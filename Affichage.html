@@ -37,6 +37,15 @@
                     // Obtenir l'élément <select> pour y ajouter les options
                     const selectElement = document.getElementById('uniqueValuesSelect');
 
+                    // Vider l'élément <select> pour éviter d'ajouter en double lors du rechargement
+                    selectElement.innerHTML = '';
+
+                    // Ajouter une option vide par défaut
+                    const defaultOption = document.createElement('option');
+                    defaultOption.value = '';
+                    defaultOption.textContent = '-- Sélectionner un projet --';
+                    selectElement.appendChild(defaultOption);
+
                     // Ajouter une option par valeur unique trouvée
                     uniqueValues.forEach(value => {
                         const option = document.createElement('option');
