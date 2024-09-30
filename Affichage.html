@@ -2,58 +2,64 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Grist Widget - Sélection de la première colonne</title>
+    <title>Grist Widget - Liste Sélectionnable</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             margin: 20px;
         }
         select {
-            width: 300px;
+            width: 200px;
             padding: 10px;
             margin: 20px 0;
         }
     </style>
+    <!-- Inclusion de l'API Grist -->
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
 </head>
 <body>
 
-    <h3>Sélectionnez une valeur de la première colonne :</h3>
-    <select id="firstColumnSelect">
+    <h3>Sélectionnez une valeur unique :</h3>
+    <select id="uniqueValuesSelect">
         <!-- Les options seront ajoutées dynamiquement ici -->
     </select>
 
     <script>
-        // Fonction pour charger les données du tableau dans lequel le widget est déployé
-        function loadTableData() {
-            grist.ready(); // Signaler que le widget est prêt
-            grist.onRecords(function (records) {
-                if (records && records.records) {
-                    // Extraire les données de la première colonne
-                    const firstColumnValues = records.records.map(record => record[0]); // Première colonne
+        // Fonction pour charger les valeurs uniques de la première colonne
+        function loadUniqueValues(records) {
+            const uniqueValues = [...new Set(records.map(record => record.fields[Object.keys(record.fields)[0]]))];
 
-                    // Filtrer les doublons
-                    const uniqueValues = [...new Set(firstColumnValues)];
+            // Obtenir l'élément <select> pour y ajouter les options
+            const selectElement = document.getElementById('uniqueValuesSelect');
 
-                    // Obtenir l'élément <select> pour y ajouter les options
-                    const selectElement = document.getElementById('firstColumnSelect');
-                    selectElement.innerHTML = ''; // Nettoyer les options précédentes
+            // Ajouter une option vide par défaut
+            const defaultOption = document.createElement('option');
+            defaultOption.value = '';
+            defaultOption.textContent = '-- Sélectionner une valeur --';
+            selectElement.appendChild(defaultOption);
 
-                    // Ajouter une option par valeur unique trouvée
-                    uniqueValues.forEach(value => {
-                        const option = document.createElement('option');
-                        option.value = value;
-                        option.textContent = value;
-                        selectElement.appendChild(option);
-                    });
-                } else {
-                    console.error('Aucune donnée trouvée dans la table.');
+            // Ajouter une option par valeur unique trouvée
+            uniqueValues.forEach(value => {
+                if (value) {
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = value;
+                    selectElement.appendChild(option);
                 }
             });
         }
 
-        // Charger les données au démarrage
-        loadTableData();
+        // Initialisation du widget Grist
+        grist.ready();
+
+        // Récupération des enregistrements de la table actuelle
+        grist.onRecords(records => {
+            if (records.length === 0) {
+                console.error('Aucun enregistrement trouvé.');
+                return;
+            }
+            loadUniqueValues(records);
+        });
     </script>
 
 </body>
