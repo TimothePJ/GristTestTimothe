@@ -24,37 +24,46 @@
 
     <script>
         // URL de l'API pour récupérer les données
-        const apiUrl = 'https://vincitest.getgrist.com/api'; // Remplace par l'URL de ton API
+        const apiUrl = 'https://vincitest.getgrist.com/api/docs/h7kNsaQWiWzdVBU8WfZWpF/tables/Fusion/records'; // URL correcte de l'API
+        const bearerToken = '52a7601b8532a91257c92a42eda896b47aa6c73d'; // Ton token
 
         // Fonction pour charger les valeurs uniques de la première colonne
         function loadUniqueValues() {
-            fetch(apiUrl)
-                .then(response => response.json())
-                .then(data => {
-                    // Extraire les valeurs de la première colonne et filtrer les duplications
-                    const uniqueValues = [...new Set(data.map(record => record.NomProjet))];
+            fetch(apiUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${bearerToken}`,
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log(data);  // Vérifie ce qui est retourné par l'API
 
-                    // Obtenir l'élément <select> pour y ajouter les options
-                    const selectElement = document.getElementById('uniqueValuesSelect');
+                // Extraire les valeurs de la première colonne (NomProjet) et filtrer les duplications
+                const uniqueValues = [...new Set(data.records.map(record => record.fields.NomProjet))];
 
-                    // Vider l'élément <select> pour éviter d'ajouter en double lors du rechargement
-                    selectElement.innerHTML = '';
+                // Obtenir l'élément <select> pour y ajouter les options
+                const selectElement = document.getElementById('uniqueValuesSelect');
 
-                    // Ajouter une option vide par défaut
-                    const defaultOption = document.createElement('option');
-                    defaultOption.value = '';
-                    defaultOption.textContent = '-- Sélectionner un projet --';
-                    selectElement.appendChild(defaultOption);
+                // Vider l'élément <select> pour éviter d'ajouter en double lors du rechargement
+                selectElement.innerHTML = '';
 
-                    // Ajouter une option par valeur unique trouvée
-                    uniqueValues.forEach(value => {
-                        const option = document.createElement('option');
-                        option.value = value;
-                        option.textContent = value;
-                        selectElement.appendChild(option);
-                    });
-                })
-                .catch(error => console.error('Erreur lors du chargement des valeurs uniques:', error));
+                // Ajouter une option vide par défaut
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = '-- Sélectionner un projet --';
+                selectElement.appendChild(defaultOption);
+
+                // Ajouter une option par valeur unique trouvée
+                uniqueValues.forEach(value => {
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = value;
+                    selectElement.appendChild(option);
+                });
+            })
+            .catch(error => console.error('Erreur lors du chargement des valeurs uniques:', error));
         }
 
         // Charger les valeurs uniques au démarrage
