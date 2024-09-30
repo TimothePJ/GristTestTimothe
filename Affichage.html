@@ -2,148 +2,57 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Grist Widget - Valeurs Sélectionnables</title>
+    <title>Grist Widget - Sélection de la première colonne</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             margin: 20px;
         }
-        select, ul, input {
-            width: 200px;
+        select {
+            width: 300px;
             padding: 10px;
             margin: 20px 0;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }
-        table, th, td {
-            border: 1px solid black;
-            padding: 8px;
         }
     </style>
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
 </head>
 <body>
 
-    <h3>Sélectionnez une valeur unique :</h3>
-    <select id="uniqueValuesSelect"></select>
-
-    <h3>Valeurs associées dans la deuxième colonne :</h3>
-    <ul id="secondColumnListBox"></ul>
-
-    <h3>Tableau des données :</h3>
-    <table id="dataTable">
-        <thead>
-            <tr id="tableHeader"></tr>
-        </thead>
-        <tbody>
-        </tbody>
-    </table>
+    <h3>Sélectionnez une valeur de la première colonne :</h3>
+    <select id="firstColumnSelect">
+        <!-- Les options seront ajoutées dynamiquement ici -->
+    </select>
 
     <script>
-        // Fonction pour charger les données du tableau actuel dans lequel le widget est déployé
+        // Fonction pour charger les données du tableau dans lequel le widget est déployé
         function loadTableData() {
-            grist.ready();
-            grist.onRecord(function (record) {
-                // Obtenir l'ID de la table courante
-                const tableId = grist.docApi.fetchSelectedTable().then(function(tableData) {
-                    // Appeler la fonction pour récupérer les données de la première colonne
-                    loadUniqueValues(tableData);
-                });
+            grist.ready(); // Signaler que le widget est prêt
+            grist.onRecords(function (records) {
+                if (records && records.records) {
+                    // Extraire les données de la première colonne
+                    const firstColumnValues = records.records.map(record => record[0]); // Première colonne
+
+                    // Filtrer les doublons
+                    const uniqueValues = [...new Set(firstColumnValues)];
+
+                    // Obtenir l'élément <select> pour y ajouter les options
+                    const selectElement = document.getElementById('firstColumnSelect');
+                    selectElement.innerHTML = ''; // Nettoyer les options précédentes
+
+                    // Ajouter une option par valeur unique trouvée
+                    uniqueValues.forEach(value => {
+                        const option = document.createElement('option');
+                        option.value = value;
+                        option.textContent = value;
+                        selectElement.appendChild(option);
+                    });
+                } else {
+                    console.error('Aucune donnée trouvée dans la table.');
+                }
             });
         }
 
-        // Fonction pour charger les valeurs uniques de la première colonne de la table actuelle
-        function loadUniqueValues(tableData) {
-            if (!tableData || !tableData.columns || !tableData.rows) {
-                console.error('Aucune donnée disponible pour la table actuelle.');
-                return;
-            }
-
-            // Extraire les valeurs uniques de la première colonne (la première colonne ici)
-            const firstColumnValues = [...new Set(tableData.rows.map(row => row[0]))];
-
-            // Obtenir l'élément <select> pour y ajouter les options
-            const selectElement = document.getElementById('uniqueValuesSelect');
-            selectElement.innerHTML = '';
-
-            // Ajouter une option vide par défaut
-            const defaultOption = document.createElement('option');
-            defaultOption.value = '';
-            defaultOption.textContent = '-- Sélectionner une valeur --';
-            selectElement.appendChild(defaultOption);
-
-            // Ajouter une option par valeur unique trouvée
-            firstColumnValues.forEach(value => {
-                const option = document.createElement('option');
-                option.value = value;
-                option.textContent = value;
-                selectElement.appendChild(option);
-            });
-
-            // Écoute l'événement de changement de sélection pour mettre à jour la deuxième colonne
-            selectElement.addEventListener('change', function () {
-                const selectedValue = this.value;
-                loadSecondColumnValues(tableData.rows, selectedValue);
-            });
-        }
-
-        // Fonction pour charger les valeurs de la deuxième colonne en fonction de la sélection dans la première colonne
-        function loadSecondColumnValues(rows, selectedValue) {
-            const secondColumnListBox = document.getElementById('secondColumnListBox');
-            secondColumnListBox.innerHTML = '';
-
-            // Filtrer les valeurs de la deuxième colonne en fonction de la sélection
-            const filteredRows = rows.filter(row => row[0] === selectedValue);
-
-            // Extraire les valeurs de la deuxième colonne
-            const secondColumnValues = [...new Set(filteredRows.map(row => row[1]))];
-
-            // Ajouter les valeurs dans la listbox
-            secondColumnValues.forEach(value => {
-                const li = document.createElement('li');
-                li.textContent = value;
-                secondColumnListBox.appendChild(li);
-            });
-
-            // Charger les données détaillées dans la DataGrid (table)
-            loadDataTable(filteredRows);
-        }
-
-        // Fonction pour charger les données dans le tableau (sans les deux premières colonnes)
-        function loadDataTable(rows) {
-            const dataTableBody = document.querySelector('#dataTable tbody');
-            const tableHeader = document.getElementById('tableHeader');
-            dataTableBody.innerHTML = '';
-
-            if (rows.length === 0) return;
-
-            // Récupérer toutes les clés (colonnes) sauf les deux premières colonnes
-            const columns = rows[0].slice(2); // Exclure les deux premières colonnes
-
-            // Ajouter les en-têtes de colonnes (une seule fois)
-            tableHeader.innerHTML = '';
-            columns.forEach((col, index) => {
-                const th = document.createElement('th');
-                th.textContent = `Colonne ${index + 3}`; // Colonne 3 et plus
-                tableHeader.appendChild(th);
-            });
-
-            // Ajouter les lignes au tableau
-            rows.forEach(row => {
-                const tr = document.createElement('tr');
-                row.slice(2).forEach(value => {
-                    const td = document.createElement('td');
-                    td.textContent = value || '';
-                    tr.appendChild(td);
-                });
-                dataTableBody.appendChild(tr);
-            });
-        }
-
-        // Charger les données du tableau en démarrage
+        // Charger les données au démarrage
         loadTableData();
     </script>
 
