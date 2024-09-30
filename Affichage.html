@@ -22,53 +22,68 @@
         <!-- Les options seront ajoutées dynamiquement ici -->
     </select>
 
-    <script>
-        // URL de l'API pour récupérer les données
-        const apiUrl = 'https://vincitest.getgrist.com/api/docs/h7kNsaQWiWzdVBU8WfZWpF/tables/Fusion/records';
-        const bearerToken = '52a7601b8532a91257c92a42eda896b47aa6c73d';
+<script>
+    // URL de l'API pour récupérer les données
+    const apiUrl = 'https://vincitest.getgrist.com/api/docs/h7kNsaQWiWzdVBU8WfZWpF/tables/Fusion/records'; // Assure-toi que cette URL est correcte
+    const bearerToken = '52a7601b8532a91257c92a42eda896b47aa6c73d'; // Utilise ton token d'authentification
 
-        // Fonction pour charger les valeurs uniques de la première colonne
-        function loadUniqueValues() {
-            fetch(apiUrl, {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${bearerToken}`,
-                    'Content-Type': 'application/json'
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                console.log(data);  // Vérifie ce qui est retourné par l'API
+    // Fonction pour charger les valeurs uniques de la première colonne
+    function loadUniqueValues() {
+        fetch(apiUrl, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${bearerToken}`,
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => {
+            // Vérifie si la réponse est OK
+            console.log("Statut de la réponse:", response.status);
+            if (!response.ok) {
+                throw new Error(`Erreur HTTP: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            // Affiche les données retournées par l'API dans la console
+            console.log("Données reçues de l'API:", data);
 
-                // Extraire les valeurs de la première colonne (NomProjet) et filtrer les duplications
-                const uniqueValues = [...new Set(data.records.map(record => record.fields.NomProjet))];
+            // Extraire les valeurs de la première colonne (NomProjet) et filtrer les duplications
+            const uniqueValues = [...new Set(data.records.map(record => record.fields.NomProjet))];
 
-                // Obtenir l'élément <select> pour y ajouter les options
-                const selectElement = document.getElementById('uniqueValuesSelect');
+            // Vérifie les valeurs uniques extraites
+            console.log("Valeurs uniques de la colonne 'NomProjet':", uniqueValues);
 
-                // Vider l'élément <select> pour éviter d'ajouter en double lors du rechargement
-                selectElement.innerHTML = '';
+            // Obtenir l'élément <select> pour y ajouter les options
+            const selectElement = document.getElementById('uniqueValuesSelect');
 
-                // Ajouter une option vide par défaut
-                const defaultOption = document.createElement('option');
-                defaultOption.value = '';
-                defaultOption.textContent = '-- Sélectionner un projet --';
-                selectElement.appendChild(defaultOption);
+            // Vider l'élément <select> pour éviter d'ajouter en double lors du rechargement
+            selectElement.innerHTML = '';
 
-                // Ajouter une option par valeur unique trouvée
-                uniqueValues.forEach(value => {
-                    const option = document.createElement('option');
-                    option.value = value;
-                    option.textContent = value;
-                    selectElement.appendChild(option);
-                });
-            })
-            .catch(error => console.error('Erreur lors du chargement des valeurs uniques:', error));
-        }
+            // Ajouter une option vide par défaut
+            const defaultOption = document.createElement('option');
+            defaultOption.value = '';
+            defaultOption.textContent = '-- Sélectionner un projet --';
+            selectElement.appendChild(defaultOption);
 
-        // Charger les valeurs uniques au démarrage
-        loadUniqueValues();
-    </script>
+            // Ajouter une option par valeur unique trouvée
+            uniqueValues.forEach(value => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                selectElement.appendChild(option);
+            });
+        })
+        .catch(error => {
+            // Affiche les erreurs dans la console
+            console.error('Erreur lors du chargement des valeurs uniques:', error);
+        });
+    }
+
+    // Charger les valeurs uniques au démarrage
+    loadUniqueValues();
+</script>
+
 
 </body>
 </html>
