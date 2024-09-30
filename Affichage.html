@@ -2,87 +2,155 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Grist Widget - Liste Sélectionnable</title>
+    <title>Grist Widget - Valeurs Sélectionnables</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             margin: 20px;
         }
-        select {
+        select, ul, input {
             width: 200px;
             padding: 10px;
             margin: 20px 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        table, th, td {
+            border: 1px solid black;
+            padding: 8px;
         }
     </style>
 </head>
 <body>
 
     <h3>Sélectionnez une valeur unique :</h3>
-    <select id="uniqueValuesSelect">
-        <!-- Les options seront ajoutées dynamiquement ici -->
-    </select>
+    <select id="uniqueValuesSelect"></select>
 
-<script>
-    // URL de l'API Grist et le token
-    const apiUrl = 'https://vincitest.getgrist.com/api/docs/h7kNsaQWiWzdVBU8WfZWpF/tables/Fusion/records';
-    const bearerToken = '52a7601b8532a91257c92a42eda896b47aa6c73d';
+    <h3>Valeurs associées dans la deuxième colonne :</h3>
+    <ul id="secondColumnListBox"></ul>
 
-    // Fonction pour charger les valeurs uniques de la première colonne
-    function loadUniqueValues() {
-        fetch(apiUrl, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${bearerToken}`,
-                'Content-Type': 'application/json'
-            }
-        })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error('Erreur lors de la récupération des données de l\'API. Code statut: ' + response.status);
-            }
-            return response.json();
-        })
-        .then(data => {
-            // Affiche la réponse de l'API dans la console pour comprendre sa structure
-            console.log('Réponse de l\'API:', data);
+    <h3>Tableau des données :</h3>
+    <table id="dataTable">
+        <thead>
+            <tr>
+                <th>Emetteur</th>
+                <th>Référence</th>
+                <th>Indice</th>
+                <th>Reçu</th>
+                <th>Description - Observations</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
 
-            if (!data || !data.records) {
-                console.error('Aucune donnée reçue de l\'API ou structure inattendue.');
-                return;
-            }
+    <script>
+        const apiUrl = 'https://vincitest.getgrist.com/api/docs/h7kNsaQWiWzdVBU8WfZWpF/tables/Fusion/records';
+        const bearerToken = '52a7601b8532a91257c92a42eda896b47aa6c73d';
 
-            // Extraire les valeurs de la première colonne (par exemple 'NomProjet')
-            const uniqueValues = [...new Set(data.records.map(record => record.fields.NomProjet))];
+        // Fonction pour charger les valeurs uniques de la première colonne
+        function loadUniqueValues() {
+            fetch(apiUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${bearerToken}`,
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Erreur lors de la récupération des données. Code statut: ' + response.status);
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Affiche la réponse de l'API dans la console pour comprendre sa structure
+                console.log('Réponse de l\'API:', data);
 
-            // Obtenir l'élément <select> pour y ajouter les options
-            const selectElement = document.getElementById('uniqueValuesSelect');
+                if (!data || !data.records) {
+                    console.error('Aucune donnée reçue de l\'API.');
+                    return;
+                }
 
-            // Vider l'élément <select> pour éviter d'ajouter en double lors du rechargement
-            selectElement.innerHTML = '';
+                // Extraire les valeurs de la première colonne (par exemple 'NomProjet')
+                const uniqueValues = [...new Set(data.records.map(record => record.fields.NomProjet))];
 
-            // Ajouter une option vide par défaut
-            const defaultOption = document.createElement('option');
-            defaultOption.value = '';
-            defaultOption.textContent = '-- Sélectionner un projet --';
-            selectElement.appendChild(defaultOption);
+                // Obtenir l'élément <select> pour y ajouter les options
+                const selectElement = document.getElementById('uniqueValuesSelect');
+                selectElement.innerHTML = '';
 
-            // Ajouter une option par valeur unique trouvée
-            uniqueValues.forEach(value => {
-                const option = document.createElement('option');
-                option.value = value;
-                option.textContent = value;
-                selectElement.appendChild(option);
+                // Ajouter une option vide par défaut
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = '-- Sélectionner un projet --';
+                selectElement.appendChild(defaultOption);
+
+                // Ajouter une option par valeur unique trouvée
+                uniqueValues.forEach(value => {
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = value;
+                    selectElement.appendChild(option);
+                });
+
+                // Écoute l'événement de changement de sélection pour mettre à jour la deuxième colonne
+                selectElement.addEventListener('change', function () {
+                    const selectedValue = this.value;
+                    loadSecondColumnValues(data.records, selectedValue);
+                });
+            })
+            .catch(error => {
+                console.error('Erreur lors du chargement des valeurs uniques:', error);
             });
-        })
-        .catch(error => {
-            console.error('Erreur lors du chargement des valeurs uniques:', error);
-        });
-    }
+        }
 
-    // Charger les valeurs uniques au démarrage
-    loadUniqueValues();
-</script>
+        // Fonction pour charger les valeurs de la deuxième colonne en fonction de la sélection dans la première colonne
+        function loadSecondColumnValues(records, selectedValue) {
+            const secondColumnListBox = document.getElementById('secondColumnListBox');
+            secondColumnListBox.innerHTML = '';
 
+            // Filtrer les valeurs de la deuxième colonne en fonction de la sélection
+            const filteredRecords = records.filter(record => record.fields.NomProjet === selectedValue);
+
+            // Extraire les valeurs de la deuxième colonne (par exemple 'NomEtage')
+            const secondColumnValues = [...new Set(filteredRecords.map(record => record.fields.NomEtage))];
+
+            // Ajouter les valeurs dans la listbox
+            secondColumnValues.forEach(value => {
+                const li = document.createElement('li');
+                li.textContent = value;
+                secondColumnListBox.appendChild(li);
+            });
+
+            // Charger les données détaillées dans la DataGrid (table)
+            loadDataTable(filteredRecords);
+        }
+
+        // Fonction pour charger les données dans le tableau
+        function loadDataTable(records) {
+            const dataTableBody = document.querySelector('#dataTable tbody');
+            dataTableBody.innerHTML = '';
+
+            // Ajouter les lignes au tableau
+            records.forEach(record => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${record.fields.Emetteur || ''}</td>
+                    <td>${record.fields.Reference || ''}</td>
+                    <td>${record.fields.Indice || ''}</td>
+                    <td>${record.fields.Recu || ''}</td>
+                    <td>${record.fields.DescriptionObservations || ''}</td>
+                `;
+                dataTableBody.appendChild(row);
+            });
+        }
+
+        // Charger les valeurs uniques au démarrage
+        loadUniqueValues();
+    </script>
 
 </body>
 </html>
