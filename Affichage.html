@@ -23,21 +23,34 @@
     </select>
 
     <script>
+        // URL de l'API Grist et le token
+        const apiUrl = 'https://vincitest.getgrist.com/api/docs/h7kNsaQWiWzdVBU8WfZWpF/tables/Fusion/records'; // URL correcte de l'API
+        const bearerToken = '52a7601b8532a91257c92a42eda896b47aa6c73d'; // Ton token
+
         // Fonction pour charger les valeurs uniques de la première colonne
         function loadUniqueValues() {
-            grist.ready();  // Indiquer à Grist que le widget est prêt à recevoir des données
-
-            // Fonction pour écouter les changements de données
-            grist.onRecords(function(tableData) {
-                if (!tableData || !tableData.records) {
-                    console.error("Aucune donnée récupérée.");
+            fetch(apiUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${bearerToken}`,
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Erreur lors de la récupération des données de l\'API');
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Assure-toi que les données sont présentes
+                if (!data || !data.records) {
+                    console.error('Aucune donnée reçue de l\'API.');
                     return;
                 }
 
-                const rows = tableData.records;
-
                 // Extraire les valeurs de la première colonne (par exemple 'NomProjet')
-                const uniqueValues = [...new Set(rows.map(record => record.fields.NomProjet))];
+                const uniqueValues = [...new Set(data.records.map(record => record.fields.NomProjet))];
 
                 // Obtenir l'élément <select> pour y ajouter les options
                 const selectElement = document.getElementById('uniqueValuesSelect');
@@ -58,6 +71,9 @@
                     option.textContent = value;
                     selectElement.appendChild(option);
                 });
+            })
+            .catch(error => {
+                console.error('Erreur lors du chargement des valeurs uniques:', error);
             });
         }
 
