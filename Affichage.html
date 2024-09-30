@@ -23,29 +23,57 @@
     </select>
 
     <script>
-        // URL de l'API pour récupérer les données
-        const apiUrl = 'https://api.yourservice.com/data'; // Remplace par l'URL de ton API
+        // URL de l'API pour récupérer les données depuis Grist
+        const apiUrl = 'https://vincitest.getgrist.com/api/docs/h7kNsaQWiWzdVBU8WfZWpF/tables/Fusion/records';
+        const bearerToken = '52a7601b8532a91257c92a42eda896b47aa6c73d';  // Assure-toi d'avoir le bon token d'accès
 
         // Fonction pour charger les valeurs uniques de la première colonne
         function loadUniqueValues() {
-            fetch(apiUrl)
-                .then(response => response.json())
-                .then(data => {
-                    // Extraire les valeurs de la première colonne et filtrer les duplications
-                    const uniqueValues = [...new Set(data.map(record => record.NomProjet))];
+            fetch(apiUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${bearerToken}`,
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => {
+                // Vérifie si la réponse est OK
+                if (!response.ok) {
+                    throw new Error(`Erreur HTTP: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Affiche les données dans la console pour débugger
+                console.log("Données reçues de l'API:", data);
 
-                    // Obtenir l'élément <select> pour y ajouter les options
-                    const selectElement = document.getElementById('uniqueValuesSelect');
+                // Extraire les valeurs de la première colonne et éliminer les duplications
+                const uniqueValues = [...new Set(data.records.map(record => record.fields.NomProjet))];
 
-                    // Ajouter une option par valeur unique trouvée
-                    uniqueValues.forEach(value => {
-                        const option = document.createElement('option');
-                        option.value = value;
-                        option.textContent = value;
-                        selectElement.appendChild(option);
-                    });
-                })
-                .catch(error => console.error('Erreur lors du chargement des valeurs uniques:', error));
+                // Obtenir l'élément <select> pour y ajouter les options
+                const selectElement = document.getElementById('uniqueValuesSelect');
+
+                // Vider l'élément <select> pour éviter d'ajouter en double lors du rechargement
+                selectElement.innerHTML = '';
+
+                // Ajouter une option vide par défaut
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = '-- Sélectionner un projet --';
+                selectElement.appendChild(defaultOption);
+
+                // Ajouter une option par valeur unique trouvée
+                uniqueValues.forEach(value => {
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = value;
+                    selectElement.appendChild(option);
+                });
+            })
+            .catch(error => {
+                // Affiche les erreurs dans la console
+                console.error('Erreur lors du chargement des valeurs uniques:', error);
+            });
         }
 
         // Charger les valeurs uniques au démarrage
