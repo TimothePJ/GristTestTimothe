@@ -22,16 +22,21 @@
         <!-- Les options seront ajoutées dynamiquement ici -->
     </select>
 
-    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
     <script>
         // Fonction pour charger les valeurs uniques de la première colonne
         function loadUniqueValues() {
-            // Récupérer les données de la table active dans Grist
-            grist.ready();
-            grist.docApi.fetchTable("Fusion").then(function(tableData) {
+            grist.ready();  // Indiquer à Grist que le widget est prêt à recevoir des données
+
+            // Fonction pour écouter les changements de données
+            grist.onRecords(function(tableData) {
+                if (!tableData || !tableData.records) {
+                    console.error("Aucune donnée récupérée.");
+                    return;
+                }
+
                 const rows = tableData.records;
-                
-                // Extraire les valeurs de la première colonne (par exemple, NomProjet)
+
+                // Extraire les valeurs de la première colonne (par exemple 'NomProjet')
                 const uniqueValues = [...new Set(rows.map(record => record.fields.NomProjet))];
 
                 // Obtenir l'élément <select> pour y ajouter les options
@@ -53,8 +58,6 @@
                     option.textContent = value;
                     selectElement.appendChild(option);
                 });
-            }).catch(function(error) {
-                console.error('Erreur lors du chargement des valeurs uniques:', error);
             });
         }
 
