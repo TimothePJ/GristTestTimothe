@@ -35,13 +35,7 @@
     <h3>Tableau des données :</h3>
     <table id="dataTable">
         <thead>
-            <tr>
-                <th>Emetteur</th>
-                <th>Référence</th>
-                <th>Indice</th>
-                <th>Reçu</th>
-                <th>Description - Observations</th>
-            </tr>
+            <tr id="tableHeader"></tr>
         </thead>
         <tbody>
         </tbody>
@@ -129,21 +123,33 @@
             loadDataTable(filteredRecords);
         }
 
-        // Fonction pour charger les données dans le tableau
+        // Fonction pour charger les données dans le tableau (sans les deux premières colonnes)
         function loadDataTable(records) {
             const dataTableBody = document.querySelector('#dataTable tbody');
+            const tableHeader = document.getElementById('tableHeader');
             dataTableBody.innerHTML = '';
+
+            if (records.length === 0) return;
+
+            // Récupérer toutes les clés (colonnes) sauf 'NomProjet' et 'NomEtage'
+            const columns = Object.keys(records[0].fields).filter(col => col !== 'NomProjet' && col !== 'NomEtage');
+
+            // Ajouter les en-têtes de colonnes (une seule fois)
+            tableHeader.innerHTML = '';
+            columns.forEach(col => {
+                const th = document.createElement('th');
+                th.textContent = col;
+                tableHeader.appendChild(th);
+            });
 
             // Ajouter les lignes au tableau
             records.forEach(record => {
                 const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${record.fields.Emetteur || ''}</td>
-                    <td>${record.fields.Reference || ''}</td>
-                    <td>${record.fields.Indice || ''}</td>
-                    <td>${record.fields.Recu || ''}</td>
-                    <td>${record.fields.DescriptionObservations || ''}</td>
-                `;
+                columns.forEach(col => {
+                    const cell = document.createElement('td');
+                    cell.textContent = record.fields[col] || '';
+                    row.appendChild(cell);
+                });
                 dataTableBody.appendChild(row);
             });
         }
