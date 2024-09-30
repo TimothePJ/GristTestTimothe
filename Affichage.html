@@ -22,37 +22,22 @@
         <!-- Les options seront ajoutées dynamiquement ici -->
     </select>
 
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
     <script>
-        // URL de l'API pour récupérer les données depuis Grist (table "Fusion")
-        const apiUrl = 'https://vincitest.getgrist.com/api/docs/h7kNsaQWiWzdVBU8WfZWpF/tables/Fusion/records';
-        const bearerToken = '52a7601b8532a91257c92a42eda896b47aa6c73d';  // Ton token d'accès Grist
-
-        // Fonction pour charger les valeurs uniques de la première colonne (NomProjet)
+        // Fonction pour charger les valeurs uniques de la première colonne
         function loadUniqueValues() {
-            fetch(apiUrl, {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${bearerToken}`,
-                    'Content-Type': 'application/json'
-                }
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`Erreur HTTP: ${response.status}`);
-                }
-                return response.json();  // Convertir la réponse en JSON
-            })
-            .then(data => {
-                // Affiche les données reçues pour déboguer
-                console.log("Données reçues de l'API Grist:", data);
+            // Récupérer les données de la table active dans Grist
+            grist.ready();
+            grist.docApi.fetchTable("Fusion").then(function(tableData) {
+                const rows = tableData.records;
+                
+                // Extraire les valeurs de la première colonne (par exemple, NomProjet)
+                const uniqueValues = [...new Set(rows.map(record => record.fields.NomProjet))];
 
-                // Extraire les valeurs uniques de la première colonne (NomProjet)
-                const uniqueValues = [...new Set(data.records.map(record => record.fields.NomProjet))];
-
-                // Obtenir l'élément <select> pour ajouter les options
+                // Obtenir l'élément <select> pour y ajouter les options
                 const selectElement = document.getElementById('uniqueValuesSelect');
 
-                // Vider l'élément <select> avant d'ajouter de nouvelles options
+                // Vider l'élément <select> pour éviter d'ajouter en double lors du rechargement
                 selectElement.innerHTML = '';
 
                 // Ajouter une option vide par défaut
@@ -61,18 +46,14 @@
                 defaultOption.textContent = '-- Sélectionner un projet --';
                 selectElement.appendChild(defaultOption);
 
-                // Ajouter une option pour chaque valeur unique trouvée dans "NomProjet"
+                // Ajouter une option par valeur unique trouvée
                 uniqueValues.forEach(value => {
-                    if (value) {  // Vérifier si la valeur est définie
-                        const option = document.createElement('option');
-                        option.value = value;
-                        option.textContent = value;
-                        selectElement.appendChild(option);
-                    }
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = value;
+                    selectElement.appendChild(option);
                 });
-            })
-            .catch(error => {
-                // Afficher les erreurs dans la console
+            }).catch(function(error) {
                 console.error('Erreur lors du chargement des valeurs uniques:', error);
             });
         }
