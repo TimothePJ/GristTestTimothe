@@ -22,64 +22,67 @@
         <!-- Les options seront ajoutées dynamiquement ici -->
     </select>
 
-    <script>
-        // URL de l'API Grist et le token
-        const apiUrl = 'https://vincitest.getgrist.com/api/docs/h7kNsaQWiWzdVBU8WfZWpF/tables/Fusion/records'; // URL correcte de l'API
-        const bearerToken = '52a7601b8532a91257c92a42eda896b47aa6c73d'; // Ton token
+<script>
+    // URL de l'API Grist et le token
+    const apiUrl = 'https://vincitest.getgrist.com/api/docs/h7kNsaQWiWzdVBU8WfZWpF/tables/Fusion/records';
+    const bearerToken = '52a7601b8532a91257c92a42eda896b47aa6c73d';
 
-        // Fonction pour charger les valeurs uniques de la première colonne
-        function loadUniqueValues() {
-            fetch(apiUrl, {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${bearerToken}`,
-                    'Content-Type': 'application/json'
-                }
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Erreur lors de la récupération des données de l\'API');
-                }
-                return response.json();
-            })
-            .then(data => {
-                // Assure-toi que les données sont présentes
-                if (!data || !data.records) {
-                    console.error('Aucune donnée reçue de l\'API.');
-                    return;
-                }
+    // Fonction pour charger les valeurs uniques de la première colonne
+    function loadUniqueValues() {
+        fetch(apiUrl, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${bearerToken}`,
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Erreur lors de la récupération des données de l\'API. Code statut: ' + response.status);
+            }
+            return response.json();
+        })
+        .then(data => {
+            // Affiche la réponse de l'API dans la console pour comprendre sa structure
+            console.log('Réponse de l\'API:', data);
 
-                // Extraire les valeurs de la première colonne (par exemple 'NomProjet')
-                const uniqueValues = [...new Set(data.records.map(record => record.fields.NomProjet))];
+            if (!data || !data.records) {
+                console.error('Aucune donnée reçue de l\'API ou structure inattendue.');
+                return;
+            }
 
-                // Obtenir l'élément <select> pour y ajouter les options
-                const selectElement = document.getElementById('uniqueValuesSelect');
+            // Extraire les valeurs de la première colonne (par exemple 'NomProjet')
+            const uniqueValues = [...new Set(data.records.map(record => record.fields.NomProjet))];
 
-                // Vider l'élément <select> pour éviter d'ajouter en double lors du rechargement
-                selectElement.innerHTML = '';
+            // Obtenir l'élément <select> pour y ajouter les options
+            const selectElement = document.getElementById('uniqueValuesSelect');
 
-                // Ajouter une option vide par défaut
-                const defaultOption = document.createElement('option');
-                defaultOption.value = '';
-                defaultOption.textContent = '-- Sélectionner un projet --';
-                selectElement.appendChild(defaultOption);
+            // Vider l'élément <select> pour éviter d'ajouter en double lors du rechargement
+            selectElement.innerHTML = '';
 
-                // Ajouter une option par valeur unique trouvée
-                uniqueValues.forEach(value => {
-                    const option = document.createElement('option');
-                    option.value = value;
-                    option.textContent = value;
-                    selectElement.appendChild(option);
-                });
-            })
-            .catch(error => {
-                console.error('Erreur lors du chargement des valeurs uniques:', error);
+            // Ajouter une option vide par défaut
+            const defaultOption = document.createElement('option');
+            defaultOption.value = '';
+            defaultOption.textContent = '-- Sélectionner un projet --';
+            selectElement.appendChild(defaultOption);
+
+            // Ajouter une option par valeur unique trouvée
+            uniqueValues.forEach(value => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                selectElement.appendChild(option);
             });
-        }
+        })
+        .catch(error => {
+            console.error('Erreur lors du chargement des valeurs uniques:', error);
+        });
+    }
 
-        // Charger les valeurs uniques au démarrage
-        loadUniqueValues();
-    </script>
+    // Charger les valeurs uniques au démarrage
+    loadUniqueValues();
+</script>
+
 
 </body>
 </html>
