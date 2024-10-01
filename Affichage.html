@@ -142,6 +142,7 @@
       let records = [];
       let selectedFirstValue = '';
       let selectedSecondValue = '';
+      let modifiedRecords = new Set(); // To keep track of records that have been edited
 
       // Function to populate the first dropdown with unique values from the first column
       function populateFirstColumnDropdown(values) {
@@ -218,7 +219,7 @@
             td.textContent = record[header] || '';  // Use empty string for null/undefined values
             td.addEventListener('blur', function() {
               record[header] = td.textContent; // Update record with edited value
-              updateRecordInGrist(record); // Save changes to Grist
+              modifiedRecords.add(record); // Track this record as modified
             });
             tr.appendChild(td);
           });
@@ -318,9 +319,13 @@
         document.getElementById('descriptionInput').value = '';
       });
 
-      // Save Button to refresh the page after all modifications
+      // Save Button to update modified records in Grist
       document.getElementById('saveButton').addEventListener('click', function() {
-        window.location.reload(); // Refresh the page to show updated data from Grist
+        modifiedRecords.forEach(record => {
+          updateRecordInGrist(record);
+        });
+        modifiedRecords.clear(); // Clear the set after saving
+        alert('Modifications sauvegardées');
       });
 
       // Function to add a record to Grist via the API
