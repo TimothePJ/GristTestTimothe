@@ -26,10 +26,12 @@
         dropdown.innerHTML = '<option value="">Select an option</option>';  // Reset the dropdown
 
         values.forEach(value => {
-          const option = document.createElement('option');
-          option.value = value;
-          option.text = value;
-          dropdown.appendChild(option);
+          if (value) {  // Skip null or empty values
+            const option = document.createElement('option');
+            option.value = value;
+            option.text = value;
+            dropdown.appendChild(option);
+          }
         });
         console.log("First column populated:", values); // Debugging output
       }
@@ -42,7 +44,7 @@
         const secondColumnValues = records
           .filter(record => record.NomProjet === selectedValue)  // Filter based on selected first column value
           .map(record => record.NomEtage)  // Extract second column values
-          .filter((value, index, self) => self.indexOf(value) === index)  // Remove duplicates
+          .filter((value, index, self) => value && self.indexOf(value) === index)  // Remove duplicates and null/empty values
           .sort();
 
         secondColumnValues.forEach(value => {
@@ -76,7 +78,7 @@
         });
 
         // Populate the first dropdown with unique values from 'NomProjet'
-        const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
+        const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet).filter(value => value))];  // Filter out null/empty values
         populateFirstColumnDropdown(uniqueFirstColumnValues);
       });
 
