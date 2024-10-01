@@ -121,7 +121,7 @@
         if (filteredRecords.length === 0) return;
 
         const exampleRecord = filteredRecords[0];
-        const headers = Object.keys(exampleRecord).filter(key => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'LastColumn'); // Skip first two and last column
+        const headers = Object.keys(exampleRecord).filter(key => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'ID_Ligne'); // Skip first two and last column (ID_Ligne)
 
         // Populate the table header
         headers.forEach(header => {
@@ -159,10 +159,12 @@
           return {
             NomProjet: nomProjet,
             NomEtage: nomEtage,
-            OtherColumn1: record.OtherColumn1 || '',
-            OtherColumn2: record.OtherColumn2 || '',
-            OtherColumn3: record.OtherColumn3 || '',
-            LastColumn: record.LastColumn || '' // Assuming 'LastColumn' is the column to be excluded from the table
+            Emetteur: record.Emetteur || '',
+            Reference: record.Reference || '',
+            Indice: record.Indice || '',
+            Recu: record.Recu || '',
+            DescriptionObservations: record.DescriptionObservations || '',
+            ID_Ligne: record.ID_Ligne || '' // Exclude this column from the table display
           };
         });
 
