@@ -31,6 +31,7 @@
           option.text = value;
           dropdown.appendChild(option);
         });
+        console.log("First column populated:", values); // Debugging output
       }
 
       // Function to populate the second listbox based on the selected first column value
@@ -50,6 +51,8 @@
           option.text = value;
           listbox.appendChild(option);
         });
+
+        console.log("Second column values populated for", selectedValue, ":", secondColumnValues); // Debugging output
       }
 
       // Ready Grist
@@ -57,10 +60,20 @@
 
       // Fetch records from Grist
       grist.onRecords(function(receivedRecords) {
-        records = receivedRecords.map(record => ({
-          NomProjet: record.NomProjet,
-          NomEtage: record.NomEtage
-        }));
+        console.log("Records received from Grist:", receivedRecords); // Debugging output
+        
+        records = receivedRecords.map(record => {
+          const nomProjet = record.NomProjet || null;
+          const nomEtage = record.NomEtage || null;
+
+          console.log("Record:", record); // Log each record for debugging
+          console.log("NomProjet:", nomProjet, "NomEtage:", nomEtage); // Debugging output for specific fields
+
+          return {
+            NomProjet: nomProjet,
+            NomEtage: nomEtage
+          };
+        });
 
         // Populate the first dropdown with unique values from 'NomProjet'
         const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
