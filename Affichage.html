@@ -4,14 +4,36 @@
     <meta charset="utf-8">
     <title>Grist Two-Step Selection</title>
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <style>
+      /* Style to center the content on the page */
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        margin: 0;
+        font-family: Arial, sans-serif;
+      }
+
+      /* Style for both the labels and select elements */
+      label {
+        font-weight: bold;
+        margin-bottom: 10px;
+      }
+
+      select {
+        width: 200px;
+        padding: 8px;
+        margin-bottom: 20px;
+      }
+    </style>
   </head>
   <body>
     <label for="firstColumnDropdown">Projet :</label>
     <select id="firstColumnDropdown">
       <option value="">Select an option</option>
     </select>
-
-    <br><br>
 
     <label for="secondColumnListbox">Tableau :</label>
     <select id="secondColumnListbox" multiple size="10">
