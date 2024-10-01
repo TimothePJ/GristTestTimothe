@@ -5,23 +5,31 @@
     <title>Grist Two-Step Selection with Table</title>
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
     <style>
-      /* Style to center the content and keep it organized */
+      /* Style to keep the selection container fixed at the top */
       body {
+        margin: 0;
+        padding: 0;
+        font-family: Arial, sans-serif;
+        background-color: #2c2c2c;
+        color: white;
+      }
+
+      .sticky-container {
+        position: sticky;
+        top: 0;
+        background-color: #2c2c2c;
+        padding: 20px;
         display: flex;
         flex-direction: column;
         align-items: center;
-        justify-content: flex-start;
-        margin: 0;
-        padding: 20px;
-        font-family: Arial, sans-serif;
-        background-color: #2c2c2c;
+        z-index: 1000;
+        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
       }
 
-      /* Style for labels and select elements */
+      /* General styles for the dropdowns */
       label {
         font-weight: bold;
         margin-bottom: 10px;
-        color: #fff;
       }
 
       select {
@@ -30,27 +38,19 @@
         margin-bottom: 20px;
       }
 
-      /* Container for keeping lists at the top */
-      .selection-container {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        margin-bottom: 20px;
-      }
-
       /* Style for the table */
       table {
         width: 100%;
         max-width: 800px;
         border-collapse: collapse;
-        margin-top: 20px;
+        margin-top: 100px;
+        background-color: #fff;
       }
 
       th, td {
         padding: 10px;
         border: 1px solid #ddd;
         text-align: left;
-        background-color: #f4f4f4;
       }
 
       th {
@@ -59,20 +59,25 @@
       }
 
       td {
-        background-color: white;
         color: black;
       }
+
+      /* Table container to allow scrolling */
+      .table-container {
+        margin-top: 20px;
+        padding: 20px;
+      }
+
     </style>
   </head>
   <body>
-    <div class="selection-container">
+    <!-- Container for the sticky selection lists -->
+    <div class="sticky-container">
       <!-- First dropdown for selecting a project -->
       <label for="firstColumnDropdown">Projet :</label>
       <select id="firstColumnDropdown">
         <option value="">Select an option</option>
       </select>
-
-      <br><br>
 
       <!-- Second listbox for selecting the tableau -->
       <label for="secondColumnListbox">Tableau :</label>
@@ -80,12 +85,14 @@
     </div>
 
     <!-- Table to display the remaining data -->
-    <table id="dataTable">
-      <thead>
-        <tr id="tableHeader"></tr>
-      </thead>
-      <tbody id="tableBody"></tbody>
-    </table>
+    <div class="table-container">
+      <table id="dataTable">
+        <thead>
+          <tr id="tableHeader"></tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
 
     <script>
       let records = [];
