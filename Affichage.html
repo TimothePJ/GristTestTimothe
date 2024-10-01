@@ -1,119 +1,43 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Grist First Column List</title>
-</head>
-<body>
-    <!-- Dropdown (équivalent de ComboBox en HTML) -->
-    <select id="firstColumnDropdown" onchange="onFirstColumnSelectionChange()">
-        <option value="">Select an option</option>
+  <head>
+    <meta charset="utf-8">
+    <title>onRecords</title>
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  </head>
+  <body>
+    <label for="firstColumnDropdown">Select from first column:</label>
+    <select id="firstColumnDropdown">
+      <option value="">Select an option</option>
     </select>
 
-    <!-- Liste des valeurs de la deuxième colonne -->
-    <ul id="secondColumnList"></ul>
-
     <script>
-        const apiUrl = 'https://vincitest.getgrist.com/api/docs/h7kNsaQWiWzdVBU8WfZWpF/tables/Fusion/records';
-        const bearerToken = '52a7601b8532a91257c92a42eda896b47aa6c73d';
+      // Ready Grist
+      grist.ready();
+      
+      // Listen for record updates
+      grist.onRecords(function(records) {
+        // Extract the first column values (assuming 'NomProjet' is the first column)
+        const firstColumnValues = [...new Set(records.map(record => record.NomProjet))];
+        
+        // Populate the dropdown with the unique values from the first column
+        populateFirstColumnDropdown(firstColumnValues);
+      });
 
-        // Fonction pour obtenir les données de la première colonne
-        async function fetchFirstColumnValues() {
-            try {
-                const response = await fetch(apiUrl, {
-                    method: 'GET',
-                    headers: {
-                        'Authorization': `Bearer ${bearerToken}`
-                    }
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! Status: ${response.status}`);
-                }
-
-                const data = await response.json();
-                const records = data.records;
-
-                // Récupérer les valeurs uniques de la première colonne (par exemple 'NomProjet')
-                const firstColumnValues = [...new Set(records.map(record => record.fields.NomProjet))];
-
-                // Ajouter l'option "Ajouter" à la liste
-                firstColumnValues.push('Ajouter');
-
-                populateFirstColumnDropdown(firstColumnValues);
-            } catch (error) {
-                console.error('Error fetching first column values:', error);
-            }
-        }
-
-        // Fonction pour remplir la liste déroulante avec les valeurs de la première colonne
-        function populateFirstColumnDropdown(values) {
-            const dropdown = document.getElementById('firstColumnDropdown');
-
-            values.forEach(value => {
-                const option = document.createElement('option');
-                option.value = value;
-                option.text = value;
-                dropdown.appendChild(option);
-            });
-        }
-
-        // Fonction qui gère la sélection dans la première colonne
-        function onFirstColumnSelectionChange() {
-            const selectedValue = document.getElementById('firstColumnDropdown').value;
-            if (selectedValue === 'Ajouter') {
-                alert('Fonctionnalité Ajouter activée');
-                // Implémenter ici la logique pour ajouter un nouv'el élément
-            } else if (selectedValue) {
-                fetchSecondColumnValues(selectedValue);
-            } else {
-                document.getElementById('secondColumnList').innerHTML = '';
-            }
-        }
-
-        // Fonction pour obtenir les données de la deuxième colonne en fonction de la valeur sélectionnée de la première colonne
-        async function fetchSecondColumnValues(firstColumnValue) {
-            try {
-                const response = await fetch(apiUrl, {
-                    method: 'GET',
-                    headers: {
-                        'Authorization': `Bearer ${bearerToken}`
-                    }
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! Status: ${response.status}`);
-                }
-
-                const data = await response.json();
-                const records = data.records;
-
-                // Filtrer les valeurs de la deuxième colonne (par exemple 'NomEtage') en fonction de la première colonne
-                const secondColumnValues = records
-                    .filter(record => record.fields.NomProjet === firstColumnValue)
-                    .map(record => record.fields.NomEtage);
-
-                populateSecondColumnList(secondColumnValues);
-            } catch (error) {
-                console.error('Error fetching second column values:', error);
-            }
-        }
-
-        // Fonction pour remplir la liste des valeurs de la deuxième colonne
-        function populateSecondColumnList(values) {
-            const list = document.getElementById('secondColumnList');
-            list.innerHTML = '';
-
-            values.forEach(value => {
-                const li = document.createElement('li');
-                li.textContent = value;
-                list.appendChild(li);
-            });
-        }
-
-        // Appel de la fonction pour charger les données dès que la page est chargée
-        window.onload = fetchFirstColumnValues;
+      function populateFirstColumnDropdown(values) {
+        const dropdown = document.getElementById('firstColumnDropdown');
+        
+        // Clear existing options
+        dropdown.innerHTML = '<option value="">Select an option</option>';
+        
+        // Populate dropdown with new options
+        values.forEach(value => {
+          const option = document.createElement('option');
+          option.value = value;
+          option.text = value;
+          dropdown.appendChild(option);
+        });
+      }
     </script>
-</body>
+  </body>
 </html>
