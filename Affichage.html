@@ -2,35 +2,29 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>onRecords</title>
+    <title>Grist Two-Step Selection</title>
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   </head>
   <body>
-    <label for="firstColumnDropdown">Projet :</label>
+    <label for="firstColumnDropdown">Select from first column (NomProjet):</label>
     <select id="firstColumnDropdown">
-      <option value="">test</option>
+      <option value="">Select an option</option>
+    </select>
+
+    <br><br>
+
+    <label for="secondColumnListbox">Second column values (NomEtage):</label>
+    <select id="secondColumnListbox" multiple size="10">
     </select>
 
     <script>
-      // Ready Grist
-      grist.ready();
-      
-      // Listen for record updates
-      grist.onRecords(function(records) {
-        // Extract the first column values (assuming 'NomProjet' is the first column)
-        const firstColumnValues = [...new Set(records.map(record => record.NomProjet))];
-        
-        // Populate the dropdown with the unique values from the first column
-        populateFirstColumnDropdown(firstColumnValues);
-      });
+      let records = [];
 
+      // Function to populate the first dropdown with unique values from the first column
       function populateFirstColumnDropdown(values) {
         const dropdown = document.getElementById('firstColumnDropdown');
-        
-        // Clear existing options
-        dropdown.innerHTML = '<option value="">Select an option</option>';
-        
-        // Populate dropdown with new options
+        dropdown.innerHTML = '<option value="">Select an option</option>';  // Reset the dropdown
+
         values.forEach(value => {
           const option = document.createElement('option');
           option.value = value;
@@ -38,6 +32,50 @@
           dropdown.appendChild(option);
         });
       }
+
+      // Function to populate the second listbox based on the selected first column value
+      function populateSecondColumnListbox(selectedValue) {
+        const listbox = document.getElementById('secondColumnListbox');
+        listbox.innerHTML = '';  // Clear current listbox
+
+        const secondColumnValues = records
+          .filter(record => record.NomProjet === selectedValue)  // Filter based on selected first column value
+          .map(record => record.NomEtage)  // Extract second column values
+          .filter((value, index, self) => self.indexOf(value) === index)  // Remove duplicates
+          .sort();
+
+        secondColumnValues.forEach(value => {
+          const option = document.createElement('option');
+          option.value = value;
+          option.text = value;
+          listbox.appendChild(option);
+        });
+      }
+
+      // Ready Grist
+      grist.ready();
+
+      // Fetch records from Grist
+      grist.onRecords(function(receivedRecords) {
+        records = receivedRecords.map(record => ({
+          NomProjet: record.NomProjet,
+          NomEtage: record.NomEtage
+        }));
+
+        // Populate the first dropdown with unique values from 'NomProjet'
+        const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
+        populateFirstColumnDropdown(uniqueFirstColumnValues);
+      });
+
+      // Listen to changes in the first dropdown and update the second listbox accordingly
+      document.getElementById('firstColumnDropdown').addEventListener('change', function() {
+        const selectedValue = this.value;
+        if (selectedValue) {
+          populateSecondColumnListbox(selectedValue);
+        } else {
+          document.getElementById('secondColumnListbox').innerHTML = '';  // Clear second listbox if no selection
+        }
+      });
     </script>
   </body>
 </html>
