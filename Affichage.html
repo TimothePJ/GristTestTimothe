@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Grist Two-Step Selection</title>
+    <title>Grist Two-Step Selection with Table</title>
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
     <style>
       /* Style to center the content on the page */
@@ -27,6 +27,23 @@
         padding: 8px;
         margin-bottom: 20px;
       }
+
+      /* Style for the table */
+      table {
+        width: 600px;
+        border-collapse: collapse;
+        margin-top: 20px;
+      }
+
+      th, td {
+        padding: 10px;
+        border: 1px solid #ddd;
+        text-align: left;
+      }
+
+      th {
+        background-color: #f4f4f4;
+      }
     </style>
   </head>
   <body>
@@ -35,9 +52,19 @@
       <option value="">Select an option</option>
     </select>
 
+    <br><br>
+
     <label for="secondColumnListbox">Tableau :</label>
-    <select id="secondColumnListbox" multiple size="10">
-    </select>
+    <select id="secondColumnListbox" multiple size="10"></select>
+
+    <br><br>
+
+    <table id="dataTable">
+      <thead>
+        <tr id="tableHeader"></tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
 
     <script>
       let records = [];
@@ -79,6 +106,44 @@
         console.log("Second column values populated for", selectedValue, ":", secondColumnValues); // Debugging output
       }
 
+      // Function to populate the table based on the selected first and second column values
+      function populateTable(selectedFirstValue, selectedSecondValue) {
+        const tableHeader = document.getElementById('tableHeader');
+        const tableBody = document.getElementById('tableBody');
+
+        // Clear the table
+        tableHeader.innerHTML = '';
+        tableBody.innerHTML = '';
+
+        const filteredRecords = records
+          .filter(record => record.NomProjet === selectedFirstValue && record.NomEtage === selectedSecondValue);
+
+        if (filteredRecords.length === 0) return;
+
+        const exampleRecord = filteredRecords[0];
+        const headers = Object.keys(exampleRecord).filter(key => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'LastColumn'); // Skip first two and last column
+
+        // Populate the table header
+        headers.forEach(header => {
+          const th = document.createElement('th');
+          th.textContent = header;
+          tableHeader.appendChild(th);
+        });
+
+        // Populate the table body with filtered records
+        filteredRecords.forEach(record => {
+          const tr = document.createElement('tr');
+          headers.forEach(header => {
+            const td = document.createElement('td');
+            td.textContent = record[header] || '';  // Use empty string for null/undefined values
+            tr.appendChild(td);
+          });
+          tableBody.appendChild(tr);
+        });
+
+        console.log("Table populated with records:", filteredRecords); // Debugging output
+      }
+
       // Ready Grist
       grist.ready();
 
@@ -90,12 +155,14 @@
           const nomProjet = record.NomProjet || null;
           const nomEtage = record.NomEtage || null;
 
-          console.log("Record:", record); // Log each record for debugging
-          console.log("NomProjet:", nomProjet, "NomEtage:", nomEtage); // Debugging output for specific fields
-
+          // Include other columns in the record
           return {
             NomProjet: nomProjet,
-            NomEtage: nomEtage
+            NomEtage: nomEtage,
+            OtherColumn1: record.OtherColumn1 || '',
+            OtherColumn2: record.OtherColumn2 || '',
+            OtherColumn3: record.OtherColumn3 || '',
+            LastColumn: record.LastColumn || '' // Assuming 'LastColumn' is the column to be excluded from the table
           };
         });
 
@@ -111,6 +178,15 @@
           populateSecondColumnListbox(selectedValue);
         } else {
           document.getElementById('secondColumnListbox').innerHTML = '';  // Clear second listbox if no selection
+        }
+      });
+
+      // Listen to changes in the second listbox and update the table accordingly
+      document.getElementById('secondColumnListbox').addEventListener('change', function() {
+        const selectedFirstValue = document.getElementById('firstColumnDropdown').value;
+        const selectedSecondValue = this.value;
+        if (selectedFirstValue && selectedSecondValue) {
+          populateTable(selectedFirstValue, selectedSecondValue);
         }
       });
     </script>
