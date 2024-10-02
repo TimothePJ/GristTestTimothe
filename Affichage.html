@@ -236,16 +236,16 @@
             td.textContent = record[header] || '';  // Use empty string for null/undefined values
             td.addEventListener('blur', function() {
               record[header] = td.textContent; // Update record with edited value
-              modifiedRecords.add(record); // Track this record as modified
+              modifiedRecords.add(record); // Track modified record
             });
             tr.appendChild(td);
           });
 
-          // Add context menu for deleting rows
+          // Add event listener for right-click to show context menu
           tr.addEventListener('contextmenu', function(event) {
             event.preventDefault();
-            selectedRowRecord = record; // Track the selected record
-            showContextMenu(event.pageX, event.pageY);
+            selectedRowRecord = record;
+            showContextMenu(event.pageX, event.pageY); // Show the context menu at the click position
           });
 
           tableBody.appendChild(tr);
@@ -254,21 +254,21 @@
         console.log("Table populated with records:", filteredRecords); // Debugging output
       }
 
-      // Show context menu
+      // Function to show the context menu
       function showContextMenu(x, y) {
         const contextMenu = document.getElementById('contextMenu');
+        contextMenu.style.display = 'block';
         contextMenu.style.left = `${x}px`;
         contextMenu.style.top = `${y}px`;
-        contextMenu.style.display = 'block';
       }
 
-      // Hide context menu
+      // Function to hide the context menu
       function hideContextMenu() {
         const contextMenu = document.getElementById('contextMenu');
         contextMenu.style.display = 'none';
       }
 
-      // Context menu action: Delete row
+      // Handle deleting a row from the context menu
       document.getElementById('deleteRow').addEventListener('click', function() {
         if (selectedRowRecord) {
           deleteRecordFromGrist(selectedRowRecord.ID_Ligne); // Remove from Grist
