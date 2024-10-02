@@ -64,11 +64,6 @@
         padding: 20px;
       }
 
-      .edit-button, .delete-button {
-        margin-left: 10px;
-        cursor: pointer;
-      }
-
       .add-form {
         margin-top: 20px;
         padding: 10px;
@@ -98,6 +93,27 @@
       .save-button:hover {
         background-color: #45a049;
       }
+
+      /* Context menu styling */
+      .context-menu {
+        position: absolute;
+        background-color: #333;
+        border: 1px solid #ddd;
+        padding: 5px;
+        display: none;
+        z-index: 1000;
+        color: white;
+        cursor: pointer;
+      }
+
+      .context-menu div {
+        padding: 8px;
+        border-bottom: 1px solid #ddd;
+      }
+
+      .context-menu div:hover {
+        background-color: #444;
+      }
     </style>
   </head>
   <body>
@@ -124,6 +140,11 @@
       </table>
     </div>
 
+    <!-- Context menu for row actions -->
+    <div id="contextMenu" class="context-menu">
+      <div id="deleteRow">Supprimer la ligne</div>
+    </div>
+
     <!-- Form to add new rows -->
     <div class="add-form">
       <h3>Ajouter une nouvelle ligne :</h3>
@@ -143,6 +164,7 @@
       let selectedFirstValue = '';
       let selectedSecondValue = '';
       let modifiedRecords = new Set(); // To keep track of records that have been edited
+      let selectedRowRecord = null; // To track the selected row for deletion
 
       // Function to populate the first dropdown with unique values from the first column
       function populateFirstColumnDropdown(values) {
@@ -205,11 +227,6 @@
           tableHeader.appendChild(th);
         });
 
-        // Add action column for editing and deleting
-        const actionTh = document.createElement('th');
-        actionTh.textContent = 'Actions';
-        tableHeader.appendChild(actionTh);
-
         // Populate the table body with filtered records
         filteredRecords.forEach((record, rowIndex) => {
           const tr = document.createElement('tr');
@@ -224,25 +241,47 @@
             tr.appendChild(td);
           });
 
-          // Add buttons for editing and deleting
-          const actionTd = document.createElement('td');
-          const deleteButton = document.createElement('button');
-          deleteButton.textContent = 'Supprimer';
-          deleteButton.className = 'delete-button';
-          deleteButton.addEventListener('click', function() {
-            // Remove the record and refresh the table
-            deleteRecordFromGrist(record.ID_Ligne); // Remove from Grist
-            records.splice(records.indexOf(record), 1);
-            populateTable();
+          // Add context menu for deleting rows
+          tr.addEventListener('contextmenu', function(event) {
+            event.preventDefault();
+            selectedRowRecord = record; // Track the selected record
+            showContextMenu(event.pageX, event.pageY);
           });
-          actionTd.appendChild(deleteButton);
-          tr.appendChild(actionTd);
 
           tableBody.appendChild(tr);
         });
 
         console.log("Table populated with records:", filteredRecords); // Debugging output
       }
+
+      // Show context menu
+      function showContextMenu(x, y) {
+        const contextMenu = document.getElementById('contextMenu');
+        contextMenu.style.left = `${x}px`;
+        contextMenu.style.top = `${y}px`;
+        contextMenu.style.display = 'block';
+      }
+
+      // Hide context menu
+      function hideContextMenu() {
+        const contextMenu = document.getElementById('contextMenu');
+        contextMenu.style.display = 'none';
+      }
+
+      // Context menu action: Delete row
+      document.getElementById('deleteRow').addEventListener('click', function() {
+        if (selectedRowRecord) {
+          deleteRecordFromGrist(selectedRowRecord.ID_Ligne); // Remove from Grist
+          records.splice(records.indexOf(selectedRowRecord), 1); // Remove from local records
+          populateTable(); // Refresh the table
+        }
+        hideContextMenu(); // Hide the context menu after deleting
+      });
+
+      // Hide context menu if clicking outside
+      window.addEventListener('click', function() {
+        hideContextMenu();
+      });
 
       // Ready Grist
       grist.ready();
