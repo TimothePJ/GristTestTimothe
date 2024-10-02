@@ -116,7 +116,8 @@
 
     <!-- Context menu for row actions -->
     <div id="contextMenu" class="context-menu">
-      <div id="addRow">Ajouter une nouvelle ligne</div>
+      <div id="addRowAbove">Ajouter une ligne au-dessus</div>
+      <div id="addRowBelow">Ajouter une ligne en dessous</div>
       <div id="deleteRow">Supprimer la ligne</div>
     </div>
 
@@ -124,7 +125,7 @@
       let records = [];
       let selectedFirstValue = '';
       let selectedSecondValue = '';
-      let selectedRowRecord = null; // To track the selected row for deletion
+      let selectedRowRecord = null; // To track the selected row for adding/deleting
 
       // Function to populate the first dropdown with unique values from the first column
       function populateFirstColumnDropdown(values) {
@@ -203,7 +204,7 @@
           // Add event listener for right-click to show context menu
           tr.addEventListener('contextmenu', function(event) {
             event.preventDefault();
-            selectedRowRecord = record;
+            selectedRowRecord = { record, rowIndex };  // Track the selected row and index
             showContextMenu(event.pageX, event.pageY); // Show the context menu at the click position
           });
 
@@ -231,36 +232,55 @@
       document.getElementById('deleteRow').addEventListener('click', function() {
         if (selectedRowRecord) {
           // Remove the record both locally and in Grist
-          deleteRecordFromGrist(selectedRowRecord);
-          records.splice(records.indexOf(selectedRowRecord), 1); // Remove from local records
+          deleteRecordFromGrist(selectedRowRecord.record);
+          records.splice(records.indexOf(selectedRowRecord.record), 1); // Remove from local records
           populateTable(); // Refresh the table
         }
         hideContextMenu(); // Hide the context menu after deleting
       });
 
-      // Handle adding a new row from the context menu
-      document.getElementById('addRow').addEventListener('click', function() {
-        const newRecord = {
-          NomProjet: selectedFirstValue,
-          NomEtage: selectedSecondValue,
-          Emetteur: 'Nouvel émetteur',
-          Reference: 'Nouvelle référence',
-          Indice: 'A',
-          Recu: 'Date',
-          DescriptionObservations: 'Nouvelle observation',
-          ID_Ligne: records.length + 1 // Just a simple ID management, adjust accordingly
-        };
-
-        // Add the new record both locally and in Grist
-        records.push(newRecord);
-        addRecordToGrist(newRecord);
-        populateTable(); // Refresh the table
+      // Handle adding a new row above the selected row from the context menu
+      document.getElementById('addRowAbove').addEventListener('click', function() {
+        if (selectedRowRecord) {
+          const newRecord = createNewRecord();
+          records.splice(selectedRowRecord.rowIndex, 0, newRecord); // Insert above
+          addRecordToGrist(newRecord);
+          populateTable(); // Refresh the table
+        }
         hideContextMenu(); // Hide the context menu after adding
       });
 
-      // Hide context menu if clicking outside
-      window.addEventListener('click', function() {
-        hideContextMenu();
+      // Handle adding a new row below the selected row from the context menu
+      document.getElementById('addRowBelow').addEventListener('click', function() {
+        if (selectedRowRecord) {
+          const newRecord = createNewRecord();
+          records.splice(selectedRowRecord.rowIndex + 1, 0, newRecord); // Insert below
+          addRecordToGrist(newRecord);
+          populateTable(); // Refresh the table
+        }
+        hideContextMenu(); // Hide the context menu after adding
+      });
+
+      // Function to create a new blank record (you can modify default values here)
+      function createNewRecord() {
+        return {
+          NomProjet: selectedFirstValue,
+          NomEtage: selectedSecondValue,
+          Emetteur: '',
+          Reference: '',
+          Indice: '',
+          Recu: '',
+          DescriptionObservations: '',
+          ID_Ligne: records.length + 1 // Temporary ID for new rows, change logic if necessary
+        };
+      }
+
+      // Hide the context menu when clicking outside
+      document.addEventListener('click', function(event) {
+        const contextMenu = document.getElementById('contextMenu');
+        if (!contextMenu.contains(event.target)) {
+          hideContextMenu();
+        }
       });
 
       // Ready Grist
