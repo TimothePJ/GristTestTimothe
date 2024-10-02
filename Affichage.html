@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Grist Two-Step Selection with Editable Table</title>
+    <title>Grist Two-Step Selection with Editable Table and Save</title>
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
     <style>
       body {
@@ -163,7 +163,7 @@
       let records = [];
       let selectedFirstValue = '';
       let selectedSecondValue = '';
-      let modifiedRecords = new Set(); // To keep track of records that have been edited
+      let modifiedRecords = []; // Array to store all modified records
       let selectedRowRecord = null; // To track the selected row for deletion
 
       // Function to populate the first dropdown with unique values from the first column
@@ -236,7 +236,9 @@
             td.textContent = record[header] || '';  // Use empty string for null/undefined values
             td.addEventListener('blur', function() {
               record[header] = td.textContent; // Update record with edited value
-              modifiedRecords.add(record); // Track modified record
+              if (!modifiedRecords.includes(record)) {
+                modifiedRecords.push(record); // Add record to modified records if it's not already there
+              }
             });
             tr.appendChild(td);
           });
@@ -363,7 +365,7 @@
         modifiedRecords.forEach(record => {
           updateRecordInGrist(record);
         });
-        modifiedRecords.clear(); // Clear the set after saving
+        modifiedRecords = []; // Clear the array after saving
         alert('Modifications sauvegardées');
       });
 
