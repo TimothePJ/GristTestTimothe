@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Grist Two-Step Selection with Contextual Deletion</title>
+    <title>Grist Two-Step Selection with Contextual Menu</title>
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
     <style>
       body {
@@ -84,6 +84,10 @@
       .context-menu div:hover {
         background-color: #444;
       }
+
+      .context-menu div:last-child {
+        border-bottom: none;
+      }
     </style>
   </head>
   <body>
@@ -112,6 +116,7 @@
 
     <!-- Context menu for row actions -->
     <div id="contextMenu" class="context-menu">
+      <div id="addRow">Ajouter une nouvelle ligne</div>
       <div id="deleteRow">Supprimer la ligne</div>
     </div>
 
@@ -233,6 +238,26 @@
         hideContextMenu(); // Hide the context menu after deleting
       });
 
+      // Handle adding a new row from the context menu
+      document.getElementById('addRow').addEventListener('click', function() {
+        const newRecord = {
+          NomProjet: selectedFirstValue,
+          NomEtage: selectedSecondValue,
+          Emetteur: 'Nouvel émetteur',
+          Reference: 'Nouvelle référence',
+          Indice: 'A',
+          Recu: 'Date',
+          DescriptionObservations: 'Nouvelle observation',
+          ID_Ligne: records.length + 1 // Just a simple ID management, adjust accordingly
+        };
+
+        // Add the new record both locally and in Grist
+        records.push(newRecord);
+        addRecordToGrist(newRecord);
+        populateTable(); // Refresh the table
+        hideContextMenu(); // Hide the context menu after adding
+      });
+
       // Hide context menu if clicking outside
       window.addEventListener('click', function() {
         hideContextMenu();
@@ -285,11 +310,19 @@
         }
       });
 
+      // Function to add a record to Grist via the API
+      function addRecordToGrist(record) {
+        grist.docApi.applyUserActions([
+          ['AddRecord', 'Fusion', record] // Replace 'Fusion' with your table ID if necessary
+        ]).then(() => {
+          console.log("Record added to Grist:", record);
+        }).catch(error => {
+          console.error("Failed to add record to Grist:", error);
+        });
+      }
+
       // Function to delete a record from Grist
       function deleteRecordFromGrist(record) {
-        const { NomProjet, NomEtage, Emetteur, Reference, Indice, Recu, DescriptionObservations } = record;
-
-        // Find the corresponding row in Grist based on all the fields
         grist.docApi.applyUserActions([
           ['RemoveRecord', 'Fusion', record.ID_Ligne] // Use ID_Ligne to delete the correct record
         ]).then(() => {
