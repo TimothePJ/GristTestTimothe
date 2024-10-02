@@ -126,6 +126,7 @@
       let selectedFirstValue = '';
       let selectedSecondValue = '';
       let selectedRowRecord = null; // To track the selected row for adding/deleting
+      let selectedRowIndex = null;  // To track the selected row index for inserting rows
 
       // Function to populate the first dropdown with unique values from the first column
       function populateFirstColumnDropdown(values) {
@@ -205,6 +206,7 @@
           tr.addEventListener('contextmenu', function(event) {
             event.preventDefault();
             selectedRowRecord = { record, rowIndex };  // Track the selected row and index
+            selectedRowIndex = rowIndex;  // Store row index for adding rows above/below
             showContextMenu(event.pageX, event.pageY); // Show the context menu at the click position
           });
 
@@ -243,7 +245,7 @@
       document.getElementById('addRowAbove').addEventListener('click', function() {
         if (selectedRowRecord) {
           const newRecord = createNewRecord();
-          records.splice(selectedRowRecord.rowIndex, 0, newRecord); // Insert above
+          records.splice(selectedRowIndex, 0, newRecord); // Insert exactly above the selected row
           addRecordToGrist(newRecord);
           populateTable(); // Refresh the table
         }
@@ -254,7 +256,7 @@
       document.getElementById('addRowBelow').addEventListener('click', function() {
         if (selectedRowRecord) {
           const newRecord = createNewRecord();
-          records.splice(selectedRowRecord.rowIndex + 1, 0, newRecord); // Insert below
+          records.splice(selectedRowIndex + 1, 0, newRecord); // Insert exactly below the selected row
           addRecordToGrist(newRecord);
           populateTable(); // Refresh the table
         }
