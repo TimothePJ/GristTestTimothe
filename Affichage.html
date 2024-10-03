@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Grist Two-Step Selection with Contextual Menu</title>
+    <title>Grist Two-Step Selection with Editable Table</title>
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
     <style>
       body {
@@ -64,29 +64,21 @@
         padding: 20px;
       }
 
-      /* Context menu styling */
-      .context-menu {
-        position: absolute;
-        background-color: #333;
-        border: 1px solid #ddd;
+      .add-form {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #f4f4f4;
+        color: black;
+      }
+
+      .add-form input {
+        margin-right: 10px;
         padding: 5px;
-        display: none;
-        z-index: 1000;
-        color: white;
+      }
+
+      .add-form button {
+        padding: 5px 10px;
         cursor: pointer;
-      }
-
-      .context-menu div {
-        padding: 8px;
-        border-bottom: 1px solid #ddd;
-      }
-
-      .context-menu div:hover {
-        background-color: #444;
-      }
-
-      .context-menu div:last-child {
-        border-bottom: none;
       }
     </style>
   </head>
@@ -114,19 +106,21 @@
       </table>
     </div>
 
-    <!-- Context menu for row actions -->
-    <div id="contextMenu" class="context-menu">
-      <div id="addRowAbove">Ajouter une ligne au-dessus</div>
-      <div id="addRowBelow">Ajouter une ligne en dessous</div>
-      <div id="deleteRow">Supprimer la ligne</div>
+    <!-- Form to add new rows -->
+    <div class="add-form">
+      <h3>Ajouter une nouvelle ligne :</h3>
+      <input type="text" id="emetteurInput" placeholder="Emetteur">
+      <input type="text" id="referenceInput" placeholder="Référence">
+      <input type="text" id="indiceInput" placeholder="Indice">
+      <input type="text" id="recuInput" placeholder="Reçu">
+      <input type="text" id="descriptionInput" placeholder="Description/Observations">
+      <button id="addRowButton">Ajouter</button>
     </div>
 
     <script>
       let records = [];
       let selectedFirstValue = '';
       let selectedSecondValue = '';
-      let selectedRowRecord = null; // To track the selected row for adding/deleting
-      let selectedRowIndex = null;  // To track the selected row index for inserting rows
 
       // Function to populate the first dropdown with unique values from the first column
       function populateFirstColumnDropdown(values) {
@@ -202,88 +196,11 @@
             tr.appendChild(td);
           });
 
-          // Add event listener for right-click to show context menu
-          tr.addEventListener('contextmenu', function(event) {
-            event.preventDefault();
-            selectedRowRecord = { record, rowIndex };  // Track the selected row and index
-            selectedRowIndex = rowIndex;  // Store row index for adding rows above/below
-            showContextMenu(event.pageX, event.pageY); // Show the context menu at the click position
-          });
-
           tableBody.appendChild(tr);
         });
 
         console.log("Table populated with records:", filteredRecords); // Debugging output
       }
-
-      // Function to show the context menu
-      function showContextMenu(x, y) {
-        const contextMenu = document.getElementById('contextMenu');
-        contextMenu.style.display = 'block';
-        contextMenu.style.left = `${x}px`;
-        contextMenu.style.top = `${y}px`;
-      }
-
-      // Function to hide the context menu
-      function hideContextMenu() {
-        const contextMenu = document.getElementById('contextMenu');
-        contextMenu.style.display = 'none';
-      }
-
-      // Handle deleting a row from the context menu
-      document.getElementById('deleteRow').addEventListener('click', function() {
-        if (selectedRowRecord) {
-          // Remove the record both locally and in Grist
-          deleteRecordFromGrist(selectedRowRecord.record);
-          records.splice(records.indexOf(selectedRowRecord.record), 1); // Remove from local records
-          populateTable(); // Refresh the table
-        }
-        hideContextMenu(); // Hide the context menu after deleting
-      });
-
-      // Handle adding a new row above the selected row from the context menu
-      document.getElementById('addRowAbove').addEventListener('click', function() {
-        if (selectedRowRecord) {
-          const newRecord = createNewRecord();
-          records.splice(selectedRowIndex, 0, newRecord); // Insert exactly above the selected row
-          addRecordToGrist(newRecord);
-          populateTable(); // Refresh the table
-        }
-        hideContextMenu(); // Hide the context menu after adding
-      });
-
-      // Handle adding a new row below the selected row from the context menu
-      document.getElementById('addRowBelow').addEventListener('click', function() {
-        if (selectedRowRecord) {
-          const newRecord = createNewRecord();
-          records.splice(selectedRowIndex + 1, 0, newRecord); // Insert exactly below the selected row
-          addRecordToGrist(newRecord);
-          populateTable(); // Refresh the table
-        }
-        hideContextMenu(); // Hide the context menu after adding
-      });
-
-      // Function to create a new blank record (you can modify default values here)
-      function createNewRecord() {
-        return {
-          NomProjet: selectedFirstValue,
-          NomEtage: selectedSecondValue,
-          Emetteur: '',
-          Reference: '',
-          Indice: '',
-          Recu: '',
-          DescriptionObservations: '',
-          ID_Ligne: records.length + 1 // Temporary ID for new rows, change logic if necessary
-        };
-      }
-
-      // Hide the context menu when clicking outside
-      document.addEventListener('click', function(event) {
-        const contextMenu = document.getElementById('contextMenu');
-        if (!contextMenu.contains(event.target)) {
-          hideContextMenu();
-        }
-      });
 
       // Ready Grist
       grist.ready();
@@ -332,6 +249,38 @@
         }
       });
 
+      // Add new row to the table and save to Grist
+      document.getElementById('addRowButton').addEventListener('click', function() {
+        // Calculate the new ID_Ligne based on the last row's ID_Ligne
+        const lastRecord = records[records.length - 1];
+        const newID_Ligne = lastRecord ? lastRecord.ID_Ligne + 1 : 1;
+
+        const newRecord = {
+          NomProjet: selectedFirstValue,
+          NomEtage: selectedSecondValue,
+          Emetteur: document.getElementById('emetteurInput').value,
+          Reference: document.getElementById('referenceInput').value,
+          Indice: document.getElementById('indiceInput').value,
+          Recu: document.getElementById('recuInput').value,
+          DescriptionObservations: document.getElementById('descriptionInput').value,
+          ID_Ligne: newID_Ligne // Set ID_Ligne as the new ID
+        };
+
+        // Add new record to the list and refresh the table
+        records.push(newRecord);
+        populateTable();
+
+        // Save the new record to Grist
+        addRecordToGrist(newRecord);
+
+        // Clear input fields
+        document.getElementById('emetteurInput').value = '';
+        document.getElementById('referenceInput').value = '';
+        document.getElementById('indiceInput').value = '';
+        document.getElementById('recuInput').value = '';
+        document.getElementById('descriptionInput').value = '';
+      });
+
       // Function to add a record to Grist via the API
       function addRecordToGrist(record) {
         grist.docApi.applyUserActions([
@@ -340,17 +289,6 @@
           console.log("Record added to Grist:", record);
         }).catch(error => {
           console.error("Failed to add record to Grist:", error);
-        });
-      }
-
-      // Function to delete a record from Grist
-      function deleteRecordFromGrist(record) {
-        grist.docApi.applyUserActions([
-          ['RemoveRecord', 'Fusion', record.ID_Ligne] // Use ID_Ligne to delete the correct record
-        ]).then(() => {
-          console.log("Record deleted from Grist:", record);
-        }).catch(error => {
-          console.error("Failed to delete record from Grist:", error);
         });
       }
     </script>
