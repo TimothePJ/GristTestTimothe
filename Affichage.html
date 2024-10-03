@@ -122,149 +122,21 @@
       let selectedFirstValue = '';
       let selectedSecondValue = '';
 
-      // Function to populate the first dropdown with unique values from the first column
-      function populateFirstColumnDropdown(values) {
-        const dropdown = document.getElementById('firstColumnDropdown');
-        dropdown.innerHTML = '<option value="">Select an option</option>';  // Reset the dropdown
-
-        values.forEach(value => {
-          if (value) {  // Skip null or empty values
-            const option = document.createElement('option');
-            option.value = value;
-            option.text = value;
-            dropdown.appendChild(option);
-          }
-        });
-        console.log("First column populated:", values); // Debugging output
-      }
-
-      // Function to populate the second listbox based on the selected first column value
-      function populateSecondColumnListbox(selectedValue) {
-        const listbox = document.getElementById('secondColumnListbox');
-        listbox.innerHTML = '';  // Clear current listbox
-
-        const secondColumnValues = records
-          .filter(record => record.NomProjet === selectedValue)  // Filter based on selected first column value
-          .map(record => record.NomEtage)  // Extract second column values
-          .filter((value, index, self) => value && self.indexOf(value) === index)  // Remove duplicates and null/empty values
-          .sort();
-
-        secondColumnValues.forEach(value => {
-          const option = document.createElement('option');
-          option.value = value;
-          option.text = value;
-          listbox.appendChild(option);
-        });
-
-        console.log("Second column values populated for", selectedValue, ":", secondColumnValues); // Debugging output
-      }
-
-      // Function to populate the table based on the selected first and second column values
-      function populateTable() {
-        const tableHeader = document.getElementById('tableHeader');
-        const tableBody = document.getElementById('tableBody');
-
-        // Clear the table
-        tableHeader.innerHTML = '';
-        tableBody.innerHTML = '';
-
-        const filteredRecords = records
-          .filter(record => record.NomProjet === selectedFirstValue && record.NomEtage === selectedSecondValue);
-
-        if (filteredRecords.length === 0) return;
-
-        const exampleRecord = filteredRecords[0];
-        const headers = Object.keys(exampleRecord).filter(key => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'ID_Ligne'); // Skip first two and last column (ID_Ligne)
-
-        // Populate the table header
-        headers.forEach(header => {
-          const th = document.createElement('th');
-          th.textContent = header;
-          tableHeader.appendChild(th);
-        });
-
-        // Populate the table body with filtered records
-        filteredRecords.forEach((record, rowIndex) => {
-          const tr = document.createElement('tr');
-          headers.forEach(header => {
-            const td = document.createElement('td');
-            td.contentEditable = "true";  // Make cells editable
-            td.textContent = record[header] || '';  // Use empty string for null/undefined values
-            td.addEventListener('blur', function() {
-              record[header] = td.textContent; // Update record with edited value
-              updateRecordInGrist(record); // Save changes to Grist
-            });
-            tr.appendChild(td);
-          });
-
-          tableBody.appendChild(tr);
-        });
-
-        console.log("Table populated with records:", filteredRecords); // Debugging output
-      }
-
       // Ready Grist
       grist.ready();
 
-      // Fetch records from Grist
-      grist.onRecords(function(receivedRecords) {
-        console.log("Records received from Grist:", receivedRecords); // Debugging output
-        
-        records = receivedRecords.map(record => {
-          const nomProjet = record.NomProjet || null;
-          const nomEtage = record.NomEtage || null;
-
-          // Include other columns in the record
-          return {
-            NomProjet: nomProjet,
-            NomEtage: nomEtage,
-            Emetteur: record.Emetteur || '',
-            Reference: record.Reference || '',
-            Indice: record.Indice || '',
-            Recu: record.Recu || '',
-            DescriptionObservations: record.DescriptionObservations || '',
-            ID_Ligne: record.ID_Ligne || '' // Exclude this column from the table display
-          };
-        });
-
-        // Populate the first dropdown with unique values from 'NomProjet'
-        const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
-        populateFirstColumnDropdown(uniqueFirstColumnValues);
-      });
-
-      // Listen to changes in the first dropdown and update the second listbox accordingly
-      document.getElementById('firstColumnDropdown').addEventListener('change', function() {
-        selectedFirstValue = this.value;
-        if (selectedFirstValue) {
-          populateSecondColumnListbox(selectedFirstValue);
-        } else {
-          document.getElementById('secondColumnListbox').innerHTML = '';  // Clear second listbox if no selection
-        }
-      });
-
-      // Listen to changes in the second listbox and update the table accordingly
-      document.getElementById('secondColumnListbox').addEventListener('change', function() {
-        selectedSecondValue = this.value;
-        if (selectedFirstValue && selectedSecondValue) {
-          populateTable();
-        }
-      });
-
-      // Add new row to the table and save to Grist
+      // Function to add a new row (empty) to Grist when button is clicked
       document.getElementById('addRowButton').addEventListener('click', function() {
-        const blankRecord = {
-          NomProjet: selectedFirstValue,
-          NomEtage: selectedSecondValue
-        };
-
         // Step 1: Add an empty record to Grist to obtain the new row's ID
-        grist.docApi.applyUserActions([['AddRecord', 'Fusion', blankRecord]])
+        grist.docApi.applyUserActions([['AddRecord', 'Fusion', {}]])  // 'Fusion' is your table name
         .then((response) => {
           const newID_Ligne = response[0];  // Grist returns the new row ID
-          
+          console.log("New empty row added with ID:", newID_Ligne);
+
+          // Step 2: Create a new record with input values and the new ID_Ligne
           const newRecord = {
-            NomProjet: selectedFirstValue,
-            NomEtage: selectedSecondValue,
+            NomProjet: selectedFirstValue,  // Value from the first selection list
+            NomEtage: selectedSecondValue,  // Value from the second selection list
             Emetteur: document.getElementById('emetteurInput').value,
             Reference: document.getElementById('referenceInput').value,
             Indice: document.getElementById('indiceInput').value,
@@ -273,7 +145,7 @@
             ID_Ligne: newID_Ligne // Use the new ID from Grist
           };
 
-          // Step 2: Update the newly created record with the user inputs
+          // Step 3: Update the newly created record in Grist with the user inputs
           updateRecordInGrist(newRecord);
 
           // Add new record to the list and refresh the table
@@ -293,14 +165,79 @@
 
       // Function to update a record in Grist
       function updateRecordInGrist(record) {
-        grist.docApi.applyUserActions([
-          ['UpdateRecord', 'Fusion', record.ID_Ligne, record] // Replace 'Fusion' with your table ID if necessary
-        ]).then(() => {
+        grist.docApi.applyUserActions([['UpdateRecord', 'Fusion', record.ID_Ligne, record]])  // 'Fusion' is your table name
+        .then(() => {
           console.log("Record updated in Grist:", record);
         }).catch(error => {
           console.error("Failed to update record in Grist:", error);
         });
       }
+
+      // Populate first dropdown
+      function populateFirstColumnDropdown(values) {
+        const dropdown = document.getElementById('firstColumnDropdown');
+        dropdown.innerHTML = '<option value="">Select an option</option>';  // Reset the dropdown
+        values.forEach(value => {
+          if (value) {  // Skip null or empty values
+            const option = document.createElement('option');
+            option.value = value;
+            option.text = value;
+            dropdown.appendChild(option);
+          }
+        });
+      }
+
+      // Listen to changes in the first dropdown and update the second listbox accordingly
+      document.getElementById('firstColumnDropdown').addEventListener('change', function() {
+        selectedFirstValue = this.value;
+        if (selectedFirstValue) {
+          populateSecondColumnListbox(selectedFirstValue);
+        } else {
+          document.getElementById('secondColumnListbox').innerHTML = '';  // Clear second listbox if no selection
+        }
+      });
+
+      // Listen to changes in the second listbox and update the table accordingly
+      document.getElementById('secondColumnListbox').addEventListener('change', function() {
+        selectedSecondValue = this.value;
+        if (selectedFirstValue && selectedSecondValue) {
+          populateTable();
+        }
+      });
+
+      // Function to populate the second listbox based on the selected first column value
+      function populateSecondColumnListbox(selectedValue) {
+        const listbox = document.getElementById('secondColumnListbox');
+        listbox.innerHTML = '';  // Clear current listbox
+        const secondColumnValues = records
+          .filter(record => record.NomProjet === selectedValue)
+          .map(record => record.NomEtage)
+          .filter((value, index, self) => value && self.indexOf(value) === index)
+          .sort();
+        secondColumnValues.forEach(value => {
+          const option = document.createElement('option');
+          option.value = value;
+          option.text = value;
+          listbox.appendChild(option);
+        });
+      }
+
+      // Fetch records from Grist
+      grist.onRecords(function(receivedRecords) {
+        console.log("Records received from Grist:", receivedRecords); // Debugging output
+        records = receivedRecords.map(record => ({
+          NomProjet: record.NomProjet || '',
+          NomEtage: record.NomEtage || '',
+          Emetteur: record.Emetteur || '',
+          Reference: record.Reference || '',
+          Indice: record.Indice || '',
+          Recu: record.Recu || '',
+          DescriptionObservations: record.DescriptionObservations || '',
+          ID_Ligne: record.ID_Ligne || '' // Exclude this column from the table display
+        }));
+        const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
+        populateFirstColumnDropdown(uniqueFirstColumnValues);
+      });
     </script>
   </body>
 </html>
