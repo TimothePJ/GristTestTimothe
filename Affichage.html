@@ -192,6 +192,7 @@
             td.textContent = record[header] || '';  // Use empty string for null/undefined values
             td.addEventListener('blur', function() {
               record[header] = td.textContent; // Update record with edited value
+              updateRecordInGrist(record); // Save changes to Grist
             });
             tr.appendChild(td);
           });
@@ -251,44 +252,53 @@
 
       // Add new row to the table and save to Grist
       document.getElementById('addRowButton').addEventListener('click', function() {
-        // Calculate the new ID_Ligne based on the last row's ID_Ligne
-        const lastRecord = records[records.length - 1];
-        const newID_Ligne = lastRecord ? lastRecord.ID_Ligne + 1 : 1;
-
-        const newRecord = {
+        // Add a blank row to Grist first, and then fill it in once we get the ID_Ligne
+        const blankRecord = {
           NomProjet: selectedFirstValue,
-          NomEtage: selectedSecondValue,
-          Emetteur: document.getElementById('emetteurInput').value,
-          Reference: document.getElementById('referenceInput').value,
-          Indice: document.getElementById('indiceInput').value,
-          Recu: document.getElementById('recuInput').value,
-          DescriptionObservations: document.getElementById('descriptionInput').value,
-          ID_Ligne: newID_Ligne // Set ID_Ligne as the new ID
+          NomEtage: selectedSecondValue
         };
 
-        // Add new record to the list and refresh the table
-        records.push(newRecord);
-        populateTable();
+        grist.docApi.applyUserActions([['AddRecord', 'Fusion', blankRecord]])
+        .then((response) => {
+          const newID_Ligne = response[0];  // Grist returns the new row ID
+          
+          const newRecord = {
+            NomProjet: selectedFirstValue,
+            NomEtage: selectedSecondValue,
+            Emetteur: document.getElementById('emetteurInput').value,
+            Reference: document.getElementById('referenceInput').value,
+            Indice: document.getElementById('indiceInput').value,
+            Recu: document.getElementById('recuInput').value,
+            DescriptionObservations: document.getElementById('descriptionInput').value,
+            ID_Ligne: newID_Ligne // Use the new ID from Grist
+          };
 
-        // Save the new record to Grist
-        addRecordToGrist(newRecord);
+          // Add new record to the list and refresh the table
+          records.push(newRecord);
+          populateTable();
 
-        // Clear input fields
-        document.getElementById('emetteurInput').value = '';
-        document.getElementById('referenceInput').value = '';
-        document.getElementById('indiceInput').value = '';
-        document.getElementById('recuInput').value = '';
-        document.getElementById('descriptionInput').value = '';
-      });
+          // Save the new record to Grist
+          updateRecordInGrist(newRecord);
 
-      // Function to add a record to Grist via the API
-      function addRecordToGrist(record) {
-        grist.docApi.applyUserActions([
-          ['AddRecord', 'Fusion', record] // Replace 'Fusion' with your table ID if necessary
-        ]).then(() => {
-          console.log("Record added to Grist:", record);
+          // Clear input fields
+          document.getElementById('emetteurInput').value = '';
+          document.getElementById('referenceInput').value = '';
+          document.getElementById('indiceInput').value = '';
+          document.getElementById('recuInput').value = '';
+          document.getElementById('descriptionInput').value = '';
         }).catch(error => {
           console.error("Failed to add record to Grist:", error);
+        });
+      });
+
+      // Function to update a record in Grist
+      function updateRecordInGrist(record) {
+        grist.docApi.applyUserActions([
+          ['UpdateRecord', 'Fusion', record.ID_Ligne, record] // Replace 'Fusion' with your table ID if necessary
+        ]).then(() => {
+          console.log("Record updated in Grist:", record);
+        }).catch(error => {
+          console.error("Failed to update record in Grist:", error);
         });
       }
     </script>
