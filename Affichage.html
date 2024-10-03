@@ -252,12 +252,12 @@
 
       // Add new row to the table and save to Grist
       document.getElementById('addRowButton').addEventListener('click', function() {
-        // Add a blank row to Grist first, and then fill it in once we get the ID_Ligne
         const blankRecord = {
           NomProjet: selectedFirstValue,
           NomEtage: selectedSecondValue
         };
 
+        // Step 1: Add an empty record to Grist to obtain the new row's ID
         grist.docApi.applyUserActions([['AddRecord', 'Fusion', blankRecord]])
         .then((response) => {
           const newID_Ligne = response[0];  // Grist returns the new row ID
@@ -273,12 +273,12 @@
             ID_Ligne: newID_Ligne // Use the new ID from Grist
           };
 
+          // Step 2: Update the newly created record with the user inputs
+          updateRecordInGrist(newRecord);
+
           // Add new record to the list and refresh the table
           records.push(newRecord);
           populateTable();
-
-          // Save the new record to Grist
-          updateRecordInGrist(newRecord);
 
           // Clear input fields
           document.getElementById('emetteurInput').value = '';
