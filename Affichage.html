@@ -128,7 +128,7 @@
       // Function to populate the first dropdown with unique values from the first column
       function populateFirstColumnDropdown(values) {
         const dropdown = document.getElementById('firstColumnDropdown');
-        dropdown.innerHTML = '<option value="">Select an option</option>';  // Reset the dropdown
+        dropdown.innerHTML = '<option value=""> </option>';  // Reset the dropdown
 
         values.forEach(value => {
           if (value) {  // Skip null or empty values
