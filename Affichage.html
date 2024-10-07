@@ -261,7 +261,15 @@
         // Implement delete functionality here later
       });
 
-      // Other existing functions like updating Grist, adding new rows, etc.
+      // Function to update a record in Grist
+      function updateRecordInGrist(record) {
+        grist.docApi.applyUserActions([['UpdateRecord', 'Fusion', record.ID_Ligne, record]])
+        .then(() => {
+          console.log("Record updated in Grist:", record);
+        }).catch(error => {
+          console.error("Failed to update record in Grist:", error);
+        });
+      }
 
       // Fetch records from Grist
       grist.onRecords(function(receivedRecords) {
