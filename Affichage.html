@@ -127,7 +127,9 @@
     <div class="table-container">
       <table id="dataTable">
         <thead>
-          <tr id="tableHeader"></tr>
+          <tr id="tableHeader">
+            <th>ID</th> <!-- Add a column for ID -->
+          </tr>
         </thead>
         <tbody id="tableBody"></tbody>
       </table>
@@ -199,7 +201,6 @@
         const tableBody = document.getElementById('tableBody');
 
         // Clear the table
-        tableHeader.innerHTML = '';
         tableBody.innerHTML = '';
 
         const filteredRecords = records
@@ -210,7 +211,8 @@
         const exampleRecord = filteredRecords[0];
         const headers = Object.keys(exampleRecord).filter(key => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'ID_Ligne'); // Skip first two and last column (ID_Ligne)
 
-        // Populate the table header
+        // Populate the table header with the additional 'ID' column
+        tableHeader.innerHTML = '<th>ID</th>';
         headers.forEach(header => {
           const th = document.createElement('th');
           th.textContent = header;
@@ -221,6 +223,11 @@
         filteredRecords.forEach((record, rowIndex) => {
           const tr = document.createElement('tr');
           tr.addEventListener('contextmenu', (event) => showContextMenu(event, rowIndex, record.ID_Ligne)); // Show context menu on right-click and store the ID
+
+          // Add the ID as the first column
+          const idCell = document.createElement('td');
+          idCell.textContent = record.ID_Ligne;
+          tr.appendChild(idCell);
 
           headers.forEach(header => {
             const td = document.createElement('td');
