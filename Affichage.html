@@ -154,6 +154,7 @@
       let selectedFirstValue = '';
       let selectedSecondValue = '';
       let selectedRowIndex = null;
+      let selectedRecordId = null;
 
       // Ready Grist
       grist.ready();
@@ -219,7 +220,7 @@
         // Populate the table body with filtered records
         filteredRecords.forEach((record, rowIndex) => {
           const tr = document.createElement('tr');
-          tr.addEventListener('contextmenu', (event) => showContextMenu(event, rowIndex)); // Show context menu on right-click
+          tr.addEventListener('contextmenu', (event) => showContextMenu(event, rowIndex, record.ID_Ligne)); // Show context menu on right-click and store the ID
 
           headers.forEach(header => {
             const td = document.createElement('td');
@@ -237,9 +238,10 @@
       }
 
       // Show context menu on right-click
-      function showContextMenu(event, rowIndex) {
+      function showContextMenu(event, rowIndex, recordId) {
         event.preventDefault();
         selectedRowIndex = rowIndex; // Track which row was right-clicked
+        selectedRecordId = recordId;  // Store the ID of the selected record
 
         const contextMenu = document.getElementById('contextMenu');
         contextMenu.style.display = 'block';
@@ -257,8 +259,8 @@
 
       // Add event listener for "Supprimer" option
       document.getElementById('deleteOption').addEventListener('click', function() {
-        console.log("Supprimer clicked for row index:", selectedRowIndex);
-        deleteRecordInGrist(373); // Delete the record with ID 373
+        console.log("Supprimer clicked for row ID:", selectedRecordId);
+        deleteRecordInGrist(selectedRecordId); // Delete the record using the stored ID
       });
 
       // Function to delete a record in Grist
