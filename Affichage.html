@@ -222,7 +222,7 @@
         // Populate the table body with filtered records
         filteredRecords.forEach((record, rowIndex) => {
           const tr = document.createElement('tr');
-          tr.addEventListener('contextmenu', (event) => showContextMenu(event, rowIndex)); // Show context menu on right-click
+          tr.addEventListener('contextmenu', (event) => showContextMenu(event, rowIndex, record.ID_Ligne)); // Show context menu on right-click and store the ID
 
           // Add the ID as the first column
           const idCell = document.createElement('td');
@@ -249,7 +249,7 @@
         event.preventDefault();
         selectedRowIndex = rowIndex; // Track which row was right-clicked
 
-        const row = event.target.parentElement; // Get the row element
+        const row = event.target.closest('tr'); // Get the row element using closest
         const idCell = row.cells[0]; // Get the first cell (ID)
         selectedRecordId = idCell.textContent; // Store the ID from the first cell
 
