@@ -153,7 +153,7 @@
       let records = [];
       let selectedFirstValue = '';
       let selectedSecondValue = '';
-      let selectedRowIndex = null; // To track the index of the selected row
+      let selectedRowIndex = null;
 
       // Ready Grist
       grist.ready();
@@ -161,7 +161,7 @@
       // Function to populate the first dropdown with unique values from the first column
       function populateFirstColumnDropdown(values) {
         const dropdown = document.getElementById('firstColumnDropdown');
-        dropdown.innerHTML = '<option value=""> </option>';  // Reset the dropdown
+        dropdown.innerHTML = '<option value="">Select an option</option>';  // Reset the dropdown
 
         values.forEach(value => {
           if (value) {  // Skip null or empty values
@@ -279,6 +279,24 @@
         // Populate the first dropdown with unique values from 'NomProjet'
         const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
         populateFirstColumnDropdown(uniqueFirstColumnValues);
+      });
+
+      // Listen to changes in the first dropdown and update the second listbox accordingly
+      document.getElementById('firstColumnDropdown').addEventListener('change', function() {
+        selectedFirstValue = this.value;
+        if (selectedFirstValue) {
+          populateSecondColumnListbox(selectedFirstValue);
+        } else {
+          document.getElementById('secondColumnListbox').innerHTML = '';  // Clear second listbox if no selection
+        }
+      });
+
+      // Listen to changes in the second listbox and update the table accordingly
+      document.getElementById('secondColumnListbox').addEventListener('change', function() {
+        selectedSecondValue = this.value;
+        if (selectedFirstValue && selectedSecondValue) {
+          populateTable();
+        }
       });
 
       // Function to update a record in Grist
