@@ -258,8 +258,21 @@
       // Add event listener for "Supprimer" option
       document.getElementById('deleteOption').addEventListener('click', function() {
         console.log("Supprimer clicked for row index:", selectedRowIndex);
-        // Implement delete functionality here later
+        deleteRecordInGrist(373); // Delete the record with ID 373
       });
+
+      // Function to delete a record in Grist
+      function deleteRecordInGrist(recordId) {
+        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', recordId]])
+        .then(() => {
+          console.log("Record deleted with ID:", recordId);
+          // Optionally refresh the table
+          records = records.filter(record => record.ID_Ligne !== recordId);  // Remove from local records
+          populateTable();
+        }).catch(error => {
+          console.error("Failed to delete record in Grist:", error);
+        });
+      }
 
       // Fetch records from Grist
       grist.onRecords(function(receivedRecords) {
