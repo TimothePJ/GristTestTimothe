@@ -155,7 +155,6 @@
       let records = [];
       let selectedFirstValue = '';
       let selectedSecondValue = '';
-      let selectedRowIndex = null;
       let selectedRecordId = null;
 
       // Ready Grist
@@ -220,9 +219,9 @@
         });
 
         // Populate the table body with filtered records
-        filteredRecords.forEach((record, rowIndex) => {
+        filteredRecords.forEach((record) => {
           const tr = document.createElement('tr');
-          tr.addEventListener('contextmenu', (event) => showContextMenu(event, rowIndex, record.ID_Ligne)); // Show context menu on right-click and store the ID
+          tr.addEventListener('contextmenu', (event) => showContextMenu(event, tr)); // Show context menu on right-click
 
           // Add the ID as the first column
           const idCell = document.createElement('td');
@@ -245,11 +244,9 @@
       }
 
       // Show context menu on right-click and get the ID from the first cell
-      function showContextMenu(event, rowIndex) {
+      function showContextMenu(event, row) {
         event.preventDefault();
-        selectedRowIndex = rowIndex; // Track which row was right-clicked
 
-        const row = event.target.closest('tr'); // Get the row element using closest
         const idCell = row.cells[0]; // Get the first cell (ID)
         selectedRecordId = idCell.textContent; // Store the ID from the first cell
 
