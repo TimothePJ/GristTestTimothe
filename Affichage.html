@@ -263,10 +263,10 @@
       });
 
       // Add event listener for "Supprimer" option
-      document.getElementById('deleteOption').addEventListener('click', function() {
-        console.log("Supprimer clicked for row ID:", selectedRecordId);
-        deleteRecordInGrist(selectedRecordId); // Delete the record using the stored ID
+      document.getElementById('deleteOption').addEventListener('click', () => {
+        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', recordId]]);
       });
+
 
       // Function to delete a record in Grist
       function deleteRecordInGrist(recordId) {
