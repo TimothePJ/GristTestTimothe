@@ -234,7 +234,7 @@
             td.textContent = record[header] || '';  // Use empty string for null/undefined values
             td.addEventListener('blur', function() {
               record[header] = td.textContent; // Update record with edited value
-              updateRecordInGrist(record); // Save changes to Grist
+              // updateRecordInGrist(record); // Save changes to Grist
             });
             tr.appendChild(td);
           });
@@ -264,7 +264,8 @@
 
       // Add event listener for "Supprimer" option
       document.getElementById('deleteOption').addEventListener('click', () => {
-        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', recordId]]);
+        console.log("Supprimer clicked for row ID:", selectedRecordId);
+        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', Number(selectedRecordId)]]);
       });
 
 
@@ -318,7 +319,7 @@
           console.log("Record updated in Grist:", record);
         }).catch(error => {
           console.error("Failed to update record in Grist:", error);
-        });
+      });
       }
     </script>
   </body>
