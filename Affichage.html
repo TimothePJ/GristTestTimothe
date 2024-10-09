@@ -270,16 +270,8 @@
 
       // Function to delete a record in Grist
       function deleteRecordInGrist(recordId) {
-        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', recordId]])
-        .then(() => {
-          console.log("Record deleted with ID:", recordId);
-          // Optionally refresh the table
-          records = records.filter(record => record.ID_Ligne !== recordId);  // Remove from local records
-          populateTable();
-        }).catch(error => {
-          console.error("Failed to delete record in Grist:", error);
-        });
-      }
+        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', recordId]]);
+              }
 
       // Fetch records from Grist
       grist.onRecords(function(receivedRecords) {
