@@ -155,7 +155,7 @@
       let records = [];
       let selectedFirstValue = '';
       let selectedSecondValue = '';
-      let idsList = [];  // This will store the list of IDs
+      let selectedRecordId = null;
 
       // Ready Grist
       grist.ready();
@@ -201,7 +201,6 @@
 
         // Clear the table
         tableBody.innerHTML = '';
-        idsList = [];  // Reset the list of IDs
 
         const filteredRecords = records
           .filter(record => record.NomProjet === selectedFirstValue && record.NomEtage === selectedSecondValue);
@@ -219,12 +218,10 @@
           tableHeader.appendChild(th);
         });
 
-        // Populate the table body with filtered records and build the idsList
+        // Populate the table body with filtered records
         filteredRecords.forEach((record, rowIndex) => {
-          idsList.push(record.ID_Ligne);  // Store the ID for this row
-
           const tr = document.createElement('tr');
-          tr.addEventListener('contextmenu', (event) => showContextMenu(event, rowIndex)); // Show context menu on right-click
+          tr.addEventListener('contextmenu', (event) => showContextMenu(event, record.ID_Ligne)); // Show context menu on right-click and store the ID
 
           // Add the ID as the first column
           const idCell = document.createElement('td');
@@ -246,10 +243,10 @@
         });
       }
 
-      // Show context menu on right-click and get the row index
-      function showContextMenu(event, rowIndex) {
+      // Show context menu on right-click and get the record ID from the first column
+      function showContextMenu(event, recordId) {
         event.preventDefault();
-        selectedRowIndex = rowIndex;  // Store the index of the row clicked
+        selectedRecordId = recordId;  // Store the ID of the selected record
 
         const contextMenu = document.getElementById('contextMenu');
         contextMenu.style.display = 'block';
@@ -267,9 +264,8 @@
 
       // Add event listener for "Supprimer" option
       document.getElementById('deleteOption').addEventListener('click', function() {
-        const idToDelete = idsList[selectedRowIndex];  // Get the ID from the idsList based on row index
-        console.log("Supprimer clicked for row ID:", idToDelete);
-        deleteRecordInGrist(idToDelete);  // Delete the record using the ID
+        console.log("Supprimer clicked for row ID:", selectedRecordId);
+        deleteRecordInGrist(selectedRecordId); // Delete the record using the stored ID
       });
 
       // Function to delete a record in Grist
@@ -277,10 +273,9 @@
         grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', recordId]])
         .then(() => {
           console.log("Record deleted with ID:", recordId);
-          // Remove the ID from the idsList and refresh the table
-          idsList = idsList.filter(id => id !== recordId);  // Remove the ID from the list
+          // Optionally refresh the table
           records = records.filter(record => record.ID_Ligne !== recordId);  // Remove from local records
-          populateTable();  // Refresh the table
+          populateTable();
         }).catch(error => {
           console.error("Failed to delete record in Grist:", error);
         });
