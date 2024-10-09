@@ -155,6 +155,7 @@
       let records = [];
       let selectedFirstValue = '';
       let selectedSecondValue = '';
+      let selectedRowIndex = null;
       let selectedRecordId = null;
 
       // Ready Grist
@@ -219,9 +220,9 @@
         });
 
         // Populate the table body with filtered records
-        filteredRecords.forEach((record) => {
+        filteredRecords.forEach((record, rowIndex) => {
           const tr = document.createElement('tr');
-          tr.addEventListener('contextmenu', (event) => showContextMenu(event, tr)); // Show context menu on right-click
+          tr.addEventListener('contextmenu', (event) => showContextMenu(event, rowIndex)); // Show context menu on right-click
 
           // Add the ID as the first column
           const idCell = document.createElement('td');
@@ -243,12 +244,10 @@
         });
       }
 
-      // Show context menu on right-click and get the ID from the first cell
-      function showContextMenu(event, row) {
+      // Show context menu on right-click and get the row index
+      function showContextMenu(event, rowIndex) {
         event.preventDefault();
-
-        const idCell = row.cells[0]; // Get the first cell (ID)
-        selectedRecordId = idCell.textContent; // Store the ID from the first cell
+        selectedRowIndex = rowIndex; // Track which row was right-clicked
 
         const contextMenu = document.getElementById('contextMenu');
         contextMenu.style.display = 'block';
@@ -266,6 +265,11 @@
 
       // Add event listener for "Supprimer" option
       document.getElementById('deleteOption').addEventListener('click', function() {
+        const tableBody = document.getElementById('tableBody');
+        const row = tableBody.rows[selectedRowIndex]; // Get the row that was clicked
+        const idCell = row.cells[0]; // Get the first cell (ID) in the row
+        selectedRecordId = idCell.textContent; // Store the ID from the first cell
+
         console.log("Supprimer clicked for row ID:", selectedRecordId);
         deleteRecordInGrist(selectedRecordId); // Delete the record using the ID from the first column
       });
