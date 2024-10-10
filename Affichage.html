@@ -262,16 +262,27 @@
         }
       });
 
-      // Add event listener for "Supprimer" option
-      document.getElementById('deleteOption').addEventListener('click', () => {
-        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', recordId]]);
-      });
-
-
-      // Function to delete a record in Grist
-      function deleteRecordInGrist(recordId) {
-        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', recordId]]);
-      }
+    // Add event listener for "Supprimer" option
+    document.getElementById('deleteOption').addEventListener('click', () => {
+        console.log("Supprimer clicked for row ID:", selectedRecordId);
+        
+        // Supprime la ligne dans Grist
+        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', Number(selectedRecordId)]])
+        .then(() => {
+            // Une fois la suppression terminée, actualise le tableau HTML
+            records = records.filter(record => record.ID_Ligne !== selectedRecordId); // Filtre localement le tableau
+            populateTable();  // Actualise l'affichage du tableau
+    
+            // Masquer le menu contextuel après la suppression
+            const contextMenu = document.getElementById('contextMenu');
+            contextMenu.style.display = 'none';
+    
+            console.log("Tableau actualisé et menu contextuel masqué après suppression.");
+        })
+        .catch(error => {
+            console.error("Erreur lors de la suppression de la ligne dans Grist:", error);
+        });
+    });
 
       // Fetch records from Grist
       grist.onRecords(function(receivedRecords) {
