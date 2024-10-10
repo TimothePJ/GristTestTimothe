@@ -234,7 +234,7 @@
             td.textContent = record[header] || '';  // Use empty string for null/undefined values
             td.addEventListener('blur', function() {
               record[header] = td.textContent; // Update record with edited value
-              updateRecordInGrist(record); // Save changes to Grist
+              // updateRecordInGrist(record); // Save changes to Grist
             });
             tr.appendChild(td);
           });
@@ -250,8 +250,8 @@
 
         const contextMenu = document.getElementById('contextMenu');
         contextMenu.style.display = 'block';
-        contextMenu.style.left = `${event.pageX}px`;
-        contextMenu.style.top = `${event.pageY}px`;
+        contextMenu.style.left = ${event.pageX}px;
+        contextMenu.style.top = ${event.pageY}px;
       }
 
       // Hide context menu if clicked elsewhere
@@ -265,44 +265,34 @@
       // Add event listener for "Supprimer" option
       document.getElementById('deleteOption').addEventListener('click', () => {
         console.log("Supprimer clicked for row ID:", selectedRecordId);
-        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', Number(selectedRecordId)]])
-        .then(() => {
-          console.log("Record deleted with ID:", selectedRecordId);
-          // Refresh the records and the table after deletion
-          refreshRecords();
-        });
+        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', Number(selectedRecordId)]]);
       });
+
 
       // Function to delete a record in Grist
       function deleteRecordInGrist(recordId) {
-        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', recordId]])
-        .then(() => {
-          refreshRecords();  // Refresh the table after deletion
-        });
+        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', recordId]]);
       }
 
-      // Fetch records from Grist and refresh the table
-      function refreshRecords() {
-        grist.onRecords(function(receivedRecords) {
-          console.log("Records refreshed:", receivedRecords);
-          
-          records = receivedRecords.map(record => ({
-            NomProjet: record.NomProjet || '',
-            NomEtage: record.NomEtage || '',
-            Emetteur: record.Emetteur || '',
-            Reference: record.Reference || '',
-            Indice: record.Indice || '',
-            Recu: record.Recu || '',
-            DescriptionObservations: record.DescriptionObservations || '',
-            ID_Ligne: record.ID_Ligne || ''
-          }));
-  
-          populateTable();  // Refresh the table with new data
-        });
-      }
+      // Fetch records from Grist
+      grist.onRecords(function(receivedRecords) {
+        console.log("Records received from Grist:", receivedRecords);
+        
+        records = receivedRecords.map(record => ({
+          NomProjet: record.NomProjet || '',
+          NomEtage: record.NomEtage || '',
+          Emetteur: record.Emetteur || '',
+          Reference: record.Reference || '',
+          Indice: record.Indice || '',
+          Recu: record.Recu || '',
+          DescriptionObservations: record.DescriptionObservations || '',
+          ID_Ligne: record.ID_Ligne || ''
+        }));
 
-      // Initial fetching of records
-      refreshRecords();
+        // Populate the first dropdown with unique values from 'NomProjet'
+        const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
+        populateFirstColumnDropdown(uniqueFirstColumnValues);
+      });
 
       // Listen to changes in the first dropdown and update the second listbox accordingly
       document.getElementById('firstColumnDropdown').addEventListener('change', function() {
