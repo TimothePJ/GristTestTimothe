@@ -301,23 +301,23 @@
       document.getElementById('addEmptyRowButton').addEventListener('click', () => {
           console.log("Ajouter une ligne vide");
       
-          // Crée une nouvelle ligne avec des colonnes vides
-          const newRecord = {
-              NomProjet: selectedFirstValue || '',   // Valeur du premier select
-              NomEtage: selectedSecondValue || '',   // Valeur du second select
+          // Crée un objet avec les colonnes vides
+          const columnValues = {
+              NomProjet: selectedFirstValue || '',   // Valeur du premier select ou vide
+              NomEtage: selectedSecondValue || '',   // Valeur du second select ou vide
               Emetteur: '',  // Colonnes vides
               Reference: '',
               Indice: '',
               Recu: '',
-              DescriptionObservations: '',
-              ID_Ligne: ''  // Grist générera l'ID
+              DescriptionObservations: ''
           };
       
           // Ajoute cette ligne vide dans Grist
-          grist.docApi.applyUserActions([['AddRecord', 'Fusion', newRecord]])
+          grist.docApi.applyUserActions([['AddRecord', 'Fusion', columnValues]])
           .then((result) => {
               // Ajoute la nouvelle ligne aux records locaux pour mise à jour immédiate du tableau
-              records.push({ ...newRecord, ID_Ligne: result[0].id }); // Assure que la ligne a un ID généré
+              const newRecord = { ...columnValues, ID_Ligne: result[0].id }; // Ajoute l'ID généré par Grist
+              records.push(newRecord); // Met à jour le tableau localement
               populateTable(); // Actualise l'affichage du tableau avec la nouvelle ligne
       
               console.log("Nouvelle ligne vide ajoutée et tableau actualisé.");
