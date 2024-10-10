@@ -274,15 +274,22 @@
               populateTable();  // Actualise l'affichage du tableau
       
               // Masquer le menu contextuel après la suppression
-              const contextMenu = document.getElementById('contextMenu');
-              contextMenu.style.display = 'none';
+              hideContextMenu();
       
               console.log("Tableau actualisé et menu contextuel masqué après suppression.");
           })
           .catch(error => {
               console.error("Erreur lors de la suppression de la ligne dans Grist:", error);
+              // Optionnel : afficher un message d'erreur à l'utilisateur
+              alert("Une erreur s'est produite lors de la suppression de la ligne.");
           });
       });
+      
+      // Fonction pour cacher le menu contextuel
+      function hideContextMenu() {
+          const contextMenu = document.getElementById('contextMenu');
+          contextMenu.style.display = 'none';
+      }
 
       // Function to delete a record in Grist
       function deleteRecordInGrist(recordId) {
