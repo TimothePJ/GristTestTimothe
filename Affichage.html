@@ -151,46 +151,14 @@
       <button id="addRowButton">Ajouter</button>
     </div>
 
-    <!-- Button to add an empty row to Grist -->
-    <div class="add-form">
-      <h3>Ajouter une ligne vide :</h3>
-      <button id="addEmptyRowButton">Ajouter une ligne vide</button>
-    </div>
-
     <script>
       let records = [];
       let selectedFirstValue = '';
       let selectedSecondValue = '';
       let selectedRecordId = null;
 
-      // Grist est prêt
+      // Ready Grist
       grist.ready();
-
-      // Fonction pour ajouter une nouvelle ligne vide à Grist avec 8 colonnes
-      function addEmptyRow() {
-        const newRow = {
-          "Colonne1": "",  // Remplace par le nom exact de la colonne
-          "Colonne2": "",  // Remplace par le nom exact de la colonne
-          "Colonne3": "",  // Remplace par le nom exact de la colonne
-          "Colonne4": "",  // Remplace par le nom exact de la colonne
-          "Colonne5": "",  // Remplace par le nom exact de la colonne
-          "Colonne6": "",  // Remplace par le nom exact de la colonne
-          "Colonne7": "",  // Remplace par le nom exact de la colonne
-          "Colonne8": ""   // Remplace par le nom exact de la colonne
-        };
-
-        // Ajouter une ligne vide à la table "Fusion" avec les colonnes spécifiées
-        grist.docApi.applyUserActions([['AddRecord', 'Fusion', null, newRow]])
-          .then((response) => {
-            console.log("Nouvelle ligne vide ajoutée avec succès. ID de la nouvelle ligne :", response[0]);
-          })
-          .catch(error => {
-            console.error("Erreur lors de l'ajout de la ligne vide :", error);
-          });
-      }
-
-      // Ajouter un événement au bouton pour appeler la fonction d'ajout de ligne vide
-      document.getElementById('addEmptyRowButton').addEventListener('click', addEmptyRow);
 
       // Function to populate the first dropdown with unique values from the first column
       function populateFirstColumnDropdown(values) {
@@ -281,8 +249,8 @@
 
         const contextMenu = document.getElementById('contextMenu');
         contextMenu.style.display = 'block';
-        contextMenu.style.left = `${event.pageX}px`;
-        contextMenu.style.top = `${event.pageY}px`;
+        contextMenu.style.left = ${event.pageX}px;
+        contextMenu.style.top = ${event.pageY}px;
       }
 
       // Hide context menu if clicked elsewhere
@@ -332,7 +300,7 @@
         };
 
         // Ajouter la nouvelle ligne dans Grist
-        grist.docApi.applyUserActions([['AddRecord', 'Fusion', null, newRow]])
+        grist.docApi.applyUserActions([['AddRecord', 'Fusion', newRow]])
           .then((response) => {
             console.log("Nouvelle ligne ajoutée dans Grist:", response);
 
