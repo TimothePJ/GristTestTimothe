@@ -269,9 +269,11 @@
           // Supprime la ligne dans Grist
           grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', Number(selectedRecordId)]])
           .then(() => {
-              // Une fois la suppression terminée, actualise le tableau HTML
+              // Supprime la ligne localement dans le tableau
               records = records.filter(record => record.ID_Ligne !== selectedRecordId); // Filtre localement le tableau
-              populateTable();  // Actualise l'affichage du tableau
+      
+              // Actualise l'affichage du tableau
+              populateTable();
       
               // Masquer le menu contextuel après la suppression
               hideContextMenu();
@@ -280,11 +282,10 @@
           })
           .catch(error => {
               console.error("Erreur lors de la suppression de la ligne dans Grist:", error);
-              // Optionnel : afficher un message d'erreur à l'utilisateur
               alert("Une erreur s'est produite lors de la suppression de la ligne.");
           });
       });
-      
+
       // Fonction pour cacher le menu contextuel
       function hideContextMenu() {
           const contextMenu = document.getElementById('contextMenu');
