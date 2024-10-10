@@ -348,7 +348,7 @@
 
       // Function to update a record in Grist
       function updateRecordInGrist(record) {
-        grist.docApi.applyUserActions([['UpdateRecord', 'Fusion', record.ID_Ligne, record]])
+        grist.docApi.applyUserActions([['UpdateRecord', 'Fusion', record.ID_Ligne, record]])                                                                                                                                                                                                                                                  
         .then(() => {
           console.log("Record updated in Grist:", record);
         }).catch(error => {
