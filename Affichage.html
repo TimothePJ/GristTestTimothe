@@ -223,7 +223,7 @@
       document.getElementById('addEmptyRowButton').addEventListener('click', async () => {
         const emptyRow = {
           fields: {
-            NomProjet: '',
+            NomProjet: '', // Valeurs par défaut pour chaque colonne
             NomEtage: '',
             Emetteur: '',
             Reference: '',
@@ -267,11 +267,9 @@
 
         tableBody.innerHTML = '';
 
-        const filteredRecords = records.filter(record => record.NomProjet === selectedFirstValue && record.NomEtage === selectedSecondValue);
+        if (records.length === 0) return;
 
-        if (filteredRecords.length === 0) return;
-
-        const exampleRecord = filteredRecords[0];
+        const exampleRecord = records[0];
         const headers = Object.keys(exampleRecord).filter(key => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'ID_Ligne');
 
         tableHeader.innerHTML = '<th>ID</th>';
@@ -281,7 +279,7 @@
           tableHeader.appendChild(th);
         });
 
-        filteredRecords.forEach(record => {
+        records.forEach(record => {
           const tr = document.createElement('tr');
           tr.addEventListener('contextmenu', (event) => showContextMenu(event, record.ID_Ligne));
 
