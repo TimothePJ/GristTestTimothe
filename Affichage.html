@@ -151,13 +151,19 @@
       <button id="addRowButton">Ajouter</button>
     </div>
 
+    <!-- Button to add an empty row -->
+    <div class="add-form">
+      <h3>Ajouter une ligne vide :</h3>
+      <button id="addEmptyRowButton">Ajouter une ligne vide</button>
+    </div>
+
     <script>
-      const apiKey = '52a7601b8532a91257c92a42eda896b47aa6c73d'; // Utiliser votre clé API
-      const docId = 'h7kNsaQWiWzdVBU8WfZWpF'; // Remplacer par l'ID de votre document Grist
-      const tableId = 'Fusion'; // Nom de la table où ajouter les enregistrements
+      const apiKey = '52a7601b8532a91257c92a42eda896b47aa6c73d'; // Votre clé API
+      const docId = 'h7kNsaQWiWzdVBU8WfZWpF'; // ID de votre document Grist
+      const tableId = 'Fusion'; // ID ou nom de votre table
       const gristBaseUrl = `https://vincitest.getgrist.com/api/docs/${docId}/tables/${tableId}/records`;
 
-      // Fonction pour ajouter une nouvelle ligne via l'API
+      // Fonction pour ajouter une nouvelle ligne avec des données
       document.getElementById('addRowButton').addEventListener('click', async () => {
         const emetteur = document.getElementById('emetteurInput').value;
         const reference = document.getElementById('referenceInput').value;
@@ -179,7 +185,7 @@
         };
 
         try {
-          // Appel à l'API Grist pour ajouter la nouvelle ligne
+          // Appel API pour ajouter la ligne
           const response = await fetch(gristBaseUrl, {
             method: 'POST',
             headers: {
@@ -194,9 +200,9 @@
           }
 
           const result = await response.json();
-          const newRecordId = result.records[0].id; // Récupérer l'ID du nouvel enregistrement
+          const newRecordId = result.records[0].id;
 
-          // Mettre à jour les données locales et réafficher la table
+          // Mettre à jour les données locales et réafficher le tableau
           records.push({ ...newRow.fields, ID_Ligne: newRecordId });
           populateTable();
 
@@ -213,22 +219,61 @@
         }
       });
 
+      // Fonction pour ajouter une ligne vide via l'API
+      document.getElementById('addEmptyRowButton').addEventListener('click', async () => {
+        const emptyRow = {
+          fields: {
+            NomProjet: '',
+            NomEtage: '',
+            Emetteur: '',
+            Reference: '',
+            Indice: '',
+            Recu: '',
+            DescriptionObservations: ''
+          }
+        };
+
+        try {
+          // Appel API pour ajouter une ligne vide
+          const response = await fetch(gristBaseUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({ records: [emptyRow] })
+          });
+
+          if (!response.ok) {
+            throw new Error(`Erreur: ${response.statusText}`);
+          }
+
+          const result = await response.json();
+          const newRecordId = result.records[0].id;
+
+          // Mettre à jour les données locales et réafficher le tableau
+          records.push({ ...emptyRow.fields, ID_Ligne: newRecordId });
+          populateTable();
+
+          console.log("Nouvelle ligne vide ajoutée avec succès:", result);
+        } catch (error) {
+          console.error("Erreur lors de l'ajout de la ligne vide:", error);
+        }
+      });
+
       function populateTable() {
         const tableHeader = document.getElementById('tableHeader');
         const tableBody = document.getElementById('tableBody');
 
-        // Clear the table
         tableBody.innerHTML = '';
 
-        const filteredRecords = records
-          .filter(record => record.NomProjet === selectedFirstValue && record.NomEtage === selectedSecondValue);
+        const filteredRecords = records.filter(record => record.NomProjet === selectedFirstValue && record.NomEtage === selectedSecondValue);
 
         if (filteredRecords.length === 0) return;
 
         const exampleRecord = filteredRecords[0];
-        const headers = Object.keys(exampleRecord).filter(key => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'ID_Ligne'); // Skip first two and last column (ID_Ligne)
+        const headers = Object.keys(exampleRecord).filter(key => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'ID_Ligne');
 
-        // Populate the table header with the additional 'ID' column
         tableHeader.innerHTML = '<th>ID</th>';
         headers.forEach(header => {
           const th = document.createElement('th');
@@ -236,31 +281,24 @@
           tableHeader.appendChild(th);
         });
 
-        // Populate the table body with filtered records
-        filteredRecords.forEach((record, rowIndex) => {
+        filteredRecords.forEach(record => {
           const tr = document.createElement('tr');
-          tr.addEventListener('contextmenu', (event) => showContextMenu(event, record.ID_Ligne)); // Show context menu on right-click and store the ID
+          tr.addEventListener('contextmenu', (event) => showContextMenu(event, record.ID_Ligne));
 
-          // Add the ID as the first column
           const idCell = document.createElement('td');
           idCell.textContent = record.ID_Ligne;
           tr.appendChild(idCell);
 
           headers.forEach(header => {
             const td = document.createElement('td');
-            td.contentEditable = "true";  // Make cells editable
-            td.textContent = record[header] || '';  // Use empty string for null/undefined values
-            td.addEventListener('blur', function() {
-              record[header] = td.textContent; // Update record with edited value
-              updateRecordInGrist(record); // Save changes to Grist
-            });
+            td.contentEditable = true;
+            td.textContent = record[header] || '';
             tr.appendChild(td);
           });
 
           tableBody.appendChild(tr);
         });
       }
-
     </script>
   </body>
 </html>
