@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -251,8 +250,8 @@
 
         const contextMenu = document.getElementById('contextMenu');
         contextMenu.style.display = 'block';
-        contextMenu.style.left = ${event.pageX}px;
-        contextMenu.style.top = ${event.pageY}px;
+        contextMenu.style.left = `${event.pageX}px`;
+        contextMenu.style.top = `${event.pageY}px`;
       }
 
       // Hide context menu if clicked elsewhere
@@ -265,27 +264,9 @@
 
       // Add event listener for "Supprimer" option
       document.getElementById('deleteOption').addEventListener('click', () => {
-          console.log("Supprimer clicked for row ID:", selectedRecordId);
-      
-          // Supprime la ligne dans Grist
-          grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', Number(selectedRecordId)]])
-          .then(() => {
-              // Mise à jour locale des données en supprimant l'enregistrement supprimé
-              records = records.filter(record => record.ID_Ligne !== selectedRecordId);
-              
-              // Actualise le tableau HTML
-              populateTable();
-              
-              // Masque le menu contextuel
-              const contextMenu = document.getElementById('contextMenu');
-              contextMenu.style.display = 'none';
-      
-              console.log("Tableau actualisé et menu contextuel masqué après suppression.");
-          })
-          .catch(error => {
-              console.error("Erreur lors de la suppression de la ligne dans Grist:", error);
-          });
+        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', recordId]]);
       });
+
 
       // Function to delete a record in Grist
       function deleteRecordInGrist(recordId) {
