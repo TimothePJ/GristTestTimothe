@@ -1,338 +1,249 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <title>Grist Two-Step Selection with Editable Table</title>
-    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-    <style>
-      body {
-        margin: 0;
-        padding: 0;
-        font-family: Arial, sans-serif;
-        background-color: #2c2c2c;
-        color: white;
-      }
+<head>
+  <meta charset="utf-8">
+  <title>Grist Two-Step Selection with Editable Table</title>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+      background-color: #2c2c2c;
+      color: white;
+    }
 
-      .sticky-container {
-        position: sticky;
-        top: 0;
-        background-color: #2c2c2c;
-        padding: 20px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        z-index: 1000;
-        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
-      }
+    .sticky-container {
+      position: sticky;
+      top: 0;
+      background-color: #2c2c2c;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      z-index: 1000;
+      box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+    }
 
-      label {
-        font-weight: bold;
-        margin-bottom: 10px;
-      }
+    label {
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
 
-      select {
-        width: 200px;
-        padding: 8px;
-        margin-bottom: 20px;
-      }
+    select {
+      width: 200px;
+      padding: 8px;
+      margin-bottom: 20px;
+    }
 
-      table {
-        width: 100%;
-        max-width: 800px;
-        border-collapse: collapse;
-        margin-top: 20px;
-        background-color: #fff;
-      }
+    table {
+      width: 100%;
+      max-width: 800px;
+      border-collapse: collapse;
+      margin-top: 20px;
+      background-color: #fff;
+    }
 
-      th, td {
-        padding: 10px;
-        border: 1px solid #ddd;
-        text-align: left;
-      }
+    th, td {
+      padding: 10px;
+      border: 1px solid #ddd;
+      text-align: left;
+    }
 
-      th {
-        background-color: #333;
-        color: white;
-      }
+    th {
+      background-color: #333;
+      color: white;
+    }
 
-      td {
-        color: black;
-      }
+    td {
+      color: black;
+    }
 
-      .table-container {
-        margin-top: 20px;
-        padding: 20px;
-      }
+    .table-container {
+      margin-top: 20px;
+      padding: 20px;
+    }
 
-      .add-form {
-        margin-top: 20px;
-        padding: 10px;
-        background-color: #f4f4f4;
-        color: black;
-      }
+    .add-form {
+      margin-top: 20px;
+      padding: 10px;
+      background-color: #f4f4f4;
+      color: black;
+    }
 
-      .add-form input {
-        margin-right: 10px;
-        padding: 5px;
-      }
+    .add-form input {
+      margin-right: 10px;
+      padding: 5px;
+    }
 
-      .add-form button {
-        padding: 5px 10px;
-        cursor: pointer;
-      }
+    .add-form button {
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <!-- Container for the sticky selection lists -->
+  <div class="sticky-container">
+    <!-- First dropdown for selecting a project -->
+    <label for="firstColumnDropdown">Projet :</label>
+    <select id="firstColumnDropdown">
+      <option value="">Sélectionnez un projet</option>
+    </select>
 
-      /* Context Menu Styles */
-      .context-menu {
-        display: none;
-        position: absolute;
-        background-color: #333;
-        color: white;
-        border: 1px solid #ddd;
-        z-index: 10000;
-        padding: 10px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-      }
+    <!-- Second listbox for selecting the table (floor) -->
+    <label for="secondColumnListbox">Tableau :</label>
+    <select id="secondColumnListbox" multiple size="10"></select>
+  </div>
 
-      .context-menu button {
-        display: block;
-        background: none;
-        border: none;
-        color: white;
-        cursor: pointer;
-        padding: 5px;
-        width: 100%;
-        text-align: left;
-      }
+  <!-- Table to display and edit the data -->
+  <div class="table-container">
+    <table id="dataTable">
+      <thead>
+        <tr id="tableHeader">
+          <th>ID</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
 
-      .context-menu button:hover {
-        background-color: #444;
-      }
-    </style>
-  </head>
-  <body>
-    <!-- Container for the sticky selection lists -->
-    <div class="sticky-container">
-      <!-- First dropdown for selecting a project -->
-      <label for="firstColumnDropdown">Projet :</label>
-      <select id="firstColumnDropdown">
-        <option value="">Select an option</option>
-      </select>
+  <script>
+    const apiKey = '52a7601b8532a91257c92a42eda896b47aa6c73d';
+    const docId = 'h7kNsaQWiWzdVBU8WfZWpF';
+    const tableId = 'Fusion';
+    const gristBaseUrl = `https://vincitest.getgrist.com/api/docs/${docId}/tables/${tableId}/records`;
+    let records = [];
+    let selectedFirstValue = '';
+    let selectedSecondValue = '';
 
-      <!-- Second listbox for selecting the tableau -->
-      <label for="secondColumnListbox">Tableau :</label>
-      <select id="secondColumnListbox" multiple size="10"></select>
-    </div>
+    // Ready Grist
+    grist.ready();
 
-    <!-- Table to display and edit the data -->
-    <div class="table-container">
-      <table id="dataTable">
-        <thead>
-          <tr id="tableHeader">
-            <th>ID</th> <!-- Add a column for ID -->
-          </tr>
-        </thead>
-        <tbody id="tableBody"></tbody>
-      </table>
-    </div>
-
-    <!-- Context Menu -->
-    <div id="contextMenu" class="context-menu">
-      <button id="deleteOption">Supprimer</button>
-    </div>
-
-    <!-- Form to add new rows -->
-    <div class="add-form">
-      <h3>Ajouter une nouvelle ligne :</h3>
-      <input type="text" id="emetteurInput" placeholder="Emetteur">
-      <input type="text" id="referenceInput" placeholder="Référence">
-      <input type="text" id="indiceInput" placeholder="Indice">
-      <input type="text" id="recuInput" placeholder="Reçu">
-      <input type="text" id="descriptionInput" placeholder="Description/Observations">
-      <button id="addRowButton">Ajouter</button>
-    </div>
-
-    <script>
-      let records = [];
-      let selectedFirstValue = '';
-      let selectedSecondValue = '';
-      let selectedRecordId = null;
-
-      // Ready Grist
-      grist.ready();
-
-      // Function to populate the first dropdown with unique values from the first column
-      function populateFirstColumnDropdown(values) {
-        const dropdown = document.getElementById('firstColumnDropdown');
-        dropdown.innerHTML = '<option value="">Select an option</option>';  // Reset the dropdown
-
-        values.forEach(value => {
-          if (value) {  // Skip null or empty values
-            const option = document.createElement('option');
-            option.value = value;
-            option.text = value;
-            dropdown.appendChild(option);
+    // Fetch records from the Grist table and populate dropdowns
+    async function fetchRecords() {
+      try {
+        const response = await fetch(gristBaseUrl, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
           }
         });
+
+        if (!response.ok) {
+          throw new Error(`Erreur: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        records = data.records.map(record => ({
+          NomProjet: record.fields.NomProjet || '',
+          NomEtage: record.fields.NomEtage || '',
+          Emetteur: record.fields.Emetteur || '',
+          Reference: record.fields.Reference || '',
+          Indice: record.fields.Indice || '',
+          Recu: record.fields.Recu || '',
+          DescriptionObservations: record.fields.DescriptionObservations || '',
+          ID_Ligne: record.id
+        }));
+
+        populateFirstColumnDropdown([...new Set(records.map(record => record.NomProjet))]);
+      } catch (error) {
+        console.error("Erreur lors de la récupération des enregistrements:", error);
       }
+    }
 
-      // Function to populate the second listbox based on the selected first column value
-      function populateSecondColumnListbox(selectedValue) {
-        const listbox = document.getElementById('secondColumnListbox');
-        listbox.innerHTML = '';  // Clear current listbox
+    // Populate the first dropdown with unique project values
+    function populateFirstColumnDropdown(values) {
+      const dropdown = document.getElementById('firstColumnDropdown');
+      dropdown.innerHTML = '<option value="">Sélectionnez un projet</option>';
 
-        const secondColumnValues = records
-          .filter(record => record.NomProjet === selectedValue)  // Filter based on selected first column value
-          .map(record => record.NomEtage)  // Extract second column values
-          .filter((value, index, self) => value && self.indexOf(value) === index)  // Remove duplicates and null/empty values
-          .sort();
-
-        secondColumnValues.forEach(value => {
+      values.forEach(value => {
+        if (value) {
           const option = document.createElement('option');
           option.value = value;
           option.text = value;
-          listbox.appendChild(option);
-        });
-      }
+          dropdown.appendChild(option);
+        }
+      });
+    }
 
-      // Function to populate the table based on the selected first and second column values
-      function populateTable() {
-        const tableHeader = document.getElementById('tableHeader');
-        const tableBody = document.getElementById('tableBody');
+    // Populate the second dropdown (table) based on selected project
+    function populateSecondColumnListbox(selectedValue) {
+      const listbox = document.getElementById('secondColumnListbox');
+      listbox.innerHTML = '';
 
-        // Clear the table
-        tableBody.innerHTML = '';
+      const floorValues = records
+        .filter(record => record.NomProjet === selectedValue)
+        .map(record => record.NomEtage)
+        .filter((value, index, self) => value && self.indexOf(value) === index)
+        .sort();
 
-        const filteredRecords = records
-          .filter(record => record.NomProjet === selectedFirstValue && record.NomEtage === selectedSecondValue);
+      floorValues.forEach(value => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.text = value;
+        listbox.appendChild(option);
+      });
+    }
 
-        if (filteredRecords.length === 0) return;
+    // Populate table based on selected project and floor
+    function populateTable() {
+      const tableHeader = document.getElementById('tableHeader');
+      const tableBody = document.getElementById('tableBody');
 
-        const exampleRecord = filteredRecords[0];
-        const headers = Object.keys(exampleRecord).filter(key => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'ID_Ligne'); // Skip first two and last column (ID_Ligne)
+      tableBody.innerHTML = '';
 
-        // Populate the table header with the additional 'ID' column
-        tableHeader.innerHTML = '<th>ID</th>';
+      const filteredRecords = records
+        .filter(record => record.NomProjet === selectedFirstValue && record.NomEtage === selectedSecondValue);
+
+      if (filteredRecords.length === 0) return;
+
+      const headers = Object.keys(filteredRecords[0]).filter(key => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'ID_Ligne');
+      tableHeader.innerHTML = '<th>ID</th>';
+      headers.forEach(header => {
+        const th = document.createElement('th');
+        th.textContent = header;
+        tableHeader.appendChild(th);
+      });
+
+      filteredRecords.forEach(record => {
+        const tr = document.createElement('tr');
+
+        const idCell = document.createElement('td');
+        idCell.textContent = record.ID_Ligne;
+        tr.appendChild(idCell);
+
         headers.forEach(header => {
-          const th = document.createElement('th');
-          th.textContent = header;
-          tableHeader.appendChild(th);
+          const td = document.createElement('td');
+          td.contentEditable = true;
+          td.textContent = record[header] || '';
+          tr.appendChild(td);
         });
 
-        // Populate the table body with filtered records
-        filteredRecords.forEach((record, rowIndex) => {
-          const tr = document.createElement('tr');
-          tr.addEventListener('contextmenu', (event) => showContextMenu(event, record.ID_Ligne)); // Show context menu on right-click and store the ID
+        tableBody.appendChild(tr);
+      });
+    }
 
-          // Add the ID as the first column
-          const idCell = document.createElement('td');
-          idCell.textContent = record.ID_Ligne;
-          tr.appendChild(idCell);
-
-          headers.forEach(header => {
-            const td = document.createElement('td');
-            td.contentEditable = "true";  // Make cells editable
-            td.textContent = record[header] || '';  // Use empty string for null/undefined values
-            td.addEventListener('blur', function() {
-              record[header] = td.textContent; // Update record with edited value
-              // updateRecordInGrist(record); // Save changes to Grist
-            });
-            tr.appendChild(td);
-          });
-
-          tableBody.appendChild(tr);
-        });
+    // Event listeners for dropdown changes
+    document.getElementById('firstColumnDropdown').addEventListener('change', function() {
+      selectedFirstValue = this.value;
+      if (selectedFirstValue) {
+        populateSecondColumnListbox(selectedFirstValue);
+      } else {
+        document.getElementById('secondColumnListbox').innerHTML = '';
       }
+    });
 
-      // Show context menu on right-click and get the record ID from the first column
-      function showContextMenu(event, recordId) {
-        event.preventDefault();
-        selectedRecordId = recordId;  // Store the ID of the selected record
-
-        const contextMenu = document.getElementById('contextMenu');
-        contextMenu.style.display = 'block';
-        contextMenu.style.left = ${event.pageX}px;
-        contextMenu.style.top = ${event.pageY}px;
+    document.getElementById('secondColumnListbox').addEventListener('change', function() {
+      selectedSecondValue = this.value;
+      if (selectedFirstValue && selectedSecondValue) {
+        populateTable();
       }
+    });
 
-      // Hide context menu if clicked elsewhere
-      document.addEventListener('click', function(event) {
-        const contextMenu = document.getElementById('contextMenu');
-        if (!contextMenu.contains(event.target)) {
-          contextMenu.style.display = 'none';
-        }
-      });
-
-      // Add event listener for "Supprimer" option
-      document.getElementById('deleteOption').addEventListener('click', () => {
-        console.log("Supprimer clicked for row ID:", selectedRecordId);
-        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', Number(selectedRecordId)]])
-        .then(() => {
-          records = records.filter(record => record.ID_Ligne !== selectedRecordId);
-          populateTable();
-
-          const contextMenu = document.getElementById('contextMenu');
-          contextMenu.style.display = 'none';
-          
-          console.log("Tableau actualisé et menu contextuel masqué après suppression.");
-        })
-        .catch(error => {
-          console.error("Erreur lors de la suppression de la ligne dans Grist:", error);
-        });
-      });
-
-
-      // Function to delete a record in Grist
-      function deleteRecordInGrist(recordId) {
-        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', recordId]]);
-      }
-
-      // Fetch records from Grist
-      grist.onRecords(function(receivedRecords) {
-        console.log("Records received from Grist:", receivedRecords);
-        
-        records = receivedRecords.map(record => ({
-          NomProjet: record.NomProjet || '',
-          NomEtage: record.NomEtage || '',
-          Emetteur: record.Emetteur || '',
-          Reference: record.Reference || '',
-          Indice: record.Indice || '',
-          Recu: record.Recu || '',
-          DescriptionObservations: record.DescriptionObservations || '',
-          ID_Ligne: record.ID_Ligne || ''
-        }));
-
-        // Populate the first dropdown with unique values from 'NomProjet'
-        const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
-        populateFirstColumnDropdown(uniqueFirstColumnValues);
-      });
-
-      // Listen to changes in the first dropdown and update the second listbox accordingly
-      document.getElementById('firstColumnDropdown').addEventListener('change', function() {
-        selectedFirstValue = this.value;
-        if (selectedFirstValue) {
-          populateSecondColumnListbox(selectedFirstValue);
-        } else {
-          document.getElementById('secondColumnListbox').innerHTML = '';  // Clear second listbox if no selection
-        }
-      });
-
-      // Listen to changes in the second listbox and update the table accordingly
-      document.getElementById('secondColumnListbox').addEventListener('change', function() {
-        selectedSecondValue = this.value;
-        if (selectedFirstValue && selectedSecondValue) {
-          populateTable();
-        }
-      });
-
-      // Function to update a record in Grist
-      function updateRecordInGrist(record) {
-        grist.docApi.applyUserActions([['UpdateRecord', 'Fusion', record.ID_Ligne, record]])
-        .then(() => {
-          console.log("Record updated in Grist:", record);
-        }).catch(error => {
-          console.error("Failed to update record in Grist:", error);
-        });
-      }
-    </script>
-  </body>
+    // Initial data fetch
+    fetchRecords();
+  </script>
+</body>
 </html>
