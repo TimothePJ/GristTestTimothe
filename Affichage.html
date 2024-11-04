@@ -19,10 +19,16 @@
         background-color: #2c2c2c;
         padding: 20px;
         display: flex;
-        flex-direction: column;
-        align-items: center;
+        align-items: flex-start;
         z-index: 1000;
         box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+      }
+
+      .dropdown-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin-right: 20px;
       }
 
       label {
@@ -113,14 +119,18 @@
     <!-- Container for the sticky selection lists -->
     <div class="sticky-container">
       <!-- First dropdown for selecting a project -->
-      <label for="firstColumnDropdown">Projet :</label>
-      <select id="firstColumnDropdown">
-        <option value="">Select an option</option>
-      </select>
+      <div class="dropdown-container">
+        <label for="firstColumnDropdown">Projet :</label>
+        <select id="firstColumnDropdown">
+          <option value="">Select an option</option>
+        </select>
+      </div>
 
-      <!-- Second listbox for selecting the tableau -->
-      <label for="secondColumnListbox">Tableau :</label>
-      <select id="secondColumnListbox" multiple size="10"></select>
+      <!-- Second dropdown for selecting the tableau -->
+      <div class="dropdown-container">
+        <label for="secondColumnListbox">Tableau :</label>
+        <select id="secondColumnListbox" multiple size="10"></select>
+      </div>
     </div>
 
     <!-- Table to display and edit the data -->
@@ -234,7 +244,6 @@
             td.textContent = record[header] || '';  // Use empty string for null/undefined values
             td.addEventListener('blur', function() {
               record[header] = td.textContent; // Update record with edited value
-              // updateRecordInGrist(record); // Save changes to Grist
             });
             tr.appendChild(td);
           });
@@ -270,7 +279,7 @@
           grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', Number(selectedRecordId)]])
           .then(() => {
               // Supprime la ligne localement dans le tableau
-              records = records.filter(record => record.ID_Ligne !== selectedRecordId); // Filtre localement le tableau
+              records = records.filter(record => record.ID_Ligne !== selectedRecordId);
       
               // Actualise l'affichage du tableau
               populateTable();
