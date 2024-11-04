@@ -297,44 +297,24 @@
         grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', recordId]]);
       }
 
-      // Fonction pour ajouter une nouvelle ligne
-      document.getElementById('addRowButton').addEventListener('click', () => {
-        const emetteur = document.getElementById('emetteurInput').value;
-        const reference = document.getElementById('referenceInput').value;
-        const indice = document.getElementById('indiceInput').value;
-        const recu = document.getElementById('recuInput').value;
-        const description = document.getElementById('descriptionInput').value;
+      // Fetch records from Grist
+      grist.onRecords(function(receivedRecords) {
+        console.log("Records received from Grist:", receivedRecords);
+        
+        records = receivedRecords.map(record => ({
+          NomProjet: record.NomProjet || '',
+          NomEtage: record.NomEtage || '',
+          Emetteur: record.Emetteur || '',
+          Reference: record.Reference || '',
+          Indice: record.Indice || '',
+          Recu: record.Recu || '',
+          DescriptionObservations: record.DescriptionObservations || '',
+          ID_Ligne: record.ID_Ligne || ''
+        }));
 
-        // Créer un objet pour la nouvelle ligne
-        const newRow = {
-          NomProjet: selectedFirstValue,
-          NomEtage: selectedSecondValue,
-          Emetteur: emetteur,
-          Reference: reference,
-          Indice: indice,
-          Recu: recu,
-          DescriptionObservations: description
-        };
-
-        // Ajouter la nouvelle ligne dans Grist
-        grist.docApi.applyUserActions([['AddRecord', 'Fusion', newRow]])
-          .then((response) => {
-            console.log("Nouvelle ligne ajoutée dans Grist:", response);
-
-            newRow.ID_Ligne = response[0];  // Récupérer l'ID généré par Grist
-            records.push(newRow);  // Mettre à jour localement le tableau
-            populateTable();  // Actualiser l'affichage du tableau
-
-            // Vider les champs du formulaire
-            document.getElementById('emetteurInput').value = '';
-            document.getElementById('referenceInput').value = '';
-            document.getElementById('indiceInput').value = '';
-            document.getElementById('recuInput').value = '';
-            document.getElementById('descriptionInput').value = '';
-          })
-          .catch(error => {
-            console.error("Erreur lors de l'ajout de la nouvelle ligne:", error);
-          });
+        // Populate the first dropdown with unique values from 'NomProjet'
+        const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
+        populateFirstColumnDropdown(uniqueFirstColumnValues);
       });
 
       // Listen to changes in the first dropdown and update the second listbox accordingly
@@ -362,7 +342,7 @@
           console.log("Record updated in Grist:", record);
         }).catch(error => {
           console.error("Failed to update record in Grist:", error);
-        });
+      });
       }
     </script>
   </body>
