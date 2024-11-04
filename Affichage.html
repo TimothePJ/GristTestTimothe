@@ -250,8 +250,8 @@
 
         const contextMenu = document.getElementById('contextMenu');
         contextMenu.style.display = 'block';
-        contextMenu.style.left = ${event.pageX}px;
-        contextMenu.style.top = ${event.pageY}px;
+        contextMenu.style.left = `${event.pageX}px`;
+        contextMenu.style.top = `${event.pageY}px`;
       }
 
       // Hide context menu if clicked elsewhere
@@ -297,34 +297,43 @@
         grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', recordId]]);
       }
 
-      // Écouteur d'événement pour ajouter une ligne vide
-      document.getElementById('addEmptyRowButton').addEventListener('click', () => {
-          console.log("Ajouter une ligne vide");
-      
-          // Crée un objet avec les colonnes vides
-          const columnValues = {
-              NomProjet: selectedFirstValue || '',   // Valeur du premier select ou vide
-              NomEtage: selectedSecondValue || '',   // Valeur du second select ou vide
-              Emetteur: '',  // Colonnes vides
-              Reference: '',
-              Indice: '',
-              Recu: '',
-              DescriptionObservations: ''
-          };
-      
-          // Ajoute cette ligne vide dans Grist
-          grist.docApi.applyUserActions([['AddRecord', 'Fusion', columnValues]])
-          .then((result) => {
-              // Ajoute la nouvelle ligne aux records locaux pour mise à jour immédiate du tableau
-              const newRecord = { ...columnValues, ID_Ligne: result[0].id }; // Ajoute l'ID généré par Grist
-              records.push(newRecord); // Met à jour le tableau localement
-              populateTable(); // Actualise l'affichage du tableau avec la nouvelle ligne
-      
-              console.log("Nouvelle ligne vide ajoutée et tableau actualisé.");
+      // Fonction pour ajouter une nouvelle ligne
+      document.getElementById('addRowButton').addEventListener('click', () => {
+        const emetteur = document.getElementById('emetteurInput').value;
+        const reference = document.getElementById('referenceInput').value;
+        const indice = document.getElementById('indiceInput').value;
+        const recu = document.getElementById('recuInput').value;
+        const description = document.getElementById('descriptionInput').value;
+
+        // Créer un objet pour la nouvelle ligne
+        const newRow = {
+          NomProjet: selectedFirstValue,
+          NomEtage: selectedSecondValue,
+          Emetteur: emetteur,
+          Reference: reference,
+          Indice: indice,
+          Recu: recu,
+          DescriptionObservations: description
+        };
+
+        // Ajouter la nouvelle ligne dans Grist
+        grist.docApi.applyUserActions([['AddRecord', 'Fusion', newRow]])
+          .then((response) => {
+            console.log("Nouvelle ligne ajoutée dans Grist:", response);
+
+            newRow.ID_Ligne = response[0];  // Récupérer l'ID généré par Grist
+            records.push(newRow);  // Mettre à jour localement le tableau
+            populateTable();  // Actualiser l'affichage du tableau
+
+            // Vider les champs du formulaire
+            document.getElementById('emetteurInput').value = '';
+            document.getElementById('referenceInput').value = '';
+            document.getElementById('indiceInput').value = '';
+            document.getElementById('recuInput').value = '';
+            document.getElementById('descriptionInput').value = '';
           })
           .catch(error => {
-              console.error("Erreur lors de l'ajout de la nouvelle ligne vide:", error);
-              alert("Une erreur s'est produite lors de l'ajout de la nouvelle ligne.");
+            console.error("Erreur lors de l'ajout de la nouvelle ligne:", error);
           });
       });
 
@@ -353,7 +362,7 @@
           console.log("Record updated in Grist:", record);
         }).catch(error => {
           console.error("Failed to update record in Grist:", error);
-      });
+        });
       }
     </script>
   </body>
