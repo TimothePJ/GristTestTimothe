@@ -250,8 +250,8 @@
 
         const contextMenu = document.getElementById('contextMenu');
         contextMenu.style.display = 'block';
-        contextMenu.style.left = `${event.pageX}px`;
-        contextMenu.style.top = `${event.pageY}px`;
+        contextMenu.style.left = ${event.pageX}px;
+        contextMenu.style.top = ${event.pageY}px;
       }
 
       // Hide context menu if clicked elsewhere
@@ -264,33 +264,10 @@
 
       // Add event listener for "Supprimer" option
       document.getElementById('deleteOption').addEventListener('click', () => {
-          console.log("Supprimer clicked for row ID:", selectedRecordId);
-          
-          // Supprime la ligne dans Grist
-          grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', Number(selectedRecordId)]])
-          .then(() => {
-              // Supprime la ligne localement dans le tableau
-              records = records.filter(record => record.ID_Ligne !== selectedRecordId); // Filtre localement le tableau
-      
-              // Actualise l'affichage du tableau
-              populateTable();
-      
-              // Masquer le menu contextuel après la suppression
-              hideContextMenu();
-      
-              console.log("Tableau actualisé et menu contextuel masqué après suppression.");
-          })
-          .catch(error => {
-              console.error("Erreur lors de la suppression de la ligne dans Grist:", error);
-              alert("Une erreur s'est produite lors de la suppression de la ligne.");
-          });
+        console.log("Supprimer clicked for row ID:", selectedRecordId);
+        grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', Number(selectedRecordId)]]);
       });
 
-      // Fonction pour cacher le menu contextuel
-      function hideContextMenu() {
-          const contextMenu = document.getElementById('contextMenu');
-          contextMenu.style.display = 'none';
-      }
 
       // Function to delete a record in Grist
       function deleteRecordInGrist(recordId) {
@@ -342,7 +319,7 @@
           console.log("Record updated in Grist:", record);
         }).catch(error => {
           console.error("Failed to update record in Grist:", error);
-      });
+        });
       }
     </script>
   </body>
