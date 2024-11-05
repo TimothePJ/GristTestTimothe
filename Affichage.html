@@ -385,17 +385,17 @@
         const updates = [];
         for (const row of rows) {
           const cells = row.getElementsByTagName('td');
-          const rowId = cells[0].textContent; // L'ID de la ligne, colonne 1 dans le tableau HTML
+          const rowId = cells[0].textContent.trim(); // L'ID de la ligne, colonne 1 dans le tableau HTML
       
           // Recherche de la ligne correspondante dans `records`
           const record = records.find(rec => rec.ID_Ligne === rowId);
       
-          // Vérifie si des cellules ont été modifiées et crée un objet de mise à jour si c'est le cas
+          // Si la ligne existe dans `records`, vérifie les modifications
           if (record) {
             const updatedRecord = {};
             let hasChanges = false;
       
-            // Parcours des cellules du tableau (en partant de la 2e, car la 1ère est l'ID)
+            // Parcours des cellules du tableau (en partant de la 2e cellule, car la 1ère est l'ID)
             for (let i = 1; i < cells.length; i++) {
               const fieldName = Object.keys(record)[i + 1]; // Correspondance des champs, en sautant `NomProjet`, `NomEtage`, et `ID_Ligne`
               const cellValue = cells[i].textContent.trim();
@@ -414,7 +414,7 @@
           }
         }
       
-        // Applique les modifications dans Grist
+        // Applique les modifications dans Grist si des changements ont été détectés
         if (updates.length > 0) {
           grist.docApi.applyUserActions(updates)
             .then(() => {
