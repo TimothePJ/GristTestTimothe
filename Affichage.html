@@ -154,13 +154,7 @@
 
     <!-- Form to add new rows -->
     <div class="add-form">
-      <h3>Ajouter une nouvelle ligne :</h3>
-      <input type="text" id="emetteurInput" placeholder="Emetteur">
-      <input type="text" id="referenceInput" placeholder="Référence">
-      <input type="text" id="indiceInput" placeholder="Indice">
-      <input type="text" id="recuInput" placeholder="Reçu">
-      <input type="text" id="descriptionInput" placeholder="Description/Observations">
-      <button id="addRowButton">Ajouter</button>
+      <button id="addRowButton">Ajouter une ligne</button>
     </div>
 
     <script>
@@ -340,6 +334,37 @@
           populateTable();
         }
       });
+
+      // Fonction pour ajouter une nouvelle ligne dans Grist
+      function addRowToGrist() {
+        if (!selectedFirstValue || !selectedSecondValue) {
+          alert("Veuillez sélectionner un projet et un tableau.");
+          return;
+        }
+      
+        const newRow = {
+          NomProjet: selectedFirstValue,
+          NomEtage: selectedSecondValue,
+          Emetteur: '',
+          Reference: '',
+          Indice: '',
+          Recu: '',
+          DescriptionObservations: ''
+        };
+      
+        grist.docApi.applyUserActions([['AddRecord', 'Fusion', newRow]])
+          .then(() => {
+            console.log("Nouvelle ligne ajoutée :", newRow);
+          })
+          .catch(error => {
+            console.error("Erreur lors de l'ajout de la ligne :", error);
+            alert("Erreur lors de l'ajout de la ligne.");
+          });
+      }
+      
+      // Écouteur d'événement pour le bouton d'ajout
+      document.getElementById('addRowButton').addEventListener('click', addRowToGrist);
+              
     </script>
   </body>
 </html>
