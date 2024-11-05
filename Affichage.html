@@ -342,6 +342,7 @@
           return;
         }
       
+        // Correction de la structure de `applyUserActions` pour inclure `column_values`
         const newRow = {
           NomProjet: selectedFirstValue,
           NomEtage: selectedSecondValue,
@@ -352,16 +353,18 @@
           DescriptionObservations: ''
         };
       
-        grist.docApi.applyUserActions([['AddRecord', 'Fusion', newRow]])
-          .then(() => {
-            console.log("Nouvelle ligne ajoutée :", newRow);
-          })
-          .catch(error => {
-            console.error("Erreur lors de l'ajout de la ligne :", error);
-            alert("Erreur lors de l'ajout de la ligne.");
-          });
+        grist.docApi.applyUserActions([
+          ['AddRecord', 'Fusion', null, newRow]  // Utilise `null` pour l'ID, Grist s'en chargera
+        ])
+        .then(() => {
+          console.log("Nouvelle ligne ajoutée :", newRow);
+        })
+        .catch(error => {
+          console.error("Erreur lors de l'ajout de la ligne :", error);
+          alert("Erreur lors de l'ajout de la ligne.");
+        });
       }
-      
+
       // Écouteur d'événement pour le bouton d'ajout
       document.getElementById('addRowButton').addEventListener('click', addRowToGrist);
               
