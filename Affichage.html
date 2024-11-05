@@ -368,7 +368,71 @@
 
       // Écouteur d'événement pour le bouton d'ajout
       document.getElementById('addRowButton').addEventListener('click', addRowToGrist);
-              
+
+      // Fonction pour sauvegarder les modifications dans Grist
+      function saveChanges() {
+        // Vérifie que les listes déroulantes sont bien sélectionnées
+        if (!selectedFirstValue || !selectedSecondValue) {
+          alert("Veuillez sélectionner un projet et un tableau pour sauvegarder.");
+          return;
+        }
+      
+        // Récupère les lignes du tableau HTML
+        const tableBody = document.getElementById('tableBody');
+        const rows = tableBody.getElementsByTagName('tr');
+      
+        // Parcours des lignes pour détecter les changements
+        const updates = [];
+        for (const row of rows) {
+          const cells = row.getElementsByTagName('td');
+          const rowId = cells[0].textContent; // L'ID de la ligne, colonne 1 dans le tableau HTML
+      
+          // Recherche de la ligne correspondante dans `records`
+          const record = records.find(rec => rec.ID_Ligne === rowId);
+      
+          // Vérifie si des cellules ont été modifiées et crée un objet de mise à jour si c'est le cas
+          if (record) {
+            const updatedRecord = {};
+            let hasChanges = false;
+      
+            // Parcours des cellules du tableau (en partant de la 2e, car la 1ère est l'ID)
+            for (let i = 1; i < cells.length; i++) {
+              const fieldName = Object.keys(record)[i + 1]; // Correspondance des champs, en sautant `NomProjet`, `NomEtage`, et `ID_Ligne`
+              const cellValue = cells[i].textContent.trim();
+      
+              // Compare la valeur de la cellule avec la valeur dans le record original
+              if (record[fieldName] !== cellValue) {
+                updatedRecord[fieldName] = cellValue;
+                hasChanges = true;
+              }
+            }
+      
+            // Si des changements sont détectés, ajoute l'enregistrement aux mises à jour
+            if (hasChanges) {
+              updates.push(['UpdateRecord', 'Fusion', Number(rowId), updatedRecord]);
+            }
+          }
+        }
+      
+        // Applique les modifications dans Grist
+        if (updates.length > 0) {
+          grist.docApi.applyUserActions(updates)
+            .then(() => {
+              console.log("Modifications sauvegardées avec succès :", updates);
+              alert("Les modifications ont été sauvegardées.");
+            })
+            .catch(error => {
+              console.error("Erreur lors de la sauvegarde des modifications :", error);
+              alert("Erreur lors de la sauvegarde des modifications.");
+            });
+        } else {
+          alert("Aucune modification à sauvegarder.");
+        }
+      }
+      
+      // Écouteur d'événement pour le bouton de sauvegarde
+      document.getElementById('saveButton').addEventListener('click', saveChanges);
+
     </script>
   </body>
 </html>
