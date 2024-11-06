@@ -384,13 +384,15 @@
         // Map des noms de colonnes dans Grist pour correspondre aux colonnes du tableau HTML (en partant de la 2e colonne)
         const columnMap = ['Emetteur', 'Reference', 'Indice', 'Recu', 'DescriptionObservations'];
       
-        // Parcours des lignes du tableau HTML pour détecter les changements
+        // Parcours des lignes pour détecter les changements
         const updates = [];
+        
+        // Récupère les IDs des lignes du tableau HTML
         for (const row of rows) {
           const cells = row.getElementsByTagName('td');
-          const rowId = cells[0].textContent.trim(); // ID de la ligne, présent dans la 1ère cellule de chaque ligne HTML
+          const rowId = cells[0].textContent.trim(); // L'ID de la ligne dans le tableau HTML (première cellule)
       
-          // Recherche de la ligne correspondante dans `records` en utilisant `ID_Ligne`
+          // Recherche la ligne correspondante dans `records` en utilisant `ID_Ligne`
           const record = records.find(rec => rec.ID_Ligne === rowId);
       
           // Si la ligne existe dans `records`, vérifie les modifications cellule par cellule
