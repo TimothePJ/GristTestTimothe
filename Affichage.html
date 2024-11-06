@@ -404,30 +404,37 @@
           // Recherche la ligne correspondante dans `records` en utilisant `ID_Ligne`
           const record = records.find(rec => rec.ID_Ligne === rowId);
       
+          // Vérifie si l'enregistrement correspondant a été trouvé
+          if (!record) {
+            console.warn(`Aucun enregistrement trouvé dans Grist pour ID_Ligne = ${rowId}`);
+            continue;
+          }
+      
+          console.log(`Enregistrement trouvé dans Grist pour ID_Ligne = ${rowId}`, record);
+      
           // Si la ligne existe dans `records`, vérifie les modifications cellule par cellule
-          if (record) {
-            const updatedFields = {};
-            let hasChanges = false;
+          const updatedFields = {};
+          let hasChanges = false;
       
-            // Parcours des cellules du tableau HTML (en partant de la 4e cellule, car les 1ère à 3ème sont ID, Projet et Tableau)
-            for (let i = 3; i < cells.length; i++) {
-              const fieldName = columnMap[i - 3]; // Correspondance avec le nom du champ dans Grist
-              const cellValue = cells[i].textContent.trim();
+          // Parcours des cellules du tableau HTML (en partant de la 4e cellule, car les 1ère à 3ème sont ID, Projet et Tableau)
+          for (let i = 3; i < cells.length; i++) {
+            const fieldName = columnMap[i - 3]; // Correspondance avec le nom du champ dans Grist
+            const cellValue = cells[i].textContent.trim();
       
-              // Compare la valeur de la cellule avec la valeur dans le record original
-              if (record[fieldName] !== cellValue) {
-                updatedFields[fieldName] = cellValue;
-                hasChanges = true;
-              }
+            // Compare la valeur de la cellule avec la valeur dans le record original
+            if (record[fieldName] !== cellValue) {
+              console.log(`Modification détectée pour ID_Ligne = ${rowId} - Champ : ${fieldName}, Valeur actuelle : "${record[fieldName]}", Nouvelle valeur : "${cellValue}"`);
+              updatedFields[fieldName] = cellValue;
+              hasChanges = true;
             }
+          }
       
-            // Si des changements sont détectés, ajoute l'enregistrement aux mises à jour
-            if (hasChanges) {
-              updates.push({
-                require: { ID_Ligne: rowId }, // Utilise ID_Ligne pour identifier la ligne
-                fields: updatedFields // Contient les valeurs modifiées
-              });
-            }
+          // Si des changements sont détectés, ajoute l'enregistrement aux mises à jour
+          if (hasChanges) {
+            updates.push({
+              require: { ID_Ligne: rowId }, // Utilise ID_Ligne pour identifier la ligne
+              fields: updatedFields // Contient les valeurs modifiées
+            });
           }
         }
       
@@ -435,7 +442,7 @@
         if (updates.length > 0) {
           try {
             // Envoi de la requête PUT pour mettre à jour les enregistrements dans Grist
-            const response = await grist.docApi.fetch(`/docs/h7kNsaQWiWzdVBU8WfZWpF/tables/Fusion/records`, {
+            const response = await grist.docApi.fetch(`/docs/{docId}/tables/Fusion/records`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ records: updates })
