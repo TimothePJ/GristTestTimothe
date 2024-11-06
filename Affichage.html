@@ -417,23 +417,14 @@
       
           // Si des changements sont détectés, ajoute l'enregistrement aux mises à jour
           if (hasChanges) {
-            updates.push({
-              require: { ID_Ligne: rowId },
-              fields: updatedFields
-            });
+            updates.push(['UpdateRecord', 'Fusion', Number(rowId), updatedFields]);
           }
         }
       
         // Applique les modifications dans Grist si des changements ont été détectés
         if (updates.length > 0) {
           try {
-            // Envoi de la requête PUT pour mettre à jour les enregistrements dans Grist
-            const response = await grist.docApi.fetch(`/docs/h7kNsaQWiWzdVBU8WfZWpF/tables/Fusion/records`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ records: updates })
-            });
-      
+            await grist.docApi.applyUserActions(updates);
             console.log("Modifications sauvegardées avec succès :", updates);
             alert("Les modifications ont été sauvegardées.");
           } catch (error) {
