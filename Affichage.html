@@ -370,7 +370,7 @@
       document.getElementById('addRowButton').addEventListener('click', addRowToGrist);
 
       // Fonction pour sauvegarder les modifications dans Grist
-      function saveChanges() {
+      async function saveChanges() {
         // Vérifie que les listes déroulantes sont bien sélectionnées
         if (!selectedFirstValue || !selectedSecondValue) {
           alert("Veuillez sélectionner un projet et un tableau pour sauvegarder.");
@@ -381,21 +381,21 @@
         const tableBody = document.getElementById('tableBody');
         const rows = tableBody.getElementsByTagName('tr');
       
-        // Map des noms de colonnes dans Grist pour correspondre aux colonnes du tableau HTML
+        // Map des noms de colonnes dans Grist pour correspondre aux colonnes du tableau HTML (en partant de la 2e colonne)
         const columnMap = ['Emetteur', 'Reference', 'Indice', 'Recu', 'DescriptionObservations'];
       
-        // Parcours des lignes pour détecter les changements
+        // Parcours des lignes du tableau HTML pour détecter les changements
         const updates = [];
         for (const row of rows) {
           const cells = row.getElementsByTagName('td');
-          const rowId = cells[0].textContent.trim(); // L'ID de la ligne, colonne 1 dans le tableau HTML
+          const rowId = cells[0].textContent.trim(); // ID de la ligne, présent dans la 1ère cellule de chaque ligne HTML
       
           // Recherche de la ligne correspondante dans `records` en utilisant `ID_Ligne`
           const record = records.find(rec => rec.ID_Ligne === rowId);
       
-          // Si la ligne existe dans `records`, vérifie les modifications
+          // Si la ligne existe dans `records`, vérifie les modifications cellule par cellule
           if (record) {
-            const updatedRecord = {};
+            const updatedFields = {};
             let hasChanges = false;
       
             // Parcours des cellules du tableau HTML (en partant de la 2e cellule, car la 1ère est l'ID)
@@ -405,29 +405,37 @@
       
               // Compare la valeur de la cellule avec la valeur dans le record original
               if (record[fieldName] !== cellValue) {
-                updatedRecord[fieldName] = cellValue;
+                updatedFields[fieldName] = cellValue;
                 hasChanges = true;
               }
             }
       
             // Si des changements sont détectés, ajoute l'enregistrement aux mises à jour
             if (hasChanges) {
-              updates.push(['UpdateRecord', 'Fusion', Number(rowId), updatedRecord]);
+              updates.push({
+                require: { ID_Ligne: rowId }, // Utilise ID_Ligne pour identifier la ligne
+                fields: updatedFields // Contient les valeurs modifiées
+              });
             }
           }
         }
       
         // Applique les modifications dans Grist si des changements ont été détectés
         if (updates.length > 0) {
-          grist.docApi.applyUserActions(updates)
-            .then(() => {
-              console.log("Modifications sauvegardées avec succès :", updates);
-              alert("Les modifications ont été sauvegardées.");
-            })
-            .catch(error => {
-              console.error("Erreur lors de la sauvegarde des modifications :", error);
-              alert("Erreur lors de la sauvegarde des modifications.");
+          try {
+            // Envoi de la requête PUT pour mettre à jour les enregistrements dans Grist
+            const response = await grist.docApi.fetch(`/docs/h7kNsaQWiWzdVBU8WfZWpF/tables/Fusion/records`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ records: updates })
             });
+      
+            console.log("Modifications sauvegardées avec succès :", updates);
+            alert("Les modifications ont été sauvegardées.");
+          } catch (error) {
+            console.error("Erreur lors de la sauvegarde des modifications :", error);
+            alert("Erreur lors de la sauvegarde des modifications.");
+          }
         } else {
           alert("Aucune modification à sauvegarder.");
         }
