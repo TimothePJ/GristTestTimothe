@@ -381,6 +381,9 @@
         const tableBody = document.getElementById('tableBody');
         const rows = tableBody.getElementsByTagName('tr');
       
+        // Map des noms de colonnes dans Grist pour correspondre aux colonnes du tableau HTML
+        const columnMap = ['Emetteur', 'Reference', 'Indice', 'Recu', 'DescriptionObservations'];
+      
         // Parcours des lignes pour détecter les changements
         const updates = [];
         for (const row of rows) {
@@ -395,12 +398,9 @@
             const updatedRecord = {};
             let hasChanges = false;
       
-            // Obtenez les noms des champs du record, en excluant ceux spécifiques
-            const fieldNames = Object.keys(record).filter(key => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'ID_Ligne');
-      
-            // Parcours des cellules du tableau (en partant de la 2e cellule, car la 1ère est l'ID)
+            // Parcours des cellules du tableau HTML (en partant de la 2e cellule, car la 1ère est l'ID)
             for (let i = 1; i < cells.length; i++) {
-              const fieldName = fieldNames[i - 1]; // Le nom de champ correspondant dans Grist
+              const fieldName = columnMap[i - 1]; // Correspondance avec le nom du champ dans Grist
               const cellValue = cells[i].textContent.trim();
       
               // Compare la valeur de la cellule avec la valeur dans le record original
