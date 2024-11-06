@@ -384,41 +384,27 @@
         // Map des noms de colonnes dans Grist pour correspondre aux colonnes du tableau HTML (en partant de la 2e colonne)
         const columnMap = ['Emetteur', 'Reference', 'Indice', 'Recu', 'DescriptionObservations'];
       
-        // Parcours des lignes du tableau HTML pour détecter les changements
         const updates = [];
-        
-        // Récupère les IDs des lignes du tableau HTML uniquement si elles correspondent aux sélections des listes
+      
+        // Parcours des lignes du tableau HTML pour détecter les changements
         for (const row of rows) {
           const cells = row.getElementsByTagName('td');
           const rowId = cells[0].textContent.trim(); // L'ID de la ligne dans le tableau HTML (première cellule)
       
-          // Vérifie si les valeurs dans les colonnes "Projet" et "Tableau" correspondent aux sélections des listes
-          const projetValue = cells[1].textContent.trim(); // Supposons que la colonne 2 contient la valeur du projet
-          const tableauValue = cells[2].textContent.trim(); // Supposons que la colonne 3 contient la valeur du tableau
-      
-          if (projetValue !== selectedFirstValue || tableauValue !== selectedSecondValue) {
-            // Ignore cette ligne si elle ne correspond pas aux sélections actuelles
-            continue;
-          }
-      
           // Recherche la ligne correspondante dans `records` en utilisant `ID_Ligne`
           const record = records.find(rec => rec.ID_Ligne === rowId);
       
-          // Vérifie si l'enregistrement correspondant a été trouvé
           if (!record) {
             console.warn(`Aucun enregistrement trouvé dans Grist pour ID_Ligne = ${rowId}`);
             continue;
           }
       
-          console.log(`Enregistrement trouvé dans Grist pour ID_Ligne = ${rowId}`, record);
-      
-          // Si la ligne existe dans `records`, vérifie les modifications cellule par cellule
           const updatedFields = {};
           let hasChanges = false;
       
-          // Parcours des cellules du tableau HTML (en partant de la 4e cellule, car les 1ère à 3ème sont ID, Projet et Tableau)
-          for (let i = 3; i < cells.length; i++) {
-            const fieldName = columnMap[i - 3]; // Correspondance avec le nom du champ dans Grist
+          // Parcours des cellules du tableau HTML pour comparer avec `record`
+          for (let i = 1; i < cells.length; i++) {
+            const fieldName = columnMap[i - 1]; // Correspondance avec le nom du champ dans Grist
             const cellValue = cells[i].textContent.trim();
       
             // Compare la valeur de la cellule avec la valeur dans le record original
@@ -432,8 +418,8 @@
           // Si des changements sont détectés, ajoute l'enregistrement aux mises à jour
           if (hasChanges) {
             updates.push({
-              require: { ID_Ligne: rowId }, // Utilise ID_Ligne pour identifier la ligne
-              fields: updatedFields // Contient les valeurs modifiées
+              require: { ID_Ligne: rowId },
+              fields: updatedFields
             });
           }
         }
@@ -442,7 +428,7 @@
         if (updates.length > 0) {
           try {
             // Envoi de la requête PUT pour mettre à jour les enregistrements dans Grist
-            const response = await grist.docApi.fetch(`/docs/{docId}/tables/Fusion/records`, {
+            const response = await grist.docApi.fetch(`/docs/h7kNsaQWiWzdVBU8WfZWpF/tables/Fusion/records`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ records: updates })
