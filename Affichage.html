@@ -390,7 +390,7 @@
           const cells = row.getElementsByTagName('td');
           const rowId = cells[0].textContent.trim(); // L'ID de la ligne, colonne 1 dans le tableau HTML
       
-          // Recherche de la ligne correspondante dans `records`
+          // Recherche de la ligne correspondante dans `records` en utilisant `ID_Ligne`
           const record = records.find(rec => rec.ID_Ligne === rowId);
       
           // Si la ligne existe dans `records`, vérifie les modifications
