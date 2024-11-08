@@ -461,28 +461,31 @@
           alert("Veuillez sélectionner un projet et un tableau.");
           return;
         }
-    
+      
+        // Enlève l'extension du fichier (partie après le dernier point)
+        const fileNameWithoutExtension = fileName.split('.').slice(0, -1).join('.');
+      
         // Trouve la valeur la plus élevée d'ID_Ligne dans `records`
         const maxIdLigne = records.reduce((max, record) => {
           const idLigne = parseInt(record.ID_Ligne, 10);
           return idLigne > max ? idLigne : max;
         }, 0);
-    
+      
         // Définit une nouvelle valeur pour `ID_Ligne` en l'incrémentant de 1
         const newIdLigne = maxIdLigne + 1;
-    
-        // Création de la nouvelle ligne avec la valeur de `ID_Ligne` et le nom du fichier pour "Reference"
+      
+        // Création de la nouvelle ligne avec la valeur de `ID_Ligne` et le nom du fichier sans extension pour "Reference"
         const newRow = {
           NomProjet: selectedFirstValue,
           NomEtage: selectedSecondValue,
           Emetteur: '',
-          Reference: fileName, // Utilise le nom du fichier pour remplir "Reference"
+          Reference: fileNameWithoutExtension, // Nom du fichier sans extension
           Indice: '',
           Recu: '',
           DescriptionObservations: '',
           ID_Ligne: newIdLigne.toString() // Convertit en string pour s'aligner avec les autres valeurs
         };
-    
+      
         // Envoie la requête pour ajouter la nouvelle ligne dans Grist
         grist.docApi.applyUserActions([
           ['AddRecord', 'Fusion', null, newRow]
@@ -498,17 +501,7 @@
           alert("Erreur lors de l'ajout de la ligne.");
         });
       }
-    
-      // Gère l'événement de sélection de fichiers
-      document.getElementById('fileInput').addEventListener('change', (event) => {
-        const files = event.target.files;
-        if (files.length > 0) {
-          Array.from(files).forEach(file => {
-            addRowWithFileName(file.name); // Ajoute une ligne pour chaque fichier sélectionné
-          });
-        }
-      });
-      
+            
     </script>
   </body>
 </html>
