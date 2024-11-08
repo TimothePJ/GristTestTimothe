@@ -388,12 +388,6 @@
 
       // Fonction pour sauvegarder les modifications dans Grist
       async function saveChanges() {
-        // Vérifie que les listes déroulantes sont bien sélectionnées
-        if (!selectedFirstValue || !selectedSecondValue) {
-          alert("Veuillez sélectionner un projet et un tableau pour sauvegarder.");
-          return;
-        }
-      
         // Récupère les lignes du tableau HTML
         const tableBody = document.getElementById('tableBody');
         const rows = tableBody.getElementsByTagName('tr');
@@ -453,6 +447,9 @@
         }
       }
       
+      // Écouteur d'événement pour le bouton de sauvegarde
+      document.getElementById('saveButton').addEventListener('click', saveChanges);
+
       // Écouteur d'événement pour le bouton de sauvegarde
       document.getElementById('saveButton').addEventListener('click', saveChanges);
 
