@@ -454,6 +454,30 @@
       // Écouteur d'événement pour le bouton de sauvegarde
       document.getElementById('saveButton').addEventListener('click', saveChanges);
 
+      <div class="add-form">
+        <button id="addRowButton">Ajouter une ligne</button>
+        <button id="saveButton">Sauvegarder</button>
+        <button id="insertButton">Insérer</button> <!-- Bouton "Insérer" -->
+        
+        <!-- Input caché pour l'explorateur de fichiers -->
+        <input type="file" id="fileInput" style="display: none;">
+      </div>
+      
+      <script>
+        // Quand le bouton "Insérer" est cliqué, déclenche le clic sur l'input de fichier
+        document.getElementById('insertButton').addEventListener('click', () => {
+          document.getElementById('fileInput').click();
+        });
+      
+        // Gère l'événement de sélection de fichier (optionnel, pour tester l'input)
+        document.getElementById('fileInput').addEventListener('change', (event) => {
+          const file = event.target.files[0];
+          if (file) {
+            console.log("Fichier sélectionné :", file.name);
+          }
+        });
+      </script>
+
     </script>
   </body>
 </html>
