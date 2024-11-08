@@ -170,20 +170,37 @@
       // Ready Grist
       grist.ready();
 
-      // Function to populate the first dropdown with unique values from the first column
+      // Fonction pour peupler la première liste déroulante avec des valeurs uniques de la première colonne
       function populateFirstColumnDropdown(values) {
         const dropdown = document.getElementById('firstColumnDropdown');
-        dropdown.innerHTML = '<option value="">Select an option</option>';  // Reset the dropdown
-
+        
+        // Conserve la sélection actuelle
+        const currentSelection = dropdown.value;
+      
+        dropdown.innerHTML = '<option value="">Select an option</option>'; // Réinitialise la liste déroulante
+      
         values.forEach(value => {
-          if (value) {  // Skip null or empty values
+          if (value) {  // Ignore les valeurs nulles ou vides
             const option = document.createElement('option');
             option.value = value;
             option.text = value;
             dropdown.appendChild(option);
           }
         });
+      
+        // Restaure la sélection précédente si elle est encore présente dans les options
+        dropdown.value = currentSelection || ''; // Conserve l'option sélectionnée ou reste sur "Select an option"
       }
+      
+      // Écouteur d'événement pour mettre à jour la valeur sélectionnée dans la première liste
+      document.getElementById('firstColumnDropdown').addEventListener('change', function() {
+        selectedFirstValue = this.value;
+        if (selectedFirstValue) {
+          populateSecondColumnListbox(selectedFirstValue);
+        } else {
+          document.getElementById('secondColumnListbox').innerHTML = '';  // Efface la seconde liste si aucune sélection
+        }
+      });  
 
       // Function to populate the second dropdown based on the selected first column value
       function populateSecondColumnListbox(selectedValue) {
