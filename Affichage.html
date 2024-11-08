@@ -343,7 +343,16 @@
           return;
         }
       
-        // Correction de la structure de `applyUserActions` pour inclure `column_values`
+        // Trouve la valeur la plus élevée d'ID_Ligne dans `records`
+        const maxIdLigne = records.reduce((max, record) => {
+          const idLigne = parseInt(record.ID_Ligne, 10);
+          return idLigne > max ? idLigne : max;
+        }, 0);
+      
+        // Définit une nouvelle valeur pour `ID_Ligne` en l'incrémentant de 1
+        const newIdLigne = maxIdLigne + 1;
+      
+        // Création de la nouvelle ligne avec la valeur de `ID_Ligne`
         const newRow = {
           NomProjet: selectedFirstValue,
           NomEtage: selectedSecondValue,
@@ -351,21 +360,26 @@
           Reference: '',
           Indice: '',
           Recu: '',
-          DescriptionObservations: ''
+          DescriptionObservations: '',
+          ID_Ligne: newIdLigne.toString() // Convertit en string pour s'aligner avec les autres valeurs
         };
       
+        // Envoie la requête pour ajouter la nouvelle ligne dans Grist
         grist.docApi.applyUserActions([
           ['AddRecord', 'Fusion', null, newRow]  // Utilise `null` pour l'ID, Grist s'en chargera
         ])
         .then(() => {
           console.log("Nouvelle ligne ajoutée :", newRow);
+          // Actualise les données pour inclure la nouvelle ligne ajoutée
+          records.push(newRow); // Mise à jour locale
+          populateTable(); // Actualise l'affichage du tableau HTML
         })
         .catch(error => {
           console.error("Erreur lors de l'ajout de la ligne :", error);
           alert("Erreur lors de l'ajout de la ligne.");
         });
       }
-
+      
       // Écouteur d'événement pour le bouton d'ajout
       document.getElementById('addRowButton').addEventListener('click', addRowToGrist);
 
