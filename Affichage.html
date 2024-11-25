@@ -403,8 +403,13 @@
       // Écouteur d'événement pour le bouton d'ajout
       document.getElementById('addRowButton').addEventListener('click', addRowToGrist);
 
-      // Fonction pour sauvegarder les modifications dans Grist
+      // Fonction de sauvegarde mise à jour
       async function saveChanges() {
+        if (!selectedFirstValue || !selectedSecondValue) {
+          alert("Veuillez sélectionner un projet et un tableau pour sauvegarder.");
+          return;
+        }
+      
         // Récupère les lignes du tableau HTML
         const tableBody = document.getElementById('tableBody');
         const rows = tableBody.getElementsByTagName('tr');
@@ -414,42 +419,38 @@
       
         const updates = [];
       
-        // Parcours des lignes du tableau HTML pour détecter les changements
         for (const row of rows) {
           const cells = row.getElementsByTagName('td');
           const rowId = cells[0].textContent.trim(); // L'ID de la ligne dans le tableau HTML (première cellule)
       
-          // Recherche la ligne correspondante dans records en utilisant ID_Ligne
+          // Recherche dans les enregistrements locaux
           const record = records.find(rec => rec.ID_Ligne === rowId);
       
           if (!record) {
-            console.warn(`Aucun enregistrement trouvé dans Grist pour ID_Ligne = ${rowId}`);
+            console.warn(`Aucun enregistrement trouvé pour ID_Ligne = ${rowId}`);
             continue;
           }
       
           const updatedFields = {};
           let hasChanges = false;
       
-          // Parcours des cellules du tableau HTML pour comparer avec record
+          // Compare chaque cellule avec l'enregistrement de `records`
           for (let i = 1; i < cells.length; i++) {
             const fieldName = columnMap[i - 1]; // Correspondance avec le nom du champ dans Grist
             const cellValue = cells[i].textContent.trim();
       
-            // Compare la valeur de la cellule avec la valeur dans le record original
             if (record[fieldName] !== cellValue) {
-              console.log(`Modification détectée pour ID_Ligne = ${rowId} - Champ : ${fieldName}, Valeur actuelle : "${record[fieldName]}", Nouvelle valeur : "${cellValue}"`);
+              console.log(`Modification détectée pour ID_Ligne = ${rowId} - Champ : ${fieldName}, Ancienne : "${record[fieldName]}", Nouvelle : "${cellValue}"`);
               updatedFields[fieldName] = cellValue;
               hasChanges = true;
             }
           }
       
-          // Si des changements sont détectés, ajoute l'enregistrement aux mises à jour
           if (hasChanges) {
             updates.push(['UpdateRecord', 'Fusion', Number(rowId), updatedFields]);
           }
         }
       
-        // Applique les modifications dans Grist si des changements ont été détectés
         if (updates.length > 0) {
           try {
             await grist.docApi.applyUserActions(updates);
@@ -460,10 +461,10 @@
             alert("Erreur lors de la sauvegarde des modifications.");
           }
         } else {
-          alert("Aucune modification à sauvegarder.");
+          alert("Aucune modification détectée pour sauvegarde.");
         }
       }
-      
+
       // Écouteur d'événement pour le bouton de sauvegarde
       document.getElementById('saveButton').addEventListener('click', saveChanges);
 
