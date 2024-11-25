@@ -1,72 +1,547 @@
-async function saveChanges() {
-  // Récupération explicite des valeurs sélectionnées dans les listes déroulantes
-  const projectDropdown = document.getElementById('firstColumnDropdown');
-  const tableDropdown = document.getElementById('secondColumnListbox');
-  
-  const currentProject = projectDropdown.value;
-  const currentTable = tableDropdown.value;
-
-  if (!currentProject || !currentTable) {
-    alert("Veuillez sélectionner un projet et un tableau avant de sauvegarder.");
-    return;
-  }
-
-  console.log(`Sauvegarde en cours pour le tableau "${currentTable}" du projet "${currentProject}".`);
-
-  // Récupération des lignes du tableau HTML
-  const tableBody = document.getElementById('tableBody');
-  const rows = tableBody.getElementsByTagName('tr');
-
-  // Map des noms de colonnes dans Grist pour correspondre aux colonnes du tableau HTML
-  const columnMap = ['Emetteur', 'Reference', 'Indice', 'Recu', 'DescriptionObservations'];
-
-  const updates = [];
-
-  for (const row of rows) {
-    const cells = row.getElementsByTagName('td');
-    const rowId = cells[0].textContent.trim(); // ID_Ligne de la ligne dans le tableau HTML (première cellule)
-
-    // Vérifie que la ligne appartient au projet et au tableau actuels
-    const record = records.find(rec => rec.ID_Ligne === rowId && 
-                                       rec.NomProjet === currentProject &&
-                                       rec.NomEtage === currentTable);
-
-    if (!record) {
-      console.warn(`Aucune correspondance pour ID_Ligne = ${rowId} dans le tableau "${currentTable}" du projet "${currentProject}".`);
-      continue;
-    }
-
-    const updatedFields = {};
-    let hasChanges = false;
-
-    // Parcours des cellules du tableau HTML pour comparer avec l'enregistrement
-    for (let i = 1; i < cells.length; i++) {
-      const fieldName = columnMap[i - 1];
-      const cellValue = cells[i].textContent.trim();
-
-      if (record[fieldName] !== cellValue) {
-        console.log(`Modification détectée pour ID_Ligne = ${rowId} - Champ : ${fieldName}, Ancienne : "${record[fieldName]}", Nouvelle : "${cellValue}"`);
-        updatedFields[fieldName] = cellValue;
-        hasChanges = true;
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Grist Two-Step Selection with Editable Table</title>
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: Arial, sans-serif;
+        background-color: #2c2c2c;
+        color: white;
       }
-    }
 
-    if (hasChanges) {
-      updates.push(['UpdateRecord', 'Fusion', Number(rowId), updatedFields]);
-    }
-  }
+      .sticky-container {
+        position: sticky;
+        top: 0;
+        background-color: #2c2c2c;
+        padding: 20px;
+        display: flex;
+        align-items: flex-start;
+        z-index: 1000;
+        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+      }
 
-  // Applique les modifications si des changements sont détectés
-  if (updates.length > 0) {
-    try {
-      await grist.docApi.applyUserActions(updates);
-      console.log("Modifications sauvegardées avec succès :", updates);
-      alert("Les modifications ont été sauvegardées.");
-    } catch (error) {
-      console.error("Erreur lors de la sauvegarde des modifications :", error);
-      alert("Erreur lors de la sauvegarde des modifications.");
-    }
-  } else {
-    alert("Aucune modification détectée pour sauvegarde.");
-  }
-}
+      .dropdown-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin-right: 20px;
+      }
+
+      label {
+        font-weight: bold;
+        margin-bottom: 10px;
+      }
+
+      select {
+        width: 200px;
+        padding: 8px;
+        margin-bottom: 20px;
+      }
+
+      table {
+        width: 100%;
+        max-width: 800px;
+        border-collapse: collapse;
+        margin-top: 20px;
+        background-color: #fff;
+      }
+
+      th, td {
+        padding: 10px;
+        border: 1px solid #ddd;
+        text-align: left;
+      }
+
+      th {
+        background-color: #333;
+        color: white;
+      }
+
+      td {
+        color: black;
+      }
+
+      .table-container {
+        margin-top: 20px;
+        padding: 20px;
+      }
+
+      .add-form {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #f4f4f4;
+        color: black;
+      }
+
+      .add-form input {
+        margin-right: 10px;
+        padding: 5px;
+      }
+
+      .add-form button {
+        padding: 5px 10px;
+        cursor: pointer;
+      }
+
+      /* Context Menu Styles */
+      .context-menu {
+        display: none;
+        position: absolute;
+        background-color: #333;
+        color: white;
+        border: 1px solid #ddd;
+        z-index: 10000;
+        padding: 10px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+      }
+
+      .context-menu button {
+        display: block;
+        background: none;
+        border: none;
+        color: white;
+        cursor: pointer;
+        padding: 5px;
+        width: 100%;
+        text-align: left;
+      }
+
+      .context-menu button:hover {
+        background-color: #444;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Container for the sticky selection lists -->
+    <div class="sticky-container">
+      <!-- First dropdown for selecting a project -->
+      <div class="dropdown-container">
+        <label for="firstColumnDropdown">Projet :</label>
+        <select id="firstColumnDropdown">
+          <option value="">Select an option</option>
+        </select>
+      </div>
+
+      <!-- Second dropdown for selecting the tableau -->
+      <div class="dropdown-container">
+        <label for="secondColumnListbox">Tableau :</label>
+        <select id="secondColumnListbox">
+          <option value="">Select an option</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Table to display and edit the data -->
+    <div class="table-container">
+      <table id="dataTable">
+        <thead>
+          <tr id="tableHeader">
+            <th>ID</th> <!-- Add a column for ID -->
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+
+    <!-- Context Menu -->
+    <div id="contextMenu" class="context-menu">
+      <button id="deleteOption">Supprimer</button>
+    </div>
+
+    <!-- Form to add new rows -->
+    <div class="add-form">
+      <button id="addRowButton">Ajouter une ligne</button>
+      <button id="saveButton">Sauvegarder</button>
+      <button id="insertButton">Insérer</button>
+
+      <input type="file" id="fileInput" style="display: none;" multiple>
+    </div>
+
+    <script>
+      let records = [];
+      let selectedFirstValue = '';
+      let selectedSecondValue = '';
+      let selectedRecordId = null;
+
+      // Ready Grist
+      grist.ready();
+
+      // Fonction pour peupler la première liste déroulante avec des valeurs uniques de la première colonne
+      function populateFirstColumnDropdown(values) {
+        const dropdown = document.getElementById('firstColumnDropdown');
+        
+        // Conserve la sélection actuelle
+        const currentSelection = dropdown.value;
+      
+        dropdown.innerHTML = '<option value="">Select an option</option>'; // Réinitialise la liste déroulante
+      
+        values.forEach(value => {
+          if (value) {  // Ignore les valeurs nulles ou vides
+            const option = document.createElement('option');
+            option.value = value;
+            option.text = value;
+            dropdown.appendChild(option);
+          }
+        });
+      
+        // Restaure la sélection précédente si elle est encore présente dans les options
+        dropdown.value = currentSelection || ''; // Conserve l'option sélectionnée ou reste sur "Select an option"
+      }
+      
+      // Écouteur d'événement pour mettre à jour la valeur sélectionnée dans la première liste
+      document.getElementById('firstColumnDropdown').addEventListener('change', function() {
+        selectedFirstValue = this.value;
+        if (selectedFirstValue) {
+          populateSecondColumnListbox(selectedFirstValue);
+        } else {
+          document.getElementById('secondColumnListbox').innerHTML = '';  // Efface la seconde liste si aucune sélection
+        }
+      });  
+
+      // Function to populate the second dropdown based on the selected first column value
+      function populateSecondColumnListbox(selectedValue) {
+        const listbox = document.getElementById('secondColumnListbox');
+        listbox.innerHTML = '<option value="">Select an option</option>';  // Clear current listbox
+
+        const secondColumnValues = records
+          .filter(record => record.NomProjet === selectedValue)  // Filter based on selected first column value
+          .map(record => record.NomEtage)  // Extract second column values
+          .filter((value, index, self) => value && self.indexOf(value) === index)  // Remove duplicates and null/empty values
+          .sort();
+
+        secondColumnValues.forEach(value => {
+          const option = document.createElement('option');
+          option.value = value;
+          option.text = value;
+          listbox.appendChild(option);
+        });
+      }
+
+      // Function to populate the table based on the selected first and second column values
+      function populateTable() {
+        const tableHeader = document.getElementById('tableHeader');
+        const tableBody = document.getElementById('tableBody');
+
+        // Clear the table
+        tableBody.innerHTML = '';
+
+        const filteredRecords = records
+          .filter(record => record.NomProjet === selectedFirstValue && record.NomEtage === selectedSecondValue);
+
+        if (filteredRecords.length === 0) return;
+
+        const exampleRecord = filteredRecords[0];
+        const headers = Object.keys(exampleRecord).filter(key => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'ID_Ligne'); // Skip first two and last column (ID_Ligne)
+
+        // Populate the table header with the additional 'ID' column
+        tableHeader.innerHTML = '<th>ID</th>';
+        headers.forEach(header => {
+          const th = document.createElement('th');
+          th.textContent = header;
+          tableHeader.appendChild(th);
+        });
+
+        // Populate the table body with filtered records
+        filteredRecords.forEach((record, rowIndex) => {
+          const tr = document.createElement('tr');
+          tr.addEventListener('contextmenu', (event) => showContextMenu(event, record.ID_Ligne)); // Show context menu on right-click and store the ID
+
+          // Add the ID as the first column
+          const idCell = document.createElement('td');
+          idCell.textContent = record.ID_Ligne;
+          tr.appendChild(idCell);
+
+          headers.forEach(header => {
+            const td = document.createElement('td');
+            td.contentEditable = "true";  // Make cells editable
+            td.textContent = record[header] || '';  // Use empty string for null/undefined values
+            td.addEventListener('blur', function() {
+              record[header] = td.textContent; // Update record with edited value
+            });
+            tr.appendChild(td);
+          });
+
+          tableBody.appendChild(tr);
+        });
+      }
+
+      // Show context menu on right-click and get the record ID from the first column
+      function showContextMenu(event, recordId) {
+        event.preventDefault();
+        selectedRecordId = recordId;  // Store the ID of the selected record
+
+        const contextMenu = document.getElementById('contextMenu');
+        contextMenu.style.display = 'block';
+        contextMenu.style.left = `${event.pageX}px`;
+        contextMenu.style.top = `${event.pageY}px`;
+      }
+
+      // Hide context menu if clicked elsewhere
+      document.addEventListener('click', function(event) {
+        const contextMenu = document.getElementById('contextMenu');
+        if (!contextMenu.contains(event.target)) {
+          contextMenu.style.display = 'none';
+        }
+      });
+
+      // Add event listener for "Supprimer" option
+      document.getElementById('deleteOption').addEventListener('click', () => {
+          console.log("Supprimer clicked for row ID:", selectedRecordId);
+          
+          // Supprime la ligne dans Grist
+          grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', Number(selectedRecordId)]])
+          .then(() => {
+              // Supprime la ligne localement dans le tableau
+              records = records.filter(record => record.ID_Ligne !== selectedRecordId);
+      
+              // Actualise l'affichage du tableau
+              populateTable();
+      
+              // Masquer le menu contextuel après la suppression
+              hideContextMenu();
+      
+              console.log("Tableau actualisé et menu contextuel masqué après suppression.");
+          })
+          .catch(error => {
+              console.error("Erreur lors de la suppression de la ligne dans Grist:", error);
+              alert("Une erreur s'est produite lors de la suppression de la ligne.");
+          });
+      });
+
+      // Fonction pour cacher le menu contextuel
+      function hideContextMenu() {
+          const contextMenu = document.getElementById('contextMenu');
+          contextMenu.style.display = 'none';
+      }
+
+      // Fetch records from Grist
+      grist.onRecords(function(receivedRecords) {
+        console.log("Records received from Grist:", receivedRecords);
+        
+        records = receivedRecords.map(record => ({
+          NomProjet: record.NomProjet || '',
+          NomEtage: record.NomEtage || '',
+          Emetteur: record.Emetteur || '',
+          Reference: record.Reference || '',
+          Indice: record.Indice || '',
+          Recu: record.Recu || '',
+          DescriptionObservations: record.DescriptionObservations || '',
+          ID_Ligne: record.ID_Ligne || ''
+        }));
+
+        // Populate the first dropdown with unique values from 'NomProjet'
+        const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
+        populateFirstColumnDropdown(uniqueFirstColumnValues);
+      });
+
+      // Listen to changes in the first dropdown and update the second listbox accordingly
+      document.getElementById('firstColumnDropdown').addEventListener('change', function() {
+        selectedFirstValue = this.value;
+        if (selectedFirstValue) {
+          populateSecondColumnListbox(selectedFirstValue);
+        } else {
+          document.getElementById('secondColumnListbox').innerHTML = '';  // Clear second listbox if no selection
+        }
+      });
+
+      // Listen to changes in the second dropdown and update the table accordingly
+      document.getElementById('secondColumnListbox').addEventListener('change', function() {
+        selectedSecondValue = this.value;
+        if (selectedFirstValue && selectedSecondValue) {
+          populateTable();
+        }
+      });
+
+      // Fonction pour ajouter une nouvelle ligne dans Grist
+      function addRowToGrist() {
+        if (!selectedFirstValue || !selectedSecondValue) {
+          alert("Veuillez sélectionner un projet et un tableau.");
+          return;
+        }
+      
+        // Trouve la valeur la plus élevée d'ID_Ligne dans records
+        const maxIdLigne = records.reduce((max, record) => {
+          const idLigne = parseInt(record.ID_Ligne, 10);
+          return idLigne > max ? idLigne : max;
+        }, 0);
+      
+        // Définit une nouvelle valeur pour ID_Ligne en l'incrémentant de 1
+        const newIdLigne = maxIdLigne + 1;
+      
+        // Création de la nouvelle ligne avec la valeur de ID_Ligne
+        const newRow = {
+          NomProjet: selectedFirstValue,
+          NomEtage: selectedSecondValue,
+          Emetteur: '',
+          Reference: '',
+          Indice: '',
+          Recu: '',
+          DescriptionObservations: '',
+          ID_Ligne: newIdLigne.toString() // Convertit en string pour s'aligner avec les autres valeurs
+        };
+      
+        // Envoie la requête pour ajouter la nouvelle ligne dans Grist
+        grist.docApi.applyUserActions([
+          ['AddRecord', 'Fusion', null, newRow]  // Utilise null pour l'ID, Grist s'en chargera
+        ])
+        .then(() => {
+          console.log("Nouvelle ligne ajoutée :", newRow);
+          // Actualise les données pour inclure la nouvelle ligne ajoutée
+          records.push(newRow); // Mise à jour locale
+          populateTable(); // Actualise l'affichage du tableau HTML
+        })
+        .catch(error => {
+          console.error("Erreur lors de l'ajout de la ligne :", error);
+          alert("Erreur lors de l'ajout de la ligne.");
+        });
+      }
+      
+      // Écouteur d'événement pour le bouton d'ajout
+      document.getElementById('addRowButton').addEventListener('click', addRowToGrist);
+
+      // Fonction de sauvegarde mise à jour
+      async function saveChanges() {
+        // Récupération explicite des valeurs sélectionnées dans les listes déroulantes
+        const projectDropdown = document.getElementById('firstColumnDropdown');
+        const tableDropdown = document.getElementById('secondColumnListbox');
+        
+        const currentProject = projectDropdown.value;
+        const currentTable = tableDropdown.value;
+      
+        if (!currentProject || !currentTable) {
+          alert("Veuillez sélectionner un projet et un tableau avant de sauvegarder.");
+          return;
+        }
+      
+        console.log(`Sauvegarde en cours pour le tableau "${currentTable}" du projet "${currentProject}".`);
+      
+        // Récupération des lignes du tableau HTML
+        const tableBody = document.getElementById('tableBody');
+        const rows = tableBody.getElementsByTagName('tr');
+      
+        // Map des noms de colonnes dans Grist pour correspondre aux colonnes du tableau HTML
+        const columnMap = ['Emetteur', 'Reference', 'Indice', 'Recu', 'DescriptionObservations'];
+      
+        const updates = [];
+      
+        for (const row of rows) {
+          const cells = row.getElementsByTagName('td');
+          const rowId = cells[0].textContent.trim(); // ID_Ligne de la ligne dans le tableau HTML (première cellule)
+      
+          // Vérifie que la ligne appartient au projet et au tableau actuels
+          const record = records.find(rec => rec.ID_Ligne === rowId && 
+                                             rec.NomProjet === currentProject &&
+                                             rec.NomEtage === currentTable);
+      
+          if (!record) {
+            console.warn(`Aucune correspondance pour ID_Ligne = ${rowId} dans le tableau "${currentTable}" du projet "${currentProject}".`);
+            continue;
+          }
+      
+          const updatedFields = {};
+          let hasChanges = false;
+      
+          // Parcours des cellules du tableau HTML pour comparer avec l'enregistrement
+          for (let i = 1; i < cells.length; i++) {
+            const fieldName = columnMap[i - 1];
+            const cellValue = cells[i].textContent.trim();
+      
+            if (record[fieldName] !== cellValue) {
+              console.log(`Modification détectée pour ID_Ligne = ${rowId} - Champ : ${fieldName}, Ancienne : "${record[fieldName]}", Nouvelle : "${cellValue}"`);
+              updatedFields[fieldName] = cellValue;
+              hasChanges = true;
+            }
+          }
+      
+          if (hasChanges) {
+            updates.push(['UpdateRecord', 'Fusion', Number(rowId), updatedFields]);
+          }
+        }
+      
+        // Applique les modifications si des changements sont détectés
+        if (updates.length > 0) {
+          try {
+            await grist.docApi.applyUserActions(updates);
+            console.log("Modifications sauvegardées avec succès :", updates);
+            alert("Les modifications ont été sauvegardées.");
+          } catch (error) {
+            console.error("Erreur lors de la sauvegarde des modifications :", error);
+            alert("Erreur lors de la sauvegarde des modifications.");
+          }
+        } else {
+          alert("Aucune modification détectée pour sauvegarde.");
+        }
+      }
+
+      // Écouteur d'événement pour le bouton de sauvegarde
+      document.getElementById('saveButton').addEventListener('click', saveChanges);
+
+      // Écouteur d'événement pour le bouton d'insersion
+      document.getElementById('insertButton').addEventListener('click', () => {
+        document.getElementById('fileInput').click();
+      });
+    
+      // Fonction pour ajouter une nouvelle ligne dans Grist avec le nom de fichier dans "Reference"
+      function addRowWithFileName(fileName) {
+        if (!selectedFirstValue || !selectedSecondValue) {
+          alert("Veuillez sélectionner un projet et un tableau.");
+          return;
+        }
+      
+        // Enlève l'extension du fichier (partie après le dernier point)
+        const fileNameWithoutExtension = fileName.split('.').slice(0, -1).join('.');
+      
+        // Trouve la valeur la plus élevée d'ID_Ligne dans records
+        const maxIdLigne = records.reduce((max, record) => {
+          const idLigne = parseInt(record.ID_Ligne, 10);
+          return idLigne > max ? idLigne : max;
+        }, 0);
+      
+        // Définit une nouvelle valeur pour ID_Ligne en l'incrémentant de 1
+        const newIdLigne = maxIdLigne + 1;
+      
+        // Création de la nouvelle ligne avec la valeur de ID_Ligne et le nom du fichier sans extension pour "Reference"
+        const newRow = {
+          NomProjet: selectedFirstValue,
+          NomEtage: selectedSecondValue,
+          Emetteur: '',
+          Reference: fileNameWithoutExtension, // Nom du fichier sans extension
+          Indice: '',
+          Recu: '',
+          DescriptionObservations: '',
+          ID_Ligne: newIdLigne.toString() // Convertit en string pour s'aligner avec les autres valeurs
+        };
+      
+        // Envoie la requête pour ajouter la nouvelle ligne dans Grist
+        grist.docApi.applyUserActions([
+          ['AddRecord', 'Fusion', null, newRow]
+        ])
+        .then(() => {
+          console.log("Nouvelle ligne ajoutée avec le fichier :", newRow);
+          // Actualise les données pour inclure la nouvelle ligne ajoutée
+          records.push(newRow); // Mise à jour locale
+          populateTable(); // Actualise l'affichage du tableau HTML
+        })
+        .catch(error => {
+          console.error("Erreur lors de l'ajout de la ligne avec le fichier :", error);
+          alert("Erreur lors de l'ajout de la ligne.");
+        });
+      }
+          
+      // Gère l'événement de sélection de fichiers
+      document.getElementById('fileInput').addEventListener('change', (event) => {
+        const files = event.target.files;
+        if (files.length > 0) {
+          Array.from(files).forEach(file => {
+            addRowWithFileName(file.name); // Ajoute une ligne pour chaque fichier sélectionné
+          });
+        }
+      });
+      
+    </script>
+  </body>
+</html>
