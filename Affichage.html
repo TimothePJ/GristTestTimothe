@@ -276,8 +276,8 @@
 
         const contextMenu = document.getElementById('contextMenu');
         contextMenu.style.display = 'block';
-        contextMenu.style.left = `${event.pageX}px`;
-        contextMenu.style.top = `${event.pageY}px`;
+        contextMenu.style.left = ${event.pageX}px;
+        contextMenu.style.top = ${event.pageY}px;
       }
 
       // Hide context menu if clicked elsewhere
@@ -363,16 +363,16 @@
           return;
         }
       
-        // Trouve la valeur la plus élevée d'ID_Ligne dans `records`
+        // Trouve la valeur la plus élevée d'ID_Ligne dans records
         const maxIdLigne = records.reduce((max, record) => {
           const idLigne = parseInt(record.ID_Ligne, 10);
           return idLigne > max ? idLigne : max;
         }, 0);
       
-        // Définit une nouvelle valeur pour `ID_Ligne` en l'incrémentant de 1
+        // Définit une nouvelle valeur pour ID_Ligne en l'incrémentant de 1
         const newIdLigne = maxIdLigne + 1;
       
-        // Création de la nouvelle ligne avec la valeur de `ID_Ligne`
+        // Création de la nouvelle ligne avec la valeur de ID_Ligne
         const newRow = {
           NomProjet: selectedFirstValue,
           NomEtage: selectedSecondValue,
@@ -386,7 +386,7 @@
       
         // Envoie la requête pour ajouter la nouvelle ligne dans Grist
         grist.docApi.applyUserActions([
-          ['AddRecord', 'Fusion', null, newRow]  // Utilise `null` pour l'ID, Grist s'en chargera
+          ['AddRecord', 'Fusion', null, newRow]  // Utilise null pour l'ID, Grist s'en chargera
         ])
         .then(() => {
           console.log("Nouvelle ligne ajoutée :", newRow);
@@ -423,7 +423,7 @@
           const record = records.find(rec => rec.ID_Ligne === rowId);
       
           if (!record) {
-            console.warn(`Aucun enregistrement trouvé dans Grist pour ID_Ligne = ${rowId}`);
+            console.warn(Aucun enregistrement trouvé dans Grist pour ID_Ligne = ${rowId});
             continue;
           }
       
@@ -437,7 +437,7 @@
       
             // Compare la valeur de la cellule avec la valeur dans le record original
             if (record[fieldName] !== cellValue) {
-              console.log(`Modification détectée pour ID_Ligne = ${rowId} - Champ : ${fieldName}, Valeur actuelle : "${record[fieldName]}", Nouvelle valeur : "${cellValue}"`);
+              console.log(Modification détectée pour ID_Ligne = ${rowId} - Champ : ${fieldName}, Valeur actuelle : "${record[fieldName]}", Nouvelle valeur : "${cellValue}");
               updatedFields[fieldName] = cellValue;
               hasChanges = true;
             }
@@ -463,7 +463,7 @@
           alert("Aucune modification à sauvegarder.");
         }
       }
-
+      
       // Écouteur d'événement pour le bouton de sauvegarde
       document.getElementById('saveButton').addEventListener('click', saveChanges);
 
@@ -482,16 +482,16 @@
         // Enlève l'extension du fichier (partie après le dernier point)
         const fileNameWithoutExtension = fileName.split('.').slice(0, -1).join('.');
       
-        // Trouve la valeur la plus élevée d'ID_Ligne dans `records`
+        // Trouve la valeur la plus élevée d'ID_Ligne dans records
         const maxIdLigne = records.reduce((max, record) => {
           const idLigne = parseInt(record.ID_Ligne, 10);
           return idLigne > max ? idLigne : max;
         }, 0);
       
-        // Définit une nouvelle valeur pour `ID_Ligne` en l'incrémentant de 1
+        // Définit une nouvelle valeur pour ID_Ligne en l'incrémentant de 1
         const newIdLigne = maxIdLigne + 1;
       
-        // Création de la nouvelle ligne avec la valeur de `ID_Ligne` et le nom du fichier sans extension pour "Reference"
+        // Création de la nouvelle ligne avec la valeur de ID_Ligne et le nom du fichier sans extension pour "Reference"
         const newRow = {
           NomProjet: selectedFirstValue,
           NomEtage: selectedSecondValue,
