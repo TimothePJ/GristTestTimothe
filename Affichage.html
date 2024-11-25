@@ -382,10 +382,13 @@
         }
       
         // Vérifiez les sélections actuelles
-        const selections = getCurrentSelections();
-        if (!selections) return;
+        const projectDropdown = document.getElementById('firstColumnDropdown');
+        const selectedProject = projectDropdown.value.trim();
       
-        const { selectedProject } = selections;
+        if (!selectedProject) {
+          alert("Veuillez sélectionner un projet avant d'ajouter un tableau.");
+          return;
+        }
       
         // Génère un nouvel ID_Ligne unique
         const maxIdLigne = records.reduce((max, record) => {
@@ -417,7 +420,7 @@
             // Actualise les options de la deuxième liste déroulante
             populateSecondColumnListbox(selectedProject);
       
-            // Récupère automatiquement la valeur du nouveau tableau
+            // Sélectionne automatiquement le nouveau tableau
             const listbox = document.getElementById('secondColumnListbox');
             listbox.value = newTableName;
       
@@ -430,7 +433,6 @@
             alert("Erreur lors de l'ajout du tableau.");
           });
       }
-
 
       // Fonction pour ajouter une nouvelle ligne dans Grist
       function addRowToGrist() {
@@ -479,21 +481,23 @@
       // Écouteur d'événement pour le bouton d'ajout
       document.getElementById('addRowButton').addEventListener('click', addRowToGrist);
 
-      function getCurrentSelections() {
+      function getCurrentSelections(isAddTableAction = false) {
         const projectDropdown = document.getElementById('firstColumnDropdown');
         const tableDropdown = document.getElementById('secondColumnListbox');
       
         const selectedProject = projectDropdown.value.trim();
         const selectedTable = tableDropdown.value.trim();
       
-        if (!selectedProject || !selectedTable) {
-          alert("Veuillez sélectionner un projet et un tableau.");
+        if (!selectedProject || (!selectedTable && !isAddTableAction)) {
+          if (!isAddTableAction) {
+            alert("Veuillez sélectionner un projet et un tableau.");
+          }
           return null; // Retourne null si les sélections sont invalides
         }
       
         return { selectedProject, selectedTable };
       }
-   
+
       // Fonction de sauvegarde mise à jour
       async function saveChanges() {
         // Obtenez les sélections actuelles
