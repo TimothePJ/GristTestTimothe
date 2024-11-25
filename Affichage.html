@@ -321,7 +321,8 @@
       // Fetch records from Grist
       grist.onRecords(function(receivedRecords) {
         console.log("Records received from Grist:", receivedRecords);
-        
+      
+        // Synchronise les données locales avec celles reçues de Grist
         records = receivedRecords.map(record => ({
           NomProjet: record.NomProjet || '',
           NomEtage: record.NomEtage || '',
@@ -332,12 +333,16 @@
           DescriptionObservations: record.DescriptionObservations || '',
           ID_Ligne: record.ID_Ligne || ''
         }));
-
-        // Populate the first dropdown with unique values from 'NomProjet'
+      
+        // Met à jour la première liste déroulante avec les valeurs uniques de 'NomProjet'
         const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
         populateFirstColumnDropdown(uniqueFirstColumnValues);
+      
+        // Si un projet et un tableau sont déjà sélectionnés, rafraîchir le tableau
+        if (selectedFirstValue && selectedSecondValue) {
+          populateTable();
+        }
       });
-
       // Listen to changes in the first dropdown and update the second listbox accordingly
       document.getElementById('firstColumnDropdown').addEventListener('change', function() {
         selectedFirstValue = this.value;
