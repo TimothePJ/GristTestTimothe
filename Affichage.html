@@ -358,12 +358,11 @@
       // Listen to changes in the second dropdown and update the table accordingly
       document.getElementById('secondColumnListbox').addEventListener('change', function () {
         const selectedValue = this.value;
-      
         if (selectedValue === 'addTable') {
-          handleAddTable(); // Ajoute un nouveau tableau
+          handleAddTable(); // Permet d'ajouter un tableau
         } else {
-          selectedSecondValue = selectedValue;
-          populateTable(); // Charge les données du tableau
+          selectedSecondValue = selectedValue; // Met à jour la valeur sélectionnée
+          populateTable(); // Actualise le tableau HTML
         }
       });
 
@@ -377,9 +376,9 @@
         }
       
         const projectDropdown = document.getElementById('firstColumnDropdown');
-        const selectedProject = projectDropdown.value.trim(); // Vérifie uniquement la sélection dans la première liste
+        const selectedProject = projectDropdown.value.trim();
       
-        if (!selectedProject) { // Pas besoin de vérifier la deuxième liste
+        if (!selectedProject) {
           alert("Veuillez sélectionner un projet avant d'ajouter un tableau.");
           return;
         }
@@ -411,12 +410,19 @@
           .then(() => {
             console.log("Nouveau tableau ajouté :", newRow);
       
-            // Actualise la deuxième liste déroulante avec le nouveau tableau ajouté
-            populateSecondColumnListbox(selectedProject);
-      
-            // Réinitialise la sélection de la deuxième liste (pas besoin de forcer une sélection)
+            // Ajoute immédiatement le tableau dans la deuxième liste
             const listbox = document.getElementById('secondColumnListbox');
-            listbox.value = '';
+            const newOption = document.createElement('option');
+            newOption.value = newTableName;
+            newOption.text = newTableName;
+            listbox.appendChild(newOption);
+      
+            // Sélectionne automatiquement le tableau ajouté dans la deuxième liste
+            listbox.value = newTableName;
+            selectedSecondValue = newTableName;
+      
+            // Charge automatiquement le tableau dans l'affichage HTML
+            populateTable();
           })
           .catch((error) => {
             console.error("Erreur lors de l'ajout du tableau :", error);
