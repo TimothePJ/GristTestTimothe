@@ -318,10 +318,10 @@
           contextMenu.style.display = 'none';
       }
 
-      // Fetch records from Grist
       grist.onRecords(function(receivedRecords) {
         console.log("Records received from Grist:", receivedRecords);
-        
+      
+        // Synchronise les données locales avec celles reçues de Grist
         records = receivedRecords.map(record => ({
           NomProjet: record.NomProjet || '',
           NomEtage: record.NomEtage || '',
@@ -332,10 +332,15 @@
           DescriptionObservations: record.DescriptionObservations || '',
           ID_Ligne: record.ID_Ligne || ''
         }));
-
-        // Populate the first dropdown with unique values from 'NomProjet'
+      
+        // Met à jour la première liste déroulante avec les valeurs uniques de 'NomProjet'
         const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
         populateFirstColumnDropdown(uniqueFirstColumnValues);
+      
+        // Si un projet et un tableau sont déjà sélectionnés, rafraîchir le tableau
+        if (selectedFirstValue && selectedSecondValue) {
+          populateTable();
+        }
       });
 
       // Listen to changes in the first dropdown and update the second listbox accordingly
@@ -405,67 +410,80 @@
 
       // Fonction pour sauvegarder les modifications dans Grist
       async function saveChanges() {
-        // Récupère les lignes du tableau HTML
+        // Vérifie que les sélections sont valides
+        if (!selectedFirstValue || !selectedSecondValue) {
+          alert("Veuillez sélectionner un projet et un tableau.");
+          return;
+        }
+      
+        // Vérifie que le tableau est correctement filtré
+        const filteredRecords = records.filter(record => 
+          record.NomProjet === selectedFirstValue && record.NomEtage === selectedSecondValue
+        );
+      
+        if (filteredRecords.length === 0) {
+          alert("Aucune donnée à sauvegarder pour ce tableau.");
+          return;
+        }
+      
+        // Synchronisation des données affichées
         const tableBody = document.getElementById('tableBody');
         const rows = tableBody.getElementsByTagName('tr');
-      
-        // Map des noms de colonnes dans Grist pour correspondre aux colonnes du tableau HTML (en partant de la 2e colonne)
         const columnMap = ['Emetteur', 'Reference', 'Indice', 'Recu', 'DescriptionObservations'];
-      
         const updates = [];
       
-        // Parcours des lignes du tableau HTML pour détecter les changements
+        // Parcours des lignes du tableau
         for (const row of rows) {
           const cells = row.getElementsByTagName('td');
-          const rowId = cells[0].textContent.trim(); // L'ID de la ligne dans le tableau HTML (première cellule)
+          const rowId = cells[0].textContent.trim(); // Première colonne : ID
       
-          // Recherche la ligne correspondante dans records en utilisant ID_Ligne
           const record = records.find(rec => rec.ID_Ligne === rowId);
       
-          if (!record) {
-            console.warn(`Aucun enregistrement trouvé dans Grist pour ID_Ligne = ${rowId}`);
-            continue;
-          }
+          if (!record) continue;
       
           const updatedFields = {};
           let hasChanges = false;
       
-          // Parcours des cellules du tableau HTML pour comparer avec record
           for (let i = 1; i < cells.length; i++) {
-            const fieldName = columnMap[i - 1]; // Correspondance avec le nom du champ dans Grist
+            const fieldName = columnMap[i - 1];
             const cellValue = cells[i].textContent.trim();
       
-            // Compare la valeur de la cellule avec la valeur dans le record original
             if (record[fieldName] !== cellValue) {
-              console.log(`Modification détectée pour ID_Ligne = ${rowId} - Champ : ${fieldName}, Valeur actuelle : "${record[fieldName]}", Nouvelle valeur : "${cellValue}"`);
               updatedFields[fieldName] = cellValue;
               hasChanges = true;
             }
           }
       
-          // Si des changements sont détectés, ajoute l'enregistrement aux mises à jour
           if (hasChanges) {
             updates.push(['UpdateRecord', 'Fusion', Number(rowId), updatedFields]);
           }
         }
       
-        // Applique les modifications dans Grist si des changements ont été détectés
         if (updates.length > 0) {
           try {
             await grist.docApi.applyUserActions(updates);
-            console.log("Modifications sauvegardées avec succès :", updates);
+            console.log("Modifications sauvegardées :", updates);
             alert("Les modifications ont été sauvegardées.");
           } catch (error) {
-            console.error("Erreur lors de la sauvegarde des modifications :", error);
-            alert("Erreur lors de la sauvegarde des modifications.");
+            console.error("Erreur lors de la sauvegarde :", error);
+            alert("Erreur lors de la sauvegarde.");
           }
         } else {
-          alert("Aucune modification à sauvegarder.");
+          alert("Aucune modification détectée.");
         }
       }
-      
+            
       // Écouteur d'événement pour le bouton de sauvegarde
-      document.getElementById('saveButton').addEventListener('click', saveChanges);
+      document.getElementById('saveButton').addEventListener('click', () => {
+        // Vérifie que le tableau est bien lié aux sélections actuelles
+        if (!selectedFirstValue || !selectedSecondValue) {
+          alert("Veuillez sélectionner un projet et un tableau avant de sauvegarder.");
+          return;
+        }
+      
+        // Appelle la fonction de sauvegarde
+        saveChanges();
+      });
 
       // Écouteur d'événement pour le bouton d'insersion
       document.getElementById('insertButton').addEventListener('click', () => {
