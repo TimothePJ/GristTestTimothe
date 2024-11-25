@@ -405,38 +405,49 @@
 
       // Fonction de sauvegarde mise à jour
       async function saveChanges() {
-        if (!selectedFirstValue || !selectedSecondValue) {
-          alert("Veuillez sélectionner un projet et un tableau pour sauvegarder.");
+        // Récupération explicite des valeurs sélectionnées dans les listes déroulantes
+        const projectDropdown = document.getElementById('firstColumnDropdown');
+        const tableDropdown = document.getElementById('secondColumnListbox');
+        
+        const currentProject = projectDropdown.value;
+        const currentTable = tableDropdown.value;
+      
+        if (!currentProject || !currentTable) {
+          alert("Veuillez sélectionner un projet et un tableau avant de sauvegarder.");
           return;
         }
       
-        // Récupère les lignes du tableau HTML
+        console.log(`Sauvegarde en cours pour le tableau "${currentTable}" du projet "${currentProject}".`);
+      
+        // Récupération des lignes du tableau HTML
         const tableBody = document.getElementById('tableBody');
         const rows = tableBody.getElementsByTagName('tr');
       
-        // Map des noms de colonnes dans Grist pour correspondre aux colonnes du tableau HTML (en partant de la 2e colonne)
+        // Map des noms de colonnes dans Grist pour correspondre aux colonnes du tableau HTML
         const columnMap = ['Emetteur', 'Reference', 'Indice', 'Recu', 'DescriptionObservations'];
       
         const updates = [];
       
         for (const row of rows) {
           const cells = row.getElementsByTagName('td');
-          const rowId = cells[0].textContent.trim(); // L'ID de la ligne dans le tableau HTML (première cellule)
+          const rowId = cells[0].textContent.trim(); // ID_Ligne de la ligne dans le tableau HTML (première cellule)
       
-          // Recherche dans les enregistrements locaux
-          const record = records.find(rec => rec.ID_Ligne === rowId);
+          // Vérifie que la ligne appartient au projet et au tableau actuels
+          const record = records.find(rec => rec.ID_Ligne === rowId && 
+                                             rec.NomProjet === currentProject &&
+                                             rec.NomEtage === currentTable);
       
           if (!record) {
-            console.warn(`Aucun enregistrement trouvé pour ID_Ligne = ${rowId}`);
+            console.warn(`Aucune correspondance pour ID_Ligne = ${rowId} dans le tableau "${currentTable}" du projet "${currentProject}".`);
             continue;
           }
       
           const updatedFields = {};
           let hasChanges = false;
       
-          // Compare chaque cellule avec l'enregistrement de `records`
+          // Parcours des cellules du tableau HTML pour comparer avec l'enregistrement
           for (let i = 1; i < cells.length; i++) {
-            const fieldName = columnMap[i - 1]; // Correspondance avec le nom du champ dans Grist
+            const fieldName = columnMap[i - 1];
             const cellValue = cells[i].textContent.trim();
       
             if (record[fieldName] !== cellValue) {
@@ -451,6 +462,7 @@
           }
         }
       
+        // Applique les modifications si des changements sont détectés
         if (updates.length > 0) {
           try {
             await grist.docApi.applyUserActions(updates);
