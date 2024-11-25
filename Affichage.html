@@ -358,20 +358,14 @@
       // Listen to changes in the second dropdown and update the table accordingly
       document.getElementById('secondColumnListbox').addEventListener('change', function () {
         const selectedValue = this.value;
-      
-        // Gérer l'ajout d'un tableau
         if (selectedValue === 'addTable') {
           handleAddTable();
-          return;
-        }
-      
-        // Gestion normale de la sélection
-        selectedSecondValue = selectedValue;
-        if (selectedFirstValue && selectedSecondValue) {
+        } else {
+          selectedSecondValue = selectedValue;
           populateTable();
         }
       });
-      
+
       // Fonction pour gérer l'ajout d'un tableau
       function handleAddTable() {
         const newTableName = prompt("Entrez le nom du nouveau tableau :");
@@ -381,7 +375,6 @@
           return;
         }
       
-        // Vérifiez les sélections actuelles
         const projectDropdown = document.getElementById('firstColumnDropdown');
         const selectedProject = projectDropdown.value.trim();
       
@@ -420,7 +413,7 @@
             // Actualise les options de la deuxième liste déroulante
             populateSecondColumnListbox(selectedProject);
       
-            // Sélectionne automatiquement le nouveau tableau
+            // Sélectionne automatiquement le nouveau tableau dans la liste déroulante
             const listbox = document.getElementById('secondColumnListbox');
             listbox.value = newTableName;
       
@@ -481,15 +474,15 @@
       // Écouteur d'événement pour le bouton d'ajout
       document.getElementById('addRowButton').addEventListener('click', addRowToGrist);
 
-      function getCurrentSelections(isAddTableAction = false) {
+      function getCurrentSelections(skipValidation = false) {
         const projectDropdown = document.getElementById('firstColumnDropdown');
         const tableDropdown = document.getElementById('secondColumnListbox');
       
         const selectedProject = projectDropdown.value.trim();
         const selectedTable = tableDropdown.value.trim();
       
-        if (!selectedProject || (!selectedTable && !isAddTableAction)) {
-          if (!isAddTableAction) {
+        if (!selectedProject || (!selectedTable && !skipValidation)) {
+          if (!skipValidation) {
             alert("Veuillez sélectionner un projet et un tableau.");
           }
           return null; // Retourne null si les sélections sont invalides
