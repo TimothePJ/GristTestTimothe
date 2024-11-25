@@ -437,7 +437,7 @@
       
             // Compare la valeur de la cellule avec la valeur dans le record original
             if (record[fieldName] !== cellValue) {
-              console.log(Modification détectée pour ID_Ligne = ${rowId} - Champ : ${fieldName}, Valeur actuelle : "${record[fieldName]}", Nouvelle valeur : "${cellValue}");
+              console.log(`Modification détectée pour ID_Ligne = ${rowId} - Champ : ${fieldName}, Valeur actuelle : "${record[fieldName]}", Nouvelle valeur : "${cellValue}"`);
               updatedFields[fieldName] = cellValue;
               hasChanges = true;
             }
