@@ -358,11 +358,12 @@
       // Listen to changes in the second dropdown and update the table accordingly
       document.getElementById('secondColumnListbox').addEventListener('change', function () {
         const selectedValue = this.value;
+      
         if (selectedValue === 'addTable') {
-          handleAddTable();
+          handleAddTable(); // Ajoute un nouveau tableau
         } else {
           selectedSecondValue = selectedValue;
-          populateTable();
+          populateTable(); // Charge les données du tableau
         }
       });
 
@@ -375,8 +376,7 @@
           return;
         }
       
-        const projectDropdown = document.getElementById('firstColumnDropdown');
-        const selectedProject = projectDropdown.value.trim();
+        const selectedProject = document.getElementById('firstColumnDropdown').value.trim();
       
         if (!selectedProject) {
           alert("Veuillez sélectionner un projet avant d'ajouter un tableau.");
@@ -410,16 +410,8 @@
           .then(() => {
             console.log("Nouveau tableau ajouté :", newRow);
       
-            // Actualise les options de la deuxième liste déroulante
+            // Recharge la liste
             populateSecondColumnListbox(selectedProject);
-      
-            // Sélectionne automatiquement le nouveau tableau dans la liste déroulante
-            const listbox = document.getElementById('secondColumnListbox');
-            listbox.value = newTableName;
-      
-            // Déclenche l'affichage du tableau correspondant
-            selectedSecondValue = newTableName;
-            populateTable();
           })
           .catch((error) => {
             console.error("Erreur lors de l'ajout du tableau :", error);
