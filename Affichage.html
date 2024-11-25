@@ -377,9 +377,9 @@
         }
       
         const projectDropdown = document.getElementById('firstColumnDropdown');
-        const selectedProject = projectDropdown.value.trim();
+        const selectedProject = projectDropdown.value.trim(); // Vérifie uniquement la sélection dans la première liste
       
-        if (!selectedProject) {
+        if (!selectedProject) { // Pas besoin de vérifier la deuxième liste
           alert("Veuillez sélectionner un projet avant d'ajouter un tableau.");
           return;
         }
@@ -392,7 +392,7 @@
       
         const newIdLigne = maxIdLigne + 1;
       
-        // Crée une nouvelle ligne avec le tableau
+        // Crée une nouvelle ligne pour le tableau
         const newRow = {
           NomProjet: selectedProject,
           NomEtage: newTableName,
@@ -411,19 +411,18 @@
           .then(() => {
             console.log("Nouveau tableau ajouté :", newRow);
       
-            // Actualise les options de la deuxième liste déroulante
+            // Actualise la deuxième liste déroulante avec le nouveau tableau ajouté
             populateSecondColumnListbox(selectedProject);
       
-            // Réinitialise la sélection à l'état initial
+            // Réinitialise la sélection de la deuxième liste (pas besoin de forcer une sélection)
             const listbox = document.getElementById('secondColumnListbox');
-            listbox.value = ''; // Efface la sélection en attendant une action manuelle
+            listbox.value = '';
           })
           .catch((error) => {
             console.error("Erreur lors de l'ajout du tableau :", error);
             alert("Erreur lors de l'ajout du tableau.");
           });
       }
-
 
       // Fonction pour ajouter une nouvelle ligne dans Grist
       function addRowToGrist() {
