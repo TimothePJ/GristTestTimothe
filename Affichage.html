@@ -358,12 +358,11 @@
       // Listen to changes in the second dropdown and update the table accordingly
       document.getElementById('secondColumnListbox').addEventListener('change', function () {
         const selectedValue = this.value;
-      
         if (selectedValue === 'addTable') {
-          handleAddTable(); // Ajoute un nouveau tableau
+          handleAddTable(); // Permet d'ajouter un tableau
         } else {
-          selectedSecondValue = selectedValue;
-          populateTable(); // Charge les données du tableau
+          selectedSecondValue = selectedValue; // Met à jour la valeur sélectionnée
+          populateTable(); // Actualise le tableau HTML
         }
       });
 
@@ -392,7 +391,7 @@
       
         const newIdLigne = maxIdLigne + 1;
       
-        // Crée une nouvelle ligne avec le tableau
+        // Crée une nouvelle ligne pour le tableau
         const newRow = {
           NomProjet: selectedProject,
           NomEtage: newTableName,
@@ -411,19 +410,25 @@
           .then(() => {
             console.log("Nouveau tableau ajouté :", newRow);
       
-            // Actualise les options de la deuxième liste déroulante
-            populateSecondColumnListbox(selectedProject);
-      
-            // Réinitialise la sélection à l'état initial
+            // Ajoute immédiatement le tableau dans la deuxième liste
             const listbox = document.getElementById('secondColumnListbox');
-            listbox.value = ''; // Efface la sélection en attendant une action manuelle
+            const newOption = document.createElement('option');
+            newOption.value = newTableName;
+            newOption.text = newTableName;
+            listbox.appendChild(newOption);
+      
+            // Sélectionne automatiquement le tableau ajouté dans la deuxième liste
+            listbox.value = newTableName;
+            selectedSecondValue = newTableName;
+      
+            // Charge automatiquement le tableau dans l'affichage HTML
+            populateTable();
           })
           .catch((error) => {
             console.error("Erreur lors de l'ajout du tableau :", error);
             alert("Erreur lors de l'ajout du tableau.");
           });
       }
-
 
       // Fonction pour ajouter une nouvelle ligne dans Grist
       function addRowToGrist() {
