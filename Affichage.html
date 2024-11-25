@@ -223,48 +223,48 @@
 
       // Function to populate the table based on the selected first and second column values
       function populateTable() {
-        const tableHeader = document.getElementById('tableHeader');
+        const selections = getCurrentSelections();
+        if (!selections) return;
+      
+        const { selectedProject, selectedTable } = selections;
         const tableBody = document.getElementById('tableBody');
-
-        // Clear the table
+        const tableHeader = document.getElementById('tableHeader');
+        
         tableBody.innerHTML = '';
-
-        const filteredRecords = records
-          .filter(record => record.NomProjet === selectedFirstValue && record.NomEtage === selectedSecondValue);
-
+        const filteredRecords = records.filter(
+          (record) =>
+            record.NomProjet === selectedProject && record.NomEtage === selectedTable
+        );
+      
         if (filteredRecords.length === 0) return;
-
+      
         const exampleRecord = filteredRecords[0];
-        const headers = Object.keys(exampleRecord).filter(key => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'ID_Ligne'); // Skip first two and last column (ID_Ligne)
-
-        // Populate the table header with the additional 'ID' column
+        const headers = Object.keys(exampleRecord).filter(
+          (key) => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'ID_Ligne'
+        );
+      
         tableHeader.innerHTML = '<th>ID</th>';
-        headers.forEach(header => {
+        headers.forEach((header) => {
           const th = document.createElement('th');
           th.textContent = header;
           tableHeader.appendChild(th);
         });
-
-        // Populate the table body with filtered records
-        filteredRecords.forEach((record, rowIndex) => {
+      
+        filteredRecords.forEach((record) => {
           const tr = document.createElement('tr');
-          tr.addEventListener('contextmenu', (event) => showContextMenu(event, record.ID_Ligne)); // Show context menu on right-click and store the ID
-
-          // Add the ID as the first column
+          tr.addEventListener('contextmenu', (event) => showContextMenu(event, record.ID_Ligne));
+      
           const idCell = document.createElement('td');
           idCell.textContent = record.ID_Ligne;
           tr.appendChild(idCell);
-
-          headers.forEach(header => {
+      
+          headers.forEach((header) => {
             const td = document.createElement('td');
-            td.contentEditable = "true";  // Make cells editable
-            td.textContent = record[header] || '';  // Use empty string for null/undefined values
-            td.addEventListener('blur', function() {
-              record[header] = td.textContent; // Update record with edited value
-            });
+            td.contentEditable = true;
+            td.textContent = record[header] || '';
             tr.appendChild(td);
           });
-
+      
           tableBody.appendChild(tr);
         });
       }
@@ -403,55 +403,64 @@
       // Écouteur d'événement pour le bouton d'ajout
       document.getElementById('addRowButton').addEventListener('click', addRowToGrist);
 
-      // Fonction de sauvegarde mise à jour
-      async function saveChanges() {
-        // Récupération explicite des valeurs sélectionnées dans les listes déroulantes
+      function getCurrentSelections() {
         const projectDropdown = document.getElementById('firstColumnDropdown');
         const tableDropdown = document.getElementById('secondColumnListbox');
-        
-        const currentProject = projectDropdown.value;
-        const currentTable = tableDropdown.value;
       
-        if (!currentProject || !currentTable) {
-          alert("Veuillez sélectionner un projet et un tableau avant de sauvegarder.");
-          return;
+        const selectedProject = projectDropdown.value.trim();
+        const selectedTable = tableDropdown.value.trim();
+      
+        if (!selectedProject || !selectedTable) {
+          alert("Veuillez sélectionner un projet et un tableau.");
+          return null; // Retourne null si les sélections sont invalides
         }
       
-        console.log(`Sauvegarde en cours pour le tableau "${currentTable}" du projet "${currentProject}".`);
+        return { selectedProject, selectedTable };
+      }
+   
+      // Fonction de sauvegarde mise à jour
+      async function saveChanges() {
+        // Obtenez les sélections actuelles
+        const selections = getCurrentSelections();
+        if (!selections) return; // Interrompt la fonction si les sélections sont invalides
       
-        // Récupération des lignes du tableau HTML
+        const { selectedProject, selectedTable } = selections;
+      
+        console.log(`Sauvegarde en cours pour le tableau "${selectedTable}" du projet "${selectedProject}".`);
+      
+        // Récupère les lignes du tableau HTML
         const tableBody = document.getElementById('tableBody');
         const rows = tableBody.getElementsByTagName('tr');
       
-        // Map des noms de colonnes dans Grist pour correspondre aux colonnes du tableau HTML
         const columnMap = ['Emetteur', 'Reference', 'Indice', 'Recu', 'DescriptionObservations'];
-      
         const updates = [];
       
         for (const row of rows) {
           const cells = row.getElementsByTagName('td');
-          const rowId = cells[0].textContent.trim(); // ID_Ligne de la ligne dans le tableau HTML (première cellule)
+          const rowId = cells[0].textContent.trim(); // ID_Ligne
       
-          // Vérifie que la ligne appartient au projet et au tableau actuels
-          const record = records.find(rec => rec.ID_Ligne === rowId && 
-                                             rec.NomProjet === currentProject &&
-                                             rec.NomEtage === currentTable);
+          // Recherche la ligne correspondante dans `records`
+          const record = records.find(
+            (rec) =>
+              rec.ID_Ligne === rowId &&
+              rec.NomProjet === selectedProject &&
+              rec.NomEtage === selectedTable
+          );
       
           if (!record) {
-            console.warn(`Aucune correspondance pour ID_Ligne = ${rowId} dans le tableau "${currentTable}" du projet "${currentProject}".`);
+            console.warn(`Ligne introuvable pour ID_Ligne = ${rowId}, Projet = ${selectedProject}, Tableau = ${selectedTable}`);
             continue;
           }
       
           const updatedFields = {};
           let hasChanges = false;
       
-          // Parcours des cellules du tableau HTML pour comparer avec l'enregistrement
+          // Compare chaque champ
           for (let i = 1; i < cells.length; i++) {
             const fieldName = columnMap[i - 1];
             const cellValue = cells[i].textContent.trim();
       
             if (record[fieldName] !== cellValue) {
-              console.log(`Modification détectée pour ID_Ligne = ${rowId} - Champ : ${fieldName}, Ancienne : "${record[fieldName]}", Nouvelle : "${cellValue}"`);
               updatedFields[fieldName] = cellValue;
               hasChanges = true;
             }
@@ -462,18 +471,17 @@
           }
         }
       
-        // Applique les modifications si des changements sont détectés
         if (updates.length > 0) {
           try {
             await grist.docApi.applyUserActions(updates);
             console.log("Modifications sauvegardées avec succès :", updates);
             alert("Les modifications ont été sauvegardées.");
           } catch (error) {
-            console.error("Erreur lors de la sauvegarde des modifications :", error);
-            alert("Erreur lors de la sauvegarde des modifications.");
+            console.error("Erreur lors de la sauvegarde :", error);
+            alert("Erreur lors de la sauvegarde.");
           }
         } else {
-          alert("Aucune modification détectée pour sauvegarde.");
+          alert("Aucune modification détectée pour la sauvegarde.");
         }
       }
 
