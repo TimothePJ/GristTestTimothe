@@ -423,7 +423,7 @@
           const record = records.find(rec => rec.ID_Ligne === rowId);
       
           if (!record) {
-            console.warn(Aucun enregistrement trouvé dans Grist pour ID_Ligne = ${rowId});
+            console.warn(`Aucun enregistrement trouvé dans Grist pour ID_Ligne = ${rowId}`);
             continue;
           }
       
