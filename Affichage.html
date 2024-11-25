@@ -376,7 +376,8 @@
           return;
         }
       
-        const selectedProject = document.getElementById('firstColumnDropdown').value.trim();
+        const projectDropdown = document.getElementById('firstColumnDropdown');
+        const selectedProject = projectDropdown.value.trim();
       
         if (!selectedProject) {
           alert("Veuillez sélectionner un projet avant d'ajouter un tableau.");
@@ -410,14 +411,19 @@
           .then(() => {
             console.log("Nouveau tableau ajouté :", newRow);
       
-            // Recharge la liste
+            // Actualise les options de la deuxième liste déroulante
             populateSecondColumnListbox(selectedProject);
+      
+            // Réinitialise la sélection à l'état initial
+            const listbox = document.getElementById('secondColumnListbox');
+            listbox.value = ''; // Efface la sélection en attendant une action manuelle
           })
           .catch((error) => {
             console.error("Erreur lors de l'ajout du tableau :", error);
             alert("Erreur lors de l'ajout du tableau.");
           });
       }
+
 
       // Fonction pour ajouter une nouvelle ligne dans Grist
       function addRowToGrist() {
