@@ -434,11 +434,11 @@
             listbox.value = newTableName;
             selectedSecondValue = newTableName;
       
-            // Recharge la table pour afficher le nouveau tableau
-            populateTable();
+            // Simule un événement de changement pour forcer l'affichage du tableau
+            const event = new Event('change');
+            listbox.dispatchEvent(event);
       
-            // Logique pour forcer l'affichage correct du tableau
-            console.log(`Le tableau "${newTableName}" a été ajouté et est maintenant affiché.`);
+            console.log(`Le tableau "${newTableName}" a été ajouté, sélectionné, et est maintenant affiché.`);
           })
           .catch((error) => {
             console.error("Erreur lors de l'ajout du tableau :", error);
