@@ -410,19 +410,25 @@
           .then(() => {
             console.log("Nouveau tableau ajouté :", newRow);
       
-            // Actualise immédiatement la deuxième liste déroulante avec tri alphabétique
+            // Actualise immédiatement la deuxième liste déroulante
             const listbox = document.getElementById('secondColumnListbox');
             const options = Array.from(listbox.options);
       
             // Ajoute la nouvelle option à la liste
             options.push(new Option(newTableName, newTableName));
       
-            // Trie les options par ordre alphabétique
-            options.sort((a, b) => a.text.localeCompare(b.text));
+            // Trie les options par ordre alphabétique (sans "Select an option" ni "Ajouter Tableau")
+            const sortableOptions = options.filter(
+              option => option.value !== "" && option.value !== "Ajouter Tableau"
+            );
       
-            // Remplace les options existantes dans la liste déroulante
+            sortableOptions.sort((a, b) => a.text.localeCompare(b.text));
+      
+            // Réinsère les options avec "Select an option" en premier et "Ajouter Tableau" en dernier
             listbox.innerHTML = '';
-            options.forEach(option => listbox.add(option));
+            listbox.appendChild(new Option("Select an option", ""));
+            sortableOptions.forEach(option => listbox.add(option));
+            listbox.appendChild(new Option("Ajouter Tableau", "Ajouter Tableau"));
       
             // Sélectionne automatiquement le tableau ajouté
             listbox.value = newTableName;
@@ -436,7 +442,7 @@
             alert("Erreur lors de l'ajout du tableau.");
           });
       }
-
+      
       // Fonction pour ajouter une nouvelle ligne dans Grist
       function addRowToGrist() {
         if (!selectedFirstValue || !selectedSecondValue) {
