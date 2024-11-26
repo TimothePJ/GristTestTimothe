@@ -410,18 +410,25 @@
           .then(() => {
             console.log("Nouveau tableau ajouté :", newRow);
       
-            // Ajoute immédiatement le tableau dans la deuxième liste
+            // Actualise immédiatement la deuxième liste déroulante avec tri alphabétique
             const listbox = document.getElementById('secondColumnListbox');
-            const newOption = document.createElement('option');
-            newOption.value = newTableName;
-            newOption.text = newTableName;
-            listbox.appendChild(newOption);
+            const options = Array.from(listbox.options);
       
-            // Sélectionne automatiquement le tableau ajouté dans la deuxième liste
+            // Ajoute la nouvelle option à la liste
+            options.push(new Option(newTableName, newTableName));
+      
+            // Trie les options par ordre alphabétique
+            options.sort((a, b) => a.text.localeCompare(b.text));
+      
+            // Remplace les options existantes dans la liste déroulante
+            listbox.innerHTML = '';
+            options.forEach(option => listbox.add(option));
+      
+            // Sélectionne automatiquement le tableau ajouté
             listbox.value = newTableName;
             selectedSecondValue = newTableName;
       
-            // Charge automatiquement le tableau dans l'affichage HTML
+            // Recharge la table pour afficher le nouveau tableau
             populateTable();
           })
           .catch((error) => {
