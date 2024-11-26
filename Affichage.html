@@ -410,34 +410,51 @@
           .then(() => {
             console.log("Nouveau tableau ajouté :", newRow);
       
-            // Actualise immédiatement la deuxième liste déroulante
-            const listbox = document.getElementById('secondColumnListbox');
-            const options = Array.from(listbox.options);
+            // Actualise immédiatement les données depuis Grist
+            grist.onRecords(function (receivedRecords) {
+              console.log("Records reçus après ajout :", receivedRecords);
       
-            // Ajoute la nouvelle option à la liste
-            options.push(new Option(newTableName, newTableName));
+              // Met à jour les données locales
+              records = receivedRecords.map(record => ({
+                NomProjet: record.NomProjet || '',
+                NomEtage: record.NomEtage || '',
+                Emetteur: record.Emetteur || '',
+                Reference: record.Reference || '',
+                Indice: record.Indice || '',
+                Recu: record.Recu || '',
+                DescriptionObservations: record.DescriptionObservations || '',
+                ID_Ligne: record.ID_Ligne || '',
+              }));
       
-            // Trie les options par ordre alphabétique (sans "Select an option" ni "Ajouter Tableau")
-            const sortableOptions = options.filter(
-              option => option.value !== "" && option.value !== "Ajouter Tableau"
-            );
+              // Actualise la deuxième liste déroulante
+              const listbox = document.getElementById('secondColumnListbox');
+              const options = Array.from(listbox.options);
       
-            sortableOptions.sort((a, b) => a.text.localeCompare(b.text));
+              // Ajoute la nouvelle option
+              options.push(new Option(newTableName, newTableName));
       
-            // Réinsère les options avec "Select an option" en premier et "Ajouter Tableau" en dernier
-            listbox.innerHTML = '';
-            listbox.appendChild(new Option("Select an option", ""));
-            sortableOptions.forEach(option => listbox.add(option));
-            listbox.appendChild(new Option("Ajouter Tableau", "Ajouter Tableau"));
+              // Trie les options par ordre alphabétique (sans "Select an option" ni "Ajouter Tableau")
+              const sortableOptions = options.filter(
+                option => option.value !== "" && option.value !== "Ajouter Tableau"
+              );
       
-            // Sélectionne automatiquement le tableau ajouté
-            listbox.value = newTableName;
-            selectedSecondValue = newTableName; // Mise à jour explicite de la sélection
+              sortableOptions.sort((a, b) => a.text.localeCompare(b.text));
       
-            console.log(`Le tableau "${newTableName}" est maintenant sélectionné.`);
+              // Réinsère les options avec "Select an option" en premier et "Ajouter Tableau" en dernier
+              listbox.innerHTML = '';
+              listbox.appendChild(new Option("Select an option", ""));
+              sortableOptions.forEach(option => listbox.add(option));
+              listbox.appendChild(new Option("Ajouter Tableau", "Ajouter Tableau"));
       
-            // Affiche immédiatement le tableau HTML
-            populateTable(); // Appel direct pour synchroniser l'affichage du tableau HTML avec la sélection
+              // Sélectionne automatiquement le tableau ajouté
+              listbox.value = newTableName;
+              selectedSecondValue = newTableName;
+      
+              console.log(`Le tableau "${newTableName}" est maintenant sélectionné.`);
+      
+              // Appelle populateTable pour actualiser immédiatement l'affichage du tableau HTML
+              populateTable();
+            });
           })
           .catch((error) => {
             console.error("Erreur lors de l'ajout du tableau :", error);
