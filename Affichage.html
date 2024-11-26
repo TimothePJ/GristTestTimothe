@@ -274,6 +274,29 @@
       
           tableBody.appendChild(tr);
         });
+        formatTable();
+      }
+
+      function formatTable(){
+        const tableBody = document.getElementById('tableBody');
+        const rows = tableBody.rows;
+        let previousText = null;
+        let rowspanCount = 1;
+    
+        for (let i = 0; i < rows.length; i++) {
+            const currentCell = rows[i].cells[1]; // Second column
+    
+            if (currentCell.innerText === previousText) {
+                // Increase rowspan count and hide current cell
+                rows[i - rowspanCount].cells[1].rowSpan = rowspanCount + 1; // Update rowspan
+                currentCell.style.display = "none"; // Hide current cell
+                rowspanCount++;
+            } else {
+                // Reset rowspan count
+                previousText = currentCell.innerText;
+                rowspanCount = 1;
+            }
+        }
       }
 
       // Show context menu on right-click and get the record ID from the first column
