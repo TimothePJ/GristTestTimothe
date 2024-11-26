@@ -434,9 +434,8 @@
             listbox.value = newTableName;
             selectedSecondValue = newTableName;
       
-            // Simule un événement de changement pour forcer l'affichage du tableau
-            const event = new Event('change');
-            listbox.dispatchEvent(event);
+            // Affiche immédiatement le tableau HTML
+            populateTable(); // Appel direct pour actualiser le tableau HTML avec les données du tableau ajouté
       
             console.log(`Le tableau "${newTableName}" a été ajouté, sélectionné, et est maintenant affiché.`);
           })
