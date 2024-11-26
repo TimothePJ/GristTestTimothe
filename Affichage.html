@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <title>Grist Two-Step Selection with Editable Table</title>
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
       body {
         margin: 0;
@@ -123,7 +124,10 @@
         <label for="firstColumnDropdown">Projet :</label>
         <select id="firstColumnDropdown">
           <option value="">Select an option</option>
+          <option value="Ajouter Projet">Ajouter Projet</option>
+          <option value="Insérer Projet">Insérer Projet</option>
         </select>
+        <input type="file" id="fileInputProject" style="display: none;" accept=".xls,.xlsx" />
       </div>
 
       <!-- Second dropdown for selecting the tableau -->
@@ -351,12 +355,14 @@
         populateFirstColumnDropdown(uniqueFirstColumnValues);
       });
 
-      // Listen to changes in the first dropdown and update the second listbox accordingly
+      // Gestion des changements dans la première liste déroulante
       document.getElementById('firstColumnDropdown').addEventListener('change', function () {
         const selectedValue = this.value;
       
         if (selectedValue === "Ajouter Projet") {
-          handleAddProject(); // Appelle la fonction pour ajouter un projet
+          handleAddProject(); // Fonction existante
+        } else if (selectedValue === "Insérer Projet") {
+          document.getElementById("fileInputProject").click(); // Ouvre le sélecteur de fichiers Excel
         } else {
           selectedFirstValue = selectedValue;
           populateSecondColumnListbox(selectedFirstValue); // Actualise la deuxième liste
@@ -747,7 +753,176 @@
           });
         }
       });
+
+      // Gère l'événement de sélection de fichiers pour "Insérer Projet"
+      document.getElementById("fileInputProject").addEventListener("change", async (event) => {
+        const file = event.target.files[0];
+        if (!file) {
+          alert("Veuillez sélectionner un fichier Excel.");
+          return;
+        }
       
+        try {
+          const rows = await readExcel(file); // Lire les lignes du fichier Excel
+          const tables = extractTablesFromExcel(rows); // Extraire les tableaux
+          const nomProjet = file.name.split(".")[0]; // Utilise le nom du fichier comme NomProjet
+      
+          console.log("Tables extraites :", tables);
+          alert(`Le projet "${nomProjet}" et ses tableaux ont été analysés avec succès !`);
+      
+          // Insérer les tableaux et lignes dans Grist
+          for (const [nomEtage, records] of Object.entries(tables)) {
+            const nonDuplicateRecords = records.filter(record =>
+              !isDuplicate(records, record)
+            );
+      
+            await insertDataIntoGrist(nomProjet, nomEtage, nonDuplicateRecords);
+          }
+      
+          alert(`Le projet "${nomProjet}" a été inséré avec succès !`);
+      
+          // Actualisation des listes déroulantes
+          grist.onRecords(function (receivedRecords) {
+            console.log("Records reçus après insertion :", receivedRecords);
+      
+            // Met à jour les données locales
+            records = receivedRecords.map(record => ({
+              NomProjet: record.NomProjet || '',
+              NomEtage: record.NomEtage || '',
+              Emetteur: record.Emetteur || '',
+              Reference: record.Reference || '',
+              Indice: record.Indice || '',
+              Recu: record.Recu || '',
+              DescriptionObservations: record.DescriptionObservations || '',
+              ID_Ligne: record.ID_Ligne || '',
+            }));
+      
+            // Actualise la première liste déroulante
+            const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
+            populateFirstColumnDropdown(uniqueFirstColumnValues);
+      
+            // Sélectionne automatiquement le projet inséré
+            const firstColumnDropdown = document.getElementById('firstColumnDropdown');
+            firstColumnDropdown.value = nomProjet;
+            selectedFirstValue = nomProjet;
+      
+            // Actualise la deuxième liste et affiche le premier tableau
+            populateSecondColumnListbox(nomProjet);
+          });
+        } catch (error) {
+          console.error("Erreur lors de l'analyse ou de l'insertion des données :", error);
+          alert("Erreur lors de l'insertion des données. Vérifiez le format du fichier.");
+        }
+      });
+
+      // Fonction pour lire un fichier Excel
+      async function readExcel(file) {
+        const reader = new FileReader();
+        return new Promise((resolve, reject) => {
+          reader.onload = (event) => {
+            const data = new Uint8Array(event.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+      
+            // Utilise la première feuille par défaut
+            const sheetName = workbook.SheetNames[0];
+            const sheet = workbook.Sheets[sheetName];
+      
+            // Convertit la feuille en tableau de données
+            const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+            resolve(rows);
+          };
+          reader.onerror = reject;
+          reader.readAsArrayBuffer(file);
+        });
+      }
+
+      // Fonction pour extraire les tableaux depuis Excel
+      function extractTablesFromExcel(rows) {
+        const tables = {}; // Stocke les tableaux extraits
+        let currentEtage = null; // Nom de l'étage en cours
+        let isInsideEtage = false; // Indique si on est dans un tableau
+        let lineOffset = 0; // Compteur pour ignorer les premières lignes après "Feuille"
+      
+        rows.forEach((row, index) => {
+          const firstColValue = row[0]?.toString().trim(); // Colonne A
+          const thirdColValue = row[2]?.toString().trim(); // Colonne C
+      
+          // Détecte le début d’un tableau avec "Feuille"
+          if (firstColValue === "Feuille") {
+            currentEtage = thirdColValue; // Récupère le nom de l'étage depuis la colonne C
+            isInsideEtage = true;
+            lineOffset = 0; // Réinitialise l'offset pour ce tableau
+            if (!tables[currentEtage]) {
+              tables[currentEtage] = []; // Initialise un tableau vide pour cet étage
+            }
+          } else if (isInsideEtage) {
+            lineOffset += 1;
+      
+            // Ignore les 3 premières lignes après "Feuille"
+            if (lineOffset > 3) {
+              // Si "*" est détecté dans la colonne A, termine le tableau
+              if (firstColValue === "*") {
+                isInsideEtage = false;
+                currentEtage = null;
+                return;
+              }
+      
+              // Collecte les données des colonnes pertinentes
+              const record = {
+                Emetteur: row[0] || "", // Colonne A
+                Reference: row[1] || "", // Colonne B
+                Indice: row[2] || "", // Colonne C
+                Recu: row[3] || "", // Colonne D
+                DescriptionObservations: row[4] || "", // Colonne E
+              };
+      
+              // Ignore les lignes totalement vides
+              if (Object.values(record).some(value => value.trim() !== "")) {
+                tables[currentEtage].push(record);
+              }
+            }
+          }
+        });
+      
+        return tables;
+      }
+
+      // Fonction pour insérer les données dans Grist
+      async function insertDataIntoGrist(nomProjet, nomEtage, records) {
+        const gristRecords = records.map((record, index) => ({
+          NomProjet: nomProjet, // Colonne 1 dans Grist
+          NomEtage: nomEtage,   // Colonne 2 dans Grist
+          Emetteur: record.Emetteur, // Colonne 3 dans Grist
+          Reference: record.Reference, // Colonne 4 dans Grist
+          Indice: record.Indice, // Colonne 5 dans Grist
+          Recu: record.Recu, // Colonne 6 dans Grist
+          DescriptionObservations: record.DescriptionObservations, // Colonne 7 dans Grist
+          ID_Ligne: Math.floor(Math.random() * 1e9).toString(), // Génère un ID unique
+        }));
+      
+        try {
+          // Ajout des enregistrements dans Grist
+          await grist.docApi.applyUserActions(
+            gristRecords.map(record => ["AddRecord", "Fusion", null, record])
+          );
+          console.log(`Tableau "${nomEtage}" inséré avec succès dans Grist.`);
+        } catch (error) {
+          console.error(`Erreur lors de l'insertion de "${nomEtage}" :`, error);
+          alert(`Erreur lors de l'insertion de "${nomEtage}".`);
+        }
+      }
+
+      // Fonction pour vérifier les doublons
+      function isDuplicate(existingRecords, newRecord) {
+        return existingRecords.some(record =>
+          record.Emetteur === newRecord.Emetteur &&
+          record.Reference === newRecord.Reference &&
+          record.Indice === newRecord.Indice &&
+          record.Recu === newRecord.Recu &&
+          record.DescriptionObservations === newRecord.DescriptionObservations
+        );
+      }
+
     </script>
   </body>
 </html>
