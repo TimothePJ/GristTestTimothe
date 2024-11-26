@@ -436,13 +436,16 @@
       
             // Recharge la table pour afficher le nouveau tableau
             populateTable();
+      
+            // Logique pour forcer l'affichage correct du tableau
+            console.log(`Le tableau "${newTableName}" a été ajouté et est maintenant affiché.`);
           })
           .catch((error) => {
             console.error("Erreur lors de l'ajout du tableau :", error);
             alert("Erreur lors de l'ajout du tableau.");
           });
       }
-      
+
       // Fonction pour ajouter une nouvelle ligne dans Grist
       function addRowToGrist() {
         if (!selectedFirstValue || !selectedSecondValue) {
