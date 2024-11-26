@@ -432,12 +432,12 @@
       
             // Sélectionne automatiquement le tableau ajouté
             listbox.value = newTableName;
-            selectedSecondValue = newTableName;
+            selectedSecondValue = newTableName; // Mise à jour explicite de la sélection
+      
+            console.log(`Le tableau "${newTableName}" est maintenant sélectionné.`);
       
             // Affiche immédiatement le tableau HTML
-            populateTable(); // Appel direct pour actualiser le tableau HTML avec les données du tableau ajouté
-      
-            console.log(`Le tableau "${newTableName}" a été ajouté, sélectionné, et est maintenant affiché.`);
+            populateTable(); // Appel direct pour synchroniser l'affichage du tableau HTML avec la sélection
           })
           .catch((error) => {
             console.error("Erreur lors de l'ajout du tableau :", error);
