@@ -491,8 +491,9 @@
           return;
         }
       
+        // Récupère la sélection actuelle du projet
         const projectDropdown = document.getElementById('firstColumnDropdown');
-        const selectedProject = projectDropdown.value.trim();
+        const selectedProject = selectedFirstValue || projectDropdown.value.trim();
       
         if (!selectedProject) {
           alert("Veuillez sélectionner un projet avant d'ajouter un tableau.");
@@ -509,7 +510,7 @@
       
         // Crée une nouvelle ligne pour le tableau
         const newRow = {
-          NomProjet: selectedProject,
+          NomProjet: selectedProject, // Associe le tableau au projet sélectionné
           NomEtage: newTableName,
           Emetteur: '',
           Reference: '',
@@ -520,9 +521,10 @@
         };
       
         // Ajoute la nouvelle ligne dans Grist
-        grist.docApi.applyUserActions([
-          ['AddRecord', 'Fusion', null, newRow],
-        ])
+        grist.docApi
+          .applyUserActions([
+            ['AddRecord', 'Fusion', null, newRow],
+          ])
           .then(() => {
             console.log("Nouveau tableau ajouté :", newRow);
       
@@ -568,7 +570,7 @@
       
               console.log(`Le tableau "${newTableName}" est maintenant sélectionné.`);
       
-              // Appelle populateTable pour actualiser immédiatement l'affichage du tableau HTML
+              // Actualise immédiatement l'affichage du tableau HTML
               populateTable();
             });
           })
