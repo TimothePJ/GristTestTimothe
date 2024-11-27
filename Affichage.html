@@ -132,6 +132,7 @@
         <select id="secondColumnListbox">
           <option value="">Select an option</option>
           <option value="addTable">AJOUTER TABLEAU</option>
+          <option value="insertProject">INSÉRER PROJET</option>
         </select>
       </div>
     </div>
@@ -367,13 +368,26 @@
       document.getElementById('secondColumnListbox').addEventListener('change', function () {
         const selectedValue = this.value;
         if (selectedValue === 'addTable') {
-          handleAddTable(); // Permet d'ajouter un tableau
+          handleAddTable(); // Gère l'ajout de tableau
+        } else if (selectedValue === 'insertProject') {
+          document.getElementById('fileInputProject').click(); // Ouvre l'explorateur de fichiers
         } else {
-          selectedSecondValue = selectedValue; // Met à jour la valeur sélectionnée
-          populateTable(); // Actualise le tableau HTML
+          selectedSecondValue = selectedValue; // Met à jour la sélection
+          populateTable(); // Recharge le tableau
         }
       });
-      
+
+      document.getElementById('fileInputProject').addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (file) {
+          console.log(`Fichier sélectionné : ${file.name}`);
+          // Ajoutez ici le traitement du fichier Excel
+          alert(`Fichier "${file.name}" prêt à être traité.`);
+        } else {
+          alert('Aucun fichier sélectionné.');
+        }
+      });
+
       // Fonction pour ajouter un projet
       function handleAddProject() {
         const projectName = prompt("Entrez le nom du nouveau projet :");
