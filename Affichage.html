@@ -117,14 +117,15 @@
     </style>
   </head>
   <body>
-    <!-- Container for the sticky selection lists -->
-    <div class="sticky-container">
-      <!-- First dropdown for selecting a project -->
+      <!-- Container for the sticky selection lists -->
       <div class="dropdown-container">
         <label for="firstColumnDropdown">Projet :</label>
         <select id="firstColumnDropdown">
           <option value="">Select an option</option>
+          <option value="Ajouter Projet">AJOUTER PROJET</option>
+          <option value="Insérer Projet">INSERER PROJET</option>
         </select>
+        <input type="file" id="fileInputProject" style="display: none;" accept=".xls,.xlsx,.xlsm" /> <!-- Fichiers Excel uniquement -->
       </div>
 
       <!-- Second dropdown for selecting the tableau -->
@@ -201,14 +202,18 @@
       }
 
       // Écouteur d'événement pour mettre à jour la valeur sélectionnée dans la première liste
-      document.getElementById('firstColumnDropdown').addEventListener('change', function() {
-        selectedFirstValue = this.value;
-        if (selectedFirstValue) {
-          populateSecondColumnListbox(selectedFirstValue);
-        } else {
-          document.getElementById('secondColumnListbox').innerHTML = '';  // Efface la seconde liste si aucune sélection
-        }
-      });  
+      document.getElementById('firstColumnDropdown').addEventListener('change', function () {
+          const selectedValue = this.value;
+      
+          if (selectedValue === "Ajouter Projet") {
+            handleAddProject(); // Appelle la fonction pour ajouter un projet
+          } else if (selectedValue === "Insérer Projet") {
+            document.getElementById("fileInputProject").click(); // Ouvre le sélecteur de fichiers Excel
+          } else {
+            selectedFirstValue = selectedValue;
+            populateSecondColumnListbox(selectedFirstValue); // Actualise la deuxième liste
+          }
+        });
 
       // Function to populate the second dropdown based on the selected first column value
       function populateSecondColumnListbox(selectedValue) {
@@ -746,6 +751,28 @@
           Array.from(files).forEach(file => {
             addRowWithFileName(file.name); // Ajoute une ligne pour chaque fichier sélectionné
           });
+        }
+      });
+
+      // Gère l'événement de sélection de fichiers
+      document.getElementById("fileInputProject").addEventListener("change", async (event) => {
+        const file = event.target.files[0];
+        if (!file) {
+          alert("Aucun fichier sélectionné.");
+          return;
+        }
+    
+        try {
+          const projectName = file.name.split(".")[0]; // Utilise le nom du fichier comme nom du projet
+          console.log(`Fichier sélectionné pour le projet : ${projectName}`);
+          
+          // Ici, vous pouvez ajouter une logique pour lire les données Excel si nécessaire.
+          alert(`Projet "${projectName}" ajouté avec succès à partir du fichier Excel !`);
+          
+          // Logique à implémenter : Ajouter le projet dans Grist ou une autre action.
+        } catch (error) {
+          console.error("Erreur lors de l'ouverture du fichier :", error);
+          alert("Erreur lors de l'ouverture du fichier. Vérifiez le format.");
         }
       });
       
