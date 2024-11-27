@@ -123,7 +123,11 @@
         <label for="firstColumnDropdown">Projet :</label>
         <select id="firstColumnDropdown">
           <option value="">Select an option</option>
+          <option value="Ajouter Projet">Ajouter Projet</option>
+          <option value="Insérer Projet">Insérer Projet</option>
         </select>
+        <!-- Champ caché pour la sélection des fichiers Excel -->
+        <input type="file" id="fileInputProject" style="display: none;" accept=".xls,.xlsx,.xlsm" />
       </div>
 
       <!-- Second dropdown for selecting the tableau -->
@@ -356,7 +360,10 @@
         const selectedValue = this.value;
       
         if (selectedValue === "Ajouter Projet") {
-          handleAddProject(); // Appelle la fonction pour ajouter un projet
+          handleAddProject(); // Fonction existante pour ajouter un projet
+        } else if (selectedValue === "Insérer Projet") {
+          // Ouvre l'explorateur de fichiers pour sélectionner un fichier Excel
+          document.getElementById("fileInputProject").click();
         } else {
           selectedFirstValue = selectedValue;
           populateSecondColumnListbox(selectedFirstValue); // Actualise la deuxième liste
@@ -745,6 +752,17 @@
           Array.from(files).forEach(file => {
             addRowWithFileName(file.name); // Ajoute une ligne pour chaque fichier sélectionné
           });
+        }
+      });
+
+      // Gère l'événement de sélection de fichier
+      document.getElementById("fileInputProject").addEventListener("change", function (event) {
+        const file = event.target.files[0];
+        if (file) {
+          alert(`Fichier sélectionné : ${file.name}`);
+          // À ce stade, tu peux appeler une fonction pour traiter le fichier Excel
+        } else {
+          alert("Aucun fichier sélectionné.");
         }
       });
       
