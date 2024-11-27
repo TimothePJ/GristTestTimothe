@@ -465,7 +465,7 @@
           return;
         }
       
-        const projectDropdown = document.getElementById('firstColumnDropdown');
+        const projectDropdown = document.getElementById("firstColumnDropdown");
         const selectedProject = projectDropdown.value.trim();
       
         if (!selectedProject) {
@@ -485,66 +485,53 @@
         const newRow = {
           NomProjet: selectedProject,
           NomEtage: newTableName,
-          Emetteur: '',
-          Reference: '',
-          Indice: '',
-          Recu: '',
-          DescriptionObservations: '',
+          Emetteur: "",
+          Reference: "",
+          Indice: "",
+          Recu: "",
+          DescriptionObservations: "",
           ID_Ligne: newIdLigne.toString(),
         };
       
         // Ajoute la nouvelle ligne dans Grist
-        grist.docApi.applyUserActions([
-          ['AddRecord', 'Fusion', null, newRow],
-        ])
+        grist.docApi
+          .applyUserActions([["AddRecord", "Fusion", null, newRow]])
           .then(() => {
             console.log("Nouveau tableau ajouté :", newRow);
       
-            // Actualise immédiatement les données depuis Grist
-            grist.onRecords(function (receivedRecords) {
-              console.log("Records reçus après ajout :", receivedRecords);
+            // Actualise immédiatement les données locales
+            records.push(newRow);
       
-              // Met à jour les données locales
-              records = receivedRecords.map(record => ({
-                NomProjet: record.NomProjet || '',
-                NomEtage: record.NomEtage || '',
-                Emetteur: record.Emetteur || '',
-                Reference: record.Reference || '',
-                Indice: record.Indice || '',
-                Recu: record.Recu || '',
-                DescriptionObservations: record.DescriptionObservations || '',
-                ID_Ligne: record.ID_Ligne || '',
-              }));
+            // Actualise la deuxième liste déroulante
+            const listbox = document.getElementById("secondColumnListbox");
+            const updatedValues = records
+              .filter((record) => record.NomProjet === selectedProject)
+              .map((record) => record.NomEtage)
+              .filter((value, index, self) => value && self.indexOf(value) === index)
+              .sort(); // Tri des valeurs par ordre alphabétique
       
-              // Actualise la deuxième liste déroulante
-              const listbox = document.getElementById('secondColumnListbox');
-              const options = Array.from(listbox.options);
-      
-              // Ajoute la nouvelle option
-              options.push(new Option(newTableName, newTableName));
-      
-              // Trie les options par ordre alphabétique (sans "Select an option" ni "Ajouter Tableau")
-              const sortableOptions = options.filter(
-                option => option.value !== "" && option.value !== "Ajouter Tableau"
-              );
-      
-              sortableOptions.sort((a, b) => a.text.localeCompare(b.text));
-      
-              // Réinsère les options avec "Select an option" en premier et "Ajouter Tableau" en dernier
-              listbox.innerHTML = '';
-              listbox.appendChild(new Option("Select an option", ""));
-              sortableOptions.forEach(option => listbox.add(option));
-              listbox.appendChild(new Option("Ajouter Tableau", "Ajouter Tableau"));
-      
-              // Sélectionne automatiquement le tableau ajouté
-              listbox.value = newTableName;
-              selectedSecondValue = newTableName;
-      
-              console.log(`Le tableau "${newTableName}" est maintenant sélectionné.`);
-      
-              // Appelle populateTable pour actualiser immédiatement l'affichage du tableau HTML
-              populateTable();
+            listbox.innerHTML = '<option value="">Select an option</option>';
+            updatedValues.forEach((value) => {
+              const option = document.createElement("option");
+              option.value = value;
+              option.text = value;
+              listbox.appendChild(option);
             });
+      
+            // Ajoute l'option "Ajouter Tableau" à la fin
+            const addOption = document.createElement("option");
+            addOption.value = "addTable";
+            addOption.text = "Ajouter Tableau";
+            listbox.appendChild(addOption);
+      
+            // Sélectionne automatiquement le tableau ajouté
+            listbox.value = newTableName;
+            selectedSecondValue = newTableName;
+      
+            console.log(`Le tableau "${newTableName}" est maintenant sélectionné.`);
+      
+            // Appelle populateTable pour actualiser immédiatement l'affichage du tableau HTML
+            populateTable();
           })
           .catch((error) => {
             console.error("Erreur lors de l'ajout du tableau :", error);
@@ -745,6 +732,16 @@
           Array.from(files).forEach(file => {
             addRowWithFileName(file.name); // Ajoute une ligne pour chaque fichier sélectionné
           });
+        }
+      });
+
+      document.getElementById("secondColumnListbox").addEventListener("change", function () {
+        const selectedValue = this.value;
+        if (selectedValue === "addTable") {
+          handleAddTable(); // Ajoute un tableau si l'option correspondante est sélectionnée
+        } else {
+          selectedSecondValue = selectedValue; // Met à jour la valeur sélectionnée
+          populateTable(); // Actualise l'affichage du tableau HTML
         }
       });
       
