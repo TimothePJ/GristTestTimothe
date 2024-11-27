@@ -772,6 +772,22 @@
           alert("Aucun fichier sélectionné.");
         }
       });
+
+      document.getElementById('firstColumnDropdown').addEventListener('click', function (event) {
+        const selectedValue = this.value;
+      
+        // Vérifie si "Insérer Projet" est sélectionné
+        if (selectedValue === "Insérer Projet") {
+          handleInsertProject(); // Appelle la fonction pour gérer l'insertion
+        }
+      });
+
+      // Fonction pour gérer "Insérer Projet"
+      function handleInsertProject() {
+        const fileInput = document.getElementById('fileInput');
+        fileInput.setAttribute('accept', '.xls,.xlsx,.xlsm'); // Fichiers Excel uniquement
+        fileInput.click(); // Ouvre l'explorateur de fichiers
+      }
       
     </script>
   </body>
