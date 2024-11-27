@@ -133,6 +133,7 @@
           <option value="">Select an option</option>
           <option value="addTable">AJOUTER TABLEAU</option>
         </select>
+        <input type="file" id="fileInputProject" style="display: none;" accept=".xls,.xlsx,.xlsm" />
       </div>
     </div>
 
@@ -206,14 +207,21 @@
       }
 
       // Écouteur d'événement pour mettre à jour la valeur sélectionnée dans la première liste
-      document.getElementById('firstColumnDropdown').addEventListener('change', function() {
-        selectedFirstValue = this.value;
-        if (selectedFirstValue) {
-          populateSecondColumnListbox(selectedFirstValue);
+      document.getElementById("firstColumnDropdown").addEventListener("change", function () {
+        const selectedValue = this.value;
+      
+        if (selectedValue === "Ajouter Projet") {
+          handleAddProject(); // Logique d'ajout d'un projet
+        } else if (selectedValue === "Insérer Projet") {
+          // Ouvre l'explorateur de fichiers
+          document.getElementById("fileInputProject").click();
+          // Réinitialise la sélection de la liste déroulante après avoir ouvert l'explorateur
+          this.value = ""; 
         } else {
-          document.getElementById('secondColumnListbox').innerHTML = '';  // Efface la seconde liste si aucune sélection
+          selectedFirstValue = selectedValue;
+          populateSecondColumnListbox(selectedFirstValue); // Actualise la deuxième liste
         }
-      });  
+      });
 
       // Function to populate the second dropdown based on the selected first column value
       function populateSecondColumnListbox(selectedValue) {
@@ -788,7 +796,17 @@
           populateTable(); // Actualise l'affichage du tableau HTML
         }
       });
-      
+
+      document.getElementById("fileInputProject").addEventListener("change", function (event) {
+        const file = event.target.files[0];
+        if (file) {
+          alert(`Fichier sélectionné : ${file.name}`);
+          // Vous pouvez ajouter ici une logique pour traiter le fichier
+        } else {
+          alert("Aucun fichier sélectionné.");
+        }
+      });
+
     </script>
   </body>
 </html>
