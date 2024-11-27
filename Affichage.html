@@ -172,6 +172,7 @@
       let selectedSecondValue = '';
       let selectedRecordId = null;
       let lastSelectedValue = '';
+      let preventReselectAction = false;
 
       // Ready Grist
       grist.ready();
@@ -215,6 +216,12 @@
       document.getElementById('firstColumnDropdown').addEventListener('change', function () {
         const selectedValue = this.value;
       
+        // Empêche l'action si elle a déjà été déclenchée
+        if (preventReselectAction) {
+          preventReselectAction = false; // Réinitialise le flag
+          return;
+        }
+      
         // Déclenche les actions selon la sélection
         if (selectedValue === "Ajouter Projet") {
           handleAddProject(); // Ajouter un projet
@@ -228,6 +235,7 @@
         // Met à jour la dernière valeur sélectionnée
         lastSelectedValue = selectedValue;
       });
+      
       // Function to populate the second dropdown based on the selected first column value
       function populateSecondColumnListbox(selectedValue) {
         const listbox = document.getElementById('secondColumnListbox');
@@ -396,7 +404,7 @@
         }
       });
       
-      // Fonction pour ajouter un projet
+      // Fonction pour gérer "Ajouter Projet"
       function handleAddProject() {
         const projectName = prompt("Entrez le nom du nouveau projet :");
         if (!projectName || projectName.trim() === "") {
@@ -410,7 +418,7 @@
           return;
         }
       
-        // Génère un nouvel ID_Ligne unique
+        // Trouve la valeur maximale d'ID_Ligne dans les records
         const maxIdLigne = records.reduce((max, record) => {
           const idLigne = parseInt(record.ID_Ligne, 10);
           return idLigne > max ? idLigne : max;
@@ -418,7 +426,7 @@
       
         const newIdLigne = maxIdLigne + 1;
       
-        // Crée une nouvelle ligne pour le projet et son premier tableau
+        // Nouvelle ligne pour le projet et son premier tableau
         const newRow = {
           NomProjet: projectName,
           NomEtage: firstTableName,
@@ -431,17 +439,13 @@
         };
       
         // Ajoute la nouvelle ligne dans Grist
-        grist.docApi.applyUserActions([
-          ['AddRecord', 'Fusion', null, newRow],
-        ])
+        grist.docApi
+          .applyUserActions([['AddRecord', 'Fusion', null, newRow]])
           .then(() => {
-            console.log("Nouveau projet ajouté :", newRow);
+            console.log(`Projet "${projectName}" ajouté avec succès.`);
       
-            // Actualise immédiatement les données depuis Grist
-            grist.onRecords(function (receivedRecords) {
-              console.log("Records reçus après ajout :", receivedRecords);
-      
-              // Met à jour les données locales
+            // Actualise les données depuis Grist
+            grist.onRecords((receivedRecords) => {
               records = receivedRecords.map(record => ({
                 NomProjet: record.NomProjet || '',
                 NomEtage: record.NomEtage || '',
@@ -453,31 +457,31 @@
                 ID_Ligne: record.ID_Ligne || '',
               }));
       
-              // Actualise la première liste déroulante
+              // Actualise la liste déroulante
               const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
               populateFirstColumnDropdown(uniqueFirstColumnValues);
       
-              // Sélectionne automatiquement le projet ajouté
-              const firstColumnDropdown = document.getElementById('firstColumnDropdown');
-              firstColumnDropdown.value = projectName;
+              // Sélectionne automatiquement le projet et son tableau ajoutés
+              document.getElementById('firstColumnDropdown').value = projectName;
               selectedFirstValue = projectName;
       
-              // Actualise la deuxième liste et sélectionne automatiquement le tableau ajouté
               populateSecondColumnListbox(projectName);
-              const secondColumnListbox = document.getElementById('secondColumnListbox');
-              secondColumnListbox.value = firstTableName;
+              document.getElementById('secondColumnListbox').value = firstTableName;
               selectedSecondValue = firstTableName;
       
-              // Affiche immédiatement le tableau HTML
+              // Met à jour le tableau HTML
               populateTable();
             });
           })
           .catch((error) => {
             console.error("Erreur lors de l'ajout du projet :", error);
-            alert("Erreur lors de l'ajout du projet.");
+            alert("Une erreur s'est produite lors de l'ajout du projet.");
           });
+      
+        // Empêche la réouverture immédiate
+        preventReselectAction = true;
       }
-            
+
       // Fonction pour gérer l'ajout d'un tableau
       function handleAddTable() {
         const newTableName = prompt("Entrez le nom du nouveau tableau :");
@@ -785,7 +789,10 @@
         const dropdown = this;
       
         // Réinitialise la sélection uniquement pour "Ajouter Projet" ou "Insérer Projet"
-        if (lastSelectedValue === "Ajouter Projet" || lastSelectedValue === "Insérer Projet") {
+        if (
+          (lastSelectedValue === "Ajouter Projet" || lastSelectedValue === "Insérer Projet") &&
+          !preventReselectAction
+        ) {
           dropdown.selectedIndex = -1; // Réinitialise la sélection visuellement
         }
       });
@@ -794,6 +801,8 @@
       function handleInsertProject() {
         const fileInput = document.getElementById('fileInput');
         fileInput.setAttribute('accept', '.xls,.xlsx,.xlsm'); // Fichiers Excel uniquement
+        fileInput.click(); // Ouvre l'explorateur de fichiers
+        preventReselectAction = true; // Bloque l'action après insertion
       }
       
     </script>
