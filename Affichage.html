@@ -228,7 +228,6 @@
         // Met à jour la dernière valeur sélectionnée
         lastSelectedValue = selectedValue;
       });
-
       // Function to populate the second dropdown based on the selected first column value
       function populateSecondColumnListbox(selectedValue) {
         const listbox = document.getElementById('secondColumnListbox');
@@ -785,8 +784,8 @@
       document.getElementById('firstColumnDropdown').addEventListener('click', function () {
         const dropdown = this;
       
-        // Réinitialise la sélection si on clique à nouveau
-        if (dropdown.value === lastSelectedValue) {
+        // Réinitialise la sélection uniquement pour "Ajouter Projet" ou "Insérer Projet"
+        if (lastSelectedValue === "Ajouter Projet" || lastSelectedValue === "Insérer Projet") {
           dropdown.selectedIndex = -1; // Réinitialise la sélection visuellement
         }
       });
