@@ -458,10 +458,14 @@
             
       // Fonction pour gérer l'ajout d'un tableau
       function handleAddTable() {
+        if (window.isAddingTable) return; // Empêche les exécutions multiples
+        window.isAddingTable = true; // Flag pour bloquer les appels successifs
+      
         const newTableName = prompt("Entrez le nom du nouveau tableau :");
       
         if (!newTableName || newTableName.trim() === "") {
           alert("Le nom du tableau ne peut pas être vide.");
+          window.isAddingTable = false; // Libère le flag
           return;
         }
       
@@ -470,6 +474,7 @@
       
         if (!selectedProject) {
           alert("Veuillez sélectionner un projet avant d'ajouter un tableau.");
+          window.isAddingTable = false; // Libère le flag
           return;
         }
       
@@ -536,6 +541,9 @@
           .catch((error) => {
             console.error("Erreur lors de l'ajout du tableau :", error);
             alert("Erreur lors de l'ajout du tableau.");
+          })
+          .finally(() => {
+            window.isAddingTable = false; // Libère le flag après le processus
           });
       }
 
