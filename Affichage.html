@@ -413,7 +413,6 @@
           ID_Ligne: newIdLigne.toString(),
         };
       
-        // Ajoute la nouvelle ligne dans Grist
         grist.docApi
           .applyUserActions([["AddRecord", "Fusion", null, newRow]])
           .then(() => {
@@ -427,7 +426,7 @@
             const uniqueProjects = records
               .map((record) => record.NomProjet)
               .filter((value, index, self) => value && self.indexOf(value) === index)
-              .sort(); // Trie les projets par ordre alphabétique
+              .sort();
       
             projectDropdown.innerHTML = '<option value="">Select an option</option>';
             uniqueProjects.forEach((project) => {
@@ -453,7 +452,7 @@
               .filter((record) => record.NomProjet === projectName)
               .map((record) => record.NomEtage)
               .filter((value, index, self) => value && self.indexOf(value) === index)
-              .sort(); // Trie les tableaux par ordre alphabétique
+              .sort();
       
             secondColumnListbox.innerHTML = '<option value="">Select an option</option>';
             tablesForProject.forEach((table) => {
@@ -500,8 +499,7 @@
           return;
         }
       
-        const projectDropdown = document.getElementById("firstColumnDropdown");
-        const selectedProject = projectDropdown.value.trim();
+        const selectedProject = selectedFirstValue.trim();
       
         if (!selectedProject) {
           alert("Veuillez sélectionner un projet avant d'ajouter un tableau.");
@@ -538,35 +536,35 @@
             // Actualise immédiatement les données locales
             records.push(newRow);
       
-            // Actualise la deuxième liste déroulante
-            const listbox = document.getElementById("secondColumnListbox");
-            const updatedValues = records
+            // Met à jour la deuxième liste déroulante
+            const secondColumnListbox = document.getElementById("secondColumnListbox");
+            const tablesForProject = records
               .filter((record) => record.NomProjet === selectedProject)
               .map((record) => record.NomEtage)
               .filter((value, index, self) => value && self.indexOf(value) === index)
-              .sort(); // Tri des valeurs par ordre alphabétique
+              .sort();
       
-            listbox.innerHTML = '<option value="">Select an option</option>';
-            updatedValues.forEach((value) => {
+            secondColumnListbox.innerHTML = '<option value="">Select an option</option>';
+            tablesForProject.forEach((table) => {
               const option = document.createElement("option");
-              option.value = value;
-              option.text = value;
-              listbox.appendChild(option);
+              option.value = table;
+              option.text = table;
+              secondColumnListbox.appendChild(option);
             });
       
-            // Ajoute l'option "Ajouter Tableau" à la fin
-            const addOption = document.createElement("option");
-            addOption.value = "addTable";
-            addOption.text = "Ajouter Tableau";
-            listbox.appendChild(addOption);
+            // Ajoute l'option "Ajouter Tableau"
+            const addTableOption = document.createElement("option");
+            addTableOption.value = "addTable";
+            addTableOption.text = "Ajouter Tableau";
+            secondColumnListbox.appendChild(addTableOption);
       
             // Sélectionne automatiquement le tableau ajouté
-            listbox.value = newTableName;
+            secondColumnListbox.value = newTableName;
             selectedSecondValue = newTableName;
       
             console.log(`Le tableau "${newTableName}" est maintenant sélectionné.`);
       
-            // Appelle populateTable pour actualiser immédiatement l'affichage du tableau HTML
+            // Affiche directement le tableau dans la vue HTML
             populateTable();
           })
           .catch((error) => {
@@ -577,6 +575,7 @@
             window.isAddingTable = false; // Libère le flag après le processus
           });
       }
+
 
       // Fonction pour ajouter une nouvelle ligne dans Grist
       function addRowToGrist() {
