@@ -491,9 +491,8 @@
           return;
         }
       
-        // Récupère la sélection actuelle du projet
-        const projectDropdown = document.getElementById('firstColumnDropdown');
-        const selectedProject = selectedFirstValue || projectDropdown.value.trim();
+        // Utilise la valeur sélectionnée actuelle dans la première liste déroulante
+        const selectedProject = selectedFirstValue;
       
         if (!selectedProject) {
           alert("Veuillez sélectionner un projet avant d'ajouter un tableau.");
@@ -510,7 +509,7 @@
       
         // Crée une nouvelle ligne pour le tableau
         const newRow = {
-          NomProjet: selectedProject, // Associe le tableau au projet sélectionné
+          NomProjet: selectedProject, // Reste lié au projet actuellement sélectionné
           NomEtage: newTableName,
           Emetteur: '',
           Reference: '',
