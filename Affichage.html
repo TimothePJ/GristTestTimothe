@@ -376,15 +376,20 @@
       
       // Fonction pour ajouter un projet
       function handleAddProject() {
+        if (window.isAddingProject) return; // Empêche les exécutions multiples
+        window.isAddingProject = true; // Flag pour éviter les appels successifs
+      
         const projectName = prompt("Entrez le nom du nouveau projet :");
         if (!projectName || projectName.trim() === "") {
           alert("Le nom du projet ne peut pas être vide.");
+          window.isAddingProject = false; // Libère le flag
           return;
         }
       
         const firstTableName = prompt("Entrez le nom du premier tableau pour ce projet :");
         if (!firstTableName || firstTableName.trim() === "") {
           alert("Le nom du tableau ne peut pas être vide.");
+          window.isAddingProject = false; // Libère le flag
           return;
         }
       
@@ -400,76 +405,105 @@
         const newRow = {
           NomProjet: projectName,
           NomEtage: firstTableName,
-          Emetteur: '',
-          Reference: '',
-          Indice: '',
-          Recu: '',
-          DescriptionObservations: '',
+          Emetteur: "",
+          Reference: "",
+          Indice: "",
+          Recu: "",
+          DescriptionObservations: "",
           ID_Ligne: newIdLigne.toString(),
         };
       
-        // Ajoute la nouvelle ligne dans Grist
-        grist.docApi.applyUserActions([
-          ['AddRecord', 'Fusion', null, newRow],
-        ])
+        grist.docApi
+          .applyUserActions([["AddRecord", "Fusion", null, newRow]])
           .then(() => {
             console.log("Nouveau projet ajouté :", newRow);
       
-            // Actualise immédiatement les données depuis Grist
-            grist.onRecords(function (receivedRecords) {
-              console.log("Records reçus après ajout :", receivedRecords);
+            // Actualise immédiatement les données locales
+            records.push(newRow);
       
-              // Met à jour les données locales
-              records = receivedRecords.map(record => ({
-                NomProjet: record.NomProjet || '',
-                NomEtage: record.NomEtage || '',
-                Emetteur: record.Emetteur || '',
-                Reference: record.Reference || '',
-                Indice: record.Indice || '',
-                Recu: record.Recu || '',
-                DescriptionObservations: record.DescriptionObservations || '',
-                ID_Ligne: record.ID_Ligne || '',
-              }));
+            // Met à jour la première liste déroulante
+            const projectDropdown = document.getElementById("firstColumnDropdown");
+            const uniqueProjects = records
+              .map((record) => record.NomProjet)
+              .filter((value, index, self) => value && self.indexOf(value) === index)
+              .sort();
       
-              // Actualise la première liste déroulante
-              const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
-              populateFirstColumnDropdown(uniqueFirstColumnValues);
-      
-              // Sélectionne automatiquement le projet ajouté
-              const firstColumnDropdown = document.getElementById('firstColumnDropdown');
-              firstColumnDropdown.value = projectName;
-              selectedFirstValue = projectName;
-      
-              // Actualise la deuxième liste et sélectionne automatiquement le tableau ajouté
-              populateSecondColumnListbox(projectName);
-              const secondColumnListbox = document.getElementById('secondColumnListbox');
-              secondColumnListbox.value = firstTableName;
-              selectedSecondValue = firstTableName;
-      
-              // Affiche immédiatement le tableau HTML
-              populateTable();
+            projectDropdown.innerHTML = '<option value="">Select an option</option>';
+            uniqueProjects.forEach((project) => {
+              const option = document.createElement("option");
+              option.value = project;
+              option.text = project;
+              projectDropdown.appendChild(option);
             });
+      
+            // Ajoute l'option "Ajouter Projet"
+            const addProjectOption = document.createElement("option");
+            addProjectOption.value = "Ajouter Projet";
+            addProjectOption.text = "Ajouter Projet";
+            projectDropdown.appendChild(addProjectOption);
+      
+            // Sélectionne automatiquement le projet ajouté
+            projectDropdown.value = projectName;
+            selectedFirstValue = projectName;
+      
+            // Met à jour la deuxième liste déroulante pour ce projet
+            const secondColumnListbox = document.getElementById("secondColumnListbox");
+            const tablesForProject = records
+              .filter((record) => record.NomProjet === projectName)
+              .map((record) => record.NomEtage)
+              .filter((value, index, self) => value && self.indexOf(value) === index)
+              .sort();
+      
+            secondColumnListbox.innerHTML = '<option value="">Select an option</option>';
+            tablesForProject.forEach((table) => {
+              const option = document.createElement("option");
+              option.value = table;
+              option.text = table;
+              secondColumnListbox.appendChild(option);
+            });
+      
+            // Ajoute l'option "Ajouter Tableau"
+            const addTableOption = document.createElement("option");
+            addTableOption.value = "addTable";
+            addTableOption.text = "Ajouter Tableau";
+            secondColumnListbox.appendChild(addTableOption);
+      
+            // Sélectionne automatiquement le tableau ajouté
+            secondColumnListbox.value = firstTableName;
+            selectedSecondValue = firstTableName;
+      
+            console.log(`Le projet "${projectName}" et son tableau "${firstTableName}" sont maintenant sélectionnés.`);
+      
+            // Affiche directement le tableau dans la vue HTML
+            populateTable();
           })
           .catch((error) => {
             console.error("Erreur lors de l'ajout du projet :", error);
             alert("Erreur lors de l'ajout du projet.");
+          })
+          .finally(() => {
+            window.isAddingProject = false; // Libère le flag
           });
       }
-            
+
       // Fonction pour gérer l'ajout d'un tableau
       function handleAddTable() {
+        if (window.isAddingTable) return; // Empêche les exécutions multiples
+        window.isAddingTable = true; // Flag pour bloquer les appels successifs
+      
         const newTableName = prompt("Entrez le nom du nouveau tableau :");
       
         if (!newTableName || newTableName.trim() === "") {
           alert("Le nom du tableau ne peut pas être vide.");
+          window.isAddingTable = false; // Libère le flag
           return;
         }
       
-        const projectDropdown = document.getElementById('firstColumnDropdown');
-        const selectedProject = projectDropdown.value.trim();
+        const selectedProject = selectedFirstValue.trim();
       
         if (!selectedProject) {
           alert("Veuillez sélectionner un projet avant d'ajouter un tableau.");
+          window.isAddingTable = false; // Libère le flag
           return;
         }
       
@@ -485,72 +519,63 @@
         const newRow = {
           NomProjet: selectedProject,
           NomEtage: newTableName,
-          Emetteur: '',
-          Reference: '',
-          Indice: '',
-          Recu: '',
-          DescriptionObservations: '',
+          Emetteur: "",
+          Reference: "",
+          Indice: "",
+          Recu: "",
+          DescriptionObservations: "",
           ID_Ligne: newIdLigne.toString(),
         };
       
         // Ajoute la nouvelle ligne dans Grist
-        grist.docApi.applyUserActions([
-          ['AddRecord', 'Fusion', null, newRow],
-        ])
+        grist.docApi
+          .applyUserActions([["AddRecord", "Fusion", null, newRow]])
           .then(() => {
             console.log("Nouveau tableau ajouté :", newRow);
       
-            // Actualise immédiatement les données depuis Grist
-            grist.onRecords(function (receivedRecords) {
-              console.log("Records reçus après ajout :", receivedRecords);
+            // Actualise immédiatement les données locales
+            records.push(newRow);
       
-              // Met à jour les données locales
-              records = receivedRecords.map(record => ({
-                NomProjet: record.NomProjet || '',
-                NomEtage: record.NomEtage || '',
-                Emetteur: record.Emetteur || '',
-                Reference: record.Reference || '',
-                Indice: record.Indice || '',
-                Recu: record.Recu || '',
-                DescriptionObservations: record.DescriptionObservations || '',
-                ID_Ligne: record.ID_Ligne || '',
-              }));
+            // Met à jour la deuxième liste déroulante
+            const secondColumnListbox = document.getElementById("secondColumnListbox");
+            const tablesForProject = records
+              .filter((record) => record.NomProjet === selectedProject)
+              .map((record) => record.NomEtage)
+              .filter((value, index, self) => value && self.indexOf(value) === index)
+              .sort();
       
-              // Actualise la deuxième liste déroulante
-              const listbox = document.getElementById('secondColumnListbox');
-              const options = Array.from(listbox.options);
-      
-              // Ajoute la nouvelle option
-              options.push(new Option(newTableName, newTableName));
-      
-              // Trie les options par ordre alphabétique (sans "Select an option" ni "Ajouter Tableau")
-              const sortableOptions = options.filter(
-                option => option.value !== "" && option.value !== "Ajouter Tableau"
-              );
-      
-              sortableOptions.sort((a, b) => a.text.localeCompare(b.text));
-      
-              // Réinsère les options avec "Select an option" en premier et "Ajouter Tableau" en dernier
-              listbox.innerHTML = '';
-              listbox.appendChild(new Option("Select an option", ""));
-              sortableOptions.forEach(option => listbox.add(option));
-              listbox.appendChild(new Option("Ajouter Tableau", "Ajouter Tableau"));
-      
-              // Sélectionne automatiquement le tableau ajouté
-              listbox.value = newTableName;
-              selectedSecondValue = newTableName;
-      
-              console.log(`Le tableau "${newTableName}" est maintenant sélectionné.`);
-      
-              // Appelle populateTable pour actualiser immédiatement l'affichage du tableau HTML
-              populateTable();
+            secondColumnListbox.innerHTML = '<option value="">Select an option</option>';
+            tablesForProject.forEach((table) => {
+              const option = document.createElement("option");
+              option.value = table;
+              option.text = table;
+              secondColumnListbox.appendChild(option);
             });
+      
+            // Ajoute l'option "Ajouter Tableau"
+            const addTableOption = document.createElement("option");
+            addTableOption.value = "addTable";
+            addTableOption.text = "Ajouter Tableau";
+            secondColumnListbox.appendChild(addTableOption);
+      
+            // Sélectionne automatiquement le tableau ajouté
+            secondColumnListbox.value = newTableName;
+            selectedSecondValue = newTableName;
+      
+            console.log(`Le tableau "${newTableName}" est maintenant sélectionné.`);
+      
+            // Affiche directement le tableau dans la vue HTML
+            populateTable();
           })
           .catch((error) => {
             console.error("Erreur lors de l'ajout du tableau :", error);
             alert("Erreur lors de l'ajout du tableau.");
+          })
+          .finally(() => {
+            window.isAddingTable = false; // Libère le flag après le processus
           });
       }
+
 
       // Fonction pour ajouter une nouvelle ligne dans Grist
       function addRowToGrist() {
@@ -745,6 +770,16 @@
           Array.from(files).forEach(file => {
             addRowWithFileName(file.name); // Ajoute une ligne pour chaque fichier sélectionné
           });
+        }
+      });
+
+      document.getElementById("secondColumnListbox").addEventListener("change", function () {
+        const selectedValue = this.value;
+        if (selectedValue === "addTable") {
+          handleAddTable(); // Ajoute un tableau si l'option correspondante est sélectionnée
+        } else {
+          selectedSecondValue = selectedValue; // Met à jour la valeur sélectionnée
+          populateTable(); // Actualise l'affichage du tableau HTML
         }
       });
       
