@@ -173,30 +173,36 @@
 
       // Fonction pour peupler la première liste déroulante avec des valeurs uniques de la première colonne
       function populateFirstColumnDropdown(values) {
-        const dropdown = document.getElementById('firstColumnDropdown');
-        
+        const dropdown = document.getElementById("firstColumnDropdown");
+      
         // Conserve la sélection actuelle
         const currentSelection = dropdown.value;
       
         dropdown.innerHTML = '<option value="">Select an option</option>'; // Réinitialise la liste déroulante
       
-        values.sort().forEach(value => {
-          if (value) {  // Ignore les valeurs nulles ou vides
-            const option = document.createElement('option');
+        values.sort().forEach((value) => {
+          if (value) {
+            const option = document.createElement("option");
             option.value = value;
             option.text = value;
             dropdown.appendChild(option);
           }
         });
       
-        // Ajoute l'option "Ajouter Projet" à la fin
-        const addProjectOption = document.createElement('option');
+        // Ajoute l'option "Ajouter Projet"
+        const addProjectOption = document.createElement("option");
         addProjectOption.value = "Ajouter Projet";
         addProjectOption.text = "Ajouter Projet";
         dropdown.appendChild(addProjectOption);
       
+        // Ajoute l'option "Insérer Projet"
+        const insertProjectOption = document.createElement("option");
+        insertProjectOption.value = "Insérer Projet";
+        insertProjectOption.text = "Insérer Projet";
+        dropdown.appendChild(insertProjectOption);
+      
         // Restaure la sélection précédente si elle est encore présente
-        dropdown.value = currentSelection || ''; // Conserve l'option sélectionnée ou reste sur "Select an option"
+        dropdown.value = currentSelection || ""; // Conserve l'option sélectionnée ou reste sur "Select an option"
       }
 
       // Écouteur d'événement pour mettre à jour la valeur sélectionnée dans la première liste
