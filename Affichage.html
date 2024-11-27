@@ -171,6 +171,7 @@
       let selectedFirstValue = '';
       let selectedSecondValue = '';
       let selectedRecordId = null;
+      let lastSelectedValue = '';
 
       // Ready Grist
       grist.ready();
@@ -211,14 +212,22 @@
       }
 
       // Écouteur d'événement pour mettre à jour la valeur sélectionnée dans la première liste
-      document.getElementById('firstColumnDropdown').addEventListener('change', function() {
-        selectedFirstValue = this.value;
-        if (selectedFirstValue) {
-          populateSecondColumnListbox(selectedFirstValue);
+      document.getElementById('firstColumnDropdown').addEventListener('change', function () {
+        const selectedValue = this.value;
+      
+        // Déclenche les actions selon la sélection
+        if (selectedValue === "Ajouter Projet") {
+          handleAddProject(); // Ajouter un projet
+        } else if (selectedValue === "Insérer Projet") {
+          handleInsertProject(); // Insérer un projet
         } else {
-          document.getElementById('secondColumnListbox').innerHTML = '';  // Efface la seconde liste si aucune sélection
+          selectedFirstValue = selectedValue;
+          populateSecondColumnListbox(selectedFirstValue); // Actualise la deuxième liste
         }
-      });  
+      
+        // Met à jour la dernière valeur sélectionnée
+        lastSelectedValue = selectedValue;
+      });
 
       // Function to populate the second dropdown based on the selected first column value
       function populateSecondColumnListbox(selectedValue) {
@@ -773,12 +782,12 @@
         }
       });
 
-      document.getElementById('firstColumnDropdown').addEventListener('click', function (event) {
-        const selectedValue = this.value;
+      document.getElementById('firstColumnDropdown').addEventListener('click', function () {
+        const dropdown = this;
       
-        // Vérifie si "Insérer Projet" est sélectionné
-        if (selectedValue === "Insérer Projet") {
-          handleInsertProject(); // Appelle la fonction pour gérer l'insertion
+        // Réinitialise la sélection si on clique à nouveau
+        if (dropdown.value === lastSelectedValue) {
+          dropdown.selectedIndex = -1; // Réinitialise la sélection visuellement
         }
       });
 
