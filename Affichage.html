@@ -806,26 +806,20 @@
         }
       
         try {
-          // Récupère les lignes actuelles depuis Grist
+          // Charger les lignes actuelles depuis Grist
           const gristTableData = await grist.docApi.fetchTable("Fusion");
           const gristRecords = gristTableData.records || [];
-          records = gristRecords.map((record) => ({
-            NomProjet: record.NomProjet || '',
-            NomEtage: record.NomEtage || '',
-            Emetteur: record.Emetteur || '',
-            Reference: record.Reference || '',
-            Indice: record.Indice || '',
-            Recu: record.Recu || '',
-            DescriptionObservations: record.DescriptionObservations || '',
-            ID_Ligne: record.ID_Ligne || '',
+          
+          // Préparer les données existantes pour la comparaison
+          const existingData = gristRecords.map((record) => ({
+            col1: record.NomProjet || '',
+            col2: record.NomEtage || '',
+            col3: record.Emetteur || '',
+            col4: record.Reference || '',
+            col5: record.Indice || '',
+            col6: record.Recu || '',
+            col7: record.DescriptionObservations || '',
           }));
-      
-          // Créer un ensemble des clés existantes dans Grist pour les comparaisons
-          const existingKeys = new Set(
-            records.map((record) =>
-              `${record.NomProjet}|${record.NomEtage}|${record.Emetteur}|${record.Reference}|${record.Indice}|${record.Recu}|${record.DescriptionObservations}`
-            )
-          );
       
           for (const file of files) {
             const workbook = await readXLSX(file);
@@ -835,127 +829,74 @@
               continue;
             }
       
-            // Récupérer le nom du projet
+            // Extraire les lignes du tableau Excel
             const range = XLSX.utils.decode_range(feuilleFichiers["!ref"]);
-            const projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
-            if (!projectNameCell || !projectNameCell.v) {
-              alert(`Le nom du projet est introuvable dans le fichier ${file.name}.`);
-              continue;
+            const rowsToInsert = [];
+            for (let r = 1; r <= range.e.r; r++) {
+              const rowData = [];
+              for (let c = 0; c < 7; c++) {
+                const cell = feuilleFichiers[XLSX.utils.encode_cell({ r, c })];
+                rowData.push(cell?.v || '');
+              }
+      
+              // Vérification des doublons
+              let isDuplicate = false;
+              let potentialMatches = existingData;
+      
+              for (let i = 0; i < 7; i++) {
+                // Filtrer les correspondances pour la colonne i
+                potentialMatches = potentialMatches.filter(
+                  (record) => record[`col${i + 1}`] === rowData[i]
+                );
+      
+                if (potentialMatches.length === 0) {
+                  // Si aucune correspondance à cette étape, ce n'est pas un doublon
+                  break;
+                }
+      
+                if (i === 6 && potentialMatches.length > 0) {
+                  // Si toutes les colonnes correspondent
+                  isDuplicate = true;
+                }
+              }
+      
+              if (!isDuplicate) {
+                rowsToInsert.push(rowData); // Ajouter la ligne à insérer
+              } else {
+                console.log("Doublon détecté :", rowData);
+              }
             }
       
-            const projectName = projectNameCell.v.split(":").pop().trim();
-            console.log("Nom du projet extrait :", projectName);
-      
-            // Ajouter le projet si nécessaire
-            const projectExists = records.some((record) => record.NomProjet === projectName);
-      
-            if (!projectExists) {
-              const maxIdLigne = records.reduce((max, record) => {
+            // Ajouter les nouvelles lignes dans Grist
+            if (rowsToInsert.length > 0) {
+              const actions = [];
+              const maxIdLigne = gristRecords.reduce((max, record) => {
                 const idLigne = parseInt(record.ID_Ligne, 10);
                 return idLigne > max ? idLigne : max;
               }, 0);
       
-              const newProjectId = maxIdLigne + 1;
-              const projectRow = {
-                NomProjet: projectName,
-                NomEtage: "",
-                Emetteur: "",
-                Reference: "",
-                Indice: "",
-                Recu: "",
-                DescriptionObservations: "",
-                ID_Ligne: newProjectId.toString(),
-              };
+              rowsToInsert.forEach((row, index) => {
+                actions.push([
+                  "AddRecord",
+                  "Fusion",
+                  null,
+                  {
+                    NomProjet: row[0],
+                    NomEtage: row[1],
+                    Emetteur: row[2],
+                    Reference: row[3],
+                    Indice: row[4],
+                    Recu: row[5],
+                    DescriptionObservations: row[6],
+                    ID_Ligne: (maxIdLigne + index + 1).toString(),
+                  },
+                ]);
+              });
       
-              await grist.docApi.applyUserActions([["AddRecord", "Fusion", null, projectRow]]);
-              records.push(projectRow);
-              console.log("Projet ajouté :", projectRow);
-            }
-      
-            // Extraire les tableaux et leurs lignes
-            const tableNames = [];
-            for (let r = 1; r <= range.e.r; r++) {
-              const firstColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 0 })];
-              const thirdColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 2 })];
-      
-              if (firstColCell && firstColCell.v === "Feuille" && thirdColCell && thirdColCell.v) {
-                tableNames.push({ name: thirdColCell.v.trim(), row: r + 3 });
-              }
-            }
-      
-            console.log("Noms des tableaux extraits :", tableNames);
-      
-            for (const { name: tableName, row: startRow } of tableNames) {
-              const tableRows = [];
-      
-              for (let r = startRow; r <= range.e.r; r++) {
-                const firstColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 0 })];
-                if (firstColCell && firstColCell.v === "*") break;
-      
-                const rowData = [];
-                for (let c = 0; c < 5; c++) {
-                  const cell = feuilleFichiers[XLSX.utils.encode_cell({ r, c })];
-                  rowData.push(cell?.v || null);
-                }
-      
-                // Remplir les cellules vides de la première colonne
-                if (!rowData[0]) {
-                  rowData[0] = tableRows.length > 0 ? tableRows[tableRows.length - 1][0] : null;
-                }
-      
-                tableRows.push(rowData);
-              }
-      
-              console.log(`Données pour le tableau "${tableName}" :`, tableRows);
-      
-              // Ajouter chaque ligne dans Grist, en vérifiant les doublons
-              const actions = [];
-              for (const row of tableRows) {
-                const rowKey = `${projectName}|${tableName}|${row[0]}|${row[1]}|${row[2]}|${row[3]}|${row[4]}`;
-      
-                if (!existingKeys.has(rowKey)) {
-                  existingKeys.add(rowKey);
-      
-                  const maxIdLigne = records.reduce((max, record) => {
-                    const idLigne = parseInt(record.ID_Ligne, 10);
-                    return idLigne > max ? idLigne : max;
-                  }, 0);
-      
-                  const newRow = {
-                    NomProjet: projectName,
-                    NomEtage: tableName,
-                    Emetteur: row[0],
-                    Reference: row[1],
-                    Indice: row[2],
-                    Recu: row[3],
-                    DescriptionObservations: row[4],
-                    ID_Ligne: (maxIdLigne + 1).toString(),
-                  };
-      
-                  records.push(newRow);
-                  actions.push(["AddRecord", "Fusion", null, newRow]);
-                } else {
-                  console.log(`Doublon détecté dans Grist :`, row);
-                }
-              }
-      
-              if (actions.length > 0) {
-                await grist.docApi.applyUserActions(actions);
-                console.log(`Tableau "${tableName}" ajouté avec ${actions.length} lignes.`);
-              } else {
-                console.log(
-                  `Aucune nouvelle ligne ajoutée pour le tableau "${tableName}", tous les enregistrements sont déjà dans Grist.`
-                );
-              }
-            }
-      
-            // Rafraîchir les listes
-            populateFirstColumnDropdown(
-              [...new Set(records.map((record) => record.NomProjet))].sort()
-            );
-      
-            if (projectName === selectedFirstValue) {
-              populateSecondColumnListbox(projectName);
+              await grist.docApi.applyUserActions(actions);
+              console.log(`${rowsToInsert.length} nouvelles lignes ajoutées.`);
+            } else {
+              console.log("Aucune nouvelle ligne ajoutée, tous les enregistrements étaient des doublons.");
             }
           }
         } catch (error) {
