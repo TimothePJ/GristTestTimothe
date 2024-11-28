@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <title>Grist Two-Step Selection with Editable Table</title>
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
       body {
         margin: 0;
@@ -133,6 +134,7 @@
           <option value="">Select an option</option>
           <option value="addTable">AJOUTER TABLEAU</option>
         </select>
+        <input type="file" id="fileInputProject" style="display: none;" accept=".xls,.xlsx,.xlsm" />
       </div>
     </div>
 
@@ -173,41 +175,54 @@
 
       // Fonction pour peupler la première liste déroulante avec des valeurs uniques de la première colonne
       function populateFirstColumnDropdown(values) {
-        const dropdown = document.getElementById('firstColumnDropdown');
-        
+        const dropdown = document.getElementById("firstColumnDropdown");
+      
         // Conserve la sélection actuelle
         const currentSelection = dropdown.value;
       
         dropdown.innerHTML = '<option value="">Select an option</option>'; // Réinitialise la liste déroulante
       
-        values.sort().forEach(value => {
-          if (value) {  // Ignore les valeurs nulles ou vides
-            const option = document.createElement('option');
+        values.sort().forEach((value) => {
+          if (value) {
+            const option = document.createElement("option");
             option.value = value;
             option.text = value;
             dropdown.appendChild(option);
           }
         });
       
-        // Ajoute l'option "Ajouter Projet" à la fin
-        const addProjectOption = document.createElement('option');
+        // Ajoute l'option "Ajouter Projet"
+        const addProjectOption = document.createElement("option");
         addProjectOption.value = "Ajouter Projet";
         addProjectOption.text = "Ajouter Projet";
         dropdown.appendChild(addProjectOption);
       
+        // Ajoute l'option "Insérer Projet"
+        const insertProjectOption = document.createElement("option");
+        insertProjectOption.value = "Insérer Projet";
+        insertProjectOption.text = "Insérer Projet";
+        dropdown.appendChild(insertProjectOption);
+      
         // Restaure la sélection précédente si elle est encore présente
-        dropdown.value = currentSelection || ''; // Conserve l'option sélectionnée ou reste sur "Select an option"
+        dropdown.value = currentSelection || ""; // Conserve l'option sélectionnée ou reste sur "Select an option"
       }
 
       // Écouteur d'événement pour mettre à jour la valeur sélectionnée dans la première liste
-      document.getElementById('firstColumnDropdown').addEventListener('change', function() {
-        selectedFirstValue = this.value;
-        if (selectedFirstValue) {
-          populateSecondColumnListbox(selectedFirstValue);
+      document.getElementById("firstColumnDropdown").addEventListener("change", function () {
+        const selectedValue = this.value;
+      
+        if (selectedValue === "Ajouter Projet") {
+          handleAddProject(); // Logique d'ajout d'un projet
+        } else if (selectedValue === "Insérer Projet") {
+          // Ouvre l'explorateur de fichiers
+          document.getElementById("fileInputProject").click();
+          // Réinitialise la sélection de la liste déroulante après avoir ouvert l'explorateur
+          this.value = ""; 
         } else {
-          document.getElementById('secondColumnListbox').innerHTML = '';  // Efface la seconde liste si aucune sélection
+          selectedFirstValue = selectedValue;
+          populateSecondColumnListbox(selectedFirstValue); // Actualise la deuxième liste
         }
-      });  
+      });
 
       // Function to populate the second dropdown based on the selected first column value
       function populateSecondColumnListbox(selectedValue) {
@@ -782,7 +797,196 @@
           populateTable(); // Actualise l'affichage du tableau HTML
         }
       });
+
+      document.getElementById("fileInputProject").addEventListener("change", async function (event) {
+        const file = event.target.files[0];
+        if (!file) {
+          alert("Aucun fichier sélectionné.");
+          return;
+        }
       
+        try {
+          const workbook = await readXLSX(file);
+          const feuilleFichiers = workbook.Sheets["Fichiers"];
+          if (!feuilleFichiers) {
+            alert("La feuille 'Fichiers' est introuvable dans le fichier sélectionné.");
+            return;
+          }
+      
+          // Récupérer le nom du projet dans la deuxième colonne de la première ligne
+          const range = XLSX.utils.decode_range(feuilleFichiers["!ref"]);
+          const projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
+          if (!projectNameCell || !projectNameCell.v) {
+            alert("Le nom du projet est introuvable.");
+            return;
+          }
+      
+          const projectName = projectNameCell.v.split(":").pop().trim();
+          console.log("Nom du projet extrait :", projectName);
+      
+          // Ajouter le projet dans Grist
+          const maxIdLigne = records.reduce((max, record) => {
+            const idLigne = parseInt(record.ID_Ligne, 10);
+            return idLigne > max ? idLigne : max;
+          }, 0);
+          const newProjectId = maxIdLigne + 1;
+      
+          const projectRow = {
+            NomProjet: projectName,
+            NomEtage: "", // Les tableaux seront ajoutés ensuite
+            Emetteur: "",
+            Reference: "",
+            Indice: "",
+            Recu: "",
+            DescriptionObservations: "",
+            ID_Ligne: newProjectId.toString(),
+          };
+      
+          await grist.docApi.applyUserActions([["AddRecord", "Fusion", null, projectRow]]);
+          records.push(projectRow);
+          console.log("Projet ajouté :", projectRow);
+      
+          // Maintenant, chercher les lignes avec "Feuille" dans la première colonne
+          const tableNames = [];
+          for (let r = 1; r <= range.e.r; r++) {
+            const firstColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 0 })];
+            const thirdColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 2 })];
+      
+            if (firstColCell && firstColCell.v === "Feuille" && thirdColCell && thirdColCell.v) {
+              tableNames.push(thirdColCell.v.trim());
+            }
+          }
+      
+          console.log("Noms des tableaux extraits :", tableNames);
+      
+          // Ajouter chaque tableau dans Grist
+          const actions = tableNames.map((tableName, index) => {
+            const tableRow = {
+              NomProjet: projectName,
+              NomEtage: tableName,
+              Emetteur: "",
+              Reference: "",
+              Indice: "",
+              Recu: "",
+              DescriptionObservations: "",
+              ID_Ligne: (newProjectId + index + 1).toString(),
+            };
+            records.push(tableRow);
+            return ["AddRecord", "Fusion", null, tableRow];
+          });
+      
+          await grist.docApi.applyUserActions(actions);
+          console.log("Tableaux ajoutés :", tableNames);
+      
+          // Rafraîchir les listes dans Grist
+          populateFirstColumnDropdown(
+            [...new Set(records.map((record) => record.NomProjet))].sort()
+          );
+      
+          if (projectName === selectedFirstValue) {
+            populateSecondColumnListbox(projectName);
+          }
+      
+          alert(`Projet "${projectName}" et ses tableaux ont été importés avec succès.`);
+        } catch (error) {
+          console.error("Erreur lors de l'importation :", error);
+          alert("Une erreur est survenue lors de l'importation.");
+        }
+      });
+
+      // Fonction pour ajouter le projet à Grist
+      function addProjectToGrist(projectName) {
+        const maxIdLigne = records.reduce((max, record) => {
+          const idLigne = parseInt(record.ID_Ligne, 10);
+          return idLigne > max ? idLigne : max;
+        }, 0);
+      
+        const newIdLigne = maxIdLigne + 1;
+      
+        const newRow = {
+          NomProjet: projectName,
+          NomEtage: "Tableau par défaut", // Par défaut pour un projet importé
+          Emetteur: "",
+          Reference: "",
+          Indice: "",
+          Recu: "",
+          DescriptionObservations: "",
+          ID_Ligne: newIdLigne.toString(),
+        };
+      
+        // Ajoute le nouveau projet dans Grist
+        grist.docApi
+          .applyUserActions([["AddRecord", "Fusion", null, newRow]])
+          .then(() => {
+            console.log("Projet importé avec succès :", newRow);
+      
+            // Rafraîchit les données locales
+            records.push(newRow);
+      
+            // Met à jour la liste des projets
+            updateProjectDropdown();
+      
+            // Sélectionne automatiquement le projet importé
+            const firstColumnDropdown = document.getElementById("firstColumnDropdown");
+            firstColumnDropdown.value = projectName;
+            selectedFirstValue = projectName;
+      
+            // Actualise la deuxième liste déroulante
+            populateSecondColumnListbox(projectName);
+          })
+          .catch((error) => {
+            console.error("Erreur lors de l'importation du projet :", error);
+            alert("Une erreur s'est produite lors de l'importation du projet.");
+          });
+      }
+
+      // Met à jour la liste déroulante des projets
+      function updateProjectDropdown() {
+        const firstColumnDropdown = document.getElementById("firstColumnDropdown");
+        const uniqueProjects = [...new Set(records.map((record) => record.NomProjet))].sort();
+      
+        firstColumnDropdown.innerHTML = '<option value="">Select an option</option>';
+        uniqueProjects.forEach((project) => {
+          const option = document.createElement("option");
+          option.value = project;
+          option.text = project;
+          firstColumnDropdown.appendChild(option);
+        });
+      
+        // Ajoute l'option "Ajouter Projet" et "Insérer Projet"
+        const addProjectOption = document.createElement("option");
+        addProjectOption.value = "Ajouter Projet";
+        addProjectOption.text = "Ajouter Projet";
+        firstColumnDropdown.appendChild(addProjectOption);
+      
+        const insertProjectOption = document.createElement("option");
+        insertProjectOption.value = "Insérer Projet";
+        insertProjectOption.text = "Insérer Projet";
+        firstColumnDropdown.appendChild(insertProjectOption);
+      }
+
+      function readXLSX(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+      
+          reader.onload = (event) => {
+            try {
+              const data = new Uint8Array(event.target.result);
+              const workbook = XLSX.read(data, { type: "array" });
+              resolve(workbook);
+            } catch (error) {
+              reject(error);
+            }
+          };
+      
+          reader.onerror = (error) => {
+            reject(error);
+          };
+      
+          reader.readAsArrayBuffer(file);
+        });
+      }
+
     </script>
   </body>
 </html>
