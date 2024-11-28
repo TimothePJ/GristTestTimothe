@@ -797,7 +797,7 @@
           populateTable(); // Actualise l'affichage du tableau HTML
         }
       });
-      
+  
       document.getElementById("fileInputProject").addEventListener("change", async function (event) {
         const files = event.target.files;
         if (!files.length) {
@@ -851,73 +851,95 @@
               console.log("Projet ajouté :", projectRow);
             }
       
-            // Comparaison et ajout des lignes
-            const actions = [];
-            for (let r = 3; r <= range.e.r; r++) {
+            // Extraire les tableaux et leurs lignes
+            const tableNames = [];
+            for (let r = 1; r <= range.e.r; r++) {
               const firstColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 0 })];
-              const tableauCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 2, c: 2 })]; // Nom du tableau (2e colonne)
-              const tableauName = tableauCell?.v?.trim();
-              if (!tableauName || (firstColCell && firstColCell.v === "Feuille")) {
-                // Exclure explicitement les lignes contenant "Feuille"
-                continue;
-              }
+              const thirdColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 2 })];
       
-              // Construire la ligne transformée
-              const rowData = [];
-              for (let c = 0; c < 5; c++) {
-                const cell = feuilleFichiers[XLSX.utils.encode_cell({ r, c })];
-                rowData.push(cell?.v || null);
-              }
-      
-              // Compléter les données manquantes avec les valeurs au-dessus
-              if (!rowData[0]) {
-                rowData[0] = actions.length > 0 ? actions[actions.length - 1][0] : null;
-              }
-      
-              // Construire la ligne au format Grist
-              const newRow = {
-                NomProjet: projectName, // 1ère colonne
-                NomEtage: tableauName, // 2ème colonne
-                Emetteur: rowData[0], // 3ème colonne
-                Reference: rowData[1], // 4ème colonne
-                Indice: rowData[2], // 5ème colonne
-                Recu: rowData[3], // 6ème colonne
-                DescriptionObservations: rowData[4], // 7ème colonne
-              };
-      
-              // Comparer avec les données existantes
-              const isDuplicate = records.some((record) => {
-                return (
-                  record.NomProjet === newRow.NomProjet && // Comparer 1ère colonne
-                  record.NomEtage === newRow.NomEtage && // Comparer 2ème colonne
-                  record.Emetteur === newRow.Emetteur && // Comparer 3ème colonne
-                  record.Reference === newRow.Reference && // Comparer 4ème colonne
-                  record.Indice === newRow.Indice && // Comparer 5ème colonne
-                  record.Recu === newRow.Recu && // Comparer 6ème colonne
-                  record.DescriptionObservations === newRow.DescriptionObservations // Comparer 7ème colonne
-                );
-              });
-      
-              if (!isDuplicate) {
-                const maxIdLigne = records.reduce((max, record) => {
-                  const idLigne = parseInt(record.ID_Ligne, 10);
-                  return idLigne > max ? idLigne : max;
-                }, 0);
-      
-                const fullRow = { ...newRow, ID_Ligne: (maxIdLigne + 1).toString() };
-                actions.push(["AddRecord", "Fusion", null, fullRow]);
-                records.push(fullRow); // Ajouter aux données locales
-              } else {
-                console.log("Doublon détecté :", newRow);
+              if (firstColCell && firstColCell.v === "Feuille" && thirdColCell && thirdColCell.v) {
+                tableNames.push({ name: thirdColCell.v.trim(), row: r + 3 });
               }
             }
       
-            // Ajouter toutes les lignes non dupliquées à Grist
-            if (actions.length > 0) {
-              await grist.docApi.applyUserActions(actions);
-              console.log(`Lignes ajoutées avec succès :`, actions);
-            } else {
-              console.log(`Aucune nouvelle ligne ajoutée pour le projet "${projectName}".`);
+            console.log("Noms des tableaux extraits :", tableNames);
+      
+            for (const { name: tableName, row: startRow } of tableNames) {
+              const tableRows = [];
+      
+              for (let r = startRow; r <= range.e.r; r++) {
+                const firstColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 0 })];
+                if (firstColCell && firstColCell.v === "*") break;
+      
+                const rowData = [];
+                for (let c = 0; c < 5; c++) {
+                  const cell = feuilleFichiers[XLSX.utils.encode_cell({ r, c })];
+                  rowData.push(cell?.v || null);
+                }
+      
+                // Remplir les cellules vides de la première colonne
+                if (!rowData[0]) {
+                  rowData[0] = tableRows.length > 0 ? tableRows[tableRows.length - 1][0] : null;
+                }
+      
+                tableRows.push(rowData);
+              }
+      
+              console.log(`Données pour le tableau "${tableName}" :`, tableRows);
+      
+              // Comparer et ajouter les nouvelles lignes
+              const actions = [];
+              for (const row of tableRows) {
+                // Construire la ligne transformée à comparer
+                const transformedRow = {
+                  NomProjet: projectName,
+                  NomEtage: tableName,
+                  Emetteur: row[0],
+                  Reference: row[1],
+                  Indice: row[2],
+                  Recu: row[3],
+                  DescriptionObservations: row[4],
+                };
+      
+                // Comparaison colonne par colonne
+                const isDuplicate = records.some((record) => {
+                  return (
+                    record.NomProjet === transformedRow.NomProjet &&
+                    record.NomEtage === transformedRow.NomEtage &&
+                    record.Emetteur === transformedRow.Emetteur &&
+                    record.Reference === transformedRow.Reference &&
+                    record.Indice === transformedRow.Indice &&
+                    record.Recu === transformedRow.Recu &&
+                    record.DescriptionObservations === transformedRow.DescriptionObservations
+                  );
+                });
+      
+                if (!isDuplicate) {
+                  const maxIdLigne = records.reduce((max, record) => {
+                    const idLigne = parseInt(record.ID_Ligne, 10);
+                    return idLigne > max ? idLigne : max;
+                  }, 0);
+      
+                  const newRow = {
+                    ...transformedRow,
+                    ID_Ligne: (maxIdLigne + 1).toString(),
+                  };
+      
+                  records.push(newRow);
+                  actions.push(["AddRecord", "Fusion", null, newRow]);
+                } else {
+                  console.log("Doublon détecté :", transformedRow);
+                }
+              }
+      
+              if (actions.length > 0) {
+                await grist.docApi.applyUserActions(actions);
+                console.log(`Tableau "${tableName}" ajouté avec ${actions.length} lignes.`);
+              } else {
+                console.log(
+                  `Aucune nouvelle ligne ajoutée pour le tableau "${tableName}", tous les enregistrements sont déjà dans Grist.`
+                );
+              }
             }
       
             // Rafraîchir les listes
