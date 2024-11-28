@@ -887,10 +887,10 @@
       
               console.log(`Données pour le tableau "${tableName}" :`, tableRows);
       
-              // Vérification des doublons et ajout des nouvelles lignes
+              // Comparer et ajouter les nouvelles lignes
               const actions = [];
               for (const row of tableRows) {
-                // Transforme la ligne en une structure complète avec le projet et le tableau
+                // Construire la ligne transformée à comparer
                 const transformedRow = {
                   NomProjet: projectName,
                   NomEtage: tableName,
@@ -901,33 +901,18 @@
                   DescriptionObservations: row[4],
                 };
       
-                let isDuplicate = false;
-                let potentialMatches = records;
-      
                 // Comparaison colonne par colonne
-                for (let i = 0; i < 7; i++) {
-                  const keyMap = [
-                    "NomProjet",
-                    "NomEtage",
-                    "Emetteur",
-                    "Reference",
-                    "Indice",
-                    "Recu",
-                    "DescriptionObservations",
-                  ];
-      
-                  potentialMatches = potentialMatches.filter(
-                    (record) => record[keyMap[i]] === transformedRow[keyMap[i]]
+                const isDuplicate = records.some((record) => {
+                  return (
+                    record.NomProjet === transformedRow.NomProjet &&
+                    record.NomEtage === transformedRow.NomEtage &&
+                    record.Emetteur === transformedRow.Emetteur &&
+                    record.Reference === transformedRow.Reference &&
+                    record.Indice === transformedRow.Indice &&
+                    record.Recu === transformedRow.Recu &&
+                    record.DescriptionObservations === transformedRow.DescriptionObservations
                   );
-      
-                  if (potentialMatches.length === 0) {
-                    break;
-                  }
-      
-                  if (i === 6 && potentialMatches.length > 0) {
-                    isDuplicate = true;
-                  }
-                }
+                });
       
                 if (!isDuplicate) {
                   const maxIdLigne = records.reduce((max, record) => {
