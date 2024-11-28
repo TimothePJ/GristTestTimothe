@@ -827,7 +827,6 @@
       
             // Ajouter le projet si nécessaire
             const projectExists = records.some((record) => record.NomProjet === projectName);
-      
             if (!projectExists) {
               const maxIdLigne = records.reduce((max, record) => {
                 const idLigne = parseInt(record.ID_Ligne, 10);
@@ -851,7 +850,7 @@
               console.log("Projet ajouté :", projectRow);
             }
       
-            // Extraire les tableaux et leurs lignes
+            // Parcourir les tableaux et ajouter les lignes
             const tableNames = [];
             for (let r = 1; r <= range.e.r; r++) {
               const firstColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 0 })];
@@ -890,7 +889,7 @@
               // Comparer et ajouter les nouvelles lignes
               const actions = [];
               for (const row of tableRows) {
-                // Construire la ligne transformée à comparer
+                // Construire la ligne transformée au format Grist
                 const transformedRow = {
                   NomProjet: projectName,
                   NomEtage: tableName,
@@ -901,7 +900,7 @@
                   DescriptionObservations: row[4],
                 };
       
-                // Comparaison colonne par colonne
+                // Comparer colonne par colonne
                 const isDuplicate = records.some((record) => {
                   return (
                     record.NomProjet === transformedRow.NomProjet &&
