@@ -851,15 +851,6 @@
               console.log("Projet ajouté :", projectRow);
             }
       
-            // Créer un ensemble des clés des lignes existantes dans Grist
-            const existingKeys = new Set(
-              records
-                .filter((record) => record.NomProjet === projectName)
-                .map((record) =>
-                  `${record.NomProjet}|${record.NomEtage}|${record.Emetteur}|${record.Reference}|${record.Indice}|${record.Recu}|${record.DescriptionObservations}`
-                )
-            );
-      
             // Extraire les tableaux et leurs lignes
             const tableNames = [];
             for (let r = 1; r <= range.e.r; r++) {
@@ -881,7 +872,7 @@
                 if (firstColCell && firstColCell.v === "*") break;
       
                 const rowData = [];
-                for (let c = 0; c < 5; c++) {
+                for (let c = 0; c < 7; c++) {
                   const cell = feuilleFichiers[XLSX.utils.encode_cell({ r, c })];
                   rowData.push(cell?.v || null);
                 }
@@ -896,14 +887,35 @@
       
               console.log(`Données pour le tableau "${tableName}" :`, tableRows);
       
-              // Ajouter chaque ligne dans Grist, en vérifiant les doublons
+              // Vérification des doublons et ajout des nouvelles lignes
               const actions = [];
               for (const row of tableRows) {
-                const rowKey = `${projectName}|${tableName}|${row[0]}|${row[1]}|${row[2]}|${row[3]}|${row[4]}`;
+                let isDuplicate = false;
+                let potentialMatches = records.filter((record) => record.NomProjet === projectName);
       
-                if (!existingKeys.has(rowKey)) {
-                  existingKeys.add(rowKey);
+                for (let i = 0; i < 7; i++) {
+                  potentialMatches = potentialMatches.filter(
+                    (record) =>
+                      [
+                        record.NomEtage,
+                        record.Emetteur,
+                        record.Reference,
+                        record.Indice,
+                        record.Recu,
+                        record.DescriptionObservations,
+                      ][i] === row[i]
+                  );
       
+                  if (potentialMatches.length === 0) {
+                    break;
+                  }
+      
+                  if (i === 6 && potentialMatches.length > 0) {
+                    isDuplicate = true;
+                  }
+                }
+      
+                if (!isDuplicate) {
                   const maxIdLigne = records.reduce((max, record) => {
                     const idLigne = parseInt(record.ID_Ligne, 10);
                     return idLigne > max ? idLigne : max;
@@ -923,7 +935,7 @@
                   records.push(newRow);
                   actions.push(["AddRecord", "Fusion", null, newRow]);
                 } else {
-                  console.log(`Doublon détecté dans Grist :`, row);
+                  console.log("Doublon détecté :", row);
                 }
               }
       
