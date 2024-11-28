@@ -825,7 +825,7 @@
             const projectName = projectNameCell.v.split(":").pop().trim();
             console.log("Nom du projet extrait :", projectName);
       
-            // Ajouter le projet si nécessaire
+            // Vérifier si le projet existe
             const projectExists = records.some((record) => record.NomProjet === projectName);
             if (!projectExists) {
               const maxIdLigne = records.reduce((max, record) => {
@@ -850,7 +850,7 @@
               console.log("Projet ajouté :", projectRow);
             }
       
-            // Parcourir les tableaux et ajouter les lignes
+            // Extraire les tableaux et leurs lignes
             const tableNames = [];
             for (let r = 1; r <= range.e.r; r++) {
               const firstColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 0 })];
@@ -900,16 +900,16 @@
                   DescriptionObservations: row[4],
                 };
       
-                // Comparer colonne par colonne
+                // Filtrer les doublons colonne par colonne
                 const isDuplicate = records.some((record) => {
                   return (
-                    record.NomProjet === transformedRow.NomProjet &&
-                    record.NomEtage === transformedRow.NomEtage &&
-                    record.Emetteur === transformedRow.Emetteur &&
-                    record.Reference === transformedRow.Reference &&
-                    record.Indice === transformedRow.Indice &&
-                    record.Recu === transformedRow.Recu &&
-                    record.DescriptionObservations === transformedRow.DescriptionObservations
+                    record.NomProjet === transformedRow.NomProjet && // 1ère colonne (NomProjet)
+                    record.NomEtage === transformedRow.NomEtage && // 2ème colonne (NomEtage)
+                    record.Emetteur === transformedRow.Emetteur && // 3ème colonne
+                    record.Reference === transformedRow.Reference && // 4ème colonne
+                    record.Indice === transformedRow.Indice && // 5ème colonne
+                    record.Recu === transformedRow.Recu && // 6ème colonne
+                    record.DescriptionObservations === transformedRow.DescriptionObservations // 7ème colonne
                   );
                 });
       
