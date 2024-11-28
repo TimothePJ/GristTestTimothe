@@ -134,7 +134,7 @@
           <option value="">Select an option</option>
           <option value="addTable">AJOUTER TABLEAU</option>
         </select>
-        <input type="file" id="fileInputProject" style="display: none;" accept=".xls,.xlsx,.xlsm" />
+        <input type="file" id="fileInputProject" style="display: none;" accept=".xls,.xlsx,.xlsm" multiple />
       </div>
     </div>
 
@@ -799,107 +799,111 @@
       });
 
       document.getElementById("fileInputProject").addEventListener("change", async function (event) {
-        const file = event.target.files[0];
-        if (!file) {
+        const files = Array.from(event.target.files);
+        if (files.length === 0) {
           alert("Aucun fichier sélectionné.");
           return;
         }
       
         try {
-          const workbook = await readXLSX(file);
-          const feuilleFichiers = workbook.Sheets["Fichiers"];
-          if (!feuilleFichiers) {
-            alert("La feuille 'Fichiers' est introuvable dans le fichier sélectionné.");
-            return;
-          }
+          for (const file of files) {
+            console.log(`Traitement du fichier : ${file.name}`);
       
-          // Récupérer le nom du projet dans la deuxième colonne de la première ligne
-          const range = XLSX.utils.decode_range(feuilleFichiers["!ref"]);
-          const projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
-          if (!projectNameCell || !projectNameCell.v) {
-            alert("Le nom du projet est introuvable.");
-            return;
-          }
+            const workbook = await readXLSX(file);
+            const feuilleFichiers = workbook.Sheets["Fichiers"];
+            if (!feuilleFichiers) {
+              console.warn(`La feuille 'Fichiers' est introuvable dans le fichier : ${file.name}`);
+              continue;
+            }
       
-          const projectName = projectNameCell.v.split(":").pop().trim();
-          console.log("Nom du projet extrait :", projectName);
+            // Récupérer le nom du projet dans la deuxième colonne de la première ligne
+            const range = XLSX.utils.decode_range(feuilleFichiers["!ref"]);
+            const projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
+            if (!projectNameCell || !projectNameCell.v) {
+              console.warn(`Le nom du projet est introuvable dans le fichier : ${file.name}`);
+              continue;
+            }
       
-          // Ajouter le projet dans Grist
-          const maxIdLigne = records.reduce((max, record) => {
-            const idLigne = parseInt(record.ID_Ligne, 10);
-            return idLigne > max ? idLigne : max;
-          }, 0);
-          const baseId = maxIdLigne + 1;
+            const projectName = projectNameCell.v.split(":").pop().trim();
+            console.log("Nom du projet extrait :", projectName);
       
-          const actions = [];
-          const tableNames = [];
+            // Ajouter le projet dans Grist
+            const maxIdLigne = records.reduce((max, record) => {
+              const idLigne = parseInt(record.ID_Ligne, 10);
+              return idLigne > max ? idLigne : max;
+            }, 0);
+            const baseId = maxIdLigne + 1;
       
-          // Parcourir les lignes pour identifier les tableaux
-          for (let r = 1; r <= range.e.r; r++) {
-            const firstColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 0 })];
-            const thirdColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 2 })];
+            const actions = [];
+            const tableNames = [];
       
-            if (firstColCell && firstColCell.v === "Feuille" && thirdColCell && thirdColCell.v) {
-              const tableName = thirdColCell.v.trim();
-              tableNames.push(tableName);
+            // Parcourir les lignes pour identifier les tableaux
+            for (let r = 1; r <= range.e.r; r++) {
+              const firstColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 0 })];
+              const thirdColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 2 })];
       
-              console.log(`Extraction des données pour le tableau "${tableName}"`);
+              if (firstColCell && firstColCell.v === "Feuille" && thirdColCell && thirdColCell.v) {
+                const tableName = thirdColCell.v.trim();
+                tableNames.push(tableName);
       
-              // Localisation des données du tableau
-              const dataStartRow = r + 3;
-              let currentRow = dataStartRow;
-              let lastNonEmptyValue = ""; // Stocke la dernière valeur non vide pour la première colonne
+                console.log(`Extraction des données pour le tableau "${tableName}"`);
       
-              while (currentRow <= range.e.r) {
-                const firstColValue = feuilleFichiers[XLSX.utils.encode_cell({ r: currentRow, c: 0 })]?.v;
-                if (firstColValue === "*") break; // Fin du tableau
+                // Localisation des données du tableau
+                const dataStartRow = r + 3;
+                let currentRow = dataStartRow;
+                let lastNonEmptyValue = ""; // Stocke la dernière valeur non vide pour la première colonne
       
-                // Si la cellule de la première colonne est vide, on utilise la dernière valeur non vide
-                const emetteurValue = firstColValue?.trim() || lastNonEmptyValue;
+                while (currentRow <= range.e.r) {
+                  const firstColValue = feuilleFichiers[XLSX.utils.encode_cell({ r: currentRow, c: 0 })]?.v;
+                  if (firstColValue === "*") break; // Fin du tableau
       
-                if (emetteurValue) {
-                  lastNonEmptyValue = emetteurValue; // Met à jour la dernière valeur non vide
+                  // Si la cellule de la première colonne est vide, on utilise la dernière valeur non vide
+                  const emetteurValue = firstColValue?.trim() || lastNonEmptyValue;
+      
+                  if (emetteurValue) {
+                    lastNonEmptyValue = emetteurValue; // Met à jour la dernière valeur non vide
+                  }
+      
+                  // Récupérer les données des colonnes 1 à 5
+                  const rowData = [];
+                  for (let col = 0; col < 5; col++) {
+                    rowData.push(feuilleFichiers[XLSX.utils.encode_cell({ r: currentRow, c: col })]?.v || "");
+                  }
+      
+                  // Créer une ligne pour Grist
+                  const rowId = baseId + actions.length;
+                  const tableRow = {
+                    NomProjet: projectName,
+                    NomEtage: tableName,
+                    Emetteur: emetteurValue, // Colonne 1 Excel -> Colonne 3 Grist
+                    Reference: rowData[1], // Colonne 2 Excel -> Colonne 4 Grist
+                    Indice: rowData[2], // Colonne 3 Excel -> Colonne 5 Grist
+                    Recu: rowData[3], // Colonne 4 Excel -> Colonne 6 Grist
+                    DescriptionObservations: rowData[4], // Colonne 5 Excel -> Colonne 7 Grist
+                    ID_Ligne: rowId.toString(),
+                  };
+      
+                  actions.push(["AddRecord", "Fusion", null, tableRow]);
+                  currentRow++;
                 }
-      
-                // Récupérer les données des colonnes 1 à 5
-                const rowData = [];
-                for (let col = 0; col < 5; col++) {
-                  rowData.push(feuilleFichiers[XLSX.utils.encode_cell({ r: currentRow, c: col })]?.v || "");
-                }
-      
-                // Créer une ligne pour Grist
-                const rowId = baseId + actions.length;
-                const tableRow = {
-                  NomProjet: projectName,
-                  NomEtage: tableName,
-                  Emetteur: emetteurValue, // Colonne 1 Excel -> Colonne 3 Grist
-                  Reference: rowData[1], // Colonne 2 Excel -> Colonne 4 Grist
-                  Indice: rowData[2], // Colonne 3 Excel -> Colonne 5 Grist
-                  Recu: rowData[3], // Colonne 4 Excel -> Colonne 6 Grist
-                  DescriptionObservations: rowData[4], // Colonne 5 Excel -> Colonne 7 Grist
-                  ID_Ligne: rowId.toString(),
-                };
-      
-                actions.push(["AddRecord", "Fusion", null, tableRow]);
-                currentRow++;
               }
+            }
+      
+            // Exécuter toutes les actions pour ajouter les lignes dans Grist
+            await grist.docApi.applyUserActions(actions);
+            console.log("Lignes ajoutées dans Grist pour le fichier :", file.name);
+      
+            // Rafraîchir les données locales et les listes déroulantes
+            actions.forEach((action) => records.push(action[3]));
+            populateFirstColumnDropdown(
+              [...new Set(records.map((record) => record.NomProjet))].sort()
+            );
+            if (projectName === selectedFirstValue) {
+              populateSecondColumnListbox(projectName);
             }
           }
       
-          // Exécuter toutes les actions pour ajouter les lignes dans Grist
-          await grist.docApi.applyUserActions(actions);
-          console.log("Lignes ajoutées dans Grist :", actions);
-      
-          // Rafraîchir les données locales et les listes déroulantes
-          actions.forEach((action) => records.push(action[3]));
-          populateFirstColumnDropdown(
-            [...new Set(records.map((record) => record.NomProjet))].sort()
-          );
-          if (projectName === selectedFirstValue) {
-            populateSecondColumnListbox(projectName);
-          }
-      
-          alert(`Projet "${projectName}" et ses tableaux ont été importés avec succès.`);
+          alert("Tous les fichiers sélectionnés ont été importés avec succès.");
         } catch (error) {
           console.error("Erreur lors de l'importation :", error);
           alert("Une erreur est survenue lors de l'importation.");
