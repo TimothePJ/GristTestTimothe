@@ -799,98 +799,26 @@
       });
 
       document.getElementById("fileInputProject").addEventListener("change", async function (event) {
-        const file = event.target.files[0];
-        if (!file) {
-          alert("Aucun fichier sélectionné.");
-          return;
-        }
-      
         try {
-          const workbook = await readXLSX(file);
-          const feuilleFichiers = workbook.Sheets["Fichiers"];
-          if (!feuilleFichiers) {
-            alert("La feuille 'Fichiers' est introuvable dans le fichier sélectionné.");
+          const file = event.target.files[0];
+          if (!file) {
+            alert("Aucun fichier sélectionné.");
             return;
           }
       
-          // Récupérer le nom du projet dans la deuxième colonne de la première ligne
-          const range = XLSX.utils.decode_range(feuilleFichiers["!ref"]);
-          const projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
-          if (!projectNameCell || !projectNameCell.v) {
-            alert("Le nom du projet est introuvable.");
-            return;
-          }
+          // Lire les données de la feuille "Fichiers"
+          const sheetData = await readXLSX(file, "Fichiers");
       
-          const projectName = projectNameCell.v.split(":").pop().trim();
-          console.log("Nom du projet extrait :", projectName);
+          // Extraire le nom du projet
+          const projectName = extractProjectName(sheetData);
       
-          // Ajouter le projet dans Grist
-          const maxIdLigne = records.reduce((max, record) => {
-            const idLigne = parseInt(record.ID_Ligne, 10);
-            return idLigne > max ? idLigne : max;
-          }, 0);
-          const newProjectId = maxIdLigne + 1;
+          // Extraire les noms des tableaux
+          const tableNames = extractTableNames(sheetData);
       
-          const projectRow = {
-            NomProjet: projectName,
-            NomEtage: "", // Les tableaux seront ajoutés ensuite
-            Emetteur: "",
-            Reference: "",
-            Indice: "",
-            Recu: "",
-            DescriptionObservations: "",
-            ID_Ligne: newProjectId.toString(),
-          };
-      
-          await grist.docApi.applyUserActions([["AddRecord", "Fusion", null, projectRow]]);
-          records.push(projectRow);
-          console.log("Projet ajouté :", projectRow);
-      
-          // Maintenant, chercher les lignes avec "Feuille" dans la première colonne
-          const tableNames = [];
-          for (let r = 1; r <= range.e.r; r++) {
-            const firstColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 0 })];
-            const thirdColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 2 })];
-      
-            if (firstColCell && firstColCell.v === "Feuille" && thirdColCell && thirdColCell.v) {
-              tableNames.push(thirdColCell.v.trim());
-            }
-          }
-      
-          console.log("Noms des tableaux extraits :", tableNames);
-      
-          // Ajouter chaque tableau dans Grist
-          const actions = tableNames.map((tableName, index) => {
-            const tableRow = {
-              NomProjet: projectName,
-              NomEtage: tableName,
-              Emetteur: "",
-              Reference: "",
-              Indice: "",
-              Recu: "",
-              DescriptionObservations: "",
-              ID_Ligne: (newProjectId + index + 1).toString(),
-            };
-            records.push(tableRow);
-            return ["AddRecord", "Fusion", null, tableRow];
-          });
-      
-          await grist.docApi.applyUserActions(actions);
-          console.log("Tableaux ajoutés :", tableNames);
-      
-          // Rafraîchir les listes dans Grist
-          populateFirstColumnDropdown(
-            [...new Set(records.map((record) => record.NomProjet))].sort()
-          );
-      
-          if (projectName === selectedFirstValue) {
-            populateSecondColumnListbox(projectName);
-          }
-      
-          alert(`Projet "${projectName}" et ses tableaux ont été importés avec succès.`);
+          // Importer les données des tableaux
+          await importTableDataFromExcel(projectName, tableNames, sheetData);
         } catch (error) {
-          console.error("Erreur lors de l'importation :", error);
-          alert("Une erreur est survenue lors de l'importation.");
+          console.error("Erreur lors du traitement du fichier Excel :", error);
         }
       });
 
@@ -985,6 +913,97 @@
       
           reader.readAsArrayBuffer(file);
         });
+      }
+
+      async function importTableDataFromExcel(projectName, tableNames, sheetData) {
+        try {
+          const rowsToInsert = [];
+          let maxIdLigne = records.reduce((max, record) => Math.max(max, parseInt(record.ID_Ligne, 10) || 0), 0);
+      
+          tableNames.forEach((tableName) => {
+            const tableIndex = sheetData.findIndex((row) => row[0]?.trim() === "Feuilles" && row[2]?.trim() === tableName);
+      
+            if (tableIndex === -1) {
+              console.warn(`Tableau "${tableName}" introuvable dans le fichier Excel.`);
+              return;
+            }
+      
+            // Les données commencent 3 lignes après l'en-tête du tableau.
+            let currentRowIndex = tableIndex + 3;
+      
+            while (currentRowIndex < sheetData.length) {
+              const row = sheetData[currentRowIndex];
+              const firstColumnValue = row[0]?.trim();
+      
+              // Arrêter la lecture si une ligne avec "*" dans la première colonne est trouvée.
+              if (firstColumnValue === "*") break;
+      
+              // Extraire les colonnes nécessaires.
+              const emetteur = row[0]?.trim() || "";
+              const reference = row[1]?.trim() || "";
+              const indice = row[2]?.trim() || "";
+              const recu = row[3]?.trim() || "";
+              const descriptionObservations = row[4]?.trim() || "";
+      
+              // Ajouter une nouvelle ligne dans Grist.
+              maxIdLigne++;
+              rowsToInsert.push({
+                NomProjet: projectName,
+                NomEtage: tableName,
+                Emetteur: emetteur,
+                Reference: reference,
+                Indice: indice,
+                Recu: recu,
+                DescriptionObservations: descriptionObservations,
+                ID_Ligne: maxIdLigne.toString(),
+              });
+      
+              currentRowIndex++;
+            }
+          });
+      
+          // Insérer toutes les lignes dans Grist.
+          if (rowsToInsert.length > 0) {
+            await grist.docApi.applyUserActions(
+              rowsToInsert.map((row) => ["AddRecord", "Fusion", null, row])
+            );
+            console.log("Données des tableaux importées avec succès :", rowsToInsert);
+      
+            // Mettre à jour les données locales.
+            records.push(...rowsToInsert);
+      
+            // Actualiser l'affichage dans Grist.
+            populateTable();
+          } else {
+            alert("Aucune donnée à importer.");
+          }
+        } catch (error) {
+          console.error("Erreur lors de l'importation des données des tableaux :", error);
+          alert("Erreur lors de l'importation des données des tableaux.");
+        }
+      }
+
+      function extractProjectName(sheetData) {
+        const headerCell = sheetData[0]?.[1]?.trim(); // 2ème colonne de la première ligne
+        const match = headerCell?.match(/Fichiers de référence : (.+)/);
+      
+        if (match) {
+          const projectName = match[1].trim();
+          console.log("Nom du projet extrait :", projectName);
+          return projectName;
+        } else {
+          throw new Error("Impossible de trouver le nom du projet dans le fichier Excel.");
+        }
+      }
+
+      function extractTableNames(sheetData) {
+        const tableNames = sheetData
+          .filter((row) => row[0]?.trim() === "Feuilles") // Cherche les lignes avec "Feuilles" dans la première colonne
+          .map((row) => row[2]?.trim()) // Prend le contenu de la 3ème colonne
+          .filter((name) => !!name); // Filtrer les noms non valides
+      
+        console.log("Noms des tableaux extraits :", tableNames);
+        return tableNames;
       }
 
     </script>
