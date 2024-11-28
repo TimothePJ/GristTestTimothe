@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <title>Grist Two-Step Selection with Editable Table</title>
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
       body {
         margin: 0;
@@ -797,16 +798,125 @@
         }
       });
 
-      document.getElementById("fileInputProject").addEventListener("change", function (event) {
+      document.getElementById("fileInputProject").addEventListener("change", async function (event) {
         const file = event.target.files[0];
-        if (file) {
-          alert(`Fichier sélectionné : ${file.name}`);
-          // Vous pouvez ajouter ici une logique pour traiter le fichier
-        } else {
+        if (!file) {
           alert("Aucun fichier sélectionné.");
+          return;
+        }
+      
+        try {
+          // Lecture du fichier Excel avec SheetJS
+          const reader = new FileReader();
+          reader.onload = function (e) {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: "array" });
+      
+            // Vérifie si la feuille "Fichiers" existe
+            if (!workbook.Sheets["Fichiers"]) {
+              alert("La feuille 'Fichiers' est introuvable dans le fichier Excel.");
+              return;
+            }
+      
+            // Récupère la valeur dans la deuxième colonne de la première ligne
+            const sheet = workbook.Sheets["Fichiers"];
+            const cellValue = sheet["B1"] ? sheet["B1"].v : null;
+      
+            if (!cellValue || !cellValue.startsWith("Fichiers de référence :")) {
+              alert("Le format attendu dans la cellule B1 est incorrect.");
+              return;
+            }
+      
+            // Extrait le nom du projet
+            const projectName = cellValue.replace("Fichiers de référence :", "").trim();
+      
+            if (!projectName) {
+              alert("Le nom du projet est vide.");
+              return;
+            }
+      
+            // Ajoute le projet à Grist
+            addProjectToGrist(projectName);
+          };
+      
+          reader.readAsArrayBuffer(file);
+        } catch (error) {
+          console.error("Erreur lors de la lecture du fichier :", error);
+          alert("Une erreur s'est produite lors de la lecture du fichier.");
         }
       });
 
+      // Fonction pour ajouter le projet à Grist
+      function addProjectToGrist(projectName) {
+        const maxIdLigne = records.reduce((max, record) => {
+          const idLigne = parseInt(record.ID_Ligne, 10);
+          return idLigne > max ? idLigne : max;
+        }, 0);
+      
+        const newIdLigne = maxIdLigne + 1;
+      
+        const newRow = {
+          NomProjet: projectName,
+          NomEtage: "Tableau par défaut", // Par défaut pour un projet importé
+          Emetteur: "",
+          Reference: "",
+          Indice: "",
+          Recu: "",
+          DescriptionObservations: "",
+          ID_Ligne: newIdLigne.toString(),
+        };
+      
+        // Ajoute le nouveau projet dans Grist
+        grist.docApi
+          .applyUserActions([["AddRecord", "Fusion", null, newRow]])
+          .then(() => {
+            console.log("Projet importé avec succès :", newRow);
+      
+            // Rafraîchit les données locales
+            records.push(newRow);
+      
+            // Met à jour la liste des projets
+            updateProjectDropdown();
+      
+            // Sélectionne automatiquement le projet importé
+            const firstColumnDropdown = document.getElementById("firstColumnDropdown");
+            firstColumnDropdown.value = projectName;
+            selectedFirstValue = projectName;
+      
+            // Actualise la deuxième liste déroulante
+            populateSecondColumnListbox(projectName);
+          })
+          .catch((error) => {
+            console.error("Erreur lors de l'importation du projet :", error);
+            alert("Une erreur s'est produite lors de l'importation du projet.");
+          });
+      }
+
+      // Met à jour la liste déroulante des projets
+      function updateProjectDropdown() {
+        const firstColumnDropdown = document.getElementById("firstColumnDropdown");
+        const uniqueProjects = [...new Set(records.map((record) => record.NomProjet))].sort();
+      
+        firstColumnDropdown.innerHTML = '<option value="">Select an option</option>';
+        uniqueProjects.forEach((project) => {
+          const option = document.createElement("option");
+          option.value = project;
+          option.text = project;
+          firstColumnDropdown.appendChild(option);
+        });
+      
+        // Ajoute l'option "Ajouter Projet" et "Insérer Projet"
+        const addProjectOption = document.createElement("option");
+        addProjectOption.value = "Ajouter Projet";
+        addProjectOption.text = "Ajouter Projet";
+        firstColumnDropdown.appendChild(addProjectOption);
+      
+        const insertProjectOption = document.createElement("option");
+        insertProjectOption.value = "Insérer Projet";
+        insertProjectOption.text = "Insérer Projet";
+        firstColumnDropdown.appendChild(insertProjectOption);
+      }
+      
     </script>
   </body>
 </html>
