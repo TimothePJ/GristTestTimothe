@@ -964,7 +964,29 @@
         insertProjectOption.text = "Insérer Projet";
         firstColumnDropdown.appendChild(insertProjectOption);
       }
+
+      function readXLSX(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
       
+          reader.onload = (event) => {
+            try {
+              const data = new Uint8Array(event.target.result);
+              const workbook = XLSX.read(data, { type: "array" });
+              resolve(workbook);
+            } catch (error) {
+              reject(error);
+            }
+          };
+      
+          reader.onerror = (error) => {
+            reject(error);
+          };
+      
+          reader.readAsArrayBuffer(file);
+        });
+      }
+
     </script>
   </body>
 </html>
