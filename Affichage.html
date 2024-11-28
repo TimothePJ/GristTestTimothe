@@ -848,10 +848,18 @@
               // Localisation des données du tableau
               const dataStartRow = r + 3;
               let currentRow = dataStartRow;
+              let lastNonEmptyValue = ""; // Stocke la dernière valeur non vide pour la première colonne
       
               while (currentRow <= range.e.r) {
                 const firstColValue = feuilleFichiers[XLSX.utils.encode_cell({ r: currentRow, c: 0 })]?.v;
                 if (firstColValue === "*") break; // Fin du tableau
+      
+                // Si la cellule de la première colonne est vide, on utilise la dernière valeur non vide
+                const emetteurValue = firstColValue?.trim() || lastNonEmptyValue;
+      
+                if (emetteurValue) {
+                  lastNonEmptyValue = emetteurValue; // Met à jour la dernière valeur non vide
+                }
       
                 // Récupérer les données des colonnes 1 à 5
                 const rowData = [];
@@ -864,7 +872,7 @@
                 const tableRow = {
                   NomProjet: projectName,
                   NomEtage: tableName,
-                  Emetteur: rowData[0], // Colonne 1 Excel -> Colonne 3 Grist
+                  Emetteur: emetteurValue, // Colonne 1 Excel -> Colonne 3 Grist
                   Reference: rowData[1], // Colonne 2 Excel -> Colonne 4 Grist
                   Indice: rowData[2], // Colonne 3 Excel -> Colonne 5 Grist
                   Recu: rowData[3], // Colonne 4 Excel -> Colonne 6 Grist
