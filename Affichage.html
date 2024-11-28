@@ -872,7 +872,7 @@
                 if (firstColCell && firstColCell.v === "*") break;
       
                 const rowData = [];
-                for (let c = 0; c < 7; c++) {
+                for (let c = 0; c < 5; c++) {
                   const cell = feuilleFichiers[XLSX.utils.encode_cell({ r, c })];
                   rowData.push(cell?.v || null);
                 }
@@ -890,20 +890,34 @@
               // Vérification des doublons et ajout des nouvelles lignes
               const actions = [];
               for (const row of tableRows) {
-                let isDuplicate = false;
-                let potentialMatches = records.filter((record) => record.NomProjet === projectName);
+                // Transforme la ligne en une structure complète avec le projet et le tableau
+                const transformedRow = {
+                  NomProjet: projectName,
+                  NomEtage: tableName,
+                  Emetteur: row[0],
+                  Reference: row[1],
+                  Indice: row[2],
+                  Recu: row[3],
+                  DescriptionObservations: row[4],
+                };
       
+                let isDuplicate = false;
+                let potentialMatches = records;
+      
+                // Comparaison colonne par colonne
                 for (let i = 0; i < 7; i++) {
+                  const keyMap = [
+                    "NomProjet",
+                    "NomEtage",
+                    "Emetteur",
+                    "Reference",
+                    "Indice",
+                    "Recu",
+                    "DescriptionObservations",
+                  ];
+      
                   potentialMatches = potentialMatches.filter(
-                    (record) =>
-                      [
-                        record.NomEtage,
-                        record.Emetteur,
-                        record.Reference,
-                        record.Indice,
-                        record.Recu,
-                        record.DescriptionObservations,
-                      ][i] === row[i]
+                    (record) => record[keyMap[i]] === transformedRow[keyMap[i]]
                   );
       
                   if (potentialMatches.length === 0) {
@@ -922,20 +936,14 @@
                   }, 0);
       
                   const newRow = {
-                    NomProjet: projectName,
-                    NomEtage: tableName,
-                    Emetteur: row[0],
-                    Reference: row[1],
-                    Indice: row[2],
-                    Recu: row[3],
-                    DescriptionObservations: row[4],
+                    ...transformedRow,
                     ID_Ligne: (maxIdLigne + 1).toString(),
                   };
       
                   records.push(newRow);
                   actions.push(["AddRecord", "Fusion", null, newRow]);
                 } else {
-                  console.log("Doublon détecté :", row);
+                  console.log("Doublon détecté :", transformedRow);
                 }
               }
       
