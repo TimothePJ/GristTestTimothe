@@ -797,7 +797,7 @@
           populateTable(); // Actualise l'affichage du tableau HTML
         }
       });
-  
+      
       document.getElementById("fileInputProject").addEventListener("change", async function (event) {
         const files = event.target.files;
         if (!files.length) {
@@ -853,10 +853,14 @@
       
             // Comparaison et ajout des lignes
             const actions = [];
-            for (let r = 3; r <= range.e.r; r++) { // Commence à la 3e ligne après les métadonnées
+            for (let r = 3; r <= range.e.r; r++) {
+              const firstColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 0 })];
               const tableauCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 2, c: 2 })]; // Nom du tableau (2e colonne)
               const tableauName = tableauCell?.v?.trim();
-              if (!tableauName) continue;
+              if (!tableauName || (firstColCell && firstColCell.v === "Feuille")) {
+                // Exclure explicitement les lignes contenant "Feuille"
+                continue;
+              }
       
               // Construire la ligne transformée
               const rowData = [];
