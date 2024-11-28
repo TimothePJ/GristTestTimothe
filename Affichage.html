@@ -814,7 +814,7 @@
               continue;
             }
       
-            // Récupérer le nom du projet dans la deuxième colonne de la première ligne
+            // Récupérer le nom du projet
             const range = XLSX.utils.decode_range(feuilleFichiers["!ref"]);
             const projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
             if (!projectNameCell || !projectNameCell.v) {
@@ -851,7 +851,14 @@
               console.log("Projet ajouté :", projectRow);
             }
       
-            // Maintenant, chercher les tableaux et leurs lignes
+            // Récupérer les lignes existantes dans Grist (clés uniques basées sur 7 colonnes)
+            const existingKeys = new Set(
+              records.map((record) =>
+                `${record.NomProjet}|${record.NomEtage}|${record.Emetteur}|${record.Reference}|${record.Indice}|${record.Recu}|${record.DescriptionObservations}`
+              )
+            );
+      
+            // Extraire les tableaux et leurs lignes
             const tableNames = [];
             for (let r = 1; r <= range.e.r; r++) {
               const firstColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 0 })];
@@ -890,47 +897,31 @@
               // Ajouter chaque ligne dans Grist, en vérifiant les doublons
               const actions = [];
               for (const row of tableRows) {
-                const rowToCheck = {
-                  NomProjet: projectName,
-                  NomEtage: tableName,
-                  Emetteur: row[0],
-                  Reference: row[1],
-                  Indice: row[2],
-                  Recu: row[3],
-                  DescriptionObservations: row[4],
-                };
+                const rowKey = `${projectName}|${tableName}|${row[0]}|${row[1]}|${row[2]}|${row[3]}|${row[4]}`;
       
-                // Vérifier si la ligne existe déjà dans Grist en comparant uniquement les 7 premières colonnes
-                const isDuplicate = records.some((record) => {
-                  return (
-                    record.NomProjet === rowToCheck.NomProjet &&
-                    record.NomEtage === rowToCheck.NomEtage &&
-                    record.Emetteur === rowToCheck.Emetteur &&
-                    record.Reference === rowToCheck.Reference &&
-                    record.Indice === rowToCheck.Indice &&
-                    record.Recu === rowToCheck.Recu &&
-                    record.DescriptionObservations === rowToCheck.DescriptionObservations
-                  );
-                });
+                if (!existingKeys.has(rowKey)) {
+                  existingKeys.add(rowKey);
       
-                if (!isDuplicate) {
                   const maxIdLigne = records.reduce((max, record) => {
                     const idLigne = parseInt(record.ID_Ligne, 10);
                     return idLigne > max ? idLigne : max;
                   }, 0);
       
                   const newRow = {
-                    ...rowToCheck,
+                    NomProjet: projectName,
+                    NomEtage: tableName,
+                    Emetteur: row[0],
+                    Reference: row[1],
+                    Indice: row[2],
+                    Recu: row[3],
+                    DescriptionObservations: row[4],
                     ID_Ligne: (maxIdLigne + 1).toString(),
                   };
       
                   records.push(newRow);
                   actions.push(["AddRecord", "Fusion", null, newRow]);
                 } else {
-                  console.log(
-                    `Doublon détecté et ignoré pour le tableau "${tableName}" :`,
-                    rowToCheck
-                  );
+                  console.log(`Doublon détecté :`, row);
                 }
               }
       
@@ -958,52 +949,6 @@
           alert("Une erreur est survenue lors de l'importation.");
         }
       });
-
-      // Fonction pour ajouter le projet à Grist
-      function addProjectToGrist(projectName) {
-        const maxIdLigne = records.reduce((max, record) => {
-          const idLigne = parseInt(record.ID_Ligne, 10);
-          return idLigne > max ? idLigne : max;
-        }, 0);
-      
-        const newIdLigne = maxIdLigne + 1;
-      
-        const newRow = {
-          NomProjet: projectName,
-          NomEtage: "Tableau par défaut", // Par défaut pour un projet importé
-          Emetteur: "",
-          Reference: "",
-          Indice: "",
-          Recu: "",
-          DescriptionObservations: "",
-          ID_Ligne: newIdLigne.toString(),
-        };
-      
-        // Ajoute le nouveau projet dans Grist
-        grist.docApi
-          .applyUserActions([["AddRecord", "Fusion", null, newRow]])
-          .then(() => {
-            console.log("Projet importé avec succès :", newRow);
-      
-            // Rafraîchit les données locales
-            records.push(newRow);
-      
-            // Met à jour la liste des projets
-            updateProjectDropdown();
-      
-            // Sélectionne automatiquement le projet importé
-            const firstColumnDropdown = document.getElementById("firstColumnDropdown");
-            firstColumnDropdown.value = projectName;
-            selectedFirstValue = projectName;
-      
-            // Actualise la deuxième liste déroulante
-            populateSecondColumnListbox(projectName);
-          })
-          .catch((error) => {
-            console.error("Erreur lors de l'importation du projet :", error);
-            alert("Une erreur s'est produite lors de l'importation du projet.");
-          });
-      }
 
       // Met à jour la liste déroulante des projets
       function updateProjectDropdown() {
