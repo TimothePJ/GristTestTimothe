@@ -806,6 +806,18 @@
         }
       
         try {
+          // Récupère les lignes actuelles depuis Grist
+          const gristRecords = await grist.docApi.fetchTable('Fusion');
+          records = gristRecords.map((record) => ({
+            NomProjet: record.NomProjet || '',
+            NomEtage: record.NomEtage || '',
+            Emetteur: record.Emetteur || '',
+            Reference: record.Reference || '',
+            Indice: record.Indice || '',
+            Recu: record.Recu || '',
+            DescriptionObservations: record.DescriptionObservations || '',
+          }));
+      
           for (const file of files) {
             const workbook = await readXLSX(file);
             const feuilleFichiers = workbook.Sheets["Fichiers"];
@@ -853,11 +865,9 @@
       
             // Créer un ensemble des clés des lignes existantes dans Grist
             const existingKeys = new Set(
-              records
-                .filter((record) => record.NomProjet === projectName)
-                .map((record) =>
-                  `${record.NomProjet}|${record.NomEtage}|${record.Emetteur}|${record.Reference}|${record.Indice}|${record.Recu}|${record.DescriptionObservations}`
-                )
+              records.map((record) =>
+                `${record.NomProjet}|${record.NomEtage}|${record.Emetteur}|${record.Reference}|${record.Indice}|${record.Recu}|${record.DescriptionObservations}`
+              )
             );
       
             // Extraire les tableaux et leurs lignes
