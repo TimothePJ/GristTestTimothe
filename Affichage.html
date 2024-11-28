@@ -799,99 +799,161 @@
       });
 
       document.getElementById("fileInputProject").addEventListener("change", async function (event) {
-        const file = event.target.files[0];
-        if (!file) {
-          alert("Aucun fichier sélectionné.");
-          return;
-        }
-      
-        try {
-          const workbook = await readXLSX(file);
-          const feuilleFichiers = workbook.Sheets["Fichiers"];
-          if (!feuilleFichiers) {
+    const file = event.target.files[0];
+    if (!file) {
+        alert("Aucun fichier sélectionné.");
+        return;
+    }
+
+    try {
+        const workbook = await readXLSX(file);
+        const feuilleFichiers = workbook.Sheets["Fichiers"];
+        if (!feuilleFichiers) {
             alert("La feuille 'Fichiers' est introuvable dans le fichier sélectionné.");
             return;
-          }
-      
-          // Récupérer le nom du projet dans la deuxième colonne de la première ligne
-          const range = XLSX.utils.decode_range(feuilleFichiers["!ref"]);
-          const projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
-          if (!projectNameCell || !projectNameCell.v) {
+        }
+
+        // Récupérer le nom du projet dans la deuxième colonne de la première ligne
+        const range = XLSX.utils.decode_range(feuilleFichiers["!ref"]);
+        const projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
+        if (!projectNameCell || !projectNameCell.v) {
             alert("Le nom du projet est introuvable.");
             return;
-          }
-      
-          const projectName = projectNameCell.v.split(":").pop().trim();
-          console.log("Nom du projet extrait :", projectName);
-      
-          // Ajouter le projet dans Grist
-          const maxIdLigne = records.reduce((max, record) => {
-            const idLigne = parseInt(record.ID_Ligne, 10);
-            return idLigne > max ? idLigne : max;
-          }, 0);
-          const newProjectId = maxIdLigne + 1;
-      
-          const projectRow = {
-            NomProjet: projectName,
-            NomEtage: "", // Les tableaux seront ajoutés ensuite
-            Emetteur: "",
-            Reference: "",
-            Indice: "",
-            Recu: "",
-            DescriptionObservations: "",
-            ID_Ligne: newProjectId.toString(),
-          };
-      
-          await grist.docApi.applyUserActions([["AddRecord", "Fusion", null, projectRow]]);
-          records.push(projectRow);
-          console.log("Projet ajouté :", projectRow);
-      
-          // Maintenant, chercher les lignes avec "Feuille" dans la première colonne
-          const tableNames = [];
-          for (let r = 1; r <= range.e.r; r++) {
+        }
+
+        const projectName = projectNameCell.v.split(":").pop().trim();
+        console.log("Nom du projet extrait :", projectName);
+
+        // Chercher les lignes avec "Feuille" dans la première colonne
+        const tableNames = [];
+        for (let r = 1; r <= range.e.r; r++) {
             const firstColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 0 })];
             const thirdColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 2 })];
-      
+
             if (firstColCell && firstColCell.v === "Feuille" && thirdColCell && thirdColCell.v) {
-              tableNames.push(thirdColCell.v.trim());
+                tableNames.push(thirdColCell.v.trim());
             }
-          }
-      
-          console.log("Noms des tableaux extraits :", tableNames);
-      
-          // Ajouter chaque tableau dans Grist
-          const actions = tableNames.map((tableName, index) => {
+        }
+
+        console.log("Noms des tableaux extraits :", tableNames);
+
+        // Générer des lignes pour chaque tableau et les ajouter dans Grist
+        const maxIdLigne = records.reduce((max, record) => {
+            const idLigne = parseInt(record.ID_Ligne, 10);
+            return idLigne > max ? idLigne : max;
+        }, 0);
+
+        const actions = tableNames.map((tableName, index) => {
             const tableRow = {
-              NomProjet: projectName,
-              NomEtage: tableName,
-              Emetteur: "",
-              Reference: "",
-              Indice: "",
-              Recu: "",
-              DescriptionObservations: "",
-              ID_Ligne: (newProjectId + index + 1).toString(),
+                NomProjet: projectName,
+                NomEtage: tableName,
+                Emetteur: "",
+                Reference: "",
+                Indice: "",
+                Recu: "",
+                DescriptionObservations: "",
+                ID_Ligne: (maxIdLigne + index + 1).toString(),
             };
             records.push(tableRow);
             return ["AddRecord", "Fusion", null, tableRow];
-          });
-      
-          await grist.docApi.applyUserActions(actions);
-          console.log("Tableaux ajoutés :", tableNames);
-      
-          // Rafraîchir les listes dans Grist
-          populateFirstColumnDropdown(
+        });
+
+        await grist.docApi.applyUserActions(actions);
+        console.log("Tableaux ajoutés :", tableNames);
+
+        // Rafraîchir les listes dans Grist
+        populateFirstColumnDropdown(
             [...new Set(records.map((record) => record.NomProjet))].sort()
-          );
-      
-          if (projectName === selectedFirstValue) {
+        );
+
+        if (projectName === selectedFirstValue) {
             populateSecondColumnListbox(projectName);
+        }
+
+        alert(`Projet "${projectName}" et ses tableaux ont été importés avec succès.`);
+    } catch (error) {
+        console.error("Erreur lors de l'importation :", error);
+        alert("Une erreur est survenue lors de l'importation.");
+    }
+});
+      
+      document.getElementById("fileInputProject").addEventListener("change", async function (event) {
+          const file = event.target.files[0];
+          if (!file) {
+              alert("Aucun fichier sélectionné.");
+              return;
           }
       
-          alert(`Projet "${projectName}" et ses tableaux ont été importés avec succès.`);
-        } catch (error) {
-          console.error("Erreur lors de l'importation :", error);
-          alert("Une erreur est survenue lors de l'importation.");
-        }
+          try {
+              const workbook = await readXLSX(file);
+              const feuilleFichiers = workbook.Sheets["Fichiers"];
+              if (!feuilleFichiers) {
+                  alert("La feuille 'Fichiers' est introuvable dans le fichier sélectionné.");
+                  return;
+              }
+      
+              // Récupérer le nom du projet dans la deuxième colonne de la première ligne
+              const range = XLSX.utils.decode_range(feuilleFichiers["!ref"]);
+              const projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
+              if (!projectNameCell || !projectNameCell.v) {
+                  alert("Le nom du projet est introuvable.");
+                  return;
+              }
+      
+              const projectName = projectNameCell.v.split(":").pop().trim();
+              console.log("Nom du projet extrait :", projectName);
+      
+              // Chercher les lignes avec "Feuille" dans la première colonne
+              const tableNames = [];
+              for (let r = 1; r <= range.e.r; r++) {
+                  const firstColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 0 })];
+                  const thirdColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 2 })];
+      
+                  if (firstColCell && firstColCell.v === "Feuille" && thirdColCell && thirdColCell.v) {
+                      tableNames.push(thirdColCell.v.trim());
+                  }
+              }
+      
+              console.log("Noms des tableaux extraits :", tableNames);
+      
+              // Générer des lignes pour chaque tableau et les ajouter dans Grist
+              const maxIdLigne = records.reduce((max, record) => {
+                  const idLigne = parseInt(record.ID_Ligne, 10);
+                  return idLigne > max ? idLigne : max;
+              }, 0);
+      
+              const actions = tableNames.map((tableName, index) => {
+                  const tableRow = {
+                      NomProjet: projectName,
+                      NomEtage: tableName,
+                      Emetteur: "",
+                      Reference: "",
+                      Indice: "",
+                      Recu: "",
+                      DescriptionObservations: "",
+                      ID_Ligne: (maxIdLigne + index + 1).toString(),
+                  };
+                  records.push(tableRow);
+                  return ["AddRecord", "Fusion", null, tableRow];
+              });
+      
+              await grist.docApi.applyUserActions(actions);
+              console.log("Tableaux ajoutés :", tableNames);
+      
+              // Rafraîchir les listes dans Grist
+              populateFirstColumnDropdown(
+                  [...new Set(records.map((record) => record.NomProjet))].sort()
+              );
+      
+              if (projectName === selectedFirstValue) {
+                  populateSecondColumnListbox(projectName);
+              }
+      
+              alert(`Projet "${projectName}" et ses tableaux ont été importés avec succès.`);
+          } catch (error) {
+              console.error("Erreur lors de l'importation :", error);
+              alert("Une erreur est survenue lors de l'importation.");
+          }
       });
 
       // Fonction pour ajouter le projet à Grist
