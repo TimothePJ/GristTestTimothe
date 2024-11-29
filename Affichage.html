@@ -409,12 +409,7 @@
         }
       
         // Génère un nouvel ID_Ligne unique
-        const maxIdLigne = records.reduce((max, record) => {
-          const idLigne = parseInt(record.ID_Ligne, 10);
-          return idLigne > max ? idLigne : max;
-        }, 0);
-      
-        const newIdLigne = maxIdLigne + 1;
+        const newIdLigne = getNextIdLigne();
       
         // Crée une nouvelle ligne pour le projet et son premier tableau
         const newRow = {
@@ -599,14 +594,7 @@
           return;
         }
       
-        // Trouve la valeur la plus élevée d'ID_Ligne dans records
-        const maxIdLigne = records.reduce((max, record) => {
-          const idLigne = parseInt(record.ID_Ligne, 10);
-          return idLigne > max ? idLigne : max;
-        }, 0);
-      
-        // Définit une nouvelle valeur pour ID_Ligne en l'incrémentant de 1
-        const newIdLigne = maxIdLigne + 1;
+        const newIdLigne = getNextIdLigne();
       
         // Création de la nouvelle ligne avec la valeur de ID_Ligne
         const newRow = {
@@ -1031,6 +1019,12 @@
           reader.readAsArrayBuffer(file);
         });
       }
+
+      function getNextIdLigne() {
+        const allIds = records.map(record => parseInt(record.ID_Ligne, 10)).filter(id => !isNaN(id));
+        return Math.max(...allIds, 0) + 1;
+      }
+
 
     </script>
   </body>
