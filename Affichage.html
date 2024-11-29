@@ -251,6 +251,12 @@
         insertProjectOption.value = "Insérer Projet";
         insertProjectOption.text = "Insérer Projet";
         dropdown.appendChild(insertProjectOption);
+
+        // Option pour supprimer un projet
+        const deleteProjectOption = document.createElement("option");
+        deleteProjectOption.value = "deleteProject";
+        deleteProjectOption.textContent = "Supprimer Projet";
+        dropdown.appendChild(deleteProjectOption);
       
         // Restaure la sélection précédente si elle est encore présente
         dropdown.value = currentSelection || ""; // Conserve l'option sélectionnée ou reste sur "Select an option"
@@ -320,6 +326,12 @@
         addOption.value = "addTable";
         addOption.text = "Ajouter Tableau";
         listbox.appendChild(addOption);
+
+        // Option pour supprimer un tableau
+        const deleteTableOption = document.createElement("option");
+        deleteTableOption.value = "deleteTable";
+        deleteTableOption.textContent = "Supprimer Tableau";
+        listbox.appendChild(deleteTableOption);
       }
 
       // Function to populate the table based on the selected first and second column values
