@@ -806,9 +806,6 @@
         }
       
         try {
-          // Snapshot des lignes existantes dans Grist avant insertion
-          const initialRecords = [...records];
-      
           for (const file of files) {
             const workbook = await readXLSX(file);
             const feuilleFichiers = workbook.Sheets["Fichiers"];
@@ -817,7 +814,7 @@
               continue;
             }
       
-            // Récupération du nom du projet
+            // Récupérer le nom du projet
             const range = XLSX.utils.decode_range(feuilleFichiers["!ref"]);
             const projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
             if (!projectNameCell || !projectNameCell.v) {
@@ -828,8 +825,8 @@
             const projectName = projectNameCell.v.split(":").pop().trim();
             console.log("Nom du projet extrait :", projectName);
       
-            // Ajout du projet dans Grist si nécessaire
-            const projectExists = initialRecords.some((record) => record.NomProjet === projectName);
+            // Ajouter le projet si nécessaire
+            const projectExists = records.some((record) => record.NomProjet === projectName);
             if (!projectExists) {
               const maxIdLigne = records.reduce((max, record) => {
                 const idLigne = parseInt(record.ID_Ligne, 10);
@@ -874,9 +871,14 @@
                 if (firstColCell && firstColCell.v === "*") break;
       
                 const rowData = [];
-                for (let c = 0; c < 7; c++) { // On considère ici 7 colonnes
+                for (let c = 0; c < 5; c++) {
                   const cell = feuilleFichiers[XLSX.utils.encode_cell({ r, c })];
                   rowData.push(cell?.v || null);
+                }
+      
+                // Remplir les cellules vides de la première colonne
+                if (!rowData[0]) {
+                  rowData[0] = tableRows.length > 0 ? tableRows[tableRows.length - 1][0] : null;
                 }
       
                 tableRows.push(rowData);
@@ -887,6 +889,7 @@
               // Comparer et ajouter les nouvelles lignes
               const actions = [];
               for (const row of tableRows) {
+                // Construire la ligne transformée au format Grist
                 const transformedRow = {
                   NomProjet: projectName,
                   NomEtage: tableName,
@@ -897,31 +900,19 @@
                   DescriptionObservations: row[4],
                 };
       
-                // Comparaison progressive par colonne avec les lignes existantes AVANT ajout
-                let filteredRecords = initialRecords;
-                const columnsToCompare = [
-                  "NomProjet",
-                  "NomEtage",
-                  "Emetteur",
-                  "Reference",
-                  "Indice",
-                  "Recu",
-                  "DescriptionObservations",
-                ];
+                // Comparer colonne par colonne
+                const isDuplicate = records.some((record) => {
+                  return (
+                    record.NomProjet === transformedRow.NomProjet &&
+                    record.NomEtage === transformedRow.NomEtage &&
+                    record.Emetteur === transformedRow.Emetteur &&
+                    record.Reference === transformedRow.Reference &&
+                    record.Indice === transformedRow.Indice &&
+                    record.Recu === transformedRow.Recu &&
+                    record.DescriptionObservations === transformedRow.DescriptionObservations
+                  );
+                });
       
-                let isDuplicate = true;
-      
-                for (let i = 0; i < columnsToCompare.length; i++) {
-                  const column = columnsToCompare[i];
-                  filteredRecords = filteredRecords.filter((record) => record[column] === transformedRow[column]);
-      
-                  if (filteredRecords.length === 0) {
-                    isDuplicate = false;
-                    break;
-                  }
-                }
-      
-                // Si la ligne n'est pas un doublon, on l'ajoute
                 if (!isDuplicate) {
                   const maxIdLigne = records.reduce((max, record) => {
                     const idLigne = parseInt(record.ID_Ligne, 10);
@@ -933,7 +924,7 @@
                     ID_Ligne: (maxIdLigne + 1).toString(),
                   };
       
-                  records.push(newRow); // Mise à jour locale
+                  records.push(newRow);
                   actions.push(["AddRecord", "Fusion", null, newRow]);
                 } else {
                   console.log("Doublon détecté :", transformedRow);
@@ -949,9 +940,19 @@
                 );
               }
             }
+      
+            // Rafraîchir les listes
+            populateFirstColumnDropdown(
+              [...new Set(records.map((record) => record.NomProjet))].sort()
+            );
+      
+            if (projectName === selectedFirstValue) {
+              populateSecondColumnListbox(projectName);
+            }
           }
         } catch (error) {
           console.error("Erreur lors de l'importation :", error);
+          alert("Une erreur est survenue lors de l'importation.");
         }
       });
 
