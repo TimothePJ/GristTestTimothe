@@ -323,7 +323,7 @@
           console.log("Supprimer clicked for row ID:", selectedRecordId);
           
           // Supprime la ligne dans Grist
-          grist.docApi.applyUserActions([['RemoveRecord', 'Fusion', Number(selectedRecordId)]])
+          grist.docApi.applyUserActions([['RemoveRecord', 'References', Number(selectedRecordId)]])
           .then(() => {
               // Supprime la ligne localement dans le tableau
               records = records.filter(record => record.ID_Ligne !== selectedRecordId);
@@ -360,7 +360,7 @@
           Indice: record.Indice || '',
           Recu: record.Recu || '',
           DescriptionObservations: record.DescriptionObservations || '',
-          ID_Ligne: record.ID_Ligne || ''
+          ID_Ligne: record.id || ''
         }));
 
         // Populate the first dropdown with unique values from 'NomProjet'
