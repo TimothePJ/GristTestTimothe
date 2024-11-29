@@ -304,8 +304,8 @@
 
         const contextMenu = document.getElementById('contextMenu');
         contextMenu.style.display = 'block';
-        contextMenu.style.left = `${event.pageX}px`;
-        contextMenu.style.top = `${event.pageY}px`;
+        contextMenu.style.left = ${event.pageX}px;
+        contextMenu.style.top = ${event.pageY}px;
       }
 
       // Hide context menu if clicked elsewhere
@@ -487,7 +487,7 @@
             secondColumnListbox.value = firstTableName;
             selectedSecondValue = firstTableName;
       
-            console.log(`Le projet "${projectName}" et son tableau "${firstTableName}" sont maintenant sélectionnés.`);
+            console.log(Le projet "${projectName}" et son tableau "${firstTableName}" sont maintenant sélectionnés.);
       
             // Affiche directement le tableau dans la vue HTML
             populateTable();
@@ -577,7 +577,7 @@
             secondColumnListbox.value = newTableName;
             selectedSecondValue = newTableName;
       
-            console.log(`Le tableau "${newTableName}" est maintenant sélectionné.`);
+            console.log(Le tableau "${newTableName}" est maintenant sélectionné.);
       
             // Affiche directement le tableau dans la vue HTML
             populateTable();
@@ -664,7 +664,7 @@
       
         const { selectedProject, selectedTable } = selections;
       
-        console.log(`Sauvegarde en cours pour le tableau "${selectedTable}" du projet "${selectedProject}".`);
+        console.log(Sauvegarde en cours pour le tableau "${selectedTable}" du projet "${selectedProject}".);
       
         // Récupère les lignes du tableau HTML
         const tableBody = document.getElementById('tableBody');
@@ -677,7 +677,7 @@
           const cells = row.getElementsByTagName('td');
           const rowId = cells[0].textContent.trim(); // ID_Ligne
       
-          // Recherche la ligne correspondante dans `records`
+          // Recherche la ligne correspondante dans records
           const record = records.find(
             (rec) =>
               rec.ID_Ligne === rowId &&
@@ -686,7 +686,7 @@
           );
       
           if (!record) {
-            console.warn(`Ligne introuvable pour ID_Ligne = ${rowId}, Projet = ${selectedProject}, Tableau = ${selectedTable}`);
+            console.warn(Ligne introuvable pour ID_Ligne = ${rowId}, Projet = ${selectedProject}, Tableau = ${selectedTable});
             continue;
           }
       
@@ -806,12 +806,14 @@
         }
       
         try {
+          // Actualisation des enregistrements pour garantir que records est synchronisé avec Grist
+          await refreshRecords();
       
           for (const file of files) {
             const workbook = await readXLSX(file);
             const feuilleFichiers = workbook.Sheets["Fichiers"];
             if (!feuilleFichiers) {
-              alert(`La feuille 'Fichiers' est introuvable dans le fichier sélectionné (${file.name}).`);
+              alert(La feuille 'Fichiers' est introuvable dans le fichier sélectionné (${file.name}).);
               continue;
             }
       
@@ -819,7 +821,7 @@
             const range = XLSX.utils.decode_range(feuilleFichiers["!ref"]);
             const projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
             if (!projectNameCell || !projectNameCell.v) {
-              alert(`Le nom du projet est introuvable dans le fichier ${file.name}.`);
+              alert(Le nom du projet est introuvable dans le fichier ${file.name}.);
               continue;
             }
       
@@ -887,7 +889,7 @@
                 tableRows.push(rowData);
               }
       
-              console.log(`Données pour le tableau "${tableName}" :`, tableRows);
+              console.log(Données pour le tableau "${tableName}" :, tableRows);
       
               // Comparer et ajouter les nouvelles lignes
               const actions = [];
@@ -930,9 +932,9 @@
       
               if (actions.length > 0) {
                 await grist.docApi.applyUserActions(actions);
-                console.log(`Tableau "${tableName}" ajouté avec ${actions.length} lignes.`);
+                console.log(Tableau "${tableName}" ajouté avec ${actions.length} lignes.);
               } else {
-                console.log(`Aucune nouvelle ligne ajoutée pour le tableau "${tableName}".`);
+                console.log(Aucune nouvelle ligne ajoutée pour le tableau "${tableName}".);
               }
       
               // Re-synchroniser après chaque tableau ajouté
@@ -976,7 +978,7 @@
           reader.onload = (event) => {
             try {
               const data = new Uint8Array(event.target.result);
-              const workbook = XLSX.read(data, { type: "array", raw: true }); // Active `raw` pour préserver les chaînes
+              const workbook = XLSX.read(data, { type: "array", raw: true }); // Active raw pour préserver les chaînes
               resolve(workbook);
             } catch (error) {
               reject(error);
@@ -989,56 +991,6 @@
       
           reader.readAsArrayBuffer(file);
         });
-      }
-
-            function getNextIdLigne() {
-        const allIds = records.map(record => parseInt(record.ID_Ligne, 10)).filter(id => !isNaN(id));
-        return Math.max(...allIds, 0) + 1;
-      }
-
-      function initializeGlobalIdCounter() {
-        const allIds = records.map(record => parseInt(record.ID_Ligne, 10)).filter(id => !isNaN(id));
-        globalIdCounter = Math.max(...allIds, 0); // Initialiser au maximum existant
-      }
-
-      function getNextGlobalId() {
-        globalIdCounter += 1;
-        return globalIdCounter.toString();;
-      }
-
-      async function refreshRecords() {
-        try {
-          const receivedRecords = await grist.docApi.fetchTable("Fusion");
-          
-          // Vérifiez que les données reçues sont dans le bon format
-          if (!receivedRecords || typeof receivedRecords !== "object") {
-            console.error("Format inattendu des enregistrements reçus :", receivedRecords);
-            return;
-          }
-      
-          // Transformez les colonnes en lignes
-          const columnKeys = Object.keys(receivedRecords); // Récupérer les colonnes
-          const rowCount = receivedRecords[columnKeys[0]].length; // Nombre de lignes basé sur la première colonne
-      
-          // Recomposez chaque ligne en un objet
-          records = Array.from({ length: rowCount }, (_, rowIndex) => {
-            const row = {};
-            columnKeys.forEach((key) => {
-              row[key] = receivedRecords[key][rowIndex] || ''; // Ajoutez chaque colonne à l'objet ligne
-            });
-            return row;
-          });
-      
-          console.log("Records synchronisés avec Grist :", records);
-        } catch (error) {
-          console.error("Erreur lors de la synchronisation des enregistrements avec Grist :", error);
-        }
-      }
-
-      async function getMaxIdFromGrist() {
-        await refreshRecords(); // Synchroniser les enregistrements avec Grist
-        const allIds = records.map(record => parseInt(record.ID_Ligne, 10)).filter(id => !isNaN(id));
-        return Math.max(...allIds, 0); // Retourne le max ou 0 si aucun ID trouvé
       }
 
     </script>
