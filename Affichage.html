@@ -806,8 +806,6 @@
         }
       
         try {
-          // Actualisation des enregistrements pour garantir que `records` est synchronisé avec Grist
-          await refreshRecords();
       
           for (const file of files) {
             const workbook = await readXLSX(file);
