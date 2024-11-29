@@ -820,7 +820,11 @@
         try {
           // Snapshot des lignes actuelles dans Grist avant tout ajout
           const initialRecords = [...records];
-      
+          let maxIdLigne = initialRecords.reduce((max, record) => {
+            const idLigne = parseInt(record.ID_Ligne, 10);
+            return idLigne > max ? idLigne : max;
+          }, 0);
+
           for (const file of files) {
             const workbook = await readXLSX(file);
             const feuilleFichiers = workbook.Sheets["Fichiers"];
@@ -940,12 +944,14 @@
                     return idLigne > max ? idLigne : max;
                   }, 0);
       
+                  maxIdLigne++; // Incrémentation de l'ID global pour garantir l'unicité
                   const newRow = {
                     ...transformedRow,
-                    ID_Ligne: (maxIdLigne + 1).toString(),
+                    ID_Ligne: maxIdLigne.toString(),
                   };
-      
                   records.push(newRow); // Mise à jour locale
+                  populateTable(); // Met à jour immédiatement la table HTML avec la nouvelle ligne
+
                   actions.push(["AddRecord", "Fusion", null, newRow]);
                 } else {
                   console.log("Doublon détecté :", transformedRow);
@@ -954,6 +960,7 @@
       
               if (actions.length > 0) {
                 await grist.docApi.applyUserActions(actions);
+                populateTable(); // Met à jour la table après l'importation
                 console.log(`Tableau "${tableName}" ajouté avec ${actions.length} lignes.`);
               } else {
                 console.log(
