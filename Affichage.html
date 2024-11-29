@@ -993,12 +993,7 @@
           reader.onload = (event) => {
             try {
               const data = new Uint8Array(event.target.result);
-              const workbook = XLSX.read(data, {
-                type: "array",
-                cellText: false,
-                cellDates: true,
-                raw: true,
-              });
+              const workbook = XLSX.read(data, { type: "array", raw: true }); // Active `raw` pour préserver "00"
               resolve(workbook);
             } catch (error) {
               reject(error);
