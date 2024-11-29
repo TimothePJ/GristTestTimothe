@@ -677,17 +677,28 @@
           const cells = row.getElementsByTagName('td');
           const rowId = cells[0].textContent.trim(); // ID_Ligne
       
-          // Recherche la ligne correspondante dans `records`
-          const record = records.find(
+          // Recherche ou création de la ligne correspondante dans `records`
+          let record = records.find(
             (rec) =>
               rec.ID_Ligne === rowId &&
               rec.NomProjet === selectedProject &&
               rec.NomEtage === selectedTable
           );
       
+          // Si aucune correspondance, crée un nouvel enregistrement temporaire
           if (!record) {
-            console.warn(`Ligne introuvable pour ID_Ligne = ${rowId}, Projet = ${selectedProject}, Tableau = ${selectedTable}`);
-            continue;
+            console.warn(`Nouvelle ligne détectée avec ID_Ligne = ${rowId}, ajoutée temporairement.`);
+            record = {
+              NomProjet: selectedProject,
+              NomEtage: selectedTable,
+              ID_Ligne: rowId,
+              Emetteur: '',
+              Reference: '',
+              Indice: '',
+              Recu: '',
+              DescriptionObservations: ''
+            };
+            records.push(record); // Ajout à records pour suivre les modifications
           }
       
           const updatedFields = {};
@@ -706,6 +717,7 @@
       
           if (hasChanges) {
             updates.push(['UpdateRecord', 'Fusion', Number(rowId), updatedFields]);
+            console.log(`Changements détectés pour la ligne ${rowId} :`, updatedFields);
           }
         }
       
