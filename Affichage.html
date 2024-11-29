@@ -619,6 +619,8 @@
           DescriptionObservations: '',
           ID_Ligne: newIdLigne.toString() // Convertit en string pour s'aligner avec les autres valeurs
         };
+
+        records.push(newRow);
       
         // Envoie la requête pour ajouter la nouvelle ligne dans Grist
         grist.docApi.applyUserActions([
@@ -658,42 +660,59 @@
 
       // Fonction de sauvegarde mise à jour
       async function saveChanges() {
-        // Obtenez les sélections actuelles
         const selections = getCurrentSelections();
-        if (!selections) return; // Interrompt la fonction si les sélections sont invalides
+        if (!selections) {
+          alert("Veuillez sélectionner un tableau.");
+          return;
+        }
       
         const { selectedProject, selectedTable } = selections;
       
         console.log(`Sauvegarde en cours pour le tableau "${selectedTable}" du projet "${selectedProject}".`);
       
-        // Récupère les lignes du tableau HTML
         const tableBody = document.getElementById('tableBody');
         const rows = tableBody.getElementsByTagName('tr');
       
         const columnMap = ['Emetteur', 'Reference', 'Indice', 'Recu', 'DescriptionObservations'];
         const updates = [];
+        const newRecords = [];
       
         for (const row of rows) {
           const cells = row.getElementsByTagName('td');
-          const rowId = cells[0].textContent.trim(); // ID_Ligne
+          const rowId = cells[0].textContent.trim();
       
-          // Recherche la ligne correspondante dans `records`
-          const record = records.find(
+          // Recherche dans records
+          let record = records.find(
             (rec) =>
               rec.ID_Ligne === rowId &&
               rec.NomProjet === selectedProject &&
               rec.NomEtage === selectedTable
           );
       
+          // Si la ligne n'existe pas dans records, on la considère comme nouvelle
           if (!record) {
-            console.warn(`Ligne introuvable pour ID_Ligne = ${rowId}, Projet = ${selectedProject}, Tableau = ${selectedTable}`);
-            continue;
+            console.log(`Nouvelle ligne détectée avec ID_Ligne = ${rowId}`);
+            const newRecord = {
+              NomProjet: selectedProject,
+              NomEtage: selectedTable,
+              ID_Ligne: rowId,
+              Emetteur: cells[1].textContent.trim(),
+              Reference: cells[2].textContent.trim(),
+              Indice: cells[3].textContent.trim(),
+              Recu: cells[4].textContent.trim(),
+              DescriptionObservations: cells[5].textContent.trim(),
+            };
+      
+            // Ajout à records et préparation pour insertion dans Grist
+            records.push(newRecord);
+            newRecords.push(['AddRecord', 'Fusion', null, newRecord]);
+            continue; // Ne pas traiter comme une modification
           }
       
+          // Vérifie les modifications des champs existants
           const updatedFields = {};
           let hasChanges = false;
       
-          // Compare chaque champ
           for (let i = 1; i < cells.length; i++) {
             const fieldName = columnMap[i - 1];
             const cellValue = cells[i].textContent.trim();
@@ -706,22 +725,33 @@
       
           if (hasChanges) {
             updates.push(['UpdateRecord', 'Fusion', Number(rowId), updatedFields]);
+            console.log(`Modifications détectées pour la ligne ${rowId} :`, updatedFields);
           }
         }
       
-        if (updates.length > 0) {
-          try {
-            await grist.docApi.applyUserActions(updates);
-            console.log("Modifications sauvegardées avec succès :", updates);
-            alert("Les modifications ont été sauvegardées.");
-          } catch (error) {
-            console.error("Erreur lors de la sauvegarde :", error);
-            alert("Erreur lors de la sauvegarde.");
+        try {
+          // Appliquer les modifications
+          if (newRecords.length > 0) {
+            await grist.docApi.applyUserActions(newRecords);
+            console.log(`${newRecords.length} nouvelles lignes ajoutées à Grist.`);
           }
-        } else {
-          alert("Aucune modification détectée pour la sauvegarde.");
+      
+          if (updates.length > 0) {
+            await grist.docApi.applyUserActions(updates);
+            console.log(`${updates.length} modifications appliquées à Grist.`);
+          }
+      
+          if (newRecords.length === 0 && updates.length === 0) {
+            alert("Aucune modification détectée.");
+          } else {
+            alert("Modifications sauvegardées avec succès !");
+          }
+        } catch (error) {
+          console.error("Erreur lors de la sauvegarde :", error);
+          alert("Une erreur est survenue lors de la sauvegarde.");
         }
       }
+
 
       // Écouteur d'événement pour le bouton de sauvegarde
       document.getElementById('saveButton').addEventListener('click', saveChanges);
