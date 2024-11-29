@@ -1044,22 +1044,24 @@
         try {
           const receivedRecords = await grist.docApi.fetchTable("Fusion");
           
-          // Vérification si `receivedRecords` contient les données sous forme de liste ou objet
-          if (!Array.isArray(receivedRecords)) {
-            console.error("Les enregistrements reçus ne sont pas un tableau :", receivedRecords);
+          // Vérifiez que les données reçues sont dans le bon format
+          if (!receivedRecords || typeof receivedRecords !== "object") {
+            console.error("Format inattendu des enregistrements reçus :", receivedRecords);
             return;
           }
       
-          records = receivedRecords.map(record => ({
-            NomProjet: record.NomProjet || '',
-            NomEtage: record.NomEtage || '',
-            Emetteur: record.Emetteur || '',
-            Reference: record.Reference || '',
-            Indice: record.Indice || '',
-            Recu: record.Recu || '',
-            DescriptionObservations: record.DescriptionObservations || '',
-            ID_Ligne: record.ID_Ligne || ''
-          }));
+          // Transformez les colonnes en lignes
+          const columnKeys = Object.keys(receivedRecords); // Récupérer les colonnes
+          const rowCount = receivedRecords[columnKeys[0]].length; // Nombre de lignes basé sur la première colonne
+      
+          // Recomposez chaque ligne en un objet
+          records = Array.from({ length: rowCount }, (_, rowIndex) => {
+            const row = {};
+            columnKeys.forEach((key) => {
+              row[key] = receivedRecords[key][rowIndex] || ''; // Ajoutez chaque colonne à l'objet ligne
+            });
+            return row;
+          });
       
           console.log("Records synchronisés avec Grist :", records);
         } catch (error) {
