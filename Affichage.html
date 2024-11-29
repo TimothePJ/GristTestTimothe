@@ -1288,78 +1288,80 @@
       function showDeleteTableModal() {
         const modal = document.getElementById("deleteTableModal");
         const list = document.getElementById("deleteTableList");
-      
+    
         // Nettoyer la liste avant de l'ajouter
         list.innerHTML = "";
-      
-        // Vérifier la sélection dans la première liste déroulante
+    
+        // Vérifier que le projet est bien sélectionné
         if (!selectedFirstValue) {
-          alert("Veuillez d'abord sélectionner un projet !");
+          alert("Veuillez sélectionner un projet avant de supprimer un tableau !");
           return;
         }
-      
+    
         // Récupérer les tableaux associés au projet sélectionné
         const tableNames = records
           .filter(record => record.NomProjet === selectedFirstValue)
           .map(record => record.NomEtage)
-          .filter((value, index, self) => value && self.indexOf(value) === index); // Supprimer les doublons
-      
+          .filter((value, index, self) => value && self.indexOf(value) === index); // Supprime les doublons
+    
         if (tableNames.length === 0) {
           alert(`Aucun tableau trouvé pour le projet "${selectedFirstValue}".`);
           return;
         }
-      
-        // Créer une liste cliquable pour chaque tableau
+    
+        // Générer une liste cliquable pour chaque tableau
         tableNames.forEach(tableName => {
           const li = document.createElement("li");
           li.textContent = tableName;
           li.style.cursor = "pointer";
-          li.style.marginBottom = "10px";
-          li.style.color = "blue"; // Pour indiquer qu'il est cliquable
-      
+          li.style.padding = "10px";
+          li.style.border = "1px solid #ddd";
+          li.style.margin = "5px 0";
+          li.style.borderRadius = "4px";
+    
           li.addEventListener("click", async () => {
             const confirmation = confirm(`Êtes-vous sûr de vouloir supprimer le tableau "${tableName}" ?`);
             if (!confirmation) return;
-      
+    
             try {
               // Filtrer les lignes à supprimer
               const rowsToDelete = records
                 .filter(record => record.NomProjet === selectedFirstValue && record.NomEtage === tableName)
                 .map(record => Number(record.ID_Ligne));
-      
+    
               if (rowsToDelete.length === 0) {
                 alert("Aucune ligne trouvée pour ce tableau.");
                 return;
               }
-      
+    
               // Préparer les actions pour la suppression
               const actions = rowsToDelete.map(rowId => ["RemoveRecord", "Fusion", rowId]);
-      
+    
               // Appliquer les suppressions dans Grist
               await grist.docApi.applyUserActions(actions);
-      
+    
               // Mise à jour locale des données
               records = records.filter(
                 record => !(record.NomProjet === selectedFirstValue && record.NomEtage === tableName)
               );
-      
+    
               // Mettre à jour l'affichage
               populateSecondColumnListbox(selectedFirstValue);
               populateTable();
-      
+    
               alert(`Le tableau "${tableName}" a été supprimé avec succès.`);
             } catch (error) {
               console.error("Erreur lors de la suppression du tableau :", error);
               alert("Une erreur est survenue lors de la suppression du tableau.");
             } finally {
-              modal.style.display = "none"; // Fermer le pop-up
+              modal.style.display = "none"; // Fermer le popup
             }
           });
-      
+    
           list.appendChild(li);
         });
-      
-        // Afficher le pop-up
+    
+        // Afficher le popup
         modal.style.display = "block";
       }
 
@@ -1371,54 +1373,54 @@
 
       // Ajouter une option "Supprimer Tableau" dans la liste déroulante des tableaux
       function populateSecondColumnListbox(selectedValue) {
-        const listbox = document.getElementById('secondColumnListbox');
+          const listbox = document.getElementById('secondColumnListbox');
       
-        listbox.innerHTML = ''; // Réinitialise la liste
+          listbox.innerHTML = ''; // Réinitialise la liste
       
-        // Option par défaut
-        const defaultOption = document.createElement("option");
-        defaultOption.value = "";
-        defaultOption.textContent = "Select an option";
-        listbox.appendChild(defaultOption);
+          // Option par défaut
+          const defaultOption = document.createElement("option");
+          defaultOption.value = "";
+          defaultOption.textContent = "Select an option";
+          listbox.appendChild(defaultOption);
       
-        // Séparateur
-        const separator1 = document.createElement("option");
-        separator1.disabled = true; // Important pour appliquer le style
-        separator1.textContent = "--------------------";
-        listbox.appendChild(separator1);
+          // Séparateur
+          const separator1 = document.createElement("option");
+          separator1.disabled = true; // Important pour appliquer le style
+          separator1.textContent = "--------------------";
+          listbox.appendChild(separator1);
       
-        // Ajouter les valeurs uniques triées
-        const secondColumnValues = records
-          .filter(record => record.NomProjet === selectedValue)
-          .map(record => record.NomEtage)
-          .filter((value, index, self) => value && self.indexOf(value) === index)
-          .sort();
+          // Ajouter les valeurs uniques triées
+          const secondColumnValues = records
+            .filter(record => record.NomProjet === selectedValue)
+            .map(record => record.NomEtage)
+            .filter((value, index, self) => value && self.indexOf(value) === index)
+            .sort();
       
-        secondColumnValues.forEach(value => {
-          const option = document.createElement("option");
-          option.value = value;
-          option.text = value;
-          listbox.appendChild(option);
-        });
+          secondColumnValues.forEach(value => {
+            const option = document.createElement("option");
+            option.value = value;
+            option.text = value;
+            listbox.appendChild(option);
+          });
       
-        // Deuxième séparateur
-        const separator2 = document.createElement("option");
-        separator2.disabled = true; // Important pour appliquer le style
-        separator2.textContent = "--------------------";
-        listbox.appendChild(separator2);
+          // Deuxième séparateur
+          const separator2 = document.createElement("option");
+          separator2.disabled = true; // Important pour appliquer le style
+          separator2.textContent = "--------------------";
+          listbox.appendChild(separator2);
       
-        // Option pour supprimer un tableau
-        const deleteTableOption = document.createElement("option");
-        deleteTableOption.value = "deleteTable";
-        deleteTableOption.textContent = "Supprimer Tableau";
-        listbox.appendChild(deleteTableOption);
+          // Option pour supprimer un tableau
+          const deleteTableOption = document.createElement("option");
+          deleteTableOption.value = "deleteTable";
+          deleteTableOption.textContent = "Supprimer Tableau";
+          listbox.appendChild(deleteTableOption);
       
-        // Ajoute l'option "Ajouter Tableau"
-        const addOption = document.createElement("option");
-        addOption.value = "addTable";
-        addOption.text = "Ajouter Tableau";
-        listbox.appendChild(addOption);
-      }
+          // Ajoute l'option "Ajouter Tableau"
+          const addOption = document.createElement("option");
+          addOption.value = "addTable";
+          addOption.text = "Ajouter Tableau";
+          listbox.appendChild(addOption);
+        }
 
     </script>
   </body>
