@@ -1371,13 +1371,27 @@
 
       // Ajouter une option "Supprimer Tableau" dans la liste déroulante des tableaux
       function populateSecondColumnListbox(selectedValue) {
-        const listbox = document.getElementById("secondColumnListbox");
-        listbox.innerHTML = '<option value="">Select an option</option>'; // Réinitialise la liste
+        const listbox = document.getElementById('secondColumnListbox');
       
+        listbox.innerHTML = ''; // Réinitialise la liste
+      
+        // Option par défaut
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "";
+        defaultOption.textContent = "Select an option";
+        listbox.appendChild(defaultOption);
+      
+        // Séparateur
+        const separator1 = document.createElement("option");
+        separator1.disabled = true; // Important pour appliquer le style
+        separator1.textContent = "--------------------";
+        listbox.appendChild(separator1);
+      
+        // Ajouter les valeurs uniques triées
         const secondColumnValues = records
-          .filter(record => record.NomProjet === selectedValue) // Filtre selon le projet
-          .map(record => record.NomEtage) // Extrait les valeurs
-          .filter((value, index, self) => value && self.indexOf(value) === index) // Supprime les doublons
+          .filter(record => record.NomProjet === selectedValue)
+          .map(record => record.NomEtage)
+          .filter((value, index, self) => value && self.indexOf(value) === index)
           .sort();
       
         secondColumnValues.forEach(value => {
@@ -1387,17 +1401,23 @@
           listbox.appendChild(option);
         });
       
+        // Deuxième séparateur
+        const separator2 = document.createElement("option");
+        separator2.disabled = true; // Important pour appliquer le style
+        separator2.textContent = "--------------------";
+        listbox.appendChild(separator2);
+      
+        // Option pour supprimer un tableau
+        const deleteTableOption = document.createElement("option");
+        deleteTableOption.value = "deleteTable";
+        deleteTableOption.textContent = "Supprimer Tableau";
+        listbox.appendChild(deleteTableOption);
+      
         // Ajoute l'option "Ajouter Tableau"
         const addOption = document.createElement("option");
         addOption.value = "addTable";
         addOption.text = "Ajouter Tableau";
         listbox.appendChild(addOption);
-      
-        // Ajoute l'option "Supprimer Tableau"
-        const deleteOption = document.createElement("option");
-        deleteOption.value = "Supprimer Tableau";
-        deleteOption.text = "Supprimer Tableau";
-        listbox.appendChild(deleteOption);
       }
 
     </script>
