@@ -878,11 +878,16 @@
                   const cell = feuilleFichiers[XLSX.utils.encode_cell({ r, c })];
                   let cellValue = cell?.v !== undefined && cell?.v !== null ? cell.v : null;
               
-                  // Manipulation spécifique pour "Indice" (colonne 3 dans Excel, c === 2)
-                  if (c === 2) { // Si on est dans la colonne "Indice"
-                    cellValue = cellValue !== null ? String(cellValue) : null; // Convertir seulement en chaîne sans ajout
+                  // Vérification spécifique pour la colonne "Indice" (c === 2)
+                  if (c === 2) { // Colonne "Indice"
+                    // Si la cellule semble être "0" mais avait initialement une longueur de 2 caractères
+                    if (cellValue !== null && String(cellValue) === "0" && cell.w && cell.w.length === 2) {
+                      cellValue = "00"; // Force à "00"
+                    } else {
+                      cellValue = cellValue !== null ? String(cellValue) : null; // Sinon, conversion normale en chaîne
+                    }
                   } else {
-                    cellValue = cellValue !== null ? String(cellValue) : null; // Convertit les autres en chaîne
+                    cellValue = cellValue !== null ? String(cellValue) : null; // Conversion pour les autres colonnes
                   }
               
                   rowData.push(cellValue === "" ? null : cellValue); // Gère les valeurs vides
