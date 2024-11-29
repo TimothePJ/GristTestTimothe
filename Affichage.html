@@ -169,6 +169,7 @@
       let selectedFirstValue = '';
       let selectedSecondValue = '';
       let selectedRecordId = null;
+      let globalIdCounter = 0;
 
       // Ready Grist
       grist.ready();
@@ -361,6 +362,8 @@
           ID_Ligne: record.ID_Ligne || ''
         }));
 
+        initializeGlobalIdCounter();
+
         // Populate the first dropdown with unique values from 'NomProjet'
         const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
         populateFirstColumnDropdown(uniqueFirstColumnValues);
@@ -409,7 +412,7 @@
         }
       
         // Génère un nouvel ID_Ligne unique
-        const newIdLigne = getNextIdLigne();
+        const newIdLigne = getNextGlobalId();
       
         // Crée une nouvelle ligne pour le projet et son premier tableau
         const newRow = {
@@ -855,6 +858,7 @@
               }, 0);
       
               const newProjectId = maxIdLigne + 1;
+              const newIdLigne = getNextGlobalId();
               const projectRow = {
                 NomProjet: projectName,
                 NomEtage: "",
@@ -1023,6 +1027,16 @@
       function getNextIdLigne() {
         const allIds = records.map(record => parseInt(record.ID_Ligne, 10)).filter(id => !isNaN(id));
         return Math.max(...allIds, 0) + 1;
+      }
+
+      function initializeGlobalIdCounter() {
+        const allIds = records.map(record => parseInt(record.ID_Ligne, 10)).filter(id => !isNaN(id));
+        globalIdCounter = Math.max(...allIds, 0);
+      }
+
+      function getNextGlobalId() {
+        globalIdCounter += 1;
+        return globalIdCounter;
       }
 
 
