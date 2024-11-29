@@ -684,7 +684,7 @@
               rec.NomProjet === selectedProject &&
               rec.NomEtage === selectedTable
           );
-      
+          
           // Si aucune correspondance, crée un nouvel enregistrement temporaire
           if (!record) {
             console.warn(`Nouvelle ligne détectée avec ID_Ligne = ${rowId}, ajoutée temporairement.`);
@@ -835,7 +835,7 @@
       
             // Récupération du nom du projet
             const range = XLSX.utils.decode_range(feuilleFichiers["!ref"]);
-            const projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
+            let projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
             if (!projectNameCell || !projectNameCell.v) {
               alert(`Le nom du projet est introuvable dans le fichier ${file.name}.`);
               continue;
@@ -939,7 +939,7 @@
                 });
       
                 if (!isDuplicate) {
-                  const maxIdLigne = records.reduce((max, record) => {
+                  let maxIdLigne = records.reduce((max, record) => {
                     const idLigne = parseInt(record.ID_Ligne, 10);
                     return idLigne > max ? idLigne : max;
                   }, 0);
