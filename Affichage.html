@@ -879,6 +879,11 @@
                   rowData.push(cell?.v || null);
                 }
       
+                // Compléter la valeur manquante dans "Emetteur" avec la valeur précédente
+                if (!rowData[0] && tableRows.length > 0) {
+                  rowData[0] = tableRows[tableRows.length - 1][0];
+                }
+      
                 tableRows.push(rowData);
               }
       
@@ -890,7 +895,7 @@
                 const transformedRow = {
                   NomProjet: projectName,
                   NomEtage: tableName,
-                  Emetteur: row[0],
+                  Emetteur: row[0], // Après complétion si nécessaire
                   Reference: row[1],
                   Indice: row[2],
                   Recu: row[3],
