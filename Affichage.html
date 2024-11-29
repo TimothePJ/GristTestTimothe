@@ -210,8 +210,21 @@
         // Conserve la sélection actuelle
         const currentSelection = dropdown.value;
       
-        dropdown.innerHTML = '<option value="">Select an option</option>'; // Réinitialise la liste déroulante
+        dropdown.innerHTML = ''; // Réinitialise la liste déroulante
       
+        // Option par défaut
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "";
+        defaultOption.textContent = "Select an option";
+        dropdown.appendChild(defaultOption);
+      
+        // Séparateur non sélectionnable
+        const separator = document.createElement("option");
+        separator.disabled = true;
+        separator.textContent = "--------------------";
+        dropdown.appendChild(separator);
+      
+        // Ajout des valeurs uniques
         values.sort().forEach((value) => {
           if (value) {
             const option = document.createElement("option");
@@ -220,6 +233,12 @@
             dropdown.appendChild(option);
           }
         });
+      
+        // Séparateur au-dessus des options supplémentaires
+        const separator2 = document.createElement("option");
+        separator2.disabled = true;
+        separator2.textContent = "--------------------";
+        dropdown.appendChild(separator2);
       
         // Ajoute l'option "Ajouter Projet"
         const addProjectOption = document.createElement("option");
@@ -232,12 +251,6 @@
         insertProjectOption.value = "Insérer Projet";
         insertProjectOption.text = "Insérer Projet";
         dropdown.appendChild(insertProjectOption);
-
-        // Ajouter l'option "Supprimer Projet"
-        const deleteProjectOption = document.createElement("option");
-        deleteProjectOption.value = "deleteProject";
-        deleteProjectOption.textContent = "Supprimer Projet";
-        dropdown.appendChild(deleteProjectOption);
       
         // Restaure la sélection précédente si elle est encore présente
         dropdown.value = currentSelection || ""; // Conserve l'option sélectionnée ou reste sur "Select an option"
@@ -267,25 +280,45 @@
       // Function to populate the second dropdown based on the selected first column value
       function populateSecondColumnListbox(selectedValue) {
         const listbox = document.getElementById('secondColumnListbox');
-        listbox.innerHTML = '<option value="">Select an option</option>'; // Réinitialise la liste
       
+        listbox.innerHTML = ''; // Réinitialise la liste
+      
+        // Option par défaut
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "";
+        defaultOption.textContent = "Select an option";
+        listbox.appendChild(defaultOption);
+      
+        // Séparateur non sélectionnable
+        const separator = document.createElement("option");
+        separator.disabled = true;
+        separator.textContent = "--------------------";
+        listbox.appendChild(separator);
+      
+        // Récupère et trie les valeurs
         const secondColumnValues = records
-          .filter(record => record.NomProjet === selectedValue) // Filtre selon le projet
-          .map(record => record.NomEtage) // Extrait les valeurs
-          .filter((value, index, self) => value && self.indexOf(value) === index) // Supprime les doublons
+          .filter(record => record.NomProjet === selectedValue)
+          .map(record => record.NomEtage)
+          .filter((value, index, self) => value && self.indexOf(value) === index)
           .sort();
       
         secondColumnValues.forEach(value => {
-          const option = document.createElement('option');
+          const option = document.createElement("option");
           option.value = value;
           option.text = value;
           listbox.appendChild(option);
         });
       
+        // Séparateur au-dessus des options supplémentaires
+        const separator2 = document.createElement("option");
+        separator2.disabled = true;
+        separator2.textContent = "--------------------";
+        listbox.appendChild(separator2);
+      
         // Ajoute l'option "Ajouter Tableau"
-        const addOption = document.createElement('option');
-        addOption.value = 'addTable';
-        addOption.text = 'Ajouter Tableau';
+        const addOption = document.createElement("option");
+        addOption.value = "addTable";
+        addOption.text = "Ajouter Tableau";
         listbox.appendChild(addOption);
       }
 
