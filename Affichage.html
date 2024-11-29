@@ -677,28 +677,17 @@
           const cells = row.getElementsByTagName('td');
           const rowId = cells[0].textContent.trim(); // ID_Ligne
       
-          // Recherche ou création de la ligne correspondante dans `records`
-          let record = records.find(
+          // Recherche la ligne correspondante dans `records`
+          const record = records.find(
             (rec) =>
               rec.ID_Ligne === rowId &&
               rec.NomProjet === selectedProject &&
               rec.NomEtage === selectedTable
           );
-          
-          // Si aucune correspondance, crée un nouvel enregistrement temporaire
+      
           if (!record) {
-            console.warn(`Nouvelle ligne détectée avec ID_Ligne = ${rowId}, ajoutée temporairement.`);
-            record = {
-              NomProjet: selectedProject,
-              NomEtage: selectedTable,
-              ID_Ligne: rowId,
-              Emetteur: '',
-              Reference: '',
-              Indice: '',
-              Recu: '',
-              DescriptionObservations: ''
-            };
-            records.push(record); // Ajout à records pour suivre les modifications
+            console.warn(`Ligne introuvable pour ID_Ligne = ${rowId}, Projet = ${selectedProject}, Tableau = ${selectedTable}`);
+            continue;
           }
       
           const updatedFields = {};
@@ -717,7 +706,6 @@
       
           if (hasChanges) {
             updates.push(['UpdateRecord', 'Fusion', Number(rowId), updatedFields]);
-            console.log(`Changements détectés pour la ligne ${rowId} :`, updatedFields);
           }
         }
       
@@ -820,11 +808,7 @@
         try {
           // Snapshot des lignes actuelles dans Grist avant tout ajout
           const initialRecords = [...records];
-          let maxIdLigne = initialRecords.reduce((max, record) => {
-            const idLigne = parseInt(record.ID_Ligne, 10);
-            return idLigne > max ? idLigne : max;
-          }, 0);
-
+      
           for (const file of files) {
             const workbook = await readXLSX(file);
             const feuilleFichiers = workbook.Sheets["Fichiers"];
@@ -835,7 +819,7 @@
       
             // Récupération du nom du projet
             const range = XLSX.utils.decode_range(feuilleFichiers["!ref"]);
-            let projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
+            const projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
             if (!projectNameCell || !projectNameCell.v) {
               alert(`Le nom du projet est introuvable dans le fichier ${file.name}.`);
               continue;
@@ -939,19 +923,17 @@
                 });
       
                 if (!isDuplicate) {
-                  let maxIdLigne = records.reduce((max, record) => {
+                  const maxIdLigne = records.reduce((max, record) => {
                     const idLigne = parseInt(record.ID_Ligne, 10);
                     return idLigne > max ? idLigne : max;
                   }, 0);
       
-                  maxIdLigne++; // Incrémentation de l'ID global pour garantir l'unicité
                   const newRow = {
                     ...transformedRow,
-                    ID_Ligne: maxIdLigne.toString(),
+                    ID_Ligne: (maxIdLigne + 1).toString(),
                   };
+      
                   records.push(newRow); // Mise à jour locale
-                  populateTable(); // Met à jour immédiatement la table HTML avec la nouvelle ligne
-
                   actions.push(["AddRecord", "Fusion", null, newRow]);
                 } else {
                   console.log("Doublon détecté :", transformedRow);
@@ -960,7 +942,6 @@
       
               if (actions.length > 0) {
                 await grist.docApi.applyUserActions(actions);
-                populateTable(); // Met à jour la table après l'importation
                 console.log(`Tableau "${tableName}" ajouté avec ${actions.length} lignes.`);
               } else {
                 console.log(
