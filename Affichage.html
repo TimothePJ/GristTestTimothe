@@ -686,11 +686,9 @@
         const selectedProject = projectDropdown.value.trim();
         const selectedTable = tableDropdown.value.trim();
       
+        // Retourne null uniquement si aucune sélection n'est faite et la validation est activée
         if (!selectedProject || (!selectedTable && !skipValidation)) {
-          if (!skipValidation) {
-            alert("Veuillez sélectionner un projet et un tableau.");
-          }
-          return null; // Retourne null si les sélections sont invalides
+          return null;
         }
       
         return { selectedProject, selectedTable };
