@@ -648,7 +648,6 @@
         return { selectedProject, selectedTable };
       }
 
-      // Fonction de sauvegarde mise à jour
       async function saveChanges() {
         const selections = getCurrentSelections();
         if (!selections) {
@@ -686,11 +685,11 @@
               NomProjet: selectedProject,
               NomEtage: selectedTable,
               ID_Ligne: rowId,
-              Emetteur: cells[1].textContent.trim(),
-              Reference: cells[2].textContent.trim(),
-              Indice: cells[3].textContent.trim(),
-              Recu: cells[4].textContent.trim(),
-              DescriptionObservations: cells[5].textContent.trim(),
+              Emetteur: cells[1]?.textContent.trim() || "",
+              Reference: cells[2]?.textContent.trim() || "",
+              Indice: cells[3]?.textContent.trim() || "",
+              Recu: cells[4]?.textContent.trim() || "",
+              DescriptionObservations: cells[5]?.textContent.trim() || "",
             };
       
             // Ajout à records et préparation pour insertion dans Grist
@@ -705,7 +704,7 @@
       
           for (let i = 1; i < cells.length; i++) {
             const fieldName = columnMap[i - 1];
-            const cellValue = cells[i].textContent.trim();
+            const cellValue = cells[i]?.textContent.trim() || "";
       
             if (record[fieldName] !== cellValue) {
               updatedFields[fieldName] = cellValue;
@@ -714,18 +713,24 @@
           }
       
           if (hasChanges) {
-            updates.push(['UpdateRecord', 'Fusion', Number(rowId), updatedFields]);
-            console.log(`Modifications détectées pour la ligne ${rowId} :`, updatedFields);
+            // Filtrer les champs indésirables avant d'ajouter aux mises à jour
+            const filteredFields = Object.fromEntries(
+              Object.entries(updatedFields).filter(([key, value]) => key !== "undefined" && value !== undefined)
+            );
+      
+            updates.push(['UpdateRecord', 'Fusion', Number(rowId), filteredFields]);
+            console.log(`Modifications détectées pour la ligne ${rowId} :`, filteredFields);
           }
         }
       
         try {
-          // Appliquer les modifications
+          // Appliquer les nouvelles lignes
           if (newRecords.length > 0) {
             await grist.docApi.applyUserActions(newRecords);
             console.log(`${newRecords.length} nouvelles lignes ajoutées à Grist.`);
           }
       
+          // Appliquer les mises à jour existantes
           if (updates.length > 0) {
             await grist.docApi.applyUserActions(updates);
             console.log(`${updates.length} modifications appliquées à Grist.`);
@@ -741,7 +746,6 @@
           alert("Une erreur est survenue lors de la sauvegarde.");
         }
       }
-
 
       // Écouteur d'événement pour le bouton de sauvegarde
       document.getElementById('saveButton').addEventListener('click', saveChanges);
