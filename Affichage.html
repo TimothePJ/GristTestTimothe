@@ -325,7 +325,6 @@
           .then(() => {
               // Supprime la ligne localement dans le tableau
               records = records.filter(record => record.ID_Ligne !== selectedRecordId);
-              refreshUI();
       
               // Actualise l'affichage du tableau
               populateTable();
@@ -436,7 +435,6 @@
       
             // Actualise immédiatement les données locales
             records.push(newRow);
-            refreshUI();
       
             // Met à jour la première liste déroulante
             const projectDropdown = document.getElementById("firstColumnDropdown");
@@ -552,7 +550,6 @@
       
             // Actualise immédiatement les données locales
             records.push(newRow);
-            refreshUI();
       
             // Met à jour la deuxième liste déroulante
             const secondColumnListbox = document.getElementById("secondColumnListbox");
@@ -631,7 +628,6 @@
           console.log("Nouvelle ligne ajoutée :", newRow);
           // Actualise les données pour inclure la nouvelle ligne ajoutée
           records.push(newRow); // Mise à jour locale
-          refreshUI();
           populateTable(); // Actualise l'affichage du tableau HTML
         })
         .catch(error => {
@@ -647,11 +643,13 @@
         const projectDropdown = document.getElementById('firstColumnDropdown');
         const tableDropdown = document.getElementById('secondColumnListbox');
       
-        const selectedProject = projectDropdown?.value.trim();
-        const selectedTable = tableDropdown?.value.trim();
+        const selectedProject = projectDropdown.value.trim();
+        const selectedTable = tableDropdown.value.trim();
       
-        if ((!selectedProject || !selectedTable) && !skipValidation) {
-          alert("Veuillez sélectionner un projet et un tableau.");
+        if (!selectedProject || (!selectedTable && !skipValidation)) {
+          if (!skipValidation) {
+            alert("Veuillez sélectionner un projet et un tableau.");
+          }
           return null; // Retourne null si les sélections sont invalides
         }
       
@@ -662,11 +660,7 @@
       async function saveChanges() {
         // Obtenez les sélections actuelles
         const selections = getCurrentSelections();
-        if (!selections || !selectedSecondValue) {
-          alert("Veuillez sélectionner un tableau avant de sauvegarder.");
-          console.error("Aucune table sélectionnée ou les sélections sont invalides :", selections);
-          return;
-        }
+        if (!selections) return; // Interrompt la fonction si les sélections sont invalides
       
         const { selectedProject, selectedTable } = selections;
       
@@ -719,17 +713,6 @@
           try {
             await grist.docApi.applyUserActions(updates);
             console.log("Modifications sauvegardées avec succès :", updates);
-
-            // Actualise localement les records
-            updates.forEach(update => {
-              const [, , rowId, updatedFields] = update;
-              const record = records.find(rec => rec.ID_Ligne === rowId.toString());
-              if (record) {
-                Object.assign(record, updatedFields); // Met à jour les champs localement
-              }
-            });
-        
-            refreshUI(); // Met à jour l'interface utilisateur
             alert("Les modifications ont été sauvegardées.");
           } catch (error) {
             console.error("Erreur lors de la sauvegarde :", error);
@@ -960,7 +943,6 @@
               if (actions.length > 0) {
                 await grist.docApi.applyUserActions(actions);
                 console.log(`Tableau "${tableName}" ajouté avec ${actions.length} lignes.`);
-                refreshUI();
               } else {
                 console.log(
                   `Aucune nouvelle ligne ajoutée pour le tableau "${tableName}", tous les enregistrements sont déjà dans Grist.`
@@ -1018,19 +1000,6 @@
       
           reader.readAsArrayBuffer(file);
         });
-      }
-
-      function refreshUI() {
-        const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
-        populateFirstColumnDropdown(uniqueFirstColumnValues);
-      
-        if (selectedFirstValue) {
-          populateSecondColumnListbox(selectedFirstValue);
-        }
-      
-        if (selectedFirstValue && selectedSecondValue) {
-          populateTable();
-        }
       }
 
     </script>
