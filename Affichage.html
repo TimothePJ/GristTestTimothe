@@ -1043,6 +1043,13 @@
       async function refreshRecords() {
         try {
           const receivedRecords = await grist.docApi.fetchTable("Fusion");
+          
+          // Vérification si `receivedRecords` contient les données sous forme de liste ou objet
+          if (!Array.isArray(receivedRecords)) {
+            console.error("Les enregistrements reçus ne sont pas un tableau :", receivedRecords);
+            return;
+          }
+      
           records = receivedRecords.map(record => ({
             NomProjet: record.NomProjet || '',
             NomEtage: record.NomEtage || '',
@@ -1053,6 +1060,7 @@
             DescriptionObservations: record.DescriptionObservations || '',
             ID_Ligne: record.ID_Ligne || ''
           }));
+      
           console.log("Records synchronisés avec Grist :", records);
         } catch (error) {
           console.error("Erreur lors de la synchronisation des enregistrements avec Grist :", error);
