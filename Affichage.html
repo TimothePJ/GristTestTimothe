@@ -647,13 +647,11 @@
         const projectDropdown = document.getElementById('firstColumnDropdown');
         const tableDropdown = document.getElementById('secondColumnListbox');
       
-        const selectedProject = projectDropdown.value.trim();
-        const selectedTable = tableDropdown.value.trim();
+        const selectedProject = projectDropdown?.value.trim();
+        const selectedTable = tableDropdown?.value.trim();
       
-        if (!selectedProject || (!selectedTable && !skipValidation)) {
-          if (!skipValidation) {
-            alert("Veuillez sélectionner un projet et un tableau.");
-          }
+        if ((!selectedProject || !selectedTable) && !skipValidation) {
+          alert("Veuillez sélectionner un projet et un tableau.");
           return null; // Retourne null si les sélections sont invalides
         }
       
@@ -664,7 +662,11 @@
       async function saveChanges() {
         // Obtenez les sélections actuelles
         const selections = getCurrentSelections();
-        if (!selections) return; // Interrompt la fonction si les sélections sont invalides
+        if (!selections || !selectedSecondValue) {
+          alert("Veuillez sélectionner un tableau avant de sauvegarder.");
+          console.error("Aucune table sélectionnée ou les sélections sont invalides :", selections);
+          return;
+        }
       
         const { selectedProject, selectedTable } = selections;
       
