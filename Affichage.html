@@ -878,9 +878,9 @@
                   const cell = feuilleFichiers[XLSX.utils.encode_cell({ r, c })];
                   let cellValue = cell?.v !== undefined && cell?.v !== null ? cell.v : null;
               
-                  // Manipulation spécifique pour "Indice" (colonne 3 dans Excel, 5 dans Grist)
-                  if (c === 2) { // Index 2 car c'est la 3e colonne Excel
-                    cellValue = cellValue !== null ? String(cellValue).padStart(2, "0") : null; // Préserve les zéros
+                  // Manipulation spécifique pour "Indice" (colonne 3 dans Excel, c === 2)
+                  if (c === 2) { // Si on est dans la colonne "Indice"
+                    cellValue = cellValue !== null ? String(cellValue) : null; // Convertir seulement en chaîne sans ajout
                   } else {
                     cellValue = cellValue !== null ? String(cellValue) : null; // Convertit les autres en chaîne
                   }
@@ -895,7 +895,7 @@
               
                 tableRows.push(rowData);
               }
-     
+
               console.log(`Données pour le tableau "${tableName}" :`, tableRows);
       
               // Comparer et ajouter les nouvelles lignes
