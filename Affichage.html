@@ -806,6 +806,9 @@
         }
       
         try {
+          // Snapshot des lignes actuelles dans Grist avant tout ajout
+          const initialRecords = [...records];
+      
           for (const file of files) {
             const workbook = await readXLSX(file);
             const feuilleFichiers = workbook.Sheets["Fichiers"];
@@ -814,7 +817,7 @@
               continue;
             }
       
-            // Récupérer le nom du projet
+            // Récupération du nom du projet
             const range = XLSX.utils.decode_range(feuilleFichiers["!ref"]);
             const projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
             if (!projectNameCell || !projectNameCell.v) {
@@ -825,11 +828,10 @@
             const projectName = projectNameCell.v.split(":").pop().trim();
             console.log("Nom du projet extrait :", projectName);
       
-            // Ajouter le projet si nécessaire
-            const projectExists = records.some((record) => record.NomProjet === projectName);
-      
+            // Ajout du projet dans Grist si nécessaire
+            const projectExists = initialRecords.some((record) => record.NomProjet === projectName);
             if (!projectExists) {
-              const maxIdLigne = records.reduce((max, record) => {
+              const maxIdLigne = initialRecords.reduce((max, record) => {
                 const idLigne = parseInt(record.ID_Ligne, 10);
                 return idLigne > max ? idLigne : max;
               }, 0);
@@ -851,16 +853,7 @@
               console.log("Projet ajouté :", projectRow);
             }
       
-            // Créer un ensemble des clés des lignes existantes dans Grist
-            const existingKeys = new Set(
-              records
-                .filter((record) => record.NomProjet === projectName)
-                .map((record) =>
-                  `${record.NomProjet}|${record.NomEtage}|${record.Emetteur}|${record.Reference}|${record.Indice}|${record.Recu}|${record.DescriptionObservations}`
-                )
-            );
-      
-            // Extraire les tableaux et leurs lignes
+            // Parcourir les tableaux et ajouter les lignes
             const tableNames = [];
             for (let r = 1; r <= range.e.r; r++) {
               const firstColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 0 })];
@@ -883,7 +876,14 @@
                 const rowData = [];
                 for (let c = 0; c < 5; c++) {
                   const cell = feuilleFichiers[XLSX.utils.encode_cell({ r, c })];
-                  rowData.push(cell?.v || null);
+                  let cellValue = null;
+      
+                  if (cell) {
+                    // Utiliser la valeur brute de la cellule, convertie en texte
+                    cellValue = cell.w !== undefined ? cell.w : (cell.v !== undefined ? String(cell.v) : null);
+                  }
+      
+                  rowData.push(cellValue === "" ? null : cellValue); // Conserve les valeurs vides comme null
                 }
       
                 // Remplir les cellules vides de la première colonne
@@ -896,34 +896,47 @@
       
               console.log(`Données pour le tableau "${tableName}" :`, tableRows);
       
-              // Ajouter chaque ligne dans Grist, en vérifiant les doublons
+              // Comparer et ajouter les nouvelles lignes
               const actions = [];
               for (const row of tableRows) {
-                const rowKey = `${projectName}|${tableName}|${row[0]}|${row[1]}|${row[2]}|${row[3]}|${row[4]}`;
+                const transformedRow = {
+                  NomProjet: projectName,
+                  NomEtage: tableName,
+                  Emetteur: row[0],
+                  Reference: row[1],
+                  Indice: row[2],
+                  Recu: row[3],
+                  DescriptionObservations: row[4],
+                };
       
-                if (!existingKeys.has(rowKey)) {
-                  existingKeys.add(rowKey);
+                // Vérification des doublons
+                const isDuplicate = records.some((record) => {
+                  return (
+                    record.NomProjet === transformedRow.NomProjet &&
+                    record.NomEtage === transformedRow.NomEtage &&
+                    (record.Emetteur === transformedRow.Emetteur || (!record.Emetteur && !transformedRow.Emetteur)) &&
+                    (record.Reference === transformedRow.Reference || (!record.Reference && !transformedRow.Reference)) &&
+                    (record.Indice === transformedRow.Indice || (!record.Indice && !transformedRow.Indice)) &&
+                    (record.Recu === transformedRow.Recu || (!record.Recu && !transformedRow.Recu)) &&
+                    (record.DescriptionObservations === transformedRow.DescriptionObservations || (!record.DescriptionObservations && !transformedRow.DescriptionObservations))
+                  );
+                });
       
+                if (!isDuplicate) {
                   const maxIdLigne = records.reduce((max, record) => {
                     const idLigne = parseInt(record.ID_Ligne, 10);
                     return idLigne > max ? idLigne : max;
                   }, 0);
       
                   const newRow = {
-                    NomProjet: projectName,
-                    NomEtage: tableName,
-                    Emetteur: row[0],
-                    Reference: row[1],
-                    Indice: row[2],
-                    Recu: row[3],
-                    DescriptionObservations: row[4],
+                    ...transformedRow,
                     ID_Ligne: (maxIdLigne + 1).toString(),
                   };
       
-                  records.push(newRow);
+                  records.push(newRow); // Mise à jour locale
                   actions.push(["AddRecord", "Fusion", null, newRow]);
                 } else {
-                  console.log(`Doublon détecté dans Grist :`, row);
+                  console.log("Doublon détecté :", transformedRow);
                 }
               }
       
@@ -936,19 +949,9 @@
                 );
               }
             }
-      
-            // Rafraîchir les listes
-            populateFirstColumnDropdown(
-              [...new Set(records.map((record) => record.NomProjet))].sort()
-            );
-      
-            if (projectName === selectedFirstValue) {
-              populateSecondColumnListbox(projectName);
-            }
           }
         } catch (error) {
           console.error("Erreur lors de l'importation :", error);
-          alert("Une erreur est survenue lors de l'importation.");
         }
       });
 
@@ -984,7 +987,7 @@
           reader.onload = (event) => {
             try {
               const data = new Uint8Array(event.target.result);
-              const workbook = XLSX.read(data, { type: "array" });
+              const workbook = XLSX.read(data, { type: "array", raw: true }); // Active `raw` pour préserver les chaînes
               resolve(workbook);
             } catch (error) {
               reject(error);
