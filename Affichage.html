@@ -806,8 +806,8 @@
         }
       
         try {
-          // Snapshot des lignes actuelles dans Grist avant tout ajout
-          const initialRecords = [...records];
+          // Actualisation des enregistrements pour garantir que `records` est synchronisé avec Grist
+          await refreshRecords();
       
           for (const file of files) {
             const workbook = await readXLSX(file);
@@ -829,14 +829,9 @@
             console.log("Nom du projet extrait :", projectName);
       
             // Ajout du projet dans Grist si nécessaire
-            const projectExists = initialRecords.some((record) => record.NomProjet === projectName);
+            const projectExists = records.some((record) => record.NomProjet === projectName);
             if (!projectExists) {
-              const maxIdLigne = initialRecords.reduce((max, record) => {
-                const idLigne = parseInt(record.ID_Ligne, 10);
-                return idLigne > max ? idLigne : max;
-              }, 0);
-      
-              const newProjectId = maxIdLigne + 1;
+              const newProjectId = getNextGlobalId();
               const projectRow = {
                 NomProjet: projectName,
                 NomEtage: "",
@@ -849,8 +844,10 @@
               };
       
               await grist.docApi.applyUserActions([["AddRecord", "Fusion", null, projectRow]]);
-              records.push(projectRow);
               console.log("Projet ajouté :", projectRow);
+      
+              // Re-synchronisation après ajout du projet
+              await refreshRecords();
             }
       
             // Parcourir les tableaux et ajouter les lignes
@@ -879,14 +876,12 @@
                   let cellValue = null;
       
                   if (cell) {
-                    // Utiliser la valeur brute de la cellule, convertie en texte
                     cellValue = cell.w !== undefined ? cell.w : (cell.v !== undefined ? String(cell.v) : null);
                   }
       
-                  rowData.push(cellValue === "" ? null : cellValue); // Conserve les valeurs vides comme null
+                  rowData.push(cellValue === "" ? null : cellValue);
                 }
       
-                // Remplir les cellules vides de la première colonne
                 if (!rowData[0]) {
                   rowData[0] = tableRows.length > 0 ? tableRows[tableRows.length - 1][0] : null;
                 }
@@ -909,7 +904,6 @@
                   DescriptionObservations: row[4],
                 };
       
-                // Vérification des doublons
                 const isDuplicate = records.some((record) => {
                   return (
                     record.NomProjet === transformedRow.NomProjet &&
@@ -923,14 +917,10 @@
                 });
       
                 if (!isDuplicate) {
-                  const maxIdLigne = records.reduce((max, record) => {
-                    const idLigne = parseInt(record.ID_Ligne, 10);
-                    return idLigne > max ? idLigne : max;
-                  }, 0);
-      
+                  const newRowId = getNextGlobalId();
                   const newRow = {
                     ...transformedRow,
-                    ID_Ligne: (maxIdLigne + 1).toString(),
+                    ID_Ligne: newRowId.toString(),
                   };
       
                   records.push(newRow); // Mise à jour locale
@@ -944,10 +934,11 @@
                 await grist.docApi.applyUserActions(actions);
                 console.log(`Tableau "${tableName}" ajouté avec ${actions.length} lignes.`);
               } else {
-                console.log(
-                  `Aucune nouvelle ligne ajoutée pour le tableau "${tableName}", tous les enregistrements sont déjà dans Grist.`
-                );
+                console.log(`Aucune nouvelle ligne ajoutée pour le tableau "${tableName}".`);
               }
+      
+              // Re-synchroniser après chaque tableau ajouté
+              await refreshRecords();
             }
           }
         } catch (error) {
