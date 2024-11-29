@@ -1414,18 +1414,18 @@
         separator2.disabled = true; // Important pour appliquer le style
         separator2.textContent = "--------------------";
         listbox.appendChild(separator2);
-      
-        // Option pour supprimer un tableau
-        const deleteTableOption = document.createElement("option");
-        deleteTableOption.value = "deleteTable";
-        deleteTableOption.textContent = "Supprimer Tableau";
-        listbox.appendChild(deleteTableOption);
-      
+        
         // Ajoute l'option "Ajouter Tableau"
         const addOption = document.createElement("option");
         addOption.value = "addTable";
         addOption.text = "Ajouter Tableau";
         listbox.appendChild(addOption);
+        
+        // Option pour supprimer un tableau
+        const deleteTableOption = document.createElement("option");
+        deleteTableOption.value = "deleteTable";
+        deleteTableOption.textContent = "Supprimer Tableau";
+        listbox.appendChild(deleteTableOption);
       }
       
     </script>
