@@ -132,7 +132,7 @@
         <label for="secondColumnListbox">Tableau :</label>
         <select id="secondColumnListbox">
           <option value="">Select an option</option>
-          <option value="addTable">AJOUTER TABLEAU</option>
+          <option value="addTable">Ajouter Tableau</option>
         </select>
         <input type="file" id="fileInputProject" style="display: none;" accept=".xls,.xlsx,.xlsm" multiple />
       </div>
@@ -155,6 +155,11 @@
       <button id="deleteOption">Supprimer</button>
     </div>
 
+    <!-- Context Menu pour les projets -->
+    <div id="projectContextMenu" class="context-menu">
+      <button id="deleteProjectOption">Supprimer</button>
+    </div>
+
     <!-- Form to add new rows -->
     <div class="add-form">
       <button id="addRowButton">Ajouter une ligne</button>
@@ -164,11 +169,36 @@
       <input type="file" id="fileInput" style="display: none;" multiple>
     </div>
 
+    <!-- Modal pour la suppression de projets -->
+    <div id="deleteProjectModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); z-index: 1000;">
+      <div style="margin: 10% auto; padding: 20px; background: white; border-radius: 8px; width: 50%; max-width: 600px; color: black;">
+        <h2 style="color: black;">Supprimer un Projet</h2>
+        <p style="color: black;">Sélectionnez un projet à supprimer :</p>
+        <ul id="deleteProjectList" style="list-style: none; padding: 0;"></ul>
+        <button id="closeDeleteProjectModal" style="margin-top: 20px;">Annuler</button>
+      </div>
+    </div>
+
+    <!-- Modal pour la suppression de tableaux -->
+    <div id="deleteTableModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); z-index: 1000;">
+      <div style="margin: 10% auto; padding: 20px; background: white; border-radius: 8px; width: 50%; max-width: 600px; color: black;">
+        <h2 style="color: black;">Supprimer un Tableau</h2>
+        <p style="color: black;">Sélectionnez un tableau à supprimer :</p>
+        <ul id="deleteTableList" style="list-style: none; padding: 0;"></ul>
+        <button id="closeDeleteTableModal" style="margin-top: 20px;">Annuler</button>
+      </div>
+    </div>
+
     <script>
       let records = [];
       let selectedFirstValue = '';
       let selectedSecondValue = '';
       let selectedRecordId = null;
+
+      const projectDropdown = document.getElementById("firstColumnDropdown");
+      const projectContextMenu = document.getElementById("projectContextMenu");
+
+      let selectedProjectForContextMenu = null;
 
       // Ready Grist
       grist.ready();
@@ -180,8 +210,21 @@
         // Conserve la sélection actuelle
         const currentSelection = dropdown.value;
       
-        dropdown.innerHTML = '<option value="">Select an option</option>'; // Réinitialise la liste déroulante
+        dropdown.innerHTML = ''; // Réinitialise la liste déroulante
       
+        // Option par défaut
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "";
+        defaultOption.textContent = "Select an option";
+        dropdown.appendChild(defaultOption);
+      
+        // Séparateur non sélectionnable
+        const separator = document.createElement("option");
+        separator.disabled = true;
+        separator.textContent = "--------------------";
+        dropdown.appendChild(separator);
+      
+        // Ajout des valeurs uniques
         values.sort().forEach((value) => {
           if (value) {
             const option = document.createElement("option");
@@ -190,6 +233,12 @@
             dropdown.appendChild(option);
           }
         });
+      
+        // Séparateur au-dessus des options supplémentaires
+        const separator2 = document.createElement("option");
+        separator2.disabled = true;
+        separator2.textContent = "--------------------";
+        dropdown.appendChild(separator2);
       
         // Ajoute l'option "Ajouter Projet"
         const addProjectOption = document.createElement("option");
@@ -218,6 +267,10 @@
           document.getElementById("fileInputProject").click();
           // Réinitialise la sélection de la liste déroulante après avoir ouvert l'explorateur
           this.value = ""; 
+        } else if (selectedValue === "deleteProject") {
+          // Ouvre le popup modal pour supprimer un projet
+          openDeleteProjectModal();
+          this.value = ""; // Réinitialise la sélection
         } else {
           selectedFirstValue = selectedValue;
           populateSecondColumnListbox(selectedFirstValue); // Actualise la deuxième liste
@@ -227,25 +280,45 @@
       // Function to populate the second dropdown based on the selected first column value
       function populateSecondColumnListbox(selectedValue) {
         const listbox = document.getElementById('secondColumnListbox');
-        listbox.innerHTML = '<option value="">Select an option</option>'; // Réinitialise la liste
       
+        listbox.innerHTML = ''; // Réinitialise la liste
+      
+        // Option par défaut
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "";
+        defaultOption.textContent = "Select an option";
+        listbox.appendChild(defaultOption);
+      
+        // Séparateur non sélectionnable
+        const separator = document.createElement("option");
+        separator.disabled = true;
+        separator.textContent = "--------------------";
+        listbox.appendChild(separator);
+      
+        // Récupère et trie les valeurs
         const secondColumnValues = records
-          .filter(record => record.NomProjet === selectedValue) // Filtre selon le projet
-          .map(record => record.NomEtage) // Extrait les valeurs
-          .filter((value, index, self) => value && self.indexOf(value) === index) // Supprime les doublons
+          .filter(record => record.NomProjet === selectedValue)
+          .map(record => record.NomEtage)
+          .filter((value, index, self) => value && self.indexOf(value) === index)
           .sort();
       
         secondColumnValues.forEach(value => {
-          const option = document.createElement('option');
+          const option = document.createElement("option");
           option.value = value;
           option.text = value;
           listbox.appendChild(option);
         });
       
+        // Séparateur au-dessus des options supplémentaires
+        const separator2 = document.createElement("option");
+        separator2.disabled = true;
+        separator2.textContent = "--------------------";
+        listbox.appendChild(separator2);
+      
         // Ajoute l'option "Ajouter Tableau"
-        const addOption = document.createElement('option');
-        addOption.value = 'addTable';
-        addOption.text = 'Ajouter Tableau';
+        const addOption = document.createElement("option");
+        addOption.value = "addTable";
+        addOption.text = "Ajouter Tableau";
         listbox.appendChild(addOption);
       }
 
@@ -646,11 +719,9 @@
         const selectedProject = projectDropdown.value.trim();
         const selectedTable = tableDropdown.value.trim();
       
+        // Retourne null uniquement si aucune sélection n'est faite et la validation est activée
         if (!selectedProject || (!selectedTable && !skipValidation)) {
-          if (!skipValidation) {
-            alert("Veuillez sélectionner un projet et un tableau.");
-          }
-          return null; // Retourne null si les sélections sont invalides
+          return null;
         }
       
         return { selectedProject, selectedTable };
@@ -788,13 +859,17 @@
         }
       });
 
+      // Ajouter une option "Supprimer Tableau" dans la deuxième liste déroulante
       document.getElementById("secondColumnListbox").addEventListener("change", function () {
         const selectedValue = this.value;
-        if (selectedValue === "addTable") {
-          handleAddTable(); // Ajoute un tableau si l'option correspondante est sélectionnée
+      
+        if (selectedValue === "Supprimer Tableau") {
+          showDeleteTableModal(); // Ouvre le pop-up pour supprimer un tableau
+        } else if (selectedValue === "addTable") {
+          handleAddTable(); // Ajoute un tableau
         } else {
-          selectedSecondValue = selectedValue; // Met à jour la valeur sélectionnée
-          populateTable(); // Actualise l'affichage du tableau HTML
+          selectedSecondValue = selectedValue; // Met à jour la sélection actuelle
+          populateTable(); // Met à jour l'affichage du tableau HTML
         }
       });
   
@@ -806,6 +881,9 @@
         }
       
         try {
+          // Rafraîchir les enregistrements existants pour obtenir les derniers ID
+          await refreshRecords();
+      
           for (const file of files) {
             const workbook = await readXLSX(file);
             const feuilleFichiers = workbook.Sheets["Fichiers"];
@@ -814,7 +892,7 @@
               continue;
             }
       
-            // Récupérer le nom du projet
+            // Récupération du nom du projet
             const range = XLSX.utils.decode_range(feuilleFichiers["!ref"]);
             const projectNameCell = feuilleFichiers[XLSX.utils.encode_cell({ r: 0, c: 1 })];
             if (!projectNameCell || !projectNameCell.v) {
@@ -825,7 +903,7 @@
             const projectName = projectNameCell.v.split(":").pop().trim();
             console.log("Nom du projet extrait :", projectName);
       
-            // Vérifier si le projet existe
+            // Vérifie si le projet existe déjà
             const projectExists = records.some((record) => record.NomProjet === projectName);
             if (!projectExists) {
               const maxIdLigne = records.reduce((max, record) => {
@@ -848,9 +926,10 @@
               await grist.docApi.applyUserActions([["AddRecord", "Fusion", null, projectRow]]);
               records.push(projectRow);
               console.log("Projet ajouté :", projectRow);
+              await refreshRecords(); // Synchronise les enregistrements après ajout du projet
             }
       
-            // Extraire les tableaux et leurs lignes
+            // Parcourir les tableaux et ajouter les lignes
             const tableNames = [];
             for (let r = 1; r <= range.e.r; r++) {
               const firstColCell = feuilleFichiers[XLSX.utils.encode_cell({ r, c: 0 })];
@@ -873,7 +952,14 @@
                 const rowData = [];
                 for (let c = 0; c < 5; c++) {
                   const cell = feuilleFichiers[XLSX.utils.encode_cell({ r, c })];
-                  rowData.push(cell?.v || null);
+                  let cellValue = null;
+      
+                  if (cell) {
+                    // Utiliser la valeur brute de la cellule, convertie en texte
+                    cellValue = cell.w !== undefined ? cell.w : (cell.v !== undefined ? String(cell.v) : null);
+                  }
+      
+                  rowData.push(cellValue === "" ? null : cellValue); // Conserve les valeurs vides comme null
                 }
       
                 // Remplir les cellules vides de la première colonne
@@ -889,7 +975,6 @@
               // Comparer et ajouter les nouvelles lignes
               const actions = [];
               for (const row of tableRows) {
-                // Construire la ligne transformée au format Grist
                 const transformedRow = {
                   NomProjet: projectName,
                   NomEtage: tableName,
@@ -900,16 +985,16 @@
                   DescriptionObservations: row[4],
                 };
       
-                // Filtrer les doublons colonne par colonne
+                // Vérification des doublons
                 const isDuplicate = records.some((record) => {
                   return (
-                    record.NomProjet === transformedRow.NomProjet && // 1ère colonne (NomProjet)
-                    record.NomEtage === transformedRow.NomEtage && // 2ème colonne (NomEtage)
-                    record.Emetteur === transformedRow.Emetteur && // 3ème colonne
-                    record.Reference === transformedRow.Reference && // 4ème colonne
-                    record.Indice === transformedRow.Indice && // 5ème colonne
-                    record.Recu === transformedRow.Recu && // 6ème colonne
-                    record.DescriptionObservations === transformedRow.DescriptionObservations // 7ème colonne
+                    record.NomProjet === transformedRow.NomProjet &&
+                    record.NomEtage === transformedRow.NomEtage &&
+                    (record.Emetteur === transformedRow.Emetteur || (!record.Emetteur && !transformedRow.Emetteur)) &&
+                    (record.Reference === transformedRow.Reference || (!record.Reference && !transformedRow.Reference)) &&
+                    (record.Indice === transformedRow.Indice || (!record.Indice && !transformedRow.Indice)) &&
+                    (record.Recu === transformedRow.Recu || (!record.Recu && !transformedRow.Recu)) &&
+                    (record.DescriptionObservations === transformedRow.DescriptionObservations || (!record.DescriptionObservations && !transformedRow.DescriptionObservations))
                   );
                 });
       
@@ -924,7 +1009,7 @@
                     ID_Ligne: (maxIdLigne + 1).toString(),
                   };
       
-                  records.push(newRow);
+                  records.push(newRow); // Mise à jour locale
                   actions.push(["AddRecord", "Fusion", null, newRow]);
                 } else {
                   console.log("Doublon détecté :", transformedRow);
@@ -934,32 +1019,23 @@
               if (actions.length > 0) {
                 await grist.docApi.applyUserActions(actions);
                 console.log(`Tableau "${tableName}" ajouté avec ${actions.length} lignes.`);
+                await refreshRecords(); // Synchronise après chaque tableau
               } else {
                 console.log(
                   `Aucune nouvelle ligne ajoutée pour le tableau "${tableName}", tous les enregistrements sont déjà dans Grist.`
                 );
               }
             }
-      
-            // Rafraîchir les listes
-            populateFirstColumnDropdown(
-              [...new Set(records.map((record) => record.NomProjet))].sort()
-            );
-      
-            if (projectName === selectedFirstValue) {
-              populateSecondColumnListbox(projectName);
-            }
           }
         } catch (error) {
           console.error("Erreur lors de l'importation :", error);
-          alert("Une erreur est survenue lors de l'importation.");
         }
       });
 
-      // Met à jour la liste déroulante des projets
+      // Fonction pour initialiser et mettre à jour la liste déroulante des projets
       function updateProjectDropdown() {
         const firstColumnDropdown = document.getElementById("firstColumnDropdown");
-        const uniqueProjects = [...new Set(records.map((record) => record.NomProjet))].sort();
+        const uniqueProjects = [...new Set(records.map(record => record.NomProjet))].sort();
       
         firstColumnDropdown.innerHTML = '<option value="">Select an option</option>';
         uniqueProjects.forEach((project) => {
@@ -969,7 +1045,7 @@
           firstColumnDropdown.appendChild(option);
         });
       
-        // Ajoute l'option "Ajouter Projet" et "Insérer Projet"
+        // Ajouter les options pour ajouter ou insérer un projet
         const addProjectOption = document.createElement("option");
         addProjectOption.value = "Ajouter Projet";
         addProjectOption.text = "Ajouter Projet";
@@ -981,14 +1057,15 @@
         firstColumnDropdown.appendChild(insertProjectOption);
       }
 
+      // Fonction pour lire un fichier Excel et retourner le workbook
       function readXLSX(file) {
         return new Promise((resolve, reject) => {
           const reader = new FileReader();
-      
+          
           reader.onload = (event) => {
             try {
               const data = new Uint8Array(event.target.result);
-              const workbook = XLSX.read(data, { type: "array" });
+              const workbook = XLSX.read(data, { type: "array", raw: true });
               resolve(workbook);
             } catch (error) {
               reject(error);
@@ -1001,6 +1078,314 @@
       
           reader.readAsArrayBuffer(file);
         });
+      }
+
+      // Fonction pour rafraîchir les enregistrements depuis Grist
+      async function refreshRecords() {
+        try {
+          // Récupère les enregistrements depuis la table "Fusion" dans Grist
+          const receivedRecords = await grist.docApi.fetchTable("Fusion");
+          
+          if (!receivedRecords || !receivedRecords.id) {
+            throw new Error("Données reçues dans un format inattendu.");
+          }
+      
+          // Transforme les enregistrements pour l'usage local
+          records = receivedRecords.id.map((id, index) => ({
+            ID_Ligne: receivedRecords.ID_Ligne[index] || '',
+            NomProjet: receivedRecords.NomProjet[index] || '',
+            NomEtage: receivedRecords.NomEtage[index] || '',
+            Emetteur: receivedRecords.Emetteur[index] || '',
+            Reference: receivedRecords.Reference[index] || '',
+            Indice: receivedRecords.Indice[index] || '',
+            Recu: receivedRecords.Recu[index] || '',
+            DescriptionObservations: receivedRecords.DescriptionObservations[index] || '',
+          }));
+      
+          console.log("Enregistrements synchronisés :", records);
+        } catch (error) {
+          console.error("Erreur lors de la synchronisation des enregistrements :", error);
+        }
+      }
+
+      // Fonction pour récupérer l'ID_Ligne le plus élevé dans Grist
+      async function getMaxIdFromGrist() {
+        await refreshRecords(); // Rafraîchir les données pour obtenir les derniers enregistrements
+        const allIds = records
+          .map(record => parseInt(record.ID_Ligne, 10))
+          .filter(id => !isNaN(id)); // Filtrer uniquement les ID valides
+        return Math.max(...allIds, 0); // Retourne le maximum ou 0 si aucun ID trouvé
+      }
+
+      // Fonction utilitaire pour calculer le prochain ID_Ligne localement
+      function getNextIdLigne() {
+        const allIds = records
+          .map(record => parseInt(record.ID_Ligne, 10))
+          .filter(id => !isNaN(id)); // Filtrer uniquement les ID valides
+        return Math.max(...allIds, 0) + 1; // Retourne le prochain ID disponible
+      }
+
+      // Écouteur pour afficher le menu contextuel
+      projectDropdown.addEventListener("contextmenu", (event) => {
+        event.preventDefault(); // Empêche le menu contextuel par défaut
+      
+        const target = event.target;
+      
+        // Vérifie qu'il s'agit bien d'une option de projet valide
+        if (
+          target.tagName === "OPTION" &&
+          target.value !== "" &&
+          target.value !== "Ajouter Projet" &&
+          target.value !== "Insérer Projet"
+        ) {
+          selectedProjectForContextMenu = target.value;
+      
+          // Positionne et affiche le menu contextuel
+          projectContextMenu.style.display = "block";
+          projectContextMenu.style.left = `${event.pageX}px`;
+          projectContextMenu.style.top = `${event.pageY}px`;
+        } else {
+          projectContextMenu.style.display = "none"; // Cache le menu si ce n'est pas un projet valide
+        }
+      });
+      
+      // Écouteur pour masquer le menu contextuel si on clique ailleurs
+      document.addEventListener("click", () => {
+        projectContextMenu.style.display = "none";
+      });
+      
+      // Suppression du projet sélectionné via le menu contextuel
+      document.getElementById("deleteProjectOption").addEventListener("click", async () => {
+        if (!selectedProjectForContextMenu) return;
+      
+        const confirmation = confirm(`Êtes-vous sûr de vouloir supprimer le projet "${selectedProjectForContextMenu}" et toutes ses lignes associées ?`);
+        if (!confirmation) return;
+      
+        try {
+          // Filtrer les IDs des lignes associées à ce projet
+          const rowsToDelete = records
+            .filter(record => record.NomProjet === selectedProjectForContextMenu)
+            .map(record => Number(record.ID_Ligne));
+      
+          if (rowsToDelete.length === 0) {
+            alert("Aucune ligne trouvée pour ce projet.");
+            return;
+          }
+      
+          // Préparer les actions de suppression
+          const actions = rowsToDelete.map(rowId => ["RemoveRecord", "Fusion", rowId]);
+      
+          // Appliquer les suppressions dans Grist
+          await grist.docApi.applyUserActions(actions);
+      
+          // Mise à jour locale des données
+          records = records.filter(record => record.NomProjet !== selectedProjectForContextMenu);
+      
+          // Mise à jour des listes déroulantes et du tableau
+          updateProjectDropdown();
+          populateSecondColumnListbox("");
+      
+          alert(`Le projet "${selectedProjectForContextMenu}" a été supprimé avec succès.`);
+        } catch (error) {
+          console.error("Erreur lors de la suppression du projet :", error);
+          alert("Une erreur est survenue lors de la suppression du projet.");
+        } finally {
+          projectContextMenu.style.display = "none"; // Cache le menu contextuel après suppression
+        }
+      });
+
+      document.addEventListener("click", () => {
+        projectContextMenu.style.display = "none";
+      });
+
+      // Fonction pour ouvrir le modal de suppression de projet
+      function openDeleteProjectModal() {
+        const modal = document.getElementById("deleteProjectModal");
+        modal.style.display = "block";
+      
+        populateDeleteProjectList();
+      }
+
+      // Fonction pour remplir la liste des projets à supprimer
+      function populateDeleteProjectList() {
+        const projectList = document.getElementById("deleteProjectList");
+        projectList.innerHTML = ""; // Réinitialise la liste
+      
+        // Obtenir les projets uniques
+        const uniqueProjects = [...new Set(records.map(record => record.NomProjet))].sort();
+      
+        uniqueProjects.forEach((project) => {
+          const li = document.createElement("li");
+          li.textContent = project;
+          li.style.cursor = "pointer";
+          li.style.padding = "10px";
+          li.style.border = "1px solid #ddd";
+          li.style.margin = "5px 0";
+          li.style.borderRadius = "4px";
+          li.addEventListener("click", () => {
+            const confirmation = confirm(`Êtes-vous sûr de vouloir supprimer le projet "${project}" ?`);
+            if (confirmation) {
+              deleteProject(project);
+            }
+          });
+          projectList.appendChild(li);
+        });
+      }
+
+      // Fonction pour fermer le modal
+      document.getElementById("closeDeleteProjectModal").addEventListener("click", function () {
+        const modal = document.getElementById("deleteProjectModal");
+        modal.style.display = "none";
+      });
+
+      // Fonction pour supprimer un projet
+      async function deleteProject(projectName) {
+        try {
+          // Filtrer les IDs des lignes associées au projet
+          const rowsToDelete = records
+            .filter(record => record.NomProjet === projectName)
+            .map(record => Number(record.ID_Ligne));
+      
+          if (rowsToDelete.length === 0) {
+            alert("Aucune ligne trouvée pour ce projet.");
+            return;
+          }
+      
+          // Préparer les actions de suppression
+          const actions = rowsToDelete.map(rowId => ["RemoveRecord", "Fusion", rowId]);
+      
+          // Appliquer les suppressions dans Grist
+          await grist.docApi.applyUserActions(actions);
+      
+          // Mise à jour locale des données
+          records = records.filter(record => record.NomProjet !== projectName);
+      
+          // Fermer le modal et rafraîchir les listes déroulantes
+          document.getElementById("deleteProjectModal").style.display = "none";
+          updateProjectDropdown();
+          populateSecondColumnListbox("");
+      
+          alert(`Le projet "${projectName}" a été supprimé avec succès.`);
+        } catch (error) {
+          console.error("Erreur lors de la suppression du projet :", error);
+          alert("Une erreur est survenue lors de la suppression du projet.");
+        }
+      }
+
+      // Fonction pour afficher le pop-up de suppression de tableaux
+      function showDeleteTableModal() {
+        const modal = document.getElementById("deleteTableModal");
+        const list = document.getElementById("deleteTableList");
+      
+        // Nettoyer la liste avant de l'ajouter
+        list.innerHTML = "";
+      
+        // Vérifier la sélection dans la première liste déroulante
+        if (!selectedFirstValue) {
+          alert("Veuillez d'abord sélectionner un projet !");
+          return;
+        }
+      
+        // Récupérer les tableaux associés au projet sélectionné
+        const tableNames = records
+          .filter(record => record.NomProjet === selectedFirstValue)
+          .map(record => record.NomEtage)
+          .filter((value, index, self) => value && self.indexOf(value) === index); // Supprimer les doublons
+      
+        if (tableNames.length === 0) {
+          alert(`Aucun tableau trouvé pour le projet "${selectedFirstValue}".`);
+          return;
+        }
+      
+        // Créer une liste cliquable pour chaque tableau
+        tableNames.forEach(tableName => {
+          const li = document.createElement("li");
+          li.textContent = tableName;
+          li.style.cursor = "pointer";
+          li.style.marginBottom = "10px";
+          li.style.color = "blue"; // Pour indiquer qu'il est cliquable
+      
+          li.addEventListener("click", async () => {
+            const confirmation = confirm(`Êtes-vous sûr de vouloir supprimer le tableau "${tableName}" ?`);
+            if (!confirmation) return;
+      
+            try {
+              // Filtrer les lignes à supprimer
+              const rowsToDelete = records
+                .filter(record => record.NomProjet === selectedFirstValue && record.NomEtage === tableName)
+                .map(record => Number(record.ID_Ligne));
+      
+              if (rowsToDelete.length === 0) {
+                alert("Aucune ligne trouvée pour ce tableau.");
+                return;
+              }
+      
+              // Préparer les actions pour la suppression
+              const actions = rowsToDelete.map(rowId => ["RemoveRecord", "Fusion", rowId]);
+      
+              // Appliquer les suppressions dans Grist
+              await grist.docApi.applyUserActions(actions);
+      
+              // Mise à jour locale des données
+              records = records.filter(
+                record => !(record.NomProjet === selectedFirstValue && record.NomEtage === tableName)
+              );
+      
+              // Mettre à jour l'affichage
+              populateSecondColumnListbox(selectedFirstValue);
+              populateTable();
+      
+              alert(`Le tableau "${tableName}" a été supprimé avec succès.`);
+            } catch (error) {
+              console.error("Erreur lors de la suppression du tableau :", error);
+              alert("Une erreur est survenue lors de la suppression du tableau.");
+            } finally {
+              modal.style.display = "none"; // Fermer le pop-up
+            }
+          });
+      
+          list.appendChild(li);
+        });
+      
+        // Afficher le pop-up
+        modal.style.display = "block";
+      }
+
+      // Fermeture du pop-up de suppression de tableaux
+      document.getElementById("closeDeleteTableModal").addEventListener("click", function () {
+        const modal = document.getElementById("deleteTableModal");
+        modal.style.display = "none";
+      });
+
+      // Ajouter une option "Supprimer Tableau" dans la liste déroulante des tableaux
+      function populateSecondColumnListbox(selectedValue) {
+        const listbox = document.getElementById("secondColumnListbox");
+        listbox.innerHTML = '<option value="">Select an option</option>'; // Réinitialise la liste
+      
+        const secondColumnValues = records
+          .filter(record => record.NomProjet === selectedValue) // Filtre selon le projet
+          .map(record => record.NomEtage) // Extrait les valeurs
+          .filter((value, index, self) => value && self.indexOf(value) === index) // Supprime les doublons
+          .sort();
+      
+        secondColumnValues.forEach(value => {
+          const option = document.createElement("option");
+          option.value = value;
+          option.text = value;
+          listbox.appendChild(option);
+        });
+      
+        // Ajoute l'option "Ajouter Tableau"
+        const addOption = document.createElement("option");
+        addOption.value = "addTable";
+        addOption.text = "Ajouter Tableau";
+        listbox.appendChild(addOption);
+      
+        // Ajoute l'option "Supprimer Tableau"
+        const deleteOption = document.createElement("option");
+        deleteOption.value = "Supprimer Tableau";
+        deleteOption.text = "Supprimer Tableau";
+        listbox.appendChild(deleteOption);
       }
 
     </script>
