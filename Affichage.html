@@ -1062,14 +1062,17 @@
 
       // Écouteur pour afficher le menu contextuel
       projectDropdown.addEventListener("contextmenu", (event) => {
-        // Empêche le menu contextuel par défaut
-        event.preventDefault();
+        event.preventDefault(); // Empêche le menu contextuel par défaut
       
-        // Identifie l'élément cliqué
         const target = event.target;
       
-        // Vérifie qu'il s'agit bien d'une option de projet
-        if (target.tagName === "OPTION" && target.value !== "" && target.value !== "Ajouter Projet" && target.value !== "Insérer Projet") {
+        // Vérifie qu'il s'agit bien d'une option de projet valide
+        if (
+          target.tagName === "OPTION" &&
+          target.value !== "" &&
+          target.value !== "Ajouter Projet" &&
+          target.value !== "Insérer Projet"
+        ) {
           selectedProjectForContextMenu = target.value;
       
           // Positionne et affiche le menu contextuel
@@ -1077,8 +1080,7 @@
           projectContextMenu.style.left = `${event.pageX}px`;
           projectContextMenu.style.top = `${event.pageY}px`;
         } else {
-          // Cache le menu si ce n'est pas un projet
-          projectContextMenu.style.display = "none";
+          projectContextMenu.style.display = "none"; // Cache le menu si ce n'est pas un projet valide
         }
       });
       
@@ -1125,6 +1127,10 @@
         } finally {
           projectContextMenu.style.display = "none"; // Cache le menu contextuel après suppression
         }
+      });
+
+      document.addEventListener("click", () => {
+        projectContextMenu.style.display = "none";
       });
 
     </script>
