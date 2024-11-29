@@ -991,6 +991,56 @@
         });
       }
 
+            function getNextIdLigne() {
+        const allIds = records.map(record => parseInt(record.ID_Ligne, 10)).filter(id => !isNaN(id));
+        return Math.max(...allIds, 0) + 1;
+      }
+
+      function initializeGlobalIdCounter() {
+        const allIds = records.map(record => parseInt(record.ID_Ligne, 10)).filter(id => !isNaN(id));
+        globalIdCounter = Math.max(...allIds, 0); // Initialiser au maximum existant
+      }
+
+      function getNextGlobalId() {
+        globalIdCounter += 1;
+        return globalIdCounter.toString();;
+      }
+
+      async function refreshRecords() {
+        try {
+          const receivedRecords = await grist.docApi.fetchTable("Fusion");
+          
+          // Vérifiez que les données reçues sont dans le bon format
+          if (!receivedRecords || typeof receivedRecords !== "object") {
+            console.error("Format inattendu des enregistrements reçus :", receivedRecords);
+            return;
+          }
+      
+          // Transformez les colonnes en lignes
+          const columnKeys = Object.keys(receivedRecords); // Récupérer les colonnes
+          const rowCount = receivedRecords[columnKeys[0]].length; // Nombre de lignes basé sur la première colonne
+      
+          // Recomposez chaque ligne en un objet
+          records = Array.from({ length: rowCount }, (_, rowIndex) => {
+            const row = {};
+            columnKeys.forEach((key) => {
+              row[key] = receivedRecords[key][rowIndex] || ''; // Ajoutez chaque colonne à l'objet ligne
+            });
+            return row;
+          });
+      
+          console.log("Records synchronisés avec Grist :", records);
+        } catch (error) {
+          console.error("Erreur lors de la synchronisation des enregistrements avec Grist :", error);
+        }
+      }
+
+      async function getMaxIdFromGrist() {
+        await refreshRecords(); // Synchroniser les enregistrements avec Grist
+        const allIds = records.map(record => parseInt(record.ID_Ligne, 10)).filter(id => !isNaN(id));
+        return Math.max(...allIds, 0); // Retourne le max ou 0 si aucun ID trouvé
+      }
+
     </script>
   </body>
 </html>
