@@ -806,8 +806,8 @@
         }
       
         try {
-          // Snapshot des lignes actuelles dans Grist avant tout ajout
-          const initialRecords = [...records];
+          // Rafraîchir les enregistrements existants pour obtenir les derniers ID
+          await refreshRecords();
       
           for (const file of files) {
             const workbook = await readXLSX(file);
@@ -828,10 +828,10 @@
             const projectName = projectNameCell.v.split(":").pop().trim();
             console.log("Nom du projet extrait :", projectName);
       
-            // Ajout du projet dans Grist si nécessaire
-            const projectExists = initialRecords.some((record) => record.NomProjet === projectName);
+            // Vérifie si le projet existe déjà
+            const projectExists = records.some((record) => record.NomProjet === projectName);
             if (!projectExists) {
-              const maxIdLigne = initialRecords.reduce((max, record) => {
+              const maxIdLigne = records.reduce((max, record) => {
                 const idLigne = parseInt(record.ID_Ligne, 10);
                 return idLigne > max ? idLigne : max;
               }, 0);
@@ -851,6 +851,7 @@
               await grist.docApi.applyUserActions([["AddRecord", "Fusion", null, projectRow]]);
               records.push(projectRow);
               console.log("Projet ajouté :", projectRow);
+              await refreshRecords(); // Synchronise les enregistrements après ajout du projet
             }
       
             // Parcourir les tableaux et ajouter les lignes
@@ -943,6 +944,7 @@
               if (actions.length > 0) {
                 await grist.docApi.applyUserActions(actions);
                 console.log(`Tableau "${tableName}" ajouté avec ${actions.length} lignes.`);
+                await refreshRecords(); // Synchronise après chaque tableau
               } else {
                 console.log(
                   `Aucune nouvelle ligne ajoutée pour le tableau "${tableName}", tous les enregistrements sont déjà dans Grist.`
@@ -955,10 +957,10 @@
         }
       });
 
-      // Met à jour la liste déroulante des projets
+      // Fonction pour initialiser et mettre à jour la liste déroulante des projets
       function updateProjectDropdown() {
         const firstColumnDropdown = document.getElementById("firstColumnDropdown");
-        const uniqueProjects = [...new Set(records.map((record) => record.NomProjet))].sort();
+        const uniqueProjects = [...new Set(records.map(record => record.NomProjet))].sort();
       
         firstColumnDropdown.innerHTML = '<option value="">Select an option</option>';
         uniqueProjects.forEach((project) => {
@@ -968,7 +970,7 @@
           firstColumnDropdown.appendChild(option);
         });
       
-        // Ajoute l'option "Ajouter Projet" et "Insérer Projet"
+        // Ajouter les options pour ajouter ou insérer un projet
         const addProjectOption = document.createElement("option");
         addProjectOption.value = "Ajouter Projet";
         addProjectOption.text = "Ajouter Projet";
@@ -980,14 +982,15 @@
         firstColumnDropdown.appendChild(insertProjectOption);
       }
 
+      // Fonction pour lire un fichier Excel et retourner le workbook
       function readXLSX(file) {
         return new Promise((resolve, reject) => {
           const reader = new FileReader();
-      
+          
           reader.onload = (event) => {
             try {
               const data = new Uint8Array(event.target.result);
-              const workbook = XLSX.read(data, { type: "array", raw: true }); // Active `raw` pour préserver les chaînes
+              const workbook = XLSX.read(data, { type: "array", raw: true });
               resolve(workbook);
             } catch (error) {
               reject(error);
@@ -1000,6 +1003,51 @@
       
           reader.readAsArrayBuffer(file);
         });
+      }
+
+      // Fonction pour rafraîchir les enregistrements depuis Grist
+      async function refreshRecords() {
+        try {
+          // Récupère les enregistrements depuis la table "Fusion" dans Grist
+          const receivedRecords = await grist.docApi.fetchTable("Fusion");
+          
+          if (!receivedRecords || !receivedRecords.id) {
+            throw new Error("Données reçues dans un format inattendu.");
+          }
+      
+          // Transforme les enregistrements pour l'usage local
+          records = receivedRecords.id.map((id, index) => ({
+            ID_Ligne: receivedRecords.ID_Ligne[index] || '',
+            NomProjet: receivedRecords.NomProjet[index] || '',
+            NomEtage: receivedRecords.NomEtage[index] || '',
+            Emetteur: receivedRecords.Emetteur[index] || '',
+            Reference: receivedRecords.Reference[index] || '',
+            Indice: receivedRecords.Indice[index] || '',
+            Recu: receivedRecords.Recu[index] || '',
+            DescriptionObservations: receivedRecords.DescriptionObservations[index] || '',
+          }));
+      
+          console.log("Enregistrements synchronisés :", records);
+        } catch (error) {
+          console.error("Erreur lors de la synchronisation des enregistrements :", error);
+        }
+      }
+
+      // Fonction pour récupérer l'ID_Ligne le plus élevé dans Grist
+      async function getMaxIdFromGrist() {
+        await refreshRecords(); // Rafraîchir les données pour obtenir les derniers enregistrements
+        const allIds = records
+          .map(record => parseInt(record.ID_Ligne, 10))
+          .filter(id => !isNaN(id)); // Filtrer uniquement les ID valides
+        return Math.max(...allIds, 0); // Retourne le maximum ou 0 si aucun ID trouvé
+      }
+
+      // Fonction utilitaire pour calculer le prochain ID_Ligne localement
+      function getNextIdLigne() {
+        const allIds = records
+          .map(record => parseInt(record.ID_Ligne, 10))
+          .filter(id => !isNaN(id)); // Filtrer uniquement les ID valides
+        return Math.max(...allIds, 0) + 1; // Retourne le prochain ID disponible
       }
 
     </script>
