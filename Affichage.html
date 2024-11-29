@@ -155,6 +155,11 @@
       <button id="deleteOption">Supprimer</button>
     </div>
 
+    <!-- Context Menu pour les projets -->
+    <div id="projectContextMenu" class="context-menu">
+      <button id="deleteProjectOption">Supprimer</button>
+    </div>
+
     <!-- Form to add new rows -->
     <div class="add-form">
       <button id="addRowButton">Ajouter une ligne</button>
@@ -169,6 +174,11 @@
       let selectedFirstValue = '';
       let selectedSecondValue = '';
       let selectedRecordId = null;
+
+      const projectDropdown = document.getElementById("firstColumnDropdown");
+      const projectContextMenu = document.getElementById("projectContextMenu");
+
+      let selectedProjectForContextMenu = null;
 
       // Ready Grist
       grist.ready();
@@ -1049,6 +1059,73 @@
           .filter(id => !isNaN(id)); // Filtrer uniquement les ID valides
         return Math.max(...allIds, 0) + 1; // Retourne le prochain ID disponible
       }
+
+      // Écouteur pour afficher le menu contextuel
+      projectDropdown.addEventListener("contextmenu", (event) => {
+        // Empêche le menu contextuel par défaut
+        event.preventDefault();
+      
+        // Identifie l'élément cliqué
+        const target = event.target;
+      
+        // Vérifie qu'il s'agit bien d'une option de projet
+        if (target.tagName === "OPTION" && target.value !== "" && target.value !== "Ajouter Projet" && target.value !== "Insérer Projet") {
+          selectedProjectForContextMenu = target.value;
+      
+          // Positionne et affiche le menu contextuel
+          projectContextMenu.style.display = "block";
+          projectContextMenu.style.left = `${event.pageX}px`;
+          projectContextMenu.style.top = `${event.pageY}px`;
+        } else {
+          // Cache le menu si ce n'est pas un projet
+          projectContextMenu.style.display = "none";
+        }
+      });
+      
+      // Écouteur pour masquer le menu contextuel si on clique ailleurs
+      document.addEventListener("click", () => {
+        projectContextMenu.style.display = "none";
+      });
+      
+      // Suppression du projet sélectionné via le menu contextuel
+      document.getElementById("deleteProjectOption").addEventListener("click", async () => {
+        if (!selectedProjectForContextMenu) return;
+      
+        const confirmation = confirm(`Êtes-vous sûr de vouloir supprimer le projet "${selectedProjectForContextMenu}" et toutes ses lignes associées ?`);
+        if (!confirmation) return;
+      
+        try {
+          // Filtrer les IDs des lignes associées à ce projet
+          const rowsToDelete = records
+            .filter(record => record.NomProjet === selectedProjectForContextMenu)
+            .map(record => Number(record.ID_Ligne));
+      
+          if (rowsToDelete.length === 0) {
+            alert("Aucune ligne trouvée pour ce projet.");
+            return;
+          }
+      
+          // Préparer les actions de suppression
+          const actions = rowsToDelete.map(rowId => ["RemoveRecord", "Fusion", rowId]);
+      
+          // Appliquer les suppressions dans Grist
+          await grist.docApi.applyUserActions(actions);
+      
+          // Mise à jour locale des données
+          records = records.filter(record => record.NomProjet !== selectedProjectForContextMenu);
+      
+          // Mise à jour des listes déroulantes et du tableau
+          updateProjectDropdown();
+          populateSecondColumnListbox("");
+      
+          alert(`Le projet "${selectedProjectForContextMenu}" a été supprimé avec succès.`);
+        } catch (error) {
+          console.error("Erreur lors de la suppression du projet :", error);
+          alert("Une erreur est survenue lors de la suppression du projet.");
+        } finally {
+          projectContextMenu.style.display = "none"; // Cache le menu contextuel après suppression
+        }
+      });
 
     </script>
   </body>
