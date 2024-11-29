@@ -423,7 +423,7 @@
           Indice: "",
           Recu: "",
           DescriptionObservations: "",
-          ID_Ligne: newIdLigne.toString(),
+          ID_Ligne: getNextGlobalId(),
         };
       
         grist.docApi
@@ -867,7 +867,7 @@
                 Indice: "",
                 Recu: "",
                 DescriptionObservations: "",
-                ID_Ligne: newProjectId.toString(),
+                ID_Ligne: getNextGlobalId(),
               };
       
               await grist.docApi.applyUserActions([["AddRecord", "Fusion", null, projectRow]]);
@@ -1031,12 +1031,12 @@
 
       function initializeGlobalIdCounter() {
         const allIds = records.map(record => parseInt(record.ID_Ligne, 10)).filter(id => !isNaN(id));
-        globalIdCounter = Math.max(...allIds, 0);
+        globalIdCounter = Math.max(...allIds, 0); // Initialiser au maximum existant
       }
 
       function getNextGlobalId() {
         globalIdCounter += 1;
-        return globalIdCounter;
+        return globalIdCounter.toString();;
       }
 
 
