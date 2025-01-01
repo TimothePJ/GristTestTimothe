@@ -321,7 +321,7 @@
         contextMenu.style.display = 'none';
       }
     });
-    
+
     // Add event listener for "Ajouter une ligne" option
     document.getElementById('addRowOption').addEventListener('click', () => {
       console.log("Ajouter une ligne clicked");
@@ -498,7 +498,7 @@
 
       // Envoie la requête pour ajouter la nouvelle ligne dans Grist
       grist.docApi.applyUserActions([
-        ['AddRecord', 'Fusion', null, newRow]  // Utilise null pour l'ID, Grist s'en chargera
+        ['AddRecord', 'References', null, newRow]  // Utilise null pour l'ID, Grist s'en chargera
       ])
         .then(() => {
           console.log("Nouvelle ligne ajoutée :", newRow);
