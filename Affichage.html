@@ -494,34 +494,32 @@
         window.isAddingProject = true; // Active un flag pour bloquer les appels successifs
       
         try {
-          // Demande le nom du nouveau projet
+          // Étape 1 : Demande le nom du projet
           const projectName = prompt("Entrez le nom du nouveau projet :");
       
-          // Si l'utilisateur clique sur "Annuler" ou laisse le champ vide
+          // Vérifie si l'utilisateur clique sur "Annuler" ou laisse le champ vide
           if (!projectName || projectName.trim() === "") {
             console.log("Ajout annulé. Aucun nom de projet fourni.");
-            window.isAddingProject = false; // Libère le flag
             return; // Arrête immédiatement tout traitement
           }
       
-          // Demande le nom du premier tableau pour ce projet
+          // Étape 2 : Demande le nom du premier tableau pour le projet
           const firstTableName = prompt("Entrez le nom du premier tableau pour ce projet :");
       
-          // Si l'utilisateur clique sur "Annuler" ou laisse le champ vide
+          // Vérifie si l'utilisateur clique sur "Annuler" ou laisse le champ vide
           if (!firstTableName || firstTableName.trim() === "") {
             console.log("Ajout annulé. Aucun nom de tableau fourni.");
-            window.isAddingProject = false; // Libère le flag
             return; // Arrête immédiatement tout traitement
           }
       
-          // Génère un nouvel ID unique pour la ligne
+          // Étape 3 : Génère un nouvel ID unique pour la ligne
           const maxIdLigne = records.reduce((max, record) => {
             const idLigne = parseInt(record.ID_Ligne, 10);
             return idLigne > max ? idLigne : max;
           }, 0);
           const newIdLigne = maxIdLigne + 1;
       
-          // Crée une nouvelle ligne pour le projet et son premier tableau
+          // Étape 4 : Crée une nouvelle ligne pour le projet et le tableau
           const newRow = {
             NomProjet: projectName,
             NomEtage: firstTableName,
