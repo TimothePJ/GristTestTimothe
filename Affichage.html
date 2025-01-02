@@ -485,21 +485,24 @@
         }
       });
       
-      // Fonction pour ajouter un projet
       function handleAddProject() {
         if (window.isAddingProject) return; // Empêche les exécutions multiples
         window.isAddingProject = true; // Flag pour éviter les appels successifs
       
         const projectName = prompt("Entrez le nom du nouveau projet :");
+      
+        // Si l'utilisateur annule ou entre un nom vide
         if (!projectName || projectName.trim() === "") {
-          alert("Le nom du projet ne peut pas être vide.");
+          alert("Opération annulée. Le nom du projet ne peut pas être vide.");
           window.isAddingProject = false; // Libère le flag
           return;
         }
       
         const firstTableName = prompt("Entrez le nom du premier tableau pour ce projet :");
+      
+        // Si l'utilisateur annule ou entre un nom vide
         if (!firstTableName || firstTableName.trim() === "") {
-          alert("Le nom du tableau ne peut pas être vide.");
+          alert("Opération annulée. Le nom du tableau ne peut pas être vide.");
           window.isAddingProject = false; // Libère le flag
           return;
         }
