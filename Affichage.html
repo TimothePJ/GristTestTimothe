@@ -495,9 +495,8 @@
       
         // Si l'utilisateur clique sur "Annuler" ou laisse le champ vide
         if (!projectName || projectName.trim() === "") {
-          alert("Opération annulée. Le projet ne sera pas ajouté.");
           window.isAddingProject = false; // Libère le flag
-          return; // Arrête immédiatement la fonction
+          return; // Arrête immédiatement la fonction, aucun autre traitement
         }
       
         // Demande le nom du premier tableau pour ce projet
@@ -505,7 +504,6 @@
       
         // Si l'utilisateur clique sur "Annuler" ou laisse le champ vide
         if (!firstTableName || firstTableName.trim() === "") {
-          alert("Opération annulée. Le tableau ne sera pas ajouté.");
           window.isAddingProject = false; // Libère le flag
           return; // Arrête immédiatement la fonction
         }
