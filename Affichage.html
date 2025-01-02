@@ -487,7 +487,10 @@
       
       function handleAddProject() {
         // Empêche plusieurs appels simultanés de la fonction
-        if (window.isAddingProject) return;
+        if (window.isAddingProject) {
+          console.log("Une opération d'ajout de projet est déjà en cours. Annulation du nouvel appel.");
+          return; // Stoppe immédiatement si la fonction est déjà en cours
+        }
         window.isAddingProject = true; // Active un flag pour bloquer les appels successifs
       
         try {
@@ -496,6 +499,7 @@
       
           // Si l'utilisateur clique sur "Annuler" ou laisse le champ vide
           if (!projectName || projectName.trim() === "") {
+            console.log("Ajout annulé. Aucun nom de projet fourni.");
             window.isAddingProject = false; // Libère le flag
             return; // Arrête immédiatement tout traitement
           }
@@ -505,6 +509,7 @@
       
           // Si l'utilisateur clique sur "Annuler" ou laisse le champ vide
           if (!firstTableName || firstTableName.trim() === "") {
+            console.log("Ajout annulé. Aucun nom de tableau fourni.");
             window.isAddingProject = false; // Libère le flag
             return; // Arrête immédiatement tout traitement
           }
@@ -538,59 +543,7 @@
               records.push(newRow);
       
               // Met à jour la liste déroulante des projets
-              const projectDropdown = document.getElementById("firstColumnDropdown");
-              const uniqueProjects = records
-                .map((record) => record.NomProjet)
-                .filter((value, index, self) => value && self.indexOf(value) === index)
-                .sort();
-      
-              // Réinitialise et remplit la liste déroulante
-              projectDropdown.innerHTML = '<option value="">Select an option</option>';
-              uniqueProjects.forEach((project) => {
-                const option = document.createElement("option");
-                option.value = project;
-                option.text = project;
-                projectDropdown.appendChild(option);
-              });
-      
-              // Ajoute l'option "Ajouter Projet"
-              const addProjectOption = document.createElement("option");
-              addProjectOption.value = "Ajouter Projet";
-              addProjectOption.text = "Ajouter Projet";
-              projectDropdown.appendChild(addProjectOption);
-      
-              // Sélectionne automatiquement le projet ajouté
-              projectDropdown.value = projectName;
-              selectedFirstValue = projectName;
-      
-              // Met à jour la deuxième liste déroulante pour ce projet
-              const secondColumnListbox = document.getElementById("secondColumnListbox");
-              const tablesForProject = records
-                .filter((record) => record.NomProjet === projectName)
-                .map((record) => record.NomEtage)
-                .filter((value, index, self) => value && self.indexOf(value) === index)
-                .sort();
-      
-              // Réinitialise et remplit la deuxième liste déroulante
-              secondColumnListbox.innerHTML = '<option value="">Select an option</option>';
-              tablesForProject.forEach((table) => {
-                const option = document.createElement("option");
-                option.value = table;
-                option.text = table;
-                secondColumnListbox.appendChild(option);
-              });
-      
-              // Ajoute l'option "Ajouter Tableau"
-              const addTableOption = document.createElement("option");
-              addTableOption.value = "addTable";
-              addTableOption.text = "Ajouter Tableau";
-              secondColumnListbox.appendChild(addTableOption);
-      
-              // Sélectionne automatiquement le tableau ajouté
-              secondColumnListbox.value = firstTableName;
-              selectedSecondValue = firstTableName;
-      
-              console.log(`Le projet "${projectName}" et son tableau "${firstTableName}" sont maintenant sélectionnés.`);
+              updateProjectDropdown();
       
               // Affiche directement le tableau dans la vue HTML
               populateTable();
