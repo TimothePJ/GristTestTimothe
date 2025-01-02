@@ -496,8 +496,9 @@
       
           // Si l'utilisateur clique sur "Annuler" ou laisse le champ vide
           if (!projectName || projectName.trim() === "") {
-            window.isAddingProject = false; // Libère le flag
-            return; // Arrête immédiatement tout traitement
+            // Libère le flag et arrête immédiatement tout traitement
+            window.isAddingProject = false;
+            return; // Rien d'autre ne se passe
           }
       
           // Demande le nom du premier tableau pour ce projet
@@ -505,8 +506,9 @@
       
           // Si l'utilisateur clique sur "Annuler" ou laisse le champ vide
           if (!firstTableName || firstTableName.trim() === "") {
-            window.isAddingProject = false; // Libère le flag
-            return; // Arrête immédiatement tout traitement
+            // Libère le flag et arrête immédiatement tout traitement
+            window.isAddingProject = false;
+            return; // Rien d'autre ne se passe
           }
       
           // Génère un nouvel ID unique pour la ligne
