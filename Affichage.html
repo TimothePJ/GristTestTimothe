@@ -500,7 +500,7 @@
           return; // Arrête immédiatement la fonction
         }
       
-        // Demande le nom du premier tableau pour ce projet
+        // Si le premier prompt est validé, demande le nom du premier tableau
         const firstTableName = prompt("Entrez le nom du premier tableau pour ce projet :");
       
         // Vérifie si l'utilisateur a annulé ou entré une valeur vide
@@ -604,7 +604,6 @@
             window.isAddingProject = false; // Libère le flag après l'opération
           });
       }
-
 
       // Fonction pour gérer l'ajout d'un tableau
       function handleAddTable() {
