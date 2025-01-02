@@ -486,33 +486,35 @@
       });
       
       function handleAddProject() {
-        if (window.isAddingProject) return; // Empêche les exécutions multiples
-        window.isAddingProject = true; // Flag pour éviter les appels successifs
+        // Empêche plusieurs appels simultanés de la fonction
+        if (window.isAddingProject) return;
+        window.isAddingProject = true; // Active un flag pour bloquer les appels successifs
       
+        // Demande le nom du nouveau projet
         const projectName = prompt("Entrez le nom du nouveau projet :");
       
-        // Si l'utilisateur annule ou entre un nom vide
+        // Vérifie si l'utilisateur a annulé ou entré une valeur vide
         if (!projectName || projectName.trim() === "") {
-          alert("Opération annulée. Le nom du projet ne peut pas être vide.");
+          alert("Opération annulée. Le projet ne sera pas ajouté.");
           window.isAddingProject = false; // Libère le flag
-          return;
+          return; // Arrête immédiatement la fonction
         }
       
+        // Demande le nom du premier tableau pour ce projet
         const firstTableName = prompt("Entrez le nom du premier tableau pour ce projet :");
       
-        // Si l'utilisateur annule ou entre un nom vide
+        // Vérifie si l'utilisateur a annulé ou entré une valeur vide
         if (!firstTableName || firstTableName.trim() === "") {
-          alert("Opération annulée. Le nom du tableau ne peut pas être vide.");
+          alert("Opération annulée. Le tableau ne sera pas ajouté.");
           window.isAddingProject = false; // Libère le flag
-          return;
+          return; // Arrête immédiatement la fonction
         }
       
-        // Génère un nouvel ID_Ligne unique
+        // Génère un nouvel ID unique pour la ligne
         const maxIdLigne = records.reduce((max, record) => {
           const idLigne = parseInt(record.ID_Ligne, 10);
           return idLigne > max ? idLigne : max;
         }, 0);
-      
         const newIdLigne = maxIdLigne + 1;
       
         // Crée une nouvelle ligne pour le projet et son premier tableau
@@ -527,6 +529,7 @@
           ID_Ligne: newIdLigne.toString(),
         };
       
+        // Envoie la ligne à Grist pour l'ajouter
         grist.docApi
           .applyUserActions([["AddRecord", "Fusion", null, newRow]])
           .then(() => {
@@ -535,13 +538,14 @@
             // Actualise immédiatement les données locales
             records.push(newRow);
       
-            // Met à jour la première liste déroulante
+            // Met à jour la liste déroulante des projets
             const projectDropdown = document.getElementById("firstColumnDropdown");
             const uniqueProjects = records
               .map((record) => record.NomProjet)
               .filter((value, index, self) => value && self.indexOf(value) === index)
               .sort();
       
+            // Réinitialise et remplit la liste déroulante
             projectDropdown.innerHTML = '<option value="">Select an option</option>';
             uniqueProjects.forEach((project) => {
               const option = document.createElement("option");
@@ -568,6 +572,7 @@
               .filter((value, index, self) => value && self.indexOf(value) === index)
               .sort();
       
+            // Réinitialise et remplit la deuxième liste déroulante
             secondColumnListbox.innerHTML = '<option value="">Select an option</option>';
             tablesForProject.forEach((table) => {
               const option = document.createElement("option");
@@ -596,9 +601,10 @@
             alert("Erreur lors de l'ajout du projet.");
           })
           .finally(() => {
-            window.isAddingProject = false; // Libère le flag
+            window.isAddingProject = false; // Libère le flag après l'opération
           });
       }
+
 
       // Fonction pour gérer l'ajout d'un tableau
       function handleAddTable() {
