@@ -249,8 +249,7 @@
 
       if (filteredRecords.length === 0) return;
 
-      const exampleRecord = filteredRecords[0];
-      const headers = Object.keys(exampleRecord).filter(
+      const headers = Object.keys(filteredRecords[0]).filter(
         (key) => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'ID_Ligne'
       );
 
@@ -259,6 +258,12 @@
         const th = document.createElement('th');
         th.textContent = header;
         tableHeader.appendChild(th);
+      });
+
+      filteredRecords.sort((a, b) => {
+        const emetteurA = a.Emetteur || '';
+        const emetteurB = b.Emetteur || '';
+        return emetteurA.localeCompare(emetteurB);
       });
 
       filteredRecords.forEach((record) => {
@@ -325,7 +330,9 @@
     // Add event listener for "Ajouter une ligne" option
     document.getElementById('addRowOption').addEventListener('click', () => {
       console.log("Ajouter une ligne clicked");
-      addRowToGrist();
+      if (selectedRecordId) {
+        insertRowBelow(selectedRecordId);
+      }
       hideContextMenu();
     });
 
@@ -465,6 +472,39 @@
         .catch((error) => {
           console.error("Erreur lors de l'ajout du tableau :", error);
           alert("Erreur lors de l'ajout du tableau.");
+        });
+    }
+
+    // Function to insert a row below the specified row with the same "Emetteur" value
+    function insertRowBelow(recordId) {
+      const record = records.find(rec => rec.ID_Ligne === recordId);
+      if (!record) {
+        console.error("Record not found:", recordId);
+        return;
+      }
+
+      const newRow = {
+        NomProjet: record.NomProjet,
+        NomEtage: record.NomEtage,
+        Emetteur: record.Emetteur,
+        Reference: '',
+        Indice: '',
+        Recu: '',
+        DescriptionObservations: '',
+        ID_Ligne: ''
+      };
+
+      grist.docApi.applyUserActions([
+        ['AddRecord', 'References', null, newRow]
+      ])
+        .then(() => {
+          console.log("New row inserted below:", newRow);
+          records.push(newRow); // Update local records
+          populateTable(); // Refresh the table display
+        })
+        .catch(error => {
+          console.error("Error inserting row:", error);
+          alert("Error inserting row.");
         });
     }
 
