@@ -488,10 +488,12 @@
       function handleAddProject() {
         // Empêche plusieurs appels simultanés de la fonction
         if (window.isAddingProject) {
-          console.log("Une opération est déjà en cours. Annulation du nouvel appel.");
+          console.log("Une opération d'ajout de projet est déjà en cours. Annulation du nouvel appel.");
           return; // Stoppe immédiatement si la fonction est déjà en cours
         }
         window.isAddingProject = true; // Active un flag pour bloquer les appels successifs
+      
+        console.log("handleAddProject a été appelé."); // Journal pour vérifier les appels
       
         try {
           // Étape 1 : Demande le nom du projet
@@ -500,6 +502,7 @@
           // Vérifie si l'utilisateur clique sur "Annuler" ou laisse le champ vide
           if (!projectName || projectName.trim() === "") {
             console.log("Ajout annulé. Aucun nom de projet fourni.");
+            window.isAddingProject = false; // Libère le flag
             return; // Arrête immédiatement tout traitement
           }
       
@@ -509,6 +512,7 @@
           // Vérifie si l'utilisateur clique sur "Annuler" ou laisse le champ vide
           if (!firstTableName || firstTableName.trim() === "") {
             console.log("Ajout annulé. Aucun nom de tableau fourni.");
+            window.isAddingProject = false; // Libère le flag
             return; // Arrête immédiatement tout traitement
           }
       
