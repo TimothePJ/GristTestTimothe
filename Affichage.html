@@ -331,7 +331,7 @@
     document.getElementById('addRowOption').addEventListener('click', () => {
       console.log("Ajouter une ligne clicked");
       if (selectedRecordId) {
-        insertRowBelow(selectedRecordId);
+        insertEmetteurRow(selectedRecordId);
       }
       hideContextMenu();
     });
@@ -476,12 +476,18 @@
     }
 
     // Function to insert a row below the specified row with the same "Emetteur" value
-    function insertRowBelow(recordId) {
+    function insertEmetteurRow(recordId) {
       const record = records.find(rec => rec.ID_Ligne === recordId);
       if (!record) {
         console.error("Record not found:", recordId);
         return;
       }
+
+      // Find max ID_Ligne
+      const maxIdLigne = records.reduce((max, rec) => {
+        const idLigne = parseInt(rec.ID_Ligne, 10);
+        return idLigne > max ? idLigne : max;
+      }, 0);
 
       const newRow = {
         NomProjet: record.NomProjet,
@@ -491,7 +497,7 @@
         Indice: '',
         Recu: '',
         DescriptionObservations: '',
-        ID_Ligne: ''
+        ID_Ligne: (maxIdLigne + 1).toString()
       };
 
       grist.docApi.applyUserActions([
@@ -499,7 +505,7 @@
       ])
         .then(() => {
           console.log("New row inserted below:", newRow);
-          records.push(newRow); // Update local records
+          records.push(newRow); // Update local records with new ID
           populateTable(); // Refresh the table display
         })
         .catch(error => {
