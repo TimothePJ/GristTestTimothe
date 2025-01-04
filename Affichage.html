@@ -167,6 +167,9 @@
   </div>
 
   <script>
+    window.alert = function () {
+      debugger;
+    }
     let records = [];
     let selectedFirstValue = '';
     let selectedSecondValue = '';
@@ -250,7 +253,7 @@
       if (filteredRecords.length === 0) return;
 
       const headers = Object.keys(filteredRecords[0]).filter(
-        (key) => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'ID_Ligne'
+        (key) => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'id'
       );
 
       tableHeader.innerHTML = '<th>ID</th>';
@@ -268,10 +271,10 @@
 
       filteredRecords.forEach((record) => {
         const tr = document.createElement('tr');
-        tr.addEventListener('contextmenu', (event) => showContextMenu(event, record.ID_Ligne));
+        tr.addEventListener('contextmenu', (event) => showContextMenu(event, record.id));
 
         const idCell = document.createElement('td');
-        idCell.textContent = record.ID_Ligne;
+        idCell.textContent = record.id;
         tr.appendChild(idCell);
 
         headers.forEach((header) => {
@@ -371,7 +374,7 @@
       console.log("Records received from Grist:", receivedRecords);
 
       records = receivedRecords;
-
+      populateTable()
       // Populate the first dropdown with unique values from 'NomProjet'
       const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
       populateFirstColumnDropdown(uniqueFirstColumnValues);
@@ -473,12 +476,6 @@
         return;
       }
 
-      // Find max ID_Ligne
-      const maxIdLigne = records.reduce((max, rec) => {
-        const idLigne = parseInt(rec.ID_Ligne, 10);
-        return idLigne > max ? idLigne : max;
-      }, 0);
-
       const newRow = {
         NomProjet: record.NomProjet,
         NomEtage: record.NomEtage,
@@ -492,21 +489,9 @@
       grist.docApi.applyUserActions([
         ['AddRecord', 'References', null, newRow]
       ])
-        .then(() => {
-          console.log("New row inserted :", newRow);
-          // Refresh records from Grist to ensure we have latest data
-          grist.onRecords(function(updatedRecords) {
-            records = updatedRecords.map(record => ({
-              NomProjet: record.NomProjet || '',
-              NomEtage: record.NomEtage || '',
-              Emetteur: record.Emetteur || '',
-              Reference: record.Reference || '',
-              Indice: record.Indice || '',
-              Recu: record.Recu || '',
-              DescriptionObservations: record.DescriptionObservations || ''
-            }));
-            populateTable(); // Refresh the table display
-          });
+        .then(result => {
+          const newRowId = result.retValues[0];
+          console.log('New Row ID:', newRowId);
         })
         .catch(error => {
           console.error("Error inserting row:", error);
@@ -568,10 +553,7 @@
       const selectedProject = projectDropdown.value.trim();
       const selectedTable = tableDropdown.value.trim();
 
-      if (!selectedProject || (!selectedTable && !isAddTableAction)) {
-        if (!isAddTableAction) {
-          alert("Veuillez sélectionner un projet et un tableau.");
-        }
+      if (!selectedProject || !selectedTable ) {
         return null; // Retourne null si les sélections sont invalides
       }
 
