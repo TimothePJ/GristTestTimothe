@@ -101,6 +101,67 @@
       box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
     }
 
+    /* Dialog Styles */
+    dialog {
+      width: 400px;
+      padding: 20px;
+      background-color: #2c2c2c;
+      color: white;
+      border: 1px solid #444;
+      border-radius: 5px;
+    }
+
+    dialog h3 {
+      margin-top: 0;
+    }
+
+    dialog label {
+      display: block;
+      margin: 10px 0 5px;
+    }
+
+    dialog input,
+    dialog textarea {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 10px;
+      background-color: #444;
+      border: 1px solid #666;
+      color: white;
+    }
+
+    dialog textarea {
+      height: 100px;
+      resize: vertical;
+    }
+
+    .dialog-buttons {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    dialog button {
+      padding: 8px 16px;
+      background-color: #666;
+      border: none;
+      color: white;
+      cursor: pointer;
+    }
+
+    dialog button[type="submit"] {
+      background-color: #4CAF50;
+    }
+
+    dialog button[type="button"] {
+      background-color: #666;
+    }
+
+    dialog button:hover {
+      opacity: 0.9;
+    }
+
     .context-menu button {
       display: block;
       background: none;
@@ -134,7 +195,6 @@
       <label for="secondColumnListbox">Etage :</label>
       <select id="secondColumnListbox">
         <option value="">Choix étage</option>
-        <option value="addTable">AJOUTER TABLEAU</option>
       </select>
     </div>
   </div>
@@ -157,23 +217,98 @@
     <button id="deleteOption">Supprimer</button>
   </div>
 
+  <!-- Add Row Dialog -->
+  <dialog id="addRowDialog">
+    <form method="dialog">
+      <h3>Ajouter une nouvelle ligne</h3>
+
+      <label for="emetteur">Emetteur:</label>
+      <input type="text" id="emetteur" name="emetteur" required>
+
+      <label for="reference">Reference:</label>
+      <div style="display: flex; gap: 10px;">
+        <input type="text" id="reference" name="reference" required style="flex: 1;">
+        <input type="file" id="referenceFile" style="display: none;" accept="*.*">
+        <button type="button" onclick="document.getElementById('referenceFile').click()"
+          style="padding: 0px 5px;">Select File</button>
+      </div>
+      <script>
+        document.getElementById('referenceFile').addEventListener('change', function () {
+          if (this.files.length > 0) {
+            document.getElementById('reference').value = this.files[0].name;
+          }
+        });
+      </script>
+
+      <label for="indice">Indice:</label>
+      <input type="text" id="indice" name="indice" required>
+
+      <label for="recu">Recu:</label>
+      <input type="date" id="recu" name="recu" required>
+
+      <label for="description">Description:</label>
+      <textarea id="description" name="description" required></textarea>
+
+      <label for="datelimite">Date Limite:</label>
+      <input type="date" id="datelimite" name="datelimite" required>
+
+      <div class="dialog-buttons">
+        <button type="submit">Ajouter</button>
+        <button type="button" onclick="document.getElementById('addRowDialog').close()">Annuler</button>
+      </div>
+    </form>
+  </dialog>
+  <!-- Add Etage Dialog -->
+  <dialog id="addEtageDialog">
+    <form method="dialog">
+      <h3>Ajouter un nouvel étage</h3>
+
+      <label for="etageName">Nom de l'étage:</label>
+      <input type="text" id="etageName" name="etageName" required>
+
+      <label for="defaultDatelimite">Date Limite réception données par défaut:</label>
+      <input type="date" id="defaultDatelimite" name="defaultDatelimite" required>
+
+      <div class="dialog-buttons">
+        <button type="submit">Ajouter</button>
+        <button type="button" onclick="document.getElementById('addEtageDialog').close()">Annuler</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Add Project Dialog -->
+  <dialog id="addProjectDialog">
+    <form method="dialog">
+      <h3>Ajouter un nouveau projet</h3>
+
+      <label for="projectName">Nom du projet:</label>
+      <input type="text" id="projectName" name="projectName" required>
+
+      <div class="dialog-buttons">
+        <button type="submit">Ajouter</button>
+        <button type="button" onclick="document.getElementById('addProjectDialog').close()">Annuler</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Form to add new rows -->
   <div class="add-form">
-    <button id="addRowButton">Ajouter une ligne</button>
-    <button id="saveButton">Sauvegarder</button>
-    <button id="insertButton">Insérer</button>
+    <button id="addProjectButton">Ajouter projet</button>
 
     <input type="file" id="fileInput" style="display: none;" multiple>
   </div>
 
   <script>
-    window.alert = function () {
-      debugger;
-    }
+    // window.alert = function () {
+    //   debugger;
+    // }
     let records = [];
     let selectedFirstValue = '';
     let selectedSecondValue = '';
+    let currentEmetteur = '';
     let selectedRecordId = null;
+    let newTable = false; // Variable to track if a new table is being added
+    let newTableName = ''; // Variable to store the name of the new table
 
     // Ready Grist
     grist.ready();
@@ -228,11 +363,26 @@
         listbox.appendChild(option);
       });
 
-      // Ajoute l'option "Ajouter Tableau"
+      // Ajoute l'option "Ajouter étage"
       const addOption = document.createElement('option');
       addOption.value = 'addTable';
-      addOption.text = 'Ajouter Tableau';
+      addOption.text = 'Ajouter étage';
       listbox.appendChild(addOption);
+    }
+
+    // Helper function to check if a string is a valid date
+    function isValidDate(dateString) {
+      const date = new Date(dateString);
+      return date instanceof Date && !isNaN(date);
+    }
+
+    // Helper function to format date as DD/MM/YYYY
+    function formatDate(dateString) {
+      const date = new Date(dateString);
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
     }
 
     // Function to populate the table based on the selected first and second column values
@@ -271,7 +421,10 @@
 
       filteredRecords.forEach((record) => {
         const tr = document.createElement('tr');
-        tr.addEventListener('contextmenu', (event) => showContextMenu(event, record.id));
+        tr.addEventListener('contextmenu', (event) => {
+          currentEmetteur = record.Emetteur;
+          showContextMenu(event, record.id);
+        });
 
         const idCell = document.createElement('td');
         idCell.textContent = record.id;
@@ -280,7 +433,14 @@
         headers.forEach((header) => {
           const td = document.createElement('td');
           td.contentEditable = true;
-          td.textContent = record[header] || '';
+          let value = record[header] || '';
+
+          // Format date fields (Recu and DateLimite)
+          if ((header === 'Recu' || header === 'DateLimite') && isValidDate(value)) {
+            value = formatDate(value);
+          }
+
+          td.textContent = value;
           tr.appendChild(td);
         });
 
@@ -332,11 +492,52 @@
 
     // Add event listener for "Ajouter une ligne" option
     document.getElementById('addRowOption').addEventListener('click', () => {
-      console.log("Ajouter une ligne clicked");
-      if (selectedRecordId) {
-        insertEmetteurRow(selectedRecordId);
+      const dialog = document.getElementById('addRowDialog');
+      if (currentEmetteur) {
+        dialog.querySelector('#emetteur').value = currentEmetteur;
       }
+      dialog.showModal();
       hideContextMenu();
+    });
+
+    // Handle dialog form submission
+    document.getElementById('addRowDialog').addEventListener('submit', (e) => {
+      e.preventDefault();
+
+      const formData = new FormData(e.target);
+      const emetteur = formData.get('emetteur');
+      const reference = formData.get('reference');
+      const indice = formData.get('indice');
+      const recu = formData.get('recu');
+      const description = formData.get('description');
+      const datelimite = formData.get('datelimite');
+
+      if (selectedRecordId) {
+        const newRow = {
+          NomProjet: selectedFirstValue,
+          NomEtage: selectedSecondValue,
+          Emetteur: emetteur,
+          Reference: reference,
+          Indice: indice,
+          Recu: recu,
+          DescriptionObservations: description,
+          DateLimite: datelimite
+        };
+
+        grist.docApi.applyUserActions([
+          ['AddRecord', 'References', null, newRow]
+        ])
+          .then(result => {
+            const newRowId = result.retValues[0];
+            console.log('New Row ID:', newRowId);
+            document.getElementById('addRowDialog').close();
+            populateTable();
+          })
+          .catch(error => {
+            console.error("Error inserting row:", error);
+            alert("Error inserting row.");
+          });
+      }
     });
 
     // Add event listener for "Supprimer" option
@@ -374,10 +575,24 @@
       console.log("Records received from Grist:", receivedRecords);
 
       records = receivedRecords;
-      populateTable()
-      // Populate the first dropdown with unique values from 'NomProjet'
-      const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
-      populateFirstColumnDropdown(uniqueFirstColumnValues);
+
+      if (newTable) {
+        newTable = false; // Reset the flag after handling the new table
+        populateSecondColumnListbox(selectedFirstValue);
+
+        // Sélectionne automatiquement le nouveau tableau
+        const listbox = document.getElementById('secondColumnListbox');
+        listbox.value = newTableName;
+
+        // Déclenche l'affichage du tableau correspondant
+        selectedSecondValue = newTableName;
+        populateTable();
+      } else {
+        populateTable()
+        // Populate the first dropdown with unique values from 'NomProjet'
+        const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
+        populateFirstColumnDropdown(uniqueFirstColumnValues);
+      }
     });
 
     // Listen to changes in the first dropdown and update the second listbox accordingly
@@ -409,64 +624,73 @@
 
     // Fonction pour gérer l'ajout d'un tableau
     function handleAddTable() {
-      const newTableName = prompt("Entrez le nom du nouveau tableau :");
+      const dialog = document.getElementById('addEtageDialog');
+      dialog.showModal();
+    }
 
-      if (!newTableName || newTableName.trim() === "") {
-        alert("Le nom du tableau ne peut pas être vide.");
+    // Handle dialog form submission for adding Etage
+    document.getElementById('addEtageDialog').addEventListener('submit', (e) => {
+      e.preventDefault();
+
+      const formData = new FormData(e.target);
+      const etageName = formData.get('etageName');
+      const defaultDatelimite = formData.get('defaultDatelimite');
+
+      if (!etageName || etageName.trim() === "") {
+        alert("Le nom de l'étage ne peut pas être vide.");
         return;
       }
 
       // Vérifiez les sélections actuelles
       const projectDropdown = document.getElementById('firstColumnDropdown');
-      const selectedProject = projectDropdown.value.trim();
+      selectedFirstValue = projectDropdown.value.trim();
 
-      if (!selectedProject) {
-        alert("Veuillez sélectionner un projet avant d'ajouter un tableau.");
+      if (!selectedFirstValue) {
+        alert("Veuillez sélectionner un projet avant d'ajouter un étage.");
         return;
       }
 
-      // Génère un nouvel ID_Ligne unique
-      const maxIdLigne = records.reduce((max, record) => {
-        const idLigne = parseInt(record.ID_Ligne, 10);
-        return idLigne > max ? idLigne : max;
-      }, 0);
+      // Define the list of emetteurs as an array
+      const emetteurs = [
+        'ARCHI',
+        'ASCENSORISTE',
+        'CHARPENTIER',
+        'METHODES',
+        'PLANS STRUCTURE AP'
+      ];
 
-      const newIdLigne = maxIdLigne + 1;
+      // Function to create new rows based on the emetteurs array
+      function createNewRows(selectedProject, etageName, defaultDatelimite) {
+        return emetteurs.map(emetteur => ({
+          NomProjet: selectedProject,
+          NomEtage: etageName,
+          Emetteur: emetteur,
+          Reference: '_',
+          Indice: '_',
+          Recu: '_',
+          DescriptionObservations: 'EN ATTENTE',
+          DateLimite: defaultDatelimite
+        }));
+      }
 
-      // Crée une nouvelle ligne avec le tableau
-      const newRow = {
-        NomProjet: selectedProject,
-        NomEtage: newTableName,
-        Emetteur: '',
-        Reference: '',
-        Indice: '',
-        Recu: '',
-        DescriptionObservations: ''
-      };
+      // Create new rows using the emetteurs array
+      const newRows = createNewRows(selectedFirstValue, etageName, defaultDatelimite);
+      const actions = newRows.map(row => ['AddRecord', 'References', null, row]);
 
       // Ajoute la nouvelle ligne dans Grist
-      grist.docApi.applyUserActions([
-        ['AddRecord', 'Fusion', null, newRow],
-      ])
+      grist.docApi.applyUserActions(actions)
         .then(() => {
-          console.log("Nouveau tableau ajouté :", newRow);
+          console.log("Nouvel étage ajouté :", newRows);
 
-          // Actualise les options de la deuxième liste déroulante
-          populateSecondColumnListbox(selectedProject);
-
-          // Sélectionne automatiquement le nouveau tableau
-          const listbox = document.getElementById('secondColumnListbox');
-          listbox.value = newTableName;
-
-          // Déclenche l'affichage du tableau correspondant
-          selectedSecondValue = newTableName;
-          populateTable();
+          newTable = true; // Set the flag to true to indicate a new table was added
+          newTableName = etageName; // Store the name of the new table
+          document.getElementById('addEtageDialog').close();
         })
         .catch((error) => {
-          console.error("Erreur lors de l'ajout du tableau :", error);
-          alert("Erreur lors de l'ajout du tableau.");
+          console.error("Erreur lors de l'ajout de l'étage :", error);
+          alert("Erreur lors de l'ajout de l'étage.");
         });
-    }
+    });
 
     // Function to insert a row below the specified row with the same "Emetteur" value
     function insertEmetteurRow(recordId) {
@@ -544,7 +768,38 @@
     }
 
     // Écouteur d'événement pour le bouton d'ajout
-    document.getElementById('addRowButton').addEventListener('click', addRowToGrist);
+    document.getElementById('addProjectButton').addEventListener('click', () => {
+      document.getElementById('addProjectDialog').showModal();
+    });
+
+    // Handle project dialog form submission
+    document.getElementById('addProjectDialog').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const projectName = formData.get('projectName');
+
+      if (!projectName) {
+        alert("Le nom du projet est requis.");
+        return;
+      }
+
+      // Add the new project to Grist
+      grist.docApi.applyUserActions([
+        ['AddRecord', 'References', null, { NomProjet: projectName }]
+      ])
+      .then(() => {
+        // Refresh the project dropdown
+        const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
+        populateFirstColumnDropdown(uniqueFirstColumnValues);
+        
+        // Close the dialog
+        document.getElementById('addProjectDialog').close();
+      })
+      .catch(error => {
+        console.error("Erreur lors de l'ajout du projet :", error);
+        alert("Erreur lors de l'ajout du projet.");
+      });
+    });
 
     function getCurrentSelections(isAddTableAction = false) {
       const projectDropdown = document.getElementById('firstColumnDropdown');
@@ -553,7 +808,7 @@
       const selectedProject = projectDropdown.value.trim();
       const selectedTable = tableDropdown.value.trim();
 
-      if (!selectedProject || !selectedTable ) {
+      if (!selectedProject || !selectedTable) {
         return null; // Retourne null si les sélections sont invalides
       }
 
@@ -626,14 +881,6 @@
         alert("Aucune modification détectée pour la sauvegarde.");
       }
     }
-
-    // Écouteur d'événement pour le bouton de sauvegarde
-    document.getElementById('saveButton').addEventListener('click', saveChanges);
-
-    // Écouteur d'événement pour le bouton d'insersion
-    document.getElementById('insertButton').addEventListener('click', () => {
-      document.getElementById('fileInput').click();
-    });
 
     // Fonction pour ajouter une nouvelle ligne dans Grist avec le nom de fichier dans "Reference"
     function addRowWithFileName(fileName) {
