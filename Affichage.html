@@ -214,6 +214,7 @@
   <!-- Context Menu -->
   <div id="contextMenu" class="context-menu">
     <button id="addRowOption">Ajouter une ligne</button>
+    <button id="editOption">Modifier</button>
     <button id="deleteOption">Supprimer</button>
   </div>
 
@@ -287,6 +288,41 @@
       <div class="dialog-buttons">
         <button type="submit">Ajouter</button>
         <button type="button" onclick="document.getElementById('addProjectDialog').close()">Annuler</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Edit Row Dialog -->
+  <dialog id="editRowDialog">
+    <form method="dialog">
+      <h3>Modifier la ligne</h3>
+
+      <label for="editEmetteur">Emetteur:</label>
+      <input type="text" id="editEmetteur" name="emetteur" required>
+
+      <label for="editReference">Reference:</label>
+      <div style="display: flex; gap: 10px;">
+        <input type="text" id="editReference" name="reference" required style="flex: 1;">
+        <input type="file" id="editReferenceFile" style="display: none;" accept="*.*">
+        <button type="button" onclick="document.getElementById('editReferenceFile').click()"
+          style="padding: 0px 5px;">Select File</button>
+      </div>
+
+      <label for="editIndice">Indice:</label>
+      <input type="text" id="editIndice" name="indice" required>
+
+      <label for="editRecu">Recu:</label>
+      <input type="date" id="editRecu" name="recu" required>
+
+      <label for="editDescription">Description:</label>
+      <textarea id="editDescription" name="description" required></textarea>
+
+      <label for="editDatelimite">Date Limite:</label>
+      <input type="date" id="editDatelimite" name="datelimite" required>
+
+      <div class="dialog-buttons">
+        <button type="submit">Enregistrer</button>
+        <button type="button" onclick="document.getElementById('editRowDialog').close()">Annuler</button>
       </div>
     </form>
   </dialog>
@@ -471,6 +507,22 @@
       }
     }
 
+    // Show edit dialog with row data
+    function showEditDialog(record) {
+      const dialog = document.getElementById('editRowDialog');
+      
+      // Populate form fields with record data
+      document.getElementById('editEmetteur').value = record.Emetteur || '';
+      document.getElementById('editReference').value = record.Reference || '';
+      document.getElementById('editIndice').value = record.Indice || '';
+      document.getElementById('editRecu').value = record.Recu ? record.Recu.split('T')[0] : '';
+      document.getElementById('editDescription').value = record.DescriptionObservations || '';
+      document.getElementById('editDatelimite').value = record.DateLimite?.toLocaleDateString() || '';
+      
+      selectedRecordId = record.id;
+      dialog.showModal();
+    }
+
     // Show context menu on right-click and get the record ID from the first column
     function showContextMenu(event, recordId) {
       event.preventDefault();
@@ -497,6 +549,17 @@
         dialog.querySelector('#emetteur').value = currentEmetteur;
       }
       dialog.showModal();
+      hideContextMenu();
+    });
+
+    // Add event listener for "Modifier" option
+    document.getElementById('editOption').addEventListener('click', () => {
+      if (selectedRecordId) {
+        const record = records.find(rec => rec.id === selectedRecordId);
+        if (record) {
+          showEditDialog(record);
+        }
+      }
       hideContextMenu();
     });
 
@@ -537,6 +600,70 @@
             console.error("Error inserting row:", error);
             alert("Error inserting row.");
           });
+      }
+    });
+
+    // Handle edit dialog form submission
+    document.getElementById('editRowDialog').addEventListener('submit', (e) => {
+      e.preventDefault();
+
+      const formData = new FormData(e.target);
+      const updatedRow = {
+        Emetteur: formData.get('emetteur'),
+        Reference: formData.get('reference'),
+        Indice: formData.get('indice'),
+        Recu: formData.get('recu'),
+        DescriptionObservations: formData.get('description'),
+        DateLimite: formData.get('datelimite')
+      };
+
+      // Handle file upload if a file was selected
+      const fileInput = document.getElementById('editReferenceFile');
+      if (fileInput.files.length > 0) {
+        const file = fileInput.files[0];
+        updatedRow.Reference = file.name;
+      }
+
+      if (selectedRecordId) {
+        grist.docApi.applyUserActions([
+          ['UpdateRecord', 'References', selectedRecordId, updatedRow]
+        ])
+        .then(() => {
+          console.log('Row updated successfully');
+          document.getElementById('editRowDialog').close();
+          populateTable();
+        })
+        .catch(error => {
+          console.error("Error updating row:", error);
+          alert("Error updating row.");
+        });
+      }
+    });
+
+    // Add event listener for "Supprimer" option
+    document.getElementById('deleteOption').addEventListener('click', () => {
+      if (selectedRecordId) {
+        if (confirm("Êtes-vous sûr de vouloir supprimer cette ligne ?")) {
+          grist.docApi.applyUserActions([
+            ['RemoveRecord', 'References', selectedRecordId]
+          ])
+          .then(() => {
+            console.log('Row deleted successfully');
+            populateTable();
+            hideContextMenu();
+          })
+          .catch(error => {
+            console.error("Error deleting row:", error);
+            alert("Error deleting row.");
+          });
+        }
+      }
+    });
+
+    // Handle file selection in edit dialog
+    document.getElementById('editReferenceFile').addEventListener('change', function() {
+      if (this.files.length > 0) {
+        document.getElementById('editReference').value = this.files[0].name;
       }
     });
 
