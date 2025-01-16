@@ -212,7 +212,8 @@
     <table id="dataTable">
       <thead>
         <tr id="tableHeader">
-          <th>ID</th> <!-- Add a column for ID -->
+          <th>ID</th>
+          <th>Bloquant</th>
         </tr>
       </thead>
       <tbody id="tableBody"></tbody>
@@ -458,11 +459,24 @@
       );
 
       tableHeader.innerHTML = '<th>ID</th>';
-      headers.forEach((header) => {
-        const th = document.createElement('th');
-        th.textContent = header;
-        tableHeader.appendChild(th);
-      });
+          headers.forEach((header) => {
+            const th = document.createElement('th');
+            th.textContent = header;
+            tableHeader.appendChild(th);
+          });
+          // Add click handler for Bloquant column
+          tableHeader.querySelector('th:nth-child(2)').addEventListener('click', (e) => {
+            if (e.target.textContent === 'Bloquant') {
+              // Toggle all Bloquant values
+              const rows = tableBody.querySelectorAll('tr');
+              rows.forEach(row => {
+                const cell = row.querySelector('td:nth-child(2)');
+                if (cell) {
+                  cell.click();
+                }
+              });
+            }
+          });
 
       filteredRecords.sort((a, b) => {
         const emetteurA = a.Emetteur || '';
@@ -481,19 +495,36 @@
         idCell.textContent = record.id;
         tr.appendChild(idCell);
 
-        headers.forEach((header) => {
-          const td = document.createElement('td');
-          td.contentEditable = true;
-          let value = record[header] || '';
+          headers.forEach((header, index) => {
+            const td = document.createElement('td');
+            td.contentEditable = false;
+            let value = record[header] || '';
 
-          // Format date fields (Recu and DateLimite)
-          if ((header === 'Recu' || header === 'DateLimite') && isValidDate(value)) {
-            value = formatDate(value);
-          }
+            // Format date fields (Recu and DateLimite)
+            if ((header === 'Recu' || header === 'DateLimite') && isValidDate(value)) {
+              value = formatDate(value);
+            }
 
-          td.textContent = value;
-          tr.appendChild(td);
-        });
+            // Special handling for Bloquant column
+            if (header === 'Bloquant') {
+              td.classList.add('bloquant-cell');
+              td.textContent = value ? '✓' : '✗';
+              td.addEventListener('click', async () => {
+                const newValue = !value;
+                try {
+                  await grist.docApi.applyUserActions([
+                    ['UpdateRecord', 'References', record.id, { Bloquant: newValue }]
+                  ]);
+                  td.textContent = newValue ? '✓' : '✗';
+                } catch (error) {
+                  console.error('Error updating Bloquant:', error);
+                }
+              });
+            } else {
+              td.textContent = value;
+            }
+            tr.appendChild(td);
+          });
 
         tableBody.appendChild(tr);
       });
