@@ -215,6 +215,7 @@
   <div id="contextMenu" class="context-menu">
     <button id="addRowOption">Ajouter une ligne</button>
     <button id="editOption">Modifier</button>
+    <button id="archiveOption">Archiver</button>
     <button id="deleteOption">Supprimer</button>
   </div>
 
@@ -510,7 +511,7 @@
     // Show edit dialog with row data
     function showEditDialog(record) {
       const dialog = document.getElementById('editRowDialog');
-      
+
       // Populate form fields with record data
       document.getElementById('editEmetteur').value = record.Emetteur || '';
       document.getElementById('editReference').value = record.Reference || '';
@@ -518,7 +519,7 @@
       document.getElementById('editRecu').value = record.Recu ? record.Recu.split('T')[0] : '';
       document.getElementById('editDescription').value = record.DescriptionObservations || '';
       document.getElementById('editDatelimite').value = record.DateLimite?.toLocaleDateString() || '';
-      
+
       selectedRecordId = record.id;
       dialog.showModal();
     }
@@ -628,15 +629,15 @@
         grist.docApi.applyUserActions([
           ['UpdateRecord', 'References', selectedRecordId, updatedRow]
         ])
-        .then(() => {
-          console.log('Row updated successfully');
-          document.getElementById('editRowDialog').close();
-          populateTable();
-        })
-        .catch(error => {
-          console.error("Error updating row:", error);
-          alert("Error updating row.");
-        });
+          .then(() => {
+            console.log('Row updated successfully');
+            document.getElementById('editRowDialog').close();
+            populateTable();
+          })
+          .catch(error => {
+            console.error("Error updating row:", error);
+            alert("Error updating row.");
+          });
       }
     });
 
@@ -647,26 +648,44 @@
           grist.docApi.applyUserActions([
             ['RemoveRecord', 'References', selectedRecordId]
           ])
-          .then(() => {
-            console.log('Row deleted successfully');
-            populateTable();
-            hideContextMenu();
-          })
-          .catch(error => {
-            console.error("Error deleting row:", error);
-            alert("Error deleting row.");
-          });
+            .then(() => {
+              console.log('Row deleted successfully');
+              populateTable();
+              hideContextMenu();
+            })
+            .catch(error => {
+              console.error("Error deleting row:", error);
+              alert("Error deleting row.");
+            });
         }
       }
     });
 
     // Handle file selection in edit dialog
-    document.getElementById('editReferenceFile').addEventListener('change', function() {
+    document.getElementById('editReferenceFile').addEventListener('change', function () {
       if (this.files.length > 0) {
         document.getElementById('editReference').value = this.files[0].name;
       }
     });
-
+    // Add event listener for "Archiver" option
+    document.getElementById('archiveOption').addEventListener('click', () => {
+      if (selectedRecordId) {
+        if (confirm("Êtes-vous sûr de vouloir archiver cette ligne ?")) {
+          grist.docApi.applyUserActions([
+            ['UpdateRecord', 'References', selectedRecordId, { Archive: true }]
+          ])
+            .then(() => {
+              console.log('Row archived successfully');
+              populateTable();
+              hideContextMenu();
+            })
+            .catch(error => {
+              console.error("Error archiving row:", error);
+              alert("Error archiving row.");
+            });
+        }
+      }
+    });
     // Add event listener for "Supprimer" option
     document.getElementById('deleteOption').addEventListener('click', () => {
       console.log("Supprimer clicked for row ID:", selectedRecordId);
@@ -916,18 +935,18 @@
       grist.docApi.applyUserActions([
         ['AddRecord', 'References', null, { NomProjet: projectName }]
       ])
-      .then(() => {
-        // Refresh the project dropdown
-        const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
-        populateFirstColumnDropdown(uniqueFirstColumnValues);
-        
-        // Close the dialog
-        document.getElementById('addProjectDialog').close();
-      })
-      .catch(error => {
-        console.error("Erreur lors de l'ajout du projet :", error);
-        alert("Erreur lors de l'ajout du projet.");
-      });
+        .then(() => {
+          // Refresh the project dropdown
+          const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
+          populateFirstColumnDropdown(uniqueFirstColumnValues);
+
+          // Close the dialog
+          document.getElementById('addProjectDialog').close();
+        })
+        .catch(error => {
+          console.error("Erreur lors de l'ajout du projet :", error);
+          alert("Erreur lors de l'ajout du projet.");
+        });
     });
 
     function getCurrentSelections(isAddTableAction = false) {
