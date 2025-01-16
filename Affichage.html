@@ -182,6 +182,7 @@
 <body>
   <!-- Container for the sticky selection lists -->
   <div class="sticky-container">
+
     <!-- First dropdown for selecting a project -->
     <div class="dropdown-container">
       <label for="firstColumnDropdown">Projet :</label>
@@ -197,8 +198,15 @@
         <option value="">Choix étage</option>
       </select>
     </div>
-  </div>
 
+    <!-- Checkbox to toggle archived rows -->
+    <div class="dropdown-container">
+      <label>
+        <input type="checkbox" id="hideArchivedToggle" checked />
+        Masquer les archives
+      </label>
+    </div>
+  </div>
   <!-- Table to display and edit the data -->
   <div class="table-container">
     <table id="dataTable">
@@ -422,6 +430,9 @@
       return `${day}/${month}/${year}`;
     }
 
+    // Add event listener for archive toggle checkbox
+    document.getElementById('hideArchivedToggle').addEventListener('change', populateTable);
+
     // Function to populate the table based on the selected first and second column values
     function populateTable() {
       const selections = getCurrentSelections();
@@ -430,11 +441,14 @@
       const { selectedProject, selectedTable } = selections;
       const tableBody = document.getElementById('tableBody');
       const tableHeader = document.getElementById('tableHeader');
+      const hideArchived = document.getElementById('hideArchivedToggle').checked;
 
       tableBody.innerHTML = '';
       const filteredRecords = records.filter(
         (record) =>
-          record.NomProjet === selectedProject && record.NomEtage === selectedTable
+          record.NomProjet === selectedProject &&
+          record.NomEtage === selectedTable &&
+          (!hideArchived || !record.Archive)
       );
 
       if (filteredRecords.length === 0) return;
