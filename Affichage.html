@@ -505,21 +505,24 @@
               value = formatDate(value);
             }
 
-            // Special handling for Bloquant column
+            // Special handling for Bloquant and Archive columns
             if (header === 'Bloquant') {
               td.classList.add('bloquant-cell');
-              td.textContent = value ? '✓' : '✗';
+              td.textContent = value ? '✓' : '';
               td.addEventListener('click', async () => {
                 const newValue = !value;
                 try {
                   await grist.docApi.applyUserActions([
                     ['UpdateRecord', 'References', record.id, { Bloquant: newValue }]
                   ]);
-                  td.textContent = newValue ? '✓' : '✗';
+                  td.textContent = newValue ? '✓' : '';
                 } catch (error) {
                   console.error('Error updating Bloquant:', error);
                 }
               });
+            } else if (header === 'Archive') {
+              td.classList.add('archive-cell');
+              td.textContent = value ? '✓' : '';
             } else {
               td.textContent = value;
             }
