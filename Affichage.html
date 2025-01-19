@@ -308,6 +308,9 @@
     <form method="dialog">
       <h3>Ajouter un nouveau projet</h3>
 
+      <label for="projectNumber">Numéro de projet:</label>
+      <input type="number" id="projectNumber" name="projectNumber" required>
+
       <label for="projectName">Nom du projet:</label>
       <input type="text" id="projectName" name="projectName" required>
 
@@ -988,17 +991,27 @@
     document.getElementById('addProjectDialog').addEventListener('submit', (e) => {
       e.preventDefault();
       const formData = new FormData(e.target);
+      const projectNumber = formData.get('projectNumber');
       const projectName = formData.get('projectName');
 
-      if (!projectName) {
-        alert("Le nom du projet est requis.");
+      if (!projectNumber || !projectName) {
+        alert("Le numéro et le nom du projet sont requis.");
         return;
       }
 
-      // Add the new project to Grist
+      // First create project in Projets table
       grist.docApi.applyUserActions([
-        ['AddRecord', 'References', null, { NomProjet: projectName }]
+        ['AddRecord', 'Projets', null, { 
+          'Numero_de_projet': projectNumber,
+          'Nom_de_projet': projectName 
+        }]
       ])
+        .then(() => {
+          // Then add to References table
+          return grist.docApi.applyUserActions([
+            ['AddRecord', 'References', null, { NomProjet: projectName }]
+          ]);
+        })
         .then(() => {
           // Refresh the project dropdown
           const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
