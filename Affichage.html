@@ -1006,10 +1006,11 @@
           'Nom_de_projet': projectName 
         }]
       ])
-        .then(() => {
-          // Then add to References table
+        .then(result => {
+          const projectId = result.retValues[0];
+          // Then add to References table using the numeric ID
           return grist.docApi.applyUserActions([
-            ['AddRecord', 'References', null, { NomProjet: projectName }]
+            ['AddRecord', 'References', null, { NomProjet: projectId }]
           ]);
         })
         .then(() => {
