@@ -202,9 +202,9 @@
 
     <!-- Second dropdown for selecting the tableau -->
     <div class="dropdown-container">
-      <label for="secondColumnListbox">Etage :</label>
+      <label for="secondColumnListbox">Document :</label>
       <select id="secondColumnListbox">
-        <option value="">Choix étage</option>
+        <option value="">Choix document</option>
       </select>
     </div>
 
@@ -285,20 +285,20 @@
       </div>
     </form>
   </dialog>
-  <!-- Add Etage Dialog -->
-  <dialog id="addEtageDialog">
+  <!-- Add Document Dialog -->
+  <dialog id="addDocumentDialog">
     <form method="dialog">
-      <h3>Ajouter un nouvel étage</h3>
+      <h3>Ajouter un nouveau document</h3>
 
-      <label for="etageName">Nom de l'étage:</label>
-      <input type="text" id="etageName" name="etageName" required>
+      <label for="documentName">Nom du document:</label>
+      <input type="text" id="documentName" name="documentName" required>
 
       <label for="defaultDatelimite">Date Limite réception données par défaut:</label>
       <input type="date" id="defaultDatelimite" name="defaultDatelimite" required>
 
       <div class="dialog-buttons">
         <button type="submit">Ajouter</button>
-        <button type="button" onclick="document.getElementById('addEtageDialog').close()">Annuler</button>
+        <button type="button" onclick="document.getElementById('addDocumentDialog').close()">Annuler</button>
       </div>
     </form>
   </dialog>
@@ -414,7 +414,7 @@
 
       const secondColumnValues = records
         .filter(record => record.NomProjet === selectedValue) // Filtre selon le projet
-        .map(record => record.NomEtage) // Extrait les valeurs
+        .map(record => record.NomDocument) // Extrait les valeurs
         .filter((value, index, self) => value && self.indexOf(value) === index) // Supprime les doublons
         .sort();
 
@@ -425,10 +425,10 @@
         listbox.appendChild(option);
       });
 
-      // Ajoute l'option "Ajouter étage"
+      // Ajoute l'option "Ajouter document"
       const addOption = document.createElement('option');
       addOption.value = 'addTable';
-      addOption.text = 'Ajouter étage';
+      addOption.text = 'Ajouter document';
       listbox.appendChild(addOption);
     }
 
@@ -464,14 +464,14 @@
       const filteredRecords = records.filter(
         (record) =>
           record.NomProjet === selectedProject &&
-          record.NomEtage === selectedTable &&
+          record.NomDocument === selectedTable &&
           (!hideArchived || !record.Archive)
       );
 
       if (filteredRecords.length === 0) return;
 
       const headers = Object.keys(filteredRecords[0]).filter(
-        (key) => key !== 'NomProjet' && key !== 'NomEtage' && key !== 'id'
+        (key) => key !== 'NomProjet' && key !== 'NomDocument' && key !== 'id'
       );
 
       tableHeader.innerHTML = '<th>ID</th>';
@@ -643,7 +643,7 @@
       if (selectedRecordId) {
         const newRow = {
           NomProjet: selectedFirstValue,
-          NomEtage: selectedSecondValue,
+          NomDocument: selectedSecondValue,
           Emetteur: emetteur,
           Reference: reference,
           Indice: indice,
@@ -834,20 +834,20 @@
 
     // Fonction pour gérer l'ajout d'un tableau
     function handleAddTable() {
-      const dialog = document.getElementById('addEtageDialog');
+      const dialog = document.getElementById('addDocumentDialog');
       dialog.showModal();
     }
 
-    // Handle dialog form submission for adding Etage
-    document.getElementById('addEtageDialog').addEventListener('submit', (e) => {
+    // Handle dialog form submission for adding Document
+    document.getElementById('addDocumentDialog').addEventListener('submit', (e) => {
       e.preventDefault();
 
       const formData = new FormData(e.target);
-      const etageName = formData.get('etageName');
+      const documentName = formData.get('documentName');
       const defaultDatelimite = formData.get('defaultDatelimite');
 
-      if (!etageName || etageName.trim() === "") {
-        alert("Le nom de l'étage ne peut pas être vide.");
+      if (!documentName || documentName.trim() === "") {
+        alert("Le nom du document ne peut pas être vide.");
         return;
       }
 
@@ -856,7 +856,7 @@
       selectedFirstValue = projectDropdown.value.trim();
 
       if (!selectedFirstValue) {
-        alert("Veuillez sélectionner un projet avant d'ajouter un étage.");
+        alert("Veuillez sélectionner un projet avant d'ajouter un document.");
         return;
       }
 
@@ -872,10 +872,10 @@
       ];
 
       // Function to create new rows based on the emetteurs array
-      function createNewRows(selectedProject, etageName, defaultDatelimite) {
+      function createNewRows(selectedProject, documentName, defaultDatelimite) {
         return emetteurs.map(emetteur => ({
           NomProjet: selectedProject,
-          NomEtage: etageName,
+          NomDocument: documentName,
           Emetteur: emetteur,
           Reference: '_',
           Indice: '_',
@@ -886,21 +886,21 @@
       }
 
       // Create new rows using the emetteurs array
-      const newRows = createNewRows(selectedFirstValue, etageName, defaultDatelimite);
+      const newRows = createNewRows(selectedFirstValue, documentName, defaultDatelimite);
       const actions = newRows.map(row => ['AddRecord', 'References', null, row]);
 
       // Ajoute la nouvelle ligne dans Grist
       grist.docApi.applyUserActions(actions)
         .then(() => {
-          console.log("Nouvel étage ajouté :", newRows);
+          console.log("Nouveau document ajouté :", newRows);
 
           newTable = true; // Set the flag to true to indicate a new table was added
-          newTableName = etageName; // Store the name of the new table
-          document.getElementById('addEtageDialog').close();
+          newTableName = documentName; // Store the name of the new table
+          document.getElementById('addDocumentDialog').close();
         })
         .catch((error) => {
-          console.error("Erreur lors de l'ajout de l'étage :", error);
-          alert("Erreur lors de l'ajout de l'étage.");
+          console.error("Erreur lors de l'ajout du document :", error);
+          alert("Erreur lors de l'ajout du document.");
         });
     });
 
@@ -914,7 +914,7 @@
 
       const newRow = {
         NomProjet: record.NomProjet,
-        NomEtage: record.NomEtage,
+        NomDocument: record.NomDocument,
         Emetteur: record.Emetteur,
         Reference: '',
         Indice: '',
@@ -954,7 +954,7 @@
       // Création de la nouvelle ligne avec la valeur de ID_Ligne
       const newRow = {
         NomProjet: selectedFirstValue,
-        NomEtage: selectedSecondValue,
+        NomDocument: selectedSecondValue,
         Emetteur: '',
         Reference: '',
         Indice: '',
@@ -1053,7 +1053,7 @@
           (rec) =>
             rec.ID_Ligne === rowId &&
             rec.NomProjet === selectedProject &&
-            rec.NomEtage === selectedTable
+            rec.NomDocument === selectedTable
         );
 
         if (!record) {
@@ -1116,7 +1116,7 @@
       // Création de la nouvelle ligne avec la valeur de ID_Ligne et le nom du fichier sans extension pour "Reference"
       const newRow = {
         NomProjet: selectedFirstValue,
-        NomEtage: selectedSecondValue,
+        NomDocument: selectedSecondValue,
         Emetteur: '',
         Reference: fileNameWithoutExtension, // Nom du fichier sans extension
         Indice: '',
