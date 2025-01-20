@@ -290,6 +290,9 @@
     <form method="dialog">
       <h3>Ajouter un nouveau document</h3>
 
+      <label for="documentNumber">Numéro du document:</label>
+      <input type="number" id="documentNumber" name="documentNumber" required>
+
       <label for="documentName">Nom du document:</label>
       <input type="text" id="documentName" name="documentName" required>
 
@@ -846,11 +849,14 @@
       e.preventDefault();
 
       const formData = new FormData(e.target);
+      const documentNumber = formData.get('documentNumber');
       const documentName = formData.get('documentName');
       const defaultDatelimite = formData.get('defaultDatelimite');
 
-      if (!documentName || documentName.trim() === "") {
-        alert("Le nom du document ne peut pas être vide.");
+      const combinedDocumentName = `${documentNumber}-${documentName}`;
+
+      if (!documentNumber || !documentName || documentName.trim() === "") {
+        alert("Le numéro et le nom du document sont requis.");
         return;
       }
 
@@ -898,7 +904,7 @@
       }
 
       // Create new rows using the emetteurs array
-      const newRows = createNewRows(projectId, documentName, defaultDatelimite);
+      const newRows = createNewRows(projectId, combinedDocumentName, defaultDatelimite);
       const actions = newRows.map(row => ['AddRecord', 'References', null, row]);
 
       // Ajoute la nouvelle ligne dans Grist
@@ -907,7 +913,7 @@
           console.log("Nouveau document ajouté :", newRows);
 
           newTable = true; // Set the flag to true to indicate a new table was added
-          newTableName = documentName; // Store the name of the new table
+          newTableName = combinedDocumentName; // Store the name of the new table
           document.getElementById('addDocumentDialog').close();
         })
         .catch((error) => {
@@ -915,17 +921,26 @@
           alert("Erreur lors de l'ajout du document.");
         });
     });
-
+/*
     // Function to insert a row below the specified row with the same "Emetteur" value
-    function insertEmetteurRow(recordId) {
+    async function insertEmetteurRow(recordId) {
       const record = records.find(rec => rec.id === recordId);
       if (!record) {
         console.error("Record not found:", recordId);
         return;
       }
 
+      // Get the project ID from Projets table
+      const projets = await grist.docApi.fetchTable('Projets');
+      const projectIndex = projets.Nom_de_projet.indexOf(record.NomProjet);
+      if (projectIndex === -1) {
+        alert("Projet non trouvé");
+        return;
+      }
+      const projectId = projets.id[projectIndex];
+
       const newRow = {
-        NomProjet: record.NomProjet,
+        NomProjet: projectId,
         NomDocument: record.NomDocument,
         Emetteur: record.Emetteur,
         Reference: '',
@@ -990,7 +1005,7 @@
           alert("Erreur lors de l'ajout de la ligne.");
         });
     }
-
+*/
     // Écouteur d'événement pour le bouton d'ajout
     document.getElementById('addProjectButton').addEventListener('click', () => {
       document.getElementById('addProjectDialog').showModal();
