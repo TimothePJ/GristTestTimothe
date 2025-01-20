@@ -842,7 +842,7 @@
     }
 
     // Handle dialog form submission for adding Document
-    document.getElementById('addDocumentDialog').addEventListener('submit', (e) => {
+    document.getElementById('addDocumentDialog').addEventListener('submit', async (e) => {
       e.preventDefault();
 
       const formData = new FormData(e.target);
@@ -863,6 +863,15 @@
         return;
       }
 
+      // Get the project ID from Projets table
+      const projets = await grist.docApi.fetchTable('Projets');
+      const projectIndex = projets.Nom_de_projet.indexOf(selectedFirstValue);
+      if (projectIndex === -1) {
+        alert("Projet non trouvé");
+        return;
+      }
+      const projectId = projets.id[projectIndex];
+
       // Define the list of emetteurs as an array
       const emetteurs = [
         'ARCHI',
@@ -875,9 +884,9 @@
       ];
 
       // Function to create new rows based on the emetteurs array
-      function createNewRows(selectedProject, documentName, defaultDatelimite) {
+      function createNewRows(projectId, documentName, defaultDatelimite) {
         return emetteurs.map(emetteur => ({
-          NomProjet: selectedProject,
+          NomProjet: projectId,
           NomDocument: documentName,
           Emetteur: emetteur,
           Reference: '_',
@@ -889,7 +898,7 @@
       }
 
       // Create new rows using the emetteurs array
-      const newRows = createNewRows(selectedFirstValue, documentName, defaultDatelimite);
+      const newRows = createNewRows(projectId, documentName, defaultDatelimite);
       const actions = newRows.map(row => ['AddRecord', 'References', null, row]);
 
       // Ajoute la nouvelle ligne dans Grist
