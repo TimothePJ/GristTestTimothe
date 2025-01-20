@@ -647,20 +647,29 @@
       const datelimite = formData.get('datelimite');
 
       if (selectedRecordId) {
-        const newRow = {
-          NomProjet: selectedFirstValue,
-          NomDocument: selectedSecondValue,
-          Emetteur: emetteur,
-          Reference: reference,
-          Indice: indice,
-          Recu: recu,
-          DescriptionObservations: description,
-          DateLimite: datelimite
-        };
+        // Get project ID from Projets table
+        grist.docApi.fetchTable('Projets').then(projets => {
+          const projectIndex = projets.Nom_de_projet.indexOf(selectedFirstValue);
+          if (projectIndex === -1) {
+            throw new Error('Project not found');
+          }
+          const projectId = projets.id[projectIndex];
 
-        grist.docApi.applyUserActions([
-          ['AddRecord', 'References', null, newRow]
-        ])
+          const newRow = {
+            NomProjet: projectId,
+            NomDocument: selectedSecondValue,
+            Emetteur: emetteur,
+            Reference: reference,
+            Indice: indice,
+            Recu: recu,
+            DescriptionObservations: description,
+            DateLimite: datelimite
+          };
+
+          return grist.docApi.applyUserActions([
+            ['AddRecord', 'References', null, newRow]
+          ]);
+        })
           .then(result => {
             const newRowId = result.retValues[0];
             console.log('New Row ID:', newRowId);
