@@ -185,6 +185,56 @@
     .context-menu button:hover {
       background-color: #444;
     }
+
+    #emetteurDropdown {
+      display: flex;
+      flex-direction: column; /* Empile les items verticalement */
+      max-height: 200px; /* Rend la liste déroulable verticalement */
+      overflow-y: auto; /* Active le défilement vertical */
+      overflow-x: hidden; /* Empêche tout défilement horizontal */
+      border: 1px solid #ddd;
+      padding: 5px;
+      background-color: #2c2c2c;
+      color: white;
+      border-radius: 4px;
+      font-size: 0.95em; /* Augmente légèrement la taille du texte */
+      box-sizing: border-box; /* Assure que padding et bordure sont inclus */
+    }
+    
+    .emetteur-item {
+      display: grid; /* Utilise la grille pour aligner les éléments */
+      grid-template-columns: auto 1fr; /* Deux colonnes : case à cocher + texte */
+      align-items: center; /* Aligne verticalement case et texte au centre */
+      gap: 30px; /* Ajoute un espace entre la case et le texte */
+      padding: 2px 5px; /* Ajoute un léger padding */
+      width: 100%; /* Utilise toute la largeur disponible */
+      box-sizing: border-box; /* Évite tout débordement */
+    }
+    
+    /* Alternance des couleurs */
+    .emetteur-item:nth-child(odd) {
+      background-color: #2c2c2c;
+    }
+    
+    .emetteur-item:nth-child(even) {
+      background-color: #3c3c3c;
+    }
+    
+    .emetteur-item input[type="checkbox"] {
+      margin: 0; /* Supprime les marges inutiles */
+      padding: 0; /* Pas de padding interne */
+      position: relative; /* Position par défaut pour un placement précis */
+      left: 0; /* Assure un alignement strict à gauche */
+    }
+    
+    .emetteur-item span {
+      white-space: nowrap; /* Empêche les retours à la ligne pour le texte */
+      overflow: hidden; /* Supprime tout débordement inutile */
+      text-overflow: clip; /* Pas de "..." ni troncature */
+      text-align: left; /* Aligne strictement le texte à gauche */
+      font-size: 1em; /* Ajuste encore un peu plus la taille du texte du span */
+    }
+    
   </style>
 </head>
 
@@ -249,8 +299,26 @@
     <form method="dialog">
       <h3>Ajouter une nouvelle ligne</h3>
 
-      <label for="emetteur">Emetteur:</label>
-      <input type="text" id="emetteur" name="emetteur" required>
+      <label for="emetteur">Émetteur:</label>
+      <select id="emetteur" name="emetteur" required>
+        <option value="">-- Sélectionnez un émetteur --</option>
+        <option value="ARCHI">ARCHI</option>
+        <option value="ASCENSORISTE">ASCENSORISTE</option>
+        <option value="CHARPENTIER">CHARPENTIER</option>
+        <option value="DETAILS TECHNIQUES">DETAILS TECHNIQUES</option>
+        <option value="ETANCHEUR">ETANCHEUR</option>
+        <option value="FAÇADIER">FAÇADIER</option>
+        <option value="LOCAL TRANSFO">LOCAL TRANSFO</option>
+        <option value="METHODES">METHODES</option>
+        <option value="PLAN DE DECAISSES DE SOLS">PLAN DE DECAISSES DE SOLS</option>
+        <option value="PLANS DOE">PLANS DOE</option>
+        <option value="PLANS GEOMETRES">PLANS GEOMETRES</option>
+        <option value="PREFA ESCALIERS">PREFA ESCALIERS</option>
+        <option value="RAPPORT DE SOL">RAPPORT DE SOL</option>
+        <option value="RESEAUX ENTERRES">RESEAUX ENTERRES</option>
+        <option value="RESERVATIONS">RESERVATIONS</option>
+        <option value="SONDAGES">SONDAGES</option>
+      </select>
 
       <label for="reference">Reference:</label>
       <div style="display: flex; gap: 10px;">
@@ -287,25 +355,95 @@
   </dialog>
   <!-- Add Document Dialog -->
   <dialog id="addDocumentDialog">
-    <form method="dialog">
+    <form method="dialog" style="display: flex; flex-direction: column; gap: 10px; font-size: 14px;">
       <h3>Ajouter un nouveau document</h3>
-
+  
       <label for="documentNumber">Numéro du document:</label>
       <input type="number" id="documentNumber" name="documentNumber" required>
-
+  
       <label for="documentName">Nom du document:</label>
       <input type="text" id="documentName" name="documentName" required>
-
+  
       <label for="defaultDatelimite">Date Limite réception données par défaut:</label>
       <input type="date" id="defaultDatelimite" name="defaultDatelimite" required>
-
-      <div class="dialog-buttons">
-        <button type="submit">Ajouter</button>
-        <button type="button" onclick="document.getElementById('addDocumentDialog').close()">Annuler</button>
+  
+      <div>
+        <label>Émetteurs:</label>
+        <div id="emetteurDropdown">
+          <div class="emetteur-item">
+            <input type="checkbox" value="ARCHI" checked>
+            <span>ARCHI</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="ASCENSORISTE" checked>
+            <span>ASCENSORISTE</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="CHARPENTIER" checked>
+            <span>CHARPENTIER</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="DETAILS TECHNIQUES" checked>
+            <span>DETAILS TECHNIQUES</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="ETANCHEUR" checked>
+            <span>ETANCHEUR</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="FAÇADIER" checked>
+            <span>FAÇADIER</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="LOCAL TRANSFO" checked>
+            <span>LOCAL TRANSFO</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="METHODES" checked>
+            <span>METHODES</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="PLAN DE DECAISSES DE SOLS" checked>
+            <span>PLAN DE DECAISSES DE SOLS</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="PLANS DOE" checked>
+            <span>PLANS DOE</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="PLANS GEOMETRES" checked>
+            <span>PLANS GEOMETRES</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="PREFA ESCALIERS" checked>
+            <span>PREFA ESCALIERS</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="RAPPORT DE SOL" checked>
+            <span>RAPPORT DE SOL</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="RESEAUX ENTERRES" checked>
+            <span>RESEAUX ENTERRES</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="RESERVATIONS" checked>
+            <span>RESERVATIONS</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="SONDAGES" checked>
+            <span>SONDAGES</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="dialog-buttons" style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button type="submit" style="padding: 8px 15px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">Ajouter</button>
+        <button type="button" onclick="document.getElementById('addDocumentDialog').close()" style="padding: 8px 15px; background-color: #666; color: white; border: none; border-radius: 5px; cursor: pointer;">Annuler</button>
       </div>
     </form>
   </dialog>
-
+  
   <!-- Add Project Dialog -->
   <dialog id="addProjectDialog">
     <form method="dialog">
@@ -329,8 +467,26 @@
     <form method="dialog">
       <h3>Modifier la ligne</h3>
 
-      <label for="editEmetteur">Emetteur:</label>
-      <input type="text" id="editEmetteur" name="emetteur" required>
+      <label for="editEmetteur">Émetteur:</label>
+      <select id="editEmetteur" name="emetteur" required>
+        <option value="">-- Sélectionnez un émetteur --</option>
+        <option value="ARCHI">ARCHI</option>
+        <option value="ASCENSORISTE">ASCENSORISTE</option>
+        <option value="CHARPENTIER">CHARPENTIER</option>
+        <option value="DETAILS TECHNIQUES">DETAILS TECHNIQUES</option>
+        <option value="ETANCHEUR">ETANCHEUR</option>
+        <option value="FAÇADIER">FAÇADIER</option>
+        <option value="LOCAL TRANSFO">LOCAL TRANSFO</option>
+        <option value="METHODES">METHODES</option>
+        <option value="PLAN DE DECAISSES DE SOLS">PLAN DE DECAISSES DE SOLS</option>
+        <option value="PLANS DOE">PLANS DOE</option>
+        <option value="PLANS GEOMETRES">PLANS GEOMETRES</option>
+        <option value="PREFA ESCALIERS">PREFA ESCALIERS</option>
+        <option value="RAPPORT DE SOL">RAPPORT DE SOL</option>
+        <option value="RESEAUX ENTERRES">RESEAUX ENTERRES</option>
+        <option value="RESERVATIONS">RESERVATIONS</option>
+        <option value="SONDAGES">SONDAGES</option>
+      </select>
 
       <label for="editReference">Reference:</label>
       <div style="display: flex; gap: 10px;">
@@ -481,24 +637,24 @@
       );
 
       tableHeader.innerHTML = '<th>ID</th>';
-          headers.forEach((header) => {
-            const th = document.createElement('th');
-            th.textContent = header;
-            tableHeader.appendChild(th);
-          });
-          // Add click handler for Bloquant column
-          tableHeader.querySelector('th:nth-child(2)').addEventListener('click', (e) => {
-            if (e.target.textContent === 'Bloquant') {
-              // Toggle all Bloquant values
-              const rows = tableBody.querySelectorAll('tr');
-              rows.forEach(row => {
-                const cell = row.querySelector('td:nth-child(2)');
-                if (cell) {
-                  cell.click();
-                }
-              });
+      headers.forEach((header) => {
+        const th = document.createElement('th');
+        th.textContent = header;
+        tableHeader.appendChild(th);
+      });
+      // Add click handler for Bloquant column
+      tableHeader.querySelector('th:nth-child(2)').addEventListener('click', (e) => {
+        if (e.target.textContent === 'Bloquant') {
+          // Toggle all Bloquant values
+          const rows = tableBody.querySelectorAll('tr');
+          rows.forEach(row => {
+            const cell = row.querySelector('td:nth-child(2)');
+            if (cell) {
+              cell.click();
             }
           });
+        }
+      });
 
       filteredRecords.sort((a, b) => {
         const emetteurA = a.Emetteur || '';
@@ -517,39 +673,40 @@
         idCell.textContent = record.id;
         tr.appendChild(idCell);
 
-          headers.forEach((header, index) => {
-            const td = document.createElement('td');
-            td.contentEditable = false;
-            let value = record[header] || '';
+        headers.forEach((header, index) => {
+          const td = document.createElement('td');
+          td.contentEditable = false;
+          let value = record[header] || '';
 
-            // Format date fields (Recu and DateLimite)
-            if ((header === 'Recu' || header === 'DateLimite') && isValidDate(value)) {
-              value = formatDate(value);
-            }
+          // Format date fields (Recu and DateLimite)
+          if ((header === 'Recu' || header === 'DateLimite') && isValidDate(value)) {
+            const formattedDate = formatDate(value);
+            value = formattedDate === '01/01/1900' ? '-' : formattedDate;
+          }
 
-            // Special handling for Bloquant and Archive columns
-            if (header === 'Bloquant') {
-              td.classList.add('bloquant-cell');
-              td.textContent = value ? '✓' : '';
-              td.addEventListener('click', async () => {
-                const newValue = !value;
-                try {
-                  await grist.docApi.applyUserActions([
-                    ['UpdateRecord', 'References', record.id, { Bloquant: newValue }]
-                  ]);
-                  td.textContent = newValue ? '✓' : '';
-                } catch (error) {
-                  console.error('Error updating Bloquant:', error);
-                }
-              });
-            } else if (header === 'Archive') {
-              td.classList.add('archive-cell');
-              td.textContent = value ? '✓' : '';
-            } else {
-              td.textContent = value;
-            }
-            tr.appendChild(td);
-          });
+          // Special handling for Bloquant and Archive columns
+          if (header === 'Bloquant') {
+            td.classList.add('bloquant-cell');
+            td.textContent = value ? '✓' : '';
+            td.addEventListener('click', async () => {
+              const newValue = !value;
+              try {
+                await grist.docApi.applyUserActions([
+                  ['UpdateRecord', 'References', record.id, { Bloquant: newValue }]
+                ]);
+                td.textContent = newValue ? '✓' : '';
+              } catch (error) {
+                console.error('Error updating Bloquant:', error);
+              }
+            });
+          } else if (header === 'Archive') {
+            td.classList.add('archive-cell');
+            td.textContent = value ? '✓' : '';
+          } else {
+            td.textContent = value;
+          }
+          tr.appendChild(td);
+        });
 
         tableBody.appendChild(tr);
       });
@@ -586,9 +743,14 @@
       document.getElementById('editEmetteur').value = record.Emetteur || '';
       document.getElementById('editReference').value = record.Reference || '';
       document.getElementById('editIndice').value = record.Indice || '';
-      document.getElementById('editRecu').value = record.Recu ? record.Recu.split('T')[0] : '';
+      //document.getElementById('editRecu').value = record.Recu ? record.Recu.split('T')[0] : '';
+      document.getElementById('editRecu').value = record.Recu instanceof Date
+        ? record.Recu.toISOString().split('T')[0]
+        : ''; 
       document.getElementById('editDescription').value = record.DescriptionObservations || '';
-      document.getElementById('editDatelimite').value = record.DateLimite?.toLocaleDateString() || '';
+      document.getElementById('editDatelimite').value = record.DateLimite instanceof Date
+        ? record.DateLimite.toISOString().split('T')[0]
+        : '';
 
       selectedRecordId = record.id;
       dialog.showModal();
@@ -853,128 +1015,97 @@
       dialog.showModal();
     }
 
-    // Handle dialog form submission for adding Document
-    document.getElementById('addDocumentDialog').addEventListener('submit', async (e) => {
-      e.preventDefault();
+// Fermer la liste déroulante si on clique en dehors
+document.addEventListener('click', (event) => {
+  const dropdown = document.getElementById('emetteurDropdown');
+  const button = document.getElementById('emetteurDropdownButton');
+  if (!dropdown.contains(event.target) && !button.contains(event.target)) {
+    dropdown.style.display = 'none';
+  }
+});
 
-      const formData = new FormData(e.target);
-      const documentNumber = formData.get('documentNumber');
-      const documentName = formData.get('documentName');
-      const defaultDatelimite = formData.get('defaultDatelimite');
+// Collecter les émetteurs sélectionnés lorsque le formulaire est soumis
+document.getElementById('addDocumentDialog').addEventListener('submit', async (e) => {
+  e.preventDefault();
 
-      const combinedDocumentName = `${documentNumber}-${documentName}`;
+  const formData = new FormData(e.target);
+  const documentNumber = formData.get('documentNumber');
+  const documentName = formData.get('documentName');
+  const defaultDatelimite = formData.get('defaultDatelimite') || '1900-01-01';
 
-      if (!documentNumber || !documentName || documentName.trim() === "") {
-        alert("Le numéro et le nom du document sont requis.");
-        return;
-      }
+  const combinedDocumentName = `${documentNumber}-${documentName}`;
 
-      // Vérifiez les sélections actuelles
-      const projectDropdown = document.getElementById('firstColumnDropdown');
-      selectedFirstValue = projectDropdown.value.trim();
+  if (!documentNumber || !documentName || documentName.trim() === "") {
+    alert("Le numéro et le nom du document sont requis.");
+    return;
+  }
 
-      if (!selectedFirstValue) {
-        alert("Veuillez sélectionner un projet avant d'ajouter un document.");
-        return;
-      }
+  const selectedEmitters = Array.from(
+    document.querySelectorAll('#emetteurDropdown input[type="checkbox"]:checked')
+  ).map((checkbox) => checkbox.value);
 
-      // Get the project ID from Projets table
-      const projets = await grist.docApi.fetchTable('Projets');
-      const projectIndex = projets.Nom_de_projet.indexOf(selectedFirstValue);
-      if (projectIndex === -1) {
-        alert("Projet non trouvé");
-        return;
-      }
-      const projectId = projets.id[projectIndex];
+  if (selectedEmitters.length === 0) {
+    alert("Veuillez sélectionner au moins un émetteur.");
+    return;
+  }
 
-      // Define the list of emetteurs as an array
-      const emetteurs = [
-        'ARCHI',
-        'ASCENSORISTE',
-        'CHARPENTIER',
-        'METHODES',
-        'OUVRAGES PROVISOIRES',
-        'PLANS STRUCTURE AP',
-        'RELEVE TOPOGRAPHIE'
-      ];
+  // Vérifiez les sélections actuelles
+  const projectDropdown = document.getElementById('firstColumnDropdown');
+  selectedFirstValue = projectDropdown.value.trim();
 
-      // Function to create new rows based on the emetteurs array
-      function createNewRows(projectId, documentName, defaultDatelimite) {
-        return emetteurs.map(emetteur => ({
-          NomProjet: projectId,
-          NomDocument: documentName,
-          Emetteur: emetteur,
-          Reference: '_',
-          Indice: '_',
-          Recu: '_',
-          DescriptionObservations: 'EN ATTENTE',
-          DateLimite: defaultDatelimite
-        }));
-      }
+  if (!selectedFirstValue) {
+    alert("Veuillez sélectionner un projet avant d'ajouter un document.");
+    return;
+  }
 
-      // Create new rows using the emetteurs array
-      const newRows = createNewRows(projectId, combinedDocumentName, defaultDatelimite);
-      const actions = newRows.map(row => ['AddRecord', 'References', null, row]);
+  // Get the project ID from Projets table
+  const projets = await grist.docApi.fetchTable('Projets');
+  const projectIndex = projets.Nom_de_projet.indexOf(selectedFirstValue);
+  if (projectIndex === -1) {
+    alert("Projet non trouvé");
+    return;
+  }
+  const projectId = projets.id[projectIndex];
 
-      // Ajoute la nouvelle ligne dans Grist
-      grist.docApi.applyUserActions(actions)
-        .then(() => {
-          console.log("Nouveau document ajouté :", newRows);
+  // Créer les nouvelles lignes pour chaque émetteur sélectionné
+  const newRows = selectedEmitters.map((emetteur) => ({
+    NomProjet: projectId,
+    NomDocument: combinedDocumentName,
+    Emetteur: emetteur,
+    Reference: '_',
+    Indice: '_',
+    Recu: '1900-01-01',
+    DescriptionObservations: 'EN ATTENTE',
+    DateLimite: defaultDatelimite || '1900-01-01', // Utilisation du format ISO standard
+  }));
 
-          newTable = true; // Set the flag to true to indicate a new table was added
-          newTableName = combinedDocumentName; // Store the name of the new table
-          document.getElementById('addDocumentDialog').close();
-        })
-        .catch((error) => {
-          console.error("Erreur lors de l'ajout du document :", error);
-          alert("Erreur lors de l'ajout du document.");
-        });
+  const actions = newRows.map((row) => ['AddRecord', 'References', null, row]);
+
+  // Ajoute les nouvelles lignes dans Grist
+  grist.docApi.applyUserActions(actions)
+    .then(() => {
+      console.log("Nouveau document ajouté avec les émetteurs sélectionnés :", selectedEmitters);
+      newTable = true; // Indique qu'un nouveau tableau a été ajouté
+      newTableName = combinedDocumentName; // Stocke le nom du nouveau tableau
+      document.getElementById('addDocumentDialog').close();
+    })
+    .catch((error) => {
+      console.error("Erreur lors de l'ajout du document :", error);
+      alert("Erreur lors de l'ajout du document.");
     });
-    
-    // Écouteur d'événement pour le bouton d'ajout
-    document.getElementById('addProjectButton').addEventListener('click', () => {
-      document.getElementById('addProjectDialog').showModal();
-    });
+});
 
-    // Handle project dialog form submission
-    document.getElementById('addProjectDialog').addEventListener('submit', (e) => {
-      e.preventDefault();
-      const formData = new FormData(e.target);
-      const projectNumber = formData.get('projectNumber');
-      const projectName = formData.get('projectName');
-
-      if (!projectNumber || !projectName) {
-        alert("Le numéro et le nom du projet sont requis.");
-        return;
-      }
-
-      // First create project in Projets table
-      grist.docApi.applyUserActions([
-        ['AddRecord', 'Projets', null, { 
-          'Numero_de_projet': projectNumber,
-          'Nom_de_projet': projectName 
-        }]
-      ])
-        .then(result => {
-          const projectId = result.retValues[0];
-          // Then add to References table using the numeric ID
-          return grist.docApi.applyUserActions([
-            ['AddRecord', 'References', null, { NomProjet: projectId }]
-          ]);
-        })
-        .then(() => {
-          // Refresh the project dropdown
-          const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
-          populateFirstColumnDropdown(uniqueFirstColumnValues);
-
-          // Close the dialog
-          document.getElementById('addProjectDialog').close();
-        })
-        .catch(error => {
-          console.error("Erreur lors de l'ajout du projet :", error);
-          alert("Erreur lors de l'ajout du projet.");
-        });
-    });
+// Fonction pour convertir une date en "DD/MM/YYYY"
+function formatDate(dateString) {
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) {
+    return ''; // Retourne une chaîne vide si la date est invalide
+  }
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0'); // Les mois sont indexés de 0 à 11
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+}
 
     function getCurrentSelections(isAddTableAction = false) {
       const projectDropdown = document.getElementById('firstColumnDropdown');
@@ -1112,6 +1243,66 @@
           addRowWithFileName(file.name); // Ajoute une ligne pour chaque fichier sélectionné
         });
       }
+    });
+
+    document.getElementById('addProjectButton').addEventListener('click', () => {
+      document.getElementById('addProjectDialog').showModal(); // Affiche la boîte de dialogue
+    });
+
+    // Logique de soumission du formulaire pour ajouter un projet
+    document.getElementById('addProjectDialog').addEventListener('submit', (e) => {
+      e.preventDefault(); // Empêche le comportement par défaut du formulaire
+
+      // Récupérer les données saisies par l'utilisateur
+      const formData = new FormData(e.target);
+      const projectNumber = formData.get('projectNumber'); // Numéro du projet
+      const projectName = formData.get('projectName'); // Nom du projet
+
+      // Vérifier que les champs requis ne sont pas vides
+      if (!projectNumber || !projectName) {
+        alert("Le numéro et le nom du projet sont requis.");
+        return;
+      }
+
+      // Ajouter le projet dans la table `Projets` de Grist
+      grist.docApi.applyUserActions([
+        ['AddRecord', 'Projets', null, {
+          'Numero_de_projet': projectNumber,
+          'Nom_de_projet': projectName
+        }]
+      ])
+        .then((result) => {
+          console.log(`Projet ajouté : ${projectNumber} - ${projectName}`);
+
+          // Obtenir l'ID du projet nouvellement créé
+          const newProjectId = result.retValues[0]; // ID du projet dans la table `Projets`
+
+          // Ajouter une ligne dans la table "References" avec la référence au projet
+          return grist.docApi.applyUserActions([
+            ['AddRecord', 'References', null, {
+              'NomProjet': newProjectId, // Utilise l'ID du projet au lieu du nom
+              'NomDocument': '',
+              'Emetteur': '',
+              'Reference': '',
+              'Indice': '',
+              'Recu': '1900-01-01T00:00:00.000Z',
+              'DescriptionObservations': '',
+              'DateLimite': null
+            }]
+          ]);
+        })
+        .then(() => {
+          // Actualiser la liste des projets dans la première liste déroulante
+          const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
+          populateFirstColumnDropdown(uniqueFirstColumnValues);
+
+          // Fermer la boîte de dialogue après le succès
+          document.getElementById('addProjectDialog').close();
+        })
+        .catch((error) => {
+          console.error("Erreur lors de l'ajout du projet ou de la ligne de référence :", error);
+          alert("Erreur lors de l'ajout du projet ou de la ligne de référence.");
+        });
     });
 
   </script>
