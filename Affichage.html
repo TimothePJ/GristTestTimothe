@@ -254,7 +254,7 @@
     <div class="dropdown-container">
       <label for="secondColumnListbox">Document :</label>
       <select id="secondColumnListbox">
-        <option value="">Choix document</option>
+        <option value="">Sélectionner un étage</option>
       </select>
     </div>
 
@@ -544,7 +544,7 @@
       // Conserve la sélection actuelle
       const currentSelection = dropdown.value;
 
-      dropdown.innerHTML = '<option value="">Select an option</option>'; // Réinitialise la liste déroulante
+      dropdown.innerHTML = '<option value="">Selectionner un projet</option>'; // Réinitialise la liste déroulante
 
       values.forEach(value => {
         if (value) {  // Ignore les valeurs nulles ou vides
@@ -572,7 +572,7 @@
     // Function to populate the second dropdown based on the selected first column value
     function populateSecondColumnListbox(selectedValue) {
       const listbox = document.getElementById('secondColumnListbox');
-      listbox.innerHTML = '<option value="">Select an option</option>'; // Réinitialise la liste
+      listbox.innerHTML = '<option value="">Sélectionner un étage</option>'; // Réinitialise la liste
 
       const secondColumnValues = records
         .filter(record => record.NomProjet === selectedValue) // Filtre selon le projet
@@ -1252,18 +1252,18 @@ function formatDate(dateString) {
     // Logique de soumission du formulaire pour ajouter un projet
     document.getElementById('addProjectDialog').addEventListener('submit', (e) => {
       e.preventDefault(); // Empêche le comportement par défaut du formulaire
-
+    
       // Récupérer les données saisies par l'utilisateur
       const formData = new FormData(e.target);
       const projectNumber = formData.get('projectNumber'); // Numéro du projet
       const projectName = formData.get('projectName'); // Nom du projet
-
+    
       // Vérifier que les champs requis ne sont pas vides
       if (!projectNumber || !projectName) {
         alert("Le numéro et le nom du projet sont requis.");
         return;
       }
-
+    
       // Ajouter le projet dans la table `Projets` de Grist
       grist.docApi.applyUserActions([
         ['AddRecord', 'Projets', null, {
@@ -1273,10 +1273,10 @@ function formatDate(dateString) {
       ])
         .then((result) => {
           console.log(`Projet ajouté : ${projectNumber} - ${projectName}`);
-
+    
           // Obtenir l'ID du projet nouvellement créé
           const newProjectId = result.retValues[0]; // ID du projet dans la table `Projets`
-
+    
           // Ajouter une ligne dans la table "References" avec la référence au projet
           return grist.docApi.applyUserActions([
             ['AddRecord', 'References', null, {
@@ -1289,13 +1289,24 @@ function formatDate(dateString) {
               'DescriptionObservations': '',
               'DateLimite': null
             }]
-          ]);
+          ]).then(() => {
+            // Ajouter le projet dans la liste déroulante
+            const dropdown = document.getElementById('firstColumnDropdown');
+            const option = document.createElement('option');
+            option.value = projectName; // Le nom du projet est affiché dans la liste déroulante
+            option.text = projectName;
+            dropdown.appendChild(option);
+    
+            // Sélectionner automatiquement le projet nouvellement créé
+            dropdown.value = projectName; // Définit le projet comme sélectionné
+            selectedFirstValue = projectName; // Met à jour la variable globale
+    
+            // Charger les données liées au projet (mise à jour des listes et du tableau)
+            populateSecondColumnListbox(projectName);
+            populateTable(); // Charge les données pour ce projet dans le tableau
+          });
         })
         .then(() => {
-          // Actualiser la liste des projets dans la première liste déroulante
-          const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
-          populateFirstColumnDropdown(uniqueFirstColumnValues);
-
           // Fermer la boîte de dialogue après le succès
           document.getElementById('addProjectDialog').close();
         })
@@ -1304,7 +1315,7 @@ function formatDate(dateString) {
           alert("Erreur lors de l'ajout du projet ou de la ligne de référence.");
         });
     });
-
+    
   </script>
 </body>
 
