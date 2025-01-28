@@ -480,13 +480,13 @@
       </script>
       
       <label for="indice">Indice:</label>
-      <input type="text" id="indice" name="indice" required placeholder="Entrez un indice (Exemple : 0)">
+      <input type="text" id="indice" name="indice" required placeholder="Entrez un indice(Exemple : 0)">
 
       <label for="recu">Recu:</label>
       <input type="date" id="recu" name="recu" required>
 
       <label for="description">Description:</label>
-      <textarea id="description" name="description" required placeholder="Entrez une description (Exemple : EN ATTENTE)"></textarea>
+      <textarea id="description" name="description" required placeholder="Entrez une description(Exemple : EN ATTENTE)"></textarea>
 
       <label for="datelimite">Date Limite:</label>
       <input type="date" id="datelimite" name="datelimite" required>
@@ -1324,88 +1324,95 @@
       dialog.showModal();
     }
 
-// Fermer la liste déroulante si on clique en dehors
-document.addEventListener('click', (event) => {
-  const dropdown = document.getElementById('emetteurDropdown');
-  const button = document.getElementById('emetteurDropdownButton');
-  if (dropdown && button && !dropdown.contains(event.target) && !button.contains(event.target)) {
-    dropdown.style.display = 'none';
-  }
-});
-
-// Collecter les émetteurs sélectionnés lorsque le formulaire est soumis
-document.getElementById('addDocumentDialog').addEventListener('submit', async (e) => {
-  e.preventDefault();
-
-  trimInputs(e.target);
-
-  const formData = new FormData(e.target);
-  const documentNumber = formData.get('documentNumber');
-  const documentName = formData.get('documentName');
-  const defaultDatelimite = formData.get('defaultDatelimite') || '1900-01-01';
-
-  const combinedDocumentName = `${documentNumber}-${documentName}`;
-
-  if (!documentNumber || !documentName || documentName.trim() === "") {
-    alert("Le numéro et le nom du document sont requis.");
-    return;
-  }
-
-  const selectedEmitters = Array.from(
-    document.querySelectorAll('#emetteurDropdown input[type="checkbox"]:checked')
-  ).map((checkbox) => checkbox.value);
-
-  if (selectedEmitters.length === 0) {
-    alert("Veuillez sélectionner au moins un émetteur.");
-    return;
-  }
-
-  // Vérifiez les sélections actuelles
-  const projectDropdown = document.getElementById('firstColumnDropdown');
-  selectedFirstValue = projectDropdown.value.trim();
-
-  if (!selectedFirstValue) {
-    alert("Veuillez sélectionner un projet avant d'ajouter un document.");
-    return;
-  }
-
-  // Get the project ID from Projets table
-  const projets = await grist.docApi.fetchTable('Projets');
-  const projectIndex = projets.Nom_de_projet.indexOf(selectedFirstValue);
-  if (projectIndex === -1) {
-    alert("Projet non trouvé");
-    return;
-  }
-  const projectId = projets.id[projectIndex];
-
-  // Créer les nouvelles lignes pour chaque émetteur sélectionné
-  const newRows = selectedEmitters.map((emetteur) => ({
-    NomProjet: projectId,
-    NomDocument: combinedDocumentName,
-    Emetteur: emetteur,
-    Reference: '_',
-    Indice: '_',
-    Recu: '1900-01-01',
-    DescriptionObservations: 'EN ATTENTE',
-    DateLimite: defaultDatelimite || '1900-01-01', // Utilisation du format ISO standard
-  }));
-
-  const actions = newRows.map((row) => ['AddRecord', 'References', null, row]);
-
-  // Ajoute les nouvelles lignes dans Grist
-  grist.docApi.applyUserActions(actions)
-    .then(() => {
-      console.log("Nouveau document ajouté avec les émetteurs sélectionnés :", selectedEmitters);
-      newTable = true; // Indique qu'un nouveau tableau a été ajouté
-      newTableName = combinedDocumentName; // Stocke le nom du nouveau tableau
-      document.getElementById('addDocumentDialog').close();
-    })
-    .catch((error) => {
-      console.error("Erreur lors de l'ajout du document :", error);
-      alert("Erreur lors de l'ajout du document.");
+    // Fermer la liste déroulante si on clique en dehors
+    document.addEventListener('click', (event) => {
+      const dropdown = document.getElementById('emetteurDropdown');
+      const button = document.getElementById('emetteurDropdownButton');
+      if (dropdown && button && !dropdown.contains(event.target) && !button.contains(event.target)) {
+        dropdown.style.display = 'none';
+      }
     });
-  });
 
+    document.getElementById('addDocumentDialog').addEventListener('submit', async (e) => {
+      e.preventDefault();
+    
+      trimInputs(e.target); // Nettoyage des espaces superflus
+    
+      const formData = new FormData(e.target);
+      const documentNumber = formData.get('documentNumber');
+      const documentName = formData.get('documentName');
+      const defaultDatelimite = formData.get('defaultDatelimite') || '1900-01-01';
+    
+      const combinedDocumentName = `${documentNumber}-${documentName}`.trim();
+    
+      if (!documentNumber || !documentName.trim()) {
+        alert("Le numéro et le nom du document sont requis.");
+        return;
+      }
+    
+      const selectedEmitters = Array.from(
+        document.querySelectorAll('#emetteurDropdown input[type="checkbox"]:checked')
+      ).map(checkbox => checkbox.value);
+    
+      if (selectedEmitters.length === 0) {
+        alert("Veuillez sélectionner au moins un émetteur.");
+        return;
+      }
+    
+      const selectedProject = selectedFirstValue;
+      if (!selectedProject) {
+        alert("Veuillez sélectionner un projet avant d'ajouter un document.");
+        return;
+      }
+    
+      try {
+        // Récupérer l'ID du projet
+        const projets = await grist.docApi.fetchTable('Projets');
+        const projectIndex = projets.Nom_de_projet.indexOf(selectedProject);
+        if (projectIndex === -1) throw new Error("Projet introuvable.");
+        const projectId = projets.id[projectIndex];
+    
+        // Création des nouvelles lignes
+        const newRows = selectedEmitters.map((emetteur) => ({
+          NomProjet: projectId,
+          NomDocument: combinedDocumentName,
+          Emetteur: emetteur,
+          Reference: '_',
+          Indice: '_',
+          Recu: '1900-01-01',
+          DescriptionObservations: 'EN ATTENTE',
+          DateLimite: defaultDatelimite,
+        }));
+    
+        const actions = newRows.map(row => ['AddRecord', 'References', null, row]);
+        await grist.docApi.applyUserActions(actions);
+    
+        console.log("Nouveau document ajouté :", combinedDocumentName);
+    
+        const secondDropdown = document.getElementById('secondColumnListbox');
+        const newOption = document.createElement('option');
+        newOption.value = combinedDocumentName;
+        newOption.textContent = combinedDocumentName;
+    
+        // Ajouter à la fin de la liste avant "Ajouter document"
+        const addTableOption = secondDropdown.querySelector('option[value="addTable"]');
+        secondDropdown.insertBefore(newOption, addTableOption);
+    
+        secondDropdown.value = combinedDocumentName;
+        selectedSecondValue = combinedDocumentName;
+    
+        // Mise à jour du tableau pour afficher les nouvelles données
+        populateTable();
+    
+        // Fermeture du dialogue
+        document.getElementById('addDocumentDialog').close();
+    
+      } catch (error) {
+        console.error("Erreur lors de l'ajout du document :", error);
+        alert("Une erreur s'est produite lors de l'ajout du document.");
+      }
+    });
+    
   // Fonction pour convertir une date en "DD/MM/YYYY"
   function formatDate(dateString) {
     const date = new Date(dateString);
@@ -1560,74 +1567,53 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
       document.getElementById('addProjectDialog').showModal(); // Affiche la boîte de dialogue
     });
 
-    // Logique de soumission du formulaire pour ajouter un projet
-    document.getElementById('addProjectDialog').addEventListener('submit', (e) => {
-      e.preventDefault(); // Empêche le comportement par défaut du formulaire
+  // Fonction pour supprimer les espaces en début et fin de chaque champ input
+  function trimInputs(form) {
+    const inputs = form.querySelectorAll("input[type='text'], input[type='number']");
+    inputs.forEach(input => input.value = input.value.trim());
+  }
 
-      trimInputs(e.target);
+  // Gère l'ajout d'un projet
+  document.getElementById('addProjectDialog').addEventListener('submit', async (e) => {
+    e.preventDefault();
     
-      // Récupérer les données saisies par l'utilisateur
-      const formData = new FormData(e.target);
-      const projectNumber = formData.get('projectNumber'); // Numéro du projet
-      const projectName = formData.get('projectName'); // Nom du projet
+    trimInputs(e.target); // Nettoyage des champs avant soumission
     
-      // Vérifier que les champs requis ne sont pas vides
-      if (!projectNumber || !projectName) {
-        alert("Le numéro et le nom du projet sont requis.");
-        return;
-      }
-    
-      // Ajouter le projet dans la table `Projets` de Grist
-      grist.docApi.applyUserActions([
-        ['AddRecord', 'Projets', null, {
-          'Numero_de_projet': projectNumber,
-          'Nom_de_projet': projectName
-        }]
-      ])
-        .then((result) => {
-          console.log(`Projet ajouté : ${projectNumber} - ${projectName}`);
-    
-          // Obtenir l'ID du projet nouvellement créé
-          const newProjectId = result.retValues[0]; // ID du projet dans la table `Projets`
-    
-          // Ajouter une ligne dans la table "References" avec la référence au projet
-          return grist.docApi.applyUserActions([
-            ['AddRecord', 'References', null, {
-              'NomProjet': newProjectId, // Utilise l'ID du projet au lieu du nom
-              'NomDocument': '',
-              'Emetteur': '',
-              'Reference': '',
-              'Indice': '',
-              'Recu': '1900-01-01T00:00:00.000Z',
-              'DescriptionObservations': '',
-              'DateLimite': null
-            }]
-          ]).then(() => {
-            // Ajouter le projet dans la liste déroulante
-            const dropdown = document.getElementById('firstColumnDropdown');
-            const option = document.createElement('option');
-            option.value = projectName; // Le nom du projet est affiché dans la liste déroulante
-            option.text = projectName;
-            dropdown.appendChild(option);
-    
-            // Sélectionner automatiquement le projet nouvellement créé
-            dropdown.value = projectName; // Définit le projet comme sélectionné
-            selectedFirstValue = projectName; // Met à jour la variable globale
-    
-            // Charger les données liées au projet (mise à jour des listes et du tableau)
-            populateSecondColumnListbox(projectName);
-            populateTable(); // Charge les données pour ce projet dans le tableau
-          });
-        })
-        .then(() => {
-          // Fermer la boîte de dialogue après le succès
-          document.getElementById('addProjectDialog').close();
-        })
-        .catch((error) => {
-          console.error("Erreur lors de l'ajout du projet ou de la ligne de référence :", error);
-          alert("Erreur lors de l'ajout du projet ou de la ligne de référence.");
-        });
-    });
+    const formData = new FormData(e.target);
+    const projectNumber = formData.get('projectNumber');
+    const projectName = formData.get('projectName');
+
+    if (!projectNumber || !projectName.trim()) {
+      alert("Le numéro et le nom du projet sont requis.");
+      return;
+    }
+
+    try {
+      const result = await grist.docApi.applyUserActions([
+        ['AddRecord', 'Projets', null, { 'Numero_de_projet': projectNumber, 'Nom_de_projet': projectName }]
+      ]);
+
+      const newProjectId = result.retValues[0];
+
+      const dropdown = document.getElementById('firstColumnDropdown');
+      const option = document.createElement('option');
+      option.value = projectName;
+      option.text = projectName;
+      dropdown.appendChild(option);
+
+      dropdown.value = projectName;
+      selectedFirstValue = projectName;
+
+      populateSecondColumnListbox(projectName);
+      populateTable();
+
+      document.getElementById('addProjectDialog').close();
+
+    } catch (error) {
+      console.error("Erreur lors de l'ajout du projet :", error);
+      alert("Une erreur s'est produite lors de l'ajout du projet.");
+    }
+  });
 
     async function renderDocumentCheckboxList() {
       const container = document.getElementById('duplicateOptionsContainer');
