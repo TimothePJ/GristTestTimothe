@@ -646,7 +646,7 @@
         <option value="SONDAGES">SONDAGES</option>
       </select>
 
-      <label for="editReference">Référence:</label>
+      <label for="editReference">Reference:</label>
       <div style="display: flex; gap: 10px; position: relative;">
           <input type="text" id="editReference" name="reference" required 
                  list="editReferenceList" placeholder="Entrez ou sélectionnez une référence"
@@ -937,7 +937,7 @@
   
       // Ouvrir la boîte de dialogue
       dialog.showModal();
-  }
+    }
   
     // Gestion du menu contextuel et récupération de l'émetteur
     function showContextMenu(event, recordId) {
@@ -1014,7 +1014,7 @@
           option.value = reference;
           referenceList.appendChild(option);
       });
-  }  
+    }  
 
   function autoFillEditFields() {
     const selectedReference = document.getElementById('editReference').value; // Référence sélectionnée
@@ -1404,19 +1404,19 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
       console.error("Erreur lors de l'ajout du document :", error);
       alert("Erreur lors de l'ajout du document.");
     });
-});
+  });
 
-// Fonction pour convertir une date en "DD/MM/YYYY"
-function formatDate(dateString) {
-  const date = new Date(dateString);
-  if (isNaN(date.getTime())) {
-    return ''; // Retourne une chaîne vide si la date est invalide
+  // Fonction pour convertir une date en "DD/MM/YYYY"
+  function formatDate(dateString) {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) {
+      return ''; // Retourne une chaîne vide si la date est invalide
+    }
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0'); // Les mois sont indexés de 0 à 11
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
   }
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0'); // Les mois sont indexés de 0 à 11
-  const year = date.getFullYear();
-  return `${day}/${month}/${year}`;
-}
 
     function getCurrentSelections(isAddTableAction = false) {
       const projectDropdown = document.getElementById('firstColumnDropdown');
