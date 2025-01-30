@@ -81,6 +81,11 @@
       z-index: 1;
     }
 
+    #dataTable th:nth-child(1),
+    #dataTable td:nth-child(1) {
+      display: none;
+    }
+    
     .add-form {
       margin-top: 10px;
       padding: 10px;
@@ -660,7 +665,7 @@
       </div>
       
       <label for="editIndice">Indice:</label>
-      <input type="text" id="editIndice" name="indice" required placeholder="Entrez un indice (Exemple : 0)">      >
+      <input type="text" id="editIndice" name="indice" required placeholder="Entrez un indice (Exemple : 0)">
 
       <label for="editRecu">Recu:</label>
       <input type="date" id="editRecu" name="recu" required>
@@ -722,14 +727,28 @@
       dropdown.value = currentSelection || ''; // Conserve l'option sélectionnée ou reste sur "Select an option"
     }
 
-    // Écouteur d'événement pour mettre à jour la valeur sélectionnée dans la première liste
+    // Réinitialise et désactive la seconde liste si aucun projet n'est sélectionné
     document.getElementById('firstColumnDropdown').addEventListener('change', function () {
-      selectedFirstValue = this.value;
-      if (selectedFirstValue) {
-        populateSecondColumnListbox(selectedFirstValue);
-      } else {
-        document.getElementById('secondColumnListbox').innerHTML = '';  // Efface la seconde liste si aucune sélection
+      const secondDropdown = document.getElementById('secondColumnListbox');
+      const tableBody = document.getElementById('tableBody');
+      const tableHeader = document.getElementById('tableHeader');
+
+      selectedFirstValue = this.value.trim();
+
+      if (!selectedFirstValue) {
+        secondDropdown.disabled = true; // Désactiver la seconde liste
+        secondDropdown.innerHTML = '<option value="">Sélectionner un étage</option>';
+        tableBody.innerHTML = '';
+        tableHeader.innerHTML = '';
+        return;
       }
+
+      secondDropdown.disabled = false; // Activer la seconde liste si un projet est sélectionné
+      populateSecondColumnListbox(selectedFirstValue); // Actualiser la liste
+      secondDropdown.value = '';
+      selectedSecondValue = '';
+      tableBody.innerHTML = '';
+      tableHeader.innerHTML = '';
     });
 
     // Function to populate the second dropdown based on the selected first column value
@@ -1016,55 +1035,55 @@
       });
     }  
 
-  function autoFillEditFields() {
-    const selectedReference = document.getElementById('editReference').value; // Référence sélectionnée
-    const selectedProject = document.getElementById('firstColumnDropdown').value; // Projet sélectionné
-    const selectedEmitter = document.getElementById('editEmetteur').value; // Émetteur sélectionné
+    function autoFillEditFields() {
+      const selectedReference = document.getElementById('editReference').value; // Référence sélectionnée
+      const selectedProject = document.getElementById('firstColumnDropdown').value; // Projet sélectionné
+      const selectedEmitter = document.getElementById('editEmetteur').value; // Émetteur sélectionné
 
-    // Vérifier si les données sont valides
-    if (!selectedReference || !selectedProject || !selectedEmitter) {
-        return;
-    }
-
-    // Trouver l'enregistrement correspondant
-    const matchingRecord = records.find(record =>
-        record.NomProjet === selectedProject &&
-        record.Emetteur === selectedEmitter &&
-        record.Reference === selectedReference
-    );
-
-    // Fonction pour convertir une date en format YYYY-MM-DD
-    function formatDateForInput(dateString) {
-        if (!dateString) return ''; // Retourne une chaîne vide si la date est vide
-
-        const date = new Date(dateString);
-        if (isNaN(date.getTime())) return ''; // Retourne une chaîne vide si la date est invalide
-
-        return date.toISOString().split('T')[0]; // Formate en "YYYY-MM-DD"
-    }
-
-    // Remplir les champs si une correspondance est trouvée
-    if (matchingRecord) {
-        document.getElementById('editIndice').value = matchingRecord.Indice || '';
-        document.getElementById('editDescription').value = matchingRecord.DescriptionObservations || '';
-        document.getElementById('editRecu').value = formatDateForInput(matchingRecord.Recu);
-        document.getElementById('editDatelimite').value = formatDateForInput(matchingRecord.DateLimite);
-    }
-  }
-
-  // Mise à jour de la liste des références lorsqu'on change le projet ou l'émetteur
-  document.getElementById('firstColumnDropdown').addEventListener('change', updateEditReferenceList);
-  document.getElementById('editEmetteur').addEventListener('change', updateEditReferenceList);
-
-  // Auto-remplissage des champs lors de la sélection ou de la saisie d'une référence
-  document.getElementById('editReference').addEventListener('input', autoFillEditFields);
-
-  // Gestion de l’importation de fichiers pour remplir la référence
-  document.getElementById('editReferenceFile').addEventListener('change', function () {
-      if (this.files.length > 0) {
-          document.getElementById('editReference').value = this.files[0].name;
+      // Vérifier si les données sont valides
+      if (!selectedReference || !selectedProject || !selectedEmitter) {
+          return;
       }
-  });
+
+      // Trouver l'enregistrement correspondant
+      const matchingRecord = records.find(record =>
+          record.NomProjet === selectedProject &&
+          record.Emetteur === selectedEmitter &&
+          record.Reference === selectedReference
+      );
+
+      // Fonction pour convertir une date en format YYYY-MM-DD
+      function formatDateForInput(dateString) {
+          if (!dateString) return ''; // Retourne une chaîne vide si la date est vide
+
+          const date = new Date(dateString);
+          if (isNaN(date.getTime())) return ''; // Retourne une chaîne vide si la date est invalide
+
+          return date.toISOString().split('T')[0]; // Formate en "YYYY-MM-DD"
+      }
+
+      // Remplir les champs si une correspondance est trouvée
+      if (matchingRecord) {
+          document.getElementById('editIndice').value = matchingRecord.Indice || '';
+          document.getElementById('editDescription').value = matchingRecord.DescriptionObservations || '';
+          document.getElementById('editRecu').value = formatDateForInput(matchingRecord.Recu);
+          document.getElementById('editDatelimite').value = formatDateForInput(matchingRecord.DateLimite);
+      }
+    }
+
+    // Mise à jour de la liste des références lorsqu'on change le projet ou l'émetteur
+    document.getElementById('firstColumnDropdown').addEventListener('change', updateEditReferenceList);
+    document.getElementById('editEmetteur').addEventListener('change', updateEditReferenceList);
+
+    // Auto-remplissage des champs lors de la sélection ou de la saisie d'une référence
+    document.getElementById('editReference').addEventListener('input', autoFillEditFields);
+
+    // Gestion de l’importation de fichiers pour remplir la référence
+    document.getElementById('editReferenceFile').addEventListener('change', function () {
+        if (this.files.length > 0) {
+            document.getElementById('editReference').value = this.files[0].name;
+        }
+    });
 
     // Add event listener for "Modifier" option
     document.getElementById('editOption').addEventListener('click', () => {
@@ -1217,6 +1236,7 @@
         document.getElementById('editReference').value = this.files[0].name;
       }
     });
+
     // Add event listener for "Archiver" option
     document.getElementById('archiveOption').addEventListener('click', () => {
       if (selectedRecordId) {
@@ -1236,6 +1256,7 @@
         }
       }
     });
+
     // Add event listener for "Supprimer" option
     document.getElementById('deleteOption').addEventListener('click', () => {
       console.log("Supprimer clicked for row ID:", selectedRecordId);
@@ -1288,16 +1309,6 @@
         // Populate the first dropdown with unique values from 'NomProjet'
         const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
         populateFirstColumnDropdown(uniqueFirstColumnValues);
-      }
-    });
-
-    // Listen to changes in the first dropdown and update the second listbox accordingly
-    document.getElementById('firstColumnDropdown').addEventListener('change', function () {
-      selectedFirstValue = this.value;
-      if (selectedFirstValue) {
-        populateSecondColumnListbox(selectedFirstValue);
-      } else {
-        document.getElementById('secondColumnListbox').innerHTML = '';  // Clear second listbox if no selection
       }
     });
 
@@ -1413,17 +1424,17 @@
       }
     });
     
-  // Fonction pour convertir une date en "DD/MM/YYYY"
-  function formatDate(dateString) {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) {
-      return ''; // Retourne une chaîne vide si la date est invalide
+    // Fonction pour convertir une date en "DD/MM/YYYY"
+    function formatDate(dateString) {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return ''; // Retourne une chaîne vide si la date est invalide
+      }
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0'); // Les mois sont indexés de 0 à 11
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
     }
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0'); // Les mois sont indexés de 0 à 11
-    const year = date.getFullYear();
-    return `${day}/${month}/${year}`;
-  }
 
     function getCurrentSelections(isAddTableAction = false) {
       const projectDropdown = document.getElementById('firstColumnDropdown');
@@ -1567,53 +1578,63 @@
       document.getElementById('addProjectDialog').showModal(); // Affiche la boîte de dialogue
     });
 
-  // Fonction pour supprimer les espaces en début et fin de chaque champ input
-  function trimInputs(form) {
-    const inputs = form.querySelectorAll("input[type='text'], input[type='number']");
-    inputs.forEach(input => input.value = input.value.trim());
-  }
-
-  // Gère l'ajout d'un projet
-  document.getElementById('addProjectDialog').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    
-    trimInputs(e.target); // Nettoyage des champs avant soumission
-    
-    const formData = new FormData(e.target);
-    const projectNumber = formData.get('projectNumber');
-    const projectName = formData.get('projectName');
-
-    if (!projectNumber || !projectName.trim()) {
-      alert("Le numéro et le nom du projet sont requis.");
-      return;
+    // Fonction pour supprimer les espaces en début et fin de chaque champ input
+    function trimInputs(form) {
+      const inputs = form.querySelectorAll("input[type='text'], input[type='number']");
+      inputs.forEach(input => input.value = input.value.trim());
     }
 
-    try {
-      const result = await grist.docApi.applyUserActions([
-        ['AddRecord', 'Projets', null, { 'Numero_de_projet': projectNumber, 'Nom_de_projet': projectName }]
-      ]);
+    // Gère l'ajout d'un projet
+    document.getElementById('addProjectDialog').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      trimInputs(e.target); // Nettoyage des champs avant soumission
+      
+      const formData = new FormData(e.target);
+      const projectNumber = formData.get('projectNumber');
+      const projectName = formData.get('projectName');
 
-      const newProjectId = result.retValues[0];
+      if (!projectNumber || !projectName.trim()) {
+        alert("Le numéro et le nom du projet sont requis.");
+        return;
+      }
 
-      const dropdown = document.getElementById('firstColumnDropdown');
-      const option = document.createElement('option');
-      option.value = projectName;
-      option.text = projectName;
-      dropdown.appendChild(option);
+      try {
+        const result = await grist.docApi.applyUserActions([
+          ['AddRecord', 'Projets', null, { 'Numero_de_projet': projectNumber, 'Nom_de_projet': projectName }]
+        ]);
 
-      dropdown.value = projectName;
-      selectedFirstValue = projectName;
+        const newProjectId = result.retValues[0];
 
-      populateSecondColumnListbox(projectName);
-      populateTable();
+        const dropdown = document.getElementById('firstColumnDropdown');
+        const option = document.createElement('option');
+        option.value = projectName;
+        option.text = projectName;
+        dropdown.appendChild(option);
 
-      document.getElementById('addProjectDialog').close();
+        dropdown.value = projectName;
+        selectedFirstValue = projectName;
 
-    } catch (error) {
-      console.error("Erreur lors de l'ajout du projet :", error);
-      alert("Une erreur s'est produite lors de l'ajout du projet.");
-    }
-  });
+        // === Réinitialisation de la liste des documents et du tableau ===
+        const secondDropdown = document.getElementById('secondColumnListbox');
+        const tableBody = document.getElementById('tableBody');
+        const tableHeader = document.getElementById('tableHeader');
+
+        secondDropdown.innerHTML = '<option value="">Sélectionner un étage</option>';
+        selectedSecondValue = ''; // Réinitialiser la sélection du document
+        tableBody.innerHTML = ''; // Effacer le contenu du tableau
+        tableHeader.innerHTML = ''; // Effacer l'en-tête du tableau
+
+        // Mettre à jour la liste des documents pour le projet sélectionné (sans la désactiver)
+        populateSecondColumnListbox(projectName);
+
+        document.getElementById('addProjectDialog').close();
+
+      } catch (error) {
+        console.error("Erreur lors de l'ajout du projet :", error);
+        alert("Une erreur s'est produite lors de l'ajout du projet.");
+      }
+    });
 
     async function renderDocumentCheckboxList() {
       const container = document.getElementById('duplicateOptionsContainer');
