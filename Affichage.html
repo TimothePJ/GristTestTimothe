@@ -712,6 +712,9 @@
       // Conserve la sélection actuelle
       const currentSelection = dropdown.value;
 
+      // Trier les valeurs par ordre alphabétique
+      values.sort((a, b) => a.localeCompare(b));
+
       dropdown.innerHTML = '<option value="">Selectionner un projet</option>'; // Réinitialise la liste déroulante
 
       values.forEach(value => {
