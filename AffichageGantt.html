@@ -1,0 +1,1864 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <title>Grist Two-Step Selection with Editable Table</title>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+      background-color: #2c2c2c;
+      color: white;
+    }
+
+    .sticky-container {
+      position: sticky;
+      top: 0;
+      background-color: #2c2c2c;
+      padding: 20px;
+      display: flex;
+      align-items: flex-start;
+      z-index: 1000;
+      box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .dropdown-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-right: 20px;
+    }
+
+    label {
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+
+    select {
+      width: 200px;
+      padding: 8px;
+      margin-bottom: 20px;
+    }
+
+    table {
+        width: 90%; /* Ajuste la largeur globale du tableau */
+        max-width: 1200px; /* Augmente la largeur max */
+        border-collapse: collapse;
+        margin-top: 0px;
+        background-color: #fff;
+    }
+    
+    th,
+    td {
+      padding: 10px;
+      border: 1px solid #ddd;
+      text-align: left;
+    }
+
+    th {
+      background-color: #333;
+      color: white;
+    }
+
+    td {
+      color: black;
+    }
+
+    .table-container {
+      margin-top: 0px;
+      padding: 0px;
+      overflow-y: auto;
+      max-height: calc(100vh - 200px);
+    }
+
+    #dataTable thead {
+      position: sticky;
+      top: 0;
+      background-color: #333;
+      z-index: 2;
+    }
+
+    #dataTable th:nth-child(1),
+    #dataTable td:nth-child(1) {
+      display: none;
+    }
+
+    #dataTable th:nth-child(4),
+    #dataTable td:nth-child(4),
+    #dataTable th:nth-child(5),
+    #dataTable td:nth-child(5),
+    #dataTable th:nth-child(6),
+    #dataTable td:nth-child(6),
+    #dataTable th:nth-child(7),
+    #dataTable td:nth-child(7),
+    #dataTable th:nth-child(8),
+    #dataTable td:nth-child(8),
+    #dataTable th:nth-child(9),
+    #dataTable td:nth-child(9) {    
+      display: none;
+    }
+
+    #dataTable th,
+    #dataTable td {
+        padding: 12px;
+        border: 1px solid #ddd;
+        text-align: left;
+        min-width: 100px;
+        max-width: 250px; /* Définit une largeur max pour éviter l'expansion excessive */
+        word-wrap: break-word; /* Coupe les mots longs */
+        white-space: normal; /* Permet le retour à la ligne */
+        overflow-wrap: break-word; /* S'assure que les mots longs ne débordent pas */
+    }
+    
+    #dataTable th:nth-child(2), 
+    #dataTable td:nth-child(2) { /* Emetteur */
+        min-width: 120px; 
+        max-width: 150px;
+    }
+    
+    #dataTable th:nth-child(3), 
+    #dataTable td:nth-child(3) { /* Référence */
+        min-width: 150px;
+        max-width: 200px;
+    }
+    
+    /* Supprime les bordures des cellules de la colonne "Frise Chronologique" */
+    #dataTable td:nth-child(4),
+    #dataTable th:nth-child(4) {
+        border: none !important;
+        background-color: white !important; /* Garde un fond blanc uniforme */
+        padding: 20px 0; /* Ajoute un peu d'espace pour un effet de gros bloc */
+        text-align: center;
+    }
+
+    /* Supprime uniquement les bordures horizontales de la colonne Frise Chronologique */
+    #dataTable td:nth-child(4) {
+        position: relative;
+    }
+
+    #dataTable td:nth-child(4)::before,
+    #dataTable td:nth-child(4)::after {
+        content: ''; /* Empêche la ligne de s'afficher */
+        display: none;
+    }
+
+    .add-form {
+      margin-top: 10px;
+      padding: 10px;
+      background-color: #f4f4f4;
+      color: black;
+    }
+
+    .add-form input {
+      margin-right: 10px;
+      padding: 5px;
+    }
+
+    .add-form button {
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+
+    /* Context Menu Styles */
+    .context-menu {
+      display: none;
+      position: absolute;
+      background-color: #333;
+      color: white;
+      border: 1px solid #ddd;
+      z-index: 10000;
+      padding: 10px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    }
+
+    /* Dialog Styles */
+    dialog {
+      width: 400px;
+      padding: 20px;
+      background-color: #2c2c2c;
+      color: white;
+      border: 1px solid #444;
+      border-radius: 5px;
+    }
+
+    dialog h3 {
+      margin-top: 0;
+    }
+
+    dialog label {
+      display: block;
+      margin: 10px 0 5px;
+    }
+
+    dialog input,
+    dialog textarea {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 10px;
+      background-color: #444;
+      border: 1px solid #666;
+      color: white;
+    }
+
+    dialog textarea {
+      height: 100px;
+      resize: vertical;
+    }
+
+    .dialog-buttons {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    dialog button {
+      padding: 8px 16px;
+      background-color: #666;
+      border: none;
+      color: white;
+      cursor: pointer;
+    }
+
+    dialog button[type="submit"] {
+      background-color: #4CAF50;
+    }
+
+    dialog button[type="button"] {
+      background-color: #666;
+    }
+
+    dialog button:hover {
+      opacity: 0.9;
+    }
+
+    .context-menu button {
+      display: block;
+      background: none;
+      border: none;
+      color: white;
+      cursor: pointer;
+      padding: 5px;
+      width: 100%;
+      text-align: left;
+    }
+
+    .context-menu button:hover {
+      background-color: #444;
+    }
+
+    #emetteurDropdown {
+      display: flex;
+      flex-direction: column; /* Empile les items verticalement */
+      max-height: 200px; /* Rend la liste déroulable verticalement */
+      overflow-y: auto; /* Active le défilement vertical */
+      overflow-x: hidden; /* Empêche tout défilement horizontal */
+      border: 1px solid #ddd;
+      padding: 5px;
+      background-color: #2c2c2c;
+      color: white;
+      border-radius: 4px;
+      font-size: 0.95em; /* Augmente légèrement la taille du texte */
+      box-sizing: border-box; /* Assure que padding et bordure sont inclus */
+    }
+    
+    .emetteur-item {
+      display: grid; /* Utilise la grille pour aligner les éléments */
+      grid-template-columns: auto 1fr; /* Deux colonnes : case à cocher + texte */
+      align-items: center; /* Aligne verticalement case et texte au centre */
+      gap: 30px; /* Ajoute un espace entre la case et le texte */
+      padding: 2px 5px; /* Ajoute un léger padding */
+      width: 100%; /* Utilise toute la largeur disponible */
+      box-sizing: border-box; /* Évite tout débordement */
+    }
+    
+    /* Alternance des couleurs */
+    .emetteur-item:nth-child(odd) {
+      background-color: #2c2c2c;
+    }
+    
+    .emetteur-item:nth-child(even) {
+      background-color: #3c3c3c;
+    }
+    
+    .emetteur-item input[type="checkbox"] {
+      margin: 0; /* Supprime les marges inutiles */
+      padding: 0; /* Pas de padding interne */
+      position: relative; /* Position par défaut pour un placement précis */
+      left: 0; /* Assure un alignement strict à gauche */
+    }
+    
+    .emetteur-item span {
+      white-space: nowrap; /* Empêche les retours à la ligne pour le texte */
+      overflow: hidden; /* Supprime tout débordement inutile */
+      text-overflow: clip; /* Pas de "..." ni troncature */
+      text-align: left; /* Aligne strictement le texte à gauche */
+      font-size: 1em; /* Ajuste encore un peu plus la taille du texte du span */
+    }
+
+    /* Conteneur de la frise chronologique */
+    .timeline-container {
+        position: absolute;
+        top: 0;
+        right: 20px;
+        display: flex;
+        align-items: center;
+        background-color: rgba(51, 51, 51, 0.8); /* Fond semi-transparent */
+        padding: 5px 15px;
+        border-radius: 5px;
+        z-index: 1000; /* S'assurer que ça reste visible */
+        min-width: 250px;
+        height: 40px; /* Alignement avec l'en-tête */
+    }
+
+    .frise-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    }
+
+    /* Stylisation de la frise chronologique */
+    .timeline {
+        display: flex;
+        align-items: center;
+        gap: 40px; /* Espacement plus large */
+        justify-content: center;
+        background-color: white; /* Uniforme */
+        padding: 10px;
+    }
+
+    /* Supprime toute séparation entre les éléments */
+    .timeline .year,
+    .timeline .line {
+        display: inline-block;
+        vertical-align: middle;
+        font-weight: bold;
+    }
+
+    /* Stylisation des lignes */
+    .line {
+        width: 60px;
+        height: 3px;
+        background-color: black;
+    }
+
+  </style>
+</head>
+
+<body>
+  <!-- Container for the sticky selection lists -->
+  <div class="sticky-container">
+
+    <!-- First dropdown for selecting a project -->
+    <div class="dropdown-container">
+      <label for="firstColumnDropdown">Projet :</label>
+      <select id="firstColumnDropdown">
+        <option value="">Choix projet</option>
+      </select>
+    </div>
+
+    <!-- Second dropdown for selecting the tableau -->
+    <div class="dropdown-container">
+      <label for="secondColumnListbox">Document :</label>
+      <select id="secondColumnListbox">
+        <option value="">Sélectionner un étage</option>
+      </select>
+    </div>
+
+  </div>
+  <!-- Table to display and edit the data -->
+  <div class="table-container">
+    <table id="dataTable">
+        <thead>
+            <tr id="tableHeader">
+                <th>ID</th>
+                <th>Emetteur</th>
+                <th>Reference</th>
+                <th>Frise Chronologique</th>
+                <th class="timeline-header">
+                    <div class="timeline-container">
+                        <div class="timeline">
+                            <span class="year">2023</span>
+                            <div class="line"></div>
+                            <span class="year">2024</span>
+                            <div class="line"></div>
+                            <span class="year">2025</span>
+                        </div>
+                    </div>
+                </th>
+            </tr>
+        </thead>
+        
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+
+  <!-- Context Menu -->
+  <div id="contextMenu" class="context-menu">
+    <button id="addRowOption">Ajouter une ligne</button>
+    <button id="editOption">Modifier</button>
+    <button id="archiveOption">Archiver</button>
+    <button id="deleteOption">Supprimer</button>
+  </div>
+
+  <!-- Add Row Dialog -->
+  <dialog id="addRowDialog">
+    <form method="dialog">
+      <h3>Ajouter une nouvelle ligne</h3>
+
+      <label for="emetteur">Émetteur:</label>
+      <select id="emetteur" name="emetteur" required>
+        <option value="ARCHI">ARCHI</option>
+        <option value="ASCENSORISTE">ASCENSORISTE</option>
+        <option value="CHARPENTIER">CHARPENTIER</option>
+        <option value="DETAILS TECHNIQUES">DETAILS TECHNIQUES</option>
+        <option value="ETANCHEUR">ETANCHEUR</option>
+        <option value="FAÇADIER">FAÇADIER</option>
+        <option value="LOCAL TRANSFO">LOCAL TRANSFO</option>
+        <option value="METHODES">METHODES</option>
+        <option value="PLAN DE DECAISSES DE SOLS">PLAN DE DECAISSES DE SOLS</option>
+        <option value="PLANS DOE">PLANS DOE</option>
+        <option value="PLANS GEOMETRES">PLANS GEOMETRES</option>
+        <option value="PREFA ESCALIERS">PREFA ESCALIERS</option>
+        <option value="RAPPORT DE SOL">RAPPORT DE SOL</option>
+        <option value="RESEAUX ENTERRES">RESEAUX ENTERRES</option>
+        <option value="RESERVATIONS">RESERVATIONS</option>
+        <option value="SONDAGES">SONDAGES</option>
+      </select>
+
+      <label for="reference">Reference:</label>
+      <div style="display: flex; gap: 10px; position: relative;">
+        <input type="text" id="referenceInput" name="reference" required 
+               list="referenceList" placeholder="Entrez ou sélectionnez une référence"
+               style="flex: 1; background-color: #444; border: 1px solid #666; color: white; padding-right: 30px;">
+        <datalist id="referenceList"></datalist>
+        <input type="file" id="referenceFile" style="display: none;" accept="*.*">
+        <button type="button" onclick="document.getElementById('referenceFile').click()" 
+                style="padding: 0px 5px; background-color: #666; border: 1px solid #888; color: white;">
+          Select File
+        </button>
+      </div>
+      
+      <script>
+        // Variable pour stocker l'émetteur capturé depuis le menu contextuel
+        let currentContextMenuEmitter = '';
+      
+        // Fonction pour afficher le menu contextuel et capturer l'émetteur de la ligne
+        function showContextMenu(event, recordId) {
+          event.preventDefault();
+      
+          const record = records.find(r => r.id === recordId); // Trouver la ligne cliquée
+          if (record) {
+            currentContextMenuEmitter = record.Emetteur; // Capturer l'émetteur de la ligne cliquée
+          }
+      
+          const contextMenu = document.getElementById('contextMenu');
+          contextMenu.style.display = 'block';
+          contextMenu.style.left = `${event.pageX}px`;
+          contextMenu.style.top = `${event.pageY}px`;
+        }
+      
+        // Cacher le menu contextuel lorsqu'on clique ailleurs
+        document.addEventListener('click', function (event) {
+          const contextMenu = document.getElementById('contextMenu');
+          if (!contextMenu.contains(event.target)) {
+            contextMenu.style.display = 'none';
+          }
+        });
+      
+        // Fonction pour mettre à jour la liste des références dynamiquement
+        function updateReferenceList() {
+          const selectedProject = document.getElementById('firstColumnDropdown').value; // Projet sélectionné
+          const selectedEmitter = document.getElementById('emetteur').value || currentContextMenuEmitter; // Utilise l'émetteur capturé ou sélectionné
+          const referenceList = document.getElementById('referenceList'); // Liste déroulante des références
+      
+          // Vérifier si le projet et l'émetteur sont valides
+          if (!selectedProject || !selectedEmitter) {
+              referenceList.innerHTML = ''; // Vider la liste si pas de sélection
+              return;
+          }
+      
+          // Filtrer les références selon le projet et l'émetteur
+          const filteredReferences = records
+              .filter(record => record.NomProjet === selectedProject && record.Emetteur === selectedEmitter)
+              .map(record => record.Reference)
+              .filter((value, index, self) => value && self.indexOf(value) === index); // Supprimer les doublons
+      
+          // Réinitialiser et remplir la liste des références
+          referenceList.innerHTML = '';
+          filteredReferences.forEach(reference => {
+              const option = document.createElement('option');
+              option.value = reference;
+              referenceList.appendChild(option);
+          });
+        }
+      
+        // Fonction pour remplir automatiquement les champs en fonction de la référence sélectionnée
+        function autoFillFields() {
+          const selectedReference = document.getElementById('referenceInput').value; // Référence sélectionnée
+          const selectedProject = document.getElementById('firstColumnDropdown').value; // Projet sélectionné
+          const selectedEmitter = document.getElementById('emetteur').value || currentContextMenuEmitter; // Émetteur sélectionné
+      
+          // Vérifier si les données nécessaires sont présentes
+          if (!selectedReference || !selectedProject || !selectedEmitter) {
+              console.warn("Référence, projet ou émetteur non sélectionné(s).");
+              return;
+          }
+      
+          // Trouver l'enregistrement correspondant dans `records`
+          const matchingRecord = records.find(record =>
+              record.NomProjet === selectedProject &&
+              record.Emetteur === selectedEmitter &&
+              record.Reference === selectedReference
+          );
+      
+          // Fonction pour convertir une date en format YYYY-MM-DD (compatible avec <input type="date">)
+          function formatDateForInput(dateString) {
+              if (!dateString) return ''; // Retourne une chaîne vide si la date est vide
+      
+              const date = new Date(dateString);
+              if (isNaN(date.getTime())) return ''; // Retourne une chaîne vide si la date est invalide
+      
+              return date.toISOString().split('T')[0]; // Formate en "YYYY-MM-DD"
+          }
+      
+          // Remplir les champs si une correspondance est trouvée
+          if (matchingRecord) {
+              console.log("Enregistrement correspondant :", matchingRecord);
+      
+              document.getElementById('indice').value = matchingRecord.Indice || '';
+              document.getElementById('description').value = matchingRecord.DescriptionObservations || '';
+      
+              // Formater et remplir le champ "Reçu" au format YYYY-MM-DD
+              document.getElementById('recu').value = formatDateForInput(matchingRecord.Recu);
+      
+              // Formater et remplir le champ "Date Limite" au format YYYY-MM-DD
+              document.getElementById('datelimite').value = formatDateForInput(matchingRecord.DateLimite);
+      
+          } else {
+              // Si aucun enregistrement correspondant n'est trouvé, vider les champs
+              console.warn("Aucun enregistrement correspondant trouvé pour la référence sélectionnée.");
+              document.getElementById('indice').value = '';
+              document.getElementById('description').value = '';
+              document.getElementById('recu').value = ''; // Vider le champ de la date "Reçu"
+              document.getElementById('datelimite').value = ''; // Vider le champ de la date "Date Limite"
+          }
+        }
+      
+        // Fonction pour réinitialiser le formulaire et actualiser les références à chaque ouverture
+        function resetAndUpdateDialog() {
+          const addRowDialog = document.getElementById('addRowDialog');
+      
+          // Réinitialisation des champs du formulaire
+          const inputs = addRowDialog.querySelectorAll('input, textarea, select');
+          inputs.forEach(input => {
+            if (input.type === 'checkbox') {
+              input.checked = false; // Décoche les cases
+            } else {
+              input.value = ''; // Réinitialise les champs texte, date, textarea
+            }
+          });
+      
+          // Préremplir l'émetteur avec celui capturé depuis le menu contextuel
+          if (currentContextMenuEmitter) {
+            document.getElementById('emetteur').value = currentContextMenuEmitter;
+          }
+      
+          // Mettre à jour la liste des références en fonction du projet et de l'émetteur
+          updateReferenceList();
+        }
+      
+        // Réinitialiser et actualiser les références à chaque ouverture du dialogue
+        document.getElementById('addRowDialog').addEventListener('show', resetAndUpdateDialog);
+      
+        // Mise à jour de la liste des références lorsqu'on change le projet ou l'émetteur
+        document.getElementById('firstColumnDropdown').addEventListener('change', updateReferenceList);
+        document.getElementById('emetteur').addEventListener('change', updateReferenceList);
+      
+        // Auto-remplissage des champs lors de la sélection ou de la saisie d'une référence
+        document.getElementById('referenceInput').addEventListener('input', autoFillFields);
+      
+        // Gestion de l'importation de fichiers pour remplir la référence
+        document.getElementById('referenceFile').addEventListener('change', function () {
+          if (this.files.length > 0) {
+            document.getElementById('referenceInput').value = this.files[0].name;
+          }
+        });
+      </script>
+      
+      <label for="indice">Indice:</label>
+      <input type="text" id="indice" name="indice" required placeholder="Entrez un indice (Exemple : 0)">
+
+      <label for="recu">Recu:</label>
+      <input type="date" id="recu" name="recu" required>
+
+      <label for="description">Description:</label>
+      <textarea id="description" name="description" required placeholder="Entrez une description (Exemple : EN ATTENTE)"></textarea>
+
+      <label for="datelimite">Date Limite:</label>
+      <input type="date" id="datelimite" name="datelimite" required>
+
+      <div style="margin-top: 10px; display: flex; align-items: center;">
+        <label for="duplicateCheckbox" style="display: flex; align-items: center; gap: 10px; font-weight: bold; white-space: nowrap;">
+          <input type="checkbox" id="duplicateCheckbox" name="duplicateCheckbox" style="margin: 0;">
+          Ajouter sur d'autres documents
+        </label>
+      </div>     
+      
+      <div id="duplicateOptionsContainer" style="display: none; margin-top: 10px; padding: 10px; border: 1px solid #444; border-radius: 5px; background-color: #2c2c2c;">
+        <!-- Contenu de la box sera inséré ici -->
+      </div>   
+      <div class="dialog-buttons" style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button type="submit" id="confirmAddRowButton" style="background-color: #4CAF50; color: white;">
+          Ajouter
+        </button>
+        <button type="button" id="cancelAddRowButton" style="padding: 8px 15px; background-color: #666; color: white;">
+          Annuler
+        </button>
+      </div>   
+    </form>
+  </dialog>
+  <!-- Add Document Dialog -->
+  <dialog id="addDocumentDialog">
+    <form method="dialog" style="display: flex; flex-direction: column; gap: 10px; font-size: 14px;">
+      <h3>Ajouter un nouveau document</h3>
+  
+      <label for="documentNumber">Numéro du document:</label>
+      <input type="number" id="documentNumber" name="documentNumber" required>
+  
+      <label for="documentName">Nom du document:</label>
+      <input type="text" id="documentName" name="documentName" required>
+  
+      <label for="defaultDatelimite">Date Limite réception données par défaut:</label>
+      <input type="date" id="defaultDatelimite" name="defaultDatelimite" required>
+  
+      <div>
+        <label>Émetteurs:</label>
+        <div id="emetteurDropdown">
+          <div class="emetteur-item">
+            <input type="checkbox" value="ARCHI" checked>
+            <span>ARCHI</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="ASCENSORISTE" checked>
+            <span>ASCENSORISTE</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="CHARPENTIER" checked>
+            <span>CHARPENTIER</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="DETAILS TECHNIQUES" checked>
+            <span>DETAILS TECHNIQUES</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="ETANCHEUR" checked>
+            <span>ETANCHEUR</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="FAÇADIER" checked>
+            <span>FAÇADIER</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="LOCAL TRANSFO" checked>
+            <span>LOCAL TRANSFO</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="METHODES" checked>
+            <span>METHODES</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="PLAN DE DECAISSES DE SOLS" checked>
+            <span>PLAN DE DECAISSES DE SOLS</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="PLANS DOE" checked>
+            <span>PLANS DOE</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="PLANS GEOMETRES" checked>
+            <span>PLANS GEOMETRES</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="PREFA ESCALIERS" checked>
+            <span>PREFA ESCALIERS</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="RAPPORT DE SOL" checked>
+            <span>RAPPORT DE SOL</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="RESEAUX ENTERRES" checked>
+            <span>RESEAUX ENTERRES</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="RESERVATIONS" checked>
+            <span>RESERVATIONS</span>
+          </div>
+          <div class="emetteur-item">
+            <input type="checkbox" value="SONDAGES" checked>
+            <span>SONDAGES</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="dialog-buttons" style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button type="submit" style="padding: 8px 15px; background-color: #4CAF50; color: white; border: none; cursor: pointer;">Ajouter</button>
+        <button type="button" onclick="document.getElementById('addDocumentDialog').close()" style="padding: 8px 15px; background-color: #666; color: white; border: none; cursor: pointer;">Annuler</button>
+      </div>
+    </form>
+  </dialog>
+  
+  <!-- Add Project Dialog -->
+  <dialog id="addProjectDialog">
+    <form method="dialog">
+      <h3>Ajouter un nouveau projet</h3>
+
+      <label for="projectNumber">Numéro de projet:</label>
+      <input type="number" id="projectNumber" name="projectNumber" required>
+
+      <label for="projectName">Nom du projet:</label>
+      <input type="text" id="projectName" name="projectName" required>
+
+      <div class="dialog-buttons">
+        <button type="submit">Ajouter</button>
+        <button type="button" onclick="document.getElementById('addProjectDialog').close()">Annuler</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Edit Row Dialog -->
+  <dialog id="editRowDialog">
+    <form method="dialog">
+      <h3>Modifier la ligne</h3>
+
+      <label for="editEmetteur">Émetteur:</label>
+      <select id="editEmetteur" name="emetteur" required>
+        <option value="">-- Sélectionnez un émetteur --</option>
+        <option value="ARCHI">ARCHI</option>
+        <option value="ASCENSORISTE">ASCENSORISTE</option>
+        <option value="CHARPENTIER">CHARPENTIER</option>
+        <option value="DETAILS TECHNIQUES">DETAILS TECHNIQUES</option>
+        <option value="ETANCHEUR">ETANCHEUR</option>
+        <option value="FAÇADIER">FAÇADIER</option>
+        <option value="LOCAL TRANSFO">LOCAL TRANSFO</option>
+        <option value="METHODES">METHODES</option>
+        <option value="PLAN DE DECAISSES DE SOLS">PLAN DE DECAISSES DE SOLS</option>
+        <option value="PLANS DOE">PLANS DOE</option>
+        <option value="PLANS GEOMETRES">PLANS GEOMETRES</option>
+        <option value="PREFA ESCALIERS">PREFA ESCALIERS</option>
+        <option value="RAPPORT DE SOL">RAPPORT DE SOL</option>
+        <option value="RESEAUX ENTERRES">RESEAUX ENTERRES</option>
+        <option value="RESERVATIONS">RESERVATIONS</option>
+        <option value="SONDAGES">SONDAGES</option>
+      </select>
+
+      <label for="editReference">Reference:</label>
+      <div style="display: flex; gap: 10px; position: relative;">
+          <input type="text" id="editReference" name="reference" required 
+                 list="editReferenceList" placeholder="Entrez ou sélectionnez une référence"
+                 style="flex: 1; background-color: #444; border: 1px solid #666; color: white; padding-right: 30px;">
+          <datalist id="editReferenceList"></datalist>
+          <input type="file" id="editReferenceFile" style="display: none;" accept="*.*">
+          <button type="button" onclick="document.getElementById('editReferenceFile').click()" 
+                  style="padding: 0px 5px; background-color: #666; border: 1px solid #888; color: white;">
+              Select File
+          </button>
+      </div>
+      
+      <label for="editIndice">Indice:</label>
+      <input type="text" id="editIndice" name="indice" required placeholder="Entrez un indice (Exemple : 0)">
+
+      <label for="editRecu">Recu:</label>
+      <input type="date" id="editRecu" name="recu" required>
+
+      <label for="editDescription">Description:</label>
+      <textarea id="editDescription" name="description" required placeholder="Entrez une description (Exemple : EN ATTENTE)"></textarea>
+
+      <label for="editDatelimite">Date Limite:</label>
+      <input type="date" id="editDatelimite" name="datelimite" required>
+
+      <div class="dialog-buttons">
+        <button type="submit">Enregistrer</button>
+        <button type="button" onclick="document.getElementById('editRowDialog').close()">Annuler</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Form to add new rows -->
+  <div class="add-form">
+    <button id="addProjectButton">Ajouter projet</button>
+
+    <input type="file" id="fileInput" style="display: none;" multiple>
+  </div>
+
+  <script>
+    // window.alert = function () {
+    //   debugger;
+    // }
+    let records = [];
+    let selectedFirstValue = '';
+    let selectedSecondValue = '';
+    let currentEmetteur = '';
+    let selectedRecordId = null;
+    let newTable = false; // Variable to track if a new table is being added
+    let newTableName = ''; // Variable to store the name of the new table
+
+    // Ready Grist
+    grist.ready();
+
+    // Fonction pour peupler la première liste déroulante avec des valeurs uniques de la première colonne
+    function populateFirstColumnDropdown(values) {
+      const dropdown = document.getElementById('firstColumnDropdown');
+
+      // Conserve la sélection actuelle
+      const currentSelection = dropdown.value;
+
+      // Trier les valeurs par ordre alphabétique
+      values.sort((a, b) => a.localeCompare(b));
+
+      dropdown.innerHTML = '<option value="">Selectionner un projet</option>'; // Réinitialise la liste déroulante
+
+      values.forEach(value => {
+        if (value) {  // Ignore les valeurs nulles ou vides
+          const option = document.createElement('option');
+          option.value = value;
+          option.text = value;
+          dropdown.appendChild(option);
+        }
+      });
+
+      // Restaure la sélection précédente si elle est encore présente dans les options
+      dropdown.value = currentSelection || ''; // Conserve l'option sélectionnée ou reste sur "Select an option"
+    }
+
+    // Réinitialise et désactive la seconde liste si aucun projet n'est sélectionné
+    document.getElementById('firstColumnDropdown').addEventListener('change', function () {
+      const secondDropdown = document.getElementById('secondColumnListbox');
+      const tableBody = document.getElementById('tableBody');
+      const tableHeader = document.getElementById('tableHeader');
+
+      selectedFirstValue = this.value.trim();
+
+      if (!selectedFirstValue) {
+        secondDropdown.disabled = true; // Désactiver la seconde liste
+        secondDropdown.innerHTML = '<option value="">Sélectionner un étage</option>';
+        tableBody.innerHTML = '';
+        tableHeader.innerHTML = '';
+        return;
+      }
+
+      secondDropdown.disabled = false; // Activer la seconde liste si un projet est sélectionné
+      populateSecondColumnListbox(selectedFirstValue); // Actualiser la liste
+      secondDropdown.value = '';
+      selectedSecondValue = '';
+      tableBody.innerHTML = '';
+      tableHeader.innerHTML = '';
+    });
+
+    // Function to populate the second dropdown based on the selected first column value
+    function populateSecondColumnListbox(selectedValue) {
+      const listbox = document.getElementById('secondColumnListbox');
+      listbox.innerHTML = '<option value="">Sélectionner un étage</option>'; // Réinitialise la liste
+
+      const secondColumnValues = records
+        .filter(record => record.NomProjet === selectedValue) // Filtre selon le projet
+        .map(record => record.NomDocument) // Extrait les valeurs
+        .filter((value, index, self) => value && self.indexOf(value) === index) // Supprime les doublons
+        .sort();
+
+      secondColumnValues.forEach(value => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.text = value;
+        listbox.appendChild(option);
+      });
+
+      // Ajoute l'option "Ajouter document"
+      const addOption = document.createElement('option');
+      addOption.value = 'addTable';
+      addOption.text = 'Ajouter document';
+      listbox.appendChild(addOption);
+    }
+
+    // Helper function to check if a string is a valid date
+    function isValidDate(dateString) {
+      const date = new Date(dateString);
+      return date instanceof Date && !isNaN(date);
+    }
+
+    // Helper function to format date as DD/MM/YYYY
+    function formatDate(dateString) {
+      const date = new Date(dateString);
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
+    }
+
+    function populateTable() {
+        const selections = getCurrentSelections();
+        if (!selections) return;
+    
+        const { selectedProject, selectedTable } = selections;
+        const tableBody = document.getElementById('tableBody');
+        const tableHeader = document.getElementById('tableHeader');
+    
+        tableBody.innerHTML = '';
+        const filteredRecords = records.filter(
+            (record) =>
+                record.NomProjet === selectedProject &&
+                record.NomDocument === selectedTable
+        );
+    
+        if (filteredRecords.length === 0) return;
+    
+        const headers = Object.keys(filteredRecords[0]).filter(
+            (key) => key !== 'NomProjet' && key !== 'NomDocument' && key !== 'id'
+        );
+    
+        // Ajout des en-têtes du tableau
+        tableHeader.innerHTML = '<th>ID</th>';
+        headers.forEach((header) => {
+            const th = document.createElement('th');
+            th.textContent = header;
+            tableHeader.appendChild(th);
+        });
+    
+        // Ajout de l'en-tête pour la frise chronologique
+        const thFrise = document.createElement('th');
+        thFrise.textContent = "Frise Chronologique";
+        tableHeader.appendChild(thFrise);
+    
+        // Trier les enregistrements par émetteur pour un affichage plus organisé
+        filteredRecords.sort((a, b) => {
+            const emetteurA = a.Emetteur || '';
+            const emetteurB = b.Emetteur || '';
+            return emetteurA.localeCompare(emetteurB);
+        });
+    
+        // Remplissage du tableau avec les données et la frise chronologique
+        filteredRecords.forEach((record) => {
+            const tr = document.createElement('tr');
+            tr.addEventListener('contextmenu', (event) => {
+                currentEmetteur = record.Emetteur;
+                showContextMenu(event, record.id);
+            });
+    
+            const idCell = document.createElement('td');
+            idCell.textContent = record.id;
+            tr.appendChild(idCell);
+    
+            headers.forEach((header) => {
+                const td = document.createElement('td');
+                td.textContent = record[header] || '';
+                tr.appendChild(td);
+            });
+    
+            // Ajouter la frise chronologique
+            const friseCell = document.createElement('td');
+            friseCell.innerHTML = `
+                <div class="timeline">
+                    <span class="year">2023</span>
+                    <div class="line"></div>
+                    <span class="year">2024</span>
+                    <div class="line"></div>
+                    <span class="year">2025</span>
+                </div>
+            `;
+            tr.appendChild(friseCell);
+    
+            tableBody.appendChild(tr);
+        });
+    
+        formatTable();
+    }
+    
+    function formatTable() {
+      const tableBody = document.getElementById('tableBody');
+      const rows = tableBody.rows;
+      let previousText = null;
+      let rowspanCount = 1;
+
+      for (let i = 0; i < rows.length; i++) {
+        const currentCell = rows[i].cells[1]; // Second column
+
+        if (currentCell.innerText === previousText) {
+          // Increase rowspan count and hide current cell
+          rows[i - rowspanCount].cells[1].rowSpan = rowspanCount + 1; // Update rowspan
+          currentCell.style.display = "none"; // Hide current cell
+          rowspanCount++;
+        } else {
+          // Reset rowspan count
+          previousText = currentCell.innerText;
+          rowspanCount = 1;
+        }
+      }
+    }
+
+    // Show edit dialog with row data
+    function showEditDialog(record) {
+      const dialog = document.getElementById('editRowDialog');
+  
+      // Vérifier si l'enregistrement est valide
+      if (!record) {
+          console.warn("Aucun enregistrement sélectionné pour modification.");
+          return;
+      }
+  
+      console.log("Enregistrement en cours de modification :", record);
+  
+      // Fonction pour convertir une date en format YYYY-MM-DD (compatible avec <input type="date">)
+      function formatDateForInput(dateString) {
+          if (!dateString) return ''; // Retourne une chaîne vide si la date est vide
+  
+          const date = new Date(dateString);
+          if (isNaN(date.getTime())) return ''; // Retourne une chaîne vide si la date est invalide
+  
+          return date.toISOString().split('T')[0]; // Formate en "YYYY-MM-DD"
+      }
+  
+      // Pré-remplir les champs avec les valeurs actuelles
+      document.getElementById('editEmetteur').value = record.Emetteur || '';
+      document.getElementById('editReference').value = record.Reference || '';
+      document.getElementById('editIndice').value = record.Indice || '';
+      document.getElementById('editDescription').value = record.DescriptionObservations || '';
+  
+      // Formater et remplir le champ "Reçu" au format YYYY-MM-DD
+      document.getElementById('editRecu').value = formatDateForInput(record.Recu);
+  
+      // Formater et remplir le champ "Date Limite" au format YYYY-MM-DD
+      document.getElementById('editDatelimite').value = formatDateForInput(record.DateLimite);
+  
+      // Mettre à jour la liste des références dynamiquement
+      updateEditReferenceList();
+  
+      // Ouvrir la boîte de dialogue
+      dialog.showModal();
+    }
+  
+    // Gestion du menu contextuel et récupération de l'émetteur
+    function showContextMenu(event, recordId) {
+      event.preventDefault();
+      selectedRecordId = recordId; // Stocke l'ID de la ligne sélectionnée
+
+      // Récupère l'émetteur de la ligne cliquée
+      const matchingRecord = records.find(record => record.id === recordId);
+      if (matchingRecord) {
+        currentEmetteur = matchingRecord.Emetteur;
+      }
+
+      const contextMenu = document.getElementById('contextMenu');
+      contextMenu.style.display = 'block';
+      contextMenu.style.left = `${event.pageX}px`;
+      contextMenu.style.top = `${event.pageY}px`;
+    }
+
+    // Lorsqu'on ouvre le formulaire, on pré-remplit l'émetteur récupéré
+    document.getElementById('addRowOption').addEventListener('click', () => {
+      const dialog = document.getElementById('addRowDialog');
+
+      if (currentEmetteur) {
+        document.getElementById('emetteur').value = currentEmetteur;
+      }
+
+      dialog.showModal();
+      hideContextMenu();
+    });
+
+    // Hide context menu if clicked elsewhere
+    document.addEventListener('click', function (event) {
+      const contextMenu = document.getElementById('contextMenu');
+      if (!contextMenu.contains(event.target)) {
+        contextMenu.style.display = 'none';
+      }
+    });
+
+    // Add event listener for "Ajouter une ligne" option
+    document.getElementById('addRowOption').addEventListener('click', () => {
+      const dialog = document.getElementById('addRowDialog');
+  
+      if (currentContextMenuEmitter) {
+          document.getElementById('emetteur').value = currentContextMenuEmitter; // Pré-remplit l'émetteur
+      }
+  
+      updateReferenceList(); // Met à jour la liste des références avec le nouvel émetteur
+  
+      dialog.showModal();
+      hideContextMenu();
+    });
+
+    function updateEditReferenceList() {
+      const selectedProject = document.getElementById('firstColumnDropdown').value; // Projet sélectionné
+      const selectedEmitter = document.getElementById('editEmetteur').value; // Émetteur sélectionné dans la modification
+      const referenceList = document.getElementById('editReferenceList'); // Liste déroulante des références
+  
+      // Vérifier si le projet et l'émetteur sont valides
+      if (!selectedProject || !selectedEmitter) {
+          referenceList.innerHTML = ''; // Vider la liste si pas de sélection
+          return;
+      }
+  
+      // Filtrer les références selon le projet et l'émetteur
+      const filteredReferences = records
+          .filter(record => record.NomProjet === selectedProject && record.Emetteur === selectedEmitter)
+          .map(record => record.Reference)
+          .filter((value, index, self) => value && self.indexOf(value) === index); // Supprimer les doublons
+  
+      // Réinitialiser et remplir la liste des références
+      referenceList.innerHTML = '';
+      filteredReferences.forEach(reference => {
+          const option = document.createElement('option');
+          option.value = reference;
+          referenceList.appendChild(option);
+      });
+    }  
+
+    function autoFillEditFields() {
+      const selectedReference = document.getElementById('editReference').value; // Référence sélectionnée
+      const selectedProject = document.getElementById('firstColumnDropdown').value; // Projet sélectionné
+      const selectedEmitter = document.getElementById('editEmetteur').value; // Émetteur sélectionné
+
+      // Vérifier si les données sont valides
+      if (!selectedReference || !selectedProject || !selectedEmitter) {
+          return;
+      }
+
+      // Trouver l'enregistrement correspondant
+      const matchingRecord = records.find(record =>
+          record.NomProjet === selectedProject &&
+          record.Emetteur === selectedEmitter &&
+          record.Reference === selectedReference
+      );
+
+      // Fonction pour convertir une date en format YYYY-MM-DD
+      function formatDateForInput(dateString) {
+          if (!dateString) return ''; // Retourne une chaîne vide si la date est vide
+
+          const date = new Date(dateString);
+          if (isNaN(date.getTime())) return ''; // Retourne une chaîne vide si la date est invalide
+
+          return date.toISOString().split('T')[0]; // Formate en "YYYY-MM-DD"
+      }
+
+      // Remplir les champs si une correspondance est trouvée
+      if (matchingRecord) {
+          document.getElementById('editIndice').value = matchingRecord.Indice || '';
+          document.getElementById('editDescription').value = matchingRecord.DescriptionObservations || '';
+          document.getElementById('editRecu').value = formatDateForInput(matchingRecord.Recu);
+          document.getElementById('editDatelimite').value = formatDateForInput(matchingRecord.DateLimite);
+      }
+    }
+
+    // Mise à jour de la liste des références lorsqu'on change le projet ou l'émetteur
+    document.getElementById('firstColumnDropdown').addEventListener('change', updateEditReferenceList);
+    document.getElementById('editEmetteur').addEventListener('change', updateEditReferenceList);
+
+    // Auto-remplissage des champs lors de la sélection ou de la saisie d'une référence
+    document.getElementById('editReference').addEventListener('input', autoFillEditFields);
+
+    // Gestion de l’importation de fichiers pour remplir la référence
+    document.getElementById('editReferenceFile').addEventListener('change', function () {
+        if (this.files.length > 0) {
+            document.getElementById('editReference').value = this.files[0].name;
+        }
+    });
+
+    // Add event listener for "Modifier" option
+    document.getElementById('editOption').addEventListener('click', () => {
+      if (selectedRecordId) {
+        const record = records.find(rec => rec.id === selectedRecordId);
+        if (record) {
+          showEditDialog(record);
+        }
+      }
+      hideContextMenu();
+    });
+
+    // Handle dialog form submission
+    document.getElementById('addRowDialog').addEventListener('submit', async (e) => {
+      e.preventDefault();
+    
+      const formData = new FormData(e.target);
+      const emetteur = formData.get('emetteur');
+      const reference = formData.get('reference');
+      const indice = formData.get('indice');
+      const recu = formData.get('recu');
+      const description = formData.get('description');
+      const datelimite = formData.get('datelimite');
+      const isDuplicate = document.getElementById('duplicateCheckbox').checked;
+    
+      try {
+        // Récupérer les informations du projet
+        const projets = await grist.docApi.fetchTable('Projets');
+        const projectIndex = projets.Nom_de_projet.indexOf(selectedFirstValue);
+        if (projectIndex === -1) throw new Error('Projet introuvable.');
+        const projectId = projets.id[projectIndex];
+    
+        const userActions = [];
+    
+        if (isDuplicate) {
+          // Récupérer les documents sélectionnés pour duplication
+          const selectedDocuments = Array.from(document.querySelectorAll('input[name="documents"]:checked')).map(input => input.value);
+    
+          // Ajouter une ligne dans le document actuellement sélectionné dans la deuxième liste déroulante
+          if (!selectedDocuments.includes(selectedSecondValue)) {
+            selectedDocuments.push(selectedSecondValue);
+          }
+    
+          // Ajouter une ligne pour chaque document sélectionné
+          selectedDocuments.forEach(docName => {
+            const newRow = {
+              NomProjet: projectId,
+              NomDocument: docName,
+              Emetteur: emetteur,
+              Reference: reference,
+              Indice: indice,
+              Recu: recu,
+              DescriptionObservations: description,
+              DateLimite: datelimite,
+            };
+            userActions.push(['AddRecord', 'References', null, newRow]);
+          });
+    
+        } else {
+          // Ajouter une seule ligne dans le document sélectionné dans la deuxième liste déroulante
+          const newRow = {
+            NomProjet: projectId,
+            NomDocument: selectedSecondValue,
+            Emetteur: emetteur,
+            Reference: reference,
+            Indice: indice,
+            Recu: recu,
+            DescriptionObservations: description,
+            DateLimite: datelimite,
+          };
+          userActions.push(['AddRecord', 'References', null, newRow]);
+        }
+    
+        // Appliquer les actions à Grist
+        await grist.docApi.applyUserActions(userActions);
+        console.log('Lignes ajoutées avec succès.');
+        document.getElementById('addRowDialog').close();
+        populateTable();
+      } catch (error) {
+        console.error('Erreur lors de l\'ajout des lignes :', error);
+        alert('Erreur lors de l\'ajout des lignes.');
+      }
+    });
+    
+    // Gérer l'annulation du formulaire d'ajout de ligne
+    document.getElementById('cancelAddRowButton').addEventListener('click', () => {
+      document.getElementById('addRowDialog').close();
+    });
+    
+    // Handle edit dialog form submission
+    document.getElementById('editRowDialog').addEventListener('submit', (e) => {
+      e.preventDefault();
+
+      const formData = new FormData(e.target);
+      const updatedRow = {
+        Emetteur: formData.get('emetteur'),
+        Reference: formData.get('reference'),
+        Indice: formData.get('indice'),
+        Recu: formData.get('recu'),
+        DescriptionObservations: formData.get('description'),
+        DateLimite: formData.get('datelimite')
+      };
+
+      // Handle file upload if a file was selected
+      const fileInput = document.getElementById('editReferenceFile');
+      if (fileInput.files.length > 0) {
+        const file = fileInput.files[0];
+        updatedRow.Reference = file.name;
+      }
+
+      if (selectedRecordId) {
+        grist.docApi.applyUserActions([
+          ['UpdateRecord', 'References', selectedRecordId, updatedRow]
+        ])
+          .then(() => {
+            console.log('Row updated successfully');
+            document.getElementById('editRowDialog').close();
+            populateTable();
+          })
+          .catch(error => {
+            console.error("Error updating row:", error);
+            alert("Error updating row.");
+          });
+      }
+    });
+
+    // Add event listener for "Supprimer" option
+    document.getElementById('deleteOption').addEventListener('click', () => {
+      if (selectedRecordId) {
+        if (confirm("Êtes-vous sûr de vouloir supprimer cette ligne ?")) {
+          grist.docApi.applyUserActions([
+            ['RemoveRecord', 'References', selectedRecordId]
+          ])
+            .then(() => {
+              console.log('Row deleted successfully');
+              populateTable();
+              hideContextMenu();
+            })
+            .catch(error => {
+              console.error("Error deleting row:", error);
+              alert("Error deleting row.");
+            });
+        }
+      }
+    });
+
+    // Handle file selection in edit dialog
+    document.getElementById('editReferenceFile').addEventListener('change', function () {
+      if (this.files.length > 0) {
+        document.getElementById('editReference').value = this.files[0].name;
+      }
+    });
+
+    // Add event listener for "Archiver" option
+    document.getElementById('archiveOption').addEventListener('click', () => {
+      if (selectedRecordId) {
+        if (confirm("Êtes-vous sûr de vouloir archiver cette ligne ?")) {
+          grist.docApi.applyUserActions([
+            ['UpdateRecord', 'References', selectedRecordId, { Archive: true }]
+          ])
+            .then(() => {
+              console.log('Row archived successfully');
+              populateTable();
+              hideContextMenu();
+            })
+            .catch(error => {
+              console.error("Error archiving row:", error);
+              alert("Error archiving row.");
+            });
+        }
+      }
+    });
+
+    // Add event listener for "Supprimer" option
+    document.getElementById('deleteOption').addEventListener('click', () => {
+      console.log("Supprimer clicked for row ID:", selectedRecordId);
+
+      // Supprime la ligne dans Grist
+      grist.docApi.applyUserActions([['RemoveRecord', 'References', Number(selectedRecordId)]])
+        .then(() => {
+          // Supprime la ligne localement dans le tableau
+          records = records.filter(record => record.ID_Ligne !== selectedRecordId);
+
+          // Actualise l'affichage du tableau
+          populateTable();
+
+          // Masquer le menu contextuel après la suppression
+          hideContextMenu();
+
+          console.log("Tableau actualisé et menu contextuel masqué après suppression.");
+        })
+        .catch(error => {
+          console.error("Erreur lors de la suppression de la ligne dans Grist:", error);
+          alert("Une erreur s'est produite lors de la suppression de la ligne.");
+        });
+    });
+
+    // Fonction pour cacher le menu contextuel
+    function hideContextMenu() {
+      const contextMenu = document.getElementById('contextMenu');
+      contextMenu.style.display = 'none';
+    }
+
+    // Fetch records from Grist
+    grist.onRecords(function (receivedRecords) {
+      console.log("Records received from Grist:", receivedRecords);
+
+      records = receivedRecords;
+
+      if (newTable) {
+        newTable = false; // Reset the flag after handling the new table
+        populateSecondColumnListbox(selectedFirstValue);
+
+        // Sélectionne automatiquement le nouveau tableau
+        const listbox = document.getElementById('secondColumnListbox');
+        listbox.value = newTableName;
+
+        // Déclenche l'affichage du tableau correspondant
+        selectedSecondValue = newTableName;
+        populateTable();
+      } else {
+        populateTable()
+        // Populate the first dropdown with unique values from 'NomProjet'
+        const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
+        populateFirstColumnDropdown(uniqueFirstColumnValues);
+      }
+    });
+
+    // Listen to changes in the second dropdown and update the table accordingly
+    document.getElementById('secondColumnListbox').addEventListener('change', function () {
+      const selectedValue = this.value;
+
+      // Gérer l'ajout d'un tableau
+      if (selectedValue === 'addTable') {
+        handleAddTable();
+        return;
+      }
+
+      // Gestion normale de la sélection
+      selectedSecondValue = selectedValue;
+      if (selectedFirstValue && selectedSecondValue) {
+        populateTable();
+      }
+    });
+
+    // Fonction pour gérer l'ajout d'un tableau
+    function handleAddTable() {
+      const dialog = document.getElementById('addDocumentDialog');
+      dialog.showModal();
+    }
+
+    // Fermer la liste déroulante si on clique en dehors
+    document.addEventListener('click', (event) => {
+      const dropdown = document.getElementById('emetteurDropdown');
+      const button = document.getElementById('emetteurDropdownButton');
+      if (dropdown && button && !dropdown.contains(event.target) && !button.contains(event.target)) {
+        dropdown.style.display = 'none';
+      }
+    });
+
+    document.getElementById('addDocumentDialog').addEventListener('submit', async (e) => {
+      e.preventDefault();
+    
+      trimInputs(e.target); // Nettoyage des espaces superflus
+    
+      const formData = new FormData(e.target);
+      const documentNumber = formData.get('documentNumber');
+      const documentName = formData.get('documentName');
+      const defaultDatelimite = formData.get('defaultDatelimite') || '1900-01-01';
+    
+      const combinedDocumentName = `${documentNumber}-${documentName}`.trim();
+    
+      if (!documentNumber || !documentName.trim()) {
+        alert("Le numéro et le nom du document sont requis.");
+        return;
+      }
+    
+      const selectedEmitters = Array.from(
+        document.querySelectorAll('#emetteurDropdown input[type="checkbox"]:checked')
+      ).map(checkbox => checkbox.value);
+    
+      if (selectedEmitters.length === 0) {
+        alert("Veuillez sélectionner au moins un émetteur.");
+        return;
+      }
+    
+      const selectedProject = selectedFirstValue;
+      if (!selectedProject) {
+        alert("Veuillez sélectionner un projet avant d'ajouter un document.");
+        return;
+      }
+    
+      try {
+        // Récupérer l'ID du projet
+        const projets = await grist.docApi.fetchTable('Projets');
+        const projectIndex = projets.Nom_de_projet.indexOf(selectedProject);
+        if (projectIndex === -1) throw new Error("Projet introuvable.");
+        const projectId = projets.id[projectIndex];
+    
+        // Création des nouvelles lignes
+        const newRows = selectedEmitters.map((emetteur) => ({
+          NomProjet: projectId,
+          NomDocument: combinedDocumentName,
+          Emetteur: emetteur,
+          Reference: '_',
+          Indice: '_',
+          Recu: '1900-01-01',
+          DescriptionObservations: 'EN ATTENTE',
+          DateLimite: defaultDatelimite,
+        }));
+    
+        const actions = newRows.map(row => ['AddRecord', 'References', null, row]);
+        await grist.docApi.applyUserActions(actions);
+    
+        console.log("Nouveau document ajouté :", combinedDocumentName);
+    
+        const secondDropdown = document.getElementById('secondColumnListbox');
+        const newOption = document.createElement('option');
+        newOption.value = combinedDocumentName;
+        newOption.textContent = combinedDocumentName;
+    
+        // Ajouter à la fin de la liste avant "Ajouter document"
+        const addTableOption = secondDropdown.querySelector('option[value="addTable"]');
+        secondDropdown.insertBefore(newOption, addTableOption);
+    
+        secondDropdown.value = combinedDocumentName;
+        selectedSecondValue = combinedDocumentName;
+    
+        // Mise à jour du tableau pour afficher les nouvelles données
+        populateTable();
+    
+        // Fermeture du dialogue
+        document.getElementById('addDocumentDialog').close();
+    
+      } catch (error) {
+        console.error("Erreur lors de l'ajout du document :", error);
+        alert("Une erreur s'est produite lors de l'ajout du document.");
+      }
+    });
+    
+    // Fonction pour convertir une date en "DD/MM/YYYY"
+    function formatDate(dateString) {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return ''; // Retourne une chaîne vide si la date est invalide
+      }
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0'); // Les mois sont indexés de 0 à 11
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
+    }
+
+    function getCurrentSelections(isAddTableAction = false) {
+      const projectDropdown = document.getElementById('firstColumnDropdown');
+      const tableDropdown = document.getElementById('secondColumnListbox');
+
+      const selectedProject = projectDropdown.value.trim();
+      const selectedTable = tableDropdown.value.trim();
+
+      if (!selectedProject || !selectedTable) {
+        return null; // Retourne null si les sélections sont invalides
+      }
+
+      return { selectedProject, selectedTable };
+    }
+
+    // Fonction de sauvegarde mise à jour
+    async function saveChanges() {
+      // Obtenez les sélections actuelles
+      const selections = getCurrentSelections();
+      if (!selections) return; // Interrompt la fonction si les sélections sont invalides
+
+      const { selectedProject, selectedTable } = selections;
+
+      console.log(`Sauvegarde en cours pour le tableau "${selectedTable}" du projet "${selectedProject}".`);
+
+      // Récupère les lignes du tableau HTML
+      const tableBody = document.getElementById('tableBody');
+      const rows = tableBody.getElementsByTagName('tr');
+
+      const columnMap = ['Emetteur', 'Reference', 'Indice', 'Recu', 'DescriptionObservations'];
+      const updates = [];
+
+      for (const row of rows) {
+        const cells = row.getElementsByTagName('td');
+        const rowId = cells[0].textContent.trim(); // ID_Ligne
+
+        // Recherche la ligne correspondante dans `records`
+        const record = records.find(
+          (rec) =>
+            rec.ID_Ligne === rowId &&
+            rec.NomProjet === selectedProject &&
+            rec.NomDocument === selectedTable
+        );
+
+        if (!record) {
+          console.warn(`Ligne introuvable pour ID_Ligne = ${rowId}, Projet = ${selectedProject}, Tableau = ${selectedTable}`);
+          continue;
+        }
+
+        const updatedFields = {};
+        let hasChanges = false;
+
+        // Compare chaque champ
+        for (let i = 1; i < cells.length; i++) {
+          const fieldName = columnMap[i - 1];
+          const cellValue = cells[i].textContent.trim();
+
+          if (record[fieldName] !== cellValue) {
+            updatedFields[fieldName] = cellValue;
+            hasChanges = true;
+          }
+        }
+
+        if (hasChanges) {
+          updates.push(['UpdateRecord', 'Fusion', Number(rowId), updatedFields]);
+        }
+      }
+
+      if (updates.length > 0) {
+        try {
+          await grist.docApi.applyUserActions(updates);
+          console.log("Modifications sauvegardées avec succès :", updates);
+          alert("Les modifications ont été sauvegardées.");
+        } catch (error) {
+          console.error("Erreur lors de la sauvegarde :", error);
+          alert("Erreur lors de la sauvegarde.");
+        }
+      } else {
+        alert("Aucune modification détectée pour la sauvegarde.");
+      }
+    }
+
+    // Fonction pour ajouter une nouvelle ligne dans Grist avec le nom de fichier dans "Reference"
+    function addRowWithFileName(fileName) {
+      if (!selectedFirstValue || !selectedSecondValue) {
+        alert("Veuillez sélectionner un projet et un tableau.");
+        return;
+      }
+
+      // Enlève l'extension du fichier (partie après le dernier point)
+      const fileNameWithoutExtension = fileName.split('.').slice(0, -1).join('.');
+
+      // Trouve la valeur la plus élevée d'ID_Ligne dans records
+      const maxIdLigne = records.reduce((max, record) => {
+        const idLigne = parseInt(record.ID_Ligne, 10);
+        return idLigne > max ? idLigne : max;
+      }, 0);
+
+      // Définit une nouvelle valeur pour ID_Ligne en l'incrémentant de 1
+      const newIdLigne = maxIdLigne + 1;
+
+      // Création de la nouvelle ligne avec la valeur de ID_Ligne et le nom du fichier sans extension pour "Reference"
+      const newRow = {
+        NomProjet: selectedFirstValue,
+        NomDocument: selectedSecondValue,
+        Emetteur: '',
+        Reference: fileNameWithoutExtension, // Nom du fichier sans extension
+        Indice: '',
+        Recu: '',
+        DescriptionObservations: '',
+        ID_Ligne: newIdLigne.toString() // Convertit en string pour s'aligner avec les autres valeurs
+      };
+
+      // Envoie la requête pour ajouter la nouvelle ligne dans Grist
+      grist.docApi.applyUserActions([
+        ['AddRecord', 'Fusion', null, newRow]
+      ])
+        .then(() => {
+          console.log("Nouvelle ligne ajoutée avec le fichier :", newRow);
+          // Actualise les données pour inclure la nouvelle ligne ajoutée
+          records.push(newRow); // Mise à jour locale
+          populateTable(); // Actualise l'affichage du tableau HTML
+        })
+        .catch(error => {
+          console.error("Erreur lors de l'ajout de la ligne avec le fichier :", error);
+          alert("Erreur lors de l'ajout de la ligne.");
+        });
+    }
+
+    // Gère l'événement de sélection de fichiers
+    document.getElementById('fileInput').addEventListener('change', (event) => {
+      const files = event.target.files;
+      if (files.length > 0) {
+        Array.from(files).forEach(file => {
+          addRowWithFileName(file.name); // Ajoute une ligne pour chaque fichier sélectionné
+        });
+      }
+    });
+
+    document.getElementById('addProjectButton').addEventListener('click', () => {
+      document.getElementById('addProjectDialog').showModal(); // Affiche la boîte de dialogue
+    });
+
+    // Fonction pour supprimer les espaces en début et fin de chaque champ input
+    function trimInputs(form) {
+      const inputs = form.querySelectorAll("input[type='text'], input[type='number']");
+      inputs.forEach(input => input.value = input.value.trim());
+    }
+
+    // Gère l'ajout d'un projet
+    document.getElementById('addProjectDialog').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      trimInputs(e.target); // Nettoyage des champs avant soumission
+      
+      const formData = new FormData(e.target);
+      const projectNumber = formData.get('projectNumber');
+      const projectName = formData.get('projectName');
+
+      if (!projectNumber || !projectName.trim()) {
+        alert("Le numéro et le nom du projet sont requis.");
+        return;
+      }
+
+      try {
+        const result = await grist.docApi.applyUserActions([
+          ['AddRecord', 'Projets', null, { 'Numero_de_projet': projectNumber, 'Nom_de_projet': projectName }]
+        ]);
+
+        const newProjectId = result.retValues[0];
+
+        const dropdown = document.getElementById('firstColumnDropdown');
+        const option = document.createElement('option');
+        option.value = projectName;
+        option.text = projectName;
+        dropdown.appendChild(option);
+
+        dropdown.value = projectName;
+        selectedFirstValue = projectName;
+
+        // === Réinitialisation de la liste des documents et du tableau ===
+        const secondDropdown = document.getElementById('secondColumnListbox');
+        const tableBody = document.getElementById('tableBody');
+        const tableHeader = document.getElementById('tableHeader');
+
+        secondDropdown.innerHTML = '<option value="">Sélectionner un étage</option>';
+        selectedSecondValue = ''; // Réinitialiser la sélection du document
+        tableBody.innerHTML = ''; // Effacer le contenu du tableau
+        tableHeader.innerHTML = ''; // Effacer l'en-tête du tableau
+
+        // Mettre à jour la liste des documents pour le projet sélectionné (sans la désactiver)
+        populateSecondColumnListbox(projectName);
+
+        document.getElementById('addProjectDialog').close();
+
+      } catch (error) {
+        console.error("Erreur lors de l'ajout du projet :", error);
+        alert("Une erreur s'est produite lors de l'ajout du projet.");
+      }
+    });
+
+    async function renderDocumentCheckboxList() {
+      const container = document.getElementById('duplicateOptionsContainer');
+      const secondDropdown = document.getElementById('secondColumnListbox');
+      const selectedProject = selectedFirstValue; // Projet sélectionné dans la première liste
+      const selectedDocument = secondDropdown.value; // Document actuellement sélectionné dans la deuxième liste
+    
+      // Vérifier qu'un projet est sélectionné
+      if (!selectedProject) {
+        container.innerHTML = '<p style="color: red;">Veuillez sélectionner un projet avant de dupliquer une ligne.</p>';
+        return;
+      }
+    
+      // Obtenir les options disponibles dans la deuxième liste déroulante
+      const documentOptions = Array.from(secondDropdown.options)
+        .filter(option => option.value && option.value !== 'addTable' && option.value !== selectedDocument) // Exclure le document sélectionné
+        .map(option => option.value);
+    
+      // Si aucun document n'est disponible
+      if (documentOptions.length === 0) {
+        container.innerHTML = '<p>Aucun autre document disponible pour ce projet.</p>';
+        return;
+      }
+    
+      // Générer les cases à cocher pour les autres documents
+      const listHTML = documentOptions.map((name, index) => `
+        <div class="emetteur-item">
+          <input type="checkbox" id="doc-${index}" name="documents" value="${name}">
+          <span>${name}</span>
+        </div>
+      `).join('');
+    
+      // Afficher la liste des options sans inclure le document sélectionné
+      container.innerHTML = `
+        <p>Etage :</p>
+        <div id="documentList" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px;">
+          ${listHTML}
+        </div>
+      `;
+    }
+    
+    document.getElementById('duplicateCheckbox').addEventListener('change', async function () {
+      const container = document.getElementById('duplicateOptionsContainer');
+      if (this.checked) {
+        container.style.display = 'block'; // Afficher le conteneur des options de duplication
+        await renderDocumentCheckboxList(); // Charger les documents disponibles pour duplication
+      } else {
+        container.style.display = 'none'; // Cacher le conteneur
+        container.innerHTML = ''; // Vider le contenu
+      }
+    });    
+
+    // Réinitialiser le formulaire d'ajout de ligne
+    function resetAddRowForm() {
+      const addRowDialog = document.getElementById('addRowDialog');
+      const inputs = addRowDialog.querySelectorAll('input, textarea, select');
+      inputs.forEach(input => {
+        if (input.type === 'checkbox') {
+          input.checked = false; // Décoche toutes les cases, y compris "Dupliquer"
+        } else {
+          input.value = ''; // Réinitialise les champs texte, date, textarea
+        }
+      });
+
+      // Cacher les options liées à la duplication
+      const duplicateOptionsContainer = document.getElementById('duplicateOptionsContainer');
+      if (duplicateOptionsContainer) {
+        duplicateOptionsContainer.style.display = 'none'; // Cacher le conteneur de duplication
+        duplicateOptionsContainer.innerHTML = ''; // Vider les options de duplication
+      }
+    }
+
+    // Ajout d'un événement pour réinitialiser lorsque le dialogue est ouvert
+    document.getElementById('addRowDialog').addEventListener('show', resetAddRowForm);
+
+    // Réinitialiser également lorsqu'on change de tableau dans la deuxième liste déroulante
+    document.getElementById('secondColumnListbox').addEventListener('change', () => {
+      resetAddRowForm(); // Réinitialise les champs du formulaire d'ajout
+    });
+
+    function updateTimelineHeader() {
+        const tableBody = document.getElementById('tableBody');
+        const rows = tableBody.getElementsByTagName('tr');
+    
+        let minDate = null;
+        let maxDate = null;
+    
+        for (const row of rows) {
+            const dateLimiteCell = row.cells[row.cells.length - 2]; // Avant-dernière colonne (DateLimite)
+            const recuCell = row.cells[row.cells.length - 3]; // Troisième colonne avant la fin (Recu)
+    
+            const dateLimite = new Date(dateLimiteCell.textContent.trim());
+            const recu = new Date(recuCell.textContent.trim());
+    
+            if (!isNaN(dateLimite)) {
+                if (!minDate || dateLimite < minDate) minDate = new Date(dateLimite);
+                if (!maxDate || dateLimite > maxDate) maxDate = new Date(dateLimite);
+            }
+    
+            if (!isNaN(recu)) {
+                if (!minDate || recu < minDate) minDate = new Date(recu);
+                if (!maxDate || recu > maxDate) maxDate = new Date(recu);
+            }
+        }
+    
+        if (!minDate || !maxDate) {
+            console.warn("Aucune date valide trouvée dans DateLimite/Recu.");
+            return;
+        }
+    
+        // Ajustement des dates
+        minDate.setMonth(minDate.getMonth() - 1); // Retirer 1 mois à la plus petite date
+        maxDate.setMonth(maxDate.getMonth() + 2); // Ajouter 2 mois à la plus grande date
+    
+        // Formatage des dates (mois et année)
+        const options = { year: 'numeric', month: 'short' };
+        const minDateFormatted = minDate.toLocaleDateString('fr-FR', options);
+        const maxDateFormatted = maxDate.toLocaleDateString('fr-FR', options);
+    
+        // Mise à jour de l'en-tête
+        const timelineHeader = document.querySelector('.timeline-header');
+        if (timelineHeader) {
+            timelineHeader.innerHTML = `<div class="timeline-container">
+                <span>${minDateFormatted} - ${maxDateFormatted}</span>
+            </div>`;
+        }
+    }
+    
+    // Rafraîchir la frise après chaque mise à jour du tableau
+    function refreshTableAndTimeline() {
+        populateTable();
+        updateTimelineHeader();
+    }
+    
+    // Appeler la mise à jour de la frise après le chargement du tableau
+    document.addEventListener("DOMContentLoaded", () => {
+        updateTimelineHeader();
+    });
+    
+  </script>
+</body>
+
+</html>
