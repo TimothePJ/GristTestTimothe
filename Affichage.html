@@ -941,6 +941,8 @@
   
           return date.toISOString().split('T')[0]; // Formate en "YYYY-MM-DD"
       }
+
+      updateEditReferenceList()
   
       // Pré-remplir les champs avec les valeurs actuelles
       document.getElementById('editEmetteur').value = record.Emetteur || '';
@@ -1027,7 +1029,8 @@
       const filteredReferences = records
           .filter(record => record.NomProjet === selectedProject && record.Emetteur === selectedEmitter)
           .map(record => record.Reference)
-          .filter((value, index, self) => value && self.indexOf(value) === index); // Supprimer les doublons
+          .filter((value, index, self) => value && self.indexOf(value) === index) // Supprimer les doublons
+          .sort((a, b) => a.localeCompare(b, 'fr', { ignorePunctuation: true }));
   
       // Réinitialiser et remplir la liste des références
       referenceList.innerHTML = '';
