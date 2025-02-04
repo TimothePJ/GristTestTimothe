@@ -328,7 +328,7 @@
       <div style="display: flex; gap: 10px; position: relative;">
         <input type="text" id="referenceInput" name="reference" required 
                list="referenceList" placeholder="Entrez ou sélectionnez une référence"
-               style="flex: 1; background-color: #444; border: 1px solid #666; color: white; padding-right: 30px;">
+               style="flex: 1; background-color: #444; border: 1px solid #454545; color: white; padding-right: 30px;" autocomplete="off">
         <datalist id="referenceList"></datalist>
         <input type="file" id="referenceFile" style="display: none;" accept="*.*">
         <button type="button" onclick="document.getElementById('referenceFile').click()" 
@@ -1672,7 +1672,7 @@
     
       // Afficher la liste des options sans inclure le document sélectionné
       container.innerHTML = `
-        <p>Etage :</p>
+        <p>Document :</p>
         <div id="documentList" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px;">
           ${listHTML}
         </div>
