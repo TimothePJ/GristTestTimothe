@@ -597,6 +597,11 @@
             <input type="checkbox" value="SONDAGES" checked>
             <span>SONDAGES</span>
           </div>
+          <!-- Ligne pour ajouter un émetteur personnalisé -->
+          <div class="emetteur-item">
+            <input type="checkbox" id="customEmetteurCheckbox">
+            <input type="text" id="customEmetteurInput" placeholder="Autre émetteur..." style="flex: 1; padding: 5px;">
+          </div>
         </div>
       </div>
       
@@ -1354,8 +1359,15 @@
     
       const selectedEmitters = Array.from(
         document.querySelectorAll('#emetteurDropdown input[type="checkbox"]:checked')
-      ).map(checkbox => checkbox.value);
-    
+      ).map(checkbox => {
+        // Vérifie si c'est la case personnalisée
+        if (checkbox.id === "customEmetteurCheckbox") {
+          const customValue = document.getElementById("customEmetteurInput").value.trim();
+          return customValue ? customValue : null; // Retourne la valeur écrite, sinon null
+        }
+        return checkbox.value;
+      }).filter(value => value); // Supprime les valeurs nulles
+
       if (selectedEmitters.length === 0) {
         alert("Veuillez sélectionner au moins un émetteur.");
         return;
