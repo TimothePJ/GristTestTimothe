@@ -364,33 +364,33 @@
           }
         });
       
-        // Fonction pour mettre à jour la liste des références dynamiquement
         function updateReferenceList() {
           const selectedProject = document.getElementById('firstColumnDropdown').value; // Projet sélectionné
           const selectedEmitter = document.getElementById('emetteur').value || currentContextMenuEmitter; // Utilise l'émetteur capturé ou sélectionné
           const referenceList = document.getElementById('referenceList'); // Liste déroulante des références
-      
+        
           // Vérifier si le projet et l'émetteur sont valides
           if (!selectedProject || !selectedEmitter) {
-              referenceList.innerHTML = ''; // Vider la liste si pas de sélection
-              return;
+            referenceList.innerHTML = ''; // Vider la liste si pas de sélection
+            return;
           }
-      
+        
           // Filtrer les références selon le projet et l'émetteur
           const filteredReferences = records
-              .filter(record => record.NomProjet === selectedProject && record.Emetteur === selectedEmitter)
-              .map(record => record.Reference)
-              .filter((value, index, self) => value && self.indexOf(value) === index); // Supprimer les doublons
-      
+            .filter(record => record.NomProjet === selectedProject && record.Emetteur === selectedEmitter)
+            .map(record => record.Reference)
+            .filter((value, index, self) => value && self.indexOf(value) === index) // Supprime les doublons
+            .sort((a, b) => a.localeCompare(b, 'fr', { ignorePunctuation: true }));
+        
           // Réinitialiser et remplir la liste des références
           referenceList.innerHTML = '';
           filteredReferences.forEach(reference => {
-              const option = document.createElement('option');
-              option.value = reference;
-              referenceList.appendChild(option);
+            const option = document.createElement('option');
+            option.value = reference;
+            referenceList.appendChild(option);
           });
         }
-      
+        
         // Fonction pour remplir automatiquement les champs en fonction de la référence sélectionnée
         function autoFillFields() {
           const selectedReference = document.getElementById('referenceInput').value; // Référence sélectionnée
