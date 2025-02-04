@@ -1216,26 +1216,6 @@
       }
     });
 
-    // Add event listener for "Supprimer" option
-    document.getElementById('deleteOption').addEventListener('click', () => {
-      if (selectedRecordId) {
-        if (confirm("Êtes-vous sûr de vouloir supprimer cette ligne ?")) {
-          grist.docApi.applyUserActions([
-            ['RemoveRecord', 'References', selectedRecordId]
-          ])
-            .then(() => {
-              console.log('Row deleted successfully');
-              populateTable();
-              hideContextMenu();
-            })
-            .catch(error => {
-              console.error("Error deleting row:", error);
-              alert("Error deleting row.");
-            });
-        }
-      }
-    });
-
     // Handle file selection in edit dialog
     document.getElementById('editReferenceFile').addEventListener('change', function () {
       if (this.files.length > 0) {
@@ -1263,30 +1243,35 @@
       }
     });
 
-    // Add event listener for "Supprimer" option
     document.getElementById('deleteOption').addEventListener('click', () => {
-      console.log("Supprimer clicked for row ID:", selectedRecordId);
-
-      // Supprime la ligne dans Grist
-      grist.docApi.applyUserActions([['RemoveRecord', 'References', Number(selectedRecordId)]])
+      if (!selectedRecordId) {
+        console.warn("Aucune ligne sélectionnée pour suppression.");
+        return;
+      }
+    
+      // Demande confirmation avant de supprimer
+      const confirmDelete = confirm("Êtes-vous sûr de vouloir supprimer cette ligne ?");
+      
+      if (!confirmDelete) {
+        console.log("Suppression annulée par l'utilisateur.");
+        return;
+      }
+    
+      // Si l'utilisateur confirme, on supprime la ligne
+      grist.docApi.applyUserActions([
+        ['RemoveRecord', 'References', selectedRecordId]
+      ])
         .then(() => {
-          // Supprime la ligne localement dans le tableau
-          records = records.filter(record => record.ID_Ligne !== selectedRecordId);
-
-          // Actualise l'affichage du tableau
-          populateTable();
-
-          // Masquer le menu contextuel après la suppression
+          console.log(`Ligne ${selectedRecordId} supprimée avec succès.`);
+          populateTable(); // Actualise le tableau
           hideContextMenu();
-
-          console.log("Tableau actualisé et menu contextuel masqué après suppression.");
         })
         .catch(error => {
-          console.error("Erreur lors de la suppression de la ligne dans Grist:", error);
-          alert("Une erreur s'est produite lors de la suppression de la ligne.");
+          console.error("Erreur lors de la suppression de la ligne :", error);
+          alert("Une erreur s'est produite lors de la suppression.");
         });
     });
-
+    
     // Fonction pour cacher le menu contextuel
     function hideContextMenu() {
       const contextMenu = document.getElementById('contextMenu');
