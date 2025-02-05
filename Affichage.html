@@ -1728,39 +1728,107 @@
       }
     });
     
-    function addNewCustomEmetteurRow() {
-      const container = document.getElementById('emetteurDropdown');
-    
-      // Création du div contenant la nouvelle ligne
-      const newEmetteurRow = document.createElement('div');
-      newEmetteurRow.classList.add('emetteur-item');
-    
-      // Création de la case à cocher
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-    
-      // Création de l'input texte
-      const textInput = document.createElement('input');
-      textInput.type = 'text';
-      textInput.placeholder = 'Autre émetteur...';
-      textInput.style.flex = '1';
-      textInput.style.padding = '5px';
-    
-      // Ajout d'un event listener sur la nouvelle case pour continuer la chaîne
-      checkbox.addEventListener('change', function () {
-        if (this.checked) {
+    document.getElementById('customEmetteurCheckbox').addEventListener('change', function () {
+      if (this.checked) {
           addNewCustomEmetteurRow();
-        }
-      });
-    
-      // Ajout des éléments dans la ligne
-      newEmetteurRow.appendChild(checkbox);
-      newEmetteurRow.appendChild(textInput);
-    
-      // Ajout de la ligne dans le conteneur
-      container.appendChild(newEmetteurRow);
+      }
+  });
+  
+  document.getElementById('customEmetteurCheckbox').addEventListener('change', function () {
+    if (this.checked) {
+        addNewCustomEmetteurRow();
     }
-    
+});
+
+document.getElementById('customEmetteurCheckbox').addEventListener('change', function () {
+  if (this.checked) {
+      addNewCustomEmetteurRow();
+  }
+});
+
+document.getElementById('customEmetteurCheckbox').addEventListener('change', function () {
+  if (this.checked) {
+      addNewCustomEmetteurRow();
+  }
+});
+
+  function addNewCustomEmetteurRow() {
+    const container = document.getElementById('emetteurDropdown');
+
+    // Vérifier s'il existe déjà une ligne non cochée
+    const existingModifiableRow = container.querySelector('.emetteur-item input[type="checkbox"]:not(:checked)');
+    if (existingModifiableRow) {
+        return; // Ne pas ajouter une nouvelle ligne si une ligne vide existe déjà
+    }
+
+    // Création de la nouvelle ligne d'émetteur
+    const newEmetteurRow = document.createElement('div');
+    newEmetteurRow.classList.add('emetteur-item');
+
+    // Création de la case à cocher
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+
+    // Création de l'input texte
+    const textInput = document.createElement('input');
+    textInput.type = 'text';
+    textInput.placeholder = 'Autre émetteur...';
+    textInput.style.flex = '1';
+    textInput.style.padding = '5px';
+
+    // Gestion du comportement lorsqu'on décoche la première case
+    checkbox.addEventListener('change', function () {
+        const allRows = Array.from(container.querySelectorAll('.emetteur-item'));
+        const currentIndex = allRows.indexOf(newEmetteurRow);
+
+        if (this.checked) {
+            addNewCustomEmetteurRow(); // Ajoute une nouvelle ligne si nécessaire
+        } else {
+            if (currentIndex === 0) {
+                const secondRow = allRows[1];
+                if (secondRow && secondRow.querySelector('input[type="checkbox"]').checked) {
+                    newEmetteurRow.remove();
+                    return; // On sort immédiatement après suppression
+                }
+
+                // 💡 Correction : S'assurer que même la première case modifiable suit le coulissage
+                for (let i = 0; i < allRows.length - 1; i++) {
+                    const currentCheckbox = allRows[i].querySelector('input[type="checkbox"]');
+                    const currentTextInput = allRows[i].querySelector('input[type="text"]');
+                    const nextCheckbox = allRows[i + 1].querySelector('input[type="checkbox"]');
+                    const nextTextInput = allRows[i + 1].querySelector('input[type="text"]');
+
+                    currentCheckbox.checked = nextCheckbox.checked;
+                    currentTextInput.value = nextTextInput.value;
+                }
+
+                // Vérifier si la dernière ligne après coulissage est vide, et la supprimer
+                const lastRow = allRows[allRows.length - 1];
+                const lastTextInput = lastRow.querySelector('input[type="text"]');
+
+                if (lastTextInput.value.trim() === "" && !lastRow.querySelector('input[type="checkbox"]').checked) {
+                    lastRow.remove();
+                }
+            } else {
+                // Supprime normalement si ce n'est pas la première ligne
+                newEmetteurRow.remove();
+            }
+        }
+
+        // S'assurer qu'il y a toujours au moins une ligne modifiable disponible
+        if (!container.querySelector('.emetteur-item input[type="checkbox"]:not(:checked)')) {
+            addNewCustomEmetteurRow();
+        }
+    });
+
+    // Ajout des éléments à la ligne
+    newEmetteurRow.appendChild(checkbox);
+    newEmetteurRow.appendChild(textInput);
+
+    // Ajout de la ligne dans le conteneur
+    container.appendChild(newEmetteurRow);
+  }
+
   </script>
 </body>
 
