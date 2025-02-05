@@ -1360,12 +1360,16 @@
       const selectedEmitters = Array.from(
         document.querySelectorAll('#emetteurDropdown input[type="checkbox"]:checked')
       ).map(checkbox => {
-        // Vérifie si c'est la case personnalisée
-        if (checkbox.id === "customEmetteurCheckbox") {
-          const customValue = document.getElementById("customEmetteurInput").value.trim();
+        // Trouve l'input texte qui est juste après la case à cocher
+        const textInput = checkbox.nextElementSibling;
+
+        // Si c'est un champ texte (pour les émetteurs personnalisés)
+        if (textInput && textInput.tagName === "INPUT" && textInput.type === "text") {
+          const customValue = textInput.value.trim();
           return customValue ? customValue : null; // Retourne la valeur écrite, sinon null
         }
-        return checkbox.value;
+
+        return checkbox.value; // Pour les émetteurs standards
       }).filter(value => value); // Supprime les valeurs nulles
 
       if (selectedEmitters.length === 0) {
@@ -1718,6 +1722,45 @@
       resetAddRowForm(); // Réinitialise les champs du formulaire d'ajout
     });
 
+    document.getElementById('customEmetteurCheckbox').addEventListener('change', function () {
+      if (this.checked) {
+        addNewCustomEmetteurRow();
+      }
+    });
+    
+    function addNewCustomEmetteurRow() {
+      const container = document.getElementById('emetteurDropdown');
+    
+      // Création du div contenant la nouvelle ligne
+      const newEmetteurRow = document.createElement('div');
+      newEmetteurRow.classList.add('emetteur-item');
+    
+      // Création de la case à cocher
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+    
+      // Création de l'input texte
+      const textInput = document.createElement('input');
+      textInput.type = 'text';
+      textInput.placeholder = 'Autre émetteur...';
+      textInput.style.flex = '1';
+      textInput.style.padding = '5px';
+    
+      // Ajout d'un event listener sur la nouvelle case pour continuer la chaîne
+      checkbox.addEventListener('change', function () {
+        if (this.checked) {
+          addNewCustomEmetteurRow();
+        }
+      });
+    
+      // Ajout des éléments dans la ligne
+      newEmetteurRow.appendChild(checkbox);
+      newEmetteurRow.appendChild(textInput);
+    
+      // Ajout de la ligne dans le conteneur
+      container.appendChild(newEmetteurRow);
+    }
+    
   </script>
 </body>
 
