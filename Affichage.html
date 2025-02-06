@@ -533,77 +533,7 @@
       <div>
         <label>Émetteurs:</label>
         <div id="emetteurDropdown">
-          <div class="emetteur-item">
-            <input type="checkbox" value="ARCHI" checked>
-            <span>ARCHI</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="ASCENSORISTE" checked>
-            <span>ASCENSORISTE</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="CHARPENTIER" checked>
-            <span>CHARPENTIER</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="DETAILS TECHNIQUES" checked>
-            <span>DETAILS TECHNIQUES</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="ETANCHEUR" checked>
-            <span>ETANCHEUR</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="FAÇADIER" checked>
-            <span>FAÇADIER</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="LOCAL TRANSFO" checked>
-            <span>LOCAL TRANSFO</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="METHODES" checked>
-            <span>METHODES</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="PLAN DE DECAISSES DE SOLS" checked>
-            <span>PLAN DE DECAISSES DE SOLS</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="PLANS DOE" checked>
-            <span>PLANS DOE</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="PLANS GEOMETRES" checked>
-            <span>PLANS GEOMETRES</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="PREFA ESCALIERS" checked>
-            <span>PREFA ESCALIERS</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="RAPPORT DE SOL" checked>
-            <span>RAPPORT DE SOL</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="RESEAUX ENTERRES" checked>
-            <span>RESEAUX ENTERRES</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="RESERVATIONS" checked>
-            <span>RESERVATIONS</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="SONDAGES" checked>
-            <span>SONDAGES</span>
-          </div>
-          <!-- Ligne unique pour l'émetteur personnalisé -->
-          <div id="customEmetteurContainer">
-            <div class="emetteur-item custom-emetteur">
-                <input type="checkbox" id="customEmetteurCheckbox">
-                <input type="text" id="customEmetteurInput" placeholder="Autre émetteur..." style="flex: 1; padding: 5px;">
-            </div>
-          </div>
+          
         </div>
       </div>
       
@@ -755,6 +685,7 @@
 
       secondDropdown.disabled = false; // Activer la seconde liste si un projet est sélectionné
       populateSecondColumnListbox(selectedFirstValue); // Actualiser la liste
+      updateEmetteurList();
       secondDropdown.value = '';
       selectedSecondValue = '';
       tableBody.innerHTML = '';
@@ -1294,6 +1225,7 @@
       if (newTable) {
         newTable = false; // Reset the flag after handling the new table
         populateSecondColumnListbox(selectedFirstValue);
+        updateEmetteurList(); // Met à jour la liste des émetteurs en fonction du projet sélectionné
 
         // Sélectionne automatiquement le nouveau tableau
         const listbox = document.getElementById('secondColumnListbox');
@@ -1783,7 +1715,7 @@ document.getElementById('customEmetteurCheckbox').addEventListener('change', fun
     document.getElementById('customEmetteurCheckbox').checked = false;
     document.getElementById('customEmetteurInput').value = '';
 
-    console.log("Fenêtre réinitialisée avec une seule case personnalisée vide.");
+    console.log("Fenêtre réinitialisée avec les émetteurs mis à jour.");
   }
 
   // Ajout de l'événement lors de l'ouverture de la boîte de dialogue
@@ -1883,6 +1815,97 @@ document.getElementById('customEmetteurCheckbox').addEventListener('change', fun
     } else {
         removeCustomEmitter(this.closest('.custom-emetteur'));
     }
+  });
+
+  async function updateEmetteurList() {
+    const selectedProject = document.getElementById('firstColumnDropdown').value;
+    if (!selectedProject) return;
+
+    console.log(`Mise à jour des émetteurs pour le projet : ${selectedProject}`);
+
+    try {
+        // Liste des émetteurs prédéfinis
+        const defaultEmetteurs = [
+            "ARCHI", "ASCENSORISTE", "CHARPENTIER", "DETAILS TECHNIQUES", "ETANCHEUR",
+            "FAÇADIER", "LOCAL TRANSFO", "METHODES", "PLAN DE DECAISSES DE SOLS",
+            "PLANS DOE", "PLANS GEOMETRES", "PREFA ESCALIERS", "RAPPORT DE SOL",
+            "RESEAUX ENTERRES", "RESERVATIONS", "SONDAGES"
+        ];
+
+        // Récupérer toutes les lignes de la table "References"
+        const referenceTable = await grist.docApi.fetchTable('References');
+
+        // Vérifier si `NomProjetString` existe et contient des valeurs
+        if (!referenceTable.NomProjetString || referenceTable.NomProjetString.length === 0) {
+            console.error("La colonne NomProjetString est vide ou introuvable !");
+            return;
+        }
+
+        // Filtrer les émetteurs liés au projet sélectionné (en utilisant NomProjetString)
+        const emetteursFromProject = referenceTable.Emetteur.filter((_, index) => 
+            referenceTable.NomProjetString[index] === selectedProject
+        );
+
+        // Supprimer les doublons et trier
+        const uniqueEmetteursFromProject = [...new Set(emetteursFromProject)]
+            .filter(emetteur => emetteur && !defaultEmetteurs.includes(emetteur))
+            .sort();
+
+        console.log(`Émetteurs trouvés pour ${selectedProject} :`, uniqueEmetteursFromProject);
+
+        // Mise à jour de la liste
+        populateEmetteurDropdown(uniqueEmetteursFromProject, defaultEmetteurs);
+
+    } catch (error) {
+        console.error("Erreur lors de la récupération des émetteurs :", error);
+    }
+  }
+
+  function populateEmetteurDropdown(projectEmetteurs, defaultEmetteurs) {
+    const container = document.getElementById('emetteurDropdown');
+
+    // Fusionner les émetteurs prédéfinis et ceux du projet sélectionné
+    const allEmetteurs = [...defaultEmetteurs, ...projectEmetteurs].sort();
+
+    // Vider la liste actuelle
+    container.innerHTML = '';
+
+    allEmetteurs.forEach(emetteur => {
+        const emetteurItem = document.createElement('div');
+        emetteurItem.classList.add('emetteur-item');
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = emetteur;
+        checkbox.checked = true; // Toutes les cases cochées par défaut
+
+        const label = document.createElement('span');
+        label.textContent = emetteur;
+
+        emetteurItem.appendChild(checkbox);
+        emetteurItem.appendChild(label);
+        container.appendChild(emetteurItem);
+    });
+
+    // Ajouter un champ pour émetteur personnalisé
+    addCustomEmetteurRow();
+  }
+
+  document.getElementById('firstColumnDropdown').addEventListener('change', function () {
+    console.log("Projet sélectionné : ", this.value); // Vérifie si le changement est bien détecté
+    updateEmetteurList();
+  });
+
+  // Écouteur pour mettre à jour la liste des émetteurs à chaque ouverture de la boîte de dialogue
+  document.getElementById('addDocumentDialog').addEventListener('show', () => {
+    console.log("Ouverture de la boîte de dialogue 'Ajouter un document'. Mise à jour des émetteurs...");
+    updateEmetteurList();
+  });
+
+  document.getElementById('addDocumentDialog').addEventListener('show', function () {
+    console.log("Réinitialisation et mise à jour des émetteurs...");
+    resetAddDocumentDialog();
+    updateEmetteurList();
   });
 
   </script>
