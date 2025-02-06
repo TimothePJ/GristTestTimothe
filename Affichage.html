@@ -597,10 +597,12 @@
             <input type="checkbox" value="SONDAGES" checked>
             <span>SONDAGES</span>
           </div>
-          <!-- Ligne pour ajouter un émetteur personnalisé -->
-          <div class="emetteur-item">
-            <input type="checkbox" id="customEmetteurCheckbox">
-            <input type="text" id="customEmetteurInput" placeholder="Autre émetteur..." style="flex: 1; padding: 5px;">
+          <!-- Ligne unique pour l'émetteur personnalisé -->
+          <div id="customEmetteurContainer">
+            <div class="emetteur-item custom-emetteur">
+                <input type="checkbox" id="customEmetteurCheckbox">
+                <input type="text" id="customEmetteurInput" placeholder="Autre émetteur..." style="flex: 1; padding: 5px;">
+            </div>
           </div>
         </div>
       </div>
@@ -1752,82 +1754,136 @@ document.getElementById('customEmetteurCheckbox').addEventListener('change', fun
   }
 });
 
-  function addNewCustomEmetteurRow() {
+  // Fonction pour réinitialiser et assurer qu'il y a une seule case personnalisée vide et décochée
+  function initializeCustomEmitters() {
     const container = document.getElementById('emetteurDropdown');
 
-    // Vérifier s'il existe déjà une ligne non cochée
-    const existingModifiableRow = container.querySelector('.emetteur-item input[type="checkbox"]:not(:checked)');
-    if (existingModifiableRow) {
-        return; // Ne pas ajouter une nouvelle ligne si une ligne vide existe déjà
+    // Supprime toutes les anciennes cases personnalisées
+    document.querySelectorAll('.custom-emetteur').forEach(row => row.remove());
+
+    // Ajoute une seule case personnalisée vide et décochée
+    addCustomEmetteurRow(false);
+  }
+
+  // Fonction pour réinitialiser la boîte de dialogue "Ajouter un document"
+  function resetAddDocumentDialog() {
+    console.log("Réinitialisation du formulaire d'ajout de document...");
+
+    // Réinitialiser les champs texte et date
+    document.getElementById('documentNumber').value = '';
+    document.getElementById('documentName').value = '';
+    document.getElementById('defaultDatelimite').value = '';
+
+    // Réinitialiser toutes les cases à cocher des émetteurs standards
+    document.querySelectorAll('.emetteur-item:not(.custom-emetteur) input[type="checkbox"]')
+        .forEach(checkbox => checkbox.checked = true);
+
+    // Initialisation des émetteurs personnalisés
+    initializeCustomEmitters();
+    document.getElementById('customEmetteurCheckbox').checked = false;
+    document.getElementById('customEmetteurInput').value = '';
+
+    console.log("Fenêtre réinitialisée avec une seule case personnalisée vide.");
+  }
+
+  // Ajout de l'événement lors de l'ouverture de la boîte de dialogue
+  document.getElementById('addDocumentDialog').addEventListener('show', resetAddDocumentDialog);
+
+  // Gestion de l'ouverture de la boîte de dialogue "Ajouter document"
+  document.getElementById('secondColumnListbox').addEventListener('change', function () {
+    if (this.value === 'addTable') {
+        resetAddDocumentDialog();
+        document.getElementById('addDocumentDialog').showModal();
+    }
+  });
+
+  // Fonction pour ajouter un nouvel émetteur personnalisé
+  function addCustomEmetteurRow() {
+    const container = document.getElementById('emetteurDropdown');
+
+    // Vérifier s'il y a déjà une ligne et si la dernière est cochée
+    const allCustomRows = container.querySelectorAll('.custom-emetteur');
+    if (allCustomRows.length > 0) {
+        const lastCheckbox = allCustomRows[allCustomRows.length - 1].querySelector('input[type="checkbox"]');
+        if (!lastCheckbox.checked) {
+            return; // Ne pas ajouter si la dernière case est décochée
+        }
     }
 
-    // Création de la nouvelle ligne d'émetteur
+    // Création de la ligne d'émetteur personnalisé
     const newEmetteurRow = document.createElement('div');
-    newEmetteurRow.classList.add('emetteur-item');
+    newEmetteurRow.classList.add('emetteur-item', 'custom-emetteur');
 
-    // Création de la case à cocher
+    // Case à cocher pour l'émetteur
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
+    checkbox.classList.add('custom-emetteur-checkbox');
+    checkbox.checked = false; // Toujours décoché au début
 
-    // Création de l'input texte
+    // Champ texte pour le nom de l'émetteur
     const textInput = document.createElement('input');
     textInput.type = 'text';
     textInput.placeholder = 'Autre émetteur...';
     textInput.style.flex = '1';
     textInput.style.padding = '5px';
 
-    // Gestion du comportement lorsqu'on décoche la première case
+    // Gestion du comportement lors du changement d'état de la case à cocher
     checkbox.addEventListener('change', function () {
-        const allRows = Array.from(container.querySelectorAll('.emetteur-item'));
-        const currentIndex = allRows.indexOf(newEmetteurRow);
-
         if (this.checked) {
-            addNewCustomEmetteurRow(); // Ajoute une nouvelle ligne si nécessaire
-        } else {
-            if (currentIndex === 0) {
-                const secondRow = allRows[1];
-                if (secondRow && secondRow.querySelector('input[type="checkbox"]').checked) {
-                    newEmetteurRow.remove();
-                    return; // On sort immédiatement après suppression
-                }
-
-                // 💡 Correction : S'assurer que même la première case modifiable suit le coulissage
-                for (let i = 0; i < allRows.length - 1; i++) {
-                    const currentCheckbox = allRows[i].querySelector('input[type="checkbox"]');
-                    const currentTextInput = allRows[i].querySelector('input[type="text"]');
-                    const nextCheckbox = allRows[i + 1].querySelector('input[type="checkbox"]');
-                    const nextTextInput = allRows[i + 1].querySelector('input[type="text"]');
-
-                    currentCheckbox.checked = nextCheckbox.checked;
-                    currentTextInput.value = nextTextInput.value;
-                }
-
-                // Vérifier si la dernière ligne après coulissage est vide, et la supprimer
-                const lastRow = allRows[allRows.length - 1];
-                const lastTextInput = lastRow.querySelector('input[type="text"]');
-
-                if (lastTextInput.value.trim() === "" && !lastRow.querySelector('input[type="checkbox"]').checked) {
-                    lastRow.remove();
-                }
-            } else {
-                // Supprime normalement si ce n'est pas la première ligne
-                newEmetteurRow.remove();
+            // Ajouter une nouvelle case seulement si celle-ci est la dernière
+            if (!newEmetteurRow.nextElementSibling) {
+                addCustomEmetteurRow();
             }
-        }
-
-        // S'assurer qu'il y a toujours au moins une ligne modifiable disponible
-        if (!container.querySelector('.emetteur-item input[type="checkbox"]:not(:checked)')) {
-            addNewCustomEmetteurRow();
+        } else {
+            // Si la case est décochée, toutes les suivantes remontent et la dernière est supprimée
+            removeCustomEmitter(newEmetteurRow);
         }
     });
 
-    // Ajout des éléments à la ligne
+    // Ajout des éléments dans la ligne
     newEmetteurRow.appendChild(checkbox);
     newEmetteurRow.appendChild(textInput);
 
-    // Ajout de la ligne dans le conteneur
+    // Ajout dans le container
     container.appendChild(newEmetteurRow);
   }
+
+  // Fonction pour gérer la suppression et le décalage des cases personnalisées
+  function removeCustomEmitter(rowToRemove) {
+    const container = document.getElementById('emetteurDropdown');
+    const allRows = Array.from(container.querySelectorAll('.custom-emetteur'));
+    const indexToRemove = allRows.indexOf(rowToRemove);
+
+    // Si c'est la seule case, elle doit rester décochée et vide
+    if (allRows.length === 1) {
+        rowToRemove.querySelector('input[type="checkbox"]').checked = false;
+        rowToRemove.querySelector('input[type="text"]').value = '';
+        return;
+    }
+
+    // Décalage des valeurs des cases suivantes vers le haut
+    for (let i = indexToRemove; i < allRows.length - 1; i++) {
+        const currentCheckbox = allRows[i].querySelector('input[type="checkbox"]');
+        const currentTextInput = allRows[i].querySelector('input[type="text"]');
+        const nextCheckbox = allRows[i + 1].querySelector('input[type="checkbox"]');
+        const nextTextInput = allRows[i + 1].querySelector('input[type="text"]');
+
+        currentCheckbox.checked = nextCheckbox.checked;
+        currentTextInput.value = nextTextInput.value;
+    }
+
+    // Supprime la dernière case si ce n'est pas la seule restante
+    allRows[allRows.length - 1].remove();
+  }
+
+  // Événement pour le premier émetteur afin qu'il respecte les mêmes règles
+  document.getElementById('customEmetteurCheckbox').addEventListener('change', function () {
+    if (this.checked) {
+        addCustomEmetteurRow();
+    } else {
+        removeCustomEmitter(this.closest('.custom-emetteur'));
+    }
+  });
 
   </script>
 </body>
