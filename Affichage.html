@@ -321,7 +321,7 @@
         <option value="RAPPORT DE SOL">RAPPORT DE SOL</option>
         <option value="RESEAUX ENTERRES">RESEAUX ENTERRES</option>
         <option value="RESERVATIONS">RESERVATIONS</option>
-        <option value="SONDAGES">SONDAGES</option>
+        <option value="STRUCTURE">STRUCTURE</option>
       </select>
 
       <label for="reference">Reference:</label>
@@ -364,33 +364,33 @@
           }
         });
       
-        // Fonction pour mettre à jour la liste des références dynamiquement
         function updateReferenceList() {
           const selectedProject = document.getElementById('firstColumnDropdown').value; // Projet sélectionné
           const selectedEmitter = document.getElementById('emetteur').value || currentContextMenuEmitter; // Utilise l'émetteur capturé ou sélectionné
           const referenceList = document.getElementById('referenceList'); // Liste déroulante des références
-      
+        
           // Vérifier si le projet et l'émetteur sont valides
           if (!selectedProject || !selectedEmitter) {
-              referenceList.innerHTML = ''; // Vider la liste si pas de sélection
-              return;
+            referenceList.innerHTML = ''; // Vider la liste si pas de sélection
+            return;
           }
-      
+        
           // Filtrer les références selon le projet et l'émetteur
           const filteredReferences = records
-              .filter(record => record.NomProjet === selectedProject && record.Emetteur === selectedEmitter)
-              .map(record => record.Reference)
-              .filter((value, index, self) => value && self.indexOf(value) === index); // Supprimer les doublons
-      
+            .filter(record => record.NomProjet === selectedProject && record.Emetteur === selectedEmitter)
+            .map(record => record.Reference)
+            .filter((value, index, self) => value && self.indexOf(value) === index) // Supprime les doublons
+            .sort((a, b) => a.localeCompare(b, 'fr', { ignorePunctuation: true }));
+        
           // Réinitialiser et remplir la liste des références
           referenceList.innerHTML = '';
           filteredReferences.forEach(reference => {
-              const option = document.createElement('option');
-              option.value = reference;
-              referenceList.appendChild(option);
+            const option = document.createElement('option');
+            option.value = reference;
+            referenceList.appendChild(option);
           });
         }
-      
+        
         // Fonction pour remplir automatiquement les champs en fonction de la référence sélectionnée
         function autoFillFields() {
           const selectedReference = document.getElementById('referenceInput').value; // Référence sélectionnée
@@ -533,70 +533,7 @@
       <div>
         <label>Émetteurs:</label>
         <div id="emetteurDropdown">
-          <div class="emetteur-item">
-            <input type="checkbox" value="ARCHI" checked>
-            <span>ARCHI</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="ASCENSORISTE" checked>
-            <span>ASCENSORISTE</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="CHARPENTIER" checked>
-            <span>CHARPENTIER</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="DETAILS TECHNIQUES" checked>
-            <span>DETAILS TECHNIQUES</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="ETANCHEUR" checked>
-            <span>ETANCHEUR</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="FAÇADIER" checked>
-            <span>FAÇADIER</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="LOCAL TRANSFO" checked>
-            <span>LOCAL TRANSFO</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="METHODES" checked>
-            <span>METHODES</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="PLAN DE DECAISSES DE SOLS" checked>
-            <span>PLAN DE DECAISSES DE SOLS</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="PLANS DOE" checked>
-            <span>PLANS DOE</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="PLANS GEOMETRES" checked>
-            <span>PLANS GEOMETRES</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="PREFA ESCALIERS" checked>
-            <span>PREFA ESCALIERS</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="RAPPORT DE SOL" checked>
-            <span>RAPPORT DE SOL</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="RESEAUX ENTERRES" checked>
-            <span>RESEAUX ENTERRES</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="RESERVATIONS" checked>
-            <span>RESERVATIONS</span>
-          </div>
-          <div class="emetteur-item">
-            <input type="checkbox" value="SONDAGES" checked>
-            <span>SONDAGES</span>
-          </div>
+          
         </div>
       </div>
       
@@ -649,6 +586,7 @@
         <option value="RESEAUX ENTERRES">RESEAUX ENTERRES</option>
         <option value="RESERVATIONS">RESERVATIONS</option>
         <option value="SONDAGES">SONDAGES</option>
+        <option value="STRUCTURE">STRUCTURE</option>
       </select>
 
       <label for="editReference">Reference:</label>
@@ -748,6 +686,7 @@
 
       secondDropdown.disabled = false; // Activer la seconde liste si un projet est sélectionné
       populateSecondColumnListbox(selectedFirstValue); // Actualiser la liste
+      updateEmetteurList();
       secondDropdown.value = '';
       selectedSecondValue = '';
       tableBody.innerHTML = '';
@@ -941,6 +880,8 @@
   
           return date.toISOString().split('T')[0]; // Formate en "YYYY-MM-DD"
       }
+
+      updateEditReferenceList()
   
       // Pré-remplir les champs avec les valeurs actuelles
       document.getElementById('editEmetteur').value = record.Emetteur || '';
@@ -1027,7 +968,8 @@
       const filteredReferences = records
           .filter(record => record.NomProjet === selectedProject && record.Emetteur === selectedEmitter)
           .map(record => record.Reference)
-          .filter((value, index, self) => value && self.indexOf(value) === index); // Supprimer les doublons
+          .filter((value, index, self) => value && self.indexOf(value) === index) // Supprimer les doublons
+          .sort((a, b) => a.localeCompare(b, 'fr', { ignorePunctuation: true }));
   
       // Réinitialiser et remplir la liste des références
       referenceList.innerHTML = '';
@@ -1213,26 +1155,6 @@
       }
     });
 
-    // Add event listener for "Supprimer" option
-    document.getElementById('deleteOption').addEventListener('click', () => {
-      if (selectedRecordId) {
-        if (confirm("Êtes-vous sûr de vouloir supprimer cette ligne ?")) {
-          grist.docApi.applyUserActions([
-            ['RemoveRecord', 'References', selectedRecordId]
-          ])
-            .then(() => {
-              console.log('Row deleted successfully');
-              populateTable();
-              hideContextMenu();
-            })
-            .catch(error => {
-              console.error("Error deleting row:", error);
-              alert("Error deleting row.");
-            });
-        }
-      }
-    });
-
     // Handle file selection in edit dialog
     document.getElementById('editReferenceFile').addEventListener('change', function () {
       if (this.files.length > 0) {
@@ -1260,30 +1182,35 @@
       }
     });
 
-    // Add event listener for "Supprimer" option
     document.getElementById('deleteOption').addEventListener('click', () => {
-      console.log("Supprimer clicked for row ID:", selectedRecordId);
-
-      // Supprime la ligne dans Grist
-      grist.docApi.applyUserActions([['RemoveRecord', 'References', Number(selectedRecordId)]])
+      if (!selectedRecordId) {
+        console.warn("Aucune ligne sélectionnée pour suppression.");
+        return;
+      }
+    
+      // Demande confirmation avant de supprimer
+      const confirmDelete = confirm("Êtes-vous sûr de vouloir supprimer cette ligne ?");
+      
+      if (!confirmDelete) {
+        console.log("Suppression annulée par l'utilisateur.");
+        return;
+      }
+    
+      // Si l'utilisateur confirme, on supprime la ligne
+      grist.docApi.applyUserActions([
+        ['RemoveRecord', 'References', selectedRecordId]
+      ])
         .then(() => {
-          // Supprime la ligne localement dans le tableau
-          records = records.filter(record => record.ID_Ligne !== selectedRecordId);
-
-          // Actualise l'affichage du tableau
-          populateTable();
-
-          // Masquer le menu contextuel après la suppression
+          console.log(`Ligne ${selectedRecordId} supprimée avec succès.`);
+          populateTable(); // Actualise le tableau
           hideContextMenu();
-
-          console.log("Tableau actualisé et menu contextuel masqué après suppression.");
         })
         .catch(error => {
-          console.error("Erreur lors de la suppression de la ligne dans Grist:", error);
-          alert("Une erreur s'est produite lors de la suppression de la ligne.");
+          console.error("Erreur lors de la suppression de la ligne :", error);
+          alert("Une erreur s'est produite lors de la suppression.");
         });
     });
-
+    
     // Fonction pour cacher le menu contextuel
     function hideContextMenu() {
       const contextMenu = document.getElementById('contextMenu');
@@ -1299,6 +1226,7 @@
       if (newTable) {
         newTable = false; // Reset the flag after handling the new table
         populateSecondColumnListbox(selectedFirstValue);
+        updateEmetteurList(); // Met à jour la liste des émetteurs en fonction du projet sélectionné
 
         // Sélectionne automatiquement le nouveau tableau
         const listbox = document.getElementById('secondColumnListbox');
@@ -1366,8 +1294,19 @@
     
       const selectedEmitters = Array.from(
         document.querySelectorAll('#emetteurDropdown input[type="checkbox"]:checked')
-      ).map(checkbox => checkbox.value);
-    
+      ).map(checkbox => {
+        // Trouve l'input texte qui est juste après la case à cocher
+        const textInput = checkbox.nextElementSibling;
+
+        // Si c'est un champ texte (pour les émetteurs personnalisés)
+        if (textInput && textInput.tagName === "INPUT" && textInput.type === "text") {
+          const customValue = textInput.value.trim();
+          return customValue ? customValue : null; // Retourne la valeur écrite, sinon null
+        }
+
+        return checkbox.value; // Pour les émetteurs standards
+      }).filter(value => value); // Supprime les valeurs nulles
+
       if (selectedEmitters.length === 0) {
         alert("Veuillez sélectionner au moins un émetteur.");
         return;
@@ -1717,6 +1656,272 @@
     document.getElementById('secondColumnListbox').addEventListener('change', () => {
       resetAddRowForm(); // Réinitialise les champs du formulaire d'ajout
     });
+
+    document.getElementById('customEmetteurCheckbox').addEventListener('change', function () {
+      if (this.checked) {
+        addNewCustomEmetteurRow();
+      }
+    });
+    
+    document.getElementById('customEmetteurCheckbox').addEventListener('change', function () {
+      if (this.checked) {
+          addNewCustomEmetteurRow();
+      }
+  });
+  
+  document.getElementById('customEmetteurCheckbox').addEventListener('change', function () {
+    if (this.checked) {
+        addNewCustomEmetteurRow();
+    }
+  });
+
+  document.getElementById('customEmetteurCheckbox').addEventListener('change', function () {
+    if (this.checked) {
+        addNewCustomEmetteurRow();
+    }
+  });
+
+  document.getElementById('customEmetteurCheckbox').addEventListener('change', function () {
+    if (this.checked) {
+        addNewCustomEmetteurRow();
+    }
+  });
+
+  // Fonction pour réinitialiser et assurer qu'il y a une seule case personnalisée vide et décochée
+  function initializeCustomEmitters() {
+    const container = document.getElementById('emetteurDropdown');
+
+    // Supprime toutes les anciennes cases personnalisées
+    document.querySelectorAll('.custom-emetteur').forEach(row => row.remove());
+
+    // Ajoute une seule case personnalisée vide et décochée
+    addCustomEmetteurRow(false);
+  }
+
+  // Fonction pour réinitialiser la boîte de dialogue "Ajouter un document"
+  function resetAddDocumentDialog() {
+    console.log("Réinitialisation du formulaire d'ajout de document...");
+
+    // Réinitialiser les champs texte et date
+    document.getElementById('documentNumber').value = '';
+    document.getElementById('documentName').value = '';
+    document.getElementById('defaultDatelimite').value = '';
+
+    // Réinitialiser toutes les cases à cocher des émetteurs standards
+    document.querySelectorAll('.emetteur-item:not(.custom-emetteur) input[type="checkbox"]')
+        .forEach(checkbox => checkbox.checked = true);
+
+    // Initialisation des émetteurs personnalisés
+    initializeCustomEmitters();
+    document.getElementById('customEmetteurCheckbox').checked = false;
+    document.getElementById('customEmetteurInput').value = '';
+
+    console.log("Fenêtre réinitialisée avec les émetteurs mis à jour.");
+  }
+
+  // Ajout de l'événement lors de l'ouverture de la boîte de dialogue
+  document.getElementById('addDocumentDialog').addEventListener('show', resetAddDocumentDialog);
+
+  // Gestion de l'ouverture de la boîte de dialogue "Ajouter document"
+  document.getElementById('secondColumnListbox').addEventListener('change', function () {
+    if (this.value === 'addTable') {
+        resetAddDocumentDialog();
+        document.getElementById('addDocumentDialog').showModal();
+    }
+  });
+
+  // Fonction pour ajouter un nouvel émetteur personnalisé
+  function addCustomEmetteurRow() {
+    const container = document.getElementById('emetteurDropdown');
+
+    // Vérifier s'il y a déjà une ligne et si la dernière est cochée
+    const allCustomRows = container.querySelectorAll('.custom-emetteur');
+    if (allCustomRows.length > 0) {
+        const lastCheckbox = allCustomRows[allCustomRows.length - 1].querySelector('input[type="checkbox"]');
+        if (!lastCheckbox.checked) {
+            return; // Ne pas ajouter si la dernière case est décochée
+        }
+    }
+
+    // Création de la ligne d'émetteur personnalisé
+    const newEmetteurRow = document.createElement('div');
+    newEmetteurRow.classList.add('emetteur-item', 'custom-emetteur');
+
+    // Case à cocher pour l'émetteur
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.classList.add('custom-emetteur-checkbox');
+    checkbox.checked = false; // Toujours décoché au début
+
+    // Champ texte pour le nom de l'émetteur
+    const textInput = document.createElement('input');
+    textInput.type = 'text';
+    textInput.placeholder = 'Autre émetteur...';
+    textInput.style.flex = '1';
+    textInput.style.padding = '5px';
+
+    // Gestion du comportement lors du changement d'état de la case à cocher
+    checkbox.addEventListener('change', function () {
+        if (this.checked) {
+            // Ajouter une nouvelle case seulement si celle-ci est la dernière
+            if (!newEmetteurRow.nextElementSibling) {
+                addCustomEmetteurRow();
+            }
+        } else {
+            // Si la case est décochée, toutes les suivantes remontent et la dernière est supprimée
+            removeCustomEmitter(newEmetteurRow);
+        }
+    });
+
+    // Ajout des éléments dans la ligne
+    newEmetteurRow.appendChild(checkbox);
+    newEmetteurRow.appendChild(textInput);
+
+    // Ajout dans le container
+    container.appendChild(newEmetteurRow);
+  }
+
+  // Fonction pour gérer la suppression et le décalage des cases personnalisées
+  function removeCustomEmitter(rowToRemove) {
+    const container = document.getElementById('emetteurDropdown');
+    const allRows = Array.from(container.querySelectorAll('.custom-emetteur'));
+    const indexToRemove = allRows.indexOf(rowToRemove);
+
+    // Si c'est la seule case, elle doit rester décochée et vide
+    if (allRows.length === 1) {
+        rowToRemove.querySelector('input[type="checkbox"]').checked = false;
+        rowToRemove.querySelector('input[type="text"]').value = '';
+        return;
+    }
+
+    // Décalage des valeurs des cases suivantes vers le haut
+    for (let i = indexToRemove; i < allRows.length - 1; i++) {
+        const currentCheckbox = allRows[i].querySelector('input[type="checkbox"]');
+        const currentTextInput = allRows[i].querySelector('input[type="text"]');
+        const nextCheckbox = allRows[i + 1].querySelector('input[type="checkbox"]');
+        const nextTextInput = allRows[i + 1].querySelector('input[type="text"]');
+
+        currentCheckbox.checked = nextCheckbox.checked;
+        currentTextInput.value = nextTextInput.value;
+    }
+
+    // Supprime la dernière case si ce n'est pas la seule restante
+    allRows[allRows.length - 1].remove();
+  }
+
+  // Événement pour le premier émetteur afin qu'il respecte les mêmes règles
+  document.getElementById('customEmetteurCheckbox').addEventListener('change', function () {
+    if (this.checked) {
+        addCustomEmetteurRow();
+    } else {
+        removeCustomEmitter(this.closest('.custom-emetteur'));
+    }
+  });
+
+  async function updateEmetteurList(excludeCustom = false, targetDropdownId = "emetteurDropdown") {
+    const selectedProject = document.getElementById('firstColumnDropdown').value;
+    if (!selectedProject) return;
+
+    console.log(`Mise à jour des émetteurs pour le projet : ${selectedProject}`);
+
+    try {
+        // Liste des émetteurs prédéfinis
+        const defaultEmetteurs = [
+            "ARCHI", "ASCENSORISTE", "CHARPENTIER", "DETAILS TECHNIQUES", "ETANCHEUR",
+            "FAÇADIER", "LOCAL TRANSFO", "METHODES", "PLAN DE DECAISSES DE SOLS",
+            "PLANS DOE", "PLANS GEOMETRES", "PREFA ESCALIERS", "RAPPORT DE SOL",
+            "RESEAUX ENTERRES", "RESERVATIONS", "SONDAGES"
+        ];
+
+        // Récupérer toutes les lignes de la table "References"
+        const referenceTable = await grist.docApi.fetchTable('References');
+
+        if (!referenceTable.NomProjetString || referenceTable.NomProjetString.length === 0) {
+            console.error("La colonne NomProjetString est vide ou introuvable !");
+            return;
+        }
+
+        // Filtrer les émetteurs liés au projet sélectionné
+        let emetteursFromProject = referenceTable.Emetteur.filter((_, index) => 
+            referenceTable.NomProjetString[index] === selectedProject
+        );
+
+        // Supprimer les doublons et trier
+        let uniqueEmetteursFromProject = [...new Set(emetteursFromProject)]
+            .filter(emetteur => emetteur && !defaultEmetteurs.includes(emetteur))
+            .sort();
+
+        console.log(`Émetteurs trouvés pour ${selectedProject} :`, uniqueEmetteursFromProject);
+
+        // Exclure les émetteurs personnalisés pour "Ajouter une ligne"
+        if (excludeCustom) {
+            uniqueEmetteursFromProject = uniqueEmetteursFromProject.filter(emetteur => defaultEmetteurs.includes(emetteur));
+        }
+
+        // Mise à jour de la liste
+        populateEmetteurDropdown(uniqueEmetteursFromProject, defaultEmetteurs, targetDropdownId);
+
+    } catch (error) {
+        console.error("Erreur lors de la récupération des émetteurs :", error);
+    }
+  }
+
+  function populateEmetteurDropdown(projectEmetteurs, defaultEmetteurs) {
+    const container = document.getElementById('emetteurDropdown');
+
+    // Fusionner les émetteurs prédéfinis et ceux du projet sélectionné
+    const allEmetteurs = [...defaultEmetteurs, ...projectEmetteurs].sort();
+
+    // Vider la liste actuelle
+    container.innerHTML = '';
+
+    allEmetteurs.forEach(emetteur => {
+        const emetteurItem = document.createElement('div');
+        emetteurItem.classList.add('emetteur-item');
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = emetteur;
+        checkbox.checked = true; // Toutes les cases cochées par défaut
+
+        const label = document.createElement('span');
+        label.textContent = emetteur;
+
+        emetteurItem.appendChild(checkbox);
+        emetteurItem.appendChild(label);
+        container.appendChild(emetteurItem);
+    });
+
+    // Ajouter un champ pour émetteur personnalisé
+    addCustomEmetteurRow();
+  }
+
+  document.getElementById('firstColumnDropdown').addEventListener('change', function () {
+    console.log("Projet sélectionné : ", this.value); // Vérifie si le changement est bien détecté
+    updateEmetteurList();
+  });
+
+  // Écouteur pour mettre à jour la liste des émetteurs à chaque ouverture de la boîte de dialogue
+  document.getElementById('addDocumentDialog').addEventListener('show', () => {
+    console.log("Ouverture de la boîte de dialogue 'Ajouter un document'. Mise à jour des émetteurs...");
+    updateEmetteurList();
+  });
+
+  document.getElementById('addDocumentDialog').addEventListener('show', function () {
+    console.log("Réinitialisation et mise à jour des émetteurs...");
+    resetAddDocumentDialog();
+    updateEmetteurList();
+  });
+
+  function updateEmetteurListForAddRow() {
+    updateEmetteurList(true, "emetteur");
+  }
+
+  // Mise à jour de la liste des émetteurs lorsqu'on ouvre le dialogue "Ajouter une ligne"
+  document.getElementById('addRowDialog').addEventListener('show', updateEmetteurListForAddRow);
+
+  // Mise à jour lorsqu'on change de projet dans "Ajouter une ligne"
+  document.getElementById('firstColumnDropdown').addEventListener('change', updateEmetteurListForAddRow);
 
   </script>
 </body>
