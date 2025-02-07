@@ -305,24 +305,20 @@
       <h3>Ajouter une nouvelle ligne</h3>
 
       <label for="emetteur">Émetteur:</label>
-      <select id="emetteur" name="emetteur" required>
-        <option value="ARCHI">ARCHI</option>
-        <option value="ASCENSORISTE">ASCENSORISTE</option>
-        <option value="CHARPENTIER">CHARPENTIER</option>
-        <option value="DETAILS TECHNIQUES">DETAILS TECHNIQUES</option>
-        <option value="ETANCHEUR">ETANCHEUR</option>
-        <option value="FAÇADIER">FAÇADIER</option>
-        <option value="LOCAL TRANSFO">LOCAL TRANSFO</option>
-        <option value="METHODES">METHODES</option>
-        <option value="PLAN DE DECAISSES DE SOLS">PLAN DE DECAISSES DE SOLS</option>
-        <option value="PLANS DOE">PLANS DOE</option>
-        <option value="PLANS GEOMETRES">PLANS GEOMETRES</option>
-        <option value="PREFA ESCALIERS">PREFA ESCALIERS</option>
-        <option value="RAPPORT DE SOL">RAPPORT DE SOL</option>
-        <option value="RESEAUX ENTERRES">RESEAUX ENTERRES</option>
-        <option value="RESERVATIONS">RESERVATIONS</option>
-        <option value="STRUCTURE">STRUCTURE</option>
-      </select>
+      <input type="text" id="emetteur" name="emetteur" list="emetteurList" required placeholder="Sélectionner ou entrer un émetteur">
+      <datalist id="emetteurList">
+        <option value="ARCHI"></option>
+        <option value="ASCENSORISTE"></option>
+        <option value="CHARPENTIER"></option>
+        <option value="DETAILS TECHNIQUES"></option>
+        <option value="ETANCHEUR"></option>
+        <option value="FAÇADIER"></option>
+        <option value="LOCAL TRANSFO"></option>
+        <option value="METHODES"></option>
+        <option value="PLANS DOE"></option>
+        <option value="PREFA ESCALIERS"></option>
+        <option value="STRUCTURE"></option>
+      </datalist>
 
       <label for="reference">Reference:</label>
       <div style="display: flex; gap: 10px; position: relative;">
@@ -568,26 +564,20 @@
       <h3>Modifier la ligne</h3>
 
       <label for="editEmetteur">Émetteur:</label>
-      <select id="editEmetteur" name="emetteur" required>
-        <option value="">-- Sélectionnez un émetteur --</option>
-        <option value="ARCHI">ARCHI</option>
-        <option value="ASCENSORISTE">ASCENSORISTE</option>
-        <option value="CHARPENTIER">CHARPENTIER</option>
-        <option value="DETAILS TECHNIQUES">DETAILS TECHNIQUES</option>
-        <option value="ETANCHEUR">ETANCHEUR</option>
-        <option value="FAÇADIER">FAÇADIER</option>
-        <option value="LOCAL TRANSFO">LOCAL TRANSFO</option>
-        <option value="METHODES">METHODES</option>
-        <option value="PLAN DE DECAISSES DE SOLS">PLAN DE DECAISSES DE SOLS</option>
-        <option value="PLANS DOE">PLANS DOE</option>
-        <option value="PLANS GEOMETRES">PLANS GEOMETRES</option>
-        <option value="PREFA ESCALIERS">PREFA ESCALIERS</option>
-        <option value="RAPPORT DE SOL">RAPPORT DE SOL</option>
-        <option value="RESEAUX ENTERRES">RESEAUX ENTERRES</option>
-        <option value="RESERVATIONS">RESERVATIONS</option>
-        <option value="SONDAGES">SONDAGES</option>
-        <option value="STRUCTURE">STRUCTURE</option>
-      </select>
+      <input type="text" id="editEmetteur" name="editEmetteur" list="editEmetteurList" required placeholder="Sélectionner ou entrer un émetteur">
+      <datalist id="editEmetteurList">
+        <option value="ARCHI"></option>
+        <option value="ASCENSORISTE"></option>
+        <option value="CHARPENTIER"></option>
+        <option value="DETAILS TECHNIQUES"></option>
+        <option value="ETANCHEUR"></option>
+        <option value="FAÇADIER"></option>
+        <option value="LOCAL TRANSFO"></option>
+        <option value="METHODES"></option>
+        <option value="PLANS DOE"></option>
+        <option value="PREFA ESCALIERS"></option>
+        <option value="STRUCTURE"></option>
+      </datalist>
 
       <label for="editReference">Reference:</label>
       <div style="display: flex; gap: 10px; position: relative;">
@@ -1922,6 +1912,125 @@
 
   // Mise à jour lorsqu'on change de projet dans "Ajouter une ligne"
   document.getElementById('firstColumnDropdown').addEventListener('change', updateEmetteurListForAddRow);
+
+  function updateEmetteurListForInputs() {
+    const selectedProject = document.getElementById('firstColumnDropdown')?.value;
+    if (!selectedProject) return;
+
+    // Liste des émetteurs prédéfinis
+    const defaultEmetteurs = [
+        "ARCHI", "ASCENSORISTE", "CHARPENTIER", "DETAILS TECHNIQUES", "ETANCHEUR",
+        "FAÇADIER", "LOCAL TRANSFO", "METHODES", "PLANS DOE", "PREFA ESCALIERS", "STRUCTURE"
+    ];
+
+    // Vérifier que records contient bien des données
+    if (!Array.isArray(records)) {
+        console.error("Erreur : records est vide ou introuvable.");
+        return;
+    }
+
+    // Récupérer les émetteurs uniques du projet sélectionné
+    const projectEmetteurs = records
+        .filter(record => record.NomProjet === selectedProject)
+        .map(record => record.Emetteur)
+        .filter((value, index, self) => value && self.indexOf(value) === index) // Supprime les doublons
+        .sort();
+
+    // Fusionner les valeurs (émetteurs par défaut + ceux du projet)
+    const allEmetteurs = [...new Set([...defaultEmetteurs, ...projectEmetteurs])].sort();
+
+    // Mettre à jour les listes d’émetteurs pour "Ajouter" et "Modifier"
+    updateDatalist('emetteurList', allEmetteurs);
+    updateDatalist('editEmetteurList', allEmetteurs);
+  }
+
+  // Fonction pour remplir une liste `datalist`
+  function updateDatalist(listId, values) {
+    const datalist = document.getElementById(listId);
+    if (!datalist) {
+        console.error(`Erreur : Datalist ${listId} introuvable.`);
+        return;
+    }
+    datalist.innerHTML = ''; // Vider la liste existante
+    values.forEach(value => {
+        const option = document.createElement('option');
+        option.value = value;
+        datalist.appendChild(option);
+    });
+  }
+
+  // Mettre à jour la liste des émetteurs aux bons moments
+  document.getElementById('firstColumnDropdown')?.addEventListener('change', updateEmetteurListForInputs);
+  document.getElementById('secondColumnListbox')?.addEventListener('change', updateEmetteurListForInputs);
+  document.getElementById('emetteur')?.addEventListener('focus', updateEmetteurListForInputs);
+  document.getElementById('editEmetteur')?.addEventListener('focus', updateEmetteurListForInputs);
+
+  document.getElementById('editRowDialog').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    if (!selectedRecordId) {
+        console.error("Aucune ligne sélectionnée pour modification.");
+        return;
+    }
+
+    // Récupération correcte des champs du formulaire
+    const editEmetteurInput = document.getElementById('editEmetteur');
+    let newEmetteur = editEmetteurInput ? editEmetteurInput.value.trim() : '';
+
+    // Si l'utilisateur n'a pas modifié l'émetteur, on garde l'ancien
+    if (!newEmetteur || newEmetteur === '') {
+        console.warn("L'émetteur est vide, récupération de l'ancien...");
+        newEmetteur = records.find(r => r.id === selectedRecordId)?.Emetteur || '';
+    }
+
+    console.log(`Modification : Ancien Emetteur -> ${records.find(r => r.id === selectedRecordId)?.Emetteur} | Nouveau -> ${newEmetteur}`);
+
+    const updatedRow = {
+        Emetteur: newEmetteur,  // On force la valeur ici
+        Reference: document.getElementById('editReference').value.trim() || records.find(r => r.id === selectedRecordId)?.Reference || '',
+        Indice: document.getElementById('editIndice').value.trim() || records.find(r => r.id === selectedRecordId)?.Indice || '',
+        Recu: document.getElementById('editRecu').value || records.find(r => r.id === selectedRecordId)?.Recu || '',
+        DescriptionObservations: document.getElementById('editDescription').value.trim() || records.find(r => r.id === selectedRecordId)?.DescriptionObservations || '',
+        DateLimite: document.getElementById('editDatelimite').value || records.find(r => r.id === selectedRecordId)?.DateLimite || ''
+    };
+
+    try {
+        // Vérification avant d'envoyer à Grist
+        console.log("Données envoyées à Grist :", updatedRow);
+
+        // Mise à jour de l'enregistrement dans Grist
+        await grist.docApi.applyUserActions([
+            ['UpdateRecord', 'References', selectedRecordId, updatedRow]
+        ]);
+
+        console.log("Mise à jour réussie !");
+
+        // Rafraîchir le tableau pour voir les modifications immédiatement
+        await populateTable();
+
+        // Fermer le dialogue de modification
+        document.getElementById('editRowDialog').close();
+    } catch (error) {
+        console.error("Erreur lors de la mise à jour :", error);
+        alert("Erreur lors de la modification.");
+    }
+  });
+
+  // Fonction pour forcer la mise à jour des émetteurs après modification
+  function refreshEmetteurList() {
+    console.log("Mise à jour de la liste des émetteurs après modification...");
+    updateEmetteurListForInputs(); // Recharge les valeurs dans `datalist`
+  }
+
+  // Écoute l'événement de fermeture du dialogue après modification
+  document.getElementById('editRowDialog').addEventListener('close', refreshEmetteurList);
+
+  // Rafraîchir les émetteurs après modification
+  document.getElementById('editRowDialog').addEventListener('close', () => {
+    console.log("Mise à jour de la liste des émetteurs après fermeture de la fenêtre Modifier...");
+    updateEmetteurListForInputs();
+    populateTable();
+  });
 
   </script>
 </body>
