@@ -998,12 +998,13 @@
       if (selectedRecordId) {
         const record = records.find(rec => rec.id === selectedRecordId);
         if (record) {
+          updateEmetteurList(false, "editEmetteurList");
           showEditDialog(record);
         }
       }
       hideContextMenu();
     });
-
+    
     // Handle dialog form submission
     document.getElementById('addRowDialog').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -1206,29 +1207,27 @@
       }
     });
 
-    // Listen to changes in the second dropdown and update the table accordingly
     document.getElementById('secondColumnListbox').addEventListener('change', function () {
       const selectedValue = this.value;
-
-      // Gérer l'ajout d'un tableau
+      console.log("Tableau sélectionné :", selectedValue);
       if (selectedValue === 'addTable') {
         handleAddTable();
         return;
       }
-
-      // Gestion normale de la sélection
       selectedSecondValue = selectedValue;
+      console.log("selectedFirstValue:", selectedFirstValue, "selectedSecondValue:", selectedSecondValue);
       if (selectedFirstValue && selectedSecondValue) {
         populateTable();
       }
     });
-
+    
     // Fonction pour gérer l'ajout d'un tableau
     function handleAddTable() {
+      resetAddDocumentDialog();
       const dialog = document.getElementById('addDocumentDialog');
       dialog.showModal();
     }
-
+    
     // Fermer la liste déroulante si on clique en dehors
     document.addEventListener('click', (event) => {
       const dropdown = document.getElementById('emetteurDropdown');
@@ -1617,12 +1616,6 @@
       resetAddRowForm(); // Réinitialise les champs du formulaire d'ajout
     });
 
-  document.getElementById('customEmetteurCheckbox').addEventListener('change', function () {
-    if (this.checked) {
-        addNewCustomEmetteurRow();
-    }
-  });
-
   // Fonction pour réinitialiser et assurer qu'il y a une seule case personnalisée vide et décochée
   function initializeCustomEmitters() {
     const container = document.getElementById('emetteurDropdown');
@@ -1636,30 +1629,44 @@
 
   // Fonction pour réinitialiser la boîte de dialogue "Ajouter un document"
   function resetAddDocumentDialog() {
-
     // Réinitialiser les champs texte et date
     document.getElementById('documentNumber').value = '';
     document.getElementById('documentName').value = '';
     document.getElementById('defaultDatelimite').value = '';
-
-    // Réinitialiser toutes les cases à cocher des émetteurs standards
-    document.querySelectorAll('.emetteur-item:not(.custom-emetteur) input[type="checkbox"]')
-        .forEach(checkbox => checkbox.checked = true);
-
-    // Initialisation des émetteurs personnalisés
-    initializeCustomEmitters();
-    document.getElementById('customEmetteurCheckbox').checked = false;
-    document.getElementById('customEmetteurInput').value = '';
-  }
-
-  // Gestion de l'ouverture de la boîte de dialogue "Ajouter document"
-  document.getElementById('secondColumnListbox').addEventListener('change', function () {
-    if (this.value === 'addTable') {
-        resetAddDocumentDialog();
-        document.getElementById('addDocumentDialog').showModal();
+  
+    // Récupérer le projet sélectionné
+    const selectedProject = document.getElementById('firstColumnDropdown').value;
+    if (!selectedProject) {
+      console.error("Aucun projet sélectionné !");
+      return;
     }
-  });
-
+  
+    // Liste par défaut d'émetteurs
+    const defaultEmetteurs = [
+      "ARCHI", "ASCENSORISTE", "CHARPENTIER", "DETAILS TECHNIQUES", "ETANCHEUR",
+      "FAÇADIER", "LOCAL TRANSFO", "METHODES", "PLAN DECAISSES DE SOLS",
+      "PLANS DOE", "PLANS GEOMETRES", "PREFA ESCALIERS", "RAPPORT DE SOL",
+      "RESEAUX ENTERRES", "RESERVATIONS", "SONDAGES"
+    ];
+  
+    // Extraire les émetteurs du projet à partir de records
+    const projectEmetteurs = [...new Set(
+      records
+        .filter(r => r.NomProjet === selectedProject)
+        .map(r => r.Emetteur)
+        .filter(Boolean)
+    )];
+  
+    // Remplir la div avec la fonction dédiée
+    populateEmetteurDropdown(projectEmetteurs, defaultEmetteurs);
+  
+    // Réinitialiser les éventuels éléments de personnalisation (si présents)
+    const customCheckbox = document.getElementById('customEmetteurCheckbox');
+    if (customCheckbox) customCheckbox.checked = false;
+    const customInput = document.getElementById('customEmetteurInput');
+    if (customInput) customInput.value = '';
+  }
+  
   // Fonction pour ajouter un nouvel émetteur personnalisé
   function addCustomEmetteurRow() {
     const container = document.getElementById('emetteurDropdown');
@@ -1739,15 +1746,6 @@
     allRows[allRows.length - 1].remove();
   }
 
-  // Événement pour le premier émetteur afin qu'il respecte les mêmes règles
-  document.getElementById('customEmetteurCheckbox').addEventListener('change', function () {
-    if (this.checked) {
-        addCustomEmetteurRow();
-    } else {
-        removeCustomEmitter(this.closest('.custom-emetteur'));
-    }
-  });
-
   async function updateEmetteurList(excludeCustom = false, targetDropdownId = "emetteurDropdown") {
     const selectedProject = document.getElementById('firstColumnDropdown').value;
     if (!selectedProject) return;
@@ -1796,34 +1794,34 @@
 
   function populateEmetteurDropdown(projectEmetteurs, defaultEmetteurs) {
     const container = document.getElementById('emetteurDropdown');
-
-    // Fusionner les émetteurs prédéfinis et ceux du projet sélectionné
-    const allEmetteurs = [...defaultEmetteurs, ...projectEmetteurs].sort();
-
-    // Vider la liste actuelle
-    container.innerHTML = '';
-
+    container.innerHTML = ''; // Vider la div avant de la remplir
+  
+    // Fusionner et dédoublonner les deux listes, puis trier
+    const allEmetteurs = [...defaultEmetteurs, ...projectEmetteurs]
+      .filter((v, i, a) => a.indexOf(v) === i)
+      .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+  
     allEmetteurs.forEach(emetteur => {
-        const emetteurItem = document.createElement('div');
-        emetteurItem.classList.add('emetteur-item');
-
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.value = emetteur;
-        checkbox.checked = true; // Toutes les cases cochées par défaut
-
-        const label = document.createElement('span');
-        label.textContent = emetteur;
-
-        emetteurItem.appendChild(checkbox);
-        emetteurItem.appendChild(label);
-        container.appendChild(emetteurItem);
+      const emetteurItem = document.createElement('div');
+      emetteurItem.classList.add('emetteur-item');
+  
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = emetteur;
+      checkbox.checked = true; // Coché par défaut
+  
+      const label = document.createElement('span');
+      label.textContent = emetteur;
+  
+      emetteurItem.appendChild(checkbox);
+      emetteurItem.appendChild(label);
+      container.appendChild(emetteurItem);
     });
-
-    // Ajouter un champ pour émetteur personnalisé
+  
+    // Ajouter une case pour un émetteur personnalisé
     addCustomEmetteurRow();
   }
-
+  
   document.getElementById('firstColumnDropdown').addEventListener('change', function () {
     updateEmetteurList();
   });
@@ -1842,53 +1840,44 @@
     });
   }
 
-  // Écouteur pour mettre à jour la liste des émetteurs à chaque ouverture de la boîte de dialogue
   document.getElementById('addDocumentDialog').addEventListener('show', () => {
-    console.log("Ouverture de la boîte de dialogue 'Ajouter un document'. Mise à jour des émetteurs...");
-    updateEmetteurList();
+    resetAddDocumentDialog();
   });
-
+  
   function updateEmetteurListForAddRow() {
     updateEmetteurList(true, "emetteur");
   }
-
-  document.getElementById('addRowButton').addEventListener('click', resetAddRowForm);
-  document.getElementById('addDocumentButton').addEventListener('click', resetAddDocumentDialog);
 
   function updateEmetteurListForInputs() {
     updateEmetteurList(true, "emetteurList");
     const selectedProject = document.getElementById('firstColumnDropdown')?.value;
     if (!selectedProject) return;
-
-    // Liste des émetteurs prédéfinis
+  
     const defaultEmetteurs = [
-        "ARCHI", "ASCENSORISTE", "CHARPENTIER", "DETAILS TECHNIQUES", "ETANCHEUR",
-        "FAÇADIER", "LOCAL TRANSFO", "METHODES", "PLAN DE DECAISSES DE SOLS",
-        "PLANS DOE", "PLANS GEOMETRES", "PREFA ESCALIERS", "RAPPORT DE SOL",
-        "RESEAUX ENTERRES", "RESERVATIONS", "SONDAGES"
+      "ARCHI", "ASCENSORISTE", "CHARPENTIER", "DETAILS TECHNIQUES", "ETANCHEUR",
+      "FAÇADIER", "LOCAL TRANSFO", "METHODES", "PLAN DECAISSES DE SOLS",
+      "PLANS DOE", "PLANS GEOMETRES", "PREFA ESCALIERS", "RAPPORT DE SOL",
+      "RESEAUX ENTERRES", "RESERVATIONS", "SONDAGES"
     ];
-
-    // Vérifier que records contient bien des données
+  
     if (!Array.isArray(records)) {
-        console.error("Erreur : records est vide ou introuvable.");
-        return;
+      console.error("Erreur : records est vide ou introuvable.");
+      return;
     }
-
-    // Récupérer les émetteurs uniques du projet sélectionné
+  
     const projectEmetteurs = records
-        .filter(record => record.NomProjet === selectedProject)
-        .map(record => record.Emetteur)
-        .filter((value, index, self) => value && self.indexOf(value) === index) // Supprime les doublons
-        .sort();
-
-    // Fusionner les valeurs (émetteurs par défaut + ceux du projet)
-    const allEmetteurs = [...new Set([...defaultEmetteurs, ...projectEmetteurs])].sort();
-
-    // Mettre à jour les listes d’émetteurs pour "Ajouter" et "Modifier"
+      .filter(record => record.NomProjet === selectedProject)
+      .map(record => record.Emetteur)
+      .filter((value, index, self) => value && self.indexOf(value) === index)
+      .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+  
+    const allEmetteurs = [...new Set([...defaultEmetteurs, ...projectEmetteurs])]
+      .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+  
     updateDatalist('emetteurList', allEmetteurs);
     updateDatalist('editEmetteurList', allEmetteurs);
   }
-
+  
   // Fonction pour remplir une liste `datalist`
   function updateDatalist(listId, values) {
     const datalist = document.getElementById(listId);
@@ -1912,41 +1901,38 @@
   function updateEditEmetteurList() {
     const selectedProject = document.getElementById('firstColumnDropdown').value;
     const emetteurList = document.getElementById('editEmetteurList');
-
+  
     if (!selectedProject) {
-        emetteurList.innerHTML = ''; // Vide la liste si aucun projet sélectionné
-        return;
+      emetteurList.innerHTML = '';
+      return;
     }
-
-    // Liste des émetteurs par défaut
+  
     const defaultEmetteurs = [
-        "ARCHI", "ASCENSORISTE", "CHARPENTIER", "DETAILS TECHNIQUES", "ETANCHEUR",
-        "FAÇADIER", "LOCAL TRANSFO", "METHODES", "PLAN DE DECAISSES DE SOLS",
-        "PLANS DOE", "PLANS GEOMETRES", "PREFA ESCALIERS", "RAPPORT DE SOL",
-        "RESEAUX ENTERRES", "RESERVATIONS", "SONDAGES"
+      "ARCHI", "ASCENSORISTE", "CHARPENTIER", "DETAILS TECHNIQUES", "ETANCHEUR",
+      "FAÇADIER", "LOCAL TRANSFO", "METHODES", "PLAN DECAISSES DE SOLS",
+      "PLANS DOE", "PLANS GEOMETRES", "PREFA ESCALIERS", "RAPPORT DE SOL",
+      "RESEAUX ENTERRES", "RESERVATIONS", "SONDAGES"
     ];
-
-    // Récupérer les émetteurs liés au projet sélectionné
+  
     const projectEmetteurs = records
-        .filter(record => record.NomProjet === selectedProject)
-        .map(record => record.Emetteur)
-        .filter((value, index, self) => value && self.indexOf(value) === index) // Supprime les doublons
-        .sort();
-
-    // Fusionner liste statique + émetteurs du projet
-    const allEmetteurs = [...new Set([...defaultEmetteurs, ...projectEmetteurs])].sort();
-
-    // Remplir `datalist`
+      .filter(record => record.NomProjet === selectedProject)
+      .map(record => record.Emetteur)
+      .filter((value, index, self) => value && self.indexOf(value) === index)
+      .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+  
+    const allEmetteurs = [...new Set([...defaultEmetteurs, ...projectEmetteurs])]
+      .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+  
     emetteurList.innerHTML = '';
     allEmetteurs.forEach(emetteur => {
-        const option = document.createElement('option');
-        option.value = emetteur;
-        emetteurList.appendChild(option);
+      const option = document.createElement('option');
+      option.value = emetteur;
+      emetteurList.appendChild(option);
     });
-
-    console.log("🔄 Liste des émetteurs mise à jour pour l'édition :", allEmetteurs);
+  
+    console.log("Liste des émetteurs mise à jour pour l'édition :", allEmetteurs);
   }
-
+  
   document.getElementById('editRowDialog').addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -1989,12 +1975,6 @@
     }
   });
 
-  // Associe la mise à jour de la liste à l'affichage du formulaire Modifier
-  document.getElementById('editOption').addEventListener('click', () => {
-    updateEmetteurList(true, "editEmetteurList");  // Mise à jour sans émetteurs personnalisés
-    document.getElementById('editRowDialog').showModal();
-  });
-
   // Met à jour la liste si l'utilisateur change de projet avant d'éditer une ligne
   document.getElementById('firstColumnDropdown').addEventListener('change', updateEditEmetteurList);
 
@@ -2013,63 +1993,84 @@
   });
   
   document.getElementById('addRowDialog').addEventListener('show', () => {
-    updateEmetteurList(true, "emetteurList");
+    resetAndUpdateDialog(); // Réinitialise le formulaire
+    updateEmetteurList(false, "emetteurList"); // Actualise la liste en incluant les émetteurs personnalisés
   });
-
+  
   document.getElementById('editRowDialog').addEventListener('show', () => {
-    updateEmetteurList(true, "editEmetteurList");
+    updateEmetteurList(false, "editEmetteurList");
   });
 
   async function updateEmetteurList(excludeCustom = false, targetDropdownIds = ["emetteurList", "editEmetteurList"]) {
+    // Si targetDropdownIds est une chaîne, la convertir en tableau
+    if (typeof targetDropdownIds === "string") {
+      targetDropdownIds = [targetDropdownIds];
+    }
+    
     const selectedProject = document.getElementById('firstColumnDropdown').value;
     if (!selectedProject) return;
-
+  
     try {
-        console.log(`Mise à jour des émetteurs pour : ${selectedProject}, Exclure personnalisés : ${excludeCustom}`);
-
-        // Liste des émetteurs prédéfinis
-        const defaultEmetteurs = [
-            "ARCHI", "ASCENSORISTE", "CHARPENTIER", "DETAILS TECHNIQUES", "ETANCHEUR",
-            "FAÇADIER", "LOCAL TRANSFO", "METHODES", "PLAN DE DECAISSES DE SOLS",
-            "PLANS DOE", "PLANS GEOMETRES", "PREFA ESCALIERS", "RAPPORT DE SOL",
-            "RESEAUX ENTERRES", "RESERVATIONS", "SONDAGES"
-        ];
-
-        // Récupérer les émetteurs depuis la table Grist
-        const referenceTable = await grist.docApi.fetchTable('References');
-
-        if (!referenceTable.NomProjetString || referenceTable.NomProjetString.length === 0) {
-            console.error("Erreur : La colonne NomProjetString est vide ou introuvable !");
-            return;
+      // Liste par défaut
+      const defaultEmetteurs = [
+        "ARCHI", "ASCENSORISTE", "CHARPENTIER", "DETAILS TECHNIQUES", "ETANCHEUR",
+        "FAÇADIER", "LOCAL TRANSFO", "METHODES", "PLAN DECAISSES DE SOLS",
+        "PLANS DOE", "PLANS GEOMETRES", "PREFA ESCALIERS", "RAPPORT DE SOL",
+        "RESEAUX ENTERRES", "RESERVATIONS", "SONDAGES"
+      ];
+  
+      // Récupérer les enregistrements depuis Grist
+      const referenceTable = await grist.docApi.fetchTable('References');
+      if (!referenceTable.NomProjetString || referenceTable.NomProjetString.length === 0) {
+        console.error("Erreur : La colonne NomProjetString est vide ou introuvable !");
+        return;
+      }
+  
+      // Récupérer les émetteurs liés au projet sélectionné
+      let emetteursFromProject = referenceTable.Emetteur.filter((_, index) =>
+        referenceTable.NomProjetString[index] === selectedProject
+      );
+  
+      // Supprimer les doublons et conserver uniquement ceux qui ne sont pas dans defaultEmetteurs
+      let uniqueEmetteursFromProject = [...new Set(emetteursFromProject)]
+        .filter(emetteur => emetteur && !defaultEmetteurs.includes(emetteur))
+        .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+  
+      // Si excludeCustom est true, ne garder que ceux de defaultEmetteurs
+      if (excludeCustom) {
+        uniqueEmetteursFromProject = uniqueEmetteursFromProject.filter(emetteur => defaultEmetteurs.includes(emetteur));
+      }
+      
+      // Fusionner et trier la liste finale
+      let finalEmetteurList = [...defaultEmetteurs, ...uniqueEmetteursFromProject]
+        .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+  
+      // Pour la cible "emetteurList" (formulaire Ajouter une ligne),
+      // si l'input contient une valeur personnalisée non présente, l'ajouter
+      if (targetDropdownIds.includes("emetteurList")) {
+        const emitterInput = document.getElementById('emetteur');
+        const currentValue = emitterInput.value.trim();
+        if (currentValue && !finalEmetteurList.includes(currentValue)) {
+          finalEmetteurList.push(currentValue);
+          finalEmetteurList.sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
         }
-
-        // Filtrer les émetteurs liés au projet sélectionné
-        let emetteursFromProject = referenceTable.Emetteur.filter((_, index) => 
-            referenceTable.NomProjetString[index] === selectedProject
-        );
-
-        // Supprimer les doublons et trier
-        let uniqueEmetteursFromProject = [...new Set(emetteursFromProject)]
-            .filter(emetteur => emetteur && !defaultEmetteurs.includes(emetteur))
-            .sort();
-
-        // Exclure les émetteurs personnalisés si demandé
-        if (excludeCustom) {
-            uniqueEmetteursFromProject = uniqueEmetteursFromProject.filter(emetteur => defaultEmetteurs.includes(emetteur));
-        }
-
-        // Fusionner et mettre à jour la liste
-        const finalEmetteurList = [...defaultEmetteurs, ...uniqueEmetteursFromProject];
-        targetDropdownIds.forEach(targetId => populateDatalist(targetId, finalEmetteurList));
+      }
+      
+      // Mettre à jour chaque datalist ciblée
+      targetDropdownIds.forEach(targetId => populateDatalist(targetId, finalEmetteurList));
     } catch (error) {
-        console.error("Erreur lors de la récupération des émetteurs :", error);
+      console.error("Erreur lors de la récupération des émetteurs :", error);
     }
-  }
-
+  }  
+  
+  document.getElementById('emetteur').addEventListener('blur', () => {
+    updateEmetteurList(false, "emetteurList");
+  });
+  
   document.getElementById('editRowDialog').addEventListener('show', () => updateEmetteurList(false));
 
   document.getElementById('firstColumnDropdown').addEventListener('change', () => {
-    updateEmetteurList(true, "editEmetteurList");
+    updateEmetteurList(true, ["editEmetteurList"]);
   });
 
   document.getElementById('editRowDialog').addEventListener('show', updateEditEmetteurList);
