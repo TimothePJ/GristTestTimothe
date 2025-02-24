@@ -1628,7 +1628,7 @@
   }
 
   // Fonction pour réinitialiser la boîte de dialogue "Ajouter un document"
-  function resetAddDocumentDialog() {
+  async function resetAddDocumentDialog() {
     // Réinitialiser les champs texte et date
     document.getElementById('documentNumber').value = '';
     document.getElementById('documentName').value = '';
@@ -1642,12 +1642,7 @@
     }
   
     // Liste par défaut d'émetteurs
-    const defaultEmetteurs = [
-      "ARCHI", "ASCENSORISTE", "CHARPENTIER", "DETAILS TECHNIQUES", "ETANCHEUR",
-      "FAÇADIER", "LOCAL TRANSFO", "METHODES", "PLAN DECAISSES DE SOLS",
-      "PLANS DOE", "PLANS GEOMETRES", "PREFA ESCALIERS", "RAPPORT DE SOL",
-      "RESEAUX ENTERRES", "RESERVATIONS", "SONDAGES"
-    ];
+    const defaultEmetteurs = await getDefaultEmetteurs();
   
     // Extraire les émetteurs du projet à partir de records
     const projectEmetteurs = [...new Set(
@@ -1752,12 +1747,7 @@
 
     try {
         // Liste des émetteurs prédéfinis
-        const defaultEmetteurs = [
-            "ARCHI", "ASCENSORISTE", "CHARPENTIER", "DETAILS TECHNIQUES", "ETANCHEUR",
-            "FAÇADIER", "LOCAL TRANSFO", "METHODES", "PLAN DE DECAISSES DE SOLS",
-            "PLANS DOE", "PLANS GEOMETRES", "PREFA ESCALIERS", "RAPPORT DE SOL",
-            "RESEAUX ENTERRES", "RESERVATIONS", "SONDAGES"
-        ];
+        const defaultEmetteurs = await getDefaultEmetteurs();
 
         // Récupérer toutes les lignes de la table "References"
         const referenceTable = await grist.docApi.fetchTable('References');
@@ -1848,17 +1838,11 @@
     updateEmetteurList(true, "emetteur");
   }
 
-  function updateEmetteurListForInputs() {
+  async function updateEmetteurListForInputs() {
+    const defaultEmetteurs = await getDefaultEmetteurs();
     updateEmetteurList(true, "emetteurList");
     const selectedProject = document.getElementById('firstColumnDropdown')?.value;
     if (!selectedProject) return;
-  
-    const defaultEmetteurs = [
-      "ARCHI", "ASCENSORISTE", "CHARPENTIER", "DETAILS TECHNIQUES", "ETANCHEUR",
-      "FAÇADIER", "LOCAL TRANSFO", "METHODES", "PLAN DECAISSES DE SOLS",
-      "PLANS DOE", "PLANS GEOMETRES", "PREFA ESCALIERS", "RAPPORT DE SOL",
-      "RESEAUX ENTERRES", "RESERVATIONS", "SONDAGES"
-    ];
   
     if (!Array.isArray(records)) {
       console.error("Erreur : records est vide ou introuvable.");
@@ -1898,7 +1882,7 @@
     console.log("Valeur capturée dans l'émetteur :", currentEditEmetteur);
   });
 
-  function updateEditEmetteurList() {
+  async function updateEditEmetteurList() {
     const selectedProject = document.getElementById('firstColumnDropdown').value;
     const emetteurList = document.getElementById('editEmetteurList');
   
@@ -1907,12 +1891,7 @@
       return;
     }
   
-    const defaultEmetteurs = [
-      "ARCHI", "ASCENSORISTE", "CHARPENTIER", "DETAILS TECHNIQUES", "ETANCHEUR",
-      "FAÇADIER", "LOCAL TRANSFO", "METHODES", "PLAN DECAISSES DE SOLS",
-      "PLANS DOE", "PLANS GEOMETRES", "PREFA ESCALIERS", "RAPPORT DE SOL",
-      "RESEAUX ENTERRES", "RESERVATIONS", "SONDAGES"
-    ];
+    const defaultEmetteurs = await getDefaultEmetteurs();
   
     const projectEmetteurs = records
       .filter(record => record.NomProjet === selectedProject)
@@ -2001,6 +1980,10 @@
     updateEmetteurList(false, "editEmetteurList");
   });
 
+  document.getElementById('editRowDialog').addEventListener('show', async () => {
+    await updateEmetteurList(false, "editEmetteurList");
+  });  
+
   async function updateEmetteurList(excludeCustom = false, targetDropdownIds = ["emetteurList", "editEmetteurList"]) {
     // Si targetDropdownIds est une chaîne, la convertir en tableau
     if (typeof targetDropdownIds === "string") {
@@ -2012,12 +1995,7 @@
   
     try {
       // Liste par défaut
-      const defaultEmetteurs = [
-        "ARCHI", "ASCENSORISTE", "CHARPENTIER", "DETAILS TECHNIQUES", "ETANCHEUR",
-        "FAÇADIER", "LOCAL TRANSFO", "METHODES", "PLAN DECAISSES DE SOLS",
-        "PLANS DOE", "PLANS GEOMETRES", "PREFA ESCALIERS", "RAPPORT DE SOL",
-        "RESEAUX ENTERRES", "RESERVATIONS", "SONDAGES"
-      ];
+      const defaultEmetteurs = await getDefaultEmetteurs();
   
       // Récupérer les enregistrements depuis Grist
       const referenceTable = await grist.docApi.fetchTable('References');
@@ -2074,6 +2052,23 @@
   });
 
   document.getElementById('editRowDialog').addEventListener('show', updateEditEmetteurList);
+
+  async function getDefaultEmetteurs() {
+    try {
+      // Récupère la table "Emetteurs"
+      const emitterTable = await grist.docApi.fetchTable('Emetteurs');
+      // Supposons que la colonne s'appelle aussi "Emetteurs"
+      if (emitterTable && emitterTable.Emetteurs && emitterTable.Emetteurs.length > 0) {
+        // Filtrer les valeurs non nulles et trier selon la locale française
+        return emitterTable.Emetteurs.filter(val => !!val)
+          .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+      }
+      return []; // Retourne un tableau vide si rien n'est trouvé
+    } catch (error) {
+      console.error("Erreur lors de la récupération des émetteurs par défaut :", error);
+      return [];
+    }
+  }  
 
   </script>
 </body>
