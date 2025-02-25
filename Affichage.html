@@ -609,6 +609,17 @@
     // Ready Grist
     grist.ready();
 
+    // Variable globale pour stocker les enregistrements de la table "Team"
+    let teamRecords = [];
+
+    // Lorsque les enregistrements de la table sont disponibles, on les stocke
+    grist.onRecords((records, tableId) => {
+      if (tableId === "Team") {
+        teamRecords = records;
+        console.log("Team records loaded :", teamRecords);
+      }
+    });
+
     // Fonction pour peupler la première liste déroulante avec des valeurs uniques de la première colonne
     function populateFirstColumnDropdown(values) {
       const dropdown = document.getElementById('firstColumnDropdown');
@@ -1008,7 +1019,7 @@
     // Handle dialog form submission
     document.getElementById('addRowDialog').addEventListener('submit', async (e) => {
       e.preventDefault();
-    
+      
       const formData = new FormData(e.target);
       const emetteur = formData.get('emetteur');
       const reference = formData.get('reference');
@@ -1017,26 +1028,25 @@
       const description = formData.get('description');
       const datelimite = formData.get('datelimite');
       const isDuplicate = document.getElementById('duplicateCheckbox').checked;
-    
+      
       try {
-        // Récupérer les informations du projet
+        // Récupérer l'ID du projet à partir de la table Projets
         const projets = await grist.docApi.fetchTable('Projets');
         const projectIndex = projets.Nom_de_projet.indexOf(selectedFirstValue);
-        if (projectIndex === -1) throw new Error('Projet introuvable.');
+        if (projectIndex === -1) throw new Error("Projet introuvable.");
         const projectId = projets.id[projectIndex];
-    
+        
+        // Récupérer le service depuis la table Team (la première ligne)
+        const serviceValue = await getTeamService();
+        
         const userActions = [];
-    
+        
         if (isDuplicate) {
-          // Récupérer les documents sélectionnés pour duplication
+          // Si duplication sur plusieurs documents
           const selectedDocuments = Array.from(document.querySelectorAll('input[name="documents"]:checked')).map(input => input.value);
-    
-          // Ajouter une ligne dans le document actuellement sélectionné dans la deuxième liste déroulante
           if (!selectedDocuments.includes(selectedSecondValue)) {
             selectedDocuments.push(selectedSecondValue);
           }
-    
-          // Ajouter une ligne pour chaque document sélectionné
           selectedDocuments.forEach(docName => {
             const newRow = {
               NomProjet: projectId,
@@ -1047,12 +1057,11 @@
               Recu: recu,
               DescriptionObservations: description,
               DateLimite: datelimite,
+              Service: serviceValue  // Insertion du service récupéré
             };
             userActions.push(['AddRecord', 'References', null, newRow]);
           });
-    
         } else {
-          // Ajouter une seule ligne dans le document sélectionné dans la deuxième liste déroulante
           const newRow = {
             NomProjet: projectId,
             NomDocument: selectedSecondValue,
@@ -1062,18 +1071,18 @@
             Recu: recu,
             DescriptionObservations: description,
             DateLimite: datelimite,
+            Service: serviceValue  // Insertion du service récupéré
           };
           userActions.push(['AddRecord', 'References', null, newRow]);
         }
-    
-        // Appliquer les actions à Grist
+        
         await grist.docApi.applyUserActions(userActions);
-        console.log('Lignes ajoutées avec succès.');
+        console.log("Ligne(s) ajoutée(s) avec succès.");
         document.getElementById('addRowDialog').close();
         populateTable();
       } catch (error) {
-        console.error('Erreur lors de l\'ajout des lignes :', error);
-        alert('Erreur lors de l\'ajout des lignes.');
+        console.error("Erreur lors de l'ajout des lignes :", error);
+        alert("Erreur lors de l'ajout des lignes.");
       }
     });
     
@@ -1914,46 +1923,37 @@
   
   document.getElementById('editRowDialog').addEventListener('submit', async (e) => {
     e.preventDefault();
-
-    if (!selectedRecordId) {
-        console.error("Aucune ligne sélectionnée pour modification.");
-        return;
-    }
-
-    // Récupère l'émetteur saisi/modifié dans l'input
-    let newEmetteur = document.getElementById('editEmetteur').value.trim();
-
-    // Si l'utilisateur n'a rien saisi, garder l'ancien émetteur
-    if (!newEmetteur) {
-        console.warn("Aucun nouvel émetteur détecté, récupération de l'ancien...");
-        newEmetteur = records.find(r => r.id === selectedRecordId)?.Emetteur || '';
-    }
-
+  
+    // Récupérer le service de l'utilisateur depuis la table "Team"
+    const serviceValue = await getUserService();
+  
+    const formData = new FormData(e.target);
     const updatedRow = {
-        Emetteur: newEmetteur,
-        Reference: document.getElementById('editReference').value.trim() || records.find(r => r.id === selectedRecordId)?.Reference || '',
-        Indice: document.getElementById('editIndice').value.trim() || records.find(r => r.id === selectedRecordId)?.Indice || '',
-        Recu: document.getElementById('editRecu').value || records.find(r => r.id === selectedRecordId)?.Recu || '',
-        DescriptionObservations: document.getElementById('editDescription').value.trim() || records.find(r => r.id === selectedRecordId)?.DescriptionObservations || '',
-        DateLimite: document.getElementById('editDatelimite').value || records.find(r => r.id === selectedRecordId)?.DateLimite || ''
+      Emetteur: formData.get('editEmetteur'),
+      Reference: formData.get('reference'),
+      Indice: formData.get('indice'),
+      Recu: formData.get('recu'),
+      DescriptionObservations: formData.get('description'),
+      DateLimite: formData.get('datelimite'),
+      Service: serviceValue  // Mise à jour automatique du service
     };
-
-    try {
+  
+    if (selectedRecordId) {
+      try {
         console.log("Mise à jour envoyée à Grist :", updatedRow);
-
         await grist.docApi.applyUserActions([
-            ['UpdateRecord', 'References', selectedRecordId, updatedRow]
+          ['UpdateRecord', 'References', selectedRecordId, updatedRow]
         ]);
-
         console.log("Mise à jour réussie !");
         await populateTable();
         document.getElementById('editRowDialog').close();
-    } catch (error) {
+      } catch (error) {
         console.error("Erreur lors de la mise à jour :", error);
         alert("Erreur lors de la modification.");
+      }
     }
   });
-
+  
   // Met à jour la liste si l'utilisateur change de projet avant d'éditer une ligne
   document.getElementById('firstColumnDropdown').addEventListener('change', updateEditEmetteurList);
 
@@ -2055,18 +2055,37 @@
 
   async function getDefaultEmetteurs() {
     try {
-      // Récupère la table "Emetteurs"
       const emitterTable = await grist.docApi.fetchTable('Emetteurs');
-      // Supposons que la colonne s'appelle aussi "Emetteurs"
       if (emitterTable && emitterTable.Emetteurs && emitterTable.Emetteurs.length > 0) {
-        // Filtrer les valeurs non nulles et trier selon la locale française
         return emitterTable.Emetteurs.filter(val => !!val)
           .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
       }
-      return []; // Retourne un tableau vide si rien n'est trouvé
+      return [];
     } catch (error) {
       console.error("Erreur lors de la récupération des émetteurs par défaut :", error);
       return [];
+    }
+  }  
+
+  async function getTeamService() {
+    try {
+      const teamTable = await grist.docApi.fetchTable('Team');
+      // Si la table est retournée en format tableau d'objets
+      if (Array.isArray(teamTable)) {
+        if (teamTable.length > 0) {
+          console.log("Service récupéré (tableau d'objets) :", teamTable[0].Service);
+          return teamTable[0].Service || "";
+        }
+      }
+      // Sinon, si la table est retournée au format colonnes (objet avec des tableaux)
+      else if (teamTable.Service && Array.isArray(teamTable.Service)) {
+        console.log("Service récupéré (format colonnes) :", teamTable.Service[0]);
+        return teamTable.Service[0] || "";
+      }
+      return "";
+    } catch (error) {
+      console.error("Erreur lors de la récupération du service depuis la table Team :", error);
+      return "";
     }
   }  
 
