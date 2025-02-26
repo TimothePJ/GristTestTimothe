@@ -472,13 +472,13 @@
       <input type="text" id="indice" name="indice" required placeholder="Entrez un indice (Exemple : 0)">
 
       <label for="recu">Recu:</label>
-      <input type="date" id="recu" name="recu" required>
+      <input type="date" id="recu" name="recu" placeholder="YYYY-MM-DD">
 
       <label for="description">Description:</label>
       <textarea id="description" name="description" required placeholder="Entrez une description (Exemple : EN ATTENTE)"></textarea>
 
       <label for="datelimite">Date Limite:</label>
-      <input type="date" id="datelimite" name="datelimite" required>
+      <input type="date" id="datelimite" name="datelimite">
 
       <div style="margin-top: 10px; display: flex; align-items: center;">
         <label for="duplicateCheckbox" style="display: flex; align-items: center; gap: 10px; font-weight: bold; white-space: nowrap;">
@@ -512,7 +512,7 @@
       <input type="text" id="documentName" name="documentName" required>
   
       <label for="defaultDatelimite">Date Limite réception données par défaut:</label>
-      <input type="date" id="defaultDatelimite" name="defaultDatelimite" required>
+      <input type="date" id="defaultDatelimite" name="defaultDatelimite">
   
       <div>
         <label>Émetteurs:</label>
@@ -578,7 +578,7 @@
       <textarea id="editDescription" name="description" required placeholder="Entrez une description (Exemple : EN ATTENTE)"></textarea>
 
       <label for="editDatelimite">Date Limite:</label>
-      <input type="date" id="editDatelimite" name="datelimite" required>
+      <input type="date" id="editDatelimite" name="datelimite">
 
       <div class="dialog-buttons">
         <button type="submit">Enregistrer</button>
@@ -1026,8 +1026,12 @@
       const indice = formData.get('indice');
       const recu = formData.get('recu');
       const description = formData.get('description');
-      const datelimite = formData.get('datelimite');
+      let datelimite = formData.get('datelimite');
       const isDuplicate = document.getElementById('duplicateCheckbox').checked;
+
+      if (!datelimite) {
+        datelimite = "1900-01-01";
+      }
       
       try {
         // Récupérer l'ID du projet à partir de la table Projets
@@ -1254,7 +1258,11 @@
       const formData = new FormData(e.target);
       const documentNumber = formData.get('documentNumber');
       const documentName = formData.get('documentName');
-      const defaultDatelimite = formData.get('defaultDatelimite') || '1900-01-01';
+      let defaultDatelimite = formData.get('defaultDatelimite');
+
+      if (!defaultDatelimite) {
+        defaultDatelimite = "1900-01-01";
+      }
       
       const combinedDocumentName = `${documentNumber}-${documentName}`.trim();
       
@@ -1928,18 +1936,21 @@
   document.getElementById('editRowDialog').addEventListener('submit', async (e) => {
     e.preventDefault();
   
-    // Récupérer le service de l'utilisateur depuis la table "Team"
-    const serviceValue = await getUserService();
-  
     const formData = new FormData(e.target);
+    let datelimite = formData.get('datelimite');
+  
+    // Vérifier si vide, assigner "1900-01-01"
+    if (!datelimite || datelimite.trim() === "") {
+      datelimite = "1900-01-01";
+    }
+  
     const updatedRow = {
       Emetteur: formData.get('editEmetteur'),
       Reference: formData.get('reference'),
       Indice: formData.get('indice'),
       Recu: formData.get('recu'),
       DescriptionObservations: formData.get('description'),
-      DateLimite: formData.get('datelimite'),
-      Service: serviceValue  // Mise à jour automatique du service
+      DateLimite: datelimite // Valeur corrigée ici
     };
   
     if (selectedRecordId) {
