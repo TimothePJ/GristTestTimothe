@@ -1248,16 +1248,16 @@
 
     document.getElementById('addDocumentDialog').addEventListener('submit', async (e) => {
       e.preventDefault();
-    
-      trimInputs(e.target); // Nettoyage des espaces superflus
-    
+      
+      trimInputs(e.target); // Nettoie les entrées (évite les espaces superflus)
+      
       const formData = new FormData(e.target);
       const documentNumber = formData.get('documentNumber');
       const documentName = formData.get('documentName');
       const defaultDatelimite = formData.get('defaultDatelimite') || '1900-01-01';
-    
+      
       const combinedDocumentName = `${documentNumber}-${documentName}`.trim();
-    
+      
       if (!documentNumber || !documentName.trim()) {
         alert("Le numéro et le nom du document sont requis.");
         return;
@@ -1268,16 +1268,16 @@
       ).map(checkbox => {
         // Trouve l'input texte qui est juste après la case à cocher
         const textInput = checkbox.nextElementSibling;
-
+    
         // Si c'est un champ texte (pour les émetteurs personnalisés)
         if (textInput && textInput.tagName === "INPUT" && textInput.type === "text") {
           const customValue = textInput.value.trim();
           return customValue ? customValue : null; // Retourne la valeur écrite, sinon null
         }
-
+    
         return checkbox.value; // Pour les émetteurs standards
       }).filter(value => value); // Supprime les valeurs nulles
-
+    
       if (selectedEmitters.length === 0) {
         alert("Veuillez sélectionner au moins un émetteur.");
         return;
@@ -1296,6 +1296,9 @@
         if (projectIndex === -1) throw new Error("Projet introuvable.");
         const projectId = projets.id[projectIndex];
     
+        // Récupérer le service depuis la table Team (la première ligne)
+        const serviceValue = await getTeamService();
+    
         // Création des nouvelles lignes
         const newRows = selectedEmitters.map((emetteur) => ({
           NomProjet: projectId,
@@ -1306,6 +1309,7 @@
           Recu: '1900-01-01',
           DescriptionObservations: 'EN ATTENTE',
           DateLimite: defaultDatelimite,
+          Service: serviceValue
         }));
     
         const actions = newRows.map(row => ['AddRecord', 'References', null, row]);
@@ -2070,14 +2074,12 @@
   async function getTeamService() {
     try {
       const teamTable = await grist.docApi.fetchTable('Team');
-      // Si la table est retournée en format tableau d'objets
-      if (Array.isArray(teamTable)) {
-        if (teamTable.length > 0) {
-          console.log("Service récupéré (tableau d'objets) :", teamTable[0].Service);
-          return teamTable[0].Service || "";
-        }
+      // Vérifier si la table est au format tableau d'objets
+      if (Array.isArray(teamTable) && teamTable.length > 0) {
+        console.log("Service récupéré (tableau d'objets) :", teamTable[0].Service);
+        return teamTable[0].Service || "";
       }
-      // Sinon, si la table est retournée au format colonnes (objet avec des tableaux)
+      // Vérifier si la table est au format colonnes (objet avec des tableaux)
       else if (teamTable.Service && Array.isArray(teamTable.Service)) {
         console.log("Service récupéré (format colonnes) :", teamTable.Service[0]);
         return teamTable.Service[0] || "";
@@ -2087,8 +2089,8 @@
       console.error("Erreur lors de la récupération du service depuis la table Team :", error);
       return "";
     }
-  }  
-
+  }
+  
   </script>
 </body>
 
