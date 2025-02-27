@@ -467,7 +467,8 @@
         // Gestion de l'importation de fichiers pour remplir la référence
         document.getElementById('referenceFile').addEventListener('change', function () {
           if (this.files.length > 0) {
-            document.getElementById('referenceInput').value = this.files[0].name;
+              const fileName = this.files[0].name;
+              document.getElementById('referenceInput').value = removeFileExtension(fileName);
           }
         });
       </script>
@@ -994,11 +995,12 @@
 
     // Gestion de l’importation de fichiers pour remplir la référence
     document.getElementById('editReferenceFile').addEventListener('change', function () {
-        if (this.files.length > 0) {
-            document.getElementById('editReference').value = this.files[0].name;
-        }
+      if (this.files.length > 0) {
+          const fileName = this.files[0].name;
+          document.getElementById('editReference').value = removeFileExtension(fileName);
+      }
     });
-
+    
     // Add event listener for "Modifier" option
     document.getElementById('editOption').addEventListener('click', () => {
       if (selectedRecordId) {
@@ -1124,13 +1126,6 @@
             console.error("Error updating row:", error);
             alert("Error updating row.");
           });
-      }
-    });
-
-    // Handle file selection in edit dialog
-    document.getElementById('editReferenceFile').addEventListener('change', function () {
-      if (this.files.length > 0) {
-        document.getElementById('editReference').value = this.files[0].name;
       }
     });
 
@@ -2109,6 +2104,11 @@
       }
     });
   }  
+
+  // Fonction pour retirer l'extension d'un fichier
+  function removeFileExtension(fileName) {
+    return fileName.replace(/\.[^/.]+$/, ""); // Supprime tout après le dernier point
+  }
   
   </script>
 </body>
