@@ -1149,35 +1149,45 @@
       }
     });
 
-    document.getElementById('deleteOption').addEventListener('click', () => {
+    document.getElementById('deleteOption').addEventListener('click', async () => {
       if (!selectedRecordId) {
-        console.warn("Aucune ligne sélectionnée pour suppression.");
-        return;
+          console.warn("Aucune ligne sélectionnée pour suppression.");
+          return;
       }
-    
-      // Demande confirmation avant de supprimer
+  
+      // Demande de confirmation
       const confirmDelete = confirm("Êtes-vous sûr de vouloir supprimer cette ligne ?");
-      
       if (!confirmDelete) {
-        console.log("Suppression annulée par l'utilisateur.");
-        return;
+          console.log("Suppression annulée par l'utilisateur.");
+          return;
       }
-    
-      // Si l'utilisateur confirme, on supprime la ligne
-      grist.docApi.applyUserActions([
-        ['RemoveRecord', 'References', selectedRecordId]
-      ])
-        .then(() => {
+  
+      // Demander un mot de passe avant de supprimer
+      const password = prompt("Veuillez entrer le mot de passe pour supprimer cette ligne :");
+  
+      const correctPassword = "admin"; 
+  
+      if (password !== correctPassword) {
+          alert("Mot de passe incorrect. Suppression annulée.");
+          console.warn("Tentative de suppression avec un mot de passe incorrect.");
+          return;
+      }
+  
+      // Suppression après validation du mot de passe
+      try {
+          await grist.docApi.applyUserActions([
+              ['RemoveRecord', 'References', selectedRecordId]
+          ]);
+  
           console.log(`Ligne ${selectedRecordId} supprimée avec succès.`);
-          populateTable(); // Actualise le tableau
+          populateTable(); // Rafraîchir la table
           hideContextMenu();
-        })
-        .catch(error => {
+      } catch (error) {
           console.error("Erreur lors de la suppression de la ligne :", error);
           alert("Une erreur s'est produite lors de la suppression.");
-        });
+      }
     });
-    
+  
     // Fonction pour cacher le menu contextuel
     function hideContextMenu() {
       const contextMenu = document.getElementById('contextMenu');
