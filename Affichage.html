@@ -893,18 +893,6 @@
       contextMenu.style.top = `${event.pageY}px`;
     }
 
-    // Lorsqu'on ouvre le formulaire, on pré-remplit l'émetteur récupéré
-    document.getElementById('addRowOption').addEventListener('click', () => {
-      const dialog = document.getElementById('addRowDialog');
-
-      if (currentEmetteur) {
-        document.getElementById('emetteur').value = currentEmetteur;
-      }
-
-      dialog.showModal();
-      hideContextMenu();
-    });
-
     // Hide context menu if clicked elsewhere
     document.addEventListener('click', function (event) {
       const contextMenu = document.getElementById('contextMenu');
@@ -916,6 +904,9 @@
     // Add event listener for "Ajouter une ligne" option
     document.getElementById('addRowOption').addEventListener('click', () => {
       const dialog = document.getElementById('addRowDialog');
+
+      // Réinitialise la fenêtre avant ouverture
+      resetAddRowDialog();
   
       if (currentContextMenuEmitter) {
           document.getElementById('emetteur').value = currentContextMenuEmitter; // Pré-remplit l'émetteur
@@ -1019,77 +1010,77 @@
     // Handle dialog form submission
     document.getElementById('addRowDialog').addEventListener('submit', async (e) => {
       e.preventDefault();
-      
+  
       const formData = new FormData(e.target);
       const emetteur = formData.get('emetteur');
       const reference = formData.get('reference');
       const indice = formData.get('indice');
-      const recu = formData.get('recu');
+      let recu = formData.get('recu'); // Peut être vide
       const description = formData.get('description');
-      let datelimite = formData.get('datelimite');
+      let datelimite = formData.get('datelimite'); // Peut être vide
       const isDuplicate = document.getElementById('duplicateCheckbox').checked;
-
-      if (!datelimite) {
-        datelimite = "1900-01-01";
-      }
-      
+  
+      if (!recu) recu = "1900-01-01";
+      if (!datelimite) datelimite = "1900-01-01";
+  
       try {
-        // Récupérer l'ID du projet à partir de la table Projets
-        const projets = await grist.docApi.fetchTable('Projets');
-        const projectIndex = projets.Nom_de_projet.indexOf(selectedFirstValue);
-        if (projectIndex === -1) throw new Error("Projet introuvable.");
-        const projectId = projets.id[projectIndex];
-        
-        // Récupérer le service depuis la table Team (la première ligne)
-        const serviceValue = await getTeamService();
-        
-        const userActions = [];
-        
-        if (isDuplicate) {
-          // Si duplication sur plusieurs documents
-          const selectedDocuments = Array.from(document.querySelectorAll('input[name="documents"]:checked')).map(input => input.value);
-          if (!selectedDocuments.includes(selectedSecondValue)) {
-            selectedDocuments.push(selectedSecondValue);
+          const projets = await grist.docApi.fetchTable('Projets');
+          const projectIndex = projets.Nom_de_projet.indexOf(selectedFirstValue);
+          if (projectIndex === -1) throw new Error("Projet introuvable.");
+          const projectId = projets.id[projectIndex];
+  
+          const serviceValue = await getTeamService();
+  
+          const userActions = [];
+  
+          if (isDuplicate) {
+              const selectedDocuments = Array.from(document.querySelectorAll('input[name="documents"]:checked'))
+                  .map(input => input.value);
+  
+              if (!selectedDocuments.includes(selectedSecondValue)) {
+                  selectedDocuments.push(selectedSecondValue);
+              }
+  
+              selectedDocuments.forEach(docName => {
+                  const newRow = {
+                      NomProjet: projectId,
+                      NomDocument: docName,
+                      Emetteur: emetteur,
+                      Reference: reference,
+                      Indice: indice,
+                      Recu: recu,
+                      DescriptionObservations: description,
+                      DateLimite: datelimite,
+                      Service: serviceValue
+                  };
+                  userActions.push(['AddRecord', 'References', null, newRow]);
+              });
+          } else {
+              const newRow = {
+                  NomProjet: projectId,
+                  NomDocument: selectedSecondValue,
+                  Emetteur: emetteur,
+                  Reference: reference,
+                  Indice: indice,
+                  Recu: recu,
+                  DescriptionObservations: description,
+                  DateLimite: datelimite,
+                  Service: serviceValue
+              };
+              userActions.push(['AddRecord', 'References', null, newRow]);
           }
-          selectedDocuments.forEach(docName => {
-            const newRow = {
-              NomProjet: projectId,
-              NomDocument: docName,
-              Emetteur: emetteur,
-              Reference: reference,
-              Indice: indice,
-              Recu: recu,
-              DescriptionObservations: description,
-              DateLimite: datelimite,
-              Service: serviceValue  // Insertion du service récupéré
-            };
-            userActions.push(['AddRecord', 'References', null, newRow]);
-          });
-        } else {
-          const newRow = {
-            NomProjet: projectId,
-            NomDocument: selectedSecondValue,
-            Emetteur: emetteur,
-            Reference: reference,
-            Indice: indice,
-            Recu: recu,
-            DescriptionObservations: description,
-            DateLimite: datelimite,
-            Service: serviceValue  // Insertion du service récupéré
-          };
-          userActions.push(['AddRecord', 'References', null, newRow]);
-        }
-        
-        await grist.docApi.applyUserActions(userActions);
-        console.log("Ligne(s) ajoutée(s) avec succès.");
-        document.getElementById('addRowDialog').close();
-        populateTable();
+  
+          await grist.docApi.applyUserActions(userActions);
+          console.log("Ligne(s) ajoutée(s) avec succès.");
+  
+          document.getElementById('addRowDialog').close();
+          populateTable();
       } catch (error) {
-        console.error("Erreur lors de l'ajout des lignes :", error);
-        alert("Erreur lors de l'ajout des lignes.");
+          console.error("Erreur lors de l'ajout des lignes :", error);
+          alert("Erreur lors de l'ajout des lignes.");
       }
     });
-    
+  
     // Gérer l'annulation du formulaire d'ajout de ligne
     document.getElementById('cancelAddRowButton').addEventListener('click', () => {
       document.getElementById('addRowDialog').close();
@@ -2101,6 +2092,19 @@
       return "";
     }
   }
+
+  function resetAddRowDialog() {
+    const dialog = document.getElementById('addRowDialog');
+    const inputs = dialog.querySelectorAll('input, textarea, select');
+    
+    inputs.forEach(input => {
+      if (input.type === 'checkbox') {
+        input.checked = false; // Décoche les cases
+      } else {
+        input.value = ''; // Réinitialise les champs texte et date
+      }
+    });
+  }  
   
   </script>
 </body>
