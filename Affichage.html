@@ -353,25 +353,31 @@
         });
       
         function updateReferenceList() {
-          const selectedProject = document.getElementById('firstColumnDropdown').value; // Projet sélectionné
-          const selectedEmitter = document.getElementById('emetteur').value || currentContextMenuEmitter; // Utilise l'émetteur capturé ou sélectionné
-          const referenceList = document.getElementById('referenceList'); // Liste déroulante des références
+          const selectedProject = document.getElementById('firstColumnDropdown').value;
+          const selectedEmitter = document.getElementById('emetteur').value || currentContextMenuEmitter;
+          const referenceList = document.getElementById('referenceList');
         
           // Vérifier si le projet et l'émetteur sont valides
           if (!selectedProject || !selectedEmitter) {
-            referenceList.innerHTML = ''; // Vider la liste si pas de sélection
+            referenceList.innerHTML = '';
             return;
           }
         
-          // Filtrer les références selon le projet et l'émetteur
+          // Vider la liste existante
+          referenceList.innerHTML = '';
+        
+          // 1) Option par défaut "_"
+          const defaultOption = document.createElement('option');
+          defaultOption.value = '_';    // La valeur qu'on veut proposer
+          referenceList.appendChild(defaultOption);
+        
+          // 2) Puis insérer les références filtrées
           const filteredReferences = records
             .filter(record => record.NomProjet === selectedProject && record.Emetteur === selectedEmitter)
             .map(record => record.Reference)
-            .filter((value, index, self) => value && self.indexOf(value) === index) // Supprime les doublons
+            .filter((value, index, self) => value && self.indexOf(value) === index)
             .sort((a, b) => a.localeCompare(b, 'fr', { ignorePunctuation: true }));
         
-          // Réinitialiser et remplir la liste des références
-          referenceList.innerHTML = '';
           filteredReferences.forEach(reference => {
             const option = document.createElement('option');
             option.value = reference;
@@ -381,56 +387,51 @@
         
         // Fonction pour remplir automatiquement les champs en fonction de la référence sélectionnée
         function autoFillFields() {
-          const selectedReference = document.getElementById('referenceInput').value; // Référence sélectionnée
-          const selectedProject = document.getElementById('firstColumnDropdown').value; // Projet sélectionné
-          const selectedEmitter = document.getElementById('emetteur').value || currentContextMenuEmitter; // Émetteur sélectionné
-      
-          // Vérifier si les données nécessaires sont présentes
+          const selectedReference = document.getElementById('referenceInput').value; 
+          const selectedProject   = document.getElementById('firstColumnDropdown').value; 
+          const selectedEmitter   = document.getElementById('emetteur').value || currentContextMenuEmitter;
+        
           if (!selectedReference || !selectedProject || !selectedEmitter) {
-              console.warn("Référence, projet ou émetteur non sélectionné(s).");
-              return;
+            return;
           }
-      
-          // Trouver l'enregistrement correspondant dans `records`
+        
+          // Si c'est "_", on remplit avec les valeurs par défaut
+          if (selectedReference === '_') {
+            document.getElementById('indice').value       = '-';
+            document.getElementById('recu').value         = '1900-01-01';
+            document.getElementById('description').value  = 'EN ATTENTE';
+            document.getElementById('datelimite').value   = '1900-01-01';
+            return;
+          }
+        
+          // Sinon, on cherche un enregistrement dans `records` pour autofill
           const matchingRecord = records.find(record =>
-              record.NomProjet === selectedProject &&
-              record.Emetteur === selectedEmitter &&
-              record.Reference === selectedReference
+            record.NomProjet === selectedProject &&
+            record.Emetteur === selectedEmitter &&
+            record.Reference === selectedReference
           );
-      
-          // Fonction pour convertir une date en format YYYY-MM-DD (compatible avec <input type="date">)
+        
           function formatDateForInput(dateString) {
-              if (!dateString) return ''; // Retourne une chaîne vide si la date est vide
-      
-              const date = new Date(dateString);
-              if (isNaN(date.getTime())) return ''; // Retourne une chaîne vide si la date est invalide
-      
-              return date.toISOString().split('T')[0]; // Formate en "YYYY-MM-DD"
+            if (!dateString) return '';
+            const date = new Date(dateString);
+            return isNaN(date.getTime()) ? '' : date.toISOString().split('T')[0];
           }
-      
-          // Remplir les champs si une correspondance est trouvée
+        
           if (matchingRecord) {
-              console.log("Enregistrement correspondant :", matchingRecord);
-      
-              document.getElementById('indice').value = matchingRecord.Indice || '';
-              document.getElementById('description').value = matchingRecord.DescriptionObservations || '';
-      
-              // Formater et remplir le champ "Reçu" au format YYYY-MM-DD
-              document.getElementById('recu').value = formatDateForInput(matchingRecord.Recu);
-      
-              // Formater et remplir le champ "Date Limite" au format YYYY-MM-DD
-              document.getElementById('datelimite').value = formatDateForInput(matchingRecord.DateLimite);
-      
+            // Remplir avec les infos réelles
+            document.getElementById('indice').value      = matchingRecord.Indice || '';
+            document.getElementById('description').value = matchingRecord.DescriptionObservations || '';
+            document.getElementById('recu').value        = formatDateForInput(matchingRecord.Recu);
+            document.getElementById('datelimite').value  = formatDateForInput(matchingRecord.DateLimite);
           } else {
-              // Si aucun enregistrement correspondant n'est trouvé, vider les champs
-              console.warn("Aucun enregistrement correspondant trouvé pour la référence sélectionnée.");
-              document.getElementById('indice').value = '';
-              document.getElementById('description').value = '';
-              document.getElementById('recu').value = ''; // Vider le champ de la date "Reçu"
-              document.getElementById('datelimite').value = ''; // Vider le champ de la date "Date Limite"
+            // Rien trouvé -> vider les champs (ou gérer autrement)
+            document.getElementById('indice').value      = '';
+            document.getElementById('description').value = '';
+            document.getElementById('recu').value        = '';
+            document.getElementById('datelimite').value  = '';
           }
         }
-      
+        
         // Fonction pour réinitialiser le formulaire et actualiser les références à chaque ouverture
         function resetAndUpdateDialog() {
           const addRowDialog = document.getElementById('addRowDialog');
@@ -844,43 +845,36 @@
     // Show edit dialog with row data
     function showEditDialog(record) {
       const dialog = document.getElementById('editRowDialog');
-  
-      // Vérifier si l'enregistrement est valide
+    
       if (!record) {
-          console.warn("Aucun enregistrement sélectionné pour modification.");
-          return;
+        console.warn("Aucun enregistrement sélectionné pour modification.");
+        return;
       }
-  
       console.log("Enregistrement en cours de modification :", record);
-  
-      // Fonction pour convertir une date en format YYYY-MM-DD (compatible avec <input type="date">)
+    
+      // --- Convertir la date en format YYYY-MM-DD si besoin ---
       function formatDateForInput(dateString) {
-          if (!dateString) return ''; // Retourne une chaîne vide si la date est vide
-  
-          const date = new Date(dateString);
-          if (isNaN(date.getTime())) return ''; // Retourne une chaîne vide si la date est invalide
-  
-          return date.toISOString().split('T')[0]; // Formate en "YYYY-MM-DD"
+        if (!dateString) return '';
+        const date = new Date(dateString);
+        return isNaN(date.getTime()) ? '' : date.toISOString().split('T')[0];
       }
-
-      updateEditReferenceList()
-  
-      // Pré-remplir les champs avec les valeurs actuelles
+    
+      // Assigne D'ABORD l'émetteur au champ "editEmetteur".
       document.getElementById('editEmetteur').value = record.Emetteur || '';
+    
+      // Met à jour la liste des références APRÈS avoir défini l'émetteur.
+      updateEditReferenceList();
+    
+      // Maintenant on peut remplir la référence et les autres champs.
       document.getElementById('editReference').value = record.Reference || '';
       document.getElementById('editIndice').value = record.Indice || '';
       document.getElementById('editDescription').value = record.DescriptionObservations || '';
-  
-      // Formater et remplir le champ "Reçu" au format YYYY-MM-DD
       document.getElementById('editRecu').value = formatDateForInput(record.Recu);
-  
-      // Formater et remplir le champ "Date Limite" au format YYYY-MM-DD
       document.getElementById('editDatelimite').value = formatDateForInput(record.DateLimite);
-  
-      // Ouvrir la boîte de dialogue
+    
       dialog.showModal();
     }
-  
+    
     // Gestion du menu contextuel et récupération de l'émetteur
     function showContextMenu(event, recordId) {
       event.preventDefault();
@@ -924,68 +918,80 @@
     });
 
     function updateEditReferenceList() {
-      const selectedProject = document.getElementById('firstColumnDropdown').value; // Projet sélectionné
-      const selectedEmitter = document.getElementById('editEmetteur').value; // Émetteur sélectionné dans la modification
-      const referenceList = document.getElementById('editReferenceList'); // Liste déroulante des références
-  
-      // Vérifier si le projet et l'émetteur sont valides
+      const selectedProject = document.getElementById('firstColumnDropdown').value; 
+      const selectedEmitter = document.getElementById('editEmetteur').value; 
+      const referenceList   = document.getElementById('editReferenceList');
+    
       if (!selectedProject || !selectedEmitter) {
-          referenceList.innerHTML = ''; // Vider la liste si pas de sélection
-          return;
+        referenceList.innerHTML = '';
+        return;
       }
-  
-      // Filtrer les références selon le projet et l'émetteur
-      const filteredReferences = records
-          .filter(record => record.NomProjet === selectedProject && record.Emetteur === selectedEmitter)
-          .map(record => record.Reference)
-          .filter((value, index, self) => value && self.indexOf(value) === index) // Supprimer les doublons
-          .sort((a, b) => a.localeCompare(b, 'fr', { ignorePunctuation: true }));
-  
-      // Réinitialiser et remplir la liste des références
+    
       referenceList.innerHTML = '';
+    
+      // Ajouter la proposition "_"
+      const defaultOption = document.createElement('option');
+      defaultOption.value = '_';
+      referenceList.appendChild(defaultOption);
+    
+      const filteredReferences = records
+        .filter(record => record.NomProjet === selectedProject && record.Emetteur === selectedEmitter)
+        .map(record => record.Reference)
+        .filter((value, index, self) => value && self.indexOf(value) === index)
+        .sort((a, b) => a.localeCompare(b, 'fr', { ignorePunctuation: true }));
+    
       filteredReferences.forEach(reference => {
-          const option = document.createElement('option');
-          option.value = reference;
-          referenceList.appendChild(option);
+        const option = document.createElement('option');
+        option.value = reference;
+        referenceList.appendChild(option);
       });
-    }  
-
+    }
+    
     function autoFillEditFields() {
-      const selectedReference = document.getElementById('editReference').value; // Référence sélectionnée
-      const selectedProject = document.getElementById('firstColumnDropdown').value; // Projet sélectionné
-      const selectedEmitter = document.getElementById('editEmetteur').value; // Émetteur sélectionné
-
-      // Vérifier si les données sont valides
+      const selectedReference = document.getElementById('editReference').value;
+      const selectedProject   = document.getElementById('firstColumnDropdown').value;
+      const selectedEmitter   = document.getElementById('editEmetteur').value;
+    
       if (!selectedReference || !selectedProject || !selectedEmitter) {
-          return;
+        return;
       }
-
-      // Trouver l'enregistrement correspondant
+    
+      // Si "_" => valeurs par défaut
+      if (selectedReference === '_') {
+        document.getElementById('editIndice').value       = '-';
+        document.getElementById('editDescription').value  = 'EN ATTENTE';
+        document.getElementById('editRecu').value         = '1900-01-01';
+        document.getElementById('editDatelimite').value   = '1900-01-01';
+        return;
+      }
+    
+      // Sinon chercher le record correspondant
       const matchingRecord = records.find(record =>
-          record.NomProjet === selectedProject &&
-          record.Emetteur === selectedEmitter &&
-          record.Reference === selectedReference
+        record.NomProjet === selectedProject &&
+        record.Emetteur === selectedEmitter &&
+        record.Reference === selectedReference
       );
-
-      // Fonction pour convertir une date en format YYYY-MM-DD
+    
       function formatDateForInput(dateString) {
-          if (!dateString) return ''; // Retourne une chaîne vide si la date est vide
-
-          const date = new Date(dateString);
-          if (isNaN(date.getTime())) return ''; // Retourne une chaîne vide si la date est invalide
-
-          return date.toISOString().split('T')[0]; // Formate en "YYYY-MM-DD"
+        if (!dateString) return '';
+        const date = new Date(dateString);
+        return isNaN(date.getTime()) ? '' : date.toISOString().split('T')[0];
       }
-
-      // Remplir les champs si une correspondance est trouvée
+    
       if (matchingRecord) {
-          document.getElementById('editIndice').value = matchingRecord.Indice || '';
-          document.getElementById('editDescription').value = matchingRecord.DescriptionObservations || '';
-          document.getElementById('editRecu').value = formatDateForInput(matchingRecord.Recu);
-          document.getElementById('editDatelimite').value = formatDateForInput(matchingRecord.DateLimite);
+        document.getElementById('editIndice').value      = matchingRecord.Indice || '';
+        document.getElementById('editDescription').value = matchingRecord.DescriptionObservations || '';
+        document.getElementById('editRecu').value        = formatDateForInput(matchingRecord.Recu);
+        document.getElementById('editDatelimite').value  = formatDateForInput(matchingRecord.DateLimite);
+      } else {
+        // Aucun matchingRecord -> vider ou laisser par défaut
+        document.getElementById('editIndice').value      = '';
+        document.getElementById('editDescription').value = '';
+        document.getElementById('editRecu').value        = '';
+        document.getElementById('editDatelimite').value  = '';
       }
     }
-
+    
     // Mise à jour de la liste des références lorsqu'on change le projet ou l'émetteur
     document.getElementById('firstColumnDropdown').addEventListener('change', updateEditReferenceList);
     document.getElementById('editEmetteur').addEventListener('change', updateEditReferenceList);
@@ -1186,7 +1192,7 @@
           console.error("Erreur lors de la suppression de la ligne :", error);
           alert("Une erreur s'est produite lors de la suppression.");
       }
-    });
+  });
   
     // Fonction pour cacher le menu contextuel
     function hideContextMenu() {
