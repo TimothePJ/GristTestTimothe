@@ -351,11 +351,16 @@
         // Cacher le menu contextuel lorsqu'on clique ailleurs
         document.addEventListener('click', function (event) {
           const contextMenu = document.getElementById('contextMenu');
+          // Si le clic n'est pas sur le menu contextuel, le masquer...
           if (!contextMenu.contains(event.target)) {
             contextMenu.style.display = 'none';
+            // Retire la surbrillance de toutes les lignes
+            document.querySelectorAll('#tableBody tr.highlighted').forEach(row => {
+              row.classList.remove('highlighted');
+            });
           }
         });
-      
+        
         function updateReferenceList() {
           const selectedProject = document.getElementById('firstColumnDropdown').value;
           const selectedEmitter = document.getElementById('emetteur').value || currentContextMenuEmitter;
@@ -903,14 +908,6 @@
       contextMenu.style.top = `${event.pageY}px`;
     }
 
-    // Hide context menu if clicked elsewhere
-    document.addEventListener('click', function (event) {
-      const contextMenu = document.getElementById('contextMenu');
-      if (!contextMenu.contains(event.target)) {
-        contextMenu.style.display = 'none';
-      }
-    });
-
     // Add event listener for "Ajouter une ligne" option
     document.getElementById('addRowOption').addEventListener('click', () => {
       const dialog = document.getElementById('addRowDialog');
@@ -1027,7 +1024,6 @@
           showEditDialog(record);
         }
       }
-      hideContextMenu();
     });
     
     // Handle dialog form submission
@@ -1203,14 +1199,22 @@
           console.error("Erreur lors de la suppression de la ligne :", error);
           alert("Une erreur s'est produite lors de la suppression.");
       }
-  });
+    });
   
     // Fonction pour cacher le menu contextuel
     function hideContextMenu() {
       const contextMenu = document.getElementById('contextMenu');
       contextMenu.style.display = 'none';
+      
+      // Si le dialogue d'édition n'est pas ouvert, retirer la surbrillance
+      const editDialog = document.getElementById('editRowDialog');
+      if (!editDialog.open) {
+        const rows = document.querySelectorAll('#tableBody tr');
+        rows.forEach(row => row.classList.remove('highlighted'));
+      }
     }
-
+    
+    
     // Fetch records from Grist
     grist.onRecords(function (receivedRecords) {
       console.log("Records received from Grist:", receivedRecords);
@@ -1999,8 +2003,13 @@
 
   // Rafraîchir les émetteurs après modification
   document.getElementById('editRowDialog').addEventListener('close', () => {
-    updateEditEmetteurList();
-    populateTable();
+    const rows = document.querySelectorAll('#tableBody tr');
+    rows.forEach(row => row.classList.remove('highlighted'));
+  });
+
+  document.getElementById('addRowDialog').addEventListener('close', () => {
+    const rows = document.querySelectorAll('#tableBody tr');
+    rows.forEach(row => row.classList.remove('highlighted'));
   });
   
   document.getElementById('addRowDialog').addEventListener('show', () => {
