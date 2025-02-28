@@ -14,6 +14,10 @@
       color: white;
     }
 
+    .highlighted {
+      background-color: #f0e68c;
+    }    
+
     .sticky-container {
       position: sticky;
       top: 0;
@@ -774,6 +778,13 @@
         tr.addEventListener('contextmenu', (event) => {
           currentEmetteur = record.Emetteur;
           showContextMenu(event, record.id);
+      
+          event.preventDefault();
+      
+          const rows = document.querySelectorAll('#tableBody tr');
+          rows.forEach(row => row.classList.remove('highlighted'));
+      
+          tr.classList.add('highlighted');
         });
 
         const idCell = document.createElement('td');
