@@ -2134,13 +2134,22 @@
     
     inputs.forEach(input => {
       if (input.type === 'checkbox') {
-        input.checked = false; // Décoche les cases
+        input.checked = false; // Décoche toutes les cases
       } else {
-        input.value = ''; // Réinitialise les champs texte et date
+        input.value = ''; // Réinitialise les champs texte, date, textarea
       }
     });
-  }  
-
+  
+    // Assurez-vous que la case "Ajouter sur d'autres documents" est décochée
+    const duplicateCheckbox = document.getElementById('duplicateCheckbox');
+    duplicateCheckbox.checked = false;
+    
+    // Masquez et videz le conteneur des options de duplication
+    const duplicateOptionsContainer = document.getElementById('duplicateOptionsContainer');
+    duplicateOptionsContainer.style.display = 'none';
+    duplicateOptionsContainer.innerHTML = '';
+  }
+  
   // Fonction pour retirer l'extension d'un fichier
   function removeFileExtension(fileName) {
     return fileName.replace(/\.[^/.]+$/, ""); // Supprime tout après le dernier point
