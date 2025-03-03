@@ -351,13 +351,15 @@
         // Cacher le menu contextuel lorsqu'on clique ailleurs
         document.addEventListener('click', function (event) {
           const contextMenu = document.getElementById('contextMenu');
-          // Si le clic n'est pas sur le menu contextuel, le masquer...
+          const editDialog = document.getElementById('editRowDialog');
+          // Si le clic est en dehors du menu contextuel
           if (!contextMenu.contains(event.target)) {
             contextMenu.style.display = 'none';
-            // Retire la surbrillance de toutes les lignes
-            document.querySelectorAll('#tableBody tr.highlighted').forEach(row => {
-              row.classList.remove('highlighted');
-            });
+            if (!editDialog.open) {
+              document.querySelectorAll('#tableBody tr.highlighted').forEach(row => {
+                row.classList.remove('highlighted');
+              });
+            }
           }
         });
         
@@ -1017,6 +1019,9 @@
     
     // Add event listener for "Modifier" option
     document.getElementById('editOption').addEventListener('click', () => {
+      // Masquer le menu contextuel
+      document.getElementById('contextMenu').style.display = 'none';
+      
       if (selectedRecordId) {
         const record = records.find(rec => rec.id === selectedRecordId);
         if (record) {
