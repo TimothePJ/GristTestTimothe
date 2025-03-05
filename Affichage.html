@@ -464,26 +464,24 @@
         // Fonction pour réinitialiser le formulaire et actualiser les références à chaque ouverture
         function resetAndUpdateDialog() {
           const addRowDialog = document.getElementById('addRowDialog');
-      
-          // Réinitialisation des champs du formulaire
           const inputs = addRowDialog.querySelectorAll('input, textarea, select');
+          
+          // Réinitialiser tous les champs sauf "emetteur"
           inputs.forEach(input => {
             if (input.type === 'checkbox') {
-              input.checked = false; // Décoche les cases
-            } else {
-              input.value = ''; // Réinitialise les champs texte, date, textarea
+              input.checked = false;
+            } else if (input.id !== 'emetteur') {
+              input.value = '';
             }
           });
-      
-          // Préremplir l'émetteur avec celui capturé depuis le menu contextuel
-          if (currentContextMenuEmitter) {
-            document.getElementById('emetteur').value = currentContextMenuEmitter;
-          }
-      
-          // Mettre à jour la liste des références en fonction du projet et de l'émetteur
+          
+          // Ici, on force la valeur du champ émetteur à celle de la ligne cliquée
+          document.getElementById('emetteur').value = currentEmetteur; // currentEmetteur a été défini dans showContextMenu
+          
+          // Met à jour la liste des références en fonction du projet et de l'émetteur
           updateReferenceList();
         }
-      
+        
         // Réinitialiser et actualiser les références à chaque ouverture du dialogue
         document.getElementById('addRowDialog').addEventListener('show', resetAndUpdateDialog);
       
@@ -930,21 +928,11 @@
 
     // Add event listener for "Ajouter une ligne" option
     document.getElementById('addRowOption').addEventListener('click', () => {
-      const dialog = document.getElementById('addRowDialog');
-
-      // Réinitialise la fenêtre avant ouverture
-      resetAddRowDialog();
-  
-      if (currentContextMenuEmitter) {
-          document.getElementById('emetteur').value = currentContextMenuEmitter; // Pré-remplit l'émetteur
-      }
-  
-      updateReferenceList(); // Met à jour la liste des références avec le nouvel émetteur
-  
-      dialog.showModal();
+      resetAndUpdateDialog();
+      document.getElementById('addRowDialog').showModal();
       hideContextMenu();
     });
-
+    
     function updateEditReferenceList() {
       const selectedProject = document.getElementById('firstColumnDropdown').value; 
       const selectedEmitter = document.getElementById('editEmetteur').value; 
@@ -1662,9 +1650,9 @@
       const inputs = addRowDialog.querySelectorAll('input, textarea, select');
       inputs.forEach(input => {
         if (input.type === 'checkbox') {
-          input.checked = false; // Décoche toutes les cases, y compris "Dupliquer"
-        } else {
-          input.value = ''; // Réinitialise les champs texte, date, textarea
+          input.checked = false; // Décoche toutes les cases
+        } else if (input.id !== 'emetteur') { 
+          input.value = ''; // Réinitialise tous les champs sauf "emetteur"
         }
       });
 
@@ -1698,17 +1686,17 @@
     document.getElementById('documentNumber').value = '';
     document.getElementById('documentName').value = '';
     document.getElementById('defaultDatelimite').value = '';
-  
+    
     // Récupérer le projet sélectionné
     const selectedProject = document.getElementById('firstColumnDropdown').value;
     if (!selectedProject) {
       console.error("Aucun projet sélectionné !");
       return;
     }
-  
+    
     // Liste par défaut d'émetteurs
     const defaultEmetteurs = await getDefaultEmetteurs();
-  
+    
     // Extraire les émetteurs du projet à partir de records
     const projectEmetteurs = [...new Set(
       records
@@ -1716,10 +1704,17 @@
         .map(r => r.Emetteur)
         .filter(Boolean)
     )];
-  
+    
     // Remplir la div avec la fonction dédiée
     populateEmetteurDropdown(projectEmetteurs, defaultEmetteurs);
-  
+    
+    if (currentContextMenuEmitter) {
+      const checkboxes = document.querySelectorAll('#emetteurDropdown input[type="checkbox"]');
+      checkboxes.forEach(cb => {
+        cb.checked = (cb.value === currentContextMenuEmitter);
+      });
+    }
+    
     // Réinitialiser les éventuels éléments de personnalisation (si présents)
     const customCheckbox = document.getElementById('customEmetteurCheckbox');
     if (customCheckbox) customCheckbox.checked = false;
@@ -1851,7 +1846,6 @@
     const container = document.getElementById('emetteurDropdown');
     container.innerHTML = ''; // Vider la div avant de la remplir
   
-    // Fusionner et dédoublonner les deux listes, puis trier
     const allEmetteurs = [...defaultEmetteurs, ...projectEmetteurs]
       .filter((v, i, a) => a.indexOf(v) === i)
       .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
@@ -1863,7 +1857,8 @@
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.value = emetteur;
-      checkbox.checked = true; // Coché par défaut
+      // Modification pour pré-sélectionner uniquement si l'émetteur correspond
+      checkbox.checked = (emetteur === currentContextMenuEmitter);
   
       const label = document.createElement('span');
       label.textContent = emetteur;
@@ -1873,7 +1868,6 @@
       container.appendChild(emetteurItem);
     });
   
-    // Ajouter une case pour un émetteur personnalisé
     addCustomEmetteurRow();
   }
   
@@ -2068,7 +2062,7 @@
         return;
       }
   
-      // Récupérer les émetteurs liés au projet sélectionné
+      // Récupérer les émetteurus liés au projet sélectionné
       let emetteursFromProject = referenceTable.Emetteur.filter((_, index) =>
         referenceTable.NomProjetString[index] === selectedProject
       );
@@ -2158,11 +2152,11 @@
     inputs.forEach(input => {
       if (input.type === 'checkbox') {
         input.checked = false; // Décoche toutes les cases
-      } else {
-        input.value = ''; // Réinitialise les champs texte, date, textarea
+      } else if (input.id !== 'emetteur') { 
+        input.value = ''; // Réinitialise tous les champs sauf "emetteur"
       }
     });
-  
+
     // Assurez-vous que la case "Ajouter sur d'autres documents" est décochée
     const duplicateCheckbox = document.getElementById('duplicateCheckbox');
     duplicateCheckbox.checked = false;
