@@ -374,8 +374,8 @@
           if (!contextMenu.contains(event.target)) {
             contextMenu.style.display = 'none';
             if (!editDialog.open) {
-              document.querySelectorAll('#tableBody tr.highlighted').forEach(row => {
-                row.classList.remove('highlighted');
+              document.querySelectorAll('#tableBody tr.highlighted, #tableBody td.highlighted').forEach(el => {
+                el.classList.remove('highlighted');
               });
             }
           }
@@ -799,17 +799,40 @@
       filteredRecords.forEach((record) => {
         const tr = document.createElement('tr');
         tr.addEventListener('contextmenu', (event) => {
+          event.preventDefault();
           currentEmetteur = record.Emetteur;
           showContextMenu(event, record.id);
-      
-          event.preventDefault();
-      
-          const rows = document.querySelectorAll('#tableBody tr');
-          rows.forEach(row => row.classList.remove('highlighted'));
-      
+        
+          // Retirer la surbrillance de toutes les lignes et de toutes les cellules émetteur
+          document.querySelectorAll('#tableBody tr').forEach(row => {
+            row.classList.remove('highlighted');
+            if (row.cells[1]) {
+              row.cells[1].classList.remove('highlighted');
+            }
+          });
+        
+          // Appliquer la surbrillance à la ligne cliquée pour les autres colonnes
           tr.classList.add('highlighted');
+        
+          // Pour la colonne "Emetteur" :
+          // Si la cellule dans la ligne cliquée est masquée (fusionnée),
+          // rechercher la cellule visible (dans la première ligne du groupe).
+          let emitterCell = tr.cells[1];
+          if (getComputedStyle(emitterCell).display === "none") {
+            let currentRow = tr;
+            // Parcourir les lignes précédentes jusqu'à trouver la cellule émetteur visible
+            while (currentRow && getComputedStyle(currentRow.cells[1]).display === "none") {
+              currentRow = currentRow.previousElementSibling;
+            }
+            if (currentRow && currentRow.cells[1]) {
+              currentRow.cells[1].classList.add('highlighted');
+            }
+          } else {
+            // Sinon, surligner directement la cellule de la ligne cliquée
+            emitterCell.classList.add('highlighted');
+          }
         });
-
+        
         const idCell = document.createElement('td');
         idCell.textContent = record.id;
         tr.appendChild(idCell);
@@ -1217,14 +1240,11 @@
       const contextMenu = document.getElementById('contextMenu');
       contextMenu.style.display = 'none';
       
-      // Si le dialogue d'édition n'est pas ouvert, retirer la surbrillance
-      const editDialog = document.getElementById('editRowDialog');
-      if (!editDialog.open) {
-        const rows = document.querySelectorAll('#tableBody tr');
-        rows.forEach(row => row.classList.remove('highlighted'));
-      }
+      // Supprime la surbrillance de toutes les lignes et de toutes les cellules (colonnes)
+      document.querySelectorAll('#tableBody tr.highlighted, #tableBody td.highlighted').forEach(el => {
+        el.classList.remove('highlighted');
+      });
     }
-    
     
     // Fetch records from Grist
     grist.onRecords(function (receivedRecords) {
