@@ -1873,6 +1873,31 @@
     const container = document.getElementById('emetteurDropdown');
     container.innerHTML = ''; // Vider la div avant de la remplir
   
+    // --- Ajout de la case "Tout sélectionner" ---
+    const selectAllDiv = document.createElement('div');
+    selectAllDiv.classList.add('emetteur-item');
+  
+    const selectAllCheckbox = document.createElement('input');
+    selectAllCheckbox.type = 'checkbox';
+    selectAllCheckbox.id = 'selectAllEmitters';
+  
+    const selectAllLabel = document.createElement('span');
+    selectAllLabel.textContent = 'Tout sélectionner';
+  
+    selectAllDiv.appendChild(selectAllCheckbox);
+    selectAllDiv.appendChild(selectAllLabel);
+    container.appendChild(selectAllDiv);
+  
+    // Écouteur d'événement pour gérer la sélection/désélection de toutes les cases
+    selectAllCheckbox.addEventListener('change', function() {
+      // On récupère toutes les cases à cocher sauf celle "Tout sélectionner" et celles de type "Autre émetteur"
+      const emitterCheckboxes = container.querySelectorAll("input[type='checkbox']:not(#selectAllEmitters):not(.custom-emetteur-checkbox)");
+      emitterCheckboxes.forEach(cb => {
+        cb.checked = selectAllCheckbox.checked;
+      });
+    });
+  
+    // Création de la liste combinée des émetteurs (sans doublons et triée)
     const allEmetteurs = [...defaultEmetteurs, ...projectEmetteurs]
       .filter((v, i, a) => a.indexOf(v) === i)
       .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
@@ -1884,8 +1909,16 @@
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.value = emetteur;
-      // Modification pour pré-sélectionner uniquement si l'émetteur correspond
+      // Pré-sélection si applicable (exemple pour action contextuelle)
       checkbox.checked = (emetteur === currentContextMenuEmitter);
+  
+      // Si une case individuelle est décochée, on décoche "Tout sélectionner"
+      checkbox.addEventListener('change', function () {
+        if (!this.checked) {
+          const selectAll = document.getElementById('selectAllEmitters');
+          if (selectAll) selectAll.checked = false;
+        }
+      });
   
       const label = document.createElement('span');
       label.textContent = emetteur;
@@ -1895,6 +1928,7 @@
       container.appendChild(emetteurItem);
     });
   
+    // Ajout de la ligne pour un émetteur personnalisé ("Autre émetteur")
     addCustomEmetteurRow();
   }
   
