@@ -482,10 +482,11 @@
             }
           });
           
-          // Ici, on force la valeur du champ émetteur à celle de la ligne cliquée
-          document.getElementById('emetteur').value = currentEmetteur; // currentEmetteur a été défini dans showContextMenu
+          const duplicateOptionsContainer = document.getElementById('duplicateOptionsContainer');
+          duplicateOptionsContainer.style.display = 'none';
+          duplicateOptionsContainer.innerHTML = '';
           
-          // Met à jour la liste des références en fonction du projet et de l'émetteur
+          document.getElementById('emetteur').value = currentEmetteur;
           updateReferenceList();
         }
         
@@ -1643,7 +1644,15 @@
         return;
       }
     
-      // Générer les cases à cocher pour les autres documents
+      // Générer la case "Tout sélectionner"
+      const selectAllDiv = `
+        <div class="emetteur-item">
+          <input type="checkbox" id="selectAllDocuments" class="select-all-documents">
+          <span>Tout sélectionner</span>
+        </div>
+      `;
+    
+      // Générer les cases à cocher pour chaque document disponible
       const listHTML = documentOptions.map((name, index) => `
         <div class="emetteur-item">
           <input type="checkbox" id="doc-${index}" name="documents" value="${name}">
@@ -1651,13 +1660,24 @@
         </div>
       `).join('');
     
-      // Afficher la liste des options sans inclure le document sélectionné
+      // Afficher la liste complète avec l'option "Tout sélectionner"
       container.innerHTML = `
         <p>Document :</p>
         <div id="documentList" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px;">
+          ${selectAllDiv}
           ${listHTML}
         </div>
       `;
+    
+      // Ajouter un écouteur à la case "Tout sélectionner" pour cocher/décocher tous les documents
+      const selectAllCheckbox = document.getElementById('selectAllDocuments');
+      selectAllCheckbox.addEventListener('change', function() {
+        // Récupérer toutes les cases à cocher des documents (excluant la case "Tout sélectionner")
+        const docCheckboxes = container.querySelectorAll("input[name='documents']");
+        docCheckboxes.forEach(cb => {
+          cb.checked = selectAllCheckbox.checked;
+        });
+      });
     }
     
     document.getElementById('duplicateCheckbox').addEventListener('change', async function () {
