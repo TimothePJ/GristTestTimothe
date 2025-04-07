@@ -238,6 +238,21 @@
       font-size: 0.95em; /* Augmente légèrement la taille du texte */
       box-sizing: border-box; /* Assure que padding et bordure sont inclus */
     }
+
+    #multipleEmetteurDropdown {
+      display: flex;
+      flex-direction: column;
+      max-height: 200px; /* Hauteur fixe pour la liste déroulable */
+      overflow-y: auto;
+      overflow-x: hidden;
+      border: 1px solid #ddd;
+      padding: 5px;
+      background-color: #2c2c2c;
+      color: white;
+      border-radius: 4px;
+      font-size: 0.95em;
+      box-sizing: border-box;
+    }    
     
     .emetteur-item {
       display: grid; /* Utilise la grille pour aligner les éléments */
@@ -568,7 +583,44 @@
       </div>
     </form>
   </dialog>
-  
+
+  <!-- Add Multiple Document Dialog -->
+  <dialog id="addMultipleDocumentDialog">
+    <form method="dialog" style="display: flex; flex-direction: column; gap: 10px; font-size: 14px;">
+      <h3>Ajouter plusieurs document</h3>
+    
+      <!-- Tableau dynamique pour numéro et nom du document -->
+      <table id="documentTable" style="width:100%; border-collapse: collapse;">
+        <thead>
+          <tr>
+            <th style="border: 1px solid #ddd; padding: 8px;">Numéro du document</th>
+            <th style="border: 1px solid #ddd; padding: 8px;">Nom du document</th>
+          </tr>
+        </thead>
+        <tbody id="documentTableBody">
+          <!-- Ligne initiale vide -->
+          <tr>
+            <td style="border: 1px solid #ddd; padding: 8px;" contenteditable="true"></td>
+            <td style="border: 1px solid #ddd; padding: 8px;" contenteditable="true"></td>
+          </tr>
+        </tbody>
+      </table>
+    
+      <label for="multipleDefaultDatelimite">Date Limite réception données par défaut:</label>
+      <input type="date" id="multipleDefaultDatelimite" name="defaultDatelimite">
+    
+      <div>
+        <label>Émetteurs:</label>
+        <div id="multipleEmetteurDropdown"></div>
+      </div>
+      
+      <div class="dialog-buttons" style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button type="submit" style="padding: 8px 15px; background-color: #4CAF50; color: white;">Ajouter</button>
+        <button type="button" onclick="document.getElementById('addMultipleDocumentDialog').close()" style="padding: 8px 15px; background-color: #666; color: white;">Annuler</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Add Project Dialog -->
   <dialog id="addProjectDialog">
     <form method="dialog">
@@ -734,6 +786,12 @@
       addOption.value = 'addTable';
       addOption.text = 'Ajouter document';
       listbox.appendChild(addOption);
+
+      // Ajoute l'option "Ajouter plusieurs document"
+      const addMultipleOption = document.createElement('option');
+      addMultipleOption.value = 'addMultipleTable';
+      addMultipleOption.text = 'Ajouter plusieurs document';
+      listbox.appendChild(addMultipleOption);
     }
 
     // Helper function to check if a string is a valid date
@@ -1285,6 +1343,10 @@
       console.log("Tableau sélectionné :", selectedValue);
       if (selectedValue === 'addTable') {
         handleAddTable();
+        return;
+      }
+      if (selectedValue === 'addMultipleTable') {
+        handleAddMultipleTable();
         return;
       }
       selectedSecondValue = selectedValue;
@@ -2252,7 +2314,411 @@
   function removeFileExtension(fileName) {
     return fileName.replace(/\.[^/.]+$/, ""); // Supprime tout après le dernier point
   }
+
+  function handleAddMultipleTable() {
+    resetAddMultipleDocumentDialog();
+    document.getElementById('addMultipleDocumentDialog').showModal();
+  }
   
+  function resetAddMultipleDocumentDialog() {
+    const dialog = document.getElementById('addMultipleDocumentDialog');
+    const inputs = dialog.querySelectorAll('input, textarea, select');
+    inputs.forEach(input => {
+      if (input.type === 'checkbox') {
+        input.checked = false;
+      } else {
+        input.value = '';
+      }
+    });
+  
+    // Réinitialiser le tableau dynamique
+    const tbody = document.getElementById('documentTableBody');
+    // Supprime toutes les lignes existantes
+    tbody.innerHTML = '';
+    // Crée une nouvelle ligne vide initiale
+    const newRow = document.createElement('tr');
+  
+    const tdNumber = document.createElement('td');
+    tdNumber.style.border = "1px solid #ddd";
+    tdNumber.style.padding = "8px";
+    tdNumber.contentEditable = "true";
+    // Pour forcer la saisie numérique, nous ajouterons l'écouteur dans addInputListenerToRow()
+    newRow.appendChild(tdNumber);
+  
+    const tdName = document.createElement('td');
+    tdName.style.border = "1px solid #ddd";
+    tdName.style.padding = "8px";
+    tdName.contentEditable = "true";
+    newRow.appendChild(tdName);
+  
+    tbody.appendChild(newRow);
+    // Attache les écouteurs à la nouvelle ligne
+    addInputListenerToRow(newRow);
+  
+    // Réinitialiser la liste des émetteurs dans le dialog
+    getDefaultEmetteurs().then(defaultEmetteurs => {
+      const projectEmetteurs = records
+        .filter(record => record.NomProjet === selectedFirstValue)
+        .map(record => record.Emetteur)
+        .filter((value, index, self) => value && self.indexOf(value) === index)
+        .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+      populateEmetteurDropdownForContainer('multipleEmetteurDropdown', projectEmetteurs, defaultEmetteurs);
+    });
+  }
+  
+  function populateEmetteurDropdownForContainer(containerId, projectEmetteurs, defaultEmetteurs) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = ''; // Vider le conteneur
+  
+    // Ajout de la case "Tout sélectionner"
+    const selectAllDiv = document.createElement('div');
+    selectAllDiv.classList.add('emetteur-item');
+  
+    const selectAllCheckbox = document.createElement('input');
+    selectAllCheckbox.type = 'checkbox';
+    selectAllCheckbox.id = containerId + '_selectAll';
+  
+    const selectAllLabel = document.createElement('span');
+    selectAllLabel.textContent = 'Tout sélectionner';
+  
+    selectAllDiv.appendChild(selectAllCheckbox);
+    selectAllDiv.appendChild(selectAllLabel);
+    container.appendChild(selectAllDiv);
+  
+    // Gestion du clic sur "Tout sélectionner"
+    selectAllCheckbox.addEventListener('change', function() {
+      const emitterCheckboxes = container.querySelectorAll("input[type='checkbox']:not(#" + containerId + "_selectAll):not(.custom-emetteur-checkbox)");
+      emitterCheckboxes.forEach(cb => {
+        cb.checked = selectAllCheckbox.checked;
+      });
+    });
+  
+    // Création de la liste combinée des émetteurs (sans doublons et triée)
+    const allEmetteurs = [...defaultEmetteurs, ...projectEmetteurs]
+      .filter((v, i, a) => a.indexOf(v) === i)
+      .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+  
+    allEmetteurs.forEach(emetteur => {
+      const emetteurItem = document.createElement('div');
+      emetteurItem.classList.add('emetteur-item');
+  
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = emetteur;
+      // (Optionnel) Pré-sélection si besoin
+      checkbox.checked = (emetteur === currentContextMenuEmitter);
+  
+      checkbox.addEventListener('change', function () {
+        if (!this.checked) {
+          const selectAll = document.getElementById(containerId + '_selectAll');
+          if (selectAll) selectAll.checked = false;
+        }
+      });
+  
+      const label = document.createElement('span');
+      label.textContent = emetteur;
+  
+      emetteurItem.appendChild(checkbox);
+      emetteurItem.appendChild(label);
+      container.appendChild(emetteurItem);
+    });
+  
+    // Ajout de la ligne pour un émetteur personnalisé ("Autre émetteur")
+    addCustomEmetteurRowForContainer(containerId);
+  }
+  
+  // Fonction similaire à addCustomEmetteurRow, mais qui ajoute dans le conteneur cible
+  function addCustomEmetteurRowForContainer(containerId) {
+    const container = document.getElementById(containerId);
+    const allCustomRows = container.querySelectorAll('.custom-emetteur');
+    if (allCustomRows.length > 0) {
+      const lastCheckbox = allCustomRows[allCustomRows.length - 1].querySelector('input[type="checkbox"]');
+      if (lastCheckbox && !lastCheckbox.checked) {
+        return; // Ne pas ajouter si la dernière case personnalisée n'est pas cochée
+      }
+    }
+    const newEmetteurRow = document.createElement('div');
+    newEmetteurRow.classList.add('emetteur-item', 'custom-emetteur');
+  
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.classList.add('custom-emetteur-checkbox');
+    checkbox.checked = false;
+  
+    const textInput = document.createElement('input');
+    textInput.type = 'text';
+    textInput.placeholder = 'Autre émetteur...';
+    textInput.style.flex = '1';
+    textInput.style.padding = '5px';
+  
+    checkbox.addEventListener('change', function () {
+      if (this.checked) {
+        if (!newEmetteurRow.nextElementSibling) {
+          addCustomEmetteurRowForContainer(containerId);
+        }
+      } else {
+        removeCustomEmitterForContainer(newEmetteurRow, containerId);
+      }
+    });
+  
+    newEmetteurRow.appendChild(checkbox);
+    newEmetteurRow.appendChild(textInput);
+    container.appendChild(newEmetteurRow);
+  }
+  
+  function removeCustomEmitterForContainer(rowToRemove, containerId) {
+    const container = document.getElementById(containerId);
+    const allRows = Array.from(container.querySelectorAll('.custom-emetteur'));
+    const indexToRemove = allRows.indexOf(rowToRemove);
+  
+    if (allRows.length === 1) {
+      rowToRemove.querySelector('input[type="checkbox"]').checked = false;
+      rowToRemove.querySelector('input[type="text"]').value = '';
+      return;
+    }
+  
+    for (let i = indexToRemove; i < allRows.length - 1; i++) {
+      const currentCheckbox = allRows[i].querySelector('input[type="checkbox"]');
+      const currentTextInput = allRows[i].querySelector('input[type="text"]');
+      const nextCheckbox = allRows[i + 1].querySelector('input[type="checkbox"]');
+      const nextTextInput = allRows[i + 1].querySelector('input[type="text"]');
+      currentCheckbox.checked = nextCheckbox.checked;
+      currentTextInput.value = nextTextInput.value;
+    }
+    allRows[allRows.length - 1].remove();
+  }
+
+  document.getElementById('addMultipleDocumentDialog').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    trimInputs(e.target); // Nettoie les espaces superflus
+  
+    // Récupérer les lignes du tableau dynamique
+    const tbody = document.getElementById('documentTableBody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    
+    // Filtrer les lignes non complètement vides (on ignore la dernière ligne vide)
+    const documentRows = rows.filter((row, index) => {
+      const cells = row.querySelectorAll('td');
+      const cell1 = cells[0].innerText.trim();
+      const cell2 = cells[1].innerText.trim();
+      // Si c'est la dernière ligne et qu'elle est vide, on l'ignore
+      if (index === rows.length - 1 && cell1 === '' && cell2 === '') {
+        return false;
+      }
+      // On considère la ligne si au moins une cellule est renseignée
+      return (cell1 !== '' || cell2 !== '');
+    });
+    
+    // Vérifier que pour chaque ligne non vide, les deux cellules sont complétées
+    for (const row of documentRows) {
+      const cells = row.querySelectorAll('td');
+      const cell1 = cells[0].innerText.trim();
+      const cell2 = cells[1].innerText.trim();
+      if ((cell1 === '' && cell2 !== '') || (cell1 !== '' && cell2 === '')) {
+        alert("Chaque ligne doit être complétée dans les deux colonnes.");
+        return;
+      }
+    }
+    
+    if (documentRows.length === 0) {
+      alert("Veuillez remplir au moins une ligne avec un numéro et un nom de document.");
+      return;
+    }
+    
+    // Construire un tableau de données à partir des lignes (chaque ligne contient un numéro et un nom)
+    const documentsData = documentRows.map(row => {
+      const cells = row.querySelectorAll('td');
+      return {
+        documentNumber: cells[0].innerText.trim(),
+        documentName: cells[1].innerText.trim()
+      };
+    });
+    
+    // Récupérer les émetteurs sélectionnés dans le conteneur du dialog "Ajouter plusieurs document"
+    const selectedEmitters = Array.from(document.querySelectorAll('#multipleEmetteurDropdown input[type="checkbox"]:checked'))
+      .map(checkbox => {
+        // Pour une case personnalisée, récupérer la valeur saisie dans le champ adjacent
+        const textInput = checkbox.nextElementSibling;
+        if (textInput && textInput.tagName === "INPUT" && textInput.type === "text") {
+          const customValue = textInput.value.trim();
+          return customValue ? customValue : null;
+        }
+        return checkbox.value;
+      })
+      .filter(value => value); // Exclut les valeurs nulles
+    
+    if (selectedEmitters.length === 0) {
+      alert("Veuillez sélectionner au moins un émetteur.");
+      return;
+    }
+    
+    // Récupérer le projet sélectionné (stocké dans la variable globale "selectedFirstValue")
+    const selectedProject = selectedFirstValue;
+    if (!selectedProject) {
+      alert("Veuillez sélectionner un projet avant d'ajouter un document.");
+      return;
+    }
+    
+    try {
+      // Récupérer l'ID du projet
+      const projets = await grist.docApi.fetchTable('Projets');
+      const projectIndex = projets.Nom_de_projet.indexOf(selectedProject);
+      if (projectIndex === -1) throw new Error("Projet introuvable.");
+      const projectId = projets.id[projectIndex];
+      
+      // Récupérer le service depuis la table Team
+      const serviceValue = await getTeamService();
+      
+      // Récupérer la date limite par défaut
+      const defaultDatelimite = document.getElementById('multipleDefaultDatelimite').value || "1900-01-01";
+      
+      // Construire la liste des actions à appliquer pour chaque document et chaque émetteur
+      const actions = [];
+      documentsData.forEach(doc => {
+        // Concatène le numéro et le nom avec un tiret
+        const combinedDocumentName = `${doc.documentNumber}-${doc.documentName}`.trim();
+        selectedEmitters.forEach(emetteur => {
+          const newRow = {
+            NomProjet: projectId,
+            NomDocument: combinedDocumentName,
+            Emetteur: emetteur,
+            Reference: '_',
+            Indice: '_',
+            Recu: '1900-01-01',
+            DescriptionObservations: 'EN ATTENTE',
+            DateLimite: defaultDatelimite,
+            Service: serviceValue
+          };
+          actions.push(['AddRecord', 'References', null, newRow]);
+        });
+      });
+      
+      // Appliquer les actions via l'API Grist
+      await grist.docApi.applyUserActions(actions);
+      console.log("Documents ajoutés :", documentsData);
+      
+      // Mettre à jour le dropdown de documents en ajoutant chaque nouveau document
+      const secondDropdown = document.getElementById('secondColumnListbox');
+      documentsData.forEach(doc => {
+        const combinedDocumentName = `${doc.documentNumber}-${doc.documentName}`.trim();
+        const newOption = document.createElement('option');
+        newOption.value = combinedDocumentName;
+        newOption.textContent = combinedDocumentName;
+        // Insère l'option avant l'option "Ajouter document"
+        const addTableOption = secondDropdown.querySelector('option[value="addTable"]');
+        secondDropdown.insertBefore(newOption, addTableOption);
+      });
+      
+      // Optionnel : définir la sélection sur le dernier document ajouté
+      const lastCombinedDocumentName = `${documentsData[documentsData.length - 1].documentNumber}-${documentsData[documentsData.length - 1].documentName}`.trim();
+      secondDropdown.value = lastCombinedDocumentName;
+      selectedSecondValue = lastCombinedDocumentName;
+      
+      // Met à jour l'affichage du tableau principal et ferme le dialog
+      populateTable();
+      document.getElementById('addMultipleDocumentDialog').close();
+      
+    } catch (error) {
+      console.error("Erreur lors de l'ajout des documents :", error);
+      alert("Une erreur s'est produite lors de l'ajout des documents.");
+    }
+  });
+
+  function setCaretToEnd(el) {
+    const range = document.createRange();
+    const sel = window.getSelection();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  
+  // Ajoute l'écouteur sur une ligne pour surveiller les modifications
+  function addInputListenerToRow(row) {
+    const firstCell = row.querySelectorAll('td')[0];
+    firstCell.addEventListener('input', function() {
+      // Conserve la valeur, filtre les caractères non numériques
+      const oldText = this.innerText;
+      const newText = oldText.replace(/\D/g, '');
+      if(newText !== oldText) {
+        this.innerText = newText;
+        // Replace le curseur à la fin
+        setCaretToEnd(this);
+      }
+      updateDocumentTable();
+    });
+  
+    // Ajoute l'écouteur pour les autres cellules
+    row.querySelectorAll('td').forEach(cell => {
+      if (cell !== firstCell) {
+        cell.addEventListener('input', updateDocumentTable);
+      }
+    });
+  }
+  
+  // Fonction qui met à jour le tableau
+  function updateDocumentTable() {
+    const tbody = document.getElementById('documentTableBody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    
+    // Supprime toutes les lignes vides sauf la dernière
+    rows.slice(0, -1).forEach(row => {
+      const cells = row.querySelectorAll('td');
+      let isEmpty = true;
+      cells.forEach(cell => {
+        if (cell.innerText.trim() !== '') {
+          isEmpty = false;
+        }
+      });
+      if (isEmpty) {
+        row.remove();
+      }
+    });
+    
+    // Vérifie la dernière ligne
+    const lastRow = tbody.lastElementChild;
+    if (lastRow) {
+      const cells = lastRow.querySelectorAll('td');
+      let hasContent = false;
+      cells.forEach(cell => {
+        if (cell.innerText.trim() !== '') {
+          hasContent = true;
+        }
+      });
+      if (hasContent) {
+        // Crée une nouvelle ligne vide
+        const newRow = document.createElement('tr');
+        
+        const td1 = document.createElement('td');
+        td1.style.border = "1px solid #ddd";
+        td1.style.padding = "8px";
+        td1.contentEditable = "true";
+        
+        const td2 = document.createElement('td');
+        td2.style.border = "1px solid #ddd";
+        td2.style.padding = "8px";
+        td2.contentEditable = "true";
+        
+        newRow.appendChild(td1);
+        newRow.appendChild(td2);
+        tbody.appendChild(newRow);
+        addInputListenerToRow(newRow);
+      }
+    }
+  }
+
+  // Initialisation : Ajoute l'écouteur sur la première ligne dès le chargement du dialog
+  document.addEventListener('DOMContentLoaded', () => {
+    const initialRow = document.querySelector('#documentTableBody tr');
+    if (initialRow) {
+      addInputListenerToRow(initialRow);
+    }
+  });
+
+  document.getElementById('addMultipleDocumentDialog').addEventListener('show', () => {
+    resetAddMultipleDocumentDialog();
+  });  
+
   </script>
 </body>
 
