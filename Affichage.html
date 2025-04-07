@@ -5,6 +5,7 @@
   <meta charset="utf-8">
   <title>Grist Two-Step Selection with Editable Table</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
   <style>
     body {
       margin: 0;
@@ -687,7 +688,11 @@
 
   <!-- Form to add new rows -->
   <div class="add-form">
-    <button id="addProjectButton">Ajouter projet</button>
+    <button id="addProjectButton">Ajouter Projet</button>
+
+    <button id="copyTableDataButton">Copier Tableau</button>
+
+    <button id="copyTableDataButtonImage">Copier Tableau Image</button>
 
     <input type="file" id="fileInput" style="display: none;" multiple>
   </div>
@@ -2752,7 +2757,131 @@
       selectedSecondValue = '';
     }
   });
+
+  document.getElementById('copyTableDataButton').addEventListener('click', function() {
+    // Récupérer l'élément du tableau
+    const table = document.getElementById('dataTable');
+    if (!table) {
+      alert("Tableau introuvable !");
+      return;
+    }
   
+    // Récupérer toutes les lignes (en-tête et corps)
+    const rows = table.querySelectorAll('tr');
+    let tableText = "";
+  
+    // Parcourir chaque ligne et récupérer le texte de chaque cellule en ignorant la première colonne (ID)
+    rows.forEach(row => {
+      const cells = row.querySelectorAll('th, td');
+      // Exclure la première cellule (colonne ID)
+      const cellTexts = Array.from(cells).slice(1).map(cell => cell.innerText.trim());
+      tableText += cellTexts.join('\t') + "\n";
+    });
+  
+    // Essayer d'utiliser l'API Clipboard
+    navigator.clipboard.writeText(tableText)
+      .then(() => {
+        alert("Données du tableau copiées dans le presse-papier !");
+      })
+      .catch(err => {
+        console.warn("Clipboard API non disponible, utilisation du fallback.", err);
+        // Fallback : créer un textarea temporaire
+        const textarea = document.createElement("textarea");
+        textarea.value = tableText;
+        // Positionner le textarea hors écran
+        textarea.style.position = "fixed";
+        textarea.style.top = "-1000px";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        try {
+          const successful = document.execCommand('copy');
+          if (successful) {
+            alert("Données du tableau copiées dans le presse-papier (fallback execCommand) !");
+          } else {
+            alert("Échec de la copie via execCommand.");
+          }
+        } catch (err2) {
+          alert("Erreur lors de la copie (fallback) : " + err2);
+        }
+        document.body.removeChild(textarea);
+      });
+  });
+
+  document.getElementById('copyTableDataButtonImage').addEventListener('click', async function() {
+    const table = document.getElementById('dataTable');
+    if (!table) {
+      alert("Tableau introuvable !");
+      return;
+    }
+    
+    try {
+      // Capture du tableau dans un canvas via html2canvas
+      const canvas = await html2canvas(table, { useCORS: true });
+      
+      // Tenter d'utiliser l'API Clipboard avec ClipboardItem (ici en PNG)
+      if (navigator.clipboard && navigator.clipboard.write) {
+        canvas.toBlob(async function(blob) {
+          if (!blob) {
+            alert("Erreur lors de la conversion en image.");
+            return;
+          }
+          try {
+            const clipboardItem = new ClipboardItem({ 'image/png': blob });
+            await navigator.clipboard.write([clipboardItem]);
+            alert("Image du tableau copiée dans le presse-papier !");
+          } catch (err) {
+            console.warn("Clipboard API échouée, utilisation du fallback.", err);
+            fallbackCopyImage(canvas);
+          }
+        }, 'image/png');
+      } else {
+        fallbackCopyImage(canvas);
+      }
+    } catch (error) {
+      alert("Erreur lors de la capture du tableau : " + error);
+    }
+  });
+  
+  // Méthode fallback basée sur document.execCommand('copy')
+  function fallbackCopyImage(canvas) {
+    // Convertit le canvas en DataURL
+    const dataURL = canvas.toDataURL('image/png');
+    
+    // Crée un conteneur contenteditable hors écran
+    const container = document.createElement('div');
+    container.contentEditable = true;
+    container.style.position = 'fixed';
+    container.style.top = '-1000px';
+    
+    // Insère l'image dans le conteneur
+    container.innerHTML = `<img src="${dataURL}">`;
+    document.body.appendChild(container);
+    
+    // Sélectionne le contenu du conteneur
+    const range = document.createRange();
+    range.selectNodeContents(container);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    
+    // Tente d'exécuter la commande copy
+    try {
+      const successful = document.execCommand('copy');
+      if (successful) {
+        alert("Image du tableau copiée dans le presse-papier via fallback !");
+      } else {
+        alert("Échec de la copie de l'image via fallback.");
+      }
+    } catch (err) {
+      alert("Erreur lors de la copie (fallback) : " + err);
+    }
+    
+    // Nettoyage
+    document.body.removeChild(container);
+    selection.removeAllRanges();
+  }  
+
   </script>
 </body>
 
