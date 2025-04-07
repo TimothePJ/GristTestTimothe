@@ -556,30 +556,32 @@
       </div>   
     </form>
   </dialog>
+
   <!-- Add Document Dialog -->
   <dialog id="addDocumentDialog">
     <form method="dialog" style="display: flex; flex-direction: column; gap: 10px; font-size: 14px;">
       <h3>Ajouter un nouveau document</h3>
-  
+
       <label for="documentNumber">Numéro du document:</label>
       <input type="number" id="documentNumber" name="documentNumber" required>
-  
+
       <label for="documentName">Nom du document:</label>
       <input type="text" id="documentName" name="documentName" required>
-  
+
       <label for="defaultDatelimite">Date Limite réception données par défaut:</label>
       <input type="date" id="defaultDatelimite" name="defaultDatelimite">
-  
+
       <div>
         <label>Émetteurs:</label>
         <div id="emetteurDropdown">
-          
+          <!-- Contenu généré dynamiquement -->
         </div>
       </div>
       
       <div class="dialog-buttons" style="display: flex; justify-content: flex-end; gap: 10px;">
         <button type="submit" style="padding: 8px 15px; background-color: #4CAF50; color: white; border: none; cursor: pointer;">Ajouter</button>
-        <button type="button" onclick="document.getElementById('addDocumentDialog').close()" style="padding: 8px 15px; background-color: #666; color: white; border: none; cursor: pointer;">Annuler</button>
+        <!-- Bouton Annuler avec id dédié -->
+        <button type="button" id="cancelAddDocumentButton" style="padding: 8px 15px; background-color: #666; color: white; border: none; cursor: pointer;">Annuler</button>
       </div>
     </form>
   </dialog>
@@ -611,12 +613,15 @@
     
       <div>
         <label>Émetteurs:</label>
-        <div id="multipleEmetteurDropdown"></div>
+        <div id="multipleEmetteurDropdown">
+          <!-- Contenu généré dynamiquement -->
+        </div>
       </div>
       
       <div class="dialog-buttons" style="display: flex; justify-content: flex-end; gap: 10px;">
         <button type="submit" style="padding: 8px 15px; background-color: #4CAF50; color: white;">Ajouter</button>
-        <button type="button" onclick="document.getElementById('addMultipleDocumentDialog').close()" style="padding: 8px 15px; background-color: #666; color: white;">Annuler</button>
+        <!-- Bouton Annuler avec id dédié -->
+        <button type="button" id="cancelAddMultipleDocumentButton" style="padding: 8px 15px; background-color: #666; color: white;">Annuler</button>
       </div>
     </form>
   </dialog>
@@ -698,6 +703,7 @@
     let selectedRecordId = null;
     let newTable = false; // Variable to track if a new table is being added
     let newTableName = ''; // Variable to store the name of the new table
+    let lastValidDocument = '';
 
     // Ready Grist
     grist.ready();
@@ -1348,6 +1354,10 @@
       if (selectedValue === 'addMultipleTable') {
         handleAddMultipleTable();
         return;
+      }
+      // Enregistrez la sélection valide si elle n'est pas vide
+      if (selectedValue.trim() !== "") {
+        lastValidDocument = selectedValue;
       }
       selectedSecondValue = selectedValue;
       console.log("selectedFirstValue:", selectedFirstValue, "selectedSecondValue:", selectedSecondValue);
@@ -2719,6 +2729,30 @@
     resetAddMultipleDocumentDialog();
   });  
 
+  document.getElementById('cancelAddDocumentButton').addEventListener('click', function() {
+    document.getElementById('addDocumentDialog').close();
+    // Si une sélection valide existe, la réaffecter ; sinon, assigner la valeur par défaut
+    if (lastValidDocument) {
+      document.getElementById('secondColumnListbox').value = lastValidDocument;
+      selectedSecondValue = lastValidDocument;
+    } else {
+      document.getElementById('secondColumnListbox').value = 'Sélectionner un étage';
+      selectedSecondValue = '';
+    }
+  });
+  
+  document.getElementById('cancelAddMultipleDocumentButton').addEventListener('click', function() {
+    document.getElementById('addMultipleDocumentDialog').close();
+    // Si une sélection valide existe, la réaffecter ; sinon, assigner la valeur par défaut
+    if (lastValidDocument) {
+      document.getElementById('secondColumnListbox').value = lastValidDocument;
+      selectedSecondValue = lastValidDocument;
+    } else {
+      document.getElementById('secondColumnListbox').value = 'Sélectionner un étage';
+      selectedSecondValue = '';
+    }
+  });
+  
   </script>
 </body>
 
