@@ -587,7 +587,7 @@
   <!-- Add Multiple Document Dialog -->
   <dialog id="addMultipleDocumentDialog">
     <form method="dialog" style="display: flex; flex-direction: column; gap: 10px; font-size: 14px;">
-      <h3>Ajouter plusieurs document</h3>
+      <h3>Ajouter Plusieurs document</h3>
     
       <!-- Tableau dynamique pour numéro et nom du document -->
       <table id="documentTable" style="width:100%; border-collapse: collapse;">
@@ -787,10 +787,10 @@
       addOption.text = 'Ajouter document';
       listbox.appendChild(addOption);
 
-      // Ajoute l'option "Ajouter plusieurs document"
+      // Ajoute l'option "Ajouter Plusieurs document"
       const addMultipleOption = document.createElement('option');
       addMultipleOption.value = 'addMultipleTable';
-      addMultipleOption.text = 'Ajouter plusieurs document';
+      addMultipleOption.text = 'Ajouter Plusieurs document';
       listbox.appendChild(addMultipleOption);
     }
 
@@ -2534,7 +2534,7 @@
       };
     });
     
-    // Récupérer les émetteurs sélectionnés dans le conteneur du dialog "Ajouter plusieurs document"
+    // Récupérer les émetteurs sélectionnés dans le conteneur du dialog "Ajouter Plusieurs document"
     const selectedEmitters = Array.from(document.querySelectorAll('#multipleEmetteurDropdown input[type="checkbox"]:checked'))
       .map(checkbox => {
         // Pour une case personnalisée, récupérer la valeur saisie dans le champ adjacent
