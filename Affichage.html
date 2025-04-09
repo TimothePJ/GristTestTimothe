@@ -694,6 +694,8 @@
 
     <button id="copyTableDataButtonImage">Copier Tableau Image</button>
 
+    <button id="downloadTableButton">Télécharger Tableau</button>
+
     <input type="file" id="fileInput" style="display: none;" multiple>
   </div>
 
@@ -2758,7 +2760,17 @@
     }
   });
 
+  // Bouton "Télécharger Tableau"
   document.getElementById('copyTableDataButton').addEventListener('click', function() {
+
+    // Vérifie qu'un projet et un document sont sélectionnés
+    const firstValue = document.getElementById('firstColumnDropdown').value.trim();
+    const secondValue = document.getElementById('secondColumnListbox').value.trim();
+    if (!firstValue || !secondValue || secondValue === "Sélectionner un étage") {
+      alert("Veuillez sélectionner un projet et un document.");
+      return;
+    }
+
     // Récupérer l'élément du tableau
     const table = document.getElementById('dataTable');
     if (!table) {
@@ -2797,7 +2809,7 @@
         try {
           const successful = document.execCommand('copy');
           if (successful) {
-            alert("Données du tableau copiées dans le presse-papier (fallback execCommand) !");
+            alert("Données du tableau copiées dans le presse-papier");
           } else {
             alert("Échec de la copie via execCommand.");
           }
@@ -2808,7 +2820,17 @@
       });
   });
 
+  // Bouton "Copier Tableau Image"
   document.getElementById('copyTableDataButtonImage').addEventListener('click', async function() {
+
+    // Vérifie qu'un projet et un document sont sélectionnés
+    const firstValue = document.getElementById('firstColumnDropdown').value.trim();
+    const secondValue = document.getElementById('secondColumnListbox').value.trim();
+    if (!firstValue || !secondValue || secondValue === "Sélectionner un étage") {
+      alert("Veuillez sélectionner un projet et un document.");
+      return;
+    }
+
     const table = document.getElementById('dataTable');
     if (!table) {
       alert("Tableau introuvable !");
@@ -2869,7 +2891,6 @@
     try {
       const successful = document.execCommand('copy');
       if (successful) {
-        alert("Image du tableau copiée dans le presse-papier via fallback !");
       } else {
         alert("Échec de la copie de l'image via fallback.");
       }
@@ -2882,6 +2903,72 @@
     selection.removeAllRanges();
   }  
 
+  // Bouton "Télécharger Tableau"
+  document.getElementById('downloadTableButton').addEventListener('click', async function() {
+    // Vérifier qu'un projet et un document sont sélectionnés
+    const projectName = document.getElementById('firstColumnDropdown').value.trim();
+    const docName = document.getElementById('secondColumnListbox').value.trim();
+    if (!projectName || !docName || docName === "Sélectionner un étage") {
+      alert("Veuillez sélectionner un projet et un document.");
+      return;
+    }
+    
+    const suggestedName = `${projectName}_${docName}.png`;
+    
+    const table = document.getElementById('dataTable');
+    if (!table) {
+      alert("Tableau introuvable !");
+      return;
+    }
+    
+    try {
+      // Capture le rendu du tableau dans un canvas via html2canvas
+      const canvas = await html2canvas(table, { useCORS: true });
+      // Convertit le canvas en blob PNG
+      const blob = await new Promise(resolve => {
+        canvas.toBlob(resolve, 'image/png');
+      });
+      
+      // Si l'API File System Access est disponible, essaye de l'utiliser pour ouvrir le sélecteur
+      if (window.showSaveFilePicker) {
+        try {
+          const options = {
+            suggestedName: suggestedName,
+            types: [{
+              description: 'Images PNG',
+              accept: { 'image/png': ['.png'] }
+            }]
+          };
+          // Attention : showSaveFilePicker ne peut s'exécuter que dans un contexte sécurisé et en top-level.
+          const handle = await window.showSaveFilePicker(options);
+          const writableStream = await handle.createWritable();
+          await writableStream.write(blob);
+          await writableStream.close();
+          return;  // Arrête ici
+        } catch (err) {
+          console.error("Erreur de showSaveFilePicker :", err);
+          fallbackDownload(blob, suggestedName);
+        }
+      } else {
+        fallbackDownload(blob, suggestedName);
+      }
+    } catch (error) {
+      alert("Erreur lors de la capture du tableau : " + error);
+    }
+  });
+  
+  // Fonction fallback qui lance un téléchargement classique
+  function fallbackDownload(blob, suggestedName) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    // Utilise le nom suggéré
+    link.download = suggestedName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+  
   </script>
 </body>
 
