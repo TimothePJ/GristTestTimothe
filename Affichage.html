@@ -2762,7 +2762,6 @@
 
   // Bouton "Télécharger Tableau"
   document.getElementById('copyTableDataButton').addEventListener('click', function() {
-
     // Vérifie qu'un projet et un document sont sélectionnés
     const firstValue = document.getElementById('firstColumnDropdown').value.trim();
     const secondValue = document.getElementById('secondColumnListbox').value.trim();
@@ -2770,37 +2769,37 @@
       alert("Veuillez sélectionner un projet et un document.");
       return;
     }
-
-    // Récupérer l'élément du tableau
+  
+    // Récupère l'élément du tableau
     const table = document.getElementById('dataTable');
     if (!table) {
       alert("Tableau introuvable !");
       return;
     }
   
-    // Récupérer toutes les lignes (en-tête et corps)
+    // Récupère toutes les lignes (en-tête et corps)
     const rows = table.querySelectorAll('tr');
     let tableText = "";
   
-    // Parcourir chaque ligne et récupérer le texte de chaque cellule en ignorant la première colonne (ID)
     rows.forEach(row => {
       const cells = row.querySelectorAll('th, td');
-      // Exclure la première cellule (colonne ID)
-      const cellTexts = Array.from(cells).slice(1).map(cell => cell.innerText.trim());
+      const cellTexts = Array.from(cells)
+        .slice(1)           // Supprime la première colonne (ID)
+        .slice(0, 5)        // Conserve les 5 premières cellules restantes
+        .map(cell => cell.innerText.trim());
       tableText += cellTexts.join('\t') + "\n";
     });
   
-    // Essayer d'utiliser l'API Clipboard
+    // Essayer d'utiliser l'API Clipboard pour copier le texte
     navigator.clipboard.writeText(tableText)
       .then(() => {
         alert("Données du tableau copiées dans le presse-papier !");
       })
       .catch(err => {
         console.warn("Clipboard API non disponible, utilisation du fallback.", err);
-        // Fallback : créer un textarea temporaire
+        // Fallback : créer un textarea temporaire et utiliser document.execCommand('copy')
         const textarea = document.createElement("textarea");
         textarea.value = tableText;
-        // Positionner le textarea hors écran
         textarea.style.position = "fixed";
         textarea.style.top = "-1000px";
         document.body.appendChild(textarea);
@@ -2809,7 +2808,7 @@
         try {
           const successful = document.execCommand('copy');
           if (successful) {
-            alert("Données du tableau copiées dans le presse-papier");
+            alert("Données du tableau copiées dans le presse-papier !");
           } else {
             alert("Échec de la copie via execCommand.");
           }
@@ -2819,10 +2818,8 @@
         document.body.removeChild(textarea);
       });
   });
-
-  // Bouton "Copier Tableau Image"
+  
   document.getElementById('copyTableDataButtonImage').addEventListener('click', async function() {
-
     // Vérifie qu'un projet et un document sont sélectionnés
     const firstValue = document.getElementById('firstColumnDropdown').value.trim();
     const secondValue = document.getElementById('secondColumnListbox').value.trim();
@@ -2830,18 +2827,51 @@
       alert("Veuillez sélectionner un projet et un document.");
       return;
     }
-
-    const table = document.getElementById('dataTable');
-    if (!table) {
+  
+    const originalTable = document.getElementById('dataTable');
+    if (!originalTable) {
       alert("Tableau introuvable !");
       return;
     }
-    
+  
+    // Cloner le tableau original (avec toutes ses parties)
+    const clonedTable = originalTable.cloneNode(true);
+  
+    // Pour éviter que le header ne se positionne en sticky,
+    // on modifie le style du thead en position static
+    const thead = clonedTable.querySelector('thead');
+    if (thead) {
+      thead.style.position = 'static';
+      thead.style.top = '0';
+    }
+  
+    // Indices des colonnes à supprimer (en se basant sur l’ordre dans le tableau original)
+    // Ici, on souhaite retirer "DateLimite", "Bloquant" et "Archive".
+    // Dans notre tableau, ces colonnes se trouvent respectivement aux indices 6, 7 et 8
+    // On supprime en partant de la plus grande pour éviter que l’indexation ne soit décalée.
+    const indicesToRemove = [8, 7, 6];
+    clonedTable.querySelectorAll('tr').forEach(row => {
+      indicesToRemove.forEach(idx => {
+        if (row.children[idx]) {
+          row.removeChild(row.children[idx]);
+        }
+      });
+    });
+  
+    // Créer un conteneur temporaire dans lequel on place le clone pour le rendre capturable.
+    const tempContainer = document.createElement('div');
+    tempContainer.style.position = 'absolute';
+    tempContainer.style.top = '-9999px';
+    tempContainer.style.left = '-9999px';
+    tempContainer.style.display = 'block';
+    tempContainer.appendChild(clonedTable);
+    document.body.appendChild(tempContainer);
+  
     try {
-      // Capture du tableau dans un canvas via html2canvas
-      const canvas = await html2canvas(table, { useCORS: true });
+      // Utilisation de html2canvas pour capturer le tableau cloné
+      const canvas = await html2canvas(clonedTable, { useCORS: true });
       
-      // Tenter d'utiliser l'API Clipboard avec ClipboardItem (ici en PNG)
+      // Si l'API Clipboard est disponible, essayer de copier l'image dans le presse-papier
       if (navigator.clipboard && navigator.clipboard.write) {
         canvas.toBlob(async function(blob) {
           if (!blob) {
@@ -2853,7 +2883,7 @@
             await navigator.clipboard.write([clipboardItem]);
             alert("Image du tableau copiée dans le presse-papier !");
           } catch (err) {
-            console.warn("Clipboard API échouée, utilisation du fallback.", err);
+            console.warn("Erreur lors de l'utilisation de l'API Clipboard, passage au fallback.", err);
             fallbackCopyImage(canvas);
           }
         }, 'image/png');
@@ -2862,47 +2892,50 @@
       }
     } catch (error) {
       alert("Erreur lors de la capture du tableau : " + error);
+    } finally {
+      document.body.removeChild(tempContainer);
     }
   });
   
-  // Méthode fallback basée sur document.execCommand('copy')
+  // Fallback copier image
   function fallbackCopyImage(canvas) {
-    // Convertit le canvas en DataURL
-    const dataURL = canvas.toDataURL('image/png');
     
-    // Crée un conteneur contenteditable hors écran
+    const dataURL = canvas.toDataURL('image/png');
+  
+    // Crée un conteneur contentEditable hors écran
     const container = document.createElement('div');
     container.contentEditable = true;
-    container.style.position = 'fixed';
-    container.style.top = '-1000px';
-    
-    // Insère l'image dans le conteneur
-    container.innerHTML = `<img src="${dataURL}">`;
+    container.style.position = 'absolute';
+    container.style.top = '-9999px';
+    container.style.left = '-9999px';
     document.body.appendChild(container);
-    
+  
+    // Insère l'image dans le conteneur via une balise <img>
+    container.innerHTML = `<img src="${dataURL}">`;
+  
     // Sélectionne le contenu du conteneur
     const range = document.createRange();
     range.selectNodeContents(container);
     const selection = window.getSelection();
     selection.removeAllRanges();
     selection.addRange(range);
-    
-    // Tente d'exécuter la commande copy
+  
     try {
-      const successful = document.execCommand('copy');
-      if (successful) {
+      const success = document.execCommand('copy');
+      if (success) {
+        alert("Image du tableau copiée dans le presse-papier !");
       } else {
-        alert("Échec de la copie de l'image via fallback.");
+        alert("Échec de la copie de l'image via le fallback.");
       }
     } catch (err) {
       alert("Erreur lors de la copie (fallback) : " + err);
     }
-    
+  
     // Nettoyage
     document.body.removeChild(container);
     selection.removeAllRanges();
-  }  
-
+  }
+  
   // Bouton "Télécharger Tableau"
   document.getElementById('downloadTableButton').addEventListener('click', async function() {
     // Vérifier qu'un projet et un document sont sélectionnés
@@ -2912,24 +2945,53 @@
       alert("Veuillez sélectionner un projet et un document.");
       return;
     }
-    
+  
+    // Définition du nom
     const suggestedName = `${projectName}_${docName}.png`;
-    
-    const table = document.getElementById('dataTable');
-    if (!table) {
+  
+    // Récupérer le tableau original
+    const originalTable = document.getElementById('dataTable');
+    if (!originalTable) {
       alert("Tableau introuvable !");
       return;
     }
-    
+  
+    // Cloner le tableau
+    const clonedTable = originalTable.cloneNode(true);
+  
+    const thead = clonedTable.querySelector('thead');
+    if (thead) {
+      thead.style.position = 'static';
+      thead.style.top = '0';
+    }
+  
+    const indicesToRemove = [8, 7, 6];
+    clonedTable.querySelectorAll('tr').forEach(row => {
+      indicesToRemove.forEach(idx => {
+        if (row.children[idx]) {
+          row.removeChild(row.children[idx]);
+        }
+      });
+    });
+  
+    // Créer un conteneur temporaire hors écran pour placer le clone
+    const tempContainer = document.createElement('div');
+    tempContainer.style.position = 'absolute';
+    tempContainer.style.top = '-9999px';
+    tempContainer.style.left = '-9999px';
+    tempContainer.style.display = 'block';
+    tempContainer.appendChild(clonedTable);
+    document.body.appendChild(tempContainer);
+  
     try {
-      // Capture le rendu du tableau dans un canvas via html2canvas
-      const canvas = await html2canvas(table, { useCORS: true });
-      // Convertit le canvas en blob PNG
+      // Capture du clone par html2canvas
+      const canvas = await html2canvas(clonedTable, { useCORS: true });
+      // Convertir le canvas en Blob (format PNG)
       const blob = await new Promise(resolve => {
         canvas.toBlob(resolve, 'image/png');
       });
       
-      // Si l'API File System Access est disponible, essaye de l'utiliser pour ouvrir le sélecteur
+      // Si l'API File System Access est disponible, tenter de l'utiliser pour ouvrir le navigateur de fichier
       if (window.showSaveFilePicker) {
         try {
           const options = {
@@ -2939,30 +3001,33 @@
               accept: { 'image/png': ['.png'] }
             }]
           };
-          // Attention : showSaveFilePicker ne peut s'exécuter que dans un contexte sécurisé et en top-level.
+          // Note : showSaveFilePicker doit être exécuté dans un contexte sécurisé (HTTPS) et au niveau top-level
           const handle = await window.showSaveFilePicker(options);
           const writableStream = await handle.createWritable();
           await writableStream.write(blob);
           await writableStream.close();
-          return;  // Arrête ici
         } catch (err) {
-          console.error("Erreur de showSaveFilePicker :", err);
+          console.error("Erreur avec showSaveFilePicker :", err);
+          // Fallback classique en cas d'échec
           fallbackDownload(blob, suggestedName);
         }
       } else {
+        // Si l'API n'est pas disponible, utiliser le fallback
         fallbackDownload(blob, suggestedName);
       }
     } catch (error) {
       alert("Erreur lors de la capture du tableau : " + error);
+    } finally {
+      // Supprimer le conteneur temporaire
+      document.body.removeChild(tempContainer);
     }
   });
   
-  // Fonction fallback qui lance un téléchargement classique
+  // Fonction fallback : réalise un téléchargement classique via un lien
   function fallbackDownload(blob, suggestedName) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    // Utilise le nom suggéré
     link.download = suggestedName;
     document.body.appendChild(link);
     link.click();
