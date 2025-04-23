@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Gant - Sélection Projet</title>
+
+  <!-- Grist Plugin -->
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+
+  <!-- Frappe Gantt -->
+  <link rel="stylesheet" href="https://unpkg.com/frappe-gantt/dist/frappe-gantt.css">
+  <script src="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.min.js"></script>
+
+  <!-- Styles personnalisés -->
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="gantt.css">
+
+  <!-- Scripts -->
+  <script src="script.js" defer></script>
+  <script src="gantt.js" defer></script>
+</head>
+
+<body>
+  <div class="sticky-container">
+    <div class="dropdown-container">
+      <label for="projectDropdown">Projet :</label>
+      <select id="projectDropdown">
+        <option value="">Choisir un projet</option>
+      </select>
+    </div>
+
+    <div class="dropdown-container">
+      <label for="documentDropdown">Document :</label>
+      <select id="documentDropdown">
+        <option value="">Sélectionner un document</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="gantt" style="margin: 40px;"></div>
+</body>
+
+</html>
