@@ -31,6 +31,6 @@ document.getElementById("projectDropdown").addEventListener("change", () => {
 document.getElementById("documentDropdown").addEventListener("change", () => {
     const selectedProject = document.getElementById("projectDropdown").value;
     const selectedDocument = document.getElementById("documentDropdown").value;
-    updateGanttChart(selectedProject, selectedDocument, records); // 👈 ajout
+    updateGanttChart(selectedProject, selectedDocument, records);
 });
   

@@ -1,4 +1,103 @@
-.bar.bloquant {
-    fill: #e74c3c !important; /* rouge bloquant */
-  }
-  
+/* Conteneur principal qui gère le scroll vertical */
+#gantt-container-scroll {
+  height: calc(100vh - 150px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Conteneur qui regroupe la colonne Émetteur et le Gantt */
+#gantt-container {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+}
+
+/* Colonne Émetteur */
+#task-list {
+  width: 250px;
+  background-color: #2c2c2c;
+  border-right: 3px solid #666;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+/* Entête Émetteur */
+.header {
+  background-color: #444;
+  font-weight: bold;
+  font-size: 16px;
+  text-align: center;
+  height: 59px;
+  line-height: 59px;
+  border-bottom: 2px solid #666;
+  padding: 0;
+}
+
+/* Conteneur des lignes d'émetteur */
+#task-rows {
+  flex-grow: 1;
+}
+
+/* Chaque ligne émetteur */
+.task-row {
+  height: 55px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  border-bottom: 1px solid #444;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Partie droite contenant le Gantt */
+#gantt-right {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Diagramme de Gantt */
+#gantt {
+  flex-grow: 1;
+  background-color: #1e1e1e;
+  overflow: hidden; /* PAS auto */
+}
+
+/* Scrollbar horizontale (séparée si besoin, mais pas obligatoire) */
+#gantt-scroll-x {
+  height: 20px;
+  overflow-x: auto; 
+  overflow-y: hidden;
+  background-color: #1e1e1e;
+}
+
+/* Conteneur interne du scroll horizontal */
+#gantt-scroll-inner {
+  height: 1px;
+  width: 3000px;
+}
+
+/* Conteneur qui permet de scroller horizontalement le corps du Gantt */
+#gantt-body-scroll {
+  flex-grow: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background-color: #1e1e1e;
+}
+
+#gantt-scrollbar-fixed {
+  position: fixed;
+  bottom: 0;
+  left: 250px;
+  right: 0;
+  height: 20px;
+  background-color: #1e1e1e;
+  overflow-x: auto;
+  overflow-y: hidden;
+  z-index: 999;
+  border-top: 1px solid #555;
+}
