@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Planning Indices (Multi-barres)</title>
+
+  <!-- Grist Plugin -->
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+
+  <!-- Google Charts -->
+  <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="gantt.css">
+
+  <!-- Scripts -->
+  <script src="script.js" defer></script>
+  <script src="gantt.js" defer></script>
+</head>
+<body>
+
+  <!-- Menu de sélection projet / désignation -->
+  <div class="sticky-container">
+    <div class="dropdown-container">
+      <label for="projectDropdown">Projet :</label>
+      <select id="projectDropdown">
+        <option value="">Choisir un projet</option>
+      </select>
+    </div>
+    <div class="dropdown-container">
+      <label for="designationDropdown">Désignation :</label>
+      <select id="designationDropdown">
+        <option value="">Choisir une désignation</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Conteneur principal -->
+  <div id="gantt-container-scroll">
+    <div id="gantt-container">
+      
+      <!-- Partie gauche : colonnes fixes -->
+      <div id="task-list">
+        <div class="header-row">
+          <div class="header-cell">Nom Plan</div>
+          <div class="header-cell">Dernier Indice</div>
+        </div>
+        <div id="task-rows"></div>
+      </div>
+
+      <!-- Partie droite : diagramme -->
+      <div id="gantt-right">
+        <div id="gantt-scroll-container">
+          <div id="gantt" style="width: 2000px; height: 600px;"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</body>
+</html>
