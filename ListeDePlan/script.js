@@ -32,5 +32,15 @@ document.getElementById("projectDropdown").addEventListener("change", () => {
 document.getElementById("designationDropdown").addEventListener("change", () => {
   const selectedProject = document.getElementById("projectDropdown").value;
   const selectedDesignation = document.getElementById("designationDropdown").value;
+
   updateGanttChart(selectedProject, selectedDesignation, records);
+});
+
+// Synchronisation scroll horizontal (gantt <-> barre)
+document.getElementById("gantt-horizontal-scroll").addEventListener("scroll", (e) => {
+  document.getElementById("gantt-vertical-wrapper").scrollLeft = e.target.scrollLeft;
+});
+
+document.getElementById("gantt-vertical-wrapper").addEventListener("scroll", (e) => {
+  document.getElementById("gantt-horizontal-scroll").scrollLeft = e.target.scrollLeft;
 });

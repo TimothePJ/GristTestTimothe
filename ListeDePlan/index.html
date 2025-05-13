@@ -2,13 +2,11 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Planning Indices (Multi-barres)</title>
+  <title>Liste de Plan - Gantt</title>
 
-  <!-- Grist Plugin -->
+  <!-- Grist & Google Charts -->
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-
-  <!-- Google Charts -->
-  <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+  <script src="https://www.gstatic.com/charts/loader.js"></script>
 
   <!-- Styles -->
   <link rel="stylesheet" href="style.css">
@@ -20,7 +18,7 @@
 </head>
 <body>
 
-  <!-- Menu de sélection projet / désignation -->
+  <!-- Filtres en haut -->
   <div class="sticky-container">
     <div class="dropdown-container">
       <label for="projectDropdown">Projet :</label>
@@ -28,6 +26,7 @@
         <option value="">Choisir un projet</option>
       </select>
     </div>
+
     <div class="dropdown-container">
       <label for="designationDropdown">Désignation :</label>
       <select id="designationDropdown">
@@ -36,28 +35,20 @@
     </div>
   </div>
 
-  <!-- Conteneur principal -->
-  <div id="gantt-container-scroll">
-    <div id="gantt-container">
-      
-      <!-- Partie gauche : colonnes fixes -->
-      <div id="task-list">
-        <div class="header-row">
-          <div class="header-cell">Nom Plan</div>
-          <div class="header-cell">Dernier Indice</div>
-        </div>
-        <div id="task-rows"></div>
-      </div>
-
-      <!-- Partie droite : diagramme -->
-      <div id="gantt-right">
-        <div id="gantt-scroll-container">
-          <div id="gantt" style="width: 2000px; height: 600px;"></div>
-        </div>
-      </div>
-
+  <!-- Zone Gantt verticale avec scroll -->
+  <div id="gantt-vertical-wrapper">
+    <div id="gantt-inner">
+      <div id="gantt" style="width: 2000px;"></div>
     </div>
   </div>
+
+  <!-- Scroll horizontal en bas, toujours visible -->
+  <div id="gantt-horizontal-scroll">
+    <div id="scroll-sync" style="width: 2000px;"></div>
+  </div>
+
+  <!-- Menu contextuel -->
+  <div id="custom-context-menu" style="display: none; position: absolute;"></div>
 
 </body>
 </html>

@@ -1,16 +1,31 @@
-google.charts.load("current", {packages:["timeline"]});
-google.charts.setOnLoadCallback(() => { window.googleChartsReady = true; });
+google.charts.load("current", {
+  packages: ["timeline"],
+  language: "fr"
+});
+
+google.charts.setOnLoadCallback(() => {
+  window.googleChartsReady = true;
+});
+
+let recordMap = new Map(); // Map NomPlan → ligne Grist
 
 function convertToGoogleData(records, project, designation) {
-  const indices = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+  const indices = ["c0", ...("ABCDEFGHIJKLMNOPQRSTUVWXYZ".split(""))];
   const dataRows = [];
-  const leftPanel = [];
 
-  const filtered = records.filter(r => r.NomProjet === project && r.Designation === designation);
+  const filtered = records.filter(r =>
+    r.NomProjet === project && r.Designation === designation
+  );
+
+  recordMap.clear();
 
   filtered.forEach(rec => {
     const nomPlan = rec.NomPlan || "(Sans nom)";
-    const dernierIndice = rec.DernierIndice || "";
+    recordMap.set(nomPlan, rec); // on lie le nom à l'objet complet
+
+    let dernierIndice = rec.DernierIndice || "";
+    if (dernierIndice === "0") dernierIndice = "c0";
+
     const lastIndex = indices.indexOf(dernierIndice);
     if (lastIndex === -1) return;
 
@@ -20,44 +35,15 @@ function convertToGoogleData(records, project, designation) {
       const date = dateStr ? new Date(dateStr) : null;
       if (!date || isNaN(date)) continue;
 
-      // Pour Google Charts : début et fin = même date = événement ponctuel
       const end = new Date(date);
-      end.setHours(end.getHours() + 1); // pour être visible
+      end.setHours(end.getHours() + 1);
+      const labelIndice = ind === "c0" ? "0" : ind;
 
-      dataRows.push([
-        nomPlan,
-        `Indice ${ind}`,
-        date,
-        end
-      ]);
+      dataRows.push([nomPlan, labelIndice, date, end]);
     }
-
-    leftPanel.push({ nomPlan, dernierIndice });
   });
 
-  return { dataRows, leftPanel };
-}
-
-function renderTaskList(leftPanel) {
-  const container = document.getElementById("task-rows");
-  container.innerHTML = "";
-
-  leftPanel.forEach(row => {
-    const div = document.createElement("div");
-    div.className = "task-row";
-
-    const plan = document.createElement("div");
-    plan.className = "task-cell";
-    plan.textContent = row.nomPlan;
-
-    const dernier = document.createElement("div");
-    dernier.className = "task-cell";
-    dernier.textContent = row.dernierIndice;
-
-    div.appendChild(plan);
-    div.appendChild(dernier);
-    container.appendChild(div);
-  });
+  return dataRows;
 }
 
 function renderGantt(dataRows) {
@@ -79,48 +65,98 @@ function renderGantt(dataRows) {
 
   const { startMargin, endMargin } = getMinMaxDates(dataRows);
 
-    chart.draw(dataTable, {
+  chart.draw(dataTable, {
     timeline: {
-        showRowLabels: false,
-        colorByRowLabel: false,
-        barLabelStyle: { fontSize: 12, color: '#222' }
+      showRowLabels: true,
+      colorByRowLabel: false,
+      barLabelStyle: { fontSize: 12, color: '#222' }
     },
     backgroundColor: '#ffffff',
     avoidOverlappingGridLines: true,
     hAxis: {
-        minValue: startMargin,
-        maxValue: endMargin
+      minValue: startMargin,
+      maxValue: endMargin,
+      format: 'dd MMM',
+      textStyle: { color: '#222' },
+      slantedText: false
     }
-    });
+  });
 
+  container.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+
+    const rect = container.getBoundingClientRect();
+    const y = e.clientY - rect.top + container.scrollTop;
+
+    const rowHeight = height / dataTable.getNumberOfRows();
+    const rowIndex = Math.floor(y / rowHeight);
+    if (rowIndex < 0 || rowIndex >= dataTable.getNumberOfRows()) return;
+
+    const nomPlan = dataTable.getValue(rowIndex, 0);
+    const indice = dataTable.getValue(rowIndex, 1);
+    const record = recordMap.get(nomPlan);
+    if (!record) return;
+
+    const menu = document.getElementById('custom-context-menu');
+    if (!menu) return;
+
+    menu.style.display = 'block';
+    menu.style.position = 'absolute';
+    menu.style.top = `${e.pageY}px`;
+    menu.style.left = `${e.pageX}px`;
+    menu.style.background = '#333';
+    menu.style.color = '#fff';
+    menu.style.padding = '10px';
+    menu.style.borderRadius = '4px';
+    menu.style.zIndex = 10000;
+    menu.style.boxShadow = '0 2px 6px rgba(0,0,0,0.4)';
+    menu.innerHTML = `
+      <div onclick="modifierPlan(${record.id})">Modifier</div>
+      <div onclick="ajouterIndice(${record.id})">Ajouter un indice</div>
+      <div onclick="supprimerIndice(${record.id}, '${indice}')">Supprimer l'indice ${indice}</div>
+    `;
+  });
+
+  document.addEventListener('click', () => {
+    const menu = document.getElementById('custom-context-menu');
+    if (menu) menu.style.display = 'none';
+  });
 }
 
-window.updateGanttChart = function(project, designation, records) {
+window.updateGanttChart = function (project, designation, records) {
   if (!window.googleChartsReady) return;
-
-  const { dataRows, leftPanel } = convertToGoogleData(records, project, designation);
-  renderTaskList(leftPanel);
+  const dataRows = convertToGoogleData(records, project, designation);
   renderGantt(dataRows);
 };
 
 function getMinMaxDates(rows) {
-    let min = null;
-    let max = null;
-  
-    for (const row of rows) {
-      const start = row[2];
-      const end = row[3];
-      if (!min || start < min) min = start;
-      if (!max || end > max) max = end;
-    }
-  
-    // Ajoute des jours de marge
-    const startMargin = new Date(min);
-    startMargin.setDate(startMargin.getDate() - 3);
-  
-    const endMargin = new Date(max);
-    endMargin.setDate(endMargin.getDate() + 3);
-  
-    return { startMargin, endMargin };
+  let min = null;
+  let max = null;
+
+  for (const row of rows) {
+    const start = row[2];
+    const end = row[3];
+    if (!min || start < min) min = start;
+    if (!max || end > max) max = end;
   }
-  
+
+  const startMargin = new Date(min);
+  startMargin.setDate(startMargin.getDate() - 5);
+  const endMargin = new Date(max);
+  endMargin.setDate(endMargin.getDate() + 5);
+
+  return { startMargin, endMargin };
+}
+
+// Fonctions tests
+function modifierPlan(id) {
+  alert(`Modifier le plan ID ${id}`);
+}
+
+function ajouterIndice(id) {
+  alert(`Ajouter un indice au plan ID ${id}`);
+}
+
+function supprimerIndice(id, indice) {
+  alert(`Supprimer l'indice ${indice} du plan ID ${id}`);
+}
