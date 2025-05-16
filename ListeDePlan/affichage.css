@@ -1,0 +1,98 @@
+/* Conteneur scrollable */
+#plans-output {
+  max-height: 80vh;
+  overflow: auto;
+  position: relative;
+  background-color: #2c2c2c;
+}
+
+/* Tableau */
+.plan-table {
+  width: max-content;
+  border-collapse: collapse;
+  background-color: #2c2c2c;
+  color: white;
+  margin: 0;
+}
+
+/* Cellules */
+.plan-table th,
+.plan-table td {
+  border: 1px solid #666;
+  padding: 10px;
+  white-space: nowrap;
+  text-align: center;
+  background-color: #2c2c2c;
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+}
+
+/* Entêtes fixes en haut */
+.plan-table thead th {
+  position: sticky;
+  top: 0;
+  background-color: #444;
+  z-index: 50;
+  color: white;
+}
+
+/* Cellules éditables */
+.plan-table td.editable {
+  background-color: #1f1f1f;
+  cursor: text;
+}
+
+/* Colonnes d’indice */
+.plan-table td.indice,
+.plan-table th.indice {
+  width: 110px;
+  min-width: 110px;
+  max-width: 110px;
+}
+
+/* 1ere colonne */
+.plan-table th:first-child {
+  position: sticky;
+  top: 0;
+  left: 0;
+  width: 120px;
+  min-width: 120px;
+  max-width: 120px;
+  background-color: #444;
+  z-index: 110;
+}
+
+.plan-table td:first-child {
+  position: sticky;
+  left: 0;
+  width: 120px;
+  min-width: 120px;
+  max-width: 120px;
+  background-color: #444;
+  z-index: 102;
+}
+
+/* 2eme colonne */
+.plan-table th:nth-child(2) {
+  position: sticky;
+  top: 0;
+  left: 120px;
+  width: 300px;
+  min-width: 300px;
+  max-width: 300px;
+  background-color: #444;
+  z-index: 109;
+  border-left: 1px solid #666;
+}
+
+.plan-table td:nth-child(2) {
+  position: sticky;
+  left: 120px;
+  width: 300px;
+  min-width: 300px;
+  max-width: 300px;
+  background-color: #444;
+  z-index: 101;
+  border-left: 1px solid #666;
+}

@@ -2,23 +2,20 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Liste de Plan - Gantt</title>
+  <title>Sélection Plans</title>
 
-  <!-- Grist & Google Charts -->
+  <!-- Grist Plugin API -->
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-  <script src="https://www.gstatic.com/charts/loader.js"></script>
 
   <!-- Styles -->
   <link rel="stylesheet" href="style.css">
-  <link rel="stylesheet" href="gantt.css">
+  <link rel="stylesheet" href="affichage.css">
 
   <!-- Scripts -->
   <script src="script.js" defer></script>
-  <script src="gantt.js" defer></script>
+  <script src="affichage.js" defer></script>
 </head>
 <body>
-
-  <!-- Filtres en haut -->
   <div class="sticky-container">
     <div class="dropdown-container">
       <label for="projectDropdown">Projet :</label>
@@ -35,20 +32,8 @@
     </div>
   </div>
 
-  <!-- Zone Gantt verticale avec scroll -->
-  <div id="gantt-vertical-wrapper">
-    <div id="gantt-inner">
-      <div id="gantt" style="width: 2000px;"></div>
-    </div>
+  <div id="plans-output">
+    <!-- Contenu affiché dynamiquement -->
   </div>
-
-  <!-- Scroll horizontal en bas, toujours visible -->
-  <div id="gantt-horizontal-scroll">
-    <div id="scroll-sync" style="width: 2000px;"></div>
-  </div>
-
-  <!-- Menu contextuel -->
-  <div id="custom-context-menu" style="display: none; position: absolute;"></div>
-
 </body>
 </html>

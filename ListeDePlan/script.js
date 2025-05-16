@@ -1,3 +1,5 @@
+window.__skipChangeEvent = false;
+
 let records = [];
 
 grist.ready();
@@ -27,20 +29,59 @@ document.getElementById("projectDropdown").addEventListener("change", () => {
     .map(r => r.Designation))].filter(Boolean).sort();
 
   populateDropdown("designationDropdown", designations);
+
+  // Ne vide le tableau que si l'utilisateur change manuellement
+  if (!window.__skipTableClear__) {
+    document.getElementById("plans-output").innerHTML = "";
+  }
 });
 
 document.getElementById("designationDropdown").addEventListener("change", () => {
+  if (window.__skipChangeEvent) return;
+
   const selectedProject = document.getElementById("projectDropdown").value;
   const selectedDesignation = document.getElementById("designationDropdown").value;
 
-  updateGanttChart(selectedProject, selectedDesignation, records);
+  if (selectedProject && selectedDesignation) {
+    afficherPlansFiltres(selectedProject, selectedDesignation, records);
+  }
 });
 
-// Synchronisation scroll horizontal (gantt <-> barre)
-document.getElementById("gantt-horizontal-scroll").addEventListener("scroll", (e) => {
-  document.getElementById("gantt-vertical-wrapper").scrollLeft = e.target.scrollLeft;
-});
+window.updateRecordsFromAffichage = function (updatedRecords, selectedProject, selectedDesignation) {
+  records = updatedRecords;
 
-document.getElementById("gantt-vertical-wrapper").addEventListener("scroll", (e) => {
-  document.getElementById("gantt-horizontal-scroll").scrollLeft = e.target.scrollLeft;
-});
+  if (selectedProject) {
+    window.currentProjet = selectedProject;
+    const dropdown = document.getElementById("projectDropdown");
+    if (dropdown.value !== selectedProject) {
+      dropdown.value = selectedProject;
+    }
+  }
+
+  if (selectedDesignation) {
+    window.currentDesignation = selectedDesignation;
+
+    const dropdown = document.getElementById("designationDropdown");
+    const currentOptions = Array.from(dropdown.options).map(o => o.value);
+    const newOptions = [...new Set(records
+      .filter(r => r.NomProjet === selectedProject)
+      .map(r => r.Designation))].filter(Boolean).sort();
+
+    // Comparer si les options ont vraiment changé
+    const isDifferent =
+      newOptions.length !== currentOptions.length ||
+      newOptions.some((val, i) => val !== currentOptions[i]);
+
+    if (isDifferent) {
+      populateDropdown("designationDropdown", newOptions);
+    }
+
+    // Et ne change la valeur que si différente
+    if (dropdown.value !== selectedDesignation) {
+      window.__skipChangeEvent = true;
+      dropdown.value = selectedDesignation;
+      setTimeout(() => { window.__skipChangeEvent = false }, 0);
+    }
+    
+  }
+};
