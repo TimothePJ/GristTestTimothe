@@ -6,7 +6,8 @@ grist.ready();
 
 grist.onRecords((rec) => {
   records = rec;
-  const projets = [...new Set(records.map(r => r.NomProjet))].filter(Boolean).sort();
+  // Liste unique de projets
+  const projets = [...new Set(records.map(r => r.Nom_projet))].filter(Boolean).sort();
   populateDropdown("projectDropdown", projets);
 });
 
@@ -24,13 +25,14 @@ function populateDropdown(id, values) {
 
 document.getElementById("projectDropdown").addEventListener("change", () => {
   const selectedProject = document.getElementById("projectDropdown").value;
-  const designations = [...new Set(records
-    .filter(r => r.NomProjet === selectedProject)
-    .map(r => r.Designation))].filter(Boolean).sort();
 
-  populateDropdown("designationDropdown", designations);
+  // Liste unique de Type_document pour ce projet
+  const types = [...new Set(
+    records.filter(r => r.Nom_projet === selectedProject).map(r => r.Type_document)
+  )].filter(Boolean).sort();
 
-  // Ne vide le tableau que si l'utilisateur change manuellement
+  populateDropdown("designationDropdown", types);
+
   if (!window.__skipTableClear__) {
     document.getElementById("plans-output").innerHTML = "";
   }
@@ -40,14 +42,14 @@ document.getElementById("designationDropdown").addEventListener("change", () => 
   if (window.__skipChangeEvent) return;
 
   const selectedProject = document.getElementById("projectDropdown").value;
-  const selectedDesignation = document.getElementById("designationDropdown").value;
+  const selectedType = document.getElementById("designationDropdown").value;
 
-  if (selectedProject && selectedDesignation) {
-    afficherPlansFiltres(selectedProject, selectedDesignation, records);
+  if (selectedProject && selectedType) {
+    afficherPlansFiltres(selectedProject, selectedType, records);
   }
 });
 
-window.updateRecordsFromAffichage = function (updatedRecords, selectedProject, selectedDesignation) {
+window.updateRecordsFromAffichage = function (updatedRecords, selectedProject, selectedType) {
   records = updatedRecords;
 
   if (selectedProject) {
@@ -58,16 +60,15 @@ window.updateRecordsFromAffichage = function (updatedRecords, selectedProject, s
     }
   }
 
-  if (selectedDesignation) {
-    window.currentDesignation = selectedDesignation;
+  if (selectedType) {
+    window.currentType = selectedType;
 
     const dropdown = document.getElementById("designationDropdown");
     const currentOptions = Array.from(dropdown.options).map(o => o.value);
     const newOptions = [...new Set(records
-      .filter(r => r.NomProjet === selectedProject)
-      .map(r => r.Designation))].filter(Boolean).sort();
+      .filter(r => r.Nom_projet === selectedProject)
+      .map(r => r.Type_document))].filter(Boolean).sort();
 
-    // Comparer si les options ont vraiment changé
     const isDifferent =
       newOptions.length !== currentOptions.length ||
       newOptions.some((val, i) => val !== currentOptions[i]);
@@ -76,12 +77,10 @@ window.updateRecordsFromAffichage = function (updatedRecords, selectedProject, s
       populateDropdown("designationDropdown", newOptions);
     }
 
-    // Et ne change la valeur que si différente
-    if (dropdown.value !== selectedDesignation) {
+    if (dropdown.value !== selectedType) {
       window.__skipChangeEvent = true;
-      dropdown.value = selectedDesignation;
+      dropdown.value = selectedType;
       setTimeout(() => { window.__skipChangeEvent = false }, 0);
     }
-    
   }
 };
