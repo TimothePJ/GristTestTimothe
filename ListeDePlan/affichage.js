@@ -1,11 +1,42 @@
 const INDICES = ["0", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
+let projetsDictGlobal = null;
 
-function afficherPlansFiltres(projet, designation, records) {
+(async () => {
+  await chargerProjetsMap();
+})();
+
+async function chargerProjetsMap() {
+  if (projetsDictGlobal) return projetsDictGlobal;
+
+  const data = await grist.docApi.fetchTable("Projet");
+  console.log("=== DEBUG Projet table ===");
+  console.log("Structure complète :", data);
+
+  projetsDictGlobal = {};
+
+  if (data && data.id && data.Projet) {
+    for (let i = 0; i < data.id.length; i++) {
+      const nom = data.Projet[i];
+      const id = data.id[i];
+      if (typeof nom === "string" && nom.trim()) {
+        projetsDictGlobal[nom.trim()] = id;
+      }
+    }
+  } else {
+    console.error("Structure inattendue de la table Projet :", data);
+  }
+
+  console.log("Projets connus dans Grist :", projetsDictGlobal);
+  return projetsDictGlobal;
+}
+
+function afficherPlansFiltres(projet, typeDoc, records) {
   const zone = document.getElementById("plans-output");
   zone.innerHTML = "";
 
   const filtres = records.filter(r =>
-    r.NomProjet === projet && r.Designation === designation
+    (typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet) === projet &&
+    r.Type_document === typeDoc
   );
 
   if (filtres.length === 0) {
@@ -15,11 +46,13 @@ function afficherPlansFiltres(projet, designation, records) {
 
   const plansMap = new Map();
   for (const r of filtres) {
-    const key = `${r.NumeroPlan}___${r.NomPlan}`;
+    const key = `${r.N_Document}___${r.Designation2}`;
     if (!plansMap.has(key)) {
       plansMap.set(key, {
-        NumeroPlan: r.NumeroPlan,
-        NomPlan: r.NomPlan,
+        N_Document: r.N_Document,
+        Designation2: r.Designation2,
+        Type_document: r.Type_document,
+        Nom_projet: (typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet),
         lignes: {}
       });
     }
@@ -32,21 +65,20 @@ function afficherPlansFiltres(projet, designation, records) {
       allIndicesUsed.add(ind);
     }
   }
-
   let lastUsedIndex = Math.max(...[...allIndicesUsed].map(i => INDICES.indexOf(i)).filter(i => i >= 0));
-  if (isNaN(lastUsedIndex)) lastUsedIndex = 0;
-  const indicesToShow = INDICES.slice(0, lastUsedIndex + 2); // +1 colonne vide
+  if (isNaN(lastUsedIndex)) lastUsedIndex = -1;
+  const indicesToShow = INDICES.slice(0, lastUsedIndex + 2);
 
   const table = document.createElement("table");
   table.className = "plan-table";
 
   const thead = document.createElement("thead");
   const headerRow = document.createElement("tr");
-  ["NumeroPlan", "NomPlan", ...indicesToShow].forEach(title => {
+  ["N_Document", "Designation2", ...indicesToShow].forEach(title => {
     const th = document.createElement("th");
     th.textContent = title;
-    if (title === "NomPlan") th.classList.add("nomplan");
-    if (!["NumeroPlan", "NomPlan"].includes(title)) {
+    if (title === "Designation2") th.classList.add("nomplan");
+    if (!["N_Document", "Designation2"].includes(title)) {
       th.classList.add("indice");
     }
     headerRow.appendChild(th);
@@ -60,33 +92,33 @@ function afficherPlansFiltres(projet, designation, records) {
     const tr = document.createElement("tr");
 
     const tdNum = document.createElement("td");
-    tdNum.textContent = plan.NumeroPlan;
+    tdNum.textContent = plan.N_Document;
+    tdNum.dataset.typeDocument = plan.Type_document;
+    tdNum.dataset.nomProjet = plan.Nom_projet;
     tr.appendChild(tdNum);
 
     const tdNom = document.createElement("td");
-    tdNom.textContent = plan.NomPlan;
+    tdNom.textContent = plan.Designation2;
     tdNom.classList.add("nomplan");
+    tdNom.dataset.typeDocument = plan.Type_document;
+    tdNom.dataset.nomProjet = plan.Nom_projet;
     tr.appendChild(tdNom);
 
     for (const indice of indicesToShow) {
       const td = document.createElement("td");
       td.contentEditable = true;
-      td.classList.add("editable");
-      if (!["NumeroPlan", "NomPlan"].includes(indice)) {
-        td.classList.add("indice");
-      }
+      td.classList.add("editable", "indice");
+      td.dataset.typeDocument = plan.Type_document;
+      td.dataset.nomProjet = plan.Nom_projet;
+      td.dataset.nDocument = plan.N_Document;
+      td.dataset.designation2 = plan.Designation2;
+      td.dataset.indice = indice;
 
       const rec = plan.lignes[indice];
-      if (rec && rec.DateDiffusion) {
-        td.textContent = formatDate(rec.DateDiffusion);
+      if (rec) {
+        if (rec.DateDiffusion) td.textContent = formatDate(rec.DateDiffusion);
         td.dataset.recordId = rec.id;
       }
-
-      td.dataset.numeroPlan = plan.NumeroPlan;
-      td.dataset.nomPlan = plan.NomPlan;
-      td.dataset.indice = indice;
-      td.dataset.nomProjet = projet;
-      td.dataset.designation = designation;
 
       tr.appendChild(td);
     }
@@ -94,124 +126,124 @@ function afficherPlansFiltres(projet, designation, records) {
     tbody.appendChild(tr);
   }
 
+  const trAjout = document.createElement("tr");
+
+  const tdAjoutNum = document.createElement("td");
+  tdAjoutNum.contentEditable = true;
+  tdAjoutNum.classList.add("editable", "ajout");
+  tdAjoutNum.dataset.typeDocument = typeDoc;
+  tdAjoutNum.dataset.nomProjet = projet;
+  trAjout.appendChild(tdAjoutNum);
+
+  const tdAjoutNom = document.createElement("td");
+  tdAjoutNom.contentEditable = true;
+  tdAjoutNom.classList.add("editable", "ajout");
+  tdAjoutNom.dataset.typeDocument = typeDoc;
+  tdAjoutNom.dataset.nomProjet = projet;
+  trAjout.appendChild(tdAjoutNom);
+
+  for (const indice of indicesToShow) {
+    const td = document.createElement("td");
+    td.contentEditable = true;
+    td.classList.add("editable", "ajout");
+    td.dataset.typeDocument = typeDoc;
+    td.dataset.nomProjet = projet;
+    td.dataset.indice = indice;
+    trAjout.appendChild(td);
+  }
+
+  tbody.appendChild(trAjout);
   table.appendChild(tbody);
   zone.appendChild(table);
+}
 
-  table.addEventListener("blur", async (e) => {
-    const td = e.target;
-    if (
-      td.tagName !== "TD" ||
-      !td.dataset.indice ||
-      !td.isContentEditable
-    ) return;
+document.addEventListener("focusout", async (e) => {
+  const td = e.target;
+  if (td.tagName !== "TD" || !td.classList.contains("editable")) return;
 
-    const texte = td.textContent.trim();
-    const recordId = td.dataset.recordId;
+  const texte = td.textContent.trim();
+  const recordId = td.dataset.recordId;
+  const indice = td.dataset.indice;
 
-    // Suppression
-    if (!texte && recordId) {
-      try {
-        await grist.docApi.applyUserActions([
-          ["RemoveRecord", "ListePlan_NDC_COF", parseInt(recordId)]
-        ]);
-        grist.docApi.fetchTable("ListePlan_NDC_COF").then(table => {
-          const converted = [];
-          const keys = Object.keys(table);
-          const nbRows = table[keys[0]].length;
-          for (let i = 0; i < nbRows; i++) {
-            const row = {};
-            for (const key of keys) {
-              row[key] = table[key][i];
-            }
-            converted.push(row);
-          }
-        
-          // Met à jour la variable globale "records" dans script.js
-          if (typeof window.updateRecordsFromAffichage === "function") {
-            window.updateRecordsFromAffichage(converted);
-          }
-        
-          const selectedProject = window.currentProjet || document.getElementById("projectDropdown").value;
-          const selectedDesignation = window.currentDesignation || document.getElementById("designationDropdown").value;
+  const tr = td.parentElement;
+  const tds = Array.from(tr.children);
+  const N_Document = tds[0]?.textContent.trim();
+  const Designation2 = tds[1]?.textContent.trim();
+  const Type_document = td.dataset.typeDocument || "";
+  const Nom_projet_label = td.dataset.nomProjet || "";
 
-          if (typeof window.updateRecordsFromAffichage === "function") {
-            window.updateRecordsFromAffichage(converted, selectedProject, selectedDesignation);
-          }
-          afficherPlansFiltres(selectedProject, selectedDesignation, converted);
-        });      
-      } catch (err) {
-        console.error("Erreur suppression :", err);
-        td.style.backgroundColor = "#842029";
-        td.style.color = "#fff";
-      }
-      return;
+  const isoDate = isValidDate(texte) ? convertToISO(texte) : null;
+  if (!isoDate) {
+    td.style.backgroundColor = "#842029";
+    td.style.color = "#fff";
+    return;
+  }
+
+  if (recordId) {
+    try {
+      await grist.docApi.applyUserActions([
+        ["UpdateRecord", "ListePlan_NDC_COF", parseInt(recordId), {
+          DateDiffusion: isoDate
+        }]
+      ]);
+      td.style.backgroundColor = "";
+      td.style.color = "";
+    } catch {
+      td.style.backgroundColor = "#842029";
+      td.style.color = "#fff";
     }
+    return;
+  }
 
-    if (!isValidDate(texte)) {
+  if (!recordId && N_Document && Designation2 && Nom_projet_label && indice && isoDate) {
+    projetsDictGlobal = null;
+    const projetsDict = await chargerProjetsMap();
+    const Nom_projet = projetsDict[Nom_projet_label.trim()];
+    if (!Nom_projet) {
       td.style.backgroundColor = "#842029";
       td.style.color = "#fff";
       return;
     }
 
-    const isoDate = convertToISO(texte);
     const rowData = {
-      NomProjet: td.dataset.nomProjet,
-      Designation: td.dataset.designation,
-      NumeroPlan: td.dataset.numeroPlan,
-      NomPlan: td.dataset.nomPlan,
-      Indice: td.dataset.indice,
+      N_Document,
+      Type_document,
+      Designation2,
+      Nom_projet,
+      Indice: indice,
       DateDiffusion: isoDate
     };
 
     try {
-      const projets = await grist.docApi.fetchTable('Projet');
-      const projectIndex = projets.Projet.indexOf(td.dataset.nomProjet);
-      if (projectIndex === -1) throw new Error("Projet introuvable");
-      const projectId = projets.id[projectIndex];
-      rowData.NomProjet = projectId;
+      const res = await grist.docApi.applyUserActions([
+        ["AddRecord", "ListePlan_NDC_COF", null, rowData]
+      ]);
+      td.dataset.recordId = res.retValues[0];
+      td.classList.remove("ajout");
 
-      if (recordId) {
-        await grist.docApi.applyUserActions([
-          ["UpdateRecord", "ListePlan_NDC_COF", parseInt(recordId), { DateDiffusion: isoDate }]
-        ]);
-      } else {
-        const res = await grist.docApi.applyUserActions([
-          ["AddRecord", "ListePlan_NDC_COF", null, rowData]
-        ]);
-        td.dataset.recordId = res.retValues[0];
-      }
+      const selectedProject = document.getElementById("projectDropdown").value;
+      const selectedType = document.getElementById("designationDropdown").value;
+      const recordsData = await grist.docApi.fetchTable("ListePlan_NDC_COF");
+      const rows = Object.entries(recordsData.records || {}).map(([id, row]) => ({ id: parseInt(id), ...row }));
 
-      grist.docApi.fetchTable("ListePlan_NDC_COF").then(table => {
-        const converted = [];
-        const keys = Object.keys(table);
-        const nbRows = table[keys[0]].length;
-        for (let i = 0; i < nbRows; i++) {
-          const row = {};
-          for (const key of keys) {
-            row[key] = table[key][i];
-          }
-          converted.push(row);
-        }
-      
-        if (typeof window.updateRecordsFromAffichage === "function") {
-          window.updateRecordsFromAffichage(converted);
-        }
-      
-        const selectedProject = window.currentProjet || document.getElementById("projectDropdown").value;
-        const selectedDesignation = window.currentDesignation || document.getElementById("designationDropdown").value;
+      const validRows = rows.filter(r =>
+        r.Type_document &&
+        typeof r.Type_document === "string" &&
+        r.Type_document.trim() !== "" &&
+        (typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet) === selectedProject
+      );
 
-        if (typeof window.updateRecordsFromAffichage === "function") {
-          window.updateRecordsFromAffichage(converted, selectedProject, selectedDesignation);
-        }
-        afficherPlansFiltres(selectedProject, selectedDesignation, converted);
-      });      
-    } catch (err) {
-      console.error("Erreur Grist :", err);
+      const types = [...new Set(validRows.map(r => r.Type_document))].sort();
+      const newSelectedType = types.includes(selectedType) ? selectedType : types[0] || "";
+
+      window.updateRecordsFromAffichage(rows, selectedProject, newSelectedType);
+
+    } catch {
       td.style.backgroundColor = "#842029";
       td.style.color = "#fff";
     }
-  }, true);
-}
+  }
+}, true);
 
 function isValidDate(dateStr) {
   const regex = /^\d{2}\/\d{2}\/\d{4}$/;
