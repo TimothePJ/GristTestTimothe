@@ -41,6 +41,11 @@ grist.onRecords( (rec) => {
 
     populateDropdown("designationDropdown", types);
   }
+
+  const selectedType = document.getElementById("designationDropdown").value;
+  if (selectedProject && selectedType) {
+    afficherPlansFiltres(selectedProject, selectedType, window.records);
+  }
 });
 
 function populateDropdown(id, values) {
@@ -108,67 +113,6 @@ document.getElementById("designationDropdown").addEventListener("change", () => 
     afficherPlansFiltres(selectedProject, selectedType, window.records);
   }
 });
-
-window.updateRecordsFromAffichage = async function (updatedRecords, selectedProject, selectedType) {
-  const projetsDict = await chargerProjetsMap();
-  for (const r of updatedRecords) {
-    if (typeof r.Nom_projet === "number") {
-      const projId = r.Nom_projet;
-      const projLabel = Object.entries(projetsDict).find(([label, id]) => id === projId)?.[0] || null;
-      if (projLabel) {
-        r.Nom_projet = { id: projId, details: projLabel };
-      }
-    }
-  }
-
-  window.records = updatedRecords;
-
-  if (selectedProject) {
-    window.currentProjet = selectedProject;
-    const dropdown = document.getElementById("projectDropdown");
-    if (dropdown.value !== selectedProject) {
-      window.__skipChangeEvent = true;
-      dropdown.value = selectedProject;
-      setTimeout(() => { window.__skipChangeEvent = false }, 0);
-    }
-  }
-
-  if (selectedType) {
-    window.currentType = selectedType;
-
-    const dropdown = document.getElementById("designationDropdown");
-    const currentOptions = Array.from(dropdown.options).map(o => o.value);
-    const newOptions = [...new Set(
-      window.records
-        .filter(r => {
-          const nom = typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet;
-          return nom === selectedProject &&
-                 typeof r.Type_document === "string" &&
-                 r.Type_document.trim() !== "";
-        })
-        .map(r => r.Type_document)
-    )].sort();
-
-    const isDifferent =
-      newOptions.length !== currentOptions.length ||
-      newOptions.some((val, i) => val !== currentOptions[i]);
-
-    if (newOptions.length > 0 && (isDifferent || dropdown.value === "")) {
-      populateDropdown("designationDropdown", newOptions);
-      if (!newOptions.includes(selectedType)) {
-        dropdown.value = newOptions[0] || "";
-      } else {
-        dropdown.value = selectedType;
-      }
-    }
-
-    if (dropdown.value !== selectedType) {
-      window.__skipChangeEvent = true;
-      dropdown.value = selectedType;
-      setTimeout(() => { window.__skipChangeEvent = false }, 0);
-    }
-  }
-};
 
 async function supprimerLignesSansDate() {
   console.log("== SUPPRESSION : routine appelée ==");
