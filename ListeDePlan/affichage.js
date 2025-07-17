@@ -56,8 +56,13 @@ function afficherPlansFiltres(projet, typeDoc, records) {
         lignes: {}
       });
     }
-    plansMap.get(key).lignes[r.Indice] = r;
+    if (!plansMap.get(key).lignes[r.Indice]) {
+      plansMap.get(key).lignes[r.Indice] = [];
+    }
+    plansMap.get(key).lignes[r.Indice].push(r);
   }
+
+  let hasMultiDateError = false;
 
   // Identify documents that appear in multiple rows due to different designations.
   const docToDesignations = new Map();
@@ -110,6 +115,23 @@ function afficherPlansFiltres(projet, typeDoc, records) {
 
       warningDiv.appendChild(form);
     }
+  }
+
+  for (const plan of plansMap.values()) {
+    for (const indice in plan.lignes) {
+      if (plan.lignes[indice].length > 1) {
+        hasMultiDateError = true;
+        break;
+      }
+    }
+    if (hasMultiDateError) break;
+  }
+
+  if (hasMultiDateError) {
+    const p = document.createElement('p');
+    p.className = 'warning-message';
+    p.textContent = "Des dates multiples sont trouvées pour certains documents pour la même indice, veuillez corriger en cliquant dessus.";
+    warningDiv.appendChild(p);
   }
 
   const allIndicesUsed = new Set();
@@ -178,12 +200,19 @@ function afficherPlansFiltres(projet, typeDoc, records) {
       td.dataset.designation2 = plan.Designation2;
       td.dataset.indice = indice;
 
-      const rec = plan.lignes[indice];
-      if (rec) {
-        if (rec.DateDiffusion) td.textContent = formatDate(rec.DateDiffusion);
-        td.dataset.recordId = rec.id;
+      const recs = plan.lignes[indice];
+      if (recs && recs.length > 0) {
+        if (recs.length > 1) {
+          td.classList.add('multi-date-error');
+          td.contentEditable = false; // Prevent editing
+          td.innerHTML = recs.map(r => formatDate(r.DateDiffusion)).join('<br>');
+          td.dataset.conflicts = JSON.stringify(recs.map(r => ({ id: r.id, date: r.DateDiffusion })));
+        } else {
+          const rec = recs[0];
+          if (rec.DateDiffusion) td.textContent = formatDate(rec.DateDiffusion);
+          td.dataset.recordId = rec.id;
+        }
       }
-
       tr.appendChild(td);
     }
 
@@ -247,6 +276,67 @@ function regenererDesignationDropdown(records, projetLabel) {
 }
 
 document.addEventListener("click", async (e) => {
+  if (e.target.matches('td.multi-date-error')) {
+    const td = e.target;
+    const conflicts = JSON.parse(td.dataset.conflicts);
+    
+    // Remove any existing popup
+    const existingPopup = document.getElementById('date-fix-popup');
+    if (existingPopup) existingPopup.remove();
+
+    const popup = document.createElement('div');
+    popup.id = 'date-fix-popup';
+    popup.style.position = 'absolute';
+    popup.style.left = `${td.offsetLeft + td.offsetWidth}px`;
+    popup.style.top = `${td.offsetTop}px`;
+    
+    popup.innerHTML = `<p>Choisir la date correcte:</p>`;
+    const fieldset = document.createElement('fieldset');
+    
+    conflicts.forEach((conflict, index) => {
+      const label = document.createElement('label');
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'date-fix';
+      radio.value = conflict.id;
+      if (index === 0) radio.checked = true;
+      label.appendChild(radio);
+      label.append(` ${formatDate(conflict.date)}`);
+      fieldset.appendChild(label);
+    });
+    popup.appendChild(fieldset);
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.textContent = 'Confirmer';
+    confirmBtn.onclick = async () => {
+      const selectedRadio = popup.querySelector('input[name="date-fix"]:checked');
+      if (selectedRadio) {
+        const correctRecordId = parseInt(selectedRadio.value, 10);
+        const recordsToDelete = conflicts.filter(c => c.id !== correctRecordId);
+
+        try {
+          const table = await grist.getTable();
+          for (const record of recordsToDelete) {
+            await table.destroy(record.id);
+          }
+          popup.remove();
+          // The onRecords event will be triggered automatically by the deletions.
+        } catch (err) {
+          console.error("Erreur lors de la suppression des dates en double :", err);
+          alert("Une erreur est survenue lors de la suppression.");
+        }
+      }
+    };
+    popup.appendChild(confirmBtn);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Annuler';
+    cancelBtn.onclick = () => popup.remove();
+    popup.appendChild(cancelBtn);
+
+    td.closest('#plans-output').appendChild(popup);
+  }
+
   if (!e.target.matches('button.fix-designation-btn')) return;
 
   const button = e.target;

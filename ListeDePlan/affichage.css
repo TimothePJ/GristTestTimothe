@@ -152,3 +152,44 @@
 tr.duplicate-doc td {
   background-color: #ffdddd !important;
 }
+
+.warning-message {
+  color: #ffcc00;
+  font-weight: bold;
+}
+
+td.multi-date-error {
+  background-color: #ff4d4d !important;
+  color: white !important;
+  cursor: pointer;
+}
+
+#date-fix-popup {
+  position: absolute;
+  background-color: #555;
+  border: 1px solid #ffcc00;
+  border-radius: 5px;
+  padding: 15px;
+  z-index: 200;
+  color: white;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+}
+
+#date-fix-popup p {
+  margin: 0 0 10px 0;
+}
+
+#date-fix-popup fieldset {
+  border: none;
+  padding: 0;
+  margin: 0 0 10px 0;
+}
+
+#date-fix-popup label {
+  display: block;
+  margin-bottom: 5px;
+}
+
+#date-fix-popup button {
+  margin-right: 10px;
+}
