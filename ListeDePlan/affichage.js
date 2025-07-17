@@ -25,13 +25,13 @@ async function chargerProjetsMap() {
   return projetsDictGlobal;
 }
 
-function afficherPlansFiltres(projet, typeDoc, records) {
+function afficherPlansFiltres(projet, typeDocument, records) {
   const zone = document.getElementById("plans-output");
   zone.innerHTML = "";
 
   const filtres = records.filter(r =>
     (typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet) === projet &&
-    r.Type_document === typeDoc
+    r.Type_document === typeDocument
   );
 
   if (filtres.length === 0) {
@@ -41,11 +41,11 @@ function afficherPlansFiltres(projet, typeDoc, records) {
 
   const plansMap = new Map();
   for (const r of filtres) {
-    const key = `${r.N_Document}___${r.Designation2}`;
+    const key = `${r.N_Document}___${r.Designation}`;
     if (!plansMap.has(key)) {
       plansMap.set(key, {
-        N_Document: r.N_Document,
-        Designation2: r.Designation2,
+        Num_Document: r.N_Document,
+        Designation: r.Designation,
         Type_document: r.Type_document,
         Nom_projet: (typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet),
         lignes: {}
@@ -68,8 +68,8 @@ function afficherPlansFiltres(projet, typeDoc, records) {
     if (!docToDesignations.has(r.N_Document)) {
       docToDesignations.set(r.N_Document, new Set());
     }
-    if (r.Designation2) {
-      docToDesignations.get(r.N_Document).add(r.Designation2);
+    if (r.Designation) {
+      docToDesignations.get(r.N_Document).add(r.Designation);
     }
   }
 
@@ -79,7 +79,7 @@ function afficherPlansFiltres(projet, typeDoc, records) {
       form.className = 'warning-form';
       form.innerHTML = `<p><strong>Attention :</strong> Le document <strong>${doc}</strong> a plusieurs désignations :</p>`;
       const fieldset = document.createElement('fieldset');
-      fieldset.dataset.nDocument = doc;
+      fieldset.dataset.numDocument = doc;
       let isFirst = true;
       for (const designation of designations) {
         const label = document.createElement('label');
@@ -99,7 +99,7 @@ function afficherPlansFiltres(projet, typeDoc, records) {
       const button = document.createElement('button');
       button.textContent = 'Unifier les désignations';
       button.className = 'fix-designation-btn';
-      button.dataset.nDocument = doc;
+      button.dataset.numDocument = doc;
       form.appendChild(button);
       warningDiv.appendChild(form);
     }
@@ -172,11 +172,11 @@ function afficherPlansFiltres(projet, typeDoc, records) {
   table.className = "plan-table";
   const thead = document.createElement("thead");
   const headerRow = document.createElement("tr");
-  ["N_Document", "Designation2", ...indicesToShow].forEach(title => {
+  ["N° Document", "Désignation", ...indicesToShow].forEach(title => {
     const th = document.createElement("th");
     th.textContent = title;
-    if (title === "Designation2") th.classList.add("nomplan");
-    if (!["N_Document", "Designation2"].includes(title)) {
+    if (title === "Désignation") th.classList.add("nomplan");
+    if (!["N° Document", "Désignation"].includes(title)) {
       th.classList.add("indice");
     }
     headerRow.appendChild(th);
@@ -192,9 +192,9 @@ function afficherPlansFiltres(projet, typeDoc, records) {
     }
 
     const tdNum = document.createElement("td");
-    tdNum.textContent = plan.N_Document;
-    tdNum.dataset.nDocument = plan.N_Document;
-    tdNum.dataset.designation2 = plan.Designation2;
+    tdNum.textContent = plan.Num_Document;
+    tdNum.dataset.numDocument = plan.Num_Document;
+    tdNum.dataset.designation = plan.Designation;
     tdNum.contentEditable = true;
     tdNum.classList.add("editable");
     tdNum.dataset.typeDocument = plan.Type_document;
@@ -202,9 +202,9 @@ function afficherPlansFiltres(projet, typeDoc, records) {
     tr.appendChild(tdNum);
 
     const tdNom = document.createElement("td");
-    tdNom.textContent = plan.Designation2;
-    tdNom.dataset.nDocument = plan.N_Document;
-    tdNom.dataset.designation2 = plan.Designation2;
+    tdNom.textContent = plan.Designation;
+    tdNom.dataset.numDocument = plan.Num_Document;
+    tdNom.dataset.designation = plan.Designation;
     tdNom.contentEditable = true;
     tdNom.classList.add("editable", "nomplan");
     tdNom.dataset.typeDocument = plan.Type_document;
@@ -216,8 +216,8 @@ function afficherPlansFiltres(projet, typeDoc, records) {
       td.classList.add("editable", "indice");
       td.dataset.typeDocument = plan.Type_document;
       td.dataset.nomProjet = plan.Nom_projet;
-      td.dataset.nDocument = plan.N_Document;
-      td.dataset.designation2 = plan.Designation2;
+      td.dataset.numDocument = plan.Num_Document;
+      td.dataset.designation = plan.Designation;
       td.dataset.indice = indice;
 
       const recs = plan.lignes[indice];
@@ -243,19 +243,19 @@ function afficherPlansFiltres(projet, typeDoc, records) {
   const tdAjoutNum = document.createElement("td");
   tdAjoutNum.contentEditable = true;
   tdAjoutNum.classList.add("editable", "ajout");
-  tdAjoutNum.dataset.typeDocument = typeDoc;
+  tdAjoutNum.dataset.typeDocument = typeDocument;
   tdAjoutNum.dataset.nomProjet = projet;
   trAjout.appendChild(tdAjoutNum);
   const tdAjoutNom = document.createElement("td");
   tdAjoutNom.contentEditable = true;
   tdAjoutNom.classList.add("editable", "ajout");
-  tdAjoutNom.dataset.typeDocument = typeDoc;
+  tdAjoutNom.dataset.typeDocument = typeDocument;
   tdAjoutNom.dataset.nomProjet = projet;
   trAjout.appendChild(tdAjoutNom);
   for (const indice of indicesToShow) {
     const td = document.createElement("td");
     td.classList.add("editable", "indice", "ajout");
-    td.dataset.typeDocument = typeDoc;
+    td.dataset.typeDocument = typeDocument;
     td.dataset.nomProjet = projet;
     td.dataset.indice = indice;
     trAjout.appendChild(td);
@@ -322,20 +322,20 @@ document.addEventListener("click", async (e) => {
 
   if (target.matches('button.fix-designation-btn')) {
     const button = target;
-    const nDocument = button.dataset.nDocument;
+    const numDocument = button.dataset.numDocument;
     const form = button.closest('.warning-form');
-    const selectedRadio = form.querySelector(`input[name="designation-fix-${nDocument}"]:checked`);
+    const selectedRadio = form.querySelector(`input[name="designation-fix-${numDocument}"]:checked`);
     if (!selectedRadio) {
       alert("Veuillez sélectionner une désignation correcte.");
       return;
     }
     const correctDesignation = selectedRadio.value;
-    const recordsToUpdate = window.records.filter(r => r.N_Document === nDocument && r.Designation2 !== correctDesignation);
+    const recordsToUpdate = window.records.filter(r => r.N_Document === numDocument && r.Designation !== correctDesignation);
     if (recordsToUpdate.length > 0) {
-      const actions = recordsToUpdate.map(r => ["UpdateRecord", "ListePlan_NDC_COF", r.id, { Designation2: correctDesignation }]);
+      const actions = recordsToUpdate.map(r => ["UpdateRecord", "ListePlan_NDC_COF", r.id, { Designation: correctDesignation }]);
       try {
         await grist.docApi.applyUserActions(actions);
-        alert(`Les désignations pour le document ${nDocument} ont été unifiées.`);
+        alert(`Les désignations pour le document ${numDocument} ont été unifiées.`);
       } catch (err) {
         console.error("Erreur lors de l'unification des désignations :", err);
         alert("Une erreur est survenue.");
@@ -351,8 +351,8 @@ document.addEventListener("click", async (e) => {
     if (document.getElementById('date-fix-popup')) return;
     const { recordId, indice, typeDocument, nomProjet } = td.dataset;
     const tr = td.parentElement;
-    const N_Document = tr.cells[0]?.textContent.trim();
-    const Designation2 = tr.cells[1]?.textContent.trim();
+    const Num_Document = tr.cells[0]?.textContent.trim();
+    const Designation = tr.cells[1]?.textContent.trim();
     const fp = flatpickr(td, {
       "locale": "fr",
       defaultDate: td.textContent ? convertFrToDate(td.textContent) : undefined,
@@ -373,8 +373,8 @@ document.addEventListener("click", async (e) => {
           } catch (err) { console.error("Erreur lors de la mise à jour de la date :", err); }
           return;
         }
-        if (!N_Document || !Designation2 || !nomProjet || !typeDocument) {
-          console.warn("Champs obligatoires manquants pour l'ajout :", { N_Document, Designation2, nomProjet, typeDocument });
+        if (!Num_Document || !Designation || !nomProjet || !typeDocument) {
+          console.warn("Champs obligatoires manquants pour l'ajout :", { Num_Document, Designation, nomProjet, typeDocument });
           return;
         }
         const projetsDict = await chargerProjetsMap();
@@ -383,7 +383,7 @@ document.addEventListener("click", async (e) => {
           console.error("ID de projet non trouvé pour :", nomProjet);
           return;
         }
-        const rowData = { N_Document, Type_document: typeDocument, Designation2, Nom_projet: Nom_projet_id, Indice: indice, DateDiffusion: isoDate };
+        const rowData = { N_Document: Num_Document, Type_document: typeDocument, Designation: Designation, Nom_projet: Nom_projet_id, Indice: indice, DateDiffusion: isoDate };
         try {
           await grist.docApi.applyUserActions([["AddRecord", "ListePlan_NDC_COF", null, rowData]]);
         } catch (err) { console.error("Erreur lors de l'ajout du record :", err); }
@@ -399,14 +399,14 @@ document.addEventListener("focusout", async (e) => {
   td.style.backgroundColor = "";
   td.style.color = "";
   const texte = td.textContent.trim();
-  const { nDocument, designation2 } = td.dataset;
-  const recordsToUpdate = window.records.filter(r => r.N_Document === nDocument && r.Designation2 === designation2);
+  const { numDocument, designation } = td.dataset;
+  const recordsToUpdate = window.records.filter(r => r.N_Document === numDocument && r.Designation === designation);
   if (recordsToUpdate.length === 0) return;
   const champs = {};
   if (td.cellIndex === 0) {
     champs.N_Document = texte;
   } else if (td.cellIndex === 1) {
-    champs.Designation2 = texte;
+    champs.Designation = texte;
   }
   if (Object.keys(champs).length > 0) {
     const actions = recordsToUpdate.map(r => ["UpdateRecord", "ListePlan_NDC_COF", r.id, champs]);

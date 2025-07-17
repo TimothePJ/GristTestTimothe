@@ -29,7 +29,7 @@ grist.onRecords( (rec) => {
       }
     }
 
-    const types = [...new Set(
+    const typesDocument = [...new Set(
       window.records
         .filter(r => {
           const nom = typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet;
@@ -39,12 +39,12 @@ grist.onRecords( (rec) => {
         .filter(val => typeof val === "string" && val.trim())
     )].sort();
 
-    populateDropdown("designationDropdown", types);
+    populateDropdown("typeDocumentDropdown", typesDocument);
   }
 
-  const selectedType = document.getElementById("designationDropdown").value;
-  if (selectedProject && selectedType) {
-    afficherPlansFiltres(selectedProject, selectedType, window.records);
+  const selectedTypeDocument = document.getElementById("typeDocumentDropdown").value;
+  if (selectedProject && selectedTypeDocument) {
+    afficherPlansFiltres(selectedProject, selectedTypeDocument, window.records);
   }
 });
 
@@ -69,12 +69,12 @@ function populateDropdown(id, values) {
 document.getElementById("projectDropdown").addEventListener("change", () => {
   const selectedProject = document.getElementById("projectDropdown").value;
   if (!selectedProject) {
-    populateDropdown("designationDropdown", []);
+    populateDropdown("typeDocumentDropdown", []);
     document.getElementById("plans-output").innerHTML = "";
     return;
   }
 
-  const typesSet = new Set();
+  const typesDocumentSet = new Set();
 
   if(!window.records)
     console.log("no window records");
@@ -92,25 +92,25 @@ document.getElementById("projectDropdown").addEventListener("change", () => {
     }
 
     if (label === selectedProject && typeof r.Type_document === "string" && r.Type_document.trim()) {
-      typesSet.add(r.Type_document.trim());
+      typesDocumentSet.add(r.Type_document.trim());
     }
   }
 
-  const types = [...typesSet].sort();
-  populateDropdown("designationDropdown", types);
-  console.log("Types affichés dans la deuxième liste :", types);
-  document.getElementById("designationDropdown").value = "";
+  const typesDocument = [...typesDocumentSet].sort();
+  populateDropdown("typeDocumentDropdown", typesDocument);
+  console.log("Types affichés dans la deuxième liste :", typesDocument);
+  document.getElementById("typeDocumentDropdown").value = "";
   document.getElementById("plans-output").innerHTML = "";
 });
 
-document.getElementById("designationDropdown").addEventListener("change", () => {
+document.getElementById("typeDocumentDropdown").addEventListener("change", () => {
   if (window.__skipChangeEvent) return;
 
   const selectedProject = document.getElementById("projectDropdown").value;
-  const selectedType = document.getElementById("designationDropdown").value;
+  const selectedTypeDocument = document.getElementById("typeDocumentDropdown").value;
 
-  if (selectedProject && selectedType) {
-    afficherPlansFiltres(selectedProject, selectedType, window.records);
+  if (selectedProject && selectedTypeDocument) {
+    afficherPlansFiltres(selectedProject, selectedTypeDocument, window.records);
   }
 });
 
