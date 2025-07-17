@@ -193,3 +193,36 @@ td.multi-date-error {
 #date-fix-popup button {
   margin-right: 10px;
 }
+
+/* Flatpickr theme adjustments */
+.flatpickr-calendar {
+  background-color: #3a3a3a;
+  border: 1px solid #666;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+}
+.flatpickr-day{
+  color: #fff;
+}
+.flatpickr-day.selected, .flatpickr-day.startRange, .flatpickr-day.endRange {
+  background: #ffcc00;
+  color: #1f1f1f;
+  border-color: #ffcc00;
+}
+.flatpickr-day:hover {
+  background: #555;
+}
+.flatpickr-time input:hover, .flatpickr-time .flatpickr-am-pm:hover {
+  background: #555;
+}
+.flatpickr-time .flatpickr-am-pm:focus, .flatpickr-time input:focus {
+    background: #555;
+}
+span.flatpickr-weekday, .flatpickr-months .flatpickr-month {
+  color: #fff;
+}
+.numInput, .arrowUp, .arrowDown {
+  color: #fff;
+}
+.flatpickr-monthDropdown-month {
+  background-color: #2c2c2c !important;
+}
