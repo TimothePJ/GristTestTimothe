@@ -1,7 +1,15 @@
 document.addEventListener("contextmenu", function (e) {
-  const tr = e.target.closest("tr");
-  if (!tr || !tr.querySelector("[data-record-id]")) return;
+  const targetCell = e.target.closest("td");
+  if (!targetCell) return;
 
+  const tr = targetCell.closest("tr");
+  if (!tr) return;
+
+  // Only show context menu for rows that contain actual data.
+  const hasRecord = tr.querySelector("[data-record-id]");
+  const isAjoutRow = tr.querySelector("td.ajout");
+  if (!hasRecord && !isAjoutRow) return;
+  
   e.preventDefault();
   removeExistingContextMenu();
 
@@ -15,7 +23,7 @@ document.addEventListener("contextmenu", function (e) {
   deleteOption.className = "context-menu-item";
   deleteOption.textContent = "Supprimer";
   deleteOption.addEventListener("click", () => {
-    supprimerLigne(tr);
+    supprimerLigne(targetCell); // Pass the specific cell
     removeExistingContextMenu();
   });
 
@@ -30,17 +38,41 @@ function removeExistingContextMenu() {
   if (existing) existing.remove();
 }
 
-function supprimerLigne(tr) {
-  const tds = Array.from(tr.querySelectorAll("[data-record-id]"));
-  const recordIds = tds.map(td => parseInt(td.dataset.recordId)).filter(Boolean);
-  
-  if (recordIds.length === 0) return;
+function supprimerLigne(cell) {
+  const tr = cell.closest('tr');
+  let recordIdsToDelete = [];
 
-  const actions = recordIds.map(id => ["RemoveRecord", "ListePlan_NDC_COF", id]);
+  // Case 1: A specific date cell (.indice) was clicked
+  if (cell.classList.contains('indice') && cell.dataset.recordId) {
+    recordIdsToDelete.push(parseInt(cell.dataset.recordId, 10));
+  } 
+  // Case 2: The document or designation cell was clicked, delete all records in the row
+  else if (cell.cellIndex === 0 || cell.cellIndex === 1) {
+    const tdsWithRecord = Array.from(tr.querySelectorAll("td[data-record-id]"));
+    recordIdsToDelete = tdsWithRecord.map(td => parseInt(td.dataset.recordId, 10));
+  }
 
-  grist.docApi.applyUserActions(actions).then(() => {
-    tr.remove();
-  }).catch(err => {
-    console.error("Suppression échouée", err);
-  });
+  const uniqueRecordIds = [...new Set(recordIdsToDelete)].filter(Boolean);
+
+  if (uniqueRecordIds.length === 0) {
+    // If it's the "add" row, just clear it visually.
+    if (tr.querySelector('td.ajout')) {
+       const cellsToClear = tr.querySelectorAll('td');
+       cellsToClear.forEach(c => c.textContent = '');
+    }
+    return;
+  }
+
+  (async () => {
+    try {
+      const table = await grist.getTable();
+      for (const id of uniqueRecordIds) {
+        await table.destroy(id);
+      }
+    } catch (err) {
+      console.error("Suppression échouée", err);
+      alert("La suppression a échoué. Vérifiez la console pour les erreurs.");
+    }
+  })();
+  // Grist's onRecords will handle the UI update automatically.
 }
