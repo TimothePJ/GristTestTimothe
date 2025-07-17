@@ -194,6 +194,10 @@ td.multi-date-error {
   margin-right: 10px;
 }
 
+.missing-date-error {
+  background-color: #ffdddd !important;
+}
+
 /* Flatpickr theme adjustments */
 .flatpickr-calendar {
   background-color: #3a3a3a;

@@ -124,6 +124,40 @@ function afficherPlansFiltres(projet, typeDoc, records) {
     warningDiv.appendChild(p);
   }
 
+  // Missing date warnings
+  let hasMissingDateError = false;
+  for (const plan of plansMap.values()) {
+    const datedIndices = Object.keys(plan.lignes)
+      .filter(indice => plan.lignes[indice] && plan.lignes[indice].length > 0 && !plan.lignes[indice].isMissing)
+      .map(indice => INDICES.indexOf(indice))
+      .filter(index => index !== -1)
+      .sort((a, b) => a - b);
+
+    if (datedIndices.length > 0) {
+      const last = datedIndices[datedIndices.length - 1];
+      // Check all cells from the beginning up to the last valid date
+      for (let i = 0; i < last; i++) {
+        const currentIndice = INDICES[i];
+        if (!plan.lignes[currentIndice] || plan.lignes[currentIndice].length === 0) {
+          hasMissingDateError = true;
+          // Mark this cell for highlighting
+          if (!plan.lignes[currentIndice]) {
+            plan.lignes[currentIndice] = { isMissing: true };
+          } else {
+            plan.lignes[currentIndice].isMissing = true;
+          }
+        }
+      }
+    }
+  }
+
+  if (hasMissingDateError) {
+    const p = document.createElement('p');
+    p.className = 'warning-message';
+    p.textContent = "Des dates sont manquantes, veuillez les remplir.";
+    warningDiv.appendChild(p);
+  }
+
   const allIndicesUsed = new Set();
   for (const plan of plansMap.values()) {
     for (const ind in plan.lignes) {
@@ -187,12 +221,14 @@ function afficherPlansFiltres(projet, typeDoc, records) {
       td.dataset.indice = indice;
 
       const recs = plan.lignes[indice];
-      if (recs && recs.length > 0) {
-        if (recs.length > 1) {
+      if (recs) {
+        if (recs.isMissing) {
+          td.classList.add('missing-date-error');
+        } else if (recs.length > 1) {
           td.classList.add('multi-date-error');
           td.innerHTML = recs.map(r => formatDate(r.DateDiffusion)).join('<br>');
           td.dataset.conflicts = JSON.stringify(recs.map(r => ({ id: r.id, date: r.DateDiffusion })));
-        } else {
+        } else if (recs.length === 1) {
           const rec = recs[0];
           if (rec.DateDiffusion) td.textContent = formatDate(rec.DateDiffusion);
           td.dataset.recordId = rec.id;
