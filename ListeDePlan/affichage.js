@@ -158,6 +158,19 @@ function afficherPlansFiltres(projet, typeDocument, records) {
     warningDiv.appendChild(p);
   }
 
+  // Document number/type consistency warnings (for the current project)
+  const projectDocMap = window.projectDocNumberToTypeMap.get(projet);
+  if (projectDocMap) {
+    for (const [doc, types] of projectDocMap.entries()) {
+      if (types.size > 1) {
+        const p = document.createElement('p');
+        p.className = 'warning-message';
+        p.innerHTML = `<strong>Attention :</strong> Le N° Document <strong>${doc}</strong> est utilisé avec plusieurs types de documents dans ce projet : ${[...types].join(', ')}.`;
+        warningDiv.appendChild(p);
+      }
+    }
+  }
+
   const allIndicesUsed = new Set();
   for (const plan of plansMap.values()) {
     for (const ind in plan.lignes) {
@@ -384,6 +397,17 @@ document.addEventListener("click", async (e) => {
           console.warn("Champs obligatoires manquants pour l'ajout :", { Num_Document, Designation, nomProjet, typeDocument });
           return;
         }
+
+        // Project-specific validation logic
+        const projectDocMap = window.projectDocNumberToTypeMap.get(nomProjet);
+        if (projectDocMap) {
+          const existingTypes = projectDocMap.get(Num_Document);
+          if (existingTypes && !existingTypes.has(typeDocument)) {
+            alert(`Erreur : Le N° Document ${Num_Document} est déjà utilisé pour un autre type de document dans ce projet (${[...existingTypes].join(', ')}).`);
+            td.textContent = ''; // Clear the invalid date
+            return;
+          }
+        }
         const projetsDict = await chargerProjetsMap();
         const Nom_projet_id = projetsDict[nomProjet.trim()];
         if (!Nom_projet_id) {
@@ -412,6 +436,17 @@ document.addEventListener("focusout", async (e) => {
     const { typeDocument, nomProjet } = td.dataset;
 
     if (numDocument && designation) {
+      // Project-specific validation logic
+      const projectDocMap = window.projectDocNumberToTypeMap.get(nomProjet);
+      if (projectDocMap) {
+        const existingTypes = projectDocMap.get(numDocument);
+        if (existingTypes && !existingTypes.has(typeDocument)) {
+          alert(`Erreur : Le N° Document ${numDocument} est déjà utilisé pour un autre type de document dans ce projet (${[...existingTypes].join(', ')}).`);
+          tr.cells[0].textContent = ''; // Clear the invalid document number
+          return;
+        }
+      }
+
       const projetsDict = await chargerProjetsMap();
       const nomProjetId = projetsDict[nomProjet.trim()];
       if (!nomProjetId) {
