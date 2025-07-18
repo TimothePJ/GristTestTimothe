@@ -5,10 +5,10 @@ document.addEventListener("contextmenu", function (e) {
   const tr = targetCell.closest("tr");
   if (!tr) return;
 
-  // Only show context menu for rows that contain actual data.
-  const hasRecord = tr.querySelector("[data-record-id]");
+  // Only show context menu for rows that represent a document (even if dateless) or the add row.
+  const isDataRow = tr.querySelector("[data-num-document]");
   const isAjoutRow = tr.querySelector("td.ajout");
-  if (!hasRecord && !isAjoutRow) return;
+  if (!isDataRow && !isAjoutRow) return;
   
   e.preventDefault();
   removeExistingContextMenu();
@@ -46,10 +46,12 @@ function supprimerLigne(cell) {
   if (cell.classList.contains('indice') && cell.dataset.recordId) {
     recordIdsToDelete.push(parseInt(cell.dataset.recordId, 10));
   } 
-  // Case 2: The document or designation cell was clicked, delete all records in the row
+  // Case 2: The document or designation cell was clicked, delete all records for this document/designation
   else if (cell.cellIndex === 0 || cell.cellIndex === 1) {
-    const tdsWithRecord = Array.from(tr.querySelectorAll("td[data-record-id]"));
-    recordIdsToDelete = tdsWithRecord.map(td => parseInt(td.dataset.recordId, 10));
+    const numDocument = cell.dataset.numDocument;
+    const designation = cell.dataset.designation;
+    const recordsToFind = window.records.filter(r => r.N_Document === numDocument && r.Designation === designation);
+    recordIdsToDelete = recordsToFind.map(r => r.id);
   }
 
   const uniqueRecordIds = [...new Set(recordIdsToDelete)].filter(Boolean);

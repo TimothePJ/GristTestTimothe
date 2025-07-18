@@ -362,7 +362,14 @@ document.addEventListener("click", async (e) => {
         if (!isoDate) {
           if (recordId) {
             try {
-              await grist.docApi.applyUserActions([["UpdateRecord", "ListePlan_NDC_COF", parseInt(recordId, 10), { DateDiffusion: null }]]);
+              // If this is the last date for this document, set Indice to null as well.
+              const otherDates = tr.querySelectorAll('td.indice');
+              const datedCells = Array.from(otherDates).filter(cell => cell.textContent.trim() !== '' && cell !== td);
+              const fieldsToUpdate = { DateDiffusion: null };
+              if (datedCells.length === 0) {
+                fieldsToUpdate.Indice = null;
+              }
+              await grist.docApi.applyUserActions([["UpdateRecord", "ListePlan_NDC_COF", parseInt(recordId, 10), fieldsToUpdate]]);
             } catch (err) { console.error("Erreur lors de la suppression de la date :", err); }
           }
           return;
@@ -396,6 +403,39 @@ document.addEventListener("click", async (e) => {
 document.addEventListener("focusout", async (e) => {
   const td = e.target;
   if (!td.matches("td.editable:not(.indice)")) return;
+
+  // Logic to add a new dateless document from the "ajout" row
+  if (td.classList.contains('ajout')) {
+    const tr = td.parentElement;
+    const numDocument = tr.cells[0]?.textContent.trim();
+    const designation = tr.cells[1]?.textContent.trim();
+    const { typeDocument, nomProjet } = td.dataset;
+
+    if (numDocument && designation) {
+      const projetsDict = await chargerProjetsMap();
+      const nomProjetId = projetsDict[nomProjet.trim()];
+      if (!nomProjetId) {
+        console.error("ID de projet non trouvé pour :", nomProjet);
+        return;
+      }
+      const rowData = {
+        N_Document: numDocument,
+        Type_document: typeDocument,
+        Designation: designation,
+        Nom_projet: nomProjetId,
+        Indice: null,
+        DateDiffusion: null
+      };
+      try {
+        await grist.docApi.applyUserActions([["AddRecord", "ListePlan_NDC_COF", null, rowData]]);
+        // Grist will refresh, clearing the "ajout" row.
+      } catch (err) {
+        console.error("Erreur lors de l'ajout du document sans date :", err);
+      }
+    }
+    return;
+  }
+
   td.style.backgroundColor = "";
   td.style.color = "";
   const texte = td.textContent.trim();
