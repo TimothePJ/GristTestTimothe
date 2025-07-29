@@ -82,6 +82,8 @@ function updateDashboard() {
 
 function generateChartDataAndTable(projectRecords, selectedIndice) {
   const statsByType = {};
+  let totalProjectDocs = new Set();
+  let totalProjectDocsWithIndice = new Set();
 
   projectRecords.forEach(record => {
     const type = record.Type_document || 'Non spécifié';
@@ -92,8 +94,10 @@ function generateChartDataAndTable(projectRecords, selectedIndice) {
       };
     }
     statsByType[type].totalDocs.add(record.N_Document);
+    totalProjectDocs.add(record.N_Document);
     if (record.Indice === selectedIndice) {
       statsByType[type].docsWithIndice.add(record.N_Document);
+      totalProjectDocsWithIndice.add(record.N_Document);
     }
   });
 
@@ -140,8 +144,30 @@ function generateChartDataAndTable(projectRecords, selectedIndice) {
     `;
   }
 
+  // Add Total Row
+  const totalDocsCount = totalProjectDocs.size;
+  const totalWithIndiceCount = totalProjectDocsWithIndice.size;
+  const totalWithoutIndiceCount = totalDocsCount - totalWithIndiceCount;
+  const totalPercentage = totalDocsCount > 0 ? ((totalWithIndiceCount / totalDocsCount) * 100).toFixed(2) : 0;
+
+  tableHtml += `
+    <tr class="total-row">
+      <td><strong>Total</strong></td>
+      <td><strong>${totalWithIndiceCount}</strong></td>
+      <td><strong>${totalWithoutIndiceCount}</strong></td>
+      <td><strong>${totalDocsCount}</strong></td>
+      <td><strong>${totalPercentage}%</strong></td>
+    </tr>
+  `;
   tableHtml += '</tbody></table>';
   document.getElementById('stats-output').innerHTML = tableHtml;
+
+  // Add Total to Chart
+  chartLabels.push('Total');
+  dataWithIndice.push(totalDocsCount > 0 ? (totalWithIndiceCount / totalDocsCount) * 100 : 0);
+  dataWithoutIndice.push(totalDocsCount > 0 ? (totalWithoutIndiceCount / totalDocsCount) * 100 : 0);
+  rawCountsWithIndice.push(totalWithIndiceCount);
+  rawCountsWithoutIndice.push(totalWithoutIndiceCount);
 
   renderChart(chartLabels, dataWithIndice, dataWithoutIndice, rawCountsWithIndice, rawCountsWithoutIndice, selectedIndice);
 }

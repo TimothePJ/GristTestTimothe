@@ -36,3 +36,8 @@ body {
 .summary-table th {
   background-color: #32323f;
 }
+
+.total-row {
+  font-weight: bold;
+  background-color: #32323f;
+}
