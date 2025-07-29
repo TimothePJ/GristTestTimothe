@@ -2,7 +2,6 @@ grist.ready();
 
 let records = [];
 let avancementChart = null;
-const INDICES = ["0", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
 
 // Register the datalabels plugin
 Chart.register(ChartDataLabels);
@@ -10,7 +9,6 @@ Chart.register(ChartDataLabels);
 grist.onRecords((newRecords) => {
   records = newRecords;
   populateProjectDropdown();
-  populateIndiceDropdown();
   updateDashboard();
 });
 
@@ -30,41 +28,18 @@ function populateProjectDropdown() {
   projectDropdown.value = currentValue;
 }
 
-function populateIndiceDropdown() {
-    const indiceDropdown = document.getElementById('indiceDropdown');
-    const usedIndices = [...new Set(records.map(r => r.Indice))].filter(Boolean).sort((a, b) => INDICES.indexOf(a) - INDICES.indexOf(b));
-
-    const currentValue = indiceDropdown.value;
-    while (indiceDropdown.options.length > 1) indiceDropdown.remove(1);
-
-    usedIndices.forEach(indice => {
-        const option = document.createElement('option');
-        option.value = indice;
-        option.textContent = indice;
-        indiceDropdown.appendChild(option);
-    });
-    if (currentValue) {
-        indiceDropdown.value = currentValue;
-    } else if (usedIndices.length > 0) {
-        indiceDropdown.value = usedIndices[0];
-    }
-}
-
-
 document.getElementById('projectDropdown').addEventListener('change', () => updateDashboard());
-document.getElementById('indiceDropdown').addEventListener('change', () => updateDashboard());
 
 function updateDashboard() {
     const selectedProject = document.getElementById('projectDropdown').value;
-    const selectedIndice = document.getElementById('indiceDropdown').value;
     const statsOutput = document.getElementById('stats-output');
     const chartContainer = document.querySelector('.chart-container');
     statsOutput.innerHTML = ''; // Clear old stats
 
-    if (!selectedProject || !selectedIndice) {
+    if (!selectedProject) {
         if(avancementChart) avancementChart.destroy();
         chartContainer.style.display = 'none';
-        statsOutput.innerHTML = '<p>Veuillez sélectionner un projet et un indice.</p>';
+        statsOutput.innerHTML = '<p>Veuillez sélectionner un projet.</p>';
         return;
     }
 
@@ -77,30 +52,48 @@ function updateDashboard() {
     }
     
     chartContainer.style.display = 'block';
-    generateChartDataAndTable(projectRecords, selectedIndice);
+    generateChartDataAndTable(projectRecords);
 }
 
-function generateChartDataAndTable(projectRecords, selectedIndice) {
+function generateChartDataAndTable(projectRecords) {
   const statsByType = {};
-  let totalProjectDocs = new Set();
-  let totalProjectDocsWithIndice = new Set();
+  
+  // Get all unique types from the project records and initialize stats objects
+  const docTypes = [...new Set(projectRecords.map(r => r.Type_document || 'Non spécifié'))];
+  docTypes.forEach(type => {
+      statsByType[type] = { totalDocs: new Set(), docsAtIndice0: new Set(), docsAtIndiceB: new Set() };
+  });
+  // Add the virtual type if COFFRAGE exists
+  if (docTypes.includes('COFFRAGE')) {
+      statsByType['COFFRAGE - Indice B'] = { totalDocs: new Set(), docsAtIndice0: new Set(), docsAtIndiceB: new Set() };
+  }
 
+  // Populate the stats
   projectRecords.forEach(record => {
     const type = record.Type_document || 'Non spécifié';
-    if (!statsByType[type]) {
-      statsByType[type] = {
-        totalDocs: new Set(),
-        docsWithIndice: new Set()
-      };
-    }
     statsByType[type].totalDocs.add(record.N_Document);
-    totalProjectDocs.add(record.N_Document);
-    if (record.Indice === selectedIndice) {
-      statsByType[type].docsWithIndice.add(record.N_Document);
-      totalProjectDocsWithIndice.add(record.N_Document);
+
+    if (record.Indice === '0') {
+        statsByType[type].docsAtIndice0.add(record.N_Document);
+    }
+    if (type === 'COFFRAGE' && record.Indice === 'B') {
+        statsByType['COFFRAGE - Indice B'].docsAtIndiceB.add(record.N_Document);
     }
   });
 
+  // Set the total for the virtual type to be the same as the main COFFRAGE type
+  if (statsByType['COFFRAGE - Indice B']) {
+      statsByType['COFFRAGE - Indice B'].totalDocs = statsByType['COFFRAGE'].totalDocs;
+  }
+
+  // Remove virtual type if it has no documents and no total to show
+  if (statsByType['COFFRAGE - Indice B'] && statsByType['COFFRAGE - Indice B'].totalDocs.size === 0) {
+      delete statsByType['COFFRAGE - Indice B'];
+  }
+
+  let totalProjectDocs = new Set();
+  let totalProjectDocsWithIndice = new Set();
+  
   const chartLabels = [];
   const dataWithIndice = [];
   const dataWithoutIndice = [];
@@ -120,10 +113,19 @@ function generateChartDataAndTable(projectRecords, selectedIndice) {
       <tbody>
   `;
 
-  for (const type in statsByType) {
+  const sortedTypes = Object.keys(statsByType).sort();
+
+  for (const type of sortedTypes) {
     const stats = statsByType[type];
     const total = stats.totalDocs.size;
-    const withIndice = stats.docsWithIndice.size;
+    let withIndice;
+
+    if (type === 'COFFRAGE - Indice B') {
+        withIndice = stats.docsAtIndiceB.size;
+    } else {
+        withIndice = stats.docsAtIndice0.size;
+    }
+    
     const withoutIndice = total - withIndice;
     const percentage = total > 0 ? ((withIndice / total) * 100).toFixed(2) : 0;
     
@@ -142,6 +144,13 @@ function generateChartDataAndTable(projectRecords, selectedIndice) {
         <td>${percentage}%</td>
       </tr>
     `;
+
+    // Add to overall total, avoiding double counting COFFRAGE
+    if (type !== 'COFFRAGE - Indice B') {
+        stats.totalDocs.forEach(doc => totalProjectDocs.add(doc));
+    }
+    stats.docsAtIndice0.forEach(doc => totalProjectDocsWithIndice.add(doc));
+    stats.docsAtIndiceB.forEach(doc => totalProjectDocsWithIndice.add(doc));
   }
 
   // Add Total Row
@@ -169,10 +178,10 @@ function generateChartDataAndTable(projectRecords, selectedIndice) {
   rawCountsWithIndice.push(totalWithIndiceCount);
   rawCountsWithoutIndice.push(totalWithoutIndiceCount);
 
-  renderChart(chartLabels, dataWithIndice, dataWithoutIndice, rawCountsWithIndice, rawCountsWithoutIndice, selectedIndice);
+  renderChart(chartLabels, dataWithIndice, dataWithoutIndice, rawCountsWithIndice, rawCountsWithoutIndice);
 }
 
-function renderChart(labels, dataWithIndice, dataWithoutIndice, rawCountsWith, rawCountsWithout, selectedIndice) {
+function renderChart(labels, dataWithIndice, dataWithoutIndice, rawCountsWith, rawCountsWithout) {
     const ctx = document.getElementById('avancementChart').getContext('2d');
     if (avancementChart) {
         avancementChart.destroy();
@@ -182,7 +191,7 @@ function renderChart(labels, dataWithIndice, dataWithoutIndice, rawCountsWith, r
         data: {
             labels: labels,
             datasets: [{
-                label: `Avec l'indice ${selectedIndice}`,
+                label: `Avancé`,
                 data: dataWithIndice,
                 backgroundColor: 'rgba(75, 192, 192, 0.5)',
                 datalabels: {
@@ -193,7 +202,7 @@ function renderChart(labels, dataWithIndice, dataWithoutIndice, rawCountsWith, r
                     }
                 }
             }, {
-                label: 'Sans l\'indice',
+                label: 'Non avancé',
                 data: dataWithoutIndice,
                 backgroundColor: 'rgba(255, 99, 132, 0.5)',
                 datalabels: {
