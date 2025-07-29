@@ -80,23 +80,21 @@
   position: sticky;
   top: 0;
   left: 120px;
-  width: 300px;
-  min-width: 300px;
-  max-width: 300px;
   background-color: #444;
   z-index: 109;
   border-left: 1px solid #666;
+  white-space: normal;
+  text-align: left;
 }
 
 .plan-table td:nth-child(2) {
   position: sticky;
   left: 120px;
-  width: 300px;
-  min-width: 300px;
-  max-width: 300px;
   background-color: #444;
   z-index: 101;
   border-left: 1px solid #666;
+  white-space: normal;
+  text-align: left;
 }
 
 #warnings {
