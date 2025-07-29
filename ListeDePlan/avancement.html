@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Avancement des Plans</title>
+
+  <!-- Grist Plugin API -->
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Chart.js Datalabels Plugin -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="avancement.css">
+</head>
+<body>
+  <div class="sticky-container">
+    <div class="dropdown-container">
+      <label for="projectDropdown">Projet :</label>
+      <select id="projectDropdown">
+        <option value="">Choisir un projet</option>
+      </select>
+    </div>
+    <div class="dropdown-container">
+      <label for="indiceDropdown">Indice :</label>
+      <select id="indiceDropdown">
+        <option value="">Choisir un indice</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="chart-container" style="position: relative; height:60vh; width:80vw">
+    <canvas id="avancementChart"></canvas>
+  </div>
+  
+  <div id="stats-output"></div>
+
+  <!-- Scripts -->
+  <script src="avancement.js" defer></script>
+</body>
+</html>
