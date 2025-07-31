@@ -61,6 +61,10 @@ async function updateDashboard() {
     generateChartDataAndTable(projectRecords, devisMap);
 }
 
+function numberWithCommas(x) {
+    return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
+
 function generateChartDataAndTable(projectRecords, devisMap) {
   const statsByType = {};
   
@@ -101,6 +105,12 @@ function generateChartDataAndTable(projectRecords, devisMap) {
   const dataWithoutIndice = [];
   const rawCountsWithIndice = [];
   const rawCountsWithoutIndice = [];
+  const sortedTypes = Object.keys(statsByType).sort();
+  let totalDevis = 0;
+  for (const type of sortedTypes) {
+    totalDevis += devisMap[type] || 0;
+  }
+
   let tableHtml = `
     <table class="summary-table">
       <thead>
@@ -111,22 +121,23 @@ function generateChartDataAndTable(projectRecords, devisMap) {
           <th>Nombre total</th>
           <th>Pourcentage plans</th>
           <th>Devis</th>
+          <th>Pourcentage devis</th>
         </tr>
       </thead>
       <tbody>
   `;
 
-  const sortedTypes = Object.keys(statsByType).sort();
-  let totalDevis = 0;
+  let totalPourcentageDevis = 0;
 
   for (const type of sortedTypes) {
     const stats = statsByType[type];
     const total = stats.totalDocs.size;
     const withIndice = stats.advancedDocs.size;
     const withoutIndice = total - withIndice;
-    const percentage = total > 0 ? ((withIndice / total) * 100).toFixed(2) : 0;
+    const percentage = total > 0 ? (withIndice / total) * 100 : 0;
     const devis = devisMap[type] || 0;
-    totalDevis += devis;
+    const pourcentageDevis = totalDevis > 0 ? (percentage * devis) / totalDevis : 0;
+    totalPourcentageDevis += pourcentageDevis;
     
     chartLabels.push(type);
     dataWithIndice.push(total > 0 ? (withIndice / total) * 100 : 0);
@@ -140,8 +151,9 @@ function generateChartDataAndTable(projectRecords, devisMap) {
         <td>${withIndice}</td>
         <td>${withoutIndice}</td>
         <td>${total}</td>
-        <td>${percentage}%</td>
-        <td>${devis}</td>
+        <td>${percentage.toFixed(2)}%</td>
+        <td>${numberWithCommas(devis)}</td>
+        <td>${pourcentageDevis.toFixed(2)}%</td>
       </tr>
     `;
   }
@@ -163,7 +175,8 @@ function generateChartDataAndTable(projectRecords, devisMap) {
       <td><strong>${totalWithoutIndiceCount}</strong></td>
       <td><strong>${totalDocsCount}</strong></td>
       <td><strong>${totalPercentage}%</strong></td>
-      <td><strong>${totalDevis}</strong></td>
+      <td><strong>${numberWithCommas(totalDevis)}</strong></td>
+      <td><strong>${totalPourcentageDevis.toFixed(2)}%</strong></td>
     </tr>
   `;
   tableHtml += '</tbody></table>';

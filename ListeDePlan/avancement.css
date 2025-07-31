@@ -37,6 +37,10 @@ body {
   background-color: #32323f;
 }
 
+.summary-table td:not(:first-child) {
+  text-align: right;
+}
+
 .total-row {
   font-weight: bold;
   background-color: #32323f;
