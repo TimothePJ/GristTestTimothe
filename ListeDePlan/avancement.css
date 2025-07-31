@@ -17,8 +17,39 @@ body {
   margin-right: 20px;
 }
 
+.main-container {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+
 .chart-container {
+  flex: 3; /* Le graphique prend plus de place */
   margin-bottom: 20px;
+}
+
+#average-indices-container {
+  flex: 1; /* Le nouveau conteneur prend moins de place */
+  padding: 15px;
+  background-color: #a5a5b1;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+}
+
+#average-indices-container h3 {
+  margin-top: 0;
+  font-size: 1.2em;
+  color: #333;
+}
+
+#average-indices-container p {
+  font-size: 1em;
+  color: #555;
+  margin: 10px 0;
+}
+
+#average-indices-container strong {
+  color: #000;
 }
 
 .summary-table {

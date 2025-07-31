@@ -34,19 +34,23 @@ async function updateDashboard() {
     const selectedProject = document.getElementById('projectDropdown').value;
     const statsOutput = document.getElementById('stats-output');
     const chartContainer = document.querySelector('.chart-container');
+    const avgContainer = document.getElementById('average-indices-container');
     statsOutput.innerHTML = ''; // Clear old stats
 
     if (!selectedProject) {
         if(avancementChart) avancementChart.destroy();
         chartContainer.style.display = 'none';
+        if (avgContainer) avgContainer.style.display = 'none';
         statsOutput.innerHTML = '<p>Veuillez sélectionner un projet.</p>';
         return;
     }
+    if (avgContainer) avgContainer.style.display = 'block';
 
     const projectRecords = records.filter(r => r.Nom_projet === selectedProject);
     if (projectRecords.length === 0) {
         if(avancementChart) avancementChart.destroy();
         chartContainer.style.display = 'none';
+        if (avgContainer) avgContainer.style.display = 'none';
         statsOutput.innerHTML = '<p>Aucune donnée pour ce projet.</p>';
         return;
     }
@@ -67,6 +71,10 @@ function numberWithCommas(x) {
 
 function generateChartDataAndTable(projectRecords, devisMap) {
   const statsByType = {};
+  const averageIndices = {
+    'COFFRAGE': { count: 0 },
+    'ARMATURES': { count: 0 }
+  };
   
   // Get all unique types and initialize stats objects
   const docTypes = [...new Set(projectRecords.map(r => r.Type_document || 'Non spécifié'))];
@@ -88,6 +96,13 @@ function generateChartDataAndTable(projectRecords, devisMap) {
     statsByType[type].totalDocs.add(record.N_Document);
     if (record.Indice === '0') {
         statsByType[type].advancedDocs.add(record.N_Document);
+    }
+
+    // Calculate average indices for specific types
+    if (type === 'COFFRAGE' || type === 'ARMATURES') {
+      if (record.Indice !== null && record.Indice !== '') {
+        averageIndices[type].count++;
+      }
     }
   });
   
@@ -190,6 +205,20 @@ function generateChartDataAndTable(projectRecords, devisMap) {
   rawCountsWithoutIndice.push(totalWithoutIndiceCount);
 
   renderChart(chartLabels, dataWithIndice, dataWithoutIndice, rawCountsWithIndice, rawCountsWithoutIndice);
+  
+  // Display average indices
+  const avgContainer = document.getElementById('average-indices-container');
+  let avgHtml = '<h3>Indice moyen</h3>';
+
+  const totalCoffrage = statsByType['COFFRAGE'] ? statsByType['COFFRAGE'].totalDocs.size : 0;
+  const coffrageAvg = totalCoffrage > 0 ? (averageIndices['COFFRAGE'].count / totalCoffrage).toFixed(2) : 'N/A';
+  avgHtml += `<p><strong>COFFRAGE:</strong> ${coffrageAvg}</p>`;
+
+  const totalArmatures = statsByType['ARMATURES'] ? statsByType['ARMATURES'].totalDocs.size : 0;
+  const armaturesAvg = totalArmatures > 0 ? (averageIndices['ARMATURES'].count / totalArmatures).toFixed(2) : 'N/A';
+  avgHtml += `<p><strong>ARMATURES:</strong> ${armaturesAvg}</p>`;
+  
+  avgContainer.innerHTML = avgHtml;
 }
 
 function renderChart(labels, dataWithIndice, dataWithoutIndice, rawCountsWith, rawCountsWithout) {
