@@ -29,11 +29,15 @@ body {
 }
 
 #average-indices-container {
-  flex: 1; /* Le nouveau conteneur prend moins de place */
+  flex: 1;
   padding: 15px;
   background-color: #a5a5b1;
   border: 1px solid #ddd;
-  border-radius: 5px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  align-self: flex-start; /* Aligner en haut */
+  max-height: 60vh; /* Hauteur maximale */
+  overflow-y: auto; /* Ajout du défilement vertical */
 }
 
 #average-indices-container h3 {

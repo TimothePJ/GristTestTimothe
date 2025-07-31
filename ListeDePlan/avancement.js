@@ -71,15 +71,13 @@ function numberWithCommas(x) {
 
 function generateChartDataAndTable(projectRecords, devisMap) {
   const statsByType = {};
-  const averageIndices = {
-    'COFFRAGE': { count: 0 },
-    'ARMATURES': { count: 0 }
-  };
+  const averageIndices = {};
   
   // Get all unique types and initialize stats objects
   const docTypes = [...new Set(projectRecords.map(r => r.Type_document || 'Non spécifié'))];
   docTypes.forEach(type => {
       statsByType[type] = { totalDocs: new Set(), advancedDocs: new Set() };
+      averageIndices[type] = { withIndex: 0, withIndexZero: 0 };
   });
   if (docTypes.includes('COFFRAGE')) {
       statsByType['COFFRAGE - Indice B'] = { totalDocs: new Set(), advancedDocs: new Set() };
@@ -99,10 +97,11 @@ function generateChartDataAndTable(projectRecords, devisMap) {
     }
 
     // Calculate average indices for specific types
-    if (type === 'COFFRAGE' || type === 'ARMATURES') {
-      if (record.Indice !== null && record.Indice !== '') {
-        averageIndices[type].count++;
-      }
+    if (record.Indice !== null && record.Indice !== '') {
+      averageIndices[type].withIndex++;
+    }
+    if (record.Indice === '0') {
+      averageIndices[type].withIndexZero++;
     }
   });
   
@@ -210,13 +209,12 @@ function generateChartDataAndTable(projectRecords, devisMap) {
   const avgContainer = document.getElementById('average-indices-container');
   let avgHtml = '<h3>Indice moyen</h3>';
 
-  const totalCoffrage = statsByType['COFFRAGE'] ? statsByType['COFFRAGE'].totalDocs.size : 0;
-  const coffrageAvg = totalCoffrage > 0 ? (averageIndices['COFFRAGE'].count / totalCoffrage).toFixed(2) : 'N/A';
-  avgHtml += `<p><strong>COFFRAGE:</strong> ${coffrageAvg}</p>`;
-
-  const totalArmatures = statsByType['ARMATURES'] ? statsByType['ARMATURES'].totalDocs.size : 0;
-  const armaturesAvg = totalArmatures > 0 ? (averageIndices['ARMATURES'].count / totalArmatures).toFixed(2) : 'N/A';
-  avgHtml += `<p><strong>ARMATURES:</strong> ${armaturesAvg}</p>`;
+  for (const type of sortedTypes) {
+    if (type === 'COFFRAGE - Indice B') continue;
+    const avgData = averageIndices[type];
+    const avg = avgData.withIndexZero > 0 ? (avgData.withIndex / avgData.withIndexZero).toFixed(2) : 'N/A';
+    avgHtml += `<p><strong>${type}:</strong> ${avg}</p>`;
+  }
   
   avgContainer.innerHTML = avgHtml;
 }
