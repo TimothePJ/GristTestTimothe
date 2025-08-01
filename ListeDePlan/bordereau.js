@@ -185,13 +185,13 @@ function displayInvoiceTable() {
     nPlanSelect.innerHTML = '<option value="">Choisir un plan</option>';
     
     const planIndices = allPlans.Nom_projet.reduce((indices, projId, index) => {
-        if (projId === selectedProject && allPlans.Indice[index]) {
+        if (projId === selectedProject && allPlans.Indice[index] && String(allPlans.Indice[index]).trim()) {
             indices.push(index);
         }
         return indices;
     }, []);
 
-    const planNumbers = [...new Set(planIndices.map(i => allPlans.N_Document[i]))].sort();
+    const planNumbers = [...new Set(planIndices.map(i => allPlans.N_Document[i]))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 
     planNumbers.forEach(planNumber => {
       const option = document.createElement('option');
