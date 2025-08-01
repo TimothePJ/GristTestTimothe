@@ -32,12 +32,61 @@ function populateProjectDropdown() {
 }
 
 document.getElementById('projectDropdown').addEventListener('change', () => {
-  displayInvoiceTable();
+  const selectedProjectName = document.getElementById('projectDropdown').value;
+  const refInput = document.getElementById('refInput');
+  
+  if (selectedProjectName) {
+    const projectRefs = [...new Set(records.filter(r => r.Projet === selectedProjectName).map(r => r.Ref))].sort();
+    refInput.value = projectRefs.length > 0 ? projectRefs[0] : '';
+  } else {
+    refInput.value = '';
+  }
+
   loadBordereauData();
+  displayInvoiceTable();
 });
 
-document.getElementById('refInput').addEventListener('change', () => updateBordereauData());
+document.getElementById('refInput').addEventListener('change', () => {
+  loadBordereauData();
+  displayInvoiceTable();
+});
+
+document.getElementById('refInput').addEventListener('input', (e) => {
+  const refInput = e.target;
+  refInput.value = refInput.value.replace(/[^0-9]/g, '');
+  const numericValue = parseInt(refInput.value, 10);
+  if (numericValue < 1) {
+    refInput.value = '1';
+  }
+  updateArrowButtons();
+});
 document.getElementById('dateInput').addEventListener('change', () => updateBordereauData());
+
+document.getElementById('refUp').addEventListener('click', () => updateRefValue(1));
+document.getElementById('refDown').addEventListener('click', () => updateRefValue(-1));
+
+function updateRefValue(change) {
+  const refInput = document.getElementById('refInput');
+  const currentValue = refInput.value;
+  const numericPart = parseInt(currentValue.replace(/[^0-9]/g, ''), 10) || 1;
+  const newNumericPart = numericPart + change;
+
+  if (newNumericPart < 1) {
+    return;
+  }
+
+  const prefix = currentValue.replace(/[0-9]/g, '');
+  refInput.value = prefix + newNumericPart;
+  refInput.dispatchEvent(new Event('change'));
+  updateArrowButtons();
+}
+
+function updateArrowButtons() {
+  const refInput = document.getElementById('refInput');
+  const refDownButton = document.getElementById('refDown');
+  const numericValue = parseInt(refInput.value, 10);
+  refDownButton.disabled = numericValue <= 1;
+}
 
 async function updateBordereauData() {
   const selectedProjectName = document.getElementById('projectDropdown').value;
@@ -46,18 +95,27 @@ async function updateBordereauData() {
   const ref = document.getElementById('refInput').value;
   const date = document.getElementById('dateInput').value;
 
-  const projectRecords = records.filter(r => r.Projet === selectedProjectName);
-  const updates = projectRecords.map(r => ['UpdateRecord', BORDEREAU_TABLE, r.id, { Ref: ref, Date_Bordereau: date }]);
-  
-  if (updates.length > 0) {
-    await grist.docApi.applyUserActions(updates);
+  const projectRecords = records.filter(r => r.Projet === selectedProjectName && r.Ref == ref);
+
+  if (projectRecords.length > 0) {
+    // Ref exists, update the date for all matching records
+    const updates = projectRecords.map(r => ['UpdateRecord', BORDEREAU_TABLE, r.id, { Date_Bordereau: date }]);
+    if (updates.length > 0) {
+      await grist.docApi.applyUserActions(updates);
+    }
+  } else {
+    // Ref does not exist, this is handled by addItem, but we can pre-fill the date
+    // No need to create a record here, as it would be empty.
+    // The user will add items using the "Add Item" button.
   }
 }
 
 async function loadBordereauData() {
+  updateArrowButtons();
   const selectedProjectName = document.getElementById('projectDropdown').value;
   const refInput = document.getElementById('refInput');
   const dateInput = document.getElementById('dateInput');
+  const refValue = refInput.value;
 
   if (!selectedProjectName) {
     refInput.value = '';
@@ -65,35 +123,45 @@ async function loadBordereauData() {
     return;
   }
 
-  const projectRecords = records.filter(r => r.Projet === selectedProjectName);
+  const projectRecords = records.filter(r => r.Projet === selectedProjectName && r.Ref == refValue);
   if (projectRecords.length > 0) {
     const firstRecord = projectRecords[0];
     refInput.value = firstRecord.Ref || '';
     const timestamp = firstRecord.Date_Bordereau;
 
     try {
-      if (timestamp && typeof timestamp === 'number') {
-        const date = new Date(timestamp * 1000);
+      let date;
+      if (timestamp) {
+        if (typeof timestamp === 'number') {
+          // Handle Unix timestamps (assuming seconds, so multiply by 1000)
+          date = new Date(timestamp * 1000);
+        } else {
+          // Handle date strings or Date objects
+          date = new Date(timestamp);
+        }
+
+        // Check if the created date is valid
         if (!isNaN(date.getTime()) && date.getFullYear() > 1900 && date.getFullYear() < 3000) {
           dateInput.value = date.toISOString().split('T')[0];
         } else {
-          dateInput.value = new Date().toISOString().split('T')[0];
+          dateInput.value = '';
         }
       } else {
-        dateInput.value = new Date().toISOString().split('T')[0];
+        dateInput.value = '';
       }
     } catch (e) {
-      console.error("Failed to parse date, falling back to today.", e);
-      dateInput.value = new Date().toISOString().split('T')[0];
+      console.error("Failed to parse date, falling back to blank.", e);
+      dateInput.value = '';
     }
   } else {
-    refInput.value = '';
-    dateInput.value = new Date().toISOString().split('T')[0];
+    // No records found for this ref, so clear the date field for a new entry
+    dateInput.value = '';
   }
 }
 
 function displayInvoiceTable() {
   const selectedProjectName = document.getElementById('projectDropdown').value;
+  const refValue = document.getElementById('refInput').value;
   const tbody = document.querySelector('#invoiceTable tbody');
   tbody.innerHTML = '';
 
@@ -101,10 +169,14 @@ function displayInvoiceTable() {
     return;
   }
 
-  const projectRecords = records.filter(r => r.Projet === selectedProjectName);
+  const refRecords = records.filter(r => r.Projet === selectedProjectName && r.Ref == refValue);
+  if (refRecords.length === 0) {
+    return;
+  }
   const selectedProject = allProjects.id[allProjects.Projet.indexOf(selectedProjectName)];
+  const allProjectRecords = records.filter(r => r.Projet === selectedProjectName);
 
-  projectRecords.forEach(record => {
+  refRecords.forEach(record => {
     const row = tbody.insertRow();
     row.dataset.recordId = record.id;
 
@@ -140,7 +212,7 @@ function displayInvoiceTable() {
     const nbrExemplairesSelect = document.createElement('select');
     
     // Use existing values from the NbrExemplaires column for the selected project
-    const allOptions = [...new Set(projectRecords.map(r => r.NbrExemplaires).filter(Boolean))].sort();
+    const allOptions = [...new Set(allProjectRecords.map(r => r.NbrExemplaires).filter(Boolean))].sort();
 
     allOptions.forEach(optionValue => {
         const option = document.createElement('option');
@@ -174,11 +246,24 @@ document.getElementById('addItem').addEventListener('click', async () => {
     alert('Veuillez d\'abord sélectionner un projet.');
     return;
   }
+  const date = document.getElementById('dateInput').value;
+  if (!date) {
+    alert('Veuillez entrer une date valide avant d\'ajouter un élément.');
+    return;
+  }
   const projectIndex = allProjects.Projet.indexOf(selectedProjectName);
   const selectedProjectId = allProjects.id[projectIndex];
   const ref = document.getElementById('refInput').value;
-  const date = document.getElementById('dateInput').value;
-  await grist.docApi.applyUserActions([['AddRecord', BORDEREAU_TABLE, null, { Projet: selectedProjectId, Ref: ref, Date_Bordereau: date }]]);
+
+  // Check if a record with this ref already exists for the project
+  const existingRecords = records.filter(r => r.Projet === selectedProjectName && r.Ref == ref);
+  if (existingRecords.length === 0) {
+    // If no records exist for this ref, create the first one.
+    await grist.docApi.applyUserActions([['AddRecord', BORDEREAU_TABLE, null, { Projet: selectedProjectId, Ref: ref, Date_Bordereau: date }]]);
+  } else {
+    // If records already exist, just add a new one to the existing bordereau
+    await grist.docApi.applyUserActions([['AddRecord', BORDEREAU_TABLE, null, { Projet: selectedProjectId, Ref: ref, Date_Bordereau: date }]]);
+  }
 });
 
 document.querySelector('#invoiceTable').addEventListener('change', async (e) => {

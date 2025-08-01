@@ -14,9 +14,29 @@ body {
   align-items: center;
 }
 
-.dropdown-container, .button-container {
+.dropdown-container, .button-container, .info-container {
   display: flex;
+  align-items: center;
   gap: 10px;
+}
+
+.ref-container {
+  display: flex;
+  align-items: center;
+}
+
+.ref-arrows {
+  display: flex;
+  flex-direction: column;
+  margin-left: 2px;
+}
+
+.ref-arrows button {
+  height: 12px;
+  font-size: 8px;
+  line-height: 8px;
+  padding: 0 3px;
+  cursor: pointer;
 }
 
 #invoiceTable {
