@@ -346,6 +346,7 @@ document.querySelector('#invoiceTable').addEventListener('dblclick', (e) => {
 document.getElementById('generatePdf').addEventListener('click', async () => {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
+    const ITEMS_PER_PAGE = 15;
 
     const selectedProject = document.getElementById('projectDropdown').value;
     const refValue = document.getElementById('refInput').value;
@@ -355,42 +356,50 @@ document.getElementById('generatePdf').addEventListener('click', async () => {
     }
 
     const projectRecords = records.filter(r => r.Projet === selectedProject && r.Ref == refValue);
-
-    let body = [];
-    projectRecords.forEach(r => {
-        body.push([r.N_Plan, r.Indice, r.Designation, r.NbrExemplaires]);
-    });
+    const totalPages = Math.ceil(projectRecords.length / ITEMS_PER_PAGE);
 
     const dateStr = new Date(document.getElementById('dateInput').value).toLocaleDateString('fr-FR');
-
-    // Add logos
     const logo1 = await fetch('img/Petit_Logotype_Digital_Couleurs.png').then(res => res.blob());
     const logo2 = await fetch('img/Dumez_Ile_de_France_Logotype_Digital_Couleurs.png').then(res => res.blob());
     const logo3 = await fetch('img/Neom_Logotype_Digital_Couleurs.png').then(res => res.blob());
 
-    doc.addImage(URL.createObjectURL(logo1), 'PNG', 10, 10, 30, 15);
-    doc.addImage(URL.createObjectURL(logo2), 'PNG', 50, 10, 30, 15);
-    doc.addImage(URL.createObjectURL(logo3), 'PNG', 90, 10, 30, 15);
+    const addHeader = () => {
+        doc.addImage(URL.createObjectURL(logo1), 'PNG', 10, 10, 30, 15);
+        doc.addImage(URL.createObjectURL(logo2), 'PNG', 50, 10, 30, 15);
+        doc.addImage(URL.createObjectURL(logo3), 'PNG', 90, 10, 30, 15);
+        doc.setFontSize(18);
+        doc.text('BORDEREAU DE TRANSMISSION', 14, 40);
+        doc.setFontSize(12);
+        doc.text(`Date: ${dateStr}`, 14, 50);
+        doc.text(`Projet: ${selectedProject}`, 14, 60);
+        doc.text(`Ref: ${refValue || ''}`, 14, 65);
+    };
 
-    doc.setFontSize(18);
-    doc.text('BORDEREAU DE TRANSMISSION', 14, 40);
+    const addFooter = (pageNumber, totalPages) => {
+        const finalY = doc.lastAutoTable.finalY || 70;
+        doc.text('Nous vous en souhaitons bonne réception et restons à votre disposition.', 14, finalY + 10);
+        doc.text('M. GHANEM', 170, finalY + 20);
+        doc.text(`Page ${pageNumber}/${totalPages}`, 175, 280);
+    };
 
-    doc.setFontSize(12);
-    doc.text(`Date: ${dateStr}`, 14, 50);
-    doc.text(`Projet: ${selectedProject}`, 14, 60);
-    doc.text(`Ref: ${document.getElementById('refInput').value || ''}`, 14, 65);
+    for (let i = 0; i < totalPages; i++) {
+        if (i > 0) {
+            doc.addPage();
+        }
+        addHeader();
+        const start = i * ITEMS_PER_PAGE;
+        const end = start + ITEMS_PER_PAGE;
+        const pageRecords = projectRecords.slice(start, end);
+        const body = pageRecords.map(r => [r.N_Plan, r.Indice, r.Designation, r.NbrExemplaires]);
 
-    doc.autoTable({
-        startY: 75,
-        head: [['N° Plan', 'Indice', 'Désignation', 'Nbr Exemplaires']],
-        body: body,
-    });
+        doc.autoTable({
+            startY: 75,
+            head: [['N° Plan', 'Indice', 'Désignation', 'Nbr Exemplaires']],
+            body: body,
+        });
 
-    const finalY = doc.lastAutoTable.finalY || 70;
-    doc.text('Nous vous en souhaitons bonne réception et restons à votre disposition.', 14, finalY + 10);
-    doc.text('M. GHANEM', 170, finalY + 20);
-    doc.text('Page 1/1', 175, 280);
-
+        addFooter(i + 1, totalPages);
+    }
 
     doc.save(`${selectedProject} - Bordereau n°${refValue}.pdf`);
 });
