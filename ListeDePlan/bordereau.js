@@ -347,19 +347,14 @@ document.getElementById('generatePdf').addEventListener('click', async () => {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
 
-    if (typeof doc.autoTable !== 'function') {
-        console.error("jsPDF.autoTable is not a function. Make sure the autotable plugin is loaded.");
-        alert("Erreur: La fonctionnalité de génération de PDF n'est pas correctement chargée.");
-        return;
-    }
-
     const selectedProject = document.getElementById('projectDropdown').value;
+    const refValue = document.getElementById('refInput').value;
     if (!selectedProject) {
         alert('Veuillez sélectionner un projet pour générer le bordereau.');
         return;
     }
 
-    const projectRecords = records.filter(r => r.Projet === selectedProject);
+    const projectRecords = records.filter(r => r.Projet === selectedProject && r.Ref == refValue);
 
     let body = [];
     projectRecords.forEach(r => {
@@ -369,26 +364,24 @@ document.getElementById('generatePdf').addEventListener('click', async () => {
     const dateStr = new Date(document.getElementById('dateInput').value).toLocaleDateString('fr-FR');
 
     // Add logos
-    const logo1 = await fetch('https://i.imgur.com/your-logo1.png').then(res => res.blob());
-    const logo2 = await fetch('https://i.imgur.com/your-logo2.png').then(res => res.blob());
-    const logo3 = await fetch('https://i.imgur.com/your-logo3.png').then(res => res.blob());
+    const logo1 = await fetch('img/Petit_Logotype_Digital_Couleurs.png').then(res => res.blob());
+    const logo2 = await fetch('img/Dumez_Ile_de_France_Logotype_Digital_Couleurs.png').then(res => res.blob());
+    const logo3 = await fetch('img/Neom_Logotype_Digital_Couleurs.png').then(res => res.blob());
 
     doc.addImage(URL.createObjectURL(logo1), 'PNG', 10, 10, 30, 15);
     doc.addImage(URL.createObjectURL(logo2), 'PNG', 50, 10, 30, 15);
     doc.addImage(URL.createObjectURL(logo3), 'PNG', 90, 10, 30, 15);
 
-    doc.setFontSize(12);
-    doc.text(dateStr, 170, 20);
-
     doc.setFontSize(18);
     doc.text('BORDEREAU DE TRANSMISSION', 14, 40);
 
     doc.setFontSize(12);
-    doc.text(`Projet: ${selectedProject}`, 14, 50);
-    doc.text(`Ref: ${document.getElementById('refInput').value || ''}`, 14, 55);
+    doc.text(`Date: ${dateStr}`, 14, 50);
+    doc.text(`Projet: ${selectedProject}`, 14, 60);
+    doc.text(`Ref: ${document.getElementById('refInput').value || ''}`, 14, 65);
 
     doc.autoTable({
-        startY: 65,
+        startY: 75,
         head: [['N° Plan', 'Indice', 'Désignation', 'Nbr Exemplaires']],
         body: body,
     });
@@ -399,5 +392,5 @@ document.getElementById('generatePdf').addEventListener('click', async () => {
     doc.text('Page 1/1', 175, 280);
 
 
-    doc.save(`Bordereau_${selectedProject}.pdf`);
+    doc.save(`${selectedProject} - Bordereau n°${refValue}.pdf`);
 });
