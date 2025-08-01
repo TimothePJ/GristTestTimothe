@@ -138,13 +138,25 @@ function displayInvoiceTable() {
 
     const nbrExemplairesCell = row.insertCell();
     const nbrExemplairesSelect = document.createElement('select');
-    const nbrExemplairesOptions = [...new Set(projectRecords.map(r => r.NbrExemplaires).filter(Boolean))];
-    nbrExemplairesOptions.forEach(optionValue => {
+    
+    // Use existing values from the NbrExemplaires column for the selected project
+    const allOptions = [...new Set(projectRecords.map(r => r.NbrExemplaires).filter(Boolean))].sort();
+
+    allOptions.forEach(optionValue => {
         const option = document.createElement('option');
         option.value = optionValue;
         option.textContent = optionValue;
         nbrExemplairesSelect.appendChild(option);
     });
+
+    // Add a blank option if it's not there
+    if (!allOptions.includes('')) {
+      const blankOption = document.createElement('option');
+      blankOption.value = '';
+      blankOption.textContent = '---';
+      nbrExemplairesSelect.prepend(blankOption);
+    }
+
     nbrExemplairesSelect.value = record.NbrExemplaires || '';
     nbrExemplairesCell.appendChild(nbrExemplairesSelect);
 
@@ -202,13 +214,48 @@ document.querySelector('#invoiceTable').addEventListener('click', async (e) => {
     if (e.target.classList.contains('delete-btn')) {
         const row = e.target.closest('tr');
         const recordId = parseInt(row.dataset.recordId, 10);
-        try {
-          const table = await grist.getTable(BORDEREAU_TABLE);
-          await table.destroy(recordId);
-        } catch (err) {
-          console.error(err);
-        }
+        await grist.docApi.applyUserActions([['RemoveRecord', BORDEREAU_TABLE, recordId]]);
     }
+});
+
+document.querySelector('#invoiceTable').addEventListener('dblclick', (e) => {
+  const target = e.target;
+  if (target.tagName === 'SELECT' && target.parentElement.cellIndex === 3) { // NbrExemplaires
+    const cell = target.parentElement;
+    const originalValue = target.value;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = originalValue;
+    
+    cell.innerHTML = '';
+    cell.appendChild(input);
+    input.focus();
+
+    const saveAndRevert = async () => {
+      const newValue = input.value;
+      const row = cell.closest('tr');
+      const recordId = parseInt(row.dataset.recordId, 10);
+
+      // Update the current record
+      await grist.docApi.applyUserActions([['UpdateRecord', BORDEREAU_TABLE, recordId, { NbrExemplaires: newValue }]]);
+
+      // If it's a new, non-empty value, we don't need to do anything special here.
+      // The displayInvoiceTable() call below will pick it up from the 'records' data.
+      
+      // Re-render the table to show the updated dropdowns everywhere
+      displayInvoiceTable();
+    };
+
+    input.addEventListener('blur', saveAndRevert);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        input.blur(); // Trigger the blur event to save
+      } else if (e.key === 'Escape') {
+        input.removeEventListener('blur', saveAndRevert);
+        displayInvoiceTable(); // Revert without saving
+      }
+    });
+  }
 });
 
 document.getElementById('generatePdf').addEventListener('click', async () => {
