@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Bordereau de Transmission</title>
+
+  <!-- Grist Plugin API -->
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  
+  <!-- jsPDF and html2canvas -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="bordereau.css">
+</head>
+<body>
+  <div class="sticky-container">
+    <div class="dropdown-container">
+      <label for="projectDropdown">Projet :</label>
+      <select id="projectDropdown">
+        <option value="">Choisir un projet</option>
+      </select>
+    </div>
+    <div class="info-container">
+      <label for="refInput">Ref:</label>
+      <input type="text" id="refInput">
+      <label for="dateInput">Date:</label>
+      <input type="date" id="dateInput">
+    </div>
+    <div class="button-container">
+      <button id="addItem">Ajouter un élément</button>
+      <button id="generatePdf">Générer le bordereau</button>
+    </div>
+  </div>
+
+  <div class="main-container">
+    <table id="invoiceTable">
+      <thead>
+        <tr>
+          <th>N° Plan</th>
+          <th>Indice</th>
+          <th>Désignation</th>
+          <th>Nbr Exemplaires</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Scripts -->
+  <script src="bordereau.js" defer></script>
+</body>
+</html>
