@@ -7,12 +7,37 @@ grist.onRecords( (rec) => {
   window.records = rec.sort((a, b) => {
     const aDoc = a.N_Document || "";
     const bDoc = b.N_Document || "";
+
+    const isANumber = !isNaN(aDoc) && !isNaN(parseFloat(aDoc));
+    const isBNumber = !isNaN(bDoc) && !isNaN(parseFloat(bDoc));
+
+    if (isANumber && isBNumber) {
+      return parseFloat(aDoc) - parseFloat(bDoc);
+    }
+
     return aDoc.localeCompare(bDoc);
   });
 
   const projets = [...new Set(window.records.map(r =>
     typeof r.Nom_projet === "object" ? r.Nom_projet.display || r.Nom_projet.details : r.Nom_projet
   ))].filter(Boolean).sort();
+
+  // Create a project-specific map to validate document number uniqueness.
+  window.projectDocNumberToTypeMap = new Map();
+  for (const r of window.records) {
+    const projectName = typeof r.Nom_projet === 'object' ? r.Nom_projet.details : r.Nom_projet;
+    if (!projectName || !r.N_Document || !r.Type_document) continue;
+
+    if (!window.projectDocNumberToTypeMap.has(projectName)) {
+      window.projectDocNumberToTypeMap.set(projectName, new Map());
+    }
+    const projectMap = window.projectDocNumberToTypeMap.get(projectName);
+
+    if (!projectMap.has(r.N_Document)) {
+      projectMap.set(r.N_Document, new Set());
+    }
+    projectMap.get(r.N_Document).add(r.Type_document);
+  }
 
   populateDropdown("projectDropdown", projets);
 
@@ -29,7 +54,7 @@ grist.onRecords( (rec) => {
       }
     }
 
-    const types = [...new Set(
+    const typesDocument = [...new Set(
       window.records
         .filter(r => {
           const nom = typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet;
@@ -39,7 +64,12 @@ grist.onRecords( (rec) => {
         .filter(val => typeof val === "string" && val.trim())
     )].sort();
 
-    populateDropdown("designationDropdown", types);
+    populateDropdown("typeDocumentDropdown", typesDocument);
+  }
+
+  const selectedTypeDocument = document.getElementById("typeDocumentDropdown").value;
+  if (selectedProject && selectedTypeDocument) {
+    afficherPlansFiltres(selectedProject, selectedTypeDocument, window.records);
   }
 });
 
@@ -64,12 +94,12 @@ function populateDropdown(id, values) {
 document.getElementById("projectDropdown").addEventListener("change", () => {
   const selectedProject = document.getElementById("projectDropdown").value;
   if (!selectedProject) {
-    populateDropdown("designationDropdown", []);
+    populateDropdown("typeDocumentDropdown", []);
     document.getElementById("plans-output").innerHTML = "";
     return;
   }
 
-  const typesSet = new Set();
+  const typesDocumentSet = new Set();
 
   if(!window.records)
     console.log("no window records");
@@ -87,88 +117,27 @@ document.getElementById("projectDropdown").addEventListener("change", () => {
     }
 
     if (label === selectedProject && typeof r.Type_document === "string" && r.Type_document.trim()) {
-      typesSet.add(r.Type_document.trim());
+      typesDocumentSet.add(r.Type_document.trim());
     }
   }
 
-  const types = [...typesSet].sort();
-  populateDropdown("designationDropdown", types);
-  console.log("Types affichés dans la deuxième liste :", types);
-  document.getElementById("designationDropdown").value = "";
+  const typesDocument = [...typesDocumentSet].sort();
+  populateDropdown("typeDocumentDropdown", typesDocument);
+  console.log("Types affichés dans la deuxième liste :", typesDocument);
+  document.getElementById("typeDocumentDropdown").value = "";
   document.getElementById("plans-output").innerHTML = "";
 });
 
-document.getElementById("designationDropdown").addEventListener("change", () => {
+document.getElementById("typeDocumentDropdown").addEventListener("change", () => {
   if (window.__skipChangeEvent) return;
 
   const selectedProject = document.getElementById("projectDropdown").value;
-  const selectedType = document.getElementById("designationDropdown").value;
+  const selectedTypeDocument = document.getElementById("typeDocumentDropdown").value;
 
-  if (selectedProject && selectedType) {
-    afficherPlansFiltres(selectedProject, selectedType, window.records);
+  if (selectedProject && selectedTypeDocument) {
+    afficherPlansFiltres(selectedProject, selectedTypeDocument, window.records);
   }
 });
-
-window.updateRecordsFromAffichage = async function (updatedRecords, selectedProject, selectedType) {
-  const projetsDict = await chargerProjetsMap();
-  for (const r of updatedRecords) {
-    if (typeof r.Nom_projet === "number") {
-      const projId = r.Nom_projet;
-      const projLabel = Object.entries(projetsDict).find(([label, id]) => id === projId)?.[0] || null;
-      if (projLabel) {
-        r.Nom_projet = { id: projId, details: projLabel };
-      }
-    }
-  }
-
-  window.records = updatedRecords;
-
-  if (selectedProject) {
-    window.currentProjet = selectedProject;
-    const dropdown = document.getElementById("projectDropdown");
-    if (dropdown.value !== selectedProject) {
-      window.__skipChangeEvent = true;
-      dropdown.value = selectedProject;
-      setTimeout(() => { window.__skipChangeEvent = false }, 0);
-    }
-  }
-
-  if (selectedType) {
-    window.currentType = selectedType;
-
-    const dropdown = document.getElementById("designationDropdown");
-    const currentOptions = Array.from(dropdown.options).map(o => o.value);
-    const newOptions = [...new Set(
-      window.records
-        .filter(r => {
-          const nom = typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet;
-          return nom === selectedProject &&
-                 typeof r.Type_document === "string" &&
-                 r.Type_document.trim() !== "";
-        })
-        .map(r => r.Type_document)
-    )].sort();
-
-    const isDifferent =
-      newOptions.length !== currentOptions.length ||
-      newOptions.some((val, i) => val !== currentOptions[i]);
-
-    if (newOptions.length > 0 && (isDifferent || dropdown.value === "")) {
-      populateDropdown("designationDropdown", newOptions);
-      if (!newOptions.includes(selectedType)) {
-        dropdown.value = newOptions[0] || "";
-      } else {
-        dropdown.value = selectedType;
-      }
-    }
-
-    if (dropdown.value !== selectedType) {
-      window.__skipChangeEvent = true;
-      dropdown.value = selectedType;
-      setTimeout(() => { window.__skipChangeEvent = false }, 0);
-    }
-  }
-};
 
 async function supprimerLignesSansDate() {
   console.log("== SUPPRESSION : routine appelée ==");

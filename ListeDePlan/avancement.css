@@ -1,0 +1,82 @@
+body {
+  font-family: sans-serif;
+  margin: 20px;
+}
+
+.sticky-container {
+  position: sticky;
+  top: 0;
+  background-color: #32323f;
+  padding: 10px 0;
+  border-bottom: 1px solid #ccc;
+  margin-bottom: 20px;
+}
+
+.dropdown-container {
+  display: inline-block;
+  margin-right: 20px;
+}
+
+.main-container {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.chart-container {
+  flex: 3; /* Le graphique prend plus de place */
+  margin-bottom: 20px;
+}
+
+#average-indices-container {
+  flex: 1;
+  padding: 15px;
+  background-color: #a5a5b1;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  align-self: flex-start; /* Aligner en haut */
+  max-height: 60vh; /* Hauteur maximale */
+  overflow-y: auto; /* Ajout du défilement vertical */
+}
+
+#average-indices-container h3 {
+  margin-top: 0;
+  font-size: 1.2em;
+  color: #333;
+}
+
+#average-indices-container p {
+  font-size: 1em;
+  color: #555;
+  margin: 10px 0;
+}
+
+#average-indices-container strong {
+  color: #000;
+}
+
+.summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+}
+
+.summary-table th, .summary-table td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: left;
+}
+
+.summary-table th {
+  background-color: #32323f;
+}
+
+.summary-table td:not(:first-child) {
+  text-align: right;
+}
+
+.total-row {
+  font-weight: bold;
+  background-color: #32323f;
+}

@@ -1,0 +1,68 @@
+body {
+  font-family: sans-serif;
+  margin: 20px;
+}
+
+.sticky-container {
+  position: sticky;
+  top: 0;
+  background-color: #32323f;
+  padding: 10px 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dropdown-container, .button-container, .info-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ref-container {
+  display: flex;
+  align-items: center;
+}
+
+.ref-arrows {
+  display: flex;
+  flex-direction: column;
+  margin-left: 2px;
+}
+
+.ref-arrows button {
+  height: 12px;
+  font-size: 8px;
+  line-height: 8px;
+  padding: 0 3px;
+  cursor: pointer;
+}
+
+#invoiceTable {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+}
+
+#invoiceTable th, #invoiceTable td {
+  border: 1px solid #70707d;
+  padding: 8px;
+  text-align: left;
+}
+
+#invoiceTable th {
+  background-color: #32323f;
+}
+
+#invoiceTable select, #invoiceTable input {
+  width: 100%;
+}
+
+.delete-btn {
+  background-color: #f44336;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  cursor: pointer;
+}

@@ -9,9 +9,6 @@ async function chargerProjetsMap() {
   if (projetsDictGlobal) return projetsDictGlobal;
 
   const data = await grist.docApi.fetchTable("Projet");
-  console.log("=== DEBUG Projet table ===");
-  console.log("Structure complète :", data);
-
   projetsDictGlobal = {};
 
   if (data && data.id && data.Projet) {
@@ -25,18 +22,16 @@ async function chargerProjetsMap() {
   } else {
     console.error("Structure inattendue de la table Projet :", data);
   }
-
-  console.log("Projets connus dans Grist :", projetsDictGlobal);
   return projetsDictGlobal;
 }
 
-function afficherPlansFiltres(projet, typeDoc, records) {
+function afficherPlansFiltres(projet, typeDocument, records) {
   const zone = document.getElementById("plans-output");
   zone.innerHTML = "";
 
   const filtres = records.filter(r =>
     (typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet) === projet &&
-    r.Type_document === typeDoc
+    r.Type_document === typeDocument
   );
 
   if (filtres.length === 0) {
@@ -46,17 +41,134 @@ function afficherPlansFiltres(projet, typeDoc, records) {
 
   const plansMap = new Map();
   for (const r of filtres) {
-    const key = `${r.N_Document}___${r.Designation2}`;
+    const key = `${r.N_Document}___${r.Designation}`;
     if (!plansMap.has(key)) {
       plansMap.set(key, {
-        N_Document: r.N_Document,
-        Designation2: r.Designation2,
+        Num_Document: r.N_Document,
+        Designation: r.Designation,
         Type_document: r.Type_document,
         Nom_projet: (typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet),
         lignes: {}
       });
     }
-    plansMap.get(key).lignes[r.Indice] = r;
+    if (!plansMap.get(key).lignes[r.Indice]) {
+      plansMap.get(key).lignes[r.Indice] = [];
+    }
+    plansMap.get(key).lignes[r.Indice].push(r);
+  }
+
+  const warningDiv = document.createElement('div');
+  warningDiv.id = 'warnings';
+  zone.appendChild(warningDiv);
+
+  // Designation conflict warnings
+  const docToDesignations = new Map();
+  for (const r of filtres) {
+    if (!r.N_Document) continue;
+    if (!docToDesignations.has(r.N_Document)) {
+      docToDesignations.set(r.N_Document, new Set());
+    }
+    if (r.Designation) {
+      docToDesignations.get(r.N_Document).add(r.Designation);
+    }
+  }
+
+  for (const [doc, designations] of docToDesignations.entries()) {
+    if (designations.size > 1) {
+      const form = document.createElement('div');
+      form.className = 'warning-form';
+      form.innerHTML = `<p><strong>Attention :</strong> Le document <strong>${doc}</strong> a plusieurs désignations :</p>`;
+      const fieldset = document.createElement('fieldset');
+      fieldset.dataset.numDocument = doc;
+      let isFirst = true;
+      for (const designation of designations) {
+        const label = document.createElement('label');
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = `designation-fix-${doc}`;
+        radio.value = designation;
+        if (isFirst) {
+          radio.checked = true;
+          isFirst = false;
+        }
+        label.appendChild(radio);
+        label.append(` ${designation}`);
+        fieldset.appendChild(label);
+      }
+      form.appendChild(fieldset);
+      const button = document.createElement('button');
+      button.textContent = 'Unifier les désignations';
+      button.className = 'fix-designation-btn';
+      button.dataset.numDocument = doc;
+      form.appendChild(button);
+      warningDiv.appendChild(form);
+    }
+  }
+
+  // Multi-date conflict warning
+  let hasMultiDateError = false;
+  for (const plan of plansMap.values()) {
+    for (const indice in plan.lignes) {
+      if (plan.lignes[indice].length > 1) {
+        hasMultiDateError = true;
+        break;
+      }
+    }
+    if (hasMultiDateError) break;
+  }
+
+  if (hasMultiDateError) {
+    const p = document.createElement('p');
+    p.className = 'warning-message';
+    p.textContent = "Des dates multiples sont trouvées pour certains documents pour la même indice, veuillez corriger en cliquant dessus.";
+    warningDiv.appendChild(p);
+  }
+
+  // Missing date warnings
+  let hasMissingDateError = false;
+  for (const plan of plansMap.values()) {
+    const datedIndices = Object.keys(plan.lignes)
+      .filter(indice => plan.lignes[indice] && plan.lignes[indice].length > 0 && !plan.lignes[indice].isMissing)
+      .map(indice => INDICES.indexOf(indice))
+      .filter(index => index !== -1)
+      .sort((a, b) => a - b);
+
+    if (datedIndices.length > 0) {
+      const last = datedIndices[datedIndices.length - 1];
+      // Check all cells from the beginning up to the last valid date
+      for (let i = 0; i < last; i++) {
+        const currentIndice = INDICES[i];
+        if (!plan.lignes[currentIndice] || plan.lignes[currentIndice].length === 0) {
+          hasMissingDateError = true;
+          // Mark this cell for highlighting
+          if (!plan.lignes[currentIndice]) {
+            plan.lignes[currentIndice] = { isMissing: true };
+          } else {
+            plan.lignes[currentIndice].isMissing = true;
+          }
+        }
+      }
+    }
+  }
+
+  if (hasMissingDateError) {
+    const p = document.createElement('p');
+    p.className = 'warning-message';
+    p.textContent = "Des dates sont manquantes, veuillez les remplir.";
+    warningDiv.appendChild(p);
+  }
+
+  // Document number/type consistency warnings (for the current project)
+  const projectDocMap = window.projectDocNumberToTypeMap.get(projet);
+  if (projectDocMap) {
+    for (const [doc, types] of projectDocMap.entries()) {
+      if (types.size > 1) {
+        const p = document.createElement('p');
+        p.className = 'warning-message';
+        p.innerHTML = `<strong>Attention :</strong> Le N° Document <strong>${doc}</strong> est utilisé avec plusieurs types de documents dans ce projet : ${[...types].join(', ')}.`;
+        warningDiv.appendChild(p);
+      }
+    }
   }
 
   const allIndicesUsed = new Set();
@@ -71,14 +183,13 @@ function afficherPlansFiltres(projet, typeDoc, records) {
 
   const table = document.createElement("table");
   table.className = "plan-table";
-
   const thead = document.createElement("thead");
   const headerRow = document.createElement("tr");
-  ["N_Document", "Designation2", ...indicesToShow].forEach(title => {
+  ["N° Document", "Désignation", ...indicesToShow].forEach(title => {
     const th = document.createElement("th");
     th.textContent = title;
-    if (title === "Designation2") th.classList.add("nomplan");
-    if (!["N_Document", "Designation2"].includes(title)) {
+    if (title === "Désignation") th.classList.add("nomplan");
+    if (!["N° Document", "Désignation"].includes(title)) {
       th.classList.add("indice");
     }
     headerRow.appendChild(th);
@@ -87,14 +198,16 @@ function afficherPlansFiltres(projet, typeDoc, records) {
   table.appendChild(thead);
 
   const tbody = document.createElement("tbody");
-
   for (const plan of plansMap.values()) {
     const tr = document.createElement("tr");
+    if (docToDesignations.get(plan.N_Document)?.size > 1) {
+      tr.classList.add("duplicate-doc");
+    }
 
     const tdNum = document.createElement("td");
-    tdNum.textContent = plan.N_Document;
-    tdNum.dataset.nDocument = plan.N_Document;
-    tdNum.dataset.designation2 = plan.Designation2;
+    tdNum.textContent = plan.Num_Document;
+    tdNum.dataset.numDocument = plan.Num_Document;
+    tdNum.dataset.designation = plan.Designation;
     tdNum.contentEditable = true;
     tdNum.classList.add("editable");
     tdNum.dataset.typeDocument = plan.Type_document;
@@ -102,9 +215,9 @@ function afficherPlansFiltres(projet, typeDoc, records) {
     tr.appendChild(tdNum);
 
     const tdNom = document.createElement("td");
-    tdNom.textContent = plan.Designation2;
-    tdNom.dataset.nDocument = plan.N_Document;
-    tdNom.dataset.designation2 = plan.Designation2;
+    tdNom.textContent = plan.Designation;
+    tdNom.dataset.numDocument = plan.Num_Document;
+    tdNom.dataset.designation = plan.Designation;
     tdNom.contentEditable = true;
     tdNom.classList.add("editable", "nomplan");
     tdNom.dataset.typeDocument = plan.Type_document;
@@ -113,403 +226,278 @@ function afficherPlansFiltres(projet, typeDoc, records) {
 
     for (const indice of indicesToShow) {
       const td = document.createElement("td");
-      td.contentEditable = true;
       td.classList.add("editable", "indice");
       td.dataset.typeDocument = plan.Type_document;
       td.dataset.nomProjet = plan.Nom_projet;
-      td.dataset.nDocument = plan.N_Document;
-      td.dataset.designation2 = plan.Designation2;
+      td.dataset.numDocument = plan.Num_Document;
+      td.dataset.designation = plan.Designation;
       td.dataset.indice = indice;
 
-      const rec = plan.lignes[indice];
-      if (rec) {
-        if (rec.DateDiffusion) td.textContent = formatDate(rec.DateDiffusion);
-        td.dataset.recordId = rec.id;
+      const recs = plan.lignes[indice];
+      if (recs) {
+        if (recs.isMissing) {
+          td.classList.add('missing-date-error');
+        } else if (recs.length > 1) {
+          td.classList.add('multi-date-error');
+          td.innerHTML = recs.map(r => formatDate(r.DateDiffusion)).join('<br>');
+          td.dataset.conflicts = JSON.stringify(recs.map(r => ({ id: r.id, date: r.DateDiffusion })));
+        } else if (recs.length === 1) {
+          const rec = recs[0];
+          if (rec.DateDiffusion) td.textContent = formatDate(rec.DateDiffusion);
+          td.dataset.recordId = rec.id;
+        }
       }
-
       tr.appendChild(td);
     }
-
     tbody.appendChild(tr);
   }
 
   const trAjout = document.createElement("tr");
-
   const tdAjoutNum = document.createElement("td");
   tdAjoutNum.contentEditable = true;
   tdAjoutNum.classList.add("editable", "ajout");
-  tdAjoutNum.dataset.typeDocument = typeDoc;
+  tdAjoutNum.dataset.typeDocument = typeDocument;
   tdAjoutNum.dataset.nomProjet = projet;
   trAjout.appendChild(tdAjoutNum);
-
   const tdAjoutNom = document.createElement("td");
   tdAjoutNom.contentEditable = true;
   tdAjoutNom.classList.add("editable", "ajout");
-  tdAjoutNom.dataset.typeDocument = typeDoc;
+  tdAjoutNom.dataset.typeDocument = typeDocument;
   tdAjoutNom.dataset.nomProjet = projet;
   trAjout.appendChild(tdAjoutNom);
-
   for (const indice of indicesToShow) {
     const td = document.createElement("td");
-    td.contentEditable = true;
-    td.classList.add("editable", "ajout");
-    td.dataset.typeDocument = typeDoc;
+    td.classList.add("editable", "indice", "ajout");
+    td.dataset.typeDocument = typeDocument;
     td.dataset.nomProjet = projet;
     td.dataset.indice = indice;
     trAjout.appendChild(td);
   }
-
   tbody.appendChild(trAjout);
   table.appendChild(tbody);
   zone.appendChild(table);
 }
 
-function regenererDesignationDropdown(records, projetLabel) {
-  const designationDropdown = document.getElementById("designationDropdown");
-  designationDropdown.innerHTML = "";
-  const types = [
-    ...new Set(
-      records
-        .filter(r => {
-          const label =
-            typeof r.Nom_projet === "object"
-              ? r.Nom_projet.details
-              : r.Nom_projet;
-          return label === projetLabel;
-        })
-        .map(r => r.Type_document)
-        .filter(t => typeof t === "string" && t.trim() !== "")
-    ),
-  ].sort();
-  for (const t of types) {
-    const opt = document.createElement("option");
-    opt.value = t;
-    opt.textContent = t;
-    designationDropdown.appendChild(opt);
+document.addEventListener("click", async (e) => {
+  const target = e.target;
+
+  if (target.matches('td.multi-date-error')) {
+    const td = target;
+    const conflicts = JSON.parse(td.dataset.conflicts);
+    const existingPopup = document.getElementById('date-fix-popup');
+    if (existingPopup) existingPopup.remove();
+    const popup = document.createElement('div');
+    popup.id = 'date-fix-popup';
+    popup.style.position = 'absolute';
+    popup.style.left = `${td.offsetLeft + td.offsetWidth}px`;
+    popup.style.top = `${td.offsetTop}px`;
+    popup.innerHTML = `<p>Choisir la date correcte:</p>`;
+    const fieldset = document.createElement('fieldset');
+    conflicts.forEach((conflict, index) => {
+      const label = document.createElement('label');
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'date-fix';
+      radio.value = conflict.id;
+      if (index === 0) radio.checked = true;
+      label.appendChild(radio);
+      label.append(` ${formatDate(conflict.date)}`);
+      fieldset.appendChild(label);
+    });
+    popup.appendChild(fieldset);
+    const confirmBtn = document.createElement('button');
+    confirmBtn.textContent = 'Confirmer';
+    confirmBtn.onclick = async () => {
+      const selectedRadio = popup.querySelector('input[name="date-fix"]:checked');
+      if (selectedRadio) {
+        const correctRecordId = parseInt(selectedRadio.value, 10);
+        const recordsToDelete = conflicts.filter(c => c.id !== correctRecordId);
+        try {
+          const table = await grist.getTable();
+          for (const record of recordsToDelete) {
+            await table.destroy(record.id);
+          }
+          popup.remove();
+        } catch (err) {
+          console.error("Erreur lors de la suppression des dates en double :", err);
+          alert("Une erreur est survenue lors de la suppression.");
+        }
+      }
+    };
+    popup.appendChild(confirmBtn);
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Annuler';
+    cancelBtn.onclick = () => popup.remove();
+    popup.appendChild(cancelBtn);
+    td.closest('#plans-output').appendChild(popup);
+    return;
   }
-}
+
+  if (target.matches('button.fix-designation-btn')) {
+    const button = target;
+    const numDocument = button.dataset.numDocument;
+    const form = button.closest('.warning-form');
+    const selectedRadio = form.querySelector(`input[name="designation-fix-${numDocument}"]:checked`);
+    if (!selectedRadio) {
+      alert("Veuillez sélectionner une désignation correcte.");
+      return;
+    }
+    const correctDesignation = selectedRadio.value;
+    const recordsToUpdate = window.records.filter(r => r.N_Document === numDocument && r.Designation !== correctDesignation);
+    if (recordsToUpdate.length > 0) {
+      const actions = recordsToUpdate.map(r => ["UpdateRecord", "ListePlan_NDC_COF", r.id, { Designation: correctDesignation }]);
+      try {
+        await grist.docApi.applyUserActions(actions);
+        alert(`Les désignations pour le document ${numDocument} ont été unifiées.`);
+      } catch (err) {
+        console.error("Erreur lors de l'unification des désignations :", err);
+        alert("Une erreur est survenue.");
+      }
+    } else {
+      alert("Aucune mise à jour nécessaire.");
+    }
+    return;
+  }
+
+  if (target.matches('td.indice.editable')) {
+    const td = target;
+    if (document.getElementById('date-fix-popup')) return;
+    const { recordId, indice, typeDocument, nomProjet } = td.dataset;
+    const tr = td.parentElement;
+    const Num_Document = tr.cells[0]?.textContent.trim();
+    const Designation = tr.cells[1]?.textContent.trim();
+    const fp = flatpickr(td, {
+      "locale": "fr",
+      defaultDate: td.textContent ? convertFrToDate(td.textContent) : undefined,
+      dateFormat: "d/m/Y",
+      onClose: async (selectedDates, dateStr, instance) => {
+        const isoDate = selectedDates.length > 0 ? convertToISO(dateStr) : null;
+        if (!isoDate) {
+          if (recordId) {
+            try {
+              // If this is the last date for this document, set Indice to null as well.
+              const otherDates = tr.querySelectorAll('td.indice');
+              const datedCells = Array.from(otherDates).filter(cell => cell.textContent.trim() !== '' && cell !== td);
+              const fieldsToUpdate = { DateDiffusion: null };
+              if (datedCells.length === 0) {
+                fieldsToUpdate.Indice = null;
+              }
+              await grist.docApi.applyUserActions([["UpdateRecord", "ListePlan_NDC_COF", parseInt(recordId, 10), fieldsToUpdate]]);
+            } catch (err) { console.error("Erreur lors de la suppression de la date :", err); }
+          }
+          return;
+        }
+        if (recordId) {
+          try {
+            await grist.docApi.applyUserActions([["UpdateRecord", "ListePlan_NDC_COF", parseInt(recordId, 10), { DateDiffusion: isoDate }]]);
+          } catch (err) { console.error("Erreur lors de la mise à jour de la date :", err); }
+          return;
+        }
+        if (!Num_Document || !Designation || !nomProjet || !typeDocument) {
+          console.warn("Champs obligatoires manquants pour l'ajout :", { Num_Document, Designation, nomProjet, typeDocument });
+          return;
+        }
+
+        // Project-specific validation logic
+        const projectDocMap = window.projectDocNumberToTypeMap.get(nomProjet);
+        if (projectDocMap) {
+          const existingTypes = projectDocMap.get(Num_Document);
+          if (existingTypes && !existingTypes.has(typeDocument)) {
+            alert(`Erreur : Le N° Document ${Num_Document} est déjà utilisé pour un autre type de document dans ce projet (${[...existingTypes].join(', ')}).`);
+            td.textContent = ''; // Clear the invalid date
+            return;
+          }
+        }
+        const projetsDict = await chargerProjetsMap();
+        const Nom_projet_id = projetsDict[nomProjet.trim()];
+        if (!Nom_projet_id) {
+          console.error("ID de projet non trouvé pour :", nomProjet);
+          return;
+        }
+        const rowData = { N_Document: Num_Document, Type_document: typeDocument, Designation: Designation, Nom_projet: Nom_projet_id, Indice: indice, DateDiffusion: isoDate };
+        try {
+          await grist.docApi.applyUserActions([["AddRecord", "ListePlan_NDC_COF", null, rowData]]);
+        } catch (err) { console.error("Erreur lors de l'ajout du record :", err); }
+      }
+    });
+    fp.open();
+  }
+});
 
 document.addEventListener("focusout", async (e) => {
   const td = e.target;
-  if (td.tagName !== "TD" || !td.classList.contains("editable")) return;
+  if (!td.matches("td.editable:not(.indice)")) return;
 
-  // Si cellule vide non modifiée sans recordId ni indice : ignorer
-  if (td.textContent.trim() === "" && !td.dataset.recordId && !td.dataset.indice) return;
+  // Logic to add a new dateless document from the "ajout" row
+  if (td.classList.contains('ajout')) {
+    const tr = td.parentElement;
+    const numDocument = tr.cells[0]?.textContent.trim();
+    const designation = tr.cells[1]?.textContent.trim();
+    const { typeDocument, nomProjet } = td.dataset;
 
-  // Nettoyage visuel
+    if (numDocument && designation) {
+      // Project-specific validation logic
+      const projectDocMap = window.projectDocNumberToTypeMap.get(nomProjet);
+      if (projectDocMap) {
+        const existingTypes = projectDocMap.get(numDocument);
+        if (existingTypes && !existingTypes.has(typeDocument)) {
+          alert(`Erreur : Le N° Document ${numDocument} est déjà utilisé pour un autre type de document dans ce projet (${[...existingTypes].join(', ')}).`);
+          tr.cells[0].textContent = ''; // Clear the invalid document number
+          return;
+        }
+      }
+
+      const projetsDict = await chargerProjetsMap();
+      const nomProjetId = projetsDict[nomProjet.trim()];
+      if (!nomProjetId) {
+        console.error("ID de projet non trouvé pour :", nomProjet);
+        return;
+      }
+      const rowData = {
+        N_Document: numDocument,
+        Type_document: typeDocument,
+        Designation: designation,
+        Nom_projet: nomProjetId,
+        Indice: null,
+        DateDiffusion: null
+      };
+      try {
+        await grist.docApi.applyUserActions([["AddRecord", "ListePlan_NDC_COF", null, rowData]]);
+        // Grist will refresh, clearing the "ajout" row.
+      } catch (err) {
+        console.error("Erreur lors de l'ajout du document sans date :", err);
+      }
+    }
+    return;
+  }
+
   td.style.backgroundColor = "";
   td.style.color = "";
-
   const texte = td.textContent.trim();
-  const recordId = td.dataset.recordId;
-  const indice = td.dataset.indice;
-  const tr = td.parentElement;
-  const tds = Array.from(tr.children);
-  const N_Document = tds[0]?.textContent.trim();
-  const Designation2 = tds[1]?.textContent.trim();
-  const Type_document = td.dataset.typeDocument || "";
-  const Nom_projet_label = td.dataset.nomProjet || "";
-
-  if (texte === "") {
-    if (!indice && tds[0].textContent.trim() === "" && tds[1].textContent.trim() === "") {
-      try {
-        const refDoc = tds[0]?.dataset.nDocument || "";
-        const refDes = tds[1]?.dataset.designation2 || "";
-        if (!refDoc || !refDes) return;
-
-        const allRecords = await grist.docApi.fetchTable("ListePlan_NDC_COF");
-        const rows = Object.entries(allRecords.records || {}).map(([id, row]) => ({ id: parseInt(id), ...row }));
-
-        if (grist && grist._eventHandlers?.onRecords?.[0]) {
-          const handler = grist._eventHandlers.onRecords[0];
-          if (typeof handler === "function") {
-            handler(rows); // déclenche la même logique que lors du chargement initial
-          }
-        }
-        
-        const matching = rows.filter(r =>
-          r.N_Document === refDoc && r.Designation2 === refDes
-        );
-
-        const actions = matching.map(r => ["UpdateRecord", "ListePlan_NDC_COF", r.id, {
-          N_Document: "",
-          Designation2: "",
-          DateDiffusion: null
-        }]);
-
-        if (actions.length > 0) {
-          await grist.docApi.applyUserActions(actions);
-          setTimeout(() => {
-            tr.remove();
-          }, 0);
-        }
-      } catch {
-        td.style.backgroundColor = "#842029";
-        td.style.color = "#fff";
-      }
-      return;
-    }
-
-    if (recordId && indice) {
-      try {
-        await grist.docApi.applyUserActions([
-          ["UpdateRecord", "ListePlan_NDC_COF", parseInt(recordId), { DateDiffusion: null }]
-        ]);
-        td.textContent = "";
-      } catch {
-        td.style.backgroundColor = "#842029";
-        td.style.color = "#fff";
-      }
-      return;
-    }
-
-    return;
+  const { numDocument, designation } = td.dataset;
+  const recordsToUpdate = window.records.filter(r => r.N_Document === numDocument && r.Designation === designation);
+  if (recordsToUpdate.length === 0) return;
+  const champs = {};
+  if (td.cellIndex === 0) {
+    champs.N_Document = texte;
+  } else if (td.cellIndex === 1) {
+    champs.Designation = texte;
   }
-
-  if (!indice && recordId && (tds[0] === td || tds[1] === td)) {
-    const champs = {};
-    if (tds[0] === td) champs.N_Document = texte;
-    if (tds[1] === td) champs.Designation2 = texte;
-
+  if (Object.keys(champs).length > 0) {
+    const actions = recordsToUpdate.map(r => ["UpdateRecord", "ListePlan_NDC_COF", r.id, champs]);
     try {
-      await grist.docApi.applyUserActions([
-        ["UpdateRecord", "ListePlan_NDC_COF", parseInt(recordId), champs]
-      ]);
-    } catch {
-      td.style.backgroundColor = "#842029";
-      td.style.color = "#fff";
-    }
-    return;
-  }
-
-  let isoDate = null;
-  if (indice) {
-    if (!isValidDate(texte)) {
-      td.style.backgroundColor = "#842029";
-      td.style.color = "#fff";
-      return;
-    }
-    isoDate = convertToISO(texte);
-  }
-
-  if (recordId) {
-    try {
-      await grist.docApi.applyUserActions([
-        ["UpdateRecord", "ListePlan_NDC_COF", parseInt(recordId), {
-          DateDiffusion: isoDate
-        }]
-      ]);
-    } catch {
-      td.style.backgroundColor = "#842029";
-      td.style.color = "#fff";
-    }
-    return;
-  }
-
-  if (!N_Document || !Designation2 || !Nom_projet_label || !Type_document) {
-    td.style.backgroundColor = "#842029";
-    td.style.color = "#fff";
-    console.warn("Tentative d'ajout avec champs obligatoires manquants :", { N_Document, Designation2, Nom_projet_label, Type_document });
-    return;
-  }
-  
-  if (!recordId && N_Document && Designation2 && Nom_projet_label && indice && isoDate) {
-    projetsDictGlobal = null;
-    const projetsDict = await chargerProjetsMap();
-    const Nom_projet = projetsDict[Nom_projet_label.trim()];
-    if (!Nom_projet) {
-      td.style.backgroundColor = "#842029";
-      td.style.color = "#fff";
-      return;
-    }
-
-    const rowData = {
-      N_Document,
-      Type_document,
-      Designation2,
-      Nom_projet,
-      Indice: indice,
-      DateDiffusion: isoDate
-    };
-
-    try {
-      const res = await grist.docApi.applyUserActions([
-        ["AddRecord", "ListePlan_NDC_COF", null, rowData]
-      ]);
-      const newId = res.retValues[0];
-      td.dataset.recordId = newId;
-      
-      try {
-        const allRecords = await grist.docApi.fetchTable("ListePlan_NDC_COF");
-        const rows = Object.entries(allRecords.records || {}).map(([id, row]) => ({ id: parseInt(id), ...row }));
-
-        if (grist && grist._eventHandlers?.onRecords?.[0]) {
-          const handler = grist._eventHandlers.onRecords[0];
-          if (typeof handler === "function") {
-            handler(rows); // déclenche la même logique que lors du chargement initial
-          }
-        }        
-
-        const projetsDict = await chargerProjetsMap();
-        for (const r of rows) {
-          const projId = r.Nom_projet;
-          const projLabel = Object.entries(projetsDict).find(([label, id]) => id === projId)?.[0] || null;
-          if (projLabel) {
-            r.Nom_projet = { id: projId, details: projLabel };
-          }
-        }
-
-        window.records = rows;
-
-        const selectedProject = document.getElementById("projectDropdown").value;
-        const selectedType = document.getElementById("designationDropdown").value;
-
-        window.updateRecordsFromAffichage(rows, selectedProject, selectedType);
-      } catch (err) {
-        console.error("Erreur lors du rafraîchissement des records après ajout :", err);
-      }
-
-      td.classList.remove("ajout");
-
-      const trModifiee = td.parentElement;
-      const table = document.querySelector(".plan-table");
-      const tbody = table.querySelector("tbody");
-      const estDerniereLigne = trModifiee === tbody.lastElementChild;
-
-      if (estDerniereLigne) {
-        const nbColonnes = table.querySelector("thead tr").children.length;
-        const newTr = document.createElement("tr");
-
-        for (let i = 0; i < nbColonnes; i++) {
-          const header = table.querySelector("thead tr").children[i].textContent;
-          const tdNew = document.createElement("td");
-          tdNew.contentEditable = true;
-          tdNew.classList.add("editable", "ajout");
-
-          if (i === 0 || i === 1) {
-            tdNew.dataset.typeDocument = Type_document;
-            tdNew.dataset.nomProjet = Nom_projet_label;
-          }
-
-          if (i >= 2) {
-            tdNew.dataset.indice = header;
-            tdNew.dataset.typeDocument = Type_document;
-            tdNew.dataset.nomProjet = Nom_projet_label;
-          }
-
-          newTr.appendChild(tdNew);
-        }
-
-        tbody.appendChild(newTr);
-      }
-
-      const indexAjoute = INDICES.indexOf(indice);
-      const indiceSuivant = INDICES[indexAjoute + 1] || null;
-
-      if (indiceSuivant) {
-        const headRow = table.querySelector("thead tr");
-        const headers = Array.from(headRow.children).map(th => th.textContent);
-
-        if (!headers.includes(indiceSuivant)) {
-          const th = document.createElement("th");
-          th.textContent = indiceSuivant;
-          th.classList.add("indice");
-          headRow.appendChild(th);
-
-          const lignes = table.querySelectorAll("tbody tr");
-          lignes.forEach((tr, i) => {
-            const td = document.createElement("td");
-            td.contentEditable = true;
-            td.classList.add("editable", "indice");
-            td.dataset.typeDocument = Type_document;
-            td.dataset.nomProjet = Nom_projet_label;
-            td.dataset.nDocument = tr.children[0]?.textContent.trim();
-            td.dataset.designation2 = tr.children[1]?.textContent.trim();
-            td.dataset.indice = indiceSuivant;
-            if (i === lignes.length - 1) td.classList.add("ajout");
-            tr.appendChild(td);
-          });
-        }
-      }
-
-      try {
-        const allRecords = await grist.docApi.fetchTable("ListePlan_NDC_COF");
-        const rows = Object.entries(allRecords.records || {}).map(([id, row]) => ({ id: parseInt(id), ...row }));
-
-        if (grist && grist._eventHandlers?.onRecords?.[0]) {
-          const handler = grist._eventHandlers.onRecords[0];
-          if (typeof handler === "function") {
-            handler(rows); // déclenche la même logique que lors du chargement initial
-          }
-        }        
-
-        const projetsDict = await chargerProjetsMap();
-        for (const r of rows) {
-          const projId = r.Nom_projet;
-          const projLabel = Object.entries(projetsDict).find(([label, id]) => id === projId)?.[0] || null;
-          if (projLabel) {
-            r.Nom_projet = { id: projId, details: projLabel };
-          }
-        }
-
-        window.records = rows;
-
-        const selectedProject = document.getElementById("projectDropdown").value;
-        const selectedType = document.getElementById("designationDropdown").value;
-      
-        const validRows = rows.filter(r => {
-          let label = null;
-          if (typeof r.Nom_projet === "object" && r.Nom_projet !== null && "details" in r.Nom_projet) {
-            label = r.Nom_projet.details;
-          } else if (typeof r.Nom_projet === "string") {
-            label = r.Nom_projet;
-          } else if (typeof r.Nom_projet === "number") {
-            label = Object.keys(projetsDictGlobal).find(key => projetsDictGlobal[key] === r.Nom_projet);
-          }
-        
-          return (
-            typeof r.Type_document === "string" &&
-            r.Type_document.trim() !== "" &&
-            label === selectedProject
-          );
-        });
-        
-        const types = [...new Set(validRows.map(r => r.Type_document))].sort();
-        const newSelectedType = types.includes(selectedType) ? selectedType : types[0] || "";
-      
-        window.updateRecordsFromAffichage(rows, selectedProject, newSelectedType);
-        if (window.updateTypeOptions) {
-          window.updateTypeOptions(rows);
-        }
-        
-        if (grist && grist._eventHandlers && grist._eventHandlers.onRecords) {
-          const handler = grist._eventHandlers.onRecords[0];
-          if (typeof handler === "function") {
-            handler(rows); 
-          }
-        }    
-      } catch (err) {
-        td.style.backgroundColor = "#842029";
-        td.style.color = "#fff";
-      }   
-      
+      await grist.docApi.applyUserActions(actions);
     } catch (err) {
-      console.error("Erreur après ajout :", err);
+      console.error("Erreur lors de la mise à jour du texte :", err);
+      td.style.backgroundColor = "#842029";
+      td.style.color = "#fff";
     }
-    
   }
-}, true);
+});
 
-function isValidDate(dateStr) {
-  const regex = /^\d{2}\/\d{2}\/\d{4}$/;
-  if (!regex.test(dateStr)) return false;
-  const [day, month, year] = dateStr.split("/").map(Number);
-  const date = new Date(year, month - 1, day);
-  return (
-    date.getFullYear() === year &&
-    date.getMonth() === month - 1 &&
-    date.getDate() === day
-  );
+function convertFrToDate(dateStr) {
+  const [day, month, year] = dateStr.split("/");
+  return new Date(year, month - 1, day);
 }
 
 function convertToISO(dateStr) {
@@ -525,4 +513,3 @@ function formatDate(dateStr) {
   const year = d.getFullYear();
   return `${day}/${month}/${year}`;
 }
-
