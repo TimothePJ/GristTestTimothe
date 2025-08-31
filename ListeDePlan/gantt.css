@@ -1,0 +1,96 @@
+#gantt-container-scroll {
+  height: calc(100vh - 120px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+#gantt-container {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+}
+
+#task-list {
+  width: 350px;
+  background-color: #2c2c2c;
+  border-right: 2px solid #555;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.header-row {
+  display: flex;
+  background-color: #444;
+  font-weight: bold;
+  font-size: 16px;
+  height: 59px;
+  border-bottom: 1px solid #666;
+  color: #fff;
+}
+
+.header-cell {
+  flex: 1;
+  text-align: center;
+  line-height: 59px;
+  border-right: 1px solid #555;
+}
+
+#task-rows {
+  flex-grow: 1;
+}
+
+.task-row {
+  display: flex;
+  height: 55px;
+  border-bottom: 1px solid #444;
+  font-size: 14px;
+  background-color: #2c2c2c;
+  color: #fff;
+}
+
+.task-cell {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #fff;
+}
+
+#gantt-right {
+  flex-grow: 1;
+}
+
+#gantt-scroll-container {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+#gantt {
+  background-color: white;
+}
+
+/* Frise temporelle simulée */
+#gantt-fake-axis {
+  display: flex;
+  background-color: #ffffff;
+  color: #222;
+  font-size: 12px;
+  height: 30px;
+  border-bottom: 1px solid #ccc;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+#gantt-fake-axis span {
+  display: inline-block;
+  min-width: 60px;
+  text-align: center;
+  padding: 4px 6px;
+  font-family: Arial;
+  border-right: 1px solid #eee;
+}

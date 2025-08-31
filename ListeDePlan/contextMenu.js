@@ -9,7 +9,7 @@ document.addEventListener("contextmenu", function (e) {
   const isDataRow = tr.querySelector("[data-num-document]");
   const isAjoutRow = tr.querySelector("td.ajout");
   if (!isDataRow && !isAjoutRow) return;
-  
+
   e.preventDefault();
   removeExistingContextMenu();
 
@@ -19,6 +19,10 @@ document.addEventListener("contextmenu", function (e) {
   menu.style.top = `${e.pageY}px`;
   menu.style.left = `${e.pageX}px`;
 
+  // Evite que le clic à l'intérieur du menu se propage et ferme aussitôt le menu
+  menu.addEventListener("click", (ev) => ev.stopPropagation());
+
+  // Option: Supprimer
   const deleteOption = document.createElement("div");
   deleteOption.className = "context-menu-item";
   deleteOption.textContent = "Supprimer";
@@ -26,8 +30,26 @@ document.addEventListener("contextmenu", function (e) {
     supprimerLigne(targetCell); // Pass the specific cell
     removeExistingContextMenu();
   });
-
   menu.appendChild(deleteOption);
+
+  // 1) Ajouter document
+  const addOneOption = document.createElement("div");
+  addOneOption.className = "context-menu-item";
+  addOneOption.textContent = "Ajouter document";
+  // Action: ouvrir la fenêtre "Ajouter un document (Référence)"
+  addOneOption.addEventListener("click", () => {
+    removeExistingContextMenu(); // ferme le menu
+    document.dispatchEvent(new Event("LP_OPEN_ADD_REF_DOC"));
+  });
+  menu.appendChild(addOneOption);
+
+  // 2) Ajouter Plusieurs documents
+  const addManyOption = document.createElement("div");
+  addManyOption.className = "context-menu-item";
+  addManyOption.textContent = "Ajouter Plusieurs documents";
+  // (on branchera l'action plus tard)
+  menu.appendChild(addManyOption);
+
   document.body.appendChild(menu);
 });
 
@@ -45,7 +67,7 @@ function supprimerLigne(cell) {
   // Case 1: A specific date cell (.indice) was clicked
   if (cell.classList.contains('indice') && cell.dataset.recordId) {
     recordIdsToDelete.push(parseInt(cell.dataset.recordId, 10));
-  } 
+  }
   // Case 2: The document or designation cell was clicked, delete all records for this document/designation
   else if (cell.cellIndex === 0 || cell.cellIndex === 1) {
     const numDocument = cell.dataset.numDocument;
@@ -59,8 +81,8 @@ function supprimerLigne(cell) {
   if (uniqueRecordIds.length === 0) {
     // If it's the "add" row, just clear it visually.
     if (tr.querySelector('td.ajout')) {
-       const cellsToClear = tr.querySelectorAll('td');
-       cellsToClear.forEach(c => c.textContent = '');
+      const cellsToClear = tr.querySelectorAll('td');
+      cellsToClear.forEach(c => c.textContent = '');
     }
     return;
   }

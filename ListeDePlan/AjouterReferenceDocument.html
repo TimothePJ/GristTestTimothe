@@ -1,0 +1,25 @@
+<dialog id="dlg-ajouter-ref-doc">
+  <form method="dialog" id="form-ajouter-ref-doc" class="dialog-body" style="min-width:380px;gap:10px;display:flex;flex-direction:column">
+    <h3 style="margin:0 0 8px">Ajouter un document (Référence)</h3>
+
+    <label style="display:flex;flex-direction:column;gap:6px">
+      <span>Projet sélectionné</span>
+      <input id="ard-projet-display" type="text" readonly />
+    </label>
+
+    <label style="display:flex;flex-direction:column;gap:6px">
+      <span>Numéro de document</span>
+      <input id="ard-numero" type="number" step="1" min="0" required />
+    </label>
+
+    <label style="display:flex;flex-direction:column;gap:6px">
+      <span>Nom du document</span>
+      <input id="ard-nom" type="text" required />
+    </label>
+
+    <menu style="display:flex;justify-content:flex-end;gap:8px;margin:8px 0 0">
+      <button type="reset" id="ard-cancel">Annuler</button>
+      <button type="submit" id="ard-save">Ajouter</button>
+    </menu>
+  </form>
+</dialog>

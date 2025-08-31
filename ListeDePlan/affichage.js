@@ -382,14 +382,38 @@ document.addEventListener("click", async (e) => {
               if (datedCells.length === 0) {
                 fieldsToUpdate.Indice = null;
               }
-              await grist.docApi.applyUserActions([["UpdateRecord", "ListePlan_NDC_COF", parseInt(recordId, 10), fieldsToUpdate]]);
+              await grist.docApi.applyUserActions([
+                ["AddRecord", "ListePlan_NDC_COF", null, rowData],
+                ["AddRecord", "References_2", null, {
+                  // ⇩⇩ MAPPINGS demandés, avec les NOMS EXACTS du premier projet ⇩⇩
+                  NomProjet: rowData.Nom_projet,          // ID du projet déjà calculé pour ListePlan_NDC_COF
+                  NomDocument: rowData.Designation,       // Designation -> NomDocument
+                  NumeroDocument: (()=>{
+                    const s = String(rowData.N_Document ?? '').trim();
+                    // Conserve "0" -> 0 ; vide/non numérique -> null
+                    return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
+                  })()
+                }]
+              ]);
             } catch (err) { console.error("Erreur lors de la suppression de la date :", err); }
           }
           return;
         }
         if (recordId) {
           try {
-            await grist.docApi.applyUserActions([["UpdateRecord", "ListePlan_NDC_COF", parseInt(recordId, 10), { DateDiffusion: isoDate }]]);
+            await grist.docApi.applyUserActions([
+              ["AddRecord", "ListePlan_NDC_COF", null, rowData],
+              ["AddRecord", "References_2", null, {
+                // ⇩⇩ MAPPINGS demandés, avec les NOMS EXACTS du premier projet ⇩⇩
+                NomProjet: rowData.Nom_projet,          // ID du projet déjà calculé pour ListePlan_NDC_COF
+                NomDocument: rowData.Designation,       // Designation -> NomDocument
+                NumeroDocument: (()=>{
+                  const s = String(rowData.N_Document ?? '').trim();
+                  // Conserve "0" -> 0 ; vide/non numérique -> null
+                  return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
+                })()
+              }]
+            ]);
           } catch (err) { console.error("Erreur lors de la mise à jour de la date :", err); }
           return;
         }
@@ -416,7 +440,19 @@ document.addEventListener("click", async (e) => {
         }
         const rowData = { N_Document: Num_Document, Type_document: typeDocument, Designation: Designation, Nom_projet: Nom_projet_id, Indice: indice, DateDiffusion: isoDate };
         try {
-          await grist.docApi.applyUserActions([["AddRecord", "ListePlan_NDC_COF", null, rowData]]);
+          await grist.docApi.applyUserActions([
+            ["AddRecord", "ListePlan_NDC_COF", null, rowData],
+            ["AddRecord", "References_2", null, {
+              // ⇩⇩ MAPPINGS demandés, avec les NOMS EXACTS du premier projet ⇩⇩
+              NomProjet: rowData.Nom_projet,          // ID du projet déjà calculé pour ListePlan_NDC_COF
+              NomDocument: rowData.Designation,       // Designation -> NomDocument
+              NumeroDocument: (()=>{
+                const s = String(rowData.N_Document ?? '').trim();
+                // Conserve "0" -> 0 ; vide/non numérique -> null
+                return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
+              })()
+            }]
+          ]);
         } catch (err) { console.error("Erreur lors de l'ajout du record :", err); }
       }
     });
@@ -462,7 +498,19 @@ document.addEventListener("focusout", async (e) => {
         DateDiffusion: null
       };
       try {
-        await grist.docApi.applyUserActions([["AddRecord", "ListePlan_NDC_COF", null, rowData]]);
+        await grist.docApi.applyUserActions([
+          ["AddRecord", "ListePlan_NDC_COF", null, rowData],
+          ["AddRecord", "References_2", null, {
+            // ⇩⇩ MAPPINGS demandés, avec les NOMS EXACTS du premier projet ⇩⇩
+            NomProjet: rowData.Nom_projet,          // ID du projet déjà calculé pour ListePlan_NDC_COF
+            NomDocument: rowData.Designation,       // Designation -> NomDocument
+            NumeroDocument: (()=>{
+              const s = String(rowData.N_Document ?? '').trim();
+              // Conserve "0" -> 0 ; vide/non numérique -> null
+              return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
+            })()
+          }]
+        ]);
         // Grist will refresh, clearing the "ajout" row.
       } catch (err) {
         console.error("Erreur lors de l'ajout du document sans date :", err);

@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="affichage.css">
   <link rel="stylesheet" href="contextMenu.css">
+  <link rel="stylesheet" href="AjouterProjet.css">
 
   <!-- Scripts -->
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
@@ -19,6 +20,8 @@
   <script src="script.js" defer></script>
   <script src="affichage.js" defer></script>
   <script src="contextMenu.js" defer></script>
+  <script src="AjouterProjet.js" defer></script>
+  <script src="AjouterReferenceDocument.js" defer></script>
 </head>
 <body>
   <div class="sticky-container">
@@ -40,6 +43,40 @@
   <div id="plans-output">
     
   </div>
+
+  <div id="dialog-placeholder">
+
+  </div>
+
+  <div class="add-form">
+    <button id="addProjectButton">Ajouter Projet</button>
+  </div>
+
+  <!-- === Dialogue : Ajouter un document (automatique: projet & type depuis les dropdowns de la page) === -->
+  <dialog id="dlg-ajouter-ref-doc">
+    <form method="dialog" id="form-ajouter-ref-doc" class="dialog-body" style="min-width:420px;gap:12px;display:flex;flex-direction:column">
+      <h3 style="margin:0 0 8px">Ajouter un document</h3>
+
+      <div style="font-size:12px;opacity:.8">
+        Le <strong>Projet</strong> et le <strong>Type de document</strong> seront pris automatiquement depuis les 1ère et 2ème listes déroulantes de la page.
+      </div>
+
+      <label style="display:flex;flex-direction:column;gap:6px">
+        <span>Numéro de document</span>
+        <input id="ard-numero" type="number" step="1" min="0" required />
+      </label>
+
+      <label style="display:flex;flex-direction:column;gap:6px">
+        <span>Nom du document</span>
+        <input id="ard-nom" type="text" required />
+      </label>
+
+      <menu style="display:flex;justify-content:flex-end;gap:8px;margin:8px 0 0">
+        <button type="reset" id="ard-cancel">Annuler</button>
+        <button type="submit" id="ard-save">Ajouter</button>
+      </menu>
+    </form>
+  </dialog>
 
 </body>
 </html>
