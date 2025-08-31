@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <title>Grist Two-Step Selection with Editable Table</title>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+  
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+
+<body>
+  <!-- Container for the sticky selection lists -->
+  <div class="sticky-container">
+
+    <!-- First dropdown for selecting a project -->
+    <div class="dropdown-container">
+      <label for="firstColumnDropdown">Projet :</label>
+      <select id="firstColumnDropdown">
+        <option value="">Choix projet</option>
+      </select>
+    </div>
+
+    <!-- Second dropdown for selecting the tableau -->
+    <div class="dropdown-container">
+      <label for="secondColumnListbox">Document :</label>
+      <select id="secondColumnListbox">
+        <option value="">Sélectionner un étage</option>
+      </select>
+    </div>
+
+    <!-- Checkbox to toggle archived rows -->
+    <div class="dropdown-container">
+      <label>
+        <input type="checkbox" id="hideArchivedToggle" checked />
+        Masquer les archives
+      </label>
+    </div>
+  </div>
+  <!-- Table to display and edit the data -->
+  <div class="table-container">
+    <table id="dataTable">
+      <thead>
+        <tr id="tableHeader">
+          <th>ID</th>
+          <th>Emetteur</th>
+          <th>Reference</th>
+          <th>Indice</th>
+          <th>Recu</th>
+          <th>DescriptionObservations</th>
+          <th>DateLimite</th>
+          <th>Bloquant</th>
+          <th>Archive</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+
+  <!-- Context Menu -->
+  <div id="contextMenu" class="context-menu">
+    <button id="addRowOption">Ajouter une ligne</button>
+    <button id="editOption">Modifier</button>
+    <button id="archiveOption">Archiver</button>
+    <button id="deleteOption">Supprimer</button>
+  </div>
+
+  <!-- Add Row Dialog -->
+  <dialog id="addRowDialog">
+    <form method="dialog">
+      <h3>Ajouter une nouvelle ligne</h3>
+
+      <label for="emetteur">Émetteur:</label>
+      <input type="text" id="emetteur" name="emetteur" list="emetteurList" required placeholder="Sélectionner ou entrer un émetteur">
+      <datalist id="emetteurList"></datalist>
+
+      <label for="reference">Reference:</label>
+      <div style="display: flex; gap: 10px; position: relative;">
+        <input type="text" id="referenceInput" name="reference" required 
+               list="referenceList" placeholder="Entrez ou sélectionnez une référence"
+               style="flex: 1; background-color: #444; border: 1px solid #454545; color: white; padding-right: 30px;" autocomplete="off">
+        <datalist id="referenceList"></datalist>
+        <input type="file" id="referenceFile" style="display: none;" accept="*.*">
+        <button type="button" onclick="document.getElementById('referenceFile').click()" 
+                style="padding: 0px 5px; background-color: #666; border: 1px solid #888; color: white;">
+          Select File
+        </button>
+      </div>
+      
+      
+      
+      <label for="indice">Indice:</label>
+      <input type="text" id="indice" name="indice" required placeholder="Entrez un indice (Exemple : 0)">
+
+      <label for="recu">Recu:</label>
+      <input type="date" id="recu" name="recu" placeholder="YYYY-MM-DD">
+
+      <label for="description">Description:</label>
+      <textarea id="description" name="description" required placeholder="Entrez une description (Exemple : EN ATTENTE)"></textarea>
+
+      <label for="datelimite">Date Limite:</label>
+      <input type="date" id="datelimite" name="datelimite">
+
+      <div style="margin-top: 10px; display: flex; align-items: center;">
+        <label for="duplicateCheckbox" style="display: flex; align-items: center; gap: 10px; font-weight: bold; white-space: nowrap;">
+          <input type="checkbox" id="duplicateCheckbox" name="duplicateCheckbox" style="margin: 0;">
+          Ajouter sur d'autres documents
+        </label>
+      </div>     
+      
+      <div id="duplicateOptionsContainer" style="display: none; margin-top: 10px; padding: 10px; border: 1px solid #444; border-radius: 5px; background-color: #2c2c2c;">
+        <!-- Contenu de la box sera inséré ici -->
+      </div>   
+      <div class="dialog-buttons" style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button type="submit" id="confirmAddRowButton" style="background-color: #4CAF50; color: white;">
+          Ajouter
+        </button>
+        <button type="button" id="cancelAddRowButton" style="padding: 8px 15px; background-color: #666; color: white;">
+          Annuler
+        </button>
+      </div>   
+    </form>
+  </dialog>
+
+  <!-- Add Document Dialog -->
+  <dialog id="addDocumentDialog">
+    <form method="dialog" style="display: flex; flex-direction: column; gap: 10px; font-size: 14px;">
+      <h3>Ajouter un nouveau document</h3>
+
+      <label for="documentNumber">Numéro du document:</label>
+      <input type="number" id="documentNumber" name="documentNumber" required>
+
+      <label for="documentName">Nom du document:</label>
+      <input type="text" id="documentName" name="documentName" required>
+
+      <label for="defaultDatelimite">Date Limite réception données par défaut:</label>
+      <input type="date" id="defaultDatelimite" name="defaultDatelimite">
+
+      <div>
+        <label>Émetteurs:</label>
+        <div id="emetteurDropdown">
+          <!-- Contenu généré dynamiquement -->
+        </div>
+      </div>
+      
+      <div class="dialog-buttons" style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button type="submit" style="padding: 8px 15px; background-color: #4CAF50; color: white; border: none; cursor: pointer;">Ajouter</button>
+        <!-- Bouton Annuler avec id dédié -->
+        <button type="button" id="cancelAddDocumentButton" style="padding: 8px 15px; background-color: #666; color: white; border: none; cursor: pointer;">Annuler</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Add Multiple Document Dialog -->
+  <dialog id="addMultipleDocumentDialog">
+    <form method="dialog" style="display: flex; flex-direction: column; gap: 10px; font-size: 14px;">
+      <h3>Ajouter Plusieurs document</h3>
+    
+      <!-- Tableau dynamique pour numéro et nom du document -->
+      <table id="documentTable" style="width:100%; border-collapse: collapse;">
+        <thead>
+          <tr>
+            <th style="border: 1px solid #ddd; padding: 8px;">Numéro du document</th>
+            <th style="border: 1px solid #ddd; padding: 8px;">Nom du document</th>
+          </tr>
+        </thead>
+        <tbody id="documentTableBody">
+          <!-- Ligne initiale vide -->
+          <tr>
+            <td style="border: 1px solid #ddd; padding: 8px;" contenteditable="true"></td>
+            <td style="border: 1px solid #ddd; padding: 8px;" contenteditable="true"></td>
+          </tr>
+        </tbody>
+      </table>
+    
+      <label for="multipleDefaultDatelimite">Date Limite réception données par défaut:</label>
+      <input type="date" id="multipleDefaultDatelimite" name="defaultDatelimite">
+    
+      <div>
+        <label>Émetteurs:</label>
+        <div id="multipleEmetteurDropdown">
+          <!-- Contenu généré dynamiquement -->
+        </div>
+      </div>
+      
+      <div class="dialog-buttons" style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button type="submit" style="padding: 8px 15px; background-color: #4CAF50; color: white;">Ajouter</button>
+        <!-- Bouton Annuler avec id dédié -->
+        <button type="button" id="cancelAddMultipleDocumentButton" style="padding: 8px 15px; background-color: #666; color: white;">Annuler</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Add Project Dialog -->
+  <dialog id="addProjectDialog">
+    <form method="dialog">
+      <h3>Ajouter un nouveau projet</h3>
+
+      <label for="projectNumber">Numéro de projet:</label>
+      <input type="number" id="projectNumber" name="projectNumber" required>
+
+      <label for="projectName">Nom du projet:</label>
+      <input type="text" id="projectName" name="projectName" required>
+
+      <div class="dialog-buttons">
+        <button type="submit">Ajouter</button>
+        <button type="button" onclick="document.getElementById('addProjectDialog').close()">Annuler</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Edit Row Dialog -->
+  <dialog id="editRowDialog">
+    <form method="dialog">
+      <h3>Modifier la ligne</h3>
+
+      <label for="editEmetteur">Émetteur:</label>
+      <input type="text" id="editEmetteur" name="editEmetteur" list="editEmetteurList" required placeholder="Sélectionner ou entrer un émetteur">
+      <datalist id="editEmetteurList"></datalist>
+
+      <label for="editReference">Reference:</label>
+      <div style="display: flex; gap: 10px; position: relative;">
+          <input type="text" id="editReference" name="reference" required 
+                 list="editReferenceList" placeholder="Entrez ou sélectionnez une référence"
+                 style="flex: 1; background-color: #444; border: 1px solid #666; color: white; padding-right: 30px;">
+          <datalist id="editReferenceList"></datalist>
+          <input type="file" id="editReferenceFile" style="display: none;" accept="*.*">
+          <button type="button" onclick="document.getElementById('editReferenceFile').click()" 
+                  style="padding: 0px 5px; background-color: #666; border: 1px solid #888; color: white;">
+              Select File
+          </button>
+      </div>
+      
+      <label for="editIndice">Indice:</label>
+      <input type="text" id="editIndice" name="indice" required placeholder="Entrez un indice (Exemple : 0)">
+
+      <label for="editRecu">Recu:</label>
+      <input type="date" id="editRecu" name="recu" required>
+
+      <label for="editDescription">Description:</label>
+      <textarea id="editDescription" name="description" required placeholder="Entrez une description (Exemple : EN ATTENTE)"></textarea>
+
+      <label for="editDatelimite">Date Limite:</label>
+      <input type="date" id="editDatelimite" name="datelimite">
+
+      <div class="dialog-buttons">
+        <button type="submit">Enregistrer</button>
+        <button type="button" onclick="document.getElementById('editRowDialog').close()">Annuler</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Form to add new rows -->
+  <div class="add-form">
+    <button id="addProjectButton">Ajouter Projet</button>
+
+    <button id="copyTableDataButton">Copier Tableau</button>
+
+    <button id="copyTableDataButtonImage">Copier Tableau Image</button>
+
+    <button id="downloadTableButton">Télécharger Tableau</button>
+
+    <input type="file" id="fileInput" style="display: none;" multiple>
+  </div>
+
+  
+  <script src="./js/legacy.js" defer></script>
+  <script type="module" src="./js/main.js"></script>
+</body>
+
+</html>
