@@ -60,7 +60,15 @@ button:hover {
 }
 
 .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     margin-bottom: 20px;
+}
+
+.toolbar select, .toolbar input, .toolbar button, .toolbar span {
+    width: auto;
+    margin-bottom: 0;
 }
 
 table {
