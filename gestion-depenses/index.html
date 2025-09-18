@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestion des Dépenses de Projet</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="header">
+        <h1>Gestion des Dépenses de Projet</h1>
+        <div class="project-selection">
+            <h2>Projets</h2>
+            <select id="project-select"></select>
+            <button id="add-project-btn">Ajouter un projet</button>
+            <div id="add-project-form" style="display: none;">
+                <input type="text" id="project-name" placeholder="Nom du projet">
+                <input type="number" id="project-budget" placeholder="Budget">
+                <button id="save-project-btn">Enregistrer</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="main-content">
+            <div class="project-header">
+                <h2 id="current-project-name"></h2>
+                <p>Budget: <span id="current-project-budget"></span></p>
+            </div>
+
+            <div class="toolbar">
+                <label for="year-select">Année:</label>
+                <select id="year-select"></select>
+            </div>
+
+            <h3>Prévisionnel - Plan de Charge</h3>
+            <table id="charge-plan-table">
+                <thead>
+                    <tr>
+                        <th>Nom</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <button id="add-worker-btn">Ajouter un travailleur</button>
+            <div id="add-worker-form" style="display: none;">
+                <input type="text" id="worker-role" placeholder="Rôle du travailleur">
+                <input type="text" id="worker-name" placeholder="Nom du travailleur">
+                <button id="save-worker-btn">Enregistrer</button>
+            </div>
+
+            <h3>Prévisionnel - Dépense</h3>
+            <table id="expense-table">
+                <thead>
+                    <tr>
+                        <th>Nom</th>
+                        <th>Dépense journalière</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+
+            <h3>Dépenses Réelles</h3>
+            <table id="real-expense-table">
+                <thead>
+                    <tr>
+                        <th>Nom</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+
+            <h3>Graphique des Dépenses</h3>
+            <canvas id="spending-chart"></canvas>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
