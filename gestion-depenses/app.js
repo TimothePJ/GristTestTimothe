@@ -118,7 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const monthIndex = (data.selectedMonth + i) % 12;
             const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
             const th = document.createElement('th');
-            th.textContent = `${months[monthIndex]} ${year}`;
+            th.innerHTML = `${months[monthIndex]}<br>${year}`;
             headRow.appendChild(th);
         }
 
@@ -163,7 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const monthIndex = (data.selectedMonth + i) % 12;
             const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
             const th = document.createElement('th');
-            th.textContent = `${months[monthIndex]} ${year}`;
+            th.innerHTML = `${months[monthIndex]}<br>${year}`;
             headRow.appendChild(th);
         }
 
@@ -209,7 +209,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const monthIndex = (data.selectedMonth + i) % 12;
             const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
             const th = document.createElement('th');
-            th.textContent = `${months[monthIndex]} ${year}`;
+            th.innerHTML = `${months[monthIndex]}<br>${year}`;
             headRow.appendChild(th);
         }
 
@@ -256,7 +256,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
             const monthKey = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
             
-            labels.push(`${months[monthIndex]} ${year}`);
+            labels.push([months[monthIndex], year.toString()]);
             provisionalSpending.push(calculateProvisionalSpending(project, monthKey));
             realSpending.push(calculateRealSpending(project, monthKey));
         }
@@ -309,7 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateCurrentMonthYear() {
-        currentMonthYear.textContent = `${months[data.selectedMonth]} ${data.selectedYear}`;
+        currentMonthYear.innerHTML = `${months[data.selectedMonth]}<br>${data.selectedYear}`;
     }
 
     addProjectBtn.addEventListener('click', () => {
