@@ -111,7 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderChargePlanTable(project, groupedWorkers) {
         const headRow = document.querySelector('#charge-plan-table thead tr');
-        headRow.innerHTML = '<th>Nom</th><th>Actions</th>';
+        headRow.innerHTML = '<th>Nom</th><th>Actions</th><th>Total Jours</th>';
         const monthSpan = data.monthSpan;
 
         for (let i = 0; i < monthSpan; i++) {
@@ -126,12 +126,13 @@ document.addEventListener('DOMContentLoaded', () => {
         for (const role in groupedWorkers) {
             const roleRow = document.createElement('tr');
             roleRow.classList.add('role-row');
-            roleRow.innerHTML = `<td colspan="${2 + monthSpan}"><strong>${role}</strong></td>`;
+            roleRow.innerHTML = `<td colspan="${3 + monthSpan}"><strong>${role}</strong></td>`;
             chargePlanTableBody.appendChild(roleRow);
 
             groupedWorkers[role].forEach(worker => {
+                const totalProvisionalDays = Object.values(worker.provisionalDays).reduce((sum, days) => sum + (days || 0), 0);
                 const row = document.createElement('tr');
-                row.innerHTML = `<td>${worker.name}</td><td><button class="delete-worker-btn" data-worker-id="${worker.id}">Supprimer</button></td>`;
+                row.innerHTML = `<td>${worker.name}</td><td><button class="delete-worker-btn" data-worker-id="${worker.id}">Supprimer</button></td><td>${totalProvisionalDays}</td>`;
                 for (let i = 0; i < monthSpan; i++) {
                     const monthIndex = (data.selectedMonth + i) % 12;
                     const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
@@ -143,7 +144,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const totalRow = document.createElement('tr');
-        totalRow.innerHTML = '<td colspan="2"><strong>Total</strong></td>';
+        const grandTotalProvisionalDays = project.workers.reduce((total, worker) => {
+            return total + Object.values(worker.provisionalDays).reduce((sum, days) => sum + (days || 0), 0);
+        }, 0);
+        totalRow.innerHTML = `<td colspan="2"><strong>Total</strong></td><td><strong>${grandTotalProvisionalDays}</strong></td>`;
         for (let i = 0; i < monthSpan; i++) {
             const monthIndex = (data.selectedMonth + i) % 12;
             const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
@@ -156,7 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderExpenseTable(project, groupedWorkers) {
         const headRow = document.querySelector('#expense-table thead tr');
-        headRow.innerHTML = '<th>Nom</th><th>Dépense journalière</th>';
+        headRow.innerHTML = '<th>Nom</th><th>Dépense journalière</th><th>Total Dépense</th>';
         const monthSpan = data.monthSpan;
 
         for (let i = 0; i < monthSpan; i++) {
@@ -171,12 +175,14 @@ document.addEventListener('DOMContentLoaded', () => {
         for (const role in groupedWorkers) {
             const roleRow = document.createElement('tr');
             roleRow.classList.add('role-row');
-            roleRow.innerHTML = `<td colspan="${2 + monthSpan}"><strong>${role}</strong></td>`;
+            roleRow.innerHTML = `<td colspan="${3 + monthSpan}"><strong>${role}</strong></td>`;
             expenseTableBody.appendChild(roleRow);
 
             groupedWorkers[role].forEach(worker => {
+                const totalProvisionalDays = Object.values(worker.provisionalDays).reduce((sum, days) => sum + (days || 0), 0);
+                const totalProvisionalCost = totalProvisionalDays * (worker.dailyExpanse || 0);
                 const row = document.createElement('tr');
-                row.innerHTML = `<td>${worker.name}</td><td><input type="number" class="daily-expanse" data-worker-id="${worker.id}" value="${worker.dailyExpanse || ''}"></td>`;
+                row.innerHTML = `<td>${worker.name}</td><td><input type="number" class="daily-expanse" data-worker-id="${worker.id}" value="${worker.dailyExpanse || ''}"></td><td>${totalProvisionalCost.toFixed(2)} €</td>`;
                 for (let i = 0; i < monthSpan; i++) {
                     const monthIndex = (data.selectedMonth + i) % 12;
                     const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
@@ -189,7 +195,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const totalRow = document.createElement('tr');
-        totalRow.innerHTML = '<td colspan="2"><strong>Total</strong></td>';
+        const grandTotalProvisionalCost = project.workers.reduce((total, worker) => {
+            const totalDays = Object.values(worker.provisionalDays).reduce((sum, days) => sum + (days || 0), 0);
+            return total + (totalDays * (worker.dailyExpanse || 0));
+        }, 0);
+        totalRow.innerHTML = `<td colspan="2"><strong>Total</strong></td><td><strong>${grandTotalProvisionalCost.toFixed(2)} €</strong></td>`;
         for (let i = 0; i < monthSpan; i++) {
             const monthIndex = (data.selectedMonth + i) % 12;
             const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
@@ -202,7 +212,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderRealExpenseTable(project, groupedWorkers) {
         const headRow = document.querySelector('#real-expense-table thead tr');
-        headRow.innerHTML = '<th>Nom</th>';
+        headRow.innerHTML = '<th>Nom</th><th>Total Jours</th><th>Total Dépense</th>';
         const monthSpan = data.monthSpan;
 
         for (let i = 0; i < monthSpan; i++) {
@@ -217,12 +227,14 @@ document.addEventListener('DOMContentLoaded', () => {
         for (const role in groupedWorkers) {
             const roleRow = document.createElement('tr');
             roleRow.classList.add('role-row');
-            roleRow.innerHTML = `<td colspan="${1 + monthSpan}"><strong>${role}</strong></td>`;
+            roleRow.innerHTML = `<td colspan="${3 + monthSpan}"><strong>${role}</strong></td>`;
             realExpenseTableBody.appendChild(roleRow);
 
             groupedWorkers[role].forEach(worker => {
+                const totalWorkedDays = Object.values(worker.workedDays).reduce((sum, days) => sum + (days || 0), 0);
+                const totalRealCost = totalWorkedDays * (worker.dailyExpanse || 0);
                 const row = document.createElement('tr');
-                row.innerHTML = `<td>${worker.name}</td>`;
+                row.innerHTML = `<td>${worker.name}</td><td>${totalWorkedDays}</td><td>${totalRealCost.toFixed(2)} €</td>`;
                 for (let i = 0; i < monthSpan; i++) {
                     const monthIndex = (data.selectedMonth + i) % 12;
                     const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
@@ -234,7 +246,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const totalRow = document.createElement('tr');
-        totalRow.innerHTML = '<td><strong>Total</strong></td>';
+        const grandTotalWorkedDays = project.workers.reduce((total, worker) => {
+            return total + Object.values(worker.workedDays).reduce((sum, days) => sum + (days || 0), 0);
+        }, 0);
+        const grandTotalRealCost = project.workers.reduce((total, worker) => {
+            const totalDays = Object.values(worker.workedDays).reduce((sum, days) => sum + (days || 0), 0);
+            return total + (totalDays * (worker.dailyExpanse || 0));
+        }, 0);
+        totalRow.innerHTML = `<td><strong>Total</strong></td><td><strong>${grandTotalWorkedDays}</strong></td><td><strong>${grandTotalRealCost.toFixed(2)} €</strong></td>`;
         for (let i = 0; i < monthSpan; i++) {
             const monthIndex = (data.selectedMonth + i) % 12;
             const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
