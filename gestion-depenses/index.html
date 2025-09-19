@@ -15,7 +15,10 @@
             <button id="add-project-btn">Ajouter un projet</button>
             <div id="add-project-form" style="display: none;">
                 <input type="text" id="project-name" placeholder="Nom du projet">
-                <input type="number" id="project-budget" placeholder="Budget">
+                <div id="budget-lines-container"></div>
+                <input type="text" id="budget-chapter" placeholder="Chapitre">
+                <input type="number" id="budget-amount" placeholder="Montant">
+                <button id="add-budget-line-btn">Ajouter une ligne de budget</button>
                 <button id="save-project-btn">Enregistrer</button>
             </div>
         </div>
@@ -25,7 +28,19 @@
         <div class="main-content">
             <div class="project-header">
                 <h2 id="current-project-name"></h2>
-                <p>Budget: <span id="current-project-budget"></span></p>
+                <div>
+                    <p>Budget Total: <span id="total-project-budget"></span></p>
+                    <div id="current-project-budget-breakdown"></div>
+                    <button id="edit-budget-btn">Modifier le budget</button>
+                </div>
+            </div>
+
+            <div class="kpi-report">
+                <h3>Rapport KPI</h3>
+                <p>Budget Total: <span id="kpi-total-budget"></span></p>
+                <p>Total Dépense: <span id="kpi-total-spending"></span></p>
+                <p>Reste Budget: <span id="kpi-remaining-budget"></span></p>
+                <p>Pourcentage Restant: <span id="kpi-remaining-percentage"></span></p>
             </div>
 
             <div class="toolbar">
@@ -35,7 +50,7 @@
                 <button id="next-month-btn">></button>
                 <span id="current-month-year"></span>
                 <label for="month-span-input">Mois à afficher:</label>
-                <input type="number" id="month-span-input" value="3" min="1" max="12">
+                <input type="number" id="month-span-input" value="3" min="1" max="24">
             </div>
 
             <h3>Prévisionnel - Plan de Charge</h3>
@@ -83,5 +98,17 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="app.js"></script>
+
+    <div id="edit-budget-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Modifier le Budget</h2>
+            <div id="edit-budget-lines-container"></div>
+            <input type="text" id="edit-budget-chapter" placeholder="Nouveau chapitre">
+            <input type="number" id="edit-budget-amount" placeholder="Nouveau montant">
+            <button id="add-edit-budget-line-btn">Ajouter</button>
+            <button id="save-edited-budget-btn">Enregistrer</button>
+            <button id="cancel-edit-budget-btn">Annuler</button>
+        </div>
+    </div>
 </body>
 </html>
