@@ -121,3 +121,19 @@ th {
     border-radius: 5px;
     margin-bottom: 20px;
 }
+
+.table-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.table-header h3 {
+    margin: 0;
+}
+
+.table-header div {
+    display: flex;
+    gap: 5px;
+}

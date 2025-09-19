@@ -174,7 +174,7 @@ document.addEventListener('DOMContentLoaded', () => {
             groupedWorkers[role].forEach(worker => {
                 const totalProvisionalDays = Object.values(worker.provisionalDays).reduce((sum, days) => sum + (days || 0), 0);
                 const row = document.createElement('tr');
-                row.innerHTML = `<td>${worker.name}</td><td><button class="delete-worker-btn" data-worker-id="${worker.id}">Supprimer</button></td><td>${totalProvisionalDays}</td>`;
+                row.innerHTML = `<td>${worker.name}</td><td><button class="delete-worker-btn" data-worker-id="${worker.id}">Supprimer</button></td><td>${totalProvisionalDays.toFixed(2)}</td>`;
                 for (let i = 0; i < monthSpan; i++) {
                     const monthIndex = (data.selectedMonth + i) % 12;
                     const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
@@ -189,13 +189,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const grandTotalProvisionalDays = project.workers.reduce((total, worker) => {
             return total + Object.values(worker.provisionalDays).reduce((sum, days) => sum + (days || 0), 0);
         }, 0);
-        totalRow.innerHTML = `<td colspan="2"><strong>Total</strong></td><td><strong>${grandTotalProvisionalDays}</strong></td>`;
+        totalRow.innerHTML = `<td colspan="2"><strong>Total</strong></td><td><strong>${grandTotalProvisionalDays.toFixed(2)}</strong></td>`;
         for (let i = 0; i < monthSpan; i++) {
             const monthIndex = (data.selectedMonth + i) % 12;
             const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
             const monthKey = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
             const totalDays = project.workers.reduce((sum, worker) => sum + (worker.provisionalDays[monthKey] || 0), 0);
-            totalRow.innerHTML += `<td><strong>${totalDays}</strong></td>`;
+            totalRow.innerHTML += `<td><strong>${totalDays.toFixed(2)}</strong></td>`;
         }
         chargePlanTableBody.appendChild(totalRow);
     }
@@ -276,7 +276,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const totalWorkedDays = Object.values(worker.workedDays).reduce((sum, days) => sum + (days || 0), 0);
                 const totalRealCost = totalWorkedDays * (worker.dailyExpanse || 0);
                 const row = document.createElement('tr');
-                row.innerHTML = `<td>${worker.name}</td><td>${totalWorkedDays}</td><td>${formatNumber(totalRealCost)} €</td>`;
+                row.innerHTML = `<td>${worker.name}</td><td>${totalWorkedDays.toFixed(2)}</td><td>${formatNumber(totalRealCost)} €</td>`;
                 for (let i = 0; i < monthSpan; i++) {
                     const monthIndex = (data.selectedMonth + i) % 12;
                     const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
@@ -295,7 +295,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const totalDays = Object.values(worker.workedDays).reduce((sum, days) => sum + (days || 0), 0);
             return total + (totalDays * (worker.dailyExpanse || 0));
         }, 0);
-        totalRow.innerHTML = `<td><strong>Total</strong></td><td><strong>${grandTotalWorkedDays}</strong></td><td><strong>${formatNumber(grandTotalRealCost)} €</strong></td>`;
+        totalRow.innerHTML = `<td><strong>Total</strong></td><td><strong>${grandTotalWorkedDays.toFixed(2)}</strong></td><td><strong>${formatNumber(grandTotalRealCost)} €</strong></td>`;
         for (let i = 0; i < monthSpan; i++) {
             const monthIndex = (data.selectedMonth + i) % 12;
             const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
@@ -642,6 +642,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
     cancelEditBudgetBtn.addEventListener('click', () => {
         editBudgetModal.style.display = 'none';
+    });
+
+
+    document.querySelectorAll('.prev-month-table-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            data.selectedMonth--;
+            if (data.selectedMonth < 0) {
+                data.selectedMonth = 11;
+                data.selectedYear--;
+                yearSelect.value = data.selectedYear;
+            }
+            saveData();
+            renderSelectedProject();
+        });
+    });
+
+    document.querySelectorAll('.next-month-table-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            data.selectedMonth++;
+            if (data.selectedMonth > 11) {
+                data.selectedMonth = 0;
+                data.selectedYear++;
+                yearSelect.value = data.selectedYear;
+            }
+            saveData();
+            renderSelectedProject();
+        });
     });
 
 
