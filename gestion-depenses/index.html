@@ -15,6 +15,7 @@
             <button id="add-project-btn">Ajouter un projet</button>
             <div id="add-project-form" style="display: none;">
                 <input type="text" id="project-name" placeholder="Nom du projet">
+                <input type="text" id="project-number" placeholder="Numéro du projet">
                 <div id="budget-lines-container"></div>
                 <input type="text" id="budget-chapter" placeholder="Chapitre">
                 <input type="number" id="budget-amount" placeholder="Montant">
@@ -115,6 +116,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
     <script src="app.js"></script>
 
     <div id="edit-budget-modal" class="modal" style="display: none;">

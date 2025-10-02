@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const addProjectBtn = document.getElementById('add-project-btn');
     const addProjectForm = document.getElementById('add-project-form');
     const projectNameInput = document.getElementById('project-name');
+    const projectNumberInput = document.getElementById('project-number');
     const budgetLinesContainer = document.getElementById('budget-lines-container');
     const budgetChapterInput = document.getElementById('budget-chapter');
     const budgetAmountInput = document.getElementById('budget-amount');
@@ -58,33 +59,79 @@ document.addEventListener('DOMContentLoaded', () => {
         return num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, " ").replace('.', ',');
     }
 
-    function saveData() {
-        localStorage.setItem('projectExpenses', JSON.stringify(data));
-    }
+    async function loadGristData() {
+        const projectsData = await grist.docApi.fetchTable("Projects");
+        const budgetData = await grist.docApi.fetchTable("Budget");
+        const teamData = await grist.docApi.fetchTable("Team");
+        const timesheetData = await grist.docApi.fetchTable("Timesheet");
 
-    function loadData() {
-        const savedData = localStorage.getItem('projectExpenses');
-        if (savedData) {
-            data = JSON.parse(savedData);
-            if (typeof data.selectedMonth !== 'number') {
-                data.selectedMonth = new Date().getMonth();
-            }
-            if (typeof data.monthSpan !== 'number') {
-                data.monthSpan = 3;
-            }
+        const projects = projectsData.id.map((id, i) => ({
+            id: id,
+            projectNumber: projectsData.Project_Number[i],
+            name: projectsData.Name[i],
+            budgetLines: [],
+            workers: []
+        }));
 
-            // Migrate old data structure
-            if (data.projects) {
-                data.projects.forEach(project => {
-                    if (project.budget && !project.budgetLines) {
-                        project.budgetLines = [{ chapter: 'Général', amount: project.budget }];
-                        delete project.budget;
-                    } else if (!project.budgetLines) {
-                        project.budgetLines = [];
-                    }
+        const projectsByNumber = {};
+        projects.forEach(p => {
+            projectsByNumber[p.projectNumber] = p;
+        });
+
+        for (let i = 0; i < budgetData.id.length; i++) {
+            const projectNumber = budgetData.Project_Number[i];
+            if (projectsByNumber[projectNumber]) {
+                projectsByNumber[projectNumber].budgetLines.push({
+                    id: budgetData.id[i],
+                    chapter: budgetData.Chapter[i],
+                    amount: budgetData.Amount[i]
                 });
             }
         }
+
+        const teamById = {};
+        for (let i = 0; i < teamData.id.length; i++) {
+            const projectNumber = teamData.Project_Number[i];
+            if (projectsByNumber[projectNumber]) {
+                const worker = {
+                    id: teamData.id[i],
+                    role: teamData.Role[i],
+                    name: teamData.Name[i],
+                    dailyExpanse: teamData.Daily_Rate[i],
+                    provisionalDays: {},
+                    workedDays: {}
+                };
+                projectsByNumber[projectNumber].workers.push(worker);
+                teamById[worker.id] = worker;
+            }
+        }
+
+        for (let i = 0; i < timesheetData.id.length; i++) {
+            const teamMemberId = timesheetData.Team_Member[i];
+            if (teamById[teamMemberId]) {
+                const worker = teamById[teamMemberId];
+                const month = timesheetData.Month[i];
+                const provisionalDays = timesheetData.Provisional_Days[i];
+                const workedDays = timesheetData.Worked_Days[i];
+
+                // Grist returns dates as seconds since epoch
+                const date = new Date(month * 1000);
+                const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+                if (provisionalDays) {
+                    worker.provisionalDays[monthKey] = provisionalDays;
+                }
+                if (workedDays) {
+                    worker.workedDays[monthKey] = workedDays;
+                }
+            }
+        }
+
+        data.projects = projects;
+        if (data.projects.length > 0) {
+            data.selectedProjectId = data.projects[0].id;
+        }
+        renderProjects();
     }
 
     function initializeYears() {
@@ -443,35 +490,43 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    saveProjectBtn.addEventListener('click', () => {
+    saveProjectBtn.addEventListener('click', async () => {
         const name = projectNameInput.value.trim();
-        if (name && newProjectBudgetLines.length > 0) {
-            const newProject = {
-                id: Date.now(),
-                name,
-                budgetLines: newProjectBudgetLines,
-                workers: []
-            };
-            data.projects.push(newProject);
-            data.selectedProjectId = newProject.id;
-            saveData();
-            renderProjects();
+        const projectNumber = projectNumberInput.value.trim();
+        if (name && projectNumber && newProjectBudgetLines.length > 0) {
+            const projectActions = [
+                ["AddRecord", "Projects", null, { Name: name, Project_Number: projectNumber }]
+            ];
+            await grist.docApi.applyUserActions(projectActions);
+
+            // We need the ID of the newly created project.
+            // A robust way would be to fetch projects again and find the one with the matching project number.
+            // For simplicity, we'll just reload all data. A more optimized approach could be implemented.
+            await loadGristData();
+
+            const newProject = data.projects.find(p => p.projectNumber === projectNumber);
+            if (newProject) {
+                const budgetActions = newProjectBudgetLines.map(line =>
+                    ["AddRecord", "Budget", null, { Project_Number: projectNumber, Chapter: line.chapter, Amount: line.amount }]
+                );
+                await grist.docApi.applyUserActions(budgetActions);
+            }
+
             projectNameInput.value = '';
             newProjectBudgetLines = [];
             budgetLinesContainer.innerHTML = '';
             addProjectForm.style.display = 'none';
+            loadGristData();
         }
     });
 
     projectSelect.addEventListener('change', () => {
         data.selectedProjectId = parseInt(projectSelect.value);
-        saveData();
         renderSelectedProject();
     });
 
     yearSelect.addEventListener('change', () => {
         data.selectedYear = parseInt(yearSelect.value);
-        saveData();
         renderSelectedProject();
     });
 
@@ -482,7 +537,6 @@ document.addEventListener('DOMContentLoaded', () => {
             data.selectedYear--;
             yearSelect.value = data.selectedYear;
         }
-        saveData();
         renderSelectedProject();
     });
 
@@ -493,13 +547,11 @@ document.addEventListener('DOMContentLoaded', () => {
             data.selectedYear++;
             yearSelect.value = data.selectedYear;
         }
-        saveData();
         renderSelectedProject();
     });
 
     monthSpanInput.addEventListener('change', () => {
         data.monthSpan = parseInt(monthSpanInput.value);
-        saveData();
         renderSelectedProject();
     });
 
@@ -507,29 +559,23 @@ document.addEventListener('DOMContentLoaded', () => {
         addWorkerForm.style.display = addWorkerForm.style.display === 'none' ? 'block' : 'none';
     });
 
-    saveWorkerBtn.addEventListener('click', () => {
+    saveWorkerBtn.addEventListener('click', async () => {
         const role = workerRoleInput.value.trim();
         const name = workerNameInput.value.trim();
         const selectedProject = data.projects.find(p => p.id === data.selectedProjectId);
         if (role && name && selectedProject) {
-            const newWorker = {
-                id: Date.now(),
-                role,
-                name,
-                provisionalDays: {},
-                dailyExpanse: 0,
-                workedDays: {}
-            };
-            selectedProject.workers.push(newWorker);
-            saveData();
-            renderSelectedProject();
+            const actions = [
+                ["AddRecord", "Team", null, { Project_Number: selectedProject.id, Role: role, Name: name, Daily_Rate: 0 }]
+            ];
+            await grist.docApi.applyUserActions(actions);
             workerRoleInput.value = '';
             workerNameInput.value = '';
             addWorkerForm.style.display = 'none';
+            loadGristData();
         }
     });
 
-    function handleTableInputChange(e) {
+    async function handleTableInputChange(e) {
         const workerId = parseInt(e.target.dataset.workerId);
         const selectedProject = data.projects.find(p => p.id === data.selectedProjectId);
         if (!selectedProject) return;
@@ -537,31 +583,73 @@ document.addEventListener('DOMContentLoaded', () => {
         const worker = selectedProject.workers.find(w => w.id === workerId);
         if (!worker) return;
 
-        if (e.target.classList.contains('provisional-days')) {
+        if (e.target.classList.contains('daily-expanse')) {
+            const dailyExpanse = parseFloat(e.target.value) || 0;
+            worker.dailyExpanse = dailyExpanse;
+            const actions = [
+                ["UpdateRecord", "Team", worker.id, { Daily_Rate: dailyExpanse }]
+            ];
+            await grist.docApi.applyUserActions(actions);
+        } else if (e.target.classList.contains('provisional-days') || e.target.classList.contains('worked-days')) {
             const month = e.target.dataset.month;
-            worker.provisionalDays[month] = parseFloat(e.target.value) || 0;
-        } else if (e.target.classList.contains('daily-expanse')) {
-            worker.dailyExpanse = parseFloat(e.target.value) || 0;
-        } else if (e.target.classList.contains('worked-days')) {
-            const month = e.target.dataset.month;
-            worker.workedDays[month] = parseFloat(e.target.value) || 0;
+            const value = parseFloat(e.target.value) || 0;
+            const isProvisional = e.target.classList.contains('provisional-days');
+
+            if (isProvisional) {
+                worker.provisionalDays[month] = value;
+            } else {
+                worker.workedDays[month] = value;
+            }
+
+            const [year, monthNum] = month.split('-').map(Number);
+            const date = new Date(year, monthNum - 1);
+            const gristDate = date.getTime() / 1000;
+
+            // Find if a timesheet record already exists for this worker and month
+            const timesheetData = await grist.docApi.fetchTable("Timesheet");
+            let recordId = null;
+            for (let i = 0; i < timesheetData.id.length; i++) {
+                if (timesheetData.Team_Member[i] === worker.id && new Date(timesheetData.Month[i] * 1000).getTime() === date.getTime()) {
+                    recordId = timesheetData.id[i];
+                    break;
+                }
+            }
+
+            const fields = {};
+            if (isProvisional) {
+                fields.Provisional_Days = value;
+            } else {
+                fields.Worked_Days = value;
+            }
+
+            let action;
+            if (recordId) {
+                action = ["UpdateRecord", "Timesheet", recordId, fields];
+            } else {
+                fields.Team_Member = worker.id;
+                fields.Month = gristDate;
+                action = ["AddRecord", "Timesheet", null, fields];
+            }
+            await grist.docApi.applyUserActions([action]);
         }
 
-        saveData();
         renderTables(selectedProject);
         renderChart(selectedProject);
+        renderKpiReport(selectedProject);
     }
     
-    function handleDeleteWorker(e) {
+    async function handleDeleteWorker(e) {
         if (!e.target.classList.contains('delete-worker-btn')) return;
         
         const workerId = parseInt(e.target.dataset.workerId);
         const selectedProject = data.projects.find(p => p.id === data.selectedProjectId);
         if (!selectedProject) return;
 
-        selectedProject.workers = selectedProject.workers.filter(w => w.id !== workerId);
-        saveData();
-        renderSelectedProject();
+        const actions = [
+            ["RemoveRecord", "Team", workerId]
+        ];
+        await grist.docApi.applyUserActions(actions);
+        loadGristData();
     }
 
     chargePlanTableBody.addEventListener('change', handleTableInputChange);
@@ -630,13 +718,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    saveEditedBudgetBtn.addEventListener('click', () => {
+    saveEditedBudgetBtn.addEventListener('click', async () => {
         const selectedProject = data.projects.find(p => p.id === data.selectedProjectId);
         if (selectedProject) {
-            selectedProject.budgetLines = editingBudgetLines;
-            saveData();
-            renderSelectedProject();
+            const originalLines = selectedProject.budgetLines;
+            const editedLines = editingBudgetLines;
+
+            const originalIds = new Set(originalLines.map(l => l.id));
+            const editedIds = new Set(editedLines.map(l => l.id).filter(id => id));
+
+            const toDelete = originalLines.filter(l => !editedIds.has(l.id));
+            const toAdd = editedLines.filter(l => !l.id);
+            const toUpdate = editedLines.filter(l => l.id && originalIds.has(l.id));
+
+            const actions = [];
+            toDelete.forEach(line => actions.push(["RemoveRecord", "Budget", line.id]));
+            toAdd.forEach(line => actions.push(["AddRecord", "Budget", null, { Project_Number: selectedProject.projectNumber, Chapter: line.chapter, Amount: line.amount }]));
+            toUpdate.forEach(line => {
+                const original = originalLines.find(l => l.id === line.id);
+                if (original.chapter !== line.chapter || original.amount !== line.amount) {
+                    actions.push(["UpdateRecord", "Budget", line.id, { Chapter: line.chapter, Amount: line.amount }]);
+                }
+            });
+
+            if (actions.length > 0) {
+                await grist.docApi.applyUserActions(actions);
+            }
+
             editBudgetModal.style.display = 'none';
+            loadGristData();
         }
     });
 
@@ -653,7 +763,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 data.selectedYear--;
                 yearSelect.value = data.selectedYear;
             }
-            saveData();
             renderSelectedProject();
         });
     });
@@ -666,14 +775,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 data.selectedYear++;
                 yearSelect.value = data.selectedYear;
             }
-            saveData();
             renderSelectedProject();
         });
     });
 
 
-    loadData();
+    grist.ready();
     monthSpanInput.value = data.monthSpan;
     initializeYears();
-    renderProjects();
+    loadGristData();
 });
