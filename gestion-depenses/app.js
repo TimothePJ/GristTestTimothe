@@ -39,6 +39,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const addWorkerForm = document.getElementById('add-worker-form');
     const workerRoleInput = document.getElementById('worker-role');
     const workerNameInput = document.getElementById('worker-name');
+    const workerRolesList = document.getElementById('worker-roles-list');
+    const workerNamesList = document.getElementById('worker-names-list');
     const saveWorkerBtn = document.getElementById('save-worker-btn');
     const spendingChartCanvas = document.getElementById('spending-chart');
 
@@ -133,6 +135,26 @@ document.addEventListener('DOMContentLoaded', () => {
             data.selectedProjectId = data.projects[0].id;
         }
         renderProjects();
+        populateWorkerDatalists(teamData);
+    }
+
+    function populateWorkerDatalists(teamData) {
+        const roles = new Set(teamData.Role);
+        const names = new Set(teamData.Name);
+
+        workerRolesList.innerHTML = '';
+        roles.forEach(role => {
+            const option = document.createElement('option');
+            option.value = role;
+            workerRolesList.appendChild(option);
+        });
+
+        workerNamesList.innerHTML = '';
+        names.forEach(name => {
+            const option = document.createElement('option');
+            option.value = name;
+            workerNamesList.appendChild(option);
+        });
     }
 
     function initializeYears() {
