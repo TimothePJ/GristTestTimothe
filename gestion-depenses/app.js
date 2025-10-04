@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveEditedBudgetBtn = document.getElementById('save-edited-budget-btn');
     const cancelEditBudgetBtn = document.getElementById('cancel-edit-budget-btn');
     const currentProjectName = document.getElementById('current-project-name');
+    const currentProjectNumber = document.getElementById('current-project-number');
     const totalProjectBudget = document.getElementById('total-project-budget');
     const kpiTotalBudget = document.getElementById('kpi-total-budget');
     const kpiTotalSpending = document.getElementById('kpi-total-spending');
@@ -46,7 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedProjectId: null,
         selectedYear: new Date().getFullYear(),
         selectedMonth: new Date().getMonth(),
-        monthSpan: 3
+        monthSpan: 6
     };
 
     let spendingChart;
@@ -150,7 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
         data.projects.forEach(project => {
             const option = document.createElement('option');
             option.value = project.id;
-            option.textContent = project.name;
+            option.textContent = `${project.projectNumber} - ${project.name}`;
             projectSelect.appendChild(option);
         });
 
@@ -165,6 +166,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const selectedProject = data.projects.find(p => p.id === data.selectedProjectId);
         if (selectedProject) {
             currentProjectName.textContent = selectedProject.name;
+            currentProjectNumber.textContent = selectedProject.projectNumber;
             const totalBudget = selectedProject.budgetLines.reduce((sum, line) => sum + line.amount, 0);
             totalProjectBudget.textContent = `${formatNumber(totalBudget)} €`;
             currentProjectBudgetBreakdown.innerHTML = '';
@@ -475,8 +477,11 @@ document.addEventListener('DOMContentLoaded', () => {
         currentMonthYear.innerHTML = `${months[data.selectedMonth]}<br>${data.selectedYear}`;
     }
 
-    addProjectBtn.addEventListener('click', () => {
-        addProjectForm.style.display = addProjectForm.style.display === 'none' ? 'block' : 'none';
+    addProjectBtn.addEventListener('click', (e) => {
+        // Only toggle the form if the click is a trusted, user-initiated event.
+        if (e.isTrusted) {
+            addProjectForm.style.display = addProjectForm.style.display === 'none' ? 'block' : 'none';
+        }
     });
 
     addBudgetLineBtn.addEventListener('click', () => {
@@ -565,7 +570,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const selectedProject = data.projects.find(p => p.id === data.selectedProjectId);
         if (role && name && selectedProject) {
             const actions = [
-                ["AddRecord", "Team", null, { Project_Number: selectedProject.id, Role: role, Name: name, Daily_Rate: 0 }]
+                ["AddRecord", "Team", null, { Project_Number: selectedProject.projectNumber, Role: role, Name: name, Daily_Rate: 0 }]
             ];
             await grist.docApi.applyUserActions(actions);
             workerRoleInput.value = '';
