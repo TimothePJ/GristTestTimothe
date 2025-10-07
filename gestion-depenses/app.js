@@ -63,15 +63,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadGristData() {
-        const projectsData = await grist.docApi.fetchTable("Projects");
+        const projectsData = await grist.docApi.fetchTable("Projet");
         const budgetData = await grist.docApi.fetchTable("Budget");
-        const teamData = await grist.docApi.fetchTable("Team");
+        const teamData = await grist.docApi.fetchTable("ProjectTeam");
         const timesheetData = await grist.docApi.fetchTable("Timesheet");
 
         const projects = projectsData.id.map((id, i) => ({
             id: id,
-            projectNumber: projectsData.Project_Number[i],
-            name: projectsData.Name[i],
+            projectNumber: projectsData.NumeroProjet[i],
+            name: projectsData.Projet[i],
             budgetLines: [],
             workers: []
         }));
@@ -82,7 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         for (let i = 0; i < budgetData.id.length; i++) {
-            const projectNumber = budgetData.Project_Number[i];
+            const projectNumber = budgetData.NumeroProjet[i];
             if (projectsByNumber[projectNumber]) {
                 projectsByNumber[projectNumber].budgetLines.push({
                     id: budgetData.id[i],
@@ -94,7 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const teamById = {};
         for (let i = 0; i < teamData.id.length; i++) {
-            const projectNumber = teamData.Project_Number[i];
+            const projectNumber = teamData.NumeroProjet[i];
             if (projectsByNumber[projectNumber]) {
                 const worker = {
                     id: teamData.id[i],
@@ -522,7 +522,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const projectNumber = projectNumberInput.value.trim();
         if (name && projectNumber && newProjectBudgetLines.length > 0) {
             const projectActions = [
-                ["AddRecord", "Projects", null, { Name: name, Project_Number: projectNumber }]
+                ["AddRecord", "Projet", null, { Projet: name, NumeroProjet: projectNumber }]
             ];
             await grist.docApi.applyUserActions(projectActions);
 
@@ -534,7 +534,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const newProject = data.projects.find(p => p.projectNumber === projectNumber);
             if (newProject) {
                 const budgetActions = newProjectBudgetLines.map(line =>
-                    ["AddRecord", "Budget", null, { Project_Number: projectNumber, Chapter: line.chapter, Amount: line.amount }]
+                    ["AddRecord", "Budget", null, { NumeroProjet: projectNumber, Chapter: line.chapter, Amount: line.amount }]
                 );
                 await grist.docApi.applyUserActions(budgetActions);
             }
@@ -592,7 +592,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const selectedProject = data.projects.find(p => p.id === data.selectedProjectId);
         if (role && name && selectedProject) {
             const actions = [
-                ["AddRecord", "Team", null, { Project_Number: selectedProject.projectNumber, Role: role, Name: name, Daily_Rate: 0 }]
+                ["AddRecord", "ProjectTeam", null, { NumeroProjet: selectedProject.projectNumber, Role: role, Name: name, Daily_Rate: 0 }]
             ];
             await grist.docApi.applyUserActions(actions);
             workerRoleInput.value = '';
@@ -614,7 +614,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const dailyExpanse = parseFloat(e.target.value) || 0;
             worker.dailyExpanse = dailyExpanse;
             const actions = [
-                ["UpdateRecord", "Team", worker.id, { Daily_Rate: dailyExpanse }]
+                ["UpdateRecord", "ProjectTeam", worker.id, { Daily_Rate: dailyExpanse }]
             ];
             await grist.docApi.applyUserActions(actions);
         } else if (e.target.classList.contains('provisional-days') || e.target.classList.contains('worked-days')) {
@@ -673,7 +673,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!selectedProject) return;
 
         const actions = [
-            ["RemoveRecord", "Team", workerId]
+            ["RemoveRecord", "ProjectTeam", workerId]
         ];
         await grist.docApi.applyUserActions(actions);
         loadGristData();
@@ -760,7 +760,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const actions = [];
             toDelete.forEach(line => actions.push(["RemoveRecord", "Budget", line.id]));
-            toAdd.forEach(line => actions.push(["AddRecord", "Budget", null, { Project_Number: selectedProject.projectNumber, Chapter: line.chapter, Amount: line.amount }]));
+            toAdd.forEach(line => actions.push(["AddRecord", "Budget", null, { NumeroProjet: selectedProject.projectNumber, Chapter: line.chapter, Amount: line.amount }]));
             toUpdate.forEach(line => {
                 const original = originalLines.find(l => l.id === line.id);
                 if (original.chapter !== line.chapter || original.amount !== line.amount) {
