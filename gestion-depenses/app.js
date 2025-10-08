@@ -685,6 +685,129 @@ document.addEventListener('DOMContentLoaded', () => {
     
     chargePlanTableBody.addEventListener('click', handleDeleteWorker);
 
+    // Add paste event handlers for copy-paste functionality
+    async function handlePaste(e) {
+        // Only handle paste events on input fields
+        if (e.target.tagName !== 'INPUT') return;
+
+        e.preventDefault();
+        
+        const clipboardData = e.clipboardData || window.clipboardData;
+        const pastedData = clipboardData.getData('text');
+        
+        // Split by newlines (for rows) and tabs (for columns)
+        const rows = pastedData.split(/\r?\n/).filter(row => row.trim() !== '');
+        if (rows.length === 0) return;
+        
+        // Find the current row
+        const currentCell = e.target.closest('td');
+        const currentRow = e.target.closest('tr');
+        if (!currentRow || !currentCell) return;
+        
+        // Get all input fields in the current row
+        const inputFields = Array.from(currentRow.querySelectorAll('input[type="number"]'));
+        
+        // Find the index of the current input field
+        const currentIndex = inputFields.indexOf(e.target);
+        if (currentIndex === -1) return;
+        
+        // Get worker ID and determine if we're in provisional or worked days
+        const workerId = parseInt(e.target.dataset.workerId);
+        if (!workerId) return;
+        
+        const selectedProject = data.projects.find(p => p.id === data.selectedProjectId);
+        if (!selectedProject) return;
+        
+        const worker = selectedProject.workers.find(w => w.id === workerId);
+        if (!worker) return;
+        
+        const isProvisional = e.target.classList.contains('provisional-days');
+        const isWorked = e.target.classList.contains('worked-days');
+        
+        if (!isProvisional && !isWorked) return;
+        
+        // Parse the first row of pasted data
+        const values = rows[0].split('\t');
+        
+        // Collect all updates to make
+        const updates = [];
+        
+        // Fill in the values starting from the current input field
+        for (let i = 0; i < values.length && (currentIndex + i) < inputFields.length; i++) {
+            const value = values[i].trim();
+            const inputField = inputFields[currentIndex + i];
+            const month = inputField.dataset.month;
+            
+            if (!month) continue;
+            
+            // Convert comma to dot for French decimal format
+            const normalizedValue = value.replace(',', '.');
+            
+            // Only process if it's a valid number or empty
+            if (normalizedValue === '' || !isNaN(parseFloat(normalizedValue))) {
+                const numValue = normalizedValue === '' ? 0 : parseFloat(normalizedValue);
+                
+                // Update the local data model
+                if (isProvisional) {
+                    worker.provisionalDays[month] = numValue;
+                } else {
+                    worker.workedDays[month] = numValue;
+                }
+                
+                updates.push({ month, value: numValue });
+            }
+        }
+        
+        // Now make a single batch API call to save all the changes
+        if (updates.length > 0) {
+            const timesheetData = await grist.docApi.fetchTable("Timesheet");
+            const actions = [];
+            
+            for (const update of updates) {
+                const [year, monthNum] = update.month.split('-').map(Number);
+                const date = new Date(year, monthNum - 1);
+                const gristDate = date.getTime() / 1000;
+                
+                // Find if a timesheet record already exists for this worker and month
+                let recordId = null;
+                for (let i = 0; i < timesheetData.id.length; i++) {
+                    if (timesheetData.Team_Member[i] === worker.id && new Date(timesheetData.Month[i] * 1000).getTime() === date.getTime()) {
+                        recordId = timesheetData.id[i];
+                        break;
+                    }
+                }
+                
+                const fields = {};
+                if (isProvisional) {
+                    fields.Provisional_Days = update.value;
+                } else {
+                    fields.Worked_Days = update.value;
+                }
+                
+                if (recordId) {
+                    actions.push(["UpdateRecord", "Timesheet", recordId, fields]);
+                } else {
+                    fields.Team_Member = worker.id;
+                    fields.Month = gristDate;
+                    actions.push(["AddRecord", "Timesheet", null, fields]);
+                }
+            }
+            
+            // Execute all actions in a single batch
+            if (actions.length > 0) {
+                await grist.docApi.applyUserActions(actions);
+            }
+            
+            // Re-render tables once after all updates
+            renderTables(selectedProject);
+            renderChart(selectedProject);
+            renderKpiReport(selectedProject);
+        }
+    }
+
+    chargePlanTableBody.addEventListener('paste', handlePaste, true);
+    realExpenseTableBody.addEventListener('paste', handlePaste, true);
+
 
     function renderKpiReport(project) {
         const totalBudget = project.budgetLines.reduce((sum, line) => sum + line.amount, 0);
