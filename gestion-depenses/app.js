@@ -184,10 +184,32 @@ document.addEventListener('DOMContentLoaded', () => {
         renderSelectedProject();
     }
 
+    function setStartDateToEarliestData(project) {
+        const allMonthKeys = new Set();
+        project.workers.forEach(worker => {
+            Object.keys(worker.provisionalDays).forEach(key => allMonthKeys.add(key));
+            Object.keys(worker.workedDays).forEach(key => allMonthKeys.add(key));
+        });
+
+        if (allMonthKeys.size > 0) {
+            const sortedKeys = Array.from(allMonthKeys).sort();
+            const [year, month] = sortedKeys[0].split('-').map(Number);
+            data.selectedYear = year;
+            data.selectedMonth = month - 1;
+            yearSelect.value = data.selectedYear;
+        } else {
+            // Default to current date if no data
+            data.selectedYear = new Date().getFullYear();
+            data.selectedMonth = new Date().getMonth();
+            yearSelect.value = data.selectedYear;
+        }
+    }
+
     function renderSelectedProject() {
-        updateCurrentMonthYear();
         const selectedProject = data.projects.find(p => p.id === data.selectedProjectId);
         if (selectedProject) {
+            setStartDateToEarliestData(selectedProject);
+            updateCurrentMonthYear();
             currentProjectName.textContent = selectedProject.name;
             currentProjectNumber.textContent = selectedProject.projectNumber;
             const totalBudget = selectedProject.budgetLines.reduce((sum, line) => sum + line.amount, 0);
@@ -550,6 +572,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     projectSelect.addEventListener('change', () => {
         data.selectedProjectId = parseInt(projectSelect.value);
+        const selectedProject = data.projects.find(p => p.id === data.selectedProjectId);
+        if (selectedProject) {
+            setStartDateToEarliestData(selectedProject);
+        }
         renderSelectedProject();
     });
 
