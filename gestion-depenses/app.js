@@ -131,7 +131,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         data.projects = projects;
-        if (data.projects.length > 0) {
+        const selectedProjectExists = data.projects.some(p => p.id === data.selectedProjectId);
+        if (!selectedProjectExists && data.projects.length > 0) {
             data.selectedProjectId = data.projects[0].id;
         }
         renderProjects();
