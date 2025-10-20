@@ -2,23 +2,25 @@ body {
       margin: 0;
       padding: 0;
       font-family: Arial, sans-serif;
-      background-color: #2c2c2c;
-      color: white;
+      background-color: #ffffff;
+      color: #004990;
     }
 
     .highlighted {
-      background-color: #f0e68c;
+      background-color: #ed1b2d;
+      color: #ffffff;
     }    
 
     .sticky-container {
       position: sticky;
       top: 0;
-      background-color: #2c2c2c;
+      background-color: #ffffff;
       padding: 20px;
       display: flex;
       align-items: flex-start;
       z-index: 1000;
       box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+      border-bottom: 1px solid #ed1b2d;
     }
 
     .dropdown-container {
@@ -37,6 +39,9 @@ body {
       width: 200px;
       padding: 8px;
       margin-bottom: 20px;
+      background-color: #ffffff;
+      color: #004990;
+      border: 1px solid #ed1b2d;
     }
 
     table {
@@ -44,23 +49,23 @@ body {
       max-width: 800px;
       border-collapse: collapse;
       margin-top: 0px;
-      background-color: #fff;
+      background-color: #ffffff;
     }
 
     th,
     td {
       padding: 10px;
-      border: 1px solid #ddd;
+      border: 1px solid #ed1b2d;
       text-align: left;
     }
 
     th {
-      background-color: #333;
-      color: white;
+      background-color: #004990;
+      color: #ffffff;
     }
 
     td {
-      color: black;
+      color: #004990;
     }
 
     input[type="date"] {
@@ -72,9 +77,11 @@ body {
       width: 300px;
       box-sizing: border-box;
       padding-right: 10px;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='white' viewBox='0 0 30 30'%3E%3Cpath d='M19 4h-1V2h-2v2H8V2H6v2H5C3.9 4 3 4.9 3 6v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z'/%3E%3C/svg%3E");
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='%23004990' viewBox='0 0 30 30'%3E%3Cpath d='M19 4h-1V2h-2v2H8V2H6v2H5C3.9 4 3 4.9 3 6v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z'/%3E%3C/svg%3E");
       background-repeat: no-repeat;
       background-position: right 2px center;
+      border: 1px solid #ed1b2d;
+      color: #004990;
     }
     
     input[type="date"]::-webkit-calendar-picker-indicator {
@@ -91,7 +98,7 @@ body {
     #dataTable thead {
       position: sticky;
       top: 0;
-      background-color: #333;
+      background-color: #004990;
       z-index: 1;
     }
 
@@ -110,18 +117,22 @@ body {
     .add-form {
       margin-top: 10px;
       padding: 10px;
-      background-color: #f4f4f4;
-      color: black;
+      background-color: #ffffff;
+      color: #004990;
     }
 
     .add-form input {
       margin-right: 10px;
       padding: 5px;
+      border: 1px solid #ed1b2d;
     }
 
     .add-form button {
       padding: 5px 10px;
       cursor: pointer;
+      background-color: #004990;
+      color: #ffffff;
+      border: none;
     }
 
     #firstColumnDropdown {
@@ -132,9 +143,9 @@ body {
     .context-menu {
       display: none;
       position: absolute;
-      background-color: #333;
-      color: white;
-      border: 1px solid #ddd;
+      background-color: #ffffff;
+      color: #004990;
+      border: 1px solid #ed1b2d;
       z-index: 10000;
       padding: 10px;
       box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
@@ -144,9 +155,9 @@ body {
     dialog {
       width: 400px;
       padding: 20px;
-      background-color: #2c2c2c;
-      color: white;
-      border: 1px solid #444;
+      background-color: #ffffff;
+      color: #004990;
+      border: 1px solid #ed1b2d;
       border-radius: 5px;
     }
 
@@ -164,9 +175,9 @@ body {
       width: 100%;
       padding: 8px;
       margin-bottom: 10px;
-      background-color: #444;
-      border: 1px solid #666;
-      color: white;
+      background-color: #ffffff;
+      border: 1px solid #ed1b2d;
+      color: #004990;
     }
 
     dialog textarea {
@@ -183,18 +194,18 @@ body {
 
     dialog button {
       padding: 8px 16px;
-      background-color: #666;
+      background-color: #004990;
       border: none;
-      color: white;
+      color: #ffffff;
       cursor: pointer;
     }
 
     dialog button[type="submit"] {
-      background-color: #4CAF50;
+      background-color: #004990;
     }
 
     dialog button[type="button"] {
-      background-color: #666;
+      background-color: #ed1b2d;
     }
 
     dialog button:hover {
@@ -205,7 +216,7 @@ body {
       display: block;
       background: none;
       border: none;
-      color: white;
+      color: #004990;
       cursor: pointer;
       padding: 5px;
       width: 100%;
@@ -213,7 +224,8 @@ body {
     }
 
     .context-menu button:hover {
-      background-color: #444;
+      background-color: #004990;
+      color: #ffffff;
     }
 
     #emetteurDropdown {
@@ -222,10 +234,10 @@ body {
       max-height: 200px; /* Rend la liste déroulable verticalement */
       overflow-y: auto; /* Active le défilement vertical */
       overflow-x: hidden; /* Empêche tout défilement horizontal */
-      border: 1px solid #ddd;
+      border: 1px solid #ed1b2d;
       padding: 5px;
-      background-color: #2c2c2c;
-      color: white;
+      background-color: #ffffff;
+      color: #004990;
       border-radius: 4px;
       font-size: 0.95em; /* Augmente légèrement la taille du texte */
       box-sizing: border-box; /* Assure que padding et bordure sont inclus */
@@ -237,10 +249,10 @@ body {
       max-height: 200px; /* Hauteur fixe pour la liste déroulable */
       overflow-y: auto;
       overflow-x: hidden;
-      border: 1px solid #ddd;
+      border: 1px solid #ed1b2d;
       padding: 5px;
-      background-color: #2c2c2c;
-      color: white;
+      background-color: #ffffff;
+      color: #004990;
       border-radius: 4px;
       font-size: 0.95em;
       box-sizing: border-box;
@@ -258,11 +270,11 @@ body {
     
     /* Alternance des couleurs */
     .emetteur-item:nth-child(odd) {
-      background-color: #2c2c2c;
+      background-color: #ffffff;
     }
     
     .emetteur-item:nth-child(even) {
-      background-color: #3c3c3c;
+      background-color: #f2f8fc;
     }
     
     .emetteur-item input[type="checkbox"] {

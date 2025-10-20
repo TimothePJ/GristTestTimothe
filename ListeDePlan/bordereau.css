@@ -6,7 +6,7 @@ body {
 .sticky-container {
   position: sticky;
   top: 0;
-  background-color: #32323f;
+  background-color: #ffffff;
   padding: 10px 0;
   z-index: 1000;
   display: flex;
@@ -46,13 +46,14 @@ body {
 }
 
 #invoiceTable th, #invoiceTable td {
-  border: 1px solid #70707d;
+  border: 1px solid #ed1b2d;
   padding: 8px;
   text-align: left;
 }
 
 #invoiceTable th {
-  background-color: #32323f;
+  background-color: #004990;
+  color: #ffffff;
 }
 
 #invoiceTable select, #invoiceTable input {
@@ -60,8 +61,8 @@ body {
 }
 
 .delete-btn {
-  background-color: #f44336;
-  color: white;
+  background-color: #ed1b2d;
+  color: #ffffff;
   border: none;
   padding: 5px 10px;
   cursor: pointer;

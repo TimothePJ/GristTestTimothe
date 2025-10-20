@@ -12,8 +12,8 @@
 
 #task-list {
   width: 350px;
-  background-color: #2c2c2c;
-  border-right: 2px solid #555;
+  background-color: #ffffff;
+  border-right: 2px solid #ed1b2d;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -21,19 +21,19 @@
 
 .header-row {
   display: flex;
-  background-color: #444;
+  background-color: #004990;
   font-weight: bold;
   font-size: 16px;
   height: 59px;
-  border-bottom: 1px solid #666;
-  color: #fff;
+  border-bottom: 1px solid #ed1b2d;
+  color: #ffffff;
 }
 
 .header-cell {
   flex: 1;
   text-align: center;
   line-height: 59px;
-  border-right: 1px solid #555;
+  border-right: 1px solid #ed1b2d;
 }
 
 #task-rows {
@@ -43,10 +43,10 @@
 .task-row {
   display: flex;
   height: 55px;
-  border-bottom: 1px solid #444;
+  border-bottom: 1px solid #ed1b2d;
   font-size: 14px;
-  background-color: #2c2c2c;
-  color: #fff;
+  background-color: #ffffff;
+  color: #004990;
 }
 
 .task-cell {
@@ -57,7 +57,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #fff;
+  color: #004990;
 }
 
 #gantt-right {
@@ -77,10 +77,10 @@
 #gantt-fake-axis {
   display: flex;
   background-color: #ffffff;
-  color: #222;
+  color: #004990;
   font-size: 12px;
   height: 30px;
-  border-bottom: 1px solid #ccc;
+  border-bottom: 1px solid #ed1b2d;
   white-space: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
@@ -92,5 +92,5 @@
   text-align: center;
   padding: 4px 6px;
   font-family: Arial;
-  border-right: 1px solid #eee;
+  border-right: 1px solid #ed1b2d;
 }
