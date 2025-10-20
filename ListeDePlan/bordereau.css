@@ -1,6 +1,9 @@
 body {
   font-family: sans-serif;
-  margin: 20px;
+  margin: 0;
+  padding: 20px;
+  background-color: #ffffff;
+  color: #004990;
 }
 
 .sticky-container {
