@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <title>Gestion Équipe</title>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <div class="table-container">
+    <table id="dataTable">
+      <thead>
+        <tr id="tableHeader">
+          <th>Prénom</th>
+          <th>Nom</th>
+          <th>Email</th>
+          <th>Service</th>
+          <th>IdTrefle</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+
+  <div id="contextMenu" class="context-menu">
+    <button id="addRowOption">Ajouter une ligne</button>
+    <button id="editOption">Modifier</button>
+    <button id="deleteOption">Supprimer</button>
+  </div>
+
+  <dialog id="addRowDialog">
+    <form method="dialog">
+      <h3>Ajouter un nouveau membre</h3>
+      <label for="prenom">Prénom:</label>
+      <input type="text" id="prenom" name="prenom" required>
+      <label for="nom">Nom:</label>
+      <input type="text" id="nom" name="nom" required>
+      <label for="email">Email:</label>
+      <input type="email" id="email" name="email" required>
+      <label for="service">Service:</label>
+      <input type="text" id="service" name="service" required>
+      <label for="idTrefle">IdTrefle:</label>
+      <input type="text" id="idTrefle" name="idTrefle">
+      <div class="dialog-buttons">
+        <button type="submit" id="confirmAddRowButton">Ajouter</button>
+        <button type="button" id="cancelAddRowButton">Annuler</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="editRowDialog">
+    <form method="dialog">
+      <h3>Modifier le membre</h3>
+      <label for="editPrenom">Prénom:</label>
+      <input type="text" id="editPrenom" name="editPrenom" required>
+      <label for="editNom">Nom:</label>
+      <input type="text" id="editNom" name="editNom" required>
+      <label for="editEmail">Email:</label>
+      <input type="email" id="editEmail" name="editEmail" required>
+      <label for="editService">Service:</label>
+      <input type="text" id="editService" name="editService" required>
+      <label for="editIdTrefle">IdTrefle:</label>
+      <input type="text" id="editIdTrefle" name="editIdTrefle">
+      <div class="dialog-buttons">
+        <button type="submit">Enregistrer</button>
+        <button type="button" onclick="document.getElementById('editRowDialog').close()">Annuler</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+
+</html>
