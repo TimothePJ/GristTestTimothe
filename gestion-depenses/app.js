@@ -37,10 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const addWorkerBtn = document.getElementById('add-worker-btn');
     const addWorkerForm = document.getElementById('add-worker-form');
-    const workerRoleInput = document.getElementById('worker-role');
-    const workerNameInput = document.getElementById('worker-name');
-    const workerRolesList = document.getElementById('worker-roles-list');
-    const workerNamesList = document.getElementById('worker-names-list');
+    const workerNameSelect = document.getElementById('worker-name-select');
     const saveWorkerBtn = document.getElementById('save-worker-btn');
     const spendingChartCanvas = document.getElementById('spending-chart');
 
@@ -67,6 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const budgetData = await grist.docApi.fetchTable("Budget");
         const teamData = await grist.docApi.fetchTable("ProjectTeam");
         const timesheetData = await grist.docApi.fetchTable("Timesheet");
+        const allTeamsData = await grist.docApi.fetchTable("Team");
 
         const projects = projectsData.id.map((id, i) => ({
             id: id,
@@ -136,25 +134,22 @@ document.addEventListener('DOMContentLoaded', () => {
             data.selectedProjectId = data.projects[0].id;
         }
         renderProjects();
-        populateWorkerDatalists(teamData);
+        populateWorkerDatalists(allTeamsData);
     }
 
-    function populateWorkerDatalists(teamData) {
-        const roles = new Set(teamData.Role);
-        const names = new Set(teamData.Name);
+    function populateWorkerDatalists(allTeamsData) {
+        workerNameSelect.innerHTML = '';
+        const teamMembers = allTeamsData.id.map((id, index) => ({
+            id: id,
+            Prenom: allTeamsData.Prenom[index],
+            Nom: allTeamsData.Nom[index]
+        }));
 
-        workerRolesList.innerHTML = '';
-        roles.forEach(role => {
+        teamMembers.forEach(member => {
             const option = document.createElement('option');
-            option.value = role;
-            workerRolesList.appendChild(option);
-        });
-
-        workerNamesList.innerHTML = '';
-        names.forEach(name => {
-            const option = document.createElement('option');
-            option.value = name;
-            workerNamesList.appendChild(option);
+            option.value = member.id;
+            option.textContent = `${member.Prenom} ${member.Nom}`;
+            workerNameSelect.appendChild(option);
         });
     }
 
@@ -614,16 +609,26 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     saveWorkerBtn.addEventListener('click', async () => {
-        const role = workerRoleInput.value.trim();
-        const name = workerNameInput.value.trim();
+        const selectedTeamMemberId = parseInt(workerNameSelect.value, 10);
+        const allTeamsData = await grist.docApi.fetchTable("Team");
+        
+        const teamMembers = allTeamsData.id.map((id, index) => ({
+            id: id,
+            Prenom: allTeamsData.Prenom[index],
+            Nom: allTeamsData.Nom[index],
+            Role: allTeamsData.Role[index]
+        }));
+
+        const selectedTeamMember = teamMembers.find(m => m.id === selectedTeamMemberId);
         const selectedProject = data.projects.find(p => p.id === data.selectedProjectId);
-        if (role && name && selectedProject) {
+
+        if (selectedTeamMember && selectedProject) {
+            const name = `${selectedTeamMember.Prenom} ${selectedTeamMember.Nom}`;
+            const role = selectedTeamMember.Role;
             const actions = [
                 ["AddRecord", "ProjectTeam", null, { NumeroProjet: selectedProject.projectNumber, Role: role, Name: name, Daily_Rate: 0 }]
             ];
             await grist.docApi.applyUserActions(actions);
-            workerRoleInput.value = '';
-            workerNameInput.value = '';
             addWorkerForm.style.display = 'none';
             loadGristData();
         }

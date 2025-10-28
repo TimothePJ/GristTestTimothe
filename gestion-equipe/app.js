@@ -12,6 +12,7 @@ function populateTable() {
       <td>${record.Nom || ''}</td>
       <td>${record.Email || ''}</td>
       <td>${record.Service || ''}</td>
+      <td>${record.Role || ''}</td>
       <td>${record.IdTrefle || ''}</td>
     `;
     tableBody.appendChild(row);
@@ -73,6 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
       Nom: formData.get('nom'),
       Email: formData.get('email'),
       Service: formData.get('service'),
+      Role: formData.get('role'),
       IdTrefle: formData.get('idTrefle'),
     };
     try {
@@ -91,6 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('editNom').value = record.Nom || '';
       document.getElementById('editEmail').value = record.Email || '';
       document.getElementById('editService').value = record.Service || '';
+      document.getElementById('editRole').value = record.Role || '';
       document.getElementById('editIdTrefle').value = record.IdTrefle || '';
       editRowDialog.showModal();
     }
@@ -106,6 +109,7 @@ document.addEventListener('DOMContentLoaded', () => {
       Nom: formData.get('editNom'),
       Email: formData.get('editEmail'),
       Service: formData.get('editService'),
+      Role: formData.get('editRole'),
       IdTrefle: formData.get('editIdTrefle'),
     };
     try {
