@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Création de Projet</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="wizard-container">
+        <h1>Créer un nouveau projet</h1>
+
+        <div class="wizard-step" id="step-1">
+            <h2>Étape 1: Détails du Projet</h2>
+            <input type="text" id="project-name" placeholder="Nom du projet" required>
+            <input type="text" id="project-number" placeholder="Numéro du projet" required>
+            <button id="next-to-step-2">Suivant</button>
+        </div>
+
+        <div class="wizard-step" id="step-2" style="display: none;">
+            <h2>Étape 2: Lignes Budgétaires</h2>
+            <div id="budget-lines-container"></div>
+            <div class="budget-line-form">
+                <input type="text" id="budget-chapter" placeholder="Chapitre">
+                <input type="number" id="budget-amount" placeholder="Montant">
+                <button id="add-budget-line-btn">Ajouter Ligne</button>
+            </div>
+            <button id="prev-to-step-1">Précédent</button>
+            <button id="next-to-step-3">Suivant</button>
+        </div>
+
+        <div class="wizard-step" id="step-3" style="display: none;">
+            <h2>Étape 3: Sélection de l'Équipe</h2>
+            <div id="team-selection-container"></div>
+            <button id="prev-to-step-2">Précédent</button>
+            <button id="next-to-step-4">Suivant</button>
+        </div>
+
+        <div class="wizard-step" id="step-4" style="display: none;">
+            <h2>Étape 4: Révision et Création</h2>
+            <div id="review-container"></div>
+            <button id="prev-to-step-3">Précédent</button>
+            <button id="create-project-btn">Créer le Projet</button>
+        </div>
+    </div>
+
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
