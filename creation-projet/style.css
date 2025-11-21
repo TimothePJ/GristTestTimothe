@@ -78,6 +78,29 @@ button:hover {
     margin-bottom: 5px;
 }
 
+#team-selection-container h3 {
+    margin-top: 20px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid #004990;
+    padding-bottom: 5px;
+}
+
+.role-group {
+    padding-left: 20px;
+}
+
 #review-container {
     line-height: 1.6;
+}
+
+#review-container h4 {
+    margin-top: 15px;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+#review-container ul {
+    list-style-type: none;
+    padding-left: 20px;
+    margin-top: 0;
 }

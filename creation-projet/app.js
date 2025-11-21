@@ -79,14 +79,33 @@ document.addEventListener('DOMContentLoaded', () => {
             Role: teamData.Role[index]
         }));
 
+        const groupedByRole = teamMembers.reduce((acc, member) => {
+            const role = member.Role || 'Non assigné';
+            if (!acc[role]) {
+                acc[role] = [];
+            }
+            acc[role].push(member);
+            return acc;
+        }, {});
+
         const teamSelectionContainer = document.getElementById('team-selection-container');
         teamSelectionContainer.innerHTML = '';
-        teamMembers.forEach(member => {
-            const label = document.createElement('label');
-            label.classList.add('team-member');
-            label.innerHTML = `<input type="checkbox" value="${member.id}"> ${member.Prenom} ${member.Nom}`;
-            teamSelectionContainer.appendChild(label);
-        });
+
+        for (const role in groupedByRole) {
+            const roleTitle = document.createElement('h3');
+            roleTitle.textContent = role;
+            teamSelectionContainer.appendChild(roleTitle);
+
+            const roleContainer = document.createElement('div');
+            roleContainer.classList.add('role-group');
+            groupedByRole[role].forEach(member => {
+                const label = document.createElement('label');
+                label.classList.add('team-member');
+                label.innerHTML = `<input type="checkbox" value="${member.id}"> ${member.Prenom} ${member.Nom}`;
+                roleContainer.appendChild(label);
+            });
+            teamSelectionContainer.appendChild(roleContainer);
+        }
     }
 
     // Review
@@ -95,11 +114,24 @@ document.addEventListener('DOMContentLoaded', () => {
         let budgetLinesHtml = projectData.budgetLines.map(line => `<p>${line.chapter}: ${line.amount.toFixed(2)} €</p>`).join('');
         
         const selectedTeamMembers = teamMembers.filter(member => projectData.team.includes(member.id));
-        let teamHtml = '<ul>';
-        selectedTeamMembers.forEach(member => {
-            teamHtml += `<li>${member.Prenom} ${member.Nom}</li>`;
-        });
-        teamHtml += '</ul>';
+        
+        const groupedByRole = selectedTeamMembers.reduce((acc, member) => {
+            const role = member.Role || 'Non assigné';
+            if (!acc[role]) {
+                acc[role] = [];
+            }
+            acc[role].push(member);
+            return acc;
+        }, {});
+
+        let teamHtml = '';
+        for (const role in groupedByRole) {
+            teamHtml += `<h4>${role}</h4><ul>`;
+            groupedByRole[role].forEach(member => {
+                teamHtml += `<li>${member.Prenom} ${member.Nom}</li>`;
+            });
+            teamHtml += '</ul>';
+        }
 
         reviewContainer.innerHTML = `
             <h3>Détails du Projet</h3>
