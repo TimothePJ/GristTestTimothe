@@ -58,7 +58,9 @@ async function updateDashboard() {
     const ventilationData = await grist.docApi.fetchTable('Ventilation');
     const devisMap = {};
     for (let i = 0; i < ventilationData.id.length; i++) {
-        devisMap[ventilationData.Type_document[i]] = ventilationData.Budget[i];
+        if (ventilationData.gristHelper_Display[i] === selectedProject) {
+            devisMap[ventilationData.Type_document[i]] = ventilationData.Budget[i];
+        }
     }
 
     chartContainer.style.display = 'block';

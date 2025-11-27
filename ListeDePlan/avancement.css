@@ -1,14 +1,17 @@
 body {
   font-family: sans-serif;
-  margin: 20px;
+  margin: 0;
+  padding: 20px;
+  background-color: #ffffff;
+  color: #004990;
 }
 
 .sticky-container {
   position: sticky;
   top: 0;
-  background-color: #32323f;
+  background-color: #ffffff;
   padding: 10px 0;
-  border-bottom: 1px solid #ccc;
+  border-bottom: 1px solid #ed1b2d;
   margin-bottom: 20px;
 }
 
@@ -31,8 +34,8 @@ body {
 #average-indices-container {
   flex: 1;
   padding: 15px;
-  background-color: #a5a5b1;
-  border: 1px solid #ddd;
+  background-color: #ffffff;
+  border: 1px solid #ed1b2d;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   align-self: flex-start; /* Aligner en haut */
@@ -43,17 +46,17 @@ body {
 #average-indices-container h3 {
   margin-top: 0;
   font-size: 1.2em;
-  color: #333;
+  color: #004990;
 }
 
 #average-indices-container p {
   font-size: 1em;
-  color: #555;
+  color: #004990;
   margin: 10px 0;
 }
 
 #average-indices-container strong {
-  color: #000;
+  color: #ed1b2d;
 }
 
 .summary-table {
@@ -63,13 +66,14 @@ body {
 }
 
 .summary-table th, .summary-table td {
-  border: 1px solid #ddd;
+  border: 1px solid #ed1b2d;
   padding: 8px;
   text-align: left;
 }
 
 .summary-table th {
-  background-color: #32323f;
+  background-color: #004990;
+  color: #ffffff;
 }
 
 .summary-table td:not(:first-child) {
@@ -78,5 +82,6 @@ body {
 
 .total-row {
   font-weight: bold;
-  background-color: #32323f;
+  background-color: #004990;
+  color: #ffffff;
 }

@@ -1,0 +1,106 @@
+body {
+  font-family: sans-serif;
+  background-color: #ffffff;
+  color: #000000;
+  margin: 10px;
+}
+
+.wizard-container {
+    width: 100%;
+    max-width: 800px;
+    background-color: #f0f0f0;
+    padding: 20px;
+    border-radius: 8px;
+    margin: auto;
+    border: 1px solid #004990;
+}
+
+h1, h2 {
+    text-align: center;
+}
+
+.wizard-step {
+    padding: 20px;
+    border-top: 1px solid #004990;
+}
+
+input[type="text"],
+input[type="number"] {
+    width: 100%;
+    padding: 8px;
+    margin-bottom: 10px;
+    background-color: #ffffff;
+    color: #000000;
+    border: 1px solid #004990;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+button {
+    cursor: pointer;
+    background-color: #004990;
+    color: #ffffff;
+    border: 1px solid #004990;
+    font-weight: bold;
+    padding: 10px;
+}
+
+button:hover {
+    background-color: #003366;
+}
+
+#add-budget-line-btn {
+    background-color: #ed1b2d;
+    border-color: #ed1b2d;
+}
+
+#add-budget-line-btn:hover {
+    background-color: #c41221;
+}
+
+.budget-line-form {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+#budget-lines-container p {
+    background-color: #e0e0e0;
+    padding: 10px;
+    border-radius: 4px;
+    display: flex;
+    justify-content: space-between;
+    border-left: 3px solid #ed1b2d;
+}
+
+#team-selection-container .team-member {
+    display: block;
+    margin-bottom: 5px;
+}
+
+#team-selection-container h3 {
+    margin-top: 20px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid #004990;
+    padding-bottom: 5px;
+}
+
+.role-group {
+    padding-left: 20px;
+}
+
+#review-container {
+    line-height: 1.6;
+}
+
+#review-container h4 {
+    margin-top: 15px;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+#review-container ul {
+    list-style-type: none;
+    padding-left: 20px;
+    margin-top: 0;
+}

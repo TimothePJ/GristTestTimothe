@@ -1,7 +1,7 @@
 .context-menu {
     position: absolute;
-    background-color: #333;
-    border: 1px solid #555;
+    background-color: #ffffff;
+    border: 1px solid #ed1b2d;
     z-index: 10000;
     box-shadow: 0 0 5px rgba(0,0,0,0.5);
   }
@@ -9,10 +9,10 @@
   .context-menu-item {
     padding: 8px 12px;
     cursor: pointer;
-    color: #fff;
+    color: #004990;
   }
   
   .context-menu-item:hover {
-    background-color: #444;
+    background-color: #004990;
+    color: #ffffff;
   }
-  

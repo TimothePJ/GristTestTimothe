@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestion des Dépenses de Projet</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="header">
+        <h1>Gestion des Dépenses de Projet</h1>
+        <div class="project-selection">
+            <h2>Projets</h2>
+            <select id="project-select"></select>
+            <button id="add-project-btn">Ajouter un projet</button>
+            <div id="add-project-form" style="display: none;">
+                <input type="text" id="project-name" placeholder="Nom du projet">
+                <input type="text" id="project-number" placeholder="Numéro du projet">
+                <div id="budget-lines-container"></div>
+                <input type="text" id="budget-chapter" placeholder="Chapitre">
+                <input type="number" id="budget-amount" placeholder="Montant">
+                <button id="add-budget-line-btn">Ajouter une ligne de budget</button>
+                <button id="save-project-btn">Enregistrer</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="main-content">
+            <div class="project-header">
+                <div>
+                    <p><strong>Numéro:</strong> <span id="current-project-number"></span></p>
+                    <h2 id="current-project-name"></h2>
+                </div>
+                <div>
+                    <p>Budget Total: <span id="total-project-budget"></span></p>
+                    <div id="current-project-budget-breakdown"></div>
+                    <button id="edit-budget-btn">Modifier le budget</button>
+                </div>
+            </div>
+
+            <div class="kpi-report">
+                <h3>Rapport KPI</h3>
+                <p>Budget Total: <span id="kpi-total-budget"></span></p>
+                <p>Total Dépense: <span id="kpi-total-spending"></span></p>
+                <p>Reste Budget: <span id="kpi-remaining-budget"></span></p>
+                <p>Pourcentage Restant: <span id="kpi-remaining-percentage"></span></p>
+            </div>
+
+            <div class="toolbar">
+                <label for="year-select">Année:</label>
+                <select id="year-select"></select>
+                <button id="prev-month-btn"><</button>
+                <button id="next-month-btn">></button>
+                <span id="current-month-year"></span>
+                <label for="month-span-input">Mois à afficher:</label>
+                <input type="number" id="month-span-input" value="6" min="1" max="24">
+            </div>
+
+            <div class="table-header">
+                <h3>Prévisionnel - Plan de Charge</h3>
+                <div>
+                    <button class="prev-month-table-btn"><</button>
+                    <button class="next-month-table-btn">></button>
+                </div>
+            </div>
+            <table id="charge-plan-table">
+                <thead>
+                    <tr>
+                        <th>Nom</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <button id="add-worker-btn">Ajouter un travailleur</button>
+            <div id="add-worker-form" style="display: none;">
+                <select id="worker-name-select"></select>
+                <button id="save-worker-btn">Enregistrer</button>
+            </div>
+
+            <div class="table-header">
+                <h3>Prévisionnel - Dépense</h3>
+                <div>
+                    <button class="prev-month-table-btn"><</button>
+                    <button class="next-month-table-btn">></button>
+                </div>
+            </div>
+            <table id="expense-table">
+                <thead>
+                    <tr>
+                        <th>Nom</th>
+                        <th>Dépense journalière</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+
+            <div class="table-header">
+                <h3>Dépenses Réelles</h3>
+                <div>
+                    <button class="prev-month-table-btn"><</button>
+                    <button class="next-month-table-btn">></button>
+                </div>
+            </div>
+            <table id="real-expense-table">
+                <thead>
+                    <tr>
+                        <th>Nom</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+
+            <h3>Graphique des Dépenses</h3>
+            <canvas id="spending-chart"></canvas>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <script src="app.js"></script>
+
+    <div id="edit-budget-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Modifier le Budget</h2>
+            <div id="edit-budget-lines-container"></div>
+            <input type="text" id="edit-budget-chapter" placeholder="Nouveau chapitre">
+            <input type="number" id="edit-budget-amount" placeholder="Nouveau montant">
+            <button id="add-edit-budget-line-btn">Ajouter</button>
+            <button id="save-edited-budget-btn">Enregistrer</button>
+            <button id="cancel-edit-budget-btn">Annuler</button>
+        </div>
+    </div>
+</body>
+</html>
