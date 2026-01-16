@@ -6,7 +6,9 @@ document.addEventListener('DOMContentLoaded', () => {
         name: '',
         number: '',
         budgetLines: [],
-        team: []
+        team: [],
+        documents: [],
+        emitters: []
     };
 
     function showStep(stepNumber) {
@@ -29,8 +31,34 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    const projectNameInput = document.getElementById('project-name');
+    const projectNumberInput = document.getElementById('project-number');
+
+    if (projectNameInput && projectNumberInput) {
+        projectNameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+            e.preventDefault();
+            projectNumberInput.focus();
+            projectNumberInput.select();
+            }
+        });
+    }
+
     document.getElementById('prev-to-step-1').addEventListener('click', () => showStep(1));
-    document.getElementById('next-to-step-3').addEventListener('click', () => showStep(3));
+    document.getElementById('next-to-step-3').addEventListener('click', () => {
+        const chapter = budgetChapterInput.value.trim();
+        const amount = parseFloat(budgetAmountInput.value);
+
+        if (chapter && !isNaN(amount)) {
+            projectData.budgetLines.push({ chapter, amount });
+            renderBudgetLines();
+            budgetChapterInput.value = '';
+            budgetAmountInput.value = '';
+        }
+
+        showStep(3);
+    });
+
     document.getElementById('prev-to-step-2').addEventListener('click', () => showStep(2));
     document.getElementById('next-to-step-4').addEventListener('click', () => {
         const selectedTeamMembers = [];
@@ -38,16 +66,51 @@ document.addEventListener('DOMContentLoaded', () => {
             selectedTeamMembers.push(parseInt(checkbox.value, 10));
         });
         projectData.team = selectedTeamMembers;
-        renderReview();
+
+        // On va à la NOUVELLE étape 4 (pas de review ici)
         showStep(4);
     });
+
+    // Le bouton prev-to-step-3 est maintenant dans la NOUVELLE étape 4
     document.getElementById('prev-to-step-3').addEventListener('click', () => showStep(3));
+
+    document.getElementById('next-to-step-5').addEventListener('click', () => {
+    projectData.documents = Array.from(document.querySelectorAll('input[name="project-docs"]:checked'))
+        .map(i => i.value);
+
+    projectData.emitters = Array.from(document.querySelectorAll('input[name="project-emitters"]:checked'))
+        .map(i => i.value);
+
+    if (projectData.documents.length === 0) {
+        alert("Sélectionne au moins 1 document (RDC, R+1, ...).");
+        return;
+    }
+    if (projectData.emitters.length === 0) {
+        alert("Sélectionne au moins 1 émetteur.");
+        return;
+    }
+
+    renderReview();
+    showStep(5);
+    });
+
+    document.getElementById('prev-to-step-4').addEventListener('click', () => showStep(4));
 
     // Budget Lines
     const addBudgetLineBtn = document.getElementById('add-budget-line-btn');
     const budgetLinesContainer = document.getElementById('budget-lines-container');
     const budgetChapterInput = document.getElementById('budget-chapter');
     const budgetAmountInput = document.getElementById('budget-amount');
+
+    if (budgetChapterInput && budgetAmountInput) {
+        budgetChapterInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                budgetAmountInput.focus();
+                budgetAmountInput.select();
+            }
+        });
+    }
 
     addBudgetLineBtn.addEventListener('click', () => {
         const chapter = budgetChapterInput.value.trim();
@@ -62,10 +125,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderBudgetLines() {
         budgetLinesContainer.innerHTML = '';
+
         projectData.budgetLines.forEach((line, index) => {
-            const lineEl = document.createElement('p');
-            lineEl.textContent = `${line.chapter}: ${line.amount.toFixed(2)} €`;
-            budgetLinesContainer.appendChild(lineEl);
+            const row = document.createElement('div');
+            row.className = 'budget-line';
+
+            const text = document.createElement('span');
+            text.className = 'budget-line-text';
+            text.textContent = `${line.chapter}: ${line.amount.toFixed(2)} €`;
+
+            const del = document.createElement('button');
+            del.className = 'budget-line-delete';
+            del.type = 'button';
+            del.title = 'Supprimer cette ligne';
+            del.textContent = '✖';
+
+            del.addEventListener('click', () => {
+            projectData.budgetLines.splice(index, 1);
+            renderBudgetLines();
+            });
+
+            row.appendChild(text);
+            row.appendChild(del);
+            budgetLinesContainer.appendChild(row);
         });
     }
 
@@ -108,18 +190,52 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Review
+    async function getTeamService() {
+        try {
+            const teamTable = await grist.docApi.fetchTable('Team');
+
+            // Cas 1: Grist renvoie un tableau d'objets
+            if (Array.isArray(teamTable) && teamTable.length > 0) {
+            return teamTable[0].Service || "";
+            }
+
+            // Cas 2: Grist renvoie un objet de colonnes
+            if (teamTable && Array.isArray(teamTable.Service) && teamTable.Service.length > 0) {
+            return teamTable.Service[0] || "";
+            }
+
+            return "";
+        } catch (error) {
+            console.error("Erreur récupération service depuis Team:", error);
+            return "";
+        }
+    }
+
+
     function renderReview() {
         const reviewContainer = document.getElementById('review-container');
-        let budgetLinesHtml = projectData.budgetLines.map(line => `<p>${line.chapter}: ${line.amount.toFixed(2)} €</p>`).join('');
-        
-        const selectedTeamMembers = teamMembers.filter(member => projectData.team.includes(member.id));
-        
+
+        const docsHtml = (projectData.documents && projectData.documents.length)
+            ? projectData.documents.join(', ')
+            : '-';
+
+        const emittersHtml = (projectData.emitters && projectData.emitters.length)
+            ? projectData.emitters.join(', ')
+            : '-';
+
+        // Budget
+        const budgetLinesHtml = (projectData.budgetLines || [])
+            .map(line => `<p>${line.chapter}: ${Number(line.amount).toFixed(2)} €</p>`)
+            .join('');
+
+        // Team
+        const selectedTeamMembers = (teamMembers || []).filter(member =>
+            (projectData.team || []).includes(member.id)
+        );
+
         const groupedByRole = selectedTeamMembers.reduce((acc, member) => {
             const role = member.Role || 'Non assigné';
-            if (!acc[role]) {
-                acc[role] = [];
-            }
+            if (!acc[role]) acc[role] = [];
             acc[role].push(member);
             return acc;
         }, {});
@@ -128,20 +244,79 @@ document.addEventListener('DOMContentLoaded', () => {
         for (const role in groupedByRole) {
             teamHtml += `<h4>${role}</h4><ul>`;
             groupedByRole[role].forEach(member => {
-                teamHtml += `<li>${member.Prenom} ${member.Nom}</li>`;
+            teamHtml += `<li>${member.Prenom} ${member.Nom}</li>`;
             });
-            teamHtml += '</ul>';
+            teamHtml += `</ul>`;
         }
 
         reviewContainer.innerHTML = `
             <h3>Détails du Projet</h3>
             <p><strong>Nom:</strong> ${projectData.name}</p>
             <p><strong>Numéro:</strong> ${projectData.number}</p>
+
             <h3>Lignes Budgétaires</h3>
-            ${budgetLinesHtml}
+            ${budgetLinesHtml || '<p>-</p>'}
+
             <h3>Équipe</h3>
-            ${teamHtml}
+            ${teamHtml || '<p>-</p>'}
+
+            <h3>Documents</h3>
+            <p>${docsHtml}</p>
+
+            <h3>Émetteurs</h3>
+            <p>${emittersHtml}</p>
         `;
+    }
+
+    const DOCUMENTS_PRESETS = [
+        "RDC", "RDJ",
+        "SS1", "SS2", "SS3", "SS4",
+        ...Array.from({ length: 10 }, (_, i) => `R+${i + 1}`)
+    ];
+
+    function populateDocumentsSelection() {
+        const container = document.getElementById('documents-selection-container');
+        container.innerHTML = '';
+
+        DOCUMENTS_PRESETS.forEach(doc => {
+            const label = document.createElement('label');
+            label.className = 'checkbox-item';
+            label.innerHTML = `<input type="checkbox" name="project-docs" value="${doc}"> ${doc}`;
+            container.appendChild(label);
+        });
+    }
+
+    async function populateEmittersSelection() {
+        const container = document.getElementById('emitters-selection-container');
+        container.innerHTML = '';
+
+        const emitterTable = await grist.docApi.fetchTable('Emetteurs');
+
+        function normalizeEmitterName(v) {
+            if (v == null) return "";
+            return String(v).trim();
+        }
+
+        const raw = emitterTable.Emetteurs || [];
+
+        const map = new Map();
+        for (const v of raw) {
+            const display = normalizeEmitterName(v);
+            if (!display) continue;
+
+            const key = display.toLowerCase();
+            if (!map.has(key)) map.set(key, display);
+        }
+
+        const emitters = Array.from(map.values())
+            .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+
+        emitters.forEach(em => {
+            const label = document.createElement('label');
+            label.className = 'checkbox-item';
+            label.innerHTML = `<input type="checkbox" name="project-emitters" value="${em}"> ${em}`;
+            container.appendChild(label);
+        });
     }
 
     // Final Save
@@ -149,7 +324,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             // 1. Create Project
             const projectActions = [
-                ["AddRecord", "Projet", null, { Projet: projectData.name, NumeroProjet: projectData.number }]
+                ["AddRecord", "Projets", null, { Nom_de_projet: projectData.name, Numero_de_projet: projectData.number }]
             ];
             await grist.docApi.applyUserActions(projectActions);
 
@@ -172,6 +347,46 @@ document.addEventListener('DOMContentLoaded', () => {
                 await grist.docApi.applyUserActions(teamActions);
             }
 
+            // 4. Create References (documents x emitters)
+            const refTable = await grist.docApi.fetchTable("References");
+            const refCols = new Set(Object.keys(refTable)); // colonnes existantes dans Grist
+
+            const descCol =
+            refCols.has("DescriptionObservations") ? "DescriptionObservations" :
+            (refCols.has("DescriptionObservation") ? "DescriptionObservation" : null);
+
+            const serviceValue = await getTeamService();
+
+            const referencesActions = [];
+            for (const docName of projectData.documents) {
+                for (const emitter of projectData.emitters) {
+                    const row = {
+                    NomProjet: projectData.name,       // nom écrit
+                    NomDocument: docName,
+                    Emetteur: emitter,
+                    Reference: "_",
+                    Indice: "-",
+                    Recu: "1900-01-01",
+                    DateLimite: "1900-01-01",
+                    Bloquant: false,
+                    Archive: false,
+                    Service: serviceValue
+                    };
+                    if (descCol) row[descCol] = "EN ATTENTE";
+
+                    // On ne garde que les champs qui existent vraiment dans la table
+                    for (const key of Object.keys(row)) {
+                    if (!refCols.has(key)) delete row[key];
+                    }
+
+                    referencesActions.push(["AddRecord", "References", null, row]);
+                }
+            }
+
+            if (referencesActions.length > 0) {
+            await grist.docApi.applyUserActions(referencesActions);
+            }
+
             alert('Projet créé avec succès !');
             // Optionally, redirect or clear the form
             window.location.reload();
@@ -183,5 +398,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     grist.ready();
     populateTeamSelection();
+    populateDocumentsSelection();
+    populateEmittersSelection();
     showStep(1);
 });

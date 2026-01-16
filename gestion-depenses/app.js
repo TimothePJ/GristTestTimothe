@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadGristData() {
-        const projectsData = await grist.docApi.fetchTable("Projet");
+        const projectsData = await grist.docApi.fetchTable("Projets");
         const budgetData = await grist.docApi.fetchTable("Budget");
         const teamData = await grist.docApi.fetchTable("ProjectTeam");
         const timesheetData = await grist.docApi.fetchTable("Timesheet");
@@ -68,8 +68,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const projects = projectsData.id.map((id, i) => ({
             id: id,
-            projectNumber: projectsData.NumeroProjet[i],
-            name: projectsData.Projet[i],
+            projectNumber: projectsData.Numero_de_projet[i],
+            name: projectsData.Nom_de_projet[i],
             budgetLines: [],
             workers: []
         }));
@@ -540,7 +540,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const projectNumber = projectNumberInput.value.trim();
         if (name && projectNumber && newProjectBudgetLines.length > 0) {
             const projectActions = [
-                ["AddRecord", "Projet", null, { Projet: name, NumeroProjet: projectNumber }]
+                ["AddRecord", "Projets", null, { Nom_de_projet: name, Numero_de_projet: projectNumber }]
             ];
             await grist.docApi.applyUserActions(projectActions);
 
