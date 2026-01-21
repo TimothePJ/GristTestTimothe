@@ -750,22 +750,6 @@
       dropdown.value = currentSelection || ''; // Conserve l'option sélectionnée ou reste sur "Select an option"
     }
 
-    async function refreshProjectsDropdownFromProjets() {
-      try {
-        const projets = await grist.docApi.fetchTable('Projets');
-
-        // ✅ Colonne "Projet" (comme ton JSON)
-        const values = (projets.Nom_de_projet || [])
-          .map(v => (typeof v === "string" ? v.trim() : v))
-          .filter(Boolean);
-
-        const unique = [...new Set(values)];
-        populateFirstColumnDropdown(unique);
-      } catch (err) {
-        console.error("Erreur chargement Projets pour dropdown:", err);
-      }
-    }
-
     // Réinitialise et désactive la seconde liste si aucun projet n'est sélectionné
     document.getElementById('firstColumnDropdown').addEventListener('change', function () {
       const secondDropdown = document.getElementById('secondColumnListbox');
@@ -1190,7 +1174,7 @@
   
               selectedDocuments.forEach(docName => {
                   const newRow = {
-                      NomProjet: selectedFirstValue,
+                      NomProjet: projectId,
                       NomDocument: docName,
                       Emetteur: emetteur,
                       Reference: reference,
@@ -1204,7 +1188,7 @@
               });
           } else {
               const newRow = {
-                  NomProjet: selectedFirstValue,
+                  NomProjet: projectId,
                   NomDocument: selectedSecondValue,
                   Emetteur: emetteur,
                   Reference: reference,
@@ -1361,7 +1345,8 @@
       } else {
         populateTable()
         // Populate the first dropdown with unique values from 'NomProjet'
-        refreshProjectsDropdownFromProjets();
+        const uniqueFirstColumnValues = [...new Set(records.map(record => record.NomProjet))];
+        populateFirstColumnDropdown(uniqueFirstColumnValues);
       }
     });
 
@@ -1462,7 +1447,7 @@
     
         // Création des nouvelles lignes
         const newRows = selectedEmitters.map((emetteur) => ({
-          NomProjet: selectedFirstValue,
+          NomProjet: projectId,
           NomDocument: combinedDocumentName,
           Emetteur: emetteur,
           Reference: '_',
@@ -2610,7 +2595,7 @@
         const combinedDocumentName = `${doc.documentNumber}-${doc.documentName}`.trim();
         selectedEmitters.forEach(emetteur => {
           const newRow = {
-            NomProjet: selectedFirstValue,
+            NomProjet: projectId,
             NomDocument: combinedDocumentName,
             Emetteur: emetteur,
             Reference: '_',
