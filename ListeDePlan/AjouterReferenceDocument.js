@@ -278,7 +278,7 @@
 
     const actions = [
       // 1) Table des references
-      ["AddRecord", "References_2", null, {
+      ["AddRecord", "References", null, {
         NomProjet: projetId,      // Ref (ID projet)
         NomDocument: nom,
         NumeroDocument: numero    // 0 accepte

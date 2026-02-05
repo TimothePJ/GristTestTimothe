@@ -2,7 +2,7 @@
   // Reproduit la fenêtre "Ajouter document" d'AffichageReference,
   // adaptée à ListeDePlan. Ouvre sur l'événement LP_OPEN_ADD_REF_DOC
   // (déclenché par le menu contextuel), et écrit dans:
-  //   - References_2 (NomProjet, NomDocument, NumeroDocument, Emetteur, DateLimite, Service, etc.)
+  //   - References (NomProjet, NomDocument, NumeroDocument, Emetteur, DateLimite, Service, etc.)
   //   - ListePlan_NDC_COF (N_Document, Type_document, Nom_projet, Designation, ...)
 
   const STATE = {
@@ -153,10 +153,10 @@
     return [];
   }
 
-  // Récupère les émetteurs déjà utilisés pour le projet dans References_2
+  // Récupère les émetteurs déjà utilisés pour le projet dans References
   async function getProjectEmetteurs(projetId) {
     try {
-      const t = await grist.docApi.fetchTable('References_2');
+      const t = await grist.docApi.fetchTable('References');
       let rows = [];
       if (t && Array.isArray(t.id) && Array.isArray(t.NomProjet) && Array.isArray(t.Emetteur)) {
         for (let i = 0; i < t.id.length; i++) {
@@ -358,10 +358,10 @@
 
     const serviceValue = await getTeamService();
 
-    // 1) Ajouts dans References_2 (un par émetteur)
+    // 1) Ajouts dans References (un par émetteur)
     const actions = [];
     for (const em of selectedEmitters) {
-      actions.push(["AddRecord", "References_2", null, {
+      actions.push(["AddRecord", "References", null, {
         // On écrit le LIBELLÉ du projet, pas l'ID (conforme à tes données)
         NomProjet: (STATE.projectId ?? STATE.projectName),  // Ref (id) si dispo, sinon libellé
         NomDocument: nom,
