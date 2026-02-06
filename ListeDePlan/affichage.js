@@ -8,12 +8,12 @@ let projetsDictGlobal = null;
 async function chargerProjetsMap() {
   if (projetsDictGlobal) return projetsDictGlobal;
 
-  const data = await grist.docApi.fetchTable("Projet");
+  const data = await grist.docApi.fetchTable("Projets");
   projetsDictGlobal = {};
 
-  if (data && data.id && data.Projet) {
+  if (data && data.id && data.Nom_de_projet) {
     for (let i = 0; i < data.id.length; i++) {
-      const nom = data.Projet[i];
+      const nom = data.Nom_de_projet[i];
       const id = data.id[i];
       if (typeof nom === "string" && nom.trim()) {
         projetsDictGlobal[nom.trim()] = id;

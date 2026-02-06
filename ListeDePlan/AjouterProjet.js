@@ -108,15 +108,15 @@
 
   // Trouve l'ID du projet courant depuis le libellé exact
   async function resolveProjectId(projectName) {
-    const t = await grist.docApi.fetchTable("Projet");
-    // format colonnes attendu: t.Projet[], t.id[]
-    if (t && t.Projet && t.id && Array.isArray(t.Projet) && Array.isArray(t.id)) {
-      const idx = t.Projet.findIndex(p => String(p) === String(projectName));
+    const t = await grist.docApi.fetchTable("Projets");
+    // format colonnes attendu: t.Nom_de_projet[], t.id[]
+    if (t && t.Nom_de_projet && t.id && Array.isArray(t.Nom_de_projet) && Array.isArray(t.id)) {
+      const idx = t.Nom_de_projet.findIndex(p => String(p) === String(projectName));
       if (idx >= 0) return t.id[idx];
     }
     // fallback si renvoi tableau d'objets
     if (Array.isArray(t)) {
-      const row = t.find(r => String(r.Projet) === String(projectName));
+      const row = t.find(r => String(r.Nom_de_projet) === String(projectName));
       if (row) return row.id;
     }
     return null;

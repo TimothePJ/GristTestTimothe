@@ -164,7 +164,7 @@ grist.ready(async () => {
   await loadExternalComponents();
 });
 
-grist.onRecords( (rec) => {
+grist.onRecords(async (rec) => {
   window.records = rec.sort((a, b) => {
     const aDoc = a.N_Document || "";
     const bDoc = b.N_Document || "";
@@ -179,9 +179,8 @@ grist.onRecords( (rec) => {
     return aDoc.localeCompare(bDoc);
   });
 
-  const projets = [...new Set(window.records.map(r =>
-    typeof r.Nom_projet === "object" ? r.Nom_projet.display || r.Nom_projet.details : r.Nom_projet
-  ))].filter(Boolean).sort();
+  const projetsDict = await chargerProjetsMap();
+  const projets = Object.keys(projetsDict).sort();
 
   // Create a project-specific map to validate document number uniqueness.
   window.projectDocNumberToTypeMap = new Map();
@@ -204,7 +203,7 @@ grist.onRecords( (rec) => {
 
   const selectedProject = document.getElementById("projectDropdown").value;
   if (selectedProject) {
-    const projetsDict = chargerProjetsMap();
+    const projetsDict = await chargerProjetsMap();
     for (const r of window.records) {
       if (typeof r.Nom_projet === "number") {
         const projId = r.Nom_projet;

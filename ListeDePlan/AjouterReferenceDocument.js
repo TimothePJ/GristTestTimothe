@@ -44,11 +44,11 @@
   // =======================
   async function loadProjetsTable() {
     if (state.projets) return state.projets;
-    const t = await grist.docApi.fetchTable("Projet");
+    const t = await grist.docApi.fetchTable("Projets");
     const ids = t.id || [];
     const cols = t.columns || {};
-    const names = Array.isArray(cols.Projet) ? cols.Projet.map(v => String(v == null ? "" : v).trim()) : [];
-    const nums  = Array.isArray(cols.NumeroProjet) ? cols.NumeroProjet.map(v => String(v == null ? "" : v).trim()) : [];
+    const names = Array.isArray(cols.Nom_de_projet) ? cols.Nom_de_projet.map(v => String(v == null ? "" : v).trim()) : [];
+    const nums  = Array.isArray(cols.Numero_de_projet) ? cols.Numero_de_projet.map(v => String(v == null ? "" : v).trim()) : [];
 
     const items = ids.map((id, i) => {
       const name = names[i] || "";
