@@ -166,8 +166,8 @@ grist.ready(async () => {
 
 grist.onRecords(async (rec) => {
   window.records = rec.sort((a, b) => {
-    const aDoc = a.N_Document || "";
-    const bDoc = b.N_Document || "";
+    const aDoc = a.NumeroDocument || "";
+    const bDoc = b.NumeroDocument || "";
 
     const isANumber = !isNaN(aDoc) && !isNaN(parseFloat(aDoc));
     const isBNumber = !isNaN(bDoc) && !isNaN(parseFloat(bDoc));
@@ -186,17 +186,17 @@ grist.onRecords(async (rec) => {
   window.projectDocNumberToTypeMap = new Map();
   for (const r of window.records) {
     const projectName = typeof r.Nom_projet === 'object' ? r.Nom_projet.details : r.Nom_projet;
-    if (!projectName || !r.N_Document || !r.Type_document) continue;
+    if (!projectName || !r.NumeroDocument || !r.Type_document) continue;
 
     if (!window.projectDocNumberToTypeMap.has(projectName)) {
       window.projectDocNumberToTypeMap.set(projectName, new Map());
     }
     const projectMap = window.projectDocNumberToTypeMap.get(projectName);
 
-    if (!projectMap.has(r.N_Document)) {
-      projectMap.set(r.N_Document, new Set());
+    if (!projectMap.has(r.NumeroDocument)) {
+      projectMap.set(r.NumeroDocument, new Set());
     }
-    projectMap.get(r.N_Document).add(r.Type_document);
+    projectMap.get(r.NumeroDocument).add(r.Type_document);
   }
 
   populateDropdown("projectDropdown", projets);

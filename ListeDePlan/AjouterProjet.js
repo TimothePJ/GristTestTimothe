@@ -3,7 +3,7 @@
   // adaptée à ListeDePlan. Ouvre sur l'événement LP_OPEN_ADD_REF_DOC
   // (déclenché par le menu contextuel), et écrit dans:
   //   - References (NomProjet, NomDocument, NumeroDocument, Emetteur, DateLimite, Service, etc.)
-  //   - ListePlan_NDC_COF (N_Document, Type_document, Nom_projet, Designation, ...)
+  //   - ListePlan_NDC_COF (NumeroDocument, Type_document, Nom_projet, Designation, ...)
 
   const STATE = {
     projectName: null,       // libellé du projet (depuis #projectDropdown)
@@ -378,7 +378,7 @@
 
     // 2) Ajout côté Liste de plan (une seule ligne "tête" pour apparaitre dans la vue)
     actions.push(["AddRecord", "ListePlan_NDC_COF", null, {
-      N_Document: String(numeroStr),
+      NumeroDocument: String(numeroStr),
       Type_document: STATE.typeDocLabel,
       DateDiffusion: null,
       Indice: "",

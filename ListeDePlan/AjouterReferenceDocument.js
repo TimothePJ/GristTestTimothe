@@ -285,7 +285,7 @@
       }],
       // 2) Liste de plan : Type_document = libelle EXACT de la 2e liste
       ["AddRecord", "ListePlan_NDC_COF", null, {
-        N_Document: String(numeroStr),
+        NumeroDocument: String(numeroStr),
         Type_document: typeDocLabel, // texte exact de la liste
         DateDiffusion: null,
         Indice: "",

@@ -191,7 +191,7 @@ function displayInvoiceTable() {
         return indices;
     }, []);
 
-    const planNumbers = [...new Set(planIndices.map(i => allPlans.N_Document[i]))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    const planNumbers = [...new Set(planIndices.map(i => allPlans.NumeroDocument[i]))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 
     planNumbers.forEach(planNumber => {
       const option = document.createElement('option');
@@ -278,11 +278,11 @@ document.querySelector('#invoiceTable').addEventListener('change', async (e) => 
     
     const matchingPlans = allPlans.id.map((id, i) => ({
         id: id,
-        N_Document: allPlans.N_Document[i],
+        NumeroDocument: allPlans.NumeroDocument[i],
         Indice: allPlans.Indice[i],
         Designation: allPlans.Designation[i],
         Nom_projet: allPlans.Nom_projet[i]
-    })).filter(p => p.N_Document === nPlan && p.Nom_projet === selectedProject);
+    })).filter(p => p.NumeroDocument === nPlan && p.Nom_projet === selectedProject);
 
     if (matchingPlans.length > 0) {
       const latestPlan = matchingPlans.reduce((latest, current) => (latest.Indice > current.Indice) ? latest : current);

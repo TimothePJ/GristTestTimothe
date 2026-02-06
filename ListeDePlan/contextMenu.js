@@ -72,7 +72,7 @@ function supprimerLigne(cell) {
   else if (cell.cellIndex === 0 || cell.cellIndex === 1) {
     const numDocument = cell.dataset.numDocument;
     const designation = cell.dataset.designation;
-    const recordsToFind = window.records.filter(r => r.N_Document === numDocument && r.Designation === designation);
+    const recordsToFind = window.records.filter(r => r.NumeroDocument === numDocument && r.Designation === designation);
     recordIdsToDelete = recordsToFind.map(r => r.id);
   }
 
