@@ -177,8 +177,7 @@ function afficherPlansFiltres(projet, typeDocument, records) {
       allIndicesUsed.add(ind);
     }
   }
-  let lastUsedIndex = Math.max(...[...allIndicesUsed].map(i => INDICES.indexOf(i)).filter(i => i >= 0));
-  if (isNaN(lastUsedIndex)) lastUsedIndex = -1;
+  let lastUsedIndex = Math.max(-1, ...[...allIndicesUsed].map(i => INDICES.indexOf(i)).filter(i => i >= 0));
   const indicesToShow = INDICES.slice(0, lastUsedIndex + 2);
 
   const table = document.createElement("table");
@@ -433,12 +432,11 @@ document.addEventListener("click", async (e) => {
           }
         }
         const projetsDict = await chargerProjetsMap();
-        const Nom_projet_id = projetsDict[nomProjet.trim()];
-        if (!Nom_projet_id) {
-          console.error("ID de projet non trouvé pour :", nomProjet);
+        if (!projetsDict[nomProjet.trim()]) {
+          console.error("Projet non trouvé :", nomProjet);
           return;
         }
-        const rowData = { NumeroDocument: Num_Document, Type_document: typeDocument, Designation: Designation, Nom_projet: Nom_projet_id, Indice: indice, DateDiffusion: isoDate };
+        const rowData = { NumeroDocument: Num_Document, Type_document: typeDocument, Designation: Designation, Nom_projet: nomProjet, Indice: indice, DateDiffusion: isoDate };
         try {
           await grist.docApi.applyUserActions([
             ["AddRecord", "ListePlan_NDC_COF", null, rowData],
@@ -484,16 +482,15 @@ document.addEventListener("focusout", async (e) => {
       }
 
       const projetsDict = await chargerProjetsMap();
-      const nomProjetId = projetsDict[nomProjet.trim()];
-      if (!nomProjetId) {
-        console.error("ID de projet non trouvé pour :", nomProjet);
+      if (!projetsDict[nomProjet.trim()]) {
+        console.error("Projet non trouvé :", nomProjet);
         return;
       }
       const rowData = {
         NumeroDocument: numDocument,
         Type_document: typeDocument,
         Designation: designation,
-        Nom_projet: nomProjetId,
+        Nom_projet: nomProjet,
         Indice: null,
         DateDiffusion: null
       };

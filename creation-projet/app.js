@@ -625,6 +625,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 await grist.docApi.applyUserActions(referencesActions);
             }
 
+            // 5. Add to ListePlan_NDC_COF (COFFRAGE)
+            const listePlanActions = projectData.documents.map(doc => {
+                 return ["AddRecord", "ListePlan_NDC_COF", null, {
+                     Nom_projet: projectData.name,
+                     Type_document: "COFFRAGE",
+                     NumeroDocument: doc.numero,
+                     Designation: doc.name,
+                     Indice: null,
+                     DateDiffusion: null
+                 }];
+            });
+
+            if (listePlanActions.length > 0) {
+                await grist.docApi.applyUserActions(listePlanActions);
+            }
+
             alert('Projet créé avec succès !');
             // Optionally, redirect or clear the form
             window.location.reload();
