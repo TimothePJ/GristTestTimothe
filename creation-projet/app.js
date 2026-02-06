@@ -84,7 +84,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('next-to-step-5').addEventListener('click', () => {
         projectData.documents = Array.from(document.querySelectorAll('input[name="project-docs"]:checked'))
-            .map(i => i.value);
+            .map(i => customDocuments[parseInt(i.value, 10)]);
 
         projectData.emitters = Array.from(document.querySelectorAll('input[name="project-emitters"]:checked'))
             .map(i => i.value);
@@ -238,7 +238,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const reviewContainer = document.getElementById('review-container');
 
         const docsHtml = (projectData.documents && projectData.documents.length)
-            ? projectData.documents.join(', ')
+            ? projectData.documents.map(d => d.numero ? `${d.name} [${d.numero}]` : d.name).join(', ')
             : '-';
 
         const emittersHtml = (projectData.emitters && projectData.emitters.length)
@@ -290,7 +290,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
-    // Dynamic document list (replaces DOCUMENTS_PRESETS)
+    // Dynamic document list - each entry is { name, numero }
     let customDocuments = [];
 
     function renderDocumentsSelection() {
@@ -305,9 +305,10 @@ document.addEventListener('DOMContentLoaded', () => {
         customDocuments.forEach((doc, index) => {
             const chip = document.createElement('span');
             chip.className = 'doc-chip';
+            const numeroLabel = doc.numero ? ` [${doc.numero}]` : '';
             chip.innerHTML = `
-                <input type="checkbox" name="project-docs" value="${doc}" checked style="display: none;">
-                <span>${doc}</span>
+                <input type="checkbox" name="project-docs" value="${index}" checked style="display: none;">
+                <span>${doc.name}${numeroLabel}</span>
                 <button type="button" class="doc-chip-delete" data-index="${index}" title="Supprimer">✖</button>
             `;
             container.appendChild(chip);
@@ -325,22 +326,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function addDocuments(docs) {
         docs.forEach(doc => {
-            const trimmed = doc.trim();
-            if (trimmed && !customDocuments.includes(trimmed)) {
-                customDocuments.push(trimmed);
+            const name = (typeof doc === 'string' ? doc : doc.name).trim();
+            const numero = (typeof doc === 'string' ? '' : (doc.numero || '')).trim();
+            if (name && !customDocuments.some(d => d.name === name)) {
+                customDocuments.push({ name, numero });
             }
         });
         renderDocumentsSelection();
     }
 
-    function generatePatternDocuments(prefix, suffix, start, end, padding) {
+    function generatePatternDocuments(prefix, suffix, start, end, padding, numeroStart, numeroStep, numeroPadding) {
         const docs = [];
+        let currentNumero = numeroStart;
         for (let i = start; i <= end; i++) {
             let numStr = String(i);
             if (padding > 0) {
                 numStr = numStr.padStart(padding, '0');
             }
-            docs.push(`${prefix}${numStr}${suffix}`);
+            let numeroStr = String(currentNumero);
+            if (numeroPadding > 0) {
+                numeroStr = numeroStr.padStart(numeroPadding, '0');
+            }
+            docs.push({ name: `${prefix}${numStr}${suffix}`, numero: numeroStr });
+            currentNumero += numeroStep;
         }
         return docs;
     }
@@ -351,20 +359,32 @@ document.addEventListener('DOMContentLoaded', () => {
         const start = parseInt(document.getElementById('pattern-start').value, 10) || 0;
         const end = parseInt(document.getElementById('pattern-end').value, 10) || 0;
         const padding = parseInt(document.getElementById('pattern-padding').value, 10) || 0;
+        const numeroStart = parseInt(document.getElementById('numero-start').value, 10) || 0;
+        const numeroStep = parseInt(document.getElementById('numero-step').value, 10) || 1;
+        const numeroPadding = parseInt(document.getElementById('numero-padding').value, 10) || 0;
 
-        const previewEl = document.getElementById('pattern-preview-text');
+        const previewBody = document.getElementById('pattern-preview-body');
 
         if (start > end) {
-            previewEl.textContent = '(Erreur: "De" doit être ≤ "À")';
+            previewBody.innerHTML = '<tr><td colspan="2" style="color: red;">(Erreur: "De" doit être &le; "&Agrave;")</td></tr>';
             return;
         }
 
-        const docs = generatePatternDocuments(prefix, suffix, start, Math.min(end, start + 9), padding);
-        let previewText = docs.join(', ');
-        if (end - start > 9) {
-            previewText += ', ...';
+        const docs = generatePatternDocuments(prefix, suffix, start, Math.min(end, start + 9), padding, numeroStart, numeroStep, numeroPadding);
+
+        if (docs.length === 0) {
+            previewBody.innerHTML = '<tr><td colspan="2">(Aucun aperçu)</td></tr>';
+            return;
         }
-        previewEl.textContent = previewText || '(Aucun aperçu)';
+
+        let html = '';
+        docs.forEach(doc => {
+            html += `<tr><td>${doc.numero}</td><td>${doc.name}</td></tr>`;
+        });
+        if (end - start > 9) {
+            html += '<tr><td>...</td><td>...</td></tr>';
+        }
+        previewBody.innerHTML = html;
     }
 
     function setupDocsModal() {
@@ -411,18 +431,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Manual add
         const manualInput = document.getElementById('manual-doc-name');
+        const manualNumeroInput = document.getElementById('manual-doc-numero');
         const addManualBtn = document.getElementById('add-manual-doc-btn');
 
         addManualBtn.addEventListener('click', () => {
             const docName = manualInput.value.trim();
+            const docNumero = manualNumeroInput.value.trim();
             if (docName) {
-                addDocuments([docName]);
+                addDocuments([{ name: docName, numero: docNumero }]);
                 manualInput.value = '';
+                manualNumeroInput.value = '';
                 manualInput.focus();
             }
         });
 
         manualInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                manualNumeroInput.focus();
+            }
+        });
+
+        manualNumeroInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 addManualBtn.click();
@@ -443,19 +473,33 @@ document.addEventListener('DOMContentLoaded', () => {
             el.addEventListener('change', updatePatternPreview);
         });
 
+        // N°Document inputs
+        const numeroStartInput = document.getElementById('numero-start');
+        const numeroStepInput = document.getElementById('numero-step');
+        const numeroPaddingSelect = document.getElementById('numero-padding');
+
+        // Update preview on numero input change
+        [numeroStartInput, numeroStepInput, numeroPaddingSelect].forEach(el => {
+            el.addEventListener('input', updatePatternPreview);
+            el.addEventListener('change', updatePatternPreview);
+        });
+
         addPatternBtn.addEventListener('click', () => {
             const prefix = prefixInput.value || '';
             const suffix = suffixInput.value || '';
             const start = parseInt(startInput.value, 10) || 0;
             const end = parseInt(endInput.value, 10) || 0;
             const padding = parseInt(paddingSelect.value, 10) || 0;
+            const numeroStart = parseInt(numeroStartInput.value, 10) || 0;
+            const numeroStep = parseInt(numeroStepInput.value, 10) || 1;
+            const numeroPadding = parseInt(numeroPaddingSelect.value, 10) || 0;
 
             if (start > end) {
                 alert('Erreur: "De" doit être inférieur ou égal à "À".');
                 return;
             }
 
-            const docs = generatePatternDocuments(prefix, suffix, start, end, padding);
+            const docs = generatePatternDocuments(prefix, suffix, start, end, padding, numeroStart, numeroStep, numeroPadding);
             addDocuments(docs);
 
             // Reset form but keep modal open for adding more
@@ -464,6 +508,9 @@ document.addEventListener('DOMContentLoaded', () => {
             startInput.value = '1';
             endInput.value = '5';
             paddingSelect.value = '0';
+            numeroStartInput.value = '1';
+            numeroStepInput.value = '1';
+            numeroPaddingSelect.value = '3';
             updatePatternPreview();
         });
 
@@ -548,11 +595,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const serviceValue = await getTeamService();
 
             const referencesActions = [];
-            for (const docName of projectData.documents) {
+            for (const doc of projectData.documents) {
                 for (const emitter of projectData.emitters) {
                     const row = {
                         NomProjet: projectData.name,       // nom écrit
-                        NomDocument: docName,
+                        NomDocument: doc.name,
+                        NumeroDocument: doc.numero || '',
                         Emetteur: emitter,
                         Reference: "_",
                         Indice: "-",

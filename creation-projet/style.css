@@ -283,6 +283,19 @@ button:hover {
   width: 100%;
 }
 
+.numero-fieldset {
+  border: 1px solid #004990;
+  border-radius: 4px;
+  padding: 10px 15px;
+  margin-bottom: 15px;
+}
+
+.numero-fieldset legend {
+  color: #004990;
+  font-weight: bold;
+  padding: 0 6px;
+}
+
 .pattern-preview {
   background: #f0f8ff;
   border: 1px solid #004990;
@@ -295,6 +308,27 @@ button:hover {
 .pattern-preview span {
   color: #004990;
   font-family: monospace;
+}
+
+.preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-family: monospace;
+}
+
+.preview-table th {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 2px solid #004990;
+  color: #004990;
+  font-size: 13px;
+}
+
+.preview-table td {
+  padding: 3px 8px;
+  border-bottom: 1px solid #ddd;
+  color: #004990;
 }
 
 .primary-btn {
