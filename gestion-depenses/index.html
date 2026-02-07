@@ -17,7 +17,7 @@
                 <input type="text" id="project-name" placeholder="Nom du projet">
                 <input type="text" id="project-number" placeholder="Numéro du projet">
                 <div id="budget-lines-container"></div>
-                <input type="text" id="budget-chapter" placeholder="Chapitre">
+                <input type="text" id="budget-chapter" placeholder="Chapitre" list="budget-chapters-list">
                 <input type="number" id="budget-amount" placeholder="Montant">
                 <button id="add-budget-line-btn">Ajouter une ligne de budget</button>
                 <button id="save-project-btn">Enregistrer</button>
@@ -125,12 +125,28 @@
         <div class="modal-content">
             <h2>Modifier le Budget</h2>
             <div id="edit-budget-lines-container"></div>
-            <input type="text" id="edit-budget-chapter" placeholder="Nouveau chapitre">
+            <input type="text" id="edit-budget-chapter" placeholder="Nouveau chapitre" list="budget-chapters-list">
             <input type="number" id="edit-budget-amount" placeholder="Nouveau montant">
             <button id="add-edit-budget-line-btn">Ajouter</button>
             <button id="save-edited-budget-btn">Enregistrer</button>
             <button id="cancel-edit-budget-btn">Annuler</button>
         </div>
     </div>
+    <datalist id="budget-chapters-list">
+        <option value="01-Analyse Dossier-Organisation">
+        <option value="02-Réunions-Visite sur chantier">
+        <option value="03-Fond de plans">
+        <option value="04-Plan de coffrage">
+        <option value="05-Plan de démolition">
+        <option value="06-Plan d'armature">
+        <option value="07-Note de calcul">
+        <option value="08-Modélisation-Calcul">
+        <option value="09-Etude ouvrages provisoires">
+        <option value="10-DOE">
+        <option value="11-Sous-traitance-Calculs">
+        <option value="12-Sous-traitance-Armatures">
+        <option value="13-Base">
+        <option value="14-Travaux supplémentaires">
+    </datalist>
 </body>
 </html>

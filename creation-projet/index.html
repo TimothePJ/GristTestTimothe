@@ -23,7 +23,23 @@
             <h2>Étape 2: Lignes Budgétaires</h2>
             <div id="budget-lines-container"></div>
             <div class="budget-line-form">
-                <input type="text" id="budget-chapter" placeholder="Chapitre">
+                <input type="text" id="budget-chapter" placeholder="Chapitre" list="budget-chapters-list">
+                <datalist id="budget-chapters-list">
+                    <option value="01-Analyse Dossier-Organisation">
+                    <option value="02-Réunions-Visite sur chantier">
+                    <option value="03-Fond de plans">
+                    <option value="04-Plan de coffrage">
+                    <option value="05-Plan de démolition">
+                    <option value="06-Plan d'armature">
+                    <option value="07-Note de calcul">
+                    <option value="08-Modélisation-Calcul">
+                    <option value="09-Etude ouvrages provisoires">
+                    <option value="10-DOE">
+                    <option value="11-Sous-traitance-Calculs">
+                    <option value="12-Sous-traitance-Armatures">
+                    <option value="13-Base">
+                    <option value="14-Travaux supplémentaires">
+                </datalist>
                 <input type="number" id="budget-amount" placeholder="Montant">
                 <button id="add-budget-line-btn">Ajouter Ligne</button>
             </div>
