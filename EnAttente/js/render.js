@@ -179,14 +179,29 @@ function renderDetailsTable({ rows, title, footer }) {
   tTitle.textContent = title || "Lignes";
   tFooter.textContent = footer || "";
 
-  tbody.innerHTML = rows.map(r => `
-    <tr data-rowid="${r.rowId ?? ""}">
-      <td>${escapeHtml(r.emetteur)}</td>
-      <td>${escapeHtml(r.reference)}</td>
-      <td>${escapeHtml(r.indice)}</td>
-      <td>${escapeHtml(r.recu)}</td>
-      <td>${escapeHtml(r.observation)}</td>
-      <td class="bloq-cell">${r.bloquant ? "✓" : ""}</td>
-    </tr>
-  `).join("");
+  tbody.innerHTML = rows.map(r => {
+    // Ligne “séparateur” de groupe
+    if (r.type === "group") {
+        return `
+            <tr class="group-row">
+                <td colspan="6">
+                    <span class="group-label">${escapeHtml(r.label)}</span>
+                    <span class="group-count">(${r.count})</span>
+                </td>
+            </tr>
+        `;
+    }
+
+    // Ligne “normale”
+    return `
+      <tr data-rowid="${r.rowId ?? ""}">
+        <td>${escapeHtml(r.emetteur)}</td>
+        <td>${escapeHtml(r.reference)}</td>
+        <td>${escapeHtml(r.indice)}</td>
+        <td>${escapeHtml(r.recu)}</td>
+        <td>${escapeHtml(r.observation)}</td>
+        <td class="bloq-cell">${r.bloquant ? "✓" : ""}</td>
+      </tr>
+    `;
+  }).join("");
 }

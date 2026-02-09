@@ -157,3 +157,19 @@ select {
   font-weight: bold;
   color: #004990;
 }
+
+.group-row td {
+  background: #004990;  /* bandeau */
+  border: 1px solid #ed1b2d;
+  font-weight: bold;
+}
+
+.group-label {
+  color: #ffffff;
+}
+
+.group-count {
+  color: rgba(255,255,255,0.85);
+  font-weight: normal;
+  margin-left: 10px;
+}

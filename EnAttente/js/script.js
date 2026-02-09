@@ -102,6 +102,44 @@ function matchesSelectedDocument(rec) {
   return (recNum == null && selectedDocNumber == null) || (recNum === selectedDocNumber);
 }
 
+function makeGroupLabel(name, num) {
+  // num normalisé : null si 0 / vide / "-" / "_"
+  const n = normalizeNumero(num);
+
+  // NOM d'abord
+  const base = String(name || "").trim() || "Sans document";
+
+  // puis numéro si présent
+  return (n == null) ? base : `${base} ${n}`;
+}
+
+function getDocParts(rec) {
+  const nameRaw = String(rec.NomDocument || "").trim();
+  const name = nameRaw ? nameRaw : "Sans document";
+
+  const n = normalizeNumero(rec.NumeroDocument);
+
+  return {
+    name,
+    n,
+    label: makeGroupLabel(name, rec.NumeroDocument), // Nom puis Numéro, 0 ignoré
+    sortN: (n == null ? Infinity : n)
+  };
+}
+
+function rowToRenderObj(rec) {
+  return {
+    type: "row",
+    rowId: getRowId(rec),
+    emetteur: String(rec.Emetteur || "-"),
+    reference: String(rec.Reference || "-"),
+    indice: String(rec.Indice || "-"),
+    recu: getRecuText(rec),
+    observation: String((rec.DescriptionObservations ?? rec.DescriptionObservationss ?? "-")),
+    bloquant: !!getBloquant(rec)
+  };
+}
+
 function getBaseRows() {
   if (!selectedProject) return [];
 
@@ -166,6 +204,7 @@ function refreshUI() {
   const projects = uniqProjects(App.records);
   populateFirstColumnDropdown(projects);
 
+  // Reset si aucun projet ou projet invalide
   if (!selectedProject || !projects.includes(selectedProject)) {
     selectedProject = "";
     selectedDocName = "";
@@ -185,6 +224,7 @@ function refreshUI() {
     return;
   }
 
+  // Dropdown document
   secondDropdown.disabled = false;
   populateSecondColumnListbox(selectedProject);
 
@@ -200,7 +240,10 @@ function refreshUI() {
     selectedDocNumber = null;
   }
 
+  // Base rows (projet + doc (ou Tous))
   const baseRows = getBaseRows();
+
+  // Pie counts (3 catégories)
   const { countNoIndiceBlocking, countNoIndiceNotBlocking, countWithIndice } = computeCounts(baseRows);
 
   renderPieChart({
@@ -211,20 +254,13 @@ function refreshUI() {
     activeSlice: sliceFilter
   });
 
-  // Table (plus de limite)
-  const listRows = applySliceFilter(baseRows)
-    .slice()
-    .sort((a, b) => (getRecuMs(b) - getRecuMs(a)));
+  // Table : filtrage par slice (couleur), puis regroupement si document = Tous
+  const listRows = applySliceFilter(baseRows); // plus de limite, pas besoin de slice/sort ici
 
-  const rowsForRender = listRows.map(rec => ({
-    rowId: getRowId(rec),
-    emetteur: String(rec.Emetteur || "-"),
-    reference: String(rec.Reference || "-"),
-    indice: String(rec.Indice || "-"),
-    recu: getRecuText(rec),
-    observation: String((rec.DescriptionObservations ?? rec.DescriptionObservationss ?? "-")),
-    bloquant: !!getBloquant(rec)
-  }));
+  // buildRowsForTable() gère :
+  // - tri simple si un document est sélectionné
+  // - regroupement par document + séparateurs si "Tous"
+  const rowsForRender = buildRowsForTable(listRows);
 
   renderDetailsTable({
     rows: rowsForRender,
@@ -316,3 +352,44 @@ initGrist(() => {
   if (!selectedProject) selectedProject = firstDropdown.value.trim();
   refreshUI();
 });
+
+function buildRowsForTable(listRows) {
+  // Si un document est sélectionné => pas de regroupement
+  if (selectedDocName) {
+    const sorted = listRows.slice().sort((a, b) => getRecuMs(b) - getRecuMs(a));
+    return sorted.map(rowToRenderObj);
+  }
+
+  // Sinon (Tous) => regrouper par document
+  const groups = new Map(); // key -> {name,n,label,sortN,rows:[]}
+
+  for (const rec of listRows) {
+    const p = getDocParts(rec);
+    const key = JSON.stringify({ name: p.name, n: p.n }); // stable
+    if (!groups.has(key)) {
+      groups.set(key, { ...p, rows: [] });
+    }
+    groups.get(key).rows.push(rec);
+  }
+
+  // trier les groupes comme ta dropdown (numero asc, null à la fin, puis nom)
+  const groupArr = Array.from(groups.values());
+  groupArr.sort((a, b) => {
+    if (a.sortN !== b.sortN) return a.sortN - b.sortN;
+    return a.name.localeCompare(b.name, "fr", { sensitivity: "base" });
+  });
+
+  // construire le tableau final : header groupe + ses lignes
+  const out = [];
+  for (const g of groupArr) {
+    // tri interne des lignes du groupe (reçu récent -> ancien)
+    g.rows.sort((a, b) => getRecuMs(b) - getRecuMs(a));
+
+    out.push({ type: "group", label: g.label, count: g.rows.length });
+    for (const rec of g.rows) {
+      out.push(rowToRenderObj(rec));
+    }
+  }
+
+  return out;
+}
