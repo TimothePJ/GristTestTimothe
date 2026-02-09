@@ -12,24 +12,38 @@
 
 <body>
   <!-- Sticky container -->
-  <div class="sticky-container">
+    <div class="sticky-container">
     <div class="dropdown-container">
-      <label for="firstColumnDropdown">Projet :</label>
-      <select id="firstColumnDropdown">
-        <option value="">Choix projet</option>
-      </select>
+        <label for="firstColumnDropdown">Projet :</label>
+        <select id="firstColumnDropdown">
+        <option value="">Selectionner un projet</option>
+        </select>
     </div>
 
     <div class="dropdown-container">
-      <label for="secondColumnListbox">Document :</label>
-      <select id="secondColumnListbox" disabled>
-        <option value="">Sélectionner un étage</option>
-      </select>
+        <label for="secondColumnListbox">Document :</label>
+        <select id="secondColumnListbox" disabled>
+        <option value="ALL">Tous</option>
+        </select>
     </div>
-  </div>
+    </div>
 
-  <!-- Zone vide -->
-  <div id="content" style="padding: 20px;"></div>
+    <!-- Contenu -->
+    <div id="content" class="content-area">
+    <div class="card">
+        <div id="chartTitle" class="card-title">EN ATTENTE</div>
+
+        <div class="chart-row">
+        <canvas id="pieCanvas" width="280" height="280"></canvas>
+
+        <div class="chart-side">
+            <div id="chartNumbers" class="chart-numbers">Sélectionne un projet</div>
+            <div id="legend" class="legend"></div>
+        </div>
+        </div>
+    </div>
+    </div>
+
 
   <!-- scripts -->
   <script src="./js/utils.js"></script>

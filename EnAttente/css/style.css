@@ -43,3 +43,55 @@ select {
 #firstColumnDropdown {
   width: 320px;
 }
+
+.content-area {
+  padding: 20px;
+}
+
+.card {
+  border: 1px solid #ed1b2d;
+  padding: 16px;
+  max-width: 900px;
+}
+
+.card-title {
+  font-weight: bold;
+  margin-bottom: 14px;
+  font-size: 18px;
+}
+
+.chart-row {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+
+.chart-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chart-numbers {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.legend-swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid #004990;
+}

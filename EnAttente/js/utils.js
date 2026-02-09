@@ -24,3 +24,20 @@ function uniqProjects(records) {
   });
   return Array.from(set).sort((a, b) => a.localeCompare(b));
 }
+
+function getText(rec, key) {
+  const v = rec?.[key];
+  return (v == null) ? "" : String(v);
+}
+
+function isEnAttente(rec) {
+  // Supporte "DescriptionObservations" et (si jamais) "DescriptionObservationss"
+  const v = (getText(rec, "DescriptionObservations") || getText(rec, "DescriptionObservationss")).trim();
+  return v.toUpperCase() === "EN ATTENTE";
+}
+
+function getBloquant(rec) {
+  // Supporte Bloquant_V2 si tu l’utilises, sinon Bloquant
+  const v = (rec?.Bloquant_V2 !== undefined) ? rec.Bloquant_V2 : rec?.Bloquant;
+  return v === true || v === 1 || v === "true";
+}
