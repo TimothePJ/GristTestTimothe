@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MonWidget</title>
+
+  <link rel="stylesheet" href="./css/style.css" />
+  <link rel="stylesheet" href="./css/components.css" />
+
+  <!-- API Grist -->
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+</head>
+
+<body>
+  <div id="app">
+    <header class="toolbar">
+      <div class="toolbar-left">
+        <div class="title">MonWidget</div>
+
+        <select id="selectProjet" class="select"></select>
+        <select id="selectDocument" class="select"></select>
+      </div>
+
+      <div class="toolbar-right">
+        <button id="btnRefresh" class="btn">Rafraîchir</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <div id="status" class="status">Chargement…</div>
+      <div id="content" class="content"></div>
+    </main>
+  </div>
+
+  <!-- scripts (ordre important) -->
+  <script src="./js/utils.js"></script>
+  <script src="./js/grist.js"></script>
+  <script src="./js/render.js"></script>
+  <script src="./js/script.js"></script>
+</body>
+</html>

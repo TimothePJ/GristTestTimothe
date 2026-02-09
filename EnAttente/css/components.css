@@ -1,0 +1,44 @@
+.select {
+  background: #111;
+  color: #eee;
+  border: 1px solid #444;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.btn {
+  background: #2b7a2b;
+  color: #fff;
+  border: 1px solid #1d5a1d;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* une mini table simple */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+}
+
+.table th, .table td {
+  border-bottom: 1px solid #333;
+  padding: 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #444;
+  background: #111;
+  font-size: 12px;
+}
