@@ -20,14 +20,7 @@ window.gristCalendar = {
 let TZDate = null;
 
 function getLanguage() {
-  if (this._lang) {
-    return this._lang;
-  } else {
-    const queryString = window.location.search;
-    const urlParams = new URLSearchParams(queryString);
-    this._lang = urlParams.get('language') ?? 'en'
-    return this._lang;
-  }
+  return 'fr';
 }
 
 //registering code to run when a document is ready
