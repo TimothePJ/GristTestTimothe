@@ -1,17 +1,12 @@
-const GristData = {
+window.App = {
   records: [],
-  tableId: null
 };
 
-function initGrist(onUpdate) {
+window.initGrist = function(onUpdate) {
   grist.ready({ requiredAccess: "read table" });
 
-  grist.onTable((table) => {
-    GristData.tableId = table?.id || null;
-  });
-
   grist.onRecords((recs) => {
-    GristData.records = recs || [];
-    onUpdate();
+    App.records = recs || [];
+    if (typeof onUpdate === "function") onUpdate();
   });
-}
+};
