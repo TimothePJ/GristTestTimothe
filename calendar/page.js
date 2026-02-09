@@ -163,7 +163,7 @@ class CalendarHandler {
         popupDelete(){
           return t('Delete')
         },
-        poupSave(){
+        popupSave(){
           return t('Save')
         },
         popupEdit(){
