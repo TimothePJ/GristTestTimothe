@@ -8,12 +8,12 @@ let projetsDictGlobal = null;
 async function chargerProjetsMap() {
   if (projetsDictGlobal) return projetsDictGlobal;
 
-  const data = await grist.docApi.fetchTable("Projet");
+  const data = await grist.docApi.fetchTable("Projets");
   projetsDictGlobal = {};
 
-  if (data && data.id && data.Projet) {
+  if (data && data.id && data.Nom_de_projet) {
     for (let i = 0; i < data.id.length; i++) {
-      const nom = data.Projet[i];
+      const nom = data.Nom_de_projet[i];
       const id = data.id[i];
       if (typeof nom === "string" && nom.trim()) {
         projetsDictGlobal[nom.trim()] = id;
@@ -41,10 +41,10 @@ function afficherPlansFiltres(projet, typeDocument, records) {
 
   const plansMap = new Map();
   for (const r of filtres) {
-    const key = `${r.N_Document}___${r.Designation}`;
+    const key = `${r.NumeroDocument}___${r.Designation}`;
     if (!plansMap.has(key)) {
       plansMap.set(key, {
-        Num_Document: r.N_Document,
+        Num_Document: r.NumeroDocument,
         Designation: r.Designation,
         Type_document: r.Type_document,
         Nom_projet: (typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet),
@@ -64,12 +64,12 @@ function afficherPlansFiltres(projet, typeDocument, records) {
   // Designation conflict warnings
   const docToDesignations = new Map();
   for (const r of filtres) {
-    if (!r.N_Document) continue;
-    if (!docToDesignations.has(r.N_Document)) {
-      docToDesignations.set(r.N_Document, new Set());
+    if (!r.NumeroDocument) continue;
+    if (!docToDesignations.has(r.NumeroDocument)) {
+      docToDesignations.set(r.NumeroDocument, new Set());
     }
     if (r.Designation) {
-      docToDesignations.get(r.N_Document).add(r.Designation);
+      docToDesignations.get(r.NumeroDocument).add(r.Designation);
     }
   }
 
@@ -177,8 +177,7 @@ function afficherPlansFiltres(projet, typeDocument, records) {
       allIndicesUsed.add(ind);
     }
   }
-  let lastUsedIndex = Math.max(...[...allIndicesUsed].map(i => INDICES.indexOf(i)).filter(i => i >= 0));
-  if (isNaN(lastUsedIndex)) lastUsedIndex = -1;
+  let lastUsedIndex = Math.max(-1, ...[...allIndicesUsed].map(i => INDICES.indexOf(i)).filter(i => i >= 0));
   const indicesToShow = INDICES.slice(0, lastUsedIndex + 2);
 
   const table = document.createElement("table");
@@ -200,7 +199,7 @@ function afficherPlansFiltres(projet, typeDocument, records) {
   const tbody = document.createElement("tbody");
   for (const plan of plansMap.values()) {
     const tr = document.createElement("tr");
-    if (docToDesignations.get(plan.N_Document)?.size > 1) {
+    if (docToDesignations.get(plan.NumeroDocument)?.size > 1) {
       tr.classList.add("duplicate-doc");
     }
 
@@ -343,7 +342,7 @@ document.addEventListener("click", async (e) => {
       return;
     }
     const correctDesignation = selectedRadio.value;
-    const recordsToUpdate = window.records.filter(r => r.N_Document === numDocument && r.Designation !== correctDesignation);
+    const recordsToUpdate = window.records.filter(r => r.NumeroDocument === numDocument && r.Designation !== correctDesignation);
     if (recordsToUpdate.length > 0) {
       const actions = recordsToUpdate.map(r => ["UpdateRecord", "ListePlan_NDC_COF", r.id, { Designation: correctDesignation }]);
       try {
@@ -384,12 +383,12 @@ document.addEventListener("click", async (e) => {
               }
               await grist.docApi.applyUserActions([
                 ["AddRecord", "ListePlan_NDC_COF", null, rowData],
-                ["AddRecord", "References_2", null, {
+                ["AddRecord", "References", null, {
                   // ⇩⇩ MAPPINGS demandés, avec les NOMS EXACTS du premier projet ⇩⇩
                   NomProjet: rowData.Nom_projet,          // ID du projet déjà calculé pour ListePlan_NDC_COF
                   NomDocument: rowData.Designation,       // Designation -> NomDocument
                   NumeroDocument: (()=>{
-                    const s = String(rowData.N_Document ?? '').trim();
+                    const s = String(rowData.NumeroDocument ?? '').trim();
                     // Conserve "0" -> 0 ; vide/non numérique -> null
                     return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
                   })()
@@ -403,12 +402,12 @@ document.addEventListener("click", async (e) => {
           try {
             await grist.docApi.applyUserActions([
               ["AddRecord", "ListePlan_NDC_COF", null, rowData],
-              ["AddRecord", "References_2", null, {
+              ["AddRecord", "References", null, {
                 // ⇩⇩ MAPPINGS demandés, avec les NOMS EXACTS du premier projet ⇩⇩
                 NomProjet: rowData.Nom_projet,          // ID du projet déjà calculé pour ListePlan_NDC_COF
                 NomDocument: rowData.Designation,       // Designation -> NomDocument
                 NumeroDocument: (()=>{
-                  const s = String(rowData.N_Document ?? '').trim();
+                  const s = String(rowData.NumeroDocument ?? '').trim();
                   // Conserve "0" -> 0 ; vide/non numérique -> null
                   return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
                 })()
@@ -433,21 +432,20 @@ document.addEventListener("click", async (e) => {
           }
         }
         const projetsDict = await chargerProjetsMap();
-        const Nom_projet_id = projetsDict[nomProjet.trim()];
-        if (!Nom_projet_id) {
-          console.error("ID de projet non trouvé pour :", nomProjet);
+        if (!projetsDict[nomProjet.trim()]) {
+          console.error("Projet non trouvé :", nomProjet);
           return;
         }
-        const rowData = { N_Document: Num_Document, Type_document: typeDocument, Designation: Designation, Nom_projet: Nom_projet_id, Indice: indice, DateDiffusion: isoDate };
+        const rowData = { NumeroDocument: Num_Document, Type_document: typeDocument, Designation: Designation, Nom_projet: nomProjet, Indice: indice, DateDiffusion: isoDate };
         try {
           await grist.docApi.applyUserActions([
             ["AddRecord", "ListePlan_NDC_COF", null, rowData],
-            ["AddRecord", "References_2", null, {
+            ["AddRecord", "References", null, {
               // ⇩⇩ MAPPINGS demandés, avec les NOMS EXACTS du premier projet ⇩⇩
               NomProjet: rowData.Nom_projet,          // ID du projet déjà calculé pour ListePlan_NDC_COF
               NomDocument: rowData.Designation,       // Designation -> NomDocument
               NumeroDocument: (()=>{
-                const s = String(rowData.N_Document ?? '').trim();
+                const s = String(rowData.NumeroDocument ?? '').trim();
                 // Conserve "0" -> 0 ; vide/non numérique -> null
                 return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
               })()
@@ -484,28 +482,27 @@ document.addEventListener("focusout", async (e) => {
       }
 
       const projetsDict = await chargerProjetsMap();
-      const nomProjetId = projetsDict[nomProjet.trim()];
-      if (!nomProjetId) {
-        console.error("ID de projet non trouvé pour :", nomProjet);
+      if (!projetsDict[nomProjet.trim()]) {
+        console.error("Projet non trouvé :", nomProjet);
         return;
       }
       const rowData = {
-        N_Document: numDocument,
+        NumeroDocument: numDocument,
         Type_document: typeDocument,
         Designation: designation,
-        Nom_projet: nomProjetId,
+        Nom_projet: nomProjet,
         Indice: null,
         DateDiffusion: null
       };
       try {
         await grist.docApi.applyUserActions([
           ["AddRecord", "ListePlan_NDC_COF", null, rowData],
-          ["AddRecord", "References_2", null, {
+          ["AddRecord", "References", null, {
             // ⇩⇩ MAPPINGS demandés, avec les NOMS EXACTS du premier projet ⇩⇩
             NomProjet: rowData.Nom_projet,          // ID du projet déjà calculé pour ListePlan_NDC_COF
             NomDocument: rowData.Designation,       // Designation -> NomDocument
             NumeroDocument: (()=>{
-              const s = String(rowData.N_Document ?? '').trim();
+              const s = String(rowData.NumeroDocument ?? '').trim();
               // Conserve "0" -> 0 ; vide/non numérique -> null
               return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
             })()
@@ -523,11 +520,11 @@ document.addEventListener("focusout", async (e) => {
   td.style.color = "";
   const texte = td.textContent.trim();
   const { numDocument, designation } = td.dataset;
-  const recordsToUpdate = window.records.filter(r => r.N_Document === numDocument && r.Designation === designation);
+  const recordsToUpdate = window.records.filter(r => r.NumeroDocument === numDocument && r.Designation === designation);
   if (recordsToUpdate.length === 0) return;
   const champs = {};
   if (td.cellIndex === 0) {
-    champs.N_Document = texte;
+    champs.NumeroDocument = texte;
   } else if (td.cellIndex === 1) {
     champs.Designation = texte;
   }

@@ -5,7 +5,7 @@ let allPlans = [];
 let allProjects = [];
 let BORDEREAU_TABLE = 'Envois';
 const PLANS_TABLE = 'ListePlan_NDC_COF';
-const PROJET_TABLE = 'Projet';
+const PROJET_TABLE = 'Projets';
 
 grist.onRecords(async (newRecords, mappings) => {
   records = newRecords;
@@ -17,7 +17,7 @@ grist.onRecords(async (newRecords, mappings) => {
 
 function populateProjectDropdown() {
   const projectDropdown = document.getElementById('projectDropdown');
-  const projects = [...new Set(allProjects.Projet)].filter(Boolean).sort();
+  const projects = [...new Set(allProjects.Nom_de_projet)].filter(Boolean).sort();
   
   const currentValue = projectDropdown.value;
   while (projectDropdown.options.length > 1) projectDropdown.remove(1);
@@ -173,7 +173,7 @@ function displayInvoiceTable() {
   if (refRecords.length === 0) {
     return;
   }
-  const selectedProject = allProjects.id[allProjects.Projet.indexOf(selectedProjectName)];
+  const selectedProject = selectedProjectName;
   const allProjectRecords = records.filter(r => r.Projet === selectedProjectName);
 
   refRecords.forEach(record => {
@@ -191,7 +191,7 @@ function displayInvoiceTable() {
         return indices;
     }, []);
 
-    const planNumbers = [...new Set(planIndices.map(i => allPlans.N_Document[i]))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    const planNumbers = [...new Set(planIndices.map(i => allPlans.NumeroDocument[i]))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 
     planNumbers.forEach(planNumber => {
       const option = document.createElement('option');
@@ -251,18 +251,16 @@ document.getElementById('addItem').addEventListener('click', async () => {
     alert('Veuillez entrer une date valide avant d\'ajouter un élément.');
     return;
   }
-  const projectIndex = allProjects.Projet.indexOf(selectedProjectName);
-  const selectedProjectId = allProjects.id[projectIndex];
   const ref = document.getElementById('refInput').value;
 
   // Check if a record with this ref already exists for the project
   const existingRecords = records.filter(r => r.Projet === selectedProjectName && r.Ref == ref);
   if (existingRecords.length === 0) {
     // If no records exist for this ref, create the first one.
-    await grist.docApi.applyUserActions([['AddRecord', BORDEREAU_TABLE, null, { Projet: selectedProjectId, Ref: ref, Date_Bordereau: date }]]);
+    await grist.docApi.applyUserActions([['AddRecord', BORDEREAU_TABLE, null, { Projet: selectedProjectName, Ref: ref, Date_Bordereau: date }]]);
   } else {
     // If records already exist, just add a new one to the existing bordereau
-    await grist.docApi.applyUserActions([['AddRecord', BORDEREAU_TABLE, null, { Projet: selectedProjectId, Ref: ref, Date_Bordereau: date }]]);
+    await grist.docApi.applyUserActions([['AddRecord', BORDEREAU_TABLE, null, { Projet: selectedProjectName, Ref: ref, Date_Bordereau: date }]]);
   }
 });
 
@@ -274,15 +272,15 @@ document.querySelector('#invoiceTable').addEventListener('change', async (e) => 
   if (target.tagName === 'SELECT' && target.parentElement.cellIndex === 0) { // N_Plan
     const nPlan = target.value;
     const selectedProjectName = document.getElementById('projectDropdown').value;
-    const selectedProject = allProjects.id[allProjects.Projet.indexOf(selectedProjectName)];
+    const selectedProject = selectedProjectName;
     
     const matchingPlans = allPlans.id.map((id, i) => ({
         id: id,
-        N_Document: allPlans.N_Document[i],
+        NumeroDocument: allPlans.NumeroDocument[i],
         Indice: allPlans.Indice[i],
         Designation: allPlans.Designation[i],
         Nom_projet: allPlans.Nom_projet[i]
-    })).filter(p => p.N_Document === nPlan && p.Nom_projet === selectedProject);
+    })).filter(p => p.NumeroDocument === nPlan && p.Nom_projet === selectedProject);
 
     if (matchingPlans.length > 0) {
       const latestPlan = matchingPlans.reduce((latest, current) => (latest.Indice > current.Indice) ? latest : current);
@@ -375,10 +373,12 @@ document.getElementById('generatePdf').addEventListener('click', async () => {
         doc.text(`Ref: ${refValue || ''}`, 14, 65);
     };
 
-    const addFooter = (pageNumber, totalPages) => {
+    const addFooter = (pageNumber, totalPages, isLastPage) => {
         const finalY = doc.lastAutoTable.finalY || 70;
-        doc.text('Nous vous en souhaitons bonne réception et restons à votre disposition.', 14, finalY + 10);
-        doc.text('M. GHANEM', 170, finalY + 20);
+        if (isLastPage) {
+            doc.text('Nous vous en souhaitons bonne réception et restons à votre disposition.', 14, finalY + 10);
+            doc.text('M. GHANEM', 170, finalY + 20);
+        }
         doc.text(`Page ${pageNumber}/${totalPages}`, 175, 280);
     };
 
@@ -398,7 +398,7 @@ document.getElementById('generatePdf').addEventListener('click', async () => {
             body: body,
         });
 
-        addFooter(i + 1, totalPages);
+        addFooter(i + 1, totalPages, i === totalPages - 1);
     }
 
     doc.save(`${selectedProject} - Bordereau n°${refValue}.pdf`);

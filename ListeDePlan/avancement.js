@@ -90,12 +90,12 @@ function generateChartDataAndTable(projectRecords, devisMap) {
     const type = record.Type_document || 'Non spécifié';
     
     if (type === 'COFFRAGE' && record.Indice === 'B') {
-        statsByType['COFFRAGE - Indice B'].advancedDocs.add(record.N_Document);
+        statsByType['COFFRAGE - Indice B'].advancedDocs.add(record.NumeroDocument);
     }
     
-    statsByType[type].totalDocs.add(record.N_Document);
+    statsByType[type].totalDocs.add(record.NumeroDocument);
     if (record.Indice === '0') {
-        statsByType[type].advancedDocs.add(record.N_Document);
+        statsByType[type].advancedDocs.add(record.NumeroDocument);
     }
 
     // Calculate average indices for specific types

@@ -2,8 +2,8 @@
   // Reproduit la fenêtre "Ajouter document" d'AffichageReference,
   // adaptée à ListeDePlan. Ouvre sur l'événement LP_OPEN_ADD_REF_DOC
   // (déclenché par le menu contextuel), et écrit dans:
-  //   - References_2 (NomProjet, NomDocument, NumeroDocument, Emetteur, DateLimite, Service, etc.)
-  //   - ListePlan_NDC_COF (N_Document, Type_document, Nom_projet, Designation, ...)
+  //   - References (NomProjet, NomDocument, NumeroDocument, Emetteur, DateLimite, Service, etc.)
+  //   - ListePlan_NDC_COF (NumeroDocument, Type_document, Nom_projet, Designation, ...)
 
   const STATE = {
     projectName: null,       // libellé du projet (depuis #projectDropdown)
@@ -108,15 +108,15 @@
 
   // Trouve l'ID du projet courant depuis le libellé exact
   async function resolveProjectId(projectName) {
-    const t = await grist.docApi.fetchTable("Projet");
-    // format colonnes attendu: t.Projet[], t.id[]
-    if (t && t.Projet && t.id && Array.isArray(t.Projet) && Array.isArray(t.id)) {
-      const idx = t.Projet.findIndex(p => String(p) === String(projectName));
+    const t = await grist.docApi.fetchTable("Projets");
+    // format colonnes attendu: t.Nom_de_projet[], t.id[]
+    if (t && t.Nom_de_projet && t.id && Array.isArray(t.Nom_de_projet) && Array.isArray(t.id)) {
+      const idx = t.Nom_de_projet.findIndex(p => String(p) === String(projectName));
       if (idx >= 0) return t.id[idx];
     }
     // fallback si renvoi tableau d'objets
     if (Array.isArray(t)) {
-      const row = t.find(r => String(r.Projet) === String(projectName));
+      const row = t.find(r => String(r.Nom_de_projet) === String(projectName));
       if (row) return row.id;
     }
     return null;
@@ -153,10 +153,10 @@
     return [];
   }
 
-  // Récupère les émetteurs déjà utilisés pour le projet dans References_2
+  // Récupère les émetteurs déjà utilisés pour le projet dans References
   async function getProjectEmetteurs(projetId) {
     try {
-      const t = await grist.docApi.fetchTable('References_2');
+      const t = await grist.docApi.fetchTable('References');
       let rows = [];
       if (t && Array.isArray(t.id) && Array.isArray(t.NomProjet) && Array.isArray(t.Emetteur)) {
         for (let i = 0; i < t.id.length; i++) {
@@ -358,10 +358,10 @@
 
     const serviceValue = await getTeamService();
 
-    // 1) Ajouts dans References_2 (un par émetteur)
+    // 1) Ajouts dans References (un par émetteur)
     const actions = [];
     for (const em of selectedEmitters) {
-      actions.push(["AddRecord", "References_2", null, {
+      actions.push(["AddRecord", "References", null, {
         // On écrit le LIBELLÉ du projet, pas l'ID (conforme à tes données)
         NomProjet: (STATE.projectId ?? STATE.projectName),  // Ref (id) si dispo, sinon libellé
         NomDocument: nom,
@@ -378,7 +378,7 @@
 
     // 2) Ajout côté Liste de plan (une seule ligne "tête" pour apparaitre dans la vue)
     actions.push(["AddRecord", "ListePlan_NDC_COF", null, {
-      N_Document: String(numeroStr),
+      NumeroDocument: String(numeroStr),
       Type_document: STATE.typeDocLabel,
       DateDiffusion: null,
       Indice: "",

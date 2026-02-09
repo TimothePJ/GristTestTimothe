@@ -341,6 +341,30 @@ document.addEventListener('DOMContentLoaded', () => {
         expenseTableBody.appendChild(totalRow);
     }
 
+    function getPriorCumulativeSpending(project, boundaryMonthKey) {
+        let real = 0;
+        let prov = 0;
+        project.workers.forEach(worker => {
+            // Real
+            if (worker.workedDays) {
+                Object.entries(worker.workedDays).forEach(([key, days]) => {
+                    if (key < boundaryMonthKey) {
+                        real += (days || 0) * (worker.dailyExpanse || 0);
+                    }
+                });
+            }
+            // Prov
+            if (worker.provisionalDays) {
+                Object.entries(worker.provisionalDays).forEach(([key, days]) => {
+                    if (key < boundaryMonthKey) {
+                        prov += (days || 0) * (worker.dailyExpanse || 0);
+                    }
+                });
+            }
+        });
+        return { real, prov };
+    }
+
     function renderRealExpenseTable(project, groupedWorkers) {
         const headRow = document.querySelector('#real-expense-table thead tr');
         headRow.innerHTML = '<th>Nom</th><th>Total Jours</th><th>Total Dépense</th>';
@@ -393,6 +417,53 @@ document.addEventListener('DOMContentLoaded', () => {
             totalRow.innerHTML += `<td><strong>${formatNumber(totalCost)} €</strong></td>`;
         }
         realExpenseTableBody.appendChild(totalRow);
+
+        // Add 4 new calculation rows
+        const totalBudget = project.budgetLines.reduce((sum, line) => sum + line.amount, 0);
+        
+        // Calculate priors
+        const startMonthIndex = data.selectedMonth;
+        const startYear = data.selectedYear;
+        const startMonthKey = `${startYear}-${String(startMonthIndex + 1).padStart(2, '0')}`;
+        let { real: currentCumulReal, prov: currentCumulProv } = getPriorCumulativeSpending(project, startMonthKey);
+
+        const cumulFacturationRow = document.createElement('tr');
+        cumulFacturationRow.innerHTML = `<td colspan="3"><strong>Cumul facturation</strong></td>`;
+        
+        const radRow = document.createElement('tr');
+        radRow.innerHTML = `<td colspan="3"><strong>RAD</strong></td>`;
+        
+        const ecartMensuelRow = document.createElement('tr');
+        ecartMensuelRow.innerHTML = `<td colspan="3"><strong>ECART MENSUEL - FACTURE - PREV</strong></td>`;
+        
+        const cumulEcartRow = document.createElement('tr');
+        cumulEcartRow.innerHTML = `<td colspan="3"><strong>CUMUL ECART - FACTURE - PREV</strong></td>`;
+
+        for (let i = 0; i < monthSpan; i++) {
+            const monthIndex = (data.selectedMonth + i) % 12;
+            const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
+            const monthKey = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+            
+            const monthlyReal = calculateRealSpending(project, monthKey);
+            const monthlyProv = calculateProvisionalSpending(project, monthKey);
+            
+            currentCumulReal += monthlyReal;
+            currentCumulProv += monthlyProv;
+            
+            const rad = totalBudget - currentCumulReal;
+            const ecartMensuel = monthlyReal - monthlyProv;
+            const cumulEcart = currentCumulReal - currentCumulProv;
+            
+            cumulFacturationRow.innerHTML += `<td><strong>${formatNumber(currentCumulReal)} €</strong></td>`;
+            radRow.innerHTML += `<td><strong>${formatNumber(rad)} €</strong></td>`;
+            ecartMensuelRow.innerHTML += `<td><strong>${formatNumber(ecartMensuel)} €</strong></td>`;
+            cumulEcartRow.innerHTML += `<td><strong>${formatNumber(cumulEcart)} €</strong></td>`;
+        }
+        
+        realExpenseTableBody.appendChild(cumulFacturationRow);
+        realExpenseTableBody.appendChild(radRow);
+        realExpenseTableBody.appendChild(ecartMensuelRow);
+        realExpenseTableBody.appendChild(cumulEcartRow);
     }
 
     function renderChart(project) {

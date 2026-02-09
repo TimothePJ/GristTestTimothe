@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="fr">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Création de Projet</title>
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
     <div class="wizard-container">
         <h1>Créer un nouveau projet</h1>
@@ -21,7 +23,23 @@
             <h2>Étape 2: Lignes Budgétaires</h2>
             <div id="budget-lines-container"></div>
             <div class="budget-line-form">
-                <input type="text" id="budget-chapter" placeholder="Chapitre">
+                <input type="text" id="budget-chapter" placeholder="Chapitre" list="budget-chapters-list">
+                <datalist id="budget-chapters-list">
+                    <option value="01-Analyse Dossier-Organisation">
+                    <option value="02-Réunions-Visite sur chantier">
+                    <option value="03-Fond de plans">
+                    <option value="04-Plan de coffrage">
+                    <option value="05-Plan de démolition">
+                    <option value="06-Plan d'armature">
+                    <option value="07-Note de calcul">
+                    <option value="08-Modélisation-Calcul">
+                    <option value="09-Etude ouvrages provisoires">
+                    <option value="10-DOE">
+                    <option value="11-Sous-traitance-Calculs">
+                    <option value="12-Sous-traitance-Armatures">
+                    <option value="13-Base">
+                    <option value="14-Travaux supplémentaires">
+                </datalist>
                 <input type="number" id="budget-amount" placeholder="Montant">
                 <button id="add-budget-line-btn">Ajouter Ligne</button>
             </div>
@@ -39,8 +57,101 @@
         <div class="wizard-step" id="step-4" style="display: none;">
             <h2>Étape 4: Documents & Émetteurs</h2>
 
-            <h3>Documents du projet (étages)</h3>
+            <div class="section-header">
+                <h3>Documents du projet (étages)</h3>
+                <button type="button" id="open-docs-modal-btn" class="add-btn">+ Ajouter</button>
+            </div>
             <div id="documents-selection-container"></div>
+
+            <!-- Modal Dialog for Document Creation -->
+            <div id="docs-modal" class="modal-overlay" style="display: none;">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>Ajouter des documents</h3>
+                        <button type="button" id="close-docs-modal" class="modal-close">&times;</button>
+                    </div>
+                    <div class="modal-tabs">
+                        <button type="button" class="tab-btn active" data-tab="manual">Manuel</button>
+                        <button type="button" class="tab-btn" data-tab="pattern">Avec motif</button>
+                    </div>
+                    <div class="tab-content" id="tab-manual">
+                        <div class="form-group">
+                            <label for="manual-doc-name">Nom du document :</label>
+                            <input type="text" id="manual-doc-name" placeholder="Ex: RDC, SS1, R+3...">
+                        </div>
+                        <div class="form-group">
+                            <label for="manual-doc-numero">N°Document :</label>
+                            <input type="text" id="manual-doc-numero" placeholder="Ex: 001, A-01...">
+                        </div>
+                        <button type="button" id="add-manual-doc-btn" class="primary-btn">Ajouter</button>
+                    </div>
+                    <div class="tab-content" id="tab-pattern" style="display: none;">
+                        <div class="form-group">
+                            <label for="pattern-prefix">Préfixe :</label>
+                            <input type="text" id="pattern-prefix" placeholder="Ex: R+, SS, Étage">
+                        </div>
+                        <div class="form-group">
+                            <label for="pattern-suffix">Suffixe (optionnel) :</label>
+                            <input type="text" id="pattern-suffix" placeholder="Ex: -A, _bis">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="pattern-start">De :</label>
+                                <input type="number" id="pattern-start" value="1" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="pattern-end">À :</label>
+                                <input type="number" id="pattern-end" value="5" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="pattern-padding">Padding (chiffres) :</label>
+                                <select id="pattern-padding">
+                                    <option value="0">Aucun (1, 2, 10)</option>
+                                    <option value="2">2 chiffres (01, 02, 10)</option>
+                                    <option value="3">3 chiffres (001, 002)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <fieldset class="numero-fieldset">
+                            <legend>N°Document</legend>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="numero-start">Début :</label>
+                                    <input type="number" id="numero-start" value="1" min="0">
+                                </div>
+                                <div class="form-group">
+                                    <label for="numero-step">Pas :</label>
+                                    <input type="number" id="numero-step" value="1" min="1">
+                                </div>
+                                <div class="form-group">
+                                    <label for="numero-padding">Padding :</label>
+                                    <select id="numero-padding">
+                                        <option value="0">Aucun (1, 2, 10)</option>
+                                        <option value="2">2 chiffres (01, 02)</option>
+                                        <option value="3" selected>3 chiffres (001, 002)</option>
+                                        <option value="4">4 chiffres (0001, 0002)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </fieldset>
+                        <div class="pattern-preview">
+                            <strong>Aperçu :</strong>
+                            <table class="preview-table" id="pattern-preview-table">
+                                <thead>
+                                    <tr>
+                                        <th>N°Document</th>
+                                        <th>Nom Document</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pattern-preview-body">
+                                </tbody>
+                            </table>
+                        </div>
+                        <button type="button" id="add-pattern-docs-btn" class="primary-btn">Ajouter les
+                            documents</button>
+                    </div>
+                </div>
+            </div>
 
             <h3>Émetteurs par défaut</h3>
             <div id="emitters-selection-container"></div>
@@ -62,4 +173,5 @@
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
     <script src="app.js"></script>
 </body>
+
 </html>
