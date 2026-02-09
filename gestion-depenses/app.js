@@ -132,6 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const selectedProjectExists = data.projects.some(p => p.id === data.selectedProjectId);
         if (!selectedProjectExists && data.projects.length > 0) {
             data.selectedProjectId = data.projects[0].id;
+            setStartDateToEarliestData(data.projects[0]);
         }
         renderProjects();
         populateWorkerDatalists(allTeamsData);
@@ -203,7 +204,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderSelectedProject() {
         const selectedProject = data.projects.find(p => p.id === data.selectedProjectId);
         if (selectedProject) {
-            setStartDateToEarliestData(selectedProject);
             updateCurrentMonthYear();
             currentProjectName.textContent = selectedProject.name;
             currentProjectNumber.textContent = selectedProject.projectNumber;
@@ -467,6 +467,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderChart(project) {
+        const totalBudget = project.budgetLines.reduce((sum, line) => sum + line.amount, 0);
+
         const allMonthKeys = new Set();
         project.workers.forEach(worker => {
             Object.keys(worker.provisionalDays).forEach(key => allMonthKeys.add(key));
@@ -508,6 +510,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const labels = [];
         const provisionalSpendingData = [];
         const realSpendingData = [];
+        const provisionalPercentData = [];
+        const realPercentData = [];
 
         for (let i = 0; i < monthSpan; i++) {
             const monthIndex = (data.selectedMonth + i) % 12;
@@ -535,37 +539,158 @@ document.addEventListener('DOMContentLoaded', () => {
 
             provisionalSpendingData.push(provisionalValue);
             realSpendingData.push(realValue);
+            
+            provisionalPercentData.push(totalBudget > 0 ? (provisionalValue / totalBudget) * 100 : 0);
+            realPercentData.push(totalBudget > 0 ? (realValue / totalBudget) * 100 : 0);
         }
 
         if (spendingChart) {
             spendingChart.destroy();
         }
 
+        const chartPlugins = [];
+        if (typeof ChartDataLabels !== 'undefined') {
+            chartPlugins.push(ChartDataLabels);
+        }
+
         spendingChart = new Chart(spendingChartCanvas, {
-            type: 'line',
+            type: 'bar',
+            plugins: chartPlugins,
             data: {
                 labels: labels,
                 datasets: [
                     {
-                        label: 'Dépenses prévisionnelles cumulées',
-                        data: provisionalSpendingData,
+                        type: 'line',
+                        label: 'Avancement prévisionnel (%)',
+                        data: provisionalPercentData,
                         borderColor: 'rgba(255, 99, 132, 1)',
-                        borderWidth: 1,
-                        fill: false
+                        borderWidth: 2,
+                        fill: false,
+                        yAxisID: 'y',
+                        tension: 0.1,
+                        datalabels: {
+                            align: 'top',
+                            anchor: 'end'
+                        }
                     },
                     {
-                        label: 'Dépenses réelles cumulées',
+                        type: 'line',
+                        label: 'Avancement réel (%)',
+                        data: realPercentData,
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 2,
+                        fill: false,
+                        yAxisID: 'y',
+                        tension: 0.1,
+                        datalabels: {
+                            align: 'top',
+                            anchor: 'end'
+                        }
+                    },
+                    {
+                        type: 'bar',
+                        label: 'Dépenses prévisionnelles cumulées (€)',
+                        data: provisionalSpendingData,
+                        backgroundColor: 'rgba(255, 99, 132, 0.5)',
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        borderWidth: 1,
+                        yAxisID: 'y1',
+                        datalabels: {
+                            align: 'end',
+                            anchor: 'end'
+                        }
+                    },
+                    {
+                        type: 'bar',
+                        label: 'Dépenses réelles cumulées (€)',
                         data: realSpendingData,
+                        backgroundColor: 'rgba(54, 162, 235, 0.5)',
                         borderColor: 'rgba(54, 162, 235, 1)',
                         borderWidth: 1,
-                        fill: false
+                        yAxisID: 'y1',
+                        datalabels: {
+                            align: 'end',
+                            anchor: 'end'
+                        }
                     }
                 ]
             },
             options: {
+                responsive: true,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                stacked: false,
                 scales: {
                     y: {
-                        beginAtZero: true
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: '% Budget'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return value + '%';
+                            }
+                        }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Montant (€)'
+                        },
+                        grid: {
+                            drawOnChartArea: false
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return formatNumber(value) + ' €';
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    datalabels: {
+                        color: '#000',
+                        font: {
+                            weight: 'bold',
+                            size: 10
+                        },
+                        display: 'auto',
+                        formatter: function(value, context) {
+                            if (value === 0) return '';
+                            if (context.dataset.yAxisID === 'y') {
+                                return value.toFixed(1) + '%';
+                            } else {
+                                return Math.round(value).toLocaleString('fr-FR') + ' €';
+                            }
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.parsed.y !== null) {
+                                    if (context.dataset.yAxisID === 'y') {
+                                        label += context.parsed.y.toFixed(2) + '%';
+                                    } else {
+                                        label += formatNumber(context.parsed.y) + ' €';
+                                    }
+                                }
+                                return label;
+                            }
+                        }
                     }
                 }
             }
