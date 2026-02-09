@@ -1,15 +1,12 @@
 let selectedProject = "";
 let selectedDocName = "";
 let selectedDocNumber = null;
-let lastValidDocumentValue = "ALL";
 
-// filtre par couleur
-// "ALL" | "NOT_BLOCKING" | "BLOCKING"
+// "ALL" | "NO_INDICE_NOT_BLOCKING" | "NO_INDICE_BLOCKING" | "WITH_INDICE"
 let sliceFilter = "ALL";
 
 const firstDropdown = document.getElementById("firstColumnDropdown");
 const secondDropdown = document.getElementById("secondColumnListbox");
-
 const pieCanvas = document.getElementById("pieCanvas");
 const legend = document.getElementById("legend");
 
@@ -32,15 +29,12 @@ function populateFirstColumnDropdown(projects) {
     firstDropdown.appendChild(opt);
   });
 
-  if ([...firstDropdown.options].some(o => o.value === current)) {
-    firstDropdown.value = current;
-  } else {
-    firstDropdown.value = "";
-  }
+  if ([...firstDropdown.options].some(o => o.value === current)) firstDropdown.value = current;
+  else firstDropdown.value = "";
 }
 
 function buildDocumentOptionsForProject(project) {
-  const map = new Map(); // name -> Set(num|null)
+  const map = new Map();
 
   (App.records || []).forEach(rec => {
     if (!rec) return;
@@ -84,13 +78,11 @@ function buildDocumentOptionsForProject(project) {
 function populateSecondColumnListbox(project) {
   secondDropdown.innerHTML = "";
 
-  // Tous
   const allOpt = document.createElement("option");
   allOpt.value = "ALL";
   allOpt.textContent = "Tous";
   secondDropdown.appendChild(allOpt);
 
-  // documents
   const opts = buildDocumentOptionsForProject(project);
   for (const o of opts) {
     const opt = document.createElement("option");
@@ -101,7 +93,7 @@ function populateSecondColumnListbox(project) {
 }
 
 function matchesSelectedDocument(rec) {
-  if (!selectedDocName) return true; // Tous
+  if (!selectedDocName) return true;
 
   const recName = String(rec.NomDocument || "").trim();
   if (recName !== selectedDocName) return false;
@@ -110,7 +102,6 @@ function matchesSelectedDocument(rec) {
   return (recNum == null && selectedDocNumber == null) || (recNum === selectedDocNumber);
 }
 
-// baseRows = ce qui est “concerné” (ce que compte le pie)
 function getBaseRows() {
   if (!selectedProject) return [];
 
@@ -118,66 +109,82 @@ function getBaseRows() {
     if (!rec) return false;
     if (String(rec.NomProjet || "").trim() !== selectedProject) return false;
     if (!matchesSelectedDocument(rec)) return false;
-    if (!isEnAttente(rec)) return false;
-    return true;
+    return true; // plus de filtre EN ATTENTE
   });
 }
 
 function applySliceFilter(rows) {
   if (sliceFilter === "ALL") return rows;
-  if (sliceFilter === "BLOCKING") return rows.filter(r => getBloquant(r));
-  return rows.filter(r => !getBloquant(r)); // NOT_BLOCKING
+
+  if (sliceFilter === "WITH_INDICE") {
+    return rows.filter(r => hasIndice(r));
+  }
+
+  if (sliceFilter === "NO_INDICE_BLOCKING") {
+    return rows.filter(r => !hasIndice(r) && getBloquant(r));
+  }
+
+  // NO_INDICE_NOT_BLOCKING
+  return rows.filter(r => !hasIndice(r) && !getBloquant(r));
 }
 
 function computeCounts(rows) {
-  let countBlocking = 0;
-  let countNotBlocking = 0;
+  let countNoIndiceBlocking = 0;
+  let countNoIndiceNotBlocking = 0;
+  let countWithIndice = 0;
 
   rows.forEach(r => {
-    if (getBloquant(r)) countBlocking++;
-    else countNotBlocking++;
+    if (hasIndice(r)) {
+      countWithIndice++;
+    } else {
+      if (getBloquant(r)) countNoIndiceBlocking++;
+      else countNoIndiceNotBlocking++;
+    }
   });
 
-  return { countBlocking, countNotBlocking };
+  return { countNoIndiceBlocking, countNoIndiceNotBlocking, countWithIndice };
 }
 
 function chartLabel() {
   if (!selectedProject) return "";
   if (!selectedDocName) return `${selectedProject} — Tous`;
-
   const docLabel = makeDocLabel(selectedDocName, selectedDocNumber);
   return `${selectedProject} — ${docLabel}`;
 }
 
 function tableTitle() {
   const base = chartLabel();
-  if (!base) return "Lignes EN ATTENTE";
+  if (!base) return "Lignes";
 
-  if (sliceFilter === "BLOCKING") return `Lignes EN ATTENTE (bloquantes) — ${base}`;
-  if (sliceFilter === "NOT_BLOCKING") return `Lignes EN ATTENTE (non bloquantes) — ${base}`;
-  return `Lignes EN ATTENTE — ${base}`;
+  if (sliceFilter === "WITH_INDICE") return `Avec Indice — ${base}`;
+  if (sliceFilter === "NO_INDICE_BLOCKING") return `Sans Indice (bloquant) — ${base}`;
+  if (sliceFilter === "NO_INDICE_NOT_BLOCKING") return `Sans Indice (non bloquant) — ${base}`;
+  return `Toutes lignes — ${base}`;
 }
 
 function refreshUI() {
-  // dropdown projet
   const projects = uniqProjects(App.records);
   populateFirstColumnDropdown(projects);
 
-  // reset si projet invalide
   if (!selectedProject || !projects.includes(selectedProject)) {
     selectedProject = "";
     selectedDocName = "";
     selectedDocNumber = null;
-    lastValidDocumentValue = "ALL";
     sliceFilter = "ALL";
     setSecondDropdownDisabled(true);
 
-    renderPieChart({ project: "", countNotBlocking: 0, countBlocking: 0, activeSlice: "ALL" });
-    renderDetailsTable({ rows: [], title: "Lignes EN ATTENTE", footer: "" });
+    renderPieChart({
+      project: "",
+      countNoIndiceNotBlocking: 0,
+      countNoIndiceBlocking: 0,
+      countWithIndice: 0,
+      activeSlice: "ALL"
+    });
+
+    renderDetailsTable({ rows: [], title: "Lignes", footer: "" });
     return;
   }
 
-  // dropdown document
   secondDropdown.disabled = false;
   populateSecondColumnListbox(selectedProject);
 
@@ -187,34 +194,29 @@ function refreshUI() {
 
   if ([...secondDropdown.options].some(o => o.value === desiredValue)) {
     secondDropdown.value = desiredValue;
-    lastValidDocumentValue = desiredValue;
   } else {
     secondDropdown.value = "ALL";
     selectedDocName = "";
     selectedDocNumber = null;
-    lastValidDocumentValue = "ALL";
   }
 
-  // data
   const baseRows = getBaseRows();
-  const { countBlocking, countNotBlocking } = computeCounts(baseRows);
+  const { countNoIndiceBlocking, countNoIndiceNotBlocking, countWithIndice } = computeCounts(baseRows);
 
   renderPieChart({
     project: chartLabel(),
-    countNotBlocking,
-    countBlocking,
+    countNoIndiceNotBlocking,
+    countNoIndiceBlocking,
+    countWithIndice,
     activeSlice: sliceFilter
   });
 
-  // table rows (filtrés par couleur)
+  // Table (plus de limite)
   const listRows = applySliceFilter(baseRows)
     .slice()
-    .sort((a, b) => (getRecuMs(b) - getRecuMs(a))); // tri: plus récent d'abord
+    .sort((a, b) => (getRecuMs(b) - getRecuMs(a)));
 
-  const LIMIT = 250;
-  const shown = listRows.slice(0, LIMIT);
-
-  const rowsForRender = shown.map(rec => ({
+  const rowsForRender = listRows.map(rec => ({
     rowId: getRowId(rec),
     emetteur: String(rec.Emetteur || "-"),
     reference: String(rec.Reference || "-"),
@@ -224,26 +226,20 @@ function refreshUI() {
     bloquant: !!getBloquant(rec)
   }));
 
-  const footer = (listRows.length > LIMIT)
-    ? `… ${listRows.length - LIMIT} lignes non affichées (limite ${LIMIT}).`
-    : `${listRows.length} ligne(s).`;
-
   renderDetailsTable({
     rows: rowsForRender,
     title: tableTitle(),
-    footer
+    footer: `${listRows.length} ligne(s).`
   });
 }
 
 /* EVENTS */
 
-// Projet change
+// Projet
 firstDropdown.addEventListener("change", () => {
   selectedProject = firstDropdown.value.trim();
-
   selectedDocName = "";
   selectedDocNumber = null;
-  lastValidDocumentValue = "ALL";
   sliceFilter = "ALL";
 
   if (!selectedProject) {
@@ -255,18 +251,16 @@ firstDropdown.addEventListener("change", () => {
   secondDropdown.disabled = false;
   populateSecondColumnListbox(selectedProject);
   secondDropdown.value = "ALL";
-
   refreshUI();
 });
 
-// Document change
+// Document
 secondDropdown.addEventListener("change", () => {
   const val = secondDropdown.value;
 
   if (val === "ALL" || !val) {
     selectedDocName = "";
     selectedDocNumber = null;
-    lastValidDocumentValue = "ALL";
     sliceFilter = "ALL";
     refreshUI();
     return;
@@ -276,11 +270,9 @@ secondDropdown.addEventListener("change", () => {
     const parsed = JSON.parse(val);
     selectedDocName = parsed.name || "";
     selectedDocNumber = parsed.n == null ? null : Number(parsed.n);
-    lastValidDocumentValue = val;
   } catch {
     selectedDocName = "";
     selectedDocNumber = null;
-    lastValidDocumentValue = "ALL";
     secondDropdown.value = "ALL";
   }
 
@@ -288,27 +280,24 @@ secondDropdown.addEventListener("change", () => {
   refreshUI();
 });
 
-// Clic sur le pie
+// Clic sur pie (toggle)
 pieCanvas.addEventListener("click", (e) => {
   const slice = hitTestPie(e.clientX, e.clientY);
   if (!slice) return;
-
-  // toggle : re-clic sur la même couleur => ALL
   sliceFilter = (sliceFilter === slice) ? "ALL" : slice;
   refreshUI();
 });
 
-// Clic sur la légende
+// Clic sur légende (toggle)
 legend.addEventListener("click", (e) => {
   const item = e.target.closest("[data-slice]");
   if (!item) return;
-
   const slice = item.getAttribute("data-slice");
   sliceFilter = (sliceFilter === slice) ? "ALL" : slice;
   refreshUI();
 });
 
-// Clic ligne => sélectionner dans Grist
+// Clic ligne => sélection dans Grist
 document.getElementById("detailsTbody").addEventListener("click", async (e) => {
   const tr = e.target.closest("tr[data-rowid]");
   if (!tr) return;
@@ -317,9 +306,7 @@ document.getElementById("detailsTbody").addEventListener("click", async (e) => {
 
   try {
     await grist.viewApi.setSelectedRows([Number(rowId)]);
-  } catch {
-    // ignore
-  }
+  } catch {}
 });
 
 /* INIT */

@@ -109,7 +109,14 @@ function getRecuMs(rec) {
   return d ? d.getTime() : 0;
 }
 
-// (optionnel) expose explicitement au global, au cas où
+function hasIndice(rec) {
+  const v = rec?.Indice;
+  if (v == null) return false;
+  const s = String(v).trim();
+  return s !== "" && s !== "-" && s !== "_";
+}
+
+window.hasIndice = hasIndice;
 window.escapeHtml = escapeHtml;
 window.makeDocLabel = makeDocLabel;
 window.normalizeNumero = normalizeNumero;
