@@ -46,12 +46,14 @@ select {
 
 .content-area {
   padding: 20px;
+  max-width: 95vw;
 }
 
 .card {
   border: 1px solid #ed1b2d;
   padding: 16px;
-  max-width: 900px;
+  width: 100%;
+  max-width: 1400px;
 }
 
 .card-title {
@@ -94,4 +96,64 @@ select {
   width: 14px;
   height: 14px;
   border: 1px solid #004990;
+}
+
+.table-container {
+  margin-top: 10px;
+  overflow-y: auto;
+  max-height: calc(100vh - 520px); /* ajuste si besoin */
+  border: 1px solid #ed1b2d;
+}
+
+#detailsTable {
+  width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+}
+
+#detailsTable th,
+#detailsTable td {
+  padding: 10px;
+  border: 1px solid #ed1b2d;
+  text-align: left;
+  color: #004990;
+  vertical-align: top;
+}
+
+#detailsTable th {
+  background: #004990;
+  color: #ffffff;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+#detailsTable tbody tr:hover {
+  background: rgba(0, 73, 144, 0.06);
+  cursor: pointer;
+}
+
+/* colonnes un peu plus lisibles */
+#detailsTable td:nth-child(2) { /* Référence */
+  min-width: 420px;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+#detailsTable td:nth-child(5) { /* Observation */
+  min-width: 220px;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.details-footer {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #004990;
+}
+
+.bloq-cell {
+  text-align: center;
+  font-size: 18px;
+  font-weight: bold;
+  color: #004990;
 }

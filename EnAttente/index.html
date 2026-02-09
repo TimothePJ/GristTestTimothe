@@ -1,51 +1,76 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="utf-8">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MonWidget</title>
 
+  <!-- API Grist -->
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
 
-  <link rel="stylesheet" href="./css/style.css">
-  <link rel="stylesheet" href="./css/components.css">
+  <link rel="stylesheet" href="./css/style.css" />
+  <link rel="stylesheet" href="./css/components.css" />
 </head>
 
 <body>
-  <!-- Sticky container -->
-    <div class="sticky-container">
+  <!-- Header sticky -->
+  <div class="sticky-container">
     <div class="dropdown-container">
-        <label for="firstColumnDropdown">Projet :</label>
-        <select id="firstColumnDropdown">
+      <label for="firstColumnDropdown">Projet :</label>
+      <select id="firstColumnDropdown">
         <option value="">Selectionner un projet</option>
-        </select>
+      </select>
     </div>
 
     <div class="dropdown-container">
-        <label for="secondColumnListbox">Document :</label>
-        <select id="secondColumnListbox" disabled>
+      <label for="secondColumnListbox">Document :</label>
+      <select id="secondColumnListbox" disabled>
         <option value="ALL">Tous</option>
-        </select>
+      </select>
     </div>
-    </div>
+  </div>
 
-    <!-- Contenu -->
-    <div id="content" class="content-area">
-    <div class="card">
-        <div id="chartTitle" class="card-title">EN ATTENTE</div>
+  <!-- Contenu principal -->
+  <div id="content" class="content-area">
+    <!-- Carte graphique -->
+    <div class="card" id="chartCard">
+      <div id="chartTitle" class="card-title">EN ATTENTE</div>
 
-        <div class="chart-row">
+      <div class="chart-row">
         <canvas id="pieCanvas" width="280" height="280"></canvas>
 
         <div class="chart-side">
-            <div id="chartNumbers" class="chart-numbers">Sélectionne un projet</div>
-            <div id="legend" class="legend"></div>
+          <div id="chartNumbers" class="chart-numbers">Sélectionne un projet</div>
+          <div id="legend" class="legend"></div>
         </div>
-        </div>
-    </div>
+      </div>
     </div>
 
+    <!-- Carte liste -->
+    <div class="card" id="detailsCard" style="margin-top: 14px;">
+      <div id="detailsTitle" class="card-title">Lignes EN ATTENTE</div>
 
-  <!-- scripts -->
+      <div class="table-container">
+        <table id="detailsTable">
+          <thead>
+            <tr>
+              <th>Émetteur</th>
+              <th>Référence</th>
+              <th>Indice</th>
+              <th>Reçu</th>
+              <th>Observation</th>
+              <th>Bloquant</th>
+            </tr>
+          </thead>
+          <tbody id="detailsTbody"></tbody>
+        </table>
+      </div>
+
+      <div id="detailsFooter" class="details-footer"></div>
+    </div>
+  </div>
+
+  <!-- Scripts (ordre important) -->
   <script src="./js/utils.js"></script>
   <script src="./js/grist.js"></script>
   <script src="./js/render.js"></script>
