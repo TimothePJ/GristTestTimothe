@@ -1,0 +1,5 @@
+- [ ] Restore `Reference2/css/style.css` to its original state.
+- [ ] Modify `calendar/screen.css`:
+    - [ ] Replace all Grist CSS variables with the hardcoded theme colors (`#ffffff`, `#004990`, `#ed1b2d` and derived shades).
+    - [ ] Verify that `calendar/index.html` (which points to `screen.css`) will now display the correct colors.
+    - [ ] Explain why nothing changed previously (modification was in the wrong file).
