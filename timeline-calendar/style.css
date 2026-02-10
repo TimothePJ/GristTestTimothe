@@ -1,0 +1,108 @@
+:root {
+  --grist-theme-text: #222;
+  --grist-theme-page-bg: #fff;
+  --grist-theme-panel-header-bg: #f7f7f7;
+  --grist-theme-border: #ddd;
+  --grist-theme-hover: #f0f0f0;
+  --grist-theme-selection: #e6f2fa;
+  --grist-theme-accent: #16b378;
+}
+
+body, html {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  color: var(--grist-theme-text);
+  background-color: var(--grist-theme-page-bg);
+}
+
+#toolbar {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  background-color: var(--grist-theme-panel-header-bg);
+  border-bottom: 1px solid var(--grist-theme-border);
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+button {
+  background-color: #fff;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--grist-theme-text);
+}
+
+button:hover {
+  background-color: var(--grist-theme-hover);
+}
+
+button.active {
+  background-color: var(--grist-theme-selection);
+  border-color: #add6ff;
+  font-weight: 500;
+}
+
+.nav-buttons, .zoom-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+#current-date-range {
+  font-weight: 500;
+  margin-left: auto;
+}
+
+#visualization {
+  flex-grow: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Vis-Timeline Customization */
+.vis-timeline {
+  border: none;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.vis-item {
+  border-color: var(--grist-theme-border);
+  background-color: #dbeaff;
+  color: #222;
+  border-radius: 2px;
+}
+
+.vis-item.vis-selected {
+  border-color: #3b82f6;
+  background-color: #eff6ff;
+  z-index: 2;
+}
+
+.vis-labelset .vis-label {
+  border-bottom: 1px solid var(--grist-theme-border);
+}
+
+.vis-time-axis .vis-grid.vis-minor {
+  border-color: #f0f0f0;
+}
+
+.vis-time-axis .vis-grid.vis-major {
+  border-color: #e0e0e0;
+}
+
+.vis-panel.vis-left {
+  background-color: #fafafa;
+  border-right: 1px solid var(--grist-theme-border);
+}
+
+.vis-item .vis-item-content {
+  padding: 0 4px;
+}
