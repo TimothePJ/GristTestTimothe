@@ -1,535 +1,184 @@
-:root {
-  --icon-ArrowLeft: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiI+PHBhdGggZD0iTSA4Ljc4NDkzNDYsMTQuNjcwNzUzIDIuNzg0NjI5Niw4LjYyMTMyMjUgYyAtMC4zNjgyMDg0LC0wLjM3MTIzIC0wLjM2ODIwODQsLTAuOTczMSAwLC0xLjM0NDMyIGwgNi4wMDAzMDUsLTYuMDQ5NDI0IGMgMC4zNjgyMSwtMC4zNzEyMjI3NiAwLjk2NTE5LC0wLjM3MTIyMjc2IDEuMzMzNDAwNCwwIDAuMzY4MjEsMC4zNzEyMjMgMC4zNjgyMSwwLjk3MzA5NCAwLDEuMzQ0MzE0IGwgLTQuMzkwNzUwNCw0LjQyNjY5IGggNy43ODA4OTA0IHYgMS45MDExNSBIIDUuNzI3NTg0NiBsIDQuMzkwNzUwNCw0LjQyNjcyMDUgYyAwLjM2ODIxLDAuMzcxMiAwLjM2ODIxLDAuOTczMSAwLDEuMzQ0MyAtMC4zNjgyMTA0LDAuMzcxMiAtMC45NjUxOTA0LDAuMzcxMiAtMS4zMzM0MDA0LDAgeiIgY2xpcC1ydWxlPSJldmVub2RkIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiLz48L3N2Zz4=');
-  --icon-ArrowRight: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiI+PHBhdGggZD0iTSA3LjIzMjAxMzcsMTQuNjcwNzUzIDEzLjIzMjMxOSw4LjYyMTMyMjUgYyAwLjM2ODIwOCwtMC4zNzEyMyAwLjM2ODIwOCwtMC45NzMxIDAsLTEuMzQ0MzIgTCA3LjIzMjAxMzcsMS4yMjc1Nzg1IGMgLTAuMzY4MjEsLTAuMzcxMjIyNzYgLTAuOTY1MTksLTAuMzcxMjIyNzYgLTEuMzMzNDAwNCwwIC0wLjM2ODIxLDAuMzcxMjIzIC0wLjM2ODIxLDAuOTczMDk0IDAsMS4zNDQzMTQgbCA0LjM5MDc1MDcsNC40MjY2OSBIIDIuNTA4NDczMyB2IDEuOTAxMTUgSCAxMC4yODkzNjQgTCA1Ljg5ODYxMzMsMTMuMzI2NDUzIGMgLTAuMzY4MjEsMC4zNzEyIC0wLjM2ODIxLDAuOTczMSAwLDEuMzQ0MyAwLjM2ODIxMDQsMC4zNzEyIDAuOTY1MTkwNCwwLjM3MTIgMS4zMzM0MDA0LDAgeiIgY2xpcC1ydWxlPSJldmVub2RkIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiLz48L3N2Zz4=');
-  --icon-Tick: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTExLjYxODMwNjksNC42NzcwMjg0NyBDMTEuNzk2Njc4OSw0LjQ2NjIyNTE3IDEyLjExMjE2NzgsNC40Mzk5MzQ0MyAxMi4zMjI5NzExLDQuNjE4MzA2NDUgQzEyLjUzMzc3NDQsNC43OTY2Nzg0OCAxMi41NjAwNjUyLDUuMTEyMTY3NDEgMTIuMzgxNjkzMSw1LjMyMjk3MDcxIEw2LjUzMDY4ODI3LDEyLjIzNzc5NDYgTDMuNjQ2NDQ2NjEsOS4zNTM1NTI5OCBDMy40NTExODQ0Niw5LjE1ODI5MDg0IDMuNDUxMTg0NDYsOC44NDE3MDgzNSAzLjY0NjQ0NjYxLDguNjQ2NDQ2MiBDMy44NDE3MDg3Niw4LjQ1MTE4NDA2IDQuMTU4MjkxMjQsOC40NTExODQwNiA0LjM1MzU1MzM5LDguNjQ2NDQ2MiBMNi40NjkzMTE3MywxMC43NjIyMDQ1IEwxMS42MTgzMDY5LDQuNjc3MDI4NDcgWiIgZmlsbD0iIzAwMCIgZmlsbC1ydWxlPSJub256ZXJvIi8+PC9zdmc+');
-}
-
-html, body {
-  height: 100%;
-}
-
 body {
-  background-color: #ffffff !important;
-  font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol !important;
-}
-
-#calendar-options {
-  color: #004990;
-  display: flex;
-  gap: 10px 15px;
-  flex-wrap: wrap;
-  padding: 10px;
-  align-items: center;
-}
-
-/*overriding bootstrap button colors*/
-#calendar-options .btn {
-  color: #004990;
-  background-color: #ffffff;
-  border-color: #ed1b2d;
-  padding: 4px 10px;
-  outline: none;
-}
-
-#calendar-options .btn:active {
-  box-shadow: unset;
-}
-
-.icon {
-  position: relative;
-  display: inline-block;
-  vertical-align: middle;
-  mask-repeat: no-repeat;
-  -webkit-mask-repeat: no-repeat;
-  mask-position: center;
-  -webkit-mask-position: center;
-  mask-size: contain;
-  -webkit-mask-size: contain;
-  width: 13px;
-  height: 13px;
-  background-color: var(--icon-color, #004990);
-}
-
-.icon-arrow-left {
-  mask-image: var(--icon-ArrowLeft);
-  -webkit-mask-image: var(--icon-ArrowLeft);
-}
-
-.icon-arrow-right {
-  mask-image: var(--icon-ArrowRight);
-  -webkit-mask-image: var(--icon-ArrowRight);
-}
-
-#calendar-options .btn:hover {
-  background-color: #e6f2fa;
-  border-color: #004990;
-}
-
-#calendar-perspective-buttons .btn:first-child {
-  border-top-left-radius: 4px;
-  border-bottom-left-radius: 4px;
-}
-
-#calendar-perspective-buttons .btn:last-child {
-  border-top-right-radius: 4px;
-  border-bottom-right-radius: 4px;
-}
-
-#calendar-navigation-buttons, #calendar-perspective-buttons {
-  display: flex;
-}
-
-#calendar-navigation-buttons {
-  gap: 10px;
-}
-
-#calendar-options input[type="radio"] {
-  opacity: 0;
-  position: fixed;
-  width: 0;
-}
-
-.toastui-calendar-timegrid {
-  height: 100%;
-}
-
-/*** BEGIN popup-related styling ***/
-
-/* On an event-view card, hide "detail" sections, since we have nothing to show there */
-.toastui-calendar-section-detail {
-  display: none;
-}
-
-/* Fix up a strange overflow on an event-edit card on Firefox */
-.toastui-calendar-popup-container > form {
-  margin: 0;
-}
-
-.toastui-calendar-popup-container {
-  max-width: 100%;
-  font-weight: unset;
-}
-
-.toastui-calendar-popup-container .toastui-calendar-template-popupDetailDate {
-  color: #004990;
-}
-
-.toastui-calendar-detail-container,
-.toastui-calendar-form-container {
-  max-width: 100%;
-  min-width: 200px;
-  border-radius: 4px;
-  border: none;
-  box-shadow: 0 2px 20px 0 rgba(0, 0, 0, 0.2);
-  background-color: #ffffff;
-  color: #004990;
-}
-
-/* On an event-edit card, hide those detail sections for which we have nothing to show */
-.toastui-calendar-form-container .toastui-calendar-popup-section:nth-child(1),
-.toastui-calendar-form-container .toastui-calendar-popup-section:nth-child(3),
-.toastui-calendar-form-container .toastui-calendar-popup-section:nth-child(5),
-.toastui-calendar-form-container .toastui-calendar-popup-section-private {
-  display: none;
-}
-
-.readonly .toastui-calendar-detail-container .toastui-calendar-edit-button,
-.readonly .toastui-calendar-detail-container .toastui-calendar-delete-button {
-  opacity: 0.4;
-  cursor: default;
-  pointer-events: none;
-}
-
-.toastui-calendar-popup-section-item {
-  border: 1px solid #ed1b2d;
-  background-color: #ffffff;
-}
-.toastui-calendar-popup-section-item input {
-  background-color: #ffffff;
-}
-.toastui-calendar-popup-section-allday {
-  border: none;
-}
-.toastui-calendar-popup-section-title {
-  width: calc(100% - 16px);
-}
-.toastui-calendar-form-container input.toastui-calendar-content {
-  width: calc(100% - 16px);
-}
-.toastui-calendar-popup-arrow.toastui-calendar-right .toastui-calendar-popup-arrow-border {
-  border-left-color: #ed1b2d;
-}
-.toastui-calendar-popup-arrow.toastui-calendar-right .toastui-calendar-popup-arrow-fill {
-  border-left-color: #ffffff;
-}
-.toastui-calendar-popup-arrow.toastui-calendar-left .toastui-calendar-popup-arrow-border {
-  border-right-color: #ed1b2d;
-}
-.toastui-calendar-popup-arrow.toastui-calendar-left .toastui-calendar-popup-arrow-fill {
-  border-right-color: #ffffff;
-}
-.toastui-calendar-popup-arrow.toastui-calendar-top .toastui-calendar-popup-arrow-border {
-  border-bottom-color: #ed1b2d;
-}
-.toastui-calendar-popup-arrow.toastui-calendar-top .toastui-calendar-popup-arrow-fill {
-  border-bottom-color: #ffffff;
-}
-.toastui-calendar-popup-arrow.toastui-calendar-bottom .toastui-calendar-popup-arrow-border {
-  border-top-color: #ed1b2d;
-}
-.toastui-calendar-popup-arrow.toastui-calendar-bottom .toastui-calendar-popup-arrow-fill {
-  border-top-color: #ffffff;
-}
-.toastui-calendar-popup-button.toastui-calendar-popup-confirm {
-  /* match grist primary button style */
-  background-color: #004990;
-  color: #ffffff;
-  border: none;
-  border-radius: 4px;
-  margin: 4px 0;
-  font-weight: 500;
-  font-size: 13px;
-  padding: 10px 24px;
-  min-height: 40px;
-  height: unset;
-  width: unset;
-}
-.toastui-calendar-popup-button.toastui-calendar-popup-confirm:hover {
-  background-color: #003366;
-}
-.toastui-calendar-popup-button.toastui-calendar-popup-close {
-  background-color: transparent;
-  padding: 4px;
-  margin: -4px;
-  font-style: normal;
-  font-size: 16px;
-  color: #ed1b2d;
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.toastui-calendar-popup-button.toastui-calendar-popup-close:hover {
-  background-color: #e6f2fa;
-}
-.toastui-calendar-popup-button.toastui-calendar-popup-close::before {
-  content: "✕";
-}
-.toastui-calendar-icon.toastui-calendar-ic-close {
-  display: none;
-}
-
-.toastui-calendar-popup-section-allday .toastui-calendar-ic-checkbox-normal,
-.toastui-calendar-icon.toastui-calendar-ic-checkbox-checked {
-  background: none;
-  position: relative;
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-}
-.toastui-calendar-popup-section-allday .toastui-calendar-ic-checkbox-normal::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 16px;
-  width: 16px;
-  border: 1px solid #ed1b2d;
-  border-radius: 3px;
-}
-.toastui-calendar-icon.toastui-calendar-ic-checkbox-checked {
-  background-color: #004990;
-  border-radius: 3px;
-}
-.toastui-calendar-icon.toastui-calendar-ic-checkbox-checked::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 16px;
-  width: 16px;
-  mask-image: var(--icon-Tick);
-  -webkit-mask-image: var(--icon-Tick);
-  mask-size: contain;
-  -webkit-mask-size: contain;
-  mask-position: center;
-  -webkit-mask-position: center;
-  mask-repeat: no-repeat;
-  -webkit-mask-repeat: no-repeat;
-  background-color: #ffffff;
-}
-.toastui-calendar-edit-button .toastui-calendar-icon,
-.toastui-calendar-delete-button .toastui-calendar-icon {
-  display: none;    /* no easy way to adjust color for dark mode */
-}
-
-.toastui-calendar-detail-container .toastui-calendar-section-button {
-  border-top: 1px solid #ed1b2d;
-}
-
-.toastui-calendar-form-container input::placeholder {
-  color: #999999;
-}
-
-/*** END popup-related styling ***/
-
-/*** BEGIN datepicker-related styling ***/
-
-.tui-datepicker {
-  color: #004990;
-  border: none;
-  box-shadow: 0 2px 20px 0 rgba(0, 0, 0, 0.2);
-}
-
-.tui-datepicker-footer .tui-timepicker {
-  border-top: 1px solid #ed1b2d;
-}
-
-.tui-calendar,
-.tui-datepicker,
-.tui-timepicker,
-.tui-calendar-btn,
-.tui-calendar-header-inner {
-  background-color: #ffffff;
-}
-
-.tui-calendar .tui-calendar-header {
-  border-bottom: 1px solid #ed1b2d;
-}
-
-.tui-timepicker .tui-timepicker-select {
-  appearance: auto;
-  -webkit-appearance: auto;
-  -moz-appearance: auto;
-  -o-appearance: auto;
-}
-
-.tui-timepicker-select {
-  border: 1px solid #ed1b2d;
-  padding: 0px;
-  color: #004990;
-  background: #ffffff;
-}
-
-.tui-datepicker .tui-is-selectable.tui-is-selected,
-.tui-datepicker.tui-rangepicker .tui-is-selectable.tui-is-selected {
-  color: #ffffff;
-  background-color: #004990;
-}
-
-.tui-calendar .tui-calendar-today {
-  color: #ed1b2d;
-}
-
-.tui-datepicker.tui-rangepicker .tui-is-selected-range {
-  color: #004990;
-  background-color: #e6f2fa;
-}
-
-.tui-datepicker .tui-is-blocked {
-  color: #004990;
-}
-
-.tui-calendar th,
-.tui-calendar td,
-.tui-calendar .tui-calendar-body-header th,
-.tui-datepicker .tui-calendar-title {
-  color: #004990;
-}
-
-.tui-datepicker .tui-is-selectable:hover {
-  background-color: #e6f2fa;
-}
-
-.tui-calendar .tui-calendar-btn-prev-month:after,
-.tui-calendar .tui-calendar-btn-next-month:after,
-.tui-calendar.tui-calendar-month .tui-calendar-btn-prev-year:after,
-.tui-calendar.tui-calendar-month .tui-calendar-btn-next-year:after,
-.tui-calendar.tui-calendar-year .tui-calendar-btn-prev-year:after,
-.tui-calendar.tui-calendar-year .tui-calendar-btn-next-year:after {
-  background: unset;
-  margin: 0px;
-  top: 18px;
-  width: 16px;
-  height: 16px;
-  background-color: #004990;
-}
-
-.tui-calendar-btn {
-  width: 40px;
-}
-
-.tui-calendar .tui-calendar-btn-prev-month:after,
-.tui-calendar .tui-calendar-btn-prev-year:after {
-  margin-left: -8px;
-  mask-image: var(--icon-ArrowLeft);
-  -webkit-mask-image: var(--icon-ArrowLeft);
-}
-
-.tui-calendar .tui-calendar-btn-next-month:after,
-.tui-calendar .tui-calendar-btn-next-year:after {
-  margin-right: -8px;
-  mask-image: var(--icon-ArrowRight);
-  -webkit-mask-image: var(--icon-ArrowRight);
-}
-
-.tui-calendar .tui-calendar-title-today {
-  color: #004990;
-  background-color: #e6f2fa;
-}
-
-.tui-calendar .tui-calendar-title-today:hover {
-  color: #004990;
-  background-color: #d9ebf9;
-}
-
-/*** END datepicker-related styling ***/
-
-#calendar-button-previous,
-#calendar-button-next {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-input:checked + label {
-  color: #ffffff;
-}
-
-.toastui-calendar-day-view .toastui-calendar-panel:not(.toastui-calendar-time), .toastui-calendar-week-view .toastui-calendar-panel:not(.toastui-calendar-time) {
-  overflow-y: hidden;
+    padding: 0;
+    margin: 0;
 }
 
 #calendar-container {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  height: 100%;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
 }
 
 #calendar {
-  flex-grow: 1;
-  overflow: auto;
+    flex-grow: 1;
 }
 
-#calendar-options .btn.active {
-  color: #ffffff;
-  background-color: #004990;
-  border-color: #004990;
-}
-
-/*Overriding some Toast UI styles that cannot be configured via theme*/
-.toastui-calendar-panel {
-  scrollbar-gutter: stable;
-}
-
-.toastui-calendar-timegrid-time {
-  color: #004990;
-}
-
-.toastui-calendar-template-alldayTitle {
-  color: #004990;
-}
-
-.toastui-calendar-template-monthDayName{
-  color: #004990;
-}
-
-.toastui-calendar-weekday-event-dot + .toastui-calendar-weekday-event-title  {
-  color: #004990 !important;
-}
-
-.toastui-calendar-week-view-day-names {
-  border-bottom: 1px solid #ed1b2d;
-}
-
-.toastui-calendar-weekday-grid-date-decorator {
-  color: #ffffff !important;
-  background-color: #ed1b2d !important;
-}
-
-.toastui-calendar-day-view-day-names, .toastui-calendar-week-view-day-names {
-  border-bottom: 1px solid #ed1b2d;
-}
-
-.toastui-calendar-daygrid-cell+.toastui-calendar-daygrid-cell {
-  border-left: 1px solid #ed1b2d;
-}
-
-.toastui-calendar-day-names.toastui-calendar-month{
-  padding: 0px;
-}
-
-.toastui-calendar-week-view .toastui-calendar-holiday-sun,
-.toastui-calendar-day-view .toastui-calendar-holiday-sun {
-  color: #ed1b2d !important;
-}
-
-.toastui-calendar-template-popupDetailTitle {
-  word-break: keep-all;
-}
-
-.toastui-calendar-vertical-line {
-  background: #ed1b2d;
-}
-
-.toastui-calendar-popup-date-dash {
-  color: #ed1b2d;
-}
-
-.toastui-calendar-grid-selection-label {
-  color: #004990;
-}
-
-.toastui-calendar-see-more {
-  border: unset !important;
-  background-color: #ffffff !important;
-  box-shadow: 0 2px 20px 0 rgba(0, 0, 0, 0.2) !important;
-}
-
-.toastui-calendar-more-title-date,
-.toastui-calendar-more-title-day {
-  color: #004990;
-}
-
-@media (max-width: 575.98px) {
-  /* CSS hacks to make days of week more responsive in week view. */
-  .toastui-calendar-week-view .toastui-calendar-day-name__date,
-  .toastui-calendar-week-view .toastui-calendar-day-name__name {
-    font-size: 11px;
-    line-height: 11px;
-  }
-
-  .toastui-calendar-week-view .toastui-calendar-day-name-item.toastui-calendar-week {
+#calendar-options {
+    background-color: var(--grist-theme-page-panels-main-panel-bg, white);
+    padding: 8px 16px;
     display: flex;
     align-items: center;
-    justify-content: center;
-  }
+    border-bottom: 1px solid var(--grist-theme-table-body-border, #ccc);
+}
 
-  .toastui-calendar-week-view .toastui-calendar-day-name-item > span {
-    /* Collapse the &nbsp characters by shrinking the font and line-height to 0px. */
-    font-size: 0px;
-    line-height: 0px;
+#calendar-navigation-buttons {
+    margin-right: 16px;
+}
 
+#calendar-navigation-buttons button {
+    margin-right: 4px;
+    background-color: var(--grist-theme-page-panels-main-panel-bg, white);
+    border: 1px solid var(--grist-theme-table-body-border, #ccc);
+    color: var(--grist-theme-text, black);
+}
+
+#calendar-navigation-buttons button:hover {
+    background-color: var(--grist-theme-hover, #eee);
+}
+
+.icon {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    background-color: var(--grist-theme-text, black);
+    mask-size: contain;
+    -webkit-mask-size: contain;
+    mask-repeat: no-repeat;
+    -webkit-mask-repeat: no-repeat;
+    mask-position: center;
+    -webkit-mask-position: center;
+}
+
+.icon-arrow-left {
+    mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>');
+    -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>');
+}
+
+.icon-arrow-right {
+    mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>');
+    -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>');
+}
+
+
+#calendar-perspective-buttons .btn {
+    background-color: var(--grist-theme-page-panels-main-panel-bg, white);
+    border: 1px solid var(--grist-theme-table-body-border, #ccc);
+    color: var(--grist-theme-text, black);
+}
+
+#calendar-perspective-buttons .btn.active {
+    background-color: var(--grist-theme-selection, #ddd);
+    color: var(--grist-theme-text, black);
+}
+
+#calendar-title {
+    margin-left: auto;
+    font-size: 1.2em;
+    font-weight: bold;
+    color: var(--grist-theme-text, black);
+}
+
+/* Modal styles */
+.modal {
+  display: none; 
+  position: fixed; 
+  z-index: 1000; 
+  left: 0;
+  top: 0;
+  width: 100%; 
+  height: 100%; 
+  overflow: auto; 
+  background-color: rgb(0,0,0); 
+  background-color: rgba(0,0,0,0.4); 
+}
+
+.modal-content {
+  background-color: #fefefe;
+  margin: 15% auto; 
+  padding: 20px;
+  border: 1px solid #888;
+  width: 80%; 
+  max-width: 500px;
+  border-radius: 5px;
+  box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2);
+}
+
+.modal-header {
     display: flex;
-    flex-direction: column-reverse;
-    row-gap: 4px;
+    justify-content: space-between;
     align-items: center;
-    justify-content: center;
-  }
-
-  .toastui-calendar-week-view .toastui-calendar-day-name-item {
-    padding: 0 4px;
-  }
+    border-bottom: 1px solid #e5e5e5;
+    padding-bottom: 10px;
+    margin-bottom: 20px;
 }
 
-/* Toast UI doesn't allow styling dots, we are reverting it here */
-.toastui-calendar-weekday-event-dot+.toastui-calendar-weekday-event-title {
-  color: inherit;
+.modal-header h2 {
+    margin: 0;
+    font-size: 1.5em;
 }
 
-/* Force theme colors regardless of Grist theme */
+.close {
+  color: #aaa;
+  font-size: 28px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.close:hover,
+.close:focus {
+  color: black;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.modal-body .form-group {
+    margin-bottom: 15px;
+}
+
+.modal-body label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+.modal-body select.form-control {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    border-top: 1px solid #e5e5e5;
+    padding-top: 15px;
+    margin-top: 20px;
+}
+
+.modal-footer .btn {
+    padding: 8px 16px;
+    margin-left: 10px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.modal-footer .btn-secondary {
+    background-color: #6c757d;
+    color: white;
+}
+
+.modal-footer .btn-primary {
+    background-color: #007bff;
+    color: white;
+}
+
+.modal-footer .btn:hover {
+    opacity: 0.9;
+}
+
 :root {
   /* Backgrounds */
   --grist-theme-page-panels-main-panel-bg: #ffffff !important;
@@ -547,12 +196,4 @@ input:checked + label {
   --grist-theme-selection: #e6f2fa !important;
   --grist-theme-hover: #e6f2fa !important;
   --grist-theme-top-bar-button-primary-fg: #004990 !important;
-}
-
-/* Ensure events have a visible border since background is white */
-.toastui-calendar-timegrid-event,
-.toastui-calendar-weekday-event,
-.toastui-calendar-month-event,
-.toastui-calendar-weekday-event-block {
-  border: 1px solid #ed1b2d !important;
 }
