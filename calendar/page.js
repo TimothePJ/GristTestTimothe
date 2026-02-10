@@ -755,6 +755,19 @@ function buildCalendarEventObject(record, colTypes, colOptions) {
     projet: record.projet,
     document: record.document
   });
+
+  // Override color for specific chapters
+  const yellowChapters = [
+    "Développement",
+    "Gestion de service",
+    "Congés/Maladie/RTT/Férié",
+    "Formation/stages(reçues)"
+  ];
+
+  if (yellowChapters.includes(record.title)) {
+    raw.backgroundColor = '#FFD700'; // Gold/Yellow
+    raw.color = 'black'; // Ensure text is readable on yellow
+  }
   const fontWeight = type?.choiceOptions?.[selected]?.fontBold ? '800' : 'normal';
   const fontStyle = type?.choiceOptions?.[selected]?.fontItalic ? 'italic' : 'normal';
   let textDecoration = type?.choiceOptions?.[selected]?.fontUnderline ? 'underline' : 'none';

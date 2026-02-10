@@ -189,7 +189,7 @@ body {
 
   /* Borders */
   --grist-theme-table-body-border: #ed1b2d !important;
-  --grist-theme-input-readonly-border: #e0e3ff !important; /* Used for event background */
+  --grist-theme-input-readonly-border: #ced3ff !important; /* Used for event background */
   --grist-theme-accent-border: #ed1b2d !important;
 
   /* Selection/Highlight */
