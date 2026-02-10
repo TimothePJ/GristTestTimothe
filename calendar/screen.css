@@ -249,9 +249,13 @@ body {
   left: 0;
   height: 16px;
   width: 16px;
+  mask-image: var(--icon-Tick);
   -webkit-mask-image: var(--icon-Tick);
+  mask-size: contain;
   -webkit-mask-size: contain;
+  mask-position: center;
   -webkit-mask-position: center;
+  mask-repeat: no-repeat;
   -webkit-mask-repeat: no-repeat;
   background-color: #ffffff;
 }
