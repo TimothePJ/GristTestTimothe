@@ -524,3 +524,31 @@ input:checked + label {
 .toastui-calendar-weekday-event-dot+.toastui-calendar-weekday-event-title {
   color: inherit;
 }
+
+/* Force theme colors regardless of Grist theme */
+:root {
+  /* Backgrounds */
+  --grist-theme-page-panels-main-panel-bg: #ffffff !important;
+
+  /* Text */
+  --grist-theme-text: #004990 !important;
+  --grist-theme-accent-text: #ed1b2d !important;
+
+  /* Borders */
+  --grist-theme-table-body-border: #ed1b2d !important;
+  --grist-theme-input-readonly-border: #e0e3ff !important; /* Used for event background */
+  --grist-theme-accent-border: #ed1b2d !important;
+
+  /* Selection/Highlight */
+  --grist-theme-selection: #e6f2fa !important;
+  --grist-theme-hover: #e6f2fa !important;
+  --grist-theme-top-bar-button-primary-fg: #004990 !important;
+}
+
+/* Ensure events have a visible border since background is white */
+.toastui-calendar-timegrid-event,
+.toastui-calendar-weekday-event,
+.toastui-calendar-month-event,
+.toastui-calendar-weekday-event-block {
+  border: 1px solid #ed1b2d !important;
+}
