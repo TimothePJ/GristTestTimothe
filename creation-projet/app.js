@@ -98,6 +98,22 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const numeroCounts = {};
+        let hasDuplicate = false;
+        projectData.documents.forEach(doc => {
+            if (doc.numero) {
+                numeroCounts[doc.numero] = (numeroCounts[doc.numero] || 0) + 1;
+                if (numeroCounts[doc.numero] > 1) {
+                    hasDuplicate = true;
+                }
+            }
+        });
+
+        if (hasDuplicate) {
+            alert("Des numeros de documents sont en doublons");
+            return;
+        }
+
         renderReview();
         showStep(5);
     });
@@ -302,10 +318,26 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const numeroCounts = {};
+        customDocuments.forEach(doc => {
+            if (doc.numero) {
+                numeroCounts[doc.numero] = (numeroCounts[doc.numero] || 0) + 1;
+            }
+        });
+
         customDocuments.forEach((doc, index) => {
             const chip = document.createElement('span');
             chip.className = 'doc-chip';
-            const numeroLabel = doc.numero ? ` [${doc.numero}]` : '';
+            
+            const isDuplicate = doc.numero && numeroCounts[doc.numero] > 1;
+            const numeroStyle = isDuplicate ? 'color: red; font-weight: bold;' : '';
+            const numeroLabel = doc.numero ? ` <span style="${numeroStyle}">[${doc.numero}]</span>` : '';
+            
+            if (isDuplicate) {
+                chip.style.borderColor = "red";
+                chip.title = "Numéro de document dupliqué";
+            }
+
             chip.innerHTML = `
                 <input type="checkbox" name="project-docs" value="${index}" checked style="display: none;">
                 <span>${doc.name}${numeroLabel}</span>
@@ -435,10 +467,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const addManualBtn = document.getElementById('add-manual-doc-btn');
 
         addManualBtn.addEventListener('click', () => {
-            const docName = manualInput.value.trim();
-            const docNumero = manualNumeroInput.value.trim();
-            if (docName) {
-                addDocuments([{ name: docName, numero: docNumero }]);
+            const docNames = manualInput.value.split(',').map(s => s.trim()).filter(s => s);
+            const docNumeros = manualNumeroInput.value.split(',').map(s => s.trim()).filter(s => s);
+
+            if (docNames.length > 0) {
+                const docs = docNames.map((name, index) => ({
+                    name: name,
+                    numero: docNumeros[index] || ''
+                }));
+                addDocuments(docs);
                 manualInput.value = '';
                 manualNumeroInput.value = '';
                 manualInput.focus();

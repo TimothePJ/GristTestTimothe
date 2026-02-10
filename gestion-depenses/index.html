@@ -112,12 +112,19 @@
                 <tbody></tbody>
             </table>
 
-            <h3>Graphique des Dépenses</h3>
+            <div class="table-header">
+                <h3>Graphique des Dépenses</h3>
+                <div>
+                    <button class="prev-month-table-btn"><</button>
+                    <button class="next-month-table-btn">></button>
+                </div>
+            </div>
             <canvas id="spending-chart"></canvas>
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
     <script src="app.js"></script>
 
