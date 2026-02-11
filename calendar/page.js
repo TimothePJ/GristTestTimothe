@@ -245,10 +245,13 @@ class CalendarHandler {
     });
 
     // Creation happens via the event-edit form (or custom popup).
-    this.calendar.on('beforeCreateEvent', (eventInfo) => upsertEvent(eventInfo));
+    this.calendar.on('beforeCreateEvent', (eventInfo) => upsertEvent(eventInfo, eventInfo.isAllday));
 
     // Updates happen via the form or when dragging the event or its end-time.
-    this.calendar.on('beforeUpdateEvent', (update) => upsertEvent({id: update.event.id, ...update.changes}));
+    this.calendar.on('beforeUpdateEvent', (update) => {
+      const effectiveIsAllDay = update.changes.isAllday !== undefined ? update.changes.isAllday : update.event.isAllday;
+      upsertEvent({id: update.event.id, ...update.changes}, effectiveIsAllDay);
+    });
 
     // Deletion happens via the event-edit form.
     this.calendar.on('beforeDeleteEvent', (eventInfo) => deleteEvent(eventInfo));
@@ -667,11 +670,27 @@ function makeGristDateTime(date, colType) {
   }
 }
 
-async function upsertEvent(tuiEvent) {
+async function upsertEvent(tuiEvent, effectiveIsAllDay) {
   // conversion between calendar event object and grist flat format (so the one that is returned in onRecords event
   // and can be mapped by grist.mapColumnNamesBack)
   // tuiEvent can be partial: only the fields present will be updated in Grist.
   const [startType, endType] = await colTypesFetcher.getColTypes();
+
+  // Helper to adjust time if it's an all-day event
+  const isAllDay = effectiveIsAllDay !== undefined ? effectiveIsAllDay : tuiEvent.isAllday;
+  if (isAllDay) {
+    if (tuiEvent.start) {
+      const s = new TZDate(tuiEvent.start);
+      s.setHours(0, 0, 0, 0);
+      tuiEvent.start = s;
+    }
+    if (tuiEvent.end) {
+      const e = new TZDate(tuiEvent.end);
+      e.setHours(23, 59, 59, 999);
+      tuiEvent.end = e;
+    }
+  }
+
   const gristEvent = {
     id: tuiEvent.id,
     // undefined values will be removed from the fields sent to Grist.
@@ -965,11 +984,22 @@ async function saveCustomEvent() {
   }
 
   const [startType, endType] = await colTypesFetcher.getColTypes();
+
+  let startDate = currentSelection.start;
+  let endDate = currentSelection.end;
+
+  if (currentSelection.isAllday) {
+    startDate = new TZDate(startDate);
+    startDate.setHours(0, 0, 0, 0);
+    
+    endDate = new TZDate(endDate);
+    endDate.setHours(23, 59, 59, 999);
+  }
   
   const gristEvent = {
     title: chapitre, // Using Chapitre as title
-    startDate: makeGristDateTime(currentSelection.start, startType),
-    endDate: makeGristDateTime(currentSelection.end, endType),
+    startDate: makeGristDateTime(startDate, startType),
+    endDate: makeGristDateTime(endDate, endType),
     isAllDay: currentSelection.isAllday ? 1 : 0,
     projet: projet || undefined,
     document: documentName || undefined
