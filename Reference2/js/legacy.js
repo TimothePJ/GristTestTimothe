@@ -796,10 +796,8 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
   if (!datelimite) datelimite = "1900-01-01";
 
   try {
-    const projets = await grist.docApi.fetchTable('Projets');
-    const projectIndex = projets.Nom_de_projet.indexOf(selectedFirstValue);
-    if (projectIndex === -1) throw new Error("Projet introuvable.");
-    const projectId = projets.id[projectIndex];
+    const selectedProject = selectedFirstValue;
+    if (!selectedProject) throw new Error("Aucun projet sélectionné.");
 
     const serviceValue = await getTeamService();
 
@@ -1082,10 +1080,9 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
 
   try {
     // Récupérer l'ID du projet
-    const projets = await grist.docApi.fetchTable('Projets');
-    const projectIndex = projets.Nom_de_projet.indexOf(selectedProject);
-    if (projectIndex === -1) throw new Error("Projet introuvable.");
-    const projectId = projets.id[projectIndex];
+    const selectedProject = selectedFirstValue;
+    if (!selectedProject) throw new Error("Aucun projet sélectionné.");
+
 
     // Récupérer le service depuis la table Team (la première ligne)
     const serviceValue = await getTeamService();
@@ -1288,9 +1285,12 @@ document.getElementById('fileInput').addEventListener('change', (event) => {
   }
 });
 
-document.getElementById('addProjectButton').addEventListener('click', () => {
-  document.getElementById('addProjectDialog').showModal(); // Affiche la boîte de dialogue
-});
+const addProjectBtn = document.getElementById('addProjectButton');
+if (addProjectBtn) {
+  addProjectBtn.addEventListener('click', () => {
+    document.getElementById('addProjectDialog').showModal();
+  });
+}
 
 // Fonction pour supprimer les espaces en début et fin de chaque champ input
 function trimInputs(form) {
@@ -2228,10 +2228,9 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
 
   try {
     // Récupérer l'ID du projet
-    const projets = await grist.docApi.fetchTable('Projets');
-    const projectIndex = projets.Nom_de_projet.indexOf(selectedProject);
-    if (projectIndex === -1) throw new Error("Projet introuvable.");
-    const projectId = projets.id[projectIndex];
+    const selectedProject = selectedFirstValue;
+    if (!selectedProject) throw new Error("Aucun projet sélectionné.");
+
 
     // Récupérer le service depuis la table Team
     const serviceValue = await getTeamService();
@@ -2249,7 +2248,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
         const num = (Number.isFinite(_n2) && _n2 !== 0) ? _n2 : null;
         const nm = String(doc.documentName).trim();
         const newRow = {
-          NomProjet: projectId,
+          NomProjet: selectedProject,
           NomDocument: nm,
           NumeroDocument: numeroOrZero(parseNumeroForStorage(num)),
           Emetteur: emetteur,
@@ -2399,27 +2398,27 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('show', ()
   resetAddMultipleDocumentDialog();
 });
 
-document.getElementById('cancelAddDocumentButton').addEventListener('click', function () {
+document.getElementById('cancelAddDocumentButton').addEventListener('click', () => {
   document.getElementById('addDocumentDialog').close();
-  // Si une sélection valide existe, la réaffecter ; sinon, assigner la valeur par défaut
-  if (lastValidDocument) {
-    document.getElementById('secondColumnListbox').value = lastValidDocument;
-    selectedSecondValue = lastValidDocument;
-  } else {
-    document.getElementById('secondColumnListbox').value = 'Sélectionner un étage';
-    selectedSecondValue = '';
+
+  const listbox = document.getElementById('secondColumnListbox');
+  listbox.value = lastValidDocument || "";
+  selectedSecondValue = lastValidDocument || "";
+
+  if (selectedFirstValue && selectedSecondValue) {
+    populateTable();
   }
 });
 
-document.getElementById('cancelAddMultipleDocumentButton').addEventListener('click', function () {
+document.getElementById('cancelAddMultipleDocumentButton').addEventListener('click', () => {
   document.getElementById('addMultipleDocumentDialog').close();
-  // Si une sélection valide existe, la réaffecter ; sinon, assigner la valeur par défaut
-  if (lastValidDocument) {
-    document.getElementById('secondColumnListbox').value = lastValidDocument;
-    selectedSecondValue = lastValidDocument;
-  } else {
-    document.getElementById('secondColumnListbox').value = 'Sélectionner un étage';
-    selectedSecondValue = '';
+
+  const listbox = document.getElementById('secondColumnListbox');
+  listbox.value = lastValidDocument || ""; 
+  selectedSecondValue = lastValidDocument || "";
+
+  if (selectedFirstValue && selectedSecondValue) {
+    populateTable();
   }
 });
 
