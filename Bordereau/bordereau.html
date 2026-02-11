@@ -2,11 +2,12 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Bordereau de Transmission</title>
 
   <!-- Grist Plugin API -->
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-  
+
   <!-- jsPDF and html2canvas -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
@@ -15,6 +16,7 @@
   <!-- Styles -->
   <link rel="stylesheet" href="bordereau.css">
 </head>
+
 <body>
   <div class="sticky-container">
     <div class="dropdown-container">
@@ -23,21 +25,29 @@
         <option value="">Choisir un projet</option>
       </select>
     </div>
+
     <div class="info-container">
       <label for="refInput">Ref:</label>
       <div class="ref-container">
-        <input type="text" id="refInput">
+        <input type="text" id="refInput" value="1" inputmode="numeric">
         <div class="ref-arrows">
-          <button id="refUp">▲</button>
-          <button id="refDown">▼</button>
+          <button id="refUp" type="button">▲</button>
+          <button id="refDown" type="button">▼</button>
         </div>
       </div>
+
       <label for="dateInput">Date:</label>
       <input type="date" id="dateInput">
     </div>
+
     <div class="button-container">
-      <button id="addItem">Ajouter un élément</button>
-      <button id="generatePdf">Générer le bordereau</button>
+      <label class="sent-container" for="sentCheckbox">
+        <span>Envoyé :</span>
+        <input type="checkbox" id="sentCheckbox">
+      </label>
+
+      <button id="addItem" type="button">Ajouter un élément</button>
+      <button id="generatePdf" type="button">Générer le bordereau</button>
     </div>
   </div>
 
@@ -52,8 +62,7 @@
           <th></th>
         </tr>
       </thead>
-      <tbody>
-      </tbody>
+      <tbody></tbody>
     </table>
   </div>
 

@@ -70,3 +70,21 @@ body {
   padding: 5px 10px;
   cursor: pointer;
 }
+
+.sent-container {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 10px;
+  user-select: none;
+}
+
+.sent-container input {
+  width: 18px;
+  height: 18px;
+  accent-color: #004990;
+}
+
+.sent-container span {
+  font-weight: 600;
+}
