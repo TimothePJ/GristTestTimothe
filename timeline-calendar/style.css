@@ -54,6 +54,79 @@ button.active {
   gap: 4px;
 }
 
+.filters {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+select {
+  background-color: #fff;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  padding: 3px 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--grist-theme-text);
+  height: 28px;
+}
+
+select:hover {
+  background-color: var(--grist-theme-hover);
+}
+
+/* Multiselect Styles */
+.multiselect {
+  width: 200px;
+  position: relative;
+}
+
+.selectBox {
+  position: relative;
+}
+
+.selectBox select {
+  width: 100%;
+  font-weight: bold;
+}
+
+.overSelect {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+}
+
+#checkboxes {
+  display: none;
+  border: 1px solid #ccc;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background-color: #fff;
+  z-index: 100;
+  max-height: 300px;
+  overflow-y: auto;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+#checkboxes label {
+  display: block;
+  padding: 5px 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+#checkboxes label:hover {
+  background-color: #f0f0f0;
+}
+
+#checkboxes input {
+  margin-right: 8px;
+}
+
 #current-date-range {
   font-weight: 500;
   margin-left: auto;

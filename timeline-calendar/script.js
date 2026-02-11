@@ -19,10 +19,10 @@ function getGristOptions() {
     },
     {
       name: "title",
-      title: "Titre",
+      title: "Sujet",
       optional: false,
       type: "Text",
-      description: "Titre de l'événement",
+      description: "Sujet de l'événement",
       allowMultiple: false
     },
     {
@@ -40,6 +40,14 @@ function getGristOptions() {
       type: "Choice,Text",
       description: "Type pour la couleur",
       allowMultiple: false
+    },
+    {
+      name: "project",
+      title: "Projet",
+      optional: true,
+      type: "Text,Reference,Choice",
+      description: "Projet associé",
+      allowMultiple: false
     }
   ];
 }
@@ -47,6 +55,7 @@ function getGristOptions() {
 let timeline;
 let items = new vis.DataSet();
 let groups = new vis.DataSet();
+let allRecords = [];
 
 // Configuration
 const container = document.getElementById('visualization');
@@ -83,9 +92,148 @@ grist.ready({
 grist.onRecords(function (records, mappings) {
   const mappedRecords = grist.mapColumnNames(records, mappings);
   if (mappedRecords) {
-    updateTimeline(mappedRecords);
+    allRecords = mappedRecords;
+    updateFilterOptions();
+    applyFilters();
   }
 });
+
+// Filter Elements
+const filterProject = document.getElementById('filter-project');
+const filterSubjectMultiselect = document.getElementById('filter-subject-multiselect');
+const checkboxesContainer = document.getElementById('checkboxes');
+
+// Handle multiselect toggle
+let expanded = false;
+filterSubjectMultiselect.addEventListener('click', function(e) {
+    // If clicking on checkboxes, don't close
+    if (e.target.closest('#checkboxes')) return;
+    
+    if (!expanded) {
+        checkboxesContainer.style.display = "block";
+        expanded = true;
+    } else {
+        checkboxesContainer.style.display = "none";
+        expanded = false;
+    }
+});
+
+// Close when clicking outside
+document.addEventListener('click', function(e) {
+    if (!filterSubjectMultiselect.contains(e.target)) {
+        checkboxesContainer.style.display = "none";
+        expanded = false;
+    }
+});
+
+filterProject.addEventListener('change', () => {
+    updateSubjectOptions();
+    applyFilters();
+});
+
+function updateFilterOptions() {
+    const projects = new Set();
+    allRecords.forEach(record => {
+        const p = record.project;
+        if (p !== undefined && p !== null && p !== '') {
+            projects.add(String(p));
+        }
+    });
+    populateSelect(filterProject, projects);
+    
+    // Initialize subject options
+    updateSubjectOptions();
+}
+
+function updateSubjectOptions() {
+    const selectedProject = filterProject.value;
+    const subjects = new Set();
+
+    // Only add default subjects if no project is selected
+    if (!selectedProject) {
+        subjects.add("Développement");
+        subjects.add("Gestion de service");
+        subjects.add("Congés/Maladie/RTT/Férié");
+        subjects.add("Formation/stages(reçues)");
+    }
+
+    allRecords.forEach(record => {
+        const p = record.project ? String(record.project) : "";
+        // If a project is selected, only include subjects from that project
+        if (selectedProject && p !== selectedProject) return;
+
+        const t = record.title;
+        if (t !== undefined && t !== null && t !== '') {
+            subjects.add(String(t));
+        }
+    });
+
+    populateCheckboxes(checkboxesContainer, subjects);
+}
+
+function populateSelect(selectElement, values) {
+    const currentValue = selectElement.value;
+    const defaultText = selectElement.options[0].text;
+    
+    // Clear existing options (except the first one)
+    selectElement.innerHTML = `<option value="">${defaultText}</option>`;
+
+    Array.from(values).sort().forEach(value => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        selectElement.appendChild(option);
+    });
+
+    // Restore selection if possible
+    if (values.has(currentValue)) {
+        selectElement.value = currentValue;
+    }
+}
+
+function populateCheckboxes(container, values) {
+    // Get currently checked values to preserve state
+    const currentChecked = Array.from(container.querySelectorAll('input:checked')).map(cb => cb.value);
+    
+    container.innerHTML = '';
+
+    Array.from(values).sort().forEach(value => {
+        const label = document.createElement('label');
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.value = value;
+        
+        if (currentChecked.includes(value)) {
+            input.checked = true;
+        }
+
+        input.addEventListener('change', applyFilters);
+        
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(value));
+        container.appendChild(label);
+    });
+}
+
+function applyFilters() {
+    const projectFilter = filterProject.value;
+    
+    // Get selected subjects
+    const subjectCheckboxes = checkboxesContainer.querySelectorAll('input:checked');
+    const selectedSubjects = Array.from(subjectCheckboxes).map(cb => cb.value);
+
+    const filteredRecords = allRecords.filter(record => {
+        const p = record.project ? String(record.project) : "";
+        const t = record.title ? String(record.title) : "";
+
+        const matchProject = !projectFilter || p === projectFilter;
+        const matchSubject = selectedSubjects.length === 0 || selectedSubjects.includes(t);
+        
+        return matchProject && matchSubject;
+    });
+
+    updateTimeline(filteredRecords);
+}
 
 grist.on('message', (e) => {
     // Handle cursor updates if needed, though onRecords might handle selection highlighting if we wanted.

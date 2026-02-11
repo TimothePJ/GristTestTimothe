@@ -21,6 +21,20 @@
             <button id="btn-today">Aujourd'hui</button>
             <button id="btn-next" title="Suivant">></button>
         </div>
+        <div class="filters">
+            <select id="filter-project">
+                <option value="">Tous les projets</option>
+            </select>
+            <div class="multiselect" id="filter-subject-multiselect">
+                <div class="selectBox">
+                    <select>
+                        <option>Sujets</option>
+                    </select>
+                    <div class="overSelect"></div>
+                </div>
+                <div id="checkboxes"></div>
+            </div>
+        </div>
         <div class="zoom-buttons">
             <button data-zoom="day">Jour</button>
             <button data-zoom="week" class="active">Semaine</button>
