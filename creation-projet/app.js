@@ -312,6 +312,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderDocumentsSelection() {
         const container = document.getElementById('documents-selection-container');
         container.innerHTML = '';
+        
+        // Override grid display to allow full-width groups
+        container.style.display = 'block';
 
         if (customDocuments.length === 0) {
             container.innerHTML = '<p style="color: #666; font-style: italic;">Aucun document ajouté. Cliquez sur "+ Ajouter" pour commencer.</p>';
@@ -325,25 +328,60 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
+        // Group by type
+        const groupedDocs = {};
         customDocuments.forEach((doc, index) => {
-            const chip = document.createElement('span');
-            chip.className = 'doc-chip';
-            
-            const isDuplicate = doc.numero && numeroCounts[doc.numero] > 1;
-            const numeroStyle = isDuplicate ? 'color: red; font-weight: bold;' : '';
-            const numeroLabel = doc.numero ? ` <span style="${numeroStyle}">[${doc.numero}]</span>` : '';
-            
-            if (isDuplicate) {
-                chip.style.borderColor = "red";
-                chip.title = "Numéro de document dupliqué";
+            const type = doc.type || 'Autre';
+            if (!groupedDocs[type]) {
+                groupedDocs[type] = [];
             }
+            groupedDocs[type].push({ doc, index });
+        });
 
-            chip.innerHTML = `
-                <input type="checkbox" name="project-docs" value="${index}" checked style="display: none;">
-                <span>${doc.name}${numeroLabel}</span>
-                <button type="button" class="doc-chip-delete" data-index="${index}" title="Supprimer">✖</button>
-            `;
-            container.appendChild(chip);
+        const sortedTypes = Object.keys(groupedDocs).sort();
+
+        sortedTypes.forEach(type => {
+            const groupDiv = document.createElement('div');
+            groupDiv.className = 'doc-group';
+            groupDiv.style.marginBottom = '15px';
+
+            const header = document.createElement('h4');
+            header.textContent = type;
+            header.style.marginTop = '0';
+            header.style.marginBottom = '8px';
+            header.style.borderBottom = '1px solid #ccc';
+            header.style.color = '#004990';
+            header.style.fontSize = '1em';
+            groupDiv.appendChild(header);
+
+            const chipsContainer = document.createElement('div');
+            chipsContainer.style.display = 'flex';
+            chipsContainer.style.flexWrap = 'wrap';
+            chipsContainer.style.gap = '8px';
+
+            groupedDocs[type].forEach(({ doc, index }) => {
+                const chip = document.createElement('span');
+                chip.className = 'doc-chip';
+                
+                const isDuplicate = doc.numero && numeroCounts[doc.numero] > 1;
+                const numeroStyle = isDuplicate ? 'color: red; font-weight: bold;' : '';
+                const numeroLabel = doc.numero ? ` <span style="${numeroStyle}">[${doc.numero}]</span>` : '';
+                
+                if (isDuplicate) {
+                    chip.style.borderColor = "red";
+                    chip.title = "Numéro de document dupliqué";
+                }
+
+                chip.innerHTML = `
+                    <input type="checkbox" name="project-docs" value="${index}" checked style="display: none;">
+                    <span>${doc.name}${numeroLabel}</span>
+                    <button type="button" class="doc-chip-delete" data-index="${index}" title="Supprimer">✖</button>
+                `;
+                chipsContainer.appendChild(chip);
+            });
+
+            groupDiv.appendChild(chipsContainer);
+            container.appendChild(groupDiv);
         });
 
         // Add delete handlers
@@ -360,14 +398,15 @@ document.addEventListener('DOMContentLoaded', () => {
         docs.forEach(doc => {
             const name = (typeof doc === 'string' ? doc : doc.name).trim();
             const numero = (typeof doc === 'string' ? '' : (doc.numero || '')).trim();
+            const type = (typeof doc === 'string' ? '' : (doc.type || '')).trim();
             if (name && !customDocuments.some(d => d.name === name)) {
-                customDocuments.push({ name, numero });
+                customDocuments.push({ name, numero, type });
             }
         });
         renderDocumentsSelection();
     }
 
-    function generatePatternDocuments(prefix, suffix, start, end, padding, numeroStart, numeroStep, numeroPadding) {
+    function generatePatternDocuments(prefix, suffix, start, end, padding, numeroStart, numeroStep, numeroPadding, type) {
         const docs = [];
         let currentNumero = numeroStart;
         for (let i = start; i <= end; i++) {
@@ -379,7 +418,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (numeroPadding > 0) {
                 numeroStr = numeroStr.padStart(numeroPadding, '0');
             }
-            docs.push({ name: `${prefix}${numStr}${suffix}`, numero: numeroStr });
+            docs.push({ name: `${prefix}${numStr}${suffix}`, numero: numeroStr, type: type });
             currentNumero += numeroStep;
         }
         return docs;
@@ -394,6 +433,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const numeroStart = parseInt(document.getElementById('numero-start').value, 10) || 0;
         const numeroStep = parseInt(document.getElementById('numero-step').value, 10) || 1;
         const numeroPadding = parseInt(document.getElementById('numero-padding').value, 10) || 0;
+        const type = document.getElementById('pattern-doc-type').value || '';
 
         const previewBody = document.getElementById('pattern-preview-body');
 
@@ -402,19 +442,19 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const docs = generatePatternDocuments(prefix, suffix, start, Math.min(end, start + 9), padding, numeroStart, numeroStep, numeroPadding);
+        const docs = generatePatternDocuments(prefix, suffix, start, Math.min(end, start + 9), padding, numeroStart, numeroStep, numeroPadding, type);
 
         if (docs.length === 0) {
-            previewBody.innerHTML = '<tr><td colspan="2">(Aucun aperçu)</td></tr>';
+            previewBody.innerHTML = '<tr><td colspan="3">(Aucun aperçu)</td></tr>';
             return;
         }
 
         let html = '';
         docs.forEach(doc => {
-            html += `<tr><td>${doc.numero}</td><td>${doc.name}</td></tr>`;
+            html += `<tr><td>${doc.numero}</td><td>${doc.name}</td><td>${doc.type}</td></tr>`;
         });
         if (end - start > 9) {
-            html += '<tr><td>...</td><td>...</td></tr>';
+            html += '<tr><td>...</td><td>...</td><td>...</td></tr>';
         }
         previewBody.innerHTML = html;
     }
@@ -437,13 +477,6 @@ document.addEventListener('DOMContentLoaded', () => {
             modal.style.display = 'none';
         });
 
-        // Close on overlay click
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.style.display = 'none';
-            }
-        });
-
         // Tab switching
         tabBtns.forEach(btn => {
             btn.addEventListener('click', () => {
@@ -464,20 +497,24 @@ document.addEventListener('DOMContentLoaded', () => {
         // Manual add
         const manualInput = document.getElementById('manual-doc-name');
         const manualNumeroInput = document.getElementById('manual-doc-numero');
+        const manualTypeInput = document.getElementById('manual-doc-type');
         const addManualBtn = document.getElementById('add-manual-doc-btn');
 
         addManualBtn.addEventListener('click', () => {
             const docNames = manualInput.value.split(',').map(s => s.trim()).filter(s => s);
             const docNumeros = manualNumeroInput.value.split(',').map(s => s.trim()).filter(s => s);
+            const type = manualTypeInput.value.trim();
 
             if (docNames.length > 0) {
                 const docs = docNames.map((name, index) => ({
                     name: name,
-                    numero: docNumeros[index] || ''
+                    numero: docNumeros[index] || '',
+                    type: type
                 }));
                 addDocuments(docs);
                 manualInput.value = '';
                 manualNumeroInput.value = '';
+                manualTypeInput.value = 'COFFRAGE';
                 manualInput.focus();
             }
         });
@@ -502,10 +539,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const startInput = document.getElementById('pattern-start');
         const endInput = document.getElementById('pattern-end');
         const paddingSelect = document.getElementById('pattern-padding');
+        const patternTypeInput = document.getElementById('pattern-doc-type');
         const addPatternBtn = document.getElementById('add-pattern-docs-btn');
 
         // Update preview on input change
-        [prefixInput, suffixInput, startInput, endInput, paddingSelect].forEach(el => {
+        [prefixInput, suffixInput, startInput, endInput, paddingSelect, patternTypeInput].forEach(el => {
             el.addEventListener('input', updatePatternPreview);
             el.addEventListener('change', updatePatternPreview);
         });
@@ -530,13 +568,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const numeroStart = parseInt(numeroStartInput.value, 10) || 0;
             const numeroStep = parseInt(numeroStepInput.value, 10) || 1;
             const numeroPadding = parseInt(numeroPaddingSelect.value, 10) || 0;
+            const type = patternTypeInput.value.trim();
 
             if (start > end) {
                 alert('Erreur: "De" doit être inférieur ou égal à "À".');
                 return;
             }
 
-            const docs = generatePatternDocuments(prefix, suffix, start, end, padding, numeroStart, numeroStep, numeroPadding);
+            const docs = generatePatternDocuments(prefix, suffix, start, end, padding, numeroStart, numeroStep, numeroPadding, type);
             addDocuments(docs);
 
             // Reset form but keep modal open for adding more
@@ -548,6 +587,7 @@ document.addEventListener('DOMContentLoaded', () => {
             numeroStartInput.value = '1';
             numeroStepInput.value = '1';
             numeroPaddingSelect.value = '3';
+            patternTypeInput.value = 'COFFRAGE';
             updatePatternPreview();
         });
 
@@ -666,7 +706,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const listePlanActions = projectData.documents.map(doc => {
                  return ["AddRecord", "ListePlan_NDC_COF", null, {
                      Nom_projet: projectData.name,
-                     Type_document: "COFFRAGE",
+                     Type_document: doc.type || "COFFRAGE",
                      NumeroDocument: doc.numero,
                      Designation: doc.name,
                      Indice: null,
