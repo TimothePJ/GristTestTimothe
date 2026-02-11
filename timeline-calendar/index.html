@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timeline Calendar</title>
+    <!-- Grist Plugin API -->
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    
+    <!-- Vis-Timeline -->
+    <script src="https://unpkg.com/vis-timeline/standalone/umd/vis-timeline-graph2d.min.js"></script>
+    <link href="https://unpkg.com/vis-timeline/styles/vis-timeline-graph2d.min.css" rel="stylesheet" type="text/css" />
+    
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="toolbar">
+        <div class="nav-buttons">
+            <button id="btn-prev" title="Précédent"><</button>
+            <button id="btn-today">Aujourd'hui</button>
+            <button id="btn-next" title="Suivant">></button>
+        </div>
+        <div class="filters">
+            <select id="filter-project">
+                <option value="">Tous les projets</option>
+            </select>
+            <div class="multiselect" id="filter-subject-multiselect">
+                <div class="selectBox">
+                    <select>
+                        <option>Sujets</option>
+                    </select>
+                    <div class="overSelect"></div>
+                </div>
+                <div id="checkboxes"></div>
+            </div>
+        </div>
+        <div class="zoom-buttons">
+            <button data-zoom="day">Jour</button>
+            <button data-zoom="week" class="active">Semaine</button>
+            <button data-zoom="month">Mois</button>
+        </div>
+        <div id="current-date-range"></div>
+    </div>
+    
+    <div id="visualization"></div>
+
+    <script src="script.js"></script>
+</body>
+</html>

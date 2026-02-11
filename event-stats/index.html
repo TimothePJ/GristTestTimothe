@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Statistiques Événements</title>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Grist Plugin API -->
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="dashboard">
+        <div class="header">
+            <h1>Statistiques des Heures</h1>
+        </div>
+        
+        <div class="filters-container">
+            <div class="filter-group">
+                <label for="filter-year">Année</label>
+                <select id="filter-year">
+                    <option value="all">Toutes</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="filter-user">Utilisateur</label>
+                <select id="filter-user">
+                    <option value="all">Tous</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="filter-project">Projet</label>
+                <select id="filter-project">
+                    <option value="all">Tous</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label for="filter-chapter">Chapitre</label>
+                <select id="filter-chapter">
+                    <option value="all">Tous</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label for="group-by">Grouper par</label>
+                <select id="group-by">
+                    <option value="month">Mois</option>
+                    <option value="user">Utilisateur</option>
+                    <option value="project">Projet</option>
+                    <option value="chapter">Chapitre</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="stats-summary">
+            <div class="stat-card">
+                <h3>Total Heures</h3>
+                <div id="total-hours" class="stat-value">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Événements</h3>
+                <div id="total-events" class="stat-value">0</div>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <canvas id="hoursChart"></canvas>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

@@ -49,6 +49,67 @@
     <div id="calendar">
     </div>
 </div>
+
+<!-- Custom Event Creation Modal -->
+<div id="custom-event-modal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="close" onclick="closeCustomPopup()">&times;</span>
+      <h2>Nouvel événement</h2>
+    </div>
+    <div class="modal-body">
+      <form id="custom-event-form">
+        <div class="form-group">
+          <label for="event-chapitre">Chapitre</label>
+          <select id="event-chapitre" class="form-control" required>
+            <option value="">Sélectionner un chapitre</option>
+            <option value="Développement">Développement</option>
+            <option value="Gestion de service">Gestion de service</option>
+            <option value="Congés/Maladie/RTT/Férié">Congés/Maladie/RTT/Férié</option>
+            <option value="Formation/stages(reçues)">Formation/stages(reçues)</option>
+            <option value="01-Analyse Dossier-Organisation">01-Analyse Dossier-Organisation</option>
+            <option value="02-Réunions-Visite sur chantier">02-Réunions-Visite sur chantier</option>
+            <option value="03-Fond de plans">03-Fond de plans</option>
+            <option value="04-Plan de coffrage">04-Plan de coffrage</option>
+            <option value="05-Plan de démolition">05-Plan de démolition</option>
+            <option value="06-Plan d'armature">06-Plan d'armature</option>
+            <option value="07-Note de calcul">07-Note de calcul</option>
+            <option value="08-Modélisation-Calcul">08-Modélisation-Calcul</option>
+            <option value="09-Etude ouvrages provisoires">09-Etude ouvrages provisoires</option>
+            <option value="10-DOE">10-DOE</option>
+            <option value="11-Sous-traitance-Calculs">11-Sous-traitance-Calculs</option>
+            <option value="12-Sous-traitance-Armatures">12-Sous-traitance-Armatures</option>
+            <option value="13-Base">13-Base</option>
+            <option value="14-Travaux supplémentaires">14-Travaux supplémentaires</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="event-projet">Projet</label>
+          <select id="event-projet" class="form-control">
+            <option value="">Sélectionner un projet</option>
+            <!-- Options will be populated dynamically -->
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="event-document">Document</label>
+          <select id="event-document" class="form-control">
+            <option value="">Sélectionner un document</option>
+            <!-- Options will be populated dynamically -->
+          </select>
+        </div>
+        <!-- Hidden fields for time -->
+        <input type="hidden" id="event-start">
+        <input type="hidden" id="event-end">
+        <input type="hidden" id="event-allday">
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" onclick="closeCustomPopup()">Annuler</button>
+      <button type="button" class="btn btn-primary" onclick="saveCustomEvent()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
 </body>
 <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
 <script src="https://uicdn.toast.com/tui.time-picker/latest/tui-time-picker.js"></script>

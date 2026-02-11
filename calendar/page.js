@@ -152,13 +152,35 @@ class CalendarHandler {
       template: {
         time(event) {
           const {title} = event;
-          const sanitizedTitle = title.replace('"','&quot;').trim();
-          return `<span title="${sanitizedTitle}">${title}</span>`;
+          const sanitizedTitle = title.replace(/"/g, '"').trim();
+          
+          const projet = event.raw?.projet;
+          const doc = event.raw?.document;
+          
+          let html = `<span title="${sanitizedTitle}">${title}</span>`;
+          if (projet) {
+            html += `<br><span style="font-size: 0.85em; opacity: 0.8;">${projet}</span>`;
+          }
+          if (doc) {
+            html += `<br><span style="font-size: 0.85em; opacity: 0.8;">${doc}</span>`;
+          }
+          return html;
         },
         allday(event) {
           const {title} = event;
-          const sanitizedTitle = title.replace('"','&quot;').trim();
-          return `<span title="${sanitizedTitle}">${title}</span>`;
+          const sanitizedTitle = title.replace(/"/g, '"').trim();
+          
+          const projet = event.raw?.projet;
+          const doc = event.raw?.document;
+          
+          let html = `<span title="${sanitizedTitle}">${title}</span>`;
+          if (projet) {
+            html += `<br><span style="font-size: 0.85em; opacity: 0.8;">${projet}</span>`;
+          }
+          if (doc) {
+            html += `<br><span style="font-size: 0.85em; opacity: 0.8;">${doc}</span>`;
+          }
+          return html;
         },
         popupDelete(){
           return t('Delete')
@@ -189,7 +211,7 @@ class CalendarHandler {
           borderColor: this._mainColor,
         },
       ],
-      useFormPopup: !isReadOnly,
+      useFormPopup: false, // Disable default popup to use custom one
       useDetailPopup: false, // We use our own logic to show this popup.
       gridSelection: {
         // Enable adding only via dbClick.
@@ -217,16 +239,19 @@ class CalendarHandler {
 
     this.calendar.on('selectDateTime', async (info) => {
       this.calendar.clearGridSelections();
-
-      // If this click results in the form popup, focus the title field in it.
-      setTimeout(() => container.querySelector('input[name=title]')?.focus(), 0);
+      if (!isReadOnly) {
+        openCustomPopup(info.start, info.end, info.isAllday);
+      }
     });
 
-    // Creation happens via the event-edit form.
-    this.calendar.on('beforeCreateEvent', (eventInfo) => upsertEvent(eventInfo));
+    // Creation happens via the event-edit form (or custom popup).
+    this.calendar.on('beforeCreateEvent', (eventInfo) => upsertEvent(eventInfo, eventInfo.isAllday));
 
     // Updates happen via the form or when dragging the event or its end-time.
-    this.calendar.on('beforeUpdateEvent', (update) => upsertEvent({id: update.event.id, ...update.changes}));
+    this.calendar.on('beforeUpdateEvent', (update) => {
+      const effectiveIsAllDay = update.changes.isAllday !== undefined ? update.changes.isAllday : update.event.isAllday;
+      upsertEvent({id: update.event.id, ...update.changes}, effectiveIsAllDay);
+    });
 
     // Deletion happens via the event-edit form.
     this.calendar.on('beforeDeleteEvent', (eventInfo) => deleteEvent(eventInfo));
@@ -420,7 +445,7 @@ ready(async () => {
   calendarHandler = new CalendarHandler();
   window.gristCalendar.calendarHandler = calendarHandler;
   await configureGristSettings();
-
+  await fetchDropdownOptions();
 });
 
 // Data for column mapping fields in Widget GUI
@@ -466,6 +491,22 @@ function getGristOptions() {
       optional: true,
       type: "Choice,ChoiceList",
       description: t("event category and style"),
+      allowMultiple: false
+    },
+    {
+      name: "projet",
+      title: "Projet",
+      optional: true,
+      type: "Text,Reference",
+      description: "Project name",
+      allowMultiple: false
+    },
+    {
+      name: "document",
+      title: "Document",
+      optional: true,
+      type: "Text,Reference",
+      description: "Document name",
       allowMultiple: false
     }
   ];
@@ -590,8 +631,8 @@ async function upsertGristRecord(gristEvent) {
 
 const secondsPerDay = 24 * 60 * 60;
 
-function makeGristDateTime(tzDate, colType) {
-  // tzDate is a date in local's (current browser's) timezone.
+function makeGristDateTime(date, colType) {
+  // date is a date in local's (current browser's) timezone.
   // So if user is in UTC-5 and document is in UTC+2, we need to adjust the time by 7 hours (in minutes it's 420
   // and in seconds it's 25200). So basically reinterpret the time as UTC+2.
 
@@ -602,15 +643,19 @@ function makeGristDateTime(tzDate, colType) {
   // perspective it is 17:00 (as the current time for document is 7h ahead of user's time). So we need to subtract
   // 7 hours from 10:00 to get 3:00, which is 10:00 for document (in UTC+2) as it is 7 hours ahead.
   
-  let unixTime = Math.floor(tzDate.valueOf() / 1000);
+  let unixTime = Math.floor(date.valueOf() / 1000);
 
   // Get this date timezone (local one). NOTE: it has opposite sign to what will
   // be returned from a tzDate with a timezone marker
   // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getTimezoneOffset
-  const localOffsetMin = -tzDate.getTimezoneOffset();
+  const localOffsetMin = -date.getTimezoneOffset();
 
   // If we set timezone, it will have a correct sign.
-  const docOffsetMin = !docTimeZone ? localOffsetMin : tzDate.tz(docTimeZone).getTimezoneOffset();
+  // Ensure we have a TZDate instance for .tz() call.
+  // The argument 'date' might be a plain Date object or a TZDate instance.
+  // We use the global 'TZDate' constructor.
+  const dateTz = (date instanceof TZDate) ? date : new TZDate(date);
+  const docOffsetMin = !docTimeZone ? localOffsetMin : dateTz.tz(docTimeZone).getTimezoneOffset();
 
   if (colType === 'Date') {
     // Reinterpret the time as UTC. Note: timezone offset is in minutes.
@@ -625,11 +670,27 @@ function makeGristDateTime(tzDate, colType) {
   }
 }
 
-async function upsertEvent(tuiEvent) {
+async function upsertEvent(tuiEvent, effectiveIsAllDay) {
   // conversion between calendar event object and grist flat format (so the one that is returned in onRecords event
   // and can be mapped by grist.mapColumnNamesBack)
   // tuiEvent can be partial: only the fields present will be updated in Grist.
   const [startType, endType] = await colTypesFetcher.getColTypes();
+
+  // Helper to adjust time if it's an all-day event
+  const isAllDay = effectiveIsAllDay !== undefined ? effectiveIsAllDay : tuiEvent.isAllday;
+  if (isAllDay) {
+    if (tuiEvent.start) {
+      const s = new TZDate(tuiEvent.start);
+      s.setHours(0, 0, 0, 0);
+      tuiEvent.start = s;
+    }
+    if (tuiEvent.end) {
+      const e = new TZDate(tuiEvent.end);
+      e.setHours(23, 59, 59, 999);
+      tuiEvent.end = e;
+    }
+  }
+
   const gristEvent = {
     id: tuiEvent.id,
     // undefined values will be removed from the fields sent to Grist.
@@ -710,7 +771,22 @@ function buildCalendarEventObject(record, colTypes, colOptions) {
   const raw = clean({
     backgroundColor: type?.choiceOptions?.[selected]?.fillColor,
     color: type?.choiceOptions?.[selected]?.textColor,
+    projet: record.projet,
+    document: record.document
   });
+
+  // Override color for specific chapters
+  const yellowChapters = [
+    "Développement",
+    "Gestion de service",
+    "Congés/Maladie/RTT/Férié",
+    "Formation/stages(reçues)"
+  ];
+
+  if (yellowChapters.includes(record.title)) {
+    raw.backgroundColor = '#FFD700'; // Gold/Yellow
+    raw.color = 'black'; // Ensure text is readable on yellow
+  }
   const fontWeight = type?.choiceOptions?.[selected]?.fontBold ? '800' : 'normal';
   const fontStyle = type?.choiceOptions?.[selected]?.fontItalic ? 'italic' : 'normal';
   let textDecoration = type?.choiceOptions?.[selected]?.fontUnderline ? 'underline' : 'none';
@@ -878,3 +954,161 @@ document.addEventListener('dblclick', async (ev) => {
   await grist.setCursorPos({rowId: event.id});
   await grist.commandApi.run('viewAsCard');
 });
+
+// --- Custom Popup Logic ---
+
+let currentSelection = {};
+
+async function openCustomPopup(start, end, isAllday) {
+  currentSelection = { start, end, isAllday };
+  document.getElementById('custom-event-modal').style.display = 'block';
+  // Focus on the first field
+  document.getElementById('event-chapitre').focus();
+}
+
+function closeCustomPopup() {
+  document.getElementById('custom-event-modal').style.display = 'none';
+  // Clear form
+  document.getElementById('custom-event-form').reset();
+  currentSelection = {};
+}
+
+async function saveCustomEvent() {
+  const chapitre = document.getElementById('event-chapitre').value;
+  const projet = document.getElementById('event-projet').value;
+  const documentName = document.getElementById('event-document').value;
+
+  if (!chapitre) {
+    alert('Veuillez sélectionner un chapitre.');
+    return;
+  }
+
+  const [startType, endType] = await colTypesFetcher.getColTypes();
+
+  let startDate = currentSelection.start;
+  let endDate = currentSelection.end;
+
+  if (currentSelection.isAllday) {
+    startDate = new TZDate(startDate);
+    startDate.setHours(0, 0, 0, 0);
+    
+    endDate = new TZDate(endDate);
+    endDate.setHours(23, 59, 59, 999);
+  }
+  
+  const gristEvent = {
+    title: chapitre, // Using Chapitre as title
+    startDate: makeGristDateTime(startDate, startType),
+    endDate: makeGristDateTime(endDate, endType),
+    isAllDay: currentSelection.isAllday ? 1 : 0,
+    projet: projet || undefined,
+    document: documentName || undefined
+  };
+
+  await upsertGristRecord(gristEvent);
+  closeCustomPopup();
+}
+
+let allDocsData = null; // Store fetched data globally
+
+async function fetchDropdownOptions() {
+  try {
+    // Fetch Projets
+    const projetsTable = await grist.docApi.fetchTable('Projets');
+    const projetSelect = document.getElementById('event-projet');
+    projetSelect.innerHTML = '<option value="">Sélectionner un projet</option>';
+    
+    // Check if Nom_de_projet column exists
+    if (projetsTable && projetsTable.Nom_de_projet) {
+      projetsTable.Nom_de_projet.forEach(name => {
+        if (name) {
+          const option = document.createElement('option');
+          option.value = name;
+          option.textContent = name;
+          projetSelect.appendChild(option);
+        }
+      });
+    }
+
+    // Add change listener to filter documents
+    projetSelect.addEventListener('change', () => {
+      updateDocumentDropdown();
+    });
+
+    // Add change listener to Chapitre to enable/disable Project/Document
+    const chapitreSelect = document.getElementById('event-chapitre');
+    chapitreSelect.addEventListener('change', () => {
+      const selectedChapitre = chapitreSelect.value;
+      const nonProjectChapters = [
+        "Développement",
+        "Gestion de service",
+        "Congés/Maladie/RTT/Férié",
+        "Formation/stages(reçues)"
+      ];
+      
+      const shouldDisable = nonProjectChapters.includes(selectedChapitre);
+      
+      projetSelect.disabled = shouldDisable;
+      document.getElementById('event-document').disabled = shouldDisable;
+      
+      if (shouldDisable) {
+        projetSelect.value = "";
+        updateDocumentDropdown(); // This will clear document dropdown
+      }
+    });
+
+    // Fetch Documents (ListePlan_NDC_COF)
+    const docsTable = await grist.docApi.fetchTable('ListePlan_NDC_COF');
+    allDocsData = docsTable; // Store globally
+
+    // Initial update (will clear document list since no project selected)
+    updateDocumentDropdown();
+
+  } catch (e) {
+    console.error('Error fetching dropdown options:', e);
+  }
+}
+
+function updateDocumentDropdown() {
+    const projetSelect = document.getElementById('event-projet');
+    const docSelect = document.getElementById('event-document');
+    const selectedProjet = projetSelect.value;
+    
+    // Reset dropdown
+    docSelect.innerHTML = '<option value="">Sélectionner un document</option>';
+
+    if (!allDocsData || !allDocsData.Designation) return;
+
+    // If no project selected, show nothing
+    if (!selectedProjet) return;
+
+    const designations = new Set();
+    
+    // Iterate through all rows
+    // Note: Grist returns columnar data arrays: { id: [...], Designation: [...], Nom_projet: [...] }
+    const rowCount = allDocsData.id.length;
+    for (let i = 0; i < rowCount; i++) {
+        const designation = allDocsData.Designation[i];
+        // Use 'Nom_projet' column from ListePlan_NDC_COF. 
+        // If the column name is different, this needs adjustment. 
+        // Based on analysis, it seems to be Nom_projet.
+        const projet = allDocsData.Nom_projet ? allDocsData.Nom_projet[i] : null;
+
+        if (designation && projet === selectedProjet) {
+            designations.add(designation);
+        }
+    }
+
+    const uniqueDesignations = [...designations];
+    uniqueDesignations.sort().forEach(designation => {
+        const option = document.createElement('option');
+        option.value = designation;
+        option.textContent = designation;
+        docSelect.appendChild(option);
+    });
+}
+
+// Make functions globally available for HTML onclick handlers
+window.openCustomPopup = openCustomPopup;
+window.closeCustomPopup = closeCustomPopup;
+window.saveCustomEvent = saveCustomEvent;
