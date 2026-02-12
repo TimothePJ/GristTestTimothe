@@ -134,6 +134,16 @@
       <label for="documentName">Nom du document:</label>
       <input type="text" id="documentName" name="documentName" required>
 
+
+      <label for="documentType">Type de document :</label>
+      <select id="documentType" name="documentType" required>
+        <option value="NDC" selected>NDC</option>
+        <option value="COFFRAGE">COFFRAGE</option>
+        <option value="ARMATURES">ARMATURES</option>
+        <option value="COUPES">COUPES</option>
+        <option value="DÉMOLITION">DÉMOLITION</option>
+      </select>
+
       <label for="defaultDatelimite">Date Limite réception données par défaut:</label>
       <input type="date" id="defaultDatelimite" name="defaultDatelimite">
 
@@ -173,7 +183,17 @@
           </tr>
         </tbody>
       </table>
-    
+
+
+      <label for="multipleDocumentType">Type de document :</label>
+      <select id="multipleDocumentType" required>
+        <option value="NDC" selected>NDC</option>
+        <option value="COFFRAGE">COFFRAGE</option>
+        <option value="ARMATURES">ARMATURES</option>
+        <option value="COUPES">COUPES</option>
+        <option value="DÉMOLITION">DÉMOLITION</option>
+      </select>
+
       <label for="multipleDefaultDatelimite">Date Limite réception données par défaut:</label>
       <input type="date" id="multipleDefaultDatelimite" name="defaultDatelimite">
     
@@ -253,6 +273,8 @@
 
   <!-- Form to add new rows -->
   <div class="add-form">
+    <button id="addProjectButton">Ajouter Projet</button>
+
     <button id="copyTableDataButton">Copier Tableau</button>
 
     <button id="copyTableDataButtonImage">Copier Tableau Image</button>
@@ -264,6 +286,7 @@
 
   
   <script src="./js/legacy.js" defer></script>
+  <script type="module" src="./js/main.js"></script>
 </body>
 
 </html>

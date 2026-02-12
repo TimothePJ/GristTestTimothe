@@ -1,4 +1,5 @@
 
+// --- Global helpers guard (ensures availability even if earlier patches moved code) ---
 (function () {
   if (typeof window !== 'undefined') {
     if (typeof window.normalizeNumeroRaw === 'undefined') {
@@ -282,6 +283,44 @@ let records = [];
 let selectedFirstValue = '';
 let selectedSecondValue = '';
 let selectedDocNumber = null; let selectedDocName = '';
+
+// --- ListePlan NDC+COF integration (création automatique lors de l'ajout de document(s)) ---
+const LISTEPLAN_TABLE_CANDIDATES = ['ListePlan_NDC_COF', 'ListePlan NDC+COF', 'ListePlan_NDC+COF'];
+let __listePlanTableName = null;
+
+async function resolveListePlanTableName() {
+  if (__listePlanTableName) return __listePlanTableName;
+  for (const name of LISTEPLAN_TABLE_CANDIDATES) {
+    try {
+      await grist.docApi.fetchTable(name);
+      __listePlanTableName = name;
+      return name;
+    } catch (e) {
+      // ignore, try next
+    }
+  }
+  throw new Error("Table ListePlan introuvable (attendu: 'ListePlan_NDC_COF' ou 'ListePlan NDC+COF').");
+}
+
+function isoToday() {
+  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+}
+
+function _norm(v) {
+  return String(v ?? '').trim();
+}
+
+function findListePlanIndex(plansTable, projectName, numeroDocStr) {
+  const projs = plansTable.Nom_projet || [];
+  const nums  = plansTable.NumeroDocument || [];
+  const p = _norm(projectName);
+  const n = _norm(numeroDocStr);
+  for (let i = 0; i < Math.max(projs.length, nums.length); i++) {
+    if (_norm(projs[i]) === p && _norm(nums[i]) === n) return i;
+  }
+  return -1;
+}
+
 
 
 
@@ -946,9 +985,6 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
     const selectedProject = selectedFirstValue;
     if (!selectedProject) throw new Error("Aucun projet sélectionné.");
 
-    // ✅ S'assure que le cache NumeroDocument est prêt (important si la colonne n'est pas dans la vue)
-    try { await refreshReferencesNumeroCache(); } catch (e) { }
-
     const serviceValue = await getTeamService();
 
     const userActions = [];
@@ -1190,6 +1226,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
   const formData = new FormData(e.target);
   const documentNumber = formData.get('documentNumber');
   const documentName = formData.get('documentName');
+  const documentType = String(formData.get('documentType') || 'NDC').trim();
   let defaultDatelimite = formData.get('defaultDatelimite');
 
   if (!defaultDatelimite) {
@@ -1255,7 +1292,36 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
       Service: serviceValue
     }));
 
-    const actions = newRows.map(row => ['AddRecord', 'References', null, row]);
+    // 1) Upsert dans la table ListePlan (une seule fois par document, pas par émetteur)
+    let planAction = null;
+    try {
+      const plansTableName = await resolveListePlanTableName();
+      const plans = await grist.docApi.fetchTable(plansTableName);
+
+      const numStrPlan = _norm(documentNumber);
+      const idxPlan = findListePlanIndex(plans, selectedProject, numStrPlan);
+
+      if (idxPlan >= 0) {
+        planAction = ['UpdateRecord', plansTableName, plans.id[idxPlan], {
+          Type_document: documentType,
+          Designation: nm,
+        }];
+      } else {
+        planAction = ['AddRecord', plansTableName, null, {
+          Nom_projet: selectedProject,
+          NumeroDocument: numStrPlan,
+          Type_document: documentType,
+          Designation: nm
+        }];
+      }
+    } catch (err) {
+      console.warn("ListePlan: impossible d'ajouter / mettre à jour le document (vérifie le nom de table et les colonnes).", err);
+    }
+
+    // 2) Ajout des lignes dans References
+    const actions = [];
+    if (planAction) actions.push(planAction);
+    newRows.forEach(row => actions.push(['AddRecord', 'References', null, row]));
     await grist.docApi.applyUserActions(actions);
 
     console.log("Nouveau document ajouté :", combinedDocumentName);
@@ -1618,6 +1684,8 @@ async function resetAddDocumentDialog() {
   document.getElementById('documentNumber').value = '';
   document.getElementById('documentName').value = '';
   document.getElementById('defaultDatelimite').value = '';
+    const typeSel = document.getElementById('documentType');
+    if (typeSel) typeSel.value = 'NDC';
 
   // Récupérer le projet sélectionné
   const selectedProject = document.getElementById('firstColumnDropdown').value;
@@ -1953,7 +2021,7 @@ document.getElementById('editRowDialog').addEventListener('submit', async (e) =>
     Reference: formData.get('reference'),
     Indice: formData.get('indice'),
     Recu: formData.get('recu'),
-    DescriptionObservationss: formData.get('description'),
+    DescriptionObservations: formData.get('description'),
     DateLimite: datelimite // Valeur corrigée ici
   };
 
@@ -2153,6 +2221,8 @@ function resetAddMultipleDocumentDialog() {
       input.value = '';
     }
   });
+  const typeSel = document.getElementById('multipleDocumentType');
+  if (typeSel) typeSel.value = 'NDC';
 
   // Réinitialiser le tableau dynamique
   const tbody = document.getElementById('documentTableBody');
@@ -2315,6 +2385,8 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
   e.preventDefault();
   trimInputs(e.target); // Nettoie les espaces superflus
 
+  const documentType = String(document.getElementById('multipleDocumentType')?.value || 'NDC').trim();
+
   // Récupérer les lignes du tableau dynamique
   const tbody = document.getElementById('documentTableBody');
   const rows = Array.from(tbody.querySelectorAll('tr'));
@@ -2394,15 +2466,62 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
     // Récupérer la date limite par défaut
     const defaultDatelimite = document.getElementById('multipleDefaultDatelimite').value || "1900-01-01";
 
-    // Construire la liste des actions à appliquer pour chaque document et chaque émetteur
+    // Construire la liste des actions à appliquer (ListePlan + References)
     const actions = [];
+
+    // 1) Upsert dans ListePlan : 1 ligne par document (pas par émetteur)
+    try {
+      const plansTableName = await resolveListePlanTableName();
+      const plans = await grist.docApi.fetchTable(plansTableName);
+
+      // Index des lignes existantes (Nom_projet + NumeroDocument)
+      const existing = new Map();
+      const projs = plans.Nom_projet || [];
+      const nums  = plans.NumeroDocument || [];
+      const ids   = plans.id || [];
+      const L = Math.max(projs.length, nums.length, ids.length);
+
+      for (let i = 0; i < L; i++) {
+        const p = _norm(projs[i]);
+        const n = _norm(nums[i]);
+        if (!p || !n) continue;
+        existing.set(`${p}||${n}`, ids[i]);
+      }
+      const projKey = _norm(selectedProject);
+
+      documentsData.forEach(doc => {
+        const numStrPlan = _norm(doc.documentNumber);
+        const nm = String(doc.documentName).trim();
+        const key = `${projKey}||${numStrPlan}`;
+
+        if (existing.has(key)) {
+          actions.push(['UpdateRecord', plansTableName, existing.get(key), {
+            Type_document: documentType,
+            Designation: nm,
+          }]);
+        } else {
+          actions.push(['AddRecord', plansTableName, null, {
+            Nom_projet: selectedProject,
+            NumeroDocument: numStrPlan,
+            Type_document: documentType,
+            Designation: nm
+          }]);
+          // évite les doublons si deux fois le même numéro est tapé dans le tableau
+          existing.set(key, null);
+        }
+      });
+
+    } catch (err) {
+      console.warn("ListePlan: impossible d'ajouter / mettre à jour les documents (vérifie le nom de table et les colonnes).", err);
+    }
+
+    // 2) Ajout dans References : 1 ligne par (document × émetteur)
     documentsData.forEach(doc => {
-      // Concatène le numéro et le nom avec un tiret
-      const combinedDocumentName = `${doc.documentNumber}-${doc.documentName}`.trim();
       selectedEmitters.forEach(emetteur => {
         const _n2 = Number(doc.documentNumber);
         const num = (Number.isFinite(_n2) && _n2 !== 0) ? _n2 : null;
-        const nm = String(doc.documentName).trim();
+        const nm  = String(doc.documentName).trim();
+
         const newRow = {
           NomProjet: selectedProject,
           NomDocument: nm,
@@ -2411,10 +2530,11 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
           Reference: '_',
           Indice: '-',
           Recu: '1900-01-01',
-          DescriptionObservationss: 'EN ATTENTE',
+          DescriptionObservations: 'EN ATTENTE',
           DateLimite: defaultDatelimite,
           Service: serviceValue
         };
+
         actions.push(['AddRecord', 'References', null, newRow]);
       });
     });
