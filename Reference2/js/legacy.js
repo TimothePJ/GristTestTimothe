@@ -296,16 +296,54 @@ function getSelectedDocPair() {
 
 function parseDocValue(raw) {
   if (!raw) return { numero: null, name: '' };
+
+  // 1) Cas JSON (anciennes versions : value={n,name})
   try {
     const obj = JSON.parse(raw);
     if (obj && (obj.n != null || obj.numero != null || obj.name != null || obj.nom != null)) {
-      const numero = obj.n != null ? obj.n : (obj.numero != null ? obj.numero : null);
-      const name = obj.name != null ? obj.name : (obj.nom != null ? obj.nom : '');
-      return { numero: numero != null ? Number(numero) : null, name: String(name).trim() };
+      const numero = (obj.n != null) ? obj.n : (obj.numero != null ? obj.numero : null);
+      const name = (obj.name != null) ? obj.name : (obj.nom != null ? obj.nom : '');
+      const n = (numero === 0 || numero === '0') ? 0 : Number(numero);
+      return { numero: Number.isFinite(n) ? n : null, name: String(name).trim() };
     }
-  } catch (e) { }
-  // No regex fallback here: raw is treated entirely as a name
-  return { numero: null, name: String(raw).trim() };
+  } catch (e) { /* pas du JSON -> on continue */ }
+
+  // 2) Cas normal : raw = NomDocument
+  const name = String(raw).trim();
+  let numero = null;
+
+  try {
+    const selectedProject =
+      (typeof selectedFirstValue !== 'undefined' && selectedFirstValue) ?
+        String(selectedFirstValue).trim() :
+        String(document.getElementById('firstColumnDropdown')?.value || '').trim();
+
+    if (selectedProject && Array.isArray(records)) {
+      // On récupère tous les NumeroDocument du projet+document, puis on prend la valeur la plus fréquente
+      const nums = (records || [])
+        .filter(r =>
+          String(r.NomProjet || '').trim() === selectedProject &&
+          String(r.NomDocument || '').trim() === name &&
+          r.NumeroDocument != null
+        )
+        .map(r => {
+          if (r.NumeroDocument === 0 || r.NumeroDocument === '0') return 0;
+          const n = Number(r.NumeroDocument);
+          return Number.isFinite(n) ? n : null;
+        })
+        .filter(v => v != null);
+
+      if (nums.length) {
+        const counts = new Map();
+        nums.forEach(n => counts.set(n, (counts.get(n) || 0) + 1));
+        // tri: fréquence desc, puis valeur desc (pour préférer 104 plutôt que 0 si tie)
+        const best = [...counts.entries()].sort((a, b) => (b[1] - a[1]) || (b[0] - a[0]))[0];
+        numero = best ? best[0] : null;
+      }
+    }
+  } catch (e) {}
+
+  return { numero, name };
 }
 
 function makeDocLabel(name, numero) {
@@ -333,6 +371,16 @@ let selectedRecordId = null;
 let newTable = false; // Variable to track if a new table is being added
 let newTableName = ''; // Variable to store the name of the new table
 let lastValidDocument = '';
+
+
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 // Ready Grist
 grist.ready();
@@ -419,31 +467,60 @@ function populateSecondColumnListbox(selectedValue) {
   const listbox = document.getElementById('secondColumnListbox');
   listbox.innerHTML = '<option value="">Sélectionner un étage</option>'; // Réinitialise la liste
 
-  const secondColumnValues = records
-    .filter(record => record.NomProjet === selectedValue) // Filtre selon le projet
-    .map(record => record.NomDocument) // Extrait les valeurs
-    .filter((value, index, self) => value && self.indexOf(value) === index) // Supprime les doublons
-    .sort();
+  const project = String(selectedValue || '').trim();
 
-  secondColumnValues.forEach(value => {
+  // Map NomDocument -> NumeroDocument (choisit la valeur la plus fréquente)
+  const byDoc = new Map();
+  (records || [])
+    .filter(r => String(r.NomProjet || '').trim() === project)
+    .forEach(r => {
+      const name = String(r.NomDocument || '').trim();
+      if (!name) return;
+
+      let n = null;
+      if (r.NumeroDocument === 0 || r.NumeroDocument === '0') n = 0;
+      else if (r.NumeroDocument != null) {
+        const x = Number(r.NumeroDocument);
+        n = Number.isFinite(x) ? x : null;
+      }
+
+      if (!byDoc.has(name)) byDoc.set(name, []);
+      if (n != null) byDoc.get(name).push(n);
+    });
+
+  const docs = [...byDoc.keys()].sort((a, b) => a.localeCompare(b, 'fr'));
+
+  docs.forEach(name => {
+    const nums = byDoc.get(name) || [];
+    let numero = 0;
+    if (nums.length) {
+      const counts = new Map();
+      nums.forEach(v => counts.set(v, (counts.get(v) || 0) + 1));
+      const best = [...counts.entries()].sort((a, b) => (b[1] - a[1]) || (b[0] - a[0]))[0];
+      numero = best ? best[0] : 0;
+    }
     const option = document.createElement('option');
-    option.value = value;
-    option.text = value;
+    option.value = name;                 // IMPORTANT : value = NomDocument (pas de JSON)
+    option.textContent = makeDocLabel(name, numero);
     listbox.appendChild(option);
   });
 
   // Ajoute l'option "Ajouter document"
   const addOption = document.createElement('option');
   addOption.value = 'addTable';
-  addOption.text = 'Ajouter document';
+  addOption.textContent = 'Ajouter document';
   listbox.appendChild(addOption);
 
   // Ajoute l'option "Ajouter Plusieurs document"
   const addMultipleOption = document.createElement('option');
   addMultipleOption.value = 'addMultipleTable';
-  addMultipleOption.text = 'Ajouter Plusieurs document';
+  addMultipleOption.textContent = 'Ajouter Plusieurs document';
   listbox.appendChild(addMultipleOption);
+
+  // Force le libellé en "<NumeroDocument> <NomDocument>" même si des options sont ajoutées ailleurs
+  try { refreshSecondDropdownLabels(); } catch (e) {}
 }
+
 
 
 // Helper function to check if a string is a valid date
@@ -814,7 +891,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
       selectedDocuments.forEach(docVal => {
         const parsedDoc = parseDocValue(docVal);
         const newRow = {
-          NomProjet: projectId,
+          NomProjet: selectedProject,
           NomDocument: parsedDoc.name,
           NumeroDocument: numeroOrZero(parseNumeroForStorage(parsedDoc.numero)),
           Emetteur: emetteur,
@@ -830,7 +907,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
       });
     } else {
       const newRow = {
-        NomProjet: projectId,
+        NomProjet: selectedProject,
         NomDocument: getSelectedDocPair().name,
         NumeroDocument: numeroOrZero(parseNumeroForStorage(getSelectedDocPair().numero)),
         Emetteur: emetteur,
@@ -996,6 +1073,7 @@ grist.onRecords(function (receivedRecords) {
 document.getElementById('secondColumnListbox').addEventListener('change', function () {
   const selectedValue = this.value;
   console.log("Tableau sélectionné :", selectedValue);
+
   if (selectedValue === 'addTable') {
     handleAddTable();
     return;
@@ -1004,11 +1082,25 @@ document.getElementById('secondColumnListbox').addEventListener('change', functi
     handleAddMultipleTable();
     return;
   }
-  // Enregistrez la sélection valide si elle n'est pas vide
-  if (selectedValue.trim() !== "") {
-    lastValidDocument = selectedValue;
+
+  // Enregistre la sélection valide (NomDocument)
+  if (selectedValue && selectedValue.trim() !== "") {
+    lastValidDocument = selectedValue.trim();
   }
+
+  // IMPORTANT : on garde la value brute (= NomDocument)
   selectedSecondValue = selectedValue;
+
+  // Met à jour le duo (NumeroDocument / NomDocument) pour les autres fonctions
+  try {
+    const parsed = parseDocValue(selectedValue);
+    selectedDocNumber = parsed.numero;
+    selectedDocName = parsed.name;
+  } catch (e) {
+    selectedDocNumber = null;
+    selectedDocName = '';
+  }
+
   console.log("selectedFirstValue:", selectedFirstValue, "selectedSecondValue:", selectedSecondValue);
   if (selectedFirstValue && selectedSecondValue) {
     populateTable();
@@ -1037,62 +1129,57 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
   trimInputs(e.target); // Nettoie les entrées (évite les espaces superflus)
 
   const formData = new FormData(e.target);
-  const documentNumber = formData.get('documentNumber');
-  const documentName = formData.get('documentName');
+  const documentNumberRaw = formData.get('documentNumber');
+  const documentNameRaw = formData.get('documentName');
   let defaultDatelimite = formData.get('defaultDatelimite');
 
-  if (!defaultDatelimite) {
-    defaultDatelimite = "1900-01-01";
+  if (!defaultDatelimite) defaultDatelimite = "1900-01-01";
+
+  const nm = String(documentNameRaw || '').trim();
+  const num = parseNumeroForStorage(documentNumberRaw); // 0 est valide
+
+  if (!nm) {
+    alert("Le nom du document est requis.");
+    return;
   }
-
-  const combinedDocumentName = `${documentNumber}-${documentName}`.trim();
-
-  if (!documentNumber || !documentName.trim()) {
-    alert("Le numéro et le nom du document sont requis.");
+  if (documentNumberRaw == null || String(documentNumberRaw).trim() === '') {
+    alert("Le numéro du document est requis.");
+    return;
+  }
+  if (num == null) {
+    alert("Le numéro du document doit être un nombre (0 autorisé).");
     return;
   }
 
   const selectedEmitters = Array.from(
     document.querySelectorAll('#emetteurDropdown input[type="checkbox"]:checked')
   ).map(checkbox => {
-    // Trouve l'input texte qui est juste après la case à cocher
     const textInput = checkbox.nextElementSibling;
-
-    // Si c'est un champ texte (pour les émetteurs personnalisés)
     if (textInput && textInput.tagName === "INPUT" && textInput.type === "text") {
       const customValue = textInput.value.trim();
-      return customValue ? customValue : null; // Retourne la valeur écrite, sinon null
+      return customValue ? customValue : null;
     }
-
-    return checkbox.value; // Pour les émetteurs standards
-  }).filter(value => value); // Supprime les valeurs nulles
+    return checkbox.value;
+  }).filter(Boolean);
 
   if (selectedEmitters.length === 0) {
     alert("Veuillez sélectionner au moins un émetteur.");
     return;
   }
 
-  const selectedProject = selectedFirstValue;
+  const selectedProject = String(selectedFirstValue || '').trim();
   if (!selectedProject) {
     alert("Veuillez sélectionner un projet avant d'ajouter un document.");
     return;
   }
 
   try {
-    // Récupérer l'ID du projet
-    const selectedProject = selectedFirstValue;
-    if (!selectedProject) throw new Error("Aucun projet sélectionné.");
-
-
-    // Récupérer le service depuis la table Team (la première ligne)
+    // Service depuis Team
     const serviceValue = await getTeamService();
 
-    // Création des nouvelles lignes
-    const _n1 = Number(documentNumber);
-    const num = (Number.isFinite(_n1) && _n1 !== 0) ? _n1 : null;
-    const nm = String(documentName).trim();
+    // Création des nouvelles lignes (1 ligne par émetteur)
     const newRows = selectedEmitters.map((emetteur) => ({
-      NomProjet: projectId,
+      NomProjet: selectedProject,
       NomDocument: nm,
       NumeroDocument: numeroOrZero(parseNumeroForStorage(num)),
       Emetteur: emetteur,
@@ -1107,19 +1194,34 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
     const actions = newRows.map(row => ['AddRecord', 'References', null, row]);
     await grist.docApi.applyUserActions(actions);
 
-    console.log("Nouveau document ajouté :", combinedDocumentName);
+    console.log("Nouveau document ajouté :", makeDocLabel(nm, num));
 
+    // Mettre à jour le dropdown : value = NomDocument (PAS de JSON)
     const secondDropdown = document.getElementById('secondColumnListbox');
+
+    // On supprime toute option existante portant le même NomDocument (évite doublon)
+    Array.from(secondDropdown.options)
+      .filter(o => o.value === nm)
+      .forEach(o => o.remove());
+
     const newOption = document.createElement('option');
-    newOption.value = JSON.stringify({ n: (Number.isFinite(Number(documentNumber)) && Number(documentNumber) !== 0 ? Number(documentNumber) : null), name: String(documentName).trim() });
-    newOption.textContent = makeDocLabel(String(documentName).trim(), (Number(documentNumber) || null));
+    newOption.value = nm;
+    newOption.textContent = makeDocLabel(nm, num);
 
-    // Ajouter à la fin de la liste avant "Ajouter document"
     const addTableOption = secondDropdown.querySelector('option[value="addTable"]');
-    secondDropdown.insertBefore(newOption, addTableOption);
+    if (addTableOption) secondDropdown.insertBefore(newOption, addTableOption);
+    else secondDropdown.appendChild(newOption);
 
-    secondDropdown.value = JSON.stringify({ n: (Number.isFinite(Number(documentNumber)) && Number(documentNumber) !== 0 ? Number(documentNumber) : null), name: String(documentName).trim() });
-    selectedSecondValue = makeDocLabel(String(documentName).trim(), (Number(documentNumber) || null));
+    // Sélectionne le nouveau document
+    secondDropdown.value = nm;
+    selectedSecondValue = nm;
+    lastValidDocument = nm;
+
+    selectedDocNumber = num;
+    selectedDocName = nm;
+
+    // Mise à jour des labels au bon format
+    try { refreshSecondDropdownLabels(); } catch (e) {}
 
     // Mise à jour du tableau pour afficher les nouvelles données
     populateTable();
@@ -1132,6 +1234,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
     alert("Une erreur s'est produite lors de l'ajout du document.");
   }
 });
+
 
 // Fonction pour convertir une date en "DD/MM/YYYY"
 function formatDate(dateString) {
@@ -1353,61 +1456,54 @@ document.getElementById('addProjectDialog').addEventListener('submit', async (e)
 async function renderDocumentCheckboxList() {
   const container = document.getElementById('duplicateOptionsContainer');
   const secondDropdown = document.getElementById('secondColumnListbox');
-  const selectedProject = selectedFirstValue; // Projet sélectionné dans la première liste
-  const selectedDocument = secondDropdown.value; // Document actuellement sélectionné dans la deuxième liste
+  const selectedProject = String(selectedFirstValue || '').trim(); // Projet sélectionné
+  const selectedDocument = String(secondDropdown.value || '').trim(); // Document sélectionné
 
-  // Vérifier qu'un projet est sélectionné
   if (!selectedProject) {
     container.innerHTML = '<p style="color: red;">Veuillez sélectionner un projet avant de dupliquer une ligne.</p>';
     return;
   }
 
-  // Obtenir les options disponibles dans la deuxième liste déroulante
+  // Options disponibles dans le dropdown (hors actions) + on exclut le doc courant
   const documentOptions = Array.from(secondDropdown.options)
-    .filter(option => option.value && option.value !== 'addTable' && option.value !== selectedDocument) // Exclure le document sélectionné
-    .map(option => option.value);
+    .filter(opt => opt.value && opt.value !== 'addTable' && opt.value !== 'addMultipleTable' && opt.value !== selectedDocument)
+    .map(opt => {
+      const name = String(opt.value).trim();
+      const parsed = parseDocValue(name); // value = NomDocument
+      const numero = (parsed && parsed.numero != null) ? parsed.numero : 0;
+      return { value: name, label: makeDocLabel(name, numero) };
+    });
 
-  // Si aucun document n'est disponible
   if (documentOptions.length === 0) {
     container.innerHTML = '<p>Aucun autre document disponible pour ce projet.</p>';
     return;
   }
 
-  // Générer la case "Tout sélectionner"
   const selectAllDiv = `
-        <div class="emetteur-item">
-          <input type="checkbox" id="selectAllDocuments" class="select-all-documents">
-          <span>Tout sélectionner</span>
-        </div>
-      `;
+    <div class="emetteur-item">
+      <input type="checkbox" id="selectAllDocuments" class="select-all-documents">
+      <span>Tout sélectionner</span>
+    </div>
+  `;
 
-  // Générer les cases à cocher pour chaque document disponible
-  const listHTML = documentOptions.map(({ value, label }, index) => `
-        <div class="emetteur-item">
-          <input type="checkbox" id="doc-${index}" name="documents" value="${value}">
-          <span>${label}</span>
-        </div>
-      `).join('');
+  const listHTML = documentOptions.map((opt, index) => `
+    <div class="emetteur-item">
+      <input type="checkbox" id="doc-${index}" name="documents" value="${escapeHtml(String(opt.value))}">
+      <span>${escapeHtml(String(opt.label))}</span>
+    </div>
+  `).join('');
 
-  // Afficher la liste complète avec l'option "Tout sélectionner"
-  container.innerHTML = `
-        <p>Document :</p>
-        <div id="documentList" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px;">
-          ${selectAllDiv}
-          ${listHTML}
-        </div>
-      `;
+  container.innerHTML = selectAllDiv + listHTML;
 
-  // Ajouter un écouteur à la case "Tout sélectionner" pour cocher/décocher tous les documents
-  const selectAllCheckbox = document.getElementById('selectAllDocuments');
-  selectAllCheckbox.addEventListener('change', function () {
-    // Récupérer toutes les cases à cocher des documents (excluant la case "Tout sélectionner")
-    const docCheckboxes = container.querySelectorAll("input[name='documents']");
-    docCheckboxes.forEach(cb => {
-      cb.checked = selectAllCheckbox.checked;
+  const selectAllCheckbox = container.querySelector('#selectAllDocuments');
+  if (selectAllCheckbox) {
+    selectAllCheckbox.addEventListener('change', function () {
+      const docCheckboxes = container.querySelectorAll("input[name='documents']");
+      docCheckboxes.forEach(cb => { cb.checked = selectAllCheckbox.checked; });
     });
-  });
+  }
 }
+
 
 document.getElementById('duplicateCheckbox').addEventListener('change', async function () {
   const container = document.getElementById('duplicateOptionsContainer');
@@ -2157,143 +2253,113 @@ function removeCustomEmitterForContainer(rowToRemove, containerId) {
 
 document.getElementById('addMultipleDocumentDialog').addEventListener('submit', async (e) => {
   e.preventDefault();
-  trimInputs(e.target); // Nettoie les espaces superflus
 
-  // Récupérer les lignes du tableau dynamique
+  trimInputs(e.target);
+
+  // Récupérer les documents saisis (table du dialog)
   const tbody = document.getElementById('documentTableBody');
   const rows = Array.from(tbody.querySelectorAll('tr'));
 
-  // Filtrer les lignes non complètement vides (on ignore la dernière ligne vide)
-  const documentRows = rows.filter((row, index) => {
+  const documentsData = [];
+  for (const row of rows) {
     const cells = row.querySelectorAll('td');
-    const cell1 = cells[0].innerText.trim();
-    const cell2 = cells[1].innerText.trim();
-    // Si c'est la dernière ligne et qu'elle est vide, on l'ignore
-    if (index === rows.length - 1 && cell1 === '' && cell2 === '') {
-      return false;
-    }
-    // On considère la ligne si au moins une cellule est renseignée
-    return (cell1 !== '' || cell2 !== '');
-  });
+    const docNumberRaw = (cells[0]?.innerText || '').trim();
+    const docNameRaw = (cells[1]?.innerText || '').trim();
 
-  // Vérifier que pour chaque ligne non vide, les deux cellules sont complétées
-  for (const row of documentRows) {
-    const cells = row.querySelectorAll('td');
-    const cell1 = cells[0].innerText.trim();
-    const cell2 = cells[1].innerText.trim();
-    if ((cell1 === '' && cell2 !== '') || (cell1 !== '' && cell2 === '')) {
-      alert("Chaque ligne doit être complétée dans les deux colonnes.");
+    if (!docNumberRaw && !docNameRaw) continue; // ligne vide
+
+    const nm = String(docNameRaw || '').trim();
+    const num = parseNumeroForStorage(docNumberRaw);
+
+    if (!nm || num == null) {
+      alert("Chaque document doit avoir un numéro (nombre, 0 autorisé) et un nom.");
       return;
     }
+
+    documentsData.push({ documentNumber: num, documentName: nm });
   }
 
-  if (documentRows.length === 0) {
-    alert("Veuillez remplir au moins une ligne avec un numéro et un nom de document.");
+  if (!documentsData.length) {
+    alert("Ajoute au moins un document dans le tableau.");
     return;
   }
 
-  // Construire un tableau de données à partir des lignes (chaque ligne contient un numéro et un nom)
-  const documentsData = documentRows.map(row => {
-    const cells = row.querySelectorAll('td');
-    return {
-      documentNumber: cells[0].innerText.trim(),
-      documentName: cells[1].innerText.trim()
-    };
-  });
+  const selectedProject = String(selectedFirstValue || '').trim();
+  if (!selectedProject) {
+    alert("Veuillez sélectionner un projet avant d'ajouter des documents.");
+    return;
+  }
 
-  // Récupérer les émetteurs sélectionnés dans le conteneur du dialog "Ajouter Plusieurs document"
-  const selectedEmitters = Array.from(document.querySelectorAll('#multipleEmetteurDropdown input[type="checkbox"]:checked'))
-    .map(checkbox => {
-      // Pour une case personnalisée, récupérer la valeur saisie dans le champ adjacent
-      const textInput = checkbox.nextElementSibling;
-      if (textInput && textInput.tagName === "INPUT" && textInput.type === "text") {
-        const customValue = textInput.value.trim();
-        return customValue ? customValue : null;
-      }
-      return checkbox.value;
-    })
-    .filter(value => value); // Exclut les valeurs nulles
+  const selectedEmitters = Array.from(
+    document.querySelectorAll('#multipleEmetteurDropdown input[type="checkbox"]:checked')
+  ).map(checkbox => {
+    const textInput = checkbox.nextElementSibling;
+    if (textInput && textInput.tagName === "INPUT" && textInput.type === "text") {
+      const customValue = textInput.value.trim();
+      return customValue ? customValue : null;
+    }
+    return checkbox.value;
+  }).filter(Boolean);
 
   if (selectedEmitters.length === 0) {
     alert("Veuillez sélectionner au moins un émetteur.");
     return;
   }
 
-  // Récupérer le projet sélectionné (stocké dans la variable globale "selectedFirstValue")
-  const selectedProject = selectedFirstValue;
-  if (!selectedProject) {
-    alert("Veuillez sélectionner un projet avant d'ajouter un document.");
-    return;
-  }
-
   try {
-    // Récupérer l'ID du projet
-    const selectedProject = selectedFirstValue;
-    if (!selectedProject) throw new Error("Aucun projet sélectionné.");
-
-
-    // Récupérer le service depuis la table Team
     const serviceValue = await getTeamService();
-
-    // Récupérer la date limite par défaut
     const defaultDatelimite = document.getElementById('multipleDefaultDatelimite').value || "1900-01-01";
 
-    // Construire la liste des actions à appliquer pour chaque document et chaque émetteur
     const actions = [];
     documentsData.forEach(doc => {
-      // Concatène le numéro et le nom avec un tiret
-      const combinedDocumentName = `${doc.documentNumber}-${doc.documentName}`.trim();
       selectedEmitters.forEach(emetteur => {
-        const _n2 = Number(doc.documentNumber);
-        const num = (Number.isFinite(_n2) && _n2 !== 0) ? _n2 : null;
-        const nm = String(doc.documentName).trim();
-        const newRow = {
+        actions.push(['AddRecord', 'References', null, {
           NomProjet: selectedProject,
-          NomDocument: nm,
-          NumeroDocument: numeroOrZero(parseNumeroForStorage(num)),
+          NomDocument: doc.documentName,
+          NumeroDocument: numeroOrZero(parseNumeroForStorage(doc.documentNumber)),
           Emetteur: emetteur,
           Reference: '_',
           Indice: '-',
           Recu: '1900-01-01',
-          DescriptionObservationss: 'EN ATTENTE',
+          DescriptionObservations: 'EN ATTENTE',
           DateLimite: defaultDatelimite,
           Service: serviceValue
-        };
-        actions.push(['AddRecord', 'References', null, newRow]);
+        }]);
       });
     });
 
-    // Appliquer les actions via l'API Grist
     await grist.docApi.applyUserActions(actions);
     console.log("Documents ajoutés :", documentsData);
 
-    // Mettre à jour le dropdown de documents en ajoutant chaque nouveau document
+    // Mettre à jour le dropdown de documents
     const secondDropdown = document.getElementById('secondColumnListbox');
+
     documentsData.forEach(doc => {
-      const nm = String(doc.documentName).trim();
-      const num = normalizeNumeroRaw(doc.documentNumber);
-      const newOption = document.createElement('option');
-      newOption.value = JSON.stringify({ n: num, name: nm });
-      newOption.textContent = makeDocLabel(nm, num);
+      // supprime doublon si existe
+      Array.from(secondDropdown.options)
+        .filter(o => o.value === doc.documentName)
+        .forEach(o => o.remove());
+
+      const opt = document.createElement('option');
+      opt.value = doc.documentName;
+      opt.textContent = makeDocLabel(doc.documentName, doc.documentNumber);
+
       const addTableOption = secondDropdown.querySelector('option[value="addTable"]');
-      if (addTableOption) {
-        secondDropdown.insertBefore(newOption, addTableOption);
-      } else {
-        secondDropdown.appendChild(newOption);
-      }
+      if (addTableOption) secondDropdown.insertBefore(opt, addTableOption);
+      else secondDropdown.appendChild(opt);
     });
-    // Optionnel : définir la sélection sur le dernier document ajouté
-    if (documentsData.length) {
-      const lastDoc = documentsData[documentsData.length - 1];
-      const lastVal = JSON.stringify({ n: normalizeNumeroRaw(lastDoc.documentNumber), name: String(lastDoc.documentName).trim() });
-      const secondDropdown = document.getElementById('secondColumnListbox');
-      secondDropdown.value = lastVal;
-      const parsed = parseDocValue(lastVal);
-      selectedDocNumber = parsed.numero;
-      selectedDocName = parsed.name;
-      selectedSecondValue = parsed.name;
-    }
-    // Met à jour l'affichage du tableau principal et ferme le dialog
+
+    // Sélectionne le dernier document ajouté
+    const lastDoc = documentsData[documentsData.length - 1];
+    secondDropdown.value = lastDoc.documentName;
+    selectedSecondValue = lastDoc.documentName;
+    lastValidDocument = lastDoc.documentName;
+
+    selectedDocNumber = lastDoc.documentNumber;
+    selectedDocName = lastDoc.documentName;
+
+    try { refreshSecondDropdownLabels(); } catch (e) {}
+
     populateTable();
     document.getElementById('addMultipleDocumentDialog').close();
 
@@ -2302,6 +2368,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
     alert("Une erreur s'est produite lors de l'ajout des documents.");
   }
 });
+
 
 function setCaretToEnd(el) {
   const range = document.createRange();
