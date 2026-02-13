@@ -251,28 +251,6 @@ function afficherPlansFiltres(projet, typeDocument, records) {
     tbody.appendChild(tr);
   }
 
-  const trAjout = document.createElement("tr");
-  const tdAjoutNum = document.createElement("td");
-  tdAjoutNum.contentEditable = true;
-  tdAjoutNum.classList.add("editable", "ajout");
-  tdAjoutNum.dataset.typeDocument = typeDocument;
-  tdAjoutNum.dataset.nomProjet = projet;
-  trAjout.appendChild(tdAjoutNum);
-  const tdAjoutNom = document.createElement("td");
-  tdAjoutNom.contentEditable = true;
-  tdAjoutNom.classList.add("editable", "ajout");
-  tdAjoutNom.dataset.typeDocument = typeDocument;
-  tdAjoutNom.dataset.nomProjet = projet;
-  trAjout.appendChild(tdAjoutNom);
-  for (const indice of indicesToShow) {
-    const td = document.createElement("td");
-    td.classList.add("editable", "indice", "ajout");
-    td.dataset.typeDocument = typeDocument;
-    td.dataset.nomProjet = projet;
-    td.dataset.indice = indice;
-    trAjout.appendChild(td);
-  }
-  tbody.appendChild(trAjout);
   table.appendChild(tbody);
   zone.appendChild(table);
 }
@@ -484,59 +462,6 @@ document.addEventListener("click", async (e) => {
 document.addEventListener("focusout", async (e) => {
   const td = e.target;
   if (!td.matches("td.editable:not(.indice)")) return;
-
-  // Logic to add a new dateless document from the "ajout" row
-  if (td.classList.contains('ajout')) {
-    const tr = td.parentElement;
-    const numDocument = tr.cells[0]?.textContent.trim();
-    const designation = tr.cells[1]?.textContent.trim();
-    const { typeDocument, nomProjet } = td.dataset;
-
-    if (numDocument && designation) {
-      // Project-specific validation logic
-      const projectDocMap = window.projectDocNumberToTypeMap.get(nomProjet);
-      if (projectDocMap) {
-        const existingTypes = projectDocMap.get(numDocument);
-        if (existingTypes && !existingTypes.has(typeDocument)) {
-          alert(`Erreur : Le N° Document ${numDocument} est déjà utilisé pour un autre type de document dans ce projet (${[...existingTypes].join(', ')}).`);
-          tr.cells[0].textContent = ''; // Clear the invalid document number
-          return;
-        }
-      }
-
-      const projetsDict = await chargerProjetsMap();
-      if (!projetsDict[nomProjet.trim()]) {
-        console.error("Projet non trouvé :", nomProjet);
-        return;
-      }
-      const rowData = {
-        NumeroDocument: numDocument,
-        Type_document: typeDocument,
-        Designation: designation,
-        Nom_projet: nomProjet,
-        Indice: null,
-        DateDiffusion: null
-      };
-      try {
-        await grist.docApi.applyUserActions([
-          ["AddRecord", "ListePlan_NDC_COF", null, rowData],
-          ["AddRecord", "References", null, {
-            NomProjet: rowData.Nom_projet,          // ID du projet déjà calculé pour ListePlan_NDC_COF
-            NomDocument: rowData.Designation,       // Designation -> NomDocument
-            NumeroDocument: (()=>{
-              const s = String(rowData.NumeroDocument ?? '').trim();
-              // Conserve "0" -> 0 ; vide/non numérique -> null
-              return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
-            })()
-          }]
-        ]);
-        // Grist will refresh, clearing the "ajout" row.
-      } catch (err) {
-        console.error("Erreur lors de l'ajout du document sans date :", err);
-      }
-    }
-    return;
-  }
 
   td.style.backgroundColor = "";
   td.style.color = "";
