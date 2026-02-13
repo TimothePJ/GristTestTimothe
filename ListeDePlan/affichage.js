@@ -369,89 +369,112 @@ document.addEventListener("click", async (e) => {
       "locale": "fr",
       defaultDate: td.textContent ? convertFrToDate(td.textContent) : undefined,
       dateFormat: "d/m/Y",
-      onClose: async (selectedDates, dateStr, instance) => {
+        onClose: async (selectedDates, dateStr, instance) => {
         const isoDate = selectedDates.length > 0 ? convertToISO(dateStr) : null;
-        if (!isoDate) {
-          if (recordId) {
-            try {
-              // If this is the last date for this document, set Indice to null as well.
+        const recordIdInt = recordId ? parseInt(recordId, 10) : null;
+
+        // === CAS: cellule déjà existante (recordId) -> UPDATE, jamais AddRecord ===
+        if (recordIdInt) {
+          try {
+            if (!isoDate) {
+              // Suppression de date (ta logique existante)
               const otherDates = tr.querySelectorAll('td.indice');
               const datedCells = Array.from(otherDates).filter(cell => cell.textContent.trim() !== '' && cell !== td);
+
               const fieldsToUpdate = { DateDiffusion: null };
               if (datedCells.length === 0) {
                 fieldsToUpdate.Indice = null;
               }
+
               await grist.docApi.applyUserActions([
-                ["AddRecord", "ListePlan_NDC_COF", null, rowData],
+                ["UpdateRecord", "ListePlan_NDC_COF", recordIdInt, fieldsToUpdate],
+
+                // (je conserve ton AddRecord dans References, mais sans rowData)
                 ["AddRecord", "References", null, {
-                  // ⇩⇩ MAPPINGS demandés, avec les NOMS EXACTS du premier projet ⇩⇩
-                  NomProjet: rowData.Nom_projet,          // ID du projet déjà calculé pour ListePlan_NDC_COF
-                  NomDocument: rowData.Designation,       // Designation -> NomDocument
-                  NumeroDocument: (()=>{
-                    const s = String(rowData.NumeroDocument ?? '').trim();
-                    // Conserve "0" -> 0 ; vide/non numérique -> null
+                  NomProjet: nomProjet,
+                  NomDocument: Designation,
+                  NumeroDocument: (() => {
+                    const s = String(Num_Document ?? '').trim();
                     return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
                   })()
                 }]
               ]);
-            } catch (err) { console.error("Erreur lors de la suppression de la date :", err); }
+
+              td.textContent = "";
+            } else {
+              // Modification de date
+              await grist.docApi.applyUserActions([
+                ["UpdateRecord", "ListePlan_NDC_COF", recordIdInt, { DateDiffusion: isoDate }],
+
+                // (je conserve ton AddRecord dans References, mais sans rowData)
+                ["AddRecord", "References", null, {
+                  NomProjet: nomProjet,
+                  NomDocument: Designation,
+                  NumeroDocument: (() => {
+                    const s = String(Num_Document ?? '').trim();
+                    return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
+                  })()
+                }]
+              ]);
+
+              td.textContent = dateStr;
+            }
+          } catch (err) {
+            console.error("Erreur lors de la mise à jour de la date :", err);
           }
           return;
         }
-        if (recordId) {
-          try {
-            await grist.docApi.applyUserActions([
-              ["AddRecord", "ListePlan_NDC_COF", null, rowData],
-              ["AddRecord", "References", null, {
-                // ⇩⇩ MAPPINGS demandés, avec les NOMS EXACTS du premier projet ⇩⇩
-                NomProjet: rowData.Nom_projet,          // ID du projet déjà calculé pour ListePlan_NDC_COF
-                NomDocument: rowData.Designation,       // Designation -> NomDocument
-                NumeroDocument: (()=>{
-                  const s = String(rowData.NumeroDocument ?? '').trim();
-                  // Conserve "0" -> 0 ; vide/non numérique -> null
-                  return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
-                })()
-              }]
-            ]);
-          } catch (err) { console.error("Erreur lors de la mise à jour de la date :", err); }
-          return;
-        }
+
+        // === CAS: cellule vide (pas de recordId) -> ADD ===
+        if (!isoDate) return;
+
         if (!Num_Document || !Designation || !nomProjet || !typeDocument) {
           console.warn("Champs obligatoires manquants pour l'ajout :", { Num_Document, Designation, nomProjet, typeDocument });
           return;
         }
 
-        // Project-specific validation logic
+        // Project-specific validation logic (tu gardes tel quel)
         const projectDocMap = window.projectDocNumberToTypeMap.get(nomProjet);
         if (projectDocMap) {
           const existingTypes = projectDocMap.get(Num_Document);
           if (existingTypes && !existingTypes.has(typeDocument)) {
             alert(`Erreur : Le N° Document ${Num_Document} est déjà utilisé pour un autre type de document dans ce projet (${[...existingTypes].join(', ')}).`);
-            td.textContent = ''; // Clear the invalid date
+            td.textContent = '';
             return;
           }
         }
+
         const projetsDict = await chargerProjetsMap();
         if (!projetsDict[nomProjet.trim()]) {
           console.error("Projet non trouvé :", nomProjet);
           return;
         }
-        const rowData = { NumeroDocument: Num_Document, Type_document: typeDocument, Designation: Designation, Nom_projet: nomProjet, Indice: indice, DateDiffusion: isoDate };
+
+        const rowData = {
+          NumeroDocument: Num_Document,
+          Type_document: typeDocument,
+          Designation: Designation,
+          Nom_projet: nomProjet,
+          Indice: indice,
+          DateDiffusion: isoDate
+        };
+
         try {
           await grist.docApi.applyUserActions([
             ["AddRecord", "ListePlan_NDC_COF", null, rowData],
             ["AddRecord", "References", null, {
-              // ⇩⇩ MAPPINGS demandés, avec les NOMS EXACTS du premier projet ⇩⇩
-              NomProjet: rowData.Nom_projet,          // ID du projet déjà calculé pour ListePlan_NDC_COF
-              NomDocument: rowData.Designation,       // Designation -> NomDocument
-              NumeroDocument: (()=>{
+              NomProjet: rowData.Nom_projet,
+              NomDocument: rowData.Designation,
+              NumeroDocument: (() => {
                 const s = String(rowData.NumeroDocument ?? '').trim();
-                // Conserve "0" -> 0 ; vide/non numérique -> null
                 return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
               })()
             }]
           ]);
-        } catch (err) { console.error("Erreur lors de l'ajout du record :", err); }
+          td.textContent = dateStr;
+        } catch (err) {
+          console.error("Erreur lors de l'ajout du record :", err);
+        }
       }
     });
     fp.open();
