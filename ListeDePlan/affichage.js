@@ -521,7 +521,6 @@ document.addEventListener("focusout", async (e) => {
         await grist.docApi.applyUserActions([
           ["AddRecord", "ListePlan_NDC_COF", null, rowData],
           ["AddRecord", "References", null, {
-            // ⇩⇩ MAPPINGS demandés, avec les NOMS EXACTS du premier projet ⇩⇩
             NomProjet: rowData.Nom_projet,          // ID du projet déjà calculé pour ListePlan_NDC_COF
             NomDocument: rowData.Designation,       // Designation -> NomDocument
             NumeroDocument: (()=>{
