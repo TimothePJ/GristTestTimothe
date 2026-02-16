@@ -155,6 +155,7 @@ function updateSubjectOptions() {
         subjects.add("Gestion de service");
         subjects.add("Congés/Maladie/RTT/Férié");
         subjects.add("Formation/stages(reçues)");
+        subjects.add("Journée École");
     }
 
     allRecords.forEach(record => {
@@ -280,7 +281,8 @@ function updateTimeline(records) {
         "Développement",
         "Gestion de service",
         "Congés/Maladie/RTT/Férié",
-        "Formation/stages(reçues)"
+        "Formation/stages(reçues)",
+        "Journée École"
     ];
 
     if (record.title && yellowChapters.includes(record.title)) {

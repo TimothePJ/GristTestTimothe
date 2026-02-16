@@ -780,7 +780,8 @@ function buildCalendarEventObject(record, colTypes, colOptions) {
     "Développement",
     "Gestion de service",
     "Congés/Maladie/RTT/Férié",
-    "Formation/stages(reçues)"
+    "Formation/stages(reçues)",
+    "Journée École"
   ];
 
   if (yellowChapters.includes(record.title)) {
@@ -1043,7 +1044,8 @@ async function fetchDropdownOptions() {
         "Développement",
         "Gestion de service",
         "Congés/Maladie/RTT/Férié",
-        "Formation/stages(reçues)"
+        "Formation/stages(reçues)",
+        "Journée École"
       ];
       
       const shouldDisable = nonProjectChapters.includes(selectedChapitre);
