@@ -11,6 +11,10 @@ document.addEventListener('DOMContentLoaded', () => {
         emitters: []
     };
 
+    function cleanProjectName(name) {
+        return String(name ?? "").replace(/\s+$/g, "");
+    }
+
     function showStep(stepNumber) {
         steps.forEach(step => step.style.display = 'none');
         const stepToShow = document.getElementById(`step-${stepNumber}`);
@@ -22,8 +26,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Navigation
     document.getElementById('next-to-step-2').addEventListener('click', () => {
-        projectData.name = document.getElementById('project-name').value;
-        projectData.number = document.getElementById('project-number').value;
+        projectData.name = cleanProjectName(document.getElementById('project-name').value);
+        projectData.number = document.getElementById('project-number').value.trim();
+
+        // (optionnel mais pratique) mettre à jour le champ affiché
+        document.getElementById('project-name').value = projectData.name;
+        document.getElementById('project-number').value = projectData.number;
+
         if (projectData.name && projectData.number) {
             showStep(2);
         } else {
@@ -636,6 +645,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Final Save
     document.getElementById('create-project-btn').addEventListener('click', async () => {
         try {
+            projectData.name = cleanProjectName(projectData.name);
+            projectData.number = (projectData.number ?? "").toString().trim();
             // 1. Create Project
             const projectActions = [
                 ["AddRecord", "Projets", null, { Nom_de_projet: projectData.name, Numero_de_projet: projectData.number }]

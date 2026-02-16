@@ -42,6 +42,22 @@
     } catch { return { projectLabel: '', projectId: null, typeLabel: '' }; }
   }
 
+function normalizeProjectName(v) {
+  return (v ?? "")
+    .toString()
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function getNomProjet(record) {
+  const raw = (typeof record.Nom_projet === "object")
+    ? record.Nom_projet.details
+    : record.Nom_projet;
+
+  return normalizeProjectName(raw);
+}
+
+
   // ---- Sélection robuste des dropdowns ----
   function getSelectedLabelAndValue(selectEl) {
     if (!selectEl) return { label: "", value: "" };
@@ -185,7 +201,9 @@ grist.onRecords(async (rec) => {
   // Create a project-specific map to validate document number uniqueness.
   window.projectDocNumberToTypeMap = new Map();
   for (const r of window.records) {
-    const projectName = typeof r.Nom_projet === 'object' ? r.Nom_projet.details : r.Nom_projet;
+    const projectNameRaw = (typeof r.Nom_projet === 'object' ? r.Nom_projet.details : r.Nom_projet);
+    const projectName = (typeof projectNameRaw === 'string') ? projectNameRaw.trim() : projectNameRaw;
+
     if (!projectName || !r.NumeroDocument || !r.Type_document) continue;
 
     if (!window.projectDocNumberToTypeMap.has(projectName)) {
@@ -217,8 +235,9 @@ grist.onRecords(async (rec) => {
     const typesDocument = [...new Set(
       window.records
         .filter(r => {
-          const nom = typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet;
-          return nom === selectedProject;
+          const nomRaw = (typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet);
+          const nom = (typeof nomRaw === "string") ? nomRaw.trim() : nomRaw;
+          return nom === selectedProject.trim();
         })
         .map(r => r.Type_document)
         .filter(val => typeof val === "string" && val.trim())

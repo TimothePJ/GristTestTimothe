@@ -29,10 +29,15 @@ function afficherPlansFiltres(projet, typeDocument, records) {
   const zone = document.getElementById("plans-output");
   zone.innerHTML = "";
 
-  const filtres = records.filter(r =>
-    (typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet) === projet &&
-    r.Type_document === typeDocument
-  );
+  const p = (projet ?? "").trim();
+  const t = (typeDocument ?? "").trim();
+
+  const filtres = records.filter(r => {
+    const nomRaw = (typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet);
+    const nom = (typeof nomRaw === "string") ? nomRaw.trim() : nomRaw;
+    const type = (typeof r.Type_document === "string") ? r.Type_document.trim() : r.Type_document;
+    return nom === p && type === t;
+  });
 
   if (filtres.length === 0) {
     zone.innerHTML = "<p>Aucun plan trouvé pour cette sélection.</p>";
@@ -368,14 +373,14 @@ document.addEventListener("click", async (e) => {
                 ["UpdateRecord", "ListePlan_NDC_COF", recordIdInt, fieldsToUpdate],
 
                 // (je conserve ton AddRecord dans References, mais sans rowData)
-                ["AddRecord", "References", null, {
-                  NomProjet: nomProjet,
-                  NomDocument: Designation,
-                  NumeroDocument: (() => {
-                    const s = String(Num_Document ?? '').trim();
-                    return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
-                  })()
-                }]
+                // ["AddRecord", "References", null, {
+                //   NomProjet: nomProjet,
+                //   NomDocument: Designation,
+                //   NumeroDocument: (() => {
+                //     const s = String(Num_Document ?? '').trim();
+                //     return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
+                //   })()
+                // }]
               ]);
 
               td.textContent = "";
@@ -385,14 +390,14 @@ document.addEventListener("click", async (e) => {
                 ["UpdateRecord", "ListePlan_NDC_COF", recordIdInt, { DateDiffusion: isoDate }],
 
                 // (je conserve ton AddRecord dans References, mais sans rowData)
-                ["AddRecord", "References", null, {
-                  NomProjet: nomProjet,
-                  NomDocument: Designation,
-                  NumeroDocument: (() => {
-                    const s = String(Num_Document ?? '').trim();
-                    return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
-                  })()
-                }]
+                // ["AddRecord", "References", null, {
+                //   NomProjet: nomProjet,
+                //   NomDocument: Designation,
+                //   NumeroDocument: (() => {
+                //     const s = String(Num_Document ?? '').trim();
+                //     return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
+                //   })()
+                // }]
               ]);
 
               td.textContent = dateStr;
@@ -440,14 +445,14 @@ document.addEventListener("click", async (e) => {
         try {
           await grist.docApi.applyUserActions([
             ["AddRecord", "ListePlan_NDC_COF", null, rowData],
-            ["AddRecord", "References", null, {
-              NomProjet: rowData.Nom_projet,
-              NomDocument: rowData.Designation,
-              NumeroDocument: (() => {
-                const s = String(rowData.NumeroDocument ?? '').trim();
-                return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
-              })()
-            }]
+            // ["AddRecord", "References", null, {
+            //   NomProjet: rowData.Nom_projet,
+            //   NomDocument: rowData.Designation,
+            //   NumeroDocument: (() => {
+            //     const s = String(rowData.NumeroDocument ?? '').trim();
+            //     return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
+            //   })()
+            // }]
           ]);
           td.textContent = dateStr;
         } catch (err) {
