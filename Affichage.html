@@ -1043,6 +1043,9 @@
       const matchingRecord = records.find(record => record.id === recordId);
       if (matchingRecord) {
         currentEmetteur = matchingRecord.Emetteur;
+
+        const archiveBtn = document.getElementById('archiveOption');
+        archiveBtn.textContent = matchingRecord.Archive ? 'Désarchiver' : 'Archiver';
       }
 
       const contextMenu = document.getElementById('contextMenu');
@@ -1279,22 +1282,29 @@
     });
 
     // Add event listener for "Archiver" option
-    document.getElementById('archiveOption').addEventListener('click', () => {
-      if (selectedRecordId) {
-        if (confirm("Êtes-vous sûr de vouloir archiver cette ligne ?")) {
-          grist.docApi.applyUserActions([
-            ['UpdateRecord', 'References', selectedRecordId, { Archive: true }]
-          ])
-            .then(() => {
-              console.log('Row archived successfully');
-              populateTable();
-              hideContextMenu();
-            })
-            .catch(error => {
-              console.error("Error archiving row:", error);
-              alert("Error archiving row.");
-            });
-        }
+    document.getElementById('archiveOption').addEventListener('click', async () => {
+      if (!selectedRecordId) return;
+
+      const record = records.find(r => r.id === selectedRecordId);
+      const currentValue = Boolean(record?.Archive);
+      const newValue = !currentValue;
+
+      const verb = newValue ? "archiver" : "désarchiver";
+      const ok = confirm(`Êtes-vous sûr de vouloir ${verb} cette ligne ?`);
+      if (!ok) return;
+
+      try {
+        await grist.docApi.applyUserActions([
+          ['UpdateRecord', 'References', selectedRecordId, { Archive: newValue }]
+        ]);
+
+        if (record) record.Archive = newValue;
+
+        populateTable(); 
+        hideContextMenu();
+      } catch (error) {
+        console.error(`Error while trying to ${verb}:`, error);
+        alert("Erreur lors de la mise à jour de l'archive.");
       }
     });
 
