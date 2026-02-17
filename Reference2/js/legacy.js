@@ -648,7 +648,15 @@ function formatDate(dateString) {
 }
 
 // Add event listener for archive toggle checkbox
-document.getElementById('hideArchivedToggle').addEventListener('change', () => { populateSecondColumnListbox(selectedFirstValue); populateTable(); });
+document.getElementById('hideArchivedToggle').addEventListener('change', () => {
+  const second = document.getElementById('secondColumnListbox');
+  const currentDoc = second.value;          // mémorise la sélection
+
+  populateSecondColumnListbox(selectedFirstValue);
+
+  second.value = currentDoc;                // restaure la sélection si elle existe encore
+  populateTable();
+});
 
 // Function to populate the table based on the selected first and second column values
 function populateTable() {
