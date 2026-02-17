@@ -944,6 +944,30 @@
           } else if (header === 'Archive') {
             td.classList.add('archive-cell');
             td.textContent = value ? '✓' : '';
+            td.style.cursor = 'pointer';
+            td.title = "Cliquer pour archiver / désarchiver";
+
+            td.addEventListener('click', async () => {
+              // On se base sur la vraie valeur du record (pas sur la variable locale "value")
+              const newValue = !Boolean(record.Archive);
+
+              try {
+                await grist.docApi.applyUserActions([
+                  ['UpdateRecord', 'References', record.id, { Archive: newValue }]
+                ]);
+
+                // Mise à jour locale immédiate (UX)
+                record.Archive = newValue;
+                td.textContent = newValue ? '✓' : '';
+
+                // Rafraîchit le tableau (utile pour le filtre "Masquer les archives")
+                populateTable();
+
+              } catch (error) {
+                console.error('Error updating Archive:', error);
+                alert("Erreur lors de la mise à jour de l'archive.");
+              }
+            });
           } else {
             td.textContent = value;
           }
