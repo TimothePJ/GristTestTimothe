@@ -232,3 +232,7 @@ span.flatpickr-weekday, .flatpickr-months .flatpickr-month {
   background-color: #ffffff !important;
   color: #004990 !important;
 }
+
+.plan-table th.indice {
+  cursor: pointer;
+}

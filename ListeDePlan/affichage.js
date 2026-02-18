@@ -263,6 +263,11 @@ function afficherPlansFiltres(projet, typeDocument, records) {
 document.addEventListener("click", async (e) => {
   const target = e.target;
 
+  if (target.matches('th.indice')) {
+    ouvrirPickerRemplirColonne(target);
+    return;
+  }
+
   if (target.matches('td.multi-date-error')) {
     const td = target;
     const conflicts = JSON.parse(td.dataset.conflicts);
@@ -509,4 +514,167 @@ function formatDate(dateStr) {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const year = d.getFullYear();
   return `${day}/${month}/${year}`;
+}
+
+function dateObjToISO(d) {
+  // on garde la date "locale" choisie par l'utilisateur
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}T00:00:00.000Z`;
+}
+
+function ouvrirPickerRemplirColonne(th) {
+  const indice = th.textContent.trim();
+
+  // Popup léger
+  const old = document.getElementById("column-fill-popup");
+  if (old) old.remove();
+
+  const popup = document.createElement("div");
+  popup.id = "column-fill-popup";
+  popup.style.position = "absolute";
+  popup.style.zIndex = "9999";
+  popup.style.background = "#fff";
+  popup.style.border = "1px solid #ed1b2d";
+  popup.style.borderRadius = "8px";
+  popup.style.padding = "10px";
+  popup.style.boxShadow = "0 8px 20px rgba(0,0,0,0.15)";
+  popup.innerHTML = `
+    <div style="margin-bottom:8px; color:#004990;">
+      Remplir toute la colonne <strong>${indice}</strong>
+    </div>
+    <input id="column-fill-date" type="text" placeholder="Choisir une date" style="width:100%; padding:6px;" />
+    <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+      <button id="column-fill-cancel" type="button">Annuler</button>
+    </div>
+  `;
+
+  const rect = th.getBoundingClientRect();
+  popup.style.left = `${rect.left + window.scrollX}px`;
+  popup.style.top = `${rect.bottom + window.scrollY + 6}px`;
+  document.body.appendChild(popup);
+
+  const input = popup.querySelector("#column-fill-date");
+  const cancelBtn = popup.querySelector("#column-fill-cancel");
+
+  const fp = flatpickr(input, {
+    locale: "fr",
+    dateFormat: "d/m/Y",
+    closeOnSelect: true,   // important
+    onChange: async (selectedDates, dateStr, instance) => {
+      if (!selectedDates || selectedDates.length === 0) return;
+
+      // on ferme tout de suite le calendrier (UX)
+      instance.close();
+
+      try {
+        const iso = convertToISO(dateStr);
+
+        const indice = th.textContent.trim();
+        const ok = confirm(`Appliquer ${formatDate(iso)} à toute la colonne ${indice} ?`);
+        if (!ok) return;
+
+        await appliquerDateSurTouteLaColonne(th, iso);
+      } finally {
+        instance.destroy();
+        popup.remove();
+      }
+    }
+  });
+
+  fp.open();
+
+  cancelBtn.onclick = () => { fp.destroy(); popup.remove(); };
+}
+
+async function appliquerDateSurTouteLaColonne(th, isoDate) {
+  const table = th.closest("table");
+  if (!table) return;
+
+  const colIndex = th.cellIndex;
+  const indice = th.textContent.trim();
+  const tbody = table.querySelector("tbody");
+  if (!tbody) return;
+
+  const rows = Array.from(tbody.querySelectorAll("tr"))
+    .filter(tr => !tr.querySelector("td.ajout")); // ignore la ligne d'ajout
+
+  const actionsUpsert = []; // Update + Add
+  const actionsDelete = []; // Remove (multi-date)
+
+  // Petite aide pour comparer sans bug number/string
+  const same = (a, b) => String(a ?? "").trim() === String(b ?? "").trim();
+
+  for (const tr of rows) {
+    const td = tr.cells[colIndex];
+    if (!td) continue;
+
+    const typeDocument = td.dataset.typeDocument;
+    const nomProjet = td.dataset.nomProjet;
+    const numDocument = td.dataset.numDocument;
+    const designation = td.dataset.designation;
+
+    if (!typeDocument || !nomProjet || !numDocument || !designation) continue;
+
+    // 1) Multi-date (conflits) : on garde le 1er, on supprime les autres
+    if (td.dataset.conflicts) {
+      const conflicts = JSON.parse(td.dataset.conflicts); // [{id,date},...]
+      const keepId = conflicts[0]?.id;
+      if (keepId) actionsUpsert.push(["UpdateRecord", "ListePlan_NDC_COF", keepId, { DateDiffusion: isoDate }]);
+      for (const c of conflicts.slice(1)) {
+        actionsDelete.push(["RemoveRecord", "ListePlan_NDC_COF", c.id]);
+      }
+      continue;
+    }
+
+    // 2) Record existe déjà pour cette cellule
+    if (td.dataset.recordId) {
+      const rid = parseInt(td.dataset.recordId, 10);
+      actionsUpsert.push(["UpdateRecord", "ListePlan_NDC_COF", rid, { DateDiffusion: isoDate }]);
+      continue;
+    }
+
+    // 3) Cellule vide : essayer de réutiliser un "placeholder" (Indice null) sinon AddRecord
+    const placeholder = window.records.find(r =>
+      same(r.Type_document, typeDocument) &&
+      same(typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet, nomProjet) &&
+      same(r.NumeroDocument, numDocument) &&
+      same(r.Designation, designation) &&
+      (r.Indice == null || r.Indice === "") &&
+      (r.DateDiffusion == null || r.DateDiffusion === "")
+    );
+
+    if (placeholder?.id) {
+      actionsUpsert.push(["UpdateRecord", "ListePlan_NDC_COF", placeholder.id, { Indice: indice, DateDiffusion: isoDate }]);
+    } else {
+      actionsUpsert.push(["AddRecord", "ListePlan_NDC_COF", null, {
+        NumeroDocument: numDocument,
+        Type_document: typeDocument,
+        Designation: designation,
+        Nom_projet: nomProjet,
+        Indice: indice,
+        DateDiffusion: isoDate
+      }]);
+    }
+
+    // ✅ Mise à jour visuelle immédiate (même si Grist met 0.5s à refresh)
+    td.classList.remove("missing-date-error", "multi-date-error");
+    td.textContent = formatDate(isoDate);
+  }
+
+  // Appliquer en batches (évite les gros payloads si beaucoup de lignes)
+  const applyBatches = async (actions, batchSize = 200) => {
+    for (let i = 0; i < actions.length; i += batchSize) {
+      await grist.docApi.applyUserActions(actions.slice(i, i + batchSize));
+    }
+  };
+
+  try {
+    if (actionsUpsert.length) await applyBatches(actionsUpsert, 200);
+    if (actionsDelete.length) await applyBatches(actionsDelete, 200);
+  } catch (err) {
+    console.error("Erreur remplissage colonne :", err);
+    alert("Erreur lors du remplissage de la colonne (regarde la console).");
+  }
 }

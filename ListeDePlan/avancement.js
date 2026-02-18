@@ -115,7 +115,6 @@ function generateChartDataAndTable(projectRecords, devisMap) {
       }
   }
 
-
   const chartLabels = [];
   const dataWithIndice = [];
   const dataWithoutIndice = [];
