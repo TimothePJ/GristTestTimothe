@@ -70,6 +70,12 @@ document.addEventListener('DOMContentLoaded', () => {
             id: id,
             projectNumber: projectsData.Numero_de_projet[i],
             name: projectsData.Nom_de_projet[i],
+
+            // Valeur par défaut: 100% si la colonne n'existe pas ou est vide
+            billingPercentage: (projectsData.Pourcentage_Facturation && projectsData.Pourcentage_Facturation[i] != null)
+                ? projectsData.Pourcentage_Facturation[i]
+                : 100,
+
             budgetLines: [],
             workers: []
         }));
@@ -420,50 +426,112 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Add 4 new calculation rows
         const totalBudget = project.budgetLines.reduce((sum, line) => sum + line.amount, 0);
-        
+
+        // % de facturation (par projet). Valeur par défaut : 100%
+        const billingPct = (project.billingPercentage != null ? project.billingPercentage : 100);
+        const billingFactor = billingPct / 100;
+
         // Calculate priors
         const startMonthIndex = data.selectedMonth;
         const startYear = data.selectedYear;
         const startMonthKey = `${startYear}-${String(startMonthIndex + 1).padStart(2, '0')}`;
         let { real: currentCumulReal, prov: currentCumulProv } = getPriorCumulativeSpending(project, startMonthKey);
 
+        // La "facturation" = % des dépenses réelles
+        let currentCumulFacture = currentCumulReal * billingFactor;
+
         const cumulFacturationRow = document.createElement('tr');
-        cumulFacturationRow.innerHTML = `<td colspan="3"><strong>Cumul facturation</strong></td>`;
-        
+        cumulFacturationRow.innerHTML = `<td colspan="3"><strong>Cumul facturation (${billingPct}%)</strong></td>`;
+
         const radRow = document.createElement('tr');
         radRow.innerHTML = `<td colspan="3"><strong>RAD</strong></td>`;
-        
+
         const ecartMensuelRow = document.createElement('tr');
         ecartMensuelRow.innerHTML = `<td colspan="3"><strong>ECART MENSUEL - FACTURE - PREV</strong></td>`;
-        
+
         const cumulEcartRow = document.createElement('tr');
         cumulEcartRow.innerHTML = `<td colspan="3"><strong>CUMUL ECART - FACTURE - PREV</strong></td>`;
 
-        for (let i = 0; i < monthSpan; i++) {
-            const monthIndex = (data.selectedMonth + i) % 12;
-            const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
-            const monthKey = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
-            
-            const monthlyReal = calculateRealSpending(project, monthKey);
-            const monthlyProv = calculateProvisionalSpending(project, monthKey);
-            
-            currentCumulReal += monthlyReal;
-            currentCumulProv += monthlyProv;
-            
-            const rad = totalBudget - currentCumulReal;
-            const ecartMensuel = monthlyReal - monthlyProv;
-            const cumulEcart = currentCumulReal - currentCumulProv;
-            
-            cumulFacturationRow.innerHTML += `<td><strong>${formatNumber(currentCumulReal)} €</strong></td>`;
-            radRow.innerHTML += `<td><strong>${formatNumber(rad)} €</strong></td>`;
-            ecartMensuelRow.innerHTML += `<td><strong>${formatNumber(ecartMensuel)} €</strong></td>`;
-            cumulEcartRow.innerHTML += `<td><strong>${formatNumber(cumulEcart)} €</strong></td>`;
+                const monthlyFactureList = [];
+
+for (let i = 0; i < monthSpan; i++) {
+        const monthIndex = (data.selectedMonth + i) % 12;
+        const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
+        const monthKey = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+
+        const monthlyReal = calculateRealSpending(project, monthKey);
+        const monthlyProv = calculateProvisionalSpending(project, monthKey);
+
+        // Facturation = % * dépenses réelles
+        const monthlyFacture = monthlyReal * billingFactor;
+
+        monthlyFactureList.push(monthlyFacture);
+
+
+        currentCumulReal += monthlyReal;
+        currentCumulProv += monthlyProv;
+        currentCumulFacture += monthlyFacture;
+
+        const rad = totalBudget - currentCumulReal;
+        const ecartMensuel = monthlyFacture - monthlyProv;
+        const cumulEcart = currentCumulFacture - currentCumulProv;
+
+        cumulFacturationRow.innerHTML += `<td><strong>${formatNumber(currentCumulFacture)} €</strong></td>`;
+        radRow.innerHTML += `<td><strong>${formatNumber(rad)} €</strong></td>`;
+        ecartMensuelRow.innerHTML += `<td><strong>${formatNumber(ecartMensuel)} €</strong></td>`;
+        cumulEcartRow.innerHTML += `<td><strong>${formatNumber(cumulEcart)} €</strong></td>`;
         }
-        
+
         realExpenseTableBody.appendChild(cumulFacturationRow);
         realExpenseTableBody.appendChild(radRow);
         realExpenseTableBody.appendChild(ecartMensuelRow);
         realExpenseTableBody.appendChild(cumulEcartRow);
+
+        // Nouvelle ligne : Pourcentage Facturation (saisie dans la cellule du libellé + résultat mensuel)
+        const pourcentageFacturationRow = document.createElement('tr');
+        pourcentageFacturationRow.innerHTML = `
+          <td colspan="3">
+            <strong>Pourcentage Facturation</strong>
+            <span class="billing-percentage-inline">
+              <input type="number"
+                     class="billing-percentage"
+                     min="0" max="100" step="0.1"
+                     value="${billingPct}"> %
+            </span>
+          </td>`;
+
+        for (let i = 0; i < monthSpan; i++) {
+            const amount = monthlyFactureList[i] || 0;
+            pourcentageFacturationRow.innerHTML += `<td><strong>${formatNumber(amount)} €</strong></td>`;
+        }
+
+        realExpenseTableBody.appendChild(pourcentageFacturationRow);
+
+        // Sauvegarde dans Grist quand on change le %
+        const billingInput = pourcentageFacturationRow.querySelector('input.billing-percentage');
+        if (billingInput) {
+        billingInput.addEventListener('change', async (e) => {
+            e.stopPropagation();
+
+            let pct = parseFloat(billingInput.value);
+            if (isNaN(pct)) pct = 0;
+            pct = Math.max(0, Math.min(100, pct));
+            billingInput.value = pct;
+
+            project.billingPercentage = pct;
+
+            try {
+            await grist.docApi.applyUserActions([
+                ["UpdateRecord", "Projets", project.id, { Pourcentage_Facturation: pct }]
+            ]);
+        } catch (err) {
+            console.error("Impossible d'enregistrer Pourcentage_Facturation dans Grist (colonne manquante ou ID différent).", err);
+        }
+
+        renderSelectedProject();
+        });
+    }
+
     }
 
     function renderChart(project) {
