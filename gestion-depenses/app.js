@@ -66,19 +66,41 @@ document.addEventListener('DOMContentLoaded', () => {
         const timesheetData = await grist.docApi.fetchTable("Timesheet");
         const allTeamsData = await grist.docApi.fetchTable("Team");
 
-        const projects = projectsData.id.map((id, i) => ({
-            id: id,
-            projectNumber: projectsData.Numero_de_projet[i],
-            name: projectsData.Nom_de_projet[i],
+        const projects = projectsData.id.map((id, i) => {
+            // Pourcentage mensuel stocké en JSON dans une colonne Texte (optionnelle)
+            let billingPercentageByMonth = {};
+            const rawMonthly = (projectsData.Pourcentage_Facturation_Par_Mois)
+                ? projectsData.Pourcentage_Facturation_Par_Mois[i]
+                : null;
 
-            // Valeur par défaut: 100% si la colonne n'existe pas ou est vide
-            billingPercentage: (projectsData.Pourcentage_Facturation && projectsData.Pourcentage_Facturation[i] != null)
-                ? projectsData.Pourcentage_Facturation[i]
-                : 100,
+            if (rawMonthly) {
+                try {
+                    const parsed = JSON.parse(rawMonthly);
+                    if (parsed && typeof parsed === 'object') {
+                        billingPercentageByMonth = parsed;
+                    }
+                } catch (e) {
+                    console.warn('Pourcentage_Facturation_Par_Mois JSON invalide pour le projet', projectsData.Numero_de_projet[i], e);
+                }
+            }
 
-            budgetLines: [],
-            workers: []
-        }));
+            return {
+                id: id,
+                projectNumber: projectsData.Numero_de_projet[i],
+                name: projectsData.Nom_de_projet[i],
+
+                // Valeur par défaut: 100% si la colonne n'existe pas ou est vide
+                billingPercentage: (projectsData.Pourcentage_Facturation && projectsData.Pourcentage_Facturation[i] != null)
+                    ? projectsData.Pourcentage_Facturation[i]
+                    : 100,
+
+                // % par mois (YYYY-MM -> number). Si absent pour un mois, on utilise billingPercentage (ou 100).
+                billingPercentageByMonth,
+
+                budgetLines: [],
+                workers: []
+            };
+        });
 
         const projectsByNumber = {};
         projects.forEach(p => {
@@ -371,6 +393,37 @@ document.addEventListener('DOMContentLoaded', () => {
         return { real, prov };
     }
 
+    function getBillingPercentageForMonth(project, monthKey) {
+        const byMonth = project.billingPercentageByMonth || {};
+        const raw = byMonth[monthKey];
+
+        if (raw != null && raw !== '') {
+            const n = Number(raw);
+            if (!Number.isNaN(n)) {
+                return Math.max(0, Math.min(100, n));
+            }
+        }
+
+        const fallback = (project.billingPercentage != null ? Number(project.billingPercentage) : 100);
+        return Number.isFinite(fallback) ? Math.max(0, Math.min(100, fallback)) : 100;
+    }
+
+    function getPriorCumulativeFacturation(project, boundaryMonthKey) {
+        let facture = 0;
+        project.workers.forEach(worker => {
+            if (worker.workedDays) {
+                Object.entries(worker.workedDays).forEach(([key, days]) => {
+                    if (key < boundaryMonthKey) {
+                        const pct = getBillingPercentageForMonth(project, key) / 100;
+                        facture += (days || 0) * (worker.dailyExpanse || 0) * pct;
+                    }
+                });
+            }
+        });
+        return facture;
+    }
+
+    
     function renderRealExpenseTable(project, groupedWorkers) {
         const headRow = document.querySelector('#real-expense-table thead tr');
         headRow.innerHTML = '<th>Nom</th><th>Total Jours</th><th>Total Dépense</th>';
@@ -424,24 +477,55 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         realExpenseTableBody.appendChild(totalRow);
 
-        // Add 4 new calculation rows
+                // Add 4 new calculation rows + facturation (avec % par mois)
         const totalBudget = project.budgetLines.reduce((sum, line) => sum + line.amount, 0);
 
-        // % de facturation (par projet). Valeur par défaut : 100%
-        const billingPct = (project.billingPercentage != null ? project.billingPercentage : 100);
-        const billingFactor = billingPct / 100;
+        // Helper: % de facturation pour un mois (YYYY-MM). Défaut: billingPercentage (ou 100)
+        const getBillingPctForMonth = (monthKey) => {
+            let pct = null;
+
+            if (project.billingPercentageByMonth && project.billingPercentageByMonth[monthKey] != null) {
+                pct = parseFloat(project.billingPercentageByMonth[monthKey]);
+            } else if (project.billingPercentage != null) {
+                pct = parseFloat(project.billingPercentage);
+            } else {
+                pct = 100;
+            }
+
+            if (isNaN(pct)) pct = 100;
+            pct = Math.max(0, Math.min(100, pct));
+            return pct;
+        };
 
         // Calculate priors
         const startMonthIndex = data.selectedMonth;
         const startYear = data.selectedYear;
         const startMonthKey = `${startYear}-${String(startMonthIndex + 1).padStart(2, '0')}`;
+
         let { real: currentCumulReal, prov: currentCumulProv } = getPriorCumulativeSpending(project, startMonthKey);
 
-        // La "facturation" = % des dépenses réelles
-        let currentCumulFacture = currentCumulReal * billingFactor;
+        // Cumul facturation avant la période affichée (somme des facturations mensuelles)
+        const getPriorCumulativeBilling = (boundaryMonthKey) => {
+            const allKeys = new Set();
+            project.workers.forEach(w => {
+                Object.keys(w.workedDays || {}).forEach(k => allKeys.add(k));
+            });
+
+            let sum = 0;
+            Array.from(allKeys).sort().forEach(k => {
+                if (k < boundaryMonthKey) {
+                    const monthlyReal = calculateRealSpending(project, k);
+                    const pct = getBillingPctForMonth(k);
+                    sum += monthlyReal * (pct / 100);
+                }
+            });
+            return sum;
+        };
+
+        let currentCumulFacture = getPriorCumulativeBilling(startMonthKey);
 
         const cumulFacturationRow = document.createElement('tr');
-        cumulFacturationRow.innerHTML = `<td colspan="3"><strong>Cumul facturation (${billingPct}%)</strong></td>`;
+        cumulFacturationRow.innerHTML = `<td colspan="3"><strong>Cumul facturation</strong></td>`;
 
         const radRow = document.createElement('tr');
         radRow.innerHTML = `<td colspan="3"><strong>RAD</strong></td>`;
@@ -452,34 +536,36 @@ document.addEventListener('DOMContentLoaded', () => {
         const cumulEcartRow = document.createElement('tr');
         cumulEcartRow.innerHTML = `<td colspan="3"><strong>CUMUL ECART - FACTURE - PREV</strong></td>`;
 
-                const monthlyFactureList = [];
+        // Pour remplir la ligne "Pourcentage Facturation" (1 % par mois)
+        const displayedMonthKeys = [];
+        const displayedBillingPct = [];
 
-for (let i = 0; i < monthSpan; i++) {
-        const monthIndex = (data.selectedMonth + i) % 12;
-        const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
-        const monthKey = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+        for (let i = 0; i < monthSpan; i++) {
+            const monthIndex = (data.selectedMonth + i) % 12;
+            const year = data.selectedYear + Math.floor((data.selectedMonth + i) / 12);
+            const monthKey = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
 
-        const monthlyReal = calculateRealSpending(project, monthKey);
-        const monthlyProv = calculateProvisionalSpending(project, monthKey);
+            const monthlyReal = calculateRealSpending(project, monthKey);
+            const monthlyProv = calculateProvisionalSpending(project, monthKey);
 
-        // Facturation = % * dépenses réelles
-        const monthlyFacture = monthlyReal * billingFactor;
+            const pct = getBillingPctForMonth(monthKey);
+            const monthlyFacture = monthlyReal * (pct / 100);
 
-        monthlyFactureList.push(monthlyFacture);
+            displayedMonthKeys.push(monthKey);
+            displayedBillingPct.push(pct);
 
+            currentCumulReal += monthlyReal;
+            currentCumulProv += monthlyProv;
+            currentCumulFacture += monthlyFacture;
 
-        currentCumulReal += monthlyReal;
-        currentCumulProv += monthlyProv;
-        currentCumulFacture += monthlyFacture;
+            const rad = totalBudget - currentCumulReal;
+            const ecartMensuel = monthlyFacture - monthlyProv;
+            const cumulEcart = currentCumulFacture - currentCumulProv;
 
-        const rad = totalBudget - currentCumulReal;
-        const ecartMensuel = monthlyFacture - monthlyProv;
-        const cumulEcart = currentCumulFacture - currentCumulProv;
-
-        cumulFacturationRow.innerHTML += `<td><strong>${formatNumber(currentCumulFacture)} €</strong></td>`;
-        radRow.innerHTML += `<td><strong>${formatNumber(rad)} €</strong></td>`;
-        ecartMensuelRow.innerHTML += `<td><strong>${formatNumber(ecartMensuel)} €</strong></td>`;
-        cumulEcartRow.innerHTML += `<td><strong>${formatNumber(cumulEcart)} €</strong></td>`;
+            cumulFacturationRow.innerHTML += `<td><strong>${formatNumber(currentCumulFacture)} €</strong></td>`;
+            radRow.innerHTML += `<td><strong>${formatNumber(rad)} €</strong></td>`;
+            ecartMensuelRow.innerHTML += `<td><strong>${formatNumber(ecartMensuel)} €</strong></td>`;
+            cumulEcartRow.innerHTML += `<td><strong>${formatNumber(cumulEcart)} €</strong></td>`;
         }
 
         realExpenseTableBody.appendChild(cumulFacturationRow);
@@ -487,55 +573,69 @@ for (let i = 0; i < monthSpan; i++) {
         realExpenseTableBody.appendChild(ecartMensuelRow);
         realExpenseTableBody.appendChild(cumulEcartRow);
 
-        // Nouvelle ligne : Pourcentage Facturation (saisie dans la cellule du libellé + résultat mensuel)
+        // Nouvelle ligne : Pourcentage Facturation (1 pourcentage par mois, sans affichage en €)
         const pourcentageFacturationRow = document.createElement('tr');
-        pourcentageFacturationRow.innerHTML = `
-          <td colspan="3">
-            <strong>Pourcentage Facturation</strong>
-            <span class="billing-percentage-inline">
-              <input type="number"
-                     class="billing-percentage"
-                     min="0" max="100" step="0.1"
-                     value="${billingPct}"> %
-            </span>
-          </td>`;
+        pourcentageFacturationRow.innerHTML = `<td colspan="3"><strong>Pourcentage Facturation</strong></td>`;
 
         for (let i = 0; i < monthSpan; i++) {
-            const amount = monthlyFactureList[i] || 0;
-            pourcentageFacturationRow.innerHTML += `<td><strong>${formatNumber(amount)} €</strong></td>`;
+            pourcentageFacturationRow.innerHTML += `
+                <td>
+                    <input type="number"
+                           class="billing-percentage"
+                           data-month="${displayedMonthKeys[i]}"
+                           min="0" max="100" step="0.1"
+                           value="${displayedBillingPct[i]}"> %
+                </td>`;
         }
 
         realExpenseTableBody.appendChild(pourcentageFacturationRow);
 
-        // Sauvegarde dans Grist quand on change le %
-        const billingInput = pourcentageFacturationRow.querySelector('input.billing-percentage');
-        if (billingInput) {
-        billingInput.addEventListener('change', async (e) => {
-            e.stopPropagation();
+        // Sauvegarde dans Grist quand on change un % (JSON dans Projets.Pourcentage_Facturation_Par_Mois)
+        pourcentageFacturationRow.querySelectorAll('input.billing-percentage').forEach((input) => {
+            input.addEventListener('change', async (e) => {
+                e.stopPropagation();
 
-            let pct = parseFloat(billingInput.value);
-            if (isNaN(pct)) pct = 0;
-            pct = Math.max(0, Math.min(100, pct));
-            billingInput.value = pct;
+                const monthKey = input.dataset.month;
 
-            project.billingPercentage = pct;
+                let pct = parseFloat(input.value);
+                if (isNaN(pct)) pct = 100;
+                pct = Math.max(0, Math.min(100, pct));
+                input.value = pct;
 
-            try {
-            await grist.docApi.applyUserActions([
-                ["UpdateRecord", "Projets", project.id, { Pourcentage_Facturation: pct }]
-            ]);
-        } catch (err) {
-            console.error("Impossible d'enregistrer Pourcentage_Facturation dans Grist (colonne manquante ou ID différent).", err);
-        }
+                if (!project.billingPercentageByMonth) project.billingPercentageByMonth = {};
+                project.billingPercentageByMonth[monthKey] = pct;
 
-        renderSelectedProject();
+                await grist.docApi.applyUserActions([
+                    ["UpdateRecord", "Projets", project.id, {
+                        Pourcentage_Facturation_Par_Mois: JSON.stringify(project.billingPercentageByMonth)
+                    }]
+                ]);
+
+                renderSelectedProject();
+            });
         });
-    }
 
-    }
+        }
 
     function renderChart(project) {
         const totalBudget = project.budgetLines.reduce((sum, line) => sum + line.amount, 0);
+
+// Helper: % de facturation pour un mois (YYYY-MM). Défaut: billingPercentage (ou 100)
+const getBillingPctForMonth = (monthKey) => {
+    let pct = null;
+
+    if (project.billingPercentageByMonth && project.billingPercentageByMonth[monthKey] != null) {
+        pct = parseFloat(project.billingPercentageByMonth[monthKey]);
+    } else if (project.billingPercentage != null) {
+        pct = parseFloat(project.billingPercentage);
+    } else {
+        pct = 100;
+    }
+
+    if (isNaN(pct)) pct = 100;
+    pct = Math.max(0, Math.min(100, pct));
+    return pct;
+};
 
         const allMonthKeys = new Set();
         project.workers.forEach(worker => {
@@ -580,6 +680,7 @@ for (let i = 0; i < monthSpan; i++) {
         const realSpendingData = [];
         const provisionalPercentData = [];
         const realPercentData = [];
+        const billingPercentData = [];
 
         for (let i = 0; i < monthSpan; i++) {
             const monthIndex = (data.selectedMonth + i) % 12;
@@ -587,6 +688,9 @@ for (let i = 0; i < monthSpan; i++) {
             const monthKey = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
             
             labels.push([months[monthIndex], year.toString()]);
+
+            // Série % arbitraire par mois (0-100)
+            billingPercentData.push(getBillingPctForMonth(monthKey));
 
             let provisionalValue = 0;
             let realValue = 0;
@@ -646,6 +750,20 @@ for (let i = 0; i < monthSpan; i++) {
                         label: 'Avancement réel (%)',
                         data: realPercentData,
                         borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 2,
+                        fill: false,
+                        yAxisID: 'y',
+                        tension: 0.1,
+                        datalabels: {
+                            align: 'top',
+                            anchor: 'end'
+                        }
+                    },
+                    {
+                        type: 'line',
+                        label: 'Pourcentage facturation (%)',
+                        data: billingPercentData,
+                        borderColor: 'rgba(75, 192, 192, 1)',
                         borderWidth: 2,
                         fill: false,
                         yAxisID: 'y',
