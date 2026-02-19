@@ -89,7 +89,7 @@ function generateChartDataAndTable(projectRecords, devisMap) {
   projectRecords.forEach(record => {
     const type = record.Type_document || 'Non spécifié';
     
-    if (type === 'COFFRAGE' && record.Indice === 'B') {
+    if (type === 'COFFRAGE' && record.Indice === 'A') {
         statsByType['COFFRAGE - Indice A'].advancedDocs.add(record.NumeroDocument);
     }
     
