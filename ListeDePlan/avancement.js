@@ -82,7 +82,7 @@ function generateChartDataAndTable(projectRecords, devisMap) {
       averageIndices[type] = { withIndex: 0, withIndexZero: 0 };
   });
   if (docTypes.includes('COFFRAGE')) {
-      statsByType['COFFRAGE - Indice B'] = { totalDocs: new Set(), advancedDocs: new Set() };
+      statsByType['COFFRAGE - Indice A'] = { totalDocs: new Set(), advancedDocs: new Set() };
   }
 
   // Populate stats
@@ -90,7 +90,7 @@ function generateChartDataAndTable(projectRecords, devisMap) {
     const type = record.Type_document || 'Non spécifié';
     
     if (type === 'COFFRAGE' && record.Indice === 'B') {
-        statsByType['COFFRAGE - Indice B'].advancedDocs.add(record.NumeroDocument);
+        statsByType['COFFRAGE - Indice A'].advancedDocs.add(record.NumeroDocument);
     }
     
     statsByType[type].totalDocs.add(record.NumeroDocument);
@@ -110,8 +110,8 @@ function generateChartDataAndTable(projectRecords, devisMap) {
   // Correct totals for COFFRAGE types
   if (statsByType['COFFRAGE']) {
       const coffrageTotalDocs = statsByType['COFFRAGE'].totalDocs;
-      if (statsByType['COFFRAGE - Indice B']) {
-          statsByType['COFFRAGE - Indice B'].totalDocs = coffrageTotalDocs;
+      if (statsByType['COFFRAGE - Indice A']) {
+          statsByType['COFFRAGE - Indice A'].totalDocs = coffrageTotalDocs;
       }
   }
 
@@ -211,7 +211,7 @@ function generateChartDataAndTable(projectRecords, devisMap) {
   let avgHtml = '<h3>Indice moyen</h3>';
 
   for (const type of sortedTypes) {
-    if (type === 'COFFRAGE - Indice B') continue;
+    if (type === 'COFFRAGE - Indice A') continue;
     const avgData = averageIndices[type];
     const avg = avgData.withIndexZero > 0 ? (avgData.withIndex / avgData.withIndexZero).toFixed(2) : 'N/A';
     avgHtml += `<p><strong>${type}:</strong> ${avg}</p>`;
