@@ -356,7 +356,6 @@ $("projectDropdown").addEventListener("change", async () => {
   const selectedProjectName = getProject();
 
   if (selectedProjectName) {
-    // ✅ Toujours 1 quand on choisit un projet
     setRef(1);
   } else {
     $("refInput").value = "";
@@ -475,7 +474,6 @@ document.querySelector("#invoiceTable").addEventListener("change", async (e) => 
       .filter((p) => p.NumeroDocument === nPlan && p.Nom_projet === selectedProjectName);
 
     if (matchingPlans.length > 0) {
-      // ⚠️ garde ton comportement existant (comparaison string)
       const latestPlan = matchingPlans.reduce((latest, current) =>
         latest.Indice > current.Indice ? latest : current
       );

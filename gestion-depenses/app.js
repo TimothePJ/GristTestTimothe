@@ -1222,7 +1222,6 @@ const getBillingPctForMonth = (monthKey) => {
     chargePlanTableBody.addEventListener('paste', handlePaste, true);
     realExpenseTableBody.addEventListener('paste', handlePaste, true);
 
-
     function renderKpiReport(project) {
         const totalBudget = project.budgetLines.reduce((sum, line) => sum + line.amount, 0);
         const totalProvisionalSpending = project.workers.reduce((total, worker) => {
@@ -1317,7 +1316,6 @@ const getBillingPctForMonth = (monthKey) => {
     cancelEditBudgetBtn.addEventListener('click', () => {
         editBudgetModal.style.display = 'none';
     });
-
 
     document.querySelectorAll('.prev-month-table-btn').forEach(btn => {
         btn.addEventListener('click', () => {

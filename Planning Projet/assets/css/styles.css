@@ -1,0 +1,66 @@
+html,
+body {
+  margin: 0 !important;
+  padding: 0 !important;
+  font-family: Arial, sans-serif !important;
+  background: var(--vinci-bg) !important;
+  background-color: var(--vinci-bg) !important;
+  color: var(--vinci-blue) !important;
+  min-height: 100vh;
+}
+
+/* Important dans certains environnements intégrés (Grist / iframe / thème sombre) */
+html {
+  color-scheme: light !important;
+}
+
+body * {
+  box-sizing: border-box;
+}
+
+.sticky-container {
+  position: sticky;
+  top: 0;
+  background-color: var(--vinci-bg) !important;
+  padding: 20px;
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  z-index: 1000;
+  border-bottom: 1px solid var(--vinci-red);
+}
+
+.dropdown-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.dropdown-container label {
+  font-weight: bold;
+  margin-bottom: 10px;
+  color: var(--vinci-blue) !important;
+  font-size: 18px;
+}
+
+.dropdown-container select {
+  width: 220px;
+  padding: 8px;
+  background-color: var(--vinci-blue) !important;
+  color: var(--white) !important;
+  border: 1px solid var(--vinci-red) !important;
+  border-radius: 4px;
+  outline: none;
+  appearance: auto;
+  font-weight: 600;
+}
+
+.dropdown-container select:disabled {
+  opacity: 1; /* garde les couleurs visibles même disabled */
+  cursor: not-allowed;
+}
+
+#plans-output {
+  background-color: var(--vinci-bg) !important;
+  min-height: calc(100vh - 90px);
+  border-left: 1px solid #0aa36c; /* juste pour voir le bloc comme ton screen si besoin */
+}

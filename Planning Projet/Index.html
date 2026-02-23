@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sélection Projet</title>
+
+  <!-- Grist Plugin API -->
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+
+  <!-- CSS (anti-cache avec ?v=2) -->
+  <link rel="stylesheet" href="./assets/css/variables.css?v=2" />
+  <link rel="stylesheet" href="./assets/css/styles.css?v=2" />
+
+  <!-- JS -->
+  <script type="module" src="./assets/js/main.js?v=2" defer></script>
+</head>
+<body>
+  <div class="sticky-container">
+    <div class="dropdown-container">
+      <label for="projectDropdown">Projet :</label>
+      <select id="projectDropdown" disabled>
+        <option value="">Choisir un projet</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="plans-output"></div>
+</body>
+</html>
