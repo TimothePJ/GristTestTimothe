@@ -21,7 +21,7 @@ function fillSelect(selectEl, options, placeholder, selectedValue = "") {
   }
 }
 
-export function initProjectSelector(projectOptions) {
+export function initProjectSelector(projectOptions, { onChange } = {}) {
   const projectSelect = document.getElementById("projectDropdown");
   if (!projectSelect) {
     throw new Error("Dropdown projet introuvable (#projectDropdown).");
@@ -29,15 +29,15 @@ export function initProjectSelector(projectOptions) {
 
   projectSelect.disabled = false;
 
-  fillSelect(
-    projectSelect,
-    projectOptions,
-    "Choisir un projet",
-    state.selectedProject
-  );
+  // Toujours démarrer sur "Choisir un projet"
+  state.selectedProject = "";
+
+  fillSelect(projectSelect, projectOptions, "Choisir un projet", "");
 
   projectSelect.addEventListener("change", () => {
     setState({ selectedProject: projectSelect.value });
-    console.log("Projet sélectionné :", state.selectedProject);
+    onChange?.({ ...state });
   });
+
+  onChange?.({ ...state });
 }

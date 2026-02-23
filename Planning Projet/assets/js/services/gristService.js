@@ -2,7 +2,7 @@ import { APP_CONFIG } from "../config.js";
 
 function getGrist() {
   if (!window.grist) {
-    throw new Error("API Grist introuvable.");
+    throw new Error("API Grist introuvable (window.grist).");
   }
   return window.grist;
 }
@@ -32,14 +32,18 @@ function toText(value) {
 function normalizeFetchTableResult(raw) {
   if (!raw) return [];
 
+  // Cas 1: tableau d'objets
   if (Array.isArray(raw)) return raw;
+
+  // Cas 2: { records: [...] }
   if (Array.isArray(raw.records)) return raw.records;
 
+  // Cas 3: format colonnes -> tableaux
   if (typeof raw === "object") {
     const keys = Object.keys(raw);
     if (!keys.length) return [];
 
-    const maxLen = Math.max(...keys.map(k => Array.isArray(raw[k]) ? raw[k].length : 0));
+    const maxLen = Math.max(...keys.map((k) => (Array.isArray(raw[k]) ? raw[k].length : 0)));
     if (maxLen <= 0) return [];
 
     const rows = [];
@@ -56,26 +60,41 @@ function normalizeFetchTableResult(raw) {
   return [];
 }
 
-async function fetchRows() {
+async function fetchTableRows(tableName) {
   const grist = getGrist();
 
   if (!grist.docApi || typeof grist.docApi.fetchTable !== "function") {
     throw new Error("grist.docApi.fetchTable(...) indisponible.");
   }
 
-  const raw = await grist.docApi.fetchTable(APP_CONFIG.grist.sourceTable);
+  const raw = await grist.docApi.fetchTable(tableName);
   return normalizeFetchTableResult(raw);
 }
 
+/* ---------- Projets ---------- */
+
 export async function buildProjectOptions() {
-  const rows = await fetchRows();
-  const projectCol = APP_CONFIG.grist.columns.project;
+  const table = APP_CONFIG.grist.projectsTable;
+  const rows = await fetchTableRows(table.sourceTable);
 
   const values = new Set();
   for (const row of rows) {
-    const v = toText(row[projectCol]);
+    const v = toText(row[table.columns.project]);
     if (v) values.add(v);
   }
 
   return [...values].sort((a, b) => a.localeCompare(b, "fr"));
 }
+
+/* ---------- Planning ---------- */
+
+export async function fetchPlanningRows() {
+  const table = APP_CONFIG.grist.planningTable;
+  const rows = await fetchTableRows(table.sourceTable);
+
+  // On renvoie brut, le mapping métier se fait dans planningService.js
+  return rows;
+}
+
+/* Utilitaires exportés pour planningService */
+export { toText };

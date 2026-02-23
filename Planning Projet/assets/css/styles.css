@@ -1,66 +1,186 @@
-html,
-body {
-  margin: 0 !important;
-  padding: 0 !important;
-  font-family: Arial, sans-serif !important;
-  background: var(--vinci-bg) !important;
-  background-color: var(--vinci-bg) !important;
-  color: var(--vinci-blue) !important;
-  min-height: 100vh;
+/* ==========================================================
+   PROTOTYPE GANTT / PLANNING (vis-timeline)
+   ========================================================== */
+
+:root {
+  --col-id2: 90px;
+  --col-task: 280px;
+  --col-type: 140px;
+  --col-line: 130px;
+  --left-panel-width: calc(var(--col-id2) + var(--col-task) + var(--col-type) + var(--col-line) + 32px);
 }
 
-/* Important dans certains environnements intégrés (Grist / iframe / thème sombre) */
-html {
-  color-scheme: light !important;
+/* Zone planning globale */
+#timelineWrapper {
+  background: #ffffff;
+  border-top: 1px solid #e6e6e6;
+  border-bottom: 1px solid #e6e6e6;
+  min-height: 500px;
 }
 
-body * {
-  box-sizing: border-box;
+#planningTimeline {
+  height: 600px;
+  background: #ffffff;
 }
 
-.sticky-container {
+/* Header des colonnes */
+.planning-header-row {
+  display: grid;
+  grid-template-columns: var(--left-panel-width) 1fr;
+  align-items: stretch;
+  border-top: 1px solid #d9d9d9;
+  border-bottom: 1px solid #d9d9d9;
+  background: #f7f7f7;
   position: sticky;
-  top: 0;
-  background-color: var(--vinci-bg) !important;
-  padding: 20px;
-  display: flex;
-  gap: 20px;
+  top: 81px; /* sous ton header sticky principal */
+  z-index: 999;
+}
+
+.planning-header-left {
+  display: grid;
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-type) var(--col-line);
   align-items: center;
-  z-index: 1000;
-  border-bottom: 1px solid var(--vinci-red);
+  border-right: 1px solid #ddd;
+  padding: 0 8px;
 }
 
-.dropdown-container {
+.planning-header-right {
   display: flex;
-  flex-direction: column;
-}
-
-.dropdown-container label {
+  align-items: center;
+  padding: 0 12px;
   font-weight: bold;
-  margin-bottom: 10px;
-  color: var(--vinci-blue) !important;
-  font-size: 18px;
+  color: #004990;
 }
 
-.dropdown-container select {
-  width: 220px;
-  padding: 8px;
-  background-color: var(--vinci-blue) !important;
-  color: var(--white) !important;
-  border: 1px solid var(--vinci-red) !important;
-  border-radius: 4px;
-  outline: none;
-  appearance: auto;
+.planning-header-row .hcol {
+  font-weight: bold;
+  color: #004990;
+  padding: 10px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Force largeur de la zone de labels (gauche) de vis-timeline */
+#planningTimeline .vis-panel.vis-left {
+  width: var(--left-panel-width) !important;
+  border-right: 1px solid #ddd !important;
+  background: #fafafa !important;
+}
+
+#planningTimeline .vis-panel.vis-center,
+#planningTimeline .vis-panel.vis-top,
+#planningTimeline .vis-panel.vis-bottom {
+  left: var(--left-panel-width) !important;
+  width: calc(100% - var(--left-panel-width)) !important;
+}
+
+/* Ligne de groupe = nos 4 colonnes */
+.group-row-grid {
+  display: grid;
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-type) var(--col-line);
+  align-items: center;
+  gap: 0;
+  padding: 0 8px;
+  width: calc(var(--left-panel-width) - 16px);
+  min-height: 34px;
+  color: #222;
+  font-size: 13px;
+}
+
+.group-row-grid > div {
+  padding: 6px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.group-row-grid .cell-id2,
+.group-row-grid .cell-line {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.group-row-grid .cell-type {
   font-weight: 600;
+  color: #004990;
 }
 
-.dropdown-container select:disabled {
-  opacity: 1; /* garde les couleurs visibles même disabled */
-  cursor: not-allowed;
+/* Vis timeline look (dans l'esprit de ton zip) */
+#planningTimeline .vis-timeline {
+  border: none !important;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
 }
 
-#plans-output {
-  background-color: var(--vinci-bg) !important;
-  min-height: calc(100vh - 90px);
-  border-left: 1px solid #0aa36c; /* juste pour voir le bloc comme ton screen si besoin */
+#planningTimeline .vis-labelset .vis-label {
+  border-bottom: 1px solid #ececec !important;
+}
+
+#planningTimeline .vis-panel.vis-center .vis-content {
+  background: #ffffff;
+}
+
+#planningTimeline .vis-time-axis .vis-grid.vis-minor {
+  border-color: #f1f1f1 !important;
+}
+
+#planningTimeline .vis-time-axis .vis-grid.vis-major {
+  border-color: #e3e3e3 !important;
+}
+
+/* Barres de phase (4 couleurs) */
+#planningTimeline .vis-item {
+  border-radius: 3px;
+  border-width: 1px;
+  color: #fff;
+  font-size: 11px;
+}
+
+#planningTimeline .vis-item .vis-item-content {
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+#planningTimeline .vis-item.phase-limite {
+  background: #2563eb;
+  border-color: #1d4ed8;
+}
+
+#planningTimeline .vis-item.phase-coffrage {
+  background: #f59e0b;
+  border-color: #d97706;
+}
+
+#planningTimeline .vis-item.phase-armature {
+  background: #dc2626;
+  border-color: #b91c1c;
+}
+
+#planningTimeline .vis-item.phase-travaux {
+  background: #16a34a;
+  border-color: #15803d;
+}
+
+/* Si item sélectionné */
+#planningTimeline .vis-item.vis-selected {
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,0.85);
+}
+
+/* Message */
+.planning-status {
+  padding: 10px 14px;
+  color: #666;
+  font-size: 13px;
+  background: #fff;
+}
+
+/* Responsive léger */
+@media (max-width: 1200px) {
+  :root {
+    --col-id2: 70px;
+    --col-task: 220px;
+    --col-type: 120px;
+    --col-line: 110px;
+  }
 }
