@@ -1,71 +1,189 @@
-/* ==========================================================
-   PROTOTYPE GANTT / PLANNING (vis-timeline)
-   ========================================================== */
-
 :root {
+  --grist-theme-text: #222;
+  --grist-theme-page-bg: #fff;
+  --grist-theme-panel-header-bg: #f7f7f7;
+  --grist-theme-border: #ddd;
+  --grist-theme-hover: #f0f0f0;
+  --grist-theme-selection: #e6f2fa;
+  --grist-theme-accent: #16b378;
+
+  /* tes colonnes planning */
   --col-id2: 90px;
   --col-task: 280px;
   --col-type: 140px;
   --col-line: 130px;
-  --left-panel-width: calc(var(--col-id2) + var(--col-task) + var(--col-type) + var(--col-line) + 32px);
+  --left-pad-x: 8px;
+  --left-grid-width: calc(var(--col-id2) + var(--col-task) + var(--col-type) + var(--col-line));
+  --left-panel-width: calc(var(--left-grid-width) + (var(--left-pad-x) * 2));
+  --planning-row-height: 38px;
 }
 
-/* Zone planning globale */
-#timelineWrapper {
-  background: #ffffff;
-  border-top: 1px solid #e6e6e6;
-  border-bottom: 1px solid #e6e6e6;
-  min-height: 500px;
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  color: var(--grist-theme-text);
+  background-color: var(--grist-theme-page-bg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-#planningTimeline {
-  height: 600px;
-  background: #ffffff;
+/* Toolbar style = timeline-calendar.zip */
+#toolbar {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  background-color: var(--grist-theme-panel-header-bg);
+  border-bottom: 1px solid var(--grist-theme-border);
+  gap: 16px;
+  flex-shrink: 0;
 }
 
-/* Header des colonnes */
+#toolbar button {
+  background-color: #fff;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--grist-theme-text);
+}
+
+#toolbar button:hover {
+  background-color: var(--grist-theme-hover);
+}
+
+#toolbar button.active {
+  background-color: var(--grist-theme-selection);
+  border-color: #add6ff;
+  font-weight: 500;
+}
+
+.nav-buttons,
+.zoom-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.filters {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+#toolbar select {
+  background-color: #fff;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  padding: 3px 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--grist-theme-text);
+  height: 28px;
+  min-width: 220px;
+}
+
+#toolbar select:hover {
+  background-color: var(--grist-theme-hover);
+}
+
+#current-date-range {
+  font-weight: 500;
+  margin-left: auto;
+}
+
+/* Header planning dans la même DA */
 .planning-header-row {
   display: grid;
   grid-template-columns: var(--left-panel-width) 1fr;
   align-items: stretch;
-  border-top: 1px solid #d9d9d9;
-  border-bottom: 1px solid #d9d9d9;
-  background: #f7f7f7;
+  border-bottom: 1px solid var(--grist-theme-border);
+  background: var(--grist-theme-panel-header-bg);
   position: sticky;
-  top: 81px; /* sous ton header sticky principal */
-  z-index: 999;
+  top: 45px; /* toolbar height approx */
+  z-index: 50;
 }
 
 .planning-header-left {
   display: grid;
   grid-template-columns: var(--col-id2) var(--col-task) var(--col-type) var(--col-line);
+  width: var(--left-grid-width);
+  padding: 0 var(--left-pad-x);
+  box-sizing: content-box;
   align-items: center;
-  border-right: 1px solid #ddd;
-  padding: 0 8px;
+  border-right: 1px solid var(--grist-theme-border);
+  min-height: var(--planning-row-height);
+}
+
+.planning-header-left .hcol {
+  padding: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--grist-theme-text);
+  font-weight: 600;
+}
+
+.planning-header-left .c-id2,
+.planning-header-left .c-line {
+  text-align: right;
 }
 
 .planning-header-right {
   display: flex;
   align-items: center;
   padding: 0 12px;
-  font-weight: bold;
-  color: #004990;
+  min-height: var(--planning-row-height);
+  font-weight: 600;
+  color: var(--grist-theme-text);
 }
 
-.planning-header-row .hcol {
-  font-weight: bold;
-  color: #004990;
-  padding: 10px 8px;
-  white-space: nowrap;
+/* Timeline wrapper */
+#timelineWrapper {
+  background: #fff;
+  min-height: 500px;
+}
+#planningTimeline {
+  height: 600px;
+  background: #fff;
+}
+
+/* vis-timeline look = timeline-calendar.zip */
+#planningTimeline .vis-timeline {
+  border: none !important;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+#planningTimeline .vis-labelset .vis-label {
+  border-bottom: 1px solid var(--grist-theme-border) !important;
+  height: var(--planning-row-height) !important;
+  min-height: var(--planning-row-height) !important;
+  display: flex !important;
+  align-items: center !important;
+  box-sizing: border-box;
+}
+
+#planningTimeline .vis-labelset .vis-label .vis-inner {
+  width: 100% !important;
+  height: 100% !important;
   overflow: hidden;
-  text-overflow: ellipsis;
+  display: flex !important;
+  align-items: center !important;
+  box-sizing: border-box;
 }
 
-/* Force largeur de la zone de labels (gauche) de vis-timeline */
+#planningTimeline .vis-time-axis .vis-grid.vis-minor {
+  border-color: #f0f0f0 !important;
+}
+
+#planningTimeline .vis-time-axis .vis-grid.vis-major {
+  border-color: #e0e0e0 !important;
+}
+
 #planningTimeline .vis-panel.vis-left {
   width: var(--left-panel-width) !important;
-  border-right: 1px solid #ddd !important;
-  background: #fafafa !important;
+  background-color: #fafafa !important;
+  border-right: 1px solid var(--grist-theme-border) !important;
 }
 
 #planningTimeline .vis-panel.vis-center,
@@ -75,139 +193,88 @@
   width: calc(100% - var(--left-panel-width)) !important;
 }
 
-/* Ligne de groupe = nos 4 colonnes */
-.group-row-grid {
-  display: grid;
+#planningTimeline .vis-background .vis-group,
+#planningTimeline .vis-foreground .vis-group {
+  height: var(--planning-row-height) !important;
+  min-height: var(--planning-row-height) !important;
+  border-bottom: 1px solid #f2f2f2;
+  box-sizing: border-box;
+}
+
+/* Grille de gauche (tes 4 colonnes) */
+#planningTimeline .group-row-grid {
+  display: grid !important;
   grid-template-columns: var(--col-id2) var(--col-task) var(--col-type) var(--col-line);
+  width: var(--left-grid-width);
+  padding: 0 var(--left-pad-x);
+  box-sizing: content-box;
   align-items: center;
-  gap: 0;
-  padding: 0 8px;
-  width: calc(var(--left-panel-width) - 16px);
-  min-height: 34px;
+  min-height: var(--planning-row-height);
   color: #222;
   font-size: 13px;
 }
 
-.group-row-grid > div {
+#planningTimeline .group-row-grid > div {
   padding: 6px 8px;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.group-row-grid .cell-id2,
-.group-row-grid .cell-line {
+#planningTimeline .group-row-grid .cell-id2,
+#planningTimeline .group-row-grid .cell-line {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-.group-row-grid .cell-type {
-  font-weight: 600;
-  color: #004990;
-}
-
-/* Vis timeline look (dans l'esprit de ton zip) */
-#planningTimeline .vis-timeline {
-  border: none !important;
-  font-family: Arial, sans-serif;
-  font-size: 13px;
-}
-
-#planningTimeline .vis-labelset .vis-label {
-  border-bottom: 1px solid #ececec !important;
-}
-
-#planningTimeline .vis-panel.vis-center .vis-content {
-  background: #ffffff;
-}
-
-#planningTimeline .vis-time-axis .vis-grid.vis-minor {
-  border-color: #f1f1f1 !important;
-}
-
-#planningTimeline .vis-time-axis .vis-grid.vis-major {
-  border-color: #e3e3e3 !important;
-}
-
-/* Barres de phase (4 couleurs) */
+/* ===== Couleurs des barres : DA timeline-calendar ===== */
+/* Base */
 #planningTimeline .vis-item {
-  border-radius: 3px;
-  border-width: 1px;
-  color: #fff;
-  font-size: 11px;
+  border-radius: 2px;
+  border: 1px solid var(--grist-theme-border);
+  color: #222;
 }
 
 #planningTimeline .vis-item .vis-item-content {
   padding: 0 4px;
-  white-space: nowrap;
 }
 
+#planningTimeline .vis-item.vis-selected {
+  border-color: #3b82f6 !important;
+  background-color: #eff6ff !important;
+  z-index: 2;
+}
+
+/* Tes 4 phases, harmonisées à la DA claire */
 #planningTimeline .vis-item.phase-limite {
-  background: #2563eb;
-  border-color: #1d4ed8;
+  background-color: #dbeafe !important;   /* bleu clair */
+  border-color: #bfdbfe !important;
+  color: #1e3a8a !important;
 }
 
 #planningTimeline .vis-item.phase-coffrage {
-  background: #f59e0b;
-  border-color: #d97706;
+  background-color: #fef3c7 !important;   /* jaune clair */
+  border-color: #fde68a !important;
+  color: #92400e !important;
 }
 
 #planningTimeline .vis-item.phase-armature {
-  background: #dc2626;
-  border-color: #b91c1c;
+  background-color: #fee2e2 !important;   /* rouge clair */
+  border-color: #fecaca !important;
+  color: #991b1b !important;
 }
 
 #planningTimeline .vis-item.phase-travaux {
-  background: #16a34a;
-  border-color: #15803d;
+  background-color: #dcfce7 !important;   /* vert clair */
+  border-color: #bbf7d0 !important;
+  color: #166534 !important;
 }
 
-/* Si item sélectionné */
-#planningTimeline .vis-item.vis-selected {
-  box-shadow: inset 0 0 0 2px rgba(255,255,255,0.85);
-}
-
-/* Message */
 .planning-status {
   padding: 10px 14px;
   color: #666;
   font-size: 13px;
   background: #fff;
-}
-
-/* Responsive léger */
-@media (max-width: 1200px) {
-  :root {
-    --col-id2: 70px;
-    --col-task: 220px;
-    --col-type: 120px;
-    --col-line: 110px;
-  }
-}
-
-/* Force l'affichage correct du contenu custom des groupes vis-timeline */
-#planningTimeline .vis-labelset .vis-label .vis-inner {
-  width: 100% !important;
-  height: 100% !important;
-  overflow: hidden;
-}
-
-#planningTimeline .vis-labelset .vis-label {
-  display: flex;
-  align-items: center;
-}
-
-/* Notre grille 4 colonnes */
-#planningTimeline .group-row-grid {
-  display: grid !important;
-  grid-template-columns: var(--col-id2) var(--col-task) var(--col-type) var(--col-line);
-  align-items: center;
-  width: calc(var(--left-panel-width) - 16px);
-  min-height: 34px;
-  padding: 0 8px;
-  box-sizing: border-box;
-}
-
-#planningTimeline .group-row-grid > div {
-  min-width: 0;
+  border-top: 1px solid var(--grist-theme-border);
 }
