@@ -8,15 +8,23 @@ function getTimelineContainer() {
   return el;
 }
 
+function toDate(value) {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 function computeRange(items) {
-  if (!items.length) return null;
+  if (!items || !items.length) return null;
 
   let min = null;
   let max = null;
 
   for (const item of items) {
-    const s = new Date(item.start);
-    const e = new Date(item.end);
+    const s = toDate(item.start);
+    const e = toDate(item.end);
+
+    if (!s || !e) continue;
 
     if (!min || s < min) min = s;
     if (!max || e > max) max = e;
@@ -24,7 +32,7 @@ function computeRange(items) {
 
   if (!min || !max) return null;
 
-  // marge visuelle
+  // marge visuelle autour des données
   const start = new Date(min);
   start.setDate(start.getDate() - 7);
 
@@ -52,14 +60,13 @@ export function renderPlanningTimeline({ groups, items }) {
       zoomable: true,
       moveable: true,
       selectable: true,
+      showCurrentTime: false,
+      locale: "fr",
 
       orientation: {
         axis: "top",
         item: "top",
       },
-
-      showCurrentTime: false,
-      locale: "fr",
 
       margin: {
         item: { horizontal: 2, vertical: 6 },
@@ -71,7 +78,6 @@ export function renderPlanningTimeline({ groups, items }) {
         overflowMethod: "cap",
       },
 
-      // Important pour garder une bonne lisibilité des items multi-phases
       groupHeightMode: "fixed",
       groupOrder: (a, b) => {
         const al = Number(a.meta?.lignePlanning);
@@ -90,13 +96,19 @@ export function renderPlanningTimeline({ groups, items }) {
   groupsDataSet.clear();
   itemsDataSet.clear();
 
-  groupsDataSet.add(groups);
-  itemsDataSet.add(items);
+  groupsDataSet.add(groups || []);
+  itemsDataSet.add(items || []);
 
-  const range = computeRange(items);
-  if (range) {
-    timelineInstance.setWindow(range.start, range.end, { animation: false });
-  }
+  requestAnimationFrame(() => {
+    timelineInstance.redraw();
+
+    const range = computeRange(items || []);
+    if (range) {
+      timelineInstance.setWindow(range.start, range.end, { animation: false });
+    } else if ((items || []).length) {
+      timelineInstance.fit({ animation: false });
+    }
+  });
 }
 
 export function clearPlanningTimeline() {

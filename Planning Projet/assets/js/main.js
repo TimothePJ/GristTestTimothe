@@ -47,7 +47,6 @@ async function refreshPlanning() {
 
 async function bootstrap() {
   try {
-    // ⚠️ On ne charge PAS localStorage pour garder "Choisir un projet" au démarrage
     setState({ selectedProject: "" });
 
     initGrist();

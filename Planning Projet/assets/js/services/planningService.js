@@ -8,9 +8,60 @@ function toNumber(value) {
 }
 
 function parseDate(value) {
-  if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d;
+  if (value == null || value === "") return null;
+
+  // Date JS
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  // Nombre (cas Grist fréquent)
+  if (typeof value === "number") {
+    let n = value;
+
+    // Cas 1 : timestamp en secondes (Grist/Unix)
+    // Exemple ~ 1640649600 (2021)
+    if (n > 1e9 && n < 1e11) {
+      n = n * 1000;
+    }
+
+    // Cas 2 : timestamp déjà en millisecondes
+    // Exemple ~ 1640649600000
+    const d = new Date(n);
+    if (!Number.isNaN(d.getTime())) return d;
+
+    return null;
+  }
+
+  const str = String(value).trim();
+  if (!str) return null;
+
+  // DD/MM/YYYY (éventuellement avec heure derrière)
+  const frMatch = str.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+.*)?$/);
+  if (frMatch) {
+    const day = Number(frMatch[1]);
+    const month = Number(frMatch[2]);
+    const year = Number(frMatch[3]);
+
+    const d = new Date(year, month - 1, day);
+
+    if (
+      d.getFullYear() === year &&
+      d.getMonth() === month - 1 &&
+      d.getDate() === day
+    ) {
+      return d;
+    }
+    return null;
+  }
+
+  // ISO (ex: 2021-12-28T00:00:00.000Z)
+  const iso = new Date(str);
+  if (!Number.isNaN(iso.getTime())) {
+    return iso;
+  }
+
+  return null;
 }
 
 function addDays(date, days) {
