@@ -75,7 +75,7 @@ function fmtDate(date) {
 
 function buildGroupContent(row) {
   return `
-    <div class="group-row-grid">
+    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-type) var(--col-line);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
       <div class="cell-id2">${escapeHtml(row.id2 ?? "")}</div>
       <div class="cell-task">${escapeHtml(row.taches ?? "")}</div>
       <div class="cell-type">${escapeHtml(row.typeDoc ?? "")}</div>
@@ -132,6 +132,7 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
   let rows = rawRows.map((r) => {
     const id2Text = toText(r[cfg.id2]);
     const lignePlanningText = toText(r[cfg.lignePlanning]);
+    const tachesText = toText(r[cfg.taches]) || toText(r[cfg.tacheAlt]);
 
     return {
       rowId: r[cfg.id] ?? null,
@@ -139,7 +140,7 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
 
       // Colonnes affichées
       id2: id2Text,
-      taches: toText(r[cfg.taches]),
+      taches: tachesText,
       typeDoc: toText(r[cfg.typeDoc]),
       lignePlanning: lignePlanningText,
 

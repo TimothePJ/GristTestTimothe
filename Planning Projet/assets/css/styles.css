@@ -1,31 +1,28 @@
 /* ==========================================================
-   PLANNING PROJET - styles.css (version complète)
-   DA inspirée de timeline-calendar.zip + fix alignement colonnes
+   PLANNING PROJET - styles.css (complet)
+   DA claire + fix alignement 4 colonnes (vis-timeline)
    ========================================================== */
 
 :root {
-  /* Palette claire type Grist / timeline-calendar */
-  --grist-theme-text: #222222;
-  --grist-theme-page-bg: #ffffff;
+  /* Palette claire */
+  --grist-theme-text: #222;
+  --grist-theme-page-bg: #fff;
   --grist-theme-panel-header-bg: #f7f7f7;
-  --grist-theme-border: #dddddd;
+  --grist-theme-border: #ddd;
   --grist-theme-hover: #f0f0f0;
   --grist-theme-selection: #e6f2fa;
-  --grist-theme-accent: #16b378;
 
-  /* Layout colonnes planning (gauche) */
+  /* Colonnes de gauche */
   --col-id2: 90px;
   --col-task: 280px;
   --col-type: 140px;
   --col-line: 130px;
 
   --left-pad-x: 8px;
-  --left-grid-width: calc(
-    var(--col-id2) + var(--col-task) + var(--col-type) + var(--col-line)
-  );
+  --left-grid-width: calc(var(--col-id2) + var(--col-task) + var(--col-type) + var(--col-line));
   --left-panel-width: calc(var(--left-grid-width) + (var(--left-pad-x) * 2));
 
-  /* Hauteur unique pour aligner labels (gauche) et groupes/items (droite) */
+  /* Hauteur de ligne commune labels + timeline */
   --planning-row-height: 38px;
 
   /* Toolbar */
@@ -47,8 +44,7 @@ body {
   height: 100vh;
   background: var(--grist-theme-page-bg);
   color: var(--grist-theme-text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
-    Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 body * {
@@ -56,7 +52,7 @@ body * {
 }
 
 /* ==========================================================
-   Toolbar (style timeline-calendar)
+   Toolbar (timeline-calendar style)
    ========================================================== */
 
 #toolbar {
@@ -80,13 +76,12 @@ body * {
 
 .toolbar-label {
   font-weight: 600;
-  color: var(--grist-theme-text);
   margin-right: 4px;
 }
 
 #toolbar button {
-  background-color: #ffffff;
-  border: 1px solid #cccccc;
+  background-color: #fff;
+  border: 1px solid #ccc;
   border-radius: 3px;
   padding: 4px 10px;
   min-height: 28px;
@@ -107,8 +102,8 @@ body * {
 }
 
 #toolbar select {
-  background-color: #ffffff;
-  border: 1px solid #cccccc;
+  background-color: #fff;
+  border: 1px solid #ccc;
   border-radius: 3px;
   padding: 3px 6px;
   min-width: 220px;
@@ -128,13 +123,13 @@ body * {
 
 #current-date-range {
   margin-left: auto;
+  white-space: nowrap;
   font-weight: 500;
   color: #444;
-  white-space: nowrap;
 }
 
 /* ==========================================================
-   Header tableau (4 colonnes à gauche + "Planning")
+   Header tableau (4 colonnes à gauche + Planning)
    ========================================================== */
 
 .planning-header-row {
@@ -148,6 +143,7 @@ body * {
   z-index: 50;
 }
 
+/* ✅ C'EST ICI que va le bloc que tu as cité */
 .planning-header-left {
   display: grid;
   grid-template-columns: var(--col-id2) var(--col-task) var(--col-type) var(--col-line);
@@ -161,11 +157,11 @@ body * {
 
 .planning-header-left .hcol {
   padding: 8px;
-  color: var(--grist-theme-text);
-  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: var(--grist-theme-text);
+  font-weight: 600;
 }
 
 .planning-header-left .c-id2,
@@ -187,18 +183,18 @@ body * {
    ========================================================== */
 
 #timelineWrapper {
-  background: #ffffff;
+  background: #fff;
   border-bottom: 1px solid var(--grist-theme-border);
   min-height: 500px;
 }
 
 #planningTimeline {
   height: 600px;
-  background: #ffffff;
+  background: #fff;
 }
 
 /* ==========================================================
-   vis-timeline - structure générale
+   vis-timeline - structure
    ========================================================== */
 
 #planningTimeline .vis-timeline {
@@ -208,14 +204,14 @@ body * {
   background: #fff;
 }
 
-/* Largeur panneau gauche = largeur exacte de nos 4 colonnes */
+/* Largeur du panneau gauche = nos 4 colonnes */
 #planningTimeline .vis-panel.vis-left {
   width: var(--left-panel-width) !important;
-  background-color: #fafafa !important;
+  background: #fafafa !important;
   border-right: 1px solid var(--grist-theme-border) !important;
 }
 
-/* Décale les panneaux du centre pour respecter le panneau gauche custom */
+/* Décalage des panneaux droits */
 #planningTimeline .vis-panel.vis-center,
 #planningTimeline .vis-panel.vis-top,
 #planningTimeline .vis-panel.vis-bottom {
@@ -223,7 +219,7 @@ body * {
   width: calc(100% - var(--left-panel-width)) !important;
 }
 
-/* Axes / grilles */
+/* Axes / grille */
 #planningTimeline .vis-time-axis {
   background: #fff;
 }
@@ -241,11 +237,10 @@ body * {
 }
 
 /* ==========================================================
-   FIX ALIGNEMENT COLONNES GAUCHE / GROUPES / ITEMS
-   (clé du problème)
+   FIX ALIGNEMENT (gauche labels / droite groupes)
    ========================================================== */
 
-/* Lignes labels à gauche */
+/* Labels de groupe (panneau gauche) */
 #planningTimeline .vis-labelset .vis-label {
   height: var(--planning-row-height) !important;
   min-height: var(--planning-row-height) !important;
@@ -265,7 +260,7 @@ body * {
   box-sizing: border-box !important;
 }
 
-/* Lignes de fond/avant-plan côté timeline (doivent matcher les labels) */
+/* Groupes côté timeline (droite) -> même hauteur */
 #planningTimeline .vis-background .vis-group,
 #planningTimeline .vis-foreground .vis-group {
   height: var(--planning-row-height) !important;
@@ -274,14 +269,14 @@ body * {
   border-bottom: 1px solid #f2f2f2 !important;
 }
 
-/* Sécurité anti décalage horizontal des labels */
+/* Sécurité anti débordement horizontal des labels */
 #planningTimeline .vis-labelset {
   overflow-x: hidden;
 }
 
 /* ==========================================================
-   Grille custom des 4 colonnes (contenu des groups)
-   Ordre exact : ID2 | Tâches | Type_doc | Ligne_planning
+   Grille custom des 4 colonnes (contenu group labels)
+   Ordre : ID2 | Tâches | Type_doc | Ligne_planning
    ========================================================== */
 
 #planningTimeline .group-row-grid {
@@ -312,11 +307,10 @@ body * {
 
 #planningTimeline .group-row-grid .cell-type {
   font-weight: 600;
-  color: #1f2937;
 }
 
 /* ==========================================================
-   Items (barres) vis-timeline
+   Items (barres Gantt/timeline)
    ========================================================== */
 
 #planningTimeline .vis-item {
@@ -338,33 +332,33 @@ body * {
   z-index: 2;
 }
 
-/* 4 phases (palette claire harmonisée) */
+/* Couleurs des 4 phases */
 #planningTimeline .vis-item.phase-limite {
-  background-color: #dbeafe !important; /* bleu clair */
+  background-color: #dbeafe !important;
   border-color: #bfdbfe !important;
   color: #1e3a8a !important;
 }
 
 #planningTimeline .vis-item.phase-coffrage {
-  background-color: #fef3c7 !important; /* jaune clair */
+  background-color: #fef3c7 !important;
   border-color: #fde68a !important;
   color: #92400e !important;
 }
 
 #planningTimeline .vis-item.phase-armature {
-  background-color: #fee2e2 !important; /* rouge clair */
+  background-color: #fee2e2 !important;
   border-color: #fecaca !important;
   color: #991b1b !important;
 }
 
 #planningTimeline .vis-item.phase-travaux {
-  background-color: #dcfce7 !important; /* vert clair */
+  background-color: #dcfce7 !important;
   border-color: #bbf7d0 !important;
   color: #166534 !important;
 }
 
 /* ==========================================================
-   Statut / messages
+   Statut
    ========================================================== */
 
 .planning-status {
