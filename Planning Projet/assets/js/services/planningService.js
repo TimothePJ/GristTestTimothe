@@ -10,33 +10,24 @@ function toNumber(value) {
 function parseDate(value) {
   if (value == null || value === "") return null;
 
-  // Date JS
   if (value instanceof Date) {
     return Number.isNaN(value.getTime()) ? null : value;
   }
 
-  // Nombre (cas Grist fréquent)
   if (typeof value === "number") {
     let n = value;
 
-    // Cas 1 : timestamp en secondes (Grist/Unix)
-    // Exemple ~ 1640649600 (2021)
-    if (n > 1e9 && n < 1e11) {
-      n = n * 1000;
-    }
+    // timestamp en secondes -> ms
+    if (n > 1e9 && n < 1e11) n *= 1000;
 
-    // Cas 2 : timestamp déjà en millisecondes
-    // Exemple ~ 1640649600000
     const d = new Date(n);
-    if (!Number.isNaN(d.getTime())) return d;
-
-    return null;
+    return Number.isNaN(d.getTime()) ? null : d;
   }
 
   const str = String(value).trim();
   if (!str) return null;
 
-  // DD/MM/YYYY (éventuellement avec heure derrière)
+  // DD/MM/YYYY
   const frMatch = str.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+.*)?$/);
   if (frMatch) {
     const day = Number(frMatch[1]);
@@ -44,7 +35,6 @@ function parseDate(value) {
     const year = Number(frMatch[3]);
 
     const d = new Date(year, month - 1, day);
-
     if (
       d.getFullYear() === year &&
       d.getMonth() === month - 1 &&
@@ -55,13 +45,9 @@ function parseDate(value) {
     return null;
   }
 
-  // ISO (ex: 2021-12-28T00:00:00.000Z)
+  // ISO
   const iso = new Date(str);
-  if (!Number.isNaN(iso.getTime())) {
-    return iso;
-  }
-
-  return null;
+  return Number.isNaN(iso.getTime()) ? null : iso;
 }
 
 function addDays(date, days) {
@@ -139,75 +125,96 @@ function createRangeFromStartAndDays(startDateRaw, daysRaw) {
   return { start, end, durationLabel: `${days} j` };
 }
 
-/**
- * Transforme les lignes de Planning_Projet en datasets vis-timeline.
- *
- * selectedProject: string
- * - Pour l'instant, si aucun champ de liaison n'est configuré, on n'applique pas le filtre.
- */
 export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "") {
   const cfg = APP_CONFIG.grist.planningTable.columns;
-  const projectLinkCol = cfg.projectLink; // null pour l’instant dans ton JSON exemple
+  const projectLinkCol = cfg.projectLink;
 
-  // 1) Normalisation des lignes métier
-  let rows = rawRows.map((r) => ({
-    rowId: r[cfg.id] ?? null,
-    projectLink: projectLinkCol ? toText(r[projectLinkCol]) : "",
-    id2: toText(r[cfg.id2]),
-    taches: toText(r[cfg.taches]),
-    typeDoc: toText(r[cfg.typeDoc]),
-    lignePlanning: toText(r[cfg.lignePlanning]),
+  let rows = rawRows.map((r) => {
+    const id2Text = toText(r[cfg.id2]);
+    const lignePlanningText = toText(r[cfg.lignePlanning]);
 
-    dateLimite: r[cfg.dateLimite],
-    duree1: r[cfg.duree1],
+    return {
+      rowId: r[cfg.id] ?? null,
+      projectLink: projectLinkCol ? toText(r[projectLinkCol]) : "",
 
-    diffCoffrage: r[cfg.diffCoffrage],
-    duree2: r[cfg.duree2],
+      // Colonnes affichées
+      id2: id2Text,
+      taches: toText(r[cfg.taches]),
+      typeDoc: toText(r[cfg.typeDoc]),
+      lignePlanning: lignePlanningText,
 
-    diffArmature: r[cfg.diffArmature],
-    duree3: r[cfg.duree3],
+      // Valeurs numériques de tri (robustes)
+      id2Num: toNumber(id2Text),
+      lignePlanningNum: toNumber(lignePlanningText),
 
-    demarragesTravaux: r[cfg.demarragesTravaux],
-    retards: r[cfg.retards],
+      // Phases planning
+      dateLimite: r[cfg.dateLimite],
+      duree1: r[cfg.duree1],
 
-    indice: toText(r[cfg.indice]),
-    realise: toText(r[cfg.realise]),
-  }));
+      diffCoffrage: r[cfg.diffCoffrage],
+      duree2: r[cfg.duree2],
 
-  // 2) Filtre projet (seulement si colonne de liaison configurée)
+      diffArmature: r[cfg.diffArmature],
+      duree3: r[cfg.duree3],
+
+      demarragesTravaux: r[cfg.demarragesTravaux],
+      retards: r[cfg.retards],
+
+      indice: toText(r[cfg.indice]),
+      realise: toText(r[cfg.realise]),
+    };
+  });
+
+  // Filtre projet (actif seulement si colonne configurée)
   if (selectedProject && projectLinkCol) {
     rows = rows.filter((r) => r.projectLink === selectedProject);
   }
 
-  // 3) Tri (par ligne planning puis ID2)
+  // ✅ TRI ROBUSTE (ordre métier demandé)
+  // 1) Ligne_planning (numérique)
+  // 2) ID2 (numérique)
+  // 3) Type_doc
+  // 4) Taches
   rows.sort((a, b) => {
-    const la = Number(a.lignePlanning);
-    const lb = Number(b.lignePlanning);
+    const aLine = a.lignePlanningNum;
+    const bLine = b.lignePlanningNum;
+    if (aLine != null && bLine != null && aLine !== bLine) return aLine - bLine;
+    if (aLine != null && bLine == null) return -1;
+    if (aLine == null && bLine != null) return 1;
 
-    if (Number.isFinite(la) && Number.isFinite(lb) && la !== lb) return la - lb;
+    const aId2 = a.id2Num;
+    const bId2 = b.id2Num;
+    if (aId2 != null && bId2 != null && aId2 !== bId2) return aId2 - bId2;
+    if (aId2 != null && bId2 == null) return -1;
+    if (aId2 == null && bId2 != null) return 1;
 
-    const ia = Number(a.id2);
-    const ib = Number(b.id2);
-    if (Number.isFinite(ia) && Number.isFinite(ib) && ia !== ib) return ia - ib;
+    const typeCmp = (a.typeDoc || "").localeCompare(b.typeDoc || "", "fr");
+    if (typeCmp !== 0) return typeCmp;
 
     return (a.taches || "").localeCompare(b.taches || "", "fr");
   });
 
-  // 4) Groups + Items
   const groups = [];
   const items = [];
 
-  for (const row of rows) {
-    const groupId = `g-${row.rowId ?? `${row.id2}-${row.lignePlanning}`}`;
+  rows.forEach((row, index) => {
+    const groupId = `g-${row.rowId ?? `${row.id2 || "x"}-${row.lignePlanning || "x"}-${index}`}`;
 
+    // ✅ Groupe avec champs de tri explicites (pour vis-timeline)
     groups.push({
       id: groupId,
       content: buildGroupContent(row),
-      // utiles si on veut récupérer les infos au clic plus tard
+
+      // Champs de tri explicites (plus fiable que meta uniquement)
+      sortIndex: index,
+      sortLignePlanning: row.lignePlanningNum ?? Number.MAX_SAFE_INTEGER,
+      sortID2: row.id2Num ?? Number.MAX_SAFE_INTEGER,
+
+      // On garde meta pour debug / usages futurs
       meta: row,
     });
 
-    // Phase 1 : Date_limite + Duree_1 semaines
+    // Phase 1 : Date_limite + Duree_1 (semaines)
     const p1 = createRangeFromStartAndWeeks(row.dateLimite, row.duree1);
     if (p1) {
       items.push(
@@ -220,15 +227,14 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
           className: "phase-limite",
           title: `
             <b>${escapeHtml(row.taches || "Tâche")}</b><br>
-            Phase 1 (Date_limite + Duree_1)<br>
-            ${fmtDate(p1.start)} → ${fmtDate(p1.end)} (${p1.durationLabel})<br>
-            Indice: ${escapeHtml(row.indice || "—")} | Réalisé: ${escapeHtml(row.realise || "—")}%
+            Date_limite + Duree_1<br>
+            ${fmtDate(p1.start)} → ${fmtDate(p1.end)} (${p1.durationLabel})
           `,
         })
       );
     }
 
-    // Phase 2 : Diff_coffrage + Duree_2 semaines
+    // Phase 2 : Diff_coffrage + Duree_2 (semaines)
     const p2 = createRangeFromStartAndWeeks(row.diffCoffrage, row.duree2);
     if (p2) {
       items.push(
@@ -241,14 +247,14 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
           className: "phase-coffrage",
           title: `
             <b>${escapeHtml(row.taches || "Tâche")}</b><br>
-            Coffrage (Diff_coffrage + Duree_2)<br>
+            Diff_coffrage + Duree_2<br>
             ${fmtDate(p2.start)} → ${fmtDate(p2.end)} (${p2.durationLabel})
           `,
         })
       );
     }
 
-    // Phase 3 : Diff_armature + Duree_3 semaines
+    // Phase 3 : Diff_armature + Duree_3 (semaines)
     const p3 = createRangeFromStartAndWeeks(row.diffArmature, row.duree3);
     if (p3) {
       items.push(
@@ -261,14 +267,14 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
           className: "phase-armature",
           title: `
             <b>${escapeHtml(row.taches || "Tâche")}</b><br>
-            Armature (Diff_armature + Duree_3)<br>
+            Diff_armature + Duree_3<br>
             ${fmtDate(p3.start)} → ${fmtDate(p3.end)} (${p3.durationLabel})
           `,
         })
       );
     }
 
-    // Phase 4 : Demarrages_travaux + Retards jours
+    // Phase 4 : Demarrages_travaux + Retards (jours)
     const p4 = createRangeFromStartAndDays(row.demarragesTravaux, row.retards);
     if (p4) {
       items.push(
@@ -281,13 +287,17 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
           className: "phase-travaux",
           title: `
             <b>${escapeHtml(row.taches || "Tâche")}</b><br>
-            Retards (Demarrages_travaux + Retards)<br>
+            Demarrages_travaux + Retards<br>
             ${fmtDate(p4.start)} → ${fmtDate(p4.end)} (${p4.durationLabel})
           `,
         })
       );
     }
-  }
+  });
 
-  return { groups, items, rowCount: rows.length };
+  return {
+    groups,
+    items,
+    rowCount: rows.length,
+  };
 }

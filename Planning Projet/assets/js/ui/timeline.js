@@ -170,22 +170,23 @@ export function renderPlanningTimeline({ groups, items }) {
       },
 
       groupOrder: (a, b) => {
-        const al = Number(a.meta?.lignePlanning);
-        const bl = Number(b.meta?.lignePlanning);
-        if (Number.isFinite(al) && Number.isFinite(bl) && al !== bl) {
-          return al - bl;
+        if (Number.isFinite(a.sortIndex) && Number.isFinite(b.sortIndex)) {
+          return a.sortIndex - b.sortIndex;
         }
 
-        const ai = Number(a.meta?.id2);
-        const bi = Number(b.meta?.id2);
-        if (Number.isFinite(ai) && Number.isFinite(bi) && ai !== bi) {
-          return ai - bi;
+        if (Number.isFinite(a.sortLignePlanning) && Number.isFinite(b.sortLignePlanning)) {
+          if (a.sortLignePlanning !== b.sortLignePlanning) {
+            return a.sortLignePlanning - b.sortLignePlanning;
+          }
         }
 
-        return String(a.meta?.taches || "").localeCompare(
-          String(b.meta?.taches || ""),
-          "fr"
-        );
+        if (Number.isFinite(a.sortID2) && Number.isFinite(b.sortID2)) {
+          if (a.sortID2 !== b.sortID2) {
+            return a.sortID2 - b.sortID2;
+          }
+        }
+
+        return String(a.id || "").localeCompare(String(b.id || ""), "fr");
       },
     });
   }
