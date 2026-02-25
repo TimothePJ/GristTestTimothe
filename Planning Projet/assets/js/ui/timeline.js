@@ -2,6 +2,7 @@ let timelineInstance = null;
 let groupsDataSet = null;
 let itemsDataSet = null;
 let toolbarListenersBound = false;
+let dataAnchorDate = null;
 
 function buildGroupLabelElement(group) {
   const row = document.createElement("div");
@@ -70,6 +71,12 @@ function computeRange(items) {
   return { start, end };
 }
 
+function computeRangeCenter(range) {
+  if (!range?.start || !range?.end) return null;
+  const centerMs = (range.start.valueOf() + range.end.valueOf()) / 2;
+  return new Date(centerMs);
+}
+
 function updateDateRangeDisplay() {
   if (!timelineInstance) return;
 
@@ -89,11 +96,48 @@ function getCurrentZoomMode() {
   return activeBtn?.dataset.zoom || "week";
 }
 
+function getWindowCenterDate() {
+  if (!timelineInstance) return new Date();
+  const w = timelineInstance.getWindow();
+  const centerMs = (w.start.valueOf() + w.end.valueOf()) / 2;
+  return new Date(centerMs);
+}
+
+function updateNavCenterButtonLabel() {
+  const todayBtn = document.getElementById("btn-today");
+  if (!todayBtn) return;
+  const mode = getCurrentZoomMode();
+  const anchorDate = getWindowCenterDate();
+  todayBtn.textContent = getDynamicNavLabel(mode, anchorDate);
+}
+
+function getDynamicNavLabel(mode, anchorDate = new Date()) {
+  if (mode === "week") {
+    const d = new Date(anchorDate);
+    const day = d.getDay();
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    const monday = new Date(d);
+    monday.setDate(d.getDate() + diffToMonday);
+    monday.setHours(0, 0, 0, 0);
+    return `Semaine du ${monday.toLocaleDateString("fr-FR")}`;
+  }
+  if (mode === "month") {
+    const monthLabel = anchorDate.toLocaleDateString("fr-FR", {
+      month: "long",
+      year: "numeric",
+    });
+    return monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1);
+  }
+  if (mode === "year") return String(anchorDate.getFullYear());
+  return "Période";
+}
+
 function setActiveZoomButton(mode) {
   const buttons = document.querySelectorAll(".zoom-buttons button");
   buttons.forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.zoom === mode);
   });
+  updateNavCenterButtonLabel();
 }
 
 function setWindowForMode(mode, anchorDate = new Date()) {
@@ -233,12 +277,18 @@ export function renderPlanningTimeline({ groups, items }) {
 
     const range = computeRange(items || []);
     if (range) {
+      dataAnchorDate = computeRangeCenter(range);
       timelineInstance.setWindow(range.start, range.end, { animation: false });
     } else if ((items || []).length) {
       timelineInstance.fit({ animation: false });
+      const fitted = timelineInstance.getWindow();
+      dataAnchorDate = computeRangeCenter(fitted);
+    } else {
+      dataAnchorDate = null;
     }
 
     updateDateRangeDisplay();
+    updateNavCenterButtonLabel();
   });
 }
 
@@ -262,7 +312,7 @@ export function bindTimelineToolbar() {
 
   todayBtn?.addEventListener("click", () => {
     const mode = getCurrentZoomMode();
-    setWindowForMode(mode, new Date());
+    setWindowForMode(mode, dataAnchorDate || getWindowCenterDate());
   });
 
   zoomButtons.forEach((btn) => {
@@ -271,17 +321,24 @@ export function bindTimelineToolbar() {
       if (!mode) return;
 
       setActiveZoomButton(mode);
-      setWindowForMode(mode, new Date());
+      setWindowForMode(mode, dataAnchorDate || new Date());
     });
   });
 
   // Mettre à jour le texte quand l’utilisateur déplace/zoome à la souris
   if (timelineInstance) {
-    timelineInstance.on("rangechange", updateDateRangeDisplay);
-    timelineInstance.on("rangechanged", updateDateRangeDisplay);
+    timelineInstance.on("rangechange", () => {
+      updateDateRangeDisplay();
+      updateNavCenterButtonLabel();
+    });
+    timelineInstance.on("rangechanged", () => {
+      updateDateRangeDisplay();
+      updateNavCenterButtonLabel();
+    });
   }
 
   // Initialisation affichage
+  updateNavCenterButtonLabel();
   updateDateRangeDisplay();
 }
 
