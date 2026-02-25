@@ -17,9 +17,10 @@
   --col-task: 280px;
   --col-type: 140px;
   --col-line: 130px;
+  --col-indice: 80px;
 
   --left-pad-x: 8px;
-  --left-grid-width: calc(var(--col-id2) + var(--col-task) + var(--col-type) + var(--col-line));
+  --left-grid-width: calc(var(--col-id2) + var(--col-task) + var(--col-type) + var(--col-line) + var(--col-indice));
   --left-panel-width: calc(var(--left-grid-width) + (var(--left-pad-x) * 2));
 
   /* Hauteur de ligne commune labels + timeline */
@@ -146,7 +147,7 @@ body * {
 /* ✅ C'EST ICI que va le bloc que tu as cité */
 .planning-header-left {
   display: grid;
-  grid-template-columns: var(--col-id2) var(--col-task) var(--col-type) var(--col-line);
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-type) var(--col-line) var(--col-indice);
   width: var(--left-grid-width);
   padding: 0 var(--left-pad-x);
   box-sizing: content-box;
@@ -167,6 +168,10 @@ body * {
 .planning-header-left .c-id2,
 .planning-header-left .c-line {
   text-align: right;
+}
+
+.planning-header-left .c-indice {
+  text-align: center;
 }
 
 .planning-header-right {
@@ -276,12 +281,12 @@ body * {
 
 /* ==========================================================
    Grille custom des 4 colonnes (contenu group labels)
-   Ordre : ID2 | Tâches | Type_doc | Ligne_planning
+   Ordre : ID2 | Tâches | Type_doc | Ligne_planning | Indice
    ========================================================== */
 
 #planningTimeline .group-row-grid {
   display: grid !important;
-  grid-template-columns: var(--col-id2) var(--col-task) var(--col-type) var(--col-line) !important;
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-type) var(--col-line) var(--col-indice) !important;
   align-items: center !important;
   width: var(--left-grid-width) !important;
   min-height: var(--planning-row-height) !important;
@@ -303,6 +308,11 @@ body * {
 #planningTimeline .group-row-grid .cell-line {
   text-align: right !important;
   font-variant-numeric: tabular-nums;
+}
+
+#planningTimeline .group-row-grid .cell-indice {
+  text-align: center !important;
+  font-weight: 600;
 }
 
 #planningTimeline .group-row-grid .cell-type {
@@ -379,6 +389,7 @@ body * {
     --col-task: 220px;
     --col-type: 120px;
     --col-line: 120px;
+    --col-indice: 70px;
   }
 
   #toolbar {

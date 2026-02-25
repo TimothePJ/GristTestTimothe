@@ -75,11 +75,12 @@ function fmtDate(date) {
 
 function buildGroupContent(row) {
   return `
-    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-type) var(--col-line);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
+    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-type) var(--col-line) var(--col-indice);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
       <div class="cell-id2">${escapeHtml(row.id2 ?? "")}</div>
       <div class="cell-task">${escapeHtml(row.taches ?? "")}</div>
       <div class="cell-type">${escapeHtml(row.typeDoc ?? "")}</div>
       <div class="cell-line">${escapeHtml(row.lignePlanning ?? "")}</div>
+      <div class="cell-indice">${escapeHtml(row.indice ?? "")}</div>
     </div>
   `;
 }
@@ -209,6 +210,7 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       tachesLabel: row.taches ?? "",
       typeDocLabel: row.typeDoc ?? "",
       lignePlanningLabel: row.lignePlanning ?? "",
+      indiceLabel: row.indice ?? "",
 
       // Champs de tri explicites (plus fiable que meta uniquement)
       sortIndex: index,

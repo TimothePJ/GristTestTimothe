@@ -23,7 +23,11 @@ function buildGroupLabelElement(group) {
   ligne.className = "cell-line";
   ligne.textContent = String(group?.lignePlanningLabel ?? "");
 
-  row.append(id2, tache, typeDoc, ligne);
+  const indice = document.createElement("div");
+  indice.className = "cell-indice";
+  indice.textContent = String(group?.indiceLabel ?? "");
+
+  row.append(id2, tache, typeDoc, ligne, indice);
   return row;
 }
 
