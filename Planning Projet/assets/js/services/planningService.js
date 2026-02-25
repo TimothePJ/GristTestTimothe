@@ -128,7 +128,7 @@ function createRangeFromStartAndDays(startDateRaw, daysRaw) {
 
 export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "") {
   const cfg = APP_CONFIG.grist.planningTable.columns;
-  const projectLinkCol = cfg.projectLink;
+  const projectLinkCol = cfg.projectLink || cfg.nomProjet;
 
   let rows = rawRows.map((r) => {
     const id2Text = toText(r[cfg.id2]);
@@ -168,7 +168,9 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
   });
 
   // Filtre projet (actif seulement si colonne configurée)
-  if (selectedProject && projectLinkCol) {
+  if (!selectedProject) {
+    rows = [];
+  } else if (projectLinkCol) {
     rows = rows.filter((r) => r.projectLink === selectedProject);
   }
 

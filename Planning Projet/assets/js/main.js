@@ -48,7 +48,9 @@ async function refreshPlanning() {
     if (!timelineData.items || timelineData.items.length === 0) {
       clearPlanningTimeline();
 
-      if (timelineData.rowCount > 0) {
+      if (!state.selectedProject) {
+        setPlanningStatus("");
+      } else if (timelineData.rowCount > 0) {
         setPlanningStatus(
           "Aucune phase exploitable (dates ou durées manquantes) pour les lignes affichées."
         );
