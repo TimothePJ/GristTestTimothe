@@ -205,6 +205,10 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
     groups.push({
       id: groupId,
       content: buildGroupContent(row),
+      id2Label: row.id2 ?? "",
+      tachesLabel: row.taches ?? "",
+      typeDocLabel: row.typeDoc ?? "",
+      lignePlanningLabel: row.lignePlanning ?? "",
 
       // Champs de tri explicites (plus fiable que meta uniquement)
       sortIndex: index,

@@ -3,6 +3,30 @@ let groupsDataSet = null;
 let itemsDataSet = null;
 let toolbarListenersBound = false;
 
+function buildGroupLabelElement(group) {
+  const row = document.createElement("div");
+  row.className = "group-row-grid";
+
+  const id2 = document.createElement("div");
+  id2.className = "cell-id2";
+  id2.textContent = String(group?.id2Label ?? "");
+
+  const tache = document.createElement("div");
+  tache.className = "cell-task";
+  tache.textContent = String(group?.tachesLabel ?? "");
+
+  const typeDoc = document.createElement("div");
+  typeDoc.className = "cell-type";
+  typeDoc.textContent = String(group?.typeDocLabel ?? "");
+
+  const ligne = document.createElement("div");
+  ligne.className = "cell-line";
+  ligne.textContent = String(group?.lignePlanningLabel ?? "");
+
+  row.append(id2, tache, typeDoc, ligne);
+  return row;
+}
+
 function getTimelineContainer() {
   const el = document.getElementById("planningTimeline");
   if (!el) throw new Error("Conteneur #planningTimeline introuvable.");
@@ -168,6 +192,7 @@ export function renderPlanningTimeline({ groups, items }) {
         followMouse: true,
         overflowMethod: "cap",
       },
+      groupTemplate: (group) => buildGroupLabelElement(group),
 
       groupOrder: (a, b) => {
         if (Number.isFinite(a.sortIndex) && Number.isFinite(b.sortIndex)) {
