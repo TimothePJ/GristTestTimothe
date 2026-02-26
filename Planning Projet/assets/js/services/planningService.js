@@ -1,4 +1,4 @@
-import { APP_CONFIG } from "../config.js";
+﻿import { APP_CONFIG } from "../config.js";
 import { toText } from "./gristService.js";
 
 function toNumber(value) {
@@ -69,7 +69,7 @@ function escapeHtml(str) {
 }
 
 function fmtDate(date) {
-  if (!date) return "—";
+  if (!date) return "â€”";
   return date.toLocaleDateString("fr-FR");
 }
 
@@ -126,6 +126,14 @@ function createRangeFromStartAndDays(startDateRaw, daysRaw) {
   return { start, end, durationLabel: `${days} j` };
 }
 
+function createRangeBetweenDates(startDateRaw, endDateRaw) {
+  const start = parseDate(startDateRaw);
+  const end = parseDate(endDateRaw);
+  if (!start || !end) return null;
+  if (end <= start) return null;
+  return { start, end };
+}
+
 export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "") {
   const cfg = APP_CONFIG.grist.planningTable.columns;
   const projectLinkCol = cfg.projectLink || cfg.nomProjet;
@@ -139,13 +147,13 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       rowId: r[cfg.id] ?? null,
       projectLink: projectLinkCol ? toText(r[projectLinkCol]) : "",
 
-      // Colonnes affichées
+      // Colonnes affichÃ©es
       id2: id2Text,
       taches: tachesText,
       typeDoc: toText(r[cfg.typeDoc]),
       lignePlanning: lignePlanningText,
 
-      // Valeurs numériques de tri (robustes)
+      // Valeurs numÃ©riques de tri (robustes)
       id2Num: toNumber(id2Text),
       lignePlanningNum: toNumber(lignePlanningText),
 
@@ -167,16 +175,16 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
     };
   });
 
-  // Filtre projet (actif seulement si colonne configurée)
+  // Filtre projet (actif seulement si colonne configurÃ©e)
   if (!selectedProject) {
     rows = [];
   } else if (projectLinkCol) {
     rows = rows.filter((r) => r.projectLink === selectedProject);
   }
 
-  // ✅ TRI ROBUSTE (ordre métier demandé)
-  // 1) Ligne_planning (numérique)
-  // 2) ID2 (numérique)
+  // âœ… TRI ROBUSTE (ordre mÃ©tier demandÃ©)
+  // 1) Ligne_planning (numÃ©rique)
+  // 2) ID2 (numÃ©rique)
   // 3) Type_doc
   // 4) Taches
   rows.sort((a, b) => {
@@ -204,7 +212,7 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
   rows.forEach((row, index) => {
     const groupId = `g-${row.rowId ?? `${row.id2 || "x"}-${row.lignePlanning || "x"}-${index}`}`;
 
-    // ✅ Groupe avec champs de tri explicites (pour vis-timeline)
+    // âœ… Groupe avec champs de tri explicites (pour vis-timeline)
     groups.push({
       id: groupId,
       content: buildGroupContent(row),
@@ -222,62 +230,41 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       // On garde meta pour debug / usages futurs
       meta: row,
     });
-
-    // Phase 1 : Date_limite + Duree_1 (semaines)
-    const p1 = createRangeFromStartAndWeeks(row.dateLimite, row.duree1);
-    if (p1) {
+    // Coffrage : Date_limite -> Diff_coffrage
+    const pCoffrage = createRangeBetweenDates(row.dateLimite, row.diffCoffrage);
+    if (pCoffrage) {
       items.push(
         createPhaseItem({
-          itemId: `${groupId}-p1`,
+          itemId: `${groupId}-p-coffrage`,
           groupId,
-          start: p1.start,
-          end: p1.end,
-          label: "P1",
-          className: "phase-limite",
-          title: `
-            <b>${escapeHtml(row.taches || "Tâche")}</b><br>
-            Date_limite + Duree_1<br>
-            ${fmtDate(p1.start)} → ${fmtDate(p1.end)} (${p1.durationLabel})
-          `,
-        })
-      );
-    }
-
-    // Phase 2 : Diff_coffrage + Duree_2 (semaines)
-    const p2 = createRangeFromStartAndWeeks(row.diffCoffrage, row.duree2);
-    if (p2) {
-      items.push(
-        createPhaseItem({
-          itemId: `${groupId}-p2`,
-          groupId,
-          start: p2.start,
-          end: p2.end,
+          start: pCoffrage.start,
+          end: pCoffrage.end,
           label: "Coffrage",
           className: "phase-coffrage",
           title: `
-            <b>${escapeHtml(row.taches || "Tâche")}</b><br>
-            Diff_coffrage + Duree_2<br>
-            ${fmtDate(p2.start)} → ${fmtDate(p2.end)} (${p2.durationLabel})
+            <b>${escapeHtml(row.taches || "Tache")}</b><br>
+            Date_limite -> Diff_coffrage<br>
+            ${fmtDate(pCoffrage.start)} -> ${fmtDate(pCoffrage.end)}
           `,
         })
       );
     }
 
-    // Phase 3 : Diff_armature + Duree_3 (semaines)
-    const p3 = createRangeFromStartAndWeeks(row.diffArmature, row.duree3);
-    if (p3) {
+    // Armature : Diff_coffrage -> Diff_armature
+    const pArmature = createRangeBetweenDates(row.diffCoffrage, row.diffArmature);
+    if (pArmature) {
       items.push(
         createPhaseItem({
-          itemId: `${groupId}-p3`,
+          itemId: `${groupId}-p-armature`,
           groupId,
-          start: p3.start,
-          end: p3.end,
+          start: pArmature.start,
+          end: pArmature.end,
           label: "Armature",
           className: "phase-armature",
           title: `
-            <b>${escapeHtml(row.taches || "Tâche")}</b><br>
-            Diff_armature + Duree_3<br>
-            ${fmtDate(p3.start)} → ${fmtDate(p3.end)} (${p3.durationLabel})
+            <b>${escapeHtml(row.taches || "Tache")}</b><br>
+            Diff_coffrage -> Diff_armature<br>
+            ${fmtDate(pArmature.start)} -> ${fmtDate(pArmature.end)}
           `,
         })
       );
@@ -295,9 +282,9 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
           label: "Retard",
           className: "phase-travaux",
           title: `
-            <b>${escapeHtml(row.taches || "Tâche")}</b><br>
+            <b>${escapeHtml(row.taches || "TÃ¢che")}</b><br>
             Demarrages_travaux + Retards<br>
-            ${fmtDate(p4.start)} → ${fmtDate(p4.end)} (${p4.durationLabel})
+            ${fmtDate(p4.start)} â†’ ${fmtDate(p4.end)} (${p4.durationLabel})
           `,
         })
       );
@@ -310,3 +297,4 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
     rowCount: rows.length,
   };
 }
+
