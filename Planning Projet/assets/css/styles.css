@@ -14,13 +14,14 @@
 
   /* Colonnes de gauche */
   --col-id2: 90px;
-  --col-task: 280px;
+  --col-task: 188px;
   --col-type: 140px;
   --col-line: 130px;
   --col-indice: 80px;
+  --col-retards: 92px;
 
   --left-pad-x: 8px;
-  --left-grid-width: calc(var(--col-id2) + var(--col-task) + var(--col-type) + var(--col-line) + var(--col-indice));
+  --left-grid-width: calc(var(--col-id2) + var(--col-task) + var(--col-type) + var(--col-line) + var(--col-indice) + var(--col-retards));
   --left-panel-width: calc(var(--left-grid-width) + (var(--left-pad-x) * 2));
 
   /* Hauteur de ligne commune labels + timeline */
@@ -147,7 +148,7 @@ body * {
 /* ✅ C'EST ICI que va le bloc que tu as cité */
 .planning-header-left {
   display: grid;
-  grid-template-columns: var(--col-id2) var(--col-task) var(--col-type) var(--col-line) var(--col-indice);
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-type) var(--col-line) var(--col-indice) var(--col-retards);
   width: var(--left-grid-width);
   padding: 0 var(--left-pad-x);
   box-sizing: content-box;
@@ -171,6 +172,10 @@ body * {
 }
 
 .planning-header-left .c-indice {
+  text-align: center;
+}
+
+.planning-header-left .c-retards {
   text-align: center;
 }
 
@@ -286,7 +291,7 @@ body * {
 
 #planningTimeline .group-row-grid {
   display: grid !important;
-  grid-template-columns: var(--col-id2) var(--col-task) var(--col-type) var(--col-line) var(--col-indice) !important;
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-type) var(--col-line) var(--col-indice) var(--col-retards) !important;
   align-items: center !important;
   width: var(--left-grid-width) !important;
   min-height: var(--planning-row-height) !important;
@@ -313,6 +318,11 @@ body * {
 #planningTimeline .group-row-grid .cell-indice {
   text-align: center !important;
   font-weight: 600;
+}
+
+#planningTimeline .group-row-grid .cell-retards {
+  text-align: center !important;
+  font-variant-numeric: tabular-nums;
 }
 
 #planningTimeline .group-row-grid .cell-type {
@@ -367,6 +377,18 @@ body * {
   color: #166534 !important;
 }
 
+#planningTimeline .vis-item.phase-demarrage {
+  background-color: #dcfce7 !important;
+  border-color: #86efac !important;
+  color: transparent !important;
+}
+
+#planningTimeline .vis-item.phase-demarrage .vis-item-content {
+  padding: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+}
+
 /* ==========================================================
    Statut
    ========================================================== */
@@ -386,10 +408,11 @@ body * {
 @media (max-width: 1250px) {
   :root {
     --col-id2: 80px;
-    --col-task: 220px;
+    --col-task: 142px;
     --col-type: 120px;
     --col-line: 120px;
     --col-indice: 70px;
+    --col-retards: 78px;
   }
 
   #toolbar {

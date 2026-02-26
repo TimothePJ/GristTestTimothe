@@ -75,12 +75,13 @@ function fmtDate(date) {
 
 function buildGroupContent(row) {
   return `
-    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-type) var(--col-line) var(--col-indice);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
+    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-type) var(--col-line) var(--col-indice) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
       <div class="cell-id2">${escapeHtml(row.id2 ?? "")}</div>
       <div class="cell-task">${escapeHtml(row.taches ?? "")}</div>
       <div class="cell-type">${escapeHtml(row.typeDoc ?? "")}</div>
       <div class="cell-line">${escapeHtml(row.lignePlanning ?? "")}</div>
       <div class="cell-indice">${escapeHtml(row.indice ?? "")}</div>
+      <div class="cell-retards">${escapeHtml(row.retards ?? "")}</div>
     </div>
   `;
 }
@@ -168,7 +169,7 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       duree3: r[cfg.duree3],
 
       demarragesTravaux: r[cfg.demarragesTravaux],
-      retards: r[cfg.retards],
+      retards: toText(r[cfg.retards]),
 
       indice: toText(r[cfg.indice]),
       realise: toText(r[cfg.realise]),
@@ -221,6 +222,7 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       typeDocLabel: row.typeDoc ?? "",
       lignePlanningLabel: row.lignePlanning ?? "",
       indiceLabel: row.indice ?? "",
+      retardsLabel: row.retards ?? "",
 
       // Champs de tri explicites (plus fiable que meta uniquement)
       sortIndex: index,
@@ -270,25 +272,28 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       );
     }
 
-    // Phase 4 : Demarrages_travaux + Retards (jours)
-    const p4 = createRangeFromStartAndDays(row.demarragesTravaux, row.retards);
-    if (p4) {
+    // Debut des travaux : case coloree sur 1 jour a Demarrages_travaux
+    const demarrageTravauxDate = parseDate(row.demarragesTravaux);
+    if (demarrageTravauxDate) {
+      const demarrageTravauxEnd = addDays(demarrageTravauxDate, 1);
       items.push(
         createPhaseItem({
-          itemId: `${groupId}-p4`,
+          itemId: `${groupId}-demarrage`,
           groupId,
-          start: p4.start,
-          end: p4.end,
-          label: "Retard",
-          className: "phase-travaux",
+          start: demarrageTravauxDate,
+          end: demarrageTravauxEnd,
+          label: "",
+          className: "phase-demarrage",
           title: `
-            <b>${escapeHtml(row.taches || "TÃ¢che")}</b><br>
-            Demarrages_travaux + Retards<br>
-            ${fmtDate(p4.start)} â†’ ${fmtDate(p4.end)} (${p4.durationLabel})
+            <b>${escapeHtml(row.taches || "Tache")}</b><br>
+            Debut des travaux<br>
+            ${fmtDate(demarrageTravauxDate)}
           `,
         })
       );
     }
+
+    // Pas de barre "Retard" dans la timeline: affichage en colonne dédiée.
   });
 
   return {

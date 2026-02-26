@@ -28,7 +28,11 @@ function buildGroupLabelElement(group) {
   indice.className = "cell-indice";
   indice.textContent = String(group?.indiceLabel ?? "");
 
-  row.append(id2, tache, typeDoc, ligne, indice);
+  const retards = document.createElement("div");
+  retards.className = "cell-retards";
+  retards.textContent = String(group?.retardsLabel ?? "");
+
+  row.append(id2, tache, typeDoc, ligne, indice, retards);
   return row;
 }
 
@@ -52,8 +56,8 @@ function computeRange(items) {
 
   for (const item of items) {
     const s = toDate(item.start);
-    const e = toDate(item.end);
-    if (!s || !e) continue;
+    if (!s) continue;
+    const e = toDate(item.end) || s;
 
     if (!min || s < min) min = s;
     if (!max || e > max) max = e;
