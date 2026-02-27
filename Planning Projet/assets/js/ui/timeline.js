@@ -450,7 +450,7 @@ export function renderPlanningTimeline({ groups, items }) {
         item: { horizontal: 2, vertical: 4 },
         axis: 8,
       },
-      showCurrentTime: false,
+      showCurrentTime: true,
       zoomable: true,
       moveable: true,
       verticalScroll: true,

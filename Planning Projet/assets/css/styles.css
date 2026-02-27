@@ -389,6 +389,14 @@ body * {
   overflow: hidden !important;
 }
 
+/* Ligne verticale "aujourd'hui" */
+#planningTimeline .vis-current-time {
+  width: 2px !important;
+  background-color: #ed1b2d !important;
+  opacity: 0.9;
+  z-index: 5;
+}
+
 /* ==========================================================
    Statut
    ========================================================== */
