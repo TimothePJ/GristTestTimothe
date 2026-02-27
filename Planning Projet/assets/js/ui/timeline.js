@@ -3,6 +3,220 @@ let groupsDataSet = null;
 let itemsDataSet = null;
 let toolbarListenersBound = false;
 let dataAnchorDate = null;
+let hoverTooltipEl = null;
+let hoverTooltipBound = false;
+let clickTooltipTimer = null;
+
+function escapeHtml(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function getExactIsoDate(value) {
+  const d = toDate(value);
+  if (!d) return "—";
+  return d.toISOString().slice(0, 10);
+}
+
+function ensureHoverTooltip() {
+  if (hoverTooltipEl) return hoverTooltipEl;
+
+  const el = document.createElement("div");
+  el.id = "planning-hover-tooltip";
+  el.style.position = "fixed";
+  el.style.zIndex = "99999";
+  el.style.pointerEvents = "none";
+  el.style.display = "none";
+  el.style.background = "rgba(18, 24, 33, 0.95)";
+  el.style.color = "#fff";
+  el.style.border = "1px solid rgba(255, 255, 255, 0.2)";
+  el.style.borderRadius = "8px";
+  el.style.padding = "8px 10px";
+  el.style.fontSize = "12px";
+  el.style.lineHeight = "1.35";
+  el.style.boxShadow = "0 8px 20px rgba(0, 0, 0, 0.35)";
+  document.body.appendChild(el);
+
+  hoverTooltipEl = el;
+  return hoverTooltipEl;
+}
+
+function getPointerClientPos(eventLike) {
+  const src = eventLike?.srcEvent || eventLike;
+  if (!src) return null;
+
+  if (typeof src.clientX === "number" && typeof src.clientY === "number") {
+    return { x: src.clientX, y: src.clientY };
+  }
+
+  if (src.center && typeof src.center.x === "number" && typeof src.center.y === "number") {
+    return { x: src.center.x, y: src.center.y };
+  }
+
+  return null;
+}
+
+function placeHoverTooltip(eventLike) {
+  if (!hoverTooltipEl || hoverTooltipEl.style.display === "none") return;
+
+  const pos = getPointerClientPos(eventLike);
+  if (!pos) return;
+
+  const offset = 12;
+  hoverTooltipEl.style.left = `${pos.x + offset}px`;
+  hoverTooltipEl.style.top = `${pos.y + offset}px`;
+}
+
+function hideHoverTooltip() {
+  if (!hoverTooltipEl) return;
+  hoverTooltipEl.style.display = "none";
+  hoverTooltipEl.innerHTML = "";
+}
+
+function showHoverTooltip(html, eventLike) {
+  ensureHoverTooltip();
+  hoverTooltipEl.innerHTML = html;
+  hoverTooltipEl.style.display = "block";
+  placeHoverTooltip(eventLike);
+}
+
+function buildPhaseTooltipHtml(item, group) {
+  const cls = String(item?.className || "");
+  const tache = String(group?.tachesLabel || "Tache");
+
+  if (cls.includes("phase-coffrage")) {
+    return `
+      <div><strong>${escapeHtml(tache)}</strong></div>
+      <div>Coffrage</div>
+      <div>Date limite : <strong>${escapeHtml(getExactIsoDate(item.start))}</strong></div>
+      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(item.end))}</strong></div>
+    `;
+  }
+
+  if (cls.includes("phase-armature")) {
+    return `
+      <div><strong>${escapeHtml(tache)}</strong></div>
+      <div>Armature</div>
+      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(item.start))}</strong></div>
+      <div>Diff armature : <strong>${escapeHtml(getExactIsoDate(item.end))}</strong></div>
+    `;
+  }
+
+  if (cls.includes("phase-demarrage")) {
+    return `
+      <div><strong>${escapeHtml(tache)}</strong></div>
+      <div>Debut des travaux</div>
+      <div>Date : <strong>${escapeHtml(getExactIsoDate(item.start))}</strong></div>
+    `;
+  }
+
+  return "";
+}
+
+function getTimelineItemFromElement(itemEl) {
+  if (!itemEl || !itemsDataSet) return null;
+
+  const rawId =
+    itemEl.getAttribute("data-id") ||
+    itemEl.getAttribute("data-item-id") ||
+    itemEl.dataset?.id ||
+    "";
+
+  if (!rawId) return null;
+
+  let item = itemsDataSet.get(rawId);
+  if (item) return item;
+
+  if (/^\d+$/.test(rawId)) {
+    item = itemsDataSet.get(Number(rawId));
+    if (item) return item;
+  }
+
+  return null;
+}
+
+function getTimelineItemFromEvent(event, containerEl) {
+  if (timelineInstance && typeof timelineInstance.getEventProperties === "function" && itemsDataSet) {
+    const props = timelineInstance.getEventProperties(event);
+    const itemId = props?.item;
+    if (itemId != null) {
+      let item = itemsDataSet.get(itemId);
+      if (item) return item;
+
+      if (typeof itemId === "number") {
+        item = itemsDataSet.get(String(itemId));
+        if (item) return item;
+      } else if (typeof itemId === "string" && /^\d+$/.test(itemId)) {
+        item = itemsDataSet.get(Number(itemId));
+        if (item) return item;
+      }
+    }
+  }
+
+  const itemEl = event?.target?.closest?.(".vis-item");
+  if (!itemEl || (containerEl && !containerEl.contains(itemEl))) return null;
+  return getTimelineItemFromElement(itemEl);
+}
+
+function bindHoverTooltip(containerEl) {
+  if (!timelineInstance || hoverTooltipBound || !containerEl) return;
+  hoverTooltipBound = true;
+
+  ensureHoverTooltip();
+
+  containerEl.addEventListener("mousemove", (event) => {
+    const itemEl = event.target?.closest?.(".vis-item");
+    if (!itemEl || !containerEl.contains(itemEl)) {
+      hideHoverTooltip();
+      return;
+    }
+
+    const item = getTimelineItemFromElement(itemEl);
+    if (!item) {
+      hideHoverTooltip();
+      return;
+    }
+
+    const group = groupsDataSet ? groupsDataSet.get(item.group) : null;
+    const html = buildPhaseTooltipHtml(item, group);
+    if (!html) {
+      hideHoverTooltip();
+      return;
+    }
+
+    if (hoverTooltipEl.innerHTML !== html || hoverTooltipEl.style.display === "none") {
+      showHoverTooltip(html, event);
+    } else {
+      placeHoverTooltip(event);
+    }
+  });
+
+  containerEl.addEventListener("mouseleave", () => {
+    hideHoverTooltip();
+  });
+
+  containerEl.addEventListener("click", (event) => {
+    if (event.button !== 0) return; // clic gauche uniquement
+
+    const item = getTimelineItemFromEvent(event, containerEl);
+    if (!item) return;
+
+    const group = groupsDataSet ? groupsDataSet.get(item.group) : null;
+    const html = buildPhaseTooltipHtml(item, group);
+    if (!html) return;
+
+    showHoverTooltip(html, event);
+
+    if (clickTooltipTimer) clearTimeout(clickTooltipTimer);
+    clickTooltipTimer = setTimeout(() => {
+      hideHoverTooltip();
+      clickTooltipTimer = null;
+    }, 5000);
+  });
+}
 
 function buildGroupLabelElement(group) {
   const row = document.createElement("div");
@@ -244,6 +458,7 @@ export function renderPlanningTimeline({ groups, items }) {
         followMouse: true,
         overflowMethod: "cap",
       },
+      showTooltips: false,
       groupTemplate: (group) => buildGroupLabelElement(group),
 
       groupOrder: (a, b) => {
@@ -266,6 +481,8 @@ export function renderPlanningTimeline({ groups, items }) {
         return String(a.id || "").localeCompare(String(b.id || ""), "fr");
       },
     });
+
+    bindHoverTooltip(container);
   }
 
   // Mise à jour datasets
@@ -354,4 +571,6 @@ export function clearPlanningTimeline() {
 
   const rangeEl = document.getElementById("current-date-range");
   if (rangeEl) rangeEl.textContent = "";
+
+  hideHoverTooltip();
 }

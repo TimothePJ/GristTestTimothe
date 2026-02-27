@@ -73,6 +73,14 @@ function fmtDate(date) {
   return date.toLocaleDateString("fr-FR");
 }
 
+function fmtDateIso(date) {
+  if (!date) return "â€”";
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 function buildGroupContent(row) {
   return `
     <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-type) var(--col-line) var(--col-indice) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
@@ -245,8 +253,9 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
           className: "phase-coffrage",
           title: `
             <b>${escapeHtml(row.taches || "Tache")}</b><br>
-            Date_limite -> Diff_coffrage<br>
-            ${fmtDate(pCoffrage.start)} -> ${fmtDate(pCoffrage.end)}
+            Coffrage<br>
+            Date limite : ${fmtDate(pCoffrage.start)} (${fmtDateIso(pCoffrage.start)})<br>
+            Diff coffrage : ${fmtDate(pCoffrage.end)} (${fmtDateIso(pCoffrage.end)})
           `,
         })
       );
@@ -265,8 +274,9 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
           className: "phase-armature",
           title: `
             <b>${escapeHtml(row.taches || "Tache")}</b><br>
-            Diff_coffrage -> Diff_armature<br>
-            ${fmtDate(pArmature.start)} -> ${fmtDate(pArmature.end)}
+            Armature<br>
+            Diff coffrage : ${fmtDate(pArmature.start)} (${fmtDateIso(pArmature.start)})<br>
+            Diff armature : ${fmtDate(pArmature.end)} (${fmtDateIso(pArmature.end)})
           `,
         })
       );
@@ -287,7 +297,7 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
           title: `
             <b>${escapeHtml(row.taches || "Tache")}</b><br>
             Debut des travaux<br>
-            ${fmtDate(demarrageTravauxDate)}
+            ${fmtDate(demarrageTravauxDate)} (${fmtDateIso(demarrageTravauxDate)})
           `,
         })
       );
