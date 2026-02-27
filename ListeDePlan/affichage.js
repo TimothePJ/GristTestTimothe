@@ -64,11 +64,6 @@ function hasValidDate(value) {
   return !Number.isNaN(d.getTime());
 }
 
-function parseDateMs(value) {
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d.getTime();
-}
-
 function normalizeIndice(value) {
   return normalizeText(value).toUpperCase();
 }
@@ -120,20 +115,10 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
       );
 
       const current = latestByKey.get(key);
-      const dateMs = hasValidDate(r.DateDiffusion) ? parseDateMs(r.DateDiffusion) : null;
-
-      // Règle métier "dernier indice sorti":
-      // 1) d'abord la DateDiffusion la plus récente
-      // 2) en cas d'égalité de date, l'ordre d'indice le plus élevé
-      // 3) si aucune date exploitable, fallback sur l'ordre d'indice
-      const shouldReplace =
-        !current ||
-        (dateMs != null && (current.dateMs == null || dateMs > current.dateMs)) ||
-        (dateMs != null && current.dateMs != null && dateMs === current.dateMs && order > current.order) ||
-        (dateMs == null && current.dateMs == null && order > current.order);
+      const shouldReplace = !current || order > current.order;
 
       if (shouldReplace) {
-        latestByKey.set(key, { indice, order, dateMs });
+        latestByKey.set(key, { indice, order });
       }
     }
 
