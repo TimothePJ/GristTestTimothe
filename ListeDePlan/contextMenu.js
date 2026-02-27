@@ -93,6 +93,9 @@ function supprimerLigne(cell) {
       for (const id of uniqueRecordIds) {
         await table.destroy(id);
       }
+      if (typeof syncPlanningProjetIndicesFromListeDePlan === "function") {
+        await syncPlanningProjetIndicesFromListeDePlan();
+      }
     } catch (err) {
       console.error("Suppression échouée", err);
       alert("La suppression a échoué. Vérifiez la console pour les erreurs.");

@@ -25,6 +25,125 @@ async function chargerProjetsMap() {
   return projetsDictGlobal;
 }
 
+function normalizeText(value) {
+  if (value == null) return "";
+  if (typeof value === "object") {
+    if (typeof value.details === "string") return value.details.trim();
+    if (typeof value.display === "string") return value.display.trim();
+    if (typeof value.label === "string") return value.label.trim();
+    if (typeof value.name === "string") return value.name.trim();
+  }
+  return String(value).trim();
+}
+
+function normalizeRows(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (Array.isArray(raw.records)) return raw.records;
+  if (typeof raw === "object") {
+    const keys = Object.keys(raw);
+    if (!keys.length) return [];
+    const maxLen = Math.max(...keys.map((k) => (Array.isArray(raw[k]) ? raw[k].length : 0)));
+    if (maxLen <= 0) return [];
+    const rows = [];
+    for (let i = 0; i < maxLen; i++) {
+      const row = {};
+      for (const key of keys) {
+        row[key] = Array.isArray(raw[key]) ? raw[key][i] : undefined;
+      }
+      rows.push(row);
+    }
+    return rows;
+  }
+  return [];
+}
+
+function hasValidDate(value) {
+  if (value == null || value === "") return false;
+  const d = new Date(value);
+  return !Number.isNaN(d.getTime());
+}
+
+function buildPlanningLinkKey(project, numeroDocument, typeDocument, designation) {
+  return [
+    normalizeText(project).toLowerCase(),
+    normalizeText(numeroDocument).toLowerCase(),
+    normalizeText(typeDocument).toLowerCase(),
+    normalizeText(designation).toLowerCase(),
+  ].join("||");
+}
+
+async function syncPlanningProjetIndicesFromListeDePlan() {
+  try {
+    const projetsMap = await chargerProjetsMap();
+    const projectIdToName = new Map(
+      Object.entries(projetsMap || {}).map(([name, id]) => [String(id), name])
+    );
+
+    const normalizeProject = (value) => {
+      if (value != null && typeof value === "object") {
+        if (typeof value.details === "string") return value.details.trim();
+        if (typeof value.display === "string") return value.display.trim();
+      }
+      const raw = normalizeText(value);
+      return projectIdToName.get(raw) || raw;
+    };
+
+    const listeRaw = await grist.docApi.fetchTable("ListePlan_NDC_COF");
+    const planningRaw = await grist.docApi.fetchTable("Planning_Projet");
+
+    const listeRows = normalizeRows(listeRaw);
+    const planningRows = normalizeRows(planningRaw);
+
+    const indiceOrder = new Map(INDICES.map((ind, idx) => [ind, idx]));
+    const latestByKey = new Map();
+
+    for (const r of listeRows) {
+      const indice = normalizeText(r.Indice);
+      const order = indiceOrder.has(indice) ? indiceOrder.get(indice) : -1;
+      if (order < 0) continue;
+      if (!hasValidDate(r.DateDiffusion)) continue;
+
+      const key = buildPlanningLinkKey(
+        normalizeProject(r.Nom_projet),
+        r.NumeroDocument,
+        r.Type_document,
+        r.Designation
+      );
+
+      const current = latestByKey.get(key);
+      if (!current || order > current.order) {
+        latestByKey.set(key, { indice, order });
+      }
+    }
+
+    const actions = [];
+    for (const p of planningRows) {
+      const planningId = p.id;
+      if (planningId == null) continue;
+
+      const key = buildPlanningLinkKey(
+        normalizeProject(p.NomProjet),
+        p.ID2,
+        p.Type_doc,
+        p.Taches ?? p.Tache
+      );
+
+      const targetIndice = latestByKey.get(key)?.indice ?? "";
+      const currentIndice = normalizeText(p.Indice);
+      if (currentIndice !== targetIndice) {
+        actions.push(["UpdateRecord", "Planning_Projet", planningId, { Indice: targetIndice }]);
+      }
+    }
+
+    for (let i = 0; i < actions.length; i += 200) {
+      await grist.docApi.applyUserActions(actions.slice(i, i + 200));
+    }
+  } catch (err) {
+    console.error("Erreur sync ListeDePlan -> Planning_Projet (Indice) :", err);
+  }
+}
+
 function afficherPlansFiltres(projet, typeDocument, records) {
   const zone = document.getElementById("plans-output");
   zone.innerHTML = "";
@@ -304,6 +423,7 @@ document.addEventListener("click", async (e) => {
           for (const record of recordsToDelete) {
             await table.destroy(record.id);
           }
+          await syncPlanningProjetIndicesFromListeDePlan();
           popup.remove();
         } catch (err) {
           console.error("Erreur lors de la suppression des dates en double :", err);
@@ -335,6 +455,7 @@ document.addEventListener("click", async (e) => {
       const actions = recordsToUpdate.map(r => ["UpdateRecord", "ListePlan_NDC_COF", r.id, { Designation: correctDesignation }]);
       try {
         await grist.docApi.applyUserActions(actions);
+        await syncPlanningProjetIndicesFromListeDePlan();
         alert(`Les désignations pour le document ${numDocument} ont été unifiées.`);
       } catch (err) {
         console.error("Erreur lors de l'unification des désignations :", err);
@@ -387,6 +508,7 @@ document.addEventListener("click", async (e) => {
                 //   })()
                 // }]
               ]);
+              await syncPlanningProjetIndicesFromListeDePlan();
 
               td.textContent = "";
             } else {
@@ -404,6 +526,7 @@ document.addEventListener("click", async (e) => {
                 //   })()
                 // }]
               ]);
+              await syncPlanningProjetIndicesFromListeDePlan();
 
               td.textContent = dateStr;
             }
@@ -459,6 +582,7 @@ document.addEventListener("click", async (e) => {
             //   })()
             // }]
           ]);
+          await syncPlanningProjetIndicesFromListeDePlan();
           td.textContent = dateStr;
         } catch (err) {
           console.error("Erreur lors de l'ajout du record :", err);
@@ -489,6 +613,7 @@ document.addEventListener("focusout", async (e) => {
     const actions = recordsToUpdate.map(r => ["UpdateRecord", "ListePlan_NDC_COF", r.id, champs]);
     try {
       await grist.docApi.applyUserActions(actions);
+      await syncPlanningProjetIndicesFromListeDePlan();
     } catch (err) {
       console.error("Erreur lors de la mise à jour du texte :", err);
       td.style.backgroundColor = "#842029";
@@ -673,6 +798,7 @@ async function appliquerDateSurTouteLaColonne(th, isoDate) {
   try {
     if (actionsUpsert.length) await applyBatches(actionsUpsert, 200);
     if (actionsDelete.length) await applyBatches(actionsDelete, 200);
+    await syncPlanningProjetIndicesFromListeDePlan();
   } catch (err) {
     console.error("Erreur remplissage colonne :", err);
     alert("Erreur lors du remplissage de la colonne (regarde la console).");
