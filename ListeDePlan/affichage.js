@@ -64,6 +64,15 @@ function hasValidDate(value) {
   return !Number.isNaN(d.getTime());
 }
 
+function parseDateMs(value) {
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.getTime();
+}
+
+function normalizeIndice(value) {
+  return normalizeText(value).toUpperCase();
+}
+
 function buildPlanningLinkKey(project, numeroDocument, typeDocument, designation) {
   return [
     normalizeText(project).toLowerCase(),
@@ -99,10 +108,9 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
     const latestByKey = new Map();
 
     for (const r of listeRows) {
-      const indice = normalizeText(r.Indice);
+      const indice = normalizeIndice(r.Indice);
       const order = indiceOrder.has(indice) ? indiceOrder.get(indice) : -1;
       if (order < 0) continue;
-      if (!hasValidDate(r.DateDiffusion)) continue;
 
       const key = buildPlanningLinkKey(
         normalizeProject(r.Nom_projet),
@@ -112,8 +120,20 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
       );
 
       const current = latestByKey.get(key);
-      if (!current || order > current.order) {
-        latestByKey.set(key, { indice, order });
+      const dateMs = hasValidDate(r.DateDiffusion) ? parseDateMs(r.DateDiffusion) : null;
+
+      // Règle métier "dernier indice sorti":
+      // 1) d'abord la DateDiffusion la plus récente
+      // 2) en cas d'égalité de date, l'ordre d'indice le plus élevé
+      // 3) si aucune date exploitable, fallback sur l'ordre d'indice
+      const shouldReplace =
+        !current ||
+        (dateMs != null && (current.dateMs == null || dateMs > current.dateMs)) ||
+        (dateMs != null && current.dateMs != null && dateMs === current.dateMs && order > current.order) ||
+        (dateMs == null && current.dateMs == null && order > current.order);
+
+      if (shouldReplace) {
+        latestByKey.set(key, { indice, order, dateMs });
       }
     }
 

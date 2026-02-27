@@ -287,6 +287,8 @@ let selectedDocNumber = null; let selectedDocName = '';
 // --- ListePlan NDC+COF integration (création automatique lors de l'ajout de document(s)) ---
 const LISTEPLAN_TABLE_CANDIDATES = ['ListePlan_NDC_COF', 'ListePlan NDC+COF', 'ListePlan_NDC+COF'];
 let __listePlanTableName = null;
+const PLANNING_TABLE_CANDIDATES = ['Planning_Projet', 'Planning_Project'];
+let __planningTableName = null;
 
 async function resolveListePlanTableName() {
   if (__listePlanTableName) return __listePlanTableName;
@@ -302,12 +304,31 @@ async function resolveListePlanTableName() {
   throw new Error("Table ListePlan introuvable (attendu: 'ListePlan_NDC_COF' ou 'ListePlan NDC+COF').");
 }
 
+async function resolvePlanningTableName() {
+  if (__planningTableName) return __planningTableName;
+  for (const name of PLANNING_TABLE_CANDIDATES) {
+    try {
+      await grist.docApi.fetchTable(name);
+      __planningTableName = name;
+      return name;
+    } catch (e) {
+      // ignore, try next
+    }
+  }
+  throw new Error("Table Planning introuvable (attendu: 'Planning_Projet' ou 'Planning_Project').");
+}
+
 function isoToday() {
   return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
 function _norm(v) {
   return String(v ?? '').trim();
+}
+
+function computePlanningLine(numeroText, fallbackIndex = 0) {
+  const n = Number(String(numeroText ?? '').trim());
+  return Number.isFinite(n) ? (n + 9000) : (9000 + fallbackIndex + 1);
 }
 
 function findListePlanIndex(plansTable, projectName, numeroDocStr) {
@@ -317,6 +338,19 @@ function findListePlanIndex(plansTable, projectName, numeroDocStr) {
   const n = _norm(numeroDocStr);
   for (let i = 0; i < Math.max(projs.length, nums.length); i++) {
     if (_norm(projs[i]) === p && _norm(nums[i]) === n) return i;
+  }
+  return -1;
+}
+
+function findPlanningIndex(planningTable, projectName, numeroDocStr, typeDocStr) {
+  const projs = planningTable.NomProjet || [];
+  const ids2 = planningTable.ID2 || [];
+  const types = planningTable.Type_doc || [];
+  const p = _norm(projectName);
+  const n = _norm(numeroDocStr);
+  const t = _norm(typeDocStr);
+  for (let i = 0; i < Math.max(projs.length, ids2.length, types.length); i++) {
+    if (_norm(projs[i]) === p && _norm(ids2[i]) === n && _norm(types[i]) === t) return i;
   }
   return -1;
 }
@@ -1360,9 +1394,40 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
       console.warn("ListePlan: impossible d'ajouter / mettre à jour le document (vérifie le nom de table et les colonnes).", err);
     }
 
+    // 1b) Upsert dans Planning_Projet / Planning_Project
+    let planningAction = null;
+    try {
+      const planningTableName = await resolvePlanningTableName();
+      const planning = await grist.docApi.fetchTable(planningTableName);
+
+      const numStrPlanning = _norm(documentNumber);
+      const idxPlanning = findPlanningIndex(planning, selectedProject, numStrPlanning, documentType);
+      const lignePlanning = computePlanningLine(numStrPlanning, 0);
+
+      if (idxPlanning >= 0) {
+        planningAction = ['UpdateRecord', planningTableName, planning.id[idxPlanning], {
+          Taches: nm,
+          Type_doc: documentType,
+          Ligne_planning: lignePlanning
+        }];
+      } else {
+        planningAction = ['AddRecord', planningTableName, null, {
+          NomProjet: selectedProject,
+          ID2: numStrPlanning,
+          Taches: nm,
+          Type_doc: documentType,
+          Ligne_planning: lignePlanning,
+          Indice: ""
+        }];
+      }
+    } catch (err) {
+      console.warn("Planning: impossible d'ajouter / mettre à jour le document (vérifie le nom de table et les colonnes).", err);
+    }
+
     // 2) Ajout des lignes dans References
     const actions = [];
     if (planAction) actions.push(planAction);
+    if (planningAction) actions.push(planningAction);
     newRows.forEach(row => actions.push(['AddRecord', 'References', null, row]));
     await grist.docApi.applyUserActions(actions);
 
@@ -2555,6 +2620,54 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
 
     } catch (err) {
       console.warn("ListePlan: impossible d'ajouter / mettre à jour les documents (vérifie le nom de table et les colonnes).", err);
+    }
+
+    // 1b) Upsert dans Planning_Projet / Planning_Project : 1 ligne par document
+    try {
+      const planningTableName = await resolvePlanningTableName();
+      const planning = await grist.docApi.fetchTable(planningTableName);
+
+      const existingPlanning = new Map();
+      const projs = planning.NomProjet || [];
+      const ids2 = planning.ID2 || [];
+      const types = planning.Type_doc || [];
+      const ids = planning.id || [];
+      const LP = Math.max(projs.length, ids2.length, types.length, ids.length);
+      for (let i = 0; i < LP; i++) {
+        const p = _norm(projs[i]);
+        const n = _norm(ids2[i]);
+        const t = _norm(types[i]);
+        if (!p || !n || !t) continue;
+        existingPlanning.set(`${p}||${n}||${t}`, ids[i]);
+      }
+
+      const projKeyPlanning = _norm(selectedProject);
+      documentsData.forEach((doc, index) => {
+        const numStrPlanning = _norm(doc.documentNumber);
+        const nm = String(doc.documentName).trim();
+        const keyPlanning = `${projKeyPlanning}||${numStrPlanning}||${_norm(documentType)}`;
+        const lignePlanning = computePlanningLine(numStrPlanning, index);
+
+        if (existingPlanning.has(keyPlanning)) {
+          actions.push(['UpdateRecord', planningTableName, existingPlanning.get(keyPlanning), {
+            Taches: nm,
+            Type_doc: documentType,
+            Ligne_planning: lignePlanning
+          }]);
+        } else {
+          actions.push(['AddRecord', planningTableName, null, {
+            NomProjet: selectedProject,
+            ID2: numStrPlanning,
+            Taches: nm,
+            Type_doc: documentType,
+            Ligne_planning: lignePlanning,
+            Indice: ""
+          }]);
+          existingPlanning.set(keyPlanning, null);
+        }
+      });
+    } catch (err) {
+      console.warn("Planning: impossible d'ajouter / mettre à jour les documents (vérifie le nom de table et les colonnes).", err);
     }
 
     // 2) Ajout dans References : 1 ligne par (document × émetteur)

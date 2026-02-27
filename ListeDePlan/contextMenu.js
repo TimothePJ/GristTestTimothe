@@ -32,24 +32,6 @@ document.addEventListener("contextmenu", function (e) {
   });
   menu.appendChild(deleteOption);
 
-  // 1) Ajouter document
-  const addOneOption = document.createElement("div");
-  addOneOption.className = "context-menu-item";
-  addOneOption.textContent = "Ajouter document";
-  // Action: ouvrir la fenêtre "Ajouter un document (Référence)"
-  addOneOption.addEventListener("click", () => {
-    removeExistingContextMenu(); // ferme le menu
-    document.dispatchEvent(new Event("LP_OPEN_ADD_REF_DOC"));
-  });
-  menu.appendChild(addOneOption);
-
-  // 2) Ajouter Plusieurs documents
-  const addManyOption = document.createElement("div");
-  addManyOption.className = "context-menu-item";
-  addManyOption.textContent = "Ajouter Plusieurs documents";
-  // (on branchera l'action plus tard)
-  menu.appendChild(addManyOption);
-
   document.body.appendChild(menu);
 });
 
