@@ -729,6 +729,34 @@ document.addEventListener('DOMContentLoaded', () => {
                 await grist.docApi.applyUserActions(listePlanActions);
             }
 
+            const planningActions = projectData.documents.map((doc, index) => {
+                const numeroText = String(doc.numero ?? '').trim();
+                const numeroNum = Number(numeroText);
+                const hasNumero = Number.isFinite(numeroNum);
+                const lignePlanning = hasNumero ? (numeroNum + 9000) : (9000 + index + 1);
+
+                return ["AddRecord", "Planning_Projet", null, {
+                    NomProjet: projectData.name,
+                    ID2: numeroText,
+                    Taches: doc.name,
+                    Type_doc: doc.type || "COFFRAGE",
+                    Ligne_planning: lignePlanning,
+                    Indice: ""
+                }];
+            });
+
+            if (planningActions.length > 0) {
+                try {
+                    await grist.docApi.applyUserActions(planningActions);
+                } catch (err) {
+                    const planningActionsFallback = planningActions.map((action) => {
+                        const [, , recordId, fields] = action;
+                        return ["AddRecord", "Planning_Project", recordId, fields];
+                    });
+                    await grist.docApi.applyUserActions(planningActionsFallback);
+                }
+            }
+
             alert('Projet créé avec succès !');
             // Optionally, redirect or clear the form
             window.location.reload();
