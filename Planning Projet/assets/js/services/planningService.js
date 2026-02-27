@@ -162,13 +162,13 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       dateLimite: r[cfg.dateLimite],
       duree1: r[cfg.duree1],
 
-      diffCoffrage: r[cfg.diffCoffrage],
+      diffCoffrage: r[cfg.diffCoffrageCalc] ?? r[cfg.diffCoffrage],
       duree2: r[cfg.duree2],
 
-      diffArmature: r[cfg.diffArmature],
+      diffArmature: r[cfg.diffArmatureCalc] ?? r[cfg.diffArmature],
       duree3: r[cfg.duree3],
 
-      demarragesTravaux: r[cfg.demarragesTravaux],
+      demarragesTravaux: r[cfg.demarragesTravauxCalc] ?? r[cfg.demarragesTravaux],
       retards: toText(r[cfg.retards]),
 
       indice: toText(r[cfg.indice]),
