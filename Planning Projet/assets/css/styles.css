@@ -389,8 +389,12 @@ body * {
   overflow: hidden !important;
 }
 
-/* Ligne verticale "aujourd'hui" */
-#planningTimeline .vis-current-time {
+/* Ligne verticale "aujourd'hui" : seulement dans les lignes, pas dans l'entete d'axe */
+#planningTimeline .vis-panel.vis-top .vis-current-time {
+  display: none !important;
+}
+
+#planningTimeline .vis-panel.vis-center .vis-current-time {
   width: 2px !important;
   background-color: #ed1b2d !important;
   opacity: 0.9;

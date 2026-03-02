@@ -504,6 +504,14 @@ export function renderPlanningTimeline({ groups, items }) {
       timelineInstance.fit({ animation: false });
       const fitted = timelineInstance.getWindow();
       dataAnchorDate = computeRangeCenter(fitted);
+    } else if ((groups || []).length) {
+      const today = new Date();
+      const start = new Date(today);
+      const end = new Date(today);
+      start.setDate(start.getDate() - 7);
+      end.setDate(end.getDate() + 7);
+      dataAnchorDate = today;
+      timelineInstance.setWindow(start, end, { animation: false });
     } else {
       dataAnchorDate = null;
     }
