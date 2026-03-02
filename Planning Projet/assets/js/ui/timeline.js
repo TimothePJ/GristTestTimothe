@@ -7,6 +7,24 @@ let hoverTooltipEl = null;
 let hoverTooltipBound = false;
 let clickTooltipTimer = null;
 
+function updateCurrentTimeLineBounds() {
+  const container = document.getElementById("planningTimeline");
+  if (!container) return;
+
+  const topPanel = container.querySelector(".vis-panel.vis-top");
+  const currentLines = container.querySelectorAll(".vis-current-time");
+  if (!currentLines.length) return;
+
+  const topHeight = topPanel ? topPanel.getBoundingClientRect().height : 0;
+  const totalHeight = container.getBoundingClientRect().height;
+  const visibleHeight = Math.max(0, totalHeight - topHeight);
+
+  currentLines.forEach((line) => {
+    line.style.top = `${topHeight}px`;
+    line.style.height = `${visibleHeight}px`;
+  });
+}
+
 function escapeHtml(str) {
   return String(str ?? "")
     .replace(/&/g, "&amp;")
@@ -518,6 +536,7 @@ export function renderPlanningTimeline({ groups, items }) {
 
     updateDateRangeDisplay();
     updateNavCenterButtonLabel();
+    updateCurrentTimeLineBounds();
   });
 }
 
@@ -559,10 +578,12 @@ export function bindTimelineToolbar() {
     timelineInstance.on("rangechange", () => {
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
+      updateCurrentTimeLineBounds();
     });
     timelineInstance.on("rangechanged", () => {
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
+      updateCurrentTimeLineBounds();
     });
   }
 
