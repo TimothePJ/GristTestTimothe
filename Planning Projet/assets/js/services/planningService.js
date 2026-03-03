@@ -60,10 +60,8 @@ function addWeeks(date, weeks) {
   return addDays(date, weeks * 7);
 }
 
-function startOfDay(date) {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
+function getCurrentInstant() {
+  return new Date();
 }
 
 function escapeHtml(str) {
@@ -130,13 +128,13 @@ function createSplitPhaseItems({
   className,
   title,
 }) {
-  const todayStart = startOfDay(new Date());
+  const currentInstant = getCurrentInstant();
 
   if (!(start instanceof Date) || !(end instanceof Date) || end <= start) {
     return [];
   }
 
-  if (end <= todayStart) {
+  if (end <= currentInstant) {
     return [
       createPhaseItem({
         itemId: itemIdBase,
@@ -150,7 +148,7 @@ function createSplitPhaseItems({
     ];
   }
 
-  if (start >= todayStart) {
+  if (start >= currentInstant) {
     return [
       createPhaseItem({
         itemId: itemIdBase,
@@ -169,7 +167,7 @@ function createSplitPhaseItems({
       itemId: `${itemIdBase}-past`,
       groupId,
       start,
-      end: todayStart,
+      end: currentInstant,
       label: "",
       className: `${className} phase-past`,
       title,
@@ -177,7 +175,7 @@ function createSplitPhaseItems({
     createPhaseItem({
       itemId: `${itemIdBase}-current`,
       groupId,
-      start: todayStart,
+      start: currentInstant,
       end,
       label,
       className,
