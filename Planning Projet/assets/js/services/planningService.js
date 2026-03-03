@@ -156,13 +156,13 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       rowId: r[cfg.id] ?? null,
       projectLink: projectLinkCol ? toText(r[projectLinkCol]) : "",
 
-      // Colonnes affichÃ©es
+      // Colonnes affichees
       id2: id2Text,
       taches: tachesText,
       typeDoc: toText(r[cfg.typeDoc]),
       lignePlanning: lignePlanningText,
 
-      // Valeurs numÃ©riques de tri (robustes)
+      // Valeurs numeriques de tri (robustes)
       id2Num: toNumber(id2Text),
       lignePlanningNum: toNumber(lignePlanningText),
 
@@ -184,16 +184,16 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
     };
   });
 
-  // Filtre projet (actif seulement si colonne configurÃ©e)
+  // Filtre projet (actif seulement si colonne configuree)
   if (!selectedProject) {
     rows = [];
   } else if (projectLinkCol) {
     rows = rows.filter((r) => r.projectLink === selectedProject);
   }
 
-  // âœ… TRI ROBUSTE (ordre mÃ©tier demandÃ©)
-  // 1) Ligne_planning (numÃ©rique)
-  // 2) ID2 (numÃ©rique)
+  // TRI ROBUSTE 
+  // 1) Ligne_planning
+  // 2) ID2
   // 3) Type_doc
   // 4) Taches
   rows.sort((a, b) => {
@@ -221,7 +221,7 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
   rows.forEach((row, index) => {
     const groupId = `g-${row.rowId ?? `${row.id2 || "x"}-${row.lignePlanning || "x"}-${index}`}`;
 
-    // âœ… Groupe avec champs de tri explicites (pour vis-timeline)
+    // Groupe avec champs de tri explicites (pour vis-timeline)
     groups.push({
       id: groupId,
       content: buildGroupContent(row),
@@ -312,4 +312,3 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
     rowCount: rows.length,
   };
 }
-
