@@ -60,6 +60,12 @@ function addWeeks(date, weeks) {
   return addDays(date, weeks * 7);
 }
 
+function startOfDay(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
 function escapeHtml(str) {
   return String(str ?? "")
     .replace(/&/g, "&amp;")
@@ -113,6 +119,71 @@ function createPhaseItem({
     title,
     type: "range",
   };
+}
+
+function createSplitPhaseItems({
+  itemIdBase,
+  groupId,
+  start,
+  end,
+  label,
+  className,
+  title,
+}) {
+  const todayStart = startOfDay(new Date());
+
+  if (!(start instanceof Date) || !(end instanceof Date) || end <= start) {
+    return [];
+  }
+
+  if (end <= todayStart) {
+    return [
+      createPhaseItem({
+        itemId: itemIdBase,
+        groupId,
+        start,
+        end,
+        label,
+        className: `${className} phase-past`,
+        title,
+      }),
+    ];
+  }
+
+  if (start >= todayStart) {
+    return [
+      createPhaseItem({
+        itemId: itemIdBase,
+        groupId,
+        start,
+        end,
+        label,
+        className,
+        title,
+      }),
+    ];
+  }
+
+  return [
+    createPhaseItem({
+      itemId: `${itemIdBase}-past`,
+      groupId,
+      start,
+      end: todayStart,
+      label: "",
+      className: `${className} phase-past`,
+      title,
+    }),
+    createPhaseItem({
+      itemId: `${itemIdBase}-current`,
+      groupId,
+      start: todayStart,
+      end,
+      label,
+      className,
+      title,
+    }),
+  ];
 }
 
 function createRangeFromStartAndWeeks(startDateRaw, weeksRaw) {
@@ -244,8 +315,8 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
     const pCoffrage = createRangeBetweenDates(row.dateLimite, row.diffCoffrage);
     if (pCoffrage) {
       items.push(
-        createPhaseItem({
-          itemId: `${groupId}-p-coffrage`,
+        ...createSplitPhaseItems({
+          itemIdBase: `${groupId}-p-coffrage`,
           groupId,
           start: pCoffrage.start,
           end: pCoffrage.end,
@@ -265,8 +336,8 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
     const pArmature = createRangeBetweenDates(row.diffCoffrage, row.diffArmature);
     if (pArmature) {
       items.push(
-        createPhaseItem({
-          itemId: `${groupId}-p-armature`,
+        ...createSplitPhaseItems({
+          itemIdBase: `${groupId}-p-armature`,
           groupId,
           start: pArmature.start,
           end: pArmature.end,

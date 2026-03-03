@@ -365,10 +365,22 @@ body * {
   color: #92400e !important;
 }
 
+#planningTimeline .vis-item.phase-coffrage.phase-past {
+  background-color: #ead7a2 !important;
+  border-color: #d6bd74 !important;
+  color: #7a4b12 !important;
+}
+
 #planningTimeline .vis-item.phase-armature {
   background-color: #fee2e2 !important;
   border-color: #fecaca !important;
   color: #991b1b !important;
+}
+
+#planningTimeline .vis-item.phase-armature.phase-past {
+  background-color: #efc2c2 !important;
+  border-color: #dc9f9f !important;
+  color: #7f1d1d !important;
 }
 
 #planningTimeline .vis-item.phase-travaux {
