@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MS Project</title>
+
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <script src="https://unpkg.com/vis-timeline/standalone/umd/vis-timeline-graph2d.min.js"></script>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/vis-timeline/styles/vis-timeline-graph2d.min.css"
+  />
+
+  <link rel="stylesheet" href="./assets/css/variables.css" />
+  <link rel="stylesheet" href="./assets/css/styles.css" />
+  <link rel="stylesheet" href="./assets/css/timeline.css" />
+
+  <script type="module" src="./assets/js/main.js" defer></script>
+</head>
+<body>
+  <div id="toolbar">
+    <div class="nav-buttons">
+      <button id="btn-prev" type="button" title="Periode precedente">&lt;</button>
+      <button id="btn-today" type="button">Aujourd'hui</button>
+      <button id="btn-next" type="button" title="Periode suivante">&gt;</button>
+    </div>
+
+    <div class="filters">
+      <label for="projectDropdown" class="toolbar-label">Projet :</label>
+      <select id="projectDropdown" disabled>
+        <option value="">Choisir un projet</option>
+      </select>
+    </div>
+
+    <div class="zoom-buttons" aria-label="Niveau de zoom">
+      <button type="button" data-zoom="week" class="active">Semaine</button>
+      <button type="button" data-zoom="month">Mois</button>
+      <button type="button" data-zoom="year">Annee</button>
+    </div>
+
+    <div id="current-date-range" aria-live="polite"></div>
+  </div>
+
+  <div class="ms-project-header-row">
+    <div class="ms-project-header-left">
+      <div class="hcol c-id">Id</div>
+      <div class="hcol c-task">Tache</div>
+      <div class="hcol c-start">Debut</div>
+      <div class="hcol c-end">Fin</div>
+      <div class="hcol c-progress">Avancement</div>
+      <div class="hcol c-status">Statut</div>
+    </div>
+    <div class="ms-project-header-right">Timeline</div>
+  </div>
+
+  <div id="timelineWrapper">
+    <div id="msProjectTimeline"></div>
+  </div>
+
+  <div id="msProjectStatus" class="ms-project-status"></div>
+</body>
+</html>

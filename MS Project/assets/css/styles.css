@@ -1,0 +1,297 @@
+:root {
+  --col-id: 72px;
+  --col-task: 240px;
+  --col-start: 108px;
+  --col-end: 108px;
+  --col-progress: 110px;
+  --col-status: 150px;
+
+  --left-pad-x: 4px;
+  --left-grid-width: calc(var(--col-id) + var(--col-task) + var(--col-start) + var(--col-end) + var(--col-progress) + var(--col-status));
+  --left-panel-width: calc(var(--left-grid-width) + (var(--left-pad-x) * 2));
+  --row-height: 40px;
+  --toolbar-height: 46px;
+}
+
+html {
+  color-scheme: light;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: var(--page-bg);
+  color: var(--text-main);
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body * {
+  box-sizing: border-box;
+}
+
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--toolbar-height);
+  padding: 8px 16px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.nav-buttons,
+.zoom-buttons,
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolbar-label {
+  font-weight: 600;
+}
+
+#toolbar button,
+#toolbar select {
+  height: 30px;
+  border: 1px solid #c9d1dc;
+  border-radius: 4px;
+  background: #fff;
+  color: var(--text-main);
+  font-size: 13px;
+}
+
+#toolbar button {
+  min-width: 34px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+#toolbar button:hover,
+#toolbar select:hover {
+  background: var(--panel-hover);
+}
+
+#toolbar button.active {
+  background: var(--panel-selection);
+  border-color: #93c5fd;
+  font-weight: 600;
+}
+
+#toolbar select {
+  min-width: 240px;
+  padding: 0 8px;
+}
+
+#current-date-range {
+  margin-left: auto;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.ms-project-header-row {
+  display: grid;
+  grid-template-columns: var(--left-panel-width) 1fr;
+  align-items: stretch;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--panel-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.ms-project-header-left {
+  display: grid;
+  grid-template-columns: var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-progress) var(--col-status);
+  width: var(--left-grid-width);
+  min-height: var(--row-height);
+  padding: 0 var(--left-pad-x);
+  box-sizing: content-box;
+  border-right: 1px solid var(--panel-border);
+}
+
+.ms-project-header-left .hcol,
+.ms-project-header-right {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ms-project-header-right {
+  padding: 0 12px;
+}
+
+#timelineWrapper {
+  min-height: 540px;
+  background: #fff;
+}
+
+#msProjectTimeline {
+  height: 640px;
+  background: #fff;
+}
+
+#msProjectTimeline .vis-timeline {
+  border: none !important;
+  background: #fff;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+#msProjectTimeline .vis-panel.vis-left {
+  width: var(--left-panel-width) !important;
+  background: #fbfcfe !important;
+  border-right: 1px solid var(--panel-border) !important;
+}
+
+#msProjectTimeline .vis-panel.vis-center,
+#msProjectTimeline .vis-panel.vis-top,
+#msProjectTimeline .vis-panel.vis-bottom {
+  left: var(--left-panel-width) !important;
+  width: calc(100% - var(--left-panel-width)) !important;
+}
+
+#msProjectTimeline .vis-labelset .vis-label {
+  height: var(--row-height) !important;
+  min-height: var(--row-height) !important;
+  display: flex !important;
+  align-items: center !important;
+  border-bottom: 1px solid var(--panel-border) !important;
+}
+
+#msProjectTimeline .vis-labelset .vis-label .vis-inner {
+  width: 100% !important;
+  height: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  overflow: hidden !important;
+}
+
+#msProjectTimeline .vis-background .vis-group,
+#msProjectTimeline .vis-foreground .vis-group {
+  height: var(--row-height) !important;
+  min-height: var(--row-height) !important;
+  border-bottom: 1px solid #edf1f5 !important;
+}
+
+#msProjectTimeline .group-row-grid {
+  display: grid !important;
+  grid-template-columns: var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-progress) var(--col-status) !important;
+  align-items: center !important;
+  width: var(--left-grid-width) !important;
+  min-height: var(--row-height) !important;
+  padding: 0 var(--left-pad-x) !important;
+  box-sizing: content-box !important;
+}
+
+#msProjectTimeline .group-row-grid > div {
+  padding: 6px 8px !important;
+  min-width: 0 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+#msProjectTimeline .group-row-grid .cell-progress {
+  text-align: center !important;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+#msProjectTimeline .group-row-grid .cell-id,
+#msProjectTimeline .group-row-grid .cell-start,
+#msProjectTimeline .group-row-grid .cell-end {
+  font-variant-numeric: tabular-nums;
+}
+
+#msProjectTimeline .vis-time-axis .vis-grid.vis-minor {
+  border-color: #eef2f7 !important;
+}
+
+#msProjectTimeline .vis-time-axis .vis-grid.vis-major {
+  border-color: #dbe2ea !important;
+}
+
+#msProjectTimeline .vis-time-axis .vis-text {
+  color: #475569;
+}
+
+#msProjectTimeline .vis-item {
+  border-radius: 4px;
+  border-width: 1px !important;
+  font-size: 12px;
+}
+
+#msProjectTimeline .vis-item .vis-item-content {
+  padding: 2px 6px;
+}
+
+#msProjectTimeline .vis-item.phase-task {
+  background: #dbeafe !important;
+  border-color: #93c5fd !important;
+  color: #1d4ed8 !important;
+}
+
+#msProjectTimeline .vis-item.phase-task.phase-active {
+  background: #fef3c7 !important;
+  border-color: #fcd34d !important;
+  color: #92400e !important;
+}
+
+#msProjectTimeline .vis-item.phase-task.phase-complete {
+  background: #dcfce7 !important;
+  border-color: #86efac !important;
+  color: #166534 !important;
+}
+
+#msProjectTimeline .vis-item.phase-task.phase-delayed {
+  background: #fee2e2 !important;
+  border-color: #fca5a5 !important;
+  color: #b91c1c !important;
+}
+
+#msProjectTimeline .vis-item.vis-selected {
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+
+#msProjectTimeline .vis-current-time {
+  width: 2px !important;
+  background: var(--vinci-red) !important;
+  opacity: 0.85;
+}
+
+.ms-project-status {
+  padding: 12px 16px;
+  border-top: 1px solid var(--panel-border);
+  color: var(--text-muted);
+  font-size: 13px;
+  background: #fff;
+}
+
+@media (max-width: 1320px) {
+  :root {
+    --col-id: 64px;
+    --col-task: 200px;
+    --col-start: 98px;
+    --col-end: 98px;
+    --col-progress: 96px;
+    --col-status: 132px;
+  }
+
+  #toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  #current-date-range {
+    margin-left: 0;
+    width: 100%;
+  }
+}
