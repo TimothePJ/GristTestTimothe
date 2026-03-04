@@ -1,4 +1,3 @@
-import { state, setState } from "./state.js";
 import {
   initGrist,
   buildProjectOptions,
@@ -7,6 +6,7 @@ import {
   getMsProjectSetupMessage,
 } from "./services/gristService.js";
 import { buildTimelineDataFromMsProjectRows } from "./services/msProjectService.js";
+import { state, setState } from "./state.js";
 import { initProjectSelector } from "./ui/selectors.js";
 import {
   renderMsProjectTimeline,
@@ -45,9 +45,9 @@ async function refreshMsProject() {
       clearMsProjectTimeline();
 
       if (!state.selectedProject) {
-        setMsProjectStatus("Selectionne un projet pour afficher la timeline MS Project.");
+        setMsProjectStatus("");
       } else {
-        setMsProjectStatus("Aucune tache exploitable trouvee pour ce projet.");
+        setMsProjectStatus("Aucune tache exploitable trouvee pour le projet selectionne.");
       }
       return;
     }
@@ -60,7 +60,7 @@ async function refreshMsProject() {
     }
 
     setMsProjectStatus(
-      `${timelineData.rowCount} tache(s) affichee(s) pour ${state.selectedProject}.`
+      `${timelineData.rowCount} tache(s) affichee(s) | Projet : ${state.selectedProject || "Tous les projets"}`
     );
   } catch (error) {
     console.error("Erreur MS Project :", error);
@@ -78,12 +78,11 @@ async function handleProjectChange(currentState) {
 
 async function bootstrap() {
   try {
-    setState({ selectedProject: "" });
-
     initGrist();
 
-    const projectOptions = await buildProjectOptions();
+    setState({ selectedProject: "" });
 
+    const projectOptions = await buildProjectOptions();
     initProjectSelector(projectOptions, {
       onChange: handleProjectChange,
     });

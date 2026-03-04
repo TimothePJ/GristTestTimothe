@@ -56,6 +56,12 @@ function fmtIsoDate(date) {
   return date ? date.toISOString().slice(0, 10) : "";
 }
 
+function fmtDuration(value) {
+  const number = toNumber(value);
+  if (number == null) return "";
+  return `${number} j`;
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -66,73 +72,94 @@ function escapeHtml(value) {
 
 function buildGroupContent(row) {
   return `
-    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-progress) var(--col-status);align-items:center;width:var(--left-grid-width);min-height:var(--row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
+    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team) var(--col-style);align-items:center;width:var(--left-grid-width);min-height:var(--row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
       <div class="cell-id">${escapeHtml(row.id)}</div>
       <div class="cell-task">${escapeHtml(row.task)}</div>
       <div class="cell-start">${escapeHtml(row.start)}</div>
       <div class="cell-end">${escapeHtml(row.end)}</div>
-      <div class="cell-progress">${escapeHtml(row.progress)}</div>
-      <div class="cell-status">${escapeHtml(row.status)}</div>
+      <div class="cell-duration">${escapeHtml(row.durationLabel)}</div>
+      <div class="cell-team">${escapeHtml(row.teamLabel)}</div>
+      <div class="cell-style">${escapeHtml(row.barStyleLabel)}</div>
     </div>
   `;
 }
 
+function normalizeStyleToken(value) {
+  const normalized = String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return normalized || "default";
+}
+
 function resolveTaskClass(row) {
-  const today = new Date();
-  const status = String(row.status || "").toLowerCase();
+  return `phase-task bar-style-${normalizeStyleToken(row.barStyleLabel)}`;
+}
 
-  if (row.progressValue != null && row.progressValue >= 100) {
-    return "phase-task phase-complete";
+function resolveProjectLinkColumn(rawRows, config) {
+  const explicit = config.columns.projectLink;
+  if (explicit && rawRows.some((row) => row && Object.prototype.hasOwnProperty.call(row, explicit))) {
+    return explicit;
   }
 
-  if (status.includes("termine") || status.includes("completed")) {
-    return "phase-task phase-complete";
-  }
-
-  if (row.endDate && row.endDate < today && (row.progressValue == null || row.progressValue < 100)) {
-    return "phase-task phase-delayed";
-  }
-
-  if ((row.progressValue != null && row.progressValue > 0) || status.includes("cours") || status.includes("progress")) {
-    return "phase-task phase-active";
-  }
-
-  return "phase-task";
+  const candidates = config.projectLinkCandidates || [];
+  return candidates.find((column) =>
+    rawRows.some((row) => row && Object.prototype.hasOwnProperty.call(row, column))
+  ) || null;
 }
 
 export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = "") {
-  const columns = APP_CONFIG.grist.msProjectTable.columns;
+  const config = APP_CONFIG.grist.msProjectTable;
+  const columns = config.columns;
+  const projectLinkColumn = resolveProjectLinkColumn(rawRows, config);
 
   let rows = rawRows.map((rawRow, index) => {
     const startDate = parseDate(rawRow[columns.start]);
+    const durationValue = toNumber(rawRow[columns.duration]);
     const parsedEndDate = parseDate(rawRow[columns.end]);
     const endDate = startDate
       ? parsedEndDate && parsedEndDate > startDate
         ? parsedEndDate
-        : addDays(startDate, 1)
+        : durationValue != null && durationValue > 0
+          ? addDays(startDate, durationValue)
+          : addDays(startDate, 1)
       : null;
-    const progressValue = toNumber(rawRow[columns.progress]);
-    const task = toText(rawRow[columns.taskName]) || toText(rawRow[columns.taskNameAlt]) || `Tache ${index + 1}`;
-    const status = toText(rawRow[columns.status]);
+    const task = toText(rawRow[columns.taskName]) || `Tache ${index + 1}`;
+    const uniqueNumber = toText(rawRow[columns.uniqueNumber]);
+    const team = [toText(rawRow[columns.team]), toText(rawRow[columns.subTeam])]
+      .filter(Boolean)
+      .join(" / ");
+    const barStyle = toText(rawRow[columns.barStyle]);
+    const level = toText(rawRow[columns.level]);
+    const indicator = toText(rawRow[columns.indicator]);
+    const effort = toNumber(rawRow[columns.effort]);
 
     return {
       rowId: rawRow[columns.id] ?? index + 1,
-      projectLink: columns.project ? toText(rawRow[columns.project]) : "",
-      id: toText(rawRow[columns.id]) || String(index + 1),
+      id: uniqueNumber || toText(rawRow[columns.id]) || String(index + 1),
       task,
       startDate,
       endDate,
       start: fmtCellDate(startDate),
       end: fmtCellDate(endDate),
-      progressValue,
-      progress: progressValue == null ? "" : `${progressValue}%`,
-      status,
+      durationValue,
+      durationLabel: fmtDuration(rawRow[columns.duration]),
+      teamLabel: team,
+      subTeamLabel: toText(rawRow[columns.subTeam]),
+      levelLabel: level,
+      barStyleLabel: barStyle,
+      indicatorLabel: indicator,
+      effortValue: effort,
+      projectLink: projectLinkColumn ? toText(rawRow[projectLinkColumn]) : "",
     };
   });
 
   if (!selectedProject) {
     rows = [];
-  } else if (columns.project) {
+  } else if (projectLinkColumn) {
     rows = rows.filter((row) => row.projectLink === selectedProject);
   }
 
@@ -163,8 +190,12 @@ export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = ""
       taskLabel: row.task,
       startLabel: row.start,
       endLabel: row.end,
-      progressLabel: row.progress,
-      statusLabel: row.status,
+      durationLabel: row.durationLabel,
+      teamLabel: row.teamLabel,
+      styleLabel: row.barStyleLabel,
+      levelLabel: row.levelLabel,
+      indicatorLabel: row.indicatorLabel,
+      effortValue: row.effortValue,
       sortIndex: index,
     });
 
@@ -175,15 +206,19 @@ export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = ""
       group: groupId,
       start: row.startDate,
       end: row.endDate,
-      content: row.progressValue != null && row.progressValue >= 15 ? `${row.progressValue}%` : "",
+      content: row.barStyleLabel || "",
       className: resolveTaskClass(row),
       type: "range",
       title: `
         <b>${escapeHtml(row.task)}</b><br>
+        Numero : ${escapeHtml(row.id)}<br>
         Debut : ${escapeHtml(fmtIsoDate(row.startDate))}<br>
         Fin : ${escapeHtml(fmtIsoDate(row.endDate))}<br>
-        Avancement : ${escapeHtml(row.progress || "Non renseigne")}<br>
-        Statut : ${escapeHtml(row.status || "Non renseigne")}
+        Duree : ${escapeHtml(row.durationLabel || "Non renseignee")}<br>
+        Equipe : ${escapeHtml(row.teamLabel || "Non renseignee")}<br>
+        Niveau : ${escapeHtml(row.levelLabel || "Non renseigne")}<br>
+        Style : ${escapeHtml(row.barStyleLabel || "Non renseigne")}<br>
+        Effort : ${escapeHtml(row.effortValue == null ? "Non renseigne" : String(row.effortValue))}
       `,
     });
   });

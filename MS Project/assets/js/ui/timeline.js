@@ -118,10 +118,12 @@ function buildTaskTooltipHtml(item, group) {
 
   return `
     <div><strong>${escapeHtml(group?.taskLabel || "Tache")}</strong></div>
+    <div>Numero : <strong>${escapeHtml(group?.idLabel || "Non renseigne")}</strong></div>
     <div>Debut : <strong>${escapeHtml(start ? start.toISOString().slice(0, 10) : "Non renseigne")}</strong></div>
     <div>Fin : <strong>${escapeHtml(end ? end.toISOString().slice(0, 10) : "Non renseigne")}</strong></div>
-    <div>Avancement : <strong>${escapeHtml(group?.progressLabel || "Non renseigne")}</strong></div>
-    <div>Statut : <strong>${escapeHtml(group?.statusLabel || "Non renseigne")}</strong></div>
+    <div>Duree : <strong>${escapeHtml(group?.durationLabel || "Non renseignee")}</strong></div>
+    <div>Equipe : <strong>${escapeHtml(group?.teamLabel || "Non renseignee")}</strong></div>
+    <div>Style : <strong>${escapeHtml(group?.styleLabel || "Non renseigne")}</strong></div>
   `;
 }
 
@@ -174,14 +176,18 @@ function buildGroupLabelElement(group) {
   end.textContent = String(group?.endLabel ?? "");
 
   const progress = document.createElement("div");
-  progress.className = "cell-progress";
-  progress.textContent = String(group?.progressLabel ?? "");
+  progress.className = "cell-duration";
+  progress.textContent = String(group?.durationLabel ?? "");
 
   const status = document.createElement("div");
-  status.className = "cell-status";
-  status.textContent = String(group?.statusLabel ?? "");
+  status.className = "cell-team";
+  status.textContent = String(group?.teamLabel ?? "");
 
-  row.append(id, task, start, end, progress, status);
+  const style = document.createElement("div");
+  style.className = "cell-style";
+  style.textContent = String(group?.styleLabel ?? "");
+
+  row.append(id, task, start, end, progress, status, style);
   return row;
 }
 

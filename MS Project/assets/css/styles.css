@@ -1,13 +1,14 @@
 :root {
   --col-id: 72px;
-  --col-task: 240px;
+  --col-task: 280px;
   --col-start: 108px;
   --col-end: 108px;
-  --col-progress: 110px;
-  --col-status: 150px;
+  --col-duration: 86px;
+  --col-team: 110px;
+  --col-style: 120px;
 
   --left-pad-x: 4px;
-  --left-grid-width: calc(var(--col-id) + var(--col-task) + var(--col-start) + var(--col-end) + var(--col-progress) + var(--col-status));
+  --left-grid-width: calc(var(--col-id) + var(--col-task) + var(--col-start) + var(--col-end) + var(--col-duration) + var(--col-team) + var(--col-style));
   --left-panel-width: calc(var(--left-grid-width) + (var(--left-pad-x) * 2));
   --row-height: 40px;
   --toolbar-height: 46px;
@@ -105,7 +106,7 @@ body * {
 
 .ms-project-header-left {
   display: grid;
-  grid-template-columns: var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-progress) var(--col-status);
+  grid-template-columns: var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team) var(--col-style);
   width: var(--left-grid-width);
   min-height: var(--row-height);
   padding: 0 var(--left-pad-x);
@@ -182,7 +183,7 @@ body * {
 
 #msProjectTimeline .group-row-grid {
   display: grid !important;
-  grid-template-columns: var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-progress) var(--col-status) !important;
+  grid-template-columns: var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team) var(--col-style) !important;
   align-items: center !important;
   width: var(--left-grid-width) !important;
   min-height: var(--row-height) !important;
@@ -198,7 +199,7 @@ body * {
   text-overflow: ellipsis !important;
 }
 
-#msProjectTimeline .group-row-grid .cell-progress {
+#msProjectTimeline .group-row-grid .cell-duration {
   text-align: center !important;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
@@ -208,6 +209,10 @@ body * {
 #msProjectTimeline .group-row-grid .cell-start,
 #msProjectTimeline .group-row-grid .cell-end {
   font-variant-numeric: tabular-nums;
+}
+
+#msProjectTimeline .group-row-grid .cell-style {
+  font-weight: 600;
 }
 
 #msProjectTimeline .vis-time-axis .vis-grid.vis-minor {
@@ -256,6 +261,36 @@ body * {
   color: #b91c1c !important;
 }
 
+#msProjectTimeline .vis-item.bar-style-demolition {
+  background: #fee2e2 !important;
+  border-color: #f87171 !important;
+  color: #991b1b !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-gros-oeuvre {
+  background: #e0f2fe !important;
+  border-color: #7dd3fc !important;
+  color: #075985 !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-etudes {
+  background: #ede9fe !important;
+  border-color: #a78bfa !important;
+  color: #5b21b6 !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-approvisionnement {
+  background: #fef3c7 !important;
+  border-color: #fbbf24 !important;
+  color: #92400e !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-default {
+  background: #dbeafe !important;
+  border-color: #93c5fd !important;
+  color: #1d4ed8 !important;
+}
+
 #msProjectTimeline .vis-item.vis-selected {
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
 }
@@ -277,11 +312,12 @@ body * {
 @media (max-width: 1320px) {
   :root {
     --col-id: 64px;
-    --col-task: 200px;
+    --col-task: 216px;
     --col-start: 98px;
     --col-end: 98px;
-    --col-progress: 96px;
-    --col-status: 132px;
+    --col-duration: 78px;
+    --col-team: 96px;
+    --col-style: 108px;
   }
 
   #toolbar {
