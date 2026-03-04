@@ -72,14 +72,13 @@ function escapeHtml(value) {
 
 function buildGroupContent(row) {
   return `
-    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team) var(--col-style);align-items:center;width:var(--left-grid-width);min-height:var(--row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
+    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team);align-items:center;width:var(--left-grid-width);min-height:var(--row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
       <div class="cell-id">${escapeHtml(row.id)}</div>
       <div class="cell-task">${escapeHtml(row.task)}</div>
       <div class="cell-start">${escapeHtml(row.start)}</div>
       <div class="cell-end">${escapeHtml(row.end)}</div>
       <div class="cell-duration">${escapeHtml(row.durationLabel)}</div>
       <div class="cell-team">${escapeHtml(row.teamLabel)}</div>
-      <div class="cell-style">${escapeHtml(row.barStyleLabel)}</div>
     </div>
   `;
 }

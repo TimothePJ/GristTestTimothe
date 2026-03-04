@@ -1,14 +1,13 @@
 :root {
   --col-id: 72px;
   --col-task: 280px;
-  --col-start: 108px;
-  --col-end: 108px;
+  --col-start: 84px;
+  --col-end: 84px;
   --col-duration: 86px;
   --col-team: 110px;
-  --col-style: 120px;
 
   --left-pad-x: 4px;
-  --left-grid-width: calc(var(--col-id) + var(--col-task) + var(--col-start) + var(--col-end) + var(--col-duration) + var(--col-team) + var(--col-style));
+  --left-grid-width: calc(var(--col-id) + var(--col-task) + var(--col-start) + var(--col-end) + var(--col-duration) + var(--col-team));
   --left-panel-width: calc(var(--left-grid-width) + (var(--left-pad-x) * 2));
   --row-height: 40px;
   --toolbar-height: 46px;
@@ -106,7 +105,7 @@ body * {
 
 .ms-project-header-left {
   display: grid;
-  grid-template-columns: var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team) var(--col-style);
+  grid-template-columns: var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team);
   width: var(--left-grid-width);
   min-height: var(--row-height);
   padding: 0 var(--left-pad-x);
@@ -183,7 +182,7 @@ body * {
 
 #msProjectTimeline .group-row-grid {
   display: grid !important;
-  grid-template-columns: var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team) var(--col-style) !important;
+  grid-template-columns: var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team) !important;
   align-items: center !important;
   width: var(--left-grid-width) !important;
   min-height: var(--row-height) !important;
@@ -209,10 +208,6 @@ body * {
 #msProjectTimeline .group-row-grid .cell-start,
 #msProjectTimeline .group-row-grid .cell-end {
   font-variant-numeric: tabular-nums;
-}
-
-#msProjectTimeline .group-row-grid .cell-style {
-  font-weight: 600;
 }
 
 #msProjectTimeline .vis-time-axis .vis-grid.vis-minor {
@@ -313,11 +308,10 @@ body * {
   :root {
     --col-id: 64px;
     --col-task: 216px;
-    --col-start: 98px;
-    --col-end: 98px;
+    --col-start: 84px;
+    --col-end: 84px;
     --col-duration: 78px;
     --col-team: 96px;
-    --col-style: 108px;
   }
 
   #toolbar {

@@ -13,13 +13,13 @@
   --grist-theme-selection: #e6f2fa;
 
   /* Colonnes de gauche */
-  --col-id2: 72px;
+  --col-id2: 56px;
   --col-task: 196px;
   --col-start: 96px;
   --col-end: 96px;
   --col-demarrage: 108px;
-  --col-indice: 72px;
-  --col-retards: 80px;
+  --col-indice: 64px;
+  --col-retards: 90px;
 
   --left-pad-x: 4px;
   --left-grid-width: calc(var(--col-id2) + var(--col-task) + var(--col-start) + var(--col-end) + var(--col-demarrage) + var(--col-indice) + var(--col-retards));
@@ -434,13 +434,13 @@ body * {
 
 @media (max-width: 1250px) {
   :root {
-    --col-id2: 64px;
+    --col-id2: 52px;
     --col-task: 172px;
     --col-start: 88px;
     --col-end: 88px;
     --col-demarrage: 96px;
     --col-indice: 64px;
-    --col-retards: 72px;
+    --col-retards: 84px;
   }
 
   #toolbar {

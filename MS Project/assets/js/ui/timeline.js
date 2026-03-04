@@ -183,11 +183,7 @@ function buildGroupLabelElement(group) {
   status.className = "cell-team";
   status.textContent = String(group?.teamLabel ?? "");
 
-  const style = document.createElement("div");
-  style.className = "cell-style";
-  style.textContent = String(group?.styleLabel ?? "");
-
-  row.append(id, task, start, end, progress, status, style);
+  row.append(id, task, start, end, progress, status);
   return row;
 }
 
