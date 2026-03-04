@@ -6,6 +6,7 @@ let dataAnchorDate = null;
 let hoverTooltipEl = null;
 let hoverTooltipBound = false;
 let clickTooltipTimer = null;
+let itemElementsObserver = null;
 
 function updateCurrentTimeLineBounds() {
   const container = document.getElementById("planningTimeline");
@@ -83,9 +84,24 @@ function placeHoverTooltip(eventLike) {
   const pos = getPointerClientPos(eventLike);
   if (!pos) return;
 
-  const offset = 12;
-  hoverTooltipEl.style.left = `${pos.x + offset}px`;
-  hoverTooltipEl.style.top = `${pos.y + offset}px`;
+  const offset = 14;
+  const rect = hoverTooltipEl.getBoundingClientRect();
+  const maxLeft = Math.max(8, window.innerWidth - rect.width - 8);
+  const maxTop = Math.max(8, window.innerHeight - rect.height - 8);
+
+  let left = pos.x + offset;
+  let top = pos.y + offset;
+
+  if (left > maxLeft) {
+    left = Math.max(8, pos.x - rect.width - offset);
+  }
+
+  if (top > maxTop) {
+    top = Math.max(8, pos.y - rect.height - offset);
+  }
+
+  hoverTooltipEl.style.left = `${left}px`;
+  hoverTooltipEl.style.top = `${top}px`;
 }
 
 function hideHoverTooltip() {
@@ -134,8 +150,52 @@ function buildPhaseTooltipHtml(item, group) {
   return "";
 }
 
+function getNativePhaseTitle(item, group) {
+  const cls = String(item?.className || "");
+  const tache = String(group?.tachesLabel || "Tache");
+
+  if (cls.includes("phase-coffrage")) {
+    return [
+      tache,
+      `Coffrage`,
+      `Date limite : ${getExactIsoDate(item.start)}`,
+      `Diff coffrage : ${getExactIsoDate(item.end)}`,
+    ].join("\n");
+  }
+
+  if (cls.includes("phase-armature")) {
+    return [
+      tache,
+      `Armature`,
+      `Diff coffrage : ${getExactIsoDate(item.start)}`,
+      `Diff armature : ${getExactIsoDate(item.end)}`,
+    ].join("\n");
+  }
+
+  if (cls.includes("phase-demarrage")) {
+    return [
+      tache,
+      `Debut des travaux`,
+      `Date : ${getExactIsoDate(item.start)}`,
+    ].join("\n");
+  }
+
+  return "";
+}
+
 function getTimelineItemFromElement(itemEl) {
   if (!itemEl || !itemsDataSet) return null;
+
+  const decoratedItemEl = itemEl.closest?.("[data-planning-item-id]");
+  const decoratedItemId = decoratedItemEl?.getAttribute("data-planning-item-id");
+  if (decoratedItemId) {
+    const decoratedItem =
+      itemsDataSet.get(decoratedItemId) ||
+      itemsDataSet.get(String(decoratedItemId)) ||
+      itemsDataSet.get(Number(decoratedItemId)) ||
+      null;
+    if (decoratedItem) return decoratedItem;
+  }
 
   const rawId =
     itemEl.getAttribute("data-id") ||
@@ -154,6 +214,53 @@ function getTimelineItemFromElement(itemEl) {
   }
 
   return null;
+}
+
+function getRenderedTimelineItemEntries() {
+  const renderedItems = timelineInstance?.itemSet?.items;
+  if (!renderedItems || typeof renderedItems !== "object") {
+    return [];
+  }
+
+  return Object.values(renderedItems);
+}
+
+function decorateRenderedTimelineItems(containerEl) {
+  if (!containerEl || !timelineInstance) return;
+
+  const entries = getRenderedTimelineItemEntries();
+  entries.forEach((entry) => {
+    const itemId = entry?.data?.id ?? entry?.id;
+    if (itemId == null) return;
+
+    const item =
+      itemsDataSet?.get(itemId) ||
+      itemsDataSet?.get(String(itemId)) ||
+      itemsDataSet?.get(Number(itemId)) ||
+      null;
+    if (!item) return;
+
+    const group = groupsDataSet ? groupsDataSet.get(item.group) : null;
+    const title = getNativePhaseTitle(item, group);
+
+    const domNodes = [
+      entry?.dom?.box,
+      entry?.dom?.point,
+      entry?.dom?.range,
+      entry?.dom?.line,
+      entry?.dom?.dot,
+      entry?.dom?.content,
+    ].filter(Boolean);
+
+    domNodes.forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      node.setAttribute("data-planning-item-id", String(itemId));
+      if (title) {
+        node.setAttribute("title", title);
+        node.setAttribute("aria-label", title);
+      }
+    });
+  });
 }
 
 function getTimelineItemFromEvent(event, containerEl) {
@@ -179,42 +286,142 @@ function getTimelineItemFromEvent(event, containerEl) {
   return getTimelineItemFromElement(itemEl);
 }
 
+function getHoverElementFromPoint(event, containerEl) {
+  const directHoverEl = event.target?.closest?.("[data-planning-item-id], .vis-item");
+  if (directHoverEl && (!containerEl || containerEl.contains(directHoverEl))) {
+    return directHoverEl;
+  }
+
+  if (
+    typeof document.elementsFromPoint === "function" &&
+    typeof event?.clientX === "number" &&
+    typeof event?.clientY === "number"
+  ) {
+    const stack = document.elementsFromPoint(event.clientX, event.clientY);
+    const hoveredFromStack = stack.find((el) => {
+      if (!(el instanceof HTMLElement)) return false;
+      const candidate = el.closest?.("[data-planning-item-id], .vis-item");
+      return candidate && (!containerEl || containerEl.contains(candidate));
+    });
+
+    if (hoveredFromStack instanceof HTMLElement) {
+      return hoveredFromStack.closest?.("[data-planning-item-id], .vis-item") || hoveredFromStack;
+    }
+  }
+
+  return null;
+}
+
+function showTooltipForItem(item, eventLike) {
+  if (!item) {
+    hideHoverTooltip();
+    return;
+  }
+
+  const group = groupsDataSet ? groupsDataSet.get(item.group) : null;
+  const html = buildPhaseTooltipHtml(item, group);
+  if (!html) {
+    hideHoverTooltip();
+    return;
+  }
+
+  if (hoverTooltipEl?.innerHTML !== html || hoverTooltipEl?.style.display === "none") {
+    showHoverTooltip(html, eventLike);
+  } else {
+    placeHoverTooltip(eventLike);
+  }
+}
+
+function syncNativeItemTitles(containerEl) {
+  if (!containerEl || !itemsDataSet) return;
+
+  const itemElements = containerEl.querySelectorAll(".vis-item");
+  itemElements.forEach((itemEl) => {
+    const item = getTimelineItemFromElement(itemEl);
+    if (!item) return;
+
+    const group = groupsDataSet ? groupsDataSet.get(item.group) : null;
+    const title = getNativePhaseTitle(item, group);
+    if (!title) return;
+
+    itemEl.setAttribute("title", title);
+    itemEl.setAttribute("aria-label", title);
+
+    const contentEl = itemEl.querySelector(".vis-item-content");
+    if (contentEl) {
+      contentEl.setAttribute("title", title);
+      contentEl.setAttribute("aria-label", title);
+    }
+  });
+}
+
+function bindItemHoverInteractions(containerEl) {
+  if (!containerEl) return;
+
+  const itemElements = containerEl.querySelectorAll(".vis-item");
+  itemElements.forEach((itemEl) => {
+    if (itemEl.dataset.planningTooltipBound === "1") return;
+    itemEl.dataset.planningTooltipBound = "1";
+
+    itemEl.addEventListener("mouseenter", (event) => {
+      const item = getTimelineItemFromElement(itemEl) || getTimelineItemFromEvent(event, containerEl);
+      showTooltipForItem(item, event);
+    });
+
+    itemEl.addEventListener("mousemove", (event) => {
+      const item = getTimelineItemFromElement(itemEl) || getTimelineItemFromEvent(event, containerEl);
+      showTooltipForItem(item, event);
+    });
+
+    itemEl.addEventListener("mouseleave", () => {
+      hideHoverTooltip();
+    });
+  });
+}
+
 function bindHoverTooltip(containerEl) {
   if (!timelineInstance || hoverTooltipBound || !containerEl) return;
   hoverTooltipBound = true;
 
   ensureHoverTooltip();
 
-  containerEl.addEventListener("mousemove", (event) => {
-    const itemEl = event.target?.closest?.(".vis-item");
-    if (!itemEl || !containerEl.contains(itemEl)) {
+  containerEl.addEventListener("pointermove", (event) => {
+    const hoverEl = getHoverElementFromPoint(event, containerEl);
+    if (!hoverEl || !containerEl.contains(hoverEl)) {
       hideHoverTooltip();
       return;
     }
 
-    const item = getTimelineItemFromElement(itemEl);
+    const item = getTimelineItemFromElement(hoverEl) || getTimelineItemFromEvent(event, containerEl);
     if (!item) {
       hideHoverTooltip();
       return;
     }
 
-    const group = groupsDataSet ? groupsDataSet.get(item.group) : null;
-    const html = buildPhaseTooltipHtml(item, group);
-    if (!html) {
-      hideHoverTooltip();
-      return;
-    }
-
-    if (hoverTooltipEl.innerHTML !== html || hoverTooltipEl.style.display === "none") {
-      showHoverTooltip(html, event);
-    } else {
-      placeHoverTooltip(event);
-    }
+    showTooltipForItem(item, event);
   });
 
   containerEl.addEventListener("mouseleave", () => {
     hideHoverTooltip();
   });
+
+  const syncInteractiveElements = () => {
+    decorateRenderedTimelineItems(containerEl);
+    syncNativeItemTitles(containerEl);
+    bindItemHoverInteractions(containerEl);
+  };
+
+  syncInteractiveElements();
+
+  if (!itemElementsObserver && typeof MutationObserver !== "undefined") {
+    itemElementsObserver = new MutationObserver(() => {
+      requestAnimationFrame(syncInteractiveElements);
+    });
+    itemElementsObserver.observe(containerEl, {
+      childList: true,
+      subtree: true,
+    });
+  }
 
   containerEl.addEventListener("click", (event) => {
     if (event.button !== 0) return; // clic gauche uniquement
@@ -517,6 +724,9 @@ export function renderPlanningTimeline({ groups, items }) {
   // Recalage automatique sur les dates des données
   requestAnimationFrame(() => {
     timelineInstance.redraw();
+    decorateRenderedTimelineItems(container);
+    syncNativeItemTitles(container);
+    bindItemHoverInteractions(container);
 
     const range = computeRange(items || []);
     if (range) {

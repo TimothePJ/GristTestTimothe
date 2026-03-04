@@ -5,6 +5,16 @@ let toolbarListenersBound = false;
 let dataAnchorDate = null;
 let hoverTooltipEl = null;
 let hoverTooltipBound = false;
+let itemElementsObserver = null;
+let debugEventsBound = false;
+
+function debugLog(message, payload) {
+  // if (payload === undefined) {
+  //   console.log(`[MS Project tooltip] ${message}`);
+  //   return;
+  // }
+  // console.log(`[MS Project tooltip] ${message}`, payload);
+}
 
 function toDate(value) {
   if (!value) return null;
@@ -58,6 +68,7 @@ function ensureHoverTooltip() {
   document.body.appendChild(el);
 
   hoverTooltipEl = el;
+  debugLog("Tooltip DOM element created.");
   return hoverTooltipEl;
 }
 
@@ -82,14 +93,31 @@ function placeHoverTooltip(eventLike) {
   const pos = getPointerClientPos(eventLike);
   if (!pos) return;
 
-  hoverTooltipEl.style.left = `${pos.x + 12}px`;
-  hoverTooltipEl.style.top = `${pos.y + 12}px`;
+  const offset = 14;
+  const rect = hoverTooltipEl.getBoundingClientRect();
+  const maxLeft = Math.max(8, window.innerWidth - rect.width - 8);
+  const maxTop = Math.max(8, window.innerHeight - rect.height - 8);
+
+  let left = pos.x + offset;
+  let top = pos.y + offset;
+
+  if (left > maxLeft) {
+    left = Math.max(8, pos.x - rect.width - offset);
+  }
+
+  if (top > maxTop) {
+    top = Math.max(8, pos.y - rect.height - offset);
+  }
+
+  hoverTooltipEl.style.left = `${left}px`;
+  hoverTooltipEl.style.top = `${top}px`;
 }
 
 function hideHoverTooltip() {
   if (!hoverTooltipEl) return;
   hoverTooltipEl.style.display = "none";
   hoverTooltipEl.innerHTML = "";
+  debugLog("Tooltip hidden.");
 }
 
 function showHoverTooltip(html, eventLike) {
@@ -97,10 +125,25 @@ function showHoverTooltip(html, eventLike) {
   hoverTooltipEl.innerHTML = html;
   hoverTooltipEl.style.display = "block";
   placeHoverTooltip(eventLike);
+  debugLog("Tooltip displayed.");
 }
 
 function getTimelineItemFromElement(itemEl) {
   if (!itemEl || !itemsDataSet) return null;
+
+  const decoratedItemEl = itemEl.closest?.("[data-ms-item-id]");
+  const decoratedItemId = decoratedItemEl?.getAttribute("data-ms-item-id");
+  if (decoratedItemId) {
+    const decoratedItem =
+      itemsDataSet.get(decoratedItemId) ||
+      itemsDataSet.get(String(decoratedItemId)) ||
+      itemsDataSet.get(Number(decoratedItemId)) ||
+      null;
+    if (decoratedItem) return decoratedItem;
+    debugLog("No dataset item resolved from decorated element.", {
+      decoratedItemId,
+    });
+  }
 
   const rawId =
     itemEl.getAttribute("data-id") ||
@@ -109,7 +152,143 @@ function getTimelineItemFromElement(itemEl) {
     "";
 
   if (!rawId) return null;
-  return itemsDataSet.get(rawId) || itemsDataSet.get(Number(rawId)) || null;
+  const item = itemsDataSet.get(rawId) || itemsDataSet.get(Number(rawId)) || null;
+  if (!item) {
+    debugLog("No dataset item resolved from DOM element.", { rawId });
+  }
+  return item;
+}
+
+function getRenderedTimelineItemEntries() {
+  const renderedItems = timelineInstance?.itemSet?.items;
+  if (!renderedItems || typeof renderedItems !== "object") {
+    return [];
+  }
+
+  return Object.values(renderedItems);
+}
+
+function decorateRenderedTimelineItems(containerEl) {
+  if (!containerEl || !timelineInstance) return;
+
+  const entries = getRenderedTimelineItemEntries();
+  debugLog("Decorate rendered timeline items.", { count: entries.length });
+
+  entries.forEach((entry) => {
+    const itemId = entry?.data?.id ?? entry?.id;
+    if (itemId == null) return;
+
+    const item =
+      itemsDataSet?.get(itemId) ||
+      itemsDataSet?.get(String(itemId)) ||
+      itemsDataSet?.get(Number(itemId)) ||
+      null;
+    if (!item) return;
+
+    const group = groupsDataSet ? groupsDataSet.get(item.group) : null;
+    const title = getNativeItemTitle(item, group);
+
+    const domNodes = [
+      entry?.dom?.box,
+      entry?.dom?.point,
+      entry?.dom?.range,
+      entry?.dom?.line,
+      entry?.dom?.dot,
+      entry?.dom?.content,
+    ].filter(Boolean);
+
+    domNodes.forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      node.setAttribute("data-ms-item-id", String(itemId));
+      if (title) {
+        node.setAttribute("title", title);
+        node.setAttribute("aria-label", title);
+      }
+    });
+  });
+}
+
+function getTimelineItemFromEvent(event, containerEl) {
+  if (timelineInstance && typeof timelineInstance.getEventProperties === "function" && itemsDataSet) {
+    const props = timelineInstance.getEventProperties(event);
+    debugLog("getEventProperties result", props);
+    const itemId = props?.item;
+    if (itemId != null) {
+      const item = itemsDataSet.get(itemId) || itemsDataSet.get(String(itemId)) || itemsDataSet.get(Number(itemId));
+      if (item) return item;
+      debugLog("No dataset item resolved from getEventProperties.", { itemId });
+    }
+  }
+
+  const itemEl = event?.target?.closest?.(".vis-item");
+  if (!itemEl || (containerEl && !containerEl.contains(itemEl))) return null;
+  return getTimelineItemFromElement(itemEl);
+}
+
+function getHoverElementFromPoint(event, containerEl) {
+  const directHoverEl = event.target?.closest?.("[data-ms-item-id], .vis-item");
+  if (directHoverEl && (!containerEl || containerEl.contains(directHoverEl))) {
+    return directHoverEl;
+  }
+
+  if (
+    typeof document.elementsFromPoint === "function" &&
+    typeof event?.clientX === "number" &&
+    typeof event?.clientY === "number"
+  ) {
+    const stack = document.elementsFromPoint(event.clientX, event.clientY);
+    const hoveredFromStack = stack.find((el) => {
+      if (!(el instanceof HTMLElement)) return false;
+      const candidate = el.closest?.("[data-ms-item-id], .vis-item");
+      return candidate && (!containerEl || containerEl.contains(candidate));
+    });
+
+    if (hoveredFromStack instanceof HTMLElement) {
+      return hoveredFromStack.closest?.("[data-ms-item-id], .vis-item") || hoveredFromStack;
+    }
+
+    debugLog("elementsFromPoint found no timeline item.", {
+      stack: stack.slice(0, 6).map((el) => {
+        if (!(el instanceof HTMLElement)) return String(el);
+        return {
+          tag: el.tagName,
+          id: el.id || "",
+          className: el.className || "",
+          dataMsItemId: el.getAttribute("data-ms-item-id") || "",
+        };
+      }),
+    });
+  }
+
+  return null;
+}
+
+function showTooltipForItem(item, eventLike) {
+  if (!item) {
+    debugLog("showTooltipForItem called without item.");
+    hideHoverTooltip();
+    return;
+  }
+
+  const group = groupsDataSet ? groupsDataSet.get(item.group) : null;
+  const html = buildTaskTooltipHtml(item, group);
+  if (!html) {
+    debugLog("No tooltip HTML generated for item.", item);
+    hideHoverTooltip();
+    return;
+  }
+
+  debugLog("Tooltip candidate resolved.", {
+    itemId: item.id,
+    groupId: item.group,
+    task: group?.taskLabel || "",
+  });
+
+  if (hoverTooltipEl?.innerHTML !== html || hoverTooltipEl?.style.display === "none") {
+    showHoverTooltip(html, eventLike);
+  } else {
+    placeHoverTooltip(eventLike);
+  }
 }
 
 function buildTaskTooltipHtml(item, group) {
@@ -117,14 +296,114 @@ function buildTaskTooltipHtml(item, group) {
   const end = toDate(item?.end);
 
   return `
-    <div><strong>${escapeHtml(group?.taskLabel || "Tache")}</strong></div>
-    <div>Numero : <strong>${escapeHtml(group?.idLabel || "Non renseigne")}</strong></div>
-    <div>Debut : <strong>${escapeHtml(start ? start.toISOString().slice(0, 10) : "Non renseigne")}</strong></div>
-    <div>Fin : <strong>${escapeHtml(end ? end.toISOString().slice(0, 10) : "Non renseigne")}</strong></div>
-    <div>Duree : <strong>${escapeHtml(group?.durationLabel || "Non renseignee")}</strong></div>
-    <div>Equipe : <strong>${escapeHtml(group?.teamLabel || "Non renseignee")}</strong></div>
-    <div>Style : <strong>${escapeHtml(group?.styleLabel || "Non renseigne")}</strong></div>
+    <div class="tooltip-task-name">${escapeHtml(group?.taskLabel || "Tache")}</div>
+    <div class="tooltip-meta-row">Numero : <strong>${escapeHtml(group?.idLabel || "Non renseigne")}</strong></div>
+    <div class="tooltip-meta-row">Debut : <strong>${escapeHtml(start ? start.toLocaleDateString("fr-FR") : "Non renseigne")}</strong></div>
+    <div class="tooltip-meta-row">Fin : <strong>${escapeHtml(end ? end.toLocaleDateString("fr-FR") : "Non renseigne")}</strong></div>
+    <div class="tooltip-meta-row">Duree : <strong>${escapeHtml(group?.durationLabel || "Non renseignee")}</strong></div>
+    <div class="tooltip-meta-row">Equipe : <strong>${escapeHtml(group?.teamLabel || "Non renseignee")}</strong></div>
+    <div class="tooltip-meta-row">Style : <strong>${escapeHtml(group?.styleLabel || "Non renseigne")}</strong></div>
   `;
+}
+
+function getNativeItemTitle(item, group) {
+  const start = toDate(item?.start);
+  const end = toDate(item?.end);
+  const lines = [
+    String(group?.taskLabel || "Tache"),
+    `Debut : ${start ? start.toLocaleDateString("fr-FR") : "Non renseigne"}`,
+    `Fin : ${end ? end.toLocaleDateString("fr-FR") : "Non renseigne"}`,
+  ];
+  return lines.join("\n");
+}
+
+function syncNativeItemTitles(containerEl) {
+  if (!containerEl || !itemsDataSet) return;
+
+  const itemElements = containerEl.querySelectorAll(".vis-item");
+  debugLog("Sync native titles on rendered items.", { count: itemElements.length });
+  itemElements.forEach((itemEl) => {
+    const item = getTimelineItemFromElement(itemEl);
+    if (!item) return;
+
+    const group = groupsDataSet ? groupsDataSet.get(item.group) : null;
+    const title = getNativeItemTitle(item, group);
+    if (!title) return;
+
+    itemEl.setAttribute("title", title);
+    itemEl.setAttribute("aria-label", title);
+
+    const contentEl = itemEl.querySelector(".vis-item-content");
+    if (contentEl) {
+      contentEl.setAttribute("title", title);
+      contentEl.setAttribute("aria-label", title);
+    }
+  });
+}
+
+function bindItemHoverInteractions(containerEl) {
+  if (!containerEl) return;
+
+  const itemElements = containerEl.querySelectorAll(".vis-item");
+  debugLog("Bind hover interactions scan.", { count: itemElements.length });
+  itemElements.forEach((itemEl) => {
+    if (itemEl.dataset.msTooltipBound === "1") return;
+    itemEl.dataset.msTooltipBound = "1";
+    debugLog("Hover listeners bound to item element.", {
+      rawId:
+        itemEl.getAttribute("data-id") ||
+        itemEl.getAttribute("data-item-id") ||
+        itemEl.dataset?.id ||
+        "",
+    });
+
+    itemEl.addEventListener("mouseenter", (event) => {
+      const item = getTimelineItemFromElement(itemEl) || getTimelineItemFromEvent(event, containerEl);
+      debugLog("mouseenter on item.", {
+        resolved: Boolean(item),
+        title: itemEl.getAttribute("title") || "",
+      });
+      showTooltipForItem(item, event);
+    });
+
+    itemEl.addEventListener("mousemove", (event) => {
+      const item = getTimelineItemFromElement(itemEl) || getTimelineItemFromEvent(event, containerEl);
+      if (!item) {
+        debugLog("mousemove on item but no data item resolved.");
+      }
+      showTooltipForItem(item, event);
+    });
+
+    itemEl.addEventListener("mouseleave", () => {
+      debugLog("mouseleave on item.");
+      hideHoverTooltip();
+    });
+  });
+}
+
+function bindDebugTimelineEvents() {
+  if (!timelineInstance || debugEventsBound) return;
+  debugEventsBound = true;
+
+  timelineInstance.on("itemover", (props) => {
+    debugLog("vis itemover", props);
+  });
+
+  timelineInstance.on("itemout", (props) => {
+    debugLog("vis itemout", props);
+  });
+
+  timelineInstance.on("click", (props) => {
+    if (props?.item != null) {
+      debugLog("vis click on item", props);
+    }
+  });
+
+  timelineInstance.on("mouseMove", (props) => {
+    if (props?.item != null) {
+      debugLog("vis mouseMove on item", props);
+    }
+  });
 }
 
 function bindHoverTooltip(containerEl) {
@@ -133,26 +412,51 @@ function bindHoverTooltip(containerEl) {
 
   ensureHoverTooltip();
 
-  containerEl.addEventListener("mousemove", (event) => {
-    const itemEl = event.target?.closest?.(".vis-item");
-    if (!itemEl || !containerEl.contains(itemEl)) {
+  containerEl.addEventListener("pointermove", (event) => {
+    const hoverEl = getHoverElementFromPoint(event, containerEl);
+    if (!hoverEl || !containerEl.contains(hoverEl)) {
       hideHoverTooltip();
       return;
     }
 
-    const item = getTimelineItemFromElement(itemEl);
+    const item = getTimelineItemFromElement(hoverEl) || getTimelineItemFromEvent(event, containerEl);
     if (!item) {
+      debugLog("pointermove found no item.", {
+        targetClass: event.target?.className || "",
+      });
       hideHoverTooltip();
       return;
     }
 
-    const group = groupsDataSet ? groupsDataSet.get(item.group) : null;
-    showHoverTooltip(buildTaskTooltipHtml(item, group), event);
+    debugLog("pointermove resolved item.", {
+      itemId: item.id,
+    });
+    showTooltipForItem(item, event);
   });
 
   containerEl.addEventListener("mouseleave", () => {
     hideHoverTooltip();
   });
+
+  const syncInteractiveElements = () => {
+    debugLog("Sync interactive elements triggered.");
+    decorateRenderedTimelineItems(containerEl);
+    syncNativeItemTitles(containerEl);
+    bindItemHoverInteractions(containerEl);
+  };
+
+  syncInteractiveElements();
+
+  if (!itemElementsObserver && typeof MutationObserver !== "undefined") {
+    itemElementsObserver = new MutationObserver(() => {
+      debugLog("MutationObserver detected timeline DOM changes.");
+      requestAnimationFrame(syncInteractiveElements);
+    });
+    itemElementsObserver.observe(containerEl, {
+      childList: true,
+      subtree: true,
+    });
+  }
 }
 
 function buildGroupLabelElement(group) {
@@ -333,6 +637,10 @@ function moveWindowByMode(direction) {
 
 export function renderMsProjectTimeline({ groups, items }) {
   const container = getTimelineContainer();
+  debugLog("Render timeline called.", {
+    groups: groups?.length || 0,
+    items: items?.length || 0,
+  });
 
   if (!window.vis || !window.vis.DataSet || !window.vis.Timeline) {
     throw new Error("vis-timeline non charge.");
@@ -366,11 +674,16 @@ export function renderMsProjectTimeline({ groups, items }) {
       zoomable: true,
       moveable: true,
       verticalScroll: true,
-      showTooltips: false,
+      tooltip: {
+        followMouse: true,
+        overflowMethod: "cap",
+      },
+      showTooltips: true,
       groupTemplate: (group) => buildGroupLabelElement(group),
       groupOrder: (a, b) => a.sortIndex - b.sortIndex,
     });
-
+    debugLog("vis Timeline instance created.");
+    bindDebugTimelineEvents();
     bindHoverTooltip(container);
   }
 
@@ -379,9 +692,17 @@ export function renderMsProjectTimeline({ groups, items }) {
 
   groupsDataSet.add(groups || []);
   itemsDataSet.add(items || []);
+  debugLog("Datasets updated.", {
+    groupCount: groupsDataSet.length,
+    itemCount: itemsDataSet.length,
+  });
 
   requestAnimationFrame(() => {
     timelineInstance.redraw();
+    decorateRenderedTimelineItems(container);
+    syncNativeItemTitles(container);
+    bindItemHoverInteractions(container);
+    debugLog("Timeline redraw completed.");
 
     const range = computeRange(items || []);
     if (range) {
