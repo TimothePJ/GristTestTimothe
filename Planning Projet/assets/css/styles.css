@@ -13,15 +13,16 @@
   --grist-theme-selection: #e6f2fa;
 
   /* Colonnes de gauche */
-  --col-id2: 90px;
-  --col-task: 188px;
-  --col-type: 140px;
-  --col-line: 130px;
-  --col-indice: 80px;
-  --col-retards: 92px;
+  --col-id2: 72px;
+  --col-task: 196px;
+  --col-start: 96px;
+  --col-end: 96px;
+  --col-demarrage: 108px;
+  --col-indice: 72px;
+  --col-retards: 80px;
 
-  --left-pad-x: 8px;
-  --left-grid-width: calc(var(--col-id2) + var(--col-task) + var(--col-type) + var(--col-line) + var(--col-indice) + var(--col-retards));
+  --left-pad-x: 4px;
+  --left-grid-width: calc(var(--col-id2) + var(--col-task) + var(--col-start) + var(--col-end) + var(--col-demarrage) + var(--col-indice) + var(--col-retards));
   --left-panel-width: calc(var(--left-grid-width) + (var(--left-pad-x) * 2));
 
   /* Hauteur de ligne commune labels + timeline */
@@ -148,7 +149,7 @@ body * {
 /* ✅ C'EST ICI que va le bloc que tu as cité */
 .planning-header-left {
   display: grid;
-  grid-template-columns: var(--col-id2) var(--col-task) var(--col-type) var(--col-line) var(--col-indice) var(--col-retards);
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-start) var(--col-end) var(--col-demarrage) var(--col-indice) var(--col-retards);
   width: var(--left-grid-width);
   padding: 0 var(--left-pad-x);
   box-sizing: content-box;
@@ -166,9 +167,12 @@ body * {
   font-weight: 600;
 }
 
+.planning-header-left .c-start,
+.planning-header-left .c-end,
+.planning-header-left .c-demarrage,
 .planning-header-left .c-id2,
-.planning-header-left .c-line {
-  text-align: right;
+.planning-header-left .c-task {
+  text-align: left;
 }
 
 .planning-header-left .c-indice {
@@ -291,7 +295,7 @@ body * {
 
 #planningTimeline .group-row-grid {
   display: grid !important;
-  grid-template-columns: var(--col-id2) var(--col-task) var(--col-type) var(--col-line) var(--col-indice) var(--col-retards) !important;
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-start) var(--col-end) var(--col-demarrage) var(--col-indice) var(--col-retards) !important;
   align-items: center !important;
   width: var(--left-grid-width) !important;
   min-height: var(--planning-row-height) !important;
@@ -310,8 +314,11 @@ body * {
 }
 
 #planningTimeline .group-row-grid .cell-id2,
-#planningTimeline .group-row-grid .cell-line {
-  text-align: right !important;
+#planningTimeline .group-row-grid .cell-task,
+#planningTimeline .group-row-grid .cell-start,
+#planningTimeline .group-row-grid .cell-end,
+#planningTimeline .group-row-grid .cell-demarrage {
+  text-align: left !important;
   font-variant-numeric: tabular-nums;
 }
 
@@ -427,12 +434,13 @@ body * {
 
 @media (max-width: 1250px) {
   :root {
-    --col-id2: 80px;
-    --col-task: 142px;
-    --col-type: 120px;
-    --col-line: 120px;
-    --col-indice: 70px;
-    --col-retards: 78px;
+    --col-id2: 64px;
+    --col-task: 172px;
+    --col-start: 88px;
+    --col-end: 88px;
+    --col-demarrage: 96px;
+    --col-indice: 64px;
+    --col-retards: 72px;
   }
 
   #toolbar {

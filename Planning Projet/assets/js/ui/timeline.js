@@ -248,13 +248,17 @@ function buildGroupLabelElement(group) {
   tache.className = "cell-task";
   tache.textContent = String(group?.tachesLabel ?? "");
 
-  const typeDoc = document.createElement("div");
-  typeDoc.className = "cell-type";
-  typeDoc.textContent = String(group?.typeDocLabel ?? "");
+  const debut = document.createElement("div");
+  debut.className = "cell-start";
+  debut.textContent = String(group?.debutLabel ?? "");
 
-  const ligne = document.createElement("div");
-  ligne.className = "cell-line";
-  ligne.textContent = String(group?.lignePlanningLabel ?? "");
+  const fin = document.createElement("div");
+  fin.className = "cell-end";
+  fin.textContent = String(group?.finLabel ?? "");
+
+  const demarrage = document.createElement("div");
+  demarrage.className = "cell-demarrage";
+  demarrage.textContent = String(group?.demarrageLabel ?? "");
 
   const indice = document.createElement("div");
   indice.className = "cell-indice";
@@ -264,7 +268,7 @@ function buildGroupLabelElement(group) {
   retards.className = "cell-retards";
   retards.textContent = String(group?.retardsLabel ?? "");
 
-  row.append(id2, tache, typeDoc, ligne, indice, retards);
+  row.append(id2, tache, debut, fin, demarrage, indice, retards);
   return row;
 }
 

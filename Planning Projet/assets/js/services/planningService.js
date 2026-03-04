@@ -69,6 +69,25 @@ function isAllowedTypeDoc(value) {
   return normalized.includes("COFFRAGE") || normalized.includes("ARMATURES");
 }
 
+function resolveBandStartDate(typeDoc, dateLimiteRaw, diffCoffrageRaw) {
+  const normalized = String(typeDoc ?? "").toUpperCase();
+  if (normalized.includes("ARMATURES")) return parseDate(diffCoffrageRaw);
+  if (normalized.includes("COFFRAGE")) return parseDate(dateLimiteRaw);
+  return null;
+}
+
+function resolveBandEndDate(typeDoc, diffCoffrageRaw, diffArmatureRaw) {
+  const normalized = String(typeDoc ?? "").toUpperCase();
+  if (normalized.includes("ARMATURES")) return parseDate(diffArmatureRaw);
+  if (normalized.includes("COFFRAGE")) return parseDate(diffCoffrageRaw);
+  return null;
+}
+
+function fmtCellDate(date) {
+  if (!date) return "";
+  return date.toLocaleDateString("fr-FR");
+}
+
 function escapeHtml(str) {
   return String(str ?? "")
     .replace(/&/g, "&amp;")
@@ -92,11 +111,12 @@ function fmtDateIso(date) {
 
 function buildGroupContent(row) {
   return `
-    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-type) var(--col-line) var(--col-indice) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
+    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-start) var(--col-end) var(--col-demarrage) var(--col-indice) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
       <div class="cell-id2">${escapeHtml(row.id2 ?? "")}</div>
       <div class="cell-task">${escapeHtml(row.taches ?? "")}</div>
-      <div class="cell-type">${escapeHtml(row.typeDoc ?? "")}</div>
-      <div class="cell-line">${escapeHtml(row.lignePlanning ?? "")}</div>
+      <div class="cell-start">${escapeHtml(row.debut ?? "")}</div>
+      <div class="cell-end">${escapeHtml(row.fin ?? "")}</div>
+      <div class="cell-demarrage">${escapeHtml(row.demarrage ?? "")}</div>
       <div class="cell-indice">${escapeHtml(row.indice ?? "")}</div>
       <div class="cell-retards">${escapeHtml(row.retards ?? "")}</div>
     </div>
@@ -225,6 +245,21 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
     const id2Text = toText(r[cfg.id2]);
     const lignePlanningText = toText(r[cfg.lignePlanning]);
     const tachesText = toText(r[cfg.taches]) || toText(r[cfg.tacheAlt]);
+    const typeDocText = toText(r[cfg.typeDoc]);
+    const dateLimiteValue = r[cfg.dateLimite];
+    const diffCoffrageValue = r[cfg.diffCoffrageCalc] ?? r[cfg.diffCoffrage];
+    const diffArmatureValue = r[cfg.diffArmatureCalc] ?? r[cfg.diffArmature];
+    const bandStartDate = resolveBandStartDate(
+      typeDocText,
+      dateLimiteValue,
+      diffCoffrageValue
+    );
+    const bandEndDate = resolveBandEndDate(
+      typeDocText,
+      diffCoffrageValue,
+      diffArmatureValue
+    );
+    const demarrageTravauxValue = r[cfg.demarragesTravauxCalc] ?? r[cfg.demarragesTravaux];
 
     return {
       rowId: r[cfg.id] ?? null,
@@ -233,7 +268,10 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       // Colonnes affichees
       id2: id2Text,
       taches: tachesText,
-      typeDoc: toText(r[cfg.typeDoc]),
+      typeDoc: typeDocText,
+      debut: fmtCellDate(bandStartDate),
+      fin: fmtCellDate(bandEndDate),
+      demarrage: fmtCellDate(parseDate(demarrageTravauxValue)),
       lignePlanning: lignePlanningText,
 
       // Valeurs numeriques de tri (robustes)
@@ -241,16 +279,16 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       lignePlanningNum: toNumber(lignePlanningText),
 
       // Phases planning
-      dateLimite: r[cfg.dateLimite],
+      dateLimite: dateLimiteValue,
       duree1: r[cfg.duree1],
 
-      diffCoffrage: r[cfg.diffCoffrageCalc] ?? r[cfg.diffCoffrage],
+      diffCoffrage: diffCoffrageValue,
       duree2: r[cfg.duree2],
 
-      diffArmature: r[cfg.diffArmatureCalc] ?? r[cfg.diffArmature],
+      diffArmature: diffArmatureValue,
       duree3: r[cfg.duree3],
 
-      demarragesTravaux: r[cfg.demarragesTravauxCalc] ?? r[cfg.demarragesTravaux],
+      demarragesTravaux: demarrageTravauxValue,
       retards: toText(r[cfg.retards]),
 
       indice: toText(r[cfg.indice]),
@@ -304,6 +342,9 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       id2Label: row.id2 ?? "",
       tachesLabel: row.taches ?? "",
       typeDocLabel: row.typeDoc ?? "",
+      debutLabel: row.debut ?? "",
+      finLabel: row.fin ?? "",
+      demarrageLabel: row.demarrage ?? "",
       lignePlanningLabel: row.lignePlanning ?? "",
       indiceLabel: row.indice ?? "",
       retardsLabel: row.retards ?? "",
