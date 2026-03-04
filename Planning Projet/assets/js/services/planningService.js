@@ -64,6 +64,11 @@ function getCurrentInstant() {
   return new Date();
 }
 
+function isAllowedTypeDoc(value) {
+  const normalized = String(value ?? "").toUpperCase();
+  return normalized.includes("COFFRAGE") || normalized.includes("ARMATURES");
+}
+
 function escapeHtml(str) {
   return String(str ?? "")
     .replace(/&/g, "&amp;")
@@ -259,6 +264,8 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
   } else if (projectLinkCol) {
     rows = rows.filter((r) => r.projectLink === selectedProject);
   }
+
+  rows = rows.filter((row) => isAllowedTypeDoc(row.typeDoc));
 
   // TRI ROBUSTE 
   // 1) Ligne_planning
