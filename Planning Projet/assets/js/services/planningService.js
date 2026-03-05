@@ -247,8 +247,8 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
     const tachesText = toText(r[cfg.taches]) || toText(r[cfg.tacheAlt]);
     const typeDocText = toText(r[cfg.typeDoc]);
     const dateLimiteValue = r[cfg.dateLimite];
-    const diffCoffrageValue = r[cfg.diffCoffrageCalc] ?? r[cfg.diffCoffrage];
-    const diffArmatureValue = r[cfg.diffArmatureCalc] ?? r[cfg.diffArmature];
+    const diffCoffrageValue = r[cfg.diffCoffrage];
+    const diffArmatureValue = r[cfg.diffArmature];
     const bandStartDate = resolveBandStartDate(
       typeDocText,
       dateLimiteValue,
@@ -259,7 +259,7 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       diffCoffrageValue,
       diffArmatureValue
     );
-    const demarrageTravauxValue = r[cfg.demarragesTravauxCalc] ?? r[cfg.demarragesTravaux];
+    const demarrageTravauxValue = r[cfg.demarragesTravaux];
 
     return {
       rowId: r[cfg.id] ?? null,
