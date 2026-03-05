@@ -69,6 +69,16 @@ function isAllowedTypeDoc(value) {
   return normalized.includes("COFFRAGE") || normalized.includes("ARMATURES");
 }
 
+function isCoffrageTypeDoc(value) {
+  const normalized = String(value ?? "").toUpperCase();
+  return normalized.includes("COFFRAGE");
+}
+
+function isArmaturesTypeDoc(value) {
+  const normalized = String(value ?? "").toUpperCase();
+  return normalized.includes("ARMATURES");
+}
+
 function resolveBandStartDate(typeDoc, dateLimiteRaw, diffCoffrageRaw) {
   const normalized = String(typeDoc ?? "").toUpperCase();
   if (normalized.includes("ARMATURES")) return parseDate(diffCoffrageRaw);
@@ -357,51 +367,53 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       // On garde meta pour debug / usages futurs
       meta: row,
     });
-    // Coffrage : Date_limite -> Diff_coffrage
-    const pCoffrage = createRangeBetweenDates(row.dateLimite, row.diffCoffrage);
-    if (pCoffrage) {
-      items.push(
-        ...createSplitPhaseItems({
-          itemIdBase: `${groupId}-p-coffrage`,
-          groupId,
-          start: pCoffrage.start,
-          end: pCoffrage.end,
-          label: "Coffrage",
-          className: "phase-coffrage",
-          title: `
-            <b>${escapeHtml(row.taches || "Tache")}</b><br>
-            Coffrage<br>
-            Date limite : ${fmtDate(pCoffrage.start)} (${fmtDateIso(pCoffrage.start)})<br>
-            Diff coffrage : ${fmtDate(pCoffrage.end)} (${fmtDateIso(pCoffrage.end)})
-          `,
-        })
-      );
+    if (isCoffrageTypeDoc(row.typeDoc)) {
+      // COFFRAGE : Date_limite -> Diff_coffrage
+      const pCoffrage = createRangeBetweenDates(row.dateLimite, row.diffCoffrage);
+      if (pCoffrage) {
+        items.push(
+          ...createSplitPhaseItems({
+            itemIdBase: `${groupId}-p-coffrage`,
+            groupId,
+            start: pCoffrage.start,
+            end: pCoffrage.end,
+            label: "Coffrage",
+            className: "phase-coffrage",
+            title: `
+              <b>${escapeHtml(row.taches || "Tache")}</b><br>
+              Coffrage<br>
+              Date limite : ${fmtDate(pCoffrage.start)} (${fmtDateIso(pCoffrage.start)})<br>
+              Diff coffrage : ${fmtDate(pCoffrage.end)} (${fmtDateIso(pCoffrage.end)})
+            `,
+          })
+        );
+      }
+    } else if (isArmaturesTypeDoc(row.typeDoc)) {
+      // ARMATURES : Diff_coffrage -> Diff_armature
+      const pArmature = createRangeBetweenDates(row.diffCoffrage, row.diffArmature);
+      if (pArmature) {
+        items.push(
+          ...createSplitPhaseItems({
+            itemIdBase: `${groupId}-p-armature`,
+            groupId,
+            start: pArmature.start,
+            end: pArmature.end,
+            label: "Armature",
+            className: "phase-armature",
+            title: `
+              <b>${escapeHtml(row.taches || "Tache")}</b><br>
+              Armature<br>
+              Diff coffrage : ${fmtDate(pArmature.start)} (${fmtDateIso(pArmature.start)})<br>
+              Diff armature : ${fmtDate(pArmature.end)} (${fmtDateIso(pArmature.end)})
+            `,
+          })
+        );
+      }
     }
 
-    // Armature : Diff_coffrage -> Diff_armature
-    const pArmature = createRangeBetweenDates(row.diffCoffrage, row.diffArmature);
-    if (pArmature) {
-      items.push(
-        ...createSplitPhaseItems({
-          itemIdBase: `${groupId}-p-armature`,
-          groupId,
-          start: pArmature.start,
-          end: pArmature.end,
-          label: "Armature",
-          className: "phase-armature",
-          title: `
-            <b>${escapeHtml(row.taches || "Tache")}</b><br>
-            Armature<br>
-            Diff coffrage : ${fmtDate(pArmature.start)} (${fmtDateIso(pArmature.start)})<br>
-            Diff armature : ${fmtDate(pArmature.end)} (${fmtDateIso(pArmature.end)})
-          `,
-        })
-      );
-    }
-
-    // Debut des travaux : case coloree sur 1 jour a Demarrages_travaux
+    // Debut des travaux : non affiche pour les lignes COFFRAGE
     const demarrageTravauxDate = parseDate(row.demarragesTravaux);
-    if (demarrageTravauxDate) {
+    if (demarrageTravauxDate && !isCoffrageTypeDoc(row.typeDoc)) {
       const demarrageTravauxEnd = addDays(demarrageTravauxDate, 1);
       items.push(
         createPhaseItem({

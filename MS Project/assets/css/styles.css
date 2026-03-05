@@ -313,9 +313,92 @@ body * {
 }
 
 #msProjectTimeline .vis-item.bar-style-demolition {
-  background: #fee2e2 !important;
+  background-color: #fee2e2 !important;
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(220, 38, 38, 0.25) 0px,
+    rgba(220, 38, 38, 0.25) 6px,
+    rgba(220, 38, 38, 0.06) 6px,
+    rgba(220, 38, 38, 0.06) 12px
+  ) !important;
   border-color: #f87171 !important;
   color: #991b1b !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-installation,
+#msProjectTimeline .vis-item[class*="bar-style-"][class*="installation"] {
+  background-color: #ca8a04 !important;
+  background-image: none !important;
+  border-color: #a16207 !important;
+  color: #fffbeb !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-structure,
+#msProjectTimeline .vis-item[class*="bar-style-"][class*="structure"] {
+  background-color: #1e3a8a !important;
+  background-image: none !important;
+  border-color: #1e40af !important;
+  color: #eff6ff !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-terr-rso,
+#msProjectTimeline .vis-item[class*="bar-style-"][class*="terr-rso"] {
+  background-color: #8b5e34 !important;
+  background-image: none !important;
+  border-color: #6f4518 !important;
+  color: #fef3c7 !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-preparation,
+#msProjectTimeline .vis-item[class*="bar-style-"][class*="preparation"] {
+  background-color: #dbeafe !important;
+  background-image: repeating-linear-gradient(
+      45deg,
+      rgba(30, 64, 175, 0.16) 0px,
+      rgba(30, 64, 175, 0.16) 5px,
+      rgba(30, 64, 175, 0.03) 5px,
+      rgba(30, 64, 175, 0.03) 10px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(30, 64, 175, 0.16) 0px,
+      rgba(30, 64, 175, 0.16) 5px,
+      rgba(30, 64, 175, 0.03) 5px,
+      rgba(30, 64, 175, 0.03) 10px
+    ) !important;
+  border-color: #60a5fa !important;
+  color: #1e40af !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-cet-cea,
+#msProjectTimeline .vis-item[class*="bar-style-"][class*="cet-cea"],
+#msProjectTimeline .vis-item[class*="bar-style-cet"][class*="cea"] {
+  background-color: #bfdbfe !important;
+  background-image: none !important;
+  border-color: #60a5fa !important;
+  color: #1e3a8a !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-autre,
+#msProjectTimeline .vis-item[class*="bar-style-"][class*="autre"] {
+  background-color: #ffffff !important;
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(148, 163, 184, 0.35) 0px,
+    rgba(148, 163, 184, 0.35) 2px,
+    rgba(255, 255, 255, 1) 2px,
+    rgba(255, 255, 255, 1) 8px
+  ) !important;
+  border-color: #cbd5e1 !important;
+  color: #334155 !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-mth,
+#msProjectTimeline .vis-item[class*="bar-style-"][class*="mth"] {
+  background-color: #22c55e !important;
+  background-image: none !important;
+  border-color: #16a34a !important;
+  color: #f0fdf4 !important;
 }
 
 #msProjectTimeline .vis-item.bar-style-gros-oeuvre {
@@ -325,9 +408,9 @@ body * {
 }
 
 #msProjectTimeline .vis-item.bar-style-etudes {
-  background: #ede9fe !important;
-  border-color: #a78bfa !important;
-  color: #5b21b6 !important;
+  background: #f97316 !important;
+  border-color: #ea580c !important;
+  color: #fff7ed !important;
 }
 
 #msProjectTimeline .vis-item.bar-style-approvisionnement {
