@@ -198,6 +198,34 @@ body * {
   text-overflow: ellipsis !important;
 }
 
+#msProjectTimeline .group-row-grid .editable-date-cell {
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell:hover {
+  background: #eef6ff;
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell.is-editing-date {
+  padding: 2px 6px !important;
+  overflow: visible !important;
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell .editable-date-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #93c5fd;
+  border-radius: 4px;
+  padding: 2px 4px;
+  font: inherit;
+  color: #0f172a;
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell.is-saving-date {
+  opacity: 0.7;
+}
+
 #msProjectTimeline .group-row-grid .cell-duration {
   text-align: center !important;
   font-variant-numeric: tabular-nums;

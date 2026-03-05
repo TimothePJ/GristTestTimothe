@@ -7,6 +7,9 @@ let hoverTooltipEl = null;
 let hoverTooltipBound = false;
 let itemElementsObserver = null;
 let debugEventsBound = false;
+let dateCellEditHandler = null;
+let dateCellEditBound = false;
+let activeDateEditor = null;
 
 function debugLog(message, payload) {
   // if (payload === undefined) {
@@ -14,6 +17,33 @@ function debugLog(message, payload) {
   //   return;
   // }
   // console.log(`[MS Project tooltip] ${message}`, payload);
+}
+
+function parseIsoDateText(value) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+function parseFrDateTextToIso(value) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) return "";
+  return `${match[3]}-${match[2]}-${match[1]}`;
+}
+
+function normalizeDateInputToIso(value) {
+  const iso = parseIsoDateText(value);
+  if (iso) return iso;
+  return parseFrDateTextToIso(value);
+}
+
+function formatIsoDateForCell(value) {
+  const iso = parseIsoDateText(value);
+  if (!iso) return "";
+  const [year, month, day] = iso.split("-");
+  return `${day}/${month}/${year}`;
 }
 
 function toDate(value) {
@@ -459,6 +489,143 @@ function bindHoverTooltip(containerEl) {
   }
 }
 
+function resetDateCellView(cellEl, displayText, isoDate = "") {
+  if (!(cellEl instanceof HTMLElement)) return;
+  cellEl.classList.remove("is-editing-date", "is-saving-date");
+  cellEl.dataset.msDateEditing = "0";
+  cellEl.dataset.isoDate = isoDate || "";
+  cellEl.textContent = displayText;
+}
+
+function startDateCellEditing(cellEl) {
+  if (!(cellEl instanceof HTMLElement) || !dateCellEditHandler) return;
+
+  if (activeDateEditor && activeDateEditor.cellEl !== cellEl) {
+    activeDateEditor.cancel();
+    activeDateEditor = null;
+  } else if (activeDateEditor?.cellEl === cellEl) {
+    return;
+  }
+
+  const recordId = Number(cellEl.dataset.rowId);
+  const field = cellEl.dataset.dateField === "end" ? "end" : "start";
+  if (!Number.isInteger(recordId) || recordId <= 0) return;
+
+  const initialIso = normalizeDateInputToIso(cellEl.dataset.isoDate || cellEl.textContent || "");
+  const initialDisplay = formatIsoDateForCell(initialIso) || String(cellEl.textContent || "");
+
+  cellEl.classList.add("is-editing-date");
+  cellEl.dataset.msDateEditing = "1";
+  cellEl.textContent = "";
+
+  const inputEl = document.createElement("input");
+  inputEl.type = "date";
+  inputEl.className = "editable-date-input";
+  inputEl.value = initialIso || "";
+  cellEl.appendChild(inputEl);
+
+  let finalized = false;
+  const finalize = () => {
+    if (activeDateEditor?.cellEl === cellEl) {
+      activeDateEditor = null;
+    }
+  };
+
+  const cancel = () => {
+    if (finalized) return;
+    finalized = true;
+    resetDateCellView(cellEl, initialDisplay, initialIso);
+    finalize();
+  };
+
+  const commit = async () => {
+    if (finalized) return;
+
+    const nextIso = normalizeDateInputToIso(inputEl.value);
+    if (!nextIso) {
+      cancel();
+      return;
+    }
+
+    if (nextIso === initialIso) {
+      finalized = true;
+      resetDateCellView(cellEl, formatIsoDateForCell(nextIso), nextIso);
+      finalize();
+      return;
+    }
+
+    finalized = true;
+    cellEl.classList.add("is-saving-date");
+    inputEl.disabled = true;
+
+    try {
+      await dateCellEditHandler({
+        rowId: recordId,
+        field,
+        isoDate: nextIso,
+      });
+
+      if (cellEl.isConnected) {
+        resetDateCellView(cellEl, formatIsoDateForCell(nextIso), nextIso);
+      }
+    } catch (error) {
+      console.error("Erreur edition date MS Project :", error);
+      if (cellEl.isConnected) {
+        resetDateCellView(cellEl, initialDisplay, initialIso);
+      }
+    } finally {
+      finalize();
+    }
+  };
+
+  activeDateEditor = {
+    cellEl,
+    cancel,
+  };
+
+  inputEl.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  inputEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commit();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancel();
+    }
+  });
+
+  inputEl.addEventListener("blur", () => {
+    commit();
+  });
+
+  inputEl.focus();
+  inputEl.select?.();
+}
+
+function bindDateCellEditing(containerEl) {
+  if (!containerEl || dateCellEditBound) return;
+  dateCellEditBound = true;
+
+  containerEl.addEventListener("click", (event) => {
+    const targetEl = event.target;
+    if (!(targetEl instanceof Element)) return;
+
+    const cellEl = targetEl.closest(
+      ".group-row-grid .cell-start.editable-date-cell, .group-row-grid .cell-end.editable-date-cell"
+    );
+    if (!(cellEl instanceof HTMLElement) || !containerEl.contains(cellEl)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    startDateCellEditing(cellEl);
+  });
+}
+
 function buildGroupLabelElement(group) {
   const row = document.createElement("div");
   row.className = "group-row-grid";
@@ -474,10 +641,20 @@ function buildGroupLabelElement(group) {
   const start = document.createElement("div");
   start.className = "cell-start";
   start.textContent = String(group?.startLabel ?? "");
+  start.dataset.rowId = String(group?.rowId ?? "");
+  start.dataset.dateField = "start";
+  start.dataset.isoDate = String(group?.startIso ?? "");
+  start.classList.add("editable-date-cell");
+  start.title = "Cliquer pour modifier la date";
 
   const end = document.createElement("div");
   end.className = "cell-end";
   end.textContent = String(group?.endLabel ?? "");
+  end.dataset.rowId = String(group?.rowId ?? "");
+  end.dataset.dateField = "end";
+  end.dataset.isoDate = String(group?.endIso ?? "");
+  end.classList.add("editable-date-cell");
+  end.title = "Cliquer pour modifier la date";
 
   const progress = document.createElement("div");
   progress.className = "cell-duration";
@@ -635,6 +812,10 @@ function moveWindowByMode(direction) {
   setWindowForMode(mode, anchor);
 }
 
+export function setMsProjectDateEditHandler(handler) {
+  dateCellEditHandler = typeof handler === "function" ? handler : null;
+}
+
 export function renderMsProjectTimeline({ groups, items }) {
   const container = getTimelineContainer();
   debugLog("Render timeline called.", {
@@ -685,6 +866,7 @@ export function renderMsProjectTimeline({ groups, items }) {
     debugLog("vis Timeline instance created.");
     bindDebugTimelineEvents();
     bindHoverTooltip(container);
+    bindDateCellEditing(container);
   }
 
   groupsDataSet.clear();

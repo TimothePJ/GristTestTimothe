@@ -176,6 +176,8 @@ export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = ""
       task,
       startDate,
       endDate,
+      startIso: fmtIsoDate(startDate),
+      endIso: fmtIsoDate(endDate),
       start: fmtCellDate(startDate),
       end: fmtCellDate(endDate),
       durationValue,
@@ -218,11 +220,14 @@ export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = ""
 
     groups.push({
       id: groupId,
+      rowId: row.rowId,
       content: buildGroupContent(row),
       idLabel: row.id,
       taskLabel: row.task,
       startLabel: row.start,
       endLabel: row.end,
+      startIso: row.startIso,
+      endIso: row.endIso,
       durationLabel: row.durationLabel,
       teamLabel: row.teamLabel,
       styleLabel: row.barStyleLabel,

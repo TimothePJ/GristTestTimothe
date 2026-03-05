@@ -10,7 +10,7 @@ function getGrist() {
 export function initGrist() {
   const grist = getGrist();
   if (typeof grist.ready === "function") {
-    grist.ready({ requiredAccess: "read table" });
+    grist.ready({ requiredAccess: "full" });
   }
 }
 
@@ -64,6 +64,48 @@ async function fetchTableRows(tableName) {
 
   const raw = await grist.docApi.fetchTable(tableName);
   return normalizeFetchTableResult(raw);
+}
+
+function isIsoDate(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? "").trim());
+}
+
+export async function updateMsProjectDate(rowId, columnName, isoDate) {
+  const table = APP_CONFIG.grist.msProjectTable;
+  if (!table?.sourceTable) {
+    throw new Error("Nom de table MS Project manquant dans la configuration.");
+  }
+
+  const recordId = Number(rowId);
+  if (!Number.isInteger(recordId) || recordId <= 0) {
+    throw new Error("Identifiant de ligne MS Project invalide.");
+  }
+
+  const field = String(columnName ?? "").trim();
+  if (!field) {
+    throw new Error("Nom de colonne cible invalide.");
+  }
+
+  const normalizedIsoDate = String(isoDate ?? "").trim();
+  if (!isIsoDate(normalizedIsoDate)) {
+    throw new Error("Format de date invalide (attendu YYYY-MM-DD).");
+  }
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  await grist.docApi.applyUserActions([
+    [
+      "UpdateRecord",
+      table.sourceTable,
+      recordId,
+      {
+        [field]: normalizedIsoDate,
+      },
+    ],
+  ]);
 }
 
 export function isMsProjectEnabled() {

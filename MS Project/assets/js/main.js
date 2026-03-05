@@ -1,9 +1,11 @@
+import { APP_CONFIG } from "./config.js";
 import {
   initGrist,
   buildProjectOptions,
   fetchMsProjectRows,
   isMsProjectEnabled,
   getMsProjectSetupMessage,
+  updateMsProjectDate,
 } from "./services/gristService.js";
 import { buildTimelineDataFromMsProjectRows } from "./services/msProjectService.js";
 import { state, setState } from "./state.js";
@@ -12,6 +14,7 @@ import {
   renderMsProjectTimeline,
   clearMsProjectTimeline,
   bindTimelineToolbar,
+  setMsProjectDateEditHandler,
 } from "./ui/timeline.js";
 
 let toolbarBound = false;
@@ -20,6 +23,30 @@ let refreshInProgress = false;
 function setMsProjectStatus(message = "") {
   const el = document.getElementById("msProjectStatus");
   if (el) el.textContent = message;
+}
+
+function resolveDateColumnName(field) {
+  const columns = APP_CONFIG.grist.msProjectTable?.columns || {};
+  if (field === "start") return columns.start;
+  if (field === "end") return columns.end;
+  return "";
+}
+
+async function handleDateCellEdit({ rowId, field, isoDate }) {
+  const columnName = resolveDateColumnName(field);
+  if (!columnName) {
+    throw new Error(`Colonne date inconnue pour le champ "${field}".`);
+  }
+
+  const fieldLabel = field === "end" ? "Fin" : "Debut";
+  try {
+    setMsProjectStatus(`Mise a jour ${fieldLabel} en cours...`);
+    await updateMsProjectDate(rowId, columnName, isoDate);
+    await refreshMsProject();
+  } catch (error) {
+    setMsProjectStatus(`Erreur mise a jour ${fieldLabel.toLowerCase()} : ${error.message}`);
+    throw error;
+  }
 }
 
 async function refreshMsProject() {
@@ -79,6 +106,7 @@ async function handleProjectChange(currentState) {
 async function bootstrap() {
   try {
     initGrist();
+    setMsProjectDateEditHandler(handleDateCellEdit);
 
     setState({ selectedProject: "" });
 
