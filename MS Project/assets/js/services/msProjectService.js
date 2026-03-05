@@ -7,20 +7,53 @@ function toNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function normalizeUtcDateToLocalCalendar(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  return new Date(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate()
+  );
+}
+
+function toLocalNoon(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  const noon = new Date(date);
+  noon.setHours(12, 0, 0, 0);
+  return noon;
+}
+
 function parseDate(value) {
   if (value == null || value === "") return null;
 
   if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value;
+    return normalizeUtcDateToLocalCalendar(value);
   }
 
   if (typeof value === "number") {
     const date = new Date(value > 1e9 && value < 1e11 ? value * 1000 : value);
-    return Number.isNaN(date.getTime()) ? null : date;
+    return normalizeUtcDateToLocalCalendar(date);
   }
 
   const text = String(value).trim();
   if (!text) return null;
+
+  // ISO/Date-only: on conserve strictement le jour source (sans effet fuseau).
+  const isoDateMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (isoDateMatch) {
+    const year = Number(isoDateMatch[1]);
+    const month = Number(isoDateMatch[2]);
+    const day = Number(isoDateMatch[3]);
+    const date = new Date(year, month - 1, day);
+    if (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    ) {
+      return date;
+    }
+    return null;
+  }
 
   const frMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+.*)?$/);
   if (frMatch) {
@@ -42,10 +75,13 @@ function parseDate(value) {
   return Number.isNaN(isoDate.getTime()) ? null : isoDate;
 }
 
-function addDays(date, days) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
+function isSameCalendarDay(a, b) {
+  if (!(a instanceof Date) || !(b instanceof Date)) return false;
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
 }
 
 function fmtCellDate(date) {
@@ -53,7 +89,11 @@ function fmtCellDate(date) {
 }
 
 function fmtIsoDate(date) {
-  return date ? date.toISOString().slice(0, 10) : "";
+  if (!date) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function fmtDuration(value) {
@@ -119,13 +159,7 @@ export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = ""
     const startDate = parseDate(rawRow[columns.start]);
     const durationValue = toNumber(rawRow[columns.duration]);
     const parsedEndDate = parseDate(rawRow[columns.end]);
-    const endDate = startDate
-      ? parsedEndDate && parsedEndDate > startDate
-        ? parsedEndDate
-        : durationValue != null && durationValue > 0
-          ? addDays(startDate, durationValue)
-          : addDays(startDate, 1)
-      : null;
+    const endDate = parsedEndDate;
     const task = toText(rawRow[columns.taskName]) || `Tache ${index + 1}`;
     const uniqueNumber = toText(rawRow[columns.uniqueNumber]);
     const team = [toText(rawRow[columns.team]), toText(rawRow[columns.subTeam])]
@@ -199,25 +233,59 @@ export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = ""
     });
 
     if (!row.startDate || !row.endDate) return;
+    const sharedTitle = `
+      <b>${escapeHtml(row.task)}</b><br>
+      Numero : ${escapeHtml(row.id)}<br>
+      Debut : ${escapeHtml(fmtIsoDate(row.startDate))}<br>
+      Fin : ${escapeHtml(fmtIsoDate(row.endDate))}<br>
+      Duree : ${escapeHtml(row.durationLabel || "Non renseignee")}<br>
+      Equipe : ${escapeHtml(row.teamLabel || "Non renseignee")}<br>
+      Niveau : ${escapeHtml(row.levelLabel || "Non renseigne")}<br>
+      Style : ${escapeHtml(row.barStyleLabel || "Non renseigne")}<br>
+      Effort : ${escapeHtml(row.effortValue == null ? "Non renseigne" : String(row.effortValue))}
+    `;
 
+    const singleDayTask = isSameCalendarDay(row.startDate, row.endDate);
+
+    if (row.endDate > row.startDate && !singleDayTask) {
+      items.push({
+        id: `${groupId}-task`,
+        group: groupId,
+        start: row.startDate,
+        end: row.endDate,
+        content: row.barStyleLabel || "",
+        className: resolveTaskClass(row),
+        type: "range",
+        title: sharedTitle,
+      });
+      return;
+    }
+
+    if (singleDayTask) {
+      const milestoneStart = toLocalNoon(row.startDate) || row.startDate;
+      items.push({
+        id: `${groupId}-milestone`,
+        group: groupId,
+        start: milestoneStart,
+        content: "",
+        className: `${resolveTaskClass(row)} milestone-task`,
+        type: "box",
+        title: sharedTitle,
+      });
+      return;
+    }
+
+    const invalidStart = toLocalNoon(row.startDate) || row.startDate;
     items.push({
-      id: `${groupId}-task`,
+      id: `${groupId}-invalid-date-order`,
       group: groupId,
-      start: row.startDate,
-      end: row.endDate,
-      content: row.barStyleLabel || "",
-      className: resolveTaskClass(row),
-      type: "range",
+      start: invalidStart,
+      content: "",
+      className: `${resolveTaskClass(row)} milestone-task`,
+      type: "box",
       title: `
-        <b>${escapeHtml(row.task)}</b><br>
-        Numero : ${escapeHtml(row.id)}<br>
-        Debut : ${escapeHtml(fmtIsoDate(row.startDate))}<br>
-        Fin : ${escapeHtml(fmtIsoDate(row.endDate))}<br>
-        Duree : ${escapeHtml(row.durationLabel || "Non renseignee")}<br>
-        Equipe : ${escapeHtml(row.teamLabel || "Non renseignee")}<br>
-        Niveau : ${escapeHtml(row.levelLabel || "Non renseigne")}<br>
-        Style : ${escapeHtml(row.barStyleLabel || "Non renseigne")}<br>
-        Effort : ${escapeHtml(row.effortValue == null ? "Non renseigne" : String(row.effortValue))}
+        ${sharedTitle}<br>
+        <i>Attention: Fin anterieure a Debut.</i>
       `,
     });
   });

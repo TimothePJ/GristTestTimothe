@@ -286,6 +286,27 @@ body * {
   color: #1d4ed8 !important;
 }
 
+#msProjectTimeline .vis-item.milestone-task.vis-box {
+  width: 12px !important;
+  min-width: 12px !important;
+  height: 12px !important;
+  border-radius: 0 !important;
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  margin-left: -6px !important;
+  box-sizing: border-box !important;
+  padding: 0 !important;
+}
+
+#msProjectTimeline .vis-item.milestone-task.vis-box .vis-item-content {
+  display: none !important;
+}
+
+#msProjectTimeline .vis-item.milestone-task.vis-line {
+  display: none !important;
+  border: none !important;
+  width: 0 !important;
+}
+
 #msProjectTimeline .vis-item.vis-selected {
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
 }
