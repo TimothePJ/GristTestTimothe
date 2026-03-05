@@ -6,6 +6,7 @@ import {
   isMsProjectEnabled,
   getMsProjectSetupMessage,
   updateMsProjectDate,
+  syncPlanningDemarrageFromMsProjectStart,
 } from "./services/gristService.js";
 import { buildTimelineDataFromMsProjectRows } from "./services/msProjectService.js";
 import { state, setState } from "./state.js";
@@ -42,7 +43,30 @@ async function handleDateCellEdit({ rowId, field, isoDate }) {
   try {
     setMsProjectStatus(`Mise a jour ${fieldLabel} en cours...`);
     await updateMsProjectDate(rowId, columnName, isoDate);
+
+    let planningSyncResult = null;
+    if (field === "start") {
+      planningSyncResult = await syncPlanningDemarrageFromMsProjectStart(
+        rowId,
+        isoDate,
+        state.selectedProject || ""
+      );
+    }
+
     await refreshMsProject();
+
+    if (planningSyncResult && !planningSyncResult.skipped) {
+      const baseStatus = document.getElementById("msProjectStatus")?.textContent || "";
+      if (planningSyncResult.updatedCount > 0) {
+        setMsProjectStatus(
+          `${baseStatus} | Sync Planning_Projet: ${planningSyncResult.updatedCount} ligne(s)`
+        );
+      } else {
+        setMsProjectStatus(
+          `${baseStatus} | Sync Planning_Projet: aucune correspondance`
+        );
+      }
+    }
   } catch (error) {
     setMsProjectStatus(`Erreur mise a jour ${fieldLabel.toLowerCase()} : ${error.message}`);
     throw error;

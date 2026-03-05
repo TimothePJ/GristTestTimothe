@@ -70,6 +70,42 @@ function isIsoDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? "").trim());
 }
 
+function hasColumn(rows, columnName) {
+  if (!columnName) return false;
+  return rows.some(
+    (row) =>
+      row &&
+      typeof row === "object" &&
+      Object.prototype.hasOwnProperty.call(row, columnName)
+  );
+}
+
+function resolveColumn(rows, explicit, candidates = []) {
+  if (explicit && hasColumn(rows, explicit)) return explicit;
+  const fallback = candidates.find((candidate) => hasColumn(rows, candidate));
+  return fallback || explicit || "";
+}
+
+function parseComparableNumber(value) {
+  if (value == null || value === "") return null;
+  const text = toText(value);
+  if (!text) return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+}
+
+function equalsByTextOrNumber(a, b) {
+  const aText = toText(a);
+  const bText = toText(b);
+  if (!aText || !bText) return false;
+  if (aText === bText) return true;
+
+  const aNumber = parseComparableNumber(aText);
+  const bNumber = parseComparableNumber(bText);
+  if (aNumber == null || bNumber == null) return false;
+  return aNumber === bNumber;
+}
+
 export async function updateMsProjectDate(rowId, columnName, isoDate) {
   const table = APP_CONFIG.grist.msProjectTable;
   if (!table?.sourceTable) {
@@ -106,6 +142,127 @@ export async function updateMsProjectDate(rowId, columnName, isoDate) {
       },
     ],
   ]);
+}
+
+export async function syncPlanningDemarrageFromMsProjectStart(
+  rowId,
+  isoDate,
+  projectFallback = ""
+) {
+  const msTable = APP_CONFIG.grist.msProjectTable;
+  const planningTable = APP_CONFIG.grist.planningSyncTable;
+
+  if (!planningTable?.enabled) {
+    return { updatedCount: 0, matchedCount: 0, skipped: true };
+  }
+
+  if (!msTable?.sourceTable) {
+    throw new Error("Configuration table MS Project manquante.");
+  }
+  if (!planningTable?.sourceTable) {
+    throw new Error("Configuration table Planning_Projet manquante.");
+  }
+
+  const recordId = Number(rowId);
+  if (!Number.isInteger(recordId) || recordId <= 0) {
+    throw new Error("Identifiant de ligne MS Project invalide.");
+  }
+
+  const normalizedIsoDate = String(isoDate ?? "").trim();
+  if (!isIsoDate(normalizedIsoDate)) {
+    throw new Error("Format de date invalide (attendu YYYY-MM-DD).");
+  }
+
+  const msRows = await fetchTableRows(msTable.sourceTable);
+  const msIdCol = msTable.columns?.id || "id";
+  const msProjectCol = resolveColumn(
+    msRows,
+    msTable.columns?.projectLink,
+    msTable.projectLinkCandidates || []
+  );
+  const msUniqueCol = msTable.columns?.uniqueNumber;
+
+  if (!msUniqueCol) {
+    throw new Error("Colonne Numero_Unique non configuree dans MsProject.");
+  }
+
+  const msRow = msRows.find((row) => Number(row?.[msIdCol]) === recordId);
+  if (!msRow) {
+    return { updatedCount: 0, matchedCount: 0, skipped: true };
+  }
+
+  const msProjectValue = msProjectCol ? toText(msRow[msProjectCol]) : "";
+  const effectiveProjectValue = msProjectValue || toText(projectFallback);
+  const msUniqueValue = msRow[msUniqueCol];
+  if (!effectiveProjectValue || msUniqueValue == null || msUniqueValue === "") {
+    return { updatedCount: 0, matchedCount: 0, skipped: true };
+  }
+
+  const planningRows = await fetchTableRows(planningTable.sourceTable);
+  const planningIdCol = planningTable.columns?.id || "id";
+  const planningProjectCol = resolveColumn(
+    planningRows,
+    planningTable.columns?.projectLink,
+    planningTable.projectLinkCandidates || []
+  );
+  const planningDemarrageCol = resolveColumn(
+    planningRows,
+    planningTable.columns?.demarragesTravaux,
+    planningTable.demarrageCandidates || []
+  );
+
+  const lineColumnCandidates = [
+    planningTable.columns?.linePlanning,
+    ...(planningTable.linePlanningCandidates || []),
+  ]
+    .map((column) => String(column || "").trim())
+    .filter(Boolean);
+
+  const planningLineColumns = [...new Set(lineColumnCandidates)].filter((column) =>
+    hasColumn(planningRows, column)
+  );
+
+  if (!planningProjectCol || !planningLineColumns.length || !planningDemarrageCol) {
+    throw new Error("Colonnes Planning_Projet introuvables pour la synchronisation.");
+  }
+
+  const matchingRows = planningRows.filter((row) => {
+    const sameProject = toText(row[planningProjectCol]) === effectiveProjectValue;
+    const sameLine = planningLineColumns.some((lineColumn) =>
+      equalsByTextOrNumber(row[lineColumn], msUniqueValue)
+    );
+    return sameProject && sameLine;
+  });
+
+  if (!matchingRows.length) {
+    return { updatedCount: 0, matchedCount: 0, skipped: false };
+  }
+
+  const actions = matchingRows
+    .map((row) => Number(row?.[planningIdCol]))
+    .filter((id) => Number.isInteger(id) && id > 0)
+    .map((id) => [
+      "UpdateRecord",
+      planningTable.sourceTable,
+      id,
+      { [planningDemarrageCol]: normalizedIsoDate },
+    ]);
+
+  if (!actions.length) {
+    return { updatedCount: 0, matchedCount: matchingRows.length, skipped: false };
+  }
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  await grist.docApi.applyUserActions(actions);
+  return {
+    updatedCount: actions.length,
+    matchedCount: matchingRows.length,
+    skipped: false,
+  };
 }
 
 export function isMsProjectEnabled() {

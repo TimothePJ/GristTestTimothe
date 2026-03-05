@@ -35,5 +35,33 @@ export const APP_CONFIG = {
         "Nom_de_projet",
       ],
     },
+
+    planningSyncTable: {
+      enabled: true,
+      sourceTable: "Planning_Projet",
+      columns: {
+        id: "id",
+        projectLink: "NomProjet",
+        linePlanning: "Ligne_planning",
+        demarragesTravaux: "Demarrages_travaux",
+      },
+      projectLinkCandidates: [
+        "NomProjet",
+        "Nom_Projet",
+        "Projet",
+        "Project",
+        "Nom_de_projet",
+      ],
+      linePlanningCandidates: [
+        "Ligne_planning",
+        "LignePlanning",
+        "ID2",
+      ],
+      demarrageCandidates: [
+        "Demarrages_travaux",
+        "Demarrage_travaux",
+        "DemarrageTravaux",
+      ],
+    },
   },
 };

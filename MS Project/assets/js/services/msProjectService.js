@@ -189,6 +189,7 @@ export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = ""
       indicatorLabel: indicator,
       effortValue: effort,
       projectLink: projectLinkColumn ? toText(rawRow[projectLinkColumn]) : "",
+      sourceIndex: index,
     };
   });
 
@@ -198,18 +199,28 @@ export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = ""
     rows = rows.filter((row) => row.projectLink === selectedProject);
   }
 
-  rows = rows.filter((row) => row.startDate);
-
   rows.sort((a, b) => {
-    if (a.startDate && b.startDate && a.startDate.valueOf() !== b.startDate.valueOf()) {
+    const aHasStart = a.startDate instanceof Date;
+    const bHasStart = b.startDate instanceof Date;
+    if (aHasStart && bHasStart && a.startDate.valueOf() !== b.startDate.valueOf()) {
       return a.startDate - b.startDate;
     }
 
-    if (a.endDate && b.endDate && a.endDate.valueOf() !== b.endDate.valueOf()) {
+    if (aHasStart !== bHasStart) {
+      return aHasStart ? -1 : 1;
+    }
+
+    const aHasEnd = a.endDate instanceof Date;
+    const bHasEnd = b.endDate instanceof Date;
+    if (aHasEnd && bHasEnd && a.endDate.valueOf() !== b.endDate.valueOf()) {
       return a.endDate - b.endDate;
     }
 
-    return a.task.localeCompare(b.task, "fr");
+    if (aHasEnd !== bHasEnd) {
+      return aHasEnd ? -1 : 1;
+    }
+
+    return a.sourceIndex - b.sourceIndex;
   });
 
   const groups = [];
