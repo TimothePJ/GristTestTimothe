@@ -1,10 +1,10 @@
 :root {
-  --col-id: 72px;
+  --col-id: 56px;
   --col-task: 280px;
-  --col-start: 84px;
-  --col-end: 84px;
-  --col-duration: 86px;
-  --col-team: 110px;
+  --col-start: 116px;
+  --col-end: 116px;
+  --col-duration: 64px;
+  --col-team: 84px;
 
   --left-pad-x: 4px;
   --left-grid-width: calc(var(--col-id) + var(--col-task) + var(--col-start) + var(--col-end) + var(--col-duration) + var(--col-team));
@@ -210,20 +210,48 @@ body * {
 #msProjectTimeline .group-row-grid .editable-date-cell.is-editing-date {
   padding: 2px 6px !important;
   overflow: visible !important;
+  background: #eaf3ff;
+  border-radius: 4px;
 }
 
 #msProjectTimeline .group-row-grid .editable-date-cell .editable-date-input {
+  color-scheme: light;
   width: 100%;
   min-width: 0;
+  height: 26px;
   border: 1px solid #93c5fd;
   border-radius: 4px;
-  padding: 2px 4px;
+  padding: 2px 6px;
   font: inherit;
-  color: #0f172a;
+  font-weight: 600;
+  color: #1e3a8a !important;
+  background: #ffffff !important;
+  caret-color: #1e3a8a;
+  outline: none;
+  box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.25);
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell .editable-date-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell .editable-date-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell .editable-date-input::-webkit-datetime-edit {
+  color: inherit;
 }
 
 #msProjectTimeline .group-row-grid .editable-date-cell.is-saving-date {
   opacity: 0.7;
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell.is-saving-date .editable-date-input {
+  background: #f8fafc !important;
+  color: #475569 !important;
 }
 
 #msProjectTimeline .group-row-grid .cell-duration {
@@ -384,12 +412,12 @@ body * {
 
 @media (max-width: 1320px) {
   :root {
-    --col-id: 64px;
+    --col-id: 56px;
     --col-task: 216px;
-    --col-start: 84px;
-    --col-end: 84px;
-    --col-duration: 78px;
-    --col-team: 96px;
+    --col-start: 116px;
+    --col-end: 116px;
+    --col-duration: 64px;
+    --col-team: 84px;
   }
 
   #toolbar {
