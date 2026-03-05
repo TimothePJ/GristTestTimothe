@@ -7,6 +7,9 @@ let hoverTooltipEl = null;
 let hoverTooltipBound = false;
 let clickTooltipTimer = null;
 let itemElementsObserver = null;
+let durationCellEditHandler = null;
+let durationCellEditBound = false;
+let activeDurationEditor = null;
 
 function updateCurrentTimeLineBounds() {
   const container = document.getElementById("planningTimeline");
@@ -443,6 +446,172 @@ function bindHoverTooltip(containerEl) {
   });
 }
 
+function normalizeDurationInput(value) {
+  const text = String(value ?? "").trim().replace(",", ".");
+  if (!text) return null;
+  const n = Number(text);
+  if (!Number.isFinite(n) || n < 0) return null;
+  if (!Number.isInteger(n)) return null;
+  return n;
+}
+
+function formatDurationForCell(value) {
+  const n = normalizeDurationInput(value);
+  if (n == null) return "";
+  return String(n);
+}
+
+function resetDurationCellView(cellEl, displayText, durationValue = null) {
+  if (!(cellEl instanceof HTMLElement)) return;
+  cellEl.classList.remove("is-editing-duration", "is-saving-duration");
+  cellEl.dataset.planningDurationEditing = "0";
+  cellEl.dataset.durationValue =
+    durationValue == null ? "" : String(durationValue);
+  cellEl.textContent = displayText;
+}
+
+function startDurationCellEditing(cellEl) {
+  if (!(cellEl instanceof HTMLElement) || !durationCellEditHandler) return;
+
+  if (!cellEl.classList.contains("editable-duration-cell")) return;
+
+  if (activeDurationEditor && activeDurationEditor.cellEl !== cellEl) {
+    activeDurationEditor.cancel();
+    activeDurationEditor = null;
+  } else if (activeDurationEditor?.cellEl === cellEl) {
+    return;
+  }
+
+  const rowId = Number(cellEl.dataset.rowId);
+  if (!Number.isInteger(rowId) || rowId <= 0) return;
+
+  const durationColumnKey = String(cellEl.dataset.durationColumnKey || "");
+  const leftDateColumnKey = String(cellEl.dataset.leftDateColumnKey || "");
+  const rightIsoDate = String(cellEl.dataset.rightIsoDate || "");
+  const durationSlot = String(cellEl.dataset.durationSlot || "1");
+  const typeDoc = String(cellEl.dataset.typeDoc || "");
+
+  const initialDisplay = String(cellEl.textContent || "").trim();
+  const initialValue = normalizeDurationInput(
+    cellEl.dataset.durationValue || initialDisplay
+  );
+
+  cellEl.classList.add("is-editing-duration");
+  cellEl.dataset.planningDurationEditing = "1";
+  cellEl.textContent = "";
+
+  const inputEl = document.createElement("input");
+  inputEl.type = "number";
+  inputEl.className = "editable-duration-input";
+  inputEl.min = "0";
+  inputEl.step = "1";
+  inputEl.value = initialValue == null ? "" : String(initialValue);
+  cellEl.appendChild(inputEl);
+
+  let finalized = false;
+  const finalize = () => {
+    if (activeDurationEditor?.cellEl === cellEl) {
+      activeDurationEditor = null;
+    }
+  };
+
+  const cancel = () => {
+    if (finalized) return;
+    finalized = true;
+    resetDurationCellView(cellEl, initialDisplay, initialValue);
+    finalize();
+  };
+
+  const commit = async () => {
+    if (finalized) return;
+
+    const nextValue = normalizeDurationInput(inputEl.value);
+    if (nextValue == null) {
+      cancel();
+      return;
+    }
+
+    if (nextValue === initialValue) {
+      finalized = true;
+      resetDurationCellView(cellEl, formatDurationForCell(nextValue), nextValue);
+      finalize();
+      return;
+    }
+
+    finalized = true;
+    cellEl.classList.add("is-saving-duration");
+    inputEl.disabled = true;
+
+    try {
+      await durationCellEditHandler({
+        rowId,
+        durationWeeks: nextValue,
+        durationSlot,
+        typeDoc,
+        durationColumnKey,
+        leftDateColumnKey,
+        rightIsoDate,
+      });
+
+      if (cellEl.isConnected) {
+        resetDurationCellView(cellEl, formatDurationForCell(nextValue), nextValue);
+      }
+    } catch (error) {
+      console.error("Erreur edition duree planning :", error);
+      if (cellEl.isConnected) {
+        resetDurationCellView(cellEl, initialDisplay, initialValue);
+      }
+    } finally {
+      finalize();
+    }
+  };
+
+  activeDurationEditor = {
+    cellEl,
+    cancel,
+  };
+
+  inputEl.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  inputEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commit();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancel();
+    }
+  });
+
+  inputEl.addEventListener("blur", () => {
+    commit();
+  });
+
+  inputEl.focus();
+  inputEl.select?.();
+}
+
+function bindDurationCellEditing(containerEl) {
+  if (!containerEl || durationCellEditBound) return;
+  durationCellEditBound = true;
+
+  containerEl.addEventListener("click", (event) => {
+    const targetEl = event.target;
+    if (!(targetEl instanceof Element)) return;
+
+    const cellEl = targetEl.closest(".group-row-grid .editable-duration-cell");
+    if (!(cellEl instanceof HTMLElement) || !containerEl.contains(cellEl)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    startDurationCellEditing(cellEl);
+  });
+}
+
 function buildGroupLabelElement(group) {
   const row = document.createElement("div");
   row.className = "group-row-grid";
@@ -459,9 +628,51 @@ function buildGroupLabelElement(group) {
   debut.className = "cell-start";
   debut.textContent = String(group?.debutLabel ?? "");
 
+  const dureeDebutFin = document.createElement("div");
+  dureeDebutFin.className = "cell-duration-1";
+  dureeDebutFin.textContent = String(group?.dureeDebutFinLabel ?? "");
+  dureeDebutFin.dataset.rowId = String(group?.rowId ?? "");
+  dureeDebutFin.dataset.durationSlot = "1";
+  dureeDebutFin.dataset.typeDoc = String(group?.typeDocLabel ?? "");
+  dureeDebutFin.dataset.durationValue = String(group?.dureeDebutFinLabel ?? "");
+  dureeDebutFin.dataset.durationColumnKey = String(
+    group?.dureeDebutFinColumnKey ?? ""
+  );
+  dureeDebutFin.dataset.leftDateColumnKey = String(
+    group?.dureeDebutFinLeftDateColumnKey ?? ""
+  );
+  dureeDebutFin.dataset.rightIsoDate = String(group?.dureeDebutFinRightIso ?? "");
+  if (group?.dureeDebutFinEditable) {
+    dureeDebutFin.classList.add("editable-duration-cell");
+    dureeDebutFin.title = "Cliquer pour modifier la durée";
+  }
+
   const fin = document.createElement("div");
   fin.className = "cell-end";
   fin.textContent = String(group?.finLabel ?? "");
+
+  const dureeFinDemarrage = document.createElement("div");
+  dureeFinDemarrage.className = "cell-duration-2";
+  dureeFinDemarrage.textContent = String(group?.dureeFinDemarrageLabel ?? "");
+  dureeFinDemarrage.dataset.rowId = String(group?.rowId ?? "");
+  dureeFinDemarrage.dataset.durationSlot = "2";
+  dureeFinDemarrage.dataset.typeDoc = String(group?.typeDocLabel ?? "");
+  dureeFinDemarrage.dataset.durationValue = String(
+    group?.dureeFinDemarrageLabel ?? ""
+  );
+  dureeFinDemarrage.dataset.durationColumnKey = String(
+    group?.dureeFinDemarrageColumnKey ?? ""
+  );
+  dureeFinDemarrage.dataset.leftDateColumnKey = String(
+    group?.dureeFinDemarrageLeftDateColumnKey ?? ""
+  );
+  dureeFinDemarrage.dataset.rightIsoDate = String(
+    group?.dureeFinDemarrageRightIso ?? ""
+  );
+  if (group?.dureeFinDemarrageEditable) {
+    dureeFinDemarrage.classList.add("editable-duration-cell");
+    dureeFinDemarrage.title = "Cliquer pour modifier la durée";
+  }
 
   const demarrage = document.createElement("div");
   demarrage.className = "cell-demarrage";
@@ -475,7 +686,17 @@ function buildGroupLabelElement(group) {
   retards.className = "cell-retards";
   retards.textContent = String(group?.retardsLabel ?? "");
 
-  row.append(id2, tache, debut, fin, demarrage, indice, retards);
+  row.append(
+    id2,
+    tache,
+    debut,
+    dureeDebutFin,
+    fin,
+    dureeFinDemarrage,
+    demarrage,
+    indice,
+    retards
+  );
   return row;
 }
 
@@ -647,6 +868,10 @@ function moveWindowByMode(direction) {
   setWindowForMode(mode, anchor);
 }
 
+export function setPlanningDurationEditHandler(handler) {
+  durationCellEditHandler = typeof handler === "function" ? handler : null;
+}
+
 export function renderPlanningTimeline({ groups, items }) {
   const container = getTimelineContainer();
 
@@ -712,6 +937,7 @@ export function renderPlanningTimeline({ groups, items }) {
     });
 
     bindHoverTooltip(container);
+    bindDurationCellEditing(container);
   }
 
   // Mise à jour datasets

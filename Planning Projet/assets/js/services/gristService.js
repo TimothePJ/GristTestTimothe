@@ -10,7 +10,7 @@ function getGrist() {
 export function initGrist() {
   const grist = getGrist();
   if (typeof grist.ready === "function") {
-    grist.ready({ requiredAccess: "read table" });
+    grist.ready({ requiredAccess: "full" });
   }
 }
 
@@ -69,6 +69,64 @@ async function fetchTableRows(tableName) {
 
   const raw = await grist.docApi.fetchTable(tableName);
   return normalizeFetchTableResult(raw);
+}
+
+function isIsoDate(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? "").trim());
+}
+
+export async function updatePlanningDurationAndLeftDate(
+  rowId,
+  durationColumnName,
+  durationValue,
+  leftDateColumnName,
+  leftIsoDate
+) {
+  const table = APP_CONFIG.grist.planningTable;
+  if (!table?.sourceTable) {
+    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
+  }
+
+  const recordId = Number(rowId);
+  if (!Number.isInteger(recordId) || recordId <= 0) {
+    throw new Error("Identifiant de ligne Planning_Projet invalide.");
+  }
+
+  const durationField = String(durationColumnName ?? "").trim();
+  if (!durationField) {
+    throw new Error("Colonne durée invalide.");
+  }
+
+  const leftDateField = String(leftDateColumnName ?? "").trim();
+  if (!leftDateField) {
+    throw new Error("Colonne date de gauche invalide.");
+  }
+
+  if (!Number.isFinite(Number(durationValue))) {
+    throw new Error("Valeur de durée invalide.");
+  }
+
+  const normalizedLeftIsoDate = String(leftIsoDate ?? "").trim();
+  if (!isIsoDate(normalizedLeftIsoDate)) {
+    throw new Error("Format de date invalide (attendu YYYY-MM-DD).");
+  }
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  await grist.docApi.applyUserActions([
+    [
+      "UpdateRecord",
+      table.sourceTable,
+      recordId,
+      {
+        [durationField]: Number(durationValue),
+        [leftDateField]: normalizedLeftIsoDate,
+      },
+    ],
+  ]);
 }
 
 /* ---------- Projets ---------- */

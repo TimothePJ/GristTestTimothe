@@ -93,9 +93,38 @@ function resolveBandEndDate(typeDoc, diffCoffrageRaw, diffArmatureRaw) {
   return null;
 }
 
+function resolveDisplayedDurations(typeDoc, duree1Raw, duree2Raw, duree3Raw) {
+  if (isArmaturesTypeDoc(typeDoc)) {
+    return {
+      dureeDebutFin: toText(duree2Raw),
+      dureeFinDemarrage: toText(duree3Raw),
+    };
+  }
+
+  if (isCoffrageTypeDoc(typeDoc)) {
+    return {
+      dureeDebutFin: toText(duree1Raw),
+      dureeFinDemarrage: "",
+    };
+  }
+
+  return {
+    dureeDebutFin: "",
+    dureeFinDemarrage: "",
+  };
+}
+
 function fmtCellDate(date) {
   if (!date) return "";
   return date.toLocaleDateString("fr-FR");
+}
+
+function fmtIsoCellDate(date) {
+  if (!date) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function escapeHtml(str) {
@@ -121,11 +150,13 @@ function fmtDateIso(date) {
 
 function buildGroupContent(row) {
   return `
-    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-start) var(--col-end) var(--col-demarrage) var(--col-indice) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
+    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
       <div class="cell-id2">${escapeHtml(row.id2 ?? "")}</div>
       <div class="cell-task">${escapeHtml(row.taches ?? "")}</div>
       <div class="cell-start">${escapeHtml(row.debut ?? "")}</div>
+      <div class="cell-duration-1">${escapeHtml(row.dureeDebutFin ?? "")}</div>
       <div class="cell-end">${escapeHtml(row.fin ?? "")}</div>
+      <div class="cell-duration-2">${escapeHtml(row.dureeFinDemarrage ?? "")}</div>
       <div class="cell-demarrage">${escapeHtml(row.demarrage ?? "")}</div>
       <div class="cell-indice">${escapeHtml(row.indice ?? "")}</div>
       <div class="cell-retards">${escapeHtml(row.retards ?? "")}</div>
@@ -247,6 +278,45 @@ function createRangeBetweenDates(startDateRaw, endDateRaw) {
   return { start, end };
 }
 
+function resolveDurationEditMeta(typeDoc, bandEndDate, demarrageDate) {
+  if (isArmaturesTypeDoc(typeDoc)) {
+    return {
+      dureeDebutFinColumnKey: "duree2",
+      dureeDebutFinLeftDateColumnKey: "diffCoffrage",
+      dureeDebutFinRightIso: fmtIsoCellDate(bandEndDate),
+      dureeDebutFinEditable: Boolean(bandEndDate),
+      dureeFinDemarrageColumnKey: "duree3",
+      dureeFinDemarrageLeftDateColumnKey: "diffArmature",
+      dureeFinDemarrageRightIso: fmtIsoCellDate(demarrageDate),
+      dureeFinDemarrageEditable: Boolean(demarrageDate),
+    };
+  }
+
+  if (isCoffrageTypeDoc(typeDoc)) {
+    return {
+      dureeDebutFinColumnKey: "duree1",
+      dureeDebutFinLeftDateColumnKey: "dateLimite",
+      dureeDebutFinRightIso: fmtIsoCellDate(bandEndDate),
+      dureeDebutFinEditable: Boolean(bandEndDate),
+      dureeFinDemarrageColumnKey: "",
+      dureeFinDemarrageLeftDateColumnKey: "",
+      dureeFinDemarrageRightIso: "",
+      dureeFinDemarrageEditable: false,
+    };
+  }
+
+  return {
+    dureeDebutFinColumnKey: "",
+    dureeDebutFinLeftDateColumnKey: "",
+    dureeDebutFinRightIso: "",
+    dureeDebutFinEditable: false,
+    dureeFinDemarrageColumnKey: "",
+    dureeFinDemarrageLeftDateColumnKey: "",
+    dureeFinDemarrageRightIso: "",
+    dureeFinDemarrageEditable: false,
+  };
+}
+
 export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "") {
   const cfg = APP_CONFIG.grist.planningTable.columns;
   const projectLinkCol = cfg.projectLink || cfg.nomProjet;
@@ -259,6 +329,10 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
     const dateLimiteValue = r[cfg.dateLimite];
     const diffCoffrageValue = r[cfg.diffCoffrage];
     const diffArmatureValue = r[cfg.diffArmature];
+    const duree1Value = r[cfg.duree1];
+    const duree2Value = r[cfg.duree2];
+    const duree3Value = r[cfg.duree3];
+    const isCoffrage = isCoffrageTypeDoc(typeDocText);
     const bandStartDate = resolveBandStartDate(
       typeDocText,
       dateLimiteValue,
@@ -270,6 +344,19 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       diffArmatureValue
     );
     const demarrageTravauxValue = r[cfg.demarragesTravaux];
+    const demarrageTravauxDate = parseDate(demarrageTravauxValue);
+    const demarrageDisplayDate = isCoffrage ? null : demarrageTravauxDate;
+    const displayedDurations = resolveDisplayedDurations(
+      typeDocText,
+      duree1Value,
+      duree2Value,
+      duree3Value
+    );
+    const durationEditMeta = resolveDurationEditMeta(
+      typeDocText,
+      bandEndDate,
+      demarrageTravauxDate
+    );
 
     return {
       rowId: r[cfg.id] ?? null,
@@ -281,7 +368,20 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       typeDoc: typeDocText,
       debut: fmtCellDate(bandStartDate),
       fin: fmtCellDate(bandEndDate),
-      demarrage: fmtCellDate(parseDate(demarrageTravauxValue)),
+      demarrage: fmtCellDate(demarrageDisplayDate),
+      debutIso: fmtIsoCellDate(bandStartDate),
+      finIso: fmtIsoCellDate(bandEndDate),
+      demarrageIso: fmtIsoCellDate(demarrageDisplayDate),
+      dureeDebutFin: displayedDurations.dureeDebutFin,
+      dureeFinDemarrage: displayedDurations.dureeFinDemarrage,
+      dureeDebutFinColumnKey: durationEditMeta.dureeDebutFinColumnKey,
+      dureeDebutFinLeftDateColumnKey: durationEditMeta.dureeDebutFinLeftDateColumnKey,
+      dureeDebutFinRightIso: durationEditMeta.dureeDebutFinRightIso,
+      dureeDebutFinEditable: durationEditMeta.dureeDebutFinEditable,
+      dureeFinDemarrageColumnKey: durationEditMeta.dureeFinDemarrageColumnKey,
+      dureeFinDemarrageLeftDateColumnKey: durationEditMeta.dureeFinDemarrageLeftDateColumnKey,
+      dureeFinDemarrageRightIso: durationEditMeta.dureeFinDemarrageRightIso,
+      dureeFinDemarrageEditable: durationEditMeta.dureeFinDemarrageEditable,
       lignePlanning: lignePlanningText,
 
       // Valeurs numeriques de tri (robustes)
@@ -290,13 +390,13 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
 
       // Phases planning
       dateLimite: dateLimiteValue,
-      duree1: r[cfg.duree1],
+      duree1: duree1Value,
 
       diffCoffrage: diffCoffrageValue,
-      duree2: r[cfg.duree2],
+      duree2: duree2Value,
 
       diffArmature: diffArmatureValue,
-      duree3: r[cfg.duree3],
+      duree3: duree3Value,
 
       demarragesTravaux: demarrageTravauxValue,
       retards: toText(r[cfg.retards]),
@@ -348,13 +448,27 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
     // Groupe avec champs de tri explicites (pour vis-timeline)
     groups.push({
       id: groupId,
+      rowId: row.rowId,
       content: buildGroupContent(row),
       id2Label: row.id2 ?? "",
       tachesLabel: row.taches ?? "",
       typeDocLabel: row.typeDoc ?? "",
       debutLabel: row.debut ?? "",
+      debutIso: row.debutIso ?? "",
+      dureeDebutFinLabel: row.dureeDebutFin ?? "",
+      dureeDebutFinColumnKey: row.dureeDebutFinColumnKey ?? "",
+      dureeDebutFinLeftDateColumnKey: row.dureeDebutFinLeftDateColumnKey ?? "",
+      dureeDebutFinRightIso: row.dureeDebutFinRightIso ?? "",
+      dureeDebutFinEditable: Boolean(row.dureeDebutFinEditable),
       finLabel: row.fin ?? "",
+      finIso: row.finIso ?? "",
+      dureeFinDemarrageLabel: row.dureeFinDemarrage ?? "",
+      dureeFinDemarrageColumnKey: row.dureeFinDemarrageColumnKey ?? "",
+      dureeFinDemarrageLeftDateColumnKey: row.dureeFinDemarrageLeftDateColumnKey ?? "",
+      dureeFinDemarrageRightIso: row.dureeFinDemarrageRightIso ?? "",
+      dureeFinDemarrageEditable: Boolean(row.dureeFinDemarrageEditable),
       demarrageLabel: row.demarrage ?? "",
+      demarrageIso: row.demarrageIso ?? "",
       lignePlanningLabel: row.lignePlanning ?? "",
       indiceLabel: row.indice ?? "",
       retardsLabel: row.retards ?? "",

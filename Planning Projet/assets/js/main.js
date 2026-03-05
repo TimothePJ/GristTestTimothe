@@ -1,8 +1,10 @@
+import { APP_CONFIG } from "./config.js";
 import { state, setState } from "./state.js";
 import {
   initGrist,
   buildProjectOptions,
   fetchPlanningRows,
+  updatePlanningDurationAndLeftDate,
 } from "./services/gristService.js";
 import { buildTimelineDataFromPlanningRows } from "./services/planningService.js";
 import { initProjectSelector } from "./ui/selectors.js";
@@ -10,6 +12,7 @@ import {
   renderPlanningTimeline,
   clearPlanningTimeline,
   bindTimelineToolbar,
+  setPlanningDurationEditHandler,
 } from "./ui/timeline.js";
 
 let toolbarBound = false;
@@ -19,6 +22,103 @@ function setPlanningStatus(message = "") {
   const el = document.getElementById("planningStatus");
   if (el) {
     el.textContent = message;
+  }
+}
+
+function parseIsoDate(isoDate) {
+  const text = String(isoDate ?? "").trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+  return date;
+}
+
+function formatIsoDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function subtractWeeksFromIsoDate(isoDate, weeks) {
+  const rightDate = parseIsoDate(isoDate);
+  if (!rightDate) return "";
+
+  const leftDate = new Date(rightDate);
+  leftDate.setDate(leftDate.getDate() - (weeks * 7));
+  return formatIsoDate(leftDate);
+}
+
+function resolvePlanningColumnName(columnKey) {
+  const columns = APP_CONFIG.grist.planningTable?.columns || {};
+  return String(columns[columnKey] ?? "").trim();
+}
+
+async function handleDurationCellEdit({
+  rowId,
+  durationWeeks,
+  durationSlot,
+  durationColumnKey,
+  leftDateColumnKey,
+  rightIsoDate,
+}) {
+  const durationColumnName = resolvePlanningColumnName(durationColumnKey);
+  if (!durationColumnName) {
+    throw new Error("Colonne de durée introuvable dans la configuration.");
+  }
+
+  const leftDateColumnName = resolvePlanningColumnName(leftDateColumnKey);
+  if (!leftDateColumnName) {
+    throw new Error("Colonne de date de gauche introuvable dans la configuration.");
+  }
+
+  const normalizedWeeks = Number(durationWeeks);
+  if (!Number.isInteger(normalizedWeeks) || normalizedWeeks < 0) {
+    throw new Error("La durée doit être un nombre entier de semaines.");
+  }
+
+  const normalizedRightIsoDate = String(rightIsoDate ?? "").trim();
+  if (!parseIsoDate(normalizedRightIsoDate)) {
+    throw new Error("Date de référence à droite introuvable.");
+  }
+
+  const leftIsoDate = subtractWeeksFromIsoDate(
+    normalizedRightIsoDate,
+    normalizedWeeks
+  );
+  if (!leftIsoDate) {
+    throw new Error("Impossible de calculer la date de gauche.");
+  }
+
+  const slotLabel = durationSlot === "2" ? "Durée 2" : "Durée 1";
+  try {
+    setPlanningStatus(`Mise à jour ${slotLabel} en cours...`);
+
+    await updatePlanningDurationAndLeftDate(
+      rowId,
+      durationColumnName,
+      normalizedWeeks,
+      leftDateColumnName,
+      leftIsoDate
+    );
+
+    await refreshPlanning();
+  } catch (error) {
+    setPlanningStatus(
+      `Erreur mise à jour ${slotLabel.toLowerCase()} : ${error.message}`
+    );
+    throw error;
   }
 }
 
@@ -84,6 +184,7 @@ async function bootstrap() {
     setState({ selectedProject: "" });
 
     initGrist();
+    setPlanningDurationEditHandler(handleDurationCellEdit);
 
     const projectOptions = await buildProjectOptions();
 
