@@ -77,6 +77,14 @@ function buildPlanningLinkKey(project, numeroDocument, typeDocument, designation
   ].join("||");
 }
 
+function buildPlanningLinkKeyWithoutDesignation(project, numeroDocument, typeDocument) {
+  return [
+    normalizeText(project).toLowerCase(),
+    normalizeText(numeroDocument).toLowerCase(),
+    normalizeText(typeDocument).toLowerCase(),
+  ].join("||");
+}
+
 async function syncPlanningProjetIndicesFromListeDePlan() {
   try {
     const projetsMap = await chargerProjetsMap();
@@ -100,25 +108,37 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
     const planningRows = normalizeRows(planningRaw);
 
     const indiceOrder = new Map(INDICES.map((ind, idx) => [ind, idx]));
-    const latestByKey = new Map();
+    const latestByKeyStrict = new Map();
+    const latestByKeyNoDesignation = new Map();
 
     for (const r of listeRows) {
       const indice = normalizeIndice(r.Indice);
       const order = indiceOrder.has(indice) ? indiceOrder.get(indice) : -1;
       if (order < 0) continue;
+      if (!hasValidDate(r.DateDiffusion)) continue;
 
-      const key = buildPlanningLinkKey(
+      const strictKey = buildPlanningLinkKey(
         normalizeProject(r.Nom_projet),
         r.NumeroDocument,
         r.Type_document,
         r.Designation
       );
+      const noDesignationKey = buildPlanningLinkKeyWithoutDesignation(
+        normalizeProject(r.Nom_projet),
+        r.NumeroDocument,
+        r.Type_document
+      );
 
-      const current = latestByKey.get(key);
-      const shouldReplace = !current || order > current.order;
+      const strictCurrent = latestByKeyStrict.get(strictKey);
+      const shouldReplaceStrict = !strictCurrent || order > strictCurrent.order;
+      if (shouldReplaceStrict) {
+        latestByKeyStrict.set(strictKey, { indice, order });
+      }
 
-      if (shouldReplace) {
-        latestByKey.set(key, { indice, order });
+      const looseCurrent = latestByKeyNoDesignation.get(noDesignationKey);
+      const shouldReplaceLoose = !looseCurrent || order > looseCurrent.order;
+      if (shouldReplaceLoose) {
+        latestByKeyNoDesignation.set(noDesignationKey, { indice, order });
       }
     }
 
@@ -127,14 +147,22 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
       const planningId = p.id;
       if (planningId == null) continue;
 
-      const key = buildPlanningLinkKey(
+      const strictKey = buildPlanningLinkKey(
         normalizeProject(p.NomProjet),
         p.ID2,
         p.Type_doc,
         p.Taches ?? p.Tache
       );
+      const noDesignationKey = buildPlanningLinkKeyWithoutDesignation(
+        normalizeProject(p.NomProjet),
+        p.ID2,
+        p.Type_doc
+      );
 
-      const targetIndice = latestByKey.get(key)?.indice ?? "";
+      const targetIndice =
+        latestByKeyStrict.get(strictKey)?.indice ??
+        latestByKeyNoDesignation.get(noDesignationKey)?.indice ??
+        "";
       const currentIndice = normalizeText(p.Indice);
       if (currentIndice !== targetIndice) {
         actions.push(["UpdateRecord", "Planning_Projet", planningId, { Indice: targetIndice }]);

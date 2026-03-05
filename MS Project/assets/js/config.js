@@ -55,7 +55,6 @@ export const APP_CONFIG = {
       linePlanningCandidates: [
         "Ligne_planning",
         "LignePlanning",
-        "ID2",
       ],
       demarrageCandidates: [
         "Demarrages_travaux",

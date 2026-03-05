@@ -146,8 +146,7 @@ export async function updateMsProjectDate(rowId, columnName, isoDate) {
 
 export async function syncPlanningDemarrageFromMsProjectStart(
   rowId,
-  isoDate,
-  projectFallback = ""
+  isoDate
 ) {
   const msTable = APP_CONFIG.grist.msProjectTable;
   const planningTable = APP_CONFIG.grist.planningSyncTable;
@@ -175,11 +174,6 @@ export async function syncPlanningDemarrageFromMsProjectStart(
 
   const msRows = await fetchTableRows(msTable.sourceTable);
   const msIdCol = msTable.columns?.id || "id";
-  const msProjectCol = resolveColumn(
-    msRows,
-    msTable.columns?.projectLink,
-    msTable.projectLinkCandidates || []
-  );
   const msUniqueCol = msTable.columns?.uniqueNumber;
 
   if (!msUniqueCol) {
@@ -191,19 +185,17 @@ export async function syncPlanningDemarrageFromMsProjectStart(
     return { updatedCount: 0, matchedCount: 0, skipped: true };
   }
 
-  const msProjectValue = msProjectCol ? toText(msRow[msProjectCol]) : "";
-  const effectiveProjectValue = msProjectValue || toText(projectFallback);
   const msUniqueValue = msRow[msUniqueCol];
-  if (!effectiveProjectValue || msUniqueValue == null || msUniqueValue === "") {
+  if (msUniqueValue == null || msUniqueValue === "") {
     return { updatedCount: 0, matchedCount: 0, skipped: true };
   }
 
   const planningRows = await fetchTableRows(planningTable.sourceTable);
   const planningIdCol = planningTable.columns?.id || "id";
-  const planningProjectCol = resolveColumn(
+  const planningLineCol = resolveColumn(
     planningRows,
-    planningTable.columns?.projectLink,
-    planningTable.projectLinkCandidates || []
+    planningTable.columns?.linePlanning,
+    planningTable.linePlanningCandidates || []
   );
   const planningDemarrageCol = resolveColumn(
     planningRows,
@@ -211,27 +203,12 @@ export async function syncPlanningDemarrageFromMsProjectStart(
     planningTable.demarrageCandidates || []
   );
 
-  const lineColumnCandidates = [
-    planningTable.columns?.linePlanning,
-    ...(planningTable.linePlanningCandidates || []),
-  ]
-    .map((column) => String(column || "").trim())
-    .filter(Boolean);
-
-  const planningLineColumns = [...new Set(lineColumnCandidates)].filter((column) =>
-    hasColumn(planningRows, column)
-  );
-
-  if (!planningProjectCol || !planningLineColumns.length || !planningDemarrageCol) {
+  if (!planningLineCol || !planningDemarrageCol) {
     throw new Error("Colonnes Planning_Projet introuvables pour la synchronisation.");
   }
 
   const matchingRows = planningRows.filter((row) => {
-    const sameProject = toText(row[planningProjectCol]) === effectiveProjectValue;
-    const sameLine = planningLineColumns.some((lineColumn) =>
-      equalsByTextOrNumber(row[lineColumn], msUniqueValue)
-    );
-    return sameProject && sameLine;
+    return equalsByTextOrNumber(row[planningLineCol], msUniqueValue);
   });
 
   if (!matchingRows.length) {

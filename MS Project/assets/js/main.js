@@ -46,11 +46,7 @@ async function handleDateCellEdit({ rowId, field, isoDate }) {
 
     let planningSyncResult = null;
     if (field === "start") {
-      planningSyncResult = await syncPlanningDemarrageFromMsProjectStart(
-        rowId,
-        isoDate,
-        state.selectedProject || ""
-      );
+      planningSyncResult = await syncPlanningDemarrageFromMsProjectStart(rowId, isoDate);
     }
 
     await refreshMsProject();
