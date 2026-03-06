@@ -2,6 +2,7 @@ import { APP_CONFIG } from "./config.js";
 
 export const state = {
   selectedProject: "",
+  selectedZone: "",
 };
 
 export function loadState() {
@@ -14,6 +15,8 @@ export function loadState() {
 
     state.selectedProject =
       typeof parsed.selectedProject === "string" ? parsed.selectedProject : "";
+    state.selectedZone =
+      typeof parsed.selectedZone === "string" ? parsed.selectedZone : "";
   } catch (error) {
     console.warn("Erreur chargement localStorage :", error);
   }

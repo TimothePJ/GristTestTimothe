@@ -31,13 +31,44 @@ export function initProjectSelector(projectOptions, { onChange } = {}) {
 
   // Toujours démarrer sur "Choisir un projet"
   state.selectedProject = "";
+  state.selectedZone = "";
 
   fillSelect(projectSelect, projectOptions, "Choisir un projet", "");
 
   projectSelect.addEventListener("change", () => {
-    setState({ selectedProject: projectSelect.value });
+    setState({
+      selectedProject: projectSelect.value,
+      selectedZone: "",
+    });
     onChange?.({ ...state });
   });
 
   onChange?.({ ...state });
+}
+
+export function initZoneSelector({ onChange } = {}) {
+  const zoneSelect = document.getElementById("zoneDropdown");
+  if (!zoneSelect) {
+    throw new Error("Dropdown zone introuvable (#zoneDropdown).");
+  }
+
+  zoneSelect.disabled = true;
+  fillSelect(zoneSelect, [], "Toutes les zones", "");
+
+  zoneSelect.addEventListener("change", () => {
+    setState({ selectedZone: zoneSelect.value });
+    onChange?.({ ...state });
+  });
+}
+
+export function updateZoneSelector(
+  zoneOptions,
+  { selectedValue = "", enabled = false } = {}
+) {
+  const zoneSelect = document.getElementById("zoneDropdown");
+  if (!zoneSelect) return;
+
+  const options = Array.isArray(zoneOptions) ? zoneOptions : [];
+  fillSelect(zoneSelect, options, "Toutes les zones", selectedValue);
+  zoneSelect.disabled = !enabled;
 }

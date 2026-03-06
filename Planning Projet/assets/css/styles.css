@@ -29,7 +29,7 @@
   --left-panel-width: calc(var(--left-grid-width) + (var(--left-pad-x) * 2));
 
   /* Hauteur de ligne commune labels + timeline */
-  --planning-row-height: 38px;
+  --planning-row-height: 40px;
 
   /* Toolbar */
   --toolbar-height: 45px;
@@ -408,12 +408,22 @@ body * {
   border: 1px solid var(--grist-theme-border);
   color: #222;
   font-size: 12px;
-  line-height: 18px;
+  line-height: normal;
+  box-sizing: border-box;
+}
+
+#planningTimeline .vis-item.vis-range {
+  top: 4px !important;
+  height: calc(var(--planning-row-height) - 8px) !important;
+  min-height: calc(var(--planning-row-height) - 8px) !important;
 }
 
 #planningTimeline .vis-item .vis-item-content {
   padding: 0 4px;
   white-space: nowrap;
+  height: 100%;
+  display: flex;
+  align-items: center;
 }
 
 #planningTimeline .vis-item.vis-selected {

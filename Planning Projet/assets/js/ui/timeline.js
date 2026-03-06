@@ -906,7 +906,7 @@ export function renderPlanningTimeline({ groups, items }) {
       },
       groupHeightMode: "fixed", // important pour l'alignement des 4 colonnes
       margin: {
-        item: { horizontal: 2, vertical: 4 },
+        item: { horizontal: 2, vertical: 0 },
         axis: 8,
       },
       showCurrentTime: true,

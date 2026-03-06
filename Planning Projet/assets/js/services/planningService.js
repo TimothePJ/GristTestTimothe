@@ -337,13 +337,43 @@ function compareRowsBaseOrder(a, b) {
   return (a.taches || "").localeCompare(b.taches || "", "fr");
 }
 
-export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "") {
+function compareZoneKeys(a, b) {
+  const aKey = String(a ?? "");
+  const bKey = String(b ?? "");
+  if (aKey && bKey) {
+    const cmp = aKey.localeCompare(bKey, "fr", {
+      sensitivity: "base",
+      numeric: true,
+    });
+    if (cmp !== 0) return cmp;
+  }
+  if (aKey && !bKey) return -1;
+  if (!aKey && bKey) return 1;
+  return 0;
+}
+
+function buildGroupCompositeKey(zoneKey, groupeKey) {
+  const g = String(groupeKey ?? "");
+  if (!g) return "";
+  const z = String(zoneKey ?? "");
+  return `${z}||${g}`;
+}
+
+export function buildTimelineDataFromPlanningRows(
+  rawRows,
+  selectedProject = "",
+  selectedZone = ""
+) {
   const cfg = APP_CONFIG.grist.planningTable.columns;
   const projectLinkCol = cfg.projectLink || cfg.nomProjet;
+  const selectedZoneKey = String(selectedZone ?? "")
+    .trim()
+    .toLocaleLowerCase("fr");
 
   let rows = rawRows.map((r) => {
     const id2Text = toText(r[cfg.id2]);
     const groupeText = toText(r[cfg.groupe]);
+    const zoneText = toText(r[cfg.zone]);
     const lignePlanningText = toText(r[cfg.lignePlanning]);
     const tachesText = toText(r[cfg.taches]) || toText(r[cfg.tacheAlt]);
     const typeDocText = toText(r[cfg.typeDoc]);
@@ -387,6 +417,12 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       id2: id2Text,
       groupe: groupeText,
       groupeKey: groupeText ? groupeText.toLocaleLowerCase("fr") : "",
+      zone: zoneText,
+      zoneKey: zoneText ? zoneText.toLocaleLowerCase("fr") : "",
+      groupCompositeKey: buildGroupCompositeKey(
+        zoneText ? zoneText.toLocaleLowerCase("fr") : "",
+        groupeText ? groupeText.toLocaleLowerCase("fr") : ""
+      ),
       taches: tachesText,
       typeDoc: typeDocText,
       debut: fmtCellDate(bandStartDate),
@@ -436,24 +472,28 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
     rows = rows.filter((r) => r.projectLink === selectedProject);
   }
 
+  if (selectedZoneKey) {
+    rows = rows.filter((row) => row.zoneKey === selectedZoneKey);
+  }
+
   rows = rows.filter((row) => isAllowedTypeDoc(row.typeDoc));
 
   const minArmatureDiffByGroup = new Map();
   rows.forEach((row) => {
-    if (!row.groupeKey || !isArmaturesTypeDoc(row.typeDoc)) return;
+    if (!row.groupCompositeKey || !isArmaturesTypeDoc(row.typeDoc)) return;
     const armatureDiffDate = parseDate(row.diffCoffrage);
     if (!armatureDiffDate) return;
 
-    const existingMin = minArmatureDiffByGroup.get(row.groupeKey);
+    const existingMin = minArmatureDiffByGroup.get(row.groupCompositeKey);
     if (!existingMin || armatureDiffDate < existingMin) {
-      minArmatureDiffByGroup.set(row.groupeKey, armatureDiffDate);
+      minArmatureDiffByGroup.set(row.groupCompositeKey, armatureDiffDate);
     }
   });
 
   rows = rows.map((row) => {
-    if (!row.groupeKey || !isCoffrageTypeDoc(row.typeDoc)) return row;
+    if (!row.groupCompositeKey || !isCoffrageTypeDoc(row.typeDoc)) return row;
 
-    const resolvedDiffCoffrage = minArmatureDiffByGroup.get(row.groupeKey);
+    const resolvedDiffCoffrage = minArmatureDiffByGroup.get(row.groupCompositeKey);
     if (!resolvedDiffCoffrage) return row;
 
     const normalizedDiffCoffrage = new Date(resolvedDiffCoffrage);
@@ -478,20 +518,24 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
   const ungroupedRows = [];
 
   rows.forEach((row) => {
-    if (!row.groupeKey) {
+    if (!row.groupCompositeKey) {
       ungroupedRows.push(row);
       return;
     }
 
-    if (!groupedRows.has(row.groupeKey)) {
-      groupedRows.set(row.groupeKey, {
+    if (!groupedRows.has(row.groupCompositeKey)) {
+      groupedRows.set(row.groupCompositeKey, {
+        zoneKey: row.zoneKey || "",
+        zoneLabel: row.zone || "",
+        groupeKey: row.groupeKey || "",
+        groupeLabel: row.groupe || "",
         coffrage: [],
         armatures: [],
         others: [],
       });
     }
 
-    const bucket = groupedRows.get(row.groupeKey);
+    const bucket = groupedRows.get(row.groupCompositeKey);
     if (isCoffrageTypeDoc(row.typeDoc)) {
       bucket.coffrage.push(row);
     } else if (isArmaturesTypeDoc(row.typeDoc)) {
@@ -501,36 +545,32 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
     }
   });
 
-  const groupedEntries = [...groupedRows.entries()].map(([groupKey, bucket]) => {
+  const groupedEntries = [...groupedRows.values()].map((bucket) => {
     bucket.coffrage.sort(compareRowsBaseOrder);
     bucket.armatures.sort(compareRowsBaseOrder);
     bucket.others.sort(compareRowsBaseOrder);
 
     const orderedRows = [...bucket.coffrage, ...bucket.armatures, ...bucket.others];
 
-    let minDebutDate = null;
-    orderedRows.forEach((row) => {
-      const d = parseDate(row.debutIso) || parseDate(row.debut);
-      if (!d) return;
-      if (!minDebutDate || d < minDebutDate) minDebutDate = d;
-    });
-
     return {
-      groupKey,
+      zoneKey: bucket.zoneKey || "",
+      zoneLabel: bucket.zoneLabel || "",
+      groupeKey: bucket.groupeKey || "",
+      groupeLabel: bucket.groupeLabel || "",
       orderedRows,
-      minDebutDate,
     };
   });
 
   groupedEntries.sort((a, b) => {
-    const aDate = a.minDebutDate;
-    const bDate = b.minDebutDate;
+    const zoneCmp = compareZoneKeys(a.zoneKey, b.zoneKey);
+    if (zoneCmp !== 0) return zoneCmp;
 
-    if (aDate && bDate && aDate.valueOf() !== bDate.valueOf()) {
-      return aDate - bDate;
-    }
-    if (aDate && !bDate) return -1;
-    if (!aDate && bDate) return 1;
+    const groupCmp = String(a.groupeLabel || a.groupeKey || "").localeCompare(
+      String(b.groupeLabel || b.groupeKey || ""),
+      "fr",
+      { sensitivity: "base", numeric: true }
+    );
+    if (groupCmp !== 0) return groupCmp;
 
     const aFirst = a.orderedRows[0];
     const bFirst = b.orderedRows[0];
@@ -538,7 +578,13 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       return compareRowsBaseOrder(aFirst, bFirst);
     }
 
-    return String(a.groupKey).localeCompare(String(b.groupKey), "fr");
+    return 0;
+  });
+
+  ungroupedRows.sort((a, b) => {
+    const zoneCmp = compareZoneKeys(a.zoneKey, b.zoneKey);
+    if (zoneCmp !== 0) return zoneCmp;
+    return compareRowsBaseOrder(a, b);
   });
 
   rows = [];

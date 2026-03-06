@@ -18,6 +18,7 @@ export const APP_CONFIG = {
         taches: "Taches",
         tacheAlt: "Tache",
         groupe: "Groupe",
+        zone: "Zone",
         typeDoc: "Type_doc",
         lignePlanning: "Ligne_planning",
         dateLimite: "Date_limite",

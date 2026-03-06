@@ -6,9 +6,14 @@ import {
   fetchPlanningRows,
   syncCoffrageDiffCoffrageFromGroups,
   updatePlanningDurationAndLeftDate,
+  toText,
 } from "./services/gristService.js";
 import { buildTimelineDataFromPlanningRows } from "./services/planningService.js";
-import { initProjectSelector } from "./ui/selectors.js";
+import {
+  initProjectSelector,
+  initZoneSelector,
+  updateZoneSelector,
+} from "./ui/selectors.js";
 import {
   renderPlanningTimeline,
   clearPlanningTimeline,
@@ -64,6 +69,39 @@ function subtractWeeksFromIsoDate(isoDate, weeks) {
 function resolvePlanningColumnName(columnKey) {
   const columns = APP_CONFIG.grist.planningTable?.columns || {};
   return String(columns[columnKey] ?? "").trim();
+}
+
+function buildZoneOptionsForSelectedProject(planningRows, selectedProject = "") {
+  const projectName = toText(selectedProject);
+  if (!projectName) return [];
+
+  const columns = APP_CONFIG.grist.planningTable?.columns || {};
+  const projectCol = columns.projectLink || columns.nomProjet;
+  const zoneCol = columns.zone;
+  const zoneValues = new Set();
+
+  for (const row of planningRows || []) {
+    if (toText(row?.[projectCol]) !== projectName) continue;
+    const zone = toText(row?.[zoneCol]);
+    if (!zone) continue;
+    zoneValues.add(zone);
+  }
+
+  return [...zoneValues].sort((a, b) =>
+    a.localeCompare(b, "fr", { sensitivity: "base", numeric: true })
+  );
+}
+
+function normalizeSelectedZone(zoneOptions, selectedZone) {
+  const wantedZone = toText(selectedZone);
+  if (!wantedZone) return "";
+
+  const wantedKey = wantedZone.toLocaleLowerCase("fr");
+  const exact = zoneOptions.find(
+    (zone) => toText(zone).toLocaleLowerCase("fr") === wantedKey
+  );
+
+  return exact || "";
 }
 
 async function handleDurationCellEdit({
@@ -130,13 +168,14 @@ async function refreshPlanning() {
   try {
     setPlanningStatus("Chargement du planning...");
 
+    const selectedProject = state.selectedProject || "";
     let planningRows = await fetchPlanningRows();
     let syncResult = { updatedCount: 0 };
 
     try {
       syncResult = await syncCoffrageDiffCoffrageFromGroups(
         planningRows,
-        state.selectedProject || ""
+        selectedProject
       );
       if (syncResult.updatedCount > 0) {
         planningRows = await fetchPlanningRows();
@@ -145,15 +184,30 @@ async function refreshPlanning() {
       console.error("Erreur sync Diff_coffrage (groupes) :", syncError);
     }
 
+    const zoneOptions = buildZoneOptionsForSelectedProject(
+      planningRows,
+      selectedProject
+    );
+    const normalizedZone = normalizeSelectedZone(zoneOptions, state.selectedZone);
+    if (normalizedZone !== (state.selectedZone || "")) {
+      setState({ selectedZone: normalizedZone });
+    }
+
+    updateZoneSelector(zoneOptions, {
+      selectedValue: normalizedZone,
+      enabled: Boolean(selectedProject),
+    });
+
     const timelineData = buildTimelineDataFromPlanningRows(
       planningRows,
-      state.selectedProject || ""
+      selectedProject,
+      normalizedZone
     );
 
     if (!timelineData.rowCount) {
       clearPlanningTimeline();
 
-      if (!state.selectedProject) {
+      if (!selectedProject) {
         setPlanningStatus("");
       } else {
         setPlanningStatus("Aucune ligne trouvée dans la table de planning.");
@@ -168,9 +222,12 @@ async function refreshPlanning() {
       toolbarBound = true;
     }
 
-    const projectLabel = state.selectedProject
-      ? `Projet : ${state.selectedProject}`
+    const projectLabel = selectedProject
+      ? `Projet : ${selectedProject}`
       : "Tous les projets";
+    const zoneLabel = normalizedZone
+      ? `Zone : ${normalizedZone}`
+      : "Toutes les zones";
 
     const emptyPhaseSuffix =
       !timelineData.items || timelineData.items.length === 0
@@ -178,7 +235,7 @@ async function refreshPlanning() {
         : "";
 
     setPlanningStatus(
-      `${timelineData.rowCount} ligne(s) planning affichée(s) | ${projectLabel}${emptyPhaseSuffix}`
+      `${timelineData.rowCount} ligne(s) planning affichée(s) | ${projectLabel} | ${zoneLabel}${emptyPhaseSuffix}`
     );
     if (syncResult.updatedCount > 0) {
       const currentStatus = document.getElementById("planningStatus")?.textContent || "";
@@ -200,14 +257,23 @@ async function handleProjectChange(currentState) {
   await refreshPlanning();
 }
 
+async function handleZoneChange(currentState) {
+  console.log("Zone sélectionnée :", currentState.selectedZone || "(toutes)");
+  await refreshPlanning();
+}
+
 async function bootstrap() {
   try {
-    setState({ selectedProject: "" });
+    setState({ selectedProject: "", selectedZone: "" });
 
     initGrist();
     setPlanningDurationEditHandler(handleDurationCellEdit);
 
     const projectOptions = await buildProjectOptions();
+
+    initZoneSelector({
+      onChange: handleZoneChange,
+    });
 
     initProjectSelector(projectOptions, {
       onChange: handleProjectChange,
@@ -221,6 +287,11 @@ async function bootstrap() {
     if (project) {
       project.disabled = true;
       project.innerHTML = `<option value="">Erreur chargement projet</option>`;
+    }
+    const zone = document.getElementById("zoneDropdown");
+    if (zone) {
+      zone.disabled = true;
+      zone.innerHTML = `<option value="">Toutes les zones</option>`;
     }
 
     setPlanningStatus(`Erreur initialisation : ${error.message}`);
