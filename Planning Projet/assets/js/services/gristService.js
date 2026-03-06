@@ -75,6 +75,22 @@ function isIsoDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? "").trim());
 }
 
+function toInteger(value) {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return null;
+  return n;
+}
+
+function subtractWeeksFromDate(date, weeks) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  const w = toInteger(weeks);
+  if (w == null || w < 0) return null;
+  const d = new Date(date);
+  d.setDate(d.getDate() - (w * 7));
+  return d;
+}
+
 function normalizeUtcDateToLocalCalendar(date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
   return new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
@@ -261,6 +277,7 @@ export async function updatePlanningDurationAndLeftDate(
     throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
   }
 
+  const columns = table.columns || {};
   const recordId = Number(rowId);
   if (!Number.isInteger(recordId) || recordId <= 0) {
     throw new Error("Identifiant de ligne Planning_Projet invalide.");
@@ -290,15 +307,85 @@ export async function updatePlanningDurationAndLeftDate(
     throw new Error("grist.docApi.applyUserActions(...) indisponible.");
   }
 
+  const idCol = columns.id || "id";
+  const typeDocCol = columns.typeDoc || "Type_doc";
+  const dateLimiteCol = columns.dateLimite || "Date_limite";
+  const duree1Col = columns.duree1 || "Duree_1";
+  const diffCoffrageCol = columns.diffCoffrage || "Diff_coffrage";
+  const duree2Col = columns.duree2 || "Duree_2";
+  const diffArmatureCol = columns.diffArmature || "Diff_armature";
+  const duree3Col = columns.duree3 || "Duree_3";
+  const demarrageCol = columns.demarragesTravaux || "Demarrages_travaux";
+
+  const updates = {
+    [durationField]: Number(durationValue),
+    [leftDateField]: normalizedLeftIsoDate,
+  };
+
+  let currentRow = null;
+  try {
+    const rows = await fetchTableRows(table.sourceTable);
+    currentRow = rows.find((row) => Number(row?.[idCol]) === recordId) || null;
+  } catch (error) {
+    console.warn("Impossible de relire la ligne planning pour recalcul auto des dates :", error);
+  }
+
+  if (currentRow) {
+    const typeDoc = String(currentRow[typeDocCol] ?? "").toUpperCase();
+
+    if (typeDoc.includes("ARMATURES")) {
+      const finalDuree2 = durationField === duree2Col
+        ? toInteger(durationValue)
+        : toInteger(currentRow[duree2Col]);
+      const finalDuree3 = durationField === duree3Col
+        ? toInteger(durationValue)
+        : toInteger(currentRow[duree3Col]);
+
+      let diffArmatureDate = leftDateField === diffArmatureCol
+        ? parseCalendarDate(normalizedLeftIsoDate)
+        : parseCalendarDate(currentRow[diffArmatureCol]);
+
+      const demarrageDate = parseCalendarDate(currentRow[demarrageCol]);
+      const shouldRecomputeDiffArmature =
+        durationField === duree3Col || leftDateField === diffArmatureCol;
+      if (shouldRecomputeDiffArmature && demarrageDate && finalDuree3 != null && finalDuree3 >= 0) {
+        const computedDiffArmature = subtractWeeksFromDate(demarrageDate, finalDuree3);
+        const computedIso = formatIsoDate(computedDiffArmature);
+        if (computedIso) {
+          updates[diffArmatureCol] = computedIso;
+          diffArmatureDate = computedDiffArmature;
+        }
+      }
+
+      if (diffArmatureDate && finalDuree2 != null && finalDuree2 >= 0) {
+        const computedDiffCoffrage = subtractWeeksFromDate(diffArmatureDate, finalDuree2);
+        const computedIso = formatIsoDate(computedDiffCoffrage);
+        if (computedIso) {
+          updates[diffCoffrageCol] = computedIso;
+        }
+      }
+    } else if (typeDoc.includes("COFFRAGE")) {
+      const finalDuree1 = durationField === duree1Col
+        ? toInteger(durationValue)
+        : toInteger(currentRow[duree1Col]);
+      const diffCoffrageDate = parseCalendarDate(currentRow[diffCoffrageCol]);
+
+      if (diffCoffrageDate && finalDuree1 != null && finalDuree1 >= 0) {
+        const computedDateLimite = subtractWeeksFromDate(diffCoffrageDate, finalDuree1);
+        const computedIso = formatIsoDate(computedDateLimite);
+        if (computedIso) {
+          updates[dateLimiteCol] = computedIso;
+        }
+      }
+    }
+  }
+
   await grist.docApi.applyUserActions([
     [
       "UpdateRecord",
       table.sourceTable,
       recordId,
-      {
-        [durationField]: Number(durationValue),
-        [leftDateField]: normalizedLeftIsoDate,
-      },
+      updates,
     ],
   ]);
 }
