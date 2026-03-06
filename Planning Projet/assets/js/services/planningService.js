@@ -475,11 +475,11 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
   rows.sort(compareRowsBaseOrder);
 
   const groupedRows = new Map();
-  const orderedEntries = [];
+  const ungroupedRows = [];
 
   rows.forEach((row) => {
     if (!row.groupeKey) {
-      orderedEntries.push({ kind: "row", row });
+      ungroupedRows.push(row);
       return;
     }
 
@@ -489,7 +489,6 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
         armatures: [],
         others: [],
       });
-      orderedEntries.push({ kind: "group", groupKey: row.groupeKey });
     }
 
     const bucket = groupedRows.get(row.groupeKey);
@@ -502,22 +501,51 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
     }
   });
 
-  rows = [];
-  orderedEntries.forEach((entry) => {
-    if (entry.kind === "row") {
-      rows.push(entry.row);
-      return;
-    }
-
-    const bucket = groupedRows.get(entry.groupKey);
-    if (!bucket) return;
-
+  const groupedEntries = [...groupedRows.entries()].map(([groupKey, bucket]) => {
     bucket.coffrage.sort(compareRowsBaseOrder);
     bucket.armatures.sort(compareRowsBaseOrder);
     bucket.others.sort(compareRowsBaseOrder);
 
-    rows.push(...bucket.coffrage, ...bucket.armatures, ...bucket.others);
+    const orderedRows = [...bucket.coffrage, ...bucket.armatures, ...bucket.others];
+
+    let minDebutDate = null;
+    orderedRows.forEach((row) => {
+      const d = parseDate(row.debutIso) || parseDate(row.debut);
+      if (!d) return;
+      if (!minDebutDate || d < minDebutDate) minDebutDate = d;
+    });
+
+    return {
+      groupKey,
+      orderedRows,
+      minDebutDate,
+    };
   });
+
+  groupedEntries.sort((a, b) => {
+    const aDate = a.minDebutDate;
+    const bDate = b.minDebutDate;
+
+    if (aDate && bDate && aDate.valueOf() !== bDate.valueOf()) {
+      return aDate - bDate;
+    }
+    if (aDate && !bDate) return -1;
+    if (!aDate && bDate) return 1;
+
+    const aFirst = a.orderedRows[0];
+    const bFirst = b.orderedRows[0];
+    if (aFirst && bFirst) {
+      return compareRowsBaseOrder(aFirst, bFirst);
+    }
+
+    return String(a.groupKey).localeCompare(String(b.groupKey), "fr");
+  });
+
+  rows = [];
+  groupedEntries.forEach((entry) => {
+    rows.push(...entry.orderedRows);
+  });
+  rows.push(...ungroupedRows);
 
   const groups = [];
   const items = [];
