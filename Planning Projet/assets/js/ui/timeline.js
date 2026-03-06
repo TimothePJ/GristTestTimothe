@@ -613,8 +613,18 @@ function bindDurationCellEditing(containerEl) {
 }
 
 function buildGroupLabelElement(group) {
+  if (group?.isZoneHeader) {
+    const zoneBand = document.createElement("div");
+    zoneBand.className = "zone-header-band";
+    zoneBand.textContent = String(group?.zoneHeaderLabel ?? "");
+    return zoneBand;
+  }
+
   const row = document.createElement("div");
   row.className = "group-row-grid";
+  if (String(group?.typeDocLabel ?? "").toUpperCase().includes("COFFRAGE")) {
+    row.classList.add("row-type-coffrage");
+  }
 
   const id2 = document.createElement("div");
   id2.className = "cell-id2";
@@ -724,6 +734,8 @@ function computeRange(items) {
   let max = null;
 
   for (const item of items) {
+    if (item?.type === "background") continue;
+
     const s = toDate(item.start);
     if (!s) continue;
     const e = toDate(item.end) || s;

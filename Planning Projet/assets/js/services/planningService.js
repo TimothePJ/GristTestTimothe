@@ -359,6 +359,12 @@ function buildGroupCompositeKey(zoneKey, groupeKey) {
   return `${z}||${g}`;
 }
 
+function formatZoneHeaderLabel(zoneLabel) {
+  const normalized = String(zoneLabel ?? "").trim();
+  if (!normalized) return "Batiment Sans zone";
+  return `Batiment ${normalized}`;
+}
+
 export function buildTimelineDataFromPlanningRows(
   rawRows,
   selectedProject = "",
@@ -595,14 +601,53 @@ export function buildTimelineDataFromPlanningRows(
 
   const groups = [];
   const items = [];
+  let previousZoneKey = "__initial__";
+  let groupSortIndex = 0;
+  let zoneHeaderIndex = 0;
 
   rows.forEach((row, index) => {
+    const rowZoneKey = String(row.zoneKey || "");
+    if (rowZoneKey !== previousZoneKey) {
+      previousZoneKey = rowZoneKey;
+      const zoneHeaderId = `zone-${zoneHeaderIndex}-${rowZoneKey || "sans-zone"}`;
+      zoneHeaderIndex += 1;
+
+      groups.push({
+        id: zoneHeaderId,
+        rowId: null,
+        isZoneHeader: true,
+        zoneLabel: row.zone || "",
+        zoneHeaderLabel: formatZoneHeaderLabel(row.zone || ""),
+        className: "zone-header-group",
+        sortIndex: groupSortIndex++,
+        sortLignePlanning: Number.MIN_SAFE_INTEGER,
+        sortID2: Number.MIN_SAFE_INTEGER,
+        meta: {
+          isZoneHeader: true,
+          zoneKey: rowZoneKey,
+          zoneLabel: row.zone || "",
+        },
+      });
+
+      items.push({
+        id: `${zoneHeaderId}-bg`,
+        group: zoneHeaderId,
+        start: new Date(1900, 0, 1),
+        end: new Date(2200, 0, 1),
+        type: "background",
+        className: "zone-header-fill",
+        content: "",
+      });
+    }
+
     const groupId = `g-${row.rowId ?? `${row.id2 || "x"}-${row.lignePlanning || "x"}-${index}`}`;
 
     // Groupe avec champs de tri explicites (pour vis-timeline)
     groups.push({
       id: groupId,
       rowId: row.rowId,
+      isZoneHeader: false,
+      className: "planning-row-group",
       content: buildGroupContent(row),
       id2Label: row.id2 ?? "",
       tachesLabel: row.taches ?? "",
@@ -629,7 +674,7 @@ export function buildTimelineDataFromPlanningRows(
       retardsLabel: row.retards ?? "",
 
       // Champs de tri explicites (plus fiable que meta uniquement)
-      sortIndex: index,
+      sortIndex: groupSortIndex++,
       sortLignePlanning: row.lignePlanningNum ?? Number.MAX_SAFE_INTEGER,
       sortID2: row.id2Num ?? Number.MAX_SAFE_INTEGER,
 

@@ -273,6 +273,15 @@ body * {
   border-bottom: 1px solid var(--grist-theme-border) !important;
 }
 
+#planningTimeline .vis-labelset .vis-label.zone-header-group {
+  background: #e8f2ff !important;
+  border-bottom: 1px solid #c6dbff !important;
+}
+
+#planningTimeline .vis-labelset .vis-label.zone-header-group .vis-inner {
+  background: #e8f2ff !important;
+}
+
 /* Wrapper interne vis */
 #planningTimeline .vis-labelset .vis-label .vis-inner {
   width: 100% !important;
@@ -290,6 +299,27 @@ body * {
   min-height: var(--planning-row-height) !important;
   box-sizing: border-box !important;
   border-bottom: 1px solid #f2f2f2 !important;
+}
+
+#planningTimeline .vis-background .vis-group.zone-header-group {
+  background: transparent !important;
+  border-bottom: 1px solid #f2f2f2 !important;
+}
+
+#planningTimeline .vis-foreground .vis-group.zone-header-group {
+  background: transparent !important;
+  border-bottom: 1px solid #f2f2f2 !important;
+}
+
+#planningTimeline .vis-background .vis-group.planning-row-group,
+#planningTimeline .vis-foreground .vis-group.planning-row-group {
+  background: transparent !important;
+  border-bottom: 1px solid #f2f2f2 !important;
+}
+
+#planningTimeline .vis-item.vis-background.zone-header-fill {
+  background: #e8f2ff !important;
+  border: 0 !important;
 }
 
 /* Sécurité anti débordement horizontal des labels */
@@ -312,6 +342,23 @@ body * {
   box-sizing: content-box !important;
   color: #222 !important;
   font-size: 13px !important;
+}
+
+#planningTimeline .group-row-grid.row-type-coffrage {
+  background: #fff8dc !important;
+}
+
+#planningTimeline .zone-header-band {
+  display: flex !important;
+  align-items: center !important;
+  width: var(--left-grid-width) !important;
+  min-height: var(--planning-row-height) !important;
+  padding: 0 10px !important;
+  box-sizing: content-box !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  color: #1d4f91 !important;
+  letter-spacing: 0.1px;
 }
 
 #planningTimeline .group-row-grid > div {
