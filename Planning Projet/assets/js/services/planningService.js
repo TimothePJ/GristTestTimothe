@@ -318,12 +318,32 @@ function resolveDurationEditMeta(typeDoc, bandEndDate, demarrageDate) {
   };
 }
 
+function compareRowsBaseOrder(a, b) {
+  const aLine = a.lignePlanningNum;
+  const bLine = b.lignePlanningNum;
+  if (aLine != null && bLine != null && aLine !== bLine) return aLine - bLine;
+  if (aLine != null && bLine == null) return -1;
+  if (aLine == null && bLine != null) return 1;
+
+  const aId2 = a.id2Num;
+  const bId2 = b.id2Num;
+  if (aId2 != null && bId2 != null && aId2 !== bId2) return aId2 - bId2;
+  if (aId2 != null && bId2 == null) return -1;
+  if (aId2 == null && bId2 != null) return 1;
+
+  const typeCmp = (a.typeDoc || "").localeCompare(b.typeDoc || "", "fr");
+  if (typeCmp !== 0) return typeCmp;
+
+  return (a.taches || "").localeCompare(b.taches || "", "fr");
+}
+
 export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "") {
   const cfg = APP_CONFIG.grist.planningTable.columns;
   const projectLinkCol = cfg.projectLink || cfg.nomProjet;
 
   let rows = rawRows.map((r) => {
     const id2Text = toText(r[cfg.id2]);
+    const groupeText = toText(r[cfg.groupe]);
     const lignePlanningText = toText(r[cfg.lignePlanning]);
     const tachesText = toText(r[cfg.taches]) || toText(r[cfg.tacheAlt]);
     const typeDocText = toText(r[cfg.typeDoc]);
@@ -365,6 +385,8 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
 
       // Colonnes affichees
       id2: id2Text,
+      groupe: groupeText,
+      groupeKey: groupeText ? groupeText.toLocaleLowerCase("fr") : "",
       taches: tachesText,
       typeDoc: typeDocText,
       debut: fmtCellDate(bandStartDate),
@@ -416,28 +438,85 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
 
   rows = rows.filter((row) => isAllowedTypeDoc(row.typeDoc));
 
-  // TRI ROBUSTE 
-  // 1) Ligne_planning
-  // 2) ID2
-  // 3) Type_doc
-  // 4) Taches
-  rows.sort((a, b) => {
-    const aLine = a.lignePlanningNum;
-    const bLine = b.lignePlanningNum;
-    if (aLine != null && bLine != null && aLine !== bLine) return aLine - bLine;
-    if (aLine != null && bLine == null) return -1;
-    if (aLine == null && bLine != null) return 1;
+  const minArmatureDiffByGroup = new Map();
+  rows.forEach((row) => {
+    if (!row.groupeKey || !isArmaturesTypeDoc(row.typeDoc)) return;
+    const armatureDiffDate = parseDate(row.diffCoffrage);
+    if (!armatureDiffDate) return;
 
-    const aId2 = a.id2Num;
-    const bId2 = b.id2Num;
-    if (aId2 != null && bId2 != null && aId2 !== bId2) return aId2 - bId2;
-    if (aId2 != null && bId2 == null) return -1;
-    if (aId2 == null && bId2 != null) return 1;
+    const existingMin = minArmatureDiffByGroup.get(row.groupeKey);
+    if (!existingMin || armatureDiffDate < existingMin) {
+      minArmatureDiffByGroup.set(row.groupeKey, armatureDiffDate);
+    }
+  });
 
-    const typeCmp = (a.typeDoc || "").localeCompare(b.typeDoc || "", "fr");
-    if (typeCmp !== 0) return typeCmp;
+  rows = rows.map((row) => {
+    if (!row.groupeKey || !isCoffrageTypeDoc(row.typeDoc)) return row;
 
-    return (a.taches || "").localeCompare(b.taches || "", "fr");
+    const resolvedDiffCoffrage = minArmatureDiffByGroup.get(row.groupeKey);
+    if (!resolvedDiffCoffrage) return row;
+
+    const normalizedDiffCoffrage = new Date(resolvedDiffCoffrage);
+    const durationEditMeta = resolveDurationEditMeta(
+      row.typeDoc,
+      normalizedDiffCoffrage,
+      parseDate(row.demarragesTravaux)
+    );
+
+    return {
+      ...row,
+      diffCoffrage: normalizedDiffCoffrage,
+      fin: fmtCellDate(normalizedDiffCoffrage),
+      finIso: fmtIsoCellDate(normalizedDiffCoffrage),
+      ...durationEditMeta,
+    };
+  });
+
+  rows.sort(compareRowsBaseOrder);
+
+  const groupedRows = new Map();
+  const orderedEntries = [];
+
+  rows.forEach((row) => {
+    if (!row.groupeKey) {
+      orderedEntries.push({ kind: "row", row });
+      return;
+    }
+
+    if (!groupedRows.has(row.groupeKey)) {
+      groupedRows.set(row.groupeKey, {
+        coffrage: [],
+        armatures: [],
+        others: [],
+      });
+      orderedEntries.push({ kind: "group", groupKey: row.groupeKey });
+    }
+
+    const bucket = groupedRows.get(row.groupeKey);
+    if (isCoffrageTypeDoc(row.typeDoc)) {
+      bucket.coffrage.push(row);
+    } else if (isArmaturesTypeDoc(row.typeDoc)) {
+      bucket.armatures.push(row);
+    } else {
+      bucket.others.push(row);
+    }
+  });
+
+  rows = [];
+  orderedEntries.forEach((entry) => {
+    if (entry.kind === "row") {
+      rows.push(entry.row);
+      return;
+    }
+
+    const bucket = groupedRows.get(entry.groupKey);
+    if (!bucket) return;
+
+    bucket.coffrage.sort(compareRowsBaseOrder);
+    bucket.armatures.sort(compareRowsBaseOrder);
+    bucket.others.sort(compareRowsBaseOrder);
+
+    rows.push(...bucket.coffrage, ...bucket.armatures, ...bucket.others);
   });
 
   const groups = [];
@@ -454,6 +533,7 @@ export function buildTimelineDataFromPlanningRows(rawRows, selectedProject = "")
       id2Label: row.id2 ?? "",
       tachesLabel: row.taches ?? "",
       typeDocLabel: row.typeDoc ?? "",
+      groupeLabel: row.groupe ?? "",
       debutLabel: row.debut ?? "",
       debutIso: row.debutIso ?? "",
       dureeDebutFinLabel: row.dureeDebutFin ?? "",

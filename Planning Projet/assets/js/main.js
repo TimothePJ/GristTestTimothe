@@ -4,6 +4,7 @@ import {
   initGrist,
   buildProjectOptions,
   fetchPlanningRows,
+  syncCoffrageDiffCoffrageFromGroups,
   updatePlanningDurationAndLeftDate,
 } from "./services/gristService.js";
 import { buildTimelineDataFromPlanningRows } from "./services/planningService.js";
@@ -129,7 +130,21 @@ async function refreshPlanning() {
   try {
     setPlanningStatus("Chargement du planning...");
 
-    const planningRows = await fetchPlanningRows();
+    let planningRows = await fetchPlanningRows();
+    let syncResult = { updatedCount: 0 };
+
+    try {
+      syncResult = await syncCoffrageDiffCoffrageFromGroups(
+        planningRows,
+        state.selectedProject || ""
+      );
+      if (syncResult.updatedCount > 0) {
+        planningRows = await fetchPlanningRows();
+      }
+    } catch (syncError) {
+      console.error("Erreur sync Diff_coffrage (groupes) :", syncError);
+    }
+
     const timelineData = buildTimelineDataFromPlanningRows(
       planningRows,
       state.selectedProject || ""
@@ -165,6 +180,12 @@ async function refreshPlanning() {
     setPlanningStatus(
       `${timelineData.rowCount} ligne(s) planning affichée(s) | ${projectLabel}${emptyPhaseSuffix}`
     );
+    if (syncResult.updatedCount > 0) {
+      const currentStatus = document.getElementById("planningStatus")?.textContent || "";
+      setPlanningStatus(
+        `${currentStatus} | Sync Diff_coffrage: ${syncResult.updatedCount} ligne(s)`
+      );
+    }
   } catch (error) {
     console.error("Erreur refresh planning :", error);
     clearPlanningTimeline();
