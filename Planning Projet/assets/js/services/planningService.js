@@ -150,9 +150,10 @@ function fmtDateIso(date) {
 
 function buildGroupContent(row) {
   return `
-    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
+    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
       <div class="cell-id2">${escapeHtml(row.id2 ?? "")}</div>
       <div class="cell-task">${escapeHtml(row.taches ?? "")}</div>
+      <div class="cell-ligne-planning">${escapeHtml(row.lignePlanning ?? "")}</div>
       <div class="cell-start">${escapeHtml(row.debut ?? "")}</div>
       <div class="cell-duration-1">${escapeHtml(row.dureeDebutFin ?? "")}</div>
       <div class="cell-end">${escapeHtml(row.fin ?? "")}</div>

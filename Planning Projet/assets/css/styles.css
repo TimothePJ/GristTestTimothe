@@ -13,18 +13,19 @@
   --grist-theme-selection: #e6f2fa;
 
   /* Colonnes de gauche */
-  --col-id2: 56px;
+  --col-id2: 48px;
   --col-task: 196px;
-  --col-start: 96px;
-  --col-duration-1: 72px;
-  --col-end: 96px;
-  --col-duration-2: 72px;
-  --col-demarrage: 108px;
-  --col-indice: 64px;
-  --col-retards: 90px;
+  --col-ligne-planning: 84px;
+  --col-start: 84px;
+  --col-duration-1: 64px;
+  --col-end: 84px;
+  --col-duration-2: 64px;
+  --col-demarrage: 100px;
+  --col-indice: 60px;
+  --col-retards: 64px;
 
   --left-pad-x: 4px;
-  --left-grid-width: calc(var(--col-id2) + var(--col-task) + var(--col-start) + var(--col-duration-1) + var(--col-end) + var(--col-duration-2) + var(--col-demarrage) + var(--col-indice) + var(--col-retards));
+  --left-grid-width: calc(var(--col-id2) + var(--col-task) + var(--col-ligne-planning) + var(--col-start) + var(--col-duration-1) + var(--col-end) + var(--col-duration-2) + var(--col-demarrage) + var(--col-indice) + var(--col-retards));
   --left-panel-width: calc(var(--left-grid-width) + (var(--left-pad-x) * 2));
 
   /* Hauteur de ligne commune labels + timeline */
@@ -151,7 +152,7 @@ body * {
 /* ✅ C'EST ICI que va le bloc que tu as cité */
 .planning-header-left {
   display: grid;
-  grid-template-columns: var(--col-id2) var(--col-task) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-retards);
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-retards);
   width: var(--left-grid-width);
   padding: 0 var(--left-pad-x);
   box-sizing: content-box;
@@ -173,6 +174,7 @@ body * {
 .planning-header-left .c-end,
 .planning-header-left .c-demarrage,
 .planning-header-left .c-id2,
+.planning-header-left .c-ligne-planning,
 .planning-header-left .c-task {
   text-align: left;
 }
@@ -302,7 +304,7 @@ body * {
 
 #planningTimeline .group-row-grid {
   display: grid !important;
-  grid-template-columns: var(--col-id2) var(--col-task) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-retards) !important;
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-retards) !important;
   align-items: center !important;
   width: var(--left-grid-width) !important;
   min-height: var(--planning-row-height) !important;
@@ -369,6 +371,7 @@ body * {
 
 #planningTimeline .group-row-grid .cell-id2,
 #planningTimeline .group-row-grid .cell-task,
+#planningTimeline .group-row-grid .cell-ligne-planning,
 #planningTimeline .group-row-grid .cell-start,
 #planningTimeline .group-row-grid .cell-end,
 #planningTimeline .group-row-grid .cell-demarrage {
@@ -496,6 +499,7 @@ body * {
   :root {
     --col-id2: 52px;
     --col-task: 172px;
+    --col-ligne-planning: 96px;
     --col-start: 88px;
     --col-duration-1: 68px;
     --col-end: 88px;
