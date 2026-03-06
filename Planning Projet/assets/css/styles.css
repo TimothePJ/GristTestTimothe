@@ -48,9 +48,16 @@ body {
   margin: 0;
   padding: 0;
   height: 100vh;
+  overflow: hidden;
   background: var(--grist-theme-page-bg);
   color: var(--grist-theme-text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 body * {
@@ -65,11 +72,14 @@ body * {
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: var(--toolbar-height);
+  height: var(--toolbar-height);
   padding: 8px 16px;
   background-color: var(--grist-theme-panel-header-bg);
   border-bottom: 1px solid var(--grist-theme-border);
   flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 120;
 }
 
 .nav-buttons,
@@ -147,6 +157,7 @@ body * {
   position: sticky;
   top: var(--toolbar-height);
   z-index: 50;
+  flex-shrink: 0;
 }
 
 /* ✅ C'EST ICI que va le bloc que tu as cité */
@@ -208,12 +219,30 @@ body * {
 #timelineWrapper {
   background: #fff;
   border-bottom: 1px solid var(--grist-theme-border);
-  min-height: 500px;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 #planningTimeline {
-  height: 600px;
+  position: relative;
+  height: 100%;
   background: #fff;
+}
+
+#planningTimeline .timeline-axis-left-filler {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--left-panel-width);
+  height: 0;
+  background: #fff;
+  border-right: 1px solid var(--grist-theme-border);
+  border-bottom: 1px solid #e0e0e0;
+  z-index: 79;
+  pointer-events: none;
+  will-change: transform, height;
 }
 
 /* ==========================================================
@@ -245,6 +274,12 @@ body * {
 /* Axes / grille */
 #planningTimeline .vis-time-axis {
   background: #fff;
+}
+
+#planningTimeline .vis-panel.vis-top {
+  z-index: 60 !important;
+  background: #fff !important;
+  will-change: transform;
 }
 
 #planningTimeline .vis-time-axis .vis-grid.vis-minor {

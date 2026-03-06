@@ -10,6 +10,65 @@ let itemElementsObserver = null;
 let durationCellEditHandler = null;
 let durationCellEditBound = false;
 let activeDurationEditor = null;
+let stickyAxisBound = false;
+let stickyAxisRafPending = false;
+let axisLeftFillerEl = null;
+
+function ensureStickyAxisLeftFiller(container) {
+  if (!(container instanceof HTMLElement)) return null;
+  if (axisLeftFillerEl instanceof HTMLElement && axisLeftFillerEl.isConnected) {
+    return axisLeftFillerEl;
+  }
+
+  const filler = document.createElement("div");
+  filler.className = "timeline-axis-left-filler";
+  filler.setAttribute("aria-hidden", "true");
+  container.appendChild(filler);
+  axisLeftFillerEl = filler;
+  return axisLeftFillerEl;
+}
+
+function syncStickyTimelineAxisWithWrapperScroll() {
+  const wrapper = document.getElementById("timelineWrapper");
+  const container = document.getElementById("planningTimeline");
+  if (!(wrapper instanceof HTMLElement) || !(container instanceof HTMLElement)) return;
+
+  const topPanel = container.querySelector(".vis-panel.vis-top");
+  if (!(topPanel instanceof HTMLElement)) return;
+
+  const y = wrapper.scrollTop || 0;
+  topPanel.style.transform = y ? `translateY(${y}px)` : "translateY(0)";
+  topPanel.style.zIndex = "80";
+
+  const leftFiller = ensureStickyAxisLeftFiller(container);
+  if (leftFiller instanceof HTMLElement) {
+    const axisHeight = Math.max(
+      0,
+      topPanel.offsetHeight || topPanel.getBoundingClientRect().height || 0
+    );
+    leftFiller.style.height = `${axisHeight}px`;
+    leftFiller.style.transform = y ? `translateY(${y}px)` : "translateY(0)";
+  }
+}
+
+function requestStickyAxisSync() {
+  if (stickyAxisRafPending) return;
+  stickyAxisRafPending = true;
+  requestAnimationFrame(() => {
+    stickyAxisRafPending = false;
+    syncStickyTimelineAxisWithWrapperScroll();
+  });
+}
+
+function bindStickyTimelineAxis() {
+  const wrapper = document.getElementById("timelineWrapper");
+  if (!(wrapper instanceof HTMLElement) || stickyAxisBound) return;
+
+  stickyAxisBound = true;
+  wrapper.addEventListener("scroll", requestStickyAxisSync, { passive: true });
+  window.addEventListener("resize", requestStickyAxisSync);
+  requestStickyAxisSync();
+}
 
 function updateCurrentTimeLineBounds() {
   const container = document.getElementById("planningTimeline");
@@ -919,7 +978,7 @@ export function renderPlanningTimeline({ groups, items }) {
       groupHeightMode: "fixed", // important pour l'alignement des 4 colonnes
       margin: {
         item: { horizontal: 2, vertical: 0 },
-        axis: 8,
+        axis: 0,
       },
       showCurrentTime: true,
       zoomable: true,
@@ -955,6 +1014,7 @@ export function renderPlanningTimeline({ groups, items }) {
 
     bindHoverTooltip(container);
     bindDurationCellEditing(container);
+    bindStickyTimelineAxis();
   }
 
   // Mise à jour datasets
@@ -994,6 +1054,7 @@ export function renderPlanningTimeline({ groups, items }) {
     updateDateRangeDisplay();
     updateNavCenterButtonLabel();
     updateCurrentTimeLineBounds();
+    requestStickyAxisSync();
   });
 }
 
