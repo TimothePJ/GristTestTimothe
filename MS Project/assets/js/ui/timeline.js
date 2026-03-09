@@ -10,6 +10,9 @@ let debugEventsBound = false;
 let dateCellEditHandler = null;
 let dateCellEditBound = false;
 let activeDateEditor = null;
+let rowDragBound = false;
+let activeDraggedRowEl = null;
+let activeDragImageEl = null;
 
 function debugLog(message, payload) {
   // if (payload === undefined) {
@@ -626,9 +629,143 @@ function bindDateCellEditing(containerEl) {
   });
 }
 
+function buildMsProjectRowDragPayload(rowEl) {
+  if (!(rowEl instanceof HTMLElement)) return null;
+
+  const rowId = Number(rowEl.dataset.msRowId);
+  const uniqueNumber = String(rowEl.dataset.msUniqueNumber ?? "").trim();
+  if (!uniqueNumber && (!Number.isInteger(rowId) || rowId <= 0)) {
+    return null;
+  }
+
+  return {
+    type: "ms-project-row",
+    rowId: Number.isInteger(rowId) && rowId > 0 ? rowId : null,
+    uniqueNumber,
+    task: String(rowEl.dataset.msTask ?? "").trim(),
+    startIso: String(rowEl.dataset.msStartIso ?? "").trim(),
+    endIso: String(rowEl.dataset.msEndIso ?? "").trim(),
+  };
+}
+
+function setMsProjectRowDragData(dataTransfer, payload) {
+  if (!dataTransfer || !payload) return;
+  const jsonPayload = JSON.stringify(payload);
+
+  dataTransfer.effectAllowed = "copy";
+  dataTransfer.setData("application/x-ms-project-row", jsonPayload);
+  dataTransfer.setData("application/json", jsonPayload);
+  dataTransfer.setData("text/plain", payload.uniqueNumber || String(payload.rowId || ""));
+}
+
+function clearActiveDragImage() {
+  if (activeDragImageEl && activeDragImageEl.isConnected) {
+    activeDragImageEl.remove();
+  }
+  activeDragImageEl = null;
+}
+
+function setRowDraggingClass(active) {
+  document.body?.classList.toggle("ms-row-dragging", Boolean(active));
+  document.documentElement?.classList.toggle("ms-row-dragging", Boolean(active));
+}
+
+function createDragImageFromPayload(payload, rowEl) {
+  if (!payload) return null;
+
+  const dragImage = document.createElement("div");
+  dragImage.className = "ms-row-drag-image";
+
+  const rowWidth = rowEl instanceof HTMLElement
+    ? Math.max(260, Math.round(rowEl.getBoundingClientRect().width))
+    : 260;
+  dragImage.style.width = `${Math.min(760, rowWidth)}px`;
+
+  const idBadge = document.createElement("div");
+  idBadge.className = "ms-row-drag-image-id";
+  idBadge.textContent = payload.uniqueNumber || String(payload.rowId ?? "");
+
+  const info = document.createElement("div");
+  info.className = "ms-row-drag-image-info";
+
+  const task = document.createElement("div");
+  task.className = "ms-row-drag-image-task";
+  task.textContent = payload.task || "Tache";
+
+  const dates = document.createElement("div");
+  dates.className = "ms-row-drag-image-dates";
+  const start = payload.startIso || "";
+  const end = payload.endIso || "";
+  dates.textContent = start && end ? `${start} -> ${end}` : (start || end || "");
+
+  info.append(task, dates);
+  dragImage.append(idBadge, info);
+  document.body.appendChild(dragImage);
+  return dragImage;
+}
+
+function clearRowDraggingState(containerEl = null) {
+  setRowDraggingClass(false);
+
+  if (activeDraggedRowEl && activeDraggedRowEl.isConnected) {
+    activeDraggedRowEl.classList.remove("is-dragging-row");
+  }
+  activeDraggedRowEl = null;
+
+  clearActiveDragImage();
+
+  const scopeEl =
+    containerEl instanceof HTMLElement ? containerEl : document;
+  const draggingRows = scopeEl.querySelectorAll(
+    ".group-row-grid.ms-draggable-row.is-dragging-row"
+  );
+  draggingRows.forEach((rowEl) => rowEl.classList.remove("is-dragging-row"));
+}
+
+function bindRowDragging(containerEl) {
+  if (!containerEl || rowDragBound) return;
+  rowDragBound = true;
+
+  containerEl.addEventListener("dragstart", (event) => {
+    const targetEl = event.target;
+    if (!(targetEl instanceof Element)) return;
+
+    const rowEl = targetEl.closest(".group-row-grid.ms-draggable-row");
+    if (!(rowEl instanceof HTMLElement) || !containerEl.contains(rowEl)) return;
+
+    const payload = buildMsProjectRowDragPayload(rowEl);
+    if (!payload) {
+      event.preventDefault();
+      return;
+    }
+
+    setMsProjectRowDragData(event.dataTransfer, payload);
+    clearActiveDragImage();
+    const dragImageEl = createDragImageFromPayload(payload, rowEl);
+    if (dragImageEl && event.dataTransfer?.setDragImage) {
+      activeDragImageEl = dragImageEl;
+      event.dataTransfer.setDragImage(dragImageEl, 18, 18);
+    }
+    rowEl.classList.add("is-dragging-row");
+    setRowDraggingClass(true);
+    activeDraggedRowEl = rowEl;
+  });
+
+  containerEl.addEventListener("dragend", () => {
+    clearRowDraggingState(containerEl);
+  });
+}
+
 function buildGroupLabelElement(group) {
   const row = document.createElement("div");
   row.className = "group-row-grid";
+  row.classList.add("ms-draggable-row");
+  row.draggable = true;
+  row.dataset.msRowId = String(group?.rowId ?? "");
+  row.dataset.msUniqueNumber = String(group?.idLabel ?? "");
+  row.dataset.msTask = String(group?.taskLabel ?? "");
+  row.dataset.msStartIso = String(group?.startIso ?? "");
+  row.dataset.msEndIso = String(group?.endIso ?? "");
   if (group?.isTitleRow) {
     row.classList.add("row-is-title");
   }
@@ -870,6 +1007,7 @@ export function renderMsProjectTimeline({ groups, items }) {
     bindDebugTimelineEvents();
     bindHoverTooltip(container);
     bindDateCellEditing(container);
+    bindRowDragging(container);
   }
 
   groupsDataSet.clear();
