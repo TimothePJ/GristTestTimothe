@@ -112,7 +112,7 @@ function escapeHtml(value) {
 
 function buildGroupContent(row) {
   return `
-    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team);align-items:center;width:var(--left-grid-width);min-height:var(--row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
+    <div class="group-row-grid${row.isTitleRow ? " row-is-title" : ""}" style="display:grid;grid-template-columns:var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team);align-items:center;width:var(--left-grid-width);min-height:var(--row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
       <div class="cell-id">${escapeHtml(row.id)}</div>
       <div class="cell-task">${escapeHtml(row.task)}</div>
       <div class="cell-start">${escapeHtml(row.start)}</div>
@@ -166,9 +166,11 @@ export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = ""
       .filter(Boolean)
       .join(" / ");
     const barStyle = toText(rawRow[columns.barStyle]);
+    const titleMarker = toText(rawRow[columns.title]);
     const level = toText(rawRow[columns.level]);
     const indicator = toText(rawRow[columns.indicator]);
     const effort = toNumber(rawRow[columns.effort]);
+    const isTitleRow = titleMarker.toLocaleLowerCase("fr") === "titre";
 
     return {
       rowId: rawRow[columns.id] ?? index + 1,
@@ -186,6 +188,8 @@ export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = ""
       subTeamLabel: toText(rawRow[columns.subTeam]),
       levelLabel: level,
       barStyleLabel: barStyle,
+      titleMarkerLabel: titleMarker,
+      isTitleRow,
       indicatorLabel: indicator,
       effortValue: effort,
       projectLink: projectLinkColumn ? toText(rawRow[projectLinkColumn]) : "",
@@ -242,6 +246,7 @@ export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = ""
       durationLabel: row.durationLabel,
       teamLabel: row.teamLabel,
       styleLabel: row.barStyleLabel,
+      isTitleRow: Boolean(row.isTitleRow),
       levelLabel: row.levelLabel,
       indicatorLabel: row.indicatorLabel,
       effortValue: row.effortValue,
@@ -270,7 +275,7 @@ export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = ""
         start: row.startDate,
         end: row.endDate,
         content: row.barStyleLabel || "",
-        className: resolveTaskClass(row),
+        className: `${resolveTaskClass(row)}${row.isTitleRow ? " title-task" : ""}`,
         type: "range",
         title: sharedTitle,
       });
@@ -284,7 +289,7 @@ export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = ""
         group: groupId,
         start: milestoneStart,
         content: "",
-        className: `${resolveTaskClass(row)} milestone-task`,
+        className: `${resolveTaskClass(row)} milestone-task${row.isTitleRow ? " title-task" : ""}`,
         type: "box",
         title: sharedTitle,
       });
@@ -297,7 +302,7 @@ export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = ""
       group: groupId,
       start: invalidStart,
       content: "",
-      className: `${resolveTaskClass(row)} milestone-task`,
+      className: `${resolveTaskClass(row)} milestone-task${row.isTitleRow ? " title-task" : ""}`,
       type: "box",
       title: `
         ${sharedTitle}<br>

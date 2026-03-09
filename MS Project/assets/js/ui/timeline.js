@@ -629,6 +629,9 @@ function bindDateCellEditing(containerEl) {
 function buildGroupLabelElement(group) {
   const row = document.createElement("div");
   row.className = "group-row-grid";
+  if (group?.isTitleRow) {
+    row.classList.add("row-is-title");
+  }
 
   const id = document.createElement("div");
   id.className = "cell-id";

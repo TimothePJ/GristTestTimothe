@@ -198,6 +198,10 @@ body * {
   text-overflow: ellipsis !important;
 }
 
+#msProjectTimeline .group-row-grid.row-is-title > div {
+  font-weight: 700 !important;
+}
+
 #msProjectTimeline .group-row-grid .editable-date-cell {
   cursor: pointer;
   transition: background-color 120ms ease;
@@ -286,6 +290,47 @@ body * {
 
 #msProjectTimeline .vis-item .vis-item-content {
   padding: 2px 6px;
+}
+
+#msProjectTimeline .vis-item.title-task .vis-item-content {
+  font-weight: 700;
+}
+
+#msProjectTimeline .vis-item.title-task.vis-range {
+  overflow: visible;
+  --title-bracket-color: #111827;
+  --title-bracket-thickness: 2px;
+  --title-bracket-hook-size: 12px;
+  --title-bracket-hook-half: 6px;
+  box-shadow: inset 0 var(--title-bracket-thickness) 0 var(--title-bracket-color);
+}
+
+#msProjectTimeline .vis-item.title-task.vis-range::before {
+  content: "";
+  position: absolute;
+  top: var(--title-bracket-thickness);
+  left: calc(-1 * var(--title-bracket-hook-half));
+  width: 0;
+  height: 0;
+  border-left: var(--title-bracket-hook-half) solid transparent;
+  border-right: var(--title-bracket-hook-half) solid transparent;
+  border-top: var(--title-bracket-hook-size) solid var(--title-bracket-color);
+  pointer-events: none;
+  z-index: 2;
+}
+
+#msProjectTimeline .vis-item.title-task.vis-range::after {
+  content: "";
+  position: absolute;
+  top: var(--title-bracket-thickness);
+  right: calc(-1 * var(--title-bracket-hook-half));
+  width: 0;
+  height: 0;
+  border-left: var(--title-bracket-hook-half) solid transparent;
+  border-right: var(--title-bracket-hook-half) solid transparent;
+  border-top: var(--title-bracket-hook-size) solid var(--title-bracket-color);
+  pointer-events: none;
+  z-index: 2;
 }
 
 #msProjectTimeline .vis-item.phase-task {

@@ -24,6 +24,7 @@ export const APP_CONFIG = {
         subTeam: "Sous_Equipe",
         level: "Niveau",
         barStyle: "Style_Barre",
+        title: "Titre",
         effort: "Eff",
         projectLink: "NomProjet",
       },
