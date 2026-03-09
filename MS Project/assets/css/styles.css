@@ -559,3 +559,9 @@ body * {
     width: 100%;
   }
 }
+
+.import-actions {
+  display: flex;
+  align-items: center;
+  margin-left: 136px;
+}
