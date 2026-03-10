@@ -17,6 +17,7 @@ export const APP_CONFIG = {
         uniqueNumber: "Numero_Unique",
         indicator: "Indicateur",
         taskName: "Nom_Tache",
+        sourceName: "Nom",
         duration: "Duree",
         start: "Debut",
         end: "Fin",
@@ -34,6 +35,9 @@ export const APP_CONFIG = {
         "Projet",
         "Project",
         "Nom_de_projet",
+      ],
+      sourceNameCandidates: [
+        "Nom",
       ],
     },
 

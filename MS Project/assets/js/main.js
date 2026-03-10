@@ -7,6 +7,7 @@ import {
   getMsProjectSetupMessage,
   updateMsProjectDate,
   syncPlanningDemarrageFromMsProjectStart,
+  importMsProjectXmlFile,
 } from "./services/gristService.js";
 import { buildTimelineDataFromMsProjectRows } from "./services/msProjectService.js";
 import { state, setState } from "./state.js";
@@ -20,10 +21,88 @@ import {
 
 let toolbarBound = false;
 let refreshInProgress = false;
+let importButtonBound = false;
+let importFileInputEl = null;
+let importInProgress = false;
 
 function setMsProjectStatus(message = "") {
   const el = document.getElementById("msProjectStatus");
   if (el) el.textContent = message;
+}
+
+function ensureImportFileInput() {
+  if (importFileInputEl instanceof HTMLInputElement && importFileInputEl.isConnected) {
+    return importFileInputEl;
+  }
+
+  const inputEl = document.createElement("input");
+  inputEl.type = "file";
+  inputEl.id = "msProjectImportInput";
+  inputEl.accept = ".xml";
+  inputEl.style.display = "none";
+
+  inputEl.addEventListener("change", async () => {
+    const selectedFile = inputEl.files?.[0] || null;
+    if (!selectedFile) return;
+
+    const fileName = String(selectedFile.name || "").toLowerCase();
+    if (!fileName.endsWith(".xml")) {
+      setMsProjectStatus("Format non supporte pour l'instant. Selectionne un fichier XML.");
+      inputEl.value = "";
+      return;
+    }
+
+    if (importInProgress) {
+      setMsProjectStatus("Import deja en cours...");
+      return;
+    }
+
+    importInProgress = true;
+    try {
+      setMsProjectStatus(`Import XML en cours : ${selectedFile.name}`);
+      const result = await importMsProjectXmlFile(selectedFile);
+      await refreshMsProject();
+
+      setMsProjectStatus(
+        `Import termine (${result.sourceFileName}) : ${result.importedCount} ligne(s) ajoutee(s).`
+      );
+    } catch (error) {
+      console.error("Erreur import XML MS Project :", error);
+      setMsProjectStatus(`Erreur import XML : ${error.message}`);
+    } finally {
+      importInProgress = false;
+      inputEl.value = "";
+    }
+  });
+
+  document.body.appendChild(inputEl);
+  importFileInputEl = inputEl;
+  return importFileInputEl;
+}
+
+function openImportFileDialog() {
+  const inputEl = ensureImportFileInput();
+  if (!(inputEl instanceof HTMLInputElement)) {
+    setMsProjectStatus("Impossible d'ouvrir le navigateur de fichier.");
+    return;
+  }
+
+  // Allow selecting the same file twice in a row.
+  inputEl.value = "";
+  inputEl.click();
+}
+
+function bindImportButton() {
+  if (importButtonBound) return;
+  importButtonBound = true;
+
+  const importBtn = document.getElementById("btn-import");
+  if (!(importBtn instanceof HTMLButtonElement)) return;
+
+  importBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    openImportFileDialog();
+  });
 }
 
 function resolveDateColumnName(field) {
@@ -127,6 +206,7 @@ async function bootstrap() {
   try {
     initGrist();
     setMsProjectDateEditHandler(handleDateCellEdit);
+    bindImportButton();
 
     setState({ selectedProject: "" });
 

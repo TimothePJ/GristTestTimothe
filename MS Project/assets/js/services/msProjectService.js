@@ -138,7 +138,23 @@ function resolveTaskClass(row) {
   return `phase-task bar-style-${normalizeStyleToken(row.barStyleLabel)}`;
 }
 
-function resolveProjectLinkColumn(rawRows, config) {
+function resolveProjectFilterColumn(rawRows, config) {
+  const explicitSourceName = config.columns.sourceName;
+  if (
+    explicitSourceName &&
+    rawRows.some((row) => row && Object.prototype.hasOwnProperty.call(row, explicitSourceName))
+  ) {
+    return explicitSourceName;
+  }
+
+  const sourceNameCandidates = config.sourceNameCandidates || ["Nom"];
+  const sourceCandidateMatch = sourceNameCandidates.find((column) =>
+    rawRows.some((row) => row && Object.prototype.hasOwnProperty.call(row, column))
+  );
+  if (sourceCandidateMatch) {
+    return sourceCandidateMatch;
+  }
+
   const explicit = config.columns.projectLink;
   if (explicit && rawRows.some((row) => row && Object.prototype.hasOwnProperty.call(row, explicit))) {
     return explicit;
@@ -153,7 +169,7 @@ function resolveProjectLinkColumn(rawRows, config) {
 export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = "") {
   const config = APP_CONFIG.grist.msProjectTable;
   const columns = config.columns;
-  const projectLinkColumn = resolveProjectLinkColumn(rawRows, config);
+  const projectFilterColumn = resolveProjectFilterColumn(rawRows, config);
 
   let rows = rawRows.map((rawRow, index) => {
     const startDate = parseDate(rawRow[columns.start]);
@@ -192,15 +208,15 @@ export function buildTimelineDataFromMsProjectRows(rawRows, selectedProject = ""
       isTitleRow,
       indicatorLabel: indicator,
       effortValue: effort,
-      projectLink: projectLinkColumn ? toText(rawRow[projectLinkColumn]) : "",
+      projectLabel: projectFilterColumn ? toText(rawRow[projectFilterColumn]) : "",
       sourceIndex: index,
     };
   });
 
   if (!selectedProject) {
     rows = [];
-  } else if (projectLinkColumn) {
-    rows = rows.filter((row) => row.projectLink === selectedProject);
+  } else if (projectFilterColumn) {
+    rows = rows.filter((row) => row.projectLabel === selectedProject);
   }
 
   rows.sort((a, b) => {
