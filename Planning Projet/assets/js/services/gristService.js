@@ -390,6 +390,43 @@ export async function updatePlanningDurationAndLeftDate(
   ]);
 }
 
+export async function updatePlanningLignePlanning(rowId, lignePlanningValue) {
+  const table = APP_CONFIG.grist.planningTable;
+  if (!table?.sourceTable) {
+    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
+  }
+
+  const columns = table.columns || {};
+  const recordId = Number(rowId);
+  if (!Number.isInteger(recordId) || recordId <= 0) {
+    throw new Error("Identifiant de ligne Planning_Projet invalide.");
+  }
+
+  const lignePlanningField = String(columns.lignePlanning || "Ligne_planning").trim();
+  if (!lignePlanningField) {
+    throw new Error("Colonne Ligne_planning invalide.");
+  }
+
+  const normalizedValue = toText(lignePlanningValue);
+  if (!normalizedValue) {
+    throw new Error("Numero unique MS Project vide.");
+  }
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  await grist.docApi.applyUserActions([
+    [
+      "UpdateRecord",
+      table.sourceTable,
+      recordId,
+      { [lignePlanningField]: normalizedValue },
+    ],
+  ]);
+}
+
 /* ---------- Projets ---------- */
 
 export async function buildProjectOptions() {

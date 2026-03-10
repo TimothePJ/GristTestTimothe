@@ -64,6 +64,13 @@ body * {
   box-sizing: border-box;
 }
 
+html.is-ms-project-drag-cursor,
+html.is-ms-project-drag-cursor *,
+body.is-ms-project-drag-cursor,
+body.is-ms-project-drag-cursor * {
+  cursor: grabbing !important;
+}
+
 /* ==========================================================
    Toolbar (timeline-calendar style)
    ========================================================== */
@@ -377,6 +384,32 @@ body * {
   box-sizing: content-box !important;
   color: #222 !important;
   font-size: 13px !important;
+}
+
+#planningTimeline.is-ms-drop-active {
+  cursor: copy !important;
+}
+
+#planningTimeline .group-row-grid.is-ms-drop-target {
+  background: #eef6ff !important;
+  box-shadow: inset 0 0 0 1px #93c5fd;
+}
+
+#planningTimeline .group-row-grid.row-type-coffrage.is-ms-drop-target {
+  background: #fff4cf !important;
+}
+
+#planningTimeline .group-row-grid .cell-ligne-planning.is-ms-drop-target-cell {
+  background: #dbeafe;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+#planningTimeline .group-row-grid.is-ms-drop-committing .cell-ligne-planning,
+#planningTimeline .group-row-grid .cell-ligne-planning.is-ms-drop-committing-cell {
+  background: #dcfce7;
+  border-radius: 4px;
+  font-weight: 700;
 }
 
 #planningTimeline .group-row-grid.row-type-coffrage {

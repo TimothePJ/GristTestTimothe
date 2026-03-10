@@ -13,6 +13,11 @@ let activeDurationEditor = null;
 let stickyAxisBound = false;
 let stickyAxisRafPending = false;
 let axisLeftFillerEl = null;
+let msProjectRowDropHandler = null;
+let msProjectDropBound = false;
+let activeMsDropRowEl = null;
+let activeMsDropCellEl = null;
+let msProjectGlobalDragCursorActive = false;
 
 function ensureStickyAxisLeftFiller(container) {
   if (!(container instanceof HTMLElement)) return null;
@@ -671,6 +676,274 @@ function bindDurationCellEditing(containerEl) {
   });
 }
 
+function hasMsProjectPayloadType(dataTransfer) {
+  if (!dataTransfer) return false;
+  const types = Array.from(dataTransfer.types || []);
+  return (
+    types.includes("application/x-ms-project-row") ||
+    types.includes("application/json") ||
+    types.includes("text/plain")
+  );
+}
+
+function setMsProjectGlobalDragCursor(active) {
+  const nextState = Boolean(active);
+  if (msProjectGlobalDragCursorActive === nextState) return;
+  msProjectGlobalDragCursorActive = nextState;
+  document.body?.classList.toggle("is-ms-project-drag-cursor", nextState);
+  document.documentElement?.classList.toggle("is-ms-project-drag-cursor", nextState);
+}
+
+function extractMsProjectPayloadFromDataTransfer(dataTransfer) {
+  if (!dataTransfer) return null;
+
+  const readData = (mimeType) => {
+    try {
+      return dataTransfer.getData(mimeType);
+    } catch (error) {
+      return "";
+    }
+  };
+
+  const rawPayload =
+    readData("application/x-ms-project-row") || readData("application/json");
+  if (!rawPayload) return null;
+
+  try {
+    const parsed = JSON.parse(rawPayload);
+    if (!parsed || parsed.type !== "ms-project-row") return null;
+    const uniqueNumber = String(parsed.uniqueNumber ?? "").trim();
+    if (!uniqueNumber) return null;
+    return {
+      ...parsed,
+      uniqueNumber,
+    };
+  } catch (error) {
+    const plainText = String(readData("text/plain") ?? "").trim();
+    if (!plainText || !/^\d{1,20}$/.test(plainText)) {
+      return null;
+    }
+
+    return {
+      type: "ms-project-row",
+      rowId: null,
+      uniqueNumber: plainText,
+      task: "",
+      startIso: "",
+      endIso: "",
+    };
+  }
+}
+
+function clearMsProjectDropTarget(containerEl = null) {
+  if (activeMsDropRowEl && activeMsDropRowEl.isConnected) {
+    activeMsDropRowEl.classList.remove("is-ms-drop-target", "is-ms-drop-committing");
+  }
+  if (activeMsDropCellEl && activeMsDropCellEl.isConnected) {
+    activeMsDropCellEl.classList.remove(
+      "is-ms-drop-target-cell",
+      "is-ms-drop-committing-cell"
+    );
+  }
+
+  activeMsDropRowEl = null;
+  activeMsDropCellEl = null;
+
+  const effectiveContainer =
+    containerEl instanceof HTMLElement
+      ? containerEl
+      : document.getElementById("planningTimeline");
+  if (effectiveContainer instanceof HTMLElement) {
+    effectiveContainer.classList.remove("is-ms-drop-active");
+  }
+  setMsProjectGlobalDragCursor(false);
+}
+
+function setMsProjectDropTarget(rowEl, containerEl) {
+  if (!(containerEl instanceof HTMLElement)) return;
+  containerEl.classList.add("is-ms-drop-active");
+  setMsProjectGlobalDragCursor(true);
+
+  if (!(rowEl instanceof HTMLElement)) {
+    if (activeMsDropRowEl || activeMsDropCellEl) {
+      clearMsProjectDropTarget(containerEl);
+      containerEl.classList.add("is-ms-drop-active");
+    }
+    return;
+  }
+
+  if (activeMsDropRowEl === rowEl) return;
+  clearMsProjectDropTarget(containerEl);
+  containerEl.classList.add("is-ms-drop-active");
+
+  rowEl.classList.add("is-ms-drop-target");
+  activeMsDropRowEl = rowEl;
+
+  const lineCell = rowEl.querySelector(".cell-ligne-planning");
+  if (lineCell instanceof HTMLElement) {
+    lineCell.classList.add("is-ms-drop-target-cell");
+    activeMsDropCellEl = lineCell;
+  }
+}
+
+function resolvePlanningRowDropTarget(targetEl, containerEl, eventLike = null) {
+  if (targetEl instanceof Element) {
+    const rowEl = targetEl.closest(".group-row-grid");
+    if (rowEl instanceof HTMLElement && containerEl.contains(rowEl)) {
+      const rowId = Number(rowEl.dataset.planningRowId || "");
+      if (Number.isInteger(rowId) && rowId > 0) {
+        return rowEl;
+      }
+    }
+  }
+
+  if (
+    timelineInstance &&
+    typeof timelineInstance.getEventProperties === "function" &&
+    groupsDataSet &&
+    eventLike
+  ) {
+    const props = timelineInstance.getEventProperties(eventLike);
+    const groupId = props?.group;
+    if (groupId != null) {
+      const group =
+        groupsDataSet.get(groupId) ||
+        groupsDataSet.get(String(groupId)) ||
+        groupsDataSet.get(Number(groupId)) ||
+        null;
+      const rowId = Number(group?.rowId || "");
+      if (Number.isInteger(rowId) && rowId > 0) {
+        const fallbackRow = containerEl.querySelector(
+          `.group-row-grid[data-planning-row-id="${rowId}"]`
+        );
+        if (fallbackRow instanceof HTMLElement) {
+          return fallbackRow;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function bindMsProjectRowDrop(containerEl) {
+  if (!(containerEl instanceof HTMLElement) || msProjectDropBound) return;
+  msProjectDropBound = true;
+
+  window.addEventListener(
+    "dragenter",
+    (event) => {
+      if (!hasMsProjectPayloadType(event.dataTransfer)) return;
+      setMsProjectGlobalDragCursor(true);
+    },
+    true
+  );
+
+  window.addEventListener(
+    "dragover",
+    (event) => {
+      if (!hasMsProjectPayloadType(event.dataTransfer)) return;
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "copy";
+      }
+      setMsProjectGlobalDragCursor(true);
+    },
+    true
+  );
+
+  containerEl.addEventListener("dragover", (event) => {
+    if (!hasMsProjectPayloadType(event.dataTransfer)) return;
+
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "copy";
+    }
+
+    const targetEl = event.target instanceof Element ? event.target : null;
+    const rowEl = resolvePlanningRowDropTarget(targetEl, containerEl, event);
+    setMsProjectDropTarget(rowEl, containerEl);
+  });
+
+  containerEl.addEventListener("dragleave", (event) => {
+    if (!containerEl.classList.contains("is-ms-drop-active")) return;
+    const rect = containerEl.getBoundingClientRect();
+    const x = Number(event.clientX);
+    const y = Number(event.clientY);
+    const outsideContainer =
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      x < rect.left ||
+      x > rect.right ||
+      y < rect.top ||
+      y > rect.bottom;
+
+    if (outsideContainer) {
+      clearMsProjectDropTarget(containerEl);
+    }
+  });
+
+  containerEl.addEventListener("drop", async (event) => {
+    if (!hasMsProjectPayloadType(event.dataTransfer)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const payload = extractMsProjectPayloadFromDataTransfer(event.dataTransfer);
+    const targetEl = event.target instanceof Element ? event.target : null;
+    const rowEl = resolvePlanningRowDropTarget(targetEl, containerEl, event);
+
+    if (!(rowEl instanceof HTMLElement) || !payload) {
+      clearMsProjectDropTarget(containerEl);
+      return;
+    }
+
+    const planningRowId = Number(rowEl.dataset.planningRowId || "");
+    if (!Number.isInteger(planningRowId) || planningRowId <= 0) {
+      clearMsProjectDropTarget(containerEl);
+      return;
+    }
+
+    setMsProjectDropTarget(rowEl, containerEl);
+    rowEl.classList.add("is-ms-drop-committing");
+    const lineCell = rowEl.querySelector(".cell-ligne-planning");
+    if (lineCell instanceof HTMLElement) {
+      lineCell.classList.add("is-ms-drop-committing-cell");
+    }
+
+    try {
+      if (typeof msProjectRowDropHandler === "function") {
+        await msProjectRowDropHandler({
+          planningRowId,
+          uniqueNumber: payload.uniqueNumber,
+          payload,
+          targetTask: String(rowEl.querySelector(".cell-task")?.textContent || "").trim(),
+        });
+      }
+    } catch (error) {
+      console.error("Erreur drop MS Project vers Planning :", error);
+    } finally {
+      clearMsProjectDropTarget(containerEl);
+    }
+  });
+
+  window.addEventListener(
+    "dragend",
+    () => {
+      clearMsProjectDropTarget(containerEl);
+    },
+    true
+  );
+
+  window.addEventListener(
+    "drop",
+    () => {
+      clearMsProjectDropTarget(containerEl);
+    },
+    true
+  );
+}
+
 function buildGroupLabelElement(group) {
   if (group?.isZoneHeader) {
     const zoneBand = document.createElement("div");
@@ -681,6 +954,8 @@ function buildGroupLabelElement(group) {
 
   const row = document.createElement("div");
   row.className = "group-row-grid";
+  row.dataset.planningRowId = String(group?.rowId ?? "");
+  row.dataset.planningGroupId = String(group?.id ?? "");
   if (String(group?.typeDocLabel ?? "").toUpperCase().includes("COFFRAGE")) {
     row.classList.add("row-type-coffrage");
   }
@@ -696,6 +971,7 @@ function buildGroupLabelElement(group) {
   const lignePlanning = document.createElement("div");
   lignePlanning.className = "cell-ligne-planning";
   lignePlanning.textContent = String(group?.lignePlanningLabel ?? "");
+  lignePlanning.dataset.planningRowId = String(group?.rowId ?? "");
 
   const debut = document.createElement("div");
   debut.className = "cell-start";
@@ -948,6 +1224,10 @@ export function setPlanningDurationEditHandler(handler) {
   durationCellEditHandler = typeof handler === "function" ? handler : null;
 }
 
+export function setPlanningMsProjectDropHandler(handler) {
+  msProjectRowDropHandler = typeof handler === "function" ? handler : null;
+}
+
 export function renderPlanningTimeline({ groups, items }) {
   const container = getTimelineContainer();
 
@@ -1014,6 +1294,7 @@ export function renderPlanningTimeline({ groups, items }) {
 
     bindHoverTooltip(container);
     bindDurationCellEditing(container);
+    bindMsProjectRowDrop(container);
     bindStickyTimelineAxis();
   }
 
@@ -1120,4 +1401,5 @@ export function clearPlanningTimeline() {
   if (rangeEl) rangeEl.textContent = "";
 
   hideHoverTooltip();
+  clearMsProjectDropTarget();
 }

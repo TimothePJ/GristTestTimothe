@@ -6,6 +6,7 @@ import {
   fetchPlanningRows,
   syncCoffrageDiffCoffrageFromGroups,
   updatePlanningDurationAndLeftDate,
+  updatePlanningLignePlanning,
   toText,
 } from "./services/gristService.js";
 import { buildTimelineDataFromPlanningRows } from "./services/planningService.js";
@@ -19,6 +20,7 @@ import {
   clearPlanningTimeline,
   bindTimelineToolbar,
   setPlanningDurationEditHandler,
+  setPlanningMsProjectDropHandler,
 } from "./ui/timeline.js";
 
 let toolbarBound = false;
@@ -161,6 +163,36 @@ async function handleDurationCellEdit({
   }
 }
 
+async function handleMsProjectRowDrop({
+  planningRowId,
+  uniqueNumber,
+  targetTask = "",
+}) {
+  const targetRowId = Number(planningRowId);
+  if (!Number.isInteger(targetRowId) || targetRowId <= 0) {
+    throw new Error("Ligne planning cible invalide.");
+  }
+
+  const normalizedUniqueNumber = toText(uniqueNumber);
+  if (!normalizedUniqueNumber) {
+    throw new Error("Numero unique MS Project vide.");
+  }
+
+  const taskSuffix = toText(targetTask) ? ` (${toText(targetTask)})` : "";
+
+  try {
+    setPlanningStatus(`Mise a jour Ligne_planning${taskSuffix}...`);
+    await updatePlanningLignePlanning(targetRowId, normalizedUniqueNumber);
+    await refreshPlanning();
+    setPlanningStatus(
+      `Ligne_planning mise a jour: ${normalizedUniqueNumber}${taskSuffix}`
+    );
+  } catch (error) {
+    setPlanningStatus(`Erreur drop MS Project : ${error.message}`);
+    throw error;
+  }
+}
+
 async function refreshPlanning() {
   if (refreshInProgress) return;
   refreshInProgress = true;
@@ -268,6 +300,7 @@ async function bootstrap() {
 
     initGrist();
     setPlanningDurationEditHandler(handleDurationCellEdit);
+    setPlanningMsProjectDropHandler(handleMsProjectRowDrop);
 
     const projectOptions = await buildProjectOptions();
 
