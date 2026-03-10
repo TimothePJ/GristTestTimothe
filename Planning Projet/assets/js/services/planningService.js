@@ -337,6 +337,38 @@ function compareRowsBaseOrder(a, b) {
   return (a.taches || "").localeCompare(b.taches || "", "fr");
 }
 
+function compareNullableDatesAsc(aDate, bDate) {
+  const aValid = aDate instanceof Date && !Number.isNaN(aDate.getTime());
+  const bValid = bDate instanceof Date && !Number.isNaN(bDate.getTime());
+  if (aValid && bValid) {
+    if (aDate.valueOf() !== bDate.valueOf()) {
+      return aDate - bDate;
+    }
+    return 0;
+  }
+  if (aValid && !bValid) return -1;
+  if (!aValid && bValid) return 1;
+  return 0;
+}
+
+function compareRowsChronologicalOrder(a, b) {
+  const dateCmp = compareNullableDatesAsc(a?.dateLimiteDate, b?.dateLimiteDate);
+  if (dateCmp !== 0) return dateCmp;
+  return compareRowsBaseOrder(a, b);
+}
+
+function getGroupMinDateLimite(rows) {
+  let minDate = null;
+  for (const row of rows || []) {
+    const date = row?.dateLimiteDate;
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) continue;
+    if (!minDate || date < minDate) {
+      minDate = date;
+    }
+  }
+  return minDate;
+}
+
 function compareZoneKeys(a, b) {
   const aKey = String(a ?? "");
   const bKey = String(b ?? "");
@@ -455,6 +487,7 @@ export function buildTimelineDataFromPlanningRows(
 
       // Phases planning
       dateLimite: dateLimiteValue,
+      dateLimiteDate: parseDate(dateLimiteValue),
       duree1: duree1Value,
 
       diffCoffrage: diffCoffrageValue,
@@ -518,7 +551,7 @@ export function buildTimelineDataFromPlanningRows(
     };
   });
 
-  rows.sort(compareRowsBaseOrder);
+  rows.sort(compareRowsChronologicalOrder);
 
   const groupedRows = new Map();
   const ungroupedRows = [];
@@ -552,17 +585,19 @@ export function buildTimelineDataFromPlanningRows(
   });
 
   const groupedEntries = [...groupedRows.values()].map((bucket) => {
-    bucket.coffrage.sort(compareRowsBaseOrder);
-    bucket.armatures.sort(compareRowsBaseOrder);
-    bucket.others.sort(compareRowsBaseOrder);
+    bucket.coffrage.sort(compareRowsChronologicalOrder);
+    bucket.armatures.sort(compareRowsChronologicalOrder);
+    bucket.others.sort(compareRowsChronologicalOrder);
 
     const orderedRows = [...bucket.coffrage, ...bucket.armatures, ...bucket.others];
+    const minDateLimite = getGroupMinDateLimite(orderedRows);
 
     return {
       zoneKey: bucket.zoneKey || "",
       zoneLabel: bucket.zoneLabel || "",
       groupeKey: bucket.groupeKey || "",
       groupeLabel: bucket.groupeLabel || "",
+      minDateLimite,
       orderedRows,
     };
   });
@@ -570,6 +605,9 @@ export function buildTimelineDataFromPlanningRows(
   groupedEntries.sort((a, b) => {
     const zoneCmp = compareZoneKeys(a.zoneKey, b.zoneKey);
     if (zoneCmp !== 0) return zoneCmp;
+
+    const chronoCmp = compareNullableDatesAsc(a.minDateLimite, b.minDateLimite);
+    if (chronoCmp !== 0) return chronoCmp;
 
     const groupCmp = String(a.groupeLabel || a.groupeKey || "").localeCompare(
       String(b.groupeLabel || b.groupeKey || ""),
@@ -590,7 +628,7 @@ export function buildTimelineDataFromPlanningRows(
   ungroupedRows.sort((a, b) => {
     const zoneCmp = compareZoneKeys(a.zoneKey, b.zoneKey);
     if (zoneCmp !== 0) return zoneCmp;
-    return compareRowsBaseOrder(a, b);
+    return compareRowsChronologicalOrder(a, b);
   });
 
   rows = [];
