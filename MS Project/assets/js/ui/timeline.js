@@ -12,7 +12,24 @@ let dateCellEditBound = false;
 let activeDateEditor = null;
 let rowDragBound = false;
 let activeDraggedRowEl = null;
-let activeDragImageEl = null;
+let activeDragPreviewEl = null;
+let rowDragGlobalListenersBound = false;
+let pendingRowDrag = null;
+let rowDragContainerEl = null;
+let dragDebugCounter = 0;
+let lastPreviewPositionLogAt = 0;
+
+const DRAG_DEBUG = true;
+
+function dragDebug(step, data = null) {
+  if (!DRAG_DEBUG) return;
+  const id = ++dragDebugCounter;
+  if (data == null) {
+    console.log(`[MS DRAG #${id}] ${step}`);
+    return;
+  }
+  console.log(`[MS DRAG #${id}] ${step}`, data);
+}
 
 function debugLog(message, payload) {
   // if (payload === undefined) {
@@ -658,109 +675,360 @@ function setMsProjectRowDragData(dataTransfer, payload) {
   dataTransfer.setData("text/plain", payload.uniqueNumber || String(payload.rowId || ""));
 }
 
-function clearActiveDragImage() {
-  if (activeDragImageEl && activeDragImageEl.isConnected) {
-    activeDragImageEl.remove();
-  }
-  activeDragImageEl = null;
-}
-
 function setRowDraggingClass(active) {
   document.body?.classList.toggle("ms-row-dragging", Boolean(active));
   document.documentElement?.classList.toggle("ms-row-dragging", Boolean(active));
 }
 
-function createDragImageFromPayload(payload, rowEl) {
-  if (!payload) return null;
-
-  const dragImage = document.createElement("div");
-  dragImage.className = "ms-row-drag-image";
-
-  const rowWidth = rowEl instanceof HTMLElement
-    ? Math.max(260, Math.round(rowEl.getBoundingClientRect().width))
-    : 260;
-  dragImage.style.width = `${Math.min(760, rowWidth)}px`;
-
-  const idBadge = document.createElement("div");
-  idBadge.className = "ms-row-drag-image-id";
-  idBadge.textContent = payload.uniqueNumber || String(payload.rowId ?? "");
-
-  const info = document.createElement("div");
-  info.className = "ms-row-drag-image-info";
-
-  const task = document.createElement("div");
-  task.className = "ms-row-drag-image-task";
-  task.textContent = payload.task || "Tache";
-
-  const dates = document.createElement("div");
-  dates.className = "ms-row-drag-image-dates";
-  const start = payload.startIso || "";
-  const end = payload.endIso || "";
-  dates.textContent = start && end ? `${start} -> ${end}` : (start || end || "");
-
-  info.append(task, dates);
-  dragImage.append(idBadge, info);
-  document.body.appendChild(dragImage);
-  return dragImage;
+function clearDragPreview() {
+  dragDebug("clearDragPreview", {
+    hasPreview: Boolean(activeDragPreviewEl),
+  });
+  if (activeDragPreviewEl && activeDragPreviewEl.isConnected) {
+    activeDragPreviewEl.remove();
+  }
+  activeDragPreviewEl = null;
 }
 
-function clearRowDraggingState(containerEl = null) {
+function createDragPreview(rowEl, payload) {
+  if (!(rowEl instanceof HTMLElement) || !payload) return null;
+
+  const sourceCells = rowEl.querySelectorAll(":scope > div");
+  const preview = document.createElement("div");
+  preview.className = "group-row-grid ms-row-pointer-preview";
+  if (rowEl.classList.contains("row-is-title")) {
+    preview.classList.add("row-is-title");
+  }
+
+  const rowRect = rowEl.getBoundingClientRect();
+  preview.style.width = `${Math.max(320, Math.round(rowRect.width))}px`;
+  dragDebug("createDragPreview:start", {
+    rowWidth: Math.round(rowRect.width),
+    rowHeight: Math.round(rowRect.height),
+    sourceCells: sourceCells.length,
+    rowId: payload.rowId,
+    uniqueNumber: payload.uniqueNumber,
+  });
+
+  if (sourceCells.length) {
+    sourceCells.forEach((cell) => {
+      if (!(cell instanceof HTMLElement)) return;
+      const cloneCell = cell.cloneNode(true);
+      if (cloneCell instanceof HTMLElement) {
+        cloneCell.classList.remove(
+          "editable-date-cell",
+          "is-editing-date",
+          "is-saving-date"
+        );
+        cloneCell.removeAttribute("title");
+        preview.appendChild(cloneCell);
+      }
+    });
+  }
+
+  if (!preview.childElementCount) {
+    const idFallback = document.createElement("div");
+    idFallback.className = "cell-id";
+    idFallback.textContent = payload.uniqueNumber || String(payload.rowId ?? "");
+
+    const taskFallback = document.createElement("div");
+    taskFallback.className = "cell-task";
+    taskFallback.textContent = payload.task || "Tache";
+
+    const startFallback = document.createElement("div");
+    startFallback.className = "cell-start";
+    startFallback.textContent = payload.startIso || "";
+
+    const endFallback = document.createElement("div");
+    endFallback.className = "cell-end";
+    endFallback.textContent = payload.endIso || "";
+
+    const durationFallback = document.createElement("div");
+    durationFallback.className = "cell-duration";
+    durationFallback.textContent = "";
+
+    const teamFallback = document.createElement("div");
+    teamFallback.className = "cell-team";
+    teamFallback.textContent = "";
+
+    preview.append(
+      idFallback,
+      taskFallback,
+      startFallback,
+      endFallback,
+      durationFallback,
+      teamFallback
+    );
+  }
+
+  document.body.appendChild(preview);
+  dragDebug("createDragPreview:done", {
+    childCount: preview.childElementCount,
+    width: preview.style.width,
+  });
+  return preview;
+}
+
+function startActiveRowDrag(rowEl, payload, event, containerEl) {
+  if (!payload) return null;
+  if (!(rowEl instanceof HTMLElement)) return null;
+
+  dragDebug("startActiveRowDrag", {
+    rowId: payload.rowId,
+    uniqueNumber: payload.uniqueNumber,
+    task: payload.task,
+    x: event?.clientX,
+    y: event?.clientY,
+  });
+
+  clearRowDraggingState(containerEl, "start-active-drag");
+  const preview = createDragPreview(rowEl, payload);
+  if (!preview) return null;
+
+  activeDragPreviewEl = preview;
+  positionDragPreview(event);
+  rowEl.classList.add("is-dragging-row");
+  setRowDraggingClass(true);
+  activeDraggedRowEl = rowEl;
+  return activeDragPreviewEl;
+}
+
+function positionDragPreview(eventLike) {
+  if (!(activeDragPreviewEl instanceof HTMLElement)) return;
+  const x = Number(eventLike?.clientX);
+  const y = Number(eventLike?.clientY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+  activeDragPreviewEl.style.transform = `translate(${x + 18}px, ${y + 14}px)`;
+  const now = Date.now();
+  if (now - lastPreviewPositionLogAt > 300) {
+    lastPreviewPositionLogAt = now;
+    dragDebug("positionDragPreview", {
+      x,
+      y,
+    });
+  }
+}
+
+function clearRowDraggingState(containerEl = null, reason = "unknown") {
+  dragDebug("clearRowDraggingState", {
+    reason,
+    hasActiveDraggedRow: Boolean(activeDraggedRowEl),
+    hasPending: Boolean(pendingRowDrag),
+  });
   setRowDraggingClass(false);
 
   if (activeDraggedRowEl && activeDraggedRowEl.isConnected) {
     activeDraggedRowEl.classList.remove("is-dragging-row");
   }
   activeDraggedRowEl = null;
+  clearDragPreview();
+  pendingRowDrag = null;
 
-  clearActiveDragImage();
-
-  const scopeEl =
-    containerEl instanceof HTMLElement ? containerEl : document;
+  const effectiveContainer =
+    containerEl instanceof HTMLElement
+      ? containerEl
+      : (rowDragContainerEl instanceof HTMLElement ? rowDragContainerEl : document);
+  const scopeEl = effectiveContainer;
   const draggingRows = scopeEl.querySelectorAll(
     ".group-row-grid.ms-draggable-row.is-dragging-row"
   );
   draggingRows.forEach((rowEl) => rowEl.classList.remove("is-dragging-row"));
 }
 
-function bindRowDragging(containerEl) {
-  if (!containerEl || rowDragBound) return;
-  rowDragBound = true;
+function queuePendingRowDrag(rowEl, payload, eventLike, sourceLabel = "unknown") {
+  if (!(rowEl instanceof HTMLElement) || !payload) return;
+  const x = Number(eventLike?.clientX);
+  const y = Number(eventLike?.clientY);
 
-  containerEl.addEventListener("dragstart", (event) => {
-    const targetEl = event.target;
-    if (!(targetEl instanceof Element)) return;
+  dragDebug(`${sourceLabel}:pending-drag`, {
+    rowId: payload.rowId,
+    uniqueNumber: payload.uniqueNumber,
+    task: payload.task,
+    x,
+    y,
+    targetClass:
+      eventLike?.target instanceof Element ? (eventLike.target.className || "") : "",
+  });
 
-    const rowEl = targetEl.closest(".group-row-grid.ms-draggable-row");
-    if (!(rowEl instanceof HTMLElement) || !containerEl.contains(rowEl)) return;
+  pendingRowDrag = {
+    rowEl,
+    payload,
+    containerEl: rowDragContainerEl,
+    startX: Number.isFinite(x) ? x : 0,
+    startY: Number.isFinite(y) ? y : 0,
+  };
+}
 
-    const payload = buildMsProjectRowDragPayload(rowEl);
-    if (!payload) {
-      event.preventDefault();
+function processRowDragMove(event, sourceLabel = "move") {
+  if (pendingRowDrag) {
+    if ((event.buttons & 1) !== 1) {
+      dragDebug(`${sourceLabel}:pending-cancel-no-left-button`, {
+        buttons: event.buttons,
+      });
+      pendingRowDrag = null;
       return;
     }
 
-    setMsProjectRowDragData(event.dataTransfer, payload);
-    clearActiveDragImage();
-    const dragImageEl = createDragImageFromPayload(payload, rowEl);
-    if (dragImageEl && event.dataTransfer?.setDragImage) {
-      activeDragImageEl = dragImageEl;
-      event.dataTransfer.setDragImage(dragImageEl, 18, 18);
+    const dx = event.clientX - pendingRowDrag.startX;
+    const dy = event.clientY - pendingRowDrag.startY;
+    const movedEnough = Math.abs(dx) >= 4 || Math.abs(dy) >= 4;
+    if (movedEnough) {
+      dragDebug(`${sourceLabel}:pending-threshold-reached`, {
+        dx,
+        dy,
+        startX: pendingRowDrag.startX,
+        startY: pendingRowDrag.startY,
+        x: event.clientX,
+        y: event.clientY,
+        rowId: pendingRowDrag.payload?.rowId ?? null,
+        uniqueNumber: pendingRowDrag.payload?.uniqueNumber ?? "",
+      });
+      startActiveRowDrag(
+        pendingRowDrag.rowEl,
+        pendingRowDrag.payload,
+        event,
+        pendingRowDrag.containerEl
+      );
+      pendingRowDrag = null;
     }
-    rowEl.classList.add("is-dragging-row");
-    setRowDraggingClass(true);
-    activeDraggedRowEl = rowEl;
-  });
+    return;
+  }
 
-  containerEl.addEventListener("dragend", () => {
-    clearRowDraggingState(containerEl);
-  });
+  if (!activeDraggedRowEl) return;
+  if ((event.buttons & 1) !== 1) {
+    dragDebug(`${sourceLabel}:active-cancel-no-left-button`, {
+      buttons: event.buttons,
+    });
+    clearRowDraggingState(null, `${sourceLabel}-no-left-button`);
+    return;
+  }
+  positionDragPreview(event);
+}
+
+function bindGlobalRowDragging() {
+  if (rowDragGlobalListenersBound) return;
+  rowDragGlobalListenersBound = true;
+  dragDebug("bindGlobalRowDragging:bound");
+
+  window.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.button !== 0) return;
+      const targetEl = event.target;
+      if (!(targetEl instanceof Element)) return;
+
+      const rowEl = targetEl.closest(".group-row-grid.ms-draggable-row");
+      if (!(rowEl instanceof HTMLElement)) return;
+      if (
+        rowDragContainerEl instanceof HTMLElement &&
+        !rowDragContainerEl.contains(rowEl)
+      ) {
+        return;
+      }
+
+      if (targetEl.closest(".editable-date-cell")) {
+        dragDebug("pointerdown:ignored-editable-date-cell");
+        return;
+      }
+
+      const payload = buildMsProjectRowDragPayload(rowEl);
+      if (!payload) {
+        dragDebug("pointerdown:ignored-no-payload");
+        return;
+      }
+
+      queuePendingRowDrag(rowEl, payload, event, "pointerdown");
+    },
+    true
+  );
+
+  // Fallback for environments where pointer events are partially intercepted.
+  window.addEventListener(
+    "mousedown",
+    (event) => {
+      if (event.button !== 0) return;
+      const targetEl = event.target;
+      if (!(targetEl instanceof Element)) return;
+
+      const rowEl = targetEl.closest(".group-row-grid.ms-draggable-row");
+      if (!(rowEl instanceof HTMLElement)) return;
+      if (
+        rowDragContainerEl instanceof HTMLElement &&
+        !rowDragContainerEl.contains(rowEl)
+      ) {
+        return;
+      }
+
+      if (targetEl.closest(".editable-date-cell")) return;
+      const payload = buildMsProjectRowDragPayload(rowEl);
+      if (!payload) return;
+
+      queuePendingRowDrag(rowEl, payload, event, "mousedown-fallback");
+    },
+    true
+  );
+
+  window.addEventListener(
+    "pointermove",
+    (event) => {
+      processRowDragMove(event, "pointermove");
+    },
+    true
+  );
+
+  window.addEventListener(
+    "mousemove",
+    (event) => {
+      processRowDragMove(event, "mousemove");
+    },
+    true
+  );
+
+  window.addEventListener(
+    "mouseup",
+    (event) => {
+      if (pendingRowDrag) {
+        dragDebug("mouseup:clear-pending", {
+          x: event?.clientX,
+          y: event?.clientY,
+        });
+        pendingRowDrag = null;
+      }
+      if (!activeDraggedRowEl) return;
+      dragDebug("mouseup:end-active-drag", {
+        x: event?.clientX,
+        y: event?.clientY,
+      });
+      clearRowDraggingState(null, "mouseup");
+    },
+    true
+  );
+
+  window.addEventListener(
+    "blur",
+    () => {
+      if (!activeDraggedRowEl) return;
+      dragDebug("window:blur-end-active-drag");
+      clearRowDraggingState(null, "window-blur");
+    },
+    true
+  );
+}
+
+function bindRowDragging(containerEl) {
+  if (!containerEl || rowDragBound) return;
+  rowDragBound = true;
+  rowDragContainerEl = containerEl;
+  dragDebug("bindRowDragging:bound");
+  bindGlobalRowDragging();
 }
 
 function buildGroupLabelElement(group) {
   const row = document.createElement("div");
   row.className = "group-row-grid";
   row.classList.add("ms-draggable-row");
-  row.draggable = true;
+  row.draggable = false;
   row.dataset.msRowId = String(group?.rowId ?? "");
   row.dataset.msUniqueNumber = String(group?.idLabel ?? "");
   row.dataset.msTask = String(group?.taskLabel ?? "");

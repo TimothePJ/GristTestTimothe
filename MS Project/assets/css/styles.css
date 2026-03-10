@@ -212,36 +212,74 @@ body.ms-row-dragging * {
   cursor: grabbing !important;
 }
 
+html.ms-row-dragging,
+body.ms-row-dragging {
+  user-select: none !important;
+}
+
 #msProjectTimeline .group-row-grid.ms-draggable-row.is-dragging-row,
 #msProjectTimeline .group-row-grid.ms-draggable-row.is-dragging-row > div {
   opacity: 0.45 !important;
 }
 
-.ms-row-drag-image {
+.ms-native-drag-image {
   position: fixed;
   top: -10000px;
   left: -10000px;
+  pointer-events: none;
+  user-select: none;
   display: flex;
   align-items: center;
   gap: 10px;
   min-height: 34px;
+  max-width: min(620px, calc(100vw - 24px));
   padding: 7px 10px;
-  max-width: calc(100vw - 24px);
-  pointer-events: none;
-  z-index: 1000000;
-  opacity: 0.9;
-  background: rgba(239, 246, 255, 0.98);
+  border-radius: 9px;
   border: 1px solid #93c5fd;
-  border-radius: 8px;
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.24);
+  background: #eff6ff;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.22);
   color: #0f172a;
   font-size: 12px;
   line-height: 1.25;
 }
 
-.ms-row-drag-image-id {
+.ms-row-pointer-preview {
+  position: fixed;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  user-select: none;
+  z-index: 1000002;
+  opacity: 0.95;
+  transform: translate(-10000px, -10000px);
+  border: 1px solid #93c5fd;
+  border-radius: 9px;
+  background: #eff6ff;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.22);
+  color: #0f172a;
+  line-height: 1.25;
+}
+
+.ms-row-pointer-preview.group-row-grid {
+  display: grid;
+  grid-template-columns: var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team);
+  align-items: center;
+  min-height: var(--row-height);
+  padding: 0 var(--left-pad-x);
+  box-sizing: content-box;
+}
+
+.ms-row-pointer-preview.group-row-grid > div {
+  padding: 6px 8px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ms-native-drag-image-id {
   flex: 0 0 auto;
-  max-width: 130px;
+  max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -252,23 +290,19 @@ body.ms-row-dragging * {
   font-weight: 700;
 }
 
-.ms-row-drag-image-info {
+.ms-native-drag-image-main {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
 }
 
-.ms-row-drag-image-task {
+.ms-native-drag-image-task {
   min-width: 0;
-  max-width: 560px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 700;
 }
 
-.ms-row-drag-image-dates {
+.ms-native-drag-image-dates {
   color: #334155;
   white-space: nowrap;
 }
