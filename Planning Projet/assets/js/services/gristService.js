@@ -192,6 +192,8 @@ export async function syncCoffrageDiffCoffrageFromGroups(
   const groupCol = columns.groupe || "Groupe";
   const typeDocCol = columns.typeDoc || "Type_doc";
   const diffCoffrageCol = columns.diffCoffrage || "Diff_coffrage";
+  const dateLimiteCol = columns.dateLimite || "Date_limite";
+  const duree1Col = columns.duree1 || "Duree_1";
   const projectCol = columns.projectLink || columns.nomProjet || "NomProjet";
 
   const rows = Array.isArray(planningRows) ? planningRows : [];
@@ -246,14 +248,31 @@ export async function syncCoffrageDiffCoffrageFromGroups(
     const targetIso = formatIsoDate(targetDate);
     if (!targetIso) return;
 
+    const updates = {};
     const currentIso = formatIsoDate(parseCalendarDate(row?.[diffCoffrageCol]));
-    if (currentIso === targetIso) return;
+    if (currentIso !== targetIso) {
+      updates[diffCoffrageCol] = targetIso;
+    }
+
+    const duree1Weeks = toInteger(row?.[duree1Col]);
+    if (duree1Weeks != null && duree1Weeks >= 0) {
+      const computedDateLimite = subtractWeeksFromDate(targetDate, duree1Weeks);
+      const computedDateLimiteIso = formatIsoDate(computedDateLimite);
+      if (computedDateLimiteIso) {
+        const currentDateLimiteIso = formatIsoDate(parseCalendarDate(row?.[dateLimiteCol]));
+        if (currentDateLimiteIso !== computedDateLimiteIso) {
+          updates[dateLimiteCol] = computedDateLimiteIso;
+        }
+      }
+    }
+
+    if (!Object.keys(updates).length) return;
 
     actions.push([
       "UpdateRecord",
       table.sourceTable,
       recordId,
-      { [diffCoffrageCol]: targetIso },
+      updates,
     ]);
   });
 
