@@ -91,6 +91,15 @@ function subtractWeeksFromDate(date, weeks) {
   return d;
 }
 
+function addWeeksToDate(date, weeks) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  const w = toInteger(weeks);
+  if (w == null || w < 0) return null;
+  const d = new Date(date);
+  d.setDate(d.getDate() + (w * 7));
+  return d;
+}
+
 function normalizeUtcDateToLocalCalendar(date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
   return new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
@@ -423,6 +432,132 @@ export async function updatePlanningLignePlanning(rowId, lignePlanningValue) {
       table.sourceTable,
       recordId,
       { [lignePlanningField]: normalizedValue },
+    ],
+  ]);
+}
+
+export async function updatePlanningFromMsProjectDrop({
+  rowId,
+  uniqueNumber,
+  msStartIso = "",
+  msEndIso = "",
+}) {
+  const table = APP_CONFIG.grist.planningTable;
+  if (!table?.sourceTable) {
+    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
+  }
+
+  const columns = table.columns || {};
+  const recordId = Number(rowId);
+  if (!Number.isInteger(recordId) || recordId <= 0) {
+    throw new Error("Identifiant de ligne Planning_Projet invalide.");
+  }
+
+  const normalizedUniqueNumber = toText(uniqueNumber);
+  if (!normalizedUniqueNumber) {
+    throw new Error("Numero unique MS Project vide.");
+  }
+
+  const lignePlanningField = String(columns.lignePlanning || "Ligne_planning").trim();
+  const idCol = columns.id || "id";
+  const typeDocCol = columns.typeDoc || "Type_doc";
+  const dateLimiteCol = columns.dateLimite || "Date_limite";
+  const duree1Col = columns.duree1 || "Duree_1";
+  const diffCoffrageCol = columns.diffCoffrage || "Diff_coffrage";
+  const duree2Col = columns.duree2 || "Duree_2";
+  const diffArmatureCol = columns.diffArmature || "Diff_armature";
+  const duree3Col = columns.duree3 || "Duree_3";
+  const demarrageCol = columns.demarragesTravaux || "Demarrages_travaux";
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  const rows = await fetchTableRows(table.sourceTable);
+  const currentRow = rows.find((row) => Number(row?.[idCol]) === recordId) || null;
+  if (!currentRow) {
+    throw new Error("Ligne Planning_Projet introuvable.");
+  }
+
+  const typeDoc = String(currentRow[typeDocCol] ?? "").toUpperCase();
+  const droppedStartDate = parseCalendarDate(msStartIso);
+  const droppedEndDate = parseCalendarDate(msEndIso);
+  const droppedStartIso = formatIsoDate(droppedStartDate);
+  const droppedEndIso = formatIsoDate(droppedEndDate);
+
+  const updates = {
+    [lignePlanningField]: normalizedUniqueNumber,
+  };
+  if (droppedStartIso) {
+    updates[demarrageCol] = droppedStartIso;
+  }
+
+  if (isCoffrageTypeDoc(typeDoc)) {
+    let dateLimiteDate = droppedStartDate || parseCalendarDate(currentRow[dateLimiteCol]);
+    let diffCoffrageDate = droppedEndDate || parseCalendarDate(currentRow[diffCoffrageCol]);
+    const duree1 = toInteger(currentRow[duree1Col]);
+
+    if (droppedStartIso) updates[dateLimiteCol] = droppedStartIso;
+    if (droppedEndIso) updates[diffCoffrageCol] = droppedEndIso;
+
+    if (!diffCoffrageDate && dateLimiteDate && duree1 != null && duree1 >= 0) {
+      diffCoffrageDate = addWeeksToDate(dateLimiteDate, duree1);
+    }
+
+    if (!dateLimiteDate && diffCoffrageDate && duree1 != null && duree1 >= 0) {
+      dateLimiteDate = subtractWeeksFromDate(diffCoffrageDate, duree1);
+    }
+
+    const computedDateLimiteIso = formatIsoDate(dateLimiteDate);
+    const computedDiffCoffrageIso = formatIsoDate(diffCoffrageDate);
+    if (computedDateLimiteIso) updates[dateLimiteCol] = computedDateLimiteIso;
+    if (computedDiffCoffrageIso) updates[diffCoffrageCol] = computedDiffCoffrageIso;
+  } else if (isArmaturesTypeDoc(typeDoc)) {
+    let demarrageDate =
+      droppedStartDate ||
+      parseCalendarDate(currentRow[demarrageCol]);
+    let diffArmatureDate = parseCalendarDate(currentRow[diffArmatureCol]);
+    let diffCoffrageDate = parseCalendarDate(currentRow[diffCoffrageCol]);
+    const duree2 = toInteger(currentRow[duree2Col]);
+    const duree3 = toInteger(currentRow[duree3Col]);
+
+    // Le drop MS fixe prioritairement le "Debut des travaux" (demarrage),
+    // puis on recalcule les autres dates en remontant les durées.
+    if (demarrageDate && duree3 != null && duree3 >= 0) {
+      diffArmatureDate = subtractWeeksFromDate(demarrageDate, duree3);
+    } else if (!diffArmatureDate && droppedEndDate) {
+      diffArmatureDate = droppedEndDate;
+    }
+
+    if (diffArmatureDate && duree2 != null && duree2 >= 0) {
+      diffCoffrageDate = subtractWeeksFromDate(diffArmatureDate, duree2);
+    } else if (!diffCoffrageDate && droppedStartDate) {
+      diffCoffrageDate = droppedStartDate;
+    }
+
+    if (!demarrageDate && diffArmatureDate && duree3 != null && duree3 >= 0) {
+      demarrageDate = addWeeksToDate(diffArmatureDate, duree3);
+    }
+
+    const computedDemarrageIso = formatIsoDate(demarrageDate);
+    const computedDiffCoffrageIso = formatIsoDate(diffCoffrageDate);
+    const computedDiffArmatureIso = formatIsoDate(diffArmatureDate);
+    if (computedDemarrageIso) updates[demarrageCol] = computedDemarrageIso;
+    if (computedDiffCoffrageIso) updates[diffCoffrageCol] = computedDiffCoffrageIso;
+    if (computedDiffArmatureIso) updates[diffArmatureCol] = computedDiffArmatureIso;
+  } else {
+    // Fallback for unexpected Type_doc values.
+    if (droppedStartIso) updates[dateLimiteCol] = droppedStartIso;
+    if (droppedEndIso) updates[diffCoffrageCol] = droppedEndIso;
+  }
+
+  await grist.docApi.applyUserActions([
+    [
+      "UpdateRecord",
+      table.sourceTable,
+      recordId,
+      updates,
     ],
   ]);
 }

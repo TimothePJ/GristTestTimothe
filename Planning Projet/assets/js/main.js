@@ -6,7 +6,7 @@ import {
   fetchPlanningRows,
   syncCoffrageDiffCoffrageFromGroups,
   updatePlanningDurationAndLeftDate,
-  updatePlanningLignePlanning,
+  updatePlanningFromMsProjectDrop,
   toText,
 } from "./services/gristService.js";
 import { buildTimelineDataFromPlanningRows } from "./services/planningService.js";
@@ -166,6 +166,7 @@ async function handleDurationCellEdit({
 async function handleMsProjectRowDrop({
   planningRowId,
   uniqueNumber,
+  payload = null,
   targetTask = "",
 }) {
   const targetRowId = Number(planningRowId);
@@ -179,13 +180,26 @@ async function handleMsProjectRowDrop({
   }
 
   const taskSuffix = toText(targetTask) ? ` (${toText(targetTask)})` : "";
+  const droppedStartIso = toText(payload?.startIso || "");
+  const droppedEndIso = toText(payload?.endIso || "");
+  const droppedDateLabel =
+    droppedStartIso && droppedEndIso
+      ? `${droppedStartIso} -> ${droppedEndIso}`
+      : (droppedEndIso || droppedStartIso || "");
 
   try {
-    setPlanningStatus(`Mise a jour Ligne_planning${taskSuffix}...`);
-    await updatePlanningLignePlanning(targetRowId, normalizedUniqueNumber);
+    const dateSuffix = droppedDateLabel ? ` | Date: ${droppedDateLabel}` : "";
+    setPlanningStatus(`Mise a jour ligne planning${taskSuffix}${dateSuffix}...`);
+    await updatePlanningFromMsProjectDrop({
+      rowId: targetRowId,
+      uniqueNumber: normalizedUniqueNumber,
+      msStartIso: droppedStartIso,
+      msEndIso: droppedEndIso,
+    });
     await refreshPlanning();
+    const appliedDateSuffix = droppedDateLabel ? ` | ${droppedDateLabel}` : "";
     setPlanningStatus(
-      `Ligne_planning mise a jour: ${normalizedUniqueNumber}${taskSuffix}`
+      `Drop applique: Ligne_planning=${normalizedUniqueNumber}${taskSuffix}${appliedDateSuffix}`
     );
   } catch (error) {
     setPlanningStatus(`Erreur drop MS Project : ${error.message}`);
