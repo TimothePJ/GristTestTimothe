@@ -167,7 +167,6 @@ body.is-ms-project-drag-cursor * {
   flex-shrink: 0;
 }
 
-/* ✅ C'EST ICI que va le bloc que tu as cité */
 .planning-header-left {
   display: grid;
   grid-template-columns: var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-retards);
@@ -452,6 +451,24 @@ body.planning-row-dragging {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+#planningTimeline.is-planning-row-drop-active {
+  cursor: move !important;
+}
+
+#planningTimeline .group-row-grid.is-planning-row-drop-target {
+  box-shadow: inset 0 0 0 2px #16a34a;
+  background: #ecfdf3 !important;
+}
+
+#planningTimeline .group-row-grid.row-type-coffrage.is-planning-row-drop-target {
+  background: #fff2bf !important;
+}
+
+#planningTimeline .group-row-grid.is-planning-row-drop-committing {
+  box-shadow: inset 0 0 0 2px #15803d;
+  background: #dcfce7 !important;
 }
 
 #planningTimeline.is-ms-drop-active {

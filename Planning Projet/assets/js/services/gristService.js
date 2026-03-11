@@ -587,6 +587,84 @@ export async function updatePlanningFromMsProjectDrop({
   ]);
 }
 
+export async function updatePlanningGroupZoneFromPlanningDrop({
+  sourceRowId,
+  targetRowId,
+}) {
+  const table = APP_CONFIG.grist.planningTable;
+  if (!table?.sourceTable) {
+    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
+  }
+
+  const columns = table.columns || {};
+  const idCol = columns.id || "id";
+  const groupCol = String(columns.groupe || "Groupe").trim();
+  const zoneCol = String(columns.zone || "Zone").trim();
+
+  const sourceId = Number(sourceRowId);
+  const targetId = Number(targetRowId);
+  if (!Number.isInteger(sourceId) || sourceId <= 0) {
+    throw new Error("Ligne source Planning_Projet invalide.");
+  }
+  if (!Number.isInteger(targetId) || targetId <= 0) {
+    throw new Error("Ligne cible Planning_Projet invalide.");
+  }
+  if (sourceId === targetId) {
+    return { updated: false, groupe: "", zone: "" };
+  }
+
+  const rows = await fetchTableRows(table.sourceTable);
+  const sourceRow = rows.find((row) => Number(row?.[idCol]) === sourceId) || null;
+  const targetRow = rows.find((row) => Number(row?.[idCol]) === targetId) || null;
+  if (!sourceRow) {
+    throw new Error("Ligne source introuvable dans Planning_Projet.");
+  }
+  if (!targetRow) {
+    throw new Error("Ligne cible introuvable dans Planning_Projet.");
+  }
+
+  const targetGroupe = toText(targetRow[groupCol]);
+  const targetZone = toText(targetRow[zoneCol]);
+  const sourceGroupe = toText(sourceRow[groupCol]);
+  const sourceZone = toText(sourceRow[zoneCol]);
+
+  const updates = {};
+  if (sourceGroupe !== targetGroupe) {
+    updates[groupCol] = targetGroupe;
+  }
+  if (sourceZone !== targetZone) {
+    updates[zoneCol] = targetZone;
+  }
+
+  if (!Object.keys(updates).length) {
+    return {
+      updated: false,
+      groupe: targetGroupe,
+      zone: targetZone,
+    };
+  }
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  await grist.docApi.applyUserActions([
+    [
+      "UpdateRecord",
+      table.sourceTable,
+      sourceId,
+      updates,
+    ],
+  ]);
+
+  return {
+    updated: true,
+    groupe: targetGroupe,
+    zone: targetZone,
+  };
+}
+
 /* ---------- Projets ---------- */
 
 export async function buildProjectOptions() {

@@ -23,6 +23,13 @@ let planningRowDragGlobalListenersBound = false;
 let planningRowDragContainerEl = null;
 let activePlanningDraggedRowEl = null;
 let activePlanningNativeDragImageEl = null;
+let planningRowDropBound = false;
+let planningRowDropHandler = null;
+let activePlanningDropRowEl = null;
+let planningDragAutoScrollRafId = 0;
+let planningDragAutoScrollVelocityY = 0;
+let planningDragAutoScrollTargetEl = null;
+let planningDragAutoScrollLastTs = 0;
 
 const PLANNING_ROW_DRAG_HANDLED_FLAG = "__planningRowDragHandled";
 
@@ -715,6 +722,8 @@ function buildPlanningRowDragPayload(rowEl) {
     rowId,
     id2: String(rowEl.dataset.planningId2 ?? "").trim(),
     task: String(rowEl.dataset.planningTask ?? "").trim(),
+    groupe: String(rowEl.dataset.planningGroupe ?? "").trim(),
+    zone: String(rowEl.dataset.planningZone ?? "").trim(),
     lignePlanning: String(rowEl.dataset.planningLignePlanning ?? "").trim(),
     typeDoc: String(rowEl.dataset.planningTypeDoc ?? "").trim(),
     startIso: String(rowEl.dataset.planningStartIso ?? "").trim(),
@@ -729,7 +738,7 @@ function setPlanningRowDragData(dataTransfer, payload) {
   if (!dataTransfer || !payload) return;
   const jsonPayload = JSON.stringify(payload);
 
-  dataTransfer.effectAllowed = "copy";
+  dataTransfer.effectAllowed = "copyMove";
   dataTransfer.setData("application/x-planning-row", jsonPayload);
   dataTransfer.setData("text/x-planning-row", jsonPayload);
 }
@@ -739,6 +748,106 @@ function clearPlanningNativeDragImage() {
     activePlanningNativeDragImageEl.remove();
   }
   activePlanningNativeDragImageEl = null;
+}
+
+function getPlanningScrollWrapper() {
+  const wrapper = document.getElementById("timelineWrapper");
+  return wrapper instanceof HTMLElement ? wrapper : null;
+}
+
+function stopPlanningDragAutoScroll() {
+  if (planningDragAutoScrollRafId) {
+    cancelAnimationFrame(planningDragAutoScrollRafId);
+  }
+  planningDragAutoScrollRafId = 0;
+  planningDragAutoScrollVelocityY = 0;
+  planningDragAutoScrollTargetEl = null;
+  planningDragAutoScrollLastTs = 0;
+}
+
+function runPlanningDragAutoScroll(ts) {
+  const target = planningDragAutoScrollTargetEl;
+  const velocity = planningDragAutoScrollVelocityY;
+  if (!(target instanceof HTMLElement) || !Number.isFinite(velocity) || Math.abs(velocity) < 0.1) {
+    stopPlanningDragAutoScroll();
+    return;
+  }
+
+  const dtSeconds = planningDragAutoScrollLastTs
+    ? Math.min(0.05, Math.max(0.001, (ts - planningDragAutoScrollLastTs) / 1000))
+    : (1 / 60);
+  planningDragAutoScrollLastTs = ts;
+
+  const maxTop = Math.max(0, target.scrollHeight - target.clientHeight);
+  const nextTop = Math.max(0, Math.min(maxTop, target.scrollTop + (velocity * dtSeconds)));
+  target.scrollTop = nextTop;
+
+  planningDragAutoScrollRafId = requestAnimationFrame(runPlanningDragAutoScroll);
+}
+
+function startPlanningDragAutoScrollIfNeeded() {
+  if (planningDragAutoScrollRafId) return;
+  planningDragAutoScrollLastTs = 0;
+  planningDragAutoScrollRafId = requestAnimationFrame(runPlanningDragAutoScroll);
+}
+
+function computePlanningAutoScrollVelocity(distanceToEdge, threshold, maxAbsSpeedPxPerSec) {
+  if (!Number.isFinite(distanceToEdge) || distanceToEdge >= threshold) return 0;
+  const clamped = Math.max(0, Math.min(threshold, distanceToEdge));
+  const ratio = 1 - (clamped / threshold);
+  const eased = ratio * ratio;
+  return eased * maxAbsSpeedPxPerSec;
+}
+
+function updatePlanningDragAutoScrollFromPointer(clientX, clientY) {
+  if (!(activePlanningDraggedRowEl instanceof HTMLElement)) {
+    stopPlanningDragAutoScroll();
+    return;
+  }
+
+  const wrapper = getPlanningScrollWrapper();
+  if (!(wrapper instanceof HTMLElement)) {
+    stopPlanningDragAutoScroll();
+    return;
+  }
+
+  const x = Number(clientX);
+  const y = Number(clientY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    stopPlanningDragAutoScroll();
+    return;
+  }
+
+  const rect = wrapper.getBoundingClientRect();
+  const isInsideX = x >= rect.left && x <= rect.right;
+  const nearX =
+    isInsideX ||
+    (x >= rect.left - 64 && x <= rect.right + 64);
+  if (!nearX) {
+    stopPlanningDragAutoScroll();
+    return;
+  }
+
+  const threshold = Math.max(56, Math.min(140, Math.round(rect.height * 0.2)));
+  const topDist = y - rect.top;
+  const bottomDist = rect.bottom - y;
+  const maxSpeed = 1500;
+
+  let velocityY = 0;
+  if (topDist < threshold) {
+    velocityY = -computePlanningAutoScrollVelocity(topDist, threshold, maxSpeed);
+  } else if (bottomDist < threshold) {
+    velocityY = computePlanningAutoScrollVelocity(bottomDist, threshold, maxSpeed);
+  }
+
+  if (!Number.isFinite(velocityY) || Math.abs(velocityY) < 1) {
+    stopPlanningDragAutoScroll();
+    return;
+  }
+
+  planningDragAutoScrollTargetEl = wrapper;
+  planningDragAutoScrollVelocityY = velocityY;
+  startPlanningDragAutoScrollIfNeeded();
 }
 
 function clonePlanningRowForDragPreview(rowEl, payload) {
@@ -772,6 +881,7 @@ function clonePlanningRowForDragPreview(rowEl, payload) {
 
 function clearPlanningRowDraggingState(containerEl = null) {
   setPlanningRowDraggingClass(false);
+  stopPlanningDragAutoScroll();
 
   if (activePlanningDraggedRowEl && activePlanningDraggedRowEl.isConnected) {
     activePlanningDraggedRowEl.classList.remove("is-dragging-row");
@@ -841,6 +951,15 @@ function bindGlobalPlanningRowDragging() {
   planningRowDragGlobalListenersBound = true;
 
   window.addEventListener(
+    "dragover",
+    (event) => {
+      if (!hasPlanningRowPayloadType(event.dataTransfer)) return;
+      updatePlanningDragAutoScrollFromPointer(event.clientX, event.clientY);
+    },
+    true
+  );
+
+  window.addEventListener(
     "dragstart",
     (event) => {
       handlePlanningNativeDragStart(event);
@@ -851,6 +970,7 @@ function bindGlobalPlanningRowDragging() {
   window.addEventListener(
     "dragend",
     () => {
+      stopPlanningDragAutoScroll();
       clearPlanningRowDraggingState(null);
     },
     true
@@ -859,6 +979,7 @@ function bindGlobalPlanningRowDragging() {
   window.addEventListener(
     "drop",
     () => {
+      stopPlanningDragAutoScroll();
       clearPlanningRowDraggingState(null);
     },
     true
@@ -872,9 +993,209 @@ function bindPlanningRowDragging(containerEl) {
   bindGlobalPlanningRowDragging();
 }
 
+function hasPlanningRowPayloadType(dataTransfer) {
+  if (!dataTransfer) return false;
+  const types = Array.from(dataTransfer.types || []);
+  return (
+    types.includes("application/x-planning-row") ||
+    types.includes("text/x-planning-row")
+  );
+}
+
+function extractPlanningRowPayloadFromDataTransfer(dataTransfer) {
+  if (!dataTransfer) return null;
+
+  const readData = (mimeType) => {
+    try {
+      return dataTransfer.getData(mimeType);
+    } catch (error) {
+      return "";
+    }
+  };
+
+  const rawPayload =
+    readData("application/x-planning-row") || readData("text/x-planning-row");
+  if (!rawPayload) return null;
+
+  try {
+    const parsed = JSON.parse(rawPayload);
+    if (!parsed || parsed.type !== "planning-row") return null;
+    const rowId = Number(parsed.rowId);
+    if (!Number.isInteger(rowId) || rowId <= 0) return null;
+    return {
+      ...parsed,
+      rowId,
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+function clearPlanningRowDropTarget(containerEl = null) {
+  if (activePlanningDropRowEl && activePlanningDropRowEl.isConnected) {
+    activePlanningDropRowEl.classList.remove(
+      "is-planning-row-drop-target",
+      "is-planning-row-drop-committing"
+    );
+  }
+
+  activePlanningDropRowEl = null;
+
+  const effectiveContainer =
+    containerEl instanceof HTMLElement
+      ? containerEl
+      : document.getElementById("planningTimeline");
+  if (effectiveContainer instanceof HTMLElement) {
+    effectiveContainer.classList.remove("is-planning-row-drop-active");
+  }
+}
+
+function setPlanningRowDropTarget(rowEl, containerEl) {
+  if (!(containerEl instanceof HTMLElement)) return;
+  containerEl.classList.add("is-planning-row-drop-active");
+
+  if (!(rowEl instanceof HTMLElement)) {
+    if (activePlanningDropRowEl) {
+      clearPlanningRowDropTarget(containerEl);
+      containerEl.classList.add("is-planning-row-drop-active");
+    }
+    return;
+  }
+
+  if (activePlanningDropRowEl === rowEl) return;
+
+  clearPlanningRowDropTarget(containerEl);
+  containerEl.classList.add("is-planning-row-drop-active");
+  rowEl.classList.add("is-planning-row-drop-target");
+  activePlanningDropRowEl = rowEl;
+}
+
+function bindPlanningRowDrop(containerEl) {
+  if (!(containerEl instanceof HTMLElement) || planningRowDropBound) return;
+  planningRowDropBound = true;
+
+  containerEl.addEventListener("dragover", (event) => {
+    if (!hasPlanningRowPayloadType(event.dataTransfer)) return;
+
+    event.preventDefault();
+    updatePlanningDragAutoScrollFromPointer(event.clientX, event.clientY);
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
+
+    const payload = extractPlanningRowPayloadFromDataTransfer(event.dataTransfer);
+    if (!payload) {
+      clearPlanningRowDropTarget(containerEl);
+      return;
+    }
+
+    const targetEl = event.target instanceof Element ? event.target : null;
+    const rowEl = resolvePlanningRowDropTarget(targetEl, containerEl, event);
+    const targetRowId = Number(rowEl?.dataset?.planningRowId || "");
+    if (
+      !(rowEl instanceof HTMLElement) ||
+      !Number.isInteger(targetRowId) ||
+      targetRowId <= 0 ||
+      targetRowId === payload.rowId
+    ) {
+      setPlanningRowDropTarget(null, containerEl);
+      return;
+    }
+
+    setPlanningRowDropTarget(rowEl, containerEl);
+  });
+
+  containerEl.addEventListener("dragleave", (event) => {
+    if (!containerEl.classList.contains("is-planning-row-drop-active")) return;
+    const rect = containerEl.getBoundingClientRect();
+    const x = Number(event.clientX);
+    const y = Number(event.clientY);
+    const outsideContainer =
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      x < rect.left ||
+      x > rect.right ||
+      y < rect.top ||
+      y > rect.bottom;
+
+    if (outsideContainer) {
+      clearPlanningRowDropTarget(containerEl);
+      stopPlanningDragAutoScroll();
+    }
+  });
+
+  containerEl.addEventListener("drop", async (event) => {
+    if (!hasPlanningRowPayloadType(event.dataTransfer)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const payload = extractPlanningRowPayloadFromDataTransfer(event.dataTransfer);
+    const targetEl = event.target instanceof Element ? event.target : null;
+    const rowEl = resolvePlanningRowDropTarget(targetEl, containerEl, event);
+    const targetRowId = Number(rowEl?.dataset?.planningRowId || "");
+
+    if (
+      !payload ||
+      !(rowEl instanceof HTMLElement) ||
+      !Number.isInteger(targetRowId) ||
+      targetRowId <= 0 ||
+      targetRowId === payload.rowId
+    ) {
+      clearPlanningRowDropTarget(containerEl);
+      return;
+    }
+
+    setPlanningRowDropTarget(rowEl, containerEl);
+    rowEl.classList.add("is-planning-row-drop-committing");
+
+    try {
+      if (typeof planningRowDropHandler === "function") {
+        await planningRowDropHandler({
+          sourcePlanningRowId: payload.rowId,
+          targetPlanningRowId: targetRowId,
+          payload,
+          targetTask: String(rowEl.querySelector(".cell-task")?.textContent || "").trim(),
+          targetGroupe: String(rowEl.dataset.planningGroupe || "").trim(),
+          targetZone: String(rowEl.dataset.planningZone || "").trim(),
+        });
+      }
+    } catch (error) {
+      console.error("Erreur drop Planning -> Planning :", error);
+    } finally {
+      clearPlanningRowDropTarget(containerEl);
+      stopPlanningDragAutoScroll();
+    }
+  });
+
+  window.addEventListener(
+    "dragend",
+    () => {
+      clearPlanningRowDropTarget(containerEl);
+      stopPlanningDragAutoScroll();
+    },
+    true
+  );
+
+  window.addEventListener(
+    "drop",
+    () => {
+      clearPlanningRowDropTarget(containerEl);
+      stopPlanningDragAutoScroll();
+    },
+    true
+  );
+}
+
 function hasMsProjectPayloadType(dataTransfer) {
   if (!dataTransfer) return false;
   const types = Array.from(dataTransfer.types || []);
+  if (
+    types.includes("application/x-planning-row") ||
+    types.includes("text/x-planning-row")
+  ) {
+    return false;
+  }
   return (
     types.includes("application/x-ms-project-row") ||
     types.includes("application/json") ||
@@ -1157,6 +1478,8 @@ function buildGroupLabelElement(group) {
   row.dataset.planningGroupId = String(group?.id ?? "");
   row.dataset.planningId2 = String(group?.id2Label ?? "");
   row.dataset.planningTask = String(group?.tachesLabel ?? "");
+  row.dataset.planningGroupe = String(group?.groupeLabel ?? "");
+  row.dataset.planningZone = String(group?.zoneLabel ?? "");
   row.dataset.planningLignePlanning = String(group?.lignePlanningLabel ?? "");
   row.dataset.planningTypeDoc = String(group?.typeDocLabel ?? "");
   row.dataset.planningStartIso = String(group?.debutIso ?? "");
@@ -1465,6 +1788,10 @@ export function setPlanningMsProjectDropHandler(handler) {
   msProjectRowDropHandler = typeof handler === "function" ? handler : null;
 }
 
+export function setPlanningRowDropHandler(handler) {
+  planningRowDropHandler = typeof handler === "function" ? handler : null;
+}
+
 export function renderPlanningTimeline({ groups, items }) {
   const container = getTimelineContainer();
 
@@ -1533,6 +1860,7 @@ export function renderPlanningTimeline({ groups, items }) {
     bindDurationCellEditing(container);
     bindMsProjectRowDrop(container);
     bindPlanningRowDragging(container);
+    bindPlanningRowDrop(container);
     bindStickyTimelineAxis();
   }
 
@@ -1640,5 +1968,6 @@ export function clearPlanningTimeline() {
 
   hideHoverTooltip();
   clearMsProjectDropTarget();
+  clearPlanningRowDropTarget();
   clearPlanningRowDraggingState();
 }

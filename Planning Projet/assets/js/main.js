@@ -7,6 +7,7 @@ import {
   syncCoffrageDiffCoffrageFromGroups,
   updatePlanningDurationAndLeftDate,
   updatePlanningFromMsProjectDrop,
+  updatePlanningGroupZoneFromPlanningDrop,
   toText,
 } from "./services/gristService.js";
 import { buildTimelineDataFromPlanningRows } from "./services/planningService.js";
@@ -21,6 +22,7 @@ import {
   bindTimelineToolbar,
   setPlanningDurationEditHandler,
   setPlanningMsProjectDropHandler,
+  setPlanningRowDropHandler,
 } from "./ui/timeline.js";
 
 let toolbarBound = false;
@@ -207,6 +209,65 @@ async function handleMsProjectRowDrop({
   }
 }
 
+async function handlePlanningRowDrop({
+  sourcePlanningRowId,
+  targetPlanningRowId,
+  payload = null,
+  targetTask = "",
+  targetGroupe = "",
+  targetZone = "",
+}) {
+  const sourceRowId = Number(sourcePlanningRowId);
+  const destinationRowId = Number(targetPlanningRowId);
+  if (!Number.isInteger(sourceRowId) || sourceRowId <= 0) {
+    throw new Error("Ligne source planning invalide.");
+  }
+  if (!Number.isInteger(destinationRowId) || destinationRowId <= 0) {
+    throw new Error("Ligne cible planning invalide.");
+  }
+  if (sourceRowId === destinationRowId) {
+    return;
+  }
+
+  const taskSuffix = toText(targetTask) ? ` (${toText(targetTask)})` : "";
+  const groupeLabel = toText(targetGroupe);
+  const zoneLabel = toText(targetZone);
+  const targetLabelParts = [];
+  if (groupeLabel) targetLabelParts.push(`Groupe=${groupeLabel}`);
+  if (zoneLabel) targetLabelParts.push(`Zone=${zoneLabel}`);
+  const targetLabel = targetLabelParts.length
+    ? targetLabelParts.join(" | ")
+    : "ligne cible";
+
+  try {
+    setPlanningStatus(`Deplacement ligne planning vers ${targetLabel}${taskSuffix}...`);
+    const result = await updatePlanningGroupZoneFromPlanningDrop({
+      sourceRowId,
+      targetRowId: destinationRowId,
+    });
+
+    if (result?.updated) {
+      await refreshPlanning();
+      const appliedParts = [];
+      if (toText(result.groupe)) appliedParts.push(`Groupe=${toText(result.groupe)}`);
+      if (toText(result.zone)) appliedParts.push(`Zone=${toText(result.zone)}`);
+      const appliedLabel = appliedParts.length ? appliedParts.join(" | ") : targetLabel;
+      setPlanningStatus(`Deplacement applique: ${appliedLabel}${taskSuffix}`);
+      return;
+    }
+
+    const unchangedTask = toText(payload?.task);
+    if (unchangedTask) {
+      setPlanningStatus(`Aucun changement (meme Groupe/Zone) pour ${unchangedTask}.`);
+    } else {
+      setPlanningStatus("Aucun changement (meme Groupe/Zone).");
+    }
+  } catch (error) {
+    setPlanningStatus(`Erreur drop Planning : ${error.message}`);
+    throw error;
+  }
+}
+
 async function refreshPlanning() {
   if (refreshInProgress) return;
   refreshInProgress = true;
@@ -315,6 +376,7 @@ async function bootstrap() {
     initGrist();
     setPlanningDurationEditHandler(handleDurationCellEdit);
     setPlanningMsProjectDropHandler(handleMsProjectRowDrop);
+    setPlanningRowDropHandler(handlePlanningRowDrop);
 
     const projectOptions = await buildProjectOptions();
 

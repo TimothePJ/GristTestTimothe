@@ -721,6 +721,7 @@ export function buildTimelineDataFromPlanningRows(
       tachesLabel: row.taches ?? "",
       typeDocLabel: row.typeDoc ?? "",
       groupeLabel: row.groupe ?? "",
+      zoneLabel: row.zone ?? "",
       debutLabel: row.debut ?? "",
       debutIso: row.debutIso ?? "",
       dureeDebutFinLabel: row.dureeDebutFin ?? "",
