@@ -513,12 +513,18 @@ export async function updatePlanningFromMsProjectDrop({
   }
 
   if (isCoffrageTypeDoc(typeDoc)) {
-    let dateLimiteDate = droppedStartDate || parseCalendarDate(currentRow[dateLimiteCol]);
     let diffCoffrageDate = droppedEndDate || parseCalendarDate(currentRow[diffCoffrageCol]);
     const duree1 = toInteger(currentRow[duree1Col]);
+    let dateLimiteDate = droppedStartDate || parseCalendarDate(currentRow[dateLimiteCol]);
 
-    if (droppedStartIso) updates[dateLimiteCol] = droppedStartIso;
     if (droppedEndIso) updates[diffCoffrageCol] = droppedEndIso;
+
+    // Regle COFFRAGE: Date_limite est calculee a partir de Diff_coffrage - Duree_1 (semaines).
+    if (diffCoffrageDate && duree1 != null && duree1 >= 0) {
+      dateLimiteDate = subtractWeeksFromDate(diffCoffrageDate, duree1);
+    } else if (droppedStartIso) {
+      updates[dateLimiteCol] = droppedStartIso;
+    }
 
     if (!diffCoffrageDate && dateLimiteDate && duree1 != null && duree1 >= 0) {
       diffCoffrageDate = addWeeksToDate(dateLimiteDate, duree1);

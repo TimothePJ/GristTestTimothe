@@ -60,6 +60,10 @@ function addWeeks(date, weeks) {
   return addDays(date, weeks * 7);
 }
 
+function subtractWeeks(date, weeks) {
+  return addDays(date, -(weeks * 7));
+}
+
 function getCurrentInstant() {
   return new Date();
 }
@@ -79,10 +83,23 @@ function isArmaturesTypeDoc(value) {
   return normalized.includes("ARMATURES");
 }
 
-function resolveBandStartDate(typeDoc, dateLimiteRaw, diffCoffrageRaw) {
+function resolveCoffrageDateLimiteDate(dateLimiteRaw, diffCoffrageRaw, duree1Raw) {
+  const diffCoffrageDate = parseDate(diffCoffrageRaw);
+  const duree1Weeks = toNumber(duree1Raw);
+
+  if (diffCoffrageDate && duree1Weeks != null && duree1Weeks >= 0) {
+    return subtractWeeks(diffCoffrageDate, duree1Weeks);
+  }
+
+  return parseDate(dateLimiteRaw);
+}
+
+function resolveBandStartDate(typeDoc, dateLimiteRaw, diffCoffrageRaw, duree1Raw) {
   const normalized = String(typeDoc ?? "").toUpperCase();
   if (normalized.includes("ARMATURES")) return parseDate(diffCoffrageRaw);
-  if (normalized.includes("COFFRAGE")) return parseDate(dateLimiteRaw);
+  if (normalized.includes("COFFRAGE")) {
+    return resolveCoffrageDateLimiteDate(dateLimiteRaw, diffCoffrageRaw, duree1Raw);
+  }
   return null;
 }
 
@@ -422,10 +439,14 @@ export function buildTimelineDataFromPlanningRows(
     const duree2Value = r[cfg.duree2];
     const duree3Value = r[cfg.duree3];
     const isCoffrage = isCoffrageTypeDoc(typeDocText);
+    const dateLimiteDate = isCoffrage
+      ? resolveCoffrageDateLimiteDate(dateLimiteValue, diffCoffrageValue, duree1Value)
+      : parseDate(dateLimiteValue);
     const bandStartDate = resolveBandStartDate(
       typeDocText,
       dateLimiteValue,
-      diffCoffrageValue
+      diffCoffrageValue,
+      duree1Value
     );
     const bandEndDate = resolveBandEndDate(
       typeDocText,
@@ -486,8 +507,8 @@ export function buildTimelineDataFromPlanningRows(
       lignePlanningNum: toNumber(lignePlanningText),
 
       // Phases planning
-      dateLimite: dateLimiteValue,
-      dateLimiteDate: parseDate(dateLimiteValue),
+      dateLimite: dateLimiteDate || dateLimiteValue,
+      dateLimiteDate,
       duree1: duree1Value,
 
       diffCoffrage: diffCoffrageValue,
@@ -536,6 +557,11 @@ export function buildTimelineDataFromPlanningRows(
     if (!resolvedDiffCoffrage) return row;
 
     const normalizedDiffCoffrage = new Date(resolvedDiffCoffrage);
+    const normalizedDateLimite = resolveCoffrageDateLimiteDate(
+      row.dateLimite,
+      normalizedDiffCoffrage,
+      row.duree1
+    );
     const durationEditMeta = resolveDurationEditMeta(
       row.typeDoc,
       normalizedDiffCoffrage,
@@ -544,6 +570,10 @@ export function buildTimelineDataFromPlanningRows(
 
     return {
       ...row,
+      dateLimite: normalizedDateLimite || row.dateLimite,
+      dateLimiteDate: normalizedDateLimite || row.dateLimiteDate,
+      debut: fmtCellDate(normalizedDateLimite || row.dateLimiteDate),
+      debutIso: fmtIsoCellDate(normalizedDateLimite || row.dateLimiteDate),
       diffCoffrage: normalizedDiffCoffrage,
       fin: fmtCellDate(normalizedDiffCoffrage),
       finIso: fmtIsoCellDate(normalizedDiffCoffrage),
