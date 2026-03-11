@@ -374,6 +374,15 @@ function compareRowsChronologicalOrder(a, b) {
   return compareRowsBaseOrder(a, b);
 }
 
+function compareArmaturesByDemarrageOrder(a, b) {
+  const demarrageCmp = compareNullableDatesAsc(
+    a?.demarragesTravauxDate,
+    b?.demarragesTravauxDate
+  );
+  if (demarrageCmp !== 0) return demarrageCmp;
+  return compareRowsChronologicalOrder(a, b);
+}
+
 function getGroupMinDateLimite(rows) {
   let minDate = null;
   for (const row of rows || []) {
@@ -518,6 +527,7 @@ export function buildTimelineDataFromPlanningRows(
       duree3: duree3Value,
 
       demarragesTravaux: demarrageTravauxValue,
+      demarragesTravauxDate: demarrageTravauxDate,
       retards: toText(r[cfg.retards]),
 
       indice: toText(r[cfg.indice]),
@@ -616,7 +626,7 @@ export function buildTimelineDataFromPlanningRows(
 
   const groupedEntries = [...groupedRows.values()].map((bucket) => {
     bucket.coffrage.sort(compareRowsChronologicalOrder);
-    bucket.armatures.sort(compareRowsChronologicalOrder);
+    bucket.armatures.sort(compareArmaturesByDemarrageOrder);
     bucket.others.sort(compareRowsChronologicalOrder);
 
     const orderedRows = [...bucket.coffrage, ...bucket.armatures, ...bucket.others];
