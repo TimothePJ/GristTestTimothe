@@ -18,6 +18,13 @@ let msProjectDropBound = false;
 let activeMsDropRowEl = null;
 let activeMsDropCellEl = null;
 let msProjectGlobalDragCursorActive = false;
+let planningRowDragBound = false;
+let planningRowDragGlobalListenersBound = false;
+let planningRowDragContainerEl = null;
+let activePlanningDraggedRowEl = null;
+let activePlanningNativeDragImageEl = null;
+
+const PLANNING_ROW_DRAG_HANDLED_FLAG = "__planningRowDragHandled";
 
 function ensureStickyAxisLeftFiller(container) {
   if (!(container instanceof HTMLElement)) return null;
@@ -676,6 +683,195 @@ function bindDurationCellEditing(containerEl) {
   });
 }
 
+function getEventTargetElement(event) {
+  const directTarget = event?.target;
+  if (directTarget instanceof Element) {
+    return directTarget;
+  }
+
+  if (typeof event?.composedPath === "function") {
+    const elementFromPath = event.composedPath().find((node) => node instanceof Element);
+    if (elementFromPath instanceof Element) {
+      return elementFromPath;
+    }
+  }
+
+  return null;
+}
+
+function setPlanningRowDraggingClass(active) {
+  document.body?.classList.toggle("planning-row-dragging", Boolean(active));
+  document.documentElement?.classList.toggle("planning-row-dragging", Boolean(active));
+}
+
+function buildPlanningRowDragPayload(rowEl) {
+  if (!(rowEl instanceof HTMLElement)) return null;
+
+  const rowId = Number(rowEl.dataset.planningRowId || "");
+  if (!Number.isInteger(rowId) || rowId <= 0) return null;
+
+  return {
+    type: "planning-row",
+    rowId,
+    id2: String(rowEl.dataset.planningId2 ?? "").trim(),
+    task: String(rowEl.dataset.planningTask ?? "").trim(),
+    lignePlanning: String(rowEl.dataset.planningLignePlanning ?? "").trim(),
+    typeDoc: String(rowEl.dataset.planningTypeDoc ?? "").trim(),
+    startIso: String(rowEl.dataset.planningStartIso ?? "").trim(),
+    endIso: String(rowEl.dataset.planningEndIso ?? "").trim(),
+    demarrageIso: String(rowEl.dataset.planningDemarrageIso ?? "").trim(),
+    indice: String(rowEl.dataset.planningIndice ?? "").trim(),
+    retards: String(rowEl.dataset.planningRetards ?? "").trim(),
+  };
+}
+
+function setPlanningRowDragData(dataTransfer, payload) {
+  if (!dataTransfer || !payload) return;
+  const jsonPayload = JSON.stringify(payload);
+
+  dataTransfer.effectAllowed = "copy";
+  dataTransfer.setData("application/x-planning-row", jsonPayload);
+  dataTransfer.setData("text/x-planning-row", jsonPayload);
+}
+
+function clearPlanningNativeDragImage() {
+  if (activePlanningNativeDragImageEl && activePlanningNativeDragImageEl.isConnected) {
+    activePlanningNativeDragImageEl.remove();
+  }
+  activePlanningNativeDragImageEl = null;
+}
+
+function clonePlanningRowForDragPreview(rowEl, payload) {
+  if (!(rowEl instanceof HTMLElement)) return null;
+
+  const preview = rowEl.cloneNode(true);
+  if (!(preview instanceof HTMLElement)) return null;
+
+  const rowRect = rowEl.getBoundingClientRect();
+  preview.className = "group-row-grid planning-native-drag-row";
+  preview.style.width = `${Math.max(420, Math.round(rowRect.width))}px`;
+  preview.style.pointerEvents = "none";
+  preview.style.position = "fixed";
+  preview.style.top = "-10000px";
+  preview.style.left = "-10000px";
+  preview.style.zIndex = "1000002";
+
+  preview.querySelectorAll(".editable-duration-cell").forEach((cell) => {
+    if (!(cell instanceof HTMLElement)) return;
+    cell.classList.remove("editable-duration-cell", "is-editing-duration", "is-saving-duration");
+    cell.removeAttribute("title");
+  });
+
+  if (!preview.childElementCount) {
+    preview.textContent = payload?.task || payload?.id2 || "Ligne planning";
+  }
+
+  document.body.appendChild(preview);
+  return preview;
+}
+
+function clearPlanningRowDraggingState(containerEl = null) {
+  setPlanningRowDraggingClass(false);
+
+  if (activePlanningDraggedRowEl && activePlanningDraggedRowEl.isConnected) {
+    activePlanningDraggedRowEl.classList.remove("is-dragging-row");
+  }
+  activePlanningDraggedRowEl = null;
+  clearPlanningNativeDragImage();
+
+  const effectiveContainer =
+    containerEl instanceof HTMLElement
+      ? containerEl
+      : (planningRowDragContainerEl instanceof HTMLElement ? planningRowDragContainerEl : document);
+  const draggingRows = effectiveContainer.querySelectorAll(
+    ".group-row-grid.planning-draggable-row.is-dragging-row"
+  );
+  draggingRows.forEach((rowEl) => rowEl.classList.remove("is-dragging-row"));
+}
+
+function resolvePlanningDragRowElement(event, forcedRowEl = null) {
+  if (forcedRowEl instanceof HTMLElement) return forcedRowEl;
+
+  const targetEl = getEventTargetElement(event);
+  if (!(targetEl instanceof Element)) return null;
+
+  const rowEl = targetEl.closest(".group-row-grid.planning-draggable-row");
+  if (!(rowEl instanceof HTMLElement)) return null;
+  return rowEl;
+}
+
+function handlePlanningNativeDragStart(event, forcedRowEl = null) {
+  if (!event) return;
+  if (event[PLANNING_ROW_DRAG_HANDLED_FLAG]) return;
+
+  const rowEl = resolvePlanningDragRowElement(event, forcedRowEl);
+  if (!(rowEl instanceof HTMLElement)) return;
+  if (
+    planningRowDragContainerEl instanceof HTMLElement &&
+    !planningRowDragContainerEl.contains(rowEl)
+  ) {
+    return;
+  }
+
+  event[PLANNING_ROW_DRAG_HANDLED_FLAG] = true;
+
+  const payload = buildPlanningRowDragPayload(rowEl);
+  if (!payload) {
+    event.preventDefault();
+    return;
+  }
+
+  setPlanningRowDragData(event.dataTransfer, payload);
+  clearPlanningNativeDragImage();
+  const nativeImage = clonePlanningRowForDragPreview(rowEl, payload);
+  if (nativeImage) {
+    activePlanningNativeDragImageEl = nativeImage;
+    if (event.dataTransfer?.setDragImage) {
+      event.dataTransfer.setDragImage(nativeImage, 20, 16);
+    }
+  }
+
+  rowEl.classList.add("is-dragging-row");
+  activePlanningDraggedRowEl = rowEl;
+  setPlanningRowDraggingClass(true);
+}
+
+function bindGlobalPlanningRowDragging() {
+  if (planningRowDragGlobalListenersBound) return;
+  planningRowDragGlobalListenersBound = true;
+
+  window.addEventListener(
+    "dragstart",
+    (event) => {
+      handlePlanningNativeDragStart(event);
+    },
+    true
+  );
+
+  window.addEventListener(
+    "dragend",
+    () => {
+      clearPlanningRowDraggingState(null);
+    },
+    true
+  );
+
+  window.addEventListener(
+    "drop",
+    () => {
+      clearPlanningRowDraggingState(null);
+    },
+    true
+  );
+}
+
+function bindPlanningRowDragging(containerEl) {
+  if (!(containerEl instanceof HTMLElement) || planningRowDragBound) return;
+  planningRowDragBound = true;
+  planningRowDragContainerEl = containerEl;
+  bindGlobalPlanningRowDragging();
+}
+
 function hasMsProjectPayloadType(dataTransfer) {
   if (!dataTransfer) return false;
   const types = Array.from(dataTransfer.types || []);
@@ -954,8 +1150,20 @@ function buildGroupLabelElement(group) {
 
   const row = document.createElement("div");
   row.className = "group-row-grid";
+  row.classList.add("planning-draggable-row");
+  row.draggable = true;
+  row.setAttribute("draggable", "true");
   row.dataset.planningRowId = String(group?.rowId ?? "");
   row.dataset.planningGroupId = String(group?.id ?? "");
+  row.dataset.planningId2 = String(group?.id2Label ?? "");
+  row.dataset.planningTask = String(group?.tachesLabel ?? "");
+  row.dataset.planningLignePlanning = String(group?.lignePlanningLabel ?? "");
+  row.dataset.planningTypeDoc = String(group?.typeDocLabel ?? "");
+  row.dataset.planningStartIso = String(group?.debutIso ?? "");
+  row.dataset.planningEndIso = String(group?.finIso ?? "");
+  row.dataset.planningDemarrageIso = String(group?.demarrageIso ?? "");
+  row.dataset.planningIndice = String(group?.indiceLabel ?? "");
+  row.dataset.planningRetards = String(group?.retardsLabel ?? "");
   if (String(group?.typeDocLabel ?? "").toUpperCase().includes("COFFRAGE")) {
     row.classList.add("row-type-coffrage");
   }
@@ -1034,6 +1242,35 @@ function buildGroupLabelElement(group) {
   const retards = document.createElement("div");
   retards.className = "cell-retards";
   retards.textContent = String(group?.retardsLabel ?? "");
+
+  [
+    id2,
+    tache,
+    lignePlanning,
+    debut,
+    dureeDebutFin,
+    fin,
+    dureeFinDemarrage,
+    demarrage,
+    indice,
+    retards,
+  ].forEach((cellEl) => {
+    cellEl.setAttribute("draggable", "true");
+  });
+
+  row.addEventListener("dragstart", (event) => {
+    handlePlanningNativeDragStart(event, row);
+  });
+
+  row.addEventListener("mousedown", (event) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+  });
+
+  row.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+  });
 
   row.append(
     id2,
@@ -1295,6 +1532,7 @@ export function renderPlanningTimeline({ groups, items }) {
     bindHoverTooltip(container);
     bindDurationCellEditing(container);
     bindMsProjectRowDrop(container);
+    bindPlanningRowDragging(container);
     bindStickyTimelineAxis();
   }
 
@@ -1402,4 +1640,5 @@ export function clearPlanningTimeline() {
 
   hideHoverTooltip();
   clearMsProjectDropTarget();
+  clearPlanningRowDraggingState();
 }

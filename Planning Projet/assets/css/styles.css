@@ -386,6 +386,74 @@ body.is-ms-project-drag-cursor * {
   font-size: 13px !important;
 }
 
+#planningTimeline .group-row-grid.planning-draggable-row,
+#planningTimeline .group-row-grid.planning-draggable-row > div {
+  cursor: grab !important;
+}
+
+#planningTimeline .group-row-grid.planning-draggable-row {
+  user-select: none;
+  -webkit-user-drag: element;
+  transition: opacity 120ms ease;
+}
+
+#planningTimeline .group-row-grid.planning-draggable-row > div {
+  -webkit-user-drag: element;
+}
+
+#planningTimeline .group-row-grid.planning-draggable-row:active,
+#planningTimeline .group-row-grid.planning-draggable-row:active > div {
+  cursor: grabbing !important;
+}
+
+html.planning-row-dragging,
+html.planning-row-dragging *,
+body.planning-row-dragging,
+body.planning-row-dragging * {
+  cursor: grabbing !important;
+}
+
+html.planning-row-dragging,
+body.planning-row-dragging {
+  user-select: none !important;
+}
+
+#planningTimeline .group-row-grid.planning-draggable-row.is-dragging-row,
+#planningTimeline .group-row-grid.planning-draggable-row.is-dragging-row > div {
+  opacity: 0.45 !important;
+}
+
+.planning-native-drag-row {
+  position: fixed;
+  top: -10000px;
+  left: -10000px;
+  pointer-events: none;
+  user-select: none;
+  z-index: 1000002;
+  display: grid;
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-retards);
+  align-items: center;
+  min-height: var(--planning-row-height);
+  max-width: min(1120px, calc(100vw - 24px));
+  padding: 0 var(--left-pad-x);
+  box-sizing: content-box;
+  border-radius: 9px;
+  border: 1px solid #93c5fd;
+  background: #eef6ff;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.22);
+  color: #0f172a;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.planning-native-drag-row > div {
+  padding: 6px 8px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 #planningTimeline.is-ms-drop-active {
   cursor: copy !important;
 }
