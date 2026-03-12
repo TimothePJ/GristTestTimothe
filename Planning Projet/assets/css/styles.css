@@ -453,6 +453,19 @@ body.planning-row-dragging {
   text-overflow: ellipsis;
 }
 
+.planning-native-drag-stack {
+  display: grid;
+  gap: 4px;
+  max-width: min(1120px, calc(100vw - 24px));
+  pointer-events: none;
+}
+
+.planning-native-drag-row.planning-native-drag-row-linked {
+  opacity: 0.82;
+  border-color: #c2d7f5;
+  background: #f5f9ff;
+}
+
 #planningTimeline.is-planning-row-drop-active {
   cursor: move !important;
 }
@@ -512,6 +525,16 @@ body.planning-row-dragging {
   font-weight: 700 !important;
   color: #1d4f91 !important;
   letter-spacing: 0.1px;
+}
+
+#planningTimeline .zone-header-band.is-planning-zone-drop-target {
+  box-shadow: inset 0 0 0 2px #0ea5e9;
+  background: #dbeafe !important;
+}
+
+#planningTimeline .zone-header-band.is-planning-zone-drop-committing {
+  box-shadow: inset 0 0 0 2px #0284c7;
+  background: #bfdbfe !important;
 }
 
 #planningTimeline .group-row-grid > div {
@@ -699,6 +722,173 @@ body.planning-row-dragging {
   color: #666;
   background: #fff;
   border-top: 1px solid var(--grist-theme-border);
+}
+
+body.is-add-zone-modal-open {
+  overflow: hidden;
+}
+
+.add-zone-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.add-zone-modal[hidden] {
+  display: none !important;
+}
+
+.add-zone-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+.add-zone-modal__panel {
+  position: relative;
+  width: min(560px, calc(100vw - 24px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  background: linear-gradient(180deg, #ffffff 0%, #f9fbff 100%);
+  border: 1px solid #d8e2f0;
+  border-radius: 14px;
+  box-shadow: 0 24px 55px rgba(15, 23, 42, 0.3);
+  transform: translateY(8px) scale(0.985);
+  opacity: 0;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+
+.add-zone-modal.is-open .add-zone-modal__panel {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+
+.add-zone-modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid #e3eaf5;
+  background:
+    radial-gradient(130% 130% at 0% 0%, rgba(0, 73, 144, 0.12) 0%, rgba(0, 73, 144, 0) 65%),
+    #f8fbff;
+}
+
+.add-zone-modal__title-wrap h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+  color: #0f294d;
+}
+
+.add-zone-modal__title-wrap p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #4a6283;
+}
+
+.add-zone-modal__close-btn {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid #c4d4e8;
+  background: #ffffff;
+  color: #24466e;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.add-zone-modal__close-btn:hover {
+  background: #eef5ff;
+}
+
+.add-zone-modal__form {
+  display: grid;
+  gap: 9px;
+  padding: 16px 18px 18px;
+}
+
+.add-zone-modal__form label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.15px;
+  color: #193d67;
+}
+
+.add-zone-modal__form input,
+.add-zone-modal__form textarea {
+  width: 100%;
+  border: 1px solid #bfd0e7;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1d2e43;
+  font: inherit;
+  font-size: 13px;
+  padding: 9px 10px;
+  outline: none;
+}
+
+.add-zone-modal__form input:focus,
+.add-zone-modal__form textarea:focus {
+  border-color: #78a6da;
+  box-shadow: 0 0 0 3px rgba(87, 143, 209, 0.18);
+}
+
+.add-zone-modal__form input[readonly] {
+  background: #f3f7fc;
+  color: #47638a;
+}
+
+.add-zone-modal__hint {
+  margin: 2px 0 0;
+  min-height: 18px;
+  font-size: 12px;
+  color: #1f4d84;
+}
+
+.add-zone-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.add-zone-modal__actions .btn-secondary,
+.add-zone-modal__actions .btn-primary {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  min-height: 34px;
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.add-zone-modal__actions .btn-secondary {
+  border-color: #bfcfe4;
+  background: #f8fbff;
+  color: #244a75;
+}
+
+.add-zone-modal__actions .btn-secondary:hover {
+  background: #edf4ff;
+}
+
+.add-zone-modal__actions .btn-primary {
+  border-color: #0a4d93;
+  background: #0b5cb1;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.add-zone-modal__actions .btn-primary:hover {
+  background: #0a4f99;
 }
 
 /* ==========================================================

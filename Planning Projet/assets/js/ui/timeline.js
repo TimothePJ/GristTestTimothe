@@ -22,10 +22,12 @@ let planningRowDragBound = false;
 let planningRowDragGlobalListenersBound = false;
 let planningRowDragContainerEl = null;
 let activePlanningDraggedRowEl = null;
+let activePlanningDraggedLinkedRowEls = [];
 let activePlanningNativeDragImageEl = null;
 let planningRowDropBound = false;
 let planningRowDropHandler = null;
 let activePlanningDropRowEl = null;
+let activePlanningDropZoneEl = null;
 let planningDragAutoScrollRafId = 0;
 let planningDragAutoScrollVelocityY = 0;
 let planningDragAutoScrollTargetEl = null;
@@ -711,11 +713,95 @@ function setPlanningRowDraggingClass(active) {
   document.documentElement?.classList.toggle("planning-row-dragging", Boolean(active));
 }
 
-function buildPlanningRowDragPayload(rowEl) {
+function normalizePlanningZoneForMatch(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  if (text.toLocaleLowerCase("fr") === "sans zone") return "";
+  return text;
+}
+
+function isPlanningTypeDocMatch(value, keyword) {
+  const normalizedValue = String(value ?? "").toUpperCase();
+  return normalizedValue.includes(String(keyword ?? "").toUpperCase());
+}
+
+function collectLinkedArmatureRowIdsForCoffrage(sourceRowEl) {
+  if (!(sourceRowEl instanceof HTMLElement)) return [];
+
+  const sourceTypeDoc = String(sourceRowEl.dataset.planningTypeDoc || "");
+  if (!isPlanningTypeDocMatch(sourceTypeDoc, "COFFRAGE")) return [];
+
+  const sourceRowId = Number(sourceRowEl.dataset.planningRowId || "");
+  if (!Number.isInteger(sourceRowId) || sourceRowId <= 0) return [];
+
+  const sourceGroup = String(sourceRowEl.dataset.planningGroupe || "").trim();
+  if (!sourceGroup) return [];
+
+  const sourceZone = normalizePlanningZoneForMatch(sourceRowEl.dataset.planningZone || "");
+  const linkedRowIds = [];
+
+  if (groupsDataSet && typeof groupsDataSet.forEach === "function") {
+    groupsDataSet.forEach((group) => {
+      if (!group || group.isZoneHeader) return;
+
+      const candidateRowId = Number(group.rowId || "");
+      if (!Number.isInteger(candidateRowId) || candidateRowId <= 0 || candidateRowId === sourceRowId) {
+        return;
+      }
+
+      const candidateTypeDoc = String(group.typeDocLabel || "");
+      if (!isPlanningTypeDocMatch(candidateTypeDoc, "ARMATURES")) return;
+
+      const candidateGroup = String(group.groupeLabel || "").trim();
+      if (!candidateGroup || candidateGroup !== sourceGroup) return;
+
+      const candidateZone = normalizePlanningZoneForMatch(group.zoneLabel || "");
+      if (candidateZone !== sourceZone) return;
+
+      linkedRowIds.push(candidateRowId);
+    });
+  }
+
+  return [...new Set(linkedRowIds)];
+}
+
+function getPlanningRowElementByRowId(rowId) {
+  const normalizedRowId = Number(rowId);
+  if (!Number.isInteger(normalizedRowId) || normalizedRowId <= 0) return null;
+
+  const container =
+    planningRowDragContainerEl instanceof HTMLElement
+      ? planningRowDragContainerEl
+      : document;
+  const rowEl = container.querySelector(
+    `.group-row-grid.planning-draggable-row[data-planning-row-id="${normalizedRowId}"]`
+  );
+  return rowEl instanceof HTMLElement ? rowEl : null;
+}
+
+function collectLinkedArmatureRowElements(rowIds = []) {
+  if (!Array.isArray(rowIds) || !rowIds.length) return [];
+  const linkedRows = [];
+
+  rowIds.forEach((rowId) => {
+    const rowEl = getPlanningRowElementByRowId(rowId);
+    if (rowEl instanceof HTMLElement) {
+      linkedRows.push(rowEl);
+    }
+  });
+
+  return linkedRows;
+}
+
+function buildPlanningRowDragPayload(rowEl, linkedArmatureRowIds = []) {
   if (!(rowEl instanceof HTMLElement)) return null;
 
   const rowId = Number(rowEl.dataset.planningRowId || "");
   if (!Number.isInteger(rowId) || rowId <= 0) return null;
+
+  const normalizedLinkedArmatureRowIds = (Array.isArray(linkedArmatureRowIds) ? linkedArmatureRowIds : [])
+    .map((value) => Number(value))
+    .filter((id) => Number.isInteger(id) && id > 0 && id !== rowId);
 
   return {
     type: "planning-row",
@@ -731,6 +817,8 @@ function buildPlanningRowDragPayload(rowEl) {
     demarrageIso: String(rowEl.dataset.planningDemarrageIso ?? "").trim(),
     indice: String(rowEl.dataset.planningIndice ?? "").trim(),
     retards: String(rowEl.dataset.planningRetards ?? "").trim(),
+    linkedArmatureRowIds: normalizedLinkedArmatureRowIds,
+    linkedArmatureCount: normalizedLinkedArmatureRowIds.length,
   };
 }
 
@@ -850,20 +938,21 @@ function updatePlanningDragAutoScrollFromPointer(clientX, clientY) {
   startPlanningDragAutoScrollIfNeeded();
 }
 
-function clonePlanningRowForDragPreview(rowEl, payload) {
+function cloneSinglePlanningRowPreview(rowEl, payload, { isLinked = false } = {}) {
   if (!(rowEl instanceof HTMLElement)) return null;
-
   const preview = rowEl.cloneNode(true);
   if (!(preview instanceof HTMLElement)) return null;
 
   const rowRect = rowEl.getBoundingClientRect();
   preview.className = "group-row-grid planning-native-drag-row";
+  if (isLinked) {
+    preview.classList.add("planning-native-drag-row-linked");
+  }
   preview.style.width = `${Math.max(420, Math.round(rowRect.width))}px`;
   preview.style.pointerEvents = "none";
-  preview.style.position = "fixed";
-  preview.style.top = "-10000px";
-  preview.style.left = "-10000px";
-  preview.style.zIndex = "1000002";
+  preview.style.position = "static";
+  preview.style.top = "";
+  preview.style.left = "";
 
   preview.querySelectorAll(".editable-duration-cell").forEach((cell) => {
     if (!(cell instanceof HTMLElement)) return;
@@ -875,8 +964,48 @@ function clonePlanningRowForDragPreview(rowEl, payload) {
     preview.textContent = payload?.task || payload?.id2 || "Ligne planning";
   }
 
-  document.body.appendChild(preview);
   return preview;
+}
+
+function clonePlanningRowForDragPreview(rowEl, payload, linkedArmatureRows = []) {
+  if (!(rowEl instanceof HTMLElement)) return null;
+
+  const linkedRows = Array.isArray(linkedArmatureRows)
+    ? linkedArmatureRows.filter((candidate) => candidate instanceof HTMLElement)
+    : [];
+
+  const sourcePreview = cloneSinglePlanningRowPreview(rowEl, payload);
+  if (!(sourcePreview instanceof HTMLElement)) return null;
+
+  if (!linkedRows.length) {
+    sourcePreview.style.position = "fixed";
+    sourcePreview.style.top = "-10000px";
+    sourcePreview.style.left = "-10000px";
+    sourcePreview.style.zIndex = "1000002";
+    document.body.appendChild(sourcePreview);
+    return sourcePreview;
+  }
+
+  const stackEl = document.createElement("div");
+  stackEl.className = "planning-native-drag-stack";
+  stackEl.style.position = "fixed";
+  stackEl.style.top = "-10000px";
+  stackEl.style.left = "-10000px";
+  stackEl.style.pointerEvents = "none";
+  stackEl.style.zIndex = "1000002";
+
+  stackEl.appendChild(sourcePreview);
+
+  linkedRows.forEach((linkedRowEl) => {
+    const linkedPreview = cloneSinglePlanningRowPreview(linkedRowEl, payload, {
+      isLinked: true,
+    });
+    if (!(linkedPreview instanceof HTMLElement)) return;
+    stackEl.appendChild(linkedPreview);
+  });
+
+  document.body.appendChild(stackEl);
+  return stackEl;
 }
 
 function clearPlanningRowDraggingState(containerEl = null) {
@@ -886,6 +1015,13 @@ function clearPlanningRowDraggingState(containerEl = null) {
   if (activePlanningDraggedRowEl && activePlanningDraggedRowEl.isConnected) {
     activePlanningDraggedRowEl.classList.remove("is-dragging-row");
   }
+  if (Array.isArray(activePlanningDraggedLinkedRowEls)) {
+    activePlanningDraggedLinkedRowEls.forEach((linkedRowEl) => {
+      if (!(linkedRowEl instanceof HTMLElement) || !linkedRowEl.isConnected) return;
+      linkedRowEl.classList.remove("is-dragging-row");
+    });
+  }
+  activePlanningDraggedLinkedRowEls = [];
   activePlanningDraggedRowEl = null;
   clearPlanningNativeDragImage();
 
@@ -925,7 +1061,9 @@ function handlePlanningNativeDragStart(event, forcedRowEl = null) {
 
   event[PLANNING_ROW_DRAG_HANDLED_FLAG] = true;
 
-  const payload = buildPlanningRowDragPayload(rowEl);
+  const linkedArmatureRowIds = collectLinkedArmatureRowIdsForCoffrage(rowEl);
+  const linkedArmatureRows = collectLinkedArmatureRowElements(linkedArmatureRowIds);
+  const payload = buildPlanningRowDragPayload(rowEl, linkedArmatureRowIds);
   if (!payload) {
     event.preventDefault();
     return;
@@ -933,7 +1071,7 @@ function handlePlanningNativeDragStart(event, forcedRowEl = null) {
 
   setPlanningRowDragData(event.dataTransfer, payload);
   clearPlanningNativeDragImage();
-  const nativeImage = clonePlanningRowForDragPreview(rowEl, payload);
+  const nativeImage = clonePlanningRowForDragPreview(rowEl, payload, linkedArmatureRows);
   if (nativeImage) {
     activePlanningNativeDragImageEl = nativeImage;
     if (event.dataTransfer?.setDragImage) {
@@ -942,6 +1080,11 @@ function handlePlanningNativeDragStart(event, forcedRowEl = null) {
   }
 
   rowEl.classList.add("is-dragging-row");
+  linkedArmatureRows.forEach((linkedRowEl) => {
+    if (!(linkedRowEl instanceof HTMLElement)) return;
+    linkedRowEl.classList.add("is-dragging-row");
+  });
+  activePlanningDraggedLinkedRowEls = linkedArmatureRows;
   activePlanningDraggedRowEl = rowEl;
   setPlanningRowDraggingClass(true);
 }
@@ -1022,9 +1165,17 @@ function extractPlanningRowPayloadFromDataTransfer(dataTransfer) {
     if (!parsed || parsed.type !== "planning-row") return null;
     const rowId = Number(parsed.rowId);
     if (!Number.isInteger(rowId) || rowId <= 0) return null;
+    const linkedArmatureRowIds = Array.isArray(parsed.linkedArmatureRowIds)
+      ? [...new Set(
+        parsed.linkedArmatureRowIds
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value > 0 && value !== rowId)
+      )]
+      : [];
     return {
       ...parsed,
       rowId,
+      linkedArmatureRowIds,
     };
   } catch (error) {
     return null;
@@ -1038,8 +1189,15 @@ function clearPlanningRowDropTarget(containerEl = null) {
       "is-planning-row-drop-committing"
     );
   }
+  if (activePlanningDropZoneEl && activePlanningDropZoneEl.isConnected) {
+    activePlanningDropZoneEl.classList.remove(
+      "is-planning-zone-drop-target",
+      "is-planning-zone-drop-committing"
+    );
+  }
 
   activePlanningDropRowEl = null;
+  activePlanningDropZoneEl = null;
 
   const effectiveContainer =
     containerEl instanceof HTMLElement
@@ -1055,7 +1213,7 @@ function setPlanningRowDropTarget(rowEl, containerEl) {
   containerEl.classList.add("is-planning-row-drop-active");
 
   if (!(rowEl instanceof HTMLElement)) {
-    if (activePlanningDropRowEl) {
+    if (activePlanningDropRowEl || activePlanningDropZoneEl) {
       clearPlanningRowDropTarget(containerEl);
       containerEl.classList.add("is-planning-row-drop-active");
     }
@@ -1068,6 +1226,99 @@ function setPlanningRowDropTarget(rowEl, containerEl) {
   containerEl.classList.add("is-planning-row-drop-active");
   rowEl.classList.add("is-planning-row-drop-target");
   activePlanningDropRowEl = rowEl;
+}
+
+function setPlanningZoneDropTarget(zoneEl, containerEl) {
+  if (!(containerEl instanceof HTMLElement)) return;
+  containerEl.classList.add("is-planning-row-drop-active");
+
+  if (!(zoneEl instanceof HTMLElement)) {
+    if (activePlanningDropRowEl || activePlanningDropZoneEl) {
+      clearPlanningRowDropTarget(containerEl);
+      containerEl.classList.add("is-planning-row-drop-active");
+    }
+    return;
+  }
+
+  if (activePlanningDropZoneEl === zoneEl) return;
+
+  clearPlanningRowDropTarget(containerEl);
+  containerEl.classList.add("is-planning-row-drop-active");
+  zoneEl.classList.add("is-planning-zone-drop-target");
+  activePlanningDropZoneEl = zoneEl;
+}
+
+function findZoneHeaderBandElement(containerEl, zoneKey = "", zoneLabel = "") {
+  if (!(containerEl instanceof HTMLElement)) return null;
+  const bands = containerEl.querySelectorAll(".zone-header-band");
+  if (!bands.length) return null;
+
+  const normalizedZoneKey = String(zoneKey ?? "").trim();
+  const normalizedZoneLabel = String(zoneLabel ?? "").trim().toLocaleLowerCase("fr");
+
+  for (const band of bands) {
+    if (!(band instanceof HTMLElement)) continue;
+    const bandZoneKey = String(band.dataset.planningZoneKey || "").trim();
+    if (normalizedZoneKey && bandZoneKey === normalizedZoneKey) {
+      return band;
+    }
+  }
+
+  for (const band of bands) {
+    if (!(band instanceof HTMLElement)) continue;
+    const bandZoneLabel = String(
+      band.dataset.planningZoneLabel || band.textContent || ""
+    )
+      .trim()
+      .toLocaleLowerCase("fr");
+    if (normalizedZoneLabel && bandZoneLabel === normalizedZoneLabel) {
+      return band;
+    }
+  }
+
+  return null;
+}
+
+function resolvePlanningZoneDropTarget(targetEl, containerEl, eventLike = null) {
+  if (targetEl instanceof Element) {
+    const zoneBand = targetEl.closest(".zone-header-band");
+    if (zoneBand instanceof HTMLElement && containerEl.contains(zoneBand)) {
+      return {
+        zoneKey: String(zoneBand.dataset.planningZoneKey || "").trim(),
+        zoneLabel: String(zoneBand.dataset.planningZoneLabel || zoneBand.textContent || "").trim(),
+        zoneEl: zoneBand,
+      };
+    }
+  }
+
+  if (
+    timelineInstance &&
+    typeof timelineInstance.getEventProperties === "function" &&
+    groupsDataSet &&
+    eventLike
+  ) {
+    const props = timelineInstance.getEventProperties(eventLike);
+    const groupId = props?.group;
+    if (groupId != null) {
+      const group =
+        groupsDataSet.get(groupId) ||
+        groupsDataSet.get(String(groupId)) ||
+        groupsDataSet.get(Number(groupId)) ||
+        null;
+
+      if (group?.isZoneHeader) {
+        const zoneKey = String(group?.meta?.zoneKey || group?.zoneKey || "").trim();
+        const zoneLabel = String(group?.zoneLabel || "").trim();
+        return {
+          zoneKey,
+          zoneLabel,
+          zoneEl: findZoneHeaderBandElement(containerEl, zoneKey, zoneLabel),
+        };
+      }
+    }
+  }
+
+  return null;
 }
 
 function bindPlanningRowDrop(containerEl) {
@@ -1092,17 +1343,25 @@ function bindPlanningRowDrop(containerEl) {
     const targetEl = event.target instanceof Element ? event.target : null;
     const rowEl = resolvePlanningRowDropTarget(targetEl, containerEl, event);
     const targetRowId = Number(rowEl?.dataset?.planningRowId || "");
-    if (
-      !(rowEl instanceof HTMLElement) ||
-      !Number.isInteger(targetRowId) ||
-      targetRowId <= 0 ||
-      targetRowId === payload.rowId
-    ) {
-      setPlanningRowDropTarget(null, containerEl);
+    const isValidRowTarget =
+      rowEl instanceof HTMLElement &&
+      Number.isInteger(targetRowId) &&
+      targetRowId > 0 &&
+      targetRowId !== payload.rowId;
+
+    if (isValidRowTarget) {
+      setPlanningRowDropTarget(rowEl, containerEl);
       return;
     }
 
-    setPlanningRowDropTarget(rowEl, containerEl);
+    const zoneTarget = resolvePlanningZoneDropTarget(targetEl, containerEl, event);
+    const zoneLabel = String(zoneTarget?.zoneLabel || "").trim();
+    if (zoneLabel) {
+      setPlanningZoneDropTarget(zoneTarget?.zoneEl, containerEl);
+      return;
+    }
+
+    setPlanningRowDropTarget(null, containerEl);
   });
 
   containerEl.addEventListener("dragleave", (event) => {
@@ -1134,30 +1393,43 @@ function bindPlanningRowDrop(containerEl) {
     const targetEl = event.target instanceof Element ? event.target : null;
     const rowEl = resolvePlanningRowDropTarget(targetEl, containerEl, event);
     const targetRowId = Number(rowEl?.dataset?.planningRowId || "");
+    const zoneTarget = resolvePlanningZoneDropTarget(targetEl, containerEl, event);
+    const targetZoneLabel = String(zoneTarget?.zoneLabel || "").trim();
+    const isValidRowTarget =
+      rowEl instanceof HTMLElement &&
+      Number.isInteger(targetRowId) &&
+      targetRowId > 0 &&
+      targetRowId !== payload?.rowId;
 
-    if (
-      !payload ||
-      !(rowEl instanceof HTMLElement) ||
-      !Number.isInteger(targetRowId) ||
-      targetRowId <= 0 ||
-      targetRowId === payload.rowId
-    ) {
+    if (!payload || (!isValidRowTarget && !targetZoneLabel)) {
       clearPlanningRowDropTarget(containerEl);
       return;
     }
 
-    setPlanningRowDropTarget(rowEl, containerEl);
-    rowEl.classList.add("is-planning-row-drop-committing");
+    if (isValidRowTarget) {
+      setPlanningRowDropTarget(rowEl, containerEl);
+      rowEl.classList.add("is-planning-row-drop-committing");
+    } else {
+      setPlanningZoneDropTarget(zoneTarget?.zoneEl, containerEl);
+      if (activePlanningDropZoneEl instanceof HTMLElement) {
+        activePlanningDropZoneEl.classList.add("is-planning-zone-drop-committing");
+      }
+    }
 
     try {
       if (typeof planningRowDropHandler === "function") {
         await planningRowDropHandler({
           sourcePlanningRowId: payload.rowId,
-          targetPlanningRowId: targetRowId,
+          targetPlanningRowId: isValidRowTarget ? targetRowId : null,
           payload,
-          targetTask: String(rowEl.querySelector(".cell-task")?.textContent || "").trim(),
-          targetGroupe: String(rowEl.dataset.planningGroupe || "").trim(),
-          targetZone: String(rowEl.dataset.planningZone || "").trim(),
+          targetTask: isValidRowTarget
+            ? String(rowEl.querySelector(".cell-task")?.textContent || "").trim()
+            : "",
+          targetGroupe: isValidRowTarget ? String(rowEl.dataset.planningGroupe || "").trim() : "",
+          targetZone: isValidRowTarget
+            ? String(rowEl.dataset.planningZone || "").trim()
+            : targetZoneLabel,
+          targetZoneKey: String(zoneTarget?.zoneKey || "").trim(),
         });
       }
     } catch (error) {
@@ -1465,6 +1737,8 @@ function buildGroupLabelElement(group) {
   if (group?.isZoneHeader) {
     const zoneBand = document.createElement("div");
     zoneBand.className = "zone-header-band";
+    zoneBand.dataset.planningZoneKey = String(group?.meta?.zoneKey || group?.zoneKey || "");
+    zoneBand.dataset.planningZoneLabel = String(group?.zoneLabel || "");
     zoneBand.textContent = String(group?.zoneHeaderLabel ?? "");
     return zoneBand;
   }
@@ -1879,10 +2153,13 @@ export function renderPlanningTimeline({ groups, items }) {
     bindItemHoverInteractions(container);
 
     const range = computeRange(items || []);
+    const hasNonBackgroundItems = (items || []).some(
+      (item) => item?.type !== "background"
+    );
     if (range) {
       dataAnchorDate = computeRangeCenter(range);
       timelineInstance.setWindow(range.start, range.end, { animation: false });
-    } else if ((items || []).length) {
+    } else if (hasNonBackgroundItems) {
       timelineInstance.fit({ animation: false });
       const fitted = timelineInstance.getWindow();
       dataAnchorDate = computeRangeCenter(fitted);

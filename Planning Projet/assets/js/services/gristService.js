@@ -172,6 +172,13 @@ function isArmaturesTypeDoc(value) {
   return String(value ?? "").toUpperCase().includes("ARMATURES");
 }
 
+function normalizeZoneValueForStorage(value) {
+  const text = toText(value);
+  if (!text) return "";
+  if (text.toLocaleLowerCase("fr") === "sans zone") return "";
+  return text;
+}
+
 function normalizeGroupValue(value) {
   const text = toText(value);
   return text ? text.toLocaleLowerCase("fr") : "";
@@ -590,6 +597,7 @@ export async function updatePlanningFromMsProjectDrop({
 export async function updatePlanningGroupZoneFromPlanningDrop({
   sourceRowId,
   targetRowId,
+  linkedRowIds = [],
 }) {
   const table = APP_CONFIG.grist.planningTable;
   if (!table?.sourceTable) {
@@ -600,6 +608,8 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
   const idCol = columns.id || "id";
   const groupCol = String(columns.groupe || "Groupe").trim();
   const zoneCol = String(columns.zone || "Zone").trim();
+  const typeDocCol = String(columns.typeDoc || "Type_doc").trim();
+  const projectCol = String(columns.projectLink || columns.nomProjet || "NomProjet").trim();
 
   const sourceId = Number(sourceRowId);
   const targetId = Number(targetRowId);
@@ -623,24 +633,97 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
     throw new Error("Ligne cible introuvable dans Planning_Projet.");
   }
 
-  const targetGroupe = toText(targetRow[groupCol]);
-  const targetZone = toText(targetRow[zoneCol]);
+  const targetZone = normalizeZoneValueForStorage(targetRow[zoneCol]);
+  const targetIsSansZone = !targetZone;
+  const targetRowGroupe = targetIsSansZone ? "" : toText(targetRow[groupCol]);
   const sourceGroupe = toText(sourceRow[groupCol]);
-  const sourceZone = toText(sourceRow[zoneCol]);
+  const sourceZone = normalizeZoneValueForStorage(sourceRow[zoneCol]);
+  const sourceTypeDoc = toText(sourceRow[typeDocCol]);
+  const sourceProject = toText(sourceRow[projectCol]);
+  const sourceIsCoffrage = isCoffrageTypeDoc(sourceTypeDoc);
+  const isCrossZoneMove = sourceZone !== targetZone;
+
+  let nextGroupValue = targetRowGroupe;
+  if (targetIsSansZone) {
+    nextGroupValue = "";
+  } else if (sourceIsCoffrage && isCrossZoneMove) {
+    const excludedIds = new Set([sourceId]);
+    const normalizedLinkedIds = Array.isArray(linkedRowIds)
+      ? linkedRowIds
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value > 0 && value !== sourceId)
+      : [];
+    normalizedLinkedIds.forEach((id) => excludedIds.add(id));
+
+    const usedGroupNumbers = new Set();
+    for (const row of rows) {
+      const rowId = Number(row?.[idCol]);
+      if (!Number.isInteger(rowId) || excludedIds.has(rowId)) continue;
+
+      const rowZone = normalizeZoneValueForStorage(row?.[zoneCol]);
+      if (rowZone !== targetZone) continue;
+
+      const rowProject = toText(row?.[projectCol]);
+      if (sourceProject && rowProject && rowProject !== sourceProject) continue;
+
+      const groupNum = Number(toText(row?.[groupCol]));
+      if (Number.isInteger(groupNum) && groupNum > 0) {
+        usedGroupNumbers.add(groupNum);
+      }
+    }
+
+    let candidate = 1;
+    while (usedGroupNumbers.has(candidate)) {
+      candidate += 1;
+    }
+    nextGroupValue = String(candidate);
+  }
 
   const updates = {};
-  if (sourceGroupe !== targetGroupe) {
-    updates[groupCol] = targetGroupe;
+  if (sourceGroupe !== nextGroupValue) {
+    updates[groupCol] = nextGroupValue;
   }
   if (sourceZone !== targetZone) {
     updates[zoneCol] = targetZone;
   }
 
-  if (!Object.keys(updates).length) {
+  const normalizedLinkedIds = Array.isArray(linkedRowIds)
+    ? [...new Set(
+      linkedRowIds
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0 && value !== sourceId)
+    )]
+    : [];
+
+  const linkedActions = [];
+  normalizedLinkedIds.forEach((linkedId) => {
+    const linkedRow = rows.find((row) => Number(row?.[idCol]) === linkedId) || null;
+    if (!linkedRow) return;
+
+    const linkedTypeDoc = toText(linkedRow[typeDocCol]);
+    if (!isArmaturesTypeDoc(linkedTypeDoc)) return;
+
+    const linkedZone = normalizeZoneValueForStorage(linkedRow[zoneCol]);
+    const linkedGroup = toText(linkedRow[groupCol]);
+    const linkedUpdates = {};
+    if (linkedZone !== targetZone) linkedUpdates[zoneCol] = targetZone;
+    if (linkedGroup !== nextGroupValue) linkedUpdates[groupCol] = nextGroupValue;
+    if (!Object.keys(linkedUpdates).length) return;
+
+    linkedActions.push([
+      "UpdateRecord",
+      table.sourceTable,
+      linkedId,
+      linkedUpdates,
+    ]);
+  });
+
+  if (!Object.keys(updates).length && !linkedActions.length) {
     return {
       updated: false,
-      groupe: targetGroupe,
+      groupe: nextGroupValue,
       zone: targetZone,
+      linkedUpdatedCount: 0,
     };
   }
 
@@ -649,20 +732,254 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
     throw new Error("grist.docApi.applyUserActions(...) indisponible.");
   }
 
-  await grist.docApi.applyUserActions([
-    [
+  const actions = [];
+  if (Object.keys(updates).length) {
+    actions.push([
       "UpdateRecord",
       table.sourceTable,
       sourceId,
       updates,
-    ],
-  ]);
+    ]);
+  }
+  actions.push(...linkedActions);
+  await grist.docApi.applyUserActions(actions);
 
   return {
     updated: true,
-    groupe: targetGroupe,
+    groupe: nextGroupValue,
     zone: targetZone,
+    linkedUpdatedCount: linkedActions.length,
   };
+}
+
+export async function updatePlanningZoneFromZoneHeaderDrop({
+  sourceRowId,
+  targetZone,
+  targetZoneKey = "",
+  linkedRowIds = [],
+}) {
+  const table = APP_CONFIG.grist.planningTable;
+  if (!table?.sourceTable) {
+    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
+  }
+
+  const columns = table.columns || {};
+  const idCol = columns.id || "id";
+  const zoneCol = String(columns.zone || "Zone").trim();
+  const groupCol = String(columns.groupe || "Groupe").trim();
+  const typeDocCol = String(columns.typeDoc || "Type_doc").trim();
+  const projectCol = String(columns.projectLink || columns.nomProjet || "NomProjet").trim();
+  const sourceId = Number(sourceRowId);
+  const normalizedTargetZoneKey = toText(targetZoneKey);
+  const normalizedZoneFromLabel = normalizeZoneValueForStorage(targetZone);
+  const isSansZoneTarget =
+    normalizedTargetZoneKey === "" &&
+    (normalizedZoneFromLabel === "" ||
+      toText(targetZone).toLocaleLowerCase("fr") === "sans zone");
+  const normalizedZone = isSansZoneTarget ? "" : normalizedZoneFromLabel;
+
+  if (!Number.isInteger(sourceId) || sourceId <= 0) {
+    throw new Error("Ligne source Planning_Projet invalide.");
+  }
+  if (!normalizedZone && !isSansZoneTarget) {
+    throw new Error("Zone cible invalide.");
+  }
+
+  const rows = await fetchTableRows(table.sourceTable);
+  const sourceRow = rows.find((row) => Number(row?.[idCol]) === sourceId) || null;
+  if (!sourceRow) {
+    throw new Error("Ligne source introuvable dans Planning_Projet.");
+  }
+
+  const sourceZone = normalizeZoneValueForStorage(sourceRow[zoneCol]);
+  const sourceGroup = toText(sourceRow[groupCol]);
+  const sourceTypeDoc = toText(sourceRow[typeDocCol]);
+  const sourceProject = toText(sourceRow[projectCol]);
+  const shouldAssignAutoGroup = isCoffrageTypeDoc(sourceTypeDoc);
+
+  let nextGroupValue = sourceGroup;
+  if (isSansZoneTarget) {
+    nextGroupValue = "";
+  } else if (shouldAssignAutoGroup) {
+    const usedGroupNumbers = new Set();
+    for (const row of rows) {
+      const rowId = Number(row?.[idCol]);
+      if (rowId === sourceId) continue;
+
+      const rowZone = toText(row?.[zoneCol]);
+      if (rowZone !== normalizedZone) continue;
+
+      const rowProject = toText(row?.[projectCol]);
+      if (sourceProject && rowProject && rowProject !== sourceProject) continue;
+
+      const groupNum = Number(toText(row?.[groupCol]));
+      if (Number.isInteger(groupNum) && groupNum > 0) {
+        usedGroupNumbers.add(groupNum);
+      }
+    }
+
+    let candidate = 1;
+    while (usedGroupNumbers.has(candidate)) {
+      candidate += 1;
+    }
+    nextGroupValue = String(candidate);
+  }
+
+  const updates = {};
+  if (sourceZone !== normalizedZone) {
+    updates[zoneCol] = normalizedZone;
+  }
+  if ((isSansZoneTarget || shouldAssignAutoGroup) && sourceGroup !== nextGroupValue) {
+    updates[groupCol] = nextGroupValue;
+  }
+
+  const normalizedLinkedIds = Array.isArray(linkedRowIds)
+    ? [...new Set(
+      linkedRowIds
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0 && value !== sourceId)
+    )]
+    : [];
+
+  const linkedActions = [];
+  normalizedLinkedIds.forEach((linkedId) => {
+    const linkedRow = rows.find((row) => Number(row?.[idCol]) === linkedId) || null;
+    if (!linkedRow) return;
+
+    const linkedTypeDoc = toText(linkedRow[typeDocCol]);
+    if (!isArmaturesTypeDoc(linkedTypeDoc)) return;
+
+    const linkedZone = normalizeZoneValueForStorage(linkedRow[zoneCol]);
+    const linkedGroup = toText(linkedRow[groupCol]);
+    const linkedUpdates = {};
+    if (linkedZone !== normalizedZone) linkedUpdates[zoneCol] = normalizedZone;
+    if (linkedGroup !== nextGroupValue) linkedUpdates[groupCol] = nextGroupValue;
+    if (!Object.keys(linkedUpdates).length) return;
+
+    linkedActions.push([
+      "UpdateRecord",
+      table.sourceTable,
+      linkedId,
+      linkedUpdates,
+    ]);
+  });
+
+  if (!Object.keys(updates).length && !linkedActions.length) {
+    return {
+      updated: false,
+      zone: normalizedZone,
+      groupe: sourceGroup,
+      linkedUpdatedCount: 0,
+    };
+  }
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  const actions = [];
+  if (Object.keys(updates).length) {
+    actions.push([
+      "UpdateRecord",
+      table.sourceTable,
+      sourceId,
+      updates,
+    ]);
+  }
+  actions.push(...linkedActions);
+  await grist.docApi.applyUserActions(actions);
+
+  return {
+    updated: true,
+    zone: normalizedZone,
+    groupe: nextGroupValue,
+    linkedUpdatedCount: linkedActions.length,
+  };
+}
+
+export async function addPlanningZoneRow({
+  projectName,
+  zoneName,
+}) {
+  const table = APP_CONFIG.grist.planningTable;
+  if (!table?.sourceTable) {
+    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
+  }
+
+  const columns = table.columns || {};
+  const normalizedProject = toText(projectName);
+  const normalizedZone = toText(zoneName);
+
+  if (!normalizedProject) {
+    throw new Error("Projet obligatoire pour ajouter une zone.");
+  }
+  if (!normalizedZone) {
+    throw new Error("Nom de zone obligatoire.");
+  }
+
+  const id2Col = String(columns.id2 || "ID2").trim();
+  const tachesCol = String(columns.taches || columns.tacheAlt || "Taches").trim();
+  const typeDocCol = String(columns.typeDoc || "Type_doc").trim();
+  const lignePlanningCol = String(columns.lignePlanning || "Ligne_planning").trim();
+  const dateLimiteCol = String(columns.dateLimite || "Date_limite").trim();
+  const duree1Col = String(columns.duree1 || "Duree_1").trim();
+  const diffCoffrageCol = String(columns.diffCoffrage || "Diff_coffrage").trim();
+  const duree2Col = String(columns.duree2 || "Duree_2").trim();
+  const diffArmatureCol = String(columns.diffArmature || "Diff_armature").trim();
+  const duree3Col = String(columns.duree3 || "Duree_3").trim();
+  const demarrageCol = String(columns.demarragesTravaux || "Demarrages_travaux").trim();
+  const retardsCol = String(columns.retards || "Retards").trim();
+  const indiceCol = String(columns.indice || "Indice").trim();
+  const realiseCol = String(columns.realise || "Realise").trim();
+  const projectCol = String(columns.projectLink || columns.nomProjet || "NomProjet").trim();
+  const groupCol = String(columns.groupe || "Groupe").trim();
+  const zoneCol = String(columns.zone || "Zone").trim();
+
+  const fields = {
+    [id2Col]: "",
+    [tachesCol]: "",
+    [typeDocCol]: "",
+    [lignePlanningCol]: 0,
+    [dateLimiteCol]: null,
+    [duree1Col]: 0,
+    [diffCoffrageCol]: null,
+    [duree2Col]: 0,
+    [diffArmatureCol]: null,
+    [duree3Col]: 0,
+    [demarrageCol]: null,
+    [retardsCol]: 0,
+    [indiceCol]: "",
+    [realiseCol]: 0,
+    [projectCol]: normalizedProject,
+    [groupCol]: "",
+    [zoneCol]: normalizedZone,
+  };
+
+  // Colonne optionnelle presente sur certaines bases.
+  fields.Prev_Indice_0 = null;
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  const addAction = ["AddRecord", table.sourceTable, null, fields];
+  try {
+    await grist.docApi.applyUserActions([addAction]);
+  } catch (error) {
+    const message = String(error?.message ?? "");
+    const canRetryWithoutPrevIndice =
+      message.toLowerCase().includes("prev_indice_0") ||
+      message.toLowerCase().includes("unknown column");
+    if (!canRetryWithoutPrevIndice) {
+      throw error;
+    }
+
+    // Si la colonne optionnelle n'existe pas, on retente sans celle-ci.
+    delete fields.Prev_Indice_0;
+    await grist.docApi.applyUserActions([["AddRecord", table.sourceTable, null, fields]]);
+  }
 }
 
 /* ---------- Projets ---------- */

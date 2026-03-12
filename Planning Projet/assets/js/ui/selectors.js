@@ -1,6 +1,14 @@
 import { state, setState } from "../state.js";
 
-function fillSelect(selectEl, options, placeholder, selectedValue = "") {
+const ADD_ZONE_OPTION_VALUE = "__add_zone__";
+
+function fillSelect(
+  selectEl,
+  options,
+  placeholder,
+  selectedValue = "",
+  { addZoneOption = false } = {}
+) {
   selectEl.innerHTML = "";
 
   const first = document.createElement("option");
@@ -13,6 +21,19 @@ function fillSelect(selectEl, options, placeholder, selectedValue = "") {
     option.value = value;
     option.textContent = value;
     selectEl.appendChild(option);
+  }
+
+  if (addZoneOption) {
+    const sep = document.createElement("option");
+    sep.value = "";
+    sep.textContent = "--------------------";
+    sep.disabled = true;
+    selectEl.appendChild(sep);
+
+    const addZoneOptionEl = document.createElement("option");
+    addZoneOptionEl.value = ADD_ZONE_OPTION_VALUE;
+    addZoneOptionEl.textContent = "Ajouter Zone";
+    selectEl.appendChild(addZoneOptionEl);
   }
 
   selectEl.value = selectedValue;
@@ -46,16 +67,22 @@ export function initProjectSelector(projectOptions, { onChange } = {}) {
   onChange?.({ ...state });
 }
 
-export function initZoneSelector({ onChange } = {}) {
+export function initZoneSelector({ onChange, onAddZone } = {}) {
   const zoneSelect = document.getElementById("zoneDropdown");
   if (!zoneSelect) {
     throw new Error("Dropdown zone introuvable (#zoneDropdown).");
   }
 
   zoneSelect.disabled = true;
-  fillSelect(zoneSelect, [], "Toutes les zones", "");
+  fillSelect(zoneSelect, [], "Toutes les zones", "", { addZoneOption: true });
 
   zoneSelect.addEventListener("change", () => {
+    if (zoneSelect.value === ADD_ZONE_OPTION_VALUE) {
+      zoneSelect.value = state.selectedZone || "";
+      onAddZone?.({ ...state });
+      return;
+    }
+
     setState({ selectedZone: zoneSelect.value });
     onChange?.({ ...state });
   });
@@ -69,6 +96,8 @@ export function updateZoneSelector(
   if (!zoneSelect) return;
 
   const options = Array.isArray(zoneOptions) ? zoneOptions : [];
-  fillSelect(zoneSelect, options, "Toutes les zones", selectedValue);
+  fillSelect(zoneSelect, options, "Toutes les zones", selectedValue, {
+    addZoneOption: true,
+  });
   zoneSelect.disabled = !enabled;
 }

@@ -419,8 +419,8 @@ function buildGroupCompositeKey(zoneKey, groupeKey) {
 
 function formatZoneHeaderLabel(zoneLabel) {
   const normalized = String(zoneLabel ?? "").trim();
-  if (!normalized) return "Batiment Sans zone";
-  return `Batiment ${normalized}`;
+  if (!normalized) return "Sans zone";
+  return normalized;
 }
 
 export function buildTimelineDataFromPlanningRows(
@@ -545,6 +545,14 @@ export function buildTimelineDataFromPlanningRows(
   if (selectedZoneKey) {
     rows = rows.filter((row) => row.zoneKey === selectedZoneKey);
   }
+
+  const zoneCatalog = new Map();
+  rows.forEach((row) => {
+    const zoneKey = String(row.zoneKey || "");
+    if (!zoneCatalog.has(zoneKey)) {
+      zoneCatalog.set(zoneKey, String(row.zone || ""));
+    }
+  });
 
   rows = rows.filter((row) => isAllowedTypeDoc(row.typeDoc));
 
@@ -677,48 +685,33 @@ export function buildTimelineDataFromPlanningRows(
   });
   rows.push(...ungroupedRows);
 
+  const rowsByZone = new Map();
+  rows.forEach((row) => {
+    const zoneKey = String(row.zoneKey || "");
+    if (!rowsByZone.has(zoneKey)) {
+      rowsByZone.set(zoneKey, []);
+    }
+    rowsByZone.get(zoneKey).push(row);
+  });
+
+  for (const [zoneKey, zoneRows] of rowsByZone.entries()) {
+    if (zoneCatalog.has(zoneKey)) continue;
+    zoneCatalog.set(zoneKey, String(zoneRows?.[0]?.zone || ""));
+  }
+
+  const orderedZoneKeys = [...new Set([...zoneCatalog.keys(), ...rowsByZone.keys()])].sort(
+    compareZoneKeys
+  );
+
   const groups = [];
   const items = [];
-  let previousZoneKey = "__initial__";
   let groupSortIndex = 0;
   let zoneHeaderIndex = 0;
+  let fallbackRowIndex = 0;
 
-  rows.forEach((row, index) => {
-    const rowZoneKey = String(row.zoneKey || "");
-    if (rowZoneKey !== previousZoneKey) {
-      previousZoneKey = rowZoneKey;
-      const zoneHeaderId = `zone-${zoneHeaderIndex}-${rowZoneKey || "sans-zone"}`;
-      zoneHeaderIndex += 1;
-
-      groups.push({
-        id: zoneHeaderId,
-        rowId: null,
-        isZoneHeader: true,
-        zoneLabel: row.zone || "",
-        zoneHeaderLabel: formatZoneHeaderLabel(row.zone || ""),
-        className: "zone-header-group",
-        sortIndex: groupSortIndex++,
-        sortLignePlanning: Number.MIN_SAFE_INTEGER,
-        sortID2: Number.MIN_SAFE_INTEGER,
-        meta: {
-          isZoneHeader: true,
-          zoneKey: rowZoneKey,
-          zoneLabel: row.zone || "",
-        },
-      });
-
-      items.push({
-        id: `${zoneHeaderId}-bg`,
-        group: zoneHeaderId,
-        start: new Date(1900, 0, 1),
-        end: new Date(2200, 0, 1),
-        type: "background",
-        className: "zone-header-fill",
-        content: "",
-      });
-    }
-
-    const groupId = `g-${row.rowId ?? `${row.id2 || "x"}-${row.lignePlanning || "x"}-${index}`}`;
+  const appendPlanningRow = (row) => {
+    const rowFallbackIndex = fallbackRowIndex++;
+    const groupId = `g-${row.rowId ?? `${row.id2 || "x"}-${row.lignePlanning || "x"}-${rowFallbackIndex}`}`;
 
     // Groupe avec champs de tri explicites (pour vis-timeline)
     groups.push({
@@ -826,11 +819,49 @@ export function buildTimelineDataFromPlanningRows(
     }
 
     // Pas de barre "Retard" dans la timeline: affichage en colonne dédiée.
+  };
+
+  orderedZoneKeys.forEach((zoneKey) => {
+    const zoneRows = rowsByZone.get(zoneKey) || [];
+    const zoneLabel = String(zoneCatalog.get(zoneKey) ?? zoneRows?.[0]?.zone ?? "");
+    const zoneHeaderId = `zone-${zoneHeaderIndex}-${zoneKey || "sans-zone"}`;
+    zoneHeaderIndex += 1;
+
+    groups.push({
+      id: zoneHeaderId,
+      rowId: null,
+      isZoneHeader: true,
+      zoneLabel,
+      zoneHeaderLabel: formatZoneHeaderLabel(zoneLabel),
+      className: "zone-header-group",
+      sortIndex: groupSortIndex++,
+      sortLignePlanning: Number.MIN_SAFE_INTEGER,
+      sortID2: Number.MIN_SAFE_INTEGER,
+      meta: {
+        isZoneHeader: true,
+        zoneKey,
+        zoneLabel,
+      },
+    });
+
+    items.push({
+      id: `${zoneHeaderId}-bg`,
+      group: zoneHeaderId,
+      start: new Date(1900, 0, 1),
+      end: new Date(2200, 0, 1),
+      type: "background",
+      className: "zone-header-fill",
+      content: "",
+    });
+
+    zoneRows.forEach((row) => {
+      appendPlanningRow(row);
+    });
   });
 
   return {
     groups,
     items,
-    rowCount: rows.length,
+    rowCount: rows.length || orderedZoneKeys.length,
   };
 }

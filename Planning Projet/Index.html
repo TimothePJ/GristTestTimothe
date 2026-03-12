@@ -63,7 +63,7 @@
       <div class="hcol c-duration-1">Dur&eacute;e</div>
       <div class="hcol c-end">Fin</div>
       <div class="hcol c-duration-2">Dur&eacute;e</div>
-      <div class="hcol c-demarrage">D&eacute;marrage</div>
+      <div class="hcol c-demarrage">D&eacute;marrage<br>Travaux</div>
       <div class="hcol c-indice">Indice</div>
       <div class="hcol c-retards">Retard<br>(j)</div>
     </div>
@@ -73,6 +73,52 @@
   <!-- Timeline -->
   <div id="timelineWrapper">
     <div id="planningTimeline"></div>
+  </div>
+
+  <div id="addZoneModal" class="add-zone-modal" hidden aria-hidden="true">
+    <div class="add-zone-modal__backdrop" data-zone-modal-close></div>
+    <div
+      class="add-zone-modal__panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="addZoneModalTitle"
+    >
+      <div class="add-zone-modal__header">
+        <div class="add-zone-modal__title-wrap">
+          <h2 id="addZoneModalTitle">Ajouter une zone</h2>
+        </div>
+        <button
+          id="addZoneModalCloseBtn"
+          class="add-zone-modal__close-btn"
+          type="button"
+          aria-label="Fermer"
+        >x</button>
+      </div>
+
+      <form id="addZoneForm" class="add-zone-modal__form" autocomplete="off">
+        <label for="addZoneProjectName">Projet</label>
+        <input id="addZoneProjectName" type="text" readonly />
+
+        <label for="addZoneName">Nom de zone</label>
+        <input
+          id="addZoneName"
+          type="text"
+          placeholder="Ex: G2 / Zone Nord"
+          maxlength="80"
+        />
+
+        <p id="addZoneModalHint" class="add-zone-modal__hint"></p>
+
+        <div class="add-zone-modal__actions">
+          <button id="addZoneCancelBtn" type="button" class="btn-secondary">
+            Annuler
+          </button>
+          <button id="addZoneSubmitBtn" type="submit" class="btn-primary">
+            Creer la zone
+          </button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <!-- Statut / messages -->

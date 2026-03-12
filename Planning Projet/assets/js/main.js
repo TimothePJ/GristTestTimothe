@@ -8,6 +8,8 @@ import {
   updatePlanningDurationAndLeftDate,
   updatePlanningFromMsProjectDrop,
   updatePlanningGroupZoneFromPlanningDrop,
+  updatePlanningZoneFromZoneHeaderDrop,
+  addPlanningZoneRow,
   toText,
 } from "./services/gristService.js";
 import { buildTimelineDataFromPlanningRows } from "./services/planningService.js";
@@ -27,12 +29,136 @@ import {
 
 let toolbarBound = false;
 let refreshInProgress = false;
+let addZoneModalBound = false;
+let addZoneModalOpen = false;
 
 function setPlanningStatus(message = "") {
   const el = document.getElementById("planningStatus");
   if (el) {
     el.textContent = message;
   }
+}
+
+function getAddZoneModalElements() {
+  const root = document.getElementById("addZoneModal");
+  if (!(root instanceof HTMLElement)) return null;
+
+  return {
+    root,
+    closeBtn: document.getElementById("addZoneModalCloseBtn"),
+    cancelBtn: document.getElementById("addZoneCancelBtn"),
+    form: document.getElementById("addZoneForm"),
+    projectName: document.getElementById("addZoneProjectName"),
+    zoneName: document.getElementById("addZoneName"),
+    hint: document.getElementById("addZoneModalHint"),
+  };
+}
+
+function setAddZoneModalHint(message = "") {
+  const els = getAddZoneModalElements();
+  if (!els || !(els.hint instanceof HTMLElement)) return;
+  els.hint.textContent = String(message ?? "").trim();
+}
+
+function closeAddZoneModal() {
+  const els = getAddZoneModalElements();
+  if (!els) return;
+
+  addZoneModalOpen = false;
+  els.root.classList.remove("is-open");
+  els.root.setAttribute("aria-hidden", "true");
+  els.root.hidden = true;
+  document.body.classList.remove("is-add-zone-modal-open");
+  setAddZoneModalHint("");
+}
+
+function openAddZoneModal() {
+  const els = getAddZoneModalElements();
+  if (!els) return;
+
+  if (els.projectName instanceof HTMLInputElement) {
+    els.projectName.value = state.selectedProject || "";
+  }
+  if (els.zoneName instanceof HTMLInputElement) {
+    els.zoneName.value = "";
+  }
+  setAddZoneModalHint("");
+
+  els.root.hidden = false;
+  els.root.setAttribute("aria-hidden", "false");
+  addZoneModalOpen = true;
+  document.body.classList.add("is-add-zone-modal-open");
+  requestAnimationFrame(() => {
+    els.root.classList.add("is-open");
+    if (els.zoneName instanceof HTMLInputElement) {
+      els.zoneName.focus();
+    }
+  });
+}
+
+function bindAddZoneModal() {
+  if (addZoneModalBound) return;
+  const els = getAddZoneModalElements();
+  if (!els) return;
+  addZoneModalBound = true;
+
+  els.root.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest("[data-zone-modal-close]")) {
+      closeAddZoneModal();
+    }
+  });
+
+  if (els.closeBtn instanceof HTMLElement) {
+    els.closeBtn.addEventListener("click", () => closeAddZoneModal());
+  }
+  if (els.cancelBtn instanceof HTMLElement) {
+    els.cancelBtn.addEventListener("click", () => closeAddZoneModal());
+  }
+
+  if (els.form instanceof HTMLFormElement) {
+    els.form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const projectName = state.selectedProject || "";
+      const zoneValue =
+        els.zoneName instanceof HTMLInputElement ? els.zoneName.value : "";
+      const normalizedZone = toText(zoneValue);
+
+      if (!projectName) {
+        setAddZoneModalHint("Selectionne d'abord un projet.");
+        return;
+      }
+      if (!normalizedZone) {
+        setAddZoneModalHint("Renseigne un nom de zone.");
+        if (els.zoneName instanceof HTMLInputElement) {
+          els.zoneName.focus();
+        }
+        return;
+      }
+
+      try {
+        setAddZoneModalHint("");
+        await addPlanningZoneRow({
+          projectName,
+          zoneName: normalizedZone,
+        });
+        closeAddZoneModal();
+        await refreshPlanning();
+        setPlanningStatus(`Zone ajoutee: ${normalizedZone}`);
+      } catch (error) {
+        setAddZoneModalHint(`Erreur: ${error.message}`);
+      }
+    });
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (!addZoneModalOpen) return;
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    closeAddZoneModal();
+  });
 }
 
 function parseIsoDate(isoDate) {
@@ -211,56 +337,104 @@ async function handleMsProjectRowDrop({
 
 async function handlePlanningRowDrop({
   sourcePlanningRowId,
-  targetPlanningRowId,
+  targetPlanningRowId = null,
   payload = null,
   targetTask = "",
   targetGroupe = "",
   targetZone = "",
+  targetZoneKey = "",
 }) {
   const sourceRowId = Number(sourcePlanningRowId);
   const destinationRowId = Number(targetPlanningRowId);
+  const hasRowDestination =
+    Number.isInteger(destinationRowId) && destinationRowId > 0;
+  const zoneLabel = toText(targetZone);
+  const zoneKey = toText(targetZoneKey);
+  const linkedArmatureRowIds = Array.isArray(payload?.linkedArmatureRowIds)
+    ? [...new Set(
+      payload.linkedArmatureRowIds
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0 && value !== sourceRowId)
+    )]
+    : [];
+
   if (!Number.isInteger(sourceRowId) || sourceRowId <= 0) {
     throw new Error("Ligne source planning invalide.");
   }
-  if (!Number.isInteger(destinationRowId) || destinationRowId <= 0) {
-    throw new Error("Ligne cible planning invalide.");
+  if (!hasRowDestination && !zoneLabel) {
+    throw new Error("Cible planning invalide.");
   }
-  if (sourceRowId === destinationRowId) {
+  if (hasRowDestination && sourceRowId === destinationRowId) {
     return;
   }
 
   const taskSuffix = toText(targetTask) ? ` (${toText(targetTask)})` : "";
-  const groupeLabel = toText(targetGroupe);
-  const zoneLabel = toText(targetZone);
-  const targetLabelParts = [];
-  if (groupeLabel) targetLabelParts.push(`Groupe=${groupeLabel}`);
-  if (zoneLabel) targetLabelParts.push(`Zone=${zoneLabel}`);
-  const targetLabel = targetLabelParts.length
-    ? targetLabelParts.join(" | ")
-    : "ligne cible";
+  const unchangedTask = toText(payload?.task);
 
   try {
-    setPlanningStatus(`Deplacement ligne planning vers ${targetLabel}${taskSuffix}...`);
-    const result = await updatePlanningGroupZoneFromPlanningDrop({
-      sourceRowId,
-      targetRowId: destinationRowId,
-    });
+    if (hasRowDestination) {
+      const groupeLabel = toText(targetGroupe);
+      const targetLabelParts = [];
+      if (groupeLabel) targetLabelParts.push(`Groupe=${groupeLabel}`);
+      if (zoneLabel) targetLabelParts.push(`Zone=${zoneLabel}`);
+      const targetLabel = targetLabelParts.length
+        ? targetLabelParts.join(" | ")
+        : "ligne cible";
 
-    if (result?.updated) {
-      await refreshPlanning();
-      const appliedParts = [];
-      if (toText(result.groupe)) appliedParts.push(`Groupe=${toText(result.groupe)}`);
-      if (toText(result.zone)) appliedParts.push(`Zone=${toText(result.zone)}`);
-      const appliedLabel = appliedParts.length ? appliedParts.join(" | ") : targetLabel;
-      setPlanningStatus(`Deplacement applique: ${appliedLabel}${taskSuffix}`);
+      setPlanningStatus(`Deplacement ligne planning vers ${targetLabel}${taskSuffix}...`);
+      const result = await updatePlanningGroupZoneFromPlanningDrop({
+        sourceRowId,
+        targetRowId: destinationRowId,
+        linkedRowIds: linkedArmatureRowIds,
+      });
+
+      if (result?.updated) {
+        await refreshPlanning();
+        const appliedParts = [];
+        if (toText(result.groupe)) appliedParts.push(`Groupe=${toText(result.groupe)}`);
+        if (toText(result.zone)) appliedParts.push(`Zone=${toText(result.zone)}`);
+        if (Number(result?.linkedUpdatedCount) > 0) {
+          appliedParts.push(`Armatures suiveuses=${Number(result.linkedUpdatedCount)}`);
+        }
+        const appliedLabel = appliedParts.length ? appliedParts.join(" | ") : targetLabel;
+        setPlanningStatus(`Deplacement applique: ${appliedLabel}${taskSuffix}`);
+        return;
+      }
+
+      if (unchangedTask) {
+        setPlanningStatus(`Aucun changement (meme Groupe/Zone) pour ${unchangedTask}.`);
+      } else {
+        setPlanningStatus("Aucun changement (meme Groupe/Zone).");
+      }
       return;
     }
 
-    const unchangedTask = toText(payload?.task);
+    const zoneTargetLabel = zoneLabel || zoneKey || "zone cible";
+    setPlanningStatus(`Deplacement ligne planning vers Zone=${zoneTargetLabel}${taskSuffix}...`);
+    const zoneResult = await updatePlanningZoneFromZoneHeaderDrop({
+      sourceRowId,
+      targetZone: zoneTargetLabel,
+      targetZoneKey: zoneKey,
+      linkedRowIds: linkedArmatureRowIds,
+    });
+
+    if (zoneResult?.updated) {
+      await refreshPlanning();
+      const appliedZoneLabel = toText(zoneResult?.zone) || "Sans zone";
+      const zoneGroupLabel = toText(zoneResult?.groupe);
+      const linkedCount = Number(zoneResult?.linkedUpdatedCount) || 0;
+      const groupSuffix = zoneGroupLabel ? ` | Groupe=${zoneGroupLabel}` : "";
+      const linkedSuffix = linkedCount > 0 ? ` | Armatures suiveuses=${linkedCount}` : "";
+      setPlanningStatus(
+        `Deplacement applique: Zone=${appliedZoneLabel}${groupSuffix}${linkedSuffix}${taskSuffix}`
+      );
+      return;
+    }
+
     if (unchangedTask) {
-      setPlanningStatus(`Aucun changement (meme Groupe/Zone) pour ${unchangedTask}.`);
+      setPlanningStatus(`Aucun changement (deja dans Zone=${zoneTargetLabel}) pour ${unchangedTask}.`);
     } else {
-      setPlanningStatus("Aucun changement (meme Groupe/Zone).");
+      setPlanningStatus(`Aucun changement (deja dans Zone=${zoneTargetLabel}).`);
     }
   } catch (error) {
     setPlanningStatus(`Erreur drop Planning : ${error.message}`);
@@ -374,6 +548,7 @@ async function bootstrap() {
     setState({ selectedProject: "", selectedZone: "" });
 
     initGrist();
+    bindAddZoneModal();
     setPlanningDurationEditHandler(handleDurationCellEdit);
     setPlanningMsProjectDropHandler(handleMsProjectRowDrop);
     setPlanningRowDropHandler(handlePlanningRowDrop);
@@ -382,6 +557,9 @@ async function bootstrap() {
 
     initZoneSelector({
       onChange: handleZoneChange,
+      onAddZone: () => {
+        openAddZoneModal();
+      },
     });
 
     initProjectSelector(projectOptions, {
