@@ -28,6 +28,10 @@ let planningRowDropBound = false;
 let planningRowDropHandler = null;
 let activePlanningDropRowEl = null;
 let activePlanningDropZoneEl = null;
+let activePlanningDropPosition = "";
+let activePlanningDropPreviewRowEl = null;
+let activePlanningDropPreviewLabelEl = null;
+let planningDropPlacementOverlayEl = null;
 let planningDragAutoScrollRafId = 0;
 let planningDragAutoScrollVelocityY = 0;
 let planningDragAutoScrollTargetEl = null;
@@ -1098,6 +1102,7 @@ function bindGlobalPlanningRowDragging() {
     (event) => {
       if (!hasPlanningRowPayloadType(event.dataTransfer)) return;
       updatePlanningDragAutoScrollFromPointer(event.clientX, event.clientY);
+      updatePlanningDropTargetPreview(event);
     },
     true
   );
@@ -1182,10 +1187,68 @@ function extractPlanningRowPayloadFromDataTransfer(dataTransfer) {
   }
 }
 
+function normalizePlanningDropPosition(position) {
+  return position === "before" ? "before" : "after";
+}
+
+function getPlanningDropEventClientY(eventLike) {
+  if (!eventLike) return NaN;
+
+  const directClientY = Number(eventLike.clientY);
+  if (Number.isFinite(directClientY)) return directClientY;
+
+  const sourceEvent = eventLike?.srcEvent || eventLike?.event || null;
+  const sourceClientY = Number(sourceEvent?.clientY);
+  if (Number.isFinite(sourceClientY)) return sourceClientY;
+
+  return NaN;
+}
+
+function getPlanningDropCandidateElements(containerEl) {
+  if (!(containerEl instanceof HTMLElement)) return [];
+  return Array.from(
+    containerEl.querySelectorAll(".zone-header-band, .group-row-grid.planning-draggable-row")
+  ).filter((element) => element instanceof HTMLElement);
+}
+
+function findPlanningDropCandidateAtClientY(containerEl, clientY) {
+  if (!(containerEl instanceof HTMLElement)) return null;
+
+  const pointerY = Number(clientY);
+  if (!Number.isFinite(pointerY)) return null;
+
+  const candidates = getPlanningDropCandidateElements(containerEl);
+  for (const candidate of candidates) {
+    const rect = candidate.getBoundingClientRect();
+    if (pointerY >= rect.top && pointerY <= rect.bottom) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function resolvePlanningRowDropPosition(rowEl, clientY) {
+  if (!(rowEl instanceof HTMLElement)) return "after";
+
+  const pointerY = Number(clientY);
+  if (!Number.isFinite(pointerY)) return "after";
+
+  const rect = rowEl.getBoundingClientRect();
+  if (!Number.isFinite(rect.top) || !Number.isFinite(rect.height) || rect.height <= 0) {
+    return "after";
+  }
+
+  const midpoint = rect.top + (rect.height / 2);
+  return pointerY < midpoint ? "before" : "after";
+}
+
 function clearPlanningRowDropTarget(containerEl = null) {
   if (activePlanningDropRowEl && activePlanningDropRowEl.isConnected) {
     activePlanningDropRowEl.classList.remove(
       "is-planning-row-drop-target",
+      "is-planning-row-drop-before",
+      "is-planning-row-drop-after",
       "is-planning-row-drop-committing"
     );
   }
@@ -1195,9 +1258,19 @@ function clearPlanningRowDropTarget(containerEl = null) {
       "is-planning-zone-drop-committing"
     );
   }
+  if (activePlanningDropPreviewRowEl && activePlanningDropPreviewRowEl.isConnected) {
+    activePlanningDropPreviewRowEl.classList.remove("is-planning-drop-placement-row");
+  }
+  if (activePlanningDropPreviewLabelEl && activePlanningDropPreviewLabelEl.isConnected) {
+    activePlanningDropPreviewLabelEl.classList.remove("is-planning-drop-placement-label");
+  }
 
   activePlanningDropRowEl = null;
   activePlanningDropZoneEl = null;
+  activePlanningDropPosition = "";
+  activePlanningDropPreviewRowEl = null;
+  activePlanningDropPreviewLabelEl = null;
+  hidePlanningDropPlacementOverlay();
 
   const effectiveContainer =
     containerEl instanceof HTMLElement
@@ -1208,7 +1281,148 @@ function clearPlanningRowDropTarget(containerEl = null) {
   }
 }
 
-function setPlanningRowDropTarget(rowEl, containerEl) {
+function ensurePlanningDropPlacementOverlay(containerEl) {
+  if (
+    planningDropPlacementOverlayEl instanceof HTMLElement &&
+    planningDropPlacementOverlayEl.isConnected
+  ) {
+    return planningDropPlacementOverlayEl;
+  }
+
+  if (planningDropPlacementOverlayEl instanceof HTMLElement && planningDropPlacementOverlayEl.isConnected) {
+    planningDropPlacementOverlayEl.remove();
+  }
+
+  const overlayEl = document.createElement("div");
+  overlayEl.className = "planning-drop-placement-overlay";
+  overlayEl.setAttribute("aria-hidden", "true");
+  document.body.appendChild(overlayEl);
+  planningDropPlacementOverlayEl = overlayEl;
+  return planningDropPlacementOverlayEl;
+}
+
+function hidePlanningDropPlacementOverlay() {
+  if (!(planningDropPlacementOverlayEl instanceof HTMLElement)) return;
+  planningDropPlacementOverlayEl.classList.remove(
+    "is-visible",
+    "is-before",
+    "is-after",
+    "is-coffrage"
+  );
+  planningDropPlacementOverlayEl.style.removeProperty("left");
+  planningDropPlacementOverlayEl.style.removeProperty("top");
+  planningDropPlacementOverlayEl.style.removeProperty("width");
+  planningDropPlacementOverlayEl.style.removeProperty("height");
+}
+
+function setPlanningDropPlacementOverlay(rowEl, containerEl, position = "after") {
+  if (!(rowEl instanceof HTMLElement) || !(containerEl instanceof HTMLElement)) {
+    hidePlanningDropPlacementOverlay();
+    return;
+  }
+
+  const overlayEl = ensurePlanningDropPlacementOverlay(containerEl);
+  if (!(overlayEl instanceof HTMLElement)) return;
+
+  const rowRect = rowEl.getBoundingClientRect();
+  const containerRect = containerEl.getBoundingClientRect();
+  const rowHeight = Math.max(1, Math.round(rowRect.height));
+  const top = Math.round(rowRect.top);
+  const left = Math.round(containerRect.left);
+  const width = Math.max(1, Math.round(containerRect.width));
+  const normalizedPosition = normalizePlanningDropPosition(position);
+
+  overlayEl.style.left = `${left}px`;
+  overlayEl.style.top = `${top}px`;
+  overlayEl.style.width = `${width}px`;
+  overlayEl.style.height = `${rowHeight}px`;
+  overlayEl.classList.add("is-visible");
+  overlayEl.classList.toggle("is-before", normalizedPosition === "before");
+  overlayEl.classList.toggle("is-after", normalizedPosition !== "before");
+  overlayEl.classList.toggle("is-coffrage", rowEl.classList.contains("row-type-coffrage"));
+}
+
+function updatePlanningDropTargetPreview(eventLike) {
+  const containerEl =
+    planningRowDragContainerEl instanceof HTMLElement
+      ? planningRowDragContainerEl
+      : document.getElementById("planningTimeline");
+  if (!(containerEl instanceof HTMLElement)) return;
+
+  const clientX = Number(eventLike?.clientX);
+  const clientY = getPlanningDropEventClientY(eventLike);
+  const containerRect = containerEl.getBoundingClientRect();
+  const isInsideContainer =
+    Number.isFinite(clientX) &&
+    Number.isFinite(clientY) &&
+    clientX >= containerRect.left &&
+    clientX <= containerRect.right &&
+    clientY >= containerRect.top &&
+    clientY <= containerRect.bottom;
+
+  if (!isInsideContainer) {
+    clearPlanningRowDropTarget(containerEl);
+    return;
+  }
+
+  const candidateEl = findPlanningDropCandidateAtClientY(containerEl, clientY);
+  if (
+    candidateEl instanceof HTMLElement &&
+    candidateEl.classList.contains("group-row-grid")
+  ) {
+    const targetRowId = Number(candidateEl.dataset.planningRowId || "");
+    const sourceRowId = Number(activePlanningDraggedRowEl?.dataset?.planningRowId || "");
+    if (
+      Number.isInteger(targetRowId) &&
+      targetRowId > 0 &&
+      targetRowId !== sourceRowId
+    ) {
+      setPlanningRowDropTarget(
+        candidateEl,
+        containerEl,
+        resolvePlanningRowDropPosition(candidateEl, clientY)
+      );
+      return;
+    }
+  }
+
+  if (
+    candidateEl instanceof HTMLElement &&
+    candidateEl.classList.contains("zone-header-band")
+  ) {
+    setPlanningZoneDropTarget(candidateEl, containerEl);
+    return;
+  }
+
+  clearPlanningRowDropTarget(containerEl);
+}
+
+function setPlanningDropPreviewRow(rowEl) {
+  if (activePlanningDropPreviewRowEl === rowEl) return;
+
+  if (activePlanningDropPreviewRowEl && activePlanningDropPreviewRowEl.isConnected) {
+    activePlanningDropPreviewRowEl.classList.remove("is-planning-drop-placement-row");
+  }
+  if (activePlanningDropPreviewLabelEl && activePlanningDropPreviewLabelEl.isConnected) {
+    activePlanningDropPreviewLabelEl.classList.remove("is-planning-drop-placement-label");
+  }
+
+  activePlanningDropPreviewRowEl = rowEl instanceof HTMLElement ? rowEl : null;
+  if (activePlanningDropPreviewRowEl) {
+    activePlanningDropPreviewRowEl.classList.add("is-planning-drop-placement-row");
+    activePlanningDropPreviewLabelEl =
+      activePlanningDropPreviewRowEl.closest(".vis-label") instanceof HTMLElement
+        ? activePlanningDropPreviewRowEl.closest(".vis-label")
+        : null;
+    if (activePlanningDropPreviewLabelEl) {
+      activePlanningDropPreviewLabelEl.classList.add("is-planning-drop-placement-label");
+    }
+  } else {
+    activePlanningDropPreviewLabelEl = null;
+  }
+}
+
+function setPlanningRowDropTarget(rowEl, containerEl, position = "after") {
   if (!(containerEl instanceof HTMLElement)) return;
   containerEl.classList.add("is-planning-row-drop-active");
 
@@ -1220,12 +1434,26 @@ function setPlanningRowDropTarget(rowEl, containerEl) {
     return;
   }
 
-  if (activePlanningDropRowEl === rowEl) return;
+  const normalizedPosition = normalizePlanningDropPosition(position);
+  if (
+    activePlanningDropRowEl === rowEl &&
+    activePlanningDropPosition === normalizedPosition
+  ) {
+    return;
+  }
 
   clearPlanningRowDropTarget(containerEl);
   containerEl.classList.add("is-planning-row-drop-active");
   rowEl.classList.add("is-planning-row-drop-target");
+  rowEl.classList.add(
+    normalizedPosition === "before"
+      ? "is-planning-row-drop-before"
+      : "is-planning-row-drop-after"
+  );
   activePlanningDropRowEl = rowEl;
+  activePlanningDropPosition = normalizedPosition;
+  setPlanningDropPreviewRow(rowEl);
+  setPlanningDropPlacementOverlay(rowEl, containerEl, normalizedPosition);
 }
 
 function setPlanningZoneDropTarget(zoneEl, containerEl) {
@@ -1246,6 +1474,9 @@ function setPlanningZoneDropTarget(zoneEl, containerEl) {
   containerEl.classList.add("is-planning-row-drop-active");
   zoneEl.classList.add("is-planning-zone-drop-target");
   activePlanningDropZoneEl = zoneEl;
+  const previewRow = findPlanningZonePreviewRow(zoneEl, containerEl);
+  setPlanningDropPreviewRow(previewRow);
+  setPlanningDropPlacementOverlay(previewRow, containerEl, "after");
 }
 
 function findZoneHeaderBandElement(containerEl, zoneKey = "", zoneLabel = "") {
@@ -1279,7 +1510,45 @@ function findZoneHeaderBandElement(containerEl, zoneKey = "", zoneLabel = "") {
   return null;
 }
 
+function findPlanningZonePreviewRow(zoneEl, containerEl) {
+  if (!(zoneEl instanceof HTMLElement) || !(containerEl instanceof HTMLElement)) return null;
+
+  const orderedTargets = getPlanningDropCandidateElements(containerEl);
+  const zoneIndex = orderedTargets.findIndex((el) => el === zoneEl);
+  if (zoneIndex < 0) return null;
+
+  for (let i = zoneIndex + 1; i < orderedTargets.length; i += 1) {
+    const candidate = orderedTargets[i];
+    if (!(candidate instanceof HTMLElement)) continue;
+    if (candidate.classList.contains("zone-header-band")) {
+      return null;
+    }
+    if (candidate.classList.contains("group-row-grid")) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 function resolvePlanningZoneDropTarget(targetEl, containerEl, eventLike = null) {
+  const targetFromPointer = findPlanningDropCandidateAtClientY(
+    containerEl,
+    getPlanningDropEventClientY(eventLike)
+  );
+  if (
+    targetFromPointer instanceof HTMLElement &&
+    targetFromPointer.classList.contains("zone-header-band")
+  ) {
+    return {
+      zoneKey: String(targetFromPointer.dataset.planningZoneKey || "").trim(),
+      zoneLabel: String(
+        targetFromPointer.dataset.planningZoneLabel || targetFromPointer.textContent || ""
+      ).trim(),
+      zoneEl: targetFromPointer,
+    };
+  }
+
   if (targetEl instanceof Element) {
     const zoneBand = targetEl.closest(".zone-header-band");
     if (zoneBand instanceof HTMLElement && containerEl.contains(zoneBand)) {
@@ -1350,7 +1619,8 @@ function bindPlanningRowDrop(containerEl) {
       targetRowId !== payload.rowId;
 
     if (isValidRowTarget) {
-      setPlanningRowDropTarget(rowEl, containerEl);
+      const targetDropPosition = resolvePlanningRowDropPosition(rowEl, event.clientY);
+      setPlanningRowDropTarget(rowEl, containerEl, targetDropPosition);
       return;
     }
 
@@ -1400,6 +1670,9 @@ function bindPlanningRowDrop(containerEl) {
       Number.isInteger(targetRowId) &&
       targetRowId > 0 &&
       targetRowId !== payload?.rowId;
+    const targetDropPosition = isValidRowTarget
+      ? resolvePlanningRowDropPosition(rowEl, event.clientY)
+      : "";
 
     if (!payload || (!isValidRowTarget && !targetZoneLabel)) {
       clearPlanningRowDropTarget(containerEl);
@@ -1407,7 +1680,7 @@ function bindPlanningRowDrop(containerEl) {
     }
 
     if (isValidRowTarget) {
-      setPlanningRowDropTarget(rowEl, containerEl);
+      setPlanningRowDropTarget(rowEl, containerEl, targetDropPosition);
       rowEl.classList.add("is-planning-row-drop-committing");
     } else {
       setPlanningZoneDropTarget(zoneTarget?.zoneEl, containerEl);
@@ -1426,6 +1699,7 @@ function bindPlanningRowDrop(containerEl) {
             ? String(rowEl.querySelector(".cell-task")?.textContent || "").trim()
             : "",
           targetGroupe: isValidRowTarget ? String(rowEl.dataset.planningGroupe || "").trim() : "",
+          targetDropPosition: targetDropPosition || "",
           targetZone: isValidRowTarget
             ? String(rowEl.dataset.planningZone || "").trim()
             : targetZoneLabel,
@@ -1576,6 +1850,20 @@ function setMsProjectDropTarget(rowEl, containerEl) {
 }
 
 function resolvePlanningRowDropTarget(targetEl, containerEl, eventLike = null) {
+  const targetFromPointer = findPlanningDropCandidateAtClientY(
+    containerEl,
+    getPlanningDropEventClientY(eventLike)
+  );
+  if (
+    targetFromPointer instanceof HTMLElement &&
+    targetFromPointer.classList.contains("group-row-grid")
+  ) {
+    const pointerRowId = Number(targetFromPointer.dataset.planningRowId || "");
+    if (Number.isInteger(pointerRowId) && pointerRowId > 0) {
+      return targetFromPointer;
+    }
+  }
+
   if (targetEl instanceof Element) {
     const rowEl = targetEl.closest(".group-row-grid");
     if (rowEl instanceof HTMLElement && containerEl.contains(rowEl)) {

@@ -237,6 +237,57 @@ body.is-ms-project-drag-cursor * {
   background: #fff;
 }
 
+.planning-drop-placement-overlay {
+  position: fixed;
+  left: 0;
+  display: none;
+  pointer-events: none;
+  z-index: 1000003;
+  background: rgba(34, 197, 94, 0.08);
+  box-shadow:
+    inset 0 0 0 2px rgba(22, 163, 74, 0.45),
+    0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+.planning-drop-placement-overlay.is-visible {
+  display: block;
+}
+
+.planning-drop-placement-overlay.is-coffrage {
+  background: rgba(245, 158, 11, 0.12);
+  box-shadow:
+    inset 0 0 0 2px rgba(217, 119, 6, 0.45),
+    0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+.planning-drop-placement-overlay::before,
+.planning-drop-placement-overlay::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  height: 4px;
+  border-radius: 999px;
+  opacity: 0;
+  background: #16a34a;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92), 0 0 12px rgba(15, 23, 42, 0.14);
+}
+
+.planning-drop-placement-overlay.is-coffrage::before,
+.planning-drop-placement-overlay.is-coffrage::after {
+  background: #d97706;
+}
+
+.planning-drop-placement-overlay.is-before::before {
+  top: 2px;
+  opacity: 1;
+}
+
+.planning-drop-placement-overlay.is-after::after {
+  bottom: 2px;
+  opacity: 1;
+}
+
 #planningTimeline .timeline-axis-left-filler {
   position: absolute;
   top: 0;
@@ -321,6 +372,15 @@ body.is-ms-project-drag-cursor * {
 
 #planningTimeline .vis-labelset .vis-label.zone-header-group .vis-inner {
   background: #e8f2ff !important;
+}
+
+#planningTimeline .vis-labelset .vis-label.is-planning-drop-placement-label {
+  background: #f8fafc !important;
+  box-shadow: inset 0 0 0 2px rgba(15, 23, 42, 0.22);
+}
+
+#planningTimeline .vis-labelset .vis-label.is-planning-drop-placement-label .vis-inner {
+  background: inherit !important;
 }
 
 /* Wrapper interne vis */
@@ -471,17 +531,65 @@ body.planning-row-dragging {
 }
 
 #planningTimeline .group-row-grid.is-planning-row-drop-target {
+  position: relative;
+  --planning-row-drop-line-color: #16a34a;
   box-shadow: inset 0 0 0 2px #16a34a;
   background: #ecfdf3 !important;
 }
 
 #planningTimeline .group-row-grid.row-type-coffrage.is-planning-row-drop-target {
+  --planning-row-drop-line-color: #d97706;
   background: #fff2bf !important;
+}
+
+#planningTimeline .group-row-grid.is-planning-drop-placement-row {
+  box-shadow:
+    inset 0 0 0 2px rgba(15, 23, 42, 0.22),
+    0 10px 18px rgba(15, 23, 42, 0.10);
+  background: #f8fafc !important;
+}
+
+#planningTimeline .group-row-grid.row-type-coffrage.is-planning-drop-placement-row {
+  background: #fff8dc !important;
+}
+
+#planningTimeline .group-row-grid.is-planning-drop-placement-row > div {
+  font-weight: 700;
+}
+
+#planningTimeline .group-row-grid.is-planning-row-drop-target::before,
+#planningTimeline .group-row-grid.is-planning-row-drop-target::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--planning-row-drop-line-color, #16a34a);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92), 0 0 12px rgba(15, 23, 42, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+#planningTimeline .group-row-grid.is-planning-row-drop-before::before {
+  top: 2px;
+  opacity: 1;
+}
+
+#planningTimeline .group-row-grid.is-planning-row-drop-after::after {
+  bottom: 2px;
+  opacity: 1;
 }
 
 #planningTimeline .group-row-grid.is-planning-row-drop-committing {
   box-shadow: inset 0 0 0 2px #15803d;
   background: #dcfce7 !important;
+}
+
+#planningTimeline .group-row-grid.is-planning-row-drop-committing::before,
+#planningTimeline .group-row-grid.is-planning-row-drop-committing::after {
+  background: #15803d;
 }
 
 #planningTimeline.is-ms-drop-active {

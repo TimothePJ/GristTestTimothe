@@ -1120,6 +1120,7 @@ export async function updatePlanningZoneFromZoneHeaderDrop({
   const sourceTypeDoc = toText(sourceRow[typeDocCol]);
   const sourceProject = toText(sourceRow[projectCol]);
   const shouldAssignAutoGroup = isCoffrageTypeDoc(sourceTypeDoc);
+  const shouldClearGroupOnZoneDrop = !isSansZoneTarget && !shouldAssignAutoGroup;
   const sourceIsArmatures = isArmaturesTypeDoc(sourceTypeDoc);
 
   let nextGroupValue = sourceGroup;
@@ -1135,13 +1136,15 @@ export async function updatePlanningZoneFromZoneHeaderDrop({
       projectValue: sourceProject,
       excludeRowIds: [sourceId],
     });
+  } else if (shouldClearGroupOnZoneDrop) {
+    nextGroupValue = "";
   }
 
   const updates = {};
   if (sourceZone !== normalizedZone) {
     updates[zoneCol] = normalizedZone;
   }
-  if ((isSansZoneTarget || shouldAssignAutoGroup) && sourceGroup !== nextGroupValue) {
+  if ((isSansZoneTarget || shouldAssignAutoGroup || shouldClearGroupOnZoneDrop) && sourceGroup !== nextGroupValue) {
     updates[groupCol] = nextGroupValue;
   }
 
