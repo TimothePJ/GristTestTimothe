@@ -883,9 +883,18 @@ export function buildTimelineDataFromPlanningRows(
       }
     }
 
-    // Debut des travaux : non affiche pour les lignes COFFRAGE
+    // Debut des travaux :
+    // - ARMATURES : toujours visible
+    // - COFFRAGE : visible seulement pour les coffrages individuels
+    //   qui conservent encore leur lien direct avec MS Project
     const demarrageTravauxDate = parseDate(row.demarragesTravaux);
-    if (demarrageTravauxDate && !isCoffrageTypeDoc(row.typeDoc)) {
+    const shouldShowDemarragePhase =
+      demarrageTravauxDate &&
+      (
+        !isCoffrageTypeDoc(row.typeDoc) ||
+        Boolean(row.hasPlanningLink)
+      );
+    if (shouldShowDemarragePhase) {
       const demarrageTravauxEnd = addDays(demarrageTravauxDate, 1);
       items.push(
         createPhaseItem({

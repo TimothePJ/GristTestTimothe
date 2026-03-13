@@ -204,6 +204,180 @@ function buildGroupZoneKey(zoneValue, groupValue) {
   return `${zoneKey}||${groupKey}`;
 }
 
+function projectMatchesScope(rowProjectValue, scopedProjectValue) {
+  const rowProject = toText(rowProjectValue);
+  const scopedProject = toText(scopedProjectValue);
+  if (!scopedProject || !rowProject) return true;
+  return rowProject === scopedProject;
+}
+
+function getUsedGroupNumbersForZone(rows, {
+  idCol,
+  zoneCol,
+  groupCol,
+  projectCol,
+  zoneValue,
+  projectValue = "",
+  excludeRowIds = [],
+} = {}) {
+  const excludedIds = new Set(
+    Array.isArray(excludeRowIds)
+      ? excludeRowIds
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value > 0)
+      : []
+  );
+  const normalizedZone = normalizeZoneValueForStorage(zoneValue);
+  const usedGroupNumbers = new Set();
+
+  for (const row of rows || []) {
+    const rowId = Number(row?.[idCol]);
+    if (!Number.isInteger(rowId) || excludedIds.has(rowId)) continue;
+
+    const rowZone = normalizeZoneValueForStorage(row?.[zoneCol]);
+    if (rowZone !== normalizedZone) continue;
+
+    if (!projectMatchesScope(row?.[projectCol], projectValue)) continue;
+
+    const groupNum = Number(toText(row?.[groupCol]));
+    if (Number.isInteger(groupNum) && groupNum > 0) {
+      usedGroupNumbers.add(groupNum);
+    }
+  }
+
+  return usedGroupNumbers;
+}
+
+function getNextAvailableGroupValue(rows, options = {}) {
+  const usedGroupNumbers = getUsedGroupNumbersForZone(rows, options);
+  let candidate = 1;
+  while (usedGroupNumbers.has(candidate)) {
+    candidate += 1;
+  }
+  return String(candidate);
+}
+
+function findCoffrageRowsForZoneGroup(rows, {
+  idCol,
+  zoneCol,
+  groupCol,
+  projectCol,
+  typeDocCol,
+  zoneValue,
+  groupValue,
+  projectValue = "",
+  excludeRowIds = [],
+} = {}) {
+  const excludedIds = new Set(
+    Array.isArray(excludeRowIds)
+      ? excludeRowIds
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value > 0)
+      : []
+  );
+  const normalizedZone = normalizeZoneValueForStorage(zoneValue);
+  const normalizedGroup = toText(groupValue);
+
+  if (!normalizedGroup) return [];
+
+  return (rows || []).filter((row) => {
+    const rowId = Number(row?.[idCol]);
+    if (!Number.isInteger(rowId) || excludedIds.has(rowId)) return false;
+    if (!isCoffrageTypeDoc(row?.[typeDocCol])) return false;
+    if (normalizeZoneValueForStorage(row?.[zoneCol]) !== normalizedZone) return false;
+    if (toText(row?.[groupCol]) !== normalizedGroup) return false;
+    if (!projectMatchesScope(row?.[projectCol], projectValue)) return false;
+    return true;
+  });
+}
+
+function groupHasArmaturesRow(rows, {
+  idCol,
+  zoneCol,
+  groupCol,
+  projectCol,
+  typeDocCol,
+  zoneValue,
+  groupValue,
+  projectValue = "",
+  excludeRowIds = [],
+} = {}) {
+  const excludedIds = new Set(
+    Array.isArray(excludeRowIds)
+      ? excludeRowIds
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value > 0)
+      : []
+  );
+  const normalizedZone = normalizeZoneValueForStorage(zoneValue);
+  const normalizedGroup = toText(groupValue);
+
+  if (!normalizedGroup) return false;
+
+  return (rows || []).some((row) => {
+    const rowId = Number(row?.[idCol]);
+    if (!Number.isInteger(rowId) || excludedIds.has(rowId)) return false;
+    if (!isArmaturesTypeDoc(row?.[typeDocCol])) return false;
+    if (normalizeZoneValueForStorage(row?.[zoneCol]) !== normalizedZone) return false;
+    if (toText(row?.[groupCol]) !== normalizedGroup) return false;
+    if (!projectMatchesScope(row?.[projectCol], projectValue)) return false;
+    return true;
+  });
+}
+
+function buildCoffragePlanningLinkResetActions(rows, {
+  idCol,
+  zoneCol,
+  groupCol,
+  projectCol,
+  typeDocCol,
+  linePlanningCol,
+  demarrageCol,
+  tableName,
+  zoneValue,
+  groupValue,
+  projectValue = "",
+  excludeRowIds = [],
+} = {}) {
+  const coffrageRows = findCoffrageRowsForZoneGroup(rows, {
+    idCol,
+    zoneCol,
+    groupCol,
+    projectCol,
+    typeDocCol,
+    zoneValue,
+    groupValue,
+    projectValue,
+    excludeRowIds,
+  });
+
+  return coffrageRows
+    .map((row) => {
+      const rowId = Number(row?.[idCol]);
+      if (!Number.isInteger(rowId) || rowId <= 0) return null;
+
+      const updates = {};
+      if (hasPlanningLinkValue(row?.[linePlanningCol])) {
+        updates[linePlanningCol] = null;
+      }
+
+      const currentDemarrageValue = row?.[demarrageCol];
+      if (currentDemarrageValue != null && toText(currentDemarrageValue) !== "") {
+        updates[demarrageCol] = null;
+      }
+
+      if (!Object.keys(updates).length) return null;
+
+      return [
+        "UpdateRecord",
+        tableName,
+        rowId,
+        updates,
+      ];
+    })
+    .filter(Boolean);
+}
+
 export async function syncCoffrageDiffCoffrageFromGroups(
   planningRows,
   selectedProject = ""
@@ -531,7 +705,10 @@ export async function updatePlanningFromMsProjectDrop({
 
   const lignePlanningField = String(columns.lignePlanning || "Ligne_planning").trim();
   const idCol = columns.id || "id";
+  const groupCol = String(columns.groupe || "Groupe").trim();
+  const zoneCol = String(columns.zone || "Zone").trim();
   const typeDocCol = columns.typeDoc || "Type_doc";
+  const projectCol = String(columns.projectLink || columns.nomProjet || "NomProjet").trim();
   const dateLimiteCol = columns.dateLimite || "Date_limite";
   const duree1Col = columns.duree1 || "Duree_1";
   const diffCoffrageCol = columns.diffCoffrage || "Diff_coffrage";
@@ -552,6 +729,9 @@ export async function updatePlanningFromMsProjectDrop({
   }
 
   const typeDoc = String(currentRow[typeDocCol] ?? "").toUpperCase();
+  const currentGroup = toText(currentRow[groupCol]);
+  const currentZone = normalizeZoneValueForStorage(currentRow[zoneCol]);
+  const currentProject = toText(currentRow[projectCol]);
   const droppedStartDate = parseCalendarDate(msStartIso);
   const droppedEndDate = parseCalendarDate(msEndIso);
   const droppedStartIso = formatIsoDate(droppedStartDate);
@@ -629,14 +809,61 @@ export async function updatePlanningFromMsProjectDrop({
     if (droppedEndIso) updates[diffCoffrageCol] = droppedEndIso;
   }
 
-  await grist.docApi.applyUserActions([
+  const groupHasArmatures =
+    Boolean(currentZone) &&
+    Boolean(currentGroup) &&
+    groupHasArmaturesRow(rows, {
+      idCol,
+      zoneCol,
+      groupCol,
+      projectCol,
+      typeDocCol,
+      zoneValue: currentZone,
+      groupValue: currentGroup,
+      projectValue: currentProject,
+    });
+
+  if (isCoffrageTypeDoc(typeDoc) && groupHasArmatures) {
+    updates[lignePlanningField] = null;
+    updates[demarrageCol] = null;
+  }
+
+  const shouldResetGroupCoffragePlanningLinks =
+    Boolean(currentZone) &&
+    Boolean(currentGroup) &&
+    (
+      isArmaturesTypeDoc(typeDoc) ||
+      (isCoffrageTypeDoc(typeDoc) && groupHasArmatures)
+    );
+
+  const planningLinkResetActions = shouldResetGroupCoffragePlanningLinks
+    ? buildCoffragePlanningLinkResetActions(rows, {
+        idCol,
+        zoneCol,
+        groupCol,
+        projectCol,
+        typeDocCol,
+        linePlanningCol: lignePlanningField,
+        demarrageCol,
+        tableName: table.sourceTable,
+        zoneValue: currentZone,
+        groupValue: currentGroup,
+        projectValue: currentProject,
+        excludeRowIds: isCoffrageTypeDoc(typeDoc) ? [recordId] : [],
+      })
+    : [];
+
+  const actions = [
     [
       "UpdateRecord",
       table.sourceTable,
       recordId,
       updates,
     ],
-  ]);
+    ...planningLinkResetActions,
+  ];
+
+  await grist.docApi.applyUserActions(actions);
 }
 
 export async function updatePlanningGroupZoneFromPlanningDrop({
@@ -655,6 +882,8 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
   const zoneCol = String(columns.zone || "Zone").trim();
   const typeDocCol = String(columns.typeDoc || "Type_doc").trim();
   const projectCol = String(columns.projectLink || columns.nomProjet || "NomProjet").trim();
+  const linePlanningCol = String(columns.lignePlanning || "Ligne_planning").trim();
+  const demarrageCol = String(columns.demarragesTravaux || "Demarrages_travaux").trim();
 
   const sourceId = Number(sourceRowId);
   const targetId = Number(targetRowId);
@@ -686,42 +915,43 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
   const sourceTypeDoc = toText(sourceRow[typeDocCol]);
   const sourceProject = toText(sourceRow[projectCol]);
   const sourceIsCoffrage = isCoffrageTypeDoc(sourceTypeDoc);
+  const sourceIsArmatures = isArmaturesTypeDoc(sourceTypeDoc);
   const isCrossZoneMove = sourceZone !== targetZone;
 
   let nextGroupValue = targetRowGroupe;
   if (targetIsSansZone) {
     nextGroupValue = "";
-  } else if (sourceIsCoffrage && isCrossZoneMove) {
-    const excludedIds = new Set([sourceId]);
+  } else if (sourceIsCoffrage) {
     const normalizedLinkedIds = Array.isArray(linkedRowIds)
       ? linkedRowIds
           .map((value) => Number(value))
           .filter((value) => Number.isInteger(value) && value > 0 && value !== sourceId)
       : [];
-    normalizedLinkedIds.forEach((id) => excludedIds.add(id));
+    const conflictingCoffrages = findCoffrageRowsForZoneGroup(rows, {
+      idCol,
+      zoneCol,
+      groupCol,
+      projectCol,
+      typeDocCol,
+      zoneValue: targetZone,
+      groupValue: nextGroupValue,
+      projectValue: sourceProject,
+      excludeRowIds: [sourceId],
+    });
+    const mustAllocateUniqueGroup =
+      isCrossZoneMove || conflictingCoffrages.length > 0;
 
-    const usedGroupNumbers = new Set();
-    for (const row of rows) {
-      const rowId = Number(row?.[idCol]);
-      if (!Number.isInteger(rowId) || excludedIds.has(rowId)) continue;
-
-      const rowZone = normalizeZoneValueForStorage(row?.[zoneCol]);
-      if (rowZone !== targetZone) continue;
-
-      const rowProject = toText(row?.[projectCol]);
-      if (sourceProject && rowProject && rowProject !== sourceProject) continue;
-
-      const groupNum = Number(toText(row?.[groupCol]));
-      if (Number.isInteger(groupNum) && groupNum > 0) {
-        usedGroupNumbers.add(groupNum);
-      }
+    if (mustAllocateUniqueGroup) {
+      nextGroupValue = getNextAvailableGroupValue(rows, {
+        idCol,
+        zoneCol,
+        groupCol,
+        projectCol,
+        zoneValue: targetZone,
+        projectValue: sourceProject,
+        excludeRowIds: [sourceId, ...normalizedLinkedIds],
+      });
     }
-
-    let candidate = 1;
-    while (usedGroupNumbers.has(candidate)) {
-      candidate += 1;
-    }
-    nextGroupValue = String(candidate);
   }
 
   const updates = {};
@@ -763,7 +993,53 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
     ]);
   });
 
-  if (!Object.keys(updates).length && !linkedActions.length) {
+  const finalGroupHasArmatures =
+    Boolean(targetZone) &&
+    Boolean(nextGroupValue) &&
+    (
+      sourceIsArmatures ||
+      normalizedLinkedIds.length > 0 ||
+      groupHasArmaturesRow(rows, {
+        idCol,
+        zoneCol,
+        groupCol,
+        projectCol,
+        typeDocCol,
+        zoneValue: targetZone,
+        groupValue: nextGroupValue,
+        projectValue: sourceProject,
+        excludeRowIds: [sourceId, ...normalizedLinkedIds],
+      })
+    );
+
+  if (sourceIsCoffrage && finalGroupHasArmatures) {
+    if (hasPlanningLinkValue(sourceRow?.[linePlanningCol])) {
+      updates[linePlanningCol] = null;
+    }
+    const currentDemarrageValue = sourceRow?.[demarrageCol];
+    if (currentDemarrageValue != null && toText(currentDemarrageValue) !== "") {
+      updates[demarrageCol] = null;
+    }
+  }
+
+  const planningLinkResetActions = finalGroupHasArmatures
+    ? buildCoffragePlanningLinkResetActions(rows, {
+        idCol,
+        zoneCol,
+        groupCol,
+        projectCol,
+        typeDocCol,
+        linePlanningCol,
+        demarrageCol,
+        tableName: table.sourceTable,
+        zoneValue: targetZone,
+        groupValue: nextGroupValue,
+        projectValue: sourceProject,
+        excludeRowIds: sourceIsCoffrage ? [sourceId] : [],
+      })
+    : [];
+
+  if (!Object.keys(updates).length && !linkedActions.length && !planningLinkResetActions.length) {
     return {
       updated: false,
       groupe: nextGroupValue,
@@ -787,6 +1063,7 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
     ]);
   }
   actions.push(...linkedActions);
+  actions.push(...planningLinkResetActions);
   await grist.docApi.applyUserActions(actions);
 
   return {
@@ -814,6 +1091,8 @@ export async function updatePlanningZoneFromZoneHeaderDrop({
   const groupCol = String(columns.groupe || "Groupe").trim();
   const typeDocCol = String(columns.typeDoc || "Type_doc").trim();
   const projectCol = String(columns.projectLink || columns.nomProjet || "NomProjet").trim();
+  const linePlanningCol = String(columns.lignePlanning || "Ligne_planning").trim();
+  const demarrageCol = String(columns.demarragesTravaux || "Demarrages_travaux").trim();
   const sourceId = Number(sourceRowId);
   const normalizedTargetZoneKey = toText(targetZoneKey);
   const normalizedZoneFromLabel = normalizeZoneValueForStorage(targetZone);
@@ -841,33 +1120,21 @@ export async function updatePlanningZoneFromZoneHeaderDrop({
   const sourceTypeDoc = toText(sourceRow[typeDocCol]);
   const sourceProject = toText(sourceRow[projectCol]);
   const shouldAssignAutoGroup = isCoffrageTypeDoc(sourceTypeDoc);
+  const sourceIsArmatures = isArmaturesTypeDoc(sourceTypeDoc);
 
   let nextGroupValue = sourceGroup;
   if (isSansZoneTarget) {
     nextGroupValue = "";
   } else if (shouldAssignAutoGroup) {
-    const usedGroupNumbers = new Set();
-    for (const row of rows) {
-      const rowId = Number(row?.[idCol]);
-      if (rowId === sourceId) continue;
-
-      const rowZone = toText(row?.[zoneCol]);
-      if (rowZone !== normalizedZone) continue;
-
-      const rowProject = toText(row?.[projectCol]);
-      if (sourceProject && rowProject && rowProject !== sourceProject) continue;
-
-      const groupNum = Number(toText(row?.[groupCol]));
-      if (Number.isInteger(groupNum) && groupNum > 0) {
-        usedGroupNumbers.add(groupNum);
-      }
-    }
-
-    let candidate = 1;
-    while (usedGroupNumbers.has(candidate)) {
-      candidate += 1;
-    }
-    nextGroupValue = String(candidate);
+    nextGroupValue = getNextAvailableGroupValue(rows, {
+      idCol,
+      zoneCol,
+      groupCol,
+      projectCol,
+      zoneValue: normalizedZone,
+      projectValue: sourceProject,
+      excludeRowIds: [sourceId],
+    });
   }
 
   const updates = {};
@@ -909,7 +1176,53 @@ export async function updatePlanningZoneFromZoneHeaderDrop({
     ]);
   });
 
-  if (!Object.keys(updates).length && !linkedActions.length) {
+  const finalGroupHasArmatures =
+    !isSansZoneTarget &&
+    Boolean(nextGroupValue) &&
+    (
+      sourceIsArmatures ||
+      normalizedLinkedIds.length > 0 ||
+      groupHasArmaturesRow(rows, {
+        idCol,
+        zoneCol,
+        groupCol,
+        projectCol,
+        typeDocCol,
+        zoneValue: normalizedZone,
+        groupValue: nextGroupValue,
+        projectValue: sourceProject,
+        excludeRowIds: [sourceId, ...normalizedLinkedIds],
+      })
+    );
+
+  if (shouldAssignAutoGroup && finalGroupHasArmatures) {
+    if (hasPlanningLinkValue(sourceRow?.[linePlanningCol])) {
+      updates[linePlanningCol] = null;
+    }
+    const currentDemarrageValue = sourceRow?.[demarrageCol];
+    if (currentDemarrageValue != null && toText(currentDemarrageValue) !== "") {
+      updates[demarrageCol] = null;
+    }
+  }
+
+  const planningLinkResetActions = finalGroupHasArmatures
+    ? buildCoffragePlanningLinkResetActions(rows, {
+        idCol,
+        zoneCol,
+        groupCol,
+        projectCol,
+        typeDocCol,
+        linePlanningCol,
+        demarrageCol,
+        tableName: table.sourceTable,
+        zoneValue: normalizedZone,
+        groupValue: nextGroupValue,
+        projectValue: sourceProject,
+        excludeRowIds: shouldAssignAutoGroup ? [sourceId] : [],
+      })
+    : [];
+
+  if (!Object.keys(updates).length && !linkedActions.length && !planningLinkResetActions.length) {
     return {
       updated: false,
       zone: normalizedZone,
@@ -933,6 +1246,7 @@ export async function updatePlanningZoneFromZoneHeaderDrop({
     ]);
   }
   actions.push(...linkedActions);
+  actions.push(...planningLinkResetActions);
   await grist.docApi.applyUserActions(actions);
 
   return {
