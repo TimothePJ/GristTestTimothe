@@ -83,6 +83,42 @@ function isArmaturesTypeDoc(value) {
   return normalized.includes("ARMATURES");
 }
 
+function hasPlanningLinkValue(value) {
+  const text = toText(value);
+  if (!text) return false;
+
+  const numericValue = Number(text);
+  if (Number.isFinite(numericValue)) {
+    return numericValue !== 0;
+  }
+
+  return true;
+}
+
+function resolveCoffrageDiffCoffrageDate({
+  typeDoc,
+  lignePlanningRaw,
+  diffCoffrageRaw,
+  demarrageRaw,
+  duree3Raw,
+}) {
+  if (!isCoffrageTypeDoc(typeDoc)) {
+    return parseDate(diffCoffrageRaw);
+  }
+
+  if (!hasPlanningLinkValue(lignePlanningRaw)) {
+    return parseDate(diffCoffrageRaw);
+  }
+
+  const demarrageDate = parseDate(demarrageRaw);
+  const duree3Weeks = toNumber(duree3Raw);
+  if (demarrageDate && duree3Weeks != null && duree3Weeks >= 0) {
+    return subtractWeeks(demarrageDate, duree3Weeks);
+  }
+
+  return parseDate(diffCoffrageRaw);
+}
+
 function resolveCoffrageDateLimiteDate(dateLimiteRaw, diffCoffrageRaw, duree1Raw) {
   const diffCoffrageDate = parseDate(diffCoffrageRaw);
   const duree1Weeks = toNumber(duree1Raw);
@@ -110,7 +146,13 @@ function resolveBandEndDate(typeDoc, diffCoffrageRaw, diffArmatureRaw) {
   return null;
 }
 
-function resolveDisplayedDurations(typeDoc, duree1Raw, duree2Raw, duree3Raw) {
+function resolveDisplayedDurations(
+  typeDoc,
+  duree1Raw,
+  duree2Raw,
+  duree3Raw,
+  { showPlanningLinkedCoffrageDuration2 = false } = {}
+) {
   if (isArmaturesTypeDoc(typeDoc)) {
     return {
       dureeDebutFin: toText(duree2Raw),
@@ -121,7 +163,9 @@ function resolveDisplayedDurations(typeDoc, duree1Raw, duree2Raw, duree3Raw) {
   if (isCoffrageTypeDoc(typeDoc)) {
     return {
       dureeDebutFin: toText(duree1Raw),
-      dureeFinDemarrage: "",
+      dureeFinDemarrage: showPlanningLinkedCoffrageDuration2
+        ? toText(duree3Raw)
+        : "",
     };
   }
 
@@ -296,7 +340,12 @@ function createRangeBetweenDates(startDateRaw, endDateRaw) {
   return { start, end };
 }
 
-function resolveDurationEditMeta(typeDoc, bandEndDate, demarrageDate) {
+function resolveDurationEditMeta(
+  typeDoc,
+  bandEndDate,
+  demarrageDate,
+  { allowPlanningLinkedCoffrageDuration2 = false } = {}
+) {
   if (isArmaturesTypeDoc(typeDoc)) {
     return {
       dureeDebutFinColumnKey: "duree2",
@@ -316,10 +365,16 @@ function resolveDurationEditMeta(typeDoc, bandEndDate, demarrageDate) {
       dureeDebutFinLeftDateColumnKey: "dateLimite",
       dureeDebutFinRightIso: fmtIsoCellDate(bandEndDate),
       dureeDebutFinEditable: Boolean(bandEndDate),
-      dureeFinDemarrageColumnKey: "",
-      dureeFinDemarrageLeftDateColumnKey: "",
-      dureeFinDemarrageRightIso: "",
-      dureeFinDemarrageEditable: false,
+      dureeFinDemarrageColumnKey: allowPlanningLinkedCoffrageDuration2
+        ? "duree3"
+        : "",
+      dureeFinDemarrageLeftDateColumnKey: allowPlanningLinkedCoffrageDuration2
+        ? "diffCoffrage"
+        : "",
+      dureeFinDemarrageRightIso: allowPlanningLinkedCoffrageDuration2
+        ? fmtIsoCellDate(demarrageDate)
+        : "",
+      dureeFinDemarrageEditable: allowPlanningLinkedCoffrageDuration2 && Boolean(demarrageDate),
     };
   }
 
@@ -447,34 +502,55 @@ export function buildTimelineDataFromPlanningRows(
     const duree1Value = r[cfg.duree1];
     const duree2Value = r[cfg.duree2];
     const duree3Value = r[cfg.duree3];
+    const demarrageTravauxValue = r[cfg.demarragesTravaux];
+    const demarrageTravauxDate = parseDate(demarrageTravauxValue);
     const isCoffrage = isCoffrageTypeDoc(typeDocText);
+    const isPlanningLinkedCoffrage =
+      isCoffrage && hasPlanningLinkValue(lignePlanningText);
+    const resolvedDiffCoffrageDate = resolveCoffrageDiffCoffrageDate({
+      typeDoc: typeDocText,
+      lignePlanningRaw: lignePlanningText,
+      diffCoffrageRaw: diffCoffrageValue,
+      demarrageRaw: demarrageTravauxValue,
+      duree3Raw: duree3Value,
+    });
+    const diffCoffrageForDisplay = resolvedDiffCoffrageDate || diffCoffrageValue;
     const dateLimiteDate = isCoffrage
-      ? resolveCoffrageDateLimiteDate(dateLimiteValue, diffCoffrageValue, duree1Value)
+      ? resolveCoffrageDateLimiteDate(
+          dateLimiteValue,
+          diffCoffrageForDisplay,
+          duree1Value
+        )
       : parseDate(dateLimiteValue);
     const bandStartDate = resolveBandStartDate(
       typeDocText,
       dateLimiteValue,
-      diffCoffrageValue,
+      diffCoffrageForDisplay,
       duree1Value
     );
     const bandEndDate = resolveBandEndDate(
       typeDocText,
-      diffCoffrageValue,
+      diffCoffrageForDisplay,
       diffArmatureValue
     );
-    const demarrageTravauxValue = r[cfg.demarragesTravaux];
-    const demarrageTravauxDate = parseDate(demarrageTravauxValue);
-    const demarrageDisplayDate = isCoffrage ? null : demarrageTravauxDate;
+    const demarrageDisplayDate =
+      !isCoffrage || isPlanningLinkedCoffrage ? demarrageTravauxDate : null;
     const displayedDurations = resolveDisplayedDurations(
       typeDocText,
       duree1Value,
       duree2Value,
-      duree3Value
+      duree3Value,
+      {
+        showPlanningLinkedCoffrageDuration2: isPlanningLinkedCoffrage,
+      }
     );
     const durationEditMeta = resolveDurationEditMeta(
       typeDocText,
       bandEndDate,
-      demarrageTravauxDate
+      demarrageTravauxDate,
+      {
+        allowPlanningLinkedCoffrageDuration2: isPlanningLinkedCoffrage,
+      }
     );
 
     return {
@@ -510,6 +586,7 @@ export function buildTimelineDataFromPlanningRows(
       dureeFinDemarrageRightIso: durationEditMeta.dureeFinDemarrageRightIso,
       dureeFinDemarrageEditable: durationEditMeta.dureeFinDemarrageEditable,
       lignePlanning: lignePlanningText,
+      hasPlanningLink: isPlanningLinkedCoffrage,
 
       // Valeurs numeriques de tri (robustes)
       id2Num: toNumber(id2Text),
@@ -520,7 +597,7 @@ export function buildTimelineDataFromPlanningRows(
       dateLimiteDate,
       duree1: duree1Value,
 
-      diffCoffrage: diffCoffrageValue,
+      diffCoffrage: diffCoffrageForDisplay,
       duree2: duree2Value,
 
       diffArmature: diffArmatureValue,
@@ -569,7 +646,13 @@ export function buildTimelineDataFromPlanningRows(
   });
 
   rows = rows.map((row) => {
-    if (!row.groupCompositeKey || !isCoffrageTypeDoc(row.typeDoc)) return row;
+    if (
+      !row.groupCompositeKey ||
+      !isCoffrageTypeDoc(row.typeDoc) ||
+      row.hasPlanningLink
+    ) {
+      return row;
+    }
 
     const resolvedDiffCoffrage = minArmatureDiffByGroup.get(row.groupCompositeKey);
     if (!resolvedDiffCoffrage) return row;
@@ -583,7 +666,10 @@ export function buildTimelineDataFromPlanningRows(
     const durationEditMeta = resolveDurationEditMeta(
       row.typeDoc,
       normalizedDiffCoffrage,
-      parseDate(row.demarragesTravaux)
+      parseDate(row.demarragesTravaux),
+      {
+        allowPlanningLinkedCoffrageDuration2: Boolean(row.hasPlanningLink),
+      }
     );
 
     return {

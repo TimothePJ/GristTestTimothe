@@ -184,6 +184,26 @@ function normalizeGroupValue(value) {
   return text ? text.toLocaleLowerCase("fr") : "";
 }
 
+function hasPlanningLinkValue(value) {
+  const text = toText(value);
+  if (!text) return false;
+
+  const numericValue = Number(text);
+  if (Number.isFinite(numericValue)) {
+    return numericValue !== 0;
+  }
+
+  return true;
+}
+
+function buildGroupZoneKey(zoneValue, groupValue) {
+  const groupKey = normalizeGroupValue(groupValue);
+  if (!groupKey) return "";
+
+  const zoneKey = normalizeZoneValueForStorage(zoneValue).toLocaleLowerCase("fr");
+  return `${zoneKey}||${groupKey}`;
+}
+
 export async function syncCoffrageDiffCoffrageFromGroups(
   planningRows,
   selectedProject = ""
@@ -197,10 +217,12 @@ export async function syncCoffrageDiffCoffrageFromGroups(
 
   const idCol = columns.id || "id";
   const groupCol = columns.groupe || "Groupe";
+  const zoneCol = columns.zone || "Zone";
   const typeDocCol = columns.typeDoc || "Type_doc";
   const diffCoffrageCol = columns.diffCoffrage || "Diff_coffrage";
   const dateLimiteCol = columns.dateLimite || "Date_limite";
   const duree1Col = columns.duree1 || "Duree_1";
+  const linePlanningCol = columns.lignePlanning || "Ligne_planning";
   const projectCol = columns.projectLink || columns.nomProjet || "NomProjet";
 
   const rows = Array.isArray(planningRows) ? planningRows : [];
@@ -223,16 +245,16 @@ export async function syncCoffrageDiffCoffrageFromGroups(
 
   const minArmatureDiffByGroup = new Map();
   scopedRows.forEach((row) => {
-    const groupKey = normalizeGroupValue(row?.[groupCol]);
-    if (!groupKey) return;
+    const groupZoneKey = buildGroupZoneKey(row?.[zoneCol], row?.[groupCol]);
+    if (!groupZoneKey) return;
     if (!isArmaturesTypeDoc(row?.[typeDocCol])) return;
 
     const diffDate = parseCalendarDate(row?.[diffCoffrageCol]);
     if (!diffDate) return;
 
-    const currentMin = minArmatureDiffByGroup.get(groupKey);
+    const currentMin = minArmatureDiffByGroup.get(groupZoneKey);
     if (!currentMin || diffDate < currentMin) {
-      minArmatureDiffByGroup.set(groupKey, diffDate);
+      minArmatureDiffByGroup.set(groupZoneKey, diffDate);
     }
   });
 
@@ -240,11 +262,12 @@ export async function syncCoffrageDiffCoffrageFromGroups(
   let matchedCoffrageCount = 0;
 
   scopedRows.forEach((row) => {
-    const groupKey = normalizeGroupValue(row?.[groupCol]);
-    if (!groupKey) return;
+    const groupZoneKey = buildGroupZoneKey(row?.[zoneCol], row?.[groupCol]);
+    if (!groupZoneKey) return;
     if (!isCoffrageTypeDoc(row?.[typeDocCol])) return;
+    if (hasPlanningLinkValue(row?.[linePlanningCol])) return;
 
-    const targetDate = minArmatureDiffByGroup.get(groupKey);
+    const targetDate = minArmatureDiffByGroup.get(groupZoneKey);
     if (!targetDate) return;
 
     matchedCoffrageCount += 1;
@@ -403,7 +426,29 @@ export async function updatePlanningDurationAndLeftDate(
       const finalDuree1 = durationField === duree1Col
         ? toInteger(durationValue)
         : toInteger(currentRow[duree1Col]);
-      const diffCoffrageDate = parseCalendarDate(currentRow[diffCoffrageCol]);
+      const finalDuree3 = durationField === duree3Col
+        ? toInteger(durationValue)
+        : toInteger(currentRow[duree3Col]);
+      const demarrageDate = parseCalendarDate(currentRow[demarrageCol]);
+      let diffCoffrageDate = leftDateField === diffCoffrageCol
+        ? parseCalendarDate(normalizedLeftIsoDate)
+        : parseCalendarDate(currentRow[diffCoffrageCol]);
+      const shouldRecomputeDiffCoffrage =
+        durationField === duree3Col || leftDateField === diffCoffrageCol;
+
+      if (
+        demarrageDate &&
+        finalDuree3 != null &&
+        finalDuree3 >= 0 &&
+        (shouldRecomputeDiffCoffrage || !diffCoffrageDate)
+      ) {
+        const computedDiffCoffrage = subtractWeeksFromDate(demarrageDate, finalDuree3);
+        const computedIso = formatIsoDate(computedDiffCoffrage);
+        if (computedIso) {
+          updates[diffCoffrageCol] = computedIso;
+          diffCoffrageDate = computedDiffCoffrage;
+        }
+      }
 
       if (diffCoffrageDate && finalDuree1 != null && finalDuree1 >= 0) {
         const computedDateLimite = subtractWeeksFromDate(diffCoffrageDate, finalDuree1);
@@ -515,34 +560,34 @@ export async function updatePlanningFromMsProjectDrop({
   const updates = {
     [lignePlanningField]: normalizedUniqueNumber,
   };
-  if (droppedStartIso) {
-    updates[demarrageCol] = droppedStartIso;
-  }
 
   if (isCoffrageTypeDoc(typeDoc)) {
-    let diffCoffrageDate = droppedEndDate || parseCalendarDate(currentRow[diffCoffrageCol]);
+    let demarrageDate = droppedStartDate || parseCalendarDate(currentRow[demarrageCol]);
+    let diffCoffrageDate = parseCalendarDate(currentRow[diffCoffrageCol]);
+    let dateLimiteDate = parseCalendarDate(currentRow[dateLimiteCol]);
     const duree1 = toInteger(currentRow[duree1Col]);
-    let dateLimiteDate = droppedStartDate || parseCalendarDate(currentRow[dateLimiteCol]);
+    const duree3 = toInteger(currentRow[duree3Col]);
 
-    if (droppedEndIso) updates[diffCoffrageCol] = droppedEndIso;
+    // Nouveau cas COFFRAGE lie a MS Project:
+    // Demarrage travaux = Debut MS Project
+    // Diff_coffrage = Demarrage travaux - Duree_3
+    // Date_limite = Diff_coffrage - Duree_1
+    if (demarrageDate && duree3 != null && duree3 >= 0) {
+      diffCoffrageDate = subtractWeeksFromDate(demarrageDate, duree3);
+    } else if (!diffCoffrageDate && droppedEndDate) {
+      diffCoffrageDate = droppedEndDate;
+    }
 
-    // Regle COFFRAGE: Date_limite est calculee a partir de Diff_coffrage - Duree_1 (semaines).
     if (diffCoffrageDate && duree1 != null && duree1 >= 0) {
       dateLimiteDate = subtractWeeksFromDate(diffCoffrageDate, duree1);
     } else if (droppedStartIso) {
       updates[dateLimiteCol] = droppedStartIso;
     }
 
-    if (!diffCoffrageDate && dateLimiteDate && duree1 != null && duree1 >= 0) {
-      diffCoffrageDate = addWeeksToDate(dateLimiteDate, duree1);
-    }
-
-    if (!dateLimiteDate && diffCoffrageDate && duree1 != null && duree1 >= 0) {
-      dateLimiteDate = subtractWeeksFromDate(diffCoffrageDate, duree1);
-    }
-
+    const computedDemarrageIso = formatIsoDate(demarrageDate);
     const computedDateLimiteIso = formatIsoDate(dateLimiteDate);
     const computedDiffCoffrageIso = formatIsoDate(diffCoffrageDate);
+    if (computedDemarrageIso) updates[demarrageCol] = computedDemarrageIso;
     if (computedDateLimiteIso) updates[dateLimiteCol] = computedDateLimiteIso;
     if (computedDiffCoffrageIso) updates[diffCoffrageCol] = computedDiffCoffrageIso;
   } else if (isArmaturesTypeDoc(typeDoc)) {

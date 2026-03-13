@@ -98,6 +98,94 @@ function isIsoDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? "").trim());
 }
 
+function toInteger(value) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || !Number.isInteger(number)) return null;
+  return number;
+}
+
+function normalizeUtcDateToLocalCalendar(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  return new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+}
+
+function parseCalendarDate(value) {
+  if (value == null || value === "") return null;
+
+  if (value instanceof Date) {
+    return normalizeUtcDateToLocalCalendar(value);
+  }
+
+  if (typeof value === "number") {
+    const normalized = value > 1e9 && value < 1e11 ? value * 1000 : value;
+    return normalizeUtcDateToLocalCalendar(new Date(normalized));
+  }
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (isoMatch) {
+    const year = Number(isoMatch[1]);
+    const month = Number(isoMatch[2]);
+    const day = Number(isoMatch[3]);
+    const date = new Date(year, month - 1, day);
+    if (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    ) {
+      return date;
+    }
+    return null;
+  }
+
+  const frMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+.*)?$/);
+  if (frMatch) {
+    const day = Number(frMatch[1]);
+    const month = Number(frMatch[2]);
+    const year = Number(frMatch[3]);
+    const date = new Date(year, month - 1, day);
+    if (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    ) {
+      return date;
+    }
+    return null;
+  }
+
+  const fallback = new Date(text);
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
+}
+
+function formatIsoDate(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function subtractWeeksFromDate(date, weeks) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  const normalizedWeeks = toInteger(weeks);
+  if (normalizedWeeks == null || normalizedWeeks < 0) return null;
+  const shiftedDate = new Date(date);
+  shiftedDate.setDate(shiftedDate.getDate() - (normalizedWeeks * 7));
+  return shiftedDate;
+}
+
+function isCoffrageTypeDoc(value) {
+  return String(value ?? "").toUpperCase().includes("COFFRAGE");
+}
+
+function isArmaturesTypeDoc(value) {
+  return String(value ?? "").toUpperCase().includes("ARMATURES");
+}
+
 function extractIsoDatePart(value) {
   const text = toText(value);
   if (!text) return "";
@@ -448,6 +536,41 @@ export async function syncPlanningDemarrageFromMsProjectStart(
     planningTable.columns?.demarragesTravaux,
     planningTable.demarrageCandidates || []
   );
+  const planningTypeDocCol = resolveColumn(
+    planningRows,
+    planningTable.columns?.typeDoc || "Type_doc",
+    ["Type_doc", "TypeDoc"]
+  );
+  const planningDateLimiteCol = resolveColumn(
+    planningRows,
+    planningTable.columns?.dateLimite || "Date_limite",
+    ["Date_limite", "DateLimite"]
+  );
+  const planningDuree1Col = resolveColumn(
+    planningRows,
+    planningTable.columns?.duree1 || "Duree_1",
+    ["Duree_1", "Duree1"]
+  );
+  const planningDiffCoffrageCol = resolveColumn(
+    planningRows,
+    planningTable.columns?.diffCoffrage || "Diff_coffrage",
+    ["Diff_coffrage", "DiffCoffrage"]
+  );
+  const planningDuree2Col = resolveColumn(
+    planningRows,
+    planningTable.columns?.duree2 || "Duree_2",
+    ["Duree_2", "Duree2"]
+  );
+  const planningDiffArmatureCol = resolveColumn(
+    planningRows,
+    planningTable.columns?.diffArmature || "Diff_armature",
+    ["Diff_armature", "DiffArmature"]
+  );
+  const planningDuree3Col = resolveColumn(
+    planningRows,
+    planningTable.columns?.duree3 || "Duree_3",
+    ["Duree_3", "Duree3"]
+  );
 
   if (!planningLineCol || !planningDemarrageCol) {
     throw new Error("Colonnes Planning_Projet introuvables pour la synchronisation.");
@@ -461,15 +584,67 @@ export async function syncPlanningDemarrageFromMsProjectStart(
     return { updatedCount: 0, matchedCount: 0, skipped: false };
   }
 
+  const demarrageDate = parseCalendarDate(normalizedIsoDate);
   const actions = matchingRows
-    .map((row) => Number(row?.[planningIdCol]))
-    .filter((id) => Number.isInteger(id) && id > 0)
-    .map((id) => [
-      "UpdateRecord",
-      planningTable.sourceTable,
-      id,
-      { [planningDemarrageCol]: normalizedIsoDate },
-    ]);
+    .map((row) => {
+      const planningRowId = Number(row?.[planningIdCol]);
+      if (!Number.isInteger(planningRowId) || planningRowId <= 0) return null;
+
+      const updates = {
+        [planningDemarrageCol]: normalizedIsoDate,
+      };
+
+      const typeDoc = toText(row?.[planningTypeDocCol]);
+      if (isCoffrageTypeDoc(typeDoc)) {
+        const duree1 = toInteger(row?.[planningDuree1Col]);
+        const duree3 = toInteger(row?.[planningDuree3Col]);
+        const diffCoffrageDate =
+          demarrageDate && duree3 != null && duree3 >= 0
+            ? subtractWeeksFromDate(demarrageDate, duree3)
+            : parseCalendarDate(row?.[planningDiffCoffrageCol]);
+        const dateLimiteDate =
+          diffCoffrageDate && duree1 != null && duree1 >= 0
+            ? subtractWeeksFromDate(diffCoffrageDate, duree1)
+            : parseCalendarDate(row?.[planningDateLimiteCol]);
+
+        const diffCoffrageIso = formatIsoDate(diffCoffrageDate);
+        const dateLimiteIso = formatIsoDate(dateLimiteDate);
+        if (planningDiffCoffrageCol && diffCoffrageIso) {
+          updates[planningDiffCoffrageCol] = diffCoffrageIso;
+        }
+        if (planningDateLimiteCol && dateLimiteIso) {
+          updates[planningDateLimiteCol] = dateLimiteIso;
+        }
+      } else if (isArmaturesTypeDoc(typeDoc)) {
+        const duree2 = toInteger(row?.[planningDuree2Col]);
+        const duree3 = toInteger(row?.[planningDuree3Col]);
+        const diffArmatureDate =
+          demarrageDate && duree3 != null && duree3 >= 0
+            ? subtractWeeksFromDate(demarrageDate, duree3)
+            : parseCalendarDate(row?.[planningDiffArmatureCol]);
+        const diffCoffrageDate =
+          diffArmatureDate && duree2 != null && duree2 >= 0
+            ? subtractWeeksFromDate(diffArmatureDate, duree2)
+            : parseCalendarDate(row?.[planningDiffCoffrageCol]);
+
+        const diffArmatureIso = formatIsoDate(diffArmatureDate);
+        const diffCoffrageIso = formatIsoDate(diffCoffrageDate);
+        if (planningDiffArmatureCol && diffArmatureIso) {
+          updates[planningDiffArmatureCol] = diffArmatureIso;
+        }
+        if (planningDiffCoffrageCol && diffCoffrageIso) {
+          updates[planningDiffCoffrageCol] = diffCoffrageIso;
+        }
+      }
+
+      return [
+        "UpdateRecord",
+        planningTable.sourceTable,
+        planningRowId,
+        updates,
+      ];
+    })
+    .filter(Boolean);
 
   if (!actions.length) {
     return { updatedCount: 0, matchedCount: matchingRows.length, skipped: false };
