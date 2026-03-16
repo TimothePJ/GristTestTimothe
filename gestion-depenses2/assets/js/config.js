@@ -30,6 +30,7 @@ export const APP_CONFIG = {
       budget: "Budget",
       projectTeam: "ProjectTeam",
       timesheet: "Timesheet",
+      timeSegment: "TimeSegment",
       team: "Team",
     },
     columns: {
@@ -59,6 +60,15 @@ export const APP_CONFIG = {
         month: "Month",
         provisionalDays: "Provisional_Days",
         workedDays: "Worked_Days",
+      },
+      timeSegment: {
+        id: "id",
+        projectTeamLink: "ProjectTeam_Link",
+        startDate: "Start_Date",
+        endDate: "End_Date",
+        segmentType: "Segment_Type",
+        allocationDays: "Allocation_Days",
+        label: "Label",
       },
       team: {
         id: "id",

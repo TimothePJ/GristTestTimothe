@@ -1,9 +1,34 @@
 import { APP_CONFIG } from "../config.js";
 import {
   getMonthKeyFromRawMonth,
+  toReferenceId,
   toFiniteNumber,
   toGristMonthValue,
+  toText,
 } from "../utils/format.js";
+import { toGristDateTimeValue } from "../utils/timeSegments.js";
+
+const resolvedColumnCache = new Map();
+
+const TIME_SEGMENT_COLUMN_ALIASES = {
+  id: ["id"],
+  projectTeamLink: [
+    "ProjectTeam_Link",
+    "ProjectTeamLink",
+    "Project_Team_Link",
+    "ProjectTeam",
+  ],
+  startDate: ["Start_Date", "Start_At", "StartDate", "Start"],
+  endDate: ["End_Date", "End_At", "EndDate", "End"],
+  segmentType: ["Segment_Type", "SegmentType", "Type"],
+  allocationDays: [
+    "Allocation_Days",
+    "AllocationDays",
+    "Allocation",
+    "Days",
+  ],
+  label: ["Label", "Name", "Title"],
+};
 
 function getGrist() {
   if (!window.grist) {
@@ -41,14 +66,105 @@ function normalizeFetchTableResult(raw) {
   return [];
 }
 
-async function fetchTableRows(tableName) {
+function normalizeColumnName(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function resolveColumnId(availableColumns, requestedColumnId, aliases = []) {
+  const allCandidates = [requestedColumnId, ...aliases].filter(Boolean);
+  const directMatch = allCandidates.find((candidate) =>
+    availableColumns.includes(candidate)
+  );
+  if (directMatch) {
+    return directMatch;
+  }
+
+  const normalizedAvailable = new Map(
+    availableColumns.map((columnId) => [normalizeColumnName(columnId), columnId])
+  );
+
+  for (const candidate of allCandidates) {
+    const normalizedCandidate = normalizeColumnName(candidate);
+    if (normalizedAvailable.has(normalizedCandidate)) {
+      return normalizedAvailable.get(normalizedCandidate);
+    }
+  }
+
+  return requestedColumnId;
+}
+
+function getAvailableColumnIds(raw) {
+  if (Array.isArray(raw)) {
+    return raw.length > 0 && typeof raw[0] === "object" && raw[0] != null
+      ? Object.keys(raw[0])
+      : [];
+  }
+
+  if (raw && typeof raw === "object") {
+    return Object.keys(raw);
+  }
+
+  return [];
+}
+
+async function fetchTableRaw(tableName) {
   const grist = getGrist();
   if (!grist.docApi || typeof grist.docApi.fetchTable !== "function") {
     throw new Error("grist.docApi.fetchTable(...) indisponible.");
   }
 
-  const raw = await grist.docApi.fetchTable(tableName);
+  return grist.docApi.fetchTable(tableName);
+}
+
+async function fetchTableRows(tableName) {
+  const raw = await fetchTableRaw(tableName);
   return normalizeFetchTableResult(raw);
+}
+
+async function getResolvedTimeSegmentColumns() {
+  const cacheKey = APP_CONFIG.grist.tables.timeSegment;
+  if (resolvedColumnCache.has(cacheKey)) {
+    return resolvedColumnCache.get(cacheKey);
+  }
+
+  const raw = await fetchTableRaw(cacheKey);
+  const availableColumns = getAvailableColumnIds(raw);
+  const configuredColumns = APP_CONFIG.grist.columns.timeSegment;
+
+  const resolved = Object.fromEntries(
+    Object.entries(configuredColumns).map(([key, requestedColumnId]) => [
+      key,
+      resolveColumnId(
+        availableColumns,
+        requestedColumnId,
+        TIME_SEGMENT_COLUMN_ALIASES[key] || []
+      ),
+    ])
+  );
+
+  resolvedColumnCache.set(cacheKey, resolved);
+  return resolved;
+}
+
+async function fetchNormalizedTimeSegmentRows() {
+  const tableName = APP_CONFIG.grist.tables.timeSegment;
+  const raw = await fetchTableRaw(tableName);
+  const rows = normalizeFetchTableResult(raw);
+  const resolvedColumns = await getResolvedTimeSegmentColumns();
+  const canonicalColumns = APP_CONFIG.grist.columns.timeSegment;
+
+  return rows.map((row) => ({
+    [canonicalColumns.id]: row?.[resolvedColumns.id],
+    [canonicalColumns.projectTeamLink]: row?.[resolvedColumns.projectTeamLink],
+    [canonicalColumns.startDate]: row?.[resolvedColumns.startDate],
+    [canonicalColumns.endDate]: row?.[resolvedColumns.endDate],
+    [canonicalColumns.segmentType]: row?.[resolvedColumns.segmentType],
+    [canonicalColumns.allocationDays]: row?.[resolvedColumns.allocationDays],
+    [canonicalColumns.label]: row?.[resolvedColumns.label],
+  }));
 }
 
 export function initGrist() {
@@ -65,12 +181,14 @@ export async function fetchExpenseAppTables() {
     budgetRows,
     projectTeamRows,
     timesheetRows,
+    timeSegmentRows,
     teamRows,
   ] = await Promise.all([
     fetchTableRows(tables.projects),
     fetchTableRows(tables.budget),
     fetchTableRows(tables.projectTeam),
     fetchTableRows(tables.timesheet),
+    fetchNormalizedTimeSegmentRows(),
     fetchTableRows(tables.team),
   ]);
 
@@ -79,6 +197,7 @@ export async function fetchExpenseAppTables() {
     budgetRows,
     projectTeamRows,
     timesheetRows,
+    timeSegmentRows,
     teamRows,
   };
 }
@@ -197,8 +316,26 @@ export async function addWorkerToProject(project, teamMember) {
 }
 
 export async function removeProjectWorker(workerId) {
+  const normalizedWorkerId = toReferenceId(workerId);
+  if (!normalizedWorkerId) return;
+
+  const timeSegmentRows = await fetchNormalizedTimeSegmentRows();
+  const segmentRemovals = (timeSegmentRows || [])
+    .filter((row) => {
+      const projectTeamLink = toReferenceId(
+        row?.[APP_CONFIG.grist.columns.timeSegment.projectTeamLink]
+      );
+      return projectTeamLink === normalizedWorkerId;
+    })
+    .map((row) => [
+      "RemoveRecord",
+      APP_CONFIG.grist.tables.timeSegment,
+      row?.[APP_CONFIG.grist.columns.timeSegment.id],
+    ]);
+
   await applyActions([
-    ["RemoveRecord", APP_CONFIG.grist.tables.projectTeam, workerId],
+    ...segmentRemovals,
+    ["RemoveRecord", APP_CONFIG.grist.tables.projectTeam, normalizedWorkerId],
   ]);
 }
 
@@ -300,6 +437,102 @@ export async function upsertTimesheetBatch({ workerId, updates }) {
   }
 
   await applyActions(actions);
+}
+
+export async function createTimeSegment({
+  projectTeamLink,
+  startDate,
+  endDate,
+  allocationDays,
+  segmentType = "previsionnel",
+  label = "",
+}) {
+  const tableName = APP_CONFIG.grist.tables.timeSegment;
+  const columns = await getResolvedTimeSegmentColumns();
+  const startValue = toGristDateTimeValue(startDate);
+  const endValue = toGristDateTimeValue(endDate);
+
+  if (!Number.isInteger(Number(projectTeamLink)) || startValue == null || endValue == null) {
+    throw new Error("Segment invalide : ProjectTeam, date debut ou date fin manquant.");
+  }
+
+  await applyActions([
+    [
+      "AddRecord",
+      tableName,
+      null,
+      {
+        [columns.projectTeamLink]: Number(projectTeamLink),
+        [columns.startDate]: startValue,
+        [columns.endDate]: endValue,
+        [columns.segmentType]: segmentType,
+        [columns.allocationDays]: toFiniteNumber(allocationDays, 0),
+        [columns.label]: label,
+      },
+    ],
+  ]);
+}
+
+export async function updateTimeSegment({
+  segmentId,
+  startDate,
+  endDate,
+  allocationDays,
+  segmentType,
+  label,
+}) {
+  const normalizedId = toReferenceId(segmentId);
+  if (!normalizedId) {
+    throw new Error("Segment invalide : id manquant.");
+  }
+
+  const columns = await getResolvedTimeSegmentColumns();
+  const fields = {};
+
+  if (startDate != null) {
+    const startValue = toGristDateTimeValue(startDate);
+    if (startValue == null) {
+      throw new Error("Date de debut invalide pour la mise a jour du segment.");
+    }
+    fields[columns.startDate] = startValue;
+  }
+
+  if (endDate != null) {
+    const endValue = toGristDateTimeValue(endDate);
+    if (endValue == null) {
+      throw new Error("Date de fin invalide pour la mise a jour du segment.");
+    }
+    fields[columns.endDate] = endValue;
+  }
+
+  if (allocationDays != null) {
+    fields[columns.allocationDays] = toFiniteNumber(allocationDays, 0);
+  }
+
+  if (segmentType != null) {
+    fields[columns.segmentType] = segmentType;
+  }
+
+  if (label != null) {
+    fields[columns.label] = label;
+  }
+
+  if (!Object.keys(fields).length) {
+    return;
+  }
+
+  await applyActions([
+    ["UpdateRecord", APP_CONFIG.grist.tables.timeSegment, normalizedId, fields],
+  ]);
+}
+
+export async function removeTimeSegment(segmentId) {
+  const normalizedId = toReferenceId(segmentId);
+  if (!normalizedId) return;
+
+  await applyActions([
+    ["RemoveRecord", APP_CONFIG.grist.tables.timeSegment, normalizedId],
+  ]);
 }
 
 export async function updateProjectBillingPercentages(projectId, billingPercentageByMonth) {

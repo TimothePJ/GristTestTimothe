@@ -22,6 +22,37 @@ export function toFiniteNumber(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+export function toReferenceId(value) {
+  if (value == null || value === "") return null;
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+
+  if (typeof value === "string") {
+    const numeric = Number(value.trim());
+    return Number.isInteger(numeric) ? numeric : null;
+  }
+
+  if (Array.isArray(value) && value.length > 0) {
+    return toReferenceId(value[0]);
+  }
+
+  if (typeof value === "object") {
+    if (Object.prototype.hasOwnProperty.call(value, "id")) {
+      return toReferenceId(value.id);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, "rowId")) {
+      return toReferenceId(value.rowId);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, "value")) {
+      return toReferenceId(value.value);
+    }
+  }
+
+  return null;
+}
+
 export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }

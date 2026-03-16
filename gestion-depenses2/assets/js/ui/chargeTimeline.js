@@ -1,12 +1,13 @@
 import { APP_CONFIG } from "../config.js";
 import { getWorkerTotalDays, groupWorkersByRole } from "../services/projectService.js";
+import { buildDisplayedMonths, clamp, formatNumber, toFiniteNumber } from "../utils/format.js";
 import {
-  buildDisplayedMonths,
-  clamp,
-  formatNumber,
-  roundToStep,
-  toFiniteNumber,
-} from "../utils/format.js";
+  HALF_DAY_PARTS,
+  createHalfDaySlotKey,
+  getBusinessHalfDaySlotsBetween,
+  getHalfDaySlotRange,
+  getSegmentAllocationDays,
+} from "../utils/timeSegments.js";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -22,10 +23,64 @@ function formatDayValue(value) {
   return formatted.endsWith(",00") ? formatted.slice(0, -3) : formatted;
 }
 
+function formatSlotDate(date) {
+  return date.toLocaleDateString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
 function getMonthWidth(month) {
   const widthFromDays =
     month.businessDayCount * APP_CONFIG.chargeTimeline.businessDayWidth;
   return Math.max(APP_CONFIG.chargeTimeline.minimumMonthWidth, widthFromDays);
+}
+
+function getTimelineWidth(months) {
+  return months.reduce((sum, month) => sum + getMonthWidth(month), 0);
+}
+
+function buildVisibleSlots(months) {
+  const slots = [];
+  let nextLeftPx = 0;
+  let slotIndex = 0;
+
+  months.forEach((month) => {
+    const monthWidth = getMonthWidth(month);
+    const dayWidth =
+      month.businessDayCount > 0
+        ? monthWidth / month.businessDayCount
+        : APP_CONFIG.chargeTimeline.minimumMonthWidth;
+    const slotWidth = dayWidth / HALF_DAY_PARTS.length;
+    const lastDayIndex = Math.max(0, (month.businessDayDates || []).length - 1);
+
+    (month.businessDayDates || []).forEach((date, dayIndex) => {
+      HALF_DAY_PARTS.forEach((part, partIndex) => {
+        const slotRange = getHalfDaySlotRange(date, part);
+        if (!slotRange) return;
+
+        slots.push({
+          slotIndex,
+          key: createHalfDaySlotKey(date, part),
+          monthKey: month.monthKey,
+          part,
+          date,
+          startAt: slotRange.startAt,
+          endAt: slotRange.endAt,
+          leftPx: nextLeftPx,
+          widthPx: slotWidth,
+          isMonthStart: dayIndex === 0 && partIndex === 0,
+          isMonthEnd: dayIndex === lastDayIndex && partIndex === HALF_DAY_PARTS.length - 1,
+        });
+
+        nextLeftPx += slotWidth;
+        slotIndex += 1;
+      });
+    });
+  });
+
+  return slots;
 }
 
 function renderHeaderMonth(month) {
@@ -64,7 +119,7 @@ function renderHeaderMonth(month) {
   `;
 }
 
-function renderTrackSegments(months, worker = null, { showTotals = false } = {}) {
+function renderTotalMonthSegments(months, worker = null, { showTotals = false } = {}) {
   return months
     .map((month) => {
       const monthWidth = getMonthWidth(month);
@@ -83,7 +138,6 @@ function renderTrackSegments(months, worker = null, { showTotals = false } = {})
         <div
           class="charge-plan-month-segment ${showTotals ? "is-total" : ""}"
           data-month-key="${month.monthKey}"
-          data-business-days="${month.businessDayCount}"
           style="width:${monthWidth}px; background-size:${backgroundSize}"
         >
           ${
@@ -111,12 +165,133 @@ function renderTrackSegments(months, worker = null, { showTotals = false } = {})
     .join("");
 }
 
-function renderWorkerRow(worker, months) {
+function renderTrackGrid(visibleSlots) {
+  return `
+    <div class="charge-plan-track-grid">
+      ${visibleSlots
+        .map(
+          (slot) => `
+            <span
+              class="charge-plan-slot ${slot.part === "am" ? "is-am" : "is-pm"} ${
+                slot.isMonthStart ? "is-month-start" : ""
+              }"
+              data-slot-index="${slot.slotIndex}"
+              data-slot-key="${slot.key}"
+              data-slot-start="${slot.startAt.toISOString()}"
+              data-slot-end="${slot.endAt.toISOString()}"
+              style="width:${slot.widthPx}px"
+            ></span>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function buildVisibleSegmentBars(worker, visibleSlots) {
+  const slotByKey = new Map(visibleSlots.map((slot) => [slot.key, slot]));
+
+  return (worker?.segments || [])
+    .map((segment) => {
+      const coveredSlots = getBusinessHalfDaySlotsBetween(
+        segment.startAt,
+        segment.endAt
+      )
+        .map((slot) => slotByKey.get(slot.key))
+        .filter(Boolean)
+        .sort((left, right) => left.slotIndex - right.slotIndex);
+
+      if (!coveredSlots.length) {
+        return null;
+      }
+
+      const firstVisibleSlot = coveredSlots[0];
+      const lastVisibleSlot = coveredSlots[coveredSlots.length - 1];
+      const allocationDays = getSegmentAllocationDays(segment);
+      const leftPx = firstVisibleSlot.leftPx;
+      const widthPx =
+        lastVisibleSlot.leftPx + lastVisibleSlot.widthPx - firstVisibleSlot.leftPx;
+
+      return {
+        segment,
+        startIndex: firstVisibleSlot.slotIndex,
+        endIndex: lastVisibleSlot.slotIndex,
+        leftPx,
+        widthPx,
+        allocationDays,
+        title:
+          segment.label ||
+          `${formatDayValue(allocationDays)} j - ${formatSlotDate(
+            firstVisibleSlot.startAt
+          )}`,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.startIndex - right.startIndex || left.endIndex - right.endIndex);
+}
+
+function assignSegmentLanes(segmentBars) {
+  const laneEndByIndex = [];
+
+  return segmentBars.map((segmentBar) => {
+    let laneIndex = laneEndByIndex.findIndex((laneEnd) => laneEnd < segmentBar.startIndex);
+
+    if (laneIndex < 0) {
+      laneIndex = laneEndByIndex.length;
+      laneEndByIndex.push(segmentBar.endIndex);
+    } else {
+      laneEndByIndex[laneIndex] = segmentBar.endIndex;
+    }
+
+    return {
+      ...segmentBar,
+      laneIndex,
+    };
+  });
+}
+
+function renderSegmentBars(assignedBars) {
+  return assignedBars
+    .map((bar) => {
+      const topPx = 10 + bar.laneIndex * 32;
+      return `
+        <button
+          type="button"
+          class="charge-plan-segment-bar"
+          data-segment-id="${bar.segment.id}"
+          data-worker-id="${bar.segment.projectTeamLink}"
+          data-start-slot-index="${bar.startIndex}"
+          data-end-slot-index="${bar.endIndex}"
+          style="left:${bar.leftPx}px; width:${Math.max(bar.widthPx - 4, 8)}px; top:${topPx}px"
+          title="${escapeHtml(bar.title)}"
+        >
+          <span class="charge-plan-segment-handle is-start" data-resize-edge="start"></span>
+          <span class="charge-plan-segment-label">${escapeHtml(
+            bar.segment.label || `${formatDayValue(bar.allocationDays)} j`
+          )}</span>
+          <span class="charge-plan-segment-handle is-end" data-resize-edge="end"></span>
+        </button>
+      `;
+    })
+    .join("");
+}
+
+function renderWorkerRow(worker, months, visibleSlots) {
   const totalDays = getWorkerTotalDays(worker.provisionalDays);
-  const timelineWidth = months.reduce((sum, month) => sum + getMonthWidth(month), 0);
+  const timelineWidth = getTimelineWidth(months);
+  const visibleSegmentBars = buildVisibleSegmentBars(worker, visibleSlots);
+  const assignedBars = assignSegmentLanes(visibleSegmentBars);
+  const laneCount = Math.max(
+    1,
+    assignedBars.reduce((maxLane, bar) => Math.max(maxLane, bar.laneIndex + 1), 0)
+  );
+  const rowHeight = Math.max(72, 20 + laneCount * 32);
 
   return `
-    <div class="charge-plan-row" style="--timeline-width:${timelineWidth}px">
+    <div
+      class="charge-plan-row"
+      style="--timeline-width:${timelineWidth}px; --row-height:${rowHeight}px"
+    >
       <div class="charge-plan-cell charge-plan-cell--name">${escapeHtml(worker.name)}</div>
       <div class="charge-plan-cell charge-plan-cell--actions">
         <button class="delete-worker-btn" data-worker-id="${worker.id}">Supprimer</button>
@@ -128,7 +303,10 @@ function renderWorkerRow(worker, months) {
           data-worker-id="${worker.id}"
           data-timeline-width="${timelineWidth}"
         >
-          ${renderTrackSegments(months, worker)}
+          ${renderTrackGrid(visibleSlots)}
+          <div class="charge-plan-track-bars">
+            ${renderSegmentBars(assignedBars)}
+          </div>
           <div class="charge-plan-selection-preview" hidden>
             <span class="charge-plan-selection-label"></span>
           </div>
@@ -146,7 +324,7 @@ function renderTotalRow(project, months) {
     }, 0),
   }));
   const totalDays = monthsWithTotals.reduce((sum, month) => sum + month.totalDays, 0);
-  const timelineWidth = months.reduce((sum, month) => sum + getMonthWidth(month), 0);
+  const timelineWidth = getTimelineWidth(months);
 
   return `
     <div class="charge-plan-row charge-plan-row--total" style="--timeline-width:${timelineWidth}px">
@@ -157,7 +335,7 @@ function renderTotalRow(project, months) {
       )} j</strong></div>
       <div class="charge-plan-cell charge-plan-cell--timeline">
         <div class="charge-plan-track charge-plan-track--readonly">
-          ${renderTrackSegments(monthsWithTotals, null, { showTotals: true })}
+          ${renderTotalMonthSegments(monthsWithTotals, null, { showTotals: true })}
         </div>
       </div>
     </div>
@@ -172,10 +350,8 @@ export function renderChargePlanTimeline(dom, project, viewState) {
     APP_CONFIG.months
   );
   const groupedWorkers = groupWorkersByRole(project.workers);
-  const timelineWidth = displayedMonths.reduce(
-    (sum, month) => sum + getMonthWidth(month),
-    0
-  );
+  const timelineWidth = getTimelineWidth(displayedMonths);
+  const visibleSlots = buildVisibleSlots(displayedMonths);
 
   const rows = Object.entries(groupedWorkers)
     .map(
@@ -183,15 +359,19 @@ export function renderChargePlanTimeline(dom, project, viewState) {
         <div class="charge-plan-role-row" style="--timeline-width:${timelineWidth}px">
           <div class="charge-plan-role-cell">${escapeHtml(role)}</div>
         </div>
-        ${workers.map((worker) => renderWorkerRow(worker, displayedMonths)).join("")}
+        ${workers.map((worker) => renderWorkerRow(worker, displayedMonths, visibleSlots)).join("")}
       `
     )
     .join("");
 
   dom.chargePlanBoard.innerHTML = `
     <div class="charge-plan-helper">
-      Glissez sur une ligne pour affecter les jours sur la periode affichee.
-      Double-cliquez sur une ligne pour effacer la plage visible de la personne.
+      <span>
+        Glissez sur une ligne pour creer un segment en demi-journees.
+        Tirez les poignees d'un trait pour le redimensionner.
+        Double-cliquez sur un trait pour le supprimer.
+      </span>
+      <span class="charge-plan-feedback" hidden></span>
     </div>
     <div class="charge-plan-scroll">
       <div class="charge-plan-timeline" style="--timeline-width:${timelineWidth}px">
@@ -216,62 +396,82 @@ export function clearChargePlanTimeline(dom) {
   dom.chargePlanBoard.innerHTML = "";
 }
 
-function getTrackRectValues(trackEl) {
-  const rect = trackEl.getBoundingClientRect();
+function getTrackSlots(trackEl) {
+  return Array.from(trackEl.querySelectorAll(".charge-plan-slot"));
+}
+
+function buildSelectionFromSlots(firstSlot, lastSlot) {
+  if (!firstSlot || !lastSlot) return null;
+
+  const firstIndex = Number(firstSlot.dataset.slotIndex);
+  const lastIndex = Number(lastSlot.dataset.slotIndex);
+  const slotCount = lastIndex - firstIndex + 1;
+  const startPx = firstSlot.offsetLeft;
+  const endPx = lastSlot.offsetLeft + lastSlot.offsetWidth;
+
   return {
-    rect,
-    trackWidth: rect.width,
+    startSlotIndex: firstIndex,
+    endSlotIndex: lastIndex,
+    startPx,
+    endPx,
+    widthPx: Math.max(endPx - startPx, firstSlot.offsetWidth),
+    totalDays: slotCount / 2,
+    startDate: firstSlot.dataset.slotStart || "",
+    endDate: lastSlot.dataset.slotEnd || "",
   };
 }
 
-function getSelectionBounds(trackEl, startClientX, endClientX) {
-  const { rect, trackWidth } = getTrackRectValues(trackEl);
-  const rawStart = clamp(Math.min(startClientX, endClientX) - rect.left, 0, trackWidth);
-  const rawEnd = clamp(Math.max(startClientX, endClientX) - rect.left, 0, trackWidth);
+function getSlotIndexFromClientX(trackEl, clientX) {
+  const slotEls = getTrackSlots(trackEl);
+  if (!slotEls.length) return -1;
 
-  return {
-    startPx: rawStart,
-    endPx: rawEnd,
-    widthPx: Math.max(0, rawEnd - rawStart),
-  };
+  const trackRect = trackEl.getBoundingClientRect();
+  const x = clamp(clientX - trackRect.left, 0, trackRect.width - 1);
+
+  for (const slotEl of slotEls) {
+    const startX = slotEl.offsetLeft;
+    const endX = slotEl.offsetLeft + slotEl.offsetWidth;
+    if (x >= startX && x < endX) {
+      return Number(slotEl.dataset.slotIndex);
+    }
+  }
+
+  return Number(slotEls[slotEls.length - 1].dataset.slotIndex);
+}
+
+export function computeChargePlanSelectionFromSlotIndexes(
+  trackEl,
+  startSlotIndex,
+  endSlotIndex
+) {
+  const slotEls = getTrackSlots(trackEl);
+  if (!slotEls.length) return null;
+
+  const firstIndex = Math.min(startSlotIndex, endSlotIndex);
+  const lastIndex = Math.max(startSlotIndex, endSlotIndex);
+  const firstSlot = slotEls[firstIndex];
+  const lastSlot = slotEls[lastIndex];
+
+  return buildSelectionFromSlots(firstSlot, lastSlot);
+}
+
+export function getChargePlanSlotIndexAtClientX(trackEl, clientX) {
+  return getSlotIndexFromClientX(trackEl, clientX);
 }
 
 export function computeChargePlanSelection(trackEl, startClientX, endClientX) {
-  const bounds = getSelectionBounds(trackEl, startClientX, endClientX);
-  const monthSegments = Array.from(
-    trackEl.querySelectorAll(".charge-plan-month-segment")
-  ).map((segmentEl) => ({
-    monthKey: segmentEl.dataset.monthKey || "",
-    businessDayCount: Number(segmentEl.dataset.businessDays) || 0,
-    leftPx: segmentEl.offsetLeft,
-    rightPx: segmentEl.offsetLeft + segmentEl.offsetWidth,
-    widthPx: segmentEl.offsetWidth,
-  }));
+  const slotEls = getTrackSlots(trackEl);
+  if (!slotEls.length) return null;
 
-  const updates = monthSegments.map((segment) => {
-    const overlapPx =
-      Math.max(
-        0,
-        Math.min(bounds.endPx, segment.rightPx) - Math.max(bounds.startPx, segment.leftPx)
-      ) || 0;
+  const startIndex = getSlotIndexFromClientX(trackEl, startClientX);
+  const endIndex = getSlotIndexFromClientX(trackEl, endClientX);
+  if (startIndex < 0 || endIndex < 0) return null;
 
-    const rawDays =
-      overlapPx > 0 && segment.widthPx > 0
-        ? (overlapPx / segment.widthPx) * segment.businessDayCount
-        : 0;
-    const roundedDays = roundToStep(rawDays, APP_CONFIG.chargeTimeline.snapStepDays);
-
-    return {
-      monthKey: segment.monthKey,
-      provisionalDays: roundedDays,
-    };
-  });
-
-  return {
-    ...bounds,
-    totalDays: updates.reduce((sum, update) => sum + update.provisionalDays, 0),
-    updates,
-  };
+  const firstIndex = Math.min(startIndex, endIndex);
+  const lastIndex = Math.max(startIndex, endIndex);
+  const firstSlot = slotEls[firstIndex];
+  const lastSlot = slotEls[lastIndex];
+  return buildSelectionFromSlots(firstSlot, lastSlot);
 }
 
 export function updateChargePlanSelectionPreview(trackEl, selection) {
@@ -280,22 +480,27 @@ export function updateChargePlanSelectionPreview(trackEl, selection) {
   if (!previewEl || !labelEl || !selection) return;
 
   previewEl.hidden = false;
+  previewEl.classList.toggle("is-invalid", Boolean(selection.hasOverlap));
   previewEl.style.left = `${selection.startPx}px`;
-  previewEl.style.width = `${Math.max(selection.widthPx, 2)}px`;
-  labelEl.textContent = `${formatDayValue(selection.totalDays)} j`;
+  previewEl.style.width = `${Math.max(selection.widthPx, 8)}px`;
+  labelEl.textContent = selection.hasOverlap
+    ? "Chevauchement interdit"
+    : `${formatDayValue(selection.totalDays)} j`;
 }
 
 export function clearChargePlanSelectionPreview(trackEl) {
   const previewEl = trackEl.querySelector(".charge-plan-selection-preview");
   if (!previewEl) return;
   previewEl.hidden = true;
+  previewEl.classList.remove("is-invalid");
   previewEl.style.left = "0px";
   previewEl.style.width = "0px";
 }
 
-export function getEmptyChargePlanUpdates(trackEl) {
-  return Array.from(trackEl.querySelectorAll(".charge-plan-month-segment")).map((segmentEl) => ({
-    monthKey: segmentEl.dataset.monthKey || "",
-    provisionalDays: 0,
-  }));
+export function setChargePlanFeedback(boardEl, message = "") {
+  const feedbackEl = boardEl?.querySelector(".charge-plan-feedback");
+  if (!feedbackEl) return;
+
+  feedbackEl.textContent = String(message || "").trim();
+  feedbackEl.hidden = !feedbackEl.textContent;
 }

@@ -203,9 +203,18 @@ td input {
 }
 
 .charge-plan-helper {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
   margin-bottom: 10px;
   color: var(--color-text-muted);
   font-size: 0.95rem;
+}
+
+.charge-plan-feedback {
+  color: #b42318;
+  font-weight: 700;
 }
 
 .charge-plan-scroll {
@@ -216,19 +225,19 @@ td input {
 }
 
 .charge-plan-timeline {
-  min-width: calc(220px + 120px + 120px + var(--timeline-width));
+  min-width: calc(150px + 120px + 100px + var(--timeline-width));
 }
 
 .charge-plan-row,
 .charge-plan-role-row {
   display: grid;
   grid-template-columns: 150px 120px 100px var(--timeline-width);
-  min-width: calc(220px + 120px + 120px + var(--timeline-width));
+  min-width: calc(150px + 120px + 100px + var(--timeline-width));
 }
 
 .charge-plan-cell,
 .charge-plan-role-cell {
-  min-height: 72px;
+  min-height: var(--row-height, 72px);
   padding: 10px 12px;
   border-bottom: 1px solid rgba(0, 73, 144, 0.08);
   background: var(--color-surface);
@@ -288,11 +297,11 @@ td input {
 .charge-plan-header-track,
 .charge-plan-track {
   position: relative;
-  display: flex;
   min-width: var(--timeline-width);
 }
 
 .charge-plan-header-track {
+  display: flex;
   min-height: 90px;
 }
 
@@ -346,10 +355,41 @@ td input {
 }
 
 .charge-plan-track {
-  min-height: 72px;
+  min-height: var(--row-height, 72px);
   user-select: none;
   touch-action: none;
   background: rgba(0, 73, 144, 0.02);
+}
+
+.charge-plan-track-grid {
+  display: flex;
+  min-width: var(--timeline-width);
+  min-height: var(--row-height, 72px);
+}
+
+.charge-plan-slot {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: var(--row-height, 72px);
+  border-left: 1px solid rgba(0, 73, 144, 0.06);
+}
+
+.charge-plan-slot.is-month-start {
+  border-left-color: rgba(0, 73, 144, 0.18);
+}
+
+.charge-plan-slot.is-am {
+  background: rgba(0, 73, 144, 0.035);
+}
+
+.charge-plan-slot.is-pm {
+  background: rgba(0, 73, 144, 0.015);
+}
+
+.charge-plan-track-bars {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 
 .charge-plan-month-segment {
@@ -386,7 +426,53 @@ td input {
 }
 
 .charge-plan-track--readonly {
+  display: flex;
   pointer-events: none;
+}
+
+.charge-plan-segment-bar {
+  position: absolute;
+  height: 24px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+  border: 1px solid rgba(6, 60, 123, 0.16);
+  border-radius: 999px;
+  background: linear-gradient(135deg, #3b7ed8, #0f5bb8);
+  box-shadow: 0 10px 18px rgba(15, 91, 184, 0.18);
+  color: #fff;
+  cursor: pointer;
+  pointer-events: auto;
+  overflow: hidden;
+}
+
+.charge-plan-segment-bar:hover {
+  filter: brightness(1.03);
+}
+
+.charge-plan-segment-bar.is-resizing {
+  opacity: 0.38;
+}
+
+.charge-plan-segment-handle {
+  width: 10px;
+  height: 16px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  cursor: ew-resize;
+}
+
+.charge-plan-segment-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 .charge-plan-month-label,
@@ -410,8 +496,8 @@ td input {
 
 .charge-plan-selection-preview {
   position: absolute;
-  top: 8px;
-  bottom: 8px;
+  top: 10px;
+  bottom: 10px;
   z-index: 4;
   display: flex;
   justify-content: center;
@@ -421,6 +507,15 @@ td input {
   border-radius: 16px;
   background: rgba(0, 73, 144, 0.16);
   pointer-events: none;
+}
+
+.charge-plan-selection-preview.is-invalid {
+  border-color: rgba(180, 35, 24, 0.72);
+  background: rgba(180, 35, 24, 0.16);
+}
+
+.charge-plan-selection-preview.is-invalid .charge-plan-selection-label {
+  color: #b42318;
 }
 
 .charge-plan-selection-label {
@@ -479,6 +574,11 @@ canvas {
 
   .header,
   .project-header {
+    flex-direction: column;
+  }
+
+  .charge-plan-helper {
+    align-items: flex-start;
     flex-direction: column;
   }
 

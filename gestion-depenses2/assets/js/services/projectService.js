@@ -4,8 +4,13 @@ import {
   clamp,
   getMonthKeyFromRawMonth,
   toFiniteNumber,
+  toReferenceId,
   toText,
 } from "../utils/format.js";
+import {
+  getSegmentAllocationByMonth,
+  parseRawDateTime,
+} from "../utils/timeSegments.js";
 
 function parseBillingPercentageByMonth(rawValue, projectNumber) {
   if (!rawValue) return {};
@@ -45,11 +50,21 @@ function createProjectNumberIndex(projects) {
   return index;
 }
 
+function isPrevisionalSegment(segmentType) {
+  const normalizedType = toText(segmentType).toLowerCase();
+  return !normalizedType || normalizedType === "previsionnel";
+}
+
+function mergeMonthlyDays(target, monthKey, value) {
+  target[monthKey] = Math.round((toFiniteNumber(target[monthKey], 0) + value) * 100) / 100;
+}
+
 export function buildExpenseData({
   projectRows,
   budgetRows,
   projectTeamRows,
   timesheetRows,
+  timeSegmentRows,
   teamRows,
 }) {
   const columns = APP_CONFIG.grist.columns;
@@ -100,12 +115,47 @@ export function buildExpenseData({
       role: toText(row?.[columns.projectTeam.role]),
       name: toText(row?.[columns.projectTeam.name]),
       dailyRate: toFiniteNumber(row?.[columns.projectTeam.dailyRate], 0),
+      segments: [],
       provisionalDays: {},
       workedDays: {},
     };
 
     project.workers.push(worker);
     workersById.set(worker.id, worker);
+  });
+
+  (timeSegmentRows || []).forEach((row) => {
+    const workerId = toReferenceId(row?.[columns.timeSegment.projectTeamLink]);
+    const worker = workersById.get(workerId);
+    if (!worker) return;
+
+    const startAt = parseRawDateTime(row?.[columns.timeSegment.startDate]);
+    const endAt = parseRawDateTime(row?.[columns.timeSegment.endDate]);
+    if (!startAt || !endAt) return;
+
+    const segmentType = toText(row?.[columns.timeSegment.segmentType]);
+    if (!isPrevisionalSegment(segmentType)) return;
+
+    const segment = {
+      id: Number(row?.[columns.timeSegment.id]),
+      projectTeamLink: workerId,
+      startAt,
+      endAt,
+      segmentType,
+      allocationDays: toFiniteNumber(row?.[columns.timeSegment.allocationDays], 0),
+      label: toText(row?.[columns.timeSegment.label]),
+    };
+
+    worker.segments.push(segment);
+
+    const monthlyAllocation = getSegmentAllocationByMonth(segment);
+    Object.entries(monthlyAllocation).forEach(([monthKey, days]) => {
+      mergeMonthlyDays(worker.provisionalDays, monthKey, toFiniteNumber(days, 0));
+    });
+  });
+
+  workersById.forEach((worker) => {
+    worker.segments.sort((left, right) => left.startAt - right.startAt);
   });
 
   (timesheetRows || []).forEach((row) => {
@@ -116,12 +166,7 @@ export function buildExpenseData({
     const monthKey = getMonthKeyFromRawMonth(row?.[columns.timesheet.month]);
     if (!monthKey) return;
 
-    const provisionalDays = row?.[columns.timesheet.provisionalDays];
     const workedDays = row?.[columns.timesheet.workedDays];
-
-    if (provisionalDays != null) {
-      worker.provisionalDays[monthKey] = toFiniteNumber(provisionalDays, 0);
-    }
 
     if (workedDays != null) {
       worker.workedDays[monthKey] = toFiniteNumber(workedDays, 0);

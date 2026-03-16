@@ -3,11 +3,14 @@ import { APP_CONFIG } from "./config.js";
 import { getSelectedProject, setState, state } from "./state.js";
 import {
   addWorkerToProject,
+  createTimeSegment,
   createProjectWithBudget,
   fetchExpenseAppTables,
   initGrist,
   removeProjectWorker,
+  removeTimeSegment,
   saveBudgetChanges,
+  updateTimeSegment,
   updateProjectBillingPercentages,
   updateWorkerDailyRate,
   upsertTimesheetBatch,
@@ -24,8 +27,10 @@ import {
   clearChargePlanSelectionPreview,
   clearChargePlanTimeline,
   computeChargePlanSelection,
-  getEmptyChargePlanUpdates,
+  computeChargePlanSelectionFromSlotIndexes,
+  getChargePlanSlotIndexAtClientX,
   renderChargePlanTimeline,
+  setChargePlanFeedback,
   updateChargePlanSelectionPreview,
 } from "./ui/chargeTimeline.js";
 import { clearKpi, renderKpi } from "./ui/kpi.js";
@@ -45,6 +50,7 @@ import {
   toggleElement,
 } from "./ui/summary.js";
 import { clearTables, renderTables } from "./ui/tables.js";
+import { parseRawDateTime } from "./utils/timeSegments.js";
 
 let dom = null;
 let chargeTimelineDrag = null;
@@ -201,23 +207,96 @@ async function handleWorkerSave() {
   await loadData();
 }
 
-async function saveWorkerProvisionalUpdates(workerId, updates) {
+async function createChargePlanSegment(workerId, selection) {
+  if (!selection?.startDate || !selection?.endDate || selection.totalDays <= 0) {
+    return;
+  }
+
+  await createTimeSegment({
+    projectTeamLink: workerId,
+    startDate: selection.startDate,
+    endDate: selection.endDate,
+    allocationDays: selection.totalDays,
+    segmentType: "previsionnel",
+    label: "",
+  });
+
+  await loadData();
+}
+
+async function resizeChargePlanSegment(segmentId, selection) {
+  if (!selection?.startDate || !selection?.endDate || selection.totalDays <= 0) {
+    return;
+  }
+
+  await updateTimeSegment({
+    segmentId,
+    startDate: selection.startDate,
+    endDate: selection.endDate,
+    allocationDays: selection.totalDays,
+  });
+
+  await loadData();
+}
+
+function getSelectedProjectWorker(workerId) {
   const selectedProject = getSelectedProject();
-  const worker =
-    selectedProject?.workers.find((currentWorker) => currentWorker.id === workerId) || null;
-  if (!selectedProject || !worker) return;
+  if (!selectedProject) return null;
 
-  const normalizedUpdates = (updates || []).filter((update) => update.monthKey);
-  normalizedUpdates.forEach((update) => {
-    worker.provisionalDays[update.monthKey] = update.provisionalDays;
+  return (
+    selectedProject.workers.find((currentWorker) => currentWorker.id === workerId) || null
+  );
+}
+
+function selectionOverlapsWorkerSegments(worker, selection, options = {}) {
+  const ignoredSegmentId = Number(options.ignoreSegmentId);
+  if (!worker || !selection?.startDate || !selection?.endDate) {
+    return false;
+  }
+
+  const selectionStart = parseRawDateTime(selection.startDate);
+  const selectionEnd = parseRawDateTime(selection.endDate);
+  if (!selectionStart || !selectionEnd) {
+    return false;
+  }
+
+  return (worker.segments || []).some((segment) => {
+    if (Number(segment?.id) === ignoredSegmentId) {
+      return false;
+    }
+
+    const segmentStart = parseRawDateTime(segment?.startAt);
+    const segmentEnd = parseRawDateTime(segment?.endAt);
+    if (!segmentStart || !segmentEnd) {
+      return false;
+    }
+
+    return selectionStart < segmentEnd && selectionEnd > segmentStart;
   });
+}
 
-  await upsertTimesheetBatch({
-    workerId,
-    updates: normalizedUpdates,
-  });
+function annotateChargePlanSelection(workerId, selection, options = {}) {
+  if (!selection) return null;
 
-  renderApp();
+  const worker = getSelectedProjectWorker(workerId);
+  return {
+    ...selection,
+    hasOverlap: selectionOverlapsWorkerSegments(worker, selection, options),
+  };
+}
+
+function syncChargePlanFeedback(selection) {
+  if (!dom?.chargePlanBoard) return;
+
+  if (selection?.hasOverlap) {
+    setChargePlanFeedback(
+      dom.chargePlanBoard,
+      "Impossible de definir un segment qui chevauche deja une autre barre pour cette personne."
+    );
+    return;
+  }
+
+  setChargePlanFeedback(dom.chargePlanBoard, "");
 }
 
 function handleProjectSelectionChange() {
@@ -328,30 +407,120 @@ function handleChargePlanPointerDown(event) {
   const trackEl = event.target.closest(".charge-plan-track");
   if (!trackEl || trackEl.classList.contains("charge-plan-track--readonly")) return;
 
+  const resizeHandleEl = event.target.closest(".charge-plan-segment-handle");
+  const segmentEl = event.target.closest(".charge-plan-segment-bar");
+
   event.preventDefault();
+
+  if (resizeHandleEl && segmentEl instanceof HTMLElement) {
+    const workerId = Number(segmentEl.dataset.workerId);
+    const segmentId = Number(segmentEl.dataset.segmentId);
+    const edge = resizeHandleEl.dataset.resizeEdge || "";
+    const startSlotIndex = Number(segmentEl.dataset.startSlotIndex);
+    const endSlotIndex = Number(segmentEl.dataset.endSlotIndex);
+
+    if (
+      !Number.isInteger(workerId) ||
+      !Number.isInteger(segmentId) ||
+      !Number.isInteger(startSlotIndex) ||
+      !Number.isInteger(endSlotIndex) ||
+      (edge !== "start" && edge !== "end")
+    ) {
+      return;
+    }
+
+    const initialSelection = annotateChargePlanSelection(
+      workerId,
+      computeChargePlanSelectionFromSlotIndexes(trackEl, startSlotIndex, endSlotIndex),
+      { ignoreSegmentId: segmentId }
+    );
+
+    setChargePlanFeedback(dom.chargePlanBoard, "");
+    segmentEl.classList.add("is-resizing");
+    chargeTimelineDrag = {
+      mode: "resize",
+      trackEl,
+      workerId,
+      segmentId,
+      segmentEl,
+      edge,
+      fixedSlotIndex: edge === "start" ? endSlotIndex : startSlotIndex,
+      currentSelection: initialSelection,
+    };
+
+    syncChargePlanFeedback(initialSelection);
+    updateChargePlanSelectionPreview(trackEl, initialSelection);
+    return;
+  }
+
+  if (segmentEl) return;
 
   const workerId = Number(trackEl.dataset.workerId);
   if (!Number.isInteger(workerId)) return;
 
+  setChargePlanFeedback(dom.chargePlanBoard, "");
+
   chargeTimelineDrag = {
+    mode: "create",
     trackEl,
     workerId,
     startClientX: event.clientX,
-    currentSelection: computeChargePlanSelection(trackEl, event.clientX, event.clientX),
+    currentSelection: annotateChargePlanSelection(
+      workerId,
+      computeChargePlanSelection(trackEl, event.clientX, event.clientX)
+    ),
   };
 
+  syncChargePlanFeedback(chargeTimelineDrag.currentSelection);
   updateChargePlanSelectionPreview(trackEl, chargeTimelineDrag.currentSelection);
 }
 
 function handleChargePlanPointerMove(event) {
   if (!chargeTimelineDrag) return;
 
-  chargeTimelineDrag.currentSelection = computeChargePlanSelection(
-    chargeTimelineDrag.trackEl,
-    chargeTimelineDrag.startClientX,
-    event.clientX
-  );
+  if (chargeTimelineDrag.mode === "resize") {
+    const movingSlotIndex = getChargePlanSlotIndexAtClientX(
+      chargeTimelineDrag.trackEl,
+      event.clientX
+    );
+    if (movingSlotIndex < 0) return;
 
+    let startSlotIndex =
+      chargeTimelineDrag.edge === "start"
+        ? Math.min(movingSlotIndex, chargeTimelineDrag.fixedSlotIndex)
+        : chargeTimelineDrag.fixedSlotIndex;
+    let endSlotIndex =
+      chargeTimelineDrag.edge === "end"
+        ? Math.max(movingSlotIndex, chargeTimelineDrag.fixedSlotIndex)
+        : chargeTimelineDrag.fixedSlotIndex;
+
+    if (chargeTimelineDrag.edge === "start") {
+      endSlotIndex = chargeTimelineDrag.fixedSlotIndex;
+    } else {
+      startSlotIndex = chargeTimelineDrag.fixedSlotIndex;
+    }
+
+    chargeTimelineDrag.currentSelection = annotateChargePlanSelection(
+      chargeTimelineDrag.workerId,
+      computeChargePlanSelectionFromSlotIndexes(
+        chargeTimelineDrag.trackEl,
+        startSlotIndex,
+        endSlotIndex
+      ),
+      { ignoreSegmentId: chargeTimelineDrag.segmentId }
+    );
+  } else {
+    chargeTimelineDrag.currentSelection = annotateChargePlanSelection(
+      chargeTimelineDrag.workerId,
+      computeChargePlanSelection(
+        chargeTimelineDrag.trackEl,
+        chargeTimelineDrag.startClientX,
+        event.clientX
+      )
+    );
+  }
+
+  syncChargePlanFeedback(chargeTimelineDrag.currentSelection);
   updateChargePlanSelectionPreview(
     chargeTimelineDrag.trackEl,
     chargeTimelineDrag.currentSelection
@@ -362,30 +531,46 @@ async function handleChargePlanPointerUp() {
   if (!chargeTimelineDrag) return;
 
   const { trackEl, workerId, currentSelection } = chargeTimelineDrag;
+  if (chargeTimelineDrag.segmentEl instanceof HTMLElement) {
+    chargeTimelineDrag.segmentEl.classList.remove("is-resizing");
+  }
   clearChargePlanSelectionPreview(trackEl);
+  const dragState = chargeTimelineDrag;
   chargeTimelineDrag = null;
 
   if (
     !currentSelection ||
-    currentSelection.widthPx <= 0 ||
     currentSelection.totalDays <= 0
   ) {
+    setChargePlanFeedback(dom.chargePlanBoard, "");
     return;
   }
 
-  await saveWorkerProvisionalUpdates(workerId, currentSelection.updates);
+  if (currentSelection.hasOverlap) {
+    syncChargePlanFeedback(currentSelection);
+    return;
+  }
+
+  setChargePlanFeedback(dom.chargePlanBoard, "");
+  if (dragState.mode === "resize") {
+    await resizeChargePlanSegment(dragState.segmentId, currentSelection);
+    return;
+  }
+
+  await createChargePlanSegment(workerId, currentSelection);
 }
 
 async function handleChargePlanDoubleClick(event) {
   if (!(event.target instanceof Element)) return;
+  const segmentEl = event.target.closest(".charge-plan-segment-bar");
+  if (!segmentEl) return;
 
-  const trackEl = event.target.closest(".charge-plan-track");
-  if (!trackEl || trackEl.classList.contains("charge-plan-track--readonly")) return;
+  const segmentId = Number(segmentEl.dataset.segmentId);
+  if (!Number.isInteger(segmentId)) return;
 
-  const workerId = Number(trackEl.dataset.workerId);
-  if (!Number.isInteger(workerId)) return;
-
-  await saveWorkerProvisionalUpdates(workerId, getEmptyChargePlanUpdates(trackEl));
+  setChargePlanFeedback(dom.chargePlanBoard, "");
+  await removeTimeSegment(segmentId);
+  await loadData();
 }
 
 async function handlePaste(event) {
@@ -613,7 +798,11 @@ function bindEvents() {
   });
   window.addEventListener("pointercancel", () => {
     if (!chargeTimelineDrag) return;
+    if (chargeTimelineDrag.segmentEl instanceof HTMLElement) {
+      chargeTimelineDrag.segmentEl.classList.remove("is-resizing");
+    }
     clearChargePlanSelectionPreview(chargeTimelineDrag.trackEl);
+    setChargePlanFeedback(dom.chargePlanBoard, "");
     chargeTimelineDrag = null;
   });
 }
