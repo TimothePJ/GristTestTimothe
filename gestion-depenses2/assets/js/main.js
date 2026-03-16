@@ -57,13 +57,25 @@ import { parseRawDateTime } from "./utils/timeSegments.js";
 let dom = null;
 let chargeTimelineDrag = null;
 let chargePlanPan = null;
-
-const CHARGE_PLAN_ZOOM_ORDER = ["week", "month", "year"];
+let chargePlanRangeRefreshPending = false;
 const chargePlanViewport = {
   scrollRatio: 0,
   pendingAnchorRatio: null,
   pendingClientOffset: 0,
 };
+let pendingChargePlanFocusDate = "";
+let pendingChargePlanFocusAlign = "center";
+
+function toDateInputValue(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 function cloneBudgetLines(lines) {
   return JSON.parse(JSON.stringify(lines || []));
@@ -75,6 +87,9 @@ function syncStateToProjectStart(project) {
     setState({
       selectedYear: earliestMonth.year,
       selectedMonth: earliestMonth.monthIndex,
+      chargePlanAnchorDate: `${earliestMonth.year}-${String(
+        earliestMonth.monthIndex + 1
+      ).padStart(2, "0")}-01`,
     });
     return;
   }
@@ -83,6 +98,7 @@ function syncStateToProjectStart(project) {
   setState({
     selectedYear: now.getFullYear(),
     selectedMonth: now.getMonth(),
+    chargePlanAnchorDate: toDateInputValue(now),
   });
 }
 
@@ -110,6 +126,8 @@ function renderApp() {
     selectedMonth: state.selectedMonth,
     monthSpan: state.monthSpan,
     chargePlanZoomMode: state.chargePlanZoomMode,
+    chargePlanZoomScale: state.chargePlanZoomScale,
+    chargePlanAnchorDate: state.chargePlanAnchorDate,
   });
   renderTables(dom, selectedProject, {
     selectedYear: state.selectedYear,
@@ -348,8 +366,35 @@ function restoreChargePlanViewport() {
 
   requestAnimationFrame(() => {
     const maxScrollLeft = Math.max(0, scrollEl.scrollWidth - scrollEl.clientWidth);
+    let didRestoreSpecificPosition = false;
 
-    if (Number.isFinite(chargePlanViewport.pendingAnchorRatio)) {
+    if (pendingChargePlanFocusDate) {
+      const targetSlot = scrollEl.querySelector(
+        `.charge-plan-slot[data-date-key="${pendingChargePlanFocusDate}"][data-slot-part="am"]`
+      );
+      if (targetSlot instanceof HTMLElement) {
+        let nextScrollLeft =
+          targetSlot.offsetLeft - scrollEl.clientWidth / 2 + targetSlot.offsetWidth;
+
+        if (pendingChargePlanFocusAlign === "left") {
+          nextScrollLeft = targetSlot.offsetLeft - scrollEl.clientWidth * 0.25;
+        } else if (pendingChargePlanFocusAlign === "right") {
+          nextScrollLeft = targetSlot.offsetLeft - scrollEl.clientWidth * 0.75;
+        }
+
+        scrollEl.scrollLeft = clamp(nextScrollLeft, 0, maxScrollLeft);
+        pendingChargePlanFocusDate = "";
+        pendingChargePlanFocusAlign = "center";
+        chargePlanViewport.pendingAnchorRatio = null;
+        chargePlanViewport.pendingClientOffset = 0;
+        didRestoreSpecificPosition = true;
+      } else {
+        pendingChargePlanFocusDate = "";
+        pendingChargePlanFocusAlign = "center";
+      }
+    }
+
+    if (!didRestoreSpecificPosition && Number.isFinite(chargePlanViewport.pendingAnchorRatio)) {
       const absoluteOffset =
         chargePlanViewport.pendingAnchorRatio * Math.max(scrollEl.scrollWidth, 1);
       scrollEl.scrollLeft = clamp(
@@ -359,17 +404,139 @@ function restoreChargePlanViewport() {
       );
       chargePlanViewport.pendingAnchorRatio = null;
       chargePlanViewport.pendingClientOffset = 0;
-      captureChargePlanViewport(scrollEl);
-      return;
+      didRestoreSpecificPosition = true;
     }
 
-    scrollEl.scrollLeft = clamp(
-      chargePlanViewport.scrollRatio * maxScrollLeft,
-      0,
-      maxScrollLeft
-    );
+    if (!didRestoreSpecificPosition) {
+      scrollEl.scrollLeft = clamp(
+        chargePlanViewport.scrollRatio * maxScrollLeft,
+        0,
+        maxScrollLeft
+      );
+    }
+
     captureChargePlanViewport(scrollEl);
+    if (chargePlanPan) {
+      chargePlanPan.scrollEl = scrollEl;
+      chargePlanPan.startClientX = chargePlanPan.lastClientX;
+      chargePlanPan.startScrollLeft = scrollEl.scrollLeft;
+      chargePlanPan.isRebinding = false;
+      scrollEl.classList.add("is-panning");
+    }
   });
+}
+
+function getChargePlanViewportCenterDate(scrollEl) {
+  if (!(scrollEl instanceof HTMLElement)) return "";
+
+  const targetX = scrollEl.scrollLeft + scrollEl.clientWidth / 2;
+  const daySlots = Array.from(
+    scrollEl.querySelectorAll('.charge-plan-slot[data-slot-part="am"]')
+  );
+
+  for (const slotEl of daySlots) {
+    const slotMidX = slotEl.offsetLeft + slotEl.offsetWidth / 2;
+    if (slotMidX >= targetX) {
+      return String(slotEl.dataset.dateKey || "").trim();
+    }
+  }
+
+  const lastSlot = daySlots[daySlots.length - 1];
+  return String(lastSlot?.dataset?.dateKey || "").trim();
+}
+
+function getChargePlanViewportEdgeDate(scrollEl, side = "left") {
+  if (!(scrollEl instanceof HTMLElement)) return "";
+
+  const leftBound = scrollEl.scrollLeft;
+  const rightBound = scrollEl.scrollLeft + scrollEl.clientWidth;
+  const daySlots = Array.from(
+    scrollEl.querySelectorAll('.charge-plan-slot[data-slot-part="am"]')
+  );
+
+  if (side === "right") {
+    for (let index = daySlots.length - 1; index >= 0; index -= 1) {
+      const slotEl = daySlots[index];
+      const slotMidX = slotEl.offsetLeft + slotEl.offsetWidth / 2;
+      if (slotMidX <= rightBound) {
+        return String(slotEl.dataset.dateKey || "").trim();
+      }
+    }
+  } else {
+    for (const slotEl of daySlots) {
+      const slotMidX = slotEl.offsetLeft + slotEl.offsetWidth / 2;
+      if (slotMidX >= leftBound) {
+        return String(slotEl.dataset.dateKey || "").trim();
+      }
+    }
+  }
+
+  const fallbackSlot = side === "right" ? daySlots[daySlots.length - 1] : daySlots[0];
+  return String(fallbackSlot?.dataset?.dateKey || "").trim();
+}
+
+function queueChargePlanRangeRefresh({ anchorDate, focusDate, focusAlign = "center" }) {
+  const normalizedAnchorDate = String(anchorDate || "").trim();
+  const normalizedFocusDate = String(focusDate || normalizedAnchorDate).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedAnchorDate)) {
+    return;
+  }
+
+  if (
+    chargePlanRangeRefreshPending ||
+    normalizedAnchorDate === String(state.chargePlanAnchorDate || "").trim()
+  ) {
+    return;
+  }
+
+  chargePlanRangeRefreshPending = true;
+  pendingChargePlanFocusDate = normalizedFocusDate;
+  pendingChargePlanFocusAlign = focusAlign;
+  if (chargePlanPan) {
+    chargePlanPan.isRebinding = true;
+  }
+
+  requestAnimationFrame(() => {
+    chargePlanRangeRefreshPending = false;
+    setState({ chargePlanAnchorDate: normalizedAnchorDate });
+    renderApp();
+  });
+}
+
+function maybeExtendChargePlanRange(scrollEl, direction = "") {
+  if (!(scrollEl instanceof HTMLElement)) return;
+  if (chargeTimelineDrag || chargePlanRangeRefreshPending) return;
+
+  const maxScrollLeft = Math.max(0, scrollEl.scrollWidth - scrollEl.clientWidth);
+  if (maxScrollLeft <= 0) return;
+
+  const threshold = APP_CONFIG.chargeTimeline.edgeNavigationThresholdPx;
+  const nearLeftEdge = scrollEl.scrollLeft <= threshold;
+  const nearRightEdge = maxScrollLeft - scrollEl.scrollLeft <= threshold;
+
+  if (direction === "earlier" && nearLeftEdge) {
+    const edgeDate = getChargePlanViewportEdgeDate(scrollEl, "left");
+    if (!edgeDate) return;
+
+    queueChargePlanRangeRefresh({
+      anchorDate: edgeDate,
+      focusDate: edgeDate,
+      focusAlign: "left",
+    });
+    return;
+  }
+
+  if (direction === "later" && nearRightEdge) {
+    const edgeDate = getChargePlanViewportEdgeDate(scrollEl, "right");
+    if (!edgeDate) return;
+
+    queueChargePlanRangeRefresh({
+      anchorDate: edgeDate,
+      focusDate: edgeDate,
+      focusAlign: "right",
+    });
+    return;
+  }
 }
 
 function setChargePlanZoomMode(nextMode, options = {}) {
@@ -384,7 +551,51 @@ function setChargePlanZoomMode(nextMode, options = {}) {
     rememberChargePlanCenterAnchor(scrollEl);
   }
 
-  setState({ chargePlanZoomMode: nextMode });
+  setState({
+    chargePlanZoomMode: nextMode,
+    chargePlanZoomScale: APP_CONFIG.chargeTimeline.defaultZoomScale,
+  });
+  renderApp();
+}
+
+function setChargePlanZoomScale(nextScale, options = {}) {
+  const normalizedScale = clamp(
+    Number(nextScale) || APP_CONFIG.chargeTimeline.defaultZoomScale,
+    APP_CONFIG.chargeTimeline.minZoomScale,
+    APP_CONFIG.chargeTimeline.maxZoomScale
+  );
+
+  if (Math.abs(normalizedScale - state.chargePlanZoomScale) < 0.001) {
+    return;
+  }
+
+  const scrollEl = getChargePlanScrollElement();
+  if (options.anchorClientX != null && scrollEl) {
+    rememberChargePlanAnchor(scrollEl, options.anchorClientX);
+  } else {
+    rememberChargePlanCenterAnchor(scrollEl);
+  }
+
+  setState({ chargePlanZoomScale: normalizedScale });
+  renderApp();
+}
+
+function navigateChargePlanToDate(rawDateValue) {
+  const dateValue = String(rawDateValue || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+    return;
+  }
+
+  const targetDate = new Date(`${dateValue}T12:00:00`);
+  if (Number.isNaN(targetDate.getTime())) {
+    return;
+  }
+
+  pendingChargePlanFocusDate = dateValue;
+  pendingChargePlanFocusAlign = "center";
+  setState({
+    chargePlanAnchorDate: dateValue,
+  });
   renderApp();
 }
 
@@ -542,24 +753,16 @@ function handleChargePlanHeaderWheel(event) {
 
   const headerTrack = event.target.closest(".charge-plan-header-track");
   if (!(headerTrack instanceof HTMLElement)) return;
+  if (chargePlanPan || chargeTimelineDrag) return;
   event.preventDefault();
 
-  const currentZoomIndex = CHARGE_PLAN_ZOOM_ORDER.indexOf(state.chargePlanZoomMode);
-  const safeCurrentZoomIndex = currentZoomIndex >= 0 ? currentZoomIndex : 1;
-  const direction = event.deltaY < 0 ? -1 : 1;
-  const nextZoomIndex = clamp(
-    safeCurrentZoomIndex + direction,
-    0,
-    CHARGE_PLAN_ZOOM_ORDER.length - 1
-  );
-  const nextZoomMode = CHARGE_PLAN_ZOOM_ORDER[nextZoomIndex];
-
-  if (nextZoomMode === state.chargePlanZoomMode) {
-    return;
-  }
+  const nextScale =
+    event.deltaY < 0
+      ? state.chargePlanZoomScale * APP_CONFIG.chargeTimeline.wheelZoomFactor
+      : state.chargePlanZoomScale / APP_CONFIG.chargeTimeline.wheelZoomFactor;
 
   closeChargePlanContextMenu();
-  setChargePlanZoomMode(nextZoomMode, { anchorClientX: event.clientX });
+  setChargePlanZoomScale(nextScale, { anchorClientX: event.clientX });
 }
 
 function handleChargePlanZoomButtonClick(event) {
@@ -568,12 +771,32 @@ function handleChargePlanZoomButtonClick(event) {
   if (!target.classList.contains("charge-plan-zoom-btn")) return;
 
   const nextZoomMode = target.dataset.chargePlanZoom || "";
-  if (!nextZoomMode || nextZoomMode === state.chargePlanZoomMode) {
+  if (!nextZoomMode) {
     return;
   }
 
   closeChargePlanContextMenu();
   setChargePlanZoomMode(nextZoomMode);
+}
+
+function handleChargePlanDateControls(event) {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+
+  const todayButton = target.closest(".charge-plan-date-jump-btn");
+  if (todayButton instanceof HTMLButtonElement) {
+    closeChargePlanContextMenu();
+    navigateChargePlanToDate(toDateInputValue(new Date()));
+  }
+}
+
+function handleChargePlanDateInputChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  if (!target.classList.contains("charge-plan-date-input")) return;
+
+  closeChargePlanContextMenu();
+  navigateChargePlanToDate(target.value);
 }
 
 function handleChargePlanPointerDown(event) {
@@ -592,6 +815,9 @@ function handleChargePlanPointerDown(event) {
       scrollEl,
       startClientX: event.clientX,
       startScrollLeft: scrollEl.scrollLeft,
+      lastClientX: event.clientX,
+      isRebinding: false,
+      direction: "",
     };
     scrollEl.classList.add("is-panning");
     return;
@@ -683,9 +909,20 @@ function handleChargePlanPointerDown(event) {
 
 function handleChargePlanPointerMove(event) {
   if (chargePlanPan) {
+    if (chargePlanPan.isRebinding) {
+      return;
+    }
+
+    chargePlanPan.lastClientX = event.clientX;
     const deltaX = event.clientX - chargePlanPan.startClientX;
+    if (deltaX > 0) {
+      chargePlanPan.direction = "earlier";
+    } else if (deltaX < 0) {
+      chargePlanPan.direction = "later";
+    }
     chargePlanPan.scrollEl.scrollLeft = chargePlanPan.startScrollLeft - deltaX;
     captureChargePlanViewport(chargePlanPan.scrollEl);
+    maybeExtendChargePlanRange(chargePlanPan.scrollEl, chargePlanPan.direction);
     return;
   }
 
@@ -744,6 +981,7 @@ async function handleChargePlanPointerUp() {
   if (chargePlanPan) {
     chargePlanPan.scrollEl.classList.remove("is-panning");
     captureChargePlanViewport(chargePlanPan.scrollEl);
+    maybeExtendChargePlanRange(chargePlanPan.scrollEl, chargePlanPan.direction);
     chargePlanPan = null;
   }
 
@@ -1003,6 +1241,8 @@ function bindEvents() {
   dom.realExpenseTableBody.addEventListener("paste", handlePaste, true);
   dom.chargePlanBoard.addEventListener("click", handleDeleteWorker);
   dom.chargePlanBoard.addEventListener("click", handleChargePlanZoomButtonClick);
+  dom.chargePlanBoard.addEventListener("click", handleChargePlanDateControls);
+  dom.chargePlanBoard.addEventListener("change", handleChargePlanDateInputChange);
   dom.chargePlanBoard.addEventListener("click", (event) => {
     handleChargePlanContextAction(event).catch((error) => {
       console.error("Erreur action menu timeline :", error);

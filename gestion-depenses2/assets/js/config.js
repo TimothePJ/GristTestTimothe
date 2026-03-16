@@ -7,6 +7,13 @@ export const APP_CONFIG = {
     after: 5,
   },
   chargeTimeline: {
+    visibleMonthSpan: 12,
+    anchorMonthOffset: 4,
+    edgeNavigationThresholdPx: 96,
+    defaultZoomScale: 1,
+    minZoomScale: 0.55,
+    maxZoomScale: 2.8,
+    wheelZoomFactor: 1.12,
     zoomModes: {
       week: {
         label: "Semaine",

@@ -123,6 +123,17 @@ input {
   margin-bottom: 20px;
 }
 
+.toolbar label[for="year-select"],
+.toolbar #year-select,
+.toolbar label[for="month-span-input"],
+.toolbar #month-span-input,
+.toolbar #prev-month-btn,
+.toolbar #next-month-btn,
+.prev-month-table-btn,
+.next-month-table-btn {
+  display: none;
+}
+
 .toolbar select,
 .toolbar input,
 .toolbar button,
@@ -228,9 +239,9 @@ td input {
 .charge-plan-view-controls {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   flex: 0 0 auto;
-  white-space: nowrap;
 }
 
 .charge-plan-view-label {
@@ -267,6 +278,34 @@ td input {
   background: var(--color-primary);
   color: #fff;
   box-shadow: 0 8px 16px rgba(0, 73, 144, 0.18);
+}
+
+.charge-plan-date-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.charge-plan-date-input {
+  width: auto;
+  min-width: 148px;
+  margin: 0;
+}
+
+.charge-plan-date-jump-btn {
+  padding: 8px 12px;
+  border: 1px solid rgba(0, 73, 144, 0.16);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--color-primary);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.charge-plan-date-jump-btn:hover {
+  background: rgba(0, 73, 144, 0.06);
 }
 
 .charge-plan-context-menu {
@@ -360,18 +399,34 @@ td input {
   position: sticky;
   z-index: 12;
   box-shadow: 1px 0 0 rgba(0, 73, 144, 0.08);
+  background: var(--color-surface);
 }
 
 .charge-plan-cell--name {
   left: 0;
+  width: 150px;
+  min-width: 150px;
+  max-width: 150px;
+  z-index: 15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .charge-plan-cell--actions {
   left: 150px;
+  width: 120px;
+  min-width: 120px;
+  max-width: 120px;
+  z-index: 14;
 }
 
 .charge-plan-cell--total {
   left: 270px;
+  width: 100px;
+  min-width: 100px;
+  max-width: 100px;
+  z-index: 13;
 }
 
 .charge-plan-row--header .charge-plan-cell--name,
@@ -381,12 +436,25 @@ td input {
 }
 
 .charge-plan-role-cell {
-  grid-column: 1 / -1;
   min-height: auto;
   padding-block: 12px;
+  padding-inline: 16px;
   font-weight: 700;
   color: #fff;
   background: rgba(0, 73, 144, 0.9);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.charge-plan-role-cell--label {
+  grid-column: 1 / 4;
+  position: sticky;
+  left: 0;
+  z-index: 14;
+  box-shadow: 1px 0 0 rgba(0, 73, 144, 0.12), 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.charge-plan-role-cell--filler {
+  grid-column: 4 / 5;
 }
 
 .charge-plan-cell--timeline {
@@ -744,6 +812,16 @@ canvas {
   .charge-plan-view-controls {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .charge-plan-date-nav {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .charge-plan-date-input {
+    min-width: 0;
+    flex: 1 1 auto;
   }
 
   .charge-plan-zoom-buttons {
