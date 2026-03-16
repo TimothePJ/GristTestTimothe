@@ -111,7 +111,7 @@ export function getHalfDaySlotRange(baseDate, part) {
   };
 }
 
-export function getBusinessHalfDaySlotsBetween(startValue, endValue) {
+function getHalfDaySlotsBetween(startValue, endValue, { includeWeekends = false } = {}) {
   const startAt = parseRawDateTime(startValue);
   const endAt = parseRawDateTime(endValue);
   if (!startAt || !endAt) return [];
@@ -131,7 +131,8 @@ export function getBusinessHalfDaySlotsBetween(startValue, endValue) {
   const slots = [];
 
   while (cursor <= lastDay) {
-    if (isBusinessDay(cursor)) {
+    const workingDay = isBusinessDay(cursor);
+    if (includeWeekends || workingDay) {
       HALF_DAY_PARTS.forEach((part) => {
         const slotRange = getHalfDaySlotRange(cursor, part);
         if (!slotRange) return;
@@ -143,6 +144,7 @@ export function getBusinessHalfDaySlotsBetween(startValue, endValue) {
             date: new Date(cursor),
             part,
             label: slotRange.label,
+            isBusinessDay: workingDay,
             startAt: slotRange.startAt,
             endAt: slotRange.endAt,
           });
@@ -154,6 +156,18 @@ export function getBusinessHalfDaySlotsBetween(startValue, endValue) {
   }
 
   return slots;
+}
+
+export function getBusinessHalfDaySlotsBetween(startValue, endValue) {
+  return getHalfDaySlotsBetween(startValue, endValue, {
+    includeWeekends: false,
+  });
+}
+
+export function getCalendarHalfDaySlotsBetween(startValue, endValue) {
+  return getHalfDaySlotsBetween(startValue, endValue, {
+    includeWeekends: true,
+  });
 }
 
 export function getSegmentAllocationDays(segment) {

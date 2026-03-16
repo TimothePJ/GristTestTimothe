@@ -3,8 +3,9 @@ import { getWorkerTotalDays, groupWorkersByRole } from "../services/projectServi
 import { buildDisplayedMonths, clamp, formatNumber, toFiniteNumber } from "../utils/format.js";
 import {
   HALF_DAY_PARTS,
+  isBusinessDay,
+  getCalendarHalfDaySlotsBetween,
   createHalfDaySlotKey,
-  getBusinessHalfDaySlotsBetween,
   getHalfDaySlotRange,
   getSegmentAllocationDays,
 } from "../utils/timeSegments.js";
@@ -33,7 +34,7 @@ function formatSlotDate(date) {
 
 function getMonthWidth(month) {
   const widthFromDays =
-    month.businessDayCount * APP_CONFIG.chargeTimeline.businessDayWidth;
+    month.calendarDayCount * APP_CONFIG.chargeTimeline.businessDayWidth;
   return Math.max(APP_CONFIG.chargeTimeline.minimumMonthWidth, widthFromDays);
 }
 
@@ -49,13 +50,14 @@ function buildVisibleSlots(months) {
   months.forEach((month) => {
     const monthWidth = getMonthWidth(month);
     const dayWidth =
-      month.businessDayCount > 0
-        ? monthWidth / month.businessDayCount
+      month.calendarDayCount > 0
+        ? monthWidth / month.calendarDayCount
         : APP_CONFIG.chargeTimeline.minimumMonthWidth;
     const slotWidth = dayWidth / HALF_DAY_PARTS.length;
-    const lastDayIndex = Math.max(0, (month.businessDayDates || []).length - 1);
+    const lastDayIndex = Math.max(0, (month.calendarDayDates || []).length - 1);
 
-    (month.businessDayDates || []).forEach((date, dayIndex) => {
+    (month.calendarDayDates || []).forEach((date, dayIndex) => {
+      const workingDay = isBusinessDay(date);
       HALF_DAY_PARTS.forEach((part, partIndex) => {
         const slotRange = getHalfDaySlotRange(date, part);
         if (!slotRange) return;
@@ -68,6 +70,8 @@ function buildVisibleSlots(months) {
           date,
           startAt: slotRange.startAt,
           endAt: slotRange.endAt,
+          isWorkingDay: workingDay,
+          isWeekend: !workingDay,
           leftPx: nextLeftPx,
           widthPx: slotWidth,
           isMonthStart: dayIndex === 0 && partIndex === 0,
@@ -86,19 +90,23 @@ function buildVisibleSlots(months) {
 function renderHeaderMonth(month) {
   const monthWidth = getMonthWidth(month);
   const dayWidth =
-    month.businessDayCount > 0
-      ? monthWidth / month.businessDayCount
+    month.calendarDayCount > 0
+      ? monthWidth / month.calendarDayCount
       : APP_CONFIG.chargeTimeline.minimumMonthWidth;
 
-  const dayTicks = (month.businessDayDates || [])
+  const dayTicks = (month.calendarDayDates || [])
     .map((date, index) => {
+      const weekend = !isBusinessDay(date);
       const showLabel =
         index === 0 ||
-        index === month.businessDayDates.length - 1 ||
+        index === month.calendarDayDates.length - 1 ||
         index % 5 === 0;
 
       return `
-        <span class="charge-plan-day-tick" style="width:${dayWidth}px">
+        <span
+          class="charge-plan-day-tick ${weekend ? "is-weekend" : ""}"
+          style="width:${dayWidth}px"
+        >
           ${showLabel ? `<span>${date.getDate()}</span>` : ""}
         </span>
       `;
@@ -174,11 +182,14 @@ function renderTrackGrid(visibleSlots) {
             <span
               class="charge-plan-slot ${slot.part === "am" ? "is-am" : "is-pm"} ${
                 slot.isMonthStart ? "is-month-start" : ""
+              } ${slot.isWeekend ? "is-weekend" : ""} ${
+                !slot.isWorkingDay ? "is-nonworking" : ""
               }"
               data-slot-index="${slot.slotIndex}"
               data-slot-key="${slot.key}"
               data-slot-start="${slot.startAt.toISOString()}"
               data-slot-end="${slot.endAt.toISOString()}"
+              data-is-working="${slot.isWorkingDay ? "1" : "0"}"
               style="width:${slot.widthPx}px"
             ></span>
           `
@@ -193,7 +204,7 @@ function buildVisibleSegmentBars(worker, visibleSlots) {
 
   return (worker?.segments || [])
     .map((segment) => {
-      const coveredSlots = getBusinessHalfDaySlotsBetween(
+      const coveredSlots = getCalendarHalfDaySlotsBetween(
         segment.startAt,
         segment.endAt
       )
@@ -254,15 +265,17 @@ function renderSegmentBars(assignedBars) {
   return assignedBars
     .map((bar) => {
       const topPx = 10 + bar.laneIndex * 32;
+      const buttonWidth = Math.max(bar.widthPx - 4, 8);
+      const isCompact = buttonWidth < 64;
       return `
         <button
           type="button"
-          class="charge-plan-segment-bar"
+          class="charge-plan-segment-bar ${isCompact ? "is-compact" : ""}"
           data-segment-id="${bar.segment.id}"
           data-worker-id="${bar.segment.projectTeamLink}"
           data-start-slot-index="${bar.startIndex}"
           data-end-slot-index="${bar.endIndex}"
-          style="left:${bar.leftPx}px; width:${Math.max(bar.widthPx - 4, 8)}px; top:${topPx}px"
+          style="left:${bar.leftPx}px; width:${buttonWidth}px; top:${topPx}px"
           title="${escapeHtml(bar.title)}"
         >
           <span class="charge-plan-segment-handle is-start" data-resize-edge="start"></span>
@@ -369,7 +382,7 @@ export function renderChargePlanTimeline(dom, project, viewState) {
       <span>
         Glissez sur une ligne pour creer un segment en demi-journees.
         Tirez les poignees d'un trait pour le redimensionner.
-        Double-cliquez sur un trait pour le supprimer.
+        Clic droit sur un trait pour afficher les actions.
       </span>
       <span class="charge-plan-feedback" hidden></span>
     </div>
@@ -389,6 +402,15 @@ export function renderChargePlanTimeline(dom, project, viewState) {
         ${renderTotalRow(project, displayedMonths)}
       </div>
     </div>
+    <div class="charge-plan-context-menu" hidden>
+      <button
+        type="button"
+        class="charge-plan-context-action"
+        data-action="delete-segment"
+      >
+        Supprimer le segment
+      </button>
+    </div>
   `;
 }
 
@@ -405,9 +427,21 @@ function buildSelectionFromSlots(firstSlot, lastSlot) {
 
   const firstIndex = Number(firstSlot.dataset.slotIndex);
   const lastIndex = Number(lastSlot.dataset.slotIndex);
-  const slotCount = lastIndex - firstIndex + 1;
+  const selectedSlots = [];
+  let currentSlot = firstSlot;
+  while (currentSlot) {
+    selectedSlots.push(currentSlot);
+    if (currentSlot === lastSlot) break;
+    currentSlot = currentSlot.nextElementSibling;
+  }
+
+  const workingSlots = selectedSlots.filter(
+    (slotEl) => slotEl.dataset.isWorking === "1"
+  );
   const startPx = firstSlot.offsetLeft;
   const endPx = lastSlot.offsetLeft + lastSlot.offsetWidth;
+  const firstWorkingSlot = workingSlots[0] || null;
+  const lastWorkingSlot = workingSlots[workingSlots.length - 1] || null;
 
   return {
     startSlotIndex: firstIndex,
@@ -415,9 +449,9 @@ function buildSelectionFromSlots(firstSlot, lastSlot) {
     startPx,
     endPx,
     widthPx: Math.max(endPx - startPx, firstSlot.offsetWidth),
-    totalDays: slotCount / 2,
-    startDate: firstSlot.dataset.slotStart || "",
-    endDate: lastSlot.dataset.slotEnd || "",
+    totalDays: workingSlots.length / 2,
+    startDate: firstWorkingSlot?.dataset.slotStart || "",
+    endDate: lastWorkingSlot?.dataset.slotEnd || "",
   };
 }
 
@@ -503,4 +537,32 @@ export function setChargePlanFeedback(boardEl, message = "") {
 
   feedbackEl.textContent = String(message || "").trim();
   feedbackEl.hidden = !feedbackEl.textContent;
+}
+
+export function hideChargePlanContextMenu(boardEl) {
+  const menuEl = boardEl?.querySelector(".charge-plan-context-menu");
+  if (!menuEl) return;
+
+  menuEl.hidden = true;
+  menuEl.style.left = "0px";
+  menuEl.style.top = "0px";
+  delete menuEl.dataset.segmentId;
+}
+
+export function showChargePlanContextMenu(boardEl, { clientX, clientY, segmentId }) {
+  const menuEl = boardEl?.querySelector(".charge-plan-context-menu");
+  if (!menuEl) return;
+
+  menuEl.hidden = false;
+  menuEl.dataset.segmentId = String(segmentId);
+  menuEl.style.left = `${clientX}px`;
+  menuEl.style.top = `${clientY}px`;
+
+  const margin = 8;
+  const menuRect = menuEl.getBoundingClientRect();
+  const maxLeft = Math.max(margin, window.innerWidth - menuRect.width - margin);
+  const maxTop = Math.max(margin, window.innerHeight - menuRect.height - margin);
+
+  menuEl.style.left = `${Math.min(clientX, maxLeft)}px`;
+  menuEl.style.top = `${Math.min(clientY, maxTop)}px`;
 }

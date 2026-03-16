@@ -134,6 +134,21 @@ export function getBusinessDayDates(monthKey) {
   return dates;
 }
 
+export function getCalendarDayDates(monthKey) {
+  const startDate = getMonthStartDate(monthKey);
+  const endDate = getMonthEndDate(monthKey);
+  if (!startDate || !endDate) return [];
+
+  const dates = [];
+  const cursor = new Date(startDate);
+  while (cursor <= endDate) {
+    dates.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return dates;
+}
+
 export function getBusinessDayCount(monthKey) {
   return getBusinessDayDates(monthKey).length;
 }
@@ -190,14 +205,18 @@ export function buildDisplayedMonths(selectedYear, selectedMonth, monthSpan, mon
     const monthIndex = (selectedMonth + offset) % 12;
     const year = selectedYear + Math.floor((selectedMonth + offset) / 12);
     const monthKey = toMonthKey(year, monthIndex + 1);
+    const calendarDayDates = getCalendarDayDates(monthKey);
+    const businessDayDates = getBusinessDayDates(monthKey);
     items.push({
       monthIndex,
       year,
       monthNumber: monthIndex + 1,
       monthKey,
       monthLabel: months[monthIndex] || "",
-      businessDayCount: getBusinessDayCount(monthKey),
-      businessDayDates: getBusinessDayDates(monthKey),
+      calendarDayCount: calendarDayDates.length,
+      calendarDayDates,
+      businessDayCount: businessDayDates.length,
+      businessDayDates,
     });
   }
 

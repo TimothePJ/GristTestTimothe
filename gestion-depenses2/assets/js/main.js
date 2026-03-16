@@ -29,8 +29,10 @@ import {
   computeChargePlanSelection,
   computeChargePlanSelectionFromSlotIndexes,
   getChargePlanSlotIndexAtClientX,
+  hideChargePlanContextMenu,
   renderChargePlanTimeline,
   setChargePlanFeedback,
+  showChargePlanContextMenu,
   updateChargePlanSelectionPreview,
 } from "./ui/chargeTimeline.js";
 import { clearKpi, renderKpi } from "./ui/kpi.js";
@@ -299,6 +301,11 @@ function syncChargePlanFeedback(selection) {
   setChargePlanFeedback(dom.chargePlanBoard, "");
 }
 
+function closeChargePlanContextMenu() {
+  if (!dom?.chargePlanBoard) return;
+  hideChargePlanContextMenu(dom.chargePlanBoard);
+}
+
 function handleProjectSelectionChange() {
   const selectedValue = String(dom.projectSelect.value || "").trim();
   const selectedProjectId = selectedValue ? Number(selectedValue) : null;
@@ -400,9 +407,55 @@ async function handleDeleteWorker(event) {
   await loadData();
 }
 
+async function handleChargePlanContextAction(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement)) return;
+  if (!target.classList.contains("charge-plan-context-action")) return;
+
+  const action = target.dataset.action || "";
+  const menuEl = target.closest(".charge-plan-context-menu");
+  const segmentId = Number(menuEl?.dataset.segmentId);
+  closeChargePlanContextMenu();
+
+  if (action !== "delete-segment" || !Number.isInteger(segmentId)) {
+    return;
+  }
+
+  setChargePlanFeedback(dom.chargePlanBoard, "");
+  await removeTimeSegment(segmentId);
+  await loadData();
+}
+
+function handleChargePlanContextMenu(event) {
+  if (!(event.target instanceof Element)) return;
+
+  const segmentEl = event.target.closest(".charge-plan-segment-bar");
+  if (!(segmentEl instanceof HTMLElement)) {
+    closeChargePlanContextMenu();
+    return;
+  }
+
+  const segmentId = Number(segmentEl.dataset.segmentId);
+  if (!Number.isInteger(segmentId)) {
+    closeChargePlanContextMenu();
+    return;
+  }
+
+  event.preventDefault();
+  setChargePlanFeedback(dom.chargePlanBoard, "");
+  showChargePlanContextMenu(dom.chargePlanBoard, {
+    clientX: event.clientX,
+    clientY: event.clientY,
+    segmentId,
+  });
+}
+
 function handleChargePlanPointerDown(event) {
   if (!(event.target instanceof Element)) return;
   if (event.button !== 0) return;
+  if (event.target.closest(".charge-plan-context-menu")) return;
+
+  closeChargePlanContextMenu();
 
   const trackEl = event.target.closest(".charge-plan-track");
   if (!trackEl || trackEl.classList.contains("charge-plan-track--readonly")) return;
@@ -412,12 +465,21 @@ function handleChargePlanPointerDown(event) {
 
   event.preventDefault();
 
-  if (resizeHandleEl && segmentEl instanceof HTMLElement) {
+  if (segmentEl instanceof HTMLElement) {
     const workerId = Number(segmentEl.dataset.workerId);
     const segmentId = Number(segmentEl.dataset.segmentId);
-    const edge = resizeHandleEl.dataset.resizeEdge || "";
     const startSlotIndex = Number(segmentEl.dataset.startSlotIndex);
     const endSlotIndex = Number(segmentEl.dataset.endSlotIndex);
+    let edge = resizeHandleEl?.dataset.resizeEdge || "";
+
+    if (!edge && segmentEl.classList.contains("is-compact")) {
+      const segmentRect = segmentEl.getBoundingClientRect();
+      const clickRatio =
+        segmentRect.width > 0
+          ? (event.clientX - segmentRect.left) / segmentRect.width
+          : 1;
+      edge = clickRatio <= 0.5 ? "start" : "end";
+    }
 
     if (
       !Number.isInteger(workerId) ||
@@ -426,31 +488,33 @@ function handleChargePlanPointerDown(event) {
       !Number.isInteger(endSlotIndex) ||
       (edge !== "start" && edge !== "end")
     ) {
-      return;
+      if (segmentEl) return;
     }
 
-    const initialSelection = annotateChargePlanSelection(
-      workerId,
-      computeChargePlanSelectionFromSlotIndexes(trackEl, startSlotIndex, endSlotIndex),
-      { ignoreSegmentId: segmentId }
-    );
+    if (edge === "start" || edge === "end") {
+      const initialSelection = annotateChargePlanSelection(
+        workerId,
+        computeChargePlanSelectionFromSlotIndexes(trackEl, startSlotIndex, endSlotIndex),
+        { ignoreSegmentId: segmentId }
+      );
 
-    setChargePlanFeedback(dom.chargePlanBoard, "");
-    segmentEl.classList.add("is-resizing");
-    chargeTimelineDrag = {
-      mode: "resize",
-      trackEl,
-      workerId,
-      segmentId,
-      segmentEl,
-      edge,
-      fixedSlotIndex: edge === "start" ? endSlotIndex : startSlotIndex,
-      currentSelection: initialSelection,
-    };
+      setChargePlanFeedback(dom.chargePlanBoard, "");
+      segmentEl.classList.add("is-resizing");
+      chargeTimelineDrag = {
+        mode: "resize",
+        trackEl,
+        workerId,
+        segmentId,
+        segmentEl,
+        edge,
+        fixedSlotIndex: edge === "start" ? endSlotIndex : startSlotIndex,
+        currentSelection: initialSelection,
+      };
 
-    syncChargePlanFeedback(initialSelection);
-    updateChargePlanSelectionPreview(trackEl, initialSelection);
-    return;
+      syncChargePlanFeedback(initialSelection);
+      updateChargePlanSelectionPreview(trackEl, initialSelection);
+      return;
+    }
   }
 
   if (segmentEl) return;
@@ -561,16 +625,7 @@ async function handleChargePlanPointerUp() {
 }
 
 async function handleChargePlanDoubleClick(event) {
-  if (!(event.target instanceof Element)) return;
-  const segmentEl = event.target.closest(".charge-plan-segment-bar");
-  if (!segmentEl) return;
-
-  const segmentId = Number(segmentEl.dataset.segmentId);
-  if (!Number.isInteger(segmentId)) return;
-
-  setChargePlanFeedback(dom.chargePlanBoard, "");
-  await removeTimeSegment(segmentId);
-  await loadData();
+  closeChargePlanContextMenu();
 }
 
 async function handlePaste(event) {
@@ -784,12 +839,29 @@ function bindEvents() {
 
   dom.realExpenseTableBody.addEventListener("paste", handlePaste, true);
   dom.chargePlanBoard.addEventListener("click", handleDeleteWorker);
-  dom.chargePlanBoard.addEventListener("pointerdown", handleChargePlanPointerDown);
-  dom.chargePlanBoard.addEventListener("dblclick", (event) => {
-    handleChargePlanDoubleClick(event).catch((error) => {
-      console.error("Erreur effacement timeline :", error);
+  dom.chargePlanBoard.addEventListener("click", (event) => {
+    handleChargePlanContextAction(event).catch((error) => {
+      console.error("Erreur action menu timeline :", error);
     });
   });
+  dom.chargePlanBoard.addEventListener("contextmenu", handleChargePlanContextMenu);
+  dom.chargePlanBoard.addEventListener("pointerdown", handleChargePlanPointerDown);
+  dom.chargePlanBoard.addEventListener("dblclick", (event) => {
+    handleChargePlanDoubleClick(event);
+  });
+  document.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element)) {
+      closeChargePlanContextMenu();
+      return;
+    }
+
+    if (event.target.closest(".charge-plan-context-menu")) {
+      return;
+    }
+
+    closeChargePlanContextMenu();
+  });
+  window.addEventListener("scroll", closeChargePlanContextMenu, true);
   window.addEventListener("pointermove", handleChargePlanPointerMove);
   window.addEventListener("pointerup", () => {
     handleChargePlanPointerUp().catch((error) => {
@@ -803,6 +875,7 @@ function bindEvents() {
     }
     clearChargePlanSelectionPreview(chargeTimelineDrag.trackEl);
     setChargePlanFeedback(dom.chargePlanBoard, "");
+    closeChargePlanContextMenu();
     chargeTimelineDrag = null;
   });
 }
