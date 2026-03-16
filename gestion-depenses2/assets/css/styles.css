@@ -206,15 +206,67 @@ td input {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  align-items: center;
+  align-items: flex-start;
   margin-bottom: 10px;
   color: var(--color-text-muted);
   font-size: 0.95rem;
 }
 
+.charge-plan-helper-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
 .charge-plan-feedback {
   color: #b42318;
   font-weight: 700;
+}
+
+.charge-plan-view-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.charge-plan-view-label {
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.charge-plan-zoom-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid rgba(0, 73, 144, 0.12);
+  border-radius: 999px;
+  background: rgba(0, 73, 144, 0.04);
+}
+
+.charge-plan-zoom-btn {
+  min-width: 76px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-primary);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.charge-plan-zoom-btn:hover {
+  background: rgba(0, 73, 144, 0.08);
+}
+
+.charge-plan-zoom-btn.is-active {
+  background: var(--color-primary);
+  color: #fff;
+  box-shadow: 0 8px 16px rgba(0, 73, 144, 0.18);
 }
 
 .charge-plan-context-menu {
@@ -245,10 +297,22 @@ td input {
 }
 
 .charge-plan-scroll {
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
   border: 1px solid rgba(0, 73, 144, 0.12);
   border-radius: var(--radius-md);
   background: var(--color-surface);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.charge-plan-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.charge-plan-scroll.is-panning,
+.charge-plan-scroll.is-panning * {
+  cursor: grabbing !important;
 }
 
 .charge-plan-timeline {
@@ -257,9 +321,11 @@ td input {
 
 .charge-plan-row,
 .charge-plan-role-row {
+  position: relative;
   display: grid;
   grid-template-columns: 150px 120px 100px var(--timeline-width);
   min-width: calc(150px + 120px + 100px + var(--timeline-width));
+  isolation: isolate;
 }
 
 .charge-plan-cell,
@@ -282,11 +348,18 @@ td input {
   background: rgba(0, 73, 144, 0.04);
 }
 
+.charge-plan-row--total .charge-plan-cell--name,
+.charge-plan-row--total .charge-plan-cell--actions,
+.charge-plan-row--total .charge-plan-cell--total {
+  background: #f3f7fb;
+}
+
 .charge-plan-cell--name,
 .charge-plan-cell--actions,
 .charge-plan-cell--total {
   position: sticky;
-  z-index: 2;
+  z-index: 12;
+  box-shadow: 1px 0 0 rgba(0, 73, 144, 0.08);
 }
 
 .charge-plan-cell--name {
@@ -304,7 +377,7 @@ td input {
 .charge-plan-row--header .charge-plan-cell--name,
 .charge-plan-row--header .charge-plan-cell--actions,
 .charge-plan-row--header .charge-plan-cell--total {
-  z-index: 5;
+  z-index: 16;
 }
 
 .charge-plan-role-cell {
@@ -317,6 +390,8 @@ td input {
 }
 
 .charge-plan-cell--timeline {
+  position: relative;
+  z-index: 1;
   padding: 0;
   overflow: hidden;
 }
@@ -330,6 +405,7 @@ td input {
 .charge-plan-header-track {
   display: flex;
   min-height: 90px;
+  cursor: grab;
 }
 
 .charge-plan-header-month,
@@ -663,6 +739,21 @@ canvas {
   .charge-plan-helper {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .charge-plan-view-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .charge-plan-zoom-buttons {
+    flex: 1 1 auto;
+    justify-content: stretch;
+  }
+
+  .charge-plan-zoom-btn {
+    min-width: 0;
+    flex: 1 1 0;
   }
 
   .charge-plan-row,

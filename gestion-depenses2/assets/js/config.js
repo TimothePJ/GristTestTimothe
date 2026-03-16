@@ -1,13 +1,29 @@
 export const APP_CONFIG = {
   storageKey: "gestion-depenses2.state",
   defaultMonthSpan: 6,
+  defaultChargePlanZoomMode: "month",
   yearWindow: {
     before: 5,
     after: 5,
   },
   chargeTimeline: {
-    businessDayWidth: 16,
-    minimumMonthWidth: 160,
+    zoomModes: {
+      week: {
+        label: "Semaine",
+        dayWidth: 34,
+        minimumMonthWidth: 240,
+      },
+      month: {
+        label: "Mois",
+        dayWidth: 16,
+        minimumMonthWidth: 160,
+      },
+      year: {
+        label: "Annee",
+        dayWidth: 7,
+        minimumMonthWidth: 120,
+      },
+    },
     snapStepDays: 0.5,
   },
   months: [

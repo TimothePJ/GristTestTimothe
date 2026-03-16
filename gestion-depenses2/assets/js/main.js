@@ -56,6 +56,14 @@ import { parseRawDateTime } from "./utils/timeSegments.js";
 
 let dom = null;
 let chargeTimelineDrag = null;
+let chargePlanPan = null;
+
+const CHARGE_PLAN_ZOOM_ORDER = ["week", "month", "year"];
+const chargePlanViewport = {
+  scrollRatio: 0,
+  pendingAnchorRatio: null,
+  pendingClientOffset: 0,
+};
 
 function cloneBudgetLines(lines) {
   return JSON.parse(JSON.stringify(lines || []));
@@ -101,6 +109,7 @@ function renderApp() {
     selectedYear: state.selectedYear,
     selectedMonth: state.selectedMonth,
     monthSpan: state.monthSpan,
+    chargePlanZoomMode: state.chargePlanZoomMode,
   });
   renderTables(dom, selectedProject, {
     selectedYear: state.selectedYear,
@@ -118,6 +127,7 @@ function renderApp() {
       monthSpan: state.monthSpan,
     }
   );
+  restoreChargePlanViewport();
 }
 
 async function loadData({ preferredProjectNumber = "" } = {}) {
@@ -301,6 +311,83 @@ function syncChargePlanFeedback(selection) {
   setChargePlanFeedback(dom.chargePlanBoard, "");
 }
 
+function getChargePlanScrollElement() {
+  return dom?.chargePlanBoard?.querySelector(".charge-plan-scroll") || null;
+}
+
+function captureChargePlanViewport(scrollEl = getChargePlanScrollElement()) {
+  if (!(scrollEl instanceof HTMLElement)) return;
+
+  const maxScrollLeft = Math.max(0, scrollEl.scrollWidth - scrollEl.clientWidth);
+  chargePlanViewport.scrollRatio =
+    maxScrollLeft > 0 ? scrollEl.scrollLeft / maxScrollLeft : 0;
+}
+
+function rememberChargePlanAnchor(scrollEl, clientX) {
+  if (!(scrollEl instanceof HTMLElement)) return;
+
+  const rect = scrollEl.getBoundingClientRect();
+  const localOffset = clamp(clientX - rect.left, 0, rect.width);
+  const absoluteOffset = scrollEl.scrollLeft + localOffset;
+  const safeScrollWidth = Math.max(scrollEl.scrollWidth, 1);
+
+  chargePlanViewport.pendingAnchorRatio = absoluteOffset / safeScrollWidth;
+  chargePlanViewport.pendingClientOffset = localOffset;
+}
+
+function rememberChargePlanCenterAnchor(scrollEl = getChargePlanScrollElement()) {
+  if (!(scrollEl instanceof HTMLElement)) return;
+
+  const rect = scrollEl.getBoundingClientRect();
+  rememberChargePlanAnchor(scrollEl, rect.left + rect.width / 2);
+}
+
+function restoreChargePlanViewport() {
+  const scrollEl = getChargePlanScrollElement();
+  if (!(scrollEl instanceof HTMLElement)) return;
+
+  requestAnimationFrame(() => {
+    const maxScrollLeft = Math.max(0, scrollEl.scrollWidth - scrollEl.clientWidth);
+
+    if (Number.isFinite(chargePlanViewport.pendingAnchorRatio)) {
+      const absoluteOffset =
+        chargePlanViewport.pendingAnchorRatio * Math.max(scrollEl.scrollWidth, 1);
+      scrollEl.scrollLeft = clamp(
+        absoluteOffset - chargePlanViewport.pendingClientOffset,
+        0,
+        maxScrollLeft
+      );
+      chargePlanViewport.pendingAnchorRatio = null;
+      chargePlanViewport.pendingClientOffset = 0;
+      captureChargePlanViewport(scrollEl);
+      return;
+    }
+
+    scrollEl.scrollLeft = clamp(
+      chargePlanViewport.scrollRatio * maxScrollLeft,
+      0,
+      maxScrollLeft
+    );
+    captureChargePlanViewport(scrollEl);
+  });
+}
+
+function setChargePlanZoomMode(nextMode, options = {}) {
+  if (!Object.prototype.hasOwnProperty.call(APP_CONFIG.chargeTimeline.zoomModes, nextMode)) {
+    return;
+  }
+
+  const scrollEl = getChargePlanScrollElement();
+  if (options.anchorClientX != null && scrollEl) {
+    rememberChargePlanAnchor(scrollEl, options.anchorClientX);
+  } else {
+    rememberChargePlanCenterAnchor(scrollEl);
+  }
+
+  setState({ chargePlanZoomMode: nextMode });
+  renderApp();
+}
+
 function closeChargePlanContextMenu() {
   if (!dom?.chargePlanBoard) return;
   hideChargePlanContextMenu(dom.chargePlanBoard);
@@ -450,10 +537,65 @@ function handleChargePlanContextMenu(event) {
   });
 }
 
+function handleChargePlanHeaderWheel(event) {
+  if (!(event.target instanceof Element)) return;
+
+  const headerTrack = event.target.closest(".charge-plan-header-track");
+  if (!(headerTrack instanceof HTMLElement)) return;
+  event.preventDefault();
+
+  const currentZoomIndex = CHARGE_PLAN_ZOOM_ORDER.indexOf(state.chargePlanZoomMode);
+  const safeCurrentZoomIndex = currentZoomIndex >= 0 ? currentZoomIndex : 1;
+  const direction = event.deltaY < 0 ? -1 : 1;
+  const nextZoomIndex = clamp(
+    safeCurrentZoomIndex + direction,
+    0,
+    CHARGE_PLAN_ZOOM_ORDER.length - 1
+  );
+  const nextZoomMode = CHARGE_PLAN_ZOOM_ORDER[nextZoomIndex];
+
+  if (nextZoomMode === state.chargePlanZoomMode) {
+    return;
+  }
+
+  closeChargePlanContextMenu();
+  setChargePlanZoomMode(nextZoomMode, { anchorClientX: event.clientX });
+}
+
+function handleChargePlanZoomButtonClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement)) return;
+  if (!target.classList.contains("charge-plan-zoom-btn")) return;
+
+  const nextZoomMode = target.dataset.chargePlanZoom || "";
+  if (!nextZoomMode || nextZoomMode === state.chargePlanZoomMode) {
+    return;
+  }
+
+  closeChargePlanContextMenu();
+  setChargePlanZoomMode(nextZoomMode);
+}
+
 function handleChargePlanPointerDown(event) {
   if (!(event.target instanceof Element)) return;
   if (event.button !== 0) return;
   if (event.target.closest(".charge-plan-context-menu")) return;
+
+  const headerTrack = event.target.closest(".charge-plan-header-track");
+  if (headerTrack instanceof HTMLElement) {
+    const scrollEl = headerTrack.closest(".charge-plan-scroll");
+    if (!(scrollEl instanceof HTMLElement)) return;
+
+    event.preventDefault();
+    closeChargePlanContextMenu();
+    chargePlanPan = {
+      scrollEl,
+      startClientX: event.clientX,
+      startScrollLeft: scrollEl.scrollLeft,
+    };
+    scrollEl.classList.add("is-panning");
+    return;
+  }
 
   closeChargePlanContextMenu();
 
@@ -540,6 +682,13 @@ function handleChargePlanPointerDown(event) {
 }
 
 function handleChargePlanPointerMove(event) {
+  if (chargePlanPan) {
+    const deltaX = event.clientX - chargePlanPan.startClientX;
+    chargePlanPan.scrollEl.scrollLeft = chargePlanPan.startScrollLeft - deltaX;
+    captureChargePlanViewport(chargePlanPan.scrollEl);
+    return;
+  }
+
   if (!chargeTimelineDrag) return;
 
   if (chargeTimelineDrag.mode === "resize") {
@@ -592,6 +741,12 @@ function handleChargePlanPointerMove(event) {
 }
 
 async function handleChargePlanPointerUp() {
+  if (chargePlanPan) {
+    chargePlanPan.scrollEl.classList.remove("is-panning");
+    captureChargePlanViewport(chargePlanPan.scrollEl);
+    chargePlanPan = null;
+  }
+
   if (!chargeTimelineDrag) return;
 
   const { trackEl, workerId, currentSelection } = chargeTimelineDrag;
@@ -626,6 +781,14 @@ async function handleChargePlanPointerUp() {
 
 async function handleChargePlanDoubleClick(event) {
   closeChargePlanContextMenu();
+}
+
+function handleChargePlanScroll(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  if (!target.classList.contains("charge-plan-scroll")) return;
+
+  captureChargePlanViewport(target);
 }
 
 async function handlePaste(event) {
@@ -839,12 +1002,17 @@ function bindEvents() {
 
   dom.realExpenseTableBody.addEventListener("paste", handlePaste, true);
   dom.chargePlanBoard.addEventListener("click", handleDeleteWorker);
+  dom.chargePlanBoard.addEventListener("click", handleChargePlanZoomButtonClick);
   dom.chargePlanBoard.addEventListener("click", (event) => {
     handleChargePlanContextAction(event).catch((error) => {
       console.error("Erreur action menu timeline :", error);
     });
   });
   dom.chargePlanBoard.addEventListener("contextmenu", handleChargePlanContextMenu);
+  dom.chargePlanBoard.addEventListener("wheel", handleChargePlanHeaderWheel, {
+    passive: false,
+  });
+  dom.chargePlanBoard.addEventListener("scroll", handleChargePlanScroll, true);
   dom.chargePlanBoard.addEventListener("pointerdown", handleChargePlanPointerDown);
   dom.chargePlanBoard.addEventListener("dblclick", (event) => {
     handleChargePlanDoubleClick(event);
@@ -869,6 +1037,11 @@ function bindEvents() {
     });
   });
   window.addEventListener("pointercancel", () => {
+    if (chargePlanPan) {
+      chargePlanPan.scrollEl.classList.remove("is-panning");
+      captureChargePlanViewport(chargePlanPan.scrollEl);
+      chargePlanPan = null;
+    }
     if (!chargeTimelineDrag) return;
     if (chargeTimelineDrag.segmentEl instanceof HTMLElement) {
       chargeTimelineDrag.segmentEl.classList.remove("is-resizing");

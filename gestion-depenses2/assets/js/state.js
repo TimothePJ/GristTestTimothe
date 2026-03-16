@@ -7,6 +7,7 @@ function getNowState() {
     selectedYear: now.getFullYear(),
     selectedMonth: now.getMonth(),
     monthSpan: APP_CONFIG.defaultMonthSpan,
+    chargePlanZoomMode: APP_CONFIG.defaultChargePlanZoomMode,
   };
 }
 
@@ -41,6 +42,14 @@ function readPersistedState() {
         Number.isInteger(Number(parsed?.monthSpan)) && Number(parsed.monthSpan) > 0
           ? Number(parsed.monthSpan)
           : fallback.monthSpan,
+      chargePlanZoomMode:
+        typeof parsed?.chargePlanZoomMode === "string" &&
+        Object.prototype.hasOwnProperty.call(
+          APP_CONFIG.chargeTimeline.zoomModes,
+          parsed.chargePlanZoomMode
+        )
+          ? parsed.chargePlanZoomMode
+          : fallback.chargePlanZoomMode,
     };
   } catch (error) {
     console.warn("Erreur lecture localStorage gestion-depenses2 :", error);
@@ -64,6 +73,7 @@ function persistState() {
         selectedYear: state.selectedYear,
         selectedMonth: state.selectedMonth,
         monthSpan: state.monthSpan,
+        chargePlanZoomMode: state.chargePlanZoomMode,
       })
     );
   } catch (error) {
@@ -80,6 +90,7 @@ export const state = {
   selectedYear: persisted.selectedYear,
   selectedMonth: persisted.selectedMonth,
   monthSpan: persisted.monthSpan,
+  chargePlanZoomMode: persisted.chargePlanZoomMode,
   newProjectBudgetLines: [],
   editingBudgetLines: [],
   spendingChart: null,

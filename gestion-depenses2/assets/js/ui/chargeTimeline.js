@@ -32,27 +32,40 @@ function formatSlotDate(date) {
   });
 }
 
-function getMonthWidth(month) {
-  const widthFromDays =
-    month.calendarDayCount * APP_CONFIG.chargeTimeline.businessDayWidth;
-  return Math.max(APP_CONFIG.chargeTimeline.minimumMonthWidth, widthFromDays);
+function getChargePlanZoomMode(mode) {
+  if (Object.prototype.hasOwnProperty.call(APP_CONFIG.chargeTimeline.zoomModes, mode)) {
+    return mode;
+  }
+
+  return APP_CONFIG.defaultChargePlanZoomMode;
 }
 
-function getTimelineWidth(months) {
-  return months.reduce((sum, month) => sum + getMonthWidth(month), 0);
+function getZoomPreset(mode) {
+  return APP_CONFIG.chargeTimeline.zoomModes[getChargePlanZoomMode(mode)];
 }
 
-function buildVisibleSlots(months) {
+function getMonthWidth(month, zoomMode) {
+  const preset = getZoomPreset(zoomMode);
+  const widthFromDays = month.calendarDayCount * preset.dayWidth;
+  return Math.max(preset.minimumMonthWidth, widthFromDays);
+}
+
+function getTimelineWidth(months, zoomMode) {
+  return months.reduce((sum, month) => sum + getMonthWidth(month, zoomMode), 0);
+}
+
+function buildVisibleSlots(months, zoomMode) {
   const slots = [];
   let nextLeftPx = 0;
   let slotIndex = 0;
 
   months.forEach((month) => {
-    const monthWidth = getMonthWidth(month);
+    const preset = getZoomPreset(zoomMode);
+    const monthWidth = getMonthWidth(month, zoomMode);
     const dayWidth =
       month.calendarDayCount > 0
         ? monthWidth / month.calendarDayCount
-        : APP_CONFIG.chargeTimeline.minimumMonthWidth;
+        : preset.minimumMonthWidth;
     const slotWidth = dayWidth / HALF_DAY_PARTS.length;
     const lastDayIndex = Math.max(0, (month.calendarDayDates || []).length - 1);
 
@@ -87,12 +100,13 @@ function buildVisibleSlots(months) {
   return slots;
 }
 
-function renderHeaderMonth(month) {
-  const monthWidth = getMonthWidth(month);
+function renderHeaderMonth(month, zoomMode) {
+  const preset = getZoomPreset(zoomMode);
+  const monthWidth = getMonthWidth(month, zoomMode);
   const dayWidth =
     month.calendarDayCount > 0
       ? monthWidth / month.calendarDayCount
-      : APP_CONFIG.chargeTimeline.minimumMonthWidth;
+      : preset.minimumMonthWidth;
 
   const dayTicks = (month.calendarDayDates || [])
     .map((date, index) => {
@@ -127,10 +141,14 @@ function renderHeaderMonth(month) {
   `;
 }
 
-function renderTotalMonthSegments(months, worker = null, { showTotals = false } = {}) {
+function renderTotalMonthSegments(
+  months,
+  worker = null,
+  { showTotals = false, zoomMode } = {}
+) {
   return months
     .map((month) => {
-      const monthWidth = getMonthWidth(month);
+      const monthWidth = getMonthWidth(month, zoomMode);
       const days = worker
         ? toFiniteNumber(worker.provisionalDays?.[month.monthKey], 0)
         : toFiniteNumber(month.totalDays, 0);
@@ -161,7 +179,7 @@ function renderTotalMonthSegments(months, worker = null, { showTotals = false } 
               : ""
           }
           ${
-            overflowDays > 0
+            overflowDays > 0 && !showTotals
               ? `<span class="charge-plan-month-overflow">+${formatDayValue(
                   overflowDays
                 )} j</span>`
@@ -289,9 +307,9 @@ function renderSegmentBars(assignedBars) {
     .join("");
 }
 
-function renderWorkerRow(worker, months, visibleSlots) {
+function renderWorkerRow(worker, months, visibleSlots, zoomMode) {
   const totalDays = getWorkerTotalDays(worker.provisionalDays);
-  const timelineWidth = getTimelineWidth(months);
+  const timelineWidth = getTimelineWidth(months, zoomMode);
   const visibleSegmentBars = buildVisibleSegmentBars(worker, visibleSlots);
   const assignedBars = assignSegmentLanes(visibleSegmentBars);
   const laneCount = Math.max(
@@ -329,7 +347,7 @@ function renderWorkerRow(worker, months, visibleSlots) {
   `;
 }
 
-function renderTotalRow(project, months) {
+function renderTotalRow(project, months, zoomMode) {
   const monthsWithTotals = months.map((month) => ({
     ...month,
     totalDays: (project.workers || []).reduce((sum, worker) => {
@@ -337,7 +355,7 @@ function renderTotalRow(project, months) {
     }, 0),
   }));
   const totalDays = monthsWithTotals.reduce((sum, month) => sum + month.totalDays, 0);
-  const timelineWidth = getTimelineWidth(months);
+  const timelineWidth = getTimelineWidth(months, zoomMode);
 
   return `
     <div class="charge-plan-row charge-plan-row--total" style="--timeline-width:${timelineWidth}px">
@@ -348,7 +366,10 @@ function renderTotalRow(project, months) {
       )} j</strong></div>
       <div class="charge-plan-cell charge-plan-cell--timeline">
         <div class="charge-plan-track charge-plan-track--readonly">
-          ${renderTotalMonthSegments(monthsWithTotals, null, { showTotals: true })}
+          ${renderTotalMonthSegments(monthsWithTotals, null, {
+            showTotals: true,
+            zoomMode,
+          })}
         </div>
       </div>
     </div>
@@ -356,6 +377,7 @@ function renderTotalRow(project, months) {
 }
 
 export function renderChargePlanTimeline(dom, project, viewState) {
+  const zoomMode = getChargePlanZoomMode(viewState.chargePlanZoomMode);
   const displayedMonths = buildDisplayedMonths(
     viewState.selectedYear,
     viewState.selectedMonth,
@@ -363,8 +385,21 @@ export function renderChargePlanTimeline(dom, project, viewState) {
     APP_CONFIG.months
   );
   const groupedWorkers = groupWorkersByRole(project.workers);
-  const timelineWidth = getTimelineWidth(displayedMonths);
-  const visibleSlots = buildVisibleSlots(displayedMonths);
+  const timelineWidth = getTimelineWidth(displayedMonths, zoomMode);
+  const visibleSlots = buildVisibleSlots(displayedMonths, zoomMode);
+  const zoomButtons = Object.entries(APP_CONFIG.chargeTimeline.zoomModes)
+    .map(
+      ([mode, preset]) => `
+        <button
+          type="button"
+          class="charge-plan-zoom-btn ${mode === zoomMode ? "is-active" : ""}"
+          data-charge-plan-zoom="${mode}"
+        >
+          ${escapeHtml(preset.label)}
+        </button>
+      `
+    )
+    .join("");
 
   const rows = Object.entries(groupedWorkers)
     .map(
@@ -372,19 +407,29 @@ export function renderChargePlanTimeline(dom, project, viewState) {
         <div class="charge-plan-role-row" style="--timeline-width:${timelineWidth}px">
           <div class="charge-plan-role-cell">${escapeHtml(role)}</div>
         </div>
-        ${workers.map((worker) => renderWorkerRow(worker, displayedMonths, visibleSlots)).join("")}
+        ${workers
+          .map((worker) => renderWorkerRow(worker, displayedMonths, visibleSlots, zoomMode))
+          .join("")}
       `
     )
     .join("");
 
   dom.chargePlanBoard.innerHTML = `
     <div class="charge-plan-helper">
-      <span>
-        Glissez sur une ligne pour creer un segment en demi-journees.
-        Tirez les poignees d'un trait pour le redimensionner.
-        Clic droit sur un trait pour afficher les actions.
-      </span>
-      <span class="charge-plan-feedback" hidden></span>
+      <div class="charge-plan-helper-copy">
+        <span>
+          Glissez sur une ligne pour creer un segment en demi-journees.
+          Tirez les poignees d'un trait pour le redimensionner.
+          Clic droit sur un trait pour afficher les actions.
+        </span>
+        <span class="charge-plan-feedback" hidden></span>
+      </div>
+      <div class="charge-plan-view-controls">
+        <span class="charge-plan-view-label">Vue</span>
+        <div class="charge-plan-zoom-buttons" role="group" aria-label="Zoom planning">
+          ${zoomButtons}
+        </div>
+      </div>
     </div>
     <div class="charge-plan-scroll">
       <div class="charge-plan-timeline" style="--timeline-width:${timelineWidth}px">
@@ -393,13 +438,13 @@ export function renderChargePlanTimeline(dom, project, viewState) {
           <div class="charge-plan-cell charge-plan-cell--actions">Actions</div>
           <div class="charge-plan-cell charge-plan-cell--total">Total jours</div>
           <div class="charge-plan-cell charge-plan-cell--timeline">
-            <div class="charge-plan-header-track">
-              ${displayedMonths.map((month) => renderHeaderMonth(month)).join("")}
+            <div class="charge-plan-header-track" data-charge-plan-pan-zone="1">
+              ${displayedMonths.map((month) => renderHeaderMonth(month, zoomMode)).join("")}
             </div>
           </div>
         </div>
         ${rows}
-        ${renderTotalRow(project, displayedMonths)}
+        ${renderTotalRow(project, displayedMonths, zoomMode)}
       </div>
     </div>
     <div class="charge-plan-context-menu" hidden>
