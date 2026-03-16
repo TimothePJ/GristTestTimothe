@@ -78,6 +78,7 @@ body.is-ms-project-drag-cursor * {
 #toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 12px;
   height: var(--toolbar-height);
   padding: 8px 16px;
@@ -89,6 +90,10 @@ body.is-ms-project-drag-cursor * {
   z-index: 120;
 }
 
+#toolbar > * {
+  min-width: 0;
+}
+
 .nav-buttons,
 .zoom-buttons,
 .filters {
@@ -97,9 +102,20 @@ body.is-ms-project-drag-cursor * {
   gap: 4px;
 }
 
+.nav-buttons,
+.zoom-buttons {
+  flex: 0 0 auto;
+}
+
+.filters {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .toolbar-label {
   font-weight: 600;
   margin-right: 4px;
+  flex: 0 0 auto;
 }
 
 #toolbar button {
@@ -129,10 +145,13 @@ body.is-ms-project-drag-cursor * {
   border: 1px solid #ccc;
   border-radius: 3px;
   padding: 3px 6px;
-  min-width: 220px;
+  width: clamp(132px, 15vw, 220px);
+  min-width: 0;
+  max-width: 220px;
   height: 28px;
   color: var(--grist-theme-text);
   font-size: 13px;
+  flex: 0 1 auto;
 }
 
 #toolbar select:hover {
@@ -146,7 +165,13 @@ body.is-ms-project-drag-cursor * {
 
 #current-date-range {
   margin-left: auto;
+  flex: 0 1 360px;
+  min-width: 150px;
+  max-width: min(34vw, 440px);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
   font-weight: 500;
   color: #444;
 }
@@ -243,48 +268,43 @@ body.is-ms-project-drag-cursor * {
   display: none;
   pointer-events: none;
   z-index: 1000003;
-  background: rgba(34, 197, 94, 0.08);
-  box-shadow:
-    inset 0 0 0 2px rgba(22, 163, 74, 0.45),
-    0 8px 18px rgba(15, 23, 42, 0.08);
+  background: transparent;
 }
 
 .planning-drop-placement-overlay.is-visible {
   display: block;
 }
 
-.planning-drop-placement-overlay.is-coffrage {
-  background: rgba(245, 158, 11, 0.12);
-  box-shadow:
-    inset 0 0 0 2px rgba(217, 119, 6, 0.45),
-    0 8px 18px rgba(15, 23, 42, 0.08);
-}
-
 .planning-drop-placement-overlay::before,
 .planning-drop-placement-overlay::after {
   content: "";
   position: absolute;
-  left: 12px;
-  right: 12px;
-  height: 4px;
+  left: 10px;
+  right: 10px;
+  top: 50%;
+  height: 6px;
+  transform: translateY(-50%);
   border-radius: 999px;
   opacity: 0;
   background: #16a34a;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92), 0 0 12px rgba(15, 23, 42, 0.14);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.95),
+    0 0 16px rgba(22, 163, 74, 0.38);
 }
 
 .planning-drop-placement-overlay.is-coffrage::before,
 .planning-drop-placement-overlay.is-coffrage::after {
   background: #d97706;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.95),
+    0 0 16px rgba(217, 119, 6, 0.34);
 }
 
 .planning-drop-placement-overlay.is-before::before {
-  top: 2px;
   opacity: 1;
 }
 
 .planning-drop-placement-overlay.is-after::after {
-  bottom: 2px;
   opacity: 1;
 }
 
@@ -1020,11 +1040,53 @@ body.is-add-zone-modal-open {
   #toolbar {
     gap: 8px;
     padding: 8px 10px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
   }
 
   #current-date-range {
-    margin-left: 0;
-    width: 100%;
+    margin-left: auto;
+    width: auto;
+    flex-basis: 240px;
+    max-width: 240px;
+    font-size: 12px;
+  }
+
+  #toolbar select {
+    width: clamp(112px, 13vw, 170px);
+    max-width: 170px;
+  }
+}
+
+@media (max-width: 980px) {
+  #toolbar {
+    gap: 6px;
+    padding: 8px 8px;
+  }
+
+  .filters {
+    gap: 3px;
+  }
+
+  .toolbar-label {
+    margin-right: 2px;
+    font-size: 12px;
+  }
+
+  #toolbar button {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+
+  #toolbar select {
+    width: clamp(96px, 12vw, 132px);
+    max-width: 132px;
+    font-size: 12px;
+  }
+
+  #current-date-range {
+    flex-basis: 170px;
+    min-width: 120px;
+    max-width: 170px;
+    font-size: 11px;
   }
 }

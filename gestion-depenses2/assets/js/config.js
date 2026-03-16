@@ -1,0 +1,66 @@
+export const APP_CONFIG = {
+  storageKey: "gestion-depenses2.state",
+  defaultMonthSpan: 6,
+  yearWindow: {
+    before: 5,
+    after: 5,
+  },
+  months: [
+    "janvier",
+    "fevrier",
+    "mars",
+    "avril",
+    "mai",
+    "juin",
+    "juillet",
+    "aout",
+    "septembre",
+    "octobre",
+    "novembre",
+    "decembre",
+  ],
+  grist: {
+    tables: {
+      projects: "Projets",
+      budget: "Budget",
+      projectTeam: "ProjectTeam",
+      timesheet: "Timesheet",
+      team: "Team",
+    },
+    columns: {
+      projects: {
+        id: "id",
+        projectNumber: "Numero_de_projet",
+        name: "Nom_de_projet",
+        billingPercentage: "Pourcentage_Facturation",
+        billingPercentageByMonth: "Pourcentage_Facturation_Par_Mois",
+      },
+      budget: {
+        id: "id",
+        projectNumber: "NumeroProjet",
+        chapter: "Chapter",
+        amount: "Amount",
+      },
+      projectTeam: {
+        id: "id",
+        projectNumber: "NumeroProjet",
+        role: "Role",
+        name: "Name",
+        dailyRate: "Daily_Rate",
+      },
+      timesheet: {
+        id: "id",
+        workerId: "Team_Member",
+        month: "Month",
+        provisionalDays: "Provisional_Days",
+        workedDays: "Worked_Days",
+      },
+      team: {
+        id: "id",
+        firstName: "Prenom",
+        lastName: "Nom",
+        role: "Role",
+      },
+    },
+  },
+};

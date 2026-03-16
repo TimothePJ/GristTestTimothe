@@ -1324,18 +1324,22 @@ function setPlanningDropPlacementOverlay(rowEl, containerEl, position = "after")
   const overlayEl = ensurePlanningDropPlacementOverlay(containerEl);
   if (!(overlayEl instanceof HTMLElement)) return;
 
-  const rowRect = rowEl.getBoundingClientRect();
+  const anchorRect = rowEl.getBoundingClientRect();
   const containerRect = containerEl.getBoundingClientRect();
-  const rowHeight = Math.max(1, Math.round(rowRect.height));
-  const top = Math.round(rowRect.top);
+  const normalizedPosition = normalizePlanningDropPosition(position);
+  const insertionY =
+    normalizedPosition === "before"
+      ? anchorRect.top
+      : anchorRect.bottom;
+  const indicatorHeight = 10;
+  const top = Math.round(insertionY - (indicatorHeight / 2));
   const left = Math.round(containerRect.left);
   const width = Math.max(1, Math.round(containerRect.width));
-  const normalizedPosition = normalizePlanningDropPosition(position);
 
   overlayEl.style.left = `${left}px`;
   overlayEl.style.top = `${top}px`;
   overlayEl.style.width = `${width}px`;
-  overlayEl.style.height = `${rowHeight}px`;
+  overlayEl.style.height = `${indicatorHeight}px`;
   overlayEl.classList.add("is-visible");
   overlayEl.classList.toggle("is-before", normalizedPosition === "before");
   overlayEl.classList.toggle("is-after", normalizedPosition !== "before");
@@ -1476,7 +1480,11 @@ function setPlanningZoneDropTarget(zoneEl, containerEl) {
   activePlanningDropZoneEl = zoneEl;
   const previewRow = findPlanningZonePreviewRow(zoneEl, containerEl);
   setPlanningDropPreviewRow(previewRow);
-  setPlanningDropPlacementOverlay(previewRow, containerEl, "after");
+  setPlanningDropPlacementOverlay(
+    previewRow || zoneEl,
+    containerEl,
+    previewRow ? "before" : "after"
+  );
 }
 
 function findZoneHeaderBandElement(containerEl, zoneKey = "", zoneLabel = "") {
@@ -2219,6 +2227,65 @@ function computeRangeCenter(range) {
   return new Date(centerMs);
 }
 
+function buildDateRangeDisplayText(startDate, endDate, availableWidth = Infinity) {
+  if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) return "";
+  if (!(endDate instanceof Date) || Number.isNaN(endDate.getTime())) return "";
+
+  const full = [
+    startDate.toLocaleDateString("fr-FR", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    }),
+    endDate.toLocaleDateString("fr-FR", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    }),
+  ].join(" - ");
+
+  const medium = [
+    startDate.toLocaleDateString("fr-FR", {
+      day: "numeric",
+      month: "short",
+    }),
+    endDate.toLocaleDateString("fr-FR", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }),
+  ].join(" - ");
+
+  const compact = [
+    startDate.toLocaleDateString("fr-FR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "2-digit",
+    }),
+    endDate.toLocaleDateString("fr-FR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "2-digit",
+    }),
+  ].join(" - ");
+
+  const minimal = [
+    startDate.toLocaleDateString("fr-FR", {
+      day: "2-digit",
+      month: "2-digit",
+    }),
+    endDate.toLocaleDateString("fr-FR", {
+      day: "2-digit",
+      month: "2-digit",
+    }),
+  ].join(" - ");
+
+  if (availableWidth >= 340) return full;
+  if (availableWidth >= 255) return medium;
+  if (availableWidth >= 185) return compact;
+  return minimal;
+}
+
 function updateDateRangeDisplay() {
   if (!timelineInstance) return;
 
@@ -2226,11 +2293,15 @@ function updateDateRangeDisplay() {
   if (!el) return;
 
   const range = timelineInstance.getWindow();
-  const options = { year: "numeric", month: "long", day: "numeric" };
+  const availableWidth = Math.max(
+    0,
+    Math.round(el.getBoundingClientRect().width || el.clientWidth || 0)
+  );
+  const fullText = buildDateRangeDisplayText(range.start, range.end, Number.MAX_SAFE_INTEGER);
+  const displayText = buildDateRangeDisplayText(range.start, range.end, availableWidth);
 
-  el.textContent =
-    `${range.start.toLocaleDateString("fr-FR", options)} - ` +
-    `${range.end.toLocaleDateString("fr-FR", options)}`;
+  el.textContent = displayText || fullText;
+  el.title = fullText;
 }
 
 function getCurrentZoomMode() {
@@ -2520,6 +2591,9 @@ export function bindTimelineToolbar() {
   // Initialisation affichage
   updateNavCenterButtonLabel();
   updateDateRangeDisplay();
+  window.addEventListener("resize", () => {
+    updateDateRangeDisplay();
+  });
 }
 
 export function clearPlanningTimeline() {
@@ -2529,7 +2603,10 @@ export function clearPlanningTimeline() {
   itemsDataSet.clear();
 
   const rangeEl = document.getElementById("current-date-range");
-  if (rangeEl) rangeEl.textContent = "";
+  if (rangeEl) {
+    rangeEl.textContent = "";
+    rangeEl.removeAttribute("title");
+  }
 
   hideHoverTooltip();
   clearMsProjectDropTarget();
