@@ -44,62 +44,6 @@ function renderNumberInput(className, dataAttributes, value) {
   }">`;
 }
 
-function renderChargePlanTable(dom, project, displayedMonths) {
-  buildHeader(dom.chargePlanHeadRow, ["Nom", "Actions", "Total jours"], displayedMonths);
-
-  const groupedWorkers = groupWorkersByRole(project.workers);
-  const columnCount = 3 + displayedMonths.length;
-  let html = "";
-
-  Object.entries(groupedWorkers).forEach(([role, workers]) => {
-    html += renderRoleRow(role, columnCount);
-
-    workers.forEach((worker) => {
-      const totalProvisionalDays = getWorkerTotalDays(worker.provisionalDays);
-      html += `
-        <tr>
-          <td>${escapeHtml(worker.name)}</td>
-          <td>
-            <button class="delete-worker-btn" data-worker-id="${worker.id}">
-              Supprimer
-            </button>
-          </td>
-          <td>${totalProvisionalDays.toFixed(2)}</td>
-      `;
-
-      displayedMonths.forEach(({ monthKey }) => {
-        html += `<td>${renderNumberInput(
-          "provisional-days",
-          {
-            workerId: worker.id,
-            month: monthKey,
-          },
-          worker.provisionalDays?.[monthKey]
-        )}</td>`;
-      });
-
-      html += "</tr>";
-    });
-  });
-
-  const grandTotalProvisionalDays = (project.workers || []).reduce((total, worker) => {
-    return total + getWorkerTotalDays(worker.provisionalDays);
-  }, 0);
-
-  html += `<tr><td colspan="2"><strong>Total</strong></td><td><strong>${grandTotalProvisionalDays.toFixed(
-    2
-  )}</strong></td>`;
-  displayedMonths.forEach(({ monthKey }) => {
-    const totalDays = (project.workers || []).reduce((sum, worker) => {
-      return sum + toFiniteNumber(worker.provisionalDays?.[monthKey], 0);
-    }, 0);
-    html += `<td><strong>${totalDays.toFixed(2)}</strong></td>`;
-  });
-  html += "</tr>";
-
-  dom.chargePlanTableBody.innerHTML = html;
-}
-
 function renderExpenseTable(dom, project, displayedMonths) {
   buildHeader(
     dom.expenseHeadRow,
@@ -277,16 +221,13 @@ export function renderTables(dom, project, viewState) {
     APP_CONFIG.months
   );
 
-  renderChargePlanTable(dom, project, displayedMonths);
   renderExpenseTable(dom, project, displayedMonths);
   renderRealExpenseTable(dom, project, displayedMonths);
 }
 
 export function clearTables(dom) {
-  buildHeader(dom.chargePlanHeadRow, ["Nom", "Actions", "Total jours"], []);
   buildHeader(dom.expenseHeadRow, ["Nom", "Depense journaliere", "Total depense"], []);
   buildHeader(dom.realExpenseHeadRow, ["Nom", "Total jours", "Total depense"], []);
-  dom.chargePlanTableBody.innerHTML = "";
   dom.expenseTableBody.innerHTML = "";
   dom.realExpenseTableBody.innerHTML = "";
 }

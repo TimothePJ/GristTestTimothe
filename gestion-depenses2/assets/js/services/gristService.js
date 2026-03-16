@@ -1,6 +1,7 @@
 import { APP_CONFIG } from "../config.js";
 import {
   getMonthKeyFromRawMonth,
+  toFiniteNumber,
   toGristMonthValue,
 } from "../utils/format.js";
 
@@ -268,6 +269,9 @@ export async function upsertTimesheetBatch({ workerId, updates }) {
     const existingRow = findTimesheetRecord(timesheetRows, workerId, monthKey);
     const fields = buildTimesheetFields(update);
     if (!Object.keys(fields).length) continue;
+    const hasNonZeroValue = Object.values(fields).some(
+      (fieldValue) => toFiniteNumber(fieldValue, 0) !== 0
+    );
 
     if (existingRow) {
       actions.push([
@@ -276,6 +280,10 @@ export async function upsertTimesheetBatch({ workerId, updates }) {
         existingRow[columns.id],
         fields,
       ]);
+      continue;
+    }
+
+    if (!hasNonZeroValue) {
       continue;
     }
 

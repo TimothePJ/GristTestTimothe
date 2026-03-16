@@ -20,6 +20,14 @@ import {
 } from "./services/projectService.js";
 import { assertDomRefs, getDomRefs } from "./ui/dom.js";
 import { destroyChart, renderSpendingChart } from "./ui/chart.js";
+import {
+  clearChargePlanSelectionPreview,
+  clearChargePlanTimeline,
+  computeChargePlanSelection,
+  getEmptyChargePlanUpdates,
+  renderChargePlanTimeline,
+  updateChargePlanSelectionPreview,
+} from "./ui/chargeTimeline.js";
 import { clearKpi, renderKpi } from "./ui/kpi.js";
 import {
   populateYearOptions,
@@ -39,6 +47,7 @@ import {
 import { clearTables, renderTables } from "./ui/tables.js";
 
 let dom = null;
+let chargeTimelineDrag = null;
 
 function cloneBudgetLines(lines) {
   return JSON.parse(JSON.stringify(lines || []));
@@ -73,12 +82,18 @@ function renderApp() {
   if (!selectedProject) {
     clearProjectSummary(dom);
     clearKpi(dom);
+    clearChargePlanTimeline(dom);
     clearTables(dom);
     state.spendingChart = destroyChart(state.spendingChart);
     return;
   }
 
   renderProjectSummary(dom, selectedProject, getProjectBudgetTotal(selectedProject));
+  renderChargePlanTimeline(dom, selectedProject, {
+    selectedYear: state.selectedYear,
+    selectedMonth: state.selectedMonth,
+    monthSpan: state.monthSpan,
+  });
   renderTables(dom, selectedProject, {
     selectedYear: state.selectedYear,
     selectedMonth: state.selectedMonth,
@@ -186,6 +201,25 @@ async function handleWorkerSave() {
   await loadData();
 }
 
+async function saveWorkerProvisionalUpdates(workerId, updates) {
+  const selectedProject = getSelectedProject();
+  const worker =
+    selectedProject?.workers.find((currentWorker) => currentWorker.id === workerId) || null;
+  if (!selectedProject || !worker) return;
+
+  const normalizedUpdates = (updates || []).filter((update) => update.monthKey);
+  normalizedUpdates.forEach((update) => {
+    worker.provisionalDays[update.monthKey] = update.provisionalDays;
+  });
+
+  await upsertTimesheetBatch({
+    workerId,
+    updates: normalizedUpdates,
+  });
+
+  renderApp();
+}
+
 function handleProjectSelectionChange() {
   const selectedValue = String(dom.projectSelect.value || "").trim();
   const selectedProjectId = selectedValue ? Number(selectedValue) : null;
@@ -285,6 +319,73 @@ async function handleDeleteWorker(event) {
 
   await removeProjectWorker(workerId);
   await loadData();
+}
+
+function handleChargePlanPointerDown(event) {
+  if (!(event.target instanceof Element)) return;
+  if (event.button !== 0) return;
+
+  const trackEl = event.target.closest(".charge-plan-track");
+  if (!trackEl || trackEl.classList.contains("charge-plan-track--readonly")) return;
+
+  event.preventDefault();
+
+  const workerId = Number(trackEl.dataset.workerId);
+  if (!Number.isInteger(workerId)) return;
+
+  chargeTimelineDrag = {
+    trackEl,
+    workerId,
+    startClientX: event.clientX,
+    currentSelection: computeChargePlanSelection(trackEl, event.clientX, event.clientX),
+  };
+
+  updateChargePlanSelectionPreview(trackEl, chargeTimelineDrag.currentSelection);
+}
+
+function handleChargePlanPointerMove(event) {
+  if (!chargeTimelineDrag) return;
+
+  chargeTimelineDrag.currentSelection = computeChargePlanSelection(
+    chargeTimelineDrag.trackEl,
+    chargeTimelineDrag.startClientX,
+    event.clientX
+  );
+
+  updateChargePlanSelectionPreview(
+    chargeTimelineDrag.trackEl,
+    chargeTimelineDrag.currentSelection
+  );
+}
+
+async function handleChargePlanPointerUp() {
+  if (!chargeTimelineDrag) return;
+
+  const { trackEl, workerId, currentSelection } = chargeTimelineDrag;
+  clearChargePlanSelectionPreview(trackEl);
+  chargeTimelineDrag = null;
+
+  if (
+    !currentSelection ||
+    currentSelection.widthPx <= 0 ||
+    currentSelection.totalDays <= 0
+  ) {
+    return;
+  }
+
+  await saveWorkerProvisionalUpdates(workerId, currentSelection.updates);
+}
+
+async function handleChargePlanDoubleClick(event) {
+  if (!(event.target instanceof Element)) return;
+
+  const trackEl = event.target.closest(".charge-plan-track");
+  if (!trackEl || trackEl.classList.contains("charge-plan-track--readonly")) return;
+
+  const workerId = Number(trackEl.dataset.workerId);
+  if (!Number.isInteger(workerId)) return;
+
+  await saveWorkerProvisionalUpdates(workerId, getEmptyChargePlanUpdates(trackEl));
 }
 
 async function handlePaste(event) {
@@ -493,13 +594,28 @@ function bindEvents() {
     await handleWorkerSave();
   });
 
-  dom.chargePlanTableBody.addEventListener("change", handleTableInputChange);
   dom.expenseTableBody.addEventListener("change", handleTableInputChange);
   dom.realExpenseTableBody.addEventListener("change", handleTableInputChange);
 
-  dom.chargePlanTableBody.addEventListener("click", handleDeleteWorker);
-  dom.chargePlanTableBody.addEventListener("paste", handlePaste, true);
   dom.realExpenseTableBody.addEventListener("paste", handlePaste, true);
+  dom.chargePlanBoard.addEventListener("click", handleDeleteWorker);
+  dom.chargePlanBoard.addEventListener("pointerdown", handleChargePlanPointerDown);
+  dom.chargePlanBoard.addEventListener("dblclick", (event) => {
+    handleChargePlanDoubleClick(event).catch((error) => {
+      console.error("Erreur effacement timeline :", error);
+    });
+  });
+  window.addEventListener("pointermove", handleChargePlanPointerMove);
+  window.addEventListener("pointerup", () => {
+    handleChargePlanPointerUp().catch((error) => {
+      console.error("Erreur sauvegarde timeline :", error);
+    });
+  });
+  window.addEventListener("pointercancel", () => {
+    if (!chargeTimelineDrag) return;
+    clearChargePlanSelectionPreview(chargeTimelineDrag.trackEl);
+    chargeTimelineDrag = null;
+  });
 }
 
 export async function bootstrap() {

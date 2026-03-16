@@ -5,6 +5,11 @@ export const APP_CONFIG = {
     before: 5,
     after: 5,
   },
+  chargeTimeline: {
+    businessDayWidth: 16,
+    minimumMonthWidth: 160,
+    snapStepDays: 0.5,
+  },
   months: [
     "janvier",
     "fevrier",
