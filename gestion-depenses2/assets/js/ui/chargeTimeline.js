@@ -9,13 +9,13 @@ import {
 import {
   HALF_DAY_PARTS,
   isBusinessDay,
-  getCalendarHalfDaySlotsBetween,
   createHalfDaySlotKey,
   getHalfDaySlotRange,
   getSegmentAllocationDays,
 } from "../utils/timeSegments.js";
 
 let activeVisibleSlots = [];
+let currentBoardEl = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -26,20 +26,7 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function formatDayValue(value) {
-  const formatted = formatNumber(value);
-  return formatted.endsWith(",00") ? formatted.slice(0, -3) : formatted;
-}
-
-function formatSlotDate(date) {
-  return date.toLocaleDateString("fr-FR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-}
-
-function formatDateInputValue(date) {
+function toDateInputValue(date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
     return "";
   }
@@ -48,18 +35,6 @@ function formatDateInputValue(date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
-}
-
-function formatDateDisplayValue(date) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
-    return "";
-  }
-
-  return date.toLocaleDateString("fr-FR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
 }
 
 function parseDateInputValue(value, fallbackDate = null) {
@@ -76,11 +51,255 @@ function parseDateInputValue(value, fallbackDate = null) {
   return date;
 }
 
-function formatChargePlanDatePickerTitle(year, monthIndex) {
-  return new Date(year, monthIndex, 1, 12).toLocaleDateString("fr-FR", {
-    month: "long",
+function formatDateDisplayValue(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toLocaleDateString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
     year: "numeric",
   });
+}
+
+function formatDayValue(value) {
+  const formatted = formatNumber(value);
+  return formatted.endsWith(",00") ? formatted.slice(0, -3) : formatted;
+}
+
+function getChargePlanZoomMode(mode) {
+  if (Object.prototype.hasOwnProperty.call(APP_CONFIG.chargeTimeline.zoomModes, mode)) {
+    return mode;
+  }
+
+  return APP_CONFIG.defaultChargePlanZoomMode;
+}
+
+function getZoomPreset(zoomMode) {
+  return (
+    APP_CONFIG.chargeTimeline.zoomModes[getChargePlanZoomMode(zoomMode)] ||
+    APP_CONFIG.chargeTimeline.zoomModes[APP_CONFIG.defaultChargePlanZoomMode]
+  );
+}
+
+function getTimelineViewportWidth(boardEl = currentBoardEl) {
+  const boardWidth = Math.max(
+    boardEl?.clientWidth || 0,
+    boardEl?.getBoundingClientRect?.().width || 0,
+    typeof window !== "undefined" ? window.innerWidth - 64 : 0,
+    960
+  );
+  const fixedColumnsWidth = boardWidth <= 960 ? 170 + 96 + 96 : 150 + 120 + 100;
+  return Math.max(280, boardWidth - fixedColumnsWidth - 8);
+}
+
+function getAnchorMonthDayCount(anchorDate) {
+  if (!(anchorDate instanceof Date) || Number.isNaN(anchorDate.getTime())) {
+    return 30;
+  }
+
+  return new Date(anchorDate.getFullYear(), anchorDate.getMonth() + 1, 0).getDate();
+}
+
+function getSizingContext({
+  zoomMode,
+  zoomScale = APP_CONFIG.chargeTimeline.defaultZoomScale,
+  anchorDate = new Date(),
+  boardEl = currentBoardEl,
+} = {}) {
+  return {
+    zoomMode: getChargePlanZoomMode(zoomMode),
+    zoomScale: Math.max(0.1, toFiniteNumber(zoomScale, 1)),
+    timelineViewportWidth: getTimelineViewportWidth(boardEl),
+    anchorMonthDayCount: getAnchorMonthDayCount(anchorDate),
+  };
+}
+
+function getVisibleMonthEstimate(sizingContext) {
+  const context =
+    sizingContext ||
+    getSizingContext({
+      zoomMode: APP_CONFIG.defaultChargePlanZoomMode,
+      zoomScale: APP_CONFIG.chargeTimeline.defaultZoomScale,
+    });
+
+  if (context.zoomMode === "year") {
+    return 12 / Math.max(context.zoomScale, 0.01);
+  }
+
+  if (context.zoomMode === "month") {
+    return 1 / Math.max(context.zoomScale, 0.01);
+  }
+
+  const visibleDays = 7 / Math.max(context.zoomScale, 0.01);
+  return visibleDays / Math.max(context.anchorMonthDayCount, 1);
+}
+
+function getHeaderLabelDensity(sizingContext) {
+  const visibleMonths = getVisibleMonthEstimate(sizingContext);
+
+  if (visibleMonths <= 0.5) {
+    return {
+      showAllDayLabels: true,
+      showEveryOtherMondayOnly: false,
+      hideAllMondayLabels: false,
+      monthLabelStep: 1,
+    };
+  }
+
+  if (visibleMonths >= 12) {
+    return {
+      showAllDayLabels: false,
+      showEveryOtherMondayOnly: false,
+      hideAllMondayLabels: true,
+      monthLabelStep: 2,
+    };
+  }
+
+  if (visibleMonths >= 6) {
+    return {
+      showAllDayLabels: false,
+      showEveryOtherMondayOnly: true,
+      hideAllMondayLabels: false,
+      monthLabelStep: 1,
+    };
+  }
+
+  return {
+    showAllDayLabels: false,
+    showEveryOtherMondayOnly: false,
+    hideAllMondayLabels: false,
+    monthLabelStep: 1,
+  };
+}
+
+function shouldShowMondayLabel(date, density) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return false;
+  }
+
+  if (density.showAllDayLabels) {
+    return true;
+  }
+
+  if (date.getDay() !== 1) {
+    return false;
+  }
+
+  if (density.hideAllMondayLabels) {
+    return false;
+  }
+
+  if (!density.showEveryOtherMondayOnly) {
+    return true;
+  }
+
+  const utcDayCount = Math.floor(
+    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000
+  );
+  const weekIndex = Math.floor(utcDayCount / 7);
+  return weekIndex % 2 === 0;
+}
+
+function getMonthWidth(
+  month,
+  zoomMode,
+  zoomScale = APP_CONFIG.chargeTimeline.defaultZoomScale,
+  sizingContext = null
+) {
+  const context =
+    sizingContext ||
+    getSizingContext({
+      zoomMode,
+      zoomScale,
+    });
+  const safeDayCount = Math.max(1, month?.calendarDayCount || 0);
+
+  if (context.zoomMode === "week") {
+    return Math.max(
+      1,
+      (context.timelineViewportWidth / 7) * context.zoomScale * safeDayCount
+    );
+  }
+
+  if (context.zoomMode === "month") {
+    return Math.max(
+      1,
+      (context.timelineViewportWidth / Math.max(1, context.anchorMonthDayCount)) *
+        context.zoomScale *
+        safeDayCount
+    );
+  }
+
+  if (context.zoomMode === "year") {
+    return Math.max(1, (context.timelineViewportWidth / 12) * context.zoomScale);
+  }
+
+  const preset = getZoomPreset(context.zoomMode);
+  return Math.max(
+    preset.minimumMonthWidth,
+    Math.round((month?.calendarDayCount || 0) * preset.dayWidth * context.zoomScale)
+  );
+}
+
+function getTimelineWidth(
+  months,
+  zoomMode,
+  zoomScale = APP_CONFIG.chargeTimeline.defaultZoomScale,
+  sizingContext = null
+) {
+  return months.reduce(
+    (total, month) => total + getMonthWidth(month, zoomMode, zoomScale, sizingContext),
+    0
+  );
+}
+
+function buildVisibleSlots(
+  months,
+  zoomMode,
+  zoomScale = APP_CONFIG.chargeTimeline.defaultZoomScale,
+  sizingContext = null
+) {
+  const slots = [];
+  let slotIndex = 0;
+  let monthOffset = 0;
+
+  months.forEach((month) => {
+    const monthWidth = getMonthWidth(month, zoomMode, zoomScale, sizingContext);
+    const dayWidth =
+      month.calendarDayCount > 0
+        ? monthWidth / month.calendarDayCount
+        : monthWidth;
+    const halfDayWidth = dayWidth / 2;
+
+    (month.calendarDayDates || []).forEach((date, dayIndex) => {
+      const isWorkingDay = isBusinessDay(date);
+      HALF_DAY_PARTS.forEach((part, partIndex) => {
+        const slotRange = getHalfDaySlotRange(date, part);
+        if (!slotRange) {
+          return;
+        }
+
+        slots.push({
+          key: createHalfDaySlotKey(date, part),
+          slotIndex,
+          dateKey: toDateInputValue(date),
+          part,
+          isWorkingDay,
+          leftPx: monthOffset + dayIndex * dayWidth + partIndex * halfDayWidth,
+          widthPx: halfDayWidth,
+          startAt: slotRange.startAt,
+          endAt: slotRange.endAt,
+        });
+        slotIndex += 1;
+      });
+    });
+
+    monthOffset += monthWidth;
+  });
+
+  return slots;
 }
 
 function renderDatePickerMonthOptions(selectedMonthIndex) {
@@ -114,8 +333,8 @@ function renderDatePickerYearOptions(selectedYear) {
 
 function renderChargePlanDatePicker(year, monthIndex, selectedDateValue) {
   const selectedDate = parseDateInputValue(selectedDateValue, new Date());
-  const normalizedSelectedDateValue = formatDateInputValue(selectedDate);
-  const todayValue = formatDateInputValue(new Date());
+  const normalizedSelectedDateValue = toDateInputValue(selectedDate);
+  const todayValue = toDateInputValue(new Date());
   const firstOfMonth = new Date(year, monthIndex, 1, 12);
   const startOffset = (firstOfMonth.getDay() + 6) % 7;
   const gridStartDate = new Date(year, monthIndex, 1 - startOffset, 12);
@@ -126,7 +345,7 @@ function renderChargePlanDatePicker(year, monthIndex, selectedDateValue) {
     const currentDate = new Date(gridStartDate);
     currentDate.setDate(gridStartDate.getDate() + dayOffset);
 
-    const dateValue = formatDateInputValue(currentDate);
+    const dateValue = toDateInputValue(currentDate);
     const isCurrentMonth = currentDate.getMonth() === monthIndex;
     const isSelected = dateValue === normalizedSelectedDateValue;
     const isToday = dateValue === todayValue;
@@ -173,9 +392,7 @@ function renderChargePlanDatePicker(year, monthIndex, selectedDateValue) {
       </button>
     </div>
     <div class="charge-plan-date-picker-weekdays">
-      ${weekdayLabels
-        .map((label) => `<span>${escapeHtml(label)}</span>`)
-        .join("")}
+      ${weekdayLabels.map((label) => `<span>${escapeHtml(label)}</span>`).join("")}
     </div>
     <div class="charge-plan-date-picker-grid">
       ${dayButtons.join("")}
@@ -183,192 +400,59 @@ function renderChargePlanDatePicker(year, monthIndex, selectedDateValue) {
   `;
 }
 
-function getChargePlanZoomMode(mode) {
-  if (Object.prototype.hasOwnProperty.call(APP_CONFIG.chargeTimeline.zoomModes, mode)) {
-    return mode;
-  }
-
-  return APP_CONFIG.defaultChargePlanZoomMode;
-}
-
-function getChargePlanZoomScale(scale) {
-  const numericScale = Number(scale);
-  if (!Number.isFinite(numericScale)) {
-    return APP_CONFIG.chargeTimeline.defaultZoomScale;
-  }
-
-  return clamp(
-    numericScale,
-    APP_CONFIG.chargeTimeline.minZoomScale,
-    APP_CONFIG.chargeTimeline.maxZoomScale
-  );
-}
-
-function getZoomPreset(mode, scale = APP_CONFIG.chargeTimeline.defaultZoomScale) {
-  const basePreset = APP_CONFIG.chargeTimeline.zoomModes[getChargePlanZoomMode(mode)];
-  const zoomScale = getChargePlanZoomScale(scale);
-
-  return {
-    ...basePreset,
-    dayWidth: basePreset.dayWidth * zoomScale,
-    minimumMonthWidth: basePreset.minimumMonthWidth * zoomScale,
-  };
-}
-
-function getMonthWidth(month, zoomMode, zoomScale) {
-  const preset = getZoomPreset(zoomMode, zoomScale);
-  const widthFromDays = month.calendarDayCount * preset.dayWidth;
-  return Math.max(preset.minimumMonthWidth, widthFromDays);
-}
-
-function getTimelineWidth(months, zoomMode, zoomScale) {
-  return months.reduce((sum, month) => sum + getMonthWidth(month, zoomMode, zoomScale), 0);
-}
-
-function buildVisibleSlots(months, zoomMode, zoomScale) {
-  const slots = [];
-  let nextLeftPx = 0;
-  let slotIndex = 0;
-
-  months.forEach((month) => {
-    const preset = getZoomPreset(zoomMode, zoomScale);
-    const monthWidth = getMonthWidth(month, zoomMode, zoomScale);
-    const dayWidth =
-      month.calendarDayCount > 0
-        ? monthWidth / month.calendarDayCount
-        : preset.minimumMonthWidth;
-    const slotWidth = dayWidth / HALF_DAY_PARTS.length;
-    const lastDayIndex = Math.max(0, (month.calendarDayDates || []).length - 1);
-
-    (month.calendarDayDates || []).forEach((date, dayIndex) => {
-      const workingDay = isBusinessDay(date);
-      HALF_DAY_PARTS.forEach((part, partIndex) => {
-        const slotRange = getHalfDaySlotRange(date, part);
-        if (!slotRange) return;
-
-        slots.push({
-          slotIndex,
-          key: createHalfDaySlotKey(date, part),
-          dateKey: formatDateInputValue(date),
-          monthKey: month.monthKey,
-          part,
-          date,
-          startAt: slotRange.startAt,
-          endAt: slotRange.endAt,
-          isWorkingDay: workingDay,
-          isWeekend: !workingDay,
-          leftPx: nextLeftPx,
-          widthPx: slotWidth,
-          isMonthStart: dayIndex === 0 && partIndex === 0,
-          isMonthEnd: dayIndex === lastDayIndex && partIndex === HALF_DAY_PARTS.length - 1,
-        });
-
-        nextLeftPx += slotWidth;
-        slotIndex += 1;
-      });
-    });
-  });
-
-  return slots;
-}
-
-function renderHeaderMonth(month, zoomMode, zoomScale) {
-  const preset = getZoomPreset(zoomMode, zoomScale);
-  const monthWidth = getMonthWidth(month, zoomMode, zoomScale);
+function renderHeaderMonth(
+  month,
+  monthIndex,
+  zoomMode,
+  zoomScale = APP_CONFIG.chargeTimeline.defaultZoomScale,
+  sizingContext = null
+) {
+  const monthWidth = getMonthWidth(month, zoomMode, zoomScale, sizingContext);
   const dayWidth =
     month.calendarDayCount > 0
       ? monthWidth / month.calendarDayCount
-      : preset.minimumMonthWidth;
-
-  const dayTicks = (month.calendarDayDates || [])
-    .map((date, index) => {
-      const weekend = !isBusinessDay(date);
-      const showLabel =
-        index === 0 ||
-        index === month.calendarDayDates.length - 1 ||
-        index % 5 === 0;
-
-      return `
-        <span
-          class="charge-plan-day-tick ${weekend ? "is-weekend" : ""}"
-          data-date-key="${formatDateInputValue(date)}"
-          style="width:${dayWidth}px"
-        >
-          ${showLabel ? `<span>${date.getDate()}</span>` : ""}
-        </span>
-      `;
-    })
-    .join("");
+      : monthWidth;
+  const density = getHeaderLabelDensity(sizingContext);
+  const showMonthLabel = monthIndex % density.monthLabelStep === 0;
 
   return `
-    <div
-      class="charge-plan-header-month"
-      style="width:${monthWidth}px"
-    >
+    <div class="charge-plan-header-month" style="width:${monthWidth}px">
       <div class="charge-plan-header-month-title">
-        <strong>${escapeHtml(month.monthLabel)} ${month.year}</strong>
+        <span>${showMonthLabel ? escapeHtml(month.monthLabel) : "&nbsp;"}</span>
+        <span>${showMonthLabel ? month.year : "&nbsp;"}</span>
       </div>
-      <div class="charge-plan-header-day-strip">${dayTicks}</div>
+      <div class="charge-plan-header-day-strip">
+        ${(month.calendarDayDates || [])
+          .map(
+            (date) => `
+              <span
+                class="charge-plan-header-day-tick charge-plan-day-tick ${
+                  isBusinessDay(date) ? "" : "is-weekend"
+                }"
+                style="width:${dayWidth}px"
+                data-date-key="${toDateInputValue(date)}"
+              >
+                ${shouldShowMondayLabel(date, density) ? date.getDate() : ""}
+              </span>
+            `
+          )
+          .join("")}
+      </div>
     </div>
   `;
 }
 
-function renderTotalMonthSegments(
+function renderTrackGrid(
   months,
-  worker = null,
-  { showTotals = false, zoomMode, zoomScale } = {}
+  zoomMode,
+  zoomScale = APP_CONFIG.chargeTimeline.defaultZoomScale,
+  sizingContext = null
 ) {
-  return months
-    .map((month) => {
-      const monthWidth = getMonthWidth(month, zoomMode, zoomScale);
-      const days = worker
-        ? toFiniteNumber(worker.provisionalDays?.[month.monthKey], 0)
-        : toFiniteNumber(month.totalDays, 0);
-      const safeBusinessDayCount = Math.max(month.businessDayCount, 1);
-      const widthPercent = clamp((days / safeBusinessDayCount) * 100, 0, 100);
-      const overflowDays = Math.max(0, days - safeBusinessDayCount);
-      const backgroundSize =
-        month.businessDayCount > 0
-          ? `${monthWidth / month.businessDayCount}px 100%`
-          : `${monthWidth}px 100%`;
-
-      return `
-        <div
-          class="charge-plan-month-segment ${showTotals ? "is-total" : ""}"
-          data-month-key="${month.monthKey}"
-          style="width:${monthWidth}px; background-size:${backgroundSize}"
-        >
-          ${
-            days > 0
-              ? `
-                <div
-                  class="charge-plan-month-fill"
-                  style="width:${widthPercent}%"
-                >
-                  <span class="charge-plan-month-label">${formatDayValue(days)} j</span>
-                </div>
-              `
-              : ""
-          }
-          ${
-            overflowDays > 0 && !showTotals
-              ? `<span class="charge-plan-month-overflow">+${formatDayValue(
-                  overflowDays
-                )} j</span>`
-              : ""
-          }
-        </div>
-      `;
-    })
-    .join("");
-}
-
-function renderTrackGrid(months, zoomMode, zoomScale) {
   return `
     <div class="charge-plan-track-grid">
       ${months
         .map((month) => {
-          const monthWidth = getMonthWidth(month, zoomMode, zoomScale);
+          const monthWidth = getMonthWidth(month, zoomMode, zoomScale, sizingContext);
           const dayWidth =
             month.calendarDayCount > 0
               ? monthWidth / month.calendarDayCount
@@ -402,63 +486,83 @@ function renderTrackGrid(months, zoomMode, zoomScale) {
   `;
 }
 
-function buildVisibleSegmentBars(worker, visibleSlots) {
-  const slotByKey = new Map(visibleSlots.map((slot) => [slot.key, slot]));
+function getVisibleSlotRange(startAt, endAt, visibleSlots) {
+  let firstSlot = null;
+  let lastSlot = null;
 
+  for (const slot of visibleSlots) {
+    if (startAt < slot.endAt && endAt > slot.startAt) {
+      if (!firstSlot) {
+        firstSlot = slot;
+      }
+      lastSlot = slot;
+    }
+  }
+
+  if (!firstSlot || !lastSlot) {
+    return null;
+  }
+
+  return {
+    firstSlot,
+    lastSlot,
+  };
+}
+
+function buildVisibleSegmentBars(worker, visibleSlots) {
   return (worker?.segments || [])
     .map((segment) => {
-      const coveredSlots = getCalendarHalfDaySlotsBetween(
-        segment.startAt,
-        segment.endAt
-      )
-        .map((slot) => slotByKey.get(slot.key))
-        .filter(Boolean)
-        .sort((left, right) => left.slotIndex - right.slotIndex);
-
-      if (!coveredSlots.length) {
+      const startAt = segment?.startAt instanceof Date ? segment.startAt : null;
+      const endAt = segment?.endAt instanceof Date ? segment.endAt : null;
+      if (!startAt || !endAt || Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) {
         return null;
       }
 
-      const firstVisibleSlot = coveredSlots[0];
-      const lastVisibleSlot = coveredSlots[coveredSlots.length - 1];
+      const slotRange = getVisibleSlotRange(startAt, endAt, visibleSlots);
+      if (!slotRange) {
+        return null;
+      }
+
       const allocationDays = getSegmentAllocationDays(segment);
-      const leftPx = firstVisibleSlot.leftPx;
+      const label = segment?.label || `${formatDayValue(allocationDays)} j`;
+      const leftPx = slotRange.firstSlot.leftPx;
       const widthPx =
-        lastVisibleSlot.leftPx + lastVisibleSlot.widthPx - firstVisibleSlot.leftPx;
+        slotRange.lastSlot.leftPx +
+        slotRange.lastSlot.widthPx -
+        slotRange.firstSlot.leftPx;
 
       return {
-        segment,
-        startIndex: firstVisibleSlot.slotIndex,
-        endIndex: lastVisibleSlot.slotIndex,
+        segmentId: segment.id,
+        workerId: worker.id,
+        startSlotIndex: slotRange.firstSlot.slotIndex,
+        endSlotIndex: slotRange.lastSlot.slotIndex,
         leftPx,
         widthPx,
-        allocationDays,
-        title:
-          segment.label ||
-          `${formatDayValue(allocationDays)} j - ${formatSlotDate(
-            firstVisibleSlot.startAt
-          )}`,
+        label,
       };
     })
     .filter(Boolean)
-    .sort((left, right) => left.startIndex - right.startIndex || left.endIndex - right.endIndex);
+    .sort((left, right) => {
+      if (left.leftPx !== right.leftPx) {
+        return left.leftPx - right.leftPx;
+      }
+      return left.widthPx - right.widthPx;
+    });
 }
 
-function assignSegmentLanes(segmentBars) {
-  const laneEndByIndex = [];
+function assignSegmentLanes(bars) {
+  const lanes = [];
 
-  return segmentBars.map((segmentBar) => {
-    let laneIndex = laneEndByIndex.findIndex((laneEnd) => laneEnd < segmentBar.startIndex);
-
-    if (laneIndex < 0) {
-      laneIndex = laneEndByIndex.length;
-      laneEndByIndex.push(segmentBar.endIndex);
-    } else {
-      laneEndByIndex[laneIndex] = segmentBar.endIndex;
+  return bars.map((bar) => {
+    let laneIndex = lanes.findIndex((laneRightEdge) => bar.leftPx >= laneRightEdge + 8);
+    if (laneIndex === -1) {
+      laneIndex = lanes.length;
+      lanes.push(0);
     }
 
+    lanes[laneIndex] = bar.leftPx + bar.widthPx;
     return {
-      ...segmentBar,
+      ...bar,
       laneIndex,
     };
   });
@@ -467,34 +571,44 @@ function assignSegmentLanes(segmentBars) {
 function renderSegmentBars(assignedBars) {
   return assignedBars
     .map((bar) => {
-      const topPx = 10 + bar.laneIndex * 32;
-      const buttonWidth = Math.max(bar.widthPx - 4, 8);
-      const isCompact = buttonWidth < 64;
+      const compact = bar.widthPx < 64;
       return `
-        <button
-          type="button"
-          class="charge-plan-segment-bar ${isCompact ? "is-compact" : ""}"
-          data-segment-id="${bar.segment.id}"
-          data-worker-id="${bar.segment.projectTeamLink}"
-          data-start-slot-index="${bar.startIndex}"
-          data-end-slot-index="${bar.endIndex}"
-          style="left:${bar.leftPx}px; width:${buttonWidth}px; top:${topPx}px"
-          title="${escapeHtml(bar.title)}"
+        <div
+          class="charge-plan-segment-bar ${compact ? "is-compact" : ""}"
+          style="left:${bar.leftPx}px; top:${10 + bar.laneIndex * 32}px; width:${Math.max(
+            12,
+            bar.widthPx
+          )}px"
+          data-segment-id="${bar.segmentId}"
+          data-worker-id="${bar.workerId}"
+          data-start-slot-index="${bar.startSlotIndex}"
+          data-end-slot-index="${bar.endSlotIndex}"
         >
-          <span class="charge-plan-segment-handle is-start" data-resize-edge="start"></span>
-          <span class="charge-plan-segment-label">${escapeHtml(
-            bar.segment.label || `${formatDayValue(bar.allocationDays)} j`
-          )}</span>
-          <span class="charge-plan-segment-handle is-end" data-resize-edge="end"></span>
-        </button>
+          <span
+            class="charge-plan-segment-handle is-start"
+            data-resize-edge="start"
+          ></span>
+          <span class="charge-plan-segment-label">${escapeHtml(bar.label)}</span>
+          <span
+            class="charge-plan-segment-handle is-end"
+            data-resize-edge="end"
+          ></span>
+        </div>
       `;
     })
     .join("");
 }
 
-function renderWorkerRow(worker, months, visibleSlots, zoomMode, zoomScale) {
+function renderWorkerRow(
+  worker,
+  months,
+  visibleSlots,
+  zoomMode,
+  zoomScale,
+  sizingContext = null
+) {
   const totalDays = getWorkerTotalDays(worker.provisionalDays);
-  const timelineWidth = getTimelineWidth(months, zoomMode, zoomScale);
+  const timelineWidth = getTimelineWidth(months, zoomMode, zoomScale, sizingContext);
   const visibleSegmentBars = buildVisibleSegmentBars(worker, visibleSlots);
   const assignedBars = assignSegmentLanes(visibleSegmentBars);
   const laneCount = Math.max(
@@ -519,7 +633,7 @@ function renderWorkerRow(worker, months, visibleSlots, zoomMode, zoomScale) {
           data-worker-id="${worker.id}"
           data-timeline-width="${timelineWidth}"
         >
-          ${renderTrackGrid(months, zoomMode, zoomScale)}
+          ${renderTrackGrid(months, zoomMode, zoomScale, sizingContext)}
           <div class="charge-plan-track-bars">
             ${renderSegmentBars(assignedBars)}
           </div>
@@ -532,54 +646,173 @@ function renderWorkerRow(worker, months, visibleSlots, zoomMode, zoomScale) {
   `;
 }
 
-function renderTotalRow(project, months, zoomMode, zoomScale) {
-  const monthsWithTotals = months.map((month) => ({
-    ...month,
-    totalDays: (project.workers || []).reduce((sum, worker) => {
-      return sum + toFiniteNumber(worker.provisionalDays?.[month.monthKey], 0);
-    }, 0),
-  }));
-  const totalDays = monthsWithTotals.reduce((sum, month) => sum + month.totalDays, 0);
-  const timelineWidth = getTimelineWidth(months, zoomMode, zoomScale);
+function renderRoleRow(roleLabel, timelineWidth) {
+  return `
+    <div
+      class="charge-plan-role-row"
+      style="--timeline-width:${timelineWidth}px; --row-height:48px"
+    >
+      <div class="charge-plan-role-cell charge-plan-role-cell--label">
+        ${escapeHtml(roleLabel)}
+      </div>
+      <div class="charge-plan-role-cell charge-plan-role-cell--filler"></div>
+    </div>
+  `;
+}
+
+function renderReadonlyTrack(project, months, zoomMode, zoomScale, sizingContext = null) {
+  const monthlyTotals = {};
+
+  (project?.workers || []).forEach((worker) => {
+    Object.entries(worker?.provisionalDays || {}).forEach(([monthKey, value]) => {
+      monthlyTotals[monthKey] =
+        Math.round((toFiniteNumber(monthlyTotals[monthKey], 0) + toFiniteNumber(value, 0)) * 100) /
+        100;
+    });
+  });
+
+  return months
+    .map((month) => {
+      const monthWidth = getMonthWidth(month, zoomMode, zoomScale, sizingContext);
+      const totalDays = toFiniteNumber(monthlyTotals[month.monthKey], 0);
+      const fillRatio =
+        totalDays > 0
+          ? clamp(totalDays / Math.max(1, month.businessDayCount || 1), 0.08, 1)
+          : 0;
+
+      return `
+        <span class="charge-plan-month-segment" style="width:${monthWidth}px">
+          ${
+            totalDays > 0
+              ? `
+                <span class="charge-plan-month-fill" style="width:calc((100% - 12px) * ${fillRatio})">
+                  <span class="charge-plan-month-label">${formatDayValue(totalDays)} j</span>
+                </span>
+              `
+              : ""
+          }
+        </span>
+      `;
+    })
+    .join("");
+}
+
+function renderTotalRow(project, months, zoomMode, zoomScale, sizingContext = null) {
+  const timelineWidth = getTimelineWidth(months, zoomMode, zoomScale, sizingContext);
+  const totalDays = (project?.workers || []).reduce(
+    (sum, worker) => sum + getWorkerTotalDays(worker.provisionalDays),
+    0
+  );
 
   return `
-    <div class="charge-plan-row charge-plan-row--total" style="--timeline-width:${timelineWidth}px">
-      <div class="charge-plan-cell charge-plan-cell--name"><strong>Total</strong></div>
+    <div
+      class="charge-plan-row charge-plan-row--total"
+      style="--timeline-width:${timelineWidth}px; --row-height:72px"
+    >
+      <div class="charge-plan-cell charge-plan-cell--name">Total</div>
       <div class="charge-plan-cell charge-plan-cell--actions"></div>
-      <div class="charge-plan-cell charge-plan-cell--total"><strong>${formatDayValue(
-        totalDays
-      )} j</strong></div>
+      <div class="charge-plan-cell charge-plan-cell--total">${formatDayValue(totalDays)} j</div>
       <div class="charge-plan-cell charge-plan-cell--timeline">
         <div class="charge-plan-track charge-plan-track--readonly">
-          ${renderTotalMonthSegments(monthsWithTotals, null, {
-            showTotals: true,
-            zoomMode,
-            zoomScale,
-          })}
+          ${renderReadonlyTrack(project, months, zoomMode, zoomScale, sizingContext)}
         </div>
       </div>
     </div>
   `;
 }
 
-export function renderChargePlanTimeline(dom, project, viewState) {
-  const zoomMode = getChargePlanZoomMode(viewState.chargePlanZoomMode);
-  const zoomScale = getChargePlanZoomScale(viewState.chargePlanZoomScale);
-  const fallbackAnchorDate = new Date(viewState.selectedYear, viewState.selectedMonth, 1);
-  const anchorDate = parseDateInputValue(
-    viewState.chargePlanRangeStartDate || viewState.chargePlanAnchorDate,
-    fallbackAnchorDate
+function getTrackSlots(_trackEl) {
+  return activeVisibleSlots;
+}
+
+function buildSelectionFromSlots(firstSlot, lastSlot) {
+  if (!firstSlot || !lastSlot) {
+    return null;
+  }
+
+  const orderedFirst =
+    firstSlot.slotIndex <= lastSlot.slotIndex ? firstSlot : lastSlot;
+  const orderedLast =
+    firstSlot.slotIndex <= lastSlot.slotIndex ? lastSlot : firstSlot;
+
+  const selectedSlots = activeVisibleSlots.filter(
+    (slot) =>
+      slot.slotIndex >= orderedFirst.slotIndex && slot.slotIndex <= orderedLast.slotIndex
   );
-  const displayedMonths = buildDisplayedMonths(
-    anchorDate.getFullYear(),
-    anchorDate.getMonth(),
+  const totalDays =
+    selectedSlots.filter((slot) => slot.isWorkingDay).length / 2;
+
+  return {
+    startDate: orderedFirst.startAt.toISOString(),
+    endDate: orderedLast.endAt.toISOString(),
+    totalDays: Math.round(totalDays * 100) / 100,
+    leftPx: orderedFirst.leftPx,
+    widthPx:
+      orderedLast.leftPx + orderedLast.widthPx - orderedFirst.leftPx,
+    startSlotIndex: orderedFirst.slotIndex,
+    endSlotIndex: orderedLast.slotIndex,
+  };
+}
+
+function getSlotIndexFromClientX(trackEl, clientX) {
+  const slotEls = getTrackSlots(trackEl);
+  if (!slotEls.length) return -1;
+
+  const trackRect = trackEl.getBoundingClientRect();
+  const x = clamp(clientX - trackRect.left, 0, trackRect.width - 1);
+
+  for (const slotEl of slotEls) {
+    const startX = slotEl.leftPx;
+    const endX = slotEl.leftPx + slotEl.widthPx;
+    if (x >= startX && x < endX) {
+      return Number(slotEl.slotIndex);
+    }
+  }
+
+  return Number(slotEls[slotEls.length - 1].slotIndex);
+}
+
+export function renderChargePlanTimeline(dom, project, viewState) {
+  currentBoardEl = dom?.chargePlanBoard || null;
+  if (!currentBoardEl || !project) {
+    clearChargePlanTimeline(dom);
+    return;
+  }
+
+  const zoomMode = getChargePlanZoomMode(viewState?.chargePlanZoomMode);
+  const zoomScale = clamp(
+    toFiniteNumber(
+      viewState?.chargePlanZoomScale,
+      APP_CONFIG.chargeTimeline.defaultZoomScale
+    ),
+    APP_CONFIG.chargeTimeline.minZoomScale,
+    APP_CONFIG.chargeTimeline.maxZoomScale
+  );
+
+  const rangeStartDate = parseDateInputValue(
+    viewState?.chargePlanRangeStartDate,
+    parseDateInputValue(viewState?.chargePlanAnchorDate, new Date())
+  );
+
+  const months = buildDisplayedMonths(
+    rangeStartDate.getFullYear(),
+    rangeStartDate.getMonth(),
     APP_CONFIG.chargeTimeline.visibleMonthSpan,
     APP_CONFIG.months
   );
-  const groupedWorkers = groupWorkersByRole(project.workers);
-  const timelineWidth = getTimelineWidth(displayedMonths, zoomMode, zoomScale);
-  const visibleSlots = buildVisibleSlots(displayedMonths, zoomMode, zoomScale);
-  activeVisibleSlots = visibleSlots;
+  const selectedDateValue =
+    String(viewState?.chargePlanAnchorDate || "").trim() || toDateInputValue(new Date());
+  const selectedDate = parseDateInputValue(selectedDateValue, new Date());
+  const sizingContext = getSizingContext({
+    zoomMode,
+    zoomScale,
+    anchorDate: selectedDate,
+    boardEl: currentBoardEl,
+  });
+  const timelineWidth = getTimelineWidth(months, zoomMode, zoomScale, sizingContext);
+
+  activeVisibleSlots = buildVisibleSlots(months, zoomMode, zoomScale, sizingContext);
+
   const zoomButtons = Object.entries(APP_CONFIG.chargeTimeline.zoomModes)
     .map(
       ([mode, preset]) => `
@@ -593,35 +826,32 @@ export function renderChargePlanTimeline(dom, project, viewState) {
       `
     )
     .join("");
-  const anchorDateValue =
-    String(viewState.chargePlanAnchorDate || "").trim() ||
-    formatDateInputValue(anchorDate);
-  const selectedVisibleDate = parseDateInputValue(anchorDateValue, anchorDate);
-  const anchorDateLabel = formatDateDisplayValue(selectedVisibleDate);
 
+  const groupedWorkers = groupWorkersByRole(project?.workers || []);
   const rows = Object.entries(groupedWorkers)
-    .map(
-      ([role, workers]) => `
-        <div class="charge-plan-role-row" style="--timeline-width:${timelineWidth}px">
-          <div class="charge-plan-role-cell charge-plan-role-cell--label">${escapeHtml(role)}</div>
-          <div class="charge-plan-role-cell charge-plan-role-cell--filler"></div>
-        </div>
-        ${workers
-          .map((worker) =>
-            renderWorkerRow(worker, displayedMonths, visibleSlots, zoomMode, zoomScale)
+    .map(([roleLabel, workers]) => {
+      return [
+        renderRoleRow(roleLabel, timelineWidth),
+        ...(workers || []).map((worker) =>
+          renderWorkerRow(
+            worker,
+            months,
+            activeVisibleSlots,
+            zoomMode,
+            zoomScale,
+            sizingContext
           )
-          .join("")}
-      `
-    )
+        ),
+      ].join("");
+    })
     .join("");
 
-  dom.chargePlanBoard.innerHTML = `
+  currentBoardEl.innerHTML = `
     <div class="charge-plan-helper">
       <div class="charge-plan-helper-copy">
         <span>
-          Glissez sur une ligne pour creer un segment en demi-journees.
-          Tirez les poignees d'un trait pour le redimensionner.
-          Clic droit sur un trait pour afficher les actions.
+          Glissez dans une ligne pour creer un segment. Redimensionnez-le avec ses poignees.
+          Utilisez le clic droit sur une barre pour la supprimer.
         </span>
         <span class="charge-plan-feedback" hidden></span>
       </div>
@@ -634,23 +864,25 @@ export function renderChargePlanTimeline(dom, project, viewState) {
           <button
             type="button"
             class="charge-plan-date-trigger"
-            data-date-value="${escapeHtml(anchorDateValue)}"
+            data-date-value="${escapeHtml(selectedDateValue)}"
             aria-expanded="false"
           >
             <span class="charge-plan-date-trigger-label">Date</span>
-            <span class="charge-plan-date-trigger-value">${escapeHtml(anchorDateLabel)}</span>
+            <span class="charge-plan-date-trigger-value">${escapeHtml(
+              formatDateDisplayValue(selectedDate)
+            )}</span>
           </button>
           <div
             class="charge-plan-date-popover"
-            data-selected-date="${escapeHtml(anchorDateValue)}"
-            data-visible-year="${selectedVisibleDate.getFullYear()}"
-            data-visible-month="${selectedVisibleDate.getMonth()}"
+            data-selected-date="${escapeHtml(selectedDateValue)}"
+            data-visible-year="${selectedDate.getFullYear()}"
+            data-visible-month="${selectedDate.getMonth()}"
             hidden
           >
             ${renderChargePlanDatePicker(
-              selectedVisibleDate.getFullYear(),
-              selectedVisibleDate.getMonth(),
-              anchorDateValue
+              selectedDate.getFullYear(),
+              selectedDate.getMonth(),
+              selectedDateValue
             )}
           </div>
         </div>
@@ -665,20 +897,28 @@ export function renderChargePlanTimeline(dom, project, viewState) {
     </div>
     <div class="charge-plan-scroll">
       <div class="charge-plan-timeline" style="--timeline-width:${timelineWidth}px">
-        <div class="charge-plan-row charge-plan-row--header">
+        <div
+          class="charge-plan-row charge-plan-row--header"
+          style="--timeline-width:${timelineWidth}px; --row-height:90px"
+        >
           <div class="charge-plan-cell charge-plan-cell--name">Nom</div>
           <div class="charge-plan-cell charge-plan-cell--actions">Actions</div>
           <div class="charge-plan-cell charge-plan-cell--total">Total jours</div>
           <div class="charge-plan-cell charge-plan-cell--timeline">
-            <div class="charge-plan-header-track" data-charge-plan-pan-zone="1">
-              ${displayedMonths
-                .map((month) => renderHeaderMonth(month, zoomMode, zoomScale))
+            <div
+              class="charge-plan-header-track"
+              data-timeline-width="${timelineWidth}"
+            >
+              ${months
+                .map((month, monthIndex) =>
+                  renderHeaderMonth(month, monthIndex, zoomMode, zoomScale, sizingContext)
+                )
                 .join("")}
             </div>
           </div>
         </div>
         ${rows}
-        ${renderTotalRow(project, displayedMonths, zoomMode, zoomScale)}
+        ${renderTotalRow(project, months, zoomMode, zoomScale, sizingContext)}
       </div>
     </div>
     <div class="charge-plan-context-menu" hidden>
@@ -695,7 +935,11 @@ export function renderChargePlanTimeline(dom, project, viewState) {
 
 export function clearChargePlanTimeline(dom) {
   activeVisibleSlots = [];
-  dom.chargePlanBoard.innerHTML = "";
+  currentBoardEl = dom?.chargePlanBoard || null;
+
+  if (currentBoardEl) {
+    currentBoardEl.innerHTML = "";
+  }
 }
 
 export function showChargePlanDatePicker(
@@ -731,81 +975,10 @@ export function hideChargePlanDatePicker(boardEl) {
   }
 }
 
-function getTrackSlots(trackEl) {
-  if (!(trackEl instanceof HTMLElement)) {
-    return [];
-  }
-
-  const timelineWidth = Number(trackEl.dataset.timelineWidth) || 0;
-  if (timelineWidth <= 0) {
-    return [];
-  }
-
-  return activeVisibleSlots;
-}
-
-function buildSelectionFromSlots(firstSlot, lastSlot) {
-  if (!firstSlot || !lastSlot) return null;
-
-  const firstIndex = Number(firstSlot.slotIndex);
-  const lastIndex = Number(lastSlot.slotIndex);
-  const selectedSlots = [];
-  for (let slotIndex = firstIndex; slotIndex <= lastIndex; slotIndex += 1) {
-    const slot = activeVisibleSlots[slotIndex];
-    if (slot) {
-      selectedSlots.push(slot);
-    }
-  }
-
-  const workingSlots = selectedSlots.filter((slot) => slot.isWorkingDay);
-  const startPx = firstSlot.leftPx;
-  const endPx = lastSlot.leftPx + lastSlot.widthPx;
-  const firstWorkingSlot = workingSlots[0] || null;
-  const lastWorkingSlot = workingSlots[workingSlots.length - 1] || null;
-
-  return {
-    startSlotIndex: firstIndex,
-    endSlotIndex: lastIndex,
-    startPx,
-    endPx,
-    widthPx: Math.max(endPx - startPx, firstSlot.widthPx),
-    totalDays: workingSlots.length / 2,
-    startDate: firstWorkingSlot?.startAt?.toISOString?.() || "",
-    endDate: lastWorkingSlot?.endAt?.toISOString?.() || "",
-  };
-}
-
-function getSlotIndexFromClientX(trackEl, clientX) {
-  const slotEls = getTrackSlots(trackEl);
-  if (!slotEls.length) return -1;
-
-  const trackRect = trackEl.getBoundingClientRect();
-  const x = clamp(clientX - trackRect.left, 0, trackRect.width - 1);
-
-  for (const slotEl of slotEls) {
-    const startX = slotEl.leftPx;
-    const endX = slotEl.leftPx + slotEl.widthPx;
-    if (x >= startX && x < endX) {
-      return Number(slotEl.slotIndex);
-    }
-  }
-
-  return Number(slotEls[slotEls.length - 1].slotIndex);
-}
-
-export function computeChargePlanSelectionFromSlotIndexes(
-  trackEl,
-  startSlotIndex,
-  endSlotIndex
-) {
-  const slotEls = getTrackSlots(trackEl);
-  if (!slotEls.length) return null;
-
-  const firstIndex = Math.min(startSlotIndex, endSlotIndex);
-  const lastIndex = Math.max(startSlotIndex, endSlotIndex);
-  const firstSlot = slotEls[firstIndex];
-  const lastSlot = slotEls[lastIndex];
-
+export function computeChargePlanSelectionFromSlotIndexes(trackEl, firstSlotIndex, lastSlotIndex) {
+  const slots = getTrackSlots(trackEl);
+  const firstSlot = slots.find((slot) => slot.slotIndex === Number(firstSlotIndex));
+  const lastSlot = slots.find((slot) => slot.slotIndex === Number(lastSlotIndex));
   return buildSelectionFromSlots(firstSlot, lastSlot);
 }
 
@@ -814,46 +987,52 @@ export function getChargePlanSlotIndexAtClientX(trackEl, clientX) {
 }
 
 export function computeChargePlanSelection(trackEl, startClientX, endClientX) {
-  const slotEls = getTrackSlots(trackEl);
-  if (!slotEls.length) return null;
-
-  const startIndex = getSlotIndexFromClientX(trackEl, startClientX);
-  const endIndex = getSlotIndexFromClientX(trackEl, endClientX);
-  if (startIndex < 0 || endIndex < 0) return null;
-
-  const firstIndex = Math.min(startIndex, endIndex);
-  const lastIndex = Math.max(startIndex, endIndex);
-  const firstSlot = slotEls[firstIndex];
-  const lastSlot = slotEls[lastIndex];
-  return buildSelectionFromSlots(firstSlot, lastSlot);
+  const firstSlotIndex = getSlotIndexFromClientX(trackEl, startClientX);
+  const lastSlotIndex = getSlotIndexFromClientX(trackEl, endClientX);
+  return computeChargePlanSelectionFromSlotIndexes(trackEl, firstSlotIndex, lastSlotIndex);
 }
 
 export function updateChargePlanSelectionPreview(trackEl, selection) {
-  const previewEl = trackEl.querySelector(".charge-plan-selection-preview");
+  const previewEl = trackEl?.querySelector(".charge-plan-selection-preview");
   const labelEl = previewEl?.querySelector(".charge-plan-selection-label");
-  if (!previewEl || !labelEl || !selection) return;
+  if (!(previewEl instanceof HTMLElement) || !(labelEl instanceof HTMLElement)) {
+    return;
+  }
+
+  if (!selection || selection.widthPx <= 0 || selection.totalDays <= 0) {
+    clearChargePlanSelectionPreview(trackEl);
+    return;
+  }
 
   previewEl.hidden = false;
+  previewEl.style.left = `${selection.leftPx}px`;
+  previewEl.style.width = `${selection.widthPx}px`;
   previewEl.classList.toggle("is-invalid", Boolean(selection.hasOverlap));
-  previewEl.style.left = `${selection.startPx}px`;
-  previewEl.style.width = `${Math.max(selection.widthPx, 8)}px`;
-  labelEl.textContent = selection.hasOverlap
-    ? "Chevauchement interdit"
-    : `${formatDayValue(selection.totalDays)} j`;
+  labelEl.textContent = `${formatDayValue(selection.totalDays)} j`;
 }
 
 export function clearChargePlanSelectionPreview(trackEl) {
-  const previewEl = trackEl.querySelector(".charge-plan-selection-preview");
-  if (!previewEl) return;
+  const previewEl = trackEl?.querySelector(".charge-plan-selection-preview");
+  if (!(previewEl instanceof HTMLElement)) {
+    return;
+  }
+
   previewEl.hidden = true;
-  previewEl.classList.remove("is-invalid");
   previewEl.style.left = "0px";
   previewEl.style.width = "0px";
+  previewEl.classList.remove("is-invalid");
+
+  const labelEl = previewEl.querySelector(".charge-plan-selection-label");
+  if (labelEl instanceof HTMLElement) {
+    labelEl.textContent = "";
+  }
 }
 
 export function setChargePlanFeedback(boardEl, message = "") {
   const feedbackEl = boardEl?.querySelector(".charge-plan-feedback");
-  if (!feedbackEl) return;
+  if (!(feedbackEl instanceof HTMLElement)) {
+    return;
+  }
 
   feedbackEl.textContent = String(message || "").trim();
   feedbackEl.hidden = !feedbackEl.textContent;
@@ -861,28 +1040,35 @@ export function setChargePlanFeedback(boardEl, message = "") {
 
 export function hideChargePlanContextMenu(boardEl) {
   const menuEl = boardEl?.querySelector(".charge-plan-context-menu");
-  if (!menuEl) return;
+  if (!(menuEl instanceof HTMLElement)) {
+    return;
+  }
 
   menuEl.hidden = true;
   menuEl.style.left = "0px";
   menuEl.style.top = "0px";
+  delete menuEl.dataset.segmentId;
+
   const actionEl = menuEl.querySelector(".charge-plan-context-action");
   if (actionEl instanceof HTMLElement) {
     delete actionEl.dataset.segmentId;
   }
-  delete menuEl.dataset.segmentId;
 }
 
 export function showChargePlanContextMenu(boardEl, { clientX, clientY, segmentId }) {
   const menuEl = boardEl?.querySelector(".charge-plan-context-menu");
-  if (!menuEl) return;
+  if (!(menuEl instanceof HTMLElement)) {
+    return;
+  }
 
   menuEl.hidden = false;
   menuEl.dataset.segmentId = String(segmentId);
+
   const actionEl = menuEl.querySelector(".charge-plan-context-action");
   if (actionEl instanceof HTMLElement) {
     actionEl.dataset.segmentId = String(segmentId);
   }
+
   menuEl.style.left = `${clientX}px`;
   menuEl.style.top = `${clientY}px`;
 

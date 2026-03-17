@@ -303,6 +303,81 @@ export function getEarliestProjectMonth(project) {
   };
 }
 
+function getMonthKeyAnchorDate(monthKey) {
+  const [year, month] = String(monthKey || "").split("-").map(Number);
+  if (!Number.isInteger(year) || !Number.isInteger(month)) {
+    return null;
+  }
+
+  const date = new Date(year, month - 1, 1, 12, 0, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function getProjectAverageAnchorDate(project) {
+  let minTimestamp = Number.POSITIVE_INFINITY;
+  let maxTimestamp = Number.NEGATIVE_INFINITY;
+
+  const registerTimestamp = (value) => {
+    if (!Number.isFinite(value)) {
+      return;
+    }
+
+    minTimestamp = Math.min(minTimestamp, value);
+    maxTimestamp = Math.max(maxTimestamp, value);
+  };
+
+  (project?.workers || []).forEach((worker) => {
+    const segments = worker?.segments || [];
+
+    if (segments.length > 0) {
+      segments.forEach((segment) => {
+        const startAt = parseRawDateTime(segment?.startAt);
+        const endAt = parseRawDateTime(segment?.endAt);
+        if (startAt) {
+          registerTimestamp(startAt.getTime());
+        }
+        if (endAt) {
+          registerTimestamp(endAt.getTime());
+        }
+      });
+      return;
+    }
+
+    Object.keys(worker?.provisionalDays || {}).forEach((monthKey) => {
+      const monthDate = getMonthKeyAnchorDate(monthKey);
+      if (monthDate) {
+        registerTimestamp(monthDate.getTime());
+      }
+    });
+
+    Object.keys(worker?.workedDays || {}).forEach((monthKey) => {
+      const monthDate = getMonthKeyAnchorDate(monthKey);
+      if (monthDate) {
+        registerTimestamp(monthDate.getTime());
+      }
+    });
+  });
+
+  if (!Number.isFinite(minTimestamp) || !Number.isFinite(maxTimestamp)) {
+    return null;
+  }
+
+  const midpointTimestamp = minTimestamp + (maxTimestamp - minTimestamp) / 2;
+  const midpointDate = new Date(midpointTimestamp);
+  if (Number.isNaN(midpointDate.getTime())) {
+    return null;
+  }
+
+  return {
+    year: midpointDate.getFullYear(),
+    monthIndex: midpointDate.getMonth(),
+    dateValue: `${midpointDate.getFullYear()}-${String(midpointDate.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}-${String(midpointDate.getDate()).padStart(2, "0")}`,
+  };
+}
+
 export function getProjectProvisionalMonthBounds(project) {
   const monthKeys = new Set();
 

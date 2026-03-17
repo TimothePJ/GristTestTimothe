@@ -8,8 +8,9 @@ export const APP_CONFIG = {
     anchorMonthOffset: 8,
     edgeNavigationThresholdPx: 48,
     scrollIdleRefreshMs: 220,
+    yearMaxVisibleMonths: 15,
     defaultZoomScale: 1,
-    minZoomScale: 0.32,
+    minZoomScale: 0.1,
     maxZoomScale: 2.8,
     wheelZoomFactor: 1.08,
     zoomModes: {
