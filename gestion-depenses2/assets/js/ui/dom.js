@@ -32,11 +32,6 @@ export function getDomRefs() {
     kpiTotalSpending: document.getElementById("kpi-total-spending"),
     kpiRemainingBudget: document.getElementById("kpi-remaining-budget"),
     kpiRemainingPercentage: document.getElementById("kpi-remaining-percentage"),
-    yearSelect: document.getElementById("year-select"),
-    prevMonthBtn: document.getElementById("prev-month-btn"),
-    nextMonthBtn: document.getElementById("next-month-btn"),
-    currentMonthYear: document.getElementById("current-month-year"),
-    monthSpanInput: document.getElementById("month-span-input"),
     chargePlanBoard: document.getElementById("charge-plan-board"),
     expenseHeadRow: document.querySelector("#expense-table thead tr"),
     expenseTableBody: document.querySelector("#expense-table tbody"),
@@ -47,12 +42,6 @@ export function getDomRefs() {
     workerNameSelect: document.getElementById("worker-name-select"),
     saveWorkerBtn: document.getElementById("save-worker-btn"),
     spendingChartCanvas: document.getElementById("spending-chart"),
-    prevMonthTableBtns: Array.from(
-      document.querySelectorAll(".prev-month-table-btn")
-    ),
-    nextMonthTableBtns: Array.from(
-      document.querySelectorAll(".next-month-table-btn")
-    ),
   };
 }
 
@@ -84,11 +73,6 @@ export function assertDomRefs(domRefs) {
     "kpiTotalSpending",
     "kpiRemainingBudget",
     "kpiRemainingPercentage",
-    "yearSelect",
-    "prevMonthBtn",
-    "nextMonthBtn",
-    "currentMonthYear",
-    "monthSpanInput",
     "chargePlanBoard",
     "expenseHeadRow",
     "expenseTableBody",

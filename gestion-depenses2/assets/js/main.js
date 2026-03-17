@@ -1,4 +1,4 @@
-import { clamp, parseOptionalNumberInput, shiftMonthCursor } from "./utils/format.js";
+import { clamp, parseOptionalNumberInput } from "./utils/format.js";
 import { APP_CONFIG } from "./config.js";
 import { getSelectedProject, setState, state } from "./state.js";
 import {
@@ -37,8 +37,6 @@ import {
 } from "./ui/chargeTimeline.js";
 import { clearKpi, renderKpi } from "./ui/kpi.js";
 import {
-  populateYearOptions,
-  renderCurrentMonthYear,
   renderProjectOptions,
   renderWorkerOptions,
 } from "./ui/selectors.js";
@@ -58,6 +56,9 @@ let dom = null;
 let chargeTimelineDrag = null;
 let chargePlanPan = null;
 let chargePlanRangeRefreshPending = false;
+let chargePlanRangeRefreshTimer = null;
+let lastChargePlanScrollLeft = 0;
+let lastChargePlanScrollDirection = "";
 const chargePlanViewport = {
   scrollRatio: 0,
   pendingAnchorRatio: null,
@@ -105,9 +106,6 @@ function syncStateToProjectStart(project) {
 function renderApp() {
   renderProjectOptions(dom.projectSelect, state.projects, state.selectedProjectId);
   renderWorkerOptions(dom.workerNameSelect, state.teamMembers);
-  populateYearOptions(dom.yearSelect, state.selectedYear);
-  renderCurrentMonthYear(dom.currentMonthYear, state.selectedMonth, state.selectedYear);
-  dom.monthSpanInput.value = String(state.monthSpan);
   renderBudgetPreview(dom.budgetLinesContainer, state.newProjectBudgetLines);
 
   const selectedProject = getSelectedProject();
@@ -176,12 +174,6 @@ async function loadData({ preferredProjectNumber = "" } = {}) {
     setState({ selectedProjectId: null });
   }
 
-  renderApp();
-}
-
-function shiftCurrentMonth(delta) {
-  const nextState = shiftMonthCursor(state.selectedYear, state.selectedMonth, delta);
-  setState(nextState);
   renderApp();
 }
 
@@ -339,6 +331,7 @@ function captureChargePlanViewport(scrollEl = getChargePlanScrollElement()) {
   const maxScrollLeft = Math.max(0, scrollEl.scrollWidth - scrollEl.clientWidth);
   chargePlanViewport.scrollRatio =
     maxScrollLeft > 0 ? scrollEl.scrollLeft / maxScrollLeft : 0;
+  lastChargePlanScrollLeft = scrollEl.scrollLeft;
 }
 
 function rememberChargePlanAnchor(scrollEl, clientX) {
@@ -514,7 +507,18 @@ function maybeExtendChargePlanRange(scrollEl, direction = "") {
   const nearLeftEdge = scrollEl.scrollLeft <= threshold;
   const nearRightEdge = maxScrollLeft - scrollEl.scrollLeft <= threshold;
 
-  if (direction === "earlier" && nearLeftEdge) {
+  let effectiveDirection = direction;
+  if (!effectiveDirection) {
+    if (nearLeftEdge && !nearRightEdge) {
+      effectiveDirection = "earlier";
+    } else if (nearRightEdge && !nearLeftEdge) {
+      effectiveDirection = "later";
+    } else {
+      return;
+    }
+  }
+
+  if (effectiveDirection === "earlier" && nearLeftEdge) {
     const edgeDate = getChargePlanViewportEdgeDate(scrollEl, "left");
     if (!edgeDate) return;
 
@@ -526,7 +530,7 @@ function maybeExtendChargePlanRange(scrollEl, direction = "") {
     return;
   }
 
-  if (direction === "later" && nearRightEdge) {
+  if (effectiveDirection === "later" && nearRightEdge) {
     const edgeDate = getChargePlanViewportEdgeDate(scrollEl, "right");
     if (!edgeDate) return;
 
@@ -539,12 +543,55 @@ function maybeExtendChargePlanRange(scrollEl, direction = "") {
   }
 }
 
+function isChargePlanNearEdge(scrollEl, direction = "") {
+  if (!(scrollEl instanceof HTMLElement)) return false;
+
+  const maxScrollLeft = Math.max(0, scrollEl.scrollWidth - scrollEl.clientWidth);
+  if (maxScrollLeft <= 0) return false;
+
+  const threshold = APP_CONFIG.chargeTimeline.edgeNavigationThresholdPx;
+  const nearLeftEdge = scrollEl.scrollLeft <= threshold;
+  const nearRightEdge = maxScrollLeft - scrollEl.scrollLeft <= threshold;
+
+  if (direction === "earlier") return nearLeftEdge;
+  if (direction === "later") return nearRightEdge;
+
+  return nearLeftEdge || nearRightEdge;
+}
+
+function clearChargePlanRangeRefreshTimer() {
+  if (chargePlanRangeRefreshTimer == null) {
+    return;
+  }
+
+  clearTimeout(chargePlanRangeRefreshTimer);
+  chargePlanRangeRefreshTimer = null;
+}
+
+function scheduleChargePlanRangeRefresh(scrollEl, direction = "") {
+  if (!(scrollEl instanceof HTMLElement) || chargePlanPan) {
+    return;
+  }
+
+  if (!isChargePlanNearEdge(scrollEl, direction || lastChargePlanScrollDirection)) {
+    clearChargePlanRangeRefreshTimer();
+    return;
+  }
+
+  clearChargePlanRangeRefreshTimer();
+  chargePlanRangeRefreshTimer = setTimeout(() => {
+    chargePlanRangeRefreshTimer = null;
+    maybeExtendChargePlanRange(scrollEl, direction || lastChargePlanScrollDirection);
+  }, APP_CONFIG.chargeTimeline.scrollIdleRefreshMs);
+}
+
 function setChargePlanZoomMode(nextMode, options = {}) {
   if (!Object.prototype.hasOwnProperty.call(APP_CONFIG.chargeTimeline.zoomModes, nextMode)) {
     return;
   }
 
   const scrollEl = getChargePlanScrollElement();
+  clearChargePlanRangeRefreshTimer();
   if (options.anchorClientX != null && scrollEl) {
     rememberChargePlanAnchor(scrollEl, options.anchorClientX);
   } else {
@@ -570,6 +617,7 @@ function setChargePlanZoomScale(nextScale, options = {}) {
   }
 
   const scrollEl = getChargePlanScrollElement();
+  clearChargePlanRangeRefreshTimer();
   if (options.anchorClientX != null && scrollEl) {
     rememberChargePlanAnchor(scrollEl, options.anchorClientX);
   } else {
@@ -593,6 +641,7 @@ function navigateChargePlanToDate(rawDateValue) {
 
   pendingChargePlanFocusDate = dateValue;
   pendingChargePlanFocusAlign = "center";
+  clearChargePlanRangeRefreshTimer();
   setState({
     chargePlanAnchorDate: dateValue,
   });
@@ -811,6 +860,7 @@ function handleChargePlanPointerDown(event) {
 
     event.preventDefault();
     closeChargePlanContextMenu();
+    clearChargePlanRangeRefreshTimer();
     chargePlanPan = {
       scrollEl,
       startClientX: event.clientX,
@@ -922,7 +972,6 @@ function handleChargePlanPointerMove(event) {
     }
     chargePlanPan.scrollEl.scrollLeft = chargePlanPan.startScrollLeft - deltaX;
     captureChargePlanViewport(chargePlanPan.scrollEl);
-    maybeExtendChargePlanRange(chargePlanPan.scrollEl, chargePlanPan.direction);
     return;
   }
 
@@ -981,8 +1030,10 @@ async function handleChargePlanPointerUp() {
   if (chargePlanPan) {
     chargePlanPan.scrollEl.classList.remove("is-panning");
     captureChargePlanViewport(chargePlanPan.scrollEl);
-    maybeExtendChargePlanRange(chargePlanPan.scrollEl, chargePlanPan.direction);
+    const panDirection = chargePlanPan.direction;
+    const panScrollEl = chargePlanPan.scrollEl;
     chargePlanPan = null;
+    scheduleChargePlanRangeRefresh(panScrollEl, panDirection);
   }
 
   if (!chargeTimelineDrag) return;
@@ -1017,16 +1068,22 @@ async function handleChargePlanPointerUp() {
   await createChargePlanSegment(workerId, currentSelection);
 }
 
-async function handleChargePlanDoubleClick(event) {
-  closeChargePlanContextMenu();
-}
-
 function handleChargePlanScroll(event) {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
   if (!target.classList.contains("charge-plan-scroll")) return;
 
+  const previousScrollLeft = lastChargePlanScrollLeft;
   captureChargePlanViewport(target);
+  if (target.scrollLeft > previousScrollLeft) {
+    lastChargePlanScrollDirection = "later";
+  } else if (target.scrollLeft < previousScrollLeft) {
+    lastChargePlanScrollDirection = "earlier";
+  }
+
+  if (!chargePlanPan) {
+    scheduleChargePlanRangeRefresh(target, lastChargePlanScrollDirection);
+  }
 }
 
 async function handlePaste(event) {
@@ -1096,44 +1153,6 @@ async function handlePaste(event) {
 
 function bindEvents() {
   dom.projectSelect.addEventListener("change", handleProjectSelectionChange);
-
-  dom.yearSelect.addEventListener("change", () => {
-    const selectedYear = Number(dom.yearSelect.value);
-    if (!Number.isInteger(selectedYear)) return;
-
-    setState({ selectedYear });
-    renderApp();
-  });
-
-  dom.prevMonthBtn.addEventListener("click", () => {
-    shiftCurrentMonth(-1);
-  });
-
-  dom.nextMonthBtn.addEventListener("click", () => {
-    shiftCurrentMonth(1);
-  });
-
-  dom.prevMonthTableBtns.forEach((button) => {
-    button.addEventListener("click", () => {
-      shiftCurrentMonth(-1);
-    });
-  });
-
-  dom.nextMonthTableBtns.forEach((button) => {
-    button.addEventListener("click", () => {
-      shiftCurrentMonth(1);
-    });
-  });
-
-  dom.monthSpanInput.addEventListener("change", () => {
-    const nextMonthSpan = clamp(
-      Number(dom.monthSpanInput.value) || APP_CONFIG.defaultMonthSpan,
-      1,
-      24
-    );
-    setState({ monthSpan: nextMonthSpan });
-    renderApp();
-  });
 
   dom.addProjectBtn.addEventListener("click", (event) => {
     if (!event.isTrusted) return;
@@ -1254,9 +1273,6 @@ function bindEvents() {
   });
   dom.chargePlanBoard.addEventListener("scroll", handleChargePlanScroll, true);
   dom.chargePlanBoard.addEventListener("pointerdown", handleChargePlanPointerDown);
-  dom.chargePlanBoard.addEventListener("dblclick", (event) => {
-    handleChargePlanDoubleClick(event);
-  });
   document.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) {
       closeChargePlanContextMenu();
@@ -1277,6 +1293,7 @@ function bindEvents() {
     });
   });
   window.addEventListener("pointercancel", () => {
+    clearChargePlanRangeRefreshTimer();
     if (chargePlanPan) {
       chargePlanPan.scrollEl.classList.remove("is-panning");
       captureChargePlanViewport(chargePlanPan.scrollEl);

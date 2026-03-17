@@ -2,14 +2,11 @@ export const APP_CONFIG = {
   storageKey: "gestion-depenses2.state",
   defaultMonthSpan: 6,
   defaultChargePlanZoomMode: "month",
-  yearWindow: {
-    before: 5,
-    after: 5,
-  },
   chargeTimeline: {
-    visibleMonthSpan: 12,
-    anchorMonthOffset: 4,
-    edgeNavigationThresholdPx: 96,
+    visibleMonthSpan: 18,
+    anchorMonthOffset: 6,
+    edgeNavigationThresholdPx: 36,
+    scrollIdleRefreshMs: 280,
     defaultZoomScale: 1,
     minZoomScale: 0.55,
     maxZoomScale: 2.8,
