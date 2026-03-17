@@ -4,7 +4,6 @@ import {
   buildDisplayedMonths,
   clamp,
   formatNumber,
-  shiftMonthCursor,
   toFiniteNumber,
 } from "../utils/format.js";
 import {
@@ -15,6 +14,8 @@ import {
   getHalfDaySlotRange,
   getSegmentAllocationDays,
 } from "../utils/timeSegments.js";
+
+let activeVisibleSlots = [];
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -49,6 +50,18 @@ function formatDateInputValue(date) {
   return `${year}-${month}-${day}`;
 }
 
+function formatDateDisplayValue(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toLocaleDateString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
 function parseDateInputValue(value, fallbackDate = null) {
   const text = String(value || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
@@ -61,6 +74,113 @@ function parseDateInputValue(value, fallbackDate = null) {
   }
 
   return date;
+}
+
+function formatChargePlanDatePickerTitle(year, monthIndex) {
+  return new Date(year, monthIndex, 1, 12).toLocaleDateString("fr-FR", {
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function renderDatePickerMonthOptions(selectedMonthIndex) {
+  return APP_CONFIG.months
+    .map(
+      (monthLabel, currentMonthIndex) => `
+        <option
+          value="${currentMonthIndex}"
+          ${currentMonthIndex === selectedMonthIndex ? "selected" : ""}
+        >
+          ${escapeHtml(monthLabel)}
+        </option>
+      `
+    )
+    .join("");
+}
+
+function renderDatePickerYearOptions(selectedYear) {
+  const options = [];
+
+  for (let year = selectedYear - 15; year <= selectedYear + 15; year += 1) {
+    options.push(`
+      <option value="${year}" ${year === selectedYear ? "selected" : ""}>
+        ${year}
+      </option>
+    `);
+  }
+
+  return options.join("");
+}
+
+function renderChargePlanDatePicker(year, monthIndex, selectedDateValue) {
+  const selectedDate = parseDateInputValue(selectedDateValue, new Date());
+  const normalizedSelectedDateValue = formatDateInputValue(selectedDate);
+  const todayValue = formatDateInputValue(new Date());
+  const firstOfMonth = new Date(year, monthIndex, 1, 12);
+  const startOffset = (firstOfMonth.getDay() + 6) % 7;
+  const gridStartDate = new Date(year, monthIndex, 1 - startOffset, 12);
+  const weekdayLabels = ["Lu", "Ma", "Me", "Je", "Ve", "Sa", "Di"];
+  const dayButtons = [];
+
+  for (let dayOffset = 0; dayOffset < 42; dayOffset += 1) {
+    const currentDate = new Date(gridStartDate);
+    currentDate.setDate(gridStartDate.getDate() + dayOffset);
+
+    const dateValue = formatDateInputValue(currentDate);
+    const isCurrentMonth = currentDate.getMonth() === monthIndex;
+    const isSelected = dateValue === normalizedSelectedDateValue;
+    const isToday = dateValue === todayValue;
+    const isWeekend = currentDate.getDay() === 0 || currentDate.getDay() === 6;
+
+    dayButtons.push(`
+      <button
+        type="button"
+        class="charge-plan-date-picker-day ${isCurrentMonth ? "" : "is-outside-month"} ${
+          isSelected ? "is-selected" : ""
+        } ${isToday ? "is-today" : ""} ${isWeekend ? "is-weekend" : ""}"
+        data-date-value="${dateValue}"
+      >
+        ${currentDate.getDate()}
+      </button>
+    `);
+  }
+
+  return `
+    <div class="charge-plan-date-picker-header">
+      <button
+        type="button"
+        class="charge-plan-date-picker-nav"
+        data-month-delta="-1"
+        aria-label="Mois precedent"
+      >
+        ‹
+      </button>
+      <div class="charge-plan-date-picker-period-controls">
+        <select class="charge-plan-date-picker-month-select" aria-label="Choisir un mois">
+          ${renderDatePickerMonthOptions(monthIndex)}
+        </select>
+        <select class="charge-plan-date-picker-year-select" aria-label="Choisir une annee">
+          ${renderDatePickerYearOptions(year)}
+        </select>
+      </div>
+      <button
+        type="button"
+        class="charge-plan-date-picker-nav"
+        data-month-delta="1"
+        aria-label="Mois suivant"
+      >
+        ›
+      </button>
+    </div>
+    <div class="charge-plan-date-picker-weekdays">
+      ${weekdayLabels
+        .map((label) => `<span>${escapeHtml(label)}</span>`)
+        .join("")}
+    </div>
+    <div class="charge-plan-date-picker-grid">
+      ${dayButtons.join("")}
+    </div>
+  `;
 }
 
 function getChargePlanZoomMode(mode) {
@@ -171,6 +291,7 @@ function renderHeaderMonth(month, zoomMode, zoomScale) {
       return `
         <span
           class="charge-plan-day-tick ${weekend ? "is-weekend" : ""}"
+          data-date-key="${formatDateInputValue(date)}"
           style="width:${dayWidth}px"
         >
           ${showLabel ? `<span>${date.getDate()}</span>` : ""}
@@ -242,29 +363,40 @@ function renderTotalMonthSegments(
     .join("");
 }
 
-function renderTrackGrid(visibleSlots) {
+function renderTrackGrid(months, zoomMode, zoomScale) {
   return `
     <div class="charge-plan-track-grid">
-      ${visibleSlots
-        .map(
-          (slot) => `
+      ${months
+        .map((month) => {
+          const monthWidth = getMonthWidth(month, zoomMode, zoomScale);
+          const dayWidth =
+            month.calendarDayCount > 0
+              ? monthWidth / month.calendarDayCount
+              : monthWidth;
+          const weekendBlocks = (month.calendarDayDates || [])
+            .map((date, dayIndex) => {
+              if (isBusinessDay(date)) {
+                return "";
+              }
+
+              return `
+                <span
+                  class="charge-plan-grid-weekend"
+                  style="left:${dayIndex * dayWidth}px; width:${dayWidth}px"
+                ></span>
+              `;
+            })
+            .join("");
+
+          return `
             <span
-              class="charge-plan-slot ${slot.part === "am" ? "is-am" : "is-pm"} ${
-                slot.isMonthStart ? "is-month-start" : ""
-              } ${slot.isWeekend ? "is-weekend" : ""} ${
-                !slot.isWorkingDay ? "is-nonworking" : ""
-              }"
-              data-slot-index="${slot.slotIndex}"
-              data-slot-key="${slot.key}"
-              data-date-key="${slot.dateKey}"
-              data-slot-part="${slot.part}"
-              data-slot-start="${slot.startAt.toISOString()}"
-              data-slot-end="${slot.endAt.toISOString()}"
-              data-is-working="${slot.isWorkingDay ? "1" : "0"}"
-              style="width:${slot.widthPx}px"
-            ></span>
-          `
-        )
+              class="charge-plan-grid-month"
+              style="width:${monthWidth}px; --charge-plan-day-width:${dayWidth}px"
+            >
+              ${weekendBlocks}
+            </span>
+          `;
+        })
         .join("")}
     </div>
   `;
@@ -387,7 +519,7 @@ function renderWorkerRow(worker, months, visibleSlots, zoomMode, zoomScale) {
           data-worker-id="${worker.id}"
           data-timeline-width="${timelineWidth}"
         >
-          ${renderTrackGrid(visibleSlots)}
+          ${renderTrackGrid(months, zoomMode, zoomScale)}
           <div class="charge-plan-track-bars">
             ${renderSegmentBars(assignedBars)}
           </div>
@@ -434,21 +566,20 @@ export function renderChargePlanTimeline(dom, project, viewState) {
   const zoomMode = getChargePlanZoomMode(viewState.chargePlanZoomMode);
   const zoomScale = getChargePlanZoomScale(viewState.chargePlanZoomScale);
   const fallbackAnchorDate = new Date(viewState.selectedYear, viewState.selectedMonth, 1);
-  const anchorDate = parseDateInputValue(viewState.chargePlanAnchorDate, fallbackAnchorDate);
-  const rangeStart = shiftMonthCursor(
-    anchorDate.getFullYear(),
-    anchorDate.getMonth(),
-    -APP_CONFIG.chargeTimeline.anchorMonthOffset
+  const anchorDate = parseDateInputValue(
+    viewState.chargePlanRangeStartDate || viewState.chargePlanAnchorDate,
+    fallbackAnchorDate
   );
   const displayedMonths = buildDisplayedMonths(
-    rangeStart.selectedYear,
-    rangeStart.selectedMonth,
+    anchorDate.getFullYear(),
+    anchorDate.getMonth(),
     APP_CONFIG.chargeTimeline.visibleMonthSpan,
     APP_CONFIG.months
   );
   const groupedWorkers = groupWorkersByRole(project.workers);
   const timelineWidth = getTimelineWidth(displayedMonths, zoomMode, zoomScale);
   const visibleSlots = buildVisibleSlots(displayedMonths, zoomMode, zoomScale);
+  activeVisibleSlots = visibleSlots;
   const zoomButtons = Object.entries(APP_CONFIG.chargeTimeline.zoomModes)
     .map(
       ([mode, preset]) => `
@@ -465,6 +596,8 @@ export function renderChargePlanTimeline(dom, project, viewState) {
   const anchorDateValue =
     String(viewState.chargePlanAnchorDate || "").trim() ||
     formatDateInputValue(anchorDate);
+  const selectedVisibleDate = parseDateInputValue(anchorDateValue, anchorDate);
+  const anchorDateLabel = formatDateDisplayValue(selectedVisibleDate);
 
   const rows = Object.entries(groupedWorkers)
     .map(
@@ -497,14 +630,30 @@ export function renderChargePlanTimeline(dom, project, viewState) {
         <div class="charge-plan-zoom-buttons" role="group" aria-label="Zoom planning">
           ${zoomButtons}
         </div>
-        <label class="charge-plan-date-nav">
-          <span>Date</span>
-          <input
-            type="date"
-            class="charge-plan-date-input"
-            value="${escapeHtml(anchorDateValue)}"
+        <div class="charge-plan-date-picker-shell">
+          <button
+            type="button"
+            class="charge-plan-date-trigger"
+            data-date-value="${escapeHtml(anchorDateValue)}"
+            aria-expanded="false"
           >
-        </label>
+            <span class="charge-plan-date-trigger-label">Date</span>
+            <span class="charge-plan-date-trigger-value">${escapeHtml(anchorDateLabel)}</span>
+          </button>
+          <div
+            class="charge-plan-date-popover"
+            data-selected-date="${escapeHtml(anchorDateValue)}"
+            data-visible-year="${selectedVisibleDate.getFullYear()}"
+            data-visible-month="${selectedVisibleDate.getMonth()}"
+            hidden
+          >
+            ${renderChargePlanDatePicker(
+              selectedVisibleDate.getFullYear(),
+              selectedVisibleDate.getMonth(),
+              anchorDateValue
+            )}
+          </div>
+        </div>
         <button
           type="button"
           class="charge-plan-date-jump-btn"
@@ -545,31 +694,72 @@ export function renderChargePlanTimeline(dom, project, viewState) {
 }
 
 export function clearChargePlanTimeline(dom) {
+  activeVisibleSlots = [];
   dom.chargePlanBoard.innerHTML = "";
 }
 
+export function showChargePlanDatePicker(
+  boardEl,
+  { selectedDateValue, visibleYear, visibleMonth }
+) {
+  const popoverEl = boardEl?.querySelector(".charge-plan-date-popover");
+  const triggerEl = boardEl?.querySelector(".charge-plan-date-trigger");
+  if (!(popoverEl instanceof HTMLElement) || !(triggerEl instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  popoverEl.innerHTML = renderChargePlanDatePicker(
+    visibleYear,
+    visibleMonth,
+    selectedDateValue
+  );
+  popoverEl.dataset.selectedDate = selectedDateValue;
+  popoverEl.dataset.visibleYear = String(visibleYear);
+  popoverEl.dataset.visibleMonth = String(visibleMonth);
+  popoverEl.hidden = false;
+  triggerEl.setAttribute("aria-expanded", "true");
+}
+
+export function hideChargePlanDatePicker(boardEl) {
+  const popoverEl = boardEl?.querySelector(".charge-plan-date-popover");
+  const triggerEl = boardEl?.querySelector(".charge-plan-date-trigger");
+  if (popoverEl instanceof HTMLElement) {
+    popoverEl.hidden = true;
+  }
+  if (triggerEl instanceof HTMLButtonElement) {
+    triggerEl.setAttribute("aria-expanded", "false");
+  }
+}
+
 function getTrackSlots(trackEl) {
-  return Array.from(trackEl.querySelectorAll(".charge-plan-slot"));
+  if (!(trackEl instanceof HTMLElement)) {
+    return [];
+  }
+
+  const timelineWidth = Number(trackEl.dataset.timelineWidth) || 0;
+  if (timelineWidth <= 0) {
+    return [];
+  }
+
+  return activeVisibleSlots;
 }
 
 function buildSelectionFromSlots(firstSlot, lastSlot) {
   if (!firstSlot || !lastSlot) return null;
 
-  const firstIndex = Number(firstSlot.dataset.slotIndex);
-  const lastIndex = Number(lastSlot.dataset.slotIndex);
+  const firstIndex = Number(firstSlot.slotIndex);
+  const lastIndex = Number(lastSlot.slotIndex);
   const selectedSlots = [];
-  let currentSlot = firstSlot;
-  while (currentSlot) {
-    selectedSlots.push(currentSlot);
-    if (currentSlot === lastSlot) break;
-    currentSlot = currentSlot.nextElementSibling;
+  for (let slotIndex = firstIndex; slotIndex <= lastIndex; slotIndex += 1) {
+    const slot = activeVisibleSlots[slotIndex];
+    if (slot) {
+      selectedSlots.push(slot);
+    }
   }
 
-  const workingSlots = selectedSlots.filter(
-    (slotEl) => slotEl.dataset.isWorking === "1"
-  );
-  const startPx = firstSlot.offsetLeft;
-  const endPx = lastSlot.offsetLeft + lastSlot.offsetWidth;
+  const workingSlots = selectedSlots.filter((slot) => slot.isWorkingDay);
+  const startPx = firstSlot.leftPx;
+  const endPx = lastSlot.leftPx + lastSlot.widthPx;
   const firstWorkingSlot = workingSlots[0] || null;
   const lastWorkingSlot = workingSlots[workingSlots.length - 1] || null;
 
@@ -578,10 +768,10 @@ function buildSelectionFromSlots(firstSlot, lastSlot) {
     endSlotIndex: lastIndex,
     startPx,
     endPx,
-    widthPx: Math.max(endPx - startPx, firstSlot.offsetWidth),
+    widthPx: Math.max(endPx - startPx, firstSlot.widthPx),
     totalDays: workingSlots.length / 2,
-    startDate: firstWorkingSlot?.dataset.slotStart || "",
-    endDate: lastWorkingSlot?.dataset.slotEnd || "",
+    startDate: firstWorkingSlot?.startAt?.toISOString?.() || "",
+    endDate: lastWorkingSlot?.endAt?.toISOString?.() || "",
   };
 }
 
@@ -593,14 +783,14 @@ function getSlotIndexFromClientX(trackEl, clientX) {
   const x = clamp(clientX - trackRect.left, 0, trackRect.width - 1);
 
   for (const slotEl of slotEls) {
-    const startX = slotEl.offsetLeft;
-    const endX = slotEl.offsetLeft + slotEl.offsetWidth;
+    const startX = slotEl.leftPx;
+    const endX = slotEl.leftPx + slotEl.widthPx;
     if (x >= startX && x < endX) {
-      return Number(slotEl.dataset.slotIndex);
+      return Number(slotEl.slotIndex);
     }
   }
 
-  return Number(slotEls[slotEls.length - 1].dataset.slotIndex);
+  return Number(slotEls[slotEls.length - 1].slotIndex);
 }
 
 export function computeChargePlanSelectionFromSlotIndexes(
@@ -676,6 +866,10 @@ export function hideChargePlanContextMenu(boardEl) {
   menuEl.hidden = true;
   menuEl.style.left = "0px";
   menuEl.style.top = "0px";
+  const actionEl = menuEl.querySelector(".charge-plan-context-action");
+  if (actionEl instanceof HTMLElement) {
+    delete actionEl.dataset.segmentId;
+  }
   delete menuEl.dataset.segmentId;
 }
 
@@ -685,6 +879,10 @@ export function showChargePlanContextMenu(boardEl, { clientX, clientY, segmentId
 
   menuEl.hidden = false;
   menuEl.dataset.segmentId = String(segmentId);
+  const actionEl = menuEl.querySelector(".charge-plan-context-action");
+  if (actionEl instanceof HTMLElement) {
+    actionEl.dataset.segmentId = String(segmentId);
+  }
   menuEl.style.left = `${clientX}px`;
   menuEl.style.top = `${clientY}px`;
 

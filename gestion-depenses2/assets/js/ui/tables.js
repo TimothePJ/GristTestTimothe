@@ -10,6 +10,7 @@ import {
   groupWorkersByRole,
 } from "../services/projectService.js";
 import { buildDisplayedMonths, formatNumber, toFiniteNumber } from "../utils/format.js";
+import { clearExpenseTimeline, renderExpenseTimeline } from "./expenseTimeline.js";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -42,59 +43,6 @@ function renderNumberInput(className, dataAttributes, value) {
   return `<input type="number" class="cell-input ${className}" ${attrs} step="0.1" value="${
     displayValue === 0 ? "" : escapeHtml(displayValue)
   }">`;
-}
-
-function renderExpenseTable(dom, project, displayedMonths) {
-  buildHeader(
-    dom.expenseHeadRow,
-    ["Nom", "Depense journaliere", "Total depense"],
-    displayedMonths
-  );
-
-  const groupedWorkers = groupWorkersByRole(project.workers);
-  const columnCount = 3 + displayedMonths.length;
-  let html = "";
-
-  Object.entries(groupedWorkers).forEach(([role, workers]) => {
-    html += renderRoleRow(role, columnCount);
-
-    workers.forEach((worker) => {
-      const totalProvisionalDays = getWorkerTotalDays(worker.provisionalDays);
-      const totalProvisionalCost = totalProvisionalDays * toFiniteNumber(worker.dailyRate, 0);
-
-      html += `
-        <tr>
-          <td>${escapeHtml(worker.name)}</td>
-          <td>${renderNumberInput("daily-rate", { workerId: worker.id }, worker.dailyRate)}</td>
-          <td>${formatNumber(totalProvisionalCost)} EUR</td>
-      `;
-
-      displayedMonths.forEach(({ monthKey }) => {
-        const provisionalCost =
-          toFiniteNumber(worker.provisionalDays?.[monthKey], 0) *
-          toFiniteNumber(worker.dailyRate, 0);
-        html += `<td>${formatNumber(provisionalCost)} EUR</td>`;
-      });
-
-      html += "</tr>";
-    });
-  });
-
-  const grandTotalProvisionalCost = (project.workers || []).reduce((total, worker) => {
-    return total + getWorkerTotalDays(worker.provisionalDays) * toFiniteNumber(worker.dailyRate, 0);
-  }, 0);
-
-  html += `<tr><td colspan="2"><strong>Total</strong></td><td><strong>${formatNumber(
-    grandTotalProvisionalCost
-  )} EUR</strong></td>`;
-  displayedMonths.forEach(({ monthKey }) => {
-    html += `<td><strong>${formatNumber(
-      calculateProvisionalSpending(project, monthKey)
-    )} EUR</strong></td>`;
-  });
-  html += "</tr>";
-
-  dom.expenseTableBody.innerHTML = html;
 }
 
 function renderRealExpenseTable(dom, project, displayedMonths) {
@@ -221,13 +169,12 @@ export function renderTables(dom, project, viewState) {
     APP_CONFIG.months
   );
 
-  renderExpenseTable(dom, project, displayedMonths);
+  renderExpenseTimeline(dom.expenseBoard, project);
   renderRealExpenseTable(dom, project, displayedMonths);
 }
 
 export function clearTables(dom) {
-  buildHeader(dom.expenseHeadRow, ["Nom", "Depense journaliere", "Total depense"], []);
+  clearExpenseTimeline(dom.expenseBoard);
   buildHeader(dom.realExpenseHeadRow, ["Nom", "Total jours", "Total depense"], []);
-  dom.expenseTableBody.innerHTML = "";
   dom.realExpenseTableBody.innerHTML = "";
 }

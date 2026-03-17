@@ -3,14 +3,15 @@ export const APP_CONFIG = {
   defaultMonthSpan: 6,
   defaultChargePlanZoomMode: "month",
   chargeTimeline: {
-    visibleMonthSpan: 18,
-    anchorMonthOffset: 6,
-    edgeNavigationThresholdPx: 36,
-    scrollIdleRefreshMs: 280,
+    visibleMonthSpan: 144,
+    rangeShiftMonthSpan: 12,
+    anchorMonthOffset: 8,
+    edgeNavigationThresholdPx: 48,
+    scrollIdleRefreshMs: 220,
     defaultZoomScale: 1,
-    minZoomScale: 0.55,
+    minZoomScale: 0.32,
     maxZoomScale: 2.8,
-    wheelZoomFactor: 1.12,
+    wheelZoomFactor: 1.08,
     zoomModes: {
       week: {
         label: "Semaine",

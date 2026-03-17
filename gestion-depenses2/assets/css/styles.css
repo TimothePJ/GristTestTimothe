@@ -176,6 +176,10 @@ td input {
   margin-bottom: 24px;
 }
 
+#expense-board {
+  margin-bottom: 24px;
+}
+
 .charge-plan-helper {
   display: flex;
   justify-content: space-between;
@@ -243,18 +247,159 @@ td input {
   box-shadow: 0 8px 16px rgba(0, 73, 144, 0.18);
 }
 
-.charge-plan-date-nav {
+.charge-plan-date-picker-shell {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.charge-plan-date-trigger {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid rgba(0, 73, 144, 0.16);
+  border-radius: 999px;
+  background: #fff;
   color: var(--color-text);
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.charge-plan-date-trigger:hover {
+  background: rgba(0, 73, 144, 0.06);
+}
+
+.charge-plan-date-trigger[aria-expanded="true"] {
+  border-color: rgba(0, 73, 144, 0.28);
+  box-shadow: 0 10px 18px rgba(8, 21, 38, 0.08);
+}
+
+.charge-plan-date-trigger-label {
+  color: var(--color-text-muted);
+}
+
+.charge-plan-date-trigger-value {
+  color: var(--color-primary);
+}
+
+.charge-plan-date-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 18;
+  width: 280px;
+  padding: 12px;
+  border: 1px solid rgba(0, 73, 144, 0.12);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 18px 40px rgba(8, 21, 38, 0.18);
+}
+
+.charge-plan-date-popover[hidden] {
+  display: none !important;
+}
+
+.charge-plan-date-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.charge-plan-date-picker-period-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+}
+
+.charge-plan-date-picker-period-controls select {
+  width: auto;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(0, 73, 144, 0.04);
+}
+
+.charge-plan-date-picker-month-select {
+  flex: 1 1 auto;
+  text-transform: capitalize;
+}
+
+.charge-plan-date-picker-year-select {
+  flex: 0 0 96px;
+}
+
+.charge-plan-date-picker-nav {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(0, 73, 144, 0.06);
+  color: var(--color-primary);
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.charge-plan-date-picker-nav:hover {
+  background: rgba(0, 73, 144, 0.12);
+}
+
+.charge-plan-date-picker-weekdays,
+.charge-plan-date-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.charge-plan-date-picker-weekdays {
+  margin-bottom: 6px;
+}
+
+.charge-plan-date-picker-weekdays span {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 26px;
+  color: var(--color-text-muted);
+  font-size: 0.74rem;
   font-weight: 700;
 }
 
-.charge-plan-date-input {
-  width: auto;
-  min-width: 148px;
-  margin: 0;
+.charge-plan-date-picker-day {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.charge-plan-date-picker-day:hover {
+  background: rgba(0, 73, 144, 0.08);
+}
+
+.charge-plan-date-picker-day.is-outside-month {
+  color: rgba(8, 21, 38, 0.34);
+}
+
+.charge-plan-date-picker-day.is-weekend {
+  background: rgba(8, 21, 38, 0.04);
+}
+
+.charge-plan-date-picker-day.is-today {
+  border-color: rgba(0, 73, 144, 0.28);
+}
+
+.charge-plan-date-picker-day.is-selected {
+  background: var(--color-primary);
+  color: #fff;
+  box-shadow: 0 8px 16px rgba(0, 73, 144, 0.2);
 }
 
 .charge-plan-date-jump-btn {
@@ -299,11 +444,15 @@ td input {
 }
 
 .charge-plan-scroll {
+  position: relative;
   overflow-x: auto;
   overflow-y: hidden;
   border: 1px solid rgba(0, 73, 144, 0.12);
   border-radius: var(--radius-md);
   background: var(--color-surface);
+  isolation: isolate;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: none;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
@@ -315,6 +464,13 @@ td input {
 .charge-plan-scroll.is-panning,
 .charge-plan-scroll.is-panning * {
   cursor: grabbing !important;
+}
+
+.charge-plan-scroll.is-panning .charge-plan-cell--name,
+.charge-plan-scroll.is-panning .charge-plan-cell--actions,
+.charge-plan-scroll.is-panning .charge-plan-cell--total,
+.charge-plan-scroll.is-panning .charge-plan-role-cell--label {
+  pointer-events: none;
 }
 
 .charge-plan-timeline {
@@ -361,8 +517,11 @@ td input {
 .charge-plan-cell--total {
   position: sticky;
   z-index: 12;
-  box-shadow: 1px 0 0 rgba(0, 73, 144, 0.08);
+  box-shadow:
+    1px 0 0 rgba(0, 73, 144, 0.08),
+    10px 0 18px rgba(8, 21, 38, 0.04);
   background: var(--color-surface);
+  background-clip: padding-box;
 }
 
 .charge-plan-cell--name {
@@ -413,7 +572,10 @@ td input {
   position: sticky;
   left: 0;
   z-index: 14;
-  box-shadow: 1px 0 0 rgba(0, 73, 144, 0.12), 0 1px 0 rgba(255, 255, 255, 0.08);
+  box-shadow:
+    1px 0 0 rgba(0, 73, 144, 0.12),
+    10px 0 18px rgba(8, 21, 38, 0.05),
+    0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .charge-plan-role-cell--filler {
@@ -437,6 +599,8 @@ td input {
   display: flex;
   min-height: 90px;
   cursor: grab;
+  user-select: none;
+  touch-action: none;
 }
 
 .charge-plan-header-month,
@@ -497,46 +661,64 @@ td input {
   min-height: var(--row-height, 72px);
   user-select: none;
   touch-action: none;
-  background: rgba(0, 73, 144, 0.02);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(245, 248, 252, 0.92));
 }
 
 .charge-plan-track-grid {
+  position: absolute;
+  inset: 0;
   display: flex;
   min-width: var(--timeline-width);
   min-height: var(--row-height, 72px);
+  pointer-events: none;
 }
 
-.charge-plan-slot {
+.charge-plan-grid-month {
   position: relative;
   flex: 0 0 auto;
   min-height: var(--row-height, 72px);
+  border-left: 1px solid rgba(0, 73, 144, 0.12);
+  background:
+    repeating-linear-gradient(
+      to right,
+      rgba(0, 73, 144, 0.028) 0,
+      rgba(0, 73, 144, 0.028) calc(var(--charge-plan-day-width) / 2),
+      rgba(0, 73, 144, 0.016) calc(var(--charge-plan-day-width) / 2),
+      rgba(0, 73, 144, 0.016) var(--charge-plan-day-width)
+    ),
+    repeating-linear-gradient(
+      to right,
+      transparent 0,
+      transparent calc(var(--charge-plan-day-width) - 1px),
+      rgba(0, 73, 144, 0.08) calc(var(--charge-plan-day-width) - 1px),
+      rgba(0, 73, 144, 0.08) var(--charge-plan-day-width)
+    ),
+    linear-gradient(180deg, rgba(0, 73, 144, 0.03), rgba(0, 73, 144, 0.01));
+}
+
+.charge-plan-grid-month:first-child {
   border-left: none;
 }
 
-.charge-plan-slot.is-month-start {
-  border-left: none;
-}
-
-.charge-plan-slot.is-am {
-  background: rgba(0, 73, 144, 0.035);
-}
-
-.charge-plan-slot.is-pm {
-  background: rgba(0, 73, 144, 0.015);
-}
-
-.charge-plan-slot.is-weekend {
-  background: rgba(8, 21, 38, 0.08);
-}
-
-.charge-plan-slot.is-weekend.is-pm {
-  background: rgba(8, 21, 38, 0.12);
+.charge-plan-grid-weekend {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background:
+    linear-gradient(
+      to right,
+      rgba(8, 21, 38, 0.09) 0,
+      rgba(8, 21, 38, 0.09) 50%,
+      rgba(8, 21, 38, 0.12) 50%,
+      rgba(8, 21, 38, 0.12) 100%
+    );
 }
 
 .charge-plan-track-bars {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  z-index: 1;
 }
 
 .charge-plan-month-segment {
@@ -715,6 +897,222 @@ td input {
   padding: 4px 8px;
 }
 
+.expense-plan-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid rgba(0, 73, 144, 0.12);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.expense-plan-board {
+  min-width: calc(180px + 170px + 150px + var(--expense-timeline-width));
+}
+
+.expense-plan-row,
+.expense-plan-role-row {
+  display: grid;
+  grid-template-columns: 180px 170px 150px var(--expense-timeline-width);
+  min-width: calc(180px + 170px + 150px + var(--expense-timeline-width));
+  isolation: isolate;
+}
+
+.expense-plan-cell,
+.expense-plan-role-cell {
+  min-height: 118px;
+  padding: 12px;
+  border-bottom: 1px solid rgba(0, 73, 144, 0.08);
+  background: var(--color-surface);
+}
+
+.expense-plan-row--header .expense-plan-cell {
+  min-height: auto;
+  padding-block: 14px;
+  color: #fff;
+  font-weight: 700;
+  background: var(--color-primary);
+  border-bottom-color: rgba(255, 255, 255, 0.16);
+}
+
+.expense-plan-cell--name,
+.expense-plan-cell--rate,
+.expense-plan-cell--total {
+  position: sticky;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  box-shadow:
+    1px 0 0 rgba(0, 73, 144, 0.08),
+    8px 0 18px rgba(8, 21, 38, 0.04);
+  background: var(--color-surface);
+  background-clip: padding-box;
+}
+
+.expense-plan-cell--name {
+  left: 0;
+  width: 180px;
+  min-width: 180px;
+  max-width: 180px;
+  z-index: 11;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.expense-plan-cell--rate {
+  left: 180px;
+  width: 170px;
+  min-width: 170px;
+  max-width: 170px;
+  z-index: 10;
+}
+
+.expense-plan-cell--total {
+  left: 350px;
+  width: 150px;
+  min-width: 150px;
+  max-width: 150px;
+  z-index: 9;
+}
+
+.expense-plan-row--header .expense-plan-cell--name,
+.expense-plan-row--header .expense-plan-cell--rate,
+.expense-plan-row--header .expense-plan-cell--total {
+  background: var(--color-primary);
+  z-index: 12;
+}
+
+.expense-plan-row--total .expense-plan-cell {
+  background: rgba(0, 73, 144, 0.04);
+}
+
+.expense-plan-row--total .expense-plan-cell--name,
+.expense-plan-row--total .expense-plan-cell--rate,
+.expense-plan-row--total .expense-plan-cell--total {
+  background: #f3f7fb;
+}
+
+.expense-plan-role-cell {
+  min-height: auto;
+  padding-block: 12px;
+  padding-inline: 16px;
+  color: #fff;
+  font-weight: 700;
+  background: rgba(0, 73, 144, 0.9);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.expense-plan-role-cell--label {
+  grid-column: 1 / 4;
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  box-shadow:
+    1px 0 0 rgba(0, 73, 144, 0.12),
+    8px 0 18px rgba(8, 21, 38, 0.04);
+}
+
+.expense-plan-role-cell--filler {
+  grid-column: 4 / 5;
+}
+
+.expense-plan-cell--timeline {
+  padding: 0;
+  overflow: hidden;
+}
+
+.expense-plan-header-track,
+.expense-plan-track {
+  display: flex;
+  min-width: var(--expense-timeline-width);
+}
+
+.expense-plan-header-month,
+.expense-plan-month-cell {
+  flex: 0 0 var(--expense-month-width);
+  width: var(--expense-month-width);
+  border-left: 1px solid rgba(0, 73, 144, 0.08);
+}
+
+.expense-plan-header-month:first-child,
+.expense-plan-month-cell:first-child {
+  border-left: none;
+}
+
+.expense-plan-header-month {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: center;
+  min-height: 72px;
+  padding: 12px 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.02)),
+    rgba(0, 73, 144, 0.92);
+}
+
+.expense-plan-header-month-name {
+  text-transform: capitalize;
+}
+
+.expense-plan-header-month-year {
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 0.82rem;
+}
+
+.expense-plan-track {
+  min-height: 118px;
+  background:
+    linear-gradient(180deg, rgba(0, 73, 144, 0.02), rgba(0, 73, 144, 0.04));
+}
+
+.expense-plan-month-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 10px 14px;
+}
+
+.expense-plan-month-cell.is-empty {
+  background: rgba(0, 73, 144, 0.02);
+}
+
+.expense-plan-month-amount {
+  display: block;
+  min-height: 34px;
+  color: var(--color-text);
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.expense-plan-month-cell.is-empty .expense-plan-month-amount {
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.expense-plan-month-bar-shell {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  min-height: 48px;
+  padding-bottom: 2px;
+}
+
+.expense-plan-month-bar {
+  width: 34px;
+  min-height: 0;
+  border-radius: 12px 12px 6px 6px;
+  background: linear-gradient(180deg, #78aef7, #145fbe);
+  box-shadow: 0 10px 18px rgba(20, 95, 190, 0.16);
+}
+
+.expense-plan-month-bar--total {
+  background: linear-gradient(180deg, #1d7a5f, #0a5b43);
+  box-shadow: 0 10px 18px rgba(10, 91, 67, 0.16);
+}
+
 .cell-input {
   min-width: 72px;
 }
@@ -777,14 +1175,26 @@ canvas {
     justify-content: space-between;
   }
 
-  .charge-plan-date-nav {
+  .charge-plan-date-picker-shell {
     width: 100%;
-    justify-content: space-between;
   }
 
-  .charge-plan-date-input {
+  .charge-plan-date-trigger {
+    width: 100%;
+  }
+
+  .charge-plan-date-popover {
+    left: 0;
+    right: auto;
+    width: min(100%, 320px);
+  }
+
+  .charge-plan-date-picker-period-controls {
     min-width: 0;
-    flex: 1 1 auto;
+  }
+
+  .charge-plan-date-picker-year-select {
+    flex-basis: 82px;
   }
 
   .charge-plan-zoom-buttons {
@@ -809,5 +1219,31 @@ canvas {
 
   .charge-plan-cell--total {
     left: 266px;
+  }
+
+  .expense-plan-row,
+  .expense-plan-role-row {
+    grid-template-columns: 160px 148px 132px var(--expense-timeline-width);
+    min-width: calc(160px + 148px + 132px + var(--expense-timeline-width));
+  }
+
+  .expense-plan-cell--name {
+    width: 160px;
+    min-width: 160px;
+    max-width: 160px;
+  }
+
+  .expense-plan-cell--rate {
+    left: 160px;
+    width: 148px;
+    min-width: 148px;
+    max-width: 148px;
+  }
+
+  .expense-plan-cell--total {
+    left: 308px;
+    width: 132px;
+    min-width: 132px;
+    max-width: 132px;
   }
 }

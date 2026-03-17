@@ -223,6 +223,47 @@ export function buildDisplayedMonths(selectedYear, selectedMonth, monthSpan, mon
   return items;
 }
 
+export function buildMonthRangeBetween(startMonthKey, endMonthKey, months) {
+  const start = parseMonthKey(startMonthKey);
+  const end = parseMonthKey(endMonthKey);
+  if (!start || !end) {
+    return [];
+  }
+
+  const items = [];
+  let cursorYear = start.year;
+  let cursorMonth = start.monthNumber;
+
+  while (
+    cursorYear < end.year ||
+    (cursorYear === end.year && cursorMonth <= end.monthNumber)
+  ) {
+    const monthKey = toMonthKey(cursorYear, cursorMonth);
+    const calendarDayDates = getCalendarDayDates(monthKey);
+    const businessDayDates = getBusinessDayDates(monthKey);
+
+    items.push({
+      monthIndex: cursorMonth - 1,
+      year: cursorYear,
+      monthNumber: cursorMonth,
+      monthKey,
+      monthLabel: months[cursorMonth - 1] || "",
+      calendarDayCount: calendarDayDates.length,
+      calendarDayDates,
+      businessDayCount: businessDayDates.length,
+      businessDayDates,
+    });
+
+    cursorMonth += 1;
+    if (cursorMonth > 12) {
+      cursorMonth = 1;
+      cursorYear += 1;
+    }
+  }
+
+  return items;
+}
+
 export function shiftMonthCursor(selectedYear, selectedMonth, delta) {
   const cursor = new Date(selectedYear, selectedMonth, 1);
   cursor.setMonth(cursor.getMonth() + delta);
