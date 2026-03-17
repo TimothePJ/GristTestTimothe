@@ -11,6 +11,9 @@ import {
   toFiniteNumber,
   toMonthKey,
 } from "../utils/format.js";
+import { destroyChart, renderGroupedExpenseChart } from "./chart.js";
+
+let currentExpenseChart = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -30,11 +33,43 @@ function getFallbackMonthBounds() {
   };
 }
 
+function shiftMonthKey(monthKey, deltaMonths) {
+  const match = String(monthKey || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) {
+    return "";
+  }
+
+  const year = Number(match[1]);
+  const monthNumber = Number(match[2]);
+  const cursor = new Date(year, monthNumber - 1, 1, 12, 0, 0, 0);
+  if (Number.isNaN(cursor.getTime())) {
+    return "";
+  }
+
+  cursor.setMonth(cursor.getMonth() + deltaMonths);
+  return toMonthKey(cursor.getFullYear(), cursor.getMonth() + 1);
+}
+
 function buildExpenseMonths(project) {
   const monthBounds = getProjectProvisionalMonthBounds(project) || getFallbackMonthBounds();
-  return buildMonthRangeBetween(
+  const baseMonths = buildMonthRangeBetween(
     monthBounds.startMonthKey,
     monthBounds.endMonthKey,
+    APP_CONFIG.months
+  );
+
+  if (baseMonths.length >= 6) {
+    return baseMonths;
+  }
+
+  const expandedEndMonthKey = shiftMonthKey(
+    monthBounds.startMonthKey,
+    Math.max(5, baseMonths.length - 1)
+  );
+
+  return buildMonthRangeBetween(
+    monthBounds.startMonthKey,
+    expandedEndMonthKey,
     APP_CONFIG.months
   );
 }
@@ -46,7 +81,66 @@ function getWorkerMonthlyCost(worker, monthKey) {
   );
 }
 
-function getGlobalMaxMonthlyCost(project, months) {
+function getTotalProvisionalCost(project) {
+  return (project?.workers || []).reduce((sum, worker) => {
+    return sum + getWorkerTotalDays(worker.provisionalDays) * toFiniteNumber(worker.dailyRate, 0);
+  }, 0);
+}
+
+function getMonthLabels(months) {
+  return months.map(({ monthLabel, year }) => `${monthLabel} ${year}`);
+}
+
+function getExpenseGraphWidth(boardEl, project, months) {
+  const workerCount = Math.max(project?.workers?.length || 0, 1);
+  const hostWidth = Math.max(
+    720,
+    boardEl?.clientWidth || 0,
+    boardEl?.getBoundingClientRect?.().width || 0
+  );
+  const monthColumnWidth = Math.max(110, workerCount * 18 + 42);
+  return Math.max(hostWidth - 36, months.length * monthColumnWidth);
+}
+
+function getSeriesColor(index, totalSeriesCount, alpha = 1) {
+  const safeTotal = Math.max(1, Number(totalSeriesCount) || 1);
+  const hue = Math.round((index * 360) / safeTotal);
+  const saturation = 72;
+  const lightness = 46;
+
+  if (alpha >= 1) {
+    return `hsl(${hue} ${saturation}% ${lightness}%)`;
+  }
+
+  return `hsla(${hue} ${saturation}% ${lightness}% / ${alpha})`;
+}
+
+function buildExpenseChartDatasets(project, months) {
+  const workers = project?.workers || [];
+  const totalSeriesCount = workers.length;
+
+  return workers.map((worker, index) => {
+    const color = getSeriesColor(index, totalSeriesCount);
+
+    return {
+      type: "bar",
+      label: worker.name,
+      data: months.map(({ monthKey }) => getWorkerMonthlyCost(worker, monthKey)),
+      backgroundColor: getSeriesColor(index, totalSeriesCount, 0.55),
+      borderColor: color,
+      borderWidth: 2,
+      borderRadius: 4,
+      grouped: true,
+      minBarLength: 2,
+      barThickness: 12,
+      maxBarThickness: 14,
+      barPercentage: 0.92,
+      categoryPercentage: 0.92,
+    };
+  });
+}
+
+function getSuggestedMax(project, months) {
   let maxValue = 0;
 
   (project?.workers || []).forEach((worker) => {
@@ -59,113 +153,82 @@ function getGlobalMaxMonthlyCost(project, months) {
     maxValue = Math.max(maxValue, calculateProvisionalSpending(project, monthKey));
   });
 
-  return maxValue;
+  return Math.max(maxValue, 1);
 }
 
-function renderMonthHeader(months) {
-  return months
-    .map(
-      ({ monthLabel, year }) => `
-        <div class="expense-plan-header-month">
-          <span class="expense-plan-header-month-name">${escapeHtml(monthLabel)}</span>
-          <span class="expense-plan-header-month-year">${year}</span>
-        </div>
-      `
-    )
-    .join("");
-}
-
-function renderMonthlyCostCells(months, getValue, maxMonthlyCost, options = {}) {
-  const isTotalRow = Boolean(options.isTotalRow);
-  const barClassName = isTotalRow
-    ? "expense-plan-month-bar expense-plan-month-bar--total"
-    : "expense-plan-month-bar";
-
-  return months
-    .map(({ monthKey }) => {
-      const value = getValue(monthKey);
-      const safeValue = toFiniteNumber(value, 0);
-      const heightRatio = maxMonthlyCost > 0 ? safeValue / maxMonthlyCost : 0;
-      const heightPercent =
-        safeValue > 0 ? Math.max(12, Math.round(heightRatio * 100)) : 0;
+function renderRateGroup(role, workers) {
+  const workerCards = workers
+    .map((worker) => {
+      const totalDays = getWorkerTotalDays(worker.provisionalDays);
+      const totalCost = totalDays * toFiniteNumber(worker.dailyRate, 0);
 
       return `
-        <div class="expense-plan-month-cell ${safeValue > 0 ? "has-value" : "is-empty"}">
-          <span class="expense-plan-month-amount">${
-            safeValue > 0 ? `${formatNumber(safeValue)} EUR` : "—"
-          }</span>
-          <div class="expense-plan-month-bar-shell">
-            <div class="${barClassName}" style="height:${heightPercent}%"></div>
+        <div class="expense-rate-card">
+          <div class="expense-rate-card-head">
+            <span class="expense-rate-card-name">${escapeHtml(worker.name)}</span>
+            <span class="expense-rate-card-total">${formatNumber(totalCost)} EUR</span>
           </div>
+          <label class="expense-rate-card-label">
+            <span>Depense journaliere</span>
+            <input
+              type="number"
+              class="cell-input daily-rate expense-rate-card-input"
+              data-worker-id="${worker.id}"
+              step="0.1"
+              value="${escapeHtml(worker.dailyRate || "")}"
+            >
+          </label>
         </div>
       `;
     })
     .join("");
-}
 
-function renderRoleRow(role, timelineWidth) {
   return `
-    <div class="expense-plan-role-row" style="--expense-timeline-width:${timelineWidth}px;">
-      <div class="expense-plan-role-cell expense-plan-role-cell--label">${escapeHtml(role)}</div>
-      <div class="expense-plan-role-cell expense-plan-role-cell--filler"></div>
-    </div>
+    <section class="expense-rate-group">
+      <div class="expense-rate-group-title">${escapeHtml(role)}</div>
+      <div class="expense-rate-group-list">${workerCards}</div>
+    </section>
   `;
 }
 
-function renderWorkerRow(worker, months, maxMonthlyCost, timelineWidth) {
-  const totalDays = getWorkerTotalDays(worker.provisionalDays);
-  const totalCost = totalDays * toFiniteNumber(worker.dailyRate, 0);
+function renderRateControls(project) {
+  const groupedWorkers = groupWorkersByRole(project?.workers || []);
 
+  return Object.entries(groupedWorkers)
+    .map(([role, workers]) => renderRateGroup(role, workers))
+    .join("");
+}
+
+function renderExpenseSummary(project, months) {
   return `
-    <div class="expense-plan-row" style="--expense-timeline-width:${timelineWidth}px;">
-      <div class="expense-plan-cell expense-plan-cell--name">${escapeHtml(worker.name)}</div>
-      <div class="expense-plan-cell expense-plan-cell--rate">
-        <input
-          type="number"
-          class="cell-input daily-rate"
-          data-worker-id="${worker.id}"
-          step="0.1"
-          value="${escapeHtml(worker.dailyRate || "")}"
-        >
+    <div class="expense-graph-summary">
+      <div class="expense-graph-summary-item">
+        <span class="expense-graph-summary-label">Mois affiches</span>
+        <strong>${months.length}</strong>
       </div>
-      <div class="expense-plan-cell expense-plan-cell--total">${formatNumber(totalCost)} EUR</div>
-      <div class="expense-plan-cell expense-plan-cell--timeline">
-        <div class="expense-plan-track">
-          ${renderMonthlyCostCells(
-            months,
-            (monthKey) => getWorkerMonthlyCost(worker, monthKey),
-            maxMonthlyCost
-          )}
-        </div>
+      <div class="expense-graph-summary-item">
+        <span class="expense-graph-summary-label">Total previsionnel</span>
+        <strong>${formatNumber(getTotalProvisionalCost(project))} EUR</strong>
       </div>
     </div>
   `;
 }
 
-function renderTotalRow(project, months, maxMonthlyCost, timelineWidth) {
-  const totalCost = (project?.workers || []).reduce((sum, worker) => {
-    return sum + getWorkerTotalDays(worker.provisionalDays) * toFiniteNumber(worker.dailyRate, 0);
-  }, 0);
+function mountExpenseChart(boardEl, project, months) {
+  if (!(boardEl instanceof HTMLElement)) {
+    return;
+  }
 
-  return `
-    <div class="expense-plan-row expense-plan-row--total" style="--expense-timeline-width:${timelineWidth}px;">
-      <div class="expense-plan-cell expense-plan-cell--name"><strong>Total</strong></div>
-      <div class="expense-plan-cell expense-plan-cell--rate">—</div>
-      <div class="expense-plan-cell expense-plan-cell--total"><strong>${formatNumber(
-        totalCost
-      )} EUR</strong></div>
-      <div class="expense-plan-cell expense-plan-cell--timeline">
-        <div class="expense-plan-track">
-          ${renderMonthlyCostCells(
-            months,
-            (monthKey) => calculateProvisionalSpending(project, monthKey),
-            maxMonthlyCost,
-            { isTotalRow: true }
-          )}
-        </div>
-      </div>
-    </div>
-  `;
+  const canvas = boardEl.querySelector(".expense-graph-canvas");
+  if (!canvas) {
+    return;
+  }
+
+  currentExpenseChart = renderGroupedExpenseChart(canvas, currentExpenseChart, {
+    labels: getMonthLabels(months),
+    datasets: buildExpenseChartDatasets(project, months),
+    suggestedMax: getSuggestedMax(project, months),
+  });
 }
 
 export function renderExpenseTimeline(boardEl, project) {
@@ -173,44 +236,33 @@ export function renderExpenseTimeline(boardEl, project) {
     return;
   }
 
-  const months = buildExpenseMonths(project);
-  const groupedWorkers = groupWorkersByRole(project?.workers || []);
-  const monthWidth = 138;
-  const timelineWidth = months.length * monthWidth;
-  const maxMonthlyCost = getGlobalMaxMonthlyCost(project, months);
+  currentExpenseChart = destroyChart(currentExpenseChart);
 
-  let html = `
-    <div class="expense-plan-scroll">
-      <div class="expense-plan-board" style="--expense-month-width:${monthWidth}px; --expense-timeline-width:${timelineWidth}px;">
-        <div class="expense-plan-row expense-plan-row--header" style="--expense-timeline-width:${timelineWidth}px;">
-          <div class="expense-plan-cell expense-plan-cell--name">Nom</div>
-          <div class="expense-plan-cell expense-plan-cell--rate">Depense journaliere</div>
-          <div class="expense-plan-cell expense-plan-cell--total">Total depense</div>
-          <div class="expense-plan-cell expense-plan-cell--timeline">
-            <div class="expense-plan-header-track">
-              ${renderMonthHeader(months)}
-            </div>
+  const months = buildExpenseMonths(project);
+  const graphWidth = getExpenseGraphWidth(boardEl, project, months);
+
+  boardEl.innerHTML = `
+    <div class="expense-graph-layout">
+      <div class="expense-rate-panel">
+        ${renderRateControls(project)}
+      </div>
+      <div class="expense-graph-shell">
+        ${renderExpenseSummary(project, months)}
+        <div class="expense-graph-scroll">
+          <div class="expense-graph-stage" style="width:${graphWidth}px;">
+            <canvas class="expense-graph-canvas"></canvas>
           </div>
         </div>
-  `;
-
-  Object.entries(groupedWorkers).forEach(([role, workers]) => {
-    html += renderRoleRow(role, timelineWidth);
-    workers.forEach((worker) => {
-      html += renderWorkerRow(worker, months, maxMonthlyCost, timelineWidth);
-    });
-  });
-
-  html += renderTotalRow(project, months, maxMonthlyCost, timelineWidth);
-  html += `
       </div>
     </div>
   `;
 
-  boardEl.innerHTML = html;
+  mountExpenseChart(boardEl, project, months);
 }
 
 export function clearExpenseTimeline(boardEl) {
+  currentExpenseChart = destroyChart(currentExpenseChart);
+
   if (!(boardEl instanceof HTMLElement)) {
     return;
   }

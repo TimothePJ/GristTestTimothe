@@ -1022,20 +1022,18 @@ td input {
 }
 
 .expense-plan-header-track,
-.expense-plan-track {
+.expense-plan-chart-track {
   display: flex;
   min-width: var(--expense-timeline-width);
 }
 
-.expense-plan-header-month,
-.expense-plan-month-cell {
+.expense-plan-header-month {
   flex: 0 0 var(--expense-month-width);
   width: var(--expense-month-width);
   border-left: 1px solid rgba(0, 73, 144, 0.08);
 }
 
-.expense-plan-header-month:first-child,
-.expense-plan-month-cell:first-child {
+.expense-plan-header-month:first-child {
   border-left: none;
 }
 
@@ -1060,57 +1058,151 @@ td input {
   font-size: 0.82rem;
 }
 
-.expense-plan-track {
+.expense-plan-chart-track {
   min-height: 118px;
-  background:
-    linear-gradient(180deg, rgba(0, 73, 144, 0.02), rgba(0, 73, 144, 0.04));
 }
 
-.expense-plan-month-cell {
+.expense-plan-chart-shell {
+  position: relative;
+  min-width: var(--expense-timeline-width);
+  min-height: 118px;
+  padding: 8px 8px 6px;
+  background:
+    repeating-linear-gradient(
+      to right,
+      transparent 0,
+      transparent calc(var(--expense-month-width) - 1px),
+      rgba(0, 73, 144, 0.08) calc(var(--expense-month-width) - 1px),
+      rgba(0, 73, 144, 0.08) var(--expense-month-width)
+    ),
+    linear-gradient(180deg, rgba(0, 73, 144, 0.02), rgba(0, 73, 144, 0.05));
+}
+
+.expense-plan-chart-canvas {
+  display: block;
+  width: 100% !important;
+  height: 104px !important;
+}
+
+.expense-graph-layout {
+  display: grid;
+  gap: 18px;
+}
+
+.expense-rate-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.expense-rate-group {
+  overflow: hidden;
+  border: 1px solid rgba(0, 73, 144, 0.12);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.expense-rate-group-title {
+  padding: 12px 16px;
+  color: #fff;
+  font-weight: 700;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.02)),
+    rgba(0, 73, 144, 0.92);
+}
+
+.expense-rate-group-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  padding: 14px;
+}
+
+.expense-rate-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(0, 73, 144, 0.1);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, rgba(0, 73, 144, 0.02), rgba(0, 73, 144, 0.05));
+}
+
+.expense-rate-card-head {
   display: flex;
-  flex-direction: column;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 10px 14px;
+  align-items: baseline;
 }
 
-.expense-plan-month-cell.is-empty {
-  background: rgba(0, 73, 144, 0.02);
-}
-
-.expense-plan-month-amount {
-  display: block;
-  min-height: 34px;
-  color: var(--color-text);
-  font-size: 0.8rem;
+.expense-rate-card-name {
   font-weight: 700;
-  line-height: 1.25;
+  color: var(--color-text);
 }
 
-.expense-plan-month-cell.is-empty .expense-plan-month-amount {
+.expense-rate-card-total {
   color: var(--color-text-muted);
+  font-size: 0.82rem;
   font-weight: 600;
 }
 
-.expense-plan-month-bar-shell {
+.expense-rate-card-label {
+  display: grid;
+  gap: 6px;
+  color: var(--color-text-muted);
+  font-size: 0.84rem;
+}
+
+.expense-rate-card-input {
+  width: 100%;
+}
+
+.expense-graph-shell {
+  padding: 18px;
+  border: 1px solid rgba(0, 73, 144, 0.12);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.expense-graph-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+}
+
+.expense-graph-stage {
+  min-width: 100%;
+}
+
+.expense-graph-summary {
   display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  min-height: 48px;
-  padding-bottom: 2px;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
 }
 
-.expense-plan-month-bar {
-  width: 34px;
-  min-height: 0;
-  border-radius: 12px 12px 6px 6px;
-  background: linear-gradient(180deg, #78aef7, #145fbe);
-  box-shadow: 0 10px 18px rgba(20, 95, 190, 0.16);
+.expense-graph-summary-item {
+  display: grid;
+  gap: 4px;
+  min-width: 140px;
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 73, 144, 0.08);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, rgba(0, 73, 144, 0.02), rgba(0, 73, 144, 0.05));
 }
 
-.expense-plan-month-bar--total {
-  background: linear-gradient(180deg, #1d7a5f, #0a5b43);
-  box-shadow: 0 10px 18px rgba(10, 91, 67, 0.16);
+.expense-graph-summary-label {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}
+
+.expense-graph-canvas {
+  display: block;
+  width: 100% !important;
+  min-height: 420px;
+  height: 420px !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  border-radius: 0 !important;
 }
 
 .cell-input {

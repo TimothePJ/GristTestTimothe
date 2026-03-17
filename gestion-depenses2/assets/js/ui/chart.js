@@ -8,6 +8,14 @@ export function destroyChart(chart) {
   return null;
 }
 
+function getChartPlugins() {
+  const chartPlugins = [];
+  if (typeof globalThis.ChartDataLabels !== "undefined") {
+    chartPlugins.push(globalThis.ChartDataLabels);
+  }
+  return chartPlugins;
+}
+
 export function renderSpendingChart(canvas, currentChart, project, viewState) {
   const ChartCtor = globalThis.Chart;
   if (!canvas || typeof ChartCtor !== "function") {
@@ -25,16 +33,11 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
 
   destroyChart(currentChart);
 
-  const chartPlugins = [];
-  if (typeof globalThis.ChartDataLabels !== "undefined") {
-    chartPlugins.push(globalThis.ChartDataLabels);
-  }
-
   const totalBudget = getProjectBudgetTotal(project);
 
   return new ChartCtor(canvas, {
     type: "bar",
-    plugins: chartPlugins,
+    plugins: getChartPlugins(),
     data: {
       labels,
       datasets: [
@@ -178,6 +181,93 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
                 }
               }
               return label;
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+export function renderGroupedExpenseChart(canvas, currentChart, { labels, datasets, suggestedMax }) {
+  const ChartCtor = globalThis.Chart;
+  if (!canvas || typeof ChartCtor !== "function") {
+    return currentChart;
+  }
+
+  destroyChart(currentChart);
+
+  return new ChartCtor(canvas, {
+    type: "bar",
+    plugins: getChartPlugins(),
+    data: {
+      labels,
+      datasets,
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: "index",
+        intersect: false,
+      },
+      stacked: false,
+      scales: {
+        x: {
+          offset: true,
+          ticks: {
+            maxRotation: 0,
+            autoSkip: true,
+          },
+          grid: {
+            display: false,
+          },
+          border: {
+            display: false,
+          },
+        },
+        y: {
+          beginAtZero: true,
+          suggestedMax: Math.max(Number(suggestedMax) || 0, 1),
+          title: {
+            display: true,
+            text: "Montant (EUR)",
+          },
+          ticks: {
+            callback(value) {
+              return `${formatNumber(value)} EUR`;
+            },
+          },
+          grid: {
+            color: "rgba(0, 73, 144, 0.08)",
+          },
+          border: {
+            display: false,
+          },
+        },
+      },
+      plugins: {
+        legend: {
+          position: "bottom",
+          labels: {
+            usePointStyle: true,
+            pointStyle: "rectRounded",
+            boxWidth: 10,
+            boxHeight: 10,
+            padding: 14,
+            font: {
+              size: 11,
+            },
+          },
+        },
+        datalabels: {
+          display: false,
+        },
+        tooltip: {
+          callbacks: {
+            label(context) {
+              const label = context.dataset.label || "";
+              return `${label}: ${formatNumber(context.parsed.y || 0)} EUR`;
             },
           },
         },
