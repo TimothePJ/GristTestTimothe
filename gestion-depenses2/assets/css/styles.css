@@ -172,7 +172,8 @@ td input {
   margin-bottom: 0;
 }
 
-#charge-plan-board {
+#charge-plan-board,
+#real-charge-board {
   --charge-plan-name-col-width: 150px;
   --charge-plan-actions-col-width: 120px;
   --charge-plan-total-col-width: 100px;

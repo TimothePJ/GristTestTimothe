@@ -107,14 +107,17 @@ function getExpenseGraphMetrics(boardEl, project, months) {
     boardEl?.getBoundingClientRect?.().width || 0
   );
   const visibleMonthTarget = Math.max(1, config.minVisibleMonths || 6);
-  const visibleMonthCount = Math.min(Math.max(months.length, 1), visibleMonthTarget);
-  const viewportDrivenMonthWidth = hostWidth / visibleMonthCount;
+  const visibleMonthCount = Math.max(months.length, 1);
+  const viewportDrivenMonthWidth = hostWidth / visibleMonthTarget;
   const workerDrivenMonthWidth = Math.max(
     config.minMonthWidth || 118,
     workerCount * (config.workerSlotWidth || 18) + (config.monthPadding || 54)
   );
-  const monthColumnWidth = Math.max(viewportDrivenMonthWidth, workerDrivenMonthWidth);
-  const graphWidth = Math.max(hostWidth, months.length * monthColumnWidth);
+  const overflowMonthWidth = Math.max(viewportDrivenMonthWidth, workerDrivenMonthWidth);
+  const graphWidth =
+    visibleMonthCount <= visibleMonthTarget
+      ? hostWidth
+      : Math.max(hostWidth, visibleMonthCount * overflowMonthWidth);
 
   return {
     graphWidth,

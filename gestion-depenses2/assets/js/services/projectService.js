@@ -55,6 +55,11 @@ function isPrevisionalSegment(segmentType) {
   return !normalizedType || normalizedType === "previsionnel";
 }
 
+function isRealSegment(segmentType) {
+  const normalizedType = toText(segmentType).toLowerCase();
+  return normalizedType === "reel" || normalizedType === "real";
+}
+
 function mergeMonthlyDays(target, monthKey, value) {
   target[monthKey] = Math.round((toFiniteNumber(target[monthKey], 0) + value) * 100) / 100;
 }
@@ -140,6 +145,7 @@ export function buildExpenseData({
       name: toText(row?.[columns.projectTeam.name]),
       dailyRate: toFiniteNumber(row?.[columns.projectTeam.dailyRate], 0),
       segments: [],
+      realSegments: [],
       provisionalDays: {},
       workedDays: {},
     };
@@ -169,7 +175,6 @@ export function buildExpenseData({
     if (!startAt || !endAt) return;
 
     const segmentType = toText(row?.[columns.timeSegment.segmentType]);
-    if (!isPrevisionalSegment(segmentType)) return;
 
     const segment = {
       id: Number(row?.[columns.timeSegment.id]),
@@ -181,16 +186,29 @@ export function buildExpenseData({
       label: toText(row?.[columns.timeSegment.label]),
     };
 
-    worker.segments.push(segment);
+    if (isPrevisionalSegment(segmentType)) {
+      worker.segments.push(segment);
 
-    const monthlyAllocation = getSegmentAllocationByMonth(segment);
-    Object.entries(monthlyAllocation).forEach(([monthKey, days]) => {
-      mergeMonthlyDays(worker.provisionalDays, monthKey, toFiniteNumber(days, 0));
-    });
+      const monthlyAllocation = getSegmentAllocationByMonth(segment);
+      Object.entries(monthlyAllocation).forEach(([monthKey, days]) => {
+        mergeMonthlyDays(worker.provisionalDays, monthKey, toFiniteNumber(days, 0));
+      });
+      return;
+    }
+
+    if (isRealSegment(segmentType)) {
+      worker.realSegments.push(segment);
+
+      const monthlyAllocation = getSegmentAllocationByMonth(segment);
+      Object.entries(monthlyAllocation).forEach(([monthKey, days]) => {
+        mergeMonthlyDays(worker.workedDays, monthKey, toFiniteNumber(days, 0));
+      });
+    }
   });
 
   workersById.forEach((worker) => {
     worker.segments.sort((left, right) => left.startAt - right.startAt);
+    worker.realSegments.sort((left, right) => left.startAt - right.startAt);
   });
 
   (timesheetRows || []).forEach((row) => {
@@ -202,6 +220,10 @@ export function buildExpenseData({
     if (!monthKey) return;
 
     const workedDays = row?.[columns.timesheet.workedDays];
+
+    if (worker.realSegments.length > 0) {
+      return;
+    }
 
     if (workedDays != null) {
       worker.workedDays[monthKey] = toFiniteNumber(workedDays, 0);
@@ -377,7 +399,7 @@ export function getProjectAverageAnchorDate(project) {
   };
 
   (project?.workers || []).forEach((worker) => {
-    const segments = worker?.segments || [];
+    const segments = [...(worker?.segments || []), ...(worker?.realSegments || [])];
 
     if (segments.length > 0) {
       segments.forEach((segment) => {
@@ -442,7 +464,7 @@ export function getProjectFirstAnchorDate(project) {
   };
 
   (project?.workers || []).forEach((worker) => {
-    const segments = worker?.segments || [];
+    const segments = [...(worker?.segments || []), ...(worker?.realSegments || [])];
 
     if (segments.length > 0) {
       segments.forEach((segment) => {

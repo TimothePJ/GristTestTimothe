@@ -14,8 +14,17 @@ import {
   getSegmentAllocationDays,
 } from "../utils/timeSegments.js";
 
-let activeVisibleSlots = [];
+const activeVisibleSlotsByBoard = new WeakMap();
 let currentBoardEl = null;
+const DEFAULT_TIMELINE_OPTIONS = {
+  daysField: "provisionalDays",
+  segmentsField: "segments",
+  timelineKind: "previsionnel",
+  showControls: true,
+  showWorkerDeleteAction: true,
+  helperText:
+    "Glissez dans une ligne pour creer un segment. Redimensionnez-le avec ses poignees. Utilisez le clic droit sur une barre pour la supprimer.",
+};
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -24,6 +33,17 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function getTimelineOptions(options = {}) {
+  return {
+    ...DEFAULT_TIMELINE_OPTIONS,
+    ...(options || {}),
+  };
+}
+
+function getBoardVisibleSlots(boardEl) {
+  return activeVisibleSlotsByBoard.get(boardEl) || [];
 }
 
 function toDateInputValue(date) {
@@ -508,8 +528,10 @@ function getVisibleSlotRange(startAt, endAt, visibleSlots) {
   };
 }
 
-function buildVisibleSegmentBars(worker, visibleSlots) {
-  return (worker?.segments || [])
+function buildVisibleSegmentBars(worker, visibleSlots, options = {}) {
+  const timelineOptions = getTimelineOptions(options);
+
+  return (worker?.[timelineOptions.segmentsField] || [])
     .map((segment) => {
       const startAt = segment?.startAt instanceof Date ? segment.startAt : null;
       const endAt = segment?.endAt instanceof Date ? segment.endAt : null;
@@ -604,11 +626,13 @@ function renderWorkerRow(
   visibleSlots,
   zoomMode,
   zoomScale,
-  sizingContext = null
+  sizingContext = null,
+  options = {}
 ) {
-  const totalDays = getWorkerTotalDays(worker.provisionalDays);
+  const timelineOptions = getTimelineOptions(options);
+  const totalDays = getWorkerTotalDays(worker?.[timelineOptions.daysField]);
   const timelineWidth = getTimelineWidth(months, zoomMode, zoomScale, sizingContext);
-  const visibleSegmentBars = buildVisibleSegmentBars(worker, visibleSlots);
+  const visibleSegmentBars = buildVisibleSegmentBars(worker, visibleSlots, timelineOptions);
   const assignedBars = assignSegmentLanes(visibleSegmentBars);
   const laneCount = Math.max(
     1,
@@ -623,7 +647,11 @@ function renderWorkerRow(
     >
       <div class="charge-plan-cell charge-plan-cell--name">${escapeHtml(worker.name)}</div>
       <div class="charge-plan-cell charge-plan-cell--actions">
-        <button class="delete-worker-btn" data-worker-id="${worker.id}">Supprimer</button>
+        ${
+          timelineOptions.showWorkerDeleteAction
+            ? `<button class="delete-worker-btn" data-worker-id="${worker.id}">Supprimer</button>`
+            : ""
+        }
       </div>
       <div class="charge-plan-cell charge-plan-cell--total">${formatDayValue(totalDays)} j</div>
       <div class="charge-plan-cell charge-plan-cell--timeline">
@@ -659,11 +687,19 @@ function renderRoleRow(roleLabel, timelineWidth) {
   `;
 }
 
-function renderReadonlyTrack(project, months, zoomMode, zoomScale, sizingContext = null) {
+function renderReadonlyTrack(
+  project,
+  months,
+  zoomMode,
+  zoomScale,
+  sizingContext = null,
+  options = {}
+) {
+  const timelineOptions = getTimelineOptions(options);
   const monthlyTotals = {};
 
   (project?.workers || []).forEach((worker) => {
-    Object.entries(worker?.provisionalDays || {}).forEach(([monthKey, value]) => {
+    Object.entries(worker?.[timelineOptions.daysField] || {}).forEach(([monthKey, value]) => {
       monthlyTotals[monthKey] =
         Math.round((toFiniteNumber(monthlyTotals[monthKey], 0) + toFiniteNumber(value, 0)) * 100) /
         100;
@@ -696,10 +732,18 @@ function renderReadonlyTrack(project, months, zoomMode, zoomScale, sizingContext
     .join("");
 }
 
-function renderTotalRow(project, months, zoomMode, zoomScale, sizingContext = null) {
+function renderTotalRow(
+  project,
+  months,
+  zoomMode,
+  zoomScale,
+  sizingContext = null,
+  options = {}
+) {
+  const timelineOptions = getTimelineOptions(options);
   const timelineWidth = getTimelineWidth(months, zoomMode, zoomScale, sizingContext);
   const totalDays = (project?.workers || []).reduce(
-    (sum, worker) => sum + getWorkerTotalDays(worker.provisionalDays),
+    (sum, worker) => sum + getWorkerTotalDays(worker?.[timelineOptions.daysField]),
     0
   );
 
@@ -713,18 +757,27 @@ function renderTotalRow(project, months, zoomMode, zoomScale, sizingContext = nu
       <div class="charge-plan-cell charge-plan-cell--total">${formatDayValue(totalDays)} j</div>
       <div class="charge-plan-cell charge-plan-cell--timeline">
         <div class="charge-plan-track charge-plan-track--readonly">
-          ${renderReadonlyTrack(project, months, zoomMode, zoomScale, sizingContext)}
+          ${renderReadonlyTrack(
+            project,
+            months,
+            zoomMode,
+            zoomScale,
+            sizingContext,
+            timelineOptions
+          )}
         </div>
       </div>
     </div>
   `;
 }
 
-function getTrackSlots(_trackEl) {
-  return activeVisibleSlots;
+function getTrackSlots(trackEl) {
+  const boardEl =
+    trackEl instanceof Element ? trackEl.closest("[data-timeline-board-kind]") : null;
+  return getBoardVisibleSlots(boardEl);
 }
 
-function buildSelectionFromSlots(firstSlot, lastSlot) {
+function buildSelectionFromSlots(firstSlot, lastSlot, allSlots = []) {
   if (!firstSlot || !lastSlot) {
     return null;
   }
@@ -734,7 +787,7 @@ function buildSelectionFromSlots(firstSlot, lastSlot) {
   const orderedLast =
     firstSlot.slotIndex <= lastSlot.slotIndex ? lastSlot : firstSlot;
 
-  const selectedSlots = activeVisibleSlots.filter(
+  const selectedSlots = allSlots.filter(
     (slot) =>
       slot.slotIndex >= orderedFirst.slotIndex && slot.slotIndex <= orderedLast.slotIndex
   );
@@ -771,12 +824,77 @@ function getSlotIndexFromClientX(trackEl, clientX) {
   return Number(slotEls[slotEls.length - 1].slotIndex);
 }
 
-export function renderChargePlanTimeline(dom, project, viewState) {
-  currentBoardEl = dom?.chargePlanBoard || null;
+function renderTimelineControls(
+  zoomMode,
+  selectedDate,
+  selectedDateValue
+) {
+  const zoomButtons = Object.entries(APP_CONFIG.chargeTimeline.zoomModes)
+    .map(
+      ([mode, preset]) => `
+        <button
+          type="button"
+          class="charge-plan-zoom-btn ${mode === zoomMode ? "is-active" : ""}"
+          data-charge-plan-zoom="${mode}"
+        >
+          ${escapeHtml(preset.label)}
+        </button>
+      `
+    )
+    .join("");
+
+  return `
+    <div class="charge-plan-view-controls">
+      <span class="charge-plan-view-label">Vue</span>
+      <div class="charge-plan-zoom-buttons" role="group" aria-label="Zoom planning">
+        ${zoomButtons}
+      </div>
+      <div class="charge-plan-date-picker-shell">
+        <button
+          type="button"
+          class="charge-plan-date-trigger"
+          data-date-value="${escapeHtml(selectedDateValue)}"
+          aria-expanded="false"
+        >
+          <span class="charge-plan-date-trigger-label">Date</span>
+          <span class="charge-plan-date-trigger-value">${escapeHtml(
+            formatDateDisplayValue(selectedDate)
+          )}</span>
+        </button>
+        <div
+          class="charge-plan-date-popover"
+          data-selected-date="${escapeHtml(selectedDateValue)}"
+          data-visible-year="${selectedDate.getFullYear()}"
+          data-visible-month="${selectedDate.getMonth()}"
+          hidden
+        >
+          ${renderChargePlanDatePicker(
+            selectedDate.getFullYear(),
+            selectedDate.getMonth(),
+            selectedDateValue
+          )}
+        </div>
+      </div>
+      <button
+        type="button"
+        class="charge-plan-date-jump-btn"
+        data-charge-plan-date-action="today"
+      >
+        Aujourd'hui
+      </button>
+    </div>
+  `;
+}
+
+export function renderChargePlanTimeline(dom, project, viewState, options = {}) {
+  const timelineOptions = getTimelineOptions(options);
+  currentBoardEl = timelineOptions.boardEl || dom?.chargePlanBoard || null;
   if (!currentBoardEl || !project) {
-    clearChargePlanTimeline(dom);
+    clearChargePlanTimeline(currentBoardEl);
     return;
   }
+
+  currentBoardEl.dataset.timelineBoardKind = timelineOptions.timelineKind;
 
   const zoomMode = getChargePlanZoomMode(viewState?.chargePlanZoomMode);
   const zoomScale = clamp(
@@ -817,21 +935,8 @@ export function renderChargePlanTimeline(dom, project, viewState) {
   });
   const timelineWidth = getTimelineWidth(months, zoomMode, zoomScale, sizingContext);
 
-  activeVisibleSlots = buildVisibleSlots(months, zoomMode, zoomScale, sizingContext);
-
-  const zoomButtons = Object.entries(APP_CONFIG.chargeTimeline.zoomModes)
-    .map(
-      ([mode, preset]) => `
-        <button
-          type="button"
-          class="charge-plan-zoom-btn ${mode === zoomMode ? "is-active" : ""}"
-          data-charge-plan-zoom="${mode}"
-        >
-          ${escapeHtml(preset.label)}
-        </button>
-      `
-    )
-    .join("");
+  const activeVisibleSlots = buildVisibleSlots(months, zoomMode, zoomScale, sizingContext);
+  activeVisibleSlotsByBoard.set(currentBoardEl, activeVisibleSlots);
 
   const groupedWorkers = groupWorkersByRole(project?.workers || []);
   const rows = Object.entries(groupedWorkers)
@@ -845,7 +950,8 @@ export function renderChargePlanTimeline(dom, project, viewState) {
             activeVisibleSlots,
             zoomMode,
             zoomScale,
-            sizingContext
+            sizingContext,
+            timelineOptions
           )
         ),
       ].join("");
@@ -855,51 +961,10 @@ export function renderChargePlanTimeline(dom, project, viewState) {
   currentBoardEl.innerHTML = `
     <div class="charge-plan-helper">
       <div class="charge-plan-helper-copy">
-        <span>
-          Glissez dans une ligne pour creer un segment. Redimensionnez-le avec ses poignees.
-          Utilisez le clic droit sur une barre pour la supprimer.
-        </span>
+        <span>${escapeHtml(timelineOptions.helperText)}</span>
         <span class="charge-plan-feedback" hidden></span>
       </div>
-      <div class="charge-plan-view-controls">
-        <span class="charge-plan-view-label">Vue</span>
-        <div class="charge-plan-zoom-buttons" role="group" aria-label="Zoom planning">
-          ${zoomButtons}
-        </div>
-        <div class="charge-plan-date-picker-shell">
-          <button
-            type="button"
-            class="charge-plan-date-trigger"
-            data-date-value="${escapeHtml(selectedDateValue)}"
-            aria-expanded="false"
-          >
-            <span class="charge-plan-date-trigger-label">Date</span>
-            <span class="charge-plan-date-trigger-value">${escapeHtml(
-              formatDateDisplayValue(selectedDate)
-            )}</span>
-          </button>
-          <div
-            class="charge-plan-date-popover"
-            data-selected-date="${escapeHtml(selectedDateValue)}"
-            data-visible-year="${selectedDate.getFullYear()}"
-            data-visible-month="${selectedDate.getMonth()}"
-            hidden
-          >
-            ${renderChargePlanDatePicker(
-              selectedDate.getFullYear(),
-              selectedDate.getMonth(),
-              selectedDateValue
-            )}
-          </div>
-        </div>
-        <button
-          type="button"
-          class="charge-plan-date-jump-btn"
-          data-charge-plan-date-action="today"
-        >
-          Aujourd'hui
-        </button>
-      </div>
+      ${timelineOptions.showControls ? renderTimelineControls(zoomMode, selectedDate, selectedDateValue) : ""}
     </div>
     <div class="charge-plan-scroll">
       <div class="charge-plan-timeline" style="--timeline-width:${timelineWidth}px">
@@ -926,7 +991,14 @@ export function renderChargePlanTimeline(dom, project, viewState) {
           </div>
         </div>
         ${rows}
-        ${renderTotalRow(project, months, zoomMode, zoomScale, sizingContext)}
+        ${renderTotalRow(
+          project,
+          months,
+          zoomMode,
+          zoomScale,
+          sizingContext,
+          timelineOptions
+        )}
       </div>
     </div>
     <div class="charge-plan-context-menu" hidden>
@@ -941,12 +1013,33 @@ export function renderChargePlanTimeline(dom, project, viewState) {
   `;
 }
 
-export function clearChargePlanTimeline(dom) {
-  activeVisibleSlots = [];
-  currentBoardEl = dom?.chargePlanBoard || null;
+export function renderRealChargeTimeline(dom, project, viewState) {
+  return renderChargePlanTimeline(dom, project, viewState, {
+    boardEl: dom?.realChargeBoard || null,
+    daysField: "workedDays",
+    segmentsField: "realSegments",
+    timelineKind: "real",
+    showControls: false,
+    helperText:
+      "Glissez dans une ligne pour creer un segment reel. Redimensionnez-le avec ses poignees. Utilisez le clic droit sur une barre pour la supprimer.",
+  });
+}
+
+export function clearChargePlanTimeline(target) {
+  currentBoardEl =
+    target instanceof HTMLElement ? target : target?.chargePlanBoard || null;
 
   if (currentBoardEl) {
+    activeVisibleSlotsByBoard.delete(currentBoardEl);
     currentBoardEl.innerHTML = "";
+  }
+}
+
+export function clearRealChargeTimeline(target) {
+  const boardEl = target instanceof HTMLElement ? target : target?.realChargeBoard || null;
+  if (boardEl) {
+    activeVisibleSlotsByBoard.delete(boardEl);
+    boardEl.innerHTML = "";
   }
 }
 
@@ -987,7 +1080,7 @@ export function computeChargePlanSelectionFromSlotIndexes(trackEl, firstSlotInde
   const slots = getTrackSlots(trackEl);
   const firstSlot = slots.find((slot) => slot.slotIndex === Number(firstSlotIndex));
   const lastSlot = slots.find((slot) => slot.slotIndex === Number(lastSlotIndex));
-  return buildSelectionFromSlots(firstSlot, lastSlot);
+  return buildSelectionFromSlots(firstSlot, lastSlot, slots);
 }
 
 export function getChargePlanSlotIndexAtClientX(trackEl, clientX) {
