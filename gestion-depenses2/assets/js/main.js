@@ -297,7 +297,8 @@ function syncStateToProjectStart(project) {
 function renderApp() {
   renderProjectOptions(dom.projectSelect, state.projects, state.selectedProjectId);
   const selectedProject = getSelectedProject();
-  renderWorkerOptions(dom.workerNameSelect, state.teamMembers);
+  renderWorkerOptions(dom.workerNameSelect, state.teamMembers, selectedProject);
+  dom.saveWorkerBtn.disabled = dom.workerNameSelect.disabled || !selectedProject;
   renderBudgetPreview(dom.budgetLinesContainer, state.newProjectBudgetLines);
 
   if (!selectedProject) {

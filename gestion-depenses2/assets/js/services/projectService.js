@@ -59,6 +59,29 @@ function mergeMonthlyDays(target, monthKey, value) {
   target[monthKey] = Math.round((toFiniteNumber(target[monthKey], 0) + value) * 100) / 100;
 }
 
+function normalizePersonName(value) {
+  return toText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function chooseMostFrequentRole(roleCounts) {
+  let selectedRole = "";
+  let selectedCount = -1;
+
+  roleCounts.forEach((count, role) => {
+    if (count > selectedCount) {
+      selectedRole = role;
+      selectedCount = count;
+    }
+  });
+
+  return selectedRole;
+}
+
 export function buildExpenseData({
   projectRows,
   budgetRows,
@@ -103,6 +126,7 @@ export function buildExpenseData({
   });
 
   const workersById = new Map();
+  const inferredRolesByName = new Map();
 
   (projectTeamRows || []).forEach((row) => {
     const project = projectsByNumber.get(
@@ -122,6 +146,17 @@ export function buildExpenseData({
 
     project.workers.push(worker);
     workersById.set(worker.id, worker);
+
+    const normalizedName = normalizePersonName(worker.name);
+    const normalizedRole = toText(worker.role);
+    if (normalizedName && normalizedRole) {
+      const currentRoleCounts = inferredRolesByName.get(normalizedName) || new Map();
+      currentRoleCounts.set(
+        normalizedRole,
+        toFiniteNumber(currentRoleCounts.get(normalizedRole), 0) + 1
+      );
+      inferredRolesByName.set(normalizedName, currentRoleCounts);
+    }
   });
 
   (timeSegmentRows || []).forEach((row) => {
@@ -177,7 +212,22 @@ export function buildExpenseData({
     id: Number(row?.[columns.team.id]),
     firstName: toText(row?.[columns.team.firstName]),
     lastName: toText(row?.[columns.team.lastName]),
-    role: toText(row?.[columns.team.role]),
+    role: (() => {
+      const explicitRole = toText(row?.[columns.team.role]);
+      if (explicitRole) {
+        return explicitRole;
+      }
+
+      const fullName = `${toText(row?.[columns.team.firstName])} ${toText(
+        row?.[columns.team.lastName]
+      )}`.trim();
+      const inferredRoleCounts = inferredRolesByName.get(normalizePersonName(fullName));
+      if (!inferredRoleCounts) {
+        return "";
+      }
+
+      return chooseMostFrequentRole(inferredRoleCounts);
+    })(),
   }));
 
   return {
