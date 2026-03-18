@@ -181,6 +181,7 @@ td input {
 
 #expense-board {
   margin-bottom: 24px;
+  min-width: 0;
 }
 
 .charge-plan-helper {
@@ -1107,11 +1108,15 @@ td input {
 .expense-graph-layout {
   display: grid;
   gap: 18px;
+  width: 100%;
+  min-width: 0;
 }
 
 .expense-rate-panel {
   display: grid;
   gap: 14px;
+  width: 100%;
+  min-width: 0;
 }
 
 .expense-rate-group {
@@ -1176,20 +1181,53 @@ td input {
 }
 
 .expense-graph-shell {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   padding: 18px;
   border: 1px solid rgba(0, 73, 144, 0.12);
   border-radius: var(--radius-md);
   background: var(--color-surface);
+  overflow: hidden;
+}
+
+.expense-graph-helper {
+  margin-bottom: 12px;
+  color: var(--color-text-muted);
+  font-size: 0.86rem;
+  font-weight: 600;
 }
 
 .expense-graph-scroll {
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
-  padding-bottom: 4px;
+  padding-bottom: 8px;
+  scrollbar-gutter: stable both-edges;
 }
 
 .expense-graph-stage {
   min-width: 100%;
+}
+
+.expense-graph-scroll::-webkit-scrollbar {
+  height: 12px;
+}
+
+.expense-graph-scroll::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(0, 73, 144, 0.08);
+}
+
+.expense-graph-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 999px;
+  background: rgba(0, 73, 144, 0.34);
+}
+
+.expense-graph-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 73, 144, 0.48);
 }
 
 .expense-graph-summary {

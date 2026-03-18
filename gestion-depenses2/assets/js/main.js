@@ -296,10 +296,10 @@ function syncStateToProjectStart(project) {
 
 function renderApp() {
   renderProjectOptions(dom.projectSelect, state.projects, state.selectedProjectId);
+  const selectedProject = getSelectedProject();
   renderWorkerOptions(dom.workerNameSelect, state.teamMembers);
   renderBudgetPreview(dom.budgetLinesContainer, state.newProjectBudgetLines);
 
-  const selectedProject = getSelectedProject();
   if (!selectedProject) {
     clearProjectSummary(dom);
     clearKpi(dom);

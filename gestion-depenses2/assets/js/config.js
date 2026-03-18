@@ -2,6 +2,13 @@ export const APP_CONFIG = {
   storageKey: "gestion-depenses2.state",
   defaultMonthSpan: 6,
   defaultChargePlanZoomMode: "month",
+  expenseTimeline: {
+    minVisibleMonths: 6,
+    minGraphViewportWidth: 720,
+    minMonthWidth: 118,
+    workerSlotWidth: 18,
+    monthPadding: 54,
+  },
   chargeTimeline: {
     visibleMonthSpan: 144,
     defaultVisibleDays: 31,

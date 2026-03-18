@@ -14,6 +14,7 @@ import {
 import { destroyChart, renderGroupedExpenseChart } from "./chart.js";
 
 let currentExpenseChart = null;
+const expenseGraphScrollPositions = new Map();
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -91,15 +92,34 @@ function getMonthLabels(months) {
   return months.map(({ monthLabel, year }) => `${monthLabel} ${year}`);
 }
 
-function getExpenseGraphWidth(boardEl, project, months) {
+function getExpenseScrollKey(project) {
+  const projectId = project?.id ?? project?.projectId ?? "";
+  const projectNumber = project?.number ?? project?.projectNumber ?? "";
+  return String(projectId || projectNumber || "default");
+}
+
+function getExpenseGraphMetrics(boardEl, project, months) {
   const workerCount = Math.max(project?.workers?.length || 0, 1);
+  const config = APP_CONFIG.expenseTimeline || {};
   const hostWidth = Math.max(
-    720,
+    config.minGraphViewportWidth || 720,
     boardEl?.clientWidth || 0,
     boardEl?.getBoundingClientRect?.().width || 0
   );
-  const monthColumnWidth = Math.max(110, workerCount * 18 + 42);
-  return Math.max(hostWidth - 36, months.length * monthColumnWidth);
+  const visibleMonthTarget = Math.max(1, config.minVisibleMonths || 6);
+  const visibleMonthCount = Math.min(Math.max(months.length, 1), visibleMonthTarget);
+  const viewportDrivenMonthWidth = hostWidth / visibleMonthCount;
+  const workerDrivenMonthWidth = Math.max(
+    config.minMonthWidth || 118,
+    workerCount * (config.workerSlotWidth || 18) + (config.monthPadding || 54)
+  );
+  const monthColumnWidth = Math.max(viewportDrivenMonthWidth, workerDrivenMonthWidth);
+  const graphWidth = Math.max(hostWidth, months.length * monthColumnWidth);
+
+  return {
+    graphWidth,
+    isScrollable: graphWidth > hostWidth + 1,
+  };
 }
 
 function getSeriesColor(index, totalSeriesCount, alpha = 1) {
@@ -214,6 +234,32 @@ function renderExpenseSummary(project, months) {
   `;
 }
 
+function restoreExpenseGraphScroll(boardEl, project) {
+  if (!(boardEl instanceof HTMLElement)) {
+    return;
+  }
+
+  const scrollEl = boardEl.querySelector(".expense-graph-scroll");
+  if (!(scrollEl instanceof HTMLElement)) {
+    return;
+  }
+
+  const scrollKey = getExpenseScrollKey(project);
+  const savedScrollLeft = expenseGraphScrollPositions.get(scrollKey) || 0;
+
+  scrollEl.addEventListener(
+    "scroll",
+    () => {
+      expenseGraphScrollPositions.set(scrollKey, scrollEl.scrollLeft);
+    },
+    { passive: true }
+  );
+
+  requestAnimationFrame(() => {
+    scrollEl.scrollLeft = savedScrollLeft;
+  });
+}
+
 function mountExpenseChart(boardEl, project, months) {
   if (!(boardEl instanceof HTMLElement)) {
     return;
@@ -239,15 +285,20 @@ export function renderExpenseTimeline(boardEl, project) {
   currentExpenseChart = destroyChart(currentExpenseChart);
 
   const months = buildExpenseMonths(project);
-  const graphWidth = getExpenseGraphWidth(boardEl, project, months);
+  const { graphWidth, isScrollable } = getExpenseGraphMetrics(boardEl, project, months);
 
   boardEl.innerHTML = `
     <div class="expense-graph-layout">
       <div class="expense-rate-panel">
         ${renderRateControls(project)}
       </div>
-      <div class="expense-graph-shell">
+      <div class="expense-graph-shell${isScrollable ? " is-scrollable" : ""}">
         ${renderExpenseSummary(project, months)}
+        ${
+          isScrollable
+            ? '<div class="expense-graph-helper">Faites defiler horizontalement pour parcourir tous les mois.</div>'
+            : ""
+        }
         <div class="expense-graph-scroll">
           <div class="expense-graph-stage" style="width:${graphWidth}px;">
             <canvas class="expense-graph-canvas"></canvas>
@@ -258,6 +309,7 @@ export function renderExpenseTimeline(boardEl, project) {
   `;
 
   mountExpenseChart(boardEl, project, months);
+  restoreExpenseGraphScroll(boardEl, project);
 }
 
 export function clearExpenseTimeline(boardEl) {
