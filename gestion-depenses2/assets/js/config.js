@@ -4,10 +4,6 @@ export const APP_CONFIG = {
   defaultChargePlanZoomMode: "month",
   chargeTimeline: {
     visibleMonthSpan: 144,
-    rangeShiftMonthSpan: 12,
-    anchorMonthOffset: 8,
-    edgeNavigationThresholdPx: 48,
-    scrollIdleRefreshMs: 220,
     yearMaxVisibleMonths: 15,
     defaultZoomScale: 1,
     minZoomScale: 0.1,

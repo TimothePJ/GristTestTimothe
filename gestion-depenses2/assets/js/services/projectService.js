@@ -378,6 +378,52 @@ export function getProjectAverageAnchorDate(project) {
   };
 }
 
+export function getProjectFirstAnchorDate(project) {
+  let firstDate = null;
+
+  const registerDate = (candidate) => {
+    if (!(candidate instanceof Date) || Number.isNaN(candidate.getTime())) {
+      return;
+    }
+
+    if (!firstDate || candidate.getTime() < firstDate.getTime()) {
+      firstDate = candidate;
+    }
+  };
+
+  (project?.workers || []).forEach((worker) => {
+    const segments = worker?.segments || [];
+
+    if (segments.length > 0) {
+      segments.forEach((segment) => {
+        registerDate(parseRawDateTime(segment?.startAt));
+      });
+      return;
+    }
+
+    Object.keys(worker?.provisionalDays || {}).forEach((monthKey) => {
+      registerDate(getMonthKeyAnchorDate(monthKey));
+    });
+
+    Object.keys(worker?.workedDays || {}).forEach((monthKey) => {
+      registerDate(getMonthKeyAnchorDate(monthKey));
+    });
+  });
+
+  if (!firstDate) {
+    return null;
+  }
+
+  return {
+    year: firstDate.getFullYear(),
+    monthIndex: firstDate.getMonth(),
+    dateValue: `${firstDate.getFullYear()}-${String(firstDate.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}-${String(firstDate.getDate()).padStart(2, "0")}`,
+  };
+}
+
 export function getProjectProvisionalMonthBounds(project) {
   const monthKeys = new Set();
 
