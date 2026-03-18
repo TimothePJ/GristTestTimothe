@@ -4,11 +4,17 @@ export const APP_CONFIG = {
   defaultChargePlanZoomMode: "month",
   chargeTimeline: {
     visibleMonthSpan: 144,
-    yearMaxVisibleMonths: 15,
+    defaultVisibleDays: 31,
+    referenceMonthDays: 30.4375,
+    minVisibleDays: 7,
+    yearMaxVisibleMonths: 14,
     defaultZoomScale: 1,
     minZoomScale: 0.1,
     maxZoomScale: 2.8,
-    wheelZoomFactor: 1.08,
+    wheelZoomStepRatio: 0.12,
+    wheelZoomMinStepDays: 1,
+    wheelZoomMaxStepDays: 21,
+    wheelZoomMaxDeltaPerFrame: 48,
     zoomModes: {
       week: {
         label: "Semaine",

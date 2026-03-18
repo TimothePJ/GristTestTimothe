@@ -15,8 +15,68 @@ function isDateInputValue(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
 }
 
+function getAnchorMonthDayCount(dateValue) {
+  const configuredReferenceMonthDays = Number(
+    APP_CONFIG.chargeTimeline.referenceMonthDays
+  );
+  if (Number.isFinite(configuredReferenceMonthDays) && configuredReferenceMonthDays > 0) {
+    return configuredReferenceMonthDays;
+  }
+
+  const normalizedDateValue = isDateInputValue(dateValue)
+    ? String(dateValue).trim()
+    : toDateInputValue(new Date());
+  const anchorDate = new Date(`${normalizedDateValue}T12:00:00`);
+  if (Number.isNaN(anchorDate.getTime())) {
+    return APP_CONFIG.chargeTimeline.defaultVisibleDays;
+  }
+
+  return new Date(anchorDate.getFullYear(), anchorDate.getMonth() + 1, 0).getDate();
+}
+
+function deriveVisibleDaysFromLegacyZoom(mode, scale, anchorDateValue) {
+  const monthDayCount = getAnchorMonthDayCount(anchorDateValue);
+  const safeScale = Number.isFinite(Number(scale))
+    ? Math.min(
+        APP_CONFIG.chargeTimeline.maxZoomScale,
+        Math.max(
+          APP_CONFIG.chargeTimeline.minZoomScale,
+          Number(scale)
+        )
+      )
+    : APP_CONFIG.chargeTimeline.defaultZoomScale;
+
+  if (mode === "week") {
+    return 7 / safeScale;
+  }
+
+  if (mode === "year") {
+    return 365 / safeScale;
+  }
+
+  return monthDayCount / safeScale;
+}
+
+function normalizeVisibleDays(value, anchorDateValue) {
+  const monthDayCount = getAnchorMonthDayCount(anchorDateValue);
+  const minVisibleDays = APP_CONFIG.chargeTimeline.minVisibleDays;
+  const maxVisibleDays =
+    monthDayCount * Math.max(1, APP_CONFIG.chargeTimeline.yearMaxVisibleMonths || 14);
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return Math.min(
+      Math.max(APP_CONFIG.chargeTimeline.defaultVisibleDays, minVisibleDays),
+      maxVisibleDays
+    );
+  }
+
+  return Math.min(Math.max(numericValue, minVisibleDays), maxVisibleDays);
+}
+
 function getNowState() {
   const now = new Date();
+  const anchorDate = toDateInputValue(now);
   return {
     selectedProjectId: null,
     selectedYear: now.getFullYear(),
@@ -24,7 +84,11 @@ function getNowState() {
     monthSpan: APP_CONFIG.defaultMonthSpan,
     chargePlanZoomMode: APP_CONFIG.defaultChargePlanZoomMode,
     chargePlanZoomScale: APP_CONFIG.chargeTimeline.defaultZoomScale,
-    chargePlanAnchorDate: toDateInputValue(now),
+    chargePlanVisibleDays: normalizeVisibleDays(
+      APP_CONFIG.chargeTimeline.defaultVisibleDays,
+      anchorDate
+    ),
+    chargePlanAnchorDate: anchorDate,
   };
 }
 
@@ -42,6 +106,27 @@ function readPersistedState() {
     if (!raw) return fallback;
 
     const parsed = JSON.parse(raw);
+    const parsedAnchorDate = isDateInputValue(parsed?.chargePlanAnchorDate)
+      ? String(parsed.chargePlanAnchorDate).trim()
+      : fallback.chargePlanAnchorDate;
+    const parsedZoomMode =
+      typeof parsed?.chargePlanZoomMode === "string" &&
+      Object.prototype.hasOwnProperty.call(
+        APP_CONFIG.chargeTimeline.zoomModes,
+        parsed.chargePlanZoomMode
+      )
+        ? parsed.chargePlanZoomMode
+        : fallback.chargePlanZoomMode;
+    const parsedZoomScale = Number.isFinite(Number(parsed?.chargePlanZoomScale))
+      ? Math.min(
+          APP_CONFIG.chargeTimeline.maxZoomScale,
+          Math.max(
+            APP_CONFIG.chargeTimeline.minZoomScale,
+            Number(parsed.chargePlanZoomScale)
+          )
+        )
+      : fallback.chargePlanZoomScale;
+
     return {
       selectedProjectId:
         Number.isInteger(Number(parsed?.selectedProjectId))
@@ -59,26 +144,18 @@ function readPersistedState() {
         Number.isInteger(Number(parsed?.monthSpan)) && Number(parsed.monthSpan) > 0
           ? Number(parsed.monthSpan)
           : fallback.monthSpan,
-      chargePlanZoomMode:
-        typeof parsed?.chargePlanZoomMode === "string" &&
-        Object.prototype.hasOwnProperty.call(
-          APP_CONFIG.chargeTimeline.zoomModes,
-          parsed.chargePlanZoomMode
-        )
-          ? parsed.chargePlanZoomMode
-          : fallback.chargePlanZoomMode,
-      chargePlanZoomScale: Number.isFinite(Number(parsed?.chargePlanZoomScale))
-        ? Math.min(
-            APP_CONFIG.chargeTimeline.maxZoomScale,
-            Math.max(
-              APP_CONFIG.chargeTimeline.minZoomScale,
-              Number(parsed.chargePlanZoomScale)
-            )
-          )
-        : fallback.chargePlanZoomScale,
-      chargePlanAnchorDate: isDateInputValue(parsed?.chargePlanAnchorDate)
-        ? String(parsed.chargePlanAnchorDate).trim()
-        : fallback.chargePlanAnchorDate,
+      chargePlanZoomMode: parsedZoomMode,
+      chargePlanZoomScale: parsedZoomScale,
+      chargePlanVisibleDays: normalizeVisibleDays(
+        parsed?.chargePlanVisibleDays ??
+          deriveVisibleDaysFromLegacyZoom(
+            parsedZoomMode,
+            parsedZoomScale,
+            parsedAnchorDate
+          ),
+        parsedAnchorDate
+      ),
+      chargePlanAnchorDate: parsedAnchorDate,
     };
   } catch (error) {
     console.warn("Erreur lecture localStorage gestion-depenses2 :", error);
@@ -104,6 +181,7 @@ function persistState() {
         monthSpan: state.monthSpan,
         chargePlanZoomMode: state.chargePlanZoomMode,
         chargePlanZoomScale: state.chargePlanZoomScale,
+        chargePlanVisibleDays: state.chargePlanVisibleDays,
         chargePlanAnchorDate: state.chargePlanAnchorDate,
       })
     );
@@ -123,6 +201,7 @@ export const state = {
   monthSpan: persisted.monthSpan,
   chargePlanZoomMode: persisted.chargePlanZoomMode,
   chargePlanZoomScale: persisted.chargePlanZoomScale,
+  chargePlanVisibleDays: persisted.chargePlanVisibleDays,
   chargePlanAnchorDate: persisted.chargePlanAnchorDate,
   newProjectBudgetLines: [],
   editingBudgetLines: [],

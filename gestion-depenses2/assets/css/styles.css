@@ -173,6 +173,9 @@ td input {
 }
 
 #charge-plan-board {
+  --charge-plan-name-col-width: 150px;
+  --charge-plan-actions-col-width: 120px;
+  --charge-plan-total-col-width: 100px;
   margin-bottom: 24px;
 }
 
@@ -474,15 +477,29 @@ td input {
 }
 
 .charge-plan-timeline {
-  min-width: calc(150px + 120px + 100px + var(--timeline-width));
+  min-width: calc(
+    var(--charge-plan-name-col-width) +
+    var(--charge-plan-actions-col-width) +
+    var(--charge-plan-total-col-width) +
+    var(--timeline-width)
+  );
 }
 
 .charge-plan-row,
 .charge-plan-role-row {
   position: relative;
   display: grid;
-  grid-template-columns: 150px 120px 100px var(--timeline-width);
-  min-width: calc(150px + 120px + 100px + var(--timeline-width));
+  grid-template-columns:
+    var(--charge-plan-name-col-width)
+    var(--charge-plan-actions-col-width)
+    var(--charge-plan-total-col-width)
+    var(--timeline-width);
+  min-width: calc(
+    var(--charge-plan-name-col-width) +
+    var(--charge-plan-actions-col-width) +
+    var(--charge-plan-total-col-width) +
+    var(--timeline-width)
+  );
   isolation: isolate;
 }
 
@@ -526,9 +543,9 @@ td input {
 
 .charge-plan-cell--name {
   left: 0;
-  width: 150px;
-  min-width: 150px;
-  max-width: 150px;
+  width: var(--charge-plan-name-col-width);
+  min-width: var(--charge-plan-name-col-width);
+  max-width: var(--charge-plan-name-col-width);
   z-index: 15;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -536,18 +553,21 @@ td input {
 }
 
 .charge-plan-cell--actions {
-  left: 150px;
-  width: 120px;
-  min-width: 120px;
-  max-width: 120px;
+  left: var(--charge-plan-name-col-width);
+  width: var(--charge-plan-actions-col-width);
+  min-width: var(--charge-plan-actions-col-width);
+  max-width: var(--charge-plan-actions-col-width);
   z-index: 14;
 }
 
 .charge-plan-cell--total {
-  left: 270px;
-  width: 100px;
-  min-width: 100px;
-  max-width: 100px;
+  left: calc(
+    var(--charge-plan-name-col-width) +
+    var(--charge-plan-actions-col-width)
+  );
+  width: var(--charge-plan-total-col-width);
+  min-width: var(--charge-plan-total-col-width);
+  max-width: var(--charge-plan-total-col-width);
   z-index: 13;
 }
 
@@ -1301,16 +1321,15 @@ canvas {
 
   .charge-plan-row,
   .charge-plan-role-row {
-    grid-template-columns: 170px 96px 96px var(--timeline-width);
-    min-width: calc(170px + 96px + 96px + var(--timeline-width));
+    --charge-plan-name-col-width: 170px;
+    --charge-plan-actions-col-width: 96px;
+    --charge-plan-total-col-width: 96px;
   }
 
-  .charge-plan-cell--actions {
-    left: 170px;
-  }
-
-  .charge-plan-cell--total {
-    left: 266px;
+  #charge-plan-board {
+    --charge-plan-name-col-width: 170px;
+    --charge-plan-actions-col-width: 96px;
+    --charge-plan-total-col-width: 96px;
   }
 
   .expense-plan-row,

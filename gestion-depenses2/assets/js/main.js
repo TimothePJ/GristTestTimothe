@@ -63,15 +63,13 @@ let chargePlanVisibleDateTimer = null;
 let chargePlanViewportRestoreFrame = null;
 let suppressChargePlanScrollEvents = false;
 let chargePlanScrollSyncFrame = null;
+let chargePlanWheelZoomFrame = null;
+let pendingChargePlanWheelRequest = null;
 let renderedChargePlanRangeStartDate = "";
 let chargePlanRangeStartDate = "";
 const chargePlanViewport = {
   scrollRatio: 0,
-  pendingDateKey: "",
-  pendingDateOffsetRatio: null,
-  pendingTrackRatio: null,
-  pendingAnchorRatio: null,
-  pendingClientOffset: 0,
+  pendingLeftDayOffset: null,
 };
 let pendingChargePlanFocusDate = "";
 let pendingChargePlanFocusAlign = "center";
@@ -167,6 +165,78 @@ function getChargePlanRangeStartDate() {
   return fallbackRangeStartDate;
 }
 
+function getChargePlanFixedColumnsWidthEstimate(boardEl = dom?.chargePlanBoard || null) {
+  if (!(boardEl instanceof HTMLElement)) {
+    return 150 + 120 + 100;
+  }
+
+  const styles = window.getComputedStyle(boardEl);
+  const nameWidth = parseFloat(styles.getPropertyValue("--charge-plan-name-col-width"));
+  const actionsWidth = parseFloat(
+    styles.getPropertyValue("--charge-plan-actions-col-width")
+  );
+  const totalWidth = parseFloat(styles.getPropertyValue("--charge-plan-total-col-width"));
+
+  return (
+    (Number.isFinite(nameWidth) ? nameWidth : 150) +
+    (Number.isFinite(actionsWidth) ? actionsWidth : 120) +
+    (Number.isFinite(totalWidth) ? totalWidth : 100)
+  );
+}
+
+function getChargePlanTimelineViewportGeometry(scrollEl = getChargePlanScrollElement()) {
+  const boardEl = dom?.chargePlanBoard || null;
+  const fixedColumnsWidth = getChargePlanFixedColumnsWidthEstimate(boardEl);
+  const viewportWidth = Math.max(
+    280,
+    Math.max(scrollEl?.clientWidth || 0, 0) - fixedColumnsWidth
+  );
+
+  return {
+    clientLeft: fixedColumnsWidth,
+    viewportWidth,
+  };
+}
+
+function estimateChargePlanDisplayedDate(rangeStartDate, visibleDays) {
+  const normalizedRangeStartDate = normalizeChargePlanDateValue(rangeStartDate);
+  const rangeStartDateObject = parseChargePlanDateValue(normalizedRangeStartDate);
+  const rangeStartDayNumber = getChargePlanUtcDayNumber(rangeStartDateObject);
+  if (!normalizedRangeStartDate || rangeStartDayNumber == null) {
+    return "";
+  }
+
+  if (pendingChargePlanFocusDate) {
+    if (pendingChargePlanFocusAlign === "left") {
+      return pendingChargePlanFocusDate;
+    }
+
+    const focusDate = parseChargePlanDateValue(pendingChargePlanFocusDate);
+    const focusDayNumber = getChargePlanUtcDayNumber(focusDate);
+    if (focusDayNumber != null) {
+      let leftDayOffset = focusDayNumber - rangeStartDayNumber;
+      if (pendingChargePlanFocusAlign === "center") {
+        leftDayOffset -= visibleDays / 2;
+      } else if (pendingChargePlanFocusAlign === "right") {
+        leftDayOffset -= visibleDays - 1;
+      }
+
+      return getChargePlanDateValueFromUtcDayNumber(
+        rangeStartDayNumber + Math.max(0, Math.floor(leftDayOffset))
+      );
+    }
+  }
+
+  if (Number.isFinite(chargePlanViewport.pendingLeftDayOffset)) {
+    return getChargePlanDateValueFromUtcDayNumber(
+      rangeStartDayNumber +
+        Math.max(0, Math.floor(Number(chargePlanViewport.pendingLeftDayOffset)))
+    );
+  }
+
+  return normalizeChargePlanDateValue(state.chargePlanAnchorDate);
+}
+
 function cloneBudgetLines(lines) {
   return JSON.parse(JSON.stringify(lines || []));
 }
@@ -175,8 +245,7 @@ function syncStateToProjectStart(project) {
   const firstAnchor = getProjectFirstAnchorDate(project);
   if (firstAnchor?.dateValue) {
     const anchorDate = firstAnchor.dateValue;
-    pendingChargePlanFocusDate = anchorDate;
-    pendingChargePlanFocusAlign = "left";
+    setPendingChargePlanFocus(anchorDate, "left");
     setChargePlanRangeStartDate(anchorDate);
     setState({
       selectedYear: firstAnchor.year,
@@ -189,8 +258,7 @@ function syncStateToProjectStart(project) {
   const averageAnchor = getProjectAverageAnchorDate(project);
   if (averageAnchor?.dateValue) {
     const anchorDate = averageAnchor.dateValue;
-    pendingChargePlanFocusDate = anchorDate;
-    pendingChargePlanFocusAlign = "center";
+    setPendingChargePlanFocus(anchorDate, "center");
     setChargePlanRangeStartDate(anchorDate);
     setState({
       selectedYear: averageAnchor.year,
@@ -205,8 +273,7 @@ function syncStateToProjectStart(project) {
     const anchorDate = `${earliestMonth.year}-${String(
       earliestMonth.monthIndex + 1
     ).padStart(2, "0")}-01`;
-    pendingChargePlanFocusDate = anchorDate;
-    pendingChargePlanFocusAlign = "left";
+    setPendingChargePlanFocus(anchorDate, "left");
     setChargePlanRangeStartDate(anchorDate);
     setState({
       selectedYear: earliestMonth.year,
@@ -218,8 +285,7 @@ function syncStateToProjectStart(project) {
 
   const now = new Date();
   const anchorDate = getTodayDateValueInTimeZone();
-  pendingChargePlanFocusDate = anchorDate;
-  pendingChargePlanFocusAlign = "left";
+  setPendingChargePlanFocus(anchorDate, "left");
   setChargePlanRangeStartDate(anchorDate);
   setState({
     selectedYear: now.getFullYear(),
@@ -274,21 +340,33 @@ function renderChargePlanSection(selectedProject = getSelectedProject()) {
   if (!renderedChargePlanRangeStartDate) {
     const initialVisibleDate = normalizeChargePlanDateValue(state.chargePlanAnchorDate);
     if (initialVisibleDate && !pendingChargePlanFocusDate) {
-      pendingChargePlanFocusDate = initialVisibleDate;
-      pendingChargePlanFocusAlign = "left";
+      setPendingChargePlanFocus(initialVisibleDate, "left");
     }
   }
 
   const rangeStartDate = getChargePlanRangeStartDate();
   renderedChargePlanRangeStartDate = rangeStartDate;
+  const derivedZoomState = getChargePlanZoomStateFromVisibleDays(
+    state.chargePlanVisibleDays
+  );
+  const displayedDateValue =
+    estimateChargePlanDisplayedDate(
+      rangeStartDate,
+      derivedZoomState.chargePlanVisibleDays
+    ) ||
+    normalizeChargePlanDateValue(getChargePlanDatePickerValue()) ||
+    normalizeChargePlanDateValue(getChargePlanViewportEdgeDate(getChargePlanScrollElement(), "left")) ||
+    normalizeChargePlanDateValue(state.chargePlanAnchorDate);
 
   renderChargePlanTimeline(dom, selectedProject, {
     selectedYear: state.selectedYear,
     selectedMonth: state.selectedMonth,
     monthSpan: state.monthSpan,
-    chargePlanZoomMode: state.chargePlanZoomMode,
-    chargePlanZoomScale: state.chargePlanZoomScale,
+    chargePlanZoomMode: derivedZoomState.chargePlanZoomMode,
+    chargePlanZoomScale: derivedZoomState.chargePlanZoomScale,
+    chargePlanVisibleDays: derivedZoomState.chargePlanVisibleDays,
     chargePlanAnchorDate: state.chargePlanAnchorDate,
+    chargePlanDisplayedDate: displayedDateValue,
     chargePlanRangeStartDate: rangeStartDate,
   });
   restoreChargePlanViewport();
@@ -534,109 +612,208 @@ function getElementContentLeft(element, scrollEl) {
   return Number.isFinite(offset) ? offset : 0;
 }
 
-function getChargePlanDayTickAtOffset(scrollEl, absoluteOffset) {
+function parseChargePlanDateValue(rawValue) {
+  const normalizedDateValue = normalizeChargePlanDateValue(rawValue);
+  if (!normalizedDateValue) {
+    return null;
+  }
+
+  const date = new Date(`${normalizedDateValue}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getChargePlanUtcDayNumber(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return Math.floor(
+    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000
+  );
+}
+
+function getChargePlanDateValueFromUtcDayNumber(dayNumber) {
+  if (!Number.isFinite(dayNumber)) {
+    return "";
+  }
+
+  const utcDate = new Date(dayNumber * 86400000);
+  if (Number.isNaN(utcDate.getTime())) {
+    return "";
+  }
+
+  return toDateInputValue(
+    new Date(
+      utcDate.getUTCFullYear(),
+      utcDate.getUTCMonth(),
+      utcDate.getUTCDate(),
+      12
+    )
+  );
+}
+
+function getChargePlanDateValueFromDayOffset(metrics, dayOffset, rounding = "floor") {
+  if (!metrics || !Number.isFinite(dayOffset)) {
+    return "";
+  }
+
+  const normalizedDayOffset =
+    rounding === "round" ? Math.round(dayOffset) : Math.floor(dayOffset);
+  const clampedDayOffset = clamp(
+    normalizedDayOffset,
+    0,
+    Math.max(metrics.totalDays - 1, 0)
+  );
+
+  return getChargePlanDateValueFromUtcDayNumber(
+    metrics.rangeStartDayNumber + clampedDayOffset
+  );
+}
+
+function getChargePlanTimelineMetrics(scrollEl = getChargePlanScrollElement()) {
+  if (!(scrollEl instanceof HTMLElement)) {
+    return null;
+  }
+
   const headerTrack = getChargePlanHeaderTrack(scrollEl);
   if (!(headerTrack instanceof HTMLElement)) {
     return null;
   }
 
-  const dayTicks = Array.from(
-    headerTrack.querySelectorAll(".charge-plan-header-day-tick[data-date-key]")
+  const trackWidth = Math.max(
+    Number(headerTrack.dataset.timelineWidth) || 0,
+    headerTrack.scrollWidth || 0,
+    headerTrack.offsetWidth || 0
   );
+  const totalDays = Math.max(Number(headerTrack.dataset.totalDays) || 0, 0);
+  const rangeStartDate = parseChargePlanDateValue(headerTrack.dataset.rangeStartDate);
+  const rangeStartDayNumber = getChargePlanUtcDayNumber(rangeStartDate);
 
-  for (const tickEl of dayTicks) {
-    if (!(tickEl instanceof HTMLElement)) {
-      continue;
-    }
-
-    const tickLeft = getElementContentLeft(tickEl, scrollEl);
-    const tickRight = tickLeft + tickEl.offsetWidth;
-
-    if (absoluteOffset >= tickLeft && absoluteOffset <= tickRight) {
-      return {
-        headerTrack,
-        tickEl,
-        tickLeft,
-        tickWidth: Math.max(tickEl.offsetWidth, 1),
-      };
-    }
-  }
-
-  const firstTick = dayTicks[0];
-  const lastTick = dayTicks[dayTicks.length - 1];
-  const fallbackTick =
-    absoluteOffset < headerTrack.offsetLeft ? firstTick : lastTick;
-
-  if (!(fallbackTick instanceof HTMLElement)) {
+  if (!trackWidth || !totalDays || rangeStartDayNumber == null) {
     return null;
   }
 
   return {
-    headerTrack,
-    tickEl: fallbackTick,
-    tickLeft: getElementContentLeft(fallbackTick, scrollEl),
-    tickWidth: Math.max(fallbackTick.offsetWidth, 1),
+    trackLeft: getElementContentLeft(headerTrack, scrollEl),
+    trackWidth,
+    totalDays,
+    dayWidth: trackWidth / totalDays,
+    rangeStartDayNumber,
   };
 }
 
-function rememberChargePlanAnchor(scrollEl, clientX) {
-  if (!(scrollEl instanceof HTMLElement)) return;
-
-  const rect = scrollEl.getBoundingClientRect();
-  const localOffset = clamp(clientX - rect.left, 0, rect.width);
-  const absoluteOffset = scrollEl.scrollLeft + localOffset;
-  const tickAnchor = getChargePlanDayTickAtOffset(scrollEl, absoluteOffset);
-
-  if (tickAnchor?.tickEl instanceof HTMLElement) {
-    const offsetInsideTick = clamp(
-      absoluteOffset - tickAnchor.tickLeft,
-      0,
-      tickAnchor.tickWidth
-    );
-
-    chargePlanViewport.pendingDateKey = String(
-      tickAnchor.tickEl.dataset.dateKey || ""
-    ).trim();
-    chargePlanViewport.pendingDateOffsetRatio =
-      offsetInsideTick / tickAnchor.tickWidth;
-    chargePlanViewport.pendingTrackRatio = null;
-    chargePlanViewport.pendingAnchorRatio = null;
-    chargePlanViewport.pendingClientOffset = localOffset;
-    return;
+function getChargePlanDayOffsetAtContentOffset(scrollEl, contentOffset) {
+  const metrics = getChargePlanTimelineMetrics(scrollEl);
+  if (!metrics) {
+    return null;
   }
 
-  const headerTrack = getChargePlanHeaderTrack(scrollEl);
-  if (headerTrack instanceof HTMLElement) {
-    const trackWidth = Math.max(headerTrack.scrollWidth || headerTrack.offsetWidth, 1);
-    const trackLeft = getElementContentLeft(headerTrack, scrollEl);
-    const relativeTrackOffset = clamp(
-      absoluteOffset - trackLeft,
-      0,
-      trackWidth
-    );
+  const relativeOffset = clamp(
+    contentOffset - metrics.trackLeft,
+    0,
+    metrics.trackWidth
+  );
 
-    chargePlanViewport.pendingDateKey = "";
-    chargePlanViewport.pendingDateOffsetRatio = null;
-    chargePlanViewport.pendingTrackRatio = relativeTrackOffset / trackWidth;
-    chargePlanViewport.pendingAnchorRatio = null;
-    chargePlanViewport.pendingClientOffset = localOffset;
-    return;
-  }
-
-  const safeScrollWidth = Math.max(scrollEl.scrollWidth, 1);
-
-  chargePlanViewport.pendingDateKey = "";
-  chargePlanViewport.pendingDateOffsetRatio = null;
-  chargePlanViewport.pendingTrackRatio = null;
-  chargePlanViewport.pendingAnchorRatio = absoluteOffset / safeScrollWidth;
-  chargePlanViewport.pendingClientOffset = localOffset;
+  return {
+    metrics,
+    dayOffset: relativeOffset / Math.max(metrics.dayWidth, 0.0001),
+  };
 }
 
-function rememberChargePlanCenterAnchor(scrollEl = getChargePlanScrollElement()) {
-  if (!(scrollEl instanceof HTMLElement)) return;
+function getChargePlanDateValueAtContentOffset(
+  scrollEl,
+  contentOffset,
+  rounding = "floor"
+) {
+  const measurement = getChargePlanDayOffsetAtContentOffset(scrollEl, contentOffset);
+  if (!measurement) {
+    return "";
+  }
+
+  const { metrics, dayOffset } = measurement;
+  const clampedDayIndex = clamp(
+    rounding === "round" ? Math.round(dayOffset) : Math.floor(dayOffset),
+    0,
+    Math.max(metrics.totalDays - 1, 0)
+  );
+
+  return getChargePlanDateValueFromUtcDayNumber(
+    metrics.rangeStartDayNumber + clampedDayIndex
+  );
+}
+
+function clearChargePlanPendingViewportAnchor() {
+  chargePlanViewport.pendingLeftDayOffset = null;
+}
+
+function setPendingChargePlanLeftDayOffset(dayOffset) {
+  clearChargePlanPendingViewportAnchor();
+  if (Number.isFinite(dayOffset)) {
+    chargePlanViewport.pendingLeftDayOffset = Number(dayOffset);
+  }
+}
+
+function setPendingChargePlanFocus(dateValue, align = "left") {
+  clearChargePlanPendingViewportAnchor();
+  pendingChargePlanFocusDate = normalizeChargePlanDateValue(dateValue);
+  pendingChargePlanFocusAlign = align;
+}
+
+function getChargePlanViewportAnchorRatio(
+  scrollEl = getChargePlanScrollElement(),
+  clientX = null
+) {
+  if (!(scrollEl instanceof HTMLElement)) {
+    return 0;
+  }
+
+  if (clientX == null) {
+    return 0;
+  }
 
   const rect = scrollEl.getBoundingClientRect();
-  rememberChargePlanAnchor(scrollEl, rect.left + rect.width / 2);
+  const geometry = getChargePlanTimelineViewportGeometry(scrollEl);
+  const localOffset = clamp(
+    clientX - rect.left - geometry.clientLeft,
+    0,
+    geometry.viewportWidth
+  );
+
+  return geometry.viewportWidth > 0 ? localOffset / geometry.viewportWidth : 0;
+}
+
+function getChargePlanViewportLeftDayOffset(scrollEl = getChargePlanScrollElement()) {
+  if (!(scrollEl instanceof HTMLElement)) {
+    return null;
+  }
+
+  const geometry = getChargePlanTimelineViewportGeometry(scrollEl);
+  const leftContentOffset = scrollEl.scrollLeft + geometry.clientLeft;
+  const measurement = getChargePlanDayOffsetAtContentOffset(scrollEl, leftContentOffset);
+  return measurement ? measurement.dayOffset : null;
+}
+
+function getChargePlanNextLeftDayOffset(
+  scrollEl,
+  nextVisibleDays,
+  anchorRatio = 0
+) {
+  const currentLeftDayOffset = getChargePlanViewportLeftDayOffset(scrollEl);
+  if (!Number.isFinite(currentLeftDayOffset)) {
+    return null;
+  }
+
+  const currentVisibleDays = getCurrentChargePlanVisibleDays();
+  const normalizedAnchorRatio = clamp(anchorRatio, 0, 1);
+  const metrics = getChargePlanTimelineMetrics(scrollEl);
+
+  return clamp(
+    currentLeftDayOffset +
+      normalizedAnchorRatio * currentVisibleDays -
+      normalizedAnchorRatio * Math.max(nextVisibleDays, 1),
+    0,
+    Math.max((metrics?.totalDays || 1) - 1, 0)
+  );
 }
 
 function restoreChargePlanViewport() {
@@ -651,33 +828,36 @@ function restoreChargePlanViewport() {
   suppressChargePlanScrollEvents = true;
   requestAnimationFrame(() => {
     const maxScrollLeft = Math.max(0, scrollEl.scrollWidth - scrollEl.clientWidth);
-    let didRestoreSpecificPosition = false;
+    const metrics = getChargePlanTimelineMetrics(scrollEl);
+    const geometry = getChargePlanTimelineViewportGeometry(scrollEl);
+    let nextScrollLeft = null;
 
     if (pendingChargePlanFocusDate) {
-      const targetDayTick = scrollEl.querySelector(
-        `.charge-plan-header-day-tick[data-date-key="${pendingChargePlanFocusDate}"]`
-      );
-      if (targetDayTick instanceof HTMLElement) {
-        const tickOffset = getElementContentLeft(targetDayTick, scrollEl);
-        let nextScrollLeft =
-          tickOffset - scrollEl.clientWidth / 2 + targetDayTick.offsetWidth / 2;
+      const targetDate = parseChargePlanDateValue(pendingChargePlanFocusDate);
+      const targetDayNumber = getChargePlanUtcDayNumber(targetDate);
+      if (metrics && targetDayNumber != null) {
+        const dayOffset = clamp(
+          targetDayNumber - metrics.rangeStartDayNumber,
+          0,
+          Math.max(metrics.totalDays - 1, 0)
+        );
+        const tickOffset = metrics.trackLeft + dayOffset * metrics.dayWidth;
+        nextScrollLeft =
+          tickOffset -
+          geometry.clientLeft -
+          geometry.viewportWidth / 2 +
+          metrics.dayWidth / 2;
 
         if (pendingChargePlanFocusAlign === "left") {
-          nextScrollLeft = tickOffset;
+          nextScrollLeft = tickOffset - geometry.clientLeft;
         } else if (pendingChargePlanFocusAlign === "right") {
           nextScrollLeft =
-            tickOffset - scrollEl.clientWidth + targetDayTick.offsetWidth;
+            tickOffset - geometry.clientLeft - geometry.viewportWidth + metrics.dayWidth;
         }
 
-        scrollEl.scrollLeft = clamp(nextScrollLeft, 0, maxScrollLeft);
+        clearChargePlanPendingViewportAnchor();
         pendingChargePlanFocusDate = "";
         pendingChargePlanFocusAlign = "center";
-        chargePlanViewport.pendingDateKey = "";
-        chargePlanViewport.pendingDateOffsetRatio = null;
-        chargePlanViewport.pendingAnchorRatio = null;
-        chargePlanViewport.pendingTrackRatio = null;
-        chargePlanViewport.pendingClientOffset = 0;
-        didRestoreSpecificPosition = true;
       } else {
         pendingChargePlanFocusDate = "";
         pendingChargePlanFocusAlign = "center";
@@ -685,85 +865,45 @@ function restoreChargePlanViewport() {
     }
 
     if (
-      !didRestoreSpecificPosition &&
-      chargePlanViewport.pendingDateKey
+      nextScrollLeft == null &&
+      Number.isFinite(chargePlanViewport.pendingLeftDayOffset) &&
+      metrics
     ) {
-      const targetDayTick = scrollEl.querySelector(
-        `.charge-plan-header-day-tick[data-date-key="${chargePlanViewport.pendingDateKey}"]`
-      );
-
-      if (targetDayTick instanceof HTMLElement) {
-        const tickOffset = getElementContentLeft(targetDayTick, scrollEl);
-        const tickWidth = Math.max(targetDayTick.offsetWidth, 1);
-        const offsetInsideTick =
-          clamp(
-            Number(chargePlanViewport.pendingDateOffsetRatio),
-            0,
-            1
-          ) * tickWidth;
-
-        scrollEl.scrollLeft = clamp(
-          tickOffset + offsetInsideTick - chargePlanViewport.pendingClientOffset,
-          0,
-          maxScrollLeft
-        );
-        chargePlanViewport.pendingDateKey = "";
-        chargePlanViewport.pendingDateOffsetRatio = null;
-        chargePlanViewport.pendingClientOffset = 0;
-        didRestoreSpecificPosition = true;
-      } else {
-        chargePlanViewport.pendingDateKey = "";
-        chargePlanViewport.pendingDateOffsetRatio = null;
-      }
-    }
-
-    if (
-      !didRestoreSpecificPosition &&
-      Number.isFinite(chargePlanViewport.pendingTrackRatio)
-    ) {
-      const headerTrack = getChargePlanHeaderTrack(scrollEl);
-      if (headerTrack instanceof HTMLElement) {
-        const trackWidth = Math.max(headerTrack.scrollWidth || headerTrack.offsetWidth, 1);
-        const absoluteOffset =
-          getElementContentLeft(headerTrack, scrollEl) +
-          chargePlanViewport.pendingTrackRatio * trackWidth;
-
-        scrollEl.scrollLeft = clamp(
-          absoluteOffset - chargePlanViewport.pendingClientOffset,
-          0,
-          maxScrollLeft
-        );
-        chargePlanViewport.pendingTrackRatio = null;
-        chargePlanViewport.pendingClientOffset = 0;
-        didRestoreSpecificPosition = true;
-      } else {
-        chargePlanViewport.pendingTrackRatio = null;
-      }
-    }
-
-    if (!didRestoreSpecificPosition && Number.isFinite(chargePlanViewport.pendingAnchorRatio)) {
       const absoluteOffset =
-        chargePlanViewport.pendingAnchorRatio * Math.max(scrollEl.scrollWidth, 1);
-      scrollEl.scrollLeft = clamp(
-        absoluteOffset - chargePlanViewport.pendingClientOffset,
-        0,
-        maxScrollLeft
-      );
-      chargePlanViewport.pendingAnchorRatio = null;
-      chargePlanViewport.pendingClientOffset = 0;
-      didRestoreSpecificPosition = true;
+        metrics.trackLeft +
+        clamp(
+          Number(chargePlanViewport.pendingLeftDayOffset),
+          0,
+          Math.max(metrics.totalDays, 0)
+        ) *
+          metrics.dayWidth;
+      nextScrollLeft = absoluteOffset - geometry.clientLeft;
+      clearChargePlanPendingViewportAnchor();
     }
 
-    if (!didRestoreSpecificPosition) {
-      scrollEl.scrollLeft = clamp(
-        chargePlanViewport.scrollRatio * maxScrollLeft,
-        0,
-        maxScrollLeft
-      );
+    if (nextScrollLeft == null && metrics) {
+      const anchorDate = parseChargePlanDateValue(state.chargePlanAnchorDate);
+      const anchorDayNumber = getChargePlanUtcDayNumber(anchorDate);
+
+      if (anchorDayNumber != null) {
+        const dayOffset = clamp(
+          anchorDayNumber - metrics.rangeStartDayNumber,
+          0,
+          Math.max(metrics.totalDays - 1, 0)
+        );
+        nextScrollLeft =
+          metrics.trackLeft + dayOffset * metrics.dayWidth - geometry.clientLeft;
+      }
     }
+
+    if (nextScrollLeft == null) {
+      nextScrollLeft = chargePlanViewport.scrollRatio * maxScrollLeft;
+    }
+
+    scrollEl.scrollLeft = clamp(nextScrollLeft, 0, maxScrollLeft);
 
     captureChargePlanViewport(scrollEl);
-    syncChargePlanVisibleDate(scrollEl);
+    syncChargePlanVisibleDate(scrollEl, { persist: true });
     if (chargePlanPan) {
       chargePlanPan.scrollEl = scrollEl;
       chargePlanPan.startClientX = chargePlanPan.lastClientX;
@@ -778,53 +918,17 @@ function restoreChargePlanViewport() {
   });
 }
 
-function getChargePlanViewportCenterDate(scrollEl) {
-  if (!(scrollEl instanceof HTMLElement)) return "";
-
-  const targetX = scrollEl.scrollLeft + scrollEl.clientWidth / 2;
-  const daySlots = Array.from(
-    scrollEl.querySelectorAll(".charge-plan-header-day-tick[data-date-key]")
-  );
-
-  for (const slotEl of daySlots) {
-    const slotMidX = getElementContentLeft(slotEl, scrollEl) + slotEl.offsetWidth / 2;
-    if (slotMidX >= targetX) {
-      return String(slotEl.dataset.dateKey || "").trim();
-    }
-  }
-
-  const lastSlot = daySlots[daySlots.length - 1];
-  return String(lastSlot?.dataset?.dateKey || "").trim();
-}
-
 function getChargePlanViewportEdgeDate(scrollEl, side = "left") {
   if (!(scrollEl instanceof HTMLElement)) return "";
+  const geometry = getChargePlanTimelineViewportGeometry(scrollEl);
 
-  const leftBound = scrollEl.scrollLeft;
-  const rightBound = scrollEl.scrollLeft + scrollEl.clientWidth;
-  const daySlots = Array.from(
-    scrollEl.querySelectorAll(".charge-plan-header-day-tick[data-date-key]")
+  return getChargePlanDateValueAtContentOffset(
+    scrollEl,
+    side === "right"
+      ? scrollEl.scrollLeft + geometry.clientLeft + geometry.viewportWidth - 1
+      : scrollEl.scrollLeft + geometry.clientLeft,
+    "floor"
   );
-
-  if (side === "right") {
-    for (let index = daySlots.length - 1; index >= 0; index -= 1) {
-      const slotEl = daySlots[index];
-      const slotMidX = getElementContentLeft(slotEl, scrollEl) + slotEl.offsetWidth / 2;
-      if (slotMidX <= rightBound) {
-        return String(slotEl.dataset.dateKey || "").trim();
-      }
-    }
-  } else {
-    for (const slotEl of daySlots) {
-      const slotMidX = getElementContentLeft(slotEl, scrollEl) + slotEl.offsetWidth / 2;
-      if (slotMidX >= leftBound) {
-        return String(slotEl.dataset.dateKey || "").trim();
-      }
-    }
-  }
-
-  const fallbackSlot = side === "right" ? daySlots[daySlots.length - 1] : daySlots[0];
-  return String(fallbackSlot?.dataset?.dateKey || "").trim();
 }
 
 function syncChargePlanVisibleDate(scrollEl = getChargePlanScrollElement(), options = {}) {
@@ -864,6 +968,17 @@ function clearChargePlanScrollSyncFrame() {
   chargePlanScrollSyncFrame = null;
 }
 
+function clearChargePlanWheelZoomFrame() {
+  if (chargePlanWheelZoomFrame == null) {
+    pendingChargePlanWheelRequest = null;
+    return;
+  }
+
+  cancelAnimationFrame(chargePlanWheelZoomFrame);
+  chargePlanWheelZoomFrame = null;
+  pendingChargePlanWheelRequest = null;
+}
+
 function scheduleChargePlanVisibleDateSync(scrollEl = getChargePlanScrollElement()) {
   if (!(scrollEl instanceof HTMLElement)) {
     return;
@@ -874,26 +989,6 @@ function scheduleChargePlanVisibleDateSync(scrollEl = getChargePlanScrollElement
     chargePlanVisibleDateTimer = null;
     syncChargePlanVisibleDate(scrollEl, { persist: true });
   }, 140);
-}
-
-function setChargePlanZoomMode(nextMode, options = {}) {
-  if (!Object.prototype.hasOwnProperty.call(APP_CONFIG.chargeTimeline.zoomModes, nextMode)) {
-    return;
-  }
-
-  const { monthVisibleDays, maxVisibleDays } = getChargePlanVisibleDaysBounds();
-  let targetVisibleDays = monthVisibleDays;
-
-  if (nextMode === "week") {
-    targetVisibleDays = 7;
-  } else if (nextMode === "year") {
-    targetVisibleDays = Math.min(maxVisibleDays, monthVisibleDays * 12);
-  }
-
-  applyChargePlanZoomState(
-    getChargePlanDerivedZoomStateFromVisibleDays(targetVisibleDays),
-    options
-  );
 }
 
 function getChargePlanZoomAnchorDate() {
@@ -910,43 +1005,28 @@ function getChargePlanReferenceMonthDayCount() {
   return new Date(anchorDate.getFullYear(), anchorDate.getMonth() + 1, 0).getDate();
 }
 
-function getChargePlanModeReferenceVisibleDays(mode) {
-  const normalizedMode = String(mode || "").trim();
-  if (normalizedMode === "week") {
-    return 7;
-  }
-
-  if (normalizedMode === "year") {
-    return 365;
-  }
-
-  return getChargePlanReferenceMonthDayCount();
-}
-
-function getChargePlanVisibleDaysEstimate(mode, scale) {
-  const safeScale = Math.max(
-    APP_CONFIG.chargeTimeline.minZoomScale,
-    Number(scale) || APP_CONFIG.chargeTimeline.defaultZoomScale
-  );
-  return getChargePlanModeReferenceVisibleDays(mode) / safeScale;
-}
-
 function getChargePlanVisibleDaysBounds() {
-  const monthVisibleDays = getChargePlanModeReferenceVisibleDays("month");
+  const configuredReferenceMonthDays = Number(
+    APP_CONFIG.chargeTimeline.referenceMonthDays
+  );
+  const monthVisibleDays =
+    Number.isFinite(configuredReferenceMonthDays) && configuredReferenceMonthDays > 0
+      ? configuredReferenceMonthDays
+      : getChargePlanReferenceMonthDayCount();
   const maxVisibleDays = Math.max(
     monthVisibleDays,
-    monthVisibleDays * Math.max(1, APP_CONFIG.chargeTimeline.yearMaxVisibleMonths || 15)
+    monthVisibleDays * Math.max(1, APP_CONFIG.chargeTimeline.yearMaxVisibleMonths || 14)
   );
 
   return {
     monthVisibleDays,
-    minVisibleDays: 1,
+    minVisibleDays: APP_CONFIG.chargeTimeline.minVisibleDays,
     maxVisibleDays,
     yearThreshold: monthVisibleDays * 10,
   };
 }
 
-function getChargePlanDerivedZoomStateFromVisibleDays(nextVisibleDays) {
+function getChargePlanZoomModeForVisibleDays(nextVisibleDays) {
   const { monthVisibleDays, minVisibleDays, maxVisibleDays, yearThreshold } =
     getChargePlanVisibleDaysBounds();
   const visibleDays = clamp(nextVisibleDays, minVisibleDays, maxVisibleDays);
@@ -958,73 +1038,221 @@ function getChargePlanDerivedZoomStateFromVisibleDays(nextVisibleDays) {
     derivedMode = "year";
   }
 
-  const derivedScale = clamp(
-    getChargePlanModeReferenceVisibleDays(derivedMode) / Math.max(visibleDays, 1),
+  return derivedMode;
+}
+
+function getChargePlanZoomScaleForVisibleDays(nextVisibleDays, zoomMode) {
+  const { monthVisibleDays, minVisibleDays, maxVisibleDays } =
+    getChargePlanVisibleDaysBounds();
+  const visibleDays = clamp(nextVisibleDays, minVisibleDays, maxVisibleDays);
+
+  if (zoomMode === "week") {
+    return clamp(
+      7 / Math.max(visibleDays, 1),
+      APP_CONFIG.chargeTimeline.minZoomScale,
+      APP_CONFIG.chargeTimeline.maxZoomScale
+    );
+  }
+
+  if (zoomMode === "year") {
+    return clamp(
+      365 / Math.max(visibleDays, 1),
+      APP_CONFIG.chargeTimeline.minZoomScale,
+      APP_CONFIG.chargeTimeline.maxZoomScale
+    );
+  }
+
+  return clamp(
+    monthVisibleDays / Math.max(visibleDays, 1),
     APP_CONFIG.chargeTimeline.minZoomScale,
     APP_CONFIG.chargeTimeline.maxZoomScale
+  );
+}
+
+function getChargePlanZoomStateFromVisibleDays(nextVisibleDays) {
+  const { minVisibleDays, maxVisibleDays } = getChargePlanVisibleDaysBounds();
+  const visibleDays = clamp(nextVisibleDays, minVisibleDays, maxVisibleDays);
+  const derivedMode = getChargePlanZoomModeForVisibleDays(visibleDays);
+  const derivedScale = getChargePlanZoomScaleForVisibleDays(
+    visibleDays,
+    derivedMode
   );
 
   return {
     chargePlanZoomMode: derivedMode,
     chargePlanZoomScale: derivedScale,
+    chargePlanVisibleDays: visibleDays,
   };
 }
 
 function getCurrentChargePlanVisibleDays() {
   const { minVisibleDays, maxVisibleDays } = getChargePlanVisibleDaysBounds();
   return clamp(
-    getChargePlanVisibleDaysEstimate(
-      state.chargePlanZoomMode,
-      state.chargePlanZoomScale
-    ),
+    Number(state.chargePlanVisibleDays) || APP_CONFIG.chargeTimeline.defaultVisibleDays,
     minVisibleDays,
     maxVisibleDays
   );
 }
 
-function applyChargePlanZoomState(derivedZoomState, options = {}) {
+function buildChargePlanZoomStatePatch(nextVisibleDays, options = {}) {
+  const derivedZoomState = getChargePlanZoomStateFromVisibleDays(nextVisibleDays);
   if (!derivedZoomState) {
+    return null;
+  }
+
+  const scrollEl = getChargePlanScrollElement();
+  let nextLeftDayOffset = null;
+
+  if (scrollEl) {
+    const anchorRatio =
+      options.anchorClientX != null
+        ? getChargePlanViewportAnchorRatio(scrollEl, options.anchorClientX)
+        : 0;
+    nextLeftDayOffset = getChargePlanNextLeftDayOffset(
+      scrollEl,
+      derivedZoomState.chargePlanVisibleDays,
+      anchorRatio
+    );
+  }
+
+  return {
+    derivedZoomState,
+    nextLeftDayOffset,
+  };
+}
+
+function applyChargePlanVisibleDays(nextVisibleDays, options = {}) {
+  const zoomStatePatch = buildChargePlanZoomStatePatch(nextVisibleDays, options);
+  if (!zoomStatePatch) {
     return;
   }
+  const { derivedZoomState, nextLeftDayOffset } = zoomStatePatch;
 
   if (
     derivedZoomState.chargePlanZoomMode === state.chargePlanZoomMode &&
-    Math.abs(derivedZoomState.chargePlanZoomScale - state.chargePlanZoomScale) < 0.001
+    Math.abs(derivedZoomState.chargePlanZoomScale - state.chargePlanZoomScale) < 0.001 &&
+    Math.abs(derivedZoomState.chargePlanVisibleDays - state.chargePlanVisibleDays) < 0.01
   ) {
     return;
   }
 
-  const scrollEl = getChargePlanScrollElement();
-  if (options.anchorClientX != null && scrollEl) {
-    rememberChargePlanAnchor(scrollEl, options.anchorClientX);
+  if (Number.isFinite(nextLeftDayOffset)) {
+    setPendingChargePlanLeftDayOffset(nextLeftDayOffset);
   } else {
-    rememberChargePlanCenterAnchor(scrollEl);
+    clearChargePlanPendingViewportAnchor();
   }
 
   setState(derivedZoomState);
   renderChargePlanSection();
 }
 
-function setChargePlanZoomScale(nextScale, options = {}) {
-  const numericNextScale =
-    Number(nextScale) || APP_CONFIG.chargeTimeline.defaultZoomScale;
-  const currentScale = Math.max(
-    APP_CONFIG.chargeTimeline.minZoomScale,
-    Number(state.chargePlanZoomScale) || APP_CONFIG.chargeTimeline.defaultZoomScale
-  );
-  const nextScaleClamped = clamp(
-    numericNextScale,
-    APP_CONFIG.chargeTimeline.minZoomScale,
-    APP_CONFIG.chargeTimeline.maxZoomScale
-  );
-  const scaleRatio = nextScaleClamped / currentScale;
-  const nextVisibleDays =
-    getCurrentChargePlanVisibleDays() / Math.max(scaleRatio, 0.0001);
+function getChargePlanTargetVisibleDaysForMode(nextMode) {
+  const { monthVisibleDays, maxVisibleDays } = getChargePlanVisibleDaysBounds();
 
-  applyChargePlanZoomState(
-    getChargePlanDerivedZoomStateFromVisibleDays(nextVisibleDays),
+  if (nextMode === "week") {
+    return 7;
+  }
+
+  if (nextMode === "year") {
+    return Math.min(maxVisibleDays, monthVisibleDays * 12);
+  }
+
+  return monthVisibleDays;
+}
+
+function setChargePlanZoomMode(nextMode, options = {}) {
+  if (!Object.prototype.hasOwnProperty.call(APP_CONFIG.chargeTimeline.zoomModes, nextMode)) {
+    return;
+  }
+
+  applyChargePlanVisibleDays(
+    getChargePlanTargetVisibleDaysForMode(nextMode),
     options
   );
+}
+
+function adjustChargePlanZoomByFactor(factor, options = {}) {
+  const safeFactor = Number(factor);
+  if (!Number.isFinite(safeFactor) || safeFactor <= 0) {
+    return;
+  }
+
+  applyChargePlanVisibleDays(getCurrentChargePlanVisibleDays() * safeFactor, options);
+}
+
+function normalizeChargePlanWheelDelta(deltaY, deltaMode = 0) {
+  const numericDelta = Number(deltaY);
+  if (!Number.isFinite(numericDelta)) {
+    return 0;
+  }
+
+  if (deltaMode === 1) {
+    return numericDelta * 16;
+  }
+
+  if (deltaMode === 2) {
+    return numericDelta * 120;
+  }
+
+  return numericDelta;
+}
+
+function getChargePlanWheelStepDays(currentVisibleDays) {
+  const stepRatio = Number(APP_CONFIG.chargeTimeline.wheelZoomStepRatio) || 0.12;
+  const minStepDays = Number(APP_CONFIG.chargeTimeline.wheelZoomMinStepDays) || 1;
+  const maxStepDays = Number(APP_CONFIG.chargeTimeline.wheelZoomMaxStepDays) || 21;
+
+  return clamp(currentVisibleDays * stepRatio, minStepDays, maxStepDays);
+}
+
+function scheduleChargePlanWheelZoom(clientX, deltaY, deltaMode = 0) {
+  const normalizedDelta = normalizeChargePlanWheelDelta(deltaY, deltaMode);
+  if (!Number.isFinite(normalizedDelta) || normalizedDelta === 0) {
+    return;
+  }
+
+  pendingChargePlanWheelRequest = {
+    clientX,
+    delta: clamp(
+      normalizedDelta,
+      -APP_CONFIG.chargeTimeline.wheelZoomMaxDeltaPerFrame,
+      APP_CONFIG.chargeTimeline.wheelZoomMaxDeltaPerFrame
+    ),
+  };
+
+  if (chargePlanWheelZoomFrame != null) {
+    return;
+  }
+
+  const flushWheelZoom = () => {
+    if (chargePlanViewportRestoreFrame != null || suppressChargePlanScrollEvents) {
+      chargePlanWheelZoomFrame = requestAnimationFrame(flushWheelZoom);
+      return;
+    }
+
+    chargePlanWheelZoomFrame = null;
+
+    const request = pendingChargePlanWheelRequest;
+    pendingChargePlanWheelRequest = null;
+    if (!request) {
+      return;
+    }
+
+    const currentVisibleDays = getCurrentChargePlanVisibleDays();
+    const stepDays = getChargePlanWheelStepDays(currentVisibleDays);
+    const nextVisibleDays =
+      currentVisibleDays + Math.sign(request.delta) * stepDays;
+
+    applyChargePlanVisibleDays(nextVisibleDays, {
+      anchorClientX: request.clientX,
+    });
+
+    if (pendingChargePlanWheelRequest) {
+      chargePlanWheelZoomFrame = requestAnimationFrame(flushWheelZoom);
+    }
+  };
+
+  chargePlanWheelZoomFrame = requestAnimationFrame(flushWheelZoom);
 }
 
 function navigateChargePlanToDate(rawDateValue) {
@@ -1038,8 +1266,8 @@ function navigateChargePlanToDate(rawDateValue) {
     return;
   }
 
-  pendingChargePlanFocusDate = dateValue;
-  pendingChargePlanFocusAlign = "left";
+  setPendingChargePlanFocus(dateValue, "left");
+  clearChargePlanWheelZoomFrame();
   clearChargePlanVisibleDateTimer();
   setChargePlanRangeStartDate(dateValue);
   setState({
@@ -1143,6 +1371,8 @@ function closeChargePlanContextMenu() {
 function handleProjectSelectionChange() {
   const selectedValue = String(dom.projectSelect.value || "").trim();
   const selectedProjectId = selectedValue ? Number(selectedValue) : null;
+  clearChargePlanWheelZoomFrame();
+  clearChargePlanVisibleDateTimer();
   setState({
     selectedProjectId: Number.isInteger(selectedProjectId) ? selectedProjectId : null,
   });
@@ -1298,14 +1528,9 @@ function handleChargePlanHeaderWheel(event) {
   if (chargePlanPan || chargeTimelineDrag) return;
   event.preventDefault();
 
-  const nextScale =
-    event.deltaY < 0
-      ? state.chargePlanZoomScale * APP_CONFIG.chargeTimeline.wheelZoomFactor
-      : state.chargePlanZoomScale / APP_CONFIG.chargeTimeline.wheelZoomFactor;
-
   closeChargePlanContextMenu();
   closeChargePlanDatePicker();
-  setChargePlanZoomScale(nextScale, { anchorClientX: event.clientX });
+  scheduleChargePlanWheelZoom(event.clientX, event.deltaY, event.deltaMode);
 }
 
 function handleChargePlanZoomButtonClick(event) {
@@ -1320,6 +1545,7 @@ function handleChargePlanZoomButtonClick(event) {
 
   closeChargePlanContextMenu();
   closeChargePlanDatePicker();
+  clearChargePlanWheelZoomFrame();
   setChargePlanZoomMode(nextZoomMode);
 }
 
@@ -1332,6 +1558,7 @@ function handleChargePlanDateControls(event) {
     event.stopPropagation();
     closeChargePlanContextMenu();
     closeChargePlanDatePicker();
+    clearChargePlanWheelZoomFrame();
     navigateChargePlanToDate(getTodayDateValueInTimeZone());
     return;
   }
@@ -1446,6 +1673,7 @@ function handleChargePlanDatePickerChange(event) {
 function handleChargePlanPointerDown(event) {
   if (!(event.target instanceof Element)) return;
   if (event.button !== 0) return;
+  clearChargePlanWheelZoomFrame();
   if (event.target.closest(".charge-plan-context-menu")) return;
   if (event.target.closest(".charge-plan-date-picker-shell")) {
     closeChargePlanContextMenu();
@@ -1914,6 +2142,7 @@ function bindEvents() {
   window.addEventListener("pointercancel", () => {
     clearChargePlanScrollSyncFrame();
     clearChargePlanVisibleDateTimer();
+    clearChargePlanWheelZoomFrame();
     if (chargePlanPan) {
       chargePlanPan.scrollEl.classList.remove("is-panning");
       tryReleasePointerCapture(chargePlanPan.scrollEl, chargePlanPan.pointerId);

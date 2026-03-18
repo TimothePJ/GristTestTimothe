@@ -83,15 +83,40 @@ function getZoomPreset(zoomMode) {
   );
 }
 
+function getChargePlanFixedColumnsWidth(boardEl = currentBoardEl) {
+  if (!(boardEl instanceof HTMLElement)) {
+    return 150 + 120 + 100;
+  }
+
+  const styles = window.getComputedStyle(boardEl);
+  const nameWidth = parseFloat(
+    styles.getPropertyValue("--charge-plan-name-col-width")
+  );
+  const actionsWidth = parseFloat(
+    styles.getPropertyValue("--charge-plan-actions-col-width")
+  );
+  const totalWidth = parseFloat(
+    styles.getPropertyValue("--charge-plan-total-col-width")
+  );
+
+  return (
+    (Number.isFinite(nameWidth) ? nameWidth : 150) +
+    (Number.isFinite(actionsWidth) ? actionsWidth : 120) +
+    (Number.isFinite(totalWidth) ? totalWidth : 100)
+  );
+}
+
 function getTimelineViewportWidth(boardEl = currentBoardEl) {
-  const boardWidth = Math.max(
+  const scrollEl = boardEl?.querySelector(".charge-plan-scroll");
+  const containerWidth = Math.max(
+    scrollEl?.clientWidth || 0,
     boardEl?.clientWidth || 0,
     boardEl?.getBoundingClientRect?.().width || 0,
     typeof window !== "undefined" ? window.innerWidth - 64 : 0,
     960
   );
-  const fixedColumnsWidth = boardWidth <= 960 ? 170 + 96 + 96 : 150 + 120 + 100;
-  return Math.max(280, boardWidth - fixedColumnsWidth - 8);
+  const fixedColumnsWidth = getChargePlanFixedColumnsWidth(boardEl);
+  return Math.max(280, containerWidth - fixedColumnsWidth);
 }
 
 function getAnchorMonthDayCount(anchorDate) {
@@ -105,12 +130,17 @@ function getAnchorMonthDayCount(anchorDate) {
 function getSizingContext({
   zoomMode,
   zoomScale = APP_CONFIG.chargeTimeline.defaultZoomScale,
+  visibleDays = APP_CONFIG.chargeTimeline.defaultVisibleDays,
   anchorDate = new Date(),
   boardEl = currentBoardEl,
 } = {}) {
   return {
     zoomMode: getChargePlanZoomMode(zoomMode),
     zoomScale: Math.max(0.1, toFiniteNumber(zoomScale, 1)),
+    visibleDays: Math.max(
+      APP_CONFIG.chargeTimeline.minVisibleDays,
+      toFiniteNumber(visibleDays, APP_CONFIG.chargeTimeline.defaultVisibleDays)
+    ),
     timelineViewportWidth: getTimelineViewportWidth(boardEl),
     anchorMonthDayCount: getAnchorMonthDayCount(anchorDate),
   };
@@ -122,18 +152,10 @@ function getVisibleMonthEstimate(sizingContext) {
     getSizingContext({
       zoomMode: APP_CONFIG.defaultChargePlanZoomMode,
       zoomScale: APP_CONFIG.chargeTimeline.defaultZoomScale,
+      visibleDays: APP_CONFIG.chargeTimeline.defaultVisibleDays,
     });
 
-  if (context.zoomMode === "year") {
-    return 12 / Math.max(context.zoomScale, 0.01);
-  }
-
-  if (context.zoomMode === "month") {
-    return 1 / Math.max(context.zoomScale, 0.01);
-  }
-
-  const visibleDays = 7 / Math.max(context.zoomScale, 0.01);
-  return visibleDays / Math.max(context.anchorMonthDayCount, 1);
+  return context.visibleDays / Math.max(context.anchorMonthDayCount, 1);
 }
 
 function getHeaderLabelDensity(sizingContext) {
@@ -215,32 +237,9 @@ function getMonthWidth(
       zoomScale,
     });
   const safeDayCount = Math.max(1, month?.calendarDayCount || 0);
+  const dayWidth = context.timelineViewportWidth / Math.max(context.visibleDays, 1);
 
-  if (context.zoomMode === "week") {
-    return Math.max(
-      1,
-      (context.timelineViewportWidth / 7) * context.zoomScale * safeDayCount
-    );
-  }
-
-  if (context.zoomMode === "month") {
-    return Math.max(
-      1,
-      (context.timelineViewportWidth / Math.max(1, context.anchorMonthDayCount)) *
-        context.zoomScale *
-        safeDayCount
-    );
-  }
-
-  if (context.zoomMode === "year") {
-    return Math.max(1, (context.timelineViewportWidth / 12) * context.zoomScale);
-  }
-
-  const preset = getZoomPreset(context.zoomMode);
-  return Math.max(
-    preset.minimumMonthWidth,
-    Math.round((month?.calendarDayCount || 0) * preset.dayWidth * context.zoomScale)
-  );
+  return Math.max(1, dayWidth * safeDayCount);
 }
 
 function getTimelineWidth(
@@ -800,12 +799,19 @@ export function renderChargePlanTimeline(dom, project, viewState) {
     APP_CONFIG.chargeTimeline.visibleMonthSpan,
     APP_CONFIG.months
   );
+  const totalCalendarDays = months.reduce(
+    (sum, month) => sum + Math.max(0, month.calendarDayCount || 0),
+    0
+  );
   const selectedDateValue =
-    String(viewState?.chargePlanAnchorDate || "").trim() || toDateInputValue(new Date());
+    String(viewState?.chargePlanDisplayedDate || "").trim() ||
+    String(viewState?.chargePlanAnchorDate || "").trim() ||
+    toDateInputValue(new Date());
   const selectedDate = parseDateInputValue(selectedDateValue, new Date());
   const sizingContext = getSizingContext({
     zoomMode,
     zoomScale,
+    visibleDays: viewState?.chargePlanVisibleDays,
     anchorDate: selectedDate,
     boardEl: currentBoardEl,
   });
@@ -908,6 +914,8 @@ export function renderChargePlanTimeline(dom, project, viewState) {
             <div
               class="charge-plan-header-track"
               data-timeline-width="${timelineWidth}"
+              data-total-days="${totalCalendarDays}"
+              data-range-start-date="${toDateInputValue(rangeStartDate)}"
             >
               ${months
                 .map((month, monthIndex) =>
