@@ -1287,11 +1287,42 @@ td input {
   overflow: hidden;
 }
 
+.expense-graph-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
 .expense-graph-helper {
   margin-bottom: 12px;
   color: var(--color-text-muted);
   font-size: 0.86rem;
   font-weight: 600;
+}
+
+.expense-graph-unit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 73, 144, 0.08);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, rgba(0, 73, 144, 0.02), rgba(0, 73, 144, 0.05));
+  color: var(--color-text);
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.expense-graph-unit-toggle-input {
+  width: auto;
+  margin: 0;
+}
+
+.expense-graph-unit-toggle-label {
+  white-space: nowrap;
 }
 
 .expense-graph-scroll {
@@ -1331,6 +1362,10 @@ td input {
   gap: 14px;
   flex-wrap: wrap;
   margin-bottom: 14px;
+}
+
+.expense-graph-toolbar .expense-graph-summary {
+  margin-bottom: 0;
 }
 
 .expense-graph-summary-item {

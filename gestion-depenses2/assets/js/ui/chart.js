@@ -189,13 +189,20 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
   });
 }
 
-export function renderGroupedExpenseChart(canvas, currentChart, { labels, datasets, suggestedMax }) {
+export function renderGroupedExpenseChart(
+  canvas,
+  currentChart,
+  { labels, datasets, suggestedMax, unit = "currency" }
+) {
   const ChartCtor = globalThis.Chart;
   if (!canvas || typeof ChartCtor !== "function") {
     return currentChart;
   }
 
   destroyChart(currentChart);
+
+  const isDaysUnit = unit === "days";
+  const yAxisLabel = isDaysUnit ? "Jours travailles" : "Montant (EUR)";
 
   return new ChartCtor(canvas, {
     type: "bar",
@@ -231,11 +238,11 @@ export function renderGroupedExpenseChart(canvas, currentChart, { labels, datase
           suggestedMax: Math.max(Number(suggestedMax) || 0, 1),
           title: {
             display: true,
-            text: "Montant (EUR)",
+            text: yAxisLabel,
           },
           ticks: {
             callback(value) {
-              return `${formatNumber(value)} EUR`;
+              return isDaysUnit ? `${formatNumber(value)} j` : `${formatNumber(value)} EUR`;
             },
           },
           grid: {
@@ -267,7 +274,8 @@ export function renderGroupedExpenseChart(canvas, currentChart, { labels, datase
           callbacks: {
             label(context) {
               const label = context.dataset.label || "";
-              return `${label}: ${formatNumber(context.parsed.y || 0)} EUR`;
+              const suffix = isDaysUnit ? "j" : "EUR";
+              return `${label}: ${formatNumber(context.parsed.y || 0)} ${suffix}`;
             },
           },
         },

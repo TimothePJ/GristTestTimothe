@@ -39,6 +39,10 @@ import {
   showChargePlanContextMenu,
   updateChargePlanSelectionPreview,
 } from "./ui/chargeTimeline.js";
+import {
+  getExpenseGraphDisplayMode,
+  setExpenseGraphDisplayMode,
+} from "./ui/expenseTimeline.js";
 import { clearKpi, renderKpi } from "./ui/kpi.js";
 import {
   renderProjectOptions,
@@ -1579,6 +1583,32 @@ async function handleTableInputChange(event) {
   }
 }
 
+function handleExpenseGraphControlChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  if (!target.classList.contains("expense-graph-unit-toggle-input")) return;
+
+  const graphKind = target.dataset.graphKind === "real" ? "real" : "provisional";
+  const nextDisplayMode = target.checked ? "days" : "currency";
+
+  if (getExpenseGraphDisplayMode(graphKind) === nextDisplayMode) {
+    return;
+  }
+
+  setExpenseGraphDisplayMode(graphKind, nextDisplayMode);
+
+  const selectedProject = getSelectedProject();
+  if (!selectedProject) {
+    return;
+  }
+
+  renderTables(dom, selectedProject, {
+    selectedYear: state.selectedYear,
+    selectedMonth: state.selectedMonth,
+    monthSpan: state.monthSpan,
+  });
+}
+
 async function handleDeleteWorker(event) {
   const target = event.target;
   if (!(target instanceof HTMLButtonElement)) return;
@@ -2183,7 +2213,9 @@ function bindEvents() {
     await handleWorkerSave();
   });
 
+  dom.expenseBoard.addEventListener("change", handleExpenseGraphControlChange);
   dom.expenseBoard.addEventListener("change", handleTableInputChange);
+  dom.realExpenseBoard.addEventListener("change", handleExpenseGraphControlChange);
   dom.teamManagementRates.addEventListener("change", handleTableInputChange);
   dom.teamManagementRates.addEventListener("click", handleDeleteWorker);
   const timelineBoards = [dom.chargePlanBoard, dom.realChargeBoard];
