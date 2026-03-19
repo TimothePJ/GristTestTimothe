@@ -109,12 +109,30 @@ input {
   margin-bottom: 20px;
 }
 
+.team-management-section {
+  margin-bottom: 24px;
+}
+
+.team-management-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.team-management-panel > button {
+  justify-self: start;
+}
+
+#team-management-rates {
+  display: grid;
+  gap: 14px;
+}
+
 .table-header,
 #add-project-form,
 #add-worker-form {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--spacing-2);
+  gap: 12px;
 }
 
 #add-project-form,
@@ -123,6 +141,23 @@ input {
   padding: 16px;
   border-radius: var(--radius-md);
   background: var(--color-surface-muted);
+}
+
+#add-worker-form {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+#add-worker-form select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#add-worker-form button {
+  flex: 0 0 auto;
+  width: auto;
+  white-space: nowrap;
 }
 
 #add-project-form > *,

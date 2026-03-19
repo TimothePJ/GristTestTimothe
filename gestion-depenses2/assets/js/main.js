@@ -2151,6 +2151,7 @@ function bindEvents() {
   });
 
   dom.expenseBoard.addEventListener("change", handleTableInputChange);
+  dom.teamManagementRates.addEventListener("change", handleTableInputChange);
   const timelineBoards = [dom.chargePlanBoard, dom.realChargeBoard];
 
   timelineBoards.forEach((boardEl) => {

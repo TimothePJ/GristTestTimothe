@@ -48,15 +48,24 @@
                 <p>Pourcentage restant: <span id="kpi-remaining-percentage"></span></p>
             </div>
 
+            <section class="team-management-section">
+                <div class="table-header">
+                    <h3>Gestion - Equipe</h3>
+                </div>
+                <div class="team-management-panel">
+                    <button id="add-worker-btn">Ajouter un travailleur</button>
+                    <div id="add-worker-form" style="display: none;">
+                        <select id="worker-name-select"></select>
+                        <button id="save-worker-btn">Enregistrer</button>
+                    </div>
+                    <div id="team-management-rates"></div>
+                </div>
+            </section>
+
             <div class="table-header">
                 <h3>Previsionnel - Plan de charge</h3>
             </div>
             <div id="charge-plan-board"></div>
-            <button id="add-worker-btn">Ajouter un travailleur</button>
-            <div id="add-worker-form" style="display: none;">
-                <select id="worker-name-select"></select>
-                <button id="save-worker-btn">Enregistrer</button>
-            </div>
 
             <div class="table-header">
                 <h3>Previsionnel - Depense</h3>

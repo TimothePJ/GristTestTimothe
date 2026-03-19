@@ -246,6 +246,22 @@ function renderRateControls(project) {
     .join("");
 }
 
+export function renderExpenseRateControls(boardEl, project) {
+  if (!(boardEl instanceof HTMLElement)) {
+    return;
+  }
+
+  boardEl.innerHTML = renderRateControls(project);
+}
+
+export function clearExpenseRateControls(boardEl) {
+  if (!(boardEl instanceof HTMLElement)) {
+    return;
+  }
+
+  boardEl.innerHTML = "";
+}
+
 function renderExpenseSummary(project, months) {
   return `
     <div class="expense-graph-summary">
@@ -362,7 +378,7 @@ export function renderExpenseTimeline(boardEl, project) {
     daysField: "provisionalDays",
     monthBoundsGetter: getProjectProvisionalMonthBounds,
     aggregateSpendingCalculator: calculateProvisionalSpending,
-    showRatePanel: true,
+    showRatePanel: false,
     showSummary: true,
     showHelper: true,
   });
