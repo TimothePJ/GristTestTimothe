@@ -457,7 +457,7 @@ td input {
   background: var(--color-surface);
   isolation: isolate;
   overscroll-behavior-x: contain;
-  overscroll-behavior-y: none;
+  overscroll-behavior-y: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
@@ -549,9 +549,9 @@ td input {
   min-width: var(--charge-plan-name-col-width);
   max-width: var(--charge-plan-name-col-width);
   z-index: 15;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .charge-plan-cell--actions {

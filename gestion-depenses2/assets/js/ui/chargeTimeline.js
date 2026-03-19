@@ -1019,7 +1019,8 @@ export function renderRealChargeTimeline(dom, project, viewState) {
     daysField: "workedDays",
     segmentsField: "realSegments",
     timelineKind: "real",
-    showControls: false,
+    showControls: true,
+    showWorkerDeleteAction: true,
     helperText:
       "Glissez dans une ligne pour creer un segment reel. Redimensionnez-le avec ses poignees. Utilisez le clic droit sur une barre pour la supprimer.",
   });

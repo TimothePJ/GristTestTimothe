@@ -270,6 +270,18 @@ function getTimelineSegmentType(boardEl) {
   return getTimelineKind(boardEl) === "real" ? "reel" : "previsionnel";
 }
 
+function isChargePlanWheelZoomZone(target) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+
+  return Boolean(
+    target.closest(".charge-plan-header-day-strip") ||
+      target.closest(".charge-plan-header-month-title") ||
+      target.closest(".charge-plan-day-tick")
+  );
+}
+
 function syncStateToProjectStart(project) {
   const firstAnchor = getProjectFirstAnchorDate(project);
   if (firstAnchor?.dateValue) {
@@ -619,6 +631,13 @@ function formatChargePlanDateLabel(dateValue) {
 }
 
 function updateChargePlanDateTrigger(dateValue, boardEl = dom?.chargePlanBoard || null) {
+  if (!(boardEl instanceof HTMLElement)) {
+    getTimelineBoards().forEach((timelineBoardEl) => {
+      updateChargePlanDateTrigger(dateValue, timelineBoardEl);
+    });
+    return;
+  }
+
   const { triggerEl, popoverEl } = getChargePlanDatePickerElements(boardEl);
   if (!(triggerEl instanceof HTMLButtonElement)) {
     return;
@@ -1024,7 +1043,7 @@ function syncChargePlanVisibleDate(
     return "";
   }
 
-  updateChargePlanDateTrigger(firstVisibleDate, boardEl);
+  updateChargePlanDateTrigger(firstVisibleDate);
 
   if (options.persist && firstVisibleDate !== String(state.chargePlanAnchorDate || "").trim()) {
     setState({ chargePlanAnchorDate: firstVisibleDate });
@@ -1403,9 +1422,15 @@ function isChargePlanDatePickerOpen(boardEl = dom?.chargePlanBoard || null) {
   return popoverEl instanceof HTMLElement && !popoverEl.hidden;
 }
 
-function closeChargePlanDatePicker(boardEl = dom?.chargePlanBoard || null) {
-  if (!(boardEl instanceof HTMLElement)) return;
-  hideChargePlanDatePicker(boardEl);
+function closeChargePlanDatePicker(boardEl = null) {
+  if (boardEl instanceof HTMLElement) {
+    hideChargePlanDatePicker(boardEl);
+    return;
+  }
+
+  getTimelineBoards().forEach((timelineBoardEl) => {
+    hideChargePlanDatePicker(timelineBoardEl);
+  });
 }
 
 function openChargePlanDatePicker(boardEl = dom?.chargePlanBoard || null) {
@@ -1600,6 +1625,7 @@ function handleChargePlanHeaderWheel(event) {
       : getTimelineBoardFromElement(event.target);
   if (!(boardEl instanceof HTMLElement)) return;
   if (!(event.target instanceof Element)) return;
+  if (!isChargePlanWheelZoomZone(event.target)) return;
 
   const headerTrack = event.target.closest(".charge-plan-header-track");
   if (!(headerTrack instanceof HTMLElement)) return;
@@ -1607,9 +1633,7 @@ function handleChargePlanHeaderWheel(event) {
   event.preventDefault();
 
   hideChargePlanContextMenu(boardEl);
-  if (boardEl === dom?.chargePlanBoard) {
-    closeChargePlanDatePicker(boardEl);
-  }
+  closeChargePlanDatePicker(boardEl);
   scheduleChargePlanWheelZoom(boardEl, event.clientX, event.deltaY, event.deltaMode);
 }
 
@@ -1630,6 +1654,11 @@ function handleChargePlanZoomButtonClick(event) {
 }
 
 function handleChargePlanDateControls(event) {
+  const boardEl =
+    event.currentTarget instanceof HTMLElement
+      ? event.currentTarget
+      : getTimelineBoardFromElement(event.target);
+  if (!(boardEl instanceof HTMLElement)) return;
   const target = event.target;
   if (!(target instanceof Element)) return;
 
@@ -1648,13 +1677,14 @@ function handleChargePlanDateControls(event) {
     event.stopPropagation();
     closeChargePlanContextMenu();
 
-    if (isChargePlanDatePickerOpen()) {
-      closeChargePlanDatePicker();
+    if (isChargePlanDatePickerOpen(boardEl)) {
+      closeChargePlanDatePicker(boardEl);
       return;
     }
 
     syncChargePlanDatePickerView(dateTrigger.dataset.dateValue || state.chargePlanAnchorDate);
-    openChargePlanDatePicker();
+    closeChargePlanDatePicker();
+    openChargePlanDatePicker(boardEl);
     return;
   }
 
@@ -1675,7 +1705,7 @@ function handleChargePlanDateControls(event) {
       year: nextMonthDate.getFullYear(),
       month: nextMonthDate.getMonth(),
     };
-    openChargePlanDatePicker();
+    openChargePlanDatePicker(boardEl);
     return;
   }
 
@@ -1717,6 +1747,11 @@ function handleChargePlanDateControls(event) {
 }
 
 function handleChargePlanDatePickerChange(event) {
+  const boardEl =
+    event.currentTarget instanceof HTMLElement
+      ? event.currentTarget
+      : getTimelineBoardFromElement(event.target);
+  if (!(boardEl instanceof HTMLElement)) return;
   const target = event.target;
   if (!(target instanceof Element)) return;
 
@@ -1747,7 +1782,7 @@ function handleChargePlanDatePickerChange(event) {
     year: nextYear,
     month: nextMonth,
   };
-  openChargePlanDatePicker();
+  openChargePlanDatePicker(boardEl);
 }
 
 function handleChargePlanPointerDown(event) {
@@ -1772,9 +1807,7 @@ function handleChargePlanPointerDown(event) {
 
     event.preventDefault();
     hideChargePlanContextMenu(boardEl);
-    if (boardEl === dom?.chargePlanBoard) {
-      closeChargePlanDatePicker(boardEl);
-    }
+    closeChargePlanDatePicker(boardEl);
     chargePlanPan = {
       boardEl,
       scrollEl,
@@ -1789,9 +1822,7 @@ function handleChargePlanPointerDown(event) {
   }
 
   hideChargePlanContextMenu(boardEl);
-  if (boardEl === dom?.chargePlanBoard) {
-    closeChargePlanDatePicker(boardEl);
-  }
+  closeChargePlanDatePicker(boardEl);
 
   const trackEl = event.target.closest(".charge-plan-track");
   if (!trackEl || trackEl.classList.contains("charge-plan-track--readonly")) return;
