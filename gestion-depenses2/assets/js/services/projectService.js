@@ -516,6 +516,26 @@ export function getProjectProvisionalMonthBounds(project) {
   };
 }
 
+export function getProjectRealMonthBounds(project) {
+  const monthKeys = new Set();
+
+  (project?.workers || []).forEach((worker) => {
+    Object.keys(worker?.workedDays || {}).forEach((monthKey) => {
+      monthKeys.add(monthKey);
+    });
+  });
+
+  if (!monthKeys.size) {
+    return null;
+  }
+
+  const sortedMonthKeys = [...monthKeys].sort();
+  return {
+    startMonthKey: sortedMonthKeys[0],
+    endMonthKey: sortedMonthKeys[sortedMonthKeys.length - 1],
+  };
+}
+
 export function getProjectKpis(project) {
   const totalBudget = getProjectBudgetTotal(project);
   const totalProvisionalSpending = (project?.workers || []).reduce((total, worker) => {

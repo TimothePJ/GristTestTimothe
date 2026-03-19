@@ -1,7 +1,9 @@
 import { APP_CONFIG } from "../config.js";
 import {
   calculateProvisionalSpending,
+  calculateRealSpending,
   getProjectProvisionalMonthBounds,
+  getProjectRealMonthBounds,
   getWorkerTotalDays,
   groupWorkersByRole,
 } from "../services/projectService.js";
@@ -13,7 +15,7 @@ import {
 } from "../utils/format.js";
 import { destroyChart, renderGroupedExpenseChart } from "./chart.js";
 
-let currentExpenseChart = null;
+const expenseCharts = new WeakMap();
 const expenseGraphScrollPositions = new Map();
 
 function escapeHtml(value) {
@@ -51,8 +53,25 @@ function shiftMonthKey(monthKey, deltaMonths) {
   return toMonthKey(cursor.getFullYear(), cursor.getMonth() + 1);
 }
 
-function buildExpenseMonths(project) {
-  const monthBounds = getProjectProvisionalMonthBounds(project) || getFallbackMonthBounds();
+function getExpenseChart(boardEl) {
+  return boardEl instanceof HTMLElement ? expenseCharts.get(boardEl) || null : null;
+}
+
+function setExpenseChart(boardEl, chart) {
+  if (!(boardEl instanceof HTMLElement)) {
+    return;
+  }
+
+  if (!chart) {
+    expenseCharts.delete(boardEl);
+    return;
+  }
+
+  expenseCharts.set(boardEl, chart);
+}
+
+function buildExpenseMonths(project, monthBoundsGetter) {
+  const monthBounds = monthBoundsGetter(project) || getFallbackMonthBounds();
   const baseMonths = buildMonthRangeBetween(
     monthBounds.startMonthKey,
     monthBounds.endMonthKey,
@@ -75,16 +94,16 @@ function buildExpenseMonths(project) {
   );
 }
 
-function getWorkerMonthlyCost(worker, monthKey) {
+function getWorkerMonthlyCost(worker, monthKey, daysField = "provisionalDays") {
   return (
-    toFiniteNumber(worker?.provisionalDays?.[monthKey], 0) *
+    toFiniteNumber(worker?.[daysField]?.[monthKey], 0) *
     toFiniteNumber(worker?.dailyRate, 0)
   );
 }
 
-function getTotalProvisionalCost(project) {
+function getTotalCost(project, daysField = "provisionalDays") {
   return (project?.workers || []).reduce((sum, worker) => {
-    return sum + getWorkerTotalDays(worker.provisionalDays) * toFiniteNumber(worker.dailyRate, 0);
+    return sum + getWorkerTotalDays(worker[daysField]) * toFiniteNumber(worker.dailyRate, 0);
   }, 0);
 }
 
@@ -92,10 +111,10 @@ function getMonthLabels(months) {
   return months.map(({ monthLabel, year }) => `${monthLabel} ${year}`);
 }
 
-function getExpenseScrollKey(project) {
+function getExpenseScrollKey(project, graphKind = "provisional") {
   const projectId = project?.id ?? project?.projectId ?? "";
   const projectNumber = project?.number ?? project?.projectNumber ?? "";
-  return String(projectId || projectNumber || "default");
+  return `${String(projectId || projectNumber || "default")}::${graphKind}`;
 }
 
 function getExpenseGraphMetrics(boardEl, project, months) {
@@ -138,7 +157,7 @@ function getSeriesColor(index, totalSeriesCount, alpha = 1) {
   return `hsla(${hue} ${saturation}% ${lightness}% / ${alpha})`;
 }
 
-function buildExpenseChartDatasets(project, months) {
+function buildExpenseChartDatasets(project, months, daysField = "provisionalDays") {
   const workers = project?.workers || [];
   const totalSeriesCount = workers.length;
 
@@ -148,7 +167,7 @@ function buildExpenseChartDatasets(project, months) {
     return {
       type: "bar",
       label: worker.name,
-      data: months.map(({ monthKey }) => getWorkerMonthlyCost(worker, monthKey)),
+      data: months.map(({ monthKey }) => getWorkerMonthlyCost(worker, monthKey, daysField)),
       backgroundColor: getSeriesColor(index, totalSeriesCount, 0.55),
       borderColor: color,
       borderWidth: 2,
@@ -163,17 +182,22 @@ function buildExpenseChartDatasets(project, months) {
   });
 }
 
-function getSuggestedMax(project, months) {
+function getSuggestedMax(
+  project,
+  months,
+  daysField = "provisionalDays",
+  aggregateSpendingCalculator = calculateProvisionalSpending
+) {
   let maxValue = 0;
 
   (project?.workers || []).forEach((worker) => {
     months.forEach(({ monthKey }) => {
-      maxValue = Math.max(maxValue, getWorkerMonthlyCost(worker, monthKey));
+      maxValue = Math.max(maxValue, getWorkerMonthlyCost(worker, monthKey, daysField));
     });
   });
 
   months.forEach(({ monthKey }) => {
-    maxValue = Math.max(maxValue, calculateProvisionalSpending(project, monthKey));
+    maxValue = Math.max(maxValue, aggregateSpendingCalculator(project, monthKey));
   });
 
   return Math.max(maxValue, 1);
@@ -231,13 +255,13 @@ function renderExpenseSummary(project, months) {
       </div>
       <div class="expense-graph-summary-item">
         <span class="expense-graph-summary-label">Total previsionnel</span>
-        <strong>${formatNumber(getTotalProvisionalCost(project))} EUR</strong>
+        <strong>${formatNumber(getTotalCost(project, "provisionalDays"))} EUR</strong>
       </div>
     </div>
   `;
 }
 
-function restoreExpenseGraphScroll(boardEl, project) {
+function restoreExpenseGraphScroll(boardEl, project, graphKind) {
   if (!(boardEl instanceof HTMLElement)) {
     return;
   }
@@ -247,7 +271,7 @@ function restoreExpenseGraphScroll(boardEl, project) {
     return;
   }
 
-  const scrollKey = getExpenseScrollKey(project);
+  const scrollKey = getExpenseScrollKey(project, graphKind);
   const savedScrollLeft = expenseGraphScrollPositions.get(scrollKey) || 0;
 
   scrollEl.addEventListener(
@@ -263,7 +287,7 @@ function restoreExpenseGraphScroll(boardEl, project) {
   });
 }
 
-function mountExpenseChart(boardEl, project, months) {
+function mountExpenseChart(boardEl, project, months, options = {}) {
   if (!(boardEl instanceof HTMLElement)) {
     return;
   }
@@ -273,32 +297,49 @@ function mountExpenseChart(boardEl, project, months) {
     return;
   }
 
-  currentExpenseChart = renderGroupedExpenseChart(canvas, currentExpenseChart, {
+  const currentExpenseChart = getExpenseChart(boardEl);
+  const nextChart = renderGroupedExpenseChart(canvas, currentExpenseChart, {
     labels: getMonthLabels(months),
-    datasets: buildExpenseChartDatasets(project, months),
-    suggestedMax: getSuggestedMax(project, months),
+    datasets: buildExpenseChartDatasets(project, months, options.daysField),
+    suggestedMax: getSuggestedMax(
+      project,
+      months,
+      options.daysField,
+      options.aggregateSpendingCalculator
+    ),
   });
+  setExpenseChart(boardEl, nextChart);
 }
 
-export function renderExpenseTimeline(boardEl, project) {
+function renderExpenseGraphBoard(boardEl, project, options = {}) {
   if (!(boardEl instanceof HTMLElement)) {
     return;
   }
 
-  currentExpenseChart = destroyChart(currentExpenseChart);
+  const currentExpenseChart = getExpenseChart(boardEl);
+  setExpenseChart(boardEl, destroyChart(currentExpenseChart));
 
-  const months = buildExpenseMonths(project);
+  const months = buildExpenseMonths(project, options.monthBoundsGetter);
   const { graphWidth, isScrollable } = getExpenseGraphMetrics(boardEl, project, months);
+  const showRatePanel = options.showRatePanel !== false;
+  const showSummary = options.showSummary !== false;
+  const showHelper = options.showHelper !== false;
 
   boardEl.innerHTML = `
-    <div class="expense-graph-layout">
+    <div class="expense-graph-layout${showRatePanel ? "" : " expense-graph-layout--chart-only"}">
+      ${
+        showRatePanel
+          ? `
       <div class="expense-rate-panel">
         ${renderRateControls(project)}
       </div>
+      `
+          : ""
+      }
       <div class="expense-graph-shell${isScrollable ? " is-scrollable" : ""}">
-        ${renderExpenseSummary(project, months)}
+        ${showSummary ? renderExpenseSummary(project, months) : ""}
         ${
-          isScrollable
+          isScrollable && showHelper
             ? '<div class="expense-graph-helper">Faites defiler horizontalement pour parcourir tous les mois.</div>'
             : ""
         }
@@ -311,12 +352,37 @@ export function renderExpenseTimeline(boardEl, project) {
     </div>
   `;
 
-  mountExpenseChart(boardEl, project, months);
-  restoreExpenseGraphScroll(boardEl, project);
+  mountExpenseChart(boardEl, project, months, options);
+  restoreExpenseGraphScroll(boardEl, project, options.graphKind);
+}
+
+export function renderExpenseTimeline(boardEl, project) {
+  renderExpenseGraphBoard(boardEl, project, {
+    graphKind: "provisional",
+    daysField: "provisionalDays",
+    monthBoundsGetter: getProjectProvisionalMonthBounds,
+    aggregateSpendingCalculator: calculateProvisionalSpending,
+    showRatePanel: true,
+    showSummary: true,
+    showHelper: true,
+  });
+}
+
+export function renderRealExpenseTimeline(boardEl, project) {
+  renderExpenseGraphBoard(boardEl, project, {
+    graphKind: "real",
+    daysField: "workedDays",
+    monthBoundsGetter: getProjectRealMonthBounds,
+    aggregateSpendingCalculator: calculateRealSpending,
+    showRatePanel: false,
+    showSummary: false,
+    showHelper: false,
+  });
 }
 
 export function clearExpenseTimeline(boardEl) {
-  currentExpenseChart = destroyChart(currentExpenseChart);
+  const currentExpenseChart = getExpenseChart(boardEl);
+  setExpenseChart(boardEl, destroyChart(currentExpenseChart));
 
   if (!(boardEl instanceof HTMLElement)) {
     return;

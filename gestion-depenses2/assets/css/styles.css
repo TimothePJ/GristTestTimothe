@@ -185,6 +185,11 @@ td input {
   min-width: 0;
 }
 
+#real-expense-board {
+  margin: 16px 0 24px;
+  min-width: 0;
+}
+
 .charge-plan-helper {
   display: flex;
   justify-content: space-between;
@@ -1111,6 +1116,10 @@ td input {
   gap: 18px;
   width: 100%;
   min-width: 0;
+}
+
+.expense-graph-layout--chart-only {
+  gap: 0;
 }
 
 .expense-rate-panel {
