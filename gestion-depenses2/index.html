@@ -95,14 +95,25 @@
     <script type="module" src="assets/js/main.js"></script>
 
     <div id="edit-budget-modal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <h2>Modifier le budget</h2>
-            <div id="edit-budget-lines-container"></div>
-            <input type="text" id="edit-budget-chapter" placeholder="Nouveau chapitre" list="budget-chapters-list">
-            <input type="number" id="edit-budget-amount" placeholder="Nouveau montant">
-            <button id="add-edit-budget-line-btn">Ajouter</button>
-            <button id="save-edited-budget-btn">Enregistrer</button>
-            <button id="cancel-edit-budget-btn">Annuler</button>
+        <div class="modal-content modal-content--budget">
+            <div class="budget-modal-header">
+                <div>
+                    <h2>Modifier le budget</h2>
+                    <p class="budget-modal-subtitle">Glisse les lignes pour changer leur ordre, puis enregistre.</p>
+                </div>
+                <button id="cancel-edit-budget-btn" type="button" class="budget-modal-close-btn">Fermer</button>
+            </div>
+            <div class="budget-modal-body">
+                <div id="edit-budget-lines-container" class="budget-edit-list"></div>
+                <div class="budget-modal-add-row">
+                    <input type="text" id="edit-budget-chapter" placeholder="Nouveau chapitre" list="budget-chapters-list">
+                    <input type="number" id="edit-budget-amount" placeholder="Nouveau montant">
+                    <button id="add-edit-budget-line-btn">Ajouter</button>
+                </div>
+            </div>
+            <div class="budget-modal-footer">
+                <button id="save-edited-budget-btn">Enregistrer</button>
+            </div>
         </div>
     </div>
 

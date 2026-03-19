@@ -71,6 +71,12 @@ let chargePlanWheelZoomFrame = null;
 let pendingChargePlanWheelRequest = null;
 let renderedChargePlanRangeStartDate = "";
 let chargePlanRangeStartDate = "";
+let editingBudgetLineIndex = null;
+const budgetLineDragState = {
+  sourceIndex: null,
+  targetIndex: null,
+  position: "after",
+};
 const chargePlanViewport = {
   scrollRatio: 0,
   leftDayOffset: null,
@@ -243,6 +249,164 @@ function estimateChargePlanDisplayedDate(rangeStartDate, visibleDays) {
 
 function cloneBudgetLines(lines) {
   return JSON.parse(JSON.stringify(lines || []));
+}
+
+function moveBudgetLine(lines, fromIndex, toIndex) {
+  const nextLines = Array.isArray(lines) ? [...lines] : [];
+  if (
+    !Number.isInteger(fromIndex) ||
+    !Number.isInteger(toIndex) ||
+    fromIndex < 0 ||
+    toIndex < 0 ||
+    fromIndex >= nextLines.length ||
+    toIndex > nextLines.length
+  ) {
+    return nextLines;
+  }
+
+  const [movedLine] = nextLines.splice(fromIndex, 1);
+  if (!movedLine) {
+    return nextLines;
+  }
+
+  nextLines.splice(toIndex, 0, movedLine);
+  return nextLines;
+}
+
+function clearBudgetLineDropIndicators() {
+  if (!(dom?.editBudgetLinesContainer instanceof HTMLElement)) {
+    return;
+  }
+
+  dom.editBudgetLinesContainer
+    .querySelectorAll(".budget-edit-row")
+    .forEach((rowEl) => {
+      rowEl.classList.remove(
+        "is-dragging",
+        "is-drop-target-before",
+        "is-drop-target-after"
+      );
+    });
+}
+
+function resetBudgetLineDragState() {
+  budgetLineDragState.sourceIndex = null;
+  budgetLineDragState.targetIndex = null;
+  budgetLineDragState.position = "after";
+  clearBudgetLineDropIndicators();
+}
+
+function syncBudgetLineEditorUi() {
+  if (!(dom?.addEditBudgetLineBtn instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  dom.addEditBudgetLineBtn.textContent = Number.isInteger(editingBudgetLineIndex)
+    ? "Enregistrer la modification"
+    : "Ajouter";
+}
+
+function resetBudgetLineEditor() {
+  editingBudgetLineIndex = null;
+  if (dom?.editBudgetChapterInput instanceof HTMLInputElement) {
+    dom.editBudgetChapterInput.value = "";
+  }
+  if (dom?.editBudgetAmountInput instanceof HTMLInputElement) {
+    dom.editBudgetAmountInput.value = "";
+  }
+  syncBudgetLineEditorUi();
+}
+
+function startBudgetLineEditor(index) {
+  const line = state.editingBudgetLines[index];
+  if (!line) {
+    resetBudgetLineEditor();
+    renderEditingBudgetLines();
+    return;
+  }
+
+  editingBudgetLineIndex = index;
+  dom.editBudgetChapterInput.value = line.chapter || "";
+  dom.editBudgetAmountInput.value = String(line.amount ?? "");
+  syncBudgetLineEditorUi();
+  renderEditingBudgetLines();
+  dom.editBudgetChapterInput.focus();
+  dom.editBudgetChapterInput.select();
+}
+
+function renderEditingBudgetLines() {
+  renderEditBudgetLines(
+    dom.editBudgetLinesContainer,
+    state.editingBudgetLines,
+    editingBudgetLineIndex
+  );
+  resetBudgetLineDragState();
+}
+
+function getBudgetEditRowFromEventTarget(target) {
+  return target instanceof Element
+    ? target.closest(".budget-edit-row")
+    : null;
+}
+
+function updateBudgetLineDropIndicators() {
+  clearBudgetLineDropIndicators();
+
+  if (!(dom?.editBudgetLinesContainer instanceof HTMLElement)) {
+    return;
+  }
+
+  const { sourceIndex, targetIndex, position } = budgetLineDragState;
+  if (Number.isInteger(sourceIndex)) {
+    const sourceRow = dom.editBudgetLinesContainer.querySelector(
+      `.budget-edit-row[data-index="${sourceIndex}"]`
+    );
+    sourceRow?.classList.add("is-dragging");
+  }
+
+  if (!Number.isInteger(targetIndex)) {
+    return;
+  }
+
+  const targetRow = dom.editBudgetLinesContainer.querySelector(
+    `.budget-edit-row[data-index="${targetIndex}"]`
+  );
+
+  if (!targetRow) {
+    return;
+  }
+
+  targetRow.classList.add(
+    position === "before" ? "is-drop-target-before" : "is-drop-target-after"
+  );
+}
+
+function commitBudgetLineDrop() {
+  const { sourceIndex, targetIndex, position } = budgetLineDragState;
+  if (!Number.isInteger(sourceIndex) || !Number.isInteger(targetIndex)) {
+    resetBudgetLineDragState();
+    return;
+  }
+
+  let destinationIndex = targetIndex + (position === "after" ? 1 : 0);
+  if (destinationIndex > sourceIndex) {
+    destinationIndex -= 1;
+  }
+
+  if (destinationIndex === sourceIndex) {
+    resetBudgetLineDragState();
+    return;
+  }
+
+  setState({
+    editingBudgetLines: moveBudgetLine(
+      state.editingBudgetLines,
+      sourceIndex,
+      destinationIndex
+    ),
+  });
+  resetBudgetLineEditor();
+  renderEditingBudgetLines();
 }
 
 function getTimelineBoards() {
@@ -472,9 +636,10 @@ function resetNewProjectForm() {
 }
 
 function resetEditBudgetForm() {
-  dom.editBudgetChapterInput.value = "";
-  dom.editBudgetAmountInput.value = "";
+  dom.editBudgetLinesContainer.innerHTML = "";
+  resetBudgetLineEditor();
   setState({ editingBudgetLines: [] });
+  resetBudgetLineDragState();
   closeModal(dom.editBudgetModal);
 }
 
@@ -2153,22 +2318,106 @@ function bindEvents() {
     setState({
       editingBudgetLines: cloneBudgetLines(selectedProject.budgetLines),
     });
-    renderEditBudgetLines(dom.editBudgetLinesContainer, state.editingBudgetLines);
+    resetBudgetLineEditor();
+    renderEditingBudgetLines();
     openModal(dom.editBudgetModal);
   });
 
   dom.editBudgetLinesContainer.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLButtonElement)) return;
-    if (!target.classList.contains("delete-budget-line-btn")) return;
 
     const index = Number(target.dataset.index);
     if (!Number.isInteger(index)) return;
 
+    if (target.classList.contains("modify-budget-line-btn")) {
+      if (editingBudgetLineIndex === index) {
+        resetBudgetLineEditor();
+        renderEditingBudgetLines();
+        return;
+      }
+
+      startBudgetLineEditor(index);
+      return;
+    }
+
+    if (!target.classList.contains("delete-budget-line-btn")) return;
+
     const nextLines = [...state.editingBudgetLines];
     nextLines.splice(index, 1);
     setState({ editingBudgetLines: nextLines });
-    renderEditBudgetLines(dom.editBudgetLinesContainer, state.editingBudgetLines);
+    resetBudgetLineEditor();
+    renderEditingBudgetLines();
+  });
+
+  dom.editBudgetLinesContainer.addEventListener("dragstart", (event) => {
+    if (
+      event.target instanceof Element &&
+      event.target.closest("button")
+    ) {
+      event.preventDefault();
+      return;
+    }
+
+    const rowEl = getBudgetEditRowFromEventTarget(event.target);
+    if (!(rowEl instanceof HTMLElement) || !(event.dataTransfer instanceof DataTransfer)) {
+      return;
+    }
+
+    const sourceIndex = Number(rowEl.dataset.index);
+    if (!Number.isInteger(sourceIndex)) {
+      return;
+    }
+
+    budgetLineDragState.sourceIndex = sourceIndex;
+    budgetLineDragState.targetIndex = sourceIndex;
+    budgetLineDragState.position = "after";
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(sourceIndex));
+    updateBudgetLineDropIndicators();
+  });
+
+  dom.editBudgetLinesContainer.addEventListener("dragover", (event) => {
+    if (!Number.isInteger(budgetLineDragState.sourceIndex)) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const rowEl = getBudgetEditRowFromEventTarget(event.target);
+    if (!(rowEl instanceof HTMLElement)) {
+      const lastIndex = state.editingBudgetLines.length - 1;
+      if (lastIndex >= 0) {
+        budgetLineDragState.targetIndex = lastIndex;
+        budgetLineDragState.position = "after";
+        updateBudgetLineDropIndicators();
+      }
+      return;
+    }
+
+    const targetIndex = Number(rowEl.dataset.index);
+    if (!Number.isInteger(targetIndex)) {
+      return;
+    }
+
+    const rowRect = rowEl.getBoundingClientRect();
+    budgetLineDragState.targetIndex = targetIndex;
+    budgetLineDragState.position =
+      event.clientY < rowRect.top + rowRect.height / 2 ? "before" : "after";
+    updateBudgetLineDropIndicators();
+  });
+
+  dom.editBudgetLinesContainer.addEventListener("drop", (event) => {
+    if (!Number.isInteger(budgetLineDragState.sourceIndex)) {
+      return;
+    }
+
+    event.preventDefault();
+    commitBudgetLineDrop();
+  });
+
+  dom.editBudgetLinesContainer.addEventListener("dragend", () => {
+    resetBudgetLineDragState();
   });
 
   dom.addEditBudgetLineBtn.addEventListener("click", () => {
@@ -2176,19 +2425,36 @@ function bindEvents() {
     const amount = parseOptionalNumberInput(dom.editBudgetAmountInput.value);
     if (!chapter || amount == null) return;
 
-    setState({
-      editingBudgetLines: [
-        ...state.editingBudgetLines,
-        {
-          chapter,
-          amount,
-        },
-      ],
-    });
+    if (Number.isInteger(editingBudgetLineIndex)) {
+      const nextLines = [...state.editingBudgetLines];
+      if (!nextLines[editingBudgetLineIndex]) {
+        resetBudgetLineEditor();
+        renderEditingBudgetLines();
+        return;
+      }
 
-    dom.editBudgetChapterInput.value = "";
-    dom.editBudgetAmountInput.value = "";
-    renderEditBudgetLines(dom.editBudgetLinesContainer, state.editingBudgetLines);
+      nextLines[editingBudgetLineIndex] = {
+        ...nextLines[editingBudgetLineIndex],
+        chapter,
+        amount,
+      };
+
+      setState({ editingBudgetLines: nextLines });
+    } else {
+      setState({
+        editingBudgetLines: [
+          ...state.editingBudgetLines,
+          {
+            chapter,
+            amount,
+          },
+        ],
+      });
+    }
+
+    resetBudgetLineEditor();
+    renderEditingBudgetLines();
+    dom.editBudgetChapterInput.focus();
   });
 
   dom.saveEditedBudgetBtn.addEventListener("click", async () => {
@@ -2202,6 +2468,12 @@ function bindEvents() {
 
   dom.cancelEditBudgetBtn.addEventListener("click", () => {
     resetEditBudgetForm();
+  });
+
+  dom.editBudgetModal.addEventListener("click", (event) => {
+    if (event.target === dom.editBudgetModal) {
+      resetEditBudgetForm();
+    }
   });
 
   dom.addWorkerBtn.addEventListener("click", () => {
@@ -2312,6 +2584,10 @@ function bindEvents() {
     setChargePlanFeedback(chargeTimelineDrag.boardEl, "");
     closeChargePlanContextMenu();
     chargeTimelineDrag = null;
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || dom.editBudgetModal.hidden) return;
+    resetEditBudgetForm();
   });
 }
 

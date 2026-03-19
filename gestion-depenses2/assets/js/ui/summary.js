@@ -54,13 +54,38 @@ export function renderBudgetPreview(container, budgetLines) {
     .join("");
 }
 
-export function renderEditBudgetLines(container, budgetLines) {
-  container.innerHTML = (budgetLines || [])
+export function renderEditBudgetLines(container, budgetLines, editingIndex = null) {
+  const lines = Array.isArray(budgetLines) ? budgetLines : [];
+
+  if (!lines.length) {
+    container.innerHTML = `
+      <div class="budget-edit-empty-state">
+        Aucune ligne de budget pour le moment.
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = lines
     .map(
       (line, index) => `
-        <div class="budget-line-row">
-          <span>${escapeHtml(line.chapter)} : ${formatNumber(line.amount)} EUR</span>
-          <button class="delete-budget-line-btn" data-index="${index}">Supprimer</button>
+        <div class="budget-edit-row${
+          index === editingIndex ? " is-editing" : ""
+        }" data-index="${index}" draggable="true">
+          <div class="budget-edit-line-content">
+            <div class="budget-edit-line-title">${escapeHtml(line.chapter)}</div>
+            <div class="budget-edit-line-amount">${formatNumber(line.amount)} EUR</div>
+          </div>
+          <div class="budget-edit-row-actions">
+            <button
+              type="button"
+              class="modify-budget-line-btn"
+              data-index="${index}"
+            >
+              ${index === editingIndex ? "En cours" : "Modifier"}
+            </button>
+            <button type="button" class="delete-budget-line-btn" data-index="${index}">Supprimer</button>
+          </div>
         </div>
       `
     )
@@ -68,7 +93,7 @@ export function renderEditBudgetLines(container, budgetLines) {
 }
 
 export function openModal(modal) {
-  toggleElement(modal, true, "block");
+  toggleElement(modal, true, "flex");
 }
 
 export function closeModal(modal) {

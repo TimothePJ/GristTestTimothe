@@ -250,20 +250,15 @@ export async function saveBudgetChanges(project, editedLines) {
   const originalLines = Array.isArray(project?.budgetLines) ? project.budgetLines : [];
   const nextLines = Array.isArray(editedLines) ? editedLines : [];
 
-  const originalIds = new Set(originalLines.map((line) => line.id));
-  const editedIds = new Set(nextLines.map((line) => line.id).filter(Boolean));
-
-  const toDelete = originalLines.filter((line) => !editedIds.has(line.id));
-  const toAdd = nextLines.filter((line) => !line.id);
-  const toUpdate = nextLines.filter((line) => line.id && originalIds.has(line.id));
-
   const actions = [];
 
-  toDelete.forEach((line) => {
+  // The budget table has no explicit sort column, so we fully rewrite the rows
+  // to preserve the exact visual order chosen in the modal.
+  originalLines.forEach((line) => {
     actions.push(["RemoveRecord", tables.budget, line.id]);
   });
 
-  toAdd.forEach((line) => {
+  nextLines.forEach((line) => {
     actions.push([
       "AddRecord",
       tables.budget,
@@ -274,23 +269,6 @@ export async function saveBudgetChanges(project, editedLines) {
         [columns.budget.amount]: line.amount,
       },
     ]);
-  });
-
-  toUpdate.forEach((line) => {
-    const original = originalLines.find((item) => item.id === line.id);
-    if (!original) return;
-
-    if (original.chapter !== line.chapter || original.amount !== line.amount) {
-      actions.push([
-        "UpdateRecord",
-        tables.budget,
-        line.id,
-        {
-          [columns.budget.chapter]: line.chapter,
-          [columns.budget.amount]: line.amount,
-        },
-      ]);
-    }
   });
 
   await applyActions(actions);
