@@ -132,7 +132,12 @@ input {
 #add-worker-form {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 24px;
+}
+
+#add-project-form[hidden],
+#add-worker-form[hidden] {
+  display: none !important;
 }
 
 #add-project-form,
@@ -144,9 +149,7 @@ input {
 }
 
 #add-worker-form {
-  display: flex;
   align-items: center;
-  gap: 16px;
 }
 
 #add-worker-form select {
@@ -210,7 +213,6 @@ td input {
 #charge-plan-board,
 #real-charge-board {
   --charge-plan-name-col-width: 150px;
-  --charge-plan-actions-col-width: 120px;
   --charge-plan-total-col-width: 100px;
   margin-bottom: 24px;
 }
@@ -512,7 +514,6 @@ td input {
 }
 
 .charge-plan-scroll.is-panning .charge-plan-cell--name,
-.charge-plan-scroll.is-panning .charge-plan-cell--actions,
 .charge-plan-scroll.is-panning .charge-plan-cell--total,
 .charge-plan-scroll.is-panning .charge-plan-role-cell--label {
   pointer-events: none;
@@ -521,7 +522,6 @@ td input {
 .charge-plan-timeline {
   min-width: calc(
     var(--charge-plan-name-col-width) +
-    var(--charge-plan-actions-col-width) +
     var(--charge-plan-total-col-width) +
     var(--timeline-width)
   );
@@ -533,12 +533,10 @@ td input {
   display: grid;
   grid-template-columns:
     var(--charge-plan-name-col-width)
-    var(--charge-plan-actions-col-width)
     var(--charge-plan-total-col-width)
     var(--timeline-width);
   min-width: calc(
     var(--charge-plan-name-col-width) +
-    var(--charge-plan-actions-col-width) +
     var(--charge-plan-total-col-width) +
     var(--timeline-width)
   );
@@ -566,13 +564,11 @@ td input {
 }
 
 .charge-plan-row--total .charge-plan-cell--name,
-.charge-plan-row--total .charge-plan-cell--actions,
 .charge-plan-row--total .charge-plan-cell--total {
   background: #f3f7fb;
 }
 
 .charge-plan-cell--name,
-.charge-plan-cell--actions,
 .charge-plan-cell--total {
   position: sticky;
   z-index: 12;
@@ -594,27 +590,15 @@ td input {
   word-break: break-word;
 }
 
-.charge-plan-cell--actions {
-  left: var(--charge-plan-name-col-width);
-  width: var(--charge-plan-actions-col-width);
-  min-width: var(--charge-plan-actions-col-width);
-  max-width: var(--charge-plan-actions-col-width);
-  z-index: 14;
-}
-
 .charge-plan-cell--total {
-  left: calc(
-    var(--charge-plan-name-col-width) +
-    var(--charge-plan-actions-col-width)
-  );
+  left: var(--charge-plan-name-col-width);
   width: var(--charge-plan-total-col-width);
   min-width: var(--charge-plan-total-col-width);
   max-width: var(--charge-plan-total-col-width);
-  z-index: 13;
+  z-index: 14;
 }
 
 .charge-plan-row--header .charge-plan-cell--name,
-.charge-plan-row--header .charge-plan-cell--actions,
 .charge-plan-row--header .charge-plan-cell--total {
   z-index: 16;
 }
@@ -630,7 +614,7 @@ td input {
 }
 
 .charge-plan-role-cell--label {
-  grid-column: 1 / 4;
+  grid-column: 1 / 3;
   position: sticky;
   left: 0;
   z-index: 14;
@@ -641,7 +625,7 @@ td input {
 }
 
 .charge-plan-role-cell--filler {
-  grid-column: 4 / 5;
+  grid-column: 3 / 4;
 }
 
 .charge-plan-cell--timeline {
@@ -1200,7 +1184,13 @@ td input {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  align-items: baseline;
+  align-items: flex-start;
+}
+
+.expense-rate-card-head-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
 }
 
 .expense-rate-card-name {
@@ -1209,9 +1199,56 @@ td input {
 }
 
 .expense-rate-card-total {
+  display: grid;
+  gap: 2px;
   color: var(--color-text-muted);
   font-size: 0.82rem;
   font-weight: 600;
+}
+
+.expense-rate-card-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 30px;
+}
+
+.expense-rate-card-total strong {
+  color: var(--color-text);
+  font-size: 0.9rem;
+}
+
+.expense-rate-card-total em {
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+  font-style: normal;
+}
+
+.expense-rate-card-total-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.expense-rate-card-total.is-real strong {
+  color: var(--color-primary);
+}
+
+.expense-rate-card-total.is-delta {
+  padding-left: 12px;
+  border-left: 1px solid rgba(0, 73, 144, 0.12);
+}
+
+.expense-rate-card-total.is-delta.is-positive strong {
+  color: var(--color-accent);
+}
+
+.expense-rate-card-total.is-delta.is-negative strong {
+  color: var(--color-primary);
+}
+
+.expense-rate-card-total.is-delta.is-neutral strong {
+  color: var(--color-text);
 }
 
 .expense-rate-card-label {
@@ -1223,6 +1260,20 @@ td input {
 
 .expense-rate-card-input {
   width: 100%;
+}
+
+.expense-rate-card-delete-btn {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  padding: 8px 12px;
+  background: rgba(237, 27, 45, 0.1);
+  color: var(--color-accent);
+  border: 1px solid rgba(237, 27, 45, 0.18);
+}
+
+.expense-rate-card-delete-btn:hover {
+  background: rgba(237, 27, 45, 0.16);
+  color: #b42318;
 }
 
 .expense-graph-shell {
@@ -1405,13 +1456,11 @@ canvas {
   .charge-plan-row,
   .charge-plan-role-row {
     --charge-plan-name-col-width: 170px;
-    --charge-plan-actions-col-width: 96px;
     --charge-plan-total-col-width: 96px;
   }
 
   #charge-plan-board {
     --charge-plan-name-col-width: 170px;
-    --charge-plan-actions-col-width: 96px;
     --charge-plan-total-col-width: 96px;
   }
 

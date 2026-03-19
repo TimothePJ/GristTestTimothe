@@ -87,6 +87,44 @@ function chooseMostFrequentRole(roleCounts) {
   return selectedRole;
 }
 
+function normalizeRoleForSort(role) {
+  return toText(role)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function getRoleDisplayOrder(role) {
+  const normalizedRole = normalizeRoleForSort(role);
+
+  if (normalizedRole.includes("projet")) {
+    return 0;
+  }
+
+  if (normalizedRole.includes("ingen")) {
+    return 1;
+  }
+
+  return 2;
+}
+
+function compareWorkersByName(leftWorker, rightWorker) {
+  const leftName = toText(leftWorker?.name);
+  const rightName = toText(rightWorker?.name);
+  const byName = leftName.localeCompare(rightName, "fr", {
+    sensitivity: "base",
+    numeric: true,
+  });
+
+  if (byName !== 0) {
+    return byName;
+  }
+
+  return toFiniteNumber(leftWorker?.id, 0) - toFiniteNumber(rightWorker?.id, 0);
+}
+
 export function buildExpenseData({
   projectRows,
   budgetRows,
@@ -340,7 +378,7 @@ export function getPriorCumulativeBilling(project, boundaryMonthKey) {
 }
 
 export function groupWorkersByRole(workers) {
-  return (workers || []).reduce((groups, worker) => {
+  const groupedWorkers = (workers || []).reduce((groups, worker) => {
     const role = worker?.role || "Sans role";
     if (!groups[role]) {
       groups[role] = [];
@@ -348,6 +386,22 @@ export function groupWorkersByRole(workers) {
     groups[role].push(worker);
     return groups;
   }, {});
+
+  return Object.fromEntries(
+    Object.entries(groupedWorkers)
+      .map(([role, roleWorkers]) => [role, [...roleWorkers].sort(compareWorkersByName)])
+      .sort(([leftRole], [rightRole]) => {
+        const byDisplayOrder = getRoleDisplayOrder(leftRole) - getRoleDisplayOrder(rightRole);
+        if (byDisplayOrder !== 0) {
+          return byDisplayOrder;
+        }
+
+        return toText(leftRole).localeCompare(toText(rightRole), "fr", {
+          sensitivity: "base",
+          numeric: true,
+        });
+      })
+  );
 }
 
 export function getEarliestProjectMonth(project) {

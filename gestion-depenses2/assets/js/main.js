@@ -69,6 +69,7 @@ let renderedChargePlanRangeStartDate = "";
 let chargePlanRangeStartDate = "";
 const chargePlanViewport = {
   scrollRatio: 0,
+  leftDayOffset: null,
   pendingLeftDayOffset: null,
 };
 let pendingChargePlanFocusDate = "";
@@ -167,19 +168,15 @@ function getChargePlanRangeStartDate() {
 
 function getChargePlanFixedColumnsWidthEstimate(boardEl = dom?.chargePlanBoard || null) {
   if (!(boardEl instanceof HTMLElement)) {
-    return 150 + 120 + 100;
+    return 150 + 100;
   }
 
   const styles = window.getComputedStyle(boardEl);
   const nameWidth = parseFloat(styles.getPropertyValue("--charge-plan-name-col-width"));
-  const actionsWidth = parseFloat(
-    styles.getPropertyValue("--charge-plan-actions-col-width")
-  );
   const totalWidth = parseFloat(styles.getPropertyValue("--charge-plan-total-col-width"));
 
   return (
     (Number.isFinite(nameWidth) ? nameWidth : 150) +
-    (Number.isFinite(actionsWidth) ? actionsWidth : 120) +
     (Number.isFinite(totalWidth) ? totalWidth : 100)
   );
 }
@@ -666,6 +663,7 @@ function captureChargePlanViewport(scrollEl = getChargePlanScrollElement()) {
   const maxScrollLeft = Math.max(0, scrollEl.scrollWidth - scrollEl.clientWidth);
   chargePlanViewport.scrollRatio =
     maxScrollLeft > 0 ? scrollEl.scrollLeft / maxScrollLeft : 0;
+  chargePlanViewport.leftDayOffset = getChargePlanViewportLeftDayOffset(scrollEl);
 }
 
 function syncChargePlanScrollAcrossBoards(sourceScrollEl) {
@@ -679,6 +677,7 @@ function syncChargePlanScrollAcrossBoards(sourceScrollEl) {
 
   const maxScrollLeft = Math.max(0, sourceScrollEl.scrollWidth - sourceScrollEl.clientWidth);
   const sourceRatio = maxScrollLeft > 0 ? sourceScrollEl.scrollLeft / maxScrollLeft : 0;
+  const sourceLeftDayOffset = getChargePlanViewportLeftDayOffset(sourceScrollEl);
 
   suppressChargePlanScrollEvents = true;
   getTimelineBoards().forEach((boardEl) => {
@@ -687,10 +686,30 @@ function syncChargePlanScrollAcrossBoards(sourceScrollEl) {
       return;
     }
 
+    const targetMetrics = getChargePlanTimelineMetrics(targetScrollEl);
+    const targetGeometry = getChargePlanTimelineViewportGeometry(targetScrollEl);
     const targetMaxScrollLeft = Math.max(
       0,
       targetScrollEl.scrollWidth - targetScrollEl.clientWidth
     );
+
+    if (Number.isFinite(sourceLeftDayOffset) && targetMetrics) {
+      const absoluteOffset =
+        targetMetrics.trackLeft +
+        clamp(
+          Number(sourceLeftDayOffset),
+          0,
+          Math.max(targetMetrics.totalDays, 0)
+        ) *
+          targetMetrics.dayWidth;
+      targetScrollEl.scrollLeft = clamp(
+        absoluteOffset - targetGeometry.clientLeft,
+        0,
+        targetMaxScrollLeft
+      );
+      return;
+    }
+
     targetScrollEl.scrollLeft = targetMaxScrollLeft * sourceRatio;
   });
   requestAnimationFrame(() => {
@@ -977,6 +996,22 @@ function restoreChargePlanViewport(boardEl = dom?.chargePlanBoard || null) {
           metrics.dayWidth;
       nextScrollLeft = absoluteOffset - geometry.clientLeft;
       clearChargePlanPendingViewportAnchor();
+    }
+
+    if (
+      nextScrollLeft == null &&
+      Number.isFinite(chargePlanViewport.leftDayOffset) &&
+      metrics
+    ) {
+      const absoluteOffset =
+        metrics.trackLeft +
+        clamp(
+          Number(chargePlanViewport.leftDayOffset),
+          0,
+          Math.max(metrics.totalDays, 0)
+        ) *
+          metrics.dayWidth;
+      nextScrollLeft = absoluteOffset - geometry.clientLeft;
     }
 
     if (nextScrollLeft == null && metrics) {
@@ -2053,8 +2088,7 @@ function bindEvents() {
   dom.addProjectBtn.addEventListener("click", (event) => {
     if (!event.isTrusted) return;
 
-    const shouldShow =
-      dom.addProjectForm.style.display === "none" || !dom.addProjectForm.style.display;
+    const shouldShow = dom.addProjectForm.hidden;
     toggleElement(dom.addProjectForm, shouldShow);
   });
 
@@ -2141,8 +2175,7 @@ function bindEvents() {
   });
 
   dom.addWorkerBtn.addEventListener("click", () => {
-    const shouldShow =
-      dom.addWorkerForm.style.display === "none" || !dom.addWorkerForm.style.display;
+    const shouldShow = dom.addWorkerForm.hidden;
     toggleElement(dom.addWorkerForm, shouldShow);
   });
 
@@ -2152,6 +2185,7 @@ function bindEvents() {
 
   dom.expenseBoard.addEventListener("change", handleTableInputChange);
   dom.teamManagementRates.addEventListener("change", handleTableInputChange);
+  dom.teamManagementRates.addEventListener("click", handleDeleteWorker);
   const timelineBoards = [dom.chargePlanBoard, dom.realChargeBoard];
 
   timelineBoards.forEach((boardEl) => {

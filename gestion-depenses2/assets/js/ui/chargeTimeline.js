@@ -21,7 +21,6 @@ const DEFAULT_TIMELINE_OPTIONS = {
   segmentsField: "segments",
   timelineKind: "previsionnel",
   showControls: true,
-  showWorkerDeleteAction: true,
   helperText:
     "Glissez dans une ligne pour creer un segment. Redimensionnez-le avec ses poignees. Utilisez le clic droit sur une barre pour la supprimer.",
 };
@@ -105,15 +104,12 @@ function getZoomPreset(zoomMode) {
 
 function getChargePlanFixedColumnsWidth(boardEl = currentBoardEl) {
   if (!(boardEl instanceof HTMLElement)) {
-    return 150 + 120 + 100;
+    return 150 + 100;
   }
 
   const styles = window.getComputedStyle(boardEl);
   const nameWidth = parseFloat(
     styles.getPropertyValue("--charge-plan-name-col-width")
-  );
-  const actionsWidth = parseFloat(
-    styles.getPropertyValue("--charge-plan-actions-col-width")
   );
   const totalWidth = parseFloat(
     styles.getPropertyValue("--charge-plan-total-col-width")
@@ -121,7 +117,6 @@ function getChargePlanFixedColumnsWidth(boardEl = currentBoardEl) {
 
   return (
     (Number.isFinite(nameWidth) ? nameWidth : 150) +
-    (Number.isFinite(actionsWidth) ? actionsWidth : 120) +
     (Number.isFinite(totalWidth) ? totalWidth : 100)
   );
 }
@@ -646,13 +641,6 @@ function renderWorkerRow(
       style="--timeline-width:${timelineWidth}px; --row-height:${rowHeight}px"
     >
       <div class="charge-plan-cell charge-plan-cell--name">${escapeHtml(worker.name)}</div>
-      <div class="charge-plan-cell charge-plan-cell--actions">
-        ${
-          timelineOptions.showWorkerDeleteAction
-            ? `<button class="delete-worker-btn" data-worker-id="${worker.id}">Supprimer</button>`
-            : ""
-        }
-      </div>
       <div class="charge-plan-cell charge-plan-cell--total">${formatDayValue(totalDays)} j</div>
       <div class="charge-plan-cell charge-plan-cell--timeline">
         <div
@@ -753,7 +741,6 @@ function renderTotalRow(
       style="--timeline-width:${timelineWidth}px; --row-height:72px"
     >
       <div class="charge-plan-cell charge-plan-cell--name">Total</div>
-      <div class="charge-plan-cell charge-plan-cell--actions"></div>
       <div class="charge-plan-cell charge-plan-cell--total">${formatDayValue(totalDays)} j</div>
       <div class="charge-plan-cell charge-plan-cell--timeline">
         <div class="charge-plan-track charge-plan-track--readonly">
@@ -973,7 +960,6 @@ export function renderChargePlanTimeline(dom, project, viewState, options = {}) 
           style="--timeline-width:${timelineWidth}px; --row-height:90px"
         >
           <div class="charge-plan-cell charge-plan-cell--name">Nom</div>
-          <div class="charge-plan-cell charge-plan-cell--actions">Actions</div>
           <div class="charge-plan-cell charge-plan-cell--total">Total jours</div>
           <div class="charge-plan-cell charge-plan-cell--timeline">
             <div
@@ -1020,7 +1006,6 @@ export function renderRealChargeTimeline(dom, project, viewState) {
     segmentsField: "realSegments",
     timelineKind: "real",
     showControls: true,
-    showWorkerDeleteAction: true,
     helperText:
       "Glissez dans une ligne pour creer un segment reel. Redimensionnez-le avec ses poignees. Utilisez le clic droit sur une barre pour la supprimer.",
   });

@@ -9,9 +9,20 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-export function toggleElement(element, visible, displayValue = "block") {
+export function toggleElement(element, visible, displayValue = "") {
   if (!element) return;
-  element.style.display = visible ? displayValue : "none";
+  element.hidden = !visible;
+
+  if (visible) {
+    if (displayValue) {
+      element.style.display = displayValue;
+    } else {
+      element.style.removeProperty("display");
+    }
+    return;
+  }
+
+  element.style.display = "none";
 }
 
 export function renderProjectSummary(dom, project, totalBudget) {

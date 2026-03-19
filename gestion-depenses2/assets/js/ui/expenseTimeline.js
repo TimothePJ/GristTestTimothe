@@ -157,6 +157,12 @@ function getSeriesColor(index, totalSeriesCount, alpha = 1) {
   return `hsla(${hue} ${saturation}% ${lightness}% / ${alpha})`;
 }
 
+function formatSignedNumber(value) {
+  const numericValue = toFiniteNumber(value, 0);
+  const prefix = numericValue > 0 ? "+" : "";
+  return `${prefix}${formatNumber(numericValue)}`;
+}
+
 function buildExpenseChartDatasets(project, months, daysField = "provisionalDays") {
   const workers = project?.workers || [];
   const totalSeriesCount = workers.length;
@@ -206,14 +212,50 @@ function getSuggestedMax(
 function renderRateGroup(role, workers) {
   const workerCards = workers
     .map((worker) => {
-      const totalDays = getWorkerTotalDays(worker.provisionalDays);
-      const totalCost = totalDays * toFiniteNumber(worker.dailyRate, 0);
+      const dailyRate = toFiniteNumber(worker.dailyRate, 0);
+      const provisionalDays = getWorkerTotalDays(worker.provisionalDays);
+      const realDays = getWorkerTotalDays(worker.workedDays);
+      const provisionalCost = provisionalDays * dailyRate;
+      const realCost = realDays * dailyRate;
+      const differenceDays = realDays - provisionalDays;
+      const differenceCost = realCost - provisionalCost;
+      const differenceClass =
+        differenceCost > 0 || differenceDays > 0
+          ? "is-positive"
+          : differenceCost < 0 || differenceDays < 0
+            ? "is-negative"
+            : "is-neutral";
 
       return `
         <div class="expense-rate-card">
           <div class="expense-rate-card-head">
-            <span class="expense-rate-card-name">${escapeHtml(worker.name)}</span>
-            <span class="expense-rate-card-total">${formatNumber(totalCost)} EUR</span>
+            <div class="expense-rate-card-head-main">
+              <span class="expense-rate-card-name">${escapeHtml(worker.name)}</span>
+              <div class="expense-rate-card-totals">
+                <span class="expense-rate-card-total">
+                  <span class="expense-rate-card-total-label">Previsionnel</span>
+                  <strong>${formatNumber(provisionalCost)} EUR</strong>
+                  <em>${formatNumber(provisionalDays)} j</em>
+                </span>
+                <span class="expense-rate-card-total is-real">
+                  <span class="expense-rate-card-total-label">Reel</span>
+                  <strong>${formatNumber(realCost)} EUR</strong>
+                  <em>${formatNumber(realDays)} j</em>
+                </span>
+                <span class="expense-rate-card-total is-delta ${differenceClass}">
+                  <span class="expense-rate-card-total-label">Difference</span>
+                  <strong>${formatSignedNumber(differenceCost)} EUR</strong>
+                  <em>${formatSignedNumber(differenceDays)} j</em>
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="delete-worker-btn expense-rate-card-delete-btn"
+              data-worker-id="${worker.id}"
+            >
+              Supprimer
+            </button>
           </div>
           <label class="expense-rate-card-label">
             <span>Depense journaliere</span>
@@ -262,16 +304,18 @@ export function clearExpenseRateControls(boardEl) {
   boardEl.innerHTML = "";
 }
 
-function renderExpenseSummary(project, months) {
+function renderExpenseSummary(project, summaryKind = "provisional") {
+  const isRealSummary = summaryKind === "real";
+  const summaryLabel = isRealSummary ? "Total reel" : "Total previsionnel";
+  const summaryValue = isRealSummary
+    ? getTotalCost(project, "workedDays")
+    : getTotalCost(project, "provisionalDays");
+
   return `
     <div class="expense-graph-summary">
       <div class="expense-graph-summary-item">
-        <span class="expense-graph-summary-label">Mois affiches</span>
-        <strong>${months.length}</strong>
-      </div>
-      <div class="expense-graph-summary-item">
-        <span class="expense-graph-summary-label">Total previsionnel</span>
-        <strong>${formatNumber(getTotalCost(project, "provisionalDays"))} EUR</strong>
+        <span class="expense-graph-summary-label">${summaryLabel}</span>
+        <strong>${formatNumber(summaryValue)} EUR</strong>
       </div>
     </div>
   `;
@@ -353,7 +397,7 @@ function renderExpenseGraphBoard(boardEl, project, options = {}) {
           : ""
       }
       <div class="expense-graph-shell${isScrollable ? " is-scrollable" : ""}">
-        ${showSummary ? renderExpenseSummary(project, months) : ""}
+        ${showSummary ? renderExpenseSummary(project, options.summaryKind) : ""}
         ${
           isScrollable && showHelper
             ? '<div class="expense-graph-helper">Faites defiler horizontalement pour parcourir tous les mois.</div>'
@@ -380,6 +424,7 @@ export function renderExpenseTimeline(boardEl, project) {
     aggregateSpendingCalculator: calculateProvisionalSpending,
     showRatePanel: false,
     showSummary: true,
+    summaryKind: "provisional",
     showHelper: true,
   });
 }
@@ -391,7 +436,8 @@ export function renderRealExpenseTimeline(boardEl, project) {
     monthBoundsGetter: getProjectRealMonthBounds,
     aggregateSpendingCalculator: calculateRealSpending,
     showRatePanel: false,
-    showSummary: false,
+    showSummary: true,
+    summaryKind: "real",
     showHelper: false,
   });
 }
