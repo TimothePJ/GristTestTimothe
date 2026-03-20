@@ -41,7 +41,11 @@ import {
 } from "./ui/chargeTimeline.js";
 import {
   getExpenseGraphDisplayMode,
+  getTeamManagementSummaryGroupedByRole,
+  getTeamManagementSummaryMode,
   setExpenseGraphDisplayMode,
+  setTeamManagementSummaryGroupedByRole,
+  setTeamManagementSummaryMode,
 } from "./ui/expenseTimeline.js";
 import { clearKpi, renderKpi } from "./ui/kpi.js";
 import {
@@ -1774,6 +1778,40 @@ function handleExpenseGraphControlChange(event) {
   });
 }
 
+function handleTeamManagementSummaryToggleChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+
+  if (target.classList.contains("team-summary-mode-toggle-input")) {
+    const nextMode = target.checked ? "real" : "provisional";
+    if (getTeamManagementSummaryMode() === nextMode) {
+      return;
+    }
+
+    setTeamManagementSummaryMode(nextMode);
+  } else if (target.classList.contains("team-summary-group-toggle-input")) {
+    const nextGroupedState = target.checked;
+    if (getTeamManagementSummaryGroupedByRole() === nextGroupedState) {
+      return;
+    }
+
+    setTeamManagementSummaryGroupedByRole(nextGroupedState);
+  } else {
+    return;
+  }
+
+  const selectedProject = getSelectedProject();
+  if (!selectedProject) {
+    return;
+  }
+
+  renderTables(dom, selectedProject, {
+    selectedYear: state.selectedYear,
+    selectedMonth: state.selectedMonth,
+    monthSpan: state.monthSpan,
+  });
+}
+
 async function handleDeleteWorker(event) {
   const target = event.target;
   if (!(target instanceof HTMLButtonElement)) return;
@@ -2488,6 +2526,7 @@ function bindEvents() {
   dom.expenseBoard.addEventListener("change", handleExpenseGraphControlChange);
   dom.expenseBoard.addEventListener("change", handleTableInputChange);
   dom.realExpenseBoard.addEventListener("change", handleExpenseGraphControlChange);
+  dom.teamManagementRates.addEventListener("change", handleTeamManagementSummaryToggleChange);
   dom.teamManagementRates.addEventListener("change", handleTableInputChange);
   dom.teamManagementRates.addEventListener("click", handleDeleteWorker);
   const timelineBoards = [dom.chargePlanBoard, dom.realChargeBoard];

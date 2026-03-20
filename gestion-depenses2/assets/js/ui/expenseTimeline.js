@@ -21,6 +21,8 @@ const expenseGraphDisplayModes = new Map([
   ["provisional", "currency"],
   ["real", "currency"],
 ]);
+let teamManagementSummaryMode = "provisional";
+let teamManagementSummaryGroupedByRole = false;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -84,6 +86,22 @@ export function getExpenseGraphDisplayMode(graphKind = "provisional") {
 
 export function setExpenseGraphDisplayMode(graphKind = "provisional", mode = "currency") {
   expenseGraphDisplayModes.set(graphKind, normalizeExpenseGraphDisplayMode(mode));
+}
+
+export function getTeamManagementSummaryMode() {
+  return teamManagementSummaryMode === "real" ? "real" : "provisional";
+}
+
+export function setTeamManagementSummaryMode(mode = "provisional") {
+  teamManagementSummaryMode = mode === "real" ? "real" : "provisional";
+}
+
+export function getTeamManagementSummaryGroupedByRole() {
+  return Boolean(teamManagementSummaryGroupedByRole);
+}
+
+export function setTeamManagementSummaryGroupedByRole(value) {
+  teamManagementSummaryGroupedByRole = Boolean(value);
 }
 
 function buildExpenseMonths(project, monthBoundsGetter) {
@@ -286,17 +304,17 @@ function renderRateGroup(role, workers) {
               <div class="expense-rate-card-totals">
                 <span class="expense-rate-card-total">
                   <span class="expense-rate-card-total-label">Previsionnel</span>
-                  <strong>${formatNumber(provisionalCost)} EUR</strong>
+                  <strong>${formatNumber(provisionalCost)} €</strong>
                   <em>${formatNumber(provisionalDays)} j</em>
                 </span>
                 <span class="expense-rate-card-total is-real">
                   <span class="expense-rate-card-total-label">Reel</span>
-                  <strong>${formatNumber(realCost)} EUR</strong>
+                  <strong>${formatNumber(realCost)} €</strong>
                   <em>${formatNumber(realDays)} j</em>
                 </span>
                 <span class="expense-rate-card-total is-delta ${differenceClass}">
                   <span class="expense-rate-card-total-label">Difference</span>
-                  <strong>${formatSignedNumber(differenceCost)} EUR</strong>
+                  <strong>${formatSignedNumber(differenceCost)} €</strong>
                   <em>${formatSignedNumber(differenceDays)} j</em>
                 </span>
               </div>
@@ -340,12 +358,151 @@ function renderRateControls(project) {
     .join("");
 }
 
+function buildTeamManagementSummaryEntries(project, mode = "provisional") {
+  const daysField = mode === "real" ? "workedDays" : "provisionalDays";
+  const workers = project?.workers || [];
+
+  return workers
+    .map((worker, index) => {
+      const days = getWorkerTotalDays(worker?.[daysField]);
+      const value = days * toFiniteNumber(worker?.dailyRate, 0);
+
+      return {
+        id: worker.id,
+        name: worker.name,
+        days,
+        value,
+        color: getSeriesColor(index, Math.max(workers.length, 1), 0.9),
+      };
+    })
+    .filter((entry) => entry.value > 0)
+    .sort((left, right) => right.value - left.value);
+}
+
+function buildTeamManagementSummaryRoleEntries(project, mode = "provisional") {
+  const daysField = mode === "real" ? "workedDays" : "provisionalDays";
+  const groupedWorkers = groupWorkersByRole(project?.workers || []);
+  const roles = Object.entries(groupedWorkers);
+
+  return roles
+    .map(([role, workers], index) => {
+      const days = (workers || []).reduce((sum, worker) => {
+        return sum + getWorkerTotalDays(worker?.[daysField]);
+      }, 0);
+      const value = (workers || []).reduce((sum, worker) => {
+        return sum + getWorkerTotalDays(worker?.[daysField]) * toFiniteNumber(worker?.dailyRate, 0);
+      }, 0);
+
+      return {
+        id: `role-${role}`,
+        name: role,
+        days,
+        value,
+        color: getSeriesColor(index, Math.max(roles.length, 1), 0.9),
+      };
+    })
+    .filter((entry) => entry.value > 0);
+}
+
+function renderTeamManagementSummary(project) {
+  const mode = getTeamManagementSummaryMode();
+  const groupedByRole = getTeamManagementSummaryGroupedByRole();
+  const entries = groupedByRole
+    ? buildTeamManagementSummaryRoleEntries(project, mode)
+    : buildTeamManagementSummaryEntries(project, mode);
+  const totalValue = entries.reduce((sum, entry) => sum + entry.value, 0);
+  const modeChecked = mode === "real" ? "checked" : "";
+  const groupChecked = groupedByRole ? "checked" : "";
+  const modeLabel = mode === "real" ? "Reel" : "Previsionnel";
+  const groupingLabel = groupedByRole ? "Par role" : "Par personne";
+
+  return `
+    <section class="team-summary-panel">
+      <div class="team-summary-toolbar">
+        <div class="team-summary-copy">
+          <strong class="team-summary-title">Synthese equipe</strong>
+          <span class="team-summary-subtitle">${modeLabel} - ${groupingLabel} - ${formatNumber(totalValue)} €</span>
+        </div>
+        <div class="team-summary-toggle-group">
+          <label class="team-summary-toggle">
+            <input
+              type="checkbox"
+              class="team-summary-mode-toggle-input"
+              ${modeChecked}
+            >
+            <span class="team-summary-toggle-label">Afficher en reel</span>
+          </label>
+          <label class="team-summary-toggle">
+            <input
+              type="checkbox"
+              class="team-summary-group-toggle-input"
+              ${groupChecked}
+            >
+            <span class="team-summary-toggle-label">Regrouper par role</span>
+          </label>
+        </div>
+      </div>
+      ${
+        entries.length
+          ? `
+      <div class="team-summary-layout">
+        <div class="team-summary-bar">
+          ${entries
+            .map((entry) => {
+              const share = totalValue > 0 ? (entry.value / totalValue) * 100 : 0;
+              const showInlineLabel = share >= 10;
+              const segmentTitle = `${entry.name} : ${formatNumber(entry.value)} €`;
+
+              return `
+                <div
+                  class="team-summary-segment"
+                  style="flex:${Math.max(entry.value, 1)} 1 0; background:${entry.color};"
+                  title="${escapeHtml(segmentTitle)}"
+                >
+                  ${
+                    showInlineLabel
+                      ? `<span class="team-summary-segment-label">${formatNumber(entry.value)} €</span>`
+                      : ""
+                  }
+                </div>
+              `;
+            })
+            .join("")}
+        </div>
+        <div class="team-summary-legend">
+          ${entries
+            .map(
+              (entry) => `
+                <div class="team-summary-legend-item">
+                  <span class="team-summary-legend-swatch" style="background:${entry.color};"></span>
+                  <span class="team-summary-legend-name">${escapeHtml(entry.name)}</span>
+                  <strong class="team-summary-legend-value">${formatNumber(entry.value)} €</strong>
+                </div>
+              `
+            )
+            .join("")}
+        </div>
+      </div>
+      `
+          : `
+      <div class="team-summary-empty-state">
+        Aucune depense ${mode === "real" ? "reelle" : "previsionnelle"} a afficher pour le moment.
+      </div>
+      `
+      }
+    </section>
+  `;
+}
+
 export function renderExpenseRateControls(boardEl, project) {
   if (!(boardEl instanceof HTMLElement)) {
     return;
   }
 
-  boardEl.innerHTML = renderRateControls(project);
+  boardEl.innerHTML = `
+    ${renderRateControls(project)}
+    ${renderTeamManagementSummary(project)}
+  `;
 }
 
 export function clearExpenseRateControls(boardEl) {
@@ -362,7 +519,7 @@ function renderExpenseSummary(project, summaryKind = "provisional") {
   const daysField = isRealSummary ? "workedDays" : "provisionalDays";
   const displayMode = getExpenseGraphDisplayMode(isRealSummary ? "real" : "provisional");
   const summaryValue = getTotalCost(project, daysField, displayMode);
-  const summarySuffix = displayMode === "days" ? "j" : "EUR";
+  const summarySuffix = displayMode === "days" ? "j" : "€";
 
   return `
     <div class="expense-graph-summary">

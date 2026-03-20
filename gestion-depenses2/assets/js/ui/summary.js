@@ -28,12 +28,12 @@ export function toggleElement(element, visible, displayValue = "") {
 export function renderProjectSummary(dom, project, totalBudget) {
   dom.currentProjectName.textContent = project?.name || "";
   dom.currentProjectNumber.textContent = project?.projectNumber || "";
-  dom.totalProjectBudget.textContent = `${formatNumber(totalBudget)} EUR`;
+  dom.totalProjectBudget.textContent = `${formatNumber(totalBudget)} €`;
 
   dom.currentProjectBudgetBreakdown.innerHTML = (project?.budgetLines || [])
     .map(
       (line) =>
-        `<p>${escapeHtml(line.chapter)} : ${formatNumber(line.amount)} EUR</p>`
+        `<p>${escapeHtml(line.chapter)} : ${formatNumber(line.amount)} €</p>`
     )
     .join("");
 }
@@ -49,7 +49,7 @@ export function renderBudgetPreview(container, budgetLines) {
   container.innerHTML = (budgetLines || [])
     .map(
       (line) =>
-        `<p>${escapeHtml(line.chapter)} : ${formatNumber(line.amount)} EUR</p>`
+        `<p>${escapeHtml(line.chapter)} : ${formatNumber(line.amount)} €</p>`
     )
     .join("");
 }
@@ -74,7 +74,7 @@ export function renderEditBudgetLines(container, budgetLines, editingIndex = nul
         }" data-index="${index}" draggable="true">
           <div class="budget-edit-line-content">
             <div class="budget-edit-line-title">${escapeHtml(line.chapter)}</div>
-            <div class="budget-edit-line-amount">${formatNumber(line.amount)} EUR</div>
+            <div class="budget-edit-line-amount">${formatNumber(line.amount)} €</div>
           </div>
           <div class="budget-edit-row-actions">
             <button

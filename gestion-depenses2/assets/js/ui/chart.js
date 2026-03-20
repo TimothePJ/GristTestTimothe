@@ -76,7 +76,7 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
         },
         {
           type: "bar",
-          label: "Depenses previsionnelles cumulees (EUR)",
+          label: "Depenses previsionnelles cumulees (€)",
           data: provisionalSpendingData,
           backgroundColor: "rgba(255, 99, 132, 0.5)",
           borderColor: "rgba(255, 99, 132, 1)",
@@ -86,7 +86,7 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
         },
         {
           type: "bar",
-          label: "Depenses reelles cumulees (EUR)",
+          label: "Depenses reelles cumulees (€)",
           data: realSpendingData,
           backgroundColor: "rgba(54, 162, 235, 0.5)",
           borderColor: "rgba(54, 162, 235, 1)",
@@ -96,7 +96,7 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
         },
         {
           type: "line",
-          label: "Budget total (EUR)",
+          label: "Budget total (€)",
           data: labels.map(() => totalBudget),
           borderColor: "rgba(0, 73, 144, 0.7)",
           borderDash: [6, 4],
@@ -138,14 +138,14 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
           beginAtZero: true,
           title: {
             display: true,
-            text: "Montant (EUR)",
+            text: "Montant (€)",
           },
           grid: {
             drawOnChartArea: false,
           },
           ticks: {
             callback(value) {
-              return `${formatNumber(value)} EUR`;
+              return `${formatNumber(value)} €`;
             },
           },
         },
@@ -163,7 +163,7 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
             if (context.dataset.yAxisID === "y") {
               return `${Number(value).toFixed(1)}%`;
             }
-            return `${Math.round(value).toLocaleString("fr-FR")} EUR`;
+            return `${Math.round(value).toLocaleString("fr-FR")} €`;
           },
         },
         tooltip: {
@@ -177,7 +177,7 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
                 if (context.dataset.yAxisID === "y") {
                   label += `${context.parsed.y.toFixed(2)}%`;
                 } else {
-                  label += `${formatNumber(context.parsed.y)} EUR`;
+                  label += `${formatNumber(context.parsed.y)} €`;
                 }
               }
               return label;
@@ -202,7 +202,7 @@ export function renderGroupedExpenseChart(
   destroyChart(currentChart);
 
   const isDaysUnit = unit === "days";
-  const yAxisLabel = isDaysUnit ? "Jours travailles" : "Montant (EUR)";
+  const yAxisLabel = isDaysUnit ? "Jours travailles" : "Montant (€)";
 
   return new ChartCtor(canvas, {
     type: "bar",
@@ -242,7 +242,7 @@ export function renderGroupedExpenseChart(
           },
           ticks: {
             callback(value) {
-              return isDaysUnit ? `${formatNumber(value)} j` : `${formatNumber(value)} EUR`;
+              return isDaysUnit ? `${formatNumber(value)} j` : `${formatNumber(value)} €`;
             },
           },
           grid: {
@@ -274,7 +274,7 @@ export function renderGroupedExpenseChart(
           callbacks: {
             label(context) {
               const label = context.dataset.label || "";
-              const suffix = isDaysUnit ? "j" : "EUR";
+              const suffix = isDaysUnit ? "j" : "€";
               return `${label}: ${formatNumber(context.parsed.y || 0)} ${suffix}`;
             },
           },
