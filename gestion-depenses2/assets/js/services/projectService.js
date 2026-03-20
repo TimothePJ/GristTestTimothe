@@ -1,5 +1,6 @@
 import { APP_CONFIG } from "../config.js";
 import {
+  buildMonthRangeBetween,
   buildDisplayedMonths,
   clamp,
   getMonthKeyFromRawMonth,
@@ -791,6 +792,10 @@ export function getProjectKpis(project) {
 export function buildChartSeries(project, { selectedYear, selectedMonth, monthSpan }) {
   const allMonthKeys = new Set();
 
+  Object.keys(project?.billingPercentageByMonth || {}).forEach((monthKey) => {
+    allMonthKeys.add(monthKey);
+  });
+
   (project?.workers || []).forEach((worker) => {
     Object.keys(worker?.provisionalDays || {}).forEach((monthKey) => {
       allMonthKeys.add(monthKey);
@@ -832,12 +837,19 @@ export function buildChartSeries(project, { selectedYear, selectedMonth, monthSp
     }
   }
 
-  const displayedMonths = buildDisplayedMonths(
-    selectedYear,
-    selectedMonth,
-    monthSpan,
-    APP_CONFIG.months
-  );
+  const displayedMonths =
+    sortedKeys.length > 0
+      ? buildMonthRangeBetween(
+          sortedKeys[0],
+          sortedKeys[sortedKeys.length - 1],
+          APP_CONFIG.months
+        )
+      : buildDisplayedMonths(
+          selectedYear,
+          selectedMonth,
+          Math.max(Number(monthSpan) || 1, 1),
+          APP_CONFIG.months
+        );
 
   const totalBudget = getProjectBudgetTotal(project);
   const labels = [];
@@ -882,6 +894,7 @@ export function buildChartSeries(project, { selectedYear, selectedMonth, monthSp
   });
 
   return {
+    displayedMonths,
     labels,
     provisionalSpendingData,
     realSpendingData,

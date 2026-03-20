@@ -22,7 +22,14 @@ import {
   getProjectBudgetTotal,
 } from "./services/projectService.js";
 import { assertDomRefs, getDomRefs } from "./ui/dom.js";
-import { destroyChart, renderSpendingChart } from "./ui/chart.js";
+import {
+  clearSpendingBillingEditor,
+  destroyChart,
+  getSpendingChartBarsFromTop,
+  renderSpendingBillingEditor,
+  renderSpendingChart,
+  setSpendingChartBarsFromTop,
+} from "./ui/chart.js";
 import {
   clearChargePlanSelectionPreview,
   clearChargePlanTimeline,
@@ -519,6 +526,7 @@ function renderApp() {
     clearChargePlanTimeline(dom);
     clearRealChargeTimeline(dom);
     clearTables(dom);
+    clearSpendingBillingEditor(dom.spendingBillingEditor);
     state.spendingChart = destroyChart(state.spendingChart);
     return;
   }
@@ -526,6 +534,11 @@ function renderApp() {
   renderProjectSummary(dom, selectedProject, getProjectBudgetTotal(selectedProject));
   renderChargePlanSection(selectedProject);
   renderTables(dom, selectedProject, {
+    selectedYear: state.selectedYear,
+    selectedMonth: state.selectedMonth,
+    monthSpan: state.monthSpan,
+  });
+  renderSpendingBillingEditor(dom.spendingBillingEditor, selectedProject, {
     selectedYear: state.selectedYear,
     selectedMonth: state.selectedMonth,
     monthSpan: state.monthSpan,
@@ -1780,6 +1793,38 @@ function handleExpenseGraphControlChange(event) {
   });
 }
 
+function handleSpendingChartControlChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  if (!target.classList.contains("spending-chart-bars-toggle-input")) return;
+
+  const nextBarsFromTop = target.checked;
+  if (getSpendingChartBarsFromTop() === nextBarsFromTop) {
+    return;
+  }
+
+  setSpendingChartBarsFromTop(nextBarsFromTop);
+
+  const selectedProject = getSelectedProject();
+  if (!selectedProject) {
+    return;
+  }
+
+  const viewState = {
+    selectedYear: state.selectedYear,
+    selectedMonth: state.selectedMonth,
+    monthSpan: state.monthSpan,
+  };
+
+  renderSpendingBillingEditor(dom.spendingBillingEditor, selectedProject, viewState);
+  state.spendingChart = renderSpendingChart(
+    dom.spendingChartCanvas,
+    state.spendingChart,
+    selectedProject,
+    viewState
+  );
+}
+
 function handleTeamManagementSummaryToggleChange(event) {
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) return;
@@ -2535,6 +2580,8 @@ function bindEvents() {
   dom.expenseBoard.addEventListener("change", handleExpenseGraphControlChange);
   dom.expenseBoard.addEventListener("change", handleTableInputChange);
   dom.realExpenseBoard.addEventListener("change", handleExpenseGraphControlChange);
+  dom.spendingBillingEditor.addEventListener("change", handleTableInputChange);
+  dom.spendingBillingEditor.addEventListener("change", handleSpendingChartControlChange);
   dom.teamManagementRates.addEventListener("change", handleTeamManagementSummaryToggleChange);
   dom.teamManagementRates.addEventListener("change", handleTableInputChange);
   dom.teamManagementRates.addEventListener("click", handleDeleteWorker);

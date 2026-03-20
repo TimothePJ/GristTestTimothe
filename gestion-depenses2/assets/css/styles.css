@@ -363,6 +363,10 @@ td input {
   min-width: 0;
 }
 
+#spending-billing-editor {
+  margin: 0 0 16px;
+}
+
 .charge-plan-helper {
   display: flex;
   justify-content: space-between;
@@ -1546,6 +1550,128 @@ td input {
 .expense-graph-summary-label {
   color: var(--color-text-muted);
   font-size: 0.8rem;
+}
+
+.billing-editor-panel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid rgba(0, 73, 144, 0.12);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.billing-editor-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.billing-editor-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.billing-editor-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 73, 144, 0.08);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, rgba(0, 73, 144, 0.02), rgba(0, 73, 144, 0.05));
+  color: var(--color-text);
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.spending-chart-bars-toggle-input {
+  width: auto;
+  margin: 0;
+}
+
+.billing-editor-toggle-label {
+  white-space: nowrap;
+}
+
+.billing-editor-title {
+  color: var(--color-text);
+}
+
+.billing-editor-subtitle {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
+.billing-editor-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 6px;
+  scrollbar-gutter: stable both-edges;
+}
+
+.billing-editor-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(132px, 1fr);
+  gap: 12px;
+}
+
+.billing-editor-item {
+  display: grid;
+  gap: 10px;
+  min-width: 132px;
+  padding: 12px;
+  border: 1px solid rgba(0, 73, 144, 0.08);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, rgba(0, 73, 144, 0.02), rgba(0, 73, 144, 0.05));
+}
+
+.billing-editor-month {
+  color: var(--color-text);
+  font-size: 0.84rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.billing-editor-input-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.billing-editor-input {
+  min-width: 0;
+  width: 100%;
+  text-align: right;
+}
+
+.billing-editor-unit {
+  color: var(--color-text-muted);
+  font-weight: 700;
+}
+
+.billing-editor-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+
+.billing-editor-scroll::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(0, 73, 144, 0.08);
+}
+
+.billing-editor-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(0, 73, 144, 0.32);
+}
+
+.billing-editor-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 73, 144, 0.46);
 }
 
 .expense-graph-canvas {

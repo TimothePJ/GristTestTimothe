@@ -19,6 +19,8 @@ const SPENDING_CHART_COLORS = {
   },
 };
 
+let spendingChartBarsFromTop = false;
+
 export function destroyChart(chart) {
   if (chart && typeof chart.destroy === "function") {
     chart.destroy();
@@ -32,6 +34,93 @@ function getChartPlugins() {
     chartPlugins.push(globalThis.ChartDataLabels);
   }
   return chartPlugins;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+export function clearSpendingBillingEditor(boardEl) {
+  if (!(boardEl instanceof HTMLElement)) {
+    return;
+  }
+
+  boardEl.innerHTML = "";
+}
+
+export function getSpendingChartBarsFromTop() {
+  return Boolean(spendingChartBarsFromTop);
+}
+
+export function setSpendingChartBarsFromTop(value) {
+  spendingChartBarsFromTop = Boolean(value);
+}
+
+export function renderSpendingBillingEditor(boardEl, project, viewState) {
+  if (!(boardEl instanceof HTMLElement)) {
+    return;
+  }
+
+  if (!project) {
+    clearSpendingBillingEditor(boardEl);
+    return;
+  }
+
+  const { displayedMonths, billingPercentData } = buildChartSeries(project, viewState);
+  const barsFromTopChecked = getSpendingChartBarsFromTop() ? "checked" : "";
+
+  boardEl.innerHTML = `
+    <section class="billing-editor-panel">
+      <div class="billing-editor-copy">
+        <strong class="billing-editor-title">Facturation mensuelle</strong>
+        <span class="billing-editor-subtitle">
+          Renseigne le pourcentage facture pour chaque mois affiche dans le graphique.
+        </span>
+      </div>
+      <div class="billing-editor-scroll">
+        <div class="billing-editor-grid">
+          ${displayedMonths
+            .map((month, index) => {
+              const monthLabel = `${month.monthLabel} ${month.year}`;
+              const inputId = `billing-percentage-${project.id}-${month.monthKey}`;
+
+              return `
+                <label class="billing-editor-item" for="${escapeHtml(inputId)}">
+                  <span class="billing-editor-month">${escapeHtml(monthLabel)}</span>
+                  <span class="billing-editor-input-shell">
+                    <input
+                      id="${escapeHtml(inputId)}"
+                      type="number"
+                      class="cell-input billing-percentage billing-editor-input"
+                      data-month="${escapeHtml(month.monthKey)}"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      value="${escapeHtml(billingPercentData[index] ?? 100)}"
+                    >
+                    <span class="billing-editor-unit">%</span>
+                  </span>
+                </label>
+              `;
+            })
+            .join("")}
+        </div>
+      </div>
+      <label class="billing-editor-toggle">
+        <input
+          type="checkbox"
+          class="spending-chart-bars-toggle-input"
+          ${barsFromTopChecked}
+        >
+        <span class="billing-editor-toggle-label">Colonnes depuis le haut</span>
+      </label>
+    </section>
+  `;
 }
 
 export function renderSpendingChart(canvas, currentChart, project, viewState) {
@@ -53,6 +142,10 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
   destroyChart(currentChart);
 
   const totalBudget = getProjectBudgetTotal(project);
+  const barsFromTop = getSpendingChartBarsFromTop();
+  const barDataLabels = barsFromTop
+    ? { align: "start", anchor: "start" }
+    : { align: "end", anchor: "end" };
 
   return new ChartCtor(canvas, {
     type: "bar",
@@ -101,7 +194,7 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
           borderColor: SPENDING_CHART_COLORS.provisional.solid,
           borderWidth: 1,
           yAxisID: "y1",
-          datalabels: { align: "end", anchor: "end" },
+          datalabels: barDataLabels,
         },
         {
           type: "bar",
@@ -111,7 +204,7 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
           borderColor: SPENDING_CHART_COLORS.real.solid,
           borderWidth: 1,
           yAxisID: "y1",
-          datalabels: { align: "end", anchor: "end" },
+          datalabels: barDataLabels,
         },
         {
           type: "bar",
@@ -121,7 +214,7 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
           borderColor: SPENDING_CHART_COLORS.billing.solid,
           borderWidth: 1,
           yAxisID: "y1",
-          datalabels: { align: "end", anchor: "end" },
+          datalabels: barDataLabels,
         },
         {
           type: "line",
@@ -165,6 +258,7 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
           display: true,
           position: "right",
           beginAtZero: true,
+          reverse: barsFromTop,
           title: {
             display: true,
             text: "Montant (€)",
