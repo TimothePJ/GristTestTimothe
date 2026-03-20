@@ -124,6 +124,19 @@ async function fetchTableRows(tableName) {
   return normalizeFetchTableResult(raw);
 }
 
+async function fetchOptionalTableRows(tableName) {
+  if (!tableName) {
+    return [];
+  }
+
+  try {
+    return await fetchTableRows(tableName);
+  } catch (error) {
+    console.warn(`Lecture optionnelle impossible pour la table ${tableName} :`, error);
+    return [];
+  }
+}
+
 async function getResolvedTimeSegmentColumns() {
   const cacheKey = APP_CONFIG.grist.tables.timeSegment;
   if (resolvedColumnCache.has(cacheKey)) {
@@ -179,6 +192,7 @@ export async function fetchExpenseAppTables() {
   const [
     projectRows,
     budgetRows,
+    planningProjectRows,
     projectTeamRows,
     timesheetRows,
     timeSegmentRows,
@@ -186,6 +200,7 @@ export async function fetchExpenseAppTables() {
   ] = await Promise.all([
     fetchTableRows(tables.projects),
     fetchTableRows(tables.budget),
+    fetchOptionalTableRows(tables.planningProject),
     fetchTableRows(tables.projectTeam),
     fetchTableRows(tables.timesheet),
     fetchNormalizedTimeSegmentRows(),
@@ -195,6 +210,7 @@ export async function fetchExpenseAppTables() {
   return {
     projectRows,
     budgetRows,
+    planningProjectRows,
     projectTeamRows,
     timesheetRows,
     timeSegmentRows,

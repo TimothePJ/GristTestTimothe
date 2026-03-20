@@ -1,5 +1,9 @@
 import { APP_CONFIG } from "../config.js";
-import { getWorkerTotalDays, groupWorkersByRole } from "../services/projectService.js";
+import {
+  countPlanningTasksOverlappingRange,
+  getWorkerTotalDays,
+  groupWorkersByRole,
+} from "../services/projectService.js";
 import {
   buildDisplayedMonths,
   clamp,
@@ -525,6 +529,7 @@ function getVisibleSlotRange(startAt, endAt, visibleSlots) {
 
 function buildVisibleSegmentBars(worker, visibleSlots, options = {}) {
   const timelineOptions = getTimelineOptions(options);
+  const planningTasks = timelineOptions.planningTasks || [];
 
   return (worker?.[timelineOptions.segmentsField] || [])
     .map((segment) => {
@@ -541,6 +546,11 @@ function buildVisibleSegmentBars(worker, visibleSlots, options = {}) {
 
       const allocationDays = getSegmentAllocationDays(segment);
       const label = segment?.label || `${formatDayValue(allocationDays)} j`;
+      const planningTaskCount = countPlanningTasksOverlappingRange(
+        planningTasks,
+        startAt,
+        endAt
+      );
       const leftPx = slotRange.firstSlot.leftPx;
       const widthPx =
         slotRange.lastSlot.leftPx +
@@ -555,6 +565,7 @@ function buildVisibleSegmentBars(worker, visibleSlots, options = {}) {
         leftPx,
         widthPx,
         label,
+        planningTaskCount,
       };
     })
     .filter(Boolean)
@@ -588,6 +599,7 @@ function renderSegmentBars(assignedBars) {
   return assignedBars
     .map((bar) => {
       const compact = bar.widthPx < 64;
+      const planningTooltip = `${bar.planningTaskCount} plan(s) Planning Projet sur cette periode`;
       return `
         <div
           class="charge-plan-segment-bar ${compact ? "is-compact" : ""}"
@@ -599,6 +611,8 @@ function renderSegmentBars(assignedBars) {
           data-worker-id="${bar.workerId}"
           data-start-slot-index="${bar.startSlotIndex}"
           data-end-slot-index="${bar.endSlotIndex}"
+          data-planning-tooltip="${escapeHtml(planningTooltip)}"
+          title="${escapeHtml(planningTooltip)}"
         >
           <span
             class="charge-plan-segment-handle is-start"
@@ -938,7 +952,10 @@ export function renderChargePlanTimeline(dom, project, viewState, options = {}) 
             zoomMode,
             zoomScale,
             sizingContext,
-            timelineOptions
+            {
+              ...timelineOptions,
+              planningTasks: project?.planningTasks || [],
+            }
           )
         ),
       ].join("");

@@ -828,6 +828,35 @@ td input {
   filter: brightness(1.03);
 }
 
+.charge-plan-segment-bar[data-planning-tooltip]::after {
+  content: attr(data-planning-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  z-index: 8;
+  min-width: max-content;
+  max-width: 220px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(8, 21, 38, 0.94);
+  box-shadow: 0 10px 24px rgba(8, 21, 38, 0.24);
+  color: #fff;
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: center;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 6px);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.charge-plan-segment-bar[data-planning-tooltip]:hover::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 .charge-plan-segment-bar.is-resizing {
   opacity: 0.38;
 }

@@ -73,6 +73,122 @@ function normalizePersonName(value) {
     .toLowerCase();
 }
 
+function normalizeLookupText(value) {
+  return toText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function addDays(date, days) {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate;
+}
+
+function addWeeks(date, weeks) {
+  return addDays(date, weeks * 7);
+}
+
+function parsePlanningDate(value) {
+  return parseRawDateTime(value);
+}
+
+function getPlanningTaskRange(row, planningColumns) {
+  if (!planningColumns) {
+    return null;
+  }
+
+  const typeDoc = toText(row?.[planningColumns.typeDoc]).toUpperCase();
+  const dateLimite = parsePlanningDate(row?.[planningColumns.dateLimite]);
+  const diffCoffrage = parsePlanningDate(row?.[planningColumns.diffCoffrage]);
+  const diffArmature = parsePlanningDate(row?.[planningColumns.diffArmature]);
+  const demarragesTravaux = parsePlanningDate(row?.[planningColumns.demarragesTravaux]);
+  const duree1 = toFiniteNumber(row?.[planningColumns.duree1], Number.NaN);
+  const duree2 = toFiniteNumber(row?.[planningColumns.duree2], Number.NaN);
+  const duree3 = toFiniteNumber(row?.[planningColumns.duree3], Number.NaN);
+
+  let startAt = null;
+  let endAt = null;
+
+  if (typeDoc.includes("ARMATURE")) {
+    startAt = diffCoffrage;
+    endAt = diffArmature;
+  } else if (typeDoc.includes("COFFRAGE")) {
+    startAt = dateLimite;
+    endAt = diffCoffrage;
+  } else if (dateLimite && diffCoffrage) {
+    startAt = dateLimite;
+    endAt = diffCoffrage;
+  } else if (diffCoffrage && diffArmature) {
+    startAt = diffCoffrage;
+    endAt = diffArmature;
+  } else if (dateLimite && Number.isFinite(duree1) && duree1 > 0) {
+    startAt = dateLimite;
+    endAt = addWeeks(dateLimite, duree1);
+  } else if (diffCoffrage && Number.isFinite(duree2) && duree2 > 0) {
+    startAt = diffCoffrage;
+    endAt = addWeeks(diffCoffrage, duree2);
+  } else if (diffArmature && Number.isFinite(duree3) && duree3 > 0) {
+    startAt = diffArmature;
+    endAt = addWeeks(diffArmature, duree3);
+  } else if (demarragesTravaux) {
+    startAt = demarragesTravaux;
+    endAt = addDays(demarragesTravaux, 1);
+  }
+
+  if (!(startAt instanceof Date) || Number.isNaN(startAt.getTime())) {
+    return null;
+  }
+
+  if (!(endAt instanceof Date) || Number.isNaN(endAt.getTime())) {
+    return null;
+  }
+
+  if (endAt <= startAt) {
+    endAt = addDays(startAt, 1);
+  }
+
+  return { startAt, endAt };
+}
+
+function getPlanningTaskLabel(row, planningColumns) {
+  return (
+    toText(row?.[planningColumns.taskName]) ||
+    toText(row?.[planningColumns.taskNameAlt]) ||
+    toText(row?.[planningColumns.taskCode]) ||
+    "Plan"
+  );
+}
+
+function getDayFloor(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+}
+
+function getDayCeil(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+}
+
+export function countPlanningTasksOverlappingRange(planningTasks, startAt, endAt) {
+  const rangeStart = startAt instanceof Date ? getDayFloor(startAt) : null;
+  const rangeEnd = endAt instanceof Date ? getDayCeil(endAt) : null;
+  if (!rangeStart || !rangeEnd || Number.isNaN(rangeStart.getTime()) || Number.isNaN(rangeEnd.getTime())) {
+    return 0;
+  }
+
+  return (planningTasks || []).reduce((count, task) => {
+    const taskStart = task?.startAt instanceof Date ? getDayFloor(task.startAt) : null;
+    const taskEnd = task?.endAt instanceof Date ? getDayCeil(task.endAt) : null;
+    if (!taskStart || !taskEnd) {
+      return count;
+    }
+
+    return taskStart <= rangeEnd && taskEnd >= rangeStart ? count + 1 : count;
+  }, 0);
+}
+
 function chooseMostFrequentRole(roleCounts) {
   let selectedRole = "";
   let selectedCount = -1;
@@ -128,6 +244,7 @@ function compareWorkersByName(leftWorker, rightWorker) {
 export function buildExpenseData({
   projectRows,
   budgetRows,
+  planningProjectRows,
   projectTeamRows,
   timesheetRows,
   timeSegmentRows,
@@ -151,6 +268,7 @@ export function buildExpenseData({
         projectNumber
       ),
       budgetLines: [],
+      planningTasks: [],
       workers: [],
     };
   });
@@ -166,6 +284,63 @@ export function buildExpenseData({
       chapter: toText(row?.[columns.budget.chapter]),
       amount: toFiniteNumber(row?.[columns.budget.amount], 0),
     });
+  });
+
+  const projectsByPlanningKey = new Map();
+  projects.forEach((project) => {
+    const projectNameKey = normalizeLookupText(project.name);
+    const projectNumberKey = normalizeLookupText(project.projectNumber);
+
+    if (projectNameKey) {
+      const existingProjects = projectsByPlanningKey.get(projectNameKey) || [];
+      existingProjects.push(project);
+      projectsByPlanningKey.set(projectNameKey, existingProjects);
+    }
+
+    if (projectNumberKey && projectNumberKey !== projectNameKey) {
+      const existingProjects = projectsByPlanningKey.get(projectNumberKey) || [];
+      existingProjects.push(project);
+      projectsByPlanningKey.set(projectNumberKey, existingProjects);
+    }
+  });
+
+  const planningColumns = columns.planningProject;
+
+  (planningProjectRows || []).forEach((row) => {
+    if (!planningColumns) {
+      return;
+    }
+
+    const planningProjectKey = normalizeLookupText(row?.[planningColumns.projectName]);
+    if (!planningProjectKey) {
+      return;
+    }
+
+    const linkedProjects = projectsByPlanningKey.get(planningProjectKey) || [];
+    if (!linkedProjects.length) {
+      return;
+    }
+
+    const range = getPlanningTaskRange(row, planningColumns);
+    if (!range) {
+      return;
+    }
+
+    const task = {
+      id: Number(row?.[planningColumns.id]),
+      name: getPlanningTaskLabel(row, planningColumns),
+      typeDoc: toText(row?.[planningColumns.typeDoc]),
+      startAt: range.startAt,
+      endAt: range.endAt,
+    };
+
+    linkedProjects.forEach((project) => {
+      project.planningTasks.push(task);
+    });
+  });
+
+  projects.forEach((project) => {
+    project.planningTasks.sort((left, right) => left.startAt - right.startAt);
   });
 
   const workersById = new Map();
