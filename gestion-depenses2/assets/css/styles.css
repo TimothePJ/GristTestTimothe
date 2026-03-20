@@ -367,6 +367,19 @@ td input {
   margin: 0 0 16px;
 }
 
+#spending-chart-shell {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid rgba(0, 73, 144, 0.12);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+#spending-chart-controls {
+  margin: 0;
+}
+
 .charge-plan-helper {
   display: flex;
   justify-content: space-between;
@@ -1596,6 +1609,11 @@ td input {
 
 .billing-editor-toggle-label {
   white-space: nowrap;
+}
+
+.spending-chart-controls-row {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .billing-editor-title {

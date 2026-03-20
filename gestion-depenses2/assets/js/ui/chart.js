@@ -53,12 +53,41 @@ export function clearSpendingBillingEditor(boardEl) {
   boardEl.innerHTML = "";
 }
 
+export function clearSpendingChartControls(boardEl) {
+  if (!(boardEl instanceof HTMLElement)) {
+    return;
+  }
+
+  boardEl.innerHTML = "";
+}
+
 export function getSpendingChartBarsFromTop() {
   return Boolean(spendingChartBarsFromTop);
 }
 
 export function setSpendingChartBarsFromTop(value) {
   spendingChartBarsFromTop = Boolean(value);
+}
+
+export function renderSpendingChartControls(boardEl) {
+  if (!(boardEl instanceof HTMLElement)) {
+    return;
+  }
+
+  const barsFromTopChecked = getSpendingChartBarsFromTop() ? "checked" : "";
+
+  boardEl.innerHTML = `
+    <div class="spending-chart-controls-row">
+      <label class="billing-editor-toggle">
+        <input
+          type="checkbox"
+          class="spending-chart-bars-toggle-input"
+          ${barsFromTopChecked}
+        >
+        <span class="billing-editor-toggle-label">Colonnes depuis le haut</span>
+      </label>
+    </div>
+  `;
 }
 
 export function renderSpendingBillingEditor(boardEl, project, viewState) {
@@ -72,7 +101,6 @@ export function renderSpendingBillingEditor(boardEl, project, viewState) {
   }
 
   const { displayedMonths, billingPercentData } = buildChartSeries(project, viewState);
-  const barsFromTopChecked = getSpendingChartBarsFromTop() ? "checked" : "";
 
   boardEl.innerHTML = `
     <section class="billing-editor-panel">
@@ -111,14 +139,6 @@ export function renderSpendingBillingEditor(boardEl, project, viewState) {
             .join("")}
         </div>
       </div>
-      <label class="billing-editor-toggle">
-        <input
-          type="checkbox"
-          class="spending-chart-bars-toggle-input"
-          ${barsFromTopChecked}
-        >
-        <span class="billing-editor-toggle-label">Colonnes depuis le haut</span>
-      </label>
     </section>
   `;
 }

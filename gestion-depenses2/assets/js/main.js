@@ -24,9 +24,11 @@ import {
 import { assertDomRefs, getDomRefs } from "./ui/dom.js";
 import {
   clearSpendingBillingEditor,
+  clearSpendingChartControls,
   destroyChart,
   getSpendingChartBarsFromTop,
   renderSpendingBillingEditor,
+  renderSpendingChartControls,
   renderSpendingChart,
   setSpendingChartBarsFromTop,
 } from "./ui/chart.js";
@@ -527,6 +529,7 @@ function renderApp() {
     clearRealChargeTimeline(dom);
     clearTables(dom);
     clearSpendingBillingEditor(dom.spendingBillingEditor);
+    clearSpendingChartControls(dom.spendingChartControls);
     state.spendingChart = destroyChart(state.spendingChart);
     return;
   }
@@ -543,6 +546,7 @@ function renderApp() {
     selectedMonth: state.selectedMonth,
     monthSpan: state.monthSpan,
   });
+  renderSpendingChartControls(dom.spendingChartControls);
   renderKpi(dom, selectedProject);
   state.spendingChart = renderSpendingChart(
     dom.spendingChartCanvas,
@@ -1816,7 +1820,7 @@ function handleSpendingChartControlChange(event) {
     monthSpan: state.monthSpan,
   };
 
-  renderSpendingBillingEditor(dom.spendingBillingEditor, selectedProject, viewState);
+  renderSpendingChartControls(dom.spendingChartControls);
   state.spendingChart = renderSpendingChart(
     dom.spendingChartCanvas,
     state.spendingChart,
@@ -2581,7 +2585,7 @@ function bindEvents() {
   dom.expenseBoard.addEventListener("change", handleTableInputChange);
   dom.realExpenseBoard.addEventListener("change", handleExpenseGraphControlChange);
   dom.spendingBillingEditor.addEventListener("change", handleTableInputChange);
-  dom.spendingBillingEditor.addEventListener("change", handleSpendingChartControlChange);
+  dom.spendingChartControls.addEventListener("change", handleSpendingChartControlChange);
   dom.teamManagementRates.addEventListener("change", handleTeamManagementSummaryToggleChange);
   dom.teamManagementRates.addEventListener("change", handleTableInputChange);
   dom.teamManagementRates.addEventListener("click", handleDeleteWorker);
