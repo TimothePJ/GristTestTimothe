@@ -183,6 +183,10 @@ input {
   margin: 0;
 }
 
+.team-summary-display-toggle-input {
+  margin: 0;
+}
+
 .team-summary-toggle-label {
   font-weight: 600;
   color: var(--color-text);

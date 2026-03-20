@@ -23,6 +23,7 @@ const expenseGraphDisplayModes = new Map([
 ]);
 let teamManagementSummaryMode = "provisional";
 let teamManagementSummaryGroupedByRole = false;
+let teamManagementSummaryDisplayMode = "currency";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -102,6 +103,14 @@ export function getTeamManagementSummaryGroupedByRole() {
 
 export function setTeamManagementSummaryGroupedByRole(value) {
   teamManagementSummaryGroupedByRole = Boolean(value);
+}
+
+export function getTeamManagementSummaryDisplayMode() {
+  return teamManagementSummaryDisplayMode === "days" ? "days" : "currency";
+}
+
+export function setTeamManagementSummaryDisplayMode(mode = "currency") {
+  teamManagementSummaryDisplayMode = mode === "days" ? "days" : "currency";
 }
 
 function buildExpenseMonths(project, monthBoundsGetter) {
@@ -375,8 +384,7 @@ function buildTeamManagementSummaryEntries(project, mode = "provisional") {
         color: getSeriesColor(index, Math.max(workers.length, 1), 0.9),
       };
     })
-    .filter((entry) => entry.value > 0)
-    .sort((left, right) => right.value - left.value);
+    .filter((entry) => entry.value > 0 || entry.days > 0);
 }
 
 function buildTeamManagementSummaryRoleEntries(project, mode = "provisional") {
@@ -401,27 +409,37 @@ function buildTeamManagementSummaryRoleEntries(project, mode = "provisional") {
         color: getSeriesColor(index, Math.max(roles.length, 1), 0.9),
       };
     })
-    .filter((entry) => entry.value > 0);
+    .filter((entry) => entry.value > 0 || entry.days > 0);
 }
 
 function renderTeamManagementSummary(project) {
   const mode = getTeamManagementSummaryMode();
   const groupedByRole = getTeamManagementSummaryGroupedByRole();
-  const entries = groupedByRole
+  const displayMode = getTeamManagementSummaryDisplayMode();
+  const rawEntries = groupedByRole
     ? buildTeamManagementSummaryRoleEntries(project, mode)
     : buildTeamManagementSummaryEntries(project, mode);
-  const totalValue = entries.reduce((sum, entry) => sum + entry.value, 0);
+  const entries = [...rawEntries].sort((left, right) => {
+    const leftMetric = displayMode === "days" ? left.days : left.value;
+    const rightMetric = displayMode === "days" ? right.days : right.value;
+    return rightMetric - leftMetric;
+  });
+  const totalMetric = entries.reduce((sum, entry) => {
+    return sum + (displayMode === "days" ? entry.days : entry.value);
+  }, 0);
   const modeChecked = mode === "real" ? "checked" : "";
   const groupChecked = groupedByRole ? "checked" : "";
+  const displayChecked = displayMode === "days" ? "checked" : "";
   const modeLabel = mode === "real" ? "Reel" : "Previsionnel";
   const groupingLabel = groupedByRole ? "Par role" : "Par personne";
+  const valueSuffix = displayMode === "days" ? "j" : "\u20ac";
 
   return `
     <section class="team-summary-panel">
       <div class="team-summary-toolbar">
         <div class="team-summary-copy">
           <strong class="team-summary-title">Synthese equipe</strong>
-          <span class="team-summary-subtitle">${modeLabel} - ${groupingLabel} - ${formatNumber(totalValue)} €</span>
+          <span class="team-summary-subtitle">${modeLabel} - ${groupingLabel} - ${formatNumber(totalMetric)} ${valueSuffix}</span>
         </div>
         <div class="team-summary-toggle-group">
           <label class="team-summary-toggle">
@@ -440,6 +458,14 @@ function renderTeamManagementSummary(project) {
             >
             <span class="team-summary-toggle-label">Regrouper par role</span>
           </label>
+          <label class="team-summary-toggle">
+            <input
+              type="checkbox"
+              class="team-summary-display-toggle-input"
+              ${displayChecked}
+            >
+            <span class="team-summary-toggle-label">Afficher en jours</span>
+          </label>
         </div>
       </div>
       ${
@@ -449,19 +475,20 @@ function renderTeamManagementSummary(project) {
         <div class="team-summary-bar">
           ${entries
             .map((entry) => {
-              const share = totalValue > 0 ? (entry.value / totalValue) * 100 : 0;
+              const metricValue = displayMode === "days" ? entry.days : entry.value;
+              const share = totalMetric > 0 ? (metricValue / totalMetric) * 100 : 0;
               const showInlineLabel = share >= 10;
-              const segmentTitle = `${entry.name} : ${formatNumber(entry.value)} €`;
+              const segmentTitle = `${entry.name} : ${formatNumber(metricValue)} ${valueSuffix}`;
 
               return `
                 <div
                   class="team-summary-segment"
-                  style="flex:${Math.max(entry.value, 1)} 1 0; background:${entry.color};"
+                  style="flex:${Math.max(metricValue, 1)} 1 0; background:${entry.color};"
                   title="${escapeHtml(segmentTitle)}"
                 >
                   ${
                     showInlineLabel
-                      ? `<span class="team-summary-segment-label">${formatNumber(entry.value)} €</span>`
+                      ? `<span class="team-summary-segment-label">${formatNumber(metricValue)} ${valueSuffix}</span>`
                       : ""
                   }
                 </div>
@@ -476,7 +503,9 @@ function renderTeamManagementSummary(project) {
                 <div class="team-summary-legend-item">
                   <span class="team-summary-legend-swatch" style="background:${entry.color};"></span>
                   <span class="team-summary-legend-name">${escapeHtml(entry.name)}</span>
-                  <strong class="team-summary-legend-value">${formatNumber(entry.value)} €</strong>
+                  <strong class="team-summary-legend-value">${formatNumber(
+                    displayMode === "days" ? entry.days : entry.value
+                  )} ${valueSuffix}</strong>
                 </div>
               `
             )
@@ -486,7 +515,7 @@ function renderTeamManagementSummary(project) {
       `
           : `
       <div class="team-summary-empty-state">
-        Aucune depense ${mode === "real" ? "reelle" : "previsionnelle"} a afficher pour le moment.
+        Aucune donnee ${mode === "real" ? "reelle" : "previsionnelle"} a afficher pour le moment.
       </div>
       `
       }

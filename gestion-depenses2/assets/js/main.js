@@ -41,9 +41,11 @@ import {
 } from "./ui/chargeTimeline.js";
 import {
   getExpenseGraphDisplayMode,
+  getTeamManagementSummaryDisplayMode,
   getTeamManagementSummaryGroupedByRole,
   getTeamManagementSummaryMode,
   setExpenseGraphDisplayMode,
+  setTeamManagementSummaryDisplayMode,
   setTeamManagementSummaryGroupedByRole,
   setTeamManagementSummaryMode,
 } from "./ui/expenseTimeline.js";
@@ -1796,6 +1798,13 @@ function handleTeamManagementSummaryToggleChange(event) {
     }
 
     setTeamManagementSummaryGroupedByRole(nextGroupedState);
+  } else if (target.classList.contains("team-summary-display-toggle-input")) {
+    const nextDisplayMode = target.checked ? "days" : "currency";
+    if (getTeamManagementSummaryDisplayMode() === nextDisplayMode) {
+      return;
+    }
+
+    setTeamManagementSummaryDisplayMode(nextDisplayMode);
   } else {
     return;
   }

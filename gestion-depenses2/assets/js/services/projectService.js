@@ -843,13 +843,16 @@ export function buildChartSeries(project, { selectedYear, selectedMonth, monthSp
   const labels = [];
   const provisionalSpendingData = [];
   const realSpendingData = [];
+  const billedAmountData = [];
   const provisionalPercentData = [];
   const realPercentData = [];
   const billingPercentData = [];
 
   displayedMonths.forEach(({ monthKey, monthLabel, year }) => {
+    const billingPercentage = getBillingPercentageForMonth(project, monthKey);
     labels.push([monthLabel, String(year)]);
-    billingPercentData.push(getBillingPercentageForMonth(project, monthKey));
+    billingPercentData.push(billingPercentage);
+    billedAmountData.push(totalBudget > 0 ? (totalBudget * billingPercentage) / 100 : 0);
 
     let provisionalValue = 0;
     let realValue = 0;
@@ -882,6 +885,7 @@ export function buildChartSeries(project, { selectedYear, selectedMonth, monthSp
     labels,
     provisionalSpendingData,
     realSpendingData,
+    billedAmountData,
     provisionalPercentData,
     realPercentData,
     billingPercentData,

@@ -1,6 +1,24 @@
 import { buildChartSeries, getProjectBudgetTotal } from "../services/projectService.js";
 import { formatNumber } from "../utils/format.js";
 
+const SPENDING_CHART_COLORS = {
+  provisional: {
+    solid: "rgba(121, 128, 138, 1)",
+    fill: "rgba(121, 128, 138, 0.45)",
+  },
+  real: {
+    solid: "rgba(232, 126, 43, 1)",
+    fill: "rgba(232, 126, 43, 0.45)",
+  },
+  billing: {
+    solid: "rgba(43, 123, 201, 1)",
+    fill: "rgba(43, 123, 201, 0.45)",
+  },
+  budget: {
+    solid: "rgba(255, 36, 36, 0.9)",
+  },
+};
+
 export function destroyChart(chart) {
   if (chart && typeof chart.destroy === "function") {
     chart.destroy();
@@ -26,6 +44,7 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
     labels,
     provisionalSpendingData,
     realSpendingData,
+    billedAmountData,
     provisionalPercentData,
     realPercentData,
     billingPercentData,
@@ -45,7 +64,7 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
           type: "line",
           label: "Avancement previsionnel (%)",
           data: provisionalPercentData,
-          borderColor: "rgba(255, 99, 132, 1)",
+          borderColor: SPENDING_CHART_COLORS.provisional.solid,
           borderWidth: 2,
           fill: false,
           yAxisID: "y",
@@ -56,7 +75,7 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
           type: "line",
           label: "Avancement reel (%)",
           data: realPercentData,
-          borderColor: "rgba(54, 162, 235, 1)",
+          borderColor: SPENDING_CHART_COLORS.real.solid,
           borderWidth: 2,
           fill: false,
           yAxisID: "y",
@@ -67,7 +86,7 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
           type: "line",
           label: "Pourcentage facturation (%)",
           data: billingPercentData,
-          borderColor: "rgba(75, 192, 192, 1)",
+          borderColor: SPENDING_CHART_COLORS.billing.solid,
           borderWidth: 2,
           fill: false,
           yAxisID: "y",
@@ -78,8 +97,8 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
           type: "bar",
           label: "Depenses previsionnelles cumulees (€)",
           data: provisionalSpendingData,
-          backgroundColor: "rgba(255, 99, 132, 0.5)",
-          borderColor: "rgba(255, 99, 132, 1)",
+          backgroundColor: SPENDING_CHART_COLORS.provisional.fill,
+          borderColor: SPENDING_CHART_COLORS.provisional.solid,
           borderWidth: 1,
           yAxisID: "y1",
           datalabels: { align: "end", anchor: "end" },
@@ -88,8 +107,18 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
           type: "bar",
           label: "Depenses reelles cumulees (€)",
           data: realSpendingData,
-          backgroundColor: "rgba(54, 162, 235, 0.5)",
-          borderColor: "rgba(54, 162, 235, 1)",
+          backgroundColor: SPENDING_CHART_COLORS.real.fill,
+          borderColor: SPENDING_CHART_COLORS.real.solid,
+          borderWidth: 1,
+          yAxisID: "y1",
+          datalabels: { align: "end", anchor: "end" },
+        },
+        {
+          type: "bar",
+          label: "Montant facture mensuel (â‚¬)",
+          data: billedAmountData,
+          backgroundColor: SPENDING_CHART_COLORS.billing.fill,
+          borderColor: SPENDING_CHART_COLORS.billing.solid,
           borderWidth: 1,
           yAxisID: "y1",
           datalabels: { align: "end", anchor: "end" },
@@ -98,7 +127,7 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
           type: "line",
           label: "Budget total (€)",
           data: labels.map(() => totalBudget),
-          borderColor: "rgba(0, 73, 144, 0.7)",
+          borderColor: SPENDING_CHART_COLORS.budget.solid,
           borderDash: [6, 4],
           borderWidth: 2,
           pointRadius: 0,
@@ -151,6 +180,19 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
         },
       },
       plugins: {
+        legend: {
+          position: "bottom",
+          labels: {
+            usePointStyle: true,
+            pointStyle: "rectRounded",
+            boxWidth: 10,
+            boxHeight: 10,
+            padding: 14,
+            font: {
+              size: 11,
+            },
+          },
+        },
         datalabels: {
           color: "#000",
           font: {
