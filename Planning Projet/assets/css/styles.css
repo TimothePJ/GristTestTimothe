@@ -22,10 +22,11 @@
   --col-duration-2: 64px;
   --col-demarrage: 100px;
   --col-indice: 60px;
+  --col-realise: 92px;
   --col-retards: 64px;
 
   --left-pad-x: 4px;
-  --left-grid-width: calc(var(--col-id2) + var(--col-task) + var(--col-ligne-planning) + var(--col-start) + var(--col-duration-1) + var(--col-end) + var(--col-duration-2) + var(--col-demarrage) + var(--col-indice) + var(--col-retards));
+  --left-grid-width: calc(var(--col-id2) + var(--col-task) + var(--col-ligne-planning) + var(--col-start) + var(--col-duration-1) + var(--col-end) + var(--col-duration-2) + var(--col-demarrage) + var(--col-indice) + var(--col-realise) + var(--col-retards));
   --left-panel-width: calc(var(--left-grid-width) + (var(--left-pad-x) * 2));
 
   /* Hauteur de ligne commune labels + timeline */
@@ -194,7 +195,7 @@ body.is-ms-project-drag-cursor * {
 
 .planning-header-left {
   display: grid;
-  grid-template-columns: var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-retards);
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-realise) var(--col-retards);
   width: var(--left-grid-width);
   padding: 0 var(--left-pad-x);
   box-sizing: content-box;
@@ -227,6 +228,10 @@ body.is-ms-project-drag-cursor * {
 }
 
 .planning-header-left .c-indice {
+  text-align: center;
+}
+
+.planning-header-left .c-realise {
   text-align: center;
 }
 
@@ -455,7 +460,7 @@ body.is-ms-project-drag-cursor * {
 
 #planningTimeline .group-row-grid {
   display: grid !important;
-  grid-template-columns: var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-retards) !important;
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-realise) var(--col-retards) !important;
   align-items: center !important;
   width: var(--left-grid-width) !important;
   min-height: var(--planning-row-height) !important;
@@ -510,7 +515,7 @@ body.planning-row-dragging {
   user-select: none;
   z-index: 1000002;
   display: grid;
-  grid-template-columns: var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-retards);
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-realise) var(--col-retards);
   align-items: center;
   min-height: var(--planning-row-height);
   max-width: min(1120px, calc(100vw - 24px));
@@ -736,7 +741,8 @@ body.planning-row-dragging {
   font-variant-numeric: tabular-nums;
 }
 
-#planningTimeline .group-row-grid .cell-indice {
+#planningTimeline .group-row-grid .cell-indice,
+#planningTimeline .group-row-grid .cell-realise {
   text-align: center !important;
   font-weight: 600;
 }
@@ -1034,6 +1040,7 @@ body.is-add-zone-modal-open {
     --col-duration-2: 68px;
     --col-demarrage: 96px;
     --col-indice: 64px;
+    --col-realise: 96px;
     --col-retards: 84px;
   }
 

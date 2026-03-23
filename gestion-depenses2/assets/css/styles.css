@@ -166,9 +166,87 @@ input {
   line-height: 1;
 }
 
-.planning-management-month-input {
-  width: auto;
-  min-width: 176px;
+.planning-management-month-picker-wrap {
+  position: relative;
+}
+
+.planning-management-month-trigger {
+  min-width: 190px;
+  justify-content: space-between;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid rgba(0, 73, 144, 0.14);
+  box-shadow: 0 6px 18px rgba(0, 73, 144, 0.06);
+}
+
+.planning-management-month-trigger:hover,
+.planning-management-month-trigger.is-open {
+  background: rgba(0, 73, 144, 0.06);
+  color: var(--color-text);
+}
+
+.planning-management-month-picker {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  z-index: 30;
+  width: 272px;
+  padding: 14px;
+  border: 1px solid rgba(0, 73, 144, 0.14);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, #ffffff, #f6faff);
+  box-shadow: 0 18px 34px rgba(0, 32, 71, 0.18);
+}
+
+.planning-management-month-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.planning-management-month-picker-nav-btn {
+  min-width: 38px;
+  padding-inline: 0;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.planning-management-month-picker-year {
+  color: var(--color-text);
+  font-size: 0.98rem;
+}
+
+.planning-management-month-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.planning-management-month-picker-month-btn {
+  padding: 9px 8px;
+  border: 1px solid rgba(0, 73, 144, 0.1);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  text-transform: capitalize;
+}
+
+.planning-management-month-picker-month-btn:hover {
+  background: rgba(0, 73, 144, 0.08);
+  color: var(--color-text);
+}
+
+.planning-management-month-picker-month-btn.is-selected {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+.planning-management-month-picker-month-btn.is-current:not(.is-selected) {
+  border-color: rgba(0, 73, 144, 0.4);
+  box-shadow: inset 0 0 0 1px rgba(0, 73, 144, 0.18);
 }
 
 .planning-management-title {
@@ -201,9 +279,28 @@ input {
   gap: 10px;
 }
 
+.planning-management-list-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, auto) minmax(118px, auto);
+  gap: 12px 16px;
+  align-items: end;
+  padding: 0 14px;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.planning-management-list-head-realisation {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  text-align: right;
+}
+
 .planning-management-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, auto) minmax(118px, auto);
   gap: 12px 16px;
   align-items: center;
   padding: 12px 14px;
@@ -240,6 +337,20 @@ input {
 }
 
 .planning-management-item-deadline-label {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.planning-management-item-realisation {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  text-align: right;
+}
+
+.planning-management-item-realisation-label {
   color: var(--color-text-muted);
   font-size: 0.78rem;
   text-transform: uppercase;

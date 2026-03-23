@@ -164,6 +164,33 @@ function getPlanningTaskLabel(row, planningColumns) {
   );
 }
 
+function normalizePlanningIndice(value) {
+  return toText(value).trim().toUpperCase();
+}
+
+export function computePlanningRealisationValue(typeDoc, indice) {
+  const normalizedTypeDoc = toText(typeDoc).trim().toUpperCase();
+  const normalizedIndice = normalizePlanningIndice(indice);
+
+  // The result must always be derived from the current Indice value.
+  // Empty indice remains a distinct state from the first indice "0".
+  if (normalizedIndice === "") {
+    return 0;
+  }
+
+  const isNumericIndice = /^\d+$/.test(normalizedIndice);
+  if (isNumericIndice) {
+    return normalizedTypeDoc.includes("COFFRAGE") ? 50 : 100;
+  }
+
+  const isAlphabeticIndice = /^[A-Z]/.test(normalizedIndice);
+  if (isAlphabeticIndice) {
+    return 100;
+  }
+
+  return 100;
+}
+
 function getDayFloor(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
 }
@@ -221,15 +248,7 @@ export function getPlanningTasksOverlappingRange(planningTasks, startAt, endAt) 
 }
 
 export function countPlanningTasksOverlappingRange(planningTasks, startAt, endAt) {
-  return getPlanningTasksOverlappingRange(planningTasks, startAt, endAt).reduce((count, task) => {
-    const taskStart = task?.startAt instanceof Date ? getDayFloor(task.startAt) : null;
-    const taskEnd = task?.endAt instanceof Date ? getDayCeil(task.endAt) : null;
-    if (!taskStart || !taskEnd) {
-      return count;
-    }
-
-    return taskStart <= rangeEnd && taskEnd >= rangeStart ? count + 1 : count;
-  }, 0);
+  return getPlanningTasksOverlappingRange(planningTasks, startAt, endAt).length;
 }
 
 function chooseMostFrequentRole(roleCounts) {
@@ -374,6 +393,11 @@ export function buildExpenseData({
       name: getPlanningTaskLabel(row, planningColumns),
       taskCode: toText(row?.[planningColumns.taskCode]),
       typeDoc: toText(row?.[planningColumns.typeDoc]),
+      indice: toText(row?.[planningColumns.indice]),
+      realisationPct: computePlanningRealisationValue(
+        row?.[planningColumns.typeDoc],
+        row?.[planningColumns.indice]
+      ),
       startAt: range.startAt,
       endAt: range.endAt,
       deadlineAt: parsePlanningDate(row?.[planningColumns.dateLimite]) || range.endAt,

@@ -86,6 +86,8 @@ export const APP_CONFIG = {
         taskNameAlt: "Tache",
         taskCode: "ID2",
         typeDoc: "Type_doc",
+        indice: "Indice",
+        realise: "Realise",
         dateLimite: "Date_limite",
         duree1: "Duree_1",
         diffCoffrage: "Diff_coffrage",

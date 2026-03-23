@@ -99,6 +99,8 @@ let chargePlanRangeStartDate = "";
 let editingBudgetLineIndex = null;
 let planningManagementHover = null;
 let planningManagementMonthKey = getMonthKeyFromDate(new Date());
+let planningManagementMonthPickerOpen = false;
+let planningManagementMonthPickerViewYear = new Date().getFullYear();
 const budgetLineDragState = {
   sourceIndex: null,
   targetIndex: null,
@@ -576,11 +578,15 @@ function renderApp() {
 
 function renderPlanningManagementSection(selectedProject = getSelectedProject()) {
   if (!selectedProject) {
+    planningManagementMonthPickerOpen = false;
     clearPlanningManagement(dom.planManagementBoard);
     return;
   }
 
-  renderPlanningManagement(dom.planManagementBoard, selectedProject, planningManagementMonthKey);
+  renderPlanningManagement(dom.planManagementBoard, selectedProject, planningManagementMonthKey, {
+    monthPickerOpen: planningManagementMonthPickerOpen,
+    monthPickerViewYear: planningManagementMonthPickerViewYear,
+  });
 }
 
 function shiftPlanningManagementMonth(monthKey, deltaMonths = 0) {
@@ -594,9 +600,52 @@ function shiftPlanningManagementMonth(monthKey, deltaMonths = 0) {
   return toMonthKey(cursor.getFullYear(), cursor.getMonth() + 1);
 }
 
+function syncPlanningManagementMonthPickerViewYear(monthKey = planningManagementMonthKey) {
+  const parsed = parseMonthKey(monthKey);
+  planningManagementMonthPickerViewYear = parsed?.year || new Date().getFullYear();
+}
+
 function handlePlanningManagementControlClick(event) {
   const target = event.target;
   if (!(target instanceof HTMLButtonElement)) return;
+
+  if (target.classList.contains("planning-management-month-trigger")) {
+    if (!planningManagementMonthPickerOpen) {
+      syncPlanningManagementMonthPickerViewYear();
+    }
+
+    planningManagementMonthPickerOpen = !planningManagementMonthPickerOpen;
+    renderPlanningManagementSection();
+    return;
+  }
+
+  if (target.classList.contains("planning-management-month-picker-nav-btn")) {
+    const yearDelta = Number(target.dataset.monthPickerYearDelta);
+    if (!Number.isInteger(yearDelta)) {
+      return;
+    }
+
+    planningManagementMonthPickerOpen = true;
+    planningManagementMonthPickerViewYear += yearDelta;
+    renderPlanningManagementSection();
+    return;
+  }
+
+  if (target.classList.contains("planning-management-month-picker-month-btn")) {
+    const normalizedMonthKey = parseMonthKey(target.dataset.monthValue)
+      ? String(target.dataset.monthValue).trim()
+      : "";
+    if (!normalizedMonthKey) {
+      return;
+    }
+
+    planningManagementMonthKey = normalizedMonthKey;
+    planningManagementMonthPickerOpen = false;
+    syncPlanningManagementMonthPickerViewYear(normalizedMonthKey);
+    renderPlanningManagementSection();
+    return;
+  }
+
   if (!target.classList.contains("planning-management-nav-btn")) return;
 
   const monthDelta = Number(target.dataset.monthDelta);
@@ -608,6 +657,8 @@ function handlePlanningManagementControlClick(event) {
     planningManagementMonthKey,
     monthDelta
   );
+  planningManagementMonthPickerOpen = false;
+  syncPlanningManagementMonthPickerViewYear(planningManagementMonthKey);
   renderPlanningManagementSection();
 }
 
@@ -624,6 +675,8 @@ function handlePlanningManagementControlChange(event) {
   }
 
   planningManagementMonthKey = normalizedMonthKey;
+  planningManagementMonthPickerOpen = false;
+  syncPlanningManagementMonthPickerViewYear(planningManagementMonthKey);
   renderPlanningManagementSection();
 }
 
@@ -2760,6 +2813,24 @@ function bindEvents() {
   dom.spendingChartControls.addEventListener("change", handleSpendingChartControlChange);
   dom.planManagementBoard.addEventListener("click", handlePlanningManagementControlClick);
   dom.planManagementBoard.addEventListener("change", handlePlanningManagementControlChange);
+  document.addEventListener("pointerdown", (event) => {
+    if (!planningManagementMonthPickerOpen) {
+      return;
+    }
+
+    if (!(dom?.planManagementBoard instanceof HTMLElement)) {
+      planningManagementMonthPickerOpen = false;
+      return;
+    }
+
+    const target = event.target;
+    if (target instanceof Node && dom.planManagementBoard.contains(target)) {
+      return;
+    }
+
+    planningManagementMonthPickerOpen = false;
+    renderPlanningManagementSection();
+  });
   dom.teamManagementRates.addEventListener("change", handleTeamManagementSummaryToggleChange);
   dom.teamManagementRates.addEventListener("change", handleTableInputChange);
   dom.teamManagementRates.addEventListener("click", handleDeleteWorker);

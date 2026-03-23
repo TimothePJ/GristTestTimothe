@@ -2056,6 +2056,7 @@ function buildGroupLabelElement(group) {
   row.dataset.planningEndIso = String(group?.finIso ?? "");
   row.dataset.planningDemarrageIso = String(group?.demarrageIso ?? "");
   row.dataset.planningIndice = String(group?.indiceLabel ?? "");
+  row.dataset.planningRealise = String(group?.realiseLabel ?? "");
   row.dataset.planningRetards = String(group?.retardsLabel ?? "");
   if (String(group?.typeDocLabel ?? "").toUpperCase().includes("COFFRAGE")) {
     row.classList.add("row-type-coffrage");
@@ -2132,6 +2133,10 @@ function buildGroupLabelElement(group) {
   indice.className = "cell-indice";
   indice.textContent = String(group?.indiceLabel ?? "");
 
+  const realise = document.createElement("div");
+  realise.className = "cell-realise";
+  realise.textContent = String(group?.realiseLabel ?? "");
+
   const retards = document.createElement("div");
   retards.className = "cell-retards";
   retards.textContent = String(group?.retardsLabel ?? "");
@@ -2146,6 +2151,7 @@ function buildGroupLabelElement(group) {
     dureeFinDemarrage,
     demarrage,
     indice,
+    realise,
     retards,
   ].forEach((cellEl) => {
     cellEl.setAttribute("draggable", "true");
@@ -2175,6 +2181,7 @@ function buildGroupLabelElement(group) {
     dureeFinDemarrage,
     demarrage,
     indice,
+    realise,
     retards
   );
   return row;

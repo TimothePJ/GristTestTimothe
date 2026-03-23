@@ -1369,5 +1369,49 @@ export async function fetchPlanningRows() {
   return rows;
 }
 
+export async function syncPlanningRealiseValues(updates) {
+  const normalizedUpdates = (updates || []).filter((update) => {
+    const rowId = Number(update?.id);
+    const realiseValue = update?.realise;
+    return (
+      Number.isInteger(rowId) &&
+      rowId > 0 &&
+      (realiseValue == null || Number.isFinite(Number(realiseValue)))
+    );
+  });
+
+  if (!normalizedUpdates.length) {
+    return { updatedCount: 0 };
+  }
+
+  const table = APP_CONFIG.grist.planningTable;
+  if (!table?.sourceTable) {
+    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
+  }
+
+  const columns = table.columns || {};
+  const realiseCol = String(columns.realise || "Realise").trim();
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  await grist.docApi.applyUserActions(
+    normalizedUpdates.map((update) => [
+      "UpdateRecord",
+      table.sourceTable,
+      Number(update.id),
+      {
+        [realiseCol]: update.realise == null ? null : Number(update.realise),
+      },
+    ])
+  );
+
+  return {
+    updatedCount: normalizedUpdates.length,
+  };
+}
+
 /* Utilitaires exportés pour planningService */
 export { toText };

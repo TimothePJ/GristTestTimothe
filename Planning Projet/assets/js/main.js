@@ -4,6 +4,7 @@ import {
   initGrist,
   buildProjectOptions,
   fetchPlanningRows,
+  syncPlanningRealiseValues,
   syncCoffrageDiffCoffrageFromGroups,
   updatePlanningDurationAndLeftDate,
   updatePlanningFromMsProjectDrop,
@@ -12,7 +13,10 @@ import {
   addPlanningZoneRow,
   toText,
 } from "./services/gristService.js";
-import { buildTimelineDataFromPlanningRows } from "./services/planningService.js";
+import {
+  buildPlanningRealiseUpdates,
+  buildTimelineDataFromPlanningRows,
+} from "./services/planningService.js";
 import {
   initProjectSelector,
   initZoneSelector,
@@ -465,6 +469,17 @@ async function refreshPlanning() {
       console.error("Erreur sync Diff_coffrage (groupes) :", syncError);
     }
 
+    let realiseSyncResult = { updatedCount: 0 };
+    try {
+      const realiseUpdates = buildPlanningRealiseUpdates(planningRows);
+      if (realiseUpdates.length > 0) {
+        realiseSyncResult = await syncPlanningRealiseValues(realiseUpdates);
+        planningRows = await fetchPlanningRows();
+      }
+    } catch (realiseSyncError) {
+      console.error("Erreur sync Realise (Indice) :", realiseSyncError);
+    }
+
     const zoneOptions = buildZoneOptionsForSelectedProject(
       planningRows,
       selectedProject
@@ -522,6 +537,12 @@ async function refreshPlanning() {
       const currentStatus = document.getElementById("planningStatus")?.textContent || "";
       setPlanningStatus(
         `${currentStatus} | Sync Diff_coffrage: ${syncResult.updatedCount} ligne(s)`
+      );
+    }
+    if (realiseSyncResult.updatedCount > 0) {
+      const currentStatus = document.getElementById("planningStatus")?.textContent || "";
+      setPlanningStatus(
+        `${currentStatus} | Sync Realise: ${realiseSyncResult.updatedCount} ligne(s)`
       );
     }
   } catch (error) {

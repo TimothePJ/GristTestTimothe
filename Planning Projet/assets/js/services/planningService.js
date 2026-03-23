@@ -83,6 +83,55 @@ function isArmaturesTypeDoc(value) {
   return normalized.includes("ARMATURES");
 }
 
+export function computePlanningRealiseValue(typeDoc, indice) {
+  const normalizedTypeDoc = String(typeDoc ?? "").trim().toUpperCase();
+  const normalizedIndice = String(indice ?? "").trim().toUpperCase();
+
+  // The result must always be derived from the current Indice value.
+  // Empty indice remains a distinct state from the first indice "0".
+  if (normalizedIndice === "") {
+    return 0;
+  }
+
+  const isNumericIndice = /^\d+$/.test(normalizedIndice);
+  if (isNumericIndice) {
+    return isCoffrageTypeDoc(normalizedTypeDoc) ? 50 : 100;
+  }
+
+  const isAlphabeticIndice = /^[A-Z]/.test(normalizedIndice);
+  if (isAlphabeticIndice) {
+    return 100;
+  }
+
+  return 100;
+}
+
+export function buildPlanningRealiseUpdates(rawRows) {
+  const cfg = APP_CONFIG.grist.planningTable.columns;
+
+  return (rawRows || []).reduce((updates, row) => {
+    const rowId = Number(row?.[cfg.id]);
+    if (!Number.isInteger(rowId) || rowId <= 0) {
+      return updates;
+    }
+
+    const nextRealise = computePlanningRealiseValue(
+      toText(row?.[cfg.typeDoc]),
+      toText(row?.[cfg.indice])
+    );
+    const currentRealise = toNumber(row?.[cfg.realise]);
+    if (currentRealise === nextRealise) {
+      return updates;
+    }
+
+    updates.push({
+      id: rowId,
+      realise: nextRealise,
+    });
+    return updates;
+  }, []);
+}
+
 function hasPlanningLinkValue(value) {
   const text = toText(value);
   if (!text) return false;
@@ -211,7 +260,7 @@ function fmtDateIso(date) {
 
 function buildGroupContent(row) {
   return `
-    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
+    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-realise) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
       <div class="cell-id2">${escapeHtml(row.id2 ?? "")}</div>
       <div class="cell-task">${escapeHtml(row.taches ?? "")}</div>
       <div class="cell-ligne-planning">${escapeHtml(row.lignePlanning ?? "")}</div>
@@ -221,6 +270,7 @@ function buildGroupContent(row) {
       <div class="cell-duration-2">${escapeHtml(row.dureeFinDemarrage ?? "")}</div>
       <div class="cell-demarrage">${escapeHtml(row.demarrage ?? "")}</div>
       <div class="cell-indice">${escapeHtml(row.indice ?? "")}</div>
+      <div class="cell-realise">${escapeHtml(row.realise ?? "")}</div>
       <div class="cell-retards">${escapeHtml(row.retards ?? "")}</div>
     </div>
   `;
@@ -605,10 +655,15 @@ export function buildTimelineDataFromPlanningRows(
 
       demarragesTravaux: demarrageTravauxValue,
       demarragesTravauxDate: demarrageTravauxDate,
-      retards: toText(r[cfg.retards]),
-
       indice: toText(r[cfg.indice]),
-      realise: toText(r[cfg.realise]),
+      realise: (() => {
+        const computedRealise = computePlanningRealiseValue(
+          toText(r[cfg.typeDoc]),
+          toText(r[cfg.indice])
+        );
+        return String(computedRealise ?? 0);
+      })(),
+      retards: toText(r[cfg.retards]),
     };
   });
 
@@ -829,6 +884,7 @@ export function buildTimelineDataFromPlanningRows(
       demarrageIso: row.demarrageIso ?? "",
       lignePlanningLabel: row.lignePlanning ?? "",
       indiceLabel: row.indice ?? "",
+      realiseLabel: row.realise ?? "",
       retardsLabel: row.retards ?? "",
 
       // Champs de tri explicites (plus fiable que meta uniquement)

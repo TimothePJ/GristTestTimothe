@@ -27,6 +27,11 @@ function formatPlanningDate(date) {
   }).format(date);
 }
 
+function formatPlanningRealisation(value) {
+  const normalizedValue = Number.isFinite(Number(value)) ? Number(value) : 0;
+  return `${normalizedValue} %`;
+}
+
 function renderPlanningManagementEmptyState(message) {
   return `
     <div class="planning-management-empty-state">
@@ -53,6 +58,14 @@ function formatPlanningMonth(monthKey) {
     month: "long",
     year: "numeric",
   }).format(new Date(parsed.year, parsed.monthNumber - 1, 1, 12));
+}
+
+function formatPlanningMonthShort(year, monthNumber) {
+  return new Intl.DateTimeFormat("fr-FR", {
+    month: "short",
+  })
+    .format(new Date(year, monthNumber - 1, 1, 12))
+    .replace(/\.$/, "");
 }
 
 function getPlanningMonthWindow(monthKey) {
@@ -99,7 +112,69 @@ export function clearPlanningManagement(boardEl) {
   boardEl.innerHTML = "";
 }
 
-export function renderPlanningManagement(boardEl, project, selectedMonthKey = "") {
+function renderPlanningMonthPicker(selectedMonthKey, options = {}) {
+  const normalizedMonthKey = normalizeMonthKey(selectedMonthKey);
+  const parsedSelectedMonth = parseMonthKey(normalizedMonthKey);
+  const fallbackDate = new Date();
+  const pickerYear = Number.isInteger(options.monthPickerViewYear)
+    ? Number(options.monthPickerViewYear)
+    : parsedSelectedMonth?.year || fallbackDate.getFullYear();
+  const currentMonthKey = getCurrentMonthKey();
+
+  return `
+    <div class="planning-management-month-picker" role="dialog" aria-label="Choisir un mois">
+      <div class="planning-management-month-picker-header">
+        <button
+          type="button"
+          class="planning-management-month-picker-nav-btn"
+          data-month-picker-year-delta="-1"
+          aria-label="Annee precedente"
+        >
+          &#8249;
+        </button>
+        <strong class="planning-management-month-picker-year">${escapeHtml(
+          String(pickerYear)
+        )}</strong>
+        <button
+          type="button"
+          class="planning-management-month-picker-nav-btn"
+          data-month-picker-year-delta="1"
+          aria-label="Annee suivante"
+        >
+          &#8250;
+        </button>
+      </div>
+      <div class="planning-management-month-picker-grid">
+        ${Array.from({ length: 12 }, (_, index) => {
+          const monthNumber = index + 1;
+          const monthKey = `${pickerYear}-${String(monthNumber).padStart(2, "0")}`;
+          const isSelected = monthKey === normalizedMonthKey;
+          const isCurrent = monthKey === currentMonthKey;
+
+          return `
+            <button
+              type="button"
+              class="planning-management-month-picker-month-btn${
+                isSelected ? " is-selected" : ""
+              }${isCurrent ? " is-current" : ""}"
+              data-month-value="${escapeHtml(monthKey)}"
+              aria-pressed="${isSelected ? "true" : "false"}"
+            >
+              ${escapeHtml(formatPlanningMonthShort(pickerYear, monthNumber))}
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `;
+}
+
+export function renderPlanningManagement(
+  boardEl,
+  project,
+  selectedMonthKey = "",
+  options = {}
+) {
   if (!(boardEl instanceof HTMLElement)) {
     return;
   }
@@ -136,21 +211,33 @@ export function renderPlanningManagement(boardEl, project, selectedMonthKey = ""
             data-month-delta="-1"
             aria-label="Mois precedent"
           >
-            ‹
+            &#8249;
           </button>
-          <input
-            type="month"
-            class="planning-management-month-input"
-            value="${escapeHtml(monthWindow.monthKey)}"
-            aria-label="Selectionner un mois"
-          >
+          <div class="planning-management-month-picker-wrap">
+            <button
+              type="button"
+              class="planning-management-month-trigger${
+                options.monthPickerOpen ? " is-open" : ""
+              }"
+              aria-label="Choisir un mois"
+              aria-haspopup="dialog"
+              aria-expanded="${options.monthPickerOpen ? "true" : "false"}"
+            >
+              ${escapeHtml(monthLabel)}
+            </button>
+            ${
+              options.monthPickerOpen
+                ? renderPlanningMonthPicker(monthWindow.monthKey, options)
+                : ""
+            }
+          </div>
           <button
             type="button"
             class="planning-management-nav-btn"
             data-month-delta="1"
             aria-label="Mois suivant"
           >
-            ›
+            &#8250;
           </button>
         </div>
       </div>
@@ -164,6 +251,14 @@ export function renderPlanningManagement(boardEl, project, selectedMonthKey = ""
         overlappingTasks.length
           ? `
       <div class="planning-management-list">
+        <div class="planning-management-list-head" aria-hidden="true">
+          <span class="planning-management-list-head-main">Plan</span>
+          <span class="planning-management-list-head-deadline">Echeance</span>
+          <span class="planning-management-list-head-realisation">
+            <span>Realisation</span>
+            <span>(En %)</span>
+          </span>
+        </div>
         ${overlappingTasks
           .map((task) => {
             const taskLabel = task.taskCode
@@ -196,6 +291,12 @@ export function renderPlanningManagement(boardEl, project, selectedMonthKey = ""
                 <div class="planning-management-item-deadline">
                   <span class="planning-management-item-deadline-label">Echeance</span>
                   <strong>${escapeHtml(formatPlanningDate(task.deadlineAt))}</strong>
+                </div>
+                <div class="planning-management-item-realisation">
+                  <span class="planning-management-item-realisation-label">Realisation</span>
+                  <strong>${escapeHtml(
+                    formatPlanningRealisation(task.realisationPct)
+                  )}</strong>
                 </div>
               </article>
             `;
