@@ -314,10 +314,26 @@ async function applySharedProject(projectKey) {
       ]);
 
       await sleep(180);
-      sharedViewport = buildProjectSelectionViewport(
-        planningApi.getProjectDateBounds?.() || null,
-        sharedViewport
-      );
+      const planningViewportAfterSelection = planningApi.getViewport?.() || null;
+      sharedViewport = buildCanonicalSharedViewport({
+        ...sharedViewport,
+        ...(planningViewportAfterSelection || {}),
+        firstVisibleDate:
+          planningViewportAfterSelection?.firstVisibleDate ||
+          planningViewportAfterSelection?.rangeStartDate ||
+          sharedViewport.firstVisibleDate,
+        rangeStartDate:
+          planningViewportAfterSelection?.firstVisibleDate ||
+          planningViewportAfterSelection?.rangeStartDate ||
+          sharedViewport.rangeStartDate,
+        visibleDays:
+          Number(planningViewportAfterSelection?.visibleDays) || sharedViewport.visibleDays,
+        mode: String(planningViewportAfterSelection?.mode || sharedViewport.mode || "").trim(),
+        anchorDate:
+          planningViewportAfterSelection?.anchorDate ||
+          planningViewportAfterSelection?.firstVisibleDate ||
+          sharedViewport.anchorDate,
+      });
       await Promise.all([
         Promise.resolve(planningApi.applyViewport(sharedViewport)),
         Promise.resolve(expensesApi.applyViewport(sharedViewport)),
