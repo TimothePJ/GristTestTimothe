@@ -1,4 +1,10 @@
-import { clamp, parseOptionalNumberInput } from "./utils/format.js";
+import {
+  clamp,
+  getMonthKeyFromDate,
+  parseMonthKey,
+  parseOptionalNumberInput,
+  toMonthKey,
+} from "./utils/format.js";
 import { APP_CONFIG } from "./config.js";
 import { getSelectedProject, setState, state } from "./state.js";
 import {
@@ -60,6 +66,10 @@ import {
 } from "./ui/expenseTimeline.js";
 import { clearKpi, renderKpi } from "./ui/kpi.js";
 import {
+  clearPlanningManagement,
+  renderPlanningManagement,
+} from "./ui/planningManagement.js";
+import {
   renderProjectOptions,
   renderWorkerOptions,
 } from "./ui/selectors.js";
@@ -87,6 +97,8 @@ let pendingChargePlanWheelRequest = null;
 let renderedChargePlanRangeStartDate = "";
 let chargePlanRangeStartDate = "";
 let editingBudgetLineIndex = null;
+let planningManagementHover = null;
+let planningManagementMonthKey = getMonthKeyFromDate(new Date());
 const budgetLineDragState = {
   sourceIndex: null,
   targetIndex: null,
@@ -527,6 +539,7 @@ function renderApp() {
     clearKpi(dom);
     clearChargePlanTimeline(dom);
     clearRealChargeTimeline(dom);
+    clearPlanningManagement(dom.planManagementBoard);
     clearTables(dom);
     clearSpendingBillingEditor(dom.spendingBillingEditor);
     clearSpendingChartControls(dom.spendingChartControls);
@@ -536,6 +549,7 @@ function renderApp() {
 
   renderProjectSummary(dom, selectedProject, getProjectBudgetTotal(selectedProject));
   renderChargePlanSection(selectedProject);
+  renderPlanningManagementSection(selectedProject);
   renderTables(dom, selectedProject, {
     selectedYear: state.selectedYear,
     selectedMonth: state.selectedMonth,
@@ -558,6 +572,123 @@ function renderApp() {
       monthSpan: state.monthSpan,
     }
   );
+}
+
+function renderPlanningManagementSection(selectedProject = getSelectedProject()) {
+  if (!selectedProject) {
+    clearPlanningManagement(dom.planManagementBoard);
+    return;
+  }
+
+  renderPlanningManagement(dom.planManagementBoard, selectedProject, planningManagementMonthKey);
+}
+
+function shiftPlanningManagementMonth(monthKey, deltaMonths = 0) {
+  const parsed = parseMonthKey(monthKey);
+  if (!parsed) {
+    return getMonthKeyFromDate(new Date());
+  }
+
+  const cursor = new Date(parsed.year, parsed.monthNumber - 1, 1, 12, 0, 0, 0);
+  cursor.setMonth(cursor.getMonth() + deltaMonths);
+  return toMonthKey(cursor.getFullYear(), cursor.getMonth() + 1);
+}
+
+function handlePlanningManagementControlClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement)) return;
+  if (!target.classList.contains("planning-management-nav-btn")) return;
+
+  const monthDelta = Number(target.dataset.monthDelta);
+  if (!Number.isInteger(monthDelta)) {
+    return;
+  }
+
+  planningManagementMonthKey = shiftPlanningManagementMonth(
+    planningManagementMonthKey,
+    monthDelta
+  );
+  renderPlanningManagementSection();
+}
+
+function handlePlanningManagementControlChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  if (!target.classList.contains("planning-management-month-input")) return;
+
+  const normalizedMonthKey = parseMonthKey(target.value)
+    ? String(target.value).trim()
+    : "";
+  if (!normalizedMonthKey || normalizedMonthKey === planningManagementMonthKey) {
+    return;
+  }
+
+  planningManagementMonthKey = normalizedMonthKey;
+  renderPlanningManagementSection();
+}
+
+function clearPlanningManagementHover() {
+  if (!planningManagementHover) {
+    return;
+  }
+
+  planningManagementHover = null;
+  renderPlanningManagementSection();
+}
+
+function getPlanningBoardLabel(boardEl) {
+  if (!(boardEl instanceof HTMLElement)) {
+    return "";
+  }
+
+  return boardEl === dom?.realChargeBoard ? "Reel" : "Previsionnel";
+}
+
+function updatePlanningManagementHoverFromSegment(segmentEl, boardEl) {
+  if (!(segmentEl instanceof HTMLElement)) {
+    clearPlanningManagementHover();
+    return;
+  }
+
+  const startAtMs = Number(segmentEl.dataset.startAtMs);
+  const endAtMs = Number(segmentEl.dataset.endAtMs);
+  const workerId = Number(segmentEl.dataset.workerId);
+  if (!Number.isFinite(startAtMs) || !Number.isFinite(endAtMs)) {
+    clearPlanningManagementHover();
+    return;
+  }
+
+  const startAt = new Date(startAtMs);
+  const endAt = new Date(endAtMs);
+  if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) {
+    clearPlanningManagementHover();
+    return;
+  }
+
+  const worker = getSelectedProjectWorker(workerId);
+  const nextHover = {
+    segmentId: Number(segmentEl.dataset.segmentId),
+    workerId,
+    workerName: worker?.name || "",
+    boardLabel: getPlanningBoardLabel(boardEl),
+    startAt,
+    endAt,
+  };
+
+  const currentHover = planningManagementHover;
+  if (
+    currentHover &&
+    currentHover.segmentId === nextHover.segmentId &&
+    currentHover.workerId === nextHover.workerId &&
+    currentHover.startAt?.getTime?.() === nextHover.startAt.getTime() &&
+    currentHover.endAt?.getTime?.() === nextHover.endAt.getTime() &&
+    currentHover.boardLabel === nextHover.boardLabel
+  ) {
+    return;
+  }
+
+  planningManagementHover = nextHover;
+  renderPlanningManagementSection();
 }
 
 function renderChargePlanSection(selectedProject = getSelectedProject()) {
@@ -619,6 +750,7 @@ function renderChargePlanSection(selectedProject = getSelectedProject()) {
 async function loadData({ preferredProjectNumber = "" } = {}) {
   const tables = await fetchExpenseAppTables();
   const { projects, teamMembers } = buildExpenseData(tables);
+  planningManagementHover = null;
 
   setState({
     projects,
@@ -1720,6 +1852,7 @@ function handleProjectSelectionChange() {
   const selectedProjectId = selectedValue ? Number(selectedValue) : null;
   clearChargePlanWheelZoomFrame();
   clearChargePlanVisibleDateTimer();
+  planningManagementHover = null;
   setState({
     selectedProjectId: Number.isInteger(selectedProjectId) ? selectedProjectId : null,
   });
@@ -1942,6 +2075,45 @@ function handleChargePlanContextMenu(event) {
     clientY: event.clientY,
     segmentId,
   });
+}
+
+function handleChargePlanSegmentMouseOver(event) {
+  const boardEl =
+    event.currentTarget instanceof HTMLElement
+      ? event.currentTarget
+      : getTimelineBoardFromElement(event.target);
+  if (!(boardEl instanceof HTMLElement)) return;
+  if (!(event.target instanceof Element)) return;
+
+  const segmentEl = event.target.closest(".charge-plan-segment-bar");
+  if (!(segmentEl instanceof HTMLElement)) {
+    return;
+  }
+
+  const relatedTarget =
+    event.relatedTarget instanceof Node ? event.relatedTarget : null;
+  if (relatedTarget && segmentEl.contains(relatedTarget)) {
+    return;
+  }
+
+  updatePlanningManagementHoverFromSegment(segmentEl, boardEl);
+}
+
+function handleChargePlanSegmentMouseOut(event) {
+  if (!(event.target instanceof Element)) return;
+
+  const segmentEl = event.target.closest(".charge-plan-segment-bar");
+  if (!(segmentEl instanceof HTMLElement)) {
+    return;
+  }
+
+  const relatedTarget =
+    event.relatedTarget instanceof Node ? event.relatedTarget : null;
+  if (relatedTarget && segmentEl.contains(relatedTarget)) {
+    return;
+  }
+
+  clearPlanningManagementHover();
 }
 
 function handleChargePlanHeaderWheel(event) {
@@ -2586,6 +2758,8 @@ function bindEvents() {
   dom.realExpenseBoard.addEventListener("change", handleExpenseGraphControlChange);
   dom.spendingBillingEditor.addEventListener("change", handleTableInputChange);
   dom.spendingChartControls.addEventListener("change", handleSpendingChartControlChange);
+  dom.planManagementBoard.addEventListener("click", handlePlanningManagementControlClick);
+  dom.planManagementBoard.addEventListener("change", handlePlanningManagementControlChange);
   dom.teamManagementRates.addEventListener("change", handleTeamManagementSummaryToggleChange);
   dom.teamManagementRates.addEventListener("change", handleTableInputChange);
   dom.teamManagementRates.addEventListener("click", handleDeleteWorker);

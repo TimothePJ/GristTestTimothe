@@ -113,6 +113,144 @@ input {
   margin-bottom: 24px;
 }
 
+.plan-management-section {
+  margin-bottom: 24px;
+}
+
+#plan-management-board {
+  display: grid;
+  gap: 14px;
+}
+
+.planning-management-panel,
+.planning-management-empty-state {
+  padding: 18px;
+  border: 1px solid rgba(0, 73, 144, 0.12);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(0, 73, 144, 0.03), rgba(255, 255, 255, 0.98));
+}
+
+.planning-management-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.planning-management-summary {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.planning-management-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.planning-management-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.planning-management-nav-btn {
+  min-width: 42px;
+  padding-inline: 0;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.planning-management-month-input {
+  width: auto;
+  min-width: 176px;
+}
+
+.planning-management-title {
+  color: var(--color-text);
+}
+
+.planning-management-subtitle {
+  color: var(--color-text-muted);
+  font-size: 0.92rem;
+}
+
+.planning-management-count {
+  display: grid;
+  gap: 4px;
+  min-width: 132px;
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 73, 144, 0.08);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  text-align: right;
+}
+
+.planning-management-count-label {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}
+
+.planning-management-list {
+  display: grid;
+  gap: 10px;
+}
+
+.planning-management-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 16px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid rgba(0, 73, 144, 0.08);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.planning-management-item-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.planning-management-item-title {
+  color: var(--color-text);
+}
+
+.planning-management-item-meta {
+  color: var(--color-text-muted);
+  font-size: 0.86rem;
+}
+
+.planning-management-item-window {
+  color: var(--color-text-muted);
+  font-size: 0.86rem;
+}
+
+.planning-management-item-deadline {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  text-align: right;
+}
+
+.planning-management-item-deadline-label {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.planning-management-empty-state {
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
 .team-management-panel {
   display: grid;
   gap: 12px;

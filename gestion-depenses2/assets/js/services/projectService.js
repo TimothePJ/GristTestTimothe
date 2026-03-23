@@ -172,14 +172,56 @@ function getDayCeil(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
 }
 
-export function countPlanningTasksOverlappingRange(planningTasks, startAt, endAt) {
+function getPlanningTasksOverlapWindow(startAt, endAt) {
   const rangeStart = startAt instanceof Date ? getDayFloor(startAt) : null;
   const rangeEnd = endAt instanceof Date ? getDayCeil(endAt) : null;
   if (!rangeStart || !rangeEnd || Number.isNaN(rangeStart.getTime()) || Number.isNaN(rangeEnd.getTime())) {
-    return 0;
+    return null;
   }
 
-  return (planningTasks || []).reduce((count, task) => {
+  return { rangeStart, rangeEnd };
+}
+
+export function getPlanningTasksOverlappingRange(planningTasks, startAt, endAt) {
+  const overlapWindow = getPlanningTasksOverlapWindow(startAt, endAt);
+  if (!overlapWindow) {
+    return [];
+  }
+
+  const { rangeStart, rangeEnd } = overlapWindow;
+
+  return (planningTasks || [])
+    .filter((task) => {
+      const taskStart = task?.startAt instanceof Date ? getDayFloor(task.startAt) : null;
+      const taskEnd = task?.endAt instanceof Date ? getDayCeil(task.endAt) : null;
+      if (!taskStart || !taskEnd) {
+        return false;
+      }
+
+      return taskStart <= rangeEnd && taskEnd >= rangeStart;
+    })
+    .sort((left, right) => {
+      const leftDeadline = left?.deadlineAt instanceof Date ? left.deadlineAt.getTime() : Number.MAX_SAFE_INTEGER;
+      const rightDeadline = right?.deadlineAt instanceof Date ? right.deadlineAt.getTime() : Number.MAX_SAFE_INTEGER;
+      if (leftDeadline !== rightDeadline) {
+        return leftDeadline - rightDeadline;
+      }
+
+      const leftStart = left?.startAt instanceof Date ? left.startAt.getTime() : Number.MAX_SAFE_INTEGER;
+      const rightStart = right?.startAt instanceof Date ? right.startAt.getTime() : Number.MAX_SAFE_INTEGER;
+      if (leftStart !== rightStart) {
+        return leftStart - rightStart;
+      }
+
+      return toText(left?.name).localeCompare(toText(right?.name), "fr", {
+        sensitivity: "base",
+        numeric: true,
+      });
+    });
+}
+
+export function countPlanningTasksOverlappingRange(planningTasks, startAt, endAt) {
+  return getPlanningTasksOverlappingRange(planningTasks, startAt, endAt).reduce((count, task) => {
     const taskStart = task?.startAt instanceof Date ? getDayFloor(task.startAt) : null;
     const taskEnd = task?.endAt instanceof Date ? getDayCeil(task.endAt) : null;
     if (!taskStart || !taskEnd) {
@@ -330,9 +372,11 @@ export function buildExpenseData({
     const task = {
       id: Number(row?.[planningColumns.id]),
       name: getPlanningTaskLabel(row, planningColumns),
+      taskCode: toText(row?.[planningColumns.taskCode]),
       typeDoc: toText(row?.[planningColumns.typeDoc]),
       startAt: range.startAt,
       endAt: range.endAt,
+      deadlineAt: parsePlanningDate(row?.[planningColumns.dateLimite]) || range.endAt,
     };
 
     linkedProjects.forEach((project) => {

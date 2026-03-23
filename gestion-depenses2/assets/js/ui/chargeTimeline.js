@@ -562,6 +562,8 @@ function buildVisibleSegmentBars(worker, visibleSlots, options = {}) {
         workerId: worker.id,
         startSlotIndex: slotRange.firstSlot.slotIndex,
         endSlotIndex: slotRange.lastSlot.slotIndex,
+        startAtMs: startAt.getTime(),
+        endAtMs: endAt.getTime(),
         leftPx,
         widthPx,
         label,
@@ -611,6 +613,8 @@ function renderSegmentBars(assignedBars) {
           data-worker-id="${bar.workerId}"
           data-start-slot-index="${bar.startSlotIndex}"
           data-end-slot-index="${bar.endSlotIndex}"
+          data-start-at-ms="${bar.startAtMs}"
+          data-end-at-ms="${bar.endAtMs}"
           data-planning-tooltip="${escapeHtml(planningTooltip)}"
           title="${escapeHtml(planningTooltip)}"
         >
