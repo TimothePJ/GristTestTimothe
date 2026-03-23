@@ -1,6 +1,14 @@
 import { APP_CONFIG } from "../config.js";
 
 function getGrist() {
+  try {
+    if (window.parent && window.parent !== window && window.parent.grist) {
+      return window.parent.grist;
+    }
+  } catch (_error) {
+    // Ignore cross-context access issues and fallback to local window.
+  }
+
   if (!window.grist) {
     throw new Error("API Grist introuvable (window.grist).");
   }

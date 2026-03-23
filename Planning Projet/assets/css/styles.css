@@ -177,6 +177,95 @@ body.is-ms-project-drag-cursor * {
   color: #444;
 }
 
+body.planning-sync-embedded .filters {
+  display: none;
+}
+
+body.planning-sync-embedded {
+  --planning-sync-reference-left-width: 250px;
+  --left-pad-x: 0px;
+  --col-id2: 0px;
+  --col-task: 250px;
+  --col-ligne-planning: 0px;
+  --col-start: 0px;
+  --col-duration-1: 0px;
+  --col-end: 0px;
+  --col-duration-2: 0px;
+  --col-demarrage: 0px;
+  --col-indice: 0px;
+  --col-realise: 0px;
+  --col-retards: 0px;
+}
+
+body.planning-sync-embedded .planning-header-row {
+  grid-template-columns: var(--planning-sync-reference-left-width) 1fr !important;
+}
+
+body.planning-sync-embedded .planning-header-left {
+  grid-template-columns: var(--planning-sync-reference-left-width) !important;
+  width: var(--planning-sync-reference-left-width) !important;
+  padding: 0 !important;
+}
+
+body.planning-sync-embedded #planningTimeline .group-row-grid {
+  grid-template-columns: var(--planning-sync-reference-left-width) !important;
+  width: var(--planning-sync-reference-left-width) !important;
+  padding: 0 !important;
+}
+
+body.planning-sync-embedded #planningTimeline .zone-header-band {
+  width: var(--planning-sync-reference-left-width) !important;
+  padding: 0 8px !important;
+}
+
+body.planning-sync-embedded #planningTimeline .timeline-axis-left-filler,
+body.planning-sync-embedded #planningTimeline .vis-panel.vis-left {
+  width: var(--planning-sync-reference-left-width) !important;
+}
+
+body.planning-sync-embedded #planningTimeline .vis-panel.vis-center,
+body.planning-sync-embedded #planningTimeline .vis-panel.vis-top,
+body.planning-sync-embedded #planningTimeline .vis-panel.vis-bottom {
+  left: var(--planning-sync-reference-left-width) !important;
+  width: calc(100% - var(--planning-sync-reference-left-width)) !important;
+}
+
+body.planning-sync-embedded #toolbar {
+  gap: 10px;
+}
+
+body.planning-sync-embedded #current-date-range {
+  flex: 1 1 auto;
+  max-width: none;
+}
+
+body.planning-sync-embedded .planning-status {
+  display: none;
+}
+
+body.planning-sync-embedded .planning-header-left .c-id2,
+body.planning-sync-embedded .planning-header-left .c-start,
+body.planning-sync-embedded .planning-header-left .c-duration-1,
+body.planning-sync-embedded .planning-header-left .c-end,
+body.planning-sync-embedded .planning-header-left .c-duration-2,
+body.planning-sync-embedded .planning-header-left .c-demarrage,
+body.planning-sync-embedded .planning-header-left .c-indice,
+body.planning-sync-embedded .planning-header-left .c-realise,
+body.planning-sync-embedded .planning-header-left .c-retards,
+body.planning-sync-embedded .planning-header-left .c-ligne-planning,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-id2,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-start,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-duration-1,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-end,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-duration-2,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-demarrage,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-indice,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-realise,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-retards,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-ligne-planning {
+  display: none !important;
+}
+
 /* ==========================================================
    Header tableau (4 colonnes à gauche + Planning)
    ========================================================== */

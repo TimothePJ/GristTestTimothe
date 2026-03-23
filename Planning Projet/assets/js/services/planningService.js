@@ -258,6 +258,55 @@ function fmtDateIso(date) {
   return `${y}-${m}-${d}`;
 }
 
+function isIsoDateValue(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
+}
+
+function getInclusiveDaySpan(startDateValue, endDateValue) {
+  if (!isIsoDateValue(startDateValue) || !isIsoDateValue(endDateValue)) {
+    return 0;
+  }
+
+  const startDate = new Date(`${startDateValue}T12:00:00`);
+  const endDate = new Date(`${endDateValue}T12:00:00`);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate < startDate) {
+    return 0;
+  }
+
+  return Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1;
+}
+
+function getTimelineRowsDateBounds(rows) {
+  let startDate = "";
+  let endDate = "";
+
+  (rows || []).forEach((row) => {
+    const candidates = [row?.debutIso, row?.finIso, row?.demarrageIso]
+      .map((value) => String(value || "").trim())
+      .filter(isIsoDateValue);
+
+    candidates.forEach((dateValue) => {
+      if (!startDate || dateValue < startDate) {
+        startDate = dateValue;
+      }
+
+      if (!endDate || dateValue > endDate) {
+        endDate = dateValue;
+      }
+    });
+  });
+
+  if (!startDate || !endDate) {
+    return null;
+  }
+
+  return {
+    startDate,
+    endDate,
+    spanDays: getInclusiveDaySpan(startDate, endDate),
+  };
+}
+
 function buildGroupContent(row) {
   return `
     <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-realise) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
@@ -1014,5 +1063,6 @@ export function buildTimelineDataFromPlanningRows(
     groups,
     items,
     rowCount: rows.length || orderedZoneKeys.length,
+    dateBounds: getTimelineRowsDateBounds(rows),
   };
 }

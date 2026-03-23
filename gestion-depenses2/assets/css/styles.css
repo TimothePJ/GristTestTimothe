@@ -89,6 +89,36 @@ input {
   border: 1px solid rgba(0, 73, 144, 0.1);
 }
 
+body.planning-sync-embedded {
+  padding: 0;
+  background: #f7f9fc;
+}
+
+body.planning-sync-embedded .header,
+body.planning-sync-embedded .project-header,
+body.planning-sync-embedded .kpi-report,
+body.planning-sync-embedded .plan-management-section,
+body.planning-sync-embedded .team-management-section,
+body.planning-sync-embedded #expense-board,
+body.planning-sync-embedded #real-charge-board,
+body.planning-sync-embedded #real-expense-board,
+body.planning-sync-embedded #spending-billing-editor,
+body.planning-sync-embedded #spending-chart-shell {
+  display: none !important;
+}
+
+body.planning-sync-embedded .main-content {
+  padding: 16px;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
+body.planning-sync-embedded .container {
+  max-width: none;
+}
+
 .project-header {
   display: flex;
   justify-content: space-between;

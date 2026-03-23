@@ -23,24 +23,43 @@ import {
   updateZoneSelector,
 } from "./ui/selectors.js";
 import {
+  applyPlanningViewportState,
   renderPlanningTimeline,
   clearPlanningTimeline,
   bindTimelineToolbar,
+  getPlanningViewportState,
   setPlanningDurationEditHandler,
   setPlanningMsProjectDropHandler,
   setPlanningRowDropHandler,
+  subscribePlanningViewportChanges,
 } from "./ui/timeline.js";
 
 let toolbarBound = false;
 let refreshInProgress = false;
 let addZoneModalBound = false;
 let addZoneModalOpen = false;
+let planningProjectOptions = [];
+let planningSyncApiReady = false;
+let suppressPlanningSyncEvents = false;
+let currentPlanningDateBounds = null;
+
+const EMBEDDED_PLANNING_SYNC_MODE =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("embedded") === "planning-sync";
 
 function setPlanningStatus(message = "") {
   const el = document.getElementById("planningStatus");
   if (el) {
     el.textContent = message;
   }
+}
+
+function applyEmbeddedPlanningSyncMode() {
+  if (!EMBEDDED_PLANNING_SYNC_MODE || typeof document === "undefined") {
+    return;
+  }
+
+  document.body.classList.add("planning-sync-embedded");
 }
 
 function getAddZoneModalElements() {
@@ -499,8 +518,10 @@ async function refreshPlanning() {
       selectedProject,
       normalizedZone
     );
+    currentPlanningDateBounds = timelineData?.dateBounds || null;
 
     if (!timelineData.rowCount) {
+      currentPlanningDateBounds = null;
       clearPlanningTimeline();
 
       if (!selectedProject) {
@@ -566,6 +587,7 @@ async function handleZoneChange(currentState) {
 
 async function bootstrap() {
   try {
+    applyEmbeddedPlanningSyncMode();
     setState({ selectedProject: "", selectedZone: "" });
 
     initGrist();
@@ -575,6 +597,7 @@ async function bootstrap() {
     setPlanningRowDropHandler(handlePlanningRowDrop);
 
     const projectOptions = await buildProjectOptions();
+    planningProjectOptions = [...projectOptions];
 
     initZoneSelector({
       onChange: handleZoneChange,
@@ -588,6 +611,7 @@ async function bootstrap() {
     });
 
     await refreshPlanning();
+    planningSyncApiReady = true;
   } catch (error) {
     console.error("Erreur d'initialisation :", error);
 
@@ -605,5 +629,77 @@ async function bootstrap() {
     setPlanningStatus(`Erreur initialisation : ${error.message}`);
   }
 }
+
+function exposePlanningSyncApi() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.__planningProjetSyncApi = {
+    get isReady() {
+      return planningSyncApiReady;
+    },
+    listProjects() {
+      return [...planningProjectOptions];
+    },
+    getSelectedProject() {
+      return state.selectedProject || "";
+    },
+    async setSelectedProject(projectName = "") {
+      const normalizedProject = toText(projectName);
+      setState({
+        selectedProject: normalizedProject,
+        selectedZone: "",
+      });
+
+      const projectSelect = document.getElementById("projectDropdown");
+      if (projectSelect instanceof HTMLSelectElement) {
+        projectSelect.value = normalizedProject;
+      }
+
+      const zoneSelect = document.getElementById("zoneDropdown");
+      if (zoneSelect instanceof HTMLSelectElement) {
+        zoneSelect.value = "";
+      }
+
+      await refreshPlanning();
+      return Boolean(normalizedProject);
+    },
+    getViewport() {
+      return getPlanningViewportState();
+    },
+    getProjectDateBounds() {
+      return currentPlanningDateBounds ? { ...currentPlanningDateBounds } : null;
+    },
+    applyViewport(viewport = {}) {
+      suppressPlanningSyncEvents = true;
+      try {
+        applyPlanningViewportState(viewport);
+      } finally {
+        setTimeout(() => {
+          suppressPlanningSyncEvents = false;
+        }, 0);
+      }
+    },
+    subscribeViewportChange(listener) {
+      return subscribePlanningViewportChanges((viewport, meta = {}) => {
+        if (suppressPlanningSyncEvents) {
+          return;
+        }
+
+        if (typeof listener === "function") {
+          listener({
+            app: "planning-projet",
+            projectKey: state.selectedProject || "",
+            viewport,
+            meta,
+          });
+        }
+      });
+    },
+  };
+}
+
+exposePlanningSyncApi();
 
 document.addEventListener("DOMContentLoaded", bootstrap);

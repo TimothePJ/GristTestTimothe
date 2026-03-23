@@ -36,6 +36,10 @@ let planningDragAutoScrollRafId = 0;
 let planningDragAutoScrollVelocityY = 0;
 let planningDragAutoScrollTargetEl = null;
 let planningDragAutoScrollLastTs = 0;
+const planningViewportListeners = new Set();
+const EMBEDDED_PLANNING_SYNC_MODE =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("embedded") === "planning-sync";
 
 const PLANNING_ROW_DRAG_HANDLED_FLAG = "__planningRowDragHandled";
 
@@ -119,6 +123,32 @@ function escapeHtml(str) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function toIsoDateValue(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function shiftIsoDateValue(dateValue, dayDelta = 0) {
+  const normalizedDateValue = String(dateValue || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDateValue)) {
+    return "";
+  }
+
+  const date = new Date(`${normalizedDateValue}T12:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  date.setDate(date.getDate() + Number(dayDelta || 0));
+  return toIsoDateValue(date);
 }
 
 function getExactIsoDate(value) {
@@ -2323,6 +2353,105 @@ function getWindowCenterDate() {
   return new Date(centerMs);
 }
 
+function getVisibleDaysFromRange(range) {
+  if (!range?.start || !range?.end) {
+    return 0;
+  }
+
+  const startMs = range.start.valueOf();
+  const endMs = range.end.valueOf();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    return 0;
+  }
+
+  return Math.max(1, Math.ceil((endMs - startMs) / 86400000));
+}
+
+function emitPlanningViewportChange(reason = "") {
+  const viewport = getPlanningViewportState();
+  if (!viewport) {
+    return;
+  }
+
+  planningViewportListeners.forEach((listener) => {
+    listener(viewport, { reason });
+  });
+}
+
+export function getPlanningViewportState() {
+  if (!timelineInstance) {
+    return null;
+  }
+
+  const range = timelineInstance.getWindow();
+  const anchorDate = getWindowCenterDate();
+  const firstVisibleDate = toIsoDateValue(range.start);
+  const visibleDays = getVisibleDaysFromRange(range);
+
+  return {
+    mode: getCurrentZoomMode(),
+    anchorDate: toIsoDateValue(anchorDate),
+    firstVisibleDate,
+    visibleDays,
+    rangeStartDate: firstVisibleDate,
+    rangeEndDate: shiftIsoDateValue(firstVisibleDate, visibleDays - 1),
+  };
+}
+
+export function applyPlanningViewportState(viewport = {}) {
+  if (!timelineInstance) {
+    return;
+  }
+
+  const nextMode = String(viewport.mode || "").trim() || getCurrentZoomMode();
+  const nextStartDate = String(viewport.firstVisibleDate || viewport.rangeStartDate || "").trim();
+  const nextVisibleDays = Number(viewport.visibleDays);
+  const nextEndDate =
+    nextStartDate && Number.isFinite(nextVisibleDays) && nextVisibleDays > 0
+      ? shiftIsoDateValue(nextStartDate, Math.round(nextVisibleDays) - 1)
+      : String(viewport.rangeEndDate || "").trim();
+  const nextAnchorDate = String(viewport.anchorDate || "").trim();
+
+  if (nextMode) {
+    setActiveZoomButton(nextMode);
+  }
+
+  if (nextStartDate && nextEndDate) {
+    const start = new Date(`${nextStartDate}T00:00:00`);
+    const end = new Date(`${nextEndDate}T23:59:59.999`);
+    if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end >= start) {
+      timelineInstance.setWindow(start, end, { animation: false });
+      updateDateRangeDisplay();
+      updateNavCenterButtonLabel();
+      updateCurrentTimeLineBounds();
+      requestStickyAxisSync();
+      return;
+    }
+  }
+
+  const anchorDate = nextAnchorDate
+    ? new Date(`${nextAnchorDate}T12:00:00`)
+    : getWindowCenterDate();
+
+  if (!Number.isNaN(anchorDate.getTime())) {
+    setWindowForMode(nextMode, anchorDate);
+    updateNavCenterButtonLabel();
+    updateCurrentTimeLineBounds();
+    requestStickyAxisSync();
+  }
+}
+
+export function subscribePlanningViewportChanges(listener) {
+  if (typeof listener !== "function") {
+    return () => {};
+  }
+
+  planningViewportListeners.add(listener);
+  return () => {
+    planningViewportListeners.delete(listener);
+  };
+}
+
 function updateNavCenterButtonLabel() {
   const todayBtn = document.getElementById("btn-today");
   if (!todayBtn) return;
@@ -2522,7 +2651,18 @@ export function renderPlanningTimeline({ groups, items }) {
     const hasNonBackgroundItems = (items || []).some(
       (item) => item?.type !== "background"
     );
-    if (range) {
+    if (EMBEDDED_PLANNING_SYNC_MODE) {
+      if (range) {
+        dataAnchorDate = computeRangeCenter(range);
+      } else if (hasNonBackgroundItems) {
+        const fitted = timelineInstance.getWindow();
+        dataAnchorDate = computeRangeCenter(fitted);
+      } else if ((groups || []).length) {
+        dataAnchorDate = new Date();
+      } else {
+        dataAnchorDate = null;
+      }
+    } else if (range) {
       dataAnchorDate = computeRangeCenter(range);
       timelineInstance.setWindow(range.start, range.end, { animation: false });
     } else if (hasNonBackgroundItems) {
@@ -2592,6 +2732,7 @@ export function bindTimelineToolbar() {
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
       updateCurrentTimeLineBounds();
+      emitPlanningViewportChange("rangechanged");
     });
   }
 
