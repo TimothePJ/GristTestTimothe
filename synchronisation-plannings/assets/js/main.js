@@ -303,7 +303,7 @@ async function applySharedProject(projectKey) {
     ]);
     activeProjectKey = normalizedProjectKey;
 
-    const sharedViewport = buildProjectSelectionViewport(
+    let sharedViewport = buildProjectSelectionViewport(
       planningApi.getProjectDateBounds?.() || null,
       expensesApi.getViewport?.() || planningApi.getViewport?.() || {}
     );
@@ -312,6 +312,17 @@ async function applySharedProject(projectKey) {
         Promise.resolve(planningApi.applyViewport(sharedViewport)),
         Promise.resolve(expensesApi.applyViewport(sharedViewport)),
       ]);
+
+      await sleep(180);
+      sharedViewport = buildProjectSelectionViewport(
+        planningApi.getProjectDateBounds?.() || null,
+        sharedViewport
+      );
+      await Promise.all([
+        Promise.resolve(planningApi.applyViewport(sharedViewport)),
+        Promise.resolve(expensesApi.applyViewport(sharedViewport)),
+      ]);
+
       lastAppliedViewportSignature = getViewportSignature(normalizedProjectKey, sharedViewport);
       setLastRange(sharedViewport);
     }
