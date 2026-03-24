@@ -221,14 +221,44 @@ function getInclusiveDaySpan(startDateValue, endDateValue) {
   return Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1;
 }
 
-function getSharedVisibleDaysBounds() {
-  const monthVisibleDays = Number(SHARED_VIEWPORT_RULES.referenceMonthDays) || 30.4375;
+function getSharedVisibleDaysBounds(viewport = {}) {
+  const fallbackMonthVisibleDays = Number(SHARED_VIEWPORT_RULES.referenceMonthDays) || 30.4375;
+  const fallbackMinVisibleDays = Number(SHARED_VIEWPORT_RULES.minVisibleDays) || 7;
+  const fallbackMaxVisibleDays =
+    fallbackMonthVisibleDays *
+    Math.max(1, Number(SHARED_VIEWPORT_RULES.yearMaxVisibleMonths) || 14);
+  let sourceBounds = null;
+
+  if (expensesApi?.getViewportBounds) {
+    try {
+      sourceBounds = expensesApi.getViewportBounds(viewport) || null;
+    } catch (error) {
+      console.warn("Impossible de lire les bornes de gestion-depenses2 :", error);
+    }
+  }
+
+  const monthVisibleDays =
+    Number(sourceBounds?.monthVisibleDays) > 0
+      ? Number(sourceBounds.monthVisibleDays)
+      : fallbackMonthVisibleDays;
+  const minVisibleDays =
+    Number(sourceBounds?.minVisibleDays) > 0
+      ? Number(sourceBounds.minVisibleDays)
+      : fallbackMinVisibleDays;
+  const maxVisibleDays =
+    Number(sourceBounds?.maxVisibleDays) > 0
+      ? Math.max(monthVisibleDays, Number(sourceBounds.maxVisibleDays))
+      : Math.max(monthVisibleDays, fallbackMaxVisibleDays);
+  const yearThreshold =
+    Number(sourceBounds?.yearThreshold) > 0
+      ? Number(sourceBounds.yearThreshold)
+      : monthVisibleDays * 10;
+
   return {
     monthVisibleDays,
-    minVisibleDays: Number(SHARED_VIEWPORT_RULES.minVisibleDays) || 7,
-    maxVisibleDays:
-      monthVisibleDays * Math.max(1, Number(SHARED_VIEWPORT_RULES.yearMaxVisibleMonths) || 14),
-    yearThreshold: monthVisibleDays * 10,
+    minVisibleDays,
+    maxVisibleDays,
+    yearThreshold,
   };
 }
 
@@ -236,9 +266,9 @@ function isSupportedSharedMode(mode) {
   return mode === "week" || mode === "month" || mode === "year";
 }
 
-function deriveSharedModeFromVisibleDays(nextVisibleDays) {
+function deriveSharedModeFromVisibleDays(nextVisibleDays, viewport = {}) {
   const { monthVisibleDays, minVisibleDays, maxVisibleDays, yearThreshold } =
-    getSharedVisibleDaysBounds();
+    getSharedVisibleDaysBounds(viewport);
   const visibleDays = clamp(Math.round(nextVisibleDays || 0), minVisibleDays, maxVisibleDays);
 
   if (visibleDays < monthVisibleDays) {
@@ -253,7 +283,7 @@ function deriveSharedModeFromVisibleDays(nextVisibleDays) {
 }
 
 function buildCanonicalSharedViewport(viewport = {}) {
-  const { minVisibleDays, maxVisibleDays } = getSharedVisibleDaysBounds();
+  const { minVisibleDays, maxVisibleDays } = getSharedVisibleDaysBounds(viewport);
   const rawVisibleDays = Number(viewport.visibleDays);
   const fallbackStartDate = normalizeIsoDate(viewport.rangeStartDate);
   const firstVisibleDate = normalizeIsoDate(viewport.firstVisibleDate) || fallbackStartDate;
@@ -273,7 +303,12 @@ function buildCanonicalSharedViewport(viewport = {}) {
     ...viewport,
     mode: isSupportedSharedMode(explicitMode)
       ? explicitMode
-      : deriveSharedModeFromVisibleDays(visibleDays),
+      : deriveSharedModeFromVisibleDays(visibleDays, {
+          ...viewport,
+          firstVisibleDate,
+          rangeStartDate: firstVisibleDate,
+          visibleDays,
+        }),
     anchorDate,
     firstVisibleDate,
     visibleDays,
@@ -295,7 +330,12 @@ function buildProjectSelectionViewport(projectDateBounds = null, fallbackViewpor
     return fallbackSharedViewport;
   }
 
-  const { minVisibleDays, maxVisibleDays } = getSharedVisibleDaysBounds();
+  const { minVisibleDays, maxVisibleDays } = getSharedVisibleDaysBounds({
+    ...fallbackViewport,
+    firstVisibleDate: projectStartDate,
+    rangeStartDate: projectStartDate,
+    anchorDate: projectStartDate,
+  });
   const projectSpanDays = clamp(
     Number(projectDateBounds?.spanDays) || getInclusiveDaySpan(projectStartDate, projectEndDate) || minVisibleDays,
     minVisibleDays,
@@ -312,8 +352,8 @@ function buildProjectSelectionViewport(projectDateBounds = null, fallbackViewpor
   });
 }
 
-function getTargetVisibleDaysForMode(nextMode) {
-  const { monthVisibleDays, maxVisibleDays } = getSharedVisibleDaysBounds();
+function getTargetVisibleDaysForMode(nextMode, viewport = {}) {
+  const { monthVisibleDays, maxVisibleDays } = getSharedVisibleDaysBounds(viewport);
 
   if (nextMode === "week") {
     return 7;
@@ -336,12 +376,67 @@ function getCurrentSharedViewport() {
   return baseViewport ? buildCanonicalSharedViewport(baseViewport) : null;
 }
 
+function syncPlanningViewportBounds(viewport = {}) {
+  if (!planningApi?.setViewportBounds || !expensesApi?.getViewportBounds) {
+    return;
+  }
+
+  try {
+    const bounds = expensesApi.getViewportBounds(viewport) || null;
+    if (bounds) {
+      planningApi.setViewportBounds(bounds);
+    }
+  } catch (error) {
+    console.warn("Impossible de synchroniser les bornes du planning :", error);
+  }
+}
+
+async function alignExpensesViewportToPlanning(maxAttempts = 4) {
+  if (!planningApi || !expensesApi) {
+    return null;
+  }
+
+  let planningViewport = buildCanonicalSharedViewport(
+    planningApi.getViewport?.() || sharedViewportState || {}
+  );
+  if (!planningViewport.firstVisibleDate) {
+    return null;
+  }
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    syncPlanningViewportBounds(planningViewport);
+    await Promise.resolve(expensesApi.applyViewport(planningViewport));
+    scheduleExpensesFramePresentation();
+    await sleep(attempt === 0 ? 90 : 140);
+
+    const refreshedPlanningViewport = buildCanonicalSharedViewport(
+      planningApi.getViewport?.() || planningViewport
+    );
+    const refreshedExpensesViewport = buildCanonicalSharedViewport(
+      expensesApi.getViewport?.() || planningViewport
+    );
+
+    const isAligned =
+      refreshedPlanningViewport.firstVisibleDate === refreshedExpensesViewport.firstVisibleDate &&
+      refreshedPlanningViewport.visibleDays === refreshedExpensesViewport.visibleDays &&
+      refreshedPlanningViewport.mode === refreshedExpensesViewport.mode;
+
+    planningViewport = refreshedPlanningViewport;
+    if (isAligned) {
+      return refreshedPlanningViewport;
+    }
+  }
+
+  return planningViewport;
+}
+
 async function applyViewportFromParentControls(viewport = {}) {
   if (!planningApi || !expensesApi || projectSyncInProgress || viewportSyncInProgress) {
     return;
   }
 
   const canonicalViewport = buildCanonicalSharedViewport(viewport);
+  syncPlanningViewportBounds(canonicalViewport);
   const viewportSignature = getViewportSignature(activeProjectKey, canonicalViewport);
   viewportSyncInProgress = true;
 
@@ -414,7 +509,25 @@ function ensureExpensesFramePresentation() {
       }
 
       body.planning-sync-embedded #charge-plan-board .charge-plan-row--header {
-        display: none !important;
+        min-height: 0 !important;
+        height: 0 !important;
+        border: 0 !important;
+        overflow: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+      }
+
+      body.planning-sync-embedded #charge-plan-board .charge-plan-row--header > .charge-plan-cell {
+        min-height: 0 !important;
+        height: 0 !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        border: 0 !important;
+      }
+
+      body.planning-sync-embedded #charge-plan-board .charge-plan-row--header .charge-plan-header-track {
+        min-height: 0 !important;
+        height: 0 !important;
       }
 
       body.planning-sync-embedded #charge-plan-board .charge-plan-scroll {
@@ -482,7 +595,7 @@ function bindExpensesPlanningShellControls() {
       void applyViewportFromParentControls({
         ...currentViewport,
         mode: nextMode,
-        visibleDays: getTargetVisibleDaysForMode(nextMode),
+        visibleDays: getTargetVisibleDaysForMode(nextMode, currentViewport),
         rangeEndDate: "",
       });
     });
@@ -625,6 +738,7 @@ async function applySharedProject(projectKey) {
       expensesApi.getViewport?.() || planningApi.getViewport?.() || {}
     );
     if (sharedViewport?.firstVisibleDate) {
+      syncPlanningViewportBounds(sharedViewport);
       await Promise.all([
         Promise.resolve(planningApi.applyViewport(sharedViewport)),
         Promise.resolve(expensesApi.applyViewport(sharedViewport)),
@@ -651,10 +765,19 @@ async function applySharedProject(projectKey) {
           planningViewportAfterSelection?.firstVisibleDate ||
           sharedViewport.anchorDate,
       });
+      syncPlanningViewportBounds(sharedViewport);
       await Promise.all([
         Promise.resolve(planningApi.applyViewport(sharedViewport)),
         Promise.resolve(expensesApi.applyViewport(sharedViewport)),
       ]);
+
+      const stabilizedViewport = await alignExpensesViewportToPlanning();
+      if (stabilizedViewport?.firstVisibleDate) {
+        sharedViewport = buildCanonicalSharedViewport({
+          ...sharedViewport,
+          ...stabilizedViewport,
+        });
+      }
 
       lastAppliedViewportSignature = getViewportSignature(normalizedProjectKey, sharedViewport);
       sharedViewportState = sharedViewport;
@@ -712,6 +835,7 @@ async function flushViewportSyncQueue() {
   }
 
   const canonicalViewport = buildCanonicalSharedViewport(payload.viewport);
+  syncPlanningViewportBounds(canonicalViewport);
   const viewportSignature = getViewportSignature(payloadProjectKey, canonicalViewport);
   if (viewportSignature && viewportSignature === lastAppliedViewportSignature) {
     sharedViewportState = canonicalViewport;

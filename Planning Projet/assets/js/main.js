@@ -28,6 +28,7 @@ import {
   clearPlanningTimeline,
   bindTimelineToolbar,
   getPlanningViewportState,
+  setPlanningViewportBounds,
   setPlanningDurationEditHandler,
   setPlanningMsProjectDropHandler,
   setPlanningRowDropHandler,
@@ -670,6 +671,9 @@ function exposePlanningSyncApi() {
     },
     getProjectDateBounds() {
       return currentPlanningDateBounds ? { ...currentPlanningDateBounds } : null;
+    },
+    setViewportBounds(bounds = {}) {
+      setPlanningViewportBounds(bounds);
     },
     applyViewport(viewport = {}) {
       suppressPlanningSyncEvents = true;

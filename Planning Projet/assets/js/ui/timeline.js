@@ -40,6 +40,11 @@ const planningViewportListeners = new Set();
 const EMBEDDED_PLANNING_SYNC_MODE =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).get("embedded") === "planning-sync";
+let embeddedPlanningViewportBounds = {
+  minVisibleDays: 7,
+  maxVisibleDays: 392,
+};
+let planningViewportBoundsCorrectionPending = false;
 
 const PLANNING_ROW_DRAG_HANDLED_FLAG = "__planningRowDragHandled";
 
@@ -115,6 +120,78 @@ function updateCurrentTimeLineBounds() {
     line.style.top = `${topHeight}px`;
     line.style.height = `${visibleHeight}px`;
   });
+}
+
+function normalizePlanningViewportBounds(bounds = {}) {
+  const nextMinVisibleDays = Math.max(1, Math.round(Number(bounds.minVisibleDays) || 7));
+  const nextMaxVisibleDays = Math.max(
+    nextMinVisibleDays,
+    Math.round(Number(bounds.maxVisibleDays) || 392)
+  );
+
+  return {
+    minVisibleDays: nextMinVisibleDays,
+    maxVisibleDays: nextMaxVisibleDays,
+  };
+}
+
+function clampPlanningVisibleDaysToBounds(nextVisibleDays, bounds = embeddedPlanningViewportBounds) {
+  const normalizedBounds = normalizePlanningViewportBounds(bounds);
+  return Math.min(
+    Math.max(Math.round(Number(nextVisibleDays) || normalizedBounds.minVisibleDays), normalizedBounds.minVisibleDays),
+    normalizedBounds.maxVisibleDays
+  );
+}
+
+function buildClampedPlanningRange(range, bounds = embeddedPlanningViewportBounds) {
+  if (!range?.start || !range?.end) {
+    return null;
+  }
+
+  const visibleDays = getVisibleDaysFromRange(range);
+  const clampedVisibleDays = clampPlanningVisibleDaysToBounds(visibleDays, bounds);
+  if (clampedVisibleDays === visibleDays) {
+    return null;
+  }
+
+  const centerMs = (range.start.valueOf() + range.end.valueOf()) / 2;
+  const centerDate = new Date(centerMs);
+  if (Number.isNaN(centerDate.getTime())) {
+    return null;
+  }
+
+  const start = new Date(centerDate);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - Math.floor((clampedVisibleDays - 1) / 2));
+
+  const end = new Date(start);
+  end.setDate(start.getDate() + clampedVisibleDays - 1);
+  end.setHours(23, 59, 59, 999);
+
+  return { start, end, visibleDays: clampedVisibleDays };
+}
+
+function enforceEmbeddedPlanningViewportBounds(range = null) {
+  if (!EMBEDDED_PLANNING_SYNC_MODE || !timelineInstance || planningViewportBoundsCorrectionPending) {
+    return false;
+  }
+
+  const effectiveRange = range || timelineInstance.getWindow();
+  const clampedRange = buildClampedPlanningRange(effectiveRange, embeddedPlanningViewportBounds);
+  if (!clampedRange) {
+    return false;
+  }
+
+  planningViewportBoundsCorrectionPending = true;
+  timelineInstance.setWindow(clampedRange.start, clampedRange.end, { animation: false });
+  updateDateRangeDisplay();
+  updateNavCenterButtonLabel();
+  updateCurrentTimeLineBounds();
+  requestStickyAxisSync();
+  requestAnimationFrame(() => {
+    planningViewportBoundsCorrectionPending = false;
+  });
+  return true;
 }
 
 function escapeHtml(str) {
@@ -2405,7 +2482,12 @@ export function applyPlanningViewportState(viewport = {}) {
 
   const nextMode = String(viewport.mode || "").trim() || getCurrentZoomMode();
   const nextStartDate = String(viewport.firstVisibleDate || viewport.rangeStartDate || "").trim();
-  const nextVisibleDays = Number(viewport.visibleDays);
+  const nextVisibleDays = EMBEDDED_PLANNING_SYNC_MODE
+    ? clampPlanningVisibleDaysToBounds(
+        Number(viewport.visibleDays),
+        normalizePlanningViewportBounds(viewport.viewportBounds || embeddedPlanningViewportBounds)
+      )
+    : Number(viewport.visibleDays);
   const nextEndDate =
     nextStartDate && Number.isFinite(nextVisibleDays) && nextVisibleDays > 0
       ? shiftIsoDateValue(nextStartDate, Math.round(nextVisibleDays) - 1)
@@ -2438,6 +2520,20 @@ export function applyPlanningViewportState(viewport = {}) {
     updateNavCenterButtonLabel();
     updateCurrentTimeLineBounds();
     requestStickyAxisSync();
+  }
+}
+
+export function setPlanningViewportBounds(bounds = {}) {
+  embeddedPlanningViewportBounds = normalizePlanningViewportBounds(bounds);
+
+  if (timelineInstance) {
+    const zoomMinMs = embeddedPlanningViewportBounds.minVisibleDays * 86400000;
+    const zoomMaxMs = embeddedPlanningViewportBounds.maxVisibleDays * 86400000;
+    timelineInstance.setOptions({
+      zoomMin: zoomMinMs,
+      zoomMax: zoomMaxMs,
+    });
+    enforceEmbeddedPlanningViewportBounds();
   }
 }
 
@@ -2724,11 +2820,17 @@ export function bindTimelineToolbar() {
   // Mettre à jour le texte quand l’utilisateur déplace/zoome à la souris
   if (timelineInstance) {
     timelineInstance.on("rangechange", () => {
+      if (enforceEmbeddedPlanningViewportBounds()) {
+        return;
+      }
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
       updateCurrentTimeLineBounds();
     });
     timelineInstance.on("rangechanged", () => {
+      if (enforceEmbeddedPlanningViewportBounds()) {
+        return;
+      }
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
       updateCurrentTimeLineBounds();

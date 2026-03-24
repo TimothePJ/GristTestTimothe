@@ -1917,19 +1917,31 @@ function getChargePlanZoomAnchorDate() {
   return Number.isNaN(anchorDate.getTime()) ? new Date() : anchorDate;
 }
 
-function getChargePlanReferenceMonthDayCount() {
-  const anchorDate = getChargePlanZoomAnchorDate();
+function getChargePlanReferenceMonthDayCountForDate(dateValue = "") {
+  const normalizedDateValue = normalizeChargePlanDateValue(dateValue);
+  const anchorDate = normalizedDateValue
+    ? new Date(`${normalizedDateValue}T12:00:00`)
+    : getChargePlanZoomAnchorDate();
+
+  if (Number.isNaN(anchorDate.getTime())) {
+    return getChargePlanReferenceMonthDayCount();
+  }
+
   return new Date(anchorDate.getFullYear(), anchorDate.getMonth() + 1, 0).getDate();
 }
 
-function getChargePlanVisibleDaysBounds() {
+function getChargePlanReferenceMonthDayCount() {
+  return getChargePlanReferenceMonthDayCountForDate();
+}
+
+function getChargePlanVisibleDaysBounds(dateValue = "") {
   const configuredReferenceMonthDays = Number(
     APP_CONFIG.chargeTimeline.referenceMonthDays
   );
   const monthVisibleDays =
     Number.isFinite(configuredReferenceMonthDays) && configuredReferenceMonthDays > 0
       ? configuredReferenceMonthDays
-      : getChargePlanReferenceMonthDayCount();
+      : getChargePlanReferenceMonthDayCountForDate(dateValue);
   const maxVisibleDays = Math.max(
     monthVisibleDays,
     monthVisibleDays * Math.max(1, APP_CONFIG.chargeTimeline.yearMaxVisibleMonths || 14)
@@ -3357,6 +3369,14 @@ function exposeChargePlanSyncApi() {
     },
     setSelectedProject(projectKey = "") {
       return setSelectedProjectForPlanningSync(projectKey);
+    },
+    getViewportBounds(viewport = {}) {
+      const referenceDateValue =
+        normalizeChargePlanDateValue(viewport.firstVisibleDate) ||
+        normalizeChargePlanDateValue(viewport.anchorDate) ||
+        normalizeChargePlanDateValue(viewport.rangeStartDate) ||
+        "";
+      return getChargePlanVisibleDaysBounds(referenceDateValue);
     },
     getViewport() {
       return getChargePlanSyncViewport();
