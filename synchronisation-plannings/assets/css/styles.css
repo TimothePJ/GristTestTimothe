@@ -167,40 +167,144 @@ select {
   margin-top: var(--spacing-4);
 }
 
-.app-stack {
+.sync-planning-card {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--spacing-5);
+  gap: var(--spacing-3);
+  padding: var(--spacing-5);
 }
 
-.app-card--frame {
+.sync-planning-card-header {
   display: grid;
-  gap: var(--spacing-4);
-}
-
-.embedded-app-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   gap: var(--spacing-3);
 }
 
-.embedded-app-tag {
+.sync-planning-pane {
+  display: grid;
+  gap: 0;
+}
+
+.sync-planning-pane + .sync-planning-pane {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.sync-planning-frames {
+  display: grid;
+  gap: 0;
+}
+
+.sync-expenses-planning-shell {
+  display: grid;
+  gap: var(--spacing-3);
+  padding: var(--spacing-3) var(--spacing-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(180deg, rgba(10, 103, 163, 0.04), rgba(255, 255, 255, 0.98));
+}
+
+.sync-expenses-planning-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.sync-expenses-planning-copy h3 {
+  margin: 0;
+}
+
+.sync-expenses-planning-copy p {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.sync-expenses-planning-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.sync-expenses-planning-view-label {
+  font-weight: 700;
+}
+
+.sync-expenses-planning-zoom-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: rgba(10, 103, 163, 0.05);
+}
+
+.sync-expenses-planning-mode-btn,
+.sync-expenses-planning-date-trigger,
+.sync-expenses-planning-today-btn {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(20, 50, 74, 0.16);
+  background: #fff;
+  color: var(--color-ink);
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.sync-expenses-planning-mode-btn:hover,
+.sync-expenses-planning-date-trigger:hover,
+.sync-expenses-planning-today-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(10, 103, 163, 0.4);
+}
+
+.sync-expenses-planning-mode-btn.is-active {
+  background: var(--color-blue);
+  border-color: var(--color-blue);
+  color: #fff;
+  box-shadow: 0 10px 20px rgba(10, 103, 163, 0.18);
+}
+
+.sync-expenses-planning-mode-btn:disabled,
+.sync-expenses-planning-date-trigger:disabled,
+.sync-expenses-planning-today-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
+}
+
+.sync-expenses-planning-date-shell {
+  position: relative;
+}
+
+.sync-expenses-planning-date-trigger {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
-  padding: 8px 12px;
-  font-size: 0.84rem;
-  font-weight: 700;
-  color: #fff;
+  gap: 8px;
 }
 
-.embedded-app-tag--orange {
-  background: var(--color-orange);
+.sync-expenses-planning-date-trigger-label {
+  color: var(--color-muted);
 }
 
-.embedded-app-tag--blue {
-  background: var(--color-blue);
+.sync-expenses-planning-date-trigger-value {
+  color: var(--color-blue);
+}
+
+.sync-expenses-planning-date-input {
+  position: absolute;
+  inset: 0;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .embedded-app-frame {
@@ -216,8 +320,20 @@ select {
 }
 
 .embedded-app-frame--expenses {
-  min-height: 520px;
-  height: 520px;
+  min-height: 620px;
+  height: 620px;
+  opacity: 0;
+  transition: opacity 0.16s ease;
+}
+
+.embedded-app-frame--expenses.is-ready {
+  opacity: 1;
+}
+
+.sync-planning-pane--expenses .embedded-app-frame--expenses {
+  border: none;
+  border-radius: 0;
+  background: transparent;
 }
 
 .mock-app {
@@ -453,5 +569,17 @@ code {
   .mock-toolbar,
   .log-card-header {
     align-items: stretch;
+  }
+
+  .sync-expenses-planning-controls {
+    align-items: stretch;
+  }
+
+  .sync-expenses-planning-zoom-buttons {
+    width: 100%;
+  }
+
+  .sync-expenses-planning-mode-btn {
+    flex: 1 1 0;
   }
 }

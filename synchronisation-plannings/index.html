@@ -54,37 +54,106 @@
         </div>
       </section>
 
-      <section class="app-stack">
-        <div class="card app-card app-card--frame">
-          <div class="embedded-app-header">
-            <div>
-              <p class="eyebrow">Reference haute</p>
-              <h2>Planning Projet</h2>
-            </div>
-            <span class="embedded-app-tag embedded-app-tag--orange">Source planning</span>
+      <section class="card sync-planning-card">
+        <div class="sync-planning-card-header">
+          <div>
+            <p class="eyebrow">Plannings synchronises</p>
+            <h2>Plannings superposes</h2>
+            <p class="workspace-copy">
+              Les deux plannings vivent maintenant dans une seule section,
+              l'un au-dessus de l'autre.
+            </p>
           </div>
-          <iframe
-            id="planning-projet-frame"
-            class="embedded-app-frame embedded-app-frame--planning"
-            title="Planning Projet synchronise"
-            src="../Planning%20Projet/Index.html?embedded=planning-sync"
-          ></iframe>
+
+          <section class="sync-expenses-planning-shell">
+            <div class="sync-expenses-planning-copy">
+              <h3>Previsionnel - Plan de charge</h3>
+              <p>
+                Glissez dans une ligne pour creer un segment. Redimensionnez-le
+                avec ses poignees. Utilisez le clic droit sur une barre pour la
+                supprimer.
+              </p>
+            </div>
+            <div class="sync-expenses-planning-controls">
+              <span class="sync-expenses-planning-view-label">Vue</span>
+              <div class="sync-expenses-planning-zoom-buttons">
+                <button
+                  type="button"
+                  class="sync-expenses-planning-mode-btn"
+                  data-expenses-sync-mode="week"
+                  disabled
+                >
+                  Semaine
+                </button>
+                <button
+                  type="button"
+                  class="sync-expenses-planning-mode-btn"
+                  data-expenses-sync-mode="month"
+                  disabled
+                >
+                  Mois
+                </button>
+                <button
+                  type="button"
+                  class="sync-expenses-planning-mode-btn"
+                  data-expenses-sync-mode="year"
+                  disabled
+                >
+                  Annee
+                </button>
+              </div>
+              <div class="sync-expenses-planning-date-shell">
+                <button
+                  id="expenses-sync-date-trigger"
+                  type="button"
+                  class="sync-expenses-planning-date-trigger"
+                  disabled
+                >
+                  <span class="sync-expenses-planning-date-trigger-label">Date</span>
+                  <span
+                    id="expenses-sync-date-value"
+                    class="sync-expenses-planning-date-trigger-value"
+                  >
+                    --
+                  </span>
+                </button>
+                <input
+                  id="expenses-sync-date-input"
+                  class="sync-expenses-planning-date-input"
+                  type="date"
+                  disabled
+                />
+              </div>
+              <button
+                id="expenses-sync-today-btn"
+                type="button"
+                class="sync-expenses-planning-today-btn"
+                disabled
+              >
+                Aujourd'hui
+              </button>
+            </div>
+          </section>
         </div>
 
-        <div class="card app-card app-card--frame">
-          <div class="embedded-app-header">
-            <div>
-              <p class="eyebrow">Reference basse</p>
-              <h2>gestion-depenses2</h2>
-            </div>
-            <span class="embedded-app-tag embedded-app-tag--blue">Plan de charge</span>
+        <div class="sync-planning-frames">
+          <div class="sync-planning-pane sync-planning-pane--planning">
+            <iframe
+              id="planning-projet-frame"
+              class="embedded-app-frame embedded-app-frame--planning"
+              title="Planning Projet synchronise"
+              src="../Planning%20Projet/Index.html?embedded=planning-sync"
+            ></iframe>
           </div>
-          <iframe
-            id="gestion-depenses2-frame"
-            class="embedded-app-frame embedded-app-frame--expenses"
-            title="gestion-depenses2 synchronise"
-            src="../gestion-depenses2/index.html?embedded=planning-sync"
-          ></iframe>
+
+          <div class="sync-planning-pane sync-planning-pane--expenses">
+            <iframe
+              id="gestion-depenses2-frame"
+              class="embedded-app-frame embedded-app-frame--expenses"
+              title="gestion-depenses2 synchronise"
+              src="../gestion-depenses2/index.html?embedded=planning-sync"
+            ></iframe>
+          </div>
         </div>
       </section>
 

@@ -1715,6 +1715,22 @@ function shiftIsoDateValue(dateValue, dayDelta = 0) {
   return toDateInputValue(date);
 }
 
+function getChargePlanInclusiveDaySpan(startDateValue, endDateValue) {
+  const normalizedStartDate = normalizeChargePlanDateValue(startDateValue);
+  const normalizedEndDate = normalizeChargePlanDateValue(endDateValue);
+  if (!normalizedStartDate || !normalizedEndDate) {
+    return 0;
+  }
+
+  const startDate = new Date(`${normalizedStartDate}T12:00:00`);
+  const endDate = new Date(`${normalizedEndDate}T12:00:00`);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate < startDate) {
+    return 0;
+  }
+
+  return Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1;
+}
+
 function getChargePlanSyncProjectKey() {
   const selectedProject = getSelectedProject();
   if (!selectedProject) {
@@ -1725,17 +1741,27 @@ function getChargePlanSyncProjectKey() {
 }
 
 function getChargePlanSyncViewport() {
-  const visibleDays = Math.max(1, Math.round(getCurrentChargePlanVisibleDays()));
   const scrollEl = getChargePlanScrollElement(dom?.chargePlanBoard || null);
   const firstVisibleDate =
     normalizeChargePlanDateValue(getChargePlanViewportEdgeDate(scrollEl, "left")) ||
     normalizeChargePlanDateValue(state.chargePlanAnchorDate) ||
     normalizeChargePlanDateValue(getChargePlanRangeStartDate());
+  const lastVisibleDate =
+    normalizeChargePlanDateValue(getChargePlanViewportEdgeDate(scrollEl, "right")) ||
+    shiftIsoDateValue(
+      firstVisibleDate,
+      Math.max(0, Math.round(getCurrentChargePlanVisibleDays()) - 1)
+    );
+  const visibleDays = Math.max(
+    1,
+    getChargePlanInclusiveDaySpan(firstVisibleDate, lastVisibleDate) ||
+      Math.round(getCurrentChargePlanVisibleDays())
+  );
 
   const contentStartDate =
     normalizeChargePlanDateValue(getChargePlanRangeStartDate()) || firstVisibleDate;
   const rangeStartDate = firstVisibleDate;
-  const rangeEndDate = shiftIsoDateValue(firstVisibleDate, visibleDays - 1);
+  const rangeEndDate = lastVisibleDate || shiftIsoDateValue(firstVisibleDate, visibleDays - 1);
 
   return {
     mode: String(state.chargePlanZoomMode || "month").trim() || "month",
