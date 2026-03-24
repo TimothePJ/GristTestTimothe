@@ -161,6 +161,12 @@ select {
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border-strong);
   background: #fff;
+  color: var(--color-ink);
+}
+
+.workspace-form select option {
+  color: var(--color-ink);
+  background: #fff;
 }
 
 .sync-dashboard {
@@ -181,6 +187,10 @@ select {
 .sync-planning-pane {
   display: grid;
   gap: 0;
+}
+
+.sync-planning-pane--planning {
+  position: relative;
 }
 
 .sync-planning-pane + .sync-planning-pane {
@@ -314,7 +324,14 @@ select {
   background: #fff;
 }
 
+.embedded-app-frame--expenses {
+  border-top: 0;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
 .embedded-app-frame--planning {
+  border-top: 0;
+  border-radius: 0;
   min-height: 820px;
   height: 820px;
 }

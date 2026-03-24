@@ -243,6 +243,42 @@ body.planning-sync-embedded .planning-status {
   display: none;
 }
 
+body.planning-sync-axis-only {
+  overflow: hidden !important;
+}
+
+body.planning-sync-axis-only #toolbar,
+body.planning-sync-axis-only .planning-header-row,
+body.planning-sync-axis-only .planning-status,
+body.planning-sync-axis-only #addZoneModal {
+  display: none !important;
+}
+
+body.planning-sync-axis-only #timelineWrapper {
+  height: 72px !important;
+  min-height: 72px !important;
+  overflow: hidden !important;
+  border: 0 !important;
+}
+
+body.planning-sync-axis-only #planningTimeline {
+  height: 72px !important;
+  min-height: 72px !important;
+}
+
+body.planning-sync-axis-only #planningTimeline .timeline-axis-left-filler,
+body.planning-sync-axis-only #planningTimeline .vis-panel.vis-left,
+body.planning-sync-axis-only #planningTimeline .vis-panel.vis-center,
+body.planning-sync-axis-only #planningTimeline .vis-panel.vis-bottom {
+  display: none !important;
+}
+
+body.planning-sync-axis-only #planningTimeline .vis-panel.vis-top {
+  top: 0 !important;
+  transform: translateY(0) !important;
+  z-index: 80 !important;
+}
+
 body.planning-sync-embedded .planning-header-left .c-id2,
 body.planning-sync-embedded .planning-header-left .c-start,
 body.planning-sync-embedded .planning-header-left .c-duration-1,

@@ -732,7 +732,6 @@ async function applySharedProject(projectKey) {
     ]);
     activeProjectKey = normalizedProjectKey;
     scheduleExpensesFramePresentation();
-
     let sharedViewport = buildProjectSelectionViewport(
       planningApi.getProjectDateBounds?.() || null,
       expensesApi.getViewport?.() || planningApi.getViewport?.() || {}
@@ -854,7 +853,9 @@ async function flushViewportSyncQueue() {
         ? expensesApi
         : null;
     const sourceSignature = getViewportSignature(payloadProjectKey, payload.viewport);
-    const applyCalls = [Promise.resolve(targetApi.applyViewport(canonicalViewport))];
+    const applyCalls = [
+      Promise.resolve(targetApi.applyViewport(canonicalViewport)),
+    ];
 
     if (sourceApi && sourceSignature !== viewportSignature) {
       applyCalls.push(Promise.resolve(sourceApi.applyViewport(canonicalViewport)));
