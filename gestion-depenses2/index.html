@@ -140,28 +140,32 @@
             <div class="segment-edit-form">
                 <div class="segment-edit-grid">
                     <label class="segment-edit-field">
-                        <span>Date de debut</span>
+                        <span>Premiere date</span>
                         <input type="date" id="edit-segment-start-date">
                     </label>
                     <label class="segment-edit-field">
-                        <span>Demi-journee debut</span>
+                        <span>Partie de la premiere date</span>
                         <select id="edit-segment-start-part">
                             <option value="am">Matin</option>
                             <option value="pm">Apres-midi</option>
                         </select>
                     </label>
                     <label class="segment-edit-field">
-                        <span>Date de fin</span>
+                        <span>Deuxieme date</span>
                         <input type="date" id="edit-segment-end-date">
                     </label>
                     <label class="segment-edit-field">
-                        <span>Demi-journee fin</span>
+                        <span>Partie de la deuxieme date</span>
                         <select id="edit-segment-end-part">
                             <option value="am">Matin</option>
                             <option value="pm">Apres-midi</option>
                         </select>
                     </label>
                 </div>
+                <p class="segment-edit-note">
+                    Premiere date : <strong>Matin</strong> compte la journee complete, <strong>Apres-midi</strong> compte la demi-journee.
+                    Deuxieme date : <strong>Matin</strong> compte la demi-journee, <strong>Apres-midi</strong> compte la journee complete.
+                </p>
                 <p id="edit-segment-feedback" class="segment-edit-feedback" hidden></p>
             </div>
             <div class="segment-edit-footer">
