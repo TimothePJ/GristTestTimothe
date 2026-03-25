@@ -304,6 +304,51 @@ body.planning-sync-axis-only #planningTimeline .vis-panel.vis-top:active {
   cursor: grabbing;
 }
 
+body.planning-sync-header-only {
+  overflow: hidden !important;
+}
+
+body.planning-sync-header-only #toolbar,
+body.planning-sync-header-only .planning-header-row,
+body.planning-sync-header-only .planning-status,
+body.planning-sync-header-only #addZoneModal {
+  display: none !important;
+}
+
+body.planning-sync-header-only #timelineWrapper {
+  height: 72px !important;
+  min-height: 72px !important;
+  overflow-y: scroll !important;
+  overflow-x: hidden !important;
+  scrollbar-gutter: stable;
+  border: 0 !important;
+}
+
+body.planning-sync-header-only #planningTimeline {
+  height: 72px !important;
+  min-height: 72px !important;
+}
+
+body.planning-sync-header-only #planningTimeline .vis-panel.vis-left,
+body.planning-sync-header-only #planningTimeline .vis-panel.vis-center,
+body.planning-sync-header-only #planningTimeline .vis-panel.vis-bottom,
+body.planning-sync-header-only #planningTimeline .timeline-axis-left-filler {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+body.planning-sync-header-only #planningTimeline .vis-panel.vis-top {
+  top: 0 !important;
+  transform: translateY(0) !important;
+  z-index: 80 !important;
+  pointer-events: auto !important;
+  cursor: grab;
+}
+
+body.planning-sync-header-only #planningTimeline .vis-panel.vis-top:active {
+  cursor: grabbing;
+}
+
 body.planning-sync-embedded .planning-header-left .c-id2,
 body.planning-sync-embedded .planning-header-left .c-start,
 body.planning-sync-embedded .planning-header-left .c-duration-1,
@@ -520,6 +565,12 @@ body.planning-sync-embedded #planningTimeline .group-row-grid .cell-ligne-planni
 
 #planningTimeline .vis-time-axis .vis-grid.vis-major {
   border-color: #e0e0e0 !important;
+}
+
+body.planning-sync-axis-only #planningTimeline .vis-time-axis .vis-grid.vis-major,
+body.planning-sync-embedded #planningTimeline .vis-time-axis .vis-grid.vis-major {
+  border-color: #bcc9d6 !important;
+  border-left-width: 2px !important;
 }
 
 #planningTimeline .vis-time-axis .vis-text {

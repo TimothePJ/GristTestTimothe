@@ -53,6 +53,9 @@ const EMBEDDED_PLANNING_SYNC_MODE =
 const AXIS_ONLY_EMBEDDED_MODE =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).get("axisOnly") === "1";
+const HEADER_ONLY_EMBEDDED_MODE =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("headerOnly") === "1";
 const EXTERNAL_AXIS_EMBEDDED_MODE =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).get("externalAxis") === "1";
@@ -72,6 +75,9 @@ function applyEmbeddedPlanningSyncMode() {
   document.body.classList.add("planning-sync-embedded");
   if (AXIS_ONLY_EMBEDDED_MODE) {
     document.body.classList.add("planning-sync-axis-only");
+  }
+  if (HEADER_ONLY_EMBEDDED_MODE) {
+    document.body.classList.add("planning-sync-header-only");
   }
   if (EXTERNAL_AXIS_EMBEDDED_MODE) {
     document.body.classList.add("planning-sync-external-axis");
