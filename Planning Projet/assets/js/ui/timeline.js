@@ -2466,6 +2466,15 @@ function getVisibleDaysFromRange(range) {
   return Math.max(1, Math.ceil((endMs - startMs) / 86400000));
 }
 
+function parsePlanningExactNumber(value) {
+  if (value == null || value === "") {
+    return Number.NaN;
+  }
+
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : Number.NaN;
+}
+
 function emitPlanningViewportChange(reason = "") {
   const viewport = getPlanningViewportState();
   if (!viewport) {
@@ -2526,8 +2535,8 @@ export function applyPlanningViewportState(viewport = {}) {
     setActiveZoomButton(nextMode);
   }
 
-  const nextWindowStartMs = Number(viewport.windowStartMs);
-  const nextWindowEndMs = Number(viewport.windowEndMs);
+  const nextWindowStartMs = parsePlanningExactNumber(viewport.windowStartMs);
+  const nextWindowEndMs = parsePlanningExactNumber(viewport.windowEndMs);
   if (Number.isFinite(nextWindowStartMs) && Number.isFinite(nextWindowEndMs)) {
     const exactRange = {
       start: new Date(nextWindowStartMs),

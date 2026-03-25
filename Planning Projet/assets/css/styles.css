@@ -243,6 +243,10 @@ body.planning-sync-embedded .planning-status {
   display: none;
 }
 
+body.planning-sync-embedded #timelineWrapper {
+  scrollbar-gutter: stable;
+}
+
 body.planning-sync-external-axis #toolbar {
   display: none !important;
 }

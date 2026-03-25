@@ -51,6 +51,15 @@ function normalizeMode(rawValue) {
   return VIEWPORT_MODES.includes(normalized) ? normalized : "month";
 }
 
+function normalizeExactNumber(rawValue) {
+  if (rawValue == null || rawValue === "") {
+    return null;
+  }
+
+  const numericValue = Number(rawValue);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
 export function normalizePlanningScope(rawScope = {}) {
   return {
     projectId: normalizeScopeValue(rawScope.projectId),
@@ -60,6 +69,8 @@ export function normalizePlanningScope(rawScope = {}) {
 
 export function normalizePlanningViewport(rawViewport = {}) {
   const mode = normalizeMode(rawViewport.mode);
+  const windowStartMs = normalizeExactNumber(rawViewport.windowStartMs);
+  const windowEndMs = normalizeExactNumber(rawViewport.windowEndMs);
   const anchorDate =
     normalizeIsoDate(rawViewport.anchorDate) ||
     normalizeIsoDate(rawViewport.firstVisibleDate) ||
@@ -86,6 +97,13 @@ export function normalizePlanningViewport(rawViewport = {}) {
     visibleDays,
     rangeStartDate,
     rangeEndDate,
+    windowStartMs,
+    windowEndMs,
+    leftDayOffset: normalizeExactNumber(rawViewport.leftDayOffset),
+    rightDayOffset: normalizeExactNumber(rawViewport.rightDayOffset),
+    exactVisibleDays: normalizeExactNumber(rawViewport.exactVisibleDays),
+    contentStartDate: normalizeIsoDate(rawViewport.contentStartDate),
+    contentStartMs: normalizeExactNumber(rawViewport.contentStartMs),
   };
 }
 
@@ -150,7 +168,13 @@ export function areViewportsEqual(leftViewport = {}, rightViewport = {}) {
     left.firstVisibleDate === right.firstVisibleDate &&
     left.visibleDays === right.visibleDays &&
     left.rangeStartDate === right.rangeStartDate &&
-    left.rangeEndDate === right.rangeEndDate
+    left.rangeEndDate === right.rangeEndDate &&
+    left.windowStartMs === right.windowStartMs &&
+    left.windowEndMs === right.windowEndMs &&
+    left.leftDayOffset === right.leftDayOffset &&
+    left.rightDayOffset === right.rightDayOffset &&
+    left.contentStartDate === right.contentStartDate &&
+    left.contentStartMs === right.contentStartMs
   );
 }
 

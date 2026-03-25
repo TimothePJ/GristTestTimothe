@@ -125,8 +125,52 @@ function getChargePlanFixedColumnsWidth(boardEl = currentBoardEl) {
   );
 }
 
+function getEmbeddedPlanningVisibleWidthAdjustment(boardEl = currentBoardEl) {
+  if (!(boardEl instanceof HTMLElement) || typeof window === "undefined") {
+    return 0;
+  }
+
+  const rootStyles = window.getComputedStyle(document.documentElement);
+  const bodyStyles =
+    document.body instanceof HTMLElement ? window.getComputedStyle(document.body) : null;
+  const boardStyles = window.getComputedStyle(boardEl);
+  const rawValue =
+    boardStyles.getPropertyValue("--sync-planning-visible-width-adjustment") ||
+    bodyStyles?.getPropertyValue("--sync-planning-visible-width-adjustment") ||
+    rootStyles.getPropertyValue("--sync-planning-visible-width-adjustment") ||
+    "0";
+  const adjustment = parseFloat(rawValue);
+
+  return Number.isFinite(adjustment) && adjustment > 0 ? adjustment : 0;
+}
+
 function getTimelineViewportWidth(boardEl = currentBoardEl) {
   const scrollEl = boardEl?.querySelector(".charge-plan-scroll");
+  const fixedColumnsWidth = getChargePlanFixedColumnsWidth(boardEl);
+  const embeddedVisibleWidthAdjustment = getEmbeddedPlanningVisibleWidthAdjustment(boardEl);
+  const isEmbeddedPlanningSync =
+    typeof document !== "undefined" &&
+    document.body instanceof HTMLElement &&
+    document.body.classList.contains("planning-sync-embedded");
+
+  if (isEmbeddedPlanningSync) {
+    const embeddedScrollWidth = scrollEl?.clientWidth || 0;
+    if (embeddedScrollWidth > 0) {
+      return Math.max(280, embeddedScrollWidth - fixedColumnsWidth);
+    }
+
+    const embeddedContainerWidth =
+      boardEl?.clientWidth ||
+      boardEl?.getBoundingClientRect?.().width ||
+      (typeof window !== "undefined" ? window.innerWidth - 64 : 0) ||
+      960;
+
+    return Math.max(
+      280,
+      embeddedContainerWidth - fixedColumnsWidth - embeddedVisibleWidthAdjustment
+    );
+  }
+
   const containerWidth = Math.max(
     scrollEl?.clientWidth || 0,
     boardEl?.clientWidth || 0,
@@ -134,7 +178,6 @@ function getTimelineViewportWidth(boardEl = currentBoardEl) {
     typeof window !== "undefined" ? window.innerWidth - 64 : 0,
     960
   );
-  const fixedColumnsWidth = getChargePlanFixedColumnsWidth(boardEl);
   return Math.max(280, containerWidth - fixedColumnsWidth);
 }
 

@@ -111,6 +111,7 @@ let chargePlanSyncApiReady = false;
 let suppressChargePlanSyncEvents = false;
 let chargePlanSyncSuppressionToken = 0;
 let chargePlanSyncAlignmentTimer = null;
+let lastChargePlanSyncViewportSignature = "";
 const chargePlanSyncListeners = new Set();
 const budgetLineDragState = {
   sourceIndex: null,
@@ -126,6 +127,7 @@ let pendingChargePlanFocusDate = "";
 let pendingChargePlanFocusAlign = "center";
 let chargePlanDatePickerView = null;
 const PARIS_TIMEZONE = "Europe/Paris";
+const DAY_IN_MS = 86400000;
 const EMBEDDED_PLANNING_SYNC_MODE =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).get("embedded") === "planning-sync";
@@ -277,6 +279,63 @@ function ensureChargePlanSyncAlignedDate(targetDateValue, attempt = 0) {
 
     if (attempt < 12) {
       ensureChargePlanSyncAlignedDate(normalizedTargetDate, attempt + 1);
+    }
+  }, attempt === 0 ? 0 : 36);
+}
+
+function ensureChargePlanSyncAlignedViewport(targetViewport = {}, attempt = 0) {
+  const normalizedTargetDate = normalizeChargePlanDateValue(
+    targetViewport.referenceDateValue ||
+      targetViewport.firstVisibleDate ||
+      targetViewport.rangeStartDate
+  );
+  const targetLeftDayOffset = parseChargePlanExactNumber(targetViewport.leftDayOffset);
+  const targetWindowStartMs = parseChargePlanExactNumber(targetViewport.windowStartMs);
+  const targetWindowEndMs = parseChargePlanExactNumber(targetViewport.windowEndMs);
+
+  if (
+    !normalizedTargetDate &&
+    !Number.isFinite(targetLeftDayOffset) &&
+    !Number.isFinite(targetWindowStartMs)
+  ) {
+    clearChargePlanSyncAlignmentTimer();
+    return;
+  }
+
+  clearChargePlanSyncAlignmentTimer();
+  chargePlanSyncAlignmentTimer = setTimeout(() => {
+    chargePlanSyncAlignmentTimer = null;
+
+    const currentViewport = getChargePlanSyncViewport();
+    const currentWindowStartMs = parseChargePlanExactNumber(currentViewport?.windowStartMs);
+    const currentWindowEndMs = parseChargePlanExactNumber(currentViewport?.windowEndMs);
+    const currentLeftDayOffset = parseChargePlanExactNumber(currentViewport?.leftDayOffset);
+    const startAligned = Number.isFinite(targetWindowStartMs)
+      ? Number.isFinite(currentWindowStartMs) &&
+        Math.abs(currentWindowStartMs - targetWindowStartMs) <= DAY_IN_MS / 400
+      : Number.isFinite(targetLeftDayOffset)
+      ? Number.isFinite(currentLeftDayOffset) &&
+        Math.abs(currentLeftDayOffset - targetLeftDayOffset) <= 0.01
+      : true;
+    const endAligned = Number.isFinite(targetWindowEndMs)
+      ? Number.isFinite(currentWindowEndMs) &&
+        Math.abs(currentWindowEndMs - targetWindowEndMs) <= DAY_IN_MS / 400
+      : true;
+
+    if (startAligned && endAligned) {
+      return;
+    }
+
+    if (Number.isFinite(targetLeftDayOffset)) {
+      setPendingChargePlanLeftDayOffset(targetLeftDayOffset);
+    } else if (normalizedTargetDate) {
+      setPendingChargePlanFocus(normalizedTargetDate, "left");
+    }
+
+    restoreChargePlanViewport(dom?.chargePlanBoard || null);
+
+    if (attempt < 12) {
+      ensureChargePlanSyncAlignedViewport(targetViewport, attempt + 1);
     }
   }, attempt === 0 ? 0 : 36);
 }
@@ -1203,12 +1262,17 @@ function applyChargePlanSyncViewport(viewport = {}) {
   const suppressionToken = beginChargePlanSyncSuppression();
 
   try {
-    const nextVisibleDays = Number(viewport.visibleDays);
+    const exactViewport = getChargePlanSharedExactViewport(viewport);
+    const nextVisibleDays = Number.isFinite(exactViewport?.visibleDays)
+      ? Number(exactViewport.visibleDays)
+      : Number(viewport.visibleDays);
     const nextMode = String(viewport.mode || "").trim();
     const nextDateValue =
       normalizeChargePlanDateValue(viewport.firstVisibleDate) ||
       normalizeChargePlanDateValue(viewport.anchorDate) ||
-      normalizeChargePlanDateValue(viewport.rangeStartDate);
+      normalizeChargePlanDateValue(viewport.rangeStartDate) ||
+      getChargePlanDateValueFromTimestampMs(viewport.windowStartMs) ||
+      normalizeChargePlanDateValue(exactViewport?.referenceDateValue);
 
     if (
       nextMode &&
@@ -1227,9 +1291,13 @@ function applyChargePlanSyncViewport(viewport = {}) {
     if (nextDateValue) {
       const targetDate = new Date(`${nextDateValue}T12:00:00`);
       if (!Number.isNaN(targetDate.getTime())) {
-        setPendingChargePlanFocus(nextDateValue, "left");
         clearChargePlanWheelZoomFrame();
         clearChargePlanVisibleDateTimer();
+        if (Number.isFinite(exactViewport?.leftDayOffset)) {
+          setPendingChargePlanLeftDayOffset(exactViewport.leftDayOffset);
+        } else {
+          setPendingChargePlanFocus(nextDateValue, "left");
+        }
         setChargePlanRangeStartDate(nextDateValue);
         setState({
           selectedYear: targetDate.getFullYear(),
@@ -1240,7 +1308,9 @@ function applyChargePlanSyncViewport(viewport = {}) {
     }
 
     renderChargePlanSection();
-    if (nextDateValue) {
+    if (exactViewport) {
+      ensureChargePlanSyncAlignedViewport(exactViewport);
+    } else if (nextDateValue) {
       ensureChargePlanSyncAlignedDate(nextDateValue);
     }
   } finally {
@@ -1571,6 +1641,36 @@ function parseChargePlanDateValue(rawValue) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function getChargePlanLocalDayStartMs(rawValue) {
+  const normalizedDateValue = normalizeChargePlanDateValue(rawValue);
+  if (!normalizedDateValue) {
+    return null;
+  }
+
+  const [year, month, day] = normalizedDateValue.split("-").map(Number);
+  const date = new Date(year, month - 1, day, 0, 0, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date.getTime();
+}
+
+function getChargePlanDateValueFromTimestampMs(timestampMs) {
+  const numericTimestamp = timestampMs == null ? Number.NaN : Number(timestampMs);
+  if (!Number.isFinite(numericTimestamp)) {
+    return "";
+  }
+
+  const date = new Date(numericTimestamp);
+  return Number.isNaN(date.getTime()) ? "" : toDateInputValue(date);
+}
+
+function parseChargePlanExactNumber(value) {
+  if (value == null || value === "") {
+    return Number.NaN;
+  }
+
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : Number.NaN;
+}
+
 function getChargePlanUtcDayNumber(date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
     return null;
@@ -1740,6 +1840,84 @@ function getChargePlanViewportLeftDayOffset(scrollEl = getChargePlanScrollElemen
   const leftContentOffset = scrollEl.scrollLeft + geometry.clientLeft;
   const measurement = getChargePlanDayOffsetAtContentOffset(scrollEl, leftContentOffset);
   return measurement ? measurement.dayOffset : null;
+}
+
+function getChargePlanViewportWindow(scrollEl = getChargePlanScrollElement()) {
+  if (!(scrollEl instanceof HTMLElement)) {
+    return null;
+  }
+
+  const metrics = getChargePlanTimelineMetrics(scrollEl);
+  if (!metrics) {
+    return null;
+  }
+
+  const geometry = getChargePlanTimelineViewportGeometry(scrollEl);
+  const leftContentOffset = scrollEl.scrollLeft + geometry.clientLeft;
+  const leftMeasurement = getChargePlanDayOffsetAtContentOffset(scrollEl, leftContentOffset);
+  if (!leftMeasurement) {
+    return null;
+  }
+
+  const visibleDaySpan = geometry.viewportWidth / Math.max(metrics.dayWidth, 0.0001);
+  const leftDayOffset = leftMeasurement.dayOffset;
+  const rightDayOffset = clamp(
+    leftDayOffset + visibleDaySpan,
+    0,
+    Math.max(metrics.totalDays, 0)
+  );
+  const contentStartDate = getChargePlanDateValueFromUtcDayNumber(metrics.rangeStartDayNumber);
+  const contentStartMs = getChargePlanLocalDayStartMs(contentStartDate);
+
+  return {
+    leftDayOffset,
+    rightDayOffset,
+    visibleDaySpan,
+    contentStartDate,
+    contentStartMs,
+    windowStartMs:
+      Number.isFinite(contentStartMs) ? contentStartMs + leftDayOffset * DAY_IN_MS : null,
+    windowEndMs:
+      Number.isFinite(contentStartMs) ? contentStartMs + rightDayOffset * DAY_IN_MS : null,
+  };
+}
+
+function getChargePlanSharedExactViewport(viewport = {}) {
+  const windowStartMs = parseChargePlanExactNumber(viewport.windowStartMs);
+  const windowEndMs = parseChargePlanExactNumber(viewport.windowEndMs);
+  if (!Number.isFinite(windowStartMs) || !Number.isFinite(windowEndMs) || windowEndMs <= windowStartMs) {
+    return null;
+  }
+
+  const referenceDateValue =
+    normalizeChargePlanDateValue(viewport.firstVisibleDate) ||
+    normalizeChargePlanDateValue(viewport.rangeStartDate) ||
+    getChargePlanDateValueFromTimestampMs(windowStartMs);
+  const rangeStartDate = getChargePlanWindowStartDate(referenceDateValue);
+  const rangeStartMs = getChargePlanLocalDayStartMs(rangeStartDate);
+  if (!referenceDateValue || !Number.isFinite(rangeStartMs)) {
+    return null;
+  }
+
+  const exactVisibleDays = (windowEndMs - windowStartMs) / DAY_IN_MS;
+  const { minVisibleDays, maxVisibleDays } = getChargePlanVisibleDaysBounds(referenceDateValue);
+  const visibleDays = clamp(exactVisibleDays, minVisibleDays, maxVisibleDays);
+  const leftDayOffset = (windowStartMs - rangeStartMs) / DAY_IN_MS;
+
+  return {
+    referenceDateValue,
+    rangeStartDate,
+    rangeStartMs,
+    leftDayOffset,
+    rightDayOffset: leftDayOffset + visibleDays,
+    visibleDays,
+    exactVisibleDays,
+    windowStartMs,
+    windowEndMs:
+      Number.isFinite(rangeStartMs)
+        ? rangeStartMs + (leftDayOffset + visibleDays) * DAY_IN_MS
+        : windowEndMs,
+  };
 }
 
 function getChargePlanNextLeftDayOffset(
@@ -1943,13 +2121,38 @@ function getChargePlanSyncProjectKey() {
   return String(selectedProject.name || selectedProject.projectNumber || "").trim();
 }
 
+function getChargePlanSyncViewportSignature(viewport = {}) {
+  const mode = String(viewport.mode || "").trim();
+  const firstVisibleDate = String(viewport.firstVisibleDate || viewport.rangeStartDate || "").trim();
+  const visibleDays = Number(viewport.visibleDays);
+  const windowStartMs = parseChargePlanExactNumber(viewport.windowStartMs);
+  const windowEndMs = parseChargePlanExactNumber(viewport.windowEndMs);
+  const leftDayOffset = parseChargePlanExactNumber(viewport.leftDayOffset);
+
+  return [
+    mode,
+    firstVisibleDate,
+    Number.isFinite(visibleDays) ? visibleDays.toFixed(4) : "",
+    Number.isFinite(windowStartMs) ? Math.round(windowStartMs) : "",
+    Number.isFinite(windowEndMs) ? Math.round(windowEndMs) : "",
+    Number.isFinite(leftDayOffset) ? leftDayOffset.toFixed(6) : "",
+  ].join("|");
+}
+
 function getChargePlanSyncViewport() {
   const scrollEl = getChargePlanScrollElement(dom?.chargePlanBoard || null);
+  const exactViewport = getChargePlanViewportWindow(scrollEl);
   const firstVisibleDate =
+    normalizeChargePlanDateValue(getChargePlanDateValueFromTimestampMs(exactViewport?.windowStartMs)) ||
     normalizeChargePlanDateValue(getChargePlanViewportEdgeDate(scrollEl, "left")) ||
     normalizeChargePlanDateValue(state.chargePlanAnchorDate) ||
     normalizeChargePlanDateValue(getChargePlanRangeStartDate());
   const lastVisibleDate =
+    normalizeChargePlanDateValue(
+      getChargePlanDateValueFromTimestampMs(
+        Number.isFinite(exactViewport?.windowEndMs) ? exactViewport.windowEndMs - 1 : null
+      )
+    ) ||
     normalizeChargePlanDateValue(getChargePlanViewportEdgeDate(scrollEl, "right")) ||
     shiftIsoDateValue(
       firstVisibleDate,
@@ -1974,6 +2177,23 @@ function getChargePlanSyncViewport() {
     rangeStartDate,
     rangeEndDate,
     contentStartDate,
+    contentStartMs:
+      Number.isFinite(exactViewport?.contentStartMs)
+        ? Number(exactViewport.contentStartMs)
+        : getChargePlanLocalDayStartMs(contentStartDate),
+    leftDayOffset: Number.isFinite(exactViewport?.leftDayOffset)
+      ? Number(exactViewport.leftDayOffset)
+      : getChargePlanViewportLeftDayOffset(scrollEl),
+    rightDayOffset: Number.isFinite(exactViewport?.rightDayOffset)
+      ? Number(exactViewport.rightDayOffset)
+      : null,
+    exactVisibleDays: Number.isFinite(exactViewport?.visibleDaySpan)
+      ? Number(exactViewport.visibleDaySpan)
+      : null,
+    windowStartMs:
+      Number.isFinite(exactViewport?.windowStartMs) ? Number(exactViewport.windowStartMs) : null,
+    windowEndMs:
+      Number.isFinite(exactViewport?.windowEndMs) ? Number(exactViewport.windowEndMs) : null,
   };
 }
 
@@ -1982,10 +2202,23 @@ function emitChargePlanSyncViewportChange(reason = "") {
     return;
   }
 
+  const projectKey = getChargePlanSyncProjectKey();
+  const viewport = getChargePlanSyncViewport();
+  const viewportSignature = [
+    projectKey,
+    getChargePlanSyncViewportSignature(viewport),
+  ].join("|");
+
+  if (viewportSignature === lastChargePlanSyncViewportSignature) {
+    return;
+  }
+
+  lastChargePlanSyncViewportSignature = viewportSignature;
+
   const payload = {
     app: "gestion-depenses2",
-    projectKey: getChargePlanSyncProjectKey(),
-    viewport: getChargePlanSyncViewport(),
+    projectKey,
+    viewport,
     meta: { reason },
   };
 
@@ -2010,8 +2243,11 @@ function syncChargePlanVisibleDate(
 
   updateChargePlanDateTrigger(firstVisibleDate);
 
-  if (options.persist && firstVisibleDate !== String(state.chargePlanAnchorDate || "").trim()) {
-    setState({ chargePlanAnchorDate: firstVisibleDate });
+  if (options.persist) {
+    if (firstVisibleDate !== String(state.chargePlanAnchorDate || "").trim()) {
+      setState({ chargePlanAnchorDate: firstVisibleDate });
+    }
+
     emitChargePlanSyncViewportChange("scroll");
   }
 
