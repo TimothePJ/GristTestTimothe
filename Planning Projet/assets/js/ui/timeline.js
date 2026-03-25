@@ -2492,6 +2492,12 @@ export function getPlanningViewportState() {
     anchorDate: toIsoDateValue(anchorDate),
     firstVisibleDate,
     visibleDays,
+    windowStartMs:
+      range.start instanceof Date && !Number.isNaN(range.start.getTime())
+        ? range.start.getTime()
+        : null,
+    windowEndMs:
+      range.end instanceof Date && !Number.isNaN(range.end.getTime()) ? range.end.getTime() : null,
     rangeStartDate: firstVisibleDate,
     rangeEndDate: shiftIsoDateValue(firstVisibleDate, visibleDays - 1),
   };
@@ -2518,6 +2524,34 @@ export function applyPlanningViewportState(viewport = {}) {
 
   if (nextMode) {
     setActiveZoomButton(nextMode);
+  }
+
+  const nextWindowStartMs = Number(viewport.windowStartMs);
+  const nextWindowEndMs = Number(viewport.windowEndMs);
+  if (Number.isFinite(nextWindowStartMs) && Number.isFinite(nextWindowEndMs)) {
+    const exactRange = {
+      start: new Date(nextWindowStartMs),
+      end: new Date(nextWindowEndMs),
+    };
+    if (
+      !Number.isNaN(exactRange.start.getTime()) &&
+      !Number.isNaN(exactRange.end.getTime()) &&
+      exactRange.end >= exactRange.start
+    ) {
+      const clampedRange = EMBEDDED_PLANNING_SYNC_MODE
+        ? buildClampedPlanningRange(
+            exactRange,
+            normalizePlanningViewportBounds(viewport.viewportBounds || embeddedPlanningViewportBounds)
+          ) || exactRange
+        : exactRange;
+
+      timelineInstance.setWindow(clampedRange.start, clampedRange.end, { animation: false });
+      updateDateRangeDisplay();
+      updateNavCenterButtonLabel();
+      updateCurrentTimeLineBounds();
+      requestStickyAxisSync();
+      return;
+    }
   }
 
   if (nextStartDate && nextEndDate) {

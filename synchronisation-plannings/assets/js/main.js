@@ -337,12 +337,16 @@ function getViewportSignature(projectKey, viewport = {}) {
   const rangeStartDate = String(viewport?.firstVisibleDate || viewport?.rangeStartDate || "").trim();
   const mode = String(viewport?.mode || "").trim();
   const visibleDays = Number(viewport?.visibleDays);
+  const windowStartMs = Number(viewport?.windowStartMs);
+  const windowEndMs = Number(viewport?.windowEndMs);
 
   return [
     normalizedProjectKey,
     rangeStartDate,
     mode,
     Number.isFinite(visibleDays) ? visibleDays : "",
+    Number.isFinite(windowStartMs) ? windowStartMs : "",
+    Number.isFinite(windowEndMs) ? windowEndMs : "",
   ].join("|");
 }
 
@@ -482,6 +486,22 @@ function buildCanonicalSharedViewport(viewport = {}) {
     visibleDays,
     rangeStartDate: firstVisibleDate,
     rangeEndDate,
+  };
+}
+
+function buildPlanningExactSharedViewport(viewport = {}) {
+  const canonicalViewport = buildCanonicalSharedViewport(viewport);
+  const windowStartMs = Number(viewport?.windowStartMs);
+  const windowEndMs = Number(viewport?.windowEndMs);
+
+  if (!Number.isFinite(windowStartMs) || !Number.isFinite(windowEndMs)) {
+    return canonicalViewport;
+  }
+
+  return {
+    ...canonicalViewport,
+    windowStartMs,
+    windowEndMs,
   };
 }
 
@@ -1053,6 +1073,10 @@ async function flushViewportSyncQueue() {
   }
 
   const canonicalViewport = buildCanonicalSharedViewport(payload.viewport);
+  const planningExactViewport =
+    payload.app === "planning-projet-main" || payload.app === "planning-projet-axis"
+      ? buildPlanningExactSharedViewport(payload.viewport)
+      : canonicalViewport;
   syncPlanningViewportBounds(canonicalViewport);
   const viewportSignature = getViewportSignature(payloadProjectKey, canonicalViewport);
   if (viewportSignature && viewportSignature === lastAppliedViewportSignature) {
@@ -1066,12 +1090,19 @@ async function flushViewportSyncQueue() {
 
   try {
     const sourceSignature = getViewportSignature(payloadProjectKey, payload.viewport);
+    const getViewportForApi = (api) => {
+      if (api === expensesApi) {
+        return canonicalViewport;
+      }
+
+      return planningExactViewport;
+    };
     const applyCalls = targetApis.map((api) =>
-      Promise.resolve(api.applyViewport(canonicalViewport))
+      Promise.resolve(api.applyViewport(getViewportForApi(api)))
     );
 
     if (sourceApi && sourceSignature !== viewportSignature) {
-      applyCalls.push(Promise.resolve(sourceApi.applyViewport(canonicalViewport)));
+      applyCalls.push(Promise.resolve(sourceApi.applyViewport(getViewportForApi(sourceApi))));
     }
 
     await Promise.all(applyCalls);
