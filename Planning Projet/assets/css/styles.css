@@ -243,6 +243,25 @@ body.planning-sync-embedded .planning-status {
   display: none;
 }
 
+body.planning-sync-external-axis #toolbar {
+  display: none !important;
+}
+
+body.planning-sync-external-axis .planning-header-row {
+  top: 0 !important;
+}
+
+body.planning-sync-external-axis #planningTimeline .timeline-axis-left-filler,
+body.planning-sync-external-axis #planningTimeline .vis-panel.vis-top {
+  display: none !important;
+}
+
+body.planning-sync-external-axis #planningTimeline .vis-panel.vis-left,
+body.planning-sync-external-axis #planningTimeline .vis-panel.vis-center,
+body.planning-sync-external-axis #planningTimeline .vis-panel.vis-bottom {
+  top: 0 !important;
+}
+
 body.planning-sync-axis-only {
   overflow: hidden !important;
 }
@@ -277,6 +296,12 @@ body.planning-sync-axis-only #planningTimeline .vis-panel.vis-top {
   top: 0 !important;
   transform: translateY(0) !important;
   z-index: 80 !important;
+  pointer-events: auto !important;
+  cursor: grab;
+}
+
+body.planning-sync-axis-only #planningTimeline .vis-panel.vis-top:active {
+  cursor: grabbing;
 }
 
 body.planning-sync-embedded .planning-header-left .c-id2,

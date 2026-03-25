@@ -1,4 +1,5 @@
 const planningFrameEl = document.getElementById("planning-projet-frame");
+const planningAxisFrameEl = document.getElementById("planning-projet-axis-frame");
 const expensesFrameEl = document.getElementById("gestion-depenses2-frame");
 const projectSelectEl = document.getElementById("shared-project-select");
 const statusValueEl = document.getElementById("hub-status-value");
@@ -6,15 +7,16 @@ const lastSourceValueEl = document.getElementById("last-source-value");
 const lastRangeValueEl = document.getElementById("last-range-value");
 const logEl = document.getElementById("sync-log");
 const clearLogBtn = document.getElementById("clear-log-btn");
+const sharedPrevBtnEl = document.getElementById("shared-prev-btn");
+const sharedCenterBtnEl = document.getElementById("shared-center-btn");
+const sharedNextBtnEl = document.getElementById("shared-next-btn");
+const sharedCurrentDateRangeEl = document.getElementById("shared-current-date-range");
 const expensesModeButtons = Array.from(
   document.querySelectorAll("[data-expenses-sync-mode]")
 );
-const expensesDateTriggerEl = document.getElementById("expenses-sync-date-trigger");
-const expensesDateValueEl = document.getElementById("expenses-sync-date-value");
-const expensesDateInputEl = document.getElementById("expenses-sync-date-input");
-const expensesTodayBtnEl = document.getElementById("expenses-sync-today-btn");
 
 let planningApi = null;
+let planningAxisApi = null;
 let expensesApi = null;
 let activeProjectKey = "";
 let projectSyncInProgress = false;
@@ -28,6 +30,62 @@ const SHARED_VIEWPORT_RULES = {
   minVisibleDays: 7,
   yearMaxVisibleMonths: 14,
 };
+
+function getReferencePlanningApi() {
+  return planningAxisApi || planningApi || null;
+}
+
+function getViewportSourceLabel(sourceApp = "") {
+  if (sourceApp === "planning-projet-axis") {
+    return "frise commune";
+  }
+
+  if (sourceApp === "planning-projet-main") {
+    return "planning-projet";
+  }
+
+  if (sourceApp === "gestion-depenses2") {
+    return "gestion-depenses2";
+  }
+
+  if (sourceApp === "Pilotage commun") {
+    return "Pilotage commun";
+  }
+
+  return String(sourceApp || "").trim() || "source inconnue";
+}
+
+function getViewportSourceApi(sourceApp = "") {
+  if (sourceApp === "planning-projet-axis") {
+    return planningAxisApi;
+  }
+
+  if (sourceApp === "planning-projet-main") {
+    return planningApi;
+  }
+
+  if (sourceApp === "gestion-depenses2") {
+    return expensesApi;
+  }
+
+  return null;
+}
+
+function getViewportTargetApis(sourceApp = "") {
+  if (sourceApp === "planning-projet-axis") {
+    return [planningApi, expensesApi].filter(Boolean);
+  }
+
+  if (sourceApp === "planning-projet-main") {
+    return [planningAxisApi, expensesApi].filter(Boolean);
+  }
+
+  if (sourceApp === "gestion-depenses2") {
+    return [planningApi, planningAxisApi].filter(Boolean);
+  }
+
+  return [];
+}
 
 function setHubStatus(message) {
   if (statusValueEl) {
@@ -72,43 +130,136 @@ function setExpensesPlanningControlsDisabled(disabled = true) {
     buttonEl.disabled = Boolean(disabled);
   });
 
-  if (expensesDateTriggerEl instanceof HTMLButtonElement) {
-    expensesDateTriggerEl.disabled = Boolean(disabled);
+  if (sharedPrevBtnEl instanceof HTMLButtonElement) {
+    sharedPrevBtnEl.disabled = Boolean(disabled);
   }
 
-  if (expensesDateInputEl instanceof HTMLInputElement) {
-    expensesDateInputEl.disabled = Boolean(disabled);
+  if (sharedCenterBtnEl instanceof HTMLButtonElement) {
+    sharedCenterBtnEl.disabled = Boolean(disabled);
   }
 
-  if (expensesTodayBtnEl instanceof HTMLButtonElement) {
-    expensesTodayBtnEl.disabled = Boolean(disabled);
+  if (sharedNextBtnEl instanceof HTMLButtonElement) {
+    sharedNextBtnEl.disabled = Boolean(disabled);
   }
 }
 
-function formatViewportDateLabel(dateValue) {
-  const normalizedDateValue = normalizeIsoDate(dateValue);
-  if (!normalizedDateValue) {
-    return "--";
+function formatSharedCenterLabel(mode = "", anchorDateValue = "") {
+  const normalizedMode = String(mode || "").trim() || "week";
+  const normalizedAnchorDate = normalizeIsoDate(anchorDateValue);
+  const anchorDate = normalizedAnchorDate
+    ? new Date(`${normalizedAnchorDate}T12:00:00`)
+    : new Date();
+
+  if (Number.isNaN(anchorDate.getTime())) {
+    return "Aujourd'hui";
   }
 
-  const date = new Date(`${normalizedDateValue}T12:00:00`);
-  if (Number.isNaN(date.getTime())) {
-    return "--";
+  if (normalizedMode === "week") {
+    const day = anchorDate.getDay();
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    const monday = new Date(anchorDate);
+    monday.setDate(anchorDate.getDate() + diffToMonday);
+    monday.setHours(0, 0, 0, 0);
+    return `Semaine du ${monday.toLocaleDateString("fr-FR")}`;
   }
 
-  return date.toLocaleDateString("fr-FR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
+  if (normalizedMode === "month") {
+    const monthLabel = anchorDate.toLocaleDateString("fr-FR", {
+      month: "long",
+      year: "numeric",
+    });
+    return monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1);
+  }
+
+  if (normalizedMode === "year") {
+    return String(anchorDate.getFullYear());
+  }
+
+  return "Aujourd'hui";
 }
 
-function getTodayIsoDate() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+function formatSharedRangeLabel(startDateValue, endDateValue, availableWidth = Infinity) {
+  const normalizedStartDate = normalizeIsoDate(startDateValue);
+  const normalizedEndDate = normalizeIsoDate(endDateValue);
+  if (!normalizedStartDate) {
+    return "-";
+  }
+
+  const startDate = new Date(`${normalizedStartDate}T12:00:00`);
+  if (Number.isNaN(startDate.getTime())) {
+    return "-";
+  }
+
+  if (!normalizedEndDate) {
+    return startDate.toLocaleDateString("fr-FR", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  }
+
+  const endDate = new Date(`${normalizedEndDate}T12:00:00`);
+  if (Number.isNaN(endDate.getTime())) {
+    return startDate.toLocaleDateString("fr-FR", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  }
+
+  const full = [
+    startDate.toLocaleDateString("fr-FR", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    }),
+    endDate.toLocaleDateString("fr-FR", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    }),
+  ].join(" - ");
+
+  const medium = [
+    startDate.toLocaleDateString("fr-FR", {
+      day: "numeric",
+      month: "short",
+    }),
+    endDate.toLocaleDateString("fr-FR", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }),
+  ].join(" - ");
+
+  const compact = [
+    startDate.toLocaleDateString("fr-FR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "2-digit",
+    }),
+    endDate.toLocaleDateString("fr-FR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "2-digit",
+    }),
+  ].join(" - ");
+
+  const minimal = [
+    startDate.toLocaleDateString("fr-FR", {
+      day: "2-digit",
+      month: "2-digit",
+    }),
+    endDate.toLocaleDateString("fr-FR", {
+      day: "2-digit",
+      month: "2-digit",
+    }),
+  ].join(" - ");
+
+  if (availableWidth >= 340) return full;
+  if (availableWidth >= 255) return medium;
+  if (availableWidth >= 185) return compact;
+  return minimal;
 }
 
 function syncExpensesPlanningShell(viewport = null) {
@@ -131,16 +282,33 @@ function syncExpensesPlanningShell(viewport = null) {
     buttonEl.setAttribute("aria-pressed", isActive ? "true" : "false");
   });
 
-  if (expensesDateValueEl instanceof HTMLElement) {
-    expensesDateValueEl.textContent = formatViewportDateLabel(activeDateValue);
+  if (sharedCenterBtnEl instanceof HTMLButtonElement) {
+    sharedCenterBtnEl.textContent = formatSharedCenterLabel(
+      activeMode,
+      activeViewport?.anchorDate || activeDateValue
+    );
   }
 
-  if (expensesDateTriggerEl instanceof HTMLButtonElement) {
-    expensesDateTriggerEl.dataset.dateValue = activeDateValue;
-  }
-
-  if (expensesDateInputEl instanceof HTMLInputElement) {
-    expensesDateInputEl.value = activeDateValue;
+  if (sharedCurrentDateRangeEl instanceof HTMLElement) {
+    const availableWidth = Math.max(
+      0,
+      Math.round(
+        sharedCurrentDateRangeEl.getBoundingClientRect().width ||
+          sharedCurrentDateRangeEl.clientWidth ||
+          0
+      )
+    );
+    const fullLabel = formatSharedRangeLabel(
+      activeViewport?.firstVisibleDate || activeViewport?.rangeStartDate || "",
+      activeViewport?.rangeEndDate || "",
+      Number.MAX_SAFE_INTEGER
+    );
+    sharedCurrentDateRangeEl.textContent = formatSharedRangeLabel(
+      activeViewport?.firstVisibleDate || activeViewport?.rangeStartDate || "",
+      activeViewport?.rangeEndDate || "",
+      availableWidth
+    );
+    sharedCurrentDateRangeEl.title = fullLabel;
   }
 }
 
@@ -367,10 +535,11 @@ function getTargetVisibleDaysForMode(nextMode, viewport = {}) {
 }
 
 function getCurrentSharedViewport() {
+  const referencePlanningApi = getReferencePlanningApi();
   const baseViewport =
     sharedViewportState ||
     expensesApi?.getViewport?.() ||
-    planningApi?.getViewport?.() ||
+    referencePlanningApi?.getViewport?.() ||
     null;
 
   return baseViewport ? buildCanonicalSharedViewport(baseViewport) : null;
@@ -385,6 +554,9 @@ function syncPlanningViewportBounds(viewport = {}) {
     const bounds = expensesApi.getViewportBounds(viewport) || null;
     if (bounds) {
       planningApi.setViewportBounds(bounds);
+      if (planningAxisApi?.setViewportBounds) {
+        planningAxisApi.setViewportBounds(bounds);
+      }
     }
   } catch (error) {
     console.warn("Impossible de synchroniser les bornes du planning :", error);
@@ -392,12 +564,13 @@ function syncPlanningViewportBounds(viewport = {}) {
 }
 
 async function alignExpensesViewportToPlanning(maxAttempts = 4) {
-  if (!planningApi || !expensesApi) {
+  const referencePlanningApi = getReferencePlanningApi();
+  if (!referencePlanningApi || !expensesApi) {
     return null;
   }
 
   let planningViewport = buildCanonicalSharedViewport(
-    planningApi.getViewport?.() || sharedViewportState || {}
+    referencePlanningApi.getViewport?.() || sharedViewportState || {}
   );
   if (!planningViewport.firstVisibleDate) {
     return null;
@@ -410,7 +583,7 @@ async function alignExpensesViewportToPlanning(maxAttempts = 4) {
     await sleep(attempt === 0 ? 90 : 140);
 
     const refreshedPlanningViewport = buildCanonicalSharedViewport(
-      planningApi.getViewport?.() || planningViewport
+      referencePlanningApi.getViewport?.() || planningViewport
     );
     const refreshedExpensesViewport = buildCanonicalSharedViewport(
       expensesApi.getViewport?.() || planningViewport
@@ -443,13 +616,14 @@ async function applyViewportFromParentControls(viewport = {}) {
   try {
     await Promise.all([
       Promise.resolve(planningApi.applyViewport(canonicalViewport)),
+      Promise.resolve(planningAxisApi?.applyViewport?.(canonicalViewport)),
       Promise.resolve(expensesApi.applyViewport(canonicalViewport)),
     ]);
 
     lastAppliedViewportSignature = viewportSignature;
     sharedViewportState = canonicalViewport;
     syncExpensesPlanningShell(canonicalViewport);
-    setLastSource("Pilotage commun");
+    setLastSource(getViewportSourceLabel("Pilotage commun"));
     setLastRange(canonicalViewport);
     setHubStatus("Synchro active depuis Pilotage commun");
     appendLog(
@@ -583,12 +757,64 @@ function scheduleExpensesFramePresentation(attempt = 0) {
   }, attempt === 0 ? 0 : 120);
 }
 
+function shiftViewportByMode(viewport = {}, direction = 1) {
+  const canonicalViewport = buildCanonicalSharedViewport(viewport);
+  const baseDateValue =
+    normalizeIsoDate(canonicalViewport.firstVisibleDate) ||
+    normalizeIsoDate(canonicalViewport.rangeStartDate);
+  if (!baseDateValue) {
+    return canonicalViewport;
+  }
+
+  const baseDate = new Date(`${baseDateValue}T12:00:00`);
+  if (Number.isNaN(baseDate.getTime())) {
+    return canonicalViewport;
+  }
+
+  const safeDirection = direction >= 0 ? 1 : -1;
+  const nextDate = new Date(baseDate);
+  const mode = String(canonicalViewport.mode || "").trim();
+
+  if (mode === "week") {
+    nextDate.setDate(nextDate.getDate() + safeDirection * 7);
+  } else if (mode === "month") {
+    nextDate.setMonth(nextDate.getMonth() + safeDirection);
+  } else if (mode === "year") {
+    nextDate.setFullYear(nextDate.getFullYear() + safeDirection);
+  } else {
+    nextDate.setDate(nextDate.getDate() + safeDirection * canonicalViewport.visibleDays);
+  }
+
+  const nextDateValue = normalizeIsoDate(
+    `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}-${String(
+      nextDate.getDate()
+    ).padStart(2, "0")}`
+  );
+
+  return buildCanonicalSharedViewport({
+    ...canonicalViewport,
+    anchorDate: nextDateValue,
+    firstVisibleDate: nextDateValue,
+    rangeStartDate: nextDateValue,
+    rangeEndDate: "",
+  });
+}
+
 function bindExpensesPlanningShellControls() {
   expensesModeButtons.forEach((buttonEl) => {
     buttonEl.addEventListener("click", () => {
       const nextMode = String(buttonEl.dataset.expensesSyncMode || "").trim();
+      if (!nextMode) {
+        return;
+      }
+
+      if (planningAxisApi?.setZoomMode) {
+        planningAxisApi.setZoomMode(nextMode);
+        return;
+      }
+
       const currentViewport = getCurrentSharedViewport();
-      if (!currentViewport || !nextMode) {
+      if (!currentViewport) {
         return;
       }
 
@@ -601,50 +827,50 @@ function bindExpensesPlanningShellControls() {
     });
   });
 
-  expensesDateTriggerEl?.addEventListener("click", () => {
-    if (!(expensesDateInputEl instanceof HTMLInputElement) || expensesDateInputEl.disabled) {
+  sharedPrevBtnEl?.addEventListener("click", () => {
+    if (planningAxisApi?.moveViewportByMode) {
+      planningAxisApi.moveViewportByMode(-1);
       return;
     }
 
-    if (typeof expensesDateInputEl.showPicker === "function") {
-      expensesDateInputEl.showPicker();
-      return;
-    }
-
-    expensesDateInputEl.focus();
-    expensesDateInputEl.click();
-  });
-
-  expensesDateInputEl?.addEventListener("change", () => {
-    const nextDateValue = normalizeIsoDate(expensesDateInputEl.value);
-    const currentViewport = getCurrentSharedViewport();
-    if (!currentViewport || !nextDateValue) {
-      return;
-    }
-
-    void applyViewportFromParentControls({
-      ...currentViewport,
-      anchorDate: nextDateValue,
-      firstVisibleDate: nextDateValue,
-      rangeStartDate: nextDateValue,
-      rangeEndDate: "",
-    });
-  });
-
-  expensesTodayBtnEl?.addEventListener("click", () => {
     const currentViewport = getCurrentSharedViewport();
     if (!currentViewport) {
       return;
     }
 
-    const todayDateValue = getTodayIsoDate();
-    void applyViewportFromParentControls({
-      ...currentViewport,
-      anchorDate: todayDateValue,
-      firstVisibleDate: todayDateValue,
-      rangeStartDate: todayDateValue,
-      rangeEndDate: "",
-    });
+    void applyViewportFromParentControls(shiftViewportByMode(currentViewport, -1));
+  });
+
+  sharedCenterBtnEl?.addEventListener("click", () => {
+    if (planningAxisApi?.focusDataAnchor) {
+      planningAxisApi.focusDataAnchor();
+      return;
+    }
+
+    const currentViewport = getCurrentSharedViewport();
+    if (!currentViewport) {
+      return;
+    }
+
+    void applyViewportFromParentControls(currentViewport);
+  });
+
+  sharedNextBtnEl?.addEventListener("click", () => {
+    if (planningAxisApi?.moveViewportByMode) {
+      planningAxisApi.moveViewportByMode(1);
+      return;
+    }
+
+    const currentViewport = getCurrentSharedViewport();
+    if (!currentViewport) {
+      return;
+    }
+
+    void applyViewportFromParentControls(shiftViewportByMode(currentViewport, 1));
+  });
+
+  window.addEventListener("resize", () => {
+    syncExpensesPlanningShell();
   });
 }
 
@@ -728,23 +954,26 @@ async function applySharedProject(projectKey) {
   try {
     await Promise.all([
       Promise.resolve(planningApi.setSelectedProject(normalizedProjectKey)),
+      Promise.resolve(planningAxisApi?.setSelectedProject?.(normalizedProjectKey)),
       Promise.resolve(expensesApi.setSelectedProject(normalizedProjectKey)),
     ]);
     activeProjectKey = normalizedProjectKey;
     scheduleExpensesFramePresentation();
+    const referencePlanningApi = getReferencePlanningApi() || planningApi;
     let sharedViewport = buildProjectSelectionViewport(
-      planningApi.getProjectDateBounds?.() || null,
-      expensesApi.getViewport?.() || planningApi.getViewport?.() || {}
+      referencePlanningApi.getProjectDateBounds?.() || planningApi.getProjectDateBounds?.() || null,
+      expensesApi.getViewport?.() || referencePlanningApi.getViewport?.() || planningApi.getViewport?.() || {}
     );
     if (sharedViewport?.firstVisibleDate) {
       syncPlanningViewportBounds(sharedViewport);
       await Promise.all([
         Promise.resolve(planningApi.applyViewport(sharedViewport)),
+        Promise.resolve(planningAxisApi?.applyViewport?.(sharedViewport)),
         Promise.resolve(expensesApi.applyViewport(sharedViewport)),
       ]);
 
       await sleep(180);
-      const planningViewportAfterSelection = planningApi.getViewport?.() || null;
+      const planningViewportAfterSelection = referencePlanningApi.getViewport?.() || null;
       sharedViewport = buildCanonicalSharedViewport({
         ...sharedViewport,
         ...(planningViewportAfterSelection || {}),
@@ -767,6 +996,7 @@ async function applySharedProject(projectKey) {
       syncPlanningViewportBounds(sharedViewport);
       await Promise.all([
         Promise.resolve(planningApi.applyViewport(sharedViewport)),
+        Promise.resolve(planningAxisApi?.applyViewport?.(sharedViewport)),
         Promise.resolve(expensesApi.applyViewport(sharedViewport)),
       ]);
 
@@ -789,25 +1019,13 @@ async function applySharedProject(projectKey) {
       projectSelectEl.value = normalizedProjectKey;
     }
 
-    setLastSource("Pilotage commun");
+    setLastSource(getViewportSourceLabel("Pilotage commun"));
     setHubStatus(`Projet synchronise : ${normalizedProjectKey}`);
     appendLog(`Projet partage applique : ${normalizedProjectKey}`);
   } finally {
     projectSyncInProgress = false;
     void flushViewportSyncQueue();
   }
-}
-
-function getTargetApi(sourceApp) {
-  if (sourceApp === "planning-projet") {
-    return expensesApi;
-  }
-
-  if (sourceApp === "gestion-depenses2") {
-    return planningApi;
-  }
-
-  return null;
 }
 
 async function flushViewportSyncQueue() {
@@ -827,8 +1045,9 @@ async function flushViewportSyncQueue() {
     return;
   }
 
-  const targetApi = getTargetApi(payload.app);
-  if (!targetApi) {
+  const sourceApi = getViewportSourceApi(payload.app);
+  const targetApis = getViewportTargetApis(payload.app);
+  if (targetApis.length === 0) {
     void flushViewportSyncQueue();
     return;
   }
@@ -846,16 +1065,10 @@ async function flushViewportSyncQueue() {
   viewportSyncInProgress = true;
 
   try {
-    const sourceApi =
-      payload.app === "planning-projet"
-        ? planningApi
-        : payload.app === "gestion-depenses2"
-        ? expensesApi
-        : null;
     const sourceSignature = getViewportSignature(payloadProjectKey, payload.viewport);
-    const applyCalls = [
-      Promise.resolve(targetApi.applyViewport(canonicalViewport)),
-    ];
+    const applyCalls = targetApis.map((api) =>
+      Promise.resolve(api.applyViewport(canonicalViewport))
+    );
 
     if (sourceApi && sourceSignature !== viewportSignature) {
       applyCalls.push(Promise.resolve(sourceApi.applyViewport(canonicalViewport)));
@@ -865,11 +1078,11 @@ async function flushViewportSyncQueue() {
     lastAppliedViewportSignature = viewportSignature;
     sharedViewportState = canonicalViewport;
     syncExpensesPlanningShell(canonicalViewport);
-    setLastSource(payload.app);
+    setLastSource(getViewportSourceLabel(payload.app));
     setLastRange(canonicalViewport);
-    setHubStatus(`Synchro active depuis ${payload.app}`);
+    setHubStatus(`Synchro active depuis ${getViewportSourceLabel(payload.app)}`);
     appendLog(
-      `${payload.app} -> ${canonicalViewport.firstVisibleDate || "?"} / ${
+      `${getViewportSourceLabel(payload.app)} -> ${canonicalViewport.firstVisibleDate || "?"} / ${
         canonicalViewport.rangeEndDate || "?"
       } / ${canonicalViewport.mode || "?"}`
     );
@@ -902,8 +1115,9 @@ async function bootstrap() {
 
     setHubStatus("Connexion aux plannings...");
 
-    [planningApi, expensesApi] = await Promise.all([
+    [planningApi, planningAxisApi, expensesApi] = await Promise.all([
       waitForChildApi(planningFrameEl, "__planningProjetSyncApi"),
+      waitForChildApi(planningAxisFrameEl, "__planningProjetSyncApi"),
       waitForChildApi(expensesFrameEl, "__gestionDepenses2PlanningSyncApi"),
     ]);
     bindExpensesPlanningShellControls();
@@ -922,7 +1136,12 @@ async function bootstrap() {
       planningProjects[0] ||
       "";
 
-    planningApi.subscribeViewportChange(handleViewportChange);
+    planningApi.subscribeViewportChange((payload) =>
+      handleViewportChange({ ...payload, app: "planning-projet-main" })
+    );
+    planningAxisApi.subscribeViewportChange((payload) =>
+      handleViewportChange({ ...payload, app: "planning-projet-axis" })
+    );
     expensesApi.subscribeViewportChange(handleViewportChange);
 
     if (projectSelectEl instanceof HTMLSelectElement) {

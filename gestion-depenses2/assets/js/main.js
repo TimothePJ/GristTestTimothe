@@ -83,7 +83,11 @@ import {
   toggleElement,
 } from "./ui/summary.js";
 import { clearTables, renderTables } from "./ui/tables.js";
-import { parseRawDateTime } from "./utils/timeSegments.js";
+import {
+  getHalfDaySlotRange,
+  getSegmentAllocationDays,
+  parseRawDateTime,
+} from "./utils/timeSegments.js";
 
 let dom = null;
 let chargeTimelineDrag = null;
@@ -98,6 +102,7 @@ let pendingChargePlanWheelRequest = null;
 let renderedChargePlanRangeStartDate = "";
 let chargePlanRangeStartDate = "";
 let editingBudgetLineIndex = null;
+let editingChargePlanSegment = null;
 let planningManagementHover = null;
 let planningManagementMonthKey = getMonthKeyFromDate(new Date());
 let planningManagementMonthPickerOpen = false;
@@ -603,6 +608,198 @@ function getTimelineSegmentType(boardEl) {
   return getTimelineKind(boardEl) === "real" ? "reel" : "previsionnel";
 }
 
+function setEditChargePlanFeedback(message = "") {
+  if (!(dom?.editSegmentFeedback instanceof HTMLElement)) {
+    return;
+  }
+
+  const text = String(message || "").trim();
+  dom.editSegmentFeedback.textContent = text;
+  dom.editSegmentFeedback.hidden = !text;
+}
+
+function getSegmentHalfDayPart(date, edge = "start") {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return "am";
+  }
+
+  const hours = date.getHours();
+  if (edge === "end") {
+    return hours <= 12 ? "am" : "pm";
+  }
+
+  return hours < 12 ? "am" : "pm";
+}
+
+function buildSegmentHalfDayBoundary(dateValue, part, edge = "start") {
+  const normalizedDateValue = String(dateValue || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDateValue)) {
+    return null;
+  }
+
+  const anchorDate = new Date(`${normalizedDateValue}T12:00:00`);
+  if (Number.isNaN(anchorDate.getTime())) {
+    return null;
+  }
+
+  const slotRange = getHalfDaySlotRange(anchorDate, part);
+  if (!slotRange) {
+    return null;
+  }
+
+  return edge === "end" ? slotRange.endAt : slotRange.startAt;
+}
+
+function buildChargePlanSelectionFromEditValues({
+  startDateValue,
+  startPart,
+  endDateValue,
+  endPart,
+}) {
+  const startAt = buildSegmentHalfDayBoundary(startDateValue, startPart, "start");
+  const endAt = buildSegmentHalfDayBoundary(endDateValue, endPart, "end");
+
+  if (!startAt || !endAt) {
+    return {
+      error: "Veuillez choisir une date de debut et une date de fin valides.",
+    };
+  }
+
+  if (endAt <= startAt) {
+    return {
+      error: "La fin doit etre strictement apres le debut.",
+    };
+  }
+
+  const totalDays = getSegmentAllocationDays({
+    startAt,
+    endAt,
+  });
+
+  if (totalDays <= 0) {
+    return {
+      error: "La plage choisie ne contient aucun demi-jour ouvrable.",
+    };
+  }
+
+  return {
+    startDate: startAt.toISOString(),
+    endDate: endAt.toISOString(),
+    totalDays,
+  };
+}
+
+function resetEditChargePlanForm() {
+  editingChargePlanSegment = null;
+
+  if (dom?.editSegmentStartDateInput instanceof HTMLInputElement) {
+    dom.editSegmentStartDateInput.value = "";
+  }
+  if (dom?.editSegmentStartPartInput instanceof HTMLSelectElement) {
+    dom.editSegmentStartPartInput.value = "am";
+  }
+  if (dom?.editSegmentEndDateInput instanceof HTMLInputElement) {
+    dom.editSegmentEndDateInput.value = "";
+  }
+  if (dom?.editSegmentEndPartInput instanceof HTMLSelectElement) {
+    dom.editSegmentEndPartInput.value = "pm";
+  }
+
+  setEditChargePlanFeedback("");
+  closeModal(dom?.editSegmentModal);
+}
+
+function findChargePlanSegmentContext(segmentId, boardEl) {
+  const normalizedSegmentId = Number(segmentId);
+  const selectedProject = getSelectedProject();
+  if (!Number.isInteger(normalizedSegmentId) || !selectedProject) {
+    return null;
+  }
+
+  const segmentField = getTimelineSegmentField(boardEl);
+  for (const worker of selectedProject.workers || []) {
+    const segment = (worker?.[segmentField] || []).find(
+      (currentSegment) => Number(currentSegment?.id) === normalizedSegmentId
+    );
+    if (segment) {
+      return {
+        projectId: Number(selectedProject.id),
+        boardEl,
+        worker,
+        segment,
+        segmentField,
+      };
+    }
+  }
+
+  return null;
+}
+
+function openEditChargePlanModal(segmentId, boardEl) {
+  const segmentContext = findChargePlanSegmentContext(segmentId, boardEl);
+  if (!segmentContext) {
+    return;
+  }
+
+  const startAt = parseRawDateTime(segmentContext.segment?.startAt);
+  const endAt = parseRawDateTime(segmentContext.segment?.endAt);
+  if (!startAt || !endAt) {
+    return;
+  }
+
+  editingChargePlanSegment = segmentContext;
+  dom.editSegmentStartDateInput.value = toDateInputValue(startAt);
+  dom.editSegmentStartPartInput.value = getSegmentHalfDayPart(startAt, "start");
+  dom.editSegmentEndDateInput.value = toDateInputValue(endAt);
+  dom.editSegmentEndPartInput.value = getSegmentHalfDayPart(endAt, "end");
+  setEditChargePlanFeedback("");
+  openModal(dom.editSegmentModal);
+}
+
+async function saveEditedChargePlanSegment() {
+  if (!editingChargePlanSegment) {
+    return;
+  }
+
+  const selection = buildChargePlanSelectionFromEditValues({
+    startDateValue: dom.editSegmentStartDateInput.value,
+    startPart: dom.editSegmentStartPartInput.value,
+    endDateValue: dom.editSegmentEndDateInput.value,
+    endPart: dom.editSegmentEndPartInput.value,
+  });
+
+  if (selection.error) {
+    setEditChargePlanFeedback(selection.error);
+    return;
+  }
+
+  const annotatedSelection = annotateChargePlanSelection(
+    editingChargePlanSegment.worker?.id,
+    selection,
+    {
+      ignoreSegmentId: editingChargePlanSegment.segment?.id,
+      segmentField: editingChargePlanSegment.segmentField,
+    }
+  );
+
+  if (annotatedSelection?.hasOverlap) {
+    setEditChargePlanFeedback(
+      "Impossible de definir un segment qui chevauche deja une autre barre pour cette personne."
+    );
+    return;
+  }
+
+  await updateTimeSegment({
+    segmentId: editingChargePlanSegment.segment?.id,
+    startDate: selection.startDate,
+    endDate: selection.endDate,
+    allocationDays: selection.totalDays,
+  });
+
+  resetEditChargePlanForm();
+  await loadData();
+}
+
 function isChargePlanWheelZoomZone(target) {
   if (!(target instanceof Element)) {
     return false;
@@ -671,6 +868,12 @@ function syncStateToProjectStart(project) {
 function renderApp() {
   renderProjectOptions(dom.projectSelect, state.projects, state.selectedProjectId);
   const selectedProject = getSelectedProject();
+  if (
+    editingChargePlanSegment &&
+    (!selectedProject || Number(selectedProject.id) !== editingChargePlanSegment.projectId)
+  ) {
+    resetEditChargePlanForm();
+  }
   renderWorkerOptions(dom.workerNameSelect, state.teamMembers, selectedProject);
   dom.saveWorkerBtn.disabled = dom.workerNameSelect.disabled || !selectedProject;
   renderBudgetPreview(dom.budgetLinesContainer, state.newProjectBudgetLines);
@@ -2505,7 +2708,16 @@ async function handleChargePlanContextAction(event) {
     hideChargePlanContextMenu(boardEl);
   }
 
-  if (action !== "delete-segment" || !Number.isInteger(segmentId)) {
+  if (!Number.isInteger(segmentId)) {
+    return;
+  }
+
+  if (action === "edit-segment") {
+    openEditChargePlanModal(segmentId, boardEl);
+    return;
+  }
+
+  if (action !== "delete-segment") {
     return;
   }
 
@@ -3203,6 +3415,37 @@ function bindEvents() {
     if (event.target === dom.editBudgetModal) {
       resetEditBudgetForm();
     }
+  });
+
+  dom.saveEditSegmentBtn.addEventListener("click", () => {
+    saveEditedChargePlanSegment().catch((error) => {
+      console.error("Erreur modification segment :", error);
+      setEditChargePlanFeedback("Une erreur est survenue pendant la modification du segment.");
+    });
+  });
+
+  dom.cancelEditSegmentBtn.addEventListener("click", () => {
+    resetEditChargePlanForm();
+  });
+
+  dom.editSegmentModal.addEventListener("click", (event) => {
+    if (event.target === dom.editSegmentModal) {
+      resetEditChargePlanForm();
+    }
+  });
+
+  [
+    dom.editSegmentStartDateInput,
+    dom.editSegmentStartPartInput,
+    dom.editSegmentEndDateInput,
+    dom.editSegmentEndPartInput,
+  ].forEach((fieldEl) => {
+    fieldEl.addEventListener("input", () => {
+      setEditChargePlanFeedback("");
+    });
+    fieldEl.addEventListener("change", () => {
+      setEditChargePlanFeedback("");
+    });
   });
 
   dom.addWorkerBtn.addEventListener("click", () => {

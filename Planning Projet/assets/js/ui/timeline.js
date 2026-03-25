@@ -2423,6 +2423,28 @@ function getCurrentZoomMode() {
   return activeBtn?.dataset.zoom || "week";
 }
 
+function normalizePlanningZoomMode(mode) {
+  const normalizedMode = String(mode || "").trim();
+  if (normalizedMode === "week" || normalizedMode === "month" || normalizedMode === "year") {
+    return normalizedMode;
+  }
+  return getCurrentZoomMode();
+}
+
+function resolvePlanningAnchorDate(anchorDate = null) {
+  if (anchorDate instanceof Date) {
+    return Number.isNaN(anchorDate.getTime()) ? null : new Date(anchorDate);
+  }
+
+  const normalizedAnchorDate = String(anchorDate || "").trim();
+  if (!normalizedAnchorDate) {
+    return null;
+  }
+
+  const date = new Date(`${normalizedAnchorDate}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function getWindowCenterDate() {
   if (!timelineInstance) return new Date();
   const w = timelineInstance.getWindow();
@@ -2643,6 +2665,48 @@ function moveWindowByMode(direction) {
   }
 
   setWindowForMode(mode, anchor);
+}
+
+export function setPlanningZoomMode(mode, anchorDate = null) {
+  if (!timelineInstance) {
+    return null;
+  }
+
+  const nextMode = normalizePlanningZoomMode(mode);
+  const nextAnchorDate =
+    resolvePlanningAnchorDate(anchorDate) || dataAnchorDate || getWindowCenterDate();
+
+  setActiveZoomButton(nextMode);
+  setWindowForMode(nextMode, nextAnchorDate);
+  updateNavCenterButtonLabel();
+  updateCurrentTimeLineBounds();
+  requestStickyAxisSync();
+  return getPlanningViewportState();
+}
+
+export function movePlanningViewportByMode(direction = 1) {
+  if (!timelineInstance) {
+    return null;
+  }
+
+  moveWindowByMode(direction >= 0 ? 1 : -1);
+  updateNavCenterButtonLabel();
+  updateCurrentTimeLineBounds();
+  requestStickyAxisSync();
+  return getPlanningViewportState();
+}
+
+export function focusPlanningDataAnchor() {
+  if (!timelineInstance) {
+    return null;
+  }
+
+  const mode = getCurrentZoomMode();
+  setWindowForMode(mode, dataAnchorDate || getWindowCenterDate());
+  updateNavCenterButtonLabel();
+  updateCurrentTimeLineBounds();
+  requestStickyAxisSync();
+  return getPlanningViewportState();
 }
 
 export function setPlanningDurationEditHandler(handler) {

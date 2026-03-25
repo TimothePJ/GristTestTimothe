@@ -26,7 +26,7 @@ const DEFAULT_TIMELINE_OPTIONS = {
   timelineKind: "previsionnel",
   showControls: true,
   helperText:
-    "Glissez dans une ligne pour creer un segment. Redimensionnez-le avec ses poignees. Utilisez le clic droit sur une barre pour la supprimer.",
+    "Glissez dans une ligne pour creer un segment. Redimensionnez-le avec ses poignees. Utilisez le clic droit sur une barre pour la modifier ou la supprimer.",
 };
 
 function escapeHtml(value) {
@@ -1012,6 +1012,13 @@ export function renderChargePlanTimeline(dom, project, viewState, options = {}) 
       <button
         type="button"
         class="charge-plan-context-action"
+        data-action="edit-segment"
+      >
+        Modifier
+      </button>
+      <button
+        type="button"
+        class="charge-plan-context-action"
         data-action="delete-segment"
       >
         Supprimer le segment
@@ -1028,7 +1035,7 @@ export function renderRealChargeTimeline(dom, project, viewState) {
     timelineKind: "real",
     showControls: true,
     helperText:
-      "Glissez dans une ligne pour creer un segment reel. Redimensionnez-le avec ses poignees. Utilisez le clic droit sur une barre pour la supprimer.",
+      "Glissez dans une ligne pour creer un segment reel. Redimensionnez-le avec ses poignees. Utilisez le clic droit sur une barre pour la modifier ou la supprimer.",
   });
 }
 
@@ -1157,10 +1164,11 @@ export function hideChargePlanContextMenu(boardEl) {
   menuEl.style.top = "0px";
   delete menuEl.dataset.segmentId;
 
-  const actionEl = menuEl.querySelector(".charge-plan-context-action");
-  if (actionEl instanceof HTMLElement) {
-    delete actionEl.dataset.segmentId;
-  }
+  menuEl.querySelectorAll(".charge-plan-context-action").forEach((actionEl) => {
+    if (actionEl instanceof HTMLElement) {
+      delete actionEl.dataset.segmentId;
+    }
+  });
 }
 
 export function showChargePlanContextMenu(boardEl, { clientX, clientY, segmentId }) {
@@ -1172,10 +1180,11 @@ export function showChargePlanContextMenu(boardEl, { clientX, clientY, segmentId
   menuEl.hidden = false;
   menuEl.dataset.segmentId = String(segmentId);
 
-  const actionEl = menuEl.querySelector(".charge-plan-context-action");
-  if (actionEl instanceof HTMLElement) {
-    actionEl.dataset.segmentId = String(segmentId);
-  }
+  menuEl.querySelectorAll(".charge-plan-context-action").forEach((actionEl) => {
+    if (actionEl instanceof HTMLElement) {
+      actionEl.dataset.segmentId = String(segmentId);
+    }
+  });
 
   menuEl.style.left = `${clientX}px`;
   menuEl.style.top = `${clientY}px`;

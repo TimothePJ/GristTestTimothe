@@ -128,6 +128,48 @@
         </div>
     </div>
 
+    <div id="edit-segment-modal" class="modal" style="display: none;">
+        <div class="modal-content modal-content--segment">
+            <div class="budget-modal-header">
+                <div>
+                    <h2>Modifier le segment</h2>
+                    <p class="budget-modal-subtitle">Choisissez une nouvelle plage au demi-jour pres.</p>
+                </div>
+                <button id="cancel-edit-segment-btn" type="button" class="budget-modal-close-btn">Fermer</button>
+            </div>
+            <div class="segment-edit-form">
+                <div class="segment-edit-grid">
+                    <label class="segment-edit-field">
+                        <span>Date de debut</span>
+                        <input type="date" id="edit-segment-start-date">
+                    </label>
+                    <label class="segment-edit-field">
+                        <span>Demi-journee debut</span>
+                        <select id="edit-segment-start-part">
+                            <option value="am">Matin</option>
+                            <option value="pm">Apres-midi</option>
+                        </select>
+                    </label>
+                    <label class="segment-edit-field">
+                        <span>Date de fin</span>
+                        <input type="date" id="edit-segment-end-date">
+                    </label>
+                    <label class="segment-edit-field">
+                        <span>Demi-journee fin</span>
+                        <select id="edit-segment-end-part">
+                            <option value="am">Matin</option>
+                            <option value="pm">Apres-midi</option>
+                        </select>
+                    </label>
+                </div>
+                <p id="edit-segment-feedback" class="segment-edit-feedback" hidden></p>
+            </div>
+            <div class="segment-edit-footer">
+                <button id="save-edit-segment-btn" type="button">Enregistrer</button>
+            </div>
+        </div>
+    </div>
+
     <datalist id="budget-chapters-list">
         <option value="01-Analyse Dossier-Organisation">
         <option value="02-Reunions-Visite sur chantier">

@@ -64,77 +64,76 @@
               l'un au-dessus de l'autre.
             </p>
           </div>
+        </div>
 
-          <section class="sync-expenses-planning-shell">
-            <div class="sync-expenses-planning-copy">
-              <h3>Previsionnel - Plan de charge</h3>
-              <p>
-                Glissez dans une ligne pour creer un segment. Redimensionnez-le
-                avec ses poignees. Utilisez le clic droit sur une barre pour la
-                supprimer.
-              </p>
-            </div>
-            <div class="sync-expenses-planning-controls">
-              <span class="sync-expenses-planning-view-label">Vue</span>
-              <div class="sync-expenses-planning-zoom-buttons">
-                <button
-                  type="button"
-                  class="sync-expenses-planning-mode-btn"
-                  data-expenses-sync-mode="week"
-                  disabled
-                >
-                  Semaine
-                </button>
-                <button
-                  type="button"
-                  class="sync-expenses-planning-mode-btn"
-                  data-expenses-sync-mode="month"
-                  disabled
-                >
-                  Mois
-                </button>
-                <button
-                  type="button"
-                  class="sync-expenses-planning-mode-btn"
-                  data-expenses-sync-mode="year"
-                  disabled
-                >
-                  Annee
-                </button>
-              </div>
-              <div class="sync-expenses-planning-date-shell">
-                <button
-                  id="expenses-sync-date-trigger"
-                  type="button"
-                  class="sync-expenses-planning-date-trigger"
-                  disabled
-                >
-                  <span class="sync-expenses-planning-date-trigger-label">Date</span>
-                  <span
-                    id="expenses-sync-date-value"
-                    class="sync-expenses-planning-date-trigger-value"
-                  >
-                    --
-                  </span>
-                </button>
-                <input
-                  id="expenses-sync-date-input"
-                  class="sync-expenses-planning-date-input"
-                  type="date"
-                  disabled
-                />
-              </div>
+        <section class="shared-timeline-shell">
+          <div class="shared-timeline-toolbar">
+            <div class="nav-buttons shared-timeline-nav">
               <button
-                id="expenses-sync-today-btn"
+                id="shared-prev-btn"
                 type="button"
-                class="sync-expenses-planning-today-btn"
+                class="shared-timeline-nav-btn"
+                aria-label="Periode precedente"
+                disabled
+              >
+                &lt;
+              </button>
+              <button
+                id="shared-center-btn"
+                type="button"
+                class="shared-timeline-center-btn"
                 disabled
               >
                 Aujourd'hui
               </button>
+              <button
+                id="shared-next-btn"
+                type="button"
+                class="shared-timeline-nav-btn"
+                aria-label="Periode suivante"
+                disabled
+              >
+                &gt;
+              </button>
             </div>
-          </section>
-        </div>
+
+            <div class="zoom-buttons shared-timeline-mode-buttons" aria-label="Niveau de zoom">
+              <button
+                type="button"
+                class="shared-timeline-mode-btn"
+                data-expenses-sync-mode="week"
+                disabled
+              >
+                Semaine
+              </button>
+              <button
+                type="button"
+                class="shared-timeline-mode-btn"
+                data-expenses-sync-mode="month"
+                disabled
+              >
+                Mois
+              </button>
+              <button
+                type="button"
+                class="shared-timeline-mode-btn"
+                data-expenses-sync-mode="year"
+                disabled
+              >
+                  Année
+                </button>
+              </div>
+
+              <div id="shared-current-date-range" class="shared-current-date-range">-</div>
+            </div>
+
+          <iframe
+            id="planning-projet-axis-frame"
+            class="embedded-app-frame embedded-app-frame--planning-axis"
+            title="Frise chronologique commune"
+            src="../Planning%20Projet/Index.html?embedded=planning-sync&axisOnly=1"
+          ></iframe>
+        </section>
 
         <div class="sync-planning-frames">
           <div class="sync-planning-pane sync-planning-pane--planning">
@@ -142,7 +141,7 @@
               id="planning-projet-frame"
               class="embedded-app-frame embedded-app-frame--planning"
               title="Planning Projet synchronise"
-              src="../Planning%20Projet/Index.html?embedded=planning-sync"
+              src="../Planning%20Projet/Index.html?embedded=planning-sync&externalAxis=1"
             ></iframe>
           </div>
 

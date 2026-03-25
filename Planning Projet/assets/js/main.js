@@ -28,6 +28,9 @@ import {
   clearPlanningTimeline,
   bindTimelineToolbar,
   getPlanningViewportState,
+  setPlanningZoomMode,
+  movePlanningViewportByMode,
+  focusPlanningDataAnchor,
   setPlanningViewportBounds,
   setPlanningDurationEditHandler,
   setPlanningMsProjectDropHandler,
@@ -50,6 +53,9 @@ const EMBEDDED_PLANNING_SYNC_MODE =
 const AXIS_ONLY_EMBEDDED_MODE =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).get("axisOnly") === "1";
+const EXTERNAL_AXIS_EMBEDDED_MODE =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("externalAxis") === "1";
 
 function setPlanningStatus(message = "") {
   const el = document.getElementById("planningStatus");
@@ -66,6 +72,9 @@ function applyEmbeddedPlanningSyncMode() {
   document.body.classList.add("planning-sync-embedded");
   if (AXIS_ONLY_EMBEDDED_MODE) {
     document.body.classList.add("planning-sync-axis-only");
+  }
+  if (EXTERNAL_AXIS_EMBEDDED_MODE) {
+    document.body.classList.add("planning-sync-external-axis");
   }
 }
 
@@ -680,6 +689,15 @@ function exposePlanningSyncApi() {
     },
     setViewportBounds(bounds = {}) {
       setPlanningViewportBounds(bounds);
+    },
+    setZoomMode(mode, anchorDate = "") {
+      return setPlanningZoomMode(mode, anchorDate);
+    },
+    moveViewportByMode(direction = 1) {
+      return movePlanningViewportByMode(direction);
+    },
+    focusDataAnchor() {
+      return focusPlanningDataAnchor();
     },
     applyViewport(viewport = {}) {
       suppressPlanningSyncEvents = true;
