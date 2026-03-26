@@ -177,6 +177,7 @@ select {
   --sync-planning-scrollbar-shift: 0px;
   position: relative;
   overflow: visible;
+  overflow-anchor: none;
   display: grid;
   gap: var(--spacing-3);
   padding: var(--spacing-5);
@@ -190,6 +191,10 @@ select {
 .sync-planning-pane {
   display: grid;
   gap: 0;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-anchor: none;
 }
 
 .sync-planning-pane--planning {
@@ -209,6 +214,8 @@ select {
 .sync-planning-frames {
   display: grid;
   gap: 0;
+  min-width: 0;
+  width: 100%;
 }
 
 .shared-timeline-shell {
@@ -219,6 +226,11 @@ select {
   gap: 0;
   margin-top: calc(var(--spacing-3) * -1);
   padding-right: var(--sync-planning-scrollbar-shift);
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  align-self: stretch;
+  overflow-anchor: none;
 }
 
 .shared-timeline-toolbar {
@@ -435,6 +447,9 @@ select {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: #fff;
+  display: block;
+  box-sizing: border-box;
+  overflow-anchor: none;
 }
 
 .embedded-app-frame--planning-axis {
@@ -477,6 +492,11 @@ select {
   border: none;
   border-radius: 0;
   background: transparent;
+}
+
+body.layout-debug-no-sticky .shared-timeline-shell {
+  position: static !important;
+  top: auto !important;
 }
 
 .mock-app {

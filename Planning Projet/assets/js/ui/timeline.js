@@ -37,14 +37,22 @@ let planningDragAutoScrollVelocityY = 0;
 let planningDragAutoScrollTargetEl = null;
 let planningDragAutoScrollLastTs = 0;
 const planningViewportListeners = new Set();
+let lastPlanningViewportEmissionSignature = "";
+let pendingProgrammaticPlanningViewportSignature = "";
+let pendingProgrammaticPlanningViewportTimer = 0;
+let pendingProgrammaticPlanningViewportExpiresAt = 0;
 const EMBEDDED_PLANNING_SYNC_MODE =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).get("embedded") === "planning-sync";
+const EXTERNAL_AXIS_EMBEDDED_MODE =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("externalAxis") === "1";
 let embeddedPlanningViewportBounds = {
   minVisibleDays: 7,
   maxVisibleDays: 392,
 };
 let planningViewportBoundsCorrectionPending = false;
+const PROGRAMMATIC_PLANNING_VIEWPORT_SUPPRESSION_MS = 600;
 
 const PLANNING_ROW_DRAG_HANDLED_FLAG = "__planningRowDragHandled";
 
@@ -63,6 +71,10 @@ function ensureStickyAxisLeftFiller(container) {
 }
 
 function syncStickyTimelineAxisWithWrapperScroll() {
+  if (EXTERNAL_AXIS_EMBEDDED_MODE) {
+    return;
+  }
+
   const wrapper = document.getElementById("timelineWrapper");
   const container = document.getElementById("planningTimeline");
   if (!(wrapper instanceof HTMLElement) || !(container instanceof HTMLElement)) return;
@@ -86,6 +98,10 @@ function syncStickyTimelineAxisWithWrapperScroll() {
 }
 
 function requestStickyAxisSync() {
+  if (EXTERNAL_AXIS_EMBEDDED_MODE) {
+    return;
+  }
+
   if (stickyAxisRafPending) return;
   stickyAxisRafPending = true;
   requestAnimationFrame(() => {
@@ -95,6 +111,8 @@ function requestStickyAxisSync() {
 }
 
 function bindStickyTimelineAxis() {
+  if (EXTERNAL_AXIS_EMBEDDED_MODE) return;
+
   const wrapper = document.getElementById("timelineWrapper");
   if (!(wrapper instanceof HTMLElement) || stickyAxisBound) return;
 
@@ -2475,11 +2493,115 @@ function parsePlanningExactNumber(value) {
   return Number.isFinite(numericValue) ? numericValue : Number.NaN;
 }
 
+function buildPlanningViewportLogicalSignature({
+  mode = "",
+  firstVisibleDate = "",
+  rangeStartDate = "",
+  visibleDays = Number.NaN,
+} = {}) {
+  const normalizedMode = String(mode || "").trim();
+  const normalizedFirstVisibleDate = String(firstVisibleDate || rangeStartDate || "").trim();
+  const normalizedVisibleDays = Number(visibleDays);
+
+  return [
+    normalizedMode,
+    normalizedFirstVisibleDate,
+    Number.isFinite(normalizedVisibleDays) ? Math.round(normalizedVisibleDays) : "",
+  ].join("|");
+}
+
+function getPlanningViewportLogicalSignature(viewport = null) {
+  if (!viewport) {
+    return "";
+  }
+
+  return buildPlanningViewportLogicalSignature({
+    mode: viewport.mode,
+    firstVisibleDate: viewport.firstVisibleDate,
+    rangeStartDate: viewport.rangeStartDate,
+    visibleDays: viewport.visibleDays,
+  });
+}
+
+function clearPendingProgrammaticPlanningViewport(expectedSignature = "") {
+  if (
+    expectedSignature &&
+    pendingProgrammaticPlanningViewportSignature !== expectedSignature
+  ) {
+    return;
+  }
+
+  if (pendingProgrammaticPlanningViewportTimer) {
+    window.clearTimeout(pendingProgrammaticPlanningViewportTimer);
+    pendingProgrammaticPlanningViewportTimer = 0;
+  }
+
+  pendingProgrammaticPlanningViewportSignature = "";
+  pendingProgrammaticPlanningViewportExpiresAt = 0;
+}
+
+function rememberProgrammaticPlanningViewport(logicalSignature = "") {
+  clearPendingProgrammaticPlanningViewport();
+
+  if (!logicalSignature) {
+    return "";
+  }
+
+  pendingProgrammaticPlanningViewportSignature = logicalSignature;
+  pendingProgrammaticPlanningViewportExpiresAt =
+    Date.now() + PROGRAMMATIC_PLANNING_VIEWPORT_SUPPRESSION_MS;
+  pendingProgrammaticPlanningViewportTimer = window.setTimeout(() => {
+    clearPendingProgrammaticPlanningViewport(logicalSignature);
+  }, PROGRAMMATIC_PLANNING_VIEWPORT_SUPPRESSION_MS);
+
+  return logicalSignature;
+}
+
+function rememberProgrammaticPlanningViewportFromRange(mode = "", range = null) {
+  if (!range?.start || !range?.end) {
+    return "";
+  }
+
+  return rememberProgrammaticPlanningViewport(
+    buildPlanningViewportLogicalSignature({
+      mode,
+      firstVisibleDate: toIsoDateValue(range.start),
+      visibleDays: getVisibleDaysFromRange(range),
+    })
+  );
+}
+
+function shouldSuppressProgrammaticPlanningViewport(logicalSignature = "") {
+  if (!logicalSignature || !pendingProgrammaticPlanningViewportSignature) {
+    return false;
+  }
+
+  if (Date.now() > pendingProgrammaticPlanningViewportExpiresAt) {
+    clearPendingProgrammaticPlanningViewport();
+    return false;
+  }
+
+  return logicalSignature === pendingProgrammaticPlanningViewportSignature;
+}
+
 function emitPlanningViewportChange(reason = "") {
   const viewport = getPlanningViewportState();
   if (!viewport) {
     return;
   }
+
+  const logicalSignature = getPlanningViewportLogicalSignature(viewport);
+  if (shouldSuppressProgrammaticPlanningViewport(logicalSignature)) {
+    lastPlanningViewportEmissionSignature = logicalSignature;
+    clearPendingProgrammaticPlanningViewport(logicalSignature);
+    return;
+  }
+
+  if (logicalSignature && logicalSignature === lastPlanningViewportEmissionSignature) {
+    return;
+  }
+
+  lastPlanningViewportEmissionSignature = logicalSignature;
 
   planningViewportListeners.forEach((listener) => {
     listener(viewport, { reason });
@@ -2554,6 +2676,7 @@ export function applyPlanningViewportState(viewport = {}) {
           ) || exactRange
         : exactRange;
 
+      rememberProgrammaticPlanningViewportFromRange(nextMode, clampedRange);
       timelineInstance.setWindow(clampedRange.start, clampedRange.end, { animation: false });
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
@@ -2567,6 +2690,7 @@ export function applyPlanningViewportState(viewport = {}) {
     const start = new Date(`${nextStartDate}T00:00:00`);
     const end = new Date(`${nextEndDate}T23:59:59.999`);
     if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end >= start) {
+      rememberProgrammaticPlanningViewportFromRange(nextMode, { start, end });
       timelineInstance.setWindow(start, end, { animation: false });
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
@@ -2582,6 +2706,7 @@ export function applyPlanningViewportState(viewport = {}) {
 
   if (!Number.isNaN(anchorDate.getTime())) {
     setWindowForMode(nextMode, anchorDate);
+    rememberProgrammaticPlanningViewport(getPlanningViewportLogicalSignature(getPlanningViewportState()));
     updateNavCenterButtonLabel();
     updateCurrentTimeLineBounds();
     requestStickyAxisSync();
@@ -2958,6 +3083,8 @@ export function clearPlanningTimeline() {
 
   groupsDataSet.clear();
   itemsDataSet.clear();
+  lastPlanningViewportEmissionSignature = "";
+  clearPendingProgrammaticPlanningViewport();
 
   const rangeEl = document.getElementById("current-date-range");
   if (rangeEl) {

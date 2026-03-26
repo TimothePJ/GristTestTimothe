@@ -22,6 +22,7 @@ import {
 } from "./services/gristService.js";
 import {
   buildExpenseData,
+  getProjectDateBounds,
   getProjectAverageAnchorDate,
   getEarliestProjectMonth,
   getProjectFirstAnchorDate,
@@ -3856,6 +3857,10 @@ function exposeChargePlanSyncApi() {
         normalizeChargePlanDateValue(viewport.rangeStartDate) ||
         "";
       return getChargePlanVisibleDaysBounds(referenceDateValue);
+    },
+    getProjectDateBounds() {
+      const selectedProject = getSelectedProject();
+      return selectedProject ? getProjectDateBounds(selectedProject) : null;
     },
     getViewport() {
       return getChargePlanSyncViewport();

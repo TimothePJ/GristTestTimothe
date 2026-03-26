@@ -44,7 +44,6 @@ let addZoneModalBound = false;
 let addZoneModalOpen = false;
 let planningProjectOptions = [];
 let planningSyncApiReady = false;
-let suppressPlanningSyncEvents = false;
 let currentPlanningDateBounds = null;
 
 const EMBEDDED_PLANNING_SYNC_MODE =
@@ -706,21 +705,10 @@ function exposePlanningSyncApi() {
       return focusPlanningDataAnchor();
     },
     applyViewport(viewport = {}) {
-      suppressPlanningSyncEvents = true;
-      try {
-        applyPlanningViewportState(viewport);
-      } finally {
-        setTimeout(() => {
-          suppressPlanningSyncEvents = false;
-        }, 0);
-      }
+      applyPlanningViewportState(viewport);
     },
     subscribeViewportChange(listener) {
       return subscribePlanningViewportChanges((viewport, meta = {}) => {
-        if (suppressPlanningSyncEvents) {
-          return;
-        }
-
         if (typeof listener === "function") {
           listener({
             app: "planning-projet",

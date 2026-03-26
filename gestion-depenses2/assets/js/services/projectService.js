@@ -3,7 +3,9 @@ import {
   buildMonthRangeBetween,
   buildDisplayedMonths,
   clamp,
+  getMonthEndDate,
   getMonthKeyFromRawMonth,
+  getMonthStartDate,
   toFiniteNumber,
   toReferenceId,
   toText,
@@ -674,13 +676,37 @@ export function getEarliestProjectMonth(project) {
 }
 
 function getMonthKeyAnchorDate(monthKey) {
-  const [year, month] = String(monthKey || "").split("-").map(Number);
-  if (!Number.isInteger(year) || !Number.isInteger(month)) {
+  const startDate = getMonthStartDate(monthKey);
+  if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) {
     return null;
   }
 
-  const date = new Date(year, month - 1, 1, 12, 0, 0, 0);
-  return Number.isNaN(date.getTime()) ? null : date;
+  return new Date(
+    startDate.getFullYear(),
+    startDate.getMonth(),
+    startDate.getDate(),
+    12,
+    0,
+    0,
+    0
+  );
+}
+
+function getMonthKeyEndDate(monthKey) {
+  const endDate = getMonthEndDate(monthKey);
+  if (!(endDate instanceof Date) || Number.isNaN(endDate.getTime())) {
+    return null;
+  }
+
+  return new Date(
+    endDate.getFullYear(),
+    endDate.getMonth(),
+    endDate.getDate(),
+    12,
+    0,
+    0,
+    0
+  );
 }
 
 export function getProjectAverageAnchorDate(project) {
@@ -791,6 +817,68 @@ export function getProjectFirstAnchorDate(project) {
       2,
       "0"
     )}-${String(firstDate.getDate()).padStart(2, "0")}`,
+  };
+}
+
+export function getProjectDateBounds(project) {
+  let firstDate = null;
+  let lastDate = null;
+
+  const registerDate = (candidate, edge = "start") => {
+    if (!(candidate instanceof Date) || Number.isNaN(candidate.getTime())) {
+      return;
+    }
+
+    if (edge === "start") {
+      if (!firstDate || candidate.getTime() < firstDate.getTime()) {
+        firstDate = candidate;
+      }
+      return;
+    }
+
+    if (!lastDate || candidate.getTime() > lastDate.getTime()) {
+      lastDate = candidate;
+    }
+  };
+
+  (project?.workers || []).forEach((worker) => {
+    const segments = [...(worker?.segments || []), ...(worker?.realSegments || [])];
+
+    segments.forEach((segment) => {
+      registerDate(parseRawDateTime(segment?.startAt), "start");
+      registerDate(parseRawDateTime(segment?.endAt), "end");
+    });
+
+    Object.keys(worker?.provisionalDays || {}).forEach((monthKey) => {
+      registerDate(getMonthKeyAnchorDate(monthKey), "start");
+      registerDate(getMonthKeyEndDate(monthKey), "end");
+    });
+
+    Object.keys(worker?.workedDays || {}).forEach((monthKey) => {
+      registerDate(getMonthKeyAnchorDate(monthKey), "start");
+      registerDate(getMonthKeyEndDate(monthKey), "end");
+    });
+  });
+
+  if (!firstDate || !lastDate) {
+    return null;
+  }
+
+  const startDate = `${firstDate.getFullYear()}-${String(firstDate.getMonth() + 1).padStart(
+    2,
+    "0"
+  )}-${String(firstDate.getDate()).padStart(2, "0")}`;
+  const endDate = `${lastDate.getFullYear()}-${String(lastDate.getMonth() + 1).padStart(
+    2,
+    "0"
+  )}-${String(lastDate.getDate()).padStart(2, "0")}`;
+  const spanDays =
+    Math.max(0, Math.round((lastDate.getTime() - firstDate.getTime()) / 86400000)) + 1;
+
+  return {
+    startDate,
+    endDate,
+    spanDays,
   };
 }
 

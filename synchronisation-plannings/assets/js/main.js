@@ -14,6 +14,10 @@ const sharedCurrentDateRangeEl = document.getElementById("shared-current-date-ra
 const expensesModeButtons = Array.from(
   document.querySelectorAll("[data-expenses-sync-mode]")
 );
+const HUB_URL_PARAMS =
+  typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+const LAYOUT_DEBUG_ENABLED = HUB_URL_PARAMS?.get("debugLayout") === "1";
+const DEBUG_DISABLE_STICKY_SHELL = HUB_URL_PARAMS?.get("noStickyShell") === "1";
 
 let planningApi = null;
 let planningAxisApi = null;
@@ -22,16 +26,24 @@ let activeProjectKey = "";
 let projectSyncInProgress = false;
 let viewportSyncInProgress = false;
 let pendingViewportPayload = null;
-let lastAppliedViewportSignature = "";
+let lastAppliedViewportLogicalSignature = "";
 let sharedViewportState = null;
 let expensesFramePresentationTimer = 0;
 let lastExpensesVisibleWidthAdjustment = Number.NaN;
 let expensesVisibleWidthAdjustmentRerenderPending = false;
+let planningLayoutDebugRafId = 0;
+let planningLayoutDebugCleanup = null;
+let lastPlanningLayoutDebugSignature = "";
+const pendingPlanningLayoutDebugReasons = new Set();
 const SHARED_VIEWPORT_RULES = {
   referenceMonthDays: 30.4375,
   minVisibleDays: 7,
   yearMaxVisibleMonths: 14,
 };
+
+if (DEBUG_DISABLE_STICKY_SHELL && typeof document !== "undefined") {
+  document.body.classList.add("layout-debug-no-sticky");
+}
 
 function getReferencePlanningApi() {
   return planningAxisApi || planningApi || null;
@@ -325,6 +337,231 @@ function appendLog(message) {
     .join("\n");
 }
 
+function roundLayoutDebugValue(value, digits = 2) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return null;
+  }
+
+  const precision = 10 ** digits;
+  return Math.round(numericValue * precision) / precision;
+}
+
+function getSharedTimelineShellState() {
+  const shellEl = document.querySelector(".shared-timeline-shell");
+  if (!(shellEl instanceof HTMLElement)) {
+    return null;
+  }
+
+  const shellRect = shellEl.getBoundingClientRect();
+  const shellTop = roundLayoutDebugValue(shellRect.top);
+  return {
+    top: shellTop,
+    width: roundLayoutDebugValue(shellRect.width),
+    height: roundLayoutDebugValue(shellRect.height),
+    sticky: Number.isFinite(shellTop) ? shellTop <= 10.5 : false,
+  };
+}
+
+function getPlanningLayoutSnapshot(reason = "") {
+  const planningDocument = planningFrameEl?.contentDocument;
+  const planningWindow = planningFrameEl?.contentWindow;
+  if (!planningDocument || !planningWindow) {
+    return null;
+  }
+
+  const wrapper = planningDocument.getElementById("timelineWrapper");
+  const planningRoot = planningDocument.getElementById("planningTimeline");
+  const headerRow = planningDocument.querySelector(".planning-header-row");
+  const topPanel = planningDocument.querySelector("#planningTimeline .vis-panel.vis-top");
+  const leftPanel = planningDocument.querySelector("#planningTimeline .vis-panel.vis-left");
+  const centerPanel = planningDocument.querySelector("#planningTimeline .vis-panel.vis-center");
+  const firstTaskCell = planningDocument.querySelector(
+    "#planningTimeline .group-row-grid .cell-task"
+  );
+  const firstLabelInner = planningDocument.querySelector(
+    "#planningTimeline .vis-labelset .vis-label .vis-inner"
+  );
+  if (
+    !(wrapper instanceof planningWindow.HTMLElement) ||
+    !(planningRoot instanceof planningWindow.HTMLElement)
+  ) {
+    return null;
+  }
+
+  const frameRect = planningFrameEl?.getBoundingClientRect?.() || null;
+  const wrapperRect = wrapper.getBoundingClientRect();
+  const headerRect = headerRow instanceof planningWindow.HTMLElement ? headerRow.getBoundingClientRect() : null;
+  const topPanelRect =
+    topPanel instanceof planningWindow.HTMLElement ? topPanel.getBoundingClientRect() : null;
+  const leftPanelRect =
+    leftPanel instanceof planningWindow.HTMLElement ? leftPanel.getBoundingClientRect() : null;
+  const centerPanelRect =
+    centerPanel instanceof planningWindow.HTMLElement ? centerPanel.getBoundingClientRect() : null;
+  const firstTaskCellRect =
+    firstTaskCell instanceof planningWindow.HTMLElement ? firstTaskCell.getBoundingClientRect() : null;
+  const firstLabelInnerRect =
+    firstLabelInner instanceof planningWindow.HTMLElement
+      ? firstLabelInner.getBoundingClientRect()
+      : null;
+  const topPanelStyle =
+    topPanel instanceof planningWindow.HTMLElement
+      ? planningWindow.getComputedStyle(topPanel)
+      : null;
+  const leftPanelStyle =
+    leftPanel instanceof planningWindow.HTMLElement
+      ? planningWindow.getComputedStyle(leftPanel)
+      : null;
+  const firstTaskCellStyle =
+    firstTaskCell instanceof planningWindow.HTMLElement
+      ? planningWindow.getComputedStyle(firstTaskCell)
+      : null;
+  const syncPlanningCardEl = document.querySelector(".sync-planning-card");
+  const scrollbarShift =
+    syncPlanningCardEl instanceof HTMLElement
+      ? syncPlanningCardEl.style.getPropertyValue("--sync-planning-scrollbar-shift").trim()
+      : "";
+
+  return {
+    reason,
+    pageScrollY: roundLayoutDebugValue(window.scrollY, 0),
+    shell: getSharedTimelineShellState(),
+    frame: frameRect
+      ? {
+          top: roundLayoutDebugValue(frameRect.top),
+          bottom: roundLayoutDebugValue(frameRect.bottom),
+          width: roundLayoutDebugValue(frameRect.width),
+          height: roundLayoutDebugValue(frameRect.height),
+        }
+      : null,
+    wrapper: {
+      top: roundLayoutDebugValue(wrapperRect.top),
+      scrollTop: roundLayoutDebugValue(wrapper.scrollTop, 0),
+      clientWidth: roundLayoutDebugValue(wrapper.clientWidth, 0),
+      offsetWidth: roundLayoutDebugValue(wrapper.offsetWidth, 0),
+      scrollHeight: roundLayoutDebugValue(wrapper.scrollHeight, 0),
+      gutterWidth: roundLayoutDebugValue(getPlanningMainScrollbarGutterWidth()),
+    },
+    headerRow:
+      headerRect && frameRect
+        ? {
+            topInFrame: roundLayoutDebugValue(headerRect.top - frameRect.top),
+            height: roundLayoutDebugValue(headerRect.height),
+          }
+        : null,
+    topPanel:
+      topPanelRect && frameRect
+        ? {
+            display: topPanelStyle?.display || "",
+            transform: topPanelStyle?.transform || "",
+            topInFrame: roundLayoutDebugValue(topPanelRect.top - frameRect.top),
+            height: roundLayoutDebugValue(topPanelRect.height),
+          }
+        : null,
+    leftPanel:
+      leftPanelRect && frameRect
+        ? {
+            leftInFrame: roundLayoutDebugValue(leftPanelRect.left - frameRect.left),
+            width: roundLayoutDebugValue(leftPanelRect.width),
+            overflow: leftPanelStyle?.overflow || "",
+          }
+        : null,
+    centerPanel:
+      centerPanelRect && frameRect
+        ? {
+            leftInFrame: roundLayoutDebugValue(centerPanelRect.left - frameRect.left),
+            width: roundLayoutDebugValue(centerPanelRect.width),
+          }
+        : null,
+    firstLabelInner:
+      firstLabelInnerRect && frameRect
+        ? {
+            leftInFrame: roundLayoutDebugValue(firstLabelInnerRect.left - frameRect.left),
+            width: roundLayoutDebugValue(firstLabelInnerRect.width),
+          }
+        : null,
+    firstTaskCell:
+      firstTaskCellRect && frameRect
+        ? {
+            leftInFrame: roundLayoutDebugValue(firstTaskCellRect.left - frameRect.left),
+            width: roundLayoutDebugValue(firstTaskCellRect.width),
+            scrollWidth: roundLayoutDebugValue(firstTaskCell.scrollWidth, 0),
+            clientWidth: roundLayoutDebugValue(firstTaskCell.clientWidth, 0),
+            textAlign: firstTaskCellStyle?.textAlign || "",
+          }
+        : null,
+    syncScrollbarShift: scrollbarShift || "0px",
+  };
+}
+
+function schedulePlanningLayoutDebug(reason = "") {
+  if (!LAYOUT_DEBUG_ENABLED) {
+    return;
+  }
+
+  if (reason) {
+    pendingPlanningLayoutDebugReasons.add(reason);
+  }
+
+  if (planningLayoutDebugRafId) {
+    return;
+  }
+
+  planningLayoutDebugRafId = window.requestAnimationFrame(() => {
+    planningLayoutDebugRafId = 0;
+    const reasonLabel = Array.from(pendingPlanningLayoutDebugReasons).join(",");
+    pendingPlanningLayoutDebugReasons.clear();
+    const snapshot = getPlanningLayoutSnapshot(reasonLabel || "layout");
+    if (!snapshot) {
+      return;
+    }
+
+    const nextSignature = JSON.stringify(snapshot);
+    if (nextSignature === lastPlanningLayoutDebugSignature) {
+      return;
+    }
+
+    lastPlanningLayoutDebugSignature = nextSignature;
+    console.info("[sync-layout]", snapshot);
+  });
+}
+
+function bindPlanningLayoutDebug() {
+  if (!LAYOUT_DEBUG_ENABLED) {
+    return;
+  }
+
+  if (planningLayoutDebugCleanup) {
+    planningLayoutDebugCleanup();
+    planningLayoutDebugCleanup = null;
+  }
+
+  const planningDocument = planningFrameEl?.contentDocument;
+  const planningWindow = planningFrameEl?.contentWindow;
+  const wrapper = planningDocument?.getElementById("timelineWrapper");
+  if (!(planningWindow && wrapper instanceof planningWindow.HTMLElement)) {
+    return;
+  }
+
+  const handleWrapperScroll = () => schedulePlanningLayoutDebug("planning-scroll");
+  const handlePageScroll = () => schedulePlanningLayoutDebug("page-scroll");
+  const handleResize = () => schedulePlanningLayoutDebug("resize");
+
+  wrapper.addEventListener("scroll", handleWrapperScroll, { passive: true });
+  window.addEventListener("scroll", handlePageScroll, { passive: true });
+  window.addEventListener("resize", handleResize);
+  window.visualViewport?.addEventListener("resize", handleResize);
+
+  planningLayoutDebugCleanup = () => {
+    wrapper.removeEventListener("scroll", handleWrapperScroll);
+    window.removeEventListener("scroll", handlePageScroll);
+    window.removeEventListener("resize", handleResize);
+    window.visualViewport?.removeEventListener("resize", handleResize);
+  };
+
+  schedulePlanningLayoutDebug("bind");
+}
+
 function normalizeProjectKey(value) {
   return String(value || "")
     .normalize("NFD")
@@ -334,21 +571,17 @@ function normalizeProjectKey(value) {
     .toLowerCase();
 }
 
-function getViewportSignature(projectKey, viewport = {}) {
+function getViewportLogicalSignature(projectKey, viewport = {}) {
   const normalizedProjectKey = normalizeProjectKey(projectKey || activeProjectKey || "");
   const rangeStartDate = String(viewport?.firstVisibleDate || viewport?.rangeStartDate || "").trim();
   const mode = String(viewport?.mode || "").trim();
   const visibleDays = Number(viewport?.visibleDays);
-  const windowStartMs = parseSharedExactNumber(viewport?.windowStartMs);
-  const windowEndMs = parseSharedExactNumber(viewport?.windowEndMs);
 
   return [
     normalizedProjectKey,
     rangeStartDate,
     mode,
-    Number.isFinite(visibleDays) ? visibleDays : "",
-    Number.isFinite(windowStartMs) ? windowStartMs : "",
-    Number.isFinite(windowEndMs) ? windowEndMs : "",
+    Number.isFinite(visibleDays) ? Math.round(visibleDays) : "",
   ].join("|");
 }
 
@@ -551,6 +784,66 @@ function buildPlanningExactSharedViewport(viewport = {}) {
   };
 }
 
+function normalizeProjectDateBounds(projectDateBounds = null) {
+  const startDate = normalizeIsoDate(projectDateBounds?.startDate || projectDateBounds?.firstDate);
+  const endDate = normalizeIsoDate(projectDateBounds?.endDate || projectDateBounds?.lastDate);
+
+  if (!startDate && !endDate) {
+    return null;
+  }
+
+  const normalizedStartDate = startDate || endDate;
+  const normalizedEndDate = endDate || startDate;
+  if (!normalizedStartDate || !normalizedEndDate) {
+    return null;
+  }
+
+  return {
+    startDate: normalizedStartDate,
+    endDate: normalizedEndDate,
+    spanDays:
+      Math.max(
+        1,
+        Number(projectDateBounds?.spanDays) ||
+          getInclusiveDaySpan(normalizedStartDate, normalizedEndDate)
+      ) || 1,
+  };
+}
+
+function buildSharedProjectDateBounds({
+  planningDateBounds = null,
+  expensesDateBounds = null,
+} = {}) {
+  const normalizedPlanningBounds = normalizeProjectDateBounds(planningDateBounds);
+  const normalizedExpensesBounds = normalizeProjectDateBounds(expensesDateBounds);
+
+  if (!normalizedPlanningBounds) {
+    return normalizedExpensesBounds;
+  }
+
+  if (!normalizedExpensesBounds) {
+    return normalizedPlanningBounds;
+  }
+
+  const startDate = normalizedExpensesBounds.startDate || normalizedPlanningBounds.startDate;
+  const endDateCandidates = [normalizedPlanningBounds.endDate, normalizedExpensesBounds.endDate]
+    .filter(Boolean)
+    .sort();
+  const endDate = endDateCandidates.length
+    ? endDateCandidates[endDateCandidates.length - 1]
+    : "";
+
+  if (!startDate || !endDate) {
+    return normalizedExpensesBounds || normalizedPlanningBounds;
+  }
+
+  return {
+    startDate,
+    endDate,
+    spanDays: getInclusiveDaySpan(startDate, endDate),
+  };
+}
+
 function buildProjectSelectionViewport(projectDateBounds = null, fallbackViewport = {}) {
   const fallbackSharedViewport = buildCanonicalSharedViewport(fallbackViewport);
   const projectStartDate = normalizeIsoDate(
@@ -629,14 +922,14 @@ function syncPlanningViewportBounds(viewport = {}) {
   }
 }
 
-async function alignExpensesViewportToPlanning(maxAttempts = 4) {
+async function alignExpensesViewportToPlanning(baseViewport = null, maxAttempts = 4) {
   const referencePlanningApi = getReferencePlanningApi();
   if (!referencePlanningApi || !expensesApi) {
     return null;
   }
 
   let planningViewport = buildCanonicalSharedViewport(
-    referencePlanningApi.getViewport?.() || sharedViewportState || {}
+    referencePlanningApi.getViewport?.() || baseViewport || sharedViewportState || {}
   );
   if (!planningViewport.firstVisibleDate) {
     return null;
@@ -688,7 +981,7 @@ async function applyViewportFromParentControls(viewport = {}) {
 
   const canonicalViewport = buildCanonicalSharedViewport(viewport);
   syncPlanningViewportBounds(canonicalViewport);
-  const viewportSignature = getViewportSignature(activeProjectKey, canonicalViewport);
+  const viewportLogicalSignature = getViewportLogicalSignature(activeProjectKey, canonicalViewport);
   viewportSyncInProgress = true;
 
   try {
@@ -698,7 +991,7 @@ async function applyViewportFromParentControls(viewport = {}) {
       Promise.resolve(expensesApi.applyViewport(canonicalViewport)),
     ]);
 
-    lastAppliedViewportSignature = viewportSignature;
+    lastAppliedViewportLogicalSignature = viewportLogicalSignature;
     sharedViewportState = canonicalViewport;
     syncExpensesPlanningShell(canonicalViewport);
     setLastSource(getViewportSourceLabel("Pilotage commun"));
@@ -856,6 +1149,7 @@ function ensureExpensesFramePresentation() {
           if (viewportToReapply) {
             expensesApi.applyViewport(viewportToReapply);
           }
+          schedulePlanningLayoutDebug("expenses-width-adjustment");
         } finally {
           window.setTimeout(() => {
             expensesVisibleWidthAdjustmentRerenderPending = false;
@@ -867,6 +1161,7 @@ function ensureExpensesFramePresentation() {
   }
 
   expensesFrameEl?.classList.add("is-ready");
+  schedulePlanningLayoutDebug("expenses-presentation");
   return true;
 }
 
@@ -1155,21 +1450,30 @@ async function applySharedProject(projectKey) {
     activeProjectKey = normalizedProjectKey;
     scheduleExpensesFramePresentation();
     const referencePlanningApi = getReferencePlanningApi() || planningApi;
+    const planningProjectDateBounds =
+      referencePlanningApi.getProjectDateBounds?.() || planningApi.getProjectDateBounds?.() || null;
+    const expensesProjectDateBounds = expensesApi.getProjectDateBounds?.() || null;
     let sharedViewport = buildProjectSelectionViewport(
-      referencePlanningApi.getProjectDateBounds?.() || planningApi.getProjectDateBounds?.() || null,
+      buildSharedProjectDateBounds({
+        planningDateBounds: planningProjectDateBounds,
+        expensesDateBounds: expensesProjectDateBounds,
+      }),
       expensesApi.getViewport?.() || referencePlanningApi.getViewport?.() || planningApi.getViewport?.() || {}
     );
     if (sharedViewport?.firstVisibleDate) {
+      const initialViewportLogicalSignature = getViewportLogicalSignature(
+        normalizedProjectKey,
+        sharedViewport
+      );
       syncPlanningViewportBounds(sharedViewport);
       await Promise.all([
         Promise.resolve(planningApi.applyViewport(sharedViewport)),
         Promise.resolve(planningAxisApi?.applyViewport?.(sharedViewport)),
-        Promise.resolve(expensesApi.applyViewport(sharedViewport)),
       ]);
 
       await sleep(180);
       const planningViewportAfterSelection = referencePlanningApi.getViewport?.() || null;
-      sharedViewport = buildCanonicalSharedViewport({
+      const stabilizedPlanningViewport = buildCanonicalSharedViewport({
         ...sharedViewport,
         ...(planningViewportAfterSelection || {}),
         firstVisibleDate:
@@ -1188,14 +1492,24 @@ async function applySharedProject(projectKey) {
           planningViewportAfterSelection?.firstVisibleDate ||
           sharedViewport.anchorDate,
       });
-      syncPlanningViewportBounds(sharedViewport);
-      await Promise.all([
-        Promise.resolve(planningApi.applyViewport(sharedViewport)),
-        Promise.resolve(planningAxisApi?.applyViewport?.(sharedViewport)),
-        Promise.resolve(expensesApi.applyViewport(sharedViewport)),
-      ]);
+      const stabilizedViewportLogicalSignature = getViewportLogicalSignature(
+        normalizedProjectKey,
+        stabilizedPlanningViewport
+      );
 
-      const stabilizedViewport = await alignExpensesViewportToPlanning();
+      sharedViewport = stabilizedPlanningViewport;
+      if (
+        stabilizedViewportLogicalSignature &&
+        stabilizedViewportLogicalSignature !== initialViewportLogicalSignature
+      ) {
+        syncPlanningViewportBounds(sharedViewport);
+        await Promise.all([
+          Promise.resolve(planningApi.applyViewport(sharedViewport)),
+          Promise.resolve(planningAxisApi?.applyViewport?.(sharedViewport)),
+        ]);
+      }
+
+      const stabilizedViewport = await alignExpensesViewportToPlanning(sharedViewport);
       if (stabilizedViewport?.firstVisibleDate) {
         sharedViewport = buildCanonicalSharedViewport({
           ...sharedViewport,
@@ -1203,7 +1517,10 @@ async function applySharedProject(projectKey) {
         });
       }
 
-      lastAppliedViewportSignature = getViewportSignature(normalizedProjectKey, sharedViewport);
+      lastAppliedViewportLogicalSignature = getViewportLogicalSignature(
+        normalizedProjectKey,
+        sharedViewport
+      );
       sharedViewportState = sharedViewport;
       setLastRange(sharedViewport);
       syncExpensesPlanningShell(sharedViewport);
@@ -1250,8 +1567,14 @@ async function flushViewportSyncQueue() {
   const canonicalViewport = buildCanonicalSharedViewport(payload.viewport);
   const exactSharedViewport = buildPlanningExactSharedViewport(payload.viewport);
   syncPlanningViewportBounds(canonicalViewport);
-  const viewportSignature = getViewportSignature(payloadProjectKey, canonicalViewport);
-  if (viewportSignature && viewportSignature === lastAppliedViewportSignature) {
+  const viewportLogicalSignature = getViewportLogicalSignature(
+    payloadProjectKey,
+    canonicalViewport
+  );
+  if (
+    viewportLogicalSignature &&
+    viewportLogicalSignature === lastAppliedViewportLogicalSignature
+  ) {
     sharedViewportState = canonicalViewport;
     syncExpensesPlanningShell(canonicalViewport);
     void flushViewportSyncQueue();
@@ -1261,18 +1584,21 @@ async function flushViewportSyncQueue() {
   viewportSyncInProgress = true;
 
   try {
-    const sourceSignature = getViewportSignature(payloadProjectKey, payload.viewport);
+    const sourceLogicalSignature = getViewportLogicalSignature(
+      payloadProjectKey,
+      payload.viewport
+    );
     const getViewportForApi = () => exactSharedViewport;
     const applyCalls = targetApis.map((api) =>
       Promise.resolve(api.applyViewport(getViewportForApi(api)))
     );
 
-    if (sourceApi && sourceSignature !== viewportSignature) {
+    if (sourceApi && sourceLogicalSignature !== viewportLogicalSignature) {
       applyCalls.push(Promise.resolve(sourceApi.applyViewport(getViewportForApi(sourceApi))));
     }
 
     await Promise.all(applyCalls);
-    lastAppliedViewportSignature = viewportSignature;
+    lastAppliedViewportLogicalSignature = viewportLogicalSignature;
     sharedViewportState = canonicalViewport;
     syncExpensesPlanningShell(canonicalViewport);
     setLastSource(getViewportSourceLabel(payload.app));
@@ -1319,12 +1645,16 @@ async function bootstrap() {
     ]);
     bindExpensesPlanningShellControls();
     scheduleExpensesFramePresentation();
+    bindPlanningLayoutDebug();
 
     expensesFrameEl?.addEventListener("load", () => {
       scheduleExpensesFramePresentation();
+      schedulePlanningLayoutDebug("expenses-frame-load");
     });
     planningFrameEl?.addEventListener("load", () => {
       scheduleExpensesFramePresentation();
+      bindPlanningLayoutDebug();
+      schedulePlanningLayoutDebug("planning-frame-load");
     });
 
     const planningProjects = (planningApi.listProjects?.() || []).filter(Boolean);
@@ -1360,6 +1690,8 @@ async function bootstrap() {
     } else {
       setHubStatus("Aucun projet disponible.");
     }
+
+    schedulePlanningLayoutDebug("bootstrap-ready");
   } catch (error) {
     console.error("Erreur synchronisation plannings :", error);
     setHubStatus(`Erreur : ${error.message}`);
