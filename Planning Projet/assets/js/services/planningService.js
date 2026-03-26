@@ -307,6 +307,48 @@ function getTimelineRowsDateBounds(rows) {
   };
 }
 
+function getTimelineItemsDateBounds(items) {
+  let startDate = "";
+  let endDate = "";
+
+  (items || []).forEach((item) => {
+    if (item?.type === "background") {
+      return;
+    }
+
+    const start = parseDate(item?.start);
+    const end = parseDate(item?.end) || start;
+    if (!start || !end) {
+      return;
+    }
+
+    const startIso = fmtIsoCellDate(start);
+    const endReferenceDate = new Date(Math.max(start.getTime(), end.getTime() - 1));
+    const endIso = fmtIsoCellDate(endReferenceDate);
+    if (!startIso || !endIso) {
+      return;
+    }
+
+    if (!startDate || startIso < startDate) {
+      startDate = startIso;
+    }
+
+    if (!endDate || endIso > endDate) {
+      endDate = endIso;
+    }
+  });
+
+  if (!startDate || !endDate) {
+    return null;
+  }
+
+  return {
+    startDate,
+    endDate,
+    spanDays: getInclusiveDaySpan(startDate, endDate),
+  };
+}
+
 function buildGroupContent(row) {
   return `
     <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-realise) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
@@ -1063,6 +1105,6 @@ export function buildTimelineDataFromPlanningRows(
     groups,
     items,
     rowCount: rows.length || orderedZoneKeys.length,
-    dateBounds: getTimelineRowsDateBounds(rows),
+    dateBounds: getTimelineItemsDateBounds(items) || getTimelineRowsDateBounds(rows),
   };
 }

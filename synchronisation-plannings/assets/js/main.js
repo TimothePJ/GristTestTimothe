@@ -784,6 +784,18 @@ function buildPlanningExactSharedViewport(viewport = {}) {
   };
 }
 
+function stripExactWindowViewportState(viewport = {}) {
+  const nextViewport = { ...viewport };
+  delete nextViewport.windowStartMs;
+  delete nextViewport.windowEndMs;
+  delete nextViewport.leftDayOffset;
+  delete nextViewport.rightDayOffset;
+  delete nextViewport.exactVisibleDays;
+  delete nextViewport.contentStartDate;
+  delete nextViewport.contentStartMs;
+  return nextViewport;
+}
+
 function normalizeProjectDateBounds(projectDateBounds = null) {
   const startDate = normalizeIsoDate(projectDateBounds?.startDate || projectDateBounds?.firstDate);
   const endDate = normalizeIsoDate(projectDateBounds?.endDate || projectDateBounds?.lastDate);
@@ -817,35 +829,17 @@ function buildSharedProjectDateBounds({
   const normalizedPlanningBounds = normalizeProjectDateBounds(planningDateBounds);
   const normalizedExpensesBounds = normalizeProjectDateBounds(expensesDateBounds);
 
-  if (!normalizedPlanningBounds) {
-    return normalizedExpensesBounds;
-  }
-
-  if (!normalizedExpensesBounds) {
+  if (normalizedPlanningBounds) {
     return normalizedPlanningBounds;
   }
 
-  const startDate = normalizedExpensesBounds.startDate || normalizedPlanningBounds.startDate;
-  const endDateCandidates = [normalizedPlanningBounds.endDate, normalizedExpensesBounds.endDate]
-    .filter(Boolean)
-    .sort();
-  const endDate = endDateCandidates.length
-    ? endDateCandidates[endDateCandidates.length - 1]
-    : "";
-
-  if (!startDate || !endDate) {
-    return normalizedExpensesBounds || normalizedPlanningBounds;
-  }
-
-  return {
-    startDate,
-    endDate,
-    spanDays: getInclusiveDaySpan(startDate, endDate),
-  };
+  return normalizedExpensesBounds;
 }
 
 function buildProjectSelectionViewport(projectDateBounds = null, fallbackViewport = {}) {
-  const fallbackSharedViewport = buildCanonicalSharedViewport(fallbackViewport);
+  const fallbackSharedViewport = buildCanonicalSharedViewport(
+    stripExactWindowViewportState(fallbackViewport)
+  );
   const projectStartDate = normalizeIsoDate(
     projectDateBounds?.startDate || projectDateBounds?.firstDate
   );
@@ -871,6 +865,13 @@ function buildProjectSelectionViewport(projectDateBounds = null, fallbackViewpor
 
   return buildCanonicalSharedViewport({
     ...fallbackSharedViewport,
+    windowStartMs: null,
+    windowEndMs: null,
+    leftDayOffset: null,
+    rightDayOffset: null,
+    exactVisibleDays: null,
+    contentStartDate: "",
+    contentStartMs: null,
     anchorDate: projectStartDate,
     firstVisibleDate: projectStartDate,
     rangeStartDate: projectStartDate,
