@@ -129,6 +129,7 @@ let pendingChargePlanFocusAlign = "center";
 let chargePlanDatePickerView = null;
 const PARIS_TIMEZONE = "Europe/Paris";
 const DAY_IN_MS = 86400000;
+const CHARGE_PLAN_DAY_SPAN_SNAP_EPSILON = 0.02;
 const EMBEDDED_PLANNING_SYNC_MODE =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).get("embedded") === "planning-sync";
@@ -415,21 +416,68 @@ function getChargePlanFixedColumnsWidthEstimate(boardEl = dom?.chargePlanBoard |
   );
 }
 
+function getEmbeddedPlanningReferenceVisibleWidth(boardEl = dom?.chargePlanBoard || null) {
+  if (!(boardEl instanceof HTMLElement) || typeof window === "undefined") {
+    return 0;
+  }
+
+  const rootStyles = window.getComputedStyle(document.documentElement);
+  const bodyStyles =
+    document.body instanceof HTMLElement ? window.getComputedStyle(document.body) : null;
+  const boardStyles = window.getComputedStyle(boardEl);
+  const rawValue =
+    boardStyles.getPropertyValue("--sync-planning-reference-visible-width") ||
+    bodyStyles?.getPropertyValue("--sync-planning-reference-visible-width") ||
+    rootStyles.getPropertyValue("--sync-planning-reference-visible-width") ||
+    "0";
+  const width = parseFloat(rawValue);
+
+  return Number.isFinite(width) && width > 0 ? width : 0;
+}
+
 function getChargePlanTimelineViewportGeometry(scrollEl = getChargePlanScrollElement()) {
   const boardEl =
     scrollEl instanceof Element
       ? getTimelineBoardFromElement(scrollEl)
       : dom?.chargePlanBoard || null;
   const fixedColumnsWidth = getChargePlanFixedColumnsWidthEstimate(boardEl);
+  const isEmbeddedPlanningSync =
+    typeof document !== "undefined" &&
+    document.body instanceof HTMLElement &&
+    document.body.classList.contains("planning-sync-embedded");
+  const embeddedReferenceVisibleWidth = getEmbeddedPlanningReferenceVisibleWidth(boardEl);
+  const scrollClientLeft = Math.max(Number(scrollEl?.clientLeft || 0), 0);
+  const actualViewportWidth = Math.max(
+    Math.max(scrollEl?.clientWidth || 0, 0) - fixedColumnsWidth,
+    0
+  );
   const viewportWidth = Math.max(
     280,
-    Math.max(scrollEl?.clientWidth || 0, 0) - fixedColumnsWidth
+    actualViewportWidth > 0
+      ? actualViewportWidth
+      : isEmbeddedPlanningSync && embeddedReferenceVisibleWidth > 0
+      ? embeddedReferenceVisibleWidth
+      : actualViewportWidth
   );
 
   return {
-    clientLeft: fixedColumnsWidth,
+    clientLeft: fixedColumnsWidth + scrollClientLeft,
     viewportWidth,
   };
+}
+
+function snapChargePlanVisibleDaySpan(daySpan) {
+  const numericDaySpan = Number(daySpan);
+  if (!Number.isFinite(numericDaySpan) || numericDaySpan <= 0) {
+    return Number.NaN;
+  }
+
+  const roundedDaySpan = Math.round(numericDaySpan);
+  if (Math.abs(numericDaySpan - roundedDaySpan) <= CHARGE_PLAN_DAY_SPAN_SNAP_EPSILON) {
+    return roundedDaySpan;
+  }
+
+  return numericDaySpan;
 }
 
 function estimateChargePlanDisplayedDate(rangeStartDate, visibleDays) {
@@ -1860,7 +1908,9 @@ function getChargePlanViewportWindow(scrollEl = getChargePlanScrollElement()) {
     return null;
   }
 
-  const visibleDaySpan = geometry.viewportWidth / Math.max(metrics.dayWidth, 0.0001);
+  const visibleDaySpan = snapChargePlanVisibleDaySpan(
+    geometry.viewportWidth / Math.max(metrics.dayWidth, 0.0001)
+  );
   const leftDayOffset = leftMeasurement.dayOffset;
   const rightDayOffset = clamp(
     leftDayOffset + visibleDaySpan,
@@ -1900,7 +1950,9 @@ function getChargePlanSharedExactViewport(viewport = {}) {
     return null;
   }
 
-  const exactVisibleDays = (windowEndMs - windowStartMs) / DAY_IN_MS;
+  const exactVisibleDays = snapChargePlanVisibleDaySpan(
+    (windowEndMs - windowStartMs) / DAY_IN_MS
+  );
   const { minVisibleDays, maxVisibleDays } = getChargePlanVisibleDaysBounds(referenceDateValue);
   const visibleDays = clamp(exactVisibleDays, minVisibleDays, maxVisibleDays);
   const leftDayOffset = (windowStartMs - rangeStartMs) / DAY_IN_MS;
@@ -3867,6 +3919,31 @@ function exposeChargePlanSyncApi() {
     },
     applyViewport(viewport = {}) {
       applyChargePlanSyncViewport(viewport);
+    },
+    nudgeViewportByPixels(pixelDelta = 0) {
+      const scrollEl = getChargePlanScrollElement(dom?.chargePlanBoard || null);
+      const delta = Number(pixelDelta);
+      if (!(scrollEl instanceof HTMLElement) || !Number.isFinite(delta) || Math.abs(delta) < 0.1) {
+        return false;
+      }
+
+      const suppressionToken = beginChargePlanSyncSuppression();
+      suppressChargePlanScrollEvents = true;
+
+      try {
+        const maxScrollLeft = Math.max(0, scrollEl.scrollWidth - scrollEl.clientWidth);
+        scrollEl.scrollLeft = clamp(scrollEl.scrollLeft + delta, 0, maxScrollLeft);
+        const leftDayOffset = getChargePlanViewportLeftDayOffset(scrollEl);
+        captureChargePlanViewport(scrollEl, leftDayOffset);
+        syncChargePlanVisibleDate(scrollEl, { persist: false }, dom?.chargePlanBoard || null);
+      } finally {
+        requestAnimationFrame(() => {
+          suppressChargePlanScrollEvents = false;
+          finishChargePlanSyncSuppression(suppressionToken);
+        });
+      }
+
+      return true;
     },
     subscribeViewportChange(listener) {
       if (typeof listener !== "function") {

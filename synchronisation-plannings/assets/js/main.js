@@ -1,6 +1,7 @@
 const planningFrameEl = document.getElementById("planning-projet-frame");
 const planningAxisFrameEl = document.getElementById("planning-projet-axis-frame");
 const expensesFrameEl = document.getElementById("gestion-depenses2-frame");
+const planningResizeHandleEl = document.getElementById("sync-planning-resize-handle");
 const projectSelectEl = document.getElementById("shared-project-select");
 const statusValueEl = document.getElementById("hub-status-value");
 const lastSourceValueEl = document.getElementById("last-source-value");
@@ -18,6 +19,11 @@ const HUB_URL_PARAMS =
   typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
 const LAYOUT_DEBUG_ENABLED = HUB_URL_PARAMS?.get("debugLayout") === "1";
 const DEBUG_DISABLE_STICKY_SHELL = HUB_URL_PARAMS?.get("noStickyShell") === "1";
+const DAY_IN_MS = 86400000;
+const DEFAULT_PLANNING_FRAME_HEIGHT = 820;
+const MIN_PLANNING_FRAME_HEIGHT = 280;
+const MAX_PLANNING_FRAME_HEIGHT = 1600;
+const PLANNING_FRAME_HEIGHT_STORAGE_KEY = "sync-planning.top-frame-height";
 
 let planningApi = null;
 let planningAxisApi = null;
@@ -30,10 +36,14 @@ let lastAppliedViewportLogicalSignature = "";
 let sharedViewportState = null;
 let expensesFramePresentationTimer = 0;
 let lastExpensesVisibleWidthAdjustment = Number.NaN;
+let lastExpensesReferenceVisibleWidth = Number.NaN;
+let lastExpensesPixelAlignmentDelta = Number.NaN;
 let expensesVisibleWidthAdjustmentRerenderPending = false;
 let planningLayoutDebugRafId = 0;
 let planningLayoutDebugCleanup = null;
 let lastPlanningLayoutDebugSignature = "";
+let planningFrameResizeState = null;
+let planningFrameResizeRefreshRafId = 0;
 const pendingPlanningLayoutDebugReasons = new Set();
 const SHARED_VIEWPORT_RULES = {
   referenceMonthDays: 30.4375,
@@ -155,6 +165,184 @@ function setExpensesPlanningControlsDisabled(disabled = true) {
   if (sharedNextBtnEl instanceof HTMLButtonElement) {
     sharedNextBtnEl.disabled = Boolean(disabled);
   }
+}
+
+function clampPlanningFrameHeight(height) {
+  const numericHeight = Number(height);
+  if (!Number.isFinite(numericHeight)) {
+    return DEFAULT_PLANNING_FRAME_HEIGHT;
+  }
+
+  return Math.min(MAX_PLANNING_FRAME_HEIGHT, Math.max(MIN_PLANNING_FRAME_HEIGHT, numericHeight));
+}
+
+function persistPlanningFrameHeight(height) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      PLANNING_FRAME_HEIGHT_STORAGE_KEY,
+      String(Math.round(clampPlanningFrameHeight(height)))
+    );
+  } catch (error) {
+    console.warn("[sync] impossible d'enregistrer la hauteur du planning", error);
+  }
+}
+
+function getStoredPlanningFrameHeight() {
+  if (typeof window === "undefined") {
+    return Number.NaN;
+  }
+
+  try {
+    const storedValue = Number(window.localStorage.getItem(PLANNING_FRAME_HEIGHT_STORAGE_KEY));
+    return Number.isFinite(storedValue) ? clampPlanningFrameHeight(storedValue) : Number.NaN;
+  } catch (error) {
+    console.warn("[sync] impossible de relire la hauteur du planning", error);
+    return Number.NaN;
+  }
+}
+
+function schedulePlanningFrameResizeRefresh(reason = "planning-frame-resize") {
+  if (planningFrameResizeRefreshRafId) {
+    return;
+  }
+
+  planningFrameResizeRefreshRafId = window.requestAnimationFrame(() => {
+    planningFrameResizeRefreshRafId = 0;
+    scheduleExpensesFramePresentation();
+    schedulePlanningLayoutDebug(reason);
+  });
+}
+
+function applyPlanningFrameHeight(nextHeight, { persist = true, refresh = true } = {}) {
+  const appliedHeight = clampPlanningFrameHeight(nextHeight);
+
+  if (planningFrameEl instanceof HTMLIFrameElement) {
+    planningFrameEl.style.height = `${appliedHeight}px`;
+    planningFrameEl.style.minHeight = `${appliedHeight}px`;
+  }
+
+  if (planningResizeHandleEl instanceof HTMLElement) {
+    planningResizeHandleEl.setAttribute("aria-valuemin", String(MIN_PLANNING_FRAME_HEIGHT));
+    planningResizeHandleEl.setAttribute("aria-valuemax", String(MAX_PLANNING_FRAME_HEIGHT));
+    planningResizeHandleEl.setAttribute("aria-valuenow", String(Math.round(appliedHeight)));
+    planningResizeHandleEl.setAttribute("aria-valuetext", `${Math.round(appliedHeight)} pixels`);
+  }
+
+  if (persist) {
+    persistPlanningFrameHeight(appliedHeight);
+  }
+
+  if (refresh) {
+    schedulePlanningFrameResizeRefresh();
+  }
+
+  return appliedHeight;
+}
+
+function bindPlanningFrameResizeHandle() {
+  if (!(planningResizeHandleEl instanceof HTMLElement)) {
+    return;
+  }
+
+  const finishResize = () => {
+    if (!planningFrameResizeState) {
+      return;
+    }
+
+    const finalHeight =
+      planningFrameEl?.getBoundingClientRect?.().height || planningFrameResizeState.startHeight;
+
+    document.body.classList.remove("is-sync-planning-resizing");
+    applyPlanningFrameHeight(finalHeight, { persist: true, refresh: true });
+    planningFrameResizeState = null;
+  };
+
+  planningResizeHandleEl.addEventListener("dblclick", () => {
+    applyPlanningFrameHeight(DEFAULT_PLANNING_FRAME_HEIGHT, { persist: true, refresh: true });
+  });
+
+  planningResizeHandleEl.addEventListener("keydown", (event) => {
+    const currentHeight =
+      planningFrameEl?.getBoundingClientRect?.().height || DEFAULT_PLANNING_FRAME_HEIGHT;
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      applyPlanningFrameHeight(currentHeight - 32, { persist: true, refresh: true });
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      applyPlanningFrameHeight(currentHeight + 32, { persist: true, refresh: true });
+      return;
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault();
+      applyPlanningFrameHeight(MIN_PLANNING_FRAME_HEIGHT, { persist: true, refresh: true });
+      return;
+    }
+
+    if (event.key === "End") {
+      event.preventDefault();
+      applyPlanningFrameHeight(DEFAULT_PLANNING_FRAME_HEIGHT, { persist: true, refresh: true });
+    }
+  });
+
+  planningResizeHandleEl.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    const startHeight =
+      planningFrameEl?.getBoundingClientRect?.().height || DEFAULT_PLANNING_FRAME_HEIGHT;
+
+    planningFrameResizeState = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startHeight,
+    };
+
+    document.body.classList.add("is-sync-planning-resizing");
+    planningResizeHandleEl.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  });
+
+  planningResizeHandleEl.addEventListener("pointermove", (event) => {
+    if (!planningFrameResizeState || event.pointerId !== planningFrameResizeState.pointerId) {
+      return;
+    }
+
+    const nextHeight =
+      planningFrameResizeState.startHeight + (event.clientY - planningFrameResizeState.startY);
+    applyPlanningFrameHeight(nextHeight, { persist: false, refresh: true });
+  });
+
+  planningResizeHandleEl.addEventListener("pointerup", (event) => {
+    if (!planningFrameResizeState || event.pointerId !== planningFrameResizeState.pointerId) {
+      return;
+    }
+
+    planningResizeHandleEl.releasePointerCapture?.(event.pointerId);
+    finishResize();
+  });
+
+  planningResizeHandleEl.addEventListener("pointercancel", (event) => {
+    if (!planningFrameResizeState || event.pointerId !== planningFrameResizeState.pointerId) {
+      return;
+    }
+
+    planningResizeHandleEl.releasePointerCapture?.(event.pointerId);
+    finishResize();
+  });
+
+  planningResizeHandleEl.addEventListener("lostpointercapture", () => {
+    finishResize();
+  });
 }
 
 function formatSharedCenterLabel(mode = "", anchorDateValue = "") {
@@ -571,17 +759,32 @@ function normalizeProjectKey(value) {
     .toLowerCase();
 }
 
+function normalizeViewportSignatureTimestamp(timestampMs) {
+  const numericTimestamp = parseSharedExactNumber(timestampMs);
+  if (!Number.isFinite(numericTimestamp)) {
+    return "";
+  }
+
+  return String(Math.round(numericTimestamp / 10) * 10);
+}
+
 function getViewportLogicalSignature(projectKey, viewport = {}) {
   const normalizedProjectKey = normalizeProjectKey(projectKey || activeProjectKey || "");
   const rangeStartDate = String(viewport?.firstVisibleDate || viewport?.rangeStartDate || "").trim();
   const mode = String(viewport?.mode || "").trim();
   const visibleDays = Number(viewport?.visibleDays);
+  const windowStartMs = normalizeViewportSignatureTimestamp(viewport?.windowStartMs);
+  const windowEndMs = normalizeViewportSignatureTimestamp(viewport?.windowEndMs);
+  const leftDayOffset = parseSharedExactNumber(viewport?.leftDayOffset);
 
   return [
     normalizedProjectKey,
     rangeStartDate,
     mode,
     Number.isFinite(visibleDays) ? Math.round(visibleDays) : "",
+    windowStartMs,
+    windowEndMs,
+    Number.isFinite(leftDayOffset) ? leftDayOffset.toFixed(4) : "",
   ].join("|");
 }
 
@@ -1042,6 +1245,11 @@ function ensureExpensesFramePresentation() {
     styleEl.textContent = `
       body.planning-sync-embedded {
         --sync-planning-visible-width-adjustment: 0px;
+        --sync-planning-reference-visible-width: 0px;
+        --sync-planning-reference-day-width: 0px;
+        --sync-planning-embedded-scroll-width: calc(
+          100% - var(--sync-planning-visible-width-adjustment)
+        );
         background: transparent !important;
       }
 
@@ -1064,7 +1272,7 @@ function ensureExpensesFramePresentation() {
       }
 
       body.planning-sync-embedded #charge-plan-board .charge-plan-scroll {
-        width: calc(100% - var(--sync-planning-visible-width-adjustment)) !important;
+        width: var(--sync-planning-embedded-scroll-width) !important;
       }
 
       body.planning-sync-embedded #charge-plan-board .charge-plan-row--header {
@@ -1091,6 +1299,8 @@ function ensureExpensesFramePresentation() {
 
       body.planning-sync-embedded #charge-plan-board .charge-plan-scroll {
         border-top: 0 !important;
+        border-top-left-radius: 0 !important;
+        border-top-right-radius: 0 !important;
       }
 
       body.planning-sync-embedded #charge-plan-board .charge-plan-timeline {
@@ -1104,7 +1314,27 @@ function ensureExpensesFramePresentation() {
     frameDocument.head.appendChild(styleEl);
   }
 
+  const boardStyles = frameDocument.defaultView.getComputedStyle(boardEl);
+  const fixedColumnsWidth =
+    (parseFloat(boardStyles.getPropertyValue("--charge-plan-name-col-width")) || 150) +
+    (parseFloat(boardStyles.getPropertyValue("--charge-plan-total-col-width")) || 100);
+  const embeddedScrollEl = boardEl.querySelector(".charge-plan-scroll");
+  const embeddedScrollStyles =
+    embeddedScrollEl instanceof frameDocument.defaultView.HTMLElement
+      ? frameDocument.defaultView.getComputedStyle(embeddedScrollEl)
+      : null;
+  const embeddedScrollBorderWidth =
+    (parseFloat(embeddedScrollStyles?.borderLeftWidth || "0") || 0) +
+    (parseFloat(embeddedScrollStyles?.borderRightWidth || "0") || 0);
   const mainPlanningVisibleWidthAdjustment = getPlanningMainVisibleWidthAdjustment(frameDocument);
+  const mainPlanningReferenceVisibleWidth = getPlanningMainTimelineViewportWidth();
+  const mainPlanningReferenceDayWidth = getPlanningMainReferenceDayWidth(
+    getPlanningReferencePanelContext()
+  );
+  const embeddedScrollWidth = Math.max(
+    280,
+    fixedColumnsWidth + mainPlanningReferenceVisibleWidth + embeddedScrollBorderWidth
+  );
   frameDocument.documentElement.style.setProperty(
     "--sync-planning-visible-width-adjustment",
     `${mainPlanningVisibleWidthAdjustment}px`
@@ -1112,6 +1342,42 @@ function ensureExpensesFramePresentation() {
   frameDocument.body.style.setProperty(
     "--sync-planning-visible-width-adjustment",
     `${mainPlanningVisibleWidthAdjustment}px`
+  );
+  frameDocument.documentElement.style.setProperty(
+    "--sync-planning-reference-visible-width",
+    `${mainPlanningReferenceVisibleWidth}px`
+  );
+  frameDocument.documentElement.style.setProperty(
+    "--sync-planning-reference-day-width",
+    `${mainPlanningReferenceDayWidth}px`
+  );
+  frameDocument.documentElement.style.setProperty(
+    "--sync-planning-embedded-scroll-width",
+    `${embeddedScrollWidth}px`
+  );
+  frameDocument.body.style.setProperty(
+    "--sync-planning-reference-visible-width",
+    `${mainPlanningReferenceVisibleWidth}px`
+  );
+  frameDocument.body.style.setProperty(
+    "--sync-planning-reference-day-width",
+    `${mainPlanningReferenceDayWidth}px`
+  );
+  frameDocument.body.style.setProperty(
+    "--sync-planning-embedded-scroll-width",
+    `${embeddedScrollWidth}px`
+  );
+  boardEl.style.setProperty(
+    "--sync-planning-reference-visible-width",
+    `${mainPlanningReferenceVisibleWidth}px`
+  );
+  boardEl.style.setProperty(
+    "--sync-planning-reference-day-width",
+    `${mainPlanningReferenceDayWidth}px`
+  );
+  boardEl.style.setProperty(
+    "--sync-planning-embedded-scroll-width",
+    `${embeddedScrollWidth}px`
   );
 
   const chargePlanHeaderEl = boardEl.previousElementSibling;
@@ -1135,11 +1401,24 @@ function ensureExpensesFramePresentation() {
     expensesFrameEl.style.minHeight = `${measuredHeight}px`;
   }
 
-  if (
+  const visibleWidthAdjustmentChanged =
     Number.isFinite(mainPlanningVisibleWidthAdjustment) &&
-    Math.abs(mainPlanningVisibleWidthAdjustment - lastExpensesVisibleWidthAdjustment) > 0.25
-  ) {
+    (!Number.isFinite(lastExpensesVisibleWidthAdjustment) ||
+      Math.abs(mainPlanningVisibleWidthAdjustment - lastExpensesVisibleWidthAdjustment) > 0.25);
+  const referenceVisibleWidthChanged =
+    Number.isFinite(mainPlanningReferenceVisibleWidth) &&
+    (!Number.isFinite(lastExpensesReferenceVisibleWidth) ||
+      Math.abs(mainPlanningReferenceVisibleWidth - lastExpensesReferenceVisibleWidth) > 0.25);
+
+  if (visibleWidthAdjustmentChanged) {
     lastExpensesVisibleWidthAdjustment = mainPlanningVisibleWidthAdjustment;
+  }
+
+  if (referenceVisibleWidthChanged) {
+    lastExpensesReferenceVisibleWidth = mainPlanningReferenceVisibleWidth;
+  }
+
+  if (visibleWidthAdjustmentChanged || referenceVisibleWidthChanged) {
 
     if (!expensesVisibleWidthAdjustmentRerenderPending && expensesApi?.applyViewport) {
       expensesVisibleWidthAdjustmentRerenderPending = true;
@@ -1160,6 +1439,12 @@ function ensureExpensesFramePresentation() {
       });
     }
   }
+
+  requestAnimationFrame(() => {
+    if (calibrateExpensesViewportPixelOffset(frameDocument)) {
+      scheduleExpensesFramePresentation(1);
+    }
+  });
 
   expensesFrameEl?.classList.add("is-ready");
   schedulePlanningLayoutDebug("expenses-presentation");
@@ -1199,42 +1484,304 @@ function getPlanningMainScrollbarGutterWidth() {
   return Math.round(gutterWidth * 100) / 100;
 }
 
-function getPlanningMainVisibleWidthAdjustment(expensesFrameDocument = null) {
+function getPlanningReferencePanelContext() {
+  const axisDocument = planningAxisFrameEl?.contentDocument;
+  const axisWindow = planningAxisFrameEl?.contentWindow;
+  const axisTopPanel = axisDocument?.querySelector("#planningTimeline .vis-panel.vis-top");
+  if (
+    planningAxisFrameEl &&
+    axisDocument &&
+    axisWindow &&
+    axisTopPanel instanceof axisWindow.HTMLElement
+  ) {
+    return {
+      frameEl: planningAxisFrameEl,
+      document: axisDocument,
+      window: axisWindow,
+      panelEl: axisTopPanel,
+      panelKind: "top",
+    };
+  }
+
   const planningDocument = planningFrameEl?.contentDocument;
   const planningWindow = planningFrameEl?.contentWindow;
-  const expensesDocument = expensesFrameDocument || expensesFrameEl?.contentDocument;
-  const expensesWindow = expensesFrameEl?.contentWindow;
-  if (!planningDocument || !planningWindow || !expensesDocument || !expensesWindow) {
+  const planningCenterPanel = planningDocument?.querySelector("#planningTimeline .vis-panel.vis-center");
+  if (
+    planningFrameEl &&
+    planningDocument &&
+    planningWindow &&
+    planningCenterPanel instanceof planningWindow.HTMLElement
+  ) {
+    return {
+      frameEl: planningFrameEl,
+      document: planningDocument,
+      window: planningWindow,
+      panelEl: planningCenterPanel,
+      panelKind: "center",
+    };
+  }
+
+  return null;
+}
+
+function getPlanningReferenceViewportState() {
+  const referencePlanningApi = getReferencePlanningApi();
+  if (referencePlanningApi?.getViewport) {
+    try {
+      const viewport = referencePlanningApi.getViewport();
+      if (viewport) {
+        return viewport;
+      }
+    } catch (error) {
+      console.warn("[sync] impossible de lire le viewport de reference", error);
+    }
+  }
+
+  return null;
+}
+
+function getPlanningMainExactVisibleDaySpan() {
+  const viewport = getPlanningReferenceViewportState();
+  const windowStartMs = parseSharedExactNumber(viewport?.windowStartMs);
+  const windowEndMs = parseSharedExactNumber(viewport?.windowEndMs);
+  if (!Number.isFinite(windowStartMs) || !Number.isFinite(windowEndMs) || windowEndMs <= windowStartMs) {
+    return Number.NaN;
+  }
+
+  return (windowEndMs - windowStartMs) / DAY_IN_MS;
+}
+
+function getMedianLayoutMetric(values = []) {
+  const numericValues = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (!numericValues.length) {
     return 0;
   }
 
-  const centerPanel = planningDocument.querySelector("#planningTimeline .vis-panel.vis-center");
+  const middleIndex = Math.floor(numericValues.length / 2);
+  if (numericValues.length % 2 === 1) {
+    return numericValues[middleIndex];
+  }
+
+  return (numericValues[middleIndex - 1] + numericValues[middleIndex]) / 2;
+}
+
+function getPlanningReferenceDayBoundaryPositions() {
+  const referencePanelContext = getPlanningReferencePanelContext();
+  if (!referencePanelContext || referencePanelContext.panelKind !== "top") {
+    return [];
+  }
+
+  const { document: planningDocument, window: planningWindow, panelEl } = referencePanelContext;
+  const topPanelRect = panelEl.getBoundingClientRect();
+  return Array.from(
+    planningDocument.querySelectorAll(
+      "#planningTimeline .vis-panel.vis-top .vis-time-axis .vis-grid.vis-minor"
+    )
+  )
+    .map((gridLineEl) =>
+      gridLineEl instanceof planningWindow.HTMLElement ? gridLineEl.getBoundingClientRect().left : Number.NaN
+    )
+    .filter(
+      (left) =>
+        Number.isFinite(left) &&
+        left >= topPanelRect.left - 0.5 &&
+        left <= topPanelRect.right + 0.5
+    )
+    .sort((a, b) => a - b);
+}
+
+function getPlanningMainReferenceDayWidth(referencePanelContext = null) {
+  if (!referencePanelContext || referencePanelContext.panelKind !== "top") {
+    return 0;
+  }
+
+  const { document: planningDocument, window: planningWindow, panelEl } = referencePanelContext;
+  if (!(panelEl instanceof planningWindow.HTMLElement)) {
+    return 0;
+  }
+
+  const topPanelRect = panelEl.getBoundingClientRect();
+  const gridLinePositions = Array.from(
+    planningDocument.querySelectorAll(
+      "#planningTimeline .vis-panel.vis-top .vis-time-axis .vis-grid.vis-minor"
+    )
+  )
+    .map((gridLineEl) =>
+      gridLineEl instanceof planningWindow.HTMLElement ? gridLineEl.getBoundingClientRect().left : Number.NaN
+    )
+    .filter(
+      (left) =>
+        Number.isFinite(left) &&
+        left >= topPanelRect.left - 1 &&
+        left <= topPanelRect.right + 1
+    )
+    .sort((a, b) => a - b);
+
+  if (gridLinePositions.length < 2) {
+    return 0;
+  }
+
+  const candidateDiffs = [];
+  for (let index = 1; index < gridLinePositions.length; index += 1) {
+    const diff = gridLinePositions[index] - gridLinePositions[index - 1];
+    if (diff > 2) {
+      candidateDiffs.push(diff);
+    }
+  }
+
+  const medianDayWidth = getMedianLayoutMetric(candidateDiffs);
+  return medianDayWidth > 0 ? Math.round(medianDayWidth * 1000) / 1000 : 0;
+}
+
+function getExpensesVisibleDayBoundaryPositions(expensesFrameDocument = null) {
+  const expensesDocument = expensesFrameDocument || expensesFrameEl?.contentDocument;
+  const expensesWindow = expensesFrameEl?.contentWindow;
+  if (!expensesDocument || !expensesWindow) {
+    return [];
+  }
+
+  const expensesScrollEl = expensesDocument.querySelector("#charge-plan-board .charge-plan-scroll");
+  const firstTrackGrid = expensesDocument.querySelector(
+    "#charge-plan-board .charge-plan-row:not(.charge-plan-row--header):not(.charge-plan-row--total) .charge-plan-track-grid"
+  );
+  if (
+    !(expensesScrollEl instanceof expensesWindow.HTMLElement) ||
+    !(firstTrackGrid instanceof expensesWindow.HTMLElement)
+  ) {
+    return [];
+  }
+
+  const scrollRect = expensesScrollEl.getBoundingClientRect();
+  return Array.from(firstTrackGrid.querySelectorAll(".charge-plan-grid-day"))
+    .map((dayEl) =>
+      dayEl instanceof expensesWindow.HTMLElement ? dayEl.getBoundingClientRect().left : Number.NaN
+    )
+    .filter(
+      (left) =>
+        Number.isFinite(left) &&
+        left >= scrollRect.left - 0.5 &&
+        left <= scrollRect.right + 0.5
+    )
+    .sort((a, b) => a - b);
+}
+
+function calibrateExpensesViewportPixelOffset(expensesFrameDocument = null) {
+  if (!expensesApi?.nudgeViewportByPixels) {
+    return false;
+  }
+
+  const referencePositions = getPlanningReferenceDayBoundaryPositions();
+  const expensesPositions = getExpensesVisibleDayBoundaryPositions(expensesFrameDocument);
+  const pairCount = Math.min(referencePositions.length, expensesPositions.length, 6);
+  if (pairCount < 2) {
+    return false;
+  }
+
+  const deltas = [];
+  for (let index = 0; index < pairCount; index += 1) {
+    deltas.push(expensesPositions[index] - referencePositions[index]);
+  }
+
+  const alignmentDelta = getMedianLayoutMetric(deltas);
+  if (!Number.isFinite(alignmentDelta) || Math.abs(alignmentDelta) <= 0.6 || Math.abs(alignmentDelta) > 16) {
+    lastExpensesPixelAlignmentDelta = Number.NaN;
+    return false;
+  }
+
+  if (
+    Number.isFinite(lastExpensesPixelAlignmentDelta) &&
+    Math.abs(lastExpensesPixelAlignmentDelta - alignmentDelta) <= 0.2
+  ) {
+    return false;
+  }
+
+  lastExpensesPixelAlignmentDelta = alignmentDelta;
+  return Boolean(expensesApi.nudgeViewportByPixels(alignmentDelta));
+}
+
+function getPlanningMainTimelineViewportMetrics(expensesFrameDocument = null) {
+  const expensesDocument = expensesFrameDocument || expensesFrameEl?.contentDocument;
+  const expensesWindow = expensesFrameEl?.contentWindow;
+  const referencePanelContext = getPlanningReferencePanelContext();
+  if (!referencePanelContext || !expensesDocument || !expensesWindow) {
+    return null;
+  }
+
   const expensesBoard = expensesDocument.getElementById("charge-plan-board");
   const expensesScrollEl = expensesDocument.querySelector("#charge-plan-board .charge-plan-scroll");
   if (
-    !(centerPanel instanceof planningWindow.HTMLElement) ||
     !(expensesBoard instanceof expensesWindow.HTMLElement) ||
     !(expensesScrollEl instanceof expensesWindow.HTMLElement)
   ) {
-    return 0;
+    return null;
   }
 
-  const planningFrameRect = planningFrameEl.getBoundingClientRect();
+  const planningPanelEl = referencePanelContext.panelEl;
+  const planningFrameRect = referencePanelContext.frameEl.getBoundingClientRect();
   const expensesFrameRect = expensesFrameEl.getBoundingClientRect();
-  const planningCenterRect = centerPanel.getBoundingClientRect();
+  const planningPanelRect = planningPanelEl.getBoundingClientRect();
   const expensesScrollRect = expensesScrollEl.getBoundingClientRect();
   const boardStyles = expensesWindow.getComputedStyle(expensesBoard);
   const nameWidth = parseFloat(boardStyles.getPropertyValue("--charge-plan-name-col-width"));
   const totalWidth = parseFloat(boardStyles.getPropertyValue("--charge-plan-total-col-width"));
   const fixedColumnsWidth =
     (Number.isFinite(nameWidth) ? nameWidth : 150) + (Number.isFinite(totalWidth) ? totalWidth : 100);
+  const planningViewportWidth = Math.max(
+    0,
+    Number(planningPanelEl.clientWidth) || Number(planningPanelRect.width) || 0
+  );
+  const planningExactVisibleDaySpan = getPlanningMainExactVisibleDaySpan();
+  const planningReferenceDayWidth = getPlanningMainReferenceDayWidth(referencePanelContext);
+  const planningReferenceViewportWidth =
+    Number.isFinite(planningReferenceDayWidth) &&
+    planningReferenceDayWidth > 0 &&
+    Number.isFinite(planningExactVisibleDaySpan) &&
+    planningExactVisibleDaySpan > 0
+      ? planningReferenceDayWidth * planningExactVisibleDaySpan
+      : planningViewportWidth;
+  const expensesScrollContentWidth = Math.max(
+    0,
+    Number(expensesScrollEl.clientWidth) || Number(expensesScrollRect.width) || 0
+  );
+  const expensesTimelineViewportWidth = Math.max(0, expensesScrollContentWidth - fixedColumnsWidth);
+  const planningContentLeft =
+    planningFrameRect.left +
+    planningPanelRect.left +
+    Number(planningPanelEl.clientLeft || 0);
+  const planningContentRight = planningContentLeft + planningReferenceViewportWidth;
+  const expensesTimelineContentLeft =
+    expensesFrameRect.left +
+    expensesScrollRect.left +
+    Number(expensesScrollEl.clientLeft || 0) +
+    fixedColumnsWidth;
+  const expensesContentRight =
+    expensesTimelineContentLeft + expensesTimelineViewportWidth;
 
-  const planningAbsRight = planningFrameRect.left + planningCenterRect.right;
-  const expensesAbsRight = expensesFrameRect.left + expensesScrollRect.right;
-  const planningVisibleWidth = Math.max(0, planningCenterRect.width);
-  const expensesVisibleWidth = Math.max(0, expensesScrollRect.width - fixedColumnsWidth);
-  const rightDelta = expensesAbsRight - planningAbsRight;
-  const widthDelta = expensesVisibleWidth - planningVisibleWidth;
+  return {
+    planningViewportWidth,
+    planningReferenceViewportWidth,
+    planningReferenceDayWidth,
+    planningExactVisibleDaySpan,
+    expensesTimelineViewportWidth,
+    planningContentRight,
+    expensesContentRight,
+  };
+}
+
+function getPlanningMainTimelineViewportWidth() {
+  const metrics = getPlanningMainTimelineViewportMetrics();
+  return metrics ? Math.round(metrics.planningReferenceViewportWidth * 100) / 100 : 0;
+}
+
+function getPlanningMainVisibleWidthAdjustment(expensesFrameDocument = null) {
+  const metrics = getPlanningMainTimelineViewportMetrics(expensesFrameDocument);
+  if (!metrics) {
+    return 0;
+  }
+
+  const rightDelta = metrics.expensesContentRight - metrics.planningContentRight;
+  const widthDelta =
+    metrics.expensesTimelineViewportWidth - metrics.planningReferenceViewportWidth;
   const adjustment = Math.max(0, rightDelta, widthDelta);
 
   return Math.round(adjustment * 100) / 100;
@@ -1706,4 +2253,9 @@ clearLogBtn?.addEventListener("click", () => {
   }
 });
 
+applyPlanningFrameHeight(getStoredPlanningFrameHeight(), {
+  persist: false,
+  refresh: false,
+});
+bindPlanningFrameResizeHandle();
 bootstrap();

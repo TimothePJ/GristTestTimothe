@@ -144,19 +144,74 @@ function getEmbeddedPlanningVisibleWidthAdjustment(boardEl = currentBoardEl) {
   return Number.isFinite(adjustment) && adjustment > 0 ? adjustment : 0;
 }
 
-function getTimelineViewportWidth(boardEl = currentBoardEl) {
+function getEmbeddedPlanningReferenceVisibleWidth(boardEl = currentBoardEl) {
+  if (!(boardEl instanceof HTMLElement) || typeof window === "undefined") {
+    return 0;
+  }
+
+  const rootStyles = window.getComputedStyle(document.documentElement);
+  const bodyStyles =
+    document.body instanceof HTMLElement ? window.getComputedStyle(document.body) : null;
+  const boardStyles = window.getComputedStyle(boardEl);
+  const rawValue =
+    boardStyles.getPropertyValue("--sync-planning-reference-visible-width") ||
+    bodyStyles?.getPropertyValue("--sync-planning-reference-visible-width") ||
+    rootStyles.getPropertyValue("--sync-planning-reference-visible-width") ||
+    "0";
+  const width = parseFloat(rawValue);
+
+  return Number.isFinite(width) && width > 0 ? width : 0;
+}
+
+function getEmbeddedPlanningReferenceDayWidth(boardEl = currentBoardEl) {
+  if (!(boardEl instanceof HTMLElement) || typeof window === "undefined") {
+    return 0;
+  }
+
+  const rootStyles = window.getComputedStyle(document.documentElement);
+  const bodyStyles =
+    document.body instanceof HTMLElement ? window.getComputedStyle(document.body) : null;
+  const boardStyles = window.getComputedStyle(boardEl);
+  const rawValue =
+    boardStyles.getPropertyValue("--sync-planning-reference-day-width") ||
+    bodyStyles?.getPropertyValue("--sync-planning-reference-day-width") ||
+    rootStyles.getPropertyValue("--sync-planning-reference-day-width") ||
+    "0";
+  const width = parseFloat(rawValue);
+
+  return Number.isFinite(width) && width > 0 ? width : 0;
+}
+
+function getTimelineViewportWidth(
+  boardEl = currentBoardEl,
+  visibleDays = APP_CONFIG.chargeTimeline.defaultVisibleDays
+) {
   const scrollEl = boardEl?.querySelector(".charge-plan-scroll");
   const fixedColumnsWidth = getChargePlanFixedColumnsWidth(boardEl);
   const embeddedVisibleWidthAdjustment = getEmbeddedPlanningVisibleWidthAdjustment(boardEl);
+  const embeddedReferenceVisibleWidth = getEmbeddedPlanningReferenceVisibleWidth(boardEl);
+  const embeddedReferenceDayWidth = getEmbeddedPlanningReferenceDayWidth(boardEl);
   const isEmbeddedPlanningSync =
     typeof document !== "undefined" &&
     document.body instanceof HTMLElement &&
     document.body.classList.contains("planning-sync-embedded");
+  const normalizedVisibleDays = Math.max(
+    APP_CONFIG.chargeTimeline.minVisibleDays,
+    toFiniteNumber(visibleDays, APP_CONFIG.chargeTimeline.defaultVisibleDays)
+  );
 
   if (isEmbeddedPlanningSync) {
+    if (embeddedReferenceDayWidth > 0) {
+      return Math.max(280, embeddedReferenceDayWidth * normalizedVisibleDays);
+    }
+
     const embeddedScrollWidth = scrollEl?.clientWidth || 0;
     if (embeddedScrollWidth > 0) {
       return Math.max(280, embeddedScrollWidth - fixedColumnsWidth);
+    }
+
+    if (embeddedReferenceVisibleWidth > 0) {
+      return Math.max(280, embeddedReferenceVisibleWidth);
     }
 
     const embeddedContainerWidth =
@@ -196,14 +251,24 @@ function getSizingContext({
   anchorDate = new Date(),
   boardEl = currentBoardEl,
 } = {}) {
+  const normalizedVisibleDays = Math.max(
+    APP_CONFIG.chargeTimeline.minVisibleDays,
+    toFiniteNumber(visibleDays, APP_CONFIG.chargeTimeline.defaultVisibleDays)
+  );
+  const isEmbeddedPlanningSync =
+    typeof document !== "undefined" &&
+    document.body instanceof HTMLElement &&
+    document.body.classList.contains("planning-sync-embedded");
+
   return {
     zoomMode: getChargePlanZoomMode(zoomMode),
     zoomScale: Math.max(0.1, toFiniteNumber(zoomScale, 1)),
-    visibleDays: Math.max(
-      APP_CONFIG.chargeTimeline.minVisibleDays,
-      toFiniteNumber(visibleDays, APP_CONFIG.chargeTimeline.defaultVisibleDays)
-    ),
-    timelineViewportWidth: getTimelineViewportWidth(boardEl),
+    visibleDays: normalizedVisibleDays,
+    timelineViewportWidth: getTimelineViewportWidth(boardEl, normalizedVisibleDays),
+    isEmbeddedPlanningSync,
+    referenceDayWidth: isEmbeddedPlanningSync
+      ? getEmbeddedPlanningReferenceDayWidth(boardEl)
+      : 0,
     anchorMonthDayCount: getAnchorMonthDayCount(anchorDate),
   };
 }
@@ -299,7 +364,10 @@ function getMonthWidth(
       zoomScale,
     });
   const safeDayCount = Math.max(1, month?.calendarDayCount || 0);
-  const dayWidth = context.timelineViewportWidth / Math.max(context.visibleDays, 1);
+  const dayWidth =
+    context.isEmbeddedPlanningSync && context.referenceDayWidth > 0
+      ? context.referenceDayWidth
+      : context.timelineViewportWidth / Math.max(context.visibleDays, 1);
 
   return Math.max(1, dayWidth * safeDayCount);
 }
@@ -518,16 +586,15 @@ function renderTrackGrid(
             month.calendarDayCount > 0
               ? monthWidth / month.calendarDayCount
               : monthWidth;
-          const weekendBlocks = (month.calendarDayDates || [])
+          const dayBlocks = (month.calendarDayDates || [])
             .map((date, dayIndex) => {
-              if (isBusinessDay(date)) {
-                return "";
-              }
-
               return `
                 <span
-                  class="charge-plan-grid-weekend"
+                  class="charge-plan-grid-day ${
+                    isBusinessDay(date) ? "" : "is-weekend"
+                  } ${dayIndex === 0 ? "is-first-day" : ""}"
                   style="left:${dayIndex * dayWidth}px; width:${dayWidth}px"
+                  data-date-key="${toDateInputValue(date)}"
                 ></span>
               `;
             })
@@ -536,9 +603,9 @@ function renderTrackGrid(
           return `
             <span
               class="charge-plan-grid-month"
-              style="width:${monthWidth}px; --charge-plan-day-width:${dayWidth}px"
+              style="width:${monthWidth}px"
             >
-              ${weekendBlocks}
+              ${dayBlocks}
             </span>
           `;
         })

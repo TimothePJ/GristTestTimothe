@@ -2493,20 +2493,37 @@ function parsePlanningExactNumber(value) {
   return Number.isFinite(numericValue) ? numericValue : Number.NaN;
 }
 
+function normalizePlanningViewportSignatureTimestamp(timestampMs) {
+  const numericTimestamp = parsePlanningExactNumber(timestampMs);
+  if (!Number.isFinite(numericTimestamp)) {
+    return "";
+  }
+
+  return String(Math.round(numericTimestamp / 10) * 10);
+}
+
 function buildPlanningViewportLogicalSignature({
   mode = "",
   firstVisibleDate = "",
   rangeStartDate = "",
   visibleDays = Number.NaN,
+  windowStartMs = Number.NaN,
+  windowEndMs = Number.NaN,
 } = {}) {
   const normalizedMode = String(mode || "").trim();
   const normalizedFirstVisibleDate = String(firstVisibleDate || rangeStartDate || "").trim();
   const normalizedVisibleDays = Number(visibleDays);
+  const normalizedWindowStartMs =
+    normalizePlanningViewportSignatureTimestamp(windowStartMs);
+  const normalizedWindowEndMs =
+    normalizePlanningViewportSignatureTimestamp(windowEndMs);
 
   return [
     normalizedMode,
     normalizedFirstVisibleDate,
     Number.isFinite(normalizedVisibleDays) ? Math.round(normalizedVisibleDays) : "",
+    normalizedWindowStartMs,
+    normalizedWindowEndMs,
   ].join("|");
 }
 
@@ -2520,6 +2537,8 @@ function getPlanningViewportLogicalSignature(viewport = null) {
     firstVisibleDate: viewport.firstVisibleDate,
     rangeStartDate: viewport.rangeStartDate,
     visibleDays: viewport.visibleDays,
+    windowStartMs: viewport.windowStartMs,
+    windowEndMs: viewport.windowEndMs,
   });
 }
 
@@ -2567,6 +2586,8 @@ function rememberProgrammaticPlanningViewportFromRange(mode = "", range = null) 
       mode,
       firstVisibleDate: toIsoDateValue(range.start),
       visibleDays: getVisibleDaysFromRange(range),
+      windowStartMs: range.start.valueOf(),
+      windowEndMs: range.end.valueOf(),
     })
   );
 }

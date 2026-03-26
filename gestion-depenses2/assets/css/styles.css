@@ -1101,12 +1101,12 @@ td input {
 .charge-plan-month-segment {
   position: relative;
   flex: 0 0 auto;
-  border-left: 1px solid rgba(0, 73, 144, 0.1);
+  box-shadow: inset 1px 0 0 rgba(0, 73, 144, 0.1);
 }
 
 .charge-plan-header-month:first-child,
 .charge-plan-month-segment:first-child {
-  border-left: none;
+  box-shadow: none;
 }
 
 .charge-plan-header-month {
@@ -1171,41 +1171,57 @@ td input {
   position: relative;
   flex: 0 0 auto;
   min-height: var(--row-height, 72px);
-  border-left: 1px solid rgba(0, 73, 144, 0.12);
-  background:
-    repeating-linear-gradient(
-      to right,
-      rgba(0, 73, 144, 0.028) 0,
-      rgba(0, 73, 144, 0.028) calc(var(--charge-plan-day-width) / 2),
-      rgba(0, 73, 144, 0.016) calc(var(--charge-plan-day-width) / 2),
-      rgba(0, 73, 144, 0.016) var(--charge-plan-day-width)
-    ),
-    repeating-linear-gradient(
-      to right,
-      transparent 0,
-      transparent calc(var(--charge-plan-day-width) - 1px),
-      rgba(0, 73, 144, 0.08) calc(var(--charge-plan-day-width) - 1px),
-      rgba(0, 73, 144, 0.08) var(--charge-plan-day-width)
-    ),
-    linear-gradient(180deg, rgba(0, 73, 144, 0.03), rgba(0, 73, 144, 0.01));
+  box-shadow: inset 1px 0 0 rgba(0, 73, 144, 0.12);
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(0, 73, 144, 0.03), rgba(0, 73, 144, 0.01));
 }
 
 .charge-plan-grid-month:first-child {
-  border-left: none;
+  box-shadow: none;
 }
 
-.charge-plan-grid-weekend {
+.charge-plan-grid-day {
   position: absolute;
   top: 0;
   bottom: 0;
-  background:
-    linear-gradient(
-      to right,
-      rgba(8, 21, 38, 0.09) 0,
-      rgba(8, 21, 38, 0.09) 50%,
-      rgba(8, 21, 38, 0.12) 50%,
-      rgba(8, 21, 38, 0.12) 100%
-    );
+  box-sizing: border-box;
+  border-left: 1px solid rgba(0, 73, 144, 0.08);
+  background: linear-gradient(
+    to right,
+    rgba(0, 73, 144, 0.028) 0,
+    rgba(0, 73, 144, 0.028) 50%,
+    rgba(0, 73, 144, 0.016) 50%,
+    rgba(0, 73, 144, 0.016) 100%
+  );
+}
+
+.charge-plan-grid-day::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-0.5px);
+  background: rgba(0, 73, 144, 0.05);
+}
+
+.charge-plan-grid-day.is-first-day {
+  border-left: none;
+}
+
+.charge-plan-grid-day.is-weekend {
+  background: linear-gradient(
+    to right,
+    rgba(8, 21, 38, 0.09) 0,
+    rgba(8, 21, 38, 0.09) 50%,
+    rgba(8, 21, 38, 0.12) 50%,
+    rgba(8, 21, 38, 0.12) 100%
+  );
+}
+
+.charge-plan-grid-day.is-weekend::after {
+  background: rgba(8, 21, 38, 0.08);
 }
 
 .charge-plan-track-bars {
