@@ -793,7 +793,7 @@ function renderRoleRow(roleLabel, timelineWidth) {
   return `
     <div
       class="charge-plan-role-row"
-      style="--timeline-width:${timelineWidth}px; --row-height:48px"
+      style="--timeline-width:${timelineWidth}px; --row-height:36px"
     >
       <div class="charge-plan-role-cell charge-plan-role-cell--label">
         ${escapeHtml(roleLabel)}

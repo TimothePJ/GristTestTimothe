@@ -1053,9 +1053,11 @@ td input {
 
 .charge-plan-role-cell {
   min-height: auto;
-  padding-block: 12px;
-  padding-inline: 16px;
+  padding-block: 7px;
+  padding-inline: 14px;
   font-weight: 700;
+  font-size: 0.95rem;
+  line-height: 1.2;
   color: #fff;
   background: rgba(0, 73, 144, 0.9);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08);
