@@ -132,6 +132,7 @@
             class="embedded-app-frame embedded-app-frame--planning-axis"
             title="Frise chronologique commune"
             src="../Planning%20Projet/Index.html?embedded=planning-sync&headerOnly=1"
+            loading="eager"
           ></iframe>
         </section>
 
@@ -142,6 +143,7 @@
               class="embedded-app-frame embedded-app-frame--planning"
               title="Planning Projet synchronise"
               src="../Planning%20Projet/Index.html?embedded=planning-sync&externalAxis=1"
+              loading="eager"
             ></iframe>
           </div>
 
@@ -162,22 +164,20 @@
               class="embedded-app-frame embedded-app-frame--expenses"
               title="gestion-depenses2 synchronise"
               src="../gestion-depenses2/index.html?embedded=planning-sync"
+              loading="eager"
             ></iframe>
           </div>
         </div>
       </section>
 
-      <section class="card log-card">
-        <div class="log-card-header">
-          <div>
-            <h2>Journal de synchro</h2>
-            <p>Les actions projet, zoom et navigation sont tracees ici.</p>
-          </div>
-          <button id="clear-log-btn" type="button" class="ghost-btn">
-            Vider le journal
-          </button>
-        </div>
-        <pre id="sync-log" class="sync-log">En attente d'activite...</pre>
+      <section class="card expenses-chart-card">
+        <iframe
+          id="gestion-depenses2-chart-frame"
+          class="embedded-app-frame embedded-app-frame--expenses-chart"
+          title="Graphique des depenses"
+          src="../gestion-depenses2/index.html?embedded=spending-chart-sync"
+          loading="eager"
+        ></iframe>
       </section>
     </main>
 

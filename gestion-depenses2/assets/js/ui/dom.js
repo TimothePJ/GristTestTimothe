@@ -51,6 +51,7 @@ export function getDomRefs() {
     workerNameSelect: document.getElementById("worker-name-select"),
     saveWorkerBtn: document.getElementById("save-worker-btn"),
     spendingBillingEditor: document.getElementById("spending-billing-editor"),
+    spendingChartShell: document.getElementById("spending-chart-shell"),
     spendingChartControls: document.getElementById("spending-chart-controls"),
     spendingChartCanvas: document.getElementById("spending-chart"),
   };

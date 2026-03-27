@@ -130,9 +130,13 @@ let chargePlanDatePickerView = null;
 const PARIS_TIMEZONE = "Europe/Paris";
 const DAY_IN_MS = 86400000;
 const CHARGE_PLAN_DAY_SPAN_SNAP_EPSILON = 0.02;
+const EMBEDDED_MODE =
+  typeof window !== "undefined"
+    ? String(new URLSearchParams(window.location.search).get("embedded") || "").trim()
+    : "";
 const EMBEDDED_PLANNING_SYNC_MODE =
-  typeof window !== "undefined" &&
-  new URLSearchParams(window.location.search).get("embedded") === "planning-sync";
+  EMBEDDED_MODE === "planning-sync";
+const EMBEDDED_SPENDING_CHART_MODE = EMBEDDED_MODE === "spending-chart-sync";
 
 function toDateInputValue(date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
@@ -165,7 +169,58 @@ function getTodayDateValueInTimeZone(timeZone = PARIS_TIMEZONE) {
 }
 
 function applyEmbeddedPlanningSyncMode() {
-  if (!EMBEDDED_PLANNING_SYNC_MODE || typeof document === "undefined") {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  if (EMBEDDED_SPENDING_CHART_MODE) {
+    document.body.classList.add("spending-chart-sync-embedded");
+
+    const selectorsToHide = [
+      ".header",
+      ".project-header",
+      ".kpi-report",
+      ".plan-management-section",
+      ".team-management-section",
+      "#charge-plan-board",
+      "#expense-board",
+      "#real-charge-board",
+      "#real-expense-board",
+    ];
+
+    selectorsToHide.forEach((selector) => {
+      document.querySelectorAll(selector).forEach((element) => {
+        if (element instanceof HTMLElement) {
+          element.hidden = true;
+          element.style.display = "none";
+        }
+      });
+    });
+
+    document.querySelectorAll(".table-header").forEach((element) => {
+      if (element instanceof HTMLElement) {
+        element.hidden = true;
+        element.style.display = "none";
+      }
+    });
+
+    [dom?.spendingBillingEditor, dom?.spendingChartShell].forEach((element) => {
+      if (element instanceof HTMLElement) {
+        element.hidden = false;
+        element.style.display = "";
+      }
+    });
+
+    const chartHeaderEl = dom?.spendingBillingEditor?.previousElementSibling;
+    if (chartHeaderEl instanceof HTMLElement && chartHeaderEl.classList.contains("table-header")) {
+      chartHeaderEl.hidden = false;
+      chartHeaderEl.style.display = "";
+    }
+
+    return;
+  }
+
+  if (!EMBEDDED_PLANNING_SYNC_MODE) {
     return;
   }
 

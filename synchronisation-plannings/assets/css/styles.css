@@ -529,8 +529,7 @@ select {
 .embedded-app-frame--expenses {
   min-height: 620px;
   height: 620px;
-  opacity: 0;
-  transition: opacity 0.16s ease;
+  opacity: 1;
 }
 
 .embedded-app-frame--expenses.is-ready {
@@ -751,6 +750,11 @@ body.layout-debug-no-sticky .shared-timeline-shell {
   gap: var(--spacing-4);
 }
 
+.expenses-chart-card {
+  padding: 0;
+  overflow: hidden;
+}
+
 .log-card-header {
   justify-content: space-between;
 }
@@ -766,6 +770,14 @@ body.layout-debug-no-sticky .shared-timeline-shell {
   color: #d6e7f7;
   border: 1px solid rgba(15, 26, 37, 0.35);
   white-space: pre-wrap;
+}
+
+.embedded-app-frame--expenses-chart {
+  min-height: 520px;
+  height: 520px;
+  border: none;
+  border-radius: inherit;
+  background: transparent;
 }
 
 code {

@@ -119,6 +119,35 @@ body.planning-sync-embedded .container {
   max-width: none;
 }
 
+body.spending-chart-sync-embedded {
+  padding: 0;
+  background: transparent;
+}
+
+body.spending-chart-sync-embedded .main-content {
+  padding: 16px;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
+body.spending-chart-sync-embedded .container {
+  max-width: none;
+}
+
+body.spending-chart-sync-embedded .table-header {
+  margin-bottom: 12px;
+}
+
+body.spending-chart-sync-embedded #spending-billing-editor {
+  margin: 0 0 12px;
+}
+
+body.spending-chart-sync-embedded #spending-chart-shell {
+  padding: 16px;
+}
+
 .project-header {
   display: flex;
   justify-content: space-between;

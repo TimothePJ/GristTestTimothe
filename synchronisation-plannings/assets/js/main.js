@@ -1,6 +1,7 @@
 const planningFrameEl = document.getElementById("planning-projet-frame");
 const planningAxisFrameEl = document.getElementById("planning-projet-axis-frame");
 const expensesFrameEl = document.getElementById("gestion-depenses2-frame");
+const expensesChartFrameEl = document.getElementById("gestion-depenses2-chart-frame");
 const planningResizeHandleEl = document.getElementById("sync-planning-resize-handle");
 const projectSelectEl = document.getElementById("shared-project-select");
 const statusValueEl = document.getElementById("hub-status-value");
@@ -28,13 +29,16 @@ const PLANNING_FRAME_HEIGHT_STORAGE_KEY = "sync-planning.top-frame-height";
 let planningApi = null;
 let planningAxisApi = null;
 let expensesApi = null;
+let expensesChartApi = null;
 let activeProjectKey = "";
+let requestedProjectKey = "";
 let projectSyncInProgress = false;
 let viewportSyncInProgress = false;
 let pendingViewportPayload = null;
 let lastAppliedViewportLogicalSignature = "";
 let sharedViewportState = null;
 let expensesFramePresentationTimer = 0;
+let expensesChartFramePresentationTimer = 0;
 let lastExpensesVisibleWidthAdjustment = Number.NaN;
 let lastExpensesReferenceVisibleWidth = Number.NaN;
 let lastExpensesPixelAlignmentDelta = Number.NaN;
@@ -44,6 +48,11 @@ let planningLayoutDebugCleanup = null;
 let lastPlanningLayoutDebugSignature = "";
 let planningFrameResizeState = null;
 let planningFrameResizeRefreshRafId = 0;
+let expensesFrameAttachPromise = null;
+let expensesFrameAttachAttempt = 0;
+let expensesViewportSubscriptionApi = null;
+let expensesChartFrameAttachPromise = null;
+let expensesChartFrameAttachAttempt = 0;
 const pendingPlanningLayoutDebugReasons = new Set();
 const SHARED_VIEWPORT_RULES = {
   referenceMonthDays: 30.4375,
@@ -759,6 +768,10 @@ function normalizeProjectKey(value) {
     .toLowerCase();
 }
 
+function getDesiredProjectKey() {
+  return String(requestedProjectKey || activeProjectKey || projectSelectEl?.value || "").trim();
+}
+
 function normalizeViewportSignatureTimestamp(timestampMs) {
   const numericTimestamp = parseSharedExactNumber(timestampMs);
   if (!Number.isFinite(numericTimestamp)) {
@@ -1179,7 +1192,7 @@ async function alignExpensesViewportToPlanning(baseViewport = null, maxAttempts 
 }
 
 async function applyViewportFromParentControls(viewport = {}) {
-  if (!planningApi || !expensesApi || projectSyncInProgress || viewportSyncInProgress) {
+  if (!planningApi || projectSyncInProgress || viewportSyncInProgress) {
     return;
   }
 
@@ -1189,11 +1202,16 @@ async function applyViewportFromParentControls(viewport = {}) {
   viewportSyncInProgress = true;
 
   try {
-    await Promise.all([
+    const applyCalls = [
       Promise.resolve(planningApi.applyViewport(canonicalViewport)),
       Promise.resolve(planningAxisApi?.applyViewport?.(canonicalViewport)),
-      Promise.resolve(expensesApi.applyViewport(canonicalViewport)),
-    ]);
+    ];
+
+    if (expensesApi?.applyViewport) {
+      applyCalls.push(Promise.resolve(expensesApi.applyViewport(canonicalViewport)));
+    }
+
+    await Promise.all(applyCalls);
 
     lastAppliedViewportLogicalSignature = viewportLogicalSignature;
     sharedViewportState = canonicalViewport;
@@ -1461,6 +1479,42 @@ function scheduleExpensesFramePresentation(attempt = 0) {
     }
 
     scheduleExpensesFramePresentation(attempt + 1);
+  }, attempt === 0 ? 0 : 120);
+}
+
+function ensureExpensesChartFramePresentation() {
+  const frameDocument = expensesChartFrameEl?.contentDocument;
+  if (!frameDocument) {
+    return false;
+  }
+
+  const measuredHeight = Math.max(
+    360,
+    Math.ceil(
+      Math.max(
+        frameDocument.documentElement?.scrollHeight || 0,
+        frameDocument.body?.scrollHeight || 0
+      )
+    )
+  );
+
+  if (expensesChartFrameEl instanceof HTMLIFrameElement) {
+    expensesChartFrameEl.style.height = `${measuredHeight}px`;
+    expensesChartFrameEl.style.minHeight = `${measuredHeight}px`;
+  }
+
+  return true;
+}
+
+function scheduleExpensesChartFramePresentation(attempt = 0) {
+  window.clearTimeout(expensesChartFramePresentationTimer);
+  expensesChartFramePresentationTimer = window.setTimeout(() => {
+    const applied = ensureExpensesChartFramePresentation();
+    if (applied || attempt >= 20) {
+      return;
+    }
+
+    scheduleExpensesChartFramePresentation(attempt + 1);
   }, attempt === 0 ? 0 : 120);
 }
 
@@ -1902,12 +1956,14 @@ function bindExpensesPlanningShellControls() {
   window.addEventListener("resize", () => {
     syncExpensesPlanningShell();
     scheduleExpensesFramePresentation();
+    scheduleExpensesChartFramePresentation();
   });
 
   if (window.visualViewport) {
     window.visualViewport.addEventListener("resize", () => {
       syncExpensesPlanningShell();
       scheduleExpensesFramePresentation();
+      scheduleExpensesChartFramePresentation();
     });
   }
 }
@@ -1957,6 +2013,132 @@ async function waitForChildApi(frameEl, apiName, timeoutMs = 30000) {
   throw new Error(`API ${apiName} indisponible.`);
 }
 
+function getLateAttachReferenceViewport() {
+  const referencePlanningApi = getReferencePlanningApi() || planningApi;
+  const baseViewport =
+    sharedViewportState ||
+    referencePlanningApi?.getViewport?.() ||
+    planningApi?.getViewport?.() ||
+    null;
+
+  return baseViewport ? buildCanonicalSharedViewport(baseViewport) : null;
+}
+
+async function attachExpensesFrameApi({ force = false } = {}) {
+  if (!(expensesFrameEl instanceof HTMLIFrameElement)) {
+    return null;
+  }
+
+  if (!force && expensesFrameAttachPromise) {
+    return expensesFrameAttachPromise;
+  }
+
+  const attachAttempt = ++expensesFrameAttachAttempt;
+  expensesFrameAttachPromise = waitForChildApi(expensesFrameEl, "__gestionDepenses2PlanningSyncApi")
+    .then(async (api) => {
+      if (attachAttempt !== expensesFrameAttachAttempt) {
+        return api;
+      }
+
+      expensesApi = api;
+      scheduleExpensesFramePresentation();
+
+      const targetProjectKey = getDesiredProjectKey();
+      if (targetProjectKey) {
+        await Promise.resolve(api.setSelectedProject(targetProjectKey));
+      }
+
+      let referenceViewport = getLateAttachReferenceViewport();
+      if (referenceViewport?.firstVisibleDate) {
+        syncPlanningViewportBounds(referenceViewport);
+        const stabilizedViewport = await alignExpensesViewportToPlanning(referenceViewport);
+        if (stabilizedViewport?.firstVisibleDate) {
+          referenceViewport = buildCanonicalSharedViewport({
+            ...referenceViewport,
+            ...stabilizedViewport,
+          });
+        }
+
+        sharedViewportState = referenceViewport;
+        lastAppliedViewportLogicalSignature = getViewportLogicalSignature(
+          targetProjectKey || activeProjectKey,
+          referenceViewport
+        );
+        syncExpensesPlanningShell(referenceViewport);
+        setLastRange(referenceViewport);
+      }
+
+      scheduleExpensesFramePresentation();
+
+      if (expensesViewportSubscriptionApi !== api) {
+        api.subscribeViewportChange(handleViewportChange);
+        expensesViewportSubscriptionApi = api;
+      }
+
+      if (!projectSyncInProgress && pendingViewportPayload) {
+        void flushViewportSyncQueue();
+      }
+
+      return api;
+    })
+    .catch((error) => {
+      if (attachAttempt === expensesFrameAttachAttempt) {
+        console.error("Erreur attache du planning gestion-depenses2 :", error);
+      }
+      return null;
+    })
+    .finally(() => {
+      if (attachAttempt === expensesFrameAttachAttempt) {
+        expensesFrameAttachPromise = null;
+      }
+    });
+
+  return expensesFrameAttachPromise;
+}
+
+async function attachExpensesChartFrameApi({ force = false } = {}) {
+  if (!(expensesChartFrameEl instanceof HTMLIFrameElement)) {
+    return null;
+  }
+
+  if (!force && expensesChartFrameAttachPromise) {
+    return expensesChartFrameAttachPromise;
+  }
+
+  const attachAttempt = ++expensesChartFrameAttachAttempt;
+  expensesChartFrameAttachPromise = waitForChildApi(
+    expensesChartFrameEl,
+    "__gestionDepenses2PlanningSyncApi"
+  )
+    .then(async (api) => {
+      if (attachAttempt !== expensesChartFrameAttachAttempt) {
+        return api;
+      }
+
+      expensesChartApi = api;
+      const targetProjectKey = getDesiredProjectKey();
+      if (targetProjectKey) {
+        await Promise.resolve(api.setSelectedProject(targetProjectKey));
+      }
+
+      scheduleExpensesChartFramePresentation();
+      return api;
+    })
+    .catch((error) => {
+      if (attachAttempt === expensesChartFrameAttachAttempt) {
+        console.error("Erreur attache du graphique des depenses :", error);
+      }
+      return null;
+    })
+    .finally(() => {
+      if (attachAttempt === expensesChartFrameAttachAttempt) {
+        expensesChartFrameAttachPromise = null;
+      }
+    });
+
+  return expensesChartFrameAttachPromise;
+}
+
 function renderProjectOptions(projectKeys) {
   if (!(projectSelectEl instanceof HTMLSelectElement)) {
     return;
@@ -1981,32 +2163,48 @@ function renderProjectOptions(projectKeys) {
 
 async function applySharedProject(projectKey) {
   const normalizedProjectKey = String(projectKey || "").trim();
-  if (!normalizedProjectKey || !planningApi || !expensesApi) {
+  if (!normalizedProjectKey || !planningApi) {
     return;
   }
 
+  requestedProjectKey = normalizedProjectKey;
   projectSyncInProgress = true;
   pendingViewportPayload = null;
   setHubStatus(`Chargement du projet ${normalizedProjectKey}...`);
 
   try {
-    await Promise.all([
+    const projectApplyCalls = [
       Promise.resolve(planningApi.setSelectedProject(normalizedProjectKey)),
       Promise.resolve(planningAxisApi?.setSelectedProject?.(normalizedProjectKey)),
-      Promise.resolve(expensesApi.setSelectedProject(normalizedProjectKey)),
-    ]);
+    ];
+
+    if (expensesApi?.setSelectedProject) {
+      projectApplyCalls.push(Promise.resolve(expensesApi.setSelectedProject(normalizedProjectKey)));
+    }
+
+    if (expensesChartApi?.setSelectedProject) {
+      projectApplyCalls.push(
+        Promise.resolve(expensesChartApi.setSelectedProject(normalizedProjectKey))
+      );
+    }
+
+    await Promise.all(projectApplyCalls);
     activeProjectKey = normalizedProjectKey;
     scheduleExpensesFramePresentation();
+    scheduleExpensesChartFramePresentation();
     const referencePlanningApi = getReferencePlanningApi() || planningApi;
     const planningProjectDateBounds =
       referencePlanningApi.getProjectDateBounds?.() || planningApi.getProjectDateBounds?.() || null;
-    const expensesProjectDateBounds = expensesApi.getProjectDateBounds?.() || null;
+    const expensesProjectDateBounds = expensesApi?.getProjectDateBounds?.() || null;
     let sharedViewport = buildProjectSelectionViewport(
       buildSharedProjectDateBounds({
         planningDateBounds: planningProjectDateBounds,
         expensesDateBounds: expensesProjectDateBounds,
       }),
-      expensesApi.getViewport?.() || referencePlanningApi.getViewport?.() || planningApi.getViewport?.() || {}
+      expensesApi?.getViewport?.() ||
+        referencePlanningApi.getViewport?.() ||
+        planningApi.getViewport?.() ||
+        {}
     );
     if (sharedViewport?.firstVisibleDate) {
       const initialViewportLogicalSignature = getViewportLogicalSignature(
@@ -2057,12 +2255,14 @@ async function applySharedProject(projectKey) {
         ]);
       }
 
-      const stabilizedViewport = await alignExpensesViewportToPlanning(sharedViewport);
-      if (stabilizedViewport?.firstVisibleDate) {
-        sharedViewport = buildCanonicalSharedViewport({
-          ...sharedViewport,
-          ...stabilizedViewport,
-        });
+      if (expensesApi) {
+        const stabilizedViewport = await alignExpensesViewportToPlanning(sharedViewport);
+        if (stabilizedViewport?.firstVisibleDate) {
+          sharedViewport = buildCanonicalSharedViewport({
+            ...sharedViewport,
+            ...stabilizedViewport,
+          });
+        }
       }
 
       lastAppliedViewportLogicalSignature = getViewportLogicalSignature(
@@ -2186,18 +2386,23 @@ async function bootstrap() {
 
     setHubStatus("Connexion aux plannings...");
 
-    [planningApi, planningAxisApi, expensesApi] = await Promise.all([
+    [planningApi, planningAxisApi] = await Promise.all([
       waitForChildApi(planningFrameEl, "__planningProjetSyncApi"),
       waitForChildApi(planningAxisFrameEl, "__planningProjetSyncApi"),
-      waitForChildApi(expensesFrameEl, "__gestionDepenses2PlanningSyncApi"),
     ]);
     bindExpensesPlanningShellControls();
     scheduleExpensesFramePresentation();
+    scheduleExpensesChartFramePresentation();
     bindPlanningLayoutDebug();
 
     expensesFrameEl?.addEventListener("load", () => {
       scheduleExpensesFramePresentation();
       schedulePlanningLayoutDebug("expenses-frame-load");
+      void attachExpensesFrameApi();
+    });
+    expensesChartFrameEl?.addEventListener("load", () => {
+      scheduleExpensesChartFramePresentation();
+      void attachExpensesChartFrameApi();
     });
     planningFrameEl?.addEventListener("load", () => {
       scheduleExpensesFramePresentation();
@@ -2220,7 +2425,6 @@ async function bootstrap() {
     planningAxisApi.subscribeViewportChange((payload) =>
       handleViewportChange({ ...payload, app: "planning-projet-axis" })
     );
-    expensesApi.subscribeViewportChange(handleViewportChange);
 
     if (projectSelectEl instanceof HTMLSelectElement) {
       projectSelectEl.disabled = planningProjects.length === 0;
@@ -2239,6 +2443,7 @@ async function bootstrap() {
       setHubStatus("Aucun projet disponible.");
     }
 
+    void attachExpensesFrameApi();
     schedulePlanningLayoutDebug("bootstrap-ready");
   } catch (error) {
     console.error("Erreur synchronisation plannings :", error);
