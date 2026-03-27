@@ -1,69 +1,56 @@
-# Plan d'integration
+# Intégration du hub
 
-## Idee generale
+## Vue d’ensemble
 
-Les deux apps n'ont pas le meme moteur de chronologie :
+Le hub `synchronisation-plannings` n’utilise pas un bus générique externe. Il orchestre directement quatre vues embarquées :
 
-- `gestion-depenses2` pilote une timeline maison avec `anchorDate`, `visibleDays` et un mode `week/month/year`
-- `Planning Projet` pilote une `vis.Timeline` avec une fenetre visible et des actions de zoom/navigation
+- la frise `Planning Projet`
+- le planning principal `Planning Projet`
+- le planning `gestion-depenses2`
+- le graphique des dépenses
 
-La bonne approche consiste donc a partager un **contrat de viewport**, pas des appels directs entre apps.
+Le point d’entrée prod est `assets/js/main.js`, qui démarre `bootstrapHubApp()` dans `assets/js/app/bootstrap.js`.
 
-## Etapes conseillees
+## Contrat attendu des iframes
 
-### 1. gestion-depenses2
+Chaque iframe embarquée doit exposer une API globale prête (`isReady`) avec, selon le cas :
 
-Mapper ces informations vers le contrat commun :
+- `listProjects()`
+- `getSelectedProject()`
+- `setSelectedProject(projectKey)`
+- `getViewport()`
+- `applyViewport(viewport)`
+- `subscribeViewportChange(handler)`
+- `getProjectDateBounds()`
+- éventuellement `setViewportBounds()` / `getViewportBounds()` / `moveViewportByMode()` / `setZoomMode()`
 
-- `projectId`
-- `zoneId` si besoin
-- `mode`
-- `anchorDate`
-- `firstVisibleDate`
-- `visibleDays`
+Le hub ne change pas ce contrat ; il l’encapsule simplement dans `services/childApi.js`.
 
-Points de raccord probables :
+## Répartition des responsabilités
 
-- lecture : `state.chargePlanAnchorDate`, `state.chargePlanVisibleDays`, `state.chargePlanZoomMode`
-- application : `setChargePlanZoomMode(...)`, `navigateChargePlanToDate(...)`, restauration de viewport
-- emission locale : fin de zoom molette, fin de pan, clic sur `Semaine/Mois/Annee`, `Aujourd'hui`, date picker
+- `services/projectSync.js`
+  - applique un projet partagé à toutes les vues prêtes ;
+  - recalcule le viewport initial du projet ;
+  - stabilise le planning de référence puis recale `gestion-depenses2`.
+- `services/viewportSync.js`
+  - reçoit les changements de viewport ;
+  - évite les boucles de propagation ;
+  - pilote les boutons de navigation / zoom du shell commun.
+- `viewport/alignment.js`
+  - mesure les écarts visuels entre la frise de référence et `gestion-depenses2` ;
+  - corrige la largeur visible, l’offset pixel et les alignements jour par jour.
+- `layout/framePresentation.js`
+  - injecte la présentation embarquée dans `gestion-depenses2` ;
+  - ajuste les hauteurs d’iframe sans modifier le contrat de l’app embarquée.
 
-### 2. Planning Projet
+## Debug
 
-Mapper vers le meme contrat :
+Deux paramètres d’URL sont conservés :
 
-- `projectId`
-- `zoneId`
-- `mode`
-- `anchorDate`
-- `firstVisibleDate`
-- `visibleDays`
+- `debugLayout=1` active les snapshots de layout dans la console.
+- `noStickyShell=1` désactive le comportement sticky du shell partagé.
 
-Points de raccord probables :
+## Legacy
 
-- lecture : `timelineInstance.getWindow()`, `getCurrentZoomMode()`, centre de fenetre
-- application : `setWindowForMode(...)`, `setActiveZoomButton(...)`
-- emission locale : `rangechanged`, clic zoom, prev/next, today
-
-### 3. Choix du canal
-
-Cette V1 utilise `localStorage`, mais tu peux le remplacer plus tard.
-
-Options :
-
-- `localStorage`
-  - simple
-  - bien pour une preuve de concept
-- `BroadcastChannel`
-  - propre pour plusieurs onglets ou widgets
-- table Grist dediee
-  - robuste si tu veux partager l'etat entre widgets heterogenes
-  - utile si les widgets ne partagent pas la meme origine
-
-## Resultat attendu
-
-Une fois les deux adaptateurs branches :
-
-- changement de vue dans une app => l'autre se recale
-- scroll/zoom/navigation => meme chronologie
-- changement de projet => la synchro ne s'applique plus au mauvais projet
+Les anciens modules `core/`, `adapters/` et `demo/` ont été déplacés dans `assets/js/legacy/`.
+Ils ne participent plus au chargement prod et servent uniquement de référence historique.

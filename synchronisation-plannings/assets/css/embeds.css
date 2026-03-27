@@ -1,0 +1,65 @@
+.embedded-app-frame {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: #fff;
+  display: block;
+  box-sizing: border-box;
+  overflow-anchor: none;
+}
+
+.embedded-app-frame--planning-axis {
+  min-height: 72px;
+  height: 72px;
+  border-top: 0;
+  border-bottom: 0;
+  border-radius: 0;
+  pointer-events: auto;
+  width: calc(100% + var(--sync-planning-scrollbar-shift));
+  margin-right: calc(var(--sync-planning-scrollbar-shift) * -1);
+}
+
+.embedded-app-frame--planning {
+  border-top: 0;
+  border-radius: 0;
+  min-height: 820px;
+  height: 820px;
+  width: calc(100% + var(--sync-planning-scrollbar-shift));
+  margin-right: calc(var(--sync-planning-scrollbar-shift) * -1);
+}
+
+.embedded-app-frame--expenses {
+  border-top: 0;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  min-height: 620px;
+  height: 620px;
+  opacity: 1;
+}
+
+.embedded-app-frame--expenses.is-ready {
+  opacity: 1;
+}
+
+.sync-planning-pane--expenses .embedded-app-frame--expenses {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.embedded-app-frame--expenses-chart {
+  min-height: 520px;
+  height: 520px;
+  border: none;
+  border-radius: inherit;
+  background: transparent;
+}
+
+body.is-sync-planning-resizing,
+body.is-sync-planning-resizing * {
+  cursor: ns-resize !important;
+  user-select: none !important;
+}
+
+body.is-sync-planning-resizing .embedded-app-frame {
+  pointer-events: none;
+}

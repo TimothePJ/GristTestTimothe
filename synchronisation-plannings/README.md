@@ -1,93 +1,85 @@
 # Synchronisation des plannings
 
-Premiere version d'une brique partagee pour synchroniser la chronologie entre :
+Hub de synchronisation entre :
 
-- `gestion-depenses2`
 - `Planning Projet`
+- `gestion-depenses2`
 
-L'objectif de cette V1 est de poser une base propre, reutilisable et testable sans toucher tout de suite aux deux apps existantes.
+La page [`index.html`](./index.html) embarque les deux applications, un axe temporel commun et le graphique des dépenses. Le hub pilote :
 
-## Arborescence
+- la sélection de projet partagée ;
+- la propagation des viewports ;
+- l’alignement du planning `gestion-depenses2` sur la frise / le planning de référence ;
+- la présentation visuelle des iframes embarquées.
+
+## Architecture réelle
 
 ```text
 synchronisation-plannings/
-  README.md
   index.html
+  README.md
   docs/
     INTEGRATION.md
   assets/
     css/
-      styles.css
+      main.css
+      base.css
+      layout.css
+      components.css
+      embeds.css
+      debug.css
     js/
       main.js
-      core/
-        contracts.js
-        channel.js
-        syncBridge.js
+      app/
+        bootstrap.js
+        constants.js
+        dom.js
+        state.js
+      services/
+        childApi.js
+        projectSync.js
+        viewportSync.js
+      viewport/
+        normalize.js
+        bounds.js
+        build.js
+        alignment.js
+      layout/
+        shell.js
+        framePresentation.js
+        resizeHandle.js
+        debugLayout.js
       utils/
         date.js
-      adapters/
-        gestionDepenses2Adapter.example.js
-        planningProjetAdapter.example.js
-      demo/
-        createMockPlanningApp.js
+      legacy/
+        core/
+        adapters/
+        demo/
 ```
 
-## Ce que contient cette V1
+## Rôle des modules
 
-- un contrat commun de viewport planning
-- un canal de synchronisation via `localStorage`
-- un bridge `publish/subscribe` pour relier une app au canal
-- deux adaptateurs d'exemple pour montrer comment brancher les apps existantes
-- une page de demo pour valider le comportement avant integration
+- `app/` : point d’entrée, constantes, DOM partagé, état mutable.
+- `services/` : orchestration des APIs iframe, changement de projet, synchronisation des viewports.
+- `viewport/` : logique pure de normalisation / construction / alignement des fenêtres visibles.
+- `layout/` : shell commun, redimensionnement, présentation des iframes, instrumentation debug.
+- `legacy/` : ancienne V1 contractuelle / démo conservée hors du chemin de prod.
 
-## Contrat de synchronisation
+## Flux de démarrage
 
-Chaque message publie :
+1. `assets/js/main.js` appelle `bootstrapHubApp()`.
+2. Le bootstrap récupère les APIs embarquées de `Planning Projet`.
+3. Le hub construit la liste des projets, branche les contrôles et initialise le projet actif.
+4. Les iframes `gestion-depenses2` et graphique sont attachées ensuite et se calent sur l’état partagé.
 
-- `appId`
-- `scope.projectId`
-- `scope.zoneId`
-- `viewport.mode`
-- `viewport.anchorDate`
-- `viewport.firstVisibleDate`
-- `viewport.visibleDays`
-- `viewport.rangeStartDate`
-- `viewport.rangeEndDate`
+## Contrat public conservé
 
-La synchro ne s'applique que si le `projectId` correspond. Le `zoneId` peut aussi etre utilise pour filtrer plus finement.
+Le hub continue d’utiliser les mêmes APIs exposées par les iframes :
 
-## Choix de cette premiere version
+- `setSelectedProject(...)`
+- `getViewport()`
+- `applyViewport(...)`
+- `subscribeViewportChange(...)`
+- `getProjectDateBounds(...)`
 
-- Canal : `localStorage`
-  - simple a tester
-  - fonctionne bien si les widgets partagent la meme origine
-  - facile a remplacer plus tard par une table Grist ou un autre transport
-- Source de verite : un viewport normalise
-  - pas de couplage direct entre les deux moteurs de planning
-  - chaque app garde sa logique interne
-- Integration progressive
-  - on branche d'abord le contrat
-  - puis les adaptateurs
-  - ensuite seulement la synchro automatique live
-
-## Demarrer la demo
-
-Ouvre [index.html](./index.html) dans un navigateur. La demo affiche deux faux plannings :
-
-- un panneau `gestion-depenses2`
-- un panneau `Planning Projet`
-
-Quand ils pointent sur le meme projet, un changement de chronologie dans l'un se repercute dans l'autre.
-
-## Suite logique
-
-Quand tu voudras qu'on aille plus loin, la prochaine etape propre sera :
-
-1. brancher l'adaptateur `gestion-depenses2`
-2. brancher l'adaptateur `Planning Projet`
-3. choisir le vrai canal de synchro final
-   - `localStorage`
-   - table Grist dediee
-   - `BroadcastChannel`
-   - autre
+L’HTML garde aussi les mêmes IDs structurants déjà consommés par le hub.

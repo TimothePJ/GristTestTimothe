@@ -1,0 +1,124 @@
+.workspace-card {
+  padding: var(--spacing-5);
+}
+
+.workspace-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: end;
+  gap: var(--spacing-4);
+}
+
+.workspace-copy {
+  max-width: 760px;
+}
+
+.workspace-form {
+  min-width: 240px;
+  display: grid;
+  gap: 8px;
+}
+
+.workspace-form label {
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.workspace-form select {
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: #fff;
+  color: var(--color-ink);
+}
+
+.workspace-form select option {
+  color: var(--color-ink);
+  background: #fff;
+}
+
+.sync-dashboard {
+  margin-top: var(--spacing-4);
+}
+
+.status-grid {
+  display: grid;
+  gap: var(--spacing-3);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.status-grid div {
+  padding: var(--spacing-3);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+}
+
+.status-grid span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.85rem;
+}
+
+.status-grid strong {
+  margin: 0;
+  font-weight: 700;
+}
+
+.sync-planning-card {
+  --sync-planning-scrollbar-shift: 0px;
+  position: relative;
+  overflow: visible;
+  overflow-anchor: none;
+  display: grid;
+  gap: var(--spacing-3);
+  padding: var(--spacing-5);
+}
+
+.sync-planning-card-header {
+  display: grid;
+  gap: var(--spacing-3);
+}
+
+.sync-planning-pane {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-anchor: none;
+}
+
+.sync-planning-pane--planning {
+  position: relative;
+  padding-right: var(--sync-planning-scrollbar-shift);
+}
+
+.sync-planning-pane--expenses {
+  padding-right: var(--sync-planning-scrollbar-shift);
+}
+
+.sync-planning-pane + .sync-planning-pane {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.sync-planning-frames {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.expenses-chart-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 1100px) {
+  .workspace-header {
+    align-items: stretch;
+  }
+}

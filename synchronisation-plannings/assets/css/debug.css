@@ -1,0 +1,4 @@
+body.layout-debug-no-sticky .shared-timeline-shell {
+  position: static !important;
+  top: auto !important;
+}
