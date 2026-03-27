@@ -1,7 +1,10 @@
 import { PROJECT_SELECTION_STABILIZE_DELAY_MS } from "../app/constants.js";
-import { dom } from "../app/dom.js";
 import { getReferencePlanningApi, state } from "../app/state.js";
-import { scheduleExpensesChartFramePresentation, scheduleExpensesFramePresentation } from "../layout/framePresentation.js";
+import {
+  scheduleExpensesChartFramePresentation,
+  scheduleExpensesFramePresentation,
+  scheduleOverviewFramePresentation,
+} from "../layout/framePresentation.js";
 import {
   appendLog,
   getViewportSourceLabel,
@@ -43,6 +46,10 @@ export async function applySharedProject(projectKey) {
       Promise.resolve(state.planningAxisApi?.setSelectedProject?.(normalizedProjectKey)),
     ];
 
+    if (state.overviewApi?.setSelectedProject) {
+      projectApplyCalls.push(Promise.resolve(state.overviewApi.setSelectedProject(normalizedProjectKey)));
+    }
+
     if (state.expensesApi?.setSelectedProject) {
       projectApplyCalls.push(Promise.resolve(state.expensesApi.setSelectedProject(normalizedProjectKey)));
     }
@@ -55,6 +62,7 @@ export async function applySharedProject(projectKey) {
 
     await Promise.all(projectApplyCalls);
     state.activeProjectKey = normalizedProjectKey;
+    scheduleOverviewFramePresentation();
     scheduleExpensesFramePresentation();
     scheduleExpensesChartFramePresentation();
     const referencePlanningApi = getReferencePlanningApi() || state.planningApi;
@@ -140,10 +148,6 @@ export async function applySharedProject(projectKey) {
       setLastRange(sharedViewport);
       syncExpensesPlanningShell(sharedViewport);
       scheduleExpensesFramePresentation();
-    }
-
-    if (dom.projectSelectEl instanceof HTMLSelectElement) {
-      dom.projectSelectEl.value = normalizedProjectKey;
     }
 
     setLastSource(getViewportSourceLabel("Pilotage commun"));

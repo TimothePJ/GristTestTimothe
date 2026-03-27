@@ -53,8 +53,50 @@ let embeddedPlanningViewportBounds = {
 };
 let planningViewportBoundsCorrectionPending = false;
 const PROGRAMMATIC_PLANNING_VIEWPORT_SUPPRESSION_MS = 600;
+const PLANNING_SYNC_TRACE_LABEL =
+  typeof window === "undefined"
+    ? "planning"
+    : new URLSearchParams(window.location.search).get("headerOnly") === "1"
+    ? "planning-axis"
+    : EXTERNAL_AXIS_EMBEDDED_MODE
+    ? "planning-main"
+    : EMBEDDED_PLANNING_SYNC_MODE
+    ? "planning-embedded"
+    : "planning";
+let planningSyncTraceSequence = 0;
 
 const PLANNING_ROW_DRAG_HANDLED_FLAG = "__planningRowDragHandled";
+
+function roundPlanningTraceNumber(value, digits = 2) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return null;
+  }
+
+  const precision = 10 ** digits;
+  return Math.round(numericValue * precision) / precision;
+}
+
+function summarizePlanningViewportForTrace(viewport = null) {
+  if (!viewport || typeof viewport !== "object") {
+    return null;
+  }
+
+  return {
+    mode: String(viewport.mode || "").trim(),
+    anchorDate: String(viewport.anchorDate || "").trim(),
+    firstVisibleDate: String(viewport.firstVisibleDate || viewport.rangeStartDate || "").trim(),
+    rangeEndDate: String(viewport.rangeEndDate || "").trim(),
+    visibleDays: roundPlanningTraceNumber(viewport.visibleDays, 4),
+    windowStartMs: roundPlanningTraceNumber(viewport.windowStartMs, 0),
+    windowEndMs: roundPlanningTraceNumber(viewport.windowEndMs, 0),
+  };
+}
+
+function tracePlanningSync(event, details = {}) {
+  planningSyncTraceSequence += 1;
+  console.info(`[sync-trace][${PLANNING_SYNC_TRACE_LABEL}][${planningSyncTraceSequence}] ${event}`, details);
+}
 
 function ensureStickyAxisLeftFiller(container) {
   if (!(container instanceof HTMLElement)) return null;
@@ -2613,16 +2655,31 @@ function emitPlanningViewportChange(reason = "") {
 
   const logicalSignature = getPlanningViewportLogicalSignature(viewport);
   if (shouldSuppressProgrammaticPlanningViewport(logicalSignature)) {
+    tracePlanningSync("emit-suppressed-programmatic", {
+      reason,
+      logicalSignature,
+      viewport: summarizePlanningViewportForTrace(viewport),
+    });
     lastPlanningViewportEmissionSignature = logicalSignature;
     clearPendingProgrammaticPlanningViewport(logicalSignature);
     return;
   }
 
   if (logicalSignature && logicalSignature === lastPlanningViewportEmissionSignature) {
+    tracePlanningSync("emit-skipped-duplicate", {
+      reason,
+      logicalSignature,
+      viewport: summarizePlanningViewportForTrace(viewport),
+    });
     return;
   }
 
   lastPlanningViewportEmissionSignature = logicalSignature;
+  tracePlanningSync("emit", {
+    reason,
+    logicalSignature,
+    viewport: summarizePlanningViewportForTrace(viewport),
+  });
 
   planningViewportListeners.forEach((listener) => {
     listener(viewport, { reason });
@@ -2660,6 +2717,9 @@ export function applyPlanningViewportState(viewport = {}) {
     return;
   }
 
+  tracePlanningSync("apply-viewport-request", {
+    viewport: summarizePlanningViewportForTrace(viewport),
+  });
   const nextMode = String(viewport.mode || "").trim() || getCurrentZoomMode();
   const nextStartDate = String(viewport.firstVisibleDate || viewport.rangeStartDate || "").trim();
   const nextVisibleDays = EMBEDDED_PLANNING_SYNC_MODE
@@ -2697,6 +2757,14 @@ export function applyPlanningViewportState(viewport = {}) {
           ) || exactRange
         : exactRange;
 
+      tracePlanningSync("apply-viewport-exact-range", {
+        nextMode,
+        viewport: summarizePlanningViewportForTrace(viewport),
+        appliedRange: {
+          start: roundPlanningTraceNumber(clampedRange.start?.getTime?.(), 0),
+          end: roundPlanningTraceNumber(clampedRange.end?.getTime?.(), 0),
+        },
+      });
       rememberProgrammaticPlanningViewportFromRange(nextMode, clampedRange);
       timelineInstance.setWindow(clampedRange.start, clampedRange.end, { animation: false });
       updateDateRangeDisplay();
@@ -2711,6 +2779,14 @@ export function applyPlanningViewportState(viewport = {}) {
     const start = new Date(`${nextStartDate}T00:00:00`);
     const end = new Date(`${nextEndDate}T23:59:59.999`);
     if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end >= start) {
+      tracePlanningSync("apply-viewport-date-range", {
+        nextMode,
+        viewport: summarizePlanningViewportForTrace(viewport),
+        appliedRange: {
+          start: roundPlanningTraceNumber(start.getTime(), 0),
+          end: roundPlanningTraceNumber(end.getTime(), 0),
+        },
+      });
       rememberProgrammaticPlanningViewportFromRange(nextMode, { start, end });
       timelineInstance.setWindow(start, end, { animation: false });
       updateDateRangeDisplay();
@@ -2726,6 +2802,11 @@ export function applyPlanningViewportState(viewport = {}) {
     : getWindowCenterDate();
 
   if (!Number.isNaN(anchorDate.getTime())) {
+    tracePlanningSync("apply-viewport-anchor", {
+      nextMode,
+      anchorDate: toIsoDateValue(anchorDate),
+      viewport: summarizePlanningViewportForTrace(viewport),
+    });
     setWindowForMode(nextMode, anchorDate);
     rememberProgrammaticPlanningViewport(getPlanningViewportLogicalSignature(getPlanningViewportState()));
     updateNavCenterButtonLabel();

@@ -1,5 +1,4 @@
 import { addDays, normalizeIsoDate as normalizeIsoDateValue, toIsoDate } from "../utils/date.js";
-import { dom } from "../app/dom.js";
 import { state } from "../app/state.js";
 import { DAY_IN_MS } from "../app/constants.js";
 
@@ -13,7 +12,7 @@ export function normalizeProjectKey(value) {
 }
 
 export function getDesiredProjectKey() {
-  return String(state.requestedProjectKey || state.activeProjectKey || dom.projectSelectEl?.value || "").trim();
+  return String(state.requestedProjectKey || state.activeProjectKey || "").trim();
 }
 
 export function normalizeViewportSignatureTimestamp(timestampMs) {

@@ -5,6 +5,7 @@ export const LAYOUT_DEBUG_ENABLED = HUB_URL_PARAMS?.get("debugLayout") === "1";
 export const DEBUG_DISABLE_STICKY_SHELL = HUB_URL_PARAMS?.get("noStickyShell") === "1";
 
 export const DAY_IN_MS = 86400000;
+export const DEFAULT_OVERVIEW_FRAME_MIN_HEIGHT = 560;
 export const DEFAULT_PLANNING_FRAME_HEIGHT = 820;
 export const MIN_PLANNING_FRAME_HEIGHT = 280;
 export const MAX_PLANNING_FRAME_HEIGHT = 1600;

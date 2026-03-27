@@ -1,5 +1,6 @@
 export function getHubDom() {
   return {
+    overviewFrameEl: document.getElementById("gestion-depenses2-overview-frame"),
     planningFrameEl: document.getElementById("planning-projet-frame"),
     planningAxisFrameEl: document.getElementById("planning-projet-axis-frame"),
     expensesFrameEl: document.getElementById("gestion-depenses2-frame"),

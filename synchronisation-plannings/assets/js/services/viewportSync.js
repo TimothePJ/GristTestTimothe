@@ -1,6 +1,10 @@
 import { dom } from "../app/dom.js";
 import { state } from "../app/state.js";
-import { scheduleExpensesChartFramePresentation, scheduleExpensesFramePresentation } from "../layout/framePresentation.js";
+import {
+  scheduleExpensesChartFramePresentation,
+  scheduleExpensesFramePresentation,
+  scheduleOverviewFramePresentation,
+} from "../layout/framePresentation.js";
 import {
   appendLog,
   getViewportSourceApi,
@@ -23,6 +27,68 @@ import {
   normalizeProjectKey,
 } from "../viewport/normalize.js";
 
+let viewportSyncTraceSequence = 0;
+
+function roundViewportTraceNumber(value, digits = 2) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return null;
+  }
+
+  const precision = 10 ** digits;
+  return Math.round(numericValue * precision) / precision;
+}
+
+function summarizeViewportTrace(viewport = {}) {
+  if (!viewport || typeof viewport !== "object") {
+    return null;
+  }
+
+  return {
+    mode: String(viewport.mode || "").trim(),
+    anchorDate:
+      normalizeIsoDate(viewport.anchorDate) || String(viewport.anchorDate || "").trim() || "",
+    firstVisibleDate:
+      normalizeIsoDate(viewport.firstVisibleDate) ||
+      normalizeIsoDate(viewport.rangeStartDate) ||
+      "",
+    rangeEndDate: normalizeIsoDate(viewport.rangeEndDate) || "",
+    visibleDays: roundViewportTraceNumber(viewport.visibleDays, 4),
+    leftDayOffset: roundViewportTraceNumber(viewport.leftDayOffset, 6),
+    windowStartMs: roundViewportTraceNumber(viewport.windowStartMs, 0),
+    windowEndMs: roundViewportTraceNumber(viewport.windowEndMs, 0),
+  };
+}
+
+function getViewportTraceApiLabel(api) {
+  if (!api) {
+    return "unknown";
+  }
+
+  if (api === state.planningApi) {
+    return "planning-projet-main";
+  }
+
+  if (api === state.planningAxisApi) {
+    return "planning-projet-axis";
+  }
+
+  if (api === state.expensesApi) {
+    return "gestion-depenses2";
+  }
+
+  if (api === state.expensesChartApi) {
+    return "depenses-chart";
+  }
+
+  return "custom-api";
+}
+
+function traceViewportSync(event, details = {}) {
+  viewportSyncTraceSequence += 1;
+  console.info(`[sync-trace][hub][${viewportSyncTraceSequence}] ${event}`, details);
+}
+
 export async function applyViewportFromParentControls(viewport = {}) {
   if (!state.planningApi || state.projectSyncInProgress || state.viewportSyncInProgress) {
     return;
@@ -32,6 +98,12 @@ export async function applyViewportFromParentControls(viewport = {}) {
   syncPlanningViewportBounds(canonicalViewport);
   const viewportLogicalSignature = getViewportLogicalSignature(state.activeProjectKey, canonicalViewport);
   state.viewportSyncInProgress = true;
+
+  traceViewportSync("parent-controls-apply", {
+    activeProjectKey: state.activeProjectKey,
+    viewport: summarizeViewportTrace(canonicalViewport),
+    viewportLogicalSignature,
+  });
 
   try {
     const applyCalls = [
@@ -181,6 +253,7 @@ export function bindExpensesPlanningShellControls() {
   });
 
   window.addEventListener("resize", () => {
+    scheduleOverviewFramePresentation();
     syncExpensesPlanningShell();
     scheduleExpensesFramePresentation();
     scheduleExpensesChartFramePresentation();
@@ -188,6 +261,7 @@ export function bindExpensesPlanningShellControls() {
 
   if (window.visualViewport) {
     window.visualViewport.addEventListener("resize", () => {
+      scheduleOverviewFramePresentation();
       syncExpensesPlanningShell();
       scheduleExpensesFramePresentation();
       scheduleExpensesChartFramePresentation();
@@ -203,11 +277,23 @@ export async function flushViewportSyncQueue() {
   const payload = state.pendingViewportPayload;
   state.pendingViewportPayload = null;
   const payloadProjectKey = String(payload.projectKey || "").trim();
+  traceViewportSync("flush-start", {
+    source: payload.app,
+    payloadProjectKey,
+    activeProjectKey: state.activeProjectKey,
+    meta: payload.meta || null,
+    viewport: summarizeViewportTrace(payload.viewport),
+  });
   if (
     state.activeProjectKey &&
     payloadProjectKey &&
     normalizeProjectKey(payloadProjectKey) !== normalizeProjectKey(state.activeProjectKey)
   ) {
+    traceViewportSync("flush-skip-project-mismatch", {
+      source: payload.app,
+      payloadProjectKey,
+      activeProjectKey: state.activeProjectKey,
+    });
     void flushViewportSyncQueue();
     return;
   }
@@ -215,6 +301,10 @@ export async function flushViewportSyncQueue() {
   const sourceApi = getViewportSourceApi(payload.app);
   const targetApis = getViewportTargetApis(payload.app);
   if (targetApis.length === 0) {
+    traceViewportSync("flush-skip-no-target", {
+      source: payload.app,
+      sourceApi: getViewportTraceApiLabel(sourceApi),
+    });
     void flushViewportSyncQueue();
     return;
   }
@@ -227,6 +317,11 @@ export async function flushViewportSyncQueue() {
     viewportLogicalSignature &&
     viewportLogicalSignature === state.lastAppliedViewportLogicalSignature
   ) {
+    traceViewportSync("flush-skip-duplicate-signature", {
+      source: payload.app,
+      viewportLogicalSignature,
+      viewport: summarizeViewportTrace(canonicalViewport),
+    });
     state.sharedViewportState = canonicalViewport;
     syncExpensesPlanningShell(canonicalViewport);
     void flushViewportSyncQueue();
@@ -238,15 +333,33 @@ export async function flushViewportSyncQueue() {
   try {
     const sourceLogicalSignature = getViewportLogicalSignature(payloadProjectKey, payload.viewport);
     const getViewportForApi = () => exactSharedViewport;
+    const reapplySource = Boolean(sourceApi && sourceLogicalSignature !== viewportLogicalSignature);
+    traceViewportSync("flush-apply", {
+      source: payload.app,
+      sourceApi: getViewportTraceApiLabel(sourceApi),
+      targetApis: targetApis.map((api) => getViewportTraceApiLabel(api)),
+      reapplySource,
+      sourceLogicalSignature,
+      viewportLogicalSignature,
+      sourceViewport: summarizeViewportTrace(payload.viewport),
+      exactSharedViewport: summarizeViewportTrace(exactSharedViewport),
+      canonicalViewport: summarizeViewportTrace(canonicalViewport),
+    });
     const applyCalls = targetApis.map((api) =>
       Promise.resolve(api.applyViewport(getViewportForApi(api)))
     );
 
-    if (sourceApi && sourceLogicalSignature !== viewportLogicalSignature) {
+    if (reapplySource) {
       applyCalls.push(Promise.resolve(sourceApi.applyViewport(getViewportForApi(sourceApi))));
     }
 
     await Promise.all(applyCalls);
+    traceViewportSync("flush-apply-complete", {
+      source: payload.app,
+      targetApis: targetApis.map((api) => getViewportTraceApiLabel(api)),
+      reapplySource,
+      viewportLogicalSignature,
+    });
     state.lastAppliedViewportLogicalSignature = viewportLogicalSignature;
     state.sharedViewportState = canonicalViewport;
     syncExpensesPlanningShell(canonicalViewport);
@@ -275,6 +388,13 @@ export function handleViewportChange(payload) {
     return;
   }
 
+  traceViewportSync("received", {
+    source: payload.app,
+    projectKey: String(payload.projectKey || "").trim(),
+    meta: payload.meta || null,
+    replacingPendingSource: state.pendingViewportPayload?.app || "",
+    viewport: summarizeViewportTrace(payload.viewport),
+  });
   state.pendingViewportPayload = payload;
   void flushViewportSyncQueue();
 }

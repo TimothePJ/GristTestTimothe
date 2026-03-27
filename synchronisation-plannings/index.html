@@ -26,31 +26,21 @@
             <p class="eyebrow">Pilotage commun</p>
             <h2>Projet synchronise</h2>
             <p class="workspace-copy">
-              Change le projet ici, puis navigue, zoome ou deplace l'un des
-              deux plannings : l'autre se recale automatiquement.
+              Le cockpit projet de <strong>gestion-depenses2</strong> vit
+              maintenant ici. Change le projet, ajuste le budget ou l'equipe,
+              puis navigue sur les plannings synchronises juste en dessous.
             </p>
-          </div>
-          <div class="workspace-form">
-            <label for="shared-project-select">Projet</label>
-            <select id="shared-project-select" disabled>
-              <option value="">Chargement...</option>
-            </select>
           </div>
         </div>
 
-        <div class="status-grid sync-dashboard">
-          <div>
-            <span>Etat</span>
-            <strong id="hub-status-value">Initialisation...</strong>
-          </div>
-          <div>
-            <span>Source recente</span>
-            <strong id="last-source-value">Aucune</strong>
-          </div>
-          <div>
-            <span>Chronologie</span>
-            <strong id="last-range-value">-</strong>
-          </div>
+        <div class="workspace-overview-shell">
+          <iframe
+            id="gestion-depenses2-overview-frame"
+            class="embedded-app-frame embedded-app-frame--overview"
+            title="Cockpit projet synchronise"
+            src="../gestion-depenses2/index.html?embedded=overview-sync"
+            loading="eager"
+          ></iframe>
         </div>
       </section>
 

@@ -1,5 +1,6 @@
 export function createHubState() {
   return {
+    overviewApi: null,
     planningApi: null,
     planningAxisApi: null,
     expensesApi: null,
@@ -22,6 +23,13 @@ export function createHubState() {
     lastPlanningLayoutDebugSignature: "",
     planningFrameResizeState: null,
     planningFrameResizeRefreshRafId: 0,
+    overviewFramePresentationTimer: 0,
+    overviewFrameResizeCleanup: null,
+    overviewFrameResizeDocument: null,
+    overviewFrameAttachPromise: null,
+    overviewFrameAttachAttempt: 0,
+    overviewProjectSubscriptionCleanup: null,
+    overviewProjectSubscriptionApi: null,
     expensesFrameAttachPromise: null,
     expensesFrameAttachAttempt: 0,
     expensesViewportSubscriptionApi: null,

@@ -2,7 +2,12 @@ import { DEBUG_DISABLE_STICKY_SHELL } from "./constants.js";
 import { dom } from "./dom.js";
 import { state } from "./state.js";
 import { bindPlanningLayoutDebug, schedulePlanningLayoutDebug } from "../layout/debugLayout.js";
-import { scheduleExpensesChartFramePresentation, scheduleExpensesFramePresentation } from "../layout/framePresentation.js";
+import {
+  resetOverviewFramePresentation,
+  scheduleExpensesChartFramePresentation,
+  scheduleExpensesFramePresentation,
+  scheduleOverviewFramePresentation,
+} from "../layout/framePresentation.js";
 import {
   applyPlanningFrameHeight,
   bindPlanningFrameResizeHandle,
@@ -10,11 +15,15 @@ import {
 } from "../layout/resizeHandle.js";
 import {
   appendLog,
-  renderProjectOptions,
   setExpensesPlanningControlsDisabled,
   setHubStatus,
 } from "../layout/shell.js";
-import { attachExpensesChartFrameApi, attachExpensesFrameApi, waitForChildApi } from "../services/childApi.js";
+import {
+  attachExpensesChartFrameApi,
+  attachExpensesFrameApi,
+  attachOverviewFrameApi,
+  waitForChildApi,
+} from "../services/childApi.js";
 import { applySharedProject } from "../services/projectSync.js";
 import { bindExpensesPlanningShellControls, handleViewportChange } from "../services/viewportSync.js";
 
@@ -25,6 +34,16 @@ function applyDebugBodyClass() {
 }
 
 function bindFrameLoadListeners() {
+  dom.overviewFrameEl?.addEventListener("load", () => {
+    state.overviewApi = null;
+    state.overviewProjectSubscriptionCleanup?.();
+    state.overviewProjectSubscriptionCleanup = null;
+    state.overviewProjectSubscriptionApi = null;
+    resetOverviewFramePresentation();
+    scheduleOverviewFramePresentation();
+    void attachOverviewFrameApi({ force: true });
+  });
+
   dom.expensesFrameEl?.addEventListener("load", () => {
     scheduleExpensesFramePresentation();
     schedulePlanningLayoutDebug("expenses-frame-load");
@@ -40,20 +59,6 @@ function bindFrameLoadListeners() {
     scheduleExpensesFramePresentation();
     bindPlanningLayoutDebug();
     schedulePlanningLayoutDebug("planning-frame-load");
-  });
-}
-
-function bindProjectSelector() {
-  if (!(dom.projectSelectEl instanceof HTMLSelectElement)) {
-    return;
-  }
-
-  dom.projectSelectEl.addEventListener("change", () => {
-    applySharedProject(dom.projectSelectEl.value).catch((error) => {
-      console.error(error);
-      setHubStatus(`Erreur projet : ${error.message}`);
-      appendLog(`Erreur projet : ${error.message}`);
-    });
   });
 }
 
@@ -78,13 +83,13 @@ export async function bootstrapHubApp() {
     ]);
 
     bindExpensesPlanningShellControls();
+    scheduleOverviewFramePresentation();
     scheduleExpensesFramePresentation();
     scheduleExpensesChartFramePresentation();
     bindPlanningLayoutDebug();
     bindFrameLoadListeners();
 
     const planningProjects = (state.planningApi.listProjects?.() || []).filter(Boolean);
-    renderProjectOptions(planningProjects);
     setExpensesPlanningControlsDisabled(planningProjects.length === 0);
 
     const initialProject =
@@ -98,8 +103,7 @@ export async function bootstrapHubApp() {
     state.planningAxisApi.subscribeViewportChange((payload) =>
       handleViewportChange({ ...payload, app: "planning-projet-axis" })
     );
-
-    bindProjectSelector();
+    void attachOverviewFrameApi();
 
     if (initialProject) {
       await applySharedProject(initialProject);

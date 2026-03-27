@@ -119,6 +119,25 @@ body.planning-sync-embedded .container {
   max-width: none;
 }
 
+body.overview-sync-embedded {
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+body.overview-sync-embedded .header,
+body.overview-sync-embedded .container {
+  max-width: none;
+}
+
+body.overview-sync-embedded .main-content {
+  padding: 24px;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
 body.spending-chart-sync-embedded {
   padding: 0;
   background: transparent;

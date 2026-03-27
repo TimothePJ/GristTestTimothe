@@ -8,6 +8,12 @@
   overflow-anchor: none;
 }
 
+.embedded-app-frame--overview {
+  min-height: 560px;
+  height: 560px;
+  background: transparent;
+}
+
 .embedded-app-frame--planning-axis {
   min-height: 72px;
   height: 72px;
