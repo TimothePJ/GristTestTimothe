@@ -68,6 +68,12 @@ function getCurrentInstant() {
   return new Date();
 }
 
+function startOfDay(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
 function isAllowedTypeDoc(value) {
   const normalized = String(value ?? "").toUpperCase();
   return normalized.includes("COFFRAGE") || normalized.includes("ARMATURES");
@@ -106,6 +112,77 @@ export function computePlanningRealiseValue(typeDoc, indice) {
   return 100;
 }
 
+function resolvePlanningSegmentEndDate({
+  typeDoc,
+  lignePlanningRaw,
+  diffCoffrageRaw,
+  diffArmatureRaw,
+  demarrageRaw,
+  duree3Raw,
+}) {
+  if (isCoffrageTypeDoc(typeDoc)) {
+    return resolveCoffrageDiffCoffrageDate({
+      typeDoc,
+      lignePlanningRaw,
+      diffCoffrageRaw,
+      demarrageRaw,
+      duree3Raw,
+    });
+  }
+
+  if (isArmaturesTypeDoc(typeDoc)) {
+    return parseDate(diffArmatureRaw);
+  }
+
+  return null;
+}
+
+export function computePlanningRetardValue(
+  {
+    typeDoc,
+    indice,
+    currentRetard,
+    lignePlanningRaw,
+    diffCoffrageRaw,
+    diffArmatureRaw,
+    demarrageRaw,
+    duree3Raw,
+  },
+  currentInstant = getCurrentInstant()
+) {
+  if (!isAllowedTypeDoc(typeDoc)) {
+    return 0;
+  }
+
+  const realiseValue = computePlanningRealiseValue(typeDoc, indice);
+  if (realiseValue >= 100) {
+    const frozenRetard = toNumber(currentRetard);
+    return frozenRetard != null && frozenRetard >= 0 ? frozenRetard : 0;
+  }
+
+  const segmentEndDate = resolvePlanningSegmentEndDate({
+    typeDoc,
+    lignePlanningRaw,
+    diffCoffrageRaw,
+    diffArmatureRaw,
+    demarrageRaw,
+    duree3Raw,
+  });
+  if (!segmentEndDate) {
+    return 0;
+  }
+
+  const currentDay = startOfDay(currentInstant);
+  const segmentEndDay = startOfDay(segmentEndDate);
+  if (currentDay <= segmentEndDay) {
+    return 0;
+  }
+
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const diffDays = Math.floor((currentDay.getTime() - segmentEndDay.getTime()) / msPerDay);
+  return Math.max(0, diffDays);
+}
+
 export function buildPlanningRealiseUpdates(rawRows) {
   const cfg = APP_CONFIG.grist.planningTable.columns;
 
@@ -127,6 +204,41 @@ export function buildPlanningRealiseUpdates(rawRows) {
     updates.push({
       id: rowId,
       realise: nextRealise,
+    });
+    return updates;
+  }, []);
+}
+
+export function buildPlanningRetardUpdates(rawRows, currentInstant = getCurrentInstant()) {
+  const cfg = APP_CONFIG.grist.planningTable.columns;
+
+  return (rawRows || []).reduce((updates, row) => {
+    const rowId = Number(row?.[cfg.id]);
+    if (!Number.isInteger(rowId) || rowId <= 0) {
+      return updates;
+    }
+
+    const nextRetard = computePlanningRetardValue(
+      {
+        typeDoc: toText(row?.[cfg.typeDoc]),
+        indice: toText(row?.[cfg.indice]),
+        currentRetard: row?.[cfg.retards],
+        lignePlanningRaw: row?.[cfg.lignePlanning],
+        diffCoffrageRaw: row?.[cfg.diffCoffrage],
+        diffArmatureRaw: row?.[cfg.diffArmature],
+        demarrageRaw: row?.[cfg.demarragesTravaux],
+        duree3Raw: row?.[cfg.duree3],
+      },
+      currentInstant
+    );
+    const currentRetard = toNumber(row?.[cfg.retards]);
+    if (currentRetard === nextRetard) {
+      return updates;
+    }
+
+    updates.push({
+      id: rowId,
+      retards: nextRetard,
     });
     return updates;
   }, []);
@@ -386,6 +498,38 @@ function createPhaseItem({
     title,
     type: "range",
   };
+}
+
+function createRetardBackgroundItem({
+  itemId,
+  groupId,
+  segmentEndDate,
+  retardDays,
+  title,
+}) {
+  if (!(segmentEndDate instanceof Date) || Number.isNaN(segmentEndDate.getTime())) {
+    return null;
+  }
+
+  if (!Number.isFinite(retardDays) || retardDays <= 0) {
+    return null;
+  }
+
+  const overdueStart = startOfDay(addDays(segmentEndDate, 1));
+  const overdueEnd = addDays(overdueStart, retardDays);
+  if (!(overdueEnd instanceof Date) || overdueEnd <= overdueStart) {
+    return null;
+  }
+
+  return createPhaseItem({
+    itemId,
+    groupId,
+    start: overdueStart,
+    end: overdueEnd,
+    label: "",
+    className: "phase-retard-overlay",
+    title,
+  });
 }
 
 function createSplitPhaseItems({
@@ -986,6 +1130,31 @@ export function buildTimelineDataFromPlanningRows(
       // On garde meta pour debug / usages futurs
       meta: row,
     });
+
+    const retardDays = toNumber(row.retards);
+    const segmentEndDate = resolvePlanningSegmentEndDate({
+      typeDoc: row.typeDoc,
+      lignePlanningRaw: row.lignePlanning,
+      diffCoffrageRaw: row.diffCoffrage,
+      diffArmatureRaw: row.diffArmature,
+      demarrageRaw: row.demarragesTravaux,
+      duree3Raw: row.duree3,
+    });
+    const retardBackgroundItem = createRetardBackgroundItem({
+      itemId: `${groupId}-retard-bg`,
+      groupId,
+      segmentEndDate,
+      retardDays,
+      title: `
+        <b>${escapeHtml(row.taches || "Tache")}</b><br>
+        Retard : ${escapeHtml(String(retardDays ?? 0))} jour(s)<br>
+        Fin de segment : ${segmentEndDate ? `${fmtDate(segmentEndDate)} (${fmtDateIso(segmentEndDate)})` : "-"}
+      `,
+    });
+    if (retardBackgroundItem) {
+      items.push(retardBackgroundItem);
+    }
+
     if (isCoffrageTypeDoc(row.typeDoc)) {
       // COFFRAGE : Date_limite -> Diff_coffrage
       const pCoffrage = createRangeBetweenDates(row.dateLimite, row.diffCoffrage);

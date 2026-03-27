@@ -5,6 +5,7 @@ import {
   buildProjectOptions,
   fetchPlanningRows,
   syncPlanningRealiseValues,
+  syncPlanningRetardValues,
   syncCoffrageDiffCoffrageFromGroups,
   updatePlanningDurationAndLeftDate,
   updatePlanningFromMsProjectDrop,
@@ -15,6 +16,7 @@ import {
 } from "./services/gristService.js";
 import {
   buildPlanningRealiseUpdates,
+  buildPlanningRetardUpdates,
   buildTimelineDataFromPlanningRows,
 } from "./services/planningService.js";
 import {
@@ -520,6 +522,17 @@ async function refreshPlanning() {
       console.error("Erreur sync Realise (Indice) :", realiseSyncError);
     }
 
+    let retardSyncResult = { updatedCount: 0 };
+    try {
+      const retardUpdates = buildPlanningRetardUpdates(planningRows);
+      if (retardUpdates.length > 0) {
+        retardSyncResult = await syncPlanningRetardValues(retardUpdates);
+        planningRows = await fetchPlanningRows();
+      }
+    } catch (retardSyncError) {
+      console.error("Erreur sync Retards :", retardSyncError);
+    }
+
     const zoneOptions = buildZoneOptionsForSelectedProject(
       planningRows,
       selectedProject
@@ -585,6 +598,12 @@ async function refreshPlanning() {
       const currentStatus = document.getElementById("planningStatus")?.textContent || "";
       setPlanningStatus(
         `${currentStatus} | Sync Realise: ${realiseSyncResult.updatedCount} ligne(s)`
+      );
+    }
+    if (retardSyncResult.updatedCount > 0) {
+      const currentStatus = document.getElementById("planningStatus")?.textContent || "";
+      setPlanningStatus(
+        `${currentStatus} | Sync Retards: ${retardSyncResult.updatedCount} ligne(s)`
       );
     }
   } catch (error) {

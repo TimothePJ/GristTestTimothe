@@ -1422,4 +1422,48 @@ export async function syncPlanningRealiseValues(updates) {
 }
 
 /* Utilitaires exportés pour planningService */
+export async function syncPlanningRetardValues(updates) {
+  const normalizedUpdates = (updates || []).filter((update) => {
+    const rowId = Number(update?.id);
+    const retardValue = update?.retards;
+    return (
+      Number.isInteger(rowId) &&
+      rowId > 0 &&
+      (retardValue == null || Number.isFinite(Number(retardValue)))
+    );
+  });
+
+  if (!normalizedUpdates.length) {
+    return { updatedCount: 0 };
+  }
+
+  const table = APP_CONFIG.grist.planningTable;
+  if (!table?.sourceTable) {
+    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
+  }
+
+  const columns = table.columns || {};
+  const retardsCol = String(columns.retards || "Retards").trim();
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  await grist.docApi.applyUserActions(
+    normalizedUpdates.map((update) => [
+      "UpdateRecord",
+      table.sourceTable,
+      Number(update.id),
+      {
+        [retardsCol]: update.retards == null ? null : Number(update.retards),
+      },
+    ])
+  );
+
+  return {
+    updatedCount: normalizedUpdates.length,
+  };
+}
+
 export { toText };
