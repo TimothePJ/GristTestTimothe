@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Synchronisation des plannings</title>
+    <link rel="stylesheet" href="./assets/css/main.css" />
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="hero">
+        <p class="eyebrow">Synchronisation reelle</p>
+        <h1>Planning Projet + gestion-depenses2</h1>
+        <p class="hero-copy">
+          Une seule selection de projet en haut, le planning de
+          <strong>Planning Projet</strong> au-dessus, celui de
+          <strong>gestion-depenses2</strong> en dessous, avec chronologie
+          reliee dans les deux sens.
+        </p>
+      </section>
+
+      <section class="card workspace-card">
+        <div class="workspace-header">
+          <div>
+            <p class="eyebrow">Pilotage commun</p>
+            <h2>Projet synchronise</h2>
+            <p class="workspace-copy">
+              Le cockpit projet de <strong>gestion-depenses2</strong> vit
+              maintenant ici. Change le projet, ajuste le budget ou l'equipe,
+              puis navigue sur les plannings synchronises juste en dessous.
+            </p>
+          </div>
+        </div>
+
+        <div class="workspace-overview-shell">
+          <iframe
+            id="gestion-depenses2-overview-frame"
+            class="embedded-app-frame embedded-app-frame--overview"
+            title="Cockpit projet synchronise"
+            src="../gestion-depenses2/index.html?embedded=overview-sync"
+            loading="eager"
+          ></iframe>
+        </div>
+      </section>
+
+      <section class="card sync-planning-card">
+        <div class="sync-planning-card-header">
+          <div>
+            <p class="eyebrow">Plannings synchronises</p>
+            <h2>Plannings superposes</h2>
+            <p class="workspace-copy">
+              Les deux plannings vivent maintenant dans une seule section,
+              l'un au-dessus de l'autre.
+            </p>
+          </div>
+        </div>
+
+        <section class="shared-timeline-shell">
+          <div class="shared-timeline-toolbar">
+            <div class="nav-buttons shared-timeline-nav">
+              <button
+                id="shared-prev-btn"
+                type="button"
+                class="shared-timeline-nav-btn"
+                aria-label="Periode precedente"
+                disabled
+              >
+                &lt;
+              </button>
+              <button
+                id="shared-center-btn"
+                type="button"
+                class="shared-timeline-center-btn"
+                disabled
+              >
+                Aujourd'hui
+              </button>
+              <button
+                id="shared-next-btn"
+                type="button"
+                class="shared-timeline-nav-btn"
+                aria-label="Periode suivante"
+                disabled
+              >
+                &gt;
+              </button>
+            </div>
+
+            <div class="zoom-buttons shared-timeline-mode-buttons" aria-label="Niveau de zoom">
+              <button
+                type="button"
+                class="shared-timeline-mode-btn"
+                data-expenses-sync-mode="week"
+                disabled
+              >
+                Semaine
+              </button>
+              <button
+                type="button"
+                class="shared-timeline-mode-btn"
+                data-expenses-sync-mode="month"
+                disabled
+              >
+                Mois
+              </button>
+              <button
+                type="button"
+                class="shared-timeline-mode-btn"
+                data-expenses-sync-mode="year"
+                disabled
+              >
+                  Année
+                </button>
+              </div>
+
+              <div id="shared-current-date-range" class="shared-current-date-range">-</div>
+            </div>
+
+          <iframe
+            id="planning-projet-axis-frame"
+            class="embedded-app-frame embedded-app-frame--planning-axis"
+            title="Frise chronologique commune"
+            src="../Planning%20Projet/Index.html?embedded=planning-sync&headerOnly=1"
+            loading="eager"
+          ></iframe>
+        </section>
+
+        <div class="sync-planning-frames">
+          <div class="sync-planning-pane sync-planning-pane--planning">
+            <iframe
+              id="planning-projet-frame"
+              class="embedded-app-frame embedded-app-frame--planning"
+              title="Planning Projet synchronise"
+              src="../Planning%20Projet/Index.html?embedded=planning-sync&externalAxis=1"
+              loading="eager"
+            ></iframe>
+          </div>
+
+          <div
+            id="sync-planning-resize-handle"
+            class="sync-planning-resize-handle"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Redimensionner les plannings"
+            tabindex="0"
+          >
+            <span class="sync-planning-resize-handle-grip" aria-hidden="true"></span>
+          </div>
+
+          <div class="sync-planning-pane sync-planning-pane--expenses">
+            <iframe
+              id="gestion-depenses2-frame"
+              class="embedded-app-frame embedded-app-frame--expenses"
+              title="gestion-depenses2 synchronise"
+              src="../gestion-depenses2/index.html?embedded=planning-sync"
+              loading="eager"
+            ></iframe>
+          </div>
+        </div>
+      </section>
+
+      <section class="card expenses-chart-card">
+        <iframe
+          id="gestion-depenses2-chart-frame"
+          class="embedded-app-frame embedded-app-frame--expenses-chart"
+          title="Graphique des depenses"
+          src="../gestion-depenses2/index.html?embedded=spending-chart-sync"
+          loading="eager"
+        ></iframe>
+      </section>
+    </main>
+
+    <script type="module" src="./assets/js/main.js"></script>
+  </body>
+</html>

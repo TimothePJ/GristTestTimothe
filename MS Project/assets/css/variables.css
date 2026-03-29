@@ -1,0 +1,11 @@
+:root {
+  --vinci-blue: #004990;
+  --vinci-red: #ed1b2d;
+  --page-bg: #ffffff;
+  --panel-bg: #f7f8fa;
+  --panel-border: #d9dee7;
+  --panel-hover: #eef3f9;
+  --panel-selection: #dbeafe;
+  --text-main: #1f2937;
+  --text-muted: #64748b;
+}

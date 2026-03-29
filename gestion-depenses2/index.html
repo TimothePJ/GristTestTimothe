@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestion des Depenses de Projet</title>
+    <link rel="stylesheet" href="assets/css/variables.css">
+    <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+    <div class="header">
+        <h1>Gestion des Depenses de Projet</h1>
+        <div class="project-selection">
+            <h2>Projets</h2>
+            <select id="project-select"></select>
+            <button id="add-project-btn">Ajouter un projet</button>
+            <div id="add-project-form" hidden>
+                <input type="text" id="project-name" placeholder="Nom du projet">
+                <input type="text" id="project-number" placeholder="Numero du projet">
+                <div id="budget-lines-container"></div>
+                <input type="text" id="budget-chapter" placeholder="Chapitre" list="budget-chapters-list">
+                <input type="number" id="budget-amount" placeholder="Montant">
+                <button id="add-budget-line-btn">Ajouter une ligne de budget</button>
+                <button id="save-project-btn">Enregistrer</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="main-content">
+            <div class="project-header">
+                <div>
+                    <p><strong>Numero:</strong> <span id="current-project-number"></span></p>
+                    <h2 id="current-project-name"></h2>
+                </div>
+                <div>
+                    <p>Budget total: <span id="total-project-budget"></span></p>
+                    <div id="current-project-budget-breakdown"></div>
+                    <button id="edit-budget-btn">Modifier le budget</button>
+                </div>
+            </div>
+
+            <div class="kpi-report">
+                <h3>Rapport KPI</h3>
+                <p>Budget total: <span id="kpi-total-budget"></span></p>
+                <p>Total depense: <span id="kpi-total-spending"></span></p>
+                <p>Reste budget: <span id="kpi-remaining-budget"></span></p>
+                <p>Pourcentage restant: <span id="kpi-remaining-percentage"></span></p>
+            </div>
+
+            <section class="plan-management-section">
+                <div class="table-header">
+                    <h3>Gestion - Plan</h3>
+                </div>
+                <div id="plan-management-board"></div>
+            </section>
+
+            <section class="team-management-section">
+                <div class="table-header">
+                    <h3>Gestion - Equipe</h3>
+                </div>
+                <div class="team-management-panel">
+                    <button id="add-worker-btn">Ajouter un travailleur</button>
+                    <div id="add-worker-form" hidden>
+                        <select id="worker-name-select"></select>
+                        <button id="save-worker-btn">Enregistrer</button>
+                    </div>
+                    <div id="team-management-rates"></div>
+                </div>
+            </section>
+
+            <div class="table-header">
+                <h3>Previsionnel - Plan de charge</h3>
+            </div>
+            <div id="charge-plan-board"></div>
+
+            <div class="table-header">
+                <h3>Previsionnel - Depense</h3>
+            </div>
+            <div id="expense-board"></div>
+
+            <div class="table-header">
+                <h3>Reel - Plan de charge</h3>
+            </div>
+            <div id="real-charge-board"></div>
+
+            <div class="table-header">
+                <h3>Depenses reelles</h3>
+            </div>
+            <div id="real-expense-board"></div>
+
+            <div class="table-header">
+                <h3>Graphique des depenses</h3>
+            </div>
+            <div id="spending-billing-editor"></div>
+            <div id="spending-chart-shell" class="spending-chart-shell">
+                <div id="spending-chart-controls"></div>
+                <canvas id="spending-chart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <script type="module" src="assets/js/main.js"></script>
+
+    <div id="edit-budget-modal" class="modal" style="display: none;">
+        <div class="modal-content modal-content--budget">
+            <div class="budget-modal-header">
+                <div>
+                    <h2>Modifier le budget</h2>
+                    <p class="budget-modal-subtitle">Glisse les lignes pour changer leur ordre, puis enregistre.</p>
+                </div>
+                <button id="cancel-edit-budget-btn" type="button" class="budget-modal-close-btn">Fermer</button>
+            </div>
+            <div class="budget-modal-body">
+                <div id="edit-budget-lines-container" class="budget-edit-list"></div>
+                <div class="budget-modal-add-row">
+                    <input type="text" id="edit-budget-chapter" placeholder="Nouveau chapitre" list="budget-chapters-list">
+                    <input type="number" id="edit-budget-amount" placeholder="Nouveau montant">
+                    <button id="add-edit-budget-line-btn">Ajouter</button>
+                </div>
+            </div>
+            <div class="budget-modal-footer">
+                <button id="save-edited-budget-btn">Enregistrer</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="edit-segment-modal" class="modal" style="display: none;">
+        <div class="modal-content modal-content--segment">
+            <div class="budget-modal-header">
+                <div>
+                    <h2>Modifier le segment</h2>
+                    <p class="budget-modal-subtitle">Choisissez une nouvelle plage au demi-jour pres.</p>
+                </div>
+                <button id="cancel-edit-segment-btn" type="button" class="budget-modal-close-btn">Fermer</button>
+            </div>
+            <div class="segment-edit-form">
+                <div class="segment-edit-grid">
+                    <label class="segment-edit-field">
+                        <span>Premiere date</span>
+                        <input type="date" id="edit-segment-start-date">
+                    </label>
+                    <label class="segment-edit-field">
+                        <span>Partie de la premiere date</span>
+                        <select id="edit-segment-start-part">
+                            <option value="am">Matin</option>
+                            <option value="pm">Apres-midi</option>
+                        </select>
+                    </label>
+                    <label class="segment-edit-field">
+                        <span>Deuxieme date</span>
+                        <input type="date" id="edit-segment-end-date">
+                    </label>
+                    <label class="segment-edit-field">
+                        <span>Partie de la deuxieme date</span>
+                        <select id="edit-segment-end-part">
+                            <option value="am">Matin</option>
+                            <option value="pm">Apres-midi</option>
+                        </select>
+                    </label>
+                </div>
+                <p id="edit-segment-feedback" class="segment-edit-feedback" hidden></p>
+            </div>
+            <div class="segment-edit-footer">
+                <button id="save-edit-segment-btn" type="button">Enregistrer</button>
+            </div>
+        </div>
+    </div>
+
+    <datalist id="budget-chapters-list">
+        <option value="01-Analyse Dossier-Organisation">
+        <option value="02-Reunions-Visite sur chantier">
+        <option value="03-Fond de plans">
+        <option value="04-Plan de coffrage">
+        <option value="05-Plan de demolition">
+        <option value="06-Plan d'armature">
+        <option value="07-Note de calcul">
+        <option value="08-Modelisation-Calcul">
+        <option value="09-Etude ouvrages provisoires">
+        <option value="10-DOE">
+        <option value="11-Sous-traitance-Calculs">
+        <option value="12-Sous-traitance-Armatures">
+        <option value="13-Base">
+        <option value="14-Travaux supplementaires">
+    </datalist>
+</body>
+</html>

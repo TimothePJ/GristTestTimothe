@@ -1,0 +1,1473 @@
+let timelineInstance = null;
+let groupsDataSet = null;
+let itemsDataSet = null;
+let toolbarListenersBound = false;
+let dataAnchorDate = null;
+let hoverTooltipEl = null;
+let hoverTooltipBound = false;
+let itemElementsObserver = null;
+let debugEventsBound = false;
+let dateCellEditHandler = null;
+let dateCellEditBound = false;
+let activeDateEditor = null;
+let rowDragBound = false;
+let activeDraggedRowEl = null;
+let activeNativeDragImageEl = null;
+let activeInlineDragPreviewEl = null;
+let rowDragGlobalListenersBound = false;
+let rowDragContainerEl = null;
+let dragDebugCounter = 0;
+let pendingInlineRowEl = null;
+
+const DRAG_DEBUG = true;
+const ENABLE_INLINE_PREVIEW = false;
+const USE_CUSTOM_DRAG_IMAGE = true;
+const ROW_DRAG_HANDLED_FLAG = "__msProjectRowDragHandled";
+
+function dragDebug(step, data = null) {
+  if (!DRAG_DEBUG) return;
+  const id = ++dragDebugCounter;
+  if (data == null) {
+    console.log(`[MS DRAG #${id}] ${step}`);
+    return;
+  }
+  console.log(`[MS DRAG #${id}] ${step}`, data);
+}
+
+function debugLog(message, payload) {
+  // if (payload === undefined) {
+  //   console.log(`[MS Project tooltip] ${message}`);
+  //   return;
+  // }
+  // console.log(`[MS Project tooltip] ${message}`, payload);
+}
+
+function parseIsoDateText(value) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+function parseFrDateTextToIso(value) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) return "";
+  return `${match[3]}-${match[2]}-${match[1]}`;
+}
+
+function normalizeDateInputToIso(value) {
+  const iso = parseIsoDateText(value);
+  if (iso) return iso;
+  return parseFrDateTextToIso(value);
+}
+
+function formatIsoDateForCell(value) {
+  const iso = parseIsoDateText(value);
+  if (!iso) return "";
+  const [year, month, day] = iso.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+function toDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function updateCurrentTimeLineBounds() {
+  const container = document.getElementById("msProjectTimeline");
+  if (!container) return;
+
+  const topPanel = container.querySelector(".vis-panel.vis-top");
+  const currentLines = container.querySelectorAll(".vis-current-time");
+  if (!currentLines.length) return;
+
+  const topHeight = topPanel ? topPanel.getBoundingClientRect().height : 0;
+  const totalHeight = container.getBoundingClientRect().height;
+  const visibleHeight = Math.max(0, totalHeight - topHeight);
+
+  currentLines.forEach((line) => {
+    line.style.top = `${topHeight}px`;
+    line.style.height = `${visibleHeight}px`;
+  });
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function ensureHoverTooltip() {
+  if (hoverTooltipEl) return hoverTooltipEl;
+
+  const el = document.createElement("div");
+  el.id = "ms-project-hover-tooltip";
+  el.style.position = "fixed";
+  el.style.zIndex = "99999";
+  el.style.pointerEvents = "none";
+  el.style.display = "none";
+  el.style.background = "rgba(15, 23, 42, 0.96)";
+  el.style.color = "#fff";
+  el.style.border = "1px solid rgba(255, 255, 255, 0.14)";
+  el.style.borderRadius = "8px";
+  el.style.padding = "8px 10px";
+  el.style.fontSize = "12px";
+  el.style.lineHeight = "1.4";
+  el.style.boxShadow = "0 10px 24px rgba(2, 6, 23, 0.35)";
+  document.body.appendChild(el);
+
+  hoverTooltipEl = el;
+  debugLog("Tooltip DOM element created.");
+  return hoverTooltipEl;
+}
+
+function getPointerClientPos(eventLike) {
+  const source = eventLike?.srcEvent || eventLike;
+  if (!source) return null;
+
+  if (typeof source.clientX === "number" && typeof source.clientY === "number") {
+    return { x: source.clientX, y: source.clientY };
+  }
+
+  if (source.center && typeof source.center.x === "number" && typeof source.center.y === "number") {
+    return { x: source.center.x, y: source.center.y };
+  }
+
+  return null;
+}
+
+function placeHoverTooltip(eventLike) {
+  if (!hoverTooltipEl || hoverTooltipEl.style.display === "none") return;
+
+  const pos = getPointerClientPos(eventLike);
+  if (!pos) return;
+
+  const offset = 14;
+  const rect = hoverTooltipEl.getBoundingClientRect();
+  const maxLeft = Math.max(8, window.innerWidth - rect.width - 8);
+  const maxTop = Math.max(8, window.innerHeight - rect.height - 8);
+
+  let left = pos.x + offset;
+  let top = pos.y + offset;
+
+  if (left > maxLeft) {
+    left = Math.max(8, pos.x - rect.width - offset);
+  }
+
+  if (top > maxTop) {
+    top = Math.max(8, pos.y - rect.height - offset);
+  }
+
+  hoverTooltipEl.style.left = `${left}px`;
+  hoverTooltipEl.style.top = `${top}px`;
+}
+
+function hideHoverTooltip() {
+  if (!hoverTooltipEl) return;
+  hoverTooltipEl.style.display = "none";
+  hoverTooltipEl.innerHTML = "";
+  debugLog("Tooltip hidden.");
+}
+
+function showHoverTooltip(html, eventLike) {
+  ensureHoverTooltip();
+  hoverTooltipEl.innerHTML = html;
+  hoverTooltipEl.style.display = "block";
+  placeHoverTooltip(eventLike);
+  debugLog("Tooltip displayed.");
+}
+
+function getTimelineItemFromElement(itemEl) {
+  if (!itemEl || !itemsDataSet) return null;
+
+  const decoratedItemEl = itemEl.closest?.("[data-ms-item-id]");
+  const decoratedItemId = decoratedItemEl?.getAttribute("data-ms-item-id");
+  if (decoratedItemId) {
+    const decoratedItem =
+      itemsDataSet.get(decoratedItemId) ||
+      itemsDataSet.get(String(decoratedItemId)) ||
+      itemsDataSet.get(Number(decoratedItemId)) ||
+      null;
+    if (decoratedItem) return decoratedItem;
+    debugLog("No dataset item resolved from decorated element.", {
+      decoratedItemId,
+    });
+  }
+
+  const rawId =
+    itemEl.getAttribute("data-id") ||
+    itemEl.getAttribute("data-item-id") ||
+    itemEl.dataset?.id ||
+    "";
+
+  if (!rawId) return null;
+  const item = itemsDataSet.get(rawId) || itemsDataSet.get(Number(rawId)) || null;
+  if (!item) {
+    debugLog("No dataset item resolved from DOM element.", { rawId });
+  }
+  return item;
+}
+
+function getRenderedTimelineItemEntries() {
+  const renderedItems = timelineInstance?.itemSet?.items;
+  if (!renderedItems || typeof renderedItems !== "object") {
+    return [];
+  }
+
+  return Object.values(renderedItems);
+}
+
+function decorateRenderedTimelineItems(containerEl) {
+  if (!containerEl || !timelineInstance) return;
+
+  const entries = getRenderedTimelineItemEntries();
+  debugLog("Decorate rendered timeline items.", { count: entries.length });
+
+  entries.forEach((entry) => {
+    const itemId = entry?.data?.id ?? entry?.id;
+    if (itemId == null) return;
+
+    const item =
+      itemsDataSet?.get(itemId) ||
+      itemsDataSet?.get(String(itemId)) ||
+      itemsDataSet?.get(Number(itemId)) ||
+      null;
+    if (!item) return;
+
+    const group = groupsDataSet ? groupsDataSet.get(item.group) : null;
+    const title = getNativeItemTitle(item, group);
+
+    const domNodes = [
+      entry?.dom?.box,
+      entry?.dom?.point,
+      entry?.dom?.range,
+      entry?.dom?.line,
+      entry?.dom?.dot,
+      entry?.dom?.content,
+    ].filter(Boolean);
+
+    domNodes.forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      node.setAttribute("data-ms-item-id", String(itemId));
+      if (title) {
+        node.setAttribute("title", title);
+        node.setAttribute("aria-label", title);
+      }
+    });
+  });
+}
+
+function getTimelineItemFromEvent(event, containerEl) {
+  if (timelineInstance && typeof timelineInstance.getEventProperties === "function" && itemsDataSet) {
+    const props = timelineInstance.getEventProperties(event);
+    debugLog("getEventProperties result", props);
+    const itemId = props?.item;
+    if (itemId != null) {
+      const item = itemsDataSet.get(itemId) || itemsDataSet.get(String(itemId)) || itemsDataSet.get(Number(itemId));
+      if (item) return item;
+      debugLog("No dataset item resolved from getEventProperties.", { itemId });
+    }
+  }
+
+  const itemEl = event?.target?.closest?.(".vis-item");
+  if (!itemEl || (containerEl && !containerEl.contains(itemEl))) return null;
+  return getTimelineItemFromElement(itemEl);
+}
+
+function getHoverElementFromPoint(event, containerEl) {
+  const directHoverEl = event.target?.closest?.("[data-ms-item-id], .vis-item");
+  if (directHoverEl && (!containerEl || containerEl.contains(directHoverEl))) {
+    return directHoverEl;
+  }
+
+  if (
+    typeof document.elementsFromPoint === "function" &&
+    typeof event?.clientX === "number" &&
+    typeof event?.clientY === "number"
+  ) {
+    const stack = document.elementsFromPoint(event.clientX, event.clientY);
+    const hoveredFromStack = stack.find((el) => {
+      if (!(el instanceof HTMLElement)) return false;
+      const candidate = el.closest?.("[data-ms-item-id], .vis-item");
+      return candidate && (!containerEl || containerEl.contains(candidate));
+    });
+
+    if (hoveredFromStack instanceof HTMLElement) {
+      return hoveredFromStack.closest?.("[data-ms-item-id], .vis-item") || hoveredFromStack;
+    }
+
+    debugLog("elementsFromPoint found no timeline item.", {
+      stack: stack.slice(0, 6).map((el) => {
+        if (!(el instanceof HTMLElement)) return String(el);
+        return {
+          tag: el.tagName,
+          id: el.id || "",
+          className: el.className || "",
+          dataMsItemId: el.getAttribute("data-ms-item-id") || "",
+        };
+      }),
+    });
+  }
+
+  return null;
+}
+
+function showTooltipForItem(item, eventLike) {
+  if (!item) {
+    debugLog("showTooltipForItem called without item.");
+    hideHoverTooltip();
+    return;
+  }
+
+  const group = groupsDataSet ? groupsDataSet.get(item.group) : null;
+  const html = buildTaskTooltipHtml(item, group);
+  if (!html) {
+    debugLog("No tooltip HTML generated for item.", item);
+    hideHoverTooltip();
+    return;
+  }
+
+  debugLog("Tooltip candidate resolved.", {
+    itemId: item.id,
+    groupId: item.group,
+    task: group?.taskLabel || "",
+  });
+
+  if (hoverTooltipEl?.innerHTML !== html || hoverTooltipEl?.style.display === "none") {
+    showHoverTooltip(html, eventLike);
+  } else {
+    placeHoverTooltip(eventLike);
+  }
+}
+
+function buildTaskTooltipHtml(item, group) {
+  const start = toDate(item?.start);
+  const end = toDate(item?.end);
+
+  return `
+    <div class="tooltip-task-name">${escapeHtml(group?.taskLabel || "Tache")}</div>
+    <div class="tooltip-meta-row">Numero : <strong>${escapeHtml(group?.idLabel || "Non renseigne")}</strong></div>
+    <div class="tooltip-meta-row">Debut : <strong>${escapeHtml(start ? start.toLocaleDateString("fr-FR") : "Non renseigne")}</strong></div>
+    <div class="tooltip-meta-row">Fin : <strong>${escapeHtml(end ? end.toLocaleDateString("fr-FR") : "Non renseigne")}</strong></div>
+    <div class="tooltip-meta-row">Duree : <strong>${escapeHtml(group?.durationLabel || "Non renseignee")}</strong></div>
+    <div class="tooltip-meta-row">Equipe : <strong>${escapeHtml(group?.teamLabel || "Non renseignee")}</strong></div>
+    <div class="tooltip-meta-row">Style : <strong>${escapeHtml(group?.styleLabel || "Non renseigne")}</strong></div>
+  `;
+}
+
+function getNativeItemTitle(item, group) {
+  const start = toDate(item?.start);
+  const end = toDate(item?.end);
+  const lines = [
+    String(group?.taskLabel || "Tache"),
+    `Debut : ${start ? start.toLocaleDateString("fr-FR") : "Non renseigne"}`,
+    `Fin : ${end ? end.toLocaleDateString("fr-FR") : "Non renseigne"}`,
+  ];
+  return lines.join("\n");
+}
+
+function syncNativeItemTitles(containerEl) {
+  if (!containerEl || !itemsDataSet) return;
+
+  const itemElements = containerEl.querySelectorAll(".vis-item");
+  debugLog("Sync native titles on rendered items.", { count: itemElements.length });
+  itemElements.forEach((itemEl) => {
+    const item = getTimelineItemFromElement(itemEl);
+    if (!item) return;
+
+    const group = groupsDataSet ? groupsDataSet.get(item.group) : null;
+    const title = getNativeItemTitle(item, group);
+    if (!title) return;
+
+    itemEl.setAttribute("title", title);
+    itemEl.setAttribute("aria-label", title);
+
+    const contentEl = itemEl.querySelector(".vis-item-content");
+    if (contentEl) {
+      contentEl.setAttribute("title", title);
+      contentEl.setAttribute("aria-label", title);
+    }
+  });
+}
+
+function bindItemHoverInteractions(containerEl) {
+  if (!containerEl) return;
+
+  const itemElements = containerEl.querySelectorAll(".vis-item");
+  debugLog("Bind hover interactions scan.", { count: itemElements.length });
+  itemElements.forEach((itemEl) => {
+    if (itemEl.dataset.msTooltipBound === "1") return;
+    itemEl.dataset.msTooltipBound = "1";
+    debugLog("Hover listeners bound to item element.", {
+      rawId:
+        itemEl.getAttribute("data-id") ||
+        itemEl.getAttribute("data-item-id") ||
+        itemEl.dataset?.id ||
+        "",
+    });
+
+    itemEl.addEventListener("mouseenter", (event) => {
+      const item = getTimelineItemFromElement(itemEl) || getTimelineItemFromEvent(event, containerEl);
+      debugLog("mouseenter on item.", {
+        resolved: Boolean(item),
+        title: itemEl.getAttribute("title") || "",
+      });
+      showTooltipForItem(item, event);
+    });
+
+    itemEl.addEventListener("mousemove", (event) => {
+      const item = getTimelineItemFromElement(itemEl) || getTimelineItemFromEvent(event, containerEl);
+      if (!item) {
+        debugLog("mousemove on item but no data item resolved.");
+      }
+      showTooltipForItem(item, event);
+    });
+
+    itemEl.addEventListener("mouseleave", () => {
+      debugLog("mouseleave on item.");
+      hideHoverTooltip();
+    });
+  });
+}
+
+function bindDebugTimelineEvents() {
+  if (!timelineInstance || debugEventsBound) return;
+  debugEventsBound = true;
+
+  timelineInstance.on("itemover", (props) => {
+    debugLog("vis itemover", props);
+  });
+
+  timelineInstance.on("itemout", (props) => {
+    debugLog("vis itemout", props);
+  });
+
+  timelineInstance.on("click", (props) => {
+    if (props?.item != null) {
+      debugLog("vis click on item", props);
+    }
+  });
+
+  timelineInstance.on("mouseMove", (props) => {
+    if (props?.item != null) {
+      debugLog("vis mouseMove on item", props);
+    }
+  });
+}
+
+function bindHoverTooltip(containerEl) {
+  if (!timelineInstance || hoverTooltipBound || !containerEl) return;
+  hoverTooltipBound = true;
+
+  ensureHoverTooltip();
+
+  containerEl.addEventListener("pointermove", (event) => {
+    const hoverEl = getHoverElementFromPoint(event, containerEl);
+    if (!hoverEl || !containerEl.contains(hoverEl)) {
+      hideHoverTooltip();
+      return;
+    }
+
+    const item = getTimelineItemFromElement(hoverEl) || getTimelineItemFromEvent(event, containerEl);
+    if (!item) {
+      debugLog("pointermove found no item.", {
+        targetClass: event.target?.className || "",
+      });
+      hideHoverTooltip();
+      return;
+    }
+
+    debugLog("pointermove resolved item.", {
+      itemId: item.id,
+    });
+    showTooltipForItem(item, event);
+  });
+
+  containerEl.addEventListener("mouseleave", () => {
+    hideHoverTooltip();
+  });
+
+  const syncInteractiveElements = () => {
+    debugLog("Sync interactive elements triggered.");
+    decorateRenderedTimelineItems(containerEl);
+    syncNativeItemTitles(containerEl);
+    bindItemHoverInteractions(containerEl);
+  };
+
+  syncInteractiveElements();
+
+  if (!itemElementsObserver && typeof MutationObserver !== "undefined") {
+    itemElementsObserver = new MutationObserver(() => {
+      debugLog("MutationObserver detected timeline DOM changes.");
+      requestAnimationFrame(syncInteractiveElements);
+    });
+    itemElementsObserver.observe(containerEl, {
+      childList: true,
+      subtree: true,
+    });
+  }
+}
+
+function resetDateCellView(cellEl, displayText, isoDate = "") {
+  if (!(cellEl instanceof HTMLElement)) return;
+  cellEl.classList.remove("is-editing-date", "is-saving-date");
+  cellEl.dataset.msDateEditing = "0";
+  cellEl.dataset.isoDate = isoDate || "";
+  cellEl.textContent = displayText;
+}
+
+function startDateCellEditing(cellEl) {
+  if (!(cellEl instanceof HTMLElement) || !dateCellEditHandler) return;
+
+  if (activeDateEditor && activeDateEditor.cellEl !== cellEl) {
+    activeDateEditor.cancel();
+    activeDateEditor = null;
+  } else if (activeDateEditor?.cellEl === cellEl) {
+    return;
+  }
+
+  const recordId = Number(cellEl.dataset.rowId);
+  const field = cellEl.dataset.dateField === "end" ? "end" : "start";
+  if (!Number.isInteger(recordId) || recordId <= 0) return;
+
+  const initialIso = normalizeDateInputToIso(cellEl.dataset.isoDate || cellEl.textContent || "");
+  const initialDisplay = formatIsoDateForCell(initialIso) || String(cellEl.textContent || "");
+
+  cellEl.classList.add("is-editing-date");
+  cellEl.dataset.msDateEditing = "1";
+  cellEl.textContent = "";
+
+  const inputEl = document.createElement("input");
+  inputEl.type = "date";
+  inputEl.className = "editable-date-input";
+  inputEl.value = initialIso || "";
+  cellEl.appendChild(inputEl);
+
+  let finalized = false;
+  const finalize = () => {
+    if (activeDateEditor?.cellEl === cellEl) {
+      activeDateEditor = null;
+    }
+  };
+
+  const cancel = () => {
+    if (finalized) return;
+    finalized = true;
+    resetDateCellView(cellEl, initialDisplay, initialIso);
+    finalize();
+  };
+
+  const commit = async () => {
+    if (finalized) return;
+
+    const nextIso = normalizeDateInputToIso(inputEl.value);
+    if (!nextIso) {
+      cancel();
+      return;
+    }
+
+    if (nextIso === initialIso) {
+      finalized = true;
+      resetDateCellView(cellEl, formatIsoDateForCell(nextIso), nextIso);
+      finalize();
+      return;
+    }
+
+    finalized = true;
+    cellEl.classList.add("is-saving-date");
+    inputEl.disabled = true;
+
+    try {
+      await dateCellEditHandler({
+        rowId: recordId,
+        field,
+        isoDate: nextIso,
+      });
+
+      if (cellEl.isConnected) {
+        resetDateCellView(cellEl, formatIsoDateForCell(nextIso), nextIso);
+      }
+    } catch (error) {
+      console.error("Erreur edition date MS Project :", error);
+      if (cellEl.isConnected) {
+        resetDateCellView(cellEl, initialDisplay, initialIso);
+      }
+    } finally {
+      finalize();
+    }
+  };
+
+  activeDateEditor = {
+    cellEl,
+    cancel,
+  };
+
+  inputEl.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  inputEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commit();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancel();
+    }
+  });
+
+  inputEl.addEventListener("blur", () => {
+    commit();
+  });
+
+  inputEl.focus();
+  inputEl.select?.();
+}
+
+function bindDateCellEditing(containerEl) {
+  if (!containerEl || dateCellEditBound) return;
+  dateCellEditBound = true;
+
+  containerEl.addEventListener("click", (event) => {
+    const targetEl = event.target;
+    if (!(targetEl instanceof Element)) return;
+
+    const cellEl = targetEl.closest(
+      ".group-row-grid .cell-start.editable-date-cell, .group-row-grid .cell-end.editable-date-cell"
+    );
+    if (!(cellEl instanceof HTMLElement) || !containerEl.contains(cellEl)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    startDateCellEditing(cellEl);
+  });
+}
+
+function buildMsProjectRowDragPayload(rowEl) {
+  if (!(rowEl instanceof HTMLElement)) return null;
+
+  const rowId = Number(rowEl.dataset.msRowId);
+  const uniqueNumber = String(rowEl.dataset.msUniqueNumber ?? "").trim();
+  if (!uniqueNumber && (!Number.isInteger(rowId) || rowId <= 0)) {
+    return null;
+  }
+
+  return {
+    type: "ms-project-row",
+    rowId: Number.isInteger(rowId) && rowId > 0 ? rowId : null,
+    uniqueNumber,
+    task: String(rowEl.dataset.msTask ?? "").trim(),
+    startIso: String(rowEl.dataset.msStartIso ?? "").trim(),
+    endIso: String(rowEl.dataset.msEndIso ?? "").trim(),
+  };
+}
+
+function setMsProjectRowDragData(dataTransfer, payload) {
+  if (!dataTransfer || !payload) return;
+  const jsonPayload = JSON.stringify(payload);
+
+  dataTransfer.effectAllowed = "copy";
+  dataTransfer.setData("application/x-ms-project-row", jsonPayload);
+  dataTransfer.setData("application/json", jsonPayload);
+  dataTransfer.setData("text/plain", payload.uniqueNumber || String(payload.rowId || ""));
+}
+
+function setRowDraggingClass(active) {
+  document.body?.classList.toggle("ms-row-dragging", Boolean(active));
+  document.documentElement?.classList.toggle("ms-row-dragging", Boolean(active));
+}
+
+function createCanvasNativeDragImage(payload, rowEl) {
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const sourceWidth = rowEl instanceof HTMLElement ? Math.round(rowEl.getBoundingClientRect().width) : 0;
+  const width = Math.max(420, Math.min(920, sourceWidth || 680));
+  const height = 46;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  canvas.style.position = "fixed";
+  canvas.style.top = "-10000px";
+  canvas.style.left = "-10000px";
+  canvas.style.pointerEvents = "none";
+  canvas.style.zIndex = "-1";
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+
+  ctx.scale(dpr, dpr);
+
+  // Card background
+  ctx.fillStyle = "#eff6ff";
+  ctx.strokeStyle = "#93c5fd";
+  ctx.lineWidth = 1;
+  const radius = 8;
+  ctx.beginPath();
+  ctx.moveTo(radius, 0);
+  ctx.lineTo(width - radius, 0);
+  ctx.quadraticCurveTo(width, 0, width, radius);
+  ctx.lineTo(width, height - radius);
+  ctx.quadraticCurveTo(width, height, width - radius, height);
+  ctx.lineTo(radius, height);
+  ctx.quadraticCurveTo(0, height, 0, height - radius);
+  ctx.lineTo(0, radius);
+  ctx.quadraticCurveTo(0, 0, radius, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // ID pill
+  const idText = payload?.uniqueNumber || String(payload?.rowId || "");
+  const idLabel = idText || "ID";
+  ctx.font = "700 12px 'Segoe UI', Tahoma, sans-serif";
+  const idWidth = Math.min(160, Math.max(54, Math.ceil(ctx.measureText(idLabel).width) + 18));
+  const pillX = 10;
+  const pillY = 10;
+  const pillH = 26;
+  const pillR = 13;
+  ctx.fillStyle = "#1d4ed8";
+  ctx.beginPath();
+  ctx.moveTo(pillX + pillR, pillY);
+  ctx.lineTo(pillX + idWidth - pillR, pillY);
+  ctx.quadraticCurveTo(pillX + idWidth, pillY, pillX + idWidth, pillY + pillR);
+  ctx.lineTo(pillX + idWidth, pillY + pillH - pillR);
+  ctx.quadraticCurveTo(
+    pillX + idWidth,
+    pillY + pillH,
+    pillX + idWidth - pillR,
+    pillY + pillH
+  );
+  ctx.lineTo(pillX + pillR, pillY + pillH);
+  ctx.quadraticCurveTo(pillX, pillY + pillH, pillX, pillY + pillH - pillR);
+  ctx.lineTo(pillX, pillY + pillR);
+  ctx.quadraticCurveTo(pillX, pillY, pillX + pillR, pillY);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "#ffffff";
+  ctx.textBaseline = "middle";
+  ctx.fillText(idLabel, pillX + 9, pillY + pillH / 2 + 0.5);
+
+  // Task + dates
+  const task = String(payload?.task || "").trim() || "Tache";
+  const datePart =
+    payload?.startIso && payload?.endIso
+      ? `(${payload.startIso} -> ${payload.endIso})`
+      : payload?.startIso || payload?.endIso || "";
+  const rightText = datePart ? `${task} ${datePart}` : task;
+  const textX = pillX + idWidth + 12;
+  const textY = height / 2 + 0.5;
+  const maxTextWidth = width - textX - 12;
+
+  ctx.fillStyle = "#0f172a";
+  ctx.font = "600 12px 'Segoe UI', Tahoma, sans-serif";
+  let finalText = rightText;
+  if (ctx.measureText(finalText).width > maxTextWidth) {
+    while (finalText.length > 0 && ctx.measureText(`${finalText}...`).width > maxTextWidth) {
+      finalText = finalText.slice(0, -1);
+    }
+    finalText = `${finalText}...`;
+  }
+  ctx.fillText(finalText, textX, textY);
+
+  document.body.appendChild(canvas);
+  return canvas;
+}
+
+function getEventTargetElement(event) {
+  const directTarget = event?.target;
+  if (directTarget instanceof Element) {
+    return directTarget;
+  }
+
+  if (typeof event?.composedPath === "function") {
+    const elementFromPath = event.composedPath().find((node) => node instanceof Element);
+    if (elementFromPath instanceof Element) {
+      return elementFromPath;
+    }
+  }
+
+  return null;
+}
+
+function clearNativeDragImage() {
+  dragDebug("clearNativeDragImage", {
+    hasNativeImage: Boolean(activeNativeDragImageEl),
+  });
+  if (activeNativeDragImageEl && activeNativeDragImageEl.isConnected) {
+    activeNativeDragImageEl.remove();
+  }
+  activeNativeDragImageEl = null;
+}
+
+function clearInlineDragPreview() {
+  dragDebug("clearInlineDragPreview", {
+    hasInlinePreview: Boolean(activeInlineDragPreviewEl),
+  });
+  if (activeInlineDragPreviewEl && activeInlineDragPreviewEl.isConnected) {
+    activeInlineDragPreviewEl.remove();
+  }
+  activeInlineDragPreviewEl = null;
+}
+
+function cloneRowForDragPreview(rowEl, payload, mode = "native") {
+  if (!(rowEl instanceof HTMLElement)) return null;
+
+  const preview = rowEl.cloneNode(true);
+  if (!(preview instanceof HTMLElement)) return null;
+
+  const rowRect = rowEl.getBoundingClientRect();
+  preview.className = "group-row-grid ms-native-drag-row";
+  if (rowEl.classList.contains("row-is-title")) {
+    preview.classList.add("row-is-title");
+  }
+  preview.style.width = `${Math.max(320, Math.round(rowRect.width))}px`;
+  preview.style.pointerEvents = "none";
+  preview.style.position = "fixed";
+  preview.style.top = "0";
+  preview.style.left = "0";
+  preview.style.zIndex = "999999";
+  if (mode === "inline") {
+    preview.classList.add("ms-inline-drag-preview");
+    preview.style.transform = "translate(-10000px, -10000px)";
+  } else {
+    // Keep native drag image in render tree for consistent browser ghost rendering.
+    preview.style.transform = "translate(0, 0)";
+  }
+
+  preview.querySelectorAll(".editable-date-cell").forEach((cell) => {
+    if (!(cell instanceof HTMLElement)) return;
+    cell.classList.remove("editable-date-cell", "is-editing-date", "is-saving-date");
+    cell.removeAttribute("title");
+  });
+
+  if (!preview.childElementCount) {
+    preview.textContent = payload?.task || payload?.uniqueNumber || "Ligne";
+  }
+
+  document.body.appendChild(preview);
+  dragDebug(`cloneRowForDragPreview:${mode}`, {
+    width: preview.style.width,
+    rowId: payload?.rowId ?? null,
+    uniqueNumber: payload?.uniqueNumber ?? "",
+  });
+  return preview;
+}
+
+function createNativeDragImageFromRow(rowEl, payload) {
+  return createCanvasNativeDragImage(payload, rowEl);
+}
+
+function createInlineDragPreviewFromRow(rowEl, payload) {
+  return cloneRowForDragPreview(rowEl, payload, "inline");
+}
+
+function positionInlineDragPreview(eventLike) {
+  if (!(activeInlineDragPreviewEl instanceof HTMLElement)) return;
+  const x = Number(eventLike?.clientX);
+  const y = Number(eventLike?.clientY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  activeInlineDragPreviewEl.style.transform = `translate(${x + 18}px, ${y + 14}px)`;
+}
+
+function clearRowDraggingState(containerEl = null, reason = "unknown") {
+  dragDebug("clearRowDraggingState", {
+    reason,
+    hasActiveDraggedRow: Boolean(activeDraggedRowEl),
+    hasPendingInline: Boolean(pendingInlineRowEl),
+  });
+  setRowDraggingClass(false);
+
+  if (activeDraggedRowEl && activeDraggedRowEl.isConnected) {
+    activeDraggedRowEl.classList.remove("is-dragging-row");
+  }
+  activeDraggedRowEl = null;
+  if (ENABLE_INLINE_PREVIEW) {
+    pendingInlineRowEl = null;
+  }
+  clearNativeDragImage();
+  if (ENABLE_INLINE_PREVIEW) {
+    clearInlineDragPreview();
+  }
+
+  const effectiveContainer =
+    containerEl instanceof HTMLElement
+      ? containerEl
+      : (rowDragContainerEl instanceof HTMLElement ? rowDragContainerEl : document);
+  const scopeEl = effectiveContainer;
+  const draggingRows = scopeEl.querySelectorAll(
+    ".group-row-grid.ms-draggable-row.is-dragging-row"
+  );
+  draggingRows.forEach((rowEl) => rowEl.classList.remove("is-dragging-row"));
+}
+
+function resolveMsProjectDragRowElement(event, forcedRowEl = null) {
+  if (forcedRowEl instanceof HTMLElement) {
+    return forcedRowEl;
+  }
+
+  const targetEl = getEventTargetElement(event);
+  if (!(targetEl instanceof Element)) return null;
+
+  const rowEl = targetEl.closest(".group-row-grid.ms-draggable-row");
+  if (!(rowEl instanceof HTMLElement)) return null;
+
+  return rowEl;
+}
+
+function handleMsProjectNativeDragStart(event, forcedRowEl = null) {
+  if (!event) return;
+  if (event[ROW_DRAG_HANDLED_FLAG]) return;
+
+  const rowEl = resolveMsProjectDragRowElement(event, forcedRowEl);
+  if (!(rowEl instanceof HTMLElement)) return;
+  if (
+    rowDragContainerEl instanceof HTMLElement &&
+    !rowDragContainerEl.contains(rowEl)
+  ) {
+    return;
+  }
+
+  event[ROW_DRAG_HANDLED_FLAG] = true;
+
+  const payload = buildMsProjectRowDragPayload(rowEl);
+  if (!payload) {
+    dragDebug("dragstart:ignored-no-payload");
+    event.preventDefault();
+    return;
+  }
+
+  dragDebug("dragstart:active", {
+    rowId: payload.rowId,
+    uniqueNumber: payload.uniqueNumber,
+    x: event.clientX,
+    y: event.clientY,
+  });
+
+  setMsProjectRowDragData(event.dataTransfer, payload);
+  if (USE_CUSTOM_DRAG_IMAGE) {
+    clearNativeDragImage();
+    const nativeImage = createNativeDragImageFromRow(rowEl, payload);
+    if (nativeImage) {
+      activeNativeDragImageEl = nativeImage;
+      if (event.dataTransfer?.setDragImage) {
+        event.dataTransfer.setDragImage(nativeImage, 22, 16);
+        dragDebug("dragstart:setDragImage-custom");
+      } else {
+        clearNativeDragImage();
+        dragDebug("dragstart:setDragImage-unavailable");
+      }
+    }
+  } else {
+    dragDebug("dragstart:using-browser-default-ghost");
+  }
+
+  rowEl.classList.add("is-dragging-row");
+  setRowDraggingClass(true);
+  activeDraggedRowEl = rowEl;
+  if (ENABLE_INLINE_PREVIEW) {
+    clearInlineDragPreview();
+    pendingInlineRowEl = null;
+    dragDebug("dragstart:inline-preview-cleared");
+  }
+}
+
+function bindGlobalRowDragging() {
+  if (rowDragGlobalListenersBound) return;
+  rowDragGlobalListenersBound = true;
+  dragDebug("bindGlobalRowDragging:bound");
+
+  window.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (!ENABLE_INLINE_PREVIEW) return;
+      if (event.button !== 0) return;
+      const targetEl = getEventTargetElement(event);
+      if (!(targetEl instanceof Element)) return;
+
+      const rowEl = targetEl.closest(".group-row-grid.ms-draggable-row");
+      if (!(rowEl instanceof HTMLElement)) return;
+      if (
+        rowDragContainerEl instanceof HTMLElement &&
+        !rowDragContainerEl.contains(rowEl)
+      ) {
+        return;
+      }
+
+      const payload = buildMsProjectRowDragPayload(rowEl);
+      if (!payload) return;
+
+      pendingInlineRowEl = rowEl;
+      clearInlineDragPreview();
+      activeInlineDragPreviewEl = createInlineDragPreviewFromRow(rowEl, payload);
+      positionInlineDragPreview(event);
+      setRowDraggingClass(true);
+      dragDebug("pointerdown:inline-preview-start", {
+        rowId: payload.rowId,
+        uniqueNumber: payload.uniqueNumber,
+        x: event.clientX,
+        y: event.clientY,
+      });
+    },
+    true
+  );
+
+  window.addEventListener(
+    "pointermove",
+    (event) => {
+      if (!ENABLE_INLINE_PREVIEW) return;
+      if (activeDraggedRowEl) return;
+      if (!pendingInlineRowEl) return;
+      if ((event.buttons & 1) !== 1) {
+        clearInlineDragPreview();
+        pendingInlineRowEl = null;
+        setRowDraggingClass(false);
+        return;
+      }
+      positionInlineDragPreview(event);
+    },
+    true
+  );
+
+  window.addEventListener(
+    "pointerup",
+    () => {
+      if (!ENABLE_INLINE_PREVIEW) return;
+      if (activeDraggedRowEl) return;
+      if (!pendingInlineRowEl) return;
+      clearInlineDragPreview();
+      pendingInlineRowEl = null;
+      setRowDraggingClass(false);
+    },
+    true
+  );
+
+  window.addEventListener(
+    "dragstart",
+    (event) => {
+      handleMsProjectNativeDragStart(event);
+    },
+    true
+  );
+
+  window.addEventListener(
+    "dragover",
+    (event) => {
+      if (!ENABLE_INLINE_PREVIEW) return;
+      if (!activeDraggedRowEl) return;
+      positionInlineDragPreview(event);
+    },
+    true
+  );
+
+  window.addEventListener(
+    "dragend",
+    (event) => {
+      dragDebug("dragend", {
+        x: event?.clientX,
+        y: event?.clientY,
+      });
+      clearRowDraggingState(null, "dragend");
+    },
+    true
+  );
+
+  window.addEventListener(
+    "blur",
+    () => {
+      if (!activeDraggedRowEl) return;
+      dragDebug("window:blur-during-drag", {
+        note: "state kept until dragend",
+      });
+    },
+    true
+  );
+}
+
+function bindRowDragging(containerEl) {
+  if (!containerEl || rowDragBound) return;
+  rowDragBound = true;
+  rowDragContainerEl = containerEl;
+  dragDebug("bindRowDragging:bound");
+  bindGlobalRowDragging();
+}
+
+function buildGroupLabelElement(group) {
+  const row = document.createElement("div");
+  row.className = "group-row-grid";
+  row.classList.add("ms-draggable-row");
+  row.draggable = true;
+  row.setAttribute("draggable", "true");
+  row.dataset.msRowId = String(group?.rowId ?? "");
+  row.dataset.msUniqueNumber = String(group?.idLabel ?? "");
+  row.dataset.msTask = String(group?.taskLabel ?? "");
+  row.dataset.msStartIso = String(group?.startIso ?? "");
+  row.dataset.msEndIso = String(group?.endIso ?? "");
+  if (group?.isTitleRow) {
+    row.classList.add("row-is-title");
+  }
+
+  const id = document.createElement("div");
+  id.className = "cell-id";
+  id.textContent = String(group?.idLabel ?? "");
+
+  const task = document.createElement("div");
+  task.className = "cell-task";
+  task.textContent = String(group?.taskLabel ?? "");
+
+  const start = document.createElement("div");
+  start.className = "cell-start";
+  start.textContent = String(group?.startLabel ?? "");
+  start.dataset.rowId = String(group?.rowId ?? "");
+  start.dataset.dateField = "start";
+  start.dataset.isoDate = String(group?.startIso ?? "");
+  start.classList.add("editable-date-cell");
+  start.title = "Cliquer pour modifier la date";
+
+  const end = document.createElement("div");
+  end.className = "cell-end";
+  end.textContent = String(group?.endLabel ?? "");
+  end.dataset.rowId = String(group?.rowId ?? "");
+  end.dataset.dateField = "end";
+  end.dataset.isoDate = String(group?.endIso ?? "");
+  end.classList.add("editable-date-cell");
+  end.title = "Cliquer pour modifier la date";
+
+  const progress = document.createElement("div");
+  progress.className = "cell-duration";
+  progress.textContent = String(group?.durationLabel ?? "");
+
+  const status = document.createElement("div");
+  status.className = "cell-team";
+  status.textContent = String(group?.teamLabel ?? "");
+
+  [id, task, start, end, progress, status].forEach((cellEl) => {
+    cellEl.setAttribute("draggable", "true");
+  });
+
+  row.addEventListener("dragstart", (event) => {
+    dragDebug("row:dragstart", {
+      rowId: row.dataset.msRowId || "",
+      uniqueNumber: row.dataset.msUniqueNumber || "",
+      x: event.clientX,
+      y: event.clientY,
+    });
+    handleMsProjectNativeDragStart(event, row);
+  });
+
+  row.addEventListener("mousedown", (event) => {
+    if (event.button !== 0) return;
+    // Prevent vis-timeline from hijacking row drag gesture.
+    event.stopPropagation();
+  });
+
+  row.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+  });
+
+  row.append(id, task, start, end, progress, status);
+  return row;
+}
+
+function getTimelineContainer() {
+  const el = document.getElementById("msProjectTimeline");
+  if (!el) throw new Error("Conteneur #msProjectTimeline introuvable.");
+  return el;
+}
+
+function computeRange(items) {
+  if (!items || !items.length) return null;
+
+  let min = null;
+  let max = null;
+
+  for (const item of items) {
+    const start = toDate(item.start);
+    if (!start) continue;
+    const end = toDate(item.end) || start;
+
+    if (!min || start < min) min = start;
+    if (!max || end > max) max = end;
+  }
+
+  if (!min || !max) return null;
+
+  const start = new Date(min);
+  start.setDate(start.getDate() - 7);
+
+  const end = new Date(max);
+  end.setDate(end.getDate() + 7);
+
+  return { start, end };
+}
+
+function computeRangeCenter(range) {
+  if (!range?.start || !range?.end) return null;
+  return new Date((range.start.valueOf() + range.end.valueOf()) / 2);
+}
+
+function updateDateRangeDisplay() {
+  if (!timelineInstance) return;
+
+  const el = document.getElementById("current-date-range");
+  if (!el) return;
+
+  const range = timelineInstance.getWindow();
+  const options = { year: "numeric", month: "long", day: "numeric" };
+  el.textContent =
+    `${range.start.toLocaleDateString("fr-FR", options)} - ` +
+    `${range.end.toLocaleDateString("fr-FR", options)}`;
+}
+
+function getCurrentZoomMode() {
+  const activeBtn = document.querySelector(".zoom-buttons button.active");
+  return activeBtn?.dataset.zoom || "week";
+}
+
+function getWindowCenterDate() {
+  if (!timelineInstance) return new Date();
+  const windowRange = timelineInstance.getWindow();
+  return new Date((windowRange.start.valueOf() + windowRange.end.valueOf()) / 2);
+}
+
+function getDynamicNavLabel(mode, anchorDate = new Date()) {
+  if (mode === "week") {
+    const day = anchorDate.getDay();
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    const monday = new Date(anchorDate);
+    monday.setDate(anchorDate.getDate() + diffToMonday);
+    monday.setHours(0, 0, 0, 0);
+    return `Semaine du ${monday.toLocaleDateString("fr-FR")}`;
+  }
+
+  if (mode === "month") {
+    const label = anchorDate.toLocaleDateString("fr-FR", {
+      month: "long",
+      year: "numeric",
+    });
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  }
+
+  if (mode === "year") return String(anchorDate.getFullYear());
+  return "Periode";
+}
+
+function updateNavCenterButtonLabel() {
+  const todayBtn = document.getElementById("btn-today");
+  if (!todayBtn) return;
+  todayBtn.textContent = getDynamicNavLabel(getCurrentZoomMode(), getWindowCenterDate());
+}
+
+function setActiveZoomButton(mode) {
+  const buttons = document.querySelectorAll(".zoom-buttons button");
+  buttons.forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.zoom === mode);
+  });
+  updateNavCenterButtonLabel();
+}
+
+function setWindowForMode(mode, anchorDate = new Date()) {
+  if (!timelineInstance) return;
+
+  let start;
+  let end;
+
+  if (mode === "week") {
+    const day = anchorDate.getDay();
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    start = new Date(anchorDate);
+    start.setDate(anchorDate.getDate() + diffToMonday);
+    start.setHours(0, 0, 0, 0);
+
+    end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+  } else if (mode === "month") {
+    start = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1);
+    end = new Date(anchorDate.getFullYear(), anchorDate.getMonth() + 1, 0, 23, 59, 59, 999);
+  } else if (mode === "year") {
+    start = new Date(anchorDate.getFullYear(), 0, 1);
+    end = new Date(anchorDate.getFullYear(), 11, 31, 23, 59, 59, 999);
+  } else {
+    return;
+  }
+
+  timelineInstance.setWindow(start, end, { animation: false });
+  updateDateRangeDisplay();
+}
+
+function moveWindowByMode(direction) {
+  if (!timelineInstance) return;
+
+  const mode = getCurrentZoomMode();
+  const anchor = getWindowCenterDate();
+
+  if (mode === "week") {
+    anchor.setDate(anchor.getDate() + direction * 7);
+  } else if (mode === "month") {
+    anchor.setMonth(anchor.getMonth() + direction);
+  } else if (mode === "year") {
+    anchor.setFullYear(anchor.getFullYear() + direction);
+  }
+
+  setWindowForMode(mode, anchor);
+}
+
+export function setMsProjectDateEditHandler(handler) {
+  dateCellEditHandler = typeof handler === "function" ? handler : null;
+}
+
+export function renderMsProjectTimeline({ groups, items }) {
+  const container = getTimelineContainer();
+  debugLog("Render timeline called.", {
+    groups: groups?.length || 0,
+    items: items?.length || 0,
+  });
+
+  if (!window.vis || !window.vis.DataSet || !window.vis.Timeline) {
+    throw new Error("vis-timeline non charge.");
+  }
+
+  if (!timelineInstance) {
+    groupsDataSet = new window.vis.DataSet([]);
+    itemsDataSet = new window.vis.DataSet([]);
+
+    timelineInstance = new window.vis.Timeline(container, itemsDataSet, groupsDataSet, {
+      locale: "fr",
+      orientation: {
+        axis: "top",
+        item: "top",
+      },
+      stack: false,
+      multiselect: false,
+      selectable: true,
+      editable: {
+        add: false,
+        remove: false,
+        updateGroup: false,
+        updateTime: false,
+      },
+      groupHeightMode: "fixed",
+      margin: {
+        item: { horizontal: 2, vertical: 4 },
+        axis: 8,
+      },
+      showCurrentTime: true,
+      zoomable: true,
+      moveable: true,
+      verticalScroll: true,
+      tooltip: {
+        followMouse: true,
+        overflowMethod: "cap",
+      },
+      showTooltips: true,
+      groupTemplate: (group) => buildGroupLabelElement(group),
+      groupOrder: (a, b) => a.sortIndex - b.sortIndex,
+    });
+    debugLog("vis Timeline instance created.");
+    bindDebugTimelineEvents();
+    bindHoverTooltip(container);
+    bindDateCellEditing(container);
+    bindRowDragging(container);
+  }
+
+  groupsDataSet.clear();
+  itemsDataSet.clear();
+
+  groupsDataSet.add(groups || []);
+  itemsDataSet.add(items || []);
+  debugLog("Datasets updated.", {
+    groupCount: groupsDataSet.length,
+    itemCount: itemsDataSet.length,
+  });
+
+  requestAnimationFrame(() => {
+    timelineInstance.redraw();
+    decorateRenderedTimelineItems(container);
+    syncNativeItemTitles(container);
+    bindItemHoverInteractions(container);
+    debugLog("Timeline redraw completed.");
+
+    const range = computeRange(items || []);
+    if (range) {
+      dataAnchorDate = computeRangeCenter(range);
+      timelineInstance.setWindow(range.start, range.end, { animation: false });
+    } else if ((groups || []).length) {
+      dataAnchorDate = new Date();
+      setWindowForMode(getCurrentZoomMode(), dataAnchorDate);
+    } else {
+      dataAnchorDate = null;
+    }
+
+    updateDateRangeDisplay();
+    updateNavCenterButtonLabel();
+    updateCurrentTimeLineBounds();
+  });
+}
+
+export function bindTimelineToolbar() {
+  if (toolbarListenersBound) return;
+  toolbarListenersBound = true;
+
+  const prevBtn = document.getElementById("btn-prev");
+  const todayBtn = document.getElementById("btn-today");
+  const nextBtn = document.getElementById("btn-next");
+  const zoomButtons = document.querySelectorAll(".zoom-buttons button");
+
+  prevBtn?.addEventListener("click", () => {
+    moveWindowByMode(-1);
+  });
+
+  nextBtn?.addEventListener("click", () => {
+    moveWindowByMode(1);
+  });
+
+  todayBtn?.addEventListener("click", () => {
+    setWindowForMode(getCurrentZoomMode(), dataAnchorDate || getWindowCenterDate());
+  });
+
+  zoomButtons.forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      const mode = event.currentTarget?.dataset?.zoom;
+      if (!mode) return;
+      setActiveZoomButton(mode);
+      setWindowForMode(mode, dataAnchorDate || new Date());
+    });
+  });
+
+  if (timelineInstance) {
+    timelineInstance.on("rangechange", () => {
+      updateDateRangeDisplay();
+      updateNavCenterButtonLabel();
+      updateCurrentTimeLineBounds();
+    });
+
+    timelineInstance.on("rangechanged", () => {
+      updateDateRangeDisplay();
+      updateNavCenterButtonLabel();
+      updateCurrentTimeLineBounds();
+    });
+  }
+
+  updateNavCenterButtonLabel();
+  updateDateRangeDisplay();
+}
+
+export function clearMsProjectTimeline() {
+  if (groupsDataSet) groupsDataSet.clear();
+  if (itemsDataSet) itemsDataSet.clear();
+
+  const rangeEl = document.getElementById("current-date-range");
+  if (rangeEl) rangeEl.textContent = "";
+
+  hideHoverTooltip();
+}

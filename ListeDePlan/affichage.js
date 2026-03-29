@@ -25,14 +25,171 @@ async function chargerProjetsMap() {
   return projetsDictGlobal;
 }
 
+function normalizeText(value) {
+  if (value == null) return "";
+  if (typeof value === "object") {
+    if (typeof value.details === "string") return value.details.trim();
+    if (typeof value.display === "string") return value.display.trim();
+    if (typeof value.label === "string") return value.label.trim();
+    if (typeof value.name === "string") return value.name.trim();
+  }
+  return String(value).trim();
+}
+
+function normalizeRows(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (Array.isArray(raw.records)) return raw.records;
+  if (typeof raw === "object") {
+    const keys = Object.keys(raw);
+    if (!keys.length) return [];
+    const maxLen = Math.max(...keys.map((k) => (Array.isArray(raw[k]) ? raw[k].length : 0)));
+    if (maxLen <= 0) return [];
+    const rows = [];
+    for (let i = 0; i < maxLen; i++) {
+      const row = {};
+      for (const key of keys) {
+        row[key] = Array.isArray(raw[key]) ? raw[key][i] : undefined;
+      }
+      rows.push(row);
+    }
+    return rows;
+  }
+  return [];
+}
+
+function hasValidDate(value) {
+  if (value == null || value === "") return false;
+  const d = new Date(value);
+  return !Number.isNaN(d.getTime());
+}
+
+function normalizeIndice(value) {
+  return normalizeText(value).toUpperCase();
+}
+
+function buildPlanningLinkKey(project, numeroDocument, typeDocument, designation) {
+  return [
+    normalizeText(project).toLowerCase(),
+    normalizeText(numeroDocument).toLowerCase(),
+    normalizeText(typeDocument).toLowerCase(),
+    normalizeText(designation).toLowerCase(),
+  ].join("||");
+}
+
+function buildPlanningLinkKeyWithoutDesignation(project, numeroDocument, typeDocument) {
+  return [
+    normalizeText(project).toLowerCase(),
+    normalizeText(numeroDocument).toLowerCase(),
+    normalizeText(typeDocument).toLowerCase(),
+  ].join("||");
+}
+
+async function syncPlanningProjetIndicesFromListeDePlan() {
+  try {
+    const projetsMap = await chargerProjetsMap();
+    const projectIdToName = new Map(
+      Object.entries(projetsMap || {}).map(([name, id]) => [String(id), name])
+    );
+
+    const normalizeProject = (value) => {
+      if (value != null && typeof value === "object") {
+        if (typeof value.details === "string") return value.details.trim();
+        if (typeof value.display === "string") return value.display.trim();
+      }
+      const raw = normalizeText(value);
+      return projectIdToName.get(raw) || raw;
+    };
+
+    const listeRaw = await grist.docApi.fetchTable("ListePlan_NDC_COF");
+    const planningRaw = await grist.docApi.fetchTable("Planning_Projet");
+
+    const listeRows = normalizeRows(listeRaw);
+    const planningRows = normalizeRows(planningRaw);
+
+    const indiceOrder = new Map(INDICES.map((ind, idx) => [ind, idx]));
+    const latestByKeyStrict = new Map();
+    const latestByKeyNoDesignation = new Map();
+
+    for (const r of listeRows) {
+      const indice = normalizeIndice(r.Indice);
+      const order = indiceOrder.has(indice) ? indiceOrder.get(indice) : -1;
+      if (order < 0) continue;
+      if (!hasValidDate(r.DateDiffusion)) continue;
+
+      const strictKey = buildPlanningLinkKey(
+        normalizeProject(r.Nom_projet),
+        r.NumeroDocument,
+        r.Type_document,
+        r.Designation
+      );
+      const noDesignationKey = buildPlanningLinkKeyWithoutDesignation(
+        normalizeProject(r.Nom_projet),
+        r.NumeroDocument,
+        r.Type_document
+      );
+
+      const strictCurrent = latestByKeyStrict.get(strictKey);
+      const shouldReplaceStrict = !strictCurrent || order > strictCurrent.order;
+      if (shouldReplaceStrict) {
+        latestByKeyStrict.set(strictKey, { indice, order });
+      }
+
+      const looseCurrent = latestByKeyNoDesignation.get(noDesignationKey);
+      const shouldReplaceLoose = !looseCurrent || order > looseCurrent.order;
+      if (shouldReplaceLoose) {
+        latestByKeyNoDesignation.set(noDesignationKey, { indice, order });
+      }
+    }
+
+    const actions = [];
+    for (const p of planningRows) {
+      const planningId = p.id;
+      if (planningId == null) continue;
+
+      const strictKey = buildPlanningLinkKey(
+        normalizeProject(p.NomProjet),
+        p.ID2,
+        p.Type_doc,
+        p.Taches ?? p.Tache
+      );
+      const noDesignationKey = buildPlanningLinkKeyWithoutDesignation(
+        normalizeProject(p.NomProjet),
+        p.ID2,
+        p.Type_doc
+      );
+
+      const targetIndice =
+        latestByKeyStrict.get(strictKey)?.indice ??
+        latestByKeyNoDesignation.get(noDesignationKey)?.indice ??
+        "";
+      const currentIndice = normalizeText(p.Indice);
+      if (currentIndice !== targetIndice) {
+        actions.push(["UpdateRecord", "Planning_Projet", planningId, { Indice: targetIndice }]);
+      }
+    }
+
+    for (let i = 0; i < actions.length; i += 200) {
+      await grist.docApi.applyUserActions(actions.slice(i, i + 200));
+    }
+  } catch (err) {
+    console.error("Erreur sync ListeDePlan -> Planning_Projet (Indice) :", err);
+  }
+}
+
 function afficherPlansFiltres(projet, typeDocument, records) {
   const zone = document.getElementById("plans-output");
   zone.innerHTML = "";
 
-  const filtres = records.filter(r =>
-    (typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet) === projet &&
-    r.Type_document === typeDocument
-  );
+  const p = (projet ?? "").trim();
+  const t = (typeDocument ?? "").trim();
+
+  const filtres = records.filter(r => {
+    const nomRaw = (typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet);
+    const nom = (typeof nomRaw === "string") ? nomRaw.trim() : nomRaw;
+    const type = (typeof r.Type_document === "string") ? r.Type_document.trim() : r.Type_document;
+    return nom === p && type === t;
+  });
 
   if (filtres.length === 0) {
     zone.innerHTML = "<p>Aucun plan trouvé pour cette sélection.</p>";
@@ -258,6 +415,11 @@ function afficherPlansFiltres(projet, typeDocument, records) {
 document.addEventListener("click", async (e) => {
   const target = e.target;
 
+  if (target.matches('th.indice')) {
+    ouvrirPickerRemplirColonne(target);
+    return;
+  }
+
   if (target.matches('td.multi-date-error')) {
     const td = target;
     const conflicts = JSON.parse(td.dataset.conflicts);
@@ -294,6 +456,7 @@ document.addEventListener("click", async (e) => {
           for (const record of recordsToDelete) {
             await table.destroy(record.id);
           }
+          await syncPlanningProjetIndicesFromListeDePlan();
           popup.remove();
         } catch (err) {
           console.error("Erreur lors de la suppression des dates en double :", err);
@@ -325,6 +488,7 @@ document.addEventListener("click", async (e) => {
       const actions = recordsToUpdate.map(r => ["UpdateRecord", "ListePlan_NDC_COF", r.id, { Designation: correctDesignation }]);
       try {
         await grist.docApi.applyUserActions(actions);
+        await syncPlanningProjetIndicesFromListeDePlan();
         alert(`Les désignations pour le document ${numDocument} ont été unifiées.`);
       } catch (err) {
         console.error("Erreur lors de l'unification des désignations :", err);
@@ -368,15 +532,16 @@ document.addEventListener("click", async (e) => {
                 ["UpdateRecord", "ListePlan_NDC_COF", recordIdInt, fieldsToUpdate],
 
                 // (je conserve ton AddRecord dans References, mais sans rowData)
-                ["AddRecord", "References", null, {
-                  NomProjet: nomProjet,
-                  NomDocument: Designation,
-                  NumeroDocument: (() => {
-                    const s = String(Num_Document ?? '').trim();
-                    return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
-                  })()
-                }]
+                // ["AddRecord", "References", null, {
+                //   NomProjet: nomProjet,
+                //   NomDocument: Designation,
+                //   NumeroDocument: (() => {
+                //     const s = String(Num_Document ?? '').trim();
+                //     return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
+                //   })()
+                // }]
               ]);
+              await syncPlanningProjetIndicesFromListeDePlan();
 
               td.textContent = "";
             } else {
@@ -385,15 +550,16 @@ document.addEventListener("click", async (e) => {
                 ["UpdateRecord", "ListePlan_NDC_COF", recordIdInt, { DateDiffusion: isoDate }],
 
                 // (je conserve ton AddRecord dans References, mais sans rowData)
-                ["AddRecord", "References", null, {
-                  NomProjet: nomProjet,
-                  NomDocument: Designation,
-                  NumeroDocument: (() => {
-                    const s = String(Num_Document ?? '').trim();
-                    return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
-                  })()
-                }]
+                // ["AddRecord", "References", null, {
+                //   NomProjet: nomProjet,
+                //   NomDocument: Designation,
+                //   NumeroDocument: (() => {
+                //     const s = String(Num_Document ?? '').trim();
+                //     return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
+                //   })()
+                // }]
               ]);
+              await syncPlanningProjetIndicesFromListeDePlan();
 
               td.textContent = dateStr;
             }
@@ -440,15 +606,16 @@ document.addEventListener("click", async (e) => {
         try {
           await grist.docApi.applyUserActions([
             ["AddRecord", "ListePlan_NDC_COF", null, rowData],
-            ["AddRecord", "References", null, {
-              NomProjet: rowData.Nom_projet,
-              NomDocument: rowData.Designation,
-              NumeroDocument: (() => {
-                const s = String(rowData.NumeroDocument ?? '').trim();
-                return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
-              })()
-            }]
+            // ["AddRecord", "References", null, {
+            //   NomProjet: rowData.Nom_projet,
+            //   NomDocument: rowData.Designation,
+            //   NumeroDocument: (() => {
+            //     const s = String(rowData.NumeroDocument ?? '').trim();
+            //     return (/^\d+$/.test(s) ? parseInt(s, 10) : null);
+            //   })()
+            // }]
           ]);
+          await syncPlanningProjetIndicesFromListeDePlan();
           td.textContent = dateStr;
         } catch (err) {
           console.error("Erreur lors de l'ajout du record :", err);
@@ -479,6 +646,7 @@ document.addEventListener("focusout", async (e) => {
     const actions = recordsToUpdate.map(r => ["UpdateRecord", "ListePlan_NDC_COF", r.id, champs]);
     try {
       await grist.docApi.applyUserActions(actions);
+      await syncPlanningProjetIndicesFromListeDePlan();
     } catch (err) {
       console.error("Erreur lors de la mise à jour du texte :", err);
       td.style.backgroundColor = "#842029";
@@ -504,4 +672,168 @@ function formatDate(dateStr) {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const year = d.getFullYear();
   return `${day}/${month}/${year}`;
+}
+
+function dateObjToISO(d) {
+  // on garde la date "locale" choisie par l'utilisateur
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}T00:00:00.000Z`;
+}
+
+function ouvrirPickerRemplirColonne(th) {
+  const indice = th.textContent.trim();
+
+  // Popup léger
+  const old = document.getElementById("column-fill-popup");
+  if (old) old.remove();
+
+  const popup = document.createElement("div");
+  popup.id = "column-fill-popup";
+  popup.style.position = "absolute";
+  popup.style.zIndex = "9999";
+  popup.style.background = "#fff";
+  popup.style.border = "1px solid #ed1b2d";
+  popup.style.borderRadius = "8px";
+  popup.style.padding = "10px";
+  popup.style.boxShadow = "0 8px 20px rgba(0,0,0,0.15)";
+  popup.innerHTML = `
+    <div style="margin-bottom:8px; color:#004990;">
+      Remplir toute la colonne <strong>${indice}</strong>
+    </div>
+    <input id="column-fill-date" type="text" placeholder="Choisir une date" style="width:100%; padding:6px;" />
+    <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+      <button id="column-fill-cancel" type="button">Annuler</button>
+    </div>
+  `;
+
+  const rect = th.getBoundingClientRect();
+  popup.style.left = `${rect.left + window.scrollX}px`;
+  popup.style.top = `${rect.bottom + window.scrollY + 6}px`;
+  document.body.appendChild(popup);
+
+  const input = popup.querySelector("#column-fill-date");
+  const cancelBtn = popup.querySelector("#column-fill-cancel");
+
+  const fp = flatpickr(input, {
+    locale: "fr",
+    dateFormat: "d/m/Y",
+    closeOnSelect: true,   // important
+    onChange: async (selectedDates, dateStr, instance) => {
+      if (!selectedDates || selectedDates.length === 0) return;
+
+      // on ferme tout de suite le calendrier (UX)
+      instance.close();
+
+      try {
+        const iso = convertToISO(dateStr);
+
+        const indice = th.textContent.trim();
+        const ok = confirm(`Appliquer ${formatDate(iso)} à toute la colonne ${indice} ?`);
+        if (!ok) return;
+
+        await appliquerDateSurTouteLaColonne(th, iso);
+      } finally {
+        instance.destroy();
+        popup.remove();
+      }
+    }
+  });
+
+  fp.open();
+
+  cancelBtn.onclick = () => { fp.destroy(); popup.remove(); };
+}
+
+async function appliquerDateSurTouteLaColonne(th, isoDate) {
+  const table = th.closest("table");
+  if (!table) return;
+
+  const colIndex = th.cellIndex;
+  const indice = th.textContent.trim();
+  const tbody = table.querySelector("tbody");
+  if (!tbody) return;
+
+  const rows = Array.from(tbody.querySelectorAll("tr"))
+    .filter(tr => !tr.querySelector("td.ajout")); // ignore la ligne d'ajout
+
+  const actionsUpsert = []; // Update + Add
+  const actionsDelete = []; // Remove (multi-date)
+
+  // Petite aide pour comparer sans bug number/string
+  const same = (a, b) => String(a ?? "").trim() === String(b ?? "").trim();
+
+  for (const tr of rows) {
+    const td = tr.cells[colIndex];
+    if (!td) continue;
+
+    const typeDocument = td.dataset.typeDocument;
+    const nomProjet = td.dataset.nomProjet;
+    const numDocument = td.dataset.numDocument;
+    const designation = td.dataset.designation;
+
+    if (!typeDocument || !nomProjet || !numDocument || !designation) continue;
+
+    // 1) Multi-date (conflits) : on garde le 1er, on supprime les autres
+    if (td.dataset.conflicts) {
+      const conflicts = JSON.parse(td.dataset.conflicts); // [{id,date},...]
+      const keepId = conflicts[0]?.id;
+      if (keepId) actionsUpsert.push(["UpdateRecord", "ListePlan_NDC_COF", keepId, { DateDiffusion: isoDate }]);
+      for (const c of conflicts.slice(1)) {
+        actionsDelete.push(["RemoveRecord", "ListePlan_NDC_COF", c.id]);
+      }
+      continue;
+    }
+
+    // 2) Record existe déjà pour cette cellule
+    if (td.dataset.recordId) {
+      const rid = parseInt(td.dataset.recordId, 10);
+      actionsUpsert.push(["UpdateRecord", "ListePlan_NDC_COF", rid, { DateDiffusion: isoDate }]);
+      continue;
+    }
+
+    // 3) Cellule vide : essayer de réutiliser un "placeholder" (Indice null) sinon AddRecord
+    const placeholder = window.records.find(r =>
+      same(r.Type_document, typeDocument) &&
+      same(typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet, nomProjet) &&
+      same(r.NumeroDocument, numDocument) &&
+      same(r.Designation, designation) &&
+      (r.Indice == null || r.Indice === "") &&
+      (r.DateDiffusion == null || r.DateDiffusion === "")
+    );
+
+    if (placeholder?.id) {
+      actionsUpsert.push(["UpdateRecord", "ListePlan_NDC_COF", placeholder.id, { Indice: indice, DateDiffusion: isoDate }]);
+    } else {
+      actionsUpsert.push(["AddRecord", "ListePlan_NDC_COF", null, {
+        NumeroDocument: numDocument,
+        Type_document: typeDocument,
+        Designation: designation,
+        Nom_projet: nomProjet,
+        Indice: indice,
+        DateDiffusion: isoDate
+      }]);
+    }
+
+    // ✅ Mise à jour visuelle immédiate (même si Grist met 0.5s à refresh)
+    td.classList.remove("missing-date-error", "multi-date-error");
+    td.textContent = formatDate(isoDate);
+  }
+
+  // Appliquer en batches (évite les gros payloads si beaucoup de lignes)
+  const applyBatches = async (actions, batchSize = 200) => {
+    for (let i = 0; i < actions.length; i += batchSize) {
+      await grist.docApi.applyUserActions(actions.slice(i, i + batchSize));
+    }
+  };
+
+  try {
+    if (actionsUpsert.length) await applyBatches(actionsUpsert, 200);
+    if (actionsDelete.length) await applyBatches(actionsDelete, 200);
+    await syncPlanningProjetIndicesFromListeDePlan();
+  } catch (err) {
+    console.error("Erreur remplissage colonne :", err);
+    alert("Erreur lors du remplissage de la colonne (regarde la console).");
+  }
 }

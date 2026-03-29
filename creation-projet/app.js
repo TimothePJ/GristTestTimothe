@@ -11,6 +11,10 @@ document.addEventListener('DOMContentLoaded', () => {
         emitters: []
     };
 
+    function cleanProjectName(name) {
+        return String(name ?? "").replace(/\s+$/g, "");
+    }
+
     function showStep(stepNumber) {
         steps.forEach(step => step.style.display = 'none');
         const stepToShow = document.getElementById(`step-${stepNumber}`);
@@ -22,8 +26,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Navigation
     document.getElementById('next-to-step-2').addEventListener('click', () => {
-        projectData.name = document.getElementById('project-name').value;
-        projectData.number = document.getElementById('project-number').value;
+        projectData.name = cleanProjectName(document.getElementById('project-name').value);
+        projectData.number = document.getElementById('project-number').value.trim();
+
+        // (optionnel mais pratique) mettre à jour le champ affiché
+        document.getElementById('project-name').value = projectData.name;
+        document.getElementById('project-number').value = projectData.number;
+
         if (projectData.name && projectData.number) {
             showStep(2);
         } else {
@@ -636,6 +645,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Final Save
     document.getElementById('create-project-btn').addEventListener('click', async () => {
         try {
+            projectData.name = cleanProjectName(projectData.name);
+            projectData.number = (projectData.number ?? "").toString().trim();
             // 1. Create Project
             const projectActions = [
                 ["AddRecord", "Projets", null, { Nom_de_projet: projectData.name, Numero_de_projet: projectData.number }]
@@ -716,6 +727,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (listePlanActions.length > 0) {
                 await grist.docApi.applyUserActions(listePlanActions);
+            }
+
+            const planningActions = projectData.documents.map((doc, index) => {
+                const numeroText = String(doc.numero ?? '').trim();
+                const numeroNum = Number(numeroText);
+                const hasNumero = Number.isFinite(numeroNum);
+                const lignePlanning = hasNumero ? (numeroNum + 9000) : (9000 + index + 1);
+
+                return ["AddRecord", "Planning_Projet", null, {
+                    NomProjet: projectData.name,
+                    ID2: numeroText,
+                    Taches: doc.name,
+                    Type_doc: doc.type || "COFFRAGE",
+                    Ligne_planning: lignePlanning,
+                    Indice: ""
+                }];
+            });
+
+            if (planningActions.length > 0) {
+                try {
+                    await grist.docApi.applyUserActions(planningActions);
+                } catch (err) {
+                    const planningActionsFallback = planningActions.map((action) => {
+                        const [, , recordId, fields] = action;
+                        return ["AddRecord", "Planning_Project", recordId, fields];
+                    });
+                    await grist.docApi.applyUserActions(planningActionsFallback);
+                }
             }
 
             alert('Projet créé avec succès !');

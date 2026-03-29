@@ -1,0 +1,643 @@
+:root {
+  --col-id: 56px;
+  --col-task: 280px;
+  --col-start: 116px;
+  --col-end: 116px;
+  --col-duration: 64px;
+  --col-team: 84px;
+
+  --left-pad-x: 4px;
+  --left-grid-width: calc(var(--col-id) + var(--col-task) + var(--col-start) + var(--col-end) + var(--col-duration) + var(--col-team));
+  --left-panel-width: calc(var(--left-grid-width) + (var(--left-pad-x) * 2));
+  --row-height: 40px;
+  --toolbar-height: 46px;
+}
+
+html {
+  color-scheme: light;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: var(--page-bg);
+  color: var(--text-main);
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body * {
+  box-sizing: border-box;
+}
+
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--toolbar-height);
+  padding: 8px 16px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.nav-buttons,
+.zoom-buttons,
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolbar-label {
+  font-weight: 600;
+}
+
+#toolbar button,
+#toolbar select {
+  height: 30px;
+  border: 1px solid #c9d1dc;
+  border-radius: 4px;
+  background: #fff;
+  color: var(--text-main);
+  font-size: 13px;
+}
+
+#toolbar button {
+  min-width: 34px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+#toolbar button:hover,
+#toolbar select:hover {
+  background: var(--panel-hover);
+}
+
+#toolbar button.active {
+  background: var(--panel-selection);
+  border-color: #93c5fd;
+  font-weight: 600;
+}
+
+#toolbar select {
+  min-width: 240px;
+  padding: 0 8px;
+}
+
+#current-date-range {
+  margin-left: auto;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.ms-project-header-row {
+  display: grid;
+  grid-template-columns: var(--left-panel-width) 1fr;
+  align-items: stretch;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--panel-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.ms-project-header-left {
+  display: grid;
+  grid-template-columns: var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team);
+  width: var(--left-grid-width);
+  min-height: var(--row-height);
+  padding: 0 var(--left-pad-x);
+  box-sizing: content-box;
+  border-right: 1px solid var(--panel-border);
+}
+
+.ms-project-header-left .hcol,
+.ms-project-header-right {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ms-project-header-right {
+  padding: 0 12px;
+}
+
+#timelineWrapper {
+  min-height: 540px;
+  background: #fff;
+}
+
+#msProjectTimeline {
+  height: 640px;
+  background: #fff;
+}
+
+#msProjectTimeline .vis-timeline {
+  border: none !important;
+  background: #fff;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+#msProjectTimeline .vis-panel.vis-left {
+  width: var(--left-panel-width) !important;
+  background: #fbfcfe !important;
+  border-right: 1px solid var(--panel-border) !important;
+}
+
+#msProjectTimeline .vis-panel.vis-center,
+#msProjectTimeline .vis-panel.vis-top,
+#msProjectTimeline .vis-panel.vis-bottom {
+  left: var(--left-panel-width) !important;
+  width: calc(100% - var(--left-panel-width)) !important;
+}
+
+#msProjectTimeline .vis-labelset .vis-label {
+  height: var(--row-height) !important;
+  min-height: var(--row-height) !important;
+  display: flex !important;
+  align-items: center !important;
+  border-bottom: 1px solid var(--panel-border) !important;
+}
+
+#msProjectTimeline .vis-labelset .vis-label .vis-inner {
+  width: 100% !important;
+  height: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  overflow: hidden !important;
+}
+
+#msProjectTimeline .vis-background .vis-group,
+#msProjectTimeline .vis-foreground .vis-group {
+  height: var(--row-height) !important;
+  min-height: var(--row-height) !important;
+  border-bottom: 1px solid #edf1f5 !important;
+}
+
+#msProjectTimeline .group-row-grid {
+  display: grid !important;
+  grid-template-columns: var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team) !important;
+  align-items: center !important;
+  width: var(--left-grid-width) !important;
+  min-height: var(--row-height) !important;
+  padding: 0 var(--left-pad-x) !important;
+  box-sizing: content-box !important;
+}
+
+#msProjectTimeline .group-row-grid.ms-draggable-row,
+#msProjectTimeline .group-row-grid.ms-draggable-row > div {
+  cursor: grab !important;
+}
+
+#msProjectTimeline .group-row-grid.ms-draggable-row {
+  user-select: none;
+  -webkit-user-drag: element;
+  transition: opacity 120ms ease;
+}
+
+#msProjectTimeline .group-row-grid.ms-draggable-row > div {
+  -webkit-user-drag: element;
+}
+
+#msProjectTimeline .group-row-grid.ms-draggable-row:active,
+#msProjectTimeline .group-row-grid.ms-draggable-row:active > div {
+  cursor: grabbing !important;
+}
+
+html.ms-row-dragging,
+html.ms-row-dragging *,
+body.ms-row-dragging,
+body.ms-row-dragging * {
+  cursor: grabbing !important;
+}
+
+html.ms-row-dragging,
+body.ms-row-dragging {
+  user-select: none !important;
+}
+
+#msProjectTimeline .group-row-grid.ms-draggable-row.is-dragging-row,
+#msProjectTimeline .group-row-grid.ms-draggable-row.is-dragging-row > div {
+  opacity: 0.45 !important;
+}
+
+.ms-native-drag-row {
+  position: fixed;
+  top: -10000px;
+  left: -10000px;
+  pointer-events: none;
+  user-select: none;
+  z-index: 1000002;
+  display: grid;
+  grid-template-columns: var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team);
+  align-items: center;
+  min-height: var(--row-height);
+  max-width: min(920px, calc(100vw - 24px));
+  padding: 0 var(--left-pad-x);
+  box-sizing: content-box;
+  border-radius: 9px;
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.22);
+  color: #0f172a;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.ms-native-drag-row > div {
+  padding: 6px 8px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ms-inline-drag-preview {
+  top: 0 !important;
+  left: 0 !important;
+  z-index: 1000002 !important;
+  opacity: 0.96;
+  transform: translate(-10000px, -10000px);
+}
+
+#msProjectTimeline .group-row-grid > div {
+  padding: 6px 8px !important;
+  min-width: 0 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+#msProjectTimeline .group-row-grid.row-is-title > div {
+  font-weight: 700 !important;
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell {
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell:hover {
+  background: #eef6ff;
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell.is-editing-date {
+  padding: 2px 6px !important;
+  overflow: visible !important;
+  background: #eaf3ff;
+  border-radius: 4px;
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell .editable-date-input {
+  color-scheme: light;
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  border: 1px solid #93c5fd;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font: inherit;
+  font-weight: 600;
+  color: #1e3a8a !important;
+  background: #ffffff !important;
+  caret-color: #1e3a8a;
+  outline: none;
+  box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.25);
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell .editable-date-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell .editable-date-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell .editable-date-input::-webkit-datetime-edit {
+  color: inherit;
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell.is-saving-date {
+  opacity: 0.7;
+}
+
+#msProjectTimeline .group-row-grid .editable-date-cell.is-saving-date .editable-date-input {
+  background: #f8fafc !important;
+  color: #475569 !important;
+}
+
+#msProjectTimeline .group-row-grid .cell-duration {
+  text-align: center !important;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+#msProjectTimeline .group-row-grid .cell-id,
+#msProjectTimeline .group-row-grid .cell-start,
+#msProjectTimeline .group-row-grid .cell-end {
+  font-variant-numeric: tabular-nums;
+}
+
+#msProjectTimeline .vis-time-axis .vis-grid.vis-minor {
+  border-color: #eef2f7 !important;
+}
+
+#msProjectTimeline .vis-time-axis .vis-grid.vis-major {
+  border-color: #dbe2ea !important;
+}
+
+#msProjectTimeline .vis-time-axis .vis-text {
+  color: #475569;
+}
+
+#msProjectTimeline .vis-item {
+  border-radius: 4px;
+  border-width: 1px !important;
+  font-size: 12px;
+}
+
+#msProjectTimeline .vis-item .vis-item-content {
+  padding: 2px 6px;
+}
+
+#msProjectTimeline .vis-item.title-task .vis-item-content {
+  font-weight: 700;
+}
+
+#msProjectTimeline .vis-item.title-task.vis-range {
+  overflow: visible;
+  --title-bracket-color: #111827;
+  --title-bracket-thickness: 2px;
+  --title-bracket-hook-size: 12px;
+  --title-bracket-hook-half: 6px;
+  box-shadow: inset 0 var(--title-bracket-thickness) 0 var(--title-bracket-color);
+}
+
+#msProjectTimeline .vis-item.title-task.vis-range::before {
+  content: "";
+  position: absolute;
+  top: var(--title-bracket-thickness);
+  left: calc(-1 * var(--title-bracket-hook-half));
+  width: 0;
+  height: 0;
+  border-left: var(--title-bracket-hook-half) solid transparent;
+  border-right: var(--title-bracket-hook-half) solid transparent;
+  border-top: var(--title-bracket-hook-size) solid var(--title-bracket-color);
+  pointer-events: none;
+  z-index: 2;
+}
+
+#msProjectTimeline .vis-item.title-task.vis-range::after {
+  content: "";
+  position: absolute;
+  top: var(--title-bracket-thickness);
+  right: calc(-1 * var(--title-bracket-hook-half));
+  width: 0;
+  height: 0;
+  border-left: var(--title-bracket-hook-half) solid transparent;
+  border-right: var(--title-bracket-hook-half) solid transparent;
+  border-top: var(--title-bracket-hook-size) solid var(--title-bracket-color);
+  pointer-events: none;
+  z-index: 2;
+}
+
+#msProjectTimeline .vis-item.phase-task {
+  background: #dbeafe !important;
+  border-color: #93c5fd !important;
+  color: #1d4ed8 !important;
+}
+
+#msProjectTimeline .vis-item.phase-task.phase-active {
+  background: #fef3c7 !important;
+  border-color: #fcd34d !important;
+  color: #92400e !important;
+}
+
+#msProjectTimeline .vis-item.phase-task.phase-complete {
+  background: #dcfce7 !important;
+  border-color: #86efac !important;
+  color: #166534 !important;
+}
+
+#msProjectTimeline .vis-item.phase-task.phase-delayed {
+  background: #fee2e2 !important;
+  border-color: #fca5a5 !important;
+  color: #b91c1c !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-demolition {
+  background-color: #fee2e2 !important;
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(220, 38, 38, 0.25) 0px,
+    rgba(220, 38, 38, 0.25) 6px,
+    rgba(220, 38, 38, 0.06) 6px,
+    rgba(220, 38, 38, 0.06) 12px
+  ) !important;
+  border-color: #f87171 !important;
+  color: #991b1b !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-installation,
+#msProjectTimeline .vis-item[class*="bar-style-"][class*="installation"] {
+  background-color: #ca8a04 !important;
+  background-image: none !important;
+  border-color: #a16207 !important;
+  color: #fffbeb !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-structure,
+#msProjectTimeline .vis-item[class*="bar-style-"][class*="structure"] {
+  background-color: #1e3a8a !important;
+  background-image: none !important;
+  border-color: #1e40af !important;
+  color: #eff6ff !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-terr-rso,
+#msProjectTimeline .vis-item[class*="bar-style-"][class*="terr-rso"] {
+  background-color: #8b5e34 !important;
+  background-image: none !important;
+  border-color: #6f4518 !important;
+  color: #fef3c7 !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-preparation,
+#msProjectTimeline .vis-item[class*="bar-style-"][class*="preparation"] {
+  background-color: #dbeafe !important;
+  background-image: repeating-linear-gradient(
+      45deg,
+      rgba(30, 64, 175, 0.16) 0px,
+      rgba(30, 64, 175, 0.16) 5px,
+      rgba(30, 64, 175, 0.03) 5px,
+      rgba(30, 64, 175, 0.03) 10px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(30, 64, 175, 0.16) 0px,
+      rgba(30, 64, 175, 0.16) 5px,
+      rgba(30, 64, 175, 0.03) 5px,
+      rgba(30, 64, 175, 0.03) 10px
+    ) !important;
+  border-color: #60a5fa !important;
+  color: #1e40af !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-cet-cea,
+#msProjectTimeline .vis-item[class*="bar-style-"][class*="cet-cea"],
+#msProjectTimeline .vis-item[class*="bar-style-cet"][class*="cea"] {
+  background-color: #bfdbfe !important;
+  background-image: none !important;
+  border-color: #60a5fa !important;
+  color: #1e3a8a !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-autre,
+#msProjectTimeline .vis-item[class*="bar-style-"][class*="autre"] {
+  background-color: #ffffff !important;
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(148, 163, 184, 0.35) 0px,
+    rgba(148, 163, 184, 0.35) 2px,
+    rgba(255, 255, 255, 1) 2px,
+    rgba(255, 255, 255, 1) 8px
+  ) !important;
+  border-color: #cbd5e1 !important;
+  color: #334155 !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-mth,
+#msProjectTimeline .vis-item[class*="bar-style-"][class*="mth"] {
+  background-color: #22c55e !important;
+  background-image: none !important;
+  border-color: #16a34a !important;
+  color: #f0fdf4 !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-gros-oeuvre {
+  background: #e0f2fe !important;
+  border-color: #7dd3fc !important;
+  color: #075985 !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-etudes {
+  background: #f97316 !important;
+  border-color: #ea580c !important;
+  color: #fff7ed !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-approvisionnement {
+  background: #fef3c7 !important;
+  border-color: #fbbf24 !important;
+  color: #92400e !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-default {
+  background: #dbeafe !important;
+  border-color: #93c5fd !important;
+  color: #1d4ed8 !important;
+}
+
+#msProjectTimeline .vis-item.milestone-task.vis-box {
+  width: 12px !important;
+  min-width: 12px !important;
+  height: 12px !important;
+  border-radius: 0 !important;
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  margin-left: -6px !important;
+  box-sizing: border-box !important;
+  padding: 0 !important;
+}
+
+#msProjectTimeline .vis-item.milestone-task.vis-box .vis-item-content {
+  display: none !important;
+}
+
+#msProjectTimeline .vis-item.milestone-task.vis-line {
+  display: none !important;
+  border: none !important;
+  width: 0 !important;
+}
+
+#msProjectTimeline .vis-item.vis-selected {
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+
+#msProjectTimeline .vis-current-time {
+  width: 2px !important;
+  background: var(--vinci-red) !important;
+  opacity: 0.85;
+}
+
+.ms-project-status {
+  padding: 12px 16px;
+  border-top: 1px solid var(--panel-border);
+  color: var(--text-muted);
+  font-size: 13px;
+  background: #fff;
+}
+
+#msProjectTimeline .vis-tooltip {
+  max-width: min(420px, calc(100vw - 24px));
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.18);
+}
+
+#ms-project-hover-tooltip {
+  max-width: min(420px, calc(100vw - 24px));
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+#ms-project-hover-tooltip .tooltip-task-name {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+  color: #f8fafc;
+}
+
+#ms-project-hover-tooltip .tooltip-meta-row {
+  color: rgba(248, 250, 252, 0.92);
+}
+
+@media (max-width: 1320px) {
+  :root {
+    --col-id: 56px;
+    --col-task: 216px;
+    --col-start: 116px;
+    --col-end: 116px;
+    --col-duration: 64px;
+    --col-team: 84px;
+  }
+
+  #toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  #current-date-range {
+    margin-left: 0;
+    width: 100%;
+  }
+}
+
+.import-actions {
+  display: flex;
+  align-items: center;
+  margin-left: 136px;
+}
