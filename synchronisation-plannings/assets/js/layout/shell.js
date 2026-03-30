@@ -303,3 +303,232 @@ export function renderProjectOptions(projectKeys) {
 
   dom.projectSelectEl.disabled = projectKeys.length === 0;
 }
+
+export function setSelectionWarning(selection = null) {
+  if (!(dom.selectionWarningEl instanceof HTMLElement)) {
+    return;
+  }
+
+  const warning = selection?.warning || null;
+  if (!warning?.message) {
+    dom.selectionWarningEl.hidden = true;
+    dom.selectionWarningEl.classList.add("is-hidden");
+    dom.selectionWarningEl.classList.remove("is-warning", "is-danger");
+    if (dom.selectionWarningTitleEl instanceof HTMLElement) {
+      dom.selectionWarningTitleEl.textContent = "";
+    }
+    if (dom.selectionWarningMessageEl instanceof HTMLElement) {
+      dom.selectionWarningMessageEl.textContent = "";
+    }
+    return;
+  }
+
+  dom.selectionWarningEl.hidden = false;
+  dom.selectionWarningEl.classList.remove("is-hidden");
+  dom.selectionWarningEl.classList.toggle("is-warning", warning.severity === "warning");
+  dom.selectionWarningEl.classList.toggle("is-danger", warning.severity === "danger");
+
+  if (dom.selectionWarningTitleEl instanceof HTMLElement) {
+    dom.selectionWarningTitleEl.textContent = String(selection?.label || "Page selectionnee");
+  }
+
+  if (dom.selectionWarningMessageEl instanceof HTMLElement) {
+    dom.selectionWarningMessageEl.textContent = String(warning.message || "").trim();
+  }
+}
+
+let planningWarningsModalBound = false;
+let planningWarningsModalLastFocusedElement = null;
+
+function isPlanningWarningsModalOpen() {
+  return (
+    dom.planningWarningsModalEl instanceof HTMLElement &&
+    dom.planningWarningsModalEl.hidden === false
+  );
+}
+
+function bindPlanningWarningsModal() {
+  if (planningWarningsModalBound) {
+    return;
+  }
+
+  planningWarningsModalBound = true;
+
+  if (dom.planningWarningsModalCloseBtnEl instanceof HTMLButtonElement) {
+    dom.planningWarningsModalCloseBtnEl.addEventListener("click", () => {
+      closePlanningWarningsPopup();
+    });
+  }
+
+  if (dom.planningWarningsModalEl instanceof HTMLElement) {
+    dom.planningWarningsModalEl.addEventListener("click", (event) => {
+      const closeTrigger = event.target instanceof HTMLElement
+        ? event.target.closest("[data-planning-warnings-close]")
+        : null;
+      if (closeTrigger) {
+        closePlanningWarningsPopup();
+      }
+    });
+  }
+
+  if (typeof document !== "undefined") {
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && isPlanningWarningsModalOpen()) {
+        closePlanningWarningsPopup();
+      }
+    });
+  }
+}
+
+function buildPlanningWarningsSummary(projectKey = "", overdueWarnings = [], soonWarnings = []) {
+  const parts = [];
+  if (overdueWarnings.length) {
+    parts.push(
+      `${overdueWarnings.length} page(s) en retard`
+    );
+  }
+  if (soonWarnings.length) {
+    parts.push(
+      `${soonWarnings.length} page(s) arrivent a echeance sous 7 jours`
+    );
+  }
+
+  const summary = parts.join(" et ");
+  if (!summary) {
+    return String(projectKey || "").trim()
+      ? `Projet ${String(projectKey || "").trim()}`
+      : "";
+  }
+
+  return `${summary}.`;
+}
+
+function buildPlanningWarningsSection(title, warnings = [], severity = "warning") {
+  const sectionEl = document.createElement("section");
+  sectionEl.className = "planning-warnings-modal__section";
+
+  const titleEl = document.createElement("p");
+  titleEl.className = "planning-warnings-modal__section-title";
+  titleEl.textContent = title;
+  sectionEl.appendChild(titleEl);
+
+  warnings.forEach((warning) => {
+    const rowEl = document.createElement("article");
+    rowEl.className = `planning-warnings-modal__row is-${severity}`;
+
+    const contentEl = document.createElement("div");
+    contentEl.className = "planning-warnings-modal__row-content";
+
+    const labelEl = document.createElement("p");
+    labelEl.className = "planning-warnings-modal__row-title";
+    labelEl.textContent = String(warning?.label || "Page").trim() || "Page";
+    contentEl.appendChild(labelEl);
+
+    const messageEl = document.createElement("p");
+    messageEl.className = "planning-warnings-modal__row-message";
+    messageEl.textContent = String(warning?.message || "").trim();
+    contentEl.appendChild(messageEl);
+
+    rowEl.appendChild(contentEl);
+
+    const badgeEl = document.createElement("span");
+    badgeEl.className = `planning-warnings-modal__badge is-${severity}`;
+    if (severity === "danger") {
+      badgeEl.textContent = `${Number(warning?.days) || 0} j`;
+    } else {
+      const days = Number(warning?.days) || 0;
+      badgeEl.textContent = days <= 0 ? "Aujourd'hui" : `J-${days}`;
+    }
+    rowEl.appendChild(badgeEl);
+
+    sectionEl.appendChild(rowEl);
+  });
+
+  return sectionEl;
+}
+
+export function closePlanningWarningsPopup() {
+  if (!(dom.planningWarningsModalEl instanceof HTMLElement)) {
+    return;
+  }
+
+  dom.planningWarningsModalEl.hidden = true;
+  dom.planningWarningsModalEl.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("is-planning-warnings-modal-open");
+
+  if (planningWarningsModalLastFocusedElement instanceof HTMLElement) {
+    planningWarningsModalLastFocusedElement.focus();
+  }
+
+  planningWarningsModalLastFocusedElement = null;
+}
+
+export function showPlanningWarningsPopup(projectKey = "", warnings = []) {
+  if (
+    !(dom.planningWarningsModalEl instanceof HTMLElement) ||
+    !(dom.planningWarningsModalListEl instanceof HTMLElement)
+  ) {
+    return;
+  }
+
+  bindPlanningWarningsModal();
+
+  const normalizedWarnings = Array.isArray(warnings) ? warnings.filter(Boolean) : [];
+  if (!normalizedWarnings.length) {
+    closePlanningWarningsPopup();
+    return;
+  }
+
+  const overdueWarnings = normalizedWarnings.filter(
+    (warning) => String(warning?.severity || "").trim() === "danger"
+  );
+  const soonWarnings = normalizedWarnings.filter(
+    (warning) => String(warning?.severity || "").trim() === "warning"
+  );
+
+  if (dom.planningWarningsModalTitleEl instanceof HTMLElement) {
+    dom.planningWarningsModalTitleEl.textContent = "Alertes projet";
+  }
+  if (dom.planningWarningsModalSubtitleEl instanceof HTMLElement) {
+    const normalizedProjectKey = String(projectKey || "").trim();
+    dom.planningWarningsModalSubtitleEl.textContent = normalizedProjectKey
+      ? `Projet ${normalizedProjectKey}`
+      : "Projet selectionne";
+  }
+  if (dom.planningWarningsModalSummaryEl instanceof HTMLElement) {
+    dom.planningWarningsModalSummaryEl.textContent = buildPlanningWarningsSummary(
+      projectKey,
+      overdueWarnings,
+      soonWarnings
+    );
+  }
+
+  dom.planningWarningsModalListEl.replaceChildren();
+
+  if (overdueWarnings.length) {
+    dom.planningWarningsModalListEl.appendChild(
+      buildPlanningWarningsSection("Retards constates", overdueWarnings, "danger")
+    );
+  }
+
+  if (soonWarnings.length) {
+    dom.planningWarningsModalListEl.appendChild(
+      buildPlanningWarningsSection(
+        "Echeances a moins de 7 jours",
+        soonWarnings,
+        "warning"
+      )
+    );
+  }
+
+  planningWarningsModalLastFocusedElement =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+  dom.planningWarningsModalEl.hidden = false;
+  dom.planningWarningsModalEl.setAttribute("aria-hidden", "false");
+  document.body.classList.add("is-planning-warnings-modal-open");
+
+  if (dom.planningWarningsModalCloseBtnEl instanceof HTMLButtonElement) {
+    dom.planningWarningsModalCloseBtnEl.focus();
+  }
+}

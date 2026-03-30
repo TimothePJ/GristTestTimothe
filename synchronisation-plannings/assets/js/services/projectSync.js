@@ -7,6 +7,7 @@ import {
 } from "../layout/framePresentation.js";
 import {
   appendLog,
+  closePlanningWarningsPopup,
   getViewportSourceLabel,
   setHubStatus,
   setLastRange,
@@ -36,6 +37,8 @@ export async function applySharedProject(projectKey) {
   }
 
   state.requestedProjectKey = normalizedProjectKey;
+  state.lastPlanningWarningsPopupSignature = "";
+  closePlanningWarningsPopup();
   state.projectSyncInProgress = true;
   state.pendingViewportPayload = null;
   setHubStatus(`Chargement du projet ${normalizedProjectKey}...`);

@@ -15,8 +15,11 @@ import {
 } from "../layout/resizeHandle.js";
 import {
   appendLog,
+  closePlanningWarningsPopup,
   setExpensesPlanningControlsDisabled,
   setHubStatus,
+  setSelectionWarning,
+  showPlanningWarningsPopup,
 } from "../layout/shell.js";
 import {
   attachExpensesChartFrameApi,
@@ -100,6 +103,38 @@ export async function bootstrapHubApp() {
     state.planningApi.subscribeViewportChange((payload) =>
       handleViewportChange({ ...payload, app: "planning-projet-main" })
     );
+    if (typeof state.planningApi.subscribeSelectionChange === "function") {
+      state.planningApi.subscribeSelectionChange((payload) => {
+        setSelectionWarning(payload?.selection || null);
+      });
+    }
+    if (typeof state.planningApi.subscribeWarningsChange === "function") {
+      state.planningApi.subscribeWarningsChange((payload) => {
+        const projectKey = String(payload?.projectKey || state.activeProjectKey || "").trim();
+        const warnings = Array.isArray(payload?.warnings) ? payload.warnings : [];
+        const popupSignature = JSON.stringify({
+          projectKey,
+          warnings: warnings.map((warning) => ({
+            severity: String(warning?.severity || "").trim(),
+            label: String(warning?.label || "").trim(),
+            days: Number(warning?.days) || 0,
+            segmentEndDate: String(warning?.segmentEndDate || "").trim(),
+          })),
+        });
+
+        if (!warnings.length) {
+          closePlanningWarningsPopup();
+          return;
+        }
+
+        if (popupSignature === state.lastPlanningWarningsPopupSignature) {
+          return;
+        }
+
+        state.lastPlanningWarningsPopupSignature = popupSignature;
+        showPlanningWarningsPopup(projectKey, warnings);
+      });
+    }
     state.planningAxisApi.subscribeViewportChange((payload) =>
       handleViewportChange({ ...payload, app: "planning-projet-axis" })
     );

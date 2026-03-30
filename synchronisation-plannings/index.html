@@ -56,6 +56,60 @@
           </div>
         </div>
 
+        <div
+          id="selected-page-warning"
+          class="selection-warning-banner is-hidden"
+          hidden
+          aria-live="polite"
+        >
+          <p class="selection-warning-kicker">Avertissement page</p>
+          <p id="selected-page-warning-title" class="selection-warning-title"></p>
+          <p id="selected-page-warning-message" class="selection-warning-message"></p>
+        </div>
+
+        <div
+          id="planning-warnings-modal"
+          class="planning-warnings-modal"
+          hidden
+          aria-hidden="true"
+        >
+          <div class="planning-warnings-modal__backdrop" data-planning-warnings-close></div>
+          <div
+            class="planning-warnings-modal__content"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="planning-warnings-modal-title"
+          >
+            <div class="planning-warnings-modal__header">
+              <div>
+                <h2 id="planning-warnings-modal-title">Alertes projet</h2>
+                <p
+                  id="planning-warnings-modal-subtitle"
+                  class="planning-warnings-modal__subtitle"
+                ></p>
+              </div>
+              <button
+                id="planning-warnings-modal-close-btn"
+                type="button"
+                class="planning-warnings-modal__close-btn"
+              >
+                Fermer
+              </button>
+            </div>
+
+            <div class="planning-warnings-modal__body">
+              <div
+                id="planning-warnings-modal-summary"
+                class="planning-warnings-modal__summary"
+              ></div>
+              <div
+                id="planning-warnings-modal-list"
+                class="planning-warnings-modal__list"
+              ></div>
+            </div>
+          </div>
+        </div>
+
         <section class="shared-timeline-shell">
           <div class="shared-timeline-toolbar">
             <div class="nav-buttons shared-timeline-nav">

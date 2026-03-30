@@ -37,6 +37,7 @@ import {
   setPlanningDurationEditHandler,
   setPlanningMsProjectDropHandler,
   setPlanningRowDropHandler,
+  subscribePlanningSelectionChanges,
   subscribePlanningViewportChanges,
 } from "./ui/timeline.js";
 
@@ -47,6 +48,9 @@ let addZoneModalOpen = false;
 let planningProjectOptions = [];
 let planningSyncApiReady = false;
 let currentPlanningDateBounds = null;
+const planningWarningListeners = new Set();
+let currentPlanningWarnings = [];
+let lastPlanningWarningsSignature = "";
 
 const EMBEDDED_PLANNING_SYNC_MODE =
   typeof window !== "undefined" &&
@@ -60,6 +64,116 @@ const HEADER_ONLY_EMBEDDED_MODE =
 const EXTERNAL_AXIS_EMBEDDED_MODE =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).get("externalAxis") === "1";
+
+function toFiniteNumber(value) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+function getDayStart(rawDate) {
+  const nextDate = rawDate instanceof Date ? new Date(rawDate) : new Date(rawDate);
+  if (Number.isNaN(nextDate.getTime())) {
+    return null;
+  }
+
+  nextDate.setHours(0, 0, 0, 0);
+  return nextDate;
+}
+
+function buildPlanningWarningsFromGroups(groups = []) {
+  const today = getDayStart(new Date());
+  if (!today) {
+    return [];
+  }
+
+  return (groups || [])
+    .filter((group) => group && !group.isZoneHeader)
+    .map((group) => {
+      const label = [String(group?.id2Label || "").trim(), String(group?.tachesLabel || "").trim()]
+        .filter(Boolean)
+        .join(" - ") || "Page";
+      const realizeValue = toFiniteNumber(group?.realiseLabel);
+      const retardDays = toFiniteNumber(group?.retardsLabel) || 0;
+      const segmentEndIso = String(group?.finIso || "").trim();
+      const segmentEndDate = segmentEndIso ? new Date(`${segmentEndIso}T12:00:00`) : null;
+      const normalizedEndDate =
+        segmentEndDate instanceof Date && !Number.isNaN(segmentEndDate.getTime())
+          ? segmentEndDate
+          : null;
+
+      if (retardDays > 0) {
+        return {
+          label,
+          severity: "danger",
+          days: retardDays,
+          segmentEndDate: segmentEndIso,
+          message: `${label} : ${retardDays} jour(s) de retard.`,
+        };
+      }
+
+      if (!(realizeValue != null && realizeValue < 100) || !normalizedEndDate) {
+        return null;
+      }
+
+      const endDay = getDayStart(normalizedEndDate);
+      if (!endDay) {
+        return null;
+      }
+
+      const diffDays = Math.round((endDay.getTime() - today.getTime()) / 86400000);
+      if (diffDays < 0 || diffDays >= 7) {
+        return null;
+      }
+
+      return {
+        label,
+        severity: "warning",
+        days: diffDays,
+        segmentEndDate: segmentEndIso,
+        message:
+          diffDays === 0
+            ? `${label} : fin de segment aujourd'hui.`
+            : diffDays === 1
+            ? `${label} : fin de segment demain.`
+            : `${label} : fin de segment dans ${diffDays} jour(s).`,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const severityScore = (warning) => (warning?.severity === "danger" ? 0 : 1);
+      const severityDelta = severityScore(left) - severityScore(right);
+      if (severityDelta !== 0) {
+        return severityDelta;
+      }
+
+      if (left?.severity === "danger") {
+        return (right?.days || 0) - (left?.days || 0);
+      }
+
+      return (left?.days || 0) - (right?.days || 0);
+    });
+}
+
+function emitPlanningWarningsChange(projectKey = "", warnings = []) {
+  currentPlanningWarnings = Array.isArray(warnings) ? warnings : [];
+  const nextSignature = JSON.stringify({
+    projectKey: String(projectKey || "").trim(),
+    warnings: currentPlanningWarnings,
+  });
+
+  if (nextSignature === lastPlanningWarningsSignature) {
+    return;
+  }
+
+  lastPlanningWarningsSignature = nextSignature;
+  planningWarningListeners.forEach((listener) => {
+    listener({
+      app: "planning-projet",
+      projectKey: String(projectKey || "").trim(),
+      warnings: [...currentPlanningWarnings],
+    });
+  });
+}
 
 function setPlanningStatus(message = "") {
   const el = document.getElementById("planningStatus");
@@ -552,11 +666,15 @@ async function refreshPlanning() {
       selectedProject,
       normalizedZone
     );
+    const planningWarnings = buildPlanningWarningsFromGroups(
+      timelineData?.groups || []
+    );
     currentPlanningDateBounds = timelineData?.dateBounds || null;
 
     if (!timelineData.rowCount) {
       currentPlanningDateBounds = null;
       clearPlanningTimeline();
+      emitPlanningWarningsChange(selectedProject, []);
 
       if (!selectedProject) {
         setPlanningStatus("");
@@ -567,6 +685,7 @@ async function refreshPlanning() {
     }
 
     renderPlanningTimeline(timelineData);
+    emitPlanningWarningsChange(selectedProject, planningWarnings);
 
     if (!toolbarBound) {
       bindTimelineToolbar();
@@ -609,6 +728,7 @@ async function refreshPlanning() {
   } catch (error) {
     console.error("Erreur refresh planning :", error);
     clearPlanningTimeline();
+    emitPlanningWarningsChange(state.selectedProject || "", []);
     setPlanningStatus(`Erreur planning : ${error.message}`);
   } finally {
     refreshInProgress = false;
@@ -737,6 +857,31 @@ function exposePlanningSyncApi() {
           });
         }
       });
+    },
+    subscribeSelectionChange(listener) {
+      return subscribePlanningSelectionChanges((selection, meta = {}) => {
+        if (typeof listener === "function") {
+          listener({
+            app: "planning-projet",
+            projectKey: state.selectedProject || "",
+            selection,
+            meta,
+          });
+        }
+      });
+    },
+    getWarnings() {
+      return [...currentPlanningWarnings];
+    },
+    subscribeWarningsChange(listener) {
+      if (typeof listener !== "function") {
+        return () => {};
+      }
+
+      planningWarningListeners.add(listener);
+      return () => {
+        planningWarningListeners.delete(listener);
+      };
     },
   };
 }
