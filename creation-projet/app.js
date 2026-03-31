@@ -30,6 +30,27 @@ document.addEventListener('DOMContentLoaded', () => {
             .replace(/\u00a0/g, " ");
     }
 
+    function toBooleanFlag(value) {
+        if (value === true || value === 1) {
+            return true;
+        }
+
+        const normalizedValue = String(value ?? "").trim().toLowerCase();
+        return ["true", "1", "oui", "yes", "vrai"].includes(normalizedValue);
+    }
+
+    function getTeamExternalColumn(teamData = {}) {
+        const candidateColumns = [
+            'Externe',
+            'EstExterne',
+            'External',
+            'IsExternal',
+            'Externe'
+        ];
+
+        return candidateColumns.find((columnName) => Array.isArray(teamData?.[columnName])) || null;
+    }
+
     function showStep(stepNumber) {
         steps.forEach(step => step.style.display = 'none');
         const stepToShow = document.getElementById(`step-${stepNumber}`);
@@ -325,11 +346,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Team Selection
     async function populateTeamSelection() {
         const teamData = await grist.docApi.fetchTable("Team");
+        const externalColumn = getTeamExternalColumn(teamData);
         teamMembers = teamData.id.map((id, index) => ({
             id: id,
             Prenom: teamData.Prenom[index],
             Nom: teamData.Nom[index],
-            Role: teamData.Role[index]
+            Role: teamData.Role[index],
+            Externe: externalColumn ? toBooleanFlag(teamData[externalColumn][index]) : false
         }));
 
         const groupedByRole = teamMembers.reduce((acc, member) => {
@@ -354,7 +377,24 @@ document.addEventListener('DOMContentLoaded', () => {
             groupedByRole[role].forEach(member => {
                 const label = document.createElement('label');
                 label.classList.add('team-member');
-                label.innerHTML = `<input type="checkbox" value="${member.id}"> ${member.Prenom} ${member.Nom}`;
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.value = String(member.id);
+
+                const name = document.createElement('span');
+                name.className = 'team-member-name';
+                name.textContent = `${member.Prenom} ${member.Nom}`;
+
+                label.appendChild(checkbox);
+                label.appendChild(name);
+
+                if (member.Externe) {
+                    const badge = document.createElement('span');
+                    badge.className = 'team-member-badge';
+                    badge.textContent = '(Externe)';
+                    label.appendChild(badge);
+                }
+
                 roleContainer.appendChild(label);
             });
             teamSelectionContainer.appendChild(roleContainer);

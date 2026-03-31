@@ -44,7 +44,8 @@ h1, h2 {
 }
 
 input[type="text"],
-input[type="number"] {
+input[type="number"],
+select {
     width: 100%;
     padding: 8px;
     margin-bottom: 10px;
@@ -93,13 +94,14 @@ button:hover {
 }
 
 #budget-chapter {
-    flex: 1 1 auto;
+    flex: 1 1 0;
+    min-width: 0;
 }
 
 .budget-amount-field {
     position: relative;
-    flex: 0 0 150px;
-    min-width: 150px;
+    flex: 1 1 0;
+    min-width: 0;
 }
 
 .budget-amount-field::after {
@@ -116,7 +118,8 @@ button:hover {
 #budget-amount {
     width: 100%;
     padding-right: 32px;
-    text-align: right;
+    padding-left: 10px;
+    text-align: left;
 }
 
 #budget-lines-container p {
@@ -129,8 +132,21 @@ button:hover {
 }
 
 #team-selection-container .team-member {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 10px;
     margin-bottom: 5px;
+}
+
+.team-member-name {
+    min-width: 0;
+}
+
+.team-member-badge {
+    margin-left: auto;
+    color: #004990;
+    font-size: 0.9rem;
+    font-weight: 700;
 }
 
 #team-selection-container h3 {
@@ -359,6 +375,19 @@ button:hover {
 .form-row .form-group input,
 .form-row .form-group select {
   width: 100%;
+}
+
+select {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #004990 50%),
+    linear-gradient(135deg, #004990 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) calc(50% - 3px),
+    calc(100% - 12px) calc(50% - 3px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 34px;
 }
 
 .numero-fieldset {
