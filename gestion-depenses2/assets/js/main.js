@@ -22,11 +22,13 @@ import {
 } from "./services/gristService.js";
 import {
   buildExpenseData,
+  getBillingPercentageFromAmount,
   getProjectDateBounds,
   getProjectAverageAnchorDate,
   getEarliestProjectMonth,
   getProjectFirstAnchorDate,
   getProjectBudgetTotal,
+  normalizeBillingPercentageValue,
 } from "./services/projectService.js";
 import { assertDomRefs, getDomRefs } from "./ui/dom.js";
 import {
@@ -3111,7 +3113,34 @@ async function handleTableInputChange(event) {
     const monthKey = target.dataset.month || "";
     if (!monthKey) return;
 
-    const billingPct = clamp(parseOptionalNumberInput(target.value) ?? 100, 0, 100);
+    const billingPct = normalizeBillingPercentageValue(
+      parseOptionalNumberInput(target.value),
+      100
+    );
+    selectedProject.billingPercentageByMonth = {
+      ...(selectedProject.billingPercentageByMonth || {}),
+      [monthKey]: billingPct,
+    };
+
+    await updateProjectBillingPercentages(
+      selectedProject.id,
+      selectedProject.billingPercentageByMonth
+    );
+    renderApp();
+    return;
+  }
+
+  if (target.classList.contains("billing-amount")) {
+    const monthKey = target.dataset.month || "";
+    if (!monthKey) return;
+
+    const totalBudget = getProjectBudgetTotal(selectedProject);
+    const billingAmount = Math.max(0, parseOptionalNumberInput(target.value) ?? 0);
+    const billingPct = normalizeBillingPercentageValue(
+      getBillingPercentageFromAmount(totalBudget, billingAmount),
+      0
+    );
+
     selectedProject.billingPercentageByMonth = {
       ...(selectedProject.billingPercentageByMonth || {}),
       [monthKey]: billingPct,
@@ -3150,6 +3179,64 @@ function handleExpenseGraphControlChange(event) {
     selectedMonth: state.selectedMonth,
     monthSpan: state.monthSpan,
   });
+}
+
+function formatBillingEditorInputValue(value, maximumFractionDigits = 2) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return "";
+  }
+
+  return numericValue
+    .toFixed(maximumFractionDigits)
+    .replace(/\.0+$/, "")
+    .replace(/(\.\d*?)0+$/, "$1");
+}
+
+function handleSpendingBillingEditorInput(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+
+  const selectedProject = getSelectedProject();
+  if (!selectedProject) return;
+
+  const monthKey = String(target.dataset.month || "").trim();
+  if (!monthKey) return;
+
+  const totalBudget = getProjectBudgetTotal(selectedProject);
+
+  if (target.classList.contains("billing-percentage")) {
+    const billingPct = normalizeBillingPercentageValue(
+      parseOptionalNumberInput(target.value),
+      100
+    );
+    const amountInput = dom.spendingBillingEditor?.querySelector(
+      `.billing-amount[data-month="${monthKey}"]`
+    );
+    if (amountInput instanceof HTMLInputElement) {
+      amountInput.value = formatBillingEditorInputValue(
+        totalBudget > 0 ? (totalBudget * billingPct) / 100 : 0,
+        2
+      );
+    }
+    return;
+  }
+
+  if (target.classList.contains("billing-amount")) {
+    const billingAmount = Math.max(0, parseOptionalNumberInput(target.value) ?? 0);
+    const percentageInput = dom.spendingBillingEditor?.querySelector(
+      `.billing-percentage[data-month="${monthKey}"]`
+    );
+    if (percentageInput instanceof HTMLInputElement) {
+      percentageInput.value = formatBillingEditorInputValue(
+        normalizeBillingPercentageValue(
+          getBillingPercentageFromAmount(totalBudget, billingAmount),
+          0
+        ),
+        4
+      );
+    }
+  }
 }
 
 function handleSpendingChartControlChange(event) {
@@ -4011,6 +4098,7 @@ function bindEvents() {
   dom.expenseBoard.addEventListener("change", handleExpenseGraphControlChange);
   dom.expenseBoard.addEventListener("change", handleTableInputChange);
   dom.realExpenseBoard.addEventListener("change", handleExpenseGraphControlChange);
+  dom.spendingBillingEditor.addEventListener("input", handleSpendingBillingEditorInput);
   dom.spendingBillingEditor.addEventListener("change", handleTableInputChange);
   dom.spendingChartControls.addEventListener("change", handleSpendingChartControlChange);
   dom.planManagementBoard.addEventListener("click", handlePlanningManagementControlClick);

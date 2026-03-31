@@ -16,7 +16,9 @@ import {
 import {
   appendLog,
   closePlanningWarningsPopup,
+  renderProjectOptions,
   setExpensesPlanningControlsDisabled,
+  setProjectContentVisibility,
   setHubStatus,
   setSelectionWarning,
   showPlanningWarningsPopup,
@@ -27,7 +29,7 @@ import {
   attachOverviewFrameApi,
   waitForChildApi,
 } from "../services/childApi.js";
-import { applySharedProject } from "../services/projectSync.js";
+import { applySharedProject, clearSharedProjectSelection } from "../services/projectSync.js";
 import { bindExpensesPlanningShellControls, handleViewportChange } from "../services/viewportSync.js";
 
 function applyDebugBodyClass() {
@@ -93,23 +95,30 @@ export async function bootstrapHubApp() {
     bindFrameLoadListeners();
 
     const planningProjects = (state.planningApi.listProjects?.() || []).filter(Boolean);
+    renderProjectOptions(planningProjects);
     setExpensesPlanningControlsDisabled(planningProjects.length === 0);
-
-    const initialProject =
-      String(state.planningApi.getSelectedProject?.() || "").trim() ||
-      planningProjects[0] ||
-      "";
+    setProjectContentVisibility(false);
 
     state.planningApi.subscribeViewportChange((payload) =>
       handleViewportChange({ ...payload, app: "planning-projet-main" })
     );
     if (typeof state.planningApi.subscribeSelectionChange === "function") {
       state.planningApi.subscribeSelectionChange((payload) => {
+        if (!String(state.activeProjectKey || "").trim()) {
+          setSelectionWarning(null);
+          return;
+        }
+
         setSelectionWarning(payload?.selection || null);
       });
     }
     if (typeof state.planningApi.subscribeWarningsChange === "function") {
       state.planningApi.subscribeWarningsChange((payload) => {
+        if (!String(state.activeProjectKey || "").trim()) {
+          closePlanningWarningsPopup();
+          return;
+        }
+
         const projectKey = String(payload?.projectKey || state.activeProjectKey || "").trim();
         const warnings = Array.isArray(payload?.warnings) ? payload.warnings : [];
         const popupSignature = JSON.stringify({
@@ -140,9 +149,22 @@ export async function bootstrapHubApp() {
     );
     void attachOverviewFrameApi();
 
-    if (initialProject) {
-      await applySharedProject(initialProject);
+    if (dom.projectSelectEl instanceof HTMLSelectElement) {
+      dom.projectSelectEl.addEventListener("change", () => {
+        const nextProjectKey = String(dom.projectSelectEl.value || "").trim();
+        if (!nextProjectKey) {
+          clearSharedProjectSelection();
+          return;
+        }
+
+        void applySharedProject(nextProjectKey);
+      });
+    }
+
+    if (planningProjects.length) {
+      clearSharedProjectSelection();
     } else {
+      clearSharedProjectSelection();
       setHubStatus("Aucun projet disponible.");
     }
 

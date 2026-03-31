@@ -101,10 +101,14 @@ export function normalizeProjectDateBounds(projectDateBounds = null) {
     return null;
   }
 
-  const normalizedStartDate = startDate || endDate;
-  const normalizedEndDate = endDate || startDate;
+  let normalizedStartDate = startDate || endDate;
+  let normalizedEndDate = endDate || startDate;
   if (!normalizedStartDate || !normalizedEndDate) {
     return null;
+  }
+
+  if (normalizedEndDate < normalizedStartDate) {
+    [normalizedStartDate, normalizedEndDate] = [normalizedEndDate, normalizedStartDate];
   }
 
   return {
@@ -126,11 +130,11 @@ export function buildSharedProjectDateBounds({
   const normalizedPlanningBounds = normalizeProjectDateBounds(planningDateBounds);
   const normalizedExpensesBounds = normalizeProjectDateBounds(expensesDateBounds);
 
-  if (normalizedPlanningBounds) {
-    return normalizedPlanningBounds;
+  if (normalizedExpensesBounds) {
+    return normalizedExpensesBounds;
   }
 
-  return normalizedExpensesBounds;
+  return normalizedPlanningBounds;
 }
 
 export function buildProjectSelectionViewport(projectDateBounds = null, fallbackViewport = {}) {

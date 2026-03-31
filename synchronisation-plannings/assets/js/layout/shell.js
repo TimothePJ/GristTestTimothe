@@ -301,7 +301,34 @@ export function renderProjectOptions(projectKeys) {
     dom.projectSelectEl.appendChild(optionEl);
   });
 
+  dom.projectSelectEl.value = "";
   dom.projectSelectEl.disabled = projectKeys.length === 0;
+}
+
+export function setActiveProjectSelection(projectKey = "") {
+  if (dom.projectSelectEl instanceof HTMLSelectElement) {
+    dom.projectSelectEl.value = String(projectKey || "").trim();
+  }
+}
+
+export function setProjectContentVisibility(hasProject = false) {
+  const shouldShowProjectContent = Boolean(hasProject);
+
+  if (dom.projectEmptyStateEl instanceof HTMLElement) {
+    dom.projectEmptyStateEl.hidden = shouldShowProjectContent;
+  }
+
+  if (dom.workspaceCardSectionEl instanceof HTMLElement) {
+    dom.workspaceCardSectionEl.hidden = !shouldShowProjectContent;
+  }
+
+  if (dom.syncPlanningCardSectionEl instanceof HTMLElement) {
+    dom.syncPlanningCardSectionEl.hidden = !shouldShowProjectContent;
+  }
+
+  if (dom.expensesChartCardSectionEl instanceof HTMLElement) {
+    dom.expensesChartCardSectionEl.hidden = !shouldShowProjectContent;
+  }
 }
 
 export function setSelectionWarning(selection = null) {

@@ -549,6 +549,10 @@ export function getProjectBudgetTotal(project) {
   );
 }
 
+export function normalizeBillingPercentageValue(value, fallback = 100) {
+  return Math.max(0, toFiniteNumber(value, fallback));
+}
+
 export function getWorkerTotalDays(daysByMonth) {
   return Object.values(daysByMonth || {}).reduce(
     (sum, days) => sum + toFiniteNumber(days, 0),
@@ -573,10 +577,28 @@ export function calculateRealSpending(project, monthKey) {
 export function getBillingPercentageForMonth(project, monthKey) {
   const raw = project?.billingPercentageByMonth?.[monthKey];
   if (raw != null && raw !== "") {
-    return clamp(toFiniteNumber(raw, 100), 0, 100);
+    return normalizeBillingPercentageValue(raw, 100);
   }
 
-  return clamp(toFiniteNumber(project?.billingPercentage, 100), 0, 100);
+  return normalizeBillingPercentageValue(project?.billingPercentage, 100);
+}
+
+export function getBillingAmountFromPercentage(totalBudget, billingPercentage) {
+  const normalizedBudget = Math.max(0, toFiniteNumber(totalBudget, 0));
+  if (normalizedBudget <= 0) {
+    return 0;
+  }
+
+  return normalizedBudget * (normalizeBillingPercentageValue(billingPercentage, 100) / 100);
+}
+
+export function getBillingPercentageFromAmount(totalBudget, billingAmount) {
+  const normalizedBudget = Math.max(0, toFiniteNumber(totalBudget, 0));
+  if (normalizedBudget <= 0) {
+    return 0;
+  }
+
+  return (Math.max(0, toFiniteNumber(billingAmount, 0)) / normalizedBudget) * 100;
 }
 
 export function getPriorCumulativeSpending(project, boundaryMonthKey) {
@@ -1016,11 +1038,11 @@ export function buildChartSeries(project, { selectedYear, selectedMonth, monthSp
   const realPercentData = [];
   const billingPercentData = [];
 
-  displayedMonths.forEach(({ monthKey, monthLabel, year }) => {
-    const billingPercentage = getBillingPercentageForMonth(project, monthKey);
-    labels.push([monthLabel, String(year)]);
-    billingPercentData.push(billingPercentage);
-    billedAmountData.push(totalBudget > 0 ? (totalBudget * billingPercentage) / 100 : 0);
+    displayedMonths.forEach(({ monthKey, monthLabel, year }) => {
+      const billingPercentage = getBillingPercentageForMonth(project, monthKey);
+      labels.push([monthLabel, String(year)]);
+      billingPercentData.push(billingPercentage);
+      billedAmountData.push(getBillingAmountFromPercentage(totalBudget, billingPercentage));
 
     let provisionalValue = 0;
     let realValue = 0;

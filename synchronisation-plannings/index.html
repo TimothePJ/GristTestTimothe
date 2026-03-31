@@ -20,7 +20,33 @@
         </p>
       </section>
 
-      <section class="card workspace-card">
+      <section class="card project-selection-card">
+        <div class="project-selection-card__header">
+          <div>
+            <p class="eyebrow">Selection projet</p>
+            <h2>Projet partage</h2>
+            <p class="workspace-copy">
+              Choisis un projet pour afficher le cockpit commun et les plannings synchronises.
+            </p>
+          </div>
+          <div class="workspace-form">
+            <label for="shared-project-select">Projet</label>
+            <select id="shared-project-select" aria-label="Choisir un projet">
+              <option value="" selected>Choisir un projet</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section id="project-empty-state" class="card project-empty-state">
+        <p class="eyebrow">Aucune selection</p>
+        <h2>Choisir un projet</h2>
+        <p class="workspace-copy">
+          Selectionne un projet dans la liste ci-dessus pour afficher le cockpit et les plannings.
+        </p>
+      </section>
+
+      <section id="workspace-card-section" class="card workspace-card" hidden>
         <div class="workspace-header">
           <div>
             <p class="eyebrow">Pilotage commun</p>
@@ -44,7 +70,7 @@
         </div>
       </section>
 
-      <section class="card sync-planning-card">
+      <section id="sync-planning-card-section" class="card sync-planning-card" hidden>
         <div class="sync-planning-card-header">
           <div>
             <p class="eyebrow">Plannings synchronises</p>
@@ -214,7 +240,7 @@
         </div>
       </section>
 
-      <section class="card expenses-chart-card">
+      <section id="expenses-chart-card-section" class="card expenses-chart-card" hidden>
         <iframe
           id="gestion-depenses2-chart-frame"
           class="embedded-app-frame embedded-app-frame--expenses-chart"

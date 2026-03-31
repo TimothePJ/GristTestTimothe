@@ -113,6 +113,10 @@ export async function attachOverviewFrameApi({ force = false } = {}) {
 
         if (typeof api.subscribeProjectChange === "function") {
           state.overviewProjectSubscriptionCleanup = api.subscribeProjectChange((payload) => {
+            if (!state.allowChildProjectSelectionSync) {
+              return;
+            }
+
             const nextProjectKey = String(payload?.projectKey || payload || "").trim();
             if (!nextProjectKey) {
               return;

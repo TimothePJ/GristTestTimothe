@@ -2017,6 +2017,24 @@ td input {
   text-align: center;
 }
 
+.billing-editor-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.billing-editor-field {
+  display: grid;
+  gap: 6px;
+}
+
+.billing-editor-field-label {
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
 .billing-editor-input-shell {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

@@ -7,6 +7,7 @@ export function createHubState() {
     expensesChartApi: null,
     activeProjectKey: "",
     requestedProjectKey: "",
+    allowChildProjectSelectionSync: false,
     projectSyncInProgress: false,
     lastPlanningWarningsPopupSignature: "",
     viewportSyncInProgress: false,
