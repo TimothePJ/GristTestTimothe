@@ -235,29 +235,9 @@ function afficherPlansFiltres(projet, typeDocument, records) {
       const form = document.createElement('div');
       form.className = 'warning-form';
       form.innerHTML = `<p><strong>Attention :</strong> Le document <strong>${doc}</strong> a plusieurs désignations :</p>`;
-      const fieldset = document.createElement('fieldset');
-      fieldset.dataset.numDocument = doc;
-      let isFirst = true;
-      for (const designation of designations) {
-        const label = document.createElement('label');
-        const radio = document.createElement('input');
-        radio.type = 'radio';
-        radio.name = `designation-fix-${doc}`;
-        radio.value = designation;
-        if (isFirst) {
-          radio.checked = true;
-          isFirst = false;
-        }
-        label.appendChild(radio);
-        label.append(` ${designation}`);
-        fieldset.appendChild(label);
-      }
-      form.appendChild(fieldset);
-      const button = document.createElement('button');
-      button.textContent = 'Unifier les désignations';
-      button.className = 'fix-designation-btn';
-      button.dataset.numDocument = doc;
-      form.appendChild(button);
+      const details = document.createElement('p');
+      details.textContent = `Désignations trouvées : ${[...designations].join(' / ')}. Corrigez-les manuellement.`;
+      form.appendChild(details);
       warningDiv.appendChild(form);
     }
   }
@@ -470,33 +450,6 @@ document.addEventListener("click", async (e) => {
     cancelBtn.onclick = () => popup.remove();
     popup.appendChild(cancelBtn);
     td.closest('#plans-output').appendChild(popup);
-    return;
-  }
-
-  if (target.matches('button.fix-designation-btn')) {
-    const button = target;
-    const numDocument = button.dataset.numDocument;
-    const form = button.closest('.warning-form');
-    const selectedRadio = form.querySelector(`input[name="designation-fix-${numDocument}"]:checked`);
-    if (!selectedRadio) {
-      alert("Veuillez sélectionner une désignation correcte.");
-      return;
-    }
-    const correctDesignation = selectedRadio.value;
-    const recordsToUpdate = window.records.filter(r => r.NumeroDocument === numDocument && r.Designation !== correctDesignation);
-    if (recordsToUpdate.length > 0) {
-      const actions = recordsToUpdate.map(r => ["UpdateRecord", "ListePlan_NDC_COF", r.id, { Designation: correctDesignation }]);
-      try {
-        await grist.docApi.applyUserActions(actions);
-        await syncPlanningProjetIndicesFromListeDePlan();
-        alert(`Les désignations pour le document ${numDocument} ont été unifiées.`);
-      } catch (err) {
-        console.error("Erreur lors de l'unification des désignations :", err);
-        alert("Une erreur est survenue.");
-      }
-    } else {
-      alert("Aucune mise à jour nécessaire.");
-    }
     return;
   }
 
