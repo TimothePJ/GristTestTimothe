@@ -85,6 +85,107 @@ function buildPlanningLinkKeyWithoutDesignation(project, numeroDocument, typeDoc
   ].join("||");
 }
 
+function getColumnNames(raw, rows = []) {
+  const names = new Set(Object.keys(raw || {}));
+  for (const row of rows) {
+    Object.keys(row || {}).forEach((key) => names.add(key));
+  }
+  return names;
+}
+
+function findFirstExistingColumn(columnNames, candidates) {
+  return candidates.find((name) => columnNames.has(name)) || null;
+}
+
+function matchesProjectValue(value, projectName, projectId = null) {
+  const normalizedValue = normalizeText(value);
+  const normalizedProjectName = normalizeText(projectName);
+  const normalizedProjectId = projectId == null ? "" : normalizeText(projectId);
+
+  return (
+    normalizedValue === normalizedProjectName ||
+    (normalizedProjectId !== "" && normalizedValue === normalizedProjectId)
+  );
+}
+
+function updateRowCellDatasets(tr, updates = {}) {
+  if (!tr) return;
+
+  for (const cell of Array.from(tr.cells || [])) {
+    if (!cell?.dataset) continue;
+    if (Object.prototype.hasOwnProperty.call(updates, "numDocument")) {
+      cell.dataset.numDocument = updates.numDocument;
+    }
+    if (Object.prototype.hasOwnProperty.call(updates, "designation")) {
+      cell.dataset.designation = updates.designation;
+    }
+  }
+}
+
+async function buildReferencesTextUpdateActions({
+  cellIndex,
+  texte,
+  numDocument,
+  designation,
+  typeDocument,
+  nomProjet
+}) {
+  try {
+    const referencesRaw = await grist.docApi.fetchTable("References");
+    const referenceRows = normalizeRows(referencesRaw);
+    const referenceColumns = getColumnNames(referencesRaw, referenceRows);
+
+    const projectColumn = findFirstExistingColumn(referenceColumns, ["NomProjet", "Nom_projet"]);
+    const typeColumn = findFirstExistingColumn(referenceColumns, ["Type_document", "TypeDocument"]);
+    const designationColumns = ["NomDocument", "Designation"].filter((name) => referenceColumns.has(name));
+
+    const updateFields = {};
+    if (cellIndex === 0 && referenceColumns.has("NumeroDocument")) {
+      updateFields.NumeroDocument = texte;
+    }
+    if (cellIndex === 1) {
+      if (referenceColumns.has("NomDocument")) {
+        updateFields.NomDocument = texte;
+      }
+      if (referenceColumns.has("Designation")) {
+        updateFields.Designation = texte;
+      }
+    }
+
+    if (Object.keys(updateFields).length === 0) {
+      return [];
+    }
+
+    const projetsMap = await chargerProjetsMap();
+    const projectId = projetsMap?.[normalizeText(nomProjet)] ?? null;
+
+    return referenceRows
+      .filter((row) => {
+        if (row?.id == null) return false;
+        if (normalizeText(row.NumeroDocument) !== normalizeText(numDocument)) return false;
+        if (projectColumn && !matchesProjectValue(row[projectColumn], nomProjet, projectId)) {
+          return false;
+        }
+        if (typeColumn && normalizeText(typeDocument) && normalizeText(row[typeColumn]) !== normalizeText(typeDocument)) {
+          return false;
+        }
+        if (designationColumns.length > 0) {
+          const matchesDesignation = designationColumns.some(
+            (columnName) => normalizeText(row[columnName]) === normalizeText(designation)
+          );
+          if (!matchesDesignation) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .map((row) => ["UpdateRecord", "References", row.id, updateFields]);
+  } catch (err) {
+    console.error("Erreur lors de la préparation de la synchro vers References :", err);
+    return [];
+  }
+}
+
 async function syncPlanningProjetIndicesFromListeDePlan() {
   try {
     const projetsMap = await chargerProjetsMap();
@@ -586,8 +687,18 @@ document.addEventListener("focusout", async (e) => {
   td.style.backgroundColor = "";
   td.style.color = "";
   const texte = td.textContent.trim();
-  const { numDocument, designation } = td.dataset;
-  const recordsToUpdate = window.records.filter(r => r.NumeroDocument === numDocument && r.Designation === designation);
+  const { numDocument, designation, typeDocument, nomProjet } = td.dataset;
+  const currentValue = td.cellIndex === 0 ? normalizeText(numDocument) : normalizeText(designation);
+  if (normalizeText(texte) === currentValue) return;
+
+  const projetsMap = await chargerProjetsMap();
+  const projectId = projetsMap?.[normalizeText(nomProjet)] ?? null;
+  const recordsToUpdate = window.records.filter((r) =>
+    normalizeText(r.NumeroDocument) === normalizeText(numDocument) &&
+    normalizeText(r.Designation) === normalizeText(designation) &&
+    normalizeText(r.Type_document) === normalizeText(typeDocument) &&
+    matchesProjectValue(r.Nom_projet, nomProjet, projectId)
+  );
   if (recordsToUpdate.length === 0) return;
   const champs = {};
   if (td.cellIndex === 0) {
@@ -598,7 +709,26 @@ document.addEventListener("focusout", async (e) => {
   if (Object.keys(champs).length > 0) {
     const actions = recordsToUpdate.map(r => ["UpdateRecord", "ListePlan_NDC_COF", r.id, champs]);
     try {
-      await grist.docApi.applyUserActions(actions);
+      const referenceActions = await buildReferencesTextUpdateActions({
+        cellIndex: td.cellIndex,
+        texte,
+        numDocument,
+        designation,
+        typeDocument,
+        nomProjet
+      });
+      await grist.docApi.applyUserActions(actions.concat(referenceActions));
+      recordsToUpdate.forEach((record) => {
+        if (td.cellIndex === 0) {
+          record.NumeroDocument = texte;
+        } else if (td.cellIndex === 1) {
+          record.Designation = texte;
+        }
+      });
+      updateRowCellDatasets(td.parentElement, {
+        numDocument: td.cellIndex === 0 ? texte : numDocument,
+        designation: td.cellIndex === 1 ? texte : designation
+      });
       await syncPlanningProjetIndicesFromListeDePlan();
     } catch (err) {
       console.error("Erreur lors de la mise à jour du texte :", err);

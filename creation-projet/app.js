@@ -760,7 +760,7 @@ document.addEventListener('DOMContentLoaded', () => {
             paddingSelect.value = '0';
             numeroStartInput.value = '1';
             numeroStepInput.value = '1';
-            numeroPaddingSelect.value = '3';
+            numeroPaddingSelect.value = '0';
             patternTypeInput.value = 'COFFRAGE';
             updatePatternPreview();
         });
