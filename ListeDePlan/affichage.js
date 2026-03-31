@@ -186,6 +186,78 @@ async function buildReferencesTextUpdateActions({
   }
 }
 
+async function buildPlanningProjetTextUpdateActions({
+  cellIndex,
+  texte,
+  numDocument,
+  designation,
+  typeDocument,
+  nomProjet
+}) {
+  try {
+    const planningRaw = await grist.docApi.fetchTable("Planning_Projet");
+    const planningRows = normalizeRows(planningRaw);
+    const planningColumns = getColumnNames(planningRaw, planningRows);
+
+    const projectColumn = findFirstExistingColumn(planningColumns, ["NomProjet", "Nom_projet"]);
+    const typeColumn = findFirstExistingColumn(planningColumns, ["Type_doc", "Type_document", "TypeDoc"]);
+    const numeroColumn = findFirstExistingColumn(planningColumns, ["ID2", "NumeroDocument"]);
+    const designationColumns = ["Taches", "Tache", "Designation"].filter((name) => planningColumns.has(name));
+
+    if (!numeroColumn) {
+      return [];
+    }
+
+    const updateFields = {};
+    if (cellIndex === 0) {
+      updateFields[numeroColumn] = texte;
+    }
+    if (cellIndex === 1) {
+      if (planningColumns.has("Taches")) {
+        updateFields.Taches = texte;
+      }
+      if (planningColumns.has("Tache")) {
+        updateFields.Tache = texte;
+      }
+      if (planningColumns.has("Designation")) {
+        updateFields.Designation = texte;
+      }
+    }
+
+    if (Object.keys(updateFields).length === 0) {
+      return [];
+    }
+
+    const projetsMap = await chargerProjetsMap();
+    const projectId = projetsMap?.[normalizeText(nomProjet)] ?? null;
+
+    return planningRows
+      .filter((row) => {
+        if (row?.id == null) return false;
+        if (normalizeText(row[numeroColumn]) !== normalizeText(numDocument)) return false;
+        if (projectColumn && !matchesProjectValue(row[projectColumn], nomProjet, projectId)) {
+          return false;
+        }
+        if (typeColumn && normalizeText(typeDocument) && normalizeText(row[typeColumn]) !== normalizeText(typeDocument)) {
+          return false;
+        }
+        if (designationColumns.length > 0) {
+          const matchesDesignation = designationColumns.some(
+            (columnName) => normalizeText(row[columnName]) === normalizeText(designation)
+          );
+          if (!matchesDesignation) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .map((row) => ["UpdateRecord", "Planning_Projet", row.id, updateFields]);
+  } catch (err) {
+    console.error("Erreur lors de la préparation de la synchro vers Planning_Projet :", err);
+    return [];
+  }
+}
+
 async function syncPlanningProjetIndicesFromListeDePlan() {
   try {
     const projetsMap = await chargerProjetsMap();
@@ -717,7 +789,15 @@ document.addEventListener("focusout", async (e) => {
         typeDocument,
         nomProjet
       });
-      await grist.docApi.applyUserActions(actions.concat(referenceActions));
+      const planningActions = await buildPlanningProjetTextUpdateActions({
+        cellIndex: td.cellIndex,
+        texte,
+        numDocument,
+        designation,
+        typeDocument,
+        nomProjet
+      });
+      await grist.docApi.applyUserActions(actions.concat(referenceActions, planningActions));
       recordsToUpdate.forEach((record) => {
         if (td.cellIndex === 0) {
           record.NumeroDocument = texte;

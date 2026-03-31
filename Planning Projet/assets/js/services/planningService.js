@@ -500,38 +500,6 @@ function createPhaseItem({
   };
 }
 
-function createRetardBackgroundItem({
-  itemId,
-  groupId,
-  segmentEndDate,
-  retardDays,
-  title,
-}) {
-  if (!(segmentEndDate instanceof Date) || Number.isNaN(segmentEndDate.getTime())) {
-    return null;
-  }
-
-  if (!Number.isFinite(retardDays) || retardDays <= 0) {
-    return null;
-  }
-
-  const overdueStart = startOfDay(addDays(segmentEndDate, 1));
-  const overdueEnd = addDays(overdueStart, retardDays);
-  if (!(overdueEnd instanceof Date) || overdueEnd <= overdueStart) {
-    return null;
-  }
-
-  return createPhaseItem({
-    itemId,
-    groupId,
-    start: overdueStart,
-    end: overdueEnd,
-    label: "",
-    className: "phase-retard-overlay",
-    title,
-  });
-}
-
 function createSplitPhaseItems({
   itemIdBase,
   groupId,
@@ -1130,30 +1098,6 @@ export function buildTimelineDataFromPlanningRows(
       // On garde meta pour debug / usages futurs
       meta: row,
     });
-
-    const retardDays = toNumber(row.retards);
-    const segmentEndDate = resolvePlanningSegmentEndDate({
-      typeDoc: row.typeDoc,
-      lignePlanningRaw: row.lignePlanning,
-      diffCoffrageRaw: row.diffCoffrage,
-      diffArmatureRaw: row.diffArmature,
-      demarrageRaw: row.demarragesTravaux,
-      duree3Raw: row.duree3,
-    });
-    const retardBackgroundItem = createRetardBackgroundItem({
-      itemId: `${groupId}-retard-bg`,
-      groupId,
-      segmentEndDate,
-      retardDays,
-      title: `
-        <b>${escapeHtml(row.taches || "Tache")}</b><br>
-        Retard : ${escapeHtml(String(retardDays ?? 0))} jour(s)<br>
-        Fin de segment : ${segmentEndDate ? `${fmtDate(segmentEndDate)} (${fmtDateIso(segmentEndDate)})` : "-"}
-      `,
-    });
-    if (retardBackgroundItem) {
-      items.push(retardBackgroundItem);
-    }
 
     if (isCoffrageTypeDoc(row.typeDoc)) {
       // COFFRAGE : Date_limite -> Diff_coffrage
