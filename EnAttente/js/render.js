@@ -4,6 +4,11 @@ const PIE_COLORS = {
   withIndice: "#808080"           // gris (3e couleur)
 };
 
+function formatPercent(value, total) {
+  if (!total || total <= 0 || !value || value <= 0) return "0%";
+  return `${Math.round((value / total) * 100)}%`;
+}
+
 // hit-test (clic sur les parts)
 window.PIE_HIT = {
   cx: 0, cy: 0, r: 110,
@@ -38,9 +43,9 @@ function renderPieChart({
   } else {
     numbers.innerHTML = `
       <div><b>Total lignes :</b> ${total}</div>
-      <div>• Sans Indice (non bloquant) : ${countNoIndiceNotBlocking}</div>
-      <div>• Sans Indice (bloquant) : ${countNoIndiceBlocking}</div>
-      <div>• Avec Indice : ${countWithIndice}</div>
+      <div>• Sans Indice (non bloquant) : ${countNoIndiceNotBlocking} (${formatPercent(countNoIndiceNotBlocking, total)})</div>
+      <div>• Sans Indice (bloquant) : ${countNoIndiceBlocking} (${formatPercent(countNoIndiceBlocking, total)})</div>
+      <div>• Avec Indice : ${countWithIndice} (${formatPercent(countWithIndice, total)})</div>
       <div style="margin-top:6px; font-size:12px;">
         Clic sur une couleur pour filtrer la liste.
       </div>
@@ -102,6 +107,7 @@ function renderPieChart({
 
     // dessiner (pop si actif)
     drawSlice(ctx, start, end, s.color, activeSlice === s.key);
+    drawSlicePercentLabel(ctx, start, end, s.value, total, activeSlice === s.key);
 
     start = end;
   }
@@ -138,6 +144,55 @@ function drawSlice(ctx, a0, a1, color, active) {
     ctx.stroke();
   }
 
+  ctx.restore();
+}
+
+function drawSlicePercentLabel(ctx, a0, a1, value, total, active) {
+  const { cx, cy, r } = window.PIE_HIT;
+  const percentText = formatPercent(value, total);
+  const mid = (a0 + a1) / 2;
+  const sliceAngle = a1 - a0;
+  const offset = active ? 8 : 0;
+  const dx = Math.cos(mid) * offset;
+  const dy = Math.sin(mid) * offset;
+
+  ctx.save();
+  ctx.translate(dx, dy);
+  ctx.font = "bold 15px Arial, sans-serif";
+  ctx.textBaseline = "middle";
+
+  if (sliceAngle >= 0.42) {
+    const labelRadius = r * 0.62;
+    const x = cx + Math.cos(mid) * labelRadius;
+    const y = cy + Math.sin(mid) * labelRadius;
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(percentText, x, y);
+    ctx.restore();
+    return;
+  }
+
+  const startRadius = r * 0.9;
+  const endRadius = r + 16;
+  const lineStartX = cx + Math.cos(mid) * startRadius;
+  const lineStartY = cy + Math.sin(mid) * startRadius;
+  const lineEndX = cx + Math.cos(mid) * endRadius;
+  const lineEndY = cy + Math.sin(mid) * endRadius;
+  const horizontalOffset = Math.cos(mid) >= 0 ? 18 : -18;
+  const labelX = lineEndX + horizontalOffset;
+  const labelY = lineEndY;
+
+  ctx.strokeStyle = "#004990";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(lineStartX, lineStartY);
+  ctx.lineTo(lineEndX, lineEndY);
+  ctx.lineTo(labelX, labelY);
+  ctx.stroke();
+
+  ctx.textAlign = horizontalOffset > 0 ? "left" : "right";
+  ctx.fillStyle = "#004990";
+  ctx.fillText(percentText, labelX + (horizontalOffset > 0 ? 4 : -4), labelY);
   ctx.restore();
 }
 
