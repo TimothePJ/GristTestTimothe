@@ -15,6 +15,21 @@ document.addEventListener('DOMContentLoaded', () => {
         return String(name ?? "").replace(/\s+$/g, "");
     }
 
+    function formatBudgetAmount(amount) {
+        const numericAmount = Number(amount);
+        if (!Number.isFinite(numericAmount)) {
+            return "";
+        }
+
+        return new Intl.NumberFormat("fr-FR", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        })
+            .format(numericAmount)
+            .replace(/\u202f/g, " ")
+            .replace(/\u00a0/g, " ");
+    }
+
     function showStep(stepNumber) {
         steps.forEach(step => step.style.display = 'none');
         const stepToShow = document.getElementById(`step-${stepNumber}`);
@@ -63,14 +78,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('prev-to-step-1').addEventListener('click', () => showStep(1));
     document.getElementById('next-to-step-3').addEventListener('click', () => {
-        const chapter = budgetChapterInput.value.trim();
-        const amount = parseFloat(budgetAmountInput.value);
-
-        if (chapter && !isNaN(amount)) {
-            projectData.budgetLines.push({ chapter, amount });
-            renderBudgetLines();
-            budgetChapterInput.value = '';
-            budgetAmountInput.value = '';
+        if (budgetChapterInput.value.trim() && budgetAmountInput.value.trim()) {
+            saveBudgetLineFromInputs();
         }
 
         showStep(3);
@@ -134,6 +143,60 @@ document.addEventListener('DOMContentLoaded', () => {
     const budgetLinesContainer = document.getElementById('budget-lines-container');
     const budgetChapterInput = document.getElementById('budget-chapter');
     const budgetAmountInput = document.getElementById('budget-amount');
+    let editingBudgetLineIndex = null;
+
+    function getBudgetLineOrder(chapter) {
+        const match = String(chapter ?? '').trim().match(/^(\d+)/);
+        return match ? parseInt(match[1], 10) : Number.POSITIVE_INFINITY;
+    }
+
+    function sortBudgetLines() {
+        projectData.budgetLines.sort((left, right) => {
+            const leftOrder = getBudgetLineOrder(left?.chapter);
+            const rightOrder = getBudgetLineOrder(right?.chapter);
+
+            if (leftOrder !== rightOrder) {
+                return leftOrder - rightOrder;
+            }
+
+            return String(left?.chapter ?? '').localeCompare(String(right?.chapter ?? ''), 'fr', {
+                sensitivity: 'base',
+                numeric: true
+            });
+        });
+    }
+
+    function resetBudgetLineForm() {
+        editingBudgetLineIndex = null;
+        budgetChapterInput.value = '';
+        budgetAmountInput.value = '';
+        addBudgetLineBtn.textContent = 'Ajouter Ligne';
+    }
+
+    function saveBudgetLineFromInputs() {
+        const chapter = budgetChapterInput.value.trim();
+        const amount = parseFloat(budgetAmountInput.value);
+
+        if (!chapter || Number.isNaN(amount)) {
+            return false;
+        }
+
+        const nextLine = { chapter, amount };
+        if (
+            Number.isInteger(editingBudgetLineIndex) &&
+            editingBudgetLineIndex >= 0 &&
+            editingBudgetLineIndex < projectData.budgetLines.length
+        ) {
+            projectData.budgetLines[editingBudgetLineIndex] = nextLine;
+        } else {
+            projectData.budgetLines.push(nextLine);
+        }
+
+        sortBudgetLines();
+        resetBudgetLineForm();
+        renderBudgetLines();
+        return true;
+    }
 
     if (budgetChapterInput && budgetAmountInput) {
         budgetChapterInput.addEventListener('keydown', (e) => {
@@ -160,26 +223,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     addBudgetLineBtn.addEventListener('click', () => {
-        const chapter = budgetChapterInput.value.trim();
-        const amount = parseFloat(budgetAmountInput.value);
-        if (chapter && !isNaN(amount)) {
-            projectData.budgetLines.push({ chapter, amount });
-            renderBudgetLines();
-            budgetChapterInput.value = '';
-            budgetAmountInput.value = '';
-        }
+        saveBudgetLineFromInputs();
+        budgetChapterInput.focus();
     });
 
-    function renderBudgetLines() {
+    function renderBudgetLinesLegacy() {
         budgetLinesContainer.innerHTML = '';
+        sortBudgetLines();
 
         projectData.budgetLines.forEach((line, index) => {
             const row = document.createElement('div');
             row.className = 'budget-line';
+            if (editingBudgetLineIndex === index) {
+                row.classList.add('is-editing');
+            }
 
             const text = document.createElement('span');
             text.className = 'budget-line-text';
-            text.textContent = `${line.chapter}: ${line.amount.toFixed(2)} €`;
+            text.textContent = `${line.chapter}: ${formatBudgetAmount(line.amount)} €`;
 
             const del = document.createElement('button');
             del.className = 'budget-line-delete';
@@ -194,6 +255,69 @@ document.addEventListener('DOMContentLoaded', () => {
 
             row.appendChild(text);
             row.appendChild(del);
+            budgetLinesContainer.appendChild(row);
+        });
+    }
+
+    function renderBudgetLines() {
+        budgetLinesContainer.innerHTML = '';
+        sortBudgetLines();
+
+        projectData.budgetLines.forEach((line, index) => {
+            const row = document.createElement('div');
+            row.className = 'budget-line';
+            if (editingBudgetLineIndex === index) {
+                row.classList.add('is-editing');
+            }
+
+            const text = document.createElement('span');
+            text.className = 'budget-line-text';
+            text.textContent = `${line.chapter}: ${formatBudgetAmount(line.amount)} \u20AC`;
+
+            const actions = document.createElement('div');
+            actions.className = 'budget-line-actions';
+
+            const edit = document.createElement('button');
+            edit.className = 'budget-line-edit';
+            edit.type = 'button';
+            edit.title = 'Modifier cette ligne';
+            edit.textContent = 'Modifier';
+
+            edit.addEventListener('click', () => {
+                editingBudgetLineIndex = index;
+                budgetChapterInput.value = line.chapter;
+                budgetAmountInput.value = String(line.amount);
+                addBudgetLineBtn.textContent = 'Enregistrer Ligne';
+                renderBudgetLines();
+                budgetChapterInput.focus();
+                budgetChapterInput.select();
+            });
+
+            const del = document.createElement('button');
+            del.className = 'budget-line-delete';
+            del.type = 'button';
+            del.title = 'Supprimer cette ligne';
+            del.textContent = '✖';
+
+            del.addEventListener('click', () => {
+                projectData.budgetLines.splice(index, 1);
+
+                if (editingBudgetLineIndex === index) {
+                    resetBudgetLineForm();
+                } else if (
+                    Number.isInteger(editingBudgetLineIndex) &&
+                    editingBudgetLineIndex > index
+                ) {
+                    editingBudgetLineIndex -= 1;
+                }
+
+                renderBudgetLines();
+            });
+
+            actions.appendChild(edit);
+            actions.appendChild(del);
+            row.appendChild(text);
+            row.appendChild(actions);
             budgetLinesContainer.appendChild(row);
         });
     }
@@ -261,6 +385,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderReview() {
         const reviewContainer = document.getElementById('review-container');
+        sortBudgetLines();
 
         const docsHtml = (projectData.documents && projectData.documents.length)
             ? projectData.documents.map(d => d.numero ? `${d.name} [${d.numero}]` : d.name).join(', ')
@@ -272,7 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Budget
         const budgetLinesHtml = (projectData.budgetLines || [])
-            .map(line => `<p>${line.chapter}: ${Number(line.amount).toFixed(2)} €</p>`)
+            .map(line => `<p>${line.chapter}: ${formatBudgetAmount(line.amount)} €</p>`)
             .join('');
 
         // Team

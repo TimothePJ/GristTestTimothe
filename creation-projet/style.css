@@ -24,6 +24,25 @@ h1, h2 {
     border-top: 1px solid #004990;
 }
 
+.wizard-nav {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 24px;
+}
+
+.wizard-nav--between {
+    justify-content: space-between;
+}
+
+.wizard-nav--end {
+    justify-content: flex-end;
+}
+
+.wizard-nav button {
+    min-width: 150px;
+}
+
 input[type="text"],
 input[type="number"] {
     width: 100%;
@@ -43,6 +62,7 @@ button {
     border: 1px solid #004990;
     font-weight: bold;
     padding: 10px;
+    border-radius: 999px;
 }
 
 button:hover {
@@ -52,6 +72,8 @@ button:hover {
 #add-budget-line-btn {
     background-color: #ed1b2d;
     border-color: #ed1b2d;
+    flex: 0 0 auto;
+    white-space: nowrap;
 }
 
 #add-budget-line-btn:hover {
@@ -60,8 +82,41 @@ button:hover {
 
 .budget-line-form {
     display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
     gap: 10px;
     margin-bottom: 10px;
+}
+
+.budget-line-form input {
+    margin-bottom: 0;
+}
+
+#budget-chapter {
+    flex: 1 1 auto;
+}
+
+.budget-amount-field {
+    position: relative;
+    flex: 0 0 150px;
+    min-width: 150px;
+}
+
+.budget-amount-field::after {
+    content: "\20AC";
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    transform: translateY(-50%);
+    color: #004990;
+    font-weight: bold;
+    pointer-events: none;
+}
+
+#budget-amount {
+    width: 100%;
+    padding-right: 32px;
+    text-align: right;
 }
 
 #budget-lines-container p {
@@ -126,10 +181,34 @@ button:hover {
   gap: 12px;
   padding: 6px 8px;
   border-radius: 6px;
+  background-color: #e0e0e0;
+  border-left: 3px solid #ed1b2d;
+  margin-bottom: 8px;
+}
+
+.budget-line.is-editing {
+  box-shadow: 0 0 0 2px rgba(0, 73, 144, 0.14);
 }
 
 .budget-line-text {
   flex: 1;
+}
+
+.budget-line-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.budget-line-edit {
+  padding: 6px 12px;
+  background-color: #ffffff;
+  color: #004990;
+  border-color: rgba(0, 73, 144, 0.24);
+}
+
+.budget-line.is-editing .budget-line-edit {
+  background-color: rgba(0, 73, 144, 0.08);
 }
 
 .budget-line-delete {
@@ -164,7 +243,6 @@ button:hover {
   border-color: #ed1b2d;
   padding: 6px 12px;
   font-size: 14px;
-  border-radius: 4px;
 }
 
 .add-btn:hover {
@@ -337,7 +415,7 @@ button:hover {
   border-color: #004990;
   padding: 12px;
   font-size: 16px;
-  border-radius: 4px;
+  border-radius: 999px;
 }
 
 .primary-btn:hover {
@@ -370,4 +448,23 @@ button:hover {
 .doc-chip-delete:hover {
   color: #b71c1c;
   background: transparent;
+}
+
+@media (max-width: 720px) {
+  .budget-line-form {
+    flex-wrap: wrap;
+  }
+
+  .budget-amount-field {
+    flex: 1 1 180px;
+  }
+
+  .wizard-nav {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .wizard-nav button {
+    width: 100%;
+  }
 }
