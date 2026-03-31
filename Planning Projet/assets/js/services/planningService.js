@@ -487,6 +487,7 @@ function createPhaseItem({
   label,
   className,
   title,
+  style = "",
 }) {
   return {
     id: itemId,
@@ -497,7 +498,94 @@ function createPhaseItem({
     className,
     title,
     type: "range",
+    style,
   };
+}
+
+function clampPercentage(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, numericValue));
+}
+
+function getPhasePalette(className) {
+  const normalizedClassName = String(className || "");
+
+  if (normalizedClassName.includes("phase-coffrage")) {
+    if (normalizedClassName.includes("phase-past")) {
+      return {
+        background: "#ead7a2",
+        border: "#d6bd74",
+        text: "#7a4b12",
+        overdueBackground: "#d88f8f",
+        overdueBorder: "#bb6b6b",
+      };
+    }
+
+    return {
+      background: "#fef3c7",
+      border: "#fde68a",
+      text: "#92400e",
+      overdueBackground: "#d99b9b",
+      overdueBorder: "#c97c7c",
+    };
+  }
+
+  if (normalizedClassName.includes("phase-armature")) {
+    if (normalizedClassName.includes("phase-past")) {
+      return {
+        background: "#e5e7eb",
+        border: "#cbd5e1",
+        text: "#334155",
+        overdueBackground: "#efc2c2",
+        overdueBorder: "#dc9f9f",
+      };
+    }
+
+    return {
+      background: "#f3f4f6",
+      border: "#d1d5db",
+      text: "#475569",
+      overdueBackground: "#fee2e2",
+      overdueBorder: "#fecaca",
+    };
+  }
+
+  return null;
+}
+
+function buildRetardPhaseStyle(className, realiseValue, retardDays) {
+  const palette = getPhasePalette(className);
+  if (!palette) {
+    return "";
+  }
+
+  const normalizedRetardDays = toNumber(retardDays);
+  if (normalizedRetardDays == null || normalizedRetardDays <= 0) {
+    return "";
+  }
+
+  const normalizedRealise = clampPercentage(realiseValue);
+  if (normalizedRealise >= 100) {
+    return "";
+  }
+
+  if (normalizedRealise <= 0) {
+    return [
+      `background: ${palette.overdueBackground} !important`,
+      `border-color: ${palette.overdueBorder} !important`,
+      `color: ${palette.text} !important`,
+    ].join("; ");
+  }
+
+  return [
+    `background: linear-gradient(to right, ${palette.background} 0%, ${palette.background} ${normalizedRealise}%, ${palette.overdueBackground} ${normalizedRealise}%, ${palette.overdueBackground} 100%) !important`,
+    `border-color: ${palette.border} !important`,
+    `color: ${palette.text} !important`,
+  ].join("; ");
 }
 
 function createSplitPhaseItems({
@@ -508,6 +596,8 @@ function createSplitPhaseItems({
   label,
   className,
   title,
+  style = "",
+  pastStyle = "",
 }) {
   const currentInstant = getCurrentInstant();
 
@@ -525,6 +615,7 @@ function createSplitPhaseItems({
         label,
         className: `${className} phase-past`,
         title,
+        style: pastStyle,
       }),
     ];
   }
@@ -539,6 +630,7 @@ function createSplitPhaseItems({
         label,
         className,
         title,
+        style,
       }),
     ];
   }
@@ -552,6 +644,7 @@ function createSplitPhaseItems({
       label: "",
       className: `${className} phase-past`,
       title,
+      style: pastStyle,
     }),
     createPhaseItem({
       itemId: `${itemIdBase}-current`,
@@ -561,6 +654,7 @@ function createSplitPhaseItems({
       label,
       className,
       title,
+      style,
     }),
   ];
 }
@@ -1056,6 +1150,8 @@ export function buildTimelineDataFromPlanningRows(
   const appendPlanningRow = (row) => {
     const rowFallbackIndex = fallbackRowIndex++;
     const groupId = `g-${row.rowId ?? `${row.id2 || "x"}-${row.lignePlanning || "x"}-${rowFallbackIndex}`}`;
+    const realiseValue =
+      toNumber(row.realise) ?? computePlanningRealiseValue(row.typeDoc, row.indice);
 
     // Groupe avec champs de tri explicites (pour vis-timeline)
     groups.push({
@@ -1111,6 +1207,12 @@ export function buildTimelineDataFromPlanningRows(
             end: pCoffrage.end,
             label: "Coffrage",
             className: "phase-coffrage",
+            style: buildRetardPhaseStyle("phase-coffrage", realiseValue, row.retards),
+            pastStyle: buildRetardPhaseStyle(
+              "phase-coffrage phase-past",
+              realiseValue,
+              row.retards
+            ),
             title: `
               <b>${escapeHtml(row.taches || "Tache")}</b><br>
               Coffrage<br>
@@ -1132,6 +1234,12 @@ export function buildTimelineDataFromPlanningRows(
             end: pArmature.end,
             label: "Armature",
             className: "phase-armature",
+            style: buildRetardPhaseStyle("phase-armature", realiseValue, row.retards),
+            pastStyle: buildRetardPhaseStyle(
+              "phase-armature phase-past",
+              realiseValue,
+              row.retards
+            ),
             title: `
               <b>${escapeHtml(row.taches || "Tache")}</b><br>
               Armature<br>

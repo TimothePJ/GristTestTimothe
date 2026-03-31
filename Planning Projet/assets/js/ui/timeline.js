@@ -486,6 +486,54 @@ function getRenderedTimelineItemEntries() {
   return Object.values(renderedItems);
 }
 
+function clearRenderedPlanningItemStyle(node) {
+  if (!(node instanceof HTMLElement)) return;
+
+  node.style.removeProperty("background");
+  node.style.removeProperty("border-color");
+  node.style.removeProperty("color");
+}
+
+function applyRenderedPlanningItemStyle(node, styleText) {
+  if (!(node instanceof HTMLElement)) return;
+
+  clearRenderedPlanningItemStyle(node);
+
+  const normalizedStyleText = String(styleText || "").trim();
+  if (!normalizedStyleText) {
+    return;
+  }
+
+  normalizedStyleText
+    .split(";")
+    .map((declaration) => declaration.trim())
+    .filter(Boolean)
+    .forEach((declaration) => {
+      const separatorIndex = declaration.indexOf(":");
+      if (separatorIndex <= 0) {
+        return;
+      }
+
+      const propertyName = declaration.slice(0, separatorIndex).trim();
+      let propertyValue = declaration.slice(separatorIndex + 1).trim();
+      if (!propertyName || !propertyValue) {
+        return;
+      }
+
+      let priority = "";
+      if (/!important\s*$/i.test(propertyValue)) {
+        propertyValue = propertyValue.replace(/!important\s*$/i, "").trim();
+        priority = "important";
+      }
+
+      if (!propertyValue) {
+        return;
+      }
+
+      node.style.setProperty(propertyName, propertyValue, priority);
+    });
+}
+
 function decorateRenderedTimelineItems(containerEl) {
   if (!containerEl || !timelineInstance) return;
 
@@ -503,6 +551,10 @@ function decorateRenderedTimelineItems(containerEl) {
 
     const group = groupsDataSet ? groupsDataSet.get(item.group) : null;
     const title = getNativePhaseTitle(item, group);
+    const visualNode =
+      (entry?.dom?.box instanceof HTMLElement && entry.dom.box) ||
+      (entry?.dom?.range instanceof HTMLElement && entry.dom.range) ||
+      null;
 
     const domNodes = [
       entry?.dom?.box,
@@ -521,6 +573,8 @@ function decorateRenderedTimelineItems(containerEl) {
         node.setAttribute("aria-label", title);
       }
     });
+
+    applyRenderedPlanningItemStyle(visualNode, item.style);
   });
 }
 
