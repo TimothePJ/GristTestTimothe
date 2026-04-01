@@ -4,7 +4,6 @@ export function createHubState() {
     planningApi: null,
     planningAxisApi: null,
     expensesApi: null,
-    expensesChartApi: null,
     activeProjectKey: "",
     requestedProjectKey: "",
     allowChildProjectSelectionSync: false,
@@ -15,7 +14,6 @@ export function createHubState() {
     lastAppliedViewportLogicalSignature: "",
     sharedViewportState: null,
     expensesFramePresentationTimer: 0,
-    expensesChartFramePresentationTimer: 0,
     lastExpensesVisibleWidthAdjustment: Number.NaN,
     lastExpensesReferenceVisibleWidth: Number.NaN,
     lastExpensesPixelAlignmentDelta: Number.NaN,
@@ -35,8 +33,6 @@ export function createHubState() {
     expensesFrameAttachPromise: null,
     expensesFrameAttachAttempt: 0,
     expensesViewportSubscriptionApi: null,
-    expensesChartFrameAttachPromise: null,
-    expensesChartFrameAttachAttempt: 0,
     pendingPlanningLayoutDebugReasons: new Set(),
   };
 }

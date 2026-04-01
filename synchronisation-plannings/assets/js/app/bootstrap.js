@@ -4,7 +4,6 @@ import { state } from "./state.js";
 import { bindPlanningLayoutDebug, schedulePlanningLayoutDebug } from "../layout/debugLayout.js";
 import {
   resetOverviewFramePresentation,
-  scheduleExpensesChartFramePresentation,
   scheduleExpensesFramePresentation,
   scheduleOverviewFramePresentation,
 } from "../layout/framePresentation.js";
@@ -24,7 +23,6 @@ import {
   showPlanningWarningsPopup,
 } from "../layout/shell.js";
 import {
-  attachExpensesChartFrameApi,
   attachExpensesFrameApi,
   attachOverviewFrameApi,
   waitForChildApi,
@@ -53,11 +51,6 @@ function bindFrameLoadListeners() {
     scheduleExpensesFramePresentation();
     schedulePlanningLayoutDebug("expenses-frame-load");
     void attachExpensesFrameApi();
-  });
-
-  dom.expensesChartFrameEl?.addEventListener("load", () => {
-    scheduleExpensesChartFramePresentation();
-    void attachExpensesChartFrameApi();
   });
 
   dom.planningFrameEl?.addEventListener("load", () => {
@@ -90,7 +83,6 @@ export async function bootstrapHubApp() {
     bindExpensesPlanningShellControls();
     scheduleOverviewFramePresentation();
     scheduleExpensesFramePresentation();
-    scheduleExpensesChartFramePresentation();
     bindPlanningLayoutDebug();
     bindFrameLoadListeners();
 
@@ -169,7 +161,6 @@ export async function bootstrapHubApp() {
     }
 
     void attachExpensesFrameApi();
-    void attachExpensesChartFrameApi();
     schedulePlanningLayoutDebug("bootstrap-ready");
   } catch (error) {
     console.error("Erreur synchronisation plannings :", error);

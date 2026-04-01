@@ -325,10 +325,6 @@ export function setProjectContentVisibility(hasProject = false) {
   if (dom.syncPlanningCardSectionEl instanceof HTMLElement) {
     dom.syncPlanningCardSectionEl.hidden = !shouldShowProjectContent;
   }
-
-  if (dom.expensesChartCardSectionEl instanceof HTMLElement) {
-    dom.expensesChartCardSectionEl.hidden = !shouldShowProjectContent;
-  }
 }
 
 export function setSelectionWarning(selection = null) {

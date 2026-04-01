@@ -110,7 +110,7 @@ function makeGroupLabel(name, num) {
   const base = String(name || "").trim() || "Sans document";
 
   // puis numéro si présent
-  return (n == null) ? base : `${base} ${n}`;
+  return (n == null) ? base : `${n} ${base}`;
 }
 
 function getDocParts(rec) {
@@ -260,7 +260,7 @@ function refreshUI() {
   // buildRowsForTable() gère :
   // - tri simple si un document est sélectionné
   // - regroupement par document + séparateurs si "Tous"
-  const rowsForRender = buildRowsForTable(listRows);
+  const rowsForRender = buildRowsForTable(listRows, baseRows);
 
   renderDetailsTable({
     rows: rowsForRender,
@@ -353,7 +353,7 @@ initGrist(() => {
   refreshUI();
 });
 
-function buildRowsForTable(listRows) {
+function buildRowsForTable(listRows, allRows = listRows) {
   // Si un document est sélectionné => pas de regroupement
   if (selectedDocName) {
     const sorted = listRows.slice().sort((a, b) => getRecuMs(b) - getRecuMs(a));
@@ -362,12 +362,19 @@ function buildRowsForTable(listRows) {
 
   // Sinon (Tous) => regrouper par document
   const groups = new Map(); // key -> {name,n,label,sortN,rows:[]}
+  const totalCountsByGroup = new Map();
+
+  for (const rec of allRows) {
+    const p = getDocParts(rec);
+    const key = JSON.stringify({ name: p.name, n: p.n });
+    totalCountsByGroup.set(key, (totalCountsByGroup.get(key) || 0) + 1);
+  }
 
   for (const rec of listRows) {
     const p = getDocParts(rec);
     const key = JSON.stringify({ name: p.name, n: p.n }); // stable
     if (!groups.has(key)) {
-      groups.set(key, { ...p, rows: [] });
+      groups.set(key, { ...p, rows: [], totalCount: totalCountsByGroup.get(key) || 0 });
     }
     groups.get(key).rows.push(rec);
   }
@@ -385,7 +392,12 @@ function buildRowsForTable(listRows) {
     // tri interne des lignes du groupe (reçu récent -> ancien)
     g.rows.sort((a, b) => getRecuMs(b) - getRecuMs(a));
 
-    out.push({ type: "group", label: g.label, count: g.rows.length });
+    out.push({
+      type: "group",
+      label: g.label,
+      count: g.rows.length,
+      totalCount: g.totalCount || g.rows.length
+    });
     for (const rec of g.rows) {
       out.push(rowToRenderObj(rec));
     }

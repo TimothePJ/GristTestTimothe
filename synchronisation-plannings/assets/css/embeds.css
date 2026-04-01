@@ -52,14 +52,6 @@
   background: transparent;
 }
 
-.embedded-app-frame--expenses-chart {
-  min-height: 520px;
-  height: 520px;
-  border: none;
-  border-radius: inherit;
-  background: transparent;
-}
-
 body.is-sync-planning-resizing,
 body.is-sync-planning-resizing * {
   cursor: ns-resize !important;

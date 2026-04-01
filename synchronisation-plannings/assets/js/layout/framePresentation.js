@@ -400,36 +400,3 @@ export function scheduleExpensesFramePresentation(attempt = 0) {
     scheduleExpensesFramePresentation(attempt + 1);
   }, attempt === 0 ? 0 : 120);
 }
-
-export function ensureExpensesChartFramePresentation() {
-  const frameDocument = dom.expensesChartFrameEl?.contentDocument;
-  if (!frameDocument) {
-    return false;
-  }
-
-  const measuredHeight = Math.max(
-    360,
-    Math.ceil(
-      Math.max(frameDocument.documentElement?.scrollHeight || 0, frameDocument.body?.scrollHeight || 0)
-    )
-  );
-
-  if (dom.expensesChartFrameEl instanceof HTMLIFrameElement) {
-    dom.expensesChartFrameEl.style.height = `${measuredHeight}px`;
-    dom.expensesChartFrameEl.style.minHeight = `${measuredHeight}px`;
-  }
-
-  return true;
-}
-
-export function scheduleExpensesChartFramePresentation(attempt = 0) {
-  window.clearTimeout(state.expensesChartFramePresentationTimer);
-  state.expensesChartFramePresentationTimer = window.setTimeout(() => {
-    const applied = ensureExpensesChartFramePresentation();
-    if (applied || attempt >= 20) {
-      return;
-    }
-
-    scheduleExpensesChartFramePresentation(attempt + 1);
-  }, attempt === 0 ? 0 : 120);
-}

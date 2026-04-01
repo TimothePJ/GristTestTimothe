@@ -241,7 +241,7 @@ function renderDetailsTable({ rows, title, footer }) {
             <tr class="group-row">
                 <td colspan="6">
                     <span class="group-label">${escapeHtml(r.label)}</span>
-                    <span class="group-count">(${r.count})</span>
+                    <span class="group-count">(${r.count} sur ${r.totalCount ?? r.count})</span>
                 </td>
             </tr>
         `;

@@ -1,7 +1,6 @@
 import { PROJECT_SELECTION_STABILIZE_DELAY_MS } from "../app/constants.js";
 import { getReferencePlanningApi, state } from "../app/state.js";
 import {
-  scheduleExpensesChartFramePresentation,
   scheduleExpensesFramePresentation,
   scheduleOverviewFramePresentation,
 } from "../layout/framePresentation.js";
@@ -128,19 +127,12 @@ export async function applySharedProject(projectKey) {
       projectApplyCalls.push(Promise.resolve(state.expensesApi.setSelectedProject(normalizedProjectKey)));
     }
 
-    if (state.expensesChartApi?.setSelectedProject) {
-      projectApplyCalls.push(
-        Promise.resolve(state.expensesChartApi.setSelectedProject(normalizedProjectKey))
-      );
-    }
-
     await Promise.all(projectApplyCalls);
     state.activeProjectKey = normalizedProjectKey;
     setActiveProjectSelection(normalizedProjectKey);
     setProjectContentVisibility(true);
     scheduleOverviewFramePresentation();
     scheduleExpensesFramePresentation();
-    scheduleExpensesChartFramePresentation();
     const referencePlanningApi = getReferencePlanningApi() || state.planningApi;
     const planningProjectDateBounds =
       referencePlanningApi.getProjectDateBounds?.() || state.planningApi.getProjectDateBounds?.() || null;
