@@ -854,6 +854,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         NomProjet: projectData.name,       // nom écrit
                         NomDocument: doc.name,
                         NumeroDocument: doc.numero || '',
+                        Type_document: doc.type || "COFFRAGE",
                         Emetteur: emitter,
                         Reference: "_",
                         Indice: "-",

@@ -282,6 +282,7 @@ document.getElementById('referenceFile').addEventListener('change', function () 
 let records = [];
 let selectedFirstValue = '';
 let selectedSecondValue = '';
+let selectedTypeValue = '';
 let selectedDocNumber = null; let selectedDocName = '';
 
 // --- ListePlan NDC+COF integration (création automatique lors de l'ajout de document(s)) ---
@@ -548,6 +549,94 @@ function docLabelFromRecord(record) {
   return makeDocLabel(nm, num);
 }
 
+function normalizeTypeDocument(value) {
+  return String(value ?? '').trim();
+}
+
+function getCurrentSelectedType() {
+  const dropdown = document.getElementById('thirdColumnDropdown');
+  return normalizeTypeDocument(dropdown ? dropdown.value : selectedTypeValue);
+}
+
+function getDocumentTypeForProjectDoc(projectName, docName) {
+  const project = _norm(projectName);
+  const documentName = _norm(docName);
+  if (!project || !documentName || !Array.isArray(records)) return '';
+
+  const match = records.find(record =>
+    _norm(record.NomProjet) === project &&
+    _norm(record.NomDocument) === documentName &&
+    normalizeTypeDocument(record.Type_document)
+  );
+
+  return match ? normalizeTypeDocument(match.Type_document) : '';
+}
+
+const DEFAULT_DOCUMENT_TYPES = [
+  'COFFRAGE',
+  'ARMATURES',
+  'COUPES',
+  'D\u00C9MOLITION',
+  'NDC',
+];
+
+function collectProjectDocumentTypes(projectName, extraTypes = []) {
+  const project = _norm(projectName);
+  const uniqueTypes = new Set();
+  const orderedTypes = [];
+
+  function pushType(type) {
+    const normalized = normalizeTypeDocument(type);
+    if (!normalized || uniqueTypes.has(normalized)) return;
+    uniqueTypes.add(normalized);
+    orderedTypes.push(normalized);
+  }
+
+  DEFAULT_DOCUMENT_TYPES.forEach(pushType);
+
+  if (project && Array.isArray(records)) {
+    records.forEach(record => {
+      if (_norm(record.NomProjet) !== project) return;
+      pushType(record.Type_document);
+    });
+  }
+
+  (extraTypes || []).forEach(pushType);
+
+  return orderedTypes;
+}
+
+function populateTypeDocumentDropdown(selectedProject, preferredValue = '', extraTypes = []) {
+  const dropdown = document.getElementById('thirdColumnDropdown');
+  if (!dropdown) return;
+
+  const project = _norm(selectedProject);
+  const desiredValue = normalizeTypeDocument(preferredValue || selectedTypeValue);
+
+  dropdown.innerHTML = '<option value="">Tous les types</option>';
+
+  if (!project) {
+    dropdown.disabled = true;
+    dropdown.value = '';
+    selectedTypeValue = '';
+    return;
+  }
+
+  const types = collectProjectDocumentTypes(project, extraTypes);
+  types.forEach(type => {
+    const option = document.createElement('option');
+    option.value = type;
+    option.textContent = type;
+    dropdown.appendChild(option);
+  });
+
+  dropdown.disabled = false;
+  const hasDesired = desiredValue &&
+    Array.from(dropdown.options).some(option => option.value === desiredValue);
+  dropdown.value = hasDesired ? desiredValue : '';
+  selectedTypeValue = dropdown.value;
+}
+
 let currentEmetteur = '';
 let selectedRecordId = null;
 let newTable = false; // Variable to track if a new table is being added
@@ -612,10 +701,14 @@ function populateFirstColumnDropdown(values) {
 // Réinitialise et désactive la seconde liste si aucun projet n'est sélectionné
 document.getElementById('firstColumnDropdown').addEventListener('change', function () {
   const secondDropdown = document.getElementById('secondColumnListbox');
+  const typeDropdown = document.getElementById('thirdColumnDropdown');
   const tableBody = document.getElementById('tableBody');
   const tableHeader = document.getElementById('tableHeader');
 
   selectedFirstValue = this.value.trim();
+  selectedTypeValue = '';
+  selectedSecondValue = '';
+  lastValidDocument = '';
 
   if (!selectedFirstValue) {
     secondDropdown.disabled = true; // Désactiver la seconde liste
@@ -713,7 +806,7 @@ function populateTable() {
   if (filteredRecords.length === 0) return;
 
   const headers = Object.keys(filteredRecords[0]).filter(
-    (key) => key !== 'NomProjet' && key !== 'NomDocument' && key !== 'id'
+    (key) => key !== 'NomProjet' && key !== 'NomDocument' && key !== 'id' && key !== 'Type_document'
   );
 
   tableHeader.innerHTML = '<th>ID</th>';
@@ -1072,6 +1165,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
           NomProjet: selectedProject,
           NomDocument: parsedDoc.name,
           NumeroDocument: numeroOrZero(parseNumeroForStorage(parsedDoc.numero)),
+          Type_document: getDocumentTypeForProjectDoc(selectedProject, parsedDoc.name) || getCurrentSelectedType(),
           Emetteur: emetteur,
           Reference: reference,
           Indice: indice,
@@ -1088,6 +1182,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
         NomProjet: selectedProject,
         NomDocument: getSelectedDocPair().name,
         NumeroDocument: numeroOrZero(parseNumeroForStorage(getSelectedDocPair().numero)),
+        Type_document: getDocumentTypeForProjectDoc(selectedProject, getSelectedDocPair().name) || getCurrentSelectedType(),
         Emetteur: emetteur,
         Reference: reference,
         Indice: indice,
@@ -1359,6 +1454,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
       NomProjet: selectedProject,
       NomDocument: nm,
       NumeroDocument: numeroOrZero(parseNumeroForStorage(num)),
+      Type_document: documentType,
       Emetteur: emetteur,
       Reference: '_',
       Indice: '-',
@@ -1430,6 +1526,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
     if (planningAction) actions.push(planningAction);
     newRows.forEach(row => actions.push(['AddRecord', 'References', null, row]));
     await grist.docApi.applyUserActions(actions);
+    selectedTypeValue = documentType;
 
     console.log("Nouveau document ajouté :", combinedDocumentName);
 
@@ -2681,6 +2778,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
           NomProjet: selectedProject,
           NomDocument: nm,
           NumeroDocument: numeroOrZero(parseNumeroForStorage(num)),
+          Type_document: documentType,
           Emetteur: emetteur,
           Reference: '_',
           Indice: '-',
@@ -2696,6 +2794,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
 
     // Appliquer les actions via l'API Grist
     await grist.docApi.applyUserActions(actions);
+    selectedTypeValue = documentType;
     console.log("Documents ajoutés :", documentsData);
 
     // Mettre à jour le dropdown de documents en ajoutant chaque nouveau document
@@ -3130,6 +3229,149 @@ function fallbackDownload(blob, suggestedName) {
   link.click();
   document.body.removeChild(link);
 }
+const DOC_SELECT_PLACEHOLDER_TEXT = 'S\u00e9lectionner un \u00e9tage';
+const DOC_SELECT_PLACEHOLDER_HTML = `<option value="">${DOC_SELECT_PLACEHOLDER_TEXT}</option>`;
+
+function enforceDocPlaceholderText() {
+  const dropdown = document.getElementById('secondColumnListbox');
+  if (!dropdown || !dropdown.options || dropdown.options.length === 0) return;
+  const firstOption = dropdown.options[0];
+  if (firstOption && firstOption.value === '') {
+    firstOption.text = DOC_SELECT_PLACEHOLDER_TEXT;
+  }
+}
+
+function populateSecondColumnListbox(selectedValue, preferredValue = null) {
+  const listbox = document.getElementById('secondColumnListbox');
+  if (!listbox) return;
+
+  const selectedProject = _norm(selectedValue);
+  const selectedType = getCurrentSelectedType();
+  const desiredValue = _norm(
+    preferredValue != null ? preferredValue : (selectedSecondValue || listbox.value || lastValidDocument)
+  );
+
+  listbox.innerHTML = '<option value="">SÃ©lectionner un Ã©tage</option>';
+
+  listbox.innerHTML = DOC_SELECT_PLACEHOLDER_HTML;
+
+  const secondColumnValues = (records || [])
+    .filter(record =>
+      _norm(record.NomProjet) === selectedProject &&
+      (!selectedType || normalizeTypeDocument(record.Type_document) === selectedType)
+    )
+    .map(record => _norm(record.NomDocument))
+    .filter((value, index, self) => value && self.indexOf(value) === index)
+    .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+
+  secondColumnValues.forEach(value => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.text = value;
+    listbox.appendChild(option);
+  });
+
+  const addOption = document.createElement('option');
+  addOption.value = 'addTable';
+  addOption.text = 'Ajouter document';
+  listbox.appendChild(addOption);
+
+  const addMultipleOption = document.createElement('option');
+  addMultipleOption.value = 'addMultipleTable';
+  addMultipleOption.text = 'Ajouter Plusieurs document';
+  listbox.appendChild(addMultipleOption);
+
+  const hasDesiredValue = desiredValue &&
+    Array.from(listbox.options).some(option => option.value === desiredValue);
+  listbox.value = hasDesiredValue ? desiredValue : '';
+  enforceDocPlaceholderText();
+
+  selectedSecondValue = _norm(listbox.value);
+  if (selectedSecondValue) {
+    lastValidDocument = selectedSecondValue;
+    selectedDocName = selectedSecondValue;
+    selectedDocNumber = getSelectedDocPair().numero;
+  } else {
+    lastValidDocument = '';
+    selectedDocName = '';
+    selectedDocNumber = null;
+  }
+}
+
+document.getElementById('thirdColumnDropdown').addEventListener('change', function () {
+  const tableBody = document.getElementById('tableBody');
+  const tableHeader = document.getElementById('tableHeader');
+
+  selectedTypeValue = normalizeTypeDocument(this.value);
+  populateSecondColumnListbox(selectedFirstValue, selectedSecondValue || lastValidDocument || '');
+
+  if (selectedFirstValue && selectedSecondValue) {
+    populateTable();
+  } else {
+    tableBody.innerHTML = '';
+    tableHeader.innerHTML = '';
+  }
+});
+
+document.getElementById('firstColumnDropdown').addEventListener('change', function () {
+  const project = _norm(this.value);
+  const secondDropdown = document.getElementById('secondColumnListbox');
+  const tableBody = document.getElementById('tableBody');
+  const tableHeader = document.getElementById('tableHeader');
+
+  selectedFirstValue = project;
+  selectedTypeValue = '';
+  selectedSecondValue = '';
+  lastValidDocument = '';
+
+  if (!project) {
+    populateTypeDocumentDropdown('');
+    secondDropdown.disabled = true;
+    secondDropdown.innerHTML = DOC_SELECT_PLACEHOLDER_HTML;
+    tableBody.innerHTML = '';
+    tableHeader.innerHTML = '';
+    return;
+  }
+
+  populateTypeDocumentDropdown(project);
+  populateSecondColumnListbox(project, '');
+});
+
+try {
+  const secondDropdown = document.getElementById('secondColumnListbox');
+  if (secondDropdown) {
+    secondDropdown.innerHTML = DOC_SELECT_PLACEHOLDER_HTML;
+    enforceDocPlaceholderText();
+    const placeholderObserver = new MutationObserver(() => {
+      enforceDocPlaceholderText();
+    });
+    placeholderObserver.observe(secondDropdown, { childList: true });
+  }
+} catch (e) { }
+
+grist.onRecords(function (receivedRecords, tableId) {
+  if (tableId === 'Team') return;
+  if (!Array.isArray(receivedRecords)) return;
+
+  records = receivedRecords;
+  const tableBody = document.getElementById('tableBody');
+  const tableHeader = document.getElementById('tableHeader');
+
+  if (!selectedFirstValue) {
+    populateTypeDocumentDropdown('');
+    if (tableBody) tableBody.innerHTML = '';
+    if (tableHeader) tableHeader.innerHTML = '';
+    return;
+  }
+
+  populateTypeDocumentDropdown(selectedFirstValue, selectedTypeValue);
+  populateSecondColumnListbox(selectedFirstValue, selectedSecondValue || lastValidDocument || '');
+  if (!selectedSecondValue) {
+    if (tableBody) tableBody.innerHTML = '';
+    if (tableHeader) tableHeader.innerHTML = '';
+  }
+});
+
 // --- Force labels in the 2nd dropdown to "<NumeroDocument> <NomDocument>" ---
 function refreshSecondDropdownLabels() {
   try {
