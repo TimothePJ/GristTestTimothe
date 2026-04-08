@@ -332,13 +332,24 @@ function computePlanningLine(numeroText, fallbackIndex = 0) {
   return Number.isFinite(n) ? (n + 9000) : (9000 + fallbackIndex + 1);
 }
 
-function findListePlanIndex(plansTable, projectName, numeroDocStr) {
+function findListePlanIndex(plansTable, projectName, numeroDocStr, typeDocStr = '', zoneStr = '') {
   const projs = plansTable.Nom_projet || [];
   const nums  = plansTable.NumeroDocument || [];
+  const types = plansTable.Type_document || [];
+  const zones = plansTable.Zone || [];
   const p = _norm(projectName);
   const n = _norm(numeroDocStr);
-  for (let i = 0; i < Math.max(projs.length, nums.length); i++) {
-    if (_norm(projs[i]) === p && _norm(nums[i]) === n) return i;
+  const t = _norm(typeDocStr);
+  const z = normalizeZoneValue(zoneStr);
+  for (let i = 0; i < Math.max(projs.length, nums.length, types.length, zones.length); i++) {
+    if (
+      _norm(projs[i]) === p &&
+      _norm(nums[i]) === n &&
+      _norm(types[i]) === t &&
+      normalizeZoneValue(zones[i]) === z
+    ) {
+      return i;
+    }
   }
   return -1;
 }
@@ -1630,11 +1641,12 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
       const plans = await grist.docApi.fetchTable(plansTableName);
 
       const numStrPlan = _norm(documentNumber);
-      const idxPlan = findListePlanIndex(plans, selectedProject, numStrPlan);
+      const idxPlan = findListePlanIndex(plans, selectedProject, numStrPlan, documentType, documentZone);
 
       if (idxPlan >= 0) {
         planAction = ['UpdateRecord', plansTableName, plans.id[idxPlan], {
           Type_document: documentType,
+          Zone: documentZone,
           Designation: nm,
         }];
       } else {
@@ -1642,6 +1654,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
           Nom_projet: selectedProject,
           NumeroDocument: numStrPlan,
           Type_document: documentType,
+          Zone: documentZone,
           Designation: nm
         }];
       }
@@ -2843,29 +2856,34 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
       const plansTableName = await resolveListePlanTableName();
       const plans = await grist.docApi.fetchTable(plansTableName);
 
-      // Index des lignes existantes (Nom_projet + NumeroDocument)
+      // Index des lignes existantes (Nom_projet + NumeroDocument + Type_document + Zone)
       const existing = new Map();
       const projs = plans.Nom_projet || [];
       const nums  = plans.NumeroDocument || [];
+      const types = plans.Type_document || [];
+      const zones = plans.Zone || [];
       const ids   = plans.id || [];
-      const L = Math.max(projs.length, nums.length, ids.length);
+      const L = Math.max(projs.length, nums.length, types.length, zones.length, ids.length);
 
       for (let i = 0; i < L; i++) {
         const p = _norm(projs[i]);
         const n = _norm(nums[i]);
-        if (!p || !n) continue;
-        existing.set(`${p}||${n}`, ids[i]);
+        const t = _norm(types[i]);
+        const z = normalizeZoneValue(zones[i]);
+        if (!p || !n || !t) continue;
+        existing.set(`${p}||${n}||${t}||${z}`, ids[i]);
       }
       const projKey = _norm(selectedProject);
 
       documentsData.forEach(doc => {
         const numStrPlan = _norm(doc.documentNumber);
         const nm = String(doc.documentName).trim();
-        const key = `${projKey}||${numStrPlan}`;
+        const key = `${projKey}||${numStrPlan}||${_norm(documentType)}||${documentZone}`;
 
         if (existing.has(key)) {
           actions.push(['UpdateRecord', plansTableName, existing.get(key), {
             Type_document: documentType,
+            Zone: documentZone,
             Designation: nm,
           }]);
         } else {
@@ -2873,6 +2891,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
             Nom_projet: selectedProject,
             NumeroDocument: numStrPlan,
             Type_document: documentType,
+            Zone: documentZone,
             Designation: nm
           }]);
           // évite les doublons si deux fois le même numéro est tapé dans le tableau

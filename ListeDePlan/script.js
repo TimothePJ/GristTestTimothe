@@ -175,6 +175,8 @@ function getNomProjet(record) {
   }
 window.__skipChangeEvent = false;
 window.records = [];
+window.LISTE_DE_PLAN_ALL_TYPES_VALUE = "__ALL_TYPES__";
+window.LISTE_DE_PLAN_ALL_TYPES_LABEL = "Tous les types";
 
 grist.ready(async () => {
   await loadExternalComponents();
@@ -243,7 +245,7 @@ grist.onRecords(async (rec) => {
         .filter(val => typeof val === "string" && val.trim())
     )].sort();
 
-    populateDropdown("typeDocumentDropdown", typesDocument);
+    populateTypeDocumentDropdown(typesDocument);
   }
 
   const selectedTypeDocument = document.getElementById("typeDocumentDropdown").value;
@@ -270,10 +272,33 @@ function populateDropdown(id, values) {
   }
 }
 
+function populateTypeDocumentDropdown(values) {
+  const dropdown = document.getElementById("typeDocumentDropdown");
+  if (!dropdown) return;
+
+  const currentValue = dropdown.value;
+  const allTypesValue = window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__";
+  const allTypesLabel = window.LISTE_DE_PLAN_ALL_TYPES_LABEL || "Tous les types";
+
+  dropdown.innerHTML = `<option value="${allTypesValue}">${allTypesLabel}</option>`;
+  values.forEach((val) => {
+    const opt = document.createElement("option");
+    opt.value = val;
+    opt.textContent = val;
+    dropdown.appendChild(opt);
+  });
+
+  if (currentValue === allTypesValue || values.includes(currentValue)) {
+    dropdown.value = currentValue;
+  } else {
+    dropdown.value = allTypesValue;
+  }
+}
+
 document.getElementById("projectDropdown").addEventListener("change", () => {
   const selectedProject = document.getElementById("projectDropdown").value;
   if (!selectedProject) {
-    populateDropdown("typeDocumentDropdown", []);
+    populateTypeDocumentDropdown([]);
     document.getElementById("plans-output").innerHTML = "";
     return;
   }
@@ -301,10 +326,10 @@ document.getElementById("projectDropdown").addEventListener("change", () => {
   }
 
   const typesDocument = [...typesDocumentSet].sort();
-  populateDropdown("typeDocumentDropdown", typesDocument);
+  populateTypeDocumentDropdown(typesDocument);
   console.log("Types affichés dans la deuxième liste :", typesDocument);
-  document.getElementById("typeDocumentDropdown").value = "";
-  document.getElementById("plans-output").innerHTML = "";
+  document.getElementById("typeDocumentDropdown").value = window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__";
+  afficherPlansFiltres(selectedProject, document.getElementById("typeDocumentDropdown").value, window.records);
 });
 
 document.getElementById("typeDocumentDropdown").addEventListener("change", () => {

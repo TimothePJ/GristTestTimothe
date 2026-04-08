@@ -114,12 +114,14 @@ async function getContextMenuProjectId(projectName) {
 function rowMatchesDocumentContext(row, {
   projectColumn,
   typeColumn,
+  zoneColumn,
   designationColumns,
   numeroField,
   numDocument,
   designation,
   typeDocument,
   nomProjet,
+  zone,
   projectId
 }) {
   if (row?.id == null) return false;
@@ -133,6 +135,10 @@ function rowMatchesDocumentContext(row, {
     if (normalizeContextMenuText(row[typeColumn]) !== normalizeContextMenuText(typeDocument)) {
       return false;
     }
+  }
+
+  if (zoneColumn && normalizeContextMenuText(row[zoneColumn]) !== normalizeContextMenuText(zone)) {
+    return false;
   }
 
   if (designationColumns.length > 0) {
@@ -151,7 +157,8 @@ async function buildLinkedDeletionActions({
   numDocument,
   designation,
   typeDocument,
-  nomProjet
+  nomProjet,
+  zone
 }) {
   const actions = [];
   const projectId = await getContextMenuProjectId(nomProjet);
@@ -164,18 +171,21 @@ async function buildLinkedDeletionActions({
     if (referenceColumns.has("NumeroDocument")) {
       const projectColumn = findContextMenuColumn(referenceColumns, ["NomProjet", "Nom_projet"]);
       const typeColumn = findContextMenuColumn(referenceColumns, ["Type_document", "TypeDocument"]);
+      const zoneColumn = findContextMenuColumn(referenceColumns, ["Zone"]);
       const designationColumns = ["NomDocument", "Designation"].filter((name) => referenceColumns.has(name));
 
       for (const row of referenceRows) {
         if (rowMatchesDocumentContext(row, {
           projectColumn,
           typeColumn,
+          zoneColumn,
           designationColumns,
           numeroField: "NumeroDocument",
           numDocument,
           designation,
           typeDocument,
           nomProjet,
+          zone,
           projectId
         })) {
           actions.push(["RemoveRecord", "References", row.id]);
@@ -195,20 +205,45 @@ async function buildLinkedDeletionActions({
     if (numeroField) {
       const projectColumn = findContextMenuColumn(planningColumns, ["NomProjet", "Nom_projet"]);
       const typeColumn = findContextMenuColumn(planningColumns, ["Type_doc", "Type_document", "TypeDoc"]);
+      const zoneColumn = findContextMenuColumn(planningColumns, ["Zone"]);
       const designationColumns = ["Taches", "Tache", "Designation"].filter((name) => planningColumns.has(name));
 
-      for (const row of planningRows) {
-        if (rowMatchesDocumentContext(row, {
+      const exactPlanningMatches = planningRows.filter((row) =>
+        rowMatchesDocumentContext(row, {
           projectColumn,
           typeColumn,
+          zoneColumn,
           designationColumns,
           numeroField,
           numDocument,
           designation,
           typeDocument,
           nomProjet,
+          zone,
           projectId
-        })) {
+        })
+      );
+
+      const planningRowsToDelete = exactPlanningMatches.length
+        ? exactPlanningMatches
+        : planningRows.filter((row) =>
+            rowMatchesDocumentContext(row, {
+              projectColumn,
+              typeColumn,
+              zoneColumn: null,
+              designationColumns,
+              numeroField,
+              numDocument,
+              designation,
+              typeDocument,
+              nomProjet,
+              zone,
+              projectId
+            })
+          );
+
+      for (const row of planningRowsToDelete) {
+        if (row?.id != null) {
           actions.push(["RemoveRecord", "Planning_Projet", row.id]);
         }
       }
@@ -294,12 +329,14 @@ async function supprimerLigne(cell) {
     const designation = normalizeContextMenuText(cell.dataset.designation);
     const typeDocument = normalizeContextMenuText(cell.dataset.typeDocument);
     const nomProjet = normalizeContextMenuText(cell.dataset.nomProjet);
+    const zone = normalizeContextMenuText(cell.dataset.zone);
 
     const recordsToDelete = (window.records || [])
       .filter((r) =>
         normalizeContextMenuText(r.NumeroDocument) === numDocument &&
         normalizeContextMenuText(r.Designation) === designation &&
         normalizeContextMenuText(r.Type_document) === typeDocument &&
+        normalizeContextMenuText(r.Zone) === zone &&
         normalizeContextMenuText(r.Nom_projet) === nomProjet
       )
       .map((r) => r.id)
@@ -314,7 +351,8 @@ async function supprimerLigne(cell) {
         numDocument,
         designation,
         typeDocument,
-        nomProjet
+        nomProjet,
+        zone
       });
       await grist.docApi.applyUserActions(actions.concat(linkedActions));
       if (typeof syncPlanningProjetIndicesFromListeDePlan === "function") {
