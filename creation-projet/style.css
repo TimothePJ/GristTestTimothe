@@ -464,6 +464,31 @@ select {
   font-size: 14px;
 }
 
+.doc-zone-group {
+  margin-bottom: 10px;
+}
+
+.doc-zone-title {
+  margin: 0 0 6px;
+  color: #5f6b7a;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.doc-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.doc-chip-text {
+  font-weight: 600;
+}
+
+.doc-chip-numero {
+  color: #004990;
+}
+
 .doc-chip-delete {
   background: transparent;
   border: none;

@@ -51,6 +51,160 @@ document.addEventListener('DOMContentLoaded', () => {
         return candidateColumns.find((columnName) => Array.isArray(teamData?.[columnName])) || null;
     }
 
+    const LISTEPLAN_TABLE_CANDIDATES = [
+        'ListePlan_NDC_COF',
+        'ListePlan NDC+COF',
+        'ListePlan_NDC+COF'
+    ];
+    const PLANNING_TABLE_CANDIDATES = ['Planning_Projet', 'Planning_Project'];
+
+    function normalizeText(value) {
+        return String(value ?? '').trim();
+    }
+
+    function normalizeDocumentType(value) {
+        return normalizeText(value).toUpperCase();
+    }
+
+    function normalizeZoneValue(value) {
+        const text = normalizeText(value);
+        if (!text) return '';
+        return text.toLowerCase() === 'sans zone' ? '' : text;
+    }
+
+    function formatZoneLabel(value) {
+        return normalizeZoneValue(value) || 'Sans zone';
+    }
+
+    function buildDocumentIdentityKey(doc = {}) {
+        return [
+            normalizeText(doc.name).toLowerCase(),
+            normalizeText(doc.numero).toLowerCase(),
+            normalizeDocumentType(doc.type),
+            normalizeZoneValue(doc.zone).toLowerCase()
+        ].join('||');
+    }
+
+    function buildDocumentNumeroScopeKey(doc = {}) {
+        return [
+            normalizeText(doc.numero).toLowerCase(),
+            normalizeDocumentType(doc.type),
+            normalizeZoneValue(doc.zone).toLowerCase()
+        ].join('||');
+    }
+
+    function collectCustomDocumentZones() {
+        const seen = new Set();
+        return customDocuments
+            .map((doc) => normalizeZoneValue(doc?.zone))
+            .filter((zone) => {
+                if (!zone || seen.has(zone.toLowerCase())) return false;
+                seen.add(zone.toLowerCase());
+                return true;
+            })
+            .sort((left, right) => left.localeCompare(right, 'fr', {
+                sensitivity: 'base',
+                numeric: true
+            }));
+    }
+
+    function refreshDocumentZoneSuggestionLists() {
+        const zones = collectCustomDocumentZones();
+        ['manual-doc-zone-list', 'pattern-doc-zone-list'].forEach((listId) => {
+            const datalist = document.getElementById(listId);
+            if (!(datalist instanceof HTMLDataListElement)) return;
+            datalist.innerHTML = '';
+            zones.forEach((zone) => {
+                const option = document.createElement('option');
+                option.value = zone;
+                datalist.appendChild(option);
+            });
+        });
+    }
+
+    function getTableColumnNames(tableData = {}) {
+        if (Array.isArray(tableData)) {
+            const names = new Set();
+            tableData.forEach((row) => {
+                Object.keys(row || {}).forEach((key) => names.add(String(key)));
+            });
+            return names;
+        }
+
+        return new Set(Object.keys(tableData || {}));
+    }
+
+    async function fetchFirstAvailableTable(tableCandidates = []) {
+        let lastError = null;
+        for (const tableName of tableCandidates) {
+            try {
+                const data = await grist.docApi.fetchTable(tableName);
+                return { tableName, data, columns: getTableColumnNames(data) };
+            } catch (error) {
+                lastError = error;
+            }
+        }
+
+        throw lastError || new Error('Aucune table disponible.');
+    }
+
+    function setFieldIfPresent(columnNames, fields, columnName, value) {
+        if (columnNames.has(columnName)) {
+            fields[columnName] = value;
+        }
+    }
+
+    function getTableColumnArray(tableData, columnName) {
+        if (!tableData || !columnName) return [];
+        return Array.isArray(tableData[columnName]) ? tableData[columnName] : [];
+    }
+
+    function planningZoneExists(planningData, projectName, zoneName) {
+        const normalizedZone = normalizeZoneValue(zoneName);
+        if (!normalizedZone) return true;
+
+        const projects = getTableColumnArray(planningData, 'NomProjet');
+        const zones = getTableColumnArray(planningData, 'Zone');
+
+        for (let index = 0; index < Math.max(projects.length, zones.length); index += 1) {
+            if (
+                normalizeText(projects[index]).toLowerCase() === normalizeText(projectName).toLowerCase() &&
+                normalizeZoneValue(zones[index]) === normalizedZone
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    function buildPlanningZoneAnchorFields(columnNames, projectName, zoneName) {
+        const normalizedZone = normalizeZoneValue(zoneName);
+        const fields = {};
+
+        setFieldIfPresent(columnNames, fields, 'ID2', '');
+        setFieldIfPresent(columnNames, fields, 'Taches', '');
+        setFieldIfPresent(columnNames, fields, 'Tache', '');
+        setFieldIfPresent(columnNames, fields, 'Type_doc', '');
+        setFieldIfPresent(columnNames, fields, 'Ligne_planning', 0);
+        setFieldIfPresent(columnNames, fields, 'Prev_Indice_0', null);
+        setFieldIfPresent(columnNames, fields, 'Date_limite', null);
+        setFieldIfPresent(columnNames, fields, 'Duree_1', 0);
+        setFieldIfPresent(columnNames, fields, 'Diff_coffrage', null);
+        setFieldIfPresent(columnNames, fields, 'Duree_2', 0);
+        setFieldIfPresent(columnNames, fields, 'Diff_armature', null);
+        setFieldIfPresent(columnNames, fields, 'Duree_3', 0);
+        setFieldIfPresent(columnNames, fields, 'Demarrages_travaux', null);
+        setFieldIfPresent(columnNames, fields, 'Retards', 0);
+        setFieldIfPresent(columnNames, fields, 'Indice', '');
+        setFieldIfPresent(columnNames, fields, 'Realise', 0);
+        setFieldIfPresent(columnNames, fields, 'NomProjet', projectName);
+        setFieldIfPresent(columnNames, fields, 'Groupe', '');
+        setFieldIfPresent(columnNames, fields, 'Zone', normalizedZone);
+
+        return fields;
+    }
+
     function showStep(stepNumber) {
         steps.forEach(step => step.style.display = 'none');
         const stepToShow = document.getElementById(`step-${stepNumber}`);
@@ -141,8 +295,9 @@ document.addEventListener('DOMContentLoaded', () => {
         let hasDuplicate = false;
         projectData.documents.forEach(doc => {
             if (doc.numero) {
-                numeroCounts[doc.numero] = (numeroCounts[doc.numero] || 0) + 1;
-                if (numeroCounts[doc.numero] > 1) {
+                const duplicateKey = buildDocumentNumeroScopeKey(doc);
+                numeroCounts[duplicateKey] = (numeroCounts[duplicateKey] || 0) + 1;
+                if (numeroCounts[duplicateKey] > 1) {
                     hasDuplicate = true;
                 }
             }
@@ -428,7 +583,14 @@ document.addEventListener('DOMContentLoaded', () => {
         sortBudgetLines();
 
         const docsHtml = (projectData.documents && projectData.documents.length)
-            ? projectData.documents.map(d => d.numero ? `${d.name} [${d.numero}]` : d.name).join(', ')
+            ? projectData.documents
+                .map((d) => {
+                    const numeroLabel = d.numero ? ` [${d.numero}]` : '';
+                    const typeLabel = normalizeDocumentType(d.type || 'COFFRAGE');
+                    const zoneLabel = ` - ${formatZoneLabel(d.zone)}`;
+                    return `${d.name}${numeroLabel} (${typeLabel}${zoneLabel})`;
+                })
+                .join(', ')
             : '-';
 
         const emittersHtml = (projectData.emitters && projectData.emitters.length)
@@ -489,6 +651,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Override grid display to allow full-width groups
         container.style.display = 'block';
+        refreshDocumentZoneSuggestionLists();
 
         if (customDocuments.length === 0) {
             container.innerHTML = '<p style="color: #666; font-style: italic;">Aucun document ajouté. Cliquez sur "+ Ajouter" pour commencer.</p>';
@@ -498,14 +661,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const numeroCounts = {};
         customDocuments.forEach(doc => {
             if (doc.numero) {
-                numeroCounts[doc.numero] = (numeroCounts[doc.numero] || 0) + 1;
+                const duplicateKey = buildDocumentNumeroScopeKey(doc);
+                numeroCounts[duplicateKey] = (numeroCounts[duplicateKey] || 0) + 1;
             }
         });
 
         // Group by type
         const groupedDocs = {};
         customDocuments.forEach((doc, index) => {
-            const type = doc.type || 'Autre';
+            const type = normalizeDocumentType(doc.type || 'COFFRAGE') || 'AUTRE';
             if (!groupedDocs[type]) {
                 groupedDocs[type] = [];
             }
@@ -528,33 +692,100 @@ document.addEventListener('DOMContentLoaded', () => {
             header.style.fontSize = '1em';
             groupDiv.appendChild(header);
 
-            const chipsContainer = document.createElement('div');
-            chipsContainer.style.display = 'flex';
-            chipsContainer.style.flexWrap = 'wrap';
-            chipsContainer.style.gap = '8px';
-
-            groupedDocs[type].forEach(({ doc, index }) => {
-                const chip = document.createElement('span');
-                chip.className = 'doc-chip';
-                
-                const isDuplicate = doc.numero && numeroCounts[doc.numero] > 1;
-                const numeroStyle = isDuplicate ? 'color: red; font-weight: bold;' : '';
-                const numeroLabel = doc.numero ? ` <span style="${numeroStyle}">[${doc.numero}]</span>` : '';
-                
-                if (isDuplicate) {
-                    chip.style.borderColor = "red";
-                    chip.title = "Numéro de document dupliqué";
+            const docsByZone = new Map();
+            groupedDocs[type].forEach((entry) => {
+                const zoneKey = normalizeZoneValue(entry.doc.zone);
+                if (!docsByZone.has(zoneKey)) {
+                    docsByZone.set(zoneKey, []);
                 }
-
-                chip.innerHTML = `
-                    <input type="checkbox" name="project-docs" value="${index}" checked style="display: none;">
-                    <span>${doc.name}${numeroLabel}</span>
-                    <button type="button" class="doc-chip-delete" data-index="${index}" title="Supprimer">✖</button>
-                `;
-                chipsContainer.appendChild(chip);
+                docsByZone.get(zoneKey).push(entry);
             });
 
-            groupDiv.appendChild(chipsContainer);
+            const zoneKeys = Array.from(docsByZone.keys()).sort((left, right) => {
+                const leftBlank = normalizeZoneValue(left) ? 0 : 1;
+                const rightBlank = normalizeZoneValue(right) ? 0 : 1;
+                if (leftBlank !== rightBlank) {
+                    return leftBlank - rightBlank;
+                }
+                return formatZoneLabel(left).localeCompare(formatZoneLabel(right), 'fr', {
+                    sensitivity: 'base',
+                    numeric: true
+                });
+            });
+
+            zoneKeys.forEach((zoneKey) => {
+                const zoneSection = document.createElement('div');
+                zoneSection.className = 'doc-zone-group';
+
+                const zoneTitle = document.createElement('h5');
+                zoneTitle.className = 'doc-zone-title';
+                zoneTitle.textContent = formatZoneLabel(zoneKey);
+                zoneSection.appendChild(zoneTitle);
+
+                const chipsContainer = document.createElement('div');
+                chipsContainer.className = 'doc-chip-list';
+
+                docsByZone.get(zoneKey)
+                    .sort((left, right) =>
+                        normalizeText(left.doc.numero).localeCompare(normalizeText(right.doc.numero), 'fr', {
+                            sensitivity: 'base',
+                            numeric: true
+                        }) ||
+                        normalizeText(left.doc.name).localeCompare(normalizeText(right.doc.name), 'fr', {
+                            sensitivity: 'base',
+                            numeric: true
+                        })
+                    )
+                    .forEach(({ doc, index }) => {
+                        const chip = document.createElement('span');
+                        chip.className = 'doc-chip';
+
+                        const duplicateKey = buildDocumentNumeroScopeKey(doc);
+                        const isDuplicate = doc.numero && numeroCounts[duplicateKey] > 1;
+                        if (isDuplicate) {
+                            chip.style.borderColor = 'red';
+                            chip.title = `Numéro de document dupliqué pour ${type} - ${formatZoneLabel(doc.zone)}`;
+                        }
+
+                        const checkbox = document.createElement('input');
+                        checkbox.type = 'checkbox';
+                        checkbox.name = 'project-docs';
+                        checkbox.value = String(index);
+                        checkbox.checked = true;
+                        checkbox.style.display = 'none';
+
+                        const text = document.createElement('span');
+                        text.className = 'doc-chip-text';
+                        text.textContent = doc.name;
+
+                        chip.appendChild(checkbox);
+                        chip.appendChild(text);
+
+                        if (doc.numero) {
+                            const numero = document.createElement('span');
+                            numero.className = 'doc-chip-numero';
+                            numero.textContent = `[${doc.numero}]`;
+                            if (isDuplicate) {
+                                numero.style.color = 'red';
+                                numero.style.fontWeight = 'bold';
+                            }
+                            chip.appendChild(numero);
+                        }
+
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.type = 'button';
+                        deleteBtn.className = 'doc-chip-delete';
+                        deleteBtn.dataset.index = String(index);
+                        deleteBtn.title = 'Supprimer';
+                        deleteBtn.textContent = '✖';
+                        chip.appendChild(deleteBtn);
+
+                        chipsContainer.appendChild(chip);
+                    });
+
+                zoneSection.appendChild(chipsContainer);
+                groupDiv.appendChild(zoneSection);
+            });
             container.appendChild(groupDiv);
         });
 
@@ -572,15 +803,17 @@ document.addEventListener('DOMContentLoaded', () => {
         docs.forEach(doc => {
             const name = (typeof doc === 'string' ? doc : doc.name).trim();
             const numero = (typeof doc === 'string' ? '' : (doc.numero || '')).trim();
-            const type = (typeof doc === 'string' ? '' : (doc.type || '')).trim();
-            if (name && !customDocuments.some(d => d.name === name)) {
-                customDocuments.push({ name, numero, type });
+            const type = normalizeDocumentType(typeof doc === 'string' ? '' : (doc.type || 'COFFRAGE'));
+            const zone = normalizeZoneValue(typeof doc === 'string' ? '' : (doc.zone || ''));
+            const nextDoc = { name, numero, type, zone };
+            if (name && !customDocuments.some(d => buildDocumentIdentityKey(d) === buildDocumentIdentityKey(nextDoc))) {
+                customDocuments.push(nextDoc);
             }
         });
         renderDocumentsSelection();
     }
 
-    function generatePatternDocuments(prefix, suffix, start, end, padding, numeroStart, numeroStep, numeroPadding, type) {
+    function generatePatternDocuments(prefix, suffix, start, end, padding, numeroStart, numeroStep, numeroPadding, type, zone = '') {
         const docs = [];
         let currentNumero = numeroStart;
         for (let i = start; i <= end; i++) {
@@ -592,7 +825,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (numeroPadding > 0) {
                 numeroStr = numeroStr.padStart(numeroPadding, '0');
             }
-            docs.push({ name: `${prefix}${numStr}${suffix}`, numero: numeroStr, type: type });
+            docs.push({
+                name: `${prefix}${numStr}${suffix}`,
+                numero: numeroStr,
+                type: normalizeDocumentType(type),
+                zone: normalizeZoneValue(zone)
+            });
             currentNumero += numeroStep;
         }
         return docs;
@@ -608,6 +846,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const numeroStep = parseInt(document.getElementById('numero-step').value, 10) || 1;
         const numeroPadding = parseInt(document.getElementById('numero-padding').value, 10) || 0;
         const type = document.getElementById('pattern-doc-type').value || '';
+        const zone = normalizeZoneValue(document.getElementById('pattern-doc-zone').value || '');
 
         const previewBody = document.getElementById('pattern-preview-body');
 
@@ -774,6 +1013,408 @@ document.addEventListener('DOMContentLoaded', () => {
         setupDocsModal();
     }
 
+    function renderDocumentsSelection() {
+        const container = document.getElementById('documents-selection-container');
+        container.innerHTML = '';
+        container.style.display = 'block';
+        refreshDocumentZoneSuggestionLists();
+
+        if (customDocuments.length === 0) {
+            container.innerHTML = '<p style="color: #666; font-style: italic;">Aucun document ajoute. Cliquez sur "+ Ajouter" pour commencer.</p>';
+            return;
+        }
+
+        const duplicateCounts = {};
+        customDocuments.forEach((doc) => {
+            if (!normalizeText(doc.numero)) return;
+            const duplicateKey = buildDocumentNumeroScopeKey(doc);
+            duplicateCounts[duplicateKey] = (duplicateCounts[duplicateKey] || 0) + 1;
+        });
+
+        const groupedByType = new Map();
+        customDocuments.forEach((doc, index) => {
+            const typeKey = normalizeDocumentType(doc.type || 'COFFRAGE') || 'AUTRE';
+            if (!groupedByType.has(typeKey)) {
+                groupedByType.set(typeKey, []);
+            }
+            groupedByType.get(typeKey).push({ doc, index });
+        });
+
+        const sortedTypes = Array.from(groupedByType.keys()).sort((left, right) =>
+            left.localeCompare(right, 'fr', { sensitivity: 'base', numeric: true })
+        );
+
+        sortedTypes.forEach((typeKey) => {
+            const typeSection = document.createElement('div');
+            typeSection.className = 'doc-group';
+            typeSection.style.marginBottom = '15px';
+
+            const typeHeader = document.createElement('h4');
+            typeHeader.textContent = typeKey;
+            typeHeader.style.marginTop = '0';
+            typeHeader.style.marginBottom = '8px';
+            typeHeader.style.borderBottom = '1px solid #ccc';
+            typeHeader.style.color = '#004990';
+            typeHeader.style.fontSize = '1em';
+            typeSection.appendChild(typeHeader);
+
+            const groupedByZone = new Map();
+            groupedByType.get(typeKey).forEach((entry) => {
+                const zoneKey = normalizeZoneValue(entry.doc.zone);
+                if (!groupedByZone.has(zoneKey)) {
+                    groupedByZone.set(zoneKey, []);
+                }
+                groupedByZone.get(zoneKey).push(entry);
+            });
+
+            const zoneKeys = Array.from(groupedByZone.keys()).sort((left, right) => {
+                const leftBlank = normalizeZoneValue(left) ? 0 : 1;
+                const rightBlank = normalizeZoneValue(right) ? 0 : 1;
+                if (leftBlank !== rightBlank) {
+                    return leftBlank - rightBlank;
+                }
+                return formatZoneLabel(left).localeCompare(formatZoneLabel(right), 'fr', {
+                    sensitivity: 'base',
+                    numeric: true
+                });
+            });
+
+            zoneKeys.forEach((zoneKey) => {
+                const zoneSection = document.createElement('div');
+                zoneSection.className = 'doc-zone-group';
+
+                const zoneTitle = document.createElement('h5');
+                zoneTitle.className = 'doc-zone-title';
+                zoneTitle.textContent = formatZoneLabel(zoneKey);
+                zoneSection.appendChild(zoneTitle);
+
+                const chipList = document.createElement('div');
+                chipList.className = 'doc-chip-list';
+
+                groupedByZone.get(zoneKey)
+                    .sort((left, right) =>
+                        normalizeText(left.doc.numero).localeCompare(normalizeText(right.doc.numero), 'fr', {
+                            sensitivity: 'base',
+                            numeric: true
+                        }) ||
+                        normalizeText(left.doc.name).localeCompare(normalizeText(right.doc.name), 'fr', {
+                            sensitivity: 'base',
+                            numeric: true
+                        })
+                    )
+                    .forEach(({ doc, index }) => {
+                        const chip = document.createElement('span');
+                        chip.className = 'doc-chip';
+
+                        const duplicateKey = buildDocumentNumeroScopeKey(doc);
+                        const isDuplicate = normalizeText(doc.numero) && duplicateCounts[duplicateKey] > 1;
+                        if (isDuplicate) {
+                            chip.style.borderColor = 'red';
+                            chip.title = `Numero de document duplique pour ${typeKey} - ${formatZoneLabel(doc.zone)}`;
+                        }
+
+                        const checkbox = document.createElement('input');
+                        checkbox.type = 'checkbox';
+                        checkbox.name = 'project-docs';
+                        checkbox.value = String(index);
+                        checkbox.checked = true;
+                        checkbox.style.display = 'none';
+                        chip.appendChild(checkbox);
+
+                        const chipText = document.createElement('span');
+                        chipText.className = 'doc-chip-text';
+                        chipText.textContent = doc.name;
+                        chip.appendChild(chipText);
+
+                        if (normalizeText(doc.numero)) {
+                            const numeroLabel = document.createElement('span');
+                            numeroLabel.className = 'doc-chip-numero';
+                            numeroLabel.textContent = `[${doc.numero}]`;
+                            if (isDuplicate) {
+                                numeroLabel.style.color = 'red';
+                                numeroLabel.style.fontWeight = 'bold';
+                            }
+                            chip.appendChild(numeroLabel);
+                        }
+
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.type = 'button';
+                        deleteBtn.className = 'doc-chip-delete';
+                        deleteBtn.dataset.index = String(index);
+                        deleteBtn.title = 'Supprimer';
+                        deleteBtn.textContent = '✖';
+                        chip.appendChild(deleteBtn);
+
+                        chipList.appendChild(chip);
+                    });
+
+                zoneSection.appendChild(chipList);
+                typeSection.appendChild(zoneSection);
+            });
+
+            container.appendChild(typeSection);
+        });
+
+        container.querySelectorAll('.doc-chip-delete').forEach((btn) => {
+            btn.addEventListener('click', (event) => {
+                const index = parseInt(event.currentTarget.dataset.index, 10);
+                customDocuments.splice(index, 1);
+                renderDocumentsSelection();
+            });
+        });
+    }
+
+    function addDocuments(docs) {
+        docs.forEach((doc) => {
+            const name = normalizeText(typeof doc === 'string' ? doc : doc.name);
+            const numero = normalizeText(typeof doc === 'string' ? '' : (doc.numero || ''));
+            const type = normalizeDocumentType(typeof doc === 'string' ? '' : (doc.type || 'COFFRAGE'));
+            const zone = normalizeZoneValue(typeof doc === 'string' ? '' : (doc.zone || ''));
+            const nextDoc = { name, numero, type, zone };
+            if (!name) return;
+            if (customDocuments.some((existingDoc) => buildDocumentIdentityKey(existingDoc) === buildDocumentIdentityKey(nextDoc))) {
+                return;
+            }
+            customDocuments.push(nextDoc);
+        });
+        renderDocumentsSelection();
+    }
+
+    function generatePatternDocuments(prefix, suffix, start, end, padding, numeroStart, numeroStep, numeroPadding, type, zone = '') {
+        const docs = [];
+        let currentNumero = numeroStart;
+        for (let i = start; i <= end; i += 1) {
+            let numStr = String(i);
+            if (padding > 0) {
+                numStr = numStr.padStart(padding, '0');
+            }
+            let numeroStr = String(currentNumero);
+            if (numeroPadding > 0) {
+                numeroStr = numeroStr.padStart(numeroPadding, '0');
+            }
+            docs.push({
+                name: `${prefix}${numStr}${suffix}`,
+                numero: numeroStr,
+                type: normalizeDocumentType(type),
+                zone: normalizeZoneValue(zone)
+            });
+            currentNumero += numeroStep;
+        }
+        return docs;
+    }
+
+    function updatePatternPreview() {
+        const prefix = document.getElementById('pattern-prefix').value || '';
+        const suffix = document.getElementById('pattern-suffix').value || '';
+        const start = parseInt(document.getElementById('pattern-start').value, 10) || 0;
+        const end = parseInt(document.getElementById('pattern-end').value, 10) || 0;
+        const padding = parseInt(document.getElementById('pattern-padding').value, 10) || 0;
+        const numeroStart = parseInt(document.getElementById('numero-start').value, 10) || 0;
+        const numeroStep = parseInt(document.getElementById('numero-step').value, 10) || 1;
+        const numeroPadding = parseInt(document.getElementById('numero-padding').value, 10) || 0;
+        const type = document.getElementById('pattern-doc-type').value || '';
+        const zone = normalizeZoneValue(document.getElementById('pattern-doc-zone')?.value || '');
+        const previewBody = document.getElementById('pattern-preview-body');
+
+        if (start > end) {
+            previewBody.innerHTML = '<tr><td colspan="4" style="color: red;">(Erreur: "De" doit etre inferieur ou egal a "A".)</td></tr>';
+            return;
+        }
+
+        const docs = generatePatternDocuments(
+            prefix,
+            suffix,
+            start,
+            Math.min(end, start + 9),
+            padding,
+            numeroStart,
+            numeroStep,
+            numeroPadding,
+            type,
+            zone
+        );
+
+        if (docs.length === 0) {
+            previewBody.innerHTML = '<tr><td colspan="4">(Aucun apercu)</td></tr>';
+            return;
+        }
+
+        let html = '';
+        docs.forEach((doc) => {
+            html += `<tr><td>${doc.numero}</td><td>${doc.name}</td><td>${doc.type}</td><td>${formatZoneLabel(doc.zone)}</td></tr>`;
+        });
+        if (end - start > 9) {
+            html += '<tr><td>...</td><td>...</td><td>...</td><td>...</td></tr>';
+        }
+        previewBody.innerHTML = html;
+    }
+
+    function setupDocsModal() {
+        const modal = document.getElementById('docs-modal');
+        const openBtn = document.getElementById('open-docs-modal-btn');
+        const closeBtn = document.getElementById('close-docs-modal');
+        const tabBtns = document.querySelectorAll('.tab-btn');
+        const manualTab = document.getElementById('tab-manual');
+        const patternTab = document.getElementById('tab-pattern');
+
+        const manualInput = document.getElementById('manual-doc-name');
+        const manualNumeroInput = document.getElementById('manual-doc-numero');
+        const manualTypeInput = document.getElementById('manual-doc-type');
+        const manualZoneInput = document.getElementById('manual-doc-zone');
+        const addManualBtn = document.getElementById('add-manual-doc-btn');
+
+        const prefixInput = document.getElementById('pattern-prefix');
+        const suffixInput = document.getElementById('pattern-suffix');
+        const startInput = document.getElementById('pattern-start');
+        const endInput = document.getElementById('pattern-end');
+        const paddingSelect = document.getElementById('pattern-padding');
+        const patternTypeInput = document.getElementById('pattern-doc-type');
+        const patternZoneInput = document.getElementById('pattern-doc-zone');
+        const addPatternBtn = document.getElementById('add-pattern-docs-btn');
+        const numeroStartInput = document.getElementById('numero-start');
+        const numeroStepInput = document.getElementById('numero-step');
+        const numeroPaddingSelect = document.getElementById('numero-padding');
+
+        function closeModal() {
+            modal.style.display = 'none';
+        }
+
+        openBtn.addEventListener('click', () => {
+            refreshDocumentZoneSuggestionLists();
+            modal.style.display = 'flex';
+        });
+
+        closeBtn.addEventListener('click', closeModal);
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                closeModal();
+            }
+        });
+
+        tabBtns.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                tabBtns.forEach((tabBtn) => tabBtn.classList.remove('active'));
+                btn.classList.add('active');
+
+                if (btn.dataset.tab === 'manual') {
+                    manualTab.style.display = 'block';
+                    patternTab.style.display = 'none';
+                } else {
+                    manualTab.style.display = 'none';
+                    patternTab.style.display = 'block';
+                    updatePatternPreview();
+                }
+            });
+        });
+
+        addManualBtn.addEventListener('click', () => {
+            const docNames = manualInput.value.split(',').map((value) => value.trim()).filter(Boolean);
+            const docNumeros = manualNumeroInput.value.split(',').map((value) => value.trim());
+            const type = normalizeDocumentType(manualTypeInput.value || 'COFFRAGE');
+            const zone = normalizeZoneValue(manualZoneInput.value);
+
+            if (!docNames.length) {
+                return;
+            }
+
+            const docs = docNames.map((name, index) => ({
+                name,
+                numero: docNumeros[index] || '',
+                type,
+                zone
+            }));
+
+            addDocuments(docs);
+            manualInput.value = '';
+            manualNumeroInput.value = '';
+            manualTypeInput.value = 'COFFRAGE';
+            manualZoneInput.value = '';
+            manualInput.focus();
+        });
+
+        manualZoneInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                manualInput.focus();
+            }
+        });
+
+        manualInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                manualNumeroInput.focus();
+            }
+        });
+
+        manualNumeroInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                addManualBtn.click();
+            }
+        });
+
+        [prefixInput, suffixInput, startInput, endInput, paddingSelect, patternTypeInput, patternZoneInput].forEach((element) => {
+            element.addEventListener('input', updatePatternPreview);
+            element.addEventListener('change', updatePatternPreview);
+        });
+
+        [numeroStartInput, numeroStepInput, numeroPaddingSelect].forEach((element) => {
+            element.addEventListener('input', updatePatternPreview);
+            element.addEventListener('change', updatePatternPreview);
+        });
+
+        addPatternBtn.addEventListener('click', () => {
+            const prefix = prefixInput.value || '';
+            const suffix = suffixInput.value || '';
+            const start = parseInt(startInput.value, 10) || 0;
+            const end = parseInt(endInput.value, 10) || 0;
+            const padding = parseInt(paddingSelect.value, 10) || 0;
+            const numeroStart = parseInt(numeroStartInput.value, 10) || 0;
+            const numeroStep = parseInt(numeroStepInput.value, 10) || 1;
+            const numeroPadding = parseInt(numeroPaddingSelect.value, 10) || 0;
+            const type = normalizeDocumentType(patternTypeInput.value || 'COFFRAGE');
+            const zone = normalizeZoneValue(patternZoneInput.value);
+
+            if (start > end) {
+                alert('Erreur: "De" doit Ãªtre infÃ©rieur ou Ã©gal Ã  "Ã€".');
+                return;
+            }
+
+            addDocuments(generatePatternDocuments(
+                prefix,
+                suffix,
+                start,
+                end,
+                padding,
+                numeroStart,
+                numeroStep,
+                numeroPadding,
+                type,
+                zone
+            ));
+
+            prefixInput.value = '';
+            suffixInput.value = '';
+            startInput.value = '1';
+            endInput.value = '5';
+            paddingSelect.value = '0';
+            numeroStartInput.value = '1';
+            numeroStepInput.value = '1';
+            numeroPaddingSelect.value = '0';
+            patternTypeInput.value = 'COFFRAGE';
+            patternZoneInput.value = '';
+            updatePatternPreview();
+        });
+
+        updatePatternPreview();
+    }
+
+    function initDocumentsSection() {
+        renderDocumentsSelection();
+        setupDocsModal();
+        refreshDocumentZoneSuggestionLists();
+    }
+
     async function populateEmittersSelection() {
         const container = document.getElementById('emitters-selection-container');
         container.innerHTML = '';
@@ -855,6 +1496,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         NomDocument: doc.name,
                         NumeroDocument: doc.numero || '',
                         Type_document: doc.type || "COFFRAGE",
+                        Zone: normalizeZoneValue(doc.zone),
                         Emetteur: emitter,
                         Reference: "_",
                         Indice: "-",
@@ -879,48 +1521,71 @@ document.addEventListener('DOMContentLoaded', () => {
                 await grist.docApi.applyUserActions(referencesActions);
             }
 
-            // 5. Add to ListePlan_NDC_COF (COFFRAGE)
-            const listePlanActions = projectData.documents.map(doc => {
-                 return ["AddRecord", "ListePlan_NDC_COF", null, {
-                     Nom_projet: projectData.name,
-                     Type_document: doc.type || "COFFRAGE",
-                     NumeroDocument: doc.numero,
-                     Designation: doc.name,
-                     Indice: null,
-                     DateDiffusion: null
-                 }];
+            // 5. Add to ListePlan_NDC_COF
+            const listePlanContext = await fetchFirstAvailableTable(LISTEPLAN_TABLE_CANDIDATES);
+            const listePlanActions = projectData.documents.map((doc) => {
+                const fields = {};
+                setFieldIfPresent(listePlanContext.columns, fields, 'Nom_projet', projectData.name);
+                setFieldIfPresent(listePlanContext.columns, fields, 'NomProjet', projectData.name);
+                setFieldIfPresent(listePlanContext.columns, fields, 'Type_document', doc.type || 'COFFRAGE');
+                setFieldIfPresent(listePlanContext.columns, fields, 'Type_doc', doc.type || 'COFFRAGE');
+                setFieldIfPresent(listePlanContext.columns, fields, 'NumeroDocument', doc.numero || '');
+                setFieldIfPresent(listePlanContext.columns, fields, 'Designation', doc.name);
+                setFieldIfPresent(listePlanContext.columns, fields, 'NomDocument', doc.name);
+                setFieldIfPresent(listePlanContext.columns, fields, 'Zone', normalizeZoneValue(doc.zone));
+                setFieldIfPresent(listePlanContext.columns, fields, 'Indice', null);
+                setFieldIfPresent(listePlanContext.columns, fields, 'DateDiffusion', null);
+                return ["AddRecord", listePlanContext.tableName, null, fields];
             });
 
             if (listePlanActions.length > 0) {
                 await grist.docApi.applyUserActions(listePlanActions);
             }
 
-            const planningActions = projectData.documents.map((doc, index) => {
+            const planningContext = await fetchFirstAvailableTable(PLANNING_TABLE_CANDIDATES);
+            const planningActions = [];
+            const uniqueZones = [...new Set(
+                projectData.documents
+                    .map((doc) => normalizeZoneValue(doc.zone))
+                    .filter(Boolean)
+            )].sort((left, right) => left.localeCompare(right, 'fr', {
+                sensitivity: 'base',
+                numeric: true
+            }));
+
+            uniqueZones.forEach((zoneName) => {
+                if (!planningZoneExists(planningContext.data, projectData.name, zoneName)) {
+                    planningActions.push([
+                        "AddRecord",
+                        planningContext.tableName,
+                        null,
+                        buildPlanningZoneAnchorFields(planningContext.columns, projectData.name, zoneName)
+                    ]);
+                }
+            });
+
+            projectData.documents.forEach((doc, index) => {
                 const numeroText = String(doc.numero ?? '').trim();
                 const numeroNum = Number(numeroText);
                 const hasNumero = Number.isFinite(numeroNum);
                 const lignePlanning = hasNumero ? (numeroNum + 9000) : (9000 + index + 1);
+                const fields = {};
 
-                return ["AddRecord", "Planning_Projet", null, {
-                    NomProjet: projectData.name,
-                    ID2: numeroText,
-                    Taches: doc.name,
-                    Type_doc: doc.type || "COFFRAGE",
-                    Ligne_planning: lignePlanning,
-                    Indice: ""
-                }];
+                setFieldIfPresent(planningContext.columns, fields, 'NomProjet', projectData.name);
+                setFieldIfPresent(planningContext.columns, fields, 'ID2', numeroText);
+                setFieldIfPresent(planningContext.columns, fields, 'Taches', doc.name);
+                setFieldIfPresent(planningContext.columns, fields, 'Tache', doc.name);
+                setFieldIfPresent(planningContext.columns, fields, 'Type_doc', doc.type || 'COFFRAGE');
+                setFieldIfPresent(planningContext.columns, fields, 'Ligne_planning', lignePlanning);
+                setFieldIfPresent(planningContext.columns, fields, 'Indice', '');
+                setFieldIfPresent(planningContext.columns, fields, 'Groupe', '');
+                setFieldIfPresent(planningContext.columns, fields, 'Zone', normalizeZoneValue(doc.zone));
+
+                planningActions.push(["AddRecord", planningContext.tableName, null, fields]);
             });
 
             if (planningActions.length > 0) {
-                try {
-                    await grist.docApi.applyUserActions(planningActions);
-                } catch (err) {
-                    const planningActionsFallback = planningActions.map((action) => {
-                        const [, , recordId, fields] = action;
-                        return ["AddRecord", "Planning_Project", recordId, fields];
-                    });
-                    await grist.docApi.applyUserActions(planningActionsFallback);
-                }
+                await grist.docApi.applyUserActions(planningActions);
             }
 
             alert('Projet créé avec succès !');

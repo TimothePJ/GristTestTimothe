@@ -83,6 +83,11 @@
                     </div>
                     <div class="tab-content" id="tab-manual">
                         <div class="form-group">
+                            <label for="manual-doc-zone">Zone :</label>
+                            <input type="text" id="manual-doc-zone" list="manual-doc-zone-list" placeholder="Ex: Bâtiment A, Zone C...">
+                            <datalist id="manual-doc-zone-list"></datalist>
+                        </div>
+                        <div class="form-group">
                             <label for="manual-doc-type">Type de document :</label>
                             <select id="manual-doc-type">
                                 <option value="COFFRAGE" selected>COFFRAGE</option>
@@ -103,6 +108,11 @@
                         <button type="button" id="add-manual-doc-btn" class="primary-btn">Ajouter</button>
                     </div>
                     <div class="tab-content" id="tab-pattern" style="display: none;">
+                        <div class="form-group">
+                            <label for="pattern-doc-zone">Zone :</label>
+                            <input type="text" id="pattern-doc-zone" list="pattern-doc-zone-list" placeholder="Ex: Bâtiment A, Zone C...">
+                            <datalist id="pattern-doc-zone-list"></datalist>
+                        </div>
                         <div class="form-group">
                             <label for="pattern-doc-type">Type de document :</label>
                             <select id="pattern-doc-type">
@@ -169,6 +179,7 @@
                                         <th>N°Document</th>
                                         <th>Nom Document</th>
                                         <th>Type</th>
+                                        <th>Zone</th>
                                     </tr>
                                 </thead>
                                 <tbody id="pattern-preview-body">
