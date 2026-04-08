@@ -283,7 +283,7 @@ let records = [];
 let selectedFirstValue = '';
 let selectedSecondValue = '';
 let selectedTypeValue = '';
-let selectedDocNumber = null; let selectedDocName = '';
+let selectedDocNumber = null; let selectedDocName = ''; let selectedDocZone = '';
 
 // --- ListePlan NDC+COF integration (création automatique lors de l'ajout de document(s)) ---
 const LISTEPLAN_TABLE_CANDIDATES = ['ListePlan_NDC_COF', 'ListePlan NDC+COF', 'ListePlan_NDC+COF'];
@@ -430,15 +430,33 @@ function scheduleReferencesNumeroCacheRefresh() {
 
 
 // --- helper: reads the selected pair from the 2nd dropdown at commit time ---
+function normalizeZoneValue(value) {
+  return String(value ?? '').trim();
+}
+
+function formatZoneLabel(value) {
+  const normalized = normalizeZoneValue(value);
+  return normalized || 'Sans zone';
+}
+
+function buildDocSelectValue({ numero = null, name = '', zone = '' } = {}) {
+  return JSON.stringify({
+    numero: parseNumeroForStorage(numero),
+    name: String(name ?? '').trim(),
+    zone: normalizeZoneValue(zone),
+  });
+}
+
 function getSelectedDocPair() {
   const el = document.getElementById('secondColumnListbox');
-  if (!el) return { numero: null, name: '' };
+  if (!el) return { numero: null, name: '', zone: '' };
 
   const raw = el.value;
   const parsed = parseDocValue(raw);
 
   let numero = parsed.numero;
   let name = parsed.name || String(raw || '').trim();
+  let zone = normalizeZoneValue(parsed.zone);
 
   // Fallback 1: cache (table complète) si la colonne NumeroDocument n'est pas présente dans la vue
   if (numero == null) {
@@ -464,27 +482,33 @@ function getSelectedDocPair() {
     } catch (e) { }
   }
 
-  return { numero, name };
+  return { numero, name, zone };
 }
 
 
 function parseDocValue(raw) {
-  if (!raw) return { numero: null, name: '' };
+  if (!raw) return { numero: null, name: '', zone: '' };
 
   // 1) Cas JSON (certaines parties du code pouvaient stocker un JSON dans la value)
   try {
     const obj = JSON.parse(raw);
-    if (obj && (obj.n != null || obj.numero != null || obj.name != null || obj.nom != null)) {
+    if (obj && (obj.n != null || obj.numero != null || obj.name != null || obj.nom != null || obj.zone != null)) {
       const numero = (obj.n != null) ? obj.n : (obj.numero != null ? obj.numero : null);
       const name = (obj.name != null) ? obj.name : (obj.nom != null ? obj.nom : '');
+      const zone = normalizeZoneValue(obj.zone);
       const n = (numero === 0 || numero === '0') ? 0 : Number(numero);
-      return { numero: Number.isFinite(n) ? n : null, name: String(name).trim() };
+      return {
+        numero: Number.isFinite(n) ? n : null,
+        name: String(name).trim(),
+        zone,
+      };
     }
   } catch (e) { /* pas du JSON -> on continue */ }
 
   // 2) Cas normal : raw = NomDocument
   const name = String(raw).trim();
   let numero = null;
+  let zone = '';
 
   // Projet courant
   const selectedProject =
@@ -509,6 +533,9 @@ function parseDocValue(raw) {
           numero = Number.isFinite(n) ? n : null;
         }
       }
+      if (rec) {
+        zone = normalizeZoneValue(rec.Zone);
+      }
     }
   } catch (e) { }
 
@@ -525,7 +552,7 @@ function parseDocValue(raw) {
     try { scheduleReferencesNumeroCacheRefresh(); } catch (e) { }
   }
 
-  return { numero, name };
+  return { numero, name, zone };
 }
 
 
@@ -553,19 +580,114 @@ function normalizeTypeDocument(value) {
   return String(value ?? '').trim();
 }
 
+function collectProjectZones(projectName) {
+  const project = _norm(projectName);
+  if (!project || !Array.isArray(records)) return [];
+
+  const uniqueZones = new Set();
+  const zones = [];
+
+  records.forEach((record) => {
+    if (_norm(record.NomProjet) !== project) return;
+    const zone = normalizeZoneValue(record.Zone);
+    if (!zone || uniqueZones.has(zone)) return;
+    uniqueZones.add(zone);
+    zones.push(zone);
+  });
+
+  return zones.sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base', numeric: true }));
+}
+
+function projectHasStructuredZones(projectName) {
+  return collectProjectZones(projectName).length > 0;
+}
+
+function refreshZoneSuggestionList(datalistId, projectName) {
+  const datalist = document.getElementById(datalistId);
+  if (!datalist) return;
+
+  const zones = collectProjectZones(projectName);
+  datalist.innerHTML = '';
+  zones.forEach((zone) => {
+    const option = document.createElement('option');
+    option.value = zone;
+    datalist.appendChild(option);
+  });
+}
+
+function collectProjectDocumentEntries(projectName, typeValue = '') {
+  const project = _norm(projectName);
+  const normalizedType = normalizeTypeDocument(typeValue);
+  if (!project || !Array.isArray(records)) return [];
+
+  const docsByKey = new Map();
+
+  records.forEach((record) => {
+    if (_norm(record.NomProjet) !== project) return;
+    if (normalizedType && normalizeTypeDocument(record.Type_document) !== normalizedType) return;
+
+    const name = _norm(record.NomDocument);
+    if (!name) return;
+
+    const numero = parseNumeroForStorage(record.NumeroDocument);
+    const zone = normalizeZoneValue(record.Zone);
+    const key = [
+      zone.toLocaleLowerCase('fr'),
+      numero == null ? '' : String(numero),
+      name.toLocaleLowerCase('fr'),
+    ].join('||');
+
+    if (docsByKey.has(key)) return;
+
+    docsByKey.set(key, {
+      name,
+      numero,
+      zone,
+      label: makeDocLabel(name, numero),
+      value: buildDocSelectValue({ numero, name, zone }),
+    });
+  });
+
+  return Array.from(docsByKey.values()).sort((left, right) => {
+    const zoneLeft = formatZoneLabel(left.zone);
+    const zoneRight = formatZoneLabel(right.zone);
+    const sansZoneLeft = normalizeZoneValue(left.zone) ? 0 : 1;
+    const sansZoneRight = normalizeZoneValue(right.zone) ? 0 : 1;
+
+    if (sansZoneLeft !== sansZoneRight) {
+      return sansZoneLeft - sansZoneRight;
+    }
+
+    const zoneCompare = zoneLeft.localeCompare(zoneRight, 'fr', { sensitivity: 'base', numeric: true });
+    if (zoneCompare !== 0) return zoneCompare;
+
+    const numeroLeft = left.numero == null ? Number.POSITIVE_INFINITY : Number(left.numero);
+    const numeroRight = right.numero == null ? Number.POSITIVE_INFINITY : Number(right.numero);
+    if (numeroLeft !== numeroRight) return numeroLeft - numeroRight;
+
+    return left.name.localeCompare(right.name, 'fr', { sensitivity: 'base', numeric: true });
+  });
+}
+
 function getCurrentSelectedType() {
   const dropdown = document.getElementById('thirdColumnDropdown');
   return normalizeTypeDocument(dropdown ? dropdown.value : selectedTypeValue);
 }
 
-function getDocumentTypeForProjectDoc(projectName, docName) {
+function getDocumentTypeForProjectDoc(projectName, docName, zoneName, numeroValue) {
   const project = _norm(projectName);
   const documentName = _norm(docName);
+  const normalizedZone = normalizeZoneValue(zoneName);
+  const normalizedNumero = parseNumeroForStorage(numeroValue);
+  const zoneWasProvided = arguments.length >= 3;
+  const numeroWasProvided = arguments.length >= 4;
   if (!project || !documentName || !Array.isArray(records)) return '';
 
   const match = records.find(record =>
     _norm(record.NomProjet) === project &&
     _norm(record.NomDocument) === documentName &&
+    (!zoneWasProvided || normalizeZoneValue(record.Zone) === normalizedZone) &&
+    (!numeroWasProvided || parseNumeroForStorage(record.NumeroDocument) === normalizedNumero) &&
     normalizeTypeDocument(record.Type_document)
   );
 
@@ -641,6 +763,7 @@ let currentEmetteur = '';
 let selectedRecordId = null;
 let newTable = false; // Variable to track if a new table is being added
 let newTableName = ''; // Variable to store the name of the new table
+let newTableType = '';
 let lastValidDocument = '';
 
 // Ready Grist
@@ -790,23 +913,36 @@ function populateTable() {
   const selections = getCurrentSelections();
   if (!selections) return;
 
-  const { selectedProject, selectedTable } = selections;
+  const { selectedProject, selectedTable, selectedDoc } = selections;
   const tableBody = document.getElementById('tableBody');
   const tableHeader = document.getElementById('tableHeader');
   const hideArchived = document.getElementById('hideArchivedToggle').checked;
 
   tableBody.innerHTML = '';
   const filteredRecords = records.filter(
-    (record) =>
-      record.NomProjet === selectedProject &&
-      record.NomDocument === selectedTable &&
-      (!hideArchived || !record.Archive)
+    (record) => {
+      if (record.NomProjet !== selectedProject) return false;
+      if (_norm(record.NomDocument) !== _norm(selectedTable)) return false;
+      if (normalizeZoneValue(record.Zone) !== normalizeZoneValue(selectedDoc?.zone)) return false;
+
+      if (selectedDoc && selectedDoc.numero != null) {
+        const recordNumero = parseNumeroForStorage(record.NumeroDocument);
+        if (recordNumero !== parseNumeroForStorage(selectedDoc.numero)) return false;
+      }
+
+      return !hideArchived || !record.Archive;
+    }
   );
 
   if (filteredRecords.length === 0) return;
 
   const headers = Object.keys(filteredRecords[0]).filter(
-    (key) => key !== 'NomProjet' && key !== 'NomDocument' && key !== 'id' && key !== 'Type_document'
+    (key) =>
+      key !== 'NomProjet' &&
+      key !== 'NomDocument' &&
+      key !== 'id' &&
+      key !== 'Type_document' &&
+      key !== 'Zone'
   );
 
   tableHeader.innerHTML = '<th>ID</th>';
@@ -1148,6 +1284,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
     if (!selectedProject) throw new Error("Aucun projet sélectionné.");
 
     const serviceValue = await getTeamService();
+    const currentSelectedDoc = getSelectedDocPair();
 
     const userActions = [];
 
@@ -1165,7 +1302,8 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
           NomProjet: selectedProject,
           NomDocument: parsedDoc.name,
           NumeroDocument: numeroOrZero(parseNumeroForStorage(parsedDoc.numero)),
-          Type_document: getDocumentTypeForProjectDoc(selectedProject, parsedDoc.name) || getCurrentSelectedType(),
+          Type_document: getDocumentTypeForProjectDoc(selectedProject, parsedDoc.name, parsedDoc.zone, parsedDoc.numero) || getCurrentSelectedType(),
+          Zone: normalizeZoneValue(parsedDoc.zone),
           Emetteur: emetteur,
           Reference: reference,
           Indice: indice,
@@ -1180,9 +1318,10 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
     } else {
       const newRow = {
         NomProjet: selectedProject,
-        NomDocument: getSelectedDocPair().name,
-        NumeroDocument: numeroOrZero(parseNumeroForStorage(getSelectedDocPair().numero)),
-        Type_document: getDocumentTypeForProjectDoc(selectedProject, getSelectedDocPair().name) || getCurrentSelectedType(),
+        NomDocument: currentSelectedDoc.name,
+        NumeroDocument: numeroOrZero(parseNumeroForStorage(currentSelectedDoc.numero)),
+        Type_document: getDocumentTypeForProjectDoc(selectedProject, currentSelectedDoc.name, currentSelectedDoc.zone, currentSelectedDoc.numero) || getCurrentSelectedType(),
+        Zone: normalizeZoneValue(currentSelectedDoc.zone),
         Emetteur: emetteur,
         Reference: reference,
         Indice: indice,
@@ -1334,7 +1473,9 @@ grist.onRecords(function (receivedRecords) {
 
   if (newTable) {
     newTable = false; // Reset the flag after handling the new table
-    populateSecondColumnListbox(selectedFirstValue);
+    const preferredType = normalizeTypeDocument(newTableType || selectedTypeValue);
+    populateTypeDocumentDropdown(selectedFirstValue, preferredType, preferredType ? [preferredType] : []);
+    populateSecondColumnListbox(selectedFirstValue, newTableName);
     updateEmetteurList(); // Met à jour la liste des émetteurs en fonction du projet sélectionné
 
     // Sélectionne automatiquement le nouveau tableau
@@ -1343,6 +1484,12 @@ grist.onRecords(function (receivedRecords) {
 
     // Déclenche l'affichage du tableau correspondant
     selectedSecondValue = newTableName;
+    lastValidDocument = newTableName;
+    const parsedNewDoc = parseDocValue(newTableName);
+    selectedDocName = parsedNewDoc.name || '';
+    selectedDocNumber = parseNumeroForStorage(parsedNewDoc.numero);
+    selectedDocZone = normalizeZoneValue(parsedNewDoc.zone);
+    newTableType = '';
     populateTable();
   } else {
     populateTable()
@@ -1367,6 +1514,16 @@ document.getElementById('secondColumnListbox').addEventListener('change', functi
     lastValidDocument = selectedValue;
   }
   selectedSecondValue = selectedValue;
+  if (selectedValue && selectedValue !== 'addTable' && selectedValue !== 'addMultipleTable') {
+    const parsedDoc = parseDocValue(selectedValue);
+    selectedDocName = parsedDoc.name || '';
+    selectedDocNumber = parseNumeroForStorage(parsedDoc.numero);
+    selectedDocZone = normalizeZoneValue(parsedDoc.zone);
+  } else {
+    selectedDocName = '';
+    selectedDocNumber = null;
+    selectedDocZone = '';
+  }
   console.log("selectedFirstValue:", selectedFirstValue, "selectedSecondValue:", selectedSecondValue);
   if (selectedFirstValue && selectedSecondValue) {
     populateTable();
@@ -1397,6 +1554,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
   const formData = new FormData(e.target);
   const documentNumber = formData.get('documentNumber');
   const documentName = formData.get('documentName');
+  const documentZone = normalizeZoneValue(formData.get('documentZone'));
   const documentType = String(formData.get('documentType') || 'NDC').trim();
   let defaultDatelimite = formData.get('defaultDatelimite');
 
@@ -1455,6 +1613,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
       NomDocument: nm,
       NumeroDocument: numeroOrZero(parseNumeroForStorage(num)),
       Type_document: documentType,
+      Zone: documentZone,
       Emetteur: emetteur,
       Reference: '_',
       Indice: '-',
@@ -1527,28 +1686,17 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
     newRows.forEach(row => actions.push(['AddRecord', 'References', null, row]));
     await grist.docApi.applyUserActions(actions);
     selectedTypeValue = documentType;
+    const newDocValue = buildDocSelectValue({ numero: num, name: nm, zone: documentZone });
+    newTable = true;
+    newTableName = newDocValue;
+    newTableType = documentType;
+    lastValidDocument = newDocValue;
+    selectedSecondValue = newDocValue;
+    selectedDocName = nm;
+    selectedDocNumber = (num == null ? null : num);
+    selectedDocZone = documentZone;
 
     console.log("Nouveau document ajouté :", combinedDocumentName);
-
-    const secondDropdown = document.getElementById('secondColumnListbox');
-const newOption = document.createElement('option');
-
-// ✅ On garde value = NomDocument pour ne pas casser populateTable()
-newOption.value = nm;
-newOption.textContent = makeDocLabel(nm, num);
-
-// Ajouter à la fin de la liste avant "Ajouter document"
-const addTableOption = secondDropdown.querySelector('option[value="addTable"]');
-if (addTableOption) secondDropdown.insertBefore(newOption, addTableOption);
-else secondDropdown.appendChild(newOption);
-
-// Sélectionner le nouveau document
-secondDropdown.value = nm;
-selectedSecondValue = nm;
-selectedDocName = nm;
-selectedDocNumber = (num == null ? null : num);
-// Mise à jour du tableau pour afficher les nouvelles données
-    populateTable();
 
     // Fermeture du dialogue
     document.getElementById('addDocumentDialog').close();
@@ -1576,13 +1724,15 @@ function getCurrentSelections(isAddTableAction = false) {
   const tableDropdown = document.getElementById('secondColumnListbox');
 
   const selectedProject = projectDropdown.value.trim();
-  const selectedTable = tableDropdown.value.trim();
+  const selectedValue = tableDropdown.value.trim();
+  const selectedDoc = parseDocValue(selectedValue);
+  const selectedTable = _norm(selectedDoc.name || selectedValue);
 
-  if (!selectedProject || !selectedTable) {
+  if (!selectedProject || !selectedValue || !selectedTable) {
     return null; // Retourne null si les sélections sont invalides
   }
 
-  return { selectedProject, selectedTable };
+  return { selectedProject, selectedTable, selectedDoc, selectedValue };
 }
 
 // Fonction de sauvegarde mise à jour
@@ -1781,6 +1931,7 @@ async function renderDocumentCheckboxList() {
   const secondDropdown = document.getElementById('secondColumnListbox');
   const selectedProject = selectedFirstValue; // Projet sélectionné dans la première liste
   const selectedDocument = secondDropdown.value; // Document actuellement sélectionné dans la deuxième liste
+  const showZones = projectHasStructuredZones(selectedProject);
 
   // Vérifier qu'un projet est sélectionné
   if (!selectedProject) {
@@ -1790,8 +1941,15 @@ async function renderDocumentCheckboxList() {
 
   // Obtenir les options disponibles dans la deuxième liste déroulante
   const documentOptions = Array.from(secondDropdown.options)
-    .filter(option => option.value && option.value !== 'addTable' && option.value !== selectedDocument) // Exclure le document sélectionné
-    .map(option => option.value);
+    .filter(option => option.value && option.value !== 'addTable' && option.value !== 'addMultipleTable' && option.value !== selectedDocument && !option.disabled) // Exclure le document sélectionné
+    .map(option => {
+      const parsed = parseDocValue(option.value);
+      const zoneLabel = showZones ? ` [${formatZoneLabel(parsed.zone)}]` : '';
+      return {
+        value: option.value,
+        label: `${makeDocLabel(parsed.name || option.textContent || '', parsed.numero)}${zoneLabel}`
+      };
+    });
 
   // Si aucun document n'est disponible
   if (documentOptions.length === 0) {
@@ -1887,6 +2045,7 @@ async function resetAddDocumentDialog() {
   // Réinitialiser les champs texte et date
   document.getElementById('documentNumber').value = '';
   document.getElementById('documentName').value = '';
+  document.getElementById('documentZone').value = '';
   document.getElementById('defaultDatelimite').value = '';
     const typeSel = document.getElementById('documentType');
     if (typeSel) typeSel.value = 'NDC';
@@ -1897,6 +2056,8 @@ async function resetAddDocumentDialog() {
     console.error("Aucun projet sélectionné !");
     return;
   }
+
+  refreshZoneSuggestionList('documentZoneList', selectedProject);
 
   // Liste par défaut d'émetteurs
   const defaultEmetteurs = await getDefaultEmetteurs();
@@ -2427,6 +2588,8 @@ function resetAddMultipleDocumentDialog() {
   });
   const typeSel = document.getElementById('multipleDocumentType');
   if (typeSel) typeSel.value = 'NDC';
+  const zoneInput = document.getElementById('multipleDocumentZone');
+  if (zoneInput) zoneInput.value = '';
 
   // Réinitialiser le tableau dynamique
   const tbody = document.getElementById('documentTableBody');
@@ -2453,6 +2616,7 @@ function resetAddMultipleDocumentDialog() {
   addInputListenerToRow(newRow);
 
   // Réinitialiser la liste des émetteurs dans le dialog
+  refreshZoneSuggestionList('multipleDocumentZoneList', selectedFirstValue);
   getDefaultEmetteurs().then(defaultEmetteurs => {
     const projectEmetteurs = records
       .filter(record => record.NomProjet === selectedFirstValue)
@@ -2666,6 +2830,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
 
     // Récupérer le service depuis la table Team
     const serviceValue = await getTeamService();
+    const documentZone = normalizeZoneValue(document.getElementById('multipleDocumentZone')?.value);
 
     // Récupérer la date limite par défaut
     const defaultDatelimite = document.getElementById('multipleDefaultDatelimite').value || "1900-01-01";
@@ -2779,6 +2944,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
           NomDocument: nm,
           NumeroDocument: numeroOrZero(parseNumeroForStorage(num)),
           Type_document: documentType,
+          Zone: documentZone,
           Emetteur: emetteur,
           Reference: '_',
           Indice: '-',
@@ -2798,37 +2964,32 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
     console.log("Documents ajoutés :", documentsData);
 
     // Mettre à jour le dropdown de documents en ajoutant chaque nouveau document
-const secondDropdown = document.getElementById('secondColumnListbox');
-documentsData.forEach(doc => {
-  const nm = String(doc.documentName).trim();
-  const _n = Number(doc.documentNumber);
-  const num = (Number.isFinite(_n) ? _n : null);
 
-  const newOption = document.createElement('option');
-  newOption.value = nm;                 // ✅ value = NomDocument
-  newOption.textContent = makeDocLabel(nm, num);
 
-  const addTableOption = secondDropdown.querySelector('option[value="addTable"]');
-  if (addTableOption) secondDropdown.insertBefore(newOption, addTableOption);
-  else secondDropdown.appendChild(newOption);
-});
 
 // Optionnel : sélectionner le dernier document ajouté
-if (documentsData.length) {
-  const lastDoc = documentsData[documentsData.length - 1];
-  const nm = String(lastDoc.documentName).trim();
-  const _n = Number(lastDoc.documentNumber);
-  const num = (Number.isFinite(_n) ? _n : null);
-
-  secondDropdown.value = nm;
-  selectedDocNumber = num;
-  selectedDocName = nm;
-  selectedSecondValue = nm;
-}
 
 // Met à jour l'affichage du tableau principal et ferme le dialog
 
-    populateTable();
+    if (documentsData.length) {
+      const lastDoc = documentsData[documentsData.length - 1];
+      const lastNumero = Number(lastDoc.documentNumber);
+      const lastNumValue = Number.isFinite(lastNumero) ? lastNumero : null;
+      const lastDocName = String(lastDoc.documentName).trim();
+      const lastDocValue = buildDocSelectValue({
+        numero: lastNumValue,
+        name: lastDocName,
+        zone: documentZone,
+      });
+      newTable = true;
+      newTableName = lastDocValue;
+      newTableType = documentType;
+      lastValidDocument = lastDocValue;
+      selectedSecondValue = lastDocValue;
+      selectedDocNumber = lastNumValue;
+      selectedDocName = lastDocName;
+      selectedDocZone = documentZone;
+    }
     document.getElementById('addMultipleDocumentDialog').close();
 
   } catch (error) {
@@ -3136,7 +3297,8 @@ function fallbackCopyImage(canvas) {
 document.getElementById('downloadTableButton').addEventListener('click', async function () {
   // Vérifier qu'un projet et un document sont sélectionnés
   const projectName = document.getElementById('firstColumnDropdown').value.trim();
-  const docName = document.getElementById('secondColumnListbox').value.trim();
+  const docSelection = parseDocValue(document.getElementById('secondColumnListbox').value.trim());
+  const docName = (docSelection.name || '').trim();
   if (!projectName || !docName || docName === "Sélectionner un étage") {
     alert("Veuillez sélectionner un projet et un document.");
     return;
@@ -3251,25 +3413,48 @@ function populateSecondColumnListbox(selectedValue, preferredValue = null) {
     preferredValue != null ? preferredValue : (selectedSecondValue || listbox.value || lastValidDocument)
   );
 
-  listbox.innerHTML = '<option value="">SÃ©lectionner un Ã©tage</option>';
 
   listbox.innerHTML = DOC_SELECT_PLACEHOLDER_HTML;
 
-  const secondColumnValues = (records || [])
-    .filter(record =>
-      _norm(record.NomProjet) === selectedProject &&
-      (!selectedType || normalizeTypeDocument(record.Type_document) === selectedType)
-    )
-    .map(record => _norm(record.NomDocument))
-    .filter((value, index, self) => value && self.indexOf(value) === index)
-    .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+  const documentEntries = collectProjectDocumentEntries(selectedProject, selectedType);
+  const hasZones = projectHasStructuredZones(selectedProject);
 
-  secondColumnValues.forEach(value => {
-    const option = document.createElement('option');
-    option.value = value;
-    option.text = value;
-    listbox.appendChild(option);
-  });
+  if (hasZones) {
+    const groupedEntries = new Map();
+    documentEntries.forEach((entry) => {
+      const zoneKey = normalizeZoneValue(entry.zone);
+      if (!groupedEntries.has(zoneKey)) groupedEntries.set(zoneKey, []);
+      groupedEntries.get(zoneKey).push(entry);
+    });
+
+    const groupedZones = Array.from(groupedEntries.keys()).sort((left, right) => {
+      const leftEmpty = left ? 0 : 1;
+      const rightEmpty = right ? 0 : 1;
+      if (leftEmpty !== rightEmpty) return leftEmpty - rightEmpty;
+      return formatZoneLabel(left).localeCompare(formatZoneLabel(right), 'fr', { sensitivity: 'base', numeric: true });
+    });
+
+    groupedZones.forEach((zoneKey) => {
+      const group = document.createElement('optgroup');
+      group.label = formatZoneLabel(zoneKey);
+
+      groupedEntries.get(zoneKey).forEach((entry) => {
+        const option = document.createElement('option');
+        option.value = entry.value;
+        option.text = entry.label;
+        group.appendChild(option);
+      });
+
+      listbox.appendChild(group);
+    });
+  } else {
+    documentEntries.forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = entry.value;
+      option.text = entry.label;
+      listbox.appendChild(option);
+    });
+  }
 
   const addOption = document.createElement('option');
   addOption.value = 'addTable';
@@ -3289,12 +3474,15 @@ function populateSecondColumnListbox(selectedValue, preferredValue = null) {
   selectedSecondValue = _norm(listbox.value);
   if (selectedSecondValue) {
     lastValidDocument = selectedSecondValue;
-    selectedDocName = selectedSecondValue;
-    selectedDocNumber = getSelectedDocPair().numero;
+    const parsedDoc = parseDocValue(selectedSecondValue);
+    selectedDocName = parsedDoc.name || '';
+    selectedDocNumber = parseNumeroForStorage(parsedDoc.numero);
+    selectedDocZone = normalizeZoneValue(parsedDoc.zone);
   } else {
     lastValidDocument = '';
     selectedDocName = '';
     selectedDocNumber = null;
+    selectedDocZone = '';
   }
 }
 
@@ -3323,6 +3511,9 @@ document.getElementById('firstColumnDropdown').addEventListener('change', functi
   selectedTypeValue = '';
   selectedSecondValue = '';
   lastValidDocument = '';
+  selectedDocName = '';
+  selectedDocNumber = null;
+  selectedDocZone = '';
 
   if (!project) {
     populateTypeDocumentDropdown('');
@@ -3381,6 +3572,7 @@ function refreshSecondDropdownLabels() {
     const selectedProject = (projectDropdown.value || '').trim();
     const options = Array.from(secondDropdown.options);
     options.forEach(opt => {
+      if (opt?.disabled) return;
       if (!opt || !opt.value || opt.value === 'addTable' || opt.value === 'addMultipleTable') return;
       let numero = null, name = '';
       try {
