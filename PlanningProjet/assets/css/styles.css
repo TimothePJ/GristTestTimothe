@@ -1,0 +1,1364 @@
+/* ==========================================================
+   PLANNING PROJET - styles.css (complet)
+   DA claire + fix alignement 4 colonnes (vis-timeline)
+   ========================================================== */
+
+:root {
+  /* Palette claire */
+  --grist-theme-text: #222;
+  --grist-theme-page-bg: #fff;
+  --grist-theme-panel-header-bg: #f7f7f7;
+  --grist-theme-border: #ddd;
+  --grist-theme-hover: #f0f0f0;
+  --grist-theme-selection: #e6f2fa;
+
+  /* Colonnes de gauche */
+  --col-id2: 52px;
+  --col-task: 196px;
+  --col-ligne-planning: 84px;
+  --col-start: 84px;
+  --col-duration-1: 64px;
+  --col-end: 84px;
+  --col-duration-2: 64px;
+  --col-demarrage: 100px;
+  --col-indice: 60px;
+  --col-realise: 92px;
+  --col-retards: 64px;
+
+  --left-pad-x: 4px;
+  --left-grid-width: calc(var(--col-id2) + var(--col-task) + var(--col-ligne-planning) + var(--col-start) + var(--col-duration-1) + var(--col-end) + var(--col-duration-2) + var(--col-demarrage) + var(--col-indice) + var(--col-realise) + var(--col-retards));
+  --left-panel-width: calc(var(--left-grid-width) + (var(--left-pad-x) * 2));
+
+  /* Hauteur de ligne commune labels + timeline */
+  --planning-row-height: 40px;
+
+  /* Toolbar */
+  --toolbar-height: 45px;
+}
+
+/* ==========================================================
+   Base
+   ========================================================== */
+
+html {
+  color-scheme: light;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--grist-theme-page-bg);
+  color: var(--grist-theme-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+body * {
+  box-sizing: border-box;
+}
+
+html.is-ms-project-drag-cursor,
+html.is-ms-project-drag-cursor *,
+body.is-ms-project-drag-cursor,
+body.is-ms-project-drag-cursor * {
+  cursor: grabbing !important;
+}
+
+/* ==========================================================
+   Toolbar (timeline-calendar style)
+   ========================================================== */
+
+#toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 12px;
+  height: var(--toolbar-height);
+  padding: 8px 16px;
+  background-color: var(--grist-theme-panel-header-bg);
+  border-bottom: 1px solid var(--grist-theme-border);
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 120;
+}
+
+#toolbar > * {
+  min-width: 0;
+}
+
+.nav-buttons,
+.zoom-buttons,
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.nav-buttons,
+.zoom-buttons {
+  flex: 0 0 auto;
+}
+
+.filters {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.toolbar-label {
+  font-weight: 600;
+  margin-right: 4px;
+  flex: 0 0 auto;
+}
+
+#toolbar button {
+  background-color: #fff;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  padding: 4px 10px;
+  min-height: 28px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--grist-theme-text);
+  line-height: 1.1;
+}
+
+#toolbar button:hover {
+  background-color: var(--grist-theme-hover);
+}
+
+#toolbar button.active {
+  background-color: var(--grist-theme-selection);
+  border-color: #add6ff;
+  font-weight: 600;
+}
+
+#toolbar select {
+  background-color: #fff;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  padding: 3px 6px;
+  width: clamp(132px, 15vw, 220px);
+  min-width: 0;
+  max-width: 220px;
+  height: 28px;
+  color: var(--grist-theme-text);
+  font-size: 13px;
+  flex: 0 1 auto;
+}
+
+#toolbar select:hover {
+  background-color: var(--grist-theme-hover);
+}
+
+#toolbar select:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+#current-date-range {
+  margin-left: auto;
+  flex: 0 1 360px;
+  min-width: 150px;
+  max-width: min(34vw, 440px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+  font-weight: 500;
+  color: #444;
+}
+
+body.planning-sync-embedded .filters {
+  display: none;
+}
+
+body.planning-sync-embedded {
+  --planning-sync-reference-left-width: 250px;
+  --left-pad-x: 0px;
+  --col-id2: 0px;
+  --col-task: 250px;
+  --col-ligne-planning: 0px;
+  --col-start: 0px;
+  --col-duration-1: 0px;
+  --col-end: 0px;
+  --col-duration-2: 0px;
+  --col-demarrage: 0px;
+  --col-indice: 0px;
+  --col-realise: 0px;
+  --col-retards: 0px;
+}
+
+body.planning-sync-embedded .planning-header-row {
+  grid-template-columns: var(--planning-sync-reference-left-width) 1fr !important;
+}
+
+body.planning-sync-embedded .planning-header-left {
+  grid-template-columns: var(--planning-sync-reference-left-width) !important;
+  width: var(--planning-sync-reference-left-width) !important;
+  padding: 0 !important;
+}
+
+body.planning-sync-embedded #planningTimeline .group-row-grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
+}
+
+body.planning-sync-embedded #planningTimeline .zone-header-band {
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  padding: 0 8px !important;
+  box-sizing: border-box !important;
+}
+
+body.planning-sync-embedded #planningTimeline .timeline-axis-left-filler,
+body.planning-sync-embedded #planningTimeline .vis-panel.vis-left {
+  width: var(--planning-sync-reference-left-width) !important;
+  min-width: var(--planning-sync-reference-left-width) !important;
+  max-width: var(--planning-sync-reference-left-width) !important;
+}
+
+body.planning-sync-embedded #planningTimeline .vis-panel.vis-left {
+  left: 0 !important;
+  overflow: hidden !important;
+}
+
+body.planning-sync-embedded #planningTimeline .vis-panel.vis-center,
+body.planning-sync-embedded #planningTimeline .vis-panel.vis-top,
+body.planning-sync-embedded #planningTimeline .vis-panel.vis-bottom {
+  left: var(--planning-sync-reference-left-width) !important;
+  width: calc(100% - var(--planning-sync-reference-left-width)) !important;
+}
+
+body.planning-sync-embedded #toolbar {
+  gap: 10px;
+}
+
+body.planning-sync-embedded #current-date-range {
+  flex: 1 1 auto;
+  max-width: none;
+}
+
+body.planning-sync-embedded .planning-status {
+  display: none;
+}
+
+body.planning-sync-embedded #timelineWrapper {
+  scrollbar-gutter: stable;
+  overflow-anchor: none;
+}
+
+body.planning-sync-embedded #planningTimeline .vis-labelset {
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  overflow-anchor: none;
+}
+
+body.planning-sync-embedded #planningTimeline .vis-labelset .vis-label {
+  width: var(--planning-sync-reference-left-width) !important;
+  min-width: var(--planning-sync-reference-left-width) !important;
+  max-width: var(--planning-sync-reference-left-width) !important;
+  box-sizing: border-box !important;
+  overflow-anchor: none;
+}
+
+body.planning-sync-embedded #planningTimeline .vis-labelset .vis-label .vis-inner {
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  overflow-anchor: none;
+}
+
+body.planning-sync-embedded #planningTimeline .group-row-grid,
+body.planning-sync-embedded #planningTimeline .zone-header-band,
+body.planning-sync-embedded #planningTimeline .group-row-grid > div,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-task {
+  overflow-anchor: none;
+}
+
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-task {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+body.planning-sync-external-axis #toolbar {
+  display: none !important;
+}
+
+body.planning-sync-external-axis .planning-header-row {
+  top: 0 !important;
+  z-index: 60 !important;
+}
+
+body.planning-sync-external-axis #timelineWrapper {
+  overflow-y: scroll !important;
+  overflow-x: hidden !important;
+  scrollbar-gutter: stable !important;
+  overscroll-behavior: contain;
+}
+
+body.planning-sync-external-axis #planningTimeline .timeline-axis-left-filler,
+body.planning-sync-external-axis #planningTimeline .vis-panel.vis-top {
+  display: none !important;
+}
+
+body.planning-sync-external-axis #planningTimeline .vis-panel.vis-left,
+body.planning-sync-external-axis #planningTimeline .vis-panel.vis-center,
+body.planning-sync-external-axis #planningTimeline .vis-panel.vis-bottom {
+  top: 0 !important;
+}
+
+body.planning-sync-axis-only {
+  overflow: hidden !important;
+}
+
+body.planning-sync-axis-only #toolbar,
+body.planning-sync-axis-only .planning-header-row,
+body.planning-sync-axis-only .planning-status,
+body.planning-sync-axis-only #addZoneModal {
+  display: none !important;
+}
+
+body.planning-sync-axis-only #timelineWrapper {
+  height: 72px !important;
+  min-height: 72px !important;
+  overflow: hidden !important;
+  border: 0 !important;
+}
+
+body.planning-sync-axis-only #planningTimeline {
+  height: 72px !important;
+  min-height: 72px !important;
+}
+
+body.planning-sync-axis-only #planningTimeline .timeline-axis-left-filler,
+body.planning-sync-axis-only #planningTimeline .vis-panel.vis-left,
+body.planning-sync-axis-only #planningTimeline .vis-panel.vis-center,
+body.planning-sync-axis-only #planningTimeline .vis-panel.vis-bottom {
+  display: none !important;
+}
+
+body.planning-sync-axis-only #planningTimeline .vis-panel.vis-top {
+  top: 0 !important;
+  transform: translateY(0) !important;
+  z-index: 80 !important;
+  pointer-events: auto !important;
+  cursor: grab;
+}
+
+body.planning-sync-axis-only #planningTimeline .vis-panel.vis-top:active {
+  cursor: grabbing;
+}
+
+body.planning-sync-header-only {
+  overflow: hidden !important;
+}
+
+body.planning-sync-header-only #toolbar,
+body.planning-sync-header-only .planning-header-row,
+body.planning-sync-header-only .planning-status,
+body.planning-sync-header-only #addZoneModal {
+  display: none !important;
+}
+
+body.planning-sync-header-only #timelineWrapper {
+  height: 72px !important;
+  min-height: 72px !important;
+  overflow-y: scroll !important;
+  overflow-x: hidden !important;
+  scrollbar-gutter: stable;
+  border: 0 !important;
+}
+
+body.planning-sync-header-only #planningTimeline {
+  height: 72px !important;
+  min-height: 72px !important;
+}
+
+body.planning-sync-header-only #planningTimeline .vis-panel.vis-left,
+body.planning-sync-header-only #planningTimeline .vis-panel.vis-center,
+body.planning-sync-header-only #planningTimeline .vis-panel.vis-bottom,
+body.planning-sync-header-only #planningTimeline .timeline-axis-left-filler {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+body.planning-sync-header-only #planningTimeline .vis-panel.vis-top {
+  top: 0 !important;
+  transform: translateY(0) !important;
+  z-index: 80 !important;
+  pointer-events: auto !important;
+  cursor: grab;
+}
+
+body.planning-sync-header-only #planningTimeline .vis-panel.vis-top:active {
+  cursor: grabbing;
+}
+
+body.planning-sync-embedded .planning-header-left .c-id2,
+body.planning-sync-embedded .planning-header-left .c-start,
+body.planning-sync-embedded .planning-header-left .c-duration-1,
+body.planning-sync-embedded .planning-header-left .c-end,
+body.planning-sync-embedded .planning-header-left .c-duration-2,
+body.planning-sync-embedded .planning-header-left .c-demarrage,
+body.planning-sync-embedded .planning-header-left .c-indice,
+body.planning-sync-embedded .planning-header-left .c-realise,
+body.planning-sync-embedded .planning-header-left .c-retards,
+body.planning-sync-embedded .planning-header-left .c-ligne-planning,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-id2,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-start,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-duration-1,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-end,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-duration-2,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-demarrage,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-indice,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-realise,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-retards,
+body.planning-sync-embedded #planningTimeline .group-row-grid .cell-ligne-planning {
+  display: none !important;
+}
+
+/* ==========================================================
+   Header tableau (4 colonnes à gauche + Planning)
+   ========================================================== */
+
+.planning-header-row {
+  display: grid;
+  grid-template-columns: var(--left-panel-width) 1fr;
+  align-items: stretch;
+  background: var(--grist-theme-panel-header-bg);
+  border-bottom: 1px solid var(--grist-theme-border);
+  position: sticky;
+  top: var(--toolbar-height);
+  z-index: 50;
+  flex-shrink: 0;
+}
+
+.planning-header-left {
+  display: grid;
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-realise) var(--col-retards);
+  width: var(--left-grid-width);
+  padding: 0 var(--left-pad-x);
+  box-sizing: content-box;
+  align-items: center;
+  min-height: var(--planning-row-height);
+  border-right: 1px solid var(--grist-theme-border);
+}
+
+.planning-header-left .hcol {
+  padding: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--grist-theme-text);
+  font-weight: 600;
+}
+
+.planning-header-left .c-start,
+.planning-header-left .c-end,
+.planning-header-left .c-demarrage,
+.planning-header-left .c-id2,
+.planning-header-left .c-ligne-planning,
+.planning-header-left .c-task {
+  text-align: left;
+}
+
+.planning-header-left .c-duration-1,
+.planning-header-left .c-duration-2 {
+  text-align: center;
+}
+
+.planning-header-left .c-indice {
+  text-align: center;
+}
+
+.planning-header-left .c-realise {
+  text-align: center;
+}
+
+.planning-header-left .c-retards {
+  text-align: center;
+}
+
+.planning-header-right {
+  display: flex;
+  align-items: center;
+  min-height: var(--planning-row-height);
+  padding: 0 12px;
+  color: var(--grist-theme-text);
+  font-weight: 600;
+}
+
+/* ==========================================================
+   Zone timeline
+   ========================================================== */
+
+#timelineWrapper {
+  background: #fff;
+  border-bottom: 1px solid var(--grist-theme-border);
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+#planningTimeline {
+  position: relative;
+  height: 100%;
+  background: #fff;
+}
+
+.planning-drop-placement-overlay {
+  position: fixed;
+  left: 0;
+  display: none;
+  pointer-events: none;
+  z-index: 1000003;
+  background: transparent;
+}
+
+.planning-drop-placement-overlay.is-visible {
+  display: block;
+}
+
+.planning-drop-placement-overlay::before,
+.planning-drop-placement-overlay::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 50%;
+  height: 6px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  opacity: 0;
+  background: #16a34a;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.95),
+    0 0 16px rgba(22, 163, 74, 0.38);
+}
+
+.planning-drop-placement-overlay.is-coffrage::before,
+.planning-drop-placement-overlay.is-coffrage::after {
+  background: #d97706;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.95),
+    0 0 16px rgba(217, 119, 6, 0.34);
+}
+
+.planning-drop-placement-overlay.is-before::before {
+  opacity: 1;
+}
+
+.planning-drop-placement-overlay.is-after::after {
+  opacity: 1;
+}
+
+#planningTimeline .timeline-axis-left-filler {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--left-panel-width);
+  height: 0;
+  background: #fff;
+  border-right: 1px solid var(--grist-theme-border);
+  border-bottom: 1px solid #e0e0e0;
+  z-index: 79;
+  pointer-events: none;
+  will-change: transform, height;
+}
+
+/* ==========================================================
+   vis-timeline - structure
+   ========================================================== */
+
+#planningTimeline .vis-timeline {
+  border: none !important;
+  font-family: inherit;
+  font-size: 13px;
+  background: #fff;
+}
+
+/* Largeur du panneau gauche = nos 4 colonnes */
+#planningTimeline .vis-panel.vis-left {
+  width: var(--left-panel-width) !important;
+  background: #fafafa !important;
+  border-right: 1px solid var(--grist-theme-border) !important;
+}
+
+/* Décalage des panneaux droits */
+#planningTimeline .vis-panel.vis-center,
+#planningTimeline .vis-panel.vis-top,
+#planningTimeline .vis-panel.vis-bottom {
+  left: var(--left-panel-width) !important;
+  width: calc(100% - var(--left-panel-width)) !important;
+}
+
+/* Axes / grille */
+#planningTimeline .vis-time-axis {
+  background: #fff;
+}
+
+#planningTimeline .vis-panel.vis-top {
+  z-index: 60 !important;
+  background: #fff !important;
+  will-change: transform;
+}
+
+#planningTimeline .vis-time-axis .vis-grid.vis-minor {
+  border-color: #f0f0f0 !important;
+}
+
+#planningTimeline .vis-time-axis .vis-grid.vis-major {
+  border-color: #e0e0e0 !important;
+}
+
+body.planning-sync-axis-only #planningTimeline .vis-time-axis .vis-grid.vis-major,
+body.planning-sync-embedded #planningTimeline .vis-time-axis .vis-grid.vis-major {
+  border-color: #bcc9d6 !important;
+  border-left-width: 2px !important;
+}
+
+#planningTimeline .vis-time-axis .vis-text {
+  color: #444;
+}
+
+/* ==========================================================
+   FIX ALIGNEMENT (gauche labels / droite groupes)
+   ========================================================== */
+
+/* Labels de groupe (panneau gauche) */
+#planningTimeline .vis-labelset .vis-label {
+  height: var(--planning-row-height) !important;
+  min-height: var(--planning-row-height) !important;
+  display: flex !important;
+  align-items: center !important;
+  box-sizing: border-box !important;
+  border-bottom: 1px solid var(--grist-theme-border) !important;
+}
+
+#planningTimeline .vis-labelset .vis-label.zone-header-group {
+  background: #e8f2ff !important;
+  border-bottom: 1px solid #c6dbff !important;
+}
+
+#planningTimeline .vis-labelset .vis-label.zone-header-group .vis-inner {
+  background: #e8f2ff !important;
+}
+
+#planningTimeline .vis-labelset .vis-label.is-planning-drop-placement-label {
+  background: #f8fafc !important;
+  box-shadow: inset 0 0 0 2px rgba(15, 23, 42, 0.22);
+}
+
+#planningTimeline .vis-labelset .vis-label.is-planning-drop-placement-label .vis-inner {
+  background: inherit !important;
+}
+
+/* Wrapper interne vis */
+#planningTimeline .vis-labelset .vis-label .vis-inner {
+  width: 100% !important;
+  height: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+/* Groupes côté timeline (droite) -> même hauteur */
+#planningTimeline .vis-background .vis-group,
+#planningTimeline .vis-foreground .vis-group {
+  height: var(--planning-row-height) !important;
+  min-height: var(--planning-row-height) !important;
+  box-sizing: border-box !important;
+  border-bottom: 1px solid #f2f2f2 !important;
+}
+
+#planningTimeline .vis-background .vis-group.zone-header-group {
+  background: transparent !important;
+  border-bottom: 1px solid #f2f2f2 !important;
+}
+
+#planningTimeline .vis-foreground .vis-group.zone-header-group {
+  background: transparent !important;
+  border-bottom: 1px solid #f2f2f2 !important;
+}
+
+#planningTimeline .vis-background .vis-group.planning-row-group,
+#planningTimeline .vis-foreground .vis-group.planning-row-group {
+  background: transparent !important;
+  border-bottom: 1px solid #f2f2f2 !important;
+}
+
+#planningTimeline .vis-item.vis-background.zone-header-fill {
+  background: #e8f2ff !important;
+  border: 0 !important;
+}
+
+/* Sécurité anti débordement horizontal des labels */
+#planningTimeline .vis-labelset {
+  overflow-x: hidden;
+}
+
+/* ==========================================================
+   Grille custom des 4 colonnes (contenu group labels)
+   Ordre : ID2 | Tâches | Type_doc | Ligne_planning | Indice
+   ========================================================== */
+
+#planningTimeline .group-row-grid {
+  display: grid !important;
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-realise) var(--col-retards) !important;
+  align-items: center !important;
+  width: var(--left-grid-width) !important;
+  min-height: var(--planning-row-height) !important;
+  padding: 0 var(--left-pad-x) !important;
+  box-sizing: content-box !important;
+  color: #222 !important;
+  font-size: 13px !important;
+}
+
+#planningTimeline .group-row-grid.planning-draggable-row,
+#planningTimeline .group-row-grid.planning-draggable-row > div {
+  cursor: grab !important;
+}
+
+#planningTimeline .group-row-grid.planning-draggable-row {
+  user-select: none;
+  -webkit-user-drag: element;
+  transition: opacity 120ms ease;
+}
+
+#planningTimeline .group-row-grid.planning-draggable-row > div {
+  -webkit-user-drag: element;
+}
+
+#planningTimeline .group-row-grid.planning-draggable-row:active,
+#planningTimeline .group-row-grid.planning-draggable-row:active > div {
+  cursor: grabbing !important;
+}
+
+html.planning-row-dragging,
+html.planning-row-dragging *,
+body.planning-row-dragging,
+body.planning-row-dragging * {
+  cursor: grabbing !important;
+}
+
+html.planning-row-dragging,
+body.planning-row-dragging {
+  user-select: none !important;
+}
+
+#planningTimeline .group-row-grid.planning-draggable-row.is-dragging-row,
+#planningTimeline .group-row-grid.planning-draggable-row.is-dragging-row > div {
+  opacity: 0.45 !important;
+}
+
+.planning-native-drag-row {
+  position: fixed;
+  top: -10000px;
+  left: -10000px;
+  pointer-events: none;
+  user-select: none;
+  z-index: 1000002;
+  display: grid;
+  grid-template-columns: var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-realise) var(--col-retards);
+  align-items: center;
+  min-height: var(--planning-row-height);
+  max-width: min(1120px, calc(100vw - 24px));
+  padding: 0 var(--left-pad-x);
+  box-sizing: content-box;
+  border-radius: 9px;
+  border: 1px solid #93c5fd;
+  background: #eef6ff;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.22);
+  color: #0f172a;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.planning-native-drag-row > div {
+  padding: 6px 8px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.planning-native-drag-stack {
+  display: grid;
+  gap: 4px;
+  max-width: min(1120px, calc(100vw - 24px));
+  pointer-events: none;
+}
+
+.planning-native-drag-row.planning-native-drag-row-linked {
+  opacity: 0.82;
+  border-color: #c2d7f5;
+  background: #f5f9ff;
+}
+
+#planningTimeline.is-planning-row-drop-active {
+  cursor: move !important;
+}
+
+#planningTimeline .group-row-grid.is-planning-row-drop-target {
+  position: relative;
+  --planning-row-drop-line-color: #16a34a;
+  box-shadow: inset 0 0 0 2px #16a34a;
+  background: #ecfdf3 !important;
+}
+
+#planningTimeline .group-row-grid.row-type-coffrage.is-planning-row-drop-target {
+  --planning-row-drop-line-color: #d97706;
+  background: #fff2bf !important;
+}
+
+#planningTimeline .group-row-grid.is-planning-drop-placement-row {
+  box-shadow:
+    inset 0 0 0 2px rgba(15, 23, 42, 0.22),
+    0 10px 18px rgba(15, 23, 42, 0.10);
+  background: #f8fafc !important;
+}
+
+#planningTimeline .group-row-grid.row-type-coffrage.is-planning-drop-placement-row {
+  background: #fff8dc !important;
+}
+
+#planningTimeline .group-row-grid.is-planning-drop-placement-row > div {
+  font-weight: 700;
+}
+
+#planningTimeline .group-row-grid.is-planning-row-drop-target::before,
+#planningTimeline .group-row-grid.is-planning-row-drop-target::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--planning-row-drop-line-color, #16a34a);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92), 0 0 12px rgba(15, 23, 42, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+#planningTimeline .group-row-grid.is-planning-row-drop-before::before {
+  top: 2px;
+  opacity: 1;
+}
+
+#planningTimeline .group-row-grid.is-planning-row-drop-after::after {
+  bottom: 2px;
+  opacity: 1;
+}
+
+#planningTimeline .group-row-grid.is-planning-row-drop-committing {
+  box-shadow: inset 0 0 0 2px #15803d;
+  background: #dcfce7 !important;
+}
+
+#planningTimeline .group-row-grid.is-planning-row-drop-committing::before,
+#planningTimeline .group-row-grid.is-planning-row-drop-committing::after {
+  background: #15803d;
+}
+
+#planningTimeline.is-ms-drop-active {
+  cursor: copy !important;
+}
+
+#planningTimeline .group-row-grid.is-ms-drop-target {
+  background: #eef6ff !important;
+  box-shadow: inset 0 0 0 1px #93c5fd;
+}
+
+#planningTimeline .group-row-grid.row-type-coffrage.is-ms-drop-target {
+  background: #fff4cf !important;
+}
+
+#planningTimeline .group-row-grid .cell-ligne-planning.is-ms-drop-target-cell {
+  background: #dbeafe;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+#planningTimeline .group-row-grid.is-ms-drop-committing .cell-ligne-planning,
+#planningTimeline .group-row-grid .cell-ligne-planning.is-ms-drop-committing-cell {
+  background: #dcfce7;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+#planningTimeline .group-row-grid.row-type-coffrage {
+  background: #fff8dc !important;
+}
+
+#planningTimeline .zone-header-band {
+  display: flex !important;
+  align-items: center !important;
+  width: var(--left-grid-width) !important;
+  min-height: var(--planning-row-height) !important;
+  padding: 0 10px !important;
+  box-sizing: content-box !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  color: #1d4f91 !important;
+  letter-spacing: 0.1px;
+}
+
+#planningTimeline .zone-header-band.is-planning-zone-drop-target {
+  box-shadow: inset 0 0 0 2px #0ea5e9;
+  background: #dbeafe !important;
+}
+
+#planningTimeline .zone-header-band.is-planning-zone-drop-committing {
+  box-shadow: inset 0 0 0 2px #0284c7;
+  background: #bfdbfe !important;
+}
+
+#planningTimeline .group-row-grid > div {
+  padding: 6px 8px !important;
+  min-width: 0 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+#planningTimeline .group-row-grid .editable-duration-cell {
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+#planningTimeline .group-row-grid .editable-duration-cell:hover {
+  background: #eef6ff;
+}
+
+#planningTimeline .group-row-grid .editable-duration-cell.is-editing-duration {
+  padding: 2px 6px !important;
+  overflow: visible !important;
+  background: #eaf3ff;
+  border-radius: 4px;
+}
+
+#planningTimeline .group-row-grid .editable-duration-cell .editable-duration-input {
+  color-scheme: light;
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  border: 1px solid #93c5fd;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font: inherit;
+  font-weight: 600;
+  color: #1e3a8a !important;
+  background: #ffffff !important;
+  caret-color: #1e3a8a;
+  outline: none;
+  box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.25);
+}
+
+#planningTimeline .group-row-grid .editable-duration-cell .editable-duration-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+#planningTimeline .group-row-grid .editable-duration-cell.is-saving-duration {
+  opacity: 0.7;
+}
+
+#planningTimeline .group-row-grid .editable-duration-cell.is-saving-duration .editable-duration-input {
+  background: #f8fafc !important;
+  color: #475569 !important;
+}
+
+#planningTimeline .group-row-grid .cell-id2,
+#planningTimeline .group-row-grid .cell-task,
+#planningTimeline .group-row-grid .cell-ligne-planning,
+#planningTimeline .group-row-grid .cell-start,
+#planningTimeline .group-row-grid .cell-end,
+#planningTimeline .group-row-grid .cell-demarrage {
+  text-align: left !important;
+  font-variant-numeric: tabular-nums;
+}
+
+#planningTimeline .group-row-grid .cell-duration-1,
+#planningTimeline .group-row-grid .cell-duration-2 {
+  text-align: center !important;
+  font-variant-numeric: tabular-nums;
+}
+
+#planningTimeline .group-row-grid .cell-indice,
+#planningTimeline .group-row-grid .cell-realise {
+  text-align: center !important;
+  font-weight: 600;
+}
+
+#planningTimeline .group-row-grid .cell-retards {
+  text-align: center !important;
+  font-variant-numeric: tabular-nums;
+}
+
+#planningTimeline .group-row-grid .cell-type {
+  font-weight: 600;
+}
+
+/* ==========================================================
+   Items (barres Gantt/timeline)
+   ========================================================== */
+
+#planningTimeline .vis-item {
+  border-radius: 2px;
+  border: 1px solid var(--grist-theme-border);
+  color: #222;
+  font-size: 12px;
+  line-height: normal;
+  box-sizing: border-box;
+}
+
+#planningTimeline .vis-item.vis-range {
+  top: 4px !important;
+  height: calc(var(--planning-row-height) - 8px) !important;
+  min-height: calc(var(--planning-row-height) - 8px) !important;
+}
+
+#planningTimeline .vis-item .vis-item-content {
+  padding: 0 4px;
+  white-space: nowrap;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+#planningTimeline .vis-item.vis-selected {
+  border-color: #3b82f6 !important;
+  background-color: #eff6ff !important;
+  z-index: 2;
+}
+
+/* Couleurs des 4 phases */
+#planningTimeline .vis-item.phase-limite {
+  background-color: #dbeafe !important;
+  border-color: #bfdbfe !important;
+  color: #1e3a8a !important;
+}
+
+#planningTimeline .vis-item.phase-coffrage {
+  background-color: #fef3c7 !important;
+  border-color: #fde68a !important;
+  color: #92400e !important;
+}
+
+#planningTimeline .vis-item.phase-coffrage.phase-past {
+  background-color: #ead7a2 !important;
+  border-color: #d6bd74 !important;
+  color: #7a4b12 !important;
+}
+
+#planningTimeline .vis-item.phase-armature {
+  background-color: #f3f4f6 !important;
+  border-color: #d1d5db !important;
+  color: #475569 !important;
+}
+
+#planningTimeline .vis-item.phase-armature.phase-past {
+  background-color: #e5e7eb !important;
+  border-color: #cbd5e1 !important;
+  color: #334155 !important;
+}
+
+#planningTimeline .vis-item.phase-travaux {
+  background-color: #dcfce7 !important;
+  border-color: #bbf7d0 !important;
+  color: #166534 !important;
+}
+
+#planningTimeline .vis-item.phase-demarrage {
+  background-color: #dcfce7 !important;
+  border-color: #86efac !important;
+  color: transparent !important;
+}
+
+#planningTimeline .vis-item.phase-demarrage .vis-item-content {
+  padding: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+}
+
+/* Ligne verticale "aujourd'hui" */
+#planningTimeline .vis-current-time {
+  width: 2px !important;
+  background-color: #ed1b2d !important;
+  opacity: 0.9;
+  z-index: 5;
+}
+
+/* ==========================================================
+   Statut
+   ========================================================== */
+
+.planning-status {
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #666;
+  background: #fff;
+  border-top: 1px solid var(--grist-theme-border);
+}
+
+body.is-add-zone-modal-open {
+  overflow: hidden;
+}
+
+.add-zone-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.add-zone-modal[hidden] {
+  display: none !important;
+}
+
+.add-zone-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+.add-zone-modal__panel {
+  position: relative;
+  width: min(560px, calc(100vw - 24px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  background: linear-gradient(180deg, #ffffff 0%, #f9fbff 100%);
+  border: 1px solid #d8e2f0;
+  border-radius: 14px;
+  box-shadow: 0 24px 55px rgba(15, 23, 42, 0.3);
+  transform: translateY(8px) scale(0.985);
+  opacity: 0;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+
+.add-zone-modal.is-open .add-zone-modal__panel {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+
+.add-zone-modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid #e3eaf5;
+  background:
+    radial-gradient(130% 130% at 0% 0%, rgba(0, 73, 144, 0.12) 0%, rgba(0, 73, 144, 0) 65%),
+    #f8fbff;
+}
+
+.add-zone-modal__title-wrap h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+  color: #0f294d;
+}
+
+.add-zone-modal__title-wrap p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #4a6283;
+}
+
+.add-zone-modal__close-btn {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid #c4d4e8;
+  background: #ffffff;
+  color: #24466e;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.add-zone-modal__close-btn:hover {
+  background: #eef5ff;
+}
+
+.add-zone-modal__form {
+  display: grid;
+  gap: 9px;
+  padding: 16px 18px 18px;
+}
+
+.add-zone-modal__form label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.15px;
+  color: #193d67;
+}
+
+.add-zone-modal__form input,
+.add-zone-modal__form textarea {
+  width: 100%;
+  border: 1px solid #bfd0e7;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1d2e43;
+  font: inherit;
+  font-size: 13px;
+  padding: 9px 10px;
+  outline: none;
+}
+
+.add-zone-modal__form input:focus,
+.add-zone-modal__form textarea:focus {
+  border-color: #78a6da;
+  box-shadow: 0 0 0 3px rgba(87, 143, 209, 0.18);
+}
+
+.add-zone-modal__form input[readonly] {
+  background: #f3f7fc;
+  color: #47638a;
+}
+
+.add-zone-modal__hint {
+  margin: 2px 0 0;
+  min-height: 18px;
+  font-size: 12px;
+  color: #1f4d84;
+}
+
+.add-zone-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.add-zone-modal__actions .btn-secondary,
+.add-zone-modal__actions .btn-primary {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  min-height: 34px;
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.add-zone-modal__actions .btn-secondary {
+  border-color: #bfcfe4;
+  background: #f8fbff;
+  color: #244a75;
+}
+
+.add-zone-modal__actions .btn-secondary:hover {
+  background: #edf4ff;
+}
+
+.add-zone-modal__actions .btn-primary {
+  border-color: #0a4d93;
+  background: #0b5cb1;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.add-zone-modal__actions .btn-primary:hover {
+  background: #0a4f99;
+}
+
+/* ==========================================================
+   Responsive léger
+   ========================================================== */
+
+@media (max-width: 1250px) {
+  :root {
+    --col-id2: 52px;
+    --col-task: 172px;
+    --col-ligne-planning: 96px;
+    --col-start: 88px;
+    --col-duration-1: 68px;
+    --col-end: 88px;
+    --col-duration-2: 68px;
+    --col-demarrage: 96px;
+    --col-indice: 64px;
+    --col-realise: 96px;
+    --col-retards: 84px;
+  }
+
+  #toolbar {
+    gap: 8px;
+    padding: 8px 10px;
+    flex-wrap: nowrap;
+  }
+
+  #current-date-range {
+    margin-left: auto;
+    width: auto;
+    flex-basis: 240px;
+    max-width: 240px;
+    font-size: 12px;
+  }
+
+  #toolbar select {
+    width: clamp(112px, 13vw, 170px);
+    max-width: 170px;
+  }
+}
+
+@media (max-width: 980px) {
+  #toolbar {
+    gap: 6px;
+    padding: 8px 8px;
+  }
+
+  .filters {
+    gap: 3px;
+  }
+
+  .toolbar-label {
+    margin-right: 2px;
+    font-size: 12px;
+  }
+
+  #toolbar button {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+
+  #toolbar select {
+    width: clamp(96px, 12vw, 132px);
+    max-width: 132px;
+    font-size: 12px;
+  }
+
+  #current-date-range {
+    flex-basis: 170px;
+    min-width: 120px;
+    max-width: 170px;
+    font-size: 11px;
+  }
+}
