@@ -1,5 +1,12 @@
 import { APP_CONFIG } from "../config.js";
 
+const REFERENCES_TABLE_NAME = "References";
+const LISTEPLAN_TABLE_CANDIDATES = [
+  "ListePlan_NDC_COF",
+  "ListePlan NDC+COF",
+  "ListePlan_NDC+COF",
+];
+
 function getGrist() {
   try {
     if (window.parent && window.parent !== window && window.parent.grist) {
@@ -384,6 +391,257 @@ function buildCoffragePlanningLinkResetActions(rows, {
       ];
     })
     .filter(Boolean);
+}
+
+function collectRowColumnNames(rows) {
+  const names = new Set();
+  for (const row of rows || []) {
+    if (!row || typeof row !== "object") continue;
+    Object.keys(row).forEach((key) => names.add(String(key)));
+  }
+  return names;
+}
+
+function findFirstExistingColumnName(columnNames, candidates = [], fallback = "") {
+  for (const candidate of candidates) {
+    const name = String(candidate || "").trim();
+    if (name && columnNames.has(name)) {
+      return name;
+    }
+  }
+  return String(fallback || candidates[0] || "").trim();
+}
+
+function normalizeLookupText(value) {
+  return toText(value).toLocaleLowerCase("fr");
+}
+
+function normalizeDocumentNumberForMatch(value) {
+  const text = toText(value);
+  if (!text) return "";
+  if (/^-?\d+$/.test(text)) {
+    return String(Number(text));
+  }
+  return text.toLocaleLowerCase("fr");
+}
+
+function sameLookupText(left, right) {
+  return normalizeLookupText(left) === normalizeLookupText(right);
+}
+
+function sameDocumentNumber(left, right) {
+  return normalizeDocumentNumberForMatch(left) === normalizeDocumentNumberForMatch(right);
+}
+
+function getFirstNonEmptyRowValue(row, columnNames = []) {
+  for (const columnName of columnNames) {
+    const value = toText(row?.[columnName]);
+    if (value) return value;
+  }
+  return "";
+}
+
+async function fetchFirstAvailableTable(candidates = []) {
+  let lastError = null;
+  for (const candidate of candidates) {
+    const tableName = String(candidate || "").trim();
+    if (!tableName) continue;
+    try {
+      const rows = await fetchTableRows(tableName);
+      return { tableName, rows };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  return { tableName: "", rows: [], error: lastError };
+}
+
+function buildZoneSyncTableContext(tableName, rows, {
+  projectCandidates = [],
+  numberCandidates = [],
+  typeCandidates = [],
+  zoneCandidates = [],
+  designationCandidates = [],
+} = {}) {
+  if (!tableName) return null;
+
+  const columnNames = collectRowColumnNames(rows);
+  return {
+    tableName,
+    rows: Array.isArray(rows) ? rows : [],
+    projectCol: findFirstExistingColumnName(columnNames, projectCandidates, projectCandidates[0] || ""),
+    numberCol: findFirstExistingColumnName(columnNames, numberCandidates, numberCandidates[0] || ""),
+    typeCol: findFirstExistingColumnName(columnNames, typeCandidates, typeCandidates[0] || ""),
+    zoneCol: findFirstExistingColumnName(columnNames, zoneCandidates, zoneCandidates[0] || ""),
+    designationCols: designationCandidates.filter((name) => columnNames.has(name)),
+  };
+}
+
+function filterMatchingRowsForZoneSync(context, change, {
+  requireDesignation = true,
+  sourceZoneFallbackToBlank = false,
+} = {}) {
+  if (!context?.tableName || !context.numberCol) return [];
+
+  const normalizedProject = toText(change?.projectName);
+  const normalizedNumber = toText(change?.numeroDocument);
+  const normalizedType = toText(change?.typeDocument);
+  const normalizedDesignation = toText(change?.designation);
+  const normalizedSourceZone = normalizeZoneValueForStorage(change?.sourceZone);
+
+  const baseMatches = (context.rows || []).filter((row) => {
+    const rowId = Number(row?.id);
+    if (!Number.isInteger(rowId) || rowId <= 0) return false;
+    if (context.projectCol && normalizedProject && !sameLookupText(row?.[context.projectCol], normalizedProject)) {
+      return false;
+    }
+    if (!sameDocumentNumber(row?.[context.numberCol], normalizedNumber)) {
+      return false;
+    }
+    if (context.typeCol && normalizedType && !sameLookupText(row?.[context.typeCol], normalizedType)) {
+      return false;
+    }
+    if (requireDesignation && normalizedDesignation && context.designationCols.length) {
+      const rowDesignation = getFirstNonEmptyRowValue(row, context.designationCols);
+      if (rowDesignation && !sameLookupText(rowDesignation, normalizedDesignation)) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  if (!baseMatches.length) return [];
+
+  if (!context.zoneCol) {
+    return baseMatches;
+  }
+
+  const exactZoneMatches = baseMatches.filter(
+    (row) => normalizeZoneValueForStorage(row?.[context.zoneCol]) === normalizedSourceZone
+  );
+  if (exactZoneMatches.length) {
+    return exactZoneMatches;
+  }
+
+  if (sourceZoneFallbackToBlank && normalizedSourceZone) {
+    const blankZoneMatches = baseMatches.filter(
+      (row) => normalizeZoneValueForStorage(row?.[context.zoneCol]) === ""
+    );
+    if (blankZoneMatches.length) {
+      return blankZoneMatches;
+    }
+  }
+
+  return [];
+}
+
+function buildZoneSyncActionsForTable(context, zoneChanges = []) {
+  if (!context?.tableName || !context.zoneCol) return [];
+
+  const actions = [];
+  const seenRows = new Set();
+
+  for (const change of zoneChanges) {
+    const targetZone = normalizeZoneValueForStorage(change?.targetZone);
+
+    const exactMatches = filterMatchingRowsForZoneSync(context, change, {
+      requireDesignation: true,
+      sourceZoneFallbackToBlank: true,
+    });
+    const looseMatches = exactMatches.length
+      ? exactMatches
+      : filterMatchingRowsForZoneSync(context, change, {
+          requireDesignation: false,
+          sourceZoneFallbackToBlank: true,
+        });
+
+    for (const row of looseMatches) {
+      const rowId = Number(row?.id);
+      if (!Number.isInteger(rowId) || rowId <= 0) continue;
+      if (normalizeZoneValueForStorage(row?.[context.zoneCol]) === targetZone) continue;
+
+      const rowKey = `${context.tableName}:${rowId}`;
+      if (seenRows.has(rowKey)) continue;
+      seenRows.add(rowKey);
+
+      actions.push([
+        "UpdateRecord",
+        context.tableName,
+        rowId,
+        {
+          [context.zoneCol]: targetZone,
+        },
+      ]);
+    }
+  }
+
+  return actions;
+}
+
+async function buildExternalZoneSyncActionsForPlanningChanges(zoneChanges = []) {
+  const normalizedChanges = (zoneChanges || [])
+    .map((change) => ({
+      projectName: toText(change?.projectName),
+      numeroDocument: toText(change?.numeroDocument),
+      typeDocument: toText(change?.typeDocument),
+      designation: toText(change?.designation),
+      sourceZone: normalizeZoneValueForStorage(change?.sourceZone),
+      targetZone: normalizeZoneValueForStorage(change?.targetZone),
+    }))
+    .filter((change) =>
+      change.projectName &&
+      change.numeroDocument &&
+      change.typeDocument &&
+      change.sourceZone !== change.targetZone
+    );
+
+  if (!normalizedChanges.length) {
+    return [];
+  }
+
+  const uniqueChanges = [];
+  const seenChanges = new Set();
+  normalizedChanges.forEach((change) => {
+    const key = [
+      normalizeLookupText(change.projectName),
+      normalizeDocumentNumberForMatch(change.numeroDocument),
+      normalizeLookupText(change.typeDocument),
+      normalizeLookupText(change.designation),
+      normalizeLookupText(change.sourceZone),
+      normalizeLookupText(change.targetZone),
+    ].join("||");
+    if (seenChanges.has(key)) return;
+    seenChanges.add(key);
+    uniqueChanges.push(change);
+  });
+
+  const [referencesResult, listePlanResult] = await Promise.all([
+    fetchTableRows(REFERENCES_TABLE_NAME)
+      .then((rows) => ({ tableName: REFERENCES_TABLE_NAME, rows }))
+      .catch((error) => ({ tableName: "", rows: [], error })),
+    fetchFirstAvailableTable(LISTEPLAN_TABLE_CANDIDATES),
+  ]);
+
+  const contexts = [
+    buildZoneSyncTableContext(referencesResult.tableName, referencesResult.rows, {
+      projectCandidates: ["NomProjetString", "NomProjet", "Nom_projet"],
+      numberCandidates: ["NumeroDocument"],
+      typeCandidates: ["Type_document", "TypeDocument"],
+      zoneCandidates: ["Zone"],
+      designationCandidates: ["NomDocument", "Designation"],
+    }),
+    buildZoneSyncTableContext(listePlanResult.tableName, listePlanResult.rows, {
+      projectCandidates: ["Nom_projet", "NomProjet"],
+      numberCandidates: ["NumeroDocument"],
+      typeCandidates: ["Type_document", "Type_doc"],
+      zoneCandidates: ["Zone"],
+      designationCandidates: ["Designation", "NomDocument"],
+    }),
+  ].filter(Boolean);
+
+  return contexts.flatMap((context) =>
+    buildZoneSyncActionsForTable(context, uniqueChanges)
+  );
 }
 
 export async function syncCoffrageDiffCoffrageFromGroups(
@@ -889,6 +1147,7 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
   const groupCol = String(columns.groupe || "Groupe").trim();
   const zoneCol = String(columns.zone || "Zone").trim();
   const typeDocCol = String(columns.typeDoc || "Type_doc").trim();
+  const taskCol = String(columns.taches || columns.tacheAlt || "Taches").trim();
   const projectCol = String(columns.projectLink || columns.nomProjet || "NomProjet").trim();
   const linePlanningCol = String(columns.lignePlanning || "Ligne_planning").trim();
   const demarrageCol = String(columns.demarragesTravaux || "Demarrages_travaux").trim();
@@ -979,6 +1238,19 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
     : [];
 
   const linkedActions = [];
+  const zoneChanges = [];
+
+  if (sourceZone !== targetZone) {
+    zoneChanges.push({
+      projectName: sourceProject,
+      numeroDocument: sourceRow?.[columns.id2 || "ID2"],
+      typeDocument: sourceTypeDoc,
+      designation: sourceRow?.[taskCol],
+      sourceZone,
+      targetZone,
+    });
+  }
+
   normalizedLinkedIds.forEach((linkedId) => {
     const linkedRow = rows.find((row) => Number(row?.[idCol]) === linkedId) || null;
     if (!linkedRow) return;
@@ -999,6 +1271,17 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
       linkedId,
       linkedUpdates,
     ]);
+
+    if (linkedZone !== targetZone) {
+      zoneChanges.push({
+        projectName: sourceProject,
+        numeroDocument: linkedRow?.[columns.id2 || "ID2"],
+        typeDocument: linkedTypeDoc,
+        designation: linkedRow?.[taskCol],
+        sourceZone: linkedZone,
+        targetZone,
+      });
+    }
   });
 
   const finalGroupHasArmatures =
@@ -1047,7 +1330,9 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
       })
     : [];
 
-  if (!Object.keys(updates).length && !linkedActions.length && !planningLinkResetActions.length) {
+  const externalZoneSyncActions = await buildExternalZoneSyncActionsForPlanningChanges(zoneChanges);
+
+  if (!Object.keys(updates).length && !linkedActions.length && !planningLinkResetActions.length && !externalZoneSyncActions.length) {
     return {
       updated: false,
       groupe: nextGroupValue,
@@ -1072,6 +1357,7 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
   }
   actions.push(...linkedActions);
   actions.push(...planningLinkResetActions);
+  actions.push(...externalZoneSyncActions);
   await grist.docApi.applyUserActions(actions);
 
   return {
@@ -1098,6 +1384,7 @@ export async function updatePlanningZoneFromZoneHeaderDrop({
   const zoneCol = String(columns.zone || "Zone").trim();
   const groupCol = String(columns.groupe || "Groupe").trim();
   const typeDocCol = String(columns.typeDoc || "Type_doc").trim();
+  const taskCol = String(columns.taches || columns.tacheAlt || "Taches").trim();
   const projectCol = String(columns.projectLink || columns.nomProjet || "NomProjet").trim();
   const linePlanningCol = String(columns.lignePlanning || "Ligne_planning").trim();
   const demarrageCol = String(columns.demarragesTravaux || "Demarrages_travaux").trim();
@@ -1165,6 +1452,19 @@ export async function updatePlanningZoneFromZoneHeaderDrop({
     : [];
 
   const linkedActions = [];
+  const zoneChanges = [];
+
+  if (sourceZone !== normalizedZone) {
+    zoneChanges.push({
+      projectName: sourceProject,
+      numeroDocument: sourceRow?.[columns.id2 || "ID2"],
+      typeDocument: sourceTypeDoc,
+      designation: sourceRow?.[taskCol],
+      sourceZone,
+      targetZone: normalizedZone,
+    });
+  }
+
   normalizedLinkedIds.forEach((linkedId) => {
     const linkedRow = rows.find((row) => Number(row?.[idCol]) === linkedId) || null;
     if (!linkedRow) return;
@@ -1185,6 +1485,17 @@ export async function updatePlanningZoneFromZoneHeaderDrop({
       linkedId,
       linkedUpdates,
     ]);
+
+    if (linkedZone !== normalizedZone) {
+      zoneChanges.push({
+        projectName: sourceProject,
+        numeroDocument: linkedRow?.[columns.id2 || "ID2"],
+        typeDocument: linkedTypeDoc,
+        designation: linkedRow?.[taskCol],
+        sourceZone: linkedZone,
+        targetZone: normalizedZone,
+      });
+    }
   });
 
   const finalGroupHasArmatures =
@@ -1233,7 +1544,9 @@ export async function updatePlanningZoneFromZoneHeaderDrop({
       })
     : [];
 
-  if (!Object.keys(updates).length && !linkedActions.length && !planningLinkResetActions.length) {
+  const externalZoneSyncActions = await buildExternalZoneSyncActionsForPlanningChanges(zoneChanges);
+
+  if (!Object.keys(updates).length && !linkedActions.length && !planningLinkResetActions.length && !externalZoneSyncActions.length) {
     return {
       updated: false,
       zone: normalizedZone,
@@ -1258,6 +1571,7 @@ export async function updatePlanningZoneFromZoneHeaderDrop({
   }
   actions.push(...linkedActions);
   actions.push(...planningLinkResetActions);
+  actions.push(...externalZoneSyncActions);
   await grist.docApi.applyUserActions(actions);
 
   return {

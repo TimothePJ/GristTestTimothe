@@ -921,7 +921,7 @@ function bindDurationCellEditing(containerEl) {
     event.preventDefault();
     event.stopPropagation();
     startDurationCellEditing(cellEl);
-  });
+  }, true);
 }
 
 function getEventTargetElement(event) {
@@ -2323,6 +2323,7 @@ function buildGroupLabelElement(group) {
   dureeDebutFin.dataset.rightIsoDate = String(group?.dureeDebutFinRightIso ?? "");
   if (group?.dureeDebutFinEditable) {
     dureeDebutFin.classList.add("editable-duration-cell");
+    dureeDebutFin.setAttribute("draggable", "false");
     dureeDebutFin.title = "Cliquer pour modifier la durée";
   }
 
@@ -2350,6 +2351,7 @@ function buildGroupLabelElement(group) {
   );
   if (group?.dureeFinDemarrageEditable) {
     dureeFinDemarrage.classList.add("editable-duration-cell");
+    dureeFinDemarrage.setAttribute("draggable", "false");
     dureeFinDemarrage.title = "Cliquer pour modifier la durée";
   }
 

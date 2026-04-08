@@ -354,17 +354,162 @@ function findListePlanIndex(plansTable, projectName, numeroDocStr, typeDocStr = 
   return -1;
 }
 
-function findPlanningIndex(planningTable, projectName, numeroDocStr, typeDocStr) {
-  const projs = planningTable.NomProjet || [];
-  const ids2 = planningTable.ID2 || [];
-  const types = planningTable.Type_doc || [];
+function hasPlanningColumn(planningTable, columnName) {
+  return Boolean(planningTable) && Object.prototype.hasOwnProperty.call(planningTable, columnName);
+}
+
+function setPlanningFieldIfPresent(planningTable, fields, columnName, value) {
+  if (hasPlanningColumn(planningTable, columnName)) {
+    fields[columnName] = value;
+  }
+}
+
+function getPlanningProjectColumn(planningTable) {
+  if (hasPlanningColumn(planningTable, 'NomProjet')) return 'NomProjet';
+  if (hasPlanningColumn(planningTable, 'Nom_projet')) return 'Nom_projet';
+  return 'NomProjet';
+}
+
+function getPlanningTaskColumn(planningTable) {
+  if (hasPlanningColumn(planningTable, 'Taches')) return 'Taches';
+  if (hasPlanningColumn(planningTable, 'Tache')) return 'Tache';
+  if (hasPlanningColumn(planningTable, 'Designation')) return 'Designation';
+  return 'Taches';
+}
+
+function planningZoneExists(planningTable, projectName, zoneStr = '') {
+  const normalizedZone = normalizeZoneValue(zoneStr);
+  if (!normalizedZone) return true;
+
+  const projectCol = getPlanningProjectColumn(planningTable);
+  const projs = planningTable?.[projectCol] || [];
+  const zones = planningTable?.Zone || [];
+  const p = _norm(projectName);
+
+  for (let i = 0; i < Math.max(projs.length, zones.length); i++) {
+    if (_norm(projs[i]) === p && normalizeZoneValue(zones[i]) === normalizedZone) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function buildPlanningZoneAnchorFields(planningTable, projectName, zoneStr = '') {
+  const projectCol = getPlanningProjectColumn(planningTable);
+  const taskCol = getPlanningTaskColumn(planningTable);
+  const normalizedZone = normalizeZoneValue(zoneStr);
+  const fields = {};
+
+  setPlanningFieldIfPresent(planningTable, fields, 'ID2', '');
+  setPlanningFieldIfPresent(planningTable, fields, taskCol, '');
+  setPlanningFieldIfPresent(planningTable, fields, 'Type_doc', '');
+  setPlanningFieldIfPresent(planningTable, fields, 'Ligne_planning', 0);
+  setPlanningFieldIfPresent(planningTable, fields, 'Prev_Indice_0', null);
+  setPlanningFieldIfPresent(planningTable, fields, 'Date_limite', null);
+  setPlanningFieldIfPresent(planningTable, fields, 'Duree_1', 0);
+  setPlanningFieldIfPresent(planningTable, fields, 'Diff_coffrage', null);
+  setPlanningFieldIfPresent(planningTable, fields, 'Duree_2', 0);
+  setPlanningFieldIfPresent(planningTable, fields, 'Diff_armature', null);
+  setPlanningFieldIfPresent(planningTable, fields, 'Duree_3', 0);
+  setPlanningFieldIfPresent(planningTable, fields, 'Demarrages_travaux', null);
+  setPlanningFieldIfPresent(planningTable, fields, 'Retards', 0);
+  setPlanningFieldIfPresent(planningTable, fields, 'Indice', '');
+  setPlanningFieldIfPresent(planningTable, fields, 'Realise', 0);
+  setPlanningFieldIfPresent(planningTable, fields, projectCol, _norm(projectName));
+  setPlanningFieldIfPresent(planningTable, fields, 'Groupe', '');
+  setPlanningFieldIfPresent(planningTable, fields, 'Zone', normalizedZone);
+
+  return fields;
+}
+
+function buildPlanningZoneAnchorActionIfMissing(planningTableName, planningTable, projectName, zoneStr = '') {
+  const normalizedZone = normalizeZoneValue(zoneStr);
+  if (!normalizedZone) return null;
+  if (planningZoneExists(planningTable, projectName, normalizedZone)) return null;
+
+  return ['AddRecord', planningTableName, null, buildPlanningZoneAnchorFields(planningTable, projectName, normalizedZone)];
+}
+
+function buildPlanningDocumentUpdateFields(planningTable, {
+  taskName = '',
+  typeDoc = '',
+  zoneStr = '',
+  lignePlanning = null
+} = {}) {
+  const taskCol = getPlanningTaskColumn(planningTable);
+  const fields = {};
+
+  setPlanningFieldIfPresent(planningTable, fields, taskCol, String(taskName ?? '').trim());
+  setPlanningFieldIfPresent(planningTable, fields, 'Type_doc', String(typeDoc ?? '').trim());
+  if (lignePlanning != null) {
+    setPlanningFieldIfPresent(planningTable, fields, 'Ligne_planning', lignePlanning);
+  }
+  setPlanningFieldIfPresent(planningTable, fields, 'Zone', normalizeZoneValue(zoneStr));
+
+  return fields;
+}
+
+function buildPlanningDocumentAddFields(planningTable, {
+  projectName = '',
+  numeroDocStr = '',
+  taskName = '',
+  typeDoc = '',
+  zoneStr = '',
+  lignePlanning = null
+} = {}) {
+  const projectCol = getPlanningProjectColumn(planningTable);
+  const taskCol = getPlanningTaskColumn(planningTable);
+  const fields = {};
+
+  setPlanningFieldIfPresent(planningTable, fields, projectCol, _norm(projectName));
+  setPlanningFieldIfPresent(planningTable, fields, 'ID2', _norm(numeroDocStr));
+  setPlanningFieldIfPresent(planningTable, fields, taskCol, String(taskName ?? '').trim());
+  setPlanningFieldIfPresent(planningTable, fields, 'Type_doc', String(typeDoc ?? '').trim());
+  if (lignePlanning != null) {
+    setPlanningFieldIfPresent(planningTable, fields, 'Ligne_planning', lignePlanning);
+  }
+  setPlanningFieldIfPresent(planningTable, fields, 'Indice', '');
+  setPlanningFieldIfPresent(planningTable, fields, 'Groupe', '');
+  setPlanningFieldIfPresent(planningTable, fields, 'Zone', normalizeZoneValue(zoneStr));
+
+  return fields;
+}
+
+function findPlanningIndex(planningTable, projectName, numeroDocStr, typeDocStr, zoneStr = '', taskName = '') {
+  const projectCol = getPlanningProjectColumn(planningTable);
+  const taskCol = getPlanningTaskColumn(planningTable);
+  const projs = planningTable?.[projectCol] || [];
+  const ids2 = planningTable?.ID2 || [];
+  const types = planningTable?.Type_doc || [];
+  const zones = planningTable?.Zone || [];
+  const tasks = planningTable?.[taskCol] || [];
   const p = _norm(projectName);
   const n = _norm(numeroDocStr);
   const t = _norm(typeDocStr);
-  for (let i = 0; i < Math.max(projs.length, ids2.length, types.length); i++) {
-    if (_norm(projs[i]) === p && _norm(ids2[i]) === n && _norm(types[i]) === t) return i;
+  const z = normalizeZoneValue(zoneStr);
+  let legacyFallbackIndex = -1;
+  const hasZoneColumn = hasPlanningColumn(planningTable, 'Zone');
+
+  for (let i = 0; i < Math.max(projs.length, ids2.length, types.length, zones.length, tasks.length); i++) {
+    if (_norm(projs[i]) !== p) continue;
+    if (_norm(ids2[i]) !== n) continue;
+    if (_norm(types[i]) !== t) continue;
+
+    const currentZone = hasZoneColumn ? normalizeZoneValue(zones[i]) : '';
+    if (currentZone === z) return i;
+
+    const matchesLegacyBlankZone = z && currentZone === '';
+    if (matchesLegacyBlankZone) {
+      if (_norm(taskName) && _norm(tasks[i]) === _norm(taskName)) {
+        return i;
+      }
+      if (legacyFallbackIndex < 0) {
+        legacyFallbackIndex = i;
+      }
+    }
   }
-  return -1;
+
+  return legacyFallbackIndex;
 }
 
 
@@ -640,9 +785,11 @@ function collectProjectDocumentEntries(projectName, typeValue = '') {
     const name = _norm(record.NomDocument);
     if (!name) return;
 
+    const type = normalizeTypeDocument(record.Type_document);
     const numero = parseNumeroForStorage(record.NumeroDocument);
     const zone = normalizeZoneValue(record.Zone);
     const key = [
+      type.toLocaleLowerCase('fr'),
       zone.toLocaleLowerCase('fr'),
       numero == null ? '' : String(numero),
       name.toLocaleLowerCase('fr'),
@@ -653,6 +800,7 @@ function collectProjectDocumentEntries(projectName, typeValue = '') {
     docsByKey.set(key, {
       name,
       numero,
+      type,
       zone,
       label: makeDocLabel(name, numero),
       value: buildDocSelectValue({ numero, name, zone }),
@@ -660,6 +808,19 @@ function collectProjectDocumentEntries(projectName, typeValue = '') {
   });
 
   return Array.from(docsByKey.values()).sort((left, right) => {
+    if (!normalizedType) {
+      const leftRank = getDocumentTypeSortRank(left.type);
+      const rightRank = getDocumentTypeSortRank(right.type);
+      if (leftRank !== rightRank) return leftRank - rightRank;
+
+      const typeCompare = normalizeTypeDocument(left.type).localeCompare(
+        normalizeTypeDocument(right.type),
+        'fr',
+        { sensitivity: 'base', numeric: true }
+      );
+      if (typeCompare !== 0) return typeCompare;
+    }
+
     const zoneLeft = formatZoneLabel(left.zone);
     const zoneRight = formatZoneLabel(right.zone);
     const sansZoneLeft = normalizeZoneValue(left.zone) ? 0 : 1;
@@ -712,6 +873,56 @@ const DEFAULT_DOCUMENT_TYPES = [
   'D\u00C9MOLITION',
   'NDC',
 ];
+
+function getDocumentTypeSortRank(type) {
+  const normalized = normalizeTypeDocument(type);
+  const index = DEFAULT_DOCUMENT_TYPES.indexOf(normalized);
+  return index === -1 ? DEFAULT_DOCUMENT_TYPES.length : index;
+}
+
+function compareZoneKeys(left, right) {
+  const leftEmpty = normalizeZoneValue(left) ? 0 : 1;
+  const rightEmpty = normalizeZoneValue(right) ? 0 : 1;
+  if (leftEmpty !== rightEmpty) return leftEmpty - rightEmpty;
+  return formatZoneLabel(left).localeCompare(formatZoneLabel(right), 'fr', {
+    sensitivity: 'base',
+    numeric: true,
+  });
+}
+
+function appendDocumentOption(parent, entry) {
+  const option = document.createElement('option');
+  option.value = entry.value;
+  option.text = entry.label;
+  parent.appendChild(option);
+}
+
+function appendZoneOptions(parent, entries, withZoneSeparators = false) {
+  const groupedEntries = new Map();
+  entries.forEach((entry) => {
+    const zoneKey = normalizeZoneValue(entry.zone);
+    if (!groupedEntries.has(zoneKey)) groupedEntries.set(zoneKey, []);
+    groupedEntries.get(zoneKey).push(entry);
+  });
+
+  const groupedZones = Array.from(groupedEntries.keys()).sort(compareZoneKeys);
+
+  groupedZones.forEach((zoneKey) => {
+    if (withZoneSeparators) {
+      const separator = document.createElement('option');
+      separator.disabled = true;
+      separator.text = `--- ${formatZoneLabel(zoneKey)} ---`;
+      parent.appendChild(separator);
+      groupedEntries.get(zoneKey).forEach((entry) => appendDocumentOption(parent, entry));
+      return;
+    }
+
+    const group = document.createElement('optgroup');
+    group.label = formatZoneLabel(zoneKey);
+    groupedEntries.get(zoneKey).forEach((entry) => appendDocumentOption(group, entry));
+    parent.appendChild(group);
+  });
+}
 
 function collectProjectDocumentTypes(projectName, extraTypes = []) {
   const project = _norm(projectName);
@@ -952,6 +1163,7 @@ function populateTable() {
       key !== 'NomProjet' &&
       key !== 'NomDocument' &&
       key !== 'id' &&
+      key !== 'NumeroDocument' &&
       key !== 'Type_document' &&
       key !== 'Zone'
   );
@@ -1663,30 +1875,57 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
     }
 
     // 1b) Upsert dans Planning_Projet / Planning_Project
-    let planningAction = null;
+    const planningActions = [];
     try {
       const planningTableName = await resolvePlanningTableName();
       const planning = await grist.docApi.fetchTable(planningTableName);
+      const planningZoneAnchorAction = buildPlanningZoneAnchorActionIfMissing(
+        planningTableName,
+        planning,
+        selectedProject,
+        documentZone
+      );
+      if (planningZoneAnchorAction) {
+        planningActions.push(planningZoneAnchorAction);
+      }
 
       const numStrPlanning = _norm(documentNumber);
-      const idxPlanning = findPlanningIndex(planning, selectedProject, numStrPlanning, documentType);
+      const idxPlanning = findPlanningIndex(
+        planning,
+        selectedProject,
+        numStrPlanning,
+        documentType,
+        documentZone,
+        nm
+      );
       const lignePlanning = computePlanningLine(numStrPlanning, 0);
 
       if (idxPlanning >= 0) {
-        planningAction = ['UpdateRecord', planningTableName, planning.id[idxPlanning], {
-          Taches: nm,
-          Type_doc: documentType,
-          Ligne_planning: lignePlanning
-        }];
+        planningActions.push([
+          'UpdateRecord',
+          planningTableName,
+          planning.id[idxPlanning],
+          buildPlanningDocumentUpdateFields(planning, {
+            taskName: nm,
+            typeDoc: documentType,
+            zoneStr: documentZone,
+            lignePlanning
+          })
+        ]);
       } else {
-        planningAction = ['AddRecord', planningTableName, null, {
-          NomProjet: selectedProject,
-          ID2: numStrPlanning,
-          Taches: nm,
-          Type_doc: documentType,
-          Ligne_planning: lignePlanning,
-          Indice: ""
-        }];
+        planningActions.push([
+          'AddRecord',
+          planningTableName,
+          null,
+          buildPlanningDocumentAddFields(planning, {
+            projectName: selectedProject,
+            numeroDocStr: numStrPlanning,
+            taskName: nm,
+            typeDoc: documentType,
+            zoneStr: documentZone,
+            lignePlanning
+          })
+        ]);
       }
     } catch (err) {
       console.warn("Planning: impossible d'ajouter / mettre à jour le document (vérifie le nom de table et les colonnes).", err);
@@ -1695,7 +1934,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
     // 2) Ajout des lignes dans References
     const actions = [];
     if (planAction) actions.push(planAction);
-    if (planningAction) actions.push(planningAction);
+    planningActions.forEach((action) => actions.push(action));
     newRows.forEach(row => actions.push(['AddRecord', 'References', null, row]));
     await grist.docApi.applyUserActions(actions);
     selectedTypeValue = documentType;
@@ -2907,44 +3146,59 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
     try {
       const planningTableName = await resolvePlanningTableName();
       const planning = await grist.docApi.fetchTable(planningTableName);
-
-      const existingPlanning = new Map();
-      const projs = planning.NomProjet || [];
-      const ids2 = planning.ID2 || [];
-      const types = planning.Type_doc || [];
-      const ids = planning.id || [];
-      const LP = Math.max(projs.length, ids2.length, types.length, ids.length);
-      for (let i = 0; i < LP; i++) {
-        const p = _norm(projs[i]);
-        const n = _norm(ids2[i]);
-        const t = _norm(types[i]);
-        if (!p || !n || !t) continue;
-        existingPlanning.set(`${p}||${n}||${t}`, ids[i]);
+      const planningZoneAnchorAction = buildPlanningZoneAnchorActionIfMissing(
+        planningTableName,
+        planning,
+        selectedProject,
+        documentZone
+      );
+      if (planningZoneAnchorAction) {
+        actions.push(planningZoneAnchorAction);
       }
 
       const projKeyPlanning = _norm(selectedProject);
+      const pendingPlanningAdds = new Set();
       documentsData.forEach((doc, index) => {
         const numStrPlanning = _norm(doc.documentNumber);
         const nm = String(doc.documentName).trim();
-        const keyPlanning = `${projKeyPlanning}||${numStrPlanning}||${_norm(documentType)}`;
+        const keyPlanning = `${projKeyPlanning}||${numStrPlanning}||${_norm(documentType)}||${documentZone}`;
         const lignePlanning = computePlanningLine(numStrPlanning, index);
+        const idxPlanning = findPlanningIndex(
+          planning,
+          selectedProject,
+          numStrPlanning,
+          documentType,
+          documentZone,
+          nm
+        );
 
-        if (existingPlanning.has(keyPlanning)) {
-          actions.push(['UpdateRecord', planningTableName, existingPlanning.get(keyPlanning), {
-            Taches: nm,
-            Type_doc: documentType,
-            Ligne_planning: lignePlanning
-          }]);
-        } else {
-          actions.push(['AddRecord', planningTableName, null, {
-            NomProjet: selectedProject,
-            ID2: numStrPlanning,
-            Taches: nm,
-            Type_doc: documentType,
-            Ligne_planning: lignePlanning,
-            Indice: ""
-          }]);
-          existingPlanning.set(keyPlanning, null);
+        if (idxPlanning >= 0) {
+          actions.push([
+            'UpdateRecord',
+            planningTableName,
+            planning.id[idxPlanning],
+            buildPlanningDocumentUpdateFields(planning, {
+              taskName: nm,
+              typeDoc: documentType,
+              zoneStr: documentZone,
+              lignePlanning
+            })
+          ]);
+        } else if (!pendingPlanningAdds.has(keyPlanning)) {
+          actions.push([
+            'AddRecord',
+            planningTableName,
+            null,
+            buildPlanningDocumentAddFields(planning, {
+              projectName: selectedProject,
+              numeroDocStr: numStrPlanning,
+              taskName: nm,
+              typeDoc: documentType,
+              zoneStr: documentZone,
+              lignePlanning
+            })
+          ]);
+          pendingPlanningAdds.add(keyPlanning);
         }
       });
     } catch (err) {
@@ -3437,42 +3691,42 @@ function populateSecondColumnListbox(selectedValue, preferredValue = null) {
 
   const documentEntries = collectProjectDocumentEntries(selectedProject, selectedType);
   const hasZones = projectHasStructuredZones(selectedProject);
+  const showAllTypes = !selectedType;
 
-  if (hasZones) {
-    const groupedEntries = new Map();
+  if (showAllTypes) {
+    const groupedTypes = new Map();
     documentEntries.forEach((entry) => {
-      const zoneKey = normalizeZoneValue(entry.zone);
-      if (!groupedEntries.has(zoneKey)) groupedEntries.set(zoneKey, []);
-      groupedEntries.get(zoneKey).push(entry);
+      const typeKey = normalizeTypeDocument(entry.type);
+      if (!groupedTypes.has(typeKey)) groupedTypes.set(typeKey, []);
+      groupedTypes.get(typeKey).push(entry);
     });
 
-    const groupedZones = Array.from(groupedEntries.keys()).sort((left, right) => {
-      const leftEmpty = left ? 0 : 1;
-      const rightEmpty = right ? 0 : 1;
-      if (leftEmpty !== rightEmpty) return leftEmpty - rightEmpty;
-      return formatZoneLabel(left).localeCompare(formatZoneLabel(right), 'fr', { sensitivity: 'base', numeric: true });
-    });
+    const orderedTypes = collectProjectDocumentTypes(
+      selectedProject,
+      Array.from(groupedTypes.keys())
+    ).filter((typeKey) => groupedTypes.has(typeKey));
 
-    groupedZones.forEach((zoneKey) => {
+    if (groupedTypes.has('') && !orderedTypes.includes('')) {
+      orderedTypes.push('');
+    }
+
+    orderedTypes.forEach((typeKey) => {
       const group = document.createElement('optgroup');
-      group.label = formatZoneLabel(zoneKey);
+      group.label = typeKey || 'Sans type';
+      const typeEntries = groupedTypes.get(typeKey) || [];
 
-      groupedEntries.get(zoneKey).forEach((entry) => {
-        const option = document.createElement('option');
-        option.value = entry.value;
-        option.text = entry.label;
-        group.appendChild(option);
-      });
+      if (hasZones) {
+        appendZoneOptions(group, typeEntries, true);
+      } else {
+        typeEntries.forEach((entry) => appendDocumentOption(group, entry));
+      }
 
       listbox.appendChild(group);
     });
+  } else if (hasZones) {
+    appendZoneOptions(listbox, documentEntries, false);
   } else {
-    documentEntries.forEach((entry) => {
-      const option = document.createElement('option');
-      option.value = entry.value;
-      option.text = entry.label;
-      listbox.appendChild(option);
-    });
+    documentEntries.forEach((entry) => appendDocumentOption(listbox, entry));
   }
 
   const addOption = document.createElement('option');
