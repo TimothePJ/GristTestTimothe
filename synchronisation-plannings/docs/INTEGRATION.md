@@ -4,8 +4,8 @@
 
 Le hub `synchronisation-plannings` n’utilise pas un bus générique externe. Il orchestre directement quatre vues embarquées :
 
-- la frise `PlanningProjet`
-- le planning principal `PlanningProjet`
+- la frise `Planning Projet`
+- le planning principal `Planning Projet`
 - le planning `gestion-depenses2`
 - le graphique des dépenses
 

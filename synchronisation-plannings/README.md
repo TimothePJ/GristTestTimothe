@@ -2,7 +2,7 @@
 
 Hub de synchronisation entre :
 
-- `PlanningProjet`
+- `Planning Projet`
 - `gestion-depenses2`
 
 La page [`index.html`](./index.html) embarque les deux applications, un axe temporel commun et le graphique des dépenses. Le hub pilote :
@@ -68,7 +68,7 @@ synchronisation-plannings/
 ## Flux de démarrage
 
 1. `assets/js/main.js` appelle `bootstrapHubApp()`.
-2. Le bootstrap récupère les APIs embarquées de `PlanningProjet`.
+2. Le bootstrap récupère les APIs embarquées de `Planning Projet`.
 3. Le hub construit la liste des projets, branche les contrôles et initialise le projet actif.
 4. Les iframes `gestion-depenses2` et graphique sont attachées ensuite et se calent sur l’état partagé.
 

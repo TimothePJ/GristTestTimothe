@@ -327,11 +327,6 @@ function _norm(v) {
   return String(v ?? '').trim();
 }
 
-function computePlanningLine(numeroText, fallbackIndex = 0) {
-  const n = Number(String(numeroText ?? '').trim());
-  return Number.isFinite(n) ? (n + 9000) : (9000 + fallbackIndex + 1);
-}
-
 function findListePlanIndex(plansTable, projectName, numeroDocStr, typeDocStr = '', zoneStr = '') {
   const projs = plansTable.Nom_projet || [];
   const nums  = plansTable.NumeroDocument || [];
@@ -403,7 +398,6 @@ function buildPlanningZoneAnchorFields(planningTable, projectName, zoneStr = '')
   setPlanningFieldIfPresent(planningTable, fields, 'ID2', '');
   setPlanningFieldIfPresent(planningTable, fields, taskCol, '');
   setPlanningFieldIfPresent(planningTable, fields, 'Type_doc', '');
-  setPlanningFieldIfPresent(planningTable, fields, 'Ligne_planning', 0);
   setPlanningFieldIfPresent(planningTable, fields, 'Prev_Indice_0', null);
   setPlanningFieldIfPresent(planningTable, fields, 'Date_limite', null);
   setPlanningFieldIfPresent(planningTable, fields, 'Duree_1', 0);
@@ -433,17 +427,13 @@ function buildPlanningZoneAnchorActionIfMissing(planningTableName, planningTable
 function buildPlanningDocumentUpdateFields(planningTable, {
   taskName = '',
   typeDoc = '',
-  zoneStr = '',
-  lignePlanning = null
+  zoneStr = ''
 } = {}) {
   const taskCol = getPlanningTaskColumn(planningTable);
   const fields = {};
 
   setPlanningFieldIfPresent(planningTable, fields, taskCol, String(taskName ?? '').trim());
   setPlanningFieldIfPresent(planningTable, fields, 'Type_doc', String(typeDoc ?? '').trim());
-  if (lignePlanning != null) {
-    setPlanningFieldIfPresent(planningTable, fields, 'Ligne_planning', lignePlanning);
-  }
   setPlanningFieldIfPresent(planningTable, fields, 'Zone', normalizeZoneValue(zoneStr));
 
   return fields;
@@ -454,8 +444,7 @@ function buildPlanningDocumentAddFields(planningTable, {
   numeroDocStr = '',
   taskName = '',
   typeDoc = '',
-  zoneStr = '',
-  lignePlanning = null
+  zoneStr = ''
 } = {}) {
   const projectCol = getPlanningProjectColumn(planningTable);
   const taskCol = getPlanningTaskColumn(planningTable);
@@ -465,9 +454,6 @@ function buildPlanningDocumentAddFields(planningTable, {
   setPlanningFieldIfPresent(planningTable, fields, 'ID2', _norm(numeroDocStr));
   setPlanningFieldIfPresent(planningTable, fields, taskCol, String(taskName ?? '').trim());
   setPlanningFieldIfPresent(planningTable, fields, 'Type_doc', String(typeDoc ?? '').trim());
-  if (lignePlanning != null) {
-    setPlanningFieldIfPresent(planningTable, fields, 'Ligne_planning', lignePlanning);
-  }
   setPlanningFieldIfPresent(planningTable, fields, 'Indice', '');
   setPlanningFieldIfPresent(planningTable, fields, 'Groupe', '');
   setPlanningFieldIfPresent(planningTable, fields, 'Zone', normalizeZoneValue(zoneStr));
@@ -1898,8 +1884,6 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
         documentZone,
         nm
       );
-      const lignePlanning = computePlanningLine(numStrPlanning, 0);
-
       if (idxPlanning >= 0) {
         planningActions.push([
           'UpdateRecord',
@@ -1908,8 +1892,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
           buildPlanningDocumentUpdateFields(planning, {
             taskName: nm,
             typeDoc: documentType,
-            zoneStr: documentZone,
-            lignePlanning
+            zoneStr: documentZone
           })
         ]);
       } else {
@@ -1922,8 +1905,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
             numeroDocStr: numStrPlanning,
             taskName: nm,
             typeDoc: documentType,
-            zoneStr: documentZone,
-            lignePlanning
+            zoneStr: documentZone
           })
         ]);
       }
@@ -3158,11 +3140,10 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
 
       const projKeyPlanning = _norm(selectedProject);
       const pendingPlanningAdds = new Set();
-      documentsData.forEach((doc, index) => {
+      documentsData.forEach((doc) => {
         const numStrPlanning = _norm(doc.documentNumber);
         const nm = String(doc.documentName).trim();
         const keyPlanning = `${projKeyPlanning}||${numStrPlanning}||${_norm(documentType)}||${documentZone}`;
-        const lignePlanning = computePlanningLine(numStrPlanning, index);
         const idxPlanning = findPlanningIndex(
           planning,
           selectedProject,
@@ -3180,8 +3161,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
             buildPlanningDocumentUpdateFields(planning, {
               taskName: nm,
               typeDoc: documentType,
-              zoneStr: documentZone,
-              lignePlanning
+              zoneStr: documentZone
             })
           ]);
         } else if (!pendingPlanningAdds.has(keyPlanning)) {
@@ -3194,8 +3174,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
               numeroDocStr: numStrPlanning,
               taskName: nm,
               typeDoc: documentType,
-              zoneStr: documentZone,
-              lignePlanning
+              zoneStr: documentZone
             })
           ]);
           pendingPlanningAdds.add(keyPlanning);

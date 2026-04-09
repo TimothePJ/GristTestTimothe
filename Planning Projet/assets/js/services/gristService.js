@@ -1624,7 +1624,6 @@ export async function addPlanningZoneRow({
     [id2Col]: "",
     [tachesCol]: "",
     [typeDocCol]: "",
-    [lignePlanningCol]: 0,
     [dateLimiteCol]: null,
     [duree1Col]: 0,
     [diffCoffrageCol]: null,

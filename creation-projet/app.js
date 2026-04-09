@@ -186,7 +186,6 @@ document.addEventListener('DOMContentLoaded', () => {
         setFieldIfPresent(columnNames, fields, 'Taches', '');
         setFieldIfPresent(columnNames, fields, 'Tache', '');
         setFieldIfPresent(columnNames, fields, 'Type_doc', '');
-        setFieldIfPresent(columnNames, fields, 'Ligne_planning', 0);
         setFieldIfPresent(columnNames, fields, 'Prev_Indice_0', null);
         setFieldIfPresent(columnNames, fields, 'Date_limite', null);
         setFieldIfPresent(columnNames, fields, 'Duree_1', 0);
@@ -1564,11 +1563,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
 
-            projectData.documents.forEach((doc, index) => {
+            projectData.documents.forEach((doc) => {
                 const numeroText = String(doc.numero ?? '').trim();
-                const numeroNum = Number(numeroText);
-                const hasNumero = Number.isFinite(numeroNum);
-                const lignePlanning = hasNumero ? (numeroNum + 9000) : (9000 + index + 1);
                 const fields = {};
 
                 setFieldIfPresent(planningContext.columns, fields, 'NomProjet', projectData.name);
@@ -1576,7 +1572,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 setFieldIfPresent(planningContext.columns, fields, 'Taches', doc.name);
                 setFieldIfPresent(planningContext.columns, fields, 'Tache', doc.name);
                 setFieldIfPresent(planningContext.columns, fields, 'Type_doc', doc.type || 'COFFRAGE');
-                setFieldIfPresent(planningContext.columns, fields, 'Ligne_planning', lignePlanning);
                 setFieldIfPresent(planningContext.columns, fields, 'Indice', '');
                 setFieldIfPresent(planningContext.columns, fields, 'Groupe', '');
                 setFieldIfPresent(planningContext.columns, fields, 'Zone', normalizeZoneValue(doc.zone));
