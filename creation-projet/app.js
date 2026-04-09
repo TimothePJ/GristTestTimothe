@@ -66,6 +66,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return normalizeText(value).toUpperCase();
     }
 
+    function normalizeDocumentNumberPadding(value) {
+        const numericValue = Number.parseInt(value, 10);
+        if (!Number.isFinite(numericValue)) {
+            return 3;
+        }
+
+        return Math.max(3, numericValue);
+    }
+
     function normalizeZoneValue(value) {
         const text = normalizeText(value);
         if (!text) return '';
@@ -815,14 +824,15 @@ document.addEventListener('DOMContentLoaded', () => {
     function generatePatternDocuments(prefix, suffix, start, end, padding, numeroStart, numeroStep, numeroPadding, type, zone = '') {
         const docs = [];
         let currentNumero = numeroStart;
+        const effectiveNumeroPadding = normalizeDocumentNumberPadding(numeroPadding);
         for (let i = start; i <= end; i++) {
             let numStr = String(i);
             if (padding > 0) {
                 numStr = numStr.padStart(padding, '0');
             }
             let numeroStr = String(currentNumero);
-            if (numeroPadding > 0) {
-                numeroStr = numeroStr.padStart(numeroPadding, '0');
+            if (effectiveNumeroPadding > 0) {
+                numeroStr = numeroStr.padStart(effectiveNumeroPadding, '0');
             }
             docs.push({
                 name: `${prefix}${numStr}${suffix}`,
@@ -843,7 +853,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const padding = parseInt(document.getElementById('pattern-padding').value, 10) || 0;
         const numeroStart = parseInt(document.getElementById('numero-start').value, 10) || 0;
         const numeroStep = parseInt(document.getElementById('numero-step').value, 10) || 1;
-        const numeroPadding = parseInt(document.getElementById('numero-padding').value, 10) || 0;
+        const numeroPadding = normalizeDocumentNumberPadding(document.getElementById('numero-padding').value);
         const type = document.getElementById('pattern-doc-type').value || '';
         const zone = normalizeZoneValue(document.getElementById('pattern-doc-zone').value || '');
 
@@ -979,7 +989,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const padding = parseInt(paddingSelect.value, 10) || 0;
             const numeroStart = parseInt(numeroStartInput.value, 10) || 0;
             const numeroStep = parseInt(numeroStepInput.value, 10) || 1;
-            const numeroPadding = parseInt(numeroPaddingSelect.value, 10) || 0;
+            const numeroPadding = normalizeDocumentNumberPadding(numeroPaddingSelect.value);
             const type = patternTypeInput.value.trim();
 
             if (start > end) {
@@ -998,7 +1008,7 @@ document.addEventListener('DOMContentLoaded', () => {
             paddingSelect.value = '0';
             numeroStartInput.value = '1';
             numeroStepInput.value = '1';
-            numeroPaddingSelect.value = '0';
+            numeroPaddingSelect.value = '3';
             patternTypeInput.value = 'COFFRAGE';
             updatePatternPreview();
         });
@@ -1182,14 +1192,15 @@ document.addEventListener('DOMContentLoaded', () => {
     function generatePatternDocuments(prefix, suffix, start, end, padding, numeroStart, numeroStep, numeroPadding, type, zone = '') {
         const docs = [];
         let currentNumero = numeroStart;
+        const effectiveNumeroPadding = normalizeDocumentNumberPadding(numeroPadding);
         for (let i = start; i <= end; i += 1) {
             let numStr = String(i);
             if (padding > 0) {
                 numStr = numStr.padStart(padding, '0');
             }
             let numeroStr = String(currentNumero);
-            if (numeroPadding > 0) {
-                numeroStr = numeroStr.padStart(numeroPadding, '0');
+            if (effectiveNumeroPadding > 0) {
+                numeroStr = numeroStr.padStart(effectiveNumeroPadding, '0');
             }
             docs.push({
                 name: `${prefix}${numStr}${suffix}`,
@@ -1210,7 +1221,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const padding = parseInt(document.getElementById('pattern-padding').value, 10) || 0;
         const numeroStart = parseInt(document.getElementById('numero-start').value, 10) || 0;
         const numeroStep = parseInt(document.getElementById('numero-step').value, 10) || 1;
-        const numeroPadding = parseInt(document.getElementById('numero-padding').value, 10) || 0;
+        const numeroPadding = normalizeDocumentNumberPadding(document.getElementById('numero-padding').value);
         const type = document.getElementById('pattern-doc-type').value || '';
         const zone = normalizeZoneValue(document.getElementById('pattern-doc-zone')?.value || '');
         const previewBody = document.getElementById('pattern-preview-body');
@@ -1370,7 +1381,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const padding = parseInt(paddingSelect.value, 10) || 0;
             const numeroStart = parseInt(numeroStartInput.value, 10) || 0;
             const numeroStep = parseInt(numeroStepInput.value, 10) || 1;
-            const numeroPadding = parseInt(numeroPaddingSelect.value, 10) || 0;
+            const numeroPadding = normalizeDocumentNumberPadding(numeroPaddingSelect.value);
             const type = normalizeDocumentType(patternTypeInput.value || 'COFFRAGE');
             const zone = normalizeZoneValue(patternZoneInput.value);
 
@@ -1399,7 +1410,7 @@ document.addEventListener('DOMContentLoaded', () => {
             paddingSelect.value = '0';
             numeroStartInput.value = '1';
             numeroStepInput.value = '1';
-            numeroPaddingSelect.value = '0';
+            numeroPaddingSelect.value = '3';
             patternTypeInput.value = 'COFFRAGE';
             patternZoneInput.value = '';
             updatePatternPreview();
