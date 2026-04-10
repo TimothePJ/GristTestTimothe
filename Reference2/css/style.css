@@ -257,6 +257,21 @@ body {
       font-size: 0.95em;
       box-sizing: border-box;
     }    
+
+    #referenceUnifiedEmetteurDropdown {
+      display: flex;
+      flex-direction: column;
+      max-height: 240px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      border: 1px solid #ed1b2d;
+      padding: 5px;
+      background-color: #ffffff;
+      color: #004990;
+      border-radius: 4px;
+      font-size: 0.95em;
+      box-sizing: border-box;
+    }
     
     .emetteur-item {
       display: grid; /* Utilise la grille pour aligner les éléments */
@@ -290,4 +305,594 @@ body {
       text-overflow: clip; /* Pas de "..." ni troncature */
       text-align: left; /* Aligne strictement le texte à gauche */
       font-size: 1em; /* Ajuste encore un peu plus la taille du texte du span */
+    }
+
+    .reference-unified-dialog {
+      width: min(1040px, calc(100vw - 32px));
+      max-width: 1040px;
+      height: min(860px, calc(100vh - 36px));
+      max-height: calc(100vh - 36px);
+      padding: 22px 26px;
+      box-sizing: border-box;
+    }
+
+    .reference-unified-form {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      font-size: 14px;
+      position: relative;
+      height: 100%;
+      max-height: none;
+      overflow-y: auto;
+      padding-right: 8px;
+    }
+
+    .reference-section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-top: 6px;
+    }
+
+    .reference-section-header h3 {
+      margin: 0;
+    }
+
+    .reference-add-btn {
+      padding: 8px 14px;
+      background-color: #ed1b2d;
+      color: #ffffff;
+      border: none;
+      border-radius: 999px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .reference-add-btn:hover {
+      background-color: #c41221;
+    }
+
+    .reference-docs-selection {
+      min-height: 120px;
+      max-height: 240px;
+      overflow-y: auto;
+      border: 1px solid #ed1b2d;
+      border-radius: 8px;
+      padding: 12px;
+      background: #f8fbff;
+    }
+
+    .reference-empty-state {
+      color: #5f6b7a;
+      font-style: italic;
+    }
+
+    .reference-type-group + .reference-type-group {
+      margin-top: 14px;
+    }
+
+    .reference-type-title {
+      margin: 0 0 8px;
+      color: #004990;
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .reference-zone-group + .reference-zone-group {
+      margin-top: 10px;
+    }
+
+    .reference-zone-title {
+      margin: 0 0 6px;
+      color: #5f6b7a;
+      font-size: 0.92rem;
+      font-weight: 700;
+    }
+
+    .reference-chip-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .reference-doc-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #e8f4fc;
+      border: 1px solid #004990;
+      border-radius: 16px;
+      padding: 4px 10px;
+      font-size: 14px;
+      color: #004990;
+    }
+
+    .reference-doc-chip-text {
+      font-weight: 600;
+    }
+
+    .reference-doc-chip-numero {
+      color: #004990;
+    }
+
+    .reference-doc-chip-delete {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      color: #e53935;
+      padding: 0;
+      line-height: 1;
+    }
+
+    .reference-doc-chip-delete:hover {
+      color: #b71c1c;
+      background: transparent;
+    }
+
+    #addDocumentsUnifiedDialog .reference-doc-chip-delete {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 0 !important;
+      width: auto !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      border: none !important;
+      border-radius: 0 !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      color: #e53935 !important;
+      font-size: 14px !important;
+      font-weight: 700 !important;
+      line-height: 1 !important;
+    }
+
+    #addDocumentsUnifiedDialog .reference-doc-chip-delete:hover,
+    #addDocumentsUnifiedDialog .reference-doc-chip-delete:focus-visible {
+      background: transparent !important;
+      color: #b71c1c !important;
+      outline: none;
+    }
+
+    .reference-modal-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      padding: 16px;
+      box-sizing: border-box;
+      width: 100%;
+      max-width: none;
+      height: 100%;
+      max-height: none;
+      background: rgba(0, 0, 0, 0.5);
+      border-radius: 8px;
+    }
+
+    .reference-modal-overlay[hidden] {
+      display: none !important;
+    }
+
+    .reference-modal-content {
+      background: #ffffff;
+      border-radius: 8px;
+      width: min(760px, calc(100% - 32px));
+      max-width: 760px;
+      max-height: min(74vh, 760px);
+      overflow-y: auto;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      border: 2px solid #004990;
+    }
+
+    .reference-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 15px 20px;
+      border-bottom: 1px solid #004990;
+      background-color: #004990;
+      color: #ffffff;
+      border-radius: 6px 6px 0 0;
+    }
+
+    .reference-modal-header h3 {
+      margin: 0;
+    }
+
+    .reference-modal-close {
+      background: transparent;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      color: #ffffff;
+      padding: 0;
+      line-height: 1;
+    }
+
+    .reference-modal-close:hover {
+      color: #ed1b2d;
+      background: transparent;
+    }
+
+    .reference-modal-tabs {
+      display: flex;
+      border-bottom: 1px solid #ddd;
+    }
+
+    .reference-tab-btn {
+      flex: 1;
+      padding: 12px;
+      background: #f5f5f5;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      color: #333;
+      font-weight: 400;
+    }
+
+    .reference-tab-btn:hover {
+      background: #e8e8e8;
+    }
+
+    .reference-tab-btn.active {
+      background: #ffffff;
+      border-bottom-color: #004990;
+      color: #004990;
+      font-weight: 700;
+    }
+
+    .reference-tab-content {
+      padding: 20px;
+    }
+
+    .reference-form-group {
+      margin-bottom: 15px;
+    }
+
+    .reference-form-group label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 500;
+    }
+
+    .reference-form-row {
+      display: flex;
+      gap: 15px;
+    }
+
+    .reference-form-row .reference-form-group {
+      flex: 1;
+    }
+
+    .reference-form-row .reference-form-group input,
+    .reference-form-row .reference-form-group select {
+      width: 100%;
+    }
+
+    .reference-numero-fieldset {
+      border: 1px solid #004990;
+      border-radius: 4px;
+      padding: 10px 15px;
+      margin-bottom: 15px;
+    }
+
+    .reference-numero-fieldset legend {
+      color: #004990;
+      font-weight: 700;
+      padding: 0 6px;
+    }
+
+    .reference-pattern-preview {
+      background: #f0f8ff;
+      border: 1px solid #004990;
+      border-radius: 4px;
+      padding: 10px;
+      margin-bottom: 15px;
+      font-size: 14px;
+    }
+
+    .reference-preview-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-family: monospace;
+    }
+
+    .reference-preview-table th {
+      text-align: left;
+      padding: 4px 8px;
+      border-bottom: 2px solid #004990;
+      color: #004990;
+      font-size: 13px;
+      background: transparent;
+    }
+
+    .reference-preview-table td {
+      padding: 3px 8px;
+      border-bottom: 1px solid #ddd;
+      color: #004990;
+    }
+
+    .reference-primary-btn {
+      width: 100%;
+      background-color: #004990;
+      border-color: #004990;
+      padding: 12px;
+      font-size: 16px;
+      border-radius: 999px;
+    }
+
+    .reference-primary-btn:hover {
+      background-color: #003366;
+    }
+
+    #addDocumentsUnifiedDialog .section-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    #addDocumentsUnifiedDialog .section-header h3 {
+      margin: 0;
+    }
+
+    #addDocumentsUnifiedDialog .add-btn,
+    #addDocumentsUnifiedDialog .primary-btn,
+    #addDocumentsUnifiedDialog .reference-modal-content button {
+      cursor: pointer;
+      color: #ffffff;
+      border: 1px solid #004990;
+      font-weight: bold;
+      border-radius: 999px;
+    }
+
+    #addDocumentsUnifiedDialog .add-btn {
+      background-color: #ed1b2d;
+      border-color: #ed1b2d;
+      padding: 6px 12px;
+      font-size: 14px;
+    }
+
+    #addDocumentsUnifiedDialog .add-btn:hover {
+      background-color: #c41221;
+    }
+
+    #addDocumentsUnifiedDialog .modal-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      border-radius: 8px;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+
+    #addDocumentsUnifiedDialog .modal-content {
+      background: #ffffff;
+      border-radius: 8px;
+      width: min(560px, calc(100% - 16px));
+      max-width: 560px;
+      max-height: calc(100% - 16px);
+      overflow-y: auto;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      border: 2px solid #004990;
+    }
+
+    #addDocumentsUnifiedDialog .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 15px 20px;
+      border-bottom: 1px solid #004990;
+      background-color: #004990;
+      color: #ffffff;
+      border-radius: 6px 6px 0 0;
+    }
+
+    #addDocumentsUnifiedDialog .modal-header h3 {
+      margin: 0;
+    }
+
+    #addDocumentsUnifiedDialog .modal-close {
+      background: transparent;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      color: #ffffff;
+      padding: 0;
+      line-height: 1;
+      border-radius: 0;
+    }
+
+    #addDocumentsUnifiedDialog .modal-close:hover {
+      color: #ed1b2d;
+      background: transparent;
+    }
+
+    #addDocumentsUnifiedDialog .modal-tabs {
+      display: flex;
+      border-bottom: 1px solid #ddd;
+    }
+
+    #addDocumentsUnifiedDialog .tab-btn {
+      flex: 1;
+      padding: 12px;
+      background: #f5f5f5 !important;
+      border: none !important;
+      border-bottom: 2px solid transparent !important;
+      cursor: pointer;
+      color: #333 !important;
+      font-weight: normal !important;
+      font-family: sans-serif !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+      text-transform: none !important;
+    }
+
+    #addDocumentsUnifiedDialog .tab-btn:hover {
+      background: #e8e8e8 !important;
+      color: #333 !important;
+    }
+
+    #addDocumentsUnifiedDialog .tab-btn.active {
+      background: #ffffff !important;
+      border-bottom-color: #004990 !important;
+      color: #004990 !important;
+      font-weight: bold !important;
+    }
+
+    #addDocumentsUnifiedDialog .tab-content {
+      padding: 20px;
+    }
+
+    #addDocumentsUnifiedDialog .form-group {
+      margin-bottom: 15px;
+    }
+
+    #addDocumentsUnifiedDialog .form-group label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 500;
+    }
+
+    #addDocumentsUnifiedDialog .form-row {
+      display: flex;
+      gap: 15px;
+    }
+
+    #addDocumentsUnifiedDialog .form-row .form-group {
+      flex: 1;
+    }
+
+    #addDocumentsUnifiedDialog .form-row .form-group input,
+    #addDocumentsUnifiedDialog .form-row .form-group select {
+      width: 100%;
+    }
+
+    #addDocumentsUnifiedDialog .modal-content input[type="text"],
+    #addDocumentsUnifiedDialog .modal-content input[type="number"],
+    #addDocumentsUnifiedDialog .modal-content select {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 10px;
+      background-color: #ffffff;
+      color: #000000;
+      border: 1px solid #004990;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+
+    #addDocumentsUnifiedDialog .modal-content select {
+      appearance: none;
+      background-image:
+        linear-gradient(45deg, transparent 50%, #004990 50%),
+        linear-gradient(135deg, #004990 50%, transparent 50%);
+      background-position:
+        calc(100% - 18px) calc(50% - 3px),
+        calc(100% - 12px) calc(50% - 3px);
+      background-size: 6px 6px, 6px 6px;
+      background-repeat: no-repeat;
+      padding-right: 34px;
+    }
+
+    #addDocumentsUnifiedDialog .numero-fieldset {
+      border: 1px solid #004990;
+      border-radius: 4px;
+      padding: 10px 15px;
+      margin-bottom: 15px;
+    }
+
+    #addDocumentsUnifiedDialog .numero-fieldset legend {
+      color: #004990;
+      font-weight: bold;
+      padding: 0 6px;
+    }
+
+    #addDocumentsUnifiedDialog .pattern-preview {
+      background: #f0f8ff;
+      border: 1px solid #004990;
+      border-radius: 4px;
+      padding: 10px;
+      margin-bottom: 15px;
+      font-size: 14px;
+    }
+
+    #addDocumentsUnifiedDialog .pattern-preview span {
+      color: #004990;
+      font-family: monospace;
+    }
+
+    #addDocumentsUnifiedDialog .preview-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-family: monospace;
+      background: transparent;
+    }
+
+    #addDocumentsUnifiedDialog .preview-table th {
+      text-align: left;
+      padding: 4px 8px;
+      border-bottom: 2px solid #004990;
+      color: #004990;
+      font-size: 13px;
+      background: transparent;
+    }
+
+    #addDocumentsUnifiedDialog .preview-table td {
+      padding: 3px 8px;
+      border-bottom: 1px solid #ddd;
+      color: #004990;
+      border-left: none;
+      border-right: none;
+    }
+
+    #addDocumentsUnifiedDialog .primary-btn {
+      width: 100%;
+      background-color: #004990;
+      border-color: #004990;
+      padding: 12px;
+      font-size: 16px;
+    }
+
+    #addDocumentsUnifiedDialog .primary-btn:hover {
+      background-color: #003366;
+    }
+
+    @media (max-width: 820px) {
+      .reference-unified-dialog {
+        width: calc(100vw - 16px);
+        height: calc(100vh - 16px);
+        max-height: calc(100vh - 16px);
+        padding: 16px;
+      }
+
+      .reference-unified-form {
+        height: 100%;
+        padding-right: 2px;
+      }
+
+      .reference-modal-overlay {
+        padding: 10px;
+      }
+
+      .reference-modal-content {
+        width: 100%;
+        max-height: calc(100% - 8px);
+      }
+
+      .reference-form-row,
+      #addDocumentsUnifiedDialog .form-row {
+        flex-direction: column;
+        gap: 0;
+      }
     }

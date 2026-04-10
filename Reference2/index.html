@@ -225,6 +225,161 @@
     </form>
   </dialog>
 
+  <dialog id="addDocumentsUnifiedDialog" class="reference-unified-dialog">
+    <form method="dialog" id="addDocumentsUnifiedForm" class="reference-unified-form">
+      <h3>Ajouter documents</h3>
+
+      <div class="reference-section-header section-header">
+        <h3>Documents à créer</h3>
+        <button type="button" id="openReferenceDocsBuilderBtn" class="reference-add-btn add-btn">+ Ajouter</button>
+      </div>
+      <div id="referenceDocumentsSelectionContainer" class="reference-docs-selection"></div>
+
+      <label for="referenceUnifiedDefaultDatelimite">Date Limite réception données par défaut :</label>
+      <input type="date" id="referenceUnifiedDefaultDatelimite" name="referenceUnifiedDefaultDatelimite">
+
+      <div>
+        <label>Émetteurs:</label>
+        <div id="referenceUnifiedEmetteurDropdown"></div>
+      </div>
+
+      <div class="dialog-buttons" style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button type="submit" id="confirmAddDocumentsUnifiedButton" style="padding: 8px 15px; background-color: #4CAF50; color: white; border: none; cursor: pointer;">Ajouter</button>
+        <button type="button" id="cancelAddDocumentsUnifiedButton" style="padding: 8px 15px; background-color: #666; color: white; border: none; cursor: pointer;">Annuler</button>
+      </div>
+      <div id="referenceDocsBuilderModal" class="reference-modal-overlay modal-overlay" hidden>
+        <div class="reference-modal-content modal-content">
+          <div class="reference-modal-header modal-header">
+            <h3>Ajouter des documents</h3>
+            <button type="button" id="closeReferenceDocsBuilderBtn" class="reference-modal-close modal-close">&times;</button>
+          </div>
+
+          <div class="reference-modal-tabs modal-tabs">
+            <button type="button" class="reference-tab-btn tab-btn active" data-reference-tab="manual">Manuel</button>
+            <button type="button" class="reference-tab-btn tab-btn" data-reference-tab="pattern">Avec motif</button>
+          </div>
+
+          <div class="reference-tab-content tab-content" id="referenceTabManual">
+            <div class="reference-form-group form-group">
+              <label for="referenceManualDocZone">Zone :</label>
+              <input type="text" id="referenceManualDocZone" list="referenceManualDocZoneList" placeholder="Ex: Bâtiment A, Zone C...">
+              <datalist id="referenceManualDocZoneList"></datalist>
+            </div>
+
+            <div class="reference-form-group form-group">
+              <label for="referenceManualDocType">Type de document :</label>
+              <select id="referenceManualDocType">
+                <option value="COFFRAGE">COFFRAGE</option>
+                <option value="ARMATURES">ARMATURES</option>
+                <option value="COUPES">COUPES</option>
+                <option value="DÉMOLITION">DÉMOLITION</option>
+                <option value="NDC" selected>NDC</option>
+              </select>
+            </div>
+
+            <div class="reference-form-group form-group">
+              <label for="referenceManualDocName">Nom du document :</label>
+              <input type="text" id="referenceManualDocName" placeholder="Ex: RDC, SS1, R+3...">
+            </div>
+
+            <div class="reference-form-group form-group">
+              <label for="referenceManualDocNumero">N°Document :</label>
+              <input type="text" id="referenceManualDocNumero" placeholder="Ex: 001, A-01...">
+            </div>
+
+            <button type="button" id="addReferenceManualDocBtn" class="reference-primary-btn primary-btn">Ajouter</button>
+          </div>
+
+          <div class="reference-tab-content tab-content" id="referenceTabPattern" style="display: none;">
+            <div class="reference-form-group form-group">
+              <label for="referencePatternDocZone">Zone :</label>
+              <input type="text" id="referencePatternDocZone" list="referencePatternDocZoneList" placeholder="Ex: Bâtiment A, Zone C...">
+              <datalist id="referencePatternDocZoneList"></datalist>
+            </div>
+
+            <div class="reference-form-group form-group">
+              <label for="referencePatternDocType">Type de document :</label>
+              <select id="referencePatternDocType">
+                <option value="COFFRAGE">COFFRAGE</option>
+                <option value="ARMATURES">ARMATURES</option>
+                <option value="COUPES">COUPES</option>
+                <option value="DÉMOLITION">DÉMOLITION</option>
+                <option value="NDC" selected>NDC</option>
+              </select>
+            </div>
+
+            <div class="reference-form-group form-group">
+              <label for="referencePatternPrefix">Préfixe :</label>
+              <input type="text" id="referencePatternPrefix" placeholder="Ex: R+, SS, Étage">
+            </div>
+
+            <div class="reference-form-group form-group">
+              <label for="referencePatternSuffix">Suffixe (optionnel) :</label>
+              <input type="text" id="referencePatternSuffix" placeholder="Ex: -A, _bis">
+            </div>
+
+            <div class="reference-form-row form-row">
+              <div class="reference-form-group form-group">
+                <label for="referencePatternStart">De :</label>
+                <input type="number" id="referencePatternStart" value="1" min="0">
+              </div>
+              <div class="reference-form-group form-group">
+                <label for="referencePatternEnd">À :</label>
+                <input type="number" id="referencePatternEnd" value="5" min="0">
+              </div>
+              <div class="reference-form-group form-group">
+                <label for="referencePatternPadding">Padding (chiffres) :</label>
+                <select id="referencePatternPadding">
+                  <option value="0">Aucun (1, 2, 10)</option>
+                  <option value="2">2 chiffres (01, 02, 10)</option>
+                  <option value="3">3 chiffres (001, 002)</option>
+                </select>
+              </div>
+            </div>
+
+            <fieldset class="reference-numero-fieldset numero-fieldset">
+              <legend>N°Document</legend>
+              <div class="reference-form-row form-row">
+                <div class="reference-form-group form-group">
+                  <label for="referenceNumeroStart">Début :</label>
+                  <input type="number" id="referenceNumeroStart" value="1" min="0">
+                </div>
+                <div class="reference-form-group form-group">
+                  <label for="referenceNumeroStep">Pas :</label>
+                  <input type="number" id="referenceNumeroStep" value="1" min="1">
+                </div>
+                <div class="reference-form-group form-group">
+                  <label for="referenceNumeroPadding">Padding :</label>
+                  <select id="referenceNumeroPadding">
+                    <option value="3" selected>3 chiffres (001, 002)</option>
+                    <option value="4">4 chiffres (0001, 0002)</option>
+                  </select>
+                </div>
+              </div>
+            </fieldset>
+
+            <div class="reference-pattern-preview pattern-preview">
+              <strong>Aperçu :</strong>
+              <table class="reference-preview-table preview-table">
+                <thead>
+                  <tr>
+                    <th>N°Document</th>
+                    <th>Nom Document</th>
+                    <th>Type</th>
+                    <th>Zone</th>
+                  </tr>
+                </thead>
+                <tbody id="referencePatternPreviewBody"></tbody>
+              </table>
+            </div>
+
+            <button type="button" id="addReferencePatternDocsBtn" class="reference-primary-btn primary-btn">Ajouter les documents</button>
+          </div>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Add Project Dialog -->
   <dialog id="addProjectDialog">
     <form method="dialog">
