@@ -177,6 +177,10 @@ window.__skipChangeEvent = false;
 window.records = [];
 window.LISTE_DE_PLAN_ALL_TYPES_VALUE = "__ALL_TYPES__";
 window.LISTE_DE_PLAN_ALL_TYPES_LABEL = "Tous les types";
+window.LISTE_DE_PLAN_ALL_ZONES_VALUE = "__ALL_ZONES__";
+window.LISTE_DE_PLAN_ALL_ZONES_LABEL = "Toutes les zones";
+window.LISTE_DE_PLAN_NO_ZONE_VALUE = "__NO_ZONE__";
+window.LISTE_DE_PLAN_NO_ZONE_LABEL = "Sans zone";
 
 grist.ready(async () => {
   await loadExternalComponents();
@@ -246,11 +250,18 @@ grist.onRecords(async (rec) => {
     )].sort();
 
     populateTypeDocumentDropdown(typesDocument);
+    const selectedTypeValue = document.getElementById("typeDocumentDropdown").value ||
+      (window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__");
+    populateZoneDropdown(collectZoneValues(selectedProject, selectedTypeValue, window.records));
+  } else {
+    resetZoneDropdown(true);
   }
 
   const selectedTypeDocument = document.getElementById("typeDocumentDropdown").value;
+  const selectedZoneDocument = document.getElementById("zoneDropdown")?.value ||
+    (window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__");
   if (selectedProject && selectedTypeDocument) {
-    afficherPlansFiltres(selectedProject, selectedTypeDocument, window.records);
+    afficherPlansFiltres(selectedProject, selectedTypeDocument, window.records, selectedZoneDocument);
   }
 });
 
@@ -295,10 +306,92 @@ function populateTypeDocumentDropdown(values) {
   }
 }
 
+function normalizeZoneDropdownValue(value) {
+  return String(value ?? "").trim();
+}
+
+function getZoneDropdownOptionValue(zoneValue) {
+  const normalizedZone = normalizeZoneDropdownValue(zoneValue);
+  return normalizedZone || (window.LISTE_DE_PLAN_NO_ZONE_VALUE || "__NO_ZONE__");
+}
+
+function getZoneDropdownOptionLabel(zoneValue) {
+  const normalizedZone = normalizeZoneDropdownValue(zoneValue);
+  return normalizedZone || (window.LISTE_DE_PLAN_NO_ZONE_LABEL || "Sans zone");
+}
+
+function collectZoneValues(selectedProject, selectedTypeDocument, records = window.records) {
+  const normalizedProject = normalizeProjectName(selectedProject);
+  const normalizedType = String(selectedTypeDocument ?? "").trim();
+  const includeAllTypes =
+    !normalizedType ||
+    normalizedType === (window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__");
+
+  const zoneSet = new Set();
+  for (const record of records || []) {
+    if (getNomProjet(record) !== normalizedProject) continue;
+
+    const recordType = String(record?.Type_document ?? "").trim();
+    if (!recordType) continue;
+    if (!includeAllTypes && recordType !== normalizedType) continue;
+
+    zoneSet.add(normalizeZoneDropdownValue(record?.Zone));
+  }
+
+  return [...zoneSet].sort((left, right) => {
+    const leftZone = normalizeZoneDropdownValue(left);
+    const rightZone = normalizeZoneDropdownValue(right);
+    if (!leftZone && rightZone) return 1;
+    if (leftZone && !rightZone) return -1;
+    return leftZone.localeCompare(rightZone, "fr", {
+      sensitivity: "base",
+      numeric: true
+    });
+  });
+}
+
+function populateZoneDropdown(values, preferredValue = null) {
+  const dropdown = document.getElementById("zoneDropdown");
+  if (!dropdown) return;
+
+  const currentValue = preferredValue != null ? String(preferredValue) : String(dropdown.value || "");
+  const allZonesValue = window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__";
+  const allZonesLabel = window.LISTE_DE_PLAN_ALL_ZONES_LABEL || "Toutes les zones";
+
+  dropdown.innerHTML = `<option value="${allZonesValue}">${allZonesLabel}</option>`;
+  values.forEach((zoneValue) => {
+    const option = document.createElement("option");
+    option.value = getZoneDropdownOptionValue(zoneValue);
+    option.textContent = getZoneDropdownOptionLabel(zoneValue);
+    dropdown.appendChild(option);
+  });
+
+  const availableValues = new Set(values.map((zoneValue) => getZoneDropdownOptionValue(zoneValue)));
+  if (currentValue === allZonesValue || availableValues.has(currentValue)) {
+    dropdown.value = currentValue || allZonesValue;
+  } else {
+    dropdown.value = allZonesValue;
+  }
+
+  dropdown.disabled = false;
+}
+
+function resetZoneDropdown(disabled = false) {
+  const dropdown = document.getElementById("zoneDropdown");
+  if (!dropdown) return;
+
+  const allZonesValue = window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__";
+  const allZonesLabel = window.LISTE_DE_PLAN_ALL_ZONES_LABEL || "Toutes les zones";
+  dropdown.innerHTML = `<option value="${allZonesValue}">${allZonesLabel}</option>`;
+  dropdown.value = allZonesValue;
+  dropdown.disabled = disabled;
+}
+
 document.getElementById("projectDropdown").addEventListener("change", () => {
   const selectedProject = document.getElementById("projectDropdown").value;
   if (!selectedProject) {
     populateTypeDocumentDropdown([]);
+    resetZoneDropdown(true);
     document.getElementById("plans-output").innerHTML = "";
     return;
   }
@@ -329,7 +422,20 @@ document.getElementById("projectDropdown").addEventListener("change", () => {
   populateTypeDocumentDropdown(typesDocument);
   console.log("Types affichés dans la deuxième liste :", typesDocument);
   document.getElementById("typeDocumentDropdown").value = window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__";
-  afficherPlansFiltres(selectedProject, document.getElementById("typeDocumentDropdown").value, window.records);
+  populateZoneDropdown(
+    collectZoneValues(
+      selectedProject,
+      document.getElementById("typeDocumentDropdown").value,
+      window.records
+    ),
+    window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__"
+  );
+  afficherPlansFiltres(
+    selectedProject,
+    document.getElementById("typeDocumentDropdown").value,
+    window.records,
+    document.getElementById("zoneDropdown").value
+  );
 });
 
 document.getElementById("typeDocumentDropdown").addEventListener("change", () => {
@@ -337,9 +443,30 @@ document.getElementById("typeDocumentDropdown").addEventListener("change", () =>
 
   const selectedProject = document.getElementById("projectDropdown").value;
   const selectedTypeDocument = document.getElementById("typeDocumentDropdown").value;
+  const selectedZoneDocument = document.getElementById("zoneDropdown")?.value ||
+    (window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__");
 
   if (selectedProject && selectedTypeDocument) {
-    afficherPlansFiltres(selectedProject, selectedTypeDocument, window.records);
+    populateZoneDropdown(
+      collectZoneValues(selectedProject, selectedTypeDocument, window.records),
+      selectedZoneDocument
+    );
+    afficherPlansFiltres(
+      selectedProject,
+      selectedTypeDocument,
+      window.records,
+      document.getElementById("zoneDropdown").value
+    );
+  }
+});
+
+document.getElementById("zoneDropdown").addEventListener("change", () => {
+  const selectedProject = document.getElementById("projectDropdown").value;
+  const selectedTypeDocument = document.getElementById("typeDocumentDropdown").value;
+  const selectedZoneDocument = document.getElementById("zoneDropdown").value;
+
+  if (selectedProject && selectedTypeDocument) {
+    afficherPlansFiltres(selectedProject, selectedTypeDocument, window.records, selectedZoneDocument);
   }
 });
 

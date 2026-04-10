@@ -80,6 +80,24 @@ function isAllTypesSelection(typeDocument) {
   return normalizeText(typeDocument) === normalizeText(window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__");
 }
 
+function isAllZonesSelection(zoneValue) {
+  return normalizeText(zoneValue) === normalizeText(window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__");
+}
+
+function matchesZoneSelection(record, zoneValue) {
+  if (isAllZonesSelection(zoneValue)) return true;
+
+  const selectedZone = normalizeText(zoneValue);
+  const noZoneValue = normalizeText(window.LISTE_DE_PLAN_NO_ZONE_VALUE || "__NO_ZONE__");
+  const recordZone = normalizeZoneText(getRecordZone(record));
+
+  if (selectedZone === noZoneValue) {
+    return !recordZone;
+  }
+
+  return recordZone === selectedZone;
+}
+
 function normalizeRows(raw) {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw;
@@ -716,14 +734,15 @@ function renderRowsForSelectedType(container, rows, projet) {
   renderPlanTableSection(container, rows, projet);
 }
 
-function afficherPlansFiltres(projet, typeDocument, records) {
+function afficherPlansFiltres(projet, typeDocument, records, zoneSelection = window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__") {
   const output = document.getElementById("plans-output");
   output.innerHTML = "";
 
   const normalizedProject = normalizeText(projet);
   const projectRows = records.filter((record) =>
     getRecordProjectName(record) === normalizedProject &&
-    getRecordTypeDocument(record)
+    getRecordTypeDocument(record) &&
+    matchesZoneSelection(record, zoneSelection)
   );
 
   if (projectRows.length === 0) {
