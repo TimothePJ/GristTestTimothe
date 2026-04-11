@@ -24,8 +24,28 @@ h1, h2 {
     border-top: 1px solid #004990;
 }
 
+.wizard-nav {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 24px;
+}
+
+.wizard-nav--between {
+    justify-content: space-between;
+}
+
+.wizard-nav--end {
+    justify-content: flex-end;
+}
+
+.wizard-nav button {
+    min-width: 150px;
+}
+
 input[type="text"],
-input[type="number"] {
+input[type="number"],
+select {
     width: 100%;
     padding: 8px;
     margin-bottom: 10px;
@@ -43,6 +63,7 @@ button {
     border: 1px solid #004990;
     font-weight: bold;
     padding: 10px;
+    border-radius: 999px;
 }
 
 button:hover {
@@ -52,6 +73,8 @@ button:hover {
 #add-budget-line-btn {
     background-color: #ed1b2d;
     border-color: #ed1b2d;
+    flex: 0 0 auto;
+    white-space: nowrap;
 }
 
 #add-budget-line-btn:hover {
@@ -60,8 +83,43 @@ button:hover {
 
 .budget-line-form {
     display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
     gap: 10px;
     margin-bottom: 10px;
+}
+
+.budget-line-form input {
+    margin-bottom: 0;
+}
+
+#budget-chapter {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.budget-amount-field {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.budget-amount-field::after {
+    content: "\20AC";
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    transform: translateY(-50%);
+    color: #004990;
+    font-weight: bold;
+    pointer-events: none;
+}
+
+#budget-amount {
+    width: 100%;
+    padding-right: 32px;
+    padding-left: 10px;
+    text-align: left;
 }
 
 #budget-lines-container p {
@@ -74,8 +132,21 @@ button:hover {
 }
 
 #team-selection-container .team-member {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 10px;
     margin-bottom: 5px;
+}
+
+.team-member-name {
+    min-width: 0;
+}
+
+.team-member-badge {
+    margin-left: auto;
+    color: #004990;
+    font-size: 0.9rem;
+    font-weight: 700;
 }
 
 #team-selection-container h3 {
@@ -126,10 +197,34 @@ button:hover {
   gap: 12px;
   padding: 6px 8px;
   border-radius: 6px;
+  background-color: #e0e0e0;
+  border-left: 3px solid #ed1b2d;
+  margin-bottom: 8px;
+}
+
+.budget-line.is-editing {
+  box-shadow: 0 0 0 2px rgba(0, 73, 144, 0.14);
 }
 
 .budget-line-text {
   flex: 1;
+}
+
+.budget-line-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.budget-line-edit {
+  padding: 6px 12px;
+  background-color: #ffffff;
+  color: #004990;
+  border-color: rgba(0, 73, 144, 0.24);
+}
+
+.budget-line.is-editing .budget-line-edit {
+  background-color: rgba(0, 73, 144, 0.08);
 }
 
 .budget-line-delete {
@@ -164,7 +259,6 @@ button:hover {
   border-color: #ed1b2d;
   padding: 6px 12px;
   font-size: 14px;
-  border-radius: 4px;
 }
 
 .add-btn:hover {
@@ -283,6 +377,19 @@ button:hover {
   width: 100%;
 }
 
+select {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #004990 50%),
+    linear-gradient(135deg, #004990 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) calc(50% - 3px),
+    calc(100% - 12px) calc(50% - 3px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 34px;
+}
+
 .numero-fieldset {
   border: 1px solid #004990;
   border-radius: 4px;
@@ -337,7 +444,7 @@ button:hover {
   border-color: #004990;
   padding: 12px;
   font-size: 16px;
-  border-radius: 4px;
+  border-radius: 999px;
 }
 
 .primary-btn:hover {
@@ -357,6 +464,31 @@ button:hover {
   font-size: 14px;
 }
 
+.doc-zone-group {
+  margin-bottom: 10px;
+}
+
+.doc-zone-title {
+  margin: 0 0 6px;
+  color: #5f6b7a;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.doc-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.doc-chip-text {
+  font-weight: 600;
+}
+
+.doc-chip-numero {
+  color: #004990;
+}
+
 .doc-chip-delete {
   background: transparent;
   border: none;
@@ -370,4 +502,23 @@ button:hover {
 .doc-chip-delete:hover {
   color: #b71c1c;
   background: transparent;
+}
+
+@media (max-width: 720px) {
+  .budget-line-form {
+    flex-wrap: wrap;
+  }
+
+  .budget-amount-field {
+    flex: 1 1 180px;
+  }
+
+  .wizard-nav {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .wizard-nav button {
+    width: 100%;
+  }
 }

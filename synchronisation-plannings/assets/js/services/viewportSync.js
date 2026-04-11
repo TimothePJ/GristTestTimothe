@@ -1,7 +1,6 @@
 import { dom } from "../app/dom.js";
 import { state } from "../app/state.js";
 import {
-  scheduleExpensesChartFramePresentation,
   scheduleExpensesFramePresentation,
   scheduleOverviewFramePresentation,
 } from "../layout/framePresentation.js";
@@ -75,10 +74,6 @@ function getViewportTraceApiLabel(api) {
 
   if (api === state.expensesApi) {
     return "gestion-depenses2";
-  }
-
-  if (api === state.expensesChartApi) {
-    return "depenses-chart";
   }
 
   return "custom-api";
@@ -256,7 +251,6 @@ export function bindExpensesPlanningShellControls() {
     scheduleOverviewFramePresentation();
     syncExpensesPlanningShell();
     scheduleExpensesFramePresentation();
-    scheduleExpensesChartFramePresentation();
   });
 
   if (window.visualViewport) {
@@ -264,7 +258,6 @@ export function bindExpensesPlanningShellControls() {
       scheduleOverviewFramePresentation();
       syncExpensesPlanningShell();
       scheduleExpensesFramePresentation();
-      scheduleExpensesChartFramePresentation();
     });
   }
 }

@@ -6,7 +6,6 @@ import { dom } from "../app/dom.js";
 import { getReferencePlanningApi, state } from "../app/state.js";
 import {
   resetOverviewFramePresentation,
-  scheduleExpensesChartFramePresentation,
   scheduleExpensesFramePresentation,
   scheduleOverviewFramePresentation,
 } from "../layout/framePresentation.js";
@@ -113,6 +112,10 @@ export async function attachOverviewFrameApi({ force = false } = {}) {
 
         if (typeof api.subscribeProjectChange === "function") {
           state.overviewProjectSubscriptionCleanup = api.subscribeProjectChange((payload) => {
+            if (!state.allowChildProjectSelectionSync) {
+              return;
+            }
+
             const nextProjectKey = String(payload?.projectKey || payload || "").trim();
             if (!nextProjectKey) {
               return;
@@ -226,47 +229,4 @@ export async function attachExpensesFrameApi({ force = false } = {}) {
     });
 
   return state.expensesFrameAttachPromise;
-}
-
-export async function attachExpensesChartFrameApi({ force = false } = {}) {
-  if (!(dom.expensesChartFrameEl instanceof HTMLIFrameElement)) {
-    return null;
-  }
-
-  if (!force && state.expensesChartFrameAttachPromise) {
-    return state.expensesChartFrameAttachPromise;
-  }
-
-  const attachAttempt = ++state.expensesChartFrameAttachAttempt;
-  state.expensesChartFrameAttachPromise = waitForChildApi(
-    dom.expensesChartFrameEl,
-    "__gestionDepenses2PlanningSyncApi"
-  )
-    .then(async (api) => {
-      if (attachAttempt !== state.expensesChartFrameAttachAttempt) {
-        return api;
-      }
-
-      state.expensesChartApi = api;
-      const targetProjectKey = getDesiredProjectKey();
-      if (targetProjectKey) {
-        await Promise.resolve(api.setSelectedProject(targetProjectKey));
-      }
-
-      scheduleExpensesChartFramePresentation();
-      return api;
-    })
-    .catch((error) => {
-      if (attachAttempt === state.expensesChartFrameAttachAttempt) {
-        console.error("Erreur attache du graphique des depenses :", error);
-      }
-      return null;
-    })
-    .finally(() => {
-      if (attachAttempt === state.expensesChartFrameAttachAttempt) {
-        state.expensesChartFrameAttachPromise = null;
-      }
-    });
-
-  return state.expensesChartFrameAttachPromise;
 }

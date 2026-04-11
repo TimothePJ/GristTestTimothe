@@ -35,7 +35,14 @@
     <div class="dropdown-container">
       <label for="typeDocumentDropdown">Type document :</label>
       <select id="typeDocumentDropdown">
-        <option value="">Choisir un type</option>
+        <option value="__ALL_TYPES__">Tous les types</option>
+      </select>
+    </div>
+
+    <div class="dropdown-container">
+      <label for="zoneDropdown">Zone :</label>
+      <select id="zoneDropdown" disabled>
+        <option value="__ALL_ZONES__">Toutes les zones</option>
       </select>
     </div>
   </div>
@@ -70,6 +77,19 @@
       <menu style="display:flex;justify-content:flex-end;gap:8px;margin:8px 0 0">
         <button type="reset" id="ard-cancel">Annuler</button>
         <button type="submit" id="ard-save">Ajouter</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-confirm-delete-document">
+    <form method="dialog" class="dialog-body" style="min-width:420px;gap:12px;display:flex;flex-direction:column">
+      <h3 style="margin:0 0 8px">Supprimer le document</h3>
+      <p id="confirm-delete-document-message" style="margin:0;">
+        Es-tu sûr de vouloir supprimer ce document ?
+      </p>
+      <menu class="dialog-buttons" style="margin:8px 0 0;">
+        <button type="button" id="confirm-delete-document-cancel" class="cancel-button">Annuler</button>
+        <button type="button" id="confirm-delete-document-confirm">Supprimer</button>
       </menu>
     </form>
   </dialog>

@@ -97,10 +97,40 @@
   text-align: left;
 }
 
-#warnings {
+.warnings {
   padding: 15px;
   background-color: #ffffff;
   border-bottom: 2px solid #ed1b2d;
+}
+
+.plan-type-section {
+  margin-bottom: 28px;
+}
+
+.plan-type-title,
+.plan-zone-title {
+  margin: 0;
+  padding: 12px 16px;
+  color: #004990;
+  background-color: #ffffff;
+  border-top: 2px solid #ed1b2d;
+  border-left: 1px solid #ed1b2d;
+  border-right: 1px solid #ed1b2d;
+}
+
+.plan-type-title {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.plan-zone-section {
+  margin-top: 14px;
+}
+
+.plan-zone-title {
+  font-size: 16px;
+  font-weight: 700;
+  background-color: #f8fbff;
 }
 
 .warning-form {

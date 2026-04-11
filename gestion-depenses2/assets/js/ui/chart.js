@@ -1,4 +1,8 @@
-import { buildChartSeries, getProjectBudgetTotal } from "../services/projectService.js";
+import {
+  buildChartSeries,
+  getBillingAmountFromPercentage,
+  getProjectBudgetTotal,
+} from "../services/projectService.js";
 import { formatNumber } from "../utils/format.js";
 
 const SPENDING_CHART_COLORS = {
@@ -43,6 +47,18 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function formatNumericInputValue(value, maximumFractionDigits = 2) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return "";
+  }
+
+  return numericValue
+    .toFixed(maximumFractionDigits)
+    .replace(/\.0+$/, "")
+    .replace(/(\.\d*?)0+$/, "$1");
 }
 
 export function clearSpendingBillingEditor(boardEl) {
@@ -101,13 +117,14 @@ export function renderSpendingBillingEditor(boardEl, project, viewState) {
   }
 
   const { displayedMonths, billingPercentData } = buildChartSeries(project, viewState);
+  const totalBudget = getProjectBudgetTotal(project);
 
   boardEl.innerHTML = `
     <section class="billing-editor-panel">
       <div class="billing-editor-copy">
         <strong class="billing-editor-title">Facturation mensuelle</strong>
         <span class="billing-editor-subtitle">
-          Renseigne le pourcentage facture pour chaque mois affiche dans le graphique.
+          Renseigne le pourcentage ou le montant facture pour chaque mois affiche dans le graphique.
         </span>
       </div>
       <div class="billing-editor-scroll">
@@ -115,25 +132,48 @@ export function renderSpendingBillingEditor(boardEl, project, viewState) {
           ${displayedMonths
             .map((month, index) => {
               const monthLabel = `${month.monthLabel} ${month.year}`;
-              const inputId = `billing-percentage-${project.id}-${month.monthKey}`;
+              const monthKey = month.monthKey;
+              const percentageInputId = `billing-percentage-${project.id}-${monthKey}`;
+              const amountInputId = `billing-amount-${project.id}-${monthKey}`;
+              const billingPercentage = Number(billingPercentData[index] ?? 100);
+              const billingAmount = getBillingAmountFromPercentage(totalBudget, billingPercentage);
 
               return `
-                <label class="billing-editor-item" for="${escapeHtml(inputId)}">
+                <div class="billing-editor-item">
                   <span class="billing-editor-month">${escapeHtml(monthLabel)}</span>
-                  <span class="billing-editor-input-shell">
-                    <input
-                      id="${escapeHtml(inputId)}"
-                      type="number"
-                      class="cell-input billing-percentage billing-editor-input"
-                      data-month="${escapeHtml(month.monthKey)}"
-                      min="0"
-                      max="100"
-                      step="0.1"
-                      value="${escapeHtml(billingPercentData[index] ?? 100)}"
-                    >
-                    <span class="billing-editor-unit">%</span>
-                  </span>
-                </label>
+                  <div class="billing-editor-fields">
+                    <label class="billing-editor-field" for="${escapeHtml(percentageInputId)}">
+                      <span class="billing-editor-field-label">Pourcentage</span>
+                      <span class="billing-editor-input-shell">
+                        <input
+                          id="${escapeHtml(percentageInputId)}"
+                          type="number"
+                          class="cell-input billing-percentage billing-editor-input"
+                          data-month="${escapeHtml(monthKey)}"
+                          min="0"
+                          step="0.1"
+                          value="${escapeHtml(formatNumericInputValue(billingPercentage, 4))}"
+                        >
+                        <span class="billing-editor-unit">%</span>
+                      </span>
+                    </label>
+                    <label class="billing-editor-field" for="${escapeHtml(amountInputId)}">
+                      <span class="billing-editor-field-label">Montant</span>
+                      <span class="billing-editor-input-shell">
+                        <input
+                          id="${escapeHtml(amountInputId)}"
+                          type="number"
+                          class="cell-input billing-amount billing-editor-input"
+                          data-month="${escapeHtml(monthKey)}"
+                          min="0"
+                          step="0.01"
+                          value="${escapeHtml(formatNumericInputValue(billingAmount, 2))}"
+                        >
+                        <span class="billing-editor-unit">€</span>
+                      </span>
+                    </label>
+                  </div>
+                </div>
               `;
             })
             .join("")}

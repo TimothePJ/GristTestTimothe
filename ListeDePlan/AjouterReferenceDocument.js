@@ -240,8 +240,22 @@
       console.warn("[AjouterReferenceDocument] Projet non détecté depuis la 1ère liste. Le dialog s'ouvre quand même.");
       return;
     }
+    if (
+      state.currentType === (window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__") ||
+      state.currentTypeLabel === (window.LISTE_DE_PLAN_ALL_TYPES_LABEL || "Tous les types")
+    ) {
+      alert("Veuillez sÃ©lectionner un type de document prÃ©cis avant d'ajouter un document.");
+      return;
+    }
     if (!state.currentTypeLabel) {
       console.warn("[AjouterReferenceDocument] Type non détecté depuis la 2ème liste. Utilisation d'un type vide par défaut.");;
+      return;
+    }
+    if (
+      state.currentType === (window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__") ||
+      state.currentTypeLabel === (window.LISTE_DE_PLAN_ALL_TYPES_LABEL || "Tous les types")
+    ) {
+      alert("Veuillez sÃ©lectionner un type de document prÃ©cis avant d'ajouter un document.");
       return;
     }
 
@@ -274,6 +288,14 @@
       return;
     }
 
+    if (
+      state.currentType === (window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__") ||
+      typeDocLabel === (window.LISTE_DE_PLAN_ALL_TYPES_LABEL || "Tous les types")
+    ) {
+      alert("Veuillez selectionner un type de document precis avant d'ajouter un document.");
+      return;
+    }
+
     const numero = toIntOrNull(numeroStr);
 
     const actions = [
@@ -290,7 +312,8 @@
         DateDiffusion: null,
         Indice: "",
         Nom_projet: projetId,        // Ref (ID projet)
-        Designation: nom
+        Designation: nom,
+        Zone: ""
       }]
     ];
 

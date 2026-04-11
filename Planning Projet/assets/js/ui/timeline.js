@@ -37,7 +37,9 @@ let planningDragAutoScrollVelocityY = 0;
 let planningDragAutoScrollTargetEl = null;
 let planningDragAutoScrollLastTs = 0;
 const planningViewportListeners = new Set();
+const planningSelectionListeners = new Set();
 let lastPlanningViewportEmissionSignature = "";
+let lastPlanningSelectionEmissionSignature = "";
 let pendingProgrammaticPlanningViewportSignature = "";
 let pendingProgrammaticPlanningViewportTimer = 0;
 let pendingProgrammaticPlanningViewportExpiresAt = 0;
@@ -75,6 +77,11 @@ function roundPlanningTraceNumber(value, digits = 2) {
 
   const precision = 10 ** digits;
   return Math.round(numericValue * precision) / precision;
+}
+
+function toFiniteNumber(value) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : null;
 }
 
 function summarizePlanningViewportForTrace(viewport = null) {
@@ -479,6 +486,54 @@ function getRenderedTimelineItemEntries() {
   return Object.values(renderedItems);
 }
 
+function clearRenderedPlanningItemStyle(node) {
+  if (!(node instanceof HTMLElement)) return;
+
+  node.style.removeProperty("background");
+  node.style.removeProperty("border-color");
+  node.style.removeProperty("color");
+}
+
+function applyRenderedPlanningItemStyle(node, styleText) {
+  if (!(node instanceof HTMLElement)) return;
+
+  clearRenderedPlanningItemStyle(node);
+
+  const normalizedStyleText = String(styleText || "").trim();
+  if (!normalizedStyleText) {
+    return;
+  }
+
+  normalizedStyleText
+    .split(";")
+    .map((declaration) => declaration.trim())
+    .filter(Boolean)
+    .forEach((declaration) => {
+      const separatorIndex = declaration.indexOf(":");
+      if (separatorIndex <= 0) {
+        return;
+      }
+
+      const propertyName = declaration.slice(0, separatorIndex).trim();
+      let propertyValue = declaration.slice(separatorIndex + 1).trim();
+      if (!propertyName || !propertyValue) {
+        return;
+      }
+
+      let priority = "";
+      if (/!important\s*$/i.test(propertyValue)) {
+        propertyValue = propertyValue.replace(/!important\s*$/i, "").trim();
+        priority = "important";
+      }
+
+      if (!propertyValue) {
+        return;
+      }
+
+      node.style.setProperty(propertyName, propertyValue, priority);
+    });
+}
+
 function decorateRenderedTimelineItems(containerEl) {
   if (!containerEl || !timelineInstance) return;
 
@@ -496,6 +551,10 @@ function decorateRenderedTimelineItems(containerEl) {
 
     const group = groupsDataSet ? groupsDataSet.get(item.group) : null;
     const title = getNativePhaseTitle(item, group);
+    const visualNode =
+      (entry?.dom?.box instanceof HTMLElement && entry.dom.box) ||
+      (entry?.dom?.range instanceof HTMLElement && entry.dom.range) ||
+      null;
 
     const domNodes = [
       entry?.dom?.box,
@@ -514,6 +573,8 @@ function decorateRenderedTimelineItems(containerEl) {
         node.setAttribute("aria-label", title);
       }
     });
+
+    applyRenderedPlanningItemStyle(visualNode, item.style);
   });
 }
 
@@ -860,7 +921,7 @@ function bindDurationCellEditing(containerEl) {
     event.preventDefault();
     event.stopPropagation();
     startDurationCellEditing(cellEl);
-  });
+  }, true);
 }
 
 function getEventTargetElement(event) {
@@ -2262,6 +2323,7 @@ function buildGroupLabelElement(group) {
   dureeDebutFin.dataset.rightIsoDate = String(group?.dureeDebutFinRightIso ?? "");
   if (group?.dureeDebutFinEditable) {
     dureeDebutFin.classList.add("editable-duration-cell");
+    dureeDebutFin.setAttribute("draggable", "false");
     dureeDebutFin.title = "Cliquer pour modifier la durée";
   }
 
@@ -2289,6 +2351,7 @@ function buildGroupLabelElement(group) {
   );
   if (group?.dureeFinDemarrageEditable) {
     dureeFinDemarrage.classList.add("editable-duration-cell");
+    dureeFinDemarrage.setAttribute("draggable", "false");
     dureeFinDemarrage.title = "Cliquer pour modifier la durée";
   }
 
@@ -2336,6 +2399,14 @@ function buildGroupLabelElement(group) {
   row.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
     event.stopPropagation();
+  });
+
+  row.addEventListener("click", (event) => {
+    if (event.defaultPrevented) return;
+    event.stopPropagation();
+    emitPlanningSelectionChange(buildPlanningSelectionPayloadFromGroup(group), {
+      reason: "group-click",
+    });
   });
 
   row.append(
@@ -2686,6 +2757,108 @@ function emitPlanningViewportChange(reason = "") {
   });
 }
 
+function getSelectionDayStart(rawDate) {
+  const nextDate = rawDate instanceof Date ? new Date(rawDate) : new Date(rawDate);
+  if (Number.isNaN(nextDate.getTime())) {
+    return null;
+  }
+
+  nextDate.setHours(0, 0, 0, 0);
+  return nextDate;
+}
+
+function buildPlanningSelectionLabel(group = {}) {
+  const id2Label = String(group?.id2Label || "").trim();
+  const taskLabel = String(group?.tachesLabel || "").trim();
+  return [id2Label, taskLabel].filter(Boolean).join(" - ") || taskLabel || id2Label || "Page";
+}
+
+function buildPlanningSelectionWarning(group = {}) {
+  const realizeValue = toFiniteNumber(group?.realiseLabel);
+  const retardDays = toFiniteNumber(group?.retardsLabel) || 0;
+  const segmentEndIso = String(group?.finIso || "").trim();
+  const segmentEndDate = segmentEndIso ? new Date(`${segmentEndIso}T12:00:00`) : null;
+  const normalizedEndDate =
+    segmentEndDate instanceof Date && !Number.isNaN(segmentEndDate.getTime()) ? segmentEndDate : null;
+  const selectedLabel = buildPlanningSelectionLabel(group);
+  const formattedEndDate = normalizedEndDate
+    ? normalizedEndDate.toLocaleDateString("fr-FR")
+    : "";
+
+  if (retardDays > 0) {
+    const isCompleted = realizeValue != null && realizeValue >= 100;
+    return {
+      kind: isCompleted ? "retard-frozen" : "retard-active",
+      severity: "danger",
+      days: retardDays,
+      message: isCompleted
+        ? `${selectedLabel} a accumule ${retardDays} jour(s) de retard. Fin prevue le ${formattedEndDate}.`
+        : `${selectedLabel} a ${retardDays} jour(s) de retard. Fin prevue le ${formattedEndDate}.`,
+    };
+  }
+
+  if (!(realizeValue != null && realizeValue < 100) || !normalizedEndDate) {
+    return null;
+  }
+
+  const today = getSelectionDayStart(new Date());
+  const endDay = getSelectionDayStart(normalizedEndDate);
+  if (!(today && endDay)) {
+    return null;
+  }
+
+  const diffDays = Math.round((endDay.getTime() - today.getTime()) / 86400000);
+  if (diffDays < 0 || diffDays >= 7) {
+    return null;
+  }
+
+  let timingLabel = `${diffDays} jour(s)`;
+  if (diffDays === 0) timingLabel = "aujourd'hui";
+  if (diffDays === 1) timingLabel = "demain";
+
+  return {
+    kind: "due-soon",
+    severity: "warning",
+    days: diffDays,
+    message:
+      diffDays === 0
+        ? `${selectedLabel} se termine aujourd'hui et n'est pas realise a 100 %.`
+        : `${selectedLabel} se termine dans ${timingLabel} et n'est pas realise a 100 %.`,
+    endDateLabel: formattedEndDate,
+  };
+}
+
+function buildPlanningSelectionPayloadFromGroup(group = {}) {
+  if (!group || group.isZoneHeader || !group.meta) {
+    return null;
+  }
+
+  const warning = buildPlanningSelectionWarning(group);
+  return {
+    rowId: String(group?.rowId || "").trim(),
+    groupId: String(group?.id || "").trim(),
+    label: buildPlanningSelectionLabel(group),
+    typeDoc: String(group?.typeDocLabel || "").trim(),
+    realise: toFiniteNumber(group?.realiseLabel),
+    retards: toFiniteNumber(group?.retardsLabel) || 0,
+    segmentEndDate: String(group?.finIso || "").trim(),
+    warning,
+  };
+}
+
+function emitPlanningSelectionChange(selection = null, meta = {}) {
+  const payload = selection && typeof selection === "object" ? selection : null;
+  const nextSignature = JSON.stringify(payload || null);
+  if (nextSignature === lastPlanningSelectionEmissionSignature) {
+    return;
+  }
+
+  lastPlanningSelectionEmissionSignature = nextSignature;
+  planningSelectionListeners.forEach((listener) => {
+    listener(payload, meta);
+  });
+}
+
 export function getPlanningViewportState() {
   if (!timelineInstance) {
     return null;
@@ -2837,6 +3010,17 @@ export function subscribePlanningViewportChanges(listener) {
   planningViewportListeners.add(listener);
   return () => {
     planningViewportListeners.delete(listener);
+  };
+}
+
+export function subscribePlanningSelectionChanges(listener) {
+  if (typeof listener !== "function") {
+    return () => {};
+  }
+
+  planningSelectionListeners.add(listener);
+  return () => {
+    planningSelectionListeners.delete(listener);
   };
 }
 
@@ -3061,6 +3245,27 @@ export function renderPlanningTimeline({ groups, items }) {
     bindPlanningRowDragging(container);
     bindPlanningRowDrop(container);
     bindStickyTimelineAxis();
+
+    timelineInstance.on("select", (properties = {}) => {
+      const selectedItemId = Array.isArray(properties.items) ? properties.items[0] : "";
+      if (!selectedItemId) {
+        emitPlanningSelectionChange(null, { reason: "timeline-select-clear" });
+        return;
+      }
+
+      const selectedItem = itemsDataSet?.get?.(selectedItemId) || null;
+      const selectedGroupId = String(selectedItem?.group || "").trim();
+      if (!selectedGroupId) {
+        emitPlanningSelectionChange(null, { reason: "timeline-select-missing-group" });
+        return;
+      }
+
+      const selectedGroup = groupsDataSet?.get?.(selectedGroupId) || null;
+      emitPlanningSelectionChange(buildPlanningSelectionPayloadFromGroup(selectedGroup), {
+        reason: "timeline-select",
+        itemId: String(selectedItemId),
+      });
+    });
   }
 
   // Mise à jour datasets
@@ -3186,7 +3391,9 @@ export function clearPlanningTimeline() {
   groupsDataSet.clear();
   itemsDataSet.clear();
   lastPlanningViewportEmissionSignature = "";
+  lastPlanningSelectionEmissionSignature = "";
   clearPendingProgrammaticPlanningViewport();
+  emitPlanningSelectionChange(null, { reason: "timeline-clear" });
 
   const rangeEl = document.getElementById("current-date-range");
   if (rangeEl) {

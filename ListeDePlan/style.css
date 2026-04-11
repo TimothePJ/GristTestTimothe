@@ -12,8 +12,9 @@ body {
     background-color: #ffffff;
     padding: 20px;
     display: flex;
+    flex-wrap: wrap;
     gap: 20px;
-    align-items: center;
+    align-items: flex-end;
     z-index: 1000;
     border-bottom: 1px solid #ed1b2d;
 }
@@ -35,6 +36,10 @@ select {
     color: #ffffff;
     border: 1px solid #ed1b2d;
     border-radius: 4px;
+}
+
+#zoneDropdown {
+    width: 280px;
 }
   
 .add-form {

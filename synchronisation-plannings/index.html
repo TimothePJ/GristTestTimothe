@@ -20,7 +20,33 @@
         </p>
       </section>
 
-      <section class="card workspace-card">
+      <section class="card project-selection-card">
+        <div class="project-selection-card__header">
+          <div>
+            <p class="eyebrow">Selection projet</p>
+            <h2>Projet partage</h2>
+            <p class="workspace-copy">
+              Choisis un projet pour afficher le cockpit commun et les plannings synchronises.
+            </p>
+          </div>
+          <div class="workspace-form">
+            <label for="shared-project-select">Projet</label>
+            <select id="shared-project-select" aria-label="Choisir un projet">
+              <option value="" selected>Choisir un projet</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section id="project-empty-state" class="card project-empty-state">
+        <p class="eyebrow">Aucune selection</p>
+        <h2>Choisir un projet</h2>
+        <p class="workspace-copy">
+          Selectionne un projet dans la liste ci-dessus pour afficher le cockpit et les plannings.
+        </p>
+      </section>
+
+      <section id="workspace-card-section" class="card workspace-card" hidden>
         <div class="workspace-header">
           <div>
             <p class="eyebrow">Pilotage commun</p>
@@ -44,7 +70,7 @@
         </div>
       </section>
 
-      <section class="card sync-planning-card">
+      <section id="sync-planning-card-section" class="card sync-planning-card" hidden>
         <div class="sync-planning-card-header">
           <div>
             <p class="eyebrow">Plannings synchronises</p>
@@ -53,6 +79,60 @@
               Les deux plannings vivent maintenant dans une seule section,
               l'un au-dessus de l'autre.
             </p>
+          </div>
+        </div>
+
+        <div
+          id="selected-page-warning"
+          class="selection-warning-banner is-hidden"
+          hidden
+          aria-live="polite"
+        >
+          <p class="selection-warning-kicker">Avertissement page</p>
+          <p id="selected-page-warning-title" class="selection-warning-title"></p>
+          <p id="selected-page-warning-message" class="selection-warning-message"></p>
+        </div>
+
+        <div
+          id="planning-warnings-modal"
+          class="planning-warnings-modal"
+          hidden
+          aria-hidden="true"
+        >
+          <div class="planning-warnings-modal__backdrop" data-planning-warnings-close></div>
+          <div
+            class="planning-warnings-modal__content"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="planning-warnings-modal-title"
+          >
+            <div class="planning-warnings-modal__header">
+              <div>
+                <h2 id="planning-warnings-modal-title">Alertes projet</h2>
+                <p
+                  id="planning-warnings-modal-subtitle"
+                  class="planning-warnings-modal__subtitle"
+                ></p>
+              </div>
+              <button
+                id="planning-warnings-modal-close-btn"
+                type="button"
+                class="planning-warnings-modal__close-btn"
+              >
+                Fermer
+              </button>
+            </div>
+
+            <div class="planning-warnings-modal__body">
+              <div
+                id="planning-warnings-modal-summary"
+                class="planning-warnings-modal__summary"
+              ></div>
+              <div
+                id="planning-warnings-modal-list"
+                class="planning-warnings-modal__list"
+              ></div>
+            </div>
           </div>
         </div>
 
@@ -121,7 +201,7 @@
             id="planning-projet-axis-frame"
             class="embedded-app-frame embedded-app-frame--planning-axis"
             title="Frise chronologique commune"
-            src="../Planning%20Projet/Index.html?embedded=planning-sync&headerOnly=1"
+            src="../Planning Projet/Index.html?embedded=planning-sync&headerOnly=1"
             loading="eager"
           ></iframe>
         </section>
@@ -132,7 +212,7 @@
               id="planning-projet-frame"
               class="embedded-app-frame embedded-app-frame--planning"
               title="Planning Projet synchronise"
-              src="../Planning%20Projet/Index.html?embedded=planning-sync&externalAxis=1"
+              src="../Planning Projet/Index.html?embedded=planning-sync&externalAxis=1"
               loading="eager"
             ></iframe>
           </div>
@@ -160,15 +240,6 @@
         </div>
       </section>
 
-      <section class="card expenses-chart-card">
-        <iframe
-          id="gestion-depenses2-chart-frame"
-          class="embedded-app-frame embedded-app-frame--expenses-chart"
-          title="Graphique des depenses"
-          src="../gestion-depenses2/index.html?embedded=spending-chart-sync"
-          loading="eager"
-        ></iframe>
-      </section>
     </main>
 
     <script type="module" src="./assets/js/main.js"></script>
