@@ -719,7 +719,7 @@ function docLabelFromRecord(record) {
 }
 
 function normalizeTypeDocument(value) {
-  return String(value ?? '').trim();
+  return String(value ?? '').trim().toLocaleUpperCase('fr');
 }
 
 function collectProjectZones(projectName) {
@@ -860,6 +860,96 @@ const DEFAULT_DOCUMENT_TYPES = [
   'NDC',
 ];
 
+let projetsTableCache = null;
+
+function isDefaultDocumentType(type) {
+  return DEFAULT_DOCUMENT_TYPES.includes(normalizeTypeDocument(type));
+}
+
+function parseProjectTypeDocValue(value) {
+  const seen = new Set();
+  return String(value ?? '')
+    .split(/[;,\r\n]+/)
+    .map((entry) => normalizeTypeDocument(entry))
+    .filter((entry) => {
+      if (!entry || isDefaultDocumentType(entry) || seen.has(entry)) return false;
+      seen.add(entry);
+      return true;
+    });
+}
+
+function serializeProjectTypeDocValue(types) {
+  const seen = new Set();
+  return (types || [])
+    .map((type) => normalizeTypeDocument(type))
+    .filter((type) => {
+      if (!type || isDefaultDocumentType(type) || seen.has(type)) return false;
+      seen.add(type);
+      return true;
+    })
+    .join('; ');
+}
+
+function getMatchingProjectRowIndexes(projectName, projetsTable = projetsTableCache) {
+  if (!projetsTable) return [];
+  const project = _norm(projectName);
+  if (!project) return [];
+
+  const names = Array.isArray(projetsTable.Nom_de_projet) ? projetsTable.Nom_de_projet : [];
+  const indexes = [];
+  names.forEach((value, index) => {
+    if (_norm(value) === project) {
+      indexes.push(index);
+    }
+  });
+  return indexes;
+}
+
+function collectProjectCustomDocumentTypes(projectName, projetsTable = projetsTableCache) {
+  const customTypes = [];
+  const seen = new Set();
+  const typeDocs = Array.isArray(projetsTable?.TypeDoc) ? projetsTable.TypeDoc : [];
+
+  getMatchingProjectRowIndexes(projectName, projetsTable).forEach((index) => {
+    parseProjectTypeDocValue(typeDocs[index]).forEach((type) => {
+      if (seen.has(type)) return;
+      seen.add(type);
+      customTypes.push(type);
+    });
+  });
+
+  return customTypes;
+}
+
+function collectPendingReferenceTypes() {
+  const seen = new Set();
+  return pendingReferenceDocuments
+    .map((doc) => normalizeTypeDocument(doc?.type))
+    .filter((type) => {
+      if (!type || seen.has(type)) return false;
+      seen.add(type);
+      return true;
+    });
+}
+
+function collectAvailableReferenceDocumentTypes(projectName, extraTypes = []) {
+  const seen = new Set();
+  const orderedTypes = [];
+
+  [
+    ...DEFAULT_DOCUMENT_TYPES,
+    ...collectProjectCustomDocumentTypes(projectName),
+    ...(extraTypes || [])
+  ].forEach((type) => {
+    const normalized = normalizeTypeDocument(type);
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    orderedTypes.push(normalized);
+  });
+
+  return orderedTypes;
+}
+
 function getDocumentTypeSortRank(type) {
   const normalized = normalizeTypeDocument(type);
   const index = DEFAULT_DOCUMENT_TYPES.indexOf(normalized);
@@ -923,6 +1013,7 @@ function collectProjectDocumentTypes(projectName, extraTypes = []) {
   }
 
   DEFAULT_DOCUMENT_TYPES.forEach(pushType);
+  collectProjectCustomDocumentTypes(project).forEach(pushType);
 
   if (project && Array.isArray(records)) {
     records.forEach(record => {
@@ -978,6 +1069,97 @@ const DEFAULT_REFERENCE_DOCUMENT_TYPE = 'NDC';
 const DEFAULT_REFERENCE_DATE = '1900-01-01';
 let pendingReferenceDocuments = [];
 
+async function refreshProjectsTableCache() {
+  try {
+    projetsTableCache = await grist.docApi.fetchTable('Projets');
+  } catch (error) {
+    projetsTableCache = null;
+    throw error;
+  }
+  return projetsTableCache;
+}
+
+function populateDocumentTypeDatalist(datalistId, types) {
+  const datalist = document.getElementById(datalistId);
+  if (!(datalist instanceof HTMLDataListElement)) return;
+  datalist.innerHTML = '';
+  (types || []).forEach((type) => {
+    const option = document.createElement('option');
+    option.value = type;
+    datalist.appendChild(option);
+  });
+}
+
+async function refreshReferenceTypeSuggestionLists(projectName = selectedFirstValue) {
+  try {
+    await refreshProjectsTableCache();
+  } catch (error) {
+    console.warn("Projets: impossible de recharger les types de documents.", error);
+  }
+
+  const types = collectProjectDocumentTypes(
+    projectName,
+    collectPendingReferenceTypes()
+  );
+
+  [
+    'documentTypeList',
+    'multipleDocumentTypeList',
+    'referenceManualDocTypeList',
+    'referencePatternDocTypeList',
+  ].forEach((listId) => populateDocumentTypeDatalist(listId, types));
+}
+
+function normalizeTypeDocumentInput(inputElement) {
+  if (!(inputElement instanceof HTMLInputElement)) return;
+  inputElement.value = normalizeTypeDocument(inputElement.value);
+}
+
+async function buildProjectTypeDocUpdateActions(projectName, types = []) {
+  const project = _norm(projectName);
+  if (!project) return [];
+
+  let projetsTable;
+  try {
+    projetsTable = await refreshProjectsTableCache();
+  } catch (error) {
+    console.warn("Projets: impossible de synchroniser TypeDoc.", error);
+    return [];
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(projetsTable, 'TypeDoc')) {
+    return [];
+  }
+
+  const rowIndexes = getMatchingProjectRowIndexes(project, projetsTable);
+  if (!rowIndexes.length) return [];
+
+  const existingCustomTypes = collectProjectCustomDocumentTypes(project, projetsTable);
+  const mergedTypeDocValue = serializeProjectTypeDocValue([
+    ...existingCustomTypes,
+    ...(types || []),
+  ]);
+  const currentTypeDocValue = serializeProjectTypeDocValue(existingCustomTypes);
+
+  if (mergedTypeDocValue === currentTypeDocValue) {
+    return [];
+  }
+
+  const ids = Array.isArray(projetsTable.id) ? projetsTable.id : [];
+  if (!Array.isArray(projetsTable.TypeDoc)) {
+    projetsTable.TypeDoc = [];
+  }
+
+  return rowIndexes
+    .map((rowIndex) => {
+      const recordId = ids[rowIndex];
+      if (recordId == null) return null;
+      projetsTable.TypeDoc[rowIndex] = mergedTypeDocValue;
+      return ['UpdateRecord', 'Projets', recordId, { TypeDoc: mergedTypeDocValue }];
+    })
+    .filter(Boolean);
+}
+
 function isSpecialDocumentOptionValue(value) {
   return _norm(value) === DOC_ADD_SPECIAL_VALUE;
 }
@@ -1007,6 +1189,53 @@ function restoreLastDocumentSelection() {
     if (tableBody) tableBody.innerHTML = '';
     if (tableHeader) tableHeader.innerHTML = '';
   }
+}
+
+function queueNewDocumentSelection({ numero = null, name = '', zone = '', type = '' } = {}) {
+  const normalizedName = _norm(name);
+  const normalizedNumero = parseNumeroForStorage(numero);
+  const normalizedZone = normalizeZoneValue(zone);
+  const nextValue = buildDocSelectValue({
+    numero: normalizedNumero,
+    name: normalizedName,
+    zone: normalizedZone,
+  });
+
+  newTable = true;
+  newTableName = nextValue;
+  newTableType = normalizeTypeDocument(type);
+  selectedTypeValue = '';
+  lastValidDocument = nextValue;
+  selectedSecondValue = nextValue;
+  selectedDocName = normalizedName;
+  selectedDocNumber = normalizedNumero;
+  selectedDocZone = normalizedZone;
+
+  return nextValue;
+}
+
+function captureDocumentSelectionState() {
+  return {
+    newTable,
+    newTableName,
+    newTableType,
+    lastValidDocument,
+    selectedSecondValue,
+    selectedDocName,
+    selectedDocNumber,
+    selectedDocZone,
+  };
+}
+
+function restoreDocumentSelectionState(state = {}) {
+  newTable = Boolean(state.newTable);
+  newTableName = state.newTableName || '';
+  newTableType = state.newTableType || '';
+  lastValidDocument = state.lastValidDocument || '';
+  selectedSecondValue = state.selectedSecondValue || '';
+  selectedDocName = state.selectedDocName || '';
+  selectedDocNumber = state.selectedDocNumber ?? null;
+  selectedDocZone = state.selectedDocZone || '';
 }
 
 function normalizeReferenceDocumentNumberPadding(value) {
@@ -1074,6 +1303,7 @@ function refreshReferenceZoneSuggestionLists() {
 function renderUnifiedPendingDocuments() {
   const container = document.getElementById('referenceDocumentsSelectionContainer');
   if (!container) return;
+  refreshReferenceTypeSuggestionLists(selectedFirstValue);
 
   if (!pendingReferenceDocuments.length) {
     container.innerHTML = '<p class="reference-empty-state">Aucun document ajouté pour le moment.</p>';
@@ -1237,7 +1467,9 @@ function updateReferencePatternPreview() {
   const numeroStart = Number.parseInt(document.getElementById('referenceNumeroStart')?.value, 10) || 0;
   const numeroStep = Number.parseInt(document.getElementById('referenceNumeroStep')?.value, 10) || 1;
   const numeroPadding = normalizeReferenceDocumentNumberPadding(document.getElementById('referenceNumeroPadding')?.value);
-  const type = document.getElementById('referencePatternDocType')?.value || DEFAULT_REFERENCE_DOCUMENT_TYPE;
+  const type = normalizeTypeDocument(
+    document.getElementById('referencePatternDocType')?.value || DEFAULT_REFERENCE_DOCUMENT_TYPE
+  );
   const zone = normalizeZoneValue(document.getElementById('referencePatternDocZone')?.value || '');
   const previewBody = document.getElementById('referencePatternPreviewBody');
   if (!previewBody) return;
@@ -1374,6 +1606,7 @@ async function populateReferenceUnifiedEmetteurDropdown() {
 
 async function resetUnifiedAddDocumentsDialog() {
   pendingReferenceDocuments = [];
+  await refreshReferenceTypeSuggestionLists(selectedFirstValue);
   closeReferenceDocsBuilderModal();
   renderUnifiedPendingDocuments();
   refreshReferenceZoneSuggestionLists();
@@ -1423,7 +1656,7 @@ async function createDocumentsBatch({
       documentZone: normalizeZoneValue(doc?.documentZone ?? doc?.zone),
     };
 
-    if (!normalizedDoc.documentNumber || !normalizedDoc.documentName) return;
+    if (!normalizedDoc.documentNumber || !normalizedDoc.documentName || !normalizedDoc.documentType) return;
 
     const key = [
       normalizedDoc.documentNumber.toLocaleLowerCase('fr'),
@@ -1573,25 +1806,31 @@ async function createDocumentsBatch({
     });
   });
 
-  await grist.docApi.applyUserActions(actions);
+  const typeDocActions = await buildProjectTypeDocUpdateActions(
+    normalizedProject,
+    uniqueDocuments.map((doc) => doc.documentType)
+  );
+  typeDocActions.forEach((action) => actions.unshift(action));
 
+  const previousSelectionState = captureDocumentSelectionState();
   const lastDoc = uniqueDocuments[uniqueDocuments.length - 1];
   const lastDocNumber = parseNumeroForStorage(lastDoc.documentNumber);
-  const lastDocValue = buildDocSelectValue({
+  const lastDocValue = queueNewDocumentSelection({
     numero: lastDocNumber,
     name: lastDoc.documentName,
     zone: lastDoc.documentZone,
+    type: '',
   });
 
+  try {
+    await grist.docApi.applyUserActions(actions);
+  } catch (error) {
+    restoreDocumentSelectionState(previousSelectionState);
+    throw error;
+  }
+  await refreshReferenceTypeSuggestionLists(normalizedProject);
   selectedTypeValue = '';
-  newTable = true;
-  newTableName = lastDocValue;
-  newTableType = '';
-  lastValidDocument = lastDocValue;
-  selectedSecondValue = lastDocValue;
-  selectedDocName = lastDoc.documentName;
-  selectedDocNumber = lastDocNumber;
-  selectedDocZone = lastDoc.documentZone;
+  restoreLastDocumentSelection();
 
   return {
     lastDoc,
@@ -1617,6 +1856,23 @@ function setupUnifiedAddDocumentsUi() {
   const patternZoneInput = document.getElementById('referencePatternDocZone');
   const patternTypeInput = document.getElementById('referencePatternDocType');
   const addPatternBtn = document.getElementById('addReferencePatternDocsBtn');
+
+  [
+    document.getElementById('documentType'),
+    document.getElementById('multipleDocumentType'),
+    manualTypeInput,
+    patternTypeInput,
+  ].forEach((inputElement) => {
+    if (!inputElement) return;
+    ['change', 'blur'].forEach((eventName) => {
+      inputElement.addEventListener(eventName, () => {
+        normalizeTypeDocumentInput(inputElement);
+        if (inputElement === patternTypeInput) {
+          updateReferencePatternPreview();
+        }
+      });
+    });
+  });
 
   if (openBuilderBtn) {
     openBuilderBtn.addEventListener('click', () => {
@@ -1671,11 +1927,17 @@ function setupUnifiedAddDocumentsUi() {
       const docNumeros = (manualNumeroInput?.value || '')
         .split(',')
         .map((value) => value.trim());
-      const documentType = normalizeTypeDocument(manualTypeInput?.value || DEFAULT_REFERENCE_DOCUMENT_TYPE);
+      const documentType = normalizeTypeDocument(manualTypeInput?.value);
       const documentZone = normalizeZoneValue(manualZoneInput?.value || '');
 
       if (!docNames.length) {
         alert("Veuillez renseigner au moins un nom de document.");
+        return;
+      }
+
+      if (!documentType) {
+        alert("Veuillez renseigner un type de document.");
+        manualTypeInput?.focus();
         return;
       }
 
@@ -1733,8 +1995,14 @@ function setupUnifiedAddDocumentsUi() {
       const numeroStart = Number.parseInt(document.getElementById('referenceNumeroStart')?.value, 10) || 0;
       const numeroStep = Number.parseInt(document.getElementById('referenceNumeroStep')?.value, 10) || 1;
       const numeroPadding = normalizeReferenceDocumentNumberPadding(document.getElementById('referenceNumeroPadding')?.value);
-      const documentType = normalizeTypeDocument(patternTypeInput?.value || DEFAULT_REFERENCE_DOCUMENT_TYPE);
+      const documentType = normalizeTypeDocument(patternTypeInput?.value);
       const documentZone = normalizeZoneValue(patternZoneInput?.value || '');
+
+      if (!documentType) {
+        alert("Veuillez renseigner un type de document.");
+        patternTypeInput?.focus();
+        return;
+      }
 
       if (start > end) {
         alert('Erreur: "De" doit être inférieur ou égal à "À".');
@@ -1818,7 +2086,7 @@ grist.onRecords((records, tableId) => {
 
 async function refreshProjectsDropdownFromProjets() {
   try {
-    const projets = await grist.docApi.fetchTable('Projets');
+    const projets = await refreshProjectsTableCache();
 
     // ✅ Colonne "Projet" (comme ton JSON)
     const values = (projets.Nom_de_projet || [])
@@ -2576,6 +2844,7 @@ document.addEventListener('click', (event) => {
 
 document.getElementById('addDocumentDialog').addEventListener('submit', async (e) => {
   e.preventDefault();
+  let previousSelectionState = null;
 
   trimInputs(e.target); // Nettoie les entrées (évite les espaces superflus)
 
@@ -2583,7 +2852,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
   const documentNumber = formData.get('documentNumber');
   const documentName = formData.get('documentName');
   const documentZone = normalizeZoneValue(formData.get('documentZone'));
-  const documentType = String(formData.get('documentType') || 'NDC').trim();
+  const documentType = normalizeTypeDocument(formData.get('documentType'));
   let defaultDatelimite = formData.get('defaultDatelimite');
 
   if (!defaultDatelimite) {
@@ -2591,6 +2860,11 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
   }
 
   const combinedDocumentName = `${documentNumber}-${documentName}`.trim();
+
+  if (!documentType) {
+    alert("Veuillez renseigner un type de document.");
+    return;
+  }
 
   if (!documentNumber || !documentName.trim()) {
     alert("Le numéro et le nom du document sont requis.");
@@ -2742,17 +3016,19 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
     if (planAction) actions.push(planAction);
     planningActions.forEach((action) => actions.push(action));
     newRows.forEach(row => actions.push(['AddRecord', 'References', null, row]));
+    const typeDocActions = await buildProjectTypeDocUpdateActions(selectedProject, [documentType]);
+    typeDocActions.forEach((action) => actions.unshift(action));
+    previousSelectionState = captureDocumentSelectionState();
+    queueNewDocumentSelection({
+      numero: num,
+      name: nm,
+      zone: documentZone,
+      type: '',
+    });
     await grist.docApi.applyUserActions(actions);
+    await refreshReferenceTypeSuggestionLists(selectedProject);
     selectedTypeValue = '';
-    const newDocValue = buildDocSelectValue({ numero: num, name: nm, zone: documentZone });
-    newTable = true;
-    newTableName = newDocValue;
-    newTableType = '';
-    lastValidDocument = newDocValue;
-    selectedSecondValue = newDocValue;
-    selectedDocName = nm;
-    selectedDocNumber = (num == null ? null : num);
-    selectedDocZone = documentZone;
+    restoreLastDocumentSelection();
 
     console.log("Nouveau document ajouté :", combinedDocumentName);
 
@@ -2760,6 +3036,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
     document.getElementById('addDocumentDialog').close();
 
   } catch (error) {
+    restoreDocumentSelectionState(previousSelectionState || {});
     console.error("Erreur lors de l'ajout du document :", error);
     alert("Une erreur s'est produite lors de l'ajout du document.");
   }
@@ -3105,8 +3382,9 @@ async function resetAddDocumentDialog() {
   document.getElementById('documentName').value = '';
   document.getElementById('documentZone').value = '';
   document.getElementById('defaultDatelimite').value = '';
-    const typeSel = document.getElementById('documentType');
-    if (typeSel) typeSel.value = 'NDC';
+  await refreshReferenceTypeSuggestionLists(selectedFirstValue);
+  const typeSel = document.getElementById('documentType');
+  if (typeSel) typeSel.value = getReferenceDocumentBuilderDefaultType();
 
   // Récupérer le projet sélectionné
   const selectedProject = document.getElementById('firstColumnDropdown').value;
@@ -3644,8 +3922,9 @@ function resetAddMultipleDocumentDialog() {
       input.value = '';
     }
   });
+  refreshReferenceTypeSuggestionLists(selectedFirstValue);
   const typeSel = document.getElementById('multipleDocumentType');
-  if (typeSel) typeSel.value = 'NDC';
+  if (typeSel) typeSel.value = getReferenceDocumentBuilderDefaultType();
   const zoneInput = document.getElementById('multipleDocumentZone');
   if (zoneInput) zoneInput.value = '';
 
@@ -3810,9 +4089,15 @@ function removeCustomEmitterForContainer(rowToRemove, containerId) {
 
 document.getElementById('addMultipleDocumentDialog').addEventListener('submit', async (e) => {
   e.preventDefault();
+  let previousSelectionState = null;
   trimInputs(e.target); // Nettoie les espaces superflus
 
-  const documentType = String(document.getElementById('multipleDocumentType')?.value || 'NDC').trim();
+  const documentType = normalizeTypeDocument(document.getElementById('multipleDocumentType')?.value);
+
+  if (!documentType) {
+    alert("Veuillez renseigner un type de document.");
+    return;
+  }
 
   // Récupérer les lignes du tableau dynamique
   const tbody = document.getElementById('documentTableBody');
@@ -4042,7 +4327,20 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
     });
 
     // Appliquer les actions via l'API Grist
+    const typeDocActions = await buildProjectTypeDocUpdateActions(selectedProject, [documentType]);
+    typeDocActions.forEach((action) => actions.unshift(action));
+    if (documentsData.length) {
+      const lastDoc = documentsData[documentsData.length - 1];
+      previousSelectionState = captureDocumentSelectionState();
+      queueNewDocumentSelection({
+        numero: lastDoc.documentNumber,
+        name: String(lastDoc.documentName).trim(),
+        zone: documentZone,
+        type: '',
+      });
+    }
     await grist.docApi.applyUserActions(actions);
+    await refreshReferenceTypeSuggestionLists(selectedProject);
     selectedTypeValue = '';
     console.log("Documents ajoutés :", documentsData);
 
@@ -4055,27 +4353,12 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
 // Met à jour l'affichage du tableau principal et ferme le dialog
 
     if (documentsData.length) {
-      const lastDoc = documentsData[documentsData.length - 1];
-      const lastNumero = Number(lastDoc.documentNumber);
-      const lastNumValue = Number.isFinite(lastNumero) ? lastNumero : null;
-      const lastDocName = String(lastDoc.documentName).trim();
-      const lastDocValue = buildDocSelectValue({
-        numero: lastNumValue,
-        name: lastDocName,
-        zone: documentZone,
-      });
-      newTable = true;
-      newTableName = lastDocValue;
-      newTableType = '';
-      lastValidDocument = lastDocValue;
-      selectedSecondValue = lastDocValue;
-      selectedDocNumber = lastNumValue;
-      selectedDocName = lastDocName;
-      selectedDocZone = documentZone;
+      restoreLastDocumentSelection();
     }
     document.getElementById('addMultipleDocumentDialog').close();
 
   } catch (error) {
+    restoreDocumentSelectionState(previousSelectionState || {});
     console.error("Erreur lors de l'ajout des documents :", error);
     alert("Une erreur s'est produite lors de l'ajout des documents.");
   }

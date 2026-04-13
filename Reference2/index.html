@@ -146,13 +146,8 @@
       <datalist id="documentZoneList"></datalist>
 
       <label for="documentType">Type de document :</label>
-      <select id="documentType" name="documentType" required>
-        <option value="NDC" selected>NDC</option>
-        <option value="COFFRAGE">COFFRAGE</option>
-        <option value="ARMATURES">ARMATURES</option>
-        <option value="COUPES">COUPES</option>
-        <option value="DÉMOLITION">DÉMOLITION</option>
-      </select>
+      <input type="text" id="documentType" name="documentType" list="documentTypeList" value="NDC" required placeholder="Choisir ou saisir un type">
+      <datalist id="documentTypeList"></datalist>
 
       <label for="defaultDatelimite">Date Limite réception données par défaut:</label>
       <input type="date" id="defaultDatelimite" name="defaultDatelimite">
@@ -199,13 +194,8 @@
       <datalist id="multipleDocumentZoneList"></datalist>
 
       <label for="multipleDocumentType">Type de document :</label>
-      <select id="multipleDocumentType" required>
-        <option value="NDC" selected>NDC</option>
-        <option value="COFFRAGE">COFFRAGE</option>
-        <option value="ARMATURES">ARMATURES</option>
-        <option value="COUPES">COUPES</option>
-        <option value="DÉMOLITION">DÉMOLITION</option>
-      </select>
+      <input type="text" id="multipleDocumentType" list="multipleDocumentTypeList" value="NDC" required placeholder="Choisir ou saisir un type">
+      <datalist id="multipleDocumentTypeList"></datalist>
 
       <label for="multipleDefaultDatelimite">Date Limite réception données par défaut:</label>
       <input type="date" id="multipleDefaultDatelimite" name="defaultDatelimite">
@@ -268,13 +258,8 @@
 
             <div class="reference-form-group form-group">
               <label for="referenceManualDocType">Type de document :</label>
-              <select id="referenceManualDocType">
-                <option value="COFFRAGE">COFFRAGE</option>
-                <option value="ARMATURES">ARMATURES</option>
-                <option value="COUPES">COUPES</option>
-                <option value="DÉMOLITION">DÉMOLITION</option>
-                <option value="NDC" selected>NDC</option>
-              </select>
+              <input type="text" id="referenceManualDocType" list="referenceManualDocTypeList" value="NDC" required placeholder="Choisir ou saisir un type">
+              <datalist id="referenceManualDocTypeList"></datalist>
             </div>
 
             <div class="reference-form-group form-group">
@@ -299,13 +284,8 @@
 
             <div class="reference-form-group form-group">
               <label for="referencePatternDocType">Type de document :</label>
-              <select id="referencePatternDocType">
-                <option value="COFFRAGE">COFFRAGE</option>
-                <option value="ARMATURES">ARMATURES</option>
-                <option value="COUPES">COUPES</option>
-                <option value="DÉMOLITION">DÉMOLITION</option>
-                <option value="NDC" selected>NDC</option>
-              </select>
+              <input type="text" id="referencePatternDocType" list="referencePatternDocTypeList" value="NDC" required placeholder="Choisir ou saisir un type">
+              <datalist id="referencePatternDocTypeList"></datalist>
             </div>
 
             <div class="reference-form-group form-group">

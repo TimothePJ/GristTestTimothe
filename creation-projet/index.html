@@ -89,13 +89,8 @@
                         </div>
                         <div class="form-group">
                             <label for="manual-doc-type">Type de document :</label>
-                            <select id="manual-doc-type">
-                                <option value="COFFRAGE" selected>COFFRAGE</option>
-                                <option value="ARMATURES">ARMATURES</option>
-                                <option value="COUPES">COUPES</option>
-                                <option value="DÉMOLITION">DÉMOLITION</option>
-                                <option value="NDC">NDC</option>
-                            </select>
+                            <input type="text" id="manual-doc-type" list="manual-doc-type-list" value="COFFRAGE" required placeholder="Choisir ou saisir un type">
+                            <datalist id="manual-doc-type-list"></datalist>
                         </div>
                         <div class="form-group">
                             <label for="manual-doc-name">Nom du document :</label>
@@ -115,13 +110,8 @@
                         </div>
                         <div class="form-group">
                             <label for="pattern-doc-type">Type de document :</label>
-                            <select id="pattern-doc-type">
-                                <option value="COFFRAGE" selected>COFFRAGE</option>
-                                <option value="ARMATURES">ARMATURES</option>
-                                <option value="COUPES">COUPES</option>
-                                <option value="DÉMOLITION">DÉMOLITION</option>
-                                <option value="NDC">NDC</option>
-                            </select>
+                            <input type="text" id="pattern-doc-type" list="pattern-doc-type-list" value="COFFRAGE" required placeholder="Choisir ou saisir un type">
+                            <datalist id="pattern-doc-type-list"></datalist>
                         </div>
                         <div class="form-group">
                             <label for="pattern-prefix">Préfixe :</label>
