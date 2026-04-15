@@ -680,6 +680,11 @@ td input {
   margin-bottom: 24px;
 }
 
+body.uses-vis-planning-tech #charge-plan-board,
+body.uses-vis-planning-tech #real-charge-board {
+  min-height: 0;
+}
+
 #expense-board {
   margin-bottom: 24px;
   min-width: 0;
@@ -984,6 +989,204 @@ td input {
 
 .charge-plan-context-action[data-action="delete-segment"]:hover {
   background: rgba(180, 35, 24, 0.08);
+}
+
+.charge-plan-vis-shell {
+  border: 1px solid rgba(0, 73, 144, 0.12);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.charge-plan-vis-header {
+  display: grid;
+  grid-template-columns: calc(var(--charge-plan-name-col-width) + var(--charge-plan-total-col-width)) 1fr;
+  min-height: 54px;
+  border-bottom: 1px solid rgba(0, 73, 144, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 248, 252, 0.95));
+}
+
+.charge-plan-vis-header-fixed {
+  display: grid;
+  grid-template-columns: var(--charge-plan-name-col-width) var(--charge-plan-total-col-width);
+}
+
+.charge-plan-vis-header-cell,
+.charge-plan-vis-header-axis {
+  display: flex;
+  align-items: center;
+  min-height: 54px;
+  padding: 0 12px;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.charge-plan-vis-header-cell + .charge-plan-vis-header-cell {
+  border-left: 1px solid rgba(0, 73, 144, 0.08);
+}
+
+.charge-plan-vis-header-axis {
+  border-left: 1px solid rgba(0, 73, 144, 0.12);
+}
+
+.charge-plan-vis-board {
+  position: relative;
+  min-height: 340px;
+}
+
+.charge-plan-vis-board.is-header-panning,
+.charge-plan-vis-board.is-header-panning * {
+  cursor: grabbing !important;
+}
+
+.charge-plan-vis-canvas .vis-timeline {
+  border: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(245, 248, 252, 0.94));
+}
+
+.charge-plan-vis-canvas .vis-panel.vis-left {
+  width: calc(var(--charge-plan-name-col-width) + var(--charge-plan-total-col-width)) !important;
+  border-right: 1px solid rgba(0, 73, 144, 0.12);
+  background: var(--color-surface);
+}
+
+.charge-plan-vis-canvas .vis-labelset .vis-label {
+  width: 100% !important;
+  border-bottom: 1px solid rgba(0, 73, 144, 0.08);
+  background: var(--color-surface);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.charge-plan-vis-canvas .vis-labelset .vis-label .charge-plan-vis-label {
+  display: grid;
+  grid-template-columns: var(--charge-plan-name-col-width) var(--charge-plan-total-col-width);
+  align-items: center;
+  min-height: var(--charge-plan-vis-row-height, 72px);
+  width: 100%;
+}
+
+.charge-plan-vis-label-name,
+.charge-plan-vis-label-total {
+  display: flex;
+  align-items: center;
+  min-height: var(--charge-plan-vis-row-height, 72px);
+  padding: 0 12px;
+}
+
+.charge-plan-vis-label-total {
+  border-left: 1px solid rgba(0, 73, 144, 0.08);
+}
+
+.charge-plan-vis-label--role {
+  display: flex !important;
+  align-items: center;
+  min-height: var(--charge-plan-vis-row-height, 44px) !important;
+  padding: 0 14px;
+  background: rgba(0, 73, 144, 0.9);
+  color: #fff;
+  font-weight: 700;
+}
+
+.charge-plan-vis-canvas .vis-label.charge-plan-vis-group--worker,
+.charge-plan-vis-canvas .vis-group.charge-plan-vis-group--worker,
+.charge-plan-vis-canvas .vis-label.charge-plan-vis-group--summary,
+.charge-plan-vis-canvas .vis-group.charge-plan-vis-group--summary {
+  min-height: 72px !important;
+  height: 72px !important;
+  line-height: 72px !important;
+}
+
+.charge-plan-vis-canvas .vis-label.charge-plan-vis-group--role,
+.charge-plan-vis-canvas .vis-group.charge-plan-vis-group--role {
+  min-height: 44px !important;
+  height: 44px !important;
+  line-height: 44px !important;
+  background: rgba(0, 73, 144, 0.9);
+}
+
+.charge-plan-vis-canvas .vis-label.charge-plan-vis-group--summary,
+.charge-plan-vis-canvas .vis-group.charge-plan-vis-group--summary {
+  background: rgba(0, 73, 144, 0.04);
+}
+
+.charge-plan-vis-canvas .vis-foreground .vis-group,
+.charge-plan-vis-canvas .vis-background .vis-group {
+  box-sizing: border-box;
+  border-bottom: 1px solid rgba(0, 73, 144, 0.08);
+}
+
+.charge-plan-vis-canvas .vis-label.charge-plan-vis-group--summary .charge-plan-vis-label-name,
+.charge-plan-vis-canvas .vis-label.charge-plan-vis-group--summary .charge-plan-vis-label-total {
+  font-weight: 700;
+}
+
+.charge-plan-vis-canvas .vis-panel.vis-center,
+.charge-plan-vis-canvas .vis-panel.vis-center .vis-content,
+.charge-plan-vis-canvas .vis-panel.vis-background,
+.charge-plan-vis-canvas .vis-panel.vis-top {
+  border-left: none;
+}
+
+.charge-plan-vis-canvas .vis-time-axis .vis-text,
+.charge-plan-vis-canvas .vis-time-axis .vis-major,
+.charge-plan-vis-canvas .vis-time-axis .vis-minor {
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.charge-plan-vis-canvas .vis-panel.vis-top,
+.charge-plan-vis-canvas .vis-time-axis {
+  cursor: grab;
+}
+
+.charge-plan-vis-canvas .vis-time-axis .vis-grid.vis-saturday,
+.charge-plan-vis-canvas .vis-time-axis .vis-grid.vis-sunday {
+  background: rgba(8, 21, 38, 0.04);
+}
+
+.charge-plan-vis-canvas .vis-item {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.charge-plan-vis-canvas .vis-item.charge-plan-vis-item--segment,
+.charge-plan-vis-canvas .vis-item.charge-plan-vis-item--draft {
+  min-height: 24px;
+}
+
+.charge-plan-vis-canvas .vis-item .vis-item-content {
+  padding: 0;
+  overflow: visible;
+}
+
+.charge-plan-vis-item--summary .vis-item-content {
+  display: flex;
+  align-items: center;
+}
+
+.charge-plan-vis-summary-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(0, 73, 144, 0.18), rgba(0, 73, 144, 0.35));
+  color: var(--color-primary);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.charge-plan-vis-item--draft .charge-plan-segment-bar {
+  opacity: 0.82;
+  border-style: dashed;
+}
+
+.charge-plan-vis-item--invalid .charge-plan-segment-bar,
+.charge-plan-segment-bar.is-invalid {
+  background: linear-gradient(135deg, #d92d20, #b42318);
+  box-shadow: 0 10px 18px rgba(180, 35, 24, 0.18);
 }
 
 .charge-plan-scroll {
