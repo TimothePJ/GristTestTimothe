@@ -1025,11 +1025,20 @@ export function renderChargePlanTimeline(dom, project, viewState, options = {}) 
     viewState?.chargePlanRangeStartDate,
     parseDateInputValue(viewState?.chargePlanAnchorDate, new Date())
   );
+  const renderedMonthSpan = Math.max(
+    18,
+    Math.round(
+      toFiniteNumber(
+        viewState?.chargePlanRenderedMonthSpan,
+        APP_CONFIG.chargeTimeline.visibleMonthSpan
+      )
+    )
+  );
 
   const months = buildDisplayedMonths(
     rangeStartDate.getFullYear(),
     rangeStartDate.getMonth(),
-    APP_CONFIG.chargeTimeline.visibleMonthSpan,
+    renderedMonthSpan,
     APP_CONFIG.months
   );
   const totalCalendarDays = months.reduce(

@@ -234,7 +234,7 @@ export async function applyActions(actions) {
     throw new Error("grist.docApi.applyUserActions(...) indisponible.");
   }
 
-  await grist.docApi.applyUserActions(actions);
+  return grist.docApi.applyUserActions(actions);
 }
 
 export async function createProjectWithBudget({ name, projectNumber, budgetLines }) {
@@ -458,7 +458,7 @@ export async function createTimeSegment({
     throw new Error("Segment invalide : ProjectTeam, date debut ou date fin manquant.");
   }
 
-  await applyActions([
+  const result = await applyActions([
     [
       "AddRecord",
       tableName,
@@ -473,6 +473,8 @@ export async function createTimeSegment({
       },
     ],
   ]);
+
+  return result?.retValues?.[0] ?? null;
 }
 
 export async function updateTimeSegment({

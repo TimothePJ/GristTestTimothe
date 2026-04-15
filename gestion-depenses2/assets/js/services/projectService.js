@@ -432,6 +432,7 @@ export function buildExpenseData({
       realSegments: [],
       provisionalDays: {},
       workedDays: {},
+      timesheetWorkedDays: {},
     };
 
     project.workers.push(worker);
@@ -504,13 +505,16 @@ export function buildExpenseData({
     if (!monthKey) return;
 
     const workedDays = row?.[columns.timesheet.workedDays];
+    if (workedDays != null) {
+      worker.timesheetWorkedDays[monthKey] = toFiniteNumber(workedDays, 0);
+    }
 
     if (worker.realSegments.length > 0) {
       return;
     }
 
-    if (workedDays != null) {
-      worker.workedDays[monthKey] = toFiniteNumber(workedDays, 0);
+    if (Object.prototype.hasOwnProperty.call(worker.timesheetWorkedDays, monthKey)) {
+      worker.workedDays[monthKey] = worker.timesheetWorkedDays[monthKey];
     }
   });
 

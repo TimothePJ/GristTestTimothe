@@ -3,6 +3,7 @@ import {
   getMonthKeyFromDate,
   parseMonthKey,
   parseOptionalNumberInput,
+  toFiniteNumber,
   toMonthKey,
 } from "./utils/format.js";
 import { APP_CONFIG } from "./config.js";
@@ -88,6 +89,7 @@ import {
 import { clearTables, renderTables } from "./ui/tables.js";
 import {
   getHalfDaySlotRange,
+  getSegmentAllocationByMonth,
   getSegmentAllocationDays,
   parseRawDateTime,
 } from "./utils/timeSegments.js";
@@ -119,6 +121,10 @@ let chargePlanSyncAlignmentTimer = null;
 let lastChargePlanSyncViewportSignature = "";
 const chargePlanSyncListeners = new Set();
 const chargePlanProjectChangeListeners = new Set();
+let nextOptimisticTimeSegmentId = -1;
+let deferredProjectViewsTimer = null;
+let deferredProjectViewsFrame = null;
+let deferredProjectViewsProjectId = null;
 const budgetLineDragState = {
   sourceIndex: null,
   targetIndex: null,
@@ -590,18 +596,43 @@ function shiftChargePlanRangeStartDate(rawValue, monthDelta = 0) {
   return toDateInputValue(new Date(date.getFullYear(), date.getMonth(), 1, 12));
 }
 
-function getChargePlanWindowStartDate(rawValue) {
+function getChargePlanWindowStartDate(rawValue, visibleDays = state.chargePlanVisibleDays) {
   const monthStartDateValue = getChargePlanMonthStartDateValue(rawValue);
   if (!monthStartDateValue) {
     return "";
   }
 
-  const monthOffset = -Math.floor(APP_CONFIG.chargeTimeline.visibleMonthSpan / 2);
+  const monthOffset = -Math.floor(
+    getChargePlanRenderedMonthSpan(rawValue, visibleDays) / 2
+  );
   return shiftChargePlanRangeStartDate(monthStartDateValue, monthOffset);
 }
 
-function setChargePlanRangeStartDate(rawValue) {
-  chargePlanRangeStartDate = getChargePlanWindowStartDate(rawValue);
+function getChargePlanRenderedMonthSpan(
+  dateValue = state.chargePlanAnchorDate,
+  visibleDays = state.chargePlanVisibleDays
+) {
+  const { monthVisibleDays, minVisibleDays, maxVisibleDays } =
+    getChargePlanVisibleDaysBounds(dateValue);
+  const normalizedVisibleDays = clamp(
+    Number(visibleDays) || APP_CONFIG.chargeTimeline.defaultVisibleDays,
+    minVisibleDays,
+    maxVisibleDays
+  );
+  const visibleMonthsEstimate = Math.max(
+    1,
+    Math.ceil(normalizedVisibleDays / Math.max(monthVisibleDays, 1))
+  );
+
+  return clamp(
+    visibleMonthsEstimate + 18,
+    18,
+    Math.min(APP_CONFIG.chargeTimeline.visibleMonthSpan, 48)
+  );
+}
+
+function setChargePlanRangeStartDate(rawValue, visibleDays = state.chargePlanVisibleDays) {
+  chargePlanRangeStartDate = getChargePlanWindowStartDate(rawValue, visibleDays);
 }
 
 function getChargePlanRangeStartDate() {
@@ -1057,6 +1088,36 @@ function findChargePlanSegmentContext(segmentId, boardEl) {
   return null;
 }
 
+async function deleteChargePlanSegment(segmentContext, boardEl = null) {
+  if (!segmentContext?.segment) {
+    return false;
+  }
+
+  const previousSegment = cloneChargePlanSegment(segmentContext.segment);
+  removeChargePlanSegmentLocally({
+    projectId: segmentContext.projectId,
+    workerId: segmentContext.worker?.id,
+    segmentType: previousSegment.segmentType,
+    segmentId: previousSegment.id,
+  });
+
+  try {
+    await removeTimeSegment(previousSegment.id);
+    return true;
+  } catch (error) {
+    addChargePlanSegmentLocally({
+      projectId: segmentContext.projectId,
+      workerId: segmentContext.worker?.id,
+      segment: previousSegment,
+    });
+    if (boardEl instanceof HTMLElement) {
+      setChargePlanFeedback(boardEl, "La suppression du segment a echoue.");
+    }
+    console.error("Erreur suppression segment plan de charge :", error);
+    return false;
+  }
+}
+
 function openEditChargePlanModal(segmentId, boardEl) {
   const segmentContext = findChargePlanSegmentContext(segmentId, boardEl);
   if (!segmentContext) {
@@ -1111,15 +1172,17 @@ async function saveEditedChargePlanSegment() {
     return;
   }
 
-  await updateTimeSegment({
-    segmentId: editingChargePlanSegment.segment?.id,
-    startDate: selection.startDate,
-    endDate: selection.endDate,
-    allocationDays: selection.totalDays,
-  });
+  const updateSucceeded = await updateChargePlanSegmentSelection(
+    editingChargePlanSegment,
+    selection,
+    editingChargePlanSegment.boardEl
+  );
+  if (!updateSucceeded) {
+    setEditChargePlanFeedback("La mise a jour du segment a echoue.");
+    return;
+  }
 
   resetEditChargePlanForm();
-  await loadData();
 }
 
 function isChargePlanWheelZoomZone(target) {
@@ -1188,6 +1251,7 @@ function syncStateToProjectStart(project) {
 }
 
 function renderApp() {
+  cancelDeferredProjectViewsRender();
   renderProjectOptions(dom.projectSelect, state.projects, state.selectedProjectId);
   const selectedProject = getSelectedProject();
   if (
@@ -1201,6 +1265,7 @@ function renderApp() {
   renderBudgetPreview(dom.budgetLinesContainer, state.newProjectBudgetLines);
 
   if (!selectedProject) {
+    cancelDeferredProjectViewsRender();
     clearProjectSummary(dom);
     clearKpi(dom);
     clearChargePlanTimeline(dom);
@@ -1216,6 +1281,19 @@ function renderApp() {
   renderProjectSummary(dom, selectedProject, getProjectBudgetTotal(selectedProject));
   renderChargePlanSection(selectedProject);
   renderPlanningManagementSection(selectedProject);
+  renderDeferredProjectViews(selectedProject);
+}
+
+function renderDeferredProjectViews(selectedProject = getSelectedProject()) {
+  if (!selectedProject) {
+    clearTables(dom);
+    clearSpendingBillingEditor(dom.spendingBillingEditor);
+    clearSpendingChartControls(dom.spendingChartControls);
+    clearKpi(dom);
+    state.spendingChart = destroyChart(state.spendingChart);
+    return;
+  }
+
   renderTables(dom, selectedProject, {
     selectedYear: state.selectedYear,
     selectedMonth: state.selectedMonth,
@@ -1238,6 +1316,48 @@ function renderApp() {
       monthSpan: state.monthSpan,
     }
   );
+}
+
+function cancelDeferredProjectViewsRender() {
+  if (deferredProjectViewsFrame != null) {
+    cancelAnimationFrame(deferredProjectViewsFrame);
+    deferredProjectViewsFrame = null;
+  }
+
+  if (deferredProjectViewsTimer != null) {
+    clearTimeout(deferredProjectViewsTimer);
+    deferredProjectViewsTimer = null;
+  }
+
+  deferredProjectViewsProjectId = null;
+}
+
+function scheduleDeferredProjectViewsRender(projectId = getSelectedProject()?.id ?? null) {
+  cancelDeferredProjectViewsRender();
+  deferredProjectViewsProjectId = Number.isInteger(Number(projectId))
+    ? Number(projectId)
+    : null;
+
+  deferredProjectViewsFrame = requestAnimationFrame(() => {
+    deferredProjectViewsFrame = null;
+    deferredProjectViewsTimer = setTimeout(() => {
+      deferredProjectViewsTimer = null;
+      const selectedProject = getSelectedProject();
+      if (!selectedProject) {
+        return;
+      }
+
+      if (
+        Number.isInteger(deferredProjectViewsProjectId) &&
+        Number(selectedProject.id) !== deferredProjectViewsProjectId
+      ) {
+        return;
+      }
+
+      renderDeferredProjectViews(selectedProject);
+      deferredProjectViewsProjectId = null;
+    }, 0);
+  });
 }
 
 function renderPlanningManagementSection(selectedProject = getSelectedProject()) {
@@ -1437,6 +1557,10 @@ function renderChargePlanSection(selectedProject = getSelectedProject()) {
     normalizeChargePlanDateValue(getChargePlanDatePickerValue()) ||
     normalizeChargePlanDateValue(getChargePlanViewportEdgeDate(getChargePlanScrollElement(), "left")) ||
     normalizeChargePlanDateValue(state.chargePlanAnchorDate);
+  const renderedMonthSpan = getChargePlanRenderedMonthSpan(
+    displayedDateValue,
+    derivedZoomState.chargePlanVisibleDays
+  );
 
   renderChargePlanTimeline(dom, selectedProject, {
     selectedYear: state.selectedYear,
@@ -1448,6 +1572,7 @@ function renderChargePlanSection(selectedProject = getSelectedProject()) {
     chargePlanAnchorDate: state.chargePlanAnchorDate,
     chargePlanDisplayedDate: displayedDateValue,
     chargePlanRangeStartDate: rangeStartDate,
+    chargePlanRenderedMonthSpan: renderedMonthSpan,
   });
   const realChargeBoardVisible =
     dom?.realChargeBoard instanceof HTMLElement &&
@@ -1465,6 +1590,7 @@ function renderChargePlanSection(selectedProject = getSelectedProject()) {
       chargePlanAnchorDate: state.chargePlanAnchorDate,
       chargePlanDisplayedDate: displayedDateValue,
       chargePlanRangeStartDate: rangeStartDate,
+      chargePlanRenderedMonthSpan: renderedMonthSpan,
     });
   } else {
     clearRealChargeTimeline(dom);
@@ -1698,36 +1824,395 @@ async function handleWorkerSave() {
   await loadData();
 }
 
-async function createChargePlanSegment(workerId, selection, segmentType = "previsionnel") {
-  if (!selection?.startDate || !selection?.endDate || selection.totalDays <= 0) {
-    return;
+function getNextOptimisticTimeSegmentId() {
+  const optimisticId = nextOptimisticTimeSegmentId;
+  nextOptimisticTimeSegmentId -= 1;
+  return optimisticId;
+}
+
+function isRealChargePlanSegmentType(segmentType = "") {
+  const normalizedType = String(segmentType || "")
+    .trim()
+    .toLowerCase();
+  return normalizedType === "reel" || normalizedType === "real";
+}
+
+function getChargePlanSegmentStateKeys(segmentType = "") {
+  if (isRealChargePlanSegmentType(segmentType)) {
+    return {
+      segmentField: "realSegments",
+      daysField: "workedDays",
+    };
   }
 
-  await createTimeSegment({
-    projectTeamLink: workerId,
-    startDate: selection.startDate,
-    endDate: selection.endDate,
-    allocationDays: selection.totalDays,
+  return {
+    segmentField: "segments",
+    daysField: "provisionalDays",
+  };
+}
+
+function mergeChargePlanMonthlyDays(target, monthKey, value) {
+  target[monthKey] =
+    Math.round((toFiniteNumber(target[monthKey], 0) + toFiniteNumber(value, 0)) * 100) / 100;
+}
+
+function buildChargePlanDaysByMonthFromSegments(segments = []) {
+  return (segments || []).reduce((daysByMonth, segment) => {
+    const allocationByMonth = getSegmentAllocationByMonth(segment);
+    Object.entries(allocationByMonth).forEach(([monthKey, days]) => {
+      mergeChargePlanMonthlyDays(daysByMonth, monthKey, days);
+    });
+    return daysByMonth;
+  }, {});
+}
+
+function sortChargePlanSegments(segments = []) {
+  return [...segments].sort((left, right) => {
+    const leftTime = parseRawDateTime(left?.startAt)?.getTime?.() ?? 0;
+    const rightTime = parseRawDateTime(right?.startAt)?.getTime?.() ?? 0;
+
+    if (leftTime !== rightTime) {
+      return leftTime - rightTime;
+    }
+
+    return Number(left?.id || 0) - Number(right?.id || 0);
+  });
+}
+
+function cloneChargePlanSegment(segment, overrides = {}) {
+  const nextStartAt = parseRawDateTime(overrides.startAt ?? segment?.startAt);
+  const nextEndAt = parseRawDateTime(overrides.endAt ?? segment?.endAt);
+
+  return {
+    ...segment,
+    ...overrides,
+    startAt: nextStartAt,
+    endAt: nextEndAt,
+    allocationDays: toFiniteNumber(
+      Object.prototype.hasOwnProperty.call(overrides, "allocationDays")
+        ? overrides.allocationDays
+        : segment?.allocationDays,
+      0
+    ),
+  };
+}
+
+function buildOptimisticChargePlanSegment({
+  segmentId,
+  workerId,
+  selection,
+  segmentType = "previsionnel",
+  label = "",
+}) {
+  const startAt = parseRawDateTime(selection?.startDate);
+  const endAt = parseRawDateTime(selection?.endDate);
+  if (!startAt || !endAt) {
+    return null;
+  }
+
+  return {
+    id: Number(segmentId),
+    projectTeamLink: Number(workerId),
+    startAt,
+    endAt,
+    segmentType,
+    allocationDays: toFiniteNumber(selection?.totalDays, 0),
+    label: String(label || ""),
+    isPendingSync: Number(segmentId) <= 0,
+  };
+}
+
+function rebuildWorkerChargePlanState(worker, segmentType, nextSegmentsInput) {
+  const { segmentField, daysField } = getChargePlanSegmentStateKeys(segmentType);
+  const nextSegments = sortChargePlanSegments(nextSegmentsInput);
+  const nextWorker = {
+    ...worker,
+    [segmentField]: nextSegments,
+  };
+
+  if (daysField === "provisionalDays") {
+    nextWorker.provisionalDays = buildChargePlanDaysByMonthFromSegments(nextSegments);
+    return nextWorker;
+  }
+
+  nextWorker.workedDays = nextSegments.length
+    ? buildChargePlanDaysByMonthFromSegments(nextSegments)
+    : { ...(worker?.timesheetWorkedDays || {}) };
+
+  return nextWorker;
+}
+
+function updateProjectWorkerLocally(projectId, workerId, updater) {
+  const normalizedProjectId = Number(projectId);
+  const normalizedWorkerId = Number(workerId);
+  let didUpdate = false;
+
+  const nextProjects = state.projects.map((project) => {
+    if (Number(project?.id) !== normalizedProjectId) {
+      return project;
+    }
+
+    let workerChanged = false;
+    const nextWorkers = (project?.workers || []).map((worker) => {
+      if (Number(worker?.id) !== normalizedWorkerId) {
+        return worker;
+      }
+
+      const nextWorker = updater(worker);
+      if (!nextWorker || nextWorker === worker) {
+        return worker;
+      }
+
+      workerChanged = true;
+      return nextWorker;
+    });
+
+    if (!workerChanged) {
+      return project;
+    }
+
+    didUpdate = true;
+    return {
+      ...project,
+      workers: nextWorkers,
+    };
+  });
+
+  if (!didUpdate) {
+    return false;
+  }
+
+  setState({ projects: nextProjects });
+  const selectedProject = getSelectedProject();
+  if (selectedProject) {
+    renderChargePlanSection(selectedProject);
+    scheduleDeferredProjectViewsRender(selectedProject.id);
+  }
+  return true;
+}
+
+function replaceChargePlanSegmentLocally({ projectId, workerId, segment }) {
+  if (!segment) {
+    return false;
+  }
+
+  return updateProjectWorkerLocally(projectId, workerId, (worker) => {
+    const { segmentField } = getChargePlanSegmentStateKeys(segment.segmentType);
+    const currentSegments = Array.isArray(worker?.[segmentField]) ? worker[segmentField] : [];
+    let didReplace = false;
+    const nextSegments = currentSegments.map((currentSegment) => {
+      if (Number(currentSegment?.id) !== Number(segment.id)) {
+        return currentSegment;
+      }
+
+      didReplace = true;
+      return cloneChargePlanSegment(segment);
+    });
+
+    if (!didReplace) {
+      return worker;
+    }
+
+    return rebuildWorkerChargePlanState(worker, segment.segmentType, nextSegments);
+  });
+}
+
+function replaceChargePlanSegmentIdLocally({
+  projectId,
+  workerId,
+  segmentType,
+  currentSegmentId,
+  persistedSegmentId,
+}) {
+  return updateProjectWorkerLocally(projectId, workerId, (worker) => {
+    const { segmentField } = getChargePlanSegmentStateKeys(segmentType);
+    const currentSegments = Array.isArray(worker?.[segmentField]) ? worker[segmentField] : [];
+    let didReplace = false;
+    const nextSegments = currentSegments.map((segment) => {
+      if (Number(segment?.id) !== Number(currentSegmentId)) {
+        return segment;
+      }
+
+      didReplace = true;
+      return {
+        ...segment,
+        id: Number(persistedSegmentId),
+        isPendingSync: false,
+      };
+    });
+
+    if (!didReplace) {
+      return worker;
+    }
+
+    return rebuildWorkerChargePlanState(worker, segmentType, nextSegments);
+  });
+}
+
+function addChargePlanSegmentLocally({ projectId, workerId, segment }) {
+  if (!segment) {
+    return false;
+  }
+
+  return updateProjectWorkerLocally(projectId, workerId, (worker) => {
+    const { segmentField } = getChargePlanSegmentStateKeys(segment.segmentType);
+    const currentSegments = Array.isArray(worker?.[segmentField]) ? worker[segmentField] : [];
+    return rebuildWorkerChargePlanState(worker, segment.segmentType, [
+      ...currentSegments,
+      segment,
+    ]);
+  });
+}
+
+function removeChargePlanSegmentLocally({
+  projectId,
+  workerId,
+  segmentType,
+  segmentId,
+}) {
+  return updateProjectWorkerLocally(projectId, workerId, (worker) => {
+    const { segmentField } = getChargePlanSegmentStateKeys(segmentType);
+    const currentSegments = Array.isArray(worker?.[segmentField]) ? worker[segmentField] : [];
+    const nextSegments = currentSegments.filter(
+      (segment) => Number(segment?.id) !== Number(segmentId)
+    );
+
+    if (nextSegments.length === currentSegments.length) {
+      return worker;
+    }
+
+    return rebuildWorkerChargePlanState(worker, segmentType, nextSegments);
+  });
+}
+
+async function createChargePlanSegment(
+  workerId,
+  selection,
+  segmentType = "previsionnel",
+  boardEl = null
+) {
+  if (!selection?.startDate || !selection?.endDate || selection.totalDays <= 0) {
+    return false;
+  }
+
+  const selectedProject = getSelectedProject();
+  if (!selectedProject) {
+    return false;
+  }
+
+  const optimisticSegment = buildOptimisticChargePlanSegment({
+    segmentId: getNextOptimisticTimeSegmentId(),
+    workerId,
+    selection,
     segmentType,
     label: "",
   });
-
-  await loadData();
-}
-
-async function resizeChargePlanSegment(segmentId, selection) {
-  if (!selection?.startDate || !selection?.endDate || selection.totalDays <= 0) {
-    return;
+  if (!optimisticSegment) {
+    return false;
   }
 
-  await updateTimeSegment({
-    segmentId,
-    startDate: selection.startDate,
-    endDate: selection.endDate,
-    allocationDays: selection.totalDays,
+  addChargePlanSegmentLocally({
+    projectId: selectedProject.id,
+    workerId,
+    segment: optimisticSegment,
   });
 
-  await loadData();
+  try {
+    const createdSegmentId = Number(
+      await createTimeSegment({
+        projectTeamLink: workerId,
+        startDate: selection.startDate,
+        endDate: selection.endDate,
+        allocationDays: selection.totalDays,
+        segmentType,
+        label: "",
+      })
+    );
+
+    if (Number.isInteger(createdSegmentId) && createdSegmentId > 0) {
+      replaceChargePlanSegmentIdLocally({
+        projectId: selectedProject.id,
+        workerId,
+        segmentType,
+        currentSegmentId: optimisticSegment.id,
+        persistedSegmentId: createdSegmentId,
+      });
+      return true;
+    }
+
+    console.warn("Impossible de recuperer l'id Grist du nouveau segment.", {
+      projectId: selectedProject.id,
+      workerId,
+      optimisticSegmentId: optimisticSegment.id,
+    });
+    void loadData({ preferredProjectNumber: selectedProject.projectNumber }).catch((error) => {
+      console.warn("Echec du rechargement de secours apres creation de segment.", error);
+    });
+    return true;
+  } catch (error) {
+    removeChargePlanSegmentLocally({
+      projectId: selectedProject.id,
+      workerId,
+      segmentType,
+      segmentId: optimisticSegment.id,
+    });
+    if (boardEl instanceof HTMLElement) {
+      setChargePlanFeedback(boardEl, "La creation du segment a echoue.");
+    }
+    console.error("Erreur creation segment plan de charge :", error);
+    return false;
+  }
+}
+
+async function updateChargePlanSegmentSelection(segmentContext, selection, boardEl = null) {
+  if (
+    !segmentContext ||
+    !selection?.startDate ||
+    !selection?.endDate ||
+    selection.totalDays <= 0
+  ) {
+    return false;
+  }
+
+  const previousSegment = cloneChargePlanSegment(segmentContext.segment);
+  const nextSegment = cloneChargePlanSegment(segmentContext.segment, {
+    startAt: selection.startDate,
+    endAt: selection.endDate,
+    allocationDays: selection.totalDays,
+    isPendingSync: false,
+  });
+
+  replaceChargePlanSegmentLocally({
+    projectId: segmentContext.projectId,
+    workerId: segmentContext.worker?.id,
+    segment: nextSegment,
+  });
+
+  try {
+    await updateTimeSegment({
+      segmentId: previousSegment.id,
+      startDate: selection.startDate,
+      endDate: selection.endDate,
+      allocationDays: selection.totalDays,
+    });
+    return true;
+  } catch (error) {
+    replaceChargePlanSegmentLocally({
+      projectId: segmentContext.projectId,
+      workerId: segmentContext.worker?.id,
+      segment: previousSegment,
+    });
+    if (boardEl instanceof HTMLElement) {
+      setChargePlanFeedback(boardEl, "La mise a jour du segment a echoue.");
+    }
+    console.error("Erreur mise a jour segment plan de charge :", error);
+    return false;
+  }
+}
+
+async function resizeChargePlanSegment(segmentId, selection, boardEl = null) {
+  const segmentContext = findChargePlanSegmentContext(segmentId, boardEl);
+  return updateChargePlanSegmentSelection(segmentContext, selection, boardEl);
 }
 
 function getSelectedProjectWorker(workerId) {
@@ -2251,7 +2736,7 @@ function restoreChargePlanViewport(boardEl = dom?.chargePlanBoard || null, attem
   }
 
   suppressChargePlanScrollEvents = true;
-  requestAnimationFrame(() => {
+  const performRestore = () => {
     const maxScrollLeft = Math.max(0, scrollEl.scrollWidth - scrollEl.clientWidth);
     const metrics = getChargePlanTimelineMetrics(scrollEl);
     const geometry = getChargePlanTimelineViewportGeometry(scrollEl);
@@ -2261,9 +2746,7 @@ function restoreChargePlanViewport(boardEl = dom?.chargePlanBoard || null, attem
       const targetDate = parseChargePlanDateValue(pendingChargePlanFocusDate);
       const targetDayNumber = getChargePlanUtcDayNumber(targetDate);
       if (!metrics && attempt < 8) {
-        chargePlanViewportRestoreFrame = null;
-        restoreChargePlanViewport(boardEl, attempt + 1);
-        return;
+        return false;
       }
 
       if (metrics && targetDayNumber != null) {
@@ -2363,6 +2846,16 @@ function restoreChargePlanViewport(boardEl = dom?.chargePlanBoard || null, attem
       suppressChargePlanScrollEvents = false;
       chargePlanViewportRestoreFrame = null;
     });
+    return true;
+  };
+
+  if (performRestore()) {
+    return;
+  }
+
+  chargePlanViewportRestoreFrame = requestAnimationFrame(() => {
+    chargePlanViewportRestoreFrame = null;
+    restoreChargePlanViewport(boardEl, attempt + 1);
   });
 }
 
@@ -3362,8 +3855,8 @@ async function handleChargePlanContextAction(event) {
   if (boardEl instanceof HTMLElement) {
     setChargePlanFeedback(boardEl, "");
   }
-  await removeTimeSegment(segmentId);
-  await loadData();
+  const segmentContext = findChargePlanSegmentContext(segmentId, boardEl);
+  await deleteChargePlanSegment(segmentContext, boardEl);
 }
 
 function handleChargePlanContextMenu(event) {
@@ -3381,7 +3874,7 @@ function handleChargePlanContextMenu(event) {
   }
 
   const segmentId = Number(segmentEl.dataset.segmentId);
-  if (!Number.isInteger(segmentId)) {
+  if (!Number.isInteger(segmentId) || segmentId <= 0) {
     hideChargePlanContextMenu(boardEl);
     return;
   }
@@ -3831,14 +4324,15 @@ async function handleChargePlanPointerUp() {
 
   setChargePlanFeedback(dragState.boardEl, "");
   if (dragState.mode === "resize") {
-    await resizeChargePlanSegment(dragState.segmentId, currentSelection);
+    await resizeChargePlanSegment(dragState.segmentId, currentSelection, dragState.boardEl);
     return;
   }
 
   await createChargePlanSegment(
     workerId,
     currentSelection,
-    getTimelineSegmentType(dragState.boardEl)
+    getTimelineSegmentType(dragState.boardEl),
+    dragState.boardEl
   );
 }
 

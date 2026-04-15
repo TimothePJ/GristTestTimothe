@@ -147,7 +147,7 @@ const EMBEDDED_PLANNING_SYNC_MODE =
   EMBEDDED_MODE === "planning-sync";
 const EMBEDDED_SPENDING_CHART_MODE = EMBEDDED_MODE === "spending-chart-sync";
 const EMBEDDED_OVERVIEW_MODE = EMBEDDED_MODE === "overview-sync";
-const USE_VIS_TIMELINE_PLANNING = true;
+const USE_VIS_TIMELINE_PLANNING = false;
 const CHARGE_PLAN_SYNC_TRACE_LABEL = EMBEDDED_SPENDING_CHART_MODE
   ? "depenses-chart"
   : EMBEDDED_OVERVIEW_MODE
@@ -1488,6 +1488,11 @@ function renderChargePlanSection(selectedProject = getSelectedProject()) {
     });
   } else {
     clearRealChargeTimeline(dom);
+  }
+
+  restoreChargePlanViewport(dom?.chargePlanBoard || null);
+  if (realChargeBoardVisible) {
+    restoreChargePlanViewport(dom?.realChargeBoard || null);
   }
 }
 
