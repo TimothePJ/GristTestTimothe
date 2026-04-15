@@ -1223,7 +1223,31 @@ td input {
   min-height: var(--row-height, 72px);
   box-shadow: inset 1px 0 0 rgba(0, 73, 144, 0.12);
   overflow: hidden;
-  background: linear-gradient(180deg, rgba(0, 73, 144, 0.03), rgba(0, 73, 144, 0.01));
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      rgba(0, 73, 144, 0.08) 0,
+      rgba(0, 73, 144, 0.08) 1px,
+      transparent 1px,
+      transparent var(--charge-plan-day-width)
+    ),
+    repeating-linear-gradient(
+      to right,
+      rgba(0, 73, 144, 0.028) 0,
+      rgba(0, 73, 144, 0.028) calc(var(--charge-plan-day-width) / 2),
+      rgba(0, 73, 144, 0.016) calc(var(--charge-plan-day-width) / 2),
+      rgba(0, 73, 144, 0.016) var(--charge-plan-day-width)
+    ),
+    repeating-linear-gradient(
+      to right,
+      transparent 0,
+      transparent calc(var(--charge-plan-day-width) / 2),
+      rgba(0, 73, 144, 0.05) calc(var(--charge-plan-day-width) / 2),
+      rgba(0, 73, 144, 0.05) calc(var(--charge-plan-day-width) / 2 + 1px),
+      transparent calc(var(--charge-plan-day-width) / 2 + 1px),
+      transparent var(--charge-plan-day-width)
+    ),
+    linear-gradient(180deg, rgba(0, 73, 144, 0.03), rgba(0, 73, 144, 0.01));
 }
 
 .charge-plan-grid-month:first-child {
@@ -1235,13 +1259,12 @@ td input {
   top: 0;
   bottom: 0;
   box-sizing: border-box;
-  border-left: 1px solid rgba(0, 73, 144, 0.08);
   background: linear-gradient(
     to right,
-    rgba(0, 73, 144, 0.028) 0,
-    rgba(0, 73, 144, 0.028) 50%,
-    rgba(0, 73, 144, 0.016) 50%,
-    rgba(0, 73, 144, 0.016) 100%
+    rgba(8, 21, 38, 0.09) 0,
+    rgba(8, 21, 38, 0.09) 50%,
+    rgba(8, 21, 38, 0.12) 50%,
+    rgba(8, 21, 38, 0.12) 100%
   );
 }
 
@@ -1253,24 +1276,6 @@ td input {
   left: 50%;
   width: 1px;
   transform: translateX(-0.5px);
-  background: rgba(0, 73, 144, 0.05);
-}
-
-.charge-plan-grid-day.is-first-day {
-  border-left: none;
-}
-
-.charge-plan-grid-day.is-weekend {
-  background: linear-gradient(
-    to right,
-    rgba(8, 21, 38, 0.09) 0,
-    rgba(8, 21, 38, 0.09) 50%,
-    rgba(8, 21, 38, 0.12) 50%,
-    rgba(8, 21, 38, 0.12) 100%
-  );
-}
-
-.charge-plan-grid-day.is-weekend::after {
   background: rgba(8, 21, 38, 0.08);
 }
 

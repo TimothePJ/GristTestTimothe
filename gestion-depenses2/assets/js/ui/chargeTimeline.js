@@ -580,19 +580,23 @@ function renderTrackGrid(
   return `
     <div class="charge-plan-track-grid">
       ${months
-        .map((month) => {
+        .map((month, monthIndex) => {
           const monthWidth = getMonthWidth(month, zoomMode, zoomScale, sizingContext);
           const dayWidth =
             month.calendarDayCount > 0
               ? monthWidth / month.calendarDayCount
               : monthWidth;
-          const dayBlocks = (month.calendarDayDates || [])
+          const weekendBlocks = (month.calendarDayDates || [])
             .map((date, dayIndex) => {
+              if (isBusinessDay(date)) {
+                return "";
+              }
+
               return `
                 <span
                   class="charge-plan-grid-day ${
-                    isBusinessDay(date) ? "" : "is-weekend"
-                  } ${dayIndex === 0 ? "is-first-day" : ""}"
+                    dayIndex === 0 ? "is-first-day" : ""
+                  } is-weekend"
                   style="left:${dayIndex * dayWidth}px; width:${dayWidth}px"
                   data-date-key="${toDateInputValue(date)}"
                 ></span>
@@ -602,10 +606,10 @@ function renderTrackGrid(
 
           return `
             <span
-              class="charge-plan-grid-month"
-              style="width:${monthWidth}px"
+              class="charge-plan-grid-month ${monthIndex === 0 ? "is-first-month" : ""}"
+              style="width:${monthWidth}px; --charge-plan-day-width:${dayWidth}px"
             >
-              ${dayBlocks}
+              ${weekendBlocks}
             </span>
           `;
         })

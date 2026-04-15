@@ -3431,6 +3431,11 @@ function scheduleChargePlanWheelZoom(boardEl, clientX, deltaY, deltaMode = 0) {
     }
   };
 
+  if (chargePlanViewportRestoreFrame == null && !suppressChargePlanScrollEvents) {
+    flushWheelZoom();
+    return;
+  }
+
   chargePlanWheelZoomFrame = requestAnimationFrame(flushWheelZoom);
 }
 
