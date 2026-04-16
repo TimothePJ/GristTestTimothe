@@ -13,13 +13,14 @@ import {
   setHubStatus,
   setLastRange,
   setLastSource,
+  syncSharedPlanningControlsAvailability,
   syncExpensesPlanningShell,
 } from "../layout/shell.js";
 import { alignExpensesViewportToPlanning } from "../viewport/alignment.js";
 import {
   buildCanonicalSharedViewport,
+  buildPlanningLedProjectSelectionViewport,
   buildProjectSelectionViewport,
-  buildSharedProjectDateBounds,
   normalizeProjectDateBounds,
 } from "../viewport/build.js";
 import { syncPlanningViewportBounds } from "../viewport/bounds.js";
@@ -90,6 +91,7 @@ export function clearSharedProjectSelection() {
   state.lastPlanningWarningsPopupSignature = "";
   state.lastAppliedViewportLogicalSignature = "";
   state.sharedViewportState = null;
+  state.sharedToolbarActionInProgress = false;
   closePlanningWarningsPopup();
   setActiveProjectSelection("");
   setProjectContentVisibility(false);
@@ -97,6 +99,7 @@ export function clearSharedProjectSelection() {
   setLastRange(null);
   syncExpensesPlanningShell(null);
   setHubStatus("Choisis un projet pour afficher les plannings.");
+  syncSharedPlanningControlsAvailability();
 }
 
 export async function applySharedProject(projectKey) {
@@ -112,6 +115,7 @@ export async function applySharedProject(projectKey) {
   state.projectSyncInProgress = true;
   state.pendingViewportPayload = null;
   setHubStatus(`Chargement du projet ${normalizedProjectKey}...`);
+  syncSharedPlanningControlsAvailability();
 
   try {
     const projectApplyCalls = [
@@ -122,11 +126,9 @@ export async function applySharedProject(projectKey) {
     if (state.overviewApi?.setSelectedProject) {
       projectApplyCalls.push(Promise.resolve(state.overviewApi.setSelectedProject(normalizedProjectKey)));
     }
-
     if (state.expensesApi?.setSelectedProject) {
       projectApplyCalls.push(Promise.resolve(state.expensesApi.setSelectedProject(normalizedProjectKey)));
     }
-
     await Promise.all(projectApplyCalls);
     state.activeProjectKey = normalizedProjectKey;
     setActiveProjectSelection(normalizedProjectKey);
@@ -137,19 +139,26 @@ export async function applySharedProject(projectKey) {
     const planningProjectDateBounds =
       referencePlanningApi.getProjectDateBounds?.() || state.planningApi.getProjectDateBounds?.() || null;
     const expensesProjectDateBounds = state.expensesApi?.getProjectDateBounds?.() || null;
-    const selectedProjectDateBounds = buildSharedProjectDateBounds({
-      planningDateBounds: planningProjectDateBounds,
-      expensesDateBounds: expensesProjectDateBounds,
-    });
+    const referenceProjectDateBounds =
+      normalizeProjectDateBounds(planningProjectDateBounds) ||
+      normalizeProjectDateBounds(expensesProjectDateBounds);
+    const planningViewportAfterProjectSelection =
+      referencePlanningApi.getViewport?.() || state.planningApi.getViewport?.() || null;
     const selectionFallbackViewport =
+      planningViewportAfterProjectSelection ||
+      state.sharedViewportState ||
       state.expensesApi?.getViewport?.() ||
-      referencePlanningApi.getViewport?.() ||
-      state.planningApi.getViewport?.() ||
       {};
-    let sharedViewport = buildProjectSelectionViewport(
-      selectedProjectDateBounds,
+    let sharedViewport = buildPlanningLedProjectSelectionViewport(
+      planningViewportAfterProjectSelection || {},
       selectionFallbackViewport
     );
+    if (!sharedViewport?.firstVisibleDate) {
+      sharedViewport = buildProjectSelectionViewport(
+        referenceProjectDateBounds,
+        selectionFallbackViewport
+      );
+    }
     if (sharedViewport?.firstVisibleDate) {
       const initialViewportLogicalSignature = getViewportLogicalSignature(
         normalizedProjectKey,
@@ -163,48 +172,28 @@ export async function applySharedProject(projectKey) {
 
       await sleep(PROJECT_SELECTION_STABILIZE_DELAY_MS);
       const planningViewportAfterSelection = referencePlanningApi.getViewport?.() || null;
-      const stabilizedPlanningViewport = buildCanonicalSharedViewport({
-        ...sharedViewport,
-        ...(planningViewportAfterSelection || {}),
-        firstVisibleDate:
-          planningViewportAfterSelection?.firstVisibleDate ||
-          planningViewportAfterSelection?.rangeStartDate ||
-          sharedViewport.firstVisibleDate,
-        rangeStartDate:
-          planningViewportAfterSelection?.firstVisibleDate ||
-          planningViewportAfterSelection?.rangeStartDate ||
-          sharedViewport.rangeStartDate,
-        visibleDays:
-          Number(planningViewportAfterSelection?.visibleDays) || sharedViewport.visibleDays,
-        mode: String(planningViewportAfterSelection?.mode || sharedViewport.mode || "").trim(),
-        anchorDate:
-          planningViewportAfterSelection?.anchorDate ||
-          planningViewportAfterSelection?.firstVisibleDate ||
-          sharedViewport.anchorDate,
-      });
+      const stabilizedPlanningViewport = buildPlanningLedProjectSelectionViewport(
+        planningViewportAfterSelection || {},
+        sharedViewport
+      );
       const stabilizedViewportLogicalSignature = getViewportLogicalSignature(
         normalizedProjectKey,
         stabilizedPlanningViewport
       );
       const shouldTrustStabilizedViewport = isViewportConsistentWithProjectBounds(
         stabilizedPlanningViewport,
-        selectedProjectDateBounds
+        referenceProjectDateBounds
       );
 
       if (shouldTrustStabilizedViewport) {
         sharedViewport = stabilizedPlanningViewport;
       } else {
-        console.warn(
-          "[sync] viewport planning stabilise ignore car hors plage projet",
-          {
-            projectKey: normalizedProjectKey,
-            selectedProjectDateBounds,
-            stabilizedPlanningViewport,
-          }
-        );
-        appendLog(
-          `Viewport planning ignore pour ${normalizedProjectKey} : plage hors projet`
-        );
+        console.warn("[sync] viewport planning stabilise ignore car hors plage projet", {
+          projectKey: normalizedProjectKey,
+          selectedProjectDateBounds: referenceProjectDateBounds,
+          stabilizedPlanningViewport,
+        });
+        appendLog(`Viewport planning ignore pour ${normalizedProjectKey} : plage hors projet`);
       }
 
       if (
@@ -246,6 +235,7 @@ export async function applySharedProject(projectKey) {
     appendLog(`Projet partage applique : ${normalizedProjectKey}`);
   } finally {
     state.projectSyncInProgress = false;
+    syncSharedPlanningControlsAvailability();
     void flushViewportSyncQueue();
   }
 }

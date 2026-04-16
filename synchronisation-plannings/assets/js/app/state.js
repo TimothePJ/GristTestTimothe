@@ -8,6 +8,7 @@ export function createHubState() {
     requestedProjectKey: "",
     allowChildProjectSelectionSync: false,
     projectSyncInProgress: false,
+    sharedToolbarActionInProgress: false,
     lastPlanningWarningsPopupSignature: "",
     viewportSyncInProgress: false,
     pendingViewportPayload: null,

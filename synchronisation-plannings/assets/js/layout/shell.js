@@ -111,6 +111,29 @@ export function setExpensesPlanningControlsDisabled(disabled = true) {
   }
 }
 
+export function isSharedPlanningControlsLocked() {
+  const hasActiveProject = Boolean(String(state.activeProjectKey || "").trim());
+  const planningReady = Boolean(state.planningApi && state.planningAxisApi);
+  const expensesReady = Boolean(state.expensesApi);
+  const criticalAttachInProgress = Boolean(state.expensesFrameAttachPromise);
+
+  return (
+    !hasActiveProject ||
+    !planningReady ||
+    !expensesReady ||
+    criticalAttachInProgress ||
+    state.projectSyncInProgress ||
+    state.viewportSyncInProgress ||
+    state.sharedToolbarActionInProgress
+  );
+}
+
+export function syncSharedPlanningControlsAvailability() {
+  const locked = isSharedPlanningControlsLocked();
+  setExpensesPlanningControlsDisabled(locked);
+  return !locked;
+}
+
 export function formatSharedCenterLabel(mode = "", anchorDateValue = "") {
   const normalizedMode = String(mode || "").trim() || "week";
   const normalizedAnchorDate = normalizeIsoDate(anchorDateValue);
@@ -278,6 +301,8 @@ export function syncExpensesPlanningShell(viewport = null) {
     );
     dom.sharedCurrentDateRangeEl.title = fullLabel;
   }
+
+  syncSharedPlanningControlsAvailability();
 }
 
 export function appendLog() {}
@@ -309,6 +334,8 @@ export function setActiveProjectSelection(projectKey = "") {
   if (dom.projectSelectEl instanceof HTMLSelectElement) {
     dom.projectSelectEl.value = String(projectKey || "").trim();
   }
+
+  syncSharedPlanningControlsAvailability();
 }
 
 export function setProjectContentVisibility(hasProject = false) {
@@ -325,6 +352,8 @@ export function setProjectContentVisibility(hasProject = false) {
   if (dom.syncPlanningCardSectionEl instanceof HTMLElement) {
     dom.syncPlanningCardSectionEl.hidden = !shouldShowProjectContent;
   }
+
+  syncSharedPlanningControlsAvailability();
 }
 
 export function setSelectionWarning(selection = null) {

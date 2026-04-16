@@ -137,6 +137,71 @@ export function buildSharedProjectDateBounds({
   return normalizedPlanningBounds;
 }
 
+export function buildPlanningLedProjectSelectionViewport(
+  planningViewport = {},
+  fallbackViewport = {}
+) {
+  const fallbackSharedViewport = buildCanonicalSharedViewport(
+    stripExactWindowViewportState(fallbackViewport)
+  );
+  const planningFirstVisibleDate =
+    normalizeIsoDate(planningViewport?.firstVisibleDate) ||
+    normalizeIsoDate(planningViewport?.rangeStartDate) ||
+    normalizeIsoDate(planningViewport?.anchorDate) ||
+    getIsoDateFromExactTimestamp(planningViewport?.windowStartMs);
+
+  if (!planningFirstVisibleDate) {
+    return fallbackSharedViewport;
+  }
+
+  const planningAnchorDate =
+    normalizeIsoDate(planningViewport?.anchorDate) || planningFirstVisibleDate;
+  const planningVisibleDays = Number(planningViewport?.visibleDays);
+  const { minVisibleDays, maxVisibleDays } = getSharedVisibleDaysBounds({
+    ...fallbackViewport,
+    ...planningViewport,
+    firstVisibleDate: planningFirstVisibleDate,
+    rangeStartDate: planningFirstVisibleDate,
+    anchorDate: planningAnchorDate,
+  });
+  const visibleDays = clamp(
+    Number.isFinite(planningVisibleDays) && planningVisibleDays > 0
+      ? Math.round(planningVisibleDays)
+      : Number(fallbackSharedViewport.visibleDays) || minVisibleDays,
+    minVisibleDays,
+    maxVisibleDays
+  );
+  const explicitMode = String(planningViewport?.mode || "").trim();
+  const derivedMode = deriveSharedModeFromVisibleDays(visibleDays, {
+    ...planningViewport,
+    firstVisibleDate: planningFirstVisibleDate,
+    rangeStartDate: planningFirstVisibleDate,
+    anchorDate: planningAnchorDate,
+    visibleDays,
+  });
+  const nextMode = isSupportedSharedMode(explicitMode) && explicitMode === derivedMode
+    ? explicitMode
+    : derivedMode;
+
+  return buildCanonicalSharedViewport({
+    ...fallbackSharedViewport,
+    ...stripExactWindowViewportState(planningViewport),
+    windowStartMs: null,
+    windowEndMs: null,
+    leftDayOffset: null,
+    rightDayOffset: null,
+    exactVisibleDays: null,
+    contentStartDate: "",
+    contentStartMs: null,
+    mode: nextMode,
+    anchorDate: planningAnchorDate,
+    firstVisibleDate: planningFirstVisibleDate,
+    rangeStartDate: planningFirstVisibleDate,
+    visibleDays,
+    rangeEndDate: shiftIsoDateValue(planningFirstVisibleDate, visibleDays - 1),
+  });
+}
+
 export function buildProjectSelectionViewport(projectDateBounds = null, fallbackViewport = {}) {
   const fallbackSharedViewport = buildCanonicalSharedViewport(
     stripExactWindowViewportState(fallbackViewport)
