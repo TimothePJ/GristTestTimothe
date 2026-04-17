@@ -345,14 +345,6 @@ export function setProjectContentVisibility(hasProject = false) {
     dom.projectEmptyStateEl.hidden = shouldShowProjectContent;
   }
 
-  if (dom.workspaceCardSectionEl instanceof HTMLElement) {
-    dom.workspaceCardSectionEl.hidden = !shouldShowProjectContent;
-  }
-
-  if (dom.syncPlanningCardSectionEl instanceof HTMLElement) {
-    dom.syncPlanningCardSectionEl.hidden = !shouldShowProjectContent;
-  }
-
   syncSharedPlanningControlsAvailability();
 }
 

@@ -34,6 +34,26 @@ function waitForAnimationFrame() {
   });
 }
 
+function buildPlanningSelectionAnchorViewport(viewport = {}) {
+  if (!viewport || typeof viewport !== "object") {
+    return {};
+  }
+
+  return {
+    ...viewport,
+    mode: "",
+    visibleDays: Number.NaN,
+    rangeEndDate: "",
+    windowStartMs: null,
+    windowEndMs: null,
+    leftDayOffset: null,
+    rightDayOffset: null,
+    exactVisibleDays: null,
+    contentStartDate: "",
+    contentStartMs: null,
+  };
+}
+
 export function clearSharedProjectSelection() {
   state.activeProjectKey = "";
   state.requestedProjectKey = "";
@@ -109,13 +129,16 @@ export async function applySharedProject(projectKey) {
       referencePlanningApi.getViewport?.() ||
       state.planningApi.getViewport?.() ||
       null;
+    const planningSelectionAnchorViewport = buildPlanningSelectionAnchorViewport(
+      planningViewportAfterProjectSelection || {}
+    );
     const selectionFallbackViewport =
-      planningViewportAfterProjectSelection ||
       state.sharedViewportState ||
       state.expensesApi?.getViewport?.() ||
+      planningViewportAfterProjectSelection ||
       {};
     let sharedViewport = buildPlanningLedProjectSelectionViewport(
-      planningViewportAfterProjectSelection || {},
+      planningSelectionAnchorViewport,
       selectionFallbackViewport
     );
     if (!sharedViewport?.firstVisibleDate) {
