@@ -66,6 +66,9 @@ const PLANNING_SYNC_TRACE_LABEL =
     ? "planning-embedded"
     : "planning";
 let planningSyncTraceSequence = 0;
+let planningViewportSettlePending = false;
+let planningViewportSettleToken = 0;
+let planningViewportSettleWaiters = [];
 
 const PLANNING_ROW_DRAG_HANDLED_FLAG = "__planningRowDragHandled";
 
@@ -103,6 +106,52 @@ function summarizePlanningViewportForTrace(viewport = null) {
 function tracePlanningSync(event, details = {}) {
   planningSyncTraceSequence += 1;
   console.info(`[sync-trace][${PLANNING_SYNC_TRACE_LABEL}][${planningSyncTraceSequence}] ${event}`, details);
+}
+
+function resolvePlanningViewportSettled(viewport = getPlanningViewportState()) {
+  planningViewportSettlePending = false;
+  const waiters = planningViewportSettleWaiters;
+  planningViewportSettleWaiters = [];
+  waiters.forEach((resolve) => {
+    resolve(viewport);
+  });
+}
+
+function beginPlanningViewportSettle() {
+  planningViewportSettlePending = true;
+  planningViewportSettleToken += 1;
+  return planningViewportSettleToken;
+}
+
+function queuePlanningViewportSettled(token, frameCount = 2) {
+  const safeFrameCount = Math.max(1, Math.round(Number(frameCount) || 1));
+
+  const step = (remainingFrames) => {
+    requestAnimationFrame(() => {
+      if (token !== planningViewportSettleToken) {
+        return;
+      }
+
+      if (remainingFrames <= 1) {
+        resolvePlanningViewportSettled(getPlanningViewportState());
+        return;
+      }
+
+      step(remainingFrames - 1);
+    });
+  };
+
+  step(safeFrameCount);
+}
+
+export function waitForPlanningViewportSettled() {
+  if (!planningViewportSettlePending) {
+    return Promise.resolve(getPlanningViewportState());
+  }
+
+  return new Promise((resolve) => {
+    planningViewportSettleWaiters.push(resolve);
+  });
 }
 
 function ensureStickyAxisLeftFiller(container) {
@@ -2887,7 +2936,7 @@ export function getPlanningViewportState() {
 
 export function applyPlanningViewportState(viewport = {}) {
   if (!timelineInstance) {
-    return;
+    return Promise.resolve(null);
   }
 
   tracePlanningSync("apply-viewport-request", {
@@ -2938,13 +2987,15 @@ export function applyPlanningViewportState(viewport = {}) {
           end: roundPlanningTraceNumber(clampedRange.end?.getTime?.(), 0),
         },
       });
+      const settleToken = beginPlanningViewportSettle();
       rememberProgrammaticPlanningViewportFromRange(nextMode, clampedRange);
       timelineInstance.setWindow(clampedRange.start, clampedRange.end, { animation: false });
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
       updateCurrentTimeLineBounds();
       requestStickyAxisSync();
-      return;
+      queuePlanningViewportSettled(settleToken);
+      return waitForPlanningViewportSettled();
     }
   }
 
@@ -2960,13 +3011,15 @@ export function applyPlanningViewportState(viewport = {}) {
           end: roundPlanningTraceNumber(end.getTime(), 0),
         },
       });
+      const settleToken = beginPlanningViewportSettle();
       rememberProgrammaticPlanningViewportFromRange(nextMode, { start, end });
       timelineInstance.setWindow(start, end, { animation: false });
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
       updateCurrentTimeLineBounds();
       requestStickyAxisSync();
-      return;
+      queuePlanningViewportSettled(settleToken);
+      return waitForPlanningViewportSettled();
     }
   }
 
@@ -2980,12 +3033,17 @@ export function applyPlanningViewportState(viewport = {}) {
       anchorDate: toIsoDateValue(anchorDate),
       viewport: summarizePlanningViewportForTrace(viewport),
     });
+    const settleToken = beginPlanningViewportSettle();
     setWindowForMode(nextMode, anchorDate);
     rememberProgrammaticPlanningViewport(getPlanningViewportLogicalSignature(getPlanningViewportState()));
     updateNavCenterButtonLabel();
     updateCurrentTimeLineBounds();
     requestStickyAxisSync();
+    queuePlanningViewportSettled(settleToken);
+    return waitForPlanningViewportSettled();
   }
+
+  return Promise.resolve(getPlanningViewportState());
 }
 
 export function setPlanningViewportBounds(bounds = {}) {
@@ -3123,7 +3181,7 @@ function moveWindowByMode(direction) {
 
 export function setPlanningZoomMode(mode, anchorDate = null) {
   if (!timelineInstance) {
-    return null;
+    return Promise.resolve(null);
   }
 
   const nextMode = normalizePlanningZoomMode(mode);
@@ -3131,36 +3189,42 @@ export function setPlanningZoomMode(mode, anchorDate = null) {
     resolvePlanningAnchorDate(anchorDate) || dataAnchorDate || getWindowCenterDate();
 
   setActiveZoomButton(nextMode);
+  const settleToken = beginPlanningViewportSettle();
   setWindowForMode(nextMode, nextAnchorDate);
   updateNavCenterButtonLabel();
   updateCurrentTimeLineBounds();
   requestStickyAxisSync();
-  return getPlanningViewportState();
+  queuePlanningViewportSettled(settleToken);
+  return waitForPlanningViewportSettled();
 }
 
 export function movePlanningViewportByMode(direction = 1) {
   if (!timelineInstance) {
-    return null;
+    return Promise.resolve(null);
   }
 
+  const settleToken = beginPlanningViewportSettle();
   moveWindowByMode(direction >= 0 ? 1 : -1);
   updateNavCenterButtonLabel();
   updateCurrentTimeLineBounds();
   requestStickyAxisSync();
-  return getPlanningViewportState();
+  queuePlanningViewportSettled(settleToken);
+  return waitForPlanningViewportSettled();
 }
 
 export function focusPlanningDataAnchor() {
   if (!timelineInstance) {
-    return null;
+    return Promise.resolve(null);
   }
 
   const mode = getCurrentZoomMode();
+  const settleToken = beginPlanningViewportSettle();
   setWindowForMode(mode, dataAnchorDate || getWindowCenterDate());
   updateNavCenterButtonLabel();
   updateCurrentTimeLineBounds();
   requestStickyAxisSync();
-  return getPlanningViewportState();
+  queuePlanningViewportSettled(settleToken);
+  return waitForPlanningViewportSettled();
 }
 
 export function setPlanningDurationEditHandler(handler) {
@@ -3274,6 +3338,7 @@ export function renderPlanningTimeline({ groups, items }) {
 
   groupsDataSet.add(groups || []);
   itemsDataSet.add(items || []);
+  const settleToken = beginPlanningViewportSettle();
 
   // Recalage automatique sur les dates des données
   requestAnimationFrame(() => {
@@ -3320,6 +3385,7 @@ export function renderPlanningTimeline({ groups, items }) {
     updateNavCenterButtonLabel();
     updateCurrentTimeLineBounds();
     requestStickyAxisSync();
+    queuePlanningViewportSettled(settleToken);
   });
 }
 
@@ -3405,4 +3471,5 @@ export function clearPlanningTimeline() {
   clearMsProjectDropTarget();
   clearPlanningRowDropTarget();
   clearPlanningRowDraggingState();
+  resolvePlanningViewportSettled(getPlanningViewportState());
 }

@@ -33,6 +33,7 @@ import {
   setPlanningZoomMode,
   movePlanningViewportByMode,
   focusPlanningDataAnchor,
+  waitForPlanningViewportSettled,
   setPlanningViewportBounds,
   setPlanningDurationEditHandler,
   setPlanningMsProjectDropHandler,
@@ -823,6 +824,7 @@ function exposePlanningSyncApi() {
       }
 
       await refreshPlanning();
+      await waitForPlanningViewportSettled();
       return Boolean(normalizedProject);
     },
     getViewport() {
@@ -843,8 +845,8 @@ function exposePlanningSyncApi() {
     focusDataAnchor() {
       return focusPlanningDataAnchor();
     },
-    applyViewport(viewport = {}) {
-      applyPlanningViewportState(viewport);
+    async applyViewport(viewport = {}) {
+      return await Promise.resolve(applyPlanningViewportState(viewport));
     },
     subscribeViewportChange(listener) {
       return subscribePlanningViewportChanges((viewport, meta = {}) => {

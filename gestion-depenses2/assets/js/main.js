@@ -121,6 +121,7 @@ let chargePlanSyncAlignmentTimer = null;
 let lastChargePlanSyncViewportSignature = "";
 const chargePlanSyncListeners = new Set();
 const chargePlanProjectChangeListeners = new Set();
+let chargePlanViewportSettledWaiters = [];
 let nextOptimisticTimeSegmentId = -1;
 let deferredProjectViewsTimer = null;
 let deferredProjectViewsFrame = null;
@@ -366,17 +367,40 @@ function beginChargePlanProjectChangeSuppression() {
   return chargePlanProjectChangeSuppressionToken;
 }
 
+function hasPendingChargePlanInternalWork() {
+  return (
+    chargePlanViewportRestoreFrame != null ||
+    chargePlanVisibleDateTimer != null ||
+    chargePlanScrollSyncFrame != null ||
+    chargePlanWheelZoomFrame != null ||
+    chargePlanSyncAlignmentTimer != null
+  );
+}
+
+function resolveChargePlanViewportSettled(viewport = getChargePlanSyncViewport()) {
+  const waiters = chargePlanViewportSettledWaiters;
+  chargePlanViewportSettledWaiters = [];
+  waiters.forEach((resolve) => {
+    resolve(viewport);
+  });
+}
+
+function waitForChargePlanViewportSettled() {
+  if (!suppressChargePlanSyncEvents && !hasPendingChargePlanInternalWork()) {
+    return Promise.resolve(getChargePlanSyncViewport());
+  }
+
+  return new Promise((resolve) => {
+    chargePlanViewportSettledWaiters.push(resolve);
+  });
+}
+
 function finishChargePlanSyncSuppression(token, attempt = 0) {
   if (token !== chargePlanSyncSuppressionToken) {
     return;
   }
 
-  const hasPendingInternalWork =
-    chargePlanViewportRestoreFrame != null ||
-    chargePlanVisibleDateTimer != null ||
-    chargePlanScrollSyncFrame != null ||
-    chargePlanWheelZoomFrame != null ||
-    chargePlanSyncAlignmentTimer != null;
+  const hasPendingInternalWork = hasPendingChargePlanInternalWork();
 
   if (hasPendingInternalWork && attempt < 16) {
     setTimeout(() => {
@@ -390,6 +414,12 @@ function finishChargePlanSyncSuppression(token, attempt = 0) {
       return;
     }
     suppressChargePlanSyncEvents = false;
+    requestAnimationFrame(() => {
+      if (token !== chargePlanSyncSuppressionToken) {
+        return;
+      }
+      resolveChargePlanViewportSettled(getChargePlanSyncViewport());
+    });
   });
 }
 
@@ -1633,7 +1663,7 @@ function setSelectedProjectForPlanningSync(projectKey = "") {
     traceChargePlanSync("set-project-miss", {
       projectKey: String(projectKey || "").trim(),
     });
-    return false;
+    return Promise.resolve(false);
   }
 
   traceChargePlanSync("set-project", {
@@ -1643,6 +1673,7 @@ function setSelectedProjectForPlanningSync(projectKey = "") {
   });
   const projectChangeSuppressionToken = beginChargePlanProjectChangeSuppression();
   const suppressionToken = beginChargePlanSyncSuppression();
+  const settledPromise = waitForChargePlanViewportSettled();
   try {
     clearChargePlanWheelZoomFrame();
     clearChargePlanScrollSyncFrame();
@@ -1658,11 +1689,12 @@ function setSelectedProjectForPlanningSync(projectKey = "") {
     finishChargePlanSyncSuppression(suppressionToken);
     finishChargePlanProjectChangeSuppression(projectChangeSuppressionToken);
   }
-  return true;
+  return settledPromise.then(() => true);
 }
 
 function applyChargePlanSyncViewport(viewport = {}) {
   const suppressionToken = beginChargePlanSyncSuppression();
+  const settledPromise = waitForChargePlanViewportSettled();
 
   try {
     const exactViewport = getChargePlanSharedExactViewport(viewport);
@@ -1736,6 +1768,8 @@ function applyChargePlanSyncViewport(viewport = {}) {
   } finally {
     finishChargePlanSyncSuppression(suppressionToken);
   }
+
+  return settledPromise;
 }
 
 async function loadData({ preferredProjectNumber = "" } = {}) {
@@ -4768,7 +4802,7 @@ function exposeChargePlanSyncApi() {
       return getChargePlanSyncViewport();
     },
     applyViewport(viewport = {}) {
-      applyChargePlanSyncViewport(viewport);
+      return applyChargePlanSyncViewport(viewport);
     },
     nudgeViewportByPixels(pixelDelta = 0) {
       const scrollEl = getChargePlanScrollElement(dom?.chargePlanBoard || null);
