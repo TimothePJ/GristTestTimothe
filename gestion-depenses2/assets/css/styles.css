@@ -125,7 +125,10 @@ body.overview-sync-embedded {
   background: transparent;
 }
 
-body.overview-sync-embedded .header,
+body.overview-sync-embedded .header {
+  display: none !important;
+}
+
 body.overview-sync-embedded .container {
   max-width: none;
 }

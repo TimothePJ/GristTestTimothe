@@ -230,6 +230,7 @@ function applyEmbeddedPlanningSyncMode() {
     document.body.classList.add("overview-sync-embedded");
 
     const selectorsToHide = [
+      ".header",
       ".plan-management-section",
       "#charge-plan-board",
       "#expense-board",
