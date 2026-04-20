@@ -268,7 +268,7 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
         },
         {
           type: "bar",
-          label: "Montant facture mensuel (â‚¬)",
+          label: "Montant facture mensuel (€)",
           data: billedAmountData,
           backgroundColor: SPENDING_CHART_COLORS.billing.fill,
           borderColor: SPENDING_CHART_COLORS.billing.solid,
