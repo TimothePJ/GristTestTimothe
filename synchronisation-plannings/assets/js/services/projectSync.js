@@ -12,6 +12,7 @@ import {
   setHubStatus,
   setLastRange,
   setLastSource,
+  setSelectionWarning,
   syncSharedPlanningControlsAvailability,
   syncExpensesPlanningShell,
 } from "../layout/shell.js";
@@ -67,6 +68,7 @@ export function clearSharedProjectSelection() {
   setProjectContentVisibility(false);
   setLastSource("");
   setLastRange(null);
+  setSelectionWarning(null);
   syncExpensesPlanningShell(null);
   setHubStatus("Choisis un projet pour afficher les plannings.");
   syncSharedPlanningControlsAvailability();
