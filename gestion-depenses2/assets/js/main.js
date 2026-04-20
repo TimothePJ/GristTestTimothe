@@ -1658,35 +1658,6 @@ function findProjectByPlanningSyncKey(projectKey) {
 }
 
 function setSelectedProjectForPlanningSync(projectKey = "") {
-  const normalizedProjectKey = String(projectKey || "").trim();
-  if (!normalizedProjectKey) {
-    traceChargePlanSync("set-project-clear", {
-      projectKey: "",
-    });
-    const projectChangeSuppressionToken = beginChargePlanProjectChangeSuppression();
-    const suppressionToken = beginChargePlanSyncSuppression();
-    const settledPromise = waitForChargePlanViewportSettled();
-    try {
-      clearChargePlanWheelZoomFrame();
-      clearChargePlanScrollSyncFrame();
-      clearChargePlanVisibleDateTimer();
-      clearChargePlanSyncAlignmentTimer();
-      setPendingChargePlanFocus("");
-      setChargePlanRangeStartDate("");
-      planningManagementHover = null;
-      closeChargePlanContextMenu();
-      closeChargePlanDatePicker();
-      setState({
-        selectedProjectId: null,
-      });
-      renderApp();
-    } finally {
-      finishChargePlanSyncSuppression(suppressionToken);
-      finishChargePlanProjectChangeSuppression(projectChangeSuppressionToken);
-    }
-    return settledPromise.then(() => true);
-  }
-
   const nextProject = findProjectByPlanningSyncKey(projectKey);
   if (!nextProject) {
     traceChargePlanSync("set-project-miss", {
@@ -4828,7 +4799,7 @@ function exposeChargePlanSyncApi() {
       return selectedProject ? getProjectDateBounds(selectedProject) : null;
     },
     getViewport() {
-      return getChargePlanSyncProjectKey() ? getChargePlanSyncViewport() : null;
+      return getChargePlanSyncViewport();
     },
     applyViewport(viewport = {}) {
       return applyChargePlanSyncViewport(viewport);

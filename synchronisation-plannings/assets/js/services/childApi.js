@@ -76,10 +76,6 @@ export async function waitForChildApi(frameEl, apiName, timeoutMs = FRAME_LOAD_T
 }
 
 export function getLateAttachReferenceViewport() {
-  if (!getDesiredProjectKey()) {
-    return null;
-  }
-
   const referencePlanningApi = getReferencePlanningApi() || state.planningApi;
   const planningViewport =
     referencePlanningApi?.getViewport?.() || state.planningApi?.getViewport?.() || null;
@@ -128,7 +124,9 @@ export async function attachOverviewFrameApi({ force = false } = {}) {
       scheduleOverviewFramePresentation();
 
       const targetProjectKey = getDesiredProjectKey();
-      await Promise.resolve(api.setSelectedProject(targetProjectKey || ""));
+      if (targetProjectKey) {
+        await Promise.resolve(api.setSelectedProject(targetProjectKey));
+      }
 
       scheduleOverviewFramePresentation();
 
@@ -208,7 +206,9 @@ export async function attachExpensesFrameApi({ force = false } = {}) {
       scheduleExpensesFramePresentation();
 
       const targetProjectKey = getDesiredProjectKey();
-      await Promise.resolve(api.setSelectedProject(targetProjectKey || ""));
+      if (targetProjectKey) {
+        await Promise.resolve(api.setSelectedProject(targetProjectKey));
+      }
 
       let referenceViewport = getLateAttachReferenceViewport();
       if (referenceViewport?.firstVisibleDate) {
