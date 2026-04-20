@@ -1,4 +1,3 @@
-import { PROJECT_SELECTION_STABILIZE_DELAY_MS } from "../app/constants.js";
 import { getReferencePlanningApi, state } from "../app/state.js";
 import {
   scheduleExpensesFramePresentation,
@@ -13,74 +12,47 @@ import {
   setHubStatus,
   setLastRange,
   setLastSource,
+  setSelectionWarning,
+  syncSharedPlanningControlsAvailability,
   syncExpensesPlanningShell,
 } from "../layout/shell.js";
 import { alignExpensesViewportToPlanning } from "../viewport/alignment.js";
 import {
   buildCanonicalSharedViewport,
+  buildPlanningLedProjectSelectionViewport,
   buildProjectSelectionViewport,
-  buildSharedProjectDateBounds,
   normalizeProjectDateBounds,
 } from "../viewport/build.js";
 import { syncPlanningViewportBounds } from "../viewport/bounds.js";
 import {
   getViewportLogicalSignature,
-  normalizeIsoDate,
-  shiftIsoDateValue,
 } from "../viewport/normalize.js";
 import { flushViewportSyncQueue } from "./viewportSync.js";
 
-function sleep(ms) {
+function waitForAnimationFrame() {
   return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
+    requestAnimationFrame(() => resolve());
   });
 }
 
-function getViewportDateBounds(viewport = {}) {
-  const startDate = normalizeIsoDate(
-    viewport?.firstVisibleDate || viewport?.rangeStartDate || viewport?.anchorDate
-  );
-  const explicitEndDate = normalizeIsoDate(viewport?.rangeEndDate);
-  const visibleDays = Number(viewport?.visibleDays);
-  const derivedEndDate =
-    startDate && Number.isFinite(visibleDays) && visibleDays > 0
-      ? shiftIsoDateValue(startDate, Math.max(0, Math.round(visibleDays) - 1))
-      : "";
-  const endDate = explicitEndDate || derivedEndDate || startDate;
-
-  if (!startDate || !endDate) {
-    return null;
+function buildPlanningSelectionAnchorViewport(viewport = {}) {
+  if (!viewport || typeof viewport !== "object") {
+    return {};
   }
 
   return {
-    startDate,
-    endDate,
+    ...viewport,
+    mode: "",
+    visibleDays: Number.NaN,
+    rangeEndDate: "",
+    windowStartMs: null,
+    windowEndMs: null,
+    leftDayOffset: null,
+    rightDayOffset: null,
+    exactVisibleDays: null,
+    contentStartDate: "",
+    contentStartMs: null,
   };
-}
-
-function dateBoundsIntersect(leftBounds = null, rightBounds = null) {
-  if (!leftBounds?.startDate || !leftBounds?.endDate || !rightBounds?.startDate || !rightBounds?.endDate) {
-    return false;
-  }
-
-  return !(leftBounds.endDate < rightBounds.startDate || leftBounds.startDate > rightBounds.endDate);
-}
-
-function isViewportConsistentWithProjectBounds(viewport = {}, projectDateBounds = null) {
-  const normalizedProjectDateBounds = normalizeProjectDateBounds(projectDateBounds);
-  if (!normalizedProjectDateBounds) {
-    return true;
-  }
-
-  const viewportDateBounds = getViewportDateBounds(viewport);
-  if (!viewportDateBounds) {
-    return false;
-  }
-
-  return dateBoundsIntersect(viewportDateBounds, {
-    startDate: shiftIsoDateValue(normalizedProjectDateBounds.startDate, -31),
-    endDate: shiftIsoDateValue(normalizedProjectDateBounds.endDate, 31),
-  });
 }
 
 export function clearSharedProjectSelection() {
@@ -90,13 +62,16 @@ export function clearSharedProjectSelection() {
   state.lastPlanningWarningsPopupSignature = "";
   state.lastAppliedViewportLogicalSignature = "";
   state.sharedViewportState = null;
+  state.sharedToolbarActionInProgress = false;
   closePlanningWarningsPopup();
   setActiveProjectSelection("");
   setProjectContentVisibility(false);
   setLastSource("");
   setLastRange(null);
+  setSelectionWarning(null);
   syncExpensesPlanningShell(null);
   setHubStatus("Choisis un projet pour afficher les plannings.");
+  syncSharedPlanningControlsAvailability();
 }
 
 export async function applySharedProject(projectKey) {
@@ -112,8 +87,15 @@ export async function applySharedProject(projectKey) {
   state.projectSyncInProgress = true;
   state.pendingViewportPayload = null;
   setHubStatus(`Chargement du projet ${normalizedProjectKey}...`);
+  setActiveProjectSelection(normalizedProjectKey);
+  setProjectContentVisibility(true);
+  syncSharedPlanningControlsAvailability();
 
   try {
+    scheduleOverviewFramePresentation();
+    scheduleExpensesFramePresentation();
+    await waitForAnimationFrame();
+
     const projectApplyCalls = [
       Promise.resolve(state.planningApi.setSelectedProject(normalizedProjectKey)),
       Promise.resolve(state.planningAxisApi?.setSelectedProject?.(normalizedProjectKey)),
@@ -122,102 +104,58 @@ export async function applySharedProject(projectKey) {
     if (state.overviewApi?.setSelectedProject) {
       projectApplyCalls.push(Promise.resolve(state.overviewApi.setSelectedProject(normalizedProjectKey)));
     }
-
     if (state.expensesApi?.setSelectedProject) {
       projectApplyCalls.push(Promise.resolve(state.expensesApi.setSelectedProject(normalizedProjectKey)));
     }
-
     await Promise.all(projectApplyCalls);
     state.activeProjectKey = normalizedProjectKey;
     setActiveProjectSelection(normalizedProjectKey);
-    setProjectContentVisibility(true);
     scheduleOverviewFramePresentation();
     scheduleExpensesFramePresentation();
+
     const referencePlanningApi = getReferencePlanningApi() || state.planningApi;
+    let focusedPlanningViewport = null;
+    if (referencePlanningApi?.focusDataAnchor) {
+      focusedPlanningViewport = await Promise.resolve(referencePlanningApi.focusDataAnchor());
+    } else if (state.planningApi?.focusDataAnchor) {
+      focusedPlanningViewport = await Promise.resolve(state.planningApi.focusDataAnchor());
+    }
     const planningProjectDateBounds =
       referencePlanningApi.getProjectDateBounds?.() || state.planningApi.getProjectDateBounds?.() || null;
     const expensesProjectDateBounds = state.expensesApi?.getProjectDateBounds?.() || null;
-    const selectedProjectDateBounds = buildSharedProjectDateBounds({
-      planningDateBounds: planningProjectDateBounds,
-      expensesDateBounds: expensesProjectDateBounds,
-    });
-    const selectionFallbackViewport =
-      state.expensesApi?.getViewport?.() ||
+    const referenceProjectDateBounds =
+      normalizeProjectDateBounds(planningProjectDateBounds) ||
+      normalizeProjectDateBounds(expensesProjectDateBounds);
+    const planningViewportAfterProjectSelection =
+      focusedPlanningViewport ||
       referencePlanningApi.getViewport?.() ||
       state.planningApi.getViewport?.() ||
+      null;
+    const planningSelectionAnchorViewport = buildPlanningSelectionAnchorViewport(
+      planningViewportAfterProjectSelection || {}
+    );
+    const selectionFallbackViewport =
+      state.sharedViewportState ||
+      state.expensesApi?.getViewport?.() ||
+      planningViewportAfterProjectSelection ||
       {};
-    let sharedViewport = buildProjectSelectionViewport(
-      selectedProjectDateBounds,
+    let sharedViewport = buildPlanningLedProjectSelectionViewport(
+      planningSelectionAnchorViewport,
       selectionFallbackViewport
     );
-    if (sharedViewport?.firstVisibleDate) {
-      const initialViewportLogicalSignature = getViewportLogicalSignature(
-        normalizedProjectKey,
-        sharedViewport
+    if (!sharedViewport?.firstVisibleDate) {
+      sharedViewport = buildProjectSelectionViewport(
+        referenceProjectDateBounds,
+        selectionFallbackViewport
       );
+    }
+
+    if (sharedViewport?.firstVisibleDate) {
       syncPlanningViewportBounds(sharedViewport);
       await Promise.all([
         Promise.resolve(state.planningApi.applyViewport(sharedViewport)),
         Promise.resolve(state.planningAxisApi?.applyViewport?.(sharedViewport)),
       ]);
-
-      await sleep(PROJECT_SELECTION_STABILIZE_DELAY_MS);
-      const planningViewportAfterSelection = referencePlanningApi.getViewport?.() || null;
-      const stabilizedPlanningViewport = buildCanonicalSharedViewport({
-        ...sharedViewport,
-        ...(planningViewportAfterSelection || {}),
-        firstVisibleDate:
-          planningViewportAfterSelection?.firstVisibleDate ||
-          planningViewportAfterSelection?.rangeStartDate ||
-          sharedViewport.firstVisibleDate,
-        rangeStartDate:
-          planningViewportAfterSelection?.firstVisibleDate ||
-          planningViewportAfterSelection?.rangeStartDate ||
-          sharedViewport.rangeStartDate,
-        visibleDays:
-          Number(planningViewportAfterSelection?.visibleDays) || sharedViewport.visibleDays,
-        mode: String(planningViewportAfterSelection?.mode || sharedViewport.mode || "").trim(),
-        anchorDate:
-          planningViewportAfterSelection?.anchorDate ||
-          planningViewportAfterSelection?.firstVisibleDate ||
-          sharedViewport.anchorDate,
-      });
-      const stabilizedViewportLogicalSignature = getViewportLogicalSignature(
-        normalizedProjectKey,
-        stabilizedPlanningViewport
-      );
-      const shouldTrustStabilizedViewport = isViewportConsistentWithProjectBounds(
-        stabilizedPlanningViewport,
-        selectedProjectDateBounds
-      );
-
-      if (shouldTrustStabilizedViewport) {
-        sharedViewport = stabilizedPlanningViewport;
-      } else {
-        console.warn(
-          "[sync] viewport planning stabilise ignore car hors plage projet",
-          {
-            projectKey: normalizedProjectKey,
-            selectedProjectDateBounds,
-            stabilizedPlanningViewport,
-          }
-        );
-        appendLog(
-          `Viewport planning ignore pour ${normalizedProjectKey} : plage hors projet`
-        );
-      }
-
-      if (
-        shouldTrustStabilizedViewport &&
-        stabilizedViewportLogicalSignature &&
-        stabilizedViewportLogicalSignature !== initialViewportLogicalSignature
-      ) {
-        syncPlanningViewportBounds(sharedViewport);
-        await Promise.all([
-          Promise.resolve(state.planningApi.applyViewport(sharedViewport)),
-          Promise.resolve(state.planningAxisApi?.applyViewport?.(sharedViewport)),
-        ]);
-      }
 
       if (state.expensesApi) {
         const stabilizedViewport = await alignExpensesViewportToPlanning(sharedViewport, {
@@ -246,6 +184,7 @@ export async function applySharedProject(projectKey) {
     appendLog(`Projet partage applique : ${normalizedProjectKey}`);
   } finally {
     state.projectSyncInProgress = false;
+    syncSharedPlanningControlsAvailability();
     void flushViewportSyncQueue();
   }
 }

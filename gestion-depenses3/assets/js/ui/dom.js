@@ -1,0 +1,117 @@
+export function getDomRefs() {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return {
+    projectSelect: document.getElementById("project-select"),
+    addProjectBtn: document.getElementById("add-project-btn"),
+    addProjectForm: document.getElementById("add-project-form"),
+    projectNameInput: document.getElementById("project-name"),
+    projectNumberInput: document.getElementById("project-number"),
+    budgetLinesContainer: document.getElementById("budget-lines-container"),
+    budgetChapterInput: document.getElementById("budget-chapter"),
+    budgetAmountInput: document.getElementById("budget-amount"),
+    addBudgetLineBtn: document.getElementById("add-budget-line-btn"),
+    saveProjectBtn: document.getElementById("save-project-btn"),
+    editBudgetBtn: document.getElementById("edit-budget-btn"),
+    editBudgetModal: document.getElementById("edit-budget-modal"),
+    editSegmentModal: document.getElementById("edit-segment-modal"),
+    editBudgetLinesContainer: document.getElementById("edit-budget-lines-container"),
+    editBudgetChapterInput: document.getElementById("edit-budget-chapter"),
+    editBudgetAmountInput: document.getElementById("edit-budget-amount"),
+    addEditBudgetLineBtn: document.getElementById("add-edit-budget-line-btn"),
+    saveEditedBudgetBtn: document.getElementById("save-edited-budget-btn"),
+    cancelEditBudgetBtn: document.getElementById("cancel-edit-budget-btn"),
+    editSegmentStartDateInput: document.getElementById("edit-segment-start-date"),
+    editSegmentStartPartInput: document.getElementById("edit-segment-start-part"),
+    editSegmentEndDateInput: document.getElementById("edit-segment-end-date"),
+    editSegmentEndPartInput: document.getElementById("edit-segment-end-part"),
+    editSegmentFeedback: document.getElementById("edit-segment-feedback"),
+    saveEditSegmentBtn: document.getElementById("save-edit-segment-btn"),
+    cancelEditSegmentBtn: document.getElementById("cancel-edit-segment-btn"),
+    currentProjectName: document.getElementById("current-project-name"),
+    currentProjectNumber: document.getElementById("current-project-number"),
+    totalProjectBudget: document.getElementById("total-project-budget"),
+    currentProjectBudgetBreakdown: document.getElementById(
+      "current-project-budget-breakdown"
+    ),
+    kpiTotalBudget: document.getElementById("kpi-total-budget"),
+    kpiTotalSpending: document.getElementById("kpi-total-spending"),
+    kpiRemainingBudget: document.getElementById("kpi-remaining-budget"),
+    kpiRemainingPercentage: document.getElementById("kpi-remaining-percentage"),
+    planManagementBoard: document.getElementById("plan-management-board"),
+    chargePlanBoard: document.getElementById("charge-plan-board"),
+    expenseBoard: document.getElementById("expense-board"),
+    realChargeBoard: document.getElementById("real-charge-board"),
+    realExpenseBoard: document.getElementById("real-expense-board"),
+    addWorkerBtn: document.getElementById("add-worker-btn"),
+    addWorkerForm: document.getElementById("add-worker-form"),
+    teamManagementRates: document.getElementById("team-management-rates"),
+    workerNameSelect: document.getElementById("worker-name-select"),
+    saveWorkerBtn: document.getElementById("save-worker-btn"),
+    spendingBillingEditor: document.getElementById("spending-billing-editor"),
+    spendingChartShell: document.getElementById("spending-chart-shell"),
+    spendingChartControls: document.getElementById("spending-chart-controls"),
+    spendingChartCanvas: document.getElementById("spending-chart"),
+  };
+}
+
+export function assertDomRefs(domRefs) {
+  const requiredKeys = [
+    "projectSelect",
+    "addProjectBtn",
+    "addProjectForm",
+    "projectNameInput",
+    "projectNumberInput",
+    "budgetLinesContainer",
+    "budgetChapterInput",
+    "budgetAmountInput",
+    "addBudgetLineBtn",
+    "saveProjectBtn",
+    "editBudgetBtn",
+    "editBudgetModal",
+    "editSegmentModal",
+    "editBudgetLinesContainer",
+    "editBudgetChapterInput",
+    "editBudgetAmountInput",
+    "addEditBudgetLineBtn",
+    "saveEditedBudgetBtn",
+    "cancelEditBudgetBtn",
+    "editSegmentStartDateInput",
+    "editSegmentStartPartInput",
+    "editSegmentEndDateInput",
+    "editSegmentEndPartInput",
+    "editSegmentFeedback",
+    "saveEditSegmentBtn",
+    "cancelEditSegmentBtn",
+    "currentProjectName",
+    "currentProjectNumber",
+    "totalProjectBudget",
+    "currentProjectBudgetBreakdown",
+    "kpiTotalBudget",
+    "kpiTotalSpending",
+    "kpiRemainingBudget",
+    "kpiRemainingPercentage",
+    "planManagementBoard",
+    "chargePlanBoard",
+    "expenseBoard",
+    "realChargeBoard",
+    "realExpenseBoard",
+    "addWorkerBtn",
+    "addWorkerForm",
+    "teamManagementRates",
+    "workerNameSelect",
+    "saveWorkerBtn",
+    "spendingBillingEditor",
+    "spendingChartControls",
+    "spendingChartCanvas",
+  ];
+
+  const missing = requiredKeys.filter((key) => !domRefs?.[key]);
+  if (missing.length) {
+    throw new Error(`Elements DOM introuvables : ${missing.join(", ")}`);
+  }
+
+  return domRefs;
+}

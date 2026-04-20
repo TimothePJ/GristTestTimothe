@@ -9,9 +9,11 @@ import {
   getViewportSourceApi,
   getViewportSourceLabel,
   getViewportTargetApis,
+  isSharedPlanningControlsLocked,
   setHubStatus,
   setLastRange,
   setLastSource,
+  syncSharedPlanningControlsAvailability,
   syncExpensesPlanningShell,
 } from "../layout/shell.js";
 import {
@@ -84,8 +86,55 @@ function traceViewportSync(event, details = {}) {
   console.info(`[sync-trace][hub][${viewportSyncTraceSequence}] ${event}`, details);
 }
 
-export async function applyViewportFromParentControls(viewport = {}) {
+function hasUsableViewport(viewport = {}) {
+  const canonicalViewport = buildCanonicalSharedViewport(viewport);
+  return Boolean(
+    normalizeIsoDate(canonicalViewport.firstVisibleDate) ||
+      normalizeIsoDate(canonicalViewport.rangeStartDate)
+  );
+}
+
+async function runSharedToolbarViewportAction({
+  actionLabel = "Pilotage commun",
+  execute = null,
+  fallbackViewportFactory = null,
+} = {}) {
+  if (isSharedPlanningControlsLocked()) {
+    syncSharedPlanningControlsAvailability();
+    return false;
+  }
+
+  state.sharedToolbarActionInProgress = true;
+  syncSharedPlanningControlsAvailability();
+
+  try {
+    const rawViewport = typeof execute === "function" ? await Promise.resolve(execute()) : null;
+    const fallbackViewport =
+      typeof fallbackViewportFactory === "function" ? fallbackViewportFactory() : fallbackViewportFactory;
+    const nextViewport = hasUsableViewport(rawViewport) ? rawViewport : fallbackViewport;
+    if (!hasUsableViewport(nextViewport)) {
+      return false;
+    }
+
+    await applyViewportFromParentControls(nextViewport, { sourceLabel: actionLabel });
+    return true;
+  } catch (error) {
+    console.error("Erreur action toolbar partage :", error);
+    setHubStatus(`Erreur pilotage : ${error.message}`);
+    appendLog(`Erreur toolbar partage : ${error.message}`);
+    return false;
+  } finally {
+    state.sharedToolbarActionInProgress = false;
+    syncSharedPlanningControlsAvailability();
+  }
+}
+
+export async function applyViewportFromParentControls(
+  viewport = {},
+  { sourceLabel = "Pilotage commun" } = {}
+) {
   if (!state.planningApi || state.projectSyncInProgress || state.viewportSyncInProgress) {
+    syncSharedPlanningControlsAvailability();
     return;
   }
 
@@ -93,6 +142,7 @@ export async function applyViewportFromParentControls(viewport = {}) {
   syncPlanningViewportBounds(canonicalViewport);
   const viewportLogicalSignature = getViewportLogicalSignature(state.activeProjectKey, canonicalViewport);
   state.viewportSyncInProgress = true;
+  syncSharedPlanningControlsAvailability();
 
   traceViewportSync("parent-controls-apply", {
     activeProjectKey: state.activeProjectKey,
@@ -115,11 +165,11 @@ export async function applyViewportFromParentControls(viewport = {}) {
     state.lastAppliedViewportLogicalSignature = viewportLogicalSignature;
     state.sharedViewportState = canonicalViewport;
     syncExpensesPlanningShell(canonicalViewport);
-    setLastSource(getViewportSourceLabel("Pilotage commun"));
+    setLastSource(getViewportSourceLabel(sourceLabel));
     setLastRange(canonicalViewport);
-    setHubStatus("Synchro active depuis Pilotage commun");
+    setHubStatus(`Synchro active depuis ${getViewportSourceLabel(sourceLabel)}`);
     appendLog(
-      `pilotage commun -> ${canonicalViewport.firstVisibleDate || "?"} / ${
+      `${getViewportSourceLabel(sourceLabel)} -> ${canonicalViewport.firstVisibleDate || "?"} / ${
         canonicalViewport.rangeEndDate || "?"
       } / ${canonicalViewport.mode || "?"}`
     );
@@ -129,6 +179,7 @@ export async function applyViewportFromParentControls(viewport = {}) {
     appendLog(`Erreur pilotage : ${error.message}`);
   } finally {
     state.viewportSyncInProgress = false;
+    syncSharedPlanningControlsAvailability();
     if (state.pendingViewportPayload) {
       void flushViewportSyncQueue();
     }
@@ -186,65 +237,54 @@ export function bindExpensesPlanningShellControls() {
         return;
       }
 
-      if (state.planningAxisApi?.setZoomMode) {
-        state.planningAxisApi.setZoomMode(nextMode);
-        return;
-      }
+      void runSharedToolbarViewportAction({
+        actionLabel: "Pilotage commun",
+        execute: () => state.planningAxisApi?.setZoomMode?.(nextMode),
+        fallbackViewportFactory: () => {
+          const currentViewport = getCurrentSharedViewport();
+          if (!currentViewport) {
+            return null;
+          }
 
-      const currentViewport = getCurrentSharedViewport();
-      if (!currentViewport) {
-        return;
-      }
-
-      void applyViewportFromParentControls({
-        ...currentViewport,
-        mode: nextMode,
-        visibleDays: getTargetVisibleDaysForMode(nextMode, currentViewport),
-        rangeEndDate: "",
+          return {
+            ...currentViewport,
+            mode: nextMode,
+            visibleDays: getTargetVisibleDaysForMode(nextMode, currentViewport),
+            rangeEndDate: "",
+          };
+        },
       });
     });
   });
 
   dom.sharedPrevBtnEl?.addEventListener("click", () => {
-    if (state.planningAxisApi?.moveViewportByMode) {
-      state.planningAxisApi.moveViewportByMode(-1);
-      return;
-    }
-
-    const currentViewport = getCurrentSharedViewport();
-    if (!currentViewport) {
-      return;
-    }
-
-    void applyViewportFromParentControls(shiftViewportByMode(currentViewport, -1));
+    void runSharedToolbarViewportAction({
+      actionLabel: "Pilotage commun",
+      execute: () => state.planningAxisApi?.moveViewportByMode?.(-1),
+      fallbackViewportFactory: () => {
+        const currentViewport = getCurrentSharedViewport();
+        return currentViewport ? shiftViewportByMode(currentViewport, -1) : null;
+      },
+    });
   });
 
   dom.sharedCenterBtnEl?.addEventListener("click", () => {
-    if (state.planningAxisApi?.focusDataAnchor) {
-      state.planningAxisApi.focusDataAnchor();
-      return;
-    }
-
-    const currentViewport = getCurrentSharedViewport();
-    if (!currentViewport) {
-      return;
-    }
-
-    void applyViewportFromParentControls(currentViewport);
+    void runSharedToolbarViewportAction({
+      actionLabel: "Pilotage commun",
+      execute: () => state.planningAxisApi?.focusDataAnchor?.(),
+      fallbackViewportFactory: () => getCurrentSharedViewport(),
+    });
   });
 
   dom.sharedNextBtnEl?.addEventListener("click", () => {
-    if (state.planningAxisApi?.moveViewportByMode) {
-      state.planningAxisApi.moveViewportByMode(1);
-      return;
-    }
-
-    const currentViewport = getCurrentSharedViewport();
-    if (!currentViewport) {
-      return;
-    }
-
-    void applyViewportFromParentControls(shiftViewportByMode(currentViewport, 1));
+    void runSharedToolbarViewportAction({
+      actionLabel: "Pilotage commun",
+      execute: () => state.planningAxisApi?.moveViewportByMode?.(1),
+      fallbackViewportFactory: () => {
+        const currentViewport = getCurrentSharedViewport();
+        return currentViewport ? shiftViewportByMode(currentViewport, 1) : null;
+      },
+    });
   });
 
   window.addEventListener("resize", () => {
@@ -263,7 +303,12 @@ export function bindExpensesPlanningShellControls() {
 }
 
 export async function flushViewportSyncQueue() {
-  if (state.projectSyncInProgress || state.viewportSyncInProgress || !state.pendingViewportPayload) {
+  if (
+    state.projectSyncInProgress ||
+    state.viewportSyncInProgress ||
+    state.sharedToolbarActionInProgress ||
+    !state.pendingViewportPayload
+  ) {
     return;
   }
 
@@ -322,6 +367,7 @@ export async function flushViewportSyncQueue() {
   }
 
   state.viewportSyncInProgress = true;
+  syncSharedPlanningControlsAvailability();
 
   try {
     const sourceLogicalSignature = getViewportLogicalSignature(payloadProjectKey, payload.viewport);
@@ -370,6 +416,7 @@ export async function flushViewportSyncQueue() {
     appendLog(`Erreur synchro viewport : ${error.message}`);
   } finally {
     state.viewportSyncInProgress = false;
+    syncSharedPlanningControlsAvailability();
     if (state.pendingViewportPayload) {
       void flushViewportSyncQueue();
     }
@@ -378,6 +425,16 @@ export async function flushViewportSyncQueue() {
 
 export function handleViewportChange(payload) {
   if (!payload || state.projectSyncInProgress) {
+    return;
+  }
+
+  if (state.sharedToolbarActionInProgress) {
+    traceViewportSync("received-ignored-toolbar-action", {
+      source: payload.app,
+      projectKey: String(payload.projectKey || "").trim(),
+      meta: payload.meta || null,
+      viewport: summarizeViewportTrace(payload.viewport),
+    });
     return;
   }
 

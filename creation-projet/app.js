@@ -57,13 +57,20 @@ document.addEventListener('DOMContentLoaded', () => {
         'ListePlan_NDC+COF'
     ];
     const PLANNING_TABLE_CANDIDATES = ['Planning_Projet', 'Planning_Project'];
+    const DEFAULT_DOCUMENT_TYPES = [
+        'COFFRAGE',
+        'ARMATURES',
+        'COUPES',
+        'DÉMOLITION',
+        'NDC'
+    ];
 
     function normalizeText(value) {
         return String(value ?? '').trim();
     }
 
     function normalizeDocumentType(value) {
-        return normalizeText(value).toUpperCase();
+        return normalizeText(value).toLocaleUpperCase('fr');
     }
 
     function normalizeDocumentNumberPadding(value) {
@@ -83,6 +90,70 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function formatZoneLabel(value) {
         return normalizeZoneValue(value) || 'Sans zone';
+    }
+
+    function isDefaultDocumentType(value) {
+        return DEFAULT_DOCUMENT_TYPES.includes(normalizeDocumentType(value));
+    }
+
+    function parseProjectTypeDocValue(value) {
+        const seen = new Set();
+        return String(value ?? '')
+            .split(/[;,\r\n]+/)
+            .map((entry) => normalizeDocumentType(entry))
+            .filter((entry) => {
+                if (!entry || isDefaultDocumentType(entry) || seen.has(entry)) return false;
+                seen.add(entry);
+                return true;
+            });
+    }
+
+    function collectCustomDocumentTypes(entries = customDocuments) {
+        const seen = new Set();
+        return (entries || [])
+            .map((entry) => normalizeDocumentType(typeof entry === 'string' ? entry : entry?.type))
+            .filter((type) => {
+                if (!type || isDefaultDocumentType(type) || seen.has(type)) return false;
+                seen.add(type);
+                return true;
+            });
+    }
+
+    function serializeProjectTypeDocValue(entries = customDocuments) {
+        return collectCustomDocumentTypes(entries).join('; ');
+    }
+
+    function collectAvailableDocumentTypes(extraTypes = []) {
+        const seen = new Set();
+        const orderedTypes = [];
+
+        [...DEFAULT_DOCUMENT_TYPES, ...extraTypes].forEach((type) => {
+            const normalized = normalizeDocumentType(type);
+            if (!normalized || seen.has(normalized)) return;
+            seen.add(normalized);
+            orderedTypes.push(normalized);
+        });
+
+        return orderedTypes;
+    }
+
+    function refreshDocumentTypeSuggestionLists() {
+        const types = collectAvailableDocumentTypes(customDocuments.map((doc) => doc?.type));
+        ['manual-doc-type-list', 'pattern-doc-type-list'].forEach((listId) => {
+            const datalist = document.getElementById(listId);
+            if (!(datalist instanceof HTMLDataListElement)) return;
+            datalist.innerHTML = '';
+            types.forEach((type) => {
+                const option = document.createElement('option');
+                option.value = type;
+                datalist.appendChild(option);
+            });
+        });
+    }
+
+    function normalizeDocumentTypeInput(inputElement) {
+        if (!(inputElement instanceof HTMLInputElement)) return;
+        inputElement.value = normalizeDocumentType(inputElement.value);
     }
 
     function buildDocumentIdentityKey(doc = {}) {
@@ -854,7 +925,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const numeroStart = parseInt(document.getElementById('numero-start').value, 10) || 0;
         const numeroStep = parseInt(document.getElementById('numero-step').value, 10) || 1;
         const numeroPadding = normalizeDocumentNumberPadding(document.getElementById('numero-padding').value);
-        const type = document.getElementById('pattern-doc-type').value || '';
+        const type = normalizeDocumentType(document.getElementById('pattern-doc-type').value || '');
         const zone = normalizeZoneValue(document.getElementById('pattern-doc-zone').value || '');
 
         const previewBody = document.getElementById('pattern-preview-body');
@@ -1027,6 +1098,7 @@ document.addEventListener('DOMContentLoaded', () => {
         container.innerHTML = '';
         container.style.display = 'block';
         refreshDocumentZoneSuggestionLists();
+        refreshDocumentTypeSuggestionLists();
 
         if (customDocuments.length === 0) {
             container.innerHTML = '<p style="color: #666; font-style: italic;">Aucun document ajoute. Cliquez sur "+ Ajouter" pour commencer.</p>';
@@ -1180,7 +1252,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const type = normalizeDocumentType(typeof doc === 'string' ? '' : (doc.type || 'COFFRAGE'));
             const zone = normalizeZoneValue(typeof doc === 'string' ? '' : (doc.zone || ''));
             const nextDoc = { name, numero, type, zone };
-            if (!name) return;
+            if (!name || !type) return;
             if (customDocuments.some((existingDoc) => buildDocumentIdentityKey(existingDoc) === buildDocumentIdentityKey(nextDoc))) {
                 return;
             }
@@ -1222,7 +1294,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const numeroStart = parseInt(document.getElementById('numero-start').value, 10) || 0;
         const numeroStep = parseInt(document.getElementById('numero-step').value, 10) || 1;
         const numeroPadding = normalizeDocumentNumberPadding(document.getElementById('numero-padding').value);
-        const type = document.getElementById('pattern-doc-type').value || '';
+        const type = normalizeDocumentType(document.getElementById('pattern-doc-type').value || '');
         const zone = normalizeZoneValue(document.getElementById('pattern-doc-zone')?.value || '');
         const previewBody = document.getElementById('pattern-preview-body');
 
@@ -1285,12 +1357,25 @@ document.addEventListener('DOMContentLoaded', () => {
         const numeroStepInput = document.getElementById('numero-step');
         const numeroPaddingSelect = document.getElementById('numero-padding');
 
+        [manualTypeInput, patternTypeInput].forEach((inputElement) => {
+            if (!inputElement) return;
+            ['change', 'blur'].forEach((eventName) => {
+                inputElement.addEventListener(eventName, () => {
+                    normalizeDocumentTypeInput(inputElement);
+                    if (inputElement === patternTypeInput) {
+                        updatePatternPreview();
+                    }
+                });
+            });
+        });
+
         function closeModal() {
             modal.style.display = 'none';
         }
 
         openBtn.addEventListener('click', () => {
             refreshDocumentZoneSuggestionLists();
+            refreshDocumentTypeSuggestionLists();
             modal.style.display = 'flex';
         });
 
@@ -1320,10 +1405,16 @@ document.addEventListener('DOMContentLoaded', () => {
         addManualBtn.addEventListener('click', () => {
             const docNames = manualInput.value.split(',').map((value) => value.trim()).filter(Boolean);
             const docNumeros = manualNumeroInput.value.split(',').map((value) => value.trim());
-            const type = normalizeDocumentType(manualTypeInput.value || 'COFFRAGE');
+            const type = normalizeDocumentType(manualTypeInput.value);
             const zone = normalizeZoneValue(manualZoneInput.value);
 
             if (!docNames.length) {
+                return;
+            }
+
+            if (!type) {
+                alert('Veuillez renseigner un type de document.');
+                manualTypeInput.focus();
                 return;
             }
 
@@ -1337,7 +1428,7 @@ document.addEventListener('DOMContentLoaded', () => {
             addDocuments(docs);
             manualInput.value = '';
             manualNumeroInput.value = '';
-            manualTypeInput.value = 'COFFRAGE';
+            manualTypeInput.value = DEFAULT_DOCUMENT_TYPES[0];
             manualZoneInput.value = '';
             manualInput.focus();
         });
@@ -1382,8 +1473,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const numeroStart = parseInt(numeroStartInput.value, 10) || 0;
             const numeroStep = parseInt(numeroStepInput.value, 10) || 1;
             const numeroPadding = normalizeDocumentNumberPadding(numeroPaddingSelect.value);
-            const type = normalizeDocumentType(patternTypeInput.value || 'COFFRAGE');
+            const type = normalizeDocumentType(patternTypeInput.value);
             const zone = normalizeZoneValue(patternZoneInput.value);
+
+            if (!type) {
+                alert('Veuillez renseigner un type de document.');
+                patternTypeInput.focus();
+                return;
+            }
 
             if (start > end) {
                 alert('Erreur: "De" doit Ãªtre infÃ©rieur ou Ã©gal Ã  "Ã€".');
@@ -1411,7 +1508,7 @@ document.addEventListener('DOMContentLoaded', () => {
             numeroStartInput.value = '1';
             numeroStepInput.value = '1';
             numeroPaddingSelect.value = '3';
-            patternTypeInput.value = 'COFFRAGE';
+            patternTypeInput.value = DEFAULT_DOCUMENT_TYPES[0];
             patternZoneInput.value = '';
             updatePatternPreview();
         });
@@ -1423,6 +1520,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderDocumentsSelection();
         setupDocsModal();
         refreshDocumentZoneSuggestionLists();
+        refreshDocumentTypeSuggestionLists();
     }
 
     async function populateEmittersSelection() {
@@ -1463,9 +1561,17 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             projectData.name = cleanProjectName(projectData.name);
             projectData.number = (projectData.number ?? "").toString().trim();
+            const projetsTable = await grist.docApi.fetchTable("Projets");
+            const projectFields = {
+                Nom_de_projet: projectData.name,
+                Numero_de_projet: projectData.number
+            };
+            if (Object.prototype.hasOwnProperty.call(projetsTable, 'TypeDoc')) {
+                projectFields.TypeDoc = serializeProjectTypeDocValue(projectData.documents);
+            }
             // 1. Create Project
             const projectActions = [
-                ["AddRecord", "Projets", null, { Nom_de_projet: projectData.name, Numero_de_projet: projectData.number }]
+                ["AddRecord", "Projets", null, projectFields]
             ];
             await grist.docApi.applyUserActions(projectActions);
 

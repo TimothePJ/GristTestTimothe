@@ -9,9 +9,18 @@ import {
   scheduleExpensesFramePresentation,
   scheduleOverviewFramePresentation,
 } from "../layout/framePresentation.js";
-import { appendLog, setHubStatus, setLastRange, syncExpensesPlanningShell } from "../layout/shell.js";
+import {
+  appendLog,
+  setHubStatus,
+  setLastRange,
+  syncExpensesPlanningShell,
+  syncSharedPlanningControlsAvailability,
+} from "../layout/shell.js";
 import { alignExpensesViewportToPlanning } from "../viewport/alignment.js";
-import { buildCanonicalSharedViewport } from "../viewport/build.js";
+import {
+  buildCanonicalSharedViewport,
+  buildPlanningLedProjectSelectionViewport,
+} from "../viewport/build.js";
 import { syncPlanningViewportBounds } from "../viewport/bounds.js";
 import {
   getDesiredProjectKey,
@@ -68,13 +77,27 @@ export async function waitForChildApi(frameEl, apiName, timeoutMs = FRAME_LOAD_T
 
 export function getLateAttachReferenceViewport() {
   const referencePlanningApi = getReferencePlanningApi() || state.planningApi;
+  const planningViewport =
+    referencePlanningApi?.getViewport?.() || state.planningApi?.getViewport?.() || null;
   const baseViewport =
     state.sharedViewportState ||
-    referencePlanningApi?.getViewport?.() ||
-    state.planningApi?.getViewport?.() ||
+    planningViewport ||
+    state.expensesApi?.getViewport?.() ||
     null;
 
-  return baseViewport ? buildCanonicalSharedViewport(baseViewport) : null;
+  if (!baseViewport) {
+    return null;
+  }
+
+  if (state.sharedViewportState?.firstVisibleDate) {
+    return buildCanonicalSharedViewport(state.sharedViewportState);
+  }
+
+  if (planningViewport) {
+    return buildPlanningLedProjectSelectionViewport(planningViewport, baseViewport);
+  }
+
+  return buildCanonicalSharedViewport(baseViewport);
 }
 
 export async function attachOverviewFrameApi({ force = false } = {}) {
@@ -87,6 +110,7 @@ export async function attachOverviewFrameApi({ force = false } = {}) {
   }
 
   const attachAttempt = ++state.overviewFrameAttachAttempt;
+  syncSharedPlanningControlsAvailability();
   state.overviewFrameAttachPromise = waitForChildApi(
     dom.overviewFrameEl,
     "__gestionDepenses2PlanningSyncApi"
@@ -151,6 +175,7 @@ export async function attachOverviewFrameApi({ force = false } = {}) {
     .finally(() => {
       if (attachAttempt === state.overviewFrameAttachAttempt) {
         state.overviewFrameAttachPromise = null;
+        syncSharedPlanningControlsAvailability();
       }
     });
 
@@ -167,6 +192,9 @@ export async function attachExpensesFrameApi({ force = false } = {}) {
   }
 
   const attachAttempt = ++state.expensesFrameAttachAttempt;
+  state.expensesApi = null;
+  state.expensesViewportSubscriptionApi = null;
+  syncSharedPlanningControlsAvailability();
   state.expensesFrameAttachPromise = waitForChildApi(dom.expensesFrameEl, "__gestionDepenses2PlanningSyncApi")
     .then(async (api) => {
       if (attachAttempt !== state.expensesFrameAttachAttempt) {
@@ -174,6 +202,7 @@ export async function attachExpensesFrameApi({ force = false } = {}) {
       }
 
       state.expensesApi = api;
+      syncSharedPlanningControlsAvailability();
       scheduleExpensesFramePresentation();
 
       const targetProjectKey = getDesiredProjectKey();
@@ -225,6 +254,7 @@ export async function attachExpensesFrameApi({ force = false } = {}) {
     .finally(() => {
       if (attachAttempt === state.expensesFrameAttachAttempt) {
         state.expensesFrameAttachPromise = null;
+        syncSharedPlanningControlsAvailability();
       }
     });
 

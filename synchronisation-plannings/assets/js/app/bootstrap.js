@@ -16,7 +16,7 @@ import {
   appendLog,
   closePlanningWarningsPopup,
   renderProjectOptions,
-  setExpensesPlanningControlsDisabled,
+  syncSharedPlanningControlsAvailability,
   setProjectContentVisibility,
   setHubStatus,
   setSelectionWarning,
@@ -48,6 +48,9 @@ function bindFrameLoadListeners() {
   });
 
   dom.expensesFrameEl?.addEventListener("load", () => {
+    state.expensesApi = null;
+    state.expensesViewportSubscriptionApi = null;
+    syncSharedPlanningControlsAvailability();
     scheduleExpensesFramePresentation();
     schedulePlanningLayoutDebug("expenses-frame-load");
     void attachExpensesFrameApi();
@@ -88,8 +91,8 @@ export async function bootstrapHubApp() {
 
     const planningProjects = (state.planningApi.listProjects?.() || []).filter(Boolean);
     renderProjectOptions(planningProjects);
-    setExpensesPlanningControlsDisabled(planningProjects.length === 0);
     setProjectContentVisibility(false);
+    syncSharedPlanningControlsAvailability();
 
     state.planningApi.subscribeViewportChange((payload) =>
       handleViewportChange({ ...payload, app: "planning-projet-main" })
