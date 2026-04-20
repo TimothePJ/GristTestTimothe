@@ -12,6 +12,7 @@ import {
   setHubStatus,
   setLastRange,
   setLastSource,
+  setSelectionWarning,
   syncSharedPlanningControlsAvailability,
   syncExpensesPlanningShell,
 } from "../layout/shell.js";
@@ -25,6 +26,7 @@ import {
 import { syncPlanningViewportBounds } from "../viewport/bounds.js";
 import {
   getViewportLogicalSignature,
+  normalizeProjectKey,
 } from "../viewport/normalize.js";
 import { flushViewportSyncQueue } from "./viewportSync.js";
 
@@ -55,6 +57,7 @@ function buildPlanningSelectionAnchorViewport(viewport = {}) {
 }
 
 export function clearSharedProjectSelection() {
+  const requestId = ++state.projectSyncRequestId;
   state.activeProjectKey = "";
   state.requestedProjectKey = "";
   state.allowChildProjectSelectionSync = false;
@@ -62,14 +65,43 @@ export function clearSharedProjectSelection() {
   state.lastAppliedViewportLogicalSignature = "";
   state.sharedViewportState = null;
   state.sharedToolbarActionInProgress = false;
+  state.pendingViewportPayload = null;
+  state.projectSyncInProgress = true;
   closePlanningWarningsPopup();
   setActiveProjectSelection("");
   setProjectContentVisibility(false);
   setLastSource("");
   setLastRange(null);
+  setSelectionWarning(null);
   syncExpensesPlanningShell(null);
   setHubStatus("Choisis un projet pour afficher les plannings.");
   syncSharedPlanningControlsAvailability();
+
+  const clearCalls = [
+    Promise.resolve(state.planningApi?.setSelectedProject?.("")),
+    Promise.resolve(state.planningAxisApi?.setSelectedProject?.("")),
+    Promise.resolve(state.overviewApi?.setSelectedProject?.("")),
+    Promise.resolve(state.expensesApi?.setSelectedProject?.("")),
+  ];
+
+  Promise.allSettled(clearCalls)
+    .then(() => {
+      if (requestId !== state.projectSyncRequestId) {
+        return;
+      }
+
+      scheduleOverviewFramePresentation();
+      scheduleExpensesFramePresentation();
+    })
+    .finally(() => {
+      if (requestId !== state.projectSyncRequestId) {
+        return;
+      }
+
+      state.projectSyncInProgress = false;
+      syncSharedPlanningControlsAvailability();
+      void flushViewportSyncQueue();
+    });
 }
 
 export async function applySharedProject(projectKey) {
@@ -78,6 +110,7 @@ export async function applySharedProject(projectKey) {
     return;
   }
 
+  const requestId = ++state.projectSyncRequestId;
   state.requestedProjectKey = normalizedProjectKey;
   state.allowChildProjectSelectionSync = true;
   state.lastPlanningWarningsPopupSignature = "";
@@ -93,6 +126,12 @@ export async function applySharedProject(projectKey) {
     scheduleOverviewFramePresentation();
     scheduleExpensesFramePresentation();
     await waitForAnimationFrame();
+    if (
+      requestId !== state.projectSyncRequestId ||
+      normalizeProjectKey(state.requestedProjectKey) !== normalizeProjectKey(normalizedProjectKey)
+    ) {
+      return;
+    }
 
     const projectApplyCalls = [
       Promise.resolve(state.planningApi.setSelectedProject(normalizedProjectKey)),
@@ -106,6 +145,13 @@ export async function applySharedProject(projectKey) {
       projectApplyCalls.push(Promise.resolve(state.expensesApi.setSelectedProject(normalizedProjectKey)));
     }
     await Promise.all(projectApplyCalls);
+    if (
+      requestId !== state.projectSyncRequestId ||
+      normalizeProjectKey(state.requestedProjectKey) !== normalizeProjectKey(normalizedProjectKey)
+    ) {
+      return;
+    }
+
     state.activeProjectKey = normalizedProjectKey;
     setActiveProjectSelection(normalizedProjectKey);
     scheduleOverviewFramePresentation();
@@ -118,6 +164,13 @@ export async function applySharedProject(projectKey) {
     } else if (state.planningApi?.focusDataAnchor) {
       focusedPlanningViewport = await Promise.resolve(state.planningApi.focusDataAnchor());
     }
+    if (
+      requestId !== state.projectSyncRequestId ||
+      normalizeProjectKey(state.requestedProjectKey) !== normalizeProjectKey(normalizedProjectKey)
+    ) {
+      return;
+    }
+
     const planningProjectDateBounds =
       referencePlanningApi.getProjectDateBounds?.() || state.planningApi.getProjectDateBounds?.() || null;
     const expensesProjectDateBounds = state.expensesApi?.getProjectDateBounds?.() || null;
@@ -154,11 +207,24 @@ export async function applySharedProject(projectKey) {
         Promise.resolve(state.planningApi.applyViewport(sharedViewport)),
         Promise.resolve(state.planningAxisApi?.applyViewport?.(sharedViewport)),
       ]);
+      if (
+        requestId !== state.projectSyncRequestId ||
+        normalizeProjectKey(state.requestedProjectKey) !== normalizeProjectKey(normalizedProjectKey)
+      ) {
+        return;
+      }
 
       if (state.expensesApi) {
         const stabilizedViewport = await alignExpensesViewportToPlanning(sharedViewport, {
           onAfterApply: () => scheduleExpensesFramePresentation(),
         });
+        if (
+          requestId !== state.projectSyncRequestId ||
+          normalizeProjectKey(state.requestedProjectKey) !== normalizeProjectKey(normalizedProjectKey)
+        ) {
+          return;
+        }
+
         if (stabilizedViewport?.firstVisibleDate) {
           sharedViewport = buildCanonicalSharedViewport({
             ...sharedViewport,
@@ -181,8 +247,10 @@ export async function applySharedProject(projectKey) {
     setHubStatus(`Projet synchronise : ${normalizedProjectKey}`);
     appendLog(`Projet partage applique : ${normalizedProjectKey}`);
   } finally {
-    state.projectSyncInProgress = false;
-    syncSharedPlanningControlsAvailability();
-    void flushViewportSyncQueue();
+    if (requestId === state.projectSyncRequestId) {
+      state.projectSyncInProgress = false;
+      syncSharedPlanningControlsAvailability();
+      void flushViewportSyncQueue();
+    }
   }
 }

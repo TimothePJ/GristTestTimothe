@@ -828,7 +828,7 @@ function exposePlanningSyncApi() {
       return Boolean(normalizedProject);
     },
     getViewport() {
-      return getPlanningViewportState();
+      return state.selectedProject ? getPlanningViewportState() : null;
     },
     getProjectDateBounds() {
       return currentPlanningDateBounds ? { ...currentPlanningDateBounds } : null;

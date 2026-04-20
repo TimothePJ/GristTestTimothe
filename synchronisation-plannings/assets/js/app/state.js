@@ -6,6 +6,7 @@ export function createHubState() {
     expensesApi: null,
     activeProjectKey: "",
     requestedProjectKey: "",
+    projectSyncRequestId: 0,
     allowChildProjectSelectionSync: false,
     projectSyncInProgress: false,
     sharedToolbarActionInProgress: false,
