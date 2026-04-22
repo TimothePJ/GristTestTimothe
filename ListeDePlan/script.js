@@ -650,8 +650,8 @@ document.addEventListener("DOMContentLoaded", () => {
       for (let i = 1; i <= totalPages; i++) {
         doc.setPage(i);
         doc.addImage(logo1Url, "JPEG", 10, 10, 40, 15);
-        doc.addImage(logo2Url, "PNG", doc.internal.pageSize.getWidth() - 92, 10, 40, 15);
-        doc.addImage(logo3Url, "PNG", doc.internal.pageSize.getWidth() - 50, 10, 15, 15);
+        doc.addImage(logo2Url, "PNG", doc.internal.pageSize.getWidth() - 72, 10, 40, 15);
+        doc.addImage(logo3Url, "PNG", doc.internal.pageSize.getWidth() - 30, 10, 15, 15);
         doc.setFontSize(10);
         doc.text(`Page ${i} / ${totalPages}`, doc.internal.pageSize.getWidth() - 30, doc.internal.pageSize.getHeight() - 10);
       }
