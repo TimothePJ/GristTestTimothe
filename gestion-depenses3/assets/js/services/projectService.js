@@ -325,7 +325,7 @@ export function buildExpenseData({
       name: toText(row?.[columns.projects.name]),
       billingPercentage: toFiniteNumber(
         row?.[columns.projects.billingPercentage],
-        100
+        0
       ),
       billingPercentageByMonth: parseBillingPercentageByMonth(
         row?.[columns.projects.billingPercentageByMonth],
@@ -549,7 +549,7 @@ export function getProjectBudgetTotal(project) {
   );
 }
 
-export function normalizeBillingPercentageValue(value, fallback = 100) {
+export function normalizeBillingPercentageValue(value, fallback = 0) {
   return Math.max(0, toFiniteNumber(value, fallback));
 }
 
@@ -577,10 +577,10 @@ export function calculateRealSpending(project, monthKey) {
 export function getBillingPercentageForMonth(project, monthKey) {
   const raw = project?.billingPercentageByMonth?.[monthKey];
   if (raw != null && raw !== "") {
-    return normalizeBillingPercentageValue(raw, 100);
+    return normalizeBillingPercentageValue(raw, 0);
   }
 
-  return normalizeBillingPercentageValue(project?.billingPercentage, 100);
+  return normalizeBillingPercentageValue(project?.billingPercentage, 0);
 }
 
 export function getBillingAmountFromPercentage(totalBudget, billingPercentage) {
@@ -589,7 +589,7 @@ export function getBillingAmountFromPercentage(totalBudget, billingPercentage) {
     return 0;
   }
 
-  return normalizedBudget * (normalizeBillingPercentageValue(billingPercentage, 100) / 100);
+  return normalizedBudget * (normalizeBillingPercentageValue(billingPercentage, 0) / 100);
 }
 
 export function getBillingPercentageFromAmount(totalBudget, billingAmount) {
