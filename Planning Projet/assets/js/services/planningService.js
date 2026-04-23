@@ -76,7 +76,9 @@ function startOfDay(date) {
 
 function isAllowedTypeDoc(value) {
   const normalized = String(value ?? "").toUpperCase();
-  return normalized.includes("COFFRAGE") || normalized.includes("ARMATURES");
+  // console.log("Normalized TypeDoc:", normalized);
+  return normalized.includes("COFFRAGE") || normalized.includes("ARMATURES")
+   || normalized.includes("DÉMOLITION") || normalized.includes("ELEVATION - COUPES / DETAILS");
 }
 
 function isCoffrageTypeDoc(value) {
