@@ -14,6 +14,11 @@
   <link rel="stylesheet" href="contextMenu.css">
   <link rel="stylesheet" href="AjouterProjet.css">
 
+  <!-- jsPDF and html2canvas -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
   <!-- Scripts -->
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="https://npmcdn.com/flatpickr/dist/l10n/fr.js"></script>
@@ -26,7 +31,7 @@
 <body>
   <div class="sticky-container">
     <div class="dropdown-container">
-      <label for="projectDropdown">Projet :</label>
+      <label for="projectDropdown">Projet :_</label>
       <select id="projectDropdown">
         <option value="">Choisir un projet</option>
       </select>
@@ -44,6 +49,10 @@
       <select id="zoneDropdown" disabled>
         <option value="__ALL_ZONES__">Toutes les zones</option>
       </select>
+    </div>
+
+    <div class="dropdown-container" style="justify-content: flex-end; padding-bottom: 8px;">
+      <button id="btn-print" style="padding: 8px 16px; background-color: #004990; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Imprimer</button>
     </div>
   </div>
 

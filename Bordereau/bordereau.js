@@ -577,14 +577,15 @@ $("generatePdf").addEventListener("click", async () => {
 
   const dateStr = new Date(getDateValue()).toLocaleDateString("fr-FR");
 
-  const logo1 = await fetch("img/Petit_Logotype_Digital_Couleurs.png").then((res) => res.blob());
-  const logo2 = await fetch("img/Dumez_Ile_de_France_Logotype_Digital_Couleurs.png").then((res) => res.blob());
-  const logo3 = await fetch("img/Neom_Logotype_Digital_Couleurs.png").then((res) => res.blob());
+const logo1 = await fetch("../img/VC_Logotype_Digital_RVB.jpg").then((res) => res.blob());
+  const logo2 = await fetch("../img/bloc délégation bleu.png").then((res) => res.blob());
+  const logo3 = await fetch("../img/Logo DRTO fr - Bleu.png").then((res) => res.blob());
 
   const addHeader = () => {
-    doc.addImage(URL.createObjectURL(logo1), "PNG", 10, 10, 30, 15);
-    doc.addImage(URL.createObjectURL(logo2), "PNG", 50, 10, 30, 15);
-    doc.addImage(URL.createObjectURL(logo3), "PNG", 90, 10, 30, 15);
+    const pageWidth = doc.internal.pageSize.getWidth();
+    doc.addImage(URL.createObjectURL(logo1), "JPEG", 10, 10, 40, 15);
+    doc.addImage(URL.createObjectURL(logo2), "PNG", pageWidth - 72, 10, 40, 15);
+    doc.addImage(URL.createObjectURL(logo3), "PNG", pageWidth - 30, 10, 15, 15);
     doc.setFontSize(18);
     doc.text("BORDEREAU DE TRANSMISSION", 14, 40);
     doc.setFontSize(12);
@@ -593,13 +594,15 @@ $("generatePdf").addEventListener("click", async () => {
     doc.text(`Ref: ${refValue || ""}`, 14, 65);
   };
 
-  const addFooter = (pageNumber, totalPages, isLastPage) => {
+  const addFooter = (pageNumber, totalPages) => {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
     const finalY = doc.lastAutoTable?.finalY || 70;
-    if (isLastPage) {
+    if (pageNumber === totalPages) {
       doc.text("Nous vous en souhaitons bonne réception et restons à votre disposition.", 14, finalY + 10);
       doc.text("DRTO", 170, finalY + 20);
     }
-    doc.text(`Page ${pageNumber}/${totalPages}`, 175, 280);
+    doc.text(`Page ${pageNumber} / ${totalPages}`, pageWidth - 30, pageHeight - 10);
   };
 
   for (let i = 0; i < totalPages; i++) {
@@ -617,7 +620,7 @@ $("generatePdf").addEventListener("click", async () => {
       body,
     });
 
-    addFooter(i + 1, totalPages, i === totalPages - 1);
+    addFooter(i + 1, totalPages);
   }
 
   doc.save(`${selectedProject} - Bordereau n°${refValue}.pdf`);

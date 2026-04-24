@@ -371,14 +371,14 @@ async function supprimerLigne(cell) {
     if (cell.dataset.recordId) {
       const recordId = parseInt(cell.dataset.recordId, 10);
       if (Number.isFinite(recordId)) {
-        actions.push(["UpdateRecord", "ListePlan_NDC_COF", recordId, { DateDiffusion: null }]);
+        actions.push(["RemoveRecord", "ListePlan_NDC_COF", recordId]);
       }
     } else if (cell.dataset.conflicts) {
       try {
         const conflicts = JSON.parse(cell.dataset.conflicts);
         const keepId = parseInt(conflicts?.[0]?.id, 10);
         if (Number.isFinite(keepId)) {
-          actions.push(["UpdateRecord", "ListePlan_NDC_COF", keepId, { DateDiffusion: null }]);
+          actions.push(["RemoveRecord", "ListePlan_NDC_COF", keepId]);
         }
         for (const conflict of (conflicts || []).slice(1)) {
           const id = parseInt(conflict?.id, 10);

@@ -135,7 +135,7 @@ export function renderSpendingBillingEditor(boardEl, project, viewState) {
               const monthKey = month.monthKey;
               const percentageInputId = `billing-percentage-${project.id}-${monthKey}`;
               const amountInputId = `billing-amount-${project.id}-${monthKey}`;
-              const billingPercentage = Number(billingPercentData[index] ?? 100);
+              const billingPercentage = Number(billingPercentData[index] ?? 0);
               const billingAmount = getBillingAmountFromPercentage(totalBudget, billingPercentage);
 
               return `

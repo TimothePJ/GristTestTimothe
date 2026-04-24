@@ -592,3 +592,72 @@ async function loadExternalComponents() {
       typeSel.__lpSaveBound = true;
     }
 
+// --- PDF Generation logic ---
+document.addEventListener("DOMContentLoaded", () => {
+  const btnPrint = document.getElementById("btn-print");
+  if (btnPrint) {
+    btnPrint.addEventListener("click", async () => {
+      const selectedProject = document.getElementById("projectDropdown").value;
+      if (!selectedProject) {
+        alert("Veuillez sélectionner un projet avant d'imprimer.");
+        return;
+      }
+
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF("p", "mm", "a4");
+      
+      const logo1Url = await fetch("../img/VC_Logotype_Digital_RVB.jpg").then((res) => res.blob()).then(blob => URL.createObjectURL(blob));
+      const logo2Url = await fetch("../img/bloc délégation bleu.png").then((res) => res.blob()).then(blob => URL.createObjectURL(blob));
+      const logo3Url = await fetch("../img/Logo DRTO fr - Bleu.png").then((res) => res.blob()).then(blob => URL.createObjectURL(blob));
+
+      let startY = 40;
+      doc.setFontSize(18);
+      doc.text(`Projet : ${selectedProject}`, 16, 30);
+
+      const output = document.getElementById("plans-output");
+      const children = Array.from(output.querySelectorAll("h2, h3, table"));
+
+      if (children.length === 0) {
+        alert("Aucun plan à imprimer.");
+        return;
+      }
+
+      for (const child of children) {
+        if (child.tagName === "H2" || child.tagName === "H3") {
+          if (startY > doc.internal.pageSize.getHeight() - 20) {
+            doc.addPage();
+            startY = 40;
+          }
+          doc.setFontSize(child.tagName === "H2" ? 16 : 14);
+          doc.text(child.textContent, 14, startY);
+          startY += 8;
+        } else if (child.tagName === "TABLE") {
+          doc.autoTable({
+            html: child,
+            startY: startY,
+            margin: { top: 40 },
+            styles: { fontSize: 8 },
+            headStyles: { fillColor: [0, 73, 144] },
+            didDrawPage: function() {
+              // startY is reset automatically by autoTable on new pages
+            }
+          });
+          startY = doc.lastAutoTable.finalY + 10;
+        }
+      }
+
+      const totalPages = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.addImage(logo1Url, "JPEG", 10, 10, 40, 15);
+        doc.addImage(logo2Url, "PNG", doc.internal.pageSize.getWidth() - 72, 10, 40, 15);
+        doc.addImage(logo3Url, "PNG", doc.internal.pageSize.getWidth() - 30, 10, 15, 15);
+        doc.setFontSize(10);
+        doc.text(`Page ${i} / ${totalPages}`, doc.internal.pageSize.getWidth() - 30, doc.internal.pageSize.getHeight() - 10);
+      }
+
+      doc.save(`${selectedProject} - Plans.pdf`);
+    });
+  }
+});
+
