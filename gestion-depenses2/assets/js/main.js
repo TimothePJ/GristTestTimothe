@@ -1122,7 +1122,7 @@ function syncEditChargePlanDerivedValues() {
   });
   const rawEffectifDays = parseOptionalNumberInput(dom.editSegmentEffectifInput?.value);
   const effectiveDays =
-    rawEffectifDays == null ? selection?.totalDays ?? null : Math.max(0, rawEffectifDays);
+    rawEffectifDays == null ? 0 : Math.max(0, rawEffectifDays);
 
   if (selection?.error) {
     if (dom.editSegmentEffectifInput instanceof HTMLInputElement) {

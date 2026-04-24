@@ -185,7 +185,7 @@ export function getSegmentEffectiveDays(segment) {
   const rawEffectifDays = segment?.effectifDays ?? segment?.effectif;
 
   if (rawEffectifDays == null || rawEffectifDays === "") {
-    return allocationDays;
+    return 0;
   }
 
   const parsedEffectifDays = Math.max(0, toFiniteNumber(rawEffectifDays, 0));
