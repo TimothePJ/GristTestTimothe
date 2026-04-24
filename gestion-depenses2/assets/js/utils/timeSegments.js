@@ -192,6 +192,13 @@ export function getSegmentEffectiveDays(segment) {
   return Math.min(allocationDays, parsedEffectifDays);
 }
 
+function buildMonthSlotCounts(slots) {
+  return slots.reduce((accumulator, slot) => {
+    accumulator[slot.monthKey] = (accumulator[slot.monthKey] || 0) + 1;
+    return accumulator;
+  }, {});
+}
+
 export function getSegmentAllocationByMonth(segment) {
   const slots = getBusinessHalfDaySlotsBetween(segment?.startAt, segment?.endAt);
   if (!slots.length) return {};
@@ -199,10 +206,61 @@ export function getSegmentAllocationByMonth(segment) {
   const totalDays = getSegmentEffectiveDays(segment);
   if (totalDays <= 0) return {};
 
-  const daysPerSlot = totalDays / slots.length;
-  return slots.reduce((accumulator, slot) => {
-    accumulator[slot.monthKey] =
-      Math.round(((accumulator[slot.monthKey] || 0) + daysPerSlot) * 100) / 100;
+  const totalHalfDays = Math.max(
+    0,
+    Math.min(slots.length, Math.round(totalDays * 2))
+  );
+  if (totalHalfDays <= 0) {
+    return {};
+  }
+
+  const monthSlotCounts = buildMonthSlotCounts(slots);
+  const monthEntries = Object.entries(monthSlotCounts).map(([monthKey, slotCount], index) => {
+    const exactHalfDays = (slotCount / slots.length) * totalHalfDays;
+    const floorHalfDays = Math.min(slotCount, Math.floor(exactHalfDays));
+
+    return {
+      monthKey,
+      slotCount,
+      index,
+      exactHalfDays,
+      allocatedHalfDays: floorHalfDays,
+      remainder: exactHalfDays - floorHalfDays,
+    };
+  });
+
+  let remainingHalfDays =
+    totalHalfDays -
+    monthEntries.reduce((sum, entry) => sum + entry.allocatedHalfDays, 0);
+
+  monthEntries
+    .slice()
+    .sort((left, right) => {
+      if (right.remainder !== left.remainder) {
+        return right.remainder - left.remainder;
+      }
+
+      if (right.slotCount !== left.slotCount) {
+        return right.slotCount - left.slotCount;
+      }
+
+      return left.index - right.index;
+    })
+    .forEach((entry) => {
+      if (remainingHalfDays <= 0) {
+        return;
+      }
+
+      if (entry.allocatedHalfDays >= entry.slotCount) {
+        return;
+      }
+
+      entry.allocatedHalfDays += 1;
+      remainingHalfDays -= 1;
+    });
+
+  return monthEntries.reduce((accumulator, entry) => {
+    accumulator[entry.monthKey] = entry.allocatedHalfDays / 2;
     return accumulator;
   }, {});
 }

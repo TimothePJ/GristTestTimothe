@@ -1129,7 +1129,6 @@ function syncEditChargePlanDerivedValues() {
       dom.editSegmentEffectifInput.removeAttribute("max");
     }
     setEditChargePlanMetricValue(dom.editSegmentCalculatedDays, null);
-    setEditChargePlanMetricValue(dom.editSegmentEffectiveDays, null);
     return;
   }
 
@@ -1138,7 +1137,6 @@ function syncEditChargePlanDerivedValues() {
   }
 
   setEditChargePlanMetricValue(dom.editSegmentCalculatedDays, selection.totalDays);
-  setEditChargePlanMetricValue(dom.editSegmentEffectiveDays, effectiveDays);
 }
 
 function formatEditSegmentInputValue(value) {
