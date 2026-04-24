@@ -162,6 +162,34 @@
                         </select>
                     </label>
                 </div>
+                <section class="segment-edit-section" aria-labelledby="edit-segment-effectif-title">
+                    <div class="segment-edit-section-copy">
+                        <h3 id="edit-segment-effectif-title">Jours pour completer le nombre de jours effectifs</h3>
+                        <p>
+                            Saisis ici le nombre de jours effectivement travailles dans la plage. Laisse vide pour reprendre tous les jours de la plage.
+                        </p>
+                    </div>
+                    <div class="segment-edit-grid segment-edit-grid--effectif">
+                        <label class="segment-edit-field">
+                            <span>Jours effectifs travailles</span>
+                            <input
+                                type="number"
+                                id="edit-segment-effectif"
+                                min="0"
+                                step="0.5"
+                                placeholder="0"
+                            >
+                        </label>
+                        <div class="segment-edit-metric">
+                            <span class="segment-edit-metric-label">Jours disponibles dans la plage</span>
+                            <strong id="edit-segment-calculated-days">--</strong>
+                        </div>
+                        <div class="segment-edit-metric">
+                            <span class="segment-edit-metric-label">Jours effectifs retenus</span>
+                            <strong id="edit-segment-effective-days">--</strong>
+                        </div>
+                    </div>
+                </section>
                 <p id="edit-segment-feedback" class="segment-edit-feedback" hidden></p>
             </div>
             <div class="segment-edit-footer">

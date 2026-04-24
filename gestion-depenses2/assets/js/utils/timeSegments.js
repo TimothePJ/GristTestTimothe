@@ -180,11 +180,23 @@ export function getSegmentAllocationDays(segment) {
   return slots.length / 2;
 }
 
+export function getSegmentEffectiveDays(segment) {
+  const allocationDays = getSegmentAllocationDays(segment);
+  const rawEffectifDays = segment?.effectifDays ?? segment?.effectif;
+
+  if (rawEffectifDays == null || rawEffectifDays === "") {
+    return allocationDays;
+  }
+
+  const parsedEffectifDays = Math.max(0, toFiniteNumber(rawEffectifDays, 0));
+  return Math.min(allocationDays, parsedEffectifDays);
+}
+
 export function getSegmentAllocationByMonth(segment) {
   const slots = getBusinessHalfDaySlotsBetween(segment?.startAt, segment?.endAt);
   if (!slots.length) return {};
 
-  const totalDays = getSegmentAllocationDays(segment);
+  const totalDays = getSegmentEffectiveDays(segment);
   if (totalDays <= 0) return {};
 
   const daysPerSlot = totalDays / slots.length;

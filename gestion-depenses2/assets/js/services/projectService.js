@@ -460,6 +460,11 @@ export function buildExpenseData({
     if (!startAt || !endAt) return;
 
     const segmentType = toText(row?.[columns.timeSegment.segmentType]);
+    const rawEffectifValue = row?.[columns.timeSegment.effectif];
+    const hasEffectifValue = !(
+      rawEffectifValue == null ||
+      (typeof rawEffectifValue === "string" && rawEffectifValue.trim() === "")
+    );
 
     const segment = {
       id: Number(row?.[columns.timeSegment.id]),
@@ -468,6 +473,9 @@ export function buildExpenseData({
       endAt,
       segmentType,
       allocationDays: toFiniteNumber(row?.[columns.timeSegment.allocationDays], 0),
+      effectifDays: hasEffectifValue
+        ? Math.max(0, toFiniteNumber(rawEffectifValue, 0))
+        : null,
       label: toText(row?.[columns.timeSegment.label]),
     };
 

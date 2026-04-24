@@ -1,5 +1,6 @@
 import {
   clamp,
+  formatNumber,
   getMonthKeyFromDate,
   parseMonthKey,
   parseOptionalNumberInput,
@@ -1073,6 +1074,89 @@ function buildChargePlanSelectionFromEditValues({
   };
 }
 
+function formatEditSegmentDayValue(value) {
+  const formatted = formatNumber(value);
+  return `${formatted.endsWith(",00") ? formatted.slice(0, -3) : formatted} j`;
+}
+
+function normalizeOptionalEffectifDays(value) {
+  if (value == null || value === "") {
+    return null;
+  }
+
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return null;
+  }
+
+  return Math.max(0, numericValue);
+}
+
+function isHalfDayIncrement(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return false;
+  }
+
+  return Math.abs(numericValue * 2 - Math.round(numericValue * 2)) < 1e-9;
+}
+
+function setEditChargePlanMetricValue(element, value = null) {
+  if (!(element instanceof HTMLElement)) {
+    return;
+  }
+
+  element.textContent = value == null ? "--" : formatEditSegmentDayValue(value);
+}
+
+function syncEditChargePlanDerivedValues() {
+  if (!dom) {
+    return;
+  }
+
+  const selection = buildChargePlanSelectionFromEditValues({
+    startDateValue: dom.editSegmentStartDateInput?.value,
+    startPart: dom.editSegmentStartPartInput?.value,
+    endDateValue: dom.editSegmentEndDateInput?.value,
+    endPart: dom.editSegmentEndPartInput?.value,
+  });
+  const rawEffectifDays = parseOptionalNumberInput(dom.editSegmentEffectifInput?.value);
+  const effectiveDays =
+    rawEffectifDays == null ? selection?.totalDays ?? null : Math.max(0, rawEffectifDays);
+
+  if (selection?.error) {
+    if (dom.editSegmentEffectifInput instanceof HTMLInputElement) {
+      dom.editSegmentEffectifInput.removeAttribute("max");
+    }
+    setEditChargePlanMetricValue(dom.editSegmentCalculatedDays, null);
+    setEditChargePlanMetricValue(dom.editSegmentEffectiveDays, null);
+    return;
+  }
+
+  if (dom.editSegmentEffectifInput instanceof HTMLInputElement) {
+    dom.editSegmentEffectifInput.max = String(selection.totalDays);
+  }
+
+  setEditChargePlanMetricValue(dom.editSegmentCalculatedDays, selection.totalDays);
+  setEditChargePlanMetricValue(dom.editSegmentEffectiveDays, effectiveDays);
+}
+
+function formatEditSegmentInputValue(value) {
+  if (value == null || value === "") {
+    return "";
+  }
+
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue < 0) {
+    return "";
+  }
+
+  return numericValue
+    .toFixed(2)
+    .replace(/\.0+$/, "")
+    .replace(/(\.\d*?)0+$/, "$1");
+}
+
 function resetEditChargePlanForm() {
   editingChargePlanSegment = null;
 
@@ -1088,7 +1172,11 @@ function resetEditChargePlanForm() {
   if (dom?.editSegmentEndPartInput instanceof HTMLSelectElement) {
     dom.editSegmentEndPartInput.value = "pm";
   }
+  if (dom?.editSegmentEffectifInput instanceof HTMLInputElement) {
+    dom.editSegmentEffectifInput.value = "";
+  }
 
+  syncEditChargePlanDerivedValues();
   setEditChargePlanFeedback("");
   closeModal(dom?.editSegmentModal);
 }
@@ -1166,6 +1254,10 @@ function openEditChargePlanModal(segmentId, boardEl) {
   dom.editSegmentStartPartInput.value = getSegmentHalfDayPart(startAt, "start");
   dom.editSegmentEndDateInput.value = toDateInputValue(endAt);
   dom.editSegmentEndPartInput.value = getSegmentHalfDayPart(endAt, "end");
+  dom.editSegmentEffectifInput.value = formatEditSegmentInputValue(
+    segmentContext.segment?.effectifDays
+  );
+  syncEditChargePlanDerivedValues();
   setEditChargePlanFeedback("");
   openModal(dom.editSegmentModal);
 }
@@ -1187,9 +1279,40 @@ async function saveEditedChargePlanSegment() {
     return;
   }
 
+  const rawEffectifInput = parseOptionalNumberInput(dom.editSegmentEffectifInput.value);
+  if (rawEffectifInput != null && rawEffectifInput < 0) {
+    setEditChargePlanFeedback(
+      "Le nombre de jours effectifs ne peut pas etre negatif."
+    );
+    return;
+  }
+
+  if (rawEffectifInput != null && !isHalfDayIncrement(rawEffectifInput)) {
+    setEditChargePlanFeedback(
+      "Le nombre de jours effectifs doit etre un entier ou un multiple de 0,5."
+    );
+    return;
+  }
+
+  if (rawEffectifInput != null && rawEffectifInput > selection.totalDays) {
+    setEditChargePlanFeedback(
+      "Le nombre de jours effectifs ne peut pas depasser le nombre de jours de la plage."
+    );
+    return;
+  }
+
+  const normalizedEffectifDays = normalizeOptionalEffectifDays(rawEffectifInput);
+
+  const nextSelection = {
+    ...selection,
+    effectifDays: normalizedEffectifDays,
+    effectifValueForSave:
+      normalizedEffectifDays == null ? "" : normalizedEffectifDays,
+  };
+
   const annotatedSelection = annotateChargePlanSelection(
     editingChargePlanSegment.worker?.id,
-    selection,
+    nextSelection,
     {
       ignoreSegmentId: editingChargePlanSegment.segment?.id,
       segmentField: editingChargePlanSegment.segmentField,
@@ -1205,7 +1328,7 @@ async function saveEditedChargePlanSegment() {
 
   const updateSucceeded = await updateChargePlanSegmentSelection(
     editingChargePlanSegment,
-    selection,
+    nextSelection,
     editingChargePlanSegment.boardEl
   );
   if (!updateSucceeded) {
@@ -1929,6 +2052,11 @@ function cloneChargePlanSegment(segment, overrides = {}) {
         : segment?.allocationDays,
       0
     ),
+    effectifDays: normalizeOptionalEffectifDays(
+      Object.prototype.hasOwnProperty.call(overrides, "effectifDays")
+        ? overrides.effectifDays
+        : segment?.effectifDays
+    ),
   };
 }
 
@@ -1952,6 +2080,7 @@ function buildOptimisticChargePlanSegment({
     endAt,
     segmentType,
     allocationDays: toFiniteNumber(selection?.totalDays, 0),
+    effectifDays: normalizeOptionalEffectifDays(selection?.effectifDays),
     label: String(label || ""),
     isPendingSync: Number(segmentId) <= 0,
   };
@@ -2159,6 +2288,10 @@ async function createChargePlanSegment(
         startDate: selection.startDate,
         endDate: selection.endDate,
         allocationDays: selection.totalDays,
+        effectif:
+          Object.prototype.hasOwnProperty.call(selection, "effectifValueForSave")
+            ? selection.effectifValueForSave
+            : undefined,
         segmentType,
         label: "",
       })
@@ -2209,11 +2342,28 @@ async function updateChargePlanSegmentSelection(segmentContext, selection, board
     return false;
   }
 
+  const hasEffectifUpdate = Object.prototype.hasOwnProperty.call(
+    selection,
+    "effectifDays"
+  );
+  const previousEffectifDays = normalizeOptionalEffectifDays(
+    segmentContext.segment?.effectifDays
+  );
+  const requestedEffectifDays = hasEffectifUpdate
+    ? normalizeOptionalEffectifDays(selection?.effectifDays)
+    : previousEffectifDays;
+  const nextEffectifDays =
+    requestedEffectifDays == null
+      ? null
+      : Math.min(selection.totalDays, requestedEffectifDays);
+  const shouldPersistEffectif =
+    hasEffectifUpdate || nextEffectifDays !== previousEffectifDays;
   const previousSegment = cloneChargePlanSegment(segmentContext.segment);
   const nextSegment = cloneChargePlanSegment(segmentContext.segment, {
     startAt: selection.startDate,
     endAt: selection.endDate,
     allocationDays: selection.totalDays,
+    effectifDays: nextEffectifDays,
     isPendingSync: false,
   });
 
@@ -2229,6 +2379,11 @@ async function updateChargePlanSegmentSelection(segmentContext, selection, board
       startDate: selection.startDate,
       endDate: selection.endDate,
       allocationDays: selection.totalDays,
+      effectif: shouldPersistEffectif
+        ? nextEffectifDays == null
+          ? ""
+          : nextEffectifDays
+        : undefined,
     });
     return true;
   } catch (error) {
@@ -3899,6 +4054,43 @@ async function handleChargePlanContextAction(event) {
   await deleteChargePlanSegment(segmentContext, boardEl);
 }
 
+function openChargePlanContextMenuForSegment(
+  boardEl,
+  segmentEl,
+  { clientX, clientY } = {}
+) {
+  if (!(boardEl instanceof HTMLElement)) {
+    return false;
+  }
+
+  if (!(segmentEl instanceof HTMLElement)) {
+    hideChargePlanContextMenu(boardEl);
+    return false;
+  }
+
+  const segmentId = Number(segmentEl.dataset.segmentId);
+  if (!Number.isInteger(segmentId) || segmentId <= 0) {
+    hideChargePlanContextMenu(boardEl);
+    return false;
+  }
+
+  const segmentRect = segmentEl.getBoundingClientRect();
+  const resolvedClientX = Number.isFinite(clientX)
+    ? clientX
+    : segmentRect.left + segmentRect.width / 2;
+  const resolvedClientY = Number.isFinite(clientY)
+    ? clientY
+    : segmentRect.top + segmentRect.height / 2;
+
+  setChargePlanFeedback(boardEl, "");
+  showChargePlanContextMenu(boardEl, {
+    clientX: resolvedClientX,
+    clientY: resolvedClientY,
+    segmentId,
+  });
+  return true;
+}
+
 function handleChargePlanContextMenu(event) {
   const boardEl =
     event.currentTarget instanceof HTMLElement
@@ -3913,19 +4105,38 @@ function handleChargePlanContextMenu(event) {
     return;
   }
 
+  event.preventDefault();
+  openChargePlanContextMenuForSegment(boardEl, segmentEl, {
+    clientX: event.clientX,
+    clientY: event.clientY,
+  });
+}
+
+function handleChargePlanSegmentDoubleClick(event) {
+  const boardEl =
+    event.currentTarget instanceof HTMLElement
+      ? event.currentTarget
+      : getTimelineBoardFromElement(event.target);
+  if (!(boardEl instanceof HTMLElement)) return;
+  if (!(event.target instanceof Element)) return;
+  if (chargePlanPan || chargeTimelineDrag) return;
+
+  const segmentEl = event.target.closest(".charge-plan-segment-bar");
+  if (!(segmentEl instanceof HTMLElement)) {
+    return;
+  }
+
   const segmentId = Number(segmentEl.dataset.segmentId);
   if (!Number.isInteger(segmentId) || segmentId <= 0) {
-    hideChargePlanContextMenu(boardEl);
     return;
   }
 
   event.preventDefault();
+  event.stopPropagation();
+  hideChargePlanContextMenu(boardEl);
+  closeChargePlanDatePicker(boardEl);
   setChargePlanFeedback(boardEl, "");
-  showChargePlanContextMenu(boardEl, {
-    clientX: event.clientX,
-    clientY: event.clientY,
-    segmentId,
-  });
+  openEditChargePlanModal(segmentId, boardEl);
 }
 
 function handleChargePlanSegmentMouseOver(event) {
@@ -4611,12 +4822,15 @@ function bindEvents() {
     dom.editSegmentStartPartInput,
     dom.editSegmentEndDateInput,
     dom.editSegmentEndPartInput,
+    dom.editSegmentEffectifInput,
   ].forEach((fieldEl) => {
     fieldEl.addEventListener("input", () => {
       setEditChargePlanFeedback("");
+      syncEditChargePlanDerivedValues();
     });
     fieldEl.addEventListener("change", () => {
       setEditChargePlanFeedback("");
+      syncEditChargePlanDerivedValues();
     });
   });
 
@@ -4675,6 +4889,7 @@ function bindEvents() {
         console.error("Erreur action menu timeline :", error);
       });
     });
+    boardEl.addEventListener("dblclick", handleChargePlanSegmentDoubleClick);
     boardEl.addEventListener("contextmenu", handleChargePlanContextMenu);
     boardEl.addEventListener("wheel", handleChargePlanHeaderWheel, {
       passive: false,

@@ -117,6 +117,7 @@ export const APP_CONFIG = {
         endDate: "End_Date",
         segmentType: "Segment_Type",
         allocationDays: "Allocation_Days",
+        effectif: "Effectif",
         label: "Label",
       },
       team: {

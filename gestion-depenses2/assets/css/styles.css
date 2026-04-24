@@ -2147,6 +2147,38 @@ td input {
   gap: 14px;
 }
 
+.segment-edit-section {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(0, 73, 144, 0.12);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(0, 73, 144, 0.03), rgba(255, 255, 255, 0.98));
+}
+
+.segment-edit-section-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.segment-edit-section-copy h3,
+.segment-edit-section-copy p {
+  margin: 0;
+}
+
+.segment-edit-section-copy h3 {
+  font-size: 1rem;
+  color: var(--color-text);
+}
+
+.segment-edit-section-copy p {
+  color: var(--color-text-muted);
+}
+
+.segment-edit-grid--effectif {
+  align-items: end;
+}
+
 .segment-edit-field {
   display: flex;
   flex-direction: column;
@@ -2158,6 +2190,25 @@ td input {
 .segment-edit-field input,
 .segment-edit-field select {
   width: 100%;
+}
+
+.segment-edit-metric {
+  display: grid;
+  gap: 6px;
+  min-height: 52px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 73, 144, 0.06);
+  border: 1px solid rgba(0, 73, 144, 0.08);
+}
+
+.segment-edit-metric-label {
+  font-size: 0.88rem;
+  color: var(--color-text-muted);
+}
+
+.segment-edit-metric strong {
+  color: var(--color-primary);
 }
 
 .segment-edit-feedback {

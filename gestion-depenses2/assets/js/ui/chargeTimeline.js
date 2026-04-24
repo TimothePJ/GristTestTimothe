@@ -15,7 +15,7 @@ import {
   isBusinessDay,
   createHalfDaySlotKey,
   getHalfDaySlotRange,
-  getSegmentAllocationDays,
+  getSegmentEffectiveDays,
 } from "../utils/timeSegments.js";
 
 const activeVisibleSlotsByBoard = new WeakMap();
@@ -658,8 +658,8 @@ function buildVisibleSegmentBars(worker, visibleSlots, options = {}) {
         return null;
       }
 
-      const allocationDays = getSegmentAllocationDays(segment);
-      const label = segment?.label || `${formatDayValue(allocationDays)} j`;
+      const effectiveDays = getSegmentEffectiveDays(segment);
+      const label = segment?.label || `${formatDayValue(effectiveDays)} j`;
       const planningTaskCount = countPlanningTasksOverlappingRange(
         planningTasks,
         startAt,

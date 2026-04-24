@@ -27,6 +27,7 @@ const TIME_SEGMENT_COLUMN_ALIASES = {
     "Allocation",
     "Days",
   ],
+  effectif: ["Effectif"],
   label: ["Label", "Name", "Title"],
 };
 
@@ -184,6 +185,7 @@ async function fetchNormalizedTimeSegmentRows() {
     [canonicalColumns.endDate]: row?.[resolvedColumns.endDate],
     [canonicalColumns.segmentType]: row?.[resolvedColumns.segmentType],
     [canonicalColumns.allocationDays]: row?.[resolvedColumns.allocationDays],
+    [canonicalColumns.effectif]: row?.[resolvedColumns.effectif],
     [canonicalColumns.label]: row?.[resolvedColumns.label],
   }));
 }
@@ -446,6 +448,7 @@ export async function createTimeSegment({
   startDate,
   endDate,
   allocationDays,
+  effectif,
   segmentType = "previsionnel",
   label = "",
 }) {
@@ -463,14 +466,22 @@ export async function createTimeSegment({
       "AddRecord",
       tableName,
       null,
-      {
-        [columns.projectTeamLink]: Number(projectTeamLink),
-        [columns.startDate]: startValue,
-        [columns.endDate]: endValue,
-        [columns.segmentType]: segmentType,
-        [columns.allocationDays]: toFiniteNumber(allocationDays, 0),
-        [columns.label]: label,
-      },
+      Object.fromEntries(
+        Object.entries({
+          [columns.projectTeamLink]: Number(projectTeamLink),
+          [columns.startDate]: startValue,
+          [columns.endDate]: endValue,
+          [columns.segmentType]: segmentType,
+          [columns.allocationDays]: toFiniteNumber(allocationDays, 0),
+          [columns.effectif]:
+            effectif === undefined
+              ? undefined
+              : effectif === ""
+              ? ""
+              : toFiniteNumber(effectif, 0),
+          [columns.label]: label,
+        }).filter(([, value]) => value !== undefined)
+      ),
     ],
   ]);
 
@@ -482,6 +493,7 @@ export async function updateTimeSegment({
   startDate,
   endDate,
   allocationDays,
+  effectif,
   segmentType,
   label,
 }) {
@@ -511,6 +523,11 @@ export async function updateTimeSegment({
 
   if (allocationDays != null) {
     fields[columns.allocationDays] = toFiniteNumber(allocationDays, 0);
+  }
+
+  if (effectif !== undefined) {
+    fields[columns.effectif] =
+      effectif === "" ? "" : toFiniteNumber(effectif, 0);
   }
 
   if (segmentType != null) {
