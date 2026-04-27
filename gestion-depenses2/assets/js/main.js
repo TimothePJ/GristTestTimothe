@@ -3801,7 +3801,7 @@ async function handleTableInputChange(event) {
 
     const billingPct = normalizeBillingPercentageValue(
       parseOptionalNumberInput(target.value),
-      100
+      0
     );
     selectedProject.billingPercentageByMonth = {
       ...(selectedProject.billingPercentageByMonth || {}),
@@ -3894,7 +3894,7 @@ function handleSpendingBillingEditorInput(event) {
   if (target.classList.contains("billing-percentage")) {
     const billingPct = normalizeBillingPercentageValue(
       parseOptionalNumberInput(target.value),
-      100
+      0
     );
     const amountInput = dom.spendingBillingEditor?.querySelector(
       `.billing-amount[data-month="${monthKey}"]`
