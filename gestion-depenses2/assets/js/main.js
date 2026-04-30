@@ -46,19 +46,21 @@ import {
 import {
   clearChargePlanSelectionPreview,
   clearChargePlanTimeline,
-  clearRealChargeTimeline,
   computeChargePlanSelection,
   computeChargePlanSelectionFromSlotIndexes,
   getChargePlanSlotIndexAtClientX,
   hideChargePlanContextMenu,
   hideChargePlanDatePicker,
   renderChargePlanTimeline,
-  renderRealChargeTimeline,
   setChargePlanFeedback,
   showChargePlanDatePicker,
   showChargePlanContextMenu,
   updateChargePlanSelectionPreview,
 } from "./ui/chargeTimeline.js";
+import {
+  clearRealWorkedDaysTable,
+  renderRealWorkedDaysTable,
+} from "./ui/realWorkedDaysTable.js";
 import {
   getExpenseGraphDisplayMode,
   getTeamManagementSummaryDisplayMode,
@@ -510,15 +512,6 @@ function ensureChargePlanSyncAlignedDate(targetDateValue, attempt = 0) {
     setPendingChargePlanFocus(normalizedTargetDate, "left");
     restoreChargePlanViewport(dom?.chargePlanBoard || null);
 
-    const realChargeBoardVisible =
-      dom?.realChargeBoard instanceof HTMLElement &&
-      !dom.realChargeBoard.hidden &&
-      window.getComputedStyle(dom.realChargeBoard).display !== "none";
-
-    if (realChargeBoardVisible) {
-      restoreChargePlanViewport(dom.realChargeBoard);
-    }
-
     if (attempt < 12) {
       ensureChargePlanSyncAlignedDate(normalizedTargetDate, attempt + 1);
     }
@@ -959,7 +952,7 @@ function commitBudgetLineDrop() {
 }
 
 function getTimelineBoards() {
-  return [dom?.chargePlanBoard, dom?.realChargeBoard].filter((boardEl) => {
+  return [dom?.chargePlanBoard].filter((boardEl) => {
     if (!(boardEl instanceof HTMLElement)) {
       return false;
     }
@@ -1421,7 +1414,7 @@ function renderApp() {
     clearProjectSummary(dom);
     clearKpi(dom);
     clearChargePlanTimeline(dom);
-    clearRealChargeTimeline(dom);
+    clearRealWorkedDaysTable(dom.realChargeBoard);
     clearPlanningManagement(dom.planManagementBoard);
     clearTables(dom);
     clearSpendingBillingEditor(dom.spendingBillingEditor);
@@ -1685,7 +1678,7 @@ function renderChargePlanSection(selectedProject = getSelectedProject()) {
     renderedChargePlanRangeStartDate = "";
     setChargePlanRangeStartDate("");
     clearChargePlanTimeline(dom);
-    clearRealChargeTimeline(dom);
+    clearRealWorkedDaysTable(dom.realChargeBoard);
     return;
   }
 
@@ -1732,26 +1725,12 @@ function renderChargePlanSection(selectedProject = getSelectedProject()) {
     window.getComputedStyle(dom.realChargeBoard).display !== "none";
 
   if (realChargeBoardVisible) {
-    renderRealChargeTimeline(dom, selectedProject, {
-      selectedYear: state.selectedYear,
-      selectedMonth: state.selectedMonth,
-      monthSpan: state.monthSpan,
-      chargePlanZoomMode: derivedZoomState.chargePlanZoomMode,
-      chargePlanZoomScale: derivedZoomState.chargePlanZoomScale,
-      chargePlanVisibleDays: derivedZoomState.chargePlanVisibleDays,
-      chargePlanAnchorDate: state.chargePlanAnchorDate,
-      chargePlanDisplayedDate: displayedDateValue,
-      chargePlanRangeStartDate: rangeStartDate,
-      chargePlanRenderedMonthSpan: renderedMonthSpan,
-    });
+    renderRealWorkedDaysTable(dom.realChargeBoard, selectedProject);
   } else {
-    clearRealChargeTimeline(dom);
+    clearRealWorkedDaysTable(dom.realChargeBoard);
   }
 
   restoreChargePlanViewport(dom?.chargePlanBoard || null);
-  if (realChargeBoardVisible) {
-    restoreChargePlanViewport(dom?.realChargeBoard || null);
-  }
 }
 
 function normalizePlanningSyncProjectKey(value) {
@@ -4870,7 +4849,7 @@ function bindEvents() {
   dom.teamManagementRates.addEventListener("change", handleTeamManagementSummaryToggleChange);
   dom.teamManagementRates.addEventListener("change", handleTableInputChange);
   dom.teamManagementRates.addEventListener("click", handleDeleteWorker);
-  const timelineBoards = [dom.chargePlanBoard, dom.realChargeBoard];
+  const timelineBoards = [dom.chargePlanBoard];
 
   timelineBoards.forEach((boardEl) => {
     boardEl.addEventListener("click", handleDeleteWorker);
