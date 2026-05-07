@@ -270,10 +270,170 @@ function findExtendedAttributeValue(taskNode, expectedFieldId) {
   return "";
 }
 
+function findOutlineCodeValueId(taskNode, expectedFieldId) {
+  if (!taskNode || !expectedFieldId) return "";
+  const expected = toText(expectedFieldId);
+  if (!expected) return "";
+
+  const outlineCodes = Array.from(taskNode.children || []).filter(
+    (node) => node?.localName === "OutlineCode"
+  );
+
+  for (const outlineCodeNode of outlineCodes) {
+    const fieldId = getDirectChildTextByLocalName(outlineCodeNode, "FieldID");
+    if (fieldId !== expected) continue;
+    return getDirectChildTextByLocalName(outlineCodeNode, "ValueID");
+  }
+
+  return "";
+}
+
 function normalizeBarStyleLabel(rawValue) {
   const text = toText(rawValue);
   if (!text) return "";
   return text.replace(/^\s*\d+\s*-\s*/, "").trim();
+}
+
+function normalizeLookupText(value) {
+  return toText(value).toLocaleLowerCase("fr");
+}
+
+function getDirectChildrenByLocalName(parentNode, localName) {
+  if (!parentNode || typeof localName !== "string") return [];
+  return Array.from(parentNode.children || []).filter((node) => node?.localName === localName);
+}
+
+function findProjectExtendedAttribute(xmlDocument, { fieldIds = [], aliases = [] } = {}) {
+  const projectNode = xmlDocument?.documentElement;
+  const extendedAttributesNode = getDirectChildrenByLocalName(
+    projectNode,
+    "ExtendedAttributes"
+  )[0];
+  const extendedAttributes = getDirectChildrenByLocalName(
+    extendedAttributesNode,
+    "ExtendedAttribute"
+  );
+  if (!extendedAttributes.length) return null;
+
+  const normalizedAliases = new Set(aliases.map(normalizeLookupText).filter(Boolean));
+  const normalizedFieldIds = new Set(fieldIds.map(toText).filter(Boolean));
+
+  const byAlias = extendedAttributes.find((attributeNode) =>
+    normalizedAliases.has(getDirectChildTextByLocalName(attributeNode, "Alias").toLocaleLowerCase("fr"))
+  );
+  if (byAlias) return byAlias;
+
+  return (
+    extendedAttributes.find((attributeNode) =>
+      normalizedFieldIds.has(getDirectChildTextByLocalName(attributeNode, "FieldID"))
+    ) || null
+  );
+}
+
+function findProjectOutlineCode(xmlDocument, fieldDefinition, expectedFieldId) {
+  const projectNode = xmlDocument?.documentElement;
+  const outlineCodesNode = getDirectChildrenByLocalName(projectNode, "OutlineCodes")[0];
+  const outlineCodes = getDirectChildrenByLocalName(outlineCodesNode, "OutlineCode");
+  if (!outlineCodes.length) return null;
+
+  const expected = toText(expectedFieldId);
+  const definitionLtuid = getDirectChildTextByLocalName(fieldDefinition, "Ltuid");
+  const definitionGuid = getDirectChildTextByLocalName(fieldDefinition, "Guid");
+
+  return (
+    outlineCodes.find(
+      (outlineCodeNode) => getDirectChildTextByLocalName(outlineCodeNode, "FieldID") === expected
+    ) ||
+    outlineCodes.find(
+      (outlineCodeNode) =>
+        definitionLtuid &&
+        getDirectChildTextByLocalName(outlineCodeNode, "Guid").toLocaleLowerCase("fr") ===
+          definitionLtuid.toLocaleLowerCase("fr")
+    ) ||
+    outlineCodes.find(
+      (outlineCodeNode) =>
+        definitionGuid &&
+        getDirectChildTextByLocalName(outlineCodeNode, "Guid").toLocaleLowerCase("fr") ===
+          definitionGuid.toLocaleLowerCase("fr")
+    ) ||
+    null
+  );
+}
+
+function buildOutlineCodeValueMap(outlineCodeNode) {
+  const valuesNode = getDirectChildrenByLocalName(outlineCodeNode, "Values")[0];
+  const valueNodes = getDirectChildrenByLocalName(valuesNode, "Value");
+  const valueById = new Map();
+
+  for (const valueNode of valueNodes) {
+    const valueId = getDirectChildTextByLocalName(valueNode, "ValueID");
+    if (!valueId) continue;
+    valueById.set(valueId, {
+      id: valueId,
+      parentId: getDirectChildTextByLocalName(valueNode, "ParentValueID"),
+      label: getDirectChildTextByLocalName(valueNode, "Value"),
+    });
+  }
+
+  const resolvedById = new Map();
+  const resolveValue = (valueId, visited = new Set()) => {
+    const id = toText(valueId);
+    if (!id || resolvedById.has(id)) return resolvedById.get(id) || "";
+    if (visited.has(id)) return valueById.get(id)?.label || "";
+
+    const value = valueById.get(id);
+    if (!value) return "";
+
+    visited.add(id);
+    const ownLabel = value.label;
+    const parentLabel =
+      value.parentId && value.parentId !== "0" ? resolveValue(value.parentId, visited) : "";
+    const resolved = parentLabel && ownLabel ? `${parentLabel}_${ownLabel}` : ownLabel;
+    resolvedById.set(id, resolved);
+    return resolved;
+  };
+
+  return {
+    resolve(valueId) {
+      return resolveValue(valueId);
+    },
+  };
+}
+
+function createBarStyleResolver(xmlDocument) {
+  const newStyleFieldId = "188744108";
+  const oldStyleFieldId = "188744016";
+  const newStyleDefinition = findProjectExtendedAttribute(xmlDocument, {
+    fieldIds: [newStyleFieldId],
+    aliases: ["Style Gantt"],
+  });
+  const oldStyleDefinition = findProjectExtendedAttribute(xmlDocument, {
+    fieldIds: [oldStyleFieldId],
+    aliases: ["Style Barre"],
+  });
+
+  const newStyleOutlineCode = newStyleDefinition
+    ? findProjectOutlineCode(xmlDocument, newStyleDefinition, newStyleFieldId)
+    : null;
+  const newStyleValueMap = newStyleOutlineCode
+    ? buildOutlineCodeValueMap(newStyleOutlineCode)
+    : null;
+
+  return {
+    resolve(taskNode) {
+      if (newStyleValueMap) {
+        const newStyleValueId = findOutlineCodeValueId(taskNode, newStyleFieldId);
+        const newStyleValue = normalizeBarStyleLabel(newStyleValueMap.resolve(newStyleValueId));
+        if (newStyleValue) return newStyleValue;
+      }
+
+      if (oldStyleDefinition) {
+        return normalizeBarStyleLabel(findExtendedAttributeValue(taskNode, oldStyleFieldId));
+      }
+
+      return "";
+    },
+  };
 }
 
 async function applyUserActionsInBatches(actions, batchSize = 200) {
@@ -365,6 +525,7 @@ export async function importMsProjectXmlFile(file) {
   }
 
   const sourceFileName = getFileNameWithoutExtension(file.name);
+  const barStyleResolver = createBarStyleResolver(xmlDocument);
   const importedRecords = [];
 
   for (const taskNode of taskNodes) {
@@ -391,8 +552,7 @@ export async function importMsProjectXmlFile(file) {
     if (projectLinkCol) record[projectLinkCol] = "";
     if (titleCol) record[titleCol] = "";
 
-    const styleValue = findExtendedAttributeValue(taskNode, "188744016");
-    const normalizedStyle = normalizeBarStyleLabel(styleValue);
+    const normalizedStyle = barStyleResolver.resolve(taskNode);
     if (barStyleCol) record[barStyleCol] = normalizedStyle;
     // Some tables use "Style" instead of the configured "Style_Barre".
     record.Style = normalizedStyle;
