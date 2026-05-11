@@ -154,8 +154,199 @@ function isBaseDefaultStyle(value) {
   return token === "base-style-par-defaut" || token === "base-style-par-defaut-00";
 }
 
+function isStructureMetalStyle(value) {
+  const token = normalizeStyleToken(value);
+  return token === "go-structure-metal" || token.endsWith("-structure-metal");
+}
+
+function isTerrassementStyle(value) {
+  const token = normalizeStyleToken(value);
+  return token === "st-terrassement" || token.endsWith("-terrassement");
+}
+
+function isRsoStyle(value) {
+  const token = normalizeStyleToken(value);
+  return token === "go-rso" || token.endsWith("-rso");
+}
+
+function isFondationsStyle(value) {
+  const token = normalizeStyleToken(value);
+  return token === "go-fondations" || token.endsWith("-fondations");
+}
+
+function isStabiliteProvisoireStyle(value) {
+  const token = normalizeStyleToken(value);
+  return token === "inst-stabilite-provisoire" || token.endsWith("-stabilite-provisoire");
+}
+
+function isMaterielStyle(value) {
+  const token = normalizeStyleToken(value);
+  return token === "inst-materiel" || token.endsWith("-materiel");
+}
+
+function isInstallationChantierStyle(value) {
+  const token = normalizeStyleToken(value);
+  return (
+    token === "inst-installation-de-chantier" ||
+    token.endsWith("-installation-de-chantier")
+  );
+}
+
+function isMainOeuvreTemporelleStyle(value) {
+  const token = normalizeStyleToken(value);
+  return (
+    token === "mo-main-d-oeuvre-temporelle" ||
+    token === "mo-main-d-uvre-temporelle" ||
+    token.endsWith("-main-d-oeuvre-temporelle") ||
+    token.endsWith("-main-d-uvre-temporelle")
+  );
+}
+
+function isSecuriteStyle(value) {
+  const token = normalizeStyleToken(value);
+  return token === "inst-securite" || token.endsWith("-securite");
+}
+
+function isEdtEtudesStyle(value) {
+  const token = normalizeStyleToken(value);
+  return (
+    token === "edt-etudes" ||
+    token === "etd-etudes" ||
+    token.endsWith("-edt-etudes") ||
+    token.endsWith("-etd-etudes")
+  );
+}
+
+function isAutreCheminCritiqueStyle(value) {
+  const token = normalizeStyleToken(value);
+  return token === "autre-chemin-critique" || token.endsWith("-chemin-critique");
+}
+
+function isEdtPreparationStyle(value) {
+  const token = normalizeStyleToken(value);
+  return token === "edt-preparation" || token.endsWith("-edt-preparation");
+}
+
+function resolveExplicitStyleClass(value) {
+  const token = normalizeStyleToken(value);
+  const classes = [];
+
+  if (token === "st-demolition" || token.endsWith("-demolition")) {
+    classes.push("bar-style-demolition");
+  }
+
+  if (isStructureMetalStyle(value)) {
+    classes.push("bar-style-structure-metal");
+  }
+
+  if (isTerrassementStyle(value)) {
+    classes.push("bar-style-terrassement");
+  }
+
+  if (isRsoStyle(value)) {
+    classes.push("bar-style-rso");
+  }
+
+  if (isFondationsStyle(value)) {
+    classes.push("bar-style-fondations");
+  }
+
+  if (isStabiliteProvisoireStyle(value)) {
+    classes.push("bar-style-stabilite-provisoire");
+  }
+
+  if (isMaterielStyle(value)) {
+    classes.push("bar-style-materiel");
+  }
+
+  if (isInstallationChantierStyle(value)) {
+    classes.push("bar-style-installation-chantier");
+  }
+
+  if (isMainOeuvreTemporelleStyle(value)) {
+    classes.push("bar-style-main-oeuvre-temporelle");
+  }
+
+  if (isSecuriteStyle(value)) {
+    classes.push("bar-style-securite");
+  }
+
+  if (isEdtEtudesStyle(value)) {
+    classes.push("bar-style-edt-etudes");
+  }
+
+  if (isAutreCheminCritiqueStyle(value)) {
+    classes.push("bar-style-chemin-critique");
+  }
+
+  if (isEdtPreparationStyle(value)) {
+    classes.push("bar-style-edt-preparation");
+  }
+
+  return classes;
+}
+
+function resolveTaskInlineStyle(row) {
+  if (isStructureMetalStyle(row?.barStyleLabel)) {
+    return [
+      "background-color:#5b21b6 !important",
+      "background-image:none !important",
+      "border-color:#4c1d95 !important",
+      "color:#f5f3ff !important",
+    ].join(";");
+  }
+
+  if (isAutreCheminCritiqueStyle(row?.barStyleLabel)) {
+    return [
+      "background-color:#dc2626 !important",
+      "background-image:none !important",
+      "border-color:#991b1b !important",
+      "color:#fff1f2 !important",
+    ].join(";");
+  }
+
+  if (isEdtEtudesStyle(row?.barStyleLabel)) {
+    return [
+      "background-color:#fff7ed !important",
+      "background-image:repeating-linear-gradient(90deg, rgba(249, 115, 22, 0.42) 0px, rgba(249, 115, 22, 0.42) 2px, rgba(255, 247, 237, 1) 2px, rgba(255, 247, 237, 1) 8px) !important",
+      "border-color:#fb923c !important",
+      "color:#9a3412 !important",
+    ].join(";");
+  }
+
+  if (isInstallationChantierStyle(row?.barStyleLabel)) {
+    return [
+      "background-color:#fef9c3 !important",
+      "background-image:repeating-linear-gradient(45deg, rgba(202, 138, 4, 0.24) 0px, rgba(202, 138, 4, 0.24) 5px, rgba(254, 249, 195, 0.45) 5px, rgba(254, 249, 195, 0.45) 10px), repeating-linear-gradient(-45deg, rgba(202, 138, 4, 0.24) 0px, rgba(202, 138, 4, 0.24) 5px, rgba(254, 249, 195, 0.45) 5px, rgba(254, 249, 195, 0.45) 10px) !important",
+      "border-color:#eab308 !important",
+      "color:#854d0e !important",
+    ].join(";");
+  }
+
+  if (isMainOeuvreTemporelleStyle(row?.barStyleLabel)) {
+    return [
+      "background-color:#fffde7 !important",
+      "background-image:repeating-linear-gradient(45deg, rgba(234, 179, 8, 0.18) 0px, rgba(234, 179, 8, 0.18) 5px, rgba(255, 253, 231, 0.55) 5px, rgba(255, 253, 231, 0.55) 10px), repeating-linear-gradient(-45deg, rgba(234, 179, 8, 0.18) 0px, rgba(234, 179, 8, 0.18) 5px, rgba(255, 253, 231, 0.55) 5px, rgba(255, 253, 231, 0.55) 10px) !important",
+      "border-color:#fde047 !important",
+      "color:#854d0e !important",
+    ].join(";");
+  }
+
+  if (isSecuriteStyle(row?.barStyleLabel)) {
+    return [
+      "background-color:#fee2e2 !important",
+      "background-image:repeating-linear-gradient(45deg, rgba(220, 38, 38, 0.22) 0px, rgba(220, 38, 38, 0.22) 5px, rgba(254, 226, 226, 0.45) 5px, rgba(254, 226, 226, 0.45) 10px), repeating-linear-gradient(-45deg, rgba(220, 38, 38, 0.22) 0px, rgba(220, 38, 38, 0.22) 5px, rgba(254, 226, 226, 0.45) 5px, rgba(254, 226, 226, 0.45) 10px) !important",
+      "border-color:#ef4444 !important",
+      "color:#991b1b !important",
+    ].join(";");
+  }
+
+  return "";
+}
+
 function resolveTaskClass(row) {
   const classes = [`phase-task`, `bar-style-${normalizeStyleToken(row.barStyleLabel)}`];
+  classes.push(...resolveExplicitStyleClass(row.barStyleLabel));
 
   if (row.isBaseDefaultStyle) {
     classes.push("base-default-style-task");
@@ -393,6 +584,7 @@ export function buildTimelineDataFromMsProjectRows(
     const hasPositiveDuration = row.durationValue != null && row.durationValue > 0;
     const baseRegularWithoutDuration =
       row.isBaseDefaultStyle && !row.isBoldRow && !hasPositiveDuration;
+    const inlineTaskStyle = resolveTaskInlineStyle(row);
 
     if (baseRegularWithoutDuration) {
       const milestoneStart = toLocalNoon(row.endDate) || toLocalNoon(row.startDate) || row.startDate;
@@ -402,6 +594,7 @@ export function buildTimelineDataFromMsProjectRows(
         start: milestoneStart,
         content: "",
         className: `${resolveTaskClass(row)} milestone-task`,
+        style: inlineTaskStyle,
         type: "box",
         title: sharedTitle,
       });
@@ -416,6 +609,7 @@ export function buildTimelineDataFromMsProjectRows(
         end: row.endDate,
         content: rangeContent,
         className: `${resolveTaskClass(row)}${row.isTitleRow ? " title-task" : ""}`,
+        style: inlineTaskStyle,
         type: "range",
         title: sharedTitle,
       });
@@ -430,6 +624,7 @@ export function buildTimelineDataFromMsProjectRows(
         start: milestoneStart,
         content: "",
         className: `${resolveTaskClass(row)} milestone-task${row.isTitleRow ? " title-task" : ""}`,
+        style: inlineTaskStyle,
         type: "box",
         title: sharedTitle,
       });
@@ -443,6 +638,7 @@ export function buildTimelineDataFromMsProjectRows(
       start: invalidStart,
       content: "",
       className: `${resolveTaskClass(row)} milestone-task${row.isTitleRow ? " title-task" : ""}`,
+      style: inlineTaskStyle,
       type: "box",
       title: `
         ${sharedTitle}<br>

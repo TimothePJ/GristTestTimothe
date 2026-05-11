@@ -705,7 +705,9 @@ body.ms-row-dragging {
   color: #b91c1c !important;
 }
 
-#msProjectTimeline .vis-item.bar-style-demolition {
+#msProjectTimeline .vis-item.bar-style-demolition,
+#msProjectTimeline .vis-item.bar-style-st-demolition,
+#msProjectTimeline .vis-item[class*="bar-style-"][class*="demolition"] {
   background-color: #fee2e2 !important;
   background-image: repeating-linear-gradient(
     135deg,
@@ -726,12 +728,108 @@ body.ms-row-dragging {
   color: #fffbeb !important;
 }
 
+#msProjectTimeline .vis-item.bar-style-installation-chantier,
+#msProjectTimeline .vis-item.bar-style-inst-installation-de-chantier,
+#msProjectTimeline .vis-item.bar-style-installation-chantier[class*="bar-style-"][class*="installation"],
+#msProjectTimeline .vis-item.bar-style-inst-installation-de-chantier[class*="bar-style-"][class*="installation"] {
+  background-color: #fef9c3 !important;
+  background-image: repeating-linear-gradient(
+      45deg,
+      rgba(202, 138, 4, 0.24) 0px,
+      rgba(202, 138, 4, 0.24) 5px,
+      rgba(254, 249, 195, 0.45) 5px,
+      rgba(254, 249, 195, 0.45) 10px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(202, 138, 4, 0.24) 0px,
+      rgba(202, 138, 4, 0.24) 5px,
+      rgba(254, 249, 195, 0.45) 5px,
+      rgba(254, 249, 195, 0.45) 10px
+    ) !important;
+  border-color: #eab308 !important;
+  color: #854d0e !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-main-oeuvre-temporelle,
+#msProjectTimeline .vis-item.bar-style-mo-main-d-oeuvre-temporelle,
+#msProjectTimeline .vis-item.bar-style-mo-main-d-uvre-temporelle {
+  background-color: #fffde7 !important;
+  background-image: repeating-linear-gradient(
+      45deg,
+      rgba(234, 179, 8, 0.18) 0px,
+      rgba(234, 179, 8, 0.18) 5px,
+      rgba(255, 253, 231, 0.55) 5px,
+      rgba(255, 253, 231, 0.55) 10px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(234, 179, 8, 0.18) 0px,
+      rgba(234, 179, 8, 0.18) 5px,
+      rgba(255, 253, 231, 0.55) 5px,
+      rgba(255, 253, 231, 0.55) 10px
+    ) !important;
+  border-color: #fde047 !important;
+  color: #854d0e !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-securite,
+#msProjectTimeline .vis-item.bar-style-inst-securite {
+  background-color: #fee2e2 !important;
+  background-image: repeating-linear-gradient(
+      45deg,
+      rgba(220, 38, 38, 0.22) 0px,
+      rgba(220, 38, 38, 0.22) 5px,
+      rgba(254, 226, 226, 0.45) 5px,
+      rgba(254, 226, 226, 0.45) 10px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(220, 38, 38, 0.22) 0px,
+      rgba(220, 38, 38, 0.22) 5px,
+      rgba(254, 226, 226, 0.45) 5px,
+      rgba(254, 226, 226, 0.45) 10px
+    ) !important;
+  border-color: #ef4444 !important;
+  color: #991b1b !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-terrassement,
+#msProjectTimeline .vis-item.bar-style-st-terrassement {
+  background-color: #d97706 !important;
+  background-image: repeating-linear-gradient(
+      45deg,
+      rgba(120, 53, 15, 0.42) 0px,
+      rgba(120, 53, 15, 0.42) 2px,
+      rgba(217, 119, 6, 0.12) 2px,
+      rgba(217, 119, 6, 0.12) 8px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(120, 53, 15, 0.42) 0px,
+      rgba(120, 53, 15, 0.42) 2px,
+      rgba(217, 119, 6, 0.12) 2px,
+      rgba(217, 119, 6, 0.12) 8px
+    ) !important;
+  border-color: #92400e !important;
+  color: #fff7ed !important;
+}
+
 #msProjectTimeline .vis-item.bar-style-structure,
-#msProjectTimeline .vis-item[class*="bar-style-"][class*="structure"] {
+#msProjectTimeline .vis-item.bar-style-go-structure-ba {
   background-color: #1e3a8a !important;
   background-image: none !important;
   border-color: #1e40af !important;
   color: #eff6ff !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-structure-metal,
+#msProjectTimeline .vis-item.bar-style-go-structure-metal,
+#msProjectTimeline .vis-item[class*="bar-style-go-structure-metal"] {
+  background-color: #5b21b6 !important;
+  background-image: none !important;
+  border-color: #4c1d95 !important;
+  color: #f5f3ff !important;
 }
 
 #msProjectTimeline .vis-item.bar-style-terr-rso,
@@ -740,6 +838,64 @@ body.ms-row-dragging {
   background-image: none !important;
   border-color: #6f4518 !important;
   color: #fef3c7 !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-rso,
+#msProjectTimeline .vis-item.bar-style-go-rso {
+  background-color: #8b5a2b !important;
+  background-image: none !important;
+  border-color: #6f4518 !important;
+  color: #fff7ed !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-fondations,
+#msProjectTimeline .vis-item.bar-style-go-fondations {
+  background-color: #bfdbfe !important;
+  background-image: none !important;
+  border-color: #93c5fd !important;
+  color: #1e3a8a !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-stabilite-provisoire,
+#msProjectTimeline .vis-item.bar-style-inst-stabilite-provisoire {
+  background-color: #67e8f9 !important;
+  background-image: repeating-linear-gradient(
+      45deg,
+      rgba(14, 116, 144, 0.38) 0px,
+      rgba(14, 116, 144, 0.38) 2px,
+      rgba(103, 232, 249, 0.18) 2px,
+      rgba(103, 232, 249, 0.18) 8px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(14, 116, 144, 0.38) 0px,
+      rgba(14, 116, 144, 0.38) 2px,
+      rgba(103, 232, 249, 0.18) 2px,
+      rgba(103, 232, 249, 0.18) 8px
+    ) !important;
+  border-color: #0891b2 !important;
+  color: #083344 !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-materiel,
+#msProjectTimeline .vis-item.bar-style-inst-materiel {
+  background-color: #2563eb !important;
+  background-image: repeating-linear-gradient(
+      45deg,
+      rgba(30, 64, 175, 0.42) 0px,
+      rgba(30, 64, 175, 0.42) 2px,
+      rgba(37, 99, 235, 0.14) 2px,
+      rgba(37, 99, 235, 0.14) 8px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(30, 64, 175, 0.42) 0px,
+      rgba(30, 64, 175, 0.42) 2px,
+      rgba(37, 99, 235, 0.14) 2px,
+      rgba(37, 99, 235, 0.14) 8px
+    ) !important;
+  border-color: #1d4ed8 !important;
+  color: #eff6ff !important;
 }
 
 #msProjectTimeline .vis-item.bar-style-preparation,
@@ -784,6 +940,47 @@ body.ms-row-dragging {
   ) !important;
   border-color: #cbd5e1 !important;
   color: #334155 !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-edt-etudes,
+#msProjectTimeline .vis-item.bar-style-etd-etudes,
+#msProjectTimeline .vis-item.bar-style-edt-etudes[class*="bar-style-"],
+#msProjectTimeline .vis-item.bar-style-etd-etudes[class*="bar-style-"],
+#msProjectTimeline .vis-item.bar-style-edt-etudes-orange {
+  background-color: #fff7ed !important;
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(249, 115, 22, 0.42) 0px,
+    rgba(249, 115, 22, 0.42) 2px,
+    rgba(255, 247, 237, 1) 2px,
+    rgba(255, 247, 237, 1) 8px
+  ) !important;
+  border-color: #fb923c !important;
+  color: #9a3412 !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-chemin-critique,
+#msProjectTimeline .vis-item.bar-style-autre-chemin-critique,
+#msProjectTimeline .vis-item.bar-style-chemin-critique[class*="bar-style-"][class*="autre"],
+#msProjectTimeline .vis-item.bar-style-autre-chemin-critique[class*="bar-style-"][class*="autre"] {
+  background-color: #dc2626 !important;
+  background-image: none !important;
+  border-color: #991b1b !important;
+  color: #fff1f2 !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-edt-preparation,
+#msProjectTimeline .vis-item.bar-style-edt-preparation-blue {
+  background-color: #eff6ff !important;
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(37, 99, 235, 0.42) 0px,
+    rgba(37, 99, 235, 0.42) 2px,
+    rgba(239, 246, 255, 1) 2px,
+    rgba(239, 246, 255, 1) 8px
+  ) !important;
+  border-color: #60a5fa !important;
+  color: #1d4ed8 !important;
 }
 
 #msProjectTimeline .vis-item.bar-style-mth,
