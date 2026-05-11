@@ -815,6 +815,59 @@ body.ms-row-dragging {
   color: #fff7ed !important;
 }
 
+#msProjectTimeline .vis-item.bar-style-depollution,
+#msProjectTimeline .vis-item.bar-style-st-depollution {
+  background-color: rgba(254, 226, 226, 0.58) !important;
+  background-image:
+    linear-gradient(rgba(220, 38, 38, 0.32) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(220, 38, 38, 0.32) 1px, transparent 1px) !important;
+  background-size: 7px 7px !important;
+  border-color: #fca5a5 !important;
+  color: #991b1b !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-vrd,
+#msProjectTimeline .vis-item.bar-style-st-vrd {
+  background-color: #dcfce7 !important;
+  background-image: repeating-linear-gradient(
+      45deg,
+      rgba(22, 101, 52, 0.34) 0px,
+      rgba(22, 101, 52, 0.34) 2px,
+      rgba(220, 252, 231, 0.32) 2px,
+      rgba(220, 252, 231, 0.32) 8px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(22, 101, 52, 0.34) 0px,
+      rgba(22, 101, 52, 0.34) 2px,
+      rgba(220, 252, 231, 0.32) 2px,
+      rgba(220, 252, 231, 0.32) 8px
+    ) !important;
+  border-color: #4ade80 !important;
+  color: #14532d !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-ces,
+#msProjectTimeline .vis-item.bar-style-st-ces {
+  background-color: #ede9fe !important;
+  background-image: repeating-linear-gradient(
+      45deg,
+      rgba(109, 40, 217, 0.34) 0px,
+      rgba(109, 40, 217, 0.34) 2px,
+      rgba(237, 233, 254, 0.34) 2px,
+      rgba(237, 233, 254, 0.34) 8px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(109, 40, 217, 0.34) 0px,
+      rgba(109, 40, 217, 0.34) 2px,
+      rgba(237, 233, 254, 0.34) 2px,
+      rgba(237, 233, 254, 0.34) 8px
+    ) !important;
+  border-color: #a78bfa !important;
+  color: #4c1d95 !important;
+}
+
 #msProjectTimeline .vis-item.bar-style-structure,
 #msProjectTimeline .vis-item.bar-style-go-structure-ba {
   background-color: #1e3a8a !important;
@@ -959,6 +1012,46 @@ body.ms-row-dragging {
   color: #9a3412 !important;
 }
 
+#msProjectTimeline .vis-item.bar-style-divers-travaux,
+#msProjectTimeline .vis-item.bar-style-divers-travaux-divers {
+  background-color: #fee2e2 !important;
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(220, 38, 38, 0.38) 0px,
+    rgba(220, 38, 38, 0.38) 6px,
+    rgba(255, 255, 255, 0.92) 6px,
+    rgba(255, 255, 255, 0.92) 12px
+  ) !important;
+  border-color: #f87171 !important;
+  color: #991b1b !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-divers-tsc {
+  background-color: #dbeafe !important;
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(37, 99, 235, 0.38) 0px,
+    rgba(37, 99, 235, 0.38) 6px,
+    rgba(255, 255, 255, 0.92) 6px,
+    rgba(255, 255, 255, 0.92) 12px
+  ) !important;
+  border-color: #60a5fa !important;
+  color: #1d4ed8 !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-divers-finitions {
+  background-color: #fef9c3 !important;
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(202, 138, 4, 0.42) 0px,
+    rgba(202, 138, 4, 0.42) 6px,
+    rgba(255, 255, 255, 0.92) 6px,
+    rgba(255, 255, 255, 0.92) 12px
+  ) !important;
+  border-color: #facc15 !important;
+  color: #854d0e !important;
+}
+
 #msProjectTimeline .vis-item.bar-style-chemin-critique,
 #msProjectTimeline .vis-item.bar-style-autre-chemin-critique,
 #msProjectTimeline .vis-item.bar-style-chemin-critique[class*="bar-style-"][class*="autre"],
@@ -967,6 +1060,61 @@ body.ms-row-dragging {
   background-image: none !important;
   border-color: #991b1b !important;
   color: #fff1f2 !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-temporisation,
+#msProjectTimeline .vis-item.bar-style-autres-temporisation,
+#msProjectTimeline .vis-item.bar-style-autre-temporisation,
+#msProjectTimeline .vis-item.bar-style-temporisation[class*="bar-style-"][class*="autre"],
+#msProjectTimeline .vis-item.bar-style-autres-temporisation[class*="bar-style-"][class*="autre"],
+#msProjectTimeline .vis-item.bar-style-autre-temporisation[class*="bar-style-"][class*="autre"] {
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  border-left: 1px solid #111827 !important;
+  border-right: 1px solid #111827 !important;
+  box-shadow: none !important;
+  color: transparent !important;
+  height: 10px !important;
+  overflow: visible !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-temporisation .vis-item-content,
+#msProjectTimeline .vis-item.bar-style-autres-temporisation .vis-item-content,
+#msProjectTimeline .vis-item.bar-style-autre-temporisation .vis-item-content {
+  display: none !important;
+}
+
+#msProjectTimeline .vis-item.bar-style-temporisation::before,
+#msProjectTimeline .vis-item.bar-style-autres-temporisation::before,
+#msProjectTimeline .vis-item.bar-style-autre-temporisation::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: #111827;
+  pointer-events: none;
+}
+
+#msProjectTimeline .vis-item.bar-style-temporisation::after,
+#msProjectTimeline .vis-item.bar-style-autres-temporisation::after,
+#msProjectTimeline .vis-item.bar-style-autre-temporisation::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(17, 24, 39, 0.78) 0px,
+    rgba(17, 24, 39, 0.78) 2px,
+    transparent 2px,
+    transparent 4px
+  );
+  pointer-events: none;
 }
 
 #msProjectTimeline .vis-item.bar-style-edt-preparation,

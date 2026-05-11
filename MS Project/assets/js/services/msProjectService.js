@@ -164,6 +164,21 @@ function isTerrassementStyle(value) {
   return token === "st-terrassement" || token.endsWith("-terrassement");
 }
 
+function isDepollutionStyle(value) {
+  const token = normalizeStyleToken(value);
+  return token === "st-depollution" || token.endsWith("-depollution");
+}
+
+function isVrdStyle(value) {
+  const token = normalizeStyleToken(value);
+  return token === "st-vrd" || token.endsWith("-vrd");
+}
+
+function isCesStyle(value) {
+  const token = normalizeStyleToken(value);
+  return token === "st-ces" || token.endsWith("-ces");
+}
+
 function isRsoStyle(value) {
   const token = normalizeStyleToken(value);
   return token === "go-rso" || token.endsWith("-rso");
@@ -222,9 +237,34 @@ function isAutreCheminCritiqueStyle(value) {
   return token === "autre-chemin-critique" || token.endsWith("-chemin-critique");
 }
 
+function isAutresTemporisationStyle(value) {
+  const token = normalizeStyleToken(value);
+  return (
+    token === "autres-temporisation" ||
+    token === "autre-temporisation" ||
+    token.endsWith("-autres-temporisation") ||
+    token.endsWith("-autre-temporisation")
+  );
+}
+
 function isEdtPreparationStyle(value) {
   const token = normalizeStyleToken(value);
   return token === "edt-preparation" || token.endsWith("-edt-preparation");
+}
+
+function isDiversTravauxStyle(value) {
+  const token = normalizeStyleToken(value);
+  return token === "divers-travaux-divers" || token.endsWith("-travaux-divers");
+}
+
+function isDiversTscStyle(value) {
+  const token = normalizeStyleToken(value);
+  return token === "divers-tsc" || token.endsWith("-tsc");
+}
+
+function isDiversFinitionsStyle(value) {
+  const token = normalizeStyleToken(value);
+  return token === "divers-finitions" || token.endsWith("-finitions");
 }
 
 function resolveExplicitStyleClass(value) {
@@ -241,6 +281,18 @@ function resolveExplicitStyleClass(value) {
 
   if (isTerrassementStyle(value)) {
     classes.push("bar-style-terrassement");
+  }
+
+  if (isDepollutionStyle(value)) {
+    classes.push("bar-style-depollution");
+  }
+
+  if (isVrdStyle(value)) {
+    classes.push("bar-style-vrd");
+  }
+
+  if (isCesStyle(value)) {
+    classes.push("bar-style-ces");
   }
 
   if (isRsoStyle(value)) {
@@ -279,8 +331,24 @@ function resolveExplicitStyleClass(value) {
     classes.push("bar-style-chemin-critique");
   }
 
+  if (isAutresTemporisationStyle(value)) {
+    classes.push("bar-style-temporisation");
+  }
+
   if (isEdtPreparationStyle(value)) {
     classes.push("bar-style-edt-preparation");
+  }
+
+  if (isDiversTravauxStyle(value)) {
+    classes.push("bar-style-divers-travaux");
+  }
+
+  if (isDiversTscStyle(value)) {
+    classes.push("bar-style-divers-tsc");
+  }
+
+  if (isDiversFinitionsStyle(value)) {
+    classes.push("bar-style-divers-finitions");
   }
 
   return classes;
@@ -338,6 +406,19 @@ function resolveTaskInlineStyle(row) {
       "background-image:repeating-linear-gradient(45deg, rgba(220, 38, 38, 0.22) 0px, rgba(220, 38, 38, 0.22) 5px, rgba(254, 226, 226, 0.45) 5px, rgba(254, 226, 226, 0.45) 10px), repeating-linear-gradient(-45deg, rgba(220, 38, 38, 0.22) 0px, rgba(220, 38, 38, 0.22) 5px, rgba(254, 226, 226, 0.45) 5px, rgba(254, 226, 226, 0.45) 10px) !important",
       "border-color:#ef4444 !important",
       "color:#991b1b !important",
+    ].join(";");
+  }
+
+  if (isAutresTemporisationStyle(row?.barStyleLabel)) {
+    return [
+      "background-color:transparent !important",
+      "background-image:none !important",
+      "border-top:0 !important",
+      "border-bottom:0 !important",
+      "border-left:1px solid #111827 !important",
+      "border-right:1px solid #111827 !important",
+      "box-shadow:none !important",
+      "color:transparent !important",
     ].join(";");
   }
 
