@@ -503,6 +503,7 @@ export async function importMsProjectXmlFile(file) {
   const effortCol = columns.effort;
   const projectLinkCol = columns.projectLink;
   const titleCol = columns.title;
+  const boldCol = columns.bold;
 
   if (!uniqueNumberCol || !taskNameCol || !startCol || !endCol || !durationCol) {
     throw new Error("Mapping des colonnes MS Project incomplet dans la configuration.");
@@ -551,6 +552,9 @@ export async function importMsProjectXmlFile(file) {
     if (effortCol) record[effortCol] = "";
     if (projectLinkCol) record[projectLinkCol] = "";
     if (titleCol) record[titleCol] = "";
+    if (boldCol) {
+      record[boldCol] = getDirectChildTextByLocalName(taskNode, "Summary") === "1" ? "Oui" : "";
+    }
 
     const normalizedStyle = barStyleResolver.resolve(taskNode);
     if (barStyleCol) record[barStyleCol] = normalizedStyle;

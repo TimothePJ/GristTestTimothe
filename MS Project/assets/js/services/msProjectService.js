@@ -111,8 +111,9 @@ function escapeHtml(value) {
 }
 
 function buildGroupContent(row) {
+  const titleClass = row.isTitleRow || row.isBoldRow ? " row-is-title" : "";
   return `
-    <div class="group-row-grid${row.isTitleRow ? " row-is-title" : ""}" style="display:grid;grid-template-columns:var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team);align-items:center;width:var(--left-grid-width);min-height:var(--row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
+    <div class="group-row-grid${titleClass}" style="display:grid;grid-template-columns:var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team);align-items:center;width:var(--left-grid-width);min-height:var(--row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
       <div class="cell-id">${escapeHtml(row.id)}</div>
       <div class="cell-task">${escapeHtml(row.task)}</div>
       <div class="cell-start">${escapeHtml(row.start)}</div>
@@ -134,8 +135,27 @@ function normalizeStyleToken(value) {
   return normalized || "default";
 }
 
+function isYesValue(value) {
+  const normalized = toText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("fr");
+  return normalized === "oui" || normalized === "yes" || normalized === "true" || normalized === "1";
+}
+
+function isBaseDefaultStyle(value) {
+  return normalizeStyleToken(value) === "base-style-par-defaut-00";
+}
+
 function resolveTaskClass(row) {
-  return `phase-task bar-style-${normalizeStyleToken(row.barStyleLabel)}`;
+  const classes = [`phase-task`, `bar-style-${normalizeStyleToken(row.barStyleLabel)}`];
+
+  if (row.isBaseDefaultStyle) {
+    classes.push("base-default-style-task");
+    classes.push(row.isBoldRow ? "base-default-bold-task" : "base-default-regular-task");
+  }
+
+  return classes.join(" ");
 }
 
 function resolveProjectFilterColumn(rawRows, config) {
@@ -255,7 +275,10 @@ export function buildTimelineDataFromMsProjectRows(
     const level = toText(rawRow[columns.level]);
     const indicator = toText(rawRow[columns.indicator]);
     const effort = toNumber(rawRow[columns.effort]);
+    const boldLabel = toText(rawRow[columns.bold]);
     const isTitleRow = titleMarker.toLocaleLowerCase("fr") === "titre";
+    const isBoldRow = isYesValue(boldLabel);
+    const baseDefaultStyle = isBaseDefaultStyle(barStyle);
 
     return {
       rowId: rawRow[columns.id] ?? index + 1,
@@ -274,8 +297,11 @@ export function buildTimelineDataFromMsProjectRows(
       subTeamLabel: toText(rawRow[columns.subTeam]),
       levelLabel: level,
       barStyleLabel: barStyle,
+      boldLabel,
       titleMarkerLabel: titleMarker,
       isTitleRow,
+      isBoldRow,
+      isBaseDefaultStyle: baseDefaultStyle,
       indicatorLabel: indicator,
       effortValue: effort,
       projectLabel: projectFilterColumn ? toText(rawRow[projectFilterColumn]) : "",
@@ -312,6 +338,8 @@ export function buildTimelineDataFromMsProjectRows(
       teamLabel: row.teamLabel,
       styleLabel: row.barStyleLabel,
       isTitleRow: Boolean(row.isTitleRow),
+      isBoldRow: Boolean(row.isBoldRow),
+      isBaseDefaultStyle: Boolean(row.isBaseDefaultStyle),
       levelLabel: row.levelLabel,
       indicatorLabel: row.indicatorLabel,
       effortValue: row.effortValue,
@@ -328,10 +356,29 @@ export function buildTimelineDataFromMsProjectRows(
       Equipe : ${escapeHtml(row.teamLabel || "Non renseignee")}<br>
       Niveau : ${escapeHtml(row.levelLabel || "Non renseigne")}<br>
       Style : ${escapeHtml(row.barStyleLabel || "Non renseigne")}<br>
+      Bold : ${escapeHtml(row.boldLabel || "Non")}<br>
       Effort : ${escapeHtml(row.effortValue == null ? "Non renseigne" : String(row.effortValue))}
     `;
 
     const singleDayTask = isSameCalendarDay(row.startDate, row.endDate);
+    const rangeContent = row.isBaseDefaultStyle ? "" : row.barStyleLabel || "";
+    const hasPositiveDuration = row.durationValue != null && row.durationValue > 0;
+    const baseRegularWithoutDuration =
+      row.isBaseDefaultStyle && !row.isBoldRow && !hasPositiveDuration;
+
+    if (baseRegularWithoutDuration) {
+      const milestoneStart = toLocalNoon(row.endDate) || toLocalNoon(row.startDate) || row.startDate;
+      items.push({
+        id: `${groupId}-base-default-no-duration`,
+        group: groupId,
+        start: milestoneStart,
+        content: "",
+        className: `${resolveTaskClass(row)} milestone-task`,
+        type: "box",
+        title: sharedTitle,
+      });
+      return;
+    }
 
     if (row.endDate > row.startDate && !singleDayTask) {
       items.push({
@@ -339,7 +386,7 @@ export function buildTimelineDataFromMsProjectRows(
         group: groupId,
         start: row.startDate,
         end: row.endDate,
-        content: row.barStyleLabel || "",
+        content: rangeContent,
         className: `${resolveTaskClass(row)}${row.isTitleRow ? " title-task" : ""}`,
         type: "range",
         title: sharedTitle,
