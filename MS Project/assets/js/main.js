@@ -24,7 +24,7 @@ let refreshInProgress = false;
 let importButtonBound = false;
 let importFileInputEl = null;
 let importInProgress = false;
-let sortMode = "chronological";
+let sortMode = "xml-order";
 
 function setMsProjectStatus(message = "") {
   const el = document.getElementById("msProjectStatus");
@@ -207,8 +207,11 @@ async function handleProjectChange(currentState) {
 }
 
 async function handleSortModeChange(nextSortMode) {
-  const normalizedSortMode =
-    nextSortMode === "planning-number" ? "planning-number" : "chronological";
+  const normalizedSortMode = ["xml-order", "planning-number", "chronological"].includes(
+    nextSortMode
+  )
+    ? nextSortMode
+    : "xml-order";
   if (sortMode === normalizedSortMode) return;
   sortMode = normalizedSortMode;
   await refreshMsProject();

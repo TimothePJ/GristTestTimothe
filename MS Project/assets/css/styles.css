@@ -651,6 +651,38 @@ body.ms-row-dragging {
   border-color: #111827 !important;
 }
 
+#msProjectTimeline .vis-item.base-default-bold-task.vis-range {
+  background-color: transparent !important;
+  background-image: linear-gradient(
+    to bottom,
+    #111827 0,
+    #111827 2px,
+    transparent 2px,
+    transparent 100%
+  ) !important;
+  border: 0 !important;
+  border-color: transparent !important;
+  border-width: 0 !important;
+  box-shadow: none !important;
+  min-height: 14px !important;
+}
+
+#msProjectTimeline .vis-item.base-default-regular-task.vis-range {
+  background-color: transparent !important;
+  background-image: linear-gradient(
+    to bottom,
+    #dc2626 0,
+    #dc2626 2px,
+    transparent 2px,
+    transparent 100%
+  ) !important;
+  border: 0 !important;
+  border-color: transparent !important;
+  border-width: 0 !important;
+  box-shadow: none !important;
+  min-height: 14px !important;
+}
+
 #msProjectTimeline .vis-item.milestone-task.vis-box .vis-item-content {
   display: none !important;
 }

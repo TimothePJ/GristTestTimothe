@@ -217,6 +217,23 @@ function parsePlanningNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function compareRowsByXmlOrder(a, b) {
+  const aOrder = parsePlanningNumber(a.indicatorLabel);
+  const bOrder = parsePlanningNumber(b.indicatorLabel);
+  const aHasOrder = aOrder != null;
+  const bHasOrder = bOrder != null;
+
+  if (aHasOrder && bHasOrder && aOrder !== bOrder) {
+    return aOrder - bOrder;
+  }
+
+  if (aHasOrder !== bHasOrder) {
+    return aHasOrder ? -1 : 1;
+  }
+
+  return a.sourceIndex - b.sourceIndex;
+}
+
 function compareRowsByPlanningNumber(a, b) {
   const aPlanningNumber = toText(a.uniqueNumberLabel);
   const bPlanningNumber = toText(b.uniqueNumberLabel);
@@ -245,6 +262,10 @@ function compareRowsByPlanningNumber(a, b) {
 }
 
 function compareRowsBySortMode(a, b, sortMode) {
+  if (sortMode === "xml-order") {
+    return compareRowsByXmlOrder(a, b);
+  }
+
   if (sortMode === "planning-number") {
     return compareRowsByPlanningNumber(a, b);
   }
@@ -254,7 +275,7 @@ function compareRowsBySortMode(a, b, sortMode) {
 export function buildTimelineDataFromMsProjectRows(
   rawRows,
   selectedProject = "",
-  sortMode = "chronological"
+  sortMode = "xml-order"
 ) {
   const config = APP_CONFIG.grist.msProjectTable;
   const columns = config.columns;

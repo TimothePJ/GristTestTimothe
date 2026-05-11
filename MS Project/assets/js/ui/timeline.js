@@ -1498,7 +1498,7 @@ export function bindTimelineToolbar({ onSortChange = null } = {}) {
 
   updateNavCenterButtonLabel();
   updateDateRangeDisplay();
-  setActiveSortButton("chronological");
+  setActiveSortButton("xml-order");
 }
 
 export function clearMsProjectTimeline() {

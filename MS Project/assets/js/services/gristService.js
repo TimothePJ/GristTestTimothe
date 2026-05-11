@@ -498,6 +498,7 @@ export async function importMsProjectXmlFile(file) {
   const endCol = columns.end;
   const durationCol = columns.duration;
   const barStyleCol = columns.barStyle;
+  const indicatorCol = columns.indicator;
   const teamCol = columns.team;
   const subTeamCol = columns.subTeam;
   const effortCol = columns.effort;
@@ -529,7 +530,7 @@ export async function importMsProjectXmlFile(file) {
   const barStyleResolver = createBarStyleResolver(xmlDocument);
   const importedRecords = [];
 
-  for (const taskNode of taskNodes) {
+  for (const [taskIndex, taskNode] of taskNodes.entries()) {
     const uid = getDirectChildTextByLocalName(taskNode, "UID");
     const taskName = getDirectChildTextByLocalName(taskNode, "Name");
     if (!uid || !taskName) continue;
@@ -549,6 +550,7 @@ export async function importMsProjectXmlFile(file) {
 
     if (teamCol) record[teamCol] = "";
     if (subTeamCol) record[subTeamCol] = "";
+    if (indicatorCol) record[indicatorCol] = taskIndex + 1;
     if (effortCol) record[effortCol] = "";
     if (projectLinkCol) record[projectLinkCol] = "";
     if (titleCol) record[titleCol] = "";
