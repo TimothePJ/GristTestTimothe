@@ -343,6 +343,25 @@ body * {
   ) !important;
 }
 
+#msProjectTimeline .ms-project-current-time-overlay {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  min-height: 100% !important;
+  pointer-events: none !important;
+  z-index: 4 !important;
+}
+
+#msProjectTimeline .ms-project-current-time-line {
+  position: absolute !important;
+  top: 0 !important;
+  width: 2px !important;
+  min-height: 100% !important;
+  background: var(--vinci-red) !important;
+  opacity: 0.9;
+}
+
 #msProjectTimeline .vis-background .vis-group {
   height: var(--row-height) !important;
   min-height: var(--row-height) !important;

@@ -371,10 +371,56 @@ function renderTimelineGridOverlay(containerEl, chrome) {
   });
 }
 
+function getOrCreateCurrentTimeOverlay(containerEl = getTimelineContainer()) {
+  const centerPanel = containerEl.querySelector(".vis-panel.vis-center");
+  if (!centerPanel) return null;
+
+  let overlay = Array.from(centerPanel.children).find((child) =>
+    child.classList?.contains("ms-project-current-time-overlay")
+  );
+
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.className = "ms-project-current-time-overlay";
+    centerPanel.appendChild(overlay);
+  }
+
+  return overlay;
+}
+
+function renderCurrentTimeOverlay(containerEl = getTimelineContainer()) {
+  const overlay = getOrCreateCurrentTimeOverlay(containerEl);
+  if (!overlay || !timelineInstance) return;
+
+  const centerPanel = containerEl.querySelector(".vis-panel.vis-center");
+  const centerWidth = centerPanel?.getBoundingClientRect?.().width || 0;
+  const windowRange = timelineInstance.getWindow();
+  const startMs = windowRange.start.valueOf();
+  const endMs = windowRange.end.valueOf();
+  const todayMs = Date.now();
+  const durationMs = endMs - startMs;
+
+  if (!centerWidth || !Number.isFinite(durationMs) || durationMs <= 0 || todayMs < startMs || todayMs > endMs) {
+    overlay.hidden = true;
+    overlay.replaceChildren();
+    return;
+  }
+
+  const x = ((todayMs - startMs) / durationMs) * centerWidth;
+  const line = document.createElement("div");
+  line.className = "ms-project-current-time-line";
+  line.style.transform = `translate(${x}px, 0px)`;
+  line.style.height = `${getTimelineContentHeight(containerEl)}px`;
+
+  overlay.hidden = false;
+  overlay.replaceChildren(line);
+}
+
 function syncTimelineChrome(containerEl = getTimelineContainer()) {
   const chrome = readTimelineChrome(containerEl);
   renderTimelineHeaderAxis(chrome);
   renderTimelineGridOverlay(containerEl, chrome);
+  renderCurrentTimeOverlay(containerEl);
   updateCurrentTimeLineBounds();
 }
 
