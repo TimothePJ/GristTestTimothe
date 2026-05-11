@@ -135,6 +135,12 @@ function normalizeStyleToken(value) {
   return normalized || "default";
 }
 
+function normalizeBarStyleLabel(value) {
+  const text = toText(value);
+  if (!text) return "";
+  return text.replace(/\s*\|\s*\d+\s*$/, "").trim();
+}
+
 function isYesValue(value) {
   const normalized = toText(value)
     .normalize("NFD")
@@ -144,7 +150,8 @@ function isYesValue(value) {
 }
 
 function isBaseDefaultStyle(value) {
-  return normalizeStyleToken(value) === "base-style-par-defaut-00";
+  const token = normalizeStyleToken(value);
+  return token === "base-style-par-defaut" || token === "base-style-par-defaut-00";
 }
 
 function resolveTaskClass(row) {
@@ -291,7 +298,7 @@ export function buildTimelineDataFromMsProjectRows(
     const team = [toText(rawRow[columns.team]), toText(rawRow[columns.subTeam])]
       .filter(Boolean)
       .join(" / ");
-    const barStyle = toText(rawRow[columns.barStyle]);
+    const barStyle = normalizeBarStyleLabel(rawRow[columns.barStyle]);
     const titleMarker = toText(rawRow[columns.title]);
     const level = toText(rawRow[columns.level]);
     const indicator = toText(rawRow[columns.indicator]);

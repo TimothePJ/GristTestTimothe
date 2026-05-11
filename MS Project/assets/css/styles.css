@@ -10,7 +10,10 @@
   --left-grid-width: calc(var(--col-id) + var(--col-task) + var(--col-start) + var(--col-end) + var(--col-duration) + var(--col-team));
   --left-panel-width: calc(var(--left-grid-width) + (var(--left-pad-x) * 2));
   --row-height: 40px;
-  --toolbar-height: 46px;
+  --toolbar-height: 78px;
+  --timeline-nav-side-width: 76px;
+  --timeline-nav-center-width: 128px;
+  --ms-timeline-axis-height: var(--row-height);
 }
 
 html {
@@ -48,6 +51,32 @@ body * {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.timeline-control-stack {
+  display: grid;
+  gap: 4px;
+}
+
+.timeline-control-stack .nav-buttons,
+.timeline-control-stack .zoom-buttons {
+  display: grid;
+  gap: 4px;
+}
+
+.timeline-control-stack .nav-buttons {
+  grid-template-columns:
+    var(--timeline-nav-side-width)
+    var(--timeline-nav-center-width)
+    var(--timeline-nav-side-width);
+}
+
+.timeline-control-stack .zoom-buttons {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.timeline-control-stack button {
+  width: 100%;
 }
 
 .toolbar-label {
@@ -102,23 +131,38 @@ body * {
 
 .ms-project-header-row {
   display: grid;
-  grid-template-columns: var(--left-panel-width) 1fr;
+  grid-template-columns: var(--left-panel-width) minmax(0, 1fr);
   align-items: stretch;
+  width: 100%;
   background: var(--panel-bg);
   border-bottom: 1px solid var(--panel-border);
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 80;
+}
+
+.ms-project-header-row.is-fixed {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  box-shadow: 0 1px 0 var(--panel-border);
+}
+
+.ms-project-header-row.is-fixed + #timelineWrapper {
+  margin-top: var(--ms-timeline-axis-height);
 }
 
 .ms-project-header-left {
   display: grid;
   grid-template-columns: var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team);
-  width: var(--left-grid-width);
-  min-height: var(--row-height);
+  width: 100%;
+  min-height: var(--ms-timeline-axis-height);
   padding: 0 var(--left-pad-x);
-  box-sizing: content-box;
-  border-right: 1px solid var(--panel-border);
+  box-sizing: border-box;
+  border-right: 0;
+  box-shadow: inset -1px 0 0 var(--panel-border);
 }
 
 .ms-project-header-left .hcol,
@@ -132,10 +176,73 @@ body * {
 }
 
 .ms-project-header-right {
-  padding: 0 12px;
+  position: relative;
+  padding: 0;
+  margin: 0;
+  min-height: var(--ms-timeline-axis-height);
+  overflow: hidden;
+  background: var(--panel-bg);
+}
+
+.ms-project-header-axis {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  cursor: zoom-in;
+}
+
+.ms-project-header-axis-grid,
+.ms-project-header-axis-labels {
+  position: absolute !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  pointer-events: none !important;
+}
+
+.ms-project-header-axis-grid {
+  z-index: 1;
+}
+
+.ms-project-header-axis-labels {
+  z-index: 2;
+}
+
+.ms-project-header-axis-grid-line,
+.ms-project-grid-overlay-line {
+  position: absolute !important;
+  top: 0 !important;
+  height: 100% !important;
+  width: 0 !important;
+  border-left: 1px solid #eef2f7 !important;
+  pointer-events: none !important;
+}
+
+.ms-project-header-axis-grid-line--major,
+.ms-project-grid-overlay-line--major {
+  border-left-color: #dbe2ea !important;
+}
+
+.ms-project-header-axis-label {
+  position: absolute !important;
+  margin: 0 !important;
+  padding: 0 2px !important;
+  color: #475569 !important;
+  line-height: 1.2 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: clip !important;
 }
 
 #timelineWrapper {
+  position: relative;
+  z-index: 1;
   min-height: 540px;
   background: #fff;
 }
@@ -150,12 +257,34 @@ body * {
   background: #fff;
   font-family: inherit;
   font-size: 13px;
+  overflow: visible !important;
 }
 
 #msProjectTimeline .vis-panel.vis-left {
+  top: 0 !important;
+  height: 100% !important;
   width: var(--left-panel-width) !important;
   background: #fbfcfe !important;
-  border-right: 1px solid var(--panel-border) !important;
+  border-right: 0 !important;
+  box-shadow: inset -1px 0 0 var(--panel-border) !important;
+}
+
+#msProjectTimeline .vis-panel.vis-center {
+  top: 0 !important;
+  height: 100% !important;
+  border-left: 0 !important;
+  background: #fff !important;
+}
+
+#msProjectTimeline .vis-panel.vis-top {
+  top: 0 !important;
+  height: var(--ms-timeline-axis-height) !important;
+  z-index: 1 !important;
+  background: var(--panel-bg) !important;
+  border-bottom: none !important;
+  overflow: hidden !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
 #msProjectTimeline .vis-panel.vis-center,
@@ -170,7 +299,9 @@ body * {
   min-height: var(--row-height) !important;
   display: flex !important;
   align-items: center !important;
-  border-bottom: 1px solid var(--panel-border) !important;
+  border-top: 0 !important;
+  border-bottom: 0 !important;
+  background: transparent !important;
 }
 
 #msProjectTimeline .vis-labelset .vis-label .vis-inner {
@@ -181,21 +312,65 @@ body * {
   overflow: hidden !important;
 }
 
-#msProjectTimeline .vis-background .vis-group,
+#msProjectTimeline .vis-labelset {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(var(--row-height) - 1px),
+    #edf1f5 calc(var(--row-height) - 1px),
+    #edf1f5 var(--row-height)
+  ) !important;
+}
+
+#msProjectTimeline .vis-background {
+  background: transparent !important;
+  z-index: 0 !important;
+}
+
+#msProjectTimeline .ms-project-grid-overlay {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  min-width: 100% !important;
+  pointer-events: none !important;
+  z-index: 1 !important;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(var(--row-height) - 1px),
+    #edf1f5 calc(var(--row-height) - 1px),
+    #edf1f5 var(--row-height)
+  ) !important;
+}
+
+#msProjectTimeline .vis-background .vis-group {
+  height: var(--row-height) !important;
+  min-height: var(--row-height) !important;
+  border-top: 0 !important;
+  border-bottom: 0 !important;
+  background: transparent !important;
+}
+
+#msProjectTimeline .vis-foreground {
+  z-index: 2 !important;
+}
+
 #msProjectTimeline .vis-foreground .vis-group {
   height: var(--row-height) !important;
   min-height: var(--row-height) !important;
-  border-bottom: 1px solid #edf1f5 !important;
+  border-top: 0 !important;
+  border-bottom: 0 !important;
+  background: transparent !important;
 }
 
 #msProjectTimeline .group-row-grid {
   display: grid !important;
   grid-template-columns: var(--col-id) var(--col-task) var(--col-start) var(--col-end) var(--col-duration) var(--col-team) !important;
   align-items: center !important;
-  width: var(--left-grid-width) !important;
+  width: 100% !important;
   min-height: var(--row-height) !important;
   padding: 0 var(--left-pad-x) !important;
-  box-sizing: content-box !important;
+  box-sizing: border-box !important;
 }
 
 #msProjectTimeline .group-row-grid.ms-draggable-row,
@@ -354,12 +529,13 @@ body.ms-row-dragging {
   font-variant-numeric: tabular-nums;
 }
 
-#msProjectTimeline .vis-time-axis .vis-grid.vis-minor {
-  border-color: #eef2f7 !important;
+#msProjectTimeline .vis-time-axis .vis-grid {
+  border-color: transparent !important;
 }
 
+#msProjectTimeline .vis-time-axis .vis-grid.vis-minor,
 #msProjectTimeline .vis-time-axis .vis-grid.vis-major {
-  border-color: #dbe2ea !important;
+  border-color: transparent !important;
 }
 
 #msProjectTimeline .vis-time-axis .vis-text {
@@ -701,6 +877,7 @@ body.ms-row-dragging {
   width: 2px !important;
   background: var(--vinci-red) !important;
   opacity: 0.85;
+  z-index: 4 !important;
 }
 
 .ms-project-status {

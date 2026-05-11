@@ -291,7 +291,10 @@ function findOutlineCodeValueId(taskNode, expectedFieldId) {
 function normalizeBarStyleLabel(rawValue) {
   const text = toText(rawValue);
   if (!text) return "";
-  return text.replace(/^\s*\d+\s*-\s*/, "").trim();
+  return text
+    .replace(/^\s*\d+\s*-\s*/, "")
+    .replace(/\s*\|\s*\d+\s*$/, "")
+    .trim();
 }
 
 function normalizeLookupText(value) {
