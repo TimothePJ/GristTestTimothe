@@ -64,69 +64,36 @@ body {
 }
 
 .custom-rules-panel {
-  border-top: 1px solid #ed1b2d;
-  padding-top: 14px;
+  padding-top: 0;
 }
 
-.rules-list {
-  list-style: none;
-  margin: 0 0 14px;
-  padding: 0;
-}
-
-.rules-list-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 7px 0;
-  border-bottom: 1px solid rgba(237, 27, 45, 0.2);
-  color: #004990;
-}
-
-.rules-delete-button {
-  flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
-  border: 1px solid #ed1b2d;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #ed1b2d;
-  cursor: pointer;
-  font-weight: bold;
-  line-height: 1;
-}
-
-.rules-delete-button:hover:not(:disabled) {
-  background: #ed1b2d;
-  color: #ffffff;
-}
-
-.rules-delete-button:disabled,
-.rules-add-button:disabled,
-.rules-field select:disabled {
+.index-selection-select:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
 
-.rules-form {
+.index-selection-list {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 
-.rules-field {
+.index-selection-item {
   display: grid;
-  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) minmax(72px, 96px);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(237, 27, 45, 0.2);
   font-size: 0.95em;
   color: #004990;
 }
 
-.rules-field span {
+.index-selection-item span {
   font-weight: bold;
 }
 
-.rules-field select {
+.index-selection-select {
   min-width: 0;
   width: 100%;
   padding: 7px 8px;
@@ -136,21 +103,6 @@ body {
   color: #004990;
 }
 
-.rules-add-button {
-  padding: 8px 12px;
-  border: 1px solid #004990;
-  border-radius: 6px;
-  background: #004990;
-  color: #ffffff;
-  cursor: pointer;
-  font-weight: bold;
-}
-
-.rules-add-button:hover:not(:disabled) {
-  background: #00366d;
-}
-
-.rules-empty,
 .rules-feedback {
   margin: 8px 0;
   font-size: 0.95em;
@@ -166,10 +118,6 @@ body {
 
 .rules-feedback-success {
   color: #007a5a;
-}
-
-.custom-row {
-  background-color: rgba(75, 192, 192, 0.08);
 }
 
 .summary-table {
@@ -191,6 +139,10 @@ body {
 
 .summary-table td:not(:first-child) {
   text-align: right;
+}
+
+.budget-only-row {
+  background-color: rgba(0, 73, 144, 0.06);
 }
 
 .total-row {

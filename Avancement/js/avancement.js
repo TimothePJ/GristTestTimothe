@@ -4,21 +4,25 @@ const SELECTORS = {
   chartContainer: '.chart-container',
   averageIndicesContainer: 'average-indices-container',
   statsOutput: 'stats-output',
-  ruleTypeSelect: 'customRuleTypeSelect',
-  ruleIndiceSelect: 'customRuleIndiceSelect',
-  addRuleButton: 'addCustomRuleButton',
-  ruleFeedback: 'customRuleFeedback',
+  ruleFeedback: 'indexSelectionFeedback',
 };
 
 const TABLES = {
   projects: 'Projets',
-  ventilation: 'Ventilation',
+  budget: 'Budget',
 };
 
 const PROJECT_COLUMNS = {
   id: 'id',
   name: 'Nom_de_projet',
+  projectNumber: 'Numero_de_projet',
   avancement: 'Avancement',
+};
+
+const BUDGET_COLUMNS = {
+  projectNumber: 'NumeroProjet',
+  chapter: 'Chapter',
+  amount: 'Amount',
 };
 
 const DOCUMENT_TYPES = {
@@ -34,7 +38,7 @@ const state = {
   records: [],
   chart: null,
   currentProjectConfig: null,
-  ruleFeedback: null,
+  selectionFeedback: null,
   lastSelectedProject: '',
 };
 
@@ -53,7 +57,7 @@ function init() {
   Chart.register(ChartDataLabels);
 
   elements.projectDropdown.addEventListener('change', () => {
-    state.ruleFeedback = null;
+    state.selectionFeedback = null;
     updateDashboard();
   });
 
@@ -103,7 +107,7 @@ async function updateDashboard() {
   clearOutput();
 
   if (selectedProject !== state.lastSelectedProject) {
-    state.ruleFeedback = null;
+    state.selectionFeedback = null;
     state.lastSelectedProject = selectedProject;
   }
 
@@ -121,8 +125,8 @@ async function updateDashboard() {
   }
 
   const projectConfig = await fetchProjectConfig(selectedProject);
-  const devisMap = await fetchDevisByDocumentType(selectedProject);
-  const dashboardData = buildDashboardData(projectRecords, devisMap, projectConfig.rules);
+  const ventilation = await fetchBudgetVentilation(projectConfig, projectRecords);
+  const dashboardData = buildDashboardData(projectRecords, ventilation, projectConfig.selections);
 
   state.currentProjectConfig = projectConfig;
 
@@ -174,18 +178,20 @@ async function fetchProjectConfig(selectedProject) {
     if (!hasAvancementColumn) {
       return createProjectConfig({
         id: projectRow[PROJECT_COLUMNS.id],
+        projectNumber: normalizeText(projectRow[PROJECT_COLUMNS.projectNumber]),
         canSave: false,
         warning: 'Colonne Projets.Avancement introuvable.',
       });
     }
 
-    const parsedRules = parseAvancementRules(projectRow[PROJECT_COLUMNS.avancement]);
+    const parsedSelections = parseAvancementSelections(projectRow[PROJECT_COLUMNS.avancement]);
 
     return createProjectConfig({
       id: projectRow[PROJECT_COLUMNS.id],
-      rules: parsedRules.rules,
-      canSave: !parsedRules.error,
-      warning: parsedRules.error
+      projectNumber: normalizeText(projectRow[PROJECT_COLUMNS.projectNumber]),
+      selections: parsedSelections.selections,
+      canSave: !parsedSelections.error,
+      warning: parsedSelections.error
         ? 'JSON invalide dans Projets.Avancement. Corrige ou vide la cellule.'
         : '',
     });
@@ -198,10 +204,17 @@ async function fetchProjectConfig(selectedProject) {
   }
 }
 
-function createProjectConfig({ id = null, rules = [], canSave = false, warning = '' }) {
+function createProjectConfig({
+  id = null,
+  projectNumber = '',
+  selections = [],
+  canSave = false,
+  warning = '',
+}) {
   return {
     id,
-    rules,
+    projectNumber,
+    selections,
     canSave,
     warning,
   };
@@ -245,30 +258,30 @@ function tableHasColumn(table, columnName) {
   return Boolean(table && Object.prototype.hasOwnProperty.call(table, columnName));
 }
 
-function parseAvancementRules(rawValue) {
+function parseAvancementSelections(rawValue) {
   if (rawValue == null || rawValue === '') {
-    return { rules: [], error: null };
+    return { selections: [], error: null };
   }
 
   try {
     const parsed = typeof rawValue === 'string' ? JSON.parse(rawValue) : rawValue;
 
     if (!Array.isArray(parsed)) {
-      return { rules: [], error: new Error('Avancement must be an array') };
+      return { selections: [], error: new Error('Avancement must be an array') };
     }
 
     return {
-      rules: dedupeRules(parsed.map(normalizeRule).filter(Boolean)),
+      selections: dedupeSelections(parsed.map(normalizeSelection).filter(Boolean)),
       error: null,
     };
   } catch (error) {
-    return { rules: [], error };
+    return { selections: [], error };
   }
 }
 
-function normalizeRule(rule) {
-  const typeDocument = normalizeText(rule?.typeDocument);
-  const indice = normalizeIndice(rule?.indice);
+function normalizeSelection(selection) {
+  const typeDocument = normalizeText(selection?.typeDocument);
+  const indice = normalizeIndice(selection?.indice);
 
   if (!typeDocument || !indice) {
     return null;
@@ -280,11 +293,11 @@ function normalizeRule(rule) {
   };
 }
 
-function dedupeRules(rules) {
+function dedupeSelections(selections) {
   const seen = new Set();
 
-  return rules.filter((rule) => {
-    const key = getRuleKey(rule);
+  return selections.filter((selection) => {
+    const key = selection.typeDocument;
 
     if (seen.has(key)) {
       return false;
@@ -295,47 +308,151 @@ function dedupeRules(rules) {
   });
 }
 
-async function fetchDevisByDocumentType(selectedProject) {
-  const ventilationData = await grist.docApi.fetchTable(TABLES.ventilation);
-  const devisMap = {};
+async function fetchBudgetVentilation(projectConfig, projectRecords) {
+  const emptyVentilation = {
+    byType: {},
+    unmatchedRows: [],
+    total: 0,
+  };
 
-  for (let index = 0; index < ventilationData.id.length; index += 1) {
-    if (normalizeText(ventilationData.gristHelper_Display[index]) === selectedProject) {
-      const documentType = normalizeText(ventilationData.Type_document[index]);
-      devisMap[documentType] = ventilationData.Budget[index] || 0;
-    }
+  if (!projectConfig.projectNumber) {
+    return emptyVentilation;
   }
 
-  return devisMap;
+  try {
+    const budgetTable = await grist.docApi.fetchTable(TABLES.budget);
+    const documentTypes = getDocumentTypes(projectRecords);
+    const projectBudgetRows = tableToRows(budgetTable)
+      .filter((row) => normalizeText(row[BUDGET_COLUMNS.projectNumber]) === projectConfig.projectNumber)
+      .map((row) => ({
+        chapter: normalizeText(row[BUDGET_COLUMNS.chapter]),
+        amount: toNumber(row[BUDGET_COLUMNS.amount]),
+      }))
+      .filter((row) => row.chapter || row.amount !== 0);
+
+    return buildBudgetVentilation(projectBudgetRows, documentTypes);
+  } catch (error) {
+    console.error('Erreur chargement Budget :', error);
+    return emptyVentilation;
+  }
 }
 
-function buildDashboardData(projectRecords, devisMap, customRules) {
-  const statsByType = buildStatsByType(projectRecords);
+function buildBudgetVentilation(budgetRows, documentTypes) {
+  const byType = {};
+  const unmatchedRows = [];
+  let total = 0;
+
+  budgetRows.forEach((row) => {
+    total += row.amount;
+
+    const matchedType = getBudgetDocumentType(row.chapter, documentTypes);
+    if (matchedType) {
+      byType[matchedType] = (byType[matchedType] || 0) + row.amount;
+      return;
+    }
+
+    unmatchedRows.push(row);
+  });
+
+  return {
+    byType,
+    unmatchedRows,
+    total,
+  };
+}
+
+function getBudgetDocumentType(chapter, documentTypes) {
+  const normalizedChapter = normalizeLookupText(chapter);
+
+  if (!normalizedChapter) {
+    return '';
+  }
+
+  const explicitMatch = getExplicitBudgetDocumentType(normalizedChapter, documentTypes);
+  if (explicitMatch) {
+    return explicitMatch;
+  }
+
+  return documentTypes.find((type) => {
+    const normalizedType = normalizeLookupText(type);
+    return normalizedType && normalizedChapter.includes(normalizedType);
+  }) || '';
+}
+
+function getExplicitBudgetDocumentType(normalizedChapter, documentTypes) {
+  if (normalizedChapter.includes('plan de coffrage')) {
+    return findDocumentType(documentTypes, ['COFFRAGE']);
+  }
+
+  if (normalizedChapter.includes('plan de demolition')) {
+    return findDocumentType(documentTypes, ['DEMOLITION', 'DÉMOLITION']);
+  }
+
+  if (normalizedChapter.includes('plan d armature') || normalizedChapter.includes('plan darmature')) {
+    return findDocumentType(documentTypes, ['ARMATURES', 'ARMATURE']);
+  }
+
+  if (normalizedChapter.includes('note de calcul')) {
+    return findDocumentType(documentTypes, ['NDC']);
+  }
+
+  if (normalizedChapter.startsWith('coupes')) {
+    return findDocumentType(documentTypes, ['COUPES', 'COUPE']);
+  }
+
+  return '';
+}
+
+function findDocumentType(documentTypes, candidates) {
+  const normalizedCandidates = new Set(candidates.map(normalizeLookupText));
+
+  return documentTypes.find((type) => normalizedCandidates.has(normalizeLookupText(type))) || '';
+}
+
+function buildDashboardData(projectRecords, ventilation, indexSelections) {
+  const selectedIndicesByType = buildSelectedIndicesByType(projectRecords, indexSelections);
+  const statsByType = buildStatsByType(projectRecords, selectedIndicesByType);
   const averageIndices = buildAverageIndices(projectRecords);
   const sortedTypes = Object.keys(statsByType).sort(compareText);
-  const totalDevis = sumDevis(sortedTypes, devisMap);
-  const standardRows = buildTableRows(sortedTypes, statsByType, devisMap, totalDevis);
-  const customRows = buildCustomRows(customRules, projectRecords, devisMap, totalDevis);
-  const tableRows = [...standardRows, ...customRows];
-  const totals = buildTotals(statsByType, totalDevis, standardRows);
-  const chart = buildChartData(tableRows, totals);
+  const standardRows = buildTableRows(sortedTypes, statsByType, ventilation);
+  const budgetRows = buildUnmatchedBudgetRows(ventilation.unmatchedRows);
+  const totals = buildTotals(statsByType, ventilation.total, standardRows);
+  const chart = buildChartData(standardRows, totals);
 
   return {
     averageIndices,
     chart,
-    customRows,
+    selectedIndicesByType,
     sortedTypes,
-    tableRows,
+    tableRows: [...budgetRows, ...standardRows],
     totals,
   };
 }
 
-function buildStatsByType(projectRecords) {
+function buildSelectedIndicesByType(projectRecords, indexSelections) {
+  const selectionMap = new Map(
+    indexSelections.map((selection) => [selection.typeDocument, selection.indice]),
+  );
+
+  return Object.fromEntries(
+    getDocumentTypes(projectRecords).map((type) => {
+      const availableIndices = getIndicesForDocumentType(projectRecords, type);
+      const selectedIndice = selectionMap.get(type);
+
+      return [
+        type,
+        availableIndices.includes(selectedIndice) ? selectedIndice : INDICES.advanced,
+      ];
+    }),
+  );
+}
+
+function buildStatsByType(projectRecords, selectedIndicesByType) {
   const statsByType = {};
   const documentTypes = getDocumentTypes(projectRecords);
 
   documentTypes.forEach((type) => {
-    statsByType[type] = createStatsBucket();
+    statsByType[type] = createStatsBucket(selectedIndicesByType[type] || INDICES.advanced);
   });
 
   projectRecords.forEach((record) => {
@@ -348,7 +465,7 @@ function buildStatsByType(projectRecords) {
 
     statsByType[type].totalDocs.add(documentNumber);
 
-    if (getRecordIndice(record) === INDICES.advanced) {
+    if (getRecordIndice(record) === statsByType[type].selectedIndice) {
       statsByType[type].advancedDocs.add(documentNumber);
     }
   });
@@ -366,10 +483,11 @@ function getDocumentType(record) {
   return normalizeText(record.Type_document) || DOCUMENT_TYPES.unspecified;
 }
 
-function createStatsBucket() {
+function createStatsBucket(selectedIndice) {
   return {
     totalDocs: new Set(),
     advancedDocs: new Set(),
+    selectedIndice,
   };
 }
 
@@ -396,86 +514,64 @@ function buildAverageIndices(projectRecords) {
   return averageIndices;
 }
 
-function sumDevis(sortedTypes, devisMap) {
-  return sortedTypes.reduce((total, type) => total + getDevis(type, devisMap), 0);
-}
-
-function buildTableRows(sortedTypes, statsByType, devisMap, totalDevis) {
+function buildTableRows(sortedTypes, statsByType, ventilation) {
   return sortedTypes.map((type) => {
     const total = statsByType[type].totalDocs.size;
     const withIndice = statsByType[type].advancedDocs.size;
     const withoutIndice = total - withIndice;
     const percentage = total > 0 ? (withIndice / total) * 100 : 0;
-    const devis = getDevis(type, devisMap);
-    const percentageDevis = totalDevis > 0 ? (percentage * devis) / totalDevis : 0;
+    const ventilationPrice = getVentilationPrice(type, ventilation);
+    const percentageVentilation =
+      ventilation.total > 0 ? (percentage * ventilationPrice) / ventilation.total : 0;
+    const indice = statsByType[type].selectedIndice;
 
     return {
-      label: type,
+      label: getDocumentTypeLabel(type, indice),
       type,
+      indice,
       total,
       withIndice,
       withoutIndice,
       percentage,
-      devis,
-      percentageDevis,
-      isCustom: false,
+      ventilationPrice,
+      percentageVentilation,
+      isBudgetOnly: false,
     };
   });
 }
 
-function buildCustomRows(customRules, projectRecords, devisMap, totalDevis) {
-  return customRules
-    .map((rule) => buildCustomRow(rule, projectRecords, devisMap, totalDevis))
-    .sort((a, b) => compareText(a.label, b.label));
+function buildUnmatchedBudgetRows(unmatchedRows) {
+  return unmatchedRows.map((row) => ({
+    label: formatBudgetChapterLabel(row.chapter),
+    type: '',
+    indice: '',
+    total: null,
+    withIndice: null,
+    withoutIndice: null,
+    percentage: null,
+    ventilationPrice: row.amount,
+    percentageVentilation: null,
+    isBudgetOnly: true,
+  }));
 }
 
-function buildCustomRow(rule, projectRecords, devisMap, totalDevis) {
-  const recordsByType = projectRecords.filter(
-    (record) => getDocumentType(record) === rule.typeDocument,
-  );
-  const totalDocs = new Set();
-  const docsWithIndice = new Set();
-
-  recordsByType.forEach((record) => {
-    const documentNumber = normalizeText(record.NumeroDocument);
-
-    if (!documentNumber) {
-      return;
-    }
-
-    totalDocs.add(documentNumber);
-
-    if (getRecordIndice(record) === rule.indice) {
-      docsWithIndice.add(documentNumber);
-    }
-  });
-
-  const total = totalDocs.size;
-  const withIndice = docsWithIndice.size;
-  const withoutIndice = total - withIndice;
-  const percentage = total > 0 ? (withIndice / total) * 100 : 0;
-  const devis = getDevis(rule.typeDocument, devisMap);
-  const percentageDevis = totalDevis > 0 ? (percentage * devis) / totalDevis : 0;
-
-  return {
-    label: `${rule.typeDocument} - Indice ${rule.indice}`,
-    type: rule.typeDocument,
-    indice: rule.indice,
-    total,
-    withIndice,
-    withoutIndice,
-    percentage,
-    devis,
-    percentageDevis,
-    isCustom: true,
-  };
+function formatBudgetChapterLabel(chapter) {
+  return normalizeText(chapter).replace(/^\d+\s*-\s*/, '');
 }
 
-function getDevis(type, devisMap) {
-  return devisMap[type] || 0;
+function getVentilationPrice(type, ventilation) {
+  return ventilation.byType[type] || 0;
 }
 
-function buildTotals(statsByType, totalDevis, standardRows) {
+function getDocumentTypeLabel(type, indice) {
+  if (!indice || indice === INDICES.advanced) {
+    return type;
+  }
+
+  return `${type} - Indice ${indice}`;
+}
+
+function buildTotals(statsByType, totalVentilation, standardRows) {
   const totals = Object.values(statsByType).reduce(
     (result, stats) => {
       result.totalDocs += stats.totalDocs.size;
@@ -491,8 +587,8 @@ function buildTotals(statsByType, totalDevis, standardRows) {
   const withoutIndice = totals.totalDocs - totals.withIndice;
   const percentage =
     totals.totalDocs > 0 ? (totals.withIndice / totals.totalDocs) * 100 : 0;
-  const percentageDevis = standardRows.reduce(
-    (total, row) => total + row.percentageDevis,
+  const percentageVentilation = standardRows.reduce(
+    (total, row) => total + row.percentageVentilation,
     0,
   );
 
@@ -501,8 +597,8 @@ function buildTotals(statsByType, totalDevis, standardRows) {
     withIndice: totals.withIndice,
     withoutIndice,
     percentage,
-    totalDevis,
-    percentageDevis,
+    totalVentilation,
+    percentageVentilation,
   };
 }
 
@@ -543,8 +639,8 @@ function renderStatsTable(tableRows, totals) {
           <th>Plans sans l'indice</th>
           <th>Nombre total</th>
           <th>Pourcentage plans</th>
-          <th>Devis</th>
-          <th>Pourcentage devis</th>
+          <th>Ventilation prix</th>
+          <th>Pourcentage ventilation</th>
         </tr>
       </thead>
       <tbody>
@@ -557,14 +653,14 @@ function renderStatsTable(tableRows, totals) {
 
 function renderStatsRow(row) {
   return `
-    <tr class="${row.isCustom ? 'custom-row' : ''}">
+    <tr class="${row.isBudgetOnly ? 'budget-only-row' : ''}">
       <td>${escapeHtml(row.label)}</td>
-      <td>${row.withIndice}</td>
-      <td>${row.withoutIndice}</td>
-      <td>${row.total}</td>
-      <td>${formatPercentage(row.percentage)}</td>
-      <td>${formatNumber(row.devis)}</td>
-      <td>${formatPercentage(row.percentageDevis)}</td>
+      <td>${formatTableValue(row.withIndice)}</td>
+      <td>${formatTableValue(row.withoutIndice)}</td>
+      <td>${formatTableValue(row.total)}</td>
+      <td>${formatOptionalPercentage(row.percentage)}</td>
+      <td>${formatNumber(row.ventilationPrice)}</td>
+      <td>${formatOptionalPercentage(row.percentageVentilation)}</td>
     </tr>
   `;
 }
@@ -577,19 +673,18 @@ function renderTotalRow(totals) {
       <td><strong>${totals.withoutIndice}</strong></td>
       <td><strong>${totals.totalDocs}</strong></td>
       <td><strong>${formatPercentage(totals.percentage)}</strong></td>
-      <td><strong>${formatNumber(totals.totalDevis)}</strong></td>
-      <td><strong>${formatPercentage(totals.percentageDevis)}</strong></td>
+      <td><strong>${formatNumber(totals.totalVentilation)}</strong></td>
+      <td><strong>${formatPercentage(totals.percentageVentilation)}</strong></td>
     </tr>
   `;
 }
 
 function renderSidePanel(dashboardData, projectRecords, projectConfig) {
   elements.averageIndicesContainer.innerHTML = `
-    ${renderAverageIndices(dashboardData.averageIndices, dashboardData.sortedTypes)}
-    ${renderCustomRulesPanel(projectRecords, projectConfig)}
+    ${renderIndexSelectionPanel(projectRecords, projectConfig, dashboardData.selectedIndicesByType)}
   `;
 
-  bindCustomRuleControls(projectRecords);
+  bindIndexSelectionControls(projectRecords, dashboardData.selectedIndicesByType);
 }
 
 function renderAverageIndices(averageIndices, sortedTypes) {
@@ -609,17 +704,16 @@ function renderAverageIndexLine(type, averageData) {
   return `<p><strong>${escapeHtml(type)}:</strong> ${average}</p>`;
 }
 
-function renderCustomRulesPanel(projectRecords, projectConfig) {
+function renderIndexSelectionPanel(projectRecords, projectConfig, selectedIndicesByType) {
   const documentTypes = getDocumentTypes(projectRecords);
   const controlsDisabled = !projectConfig.canSave || documentTypes.length === 0;
 
   return `
     <section class="custom-rules-panel">
-      <h3>Indices a afficher</h3>
+      <h3>Indices des graphiques</h3>
       ${renderProjectConfigWarning(projectConfig)}
-      ${renderCustomRulesList(projectConfig.rules, controlsDisabled)}
-      ${renderCustomRuleForm(documentTypes, controlsDisabled)}
-      ${renderRuleFeedback()}
+      ${renderIndexSelectionList(documentTypes, projectRecords, selectedIndicesByType, controlsDisabled)}
+      ${renderSelectionFeedback()}
     </section>
   `;
 }
@@ -632,193 +726,114 @@ function renderProjectConfigWarning(projectConfig) {
   return `<p class="rules-feedback rules-feedback-error">${escapeHtml(projectConfig.warning)}</p>`;
 }
 
-function renderCustomRulesList(rules, controlsDisabled) {
-  if (rules.length === 0) {
-    return '<p class="rules-empty">Aucune regle.</p>';
-  }
-
+function renderIndexSelectionList(
+  documentTypes,
+  projectRecords,
+  selectedIndicesByType,
+  controlsDisabled,
+) {
   return `
-    <ul class="rules-list">
-      ${rules
-        .map((rule, index) => renderCustomRuleItem(rule, index, controlsDisabled))
+    <div class="index-selection-list">
+      ${documentTypes
+        .map((type) => renderIndexSelectionItem(
+          type,
+          getIndicesForDocumentType(projectRecords, type),
+          selectedIndicesByType[type] || INDICES.advanced,
+          controlsDisabled,
+        ))
         .join('')}
-    </ul>
-  `;
-}
-
-function renderCustomRuleItem(rule, index, controlsDisabled) {
-  return `
-    <li class="rules-list-item">
-      <span>${escapeHtml(rule.typeDocument)} - Indice ${escapeHtml(rule.indice)}</span>
-      <button
-        type="button"
-        class="rules-delete-button"
-        data-rule-index="${index}"
-        title="Supprimer"
-        aria-label="Supprimer ${escapeHtml(rule.typeDocument)} indice ${escapeHtml(rule.indice)}"
-        ${controlsDisabled ? 'disabled' : ''}
-      >x</button>
-    </li>
-  `;
-}
-
-function renderCustomRuleForm(documentTypes, controlsDisabled) {
-  return `
-    <div class="rules-form">
-      <label class="rules-field" for="${SELECTORS.ruleTypeSelect}">
-        <span>Type</span>
-        <select id="${SELECTORS.ruleTypeSelect}" ${controlsDisabled ? 'disabled' : ''}>
-          <option value="">Choisir</option>
-          ${renderSelectOptions(documentTypes)}
-        </select>
-      </label>
-
-      <label class="rules-field" for="${SELECTORS.ruleIndiceSelect}">
-        <span>Indice</span>
-        <select id="${SELECTORS.ruleIndiceSelect}" disabled>
-          <option value="">Choisir</option>
-        </select>
-      </label>
-
-      <button
-        type="button"
-        id="${SELECTORS.addRuleButton}"
-        class="rules-add-button"
-        ${controlsDisabled ? 'disabled' : ''}
-      >Ajouter</button>
     </div>
   `;
 }
 
-function renderSelectOptions(values) {
+function renderIndexSelectionItem(type, indices, selectedIndice, controlsDisabled) {
+  return `
+    <label class="index-selection-item">
+      <span>${escapeHtml(type)}</span>
+      <select
+        class="index-selection-select"
+        data-type-document="${escapeHtml(type)}"
+        ${controlsDisabled ? 'disabled' : ''}
+      >
+        ${renderSelectOptions(indices, selectedIndice)}
+      </select>
+    </label>
+  `;
+}
+
+function renderSelectOptions(values, selectedValue = '') {
   return values
-    .map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`)
+    .map((value) => `
+      <option value="${escapeHtml(value)}" ${value === selectedValue ? 'selected' : ''}>
+        ${escapeHtml(value)}
+      </option>
+    `)
     .join('');
 }
 
-function renderRuleFeedback() {
-  if (!state.ruleFeedback) {
+function renderSelectionFeedback() {
+  if (!state.selectionFeedback) {
     return `<p id="${SELECTORS.ruleFeedback}" class="rules-feedback"></p>`;
   }
 
   return `
-    <p id="${SELECTORS.ruleFeedback}" class="rules-feedback rules-feedback-${state.ruleFeedback.type}">
-      ${escapeHtml(state.ruleFeedback.message)}
+    <p id="${SELECTORS.ruleFeedback}" class="rules-feedback rules-feedback-${state.selectionFeedback.type}">
+      ${escapeHtml(state.selectionFeedback.message)}
     </p>
   `;
 }
 
-function bindCustomRuleControls(projectRecords) {
-  const typeSelect = document.getElementById(SELECTORS.ruleTypeSelect);
-  const indiceSelect = document.getElementById(SELECTORS.ruleIndiceSelect);
-  const addButton = document.getElementById(SELECTORS.addRuleButton);
-  const deleteButtons = document.querySelectorAll('.rules-delete-button');
+function bindIndexSelectionControls(projectRecords, selectedIndicesByType) {
+  const selects = document.querySelectorAll('.index-selection-select');
 
-  if (typeSelect && indiceSelect) {
-    typeSelect.addEventListener('change', () => {
-      updateIndiceOptions(projectRecords);
-      updateAddRuleButtonState();
+  selects.forEach((select) => {
+    select.addEventListener('change', () => {
+      handleIndexSelectionChange(projectRecords, selectedIndicesByType);
     });
-    indiceSelect.addEventListener('change', updateAddRuleButtonState);
-  }
-
-  if (addButton) {
-    addButton.addEventListener('click', handleAddRule);
-    updateAddRuleButtonState();
-  }
-
-  deleteButtons.forEach((button) => {
-    button.addEventListener('click', () => handleDeleteRule(button));
   });
 }
 
-function updateIndiceOptions(projectRecords) {
-  const typeSelect = document.getElementById(SELECTORS.ruleTypeSelect);
-  const indiceSelect = document.getElementById(SELECTORS.ruleIndiceSelect);
-
-  if (!typeSelect || !indiceSelect) {
-    return;
-  }
-
-  const selectedType = normalizeText(typeSelect.value);
-  const indices = selectedType ? getIndicesForDocumentType(projectRecords, selectedType) : [];
-
-  indiceSelect.innerHTML = `
-    <option value="">Choisir</option>
-    ${renderSelectOptions(indices)}
-  `;
-  indiceSelect.disabled = !state.currentProjectConfig?.canSave || indices.length === 0;
-}
-
-function updateAddRuleButtonState() {
-  const typeSelect = document.getElementById(SELECTORS.ruleTypeSelect);
-  const indiceSelect = document.getElementById(SELECTORS.ruleIndiceSelect);
-  const addButton = document.getElementById(SELECTORS.addRuleButton);
-
-  if (!typeSelect || !indiceSelect || !addButton) {
-    return;
-  }
-
-  addButton.disabled =
-    !state.currentProjectConfig?.canSave ||
-    !normalizeText(typeSelect.value) ||
-    !normalizeIndice(indiceSelect.value);
-}
-
 function getIndicesForDocumentType(projectRecords, documentType) {
-  return [...new Set(
+  const indices = [...new Set(
     projectRecords
       .filter((record) => getDocumentType(record) === documentType)
       .map(getRecordIndice)
       .filter(Boolean),
   )].sort(compareText);
-}
 
-async function handleAddRule() {
-  const typeSelect = document.getElementById(SELECTORS.ruleTypeSelect);
-  const indiceSelect = document.getElementById(SELECTORS.ruleIndiceSelect);
-  const typeDocument = normalizeText(typeSelect?.value);
-  const indice = normalizeIndice(indiceSelect?.value);
-
-  if (!typeDocument || !indice) {
-    setRuleFeedback('error', 'Selection incomplete.');
-    return;
+  if (!indices.includes(INDICES.advanced)) {
+    indices.unshift(INDICES.advanced);
   }
 
+  return indices;
+}
+
+async function handleIndexSelectionChange(projectRecords, selectedIndicesByType) {
   if (!state.currentProjectConfig?.canSave) {
-    setRuleFeedback('error', 'Sauvegarde indisponible.');
+    setSelectionFeedback('error', 'Sauvegarde indisponible.');
     return;
   }
 
-  const nextRule = { typeDocument, indice };
-  const existingRules = state.currentProjectConfig.rules;
-
-  if (existingRules.some((rule) => getRuleKey(rule) === getRuleKey(nextRule))) {
-    setRuleFeedback('error', 'Cette regle existe deja.');
-    return;
-  }
-
-  await saveRules([...existingRules, nextRule], 'Regle ajoutee.');
-}
-
-async function handleDeleteRule(button) {
-  const ruleIndex = Number(button.dataset.ruleIndex);
-
-  if (!Number.isInteger(ruleIndex) || !state.currentProjectConfig?.canSave) {
-    setRuleFeedback('error', 'Suppression indisponible.');
-    return;
-  }
-
-  const nextRules = state.currentProjectConfig.rules.filter(
-    (_rule, index) => index !== ruleIndex,
+  const selectsByType = new Map(
+    [...document.querySelectorAll('.index-selection-select')].map((select) => [
+      normalizeText(select.dataset.typeDocument),
+      normalizeIndice(select.value),
+    ]),
   );
 
-  await saveRules(nextRules, 'Regle supprimee.');
+  const nextSelections = getDocumentTypes(projectRecords).map((typeDocument) => {
+    return {
+      typeDocument,
+      indice: selectsByType.get(typeDocument) || selectedIndicesByType[typeDocument] || INDICES.advanced,
+    };
+  });
+
+  await saveSelections(nextSelections, 'Indices mis a jour.');
 }
 
-async function saveRules(nextRules, successMessage) {
+async function saveSelections(nextSelections, successMessage) {
   try {
-    setRuleControlsBusy(true);
+    setIndexSelectionControlsBusy(true);
 
     await grist.docApi.applyUserActions([
       [
@@ -826,65 +841,38 @@ async function saveRules(nextRules, successMessage) {
         TABLES.projects,
         state.currentProjectConfig.id,
         {
-          [PROJECT_COLUMNS.avancement]: JSON.stringify(dedupeRules(nextRules)),
+          [PROJECT_COLUMNS.avancement]: JSON.stringify(dedupeSelections(nextSelections)),
         },
       ],
     ]);
 
-    state.ruleFeedback = { type: 'success', message: successMessage };
+    state.selectionFeedback = { type: 'success', message: successMessage };
     await updateDashboard();
   } catch (error) {
     console.error('Erreur sauvegarde Projets.Avancement :', error);
-    setRuleFeedback('error', 'Erreur lors de la sauvegarde.');
+    setSelectionFeedback('error', 'Erreur lors de la sauvegarde.');
   } finally {
-    setRuleControlsBusy(false);
+    setIndexSelectionControlsBusy(false);
   }
 }
 
-function setRuleControlsBusy(isBusy) {
-  const typeSelect = document.getElementById(SELECTORS.ruleTypeSelect);
-  const indiceSelect = document.getElementById(SELECTORS.ruleIndiceSelect);
-  const addButton = document.getElementById(SELECTORS.addRuleButton);
-  const deleteButtons = document.querySelectorAll('.rules-delete-button');
+function setIndexSelectionControlsBusy(isBusy) {
+  const selects = document.querySelectorAll('.index-selection-select');
   const canSave = Boolean(state.currentProjectConfig?.canSave);
 
-  if (typeSelect) {
-    typeSelect.disabled = isBusy || !canSave;
-  }
-
-  if (indiceSelect) {
-    indiceSelect.disabled =
-      isBusy ||
-      !canSave ||
-      !normalizeText(typeSelect?.value) ||
-      indiceSelect.options.length <= 1;
-  }
-
-  if (addButton) {
-    addButton.disabled =
-      isBusy ||
-      !canSave ||
-      !normalizeText(typeSelect?.value) ||
-      !normalizeIndice(indiceSelect?.value);
-  }
-
-  deleteButtons.forEach((button) => {
-    button.disabled = isBusy || !canSave;
+  selects.forEach((select) => {
+    select.disabled = isBusy || !canSave;
   });
 }
 
-function setRuleFeedback(type, message) {
-  state.ruleFeedback = { type, message };
+function setSelectionFeedback(type, message) {
+  state.selectionFeedback = { type, message };
 
   const feedback = document.getElementById(SELECTORS.ruleFeedback);
   if (feedback) {
     feedback.className = `rules-feedback rules-feedback-${type}`;
     feedback.textContent = message;
   }
-}
-
-function getRuleKey(rule) {
-  return `${rule.typeDocument}||${rule.indice}`;
 }
 
 function renderChart(chartData) {
@@ -1012,6 +1000,28 @@ function normalizeText(value) {
   return String(value).trim().replace(/\s+/g, ' ');
 }
 
+function normalizeLookupText(value) {
+  return normalizeText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function toNumber(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  const normalizedValue = normalizeText(value)
+    .replace(/\s/g, '')
+    .replace(',', '.');
+  const parsedValue = Number.parseFloat(normalizedValue);
+
+  return Number.isFinite(parsedValue) ? parsedValue : 0;
+}
+
 function compareText(a, b) {
   return String(a).localeCompare(String(b), 'fr', {
     numeric: true,
@@ -1032,6 +1042,14 @@ function formatNumber(value) {
   return String(value ?? 0).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
+function formatTableValue(value) {
+  return value == null ? '-' : value;
+}
+
 function formatPercentage(value) {
   return `${value.toFixed(2)}%`;
+}
+
+function formatOptionalPercentage(value) {
+  return value == null ? '-' : formatPercentage(value);
 }
