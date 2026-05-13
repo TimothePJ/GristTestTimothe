@@ -5,6 +5,7 @@ const SELECTORS = {
   averageIndicesContainer: 'average-indices-container',
   statsOutput: 'stats-output',
   ruleFeedback: 'indexSelectionFeedback',
+  budgetProgressEditable: '.budget-progress-editable',
 };
 
 const TABLES = {
@@ -26,12 +27,19 @@ const BUDGET_COLUMNS = {
 };
 
 const DOCUMENT_TYPES = {
+  coffrage: 'COFFRAGE',
+  fondPlans: 'Fond de plans',
   unspecified: 'Non specifie',
   total: 'Total',
 };
 
 const INDICES = {
   advanced: '0',
+  coffrageDefault: 'A',
+};
+
+const SPECIAL_BUDGET_KEYS = {
+  fondPlans: '__FOND_DE_PLANS__',
 };
 
 const state = {
@@ -126,12 +134,13 @@ async function updateDashboard() {
 
   const projectConfig = await fetchProjectConfig(selectedProject);
   const ventilation = await fetchBudgetVentilation(projectConfig, projectRecords);
-  const dashboardData = buildDashboardData(projectRecords, ventilation, projectConfig.selections);
+  const dashboardData = buildDashboardData(projectRecords, ventilation, projectConfig);
 
   state.currentProjectConfig = projectConfig;
 
   showDashboard();
   renderStatsTable(dashboardData.tableRows, dashboardData.totals);
+  bindBudgetProgressControls();
   renderSidePanel(dashboardData, projectRecords, projectConfig);
   renderChart(dashboardData.chart);
 }
@@ -184,14 +193,15 @@ async function fetchProjectConfig(selectedProject) {
       });
     }
 
-    const parsedSelections = parseAvancementSelections(projectRow[PROJECT_COLUMNS.avancement]);
+    const parsedConfig = parseAvancementConfig(projectRow[PROJECT_COLUMNS.avancement]);
 
     return createProjectConfig({
       id: projectRow[PROJECT_COLUMNS.id],
       projectNumber: normalizeText(projectRow[PROJECT_COLUMNS.projectNumber]),
-      selections: parsedSelections.selections,
-      canSave: !parsedSelections.error,
-      warning: parsedSelections.error
+      selections: parsedConfig.selections,
+      budgetProgress: parsedConfig.budgetProgress,
+      canSave: !parsedConfig.error,
+      warning: parsedConfig.error
         ? 'JSON invalide dans Projets.Avancement. Corrige ou vide la cellule.'
         : '',
     });
@@ -208,6 +218,7 @@ function createProjectConfig({
   id = null,
   projectNumber = '',
   selections = [],
+  budgetProgress = [],
   canSave = false,
   warning = '',
 }) {
@@ -215,6 +226,7 @@ function createProjectConfig({
     id,
     projectNumber,
     selections,
+    budgetProgress,
     canSave,
     warning,
   };
@@ -258,24 +270,25 @@ function tableHasColumn(table, columnName) {
   return Boolean(table && Object.prototype.hasOwnProperty.call(table, columnName));
 }
 
-function parseAvancementSelections(rawValue) {
+function parseAvancementConfig(rawValue) {
   if (rawValue == null || rawValue === '') {
-    return { selections: [], error: null };
+    return { selections: [], budgetProgress: [], error: null };
   }
 
   try {
     const parsed = typeof rawValue === 'string' ? JSON.parse(rawValue) : rawValue;
 
     if (!Array.isArray(parsed)) {
-      return { selections: [], error: new Error('Avancement must be an array') };
+      return { selections: [], budgetProgress: [], error: new Error('Avancement must be an array') };
     }
 
     return {
       selections: dedupeSelections(parsed.map(normalizeSelection).filter(Boolean)),
+      budgetProgress: dedupeBudgetProgress(parsed.map(normalizeBudgetProgress).filter(Boolean)),
       error: null,
     };
   } catch (error) {
-    return { selections: [], error };
+    return { selections: [], budgetProgress: [], error };
   }
 }
 
@@ -293,6 +306,20 @@ function normalizeSelection(selection) {
   };
 }
 
+function normalizeBudgetProgress(item) {
+  const budgetKey = normalizeText(item?.budgetKey);
+  const percentage = clampPercentage(toNumber(item?.percentage));
+
+  if (!budgetKey) {
+    return null;
+  }
+
+  return {
+    budgetKey,
+    percentage,
+  };
+}
+
 function dedupeSelections(selections) {
   const seen = new Set();
 
@@ -304,6 +331,19 @@ function dedupeSelections(selections) {
     }
 
     seen.add(key);
+    return true;
+  });
+}
+
+function dedupeBudgetProgress(progressItems) {
+  const seen = new Set();
+
+  return progressItems.filter((item) => {
+    if (seen.has(item.budgetKey)) {
+      return false;
+    }
+
+    seen.add(item.budgetKey);
     return true;
   });
 }
@@ -380,6 +420,10 @@ function getBudgetDocumentType(chapter, documentTypes) {
 }
 
 function getExplicitBudgetDocumentType(normalizedChapter, documentTypes) {
+  if (normalizedChapter.includes('fond de plans')) {
+    return SPECIAL_BUDGET_KEYS.fondPlans;
+  }
+
   if (normalizedChapter.includes('plan de coffrage')) {
     return findDocumentType(documentTypes, ['COFFRAGE']);
   }
@@ -409,22 +453,28 @@ function findDocumentType(documentTypes, candidates) {
   return documentTypes.find((type) => normalizedCandidates.has(normalizeLookupText(type))) || '';
 }
 
-function buildDashboardData(projectRecords, ventilation, indexSelections) {
-  const selectedIndicesByType = buildSelectedIndicesByType(projectRecords, indexSelections);
+function buildDashboardData(projectRecords, ventilation, projectConfig) {
+  const selectedIndicesByType = buildSelectedIndicesByType(projectRecords, projectConfig.selections);
   const statsByType = buildStatsByType(projectRecords, selectedIndicesByType);
   const averageIndices = buildAverageIndices(projectRecords);
   const sortedTypes = Object.keys(statsByType).sort(compareText);
+  const fondPlansRows = buildFondPlansRows(projectRecords, ventilation);
   const standardRows = buildTableRows(sortedTypes, statsByType, ventilation);
-  const budgetRows = buildUnmatchedBudgetRows(ventilation.unmatchedRows);
-  const totals = buildTotals(statsByType, ventilation.total, standardRows);
-  const chart = buildChartData(standardRows, totals);
+  const chartRows = [...fondPlansRows, ...standardRows];
+  const budgetRows = buildUnmatchedBudgetRows(
+    ventilation.unmatchedRows,
+    projectConfig.budgetProgress,
+  );
+  const tableRows = [...budgetRows, ...fondPlansRows, ...standardRows];
+  const totals = buildTotals(ventilation.total, chartRows, tableRows);
+  const chart = buildChartData(chartRows, totals);
 
   return {
     averageIndices,
     chart,
     selectedIndicesByType,
     sortedTypes,
-    tableRows: [...budgetRows, ...standardRows],
+    tableRows,
     totals,
   };
 }
@@ -438,10 +488,11 @@ function buildSelectedIndicesByType(projectRecords, indexSelections) {
     getDocumentTypes(projectRecords).map((type) => {
       const availableIndices = getIndicesForDocumentType(projectRecords, type);
       const selectedIndice = selectionMap.get(type);
+      const defaultIndice = getDefaultIndiceForDocumentType(type);
 
       return [
         type,
-        availableIndices.includes(selectedIndice) ? selectedIndice : INDICES.advanced,
+        availableIndices.includes(selectedIndice) ? selectedIndice : defaultIndice,
       ];
     }),
   );
@@ -483,6 +534,14 @@ function getDocumentType(record) {
   return normalizeText(record.Type_document) || DOCUMENT_TYPES.unspecified;
 }
 
+function isCoffrageType(type) {
+  return normalizeLookupText(type) === normalizeLookupText(DOCUMENT_TYPES.coffrage);
+}
+
+function getDefaultIndiceForDocumentType(type) {
+  return isCoffrageType(type) ? INDICES.coffrageDefault : INDICES.advanced;
+}
+
 function createStatsBucket(selectedIndice) {
   return {
     totalDocs: new Set(),
@@ -521,8 +580,8 @@ function buildTableRows(sortedTypes, statsByType, ventilation) {
     const withoutIndice = total - withIndice;
     const percentage = total > 0 ? (withIndice / total) * 100 : 0;
     const ventilationPrice = getVentilationPrice(type, ventilation);
-    const percentageVentilation =
-      ventilation.total > 0 ? (percentage * ventilationPrice) / ventilation.total : 0;
+    const percentageVentilation = percentage;
+    const doneValue = (ventilationPrice * percentageVentilation) / 100;
     const indice = statsByType[type].selectedIndice;
 
     return {
@@ -535,28 +594,112 @@ function buildTableRows(sortedTypes, statsByType, ventilation) {
       percentage,
       ventilationPrice,
       percentageVentilation,
+      doneValue,
       isBudgetOnly: false,
     };
   });
 }
 
-function buildUnmatchedBudgetRows(unmatchedRows) {
-  return unmatchedRows.map((row) => ({
-    label: formatBudgetChapterLabel(row.chapter),
-    type: '',
-    indice: '',
-    total: null,
-    withIndice: null,
-    withoutIndice: null,
-    percentage: null,
-    ventilationPrice: row.amount,
-    percentageVentilation: null,
-    isBudgetOnly: true,
-  }));
+function buildFondPlansRows(projectRecords, ventilation) {
+  const coffrageType = findDocumentType(getDocumentTypes(projectRecords), [DOCUMENT_TYPES.coffrage]);
+  const ventilationPrice = ventilation.byType[SPECIAL_BUDGET_KEYS.fondPlans] || 0;
+
+  if (!coffrageType || ventilationPrice === 0) {
+    return [];
+  }
+
+  return [
+    buildRowFromRecords({
+      label: DOCUMENT_TYPES.fondPlans,
+      projectRecords,
+      type: coffrageType,
+      indice: INDICES.advanced,
+      ventilationPrice,
+    }),
+  ];
+}
+
+function buildRowFromRecords({
+  label,
+  projectRecords,
+  type,
+  indice,
+  ventilationPrice,
+}) {
+  const totalDocs = new Set();
+  const docsWithIndice = new Set();
+
+  projectRecords.forEach((record) => {
+    if (getDocumentType(record) !== type) {
+      return;
+    }
+
+    const documentNumber = normalizeText(record.NumeroDocument);
+    if (!documentNumber) {
+      return;
+    }
+
+    totalDocs.add(documentNumber);
+
+    if (getRecordIndice(record) === indice) {
+      docsWithIndice.add(documentNumber);
+    }
+  });
+
+  const total = totalDocs.size;
+  const withIndice = docsWithIndice.size;
+  const withoutIndice = total - withIndice;
+  const percentage = total > 0 ? (withIndice / total) * 100 : 0;
+  const percentageVentilation = percentage;
+  const doneValue = (ventilationPrice * percentageVentilation) / 100;
+
+  return {
+    label,
+    type,
+    indice,
+    total,
+    withIndice,
+    withoutIndice,
+    percentage,
+    ventilationPrice,
+    percentageVentilation,
+    doneValue,
+    isBudgetOnly: false,
+  };
+}
+
+function buildUnmatchedBudgetRows(unmatchedRows, budgetProgress) {
+  const progressMap = new Map(
+    budgetProgress.map((item) => [item.budgetKey, item.percentage]),
+  );
+
+  return unmatchedRows.map((row) => {
+    const budgetKey = getBudgetProgressKey(row.chapter);
+    const percentageVentilation = progressMap.get(budgetKey) ?? 0;
+
+    return {
+      label: formatBudgetChapterLabel(row.chapter),
+      type: '',
+      indice: '',
+      total: null,
+      withIndice: null,
+      withoutIndice: null,
+      percentage: null,
+      ventilationPrice: row.amount,
+      percentageVentilation,
+      doneValue: (row.amount * percentageVentilation) / 100,
+      budgetKey,
+      isBudgetOnly: true,
+    };
+  });
 }
 
 function formatBudgetChapterLabel(chapter) {
   return normalizeText(chapter).replace(/^\d+\s*-\s*/, '');
+}
+
+function getBudgetProgressKey(chapter) {
+  return normalizeText(chapter);
 }
 
 function getVentilationPrice(type, ventilation) {
@@ -571,11 +714,11 @@ function getDocumentTypeLabel(type, indice) {
   return `${type} - Indice ${indice}`;
 }
 
-function buildTotals(statsByType, totalVentilation, standardRows) {
-  const totals = Object.values(statsByType).reduce(
+function buildTotals(totalVentilation, planRows, valueRows) {
+  const totals = planRows.reduce(
     (result, stats) => {
-      result.totalDocs += stats.totalDocs.size;
-      result.withIndice += stats.advancedDocs.size;
+      result.totalDocs += stats.total || 0;
+      result.withIndice += stats.withIndice || 0;
       return result;
     },
     {
@@ -587,10 +730,12 @@ function buildTotals(statsByType, totalVentilation, standardRows) {
   const withoutIndice = totals.totalDocs - totals.withIndice;
   const percentage =
     totals.totalDocs > 0 ? (totals.withIndice / totals.totalDocs) * 100 : 0;
-  const percentageVentilation = standardRows.reduce(
-    (total, row) => total + row.percentageVentilation,
+  const doneValue = valueRows.reduce(
+    (total, row) => total + row.doneValue,
     0,
   );
+  const percentageVentilation =
+    totalVentilation > 0 ? (doneValue / totalVentilation) * 100 : 0;
 
   return {
     totalDocs: totals.totalDocs,
@@ -599,6 +744,7 @@ function buildTotals(statsByType, totalVentilation, standardRows) {
     percentage,
     totalVentilation,
     percentageVentilation,
+    doneValue,
   };
 }
 
@@ -635,12 +781,12 @@ function renderStatsTable(tableRows, totals) {
       <thead>
         <tr>
           <th>Type de document</th>
-          <th>Plans a l'indice</th>
-          <th>Plans sans l'indice</th>
-          <th>Nombre total</th>
-          <th>Pourcentage plans</th>
+          <th>Plans diffusés</th>
+          <th>Plans restants</th>
+          <th>Total</th>
           <th>Ventilation prix</th>
-          <th>Pourcentage ventilation</th>
+          <th>% fait</th>
+          <th>Valeur faite</th>
         </tr>
       </thead>
       <tbody>
@@ -653,14 +799,14 @@ function renderStatsTable(tableRows, totals) {
 
 function renderStatsRow(row) {
   return `
-    <tr class="${row.isBudgetOnly ? 'budget-only-row' : ''}">
+    <tr>
       <td>${escapeHtml(row.label)}</td>
-      <td>${formatTableValue(row.withIndice)}</td>
-      <td>${formatTableValue(row.withoutIndice)}</td>
-      <td>${formatTableValue(row.total)}</td>
-      <td>${formatOptionalPercentage(row.percentage)}</td>
+      <td class="${getPlanCellClass(row)}">${formatTableValue(row.withIndice)}</td>
+      <td class="${getPlanCellClass(row)}">${formatTableValue(row.withoutIndice)}</td>
+      <td class="${getPlanCellClass(row)}">${formatTableValue(row.total)}</td>
       <td>${formatNumber(row.ventilationPrice)}</td>
-      <td>${formatOptionalPercentage(row.percentageVentilation)}</td>
+      <td>${renderPercentDoneCell(row)}</td>
+      <td>${formatNumber(row.doneValue)}</td>
     </tr>
   `;
 }
@@ -672,11 +818,40 @@ function renderTotalRow(totals) {
       <td><strong>${totals.withIndice}</strong></td>
       <td><strong>${totals.withoutIndice}</strong></td>
       <td><strong>${totals.totalDocs}</strong></td>
-      <td><strong>${formatPercentage(totals.percentage)}</strong></td>
       <td><strong>${formatNumber(totals.totalVentilation)}</strong></td>
       <td><strong>${formatPercentage(totals.percentageVentilation)}</strong></td>
+      <td><strong>${formatNumber(totals.doneValue)}</strong></td>
     </tr>
   `;
+}
+
+function renderPercentDoneCell(row) {
+  if (!row.isBudgetOnly) {
+    return formatPercentage(row.percentageVentilation);
+  }
+
+  const value = formatInputNumber(row.percentageVentilation);
+  const canSave = Boolean(state.currentProjectConfig?.canSave);
+
+  return `
+    <span class="budget-progress-cell">
+      <span
+        class="budget-progress-editable"
+        contenteditable="${canSave ? 'true' : 'false'}"
+        role="textbox"
+        inputmode="numeric"
+        data-budget-key="${escapeHtml(row.budgetKey)}"
+        data-previous-value="${escapeHtml(value)}"
+        aria-disabled="${canSave ? 'false' : 'true'}"
+        aria-label="% fait ${escapeHtml(row.label)}"
+      >${escapeHtml(value)}</span>
+      <span class="budget-progress-suffix">%</span>
+    </span>
+  `;
+}
+
+function getPlanCellClass(row) {
+  return row.isBudgetOnly ? 'not-applicable-cell' : '';
 }
 
 function renderSidePanel(dashboardData, projectRecords, projectConfig) {
@@ -738,7 +913,7 @@ function renderIndexSelectionList(
         .map((type) => renderIndexSelectionItem(
           type,
           getIndicesForDocumentType(projectRecords, type),
-          selectedIndicesByType[type] || INDICES.advanced,
+          selectedIndicesByType[type] || getDefaultIndiceForDocumentType(type),
           controlsDisabled,
         ))
         .join('')}
@@ -793,6 +968,65 @@ function bindIndexSelectionControls(projectRecords, selectedIndicesByType) {
   });
 }
 
+function bindBudgetProgressControls() {
+  const editables = document.querySelectorAll(SELECTORS.budgetProgressEditable);
+
+  editables.forEach((editable) => {
+    editable.addEventListener('focus', () => {
+      editable.dataset.previousValue = formatInputNumber(toNumber(editable.textContent));
+      selectEditableContent(editable);
+    });
+
+    editable.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        editable.blur();
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        editable.textContent = editable.dataset.previousValue || '0';
+        editable.blur();
+      }
+    });
+
+    editable.addEventListener('blur', () => {
+      handleBudgetProgressChange(editable);
+    });
+  });
+}
+
+async function handleBudgetProgressChange(changedEditable) {
+  if (!state.currentProjectConfig?.canSave) {
+    setSelectionFeedback('error', 'Sauvegarde indisponible.');
+    return;
+  }
+
+  if (changedEditable) {
+    const nextValue = formatInputNumber(clampPercentage(toNumber(changedEditable.textContent)));
+    const previousValue = changedEditable.dataset.previousValue || '0';
+
+    changedEditable.textContent = nextValue;
+
+    if (nextValue === previousValue) {
+      return;
+    }
+  }
+
+  const nextBudgetProgress = [...document.querySelectorAll(SELECTORS.budgetProgressEditable)]
+    .map((editable) => ({
+      budgetKey: normalizeText(editable.dataset.budgetKey),
+      percentage: clampPercentage(toNumber(editable.textContent)),
+    }))
+    .filter((item) => item.budgetKey);
+
+  await saveAvancementConfig({
+    selections: state.currentProjectConfig.selections,
+    budgetProgress: nextBudgetProgress,
+    successMessage: '% fait mis a jour.',
+  });
+}
+
 function getIndicesForDocumentType(projectRecords, documentType) {
   const indices = [...new Set(
     projectRecords
@@ -800,6 +1034,16 @@ function getIndicesForDocumentType(projectRecords, documentType) {
       .map(getRecordIndice)
       .filter(Boolean),
   )].sort(compareText);
+
+  if (isCoffrageType(documentType)) {
+    const coffrageIndices = indices.filter((indice) => indice !== INDICES.advanced);
+
+    if (!coffrageIndices.includes(INDICES.coffrageDefault)) {
+      coffrageIndices.unshift(INDICES.coffrageDefault);
+    }
+
+    return coffrageIndices;
+  }
 
   if (!indices.includes(INDICES.advanced)) {
     indices.unshift(INDICES.advanced);
@@ -824,16 +1068,24 @@ async function handleIndexSelectionChange(projectRecords, selectedIndicesByType)
   const nextSelections = getDocumentTypes(projectRecords).map((typeDocument) => {
     return {
       typeDocument,
-      indice: selectsByType.get(typeDocument) || selectedIndicesByType[typeDocument] || INDICES.advanced,
+      indice:
+        selectsByType.get(typeDocument) ||
+        selectedIndicesByType[typeDocument] ||
+        getDefaultIndiceForDocumentType(typeDocument),
     };
   });
 
-  await saveSelections(nextSelections, 'Indices mis a jour.');
+  await saveAvancementConfig({
+    selections: nextSelections,
+    budgetProgress: state.currentProjectConfig.budgetProgress,
+    successMessage: 'Indices mis a jour.',
+  });
 }
 
-async function saveSelections(nextSelections, successMessage) {
+async function saveAvancementConfig({ selections, budgetProgress, successMessage }) {
   try {
     setIndexSelectionControlsBusy(true);
+    setBudgetProgressControlsBusy(true);
 
     await grist.docApi.applyUserActions([
       [
@@ -841,7 +1093,10 @@ async function saveSelections(nextSelections, successMessage) {
         TABLES.projects,
         state.currentProjectConfig.id,
         {
-          [PROJECT_COLUMNS.avancement]: JSON.stringify(dedupeSelections(nextSelections)),
+          [PROJECT_COLUMNS.avancement]: JSON.stringify([
+            ...dedupeSelections(selections),
+            ...dedupeBudgetProgress(budgetProgress),
+          ]),
         },
       ],
     ]);
@@ -853,6 +1108,7 @@ async function saveSelections(nextSelections, successMessage) {
     setSelectionFeedback('error', 'Erreur lors de la sauvegarde.');
   } finally {
     setIndexSelectionControlsBusy(false);
+    setBudgetProgressControlsBusy(false);
   }
 }
 
@@ -863,6 +1119,32 @@ function setIndexSelectionControlsBusy(isBusy) {
   selects.forEach((select) => {
     select.disabled = isBusy || !canSave;
   });
+}
+
+function setBudgetProgressControlsBusy(isBusy) {
+  const editables = document.querySelectorAll(SELECTORS.budgetProgressEditable);
+  const canSave = Boolean(state.currentProjectConfig?.canSave);
+
+  editables.forEach((editable) => {
+    const isEnabled = !isBusy && canSave;
+
+    editable.contentEditable = String(isEnabled);
+    editable.setAttribute('aria-disabled', String(!isEnabled));
+    editable.classList.toggle('is-disabled', !isEnabled);
+  });
+}
+
+function selectEditableContent(element) {
+  const selection = window.getSelection();
+  const range = document.createRange();
+
+  if (!selection) {
+    return;
+  }
+
+  range.selectNodeContents(element);
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 function setSelectionFeedback(type, message) {
@@ -1022,6 +1304,10 @@ function toNumber(value) {
   return Number.isFinite(parsedValue) ? parsedValue : 0;
 }
 
+function clampPercentage(value) {
+  return Math.max(0, Math.min(100, Math.round(toNumber(value))));
+}
+
 function compareText(a, b) {
   return String(a).localeCompare(String(b), 'fr', {
     numeric: true,
@@ -1039,17 +1325,17 @@ function escapeHtml(value) {
 }
 
 function formatNumber(value) {
-  return String(value ?? 0).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return String(Math.round(value ?? 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
 function formatTableValue(value) {
-  return value == null ? '-' : value;
+  return value == null ? '-' : Math.round(value);
 }
 
 function formatPercentage(value) {
-  return `${value.toFixed(2)}%`;
+  return `${Math.round(value)}%`;
 }
 
-function formatOptionalPercentage(value) {
-  return value == null ? '-' : formatPercentage(value);
+function formatInputNumber(value) {
+  return String(Math.round(value ?? 0));
 }

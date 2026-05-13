@@ -141,8 +141,40 @@ body {
   text-align: right;
 }
 
-.budget-only-row {
+.not-applicable-cell {
   background-color: rgba(0, 73, 144, 0.06);
+  color: rgba(0, 73, 144, 0.55);
+}
+
+.budget-progress-cell {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 2px;
+  min-width: 48px;
+}
+
+.budget-progress-editable {
+  min-width: 28px;
+  padding: 2px 3px;
+  border-bottom: 1px solid transparent;
+  color: #004990;
+  cursor: text;
+  outline: none;
+}
+
+.budget-progress-editable:focus {
+  border-bottom-color: #ed1b2d;
+  background-color: rgba(237, 27, 45, 0.06);
+}
+
+.budget-progress-editable.is-disabled {
+  color: rgba(0, 73, 144, 0.5);
+  cursor: default;
+}
+
+.budget-progress-suffix {
+  color: #004990;
 }
 
 .total-row {
