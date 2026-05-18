@@ -1,7 +1,10 @@
 const SELECTORS = {
   projectDropdown: 'projectDropdown',
-  chartCanvas: 'avancementChart',
-  chartContainer: '.chart-container',
+  detailedChartCanvas: 'avancementChart',
+  detailedChartContainer: '.top-chart-card',
+  generalChartCanvas: 'generalProgressChart',
+  expensesChartCanvas: 'expensesProgressChart',
+  chartsContainer: '.charts-grid',
   averageIndicesContainer: 'average-indices-container',
   statsOutput: 'stats-output',
   ruleFeedback: 'indexSelectionFeedback',
@@ -44,7 +47,9 @@ const SPECIAL_BUDGET_KEYS = {
 
 const state = {
   records: [],
-  chart: null,
+  detailedChart: null,
+  generalChart: null,
+  expensesChart: null,
   currentProjectConfig: null,
   selectionFeedback: null,
   lastSelectedProject: '',
@@ -52,8 +57,11 @@ const state = {
 
 const elements = {
   projectDropdown: document.getElementById(SELECTORS.projectDropdown),
-  chartCanvas: document.getElementById(SELECTORS.chartCanvas),
-  chartContainer: document.querySelector(SELECTORS.chartContainer),
+  detailedChartCanvas: document.getElementById(SELECTORS.detailedChartCanvas),
+  detailedChartContainer: document.querySelector(SELECTORS.detailedChartContainer),
+  generalChartCanvas: document.getElementById(SELECTORS.generalChartCanvas),
+  expensesChartCanvas: document.getElementById(SELECTORS.expensesChartCanvas),
+  chartsContainer: document.querySelector(SELECTORS.chartsContainer),
   averageIndicesContainer: document.getElementById(SELECTORS.averageIndicesContainer),
   statsOutput: document.getElementById(SELECTORS.statsOutput),
 };
@@ -139,10 +147,11 @@ async function updateDashboard() {
   state.currentProjectConfig = projectConfig;
 
   showDashboard();
+  renderDetailedChart(dashboardData.chart);
   renderStatsTable(dashboardData.tableRows, dashboardData.totals);
   bindBudgetProgressControls();
   renderSidePanel(dashboardData, projectRecords, projectConfig);
-  renderChart(dashboardData.chart);
+  renderCharts(dashboardData.totals);
 }
 
 function clearOutput() {
@@ -150,18 +159,20 @@ function clearOutput() {
 }
 
 function showEmptyState(message) {
-  destroyChart();
+  destroyCharts();
   hideDashboard();
   elements.statsOutput.innerHTML = `<p>${escapeHtml(message)}</p>`;
 }
 
 function hideDashboard() {
-  elements.chartContainer.style.display = 'none';
+  elements.detailedChartContainer.style.display = 'none';
+  elements.chartsContainer.style.display = 'none';
   elements.averageIndicesContainer.style.display = 'none';
 }
 
 function showDashboard() {
-  elements.chartContainer.style.display = 'block';
+  elements.detailedChartContainer.style.display = 'block';
+  elements.chartsContainer.style.display = 'grid';
   elements.averageIndicesContainer.style.display = 'block';
 }
 
@@ -467,7 +478,7 @@ function buildDashboardData(projectRecords, ventilation, projectConfig) {
   );
   const tableRows = [...budgetRows, ...fondPlansRows, ...standardRows];
   const totals = buildTotals(ventilation.total, chartRows, tableRows);
-  const chart = buildChartData(chartRows, totals);
+  const chart = buildDetailedChartData(chartRows);
 
   return {
     averageIndices,
@@ -748,31 +759,14 @@ function buildTotals(totalVentilation, planRows, valueRows) {
   };
 }
 
-function buildChartData(tableRows, totals) {
-  const labels = tableRows.map((row) => row.label);
-  const dataWithIndice = tableRows.map((row) => row.percentage);
-  const dataWithoutIndice = tableRows.map((row) => percentageWithoutIndice(row));
-  const rawCountsWithIndice = tableRows.map((row) => row.withIndice);
-  const rawCountsWithoutIndice = tableRows.map((row) => row.withoutIndice);
-
-  labels.push(DOCUMENT_TYPES.total);
-  dataWithIndice.push(totals.percentage);
-  dataWithoutIndice.push(percentageWithoutIndice(totals));
-  rawCountsWithIndice.push(totals.withIndice);
-  rawCountsWithoutIndice.push(totals.withoutIndice);
-
+function buildDetailedChartData(rows) {
   return {
-    labels,
-    dataWithIndice,
-    dataWithoutIndice,
-    rawCountsWithIndice,
-    rawCountsWithoutIndice,
+    labels: rows.map((row) => row.label),
+    dataWithIndice: rows.map((row) => row.percentage),
+    dataWithoutIndice: rows.map((row) => getRemainingPercentage(row.percentage, row.total)),
+    rawCountsWithIndice: rows.map((row) => row.withIndice),
+    rawCountsWithoutIndice: rows.map((row) => row.withoutIndice),
   };
-}
-
-function percentageWithoutIndice(row) {
-  const total = Number.isFinite(row.total) ? row.total : row.totalDocs;
-  return total > 0 ? 100 - row.percentage : 0;
 }
 
 function renderStatsTable(tableRows, totals) {
@@ -1157,23 +1151,27 @@ function setSelectionFeedback(type, message) {
   }
 }
 
-function renderChart(chartData) {
-  const ctx = elements.chartCanvas.getContext('2d');
+function renderDetailedChart(chartData) {
+  if (!elements.detailedChartCanvas) {
+    return;
+  }
 
-  destroyChart();
+  destroyDetailedChart();
 
-  state.chart = new Chart(ctx, {
+  const ctx = elements.detailedChartCanvas.getContext('2d');
+
+  state.detailedChart = new Chart(ctx, {
     type: 'bar',
     data: {
       labels: chartData.labels,
       datasets: [
-        buildChartDataset(
+        buildArrayChartDataset(
           'Avance',
           chartData.dataWithIndice,
           chartData.rawCountsWithIndice,
           'rgba(75, 192, 192, 0.5)',
         ),
-        buildChartDataset(
+        buildArrayChartDataset(
           'Non avance',
           chartData.dataWithoutIndice,
           chartData.rawCountsWithoutIndice,
@@ -1181,28 +1179,128 @@ function renderChart(chartData) {
         ),
       ],
     },
-    options: getChartOptions(),
+    options: getChartOptions('Avancement'),
   });
 }
 
-function buildChartDataset(label, data, rawCounts, backgroundColor) {
+function renderCharts(totals) {
+  destroySummaryCharts();
+
+  state.expensesChart = renderProgressChart({
+    canvas: elements.expensesChartCanvas,
+    title: 'Avancement dépenses',
+    doneLabel: 'Valeur faite',
+    remainingLabel: 'Reste à faire',
+    donePercentage: totals.percentageVentilation,
+    remainingPercentage: getRemainingPercentage(
+      totals.percentageVentilation,
+      totals.totalVentilation,
+    ),
+    doneRaw: totals.doneValue,
+    remainingRaw: Math.max(0, totals.totalVentilation - totals.doneValue),
+    rawFormatter: formatNumber,
+  });
+
+  state.generalChart = renderProgressChart({
+    canvas: elements.generalChartCanvas,
+    title: 'Avancement général',
+    doneLabel: 'Plans diffusés',
+    remainingLabel: 'Plans restants',
+    donePercentage: totals.percentage,
+    remainingPercentage: getRemainingPercentage(totals.percentage, totals.totalDocs),
+    doneRaw: totals.withIndice,
+    remainingRaw: totals.withoutIndice,
+    rawFormatter: formatNumber,
+  });
+}
+
+function buildArrayChartDataset(label, percentages, rawValues, backgroundColor) {
   return {
     label,
-    data,
+    data: percentages.map(clampChartPercentage),
+    rawValues,
+    rawFormatter: formatNumber,
     backgroundColor,
     datalabels: {
       labels: {
         value: {
-          formatter: (_value, context) => rawCounts[context.dataIndex],
+          formatter: formatChartDataLabel,
         },
       },
     },
   };
 }
 
-function getChartOptions() {
+function renderProgressChart({
+  canvas,
+  title,
+  doneLabel,
+  remainingLabel,
+  donePercentage,
+  remainingPercentage,
+  doneRaw,
+  remainingRaw,
+  rawFormatter,
+}) {
+  if (!canvas) {
+    return null;
+  }
+
+  const ctx = canvas.getContext('2d');
+
+  return new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: [''],
+      datasets: [
+        buildChartDataset(
+          doneLabel,
+          clampChartPercentage(donePercentage),
+          doneRaw,
+          'rgba(75, 192, 192, 0.5)',
+          rawFormatter,
+        ),
+        buildChartDataset(
+          remainingLabel,
+          clampChartPercentage(remainingPercentage),
+          remainingRaw,
+          'rgba(255, 99, 132, 0.5)',
+          rawFormatter,
+        ),
+      ],
+    },
+    options: getChartOptions(title),
+  });
+}
+
+function buildChartDataset(label, percentage, rawValue, backgroundColor, rawFormatter) {
+  return {
+    label,
+    data: [percentage],
+    rawValues: [rawValue],
+    rawFormatter,
+    backgroundColor,
+    datalabels: {
+      labels: {
+        value: {
+          formatter: formatChartDataLabel,
+        },
+      },
+    },
+  };
+}
+
+function formatChartDataLabel(_value, context) {
+  const value = context.dataset.rawValues[context.dataIndex];
+  const formatter = context.dataset.rawFormatter || formatNumber;
+  return formatter(value);
+}
+
+function getChartOptions(title) {
   return {
     indexAxis: 'y',
+    responsive: true,
+    maintainAspectRatio: false,
     scales: {
       x: {
         stacked: true,
@@ -1218,7 +1316,10 @@ function getChartOptions() {
     plugins: {
       title: {
         display: true,
-        text: 'Avancement',
+        text: title,
+      },
+      legend: {
+        position: 'bottom',
       },
       tooltip: {
         callbacks: {
@@ -1239,15 +1340,35 @@ function getChartOptions() {
 
 function formatTooltipLabel(context) {
   const label = context.dataset.label ? `${context.dataset.label}: ` : '';
-  const value = context.parsed.x !== null ? `${context.parsed.x.toFixed(2)}%` : '';
+  const percentage = context.parsed.x !== null ? `${Math.round(context.parsed.x)}%` : '';
+  const rawValue = context.dataset.rawValues[context.dataIndex];
+  const formatter = context.dataset.rawFormatter || formatNumber;
+  const formattedRawValue = formatter(rawValue);
 
-  return `${label}${value}`;
+  return `${label}${percentage} (${formattedRawValue})`;
 }
 
-function destroyChart() {
-  if (state.chart) {
-    state.chart.destroy();
-    state.chart = null;
+function destroyCharts() {
+  destroyDetailedChart();
+  destroySummaryCharts();
+}
+
+function destroySummaryCharts() {
+  if (state.expensesChart) {
+    state.expensesChart.destroy();
+    state.expensesChart = null;
+  }
+
+  if (state.generalChart) {
+    state.generalChart.destroy();
+    state.generalChart = null;
+  }
+}
+
+function destroyDetailedChart() {
+  if (state.detailedChart) {
+    state.detailedChart.destroy();
+    state.detailedChart = null;
   }
 }
 
@@ -1306,6 +1427,14 @@ function toNumber(value) {
 
 function clampPercentage(value) {
   return Math.max(0, Math.min(100, Math.round(toNumber(value))));
+}
+
+function clampChartPercentage(value) {
+  return Math.max(0, Math.min(100, toNumber(value)));
+}
+
+function getRemainingPercentage(donePercentage, total) {
+  return toNumber(total) > 0 ? 100 - clampChartPercentage(donePercentage) : 0;
 }
 
 function compareText(a, b) {
