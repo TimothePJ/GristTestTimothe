@@ -46,6 +46,17 @@ const SPECIAL_BUDGET_KEYS = {
   fondPlans: '__FOND_DE_PLANS__',
 };
 
+const CHART_COLORS = {
+  done: {
+    solid: 'rgba(43, 123, 201, 1)',
+    fill: 'rgba(43, 123, 201, 0.58)',
+  },
+  remaining: {
+    solid: 'rgba(180, 35, 24, 1)',
+    fill: 'rgba(180, 35, 24, 0.58)',
+  },
+};
+
 const state = {
   records: [],
   detailedChart: null,
@@ -1159,13 +1170,13 @@ function renderDetailedChart(chartData) {
           'Avance',
           chartData.dataWithIndice,
           chartData.rawCountsWithIndice,
-          'rgba(75, 192, 192, 0.5)',
+          CHART_COLORS.done,
         ),
         buildArrayChartDataset(
           'Non avance',
           chartData.dataWithoutIndice,
           chartData.rawCountsWithoutIndice,
-          'rgba(255, 99, 132, 0.5)',
+          CHART_COLORS.remaining,
         ),
       ],
     },
@@ -1204,13 +1215,19 @@ function renderCharts(totals) {
   });
 }
 
-function buildArrayChartDataset(label, percentages, rawValues, backgroundColor) {
+function buildArrayChartDataset(label, percentages, rawValues, colors) {
   return {
     label,
     data: percentages.map(clampChartPercentage),
     rawValues,
     rawFormatter: formatNumber,
-    backgroundColor,
+    backgroundColor: colors.fill,
+    borderColor: colors.solid,
+    borderWidth: 1,
+    borderRadius: 8,
+    borderSkipped: false,
+    barPercentage: 0.72,
+    categoryPercentage: 0.78,
     datalabels: {
       labels: {
         value: {
@@ -1247,14 +1264,14 @@ function renderProgressChart({
           doneLabel,
           clampChartPercentage(donePercentage),
           doneRaw,
-          'rgba(75, 192, 192, 0.5)',
+          CHART_COLORS.done,
           rawFormatter,
         ),
         buildChartDataset(
           remainingLabel,
           clampChartPercentage(remainingPercentage),
           remainingRaw,
-          'rgba(255, 99, 132, 0.5)',
+          CHART_COLORS.remaining,
           rawFormatter,
         ),
       ],
@@ -1263,13 +1280,19 @@ function renderProgressChart({
   });
 }
 
-function buildChartDataset(label, percentage, rawValue, backgroundColor, rawFormatter) {
+function buildChartDataset(label, percentage, rawValue, colors, rawFormatter) {
   return {
     label,
     data: [percentage],
     rawValues: [rawValue],
     rawFormatter,
-    backgroundColor,
+    backgroundColor: colors.fill,
+    borderColor: colors.solid,
+    borderWidth: 1,
+    borderRadius: 10,
+    borderSkipped: false,
+    barPercentage: 0.62,
+    categoryPercentage: 0.72,
     datalabels: {
       labels: {
         value: {
@@ -1296,36 +1319,84 @@ function getChartOptions(title) {
         stacked: true,
         max: 100,
         ticks: {
+          color: '#5a7188',
           callback: (value) => `${value}%`,
+        },
+        grid: {
+          color: 'rgba(0, 73, 144, 0.08)',
+          drawBorder: false,
         },
       },
       y: {
         stacked: true,
+        ticks: {
+          color: '#17324d',
+          font: {
+            weight: 'bold',
+          },
+        },
+        grid: {
+          display: false,
+          drawBorder: false,
+        },
       },
     },
     plugins: {
       title: {
         display: true,
         text: title,
+        color: '#17324d',
+        align: 'start',
+        padding: {
+          bottom: 16,
+        },
+        font: {
+          size: 15,
+          weight: 'bold',
+        },
       },
       legend: {
         position: 'bottom',
+        labels: {
+          usePointStyle: true,
+          pointStyle: 'rectRounded',
+          boxWidth: 10,
+          boxHeight: 10,
+          padding: 14,
+          color: '#17324d',
+          font: {
+            size: 11,
+          },
+        },
       },
       tooltip: {
+        backgroundColor: 'rgba(8, 21, 38, 0.92)',
+        titleColor: '#ffffff',
+        bodyColor: '#ffffff',
+        borderColor: 'rgba(255, 255, 255, 0.12)',
+        borderWidth: 1,
+        padding: 10,
+        displayColors: true,
         callbacks: {
           label: formatTooltipLabel,
         },
       },
       datalabels: {
-        color: '#000',
+        color: '#17324d',
         display: (context) => context.dataset.data[context.dataIndex] > 0,
         font: {
           weight: 'bold',
+          size: 10,
         },
-        formatter: Math.round,
+        formatter: formatChartPercentageLabel,
       },
     },
   };
+}
+
+function formatChartPercentageLabel(value) {
+  const roundedValue = Math.round(toNumber(value));
+  return roundedValue > 0 ? `${roundedValue}%` : '';
 }
 
 function formatTooltipLabel(context) {
