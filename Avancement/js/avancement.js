@@ -46,6 +46,7 @@ const TIME_REAL_COLUMNS = {
 const DOCUMENT_TYPES = {
   coffrage: 'COFFRAGE',
   fondPlans: 'Fond de plans',
+  ndc: 'NDC',
   unspecified: 'Non specifie',
   total: 'Total',
 };
@@ -338,7 +339,8 @@ function parseAvancementConfig(rawValue) {
 }
 
 function normalizeSelection(selection) {
-  const typeDocument = normalizeText(selection?.typeDocument);
+  const rawTypeDocument = normalizeText(selection?.typeDocument);
+  const typeDocument = rawTypeDocument ? normalizeDocumentType(rawTypeDocument) : '';
   const indice = normalizeIndice(selection?.indice);
 
   if (!typeDocument || !indice) {
@@ -396,6 +398,7 @@ function dedupeBudgetProgress(progressItems) {
 async function fetchBudgetVentilation(projectConfig, projectRecords) {
   const emptyVentilation = {
     byType: {},
+    labelsByType: {},
     unmatchedRows: [],
     total: 0,
   };
@@ -467,6 +470,7 @@ async function fetchRealExpenses(projectConfig) {
 
 function buildBudgetVentilation(budgetRows, documentTypes) {
   const byType = {};
+  const labelsByType = {};
   const unmatchedRows = [];
   let total = 0;
 
@@ -476,6 +480,10 @@ function buildBudgetVentilation(budgetRows, documentTypes) {
     const matchedType = getBudgetDocumentType(row.chapter, documentTypes);
     if (matchedType) {
       byType[matchedType] = (byType[matchedType] || 0) + row.amount;
+      labelsByType[matchedType] = [
+        ...(labelsByType[matchedType] || []),
+        formatBudgetChapterLabel(row.chapter),
+      ];
       return;
     }
 
@@ -484,9 +492,19 @@ function buildBudgetVentilation(budgetRows, documentTypes) {
 
   return {
     byType,
+    labelsByType: dedupeBudgetLabels(labelsByType),
     unmatchedRows,
     total,
   };
+}
+
+function dedupeBudgetLabels(labelsByType) {
+  return Object.fromEntries(
+    Object.entries(labelsByType).map(([type, labels]) => [
+      type,
+      [...new Set(labels.filter(Boolean))],
+    ]),
+  );
 }
 
 function getBudgetDocumentType(chapter, documentTypes) {
@@ -524,8 +542,13 @@ function getExplicitBudgetDocumentType(normalizedChapter, documentTypes) {
     return findDocumentType(documentTypes, ['ARMATURES', 'ARMATURE']);
   }
 
-  if (normalizedChapter.includes('note de calcul')) {
-    return findDocumentType(documentTypes, ['NDC']);
+  if (isNoteDeCalculLabel(normalizedChapter)) {
+    return findDocumentType(documentTypes, [
+      DOCUMENT_TYPES.ndc,
+      'N.D.C',
+      'NOTE DE CALCUL',
+      'NOTES DE CALCUL',
+    ]);
   }
 
   if (normalizedChapter.startsWith('coupes')) {
@@ -537,8 +560,14 @@ function getExplicitBudgetDocumentType(normalizedChapter, documentTypes) {
 
 function findDocumentType(documentTypes, candidates) {
   const normalizedCandidates = new Set(candidates.map(normalizeLookupText));
+  const compactCandidates = new Set(candidates.map(normalizeCompactLookupText));
 
-  return documentTypes.find((type) => normalizedCandidates.has(normalizeLookupText(type))) || '';
+  return documentTypes.find((type) => {
+    return (
+      normalizedCandidates.has(normalizeLookupText(type)) ||
+      compactCandidates.has(normalizeCompactLookupText(type))
+    );
+  }) || '';
 }
 
 function buildDashboardData(projectRecords, ventilation, projectConfig, realExpenses) {
@@ -569,7 +598,10 @@ function buildDashboardData(projectRecords, ventilation, projectConfig, realExpe
 
 function buildSelectedIndicesByType(projectRecords, indexSelections) {
   const selectionMap = new Map(
-    indexSelections.map((selection) => [selection.typeDocument, selection.indice]),
+    indexSelections.map((selection) => [
+      normalizeDocumentType(selection.typeDocument),
+      selection.indice,
+    ]),
   );
 
   return Object.fromEntries(
@@ -619,7 +651,26 @@ function getDocumentTypes(projectRecords) {
 }
 
 function getDocumentType(record) {
-  return normalizeText(record.Type_document) || DOCUMENT_TYPES.unspecified;
+  return normalizeDocumentType(record.Type_document);
+}
+
+function normalizeDocumentType(value) {
+  const type = normalizeText(value);
+
+  if (!type) {
+    return DOCUMENT_TYPES.unspecified;
+  }
+
+  const normalizedType = normalizeLookupText(type);
+
+  if (
+    normalizeCompactLookupText(type) === normalizeCompactLookupText(DOCUMENT_TYPES.ndc) ||
+    isNoteDeCalculLabel(normalizedType)
+  ) {
+    return DOCUMENT_TYPES.ndc;
+  }
+
+  return type;
 }
 
 function isCoffrageType(type) {
@@ -674,6 +725,7 @@ function buildTableRows(sortedTypes, statsByType, ventilation) {
 
     return {
       label: getDocumentTypeLabel(type, indice),
+      tableLabel: getTableBudgetLabel(type, indice, ventilation),
       type,
       indice,
       total,
@@ -699,6 +751,7 @@ function buildFondPlansRows(projectRecords, ventilation) {
   return [
     buildRowFromRecords({
       label: DOCUMENT_TYPES.fondPlans,
+      tableLabel: getTableBudgetLabel(SPECIAL_BUDGET_KEYS.fondPlans, INDICES.advanced, ventilation),
       projectRecords,
       type: coffrageType,
       indice: INDICES.advanced,
@@ -709,6 +762,7 @@ function buildFondPlansRows(projectRecords, ventilation) {
 
 function buildRowFromRecords({
   label,
+  tableLabel = '',
   projectRecords,
   type,
   indice,
@@ -743,6 +797,7 @@ function buildRowFromRecords({
 
   return {
     label,
+    tableLabel: tableLabel || label,
     type,
     indice,
     total,
@@ -767,6 +822,7 @@ function buildUnmatchedBudgetRows(unmatchedRows, budgetProgress) {
 
     return {
       label: formatBudgetChapterLabel(row.chapter),
+      tableLabel: formatBudgetChapterLabel(row.chapter),
       type: '',
       indice: '',
       total: null,
@@ -792,6 +848,21 @@ function getBudgetProgressKey(chapter) {
 
 function getVentilationPrice(type, ventilation) {
   return ventilation.byType[type] || 0;
+}
+
+function getTableBudgetLabel(type, indice, ventilation) {
+  const budgetLabel = getBudgetLabel(type, ventilation) || type;
+  return getDocumentTypeLabel(budgetLabel, indice);
+}
+
+function getBudgetLabel(type, ventilation) {
+  const labels = ventilation.labelsByType?.[type] || [];
+
+  if (labels.length === 0) {
+    return '';
+  }
+
+  return labels.join(' / ');
 }
 
 function getDocumentTypeLabel(type, indice) {
@@ -872,7 +943,7 @@ function renderStatsTable(tableRows, totals) {
 function renderStatsRow(row) {
   return `
     <tr>
-      <td>${escapeHtml(row.label)}</td>
+      <td>${escapeHtml(row.tableLabel || row.label)}</td>
       <td class="${getPlanCellClass(row)}">${formatTableValue(row.withIndice)}</td>
       <td class="${getPlanCellClass(row)}">${formatTableValue(row.withoutIndice)}</td>
       <td class="${getPlanCellClass(row)}">${formatTableValue(row.total)}</td>
@@ -1594,6 +1665,19 @@ function normalizeLookupText(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+}
+
+function normalizeCompactLookupText(value) {
+  return normalizeLookupText(value).replace(/\s+/g, '');
+}
+
+function isNoteDeCalculLabel(normalizedValue) {
+  return (
+    normalizedValue.includes('note de calcul') ||
+    normalizedValue.includes('notes de calcul') ||
+    normalizedValue.includes('note calcul') ||
+    normalizedValue.includes('notes calcul')
+  );
 }
 
 function toNumber(value) {
