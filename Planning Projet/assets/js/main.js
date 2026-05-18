@@ -102,6 +102,11 @@ function buildPlanningWarningsFromGroups(groups = []) {
         segmentEndDate instanceof Date && !Number.isNaN(segmentEndDate.getTime())
           ? segmentEndDate
           : null;
+      const isCompleted = realizeValue != null && realizeValue >= 100;
+
+      if (isCompleted) {
+        return null;
+      }
 
       if (retardDays > 0) {
         return {

@@ -2851,15 +2851,16 @@ function buildPlanningSelectionWarning(group = {}) {
     ? normalizedEndDate.toLocaleDateString("fr-FR")
     : "";
 
+  if (realizeValue != null && realizeValue >= 100) {
+    return null;
+  }
+
   if (retardDays > 0) {
-    const isCompleted = realizeValue != null && realizeValue >= 100;
     return {
-      kind: isCompleted ? "retard-frozen" : "retard-active",
+      kind: "retard-active",
       severity: "danger",
       days: retardDays,
-      message: isCompleted
-        ? `${selectedLabel} a accumule ${retardDays} jour(s) de retard. Fin prevue le ${formattedEndDate}.`
-        : `${selectedLabel} a ${retardDays} jour(s) de retard. Fin prevue le ${formattedEndDate}.`,
+      message: `${selectedLabel} a ${retardDays} jour(s) de retard. Fin prevue le ${formattedEndDate}.`,
     };
   }
 

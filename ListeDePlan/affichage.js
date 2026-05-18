@@ -120,14 +120,266 @@ function normalizeRows(raw) {
   return [];
 }
 
-function hasValidDate(value) {
-  if (value == null || value === "") return false;
-  const d = new Date(value);
-  return !Number.isNaN(d.getTime());
-}
-
 function normalizeIndice(value) {
   return normalizeText(value).toUpperCase();
+}
+
+function toNumber(value) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function toInteger(value) {
+  const number = toNumber(value);
+  if (number == null || !Number.isInteger(number)) return null;
+  return number;
+}
+
+function parsePlanningSyncDate(value) {
+  if (value == null || value === "") return null;
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return new Date(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate());
+  }
+
+  if (typeof value === "number") {
+    const normalized = value > 1e9 && value < 1e11 ? value * 1000 : value;
+    const date = new Date(normalized);
+    if (Number.isNaN(date.getTime())) return null;
+    return new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  }
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (isoMatch) {
+    const year = Number(isoMatch[1]);
+    const month = Number(isoMatch[2]);
+    const day = Number(isoMatch[3]);
+    const date = new Date(year, month - 1, day);
+    if (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    ) {
+      return date;
+    }
+    return null;
+  }
+
+  const frMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+.*)?$/);
+  if (frMatch) {
+    const day = Number(frMatch[1]);
+    const month = Number(frMatch[2]);
+    const year = Number(frMatch[3]);
+    const date = new Date(year, month - 1, day);
+    if (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    ) {
+      return date;
+    }
+    return null;
+  }
+
+  const fallback = new Date(text);
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
+}
+
+function hasValidDate(value) {
+  return Boolean(parsePlanningSyncDate(value));
+}
+
+function formatDateRealise(value) {
+  const date = parsePlanningSyncDate(value);
+  if (!date) return "";
+
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+function addDaysToPlanningDate(date, days) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate;
+}
+
+function subtractWeeksFromPlanningDate(date, weeks) {
+  const normalizedWeeks = toInteger(weeks);
+  if (normalizedWeeks == null || normalizedWeeks < 0) return null;
+  return addDaysToPlanningDate(date, -(normalizedWeeks * 7));
+}
+
+function startOfPlanningDay(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  const nextDate = new Date(date);
+  nextDate.setHours(0, 0, 0, 0);
+  return nextDate;
+}
+
+function getPlanningDelayDays(segmentEndDate, referenceDate) {
+  const segmentEndDay = startOfPlanningDay(segmentEndDate);
+  const referenceDay = startOfPlanningDay(referenceDate);
+  if (!segmentEndDay || !referenceDay || referenceDay <= segmentEndDay) return 0;
+
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.max(0, Math.floor((referenceDay.getTime() - segmentEndDay.getTime()) / msPerDay));
+}
+
+function isCoffrageTypeDoc(value) {
+  return normalizeText(value).toUpperCase().includes("COFFRAGE");
+}
+
+function isArmaturesTypeDoc(value) {
+  return normalizeText(value).toUpperCase().includes("ARMATURES");
+}
+
+function isAllowedPlanningTypeDoc(value) {
+  const normalized = normalizeText(value).toUpperCase();
+  return normalized.includes("COFFRAGE") || normalized.includes("ARMATURES")
+    || normalized.includes("DÉMOLITION") || normalized.includes("ELEVATION - COUPES / DETAILS");
+}
+
+function hasPlanningLinkValue(value) {
+  const text = normalizeText(value);
+  if (!text) return false;
+
+  const numericValue = Number(text);
+  if (Number.isFinite(numericValue)) {
+    return numericValue !== 0;
+  }
+
+  return true;
+}
+
+function computePlanningRealiseValue(typeDoc, indice) {
+  const normalizedIndice = normalizeIndice(indice);
+  if (!normalizedIndice) return 0;
+
+  if (/^\d+$/.test(normalizedIndice)) {
+    return isCoffrageTypeDoc(typeDoc) ? 50 : 100;
+  }
+
+  if (/^[A-Z]/.test(normalizedIndice)) {
+    return 100;
+  }
+
+  return 100;
+}
+
+function resolveCoffrageDiffCoffrageDate({
+  typeDoc,
+  lignePlanningRaw,
+  diffCoffrageRaw,
+  demarrageRaw,
+  duree3Raw,
+}) {
+  if (!isCoffrageTypeDoc(typeDoc)) {
+    return parsePlanningSyncDate(diffCoffrageRaw);
+  }
+
+  if (!hasPlanningLinkValue(lignePlanningRaw)) {
+    return parsePlanningSyncDate(diffCoffrageRaw);
+  }
+
+  const demarrageDate = parsePlanningSyncDate(demarrageRaw);
+  const computedDate = subtractWeeksFromPlanningDate(demarrageDate, duree3Raw);
+  return computedDate || parsePlanningSyncDate(diffCoffrageRaw);
+}
+
+function resolvePlanningSegmentEndDate({
+  typeDoc,
+  lignePlanningRaw,
+  diffCoffrageRaw,
+  diffArmatureRaw,
+  demarrageRaw,
+  duree3Raw,
+}) {
+  if (isCoffrageTypeDoc(typeDoc)) {
+    return resolveCoffrageDiffCoffrageDate({
+      typeDoc,
+      lignePlanningRaw,
+      diffCoffrageRaw,
+      demarrageRaw,
+      duree3Raw,
+    });
+  }
+
+  if (isArmaturesTypeDoc(typeDoc)) {
+    return parsePlanningSyncDate(diffArmatureRaw);
+  }
+
+  return null;
+}
+
+function computePlanningRetardValue({
+  typeDoc,
+  indice,
+  currentRetard,
+  lignePlanningRaw,
+  diffCoffrageRaw,
+  diffArmatureRaw,
+  demarrageRaw,
+  duree3Raw,
+  dateRealiseRaw,
+}, currentInstant = new Date()) {
+  if (!isAllowedPlanningTypeDoc(typeDoc)) {
+    return 0;
+  }
+
+  const realiseValue = computePlanningRealiseValue(typeDoc, indice);
+  const segmentEndDate = resolvePlanningSegmentEndDate({
+    typeDoc,
+    lignePlanningRaw,
+    diffCoffrageRaw,
+    diffArmatureRaw,
+    demarrageRaw,
+    duree3Raw,
+  });
+
+  if (realiseValue >= 100) {
+    const dateRealise = parsePlanningSyncDate(dateRealiseRaw);
+    if (dateRealise && segmentEndDate) {
+      return getPlanningDelayDays(segmentEndDate, dateRealise);
+    }
+
+    const frozenRetard = toNumber(currentRetard);
+    return frozenRetard != null && frozenRetard >= 0 ? frozenRetard : 0;
+  }
+
+  if (!segmentEndDate) {
+    return 0;
+  }
+
+  return getPlanningDelayDays(segmentEndDate, currentInstant);
+}
+
+function getPlanningDateSortValue(value) {
+  const date = parsePlanningSyncDate(value);
+  return date ? date.getTime() : Number.NEGATIVE_INFINITY;
+}
+
+function shouldReplaceLatestPlanRecord(current, candidate) {
+  if (!current) return true;
+  if (candidate.order !== current.order) {
+    return candidate.order > current.order;
+  }
+
+  return getPlanningDateSortValue(candidate.dateDiffusion) >
+    getPlanningDateSortValue(current.dateDiffusion);
+}
+
+function rememberLatestPlanRecord(map, key, candidate) {
+  if (shouldReplaceLatestPlanRecord(map.get(key), candidate)) {
+    map.set(key, candidate);
+  }
 }
 
 function buildPlanningLinkKey(project, numeroDocument, typeDocument, designation, zone = "") {
@@ -361,6 +613,10 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
 
     const listeRows = normalizeRows(listeRaw);
     const planningRows = normalizeRows(planningRaw);
+    const planningColumns = getColumnNames(planningRaw, planningRows);
+    const hasRealiseColumn = planningColumns.has("Realise");
+    const hasRetardsColumn = planningColumns.has("Retards");
+    const hasDateRealiseColumn = planningColumns.has("Date_Realise");
 
     const indiceOrder = new Map(INDICES.map((ind, idx) => [ind, idx]));
     const latestByKeyStrict = new Map();
@@ -373,6 +629,11 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
       const order = indiceOrder.has(indice) ? indiceOrder.get(indice) : -1;
       if (order < 0) continue;
       if (!hasValidDate(r.DateDiffusion)) continue;
+      const latestRecord = {
+        indice,
+        order,
+        dateDiffusion: r.DateDiffusion,
+      };
 
       const strictKey = buildPlanningLinkKey(
         normalizeProject(r.Nom_projet),
@@ -399,29 +660,10 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
         r.Type_document
       );
 
-      const strictCurrent = latestByKeyStrict.get(strictKey);
-      const shouldReplaceStrict = !strictCurrent || order > strictCurrent.order;
-      if (shouldReplaceStrict) {
-        latestByKeyStrict.set(strictKey, { indice, order });
-      }
-
-      const looseCurrent = latestByKeyNoDesignation.get(noDesignationKey);
-      const shouldReplaceLoose = !looseCurrent || order > looseCurrent.order;
-      if (shouldReplaceLoose) {
-        latestByKeyNoDesignation.set(noDesignationKey, { indice, order });
-      }
-
-      const strictLegacyCurrent = latestByKeyStrictLegacy.get(strictLegacyKey);
-      const shouldReplaceStrictLegacy = !strictLegacyCurrent || order > strictLegacyCurrent.order;
-      if (shouldReplaceStrictLegacy) {
-        latestByKeyStrictLegacy.set(strictLegacyKey, { indice, order });
-      }
-
-      const looseLegacyCurrent = latestByKeyNoDesignationLegacy.get(noDesignationLegacyKey);
-      const shouldReplaceLooseLegacy = !looseLegacyCurrent || order > looseLegacyCurrent.order;
-      if (shouldReplaceLooseLegacy) {
-        latestByKeyNoDesignationLegacy.set(noDesignationLegacyKey, { indice, order });
-      }
+      rememberLatestPlanRecord(latestByKeyStrict, strictKey, latestRecord);
+      rememberLatestPlanRecord(latestByKeyNoDesignation, noDesignationKey, latestRecord);
+      rememberLatestPlanRecord(latestByKeyStrictLegacy, strictLegacyKey, latestRecord);
+      rememberLatestPlanRecord(latestByKeyNoDesignationLegacy, noDesignationLegacyKey, latestRecord);
     }
 
     const actions = [];
@@ -454,15 +696,66 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
         p.Type_doc
       );
 
-      const targetIndice =
-        latestByKeyStrict.get(strictKey)?.indice ??
-        latestByKeyNoDesignation.get(noDesignationKey)?.indice ??
-        latestByKeyStrictLegacy.get(strictLegacyKey)?.indice ??
-        latestByKeyNoDesignationLegacy.get(noDesignationLegacyKey)?.indice ??
-        "";
+      const targetRecord =
+        latestByKeyStrict.get(strictKey) ??
+        latestByKeyNoDesignation.get(noDesignationKey) ??
+        latestByKeyStrictLegacy.get(strictLegacyKey) ??
+        latestByKeyNoDesignationLegacy.get(noDesignationLegacyKey) ??
+        null;
+      const targetIndice = targetRecord?.indice ?? "";
       const currentIndice = normalizeText(p.Indice);
+      const currentRealiseStored = toNumber(p.Realise);
+      const currentRealise = hasRealiseColumn
+        ? (currentRealiseStored ?? 0)
+        : computePlanningRealiseValue(p.Type_doc, currentIndice);
+      const targetRealise = computePlanningRealiseValue(p.Type_doc, targetIndice);
+      const currentDateRealise = normalizeText(p.Date_Realise);
+      const targetDateRealiseFromListe = targetRecord
+        ? formatDateRealise(targetRecord.dateDiffusion)
+        : "";
+
+      let nextDateRealise = currentDateRealise;
+      let shouldUpdateDateRealise = false;
+      if (targetRealise >= 100) {
+        if (currentRealise < 100 && !currentDateRealise && targetDateRealiseFromListe) {
+          nextDateRealise = targetDateRealiseFromListe;
+          shouldUpdateDateRealise = true;
+        }
+      } else if (currentDateRealise) {
+        nextDateRealise = "";
+        shouldUpdateDateRealise = true;
+      }
+
+      const dateRealiseForRetard = targetRealise >= 100 ? nextDateRealise : "";
+      const targetRetard = computePlanningRetardValue({
+        typeDoc: p.Type_doc,
+        indice: targetIndice,
+        currentRetard: p.Retards,
+        lignePlanningRaw: p.Ligne_planning,
+        diffCoffrageRaw: p.Diff_coffrage,
+        diffArmatureRaw: p.Diff_armature,
+        demarrageRaw: p.Demarrages_travaux,
+        duree3Raw: p.Duree_3,
+        dateRealiseRaw: dateRealiseForRetard,
+      });
+      const currentRetard = toNumber(p.Retards);
+
+      const updates = {};
       if (currentIndice !== targetIndice) {
-        actions.push(["UpdateRecord", "Planning_Projet", planningId, { Indice: targetIndice }]);
+        updates.Indice = targetIndice;
+      }
+      if (hasRealiseColumn && currentRealiseStored !== targetRealise) {
+        updates.Realise = targetRealise;
+      }
+      if (hasDateRealiseColumn && shouldUpdateDateRealise) {
+        updates.Date_Realise = nextDateRealise;
+      }
+      if (hasRetardsColumn && currentRetard !== targetRetard) {
+        updates.Retards = targetRetard;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        actions.push(["UpdateRecord", "Planning_Projet", planningId, updates]);
       }
     }
 

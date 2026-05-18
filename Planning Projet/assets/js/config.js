@@ -32,6 +32,7 @@ export const APP_CONFIG = {
         retards: "Retards",
         indice: "Indice",
         realise: "Realise",
+        dateRealise: "Date_Realise",
         projectLink: "NomProjet"
       }
     }
