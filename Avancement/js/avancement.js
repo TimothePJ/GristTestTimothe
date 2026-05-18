@@ -39,6 +39,7 @@ const DOCUMENT_TYPES = {
 const INDICES = {
   advanced: '0',
   coffrageDefault: 'A',
+  minimumSelectable: ['0', 'A', 'B'],
 };
 
 const SPECIAL_BUDGET_KEYS = {
@@ -1022,25 +1023,15 @@ async function handleBudgetProgressChange(changedEditable) {
 }
 
 function getIndicesForDocumentType(projectRecords, documentType) {
-  const indices = [...new Set(
-    projectRecords
-      .filter((record) => getDocumentType(record) === documentType)
-      .map(getRecordIndice)
-      .filter(Boolean),
-  )].sort(compareText);
+  const existingIndices = projectRecords
+    .filter((record) => getDocumentType(record) === documentType)
+    .map(getRecordIndice)
+    .filter(Boolean);
+  const indices = [...new Set([...INDICES.minimumSelectable, ...existingIndices])]
+    .sort(compareIndices);
 
   if (isCoffrageType(documentType)) {
-    const coffrageIndices = indices.filter((indice) => indice !== INDICES.advanced);
-
-    if (!coffrageIndices.includes(INDICES.coffrageDefault)) {
-      coffrageIndices.unshift(INDICES.coffrageDefault);
-    }
-
-    return coffrageIndices;
-  }
-
-  if (!indices.includes(INDICES.advanced)) {
-    indices.unshift(INDICES.advanced);
+    return indices.filter((indice) => indice !== INDICES.advanced);
   }
 
   return indices;
@@ -1072,7 +1063,6 @@ async function handleIndexSelectionChange(projectRecords, selectedIndicesByType)
   await saveAvancementConfig({
     selections: nextSelections,
     budgetProgress: state.currentProjectConfig.budgetProgress,
-    successMessage: 'Indices mis a jour.',
   });
 }
 
@@ -1435,6 +1425,25 @@ function clampChartPercentage(value) {
 
 function getRemainingPercentage(donePercentage, total) {
   return toNumber(total) > 0 ? 100 - clampChartPercentage(donePercentage) : 0;
+}
+
+function compareIndices(a, b) {
+  const aMinimumIndex = INDICES.minimumSelectable.indexOf(a);
+  const bMinimumIndex = INDICES.minimumSelectable.indexOf(b);
+
+  if (aMinimumIndex !== -1 || bMinimumIndex !== -1) {
+    if (aMinimumIndex === -1) {
+      return 1;
+    }
+
+    if (bMinimumIndex === -1) {
+      return -1;
+    }
+
+    return aMinimumIndex - bMinimumIndex;
+  }
+
+  return compareText(a, b);
 }
 
 function compareText(a, b) {
