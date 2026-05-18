@@ -14,6 +14,8 @@ const SELECTORS = {
 const TABLES = {
   projects: 'Projets',
   budget: 'Budget',
+  projectTeam: 'ProjectTeam',
+  timeReal: 'TimeReal',
 };
 
 const PROJECT_COLUMNS = {
@@ -27,6 +29,18 @@ const BUDGET_COLUMNS = {
   projectNumber: 'NumeroProjet',
   chapter: 'Chapter',
   amount: 'Amount',
+};
+
+const PROJECT_TEAM_COLUMNS = {
+  projectNumber: 'NumeroProjet',
+  name: 'Name',
+  dailyRate: 'Daily_Rate',
+};
+
+const TIME_REAL_COLUMNS = {
+  projectNumber: 'NumeroProjet',
+  name: 'Name',
+  allocationDays: 'Allocation_Days',
 };
 
 const DOCUMENT_TYPES = {
@@ -153,8 +167,16 @@ async function updateDashboard() {
   }
 
   const projectConfig = await fetchProjectConfig(selectedProject);
-  const ventilation = await fetchBudgetVentilation(projectConfig, projectRecords);
-  const dashboardData = buildDashboardData(projectRecords, ventilation, projectConfig);
+  const [ventilation, realExpenses] = await Promise.all([
+    fetchBudgetVentilation(projectConfig, projectRecords),
+    fetchRealExpenses(projectConfig),
+  ]);
+  const dashboardData = buildDashboardData(
+    projectRecords,
+    ventilation,
+    projectConfig,
+    realExpenses,
+  );
 
   state.currentProjectConfig = projectConfig;
 
@@ -400,6 +422,49 @@ async function fetchBudgetVentilation(projectConfig, projectRecords) {
   }
 }
 
+async function fetchRealExpenses(projectConfig) {
+  if (!projectConfig.projectNumber) {
+    return 0;
+  }
+
+  try {
+    const [projectTeamTable, timeRealTable] = await Promise.all([
+      grist.docApi.fetchTable(TABLES.projectTeam),
+      grist.docApi.fetchTable(TABLES.timeReal),
+    ]);
+    const dailyRatesByName = new Map();
+
+    tableToRows(projectTeamTable)
+      .filter(
+        (row) => normalizeText(row[PROJECT_TEAM_COLUMNS.projectNumber]) === projectConfig.projectNumber,
+      )
+      .forEach((row) => {
+        const workerKey = normalizePersonName(row[PROJECT_TEAM_COLUMNS.name]);
+
+        if (!workerKey || dailyRatesByName.has(workerKey)) {
+          return;
+        }
+
+        dailyRatesByName.set(workerKey, toNumber(row[PROJECT_TEAM_COLUMNS.dailyRate]));
+      });
+
+    return tableToRows(timeRealTable)
+      .filter(
+        (row) => normalizeText(row[TIME_REAL_COLUMNS.projectNumber]) === projectConfig.projectNumber,
+      )
+      .reduce((total, row) => {
+        const workerKey = normalizePersonName(row[TIME_REAL_COLUMNS.name]);
+        const dailyRate = dailyRatesByName.get(workerKey) || 0;
+        const allocationDays = Math.max(0, toNumber(row[TIME_REAL_COLUMNS.allocationDays]));
+
+        return total + allocationDays * dailyRate;
+      }, 0);
+  } catch (error) {
+    console.error('Erreur chargement depenses reelles :', error);
+    return 0;
+  }
+}
+
 function buildBudgetVentilation(budgetRows, documentTypes) {
   const byType = {};
   const unmatchedRows = [];
@@ -476,7 +541,7 @@ function findDocumentType(documentTypes, candidates) {
   return documentTypes.find((type) => normalizedCandidates.has(normalizeLookupText(type))) || '';
 }
 
-function buildDashboardData(projectRecords, ventilation, projectConfig) {
+function buildDashboardData(projectRecords, ventilation, projectConfig, realExpenses) {
   const selectedIndicesByType = buildSelectedIndicesByType(projectRecords, projectConfig.selections);
   const statsByType = buildStatsByType(projectRecords, selectedIndicesByType);
   const averageIndices = buildAverageIndices(projectRecords);
@@ -489,7 +554,7 @@ function buildDashboardData(projectRecords, ventilation, projectConfig) {
     projectConfig.budgetProgress,
   );
   const tableRows = [...budgetRows, ...fondPlansRows, ...standardRows];
-  const totals = buildTotals(ventilation.total, chartRows, tableRows);
+  const totals = buildTotals(ventilation.total, chartRows, tableRows, realExpenses);
   const chart = buildDetailedChartData(chartRows);
 
   return {
@@ -737,7 +802,7 @@ function getDocumentTypeLabel(type, indice) {
   return `${type} - Indice ${indice}`;
 }
 
-function buildTotals(totalVentilation, planRows, valueRows) {
+function buildTotals(totalVentilation, planRows, valueRows, realExpenses) {
   const totals = planRows.reduce(
     (result, stats) => {
       result.totalDocs += stats.total || 0;
@@ -768,6 +833,7 @@ function buildTotals(totalVentilation, planRows, valueRows) {
     totalVentilation,
     percentageVentilation,
     doneValue,
+    realExpenses,
   };
 }
 
@@ -1186,19 +1252,23 @@ function renderDetailedChart(chartData) {
 
 function renderCharts(totals) {
   destroySummaryCharts();
+  const realExpensesPercentage = getSpendingPercentage(
+    totals.realExpenses,
+    totals.totalVentilation,
+  );
 
   state.expensesChart = renderProgressChart({
     canvas: elements.expensesChartCanvas,
     title: 'Avancement dépenses',
-    doneLabel: 'Valeur faite',
-    remainingLabel: 'Reste à faire',
-    donePercentage: totals.percentageVentilation,
+    doneLabel: 'Dépenses réelles',
+    remainingLabel: 'Budget restant',
+    donePercentage: realExpensesPercentage,
     remainingPercentage: getRemainingPercentage(
-      totals.percentageVentilation,
+      realExpensesPercentage,
       totals.totalVentilation,
     ),
-    doneRaw: totals.doneValue,
-    remainingRaw: Math.max(0, totals.totalVentilation - totals.doneValue),
+    doneRaw: totals.realExpenses,
+    remainingRaw: Math.max(0, totals.totalVentilation - totals.realExpenses),
     rawFormatter: formatNumber,
   });
 
@@ -1216,15 +1286,18 @@ function renderCharts(totals) {
 }
 
 function buildArrayChartDataset(label, percentages, rawValues, colors) {
+  const data = percentages.map(clampChartPercentage);
+
   return {
     label,
-    data: percentages.map(clampChartPercentage),
+    data,
     rawValues,
     rawFormatter: formatNumber,
     backgroundColor: colors.fill,
     borderColor: colors.solid,
     borderWidth: 1,
-    borderRadius: 8,
+    progressRole: getProgressRole(colors),
+    borderRadius: getStackedBarRadius(8),
     borderSkipped: false,
     barPercentage: 0.72,
     categoryPercentage: 0.78,
@@ -1289,7 +1362,8 @@ function buildChartDataset(label, percentage, rawValue, colors, rawFormatter) {
     backgroundColor: colors.fill,
     borderColor: colors.solid,
     borderWidth: 1,
-    borderRadius: 10,
+    progressRole: getProgressRole(colors),
+    borderRadius: getStackedBarRadius(10),
     borderSkipped: false,
     barPercentage: 0.62,
     categoryPercentage: 0.72,
@@ -1300,6 +1374,46 @@ function buildChartDataset(label, percentage, rawValue, colors, rawFormatter) {
         },
       },
     },
+  };
+}
+
+function getProgressRole(colors) {
+  return colors === CHART_COLORS.done ? 'done' : 'remaining';
+}
+
+function getStackedBarRadius(radius) {
+  return (context) => {
+    const role = context.dataset.progressRole;
+    const ownValue = toNumber(context.raw);
+    const oppositeRole = role === 'done' ? 'remaining' : 'done';
+    const oppositeDataset = context.chart.data.datasets.find(
+      (dataset) => dataset.progressRole === oppositeRole,
+    );
+    const oppositeValue = toNumber(oppositeDataset?.data?.[context.dataIndex]);
+
+    if (ownValue <= 0) {
+      return 0;
+    }
+
+    if (oppositeValue <= 0) {
+      return radius;
+    }
+
+    if (role === 'done') {
+      return {
+        topLeft: radius,
+        bottomLeft: radius,
+        topRight: 0,
+        bottomRight: 0,
+      };
+    }
+
+    return {
+      topLeft: 0,
+      bottomLeft: 0,
+      topRight: radius,
+      bottomRight: radius,
+    };
   };
 }
 
@@ -1464,6 +1578,15 @@ function normalizeText(value) {
   return String(value).trim().replace(/\s+/g, ' ');
 }
 
+function normalizePersonName(value) {
+  return normalizeText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 function normalizeLookupText(value) {
   return normalizeText(value)
     .normalize('NFD')
@@ -1496,6 +1619,16 @@ function clampChartPercentage(value) {
 
 function getRemainingPercentage(donePercentage, total) {
   return toNumber(total) > 0 ? 100 - clampChartPercentage(donePercentage) : 0;
+}
+
+function getSpendingPercentage(realExpenses, totalBudget) {
+  const budget = toNumber(totalBudget);
+
+  if (budget <= 0) {
+    return 0;
+  }
+
+  return (Math.max(0, toNumber(realExpenses)) / budget) * 100;
 }
 
 function compareIndices(a, b) {
