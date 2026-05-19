@@ -396,10 +396,14 @@ export function buildExpenseData({
       taskCode: toText(row?.[planningColumns.taskCode]),
       typeDoc: toText(row?.[planningColumns.typeDoc]),
       indice: toText(row?.[planningColumns.indice]),
-      realisationPct: computePlanningRealisationValue(
-        row?.[planningColumns.typeDoc],
-        row?.[planningColumns.indice]
+      realisationPct: toFiniteNumber(
+        row?.[planningColumns.realise],
+        computePlanningRealisationValue(
+          row?.[planningColumns.typeDoc],
+          row?.[planningColumns.indice]
+        )
       ),
+      retardsDays: toFiniteNumber(row?.[planningColumns.retards], 0),
       startAt: range.startAt,
       endAt: range.endAt,
       deadlineAt: parsePlanningDate(row?.[planningColumns.dateLimite]) || range.endAt,

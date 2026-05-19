@@ -26,6 +26,7 @@ import { syncPlanningViewportBounds } from "../viewport/bounds.js";
 import {
   getViewportLogicalSignature,
 } from "../viewport/normalize.js";
+import { showCurrentPlanningWarningsPopup } from "./planningWarnings.js";
 import { flushViewportSyncQueue } from "./viewportSync.js";
 
 function waitForAnimationFrame() {
@@ -193,6 +194,7 @@ export async function applySharedProject(projectKey) {
     }
 
     syncExpensesProjectWhenReady(normalizedProjectKey, sharedViewport);
+    showCurrentPlanningWarningsPopup({ force: true });
 
     setLastSource(getViewportSourceLabel("Pilotage commun"));
     setHubStatus(`Projet synchronise : ${normalizedProjectKey}`);

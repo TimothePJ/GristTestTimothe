@@ -89,6 +89,7 @@ export const APP_CONFIG = {
         typeDoc: "Type_doc",
         indice: "Indice",
         realise: "Realise",
+        retards: "Retards",
         dateLimite: "Date_limite",
         duree1: "Duree_1",
         diffCoffrage: "Diff_coffrage",

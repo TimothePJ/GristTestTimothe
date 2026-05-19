@@ -13,6 +13,7 @@ import {
   syncExpensesPlanningShell,
   syncSharedPlanningControlsAvailability,
 } from "../layout/shell.js";
+import { showCurrentPlanningWarningsPopup } from "./planningWarnings.js";
 import { alignExpensesViewportToPlanning } from "../viewport/alignment.js";
 import {
   buildCanonicalSharedViewport,
@@ -153,6 +154,8 @@ export async function attachExpensesFrameApi({ force = false } = {}) {
         api.subscribeViewportChange(handleViewportChange);
         state.expensesViewportSubscriptionApi = api;
       }
+
+      showCurrentPlanningWarningsPopup({ force: true });
 
       if (!state.projectSyncInProgress && state.pendingViewportPayload) {
         void flushViewportSyncQueue();
