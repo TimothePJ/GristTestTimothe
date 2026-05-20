@@ -1647,7 +1647,7 @@ export async function addPlanningZoneRow({
     [retardsCol]: 0,
     [indiceCol]: "",
     [realiseCol]: 0,
-    [dateRealiseCol]: "",
+    [dateRealiseCol]: null,
     [projectCol]: normalizedProject,
     [groupCol]: "",
     [zoneCol]: normalizedZone,

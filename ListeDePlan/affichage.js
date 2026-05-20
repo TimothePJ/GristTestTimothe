@@ -194,14 +194,18 @@ function hasValidDate(value) {
   return Boolean(parsePlanningSyncDate(value));
 }
 
-function formatDateRealise(value) {
+function toGristDateValue(value) {
   const date = parsePlanningSyncDate(value);
-  if (!date) return "";
+  if (!date) return null;
 
-  const day = String(date.getDate()).padStart(2, "0");
-  const month = String(date.getMonth() + 1).padStart(2, "0");
   const year = date.getFullYear();
-  return `${day}/${month}/${year}`;
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function isFrenchDateText(value) {
+  return /^\d{2}\/\d{2}\/\d{4}(?:\s+.*)?$/.test(normalizeText(value));
 }
 
 function addDaysToPlanningDate(date, days) {
@@ -711,8 +715,8 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
       const targetRealise = computePlanningRealiseValue(p.Type_doc, targetIndice);
       const currentDateRealise = normalizeText(p.Date_Realise);
       const targetDateRealiseFromListe = targetRecord
-        ? formatDateRealise(targetRecord.dateDiffusion)
-        : "";
+        ? toGristDateValue(targetRecord.dateDiffusion)
+        : null;
 
       let nextDateRealise = currentDateRealise;
       let shouldUpdateDateRealise = false;
@@ -720,9 +724,15 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
         if (currentRealise < 100 && !currentDateRealise && targetDateRealiseFromListe) {
           nextDateRealise = targetDateRealiseFromListe;
           shouldUpdateDateRealise = true;
+        } else if (isFrenchDateText(currentDateRealise)) {
+          const normalizedDateRealise = toGristDateValue(currentDateRealise);
+          if (normalizedDateRealise) {
+            nextDateRealise = normalizedDateRealise;
+            shouldUpdateDateRealise = true;
+          }
         }
       } else if (currentDateRealise) {
-        nextDateRealise = "";
+        nextDateRealise = null;
         shouldUpdateDateRealise = true;
       }
 
