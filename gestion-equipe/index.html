@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 
 <head>
   <meta charset="utf-8">
@@ -9,6 +9,12 @@
 </head>
 
 <body>
+  <div class="toolbar" aria-label="Actions de gestion des membres">
+    <button type="button" id="addMemberButton">Ajouter un membre</button>
+    <button type="button" id="editMemberButton" disabled>Modifier</button>
+    <button type="button" id="deleteMemberButton" disabled>Supprimer</button>
+  </div>
+
   <div class="table-container">
     <table id="dataTable">
       <thead>
@@ -19,6 +25,7 @@
           <th>Service</th>
           <th>Role</th>
           <th>IdTrefle</th>
+          <th>Externe</th>
         </tr>
       </thead>
       <tbody id="tableBody"></tbody>
@@ -26,7 +33,7 @@
   </div>
 
   <div id="contextMenu" class="context-menu">
-    <button id="addRowOption">Ajouter une ligne</button>
+    <button id="addRowOption">Ajouter un membre</button>
     <button id="editOption">Modifier</button>
     <button id="deleteOption">Supprimer</button>
   </div>
@@ -41,11 +48,23 @@
       <label for="email">Email:</label>
       <input type="email" id="email" name="email" required>
       <label for="service">Service:</label>
-      <input type="text" id="service" name="service" required>
+      <select id="service" name="service" required>
+        <option value="" selected disabled>Choisir un service</option>
+        <option value="Structure">Structure</option>
+        <option value="Topographie">Topographie</option>
+      </select>
       <label for="role">Role:</label>
-      <input type="text" id="role" name="role" required>
+      <select id="role" name="role" required>
+        <option value="" selected disabled>Choisir un rôle</option>
+        <option value="Projeteur">Projeteur</option>
+        <option value="Ingénieur">Ingénieur</option>
+      </select>
       <label for="idTrefle">IdTrefle:</label>
       <input type="text" id="idTrefle" name="idTrefle">
+      <label class="checkbox-label" for="externe">
+        <input type="checkbox" id="externe" name="externe">
+        Externe
+      </label>
       <div class="dialog-buttons">
         <button type="submit" id="confirmAddRowButton">Ajouter</button>
         <button type="button" id="cancelAddRowButton">Annuler</button>
@@ -63,14 +82,26 @@
       <label for="editEmail">Email:</label>
       <input type="email" id="editEmail" name="editEmail" required>
       <label for="editService">Service:</label>
-      <input type="text" id="editService" name="editService" required>
+      <select id="editService" name="editService" required>
+        <option value="" disabled>Choisir un service</option>
+        <option value="Structure">Structure</option>
+        <option value="Topographie">Topographie</option>
+      </select>
       <label for="editRole">Role:</label>
-      <input type="text" id="editRole" name="editRole" required>
+      <select id="editRole" name="editRole" required>
+        <option value="" disabled>Choisir un rôle</option>
+        <option value="Projeteur">Projeteur</option>
+        <option value="Ingénieur">Ingénieur</option>
+      </select>
       <label for="editIdTrefle">IdTrefle:</label>
       <input type="text" id="editIdTrefle" name="editIdTrefle">
+      <label class="checkbox-label" for="editExterne">
+        <input type="checkbox" id="editExterne" name="editExterne">
+        Externe
+      </label>
       <div class="dialog-buttons">
         <button type="submit">Enregistrer</button>
-        <button type="button" onclick="document.getElementById('editRowDialog').close()">Annuler</button>
+        <button type="button" id="cancelEditRowButton">Annuler</button>
       </div>
     </form>
   </dialog>

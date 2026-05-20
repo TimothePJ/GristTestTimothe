@@ -5,6 +5,18 @@ body {
   margin: 10px;
 }
 
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+  background-color: #ffffff;
+  border-bottom: 1px solid #ed1b2d;
+}
+
 .sticky-container {
   position: sticky;
   top: 0;
@@ -30,6 +42,7 @@ label {
 
 select,
 input[type="text"],
+input[type="email"],
 input[type="date"],
 input[type="number"],
 textarea {
@@ -51,6 +64,15 @@ button {
 
 button:hover {
     background-color: #ed1b2d;
+}
+
+button:disabled {
+    background-color: #b8c6d4;
+    cursor: not-allowed;
+}
+
+button:disabled:hover {
+    background-color: #b8c6d4;
 }
 
 select {
@@ -84,6 +106,18 @@ th {
 
 tbody tr:hover {
   background-color: #f0f8ff;
+}
+
+tbody tr.selected {
+  background-color: #d9ecff;
+  outline: 2px solid #004990;
+  outline-offset: -2px;
+}
+
+.empty-row td {
+  color: #526b86;
+  font-style: italic;
+  text-align: center;
 }
 
 .context-menu {
@@ -128,6 +162,18 @@ dialog form {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.checkbox-label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.checkbox-label input {
+  width: 16px;
+  height: 16px;
 }
 
 .dialog-buttons {
