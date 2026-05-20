@@ -20,10 +20,18 @@
 </head>
 <body>
   <div id="toolbar">
-    <div class="nav-buttons">
-      <button id="btn-prev" type="button" title="Periode precedente">&lt;</button>
-      <button id="btn-today" type="button">Aujourd'hui</button>
-      <button id="btn-next" type="button" title="Periode suivante">&gt;</button>
+    <div class="timeline-control-stack">
+      <div class="nav-buttons">
+        <button id="btn-prev" type="button" title="Periode precedente">&lt;</button>
+        <button id="btn-today" type="button">Aujourd'hui</button>
+        <button id="btn-next" type="button" title="Periode suivante">&gt;</button>
+      </div>
+
+      <div class="zoom-buttons" aria-label="Niveau de zoom">
+        <button type="button" data-zoom="week" class="active">Semaine</button>
+        <button type="button" data-zoom="month">Mois</button>
+        <button type="button" data-zoom="year">Annee</button>
+      </div>
     </div>
 
     <div class="filters">
@@ -33,14 +41,9 @@
       </select>
     </div>
 
-    <div class="zoom-buttons" aria-label="Niveau de zoom">
-      <button type="button" data-zoom="week" class="active">Semaine</button>
-      <button type="button" data-zoom="month">Mois</button>
-      <button type="button" data-zoom="year">Annee</button>
-    </div>
-
     <div class="sort-buttons" aria-label="Mode de tri">
-      <button type="button" data-sort="chronological" class="active">Chronologique</button>
+      <button type="button" data-sort="xml-order" class="active">Défault</button>
+      <button type="button" data-sort="chronological">Chronologique</button>
       <button type="button" data-sort="planning-number">N° planning</button>
     </div>
 
@@ -60,7 +63,9 @@
       <div class="hcol c-duration">Duree</div>
       <div class="hcol c-team">Equipe</div>
     </div>
-    <div class="ms-project-header-right">Timeline</div>
+    <div class="ms-project-header-right" aria-label="Timeline">
+      <div id="msProjectHeaderAxis" class="ms-project-header-axis"></div>
+    </div>
   </div>
 
   <div id="timelineWrapper">

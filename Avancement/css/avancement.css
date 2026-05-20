@@ -1,0 +1,236 @@
+body {
+  font-family: sans-serif;
+  margin: 0;
+  padding: 20px;
+  background-color: #f7f9fc;
+  color: #17324d;
+}
+
+.sticky-container {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background-color: rgba(247, 249, 252, 0.96);
+  padding: 10px 0 12px;
+  border-bottom: 1px solid #ed1b2d;
+  margin-bottom: 20px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 18px rgba(8, 21, 38, 0.06);
+}
+
+.dropdown-container {
+  display: inline-block;
+  margin-right: 20px;
+}
+
+.main-container {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.dashboard-content {
+  min-width: 0;
+}
+
+.top-chart-card {
+  position: relative;
+  height: 60vh;
+  min-height: 360px;
+  padding: 18px;
+  margin-bottom: 20px;
+  border: 1px solid rgba(0, 73, 144, 0.12);
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 14px 32px rgba(18, 37, 63, 0.08);
+}
+
+.top-chart-card canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.chart-card {
+  position: relative;
+  min-height: 220px;
+  height: 220px;
+  padding: 16px;
+  border: 1px solid rgba(0, 73, 144, 0.12);
+  border-radius: 12px;
+  background-color: #ffffff;
+  box-shadow: 0 14px 32px rgba(18, 37, 63, 0.08);
+}
+
+.chart-card canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+#average-indices-container {
+  padding: 15px;
+  background-color: #ffffff;
+  border: 1px solid #ed1b2d;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  align-self: flex-start; /* Aligner en haut */
+  max-height: 60vh; /* Hauteur maximale */
+  overflow-y: auto; /* Ajout du défilement vertical */
+}
+
+#average-indices-container h3 {
+  margin-top: 0;
+  font-size: 1.2em;
+  color: #004990;
+}
+
+#average-indices-container p {
+  font-size: 1em;
+  color: #004990;
+  margin: 10px 0;
+}
+
+#average-indices-container strong {
+  color: #ed1b2d;
+}
+
+.average-indices {
+  margin-bottom: 18px;
+}
+
+.custom-rules-panel {
+  padding-top: 0;
+}
+
+.index-selection-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.index-selection-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.index-selection-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(72px, 96px);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(237, 27, 45, 0.2);
+  font-size: 0.95em;
+  color: #004990;
+}
+
+.index-selection-item span {
+  font-weight: bold;
+}
+
+.index-selection-select {
+  min-width: 0;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid #004990;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #004990;
+}
+
+.rules-feedback {
+  margin: 8px 0;
+  font-size: 0.95em;
+}
+
+.rules-feedback {
+  min-height: 1.2em;
+}
+
+.rules-feedback-error {
+  color: #ed1b2d;
+}
+
+.rules-feedback-success {
+  color: #007a5a;
+}
+
+.summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+}
+
+.summary-table th, .summary-table td {
+  border: 1px solid #ed1b2d;
+  padding: 8px;
+  text-align: left;
+}
+
+.summary-table th {
+  background-color: #004990;
+  color: #ffffff;
+}
+
+.summary-table td:not(:first-child) {
+  text-align: right;
+}
+
+.not-applicable-cell {
+  background-color: rgba(0, 73, 144, 0.06);
+  color: rgba(0, 73, 144, 0.55);
+}
+
+.budget-progress-cell {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 2px;
+  min-width: 48px;
+}
+
+.budget-progress-editable {
+  min-width: 28px;
+  padding: 2px 3px;
+  border-bottom: 1px solid transparent;
+  color: #004990;
+  cursor: text;
+  outline: none;
+}
+
+.budget-progress-editable:focus {
+  border-bottom-color: #ed1b2d;
+  background-color: rgba(237, 27, 45, 0.06);
+}
+
+.budget-progress-editable.is-disabled {
+  color: rgba(0, 73, 144, 0.5);
+  cursor: default;
+}
+
+.budget-progress-suffix {
+  color: #004990;
+}
+
+.total-row {
+  font-weight: bold;
+  background-color: #004990;
+  color: #ffffff;
+}
+
+@media (max-width: 980px) {
+  .main-container {
+    grid-template-columns: 1fr;
+  }
+
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+}

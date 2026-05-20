@@ -13,17 +13,25 @@ import {
 } from "../layout/resizeHandle.js";
 import {
   appendLog,
-  closePlanningWarningsPopup,
   renderProjectOptions,
   syncSharedPlanningControlsAvailability,
   setProjectContentVisibility,
   setHubStatus,
   setSelectionWarning,
-  showPlanningWarningsPopup,
 } from "../layout/shell.js";
 import { attachExpensesFrameApi, waitForChildApi } from "../services/childApi.js";
+import {
+  handlePlanningWarningsChange,
+  showCurrentPlanningWarningsPopup,
+} from "../services/planningWarnings.js";
 import { applySharedProject, clearSharedProjectSelection } from "../services/projectSync.js";
 import { bindExpensesPlanningShellControls, handleViewportChange } from "../services/viewportSync.js";
+
+function showPlanningWarningsOnWidgetArrival() {
+  window.setTimeout(() => {
+    showCurrentPlanningWarningsPopup({ force: true });
+  }, 0);
+}
 
 function applyDebugBodyClass() {
   if (DEBUG_DISABLE_STICKY_SHELL && typeof document !== "undefined") {
@@ -35,6 +43,7 @@ function bindFrameLoadListeners() {
   dom.expensesFrameEl?.addEventListener("load", () => {
     state.expensesApi = null;
     state.expensesViewportSubscriptionApi = null;
+    state.lastPlanningWarningsPopupSignature = "";
     syncSharedPlanningControlsAvailability();
     schedulePlanningFramePresentation();
     scheduleExpensesFramePresentation();
@@ -53,6 +62,16 @@ function bindFrameLoadListeners() {
     scheduleExpensesFramePresentation();
     bindPlanningLayoutDebug();
     schedulePlanningLayoutDebug("planning-frame-load");
+  });
+}
+
+function bindWidgetArrivalWarningsListeners() {
+  window.addEventListener("pageshow", showPlanningWarningsOnWidgetArrival);
+  window.addEventListener("focus", showPlanningWarningsOnWidgetArrival);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      showPlanningWarningsOnWidgetArrival();
+    }
   });
 }
 
@@ -81,6 +100,7 @@ export async function bootstrapHubApp() {
     scheduleExpensesFramePresentation();
     bindPlanningLayoutDebug();
     bindFrameLoadListeners();
+    bindWidgetArrivalWarningsListeners();
 
     const planningProjects = (state.planningApi.listProjects?.() || []).filter(Boolean);
     renderProjectOptions(planningProjects);
@@ -102,34 +122,7 @@ export async function bootstrapHubApp() {
     }
     if (typeof state.planningApi.subscribeWarningsChange === "function") {
       state.planningApi.subscribeWarningsChange((payload) => {
-        if (!String(state.activeProjectKey || "").trim()) {
-          closePlanningWarningsPopup();
-          return;
-        }
-
-        const projectKey = String(payload?.projectKey || state.activeProjectKey || "").trim();
-        const warnings = Array.isArray(payload?.warnings) ? payload.warnings : [];
-        const popupSignature = JSON.stringify({
-          projectKey,
-          warnings: warnings.map((warning) => ({
-            severity: String(warning?.severity || "").trim(),
-            label: String(warning?.label || "").trim(),
-            days: Number(warning?.days) || 0,
-            segmentEndDate: String(warning?.segmentEndDate || "").trim(),
-          })),
-        });
-
-        if (!warnings.length) {
-          closePlanningWarningsPopup();
-          return;
-        }
-
-        if (popupSignature === state.lastPlanningWarningsPopupSignature) {
-          return;
-        }
-
-        state.lastPlanningWarningsPopupSignature = popupSignature;
-        showPlanningWarningsPopup(projectKey, warnings);
+        handlePlanningWarningsChange(payload);
       });
     }
     state.planningAxisApi.subscribeViewportChange((payload) =>

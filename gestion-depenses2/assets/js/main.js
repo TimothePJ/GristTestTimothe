@@ -161,6 +161,8 @@ const CHARGE_PLAN_SYNC_TRACE_LABEL = EMBEDDED_SPENDING_CHART_MODE
   ? "gestion-depenses2"
   : "gestion-depenses2-standalone";
 let chargePlanSyncTraceSequence = 0;
+let lastPlanningAlertsPopupSignature = "";
+let planningAlertsArrivalTimer = null;
 
 function roundChargePlanTraceNumber(value, digits = 2) {
   const numericValue = Number(value);
@@ -223,6 +225,202 @@ function getTodayDateValueInTimeZone(timeZone = PARIS_TIMEZONE) {
   }
 
   return `${year}-${month}-${day}`;
+}
+
+function formatPlanningAlertDate(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toLocaleDateString("fr-FR");
+}
+
+function getCalendarDelayDays(referenceDate, currentDate = new Date()) {
+  if (
+    !(referenceDate instanceof Date) ||
+    Number.isNaN(referenceDate.getTime()) ||
+    !(currentDate instanceof Date) ||
+    Number.isNaN(currentDate.getTime())
+  ) {
+    return 0;
+  }
+
+  const referenceDay = new Date(
+    referenceDate.getFullYear(),
+    referenceDate.getMonth(),
+    referenceDate.getDate()
+  );
+  const currentDay = new Date(
+    currentDate.getFullYear(),
+    currentDate.getMonth(),
+    currentDate.getDate()
+  );
+
+  if (currentDay <= referenceDay) {
+    return 0;
+  }
+
+  return Math.floor((currentDay.getTime() - referenceDay.getTime()) / DAY_IN_MS);
+}
+
+function getPlanningAlertEndDate(task = {}) {
+  return task?.endAt instanceof Date && !Number.isNaN(task.endAt.getTime())
+    ? task.endAt
+    : null;
+}
+
+function buildPlanningDelayAlerts(project = null) {
+  const tasks = Array.isArray(project?.planningTasks) ? project.planningTasks : [];
+
+  return tasks
+    .map((task) => {
+      const realisationPct = toFiniteNumber(task?.realisationPct, 0);
+      if (realisationPct >= 100) {
+        return null;
+      }
+
+      const endDate = getPlanningAlertEndDate(task);
+      const computedDelayDays = endDate ? getCalendarDelayDays(endDate) : 0;
+      const retardsDays = Math.max(
+        0,
+        Math.round(toFiniteNumber(task?.retardsDays, 0))
+      );
+      const delayDays = Math.max(retardsDays, computedDelayDays);
+      if (delayDays <= 0) {
+        return null;
+      }
+
+      const label = [task?.taskCode, task?.name]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .join(" - ") || "Plan";
+      const formattedEndDate = formatPlanningAlertDate(endDate);
+
+      return {
+        label,
+        days: delayDays,
+        endDate,
+        message: formattedEndDate
+          ? `${label} : ${delayDays} jour(s) de retard. Fin prevue le ${formattedEndDate}.`
+          : `${label} : ${delayDays} jour(s) de retard.`,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const delayDelta = (right?.days || 0) - (left?.days || 0);
+      if (delayDelta !== 0) {
+        return delayDelta;
+      }
+
+      const leftEndTime = left?.endDate instanceof Date ? left.endDate.getTime() : Number.MAX_SAFE_INTEGER;
+      const rightEndTime = right?.endDate instanceof Date ? right.endDate.getTime() : Number.MAX_SAFE_INTEGER;
+      return leftEndTime - rightEndTime;
+    });
+}
+
+function closePlanningAlertsPopup() {
+  if (!dom?.planningAlertsModal) {
+    return;
+  }
+
+  closeModal(dom.planningAlertsModal);
+  dom.planningAlertsModal.setAttribute("aria-hidden", "true");
+}
+
+function shouldShowLocalPlanningAlerts() {
+  return !(
+    EMBEDDED_PLANNING_SYNC_MODE ||
+    EMBEDDED_SPENDING_CHART_MODE ||
+    EMBEDDED_OVERVIEW_MODE
+  );
+}
+
+function showPlanningAlertsPopup({ force = false } = {}) {
+  if (!shouldShowLocalPlanningAlerts()) {
+    return false;
+  }
+
+  const selectedProject = getSelectedProject();
+  if (!selectedProject) {
+    lastPlanningAlertsPopupSignature = "";
+    closePlanningAlertsPopup();
+    return false;
+  }
+
+  const alerts = buildPlanningDelayAlerts(selectedProject);
+  if (!alerts.length) {
+    lastPlanningAlertsPopupSignature = "";
+    closePlanningAlertsPopup();
+    return false;
+  }
+
+  const signature = JSON.stringify({
+    projectId: selectedProject.id,
+    alerts: alerts.map((alert) => ({
+      label: alert.label,
+      days: alert.days,
+      endDate: alert.endDate instanceof Date ? alert.endDate.toISOString() : "",
+    })),
+  });
+
+  if (!force && signature === lastPlanningAlertsPopupSignature) {
+    return false;
+  }
+
+  lastPlanningAlertsPopupSignature = signature;
+
+  if (dom.planningAlertsSummary) {
+    const projectLabel = String(selectedProject.name || selectedProject.projectNumber || "").trim();
+    dom.planningAlertsSummary.textContent =
+      `${alerts.length} plan(s) non realise(s) en retard${projectLabel ? ` - ${projectLabel}` : ""}.`;
+  }
+
+  if (dom.planningAlertsList) {
+    dom.planningAlertsList.replaceChildren();
+    alerts.forEach((alert) => {
+      const itemEl = document.createElement("article");
+      itemEl.className = "planning-alerts-item";
+
+      const contentEl = document.createElement("div");
+
+      const titleEl = document.createElement("p");
+      titleEl.className = "planning-alerts-item-title";
+      titleEl.textContent = alert.label;
+      contentEl.appendChild(titleEl);
+
+      const messageEl = document.createElement("p");
+      messageEl.className = "planning-alerts-item-message";
+      messageEl.textContent = alert.message;
+      contentEl.appendChild(messageEl);
+
+      const badgeEl = document.createElement("span");
+      badgeEl.className = "planning-alerts-item-badge";
+      badgeEl.textContent = `${alert.days} j`;
+
+      itemEl.append(contentEl, badgeEl);
+      dom.planningAlertsList.appendChild(itemEl);
+    });
+  }
+
+  dom.planningAlertsModal.setAttribute("aria-hidden", "false");
+  openModal(dom.planningAlertsModal);
+  dom.planningAlertsCloseBtn?.focus();
+  return true;
+}
+
+function schedulePlanningAlertsPopupOnArrival() {
+  if (!shouldShowLocalPlanningAlerts()) {
+    return;
+  }
+
+  if (planningAlertsArrivalTimer != null) {
+    window.clearTimeout(planningAlertsArrivalTimer);
+  }
+
+  planningAlertsArrivalTimer = window.setTimeout(() => {
+    planningAlertsArrivalTimer = null;
+    showPlanningAlertsPopup({ force: true });
+  }, 0);
 }
 
 function applyEmbeddedPlanningSyncMode() {
@@ -1903,6 +2101,7 @@ async function loadData({ preferredProjectNumber = "" } = {}) {
   }
 
   renderApp();
+  schedulePlanningAlertsPopupOnArrival();
 }
 
 function resetNewProjectForm() {
@@ -3756,6 +3955,7 @@ function handleProjectSelectionChange() {
   }
 
   renderApp();
+  schedulePlanningAlertsPopupOnArrival();
   emitChargePlanSyncProjectChange("project-change");
   if (!EMBEDDED_OVERVIEW_MODE) {
     emitChargePlanSyncViewportChange("project-change");
@@ -4779,6 +4979,16 @@ function bindEvents() {
     resetEditBudgetForm();
   });
 
+  dom.planningAlertsCloseBtn.addEventListener("click", () => {
+    closePlanningAlertsPopup();
+  });
+
+  dom.planningAlertsModal.addEventListener("click", (event) => {
+    if (event.target === dom.planningAlertsModal) {
+      closePlanningAlertsPopup();
+    }
+  });
+
   dom.editBudgetModal.addEventListener("click", (event) => {
     if (event.target === dom.editBudgetModal) {
       resetEditBudgetForm();
@@ -4950,8 +5160,24 @@ function bindEvents() {
     chargeTimelineDrag = null;
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || dom.editBudgetModal.hidden) return;
-    resetEditBudgetForm();
+    if (event.key !== "Escape") return;
+
+    if (!dom.planningAlertsModal.hidden) {
+      closePlanningAlertsPopup();
+      return;
+    }
+
+    if (!dom.editBudgetModal.hidden) {
+      resetEditBudgetForm();
+    }
+  });
+
+  window.addEventListener("pageshow", schedulePlanningAlertsPopupOnArrival);
+  window.addEventListener("focus", schedulePlanningAlertsPopupOnArrival);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      schedulePlanningAlertsPopupOnArrival();
+    }
   });
 }
 
@@ -4961,6 +5187,7 @@ export async function bootstrap() {
   toggleElement(dom.addProjectForm, false);
   toggleElement(dom.addWorkerForm, false);
   closeModal(dom.editBudgetModal);
+  closePlanningAlertsPopup();
 
   initGrist();
   bindEvents();

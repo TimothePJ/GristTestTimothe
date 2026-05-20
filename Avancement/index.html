@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Avancement des Plans</title>
+
+  <!-- Grist Plugin API -->
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Chart.js Datalabels Plugin -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="css/avancement.css">
+</head>
+<body>
+  <div class="sticky-container">
+    <div class="dropdown-container">
+      <label for="projectDropdown">Projet :</label>
+      <select id="projectDropdown">
+        <option value="">Choisir un projet</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="main-container">
+    <div class="dashboard-content">
+      <section class="top-chart-card">
+        <canvas id="avancementChart"></canvas>
+      </section>
+
+      <div id="stats-output"></div>
+
+      <div class="charts-grid">
+        <section class="chart-card">
+          <canvas id="expensesProgressChart"></canvas>
+        </section>
+        <section class="chart-card">
+          <canvas id="generalProgressChart"></canvas>
+        </section>
+      </div>
+    </div>
+
+    <div id="average-indices-container"></div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/avancement.js" defer></script>
+</body>
+</html>

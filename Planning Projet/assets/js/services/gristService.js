@@ -1628,6 +1628,7 @@ export async function addPlanningZoneRow({
   const retardsCol = String(columns.retards || "Retards").trim();
   const indiceCol = String(columns.indice || "Indice").trim();
   const realiseCol = String(columns.realise || "Realise").trim();
+  const dateRealiseCol = String(columns.dateRealise || "Date_Realise").trim();
   const projectCol = String(columns.projectLink || columns.nomProjet || "NomProjet").trim();
   const groupCol = String(columns.groupe || "Groupe").trim();
   const zoneCol = String(columns.zone || "Zone").trim();
@@ -1646,6 +1647,7 @@ export async function addPlanningZoneRow({
     [retardsCol]: 0,
     [indiceCol]: "",
     [realiseCol]: 0,
+    [dateRealiseCol]: "",
     [projectCol]: normalizedProject,
     [groupCol]: "",
     [zoneCol]: normalizedZone,
@@ -1653,6 +1655,7 @@ export async function addPlanningZoneRow({
 
   // Colonne optionnelle presente sur certaines bases.
   fields.Prev_Indice_0 = null;
+  const optionalFieldNames = ["Prev_Indice_0", dateRealiseCol];
 
   const grist = getGrist();
   if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
@@ -1664,15 +1667,20 @@ export async function addPlanningZoneRow({
     await grist.docApi.applyUserActions([addAction]);
   } catch (error) {
     const message = String(error?.message ?? "");
-    const canRetryWithoutPrevIndice =
-      message.toLowerCase().includes("prev_indice_0") ||
-      message.toLowerCase().includes("unknown column");
-    if (!canRetryWithoutPrevIndice) {
+    const lowerMessage = message.toLowerCase();
+    const canRetryWithoutOptionalColumn =
+      optionalFieldNames.some((fieldName) =>
+        lowerMessage.includes(String(fieldName || "").toLowerCase())
+      ) ||
+      lowerMessage.includes("unknown column");
+    if (!canRetryWithoutOptionalColumn) {
       throw error;
     }
 
-    // Si la colonne optionnelle n'existe pas, on retente sans celle-ci.
-    delete fields.Prev_Indice_0;
+    // Si une colonne optionnelle n'existe pas, on retente sans celles-ci.
+    optionalFieldNames.forEach((fieldName) => {
+      delete fields[fieldName];
+    });
     await grist.docApi.applyUserActions([["AddRecord", table.sourceTable, null, fields]]);
   }
 }

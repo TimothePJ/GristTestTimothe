@@ -74,6 +74,27 @@ function startOfDay(date) {
   return d;
 }
 
+function getDelayDays(segmentEndDate, referenceDate) {
+  if (
+    !(segmentEndDate instanceof Date) ||
+    Number.isNaN(segmentEndDate.getTime()) ||
+    !(referenceDate instanceof Date) ||
+    Number.isNaN(referenceDate.getTime())
+  ) {
+    return 0;
+  }
+
+  const segmentEndDay = startOfDay(segmentEndDate);
+  const referenceDay = startOfDay(referenceDate);
+  if (referenceDay <= segmentEndDay) {
+    return 0;
+  }
+
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const diffDays = Math.floor((referenceDay.getTime() - segmentEndDay.getTime()) / msPerDay);
+  return Math.max(0, diffDays);
+}
+
 function isAllowedTypeDoc(value) {
   const normalized = String(value ?? "").toUpperCase();
   // console.log("Normalized TypeDoc:", normalized);
@@ -149,6 +170,7 @@ export function computePlanningRetardValue(
     diffArmatureRaw,
     demarrageRaw,
     duree3Raw,
+    dateRealiseRaw,
   },
   currentInstant = getCurrentInstant()
 ) {
@@ -157,11 +179,6 @@ export function computePlanningRetardValue(
   }
 
   const realiseValue = computePlanningRealiseValue(typeDoc, indice);
-  if (realiseValue >= 100) {
-    const frozenRetard = toNumber(currentRetard);
-    return frozenRetard != null && frozenRetard >= 0 ? frozenRetard : 0;
-  }
-
   const segmentEndDate = resolvePlanningSegmentEndDate({
     typeDoc,
     lignePlanningRaw,
@@ -170,19 +187,22 @@ export function computePlanningRetardValue(
     demarrageRaw,
     duree3Raw,
   });
+
+  if (realiseValue >= 100) {
+    const dateRealise = parseDate(dateRealiseRaw);
+    if (dateRealise && segmentEndDate) {
+      return getDelayDays(segmentEndDate, dateRealise);
+    }
+
+    const frozenRetard = toNumber(currentRetard);
+    return frozenRetard != null && frozenRetard >= 0 ? frozenRetard : 0;
+  }
+
   if (!segmentEndDate) {
     return 0;
   }
 
-  const currentDay = startOfDay(currentInstant);
-  const segmentEndDay = startOfDay(segmentEndDate);
-  if (currentDay <= segmentEndDay) {
-    return 0;
-  }
-
-  const msPerDay = 24 * 60 * 60 * 1000;
-  const diffDays = Math.floor((currentDay.getTime() - segmentEndDay.getTime()) / msPerDay);
-  return Math.max(0, diffDays);
+  return getDelayDays(segmentEndDate, currentInstant);
 }
 
 export function buildPlanningRealiseUpdates(rawRows) {
@@ -230,6 +250,7 @@ export function buildPlanningRetardUpdates(rawRows, currentInstant = getCurrentI
         diffArmatureRaw: row?.[cfg.diffArmature],
         demarrageRaw: row?.[cfg.demarragesTravaux],
         duree3Raw: row?.[cfg.duree3],
+        dateRealiseRaw: row?.[cfg.dateRealise],
       },
       currentInstant
     );

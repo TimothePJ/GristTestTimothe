@@ -2277,6 +2277,58 @@ td input {
   gap: 18px;
 }
 
+.modal-content--planning-alerts {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(78vh, 760px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.planning-alerts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.planning-alerts-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid rgba(180, 35, 24, 0.18);
+  border-radius: var(--radius-md);
+  background: rgba(180, 35, 24, 0.08);
+}
+
+.planning-alerts-item-title,
+.planning-alerts-item-message {
+  margin: 0;
+}
+
+.planning-alerts-item-title {
+  font-weight: 700;
+}
+
+.planning-alerts-item-message {
+  color: var(--color-text-muted);
+}
+
+.planning-alerts-item-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: #b42318;
+  color: #fff;
+  font-weight: 700;
+}
+
 .budget-modal-header {
   display: flex;
   align-items: flex-start;

@@ -3,6 +3,7 @@ let groupsDataSet = null;
 let itemsDataSet = null;
 let toolbarListenersBound = false;
 let dataAnchorDate = null;
+let dataDateRange = null;
 let hoverTooltipEl = null;
 let hoverTooltipBound = false;
 let itemElementsObserver = null;
@@ -18,11 +19,21 @@ let rowDragGlobalListenersBound = false;
 let rowDragContainerEl = null;
 let dragDebugCounter = 0;
 let pendingInlineRowEl = null;
+let persistentHeaderBound = false;
+let persistentHeaderFrame = 0;
+let headerAxisWheelBound = false;
 
 const DRAG_DEBUG = true;
 const ENABLE_INLINE_PREVIEW = false;
 const USE_CUSTOM_DRAG_IMAGE = true;
 const ROW_DRAG_HANDLED_FLAG = "__msProjectRowDragHandled";
+const PROJECT_START_PADDING_DAYS = 28;
+const PROJECT_END_PADDING_DAYS = 7;
+const TIMELINE_WHEEL_ZOOM_SENSITIVITY = 520;
+const TIMELINE_MIN_ZOOM_MS = 1000 * 60 * 60 * 24;
+const TIMELINE_MAX_ZOOM_MS = 1000 * 60 * 60 * 24 * 366 * 20;
+const WHEEL_DELTA_LINE = 1;
+const WHEEL_DELTA_PAGE = 2;
 
 function dragDebug(step, data = null) {
   if (!DRAG_DEBUG) return;
@@ -40,6 +51,10 @@ function debugLog(message, payload) {
   //   return;
   // }
   // console.log(`[MS Project tooltip] ${message}`, payload);
+}
+
+function clampNumber(value, min, max) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function parseIsoDateText(value) {
@@ -79,21 +94,86 @@ function updateCurrentTimeLineBounds() {
   const container = document.getElementById("msProjectTimeline");
   if (!container) return;
 
-  const topPanel = container.querySelector(".vis-panel.vis-top");
+  const currentLines = container.querySelectorAll(".vis-current-time");
+  if (!currentLines.length) return;
+
+  const contentHeight = getTimelineContentHeight(container);
+
+  currentLines.forEach((line) => {
+    const parentPanel = line.closest(".vis-panel");
+    const isBodyPanelLine = parentPanel?.classList?.contains("vis-center");
+    line.style.top = "0px";
+    line.style.height = isBodyPanelLine ? `${contentHeight}px` : "0px";
+  });
+}
+
+function updatePersistentHeaderPosition() {
+  const header = document.querySelector(".ms-project-header-row");
+  if (!(header instanceof HTMLElement)) return;
+
+  const toolbar = document.getElementById("toolbar");
+  const wrapper = document.getElementById("timelineWrapper");
+  const threshold = toolbar instanceof HTMLElement ? toolbar.offsetHeight : header.offsetTop;
+  const wasFixed = header.classList.contains("is-fixed");
+  const shouldFix = window.scrollY >= threshold;
+  header.classList.toggle("is-fixed", shouldFix);
+
+  if (shouldFix && wrapper instanceof HTMLElement) {
+    const wrapperRect = wrapper.getBoundingClientRect();
+    header.style.left = `${wrapperRect.left}px`;
+    header.style.width = `${wrapperRect.width}px`;
+    header.style.right = "auto";
+  } else {
+    header.style.left = "";
+    header.style.width = "";
+    header.style.right = "";
+  }
+
+  if (wasFixed !== shouldFix) {
+    scheduleTimelineChromeSync();
+  }
+}
+
+function schedulePersistentHeaderUpdate() {
+  if (persistentHeaderFrame) return;
+  persistentHeaderFrame = requestAnimationFrame(() => {
+    persistentHeaderFrame = 0;
+    updatePersistentHeaderPosition();
+  });
+}
+
+function bindPersistentHeader() {
+  if (persistentHeaderBound) return;
+  persistentHeaderBound = true;
+  window.addEventListener("scroll", schedulePersistentHeaderUpdate, { passive: true });
+  window.addEventListener("resize", () => {
+    schedulePersistentHeaderUpdate();
+    scheduleTimelineChromeSync();
+  });
+  schedulePersistentHeaderUpdate();
+}
+
+function updateTimelineAxisHeight(containerEl = getTimelineContainer()) {
+  const topPanel = containerEl.querySelector(".vis-panel.vis-top");
+  const measuredHeight = Math.ceil(
+    topPanel?.scrollHeight || topPanel?.getBoundingClientRect?.().height || 0
+  );
+  const fallbackHeight = 40;
+  const axisHeight = measuredHeight > 0 ? measuredHeight : fallbackHeight;
+  document.documentElement.style.setProperty("--ms-timeline-axis-height", `${axisHeight}px`);
+}
+
+function getTimelineContentHeight(container = getTimelineContainer()) {
   const centerPanel = container.querySelector(".vis-panel.vis-center");
   const leftPanel = container.querySelector(".vis-panel.vis-left");
   const labelSet = container.querySelector(".vis-labelset");
   const centerContent = centerPanel?.querySelector(".vis-content");
   const foreground = centerPanel?.querySelector(".vis-foreground");
   const background = centerPanel?.querySelector(".vis-background");
-  const currentLines = container.querySelectorAll(".vis-current-time");
-  if (!currentLines.length) return;
-
-  const topHeight = topPanel ? topPanel.getBoundingClientRect().height : 0;
   const totalHeight = container.getBoundingClientRect().height;
-  const visibleBodyHeight = Math.max(0, totalHeight - topHeight);
-  const contentHeight = Math.max(
-    visibleBodyHeight,
+
+  return Math.max(
+    Math.max(0, totalHeight),
     centerPanel?.scrollHeight || 0,
     leftPanel?.scrollHeight || 0,
     labelSet?.scrollHeight || 0,
@@ -101,13 +181,310 @@ function updateCurrentTimeLineBounds() {
     foreground?.scrollHeight || 0,
     background?.scrollHeight || 0
   );
+}
 
-  currentLines.forEach((line) => {
-    const parentPanel = line.closest(".vis-panel");
-    const isBodyPanelLine = parentPanel?.classList?.contains("vis-center");
-    line.style.top = isBodyPanelLine ? "0px" : `${topHeight}px`;
-    line.style.height = `${contentHeight}px`;
+function parseTranslate(styleText) {
+  const text = String(styleText || "");
+  const match =
+    text.match(/translate3d\(\s*(-?\d+(?:\.\d+)?)px\s*,\s*(-?\d+(?:\.\d+)?)px/i) ||
+    text.match(/translate\(\s*(-?\d+(?:\.\d+)?)px\s*,\s*(-?\d+(?:\.\d+)?)px/i);
+
+  if (match) {
+    const x = Number(match[1]);
+    const y = Number(match[2]);
+    return {
+      x: Number.isFinite(x) ? x : 0,
+      y: Number.isFinite(y) ? y : 0,
+    };
+  }
+
+  const xMatch = text.match(/translateX\(\s*(-?\d+(?:\.\d+)?)px/i);
+  if (!xMatch) return { x: 0, y: 0 };
+
+  const x = Number(xMatch[1]);
+  return {
+    x: Number.isFinite(x) ? x : 0,
+    y: 0,
+  };
+}
+
+function parseStylePixel(styleText, propertyName) {
+  const pattern = new RegExp(`${propertyName}\\s*:\\s*(-?\\d+(?:\\.\\d+)?)px`, "i");
+  const match = String(styleText || "").match(pattern);
+  if (!match) return 0;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function getElementAxisBox(element, axisRect) {
+  const rect = element.getBoundingClientRect();
+  const styleText = element.getAttribute("style") || "";
+  const fallback = parseTranslate(styleText);
+  const hasMeasuredRect = rect.width > 0 || rect.height > 0;
+  const width = rect.width || parseStylePixel(styleText, "width");
+  const height = rect.height || parseStylePixel(styleText, "height");
+
+  return {
+    x: hasMeasuredRect ? rect.left - axisRect.left : fallback.x,
+    y: hasMeasuredRect ? rect.top - axisRect.top : fallback.y,
+    width,
+    height,
+  };
+}
+
+function addTimelineGridLine(lineMap, x, kind = "minor") {
+  if (!Number.isFinite(x)) return;
+  const roundedX = Math.round(x * 100) / 100;
+  const key = String(roundedX);
+  const existing = lineMap.get(key);
+  if (!existing || kind === "major") {
+    lineMap.set(key, { x: roundedX, kind });
+  }
+}
+
+function readTimelineChrome(containerEl = getTimelineContainer()) {
+  const topPanel = containerEl.querySelector(".vis-panel.vis-top");
+  const sourceAxis = topPanel?.querySelector(".vis-time-axis");
+  if (!topPanel || !sourceAxis) return null;
+
+  updateTimelineAxisHeight(containerEl);
+
+  const topRect = topPanel.getBoundingClientRect();
+  const axisRect = sourceAxis.getBoundingClientRect();
+  const axisHeight = Math.max(topRect.height, axisRect.height, sourceAxis.scrollHeight, 40);
+  const axisWidth = Math.max(axisRect.width, topRect.width, sourceAxis.scrollWidth, 0);
+  const labels = [];
+  const lineMap = new Map();
+
+  sourceAxis.querySelectorAll(".vis-grid").forEach((grid) => {
+    const box = getElementAxisBox(grid, axisRect);
+    const kind = grid.classList.contains("vis-major") ? "major" : "minor";
+    addTimelineGridLine(lineMap, box.x, kind);
   });
+
+  sourceAxis.querySelectorAll(".vis-text:not(.vis-measure)").forEach((sourceLabel) => {
+    const box = getElementAxisBox(sourceLabel, axisRect);
+    const isMajor = sourceLabel.classList.contains("vis-major");
+    const isMinor = sourceLabel.classList.contains("vis-minor");
+
+    labels.push({
+      sourceLabel,
+      x: box.x,
+      y: box.y,
+      width: box.width,
+      height: box.height,
+      kind: isMajor ? "major" : "minor",
+    });
+
+    if (isMajor || isMinor) {
+      addTimelineGridLine(lineMap, box.x, isMajor ? "major" : "minor");
+    }
+  });
+
+  if (!labels.length && !lineMap.size) return null;
+
+  return {
+    height: axisHeight,
+    width: axisWidth,
+    labels,
+    lines: Array.from(lineMap.values()).sort((a, b) => a.x - b.x),
+  };
+}
+
+function createTimelineGridLine(line, className) {
+  const element = document.createElement("div");
+  element.className = `${className} ${className}--${line.kind}`;
+  element.style.transform = `translate(${line.x}px, 0px)`;
+  return element;
+}
+
+function renderTimelineHeaderAxis(chrome) {
+  const target = document.getElementById("msProjectHeaderAxis");
+  if (!target) return;
+
+  if (!chrome) {
+    target.replaceChildren();
+    return;
+  }
+
+  const gridLayer = document.createElement("div");
+  gridLayer.className = "ms-project-header-axis-grid";
+  chrome.lines.forEach((line) => {
+    gridLayer.appendChild(createTimelineGridLine(line, "ms-project-header-axis-grid-line"));
+  });
+
+  const labelLayer = document.createElement("div");
+  labelLayer.className = "ms-project-header-axis-labels";
+  chrome.labels.forEach((label) => {
+    const clone = label.sourceLabel.cloneNode(true);
+    clone.classList.add("ms-project-header-axis-label");
+    clone.removeAttribute("id");
+    clone.removeAttribute("style");
+    clone.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
+    clone.style.transform = `translate(${label.x}px, ${label.y}px)`;
+    if (label.width > 0) clone.style.width = `${label.width}px`;
+    if (label.height > 0) clone.style.height = `${label.height}px`;
+    labelLayer.appendChild(clone);
+  });
+
+  target.replaceChildren(gridLayer, labelLayer);
+}
+
+function getOrCreateTimelineGridOverlay(containerEl = getTimelineContainer()) {
+  const centerPanel = containerEl.querySelector(".vis-panel.vis-center");
+  if (!centerPanel) return null;
+
+  const parent = centerPanel.querySelector(".vis-background") || centerPanel;
+  let overlay = Array.from(parent.children).find((child) =>
+    child.classList?.contains("ms-project-grid-overlay")
+  );
+
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.className = "ms-project-grid-overlay";
+    const foreground = parent.querySelector?.(".vis-foreground");
+    if (foreground) {
+      parent.insertBefore(overlay, foreground);
+    } else {
+      parent.appendChild(overlay);
+    }
+  }
+
+  return overlay;
+}
+
+function renderTimelineGridOverlay(containerEl, chrome) {
+  const overlay = getOrCreateTimelineGridOverlay(containerEl);
+  if (!overlay) return;
+
+  if (!chrome) {
+    overlay.replaceChildren();
+    return;
+  }
+
+  overlay.style.height = `${getTimelineContentHeight(containerEl)}px`;
+  overlay.style.width = chrome.width > 0 ? `${chrome.width}px` : "100%";
+  overlay.replaceChildren();
+
+  chrome.lines.forEach((line) => {
+    overlay.appendChild(createTimelineGridLine(line, "ms-project-grid-overlay-line"));
+  });
+}
+
+function getOrCreateCurrentTimeOverlay(containerEl = getTimelineContainer()) {
+  const centerPanel = containerEl.querySelector(".vis-panel.vis-center");
+  if (!centerPanel) return null;
+
+  let overlay = Array.from(centerPanel.children).find((child) =>
+    child.classList?.contains("ms-project-current-time-overlay")
+  );
+
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.className = "ms-project-current-time-overlay";
+    centerPanel.appendChild(overlay);
+  }
+
+  return overlay;
+}
+
+function renderCurrentTimeOverlay(containerEl = getTimelineContainer()) {
+  const overlay = getOrCreateCurrentTimeOverlay(containerEl);
+  if (!overlay || !timelineInstance) return;
+
+  const centerPanel = containerEl.querySelector(".vis-panel.vis-center");
+  const centerWidth = centerPanel?.getBoundingClientRect?.().width || 0;
+  const windowRange = timelineInstance.getWindow();
+  const startMs = windowRange.start.valueOf();
+  const endMs = windowRange.end.valueOf();
+  const todayMs = Date.now();
+  const durationMs = endMs - startMs;
+
+  if (!centerWidth || !Number.isFinite(durationMs) || durationMs <= 0 || todayMs < startMs || todayMs > endMs) {
+    overlay.hidden = true;
+    overlay.replaceChildren();
+    return;
+  }
+
+  const x = ((todayMs - startMs) / durationMs) * centerWidth;
+  const line = document.createElement("div");
+  line.className = "ms-project-current-time-line";
+  line.style.transform = `translate(${x}px, 0px)`;
+  line.style.height = `${getTimelineContentHeight(containerEl)}px`;
+
+  overlay.hidden = false;
+  overlay.replaceChildren(line);
+}
+
+function syncTimelineChrome(containerEl = getTimelineContainer()) {
+  const chrome = readTimelineChrome(containerEl);
+  renderTimelineHeaderAxis(chrome);
+  renderTimelineGridOverlay(containerEl, chrome);
+  renderCurrentTimeOverlay(containerEl);
+  updateCurrentTimeLineBounds();
+}
+
+function scheduleTimelineChromeSync(containerEl = getTimelineContainer()) {
+  requestAnimationFrame(() => {
+    syncTimelineChrome(containerEl);
+    requestAnimationFrame(() => {
+      syncTimelineChrome(containerEl);
+    });
+  });
+}
+
+function getNormalizedWheelDelta(event) {
+  if (!event) return 0;
+  if (event.deltaMode === WHEEL_DELTA_LINE) return event.deltaY * 16;
+  if (event.deltaMode === WHEEL_DELTA_PAGE) return event.deltaY * 120;
+  return event.deltaY;
+}
+
+function zoomTimelineFromHeaderWheel(event) {
+  if (!timelineInstance) return;
+
+  const axis = document.getElementById("msProjectHeaderAxis");
+  if (!(axis instanceof HTMLElement)) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  const rect = axis.getBoundingClientRect();
+  if (!rect.width) return;
+
+  const range = timelineInstance.getWindow();
+  const startMs = range.start.valueOf();
+  const endMs = range.end.valueOf();
+  const durationMs = endMs - startMs;
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return;
+
+  const pointerRatio = clampNumber((event.clientX - rect.left) / rect.width, 0, 1);
+  const anchorMs = startMs + durationMs * pointerRatio;
+  const wheelDelta = clampNumber(getNormalizedWheelDelta(event), -240, 240);
+  const rawFactor = Math.exp(wheelDelta / TIMELINE_WHEEL_ZOOM_SENSITIVITY);
+  const targetDurationMs = clampNumber(
+    durationMs * rawFactor,
+    TIMELINE_MIN_ZOOM_MS,
+    TIMELINE_MAX_ZOOM_MS
+  );
+  const factor = targetDurationMs / durationMs;
+  const nextStart = anchorMs - (anchorMs - startMs) * factor;
+  const nextEnd = anchorMs + (endMs - anchorMs) * factor;
+
+  timelineInstance.setWindow(new Date(nextStart), new Date(nextEnd), { animation: false });
+  scheduleTimelineChromeSync();
+  updateDateRangeDisplay();
+  updateNavCenterButtonLabel();
+  updateCurrentTimeLineBounds();
+}
+
+function bindTimelineHeaderWheelZoom() {
+  if (headerAxisWheelBound) return;
+  const axis = document.getElementById("msProjectHeaderAxis");
+  if (!(axis instanceof HTMLElement)) return;
+
+  headerAxisWheelBound = true;
+  axis.addEventListener("wheel", zoomTimelineFromHeaderWheel, { passive: false });
 }
 
 function escapeHtml(value) {
@@ -1221,12 +1598,59 @@ function computeRange(items) {
   if (!min || !max) return null;
 
   const start = new Date(min);
-  start.setDate(start.getDate() - 7);
+  start.setHours(0, 0, 0, 0);
 
   const end = new Date(max);
-  end.setDate(end.getDate() + 7);
+  end.setHours(23, 59, 59, 999);
 
   return { start, end };
+}
+
+function startOfWeek(date) {
+  const result = new Date(date);
+  const day = result.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  result.setDate(result.getDate() + diffToMonday);
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+
+function endOfWeek(date) {
+  const result = startOfWeek(date);
+  result.setDate(result.getDate() + 6);
+  result.setHours(23, 59, 59, 999);
+  return result;
+}
+
+function computeDisplayRangeForMode(range, mode = "week") {
+  if (!range?.start || !range?.end) return null;
+
+  const paddedStart = new Date(range.start);
+  paddedStart.setDate(paddedStart.getDate() - PROJECT_START_PADDING_DAYS);
+  paddedStart.setHours(0, 0, 0, 0);
+
+  const paddedEnd = new Date(range.end);
+  paddedEnd.setDate(paddedEnd.getDate() + PROJECT_END_PADDING_DAYS);
+  paddedEnd.setHours(23, 59, 59, 999);
+
+  if (mode === "year") {
+    return {
+      start: new Date(paddedStart.getFullYear(), 0, 1),
+      end: new Date(paddedEnd.getFullYear(), 11, 31, 23, 59, 59, 999),
+    };
+  }
+
+  if (mode === "month") {
+    return {
+      start: new Date(paddedStart.getFullYear(), paddedStart.getMonth(), 1),
+      end: new Date(paddedEnd.getFullYear(), paddedEnd.getMonth() + 1, 0, 23, 59, 59, 999),
+    };
+  }
+
+  return {
+    start: startOfWeek(paddedStart),
+    end: endOfWeek(paddedEnd),
+  };
 }
 
 function computeRangeCenter(range) {
@@ -1260,12 +1684,14 @@ function getWindowCenterDate() {
 
 function getDynamicNavLabel(mode, anchorDate = new Date()) {
   if (mode === "week") {
-    const day = anchorDate.getDay();
-    const diffToMonday = day === 0 ? -6 : 1 - day;
-    const monday = new Date(anchorDate);
-    monday.setDate(anchorDate.getDate() + diffToMonday);
-    monday.setHours(0, 0, 0, 0);
-    return `Semaine du ${monday.toLocaleDateString("fr-FR")}`;
+    const weekStart = startOfWeek(anchorDate);
+    const weekEnd = endOfWeek(anchorDate);
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    if (today >= weekStart && today <= weekEnd) {
+      return "Aujourd'hui";
+    }
+    return weekStart.toLocaleDateString("fr-FR");
   }
 
   if (mode === "month") {
@@ -1301,6 +1727,19 @@ function setActiveSortButton(mode) {
   });
 }
 
+function fitDataWindowForMode(mode = getCurrentZoomMode()) {
+  if (!timelineInstance || !dataDateRange) return false;
+  const displayRange = computeDisplayRangeForMode(dataDateRange, mode);
+  if (!displayRange) return false;
+
+  timelineInstance.setWindow(displayRange.start, displayRange.end, { animation: false });
+  scheduleTimelineChromeSync();
+  updateDateRangeDisplay();
+  updateNavCenterButtonLabel();
+  updateCurrentTimeLineBounds();
+  return true;
+}
+
 function setWindowForMode(mode, anchorDate = new Date()) {
   if (!timelineInstance) return;
 
@@ -1328,6 +1767,7 @@ function setWindowForMode(mode, anchorDate = new Date()) {
   }
 
   timelineInstance.setWindow(start, end, { animation: false });
+  scheduleTimelineChromeSync();
   updateDateRangeDisplay();
 }
 
@@ -1354,6 +1794,8 @@ export function setMsProjectDateEditHandler(handler) {
 
 export function renderMsProjectTimeline({ groups, items }) {
   const container = getTimelineContainer();
+  bindPersistentHeader();
+  bindTimelineHeaderWheelZoom();
   debugLog("Render timeline called.", {
     groups: groups?.length || 0,
     items: items?.length || 0,
@@ -1388,7 +1830,7 @@ export function renderMsProjectTimeline({ groups, items }) {
         axis: 8,
       },
       showCurrentTime: true,
-      zoomable: true,
+      zoomable: false,
       moveable: true,
       verticalScroll: true,
       tooltip: {
@@ -1418,6 +1860,7 @@ export function renderMsProjectTimeline({ groups, items }) {
 
   requestAnimationFrame(() => {
     timelineInstance.redraw();
+    syncTimelineChrome(container);
     decorateRenderedTimelineItems(container);
     syncNativeItemTitles(container);
     bindItemHoverInteractions(container);
@@ -1425,12 +1868,15 @@ export function renderMsProjectTimeline({ groups, items }) {
 
     const range = computeRange(items || []);
     if (range) {
+      dataDateRange = range;
       dataAnchorDate = computeRangeCenter(range);
-      timelineInstance.setWindow(range.start, range.end, { animation: false });
+      fitDataWindowForMode(getCurrentZoomMode());
     } else if ((groups || []).length) {
+      dataDateRange = null;
       dataAnchorDate = new Date();
       setWindowForMode(getCurrentZoomMode(), dataAnchorDate);
     } else {
+      dataDateRange = null;
       dataAnchorDate = null;
     }
 
@@ -1459,7 +1905,9 @@ export function bindTimelineToolbar({ onSortChange = null } = {}) {
   });
 
   todayBtn?.addEventListener("click", () => {
-    setWindowForMode(getCurrentZoomMode(), dataAnchorDate || getWindowCenterDate());
+    if (!fitDataWindowForMode(getCurrentZoomMode())) {
+      setWindowForMode(getCurrentZoomMode(), dataAnchorDate || getWindowCenterDate());
+    }
   });
 
   zoomButtons.forEach((btn) => {
@@ -1467,7 +1915,9 @@ export function bindTimelineToolbar({ onSortChange = null } = {}) {
       const mode = event.currentTarget?.dataset?.zoom;
       if (!mode) return;
       setActiveZoomButton(mode);
-      setWindowForMode(mode, dataAnchorDate || new Date());
+      if (!fitDataWindowForMode(mode)) {
+        setWindowForMode(mode, dataAnchorDate || new Date());
+      }
     });
   });
 
@@ -1484,12 +1934,14 @@ export function bindTimelineToolbar({ onSortChange = null } = {}) {
 
   if (timelineInstance) {
     timelineInstance.on("rangechange", () => {
+      syncTimelineChrome();
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
       updateCurrentTimeLineBounds();
     });
 
     timelineInstance.on("rangechanged", () => {
+      syncTimelineChrome();
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
       updateCurrentTimeLineBounds();
@@ -1498,7 +1950,7 @@ export function bindTimelineToolbar({ onSortChange = null } = {}) {
 
   updateNavCenterButtonLabel();
   updateDateRangeDisplay();
-  setActiveSortButton("chronological");
+  setActiveSortButton("xml-order");
 }
 
 export function clearMsProjectTimeline() {
