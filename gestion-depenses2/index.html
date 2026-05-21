@@ -26,6 +26,32 @@
         </div>
     </div>
 
+    <section id="avancement-dashboard-section" class="avancement-dashboard-section" hidden>
+        <div class="avancement-dashboard-header">
+            <h2>Avancement des plans</h2>
+        </div>
+        <div class="avancement-dashboard-layout">
+            <div class="avancement-dashboard-content">
+                <section class="avancement-chart-card avancement-chart-card--main" id="avancement-chart-container">
+                    <canvas id="avancement-chart"></canvas>
+                </section>
+
+                <div id="avancement-stats-output"></div>
+
+                <div class="avancement-charts-grid" id="avancement-charts-grid">
+                    <section class="avancement-chart-card">
+                        <canvas id="avancement-expenses-progress-chart"></canvas>
+                    </section>
+                    <section class="avancement-chart-card">
+                        <canvas id="avancement-general-progress-chart"></canvas>
+                    </section>
+                </div>
+            </div>
+
+            <aside id="avancement-side-panel" class="avancement-side-panel"></aside>
+        </div>
+    </section>
+
     <div class="container">
         <div class="main-content">
             <div class="project-header">

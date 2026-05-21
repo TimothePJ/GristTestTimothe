@@ -247,6 +247,7 @@ export async function fetchExpenseAppTables() {
   const [
     projectRows,
     budgetRows,
+    listePlanRows,
     planningProjectRows,
     projectTeamRows,
     timesheetRows,
@@ -256,6 +257,7 @@ export async function fetchExpenseAppTables() {
   ] = await Promise.all([
     fetchTableRows(tables.projects),
     fetchTableRows(tables.budget),
+    fetchOptionalTableRows(tables.listePlan),
     fetchOptionalTableRows(tables.planningProject),
     fetchTableRows(tables.projectTeam),
     fetchTableRows(tables.timesheet),
@@ -267,6 +269,7 @@ export async function fetchExpenseAppTables() {
   return {
     projectRows,
     budgetRows,
+    listePlanRows,
     planningProjectRows,
     projectTeamRows,
     timesheetRows,
@@ -647,6 +650,19 @@ export async function updateProjectBillingPercentages(projectId, billingPercenta
         [APP_CONFIG.grist.columns.projects.billingPercentageByMonth]: JSON.stringify(
           billingPercentageByMonth || {}
         ),
+      },
+    ],
+  ]);
+}
+
+export async function updateProjectAvancementConfig(projectId, avancementConfig) {
+  await applyActions([
+    [
+      "UpdateRecord",
+      APP_CONFIG.grist.tables.projects,
+      projectId,
+      {
+        [APP_CONFIG.grist.columns.projects.avancement]: avancementConfig,
       },
     ],
   ]);

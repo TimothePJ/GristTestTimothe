@@ -19,6 +19,7 @@ import {
   removeTimeSegment,
   saveBudgetChanges,
   updateTimeSegment,
+  updateProjectAvancementConfig,
   updateProjectBillingPercentages,
   updateWorkerDailyRate,
 } from "./services/gristService.js";
@@ -72,6 +73,10 @@ import {
   setTeamManagementSummaryMode,
 } from "./ui/expenseTimeline.js";
 import { clearKpi, renderKpi } from "./ui/kpi.js";
+import {
+  clearAvancementDashboard,
+  renderAvancementDashboard,
+} from "./ui/avancementDashboard.js";
 import {
   clearPlanningManagement,
   renderPlanningManagement,
@@ -433,6 +438,7 @@ function applyEmbeddedPlanningSyncMode() {
 
     const selectorsToHide = [
       ".header",
+      ".avancement-dashboard-section",
       ".plan-management-section",
       "#charge-plan-board",
       "#expense-board",
@@ -474,6 +480,7 @@ function applyEmbeddedPlanningSyncMode() {
 
     const selectorsToHide = [
       ".header",
+      ".avancement-dashboard-section",
       ".project-header",
       ".kpi-report",
       ".plan-management-section",
@@ -524,6 +531,7 @@ function applyEmbeddedPlanningSyncMode() {
 
   const selectorsToHide = [
     ".header",
+    ".avancement-dashboard-section",
     ".project-header",
     ".kpi-report",
     ".plan-management-section",
@@ -1593,6 +1601,15 @@ function syncStateToProjectStart(project) {
   });
 }
 
+async function saveProjectAvancementConfig(project, serializedConfig) {
+  if (!project?.id) {
+    throw new Error("Projet invalide pour la sauvegarde de l'avancement.");
+  }
+
+  await updateProjectAvancementConfig(project.id, serializedConfig);
+  project.avancementConfigRaw = serializedConfig;
+}
+
 function renderApp() {
   cancelDeferredProjectViewsRender();
   renderProjectOptions(dom.projectSelect, state.projects, state.selectedProjectId);
@@ -1611,6 +1628,7 @@ function renderApp() {
     cancelDeferredProjectViewsRender();
     clearProjectSummary(dom);
     clearKpi(dom);
+    clearAvancementDashboard(dom.avancementDashboardSection);
     clearChargePlanTimeline(dom);
     clearRealWorkedDaysTable(dom.realChargeBoard);
     clearPlanningManagement(dom.planManagementBoard);
@@ -1622,6 +1640,9 @@ function renderApp() {
   }
 
   renderProjectSummary(dom, selectedProject, getProjectBudgetTotal(selectedProject));
+  renderAvancementDashboard(dom.avancementDashboardSection, selectedProject, {
+    onSave: saveProjectAvancementConfig,
+  });
   renderChargePlanSection(selectedProject);
   renderPlanningManagementSection(selectedProject);
   renderDeferredProjectViews(selectedProject);
@@ -2101,7 +2122,6 @@ async function loadData({ preferredProjectNumber = "" } = {}) {
   }
 
   renderApp();
-  schedulePlanningAlertsPopupOnArrival();
 }
 
 function resetNewProjectForm() {
@@ -5169,14 +5189,6 @@ function bindEvents() {
 
     if (!dom.editBudgetModal.hidden) {
       resetEditBudgetForm();
-    }
-  });
-
-  window.addEventListener("pageshow", schedulePlanningAlertsPopupOnArrival);
-  window.addEventListener("focus", schedulePlanningAlertsPopupOnArrival);
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {
-      schedulePlanningAlertsPopupOnArrival();
     }
   });
 }

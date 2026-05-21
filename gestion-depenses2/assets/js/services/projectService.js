@@ -52,6 +52,42 @@ function createProjectNumberIndex(projects) {
   return index;
 }
 
+function addProjectLookupEntry(index, key, project) {
+  const normalizedKey = normalizeLookupText(key);
+  if (!normalizedKey) return;
+
+  const projects = index.get(normalizedKey) || [];
+  if (!projects.some((candidate) => candidate.id === project.id)) {
+    projects.push(project);
+  }
+  index.set(normalizedKey, projects);
+}
+
+function createProjectLookupIndex(projects) {
+  const index = new Map();
+
+  (projects || []).forEach((project) => {
+    addProjectLookupEntry(index, project.name, project);
+    addProjectLookupEntry(index, project.projectNumber, project);
+    addProjectLookupEntry(index, project.id, project);
+  });
+
+  return index;
+}
+
+function getFirstText(row, candidates = []) {
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+
+    const value = toText(row?.[candidate]);
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
 function mergeMonthlyDays(target, monthKey, value) {
   target[monthKey] = Math.round((toFiniteNumber(target[monthKey], 0) + value) * 100) / 100;
 }
@@ -307,6 +343,7 @@ function compareWorkersByName(leftWorker, rightWorker) {
 export function buildExpenseData({
   projectRows,
   budgetRows,
+  listePlanRows,
   planningProjectRows,
   projectTeamRows,
   timesheetRows,
@@ -323,6 +360,7 @@ export function buildExpenseData({
       id: Number(row?.[columns.projects.id]),
       projectNumber,
       name: toText(row?.[columns.projects.name]),
+      avancementConfigRaw: row?.[columns.projects.avancement],
       billingPercentage: toFiniteNumber(
         row?.[columns.projects.billingPercentage],
         0
@@ -332,12 +370,14 @@ export function buildExpenseData({
         projectNumber
       ),
       budgetLines: [],
+      avancementRecords: [],
       planningTasks: [],
       workers: [],
     };
   });
 
   const projectsByNumber = createProjectNumberIndex(projects);
+  const projectsByAvancementKey = createProjectLookupIndex(projects);
 
   (budgetRows || []).forEach((row) => {
     const project = projectsByNumber.get(toText(row?.[columns.budget.projectNumber]));
@@ -347,6 +387,62 @@ export function buildExpenseData({
       id: Number(row?.[columns.budget.id]),
       chapter: toText(row?.[columns.budget.chapter]),
       amount: toFiniteNumber(row?.[columns.budget.amount], 0),
+    });
+  });
+
+  const listePlanColumns = columns.listePlan;
+  (listePlanRows || []).forEach((row) => {
+    const projectKey = normalizeLookupText(
+      getFirstText(row, [
+        listePlanColumns.projectName,
+        listePlanColumns.projectNameAlt,
+        "NomProjetString",
+        "Nom_de_projet",
+      ])
+    );
+    if (!projectKey) {
+      return;
+    }
+
+    const linkedProjects = projectsByAvancementKey.get(projectKey) || [];
+    if (!linkedProjects.length) {
+      return;
+    }
+
+    const documentNumber = getFirstText(row, [
+      listePlanColumns.documentNumber,
+      "Num_Document",
+      "NumDocument",
+      "ID2",
+    ]);
+    const documentType = getFirstText(row, [
+      listePlanColumns.documentType,
+      listePlanColumns.documentTypeAlt,
+      "TypeDocument",
+      "TypeDoc",
+    ]);
+
+    if (!documentNumber || !documentType) {
+      return;
+    }
+
+    const avancementRecord = {
+      id: Number(row?.[listePlanColumns.id]),
+      NumeroDocument: documentNumber,
+      Designation: getFirstText(row, [
+        listePlanColumns.documentName,
+        listePlanColumns.documentNameAlt,
+        "Taches",
+        "Tache",
+      ]),
+      Type_document: documentType,
+      Zone: getFirstText(row, [listePlanColumns.zone]),
+      Indice: getFirstText(row, [listePlanColumns.indice]),
+      DateDiffusion: getFirstText(row, [listePlanColumns.diffusionDate]),
+    };
+
+    linkedProjects.forEach((project) => {
+      project.avancementRecords.push(avancementRecord);
     });
   });
 

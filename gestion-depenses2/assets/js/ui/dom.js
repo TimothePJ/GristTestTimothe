@@ -42,6 +42,9 @@ export function getDomRefs() {
     currentProjectBudgetBreakdown: document.getElementById(
       "current-project-budget-breakdown"
     ),
+    avancementDashboardSection: document.getElementById(
+      "avancement-dashboard-section"
+    ),
     kpiTotalBudget: document.getElementById("kpi-total-budget"),
     kpiTotalSpending: document.getElementById("kpi-total-spending"),
     kpiRemainingBudget: document.getElementById("kpi-remaining-budget"),
@@ -101,6 +104,7 @@ export function assertDomRefs(domRefs) {
     "currentProjectNumber",
     "totalProjectBudget",
     "currentProjectBudgetBreakdown",
+    "avancementDashboardSection",
     "kpiTotalBudget",
     "kpiTotalSpending",
     "kpiRemainingBudget",

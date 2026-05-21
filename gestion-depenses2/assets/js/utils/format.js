@@ -6,10 +6,14 @@ export function toText(value) {
   }
 
   if (typeof value === "object") {
+    if (typeof value.details === "string") return value.details.trim();
     if (typeof value.label === "string") return value.label.trim();
     if (typeof value.name === "string") return value.name.trim();
     if (typeof value.display === "string") return value.display.trim();
     if (typeof value.Name === "string") return value.Name.trim();
+    if (Object.prototype.hasOwnProperty.call(value, "id")) return toText(value.id);
+    if (Object.prototype.hasOwnProperty.call(value, "rowId")) return toText(value.rowId);
+    if (Object.prototype.hasOwnProperty.call(value, "value")) return toText(value.value);
   }
 
   return String(value).trim();
