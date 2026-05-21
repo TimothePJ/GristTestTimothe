@@ -943,6 +943,34 @@ td input {
   margin: 0;
 }
 
+.charge-plan-edit-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.charge-plan-edit-mode-toggle {
+  padding: 9px 16px;
+  border: 1px solid rgba(0, 73, 144, 0.18);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--color-primary);
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(8, 21, 38, 0.06);
+}
+
+.charge-plan-edit-mode-toggle:hover {
+  background: rgba(0, 73, 144, 0.06);
+}
+
+.charge-plan-edit-mode-toggle.is-active {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: #fff;
+  box-shadow: 0 10px 20px rgba(0, 73, 144, 0.18);
+}
+
 .charge-plan-helper {
   display: flex;
   justify-content: space-between;
@@ -1590,6 +1618,23 @@ td input {
 
 .charge-plan-segment-bar:hover {
   filter: brightness(1.03);
+}
+
+#charge-plan-board.is-segment-editing-locked .charge-plan-track:not(.charge-plan-track--readonly) {
+  cursor: not-allowed;
+}
+
+#charge-plan-board.is-segment-editing-locked .charge-plan-segment-bar {
+  cursor: default;
+  filter: saturate(0.78);
+}
+
+#charge-plan-board.is-segment-editing-locked .charge-plan-segment-bar:hover {
+  filter: saturate(0.78);
+}
+
+#charge-plan-board.is-segment-editing-locked .charge-plan-segment-handle {
+  display: none;
 }
 
 .charge-plan-segment-bar.is-resizing {
@@ -2823,6 +2868,14 @@ canvas {
   .charge-plan-helper {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .charge-plan-edit-toolbar {
+    justify-content: stretch;
+  }
+
+  .charge-plan-edit-mode-toggle {
+    width: 100%;
   }
 
   .team-summary-toolbar,

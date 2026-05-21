@@ -25,8 +25,12 @@ const DEFAULT_TIMELINE_OPTIONS = {
   segmentsField: "segments",
   timelineKind: "previsionnel",
   showControls: true,
+  showEditToggle: false,
+  editModeEnabled: false,
   helperText:
     "Glissez dans une ligne pour creer un segment. Redimensionnez-le avec ses poignees. Utilisez le clic droit sur une barre pour la modifier ou la supprimer.",
+  lockedHelperText:
+    "Activez le mode edition pour creer, modifier ou supprimer des segments.",
 };
 
 function escapeHtml(value) {
@@ -1005,6 +1009,21 @@ function renderTimelineControls(
   `;
 }
 
+function renderTimelineEditToolbar(editModeEnabled) {
+  return `
+    <div class="charge-plan-edit-toolbar">
+      <button
+        type="button"
+        class="charge-plan-edit-mode-toggle ${editModeEnabled ? "is-active" : ""}"
+        data-charge-plan-edit-toggle="segments"
+        aria-pressed="${editModeEnabled ? "true" : "false"}"
+      >
+        ${editModeEnabled ? "Verrouiller" : "Editer"}
+      </button>
+    </div>
+  `;
+}
+
 export function renderChargePlanTimeline(dom, project, viewState, options = {}) {
   const timelineOptions = getTimelineOptions(options);
   currentBoardEl = timelineOptions.boardEl || dom?.chargePlanBoard || null;
@@ -1014,6 +1033,21 @@ export function renderChargePlanTimeline(dom, project, viewState, options = {}) 
   }
 
   currentBoardEl.dataset.timelineBoardKind = timelineOptions.timelineKind;
+  const editToggleEnabled = Boolean(timelineOptions.showEditToggle);
+  const editModeEnabled = Boolean(timelineOptions.editModeEnabled);
+  currentBoardEl.classList.toggle(
+    "is-segment-editing-enabled",
+    editToggleEnabled && editModeEnabled
+  );
+  currentBoardEl.classList.toggle(
+    "is-segment-editing-locked",
+    editToggleEnabled && !editModeEnabled
+  );
+  if (editToggleEnabled) {
+    currentBoardEl.dataset.segmentEditMode = editModeEnabled ? "enabled" : "locked";
+  } else {
+    delete currentBoardEl.dataset.segmentEditMode;
+  }
 
   const zoomMode = getChargePlanZoomMode(viewState?.chargePlanZoomMode);
   const zoomScale = clamp(
@@ -1088,11 +1122,16 @@ export function renderChargePlanTimeline(dom, project, viewState, options = {}) 
       ].join("");
     })
     .join("");
+  const helperText =
+    editToggleEnabled && !editModeEnabled
+      ? timelineOptions.lockedHelperText
+      : timelineOptions.helperText;
 
   currentBoardEl.innerHTML = `
+    ${editToggleEnabled ? renderTimelineEditToolbar(editModeEnabled) : ""}
     <div class="charge-plan-helper">
       <div class="charge-plan-helper-copy">
-        <span>${escapeHtml(timelineOptions.helperText)}</span>
+        <span>${escapeHtml(helperText)}</span>
         <span class="charge-plan-feedback" hidden></span>
       </div>
       ${timelineOptions.showControls ? renderTimelineControls(zoomMode, selectedDate, selectedDateValue) : ""}
@@ -1168,6 +1207,11 @@ export function clearChargePlanTimeline(target) {
 
   if (currentBoardEl) {
     activeVisibleSlotsByBoard.delete(currentBoardEl);
+    currentBoardEl.classList.remove(
+      "is-segment-editing-enabled",
+      "is-segment-editing-locked"
+    );
+    delete currentBoardEl.dataset.segmentEditMode;
     currentBoardEl.innerHTML = "";
   }
 }

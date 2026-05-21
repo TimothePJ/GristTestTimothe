@@ -114,6 +114,7 @@ let chargePlanWheelZoomFrame = null;
 let pendingChargePlanWheelRequest = null;
 let renderedChargePlanRangeStartDate = "";
 let chargePlanRangeStartDate = "";
+let chargePlanSegmentEditModeEnabled = false;
 let editingBudgetLineIndex = null;
 let editingChargePlanSegment = null;
 let planningManagementHover = null;
@@ -1192,6 +1193,43 @@ function getTimelineSegmentType(boardEl) {
   return getTimelineKind(boardEl) === "real" ? "reel" : "previsionnel";
 }
 
+function isChargePlanSegmentEditLockApplicable(boardEl) {
+  return (
+    boardEl instanceof HTMLElement &&
+    boardEl === dom?.chargePlanBoard &&
+    getTimelineKind(boardEl) === "previsionnel"
+  );
+}
+
+function isChargePlanSegmentEditModeLocked(boardEl) {
+  return (
+    isChargePlanSegmentEditLockApplicable(boardEl) &&
+    !chargePlanSegmentEditModeEnabled
+  );
+}
+
+function showChargePlanEditLockedFeedback(boardEl) {
+  if (boardEl instanceof HTMLElement) {
+    setChargePlanFeedback(boardEl, "Cliquez sur Editer pour modifier le planning.");
+  }
+}
+
+function cancelChargePlanSegmentDrag({ clearFeedback = true } = {}) {
+  if (!chargeTimelineDrag) {
+    return;
+  }
+
+  if (chargeTimelineDrag.segmentEl instanceof HTMLElement) {
+    chargeTimelineDrag.segmentEl.classList.remove("is-resizing");
+  }
+
+  clearChargePlanSelectionPreview(chargeTimelineDrag.trackEl);
+  if (clearFeedback) {
+    setChargePlanFeedback(chargeTimelineDrag.boardEl, "");
+  }
+  chargeTimelineDrag = null;
+}
+
 function setEditChargePlanFeedback(message = "") {
   if (!(dom?.editSegmentFeedback instanceof HTMLElement)) {
     return;
@@ -1409,6 +1447,11 @@ async function deleteChargePlanSegment(segmentContext, boardEl = null) {
     return false;
   }
 
+  if (isChargePlanSegmentEditModeLocked(boardEl)) {
+    showChargePlanEditLockedFeedback(boardEl);
+    return false;
+  }
+
   const previousSegment = cloneChargePlanSegment(segmentContext.segment);
   removeChargePlanSegmentLocally({
     projectId: segmentContext.projectId,
@@ -1435,6 +1478,11 @@ async function deleteChargePlanSegment(segmentContext, boardEl = null) {
 }
 
 function openEditChargePlanModal(segmentId, boardEl) {
+  if (isChargePlanSegmentEditModeLocked(boardEl)) {
+    showChargePlanEditLockedFeedback(boardEl);
+    return;
+  }
+
   const segmentContext = findChargePlanSegmentContext(segmentId, boardEl);
   if (!segmentContext) {
     return;
@@ -1461,6 +1509,11 @@ function openEditChargePlanModal(segmentId, boardEl) {
 
 async function saveEditedChargePlanSegment() {
   if (!editingChargePlanSegment) {
+    return;
+  }
+
+  if (isChargePlanSegmentEditModeLocked(editingChargePlanSegment.boardEl)) {
+    setEditChargePlanFeedback("Cliquez sur Editer pour modifier le planning.");
     return;
   }
 
@@ -1625,6 +1678,7 @@ function renderApp() {
   renderBudgetPreview(dom.budgetLinesContainer, state.newProjectBudgetLines);
 
   if (!selectedProject) {
+    chargePlanSegmentEditModeEnabled = false;
     cancelDeferredProjectViewsRender();
     clearProjectSummary(dom);
     clearKpi(dom);
@@ -1926,18 +1980,26 @@ function renderChargePlanSection(selectedProject = getSelectedProject()) {
     derivedZoomState.chargePlanVisibleDays
   );
 
-  renderChargePlanTimeline(dom, selectedProject, {
-    selectedYear: state.selectedYear,
-    selectedMonth: state.selectedMonth,
-    monthSpan: state.monthSpan,
-    chargePlanZoomMode: derivedZoomState.chargePlanZoomMode,
-    chargePlanZoomScale: derivedZoomState.chargePlanZoomScale,
-    chargePlanVisibleDays: derivedZoomState.chargePlanVisibleDays,
-    chargePlanAnchorDate: state.chargePlanAnchorDate,
-    chargePlanDisplayedDate: displayedDateValue,
-    chargePlanRangeStartDate: rangeStartDate,
-    chargePlanRenderedMonthSpan: renderedMonthSpan,
-  });
+  renderChargePlanTimeline(
+    dom,
+    selectedProject,
+    {
+      selectedYear: state.selectedYear,
+      selectedMonth: state.selectedMonth,
+      monthSpan: state.monthSpan,
+      chargePlanZoomMode: derivedZoomState.chargePlanZoomMode,
+      chargePlanZoomScale: derivedZoomState.chargePlanZoomScale,
+      chargePlanVisibleDays: derivedZoomState.chargePlanVisibleDays,
+      chargePlanAnchorDate: state.chargePlanAnchorDate,
+      chargePlanDisplayedDate: displayedDateValue,
+      chargePlanRangeStartDate: rangeStartDate,
+      chargePlanRenderedMonthSpan: renderedMonthSpan,
+    },
+    {
+      showEditToggle: true,
+      editModeEnabled: chargePlanSegmentEditModeEnabled,
+    }
+  );
   const realChargeBoardVisible =
     dom?.realChargeBoard instanceof HTMLElement &&
     !dom.realChargeBoard.hidden &&
@@ -2451,6 +2513,11 @@ async function createChargePlanSegment(
   segmentType = "previsionnel",
   boardEl = null
 ) {
+  if (isChargePlanSegmentEditModeLocked(boardEl)) {
+    showChargePlanEditLockedFeedback(boardEl);
+    return false;
+  }
+
   if (!selection?.startDate || !selection?.endDate || selection.totalDays <= 0) {
     return false;
   }
@@ -2537,6 +2604,11 @@ async function createChargePlanSegment(
 }
 
 async function updateChargePlanSegmentSelection(segmentContext, selection, boardEl = null) {
+  if (isChargePlanSegmentEditModeLocked(boardEl)) {
+    showChargePlanEditLockedFeedback(boardEl);
+    return false;
+  }
+
   if (
     !segmentContext ||
     !selection?.startDate ||
@@ -3964,6 +4036,8 @@ function handleProjectSelectionChange() {
   const selectedProjectId = selectedValue ? Number(selectedValue) : null;
   clearChargePlanWheelZoomFrame();
   clearChargePlanVisibleDateTimer();
+  chargePlanSegmentEditModeEnabled = false;
+  cancelChargePlanSegmentDrag({ clearFeedback: false });
   planningManagementHover = null;
   setState({
     selectedProjectId: Number.isInteger(selectedProjectId) ? selectedProjectId : null,
@@ -4217,6 +4291,37 @@ async function handleDeleteWorker(event) {
   await loadData();
 }
 
+function handleChargePlanEditModeToggle(event) {
+  const target =
+    event.target instanceof Element
+      ? event.target.closest(".charge-plan-edit-mode-toggle")
+      : null;
+  if (!(target instanceof HTMLButtonElement)) return;
+
+  const boardEl =
+    event.currentTarget instanceof HTMLElement
+      ? event.currentTarget
+      : getTimelineBoardFromElement(event.target);
+  if (!isChargePlanSegmentEditLockApplicable(boardEl)) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  chargePlanSegmentEditModeEnabled = !chargePlanSegmentEditModeEnabled;
+  hideChargePlanContextMenu(boardEl);
+  closeChargePlanDatePicker(boardEl);
+  clearChargePlanWheelZoomFrame();
+
+  if (!chargePlanSegmentEditModeEnabled) {
+    cancelChargePlanSegmentDrag({ clearFeedback: false });
+    if (editingChargePlanSegment?.boardEl === boardEl) {
+      resetEditChargePlanForm();
+    }
+  }
+
+  renderChargePlanSection();
+}
+
 async function handleChargePlanContextAction(event) {
   const boardEl =
     event.currentTarget instanceof HTMLElement
@@ -4243,6 +4348,11 @@ async function handleChargePlanContextAction(event) {
     return;
   }
 
+  if (isChargePlanSegmentEditModeLocked(boardEl)) {
+    showChargePlanEditLockedFeedback(boardEl);
+    return;
+  }
+
   if (action === "edit-segment") {
     openEditChargePlanModal(segmentId, boardEl);
     return;
@@ -4265,6 +4375,12 @@ function openChargePlanContextMenuForSegment(
   { clientX, clientY } = {}
 ) {
   if (!(boardEl instanceof HTMLElement)) {
+    return false;
+  }
+
+  if (isChargePlanSegmentEditModeLocked(boardEl)) {
+    hideChargePlanContextMenu(boardEl);
+    showChargePlanEditLockedFeedback(boardEl);
     return false;
   }
 
@@ -4311,6 +4427,12 @@ function handleChargePlanContextMenu(event) {
   }
 
   event.preventDefault();
+  if (isChargePlanSegmentEditModeLocked(boardEl)) {
+    hideChargePlanContextMenu(boardEl);
+    showChargePlanEditLockedFeedback(boardEl);
+    return;
+  }
+
   openChargePlanContextMenuForSegment(boardEl, segmentEl, {
     clientX: event.clientX,
     clientY: event.clientY,
@@ -4328,6 +4450,15 @@ function handleChargePlanSegmentDoubleClick(event) {
 
   const segmentEl = event.target.closest(".charge-plan-segment-bar");
   if (!(segmentEl instanceof HTMLElement)) {
+    return;
+  }
+
+  if (isChargePlanSegmentEditModeLocked(boardEl)) {
+    event.preventDefault();
+    event.stopPropagation();
+    hideChargePlanContextMenu(boardEl);
+    closeChargePlanDatePicker(boardEl);
+    showChargePlanEditLockedFeedback(boardEl);
     return;
   }
 
@@ -4586,14 +4717,22 @@ function handleChargePlanPointerDown(event) {
     return;
   }
 
+  const trackEl = event.target.closest(".charge-plan-track");
+  const segmentEl = event.target.closest(".charge-plan-segment-bar");
+  if (isChargePlanSegmentEditModeLocked(boardEl) && (trackEl || segmentEl)) {
+    event.preventDefault();
+    hideChargePlanContextMenu(boardEl);
+    closeChargePlanDatePicker(boardEl);
+    showChargePlanEditLockedFeedback(boardEl);
+    return;
+  }
+
   hideChargePlanContextMenu(boardEl);
   closeChargePlanDatePicker(boardEl);
 
-  const trackEl = event.target.closest(".charge-plan-track");
   if (!trackEl || trackEl.classList.contains("charge-plan-track--readonly")) return;
 
   const resizeHandleEl = event.target.closest(".charge-plan-segment-handle");
-  const segmentEl = event.target.closest(".charge-plan-segment-bar");
 
   event.preventDefault();
 
@@ -4690,6 +4829,13 @@ function handleChargePlanPointerMove(event) {
 
   if (!chargeTimelineDrag) return;
 
+  if (isChargePlanSegmentEditModeLocked(chargeTimelineDrag.boardEl)) {
+    const lockedBoardEl = chargeTimelineDrag.boardEl;
+    cancelChargePlanSegmentDrag({ clearFeedback: false });
+    showChargePlanEditLockedFeedback(lockedBoardEl);
+    return;
+  }
+
   if (chargeTimelineDrag.mode === "resize") {
     const movingSlotIndex = getChargePlanSlotIndexAtClientX(
       chargeTimelineDrag.trackEl,
@@ -4756,6 +4902,13 @@ async function handleChargePlanPointerUp() {
   }
 
   if (!chargeTimelineDrag) return;
+
+  if (isChargePlanSegmentEditModeLocked(chargeTimelineDrag.boardEl)) {
+    const lockedBoardEl = chargeTimelineDrag.boardEl;
+    cancelChargePlanSegmentDrag({ clearFeedback: false });
+    showChargePlanEditLockedFeedback(lockedBoardEl);
+    return;
+  }
 
   const { trackEl, workerId, currentSelection } = chargeTimelineDrag;
   if (chargeTimelineDrag.segmentEl instanceof HTMLElement) {
@@ -5091,6 +5244,7 @@ function bindEvents() {
 
   timelineBoards.forEach((boardEl) => {
     boardEl.addEventListener("click", handleDeleteWorker);
+    boardEl.addEventListener("click", handleChargePlanEditModeToggle);
     boardEl.addEventListener("click", handleChargePlanZoomButtonClick);
     boardEl.addEventListener("click", handleChargePlanDateControls);
     boardEl.addEventListener("click", (event) => {
