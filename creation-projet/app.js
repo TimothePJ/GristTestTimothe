@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let projectData = {
         name: '',
         number: '',
+        budgetTotalIndicatif: null,
         budgetLines: [],
         team: [],
         documents: [],
@@ -28,6 +29,40 @@ document.addEventListener('DOMContentLoaded', () => {
             .format(numericAmount)
             .replace(/\u202f/g, " ")
             .replace(/\u00a0/g, " ");
+    }
+
+    function parseBudgetNumberInput(value) {
+        const text = String(value ?? '').trim().replace(',', '.');
+        if (!text) {
+            return null;
+        }
+
+        const numericValue = Number(text);
+        return Number.isFinite(numericValue) ? numericValue : null;
+    }
+
+    function formatNumberForInput(value) {
+        const numericValue = Number(value);
+        if (!Number.isFinite(numericValue)) {
+            return '';
+        }
+
+        return String(Math.round(numericValue * 100) / 100);
+    }
+
+    function formatBudgetPercentage(value) {
+        const numericValue = Number(value);
+        if (!Number.isFinite(numericValue)) {
+            return '';
+        }
+
+        return new Intl.NumberFormat('fr-FR', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2
+        })
+            .format(numericValue)
+            .replace(/\u202f/g, ' ')
+            .replace(/\u00a0/g, ' ');
     }
 
     function toBooleanFlag(value) {
@@ -332,8 +367,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('prev-to-step-1').addEventListener('click', () => showStep(1));
     document.getElementById('next-to-step-3').addEventListener('click', () => {
-        if (budgetChapterInput.value.trim() && budgetAmountInput.value.trim()) {
-            saveBudgetLineFromInputs();
+        if (hasBudgetLineDraft() && !saveBudgetLineFromInputs()) {
+            return;
         }
 
         showStep(3);
@@ -396,9 +431,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Budget Lines
     const addBudgetLineBtn = document.getElementById('add-budget-line-btn');
     const budgetLinesContainer = document.getElementById('budget-lines-container');
+    const budgetSummary = document.getElementById('budget-summary');
+    const budgetTotalIndicatifInput = document.getElementById('budget-total-indicatif');
     const budgetChapterInput = document.getElementById('budget-chapter');
+    const budgetPercentageInput = document.getElementById('budget-percentage');
     const budgetAmountInput = document.getElementById('budget-amount');
     let editingBudgetLineIndex = null;
+    let budgetLineInputSource = 'amount';
 
     function getBudgetLineOrder(chapter) {
         const match = String(chapter ?? '').trim().match(/^(\d+)/);
@@ -421,22 +460,191 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function getBudgetTotalIndicatif() {
+        const inputAmount = parseBudgetNumberInput(budgetTotalIndicatifInput?.value);
+        const amount = inputAmount != null ? inputAmount : projectData.budgetTotalIndicatif;
+        return Number.isFinite(amount) && amount > 0 ? amount : null;
+    }
+
+    function syncProjectBudgetTotalIndicatif() {
+        const amount = parseBudgetNumberInput(budgetTotalIndicatifInput?.value);
+        projectData.budgetTotalIndicatif =
+            amount != null && amount > 0 ? Math.round(amount * 100) / 100 : null;
+    }
+
+    function getBudgetLinesTotal() {
+        return (projectData.budgetLines || []).reduce((total, line) => {
+            const amount = Number(line?.amount);
+            return Number.isFinite(amount) ? total + amount : total;
+        }, 0);
+    }
+
+    function getBudgetPercentageFromAmount(amount) {
+        const totalIndicatif = getBudgetTotalIndicatif();
+        const numericAmount = Number(amount);
+        if (!totalIndicatif || !Number.isFinite(numericAmount)) {
+            return null;
+        }
+
+        return (numericAmount / totalIndicatif) * 100;
+    }
+
+    function getBudgetAmountFromPercentage(percentage) {
+        const totalIndicatif = getBudgetTotalIndicatif();
+        const numericPercentage = Number(percentage);
+        if (!totalIndicatif || !Number.isFinite(numericPercentage)) {
+            return null;
+        }
+
+        return (totalIndicatif * numericPercentage) / 100;
+    }
+
+    function getBudgetLineDisplayText(line) {
+        const amountLabel = `${formatBudgetAmount(line?.amount)} \u20AC`;
+        const percentage = getBudgetPercentageFromAmount(line?.amount);
+        if (percentage == null) {
+            return `${line.chapter}: ${amountLabel}`;
+        }
+
+        return `${line.chapter}: ${amountLabel} (${formatBudgetPercentage(percentage)}%)`;
+    }
+
+    function renderBudgetSummary() {
+        if (!(budgetSummary instanceof HTMLElement)) {
+            return;
+        }
+
+        budgetSummary.innerHTML = '';
+
+        const totalIndicatif = getBudgetTotalIndicatif();
+        const enteredBudget = getBudgetLinesTotal();
+        const usagePercent = totalIndicatif ? (enteredBudget / totalIndicatif) * 100 : null;
+        const delta = totalIndicatif != null ? totalIndicatif - enteredBudget : null;
+        const balanceLabel =
+            delta == null
+                ? 'Reste indicatif'
+                : delta >= 0
+                    ? 'Reste indicatif'
+                    : 'Dépassement';
+        const balanceValue =
+            delta == null ? '-' : `${formatBudgetAmount(Math.abs(delta))} \u20AC`;
+        const items = [
+            {
+                label: 'Budget total indicatif',
+                value: totalIndicatif == null ? 'Non renseigné' : `${formatBudgetAmount(totalIndicatif)} \u20AC`
+            },
+            {
+                label: 'Budget saisi',
+                value: `${formatBudgetAmount(enteredBudget)} \u20AC`
+            },
+            {
+                label: balanceLabel,
+                value: balanceValue,
+                className: delta != null && delta < 0 ? 'is-over-budget' : ''
+            },
+            {
+                label: '% utilisé',
+                value: usagePercent == null ? '-' : `${formatBudgetPercentage(usagePercent)}%`,
+                className: usagePercent != null && usagePercent > 100 ? 'is-over-budget' : ''
+            }
+        ];
+
+        items.forEach((item) => {
+            const card = document.createElement('div');
+            card.className = 'budget-summary-item';
+            if (item.className) {
+                card.classList.add(item.className);
+            }
+
+            const label = document.createElement('span');
+            label.className = 'budget-summary-label';
+            label.textContent = item.label;
+
+            const value = document.createElement('strong');
+            value.textContent = item.value;
+
+            card.appendChild(label);
+            card.appendChild(value);
+            budgetSummary.appendChild(card);
+        });
+    }
+
+    function syncBudgetPercentageFromAmount() {
+        if (!(budgetPercentageInput instanceof HTMLInputElement)) {
+            return;
+        }
+
+        const amount = parseBudgetNumberInput(budgetAmountInput?.value);
+        const percentage = amount != null && amount >= 0
+            ? getBudgetPercentageFromAmount(amount)
+            : null;
+        budgetPercentageInput.value =
+            percentage == null ? '' : formatNumberForInput(percentage);
+    }
+
+    function syncBudgetAmountFromPercentage() {
+        if (!(budgetAmountInput instanceof HTMLInputElement)) {
+            return;
+        }
+
+        const percentage = parseBudgetNumberInput(budgetPercentageInput?.value);
+        const amount = percentage != null && percentage >= 0
+            ? getBudgetAmountFromPercentage(percentage)
+            : null;
+        if (amount != null) {
+            budgetAmountInput.value = formatNumberForInput(amount);
+        }
+    }
+
+    function hasBudgetLineDraft() {
+        return Boolean(
+            budgetChapterInput.value.trim() ||
+            budgetAmountInput.value.trim() ||
+            budgetPercentageInput.value.trim()
+        );
+    }
+
     function resetBudgetLineForm() {
         editingBudgetLineIndex = null;
         budgetChapterInput.value = '';
+        budgetPercentageInput.value = '';
         budgetAmountInput.value = '';
+        budgetLineInputSource = 'amount';
         addBudgetLineBtn.textContent = 'Ajouter Ligne';
     }
 
     function saveBudgetLineFromInputs() {
         const chapter = budgetChapterInput.value.trim();
-        const amount = parseFloat(budgetAmountInput.value);
+        const amount = parseBudgetNumberInput(budgetAmountInput.value);
+        const percentage = parseBudgetNumberInput(budgetPercentageInput.value);
+        const totalIndicatif = getBudgetTotalIndicatif();
 
-        if (!chapter || Number.isNaN(amount)) {
+        if (amount != null && amount < 0) {
+            alert('Le montant ne peut pas être négatif.');
             return false;
         }
 
-        const nextLine = { chapter, amount };
+        if (percentage != null && percentage < 0) {
+            alert('Le pourcentage ne peut pas être négatif.');
+            return false;
+        }
+
+        let resolvedAmount = amount;
+        if (resolvedAmount == null && percentage != null && totalIndicatif) {
+            resolvedAmount = getBudgetAmountFromPercentage(percentage);
+        }
+
+        if (!chapter || resolvedAmount == null || !Number.isFinite(resolvedAmount)) {
+            if (chapter && percentage != null && !totalIndicatif) {
+                alert('Renseignez un budget total indicatif ou saisissez un montant.');
+            }
+            return false;
+        }
+
+        const nextLine = {
+            chapter,
+            amount: Math.round(resolvedAmount * 100) / 100
+        };
         if (
             Number.isInteger(editingBudgetLineIndex) &&
             editingBudgetLineIndex >= 0 &&
@@ -450,10 +658,26 @@ document.addEventListener('DOMContentLoaded', () => {
         sortBudgetLines();
         resetBudgetLineForm();
         renderBudgetLines();
+        renderBudgetSummary();
         return true;
     }
 
-    if (budgetChapterInput && budgetAmountInput) {
+    if (budgetTotalIndicatifInput) {
+        budgetTotalIndicatifInput.addEventListener('input', () => {
+            syncProjectBudgetTotalIndicatif();
+
+            if (budgetLineInputSource === 'percentage') {
+                syncBudgetAmountFromPercentage();
+            } else {
+                syncBudgetPercentageFromAmount();
+            }
+
+            renderBudgetLines();
+            renderBudgetSummary();
+        });
+    }
+
+    if (budgetChapterInput && budgetAmountInput && budgetPercentageInput) {
         budgetChapterInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -461,10 +685,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!budgetChapterInput.value.trim()) {
                     document.getElementById('next-to-step-3').click();
                 } else {
-                    budgetAmountInput.focus();
-                    budgetAmountInput.select();
+                    budgetPercentageInput.focus();
+                    budgetPercentageInput.select();
                 }
             }
+        });
+
+        budgetPercentageInput.addEventListener('input', () => {
+            budgetLineInputSource = 'percentage';
+            syncBudgetAmountFromPercentage();
+        });
+
+        budgetPercentageInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                budgetAmountInput.focus();
+                budgetAmountInput.select();
+            }
+        });
+
+        budgetAmountInput.addEventListener('input', () => {
+            budgetLineInputSource = 'amount';
+            syncBudgetPercentageFromAmount();
         });
 
         // When pressing Enter on amount field, add the budget line
@@ -527,7 +769,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const text = document.createElement('span');
             text.className = 'budget-line-text';
-            text.textContent = `${line.chapter}: ${formatBudgetAmount(line.amount)} \u20AC`;
+            text.textContent = getBudgetLineDisplayText(line);
 
             const actions = document.createElement('div');
             actions.className = 'budget-line-actions';
@@ -542,6 +784,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 editingBudgetLineIndex = index;
                 budgetChapterInput.value = line.chapter;
                 budgetAmountInput.value = String(line.amount);
+                budgetLineInputSource = 'amount';
+                syncBudgetPercentageFromAmount();
                 addBudgetLineBtn.textContent = 'Enregistrer Ligne';
                 renderBudgetLines();
                 budgetChapterInput.focus();
@@ -567,6 +811,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 renderBudgetLines();
+                renderBudgetSummary();
             });
 
             actions.appendChild(edit);
@@ -575,7 +820,11 @@ document.addEventListener('DOMContentLoaded', () => {
             row.appendChild(actions);
             budgetLinesContainer.appendChild(row);
         });
+
+        renderBudgetSummary();
     }
+
+    renderBudgetSummary();
 
     // Team Selection
     async function populateTeamSelection() {
@@ -677,8 +926,23 @@ document.addEventListener('DOMContentLoaded', () => {
             : '-';
 
         // Budget
+        syncProjectBudgetTotalIndicatif();
+        const budgetTotalIndicatif = getBudgetTotalIndicatif();
+        const budgetTotalSaisi = getBudgetLinesTotal();
+        const budgetUsage = budgetTotalIndicatif
+            ? `${formatBudgetPercentage((budgetTotalSaisi / budgetTotalIndicatif) * 100)}%`
+            : '-';
+        const budgetDelta = budgetTotalIndicatif == null
+            ? null
+            : budgetTotalIndicatif - budgetTotalSaisi;
+        const budgetDeltaLabel = budgetDelta != null && budgetDelta < 0
+            ? 'Dépassement'
+            : 'Reste indicatif';
+        const budgetDeltaValue = budgetDelta == null
+            ? '-'
+            : `${formatBudgetAmount(Math.abs(budgetDelta))} €`;
         const budgetLinesHtml = (projectData.budgetLines || [])
-            .map(line => `<p>${line.chapter}: ${formatBudgetAmount(line.amount)} €</p>`)
+            .map(line => `<p>${getBudgetLineDisplayText(line)}</p>`)
             .join('');
 
         // Team
@@ -708,6 +972,9 @@ document.addEventListener('DOMContentLoaded', () => {
             <p><strong>Numéro:</strong> ${projectData.number}</p>
 
             <h3>Lignes Budgétaires</h3>
+            <p><strong>Budget total indicatif:</strong> ${budgetTotalIndicatif == null ? 'Non renseigné' : `${formatBudgetAmount(budgetTotalIndicatif)} €`}</p>
+            <p><strong>Budget saisi:</strong> ${formatBudgetAmount(budgetTotalSaisi)} € (${budgetUsage})</p>
+            <p><strong>${budgetDeltaLabel}:</strong> ${budgetDeltaValue}</p>
             ${budgetLinesHtml || '<p>-</p>'}
 
             <h3>Équipe</h3>

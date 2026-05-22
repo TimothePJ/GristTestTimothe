@@ -81,10 +81,73 @@ button:hover {
     background-color: #c41221;
 }
 
-.budget-line-form {
-    display: flex;
+.budget-total-panel {
+    display: grid;
+    grid-template-columns: minmax(180px, 240px) minmax(220px, 1fr);
     align-items: center;
-    flex-wrap: nowrap;
+    gap: 10px;
+    padding: 12px;
+    margin-bottom: 12px;
+    border: 1px solid rgba(0, 73, 144, 0.16);
+    border-radius: 8px;
+    background-color: rgba(0, 73, 144, 0.04);
+}
+
+.budget-total-panel label {
+    margin: 0;
+    color: #004990;
+    font-weight: bold;
+}
+
+.budget-total-panel input {
+    margin-bottom: 0;
+}
+
+.budget-total-field {
+    max-width: 320px;
+}
+
+.budget-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.budget-summary-item {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid rgba(0, 73, 144, 0.14);
+    border-radius: 8px;
+    background-color: #ffffff;
+}
+
+.budget-summary-label {
+    color: #004990;
+    font-size: 0.85rem;
+    font-weight: bold;
+}
+
+.budget-summary-item strong {
+    color: #17324d;
+    overflow-wrap: anywhere;
+}
+
+.budget-summary-item.is-over-budget {
+    border-color: rgba(237, 27, 45, 0.45);
+    background-color: rgba(237, 27, 45, 0.06);
+}
+
+.budget-summary-item.is-over-budget strong {
+    color: #c41221;
+}
+
+.budget-line-form {
+    display: grid;
+    grid-template-columns: minmax(220px, 2fr) minmax(140px, 1fr) minmax(140px, 1fr) auto;
+    align-items: center;
     gap: 10px;
     margin-bottom: 10px;
 }
@@ -94,13 +157,13 @@ button:hover {
 }
 
 #budget-chapter {
-    flex: 1 1 0;
+    width: 100%;
     min-width: 0;
 }
 
-.budget-amount-field {
+.budget-amount-field,
+.budget-percent-field {
     position: relative;
-    flex: 1 1 0;
     min-width: 0;
 }
 
@@ -115,7 +178,26 @@ button:hover {
     pointer-events: none;
 }
 
-#budget-amount {
+#budget-amount,
+#budget-total-indicatif {
+    width: 100%;
+    padding-right: 32px;
+    padding-left: 10px;
+    text-align: left;
+}
+
+.budget-percent-field::after {
+    content: "%";
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    transform: translateY(-50%);
+    color: #004990;
+    font-weight: bold;
+    pointer-events: none;
+}
+
+#budget-percentage {
     width: 100%;
     padding-right: 32px;
     padding-left: 10px;
@@ -505,12 +587,17 @@ select {
 }
 
 @media (max-width: 720px) {
+  .budget-total-panel,
   .budget-line-form {
-    flex-wrap: wrap;
+    grid-template-columns: 1fr;
   }
 
-  .budget-amount-field {
-    flex: 1 1 180px;
+  .budget-total-field {
+    max-width: none;
+  }
+
+  .budget-summary {
+    grid-template-columns: 1fr;
   }
 
   .wizard-nav {

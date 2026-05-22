@@ -31,15 +31,18 @@ body {
 }
 
 .dashboard-content {
+  display: contents;
   min-width: 0;
 }
 
 .top-chart-card {
   position: relative;
+  grid-column: 1;
+  grid-row: 1;
   height: 60vh;
   min-height: 360px;
   padding: 18px;
-  margin-bottom: 20px;
+  margin-bottom: 0;
   border: 1px solid rgba(0, 73, 144, 0.12);
   border-radius: 12px;
   background: #ffffff;
@@ -52,6 +55,8 @@ body {
 }
 
 .charts-grid {
+  grid-column: 1 / -1;
+  grid-row: 3;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
@@ -75,6 +80,8 @@ body {
 }
 
 #average-indices-container {
+  grid-column: 2;
+  grid-row: 1;
   padding: 15px;
   background-color: #ffffff;
   border: 1px solid #ed1b2d;
@@ -168,6 +175,12 @@ body {
   margin-top: 20px;
 }
 
+#stats-output {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
+}
+
 .summary-table th, .summary-table td {
   border: 1px solid #ed1b2d;
   padding: 8px;
@@ -228,6 +241,14 @@ body {
 @media (max-width: 980px) {
   .main-container {
     grid-template-columns: 1fr;
+  }
+
+  .top-chart-card,
+  #stats-output,
+  .charts-grid,
+  #average-indices-container {
+    grid-column: 1;
+    grid-row: auto;
   }
 
   .charts-grid {
