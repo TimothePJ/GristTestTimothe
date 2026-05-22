@@ -556,6 +556,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 0);
     }
 
+    function getBudgetLinesForProjectCreation() {
+        return (projectData.budgetLines || []).filter((line) => {
+            return Number(line?.amount) > 0;
+        });
+    }
+
     function getBudgetPercentageFromAmount(amount) {
         const totalIndicatif = getBudgetTotalIndicatif();
         const numericAmount = Number(amount);
@@ -1195,7 +1201,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const budgetDeltaValue = budgetDelta == null
             ? '-'
             : `${formatBudgetAmount(Math.abs(budgetDelta))} €`;
-        const budgetLinesHtml = (projectData.budgetLines || [])
+        const savedBudgetLines = getBudgetLinesForProjectCreation();
+        const budgetLinesHtml = savedBudgetLines
             .map(line => `<p>${getBudgetLineDisplayText(line)}</p>`)
             .join('');
 
@@ -1229,6 +1236,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <p><strong>Budget total indicatif:</strong> ${budgetTotalIndicatif == null ? 'Non renseigné' : `${formatBudgetAmount(budgetTotalIndicatif)} €`}</p>
             <p><strong>Budget saisi:</strong> ${formatBudgetAmount(budgetTotalSaisi)} € (${budgetUsage})</p>
             <p><strong>${budgetDeltaLabel}:</strong> ${budgetDeltaValue}</p>
+            <p><em>Les lignes à 0 € ne seront pas créées dans le budget du projet.</em></p>
             ${budgetLinesHtml || '<p>-</p>'}
 
             <h3>Équipe</h3>
@@ -2097,7 +2105,7 @@ document.addEventListener('DOMContentLoaded', () => {
             await grist.docApi.applyUserActions(projectActions);
 
             // 2. Add Budget Lines
-            const budgetActions = projectData.budgetLines.map(line =>
+            const budgetActions = getBudgetLinesForProjectCreation().map(line =>
                 ["AddRecord", "Budget", null, { NumeroProjet: projectData.number, Chapter: line.chapter, Amount: line.amount }]
             );
             if (budgetActions.length > 0) {
