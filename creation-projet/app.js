@@ -2,11 +2,35 @@ document.addEventListener('DOMContentLoaded', () => {
     const steps = document.querySelectorAll('.wizard-step');
     let currentStep = 1;
     let teamMembers = [];
+    const DEFAULT_BUDGET_CHAPTERS = [
+        '01-Analyse Dossier-Organisation',
+        '02-Réunions-Visite sur chantier',
+        '03-Fond de plans',
+        '04-Plan de coffrage',
+        '05-Plan de démolition',
+        "06-Plan d'armature",
+        '07-Note de calcul',
+        '08-Modélisation-Calcul',
+        '09-Etude ouvrages provisoires',
+        '10-DOE',
+        '11-Sous-traitance-Calculs',
+        '12-Sous-traitance-Armatures',
+        '13-Base',
+        '14-Travaux supplémentaires'
+    ];
+
+    function createDefaultBudgetLines() {
+        return DEFAULT_BUDGET_CHAPTERS.map((chapter) => ({
+            chapter,
+            amount: 0
+        }));
+    }
+
     let projectData = {
         name: '',
         number: '',
         budgetTotalIndicatif: null,
-        budgetLines: [],
+        budgetLines: createDefaultBudgetLines(),
         team: [],
         documents: [],
         emitters: []
@@ -367,6 +391,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('prev-to-step-1').addEventListener('click', () => showStep(1));
     document.getElementById('next-to-step-3').addEventListener('click', () => {
+        if (hasInlineBudgetLineEdit()) {
+            alert('Enregistrez ou annulez la ligne de budget en cours de modification.');
+            return;
+        }
+
         if (hasBudgetLineDraft() && !saveBudgetLineFromInputs()) {
             return;
         }
@@ -433,11 +462,44 @@ document.addEventListener('DOMContentLoaded', () => {
     const budgetLinesContainer = document.getElementById('budget-lines-container');
     const budgetSummary = document.getElementById('budget-summary');
     const budgetTotalIndicatifInput = document.getElementById('budget-total-indicatif');
+    const budgetChaptersList = document.getElementById('budget-chapters-list');
     const budgetChapterInput = document.getElementById('budget-chapter');
     const budgetPercentageInput = document.getElementById('budget-percentage');
     const budgetAmountInput = document.getElementById('budget-amount');
     let editingBudgetLineIndex = null;
     let budgetLineInputSource = 'amount';
+
+    function normalizeBudgetChapterKey(chapter) {
+        return String(chapter ?? '').trim().toLowerCase();
+    }
+
+    function isDefaultBudgetChapter(chapter) {
+        const chapterKey = normalizeBudgetChapterKey(chapter);
+        return DEFAULT_BUDGET_CHAPTERS.some((defaultChapter) => {
+            return normalizeBudgetChapterKey(defaultChapter) === chapterKey;
+        });
+    }
+
+    function renderBudgetChapterOptions() {
+        if (!(budgetChaptersList instanceof HTMLDataListElement)) {
+            return;
+        }
+
+        budgetChaptersList.innerHTML = '';
+        const existingChapterKeys = new Set(
+            (projectData.budgetLines || []).map((line) =>
+                normalizeBudgetChapterKey(line?.chapter)
+            )
+        );
+
+        DEFAULT_BUDGET_CHAPTERS
+            .filter((chapter) => !existingChapterKeys.has(normalizeBudgetChapterKey(chapter)))
+            .forEach((chapter) => {
+                const option = document.createElement('option');
+                option.value = chapter;
+                budgetChaptersList.appendChild(option);
+            });
+    }
 
     function getBudgetLineOrder(chapter) {
         const match = String(chapter ?? '').trim().match(/^(\d+)/);
@@ -457,6 +519,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 sensitivity: 'base',
                 numeric: true
             });
+        });
+    }
+
+    function findDuplicateBudgetChapterIndex(chapter, ignoredIndex = null) {
+        const chapterKey = normalizeBudgetChapterKey(chapter);
+        if (!chapterKey) {
+            return -1;
+        }
+
+        return projectData.budgetLines.findIndex((line, index) => {
+            if (Number.isInteger(ignoredIndex) && index === ignoredIndex) {
+                return false;
+            }
+
+            return normalizeBudgetChapterKey(line?.chapter) === chapterKey;
         });
     }
 
@@ -604,8 +681,15 @@ document.addEventListener('DOMContentLoaded', () => {
         );
     }
 
+    function hasInlineBudgetLineEdit() {
+        return (
+            Number.isInteger(editingBudgetLineIndex) &&
+            editingBudgetLineIndex >= 0 &&
+            editingBudgetLineIndex < projectData.budgetLines.length
+        );
+    }
+
     function resetBudgetLineForm() {
-        editingBudgetLineIndex = null;
         budgetChapterInput.value = '';
         budgetPercentageInput.value = '';
         budgetAmountInput.value = '';
@@ -613,10 +697,15 @@ document.addEventListener('DOMContentLoaded', () => {
         addBudgetLineBtn.textContent = 'Ajouter Ligne';
     }
 
-    function saveBudgetLineFromInputs() {
-        const chapter = budgetChapterInput.value.trim();
-        const amount = parseBudgetNumberInput(budgetAmountInput.value);
-        const percentage = parseBudgetNumberInput(budgetPercentageInput.value);
+    function buildBudgetLineFromValues({
+        chapterValue,
+        amountValue,
+        percentageValue,
+        ignoredIndex = null
+    } = {}) {
+        const chapter = String(chapterValue ?? '').trim();
+        const amount = parseBudgetNumberInput(amountValue);
+        const percentage = parseBudgetNumberInput(percentageValue);
         const totalIndicatif = getBudgetTotalIndicatif();
 
         if (amount != null && amount < 0) {
@@ -638,25 +727,70 @@ document.addEventListener('DOMContentLoaded', () => {
             if (chapter && percentage != null && !totalIndicatif) {
                 alert('Renseignez un budget total indicatif ou saisissez un montant.');
             }
-            return false;
+            return null;
         }
 
-        const nextLine = {
+        const duplicateIndex = findDuplicateBudgetChapterIndex(
+            chapter,
+            ignoredIndex
+        );
+        if (duplicateIndex !== -1) {
+            alert('Ce chapitre existe déjà. Utilisez Modifier sur la ligne existante.');
+            return null;
+        }
+
+        return {
             chapter,
             amount: Math.round(resolvedAmount * 100) / 100
         };
-        if (
-            Number.isInteger(editingBudgetLineIndex) &&
-            editingBudgetLineIndex >= 0 &&
-            editingBudgetLineIndex < projectData.budgetLines.length
-        ) {
-            projectData.budgetLines[editingBudgetLineIndex] = nextLine;
-        } else {
-            projectData.budgetLines.push(nextLine);
+    }
+
+    function saveBudgetLineFromInputs() {
+        if (hasInlineBudgetLineEdit()) {
+            alert('Enregistrez ou annulez la ligne de budget en cours de modification.');
+            return false;
         }
 
+        const nextLine = buildBudgetLineFromValues({
+            chapterValue: budgetChapterInput.value,
+            amountValue: budgetAmountInput.value,
+            percentageValue: budgetPercentageInput.value
+        });
+
+        if (!nextLine) {
+            return false;
+        }
+
+        projectData.budgetLines.push(nextLine);
         sortBudgetLines();
         resetBudgetLineForm();
+        renderBudgetLines();
+        renderBudgetSummary();
+        return true;
+    }
+
+    function saveInlineBudgetLine(index, rowEl) {
+        const chapterInput = rowEl?.querySelector('.budget-line-chapter-input');
+        const percentageInput = rowEl?.querySelector('.budget-line-percentage-input');
+        const amountInput = rowEl?.querySelector('.budget-line-amount-input');
+        const currentLine = projectData.budgetLines[index];
+
+        const nextLine = buildBudgetLineFromValues({
+            chapterValue: isDefaultBudgetChapter(currentLine?.chapter)
+                ? currentLine?.chapter
+                : chapterInput?.value,
+            amountValue: amountInput?.value,
+            percentageValue: percentageInput?.value,
+            ignoredIndex: index
+        });
+
+        if (!nextLine) {
+            return false;
+        }
+
+        projectData.budgetLines[index] = nextLine;
+        editingBudgetLineIndex = null;
+        sortBudgetLines();
         renderBudgetLines();
         renderBudgetSummary();
         return true;
@@ -759,6 +893,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderBudgetLines() {
         budgetLinesContainer.innerHTML = '';
         sortBudgetLines();
+        renderBudgetChapterOptions();
 
         projectData.budgetLines.forEach((line, index) => {
             const row = document.createElement('div');
@@ -767,30 +902,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 row.classList.add('is-editing');
             }
 
-            const text = document.createElement('span');
-            text.className = 'budget-line-text';
-            text.textContent = getBudgetLineDisplayText(line);
-
             const actions = document.createElement('div');
             actions.className = 'budget-line-actions';
-
-            const edit = document.createElement('button');
-            edit.className = 'budget-line-edit';
-            edit.type = 'button';
-            edit.title = 'Modifier cette ligne';
-            edit.textContent = 'Modifier';
-
-            edit.addEventListener('click', () => {
-                editingBudgetLineIndex = index;
-                budgetChapterInput.value = line.chapter;
-                budgetAmountInput.value = String(line.amount);
-                budgetLineInputSource = 'amount';
-                syncBudgetPercentageFromAmount();
-                addBudgetLineBtn.textContent = 'Enregistrer Ligne';
-                renderBudgetLines();
-                budgetChapterInput.focus();
-                budgetChapterInput.select();
-            });
 
             const del = document.createElement('button');
             del.className = 'budget-line-delete';
@@ -802,6 +915,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 projectData.budgetLines.splice(index, 1);
 
                 if (editingBudgetLineIndex === index) {
+                    editingBudgetLineIndex = null;
                     resetBudgetLineForm();
                 } else if (
                     Number.isInteger(editingBudgetLineIndex) &&
@@ -814,9 +928,149 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderBudgetSummary();
             });
 
-            actions.appendChild(edit);
-            actions.appendChild(del);
-            row.appendChild(text);
+            if (editingBudgetLineIndex === index) {
+                const fields = document.createElement('div');
+                fields.className = 'budget-line-edit-fields';
+
+                const defaultChapterLocked = isDefaultBudgetChapter(line.chapter);
+                let chapterInput = null;
+                if (defaultChapterLocked) {
+                    const lockedChapter = document.createElement('div');
+                    lockedChapter.className = 'budget-line-chapter-locked';
+                    lockedChapter.textContent = line.chapter || '';
+                    lockedChapter.title = 'Chapitre par défaut non modifiable';
+                    fields.appendChild(lockedChapter);
+                } else {
+                    chapterInput = document.createElement('input');
+                    chapterInput.className = 'budget-line-chapter-input';
+                    chapterInput.type = 'text';
+                    chapterInput.setAttribute('list', 'budget-chapters-list');
+                    chapterInput.value = line.chapter || '';
+                    fields.appendChild(chapterInput);
+                }
+
+                const percentageField = document.createElement('div');
+                percentageField.className = 'budget-percent-field';
+                const percentageInput = document.createElement('input');
+                percentageInput.className = 'budget-line-percentage-input';
+                percentageInput.type = 'number';
+                percentageInput.min = '0';
+                percentageInput.step = '0.01';
+                const percentage = getBudgetPercentageFromAmount(line.amount);
+                percentageInput.value = percentage == null
+                    ? ''
+                    : formatNumberForInput(percentage);
+                percentageField.appendChild(percentageInput);
+
+                const amountField = document.createElement('div');
+                amountField.className = 'budget-amount-field';
+                const amountInput = document.createElement('input');
+                amountInput.className = 'budget-line-amount-input';
+                amountInput.type = 'number';
+                amountInput.min = '0';
+                amountInput.step = '0.01';
+                amountInput.value = formatNumberForInput(line.amount);
+                amountField.appendChild(amountInput);
+
+                percentageInput.addEventListener('input', () => {
+                    const nextPercentage = parseBudgetNumberInput(percentageInput.value);
+                    const nextAmount = nextPercentage != null && nextPercentage >= 0
+                        ? getBudgetAmountFromPercentage(nextPercentage)
+                        : null;
+                    if (nextAmount != null) {
+                        amountInput.value = formatNumberForInput(nextAmount);
+                    }
+                });
+
+                amountInput.addEventListener('input', () => {
+                    const nextAmount = parseBudgetNumberInput(amountInput.value);
+                    const nextPercentage = nextAmount != null && nextAmount >= 0
+                        ? getBudgetPercentageFromAmount(nextAmount)
+                        : null;
+                    percentageInput.value = nextPercentage == null
+                        ? ''
+                        : formatNumberForInput(nextPercentage);
+                });
+
+                const save = document.createElement('button');
+                save.className = 'budget-line-save';
+                save.type = 'button';
+                save.textContent = 'Enregistrer';
+                save.addEventListener('click', () => {
+                    saveInlineBudgetLine(index, row);
+                });
+
+                const cancel = document.createElement('button');
+                cancel.className = 'budget-line-cancel';
+                cancel.type = 'button';
+                cancel.textContent = 'Annuler';
+                cancel.addEventListener('click', () => {
+                    editingBudgetLineIndex = null;
+                    renderBudgetLines();
+                });
+
+                if (chapterInput) {
+                    chapterInput.addEventListener('keydown', (event) => {
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            percentageInput.focus();
+                            percentageInput.select();
+                        }
+                    });
+                }
+                percentageInput.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        amountInput.focus();
+                        amountInput.select();
+                    }
+                });
+                amountInput.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        save.click();
+                    }
+                });
+
+                fields.appendChild(percentageField);
+                fields.appendChild(amountField);
+                actions.appendChild(save);
+                actions.appendChild(cancel);
+                actions.appendChild(del);
+                row.appendChild(fields);
+            } else {
+                const text = document.createElement('span');
+                text.className = 'budget-line-text';
+                text.textContent = getBudgetLineDisplayText(line);
+
+                const edit = document.createElement('button');
+                edit.className = 'budget-line-edit';
+                edit.type = 'button';
+                edit.title = 'Modifier cette ligne';
+                edit.textContent = 'Modifier';
+
+                edit.addEventListener('click', () => {
+                    if (hasInlineBudgetLineEdit() && editingBudgetLineIndex !== index) {
+                        alert('Enregistrez ou annulez la ligne de budget en cours de modification.');
+                        return;
+                    }
+
+                    editingBudgetLineIndex = index;
+                    renderBudgetLines();
+                    const editInput = budgetLinesContainer.querySelector(
+                        '.budget-line.is-editing .budget-line-chapter-input, .budget-line.is-editing .budget-line-percentage-input'
+                    );
+                    if (editInput instanceof HTMLInputElement) {
+                        editInput.focus();
+                        editInput.select();
+                    }
+                });
+
+                actions.appendChild(edit);
+                actions.appendChild(del);
+                row.appendChild(text);
+            }
+
             row.appendChild(actions);
             budgetLinesContainer.appendChild(row);
         });
@@ -824,7 +1078,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderBudgetSummary();
     }
 
-    renderBudgetSummary();
+    renderBudgetLines();
 
     // Team Selection
     async function populateTeamSelection() {

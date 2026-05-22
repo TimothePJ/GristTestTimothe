@@ -7,7 +7,7 @@ body {
 
 .wizard-container {
     width: 100%;
-    max-width: 800px;
+    max-width: 1100px;
     background-color: #f0f0f0;
     padding: 20px;
     border-radius: 8px;
@@ -163,45 +163,60 @@ button:hover {
 
 .budget-amount-field,
 .budget-percent-field {
+    display: flex;
+    align-items: stretch;
     position: relative;
     min-width: 0;
 }
 
-.budget-amount-field::after {
-    content: "\20AC";
+.budget-amount-field::after,
+.budget-percent-field::after {
     position: absolute;
-    top: 50%;
+    top: 0;
     right: 12px;
-    transform: translateY(-50%);
+    bottom: 0;
+    display: flex;
+    align-items: center;
     color: #004990;
     font-weight: bold;
     pointer-events: none;
 }
 
+.budget-amount-field::after {
+    content: "\20AC";
+}
+
 #budget-amount,
 #budget-total-indicatif {
     width: 100%;
-    padding-right: 32px;
+    padding-right: 38px;
     padding-left: 10px;
     text-align: left;
 }
 
 .budget-percent-field::after {
     content: "%";
-    position: absolute;
-    top: 50%;
-    right: 12px;
-    transform: translateY(-50%);
-    color: #004990;
-    font-weight: bold;
-    pointer-events: none;
 }
 
 #budget-percentage {
     width: 100%;
-    padding-right: 32px;
+    padding-right: 38px;
     padding-left: 10px;
     text-align: left;
+}
+
+.budget-amount-field input[type="number"],
+.budget-percent-field input[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+}
+
+.budget-amount-field input[type="number"]::-webkit-inner-spin-button,
+.budget-amount-field input[type="number"]::-webkit-outer-spin-button,
+.budget-percent-field input[type="number"]::-webkit-inner-spin-button,
+.budget-percent-field input[type="number"]::-webkit-outer-spin-button {
+    margin: 0;
+    -webkit-appearance: none;
 }
 
 #budget-lines-container p {
@@ -285,11 +300,51 @@ button:hover {
 }
 
 .budget-line.is-editing {
+  align-items: stretch;
   box-shadow: 0 0 0 2px rgba(0, 73, 144, 0.14);
 }
 
 .budget-line-text {
   flex: 1;
+  white-space: nowrap;
+}
+
+.budget-line-edit-fields {
+  display: grid;
+  grid-template-columns: minmax(360px, 2.4fr) minmax(120px, 0.8fr) minmax(150px, 1fr);
+  flex: 1;
+  gap: 10px;
+  min-width: 0;
+}
+
+.budget-line-edit-fields input {
+  width: 100%;
+  margin-bottom: 0;
+}
+
+.budget-line-chapter-locked {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 41px;
+  padding: 10px;
+  border: 1px solid rgba(0, 73, 144, 0.18);
+  border-radius: 4px;
+  background-color: rgba(0, 73, 144, 0.06);
+  color: #004990;
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+.budget-line-chapter-input,
+.budget-line-amount-input,
+.budget-line-percentage-input {
+  min-width: 0;
+}
+
+.budget-line-amount-input,
+.budget-line-percentage-input {
+  padding-right: 38px;
 }
 
 .budget-line-actions {
@@ -298,11 +353,23 @@ button:hover {
   gap: 8px;
 }
 
-.budget-line-edit {
+.budget-line-edit,
+.budget-line-cancel {
   padding: 6px 12px;
   background-color: #ffffff;
   color: #004990;
   border-color: rgba(0, 73, 144, 0.24);
+}
+
+.budget-line-save {
+  padding: 6px 12px;
+  background-color: #004990;
+  color: #ffffff;
+  border-color: #004990;
+}
+
+.budget-line-cancel {
+  color: #17324d;
 }
 
 .budget-line.is-editing .budget-line-edit {
@@ -590,6 +657,20 @@ select {
   .budget-total-panel,
   .budget-line-form {
     grid-template-columns: 1fr;
+  }
+
+  .budget-line,
+  .budget-line.is-editing {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .budget-line-edit-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .budget-line-actions {
+    justify-content: flex-end;
   }
 
   .budget-total-field {
