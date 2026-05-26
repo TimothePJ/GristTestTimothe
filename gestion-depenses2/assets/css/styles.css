@@ -2217,15 +2217,18 @@ td input {
   border-left: 1px solid rgba(0, 73, 144, 0.12);
 }
 
-.expense-rate-card-total.is-delta.is-positive strong {
+.expense-rate-card-total.is-delta.is-positive strong,
+.expense-rate-card-total.is-delta.is-positive em {
+  color: #168a4a;
+}
+
+.expense-rate-card-total.is-delta.is-negative strong,
+.expense-rate-card-total.is-delta.is-negative em {
   color: var(--color-accent);
 }
 
-.expense-rate-card-total.is-delta.is-negative strong {
-  color: var(--color-primary);
-}
-
-.expense-rate-card-total.is-delta.is-neutral strong {
+.expense-rate-card-total.is-delta.is-neutral strong,
+.expense-rate-card-total.is-delta.is-neutral em {
   color: var(--color-text);
 }
 

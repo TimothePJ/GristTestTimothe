@@ -296,8 +296,8 @@ function renderRateGroup(role, workers) {
       const realDays = getWorkerTotalDays(worker.workedDays);
       const provisionalCost = provisionalDays * dailyRate;
       const realCost = realDays * dailyRate;
-      const differenceDays = realDays - provisionalDays;
-      const differenceCost = realCost - provisionalCost;
+      const differenceDays = provisionalDays - realDays;
+      const differenceCost = provisionalCost - realCost;
       const differenceClass =
         differenceCost > 0 || differenceDays > 0
           ? "is-positive"
