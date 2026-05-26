@@ -461,6 +461,162 @@ function updateRowCellDatasets(tr, updates = {}) {
   }
 }
 
+function buildDedupedUpdateActions(tableName, rows, updateFields) {
+  const actionsById = new Map();
+  rows.forEach((row) => {
+    if (row?.id == null || actionsById.has(row.id)) return;
+    actionsById.set(row.id, ["UpdateRecord", tableName, row.id, { ...updateFields }]);
+  });
+  return [...actionsById.values()];
+}
+
+function getDistinctNormalizedColumnValues(rows, columnName, normalizer = normalizeText) {
+  if (!columnName) return new Set();
+  return new Set(rows.map((row) => normalizer(row?.[columnName])));
+}
+
+function buildDocumentTextSyncActions({
+  tableName,
+  rows,
+  updateFields,
+  cellIndex,
+  numeroColumn,
+  projectColumn,
+  typeColumn,
+  zoneColumn,
+  designationColumns,
+  numDocument,
+  designation,
+  typeDocument,
+  nomProjet,
+  zone,
+  projectId,
+  warningLabel
+}) {
+  const normalizedType = normalizeText(typeDocument);
+  const normalizedZone = normalizeZoneText(zone);
+
+  const matchesBaseContext = (row, { ignoreZone = false } = {}) => {
+    if (row?.id == null) return false;
+    if (projectColumn && !matchesProjectValue(row[projectColumn], nomProjet, projectId)) {
+      return false;
+    }
+    if (typeColumn && normalizedType && normalizeText(row[typeColumn]) !== normalizedType) {
+      return false;
+    }
+    if (!ignoreZone && zoneColumn && normalizeZoneText(row[zoneColumn]) !== normalizedZone) {
+      return false;
+    }
+    return true;
+  };
+
+  const matchesNumero = (row) =>
+    Boolean(numeroColumn) &&
+    normalizeText(row[numeroColumn]) === normalizeText(numDocument);
+
+  const matchesDesignation = (row, { allowMissingColumns = true } = {}) => {
+    if (!designationColumns.length) return allowMissingColumns;
+    return designationColumns.some(
+      (columnName) => normalizeText(row[columnName]) === normalizeText(designation)
+    );
+  };
+
+  const findCandidates = (strategy) =>
+    rows.filter((row) => {
+      if (!matchesBaseContext(row, { ignoreZone: strategy.ignoreZone })) return false;
+      if (strategy.requireNumero && !matchesNumero(row)) return false;
+      if (
+        strategy.requireDesignation &&
+        !matchesDesignation(row, {
+          allowMissingColumns: strategy.allowMissingDesignationColumns !== false
+        })
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+  const strategies = [
+    {
+      label: "strict",
+      requireNumero: true,
+      requireDesignation: true,
+      allowMissingDesignationColumns: true
+    },
+    cellIndex === 1 && {
+      label: "fallback numero",
+      requireNumero: true,
+      requireDesignation: false
+    },
+    cellIndex === 0 && {
+      label: "fallback designation",
+      requireNumero: false,
+      requireDesignation: true,
+      allowMissingDesignationColumns: false,
+      requireSingleCurrentNumero: true
+    }
+  ].filter(Boolean);
+
+  const resolveStrategy = (strategy) => {
+    const candidates = findCandidates(strategy);
+    if (!candidates.length) return { status: "none", candidates };
+
+    if (strategy.requireSingleCurrentNumero) {
+      const distinctCurrentNumbers = getDistinctNormalizedColumnValues(candidates, numeroColumn);
+      if (distinctCurrentNumbers.size > 1) {
+        console.warn(`Synchro ${warningLabel}: fallback ambigu sur le numero.`, {
+          strategy: strategy.label,
+          nomProjet,
+          typeDocument,
+          zone,
+          numDocument,
+          designation,
+          candidateIds: candidates.map((row) => row.id),
+          currentNumbers: [...distinctCurrentNumbers]
+        });
+        return { status: "ambiguous", candidates };
+      }
+    }
+
+    if (strategy.ignoreZone && zoneColumn) {
+      const distinctZones = getDistinctNormalizedColumnValues(candidates, zoneColumn, normalizeZoneText);
+      if (distinctZones.size > 1) {
+        console.warn(`Synchro ${warningLabel}: fallback ambigu sur la zone.`, {
+          strategy: strategy.label,
+          nomProjet,
+          typeDocument,
+          zone,
+          numDocument,
+          designation,
+          candidateIds: candidates.map((row) => row.id),
+          zones: [...distinctZones]
+        });
+        return { status: "ambiguous", candidates };
+      }
+    }
+
+    return { status: "accepted", candidates };
+  };
+
+  for (const strategy of strategies) {
+    const result = resolveStrategy({ ...strategy, ignoreZone: false });
+    if (result.status === "accepted") {
+      return buildDedupedUpdateActions(tableName, result.candidates, updateFields);
+    }
+    if (result.status === "ambiguous") return [];
+  }
+
+  for (const strategy of strategies) {
+    const result = resolveStrategy({ ...strategy, ignoreZone: true });
+    if (result.status === "accepted") {
+      return buildDedupedUpdateActions(tableName, result.candidates, updateFields);
+    }
+    if (result.status === "ambiguous") return [];
+  }
+
+  return [];
+}
+
 async function buildReferencesTextUpdateActions({
   cellIndex,
   texte,
@@ -478,6 +634,7 @@ async function buildReferencesTextUpdateActions({
     const projectColumn = findFirstExistingColumn(referenceColumns, ["NomProjet", "Nom_projet"]);
     const typeColumn = findFirstExistingColumn(referenceColumns, ["Type_document", "TypeDocument"]);
     const zoneColumn = findFirstExistingColumn(referenceColumns, ["Zone"]);
+    const numeroColumn = referenceColumns.has("NumeroDocument") ? "NumeroDocument" : null;
     const designationColumns = ["NomDocument", "Designation"].filter((name) => referenceColumns.has(name));
 
     const updateFields = {};
@@ -500,30 +657,24 @@ async function buildReferencesTextUpdateActions({
     const projetsMap = await chargerProjetsMap();
     const projectId = projetsMap?.[normalizeText(nomProjet)] ?? null;
 
-    return referenceRows
-      .filter((row) => {
-        if (row?.id == null) return false;
-        if (normalizeText(row.NumeroDocument) !== normalizeText(numDocument)) return false;
-        if (projectColumn && !matchesProjectValue(row[projectColumn], nomProjet, projectId)) {
-          return false;
-        }
-        if (typeColumn && normalizeText(typeDocument) && normalizeText(row[typeColumn]) !== normalizeText(typeDocument)) {
-          return false;
-        }
-        if (zoneColumn && normalizeZoneText(row[zoneColumn]) !== normalizeZoneText(zone)) {
-          return false;
-        }
-        if (designationColumns.length > 0) {
-          const matchesDesignation = designationColumns.some(
-            (columnName) => normalizeText(row[columnName]) === normalizeText(designation)
-          );
-          if (!matchesDesignation) {
-            return false;
-          }
-        }
-        return true;
-      })
-      .map((row) => ["UpdateRecord", "References", row.id, updateFields]);
+    return buildDocumentTextSyncActions({
+      tableName: "References",
+      rows: referenceRows,
+      updateFields,
+      cellIndex,
+      numeroColumn,
+      projectColumn,
+      typeColumn,
+      zoneColumn,
+      designationColumns,
+      numDocument,
+      designation,
+      typeDocument,
+      nomProjet,
+      zone,
+      projectId,
+      warningLabel: "References"
+    });
   } catch (err) {
     console.error("Erreur lors de la préparation de la synchro vers References :", err);
     return [];
@@ -577,35 +728,24 @@ async function buildPlanningProjetTextUpdateActions({
     const projetsMap = await chargerProjetsMap();
     const projectId = projetsMap?.[normalizeText(nomProjet)] ?? null;
 
-    const matchesPlanningRow = (row, { ignoreZone = false } = {}) => {
-      if (row?.id == null) return false;
-      if (normalizeText(row[numeroColumn]) !== normalizeText(numDocument)) return false;
-      if (projectColumn && !matchesProjectValue(row[projectColumn], nomProjet, projectId)) {
-        return false;
-      }
-      if (typeColumn && normalizeText(typeDocument) && normalizeText(row[typeColumn]) !== normalizeText(typeDocument)) {
-        return false;
-      }
-      if (!ignoreZone && zoneColumn && normalizeZoneText(row[zoneColumn]) !== normalizeZoneText(zone)) {
-        return false;
-      }
-      if (designationColumns.length > 0) {
-        const matchesDesignation = designationColumns.some(
-          (columnName) => normalizeText(row[columnName]) === normalizeText(designation)
-        );
-        if (!matchesDesignation) {
-          return false;
-        }
-      }
-      return true;
-    };
-
-    const exactMatches = planningRows.filter((row) => matchesPlanningRow(row));
-    const fallbackMatches = exactMatches.length
-      ? exactMatches
-      : planningRows.filter((row) => matchesPlanningRow(row, { ignoreZone: true }));
-
-    return fallbackMatches.map((row) => ["UpdateRecord", "Planning_Projet", row.id, updateFields]);
+    return buildDocumentTextSyncActions({
+      tableName: "Planning_Projet",
+      rows: planningRows,
+      updateFields,
+      cellIndex,
+      numeroColumn,
+      projectColumn,
+      typeColumn,
+      zoneColumn,
+      designationColumns,
+      numDocument,
+      designation,
+      typeDocument,
+      nomProjet,
+      zone,
+      projectId,
+      warningLabel: "Planning_Projet"
+    });
   } catch (err) {
     console.error("Erreur lors de la préparation de la synchro vers Planning_Projet :", err);
     return [];

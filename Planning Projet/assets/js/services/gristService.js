@@ -1187,25 +1187,27 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
   }
 
   const targetZone = normalizeZoneValueForStorage(targetRow[zoneCol]);
-  const targetIsSansZone = !targetZone;
-  const targetRowGroupe = targetIsSansZone ? "" : toText(targetRow[groupCol]);
+  const targetRowGroupe = toText(targetRow[groupCol]);
   const sourceGroupe = toText(sourceRow[groupCol]);
   const sourceZone = normalizeZoneValueForStorage(sourceRow[zoneCol]);
   const sourceTypeDoc = toText(sourceRow[typeDocCol]);
   const sourceProject = toText(sourceRow[projectCol]);
+  const targetTypeDoc = toText(targetRow[typeDocCol]);
+  const targetProject = toText(targetRow[projectCol]);
   const sourceIsCoffrage = isCoffrageTypeDoc(sourceTypeDoc);
   const sourceIsArmatures = isArmaturesTypeDoc(sourceTypeDoc);
+  const targetIsCoffrage = isCoffrageTypeDoc(targetTypeDoc);
   const isCrossZoneMove = sourceZone !== targetZone;
+  const normalizedLinkedIds = Array.isArray(linkedRowIds)
+    ? [...new Set(
+      linkedRowIds
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0 && value !== sourceId)
+    )]
+    : [];
 
   let nextGroupValue = targetRowGroupe;
-  if (targetIsSansZone) {
-    nextGroupValue = "";
-  } else if (sourceIsCoffrage) {
-    const normalizedLinkedIds = Array.isArray(linkedRowIds)
-      ? linkedRowIds
-          .map((value) => Number(value))
-          .filter((value) => Number.isInteger(value) && value > 0 && value !== sourceId)
-      : [];
+  if (sourceIsCoffrage) {
     const conflictingCoffrages = findCoffrageRowsForZoneGroup(rows, {
       idCol,
       zoneCol,
@@ -1218,7 +1220,7 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
       excludeRowIds: [sourceId],
     });
     const mustAllocateUniqueGroup =
-      isCrossZoneMove || conflictingCoffrages.length > 0;
+      !nextGroupValue || isCrossZoneMove || conflictingCoffrages.length > 0;
 
     if (mustAllocateUniqueGroup) {
       nextGroupValue = getNextAvailableGroupValue(rows, {
@@ -1231,6 +1233,16 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
         excludeRowIds: [sourceId, ...normalizedLinkedIds],
       });
     }
+  } else if (sourceIsArmatures && targetIsCoffrage && !nextGroupValue) {
+    nextGroupValue = getNextAvailableGroupValue(rows, {
+      idCol,
+      zoneCol,
+      groupCol,
+      projectCol,
+      zoneValue: targetZone,
+      projectValue: sourceProject || targetProject,
+      excludeRowIds: [sourceId, targetId, ...normalizedLinkedIds],
+    });
   }
 
   const updates = {};
@@ -1241,13 +1253,17 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
     updates[zoneCol] = targetZone;
   }
 
-  const normalizedLinkedIds = Array.isArray(linkedRowIds)
-    ? [...new Set(
-      linkedRowIds
-        .map((value) => Number(value))
-        .filter((value) => Number.isInteger(value) && value > 0 && value !== sourceId)
-    )]
-    : [];
+  const targetUpdates = {};
+  if (sourceIsArmatures && targetIsCoffrage && targetRowGroupe !== nextGroupValue) {
+    targetUpdates[groupCol] = nextGroupValue;
+    if (hasPlanningLinkValue(targetRow?.[linePlanningCol])) {
+      targetUpdates[linePlanningCol] = null;
+    }
+    const targetDemarrageValue = targetRow?.[demarrageCol];
+    if (targetDemarrageValue != null && toText(targetDemarrageValue) !== "") {
+      targetUpdates[demarrageCol] = null;
+    }
+  }
 
   const linkedActions = [];
   const zoneChanges = [];
@@ -1297,7 +1313,6 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
   });
 
   const finalGroupHasArmatures =
-    Boolean(targetZone) &&
     Boolean(nextGroupValue) &&
     (
       sourceIsArmatures ||
@@ -1344,7 +1359,7 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
 
   const externalZoneSyncActions = await buildExternalZoneSyncActionsForPlanningChanges(zoneChanges);
 
-  if (!Object.keys(updates).length && !linkedActions.length && !planningLinkResetActions.length && !externalZoneSyncActions.length) {
+  if (!Object.keys(updates).length && !Object.keys(targetUpdates).length && !linkedActions.length && !planningLinkResetActions.length && !externalZoneSyncActions.length) {
     return {
       updated: false,
       groupe: nextGroupValue,
@@ -1365,6 +1380,14 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
       table.sourceTable,
       sourceId,
       updates,
+    ]);
+  }
+  if (Object.keys(targetUpdates).length) {
+    actions.push([
+      "UpdateRecord",
+      table.sourceTable,
+      targetId,
+      targetUpdates,
     ]);
   }
   actions.push(...linkedActions);
@@ -1427,13 +1450,11 @@ export async function updatePlanningZoneFromZoneHeaderDrop({
   const sourceTypeDoc = toText(sourceRow[typeDocCol]);
   const sourceProject = toText(sourceRow[projectCol]);
   const shouldAssignAutoGroup = isCoffrageTypeDoc(sourceTypeDoc);
-  const shouldClearGroupOnZoneDrop = !isSansZoneTarget && !shouldAssignAutoGroup;
+  const shouldClearGroupOnZoneDrop = !shouldAssignAutoGroup;
   const sourceIsArmatures = isArmaturesTypeDoc(sourceTypeDoc);
 
   let nextGroupValue = sourceGroup;
-  if (isSansZoneTarget) {
-    nextGroupValue = "";
-  } else if (shouldAssignAutoGroup) {
+  if (shouldAssignAutoGroup) {
     nextGroupValue = getNextAvailableGroupValue(rows, {
       idCol,
       zoneCol,
@@ -1451,7 +1472,7 @@ export async function updatePlanningZoneFromZoneHeaderDrop({
   if (sourceZone !== normalizedZone) {
     updates[zoneCol] = normalizedZone;
   }
-  if ((isSansZoneTarget || shouldAssignAutoGroup || shouldClearGroupOnZoneDrop) && sourceGroup !== nextGroupValue) {
+  if ((shouldAssignAutoGroup || shouldClearGroupOnZoneDrop) && sourceGroup !== nextGroupValue) {
     updates[groupCol] = nextGroupValue;
   }
 
@@ -1511,7 +1532,6 @@ export async function updatePlanningZoneFromZoneHeaderDrop({
   });
 
   const finalGroupHasArmatures =
-    !isSansZoneTarget &&
     Boolean(nextGroupValue) &&
     (
       sourceIsArmatures ||

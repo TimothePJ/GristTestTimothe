@@ -2364,6 +2364,10 @@ function buildGroupLabelElement(group) {
   tache.className = "cell-task";
   tache.textContent = String(group?.tachesLabel ?? "");
 
+  const groupe = document.createElement("div");
+  groupe.className = "cell-groupe";
+  groupe.textContent = String(group?.groupeLabel ?? "");
+
   const lignePlanning = document.createElement("div");
   lignePlanning.className = "cell-ligne-planning";
   lignePlanning.textContent = String(group?.lignePlanningLabel ?? "");
@@ -2440,6 +2444,7 @@ function buildGroupLabelElement(group) {
   [
     id2,
     tache,
+    groupe,
     lignePlanning,
     debut,
     dureeDebutFin,
