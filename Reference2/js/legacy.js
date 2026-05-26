@@ -455,7 +455,7 @@ function buildPlanningDocumentAddFields(planningTable, {
   setPlanningFieldIfPresent(planningTable, fields, taskCol, String(taskName ?? '').trim());
   setPlanningFieldIfPresent(planningTable, fields, 'Type_doc', String(typeDoc ?? '').trim());
   setPlanningFieldIfPresent(planningTable, fields, 'Indice', '');
-  setPlanningFieldIfPresent(planningTable, fields, 'Groupe', '');
+  setPlanningFieldIfPresent(planningTable, fields, 'Groupe', getDefaultPlanningGroupForType(typeDoc));
   setPlanningFieldIfPresent(planningTable, fields, 'Zone', normalizeZoneValue(zoneStr));
 
   return fields;
@@ -720,6 +720,15 @@ function docLabelFromRecord(record) {
 
 function normalizeTypeDocument(value) {
   return String(value ?? '').trim().toLocaleUpperCase('fr');
+}
+
+const UNASSIGNED_COFFRAGE_GROUP = 'Aucun groupe assign\u00e9';
+
+function getDefaultPlanningGroupForType(typeDoc) {
+  const normalizedType = normalizeTypeDocument(typeDoc);
+  return (normalizedType.includes('COFFRAGE') || normalizedType.includes('COF'))
+    ? UNASSIGNED_COFFRAGE_GROUP
+    : '';
 }
 
 function collectProjectZones(projectName) {

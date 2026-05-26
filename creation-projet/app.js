@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
         '13-Base',
         '14-Travaux supplémentaires'
     ];
+    const UNASSIGNED_COFFRAGE_GROUP = 'Aucun groupe assign\u00e9';
 
     function createDefaultBudgetLines() {
         return DEFAULT_BUDGET_CHAPTERS.map((chapter) => ({
@@ -130,6 +131,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function normalizeDocumentType(value) {
         return normalizeText(value).toLocaleUpperCase('fr');
+    }
+
+    function getDefaultPlanningGroupForType(typeDoc) {
+        const normalizedType = normalizeDocumentType(typeDoc);
+        return (normalizedType.includes('COFFRAGE') || normalizedType.includes('COF'))
+            ? UNASSIGNED_COFFRAGE_GROUP
+            : '';
     }
 
     function normalizeDocumentNumberPadding(value) {
@@ -2219,7 +2227,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 setFieldIfPresent(planningContext.columns, fields, 'Tache', doc.name);
                 setFieldIfPresent(planningContext.columns, fields, 'Type_doc', doc.type || 'COFFRAGE');
                 setFieldIfPresent(planningContext.columns, fields, 'Indice', '');
-                setFieldIfPresent(planningContext.columns, fields, 'Groupe', '');
+                setFieldIfPresent(planningContext.columns, fields, 'Groupe', getDefaultPlanningGroupForType(doc.type || 'COFFRAGE'));
                 setFieldIfPresent(planningContext.columns, fields, 'Zone', normalizeZoneValue(doc.zone));
 
                 planningActions.push(["AddRecord", planningContext.tableName, null, fields]);
