@@ -972,6 +972,22 @@ function getDefaultPrintSelectedTypes(availableTypes) {
   return new Set(selection.values.filter((type) => availableTypes.includes(type)));
 }
 
+function syncMainTypeSelectionFromPrintOrder(orderedTypes, availableTypes) {
+  if (!Array.isArray(orderedTypes) || orderedTypes.length === 0) return;
+
+  const allTypesAreSelected = Array.isArray(availableTypes) &&
+    availableTypes.length > 0 &&
+    orderedTypes.length === availableTypes.length &&
+    availableTypes.every((type) => orderedTypes.includes(type));
+
+  if (allTypesAreSelected) {
+    selectAllTypeDocuments();
+  } else {
+    setSelectedTypeDocumentValues(orderedTypes);
+  }
+  refreshCurrentPlanDisplay();
+}
+
 function createPrintTypeOrderItem(type, checked) {
   const item = document.createElement("label");
   item.className = "print-type-order-item";
@@ -1247,6 +1263,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const orderedTypes = await openPrintOptionsDialog(availableTypes);
     if (!orderedTypes) return;
 
+    syncMainTypeSelectionFromPrintOrder(orderedTypes, availableTypes);
     await generatePlansPdfFromOrderedTypes(selectedProject, orderedTypes);
   }, true);
 });
