@@ -18,7 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
         '13-Base',
         '14-Travaux supplémentaires'
     ];
-    const UNASSIGNED_COFFRAGE_GROUP = 'Aucun groupe assign\u00e9';
+    const OUT_OF_PROJECT_COFFRAGE_GROUP_PREFIX = 'HORS PROJET';
 
     function createDefaultBudgetLines() {
         return DEFAULT_BUDGET_CHAPTERS.map((chapter) => ({
@@ -133,10 +133,55 @@ document.addEventListener('DOMContentLoaded', () => {
         return normalizeText(value).toLocaleUpperCase('fr');
     }
 
-    function getDefaultPlanningGroupForType(typeDoc) {
+    function isCoffrageDocumentType(typeDoc) {
         const normalizedType = normalizeDocumentType(typeDoc);
-        return (normalizedType.includes('COFFRAGE') || normalizedType.includes('COF'))
-            ? UNASSIGNED_COFFRAGE_GROUP
+        return normalizedType.includes('COFFRAGE') || normalizedType.includes('COF');
+    }
+
+    function getPlanningProjectColumnFromData(planningData = {}) {
+        if (Array.isArray(planningData?.NomProjet)) return 'NomProjet';
+        if (Array.isArray(planningData?.Nom_projet)) return 'Nom_projet';
+        return 'NomProjet';
+    }
+
+    function collectProjectPlanningGroups(planningData, projectName) {
+        const projectCol = getPlanningProjectColumnFromData(planningData);
+        const projects = getTableColumnArray(planningData, projectCol);
+        const groups = getTableColumnArray(planningData, 'Groupe');
+        const projectKey = normalizeText(projectName).toLowerCase();
+        const usedGroups = new Set();
+
+        for (let index = 0; index < Math.max(projects.length, groups.length); index += 1) {
+            if (normalizeText(projects[index]).toLowerCase() !== projectKey) continue;
+
+            const group = normalizeText(groups[index]);
+            if (group) usedGroups.add(group.toLowerCase());
+        }
+
+        return usedGroups;
+    }
+
+    function getUniqueOutOfProjectCoffrageGroup(planningData, projectName, numeroDocument, usedGroups = null) {
+        const existingGroups = usedGroups || collectProjectPlanningGroups(planningData, projectName);
+        const numeroText = normalizeText(numeroDocument);
+        const baseGroup = numeroText
+            ? `${OUT_OF_PROJECT_COFFRAGE_GROUP_PREFIX} - ${numeroText}`
+            : OUT_OF_PROJECT_COFFRAGE_GROUP_PREFIX;
+        let candidate = baseGroup;
+        let suffix = 2;
+
+        while (existingGroups.has(candidate.toLowerCase())) {
+            candidate = `${baseGroup} ${suffix}`;
+            suffix += 1;
+        }
+
+        existingGroups.add(candidate.toLowerCase());
+        return candidate;
+    }
+
+    function getDefaultPlanningGroupForType(typeDoc, planningData = null, projectName = '', numeroDocument = '', usedGroups = null) {
+        return isCoffrageDocumentType(typeDoc)
+            ? getUniqueOutOfProjectCoffrageGroup(planningData, projectName, numeroDocument, usedGroups)
             : '';
     }
 
@@ -2217,6 +2262,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
 
+            const usedPlanningGroups = collectProjectPlanningGroups(planningContext.data, projectData.name);
+
             projectData.documents.forEach((doc) => {
                 const numeroText = String(doc.numero ?? '').trim();
                 const fields = {};
@@ -2227,7 +2274,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 setFieldIfPresent(planningContext.columns, fields, 'Tache', doc.name);
                 setFieldIfPresent(planningContext.columns, fields, 'Type_doc', doc.type || 'COFFRAGE');
                 setFieldIfPresent(planningContext.columns, fields, 'Indice', '');
-                setFieldIfPresent(planningContext.columns, fields, 'Groupe', getDefaultPlanningGroupForType(doc.type || 'COFFRAGE'));
+                setFieldIfPresent(
+                    planningContext.columns,
+                    fields,
+                    'Groupe',
+                    getDefaultPlanningGroupForType(
+                        doc.type || 'COFFRAGE',
+                        planningContext.data,
+                        projectData.name,
+                        numeroText,
+                        usedPlanningGroups
+                    )
+                );
                 setFieldIfPresent(planningContext.columns, fields, 'Zone', normalizeZoneValue(doc.zone));
 
                 planningActions.push(["AddRecord", planningContext.tableName, null, fields]);

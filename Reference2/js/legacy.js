@@ -455,7 +455,12 @@ function buildPlanningDocumentAddFields(planningTable, {
   setPlanningFieldIfPresent(planningTable, fields, taskCol, String(taskName ?? '').trim());
   setPlanningFieldIfPresent(planningTable, fields, 'Type_doc', String(typeDoc ?? '').trim());
   setPlanningFieldIfPresent(planningTable, fields, 'Indice', '');
-  setPlanningFieldIfPresent(planningTable, fields, 'Groupe', getDefaultPlanningGroupForType(typeDoc));
+  setPlanningFieldIfPresent(
+    planningTable,
+    fields,
+    'Groupe',
+    getDefaultPlanningGroupForType(typeDoc, planningTable, projectName, numeroDocStr)
+  );
   setPlanningFieldIfPresent(planningTable, fields, 'Zone', normalizeZoneValue(zoneStr));
 
   return fields;
@@ -722,12 +727,50 @@ function normalizeTypeDocument(value) {
   return String(value ?? '').trim().toLocaleUpperCase('fr');
 }
 
-const UNASSIGNED_COFFRAGE_GROUP = 'Aucun groupe assign\u00e9';
+const OUT_OF_PROJECT_COFFRAGE_GROUP_PREFIX = 'HORS PROJET';
 
-function getDefaultPlanningGroupForType(typeDoc) {
+function isCoffrageDocumentType(typeDoc) {
   const normalizedType = normalizeTypeDocument(typeDoc);
-  return (normalizedType.includes('COFFRAGE') || normalizedType.includes('COF'))
-    ? UNASSIGNED_COFFRAGE_GROUP
+  return normalizedType.includes('COFFRAGE') || normalizedType.includes('COF');
+}
+
+function collectProjectPlanningGroups(planningTable, projectName) {
+  const projectCol = getPlanningProjectColumn(planningTable);
+  const projects = planningTable?.[projectCol] || [];
+  const groups = planningTable?.Groupe || [];
+  const projectKey = _norm(projectName);
+  const usedGroups = new Set();
+
+  for (let i = 0; i < Math.max(projects.length, groups.length); i++) {
+    if (_norm(projects[i]) !== projectKey) continue;
+
+    const group = _norm(groups[i]);
+    if (group) usedGroups.add(group.toLocaleLowerCase('fr'));
+  }
+
+  return usedGroups;
+}
+
+function getUniqueOutOfProjectCoffrageGroup(planningTable, projectName, numeroDocStr) {
+  const usedGroups = collectProjectPlanningGroups(planningTable, projectName);
+  const numeroText = _norm(numeroDocStr);
+  const baseGroup = numeroText
+    ? `${OUT_OF_PROJECT_COFFRAGE_GROUP_PREFIX} - ${numeroText}`
+    : OUT_OF_PROJECT_COFFRAGE_GROUP_PREFIX;
+  let candidate = baseGroup;
+  let suffix = 2;
+
+  while (usedGroups.has(candidate.toLocaleLowerCase('fr'))) {
+    candidate = `${baseGroup} ${suffix}`;
+    suffix += 1;
+  }
+
+  return candidate;
+}
+
+function getDefaultPlanningGroupForType(typeDoc, planningTable = null, projectName = '', numeroDocStr = '') {
+  return isCoffrageDocumentType(typeDoc)
+    ? getUniqueOutOfProjectCoffrageGroup(planningTable, projectName, numeroDocStr)
     : '';
 }
 
