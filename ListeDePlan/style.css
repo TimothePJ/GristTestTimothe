@@ -136,6 +136,101 @@ select {
 .checkbox-list-item span {
   overflow-wrap: anywhere;
 }
+
+.print-options-dialog {
+  border: 1px solid #ed1b2d;
+  border-radius: 6px;
+  color: #004990;
+  padding: 0;
+  width: min(520px, calc(100vw - 32px));
+}
+
+.print-options-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.print-options-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  background: #ffffff;
+}
+
+.print-options-body h3 {
+  margin: 0;
+}
+
+.print-options-intro {
+  margin: 0;
+  font-size: 13px;
+}
+
+.print-type-order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(50vh, 360px);
+  overflow: auto;
+}
+
+.print-type-order-item {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid #ed1b2d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #004990;
+  cursor: grab;
+}
+
+.print-type-order-item.is-dragging {
+  opacity: 0.55;
+}
+
+.print-type-order-item input[type="checkbox"] {
+  margin: 0;
+}
+
+.print-type-order-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.print-type-order-handle {
+  color: #004990;
+  font-weight: bold;
+  text-align: center;
+  user-select: none;
+}
+
+.print-options-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.print-options-actions button {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+#print-options-confirm {
+  background: #004990;
+  color: #ffffff;
+}
+
+#print-options-confirm:hover {
+  background: #ed1b2d;
+}
   
 .add-form {
   position: fixed; /* Reste fixé en bas */

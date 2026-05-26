@@ -945,3 +945,309 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 });
 
+function getPrintAvailableTypeValues(selectedProject) {
+  const projectName = normalizeProjectName(selectedProject);
+  const typeSet = new Set();
+
+  for (const record of window.records || []) {
+    const recordProject = typeof getRecordProjectName === "function"
+      ? getRecordProjectName(record)
+      : getNomProjet(record);
+    if (normalizeProjectName(recordProject) !== projectName) continue;
+
+    const type = normalizeTypeDocumentValue(record?.Type_document);
+    if (type) typeSet.add(type);
+  }
+
+  return [...typeSet].sort((left, right) => left.localeCompare(right, "fr", {
+    sensitivity: "base",
+    numeric: true
+  }));
+}
+
+function getDefaultPrintSelectedTypes(availableTypes) {
+  const selection = getSelectedTypeDocumentSelection();
+  if (selection.isAll) return new Set(availableTypes);
+
+  return new Set(selection.values.filter((type) => availableTypes.includes(type)));
+}
+
+function createPrintTypeOrderItem(type, checked) {
+  const item = document.createElement("label");
+  item.className = "print-type-order-item";
+  item.draggable = true;
+  item.dataset.typeDocument = type;
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = checked;
+
+  const text = document.createElement("span");
+  text.className = "print-type-order-label";
+  text.textContent = type;
+
+  const handle = document.createElement("span");
+  handle.className = "print-type-order-handle";
+  handle.textContent = "::";
+  handle.setAttribute("aria-hidden", "true");
+
+  item.appendChild(checkbox);
+  item.appendChild(text);
+  item.appendChild(handle);
+  return item;
+}
+
+function getPrintDragAfterElement(container, y) {
+  const items = [...container.querySelectorAll(".print-type-order-item:not(.is-dragging)")];
+
+  return items.reduce((closest, child) => {
+    const box = child.getBoundingClientRect();
+    const offset = y - box.top - box.height / 2;
+    if (offset < 0 && offset > closest.offset) {
+      return { offset, element: child };
+    }
+    return closest;
+  }, { offset: Number.NEGATIVE_INFINITY, element: null }).element;
+}
+
+function setupPrintTypeOrderDrag(list) {
+  list.addEventListener("dragstart", (event) => {
+    const item = event.target.closest(".print-type-order-item");
+    if (!item) return;
+
+    item.classList.add("is-dragging");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", item.dataset.typeDocument || "");
+  });
+
+  list.addEventListener("dragend", (event) => {
+    event.target.closest(".print-type-order-item")?.classList.remove("is-dragging");
+  });
+
+  list.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    const dragging = list.querySelector(".is-dragging");
+    if (!dragging) return;
+
+    const afterElement = getPrintDragAfterElement(list, event.clientY);
+    if (afterElement == null) {
+      list.appendChild(dragging);
+    } else {
+      list.insertBefore(dragging, afterElement);
+    }
+  });
+}
+
+function openPrintOptionsDialog(availableTypes) {
+  return new Promise((resolve) => {
+    const dialog = document.getElementById("dlg-print-options");
+    const list = document.getElementById("printTypeOrderList");
+    const cancelBtn = document.getElementById("print-options-cancel");
+    const confirmBtn = document.getElementById("print-options-confirm");
+
+    if (!dialog || !list || !cancelBtn || !confirmBtn || typeof dialog.showModal !== "function") {
+      resolve(availableTypes);
+      return;
+    }
+
+    const selectedTypes = getDefaultPrintSelectedTypes(availableTypes);
+    list.innerHTML = "";
+    availableTypes.forEach((type) => {
+      list.appendChild(createPrintTypeOrderItem(type, selectedTypes.has(type)));
+    });
+
+    if (!list.__printDragBound) {
+      setupPrintTypeOrderDrag(list);
+      list.__printDragBound = true;
+    }
+
+    const getDialogSelection = () => Array.from(list.querySelectorAll(".print-type-order-item"))
+      .filter((item) => item.querySelector('input[type="checkbox"]')?.checked)
+      .map((item) => normalizeTypeDocumentValue(item.dataset.typeDocument))
+      .filter(Boolean);
+
+    const cleanup = () => {
+      cancelBtn.removeEventListener("click", onCancel);
+      confirmBtn.removeEventListener("click", onConfirm);
+      dialog.removeEventListener("cancel", onCancel);
+      dialog.removeEventListener("close", onClose);
+    };
+
+    const closeWith = (value) => {
+      dialog.__printResult = value;
+      dialog.close();
+    };
+
+    const onCancel = (event) => {
+      event?.preventDefault?.();
+      closeWith(null);
+    };
+    const onConfirm = () => {
+      const selected = getDialogSelection();
+      if (selected.length === 0) {
+        alert("Selectionnez au moins un type de document a imprimer.");
+        return;
+      }
+      closeWith(selected);
+    };
+    const onClose = () => {
+      const value = Object.prototype.hasOwnProperty.call(dialog, "__printResult")
+        ? dialog.__printResult
+        : null;
+      delete dialog.__printResult;
+      cleanup();
+      resolve(value);
+    };
+
+    cancelBtn.addEventListener("click", onCancel);
+    confirmBtn.addEventListener("click", onConfirm);
+    dialog.addEventListener("cancel", onCancel);
+    dialog.addEventListener("close", onClose);
+    dialog.showModal();
+  });
+}
+
+function matchesCurrentPrintZone(record, selectedZoneDocument) {
+  if (typeof matchesZoneSelection === "function") {
+    return matchesZoneSelection(record, selectedZoneDocument);
+  }
+  return true;
+}
+
+function buildPrintContainer(selectedProject, orderedTypes, selectedZoneDocument) {
+  const container = document.createElement("div");
+  container.id = "plans-print-output";
+  container.style.position = "absolute";
+  container.style.left = "-100000px";
+  container.style.top = "0";
+  container.style.width = "1200px";
+  container.style.background = "#ffffff";
+
+  const normalizedProject = normalizeProjectName(selectedProject);
+  const projectRows = (window.records || []).filter((record) => {
+    const recordProject = typeof getRecordProjectName === "function"
+      ? getRecordProjectName(record)
+      : getNomProjet(record);
+    return normalizeProjectName(recordProject) === normalizedProject &&
+      normalizeTypeDocumentValue(record?.Type_document) &&
+      matchesCurrentPrintZone(record, selectedZoneDocument);
+  });
+
+  if (typeof renderVisibleTypeConsistencyWarnings === "function") {
+    const selectedRows = projectRows.filter((record) => orderedTypes.includes(normalizeTypeDocumentValue(record.Type_document)));
+    renderVisibleTypeConsistencyWarnings(container, selectedRows, normalizedProject);
+  }
+
+  for (const type of orderedTypes) {
+    const rowsForType = projectRows.filter((record) => normalizeTypeDocumentValue(record.Type_document) === type);
+    if (rowsForType.length === 0) continue;
+
+    const typeSection = document.createElement("section");
+    typeSection.className = "plan-type-section";
+
+    const title = document.createElement("h2");
+    title.className = "plan-type-title";
+    title.textContent = type;
+    typeSection.appendChild(title);
+
+    if (typeof renderRowsForSelectedType === "function") {
+      renderRowsForSelectedType(typeSection, rowsForType, normalizedProject);
+    }
+
+    container.appendChild(typeSection);
+  }
+
+  document.body.appendChild(container);
+  return container;
+}
+
+async function generatePlansPdfFromOrderedTypes(selectedProject, orderedTypes) {
+  const selectedZoneDocument = document.getElementById("zoneDropdown")?.value ||
+    (window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__");
+  const printContainer = buildPrintContainer(selectedProject, orderedTypes, selectedZoneDocument);
+
+  try {
+    const children = Array.from(printContainer.querySelectorAll("h2, h3, table"));
+    if (children.length === 0) {
+      alert("Aucun plan a imprimer.");
+      return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF("p", "mm", "a4");
+
+    const logo1Url = await fetch("../img/VC_Logotype_Digital_RVB.jpg").then((res) => res.blob()).then(blob => URL.createObjectURL(blob));
+    const logo2Url = await fetch("../img/bloc dÃ©lÃ©gation bleu.png").then((res) => res.blob()).then(blob => URL.createObjectURL(blob));
+    const logo3Url = await fetch("../img/Logo DRTO fr - Bleu.png").then((res) => res.blob()).then(blob => URL.createObjectURL(blob));
+
+    let startY = 40;
+    doc.setFontSize(18);
+    doc.text(`Projet : ${selectedProject}`, 16, 30);
+
+    for (const child of children) {
+      if (child.tagName === "H2" || child.tagName === "H3") {
+        if (startY > doc.internal.pageSize.getHeight() - 20) {
+          doc.addPage();
+          startY = 40;
+        }
+        doc.setFontSize(child.tagName === "H2" ? 16 : 14);
+        doc.text(child.textContent, 14, startY);
+        startY += 8;
+      } else if (child.tagName === "TABLE") {
+        doc.autoTable({
+          html: child,
+          startY: startY,
+          margin: { top: 40 },
+          styles: { fontSize: 8 },
+          headStyles: { fillColor: [0, 73, 144] },
+          didDrawPage: function() {
+            // startY is reset automatically by autoTable on new pages
+          }
+        });
+        startY = doc.lastAutoTable.finalY + 10;
+      }
+    }
+
+    const totalPages = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.addImage(logo1Url, "JPEG", 10, 10, 40, 15);
+      doc.addImage(logo2Url, "PNG", doc.internal.pageSize.getWidth() - 72, 10, 40, 15);
+      doc.addImage(logo3Url, "PNG", doc.internal.pageSize.getWidth() - 30, 10, 15, 15);
+      doc.setFontSize(10);
+      doc.text(`Page ${i} / ${totalPages}`, doc.internal.pageSize.getWidth() - 30, doc.internal.pageSize.getHeight() - 10);
+    }
+
+    doc.save(`${selectedProject} - Plans.pdf`);
+  } finally {
+    printContainer.remove();
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const btnPrint = document.getElementById("btn-print");
+  if (!btnPrint) return;
+
+  btnPrint.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    const selectedProject = document.getElementById("projectDropdown").value;
+    if (!selectedProject) {
+      alert("Veuillez selectionner un projet avant d'imprimer.");
+      return;
+    }
+
+    const availableTypes = getPrintAvailableTypeValues(selectedProject);
+    if (availableTypes.length === 0) {
+      alert("Aucun plan a imprimer.");
+      return;
+    }
+
+    const orderedTypes = await openPrintOptionsDialog(availableTypes);
+    if (!orderedTypes) return;
+
+    await generatePlansPdfFromOrderedTypes(selectedProject, orderedTypes);
+  }, true);
+});
+

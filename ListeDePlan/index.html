@@ -89,6 +89,20 @@
 
   </div>
 
+  <dialog id="dlg-print-options" class="print-options-dialog">
+    <form method="dialog" class="dialog-body print-options-body">
+      <h3>Préparer l'impression</h3>
+      <p class="print-options-intro">
+        Coche les types à imprimer et fais-les glisser dans l'ordre voulu.
+      </p>
+      <div id="printTypeOrderList" class="print-type-order-list"></div>
+      <menu class="dialog-buttons print-options-actions">
+        <button type="button" id="print-options-cancel" class="cancel-button">Annuler</button>
+        <button type="button" id="print-options-confirm">Imprimer</button>
+      </menu>
+    </form>
+  </dialog>
+
   <!-- === Dialogue : Ajouter un document (automatique: projet & type depuis les dropdowns de la page) === -->
   <dialog id="dlg-ajouter-ref-doc">
     <form method="dialog" id="form-ajouter-ref-doc" class="dialog-body" style="min-width:420px;gap:12px;display:flex;flex-direction:column">
