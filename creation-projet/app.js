@@ -18,8 +18,6 @@ document.addEventListener('DOMContentLoaded', () => {
         '13-Base',
         '14-Travaux supplémentaires'
     ];
-    const OUT_OF_PROJECT_COFFRAGE_GROUP_PREFIX = 'HORS PROJET';
-
     function createDefaultBudgetLines() {
         return DEFAULT_BUDGET_CHAPTERS.map((chapter) => ({
             chapter,
@@ -161,27 +159,22 @@ document.addEventListener('DOMContentLoaded', () => {
         return usedGroups;
     }
 
-    function getUniqueOutOfProjectCoffrageGroup(planningData, projectName, numeroDocument, usedGroups = null) {
+    function getNextAvailablePlanningGroupNumber(planningData, projectName, usedGroups = null) {
         const existingGroups = usedGroups || collectProjectPlanningGroups(planningData, projectName);
-        const numeroText = normalizeText(numeroDocument);
-        const baseGroup = numeroText
-            ? `${OUT_OF_PROJECT_COFFRAGE_GROUP_PREFIX} - ${numeroText}`
-            : OUT_OF_PROJECT_COFFRAGE_GROUP_PREFIX;
-        let candidate = baseGroup;
-        let suffix = 2;
+        let nextGroupNumber = 1;
 
-        while (existingGroups.has(candidate.toLowerCase())) {
-            candidate = `${baseGroup} ${suffix}`;
-            suffix += 1;
+        while (existingGroups.has(String(nextGroupNumber).toLowerCase())) {
+            nextGroupNumber += 1;
         }
 
+        const candidate = String(nextGroupNumber);
         existingGroups.add(candidate.toLowerCase());
         return candidate;
     }
 
-    function getDefaultPlanningGroupForType(typeDoc, planningData = null, projectName = '', numeroDocument = '', usedGroups = null) {
+    function getDefaultPlanningGroupForType(typeDoc, planningData = null, projectName = '', usedGroups = null) {
         return isCoffrageDocumentType(typeDoc)
-            ? getUniqueOutOfProjectCoffrageGroup(planningData, projectName, numeroDocument, usedGroups)
+            ? getNextAvailablePlanningGroupNumber(planningData, projectName, usedGroups)
             : '';
     }
 
@@ -2282,7 +2275,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         doc.type || 'COFFRAGE',
                         planningContext.data,
                         projectData.name,
-                        numeroText,
                         usedPlanningGroups
                     )
                 );

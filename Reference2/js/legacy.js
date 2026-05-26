@@ -459,7 +459,7 @@ function buildPlanningDocumentAddFields(planningTable, {
     planningTable,
     fields,
     'Groupe',
-    getDefaultPlanningGroupForType(typeDoc, planningTable, projectName, numeroDocStr)
+    getDefaultPlanningGroupForType(typeDoc, planningTable, projectName)
   );
   setPlanningFieldIfPresent(planningTable, fields, 'Zone', normalizeZoneValue(zoneStr));
 
@@ -727,8 +727,6 @@ function normalizeTypeDocument(value) {
   return String(value ?? '').trim().toLocaleUpperCase('fr');
 }
 
-const OUT_OF_PROJECT_COFFRAGE_GROUP_PREFIX = 'HORS PROJET';
-
 function isCoffrageDocumentType(typeDoc) {
   const normalizedType = normalizeTypeDocument(typeDoc);
   return normalizedType.includes('COFFRAGE') || normalizedType.includes('COF');
@@ -751,26 +749,38 @@ function collectProjectPlanningGroups(planningTable, projectName) {
   return usedGroups;
 }
 
-function getUniqueOutOfProjectCoffrageGroup(planningTable, projectName, numeroDocStr) {
-  const usedGroups = collectProjectPlanningGroups(planningTable, projectName);
-  const numeroText = _norm(numeroDocStr);
-  const baseGroup = numeroText
-    ? `${OUT_OF_PROJECT_COFFRAGE_GROUP_PREFIX} - ${numeroText}`
-    : OUT_OF_PROJECT_COFFRAGE_GROUP_PREFIX;
-  let candidate = baseGroup;
-  let suffix = 2;
-
-  while (usedGroups.has(candidate.toLocaleLowerCase('fr'))) {
-    candidate = `${baseGroup} ${suffix}`;
-    suffix += 1;
+function getPlanningPendingGroupSet(planningTable, projectName) {
+  if (!planningTable.__pendingOutOfProjectGroups) {
+    Object.defineProperty(planningTable, '__pendingOutOfProjectGroups', {
+      value: new Map(),
+      enumerable: false
+    });
   }
 
+  const projectKey = _norm(projectName).toLocaleLowerCase('fr');
+  if (!planningTable.__pendingOutOfProjectGroups.has(projectKey)) {
+    planningTable.__pendingOutOfProjectGroups.set(projectKey, collectProjectPlanningGroups(planningTable, projectName));
+  }
+
+  return planningTable.__pendingOutOfProjectGroups.get(projectKey);
+}
+
+function getNextAvailablePlanningGroupNumber(planningTable, projectName) {
+  const usedGroups = getPlanningPendingGroupSet(planningTable, projectName);
+  let nextGroupNumber = 1;
+
+  while (usedGroups.has(String(nextGroupNumber).toLocaleLowerCase('fr'))) {
+    nextGroupNumber += 1;
+  }
+
+  const candidate = String(nextGroupNumber);
+  usedGroups.add(candidate.toLocaleLowerCase('fr'));
   return candidate;
 }
 
-function getDefaultPlanningGroupForType(typeDoc, planningTable = null, projectName = '', numeroDocStr = '') {
+function getDefaultPlanningGroupForType(typeDoc, planningTable = null, projectName = '') {
   return isCoffrageDocumentType(typeDoc)
-    ? getUniqueOutOfProjectCoffrageGroup(planningTable, projectName, numeroDocStr)
+    ? getNextAvailablePlanningGroupNumber(planningTable, projectName)
     : '';
 }
 
