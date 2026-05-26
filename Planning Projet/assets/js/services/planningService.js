@@ -3,7 +3,9 @@ import { toText } from "./gristService.js";
 
 function toNumber(value) {
   if (value == null || value === "") return null;
-  const n = Number(value);
+  const normalizedValue =
+    typeof value === "string" ? value.trim().replace(/\s/g, "").replace(",", ".") : value;
+  const n = Number(normalizedValue);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -610,6 +612,12 @@ function buildRetardPhaseStyle(className, realiseValue, retardDays) {
     `border-color: ${palette.border} !important`,
     `color: ${palette.text} !important`,
   ].join("; ");
+}
+
+function buildPhaseClassName(className, realiseValue) {
+  return clampPercentage(realiseValue) >= 100
+    ? `${className} phase-realise-complete`
+    : className;
 }
 
 function createSplitPhaseItems({
@@ -1223,6 +1231,7 @@ export function buildTimelineDataFromPlanningRows(
       // COFFRAGE : Date_limite -> Diff_coffrage
       const pCoffrage = createRangeBetweenDates(row.dateLimite, row.diffCoffrage);
       if (pCoffrage) {
+        const coffrageClassName = buildPhaseClassName("phase-coffrage", realiseValue);
         items.push(
           ...createSplitPhaseItems({
             itemIdBase: `${groupId}-p-coffrage`,
@@ -1230,10 +1239,10 @@ export function buildTimelineDataFromPlanningRows(
             start: pCoffrage.start,
             end: pCoffrage.end,
             label: "Coffrage",
-            className: "phase-coffrage",
-            style: buildRetardPhaseStyle("phase-coffrage", realiseValue, row.retards),
+            className: coffrageClassName,
+            style: buildRetardPhaseStyle(coffrageClassName, realiseValue, row.retards),
             pastStyle: buildRetardPhaseStyle(
-              "phase-coffrage phase-past",
+              `${coffrageClassName} phase-past`,
               realiseValue,
               row.retards
             ),
@@ -1250,6 +1259,7 @@ export function buildTimelineDataFromPlanningRows(
       // ARMATURES : Diff_coffrage -> Diff_armature
       const pArmature = createRangeBetweenDates(row.diffCoffrage, row.diffArmature);
       if (pArmature) {
+        const armatureClassName = buildPhaseClassName("phase-armature", realiseValue);
         items.push(
           ...createSplitPhaseItems({
             itemIdBase: `${groupId}-p-armature`,
@@ -1257,10 +1267,10 @@ export function buildTimelineDataFromPlanningRows(
             start: pArmature.start,
             end: pArmature.end,
             label: "Armature",
-            className: "phase-armature",
-            style: buildRetardPhaseStyle("phase-armature", realiseValue, row.retards),
+            className: armatureClassName,
+            style: buildRetardPhaseStyle(armatureClassName, realiseValue, row.retards),
             pastStyle: buildRetardPhaseStyle(
-              "phase-armature phase-past",
+              `${armatureClassName} phase-past`,
               realiseValue,
               row.retards
             ),

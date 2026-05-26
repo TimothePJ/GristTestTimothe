@@ -1023,6 +1023,12 @@ function isPlanningTypeDocMatch(value, keyword) {
   return normalizedValue.includes(String(keyword ?? "").toUpperCase());
 }
 
+function isPlanningRealiseComplete(value) {
+  const normalizedValue = String(value ?? "").trim().replace(",", ".");
+  const numericValue = Number(normalizedValue);
+  return Number.isFinite(numericValue) && numericValue >= 100;
+}
+
 function collectLinkedArmatureRowIdsForCoffrage(sourceRowEl) {
   if (!(sourceRowEl instanceof HTMLElement)) return [];
 
@@ -2352,8 +2358,19 @@ function buildGroupLabelElement(group) {
   row.dataset.planningIndice = String(group?.indiceLabel ?? "");
   row.dataset.planningRealise = String(group?.realiseLabel ?? "");
   row.dataset.planningRetards = String(group?.retardsLabel ?? "");
-  if (String(group?.typeDocLabel ?? "").toUpperCase().includes("COFFRAGE")) {
+  const typeDocLabel = String(group?.typeDocLabel ?? "");
+  const isCoffrageRow = isPlanningTypeDocMatch(typeDocLabel, "COFFRAGE");
+  const isArmatureRow = isPlanningTypeDocMatch(typeDocLabel, "ARMATURE");
+  const isRealiseComplete = isPlanningRealiseComplete(group?.realiseLabel);
+
+  if (isCoffrageRow) {
     row.classList.add("row-type-coffrage");
+  }
+  if (isArmatureRow) {
+    row.classList.add("row-type-armature");
+  }
+  if (isRealiseComplete) {
+    row.classList.add("row-realise-complete");
   }
 
   const id2 = document.createElement("div");

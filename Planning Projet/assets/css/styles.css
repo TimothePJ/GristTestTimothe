@@ -1017,6 +1017,16 @@ body.planning-row-dragging {
   font-weight: 600;
 }
 
+#planningTimeline .group-row-grid.row-realise-complete.row-type-armature .cell-realise {
+  color: #22c55e !important;
+  font-weight: 700;
+}
+
+#planningTimeline .group-row-grid.row-realise-complete.row-type-coffrage .cell-realise {
+  color: #15803d !important;
+  font-weight: 700;
+}
+
 #planningTimeline .group-row-grid .cell-retards {
   text-align: center !important;
   font-variant-numeric: tabular-nums;
@@ -1078,6 +1088,10 @@ body.planning-row-dragging {
   color: #7a4b12 !important;
 }
 
+#planningTimeline .vis-item.phase-coffrage.phase-realise-complete {
+  border-color: #86efac !important;
+}
+
 #planningTimeline .vis-item.phase-armature {
   background-color: #f3f4f6 !important;
   border-color: #d1d5db !important;
@@ -1088,6 +1102,10 @@ body.planning-row-dragging {
   background-color: #e5e7eb !important;
   border-color: #cbd5e1 !important;
   color: #334155 !important;
+}
+
+#planningTimeline .vis-item.phase-armature.phase-realise-complete {
+  border-color: #bbf7d0 !important;
 }
 
 #planningTimeline .vis-item.phase-travaux {
