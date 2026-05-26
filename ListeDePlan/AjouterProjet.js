@@ -303,12 +303,21 @@
     const selProj = document.getElementById("projectDropdown");
     const selType = document.getElementById("typeDocumentDropdown");
     const projectName = selProj ? selProj.value : "";
-    const typeLabel = selType && selType.options && selType.selectedIndex >= 0
-      ? selType.options[selType.selectedIndex].text
-      : "";
+    const typeSelection = typeof window.getSelectedTypeDocumentSelection === "function"
+      ? window.getSelectedTypeDocumentSelection()
+      : null;
+    const typeLabel = typeSelection
+      ? typeSelection.singleValue
+      : (selType && selType.options && selType.selectedIndex >= 0
+        ? selType.options[selType.selectedIndex].text
+        : "");
 
     if (!projectName) {
       alert("Sélectionnez d'abord un projet.");
+      return;
+    }
+    if (typeSelection?.isMultiple) {
+      alert("Selectionnez un seul type de document avant d'ajouter un document.");
       return;
     }
     if (!typeLabel) {

@@ -216,7 +216,21 @@
 
     // Type (prendre le TEXTE AFFICHÉ pour l'écriture en Liste de plan)
     let typeLabel = null, typeValue = null;
-    if (state.typeSelect) {
+    const typeSelection = typeof window.getSelectedTypeDocumentSelection === "function"
+      ? window.getSelectedTypeDocumentSelection()
+      : null;
+    if (typeSelection) {
+      if (typeSelection.singleValue) {
+        typeLabel = typeSelection.singleValue;
+        typeValue = typeSelection.singleValue;
+      } else if (typeSelection.isAll) {
+        typeLabel = typeSelection.allLabel;
+        typeValue = typeSelection.allValue;
+      } else if (typeSelection.values.length > 1) {
+        typeLabel = typeSelection.values.join(", ");
+        typeValue = "__MULTIPLE_TYPES__";
+      }
+    } else if (state.typeSelect) {
       const idx2 = state.typeSelect.selectedIndex;
       const opt2 = state.typeSelect.options && state.typeSelect.options[idx2];
       typeLabel = (opt2 && (opt2.text || opt2.label) ? String(opt2.text || opt2.label).trim() : (state.typeSelect.value || "").trim());
@@ -238,6 +252,10 @@
 
     if (state.currentProjectId == null) {
       console.warn("[AjouterReferenceDocument] Projet non détecté depuis la 1ère liste. Le dialog s'ouvre quand même.");
+      return;
+    }
+    if (state.currentType === "__MULTIPLE_TYPES__") {
+      alert("Veuillez selectionner un seul type de document precis avant d'ajouter un document.");
       return;
     }
     if (
@@ -285,6 +303,11 @@
 
     if (projetId == null || !typeDocLabel) {
       console.warn("[AjouterReferenceDocument] Projet ou Type introuvable. Le formulaire reste éditable.");;
+      return;
+    }
+
+    if (state.currentType === "__MULTIPLE_TYPES__") {
+      alert("Veuillez selectionner un seul type de document precis avant d'ajouter un document.");
       return;
     }
 

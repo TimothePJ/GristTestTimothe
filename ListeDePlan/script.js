@@ -182,6 +182,252 @@ window.LISTE_DE_PLAN_ALL_ZONES_LABEL = "Toutes les zones";
 window.LISTE_DE_PLAN_NO_ZONE_VALUE = "__NO_ZONE__";
 window.LISTE_DE_PLAN_NO_ZONE_LABEL = "Sans zone";
 
+function getAllTypesValue() {
+  return window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__";
+}
+
+function getAllTypesLabel() {
+  return window.LISTE_DE_PLAN_ALL_TYPES_LABEL || "Tous les types";
+}
+
+function normalizeTypeDocumentValue(value) {
+  return String(value ?? "").trim();
+}
+
+function getTypeDocumentDropdown() {
+  return document.getElementById("typeDocumentDropdown");
+}
+
+function getTypeDocumentCheckboxList() {
+  return document.getElementById("typeDocumentCheckboxList");
+}
+
+function getTypeDocumentCheckboxDropdown() {
+  return document.getElementById("typeDocumentCheckboxDropdown");
+}
+
+function getTypeDocumentMenuButton() {
+  return document.getElementById("typeDocumentMenuButton");
+}
+
+function getTypeDocumentCheckboxes() {
+  const list = getTypeDocumentCheckboxList();
+  return list ? Array.from(list.querySelectorAll('input[type="checkbox"]')) : [];
+}
+
+function getTypeDocumentValueCheckboxes() {
+  const allTypesValue = getAllTypesValue();
+  return getTypeDocumentCheckboxes().filter((checkbox) => checkbox.value !== allTypesValue);
+}
+
+function getAvailableTypeDocumentValues() {
+  return getTypeDocumentValueCheckboxes()
+    .map((checkbox) => normalizeTypeDocumentValue(checkbox.value))
+    .filter(Boolean);
+}
+
+function getSelectedTypeDocumentValues() {
+  const allTypesValue = getAllTypesValue();
+  const checkboxes = getTypeDocumentCheckboxes();
+
+  if (checkboxes.length > 0) {
+    const allChecked = checkboxes.some((checkbox) => checkbox.value === allTypesValue && checkbox.checked);
+    if (allChecked) return [allTypesValue];
+
+    return [...new Set(
+      checkboxes
+        .filter((checkbox) => checkbox.checked && checkbox.value !== allTypesValue)
+        .map((checkbox) => normalizeTypeDocumentValue(checkbox.value))
+        .filter(Boolean)
+    )];
+  }
+
+  const dropdown = getTypeDocumentDropdown();
+  const value = normalizeTypeDocumentValue(dropdown?.value);
+  return value ? [value] : [];
+}
+
+function getSelectedTypeDocumentSelection() {
+  const allTypesValue = getAllTypesValue();
+  const rawValues = getSelectedTypeDocumentValues();
+  const isAll = rawValues.includes(allTypesValue);
+  const values = isAll
+    ? getAvailableTypeDocumentValues()
+    : rawValues.filter((value) => value && value !== allTypesValue);
+
+  return {
+    allValue: allTypesValue,
+    allLabel: getAllTypesLabel(),
+    rawValues,
+    values,
+    isAll,
+    isMultiple: values.length > 1,
+    singleValue: values.length === 1 ? values[0] : "",
+    hasSelection: isAll || values.length > 0
+  };
+}
+
+function syncTypeDocumentDropdownForCompatibility() {
+  const dropdown = getTypeDocumentDropdown();
+  if (!dropdown) {
+    updateTypeDocumentMenuLabel();
+    return;
+  }
+
+  const selection = getSelectedTypeDocumentSelection();
+  dropdown.value = selection.singleValue || getAllTypesValue();
+  updateTypeDocumentMenuLabel(selection);
+}
+
+function getTypeDocumentMenuText(selection = getSelectedTypeDocumentSelection()) {
+  if (selection.isAll) return selection.allLabel;
+  if (selection.values.length === 0) return "Aucun type";
+  if (selection.values.length === 1) return selection.values[0];
+  return `${selection.values.length} types selectionnes`;
+}
+
+function updateTypeDocumentMenuLabel(selection = getSelectedTypeDocumentSelection()) {
+  const label = document.getElementById("typeDocumentMenuLabel");
+  if (!label) return;
+
+  label.textContent = getTypeDocumentMenuText(selection);
+  label.title = selection.isAll
+    ? selection.allLabel
+    : selection.values.join(", ");
+}
+
+function setTypeDocumentMenuOpen(open) {
+  const menu = getTypeDocumentCheckboxDropdown();
+  const list = getTypeDocumentCheckboxList();
+  const button = getTypeDocumentMenuButton();
+  if (!menu || !list || !button) return;
+
+  menu.classList.toggle("is-open", Boolean(open));
+  list.hidden = !open;
+  button.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function toggleTypeDocumentMenu() {
+  const list = getTypeDocumentCheckboxList();
+  setTypeDocumentMenuOpen(Boolean(list?.hidden));
+}
+
+function appendTypeDocumentCheckbox(container, value, label, checked) {
+  const item = document.createElement("label");
+  item.className = "checkbox-list-item";
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.value = value;
+  checkbox.checked = Boolean(checked);
+
+  const text = document.createElement("span");
+  text.textContent = label;
+
+  item.appendChild(checkbox);
+  item.appendChild(text);
+  container.appendChild(item);
+}
+
+function setSelectedTypeDocumentValues(values) {
+  const allTypesValue = getAllTypesValue();
+  const wanted = new Set((values || []).map(normalizeTypeDocumentValue).filter(Boolean));
+  const checkboxes = getTypeDocumentCheckboxes();
+  const valueCheckboxes = checkboxes.filter((checkbox) => checkbox.value !== allTypesValue);
+  const allCheckbox = checkboxes.find((checkbox) => checkbox.value === allTypesValue);
+  const shouldSelectAll = wanted.has(allTypesValue);
+
+  if (shouldSelectAll) {
+    valueCheckboxes.forEach((checkbox) => {
+      checkbox.checked = true;
+    });
+    if (allCheckbox) allCheckbox.checked = true;
+  } else {
+    valueCheckboxes.forEach((checkbox) => {
+      checkbox.checked = wanted.has(normalizeTypeDocumentValue(checkbox.value));
+    });
+
+    if (allCheckbox) {
+      const checkedCount = valueCheckboxes.filter((checkbox) => checkbox.checked).length;
+      allCheckbox.checked = valueCheckboxes.length > 0 && checkedCount === valueCheckboxes.length;
+    }
+  }
+
+  syncTypeDocumentDropdownForCompatibility();
+}
+
+function selectAllTypeDocuments() {
+  setSelectedTypeDocumentValues([getAllTypesValue()]);
+}
+
+function refreshCurrentPlanDisplay({ refreshZones = true } = {}) {
+  const selectedProject = document.getElementById("projectDropdown")?.value || "";
+  const selectedTypeDocuments = getSelectedTypeDocumentValues();
+  const zoneDropdown = document.getElementById("zoneDropdown");
+  const selectedZoneDocument = zoneDropdown?.value ||
+    (window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__");
+  const output = document.getElementById("plans-output");
+
+  if (!selectedProject) {
+    resetZoneDropdown(true);
+    if (output) output.innerHTML = "";
+    return;
+  }
+
+  if (refreshZones) {
+    populateZoneDropdown(
+      collectZoneValues(selectedProject, selectedTypeDocuments, window.records),
+      selectedZoneDocument
+    );
+  }
+
+  afficherPlansFiltres(
+    selectedProject,
+    selectedTypeDocuments,
+    window.records,
+    document.getElementById("zoneDropdown")?.value ||
+      (window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__")
+  );
+}
+
+function handleTypeDocumentCheckboxChange(event) {
+  const checkbox = event.target;
+  if (!checkbox || checkbox.type !== "checkbox") return;
+
+  const allTypesValue = getAllTypesValue();
+  const checkboxes = getTypeDocumentCheckboxes();
+  const valueCheckboxes = checkboxes.filter((item) => item.value !== allTypesValue);
+  const allCheckbox = checkboxes.find((item) => item.value === allTypesValue);
+
+  if (checkbox.value === allTypesValue) {
+    valueCheckboxes.forEach((item) => {
+      item.checked = checkbox.checked;
+    });
+  } else if (allCheckbox) {
+    const checkedCount = valueCheckboxes.filter((item) => item.checked).length;
+    allCheckbox.checked = valueCheckboxes.length > 0 && checkedCount === valueCheckboxes.length;
+  }
+
+  syncTypeDocumentDropdownForCompatibility();
+  refreshCurrentPlanDisplay();
+}
+
+window.getSelectedTypeDocumentValues = getSelectedTypeDocumentValues;
+window.getSelectedTypeDocumentSelection = getSelectedTypeDocumentSelection;
+window.__LP_GET_CURRENT_TYPE = function () {
+  const selection = getSelectedTypeDocumentSelection();
+  if (selection.singleValue) {
+    return { label: selection.singleValue, value: selection.singleValue };
+  }
+  if (selection.isAll) {
+    return { label: selection.allLabel, value: selection.allValue };
+  }
+  if (selection.values.length > 1) {
+    return { label: selection.values.join(", "), value: "__MULTIPLE_TYPES__" };
+  }
+  return { label: "", value: "" };
+};
+
 grist.ready(async () => {
   await loadExternalComponents();
 });
@@ -250,17 +496,16 @@ grist.onRecords(async (rec) => {
     )].sort();
 
     populateTypeDocumentDropdown(typesDocument);
-    const selectedTypeValue = document.getElementById("typeDocumentDropdown").value ||
-      (window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__");
+    const selectedTypeValue = getSelectedTypeDocumentValues();
     populateZoneDropdown(collectZoneValues(selectedProject, selectedTypeValue, window.records));
   } else {
     resetZoneDropdown(true);
   }
 
-  const selectedTypeDocument = document.getElementById("typeDocumentDropdown").value;
+  const selectedTypeDocument = getSelectedTypeDocumentValues();
   const selectedZoneDocument = document.getElementById("zoneDropdown")?.value ||
     (window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__");
-  if (selectedProject && selectedTypeDocument) {
+  if (selectedProject && selectedTypeDocument.length > 0) {
     afficherPlansFiltres(selectedProject, selectedTypeDocument, window.records, selectedZoneDocument);
   }
 });
@@ -285,25 +530,52 @@ function populateDropdown(id, values) {
 
 function populateTypeDocumentDropdown(values) {
   const dropdown = document.getElementById("typeDocumentDropdown");
-  if (!dropdown) return;
+  const checkboxList = getTypeDocumentCheckboxList();
+  if (!dropdown && !checkboxList) return;
 
-  const currentValue = dropdown.value;
-  const allTypesValue = window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__";
-  const allTypesLabel = window.LISTE_DE_PLAN_ALL_TYPES_LABEL || "Tous les types";
+  const allTypesValue = getAllTypesValue();
+  const allTypesLabel = getAllTypesLabel();
+  const previousSelection = getSelectedTypeDocumentValues();
+  const uniqueValues = [...new Set(
+    (values || [])
+      .map(normalizeTypeDocumentValue)
+      .filter(Boolean)
+  )].sort((left, right) => left.localeCompare(right, "fr", {
+    sensitivity: "base",
+    numeric: true
+  }));
+  const availableValues = new Set(uniqueValues);
+  const previousExplicitValues = previousSelection
+    .filter((value) => value !== allTypesValue && availableValues.has(value));
+  const shouldSelectAll =
+    previousSelection.length === 0 ||
+    previousSelection.includes(allTypesValue) ||
+    previousExplicitValues.length === 0;
 
-  dropdown.innerHTML = `<option value="${allTypesValue}">${allTypesLabel}</option>`;
-  values.forEach((val) => {
-    const opt = document.createElement("option");
-    opt.value = val;
-    opt.textContent = val;
-    dropdown.appendChild(opt);
-  });
-
-  if (currentValue === allTypesValue || values.includes(currentValue)) {
-    dropdown.value = currentValue;
-  } else {
-    dropdown.value = allTypesValue;
+  if (dropdown) {
+    dropdown.innerHTML = `<option value="${allTypesValue}">${allTypesLabel}</option>`;
+    uniqueValues.forEach((val) => {
+      const opt = document.createElement("option");
+      opt.value = val;
+      opt.textContent = val;
+      dropdown.appendChild(opt);
+    });
   }
+
+  if (checkboxList) {
+    checkboxList.innerHTML = "";
+    appendTypeDocumentCheckbox(checkboxList, allTypesValue, allTypesLabel, shouldSelectAll);
+    uniqueValues.forEach((val) => {
+      appendTypeDocumentCheckbox(
+        checkboxList,
+        val,
+        val,
+        shouldSelectAll || previousExplicitValues.includes(val)
+      );
+    });
+  }
+
+  syncTypeDocumentDropdownForCompatibility();
 }
 
 function normalizeZoneDropdownValue(value) {
@@ -322,10 +594,16 @@ function getZoneDropdownOptionLabel(zoneValue) {
 
 function collectZoneValues(selectedProject, selectedTypeDocument, records = window.records) {
   const normalizedProject = normalizeProjectName(selectedProject);
-  const normalizedType = String(selectedTypeDocument ?? "").trim();
-  const includeAllTypes =
-    !normalizedType ||
-    normalizedType === (window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__");
+  const allTypesValue = getAllTypesValue();
+  const selectedTypes = Array.isArray(selectedTypeDocument)
+    ? selectedTypeDocument.map(normalizeTypeDocumentValue).filter(Boolean)
+    : [normalizeTypeDocumentValue(selectedTypeDocument)].filter(Boolean);
+  const includeAllTypes = selectedTypes.includes(allTypesValue);
+  const selectedTypeSet = new Set(selectedTypes.filter((value) => value !== allTypesValue));
+
+  if (!includeAllTypes && selectedTypeSet.size === 0) {
+    return [];
+  }
 
   const zoneSet = new Set();
   for (const record of records || []) {
@@ -333,7 +611,7 @@ function collectZoneValues(selectedProject, selectedTypeDocument, records = wind
 
     const recordType = String(record?.Type_document ?? "").trim();
     if (!recordType) continue;
-    if (!includeAllTypes && recordType !== normalizedType) continue;
+    if (!includeAllTypes && !selectedTypeSet.has(recordType)) continue;
 
     zoneSet.add(normalizeZoneDropdownValue(record?.Zone));
   }
@@ -421,51 +699,57 @@ document.getElementById("projectDropdown").addEventListener("change", () => {
   const typesDocument = [...typesDocumentSet].sort();
   populateTypeDocumentDropdown(typesDocument);
   console.log("Types affichés dans la deuxième liste :", typesDocument);
-  document.getElementById("typeDocumentDropdown").value = window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__";
+  selectAllTypeDocuments();
   populateZoneDropdown(
     collectZoneValues(
       selectedProject,
-      document.getElementById("typeDocumentDropdown").value,
+      getSelectedTypeDocumentValues(),
       window.records
     ),
     window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__"
   );
   afficherPlansFiltres(
     selectedProject,
-    document.getElementById("typeDocumentDropdown").value,
+    getSelectedTypeDocumentValues(),
     window.records,
     document.getElementById("zoneDropdown").value
   );
 });
 
-document.getElementById("typeDocumentDropdown").addEventListener("change", () => {
+document.getElementById("typeDocumentCheckboxList")?.addEventListener("change", handleTypeDocumentCheckboxChange);
+
+document.getElementById("typeDocumentMenuButton")?.addEventListener("click", () => {
+  toggleTypeDocumentMenu();
+});
+
+document.addEventListener("click", (event) => {
+  const menu = getTypeDocumentCheckboxDropdown();
+  if (!menu || menu.contains(event.target)) return;
+
+  setTypeDocumentMenuOpen(false);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+
+  setTypeDocumentMenuOpen(false);
+});
+
+document.getElementById("typeDocumentDropdown")?.addEventListener("change", () => {
   if (window.__skipChangeEvent) return;
 
-  const selectedProject = document.getElementById("projectDropdown").value;
-  const selectedTypeDocument = document.getElementById("typeDocumentDropdown").value;
-  const selectedZoneDocument = document.getElementById("zoneDropdown")?.value ||
-    (window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__");
-
-  if (selectedProject && selectedTypeDocument) {
-    populateZoneDropdown(
-      collectZoneValues(selectedProject, selectedTypeDocument, window.records),
-      selectedZoneDocument
-    );
-    afficherPlansFiltres(
-      selectedProject,
-      selectedTypeDocument,
-      window.records,
-      document.getElementById("zoneDropdown").value
-    );
-  }
+  const selectedTypeDocument = document.getElementById("typeDocumentDropdown").value ||
+    getAllTypesValue();
+  setSelectedTypeDocumentValues([selectedTypeDocument]);
+  refreshCurrentPlanDisplay();
 });
 
 document.getElementById("zoneDropdown").addEventListener("change", () => {
   const selectedProject = document.getElementById("projectDropdown").value;
-  const selectedTypeDocument = document.getElementById("typeDocumentDropdown").value;
+  const selectedTypeDocument = getSelectedTypeDocumentValues();
   const selectedZoneDocument = document.getElementById("zoneDropdown").value;
 
-  if (selectedProject && selectedTypeDocument) {
+  if (selectedProject && selectedTypeDocument.length > 0) {
     afficherPlansFiltres(selectedProject, selectedTypeDocument, window.records, selectedZoneDocument);
   }
 });

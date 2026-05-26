@@ -24,6 +24,7 @@ body {
     flex-direction: column;
 }
   
+.field-label,
 label {
     font-weight: bold;
     margin-bottom: 10px;
@@ -40,6 +41,100 @@ select {
 
 #zoneDropdown {
     width: 280px;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.checkbox-dropdown {
+  position: relative;
+  width: 280px;
+}
+
+.checkbox-dropdown-button {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px;
+  background-color: #004990;
+  color: #ffffff;
+  border: 1px solid #ed1b2d;
+  border-radius: 4px;
+  box-sizing: border-box;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+#typeDocumentMenuLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkbox-dropdown-arrow {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.checkbox-dropdown.is-open .checkbox-dropdown-arrow {
+  transform: rotate(180deg);
+}
+
+.checkbox-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  width: min(520px, calc(100vw - 40px));
+  max-height: 240px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 6px 12px;
+  padding: 10px;
+  background-color: #ffffff;
+  color: #004990;
+  border: 1px solid #ed1b2d;
+  border-radius: 4px;
+  box-sizing: border-box;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+  z-index: 1200;
+}
+
+.checkbox-list[hidden] {
+  display: none;
+}
+
+.checkbox-list-item {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-weight: normal;
+  line-height: 1.25;
+  cursor: pointer;
+}
+
+.checkbox-list-item input[type="checkbox"] {
+  flex: 0 0 auto;
+}
+
+.checkbox-list-item span {
+  overflow-wrap: anywhere;
 }
   
 .add-form {

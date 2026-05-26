@@ -38,10 +38,35 @@
     </div>
 
     <div class="dropdown-container">
-      <label for="typeDocumentDropdown">Type document :</label>
-      <select id="typeDocumentDropdown">
+      <span id="typeDocumentLabel" class="field-label">Type document :</span>
+      <select id="typeDocumentDropdown" class="visually-hidden" aria-hidden="true" tabindex="-1">
         <option value="__ALL_TYPES__">Tous les types</option>
       </select>
+      <div id="typeDocumentCheckboxDropdown" class="checkbox-dropdown">
+        <button
+          id="typeDocumentMenuButton"
+          class="checkbox-dropdown-button"
+          type="button"
+          aria-haspopup="true"
+          aria-expanded="false"
+          aria-controls="typeDocumentCheckboxList"
+        >
+          <span id="typeDocumentMenuLabel">Tous les types</span>
+          <span class="checkbox-dropdown-arrow" aria-hidden="true">&#9662;</span>
+        </button>
+        <div
+          id="typeDocumentCheckboxList"
+          class="checkbox-list type-document-checkbox-list"
+          role="group"
+          aria-labelledby="typeDocumentLabel"
+          hidden
+        >
+          <label class="checkbox-list-item">
+            <input type="checkbox" value="__ALL_TYPES__" checked>
+            <span>Tous les types</span>
+          </label>
+        </div>
+      </div>
     </div>
 
     <div class="dropdown-container">

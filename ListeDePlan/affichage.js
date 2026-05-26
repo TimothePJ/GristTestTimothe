@@ -76,8 +76,24 @@ function formatZoneSectionTitle(zoneValue) {
   return normalizeZoneText(zoneValue) || "Sans zone";
 }
 
+function normalizeTypeDocumentSelection(typeDocument) {
+  const allTypesValue = normalizeText(window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__");
+  const rawValues = Array.isArray(typeDocument)
+    ? typeDocument
+    : [typeDocument];
+  const values = rawValues
+    .map((value) => normalizeText(value))
+    .filter(Boolean);
+  const isAll = values.includes(allTypesValue);
+
+  return {
+    isAll,
+    values: new Set(values.filter((value) => value !== allTypesValue))
+  };
+}
+
 function isAllTypesSelection(typeDocument) {
-  return normalizeText(typeDocument) === normalizeText(window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__");
+  return normalizeTypeDocumentSelection(typeDocument).isAll;
 }
 
 function isAllZonesSelection(zoneValue) {
@@ -891,9 +907,20 @@ function renderPlanTableSection(container, filtres, projet) {
   }
 
   // Document number/type consistency warnings (for the current project)
-  const projectDocMap = container.id === "plans-output" ? window.projectDocNumberToTypeMap.get(projet) : null;
-  if (projectDocMap) {
-    for (const [doc, types] of projectDocMap.entries()) {
+  const visibleDocToTypes = new Map();
+  for (const r of filtres) {
+    const doc = normalizeText(r.NumeroDocument);
+    const type = normalizeText(r.Type_document);
+    if (!doc || !type) continue;
+
+    if (!visibleDocToTypes.has(doc)) {
+      visibleDocToTypes.set(doc, new Set());
+    }
+    visibleDocToTypes.get(doc).add(type);
+  }
+
+  if (false && visibleDocToTypes) {
+    for (const [doc, types] of visibleDocToTypes.entries()) {
       if (types.size > 1) {
         const p = document.createElement('p');
         p.className = 'warning-message';
@@ -1037,11 +1064,53 @@ function renderRowsForSelectedType(container, rows, projet) {
   renderPlanTableSection(container, rows, projet);
 }
 
+function renderVisibleTypeConsistencyWarnings(container, rows, projet) {
+  if (!container || !Array.isArray(rows) || rows.length === 0) return;
+
+  const projectDocMap = window.projectDocNumberToTypeMap?.get?.(projet) || null;
+  if (!projectDocMap) return;
+
+  const visibleDocs = new Set();
+  for (const row of rows) {
+    const doc = normalizeText(row.NumeroDocument);
+    if (doc) visibleDocs.add(doc);
+  }
+
+  const warningDiv = document.createElement("div");
+  warningDiv.className = "warnings";
+
+  const getProjectTypesForDoc = (doc) => {
+    if (projectDocMap.has(doc)) return projectDocMap.get(doc);
+
+    for (const [candidateDoc, types] of projectDocMap.entries()) {
+      if (normalizeText(candidateDoc) === doc) return types;
+    }
+
+    return null;
+  };
+
+  for (const doc of visibleDocs) {
+    const types = getProjectTypesForDoc(doc);
+    if (!types) continue;
+    if (types.size <= 1) continue;
+
+    const p = document.createElement("p");
+    p.className = "warning-message";
+    p.innerHTML = `<strong>Attention :</strong> Le N° Document <strong>${doc}</strong> est utilise avec plusieurs types de documents dans ce projet : ${[...types].join(", ")}.`;
+    warningDiv.appendChild(p);
+  }
+
+  if (warningDiv.childElementCount > 0) {
+    container.appendChild(warningDiv);
+  }
+}
+
 function afficherPlansFiltres(projet, typeDocument, records, zoneSelection = window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__") {
   const output = document.getElementById("plans-output");
   output.innerHTML = "";
 
   const normalizedProject = normalizeText(projet);
+  const typeSelection = normalizeTypeDocumentSelection(typeDocument);
   const projectRows = records.filter((record) =>
     getRecordProjectName(record) === normalizedProject &&
     getRecordTypeDocument(record) &&
@@ -1053,19 +1122,33 @@ function afficherPlansFiltres(projet, typeDocument, records, zoneSelection = win
     return;
   }
 
-  if (!isAllTypesSelection(typeDocument)) {
-    const filteredRows = projectRows.filter((record) => getRecordTypeDocument(record) === normalizeText(typeDocument));
+  let rowsToRender = projectRows;
+
+  if (!typeSelection.isAll) {
+    if (typeSelection.values.size === 0) {
+      output.innerHTML = "<p>Aucun plan trouve pour cette selection.</p>";
+      return;
+    }
+
+    const filteredRows = projectRows.filter((record) => typeSelection.values.has(getRecordTypeDocument(record)));
     if (filteredRows.length === 0) {
       output.innerHTML = "<p>Aucun plan trouve pour cette selection.</p>";
       return;
     }
 
-    renderRowsForSelectedType(output, filteredRows, normalizedProject);
-    return;
+    if (typeSelection.values.size === 1) {
+      renderVisibleTypeConsistencyWarnings(output, filteredRows, normalizedProject);
+      renderRowsForSelectedType(output, filteredRows, normalizedProject);
+      return;
+    }
+
+    rowsToRender = filteredRows;
   }
 
+  renderVisibleTypeConsistencyWarnings(output, rowsToRender, normalizedProject);
+
   const rowsByType = new Map();
-  for (const record of projectRows) {
+  for (const record of rowsToRender) {
     const typeKey = getRecordTypeDocument(record);
     if (!rowsByType.has(typeKey)) {
       rowsByType.set(typeKey, []);
