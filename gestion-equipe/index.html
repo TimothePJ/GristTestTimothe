@@ -9,6 +9,28 @@
 </head>
 
 <body>
+  <section class="dop-panel" aria-labelledby="dopPanelTitle">
+    <h2 id="dopPanelTitle">Attribution DOP projet</h2>
+    <div class="dop-controls">
+      <div class="dropdown-container">
+        <label for="dopProjectSelect">Projet</label>
+        <select id="dopProjectSelect" disabled>
+          <option value="">Chargement des projets...</option>
+        </select>
+      </div>
+      <div class="dropdown-container">
+        <label for="dopValueSelect">DOP</label>
+        <select id="dopValueSelect">
+          <option value="">Commun</option>
+          <option value="1">DOP 1</option>
+          <option value="2">DOP 2</option>
+        </select>
+      </div>
+      <button type="button" id="applyDopButton" disabled>Appliquer</button>
+    </div>
+    <div id="dopStatus" class="dop-status" role="status" aria-live="polite"></div>
+  </section>
+
   <div class="toolbar" aria-label="Actions de gestion des membres">
     <button type="button" id="addMemberButton">Ajouter un membre</button>
     <button type="button" id="editMemberButton" disabled>Modifier</button>
@@ -26,6 +48,7 @@
           <th>Role</th>
           <th>IdTrefle</th>
           <th>Externe</th>
+          <th>DOP</th>
         </tr>
       </thead>
       <tbody id="tableBody"></tbody>
@@ -61,6 +84,12 @@
       </select>
       <label for="idTrefle">IdTrefle:</label>
       <input type="text" id="idTrefle" name="idTrefle">
+      <label for="dop">DOP:</label>
+      <select id="dop" name="dop">
+        <option value="">Commun</option>
+        <option value="1">DOP 1</option>
+        <option value="2">DOP 2</option>
+      </select>
       <label class="checkbox-label" for="externe">
         <input type="checkbox" id="externe" name="externe">
         Externe
@@ -95,6 +124,12 @@
       </select>
       <label for="editIdTrefle">IdTrefle:</label>
       <input type="text" id="editIdTrefle" name="editIdTrefle">
+      <label for="editDop">DOP:</label>
+      <select id="editDop" name="editDop">
+        <option value="">Commun</option>
+        <option value="1">DOP 1</option>
+        <option value="2">DOP 2</option>
+      </select>
       <label class="checkbox-label" for="editExterne">
         <input type="checkbox" id="editExterne" name="editExterne">
         Externe

@@ -5,6 +5,50 @@ body {
   margin: 10px;
 }
 
+.dop-panel {
+  border: 1px solid #d6e0ea;
+  border-left: 4px solid #004990;
+  border-radius: 6px;
+  padding: 14px;
+  margin-bottom: 12px;
+  background-color: #f8fbff;
+}
+
+.dop-panel h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+  color: #004990;
+}
+
+.dop-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+
+.dop-controls .dropdown-container {
+  min-width: 220px;
+}
+
+.dop-status {
+  margin-top: 10px;
+  color: #31516f;
+  white-space: pre-line;
+}
+
+.dop-status.success {
+  color: #166534;
+}
+
+.dop-status.warning {
+  color: #92400e;
+}
+
+.dop-status.error {
+  color: #991b1b;
+}
+
 .toolbar {
   position: sticky;
   top: 0;
@@ -81,7 +125,7 @@ select {
 
 .table-container {
   margin-top: 20px;
-  max-height: calc(100vh - 150px);
+  max-height: calc(100vh - 260px);
   overflow-y: auto;
 }
 
