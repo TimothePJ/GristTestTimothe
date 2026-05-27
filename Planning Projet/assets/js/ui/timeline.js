@@ -1055,6 +1055,16 @@ function ensureRetardContextMenu() {
     closeRetardContextMenu();
   });
 
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (!retardContextMenuEl || retardContextMenuEl.style.display === "none") return;
+      if (event.target instanceof Node && retardContextMenuEl.contains(event.target)) return;
+      closeRetardContextMenu();
+    },
+    true
+  );
+
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       closeRetardContextMenu();

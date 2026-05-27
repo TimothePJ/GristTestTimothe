@@ -1110,7 +1110,8 @@ body.planning-row-dragging {
   border-radius: 6px;
   padding: 10px;
   font: inherit;
-  color: #1f2937;
+  background: #1f2937;
+  color: #ffffff;
 }
 
 .planning-retard-dialog__actions {
