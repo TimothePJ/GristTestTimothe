@@ -8,6 +8,7 @@ import {
   syncPlanningRetardValues,
   syncCoffrageDiffCoffrageFromGroups,
   updatePlanningDurationAndLeftDate,
+  updatePlanningRetardJustification,
   updatePlanningFromMsProjectDrop,
   updatePlanningGroupZoneFromPlanningDrop,
   updatePlanningZoneFromZoneHeaderDrop,
@@ -37,6 +38,7 @@ import {
   waitForPlanningViewportSettled,
   setPlanningViewportBounds,
   setPlanningDurationEditHandler,
+  setPlanningRetardJustificationHandler,
   setPlanningMsProjectDropHandler,
   setPlanningRowDropHandler,
   subscribePlanningSelectionChanges,
@@ -458,6 +460,22 @@ async function handleDurationCellEdit({
   }
 }
 
+async function handleRetardJustificationEdit({ rowId, remarque }) {
+  const recordId = Number(rowId);
+  if (!Number.isInteger(recordId) || recordId <= 0) {
+    throw new Error("Identifiant de ligne Planning_Projet invalide.");
+  }
+
+  try {
+    setPlanningStatus("Sauvegarde de la justification du retard...");
+    await updatePlanningRetardJustification(recordId, remarque);
+    await refreshPlanning();
+  } catch (error) {
+    setPlanningStatus(`Erreur justification retard : ${error.message}`);
+    throw error;
+  }
+}
+
 async function handleMsProjectRowDrop({
   planningRowId,
   uniqueNumber,
@@ -762,6 +780,7 @@ async function bootstrap() {
     initGrist();
     bindAddZoneModal();
     setPlanningDurationEditHandler(handleDurationCellEdit);
+    setPlanningRetardJustificationHandler(handleRetardJustificationEdit);
     setPlanningMsProjectDropHandler(handleMsProjectRowDrop);
     setPlanningRowDropHandler(handlePlanningRowDrop);
 

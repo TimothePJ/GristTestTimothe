@@ -30,6 +30,7 @@ export const APP_CONFIG = {
         duree3: "Duree_3",
         demarragesTravaux: "Demarrages_travaux",
         retards: "Retards",
+        remarque: "Remarque",
         indice: "Indice",
         realise: "Realise",
         dateRealise: "Date_Realise",

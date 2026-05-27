@@ -10,6 +10,10 @@ let itemElementsObserver = null;
 let durationCellEditHandler = null;
 let durationCellEditBound = false;
 let activeDurationEditor = null;
+let retardJustificationHandler = null;
+let activeRetardJustificationContext = null;
+let retardContextMenuEl = null;
+let retardDialogEl = null;
 let stickyAxisBound = false;
 let stickyAxisRafPending = false;
 let axisLeftFillerEl = null;
@@ -988,6 +992,196 @@ function bindDurationCellEditing(containerEl) {
     event.stopPropagation();
     startDurationCellEditing(cellEl);
   }, true);
+}
+
+function normalizeRetardJustification(value) {
+  return String(value ?? "").trim();
+}
+
+function getRetardJustificationLabel(context = activeRetardJustificationContext) {
+  const id2 = normalizeRetardJustification(context?.id2);
+  const task = normalizeRetardJustification(context?.task);
+  return [id2, task].filter(Boolean).join(" - ") || "Ligne planning";
+}
+
+function closeRetardContextMenu() {
+  if (retardContextMenuEl) {
+    retardContextMenuEl.style.display = "none";
+  }
+}
+
+function positionFixedElementNearPointer(element, event) {
+  if (!(element instanceof HTMLElement)) return;
+
+  const margin = 8;
+  const left = Number(event?.clientX || 0);
+  const top = Number(event?.clientY || 0);
+  element.style.display = "block";
+
+  const rect = element.getBoundingClientRect();
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || rect.width;
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || rect.height;
+
+  element.style.left = `${Math.max(margin, Math.min(left, viewportWidth - rect.width - margin))}px`;
+  element.style.top = `${Math.max(margin, Math.min(top, viewportHeight - rect.height - margin))}px`;
+}
+
+function ensureRetardContextMenu() {
+  if (retardContextMenuEl instanceof HTMLElement) return retardContextMenuEl;
+
+  const menu = document.createElement("div");
+  menu.className = "planning-retard-context-menu";
+  menu.style.display = "none";
+  menu.innerHTML = `
+    <button type="button" class="planning-retard-context-menu__button">
+      Justifier le retard
+    </button>
+  `;
+
+  const button = menu.querySelector("button");
+  button?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    closeRetardContextMenu();
+    openRetardJustificationDialog();
+  });
+
+  document.body.appendChild(menu);
+  retardContextMenuEl = menu;
+
+  document.addEventListener("click", (event) => {
+    if (!retardContextMenuEl || retardContextMenuEl.style.display === "none") return;
+    if (event.target instanceof Node && retardContextMenuEl.contains(event.target)) return;
+    closeRetardContextMenu();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeRetardContextMenu();
+    }
+  });
+
+  return retardContextMenuEl;
+}
+
+async function commitRetardJustification(nextValue) {
+  if (!retardJustificationHandler || !activeRetardJustificationContext) return;
+
+  const rowId = Number(activeRetardJustificationContext.rowId);
+  if (!Number.isInteger(rowId) || rowId <= 0) return;
+
+  const dialog = ensureRetardJustificationDialog();
+  const controls = dialog.querySelectorAll("button, textarea");
+  controls.forEach((control) => {
+    control.disabled = true;
+  });
+
+  try {
+    await retardJustificationHandler({
+      rowId,
+      remarque: normalizeRetardJustification(nextValue),
+    });
+    dialog.close();
+  } catch (error) {
+    console.error("Erreur justification retard :", error);
+    alert(`Erreur justification retard : ${error.message}`);
+  } finally {
+    controls.forEach((control) => {
+      control.disabled = false;
+    });
+  }
+}
+
+function ensureRetardJustificationDialog() {
+  if (retardDialogEl instanceof HTMLDialogElement) return retardDialogEl;
+
+  const dialog = document.createElement("dialog");
+  dialog.className = "planning-retard-dialog";
+  dialog.innerHTML = `
+    <form method="dialog" class="planning-retard-dialog__form">
+      <h3>Justifier le retard</h3>
+      <p class="planning-retard-dialog__line"></p>
+      <label for="planningRetardJustificationText">Justification</label>
+      <textarea id="planningRetardJustificationText" rows="6"></textarea>
+      <div class="planning-retard-dialog__actions">
+        <button type="submit" class="planning-retard-dialog__save">Enregistrer</button>
+        <button type="button" class="planning-retard-dialog__clear">Effacer</button>
+        <button type="button" class="planning-retard-dialog__cancel">Annuler</button>
+      </div>
+    </form>
+  `;
+
+  const form = dialog.querySelector("form");
+  const textarea = dialog.querySelector("textarea");
+  const clearButton = dialog.querySelector(".planning-retard-dialog__clear");
+  const cancelButton = dialog.querySelector(".planning-retard-dialog__cancel");
+
+  form?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void commitRetardJustification(textarea?.value || "");
+  });
+
+  clearButton?.addEventListener("click", (event) => {
+    event.preventDefault();
+    void commitRetardJustification("");
+  });
+
+  cancelButton?.addEventListener("click", (event) => {
+    event.preventDefault();
+    dialog.close();
+  });
+
+  document.body.appendChild(dialog);
+  retardDialogEl = dialog;
+  return retardDialogEl;
+}
+
+function openRetardJustificationDialog() {
+  const context = activeRetardJustificationContext;
+  if (!context) return;
+
+  const dialog = ensureRetardJustificationDialog();
+  const lineEl = dialog.querySelector(".planning-retard-dialog__line");
+  const textarea = dialog.querySelector("textarea");
+
+  if (lineEl) {
+    lineEl.textContent = getRetardJustificationLabel(context);
+  }
+  if (textarea) {
+    textarea.value = normalizeRetardJustification(context.remarque);
+  }
+
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+
+  requestAnimationFrame(() => {
+    textarea?.focus();
+    textarea?.select();
+  });
+}
+
+function openRetardContextMenu(event, cellEl) {
+  if (!(cellEl instanceof HTMLElement) || !retardJustificationHandler) return;
+
+  const rowId = Number(cellEl.dataset.rowId || "");
+  if (!Number.isInteger(rowId) || rowId <= 0) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  activeRetardJustificationContext = {
+    rowId,
+    id2: cellEl.dataset.id2 || "",
+    task: cellEl.dataset.task || "",
+    retards: cellEl.dataset.retards || "",
+    remarque: cellEl.dataset.remarque || "",
+  };
+
+  const menu = ensureRetardContextMenu();
+  positionFixedElementNearPointer(menu, event);
 }
 
 function getEventTargetElement(event) {
@@ -2358,6 +2552,7 @@ function buildGroupLabelElement(group) {
   row.dataset.planningIndice = String(group?.indiceLabel ?? "");
   row.dataset.planningRealise = String(group?.realiseLabel ?? "");
   row.dataset.planningRetards = String(group?.retardsLabel ?? "");
+  row.dataset.planningRemarque = String(group?.remarqueLabel ?? "");
   const typeDocLabel = String(group?.typeDocLabel ?? "");
   const isCoffrageRow = isPlanningTypeDocMatch(typeDocLabel, "COFFRAGE");
   const isArmatureRow = isPlanningTypeDocMatch(typeDocLabel, "ARMATURE");
@@ -2457,6 +2652,22 @@ function buildGroupLabelElement(group) {
   const retards = document.createElement("div");
   retards.className = "cell-retards";
   retards.textContent = String(group?.retardsLabel ?? "");
+  retards.dataset.rowId = String(group?.rowId ?? "");
+  retards.dataset.id2 = String(group?.id2Label ?? "");
+  retards.dataset.task = String(group?.tachesLabel ?? "");
+  retards.dataset.retards = String(group?.retardsLabel ?? "");
+  retards.dataset.remarque = String(group?.remarqueLabel ?? "");
+  retards.setAttribute("aria-haspopup", "dialog");
+  const remarqueText = String(group?.remarqueLabel ?? "").trim();
+  if (remarqueText) {
+    retards.classList.add("has-retard-justification");
+    retards.title = remarqueText;
+    retards.setAttribute("aria-label", remarqueText);
+  }
+
+  retards.addEventListener("contextmenu", (event) => {
+    openRetardContextMenu(event, retards);
+  });
 
   [
     id2,
@@ -3282,6 +3493,10 @@ export function focusPlanningDataAnchor() {
 
 export function setPlanningDurationEditHandler(handler) {
   durationCellEditHandler = typeof handler === "function" ? handler : null;
+}
+
+export function setPlanningRetardJustificationHandler(handler) {
+  retardJustificationHandler = typeof handler === "function" ? handler : null;
 }
 
 export function setPlanningMsProjectDropHandler(handler) {

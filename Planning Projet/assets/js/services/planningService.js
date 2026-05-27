@@ -993,6 +993,7 @@ export function buildTimelineDataFromPlanningRows(
         return String(computedRealise ?? 0);
       })(),
       retards: toText(r[cfg.retards]),
+      remarque: toText(r[cfg.remarque || "Remarque"]),
     };
   });
 
@@ -1217,6 +1218,7 @@ export function buildTimelineDataFromPlanningRows(
       indiceLabel: row.indice ?? "",
       realiseLabel: row.realise ?? "",
       retardsLabel: row.retards ?? "",
+      remarqueLabel: row.remarque ?? "",
 
       // Champs de tri explicites (plus fiable que meta uniquement)
       sortIndex: groupSortIndex++,

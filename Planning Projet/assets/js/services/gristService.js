@@ -1819,4 +1819,42 @@ export async function syncPlanningRetardValues(updates) {
   };
 }
 
+export async function updatePlanningRetardJustification(rowId, remarque) {
+  const table = APP_CONFIG.grist.planningTable;
+  if (!table?.sourceTable) {
+    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
+  }
+
+  const recordId = Number(rowId);
+  if (!Number.isInteger(recordId) || recordId <= 0) {
+    throw new Error("Identifiant de ligne Planning_Projet invalide.");
+  }
+
+  const columns = table.columns || {};
+  const remarqueCol = String(columns.remarque || "Remarque").trim();
+  if (!remarqueCol) {
+    throw new Error("Colonne Remarque invalide.");
+  }
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  await grist.docApi.applyUserActions([
+    [
+      "UpdateRecord",
+      table.sourceTable,
+      recordId,
+      {
+        [remarqueCol]: toText(remarque),
+      },
+    ],
+  ]);
+
+  return {
+    updatedCount: 1,
+  };
+}
+
 export { toText };
