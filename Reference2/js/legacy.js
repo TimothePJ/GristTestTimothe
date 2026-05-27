@@ -200,6 +200,7 @@ function autoFillFields() {
     document.getElementById('indice').value = '-';
     document.getElementById('recu').value = '1900-01-01';
     document.getElementById('description').value = 'EN ATTENTE';
+    document.getElementById('remarque').value = 'Officiel';
     document.getElementById('datelimite').value = '1900-01-01';
     return;
   }
@@ -221,12 +222,14 @@ function autoFillFields() {
     // Remplir avec les infos réelles
     document.getElementById('indice').value = matchingRecord.Indice || '';
     document.getElementById('description').value = matchingRecord.DescriptionObservations || '';
+    document.getElementById('remarque').value = normalizeRemarqueValue(matchingRecord.Remarque);
     document.getElementById('recu').value = formatDateForInput(matchingRecord.Recu);
     document.getElementById('datelimite').value = formatDateForInput(matchingRecord.DateLimite);
   } else {
     // Rien trouvé -> vider les champs (ou gérer autrement)
     document.getElementById('indice').value = '';
     document.getElementById('description').value = '';
+    document.getElementById('remarque').value = '';
     document.getElementById('recu').value = '';
     document.getElementById('datelimite').value = '';
   }
@@ -303,6 +306,11 @@ async function resolveListePlanTableName() {
     }
   }
   throw new Error("Table ListePlan introuvable (attendu: 'ListePlan_NDC_COF' ou 'ListePlan NDC+COF').");
+}
+
+function normalizeRemarqueValue(value) {
+  const text = String(value ?? '').trim();
+  return text === 'Conservatoire' || text === 'Officiel' ? text : '';
 }
 
 async function resolvePlanningTableName() {
@@ -2487,6 +2495,7 @@ function showEditDialog(record) {
   document.getElementById('editReference').value = record.Reference || '';
   document.getElementById('editIndice').value = record.Indice || '';
   document.getElementById('editDescription').value = record.DescriptionObservations || '';
+  document.getElementById('editRemarque').value = normalizeRemarqueValue(record.Remarque);
   document.getElementById('editRecu').value = formatDateForInput(record.Recu);
   document.getElementById('editDatelimite').value = formatDateForInput(record.DateLimite);
 
@@ -2563,6 +2572,7 @@ function autoFillEditFields() {
   if (selectedReference === '_') {
     document.getElementById('editIndice').value = '-';
     document.getElementById('editDescription').value = 'EN ATTENTE';
+    document.getElementById('editRemarque').value = 'Officiel';
     document.getElementById('editRecu').value = '1900-01-01';
     document.getElementById('editDatelimite').value = '1900-01-01';
     return;
@@ -2584,12 +2594,14 @@ function autoFillEditFields() {
   if (matchingRecord) {
     document.getElementById('editIndice').value = matchingRecord.Indice || '';
     document.getElementById('editDescription').value = matchingRecord.DescriptionObservations || '';
+    document.getElementById('editRemarque').value = normalizeRemarqueValue(matchingRecord.Remarque);
     document.getElementById('editRecu').value = formatDateForInput(matchingRecord.Recu);
     document.getElementById('editDatelimite').value = formatDateForInput(matchingRecord.DateLimite);
   } else {
     // Aucun matchingRecord -> vider ou laisser par défaut
     document.getElementById('editIndice').value = '';
     document.getElementById('editDescription').value = '';
+    document.getElementById('editRemarque').value = '';
     document.getElementById('editRecu').value = '';
     document.getElementById('editDatelimite').value = '';
   }
@@ -2634,6 +2646,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
   const indice = formData.get('indice');
   let recu = formData.get('recu'); // Peut être vide
   const description = formData.get('description');
+  const remarque = normalizeRemarqueValue(formData.get('remarque'));
   let datelimite = formData.get('datelimite'); // Peut être vide
   const isDuplicate = document.getElementById('duplicateCheckbox').checked;
   const cheminFromAddFile = (document.getElementById('referenceFile') && document.getElementById('referenceFile').value) ? document.getElementById('referenceFile').value : null;
@@ -2671,6 +2684,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
           Indice: indice,
           Recu: recu,
           DescriptionObservations: description,
+          Remarque: remarque,
           DateLimite: datelimite,
           Service: serviceValue,
           Chemin: cheminFromAddFile
@@ -2689,6 +2703,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
         Indice: indice,
         Recu: recu,
         DescriptionObservations: description,
+        Remarque: remarque,
         DateLimite: datelimite,
         Service: serviceValue
       };
@@ -2722,6 +2737,7 @@ document.getElementById('editRowDialog').addEventListener('submit', (e) => {
     Indice: formData.get('indice'),
     Recu: formData.get('recu'),
     DescriptionObservations: formData.get('description'),
+    Remarque: normalizeRemarqueValue(formData.get('remarque')),
     DateLimite: formData.get('datelimite')
   };
 
@@ -3786,6 +3802,7 @@ document.getElementById('editRowDialog').addEventListener('submit', async (e) =>
     Indice: formData.get('indice'),
     Recu: formData.get('recu'),
     DescriptionObservations: formData.get('description'),
+    Remarque: normalizeRemarqueValue(formData.get('remarque')),
     DateLimite: datelimite // Valeur corrigée ici
   };
 

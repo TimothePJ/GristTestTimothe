@@ -171,7 +171,8 @@ body {
     }
 
     dialog input,
-    dialog textarea {
+    dialog textarea,
+    dialog select {
       width: 100%;
       padding: 8px;
       margin-bottom: 10px;
