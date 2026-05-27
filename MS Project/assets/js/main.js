@@ -11,7 +11,7 @@ import {
 } from "./services/gristService.js";
 import { buildTimelineDataFromMsProjectRows } from "./services/msProjectService.js";
 import { state, setState } from "./state.js";
-import { initProjectSelector } from "./ui/selectors.js";
+import { initProjectSelector, updateProjectSelector } from "./ui/selectors.js";
 import {
   renderMsProjectTimeline,
   clearMsProjectTimeline,
@@ -62,10 +62,19 @@ function ensureImportFileInput() {
     try {
       setMsProjectStatus(`Import XML en cours : ${selectedFile.name}`);
       const result = await importMsProjectXmlFile(selectedFile);
+      const projectOptions = await buildProjectOptions();
+      setState({ selectedProject: result.sourceFileName || "" });
+      const selectedProject = updateProjectSelector(
+        projectOptions,
+        state.selectedProject
+      );
+      if (selectedProject !== state.selectedProject) {
+        setState({ selectedProject });
+      }
       await refreshMsProject();
 
       setMsProjectStatus(
-        `Import termine (${result.sourceFileName}) : ${result.importedCount} ligne(s) ajoutee(s).`
+        `Import termine (${result.sourceFileName}) : ${result.deletedCount || 0} ancienne(s) ligne(s) supprimee(s), ${result.importedCount} ligne(s) ajoutee(s).`
       );
     } catch (error) {
       console.error("Erreur import XML MS Project :", error);

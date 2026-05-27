@@ -575,14 +575,29 @@ export async function importMsProjectXmlFile(file) {
     throw new Error("Aucune tache exploitable trouvee (UID/Name manquants).");
   }
 
-  const { columnNames } = await fetchTableSnapshot(table.sourceTable);
+  const { rows: existingRows, columnNames } = await fetchTableSnapshot(table.sourceTable);
   const hasKnownColumns = columnNames.length > 0;
   const canUseColumn = (columnName) => {
     if (!columnName) return false;
     return !hasKnownColumns || columnNames.includes(columnName);
   };
 
+  const sourceNameCol = resolveColumn(
+    existingRows,
+    columns.sourceName || "Nom",
+    table.sourceNameCandidates || ["Nom"]
+  );
+  const idCol = columns.id || "id";
+  const rowIdsToDelete = existingRows
+    .filter((row) => sourceNameCol && toText(row?.[sourceNameCol]) === sourceFileName)
+    .map((row) => Number(row?.[idCol]))
+    .filter((rowId) => Number.isInteger(rowId) && rowId > 0);
+
   const actions = [];
+  let addedCount = 0;
+  for (const rowId of rowIdsToDelete) {
+    actions.push(["RemoveRecord", table.sourceTable, rowId]);
+  }
 
   for (const rawRecord of importedRecords) {
     const record = {};
@@ -595,6 +610,7 @@ export async function importMsProjectXmlFile(file) {
     if (!Object.keys(record).length) continue;
 
     actions.push(["AddRecord", table.sourceTable, null, record]);
+    addedCount += 1;
   }
 
   await applyUserActionsInBatches(actions);
@@ -602,8 +618,9 @@ export async function importMsProjectXmlFile(file) {
   return {
     extractedTaskCount: taskNodes.length,
     processedCount: importedRecords.length,
-    importedCount: actions.length,
-    addedCount: actions.length,
+    importedCount: addedCount,
+    addedCount,
+    deletedCount: rowIdsToDelete.length,
     updatedCount: 0,
     sourceFileName,
   };
