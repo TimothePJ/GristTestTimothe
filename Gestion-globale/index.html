@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestion globale</title>
+    <link rel="stylesheet" href="../gestion-depenses2/assets/css/variables.css">
+    <link rel="stylesheet" href="../gestion-depenses2/assets/css/styles.css">
+    <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+    <header class="global-header">
+        <div class="global-header-copy">
+            <h1>Gestion globale</h1>
+            <p id="global-status">Chargement des projets...</p>
+        </div>
+        <div class="dop-filter" role="group" aria-label="Filtrer par DOP">
+            <button type="button" class="dop-filter-btn" data-dop="1">DOP 1</button>
+            <button type="button" class="dop-filter-btn" data-dop="2">DOP 2</button>
+            <button type="button" class="dop-filter-btn is-active" data-dop="all">TOUT</button>
+        </div>
+    </header>
+
+    <main class="global-main">
+        <section class="global-top-grid">
+            <section class="project-picker-panel" aria-labelledby="project-list-title">
+                <div class="global-section-heading">
+                    <div>
+                        <h2 id="project-list-title">Projets</h2>
+                        <p id="project-list-summary"></p>
+                    </div>
+                    <div class="project-picker-actions">
+                        <button type="button" id="select-visible-projects-btn">Tout cocher</button>
+                        <button type="button" id="clear-visible-projects-btn" class="secondary-btn">Tout decocher</button>
+                    </div>
+                </div>
+                <div id="project-list" class="project-list"></div>
+            </section>
+
+            <section class="global-kpi-panel" aria-labelledby="global-kpi-title">
+                <h2 id="global-kpi-title">Synthese</h2>
+                <div class="global-kpi-grid">
+                    <div class="global-kpi-item">
+                        <span>Budget total</span>
+                        <strong id="global-total-budget">0 EUR</strong>
+                    </div>
+                    <div class="global-kpi-item">
+                        <span>Assigne</span>
+                        <strong id="global-provisional-spending">0 EUR</strong>
+                    </div>
+                    <div class="global-kpi-item">
+                        <span>Total depense</span>
+                        <strong id="global-real-spending">0 EUR</strong>
+                    </div>
+                    <div class="global-kpi-item">
+                        <span>Reste budget</span>
+                        <strong id="global-remaining-budget">0 EUR</strong>
+                    </div>
+                </div>
+            </section>
+        </section>
+
+        <section class="budget-recap-section" aria-labelledby="budget-recap-title">
+            <div class="global-section-heading">
+                <div>
+                    <h2 id="budget-recap-title">Recap budget par projet</h2>
+                    <p id="budget-recap-summary"></p>
+                </div>
+            </div>
+            <div class="budget-recap-table-wrap">
+                <table class="budget-recap-table">
+                    <thead>
+                        <tr>
+                            <th>Projet</th>
+                            <th>DOP</th>
+                            <th>Budget</th>
+                            <th>Assigne</th>
+                            <th>Depense reel</th>
+                            <th>Reste</th>
+                        </tr>
+                    </thead>
+                    <tbody id="budget-recap-body"></tbody>
+                    <tfoot id="budget-recap-foot"></tfoot>
+                </table>
+            </div>
+        </section>
+
+        <p id="charts-empty-state" class="global-empty-state" hidden>
+            Coche au moins un projet pour afficher les donnees globales.
+        </p>
+
+        <section id="avancement-dashboard-section" class="avancement-dashboard-section" hidden>
+            <div class="avancement-dashboard-header">
+                <h2>Avancement des plans</h2>
+            </div>
+            <div class="avancement-dashboard-layout">
+                <div class="avancement-dashboard-content">
+                    <section class="avancement-chart-card avancement-chart-card--main" id="avancement-chart-container">
+                        <canvas id="avancement-chart"></canvas>
+                    </section>
+
+                    <div id="avancement-stats-output"></div>
+
+                    <div class="avancement-charts-grid" id="avancement-charts-grid">
+                        <section class="avancement-chart-card">
+                            <canvas id="avancement-expenses-progress-chart"></canvas>
+                        </section>
+                        <section class="avancement-chart-card">
+                            <canvas id="avancement-general-progress-chart"></canvas>
+                        </section>
+                    </div>
+                </div>
+
+                <aside id="avancement-side-panel" class="avancement-side-panel"></aside>
+            </div>
+        </section>
+
+        <section class="global-chart-section">
+            <div class="table-header">
+                <h3>Previsionnel - Depense</h3>
+            </div>
+            <div id="expense-board"></div>
+        </section>
+
+        <section class="global-chart-section">
+            <div class="table-header">
+                <h3>Depenses reelles</h3>
+            </div>
+            <div id="real-expense-board"></div>
+        </section>
+
+        <section class="global-chart-section">
+            <div class="table-header">
+                <h3>Graphique des depenses</h3>
+            </div>
+            <div id="spending-chart-shell" class="spending-chart-shell">
+                <div id="spending-chart-controls"></div>
+                <canvas id="spending-chart"></canvas>
+            </div>
+        </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <script type="module" src="assets/js/main.js"></script>
+</body>
+</html>
