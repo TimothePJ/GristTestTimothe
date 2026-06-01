@@ -311,7 +311,7 @@ export function buildAggregatedProject(projects) {
   const billing = buildAggregatedBilling(selectedProjects, totalBudget);
 
   return {
-    id: null,
+    id: "global",
     projectNumber: "GLOBAL",
     name: `${selectedProjects.length} projet(s) selectionne(s)`,
     dop: "global",

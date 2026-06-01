@@ -42,6 +42,7 @@ const state = {
   projects: [],
   selectedDop: "all",
   selectedProjectIds: new Set(),
+  avancementConfigBySelection: new Map(),
   spendingChart: null,
 };
 
@@ -116,6 +117,37 @@ function getVisibleSelectedProjects() {
   return getFilteredProjects().filter((project) => (
     state.selectedProjectIds.has(getProjectId(project))
   ));
+}
+
+function getSelectionConfigKey(projects) {
+  return (projects || [])
+    .map(getProjectId)
+    .filter(Boolean)
+    .sort()
+    .join("|");
+}
+
+function applyAvancementConfigOverride(aggregatedProject, selectedProjects) {
+  if (!aggregatedProject) {
+    return null;
+  }
+
+  const configKey = getSelectionConfigKey(selectedProjects);
+  const localConfig = state.avancementConfigBySelection.get(configKey);
+  if (localConfig) {
+    aggregatedProject.avancementConfigRaw = localConfig;
+  }
+
+  return aggregatedProject;
+}
+
+async function saveLocalAvancementConfig(selectedProjects, project, serializedConfig) {
+  const configKey = getSelectionConfigKey(selectedProjects);
+  if (configKey) {
+    state.avancementConfigBySelection.set(configKey, serializedConfig);
+  }
+
+  project.avancementConfigRaw = serializedConfig;
 }
 
 function setStatus(message, isError = false) {
@@ -248,7 +280,7 @@ function clearAggregateViews() {
   state.spendingChart = destroyChart(state.spendingChart);
 }
 
-function renderAggregateViews(aggregatedProject) {
+function renderAggregateViews(aggregatedProject, selectedProjects = getVisibleSelectedProjects()) {
   const hasSelection = Boolean(aggregatedProject);
   dom.chartsEmptyState.hidden = hasSelection;
 
@@ -257,7 +289,11 @@ function renderAggregateViews(aggregatedProject) {
     return;
   }
 
-  renderAvancementDashboard(dom.avancementDashboardSection, aggregatedProject, {});
+  renderAvancementDashboard(dom.avancementDashboardSection, aggregatedProject, {
+    onSave: (project, serializedConfig) => (
+      saveLocalAvancementConfig(selectedProjects, project, serializedConfig)
+    ),
+  });
   renderExpenseTimeline(dom.expenseBoard, aggregatedProject);
   renderRealExpenseTimeline(dom.realExpenseBoard, aggregatedProject);
   renderSpendingChartControls(dom.spendingChartControls);
@@ -272,13 +308,16 @@ function renderAggregateViews(aggregatedProject) {
 function renderApp() {
   const filteredProjects = getFilteredProjects();
   const selectedProjects = getVisibleSelectedProjects();
-  const aggregatedProject = buildAggregatedProject(selectedProjects);
+  const aggregatedProject = applyAvancementConfigOverride(
+    buildAggregatedProject(selectedProjects),
+    selectedProjects
+  );
 
   renderDopButtons();
   renderProjectList(filteredProjects);
   renderBudgetRecap(selectedProjects);
   renderKpis(aggregatedProject);
-  renderAggregateViews(aggregatedProject);
+  renderAggregateViews(aggregatedProject, selectedProjects);
 }
 
 function bindEvents() {
@@ -330,7 +369,11 @@ function bindEvents() {
         target.dataset.graphKind || "provisional",
         target.checked ? "days" : "currency"
       );
-      renderAggregateViews(buildAggregatedProject(getVisibleSelectedProjects()));
+      const selectedProjects = getVisibleSelectedProjects();
+      renderAggregateViews(
+        applyAvancementConfigOverride(buildAggregatedProject(selectedProjects), selectedProjects),
+        selectedProjects
+      );
     });
   });
 
@@ -340,7 +383,11 @@ function bindEvents() {
     if (!target.classList.contains("spending-chart-bars-toggle-input")) return;
 
     setSpendingChartBarsFromTop(target.checked);
-    renderAggregateViews(buildAggregatedProject(getVisibleSelectedProjects()));
+    const selectedProjects = getVisibleSelectedProjects();
+    renderAggregateViews(
+      applyAvancementConfigOverride(buildAggregatedProject(selectedProjects), selectedProjects),
+      selectedProjects
+    );
   });
 }
 
