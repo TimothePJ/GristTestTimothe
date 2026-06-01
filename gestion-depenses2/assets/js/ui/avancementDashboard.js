@@ -20,12 +20,12 @@ const SPECIAL_BUDGET_KEYS = {
 
 const CHART_COLORS = {
   done: {
-    solid: "rgba(43, 123, 201, 1)",
-    fill: "rgba(43, 123, 201, 0.58)",
+    solid: "rgba(0, 73, 144, 1)",
+    fill: "rgba(0, 73, 144, 0.58)",
   },
   remaining: {
-    solid: "rgba(180, 35, 24, 1)",
-    fill: "rgba(180, 35, 24, 0.58)",
+    solid: "rgba(90, 113, 136, 1)",
+    fill: "rgba(90, 113, 136, 0.38)",
   },
 };
 
@@ -161,6 +161,9 @@ function getProjectRecords(project) {
       Zone: normalizeText(record?.Zone),
       Indice: normalizeIndice(record?.Indice),
       DateDiffusion: record?.DateDiffusion,
+      AvancementSelectedIndice: normalizeIndice(
+        record?.AvancementSelectedIndice ?? record?.avancementSelectedIndice,
+      ),
     }))
     .filter((record) => normalizeText(record.NumeroDocument) && getDocumentType(record));
 }
@@ -301,6 +304,16 @@ function buildSelectedIndicesByType(projectRecords, indexSelections) {
   );
 }
 
+function getSelectedIndiceForRecord(record, selectedIndicesByType) {
+  const recordSelectedIndice = normalizeIndice(record?.AvancementSelectedIndice);
+  if (recordSelectedIndice) {
+    return recordSelectedIndice;
+  }
+
+  const type = getDocumentType(record);
+  return selectedIndicesByType[type] || getDefaultIndiceForDocumentType(type);
+}
+
 function createStatsBucket(selectedIndice) {
   return {
     totalDocs: new Set(),
@@ -329,7 +342,7 @@ function buildStatsByType(projectRecords, selectedIndicesByType) {
 
     statsByType[type].totalDocs.add(documentKey);
 
-    if (getRecordIndice(record) === statsByType[type].selectedIndice) {
+    if (getRecordIndice(record) === getSelectedIndiceForRecord(record, selectedIndicesByType)) {
       statsByType[type].advancedDocs.add(documentKey);
     }
   });
@@ -505,7 +518,7 @@ function buildTableRows(sortedTypes, statsByType, ventilation) {
     const indice = statsByType[type].selectedIndice;
 
     return {
-      label: getDocumentTypeLabel(type, indice),
+      label: type,
       tableLabel: getTableBudgetLabel(type, indice, ventilation),
       type,
       indice,
@@ -786,12 +799,22 @@ function getPlanCellClass(row) {
 }
 
 function renderSidePanel(sidePanelEl, project, dashboardData, projectRecords, projectConfig) {
-  sidePanelEl.innerHTML = renderIndexSelectionPanel(
+  if (!(sidePanelEl instanceof HTMLElement)) {
+    return false;
+  }
+
+  const panelContent = renderIndexSelectionPanel(
     project,
     projectRecords,
     projectConfig,
     dashboardData.selectedIndicesByType,
   );
+
+  const hasPanelContent = Boolean(panelContent.trim());
+  sidePanelEl.hidden = !hasPanelContent;
+  sidePanelEl.style.display = hasPanelContent ? "block" : "none";
+  sidePanelEl.innerHTML = panelContent;
+  return hasPanelContent;
 }
 
 function renderAverageIndices(averageIndices, sortedTypes) {
@@ -812,6 +835,10 @@ function renderAverageIndexLine(type, averageData) {
 }
 
 function renderIndexSelectionPanel(project, projectRecords, projectConfig, selectedIndicesByType) {
+  if (toFiniteNumber(project?.globalSourceProjectCount, 0) > 1) {
+    return "";
+  }
+
   const documentTypes = getDocumentTypes(projectRecords);
   const controlsDisabled = !projectConfig.canSave || documentTypes.length === 0;
 
@@ -1400,17 +1427,20 @@ function hideDashboard(elements) {
   elements.chartContainer.style.display = "none";
   elements.chartsGrid.style.display = "none";
   elements.sidePanel.style.display = "none";
+  elements.sidePanel.hidden = true;
 }
 
 function showDashboard(elements) {
   elements.chartContainer.style.display = "block";
   elements.chartsGrid.style.display = "grid";
   elements.sidePanel.style.display = "block";
+  elements.sidePanel.hidden = false;
 }
 
 function renderEmptyState(rootEl, message) {
   const elements = getElements(rootEl);
   destroyCharts(rootEl);
+  rootEl.classList.remove("avancement-dashboard-section--wide");
   hideDashboard(elements);
   elements.statsOutput.innerHTML = `<p class="avancement-empty-state">${escapeHtml(message)}</p>`;
   elements.sidePanel.innerHTML = "";
@@ -1424,6 +1454,7 @@ export function clearAvancementDashboard(rootEl) {
   const elements = getElements(rootEl);
   destroyCharts(rootEl);
   rootEl.hidden = true;
+  rootEl.classList.remove("avancement-dashboard-section--wide");
   elements.statsOutput.innerHTML = "";
   elements.sidePanel.innerHTML = "";
 }
@@ -1461,7 +1492,14 @@ export function renderAvancementDashboard(rootEl, project, options = {}) {
   showDashboard(elements);
   renderDetailedChart(rootEl, elements.chartCanvas, dashboardData.chart);
   renderStatsTable(elements.statsOutput, dashboardData.tableRows, dashboardData.totals, projectConfig.canSave);
-  renderSidePanel(elements.sidePanel, project, dashboardData, projectRecords, projectConfig);
+  const hasSidePanel = renderSidePanel(
+    elements.sidePanel,
+    project,
+    dashboardData,
+    projectRecords,
+    projectConfig,
+  );
+  rootEl.classList.toggle("avancement-dashboard-section--wide", !hasSidePanel);
   renderCharts(rootEl, elements, dashboardData.totals);
   bindBudgetProgressControls(rootEl, project, options);
   bindIndexSelectionControls(rootEl, project, projectRecords, dashboardData.selectedIndicesByType, options);

@@ -360,6 +360,7 @@ export function buildExpenseData({
       id: Number(row?.[columns.projects.id]),
       projectNumber,
       name: toText(row?.[columns.projects.name]),
+      dop: toText(row?.[columns.projects.dop]),
       avancementConfigRaw: row?.[columns.projects.avancement],
       billingPercentage: toFiniteNumber(
         row?.[columns.projects.billingPercentage],
@@ -714,17 +715,42 @@ export function getWorkerTotalDays(daysByMonth) {
   );
 }
 
+function getWorkerMonthlyCost(worker, monthKey, daysField, costsField) {
+  const costsByMonth = worker?.[costsField];
+  if (
+    costsByMonth &&
+    typeof costsByMonth === "object" &&
+    Object.prototype.hasOwnProperty.call(costsByMonth, monthKey)
+  ) {
+    return toFiniteNumber(costsByMonth?.[monthKey], 0);
+  }
+
+  return (
+    toFiniteNumber(worker?.[daysField]?.[monthKey], 0) *
+    toFiniteNumber(worker?.dailyRate, 0)
+  );
+}
+
+function getWorkerTotalCost(worker, daysField, costsField) {
+  const monthKeys = new Set([
+    ...Object.keys(worker?.[daysField] || {}),
+    ...Object.keys(worker?.[costsField] || {}),
+  ]);
+
+  return [...monthKeys].reduce((sum, monthKey) => {
+    return sum + getWorkerMonthlyCost(worker, monthKey, daysField, costsField);
+  }, 0);
+}
+
 export function calculateProvisionalSpending(project, monthKey) {
   return (project?.workers || []).reduce((total, worker) => {
-    const days = toFiniteNumber(worker?.provisionalDays?.[monthKey], 0);
-    return total + days * toFiniteNumber(worker?.dailyRate, 0);
+    return total + getWorkerMonthlyCost(worker, monthKey, "provisionalDays", "provisionalCosts");
   }, 0);
 }
 
 export function calculateRealSpending(project, monthKey) {
   return (project?.workers || []).reduce((total, worker) => {
-    const days = toFiniteNumber(worker?.workedDays?.[monthKey], 0);
-    return total + days * toFiniteNumber(worker?.dailyRate, 0);
+    return total + getWorkerMonthlyCost(worker, monthKey, "workedDays", "workedCosts");
   }, 0);
 }
 
@@ -760,16 +786,28 @@ export function getPriorCumulativeSpending(project, boundaryMonthKey) {
   let provisional = 0;
 
   (project?.workers || []).forEach((worker) => {
-    Object.entries(worker?.workedDays || {}).forEach(([monthKey, days]) => {
+    const workedMonthKeys = new Set([
+      ...Object.keys(worker?.workedDays || {}),
+      ...Object.keys(worker?.workedCosts || {}),
+    ]);
+    workedMonthKeys.forEach((monthKey) => {
       if (monthKey < boundaryMonthKey) {
-        real += toFiniteNumber(days, 0) * toFiniteNumber(worker?.dailyRate, 0);
+        real += getWorkerMonthlyCost(worker, monthKey, "workedDays", "workedCosts");
       }
     });
 
-    Object.entries(worker?.provisionalDays || {}).forEach(([monthKey, days]) => {
+    const provisionalMonthKeys = new Set([
+      ...Object.keys(worker?.provisionalDays || {}),
+      ...Object.keys(worker?.provisionalCosts || {}),
+    ]);
+    provisionalMonthKeys.forEach((monthKey) => {
       if (monthKey < boundaryMonthKey) {
-        provisional +=
-          toFiniteNumber(days, 0) * toFiniteNumber(worker?.dailyRate, 0);
+        provisional += getWorkerMonthlyCost(
+          worker,
+          monthKey,
+          "provisionalDays",
+          "provisionalCosts"
+        );
       }
     });
   });
@@ -1101,11 +1139,11 @@ export function getProjectRealMonthBounds(project) {
 export function getProjectKpis(project) {
   const totalBudget = getProjectBudgetTotal(project);
   const totalProvisionalSpending = (project?.workers || []).reduce((total, worker) => {
-    return total + getWorkerTotalDays(worker?.provisionalDays) * toFiniteNumber(worker?.dailyRate, 0);
+    return total + getWorkerTotalCost(worker, "provisionalDays", "provisionalCosts");
   }, 0);
 
   const totalRealSpending = (project?.workers || []).reduce((total, worker) => {
-    return total + getWorkerTotalDays(worker?.workedDays) * toFiniteNumber(worker?.dailyRate, 0);
+    return total + getWorkerTotalCost(worker, "workedDays", "workedCosts");
   }, 0);
 
   const remainingBudget = totalBudget - totalRealSpending;

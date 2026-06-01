@@ -28,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let projectData = {
         name: '',
         number: '',
+        dop: '',
         budgetTotalIndicatif: null,
         budgetLines: createDefaultBudgetLines(),
         team: [],
@@ -402,6 +403,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('next-to-step-2').addEventListener('click', () => {
         projectData.name = cleanProjectName(document.getElementById('project-name').value);
         projectData.number = document.getElementById('project-number').value.trim();
+        projectData.dop = String(document.getElementById('project-dop')?.value || "").trim();
 
         // (optionnel mais pratique) mettre à jour le champ affiché
         document.getElementById('project-name').value = projectData.name;
@@ -1277,6 +1279,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <h3>Détails du Projet</h3>
             <p><strong>Nom:</strong> ${projectData.name}</p>
             <p><strong>Numéro:</strong> ${projectData.number}</p>
+            <p><strong>DOP:</strong> ${projectData.dop ? `DOP ${projectData.dop}` : 'Sans DOP'}</p>
 
             <h3>Lignes Budgétaires</h3>
             <p><strong>Budget total indicatif:</strong> ${budgetTotalIndicatif == null ? 'Non renseigné' : `${formatBudgetAmount(budgetTotalIndicatif)} €`}</p>
@@ -2137,13 +2140,13 @@ document.addEventListener('DOMContentLoaded', () => {
             projectData.name = cleanProjectName(projectData.name);
             projectData.number = (projectData.number ?? "").toString().trim();
             const projetsTable = await grist.docApi.fetchTable("Projets");
+            const projetsColumns = getTableColumnNames(projetsTable);
             const projectFields = {
                 Nom_de_projet: projectData.name,
                 Numero_de_projet: projectData.number
             };
-            if (Object.prototype.hasOwnProperty.call(projetsTable, 'TypeDoc')) {
-                projectFields.TypeDoc = serializeProjectTypeDocValue(projectData.documents);
-            }
+            setFieldIfPresent(projetsColumns, projectFields, 'DOP', projectData.dop);
+            setFieldIfPresent(projetsColumns, projectFields, 'TypeDoc', serializeProjectTypeDocValue(projectData.documents));
             // 1. Create Project
             const projectActions = [
                 ["AddRecord", "Projets", null, projectFields]

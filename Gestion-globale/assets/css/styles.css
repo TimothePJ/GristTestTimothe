@@ -34,8 +34,7 @@ body {
 }
 
 #global-status,
-#project-list-summary,
-#budget-recap-summary {
+#project-list-summary {
   margin: 0;
   color: var(--color-text-muted);
 }
@@ -81,7 +80,6 @@ body {
 
 .project-picker-panel,
 .global-kpi-panel,
-.budget-recap-section,
 .global-chart-section {
   padding: 24px;
   border: 1px solid rgba(0, 73, 144, 0.1);
@@ -105,6 +103,33 @@ body {
   gap: 10px;
 }
 
+.project-selection-mode {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid rgba(0, 73, 144, 0.16);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.project-selection-mode-btn {
+  min-width: 118px;
+  border-radius: 0;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: none;
+}
+
+.project-selection-mode-btn + .project-selection-mode-btn {
+  border-left: 1px solid rgba(0, 73, 144, 0.16);
+}
+
+.project-selection-mode-btn:hover,
+.project-selection-mode-btn.is-active {
+  transform: none;
+  background: var(--color-primary);
+  color: #fff;
+}
+
 .secondary-btn {
   background: var(--color-surface-muted);
   color: var(--color-primary);
@@ -118,50 +143,107 @@ body {
 
 .project-list {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
   max-height: 430px;
   overflow: auto;
   padding-right: 4px;
 }
 
-.project-list-item {
+.project-tile {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  padding: 12px 14px;
+  gap: 14px;
+  align-content: space-between;
+  min-height: 154px;
+  padding: 14px;
   border: 1px solid rgba(0, 73, 144, 0.1);
   border-radius: var(--radius-sm);
   background: linear-gradient(180deg, rgba(0, 73, 144, 0.02), rgba(0, 73, 144, 0.05));
+  color: var(--color-text);
+  text-align: left;
+  box-shadow: none;
+  cursor: pointer;
 }
 
-.project-list-item input {
-  width: auto;
-  margin: 0;
+.project-tile:hover {
+  transform: none;
+  border-color: rgba(0, 73, 144, 0.26);
+  background: rgba(0, 73, 144, 0.07);
 }
 
-.project-list-main {
+.project-tile.is-selected {
+  border-color: #003f7f;
+  background: #003f7f;
+  color: #fff;
+}
+
+.project-tile-main {
   min-width: 0;
 }
 
-.project-list-name {
+.project-tile-name {
   display: block;
   overflow-wrap: anywhere;
-  color: var(--color-text);
+  color: inherit;
   font-weight: 700;
 }
 
-.project-list-meta {
+.project-tile-meta {
   display: block;
   margin-top: 2px;
   color: var(--color-text-muted);
   font-size: 0.88rem;
 }
 
-.project-list-budget {
+.project-tile.is-selected .project-tile-meta {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.project-tile-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.project-tile-values > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.project-tile-value-label {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}
+
+.project-tile.is-selected .project-tile-value-label {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.project-tile-values strong {
+  overflow-wrap: anywhere;
   color: var(--color-primary);
   font-weight: 700;
-  white-space: nowrap;
+}
+
+.project-tile.is-selected .project-tile-values strong {
+  color: #fff;
+}
+
+.project-tile-remaining.is-positive {
+  color: #168a4a;
+}
+
+.project-tile-remaining.is-negative {
+  color: #b42318;
+}
+
+.project-tile.is-selected .project-tile-remaining.is-positive {
+  color: #8ff0b0;
+}
+
+.project-tile.is-selected .project-tile-remaining.is-negative {
+  color: #ffb3ad;
 }
 
 .global-kpi-panel {
@@ -197,49 +279,6 @@ body {
   font-size: 1.15rem;
 }
 
-.budget-recap-table-wrap {
-  overflow-x: auto;
-}
-
-.budget-recap-table {
-  margin-bottom: 0;
-  min-width: 900px;
-}
-
-.budget-recap-table th:not(:first-child),
-.budget-recap-table td:not(:first-child) {
-  text-align: right;
-}
-
-.budget-recap-table th:nth-child(2),
-.budget-recap-table td:nth-child(2) {
-  text-align: left;
-}
-
-.budget-recap-table tfoot td {
-  background: rgba(0, 73, 144, 0.92);
-  color: #fff;
-  font-weight: 700;
-}
-
-.budget-recap-table .amount-positive {
-  color: #168a4a;
-  font-weight: 700;
-}
-
-.budget-recap-table .amount-negative {
-  color: #b42318;
-  font-weight: 700;
-}
-
-.budget-recap-table tfoot .amount-positive {
-  color: #b7f3ca;
-}
-
-.budget-recap-table tfoot .amount-negative {
-  color: #ffd0cc;
-}
-
 .global-empty-state {
   padding: 18px;
   border: 1px dashed rgba(0, 73, 144, 0.2);
@@ -251,6 +290,58 @@ body {
 
 .global-chart-section .table-header {
   margin-bottom: 14px;
+}
+
+.expense-navigation-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 14px;
+  border: 1px solid rgba(0, 73, 144, 0.1);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(0, 73, 144, 0.02), rgba(0, 73, 144, 0.05));
+}
+
+.expense-navigation-left,
+.expense-navigation-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.expense-navigation-mode {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid rgba(0, 73, 144, 0.16);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.expense-navigation-mode-btn {
+  min-width: 86px;
+  border-radius: 0;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: none;
+}
+
+.expense-navigation-mode-btn + .expense-navigation-mode-btn {
+  border-left: 1px solid rgba(0, 73, 144, 0.16);
+}
+
+.expense-navigation-mode-btn:hover,
+.expense-navigation-mode-btn.is-active {
+  transform: none;
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.expense-navigation-range {
+  color: var(--color-text);
+  font-size: 0.95rem;
 }
 
 .global-chart-section .table-header h3 {
@@ -289,12 +380,32 @@ body {
   }
 
   .dop-filter,
-  .project-picker-actions {
+  .project-picker-actions,
+  .project-selection-mode,
+  .expense-navigation-panel,
+  .expense-navigation-actions {
     width: 100%;
   }
 
   .dop-filter-btn,
-  .project-picker-actions button {
+  .project-selection-mode-btn,
+  .project-picker-actions button,
+  .expense-navigation-actions button {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .expense-navigation-panel,
+  .expense-navigation-left {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .expense-navigation-mode {
+    width: 100%;
+  }
+
+  .expense-navigation-mode-btn {
     flex: 1 1 0;
     min-width: 0;
   }
@@ -303,11 +414,11 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .project-list-item {
-    grid-template-columns: auto minmax(0, 1fr);
+  .project-list {
+    grid-template-columns: 1fr;
   }
 
-  .project-list-budget {
-    grid-column: 2;
+  .project-tile {
+    min-height: 0;
   }
 }

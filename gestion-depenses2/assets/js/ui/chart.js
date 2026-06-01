@@ -451,17 +451,7 @@ export function renderGroupedExpenseChart(
       },
       plugins: {
         legend: {
-          position: "bottom",
-          labels: {
-            usePointStyle: true,
-            pointStyle: "rectRounded",
-            boxWidth: 10,
-            boxHeight: 10,
-            padding: 14,
-            font: {
-              size: 11,
-            },
-          },
+          display: false,
         },
         datalabels: {
           display: false,

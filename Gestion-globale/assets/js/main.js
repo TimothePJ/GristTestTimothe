@@ -1,6 +1,5 @@
 import { fetchExpenseAppTables, initGrist } from "../../../gestion-depenses2/assets/js/services/gristService.js";
 import {
-  getProjectBudgetTotal,
   getProjectKpis,
 } from "../../../gestion-depenses2/assets/js/services/projectService.js";
 import { formatNumber, toText } from "../../../gestion-depenses2/assets/js/utils/format.js";
@@ -24,7 +23,6 @@ import {
 import {
   buildAggregatedProject,
   buildGlobalExpenseData,
-  buildProjectBudgetRows,
   filterProjectsByDop,
   getDopLabel,
 } from "./services/globalProjectService.js";
@@ -42,6 +40,8 @@ const state = {
   projects: [],
   selectedDop: "all",
   selectedProjectIds: new Set(),
+  selectionMode: "single",
+  expenseNavigationMode: "month",
   avancementConfigBySelection: new Map(),
   spendingChart: null,
 };
@@ -54,19 +54,18 @@ function getDomRefs() {
     dopButtons: [...document.querySelectorAll(".dop-filter-btn")],
     projectList: document.getElementById("project-list"),
     projectListSummary: document.getElementById("project-list-summary"),
-    selectVisibleProjectsBtn: document.getElementById("select-visible-projects-btn"),
-    clearVisibleProjectsBtn: document.getElementById("clear-visible-projects-btn"),
+    selectionModeButtons: [...document.querySelectorAll(".project-selection-mode-btn")],
+    toggleVisibleProjectsBtn: document.getElementById("toggle-visible-projects-btn"),
     totalBudget: document.getElementById("global-total-budget"),
     provisionalSpending: document.getElementById("global-provisional-spending"),
     realSpending: document.getElementById("global-real-spending"),
     remainingBudget: document.getElementById("global-remaining-budget"),
-    budgetRecapSummary: document.getElementById("budget-recap-summary"),
-    budgetRecapBody: document.getElementById("budget-recap-body"),
-    budgetRecapFoot: document.getElementById("budget-recap-foot"),
     chartsEmptyState: document.getElementById("charts-empty-state"),
     avancementDashboardSection: document.getElementById("avancement-dashboard-section"),
     expenseBoard: document.getElementById("expense-board"),
     realExpenseBoard: document.getElementById("real-expense-board"),
+    expenseNavigationModeButtons: [...document.querySelectorAll(".expense-navigation-mode-btn")],
+    expenseNavigationRange: document.getElementById("expense-navigation-range"),
     spendingChartControls: document.getElementById("spending-chart-controls"),
     spendingChartCanvas: document.getElementById("spending-chart"),
   });
@@ -85,13 +84,53 @@ function formatCurrency(value) {
   return `${formatNumber(value)} EUR`;
 }
 
-function getSignedAmountClass(value) {
-  const numericValue = Number(value);
-  if (!Number.isFinite(numericValue) || numericValue === 0) {
-    return "amount-neutral";
+function parseDateValue(value) {
+  const text = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return null;
   }
 
-  return numericValue < 0 ? "amount-negative" : "amount-positive";
+  const date = new Date(`${text}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function toDateInputValue(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate()
+  ).padStart(2, "0")}`;
+}
+
+function formatShortDate(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toLocaleDateString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+function getExpenseNavigationPeriodCount(mode, rangeStart, rangeEnd) {
+  if (!(rangeStart instanceof Date) || !(rangeEnd instanceof Date) || rangeStart > rangeEnd) {
+    return 1;
+  }
+
+  if (mode === "year") {
+    return Math.max(1, rangeEnd.getFullYear() - rangeStart.getFullYear() + 1);
+  }
+
+  return Math.max(
+    1,
+    (rangeEnd.getFullYear() - rangeStart.getFullYear()) * 12 +
+      (rangeEnd.getMonth() - rangeStart.getMonth()) +
+      1
+  );
 }
 
 function getProjectId(project) {
@@ -109,14 +148,63 @@ function compareProjects(left, right) {
   );
 }
 
-function getFilteredProjects() {
-  return filterProjectsByDop(state.projects, state.selectedDop).sort(compareProjects);
+function isSelectableProject(project) {
+  return !project?.isTimeRealSynthetic;
+}
+
+function getSelectableProjects() {
+  return filterProjectsByDop(state.projects, state.selectedDop)
+    .filter(isSelectableProject)
+    .sort(compareProjects);
 }
 
 function getVisibleSelectedProjects() {
-  return getFilteredProjects().filter((project) => (
+  return getSelectableProjects().filter((project) => (
     state.selectedProjectIds.has(getProjectId(project))
   ));
+}
+
+function areAllVisibleProjectsSelected(projects = getSelectableProjects()) {
+  return projects.length > 0 && projects.every((project) => (
+    state.selectedProjectIds.has(getProjectId(project))
+  ));
+}
+
+function selectFirstVisibleProject(projects = getSelectableProjects()) {
+  const firstProjectId = getProjectId(projects[0]);
+  state.selectedProjectIds = firstProjectId ? new Set([firstProjectId]) : new Set();
+}
+
+function selectFirstVisibleSelectedProject(projects = getSelectableProjects()) {
+  const firstSelectedProject = (projects || []).find((project) => (
+    state.selectedProjectIds.has(getProjectId(project))
+  ));
+
+  const projectId = getProjectId(firstSelectedProject || projects?.[0]);
+  state.selectedProjectIds = projectId ? new Set([projectId]) : new Set();
+}
+
+function ensureSelectionForMode(projects = getSelectableProjects(), { forceFirst = false } = {}) {
+  if (state.selectionMode !== "single") {
+    return;
+  }
+
+  if (forceFirst) {
+    selectFirstVisibleProject(projects);
+    return;
+  }
+
+  const visibleProjectIds = new Set(projects.map(getProjectId).filter(Boolean));
+  const selectedVisibleIds = [...state.selectedProjectIds].filter((projectId) =>
+    visibleProjectIds.has(projectId)
+  );
+
+  if (selectedVisibleIds.length === 1) {
+    state.selectedProjectIds = new Set(selectedVisibleIds);
+    return;
+  }
+
+  selectFirstVisibleProject(projects);
 }
 
 function getSelectionConfigKey(projects) {
@@ -141,6 +229,68 @@ function applyAvancementConfigOverride(aggregatedProject, selectedProjects) {
   return aggregatedProject;
 }
 
+function getExpenseNavigationBounds(aggregatedProject) {
+  const bounds = aggregatedProject?.globalExpenseMonthBounds;
+  if (!bounds) {
+    return null;
+  }
+
+  const rangeStart = parseDateValue(bounds.startDate);
+  const rangeEnd = parseDateValue(bounds.endDate);
+  if (!rangeStart || !rangeEnd) {
+    return null;
+  }
+
+  return { rangeStart, rangeEnd };
+}
+
+function getExpenseNavigationView(aggregatedProject) {
+  const bounds = getExpenseNavigationBounds(aggregatedProject);
+  if (!bounds) {
+    return null;
+  }
+
+  const { rangeStart, rangeEnd } = bounds;
+  const mode = state.expenseNavigationMode === "year" ? "year" : "month";
+  const startDate = toDateInputValue(rangeStart);
+
+  return {
+    mode,
+    startDate,
+    rangeStartDate: toDateInputValue(rangeStart),
+    rangeEndDate: toDateInputValue(rangeEnd),
+    periodCount: getExpenseNavigationPeriodCount(
+      mode,
+      rangeStart,
+      rangeEnd
+    ),
+    fullRange: true,
+  };
+}
+
+function getExpenseNavigationEndDate(view) {
+  if (!view) {
+    return null;
+  }
+
+  const startDate = parseDateValue(view.startDate);
+  const rangeEndDate = parseDateValue(view.rangeEndDate);
+  if (!startDate || !rangeEndDate) {
+    return null;
+  }
+
+  return rangeEndDate;
+}
+
+function applyExpenseNavigationView(aggregatedProject) {
+  const view = getExpenseNavigationView(aggregatedProject);
+  if (view) {
+    aggregatedProject.globalExpenseTimelineView = view;
+  }
+
+  return view;
+}
+
 async function saveLocalAvancementConfig(selectedProjects, project, serializedConfig) {
   const configKey = getSelectionConfigKey(selectedProjects);
   if (configKey) {
@@ -161,13 +311,50 @@ function renderDopButtons() {
   });
 }
 
+function renderSelectionModeControls(projects) {
+  dom.selectionModeButtons.forEach((button) => {
+    const isActive = button.dataset.selectionMode === state.selectionMode;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+    button.disabled = !projects.length;
+  });
+
+  const isMultipleMode = state.selectionMode === "multiple";
+  const allVisibleProjectsSelected = areAllVisibleProjectsSelected(projects);
+  dom.toggleVisibleProjectsBtn.hidden = !isMultipleMode;
+  dom.toggleVisibleProjectsBtn.disabled = !projects.length;
+  dom.toggleVisibleProjectsBtn.textContent = allVisibleProjectsSelected
+    ? "Tout deselectionner"
+    : "Tout selectionner";
+  dom.toggleVisibleProjectsBtn.classList.toggle("secondary-btn", allVisibleProjectsSelected);
+}
+
+function renderExpenseNavigationControls(aggregatedProject) {
+  const view = aggregatedProject?.globalExpenseTimelineView || null;
+  const hasView = Boolean(view);
+  const startDate = parseDateValue(view?.startDate);
+  const endDate = getExpenseNavigationEndDate(view);
+
+  dom.expenseNavigationModeButtons.forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.expenseMode === state.expenseNavigationMode);
+    button.disabled = !hasView;
+  });
+
+  dom.expenseNavigationRange.textContent =
+    hasView && startDate && endDate
+      ? `${formatShortDate(startDate)} - ${formatShortDate(endDate)}`
+      : "Aucune periode";
+}
+
 function renderProjectList(filteredProjects) {
   const selectedCount = filteredProjects.filter((project) => (
     state.selectedProjectIds.has(getProjectId(project))
   )).length;
 
   dom.projectListSummary.textContent =
-    `${selectedCount} projet(s) coche(s) sur ${filteredProjects.length}`;
+    state.selectionMode === "single"
+      ? `${selectedCount} projet selectionne sur ${filteredProjects.length}`
+      : `${selectedCount} projet(s) selectionne(s) sur ${filteredProjects.length}`;
 
   if (!filteredProjects.length) {
     dom.projectList.innerHTML = `
@@ -179,20 +366,35 @@ function renderProjectList(filteredProjects) {
   dom.projectList.innerHTML = filteredProjects
     .map((project) => {
       const projectId = getProjectId(project);
-      const checked = state.selectedProjectIds.has(projectId) ? "checked" : "";
+      const isSelected = state.selectedProjectIds.has(projectId);
       const projectName = toText(project.name) || "Projet sans nom";
       const projectNumber = toText(project.projectNumber);
       const meta = [projectNumber, getDopLabel(project.dop)].filter(Boolean).join(" - ");
+      const projectKpis = getProjectKpis(project);
+      const remainingClass = projectKpis.remainingBudget < 0 ? "is-negative" : "is-positive";
 
       return `
-        <label class="project-list-item">
-          <input type="checkbox" data-project-id="${escapeHtml(projectId)}" ${checked}>
-          <span class="project-list-main">
-            <span class="project-list-name">${escapeHtml(projectName)}</span>
-            <span class="project-list-meta">${escapeHtml(meta)}</span>
+        <button
+          type="button"
+          class="project-tile${isSelected ? " is-selected" : ""}"
+          data-project-id="${escapeHtml(projectId)}"
+          aria-pressed="${isSelected ? "true" : "false"}"
+        >
+          <span class="project-tile-main">
+            <span class="project-tile-name">${escapeHtml(projectName)}</span>
+            <span class="project-tile-meta">${escapeHtml(meta)}</span>
           </span>
-          <span class="project-list-budget">${escapeHtml(formatCurrency(getProjectBudgetTotal(project)))}</span>
-        </label>
+          <span class="project-tile-values">
+            <span>
+              <span class="project-tile-value-label">Budget</span>
+              <strong>${escapeHtml(formatCurrency(projectKpis.totalBudget))}</strong>
+            </span>
+            <span>
+              <span class="project-tile-value-label">Reste</span>
+              <strong class="project-tile-remaining ${remainingClass}">${escapeHtml(formatCurrency(projectKpis.remainingBudget))}</strong>
+            </span>
+          </span>
+        </button>
       `;
     })
     .join("");
@@ -214,64 +416,6 @@ function renderKpis(aggregatedProject) {
   dom.remainingBudget.textContent = formatCurrency(kpis.remainingBudget);
 }
 
-function renderBudgetRecap(selectedProjects) {
-  const rows = buildProjectBudgetRows(selectedProjects);
-  const totals = rows.reduce(
-    (result, row) => {
-      result.budget += row.budget;
-      result.provisionalSpending += row.provisionalSpending;
-      result.realSpending += row.realSpending;
-      result.remainingBudget += row.remainingBudget;
-      return result;
-    },
-    {
-      budget: 0,
-      provisionalSpending: 0,
-      realSpending: 0,
-      remainingBudget: 0,
-    }
-  );
-
-  dom.budgetRecapSummary.textContent = `${rows.length} projet(s) dans le recap`;
-
-  if (!rows.length) {
-    dom.budgetRecapBody.innerHTML = `
-      <tr>
-        <td colspan="6">Aucun projet coche.</td>
-      </tr>
-    `;
-    dom.budgetRecapFoot.innerHTML = "";
-    return;
-  }
-
-  dom.budgetRecapBody.innerHTML = rows
-    .map((row) => `
-      <tr>
-        <td>
-          <strong>${escapeHtml(row.name)}</strong>
-          <br>
-          <span class="project-list-meta">${escapeHtml(row.projectNumber)}</span>
-        </td>
-        <td>${escapeHtml(getDopLabel(row.dop))}</td>
-        <td>${escapeHtml(formatCurrency(row.budget))}</td>
-        <td>${escapeHtml(formatCurrency(row.provisionalSpending))}</td>
-        <td>${escapeHtml(formatCurrency(row.realSpending))}</td>
-        <td class="${getSignedAmountClass(row.remainingBudget)}">${escapeHtml(formatCurrency(row.remainingBudget))}</td>
-      </tr>
-    `)
-    .join("");
-
-  dom.budgetRecapFoot.innerHTML = `
-    <tr>
-      <td colspan="2">Total</td>
-      <td>${escapeHtml(formatCurrency(totals.budget))}</td>
-      <td>${escapeHtml(formatCurrency(totals.provisionalSpending))}</td>
-      <td>${escapeHtml(formatCurrency(totals.realSpending))}</td>
-      <td class="${getSignedAmountClass(totals.remainingBudget)}">${escapeHtml(formatCurrency(totals.remainingBudget))}</td>
-    </tr>
-  `;
-}
-
 function clearAggregateViews() {
   clearAvancementDashboard(dom.avancementDashboardSection);
   clearExpenseTimeline(dom.expenseBoard);
@@ -283,6 +427,11 @@ function clearAggregateViews() {
 function renderAggregateViews(aggregatedProject, selectedProjects = getVisibleSelectedProjects()) {
   const hasSelection = Boolean(aggregatedProject);
   dom.chartsEmptyState.hidden = hasSelection;
+
+  if (aggregatedProject) {
+    applyExpenseNavigationView(aggregatedProject);
+  }
+  renderExpenseNavigationControls(aggregatedProject);
 
   if (!hasSelection) {
     clearAggregateViews();
@@ -306,7 +455,8 @@ function renderAggregateViews(aggregatedProject, selectedProjects = getVisibleSe
 }
 
 function renderApp() {
-  const filteredProjects = getFilteredProjects();
+  const filteredProjects = getSelectableProjects();
+  ensureSelectionForMode(filteredProjects);
   const selectedProjects = getVisibleSelectedProjects();
   const aggregatedProject = applyAvancementConfigOverride(
     buildAggregatedProject(selectedProjects),
@@ -314,8 +464,8 @@ function renderApp() {
   );
 
   renderDopButtons();
+  renderSelectionModeControls(filteredProjects);
   renderProjectList(filteredProjects);
-  renderBudgetRecap(selectedProjects);
   renderKpis(aggregatedProject);
   renderAggregateViews(aggregatedProject, selectedProjects);
 }
@@ -328,33 +478,62 @@ function bindEvents() {
     });
   });
 
-  dom.projectList.addEventListener("change", (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLInputElement)) return;
-    if (target.type !== "checkbox") return;
+  dom.selectionModeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextMode = button.dataset.selectionMode === "multiple" ? "multiple" : "single";
+      if (nextMode === state.selectionMode) {
+        return;
+      }
 
-    const projectId = target.dataset.projectId;
+      state.selectionMode = nextMode;
+      if (state.selectionMode === "single") {
+        selectFirstVisibleSelectedProject(getSelectableProjects());
+      }
+      renderApp();
+    });
+  });
+
+  dom.projectList.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const projectTile = target.closest(".project-tile");
+    if (!(projectTile instanceof HTMLButtonElement)) return;
+
+    const projectId = projectTile.dataset.projectId;
     if (!projectId) return;
 
-    if (target.checked) {
-      state.selectedProjectIds.add(projectId);
-    } else {
+    if (state.selectionMode === "single") {
+      state.selectedProjectIds = new Set([projectId]);
+      renderApp();
+      return;
+    }
+
+    if (state.selectedProjectIds.has(projectId)) {
       state.selectedProjectIds.delete(projectId);
+    } else {
+      state.selectedProjectIds.add(projectId);
     }
 
     renderApp();
   });
 
-  dom.selectVisibleProjectsBtn.addEventListener("click", () => {
-    getFilteredProjects().forEach((project) => {
-      state.selectedProjectIds.add(getProjectId(project));
-    });
-    renderApp();
-  });
+  dom.toggleVisibleProjectsBtn.addEventListener("click", () => {
+    if (state.selectionMode !== "multiple") {
+      return;
+    }
 
-  dom.clearVisibleProjectsBtn.addEventListener("click", () => {
-    getFilteredProjects().forEach((project) => {
-      state.selectedProjectIds.delete(getProjectId(project));
+    const visibleProjects = getSelectableProjects();
+    const allVisibleProjectsSelected = areAllVisibleProjectsSelected(visibleProjects);
+    visibleProjects.forEach((project) => {
+      const projectId = getProjectId(project);
+      if (!projectId) return;
+
+      if (allVisibleProjectsSelected) {
+        state.selectedProjectIds.delete(projectId);
+      } else {
+        state.selectedProjectIds.add(projectId);
+      }
     });
     renderApp();
   });
@@ -389,6 +568,18 @@ function bindEvents() {
       selectedProjects
     );
   });
+
+  dom.expenseNavigationModeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextMode = button.dataset.expenseMode;
+      if (!["month", "year"].includes(nextMode)) {
+        return;
+      }
+
+      state.expenseNavigationMode = nextMode;
+      renderApp();
+    });
+  });
 }
 
 async function loadData() {
@@ -397,9 +588,10 @@ async function loadData() {
   const { projects } = buildGlobalExpenseData(tables);
 
   state.projects = projects;
-  state.selectedProjectIds = new Set(projects.map(getProjectId).filter(Boolean));
+  state.selectedProjectIds = new Set();
 
-  setStatus(`${projects.length} projet(s) charge(s)`);
+  const selectableProjectCount = projects.filter(isSelectableProject).length;
+  setStatus(`${selectableProjectCount} projet(s) charge(s)`);
   renderApp();
 }
 

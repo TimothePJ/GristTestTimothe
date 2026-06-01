@@ -30,8 +30,11 @@
                         <p id="project-list-summary"></p>
                     </div>
                     <div class="project-picker-actions">
-                        <button type="button" id="select-visible-projects-btn">Tout cocher</button>
-                        <button type="button" id="clear-visible-projects-btn" class="secondary-btn">Tout decocher</button>
+                        <div class="project-selection-mode" role="group" aria-label="Mode de selection des projets">
+                            <button type="button" id="project-selection-single-btn" class="project-selection-mode-btn is-active" data-selection-mode="single">Un projet</button>
+                            <button type="button" id="project-selection-multiple-btn" class="project-selection-mode-btn" data-selection-mode="multiple">Plusieurs projets</button>
+                        </div>
+                        <button type="button" id="toggle-visible-projects-btn" hidden>Tout selectionner</button>
                     </div>
                 </div>
                 <div id="project-list" class="project-list"></div>
@@ -60,33 +63,8 @@
             </section>
         </section>
 
-        <section class="budget-recap-section" aria-labelledby="budget-recap-title">
-            <div class="global-section-heading">
-                <div>
-                    <h2 id="budget-recap-title">Recap budget par projet</h2>
-                    <p id="budget-recap-summary"></p>
-                </div>
-            </div>
-            <div class="budget-recap-table-wrap">
-                <table class="budget-recap-table">
-                    <thead>
-                        <tr>
-                            <th>Projet</th>
-                            <th>DOP</th>
-                            <th>Budget</th>
-                            <th>Assigne</th>
-                            <th>Depense reel</th>
-                            <th>Reste</th>
-                        </tr>
-                    </thead>
-                    <tbody id="budget-recap-body"></tbody>
-                    <tfoot id="budget-recap-foot"></tfoot>
-                </table>
-            </div>
-        </section>
-
         <p id="charts-empty-state" class="global-empty-state" hidden>
-            Coche au moins un projet pour afficher les donnees globales.
+            Selectionne au moins un projet pour afficher les donnees globales.
         </p>
 
         <section id="avancement-dashboard-section" class="avancement-dashboard-section" hidden>
@@ -116,6 +94,15 @@
         </section>
 
         <section class="global-chart-section">
+            <div class="expense-navigation-panel" aria-label="Navigation des graphiques de depenses">
+                <div class="expense-navigation-left">
+                    <div class="expense-navigation-mode" role="group" aria-label="Format d'affichage">
+                        <button type="button" class="expense-navigation-mode-btn is-active" data-expense-mode="month">Mois</button>
+                        <button type="button" class="expense-navigation-mode-btn" data-expense-mode="year">Annee</button>
+                    </div>
+                    <strong id="expense-navigation-range" class="expense-navigation-range"></strong>
+                </div>
+            </div>
             <div class="table-header">
                 <h3>Previsionnel - Depense</h3>
             </div>

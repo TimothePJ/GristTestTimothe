@@ -104,6 +104,10 @@ input {
   gap: 20px;
 }
 
+.avancement-dashboard-section--wide .avancement-dashboard-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .avancement-dashboard-content {
   display: contents;
   min-width: 0;
@@ -129,6 +133,10 @@ input {
   padding: 18px;
 }
 
+.avancement-dashboard-section--wide .avancement-chart-card--main {
+  grid-column: 1 / -1;
+}
+
 .avancement-chart-card canvas {
   width: 100% !important;
   height: 100% !important;
@@ -149,10 +157,15 @@ input {
   max-height: 62vh;
   overflow-y: auto;
   padding: 15px;
-  border: 1px solid rgba(237, 27, 45, 0.75);
+  border: 1px solid rgba(0, 73, 144, 0.12);
   border-radius: var(--radius-md);
   background: #fff;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.avancement-side-panel[hidden],
+.avancement-dashboard-section--wide .avancement-side-panel {
+  display: none !important;
 }
 
 .avancement-side-panel h3 {
@@ -171,7 +184,7 @@ input {
   align-items: center;
   gap: 8px;
   padding: 7px 0;
-  border-bottom: 1px solid rgba(237, 27, 45, 0.2);
+  border-bottom: 1px solid rgba(0, 73, 144, 0.08);
   color: var(--color-primary);
   font-size: 0.95rem;
 }
@@ -246,7 +259,7 @@ input {
 .avancement-summary-table th,
 .avancement-summary-table td {
   padding: 8px;
-  border: 1px solid rgba(237, 27, 45, 0.85);
+  border: 1px solid rgba(0, 73, 144, 0.12);
   text-align: left;
 }
 
@@ -291,8 +304,8 @@ input {
 }
 
 .avancement-budget-progress-editable:focus {
-  border-bottom-color: var(--color-accent);
-  background: rgba(237, 27, 45, 0.06);
+  border-bottom-color: var(--color-primary);
+  background: rgba(0, 73, 144, 0.06);
 }
 
 .avancement-budget-progress-editable.is-disabled {
@@ -2336,6 +2349,123 @@ td input {
 
 .expense-graph-scroll::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 73, 144, 0.48);
+}
+
+.expense-graph-legend {
+  display: grid;
+  gap: 10px;
+  max-height: 164px;
+  overflow-y: auto;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(0, 73, 144, 0.08);
+}
+
+.expense-graph-legend-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.expense-graph-legend-title {
+  color: var(--color-primary);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.expense-graph-legend-actions {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid rgba(0, 73, 144, 0.12);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 73, 144, 0.03);
+}
+
+.expense-graph-legend-action {
+  padding: 6px 9px;
+  border: 0;
+  border-right: 1px solid rgba(0, 73, 144, 0.1);
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.expense-graph-legend-action:last-child {
+  border-right: 0;
+}
+
+.expense-graph-legend-action:hover:not(:disabled) {
+  background: rgba(0, 73, 144, 0.08);
+  color: var(--color-primary);
+}
+
+.expense-graph-legend-action:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.expense-graph-legend-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.expense-graph-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 240px;
+  padding: 5px 8px;
+  border: 1px solid rgba(0, 73, 144, 0.08);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 73, 144, 0.03);
+  color: var(--color-text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.expense-graph-legend-item:hover {
+  border-color: rgba(0, 73, 144, 0.18);
+  background: rgba(0, 73, 144, 0.07);
+}
+
+.expense-graph-legend-item.is-hidden {
+  opacity: 0.48;
+  background: rgba(0, 73, 144, 0.02);
+  color: var(--color-text-muted);
+}
+
+.expense-graph-legend-item.is-hidden .expense-graph-legend-label {
+  text-decoration: line-through;
+}
+
+.expense-graph-legend-item.is-hidden .expense-graph-legend-swatch {
+  background: transparent !important;
+}
+
+.expense-graph-legend-swatch {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+}
+
+.expense-graph-legend-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .expense-graph-summary {
