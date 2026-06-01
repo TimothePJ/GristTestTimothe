@@ -3,6 +3,7 @@ import { state, setState } from "./state.js";
 import {
   initGrist,
   buildProjectOptions,
+  fetchProjectAvancementConfigs,
   fetchPlanningRows,
   syncPlanningRealiseValues,
   syncPlanningRetardValues,
@@ -16,6 +17,7 @@ import {
   toText,
 } from "./services/gristService.js";
 import {
+  buildProjectRealisationTargetLookup,
   buildPlanningRealiseUpdates,
   buildPlanningRetardUpdates,
   buildTimelineDataFromPlanningRows,
@@ -637,6 +639,8 @@ async function refreshPlanning() {
     setPlanningStatus("Chargement du planning...");
 
     const selectedProject = state.selectedProject || "";
+    const projectAvancementConfigs = await fetchProjectAvancementConfigs();
+    const realisationTargetLookup = buildProjectRealisationTargetLookup(projectAvancementConfigs);
     let planningRows = await fetchPlanningRows();
     let syncResult = { updatedCount: 0 };
 
@@ -654,7 +658,7 @@ async function refreshPlanning() {
 
     let realiseSyncResult = { updatedCount: 0 };
     try {
-      const realiseUpdates = buildPlanningRealiseUpdates(planningRows);
+      const realiseUpdates = buildPlanningRealiseUpdates(planningRows, realisationTargetLookup);
       if (realiseUpdates.length > 0) {
         realiseSyncResult = await syncPlanningRealiseValues(realiseUpdates);
         planningRows = await fetchPlanningRows();
@@ -665,7 +669,11 @@ async function refreshPlanning() {
 
     let retardSyncResult = { updatedCount: 0 };
     try {
-      const retardUpdates = buildPlanningRetardUpdates(planningRows);
+      const retardUpdates = buildPlanningRetardUpdates(
+        planningRows,
+        undefined,
+        realisationTargetLookup
+      );
       if (retardUpdates.length > 0) {
         retardSyncResult = await syncPlanningRetardValues(retardUpdates);
         planningRows = await fetchPlanningRows();
@@ -691,7 +699,8 @@ async function refreshPlanning() {
     const timelineData = buildTimelineDataFromPlanningRows(
       planningRows,
       selectedProject,
-      normalizedZone
+      normalizedZone,
+      realisationTargetLookup
     );
     const planningWarnings = buildPlanningWarningsFromGroups(
       timelineData?.groups || []

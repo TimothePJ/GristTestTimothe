@@ -13,6 +13,11 @@ import {
   getSegmentAllocationByMonth,
   parseRawDateTime,
 } from "../utils/timeSegments.js";
+import {
+  buildTargetIndiceByTypeFromAvancement,
+  computePlanningRealisationValue as computeIndexedPlanningRealisationValue,
+  getTargetIndiceForDocumentType,
+} from "../utils/planningRealisation.js";
 
 function parseBillingPercentageByMonth(rawValue, projectNumber) {
   if (!rawValue) return {};
@@ -201,31 +206,8 @@ function getPlanningTaskLabel(row, planningColumns) {
   );
 }
 
-function normalizePlanningIndice(value) {
-  return toText(value).trim().toUpperCase();
-}
-
-export function computePlanningRealisationValue(typeDoc, indice) {
-  const normalizedTypeDoc = toText(typeDoc).trim().toUpperCase();
-  const normalizedIndice = normalizePlanningIndice(indice);
-
-  // The result must always be derived from the current Indice value.
-  // Empty indice remains a distinct state from the first indice "0".
-  if (normalizedIndice === "") {
-    return 0;
-  }
-
-  const isNumericIndice = /^\d+$/.test(normalizedIndice);
-  if (isNumericIndice) {
-    return normalizedTypeDoc.includes("COFFRAGE") ? 50 : 100;
-  }
-
-  const isAlphabeticIndice = /^[A-Z]/.test(normalizedIndice);
-  if (isAlphabeticIndice) {
-    return 100;
-  }
-
-  return 100;
+export function computePlanningRealisationValue(typeDoc, indice, targetIndice = "") {
+  return computeIndexedPlanningRealisationValue(typeDoc, indice, targetIndice);
 }
 
 function getDayFloor(date) {
@@ -487,26 +469,26 @@ export function buildExpenseData({
       return;
     }
 
-    const task = {
-      id: Number(row?.[planningColumns.id]),
-      name: getPlanningTaskLabel(row, planningColumns),
-      taskCode: toText(row?.[planningColumns.taskCode]),
-      typeDoc: toText(row?.[planningColumns.typeDoc]),
-      indice: toText(row?.[planningColumns.indice]),
-      realisationPct: toFiniteNumber(
-        row?.[planningColumns.realise],
-        computePlanningRealisationValue(
-          row?.[planningColumns.typeDoc],
-          row?.[planningColumns.indice]
-        )
-      ),
-      retardsDays: toFiniteNumber(row?.[planningColumns.retards], 0),
-      startAt: range.startAt,
-      endAt: range.endAt,
-      deadlineAt: parsePlanningDate(row?.[planningColumns.dateLimite]) || range.endAt,
-    };
-
     linkedProjects.forEach((project) => {
+      const targetIndiceByType = buildTargetIndiceByTypeFromAvancement(
+        project?.avancementConfigRaw
+      );
+      const typeDoc = toText(row?.[planningColumns.typeDoc]);
+      const indice = toText(row?.[planningColumns.indice]);
+      const targetIndice = getTargetIndiceForDocumentType(typeDoc, targetIndiceByType);
+      const task = {
+        id: Number(row?.[planningColumns.id]),
+        name: getPlanningTaskLabel(row, planningColumns),
+        taskCode: toText(row?.[planningColumns.taskCode]),
+        typeDoc,
+        indice,
+        realisationPct: computePlanningRealisationValue(typeDoc, indice, targetIndice),
+        retardsDays: toFiniteNumber(row?.[planningColumns.retards], 0),
+        startAt: range.startAt,
+        endAt: range.endAt,
+        deadlineAt: parsePlanningDate(row?.[planningColumns.dateLimite]) || range.endAt,
+      };
+
       project.planningTasks.push(task);
     });
   });

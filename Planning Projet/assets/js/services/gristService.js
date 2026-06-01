@@ -1720,6 +1720,18 @@ export async function buildProjectOptions() {
   return [...values].sort((a, b) => a.localeCompare(b, "fr"));
 }
 
+export async function fetchProjectAvancementConfigs() {
+  const table = APP_CONFIG.grist.projectsTable;
+  const rows = await fetchTableRows(table.sourceTable);
+  const columns = table.columns || {};
+
+  return rows.map((row) => ({
+    projectName: toText(row?.[columns.project]),
+    projectNumber: toText(row?.[columns.projectNumber]),
+    avancementConfigRaw: row?.[columns.avancement],
+  }));
+}
+
 /* ---------- Planning ---------- */
 
 export async function fetchPlanningRows() {

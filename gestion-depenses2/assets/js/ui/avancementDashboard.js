@@ -20,12 +20,12 @@ const SPECIAL_BUDGET_KEYS = {
 
 const CHART_COLORS = {
   done: {
-    solid: "rgba(0, 73, 144, 1)",
-    fill: "rgba(0, 73, 144, 0.58)",
+    solid: "rgba(43, 123, 201, 1)",
+    fill: "rgba(43, 123, 201, 0.58)",
   },
   remaining: {
-    solid: "rgba(90, 113, 136, 1)",
-    fill: "rgba(90, 113, 136, 0.38)",
+    solid: "rgba(180, 35, 24, 1)",
+    fill: "rgba(180, 35, 24, 0.58)",
   },
 };
 
@@ -800,21 +800,22 @@ function getPlanCellClass(row) {
 
 function renderSidePanel(sidePanelEl, project, dashboardData, projectRecords, projectConfig) {
   if (!(sidePanelEl instanceof HTMLElement)) {
-    return false;
+    return;
   }
 
+  const layoutEl = sidePanelEl.closest(".avancement-dashboard-layout");
   const panelContent = renderIndexSelectionPanel(
     project,
     projectRecords,
     projectConfig,
     dashboardData.selectedIndicesByType,
   );
-
   const hasPanelContent = Boolean(panelContent.trim());
+
+  layoutEl?.classList.toggle("avancement-dashboard-layout--full", !hasPanelContent);
   sidePanelEl.hidden = !hasPanelContent;
   sidePanelEl.style.display = hasPanelContent ? "block" : "none";
   sidePanelEl.innerHTML = panelContent;
-  return hasPanelContent;
 }
 
 function renderAverageIndices(averageIndices, sortedTypes) {
@@ -1427,20 +1428,20 @@ function hideDashboard(elements) {
   elements.chartContainer.style.display = "none";
   elements.chartsGrid.style.display = "none";
   elements.sidePanel.style.display = "none";
-  elements.sidePanel.hidden = true;
+  elements.sidePanel.closest(".avancement-dashboard-layout")?.classList.remove(
+    "avancement-dashboard-layout--full",
+  );
 }
 
 function showDashboard(elements) {
   elements.chartContainer.style.display = "block";
   elements.chartsGrid.style.display = "grid";
   elements.sidePanel.style.display = "block";
-  elements.sidePanel.hidden = false;
 }
 
 function renderEmptyState(rootEl, message) {
   const elements = getElements(rootEl);
   destroyCharts(rootEl);
-  rootEl.classList.remove("avancement-dashboard-section--wide");
   hideDashboard(elements);
   elements.statsOutput.innerHTML = `<p class="avancement-empty-state">${escapeHtml(message)}</p>`;
   elements.sidePanel.innerHTML = "";
@@ -1454,9 +1455,13 @@ export function clearAvancementDashboard(rootEl) {
   const elements = getElements(rootEl);
   destroyCharts(rootEl);
   rootEl.hidden = true;
-  rootEl.classList.remove("avancement-dashboard-section--wide");
   elements.statsOutput.innerHTML = "";
   elements.sidePanel.innerHTML = "";
+  elements.sidePanel.hidden = false;
+  elements.sidePanel.style.display = "";
+  elements.sidePanel.closest(".avancement-dashboard-layout")?.classList.remove(
+    "avancement-dashboard-layout--full",
+  );
 }
 
 export function renderAvancementDashboard(rootEl, project, options = {}) {
@@ -1492,14 +1497,7 @@ export function renderAvancementDashboard(rootEl, project, options = {}) {
   showDashboard(elements);
   renderDetailedChart(rootEl, elements.chartCanvas, dashboardData.chart);
   renderStatsTable(elements.statsOutput, dashboardData.tableRows, dashboardData.totals, projectConfig.canSave);
-  const hasSidePanel = renderSidePanel(
-    elements.sidePanel,
-    project,
-    dashboardData,
-    projectRecords,
-    projectConfig,
-  );
-  rootEl.classList.toggle("avancement-dashboard-section--wide", !hasSidePanel);
+  renderSidePanel(elements.sidePanel, project, dashboardData, projectRecords, projectConfig);
   renderCharts(rootEl, elements, dashboardData.totals);
   bindBudgetProgressControls(rootEl, project, options);
   bindIndexSelectionControls(rootEl, project, projectRecords, dashboardData.selectedIndicesByType, options);

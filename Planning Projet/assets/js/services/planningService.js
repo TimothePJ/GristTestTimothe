@@ -1,5 +1,10 @@
 ﻿import { APP_CONFIG } from "../config.js";
 import { toText } from "./gristService.js";
+import {
+  buildTargetIndiceByTypeFromAvancement,
+  computePlanningRealisationValue,
+  getTargetIndiceForDocumentType,
+} from "../../../../gestion-depenses2/assets/js/utils/planningRealisation.js";
 
 function toNumber(value) {
   if (value == null || value === "") return null;
@@ -114,27 +119,54 @@ function isArmaturesTypeDoc(value) {
   return normalized.includes("ARMATURES");
 }
 
-export function computePlanningRealiseValue(typeDoc, indice) {
-  const normalizedTypeDoc = String(typeDoc ?? "").trim().toUpperCase();
-  const normalizedIndice = String(indice ?? "").trim().toUpperCase();
+function normalizeProjectLookupKey(value) {
+  return toText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
 
-  // The result must always be derived from the current Indice value.
-  // Empty indice remains a distinct state from the first indice "0".
-  if (normalizedIndice === "") {
-    return 0;
+export function buildProjectRealisationTargetLookup(projectConfigs = []) {
+  const lookup = new Map();
+
+  (projectConfigs || []).forEach((projectConfig) => {
+    const targetIndiceByType = buildTargetIndiceByTypeFromAvancement(
+      projectConfig?.avancementConfigRaw
+    );
+
+    [
+      projectConfig?.projectName,
+      projectConfig?.projectNumber,
+    ].forEach((projectKey) => {
+      const normalizedProjectKey = normalizeProjectLookupKey(projectKey);
+      if (normalizedProjectKey && !lookup.has(normalizedProjectKey)) {
+        lookup.set(normalizedProjectKey, targetIndiceByType);
+      }
+    });
+  });
+
+  return lookup;
+}
+
+function getProjectTargetIndiceByType(projectKey, targetLookup) {
+  if (!(targetLookup instanceof Map)) {
+    return null;
   }
 
-  const isNumericIndice = /^\d+$/.test(normalizedIndice);
-  if (isNumericIndice) {
-    return isCoffrageTypeDoc(normalizedTypeDoc) ? 50 : 100;
-  }
+  return targetLookup.get(normalizeProjectLookupKey(projectKey)) || null;
+}
 
-  const isAlphabeticIndice = /^[A-Z]/.test(normalizedIndice);
-  if (isAlphabeticIndice) {
-    return 100;
-  }
+function getPlanningTargetIndice(typeDoc, projectKey, targetLookup) {
+  return getTargetIndiceForDocumentType(
+    typeDoc,
+    getProjectTargetIndiceByType(projectKey, targetLookup)
+  );
+}
 
-  return 100;
+export function computePlanningRealiseValue(typeDoc, indice, targetIndice = "") {
+  return computePlanningRealisationValue(typeDoc, indice, targetIndice);
 }
 
 function resolvePlanningSegmentEndDate({
@@ -166,6 +198,7 @@ export function computePlanningRetardValue(
   {
     typeDoc,
     indice,
+    targetIndice,
     currentRetard,
     lignePlanningRaw,
     diffCoffrageRaw,
@@ -180,7 +213,7 @@ export function computePlanningRetardValue(
     return 0;
   }
 
-  const realiseValue = computePlanningRealiseValue(typeDoc, indice);
+  const realiseValue = computePlanningRealiseValue(typeDoc, indice, targetIndice);
   const segmentEndDate = resolvePlanningSegmentEndDate({
     typeDoc,
     lignePlanningRaw,
@@ -207,8 +240,9 @@ export function computePlanningRetardValue(
   return getDelayDays(segmentEndDate, currentInstant);
 }
 
-export function buildPlanningRealiseUpdates(rawRows) {
+export function buildPlanningRealiseUpdates(rawRows, targetLookup = null) {
   const cfg = APP_CONFIG.grist.planningTable.columns;
+  const projectLinkCol = cfg.projectLink || cfg.nomProjet;
 
   return (rawRows || []).reduce((updates, row) => {
     const rowId = Number(row?.[cfg.id]);
@@ -216,9 +250,11 @@ export function buildPlanningRealiseUpdates(rawRows) {
       return updates;
     }
 
+    const typeDoc = toText(row?.[cfg.typeDoc]);
     const nextRealise = computePlanningRealiseValue(
-      toText(row?.[cfg.typeDoc]),
-      toText(row?.[cfg.indice])
+      typeDoc,
+      toText(row?.[cfg.indice]),
+      getPlanningTargetIndice(typeDoc, row?.[projectLinkCol], targetLookup)
     );
     const currentRealise = toNumber(row?.[cfg.realise]);
     if (currentRealise === nextRealise) {
@@ -233,8 +269,13 @@ export function buildPlanningRealiseUpdates(rawRows) {
   }, []);
 }
 
-export function buildPlanningRetardUpdates(rawRows, currentInstant = getCurrentInstant()) {
+export function buildPlanningRetardUpdates(
+  rawRows,
+  currentInstant = getCurrentInstant(),
+  targetLookup = null
+) {
   const cfg = APP_CONFIG.grist.planningTable.columns;
+  const projectLinkCol = cfg.projectLink || cfg.nomProjet;
 
   return (rawRows || []).reduce((updates, row) => {
     const rowId = Number(row?.[cfg.id]);
@@ -242,10 +283,12 @@ export function buildPlanningRetardUpdates(rawRows, currentInstant = getCurrentI
       return updates;
     }
 
+    const typeDoc = toText(row?.[cfg.typeDoc]);
     const nextRetard = computePlanningRetardValue(
       {
-        typeDoc: toText(row?.[cfg.typeDoc]),
+        typeDoc,
         indice: toText(row?.[cfg.indice]),
+        targetIndice: getPlanningTargetIndice(typeDoc, row?.[projectLinkCol], targetLookup),
         currentRetard: row?.[cfg.retards],
         lignePlanningRaw: row?.[cfg.lignePlanning],
         diffCoffrageRaw: row?.[cfg.diffCoffrage],
@@ -488,10 +531,9 @@ function getTimelineItemsDateBounds(items) {
 
 function buildGroupContent(row) {
   return `
-    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-groupe) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-realise) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
+    <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-realise) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
       <div class="cell-id2">${escapeHtml(row.id2 ?? "")}</div>
       <div class="cell-task">${escapeHtml(row.taches ?? "")}</div>
-      <div class="cell-groupe">${escapeHtml(row.groupe ?? "")}</div>
       <div class="cell-ligne-planning">${escapeHtml(row.lignePlanning ?? "")}</div>
       <div class="cell-start">${escapeHtml(row.debut ?? "")}</div>
       <div class="cell-duration-1">${escapeHtml(row.dureeDebutFin ?? "")}</div>
@@ -860,7 +902,8 @@ function formatZoneHeaderLabel(zoneLabel) {
 export function buildTimelineDataFromPlanningRows(
   rawRows,
   selectedProject = "",
-  selectedZone = ""
+  selectedZone = "",
+  targetLookup = null
 ) {
   const cfg = APP_CONFIG.grist.planningTable.columns;
   const projectLinkCol = cfg.projectLink || cfg.nomProjet;
@@ -875,6 +918,8 @@ export function buildTimelineDataFromPlanningRows(
     const lignePlanningText = toText(r[cfg.lignePlanning]);
     const tachesText = toText(r[cfg.taches]) || toText(r[cfg.tacheAlt]);
     const typeDocText = toText(r[cfg.typeDoc]);
+    const projectLinkText = projectLinkCol ? toText(r[projectLinkCol]) : "";
+    const targetIndice = getPlanningTargetIndice(typeDocText, projectLinkText, targetLookup);
     const dateLimiteValue = r[cfg.dateLimite];
     const diffCoffrageValue = r[cfg.diffCoffrage];
     const diffArmatureValue = r[cfg.diffArmature];
@@ -934,7 +979,7 @@ export function buildTimelineDataFromPlanningRows(
 
     return {
       rowId: r[cfg.id] ?? null,
-      projectLink: projectLinkCol ? toText(r[projectLinkCol]) : "",
+      projectLink: projectLinkText,
 
       // Colonnes affichees
       id2: id2Text,
@@ -985,10 +1030,12 @@ export function buildTimelineDataFromPlanningRows(
       demarragesTravaux: demarrageTravauxValue,
       demarragesTravauxDate: demarrageTravauxDate,
       indice: toText(r[cfg.indice]),
+      targetIndice,
       realise: (() => {
         const computedRealise = computePlanningRealiseValue(
-          toText(r[cfg.typeDoc]),
-          toText(r[cfg.indice])
+          typeDocText,
+          toText(r[cfg.indice]),
+          targetIndice
         );
         return String(computedRealise ?? 0);
       })(),
@@ -1184,7 +1231,7 @@ export function buildTimelineDataFromPlanningRows(
     const rowFallbackIndex = fallbackRowIndex++;
     const groupId = `g-${row.rowId ?? `${row.id2 || "x"}-${row.lignePlanning || "x"}-${rowFallbackIndex}`}`;
     const realiseValue =
-      toNumber(row.realise) ?? computePlanningRealiseValue(row.typeDoc, row.indice);
+      toNumber(row.realise) ?? computePlanningRealiseValue(row.typeDoc, row.indice, row.targetIndice);
 
     // Groupe avec champs de tri explicites (pour vis-timeline)
     groups.push({

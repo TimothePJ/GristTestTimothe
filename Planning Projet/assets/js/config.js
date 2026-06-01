@@ -6,6 +6,8 @@ export const APP_CONFIG = {
       sourceTable: "Projets",
       columns: {
         project: "Nom_de_projet",
+        projectNumber: "Numero_de_projet",
+        avancement: "Avancement",
       },
     },
 

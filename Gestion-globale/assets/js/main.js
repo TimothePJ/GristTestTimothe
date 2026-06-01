@@ -414,6 +414,9 @@ function renderKpis(aggregatedProject) {
   dom.provisionalSpending.textContent = formatCurrency(kpis.totalProvisionalSpending);
   dom.realSpending.textContent = formatCurrency(kpis.totalRealSpending);
   dom.remainingBudget.textContent = formatCurrency(kpis.remainingBudget);
+  dom.realSpending.classList.add("is-negative");
+  dom.remainingBudget.classList.toggle("is-positive", kpis.remainingBudget >= 0);
+  dom.remainingBudget.classList.toggle("is-negative", kpis.remainingBudget < 0);
 }
 
 function clearAggregateViews() {
