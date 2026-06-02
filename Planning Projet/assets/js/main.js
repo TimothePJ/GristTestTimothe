@@ -40,8 +40,10 @@ import {
   setPlanningZoomMode,
   movePlanningViewportByMode,
   focusPlanningDataAnchor,
+  getPlanningPreferredEmbeddedHeight,
   waitForPlanningViewportSettled,
   setPlanningViewportBounds,
+  setPlanningVisualAggregateMode,
   setPlanningDurationEditHandler,
   setPlanningRetardJustificationHandler,
   setPlanningMsProjectDropHandler,
@@ -902,6 +904,12 @@ function exposePlanningSyncApi() {
     },
     setViewportBounds(bounds = {}) {
       setPlanningViewportBounds(bounds);
+    },
+    setVisualAggregateMode(enabled = false) {
+      return setPlanningVisualAggregateMode(enabled);
+    },
+    getPreferredEmbeddedHeight() {
+      return getPlanningPreferredEmbeddedHeight();
     },
     setZoomMode(mode, anchorDate = "") {
       return setPlanningZoomMode(mode, anchorDate);

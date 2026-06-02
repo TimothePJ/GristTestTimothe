@@ -12,13 +12,16 @@ import {
   schedulePlanningFramePresentation,
 } from "./framePresentation.js";
 
-export function clampPlanningFrameHeight(height) {
+export function clampPlanningFrameHeight(
+  height,
+  { minHeight = MIN_PLANNING_FRAME_HEIGHT, maxHeight = MAX_PLANNING_FRAME_HEIGHT } = {}
+) {
   const numericHeight = Number(height);
   if (!Number.isFinite(numericHeight)) {
     return DEFAULT_PLANNING_FRAME_HEIGHT;
   }
 
-  return Math.min(MAX_PLANNING_FRAME_HEIGHT, Math.max(MIN_PLANNING_FRAME_HEIGHT, numericHeight));
+  return Math.min(maxHeight, Math.max(minHeight, numericHeight));
 }
 
 export function persistPlanningFrameHeight(height) {
@@ -63,8 +66,16 @@ export function schedulePlanningFrameResizeRefresh(reason = "planning-frame-resi
   });
 }
 
-export function applyPlanningFrameHeight(nextHeight, { persist = true, refresh = true } = {}) {
-  const appliedHeight = clampPlanningFrameHeight(nextHeight);
+export function applyPlanningFrameHeight(
+  nextHeight,
+  {
+    persist = true,
+    refresh = true,
+    minHeight = MIN_PLANNING_FRAME_HEIGHT,
+    maxHeight = MAX_PLANNING_FRAME_HEIGHT,
+  } = {}
+) {
+  const appliedHeight = clampPlanningFrameHeight(nextHeight, { minHeight, maxHeight });
 
   if (dom.planningFrameEl instanceof HTMLIFrameElement) {
     dom.planningFrameEl.style.height = `${appliedHeight}px`;
@@ -72,8 +83,8 @@ export function applyPlanningFrameHeight(nextHeight, { persist = true, refresh =
   }
 
   if (dom.planningResizeHandleEl instanceof HTMLElement) {
-    dom.planningResizeHandleEl.setAttribute("aria-valuemin", String(MIN_PLANNING_FRAME_HEIGHT));
-    dom.planningResizeHandleEl.setAttribute("aria-valuemax", String(MAX_PLANNING_FRAME_HEIGHT));
+    dom.planningResizeHandleEl.setAttribute("aria-valuemin", String(minHeight));
+    dom.planningResizeHandleEl.setAttribute("aria-valuemax", String(maxHeight));
     dom.planningResizeHandleEl.setAttribute("aria-valuenow", String(Math.round(appliedHeight)));
     dom.planningResizeHandleEl.setAttribute("aria-valuetext", `${Math.round(appliedHeight)} pixels`);
   }

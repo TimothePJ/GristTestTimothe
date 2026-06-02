@@ -77,6 +77,10 @@ let planningPaneResizerBound = false;
 let activePlanningPaneResize = null;
 let pendingPlanningPaneResizeWidth = null;
 let planningPaneResizeRafId = 0;
+let visualAggregateModeEnabled = false;
+let lastPlanningTimelineData = { groups: [], items: [] };
+
+const PLANNING_PARENT_TOOLTIP_MESSAGE_TYPE = "planning-projet-hover-tooltip";
 
 const PLANNING_ROW_DRAG_HANDLED_FLAG = "__planningRowDragHandled";
 const PLANNING_PANE_MIN_WIDTH = 260;
@@ -713,6 +717,36 @@ function ensureHoverTooltip() {
   return hoverTooltipEl;
 }
 
+function canUseParentHoverTooltip() {
+  const isHeaderOnlyFrame =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("headerOnly") === "1";
+
+  return Boolean(
+    window.parent &&
+    window.parent !== window &&
+    EMBEDDED_PLANNING_SYNC_MODE &&
+    !isHeaderOnlyFrame
+  );
+}
+
+function postParentHoverTooltip(action, html = "", eventLike = null) {
+  if (!canUseParentHoverTooltip()) return false;
+
+  const pos = getPointerClientPos(eventLike);
+  window.parent.postMessage(
+    {
+      type: PLANNING_PARENT_TOOLTIP_MESSAGE_TYPE,
+      action,
+      html,
+      clientX: pos?.x ?? null,
+      clientY: pos?.y ?? null,
+    },
+    "*"
+  );
+  return true;
+}
+
 function getPointerClientPos(eventLike) {
   const src = eventLike?.srcEvent || eventLike;
   if (!src) return null;
@@ -729,6 +763,11 @@ function getPointerClientPos(eventLike) {
 }
 
 function placeHoverTooltip(eventLike) {
+  if (canUseParentHoverTooltip()) {
+    postParentHoverTooltip("move", "", eventLike);
+    return;
+  }
+
   if (!hoverTooltipEl || hoverTooltipEl.style.display === "none") return;
 
   const pos = getPointerClientPos(eventLike);
@@ -755,12 +794,21 @@ function placeHoverTooltip(eventLike) {
 }
 
 function hideHoverTooltip() {
+  postParentHoverTooltip("hide");
   if (!hoverTooltipEl) return;
   hoverTooltipEl.style.display = "none";
   hoverTooltipEl.innerHTML = "";
 }
 
 function showHoverTooltip(html, eventLike) {
+  if (postParentHoverTooltip("show", html, eventLike)) {
+    if (hoverTooltipEl) {
+      hoverTooltipEl.style.display = "none";
+      hoverTooltipEl.innerHTML = "";
+    }
+    return;
+  }
+
   ensureHoverTooltip();
   hoverTooltipEl.innerHTML = html;
   hoverTooltipEl.style.display = "block";
@@ -769,7 +817,30 @@ function showHoverTooltip(html, eventLike) {
 
 function buildPhaseTooltipHtml(item, group) {
   const cls = String(item?.className || "");
-  const tache = String(group?.tachesLabel || "Tache");
+  const tache = String(item?.taskLabel || group?.tachesLabel || "Tache");
+  const aggregateTasks = Array.isArray(item?.aggregateTasks)
+    ? item.aggregateTasks.filter(Boolean)
+    : [];
+
+  if (aggregateTasks.length > 0) {
+    const isCoffrage = cls.includes("phase-coffrage");
+    const typeLabel = isCoffrage ? "Coffrage" : "Armature";
+    const startLabel = isCoffrage ? "Date limite" : "Diff coffrage";
+    const endLabel = isCoffrage ? "Diff coffrage" : "Diff armature";
+    const rows = aggregateTasks
+      .map((task) => {
+        const taskLabel = escapeHtml(task.label || "Tache");
+        const startDateLabel = escapeHtml(getExactIsoDate(task.start));
+        const endDateLabel = escapeHtml(getExactIsoDate(task.end));
+        return `<div><strong>${taskLabel}</strong> : ${startLabel} ${startDateLabel} -> ${endLabel} ${endDateLabel}</div>`;
+      })
+      .join("");
+
+    return `
+      <div><strong>${typeLabel}</strong></div>
+      ${rows}
+    `;
+  }
 
   if (cls.includes("phase-coffrage")) {
     return `
@@ -802,7 +873,24 @@ function buildPhaseTooltipHtml(item, group) {
 
 function getNativePhaseTitle(item, group) {
   const cls = String(item?.className || "");
-  const tache = String(group?.tachesLabel || "Tache");
+  const tache = String(item?.taskLabel || group?.tachesLabel || "Tache");
+  const aggregateTasks = Array.isArray(item?.aggregateTasks)
+    ? item.aggregateTasks.filter(Boolean)
+    : [];
+
+  if (aggregateTasks.length > 0) {
+    const isCoffrage = cls.includes("phase-coffrage");
+    const typeLabel = isCoffrage ? "Coffrage" : "Armature";
+    const startLabel = isCoffrage ? "Date limite" : "Diff coffrage";
+    const endLabel = isCoffrage ? "Diff coffrage" : "Diff armature";
+    return [
+      typeLabel,
+      ...aggregateTasks.map((task) => {
+        const taskLabel = String(task.label || "Tache");
+        return `${taskLabel} : ${startLabel} ${getExactIsoDate(task.start)} -> ${endLabel} ${getExactIsoDate(task.end)}`;
+      }),
+    ].join("\n");
+  }
 
   if (cls.includes("phase-coffrage")) {
     return [
@@ -879,8 +967,11 @@ function clearRenderedPlanningItemStyle(node) {
   if (!(node instanceof HTMLElement)) return;
 
   node.style.removeProperty("background");
+  node.style.removeProperty("background-color");
   node.style.removeProperty("border-color");
   node.style.removeProperty("color");
+  node.style.removeProperty("opacity");
+  node.style.removeProperty("z-index");
 }
 
 function applyRenderedPlanningItemStyle(node, styleText) {
@@ -940,11 +1031,6 @@ function decorateRenderedTimelineItems(containerEl) {
 
     const group = groupsDataSet ? groupsDataSet.get(item.group) : null;
     const title = getNativePhaseTitle(item, group);
-    const visualNode =
-      (entry?.dom?.box instanceof HTMLElement && entry.dom.box) ||
-      (entry?.dom?.range instanceof HTMLElement && entry.dom.range) ||
-      null;
-
     const domNodes = [
       entry?.dom?.box,
       entry?.dom?.point,
@@ -954,6 +1040,7 @@ function decorateRenderedTimelineItems(containerEl) {
       entry?.dom?.content,
     ].filter(Boolean);
 
+    const styledNodes = new Set();
     domNodes.forEach((node) => {
       if (!(node instanceof HTMLElement)) return;
       node.setAttribute("data-planning-item-id", String(itemId));
@@ -961,9 +1048,21 @@ function decorateRenderedTimelineItems(containerEl) {
         node.setAttribute("title", title);
         node.setAttribute("aria-label", title);
       }
+
+      applyRenderedPlanningItemStyle(node, item.style);
+      styledNodes.add(node);
     });
 
-    applyRenderedPlanningItemStyle(visualNode, item.style);
+    const itemElement = [...containerEl.querySelectorAll(".vis-item")].find((candidate) => {
+      if (!(candidate instanceof HTMLElement)) return false;
+      return (
+        candidate.getAttribute("data-id") === String(itemId) ||
+        candidate.getAttribute("data-item-id") === String(itemId)
+      );
+    });
+    if (itemElement instanceof HTMLElement && !styledNodes.has(itemElement)) {
+      applyRenderedPlanningItemStyle(itemElement, item.style);
+    }
   });
 }
 
@@ -2852,7 +2951,474 @@ function bindMsProjectRowDrop(containerEl) {
   );
 }
 
+function createAggregateGroup(id, label, className, sortIndex) {
+  return {
+    id,
+    isAggregateGroup: true,
+    aggregateLabel: label,
+    className,
+    sortIndex,
+    sortLignePlanning: sortIndex,
+    sortID2: sortIndex,
+  };
+}
+
+function getAggregateGroupId(type = "") {
+  return type === "coffrage" ? "aggregate-coffrage" : "aggregate-armatures";
+}
+
+function parseAggregateDate(value) {
+  if (value == null || value === "") return null;
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : new Date(value);
+  }
+
+  if (typeof value === "number") {
+    let numericValue = value;
+    if (numericValue > 1e9 && numericValue < 1e11) {
+      numericValue *= 1000;
+    }
+
+    const date = new Date(numericValue);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const text = String(value || "").trim();
+  if (!text) return null;
+
+  const frenchDateMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+.*)?$/);
+  if (frenchDateMatch) {
+    const day = Number(frenchDateMatch[1]);
+    const month = Number(frenchDateMatch[2]);
+    const year = Number(frenchDateMatch[3]);
+    const date = new Date(year, month - 1, day);
+    return (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    )
+      ? date
+      : null;
+  }
+
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function createAggregateRange(startDateRaw, endDateRaw) {
+  const start = parseAggregateDate(startDateRaw);
+  const end = parseAggregateDate(endDateRaw);
+  if (!start || !end || end <= start) {
+    return null;
+  }
+
+  return { start, end };
+}
+
+function clampAggregatePercentage(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, numericValue));
+}
+
+function getAggregatePhasePalette(className) {
+  const normalizedClassName = String(className || "");
+
+  if (normalizedClassName.includes("phase-coffrage")) {
+    if (normalizedClassName.includes("phase-past")) {
+      return {
+        background: "#ead7a2",
+        border: "#d6bd74",
+        text: "#7a4b12",
+        overdueBackground: "#d88f8f",
+        overdueBorder: "#bb6b6b",
+      };
+    }
+
+    return {
+      background: "#fef3c7",
+      border: "#fde68a",
+      text: "#92400e",
+      overdueBackground: "#d99b9b",
+      overdueBorder: "#c97c7c",
+    };
+  }
+
+  if (normalizedClassName.includes("phase-armature")) {
+    if (normalizedClassName.includes("phase-past")) {
+      return {
+        background: "#e5e7eb",
+        border: "#cbd5e1",
+        text: "#334155",
+        overdueBackground: "#efc2c2",
+        overdueBorder: "#dc9f9f",
+      };
+    }
+
+    return {
+      background: "#f3f4f6",
+      border: "#d1d5db",
+      text: "#475569",
+      overdueBackground: "#fee2e2",
+      overdueBorder: "#fecaca",
+    };
+  }
+
+  return null;
+}
+
+function buildAggregateRetardPhaseStyle(className, realiseValue, retardDays) {
+  const palette = getAggregatePhasePalette(className);
+  if (!palette) return "";
+
+  const normalizedRetardDays = toFiniteNumber(retardDays);
+  if (normalizedRetardDays == null || normalizedRetardDays <= 0) {
+    return "";
+  }
+
+  const normalizedRealise = clampAggregatePercentage(realiseValue);
+  if (normalizedRealise >= 100) {
+    return "";
+  }
+
+  if (normalizedRealise <= 0) {
+    return [
+      `background: ${palette.overdueBackground} !important`,
+      `border-color: ${palette.overdueBorder} !important`,
+      `color: ${palette.text} !important`,
+    ].join("; ");
+  }
+
+  return [
+    `background: linear-gradient(to right, ${palette.background} 0%, ${palette.background} ${normalizedRealise}%, ${palette.overdueBackground} ${normalizedRealise}%, ${palette.overdueBackground} 100%) !important`,
+    `border-color: ${palette.border} !important`,
+    `color: ${palette.text} !important`,
+  ].join("; ");
+}
+
+function buildAggregatePhaseClassName(className, realiseValue) {
+  return clampAggregatePercentage(realiseValue) >= 100
+    ? `${className} phase-realise-complete`
+    : className;
+}
+
+function createAggregatePhaseItem({
+  itemId,
+  groupId,
+  start,
+  end,
+  label,
+  className,
+  taskLabel,
+  aggregateTasks = [],
+  style = "",
+}) {
+  return {
+    id: itemId,
+    group: groupId,
+    start,
+    end,
+    content: label,
+    className: [className, "planning-aggregate-phase"].filter(Boolean).join(" "),
+    taskLabel,
+    aggregateTasks,
+    title: taskLabel || label,
+    type: "range",
+    style,
+  };
+}
+
+function createSplitAggregatePhaseItems({
+  itemIdBase,
+  groupId,
+  start,
+  end,
+  label,
+  className,
+  taskLabel,
+  aggregateTasks = [],
+  style = "",
+  pastStyle = "",
+}) {
+  const currentInstant = new Date();
+  if (!(start instanceof Date) || !(end instanceof Date) || end <= start) {
+    return [];
+  }
+
+  if (end <= currentInstant) {
+    return [
+      createAggregatePhaseItem({
+        itemId: itemIdBase,
+        groupId,
+        start,
+        end,
+        label,
+        className: `${className} phase-past`,
+        taskLabel,
+        aggregateTasks,
+        style: pastStyle,
+      }),
+    ];
+  }
+
+  if (start >= currentInstant) {
+    return [
+      createAggregatePhaseItem({
+        itemId: itemIdBase,
+        groupId,
+        start,
+        end,
+        label,
+        className,
+        taskLabel,
+        aggregateTasks,
+        style,
+      }),
+    ];
+  }
+
+  return [
+    createAggregatePhaseItem({
+      itemId: `${itemIdBase}-past`,
+      groupId,
+      start,
+      end: currentInstant,
+      label: "",
+      className: `${className} phase-past`,
+      taskLabel,
+      aggregateTasks,
+      style: pastStyle,
+    }),
+    createAggregatePhaseItem({
+      itemId: `${itemIdBase}-current`,
+      groupId,
+      start: currentInstant,
+      end,
+      label,
+      className,
+      taskLabel,
+      aggregateTasks,
+      style,
+    }),
+  ];
+}
+
+function mergeOverlappingAggregateSegments(segments = []) {
+  const sortedSegments = (segments || [])
+    .filter((segment) => segment?.start && segment?.end && segment.end > segment.start)
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+
+  const mergedSegments = [];
+  sortedSegments.forEach((segment) => {
+    const previous = mergedSegments[mergedSegments.length - 1];
+    if (previous && segment.start <= previous.end) {
+      if (segment.end > previous.end) {
+        previous.end = new Date(segment.end);
+      }
+      previous.tasks.push(...segment.tasks);
+      previous.realiseValues.push(...segment.realiseValues);
+      previous.retardValues.push(...segment.retardValues);
+      return;
+    }
+
+    mergedSegments.push({
+      type: segment.type,
+      groupId: segment.groupId,
+      label: segment.label,
+      start: new Date(segment.start),
+      end: new Date(segment.end),
+      tasks: [...segment.tasks],
+      realiseValues: [...segment.realiseValues],
+      retardValues: [...segment.retardValues],
+    });
+  });
+
+  return mergedSegments.map((segment) => ({
+    ...segment,
+    tasks: segment.tasks.sort((left, right) => left.start - right.start || left.end - right.end),
+  }));
+}
+
+function buildAggregateItemsFromGroups(groups = []) {
+  const segmentsByType = {
+    coffrage: [],
+    armatures: [],
+  };
+
+  (groups || []).forEach((group, index) => {
+    if (!group || group.isZoneHeader || !group.meta) return;
+
+    const row = group.meta;
+    const typeDoc = String(row.typeDoc || group.typeDocLabel || "");
+    const isCoffrage = isPlanningTypeDocMatch(typeDoc, "COFFRAGE");
+    const isArmature = isPlanningTypeDocMatch(typeDoc, "ARMATURE");
+    if (!isCoffrage && !isArmature) return;
+
+    const aggregateType = isCoffrage ? "coffrage" : "armatures";
+    const range = isCoffrage
+      ? createAggregateRange(row.dateLimite, row.diffCoffrage)
+      : createAggregateRange(row.diffCoffrage, row.diffArmature);
+    if (!range) return;
+
+    const realiseValue =
+      toFiniteNumber(row.realise) ?? toFiniteNumber(group.realiseLabel) ?? 0;
+    const taskLabel = String(row.taches || group.tachesLabel || "").trim();
+
+    segmentsByType[aggregateType].push({
+      type: aggregateType,
+      groupId: getAggregateGroupId(aggregateType),
+      label: isCoffrage ? "Coffrage" : "Armature",
+      start: range.start,
+      end: range.end,
+      tasks: [
+        {
+          label: taskLabel,
+          start: range.start,
+          end: range.end,
+        },
+      ],
+      realiseValues: [realiseValue],
+      retardValues: [toFiniteNumber(row.retards) || 0],
+    });
+  });
+
+  const items = [];
+  Object.entries(segmentsByType).forEach(([aggregateType, segments]) => {
+    const mergedSegments = mergeOverlappingAggregateSegments(segments);
+    mergedSegments.forEach((segment, index) => {
+      const maxRealiseValue = Math.max(0, ...segment.realiseValues);
+      const maxRetardValue = Math.max(0, ...segment.retardValues);
+      const baseClassName = buildAggregatePhaseClassName(
+        aggregateType === "coffrage" ? "phase-coffrage" : "phase-armature",
+        maxRealiseValue
+      );
+
+      items.push(
+        ...createSplitAggregatePhaseItems({
+          itemIdBase: `aggregate-${aggregateType}-merged-${index}`,
+          groupId: segment.groupId,
+          start: segment.start,
+          end: segment.end,
+          label: segment.label,
+          className: baseClassName,
+          taskLabel: `${segment.tasks.length} tache(s)`,
+          aggregateTasks: segment.tasks,
+          style: buildAggregateRetardPhaseStyle(baseClassName, maxRealiseValue, maxRetardValue),
+          pastStyle: buildAggregateRetardPhaseStyle(
+            `${baseClassName} phase-past`,
+            maxRealiseValue,
+            maxRetardValue
+          ),
+        })
+      );
+    });
+  });
+
+  return items;
+}
+
+function buildVisualAggregateTimelineData(timelineData = {}) {
+  const groups = [
+    createAggregateGroup(
+      "aggregate-coffrage",
+      "Coffrages",
+      "planning-aggregate-group planning-aggregate-group--coffrage",
+      0
+    ),
+    createAggregateGroup(
+      "aggregate-armatures",
+      "Armatures",
+      "planning-aggregate-group planning-aggregate-group--armatures",
+      1
+    ),
+  ];
+
+  const items = buildAggregateItemsFromGroups(timelineData.groups || []);
+
+  return { groups, items };
+}
+
+function getDisplayedTimelineData(timelineData = {}) {
+  if (!visualAggregateModeEnabled) {
+    return {
+      groups: timelineData.groups || [],
+      items: timelineData.items || [],
+    };
+  }
+
+  return buildVisualAggregateTimelineData(timelineData);
+}
+
+function getCssPixelValue(propertyName, fallbackValue = 0) {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return fallbackValue;
+  }
+
+  const rawValue = window
+    .getComputedStyle(document.documentElement)
+    .getPropertyValue(propertyName);
+  const numericValue = Number.parseFloat(rawValue);
+  return Number.isFinite(numericValue) ? numericValue : fallbackValue;
+}
+
+function getVisibleElementHeight(selector) {
+  const element = document.querySelector(selector);
+  if (!(element instanceof HTMLElement)) {
+    return 0;
+  }
+
+  const styles = window.getComputedStyle(element);
+  if (styles.display === "none" || styles.visibility === "hidden") {
+    return 0;
+  }
+
+  return element.getBoundingClientRect().height || 0;
+}
+
+export function getPlanningPreferredEmbeddedHeight() {
+  const displayedData = getDisplayedTimelineData(lastPlanningTimelineData);
+
+  if (visualAggregateModeEnabled) {
+    const rowHeight = getCssPixelValue("--planning-row-height", 40);
+    const toolbarHeight = getVisibleElementHeight("#toolbar");
+    const headerHeight = getVisibleElementHeight(".planning-header-row") || rowHeight;
+    const rowCount = Math.max(2, (displayedData.groups || []).length);
+    return Math.ceil(toolbarHeight + headerHeight + rowHeight * rowCount + 4);
+  }
+
+  const timelineWrapperHeight = getVisibleElementHeight("#timelineWrapper");
+  return Math.ceil(
+    Math.max(
+      document.documentElement?.scrollHeight || 0,
+      document.body?.scrollHeight || 0,
+      timelineWrapperHeight
+    )
+  );
+}
+
 function buildGroupLabelElement(group) {
+  if (group?.isAggregateGroup) {
+    const row = document.createElement("div");
+    row.className = [
+      "group-row-grid",
+      "planning-aggregate-row",
+      String(group?.className || ""),
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    const labelCell = document.createElement("div");
+    labelCell.className = "planning-aggregate-row-label";
+    labelCell.textContent = String(group?.aggregateLabel || "");
+
+    row.append(labelCell);
+    return row;
+  }
+
   if (group?.isZoneHeader) {
     const zoneBand = document.createElement("div");
     zoneBand.className = "zone-header-band";
@@ -3087,6 +3653,16 @@ function computeRange(items) {
   end.setDate(end.getDate() + 7);
 
   return { start, end };
+}
+
+function computePlanningDataRange(displayedItems = [], sourceTimelineData = {}) {
+  const sourceItems = Array.isArray(sourceTimelineData?.items) ? sourceTimelineData.items : [];
+  return computeRange(sourceItems) || computeRange(displayedItems);
+}
+
+function hasPlanningDataItems(displayedItems = [], sourceTimelineData = {}) {
+  const sourceItems = Array.isArray(sourceTimelineData?.items) ? sourceTimelineData.items : [];
+  return [...sourceItems, ...displayedItems].some((item) => item?.type !== "background");
 }
 
 function computeRangeCenter(range) {
@@ -3831,7 +4407,12 @@ export function setPlanningRowDropHandler(handler) {
   planningRowDropHandler = typeof handler === "function" ? handler : null;
 }
 
-export function renderPlanningTimeline({ groups, items }) {
+export function renderPlanningTimeline(timelineData = {}) {
+  lastPlanningTimelineData = {
+    groups: timelineData.groups || [],
+    items: timelineData.items || [],
+  };
+  const { groups, items } = getDisplayedTimelineData(lastPlanningTimelineData);
   const container = getTimelineContainer();
   bindPlanningPaneResizer();
 
@@ -3940,10 +4521,8 @@ export function renderPlanningTimeline({ groups, items }) {
     syncNativeItemTitles(container);
     bindItemHoverInteractions(container);
 
-    const range = computeRange(items || []);
-    const hasNonBackgroundItems = (items || []).some(
-      (item) => item?.type !== "background"
-    );
+    const range = computePlanningDataRange(items || [], lastPlanningTimelineData);
+    const hasNonBackgroundItems = hasPlanningDataItems(items || [], lastPlanningTimelineData);
     if (EMBEDDED_PLANNING_SYNC_MODE) {
       if (range) {
         dataAnchorDate = computeRangeCenter(range);
@@ -4065,4 +4644,43 @@ export function clearPlanningTimeline() {
   clearPlanningRowDropTarget();
   clearPlanningRowDraggingState();
   resolvePlanningViewportSettled(getPlanningViewportState());
+}
+
+export function setPlanningVisualAggregateMode(enabled = false) {
+  const nextEnabled = Boolean(enabled);
+  document.body?.classList?.toggle("planning-visual-aggregate-mode", nextEnabled);
+  if (visualAggregateModeEnabled === nextEnabled) {
+    return visualAggregateModeEnabled;
+  }
+
+  const previousWindow =
+    timelineInstance && typeof timelineInstance.getWindow === "function"
+      ? timelineInstance.getWindow()
+      : null;
+  visualAggregateModeEnabled = nextEnabled;
+  if (timelineInstance) {
+    renderPlanningTimeline(lastPlanningTimelineData);
+    if (
+      previousWindow?.start instanceof Date &&
+      previousWindow?.end instanceof Date &&
+      !Number.isNaN(previousWindow.start.getTime()) &&
+      !Number.isNaN(previousWindow.end.getTime()) &&
+      previousWindow.end >= previousWindow.start
+    ) {
+      requestAnimationFrame(() => {
+        if (!timelineInstance) return;
+        rememberProgrammaticPlanningViewportFromRange(getCurrentZoomMode(), previousWindow);
+        timelineInstance.setWindow(previousWindow.start, previousWindow.end, { animation: false });
+        updateDateRangeDisplay();
+        updateNavCenterButtonLabel();
+        updateCurrentTimeLineBounds();
+        requestStickyAxisSync();
+      });
+    }
+    emitPlanningSelectionChange(null, {
+      reason: "visual-aggregate-mode-change",
+    });
+  }
+
+  return visualAggregateModeEnabled;
 }

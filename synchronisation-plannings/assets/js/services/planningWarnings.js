@@ -89,11 +89,6 @@ export function handlePlanningWarningsChange(payload = {}) {
   }
 
   const popupSignature = buildPlanningWarningsPopupSignature(projectKey, warnings);
-  if (popupSignature === state.lastPlanningWarningsPopupSignature) {
-    return false;
-  }
-
   state.lastPlanningWarningsPopupSignature = popupSignature;
-  showPlanningWarningsPopup(projectKey, warnings);
-  return true;
+  return false;
 }

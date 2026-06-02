@@ -807,6 +807,54 @@ body.planning-sync-embedded #planningTimeline .vis-time-axis .vis-grid.vis-major
   font-size: 13px !important;
 }
 
+#planningTimeline .planning-aggregate-row {
+  cursor: default !important;
+  background: #ffffff !important;
+}
+
+#planningTimeline .planning-aggregate-row-label {
+  grid-column: 1 / -1;
+  padding: 6px 10px !important;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+#planningTimeline .planning-aggregate-group--coffrage {
+  background: #ffffff !important;
+}
+
+#planningTimeline .planning-aggregate-group--armatures {
+  background: #ffffff !important;
+}
+
+body.planning-visual-aggregate-mode.planning-sync-external-axis #timelineWrapper {
+  overflow-y: hidden !important;
+  scrollbar-gutter: auto !important;
+}
+
+body.planning-visual-aggregate-mode #planningTimeline .vis-background .vis-group {
+  background: transparent !important;
+}
+
+body.planning-visual-aggregate-mode #planningTimeline .vis-foreground .vis-group {
+  background: transparent !important;
+}
+
+body.planning-visual-aggregate-mode #planningTimeline .vis-panel.vis-center .vis-content,
+body.planning-visual-aggregate-mode #planningTimeline .vis-panel.vis-center .vis-itemset,
+body.planning-visual-aggregate-mode #planningTimeline .vis-panel.vis-center .vis-foreground {
+  overflow: visible !important;
+}
+
+body.planning-visual-aggregate-mode #planningTimeline .vis-item.planning-aggregate-phase {
+  opacity: 1 !important;
+  z-index: 10 !important;
+}
+
+body.planning-visual-aggregate-mode #planningTimeline .vis-current-time {
+  z-index: 20 !important;
+}
+
 #planningTimeline .group-row-grid.planning-draggable-row,
 #planningTimeline .group-row-grid.planning-draggable-row > div {
   cursor: grab !important;

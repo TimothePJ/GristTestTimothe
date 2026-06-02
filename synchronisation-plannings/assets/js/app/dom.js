@@ -3,6 +3,7 @@ export function getHubDom() {
     planningFrameEl: document.getElementById("planning-projet-frame"),
     planningAxisFrameEl: document.getElementById("planning-projet-axis-frame"),
     expensesFrameEl: document.getElementById("gestion-depenses2-frame"),
+    planningAggregateToggleEl: document.getElementById("planning-aggregate-toggle"),
     planningResizeHandleEl: document.getElementById("sync-planning-resize-handle"),
     selectionWarningEl: document.getElementById("selected-page-warning"),
     selectionWarningTitleEl: document.getElementById("selected-page-warning-title"),
