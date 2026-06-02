@@ -1958,11 +1958,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         closeBtn.addEventListener('click', closeModal);
-        modal.addEventListener('click', (event) => {
-            if (event.target === modal) {
-                closeModal();
-            }
-        });
 
         tabBtns.forEach((btn) => {
             btn.addEventListener('click', () => {

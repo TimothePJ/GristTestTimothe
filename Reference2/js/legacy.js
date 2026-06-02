@@ -1956,14 +1956,6 @@ function setupUnifiedAddDocumentsUi() {
     });
   }
 
-  if (builderModal) {
-    builderModal.addEventListener('click', (event) => {
-      if (event.target === builderModal) {
-        closeReferenceDocsBuilderModal();
-      }
-    });
-  }
-
   document.querySelectorAll('.reference-tab-btn').forEach((button) => {
     button.addEventListener('click', () => {
       setReferenceDocsBuilderTab(button.dataset.referenceTab);
