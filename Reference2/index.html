@@ -153,8 +153,14 @@
       <datalist id="documentZoneList"></datalist>
 
       <label for="documentType">Type de document :</label>
-      <input type="text" id="documentType" name="documentType" list="documentTypeList" value="NDC" required placeholder="Choisir ou saisir un type">
-      <datalist id="documentTypeList"></datalist>
+      <select id="documentType" name="documentType" required>
+        <option value="" selected>Choisir un type</option>
+        <option value="COFFRAGE">COFFRAGE</option>
+        <option value="ARMATURES">ARMATURES</option>
+        <option value="COUPES">COUPES</option>
+        <option value="D&Eacute;MOLITION">D&Eacute;MOLITION</option>
+        <option value="NDC">NDC</option>
+      </select>
 
       <label for="defaultDatelimite">Date Limite réception données par défaut:</label>
       <input type="date" id="defaultDatelimite" name="defaultDatelimite">
@@ -201,8 +207,14 @@
       <datalist id="multipleDocumentZoneList"></datalist>
 
       <label for="multipleDocumentType">Type de document :</label>
-      <input type="text" id="multipleDocumentType" list="multipleDocumentTypeList" value="NDC" required placeholder="Choisir ou saisir un type">
-      <datalist id="multipleDocumentTypeList"></datalist>
+      <select id="multipleDocumentType" required>
+        <option value="" selected>Choisir un type</option>
+        <option value="COFFRAGE">COFFRAGE</option>
+        <option value="ARMATURES">ARMATURES</option>
+        <option value="COUPES">COUPES</option>
+        <option value="D&Eacute;MOLITION">D&Eacute;MOLITION</option>
+        <option value="NDC">NDC</option>
+      </select>
 
       <label for="multipleDefaultDatelimite">Date Limite réception données par défaut:</label>
       <input type="date" id="multipleDefaultDatelimite" name="defaultDatelimite">
@@ -265,8 +277,14 @@
 
             <div class="reference-form-group form-group">
               <label for="referenceManualDocType">Type de document :</label>
-              <input type="text" id="referenceManualDocType" list="referenceManualDocTypeList" value="NDC" required placeholder="Choisir ou saisir un type">
-              <datalist id="referenceManualDocTypeList"></datalist>
+              <select id="referenceManualDocType" required>
+                <option value="" selected>Choisir un type</option>
+                <option value="COFFRAGE">COFFRAGE</option>
+                <option value="ARMATURES">ARMATURES</option>
+                <option value="COUPES">COUPES</option>
+                <option value="D&Eacute;MOLITION">D&Eacute;MOLITION</option>
+                <option value="NDC">NDC</option>
+              </select>
             </div>
 
             <div class="reference-form-group form-group">
@@ -291,8 +309,14 @@
 
             <div class="reference-form-group form-group">
               <label for="referencePatternDocType">Type de document :</label>
-              <input type="text" id="referencePatternDocType" list="referencePatternDocTypeList" value="NDC" required placeholder="Choisir ou saisir un type">
-              <datalist id="referencePatternDocTypeList"></datalist>
+              <select id="referencePatternDocType" required>
+                <option value="" selected>Choisir un type</option>
+                <option value="COFFRAGE">COFFRAGE</option>
+                <option value="ARMATURES">ARMATURES</option>
+                <option value="COUPES">COUPES</option>
+                <option value="D&Eacute;MOLITION">D&Eacute;MOLITION</option>
+                <option value="NDC">NDC</option>
+              </select>
             </div>
 
             <div class="reference-form-group form-group">
@@ -305,7 +329,11 @@
               <input type="text" id="referencePatternSuffix" placeholder="Ex: -A, _bis">
             </div>
 
-            <div class="reference-form-row form-row">
+            <label class="reference-alphabet-pattern-toggle alphabet-pattern-toggle">
+              <input type="checkbox" id="referencePatternAlphaEnabled">
+              Ordre alphab&eacute;tique
+            </label>
+            <div class="reference-form-row form-row" id="referencePatternNumberRangeFields">
               <div class="reference-form-group form-group">
                 <label for="referencePatternStart">De :</label>
                 <input type="number" id="referencePatternStart" value="1" min="0">
@@ -321,6 +349,16 @@
                   <option value="2">2 chiffres (01, 02, 10)</option>
                   <option value="3">3 chiffres (001, 002)</option>
                 </select>
+              </div>
+            </div>
+            <div class="reference-form-row form-row" id="referencePatternAlphaRangeFields" hidden>
+              <div class="reference-form-group form-group">
+                <label for="referencePatternAlphaStart">De :</label>
+                <input type="text" id="referencePatternAlphaStart" value="A" maxlength="1">
+              </div>
+              <div class="reference-form-group form-group">
+                <label for="referencePatternAlphaEnd">&Agrave; :</label>
+                <input type="text" id="referencePatternAlphaEnd" value="E" maxlength="1">
               </div>
             </div>
 

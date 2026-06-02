@@ -1315,8 +1315,34 @@ function normalizeReferenceDocumentNumberPadding(value) {
 }
 
 function getReferenceDocumentBuilderDefaultType() {
-  const currentType = normalizeTypeDocument(getCurrentSelectedType());
-  return currentType || DEFAULT_REFERENCE_DOCUMENT_TYPE;
+  return '';
+}
+
+function normalizeAlphabetLetter(value, fallbackValue) {
+  const text = String(value ?? '').trim().toLocaleUpperCase('fr');
+  const match = text.match(/[A-Z]/);
+  return match ? match[0] : fallbackValue;
+}
+
+function getAlphabetRangeValues(startValue, endValue) {
+  const startLetter = normalizeAlphabetLetter(startValue, 'A');
+  const endLetter = normalizeAlphabetLetter(endValue, 'E');
+  const startCode = startLetter.charCodeAt(0);
+  const endCode = endLetter.charCodeAt(0);
+
+  if (startCode > endCode) {
+    return {
+      error: 'Erreur: "De" doit etre inferieur ou egal a "A".',
+      values: [],
+    };
+  }
+
+  const values = [];
+  for (let code = startCode; code <= endCode; code += 1) {
+    values.push(String.fromCharCode(code));
+  }
+
+  return { error: '', values };
 }
 
 function buildPendingReferenceDocumentIdentityKey(doc = {}) {
@@ -1502,28 +1528,53 @@ function addUnifiedPendingDocuments(documents) {
   refreshReferenceZoneSuggestionLists();
 }
 
-function generateReferencePatternDocuments(prefix, suffix, start, end, padding, numeroStart, numeroStep, numeroPadding, type, zone = '') {
+function getReferencePatternNameValues() {
+  const alphaEnabled = document.getElementById('referencePatternAlphaEnabled')?.checked;
+  if (alphaEnabled) {
+    return getAlphabetRangeValues(
+      document.getElementById('referencePatternAlphaStart')?.value,
+      document.getElementById('referencePatternAlphaEnd')?.value
+    );
+  }
+
+  const start = Number.parseInt(document.getElementById('referencePatternStart')?.value, 10) || 0;
+  const end = Number.parseInt(document.getElementById('referencePatternEnd')?.value, 10) || 0;
+  const padding = Number.parseInt(document.getElementById('referencePatternPadding')?.value, 10) || 0;
+
+  if (start > end) {
+    return {
+      error: 'Erreur: "De" doit etre inferieur ou egal a "A".',
+      values: [],
+    };
+  }
+
+  const values = [];
+  for (let index = start; index <= end; index += 1) {
+    values.push(padding > 0 ? String(index).padStart(padding, '0') : String(index));
+  }
+
+  return { error: '', values };
+}
+
+function generateReferencePatternDocuments(prefix, suffix, nameValues, numeroStart, numeroStep, numeroPadding, type, zone = '') {
   const docs = [];
   let currentNumero = numeroStart;
   const effectiveNumeroPadding = normalizeReferenceDocumentNumberPadding(numeroPadding);
 
-  for (let index = start; index <= end; index += 1) {
-    let nameIndex = String(index);
-    if (padding > 0) nameIndex = nameIndex.padStart(padding, '0');
-
+  nameValues.forEach((nameValue) => {
     let numero = String(currentNumero);
     if (effectiveNumeroPadding > 0) {
       numero = numero.padStart(effectiveNumeroPadding, '0');
     }
 
     docs.push({
-      name: `${prefix}${nameIndex}${suffix}`,
+      name: `${prefix}${nameValue}${suffix}`,
       numero,
       type: normalizeTypeDocument(type),
       zone: normalizeZoneValue(zone),
     });
     currentNumero += numeroStep;
-  }
+  });
 
   return docs;
 }
@@ -1531,20 +1582,16 @@ function generateReferencePatternDocuments(prefix, suffix, start, end, padding, 
 function updateReferencePatternPreview() {
   const prefix = document.getElementById('referencePatternPrefix')?.value || '';
   const suffix = document.getElementById('referencePatternSuffix')?.value || '';
-  const start = Number.parseInt(document.getElementById('referencePatternStart')?.value, 10) || 0;
-  const end = Number.parseInt(document.getElementById('referencePatternEnd')?.value, 10) || 0;
-  const padding = Number.parseInt(document.getElementById('referencePatternPadding')?.value, 10) || 0;
   const numeroStart = Number.parseInt(document.getElementById('referenceNumeroStart')?.value, 10) || 0;
   const numeroStep = Number.parseInt(document.getElementById('referenceNumeroStep')?.value, 10) || 1;
   const numeroPadding = normalizeReferenceDocumentNumberPadding(document.getElementById('referenceNumeroPadding')?.value);
-  const type = normalizeTypeDocument(
-    document.getElementById('referencePatternDocType')?.value || DEFAULT_REFERENCE_DOCUMENT_TYPE
-  );
+  const type = normalizeTypeDocument(document.getElementById('referencePatternDocType')?.value || '');
   const zone = normalizeZoneValue(document.getElementById('referencePatternDocZone')?.value || '');
   const previewBody = document.getElementById('referencePatternPreviewBody');
+  const patternValues = getReferencePatternNameValues();
   if (!previewBody) return;
 
-  if (start > end) {
+  if (patternValues.error) {
     previewBody.innerHTML = '<tr><td colspan="4" style="color: red;">(Erreur: "De" doit être inférieur ou égal à "À".)</td></tr>';
     return;
   }
@@ -1552,9 +1599,7 @@ function updateReferencePatternPreview() {
   const docs = generateReferencePatternDocuments(
     prefix,
     suffix,
-    start,
-    Math.min(end, start + 9),
-    padding,
+    patternValues.values.slice(0, 10),
     numeroStart,
     numeroStep,
     numeroPadding,
@@ -1569,7 +1614,7 @@ function updateReferencePatternPreview() {
 
   previewBody.innerHTML = docs.map((doc) => (
     `<tr><td>${doc.numero}</td><td>${doc.name}</td><td>${doc.type}</td><td>${formatZoneLabel(doc.zone)}</td></tr>`
-  )).join('') + (end - start > 9 ? '<tr><td>...</td><td>...</td><td>...</td><td>...</td></tr>' : '');
+  )).join('') + (patternValues.values.length > 10 ? '<tr><td>...</td><td>...</td><td>...</td><td>...</td></tr>' : '');
 }
 
 function setReferenceDocsBuilderTab(tabName) {
@@ -1589,14 +1634,12 @@ function setReferenceDocsBuilderTab(tabName) {
 }
 
 function resetReferenceDocsBuilderFields() {
-  const defaultType = getReferenceDocumentBuilderDefaultType();
-
   const manualZone = document.getElementById('referenceManualDocZone');
   const manualType = document.getElementById('referenceManualDocType');
   const manualName = document.getElementById('referenceManualDocName');
   const manualNumero = document.getElementById('referenceManualDocNumero');
   if (manualZone) manualZone.value = '';
-  if (manualType) manualType.value = defaultType;
+  if (manualType) manualType.value = '';
   if (manualName) manualName.value = '';
   if (manualNumero) manualNumero.value = '';
 
@@ -1607,17 +1650,27 @@ function resetReferenceDocsBuilderFields() {
   const patternStart = document.getElementById('referencePatternStart');
   const patternEnd = document.getElementById('referencePatternEnd');
   const patternPadding = document.getElementById('referencePatternPadding');
+  const alphaEnabled = document.getElementById('referencePatternAlphaEnabled');
+  const alphaStart = document.getElementById('referencePatternAlphaStart');
+  const alphaEnd = document.getElementById('referencePatternAlphaEnd');
+  const numberRangeFields = document.getElementById('referencePatternNumberRangeFields');
+  const alphaRangeFields = document.getElementById('referencePatternAlphaRangeFields');
   const numeroStart = document.getElementById('referenceNumeroStart');
   const numeroStep = document.getElementById('referenceNumeroStep');
   const numeroPadding = document.getElementById('referenceNumeroPadding');
 
   if (patternZone) patternZone.value = '';
-  if (patternType) patternType.value = defaultType;
+  if (patternType) patternType.value = '';
   if (patternPrefix) patternPrefix.value = '';
   if (patternSuffix) patternSuffix.value = '';
   if (patternStart) patternStart.value = '1';
   if (patternEnd) patternEnd.value = '5';
   if (patternPadding) patternPadding.value = '0';
+  if (alphaEnabled) alphaEnabled.checked = false;
+  if (alphaStart) alphaStart.value = 'A';
+  if (alphaEnd) alphaEnd.value = 'E';
+  if (numberRangeFields) numberRangeFields.hidden = false;
+  if (alphaRangeFields) alphaRangeFields.hidden = true;
   if (numeroStart) numeroStart.value = '1';
   if (numeroStep) numeroStep.value = '1';
   if (numeroPadding) numeroPadding.value = '3';
@@ -1926,6 +1979,18 @@ function setupUnifiedAddDocumentsUi() {
   const patternZoneInput = document.getElementById('referencePatternDocZone');
   const patternTypeInput = document.getElementById('referencePatternDocType');
   const addPatternBtn = document.getElementById('addReferencePatternDocsBtn');
+  const alphaEnabledInput = document.getElementById('referencePatternAlphaEnabled');
+  const alphaStartInput = document.getElementById('referencePatternAlphaStart');
+  const alphaEndInput = document.getElementById('referencePatternAlphaEnd');
+  const numberRangeFields = document.getElementById('referencePatternNumberRangeFields');
+  const alphaRangeFields = document.getElementById('referencePatternAlphaRangeFields');
+
+  function updateReferencePatternRangeMode() {
+    const isAlphabetMode = Boolean(alphaEnabledInput?.checked);
+    if (numberRangeFields) numberRangeFields.hidden = isAlphabetMode;
+    if (alphaRangeFields) alphaRangeFields.hidden = !isAlphabetMode;
+    updateReferencePatternPreview();
+  }
 
   [
     document.getElementById('documentType'),
@@ -1970,6 +2035,8 @@ function setupUnifiedAddDocumentsUi() {
     'referencePatternPadding',
     'referencePatternDocType',
     'referencePatternDocZone',
+    'referencePatternAlphaStart',
+    'referencePatternAlphaEnd',
     'referenceNumeroStart',
     'referenceNumeroStep',
     'referenceNumeroPadding',
@@ -1979,6 +2046,10 @@ function setupUnifiedAddDocumentsUi() {
     element.addEventListener('input', updateReferencePatternPreview);
     element.addEventListener('change', updateReferencePatternPreview);
   });
+
+  if (alphaEnabledInput) {
+    alphaEnabledInput.addEventListener('change', updateReferencePatternRangeMode);
+  }
 
   if (addManualBtn) {
     addManualBtn.addEventListener('click', () => {
@@ -2051,9 +2122,7 @@ function setupUnifiedAddDocumentsUi() {
     addPatternBtn.addEventListener('click', () => {
       const prefix = document.getElementById('referencePatternPrefix')?.value || '';
       const suffix = document.getElementById('referencePatternSuffix')?.value || '';
-      const start = Number.parseInt(document.getElementById('referencePatternStart')?.value, 10) || 0;
-      const end = Number.parseInt(document.getElementById('referencePatternEnd')?.value, 10) || 0;
-      const padding = Number.parseInt(document.getElementById('referencePatternPadding')?.value, 10) || 0;
+      const patternValues = getReferencePatternNameValues();
       const numeroStart = Number.parseInt(document.getElementById('referenceNumeroStart')?.value, 10) || 0;
       const numeroStep = Number.parseInt(document.getElementById('referenceNumeroStep')?.value, 10) || 1;
       const numeroPadding = normalizeReferenceDocumentNumberPadding(document.getElementById('referenceNumeroPadding')?.value);
@@ -2066,7 +2135,7 @@ function setupUnifiedAddDocumentsUi() {
         return;
       }
 
-      if (start > end) {
+      if (patternValues.error) {
         alert('Erreur: "De" doit être inférieur ou égal à "À".');
         return;
       }
@@ -2074,9 +2143,7 @@ function setupUnifiedAddDocumentsUi() {
       addUnifiedPendingDocuments(generateReferencePatternDocuments(
         prefix,
         suffix,
-        start,
-        end,
-        padding,
+        patternValues.values,
         numeroStart,
         numeroStep,
         numeroPadding,

@@ -770,6 +770,10 @@ body {
       gap: 15px;
     }
 
+    #addDocumentsUnifiedDialog .form-row[hidden] {
+      display: none !important;
+    }
+
     #addDocumentsUnifiedDialog .form-row .form-group {
       flex: 1;
     }
@@ -777,6 +781,19 @@ body {
     #addDocumentsUnifiedDialog .form-row .form-group input,
     #addDocumentsUnifiedDialog .form-row .form-group select {
       width: 100%;
+    }
+
+    #addDocumentsUnifiedDialog .alphabet-pattern-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 12px;
+      color: #004990;
+      font-weight: 600;
+    }
+
+    #addDocumentsUnifiedDialog .alphabet-pattern-toggle input {
+      margin: 0;
     }
 
     #addDocumentsUnifiedDialog .modal-content input[type="text"],

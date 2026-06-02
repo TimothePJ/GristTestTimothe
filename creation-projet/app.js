@@ -262,6 +262,33 @@ document.addEventListener('DOMContentLoaded', () => {
         inputElement.value = normalizeDocumentType(inputElement.value);
     }
 
+    function normalizeAlphabetLetter(value, fallbackValue) {
+        const text = String(value ?? '').trim().toLocaleUpperCase('fr');
+        const match = text.match(/[A-Z]/);
+        return match ? match[0] : fallbackValue;
+    }
+
+    function getAlphabetRangeValues(startValue, endValue) {
+        const startLetter = normalizeAlphabetLetter(startValue, 'A');
+        const endLetter = normalizeAlphabetLetter(endValue, 'E');
+        const startCode = startLetter.charCodeAt(0);
+        const endCode = endLetter.charCodeAt(0);
+
+        if (startCode > endCode) {
+            return {
+                error: 'Erreur: "De" doit etre inferieur ou egal a "A".',
+                values: []
+            };
+        }
+
+        const values = [];
+        for (let code = startCode; code <= endCode; code += 1) {
+            values.push(String.fromCharCode(code));
+        }
+
+        return { error: '', values };
+    }
+
     function buildDocumentIdentityKey(doc = {}) {
         return [
             normalizeText(doc.name).toLowerCase(),
@@ -1839,54 +1866,74 @@ document.addEventListener('DOMContentLoaded', () => {
         renderDocumentsSelection();
     }
 
-    function generatePatternDocuments(prefix, suffix, start, end, padding, numeroStart, numeroStep, numeroPadding, type, zone = '') {
+    function getPatternNameValues() {
+        const alphaEnabled = document.getElementById('pattern-alpha-enabled')?.checked;
+        if (alphaEnabled) {
+            return getAlphabetRangeValues(
+                document.getElementById('pattern-alpha-start')?.value,
+                document.getElementById('pattern-alpha-end')?.value
+            );
+        }
+
+        const start = parseInt(document.getElementById('pattern-start').value, 10) || 0;
+        const end = parseInt(document.getElementById('pattern-end').value, 10) || 0;
+        const padding = parseInt(document.getElementById('pattern-padding').value, 10) || 0;
+
+        if (start > end) {
+            return {
+                error: 'Erreur: "De" doit etre inferieur ou egal a "A".',
+                values: []
+            };
+        }
+
+        const values = [];
+        for (let index = start; index <= end; index += 1) {
+            values.push(padding > 0 ? String(index).padStart(padding, '0') : String(index));
+        }
+
+        return { error: '', values };
+    }
+
+    function generatePatternDocuments(prefix, suffix, nameValues, numeroStart, numeroStep, numeroPadding, type, zone = '') {
         const docs = [];
         let currentNumero = numeroStart;
         const effectiveNumeroPadding = normalizeDocumentNumberPadding(numeroPadding);
-        for (let i = start; i <= end; i += 1) {
-            let numStr = String(i);
-            if (padding > 0) {
-                numStr = numStr.padStart(padding, '0');
-            }
+        nameValues.forEach((nameValue) => {
             let numeroStr = String(currentNumero);
             if (effectiveNumeroPadding > 0) {
                 numeroStr = numeroStr.padStart(effectiveNumeroPadding, '0');
             }
             docs.push({
-                name: `${prefix}${numStr}${suffix}`,
+                name: `${prefix}${nameValue}${suffix}`,
                 numero: numeroStr,
                 type: normalizeDocumentType(type),
                 zone: normalizeZoneValue(zone)
             });
             currentNumero += numeroStep;
-        }
+        });
         return docs;
     }
 
     function updatePatternPreview() {
         const prefix = document.getElementById('pattern-prefix').value || '';
         const suffix = document.getElementById('pattern-suffix').value || '';
-        const start = parseInt(document.getElementById('pattern-start').value, 10) || 0;
-        const end = parseInt(document.getElementById('pattern-end').value, 10) || 0;
-        const padding = parseInt(document.getElementById('pattern-padding').value, 10) || 0;
         const numeroStart = parseInt(document.getElementById('numero-start').value, 10) || 0;
         const numeroStep = parseInt(document.getElementById('numero-step').value, 10) || 1;
         const numeroPadding = normalizeDocumentNumberPadding(document.getElementById('numero-padding').value);
         const type = normalizeDocumentType(document.getElementById('pattern-doc-type').value || '');
         const zone = normalizeZoneValue(document.getElementById('pattern-doc-zone')?.value || '');
         const previewBody = document.getElementById('pattern-preview-body');
+        const patternValues = getPatternNameValues();
 
-        if (start > end) {
-            previewBody.innerHTML = '<tr><td colspan="4" style="color: red;">(Erreur: "De" doit etre inferieur ou egal a "A".)</td></tr>';
+        if (patternValues.error) {
+            previewBody.innerHTML = `<tr><td colspan="4" style="color: red;">(${patternValues.error})</td></tr>`;
             return;
         }
 
         const docs = generatePatternDocuments(
             prefix,
             suffix,
-            start,
-            Math.min(end, start + 9),
-            padding,
+            patternValues.values.slice(0, 10),
             numeroStart,
             numeroStep,
             numeroPadding,
@@ -1903,7 +1950,7 @@ document.addEventListener('DOMContentLoaded', () => {
         docs.forEach((doc) => {
             html += `<tr><td>${doc.numero}</td><td>${doc.name}</td><td>${doc.type}</td><td>${formatZoneLabel(doc.zone)}</td></tr>`;
         });
-        if (end - start > 9) {
+        if (patternValues.values.length > 10) {
             html += '<tr><td>...</td><td>...</td><td>...</td><td>...</td></tr>';
         }
         previewBody.innerHTML = html;
@@ -1928,6 +1975,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const startInput = document.getElementById('pattern-start');
         const endInput = document.getElementById('pattern-end');
         const paddingSelect = document.getElementById('pattern-padding');
+        const alphaEnabledInput = document.getElementById('pattern-alpha-enabled');
+        const alphaStartInput = document.getElementById('pattern-alpha-start');
+        const alphaEndInput = document.getElementById('pattern-alpha-end');
+        const numberRangeFields = document.getElementById('pattern-number-range-fields');
+        const alphaRangeFields = document.getElementById('pattern-alpha-range-fields');
         const patternTypeInput = document.getElementById('pattern-doc-type');
         const patternZoneInput = document.getElementById('pattern-doc-zone');
         const addPatternBtn = document.getElementById('add-pattern-docs-btn');
@@ -1958,6 +2010,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         closeBtn.addEventListener('click', closeModal);
+
+        function updatePatternRangeMode() {
+            const isAlphabetMode = Boolean(alphaEnabledInput?.checked);
+            if (numberRangeFields) numberRangeFields.hidden = isAlphabetMode;
+            if (alphaRangeFields) alphaRangeFields.hidden = !isAlphabetMode;
+            updatePatternPreview();
+        }
 
         tabBtns.forEach((btn) => {
             btn.addEventListener('click', () => {
@@ -2001,7 +2060,7 @@ document.addEventListener('DOMContentLoaded', () => {
             addDocuments(docs);
             manualInput.value = '';
             manualNumeroInput.value = '';
-            manualTypeInput.value = DEFAULT_DOCUMENT_TYPES[0];
+            manualTypeInput.value = '';
             manualZoneInput.value = '';
             manualInput.focus();
         });
@@ -2027,12 +2086,18 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        [prefixInput, suffixInput, startInput, endInput, paddingSelect, patternTypeInput, patternZoneInput].forEach((element) => {
+        [prefixInput, suffixInput, startInput, endInput, paddingSelect, patternTypeInput, patternZoneInput, alphaStartInput, alphaEndInput].forEach((element) => {
+            if (!element) return;
             element.addEventListener('input', updatePatternPreview);
             element.addEventListener('change', updatePatternPreview);
         });
 
+        if (alphaEnabledInput) {
+            alphaEnabledInput.addEventListener('change', updatePatternRangeMode);
+        }
+
         [numeroStartInput, numeroStepInput, numeroPaddingSelect].forEach((element) => {
+            if (!element) return;
             element.addEventListener('input', updatePatternPreview);
             element.addEventListener('change', updatePatternPreview);
         });
@@ -2040,9 +2105,7 @@ document.addEventListener('DOMContentLoaded', () => {
         addPatternBtn.addEventListener('click', () => {
             const prefix = prefixInput.value || '';
             const suffix = suffixInput.value || '';
-            const start = parseInt(startInput.value, 10) || 0;
-            const end = parseInt(endInput.value, 10) || 0;
-            const padding = parseInt(paddingSelect.value, 10) || 0;
+            const patternValues = getPatternNameValues();
             const numeroStart = parseInt(numeroStartInput.value, 10) || 0;
             const numeroStep = parseInt(numeroStepInput.value, 10) || 1;
             const numeroPadding = normalizeDocumentNumberPadding(numeroPaddingSelect.value);
@@ -2055,7 +2118,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            if (start > end) {
+            if (patternValues.error) {
                 alert('Erreur: "De" doit Ãªtre infÃ©rieur ou Ã©gal Ã  "Ã€".');
                 return;
             }
@@ -2063,9 +2126,7 @@ document.addEventListener('DOMContentLoaded', () => {
             addDocuments(generatePatternDocuments(
                 prefix,
                 suffix,
-                start,
-                end,
-                padding,
+                patternValues.values,
                 numeroStart,
                 numeroStep,
                 numeroPadding,
@@ -2078,15 +2139,18 @@ document.addEventListener('DOMContentLoaded', () => {
             startInput.value = '1';
             endInput.value = '5';
             paddingSelect.value = '0';
+            if (alphaEnabledInput) alphaEnabledInput.checked = false;
+            if (alphaStartInput) alphaStartInput.value = 'A';
+            if (alphaEndInput) alphaEndInput.value = 'E';
             numeroStartInput.value = '1';
             numeroStepInput.value = '1';
             numeroPaddingSelect.value = '3';
-            patternTypeInput.value = DEFAULT_DOCUMENT_TYPES[0];
+            patternTypeInput.value = '';
             patternZoneInput.value = '';
-            updatePatternPreview();
+            updatePatternRangeMode();
         });
 
-        updatePatternPreview();
+        updatePatternRangeMode();
     }
 
     function initDocumentsSection() {
