@@ -73,8 +73,16 @@ let planningSyncTraceSequence = 0;
 let planningViewportSettlePending = false;
 let planningViewportSettleToken = 0;
 let planningViewportSettleWaiters = [];
+let planningPaneResizerBound = false;
+let activePlanningPaneResize = null;
+let pendingPlanningPaneResizeWidth = null;
+let planningPaneResizeRafId = 0;
 
 const PLANNING_ROW_DRAG_HANDLED_FLAG = "__planningRowDragHandled";
+const PLANNING_PANE_MIN_WIDTH = 260;
+const PLANNING_PANE_MIN_TIMELINE_WIDTH = 320;
+const PLANNING_PANE_RESIZE_STEP = 24;
+const LEGACY_PLANNING_PANE_WIDTH_STORAGE_KEY = "planning-projet.left-panel-width";
 
 function roundPlanningTraceNumber(value, digits = 2) {
   const numericValue = Number(value);
@@ -158,6 +166,270 @@ export function waitForPlanningViewportSettled() {
   });
 }
 
+function isPlanningPaneResizeEnabled() {
+  return !EMBEDDED_PLANNING_SYNC_MODE && !EXTERNAL_AXIS_EMBEDDED_MODE;
+}
+
+function readPlanningCssPixelVar(name) {
+  if (typeof window === "undefined" || typeof document === "undefined") return 0;
+  const value = window
+    .getComputedStyle(document.documentElement)
+    .getPropertyValue(name);
+  const numericValue = Number.parseFloat(value);
+  return Number.isFinite(numericValue) ? numericValue : 0;
+}
+
+function getPlanningPaneNaturalWidth() {
+  const columnNames = [
+    "--col-id2",
+    "--col-task",
+    "--col-ligne-planning",
+    "--col-start",
+    "--col-duration-1",
+    "--col-end",
+    "--col-duration-2",
+    "--col-demarrage",
+    "--col-indice",
+    "--col-realise",
+    "--col-retards",
+  ];
+  const columnsWidth = columnNames.reduce(
+    (sum, name) => sum + readPlanningCssPixelVar(name),
+    0
+  );
+  const padX = readPlanningCssPixelVar("--left-pad-x");
+  const computedWidth = columnsWidth + (padX * 2);
+  if (computedWidth > 0) {
+    return computedWidth;
+  }
+
+  const headerLeft = document.querySelector(".planning-header-left");
+  return headerLeft instanceof HTMLElement
+    ? headerLeft.getBoundingClientRect().width
+    : 0;
+}
+
+function getPlanningPaneWidthBounds() {
+  const viewportWidth =
+    window.innerWidth ||
+    document.documentElement?.clientWidth ||
+    getPlanningPaneNaturalWidth();
+  const naturalWidth = getPlanningPaneNaturalWidth();
+  const maxWidth = Math.max(
+    PLANNING_PANE_MIN_WIDTH,
+    Math.min(naturalWidth || PLANNING_PANE_MIN_WIDTH, viewportWidth - PLANNING_PANE_MIN_TIMELINE_WIDTH)
+  );
+  const minWidth = Math.min(PLANNING_PANE_MIN_WIDTH, maxWidth);
+
+  return {
+    minWidth,
+    maxWidth,
+    naturalWidth,
+  };
+}
+
+function clampPlanningPaneWidth(width) {
+  const numericWidth = Number(width);
+  const { minWidth, maxWidth } = getPlanningPaneWidthBounds();
+  if (!Number.isFinite(numericWidth)) return maxWidth;
+  return Math.min(maxWidth, Math.max(minWidth, numericWidth));
+}
+
+function clearLegacyStoredPlanningPaneWidth() {
+  try {
+    window.localStorage?.removeItem(LEGACY_PLANNING_PANE_WIDTH_STORAGE_KEY);
+  } catch (_error) {
+    // localStorage can be unavailable in embedded contexts.
+  }
+}
+
+function getCurrentPlanningPaneWidth() {
+  const inlineValue = window
+    .getComputedStyle(document.documentElement)
+    .getPropertyValue("--planning-left-panel-width");
+  const inlineNumber = Number.parseFloat(inlineValue);
+  if (Number.isFinite(inlineNumber)) {
+    return inlineNumber;
+  }
+
+  const leftPanel = document.querySelector("#planningTimeline .vis-panel.vis-left");
+  if (leftPanel instanceof HTMLElement) {
+    const panelWidth = leftPanel.getBoundingClientRect().width;
+    if (panelWidth > 0) return panelWidth;
+  }
+
+  const headerLeft = document.querySelector(".planning-header-left");
+  if (headerLeft instanceof HTMLElement) {
+    const headerWidth = headerLeft.getBoundingClientRect().width;
+    if (headerWidth > 0) return headerWidth;
+  }
+
+  return getPlanningPaneNaturalWidth();
+}
+
+function syncPlanningPaneResizerAria(width) {
+  const handle = document.getElementById("planningPaneResizer");
+  if (!(handle instanceof HTMLElement)) return;
+
+  const { minWidth, maxWidth } = getPlanningPaneWidthBounds();
+  handle.setAttribute("aria-valuemin", String(Math.round(minWidth)));
+  handle.setAttribute("aria-valuemax", String(Math.round(maxWidth)));
+  handle.setAttribute("aria-valuenow", String(Math.round(width)));
+}
+
+function refreshPlanningPaneLayout() {
+  if (timelineInstance) {
+    timelineInstance.redraw();
+  }
+
+  requestStickyAxisSync();
+  requestAnimationFrame(() => {
+    updateCurrentTimeLineBounds();
+  });
+}
+
+function setPlanningPaneWidth(width, { redraw = true } = {}) {
+  if (!isPlanningPaneResizeEnabled()) return;
+
+  const nextWidth = clampPlanningPaneWidth(width);
+  document.documentElement.style.setProperty(
+    "--planning-left-panel-width",
+    `${nextWidth}px`
+  );
+  syncPlanningPaneResizerAria(nextWidth);
+  if (redraw) {
+    refreshPlanningPaneLayout();
+  }
+}
+
+function resetPlanningPaneWidth() {
+  document.documentElement.style.removeProperty("--planning-left-panel-width");
+  syncPlanningPaneResizerAria(clampPlanningPaneWidth(getPlanningPaneNaturalWidth()));
+  refreshPlanningPaneLayout();
+}
+
+function queuePlanningPaneWidthForDrag(width) {
+  pendingPlanningPaneResizeWidth = width;
+  if (planningPaneResizeRafId) return;
+
+  planningPaneResizeRafId = requestAnimationFrame(() => {
+    planningPaneResizeRafId = 0;
+    const nextWidth = pendingPlanningPaneResizeWidth;
+    pendingPlanningPaneResizeWidth = null;
+    setPlanningPaneWidth(nextWidth, { redraw: false });
+  });
+}
+
+function handlePlanningPaneResizeStart(event) {
+  if (!isPlanningPaneResizeEnabled()) return;
+  if (!(event.currentTarget instanceof HTMLElement)) return;
+
+  event.preventDefault();
+  activePlanningPaneResize = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startWidth: getCurrentPlanningPaneWidth(),
+  };
+
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+  document.documentElement.classList.add("is-planning-pane-resizing");
+  document.body?.classList?.add("is-planning-pane-resizing");
+}
+
+function handlePlanningPaneResizeMove(event) {
+  if (!activePlanningPaneResize || event.pointerId !== activePlanningPaneResize.pointerId) {
+    return;
+  }
+
+  const deltaX = event.clientX - activePlanningPaneResize.startX;
+  queuePlanningPaneWidthForDrag(activePlanningPaneResize.startWidth + deltaX);
+}
+
+function handlePlanningPaneResizeEnd(event) {
+  if (!activePlanningPaneResize || event.pointerId !== activePlanningPaneResize.pointerId) {
+    return;
+  }
+
+  if (planningPaneResizeRafId) {
+    cancelAnimationFrame(planningPaneResizeRafId);
+    planningPaneResizeRafId = 0;
+  }
+  if (pendingPlanningPaneResizeWidth != null) {
+    setPlanningPaneWidth(pendingPlanningPaneResizeWidth, { redraw: false });
+    pendingPlanningPaneResizeWidth = null;
+  }
+
+  activePlanningPaneResize = null;
+  document.documentElement.classList.remove("is-planning-pane-resizing");
+  document.body?.classList?.remove("is-planning-pane-resizing");
+  refreshPlanningPaneLayout();
+}
+
+function handlePlanningPaneResizerKeydown(event) {
+  if (!isPlanningPaneResizeEnabled()) return;
+
+  const currentWidth = getCurrentPlanningPaneWidth();
+  if (event.key === "ArrowLeft") {
+    event.preventDefault();
+    setPlanningPaneWidth(currentWidth - PLANNING_PANE_RESIZE_STEP);
+  } else if (event.key === "ArrowRight") {
+    event.preventDefault();
+    setPlanningPaneWidth(currentWidth + PLANNING_PANE_RESIZE_STEP);
+  } else if (event.key === "Home") {
+    event.preventDefault();
+    setPlanningPaneWidth(getPlanningPaneWidthBounds().minWidth);
+  } else if (event.key === "End") {
+    event.preventDefault();
+    setPlanningPaneWidth(getPlanningPaneWidthBounds().maxWidth);
+  }
+}
+
+function bindPlanningPaneResizer() {
+  if (!isPlanningPaneResizeEnabled()) return;
+  const handle = document.getElementById("planningPaneResizer");
+  if (!(handle instanceof HTMLElement)) return;
+
+  if (!planningPaneResizerBound) {
+    clearLegacyStoredPlanningPaneWidth();
+    document.documentElement.style.removeProperty("--planning-left-panel-width");
+    syncPlanningPaneResizerAria(getCurrentPlanningPaneWidth());
+  }
+
+  if (planningPaneResizerBound) return;
+  planningPaneResizerBound = true;
+
+  handle.addEventListener("pointerdown", handlePlanningPaneResizeStart);
+  handle.addEventListener("pointermove", handlePlanningPaneResizeMove);
+  handle.addEventListener("pointerup", handlePlanningPaneResizeEnd);
+  handle.addEventListener("pointercancel", handlePlanningPaneResizeEnd);
+  handle.addEventListener("lostpointercapture", () => {
+    if (!activePlanningPaneResize) return;
+    if (planningPaneResizeRafId) {
+      cancelAnimationFrame(planningPaneResizeRafId);
+      planningPaneResizeRafId = 0;
+    }
+    if (pendingPlanningPaneResizeWidth != null) {
+      setPlanningPaneWidth(pendingPlanningPaneResizeWidth, { redraw: false });
+      pendingPlanningPaneResizeWidth = null;
+    }
+    activePlanningPaneResize = null;
+    document.documentElement.classList.remove("is-planning-pane-resizing");
+    document.body?.classList?.remove("is-planning-pane-resizing");
+    refreshPlanningPaneLayout();
+  });
+  handle.addEventListener("keydown", handlePlanningPaneResizerKeydown);
+  handle.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    resetPlanningPaneWidth();
+  });
+  window.addEventListener("resize", () => {
+    if (!isPlanningPaneResizeEnabled()) return;
+    setPlanningPaneWidth(getCurrentPlanningPaneWidth(), {
+      redraw: true,
+    });
+  });
+}
+
 function ensureStickyAxisLeftFiller(container) {
   if (!(container instanceof HTMLElement)) return null;
   if (axisLeftFillerEl instanceof HTMLElement && axisLeftFillerEl.isConnected) {
@@ -212,6 +484,10 @@ function requestStickyAxisSync() {
   });
 }
 
+function syncStickyTimelineAxisOnScroll() {
+  syncStickyTimelineAxisWithWrapperScroll();
+}
+
 function bindStickyTimelineAxis() {
   if (EXTERNAL_AXIS_EMBEDDED_MODE) return;
 
@@ -219,12 +495,53 @@ function bindStickyTimelineAxis() {
   if (!(wrapper instanceof HTMLElement) || stickyAxisBound) return;
 
   stickyAxisBound = true;
-  wrapper.addEventListener("scroll", requestStickyAxisSync, { passive: true });
+  wrapper.addEventListener("scroll", syncStickyTimelineAxisOnScroll, { passive: true });
   window.addEventListener("resize", requestStickyAxisSync);
   requestStickyAxisSync();
 }
 
-function updateCurrentTimeLineBounds() {
+function getPlanningDateMs(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  const ms = date.getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function getCurrentTimeLineLeft(range = null, centerPanel = null) {
+  const effectiveRange = range || timelineInstance?.getWindow?.() || null;
+  const startMs = getPlanningDateMs(effectiveRange?.start);
+  const endMs = getPlanningDateMs(effectiveRange?.end);
+  const panelWidth =
+    centerPanel instanceof HTMLElement ? centerPanel.getBoundingClientRect().width : 0;
+
+  if (startMs != null && endMs != null && endMs > startMs && panelWidth > 0) {
+    return ((Date.now() - startMs) / (endMs - startMs)) * panelWidth;
+  }
+
+  if (timelineInstance && typeof timelineInstance.toScreen === "function") {
+    const screenLeft = Number(timelineInstance.toScreen(new Date()));
+    if (Number.isFinite(screenLeft)) {
+      return screenLeft;
+    }
+  }
+
+  return null;
+}
+
+function syncCurrentTimeLinePosition(range = null, currentLines = null, centerPanel = null) {
+  const lines =
+    currentLines || document.getElementById("planningTimeline")?.querySelectorAll(".vis-current-time");
+  if (!lines?.length) return;
+
+  const left = getCurrentTimeLineLeft(range, centerPanel);
+  if (!Number.isFinite(left)) return;
+
+  const leftValue = `${Math.round(left * 100) / 100}px`;
+  lines.forEach((line) => {
+    line.style.left = leftValue;
+  });
+}
+
+function updateCurrentTimeLineBounds(range = null) {
   const container = document.getElementById("planningTimeline");
   if (!container) return;
 
@@ -257,6 +574,8 @@ function updateCurrentTimeLineBounds() {
     line.style.top = isBodyPanelLine ? "0px" : `${topHeight}px`;
     line.style.height = `${contentHeight}px`;
   });
+
+  syncCurrentTimeLinePosition(range, currentLines, centerPanel);
 }
 
 function normalizePlanningViewportBounds(bounds = {}) {
@@ -3514,6 +3833,7 @@ export function setPlanningRowDropHandler(handler) {
 
 export function renderPlanningTimeline({ groups, items }) {
   const container = getTimelineContainer();
+  bindPlanningPaneResizer();
 
   if (!window.vis || !window.vis.DataSet || !window.vis.Timeline) {
     throw new Error("vis-timeline non chargé.");
@@ -3697,21 +4017,21 @@ export function bindTimelineToolbar() {
 
   // Mettre à jour le texte quand l’utilisateur déplace/zoome à la souris
   if (timelineInstance) {
-    timelineInstance.on("rangechange", () => {
+    timelineInstance.on("rangechange", (properties = {}) => {
       if (enforceEmbeddedPlanningViewportBounds()) {
         return;
       }
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
-      updateCurrentTimeLineBounds();
+      syncCurrentTimeLinePosition(properties);
     });
-    timelineInstance.on("rangechanged", () => {
+    timelineInstance.on("rangechanged", (properties = {}) => {
       if (enforceEmbeddedPlanningViewportBounds()) {
         return;
       }
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
-      updateCurrentTimeLineBounds();
+      updateCurrentTimeLineBounds(properties);
       emitPlanningViewportChange("rangechanged");
     });
   }

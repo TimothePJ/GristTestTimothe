@@ -27,7 +27,8 @@
 
   --left-pad-x: 4px;
   --left-grid-width: calc(var(--col-id2) + var(--col-task) + var(--col-ligne-planning) + var(--col-start) + var(--col-duration-1) + var(--col-end) + var(--col-duration-2) + var(--col-demarrage) + var(--col-indice) + var(--col-realise) + var(--col-retards));
-  --left-panel-width: calc(var(--left-grid-width) + (var(--left-pad-x) * 2));
+  --left-panel-width-default: calc(var(--left-grid-width) + (var(--left-pad-x) * 2));
+  --left-panel-width: var(--planning-left-panel-width, var(--left-panel-width-default));
 
   /* Hauteur de ligne commune labels + timeline */
   --planning-row-height: 40px;
@@ -70,6 +71,14 @@ html.is-ms-project-drag-cursor *,
 body.is-ms-project-drag-cursor,
 body.is-ms-project-drag-cursor * {
   cursor: grabbing !important;
+}
+
+html.is-planning-pane-resizing,
+html.is-planning-pane-resizing *,
+body.is-planning-pane-resizing,
+body.is-planning-pane-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 /* ==========================================================
@@ -456,12 +465,13 @@ body.planning-sync-embedded #planningTimeline .group-row-grid .cell-ligne-planni
 .planning-header-left {
   display: grid;
   grid-template-columns: var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-realise) var(--col-retards);
-  width: var(--left-grid-width);
+  width: max(0px, calc(var(--left-panel-width) - (var(--left-pad-x) * 2)));
   padding: 0 var(--left-pad-x);
   box-sizing: content-box;
   align-items: center;
   min-height: var(--planning-row-height);
   border-right: 1px solid var(--grist-theme-border);
+  overflow: hidden;
 }
 
 .planning-header-left .hcol {
@@ -506,6 +516,66 @@ body.planning-sync-embedded #planningTimeline .group-row-grid .cell-ligne-planni
   padding: 0 12px;
   color: var(--grist-theme-text);
   font-weight: 600;
+}
+
+.planning-pane-resizer {
+  position: fixed;
+  top: var(--toolbar-height);
+  bottom: 0;
+  left: calc(var(--left-panel-width) - 6px);
+  z-index: 120;
+  width: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.planning-pane-resizer::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 5px;
+  width: 2px;
+  background: #cbd5e1;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7);
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.planning-pane-resizer::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 6px;
+  height: 34px;
+  border-radius: 999px;
+  background:
+    linear-gradient(#94a3b8, #94a3b8) center 8px / 2px 2px no-repeat,
+    linear-gradient(#94a3b8, #94a3b8) center 16px / 2px 2px no-repeat,
+    linear-gradient(#94a3b8, #94a3b8) center 24px / 2px 2px no-repeat,
+    rgba(248, 250, 252, 0.92);
+  border: 1px solid #cbd5e1;
+  transform: translateY(-50%);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.12);
+}
+
+.planning-pane-resizer:hover::before,
+.planning-pane-resizer:focus-visible::before,
+html.is-planning-pane-resizing .planning-pane-resizer::before {
+  background: #0a4f99;
+  box-shadow: 0 0 0 1px rgba(10, 79, 153, 0.18), 0 0 0 4px rgba(10, 79, 153, 0.10);
+}
+
+.planning-pane-resizer:focus-visible {
+  outline: none;
+}
+
+body.planning-sync-embedded .planning-pane-resizer,
+body.planning-sync-external-axis .planning-pane-resizer,
+body.planning-sync-axis-only .planning-pane-resizer,
+body.planning-sync-header-only .planning-pane-resizer {
+  display: none;
 }
 
 /* ==========================================================
@@ -603,6 +673,7 @@ body.planning-sync-embedded #planningTimeline .group-row-grid .cell-ligne-planni
   width: var(--left-panel-width) !important;
   background: #fafafa !important;
   border-right: 1px solid var(--grist-theme-border) !important;
+  overflow: hidden !important;
 }
 
 /* Décalage des panneaux droits */
@@ -1246,6 +1317,8 @@ body.planning-row-dragging {
   background-color: #ed1b2d !important;
   opacity: 0.9;
   z-index: 5;
+  transition: none !important;
+  will-change: left;
 }
 
 /* ==========================================================
