@@ -1,9 +1,13 @@
 ﻿import { APP_CONFIG } from "../config.js";
 import { toText } from "./gristService.js";
 import {
+  buildPlanningIndiceProgress,
   buildTargetIndiceByTypeFromAvancement,
   computePlanningRealisationValue,
+  getPlanningIndiceRank,
   getTargetIndiceForDocumentType,
+  normalizePlanningDocumentType,
+  normalizePlanningIndice,
 } from "../../../../gestion-depenses2/assets/js/utils/planningRealisation.js";
 
 function toNumber(value) {
@@ -103,10 +107,8 @@ function getDelayDays(segmentEndDate, referenceDate) {
 }
 
 function isAllowedTypeDoc(value) {
-  const normalized = String(value ?? "").toUpperCase();
-  // console.log("Normalized TypeDoc:", normalized);
-  return normalized.includes("COFFRAGE") || normalized.includes("ARMATURES")
-   || normalized.includes("DÉMOLITION") || normalized.includes("ELEVATION - COUPES / DETAILS");
+  const normalizedType = normalizePlanningDocumentType(value);
+  return ["COFFRAGE", "ARMATURES", "DEMOLITION", "COUPES"].includes(normalizedType);
 }
 
 function isCoffrageTypeDoc(value) {
@@ -137,6 +139,7 @@ export function buildProjectRealisationTargetLookup(projectConfigs = []) {
     );
 
     [
+      projectConfig?.projectId,
       projectConfig?.projectName,
       projectConfig?.projectNumber,
     ].forEach((projectKey) => {
@@ -189,6 +192,10 @@ function resolvePlanningSegmentEndDate({
 
   if (isArmaturesTypeDoc(typeDoc)) {
     return parseDate(diffArmatureRaw);
+  }
+
+  if (isAllowedTypeDoc(typeDoc)) {
+    return parseDate(diffCoffrageRaw);
   }
 
   return null;
@@ -308,6 +315,222 @@ export function buildPlanningRetardUpdates(
       id: rowId,
       retards: nextRetard,
     });
+    return updates;
+  }, []);
+}
+
+function getPlanningDateSortValue(value) {
+  const date = parseDate(value);
+  return date ? date.getTime() : Number.NEGATIVE_INFINITY;
+}
+
+function normalizePlanningLinkPart(value) {
+  return toText(value).toLocaleLowerCase("fr");
+}
+
+function buildPlanningLinkKey(project, numeroDocument, typeDocument, designation, zone = "") {
+  return [
+    normalizePlanningLinkPart(project),
+    normalizePlanningLinkPart(numeroDocument),
+    normalizePlanningLinkPart(typeDocument),
+    normalizePlanningLinkPart(designation),
+    normalizePlanningLinkPart(zone),
+  ].join("||");
+}
+
+function buildPlanningLinkKeyWithoutDesignation(project, numeroDocument, typeDocument, zone = "") {
+  return [
+    normalizePlanningLinkPart(project),
+    normalizePlanningLinkPart(numeroDocument),
+    normalizePlanningLinkPart(typeDocument),
+    normalizePlanningLinkPart(zone),
+  ].join("||");
+}
+
+function getFirstPlanningValue(row, columnNames = []) {
+  for (const columnName of columnNames) {
+    if (row?.[columnName] != null && row?.[columnName] !== "") {
+      return row[columnName];
+    }
+  }
+
+  return "";
+}
+
+function buildProjectIdToNameLookup(projectConfigs = []) {
+  const lookup = new Map();
+
+  (projectConfigs || []).forEach((projectConfig) => {
+    const projectId = toText(projectConfig?.projectId);
+    const projectName = toText(projectConfig?.projectName);
+    if (projectId && projectName && !lookup.has(projectId)) {
+      lookup.set(projectId, projectName);
+    }
+  });
+
+  return lookup;
+}
+
+function normalizeSyncProjectValue(value, projectIdToName = null) {
+  const rawValue = toText(value);
+  if (projectIdToName instanceof Map && projectIdToName.has(rawValue)) {
+    return projectIdToName.get(rawValue);
+  }
+
+  return rawValue;
+}
+
+function shouldReplaceLatestPlanRecord(current, candidate) {
+  if (!current) return true;
+  if (candidate.indiceRank !== current.indiceRank) {
+    return candidate.indiceRank > current.indiceRank;
+  }
+
+  return candidate.dateSortValue > current.dateSortValue;
+}
+
+function rememberLatestPlanRecord(map, key, candidate) {
+  if (shouldReplaceLatestPlanRecord(map.get(key), candidate)) {
+    map.set(key, candidate);
+  }
+}
+
+function normalizeIsoDateValue(value) {
+  const parsed = parseDate(value);
+  if (parsed) {
+    return fmtIsoCellDate(parsed);
+  }
+
+  return toText(value);
+}
+
+export function buildPlanningListePlanSyncUpdates(
+  planningRows,
+  listePlanRows,
+  projectConfigs = [],
+  targetLookup = null,
+  currentInstant = getCurrentInstant()
+) {
+  const cfg = APP_CONFIG.grist.planningTable.columns;
+  const projectLinkCol = cfg.projectLink || cfg.nomProjet;
+  const projectIdToName = buildProjectIdToNameLookup(projectConfigs);
+  const effectiveTargetLookup =
+    targetLookup instanceof Map ? targetLookup : buildProjectRealisationTargetLookup(projectConfigs);
+
+  const latestByKeyStrict = new Map();
+  const latestByKeyNoDesignation = new Map();
+  const latestByKeyStrictLegacy = new Map();
+  const latestByKeyNoDesignationLegacy = new Map();
+
+  (listePlanRows || []).forEach((row) => {
+    const indice = normalizePlanningIndice(row?.Indice);
+    const indiceRank = getPlanningIndiceRank(indice);
+    const dateDiffusion = row?.DateDiffusion;
+    const dateSortValue = getPlanningDateSortValue(dateDiffusion);
+    if (!indice || indiceRank == null || !Number.isFinite(dateSortValue)) {
+      return;
+    }
+
+    const projectValue = normalizeSyncProjectValue(
+      getFirstPlanningValue(row, ["Nom_projet", "NomProjet"]),
+      projectIdToName
+    );
+    const documentNumber = getFirstPlanningValue(row, ["NumeroDocument", "ID2"]);
+    const typeDocument = getFirstPlanningValue(row, ["Type_document", "Type_doc", "TypeDoc"]);
+    const designation = getFirstPlanningValue(row, ["Designation", "NomDocument", "Taches", "Tache"]);
+    const zone = getFirstPlanningValue(row, ["Zone"]);
+    const latestRecord = {
+      indice,
+      indiceRank,
+      dateDiffusion,
+      dateSortValue,
+    };
+
+    rememberLatestPlanRecord(
+      latestByKeyStrict,
+      buildPlanningLinkKey(projectValue, documentNumber, typeDocument, designation, zone),
+      latestRecord
+    );
+    rememberLatestPlanRecord(
+      latestByKeyNoDesignation,
+      buildPlanningLinkKeyWithoutDesignation(projectValue, documentNumber, typeDocument, zone),
+      latestRecord
+    );
+    rememberLatestPlanRecord(
+      latestByKeyStrictLegacy,
+      buildPlanningLinkKey(projectValue, documentNumber, typeDocument, designation),
+      latestRecord
+    );
+    rememberLatestPlanRecord(
+      latestByKeyNoDesignationLegacy,
+      buildPlanningLinkKeyWithoutDesignation(projectValue, documentNumber, typeDocument),
+      latestRecord
+    );
+  });
+
+  return (planningRows || []).reduce((updates, row) => {
+    const rowId = Number(row?.[cfg.id]);
+    if (!Number.isInteger(rowId) || rowId <= 0) {
+      return updates;
+    }
+
+    const projectValue = normalizeSyncProjectValue(row?.[projectLinkCol], projectIdToName);
+    const documentNumber = row?.[cfg.id2];
+    const typeDoc = toText(row?.[cfg.typeDoc]);
+    const designation = row?.[cfg.taches] ?? row?.[cfg.tacheAlt];
+    const zone = row?.[cfg.zone];
+
+    const latestRecord =
+      latestByKeyStrict.get(buildPlanningLinkKey(projectValue, documentNumber, typeDoc, designation, zone)) ??
+      latestByKeyNoDesignation.get(buildPlanningLinkKeyWithoutDesignation(projectValue, documentNumber, typeDoc, zone)) ??
+      latestByKeyStrictLegacy.get(buildPlanningLinkKey(projectValue, documentNumber, typeDoc, designation)) ??
+      latestByKeyNoDesignationLegacy.get(buildPlanningLinkKeyWithoutDesignation(projectValue, documentNumber, typeDoc)) ??
+      null;
+
+    const targetIndice = getPlanningTargetIndice(typeDoc, projectValue, effectiveTargetLookup);
+    const progress = buildPlanningIndiceProgress(
+      latestRecord ? [latestRecord] : [],
+      targetIndice
+    );
+    const latestIndice = progress.latestIndice;
+    const targetRealise = progress.realisation;
+    const nextDateRealise = progress.targetReached && progress.latestRecord
+      ? fmtIsoCellDate(parseDate(progress.latestRecord.dateDiffusion))
+      : null;
+    const targetRetard = computePlanningRetardValue(
+      {
+        typeDoc,
+        indice: latestIndice,
+        targetIndice,
+        currentRetard: row?.[cfg.retards],
+        lignePlanningRaw: row?.[cfg.lignePlanning],
+        diffCoffrageRaw: row?.[cfg.diffCoffrage],
+        diffArmatureRaw: row?.[cfg.diffArmature],
+        demarrageRaw: row?.[cfg.demarragesTravaux],
+        duree3Raw: row?.[cfg.duree3],
+        dateRealiseRaw: targetRealise >= 100 ? nextDateRealise : "",
+      },
+      currentInstant
+    );
+
+    const update = { id: rowId };
+    if (toText(row?.[cfg.indice]) !== latestIndice) {
+      update.indice = latestIndice;
+    }
+    if (toNumber(row?.[cfg.realise]) !== targetRealise) {
+      update.realise = targetRealise;
+    }
+    if ((normalizeIsoDateValue(row?.[cfg.dateRealise]) || "") !== (nextDateRealise || "")) {
+      update.dateRealise = nextDateRealise;
+    }
+    if (toNumber(row?.[cfg.retards]) !== targetRetard) {
+      update.retards = targetRetard;
+    }
+
+    if (Object.keys(update).length > 1) {
+      updates.push(update);
+    }
+
     return updates;
   }, []);
 }

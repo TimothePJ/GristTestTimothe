@@ -35,6 +35,7 @@ function toText(value) {
   if (typeof value === "number" || typeof value === "boolean") return String(value);
 
   if (typeof value === "object") {
+    if (typeof value.details === "string") return value.details.trim();
     if (typeof value.label === "string") return value.label.trim();
     if (typeof value.name === "string") return value.name.trim();
     if (typeof value.display === "string") return value.display.trim();
@@ -1726,6 +1727,7 @@ export async function fetchProjectAvancementConfigs() {
   const columns = table.columns || {};
 
   return rows.map((row) => ({
+    projectId: toText(row?.id),
     projectName: toText(row?.[columns.project]),
     projectNumber: toText(row?.[columns.projectNumber]),
     avancementConfigRaw: row?.[columns.avancement],
@@ -1740,6 +1742,86 @@ export async function fetchPlanningRows() {
 
   // On renvoie brut, le mapping métier se fait dans planningService.js
   return rows;
+}
+
+export async function fetchListePlanRows() {
+  return fetchFirstAvailableTable(LISTEPLAN_TABLE_CANDIDATES);
+}
+
+export async function syncPlanningComputedValues(updates) {
+  const normalizedUpdates = (updates || []).filter((update) => {
+    const rowId = Number(update?.id);
+    return Number.isInteger(rowId) && rowId > 0;
+  });
+
+  if (!normalizedUpdates.length) {
+    return { updatedCount: 0 };
+  }
+
+  const table = APP_CONFIG.grist.planningTable;
+  if (!table?.sourceTable) {
+    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
+  }
+
+  const columns = table.columns || {};
+  const indiceCol = String(columns.indice || "Indice").trim();
+  const realiseCol = String(columns.realise || "Realise").trim();
+  const dateRealiseCol = String(columns.dateRealise || "Date_Realise").trim();
+  const retardsCol = String(columns.retards || "Retards").trim();
+
+  const actions = normalizedUpdates
+    .map((update) => {
+      const fields = {};
+
+      if (Object.prototype.hasOwnProperty.call(update, "indice")) {
+        fields[indiceCol] = toText(update.indice);
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(update, "realise") &&
+        (update.realise == null || Number.isFinite(Number(update.realise)))
+      ) {
+        fields[realiseCol] = update.realise == null ? null : Number(update.realise);
+      }
+
+      if (Object.prototype.hasOwnProperty.call(update, "dateRealise")) {
+        fields[dateRealiseCol] = update.dateRealise || null;
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(update, "retards") &&
+        (update.retards == null || Number.isFinite(Number(update.retards)))
+      ) {
+        fields[retardsCol] = update.retards == null ? null : Number(update.retards);
+      }
+
+      if (!Object.keys(fields).length) {
+        return null;
+      }
+
+      return [
+        "UpdateRecord",
+        table.sourceTable,
+        Number(update.id),
+        fields,
+      ];
+    })
+    .filter(Boolean);
+
+  if (!actions.length) {
+    return { updatedCount: 0 };
+  }
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  await grist.docApi.applyUserActions(actions);
+
+  return {
+    updatedCount: actions.length,
+  };
 }
 
 export async function syncPlanningRealiseValues(updates) {

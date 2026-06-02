@@ -1,5 +1,6 @@
 const INDICES = ["0", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
 let projetsDictGlobal = null;
+let planningRealisationHelpersPromise = null;
 
 (async () => {
   await chargerProjetsMap();
@@ -140,6 +141,184 @@ function normalizeIndice(value) {
   return normalizeText(value).toUpperCase();
 }
 
+function normalizePlanningLookupText(value) {
+  return normalizeText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+}
+
+function normalizeCompactPlanningLookupText(value) {
+  return normalizePlanningLookupText(value).replace(/\s+/g, "");
+}
+
+function normalizePlanningDocumentTypeLocal(value) {
+  const normalized = normalizePlanningLookupText(value);
+  const compact = normalizeCompactPlanningLookupText(value);
+
+  if (
+    compact === "NDC" ||
+    normalized.includes("NOTE DE CALCUL") ||
+    normalized.includes("NOTES DE CALCUL") ||
+    normalized.includes("NOTE CALCUL") ||
+    normalized.includes("NOTES CALCUL")
+  ) {
+    return "NDC";
+  }
+
+  if (normalized.includes("COFFRAGE")) return "COFFRAGE";
+  if (normalized.includes("ARMATURE")) return "ARMATURES";
+  if (
+    normalized.includes("DEMOLITION") ||
+    compact.includes("DEMOLITION") ||
+    (normalized.startsWith("D") && normalized.includes("MOLITION"))
+  ) {
+    return "DEMOLITION";
+  }
+  if (normalized.includes("COUPE")) return "COUPES";
+
+  return normalized || "NON SPECIFIE";
+}
+
+function getDefaultTargetIndiceForDocumentTypeLocal(typeDoc) {
+  return normalizePlanningDocumentTypeLocal(typeDoc) === "COFFRAGE" ? "A" : "0";
+}
+
+function getPlanningIndiceRankLocal(indice) {
+  const normalizedIndice = normalizeIndice(indice);
+  if (!normalizedIndice) return 0;
+  if (normalizedIndice === "0") return 1;
+  if (/^[A-Z]$/.test(normalizedIndice)) {
+    return normalizedIndice.charCodeAt(0) - 63;
+  }
+  return null;
+}
+
+function computeIndexedRealisationLocal(indice, targetIndice) {
+  const normalizedIndice = normalizeIndice(indice);
+  const normalizedTargetIndice = normalizeIndice(targetIndice);
+
+  if (!normalizedIndice) return 0;
+  if (!normalizedTargetIndice) return normalizedIndice ? 100 : 0;
+  if (normalizedIndice === normalizedTargetIndice) return 100;
+
+  const indiceRank = getPlanningIndiceRankLocal(normalizedIndice);
+  const targetRank = getPlanningIndiceRankLocal(normalizedTargetIndice);
+  if (indiceRank == null || targetRank == null || targetRank <= 0) {
+    return 0;
+  }
+
+  return Math.min(100, Math.max(0, Math.round((indiceRank / targetRank) * 100)));
+}
+
+function isPlanningIndiceAtLeastLocal(indice, targetIndice) {
+  const normalizedIndice = normalizeIndice(indice);
+  const normalizedTargetIndice = normalizeIndice(targetIndice);
+  if (!normalizedIndice) return false;
+  if (!normalizedTargetIndice) return true;
+  if (normalizedIndice === normalizedTargetIndice) return true;
+
+  const indiceRank = getPlanningIndiceRankLocal(normalizedIndice);
+  const targetRank = getPlanningIndiceRankLocal(normalizedTargetIndice);
+  if (indiceRank == null || targetRank == null) return false;
+
+  return indiceRank >= targetRank;
+}
+
+function buildPlanningIndiceProgressLocal(records = [], targetIndice = "") {
+  let latestRecord = null;
+
+  (records || []).forEach((record) => {
+    const indice = normalizeIndice(record?.indice);
+    const indiceRank = getPlanningIndiceRankLocal(indice);
+    const dateSortValue = Number(record?.dateSortValue);
+    if (!indice || indiceRank == null || !Number.isFinite(dateSortValue)) {
+      return;
+    }
+
+    if (
+      !latestRecord ||
+      indiceRank > latestRecord.indiceRank ||
+      (indiceRank === latestRecord.indiceRank && dateSortValue > latestRecord.dateSortValue)
+    ) {
+      latestRecord = {
+        ...record,
+        indice,
+        indiceRank,
+        dateSortValue,
+      };
+    }
+  });
+
+  const latestIndice = latestRecord?.indice || "";
+  const effectiveTargetIndice = normalizeIndice(targetIndice);
+
+  return {
+    latestRecord,
+    latestIndice,
+    targetIndice: effectiveTargetIndice,
+    targetReached: isPlanningIndiceAtLeastLocal(latestIndice, effectiveTargetIndice),
+    realisation: computeIndexedRealisationLocal(latestIndice, effectiveTargetIndice),
+  };
+}
+
+function buildTargetIndiceByTypeFromAvancementLocal(rawValue) {
+  const targetIndiceByType = new Map();
+  if (rawValue == null || rawValue === "") return targetIndiceByType;
+
+  try {
+    const parsed = typeof rawValue === "string" ? JSON.parse(rawValue) : rawValue;
+    if (!Array.isArray(parsed)) return targetIndiceByType;
+
+    parsed.forEach((item) => {
+      const typeKey = normalizePlanningDocumentTypeLocal(item?.typeDocument);
+      const indice = normalizeIndice(item?.indice);
+      if (!typeKey || !indice || item?.budgetKey || targetIndiceByType.has(typeKey)) {
+        return;
+      }
+
+      targetIndiceByType.set(typeKey, indice);
+    });
+  } catch (_error) {
+    return targetIndiceByType;
+  }
+
+  return targetIndiceByType;
+}
+
+function getTargetIndiceForDocumentTypeLocal(typeDoc, targetIndiceByType = null) {
+  const typeKey = normalizePlanningDocumentTypeLocal(typeDoc);
+  if (targetIndiceByType instanceof Map && targetIndiceByType.has(typeKey)) {
+    return targetIndiceByType.get(typeKey);
+  }
+
+  return getDefaultTargetIndiceForDocumentTypeLocal(typeDoc);
+}
+
+function getLocalPlanningRealisationHelpers() {
+  return {
+    buildPlanningIndiceProgress: buildPlanningIndiceProgressLocal,
+    buildTargetIndiceByTypeFromAvancement: buildTargetIndiceByTypeFromAvancementLocal,
+    computePlanningRealisationValue: computePlanningRealiseValue,
+    getPlanningIndiceRank: getPlanningIndiceRankLocal,
+    getTargetIndiceForDocumentType: getTargetIndiceForDocumentTypeLocal,
+  };
+}
+
+async function loadPlanningRealisationHelpers() {
+  if (!planningRealisationHelpersPromise) {
+    planningRealisationHelpersPromise = import("../gestion-depenses2/assets/js/utils/planningRealisation.js")
+      .catch((error) => {
+        console.warn("Fallback logique indices planning locale :", error);
+        return getLocalPlanningRealisationHelpers();
+      });
+  }
+
+  return planningRealisationHelpersPromise;
+}
+
 function toNumber(value) {
   if (value == null || value === "") return null;
   const number = Number(value);
@@ -262,9 +441,8 @@ function isArmaturesTypeDoc(value) {
 }
 
 function isAllowedPlanningTypeDoc(value) {
-  const normalized = normalizeText(value).toUpperCase();
-  return normalized.includes("COFFRAGE") || normalized.includes("ARMATURES")
-    || normalized.includes("DÉMOLITION") || normalized.includes("ELEVATION - COUPES / DETAILS");
+  const normalizedType = normalizePlanningDocumentTypeLocal(value);
+  return ["COFFRAGE", "ARMATURES", "DEMOLITION", "COUPES"].includes(normalizedType);
 }
 
 function hasPlanningLinkValue(value) {
@@ -279,19 +457,11 @@ function hasPlanningLinkValue(value) {
   return true;
 }
 
-function computePlanningRealiseValue(typeDoc, indice) {
-  const normalizedIndice = normalizeIndice(indice);
-  if (!normalizedIndice) return 0;
+function computePlanningRealiseValue(typeDoc, indice, targetIndice = "") {
+  const effectiveTargetIndice =
+    normalizeIndice(targetIndice) || getDefaultTargetIndiceForDocumentTypeLocal(typeDoc);
 
-  if (/^\d+$/.test(normalizedIndice)) {
-    return isCoffrageTypeDoc(typeDoc) ? 50 : 100;
-  }
-
-  if (/^[A-Z]/.test(normalizedIndice)) {
-    return 100;
-  }
-
-  return 100;
+  return computeIndexedRealisationLocal(indice, effectiveTargetIndice);
 }
 
 function resolveCoffrageDiffCoffrageDate({
@@ -336,12 +506,18 @@ function resolvePlanningSegmentEndDate({
     return parsePlanningSyncDate(diffArmatureRaw);
   }
 
+  if (isAllowedPlanningTypeDoc(typeDoc)) {
+    return parsePlanningSyncDate(diffCoffrageRaw);
+  }
+
   return null;
 }
 
 function computePlanningRetardValue({
   typeDoc,
   indice,
+  targetIndice,
+  realiseValue,
   currentRetard,
   lignePlanningRaw,
   diffCoffrageRaw,
@@ -354,7 +530,8 @@ function computePlanningRetardValue({
     return 0;
   }
 
-  const realiseValue = computePlanningRealiseValue(typeDoc, indice);
+  const effectiveRealiseValue =
+    toNumber(realiseValue) ?? computePlanningRealiseValue(typeDoc, indice, targetIndice);
   const segmentEndDate = resolvePlanningSegmentEndDate({
     typeDoc,
     lignePlanningRaw,
@@ -364,7 +541,7 @@ function computePlanningRetardValue({
     duree3Raw,
   });
 
-  if (realiseValue >= 100) {
+  if (effectiveRealiseValue >= 100) {
     const dateRealise = parsePlanningSyncDate(dateRealiseRaw);
     if (dateRealise && segmentEndDate) {
       return getPlanningDelayDays(segmentEndDate, dateRealise);
@@ -419,6 +596,47 @@ function buildPlanningLinkKeyWithoutDesignation(project, numeroDocument, typeDoc
     normalizeText(typeDocument).toLowerCase(),
     normalizeZoneText(zone).toLowerCase(),
   ].join("||");
+}
+
+function normalizeProjectLookupKey(value) {
+  return normalizeText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function buildProjectTargetIndiceLookup(projectRows, helpers) {
+  const lookup = new Map();
+
+  (projectRows || []).forEach((row) => {
+    const targetIndiceByType = helpers.buildTargetIndiceByTypeFromAvancement(
+      row?.Avancement
+    );
+
+    [
+      row?.id,
+      row?.Nom_de_projet,
+      row?.NomProjet,
+      row?.Numero_de_projet,
+      row?.NumeroProjet,
+    ].forEach((projectKey) => {
+      const normalizedKey = normalizeProjectLookupKey(projectKey);
+      if (normalizedKey && !lookup.has(normalizedKey)) {
+        lookup.set(normalizedKey, targetIndiceByType);
+      }
+    });
+  });
+
+  return lookup;
+}
+
+function getProjectTargetIndiceForType(projectValue, typeDoc, targetLookup, helpers) {
+  const targetIndiceByType =
+    targetLookup.get(normalizeProjectLookupKey(projectValue)) || null;
+
+  return helpers.getTargetIndiceForDocumentType(typeDoc, targetIndiceByType);
 }
 
 function getColumnNames(raw, rows = []) {
@@ -754,6 +972,7 @@ async function buildPlanningProjetTextUpdateActions({
 
 async function syncPlanningProjetIndicesFromListeDePlan() {
   try {
+    const planningHelpers = await loadPlanningRealisationHelpers();
     const projetsMap = await chargerProjetsMap();
     const projectIdToName = new Map(
       Object.entries(projetsMap || {}).map(([name, id]) => [String(id), name])
@@ -770,15 +989,17 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
 
     const listeRaw = await grist.docApi.fetchTable("ListePlan_NDC_COF");
     const planningRaw = await grist.docApi.fetchTable("Planning_Projet");
+    const projetsRaw = await grist.docApi.fetchTable("Projets");
 
     const listeRows = normalizeRows(listeRaw);
     const planningRows = normalizeRows(planningRaw);
+    const projectRows = normalizeRows(projetsRaw);
+    const projectTargetLookup = buildProjectTargetIndiceLookup(projectRows, planningHelpers);
     const planningColumns = getColumnNames(planningRaw, planningRows);
     const hasRealiseColumn = planningColumns.has("Realise");
     const hasRetardsColumn = planningColumns.has("Retards");
     const hasDateRealiseColumn = planningColumns.has("Date_Realise");
 
-    const indiceOrder = new Map(INDICES.map((ind, idx) => [ind, idx]));
     const latestByKeyStrict = new Map();
     const latestByKeyNoDesignation = new Map();
     const latestByKeyStrictLegacy = new Map();
@@ -786,13 +1007,15 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
 
     for (const r of listeRows) {
       const indice = normalizeIndice(r.Indice);
-      const order = indiceOrder.has(indice) ? indiceOrder.get(indice) : -1;
-      if (order < 0) continue;
+      const order = Number(planningHelpers.getPlanningIndiceRank(indice));
+      if (!indice || !Number.isFinite(order) || order <= 0) continue;
       if (!hasValidDate(r.DateDiffusion)) continue;
       const latestRecord = {
         indice,
         order,
+        indiceRank: order,
         dateDiffusion: r.DateDiffusion,
+        dateSortValue: getPlanningDateSortValue(r.DateDiffusion),
       };
 
       const strictKey = buildPlanningLinkKey(
@@ -856,46 +1079,42 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
         p.Type_doc
       );
 
-      const targetRecord =
+      const latestRecord =
         latestByKeyStrict.get(strictKey) ??
         latestByKeyNoDesignation.get(noDesignationKey) ??
         latestByKeyStrictLegacy.get(strictLegacyKey) ??
         latestByKeyNoDesignationLegacy.get(noDesignationLegacyKey) ??
         null;
-      const targetIndice = targetRecord?.indice ?? "";
+      const latestIndice = latestRecord?.indice ?? "";
+      const planningProject = normalizeProject(p.NomProjet);
+      const effectiveTargetIndice = getProjectTargetIndiceForType(
+        planningProject,
+        p.Type_doc,
+        projectTargetLookup,
+        planningHelpers
+      );
+      const progress = planningHelpers.buildPlanningIndiceProgress(
+        latestRecord ? [latestRecord] : [],
+        effectiveTargetIndice
+      );
       const currentIndice = normalizeText(p.Indice);
       const currentRealiseStored = toNumber(p.Realise);
-      const currentRealise = hasRealiseColumn
-        ? (currentRealiseStored ?? 0)
-        : computePlanningRealiseValue(p.Type_doc, currentIndice);
-      const targetRealise = computePlanningRealiseValue(p.Type_doc, targetIndice);
-      const currentDateRealise = normalizeText(p.Date_Realise);
-      const targetDateRealiseFromListe = targetRecord
-        ? toGristDateValue(targetRecord.dateDiffusion)
+      const targetRealise = progress.realisation;
+      const currentDateRealise = toGristDateValue(p.Date_Realise) || normalizeText(p.Date_Realise);
+      const targetDateRealiseFromListe = progress.targetReached && progress.latestRecord
+        ? toGristDateValue(progress.latestRecord.dateDiffusion)
         : null;
 
-      let nextDateRealise = currentDateRealise;
-      let shouldUpdateDateRealise = false;
-      if (targetRealise >= 100) {
-        if (currentRealise < 100 && !currentDateRealise && targetDateRealiseFromListe) {
-          nextDateRealise = targetDateRealiseFromListe;
-          shouldUpdateDateRealise = true;
-        } else if (isFrenchDateText(currentDateRealise)) {
-          const normalizedDateRealise = toGristDateValue(currentDateRealise);
-          if (normalizedDateRealise) {
-            nextDateRealise = normalizedDateRealise;
-            shouldUpdateDateRealise = true;
-          }
-        }
-      } else if (currentDateRealise) {
-        nextDateRealise = null;
-        shouldUpdateDateRealise = true;
-      }
+      const nextDateRealise = targetDateRealiseFromListe || null;
+      const shouldUpdateDateRealise =
+        (currentDateRealise || "") !== (nextDateRealise || "");
 
       const dateRealiseForRetard = targetRealise >= 100 ? nextDateRealise : "";
       const targetRetard = computePlanningRetardValue({
         typeDoc: p.Type_doc,
-        indice: targetIndice,
+        indice: latestIndice,
+        targetIndice: effectiveTargetIndice,
+        realiseValue: targetRealise,
         currentRetard: p.Retards,
         lignePlanningRaw: p.Ligne_planning,
         diffCoffrageRaw: p.Diff_coffrage,
@@ -907,8 +1126,8 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
       const currentRetard = toNumber(p.Retards);
 
       const updates = {};
-      if (currentIndice !== targetIndice) {
-        updates.Indice = targetIndice;
+      if (currentIndice !== latestIndice) {
+        updates.Indice = latestIndice;
       }
       if (hasRealiseColumn && currentRealiseStored !== targetRealise) {
         updates.Realise = targetRealise;

@@ -4,7 +4,9 @@ import {
   initGrist,
   buildProjectOptions,
   fetchProjectAvancementConfigs,
+  fetchListePlanRows,
   fetchPlanningRows,
+  syncPlanningComputedValues,
   syncPlanningRealiseValues,
   syncPlanningRetardValues,
   syncCoffrageDiffCoffrageFromGroups,
@@ -18,6 +20,7 @@ import {
 } from "./services/gristService.js";
 import {
   buildProjectRealisationTargetLookup,
+  buildPlanningListePlanSyncUpdates,
   buildPlanningRealiseUpdates,
   buildPlanningRetardUpdates,
   buildTimelineDataFromPlanningRows,
@@ -656,6 +659,25 @@ async function refreshPlanning() {
       console.error("Erreur sync Diff_coffrage (groupes) :", syncError);
     }
 
+    let listePlanSyncResult = { updatedCount: 0 };
+    try {
+      const listePlanResult = await fetchListePlanRows();
+      if (listePlanResult?.tableName) {
+        const listePlanUpdates = buildPlanningListePlanSyncUpdates(
+          planningRows,
+          listePlanResult.rows,
+          projectAvancementConfigs,
+          realisationTargetLookup
+        );
+        if (listePlanUpdates.length > 0) {
+          listePlanSyncResult = await syncPlanningComputedValues(listePlanUpdates);
+          planningRows = await fetchPlanningRows();
+        }
+      }
+    } catch (listePlanSyncError) {
+      console.error("Erreur sync ListeDePlan -> Planning_Projet :", listePlanSyncError);
+    }
+
     let realiseSyncResult = { updatedCount: 0 };
     try {
       const realiseUpdates = buildPlanningRealiseUpdates(planningRows, realisationTargetLookup);
@@ -747,6 +769,12 @@ async function refreshPlanning() {
       const currentStatus = document.getElementById("planningStatus")?.textContent || "";
       setPlanningStatus(
         `${currentStatus} | Sync Diff_coffrage: ${syncResult.updatedCount} ligne(s)`
+      );
+    }
+    if (listePlanSyncResult.updatedCount > 0) {
+      const currentStatus = document.getElementById("planningStatus")?.textContent || "";
+      setPlanningStatus(
+        `${currentStatus} | Sync ListeDePlan: ${listePlanSyncResult.updatedCount} ligne(s)`
       );
     }
     if (realiseSyncResult.updatedCount > 0) {

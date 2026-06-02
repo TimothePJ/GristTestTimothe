@@ -35,7 +35,13 @@ export function normalizePlanningDocumentType(value) {
 
   if (normalized.includes("COFFRAGE")) return "COFFRAGE";
   if (normalized.includes("ARMATURE")) return "ARMATURES";
-  if (normalized.includes("DEMOLITION")) return "DEMOLITION";
+  if (
+    normalized.includes("DEMOLITION") ||
+    compact.includes("DEMOLITION") ||
+    (normalized.startsWith("D") && normalized.includes("MOLITION"))
+  ) {
+    return "DEMOLITION";
+  }
   if (normalized.includes("COUPE")) return "COUPES";
 
   return normalized || "NON SPECIFIE";
@@ -56,6 +62,31 @@ function getIndiceRank(indice) {
   return null;
 }
 
+export function getPlanningIndiceRank(indice) {
+  return getIndiceRank(indice);
+}
+
+export function isPlanningIndiceRecognized(indice) {
+  const normalizedIndice = normalizePlanningIndice(indice);
+  return Boolean(normalizedIndice) && getIndiceRank(normalizedIndice) != null;
+}
+
+export function isPlanningIndiceAtLeast(indice, targetIndice) {
+  const normalizedIndice = normalizePlanningIndice(indice);
+  const normalizedTargetIndice = normalizePlanningIndice(targetIndice);
+  if (!normalizedIndice) return false;
+  if (!normalizedTargetIndice) return true;
+  if (normalizedIndice === normalizedTargetIndice) return true;
+
+  const indiceRank = getIndiceRank(normalizedIndice);
+  const targetRank = getIndiceRank(normalizedTargetIndice);
+  if (indiceRank == null || targetRank == null) {
+    return false;
+  }
+
+  return indiceRank >= targetRank;
+}
+
 export function computeIndexedRealisation(indice, targetIndice) {
   const normalizedIndice = normalizePlanningIndice(indice);
   const normalizedTargetIndice = normalizePlanningIndice(targetIndice);
@@ -71,6 +102,49 @@ export function computeIndexedRealisation(indice, targetIndice) {
   }
 
   return Math.min(100, Math.max(0, Math.round((indiceRank / targetRank) * 100)));
+}
+
+export function selectLatestPlanningIndiceRecord(records = []) {
+  let latestRecord = null;
+
+  (records || []).forEach((record) => {
+    const indice = normalizePlanningIndice(record?.indice);
+    const indiceRank = getIndiceRank(indice);
+    const dateSortValue = Number(record?.dateSortValue);
+    if (!indice || indiceRank == null || !Number.isFinite(dateSortValue)) {
+      return;
+    }
+
+    if (
+      !latestRecord ||
+      indiceRank > latestRecord.indiceRank ||
+      (indiceRank === latestRecord.indiceRank && dateSortValue > latestRecord.dateSortValue)
+    ) {
+      latestRecord = {
+        ...record,
+        indice,
+        indiceRank,
+        dateSortValue,
+      };
+    }
+  });
+
+  return latestRecord;
+}
+
+export function buildPlanningIndiceProgress(records = [], targetIndice = "") {
+  const latestRecord = selectLatestPlanningIndiceRecord(records);
+  const latestIndice = latestRecord?.indice || "";
+  const effectiveTargetIndice = normalizePlanningIndice(targetIndice);
+  const realisation = computeIndexedRealisation(latestIndice, effectiveTargetIndice);
+
+  return {
+    latestRecord,
+    latestIndice,
+    targetIndice: effectiveTargetIndice,
+    targetReached: isPlanningIndiceAtLeast(latestIndice, effectiveTargetIndice),
+    realisation,
+  };
 }
 
 export function computePlanningRealisationValue(typeDoc, indice, targetIndice = "") {
