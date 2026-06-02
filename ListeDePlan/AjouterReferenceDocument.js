@@ -319,14 +319,12 @@
       return;
     }
 
-    const numero = toIntOrNull(numeroStr);
-
     const actions = [
       // 1) Table des references
       ["AddRecord", "References", null, {
         NomProjet: projetId,      // Ref (ID projet)
         NomDocument: nom,
-        NumeroDocument: numero    // 0 accepte
+        NumeroDocument: String(numeroStr)
       }],
       // 2) Liste de plan : Type_document = libelle EXACT de la 2e liste
       ["AddRecord", "ListePlan_NDC_COF", null, {

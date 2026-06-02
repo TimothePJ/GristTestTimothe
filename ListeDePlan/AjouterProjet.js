@@ -358,7 +358,6 @@
     // Valeur par défaut comme dans AffichageReference
     if (!datelimite) datelimite = "1900-01-01";
 
-    const numero = Number.parseInt(numeroStr, 10);
     const selectedEmitters = collectSelectedEmitters();
     if (selectedEmitters.length === 0) {
       alert("Sélectionnez au moins un émetteur (ou ajoutez un émetteur personnalisé).");

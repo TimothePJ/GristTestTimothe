@@ -139,11 +139,11 @@
 
   <!-- Add Document Dialog -->
   <dialog id="addDocumentDialog">
-    <form method="dialog" style="display: flex; flex-direction: column; gap: 10px; font-size: 14px;">
+    <form method="dialog" novalidate style="display: flex; flex-direction: column; gap: 10px; font-size: 14px;">
       <h3>Ajouter un nouveau document</h3>
 
       <label for="documentNumber">Numéro du document:</label>
-      <input type="number" id="documentNumber" name="documentNumber" required>
+      <input type="text" id="documentNumber" name="documentNumber" required>
 
       <label for="documentName">Nom du document:</label>
       <input type="text" id="documentName" name="documentName" required>
@@ -182,7 +182,7 @@
 
   <!-- Add Multiple Document Dialog -->
   <dialog id="addMultipleDocumentDialog">
-    <form method="dialog" style="display: flex; flex-direction: column; gap: 10px; font-size: 14px;">
+    <form method="dialog" novalidate style="display: flex; flex-direction: column; gap: 10px; font-size: 14px;">
       <h3>Ajouter Plusieurs document</h3>
     
       <!-- Tableau dynamique pour numéro et nom du document -->
@@ -235,7 +235,7 @@
   </dialog>
 
   <dialog id="addDocumentsUnifiedDialog" class="reference-unified-dialog">
-    <form method="dialog" id="addDocumentsUnifiedForm" class="reference-unified-form">
+    <form method="dialog" id="addDocumentsUnifiedForm" class="reference-unified-form" novalidate>
       <h3>Ajouter documents</h3>
 
       <div class="reference-section-header section-header">
@@ -253,7 +253,7 @@
       </div>
 
       <div class="dialog-buttons" style="display: flex; justify-content: flex-end; gap: 10px;">
-        <button type="submit" id="confirmAddDocumentsUnifiedButton" style="padding: 8px 15px; background-color: #4CAF50; color: white; border: none; cursor: pointer;">Ajouter</button>
+        <button type="button" id="confirmAddDocumentsUnifiedButton" style="padding: 8px 15px; background-color: #4CAF50; color: white; border: none; cursor: pointer;">Ajouter</button>
         <button type="button" id="cancelAddDocumentsUnifiedButton" style="padding: 8px 15px; background-color: #666; color: white; border: none; cursor: pointer;">Annuler</button>
       </div>
       <div id="referenceDocsBuilderModal" class="reference-modal-overlay modal-overlay" hidden>
@@ -277,7 +277,7 @@
 
             <div class="reference-form-group form-group">
               <label for="referenceManualDocType">Type de document :</label>
-              <select id="referenceManualDocType" required>
+              <select id="referenceManualDocType">
                 <option value="" selected>Choisir un type</option>
                 <option value="COFFRAGE">COFFRAGE</option>
                 <option value="ARMATURES">ARMATURES</option>
@@ -309,7 +309,7 @@
 
             <div class="reference-form-group form-group">
               <label for="referencePatternDocType">Type de document :</label>
-              <select id="referencePatternDocType" required>
+              <select id="referencePatternDocType">
                 <option value="" selected>Choisir un type</option>
                 <option value="COFFRAGE">COFFRAGE</option>
                 <option value="ARMATURES">ARMATURES</option>

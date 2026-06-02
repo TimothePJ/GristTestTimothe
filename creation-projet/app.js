@@ -194,6 +194,30 @@ document.addEventListener('DOMContentLoaded', () => {
         return text.toLowerCase() === 'sans zone' ? '' : text;
     }
 
+    function normalizeZoneMatchKey(value) {
+        return normalizeZoneValue(value)
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLocaleLowerCase('fr')
+            .replace(/[^a-z0-9]/g, '');
+    }
+
+    function resolveCanonicalZoneValue(value, sourceZones = []) {
+        const normalizedZone = normalizeZoneValue(value);
+        const zoneKey = normalizeZoneMatchKey(normalizedZone);
+        if (!zoneKey) return '';
+
+        const matchingZone = (sourceZones || [])
+            .map((zone) => normalizeZoneValue(zone))
+            .find((zone) => normalizeZoneMatchKey(zone) === zoneKey);
+
+        return matchingZone || normalizedZone;
+    }
+
+    function resolveProjectDocumentZone(value) {
+        return resolveCanonicalZoneValue(value, customDocuments.map((doc) => doc?.zone));
+    }
+
     function formatZoneLabel(value) {
         return normalizeZoneValue(value) || 'Sans zone';
     }
@@ -294,7 +318,7 @@ document.addEventListener('DOMContentLoaded', () => {
             normalizeText(doc.name).toLowerCase(),
             normalizeText(doc.numero).toLowerCase(),
             normalizeDocumentType(doc.type),
-            normalizeZoneValue(doc.zone).toLowerCase()
+            normalizeZoneMatchKey(doc.zone)
         ].join('||');
     }
 
@@ -302,7 +326,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return [
             normalizeText(doc.numero).toLowerCase(),
             normalizeDocumentType(doc.type),
-            normalizeZoneValue(doc.zone).toLowerCase()
+            normalizeZoneMatchKey(doc.zone)
         ].join('||');
     }
 
@@ -311,8 +335,9 @@ document.addEventListener('DOMContentLoaded', () => {
         return customDocuments
             .map((doc) => normalizeZoneValue(doc?.zone))
             .filter((zone) => {
-                if (!zone || seen.has(zone.toLowerCase())) return false;
-                seen.add(zone.toLowerCase());
+                const zoneKey = normalizeZoneMatchKey(zone);
+                if (!zoneKey || seen.has(zoneKey)) return false;
+                seen.add(zoneKey);
                 return true;
             })
             .sort((left, right) => left.localeCompare(right, 'fr', {
@@ -382,7 +407,7 @@ document.addEventListener('DOMContentLoaded', () => {
         for (let index = 0; index < Math.max(projects.length, zones.length); index += 1) {
             if (
                 normalizeText(projects[index]).toLowerCase() === normalizeText(projectName).toLowerCase() &&
-                normalizeZoneValue(zones[index]) === normalizedZone
+                normalizeZoneMatchKey(zones[index]) === normalizeZoneMatchKey(normalizedZone)
             ) {
                 return true;
             }
@@ -1488,7 +1513,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const name = (typeof doc === 'string' ? doc : doc.name).trim();
             const numero = (typeof doc === 'string' ? '' : (doc.numero || '')).trim();
             const type = normalizeDocumentType(typeof doc === 'string' ? '' : (doc.type || 'COFFRAGE'));
-            const zone = normalizeZoneValue(typeof doc === 'string' ? '' : (doc.zone || ''));
+            const zone = resolveProjectDocumentZone(typeof doc === 'string' ? '' : (doc.zone || ''));
             const nextDoc = { name, numero, type, zone };
             if (name && !customDocuments.some(d => buildDocumentIdentityKey(d) === buildDocumentIdentityKey(nextDoc))) {
                 customDocuments.push(nextDoc);
@@ -1514,7 +1539,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 name: `${prefix}${numStr}${suffix}`,
                 numero: numeroStr,
                 type: normalizeDocumentType(type),
-                zone: normalizeZoneValue(zone)
+                zone: resolveProjectDocumentZone(zone)
             });
             currentNumero += numeroStep;
         }
@@ -1855,7 +1880,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const name = normalizeText(typeof doc === 'string' ? doc : doc.name);
             const numero = normalizeText(typeof doc === 'string' ? '' : (doc.numero || ''));
             const type = normalizeDocumentType(typeof doc === 'string' ? '' : (doc.type || 'COFFRAGE'));
-            const zone = normalizeZoneValue(typeof doc === 'string' ? '' : (doc.zone || ''));
+            const zone = resolveProjectDocumentZone(typeof doc === 'string' ? '' : (doc.zone || ''));
             const nextDoc = { name, numero, type, zone };
             if (!name || !type) return;
             if (customDocuments.some((existingDoc) => buildDocumentIdentityKey(existingDoc) === buildDocumentIdentityKey(nextDoc))) {
@@ -1907,7 +1932,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 name: `${prefix}${nameValue}${suffix}`,
                 numero: numeroStr,
                 type: normalizeDocumentType(type),
-                zone: normalizeZoneValue(zone)
+                zone: resolveProjectDocumentZone(zone)
             });
             currentNumero += numeroStep;
         });

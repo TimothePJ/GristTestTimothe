@@ -19,12 +19,7 @@
     }
     if (typeof window.parseNumeroForStorage === 'undefined') {
       window.parseNumeroForStorage = function (v) {
-        if (v === 0 || v === '0') return 0;
-        if (v == null) return null;
-        const s = String(v).trim();
-        if (s === '' || s === '-' || s === '_') return null;
-        const n = Number(s);
-        return Number.isFinite(n) ? n : null;
+        return window.normalizeNumeroRaw(v);
       };
     }
     if (typeof window.numeroOrZero === 'undefined') {
@@ -50,12 +45,7 @@
     }
     if (typeof parseNumeroForStorage === 'undefined') {
       var parseNumeroForStorage = function (v) {
-        if (v === 0 || v === '0') return 0;
-        if (v == null) return null;
-        const s = String(v).trim();
-        if (s === '' || s === '-' || s === '_') return null;
-        const n = Number(s);
-        return Number.isFinite(n) ? n : null;
+        return normalizeNumeroRaw(v);
       };
     }
     if (typeof numeroOrZero === 'undefined') {
@@ -67,19 +57,14 @@
 
 
 
-// Storage-normalizer: preserves 0, returns number if numeric string, else null
+// Storage-normalizer: keeps document numbers as text so padding such as 0981 is preserved.
 
 // Coerce null/undefined to 0 for storage, keep 0 as 0
 function numeroOrZero(v) {
   return (v == null ? 0 : v);
 }
 function parseNumeroForStorage(v) {
-  if (v === 0 || v === '0') return 0;
-  if (v == null) return null;
-  const s = String(v).trim();
-  if (s === '' || s === '-' || s === '_') return null;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
+  return normalizeNumeroRaw(v);
 }
 
 
@@ -343,13 +328,13 @@ function findListePlanIndex(plansTable, projectName, numeroDocStr, typeDocStr = 
   const p = _norm(projectName);
   const n = _norm(numeroDocStr);
   const t = _norm(typeDocStr);
-  const z = normalizeZoneValue(zoneStr);
+  const z = normalizeZoneMatchKey(zoneStr);
   for (let i = 0; i < Math.max(projs.length, nums.length, types.length, zones.length); i++) {
     if (
       _norm(projs[i]) === p &&
       _norm(nums[i]) === n &&
       _norm(types[i]) === t &&
-      normalizeZoneValue(zones[i]) === z
+      normalizeZoneMatchKey(zones[i]) === z
     ) {
       return i;
     }
@@ -382,6 +367,7 @@ function getPlanningTaskColumn(planningTable) {
 
 function planningZoneExists(planningTable, projectName, zoneStr = '') {
   const normalizedZone = normalizeZoneValue(zoneStr);
+  const normalizedZoneKey = normalizeZoneMatchKey(normalizedZone);
   if (!normalizedZone) return true;
 
   const projectCol = getPlanningProjectColumn(planningTable);
@@ -390,7 +376,7 @@ function planningZoneExists(planningTable, projectName, zoneStr = '') {
   const p = _norm(projectName);
 
   for (let i = 0; i < Math.max(projs.length, zones.length); i++) {
-    if (_norm(projs[i]) === p && normalizeZoneValue(zones[i]) === normalizedZone) {
+    if (_norm(projs[i]) === p && normalizeZoneMatchKey(zones[i]) === normalizedZoneKey) {
       return true;
     }
   }
@@ -485,7 +471,7 @@ function findPlanningIndex(planningTable, projectName, numeroDocStr, typeDocStr,
   const p = _norm(projectName);
   const n = _norm(numeroDocStr);
   const t = _norm(typeDocStr);
-  const z = normalizeZoneValue(zoneStr);
+  const z = normalizeZoneMatchKey(zoneStr);
   let legacyFallbackIndex = -1;
   const hasZoneColumn = hasPlanningColumn(planningTable, 'Zone');
 
@@ -494,7 +480,7 @@ function findPlanningIndex(planningTable, projectName, numeroDocStr, typeDocStr,
     if (_norm(ids2[i]) !== n) continue;
     if (_norm(types[i]) !== t) continue;
 
-    const currentZone = hasZoneColumn ? normalizeZoneValue(zones[i]) : '';
+    const currentZone = hasZoneColumn ? normalizeZoneMatchKey(zones[i]) : '';
     if (currentZone === z) return i;
 
     const matchesLegacyBlankZone = z && currentZone === '';
@@ -545,18 +531,17 @@ async function refreshReferencesNumeroCache() {
         const doc = String(docs[i] ?? '').trim();
         if (!proj || !doc) continue;
 
-        let nRaw = nums[i];
-        let n = null;
-        if (nRaw === 0 || nRaw === '0') {
-          n = 0;
-        } else {
-          const nn = Number(String(nRaw ?? '').trim());
-          n = Number.isFinite(nn) ? nn : null;
-        }
+        const n = parseNumeroForStorage(nums[i]);
         if (n == null) continue;
 
         const key = __docKey(proj, doc);
         const prev = map.get(key);
+        if (prev != null) {
+          if (prev === '0' && n !== '0') map.set(key, n);
+          continue;
+        }
+        map.set(key, n);
+        continue;
         if (prev == null || n > prev) map.set(key, n); // ✅ on garde le max (corrige les 0 parasites)
       }
 
@@ -587,6 +572,26 @@ function scheduleReferencesNumeroCacheRefresh() {
 // --- helper: reads the selected pair from the 2nd dropdown at commit time ---
 function normalizeZoneValue(value) {
   return String(value ?? '').trim();
+}
+
+function normalizeZoneMatchKey(value) {
+  return normalizeZoneValue(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('fr')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function resolveCanonicalZoneValue(value, sourceZones = []) {
+  const normalizedZone = normalizeZoneValue(value);
+  const zoneKey = normalizeZoneMatchKey(normalizedZone);
+  if (!zoneKey) return '';
+
+  const matchingZone = (sourceZones || [])
+    .map((zone) => normalizeZoneValue(zone))
+    .find((zone) => normalizeZoneMatchKey(zone) === zoneKey);
+
+  return matchingZone || normalizedZone;
 }
 
 function formatZoneLabel(value) {
@@ -632,7 +637,7 @@ function getSelectedDocPair() {
       const txt = (opt && opt.textContent) ? opt.textContent.trim() : '';
       if (txt) {
         const m = txt.match(/^(\d+)\s+/) || txt.match(/^(\d+)$/);
-        if (m) numero = Number(m[1]);
+        if (m) numero = parseNumeroForStorage(m[1]);
       }
     } catch (e) { }
   }
@@ -651,9 +656,8 @@ function parseDocValue(raw) {
       const numero = (obj.n != null) ? obj.n : (obj.numero != null ? obj.numero : null);
       const name = (obj.name != null) ? obj.name : (obj.nom != null ? obj.nom : '');
       const zone = normalizeZoneValue(obj.zone);
-      const n = (numero === 0 || numero === '0') ? 0 : Number(numero);
       return {
-        numero: Number.isFinite(n) ? n : null,
+        numero: parseNumeroForStorage(numero),
         name: String(name).trim(),
         zone,
       };
@@ -681,12 +685,7 @@ function parseDocValue(raw) {
 
       // ⚠️ Important : si la colonne NumeroDocument n'est pas dans la vue, rec.NumeroDocument sera undefined
       if (rec && (rec.NumeroDocument !== undefined) && rec.NumeroDocument != null) {
-        if (rec.NumeroDocument === 0 || rec.NumeroDocument === '0') {
-          numero = 0;
-        } else {
-          const n = Number(rec.NumeroDocument);
-          numero = Number.isFinite(n) ? n : null;
-        }
+        numero = parseNumeroForStorage(rec.NumeroDocument);
       }
       if (rec) {
         zone = normalizeZoneValue(rec.Zone);
@@ -802,8 +801,9 @@ function collectProjectZones(projectName) {
   records.forEach((record) => {
     if (_norm(record.NomProjet) !== project) return;
     const zone = normalizeZoneValue(record.Zone);
-    if (!zone || uniqueZones.has(zone)) return;
-    uniqueZones.add(zone);
+    const zoneKey = normalizeZoneMatchKey(zone);
+    if (!zoneKey || uniqueZones.has(zoneKey)) return;
+    uniqueZones.add(zoneKey);
     zones.push(zone);
   });
 
@@ -889,8 +889,8 @@ function collectProjectDocumentEntries(projectName, typeValue = '') {
     const zoneCompare = zoneLeft.localeCompare(zoneRight, 'fr', { sensitivity: 'base', numeric: true });
     if (zoneCompare !== 0) return zoneCompare;
 
-    const numeroLeft = left.numero == null ? Number.POSITIVE_INFINITY : Number(left.numero);
-    const numeroRight = right.numero == null ? Number.POSITIVE_INFINITY : Number(right.numero);
+    const numeroLeft = numeroSortable(left.numero);
+    const numeroRight = numeroSortable(right.numero);
     if (numeroLeft !== numeroRight) return numeroLeft - numeroRight;
 
     return left.name.localeCompare(right.name, 'fr', { sensitivity: 'base', numeric: true });
@@ -906,6 +906,7 @@ function getDocumentTypeForProjectDoc(projectName, docName, zoneName, numeroValu
   const project = _norm(projectName);
   const documentName = _norm(docName);
   const normalizedZone = normalizeZoneValue(zoneName);
+  const normalizedZoneKey = normalizeZoneMatchKey(normalizedZone);
   const normalizedNumero = parseNumeroForStorage(numeroValue);
   const zoneWasProvided = arguments.length >= 3;
   const numeroWasProvided = arguments.length >= 4;
@@ -914,7 +915,7 @@ function getDocumentTypeForProjectDoc(projectName, docName, zoneName, numeroValu
   const match = records.find(record =>
     _norm(record.NomProjet) === project &&
     _norm(record.NomDocument) === documentName &&
-    (!zoneWasProvided || normalizeZoneValue(record.Zone) === normalizedZone) &&
+    (!zoneWasProvided || normalizeZoneMatchKey(record.Zone) === normalizedZoneKey) &&
     (!numeroWasProvided || parseNumeroForStorage(record.NumeroDocument) === normalizedNumero) &&
     normalizeTypeDocument(record.Type_document)
   );
@@ -1046,26 +1047,31 @@ function appendDocumentOption(parent, entry) {
 function appendZoneOptions(parent, entries, withZoneSeparators = false) {
   const groupedEntries = new Map();
   entries.forEach((entry) => {
-    const zoneKey = normalizeZoneValue(entry.zone);
-    if (!groupedEntries.has(zoneKey)) groupedEntries.set(zoneKey, []);
-    groupedEntries.get(zoneKey).push(entry);
+    const zoneKey = normalizeZoneMatchKey(entry.zone);
+    if (!groupedEntries.has(zoneKey)) {
+      groupedEntries.set(zoneKey, {
+        zone: normalizeZoneValue(entry.zone),
+        entries: [],
+      });
+    }
+    groupedEntries.get(zoneKey).entries.push(entry);
   });
 
-  const groupedZones = Array.from(groupedEntries.keys()).sort(compareZoneKeys);
+  const groupedZones = Array.from(groupedEntries.values()).sort((left, right) => compareZoneKeys(left.zone, right.zone));
 
-  groupedZones.forEach((zoneKey) => {
+  groupedZones.forEach((groupedZone) => {
     if (withZoneSeparators) {
       const separator = document.createElement('option');
       separator.disabled = true;
-      separator.text = `--- ${formatZoneLabel(zoneKey)} ---`;
+      separator.text = `--- ${formatZoneLabel(groupedZone.zone)} ---`;
       parent.appendChild(separator);
-      groupedEntries.get(zoneKey).forEach((entry) => appendDocumentOption(parent, entry));
+      groupedZone.entries.forEach((entry) => appendDocumentOption(parent, entry));
       return;
     }
 
     const group = document.createElement('optgroup');
-    group.label = formatZoneLabel(zoneKey);
-    groupedEntries.get(zoneKey).forEach((entry) => appendDocumentOption(group, entry));
+    group.label = formatZoneLabel(groupedZone.zone);
+    groupedZone.entries.forEach((entry) => appendDocumentOption(group, entry));
     parent.appendChild(group);
   });
 }
@@ -1350,7 +1356,7 @@ function buildPendingReferenceDocumentIdentityKey(doc = {}) {
     _norm(doc.name).toLocaleLowerCase('fr'),
     _norm(doc.numero).toLocaleLowerCase('fr'),
     normalizeTypeDocument(doc.type).toLocaleLowerCase('fr'),
-    normalizeZoneValue(doc.zone).toLocaleLowerCase('fr'),
+    normalizeZoneMatchKey(doc.zone),
   ].join('||');
 }
 
@@ -1359,7 +1365,7 @@ function collectPendingReferenceZones() {
   const seen = new Set();
   pendingReferenceDocuments.forEach((doc) => {
     const zone = normalizeZoneValue(doc?.zone);
-    const key = zone.toLocaleLowerCase('fr');
+    const key = normalizeZoneMatchKey(zone);
     if (!zone || seen.has(key)) return;
     seen.add(key);
     zones.push(zone);
@@ -1378,7 +1384,7 @@ function refreshReferenceZoneSuggestionLists() {
 
   mergedZones.forEach((zone) => {
     const normalized = normalizeZoneValue(zone);
-    const key = normalized.toLocaleLowerCase('fr');
+    const key = normalizeZoneMatchKey(normalized);
     if (!normalized || seen.has(key)) return;
     seen.add(key);
     uniqueZones.push(normalized);
@@ -1394,6 +1400,13 @@ function refreshReferenceZoneSuggestionLists() {
       datalist.appendChild(option);
     });
   });
+}
+
+function resolveReferenceDocumentZone(value, projectName = selectedFirstValue) {
+  return resolveCanonicalZoneValue(value, [
+    ...collectProjectZones(projectName),
+    ...collectPendingReferenceZones(),
+  ]);
 }
 
 function renderUnifiedPendingDocuments() {
@@ -1432,30 +1445,35 @@ function renderUnifiedPendingDocuments() {
 
     const zoneGroups = new Map();
     groupedTypes.get(typeKey).forEach((doc) => {
-      const zoneKey = normalizeZoneValue(doc.zone);
-      if (!zoneGroups.has(zoneKey)) zoneGroups.set(zoneKey, []);
-      zoneGroups.get(zoneKey).push(doc);
+      const zoneKey = normalizeZoneMatchKey(doc.zone);
+      if (!zoneGroups.has(zoneKey)) {
+        zoneGroups.set(zoneKey, {
+          zone: normalizeZoneValue(doc.zone),
+          docs: [],
+        });
+      }
+      zoneGroups.get(zoneKey).docs.push(doc);
     });
 
-    Array.from(zoneGroups.keys()).sort(compareZoneKeys).forEach((zoneKey) => {
+    Array.from(zoneGroups.values()).sort((left, right) => compareZoneKeys(left.zone, right.zone)).forEach((zoneGroup) => {
       const zoneSection = document.createElement('div');
       zoneSection.className = 'reference-zone-group';
 
       const zoneTitle = document.createElement('h5');
       zoneTitle.className = 'reference-zone-title';
-      zoneTitle.textContent = formatZoneLabel(zoneKey);
+      zoneTitle.textContent = formatZoneLabel(zoneGroup.zone);
       zoneSection.appendChild(zoneTitle);
 
       const chipList = document.createElement('div');
       chipList.className = 'reference-chip-list';
 
-      zoneGroups.get(zoneKey)
+      zoneGroup.docs
         .slice()
         .sort((left, right) => {
           const numeroLeft = parseNumeroForStorage(left.numero);
           const numeroRight = parseNumeroForStorage(right.numero);
-          const sortLeft = numeroLeft == null ? Number.POSITIVE_INFINITY : Number(numeroLeft);
-          const sortRight = numeroRight == null ? Number.POSITIVE_INFINITY : Number(numeroRight);
+          const sortLeft = numeroSortable(numeroLeft);
+          const sortRight = numeroSortable(numeroRight);
           if (sortLeft !== sortRight) return sortLeft - sortRight;
           return _norm(left.name).localeCompare(_norm(right.name), 'fr', {
             sensitivity: 'base',
@@ -1513,7 +1531,7 @@ function addUnifiedPendingDocuments(documents) {
       name: _norm(doc?.name || doc?.documentName),
       numero: _norm(doc?.numero || doc?.documentNumber),
       type: normalizeTypeDocument(doc?.type || doc?.documentType || DEFAULT_REFERENCE_DOCUMENT_TYPE),
-      zone: normalizeZoneValue(doc?.zone || doc?.documentZone),
+      zone: resolveReferenceDocumentZone(doc?.zone || doc?.documentZone),
     };
 
     if (!nextDoc.name || !nextDoc.numero) return;
@@ -1571,7 +1589,7 @@ function generateReferencePatternDocuments(prefix, suffix, nameValues, numeroSta
       name: `${prefix}${nameValue}${suffix}`,
       numero,
       type: normalizeTypeDocument(type),
-      zone: normalizeZoneValue(zone),
+      zone: resolveReferenceDocumentZone(zone),
     });
     currentNumero += numeroStep;
   });
@@ -1776,7 +1794,7 @@ async function createDocumentsBatch({
       documentNumber: _norm(doc?.documentNumber ?? doc?.numero),
       documentName: _norm(doc?.documentName ?? doc?.name),
       documentType: normalizeTypeDocument(doc?.documentType ?? doc?.type ?? DEFAULT_REFERENCE_DOCUMENT_TYPE),
-      documentZone: normalizeZoneValue(doc?.documentZone ?? doc?.zone),
+      documentZone: resolveReferenceDocumentZone(doc?.documentZone ?? doc?.zone, normalizedProject),
     };
 
     if (!normalizedDoc.documentNumber || !normalizedDoc.documentName || !normalizedDoc.documentType) return;
@@ -1785,7 +1803,7 @@ async function createDocumentsBatch({
       normalizedDoc.documentNumber.toLocaleLowerCase('fr'),
       normalizedDoc.documentName.toLocaleLowerCase('fr'),
       normalizedDoc.documentType.toLocaleLowerCase('fr'),
-      normalizedDoc.documentZone.toLocaleLowerCase('fr'),
+      normalizeZoneMatchKey(normalizedDoc.documentZone),
     ].join('||');
 
     if (seenDocuments.has(key)) return;
@@ -1818,7 +1836,7 @@ async function createDocumentsBatch({
         normalizedProject.toLocaleLowerCase('fr'),
         doc.documentNumber.toLocaleLowerCase('fr'),
         doc.documentType.toLocaleLowerCase('fr'),
-        doc.documentZone.toLocaleLowerCase('fr'),
+        normalizeZoneMatchKey(doc.documentZone),
       ].join('||');
 
       if (idxPlan >= 0) {
@@ -1849,7 +1867,7 @@ async function createDocumentsBatch({
     const pendingPlanningAdds = new Set();
 
     uniqueDocuments.forEach((doc) => {
-      const zoneKey = normalizeZoneValue(doc.documentZone).toLocaleLowerCase('fr');
+      const zoneKey = normalizeZoneMatchKey(doc.documentZone);
       if (zoneKey && !queuedZoneAnchors.has(zoneKey)) {
         const planningZoneAnchorAction = buildPlanningZoneAnchorActionIfMissing(
           planningTableName,
@@ -1875,7 +1893,7 @@ async function createDocumentsBatch({
         normalizedProject.toLocaleLowerCase('fr'),
         doc.documentNumber.toLocaleLowerCase('fr'),
         doc.documentType.toLocaleLowerCase('fr'),
-        doc.documentZone.toLocaleLowerCase('fr'),
+        normalizeZoneMatchKey(doc.documentZone),
       ].join('||');
 
       if (idxPlanning >= 0) {
@@ -1970,6 +1988,7 @@ function setupUnifiedAddDocumentsUi() {
   const closeBuilderBtn = document.getElementById('closeReferenceDocsBuilderBtn');
   const unifiedDialog = document.getElementById('addDocumentsUnifiedDialog');
   const unifiedForm = document.getElementById('addDocumentsUnifiedForm');
+  const confirmUnifiedBtn = document.getElementById('confirmAddDocumentsUnifiedButton');
   const cancelUnifiedBtn = document.getElementById('cancelAddDocumentsUnifiedButton');
   const manualZoneInput = document.getElementById('referenceManualDocZone');
   const manualNameInput = document.getElementById('referenceManualDocName');
@@ -2061,7 +2080,7 @@ function setupUnifiedAddDocumentsUi() {
         .split(',')
         .map((value) => value.trim());
       const documentType = normalizeTypeDocument(manualTypeInput?.value);
-      const documentZone = normalizeZoneValue(manualZoneInput?.value || '');
+      const documentZone = resolveReferenceDocumentZone(manualZoneInput?.value || '');
 
       if (!docNames.length) {
         alert("Veuillez renseigner au moins un nom de document.");
@@ -2127,7 +2146,7 @@ function setupUnifiedAddDocumentsUi() {
       const numeroStep = Number.parseInt(document.getElementById('referenceNumeroStep')?.value, 10) || 1;
       const numeroPadding = normalizeReferenceDocumentNumberPadding(document.getElementById('referenceNumeroPadding')?.value);
       const documentType = normalizeTypeDocument(patternTypeInput?.value);
-      const documentZone = normalizeZoneValue(patternZoneInput?.value || '');
+      const documentZone = resolveReferenceDocumentZone(patternZoneInput?.value || '');
 
       if (!documentType) {
         alert("Veuillez renseigner un type de document.");
@@ -2162,24 +2181,38 @@ function setupUnifiedAddDocumentsUi() {
     });
   }
 
+  async function confirmUnifiedAddDocuments() {
+    if (confirmUnifiedBtn) confirmUnifiedBtn.disabled = true;
+
+    try {
+      await createDocumentsBatch({
+        projectName: selectedFirstValue,
+        documents: pendingReferenceDocuments,
+        selectedEmitters: collectSelectedEmittersFromContainer('referenceUnifiedEmetteurDropdown'),
+        defaultDatelimite: document.getElementById('referenceUnifiedDefaultDatelimite')?.value || DEFAULT_REFERENCE_DATE,
+      });
+
+      unifiedDialog?.close();
+      closeReferenceDocsBuilderModal();
+    } catch (error) {
+      console.error("Erreur lors de l'ajout des documents :", error);
+      alert(error?.message || "Une erreur s'est produite lors de l'ajout des documents.");
+    } finally {
+      if (confirmUnifiedBtn) confirmUnifiedBtn.disabled = false;
+    }
+  }
+
+  if (confirmUnifiedBtn) {
+    confirmUnifiedBtn.addEventListener('click', () => {
+      confirmUnifiedAddDocuments();
+    });
+  }
+
   if (unifiedForm) {
-    unifiedForm.addEventListener('submit', async (event) => {
+    unifiedForm.noValidate = true;
+    unifiedForm.addEventListener('submit', (event) => {
       event.preventDefault();
-
-      try {
-        await createDocumentsBatch({
-          projectName: selectedFirstValue,
-          documents: pendingReferenceDocuments,
-          selectedEmitters: collectSelectedEmittersFromContainer('referenceUnifiedEmetteurDropdown'),
-          defaultDatelimite: document.getElementById('referenceUnifiedDefaultDatelimite')?.value || DEFAULT_REFERENCE_DATE,
-        });
-
-        unifiedDialog?.close();
-        closeReferenceDocsBuilderModal();
-      } catch (error) {
-        console.error("Erreur lors de l'ajout des documents :", error);
-        alert(error?.message || "Une erreur s'est produite lors de l'ajout des documents.");
-      }
+      confirmUnifiedAddDocuments();
     });
   }
 
@@ -2351,7 +2384,7 @@ function populateTable() {
     (record) => {
       if (record.NomProjet !== selectedProject) return false;
       if (_norm(record.NomDocument) !== _norm(selectedTable)) return false;
-      if (normalizeZoneValue(record.Zone) !== normalizeZoneValue(selectedDoc?.zone)) return false;
+      if (normalizeZoneMatchKey(record.Zone) !== normalizeZoneMatchKey(selectedDoc?.zone)) return false;
 
       if (selectedDoc && selectedDoc.numero != null) {
         const recordNumero = parseNumeroForStorage(record.NumeroDocument);
@@ -2988,7 +3021,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
   const formData = new FormData(e.target);
   const documentNumber = formData.get('documentNumber');
   const documentName = formData.get('documentName');
-  const documentZone = normalizeZoneValue(formData.get('documentZone'));
+  const documentZone = resolveReferenceDocumentZone(formData.get('documentZone'), selectedProject);
   const documentType = normalizeTypeDocument(formData.get('documentType'));
   let defaultDatelimite = formData.get('defaultDatelimite');
 
@@ -3049,13 +3082,12 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
     const serviceValue = await getTeamService();
 
     // Création des nouvelles lignes
-    const _n1 = Number(documentNumber);
-    const num = (Number.isFinite(_n1) && _n1 !== 0) ? _n1 : null;
+    const num = parseNumeroForStorage(documentNumber);
     const nm = String(documentName).trim();
     const newRows = selectedEmitters.map((emetteur) => ({
       NomProjet: selectedProject,
       NomDocument: nm,
-      NumeroDocument: numeroOrZero(parseNumeroForStorage(num)),
+      NumeroDocument: numeroOrZero(num),
       Type_document: documentType,
       Zone: documentZone,
       Emetteur: emetteur,
@@ -4318,7 +4350,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
 
     // Récupérer le service depuis la table Team
     const serviceValue = await getTeamService();
-    const documentZone = normalizeZoneValue(document.getElementById('multipleDocumentZone')?.value);
+    const documentZone = resolveReferenceDocumentZone(document.getElementById('multipleDocumentZone')?.value, selectedFirstValue);
 
     // Récupérer la date limite par défaut
     const defaultDatelimite = document.getElementById('multipleDefaultDatelimite').value || "1900-01-01";
@@ -4344,7 +4376,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
         const p = _norm(projs[i]);
         const n = _norm(nums[i]);
         const t = _norm(types[i]);
-        const z = normalizeZoneValue(zones[i]);
+        const z = normalizeZoneMatchKey(zones[i]);
         if (!p || !n || !t) continue;
         existing.set(`${p}||${n}||${t}||${z}`, ids[i]);
       }
@@ -4353,7 +4385,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
       documentsData.forEach(doc => {
         const numStrPlan = _norm(doc.documentNumber);
         const nm = String(doc.documentName).trim();
-        const key = `${projKey}||${numStrPlan}||${_norm(documentType)}||${documentZone}`;
+        const key = `${projKey}||${numStrPlan}||${_norm(documentType)}||${normalizeZoneMatchKey(documentZone)}`;
 
         if (existing.has(key)) {
           actions.push(['UpdateRecord', plansTableName, existing.get(key), {
@@ -4397,7 +4429,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
       documentsData.forEach((doc) => {
         const numStrPlanning = _norm(doc.documentNumber);
         const nm = String(doc.documentName).trim();
-        const keyPlanning = `${projKeyPlanning}||${numStrPlanning}||${_norm(documentType)}||${documentZone}`;
+        const keyPlanning = `${projKeyPlanning}||${numStrPlanning}||${_norm(documentType)}||${normalizeZoneMatchKey(documentZone)}`;
         const idxPlanning = findPlanningIndex(
           planning,
           selectedProject,
@@ -4441,14 +4473,13 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
     // 2) Ajout dans References : 1 ligne par (document × émetteur)
     documentsData.forEach(doc => {
       selectedEmitters.forEach(emetteur => {
-        const _n2 = Number(doc.documentNumber);
-        const num = (Number.isFinite(_n2) && _n2 !== 0) ? _n2 : null;
+        const num = parseNumeroForStorage(doc.documentNumber);
         const nm  = String(doc.documentName).trim();
 
         const newRow = {
           NomProjet: selectedProject,
           NomDocument: nm,
-          NumeroDocument: numeroOrZero(parseNumeroForStorage(num)),
+          NumeroDocument: numeroOrZero(num),
           Type_document: documentType,
           Zone: documentZone,
           Emetteur: emetteur,
@@ -5085,8 +5116,7 @@ function refreshSecondDropdownLabels() {
   try {
     const rec = (records || []).find(r => r.NomProjet === selectedProject && r.NomDocument === name);
     if (rec && (rec.NumeroDocument !== undefined) && rec.NumeroDocument != null) {
-      const n = Number(rec.NumeroDocument);
-      numero = Number.isFinite(n) ? n : (rec.NumeroDocument === 0 || rec.NumeroDocument === '0' ? 0 : null);
+      numero = parseNumeroForStorage(rec.NumeroDocument);
     }
   } catch (e) { }
 
