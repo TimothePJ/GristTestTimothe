@@ -134,7 +134,7 @@ grist.onRecords(async (newRecords) => {
  *  ------------------------- */
 function populateProjectDropdown() {
   const projectDropdown = $("projectDropdown");
-  const projects = [...new Set(allProjects.Nom_de_projet)].filter(Boolean).sort();
+  const projects = [...new Set(allProjects.Nom_de_projet)].filter(Boolean).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base', numeric: true }));
 
   const currentValue = projectDropdown.value || readSharedProjectSelection();
 
@@ -648,3 +648,23 @@ const logo1 = await fetch("../img/VC_Logotype_Digital_RVB.jpg").then((res) => re
 
   doc.save(`${selectedProject} - Bordereau n°${refValue}.pdf`);
 });
+
+// Synchronisation inter-widgets : réagit quand un autre widget change le projet sélectionné
+(function () {
+  if (window.__lpStorageSyncAdded_bordereau) return;
+  window.__lpStorageSyncAdded_bordereau = true;
+  var _nk = function (s) {
+    return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
+  };
+  window.addEventListener('storage', function (event) {
+    if (event.key !== 'grist.selected-project' || !event.newValue) return;
+    var newProject = String(event.newValue).trim();
+    var dropdown = document.getElementById('projectDropdown');
+    if (!dropdown) return;
+    var match = Array.from(dropdown.options).find(function (o) { return _nk(o.value) === _nk(newProject); });
+    if (match && dropdown.value !== match.value) {
+      dropdown.value = match.value;
+      dropdown.dispatchEvent(new Event('change'));
+    }
+  });
+})();

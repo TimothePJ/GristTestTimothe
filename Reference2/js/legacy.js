@@ -5225,3 +5225,23 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
     setTimeout(() => { try { refreshSecondDropdownLabels(); } catch (e) { } }, 200);
   });
 }
+
+// Synchronisation inter-widgets : réagit quand un autre widget change le projet sélectionné
+(function () {
+  if (window.__lpStorageSyncAdded_reference2) return;
+  window.__lpStorageSyncAdded_reference2 = true;
+  var _nk = function (s) {
+    return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
+  };
+  window.addEventListener('storage', function (event) {
+    if (event.key !== 'grist.selected-project' || !event.newValue) return;
+    var newProject = String(event.newValue).trim();
+    var dropdown = document.getElementById('firstColumnDropdown');
+    if (!dropdown) return;
+    var match = Array.from(dropdown.options).find(function (o) { return _nk(o.value) === _nk(newProject); });
+    if (match && dropdown.value !== match.value) {
+      dropdown.value = match.value;
+      dropdown.dispatchEvent(new Event('change'));
+    }
+  });
+})();

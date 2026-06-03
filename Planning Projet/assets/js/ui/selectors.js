@@ -76,6 +76,22 @@ export function initProjectSelector(projectOptions, { onChange } = {}) {
     onChange?.({ ...state });
   });
 
+  // Synchronisation inter-widgets : réagit quand un autre widget change le projet sélectionné
+  if (!window.__lpStorageSyncAdded_planningProjet) {
+    window.__lpStorageSyncAdded_planningProjet = true;
+    const _nk = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
+    window.addEventListener('storage', (event) => {
+      if (event.key !== 'grist.selected-project' || !event.newValue) return;
+      const newProject = String(event.newValue).trim();
+      const match = Array.from(projectSelect.options).find((o) => _nk(o.value) === _nk(newProject));
+      if (match && projectSelect.value !== match.value) {
+        projectSelect.value = match.value;
+        setState({ selectedProject: match.value, selectedZone: '' });
+        onChange?.({ ...state });
+      }
+    });
+  }
+
   onChange?.({ ...state });
 }
 
