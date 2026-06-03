@@ -4766,10 +4766,19 @@ export function renderPlanningTimeline(timelineData = {}) {
       if (range) {
         dataAnchorDate = computeRangeCenter(range);
       } else if (hasNonBackgroundItems) {
+        // Forcer un fit pour que vis-timeline n'utilise pas les backgrounds (1900/2200) comme ancre
+        timelineInstance.fit({ animation: false });
         const fitted = timelineInstance.getWindow();
         dataAnchorDate = computeRangeCenter(fitted);
       } else if ((groups || []).length) {
-        dataAnchorDate = new Date();
+        // Groupes présents mais aucune donnée → centrer sur aujourd'hui, comme le mode non-embedded
+        const today = new Date();
+        const wStart = new Date(today);
+        const wEnd = new Date(today);
+        wStart.setDate(today.getDate() - 7);
+        wEnd.setDate(today.getDate() + 7);
+        dataAnchorDate = today;
+        timelineInstance.setWindow(wStart, wEnd, { animation: false });
       } else {
         dataAnchorDate = null;
       }

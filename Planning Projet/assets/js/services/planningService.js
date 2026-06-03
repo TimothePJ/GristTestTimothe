@@ -1692,8 +1692,8 @@ export function buildTimelineDataFromPlanningRows(
     items.push({
       id: `${zoneHeaderId}-bg`,
       group: zoneHeaderId,
-      start: new Date(1900, 0, 1),
-      end: new Date(2200, 0, 1),
+      start: new Date(new Date().getFullYear() - 5, 0, 1),
+      end: new Date(new Date().getFullYear() + 15, 11, 31),
       type: "background",
       className: "zone-header-fill",
       content: "",

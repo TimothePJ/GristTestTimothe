@@ -292,6 +292,7 @@ export async function applySharedProject(projectKey) {
   };
   window.addEventListener('storage', function (event) {
     if (event.key !== 'grist.selected-project' || !event.newValue) return;
+    if (state.projectSyncInProgress) return;  // Ne pas déclencher pendant une synchro en cours
     var newProject = String(event.newValue).trim();
     var dropdown = document.getElementById('shared-project-select');
     if (!dropdown) return;
