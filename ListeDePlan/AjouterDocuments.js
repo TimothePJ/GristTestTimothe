@@ -18,6 +18,8 @@
   let cachedPlanningTableName = null;
   let cachedProjectZones = [];
   let cachedProjectForZones = '';
+  let cachedEmittersData = null;  // { defaultEmetteurs: [], projectEmetteurs: [] }
+  let cachedProjectForEmitters = '';
   let projetsTableCache = null;
 
   // ============================================================
@@ -539,17 +541,14 @@
     });
   }
 
-  async function populateEmetteurDropdownForDialog() {
-    const selectedProject = getSelectedProject();
-    if (!selectedProject) return;
-
+  async function fetchEmittersData(projectName) {
     const defaultEmetteurs = await getDefaultEmetteurs();
     let projectEmetteurs = [];
     try {
       const refs = await grist.docApi.fetchTable('References');
       const projs = refs.NomProjet || [];
       const emetteurs = refs.Emetteur || [];
-      const p = _norm(selectedProject);
+      const p = _norm(projectName);
       const seen = new Set();
       for (let i = 0; i < Math.max(projs.length, emetteurs.length); i++) {
         if (_norm(String(projs[i] ?? '')) !== p) continue;
@@ -562,8 +561,34 @@
     } catch (_e) {
       projectEmetteurs = [];
     }
+    return { defaultEmetteurs, projectEmetteurs };
+  }
 
-    populateEmetteurDropdown(projectEmetteurs, defaultEmetteurs);
+  async function prefetchForProject(projectName) {
+    if (!projectName) return;
+    fetchAndCacheProjectZones(projectName).catch(() => {});
+    if (cachedProjectForEmitters !== projectName) {
+      cachedProjectForEmitters = projectName;
+      cachedEmittersData = null;
+      fetchEmittersData(projectName).then((data) => {
+        if (cachedProjectForEmitters === projectName) cachedEmittersData = data;
+      }).catch(() => {});
+    }
+  }
+
+  async function populateEmetteurDropdownForDialog() {
+    const selectedProject = getSelectedProject();
+    if (!selectedProject) return;
+
+    if (cachedProjectForEmitters === selectedProject && cachedEmittersData) {
+      populateEmetteurDropdown(cachedEmittersData.projectEmetteurs, cachedEmittersData.defaultEmetteurs);
+      return;
+    }
+
+    const data = await fetchEmittersData(selectedProject);
+    cachedEmittersData = data;
+    cachedProjectForEmitters = selectedProject;
+    populateEmetteurDropdown(data.projectEmetteurs, data.defaultEmetteurs);
   }
 
   function collectSelectedEmitters() {
@@ -578,30 +603,31 @@
   // ============================================================
   //  DIALOG OUVERTURE / FERMETURE
   // ============================================================
-  async function resetDialog() {
+  function resetDialogSync() {
     pendingDocs = [];
     closeBuilderModal();
     renderPendingDocs();
-
     const dateInput = document.getElementById('lp-add-docs-default-date');
     if (dateInput) dateInput.value = '';
+    resetBuilderFields();
+  }
 
-    const selectedProject = getSelectedProject();
+  async function loadDialogDataAsync(selectedProject) {
     await fetchAndCacheProjectZones(selectedProject);
     refreshZoneLists();
-    resetBuilderFields();
     await populateEmetteurDropdownForDialog();
   }
 
-  async function openDialog() {
+  function openDialog() {
     const project = getSelectedProject();
     if (!project) {
       alert("Veuillez sélectionner un projet avant d'ajouter des documents.");
       return;
     }
-    await resetDialog();
+    resetDialogSync();
     const dialog = document.getElementById('lp-add-docs-dialog');
     if (dialog && typeof dialog.showModal === 'function') dialog.showModal();
+    loadDialogDataAsync(project).catch((e) => console.warn('AjouterDocuments: chargement async échoué', e));
   }
 
   function closeDialog() {
@@ -1221,6 +1247,17 @@
   function init() {
     document.getElementById('btn-ajouter-docs')?.addEventListener('click', openDialog);
     setupDialogUi();
+
+    // Pré-charger zones + émetteurs dès qu'un projet est sélectionné, pour ouvrir le dialog sans délai
+    const projectDropdown = document.getElementById('projectDropdown');
+    if (projectDropdown) {
+      projectDropdown.addEventListener('change', () => {
+        prefetchForProject(getSelectedProject());
+      });
+      // Pré-charger immédiatement si un projet est déjà sélectionné au chargement
+      const initial = getSelectedProject();
+      if (initial) prefetchForProject(initial);
+    }
   }
 
   if (document.readyState === 'loading') {
