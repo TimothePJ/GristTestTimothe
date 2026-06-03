@@ -344,29 +344,20 @@ function normalizeNumericProjectSelectionKey(value = "") {
 
 function findAvailableProjectKey(projectKeys = [], requestedProjectKey = "") {
   const requestedKey = normalizeProjectSelectionKey(requestedProjectKey);
-  const requestedCompactKey = normalizeCompactProjectSelectionKey(requestedProjectKey);
   const requestedNumericKey = normalizeNumericProjectSelectionKey(requestedProjectKey);
   if (!requestedKey) return "";
 
   return (projectKeys || []).find((projectKey) => {
     const normalizedProjectKey = normalizeProjectSelectionKey(projectKey);
-    const normalizedCompactProjectKey = normalizeCompactProjectSelectionKey(projectKey);
     const normalizedNumericProjectKey = normalizeNumericProjectSelectionKey(projectKey);
     return (
+      // Correspondance exacte (insensible à la casse et aux accents)
       normalizedProjectKey === requestedKey ||
-      normalizedCompactProjectKey === requestedCompactKey ||
+      // Correspondance par numéro de projet pur (ex: "001" == "1")
       (
         requestedNumericKey &&
         normalizedNumericProjectKey &&
         normalizedNumericProjectKey === requestedNumericKey
-      ) ||
-      (
-        requestedCompactKey.length >= 3 &&
-        normalizedCompactProjectKey.length >= 3 &&
-        (
-          requestedCompactKey.includes(normalizedCompactProjectKey) ||
-          normalizedCompactProjectKey.includes(requestedCompactKey)
-        )
       )
     );
   }) || "";

@@ -4775,6 +4775,13 @@ export function renderPlanningTimeline(timelineData = {}) {
     if (EMBEDDED_PLANNING_SYNC_MODE) {
       if (range) {
         dataAnchorDate = computeRangeCenter(range);
+        // Positionner vis-timeline sur la plage réelle des données.
+        // Sans ce setWindow, vis-timeline auto-fit sur les zone-header backgrounds
+        // (2021-2041) ce qui produit un viewport erroné (~2030) au lieu de la
+        // période du projet. Le parent (synchronisation-plannings) remplacera ce
+        // viewport via applyViewport juste après, mais il en a besoin pour
+        // correctement synchroniser gestion-depenses2.
+        timelineInstance.setWindow(range.start, range.end, { animation: false });
       } else if (hasNonBackgroundItems) {
         const fitted = timelineInstance.getWindow();
         dataAnchorDate = computeRangeCenter(fitted);
