@@ -790,9 +790,11 @@ body {
       margin: 0 0 12px;
       color: #004990;
       font-weight: 600;
+      white-space: nowrap;
     }
 
     #addDocumentsUnifiedDialog .alphabet-pattern-toggle input {
+      flex: 0 0 auto;
       margin: 0;
     }
 
