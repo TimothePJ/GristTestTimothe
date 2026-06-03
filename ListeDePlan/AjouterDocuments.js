@@ -20,6 +20,7 @@
   let cachedProjectForZones = '';
   let cachedEmittersData = null;  // { defaultEmetteurs: [], projectEmetteurs: [] }
   let cachedProjectForEmitters = '';
+  let emittersFetchPromise = null; // promesse en vol pour éviter les doublons
   let projetsTableCache = null;
 
   // ============================================================
@@ -564,15 +565,18 @@
     return { defaultEmetteurs, projectEmetteurs };
   }
 
-  async function prefetchForProject(projectName) {
+  function prefetchForProject(projectName) {
     if (!projectName) return;
     fetchAndCacheProjectZones(projectName).catch(() => {});
     if (cachedProjectForEmitters !== projectName) {
       cachedProjectForEmitters = projectName;
       cachedEmittersData = null;
-      fetchEmittersData(projectName).then((data) => {
-        if (cachedProjectForEmitters === projectName) cachedEmittersData = data;
-      }).catch(() => {});
+      emittersFetchPromise = fetchEmittersData(projectName).then((data) => {
+        if (cachedProjectForEmitters === projectName) {
+          cachedEmittersData = data;
+        }
+        return data;
+      }).catch(() => null);
     }
   }
 
@@ -580,15 +584,26 @@
     const selectedProject = getSelectedProject();
     if (!selectedProject) return;
 
+    // Cache chaud → instantané
     if (cachedProjectForEmitters === selectedProject && cachedEmittersData) {
       populateEmetteurDropdown(cachedEmittersData.projectEmetteurs, cachedEmittersData.defaultEmetteurs);
       return;
     }
 
+    // Fetch en vol → on attend la même promesse, pas de doublon
+    if (cachedProjectForEmitters === selectedProject && emittersFetchPromise) {
+      const data = await emittersFetchPromise;
+      if (data) populateEmetteurDropdown(data.projectEmetteurs, data.defaultEmetteurs);
+      return;
+    }
+
+    // Fallback : lancer un nouveau fetch
     const data = await fetchEmittersData(selectedProject);
-    cachedEmittersData = data;
-    cachedProjectForEmitters = selectedProject;
-    populateEmetteurDropdown(data.projectEmetteurs, data.defaultEmetteurs);
+    if (data) {
+      cachedEmittersData = data;
+      cachedProjectForEmitters = selectedProject;
+      populateEmetteurDropdown(data.projectEmetteurs, data.defaultEmetteurs);
+    }
   }
 
   function collectSelectedEmitters() {
@@ -603,7 +618,7 @@
   // ============================================================
   //  DIALOG OUVERTURE / FERMETURE
   // ============================================================
-  function resetDialogSync() {
+  function _resetDialogState() {
     pendingDocs = [];
     closeBuilderModal();
     renderPendingDocs();
@@ -612,28 +627,27 @@
     resetBuilderFields();
   }
 
-  async function loadDialogDataAsync(selectedProject) {
-    await fetchAndCacheProjectZones(selectedProject);
-    refreshZoneLists();
-    await populateEmetteurDropdownForDialog();
-  }
-
   function openDialog() {
     const project = getSelectedProject();
     if (!project) {
       alert("Veuillez sélectionner un projet avant d'ajouter des documents.");
       return;
     }
-    resetDialogSync();
+    // Ouverture immédiate — le reset a déjà eu lieu à la fermeture précédente
     const dialog = document.getElementById('lp-add-docs-dialog');
     if (dialog && typeof dialog.showModal === 'function') dialog.showModal();
-    loadDialogDataAsync(project).catch((e) => console.warn('AjouterDocuments: chargement async échoué', e));
+    // Chargement async en fond (souvent déjà en cache grâce au pré-fetch)
+    Promise.all([
+      fetchAndCacheProjectZones(project).then(() => refreshZoneLists()).catch(() => {}),
+      populateEmetteurDropdownForDialog().catch(() => {}),
+    ]);
   }
 
   function closeDialog() {
     const dialog = document.getElementById('lp-add-docs-dialog');
     if (dialog && typeof dialog.close === 'function') dialog.close();
-    closeBuilderModal();
+    // Reset après fermeture (pas time-critical) → dialog propre pour la prochaine ouverture
+    _resetDialogState();
   }
 
   // ============================================================
@@ -1245,16 +1259,22 @@
   //  INIT
   // ============================================================
   function init() {
-    document.getElementById('btn-ajouter-docs')?.addEventListener('click', openDialog);
+    // Reset initial : dialog propre dès la première ouverture
+    _resetDialogState();
+
+    const btn = document.getElementById('btn-ajouter-docs');
+    if (btn) {
+      // pointerdown déclenche le pré-fetch ~100ms avant le click → données prêtes à l'ouverture
+      btn.addEventListener('pointerdown', () => { prefetchForProject(getSelectedProject()); });
+      btn.addEventListener('click', openDialog);
+    }
+
     setupDialogUi();
 
-    // Pré-charger zones + émetteurs dès qu'un projet est sélectionné, pour ouvrir le dialog sans délai
+    // Pré-charger dès qu'un projet est sélectionné dans la liste déroulante
     const projectDropdown = document.getElementById('projectDropdown');
     if (projectDropdown) {
-      projectDropdown.addEventListener('change', () => {
-        prefetchForProject(getSelectedProject());
-      });
-      // Pré-charger immédiatement si un projet est déjà sélectionné au chargement
+      projectDropdown.addEventListener('change', () => { prefetchForProject(getSelectedProject()); });
       const initial = getSelectedProject();
       if (initial) prefetchForProject(initial);
     }

@@ -294,7 +294,7 @@ function populateTable() {
     row.className = 'empty-row';
 
     const cell = document.createElement('td');
-    cell.colSpan = 8;
+    cell.colSpan = 7;
     cell.textContent = 'Aucun membre dans la table Team.';
 
     row.appendChild(cell);
@@ -314,7 +314,6 @@ function populateTable() {
     appendCell(row, record.Role || '');
     appendCell(row, record.IdTrefle || '');
     appendCell(row, toBooleanFlag(record.Externe) ? 'Oui' : 'Non');
-    appendCell(row, formatDopLabel(record.DOP));
 
     if (String(record.id) === String(selectedRecordId)) {
       row.classList.add('selected');
@@ -367,7 +366,6 @@ function buildRecordFromForm(form, fieldNames) {
     Role: asText(formData.get(fieldNames.role)),
     IdTrefle: normalizeIdTrefle(formData.get(fieldNames.idTrefle)),
     Externe: formData.has(fieldNames.externe),
-    DOP: normalizeDopValue(formData.get(fieldNames.dop)),
     PrenonNom: buildFullName(prenom, nom),
   };
 }
@@ -417,7 +415,6 @@ async function saveNewRecord(form) {
     role: 'role',
     idTrefle: 'idTrefle',
     externe: 'externe',
-    dop: 'dop',
   });
   const duplicateRecord = findDuplicate(newRecord);
 
@@ -441,7 +438,6 @@ async function saveUpdatedRecord(form) {
     role: 'editRole',
     idTrefle: 'editIdTrefle',
     externe: 'editExterne',
-    dop: 'editDop',
   });
   const duplicateRecord = findDuplicate(updatedFields, selectedRecordId);
 
@@ -461,7 +457,6 @@ function openAddDialog() {
   const form = addRowDialog.querySelector('form');
 
   form.reset();
-  document.getElementById('dop').value = '';
   addRowDialog.showModal();
   hideContextMenu();
 }
@@ -476,7 +471,6 @@ function openEditDialog() {
   document.getElementById('editService').value = record.Service || '';
   document.getElementById('editRole').value = record.Role || '';
   document.getElementById('editIdTrefle').value = record.IdTrefle || '';
-  document.getElementById('editDop').value = normalizeDopValue(record.DOP);
   document.getElementById('editExterne').checked = toBooleanFlag(record.Externe);
   document.getElementById('editRowDialog').showModal();
   hideContextMenu();
