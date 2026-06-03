@@ -1665,7 +1665,7 @@ function renderReferenceDetailsBody(dialog, data = {}) {
         <tr>
           <th>Données d'entrées</th>
           <th>Reference</th>
-          <th>Bloquant</th>
+          <th><label class="planning-ref-select-all-label"><input type="checkbox" class="planning-ref-select-all" title="Tout sélectionner / désélectionner"> Bloquant</label></th>
           <th>Durée (sem.)</th>
         </tr>
       </thead>
@@ -1704,6 +1704,26 @@ function renderReferenceDetailsBody(dialog, data = {}) {
     tr.append(emetteur, referenceCell, bloquantCell, durationCell);
     tbody?.append(tr);
   });
+
+  // Logique "Tout sélectionner / désélectionner"
+  const selectAllCb = body.querySelector(".planning-ref-select-all");
+  const bloquantCbs = [...body.querySelectorAll(".planning-reference-details-table__bloquant")];
+
+  function syncSelectAll() {
+    if (!selectAllCb) return;
+    const allChecked = bloquantCbs.length > 0 && bloquantCbs.every((cb) => cb.checked);
+    const someChecked = bloquantCbs.some((cb) => cb.checked);
+    selectAllCb.checked = allChecked;
+    selectAllCb.indeterminate = someChecked && !allChecked;
+  }
+
+  if (selectAllCb) {
+    selectAllCb.addEventListener("change", () => {
+      bloquantCbs.forEach((cb) => { cb.checked = selectAllCb.checked; });
+    });
+    syncSelectAll();
+    bloquantCbs.forEach((cb) => cb.addEventListener("change", syncSelectAll));
+  }
 }
 
 async function openReferenceDetailsDialog() {

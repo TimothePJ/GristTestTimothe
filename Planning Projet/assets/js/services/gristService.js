@@ -8,6 +8,10 @@ const LISTEPLAN_TABLE_CANDIDATES = [
   "ListePlan_NDC+COF",
 ];
 
+// Cache léger pour le dialog "Détails" — évite de re-fetcher les tables à chaque clic
+let _planningRowsCache = null;  // tableau de lignes Planning_Projet
+let _refsTableCache = null;     // tableau de lignes References
+
 function getGrist() {
   try {
     if (window.parent && window.parent !== window && window.parent.grist) {
@@ -717,7 +721,7 @@ async function fetchPlanningRowById(rowId) {
     throw new Error("Identifiant de ligne Planning_Projet invalide.");
   }
 
-  const rows = await fetchTableRows(table.sourceTable);
+  const rows = _planningRowsCache ?? await fetchTableRows(table.sourceTable);
   const row = rows.find((candidate) => Number(candidate?.[idCol]) === recordId) || null;
   if (!row) {
     throw new Error("Ligne Planning_Projet introuvable.");
@@ -2323,8 +2327,7 @@ export async function fetchProjectAvancementConfigs() {
 export async function fetchPlanningRows() {
   const table = APP_CONFIG.grist.planningTable;
   const rows = await fetchTableRows(table.sourceTable);
-
-  // On renvoie brut, le mapping métier se fait dans planningService.js
+  _planningRowsCache = rows;  // alimente le cache pour fetchPlanningRowById
   return rows;
 }
 
@@ -2539,7 +2542,8 @@ export async function fetchPlanningReferenceDetails(rowId) {
   const { row, columns } = await fetchPlanningRowById(rowId);
   const startDate = getPlanningSegmentStartDate(row, columns);
   const startIso = formatIsoDate(startDate);
-  const referenceRows = await fetchTableRows(REFERENCES_TABLE_NAME);
+  if (!_refsTableCache) _refsTableCache = await fetchTableRows(REFERENCES_TABLE_NAME);
+  const referenceRows = _refsTableCache;
   const linkedRows = findLinkedReferenceRowsForPlanningRow(row, referenceRows, columns);
 
   return {
@@ -2563,7 +2567,8 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
   const { row, columns } = await fetchPlanningRowById(rowId);
   const startDate = getPlanningSegmentStartDate(row, columns);
 
-  const referenceRows = await fetchTableRows(REFERENCES_TABLE_NAME);
+  if (!_refsTableCache) _refsTableCache = await fetchTableRows(REFERENCES_TABLE_NAME);
+  const referenceRows = _refsTableCache;
   const linkedRows = findLinkedReferenceRowsForPlanningRow(row, referenceRows, columns);
   const linkedIds = new Set(
     linkedRows
@@ -2628,7 +2633,15 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
   }
 
   await grist.docApi.applyUserActions(actions);
+  // Invalider le cache après écriture — prochain "Détails" rechargera des données fraîches
+  _planningRowsCache = null;
+  _refsTableCache = null;
   return { updatedCount: actions.length };
+}
+
+export function invalidateDetailsCache() {
+  _planningRowsCache = null;
+  _refsTableCache = null;
 }
 
 export { toText };
