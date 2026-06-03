@@ -137,13 +137,6 @@ function populateProjectDropdown() {
   const projects = [...new Set(allProjects.Nom_de_projet)].filter(Boolean).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base', numeric: true }));
 
   const currentValue = projectDropdown.value || readSharedProjectSelection();
-  console.log('[SYNC][Bordereau] populateProjectDropdown', {
-    nbProjets: projects.length,
-    projets: projects,
-    localStorageActuel: readSharedProjectSelection(),
-    restorationTentee: currentValue,
-    restoreReussi: projects.includes(currentValue),
-  });
 
   // On garde l'option 0 "Sélectionner..." puis on reconstruit le reste
   while (projectDropdown.options.length > 1) projectDropdown.remove(1);
@@ -383,12 +376,7 @@ function displayInvoiceTable() {
  *  ------------------------- */
 $("projectDropdown").addEventListener("change", async () => {
   const selectedProjectName = getProject();
-  console.log('[SYNC][Bordereau] Projet sélectionné par l\'utilisateur', {
-    projet: selectedProjectName,
-    ancienLocalStorage: readSharedProjectSelection(),
-  });
   saveSharedProjectSelection(selectedProjectName);
-  console.log('[SYNC][Bordereau] localStorage["grist.selected-project"] mis à jour →', localStorage.getItem(SHARED_PROJECT_STORAGE_KEY));
 
   if (selectedProjectName) {
     setRef(1);
@@ -673,15 +661,7 @@ const logo1 = await fetch("../img/VC_Logotype_Digital_RVB.jpg").then((res) => re
     var newProject = String(event.newValue).trim();
     var dropdown = document.getElementById('projectDropdown');
     if (!dropdown) return;
-    var options = Array.from(dropdown.options).map(function(o){ return o.value; });
     var match = Array.from(dropdown.options).find(function (o) { return _nk(o.value) === _nk(newProject); });
-    console.log('[SYNC][Bordereau] storage event reçu', {
-      newValue: newProject,
-      dropdownOptions: options,
-      matchTrouve: match ? match.value : null,
-      dropdownActuel: dropdown.value,
-      actionDeclenchee: !!(match && dropdown.value !== match.value),
-    });
     if (match && dropdown.value !== match.value) {
       dropdown.value = match.value;
       dropdown.dispatchEvent(new Event('change'));

@@ -178,19 +178,11 @@ export function clearSharedProjectSelection() {
 
 export async function applySharedProject(projectKey) {
   const normalizedProjectKey = String(projectKey || "").trim();
-  console.log('[SYNC][syncPlannings] applySharedProject appelé', {
-    projectKey,
-    normalizedProjectKey,
-    planningApiDisponible: !!state.planningApi,
-    projectSyncInProgress: state.projectSyncInProgress,
-  });
   if (!normalizedProjectKey || !state.planningApi) {
-    console.warn('[SYNC][syncPlannings] applySharedProject abandonné (pas de clé ou pas d\'API)');
     return;
   }
 
   saveSharedProjectSelection(normalizedProjectKey);
-  console.log('[SYNC][syncPlannings] localStorage["grist.selected-project"] →', normalizedProjectKey);
   state.requestedProjectKey = normalizedProjectKey;
   state.lastPlanningWarningsPopupSignature = "";
   state.pendingPlanningWarningsPopupProjectKey = normalizedProjectKey;
