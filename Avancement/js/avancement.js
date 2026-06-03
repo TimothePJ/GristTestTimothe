@@ -61,6 +61,8 @@ const SPECIAL_BUDGET_KEYS = {
   fondPlans: '__FOND_DE_PLANS__',
 };
 
+const SHARED_PROJECT_STORAGE_KEY = 'grist.selected-project';
+
 const CHART_COLORS = {
   done: {
     solid: 'rgba(43, 123, 201, 1)',
@@ -98,9 +100,23 @@ init();
 function init() {
   grist.ready({ requiredAccess: 'full' });
   Chart.register(ChartDataLabels);
+  void refreshProjectDropdownFromProjectsTable();
+  window.addEventListener('pageshow', () => {
+    void refreshProjectDropdownFromProjectsTable();
+  });
+  window.addEventListener('focus', () => {
+    const savedSelection = readSharedProjectSelection();
+    if (
+      elements.projectDropdown.options.length <= 1 ||
+      (savedSelection && !elements.projectDropdown.value)
+    ) {
+      void refreshProjectDropdownFromProjectsTable();
+    }
+  });
 
   elements.projectDropdown.addEventListener('change', () => {
     state.selectionFeedback = null;
+    saveSharedProjectSelection(elements.projectDropdown.value);
     updateDashboard();
   });
 
@@ -113,7 +129,7 @@ function init() {
 
 function populateProjectDropdown() {
   const projects = getProjectNames(state.records);
-  const currentValue = elements.projectDropdown.value;
+  const currentValue = elements.projectDropdown.value || readSharedProjectSelection();
 
   clearProjectOptions();
   addProjectOptions(projects);
@@ -142,7 +158,72 @@ function addProjectOptions(projects) {
 }
 
 function restoreSelectedProject(currentValue, projects) {
-  elements.projectDropdown.value = projects.includes(currentValue) ? currentValue : '';
+  const selectedProject = findMatchingProject(projects, currentValue);
+  elements.projectDropdown.value = selectedProject;
+  if (selectedProject) {
+    saveSharedProjectSelection(selectedProject);
+  }
+}
+
+async function refreshProjectDropdownFromProjectsTable() {
+  try {
+    if (!grist?.docApi || typeof grist.docApi.fetchTable !== 'function') return;
+
+    const projectsTable = await grist.docApi.fetchTable(TABLES.projects);
+    const projects = tableToRows(projectsTable)
+      .map((row) => normalizeText(row[PROJECT_COLUMNS.name]))
+      .filter(Boolean)
+      .filter((project, index, allProjects) => allProjects.indexOf(project) === index)
+      .sort(compareText);
+
+    if (!projects.length) return;
+
+    const currentValue = elements.projectDropdown.value || readSharedProjectSelection();
+    clearProjectOptions();
+    addProjectOptions(projects);
+    restoreSelectedProject(currentValue, projects);
+  } catch (error) {
+    console.warn('Impossible de precharger la liste des projets Avancement :', error);
+  }
+}
+
+function readSharedProjectSelection() {
+  try {
+    return String(localStorage.getItem(SHARED_PROJECT_STORAGE_KEY) || '').trim();
+  } catch (_error) {
+    return '';
+  }
+}
+
+function saveSharedProjectSelection(projectName = '') {
+  try {
+    const normalizedProject = normalizeText(projectName);
+    if (normalizedProject) {
+      localStorage.setItem(SHARED_PROJECT_STORAGE_KEY, normalizedProject);
+    } else {
+      localStorage.removeItem(SHARED_PROJECT_STORAGE_KEY);
+    }
+  } catch (_error) {
+    // localStorage peut etre indisponible dans certains contextes embarques.
+  }
+}
+
+function normalizeProjectSelectionKey(value = '') {
+  return normalizeText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function findMatchingProject(projects = [], requestedProject = '') {
+  const requestedKey = normalizeProjectSelectionKey(requestedProject);
+  if (!requestedKey) return '';
+
+  return projects.find((project) =>
+    normalizeProjectSelectionKey(project) === requestedKey
+  ) || '';
 }
 
 async function updateDashboard() {

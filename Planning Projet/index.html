@@ -136,6 +136,55 @@
     </div>
   </div>
 
+  <div id="manageZoneModal" class="add-zone-modal manage-zone-modal" hidden aria-hidden="true">
+    <div class="add-zone-modal__backdrop"></div>
+    <div
+      class="add-zone-modal__panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="manageZoneModalTitle"
+    >
+      <div class="add-zone-modal__header">
+        <div class="add-zone-modal__title-wrap">
+          <h2 id="manageZoneModalTitle">Modifier Zone</h2>
+        </div>
+        <button
+          id="manageZoneModalCloseBtn"
+          class="add-zone-modal__close-btn"
+          type="button"
+          aria-label="Fermer"
+        >x</button>
+      </div>
+
+      <div class="add-zone-modal__form" autocomplete="off">
+        <label for="manageZoneProjectName">Projet</label>
+        <input id="manageZoneProjectName" type="text" readonly />
+
+        <label for="manageZoneSelect">Zone</label>
+        <select id="manageZoneSelect"></select>
+
+        <label for="manageZoneNewName">Nouveau nom</label>
+        <input
+          id="manageZoneNewName"
+          type="text"
+          placeholder="Ex: Zone B"
+          maxlength="80"
+        />
+
+        <p id="manageZoneModalHint" class="add-zone-modal__hint"></p>
+
+        <div class="add-zone-modal__actions manage-zone-modal__actions">
+          <button id="manageZoneDeleteBtn" type="button" class="btn-danger">
+            Supprimer la zone
+          </button>
+          <button id="manageZoneRenameBtn" type="button" class="btn-primary">
+            Renommer
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Statut / messages -->
   <div id="planningStatus" class="planning-status"></div>
 </body>

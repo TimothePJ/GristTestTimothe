@@ -12,6 +12,7 @@ let allProjects = [];
 const BORDEREAU_TABLE = "Envois";
 const PLANS_TABLE = "ListePlan_NDC_COF";
 const PROJET_TABLE = "Projets";
+const SHARED_PROJECT_STORAGE_KEY = "grist.selected-project";
 
 /** -------------------------
  *  Helpers DOM
@@ -20,6 +21,27 @@ const $ = (id) => document.getElementById(id);
 
 function getProject() {
   return $("projectDropdown").value;
+}
+
+function readSharedProjectSelection() {
+  try {
+    return String(localStorage.getItem(SHARED_PROJECT_STORAGE_KEY) || "").trim();
+  } catch (_error) {
+    return "";
+  }
+}
+
+function saveSharedProjectSelection(projectName = "") {
+  try {
+    const normalizedProject = String(projectName || "").trim();
+    if (normalizedProject) {
+      localStorage.setItem(SHARED_PROJECT_STORAGE_KEY, normalizedProject);
+    } else {
+      localStorage.removeItem(SHARED_PROJECT_STORAGE_KEY);
+    }
+  } catch (_error) {
+    // localStorage peut etre indisponible dans certains contextes embarques.
+  }
 }
 
 function getRef() {
@@ -114,7 +136,7 @@ function populateProjectDropdown() {
   const projectDropdown = $("projectDropdown");
   const projects = [...new Set(allProjects.Nom_de_projet)].filter(Boolean).sort();
 
-  const currentValue = projectDropdown.value;
+  const currentValue = projectDropdown.value || readSharedProjectSelection();
 
   // On garde l'option 0 "Sélectionner..." puis on reconstruit le reste
   while (projectDropdown.options.length > 1) projectDropdown.remove(1);
@@ -127,7 +149,7 @@ function populateProjectDropdown() {
   });
 
   // restore si possible
-  projectDropdown.value = currentValue;
+  projectDropdown.value = projects.includes(currentValue) ? currentValue : "";
 }
 
 /** -------------------------
@@ -354,6 +376,7 @@ function displayInvoiceTable() {
  *  ------------------------- */
 $("projectDropdown").addEventListener("change", async () => {
   const selectedProjectName = getProject();
+  saveSharedProjectSelection(selectedProjectName);
 
   if (selectedProjectName) {
     setRef(1);

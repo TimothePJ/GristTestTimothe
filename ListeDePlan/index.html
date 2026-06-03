@@ -74,10 +74,11 @@
       <select id="zoneDropdown" disabled>
         <option value="__ALL_ZONES__">Toutes les zones</option>
       </select>
+      <span id="manageZoneStatus" class="zone-manage-status" aria-live="polite"></span>
     </div>
 
-    <div class="dropdown-container" style="justify-content: flex-end; padding-bottom: 8px;">
-      <button id="btn-print" style="padding: 8px 16px; background-color: #004990; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Imprimer</button>
+    <div class="dropdown-container print-container">
+      <button id="btn-print">Imprimer</button>
     </div>
   </div>
 
@@ -101,6 +102,46 @@
         <button type="button" id="print-options-confirm">Imprimer</button>
       </menu>
     </form>
+  </dialog>
+
+  <dialog id="dlg-manage-zone" class="manage-zone-dialog">
+    <div class="manage-zone-body">
+      <div class="manage-zone-header">
+        <h3>Modifier Zone</h3>
+        <button
+          type="button"
+          id="manage-zone-close"
+          class="manage-zone-close"
+          aria-label="Fermer"
+        >x</button>
+      </div>
+
+      <label>
+        <span>Projet</span>
+        <input id="manage-zone-project" type="text" readonly>
+      </label>
+
+      <label>
+        <span>Zone</span>
+        <select id="manage-zone-select"></select>
+      </label>
+
+      <label>
+        <span>Nouveau nom</span>
+        <input id="manage-zone-new-name" type="text" maxlength="80" placeholder="Ex: Zone B">
+      </label>
+
+      <p id="manage-zone-hint" class="manage-zone-hint"></p>
+
+      <div class="manage-zone-actions">
+        <button type="button" id="manage-zone-delete" class="manage-zone-delete">
+          Supprimer la zone
+        </button>
+        <button type="button" id="manage-zone-rename" class="manage-zone-rename">
+          Renommer
+        </button>
+      </div>
+    </div>
   </dialog>
 
   <!-- === Dialogue : Ajouter un document (automatique: projet & type depuis les dropdowns de la page) === -->

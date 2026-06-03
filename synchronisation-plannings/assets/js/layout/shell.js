@@ -303,32 +303,51 @@ export function syncExpensesPlanningShell(viewport = null) {
 
 export function appendLog() {}
 
-export function renderProjectOptions(projectKeys) {
+export function renderProjectOptions(projectKeys, selectedProjectKey = "") {
   if (!(dom.projectSelectEl instanceof HTMLSelectElement)) {
     return;
   }
 
+  const normalizedSelectedProjectKey = String(selectedProjectKey || "").trim();
   dom.projectSelectEl.innerHTML = "";
 
   const placeholderOptionEl = document.createElement("option");
   placeholderOptionEl.value = "";
   placeholderOptionEl.textContent = "Choisir un projet";
+  placeholderOptionEl.selected = !normalizedSelectedProjectKey;
   dom.projectSelectEl.appendChild(placeholderOptionEl);
 
   projectKeys.forEach((projectKey) => {
+    const normalizedProjectKey = String(projectKey || "").trim();
     const optionEl = document.createElement("option");
-    optionEl.value = projectKey;
-    optionEl.textContent = projectKey;
+    optionEl.value = normalizedProjectKey;
+    optionEl.textContent = normalizedProjectKey;
+    optionEl.selected = normalizedProjectKey === normalizedSelectedProjectKey;
+    if (optionEl.selected) {
+      optionEl.setAttribute("selected", "selected");
+    }
     dom.projectSelectEl.appendChild(optionEl);
   });
 
-  dom.projectSelectEl.value = "";
+  dom.projectSelectEl.value = normalizedSelectedProjectKey;
+  if (dom.projectSelectEl.value !== normalizedSelectedProjectKey) {
+    dom.projectSelectEl.value = "";
+  }
   dom.projectSelectEl.disabled = projectKeys.length === 0;
 }
 
 export function setActiveProjectSelection(projectKey = "") {
   if (dom.projectSelectEl instanceof HTMLSelectElement) {
-    dom.projectSelectEl.value = String(projectKey || "").trim();
+    const normalizedProjectKey = String(projectKey || "").trim();
+    dom.projectSelectEl.value = normalizedProjectKey;
+    Array.from(dom.projectSelectEl.options).forEach((optionEl) => {
+      optionEl.selected = optionEl.value === normalizedProjectKey;
+      if (optionEl.selected) {
+        optionEl.setAttribute("selected", "selected");
+      } else {
+        optionEl.removeAttribute("selected");
+      }
+    });
   }
 
   syncSharedPlanningControlsAvailability();

@@ -11,9 +11,11 @@ let durationCellEditHandler = null;
 let durationCellEditBound = false;
 let activeDurationEditor = null;
 let retardJustificationHandler = null;
+let referenceDetailsHandler = null;
 let activeRetardJustificationContext = null;
 let retardContextMenuEl = null;
 let retardDialogEl = null;
+let referenceDetailsDialogEl = null;
 let stickyAxisBound = false;
 let stickyAxisRafPending = false;
 let axisLeftFillerEl = null;
@@ -1451,17 +1453,29 @@ function ensureRetardContextMenu() {
   menu.className = "planning-retard-context-menu";
   menu.style.display = "none";
   menu.innerHTML = `
-    <button type="button" class="planning-retard-context-menu__button">
+    <button type="button" class="planning-retard-context-menu__button" data-planning-retard-action="justify">
       Justifier le retard
+    </button>
+    <button type="button" class="planning-retard-context-menu__button" data-planning-retard-action="details">
+      Détails
     </button>
   `;
 
-  const button = menu.querySelector("button");
-  button?.addEventListener("click", (event) => {
+  menu.addEventListener("click", (event) => {
+    const button = event.target instanceof Element
+      ? event.target.closest("[data-planning-retard-action]")
+      : null;
+    if (!(button instanceof HTMLElement)) return;
+
     event.preventDefault();
     event.stopPropagation();
     closeRetardContextMenu();
-    openRetardJustificationDialog();
+    const action = button.dataset.planningRetardAction || "";
+    if (action === "details") {
+      void openReferenceDetailsDialog();
+    } else {
+      openRetardJustificationDialog();
+    }
   });
 
   document.body.appendChild(menu);
@@ -1591,22 +1605,216 @@ function openRetardJustificationDialog() {
   });
 }
 
-function openRetardContextMenu(event, cellEl) {
-  if (!(cellEl instanceof HTMLElement) || !retardJustificationHandler) return;
+function ensureReferenceDetailsDialog() {
+  if (referenceDetailsDialogEl instanceof HTMLDialogElement) return referenceDetailsDialogEl;
 
-  const rowId = Number(cellEl.dataset.rowId || "");
+  const dialog = document.createElement("dialog");
+  dialog.className = "planning-reference-details-dialog";
+  dialog.innerHTML = `
+    <form method="dialog" class="planning-reference-details-dialog__form">
+      <div class="planning-reference-details-dialog__header">
+        <h3>Détails</h3>
+        <button type="button" class="planning-reference-details-dialog__close" aria-label="Fermer">&times;</button>
+      </div>
+      <p class="planning-reference-details-dialog__line"></p>
+      <div class="planning-reference-details-dialog__body"></div>
+      <div class="planning-reference-details-dialog__actions">
+        <button type="submit" class="planning-reference-details-dialog__save">Enregistrer</button>
+        <button type="button" class="planning-reference-details-dialog__cancel">Annuler</button>
+      </div>
+    </form>
+  `;
+
+  const form = dialog.querySelector("form");
+  const closeButton = dialog.querySelector(".planning-reference-details-dialog__close");
+  const cancelButton = dialog.querySelector(".planning-reference-details-dialog__cancel");
+
+  form?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void commitReferenceDetailsDialog();
+  });
+
+  closeButton?.addEventListener("click", (event) => {
+    event.preventDefault();
+    dialog.close();
+  });
+
+  cancelButton?.addEventListener("click", (event) => {
+    event.preventDefault();
+    dialog.close();
+  });
+
+  document.body.appendChild(dialog);
+  referenceDetailsDialogEl = dialog;
+  return referenceDetailsDialogEl;
+}
+
+function renderReferenceDetailsBody(dialog, data = {}) {
+  const body = dialog.querySelector(".planning-reference-details-dialog__body");
+  if (!(body instanceof HTMLElement)) return;
+
+  const references = Array.isArray(data.references) ? data.references : [];
+  if (!references.length) {
+    body.innerHTML = `<div class="planning-reference-details-dialog__empty">Aucune référence liée.</div>`;
+    return;
+  }
+
+  body.innerHTML = `
+    <table class="planning-reference-details-table">
+      <thead>
+        <tr>
+          <th>Données d'entrées</th>
+          <th>Reference</th>
+          <th>Bloquant</th>
+          <th>Durée (sem.)</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  `;
+
+  const tbody = body.querySelector("tbody");
+  references.forEach((reference) => {
+    const tr = document.createElement("tr");
+    tr.dataset.referenceId = String(reference?.id ?? "");
+
+    const emetteur = document.createElement("td");
+    emetteur.textContent = String(reference?.emetteur ?? "");
+
+    const referenceCell = document.createElement("td");
+    referenceCell.textContent = String(reference?.reference ?? "");
+
+    const bloquantCell = document.createElement("td");
+    const bloquant = document.createElement("input");
+    bloquant.type = "checkbox";
+    bloquant.className = "planning-reference-details-table__bloquant";
+    bloquant.checked = Boolean(reference?.bloquant);
+    bloquantCell.append(bloquant);
+
+    const durationCell = document.createElement("td");
+    const duration = document.createElement("input");
+    duration.type = "number";
+    duration.min = "0";
+    duration.step = "1";
+    duration.inputMode = "numeric";
+    duration.className = "planning-reference-details-table__duration";
+    duration.value = reference?.durationWeeks == null ? "" : String(reference.durationWeeks);
+    durationCell.append(duration);
+
+    tr.append(emetteur, referenceCell, bloquantCell, durationCell);
+    tbody?.append(tr);
+  });
+}
+
+async function openReferenceDetailsDialog() {
+  if (!referenceDetailsHandler || !activeRetardJustificationContext) return;
+
+  const dialog = ensureReferenceDetailsDialog();
+  const lineEl = dialog.querySelector(".planning-reference-details-dialog__line");
+  const body = dialog.querySelector(".planning-reference-details-dialog__body");
+  const saveButton = dialog.querySelector(".planning-reference-details-dialog__save");
+
+  if (lineEl) {
+    lineEl.textContent = getRetardJustificationLabel(activeRetardJustificationContext);
+  }
+  if (body) {
+    body.innerHTML = `<div class="planning-reference-details-dialog__empty">Chargement...</div>`;
+  }
+  if (saveButton instanceof HTMLButtonElement) {
+    saveButton.disabled = true;
+  }
+
+  if (typeof dialog.showModal === "function" && !dialog.open) {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+
+  try {
+    const data = await referenceDetailsHandler({
+      action: "load",
+      context: { ...activeRetardJustificationContext },
+    });
+    renderReferenceDetailsBody(dialog, data);
+  } catch (error) {
+    console.error("Erreur détails références :", error);
+    if (body) {
+      body.innerHTML = `<div class="planning-reference-details-dialog__empty">Erreur : ${escapeHtml(error.message || error)}</div>`;
+    }
+  } finally {
+    if (saveButton instanceof HTMLButtonElement) {
+      saveButton.disabled = false;
+    }
+  }
+}
+
+async function commitReferenceDetailsDialog() {
+  if (!referenceDetailsHandler || !activeRetardJustificationContext) return;
+
+  const dialog = ensureReferenceDetailsDialog();
+  const controls = dialog.querySelectorAll("button, input");
+  const rows = [...dialog.querySelectorAll("tbody tr")];
+  const updates = rows.map((row) => {
+    const id = Number(row.dataset.referenceId || "");
+    const bloquant = row.querySelector(".planning-reference-details-table__bloquant");
+    const duration = row.querySelector(".planning-reference-details-table__duration");
+    return {
+      id,
+      bloquant: Boolean(bloquant instanceof HTMLInputElement && bloquant.checked),
+      durationWeeks: duration instanceof HTMLInputElement ? duration.value : "",
+    };
+  });
+
+  controls.forEach((control) => {
+    control.disabled = true;
+  });
+
+  try {
+    await referenceDetailsHandler({
+      action: "save",
+      context: { ...activeRetardJustificationContext },
+      updates,
+    });
+    dialog.close();
+  } catch (error) {
+    console.error("Erreur sauvegarde détails références :", error);
+    alert(`Erreur détails références : ${error.message}`);
+  } finally {
+    controls.forEach((control) => {
+      control.disabled = false;
+    });
+  }
+}
+
+function buildRetardContextFromRow(rowEl) {
+  if (!(rowEl instanceof HTMLElement)) return null;
+
+  const rowId = Number(rowEl.dataset.planningRowId || "");
   if (!Number.isInteger(rowId) || rowId <= 0) return;
+
+  return {
+    rowId,
+    project: rowEl.dataset.planningProject || "",
+    id2: rowEl.dataset.planningId2 || "",
+    task: rowEl.dataset.planningTask || "",
+    typeDoc: rowEl.dataset.planningTypeDoc || "",
+    zone: rowEl.dataset.planningZone || "",
+    debutIso: rowEl.dataset.planningStartIso || "",
+    retards: rowEl.dataset.planningRetards || "",
+    remarque: rowEl.dataset.planningRemarque || "",
+  };
+}
+
+function openRetardContextMenu(event, rowEl) {
+  if (!(rowEl instanceof HTMLElement) || (!retardJustificationHandler && !referenceDetailsHandler)) return;
+
+  const context = buildRetardContextFromRow(rowEl);
+  if (!context) return;
 
   event.preventDefault();
   event.stopPropagation();
 
-  activeRetardJustificationContext = {
-    rowId,
-    id2: cellEl.dataset.id2 || "",
-    task: cellEl.dataset.task || "",
-    retards: cellEl.dataset.retards || "",
-    remarque: cellEl.dataset.remarque || "",
-  };
+  activeRetardJustificationContext = context;
 
   const menu = ensureRetardContextMenu();
   positionFixedElementNearPointer(menu, event);
@@ -3435,6 +3643,7 @@ function buildGroupLabelElement(group) {
   row.setAttribute("draggable", "true");
   row.dataset.planningRowId = String(group?.rowId ?? "");
   row.dataset.planningGroupId = String(group?.id ?? "");
+  row.dataset.planningProject = String(group?.projectLabel ?? "");
   row.dataset.planningId2 = String(group?.id2Label ?? "");
   row.dataset.planningTask = String(group?.tachesLabel ?? "");
   row.dataset.planningGroupe = String(group?.groupeLabel ?? "");
@@ -3451,6 +3660,9 @@ function buildGroupLabelElement(group) {
   const typeDocLabel = String(group?.typeDocLabel ?? "");
   const isCoffrageRow = isPlanningTypeDocMatch(typeDocLabel, "COFFRAGE");
   const isArmatureRow = isPlanningTypeDocMatch(typeDocLabel, "ARMATURE");
+  const isNdcRow = isPlanningTypeDocMatch(typeDocLabel, "NDC") ||
+    isPlanningTypeDocMatch(typeDocLabel, "NOTE DE CALCUL") ||
+    isPlanningTypeDocMatch(typeDocLabel, "NOTE CALCUL");
   const isRealiseComplete = isPlanningRealiseComplete(group?.realiseLabel);
 
   if (isCoffrageRow) {
@@ -3458,6 +3670,9 @@ function buildGroupLabelElement(group) {
   }
   if (isArmatureRow) {
     row.classList.add("row-type-armature");
+  }
+  if (isNdcRow) {
+    row.classList.add("row-type-ndc");
   }
   if (isRealiseComplete) {
     row.classList.add("row-realise-complete");
@@ -3556,10 +3771,6 @@ function buildGroupLabelElement(group) {
     retards.setAttribute("aria-label", remarqueText);
   }
 
-  retards.addEventListener("contextmenu", (event) => {
-    openRetardContextMenu(event, retards);
-  });
-
   [
     id2,
     tache,
@@ -3596,6 +3807,10 @@ function buildGroupLabelElement(group) {
     emitPlanningSelectionChange(buildPlanningSelectionPayloadFromGroup(group), {
       reason: "group-click",
     });
+  });
+
+  row.addEventListener("contextmenu", (event) => {
+    openRetardContextMenu(event, row);
   });
 
   row.append(
@@ -4397,6 +4612,10 @@ export function setPlanningDurationEditHandler(handler) {
 
 export function setPlanningRetardJustificationHandler(handler) {
   retardJustificationHandler = typeof handler === "function" ? handler : null;
+}
+
+export function setPlanningReferenceDetailsHandler(handler) {
+  referenceDetailsHandler = typeof handler === "function" ? handler : null;
 }
 
 export function setPlanningMsProjectDropHandler(handler) {

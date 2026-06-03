@@ -1,6 +1,7 @@
 let selectedProject = "";
 let selectedDocName = "";
 let selectedDocNumber = null;
+const SHARED_PROJECT_STORAGE_KEY = "grist.selected-project";
 
 // "ALL" | "NO_INDICE_NOT_BLOCKING" | "NO_INDICE_BLOCKING" | "WITH_INDICE"
 let sliceFilter = "ALL";
@@ -10,6 +11,27 @@ const secondDropdown = document.getElementById("secondColumnListbox");
 const pieCanvas = document.getElementById("pieCanvas");
 const legend = document.getElementById("legend");
 
+function readSharedProjectSelection() {
+  try {
+    return String(localStorage.getItem(SHARED_PROJECT_STORAGE_KEY) || "").trim();
+  } catch (_error) {
+    return "";
+  }
+}
+
+function saveSharedProjectSelection(projectName = "") {
+  try {
+    const normalizedProject = String(projectName || "").trim();
+    if (normalizedProject) {
+      localStorage.setItem(SHARED_PROJECT_STORAGE_KEY, normalizedProject);
+    } else {
+      localStorage.removeItem(SHARED_PROJECT_STORAGE_KEY);
+    }
+  } catch (_error) {
+    // localStorage peut etre indisponible dans certains contextes embarques.
+  }
+}
+
 function setSecondDropdownDisabled(disabled) {
   secondDropdown.disabled = disabled;
   secondDropdown.innerHTML = `<option value="ALL">Tous</option>`;
@@ -17,7 +39,7 @@ function setSecondDropdownDisabled(disabled) {
 }
 
 function populateFirstColumnDropdown(projects) {
-  const current = firstDropdown.value;
+  const current = firstDropdown.value || selectedProject || readSharedProjectSelection();
 
   firstDropdown.innerHTML = `<option value="">Selectionner un projet</option>`;
   (projects || []).forEach(p => {
@@ -31,6 +53,7 @@ function populateFirstColumnDropdown(projects) {
 
   if ([...firstDropdown.options].some(o => o.value === current)) firstDropdown.value = current;
   else firstDropdown.value = "";
+  selectedProject = firstDropdown.value || selectedProject || "";
 }
 
 function buildDocumentOptionsForProject(project) {
@@ -274,6 +297,7 @@ function refreshUI() {
 // Projet
 firstDropdown.addEventListener("change", () => {
   selectedProject = firstDropdown.value.trim();
+  saveSharedProjectSelection(selectedProject);
   selectedDocName = "";
   selectedDocNumber = null;
   sliceFilter = "ALL";

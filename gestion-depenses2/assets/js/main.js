@@ -166,6 +166,50 @@ const CHARGE_PLAN_SYNC_TRACE_LABEL = EMBEDDED_SPENDING_CHART_MODE
   : EMBEDDED_PLANNING_SYNC_MODE
   ? "gestion-depenses2"
   : "gestion-depenses2-standalone";
+
+function readSharedProjectSelection() {
+  try {
+    return String(localStorage.getItem(APP_CONFIG.sharedProjectStorageKey) || "").trim();
+  } catch (_error) {
+    return "";
+  }
+}
+
+function saveSharedProjectSelection(projectName = "") {
+  try {
+    const normalizedProject = String(projectName || "").trim();
+    if (normalizedProject) {
+      localStorage.setItem(APP_CONFIG.sharedProjectStorageKey, normalizedProject);
+    } else {
+      localStorage.removeItem(APP_CONFIG.sharedProjectStorageKey);
+    }
+  } catch (_error) {
+    // localStorage peut etre indisponible dans certains contextes embarques.
+  }
+}
+
+function normalizeSharedProjectKey(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function findProjectBySharedSelection(projects = [], projectSelection = "") {
+  const selectionKey = normalizeSharedProjectKey(projectSelection);
+  if (!selectionKey) return null;
+
+  return (projects || []).find((project) =>
+    [
+      project?.name,
+      project?.projectNumber,
+      `${project?.projectNumber || ""} - ${project?.name || ""}`,
+    ].some((candidate) => normalizeSharedProjectKey(candidate) === selectionKey)
+  ) || null;
+}
+
 let chargePlanSyncTraceSequence = 0;
 let lastPlanningAlertsPopupSignature = "";
 let planningAlertsArrivalTimer = null;
@@ -2064,6 +2108,7 @@ function setSelectedProjectForPlanningSync(projectKey = "") {
     setState({
       selectedProjectId: nextProject.id,
     });
+    saveSharedProjectSelection(nextProject.name || nextProject.projectNumber || "");
     syncStateToProjectStart(nextProject);
     renderApp();
   } finally {
@@ -2174,7 +2219,19 @@ async function loadData({ preferredProjectNumber = "" } = {}) {
       selectedProject = preferredProject;
       syncStateToProjectStart(preferredProject);
     }
-  } else if (!selectedProject && projects.length > 0) {
+  } else {
+    const sharedProject = findProjectBySharedSelection(
+      projects,
+      readSharedProjectSelection()
+    );
+    if (sharedProject && (!selectedProject || selectedProject.id !== sharedProject.id)) {
+      setState({ selectedProjectId: sharedProject.id });
+      selectedProject = sharedProject;
+      syncStateToProjectStart(sharedProject);
+    }
+  }
+
+  if (!selectedProject && projects.length > 0) {
     setState({ selectedProjectId: projects[0].id });
     selectedProject = projects[0];
     syncStateToProjectStart(selectedProject);
@@ -2183,6 +2240,7 @@ async function loadData({ preferredProjectNumber = "" } = {}) {
     setState({ selectedProjectId: null });
   }
 
+  saveSharedProjectSelection(selectedProject?.name || selectedProject?.projectNumber || "");
   renderApp();
 }
 
@@ -4045,7 +4103,10 @@ function handleProjectSelectionChange() {
 
   const selectedProject = getSelectedProject();
   if (selectedProject) {
+    saveSharedProjectSelection(selectedProject.name || selectedProject.projectNumber || "");
     syncStateToProjectStart(selectedProject);
+  } else {
+    saveSharedProjectSelection("");
   }
 
   renderApp();

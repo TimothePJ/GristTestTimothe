@@ -53,6 +53,7 @@ export function showCurrentPlanningWarningsPopup({ force = false } = {}) {
   }
 
   state.lastPlanningWarningsPopupSignature = popupSignature;
+  state.pendingPlanningWarningsPopupProjectKey = "";
   showPlanningWarningsPopup(projectKey, warnings);
   return true;
 }
@@ -85,10 +86,23 @@ export function handlePlanningWarningsChange(payload = {}) {
   if (!warnings.length) {
     closePlanningWarningsPopup();
     state.lastPlanningWarningsPopupSignature = "";
+    if (state.pendingPlanningWarningsPopupProjectKey === projectKey) {
+      state.pendingPlanningWarningsPopupProjectKey = "";
+    }
     return false;
   }
 
   const popupSignature = buildPlanningWarningsPopupSignature(projectKey, warnings);
+  const shouldShowPendingPopup =
+    state.pendingPlanningWarningsPopupProjectKey === projectKey;
+
+  if (shouldShowPendingPopup) {
+    state.lastPlanningWarningsPopupSignature = popupSignature;
+    state.pendingPlanningWarningsPopupProjectKey = "";
+    showPlanningWarningsPopup(projectKey, warnings);
+    return true;
+  }
+
   state.lastPlanningWarningsPopupSignature = popupSignature;
   return false;
 }

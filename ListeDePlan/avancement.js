@@ -2,6 +2,28 @@ grist.ready();
 
 let records = [];
 let avancementChart = null;
+const SHARED_PROJECT_STORAGE_KEY = 'grist.selected-project';
+
+function readSharedProjectSelection() {
+  try {
+    return String(localStorage.getItem(SHARED_PROJECT_STORAGE_KEY) || '').trim();
+  } catch (_error) {
+    return '';
+  }
+}
+
+function saveSharedProjectSelection(projectName = '') {
+  try {
+    const normalizedProject = String(projectName || '').trim();
+    if (normalizedProject) {
+      localStorage.setItem(SHARED_PROJECT_STORAGE_KEY, normalizedProject);
+    } else {
+      localStorage.removeItem(SHARED_PROJECT_STORAGE_KEY);
+    }
+  } catch (_error) {
+    // localStorage peut etre indisponible dans certains contextes embarques.
+  }
+}
 
 // Register the datalabels plugin
 Chart.register(ChartDataLabels);
@@ -16,7 +38,7 @@ function populateProjectDropdown() {
   const projectDropdown = document.getElementById('projectDropdown');
   const projects = [...new Set(records.map(r => r.Nom_projet))].filter(Boolean).sort();
   
-  const currentValue = projectDropdown.value;
+  const currentValue = projectDropdown.value || readSharedProjectSelection();
   while (projectDropdown.options.length > 1) projectDropdown.remove(1);
 
   projects.forEach(project => {
@@ -25,10 +47,13 @@ function populateProjectDropdown() {
     option.textContent = project;
     projectDropdown.appendChild(option);
   });
-  projectDropdown.value = currentValue;
+  projectDropdown.value = projects.includes(currentValue) ? currentValue : '';
 }
 
-document.getElementById('projectDropdown').addEventListener('change', () => updateDashboard());
+document.getElementById('projectDropdown').addEventListener('change', () => {
+  saveSharedProjectSelection(document.getElementById('projectDropdown').value);
+  updateDashboard();
+});
 
 async function updateDashboard() {
     const selectedProject = document.getElementById('projectDropdown').value;

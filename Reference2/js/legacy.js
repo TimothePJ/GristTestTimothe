@@ -55,6 +55,47 @@
 })();
 // --- End helpers guard ---
 
+const SHARED_PROJECT_STORAGE_KEY = 'grist.selected-project';
+
+function readSharedProjectSelection() {
+  try {
+    return String(localStorage.getItem(SHARED_PROJECT_STORAGE_KEY) || '').trim();
+  } catch (_error) {
+    return '';
+  }
+}
+
+function saveSharedProjectSelection(projectName) {
+  try {
+    const normalizedProject = String(projectName || '').trim();
+    if (normalizedProject) {
+      localStorage.setItem(SHARED_PROJECT_STORAGE_KEY, normalizedProject);
+    } else {
+      localStorage.removeItem(SHARED_PROJECT_STORAGE_KEY);
+    }
+  } catch (_error) {
+    // localStorage peut etre indisponible dans certains contextes embarques.
+  }
+}
+
+function normalizeSharedProjectKey(projectName) {
+  return String(projectName || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLocaleLowerCase('fr');
+}
+
+function findSharedProjectMatch(values, projectName) {
+  const requestedKey = normalizeSharedProjectKey(projectName);
+  if (!requestedKey) return '';
+
+  return (values || []).find((value) =>
+    normalizeSharedProjectKey(value) === requestedKey
+  ) || '';
+}
+
 
 
 // Storage-normalizer: keeps document numbers as text so padding such as 0981 is preserved.
@@ -2263,18 +2304,37 @@ async function refreshProjectsDropdownFromProjets() {
 }
 
 // Fonction pour peupler la première liste déroulante avec des valeurs uniques de la première colonne
+window.addEventListener('pageshow', () => {
+  refreshProjectsDropdownFromProjets();
+});
+
+window.addEventListener('focus', () => {
+  const dropdown = document.getElementById('firstColumnDropdown');
+  const savedProject = readSharedProjectSelection();
+  if (!dropdown || dropdown.options.length <= 1 || (savedProject && !dropdown.value)) {
+    refreshProjectsDropdownFromProjets();
+  }
+});
+
 function populateFirstColumnDropdown(values) {
   const dropdown = document.getElementById('firstColumnDropdown');
+  if (!dropdown) return;
 
   // Conserve la sélection actuelle
-  const currentSelection = dropdown.value;
+  const currentSelection = dropdown.value || readSharedProjectSelection();
 
   // Trier les valeurs par ordre alphabétique
-  values.sort((a, b) => a.localeCompare(b));
+  const sortedValues = [...new Set(values || [])]
+    .map(value => (typeof value === 'string' ? value.trim() : value))
+    .filter(Boolean)
+    .sort((a, b) => String(a).localeCompare(String(b), 'fr', {
+      sensitivity: 'base',
+      numeric: true
+    }));
 
   dropdown.innerHTML = '<option value="">Selectionner un projet</option>'; // Réinitialise la liste déroulante
 
-  values.forEach(value => {
+  sortedValues.forEach(value => {
     if (value) {  // Ignore les valeurs nulles ou vides
       const option = document.createElement('option');
       option.value = value;
@@ -2284,7 +2344,17 @@ function populateFirstColumnDropdown(values) {
   });
 
   // Restaure la sélection précédente si elle est encore présente dans les options
-  dropdown.value = currentSelection || ''; // Conserve l'option sélectionnée ou reste sur "Select an option"
+  const restoredProject = findSharedProjectMatch(sortedValues, currentSelection);
+  dropdown.value = restoredProject; // Conserve l'option selectionnee ou reste sur "Select an option"
+  selectedFirstValue = dropdown.value || selectedFirstValue || '';
+  if (restoredProject) {
+    saveSharedProjectSelection(restoredProject);
+    selectedFirstValue = restoredProject;
+    selectedTypeValue = selectedTypeValue || '';
+    populateTypeDocumentDropdown(restoredProject, selectedTypeValue);
+    populateSecondColumnListbox(restoredProject, selectedSecondValue || lastValidDocument || '');
+    updateEmetteurList();
+  }
 }
 
 // Réinitialise et désactive la seconde liste si aucun projet n'est sélectionné
@@ -5034,6 +5104,7 @@ document.getElementById('thirdColumnDropdown').addEventListener('change', functi
 
 document.getElementById('firstColumnDropdown').addEventListener('change', function () {
   const project = _norm(this.value);
+  saveSharedProjectSelection(project);
   const secondDropdown = document.getElementById('secondColumnListbox');
   const tableBody = document.getElementById('tableBody');
   const tableHeader = document.getElementById('tableHeader');

@@ -1,5 +1,6 @@
 export const APP_CONFIG = {
   storageKey: "nouveau-projet.selected-project",
+  sharedProjectStorageKey: "grist.selected-project",
 
   grist: {
     projectsTable: {

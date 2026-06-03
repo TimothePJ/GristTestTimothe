@@ -19,6 +19,7 @@
 
   // ---- Mémoire locale de la sélection projet/type ----
   const LS_KEYS = {
+    SHARED_PROJECT_LABEL: 'grist.selected-project',
     PROJECT_LABEL: 'LP_LAST_PROJECT_LABEL',
     PROJECT_ID: 'LP_LAST_PROJECT_ID',
     TYPE_LABEL: 'LP_LAST_TYPE_LABEL',
@@ -26,7 +27,13 @@
 
   function saveLastSelection({ projectLabel, projectId, typeLabel }) {
     try {
+      if (projectLabel) localStorage.setItem(LS_KEYS.SHARED_PROJECT_LABEL, projectLabel);
+      if (projectLabel === "") localStorage.removeItem(LS_KEYS.SHARED_PROJECT_LABEL);
       if (projectLabel) localStorage.setItem(LS_KEYS.PROJECT_LABEL, projectLabel);
+      if (projectLabel === "") {
+        localStorage.removeItem(LS_KEYS.PROJECT_LABEL);
+        localStorage.removeItem(LS_KEYS.PROJECT_ID);
+      }
       if (projectId != null) localStorage.setItem(LS_KEYS.PROJECT_ID, String(projectId));
       if (typeLabel) localStorage.setItem(LS_KEYS.TYPE_LABEL, typeLabel);
     } catch {}
@@ -34,7 +41,10 @@
 
   function loadLastSelection() {
     try {
-      const lbl = localStorage.getItem(LS_KEYS.PROJECT_LABEL) || '';
+      const lbl =
+        localStorage.getItem(LS_KEYS.SHARED_PROJECT_LABEL) ||
+        localStorage.getItem(LS_KEYS.PROJECT_LABEL) ||
+        '';
       const idStr = localStorage.getItem(LS_KEYS.PROJECT_ID);
       const t = localStorage.getItem(LS_KEYS.TYPE_LABEL) || '';
       const id = idStr && /^\d+$/.test(idStr) ? Number(idStr) : null;
@@ -47,6 +57,15 @@ function normalizeProjectName(v) {
     .toString()
     .trim()
     .replace(/\s+/g, " ");
+}
+
+function normalizeProjectSelectionKey(value = "") {
+  return normalizeProjectName(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function getNomProjet(record) {
@@ -181,6 +200,19 @@ window.LISTE_DE_PLAN_ALL_ZONES_VALUE = "__ALL_ZONES__";
 window.LISTE_DE_PLAN_ALL_ZONES_LABEL = "Toutes les zones";
 window.LISTE_DE_PLAN_NO_ZONE_VALUE = "__NO_ZONE__";
 window.LISTE_DE_PLAN_NO_ZONE_LABEL = "Sans zone";
+
+const MANAGE_ZONE_REFERENCES_TABLE = "References";
+const MANAGE_ZONE_LISTEPLAN_TABLE_CANDIDATES = [
+  "ListePlan_NDC_COF",
+  "ListePlan NDC+COF",
+  "ListePlan_NDC+COF",
+];
+const MANAGE_ZONE_PLANNING_TABLE_CANDIDATES = [
+  "Planning_Projet",
+  "Planning_Project",
+];
+const MANAGE_ZONE_OPTION_VALUE = "__MANAGE_ZONE__";
+let lastRegularZoneSelection = window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__";
 
 function getAllTypesValue() {
   return window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__";
@@ -428,9 +460,23 @@ window.__LP_GET_CURRENT_TYPE = function () {
   return { label: "", value: "" };
 };
 
-grist.ready(async () => {
-  await loadExternalComponents();
+grist.ready({ requiredAccess: "full" });
+void initializeListeDePlanShell();
+window.addEventListener("pageshow", () => {
+  void refreshProjectDropdownFromProjectsTable();
 });
+window.addEventListener("focus", () => {
+  const dropdown = document.getElementById("projectDropdown");
+  const savedSelection = loadLastSelection().projectLabel;
+  if (!dropdown || dropdown.options.length <= 1 || (savedSelection && !dropdown.value)) {
+    void refreshProjectDropdownFromProjectsTable();
+  }
+});
+
+async function initializeListeDePlanShell() {
+  await loadExternalComponents();
+  await refreshProjectDropdownFromProjectsTable();
+}
 
 grist.onRecords(async (rec) => {
   window.records = rec.sort((a, b) => {
@@ -512,7 +558,9 @@ grist.onRecords(async (rec) => {
 
 function populateDropdown(id, values) {
   const dropdown = document.getElementById(id);
-  const currentValue = dropdown.value;
+  if (!dropdown) return;
+  const savedSelection = id === "projectDropdown" ? loadLastSelection().projectLabel : "";
+  const currentValue = dropdown.value || savedSelection;
   const defaultOption = dropdown.options[0]?.textContent || "Choisir";
 
   dropdown.innerHTML = `<option value="">${defaultOption}</option>`;
@@ -523,8 +571,35 @@ function populateDropdown(id, values) {
     dropdown.appendChild(opt);
   });
 
-  if (values.includes(currentValue)) {
-    dropdown.value = currentValue;
+  const matchingValue = values.find((value) =>
+    normalizeProjectSelectionKey(value) === normalizeProjectSelectionKey(currentValue)
+  );
+  if (matchingValue) {
+    dropdown.value = matchingValue;
+  }
+}
+
+async function refreshProjectDropdownFromProjectsTable() {
+  try {
+    if (!grist?.docApi || typeof grist.docApi.fetchTable !== "function") return;
+
+    const rawProjects = await grist.docApi.fetchTable("Projets");
+    const names = Array.isArray(rawProjects?.Nom_de_projet)
+      ? rawProjects.Nom_de_projet
+      : normalizeManageRows(rawProjects).map((row) => row?.Nom_de_projet);
+    const projects = [...new Set(
+      (names || [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    )].sort((left, right) => left.localeCompare(right, "fr", {
+      sensitivity: "base",
+      numeric: true
+    }));
+
+    if (!projects.length) return;
+    populateDropdown("projectDropdown", projects);
+  } catch (error) {
+    console.warn("Impossible de precharger la liste des projets :", error);
   }
 }
 
@@ -628,29 +703,738 @@ function collectZoneValues(selectedProject, selectedTypeDocument, records = wind
   });
 }
 
+function normalizeZoneManageStorageValue(value) {
+  const text = normalizeZoneDropdownValue(value);
+  const noZoneValue = window.LISTE_DE_PLAN_NO_ZONE_VALUE || "__NO_ZONE__";
+  if (!text) return "";
+  if (text === noZoneValue) return "";
+  if (text.toLocaleLowerCase("fr") === "sans zone") return "";
+  return text;
+}
+
+function normalizeZoneManageKey(value) {
+  return normalizeZoneManageStorageValue(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("fr")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function normalizeManageLookupText(value) {
+  if (value == null) return "";
+  if (typeof value === "object" && !Array.isArray(value)) {
+    if (typeof value.details === "string") return value.details.trim();
+    if (typeof value.display === "string") return value.display.trim();
+    if (typeof value.label === "string") return value.label.trim();
+    if (typeof value.name === "string") return value.name.trim();
+    if (typeof value.Name === "string") return value.Name.trim();
+  }
+  return String(value).trim();
+}
+
+function normalizeManageProjectKey(value) {
+  return normalizeManageLookupText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("fr");
+}
+
+function getManageLookupKeys(value) {
+  const values = [];
+
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    [
+      value.details,
+      value.display,
+      value.label,
+      value.name,
+      value.Name,
+      value.id,
+      value.value,
+    ].forEach((candidate) => {
+      const key = normalizeManageProjectKey(candidate);
+      if (key) values.push(key);
+    });
+  } else {
+    const key = normalizeManageProjectKey(value);
+    if (key) values.push(key);
+  }
+
+  return [...new Set(values)];
+}
+
+function normalizeManageRows(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (Array.isArray(raw.records)) return raw.records;
+
+  if (
+    raw.records &&
+    typeof raw.records === "object" &&
+    !Array.isArray(raw.records)
+  ) {
+    return Object.entries(raw.records).map(([id, row]) => ({
+      id: Number(id),
+      ...(row || {}),
+    }));
+  }
+
+  if (typeof raw === "object") {
+    const keys = Object.keys(raw);
+    if (!keys.length) return [];
+
+    const maxLen = Math.max(
+      ...keys.map((key) => (Array.isArray(raw[key]) ? raw[key].length : 0))
+    );
+    if (maxLen <= 0) return [];
+
+    const rows = [];
+    for (let i = 0; i < maxLen; i++) {
+      const row = {};
+      for (const key of keys) {
+        row[key] = Array.isArray(raw[key]) ? raw[key][i] : undefined;
+      }
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  return [];
+}
+
+function collectManageColumnNames(rows) {
+  const names = new Set();
+  for (const row of rows || []) {
+    Object.keys(row || {}).forEach((key) => names.add(key));
+  }
+  return names;
+}
+
+function findManageColumn(columnNames, candidates = []) {
+  for (const candidate of candidates || []) {
+    const name = String(candidate || "").trim();
+    if (name && columnNames.has(name)) return name;
+  }
+  return "";
+}
+
+async function fetchFirstManageZoneTable(candidates = []) {
+  let lastError = null;
+  for (const candidate of candidates) {
+    const tableName = String(candidate || "").trim();
+    if (!tableName) continue;
+
+    try {
+      const raw = await grist.docApi.fetchTable(tableName);
+      return {
+        tableName,
+        rows: normalizeManageRows(raw),
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  return { tableName: "", rows: [], error: lastError };
+}
+
+async function buildZoneManageProjectAliasKeys(projectName) {
+  const aliases = new Set(getManageLookupKeys(projectName));
+  const projectKey = normalizeManageProjectKey(projectName);
+
+  try {
+    const raw = await grist.docApi.fetchTable("Projets");
+    const rows = normalizeManageRows(raw);
+    const columnNames = collectManageColumnNames(rows);
+    const projectCol = findManageColumn(columnNames, [
+      "Nom_de_projet",
+      "NomProjet",
+      "NomProjetString",
+    ]);
+    const projectNumberCol = findManageColumn(columnNames, [
+      "Numero_de_projet",
+      "NumeroProjet",
+    ]);
+
+    for (const row of rows || []) {
+      if (!getManageLookupKeys(row?.[projectCol]).includes(projectKey)) continue;
+
+      [
+        row?.id,
+        row?.[projectCol],
+        row?.[projectNumberCol],
+        row?.Nom_de_projet,
+        row?.NomProjet,
+        row?.Numero_de_projet,
+        row?.NumeroProjet,
+      ].forEach((value) => {
+        getManageLookupKeys(value).forEach((key) => aliases.add(key));
+      });
+    }
+  } catch (error) {
+    console.warn("Impossible de charger les alias projet pour Modifier Zone :", error);
+  }
+
+  return aliases;
+}
+
+function buildManageZoneContext(tableName, rows, {
+  projectCandidates = [],
+  zoneCandidates = [],
+  id2Candidates = [],
+  taskCandidates = [],
+  typeCandidates = [],
+  planning = false,
+} = {}) {
+  if (!tableName) return null;
+  const columnNames = collectManageColumnNames(rows);
+
+  return {
+    tableName,
+    rows: Array.isArray(rows) ? rows : [],
+    projectCol: findManageColumn(columnNames, projectCandidates),
+    zoneCol: findManageColumn(columnNames, zoneCandidates),
+    id2Col: findManageColumn(columnNames, id2Candidates),
+    taskCols: (taskCandidates || []).filter((candidate) => columnNames.has(candidate)),
+    typeCol: findManageColumn(columnNames, typeCandidates),
+    planning,
+  };
+}
+
+async function fetchManageZoneContexts() {
+  const [referencesResult, listePlanResult, planningResult] = await Promise.all([
+    fetchFirstManageZoneTable([MANAGE_ZONE_REFERENCES_TABLE]),
+    fetchFirstManageZoneTable(MANAGE_ZONE_LISTEPLAN_TABLE_CANDIDATES),
+    fetchFirstManageZoneTable(MANAGE_ZONE_PLANNING_TABLE_CANDIDATES),
+  ]);
+
+  return [
+    buildManageZoneContext(referencesResult.tableName, referencesResult.rows, {
+      projectCandidates: ["NomProjetString", "NomProjet", "Nom_projet"],
+      zoneCandidates: ["Zone"],
+    }),
+    buildManageZoneContext(listePlanResult.tableName, listePlanResult.rows, {
+      projectCandidates: ["Nom_projet", "NomProjet", "NomProjetString"],
+      zoneCandidates: ["Zone"],
+    }),
+    buildManageZoneContext(planningResult.tableName, planningResult.rows, {
+      projectCandidates: ["NomProjet", "Nom_projet", "NomProjetString"],
+      zoneCandidates: ["Zone"],
+      id2Candidates: ["ID2", "NumeroDocument"],
+      taskCandidates: ["Taches", "Tache"],
+      typeCandidates: ["Type_doc", "Type_document", "TypeDoc"],
+      planning: true,
+    }),
+  ].filter(Boolean);
+}
+
+function rowMatchesManageProject(row, projectCol, projectAliasKeys) {
+  if (!projectCol) return false;
+  return getManageLookupKeys(row?.[projectCol]).some((key) => projectAliasKeys.has(key));
+}
+
+function isManageZoneAnchorRow(row, context) {
+  if (!context?.planning) return false;
+  if (context.id2Col && normalizeManageLookupText(row?.[context.id2Col])) return false;
+  if (context.typeCol && normalizeManageLookupText(row?.[context.typeCol])) return false;
+
+  const taskCols = Array.isArray(context.taskCols) ? context.taskCols : [];
+  if (!taskCols.length) return false;
+
+  return taskCols.every((columnName) => !normalizeManageLookupText(row?.[columnName]));
+}
+
+function ensureNoManageZoneDuplicate({
+  contexts,
+  projectAliasKeys,
+  sourceZoneKey,
+  targetZoneKey,
+}) {
+  if (!targetZoneKey || targetZoneKey === sourceZoneKey) return;
+
+  for (const context of contexts || []) {
+    if (!context.projectCol || !context.zoneCol) continue;
+
+    for (const row of context.rows || []) {
+      if (!rowMatchesManageProject(row, context.projectCol, projectAliasKeys)) continue;
+
+      const zoneKey = normalizeZoneManageKey(row?.[context.zoneCol]);
+      if (zoneKey && zoneKey === targetZoneKey) {
+        throw new Error("Une zone avec ce nom existe deja pour ce projet.");
+      }
+    }
+  }
+}
+
+function buildManageZoneActions({
+  contexts,
+  projectAliasKeys,
+  sourceZoneKey,
+  targetZone,
+  removeAnchors = false,
+}) {
+  const actions = [];
+  const seenRows = new Set();
+  const normalizedTargetZone = normalizeZoneManageStorageValue(targetZone);
+
+  for (const context of contexts || []) {
+    if (!context.tableName || !context.projectCol || !context.zoneCol) continue;
+
+    for (const row of context.rows || []) {
+      const rowId = Number(row?.id);
+      if (!Number.isInteger(rowId) || rowId <= 0) continue;
+      if (!rowMatchesManageProject(row, context.projectCol, projectAliasKeys)) continue;
+      if (normalizeZoneManageKey(row?.[context.zoneCol]) !== sourceZoneKey) continue;
+
+      const rowKey = `${context.tableName}:${rowId}`;
+      if (seenRows.has(rowKey)) continue;
+      seenRows.add(rowKey);
+
+      if (removeAnchors && isManageZoneAnchorRow(row, context)) {
+        actions.push(["RemoveRecord", context.tableName, rowId]);
+        continue;
+      }
+
+      if (normalizeZoneDropdownValue(row?.[context.zoneCol]) === normalizedTargetZone) {
+        continue;
+      }
+
+      actions.push([
+        "UpdateRecord",
+        context.tableName,
+        rowId,
+        {
+          [context.zoneCol]: normalizedTargetZone,
+        },
+      ]);
+    }
+  }
+
+  return actions;
+}
+
+function countManageZoneActions(actions = []) {
+  return actions.reduce(
+    (counts, action) => {
+      const actionType = action?.[0];
+      if (actionType === "RemoveRecord") {
+        counts.deletedCount += 1;
+      } else if (actionType === "UpdateRecord") {
+        counts.updatedCount += 1;
+      }
+      return counts;
+    },
+    { updatedCount: 0, deletedCount: 0 }
+  );
+}
+
+async function applyManageZoneActions(actions) {
+  if (!actions.length) return;
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions indisponible.");
+  }
+  await grist.docApi.applyUserActions(actions);
+}
+
+async function renameManageProjectZone({ projectName, sourceZone, targetZone }) {
+  const normalizedProject = normalizeProjectName(projectName);
+  const normalizedSourceZone = normalizeZoneManageStorageValue(sourceZone);
+  const normalizedTargetZone = normalizeZoneManageStorageValue(targetZone);
+  const sourceZoneKey = normalizeZoneManageKey(normalizedSourceZone);
+  const targetZoneKey = normalizeZoneManageKey(normalizedTargetZone);
+
+  if (!normalizedProject) throw new Error("Projet obligatoire.");
+  if (!sourceZoneKey) throw new Error("Zone source obligatoire.");
+  if (!targetZoneKey) throw new Error("Nouveau nom de zone obligatoire.");
+
+  const [projectAliasKeys, contexts] = await Promise.all([
+    buildZoneManageProjectAliasKeys(normalizedProject),
+    fetchManageZoneContexts(),
+  ]);
+
+  ensureNoManageZoneDuplicate({
+    contexts,
+    projectAliasKeys,
+    sourceZoneKey,
+    targetZoneKey,
+  });
+
+  const actions = buildManageZoneActions({
+    contexts,
+    projectAliasKeys,
+    sourceZoneKey,
+    targetZone: normalizedTargetZone,
+  });
+
+  await applyManageZoneActions(actions);
+
+  return {
+    sourceZone: normalizedSourceZone,
+    targetZone: normalizedTargetZone,
+    ...countManageZoneActions(actions),
+  };
+}
+
+async function clearManageProjectZone({ projectName, sourceZone }) {
+  const normalizedProject = normalizeProjectName(projectName);
+  const normalizedSourceZone = normalizeZoneManageStorageValue(sourceZone);
+  const sourceZoneKey = normalizeZoneManageKey(normalizedSourceZone);
+
+  if (!normalizedProject) throw new Error("Projet obligatoire.");
+  if (!sourceZoneKey) throw new Error("Zone source obligatoire.");
+
+  const [projectAliasKeys, contexts] = await Promise.all([
+    buildZoneManageProjectAliasKeys(normalizedProject),
+    fetchManageZoneContexts(),
+  ]);
+
+  const actions = buildManageZoneActions({
+    contexts,
+    projectAliasKeys,
+    sourceZoneKey,
+    targetZone: "",
+    removeAnchors: true,
+  });
+
+  await applyManageZoneActions(actions);
+
+  return {
+    sourceZone: normalizedSourceZone,
+    ...countManageZoneActions(actions),
+  };
+}
+
+function collectProjectZoneValues(selectedProject, records = window.records) {
+  const normalizedProject = normalizeProjectName(selectedProject);
+  if (!normalizedProject) return [];
+
+  const zonesByKey = new Map();
+  for (const record of records || []) {
+    if (getNomProjet(record) !== normalizedProject) continue;
+
+    const zone = normalizeZoneManageStorageValue(record?.Zone);
+    const zoneKey = normalizeZoneManageKey(zone);
+    if (!zoneKey || zonesByKey.has(zoneKey)) continue;
+    zonesByKey.set(zoneKey, zone);
+  }
+
+  return [...zonesByKey.values()].sort((left, right) =>
+    left.localeCompare(right, "fr", {
+      sensitivity: "base",
+      numeric: true,
+    })
+  );
+}
+
+function restoreZoneDropdownSelection(zoneValue = lastRegularZoneSelection) {
+  const dropdown = document.getElementById("zoneDropdown");
+  if (!(dropdown instanceof HTMLSelectElement)) return;
+
+  const allZonesValue = window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__";
+  const normalizedValue = String(zoneValue || allZonesValue);
+  dropdown.value = normalizedValue;
+  if (dropdown.value !== normalizedValue) {
+    dropdown.value = allZonesValue;
+  }
+
+  lastRegularZoneSelection = dropdown.value || allZonesValue;
+}
+
+function setManageZoneStatus(message = "") {
+  const status = document.getElementById("manageZoneStatus");
+  if (status) status.textContent = String(message || "");
+}
+
+function updateLocalRecordsProjectZone({ projectName, sourceZone, targetZone }) {
+  const normalizedProject = normalizeProjectName(projectName);
+  const sourceZoneKey = normalizeZoneManageKey(sourceZone);
+
+  for (const record of window.records || []) {
+    if (getNomProjet(record) !== normalizedProject) continue;
+    if (normalizeZoneManageKey(record?.Zone) !== sourceZoneKey) continue;
+    record.Zone = normalizeZoneManageStorageValue(targetZone);
+  }
+}
+
+function getManageZoneElements() {
+  return {
+    dialog: document.getElementById("dlg-manage-zone"),
+    closeBtn: document.getElementById("manage-zone-close"),
+    projectInput: document.getElementById("manage-zone-project"),
+    zoneSelect: document.getElementById("manage-zone-select"),
+    newNameInput: document.getElementById("manage-zone-new-name"),
+    hint: document.getElementById("manage-zone-hint"),
+    renameBtn: document.getElementById("manage-zone-rename"),
+    deleteBtn: document.getElementById("manage-zone-delete"),
+  };
+}
+
+function setManageZoneHint(message = "") {
+  const { hint } = getManageZoneElements();
+  if (hint) hint.textContent = String(message || "");
+}
+
+function setManageZoneBusy(isBusy) {
+  const { zoneSelect, newNameInput, renameBtn, deleteBtn } = getManageZoneElements();
+  [zoneSelect, newNameInput, renameBtn, deleteBtn].forEach((element) => {
+    if (element instanceof HTMLElement) {
+      element.toggleAttribute("disabled", Boolean(isBusy));
+    }
+  });
+}
+
+function populateManageZoneDialogZones(zones, preferredZone = "") {
+  const { zoneSelect, newNameInput } = getManageZoneElements();
+  if (!(zoneSelect instanceof HTMLSelectElement)) return "";
+
+  zoneSelect.innerHTML = "";
+  const preferredKey = normalizeZoneManageKey(preferredZone);
+  let selectedZone = "";
+
+  zones.forEach((zone) => {
+    const option = document.createElement("option");
+    option.value = zone;
+    option.textContent = zone;
+    zoneSelect.appendChild(option);
+
+    if (!selectedZone || normalizeZoneManageKey(zone) === preferredKey) {
+      selectedZone = zone;
+    }
+  });
+
+  if (selectedZone) zoneSelect.value = selectedZone;
+  if (newNameInput instanceof HTMLInputElement) {
+    newNameInput.value = selectedZone;
+  }
+
+  return selectedZone;
+}
+
+function openManageZoneDialog() {
+  const {
+    dialog,
+    projectInput,
+    newNameInput,
+  } = getManageZoneElements();
+  if (!(dialog instanceof HTMLDialogElement)) return;
+
+  const selectedProject = document.getElementById("projectDropdown")?.value || "";
+  const zones = collectProjectZoneValues(selectedProject, window.records);
+
+  if (!selectedProject) {
+    setManageZoneStatus("Selectionne d'abord un projet.");
+    return;
+  }
+  if (!zones.length) {
+    setManageZoneStatus("Aucune zone nommee a modifier pour ce projet.");
+    return;
+  }
+
+  const currentZone = document.getElementById("zoneDropdown")?.value || "";
+  const allZonesValue = window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__";
+  const preferredZone = currentZone === allZonesValue ? "" : currentZone;
+
+  if (projectInput instanceof HTMLInputElement) {
+    projectInput.value = selectedProject;
+  }
+
+  populateManageZoneDialogZones(zones, preferredZone);
+  setManageZoneHint("");
+  setManageZoneStatus("");
+  setManageZoneBusy(false);
+  dialog.showModal();
+
+  if (newNameInput instanceof HTMLInputElement) {
+    newNameInput.focus();
+    newNameInput.select();
+  }
+}
+
+function closeManageZoneDialog() {
+  const { dialog } = getManageZoneElements();
+  if (dialog instanceof HTMLDialogElement && dialog.open) {
+    dialog.close();
+  }
+  setManageZoneHint("");
+  setManageZoneBusy(false);
+  restoreZoneDropdownSelection();
+}
+
+function bindManageZoneDialog() {
+  const {
+    dialog,
+    closeBtn,
+    zoneSelect,
+    newNameInput,
+    renameBtn,
+    deleteBtn,
+  } = getManageZoneElements();
+
+  if (closeBtn instanceof HTMLElement) {
+    closeBtn.addEventListener("click", closeManageZoneDialog);
+  }
+
+  if (dialog instanceof HTMLDialogElement) {
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+    });
+  }
+
+  if (zoneSelect instanceof HTMLSelectElement) {
+    zoneSelect.addEventListener("change", () => {
+      if (newNameInput instanceof HTMLInputElement) {
+        newNameInput.value = zoneSelect.value;
+        newNameInput.focus();
+        newNameInput.select();
+      }
+      setManageZoneHint("");
+    });
+  }
+
+  if (renameBtn instanceof HTMLElement) {
+    renameBtn.addEventListener("click", async () => {
+      const projectName = document.getElementById("projectDropdown")?.value || "";
+      const sourceZone = zoneSelect instanceof HTMLSelectElement ? zoneSelect.value : "";
+      const targetZone = newNameInput instanceof HTMLInputElement ? newNameInput.value : "";
+      const sourceKey = normalizeZoneManageKey(sourceZone);
+      const targetKey = normalizeZoneManageKey(targetZone);
+
+      if (!sourceKey) {
+        setManageZoneHint("Selectionne une zone a renommer.");
+        return;
+      }
+      if (!targetKey) {
+        setManageZoneHint("Renseigne le nouveau nom de zone.");
+        return;
+      }
+
+      const duplicate = collectProjectZoneValues(projectName, window.records).some((zone) => {
+        const key = normalizeZoneManageKey(zone);
+        return key === targetKey && key !== sourceKey;
+      });
+      if (duplicate) {
+        setManageZoneHint("Une zone avec ce nom existe deja pour ce projet.");
+        return;
+      }
+
+      try {
+        setManageZoneBusy(true);
+        setManageZoneHint("Renommage en cours...");
+        const result = await renameManageProjectZone({
+          projectName,
+          sourceZone,
+          targetZone,
+        });
+        const updatedCount = Number(result.updatedCount) || 0;
+
+        if (updatedCount > 0) {
+          updateLocalRecordsProjectZone({ projectName, sourceZone, targetZone });
+        }
+        closeManageZoneDialog();
+        populateZoneDropdown(
+          collectZoneValues(projectName, getSelectedTypeDocumentValues(), window.records),
+          normalizeZoneDropdownValue(targetZone)
+        );
+        refreshCurrentPlanDisplay({ refreshZones: false });
+        setManageZoneStatus(
+          `Zone renommee: ${sourceZone} -> ${normalizeZoneDropdownValue(targetZone)}.`
+        );
+      } catch (error) {
+        setManageZoneBusy(false);
+        setManageZoneHint(`Erreur: ${error.message}`);
+      }
+    });
+  }
+
+  if (deleteBtn instanceof HTMLElement) {
+    deleteBtn.addEventListener("click", async () => {
+      const projectName = document.getElementById("projectDropdown")?.value || "";
+      const sourceZone = zoneSelect instanceof HTMLSelectElement ? zoneSelect.value : "";
+      const sourceKey = normalizeZoneManageKey(sourceZone);
+
+      if (!sourceKey) {
+        setManageZoneHint("Selectionne une zone a supprimer.");
+        return;
+      }
+
+      const confirmed = window.confirm(
+        `Supprimer la zone "${sourceZone}" ? Les documents seront conserves et passeront en Sans zone.`
+      );
+      if (!confirmed) return;
+
+      try {
+        setManageZoneBusy(true);
+        setManageZoneHint("Suppression de la zone en cours...");
+        const result = await clearManageProjectZone({
+          projectName,
+          sourceZone,
+        });
+        const updatedCount = Number(result.updatedCount) || 0;
+        const deletedCount = Number(result.deletedCount) || 0;
+
+        if (updatedCount + deletedCount > 0) {
+          updateLocalRecordsProjectZone({ projectName, sourceZone, targetZone: "" });
+        }
+        closeManageZoneDialog();
+        populateZoneDropdown(
+          collectZoneValues(projectName, getSelectedTypeDocumentValues(), window.records),
+          window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__"
+        );
+        refreshCurrentPlanDisplay({ refreshZones: false });
+        setManageZoneStatus(`Zone supprimee: ${sourceZone}.`);
+      } catch (error) {
+        setManageZoneBusy(false);
+        setManageZoneHint(`Erreur: ${error.message}`);
+      }
+    });
+  }
+}
+
 function populateZoneDropdown(values, preferredValue = null) {
   const dropdown = document.getElementById("zoneDropdown");
   if (!dropdown) return;
 
-  const currentValue = preferredValue != null ? String(preferredValue) : String(dropdown.value || "");
+  const zoneValues = Array.isArray(values) ? values : [];
+  const requestedValue = preferredValue != null ? String(preferredValue) : String(dropdown.value || "");
   const allZonesValue = window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__";
   const allZonesLabel = window.LISTE_DE_PLAN_ALL_ZONES_LABEL || "Toutes les zones";
+  const currentValue =
+    requestedValue === MANAGE_ZONE_OPTION_VALUE
+      ? lastRegularZoneSelection || allZonesValue
+      : requestedValue;
+  const hasManageableZones = zoneValues.some((zoneValue) => normalizeZoneManageKey(zoneValue));
 
   dropdown.innerHTML = `<option value="${allZonesValue}">${allZonesLabel}</option>`;
-  values.forEach((zoneValue) => {
+  zoneValues.forEach((zoneValue) => {
     const option = document.createElement("option");
     option.value = getZoneDropdownOptionValue(zoneValue);
     option.textContent = getZoneDropdownOptionLabel(zoneValue);
     dropdown.appendChild(option);
   });
 
-  const availableValues = new Set(values.map((zoneValue) => getZoneDropdownOptionValue(zoneValue)));
+  if (hasManageableZones) {
+    const separator = document.createElement("option");
+    separator.value = "";
+    separator.textContent = "--------------------";
+    separator.disabled = true;
+    dropdown.appendChild(separator);
+
+    const manageOption = document.createElement("option");
+    manageOption.value = MANAGE_ZONE_OPTION_VALUE;
+    manageOption.textContent = "Modifier Zone";
+    dropdown.appendChild(manageOption);
+  }
+
+  const availableValues = new Set(zoneValues.map((zoneValue) => getZoneDropdownOptionValue(zoneValue)));
   if (currentValue === allZonesValue || availableValues.has(currentValue)) {
     dropdown.value = currentValue || allZonesValue;
   } else {
     dropdown.value = allZonesValue;
   }
 
+  lastRegularZoneSelection = dropdown.value || allZonesValue;
   dropdown.disabled = false;
 }
 
@@ -663,10 +1447,12 @@ function resetZoneDropdown(disabled = false) {
   dropdown.innerHTML = `<option value="${allZonesValue}">${allZonesLabel}</option>`;
   dropdown.value = allZonesValue;
   dropdown.disabled = disabled;
+  lastRegularZoneSelection = allZonesValue;
 }
 
 document.getElementById("projectDropdown").addEventListener("change", () => {
   const selectedProject = document.getElementById("projectDropdown").value;
+  saveLastSelection({ projectLabel: selectedProject, projectId: null, typeLabel: null });
   if (!selectedProject) {
     populateTypeDocumentDropdown([]);
     resetZoneDropdown(true);
@@ -745,14 +1531,26 @@ document.getElementById("typeDocumentDropdown")?.addEventListener("change", () =
 });
 
 document.getElementById("zoneDropdown").addEventListener("change", () => {
+  const zoneDropdown = document.getElementById("zoneDropdown");
   const selectedProject = document.getElementById("projectDropdown").value;
   const selectedTypeDocument = getSelectedTypeDocumentValues();
-  const selectedZoneDocument = document.getElementById("zoneDropdown").value;
+  const selectedZoneDocument = zoneDropdown?.value || "";
+
+  if (selectedZoneDocument === MANAGE_ZONE_OPTION_VALUE) {
+    restoreZoneDropdownSelection();
+    openManageZoneDialog();
+    return;
+  }
+
+  lastRegularZoneSelection = selectedZoneDocument ||
+    (window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__");
 
   if (selectedProject && selectedTypeDocument.length > 0) {
     afficherPlansFiltres(selectedProject, selectedTypeDocument, window.records, selectedZoneDocument);
   }
 });
+
+bindManageZoneDialog();
 
 async function supprimerLignesSansDate() {
   console.log("== SUPPRESSION : routine appelée ==");

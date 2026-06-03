@@ -1,5 +1,6 @@
 export const APP_CONFIG = {
   storageKey: "gestion-depenses2.state",
+  sharedProjectStorageKey: "grist.selected-project",
   defaultMonthSpan: 6,
   defaultChargePlanZoomMode: "month",
   expenseTimeline: {

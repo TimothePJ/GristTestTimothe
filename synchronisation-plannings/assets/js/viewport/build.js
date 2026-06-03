@@ -130,11 +130,28 @@ export function buildSharedProjectDateBounds({
   const normalizedPlanningBounds = normalizeProjectDateBounds(planningDateBounds);
   const normalizedExpensesBounds = normalizeProjectDateBounds(expensesDateBounds);
 
-  if (normalizedExpensesBounds) {
+  if (!normalizedPlanningBounds) {
     return normalizedExpensesBounds;
   }
 
-  return normalizedPlanningBounds;
+  if (!normalizedExpensesBounds) {
+    return normalizedPlanningBounds;
+  }
+
+  const startDate =
+    normalizedPlanningBounds.startDate < normalizedExpensesBounds.startDate
+      ? normalizedPlanningBounds.startDate
+      : normalizedExpensesBounds.startDate;
+  const endDate =
+    normalizedPlanningBounds.endDate > normalizedExpensesBounds.endDate
+      ? normalizedPlanningBounds.endDate
+      : normalizedExpensesBounds.endDate;
+
+  return {
+    startDate,
+    endDate,
+    spanDays: getInclusiveDaySpan(startDate, endDate),
+  };
 }
 
 export function buildPlanningLedProjectSelectionViewport(
@@ -203,6 +220,7 @@ export function buildPlanningLedProjectSelectionViewport(
 }
 
 export function buildProjectSelectionViewport(projectDateBounds = null, fallbackViewport = {}) {
+  const projectMaxVisibleDays = 365;
   const fallbackSharedViewport = buildCanonicalSharedViewport(
     stripExactWindowViewportState(fallbackViewport)
   );
@@ -222,9 +240,11 @@ export function buildProjectSelectionViewport(projectDateBounds = null, fallback
     anchorDate: projectStartDate,
   });
   const projectSpanDays = clamp(
-    Number(projectDateBounds?.spanDays) || getInclusiveDaySpan(projectStartDate, projectEndDate) || minVisibleDays,
+    Number(projectDateBounds?.spanDays) ||
+      getInclusiveDaySpan(projectStartDate, projectEndDate) ||
+      minVisibleDays,
     minVisibleDays,
-    maxVisibleDays
+    Math.min(maxVisibleDays, projectMaxVisibleDays)
   );
 
   return buildCanonicalSharedViewport({

@@ -1,13 +1,14 @@
 import { state, setState } from "../state.js";
 
 const ADD_ZONE_OPTION_VALUE = "__add_zone__";
+const MANAGE_ZONE_OPTION_VALUE = "__manage_zone__";
 
 function fillSelect(
   selectEl,
   options,
   placeholder,
   selectedValue = "",
-  { addZoneOption = false } = {}
+  { addZoneOption = false, manageZoneOption = false } = {}
 ) {
   selectEl.innerHTML = "";
 
@@ -34,6 +35,13 @@ function fillSelect(
     addZoneOptionEl.value = ADD_ZONE_OPTION_VALUE;
     addZoneOptionEl.textContent = "Ajouter Zone";
     selectEl.appendChild(addZoneOptionEl);
+
+    if (manageZoneOption) {
+      const manageZoneOptionEl = document.createElement("option");
+      manageZoneOptionEl.value = MANAGE_ZONE_OPTION_VALUE;
+      manageZoneOptionEl.textContent = "Modifier Zone";
+      selectEl.appendChild(manageZoneOptionEl);
+    }
   }
 
   selectEl.value = selectedValue;
@@ -51,10 +59,14 @@ export function initProjectSelector(projectOptions, { onChange } = {}) {
   projectSelect.disabled = false;
 
   // Toujours démarrer sur "Choisir un projet"
-  state.selectedProject = "";
-  state.selectedZone = "";
+  const selectedProject = projectOptions.includes(state.selectedProject)
+    ? state.selectedProject
+    : "";
+  if (!selectedProject && state.selectedProject) {
+    setState({ selectedProject: "", selectedZone: "" });
+  }
 
-  fillSelect(projectSelect, projectOptions, "Choisir un projet", "");
+  fillSelect(projectSelect, projectOptions, "Choisir un projet", selectedProject);
 
   projectSelect.addEventListener("change", () => {
     setState({
@@ -67,7 +79,7 @@ export function initProjectSelector(projectOptions, { onChange } = {}) {
   onChange?.({ ...state });
 }
 
-export function initZoneSelector({ onChange, onAddZone } = {}) {
+export function initZoneSelector({ onChange, onAddZone, onManageZone } = {}) {
   const zoneSelect = document.getElementById("zoneDropdown");
   if (!zoneSelect) {
     throw new Error("Dropdown zone introuvable (#zoneDropdown).");
@@ -80,6 +92,12 @@ export function initZoneSelector({ onChange, onAddZone } = {}) {
     if (zoneSelect.value === ADD_ZONE_OPTION_VALUE) {
       zoneSelect.value = state.selectedZone || "";
       onAddZone?.({ ...state });
+      return;
+    }
+
+    if (zoneSelect.value === MANAGE_ZONE_OPTION_VALUE) {
+      zoneSelect.value = state.selectedZone || "";
+      onManageZone?.({ ...state });
       return;
     }
 
@@ -98,6 +116,7 @@ export function updateZoneSelector(
   const options = Array.isArray(zoneOptions) ? zoneOptions : [];
   fillSelect(zoneSelect, options, "Toutes les zones", selectedValue, {
     addZoneOption: true,
+    manageZoneOption: enabled && options.length > 0,
   });
   zoneSelect.disabled = !enabled;
 }

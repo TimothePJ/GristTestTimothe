@@ -21,7 +21,11 @@ import {
 } from "../layout/shell.js";
 import { attachExpensesFrameApi, waitForChildApi } from "../services/childApi.js";
 import { handlePlanningWarningsChange } from "../services/planningWarnings.js";
-import { applySharedProject, clearSharedProjectSelection } from "../services/projectSync.js";
+import {
+  applySharedProject,
+  clearSharedProjectSelection,
+  readSharedProjectSelection,
+} from "../services/projectSync.js";
 import { bindExpensesPlanningShellControls, handleViewportChange } from "../services/viewportSync.js";
 
 const COMPACT_PLANNING_FRAME_MIN_HEIGHT = 80;
@@ -319,6 +323,167 @@ function bindPlanningAggregateToggle() {
   });
 }
 
+function normalizeProjectSelectionKey(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeCompactProjectSelectionKey(value = "") {
+  return normalizeProjectSelectionKey(value).replace(/[^a-z0-9]+/g, "");
+}
+
+function normalizeNumericProjectSelectionKey(value = "") {
+  const compactKey = normalizeCompactProjectSelectionKey(value);
+  if (!/^\d+$/.test(compactKey)) return "";
+  return String(Number(compactKey));
+}
+
+function findAvailableProjectKey(projectKeys = [], requestedProjectKey = "") {
+  const requestedKey = normalizeProjectSelectionKey(requestedProjectKey);
+  const requestedCompactKey = normalizeCompactProjectSelectionKey(requestedProjectKey);
+  const requestedNumericKey = normalizeNumericProjectSelectionKey(requestedProjectKey);
+  if (!requestedKey) return "";
+
+  return (projectKeys || []).find((projectKey) => {
+    const normalizedProjectKey = normalizeProjectSelectionKey(projectKey);
+    const normalizedCompactProjectKey = normalizeCompactProjectSelectionKey(projectKey);
+    const normalizedNumericProjectKey = normalizeNumericProjectSelectionKey(projectKey);
+    return (
+      normalizedProjectKey === requestedKey ||
+      normalizedCompactProjectKey === requestedCompactKey ||
+      (
+        requestedNumericKey &&
+        normalizedNumericProjectKey &&
+        normalizedNumericProjectKey === requestedNumericKey
+      ) ||
+      (
+        requestedCompactKey.length >= 3 &&
+        normalizedCompactProjectKey.length >= 3 &&
+        (
+          requestedCompactKey.includes(normalizedCompactProjectKey) ||
+          normalizedCompactProjectKey.includes(requestedCompactKey)
+        )
+      )
+    );
+  }) || "";
+}
+
+function tableToRows(table) {
+  if (Array.isArray(table)) return table;
+  if (!table || typeof table !== "object") return [];
+
+  const keys = Object.keys(table);
+  if (!keys.length) return [];
+
+  const rowCount = Math.max(
+    ...keys.map((key) => (Array.isArray(table[key]) ? table[key].length : 0))
+  );
+  if (!rowCount) return [];
+
+  return Array.from({ length: rowCount }, (_unused, index) => {
+    const row = {};
+    keys.forEach((key) => {
+      row[key] = Array.isArray(table[key]) ? table[key][index] : undefined;
+    });
+    return row;
+  });
+}
+
+async function fetchProjectKeysFromGrist() {
+  try {
+    if (!window.grist?.docApi || typeof window.grist.docApi.fetchTable !== "function") {
+      return [];
+    }
+
+    const projectsTable = await window.grist.docApi.fetchTable("Projets");
+    return tableToRows(projectsTable)
+      .map((row) => String(row?.Nom_de_projet || "").trim())
+      .filter(Boolean);
+  } catch (error) {
+    console.warn("Impossible de charger la liste Projets pour la synchronisation :", error);
+    return [];
+  }
+}
+
+function mergeProjectKeys(...projectKeyLists) {
+  const projectsByKey = new Map();
+
+  projectKeyLists.flat().forEach((projectKey) => {
+    const normalizedProject = String(projectKey || "").trim();
+    const lookupKey = normalizeProjectSelectionKey(normalizedProject);
+    if (normalizedProject && !projectsByKey.has(lookupKey)) {
+      projectsByKey.set(lookupKey, normalizedProject);
+    }
+  });
+
+  return [...projectsByKey.values()].sort((left, right) =>
+    left.localeCompare(right, "fr", { sensitivity: "base", numeric: true })
+  );
+}
+
+function getRequestedSharedProjectKey() {
+  return (
+    readSharedProjectSelection() ||
+    state.planningApi?.getSelectedProject?.() ||
+    state.planningAxisApi?.getSelectedProject?.() ||
+    ""
+  );
+}
+
+async function applyRestoredSharedProject(projectKeys = []) {
+  const requestedSavedProjectKey = getRequestedSharedProjectKey();
+  const savedProjectKey = findAvailableProjectKey(projectKeys, requestedSavedProjectKey);
+  if (!savedProjectKey) {
+    return false;
+  }
+
+  setActiveProjectSelection(savedProjectKey);
+  setProjectContentVisibility(true);
+  await applySelectedProjectFromHub(savedProjectKey);
+  return true;
+}
+
+async function applySelectedProjectFromHub(projectKey = "") {
+  const normalizedProjectKey = String(projectKey || "").trim();
+  if (!normalizedProjectKey) {
+    clearSharedProjectSelection();
+    return;
+  }
+
+  await applySharedProject(normalizedProjectKey);
+  await refreshPlanningAggregatePresentation();
+}
+
+function shouldReapplyRestoredProject(projectKey = "") {
+  const normalizedProjectKey = String(projectKey || "").trim();
+  if (!normalizedProjectKey) return false;
+  if (String(state.activeProjectKey || "").trim() !== normalizedProjectKey) return true;
+
+  const viewport =
+    state.sharedViewportState ||
+    state.planningAxisApi?.getViewport?.() ||
+    state.planningApi?.getViewport?.() ||
+    null;
+  const firstVisibleDate = String(
+    viewport?.firstVisibleDate || viewport?.rangeStartDate || ""
+  ).trim();
+
+  return !firstVisibleDate;
+}
+
+function scheduleRestoredProjectReapply(projectKeys = [], delay = 0) {
+  window.setTimeout(() => {
+    const requestedProjectKey = getRequestedSharedProjectKey();
+    const savedProjectKey = findAvailableProjectKey(projectKeys, requestedProjectKey);
+    if (!savedProjectKey || !shouldReapplyRestoredProject(savedProjectKey)) return;
+    void applyRestoredSharedProject(projectKeys);
+  }, Math.max(0, Number(delay) || 0));
+}
+
 export async function bootstrapHubApp() {
   applyDebugBodyClass();
   bindPlanningIframeTooltipBridge();
@@ -348,9 +513,19 @@ export async function bootstrapHubApp() {
     bindPlanningAggregateToggle();
     void applyPlanningAggregateModeFromToggle();
 
-    const planningProjects = (state.planningApi.listProjects?.() || []).filter(Boolean);
-    renderProjectOptions(planningProjects);
-    setProjectContentVisibility(false);
+    const planningProjects = mergeProjectKeys(
+      state.planningApi.listProjects?.() || [],
+      await fetchProjectKeysFromGrist()
+    );
+    const initiallySelectedProjectKey = findAvailableProjectKey(
+      planningProjects,
+      getRequestedSharedProjectKey()
+    );
+    renderProjectOptions(planningProjects, initiallySelectedProjectKey);
+    setProjectContentVisibility(Boolean(initiallySelectedProjectKey));
+    if (initiallySelectedProjectKey) {
+      state.requestedProjectKey = initiallySelectedProjectKey;
+    }
     syncSharedPlanningControlsAvailability();
 
     state.planningApi.subscribeViewportChange((payload) =>
@@ -378,25 +553,38 @@ export async function bootstrapHubApp() {
     if (dom.projectSelectEl instanceof HTMLSelectElement) {
       dom.projectSelectEl.addEventListener("change", () => {
         const nextProjectKey = String(dom.projectSelectEl.value || "").trim();
-        if (!nextProjectKey) {
-          clearSharedProjectSelection();
-          return;
-        }
-
-        void applySharedProject(nextProjectKey).then(() => {
-          void refreshPlanningAggregatePresentation();
-        });
+        void applySelectedProjectFromHub(nextProjectKey);
       });
     }
 
-    if (planningProjects.length) {
-      clearSharedProjectSelection();
+    await attachExpensesFrameApi();
+
+    const requestedSavedProjectKey = getRequestedSharedProjectKey();
+    if (await applyRestoredSharedProject(planningProjects)) {
+      // Projet restaure depuis la selection commune et contenu charge.
+    } else if (requestedSavedProjectKey && planningProjects.length) {
+      setHubStatus("Projet memorise introuvable dans la synchronisation.");
+    } else if (planningProjects.length) {
+      setHubStatus("Choisis un projet pour afficher les plannings.");
     } else {
       clearSharedProjectSelection();
       setHubStatus("Aucun projet disponible.");
     }
 
-    void attachExpensesFrameApi();
+    window.addEventListener("pageshow", () => {
+      scheduleRestoredProjectReapply(planningProjects, 0);
+    });
+    window.addEventListener("focus", () => {
+      scheduleRestoredProjectReapply(planningProjects, 0);
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        scheduleRestoredProjectReapply(planningProjects, 0);
+      }
+    });
+    scheduleRestoredProjectReapply(planningProjects, 250);
+    scheduleRestoredProjectReapply(planningProjects, 1000);
+
     schedulePlanningLayoutDebug("bootstrap-ready");
   } catch (error) {
     console.error("Erreur synchronisation plannings :", error);

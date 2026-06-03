@@ -1,4 +1,5 @@
 import { APP_CONFIG } from "../config.js";
+import { normalizePlanningDocumentType } from "../../../../gestion-depenses2/assets/js/utils/planningRealisation.js";
 
 const REFERENCES_TABLE_NAME = "References";
 const LISTEPLAN_TABLE_CANDIDATES = [
@@ -188,11 +189,56 @@ function isArmaturesTypeDoc(value) {
   return String(value ?? "").toUpperCase().includes("ARMATURES");
 }
 
+function isNdcTypeDoc(value) {
+  return normalizePlanningDocumentType(value) === "NDC";
+}
+
 function normalizeZoneValueForStorage(value) {
   const text = toText(value);
   if (!text) return "";
   if (text.toLocaleLowerCase("fr") === "sans zone") return "";
   return text;
+}
+
+function normalizeZoneSoftKey(value) {
+  return normalizeZoneValueForStorage(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("fr")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function normalizeProjectSoftKey(value) {
+  return toText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("fr");
+}
+
+function getLookupValueKeys(value) {
+  const values = [];
+
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    [
+      value.details,
+      value.label,
+      value.name,
+      value.display,
+      value.Name,
+      value.id,
+      value.value,
+    ].forEach((candidate) => {
+      const key = normalizeProjectSoftKey(candidate);
+      if (key) values.push(key);
+    });
+  } else {
+    const key = normalizeProjectSoftKey(value);
+    if (key) values.push(key);
+  }
+
+  return [...new Set(values)];
 }
 
 function normalizeGroupValue(value) {
@@ -584,6 +630,166 @@ function buildZoneSyncActionsForTable(context, zoneChanges = []) {
   return actions;
 }
 
+function getPlanningSegmentStartDate(row, columns = {}) {
+  const typeDoc = row?.[columns.typeDoc || "Type_doc"];
+  if (isArmaturesTypeDoc(typeDoc)) {
+    return parseCalendarDate(row?.[columns.diffCoffrage || "Diff_coffrage"]);
+  }
+
+  return (
+    parseCalendarDate(row?.[columns.dateLimite || "Date_limite"]) ||
+    parseCalendarDate(row?.[columns.diffCoffrage || "Diff_coffrage"]) ||
+    parseCalendarDate(row?.[columns.demarragesTravaux || "Demarrages_travaux"])
+  );
+}
+
+function isEmptyReferenceDate(date) {
+  return (
+    !(date instanceof Date) ||
+    Number.isNaN(date.getTime()) ||
+    (
+      date.getFullYear() === 1900 &&
+      date.getMonth() === 0 &&
+      date.getDate() === 1
+    )
+  );
+}
+
+function formatReferenceDateIso(value) {
+  const date = parseCalendarDate(value);
+  return isEmptyReferenceDate(date) ? "" : formatIsoDate(date);
+}
+
+function parseReferenceDurationLimit(value) {
+  const text = toText(value);
+  if (!text) return null;
+  const normalized = text.replace(",", ".");
+  const numericValue = Number(normalized);
+  if (!Number.isFinite(numericValue) || !Number.isInteger(numericValue) || numericValue < 0) {
+    return null;
+  }
+  return numericValue;
+}
+
+function buildPlanningReferenceChange(row, columns = {}) {
+  return {
+    projectName: row?.[columns.projectLink || columns.nomProjet || "NomProjet"],
+    numeroDocument: row?.[columns.id2 || "ID2"],
+    typeDocument: row?.[columns.typeDoc || "Type_doc"],
+    designation: row?.[columns.taches || columns.tacheAlt || "Taches"],
+    sourceZone: row?.[columns.zone || "Zone"],
+  };
+}
+
+function findLinkedReferenceRowsForPlanningRow(planningRow, referenceRows, columns = {}) {
+  const context = buildZoneSyncTableContext(REFERENCES_TABLE_NAME, referenceRows, {
+    projectCandidates: ["NomProjetString", "NomProjet", "Nom_projet"],
+    numberCandidates: ["NumeroDocument"],
+    typeCandidates: ["Type_document", "TypeDocument"],
+    zoneCandidates: ["Zone"],
+    designationCandidates: ["NomDocument", "Designation"],
+  });
+  if (!context) return [];
+
+  const change = buildPlanningReferenceChange(planningRow, columns);
+  const exactMatches = filterMatchingRowsForZoneSync(context, change, {
+    requireDesignation: true,
+    sourceZoneFallbackToBlank: true,
+  });
+  return exactMatches.length
+    ? exactMatches
+    : filterMatchingRowsForZoneSync(context, change, {
+        requireDesignation: false,
+        sourceZoneFallbackToBlank: true,
+      });
+}
+
+async function fetchPlanningRowById(rowId) {
+  const table = APP_CONFIG.grist.planningTable;
+  if (!table?.sourceTable) {
+    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
+  }
+
+  const columns = table.columns || {};
+  const idCol = columns.id || "id";
+  const recordId = Number(rowId);
+  if (!Number.isInteger(recordId) || recordId <= 0) {
+    throw new Error("Identifiant de ligne Planning_Projet invalide.");
+  }
+
+  const rows = await fetchTableRows(table.sourceTable);
+  const row = rows.find((candidate) => Number(candidate?.[idCol]) === recordId) || null;
+  if (!row) {
+    throw new Error("Ligne Planning_Projet introuvable.");
+  }
+
+  return { row, columns };
+}
+
+async function buildReferenceOffsetSnapshotForPlanningRow(planningRow, columns = {}) {
+  const startDate = getPlanningSegmentStartDate(planningRow, columns);
+  if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) {
+    return null;
+  }
+
+  const referenceRows = await fetchTableRows(REFERENCES_TABLE_NAME).catch(() => []);
+  const linkedRows = findLinkedReferenceRowsForPlanningRow(planningRow, referenceRows, columns);
+  const offsets = linkedRows
+    .map((row) => {
+      const referenceId = Number(row?.id);
+      const durationWeeks = parseReferenceDurationLimit(row?.DureeLimite);
+      if (!Number.isInteger(referenceId) || referenceId <= 0 || durationWeeks == null) {
+        return null;
+      }
+      return { referenceId, durationWeeks };
+    })
+    .filter(Boolean);
+
+  return offsets.length ? { offsets } : null;
+}
+
+async function syncReferenceDateLimitesFromSnapshot(snapshot, planningRow, columns = {}) {
+  if (!snapshot?.offsets?.length) return 0;
+
+  const startDate = getPlanningSegmentStartDate(planningRow, columns);
+  if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) {
+    return 0;
+  }
+
+  const actions = snapshot.offsets
+    .map((offset) => {
+      const dateLimite = subtractWeeksFromDate(startDate, offset.durationWeeks);
+      const dateLimiteIso = formatIsoDate(dateLimite);
+      if (!dateLimiteIso) return null;
+      return [
+        "UpdateRecord",
+        REFERENCES_TABLE_NAME,
+        offset.referenceId,
+        {
+          DateLimite: dateLimiteIso,
+          DureeLimite: offset.durationWeeks,
+        },
+      ];
+    })
+    .filter(Boolean);
+
+  if (!actions.length) return 0;
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  await grist.docApi.applyUserActions(actions);
+  return actions.length;
+}
+
+async function syncReferenceDateLimitesAfterPlanningChange(snapshot, rowId) {
+  if (!snapshot?.offsets?.length) return 0;
+  const { row, columns } = await fetchPlanningRowById(rowId);
+  return syncReferenceDateLimitesFromSnapshot(snapshot, row, columns);
+}
+
 async function buildExternalZoneSyncActionsForPlanningChanges(zoneChanges = []) {
   const normalizedChanges = (zoneChanges || [])
     .map((change) => ({
@@ -648,6 +854,371 @@ async function buildExternalZoneSyncActionsForPlanningChanges(zoneChanges = []) 
   return contexts.flatMap((context) =>
     buildZoneSyncActionsForTable(context, uniqueChanges)
   );
+}
+
+async function buildProjectAliasKeys(projectName) {
+  const aliases = new Set(getLookupValueKeys(projectName));
+  const table = APP_CONFIG.grist.projectsTable;
+  if (!table?.sourceTable) {
+    return aliases;
+  }
+
+  try {
+    const rows = await fetchTableRows(table.sourceTable);
+    const columns = table.columns || {};
+    const projectCol = String(columns.project || "Nom_de_projet").trim();
+    const projectNumberCol = String(columns.projectNumber || "Numero_de_projet").trim();
+    const projectKey = normalizeProjectSoftKey(projectName);
+
+    for (const row of rows || []) {
+      const rowProjectKeys = getLookupValueKeys(row?.[projectCol]);
+      if (!rowProjectKeys.includes(projectKey)) continue;
+
+      [
+        row?.id,
+        row?.[projectCol],
+        row?.[projectNumberCol],
+        row?.NomProjet,
+        row?.Nom_de_projet,
+        row?.NumeroProjet,
+        row?.Numero_de_projet,
+      ].forEach((value) => {
+        getLookupValueKeys(value).forEach((key) => aliases.add(key));
+      });
+    }
+  } catch (error) {
+    console.warn("Impossible de charger les alias projet pour la gestion de zone :", error);
+  }
+
+  return aliases;
+}
+
+function buildManageZoneTableContext(tableName, rows, {
+  projectCandidates = [],
+  zoneCandidates = [],
+  id2Candidates = [],
+  taskCandidates = [],
+  typeCandidates = [],
+  planning = false,
+} = {}) {
+  if (!tableName) return null;
+  const columnNames = collectRowColumnNames(rows);
+
+  return {
+    tableName,
+    rows: Array.isArray(rows) ? rows : [],
+    projectCol: findFirstExistingColumnName(columnNames, projectCandidates, projectCandidates[0] || ""),
+    zoneCol: findFirstExistingColumnName(columnNames, zoneCandidates, zoneCandidates[0] || ""),
+    id2Col: findFirstExistingColumnName(columnNames, id2Candidates, id2Candidates[0] || ""),
+    taskCols: taskCandidates.filter((candidate) => columnNames.has(candidate)),
+    typeCol: findFirstExistingColumnName(columnNames, typeCandidates, typeCandidates[0] || ""),
+    planning,
+  };
+}
+
+function rowMatchesProjectAlias(row, projectCol, projectAliasKeys) {
+  if (!projectCol) return false;
+  const keys = getLookupValueKeys(row?.[projectCol]);
+  return keys.some((key) => projectAliasKeys.has(key));
+}
+
+function rowMatchesZoneSoftKey(row, zoneCol, sourceZoneKey) {
+  if (!zoneCol || !sourceZoneKey) return false;
+  return normalizeZoneSoftKey(row?.[zoneCol]) === sourceZoneKey;
+}
+
+function isEmptyPlanningZoneAnchorRow(row, context) {
+  if (!context?.planning) return false;
+  if (context.id2Col && toText(row?.[context.id2Col])) return false;
+  if (context.typeCol && toText(row?.[context.typeCol])) return false;
+
+  const taskCols = Array.isArray(context.taskCols) ? context.taskCols : [];
+  if (!taskCols.length) {
+    return false;
+  }
+
+  return taskCols.every((columnName) => !toText(row?.[columnName]));
+}
+
+async function fetchManageZoneContexts() {
+  const table = APP_CONFIG.grist.planningTable;
+  if (!table?.sourceTable) {
+    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
+  }
+
+  const columns = table.columns || {};
+  const [planningRows, referencesResult, listePlanResult] = await Promise.all([
+    fetchTableRows(table.sourceTable),
+    fetchTableRows(REFERENCES_TABLE_NAME)
+      .then((rows) => ({ tableName: REFERENCES_TABLE_NAME, rows }))
+      .catch((error) => ({ tableName: "", rows: [], error })),
+    fetchFirstAvailableTable(LISTEPLAN_TABLE_CANDIDATES),
+  ]);
+
+  return [
+    buildManageZoneTableContext(table.sourceTable, planningRows, {
+      projectCandidates: [
+        columns.projectLink,
+        columns.nomProjet,
+        "NomProjet",
+        "Nom_projet",
+      ],
+      zoneCandidates: [columns.zone, "Zone"],
+      id2Candidates: [columns.id2, "ID2", "NumeroDocument"],
+      taskCandidates: [columns.taches, columns.tacheAlt, "Taches", "Tache"],
+      typeCandidates: [columns.typeDoc, "Type_doc", "Type_document", "TypeDoc"],
+      planning: true,
+    }),
+    buildManageZoneTableContext(referencesResult.tableName, referencesResult.rows, {
+      projectCandidates: ["NomProjetString", "NomProjet", "Nom_projet"],
+      zoneCandidates: ["Zone"],
+    }),
+    buildManageZoneTableContext(listePlanResult.tableName, listePlanResult.rows, {
+      projectCandidates: ["Nom_projet", "NomProjet", "NomProjetString"],
+      zoneCandidates: ["Zone"],
+    }),
+  ].filter(Boolean);
+}
+
+function assertProjectZoneInput({ projectName, sourceZone, targetZone = null }) {
+  const normalizedProject = toText(projectName);
+  const normalizedSourceZone = normalizeZoneValueForStorage(sourceZone);
+  const normalizedTargetZone =
+    targetZone == null ? null : normalizeZoneValueForStorage(targetZone);
+
+  if (!normalizedProject) {
+    throw new Error("Projet obligatoire pour modifier une zone.");
+  }
+  if (!normalizedSourceZone) {
+    throw new Error("Zone source obligatoire.");
+  }
+  if (targetZone != null && !normalizedTargetZone) {
+    throw new Error("Nouveau nom de zone obligatoire.");
+  }
+
+  return {
+    normalizedProject,
+    normalizedSourceZone,
+    normalizedTargetZone,
+    sourceZoneKey: normalizeZoneSoftKey(normalizedSourceZone),
+    targetZoneKey:
+      targetZone == null ? null : normalizeZoneSoftKey(normalizedTargetZone),
+  };
+}
+
+function buildProjectZoneActions({
+  contexts,
+  projectAliasKeys,
+  sourceZoneKey,
+  targetZone,
+  removeAnchors = false,
+}) {
+  const actions = [];
+  const seenRows = new Set();
+
+  for (const context of contexts || []) {
+    if (!context?.tableName || !context.zoneCol || !context.projectCol) continue;
+
+    for (const row of context.rows || []) {
+      const rowId = Number(row?.id);
+      if (!Number.isInteger(rowId) || rowId <= 0) continue;
+      if (!rowMatchesProjectAlias(row, context.projectCol, projectAliasKeys)) continue;
+      if (!rowMatchesZoneSoftKey(row, context.zoneCol, sourceZoneKey)) continue;
+
+      const rowKey = `${context.tableName}:${rowId}`;
+      if (seenRows.has(rowKey)) continue;
+      seenRows.add(rowKey);
+
+      if (removeAnchors && isEmptyPlanningZoneAnchorRow(row, context)) {
+        actions.push(["RemoveRecord", context.tableName, rowId]);
+        continue;
+      }
+
+      const normalizedTarget = normalizeZoneValueForStorage(targetZone);
+      if (normalizeZoneValueForStorage(row?.[context.zoneCol]) === normalizedTarget) {
+        continue;
+      }
+
+      actions.push([
+        "UpdateRecord",
+        context.tableName,
+        rowId,
+        {
+          [context.zoneCol]: normalizedTarget,
+        },
+      ]);
+    }
+  }
+
+  return actions;
+}
+
+function countProjectZoneActions(actions = []) {
+  return actions.reduce(
+    (counts, action) => {
+      const actionType = action?.[0];
+      const tableName = String(action?.[1] || "");
+      if (actionType === "RemoveRecord") {
+        counts.deletedCount += 1;
+      } else if (actionType === "UpdateRecord") {
+        counts.updatedCount += 1;
+      }
+
+      if (tableName === REFERENCES_TABLE_NAME) {
+        counts.referencesUpdatedCount += 1;
+      } else if (LISTEPLAN_TABLE_CANDIDATES.includes(tableName)) {
+        counts.listePlanUpdatedCount += 1;
+      } else if (tableName === APP_CONFIG.grist.planningTable?.sourceTable) {
+        if (actionType === "RemoveRecord") {
+          counts.planningDeletedCount += 1;
+        } else {
+          counts.planningUpdatedCount += 1;
+        }
+      }
+
+      return counts;
+    },
+    {
+      updatedCount: 0,
+      deletedCount: 0,
+      planningUpdatedCount: 0,
+      planningDeletedCount: 0,
+      referencesUpdatedCount: 0,
+      listePlanUpdatedCount: 0,
+    }
+  );
+}
+
+function ensureNoProjectZoneDuplicate({
+  contexts,
+  projectAliasKeys,
+  sourceZoneKey,
+  targetZoneKey,
+}) {
+  if (!targetZoneKey || targetZoneKey === sourceZoneKey) return;
+
+  for (const context of contexts || []) {
+    if (!context?.projectCol || !context.zoneCol) continue;
+
+    for (const row of context.rows || []) {
+      if (!rowMatchesProjectAlias(row, context.projectCol, projectAliasKeys)) continue;
+
+      const zoneKey = normalizeZoneSoftKey(row?.[context.zoneCol]);
+      if (zoneKey && zoneKey === targetZoneKey) {
+        throw new Error("Une zone avec ce nom existe deja pour ce projet.");
+      }
+    }
+  }
+}
+
+export async function renameProjectZone({
+  projectName,
+  sourceZone,
+  targetZone,
+}) {
+  const {
+    normalizedProject,
+    normalizedSourceZone,
+    normalizedTargetZone,
+    sourceZoneKey,
+    targetZoneKey,
+  } = assertProjectZoneInput({ projectName, sourceZone, targetZone });
+
+  if (!sourceZoneKey || !targetZoneKey) {
+    throw new Error("Nom de zone invalide.");
+  }
+
+  const [projectAliasKeys, contexts] = await Promise.all([
+    buildProjectAliasKeys(normalizedProject),
+    fetchManageZoneContexts(),
+  ]);
+
+  ensureNoProjectZoneDuplicate({
+    contexts,
+    projectAliasKeys,
+    sourceZoneKey,
+    targetZoneKey,
+  });
+
+  const actions = buildProjectZoneActions({
+    contexts,
+    projectAliasKeys,
+    sourceZoneKey,
+    targetZone: normalizedTargetZone,
+    removeAnchors: false,
+  });
+
+  if (!actions.length) {
+    return {
+      updated: false,
+      sourceZone: normalizedSourceZone,
+      targetZone: normalizedTargetZone,
+      ...countProjectZoneActions(actions),
+    };
+  }
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  await grist.docApi.applyUserActions(actions);
+
+  return {
+    updated: true,
+    sourceZone: normalizedSourceZone,
+    targetZone: normalizedTargetZone,
+    ...countProjectZoneActions(actions),
+  };
+}
+
+export async function clearProjectZone({
+  projectName,
+  sourceZone,
+}) {
+  const {
+    normalizedProject,
+    normalizedSourceZone,
+    sourceZoneKey,
+  } = assertProjectZoneInput({ projectName, sourceZone });
+
+  if (!sourceZoneKey) {
+    throw new Error("Zone source invalide.");
+  }
+
+  const [projectAliasKeys, contexts] = await Promise.all([
+    buildProjectAliasKeys(normalizedProject),
+    fetchManageZoneContexts(),
+  ]);
+
+  const actions = buildProjectZoneActions({
+    contexts,
+    projectAliasKeys,
+    sourceZoneKey,
+    targetZone: "",
+    removeAnchors: true,
+  });
+
+  if (!actions.length) {
+    return {
+      updated: false,
+      sourceZone: normalizedSourceZone,
+      ...countProjectZoneActions(actions),
+    };
+  }
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  await grist.docApi.applyUserActions(actions);
+
+  return {
+    updated: true,
+    sourceZone: normalizedSourceZone,
+    ...countProjectZoneActions(actions),
+  };
 }
 
 export async function syncCoffrageDiffCoffrageFromGroups(
@@ -827,15 +1398,20 @@ export async function updatePlanningDurationAndLeftDate(
   };
 
   let currentRow = null;
+  let referenceOffsetSnapshot = null;
   try {
     const rows = await fetchTableRows(table.sourceTable);
     currentRow = rows.find((row) => Number(row?.[idCol]) === recordId) || null;
+    if (currentRow) {
+      referenceOffsetSnapshot = await buildReferenceOffsetSnapshotForPlanningRow(currentRow, columns);
+    }
   } catch (error) {
     console.warn("Impossible de relire la ligne planning pour recalcul auto des dates :", error);
   }
 
   if (currentRow) {
     const typeDoc = String(currentRow[typeDocCol] ?? "").toUpperCase();
+    const isNdc = isNdcTypeDoc(currentRow[typeDocCol]);
 
     if (typeDoc.includes("ARMATURES")) {
       const finalDuree2 = durationField === duree2Col
@@ -868,7 +1444,7 @@ export async function updatePlanningDurationAndLeftDate(
           updates[diffCoffrageCol] = computedIso;
         }
       }
-    } else if (typeDoc.includes("COFFRAGE")) {
+    } else if (typeDoc.includes("COFFRAGE") || isNdc) {
       const finalDuree1 = durationField === duree1Col
         ? toInteger(durationValue)
         : toInteger(currentRow[duree1Col]);
@@ -914,6 +1490,8 @@ export async function updatePlanningDurationAndLeftDate(
       updates,
     ],
   ]);
+
+  await syncReferenceDateLimitesAfterPlanningChange(referenceOffsetSnapshot, recordId);
 }
 
 export async function updatePlanningLignePlanning(rowId, lignePlanningValue) {
@@ -1001,8 +1579,10 @@ export async function updatePlanningFromMsProjectDrop({
   if (!currentRow) {
     throw new Error("Ligne Planning_Projet introuvable.");
   }
+  const referenceOffsetSnapshot = await buildReferenceOffsetSnapshotForPlanningRow(currentRow, columns);
 
   const typeDoc = String(currentRow[typeDocCol] ?? "").toUpperCase();
+  const isNdc = isNdcTypeDoc(currentRow[typeDocCol]);
   const currentGroup = toText(currentRow[groupCol]);
   const currentZone = normalizeZoneValueForStorage(currentRow[zoneCol]);
   const currentProject = toText(currentRow[projectCol]);
@@ -1018,14 +1598,14 @@ export async function updatePlanningFromMsProjectDrop({
     updates[nomXmlField] = toText(xmlName);
   }
 
-  if (isCoffrageTypeDoc(typeDoc)) {
+  if (isCoffrageTypeDoc(typeDoc) || isNdc) {
     let demarrageDate = droppedStartDate || parseCalendarDate(currentRow[demarrageCol]);
     let diffCoffrageDate = parseCalendarDate(currentRow[diffCoffrageCol]);
     let dateLimiteDate = parseCalendarDate(currentRow[dateLimiteCol]);
     const duree1 = toInteger(currentRow[duree1Col]);
     const duree3 = toInteger(currentRow[duree3Col]);
 
-    // Nouveau cas COFFRAGE lie a MS Project:
+    // COFFRAGE/NDC lie a MS Project:
     // Demarrage travaux = Debut MS Project
     // Diff_coffrage = Demarrage travaux - Duree_3
     // Date_limite = Diff_coffrage - Duree_1
@@ -1047,6 +1627,7 @@ export async function updatePlanningFromMsProjectDrop({
     if (computedDemarrageIso) updates[demarrageCol] = computedDemarrageIso;
     if (computedDateLimiteIso) updates[dateLimiteCol] = computedDateLimiteIso;
     if (computedDiffCoffrageIso) updates[diffCoffrageCol] = computedDiffCoffrageIso;
+    if (isNdc && groupCol) updates[groupCol] = "";
   } else if (isArmaturesTypeDoc(typeDoc)) {
     let demarrageDate =
       droppedStartDate ||
@@ -1087,6 +1668,7 @@ export async function updatePlanningFromMsProjectDrop({
   }
 
   const groupHasArmatures =
+    !isNdc &&
     Boolean(currentZone) &&
     Boolean(currentGroup) &&
     groupHasArmaturesRow(rows, {
@@ -1107,6 +1689,7 @@ export async function updatePlanningFromMsProjectDrop({
   }
 
   const shouldResetGroupCoffragePlanningLinks =
+    !isNdc &&
     Boolean(currentZone) &&
     Boolean(currentGroup) &&
     (
@@ -1143,6 +1726,7 @@ export async function updatePlanningFromMsProjectDrop({
   ];
 
   await grist.docApi.applyUserActions(actions);
+  await syncReferenceDateLimitesAfterPlanningChange(referenceOffsetSnapshot, recordId);
 }
 
 export async function updatePlanningGroupZoneFromPlanningDrop({
@@ -1949,6 +2533,102 @@ export async function updatePlanningRetardJustification(rowId, remarque) {
   return {
     updatedCount: 1,
   };
+}
+
+export async function fetchPlanningReferenceDetails(rowId) {
+  const { row, columns } = await fetchPlanningRowById(rowId);
+  const startDate = getPlanningSegmentStartDate(row, columns);
+  const startIso = formatIsoDate(startDate);
+  const referenceRows = await fetchTableRows(REFERENCES_TABLE_NAME);
+  const linkedRows = findLinkedReferenceRowsForPlanningRow(row, referenceRows, columns);
+
+  return {
+    planningRowId: Number(rowId),
+    segmentStartIso: startIso,
+    references: linkedRows.map((referenceRow) => {
+      const referenceId = Number(referenceRow?.id);
+      return {
+        id: Number.isInteger(referenceId) && referenceId > 0 ? referenceId : null,
+        emetteur: toText(referenceRow?.Emetteur),
+        reference: toText(referenceRow?.Reference),
+        bloquant: Boolean(referenceRow?.Bloquant),
+        dateLimite: formatReferenceDateIso(referenceRow?.DateLimite),
+        durationWeeks: parseReferenceDurationLimit(referenceRow?.DureeLimite),
+      };
+    }),
+  };
+}
+
+export async function updatePlanningReferenceDetails(rowId, updates = []) {
+  const { row, columns } = await fetchPlanningRowById(rowId);
+  const startDate = getPlanningSegmentStartDate(row, columns);
+
+  const referenceRows = await fetchTableRows(REFERENCES_TABLE_NAME);
+  const linkedRows = findLinkedReferenceRowsForPlanningRow(row, referenceRows, columns);
+  const linkedIds = new Set(
+    linkedRows
+      .map((referenceRow) => Number(referenceRow?.id))
+      .filter((id) => Number.isInteger(id) && id > 0)
+  );
+
+  const actions = (Array.isArray(updates) ? updates : [])
+    .map((update) => {
+      const referenceId = Number(update?.id);
+      if (!Number.isInteger(referenceId) || referenceId <= 0 || !linkedIds.has(referenceId)) {
+        return null;
+      }
+
+      const durationText = toText(update?.durationWeeks);
+      if (!durationText) {
+        return [
+          "UpdateRecord",
+          REFERENCES_TABLE_NAME,
+          referenceId,
+          {
+            Bloquant: Boolean(update?.bloquant),
+            DureeLimite: "",
+          },
+        ];
+      }
+
+      const durationWeeks = parseReferenceDurationLimit(durationText);
+      if (durationWeeks == null) {
+        throw new Error("La duree doit etre un nombre entier de semaines.");
+      }
+      if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) {
+        throw new Error("Date de debut du segment introuvable.");
+      }
+
+      const dateLimite = subtractWeeksFromDate(startDate, durationWeeks);
+      const dateLimiteIso = formatIsoDate(dateLimite);
+      if (!dateLimiteIso) {
+        throw new Error("Impossible de calculer DateLimite.");
+      }
+
+      return [
+        "UpdateRecord",
+        REFERENCES_TABLE_NAME,
+        referenceId,
+        {
+          Bloquant: Boolean(update?.bloquant),
+          DureeLimite: durationWeeks,
+          DateLimite: dateLimiteIso,
+        },
+      ];
+    })
+    .filter(Boolean);
+
+  if (!actions.length) {
+    return { updatedCount: 0 };
+  }
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  await grist.docApi.applyUserActions(actions);
+  return { updatedCount: actions.length };
 }
 
 export { toText };
