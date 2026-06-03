@@ -537,6 +537,8 @@ button:hover {
   margin: 0 0 12px;
   color: #004990;
   font-weight: 600;
+  max-width: none;
+  min-width: max-content;
   white-space: nowrap;
 }
 

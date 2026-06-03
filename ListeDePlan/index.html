@@ -77,6 +77,10 @@
       <span id="manageZoneStatus" class="zone-manage-status" aria-live="polite"></span>
     </div>
 
+    <div class="dropdown-container">
+      <button id="btn-ajouter-docs">Ajouter documents</button>
+    </div>
+
     <div class="dropdown-container print-container">
       <button id="btn-print">Imprimer</button>
     </div>
@@ -183,5 +187,171 @@
     </form>
   </dialog>
 
+  <!-- === Dialog : Ajouter des documents (complet, avec constructeur manuel/motif) === -->
+  <dialog id="lp-add-docs-dialog" class="lp-unified-dialog">
+    <form method="dialog" id="lp-add-docs-form" class="lp-unified-form" novalidate>
+      <h3 style="margin:0 0 4px">Ajouter documents</h3>
+
+      <div class="lp-section-header">
+        <h3>Documents à créer</h3>
+        <button type="button" id="lp-open-builder-btn" class="lp-add-btn">+ Ajouter</button>
+      </div>
+      <div id="lp-add-docs-selection-container" class="lp-docs-selection"></div>
+
+      <label for="lp-add-docs-default-date">Date Limite réception données par défaut :</label>
+      <input type="date" id="lp-add-docs-default-date" name="lp-add-docs-default-date">
+
+      <div>
+        <label>Émetteurs :</label>
+        <div id="lp-add-docs-emetteur-dropdown" class="lp-emetteur-dropdown"></div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px;">
+        <button type="button" id="lp-confirm-add-docs-btn" style="padding:8px 15px;background-color:#4CAF50;color:white;border:none;cursor:pointer;border-radius:4px;">Ajouter</button>
+        <button type="button" id="lp-cancel-add-docs-btn" style="padding:8px 15px;background-color:#666;color:white;border:none;cursor:pointer;border-radius:4px;">Annuler</button>
+      </div>
+
+      <!-- Modal imbriqué : constructeur de documents -->
+      <div id="lp-docs-builder-modal" class="lp-modal-overlay" hidden>
+        <div class="lp-modal-content">
+          <div class="lp-modal-header">
+            <h3>Ajouter des documents</h3>
+            <button type="button" id="lp-close-builder-btn" class="lp-modal-close">&times;</button>
+          </div>
+
+          <div class="lp-modal-tabs">
+            <button type="button" class="lp-tab-btn active" data-lp-tab="manual">Manuel</button>
+            <button type="button" class="lp-tab-btn" data-lp-tab="pattern">Avec motif</button>
+          </div>
+
+          <!-- Tab Manuel -->
+          <div class="lp-tab-content" id="lp-tab-manual">
+            <div class="lp-form-group">
+              <label for="lp-manual-zone">Zone :</label>
+              <input type="text" id="lp-manual-zone" list="lp-manual-zone-list" placeholder="Ex: Bâtiment A, Zone C...">
+              <datalist id="lp-manual-zone-list"></datalist>
+            </div>
+            <div class="lp-form-group">
+              <label for="lp-manual-type">Type de document :</label>
+              <select id="lp-manual-type">
+                <option value="" selected>Choisir un type</option>
+                <option value="COFFRAGE">COFFRAGE</option>
+                <option value="ARMATURES">ARMATURES</option>
+                <option value="COUPES">COUPES</option>
+                <option value="DÉMOLITION">DÉMOLITION</option>
+                <option value="NDC">NDC</option>
+              </select>
+            </div>
+            <div class="lp-form-group">
+              <label for="lp-manual-name">Nom du document :</label>
+              <input type="text" id="lp-manual-name" placeholder="Ex: RDC, SS1, R+3...">
+            </div>
+            <div class="lp-form-group">
+              <label for="lp-manual-numero">N°Document :</label>
+              <input type="text" id="lp-manual-numero" placeholder="Ex: 001, A-01...">
+            </div>
+            <button type="button" id="lp-add-manual-btn" class="lp-primary-btn">Ajouter</button>
+          </div>
+
+          <!-- Tab Motif -->
+          <div class="lp-tab-content" id="lp-tab-pattern" style="display:none;">
+            <div class="lp-form-group">
+              <label for="lp-pattern-zone">Zone :</label>
+              <input type="text" id="lp-pattern-zone" list="lp-pattern-zone-list" placeholder="Ex: Bâtiment A, Zone C...">
+              <datalist id="lp-pattern-zone-list"></datalist>
+            </div>
+            <div class="lp-form-group">
+              <label for="lp-pattern-type">Type de document :</label>
+              <select id="lp-pattern-type">
+                <option value="" selected>Choisir un type</option>
+                <option value="COFFRAGE">COFFRAGE</option>
+                <option value="ARMATURES">ARMATURES</option>
+                <option value="COUPES">COUPES</option>
+                <option value="DÉMOLITION">DÉMOLITION</option>
+                <option value="NDC">NDC</option>
+              </select>
+            </div>
+            <div class="lp-form-group">
+              <label for="lp-pattern-prefix">Préfixe :</label>
+              <input type="text" id="lp-pattern-prefix" placeholder="Ex: R+, SS, Étage">
+            </div>
+            <div class="lp-form-group">
+              <label for="lp-pattern-suffix">Suffixe (optionnel) :</label>
+              <input type="text" id="lp-pattern-suffix" placeholder="Ex: -A, _bis">
+            </div>
+            <label class="lp-alpha-toggle">
+              <input type="checkbox" id="lp-pattern-alpha-enabled">
+              Ordre&nbsp;alphabétique
+            </label>
+            <div class="lp-form-row" id="lp-pattern-number-range">
+              <div class="lp-form-group">
+                <label for="lp-pattern-start">De :</label>
+                <input type="number" id="lp-pattern-start" value="1" min="0">
+              </div>
+              <div class="lp-form-group">
+                <label for="lp-pattern-end">À :</label>
+                <input type="number" id="lp-pattern-end" value="5" min="0">
+              </div>
+              <div class="lp-form-group">
+                <label for="lp-pattern-padding">Padding (chiffres) :</label>
+                <select id="lp-pattern-padding">
+                  <option value="0">Aucun (1, 2, 10)</option>
+                  <option value="2">2 chiffres (01, 02, 10)</option>
+                  <option value="3">3 chiffres (001, 002)</option>
+                </select>
+              </div>
+            </div>
+            <div class="lp-form-row" id="lp-pattern-alpha-range" hidden>
+              <div class="lp-form-group">
+                <label for="lp-pattern-alpha-start">De :</label>
+                <input type="text" id="lp-pattern-alpha-start" value="A" maxlength="1">
+              </div>
+              <div class="lp-form-group">
+                <label for="lp-pattern-alpha-end">À :</label>
+                <input type="text" id="lp-pattern-alpha-end" value="E" maxlength="1">
+              </div>
+            </div>
+            <fieldset class="lp-numero-fieldset">
+              <legend>N°Document</legend>
+              <div class="lp-form-row">
+                <div class="lp-form-group">
+                  <label for="lp-numero-start">Début :</label>
+                  <input type="number" id="lp-numero-start" value="1" min="0">
+                </div>
+                <div class="lp-form-group">
+                  <label for="lp-numero-step">Pas :</label>
+                  <input type="number" id="lp-numero-step" value="1" min="1">
+                </div>
+                <div class="lp-form-group">
+                  <label for="lp-numero-padding">Padding :</label>
+                  <select id="lp-numero-padding">
+                    <option value="3" selected>3 chiffres (001, 002)</option>
+                    <option value="4">4 chiffres (0001, 0002)</option>
+                  </select>
+                </div>
+              </div>
+            </fieldset>
+            <div class="lp-pattern-preview">
+              <strong>Aperçu :</strong>
+              <table class="lp-preview-table">
+                <thead>
+                  <tr>
+                    <th>N°Document</th>
+                    <th>Nom Document</th>
+                    <th>Type</th>
+                    <th>Zone</th>
+                  </tr>
+                </thead>
+                <tbody id="lp-pattern-preview-body"></tbody>
+              </table>
+            </div>
+            <button type="button" id="lp-add-pattern-btn" class="lp-primary-btn">Ajouter les documents</button>
+          </div>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="AjouterDocuments.js" defer></script>
 </body>
 </html>
