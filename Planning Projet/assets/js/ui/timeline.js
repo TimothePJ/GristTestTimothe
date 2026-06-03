@@ -4743,6 +4743,16 @@ export function renderPlanningTimeline(timelineData = {}) {
         itemId: String(selectedItemId),
       });
     });
+
+    // Initialiser la fenêtre sur aujourd'hui dès la création de l'instance.
+    // Empêche vis-timeline de fitter automatiquement sur les items de fond
+    // (zone-header-fill) quand les datasets sont remplis juste après.
+    // Cette fenêtre sera immédiatement remplacée par le bon viewport
+    // (setWindow dans le RAF non-embedded, ou applyViewport depuis le parent en embedded).
+    const _t0 = new Date();
+    const _s0 = new Date(_t0); _s0.setDate(_t0.getDate() - 7);
+    const _e0 = new Date(_t0); _e0.setDate(_t0.getDate() + 7);
+    timelineInstance.setWindow(_s0, _e0, { animation: false });
   }
 
   // Mise à jour datasets
@@ -4766,19 +4776,10 @@ export function renderPlanningTimeline(timelineData = {}) {
       if (range) {
         dataAnchorDate = computeRangeCenter(range);
       } else if (hasNonBackgroundItems) {
-        // Forcer un fit pour que vis-timeline n'utilise pas les backgrounds (1900/2200) comme ancre
-        timelineInstance.fit({ animation: false });
         const fitted = timelineInstance.getWindow();
         dataAnchorDate = computeRangeCenter(fitted);
       } else if ((groups || []).length) {
-        // Groupes présents mais aucune donnée → centrer sur aujourd'hui, comme le mode non-embedded
-        const today = new Date();
-        const wStart = new Date(today);
-        const wEnd = new Date(today);
-        wStart.setDate(today.getDate() - 7);
-        wEnd.setDate(today.getDate() + 7);
-        dataAnchorDate = today;
-        timelineInstance.setWindow(wStart, wEnd, { animation: false });
+        dataAnchorDate = new Date();
       } else {
         dataAnchorDate = null;
       }

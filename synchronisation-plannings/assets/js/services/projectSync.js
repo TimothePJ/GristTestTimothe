@@ -178,11 +178,19 @@ export function clearSharedProjectSelection() {
 
 export async function applySharedProject(projectKey) {
   const normalizedProjectKey = String(projectKey || "").trim();
+  console.log('[SYNC][syncPlannings] applySharedProject appelé', {
+    projectKey,
+    normalizedProjectKey,
+    planningApiDisponible: !!state.planningApi,
+    projectSyncInProgress: state.projectSyncInProgress,
+  });
   if (!normalizedProjectKey || !state.planningApi) {
+    console.warn('[SYNC][syncPlannings] applySharedProject abandonné (pas de clé ou pas d\'API)');
     return;
   }
 
   saveSharedProjectSelection(normalizedProjectKey);
+  console.log('[SYNC][syncPlannings] localStorage["grist.selected-project"] →', normalizedProjectKey);
   state.requestedProjectKey = normalizedProjectKey;
   state.lastPlanningWarningsPopupSignature = "";
   state.pendingPlanningWarningsPopupProjectKey = normalizedProjectKey;
@@ -282,24 +290,3 @@ export async function applySharedProject(projectKey) {
     void flushViewportSyncQueue();
   }
 }
-
-// Synchronisation inter-widgets : réagit quand un autre widget change le projet sélectionné
-(function () {
-  if (window.__lpStorageSyncAdded_syncPlannings) return;
-  window.__lpStorageSyncAdded_syncPlannings = true;
-  var _nk = function (s) {
-    return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
-  };
-  window.addEventListener('storage', function (event) {
-    if (event.key !== 'grist.selected-project' || !event.newValue) return;
-    if (state.projectSyncInProgress) return;  // Ne pas déclencher pendant une synchro en cours
-    var newProject = String(event.newValue).trim();
-    var dropdown = document.getElementById('shared-project-select');
-    if (!dropdown) return;
-    var match = Array.from(dropdown.options).find(function (o) { return _nk(o.value) === _nk(newProject); });
-    if (match && dropdown.value !== match.value) {
-      dropdown.value = match.value;
-      dropdown.dispatchEvent(new Event('change'));
-    }
-  });
-})();

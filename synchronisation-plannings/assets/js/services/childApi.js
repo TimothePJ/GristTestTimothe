@@ -137,6 +137,23 @@ export async function attachExpensesFrameApi({ force = false } = {}) {
           });
         }
 
+        // Lire le viewport RÉEL de gestion-depenses2 après stabilisation (peut être clampé
+        // par ses propres bornes) et le renvoyer vers Planning Projet pour que les deux
+        // plannings affichent exactement la même période.
+        const actualExpensesViewport = buildCanonicalSharedViewport(
+          api.getViewport?.() || referenceViewport
+        );
+        if (
+          actualExpensesViewport?.firstVisibleDate &&
+          actualExpensesViewport.firstVisibleDate !== referenceViewport.firstVisibleDate
+        ) {
+          await Promise.all([
+            Promise.resolve(state.planningApi?.applyViewport?.(actualExpensesViewport)),
+            Promise.resolve(state.planningAxisApi?.applyViewport?.(actualExpensesViewport)),
+          ]);
+          referenceViewport = actualExpensesViewport;
+        }
+
         state.sharedViewportState = referenceViewport;
         state.lastAppliedViewportLogicalSignature = getViewportLogicalSignature(
           targetProjectKey || state.activeProjectKey,

@@ -436,14 +436,49 @@ function getRequestedSharedProjectKey() {
 
 async function applyRestoredSharedProject(projectKeys = []) {
   const requestedSavedProjectKey = getRequestedSharedProjectKey();
-  const savedProjectKey = findAvailableProjectKey(projectKeys, requestedSavedProjectKey);
+  let savedProjectKey = findAvailableProjectKey(projectKeys, requestedSavedProjectKey);
+
+  console.log('[SYNC][syncPlannings] applyRestoredSharedProject', {
+    localStorage: localStorage.getItem('grist.selected-project'),
+    requestedSavedProjectKey,
+    planningProjectsCount: projectKeys.length,
+    planningProjects: projectKeys,
+    matchInitial: savedProjectKey || '(aucun)',
+    activeProjectKey: state.activeProjectKey,
+    projectSyncInProgress: state.projectSyncInProgress,
+  });
+
+  // Si le projet n'est pas trouvé dans la liste actuelle (liste vide ou format différent),
+  // tenter un re-fetch direct depuis Grist pour avoir la liste à jour.
+  if (!savedProjectKey && requestedSavedProjectKey) {
+    console.log('[SYNC][syncPlannings] Match introuvable → re-fetch Grist...');
+    try {
+      const freshKeys = await fetchProjectKeysFromGrist();
+      savedProjectKey = findAvailableProjectKey(freshKeys, requestedSavedProjectKey);
+      console.log('[SYNC][syncPlannings] Re-fetch Grist', {
+        freshKeysCount: freshKeys.length,
+        freshKeys,
+        matchApresRefetch: savedProjectKey || '(aucun)',
+      });
+      if (savedProjectKey && freshKeys.length) {
+        const mergedKeys = mergeProjectKeys(projectKeys, freshKeys);
+        renderProjectOptions(mergedKeys, savedProjectKey);
+      }
+    } catch (_e) {
+      console.warn('[SYNC][syncPlannings] Re-fetch Grist échoué', _e);
+    }
+  }
+
   if (!savedProjectKey) {
+    console.warn('[SYNC][syncPlannings] Aucun projet trouvé → abandon');
     return false;
   }
 
+  console.log('[SYNC][syncPlannings] Application du projet →', savedProjectKey);
   setActiveProjectSelection(savedProjectKey);
   setProjectContentVisibility(true);
   await applySelectedProjectFromHub(savedProjectKey);
+  console.log('[SYNC][syncPlannings] Projet appliqué ✓', savedProjectKey);
   return true;
 }
 
@@ -571,16 +606,38 @@ export async function bootstrapHubApp() {
       setHubStatus("Aucun projet disponible.");
     }
 
+    // Navigation Grist (pageshow / focus / visibilitychange) :
+    // on force applyRestoredSharedProject sans le filtre shouldReapplyRestoredProject
+    // car les iframes peuvent avoir été rechargées par Grist entre deux visites.
     window.addEventListener("pageshow", () => {
-      scheduleRestoredProjectReapply(planningProjects, 0);
+      console.log('[SYNC][syncPlannings] pageshow déclenché', { localStorage: localStorage.getItem('grist.selected-project'), projectSyncInProgress: state.projectSyncInProgress });
+      if (!state.projectSyncInProgress) void applyRestoredSharedProject(planningProjects);
     });
     window.addEventListener("focus", () => {
-      scheduleRestoredProjectReapply(planningProjects, 0);
+      console.log('[SYNC][syncPlannings] focus déclenché', { localStorage: localStorage.getItem('grist.selected-project'), projectSyncInProgress: state.projectSyncInProgress });
+      if (!state.projectSyncInProgress) void applyRestoredSharedProject(planningProjects);
     });
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") {
-        scheduleRestoredProjectReapply(planningProjects, 0);
+      console.log('[SYNC][syncPlannings] visibilitychange →', document.visibilityState, { localStorage: localStorage.getItem('grist.selected-project'), projectSyncInProgress: state.projectSyncInProgress });
+      if (document.visibilityState === "visible" && !state.projectSyncInProgress) {
+        void applyRestoredSharedProject(planningProjects);
       }
+    });
+    // Synchro en temps réel : un autre widget (même origin) a changé le projet
+    window.addEventListener("storage", (event) => {
+      if (event.key !== "grist.selected-project" || !event.newValue) return;
+      console.log('[SYNC][syncPlannings] storage event reçu', {
+        newValue: event.newValue,
+        oldValue: event.oldValue,
+        projectSyncInProgress: state.projectSyncInProgress,
+        planningProjectsCount: planningProjects.length,
+        planningProjects,
+      });
+      if (state.projectSyncInProgress) {
+        console.warn('[SYNC][syncPlannings] storage event ignoré : projectSyncInProgress=true');
+        return;
+      }
+      void applyRestoredSharedProject(planningProjects);
     });
     scheduleRestoredProjectReapply(planningProjects, 250);
     scheduleRestoredProjectReapply(planningProjects, 1000);
