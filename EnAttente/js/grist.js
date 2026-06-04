@@ -3,7 +3,7 @@ window.App = {
 };
 
 window.initGrist = function(onUpdate) {
-  grist.ready({ requiredAccess: "read table" });
+  grist.ready({ requiredAccess: "full" });
 
   grist.onRecords((recs) => {
     App.records = recs || [];

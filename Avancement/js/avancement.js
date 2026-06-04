@@ -122,7 +122,13 @@ function init() {
 
   grist.onRecords((newRecords) => {
     state.records = newRecords || [];
-    populateProjectDropdown();
+    // La liste des projets vient uniquement de refreshProjectDropdownFromProjectsTable()
+    // (Projets.Nom_de_projet) pour rester cohérente avec tous les autres widgets.
+    // On restaure juste la sélection si le dropdown est déjà peuplé.
+    const saved = readSharedProjectSelection();
+    if (saved && !elements.projectDropdown.value && elements.projectDropdown.options.length > 1) {
+      restoreSelectedProject(saved, Array.from(elements.projectDropdown.options).map(o => o.value).filter(Boolean));
+    }
     updateDashboard();
   });
 }

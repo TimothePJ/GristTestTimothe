@@ -101,19 +101,20 @@ export async function applySharedProject(projectKey) {
     const referencePlanningApi = getReferencePlanningApi() || state.planningApi;
     const planningViewport = referencePlanningApi.getViewport?.() || null;
 
-    // 3. Synchroniser gestion-depenses2 en arrière-plan (ne bloque pas l'UI).
+    // 3. Synchroniser gestion-depenses2 EN ATTENDANT (dans la fenêtre projectSyncInProgress).
+    //    Les émissions viewport de gestion-depenses2 pendant son chargement sont
+    //    mises en file d'attente (projectSyncInProgress=true → pas de flush immédiat).
+    //    Les boutons ne s'activent qu'une fois tout stabilisé.
     if (state.expensesApi) {
-      const expensesApi = state.expensesApi;
-      const viewportToApply = planningViewport;
-      Promise.resolve(expensesApi.setSelectedProject(normalizedProjectKey))
-        .then(() => {
-          if (state.activeProjectKey !== normalizedProjectKey) return;
-          if (viewportToApply?.firstVisibleDate) {
-            return Promise.resolve(expensesApi.applyViewport?.(viewportToApply));
-          }
-        })
-        .then(() => scheduleExpensesFramePresentation())
-        .catch((err) => console.error("Erreur sync gestion-depenses2 :", err));
+      try {
+        await Promise.resolve(state.expensesApi.setSelectedProject(normalizedProjectKey));
+        if (planningViewport?.firstVisibleDate && state.activeProjectKey === normalizedProjectKey) {
+          await Promise.resolve(state.expensesApi.applyViewport?.(planningViewport));
+        }
+        scheduleExpensesFramePresentation();
+      } catch (err) {
+        console.error("Erreur sync gestion-depenses2 :", err);
+      }
     }
 
     // 4. Mettre à jour l'état partagé et l'affichage.

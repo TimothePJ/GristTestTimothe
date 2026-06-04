@@ -224,8 +224,9 @@ function tableTitle() {
 }
 
 function refreshUI() {
-  const projects = uniqProjects(App.records);
-  populateFirstColumnDropdown(projects);
+  // La liste des projets vient de refreshProjectDropdownFromProjectsTable() (Projets.Nom_de_projet).
+  // On ne la reconstruit pas depuis les records pour rester cohérent avec les autres widgets.
+  const projects = [...firstDropdown.options].map(o => o.value).filter(Boolean);
 
   // Reset si aucun projet ou projet invalide
   if (!selectedProject || !projects.includes(selectedProject)) {
@@ -372,9 +373,43 @@ document.getElementById("detailsTbody").addEventListener("click", async (e) => {
 /* INIT */
 setSecondDropdownDisabled(true);
 
+// Charger la liste complète des projets depuis Projets.Nom_de_projet
+// (même source que tous les autres widgets pour cohérence de synchronisation).
+async function refreshProjectDropdownFromProjectsTable() {
+  try {
+    if (!grist?.docApi || typeof grist.docApi.fetchTable !== "function") return;
+    const table = await grist.docApi.fetchTable("Projets");
+    const names = Array.isArray(table?.Nom_de_projet) ? table.Nom_de_projet : [];
+    const projects = [...new Set(names.map(v => String(v || "").trim()).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, "fr", { sensitivity: "base", numeric: true }));
+    if (!projects.length) return;
+    const current = firstDropdown.value || readSharedProjectSelection();
+    populateFirstColumnDropdown(projects);
+    if (current && [...firstDropdown.options].some(o => o.value === current)) {
+      firstDropdown.value = current;
+      selectedProject = current;
+    }
+  } catch (err) {
+    console.warn("EnAttente: impossible de charger la liste Projets :", err);
+  }
+}
+
+void refreshProjectDropdownFromProjectsTable();
+window.addEventListener("pageshow", () => { void refreshProjectDropdownFromProjectsTable(); });
+window.addEventListener("focus", () => {
+  if (firstDropdown.options.length <= 1) void refreshProjectDropdownFromProjectsTable();
+});
+
 initGrist(() => {
   if (!selectedProject) selectedProject = firstDropdown.value.trim();
-  refreshUI();
+  // Ne pas reconstruire le dropdown depuis les records (liste filtrée) :
+  // la liste vient de refreshProjectDropdownFromProjectsTable().
+  // On met juste à jour l'affichage des données.
+  if (firstDropdown.options.length <= 1) {
+    void refreshProjectDropdownFromProjectsTable().then(() => refreshUI());
+  } else {
+    refreshUI();
+  }
 });
 
 function buildRowsForTable(listRows, allRows = listRows) {
