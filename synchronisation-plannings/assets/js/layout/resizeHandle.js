@@ -71,6 +71,7 @@ export function applyPlanningFrameHeight(
   {
     persist = true,
     refresh = true,
+    liveResize = false,
     minHeight = MIN_PLANNING_FRAME_HEIGHT,
     maxHeight = MAX_PLANNING_FRAME_HEIGHT,
   } = {}
@@ -93,7 +94,10 @@ export function applyPlanningFrameHeight(
     persistPlanningFrameHeight(appliedHeight);
   }
 
-  if (refresh) {
+  // En mode liveResize (glissement en cours), on ne déclenche pas la cascade
+  // de recalculs de présentation (trop lourd à chaque pixel). Elle se fait
+  // uniquement au relâchement via finishResize().
+  if (refresh && !liveResize) {
     schedulePlanningFrameResizeRefresh();
   }
 
@@ -176,7 +180,8 @@ export function bindPlanningFrameResizeHandle() {
 
     const nextHeight =
       state.planningFrameResizeState.startHeight + (event.clientY - state.planningFrameResizeState.startY);
-    applyPlanningFrameHeight(nextHeight, { persist: false, refresh: true });
+    // liveResize: true → on ne déclenche que la mise à jour CSS, pas les recalculs de présentation.
+    applyPlanningFrameHeight(nextHeight, { persist: false, refresh: true, liveResize: true });
   });
 
   dom.planningResizeHandleEl.addEventListener("pointerup", (event) => {

@@ -8,8 +8,6 @@ export function createHubState() {
     projectSyncInProgress: false,
     sharedToolbarActionInProgress: false,
     planningVisualAggregateMode: false,
-    lastPlanningWarningsPopupSignature: "",
-    pendingPlanningWarningsPopupProjectKey: "",
     viewportSyncInProgress: false,
     pendingViewportPayload: null,
     lastAppliedViewportLogicalSignature: "",

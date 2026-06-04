@@ -3658,9 +3658,12 @@ function buildGroupLabelElement(group) {
 
   const row = document.createElement("div");
   row.className = "group-row-grid";
-  row.classList.add("planning-draggable-row");
-  row.draggable = true;
-  row.setAttribute("draggable", "true");
+  // Le drag-and-drop de lignes est désactivé en mode embedded (synchronisation-plannings).
+  if (!EMBEDDED_PLANNING_SYNC_MODE) {
+    row.classList.add("planning-draggable-row");
+    row.draggable = true;
+    row.setAttribute("draggable", "true");
+  }
   row.dataset.planningRowId = String(group?.rowId ?? "");
   row.dataset.planningGroupId = String(group?.id ?? "");
   row.dataset.planningProject = String(group?.projectLabel ?? "");
@@ -4718,9 +4721,12 @@ export function renderPlanningTimeline(timelineData = {}) {
 
     bindHoverTooltip(container);
     bindDurationCellEditing(container);
-    bindMsProjectRowDrop(container);
-    bindPlanningRowDragging(container);
-    bindPlanningRowDrop(container);
+    // Drag désactivé en mode embedded (synchronisation-plannings) : réservé à Planning Projet direct.
+    if (!EMBEDDED_PLANNING_SYNC_MODE) {
+      bindMsProjectRowDrop(container);
+      bindPlanningRowDragging(container);
+      bindPlanningRowDrop(container);
+    }
     bindStickyTimelineAxis();
 
     timelineInstance.on("select", (properties = {}) => {

@@ -20,7 +20,6 @@ import {
   setSelectionWarning,
 } from "../layout/shell.js";
 import { attachExpensesFrameApi, waitForChildApi } from "../services/childApi.js";
-import { handlePlanningWarningsChange } from "../services/planningWarnings.js";
 import {
   applySharedProject,
   clearSharedProjectSelection,
@@ -213,14 +212,23 @@ function bindPlanningIframeTooltipBridge() {
 
 function bindFrameLoadListeners() {
   dom.expensesFrameEl?.addEventListener("load", () => {
-    state.expensesApi = null;
-    state.expensesViewportSubscriptionApi = null;
-    state.lastPlanningWarningsPopupSignature = "";
-    syncSharedPlanningControlsAvailability();
+    // Vérifier si l'API est encore la même (même objet dans le contentWindow).
+    // Si oui : c'est un chargement tardif de l'iframe déjà attachée (scroll vers le bas)
+    //           → on ne réinitialise pas, on évite de tout re-synchroniser inutilement.
+    // Si non : l'iframe a réellement rechargé → réinitialisation complète.
+    const currentApi = dom.expensesFrameEl?.contentWindow?.__gestionDepenses2PlanningSyncApi;
+    const isAlreadyAttached = state.expensesApi != null && currentApi === state.expensesApi;
+
     schedulePlanningFramePresentation();
     scheduleExpensesFramePresentation();
     schedulePlanningLayoutDebug("expenses-frame-load");
-    void attachExpensesFrameApi();
+
+    if (!isAlreadyAttached) {
+      state.expensesApi = null;
+      state.expensesViewportSubscriptionApi = null;
+      syncSharedPlanningControlsAvailability();
+      void attachExpensesFrameApi();
+    }
   });
 
   dom.planningAxisFrameEl?.addEventListener("load", () => {
@@ -465,31 +473,7 @@ async function applySelectedProjectFromHub(projectKey = "") {
   await refreshPlanningAggregatePresentation();
 }
 
-function shouldReapplyRestoredProject(projectKey = "") {
-  const normalizedProjectKey = String(projectKey || "").trim();
-  if (!normalizedProjectKey) return false;
-  if (String(state.activeProjectKey || "").trim() !== normalizedProjectKey) return true;
 
-  const viewport =
-    state.sharedViewportState ||
-    state.planningAxisApi?.getViewport?.() ||
-    state.planningApi?.getViewport?.() ||
-    null;
-  const firstVisibleDate = String(
-    viewport?.firstVisibleDate || viewport?.rangeStartDate || ""
-  ).trim();
-
-  return !firstVisibleDate;
-}
-
-function scheduleRestoredProjectReapply(projectKeys = [], delay = 0) {
-  window.setTimeout(() => {
-    const requestedProjectKey = getRequestedSharedProjectKey();
-    const savedProjectKey = findAvailableProjectKey(projectKeys, requestedProjectKey);
-    if (!savedProjectKey || !shouldReapplyRestoredProject(savedProjectKey)) return;
-    void applyRestoredSharedProject(projectKeys);
-  }, Math.max(0, Number(delay) || 0));
-}
 
 export async function bootstrapHubApp() {
   applyDebugBodyClass();
@@ -548,11 +532,6 @@ export async function bootstrapHubApp() {
         setSelectionWarning(payload?.selection || null);
       });
     }
-    if (typeof state.planningApi.subscribeWarningsChange === "function") {
-      state.planningApi.subscribeWarningsChange((payload) => {
-        handlePlanningWarningsChange(payload);
-      });
-    }
     state.planningAxisApi.subscribeViewportChange((payload) =>
       handleViewportChange({ ...payload, app: "planning-projet-axis" })
     );
@@ -568,9 +547,9 @@ export async function bootstrapHubApp() {
 
     const requestedSavedProjectKey = getRequestedSharedProjectKey();
     if (await applyRestoredSharedProject(planningProjects)) {
-      // Projet restaure depuis la selection commune et contenu charge.
+      // Projet restauré depuis la sélection commune — popup retards affichée dans applySharedProject
     } else if (requestedSavedProjectKey && planningProjects.length) {
-      setHubStatus("Projet memorise introuvable dans la synchronisation.");
+      setHubStatus("Projet mémorisé introuvable dans la synchronisation.");
     } else if (planningProjects.length) {
       setHubStatus("Choisis un projet pour afficher les plannings.");
     } else {
@@ -578,42 +557,18 @@ export async function bootstrapHubApp() {
       setHubStatus("Aucun projet disponible.");
     }
 
-    // Détermine si une re-synchro est nécessaire :
-    // - projet localStorage différent du projet actif → oui (projet changé dans un autre widget)
-    // - Planning Projet montre un projet différent du projet actif → oui (iframes rechargées)
-    // - projet déjà correct et iframes à jour → NON (évite de fermer la popup des retards)
-    function needsProjectReapply() {
-      if (state.projectSyncInProgress) return false;
-      const requested = normalizeProjectSelectionKey(readSharedProjectSelection());
-      if (!requested) return false;
-      const active = normalizeProjectSelectionKey(state.activeProjectKey || "");
-      if (!active || active !== requested) return true;
-      // Vérifier que l'iframe Planning Projet affiche bien le bon projet
-      const planningShowing = normalizeProjectSelectionKey(
-        state.planningApi?.getSelectedProject?.() || ""
-      );
-      return !!planningShowing && planningShowing !== active;
-    }
-
-    window.addEventListener("pageshow", () => {
-      if (needsProjectReapply()) void applyRestoredSharedProject(planningProjects);
-    });
-    window.addEventListener("focus", () => {
-      if (needsProjectReapply()) void applyRestoredSharedProject(planningProjects);
-    });
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible" && needsProjectReapply()) {
-        void applyRestoredSharedProject(planningProjects);
-      }
-    });
-    // Synchro en temps réel : un autre widget (même origin) a changé le projet
+    // Synchro uniquement si un autre widget (même origin) change le projet en temps réel.
+    // On ne réagit PAS à pageshow/focus/visibilitychange pour éviter de fermer
+    // la popup des retards déjà affichée.
     window.addEventListener("storage", (event) => {
       if (event.key !== "grist.selected-project" || !event.newValue) return;
       if (state.projectSyncInProgress) return;
-      void applyRestoredSharedProject(planningProjects);
+      const requested = normalizeProjectSelectionKey(String(event.newValue).trim());
+      const active   = normalizeProjectSelectionKey(state.activeProjectKey || "");
+      if (requested && requested !== active) {
+        void applyRestoredSharedProject(planningProjects);
+      }
     });
-    scheduleRestoredProjectReapply(planningProjects, 250);
-    scheduleRestoredProjectReapply(planningProjects, 1000);
 
     schedulePlanningLayoutDebug("bootstrap-ready");
   } catch (error) {
