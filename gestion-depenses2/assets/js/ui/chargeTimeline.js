@@ -1063,13 +1063,17 @@ export function renderChargePlanTimeline(dom, project, viewState, options = {}) 
     viewState?.chargePlanRangeStartDate,
     parseDateInputValue(viewState?.chargePlanAnchorDate, new Date())
   );
-  const renderedMonthSpan = Math.max(
-    18,
+  const renderedMonthSpan = clamp(
     Math.round(
       toFiniteNumber(
         viewState?.chargePlanRenderedMonthSpan,
         APP_CONFIG.chargeTimeline.visibleMonthSpan
       )
+    ),
+    APP_CONFIG.chargeTimeline.minRenderedMonthSpan,
+    Math.min(
+      APP_CONFIG.chargeTimeline.visibleMonthSpan,
+      APP_CONFIG.chargeTimeline.maxRenderedMonthSpan
     )
   );
 

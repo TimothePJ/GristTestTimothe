@@ -16,7 +16,7 @@ import {
 } from "../layout/shell.js";
 import { syncPlanningViewportBounds } from "../viewport/bounds.js";
 import { getViewportLogicalSignature } from "../viewport/normalize.js";
-import { flushViewportSyncQueue } from "./viewportSync.js";
+import { flushViewportSyncQueue, syncViewportToExpensesNow } from "./viewportSync.js";
 
 const SHARED_PROJECT_STORAGE_KEY = "grist.selected-project";
 const SHARED_PROJECT_STORAGE_FALLBACK_KEYS = [
@@ -145,7 +145,7 @@ export async function applySharedProject(projectKey) {
         .then(() => {
           if (state.activeProjectKey !== normalizedProjectKey || state.expensesApi !== expensesApi) return;
           if (viewportToApply?.firstVisibleDate) {
-            return Promise.resolve(expensesApi.applyViewport?.(viewportToApply));
+            syncViewportToExpensesNow(viewportToApply);
           }
         })
         .then(() => scheduleExpensesFramePresentation())

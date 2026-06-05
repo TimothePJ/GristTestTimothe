@@ -15,6 +15,11 @@ export const APP_CONFIG = {
   },
   chargeTimeline: {
     visibleMonthSpan: 144,
+    minRenderedMonthSpan: 18,
+    maxRenderedMonthSpan: 48,
+    virtualScrollMinEdgeDays: 90,
+    virtualScrollVisibleDaysFactor: 1.5,
+    virtualScrollMaxEdgeRatio: 0.25,
     defaultVisibleDays: 31,
     referenceMonthDays: 30.4375,
     minVisibleDays: 7,

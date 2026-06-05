@@ -44,6 +44,16 @@ function traceExpensesFramePresentation(event, details = {}) {
   console.info(`[sync-trace][hub-expenses-frame][${expensesFrameTraceSequence}] ${event}`, details);
 }
 
+function scheduleExpensesPresentationBurst() {
+  scheduleExpensesFramePresentation(1);
+  window.requestAnimationFrame(() => {
+    scheduleExpensesFramePresentation(1);
+  });
+  window.setTimeout(() => {
+    scheduleExpensesFramePresentation(1);
+  }, 120);
+}
+
 export function ensurePlanningFramePresentation() {
   const syncPlanningCardEl = document.querySelector(".sync-planning-card");
   const planningWrapperEl = dom.planningFrameEl?.contentDocument?.getElementById("timelineWrapper");
@@ -266,6 +276,11 @@ export function ensureExpensesFramePresentation() {
     Number.isFinite(mainPlanningReferenceVisibleWidth) &&
     (!Number.isFinite(state.lastExpensesReferenceVisibleWidth) ||
       Math.abs(mainPlanningReferenceVisibleWidth - state.lastExpensesReferenceVisibleWidth) > 0.25);
+  const referenceDayWidthChanged =
+    Number.isFinite(mainPlanningReferenceDayWidth) &&
+    mainPlanningReferenceDayWidth > 0 &&
+    (!Number.isFinite(state.lastExpensesReferenceDayWidth) ||
+      Math.abs(mainPlanningReferenceDayWidth - state.lastExpensesReferenceDayWidth) > 0.05);
 
   if (visibleWidthAdjustmentChanged) {
     state.lastExpensesVisibleWidthAdjustment = mainPlanningVisibleWidthAdjustment;
@@ -275,10 +290,15 @@ export function ensureExpensesFramePresentation() {
     state.lastExpensesReferenceVisibleWidth = mainPlanningReferenceVisibleWidth;
   }
 
-  if (visibleWidthAdjustmentChanged || referenceVisibleWidthChanged) {
+  if (referenceDayWidthChanged) {
+    state.lastExpensesReferenceDayWidth = mainPlanningReferenceDayWidth;
+  }
+
+  if (visibleWidthAdjustmentChanged || referenceVisibleWidthChanged || referenceDayWidthChanged) {
     traceExpensesFramePresentation("width-adjustment-detected", {
       visibleWidthAdjustmentChanged,
       referenceVisibleWidthChanged,
+      referenceDayWidthChanged,
       mainPlanningVisibleWidthAdjustment: roundExpensesFrameTraceNumber(
         mainPlanningVisibleWidthAdjustment
       ),
@@ -299,13 +319,14 @@ export function ensureExpensesFramePresentation() {
             traceExpensesFramePresentation("reapply-viewport-for-width", {
               viewport: summarizeExpensesFrameViewport(viewportToReapply),
             });
-            state.expensesApi.applyViewport(viewportToReapply);
+            void Promise.resolve(state.expensesApi.applyViewport(viewportToReapply))
+              .catch((error) => console.error("reapply-viewport-for-width error:", error));
           }
           schedulePlanningLayoutDebug("expenses-width-adjustment");
         } finally {
           window.setTimeout(() => {
             state.expensesVisibleWidthAdjustmentRerenderPending = false;
-            scheduleExpensesFramePresentation(1);
+            scheduleExpensesPresentationBurst();
           }, 0);
         }
       });

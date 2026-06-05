@@ -9,7 +9,9 @@ import {
   schedulePlanningFramePresentation,
 } from "../layout/framePresentation.js";
 import {
+  setActiveProjectSelection,
   setLastRange,
+  setProjectContentVisibility,
   syncExpensesPlanningShell,
   syncSharedPlanningControlsAvailability,
 } from "../layout/shell.js";
@@ -22,7 +24,12 @@ import {
   getDesiredProjectKey,
   getViewportLogicalSignature,
 } from "../viewport/normalize.js";
-import { drainExpensesViewportQueue, flushViewportSyncQueue, handleViewportChange } from "./viewportSync.js";
+import {
+  drainExpensesViewportQueue,
+  flushViewportSyncQueue,
+  handleViewportChange,
+  syncViewportToExpensesNow,
+} from "./viewportSync.js";
 import { readSharedProjectSelection } from "./projectSync.js";
 
 export function sleep(ms) {
@@ -118,11 +125,6 @@ export async function attachExpensesFrameApi({ force = false } = {}) {
       syncSharedPlanningControlsAvailability();
       schedulePlanningFramePresentation();
 
-      // Drainer immédiatement le viewport en attente : si Planning Projet a scrollé
-      // pendant que l'API n'était pas disponible, le viewport est stocké dans
-      // _pendingExpensesViewport et peut être appliqué maintenant.
-      void drainExpensesViewportQueue();
-
       // Masquer gestion-depenses2 pendant la synchro projet + alignement viewport.
       // Il sera révélé (.is-aligned) une fois les dates alignées avec Planning Projet.
       dom.expensesFrameEl?.classList.remove("is-aligned");
@@ -139,13 +141,17 @@ export async function attachExpensesFrameApi({ force = false } = {}) {
           state.planningAxisApi?.getSelectedProject?.() ||
           readSharedProjectSelection() ||
           "";
-        // Promouvoir dans le hub pour que les futures synchros fonctionnent
         if (targetProjectKey) {
           state.activeProjectKey = targetProjectKey;
           state.requestedProjectKey = targetProjectKey;
         }
       }
       if (targetProjectKey) {
+        state.activeProjectKey = targetProjectKey;
+        state.requestedProjectKey = targetProjectKey;
+        setActiveProjectSelection(targetProjectKey);
+        setProjectContentVisibility(true);
+        syncSharedPlanningControlsAvailability();
         await Promise.resolve(api.setSelectedProject(targetProjectKey));
       }
 
@@ -153,7 +159,7 @@ export async function attachExpensesFrameApi({ force = false } = {}) {
       const referenceViewport = getLateAttachReferenceViewport();
       if (referenceViewport?.firstVisibleDate) {
         syncPlanningViewportBounds(referenceViewport);
-        await Promise.resolve(api.applyViewport(referenceViewport));
+        syncViewportToExpensesNow(referenceViewport);
         state.sharedViewportState = referenceViewport;
         state.lastAppliedViewportLogicalSignature = getViewportLogicalSignature(
           targetProjectKey || state.activeProjectKey,
@@ -162,6 +168,8 @@ export async function attachExpensesFrameApi({ force = false } = {}) {
         syncExpensesPlanningShell(referenceViewport);
         setLastRange(referenceViewport);
       }
+
+      drainExpensesViewportQueue();
 
       // Révéler gestion-depenses2 maintenant que les dates sont alignées avec Planning Projet.
       dom.expensesFrameEl?.classList.add("is-aligned");

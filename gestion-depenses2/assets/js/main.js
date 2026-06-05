@@ -901,9 +901,12 @@ function getChargePlanRenderedMonthSpan(
   );
 
   return clamp(
-    visibleMonthsEstimate + 18,
-    18,
-    Math.min(APP_CONFIG.chargeTimeline.visibleMonthSpan, 48)
+    visibleMonthsEstimate + APP_CONFIG.chargeTimeline.minRenderedMonthSpan,
+    APP_CONFIG.chargeTimeline.minRenderedMonthSpan,
+    Math.min(
+      APP_CONFIG.chargeTimeline.visibleMonthSpan,
+      APP_CONFIG.chargeTimeline.maxRenderedMonthSpan
+    )
   );
 }
 
@@ -920,6 +923,39 @@ function getChargePlanRangeStartDate() {
   const fallbackRangeStartDate = getChargePlanWindowStartDate(state.chargePlanAnchorDate);
   chargePlanRangeStartDate = fallbackRangeStartDate;
   return fallbackRangeStartDate;
+}
+
+function getChargePlanVirtualScrollEdgeThreshold(totalDays, visibleDaySpan) {
+  const numericTotalDays = Number(totalDays);
+  const numericVisibleDaySpan = Number(visibleDaySpan);
+  if (!Number.isFinite(numericTotalDays) || numericTotalDays <= 0) {
+    return 0;
+  }
+
+  const configuredMinEdgeDays = Number(APP_CONFIG.chargeTimeline.virtualScrollMinEdgeDays);
+  const configuredVisibleDaysFactor = Number(APP_CONFIG.chargeTimeline.virtualScrollVisibleDaysFactor);
+  const configuredMaxEdgeRatio = Number(APP_CONFIG.chargeTimeline.virtualScrollMaxEdgeRatio);
+  const minEdgeDays =
+    Number.isFinite(configuredMinEdgeDays) && configuredMinEdgeDays > 0
+      ? configuredMinEdgeDays
+      : 90;
+  const visibleDaysFactor =
+    Number.isFinite(configuredVisibleDaysFactor) && configuredVisibleDaysFactor > 0
+      ? configuredVisibleDaysFactor
+      : 1.5;
+  const maxEdgeRatio =
+    Number.isFinite(configuredMaxEdgeRatio) && configuredMaxEdgeRatio > 0
+      ? configuredMaxEdgeRatio
+      : 0.25;
+  const desiredEdgeDays = Math.max(
+    minEdgeDays,
+    (Number.isFinite(numericVisibleDaySpan) && numericVisibleDaySpan > 0
+      ? numericVisibleDaySpan
+      : getCurrentChargePlanVisibleDays()) * visibleDaysFactor
+  );
+  const maxEdgeDays = Math.max(1, numericTotalDays * Math.min(maxEdgeRatio, 0.45));
+
+  return Math.min(desiredEdgeDays, maxEdgeDays);
 }
 
 function getChargePlanFixedColumnsWidthEstimate(boardEl = dom?.chargePlanBoard || null) {
@@ -3649,6 +3685,10 @@ function scheduleChargePlanScrollSync(
       { persist: Boolean(pendingSync.persistVisibleDate) },
       pendingSync.boardEl
     );
+    maybeRebaseChargePlanVirtualTimeline(
+      pendingSync.sourceScrollEl,
+      pendingSync.boardEl
+    );
   });
 }
 
@@ -3676,6 +3716,90 @@ function scheduleChargePlanVisibleDateSync(
     chargePlanVisibleDateTimer = null;
     syncChargePlanVisibleDate(scrollEl, { persist: true }, boardEl);
   }, 140);
+}
+
+function maybeRebaseChargePlanVirtualTimeline(
+  sourceScrollEl = getChargePlanScrollElement(),
+  boardEl = dom?.chargePlanBoard || null
+) {
+  if (!(sourceScrollEl instanceof HTMLElement)) {
+    return false;
+  }
+
+  if (!(boardEl instanceof HTMLElement) || boardEl !== dom?.chargePlanBoard) {
+    return false;
+  }
+
+  if (chargeTimelineDrag) {
+    return false;
+  }
+
+  const metrics = getChargePlanTimelineMetrics(sourceScrollEl);
+  const viewportWindow = getChargePlanViewportWindow(sourceScrollEl);
+  if (!metrics || !viewportWindow) {
+    return false;
+  }
+
+  const visibleDaySpan = Number(viewportWindow.visibleDaySpan);
+  const leftDayOffset = Number(viewportWindow.leftDayOffset);
+  const rightDayOffset = Number(viewportWindow.rightDayOffset);
+  const edgeThresholdDays = getChargePlanVirtualScrollEdgeThreshold(
+    metrics.totalDays,
+    visibleDaySpan
+  );
+  if (
+    !Number.isFinite(edgeThresholdDays) ||
+    edgeThresholdDays <= 0 ||
+    !Number.isFinite(leftDayOffset) ||
+    !Number.isFinite(rightDayOffset)
+  ) {
+    return false;
+  }
+
+  const nearStart = leftDayOffset <= edgeThresholdDays;
+  const nearEnd = metrics.totalDays - rightDayOffset <= edgeThresholdDays;
+  if (!nearStart && !nearEnd) {
+    return false;
+  }
+
+  const firstVisibleDate =
+    normalizeChargePlanDateValue(
+      getChargePlanDateValueFromTimestampMs(viewportWindow.windowStartMs)
+    ) ||
+    normalizeChargePlanDateValue(getChargePlanViewportEdgeDate(sourceScrollEl, "left"));
+  if (!firstVisibleDate) {
+    return false;
+  }
+
+  const nextRangeStartDate = getChargePlanWindowStartDate(
+    firstVisibleDate,
+    Number.isFinite(visibleDaySpan) && visibleDaySpan > 0
+      ? visibleDaySpan
+      : state.chargePlanVisibleDays
+  );
+  const currentRangeStartDate = normalizeChargePlanDateValue(getChargePlanRangeStartDate());
+  if (!nextRangeStartDate || nextRangeStartDate === currentRangeStartDate) {
+    return false;
+  }
+
+  if (Number.isNaN(new Date(`${firstVisibleDate}T12:00:00`).getTime())) {
+    return false;
+  }
+
+  clearChargePlanVisibleDateTimer();
+  setPendingChargePlanFocus(firstVisibleDate, "left");
+  setChargePlanRangeStartDate(
+    firstVisibleDate,
+    Number.isFinite(visibleDaySpan) && visibleDaySpan > 0
+      ? visibleDaySpan
+      : state.chargePlanVisibleDays
+  );
+  setState({
+    chargePlanAnchorDate: firstVisibleDate,
+  });
+  renderChargePlanSection();
+
+  return true;
 }
 
 function getChargePlanZoomAnchorDate() {

@@ -14,6 +14,7 @@ import {
 import {
   appendLog,
   renderProjectOptions,
+  setActiveProjectSelection,
   syncSharedPlanningControlsAvailability,
   setProjectContentVisibility,
   setHubStatus,
@@ -25,11 +26,13 @@ import {
   clearSharedProjectSelection,
   readSharedProjectSelection,
 } from "../services/projectSync.js";
-import { bindExpensesPlanningShellControls, handleViewportChange, syncViewportToExpensesNow } from "../services/viewportSync.js";
+import { bindExpensesPlanningShellControls, handleViewportChange } from "../services/viewportSync.js";
 
 const COMPACT_PLANNING_FRAME_MIN_HEIGHT = 80;
 const COMPACT_PLANNING_FRAME_FALLBACK_HEIGHT = 124;
 const PLANNING_TOOLTIP_MESSAGE_TYPE = "planning-projet-hover-tooltip";
+
+const projectAliasLookup = new Map();
 
 let planningIframeTooltipEl = null;
 let planningIframeTooltipHideTimer = 0;
@@ -344,16 +347,75 @@ function normalizeCompactProjectSelectionKey(value = "") {
   return normalizeProjectSelectionKey(value).replace(/[^a-z0-9]+/g, "");
 }
 
+function getProjectNamePart(value = "") {
+  return String(value || "").replace(/^\s*\d+\s*[-\u2013\u2014]\s*/, "").trim();
+}
+
+function getProjectNumberPart(value = "") {
+  const match = String(value || "").trim().match(/^\s*0*(\d+)(?:\s*[-\u2013\u2014]\s*|\s*$)/);
+  return match ? String(Number(match[1])) : "";
+}
+
 function normalizeNumericProjectSelectionKey(value = "") {
+  const numberPart = getProjectNumberPart(value);
+  if (numberPart) return numberPart;
   const compactKey = normalizeCompactProjectSelectionKey(value);
   if (!/^\d+$/.test(compactKey)) return "";
   return String(Number(compactKey));
 }
 
+function rememberProjectAlias(canonicalProjectKey = "", alias = "") {
+  const canonical = String(canonicalProjectKey || "").trim();
+  const normalizedAlias = normalizeProjectSelectionKey(alias);
+  if (!canonical || !normalizedAlias) return;
+
+  projectAliasLookup.set(normalizedAlias, canonical);
+
+  const compactAlias = normalizeCompactProjectSelectionKey(alias);
+  if (compactAlias) {
+    projectAliasLookup.set(`compact:${compactAlias}`, canonical);
+  }
+
+  const numericAlias = normalizeNumericProjectSelectionKey(alias);
+  if (numericAlias) {
+    projectAliasLookup.set(`number:${numericAlias}`, canonical);
+  }
+}
+
+function rememberProjectAliases(canonicalProjectKey = "", aliases = []) {
+  [canonicalProjectKey, ...aliases].forEach((alias) => {
+    rememberProjectAlias(canonicalProjectKey, alias);
+  });
+}
+
+function findRegisteredProjectAlias(projectKeys = [], requestedProjectKey = "") {
+  const requestedKey = normalizeProjectSelectionKey(requestedProjectKey);
+  const requestedCompactKey = normalizeCompactProjectSelectionKey(requestedProjectKey);
+  const requestedNumericKey = normalizeNumericProjectSelectionKey(requestedProjectKey);
+  const candidates = [
+    requestedKey ? projectAliasLookup.get(requestedKey) : "",
+    requestedCompactKey ? projectAliasLookup.get(`compact:${requestedCompactKey}`) : "",
+    requestedNumericKey ? projectAliasLookup.get(`number:${requestedNumericKey}`) : "",
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const matchingProjectKey = (projectKeys || []).find(
+      (projectKey) => normalizeProjectSelectionKey(projectKey) === normalizeProjectSelectionKey(candidate)
+    );
+    if (matchingProjectKey) return matchingProjectKey;
+  }
+
+  return (projectKeys || []).length ? "" : candidates[0] || "";
+}
+
 function findAvailableProjectKey(projectKeys = [], requestedProjectKey = "") {
+  const registeredAlias = findRegisteredProjectAlias(projectKeys, requestedProjectKey);
+  if (registeredAlias) return registeredAlias;
+
   const requestedKey = normalizeProjectSelectionKey(requestedProjectKey);
   const requestedNumericKey = normalizeNumericProjectSelectionKey(requestedProjectKey);
-  // Gestion du format "numéro - nom" (ex. "232032 - BONNE-NOUVELLE" → "bonne-nouvelle")
+  // Si la valeur stockée est au format "numéro - nom" (ex. "232032 - BONNE-NOUVELLE"),
+  // extraire la partie nom pour permettre la correspondance avec "BONNE-NOUVELLE".
   const requestedNamePart = normalizeProjectSelectionKey(
     String(requestedProjectKey || "").replace(/^\s*\d+\s*[-–]\s*/, "").trim()
   );
@@ -363,14 +425,15 @@ function findAvailableProjectKey(projectKeys = [], requestedProjectKey = "") {
   return (projectKeys || []).find((projectKey) => {
     const normalizedKey = normalizeProjectSelectionKey(projectKey);
     const normalizedNumericKey = normalizeNumericProjectSelectionKey(projectKey);
-    // Partie nom extraite de la clé candidate (si elle aussi contient un préfixe numérique)
+    // Extraire aussi la partie nom de la clé candidate (si elle contient un préfixe numérique)
     const keyNamePart = normalizeProjectSelectionKey(
       String(projectKey || "").replace(/^\s*\d+\s*[-–]\s*/, "").trim()
     );
 
     return (
+      // Correspondance exacte (insensible à la casse et aux accents)
       normalizedKey === requestedKey ||
-      // Correspondance par numéro pur (ex: "001" == "1")
+      // Correspondance par numéro pur (ex : "001" == "1")
       (requestedNumericKey && normalizedNumericKey && normalizedNumericKey === requestedNumericKey) ||
       // "232032 - BONNE-NOUVELLE" stocké → correspond à "BONNE-NOUVELLE" dans la liste
       (requestedNamePart && requestedNamePart !== requestedKey && normalizedKey === requestedNamePart) ||
@@ -409,7 +472,19 @@ async function fetchProjectKeysFromGrist() {
 
     const projectsTable = await window.grist.docApi.fetchTable("Projets");
     return tableToRows(projectsTable)
-      .map((row) => String(row?.Nom_de_projet || "").trim())
+      .map((row) => {
+        const projectName = String(row?.Nom_de_projet || "").trim();
+        const projectNumber = String(row?.Numero_de_projet || "").trim();
+        const canonicalProjectKey = projectName || projectNumber;
+        if (canonicalProjectKey) {
+          rememberProjectAliases(canonicalProjectKey, [
+            projectName,
+            projectNumber,
+            projectName && projectNumber ? `${projectNumber} - ${projectName}` : "",
+          ]);
+        }
+        return canonicalProjectKey;
+      })
       .filter(Boolean);
   } catch (error) {
     console.warn("Impossible de charger la liste Projets pour la synchronisation :", error);
@@ -424,6 +499,10 @@ function mergeProjectKeys(...projectKeyLists) {
     const normalizedProject = String(projectKey || "").trim();
     const lookupKey = normalizeProjectSelectionKey(normalizedProject);
     if (normalizedProject && !projectsByKey.has(lookupKey)) {
+      rememberProjectAliases(normalizedProject, [
+        getProjectNamePart(normalizedProject),
+        getProjectNumberPart(normalizedProject),
+      ]);
       projectsByKey.set(lookupKey, normalizedProject);
     }
   });
@@ -496,7 +575,9 @@ async function refreshProjectKeysAndApplySharedSelection() {
     ]);
     const freshKeys = mergeProjectKeys(planningKeys, gristKeys);
     if (freshKeys.length) {
-      renderProjectOptions(freshKeys, state.activeProjectKey);
+      const selectedFreshProjectKey =
+        findAvailableProjectKey(freshKeys, state.activeProjectKey) || state.activeProjectKey;
+      renderProjectOptions(freshKeys, selectedFreshProjectKey);
     }
     await applyRestoredSharedProject(freshKeys.length ? freshKeys : []);
   } catch (err) {
@@ -553,8 +634,6 @@ export async function bootstrapHubApp() {
     // Subscription Planning Projet main → synchro planning-axis + gestion-depenses2
     state.planningApi.subscribeViewportChange((payload) => {
       handleViewportChange({ ...payload, app: "planning-projet-main" });
-      // Sync direct et immédiat vers gestion-depenses2 (ne passe pas par la queue)
-      void syncViewportToExpensesNow(payload?.viewport);
     });
 
     if (typeof state.planningApi.subscribeSelectionChange === "function") {
@@ -571,8 +650,6 @@ export async function bootstrapHubApp() {
     // Subscription Planning Projet axis (frise) → synchro planning-main + gestion-depenses2
     state.planningAxisApi.subscribeViewportChange((payload) => {
       handleViewportChange({ ...payload, app: "planning-projet-axis" });
-      // Sync direct et immédiat vers gestion-depenses2 (ne passe pas par la queue)
-      void syncViewportToExpensesNow(payload?.viewport);
     });
 
     if (dom.projectSelectEl instanceof HTMLSelectElement) {

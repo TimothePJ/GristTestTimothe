@@ -7,7 +7,6 @@ import {
 import {
   appendLog,
   getViewportSourceLabel,
-  getViewportTargetApis,
   isSharedPlanningControlsLocked,
   setHubStatus,
   setLastRange,
@@ -48,6 +47,16 @@ function traceViewportSync(event, details = {}) {
 let _pendingExpensesViewport = null; // dernier viewport demandé, appliqué dès que l'API est prête
 let _expensesApplyInProgress = false;
 
+function scheduleExpensesViewportPresentationBurst() {
+  scheduleExpensesFramePresentation();
+  window.requestAnimationFrame(() => {
+    scheduleExpensesFramePresentation(1);
+  });
+  window.setTimeout(() => {
+    scheduleExpensesFramePresentation(1);
+  }, 120);
+}
+
 /**
  * Enregistre un viewport à appliquer à gestion-depenses2 et lance le drain.
  * Met à jour sharedViewportState immédiatement pour éviter que framePresentation
@@ -72,28 +81,42 @@ function requestExpensesViewport(viewport) {
 }
 
 /**
- * Applique le viewport en attente à gestion-depenses2 de façon sérialisée.
- * Exporté pour être appelé depuis childApi.js dès que l'API devient disponible.
+ * Applique le viewport en attente à gestion-depenses2 (fire-and-forget).
+ *
+ * Pourquoi fire-and-forget (pas d'await) ?
+ * applyViewport() retourne une "settled promise" que gestion-depenses2 résout
+ * via finishChargePlanSyncSuppression(token). Si setSelectedProject() est
+ * appelé entre-temps (ex. dans attachExpensesFrameApi), il incrémente le
+ * suppressionToken et invalide le token de l'apply en cours → la settled
+ * promise ne se résout jamais → _expensesApplyInProgress reste true indéfiniment
+ * → plus aucun scroll ne passe. Le fire-and-forget élimine ce deadlock.
+ * Gestion-depenses2 gère déjà les appels concurrents via beginChargePlanSyncSuppression.
  */
-export async function drainExpensesViewportQueue() {
-  if (_expensesApplyInProgress) return; // déjà en cours, le finally relancera
+export function drainExpensesViewportQueue() {
+  if (_expensesApplyInProgress) return;
+
+  if (!state.expensesApi?.applyViewport) {
+    if (_pendingExpensesViewport) {
+      traceViewportSync("expenses-wait-api", {
+        firstVisibleDate: _pendingExpensesViewport.firstVisibleDate,
+      });
+    }
+    return;
+  }
 
   let viewport = _pendingExpensesViewport;
   while (viewport) {
     _pendingExpensesViewport = null;
     _expensesApplyInProgress = true;
     try {
-      if (state.expensesApi?.applyViewport) {
-        await Promise.resolve(state.expensesApi.applyViewport(viewport));
-        scheduleExpensesFramePresentation();
-        traceViewportSync("expenses-applied", { firstVisibleDate: viewport.firstVisibleDate });
-      }
-    } catch (err) {
-      console.error("drainExpensesViewportQueue error:", err);
+      void Promise.resolve(state.expensesApi.applyViewport(viewport))
+        .catch((err) => console.error("drainExpensesViewportQueue error:", err));
+      scheduleExpensesViewportPresentationBurst();
+      traceViewportSync("expenses-applied", { firstVisibleDate: viewport.firstVisibleDate });
     } finally {
       _expensesApplyInProgress = false;
     }
-    // "last-wins" : si un nouveau viewport est arrivé pendant l'apply, l'appliquer
+    // last-wins : si un nouveau viewport est arrivé, l'appliquer aussi
     viewport = _pendingExpensesViewport;
   }
 }
@@ -332,10 +355,12 @@ export async function flushViewportSyncQueue() {
   // Déduplication : évite les boucles infinies
   if (sig && sig === state.lastAppliedViewportLogicalSignature) {
     traceViewportSync("flush-skip-duplicate", { source, sig });
+    if (source !== "gestion-depenses2") {
+      requestExpensesViewport(payload.viewport);
+    }
     state.sharedViewportState = canonical;
     syncExpensesPlanningShell(canonical);
     schedulePlanningFramePresentation();
-    scheduleExpensesFramePresentation();
     void flushViewportSyncQueue();
     return;
   }

@@ -308,6 +308,12 @@ export function renderProjectOptions(projectKeys, selectedProjectKey = "") {
   }
 
   const normalizedSelectedProjectKey = String(selectedProjectKey || "").trim();
+  const normalizedProjectKeys = (projectKeys || [])
+    .map((projectKey) => String(projectKey || "").trim())
+    .filter(Boolean);
+  const hasSelectedProjectOption =
+    normalizedSelectedProjectKey &&
+    normalizedProjectKeys.some((projectKey) => projectKey === normalizedSelectedProjectKey);
   dom.projectSelectEl.innerHTML = "";
 
   const placeholderOptionEl = document.createElement("option");
@@ -316,8 +322,7 @@ export function renderProjectOptions(projectKeys, selectedProjectKey = "") {
   placeholderOptionEl.selected = !normalizedSelectedProjectKey;
   dom.projectSelectEl.appendChild(placeholderOptionEl);
 
-  projectKeys.forEach((projectKey) => {
-    const normalizedProjectKey = String(projectKey || "").trim();
+  normalizedProjectKeys.forEach((normalizedProjectKey) => {
     const optionEl = document.createElement("option");
     optionEl.value = normalizedProjectKey;
     optionEl.textContent = normalizedProjectKey;
@@ -328,16 +333,35 @@ export function renderProjectOptions(projectKeys, selectedProjectKey = "") {
     dom.projectSelectEl.appendChild(optionEl);
   });
 
+  if (normalizedSelectedProjectKey && !hasSelectedProjectOption) {
+    const selectedOptionEl = document.createElement("option");
+    selectedOptionEl.value = normalizedSelectedProjectKey;
+    selectedOptionEl.textContent = normalizedSelectedProjectKey;
+    selectedOptionEl.selected = true;
+    selectedOptionEl.setAttribute("selected", "selected");
+    dom.projectSelectEl.appendChild(selectedOptionEl);
+  }
+
   dom.projectSelectEl.value = normalizedSelectedProjectKey;
   if (dom.projectSelectEl.value !== normalizedSelectedProjectKey) {
     dom.projectSelectEl.value = "";
   }
-  dom.projectSelectEl.disabled = projectKeys.length === 0;
+  dom.projectSelectEl.disabled = normalizedProjectKeys.length === 0 && !normalizedSelectedProjectKey;
 }
 
 export function setActiveProjectSelection(projectKey = "") {
   if (dom.projectSelectEl instanceof HTMLSelectElement) {
     const normalizedProjectKey = String(projectKey || "").trim();
+    if (
+      normalizedProjectKey &&
+      !Array.from(dom.projectSelectEl.options).some((optionEl) => optionEl.value === normalizedProjectKey)
+    ) {
+      const optionEl = document.createElement("option");
+      optionEl.value = normalizedProjectKey;
+      optionEl.textContent = normalizedProjectKey;
+      dom.projectSelectEl.appendChild(optionEl);
+      dom.projectSelectEl.disabled = false;
+    }
     dom.projectSelectEl.value = normalizedProjectKey;
     Array.from(dom.projectSelectEl.options).forEach((optionEl) => {
       optionEl.selected = optionEl.value === normalizedProjectKey;

@@ -152,6 +152,19 @@ export function getPlanningMainReferenceDayWidth(referencePanelContext = null) {
   }
 
   const topPanelRect = panelEl.getBoundingClientRect();
+  const exactVisibleDaySpan = getPlanningMainExactVisibleDaySpan();
+  const exactPanelWidth = Math.max(
+    0,
+    Number(panelEl.clientWidth) || Number(topPanelRect.width) || 0
+  );
+  if (
+    Number.isFinite(exactVisibleDaySpan) &&
+    exactVisibleDaySpan > 0 &&
+    exactPanelWidth > 0
+  ) {
+    return Math.round((exactPanelWidth / exactVisibleDaySpan) * 1000) / 1000;
+  }
+
   const gridLinePositions = Array.from(
     planningDocument.querySelectorAll(
       "#planningTimeline .vis-panel.vis-top .vis-time-axis .vis-grid.vis-minor"
