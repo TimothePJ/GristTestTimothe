@@ -34,33 +34,26 @@ function traceViewportSync(event, details = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// File d'attente dédiée pour gestion-depenses2
+// Synchronisation viewport → gestion-depenses2
 //
-// Problèmes résolus :
-//   1. viewport perdu si expensesApi null → stocké dans _pendingExpensesViewport
-//   2. pas de retry depuis flushViewportSyncQueue → requestExpensesViewport appelé là aussi
-//   3. races entre applyViewport concurrents → sérialisés par _expensesApplyInProgress
-//   4. sharedViewportState pas mis à jour sur chemin direct → mis à jour dans requestExpensesViewport
-//   5. viewport en attente non appliqué à l'attachement → drainExpensesViewportQueue exporté
+// Pattern : RAF-coalescing + fire-and-forget
+//
+//   • Plusieurs rangechanged/frame sur grande plage → un seul applyViewport/frame
+//     (requestAnimationFrame coalesce tous les events d'une même frame en un seul apply)
+//   • Pas d'await sur la settled promise de gestion-depenses2 (deadlock possible si
+//     setSelectedProject() s'intercale et invalide le suppressionToken)
+//   • Viewport conservé en mémoire si l'API n'est pas encore prête ; appliqué
+//     immédiatement à l'attachement via drainExpensesViewportQueue()
 // ---------------------------------------------------------------------------
 
-let _pendingExpensesViewport = null; // dernier viewport demandé, appliqué dès que l'API est prête
-let _expensesApplyInProgress = false;
-
-function scheduleExpensesViewportPresentationBurst() {
-  scheduleExpensesFramePresentation();
-  window.requestAnimationFrame(() => {
-    scheduleExpensesFramePresentation(1);
-  });
-  window.setTimeout(() => {
-    scheduleExpensesFramePresentation(1);
-  }, 120);
-}
+let _pendingExpensesViewport = null; // dernier viewport demandé
+let _expensesApplyRafId = null;      // RAF de coalescing
 
 /**
- * Enregistre un viewport à appliquer à gestion-depenses2 et lance le drain.
- * Met à jour sharedViewportState immédiatement pour éviter que framePresentation
- * ne réapplique un viewport périmé.
+ * Enregistre un viewport et planifie son application via RAF.
+ * Tous les events reçus dans la même frame sont coalesés → un seul applyViewport.
+ * Met à jour sharedViewportState immédiatement pour que framePresentation.js
+ * ne réapplique pas un viewport périmé.
  */
 function requestExpensesViewport(viewport) {
   if (!viewport) return;
@@ -68,8 +61,6 @@ function requestExpensesViewport(viewport) {
   const exact = buildPlanningExactSharedViewport(viewport);
   if (!normalizeIsoDate(exact.firstVisibleDate)) return;
 
-  // Mise à jour de sharedViewportState AVANT tout scheduleExpensesFramePresentation
-  // pour que framePresentation.js ne réapplique pas un viewport ancien.
   const canonical = buildCanonicalSharedViewport(exact);
   if (canonical.firstVisibleDate) {
     state.sharedViewportState = canonical;
@@ -77,48 +68,43 @@ function requestExpensesViewport(viewport) {
   }
 
   _pendingExpensesViewport = exact;
-  void drainExpensesViewportQueue();
+
+  // Planifier le drain sur la prochaine frame ; si déjà planifié, on ne crée
+  // pas un deuxième RAF — le viewport existant est simplement écrasé ci-dessus.
+  if (_expensesApplyRafId === null) {
+    _expensesApplyRafId = window.requestAnimationFrame(() => {
+      _expensesApplyRafId = null;
+      drainExpensesViewportQueue();
+    });
+  }
 }
 
 /**
- * Applique le viewport en attente à gestion-depenses2 (fire-and-forget).
- *
- * Pourquoi fire-and-forget (pas d'await) ?
- * applyViewport() retourne une "settled promise" que gestion-depenses2 résout
- * via finishChargePlanSyncSuppression(token). Si setSelectedProject() est
- * appelé entre-temps (ex. dans attachExpensesFrameApi), il incrémente le
- * suppressionToken et invalide le token de l'apply en cours → la settled
- * promise ne se résout jamais → _expensesApplyInProgress reste true indéfiniment
- * → plus aucun scroll ne passe. Le fire-and-forget élimine ce deadlock.
- * Gestion-depenses2 gère déjà les appels concurrents via beginChargePlanSyncSuppression.
+ * Applique immédiatement le viewport en attente à gestion-depenses2 (fire-and-forget).
+ * Annule le RAF de coalescing si présent (drain immédiat = plus besoin du RAF).
+ * Exporté pour être appelé depuis childApi.js à l'attachement de l'API.
  */
 export function drainExpensesViewportQueue() {
-  if (_expensesApplyInProgress) return;
+  if (_expensesApplyRafId !== null) {
+    window.cancelAnimationFrame(_expensesApplyRafId);
+    _expensesApplyRafId = null;
+  }
+
+  const viewport = _pendingExpensesViewport;
+  if (!viewport) return;
 
   if (!state.expensesApi?.applyViewport) {
-    if (_pendingExpensesViewport) {
-      traceViewportSync("expenses-wait-api", {
-        firstVisibleDate: _pendingExpensesViewport.firstVisibleDate,
-      });
-    }
+    // API pas encore prête : garder le viewport en attente pour l'attachement.
+    traceViewportSync("expenses-wait-api", { firstVisibleDate: viewport.firstVisibleDate });
     return;
   }
 
-  let viewport = _pendingExpensesViewport;
-  while (viewport) {
-    _pendingExpensesViewport = null;
-    _expensesApplyInProgress = true;
-    try {
-      void Promise.resolve(state.expensesApi.applyViewport(viewport))
-        .catch((err) => console.error("drainExpensesViewportQueue error:", err));
-      scheduleExpensesViewportPresentationBurst();
-      traceViewportSync("expenses-applied", { firstVisibleDate: viewport.firstVisibleDate });
-    } finally {
-      _expensesApplyInProgress = false;
-    }
-    // last-wins : si un nouveau viewport est arrivé, l'appliquer aussi
-    viewport = _pendingExpensesViewport;
-  }
+  _pendingExpensesViewport = null;
+
+  void Promise.resolve(state.expensesApi.applyViewport(viewport))
+    .catch((err) => console.error("drainExpensesViewportQueue error:", err));
+  scheduleExpensesFramePresentation();
+  traceViewportSync("expenses-applied", { firstVisibleDate: viewport.firstVisibleDate });
 }
 
 // ---------------------------------------------------------------------------
