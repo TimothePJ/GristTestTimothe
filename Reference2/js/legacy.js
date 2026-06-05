@@ -132,7 +132,9 @@ function parseNumeroForStorage(v) {
         const _apply = grist.docApi.applyUserActions.bind(grist.docApi);
         grist.docApi.applyUserActions = function (actions) {
           const fixed = (actions || []).map(a => {
-            if (Array.isArray(a) && a.length >= 4) a[3] = normalizeCols(a[3]);
+            if (Array.isArray(a) && a.length >= 4) {
+              a[3] = normalizeReferenceActionFieldsForRetard(a, normalizeCols(a[3]));
+            }
             return a;
           });
           return _apply(fixed);
@@ -1184,7 +1186,158 @@ let lastValidDocument = '';
 const DOC_ADD_SPECIAL_VALUE = 'addDocuments';
 const DEFAULT_REFERENCE_DOCUMENT_TYPE = 'NDC';
 const DEFAULT_REFERENCE_DATE = '1900-01-01';
+const REFERENCE_RETARD_DAY_MS = 86400000;
 let pendingReferenceDocuments = [];
+
+function parseReferenceRetardCalendarDate(value) {
+  if (value == null || value === '') return null;
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : new Date(value);
+  }
+
+  if (typeof value === 'number') {
+    const absValue = Math.abs(value);
+    const timestamp = absValue >= 86400 && absValue < 1e11 ? value * 1000 : value;
+    const date = new Date(timestamp);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (isoMatch) {
+    const year = Number(isoMatch[1]);
+    const month = Number(isoMatch[2]);
+    const day = Number(isoMatch[3]);
+    const date = new Date(year, month - 1, day);
+    return (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    )
+      ? date
+      : null;
+  }
+
+  const frMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+.*)?$/);
+  if (frMatch) {
+    const day = Number(frMatch[1]);
+    const month = Number(frMatch[2]);
+    const year = Number(frMatch[3]);
+    const date = new Date(year, month - 1, day);
+    return (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    )
+      ? date
+      : null;
+  }
+
+  const fallback = new Date(text);
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
+}
+
+function isEmptyReferenceRetardDate(date) {
+  return (
+    !(date instanceof Date) ||
+    Number.isNaN(date.getTime()) ||
+    (
+      date.getFullYear() === 1900 &&
+      date.getMonth() === 0 &&
+      date.getDate() === 1
+    )
+  );
+}
+
+function getReferenceRetardCalendarMs(date) {
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function computeReferenceRetardDays(recuValue, dateLimiteValue) {
+  const recuDate = parseReferenceRetardCalendarDate(recuValue);
+  const dateLimite = parseReferenceRetardCalendarDate(dateLimiteValue);
+
+  if (isEmptyReferenceRetardDate(recuDate) || isEmptyReferenceRetardDate(dateLimite)) {
+    return null;
+  }
+
+  const recuMs = getReferenceRetardCalendarMs(recuDate);
+  const limiteMs = getReferenceRetardCalendarMs(dateLimite);
+  if (recuMs <= limiteMs) {
+    return null;
+  }
+
+  return Math.floor((recuMs - limiteMs) / REFERENCE_RETARD_DAY_MS);
+}
+
+function withComputedReferenceRetard(fields) {
+  return {
+    ...fields,
+    Retard: computeReferenceRetardDays(fields?.Recu, fields?.DateLimite),
+  };
+}
+
+function hasOwnField(fields, key) {
+  return Object.prototype.hasOwnProperty.call(fields || {}, key);
+}
+
+function getReferenceRecordById(recordId) {
+  const numericId = Number(recordId);
+  if (!Number.isInteger(numericId) || numericId <= 0) return null;
+
+  let currentRecords = [];
+  try {
+    currentRecords = Array.isArray(records) ? records : [];
+  } catch (_error) {
+    currentRecords = [];
+  }
+
+  return currentRecords.find((record) => Number(record?.id) === numericId) || null;
+}
+
+function normalizeReferenceActionFieldsForRetard(action, fields) {
+  if (!Array.isArray(action) || !fields || typeof fields !== 'object') {
+    return fields;
+  }
+
+  const actionType = String(action[0] || '');
+  const tableName = String(action[1] || '').trim().toLowerCase();
+  if (tableName !== 'references') {
+    return fields;
+  }
+
+  if (actionType === 'AddRecord') {
+    return withComputedReferenceRetard(fields);
+  }
+
+  if (actionType !== 'UpdateRecord') {
+    return fields;
+  }
+
+  const hasRecuUpdate = hasOwnField(fields, 'Recu');
+  const hasDateLimiteUpdate = hasOwnField(fields, 'DateLimite');
+  if (!hasRecuUpdate && !hasDateLimiteUpdate) {
+    return fields;
+  }
+
+  const existingRecord = getReferenceRecordById(action[2]);
+  const recuValue = hasRecuUpdate ? fields.Recu : existingRecord?.Recu;
+  const dateLimiteValue = hasDateLimiteUpdate ? fields.DateLimite : existingRecord?.DateLimite;
+  const hasRecuValue = hasRecuUpdate || hasOwnField(existingRecord, 'Recu');
+  const hasDateLimiteValue = hasDateLimiteUpdate || hasOwnField(existingRecord, 'DateLimite');
+
+  if (!hasRecuValue || !hasDateLimiteValue) {
+    return fields;
+  }
+
+  return {
+    ...fields,
+    Retard: computeReferenceRetardDays(recuValue, dateLimiteValue),
+  };
+}
 
 async function refreshProjectsTableCache() {
   try {
@@ -1971,7 +2124,7 @@ async function createDocumentsBatch({
   uniqueDocuments.forEach((doc) => {
     const numeroValue = parseNumeroForStorage(doc.documentNumber);
     normalizedEmitters.forEach((emetteur) => {
-      actions.push(['AddRecord', 'References', null, {
+      actions.push(['AddRecord', 'References', null, withComputedReferenceRetard({
         NomProjet: normalizedProject,
         NomDocument: doc.documentName,
         NumeroDocument: numeroOrZero(numeroValue),
@@ -1984,7 +2137,7 @@ async function createDocumentsBatch({
         DescriptionObservations: 'EN ATTENTE',
         DateLimite: safeDefaultDatelimite,
         Service: serviceValue,
-      }]);
+      })]);
     });
   });
 
@@ -2428,6 +2581,84 @@ function formatDate(dateString) {
   return `${day}/${month}/${year}`;
 }
 
+const REFERENCE_TABLE_HIDDEN_KEYS = new Set([
+  'NomProjet',
+  'NomDocument',
+  'id',
+  'NumeroDocument',
+  'Type_document',
+  'Zone',
+]);
+
+const REFERENCE_TABLE_PREFERRED_HEADER_ORDER = [
+  'Emetteur',
+  'Reference',
+  'Indice',
+  'Recu',
+  'DescriptionObservations',
+  'Remarque',
+  'DateLimite',
+  'Retard',
+  'DureeLimite',
+  'Bloquant',
+  'Archive',
+];
+
+function buildReferenceTableHeaders(filteredRecords) {
+  const availableHeaders = [];
+  const seenHeaders = new Set();
+
+  (filteredRecords || []).forEach((record) => {
+    Object.keys(record || {}).forEach((key) => {
+      if (REFERENCE_TABLE_HIDDEN_KEYS.has(key) || seenHeaders.has(key)) {
+        return;
+      }
+      seenHeaders.add(key);
+      availableHeaders.push(key);
+    });
+  });
+
+  const preferredHeaders = REFERENCE_TABLE_PREFERRED_HEADER_ORDER.filter((header) =>
+    seenHeaders.has(header)
+  );
+  const remainingHeaders = availableHeaders.filter((header) =>
+    !REFERENCE_TABLE_PREFERRED_HEADER_ORDER.includes(header)
+  );
+
+  return [...preferredHeaders, ...remainingHeaders];
+}
+
+function formatReferenceRetardValue(value) {
+  if (value == null || value === '') return '';
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) && numericValue > 0
+    ? String(Math.trunc(numericValue))
+    : '';
+}
+
+function hasPositiveReferenceRetard(value) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) && numericValue > 0;
+}
+
+function removeColumnsFromClonedTableByHeaders(clonedTable, headerNames) {
+  if (!(clonedTable instanceof HTMLTableElement)) return;
+
+  const headersToRemove = new Set(headerNames || []);
+  const indicesToRemove = Array.from(clonedTable.querySelectorAll('thead th'))
+    .map((th, index) => headersToRemove.has(String(th.textContent || '').trim()) ? index : -1)
+    .filter((index) => index >= 0)
+    .sort((left, right) => right - left);
+
+  clonedTable.querySelectorAll('tr').forEach(row => {
+    indicesToRemove.forEach(idx => {
+      if (row.children[idx]) {
+        row.removeChild(row.children[idx]);
+      }
+    });
+  });
+}
+
 // Add event listener for archive toggle checkbox
 document.getElementById('hideArchivedToggle').addEventListener('change', () => {
   const second = document.getElementById('secondColumnListbox');
@@ -2467,15 +2698,7 @@ function populateTable() {
 
   if (filteredRecords.length === 0) return;
 
-  const headers = Object.keys(filteredRecords[0]).filter(
-    (key) =>
-      key !== 'NomProjet' &&
-      key !== 'NomDocument' &&
-      key !== 'id' &&
-      key !== 'NumeroDocument' &&
-      key !== 'Type_document' &&
-      key !== 'Zone'
-  );
+  const headers = buildReferenceTableHeaders(filteredRecords);
 
   tableHeader.innerHTML = '<th>ID</th>';
   headers.forEach((header) => {
@@ -2547,7 +2770,8 @@ function populateTable() {
     headers.forEach((header, index) => {
       const td = document.createElement('td');
       td.contentEditable = false;
-      let value = record[header] || '';
+      let value = record[header];
+      if (value == null) value = '';
 
       // Format date fields (Recu and DateLimite)
       if ((header === 'Recu' || header === 'DateLimite') && isValidDate(value)) {
@@ -2597,6 +2821,10 @@ function populateTable() {
             alert("Erreur lors de la mise à jour de l'archive.");
           }
         });
+      } else if (header === 'Retard') {
+        td.classList.add('retard-cell');
+        td.classList.toggle('has-retard', hasPositiveReferenceRetard(value));
+        td.textContent = formatReferenceRetardValue(value);
       } else {
         td.textContent = value;
       }
@@ -2835,7 +3063,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
 
       selectedDocuments.forEach(docVal => {
         const parsedDoc = parseDocValue(docVal);
-        const newRow = {
+        const newRow = withComputedReferenceRetard({
           NomProjet: selectedProject,
           NomDocument: parsedDoc.name,
           NumeroDocument: numeroOrZero(parseNumeroForStorage(parsedDoc.numero)),
@@ -2850,11 +3078,11 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
           DateLimite: datelimite,
           Service: serviceValue,
           Chemin: cheminFromAddFile
-        };
+        });
         userActions.push(['AddRecord', 'References', null, newRow]);
       });
     } else {
-      const newRow = {
+      const newRow = withComputedReferenceRetard({
         NomProjet: selectedProject,
         NomDocument: currentSelectedDoc.name,
         NumeroDocument: numeroOrZero(parseNumeroForStorage(currentSelectedDoc.numero)),
@@ -2868,7 +3096,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
         Remarque: remarque,
         DateLimite: datelimite,
         Service: serviceValue
-      };
+      });
       userActions.push(['AddRecord', 'References', null, newRow]);
     }
 
@@ -2893,7 +3121,7 @@ document.getElementById('editRowDialog').addEventListener('submit', (e) => {
   e.preventDefault();
 
   const formData = new FormData(e.target);
-  const updatedRow = {
+  const updatedRow = withComputedReferenceRetard({
     Emetteur: formData.get('editEmetteur'),
     Reference: formData.get('reference'),
     Indice: formData.get('indice'),
@@ -2901,7 +3129,7 @@ document.getElementById('editRowDialog').addEventListener('submit', (e) => {
     DescriptionObservations: formData.get('description'),
     Remarque: normalizeRemarqueValue(formData.get('remarque')),
     DateLimite: formData.get('datelimite')
-  };
+  });
 
   // Handle file upload if a file was selected
   const fileInput = document.getElementById('editReferenceFile');
@@ -3154,7 +3382,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
     // Création des nouvelles lignes
     const num = parseNumeroForStorage(documentNumber);
     const nm = String(documentName).trim();
-    const newRows = selectedEmitters.map((emetteur) => ({
+    const newRows = selectedEmitters.map((emetteur) => withComputedReferenceRetard({
       NomProjet: selectedProject,
       NomDocument: nm,
       NumeroDocument: numeroOrZero(num),
@@ -3957,7 +4185,7 @@ document.getElementById('editRowDialog').addEventListener('submit', async (e) =>
     datelimite = "1900-01-01";
   }
 
-  const updatedRow = {
+  const updatedRow = withComputedReferenceRetard({
     Emetteur: formData.get('editEmetteur'),
     Reference: formData.get('reference'),
     Indice: formData.get('indice'),
@@ -3965,7 +4193,7 @@ document.getElementById('editRowDialog').addEventListener('submit', async (e) =>
     DescriptionObservations: formData.get('description'),
     Remarque: normalizeRemarqueValue(formData.get('remarque')),
     DateLimite: datelimite // Valeur corrigée ici
-  };
+  });
 
   if (selectedRecordId) {
     try {
@@ -4546,7 +4774,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
         const num = parseNumeroForStorage(doc.documentNumber);
         const nm  = String(doc.documentName).trim();
 
-        const newRow = {
+        const newRow = withComputedReferenceRetard({
           NomProjet: selectedProject,
           NomDocument: nm,
           NumeroDocument: numeroOrZero(num),
@@ -4559,7 +4787,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
           DescriptionObservations: 'EN ATTENTE',
           DateLimite: defaultDatelimite,
           Service: serviceValue
-        };
+        });
 
         actions.push(['AddRecord', 'References', null, newRow]);
       });
@@ -4811,14 +5039,7 @@ document.getElementById('copyTableDataButtonImage').addEventListener('click', as
   // Ici, on souhaite retirer "DateLimite", "Bloquant" et "Archive".
   // Dans notre tableau, ces colonnes se trouvent respectivement aux indices 6, 7 et 8
   // On supprime en partant de la plus grande pour éviter que l’indexation ne soit décalée.
-  const indicesToRemove = [8, 7, 6];
-  clonedTable.querySelectorAll('tr').forEach(row => {
-    indicesToRemove.forEach(idx => {
-      if (row.children[idx]) {
-        row.removeChild(row.children[idx]);
-      }
-    });
-  });
+  removeColumnsFromClonedTableByHeaders(clonedTable, ['DateLimite', 'Bloquant', 'Archive']);
 
   // Créer un conteneur temporaire dans lequel on place le clone pour le rendre capturable.
   const tempContainer = document.createElement('div');
@@ -4928,14 +5149,7 @@ document.getElementById('downloadTableButton').addEventListener('click', async f
     thead.style.top = '0';
   }
 
-  const indicesToRemove = [8, 7, 6];
-  clonedTable.querySelectorAll('tr').forEach(row => {
-    indicesToRemove.forEach(idx => {
-      if (row.children[idx]) {
-        row.removeChild(row.children[idx]);
-      }
-    });
-  });
+  removeColumnsFromClonedTableByHeaders(clonedTable, ['DateLimite', 'Bloquant', 'Archive']);
 
   // Créer un conteneur temporaire hors écran pour placer le clone
   const tempContainer = document.createElement('div');

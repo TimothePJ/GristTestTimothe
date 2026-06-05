@@ -667,6 +667,27 @@ function formatReferenceDateIso(value) {
   return isEmptyReferenceDate(date) ? "" : formatIsoDate(date);
 }
 
+function getReferenceCalendarMs(date) {
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function computeReferenceRetardDays(recuValue, dateLimiteValue) {
+  const recuDate = parseCalendarDate(recuValue);
+  const dateLimite = parseCalendarDate(dateLimiteValue);
+
+  if (isEmptyReferenceDate(recuDate) || isEmptyReferenceDate(dateLimite)) {
+    return null;
+  }
+
+  const recuMs = getReferenceCalendarMs(recuDate);
+  const limiteMs = getReferenceCalendarMs(dateLimite);
+  if (recuMs <= limiteMs) {
+    return null;
+  }
+
+  return Math.floor((recuMs - limiteMs) / DAY_MS);
+}
+
 function parseReferenceDurationLimit(value) {
   const text = toText(value);
   if (!text) return null;
@@ -750,39 +771,82 @@ async function fetchPlanningRowById(rowId) {
   return { row, columns };
 }
 
-async function buildReferenceOffsetSnapshotForPlanningRow(planningRow, columns = {}) {
+async function buildReferenceOffsetSnapshotForPlanningRow(
+  planningRow,
+  columns = {},
+  referenceRowsOverride = null
+) {
   const startDate = getPlanningSegmentStartDate(planningRow, columns);
-  if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) {
-    return null;
-  }
+  const hasValidStartDate = startDate instanceof Date && !Number.isNaN(startDate.getTime());
 
-  const referenceRows = await fetchTableRows(REFERENCES_TABLE_NAME).catch(() => []);
+  const referenceRows = Array.isArray(referenceRowsOverride)
+    ? referenceRowsOverride
+    : await fetchTableRows(REFERENCES_TABLE_NAME).catch(() => []);
   const linkedRows = findLinkedReferenceRowsForPlanningRow(planningRow, referenceRows, columns);
-  const offsets = linkedRows
-    .map((row) => {
-      const referenceId = Number(row?.id);
-      const durationWeeks =
-        parseReferenceDurationLimit(row?.DureeLimite) ??
-        getReferenceDurationWeeksFromLimitDate(startDate, parseCalendarDate(row?.DateLimite));
-      if (!Number.isInteger(referenceId) || referenceId <= 0 || durationWeeks == null) {
-        return null;
-      }
-      return { referenceId, durationWeeks };
-    })
-    .filter(Boolean);
+  const seenReferenceIds = new Set();
+  const offsets = [];
+
+  linkedRows.forEach((row) => {
+    const referenceId = Number(row?.id);
+    if (!Number.isInteger(referenceId) || referenceId <= 0 || seenReferenceIds.has(referenceId)) {
+      return;
+    }
+
+    const referenceLimitDate = parseCalendarDate(row?.DateLimite);
+    const durationWeeks =
+      parseReferenceDurationLimit(row?.DureeLimite) ??
+      (
+        !hasValidStartDate || isEmptyReferenceDate(referenceLimitDate)
+          ? null
+          : getReferenceDurationWeeksFromLimitDate(startDate, referenceLimitDate)
+      );
+
+    if (durationWeeks == null) {
+      return;
+    }
+
+    seenReferenceIds.add(referenceId);
+    offsets.push({ referenceId, durationWeeks, recuValue: row?.Recu });
+  });
 
   return offsets.length ? { offsets } : null;
 }
 
-async function syncReferenceDateLimitesFromSnapshot(snapshot, planningRow, columns = {}) {
-  if (!snapshot?.offsets?.length) return 0;
+async function buildReferenceOffsetSnapshotsForPlanningRows(planningRows = [], columns = {}) {
+  const idCol = columns.id || "id";
+  const uniqueRowsById = new Map();
+  (Array.isArray(planningRows) ? planningRows : []).forEach((row) => {
+    const rowId = Number(row?.[idCol]);
+    if (Number.isInteger(rowId) && rowId > 0 && !uniqueRowsById.has(rowId)) {
+      uniqueRowsById.set(rowId, row);
+    }
+  });
+
+  if (!uniqueRowsById.size) {
+    return new Map();
+  }
+
+  const referenceRows = await fetchTableRows(REFERENCES_TABLE_NAME).catch(() => []);
+  const snapshotsByRowId = new Map();
+  for (const [rowId, row] of uniqueRowsById.entries()) {
+    const snapshot = await buildReferenceOffsetSnapshotForPlanningRow(row, columns, referenceRows);
+    if (snapshot?.offsets?.length) {
+      snapshotsByRowId.set(rowId, snapshot);
+    }
+  }
+
+  return snapshotsByRowId;
+}
+
+function buildReferenceDateLimiteSyncActions(snapshot, planningRow, columns = {}) {
+  if (!snapshot?.offsets?.length) return [];
 
   const startDate = getPlanningSegmentStartDate(planningRow, columns);
   if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) {
-    return 0;
+    return [];
   }
 
-  const actions = snapshot.offsets
+  return snapshot.offsets
     .map((offset) => {
       const dateLimite = subtractWeeksFromDate(startDate, offset.durationWeeks);
       const dateLimiteIso = formatIsoDate(dateLimite);
@@ -794,26 +858,117 @@ async function syncReferenceDateLimitesFromSnapshot(snapshot, planningRow, colum
         {
           DateLimite: dateLimiteIso,
           DureeLimite: offset.durationWeeks,
+          Retard: computeReferenceRetardDays(offset.recuValue, dateLimiteIso),
         },
       ];
     })
     .filter(Boolean);
+}
 
-  if (!actions.length) return 0;
+async function applyReferenceDateLimiteSyncActions(actions = []) {
+  const actionsByReferenceId = new Map();
+  (Array.isArray(actions) ? actions : []).forEach((action) => {
+    const referenceId = Number(action?.[2]);
+    if (Number.isInteger(referenceId) && referenceId > 0) {
+      actionsByReferenceId.set(referenceId, action);
+    }
+  });
+
+  const dedupedActions = [...actionsByReferenceId.values()];
+  if (!dedupedActions.length) return 0;
 
   const grist = getGrist();
   if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
     throw new Error("grist.docApi.applyUserActions(...) indisponible.");
   }
 
-  await grist.docApi.applyUserActions(actions);
-  return actions.length;
+  await grist.docApi.applyUserActions(dedupedActions);
+  _planningRowsCache = null;
+  _refsTableCache = null;
+  return dedupedActions.length;
 }
 
-async function syncReferenceDateLimitesAfterPlanningChange(snapshot, rowId) {
-  if (!snapshot?.offsets?.length) return 0;
-  const { row, columns } = await fetchPlanningRowById(rowId);
-  return syncReferenceDateLimitesFromSnapshot(snapshot, row, columns);
+function isPlanningUpdateActionForTable(action, tableName) {
+  return (
+    Array.isArray(action) &&
+    action[0] === "UpdateRecord" &&
+    action[1] === tableName &&
+    Number.isInteger(Number(action[2])) &&
+    action[3] &&
+    typeof action[3] === "object"
+  );
+}
+
+async function captureReferenceDateLimiteSyncContext(
+  planningRows = [],
+  planningActions = [],
+  tableName = "",
+  columns = {}
+) {
+  const idCol = columns.id || "id";
+  const rowById = new Map();
+  (Array.isArray(planningRows) ? planningRows : []).forEach((row) => {
+    const rowId = Number(row?.[idCol]);
+    if (Number.isInteger(rowId) && rowId > 0) {
+      rowById.set(rowId, row);
+    }
+  });
+
+  const affectedRowsById = new Map();
+  (Array.isArray(planningActions) ? planningActions : []).forEach((action) => {
+    if (!isPlanningUpdateActionForTable(action, tableName)) return;
+    const rowId = Number(action[2]);
+    const row = rowById.get(rowId);
+    if (row) {
+      affectedRowsById.set(rowId, row);
+    }
+  });
+
+  if (!affectedRowsById.size) {
+    return null;
+  }
+
+  const snapshotsByRowId = await buildReferenceOffsetSnapshotsForPlanningRows(
+    [...affectedRowsById.values()],
+    columns
+  );
+  if (!snapshotsByRowId.size) {
+    return null;
+  }
+
+  const mergedRowsById = new Map(
+    [...affectedRowsById.entries()].map(([rowId, row]) => [rowId, { ...row }])
+  );
+  (Array.isArray(planningActions) ? planningActions : []).forEach((action) => {
+    if (!isPlanningUpdateActionForTable(action, tableName)) return;
+    const rowId = Number(action[2]);
+    const currentMergedRow = mergedRowsById.get(rowId);
+    if (!currentMergedRow) return;
+    mergedRowsById.set(rowId, {
+      ...currentMergedRow,
+      ...(action[3] || {}),
+    });
+  });
+
+  return {
+    snapshotsByRowId,
+    mergedRowsById,
+  };
+}
+
+async function syncReferenceDateLimitesFromContext(context, columns = {}) {
+  if (!context?.snapshotsByRowId?.size || !context?.mergedRowsById?.size) {
+    return 0;
+  }
+
+  const actions = [];
+  context.snapshotsByRowId.forEach((snapshot, rowId) => {
+    const planningRow = context.mergedRowsById.get(rowId);
+    if (!planningRow) return;
+    actions.push(...buildReferenceDateLimiteSyncActions(snapshot, planningRow, columns));
+  });
+
+  return applyReferenceDateLimiteSyncActions(actions);
 }
 
 async function buildExternalZoneSyncActionsForPlanningChanges(zoneChanges = []) {
@@ -1353,15 +1508,27 @@ export async function syncCoffrageDiffCoffrageFromGroups(
     return { updatedCount: 0, matchedCoffrageCount, skipped: false };
   }
 
+  const referenceSyncContext = await captureReferenceDateLimiteSyncContext(
+    rows,
+    actions,
+    table.sourceTable,
+    columns
+  );
+
   const grist = getGrist();
   if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
     throw new Error("grist.docApi.applyUserActions(...) indisponible.");
   }
 
   await grist.docApi.applyUserActions(actions);
+  const referenceDateLimiteUpdatedCount = await syncReferenceDateLimitesFromContext(
+    referenceSyncContext,
+    columns
+  );
   return {
     updatedCount: actions.length,
     matchedCoffrageCount,
+    referenceDateLimiteUpdatedCount,
     skipped: false,
   };
 }
@@ -1424,13 +1591,9 @@ export async function updatePlanningDurationAndLeftDate(
   };
 
   let currentRow = null;
-  let referenceOffsetSnapshot = null;
   try {
     const rows = await fetchTableRows(table.sourceTable);
     currentRow = rows.find((row) => Number(row?.[idCol]) === recordId) || null;
-    if (currentRow) {
-      referenceOffsetSnapshot = await buildReferenceOffsetSnapshotForPlanningRow(currentRow, columns);
-    }
   } catch (error) {
     console.warn("Impossible de relire la ligne planning pour recalcul auto des dates :", error);
   }
@@ -1508,16 +1671,31 @@ export async function updatePlanningDurationAndLeftDate(
     }
   }
 
-  await grist.docApi.applyUserActions([
+  const actions = [
     [
       "UpdateRecord",
       table.sourceTable,
       recordId,
       updates,
     ],
-  ]);
+  ];
+  const referenceSyncContext = await captureReferenceDateLimiteSyncContext(
+    currentRow ? [currentRow] : [],
+    actions,
+    table.sourceTable,
+    columns
+  );
 
-  await syncReferenceDateLimitesAfterPlanningChange(referenceOffsetSnapshot, recordId);
+  await grist.docApi.applyUserActions(actions);
+  const referenceDateLimiteUpdatedCount = await syncReferenceDateLimitesFromContext(
+    referenceSyncContext,
+    columns
+  );
+
+  return {
+    updatedCount: 1,
+    referenceDateLimiteUpdatedCount,
+  };
 }
 
 export async function updatePlanningLignePlanning(rowId, lignePlanningValue) {
@@ -1605,8 +1783,6 @@ export async function updatePlanningFromMsProjectDrop({
   if (!currentRow) {
     throw new Error("Ligne Planning_Projet introuvable.");
   }
-  const referenceOffsetSnapshot = await buildReferenceOffsetSnapshotForPlanningRow(currentRow, columns);
-
   const typeDoc = String(currentRow[typeDocCol] ?? "").toUpperCase();
   const isNdc = isNdcTypeDoc(currentRow[typeDocCol]);
   const currentGroup = toText(currentRow[groupCol]);
@@ -1750,9 +1926,23 @@ export async function updatePlanningFromMsProjectDrop({
     ],
     ...planningLinkResetActions,
   ];
+  const referenceSyncContext = await captureReferenceDateLimiteSyncContext(
+    rows,
+    actions,
+    table.sourceTable,
+    columns
+  );
 
   await grist.docApi.applyUserActions(actions);
-  await syncReferenceDateLimitesAfterPlanningChange(referenceOffsetSnapshot, recordId);
+  const referenceDateLimiteUpdatedCount = await syncReferenceDateLimitesFromContext(
+    referenceSyncContext,
+    columns
+  );
+
+  return {
+    updatedCount: actions.length,
+    referenceDateLimiteUpdatedCount,
+  };
 }
 
 export async function updatePlanningGroupZoneFromPlanningDrop({
@@ -2004,13 +2194,25 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
   actions.push(...linkedActions);
   actions.push(...planningLinkResetActions);
   actions.push(...externalZoneSyncActions);
+  const referenceSyncContext = await captureReferenceDateLimiteSyncContext(
+    rows,
+    actions,
+    table.sourceTable,
+    columns
+  );
+
   await grist.docApi.applyUserActions(actions);
+  const referenceDateLimiteUpdatedCount = await syncReferenceDateLimitesFromContext(
+    referenceSyncContext,
+    columns
+  );
 
   return {
     updated: true,
     groupe: nextGroupValue,
     zone: targetZone,
     linkedUpdatedCount: linkedActions.length,
+    referenceDateLimiteUpdatedCount,
   };
 }
 
@@ -2215,13 +2417,25 @@ export async function updatePlanningZoneFromZoneHeaderDrop({
   actions.push(...linkedActions);
   actions.push(...planningLinkResetActions);
   actions.push(...externalZoneSyncActions);
+  const referenceSyncContext = await captureReferenceDateLimiteSyncContext(
+    rows,
+    actions,
+    table.sourceTable,
+    columns
+  );
+
   await grist.docApi.applyUserActions(actions);
+  const referenceDateLimiteUpdatedCount = await syncReferenceDateLimitesFromContext(
+    referenceSyncContext,
+    columns
+  );
 
   return {
     updated: true,
     zone: normalizedZone,
     groupe: nextGroupValue,
     linkedUpdatedCount: linkedActions.length,
+    referenceDateLimiteUpdatedCount,
   };
 }
 
@@ -2578,8 +2792,10 @@ export async function fetchPlanningReferenceDetails(rowId) {
         emetteur: toText(referenceRow?.Emetteur),
         reference: toText(referenceRow?.Reference),
         bloquant: Boolean(referenceRow?.Bloquant),
+        recu: formatReferenceDateIso(referenceRow?.Recu),
         dateLimite: formatReferenceDateIso(referenceRow?.DateLimite),
         durationWeeks: parseReferenceDurationLimit(referenceRow?.DureeLimite),
+        retard: computeReferenceRetardDays(referenceRow?.Recu, referenceRow?.DateLimite),
       };
     }),
   };
@@ -2588,6 +2804,7 @@ export async function fetchPlanningReferenceDetails(rowId) {
 export async function updatePlanningReferenceDetails(rowId, updates = []) {
   const { row, columns } = await fetchPlanningRowById(rowId);
   const startDate = getPlanningSegmentStartDate(row, columns);
+  const hasStartDate = startDate instanceof Date && !Number.isNaN(startDate.getTime());
 
   if (!_refsTableCache) _refsTableCache = await fetchTableRows(REFERENCES_TABLE_NAME);
   const referenceRows = _refsTableCache;
@@ -2597,6 +2814,11 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
       .map((referenceRow) => Number(referenceRow?.id))
       .filter((id) => Number.isInteger(id) && id > 0)
   );
+  const linkedRowsById = new Map(
+    linkedRows
+      .map((referenceRow) => [Number(referenceRow?.id), referenceRow])
+      .filter(([id]) => Number.isInteger(id) && id > 0)
+  );
 
   const actions = (Array.isArray(updates) ? updates : [])
     .map((update) => {
@@ -2604,6 +2826,7 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
       if (!Number.isInteger(referenceId) || referenceId <= 0 || !linkedIds.has(referenceId)) {
         return null;
       }
+      const linkedReferenceRow = linkedRowsById.get(referenceId) || null;
 
       const durationText = toText(update?.durationWeeks);
       const rawDateLimiteText = toText(update?.dateLimite);
@@ -2622,10 +2845,8 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
         throw new Error("Date limite invalide.");
       }
 
-      if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) {
-        if (durationText || dateLimiteIso) {
-          throw new Error("Date de debut du segment introuvable.");
-        }
+      if (!hasStartDate && dateLimiteIso) {
+        throw new Error("Date de debut du segment introuvable.");
       }
 
       if (dateLimiteIso) {
@@ -2644,6 +2865,7 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
             Bloquant: Boolean(update?.bloquant),
             DureeLimite: durationWeeks,
             DateLimite: dateLimiteIso,
+            Retard: computeReferenceRetardDays(linkedReferenceRow?.Recu, dateLimiteIso),
           },
         ];
       }
@@ -2657,6 +2879,7 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
             Bloquant: Boolean(update?.bloquant),
             DureeLimite: "",
             DateLimite: REFERENCE_EMPTY_DATE_ISO,
+            Retard: null,
           },
         ];
       }
@@ -2664,6 +2887,20 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
       const durationWeeks = parseReferenceDurationLimit(durationText);
       if (durationWeeks == null) {
         throw new Error("La duree doit etre un nombre entier de semaines.");
+      }
+
+      if (!hasStartDate) {
+        return [
+          "UpdateRecord",
+          REFERENCES_TABLE_NAME,
+          referenceId,
+          {
+            Bloquant: Boolean(update?.bloquant),
+            DureeLimite: durationWeeks,
+            DateLimite: REFERENCE_EMPTY_DATE_ISO,
+            Retard: null,
+          },
+        ];
       }
 
       const dateLimite = subtractWeeksFromDate(startDate, durationWeeks);
@@ -2680,6 +2917,7 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
           Bloquant: Boolean(update?.bloquant),
           DureeLimite: durationWeeks,
           DateLimite: computedDateLimiteIso,
+          Retard: computeReferenceRetardDays(linkedReferenceRow?.Recu, computedDateLimiteIso),
         },
       ];
     })

@@ -1132,7 +1132,6 @@ export function renderChargePlanTimeline(dom, project, viewState, options = {}) 
       : timelineOptions.helperText;
 
   currentBoardEl.innerHTML = `
-    ${editToggleEnabled ? renderTimelineEditToolbar(editModeEnabled) : ""}
     <div class="charge-plan-helper">
       <div class="charge-plan-helper-copy">
         <span>${escapeHtml(helperText)}</span>
@@ -1174,6 +1173,7 @@ export function renderChargePlanTimeline(dom, project, viewState, options = {}) 
         )}
       </div>
     </div>
+    ${editToggleEnabled ? renderTimelineEditToolbar(editModeEnabled) : ""}
     <div class="charge-plan-context-menu" hidden>
       <button
         type="button"

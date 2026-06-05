@@ -18,6 +18,11 @@ function toNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function formatPositiveRetardValue(value) {
+  const numericValue = toNumber(value);
+  return numericValue != null && numericValue > 0 ? String(Math.trunc(numericValue)) : "";
+}
+
 function parseDate(value) {
   if (value == null || value === "") return null;
 
@@ -764,6 +769,8 @@ function getTimelineItemsDateBounds(items) {
 }
 
 function buildGroupContent(row) {
+  const retardLabel = formatPositiveRetardValue(row.retards);
+  const retardClassName = `cell-retards${retardLabel ? " has-retard" : ""}`;
   return `
     <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-realise) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
       <div class="cell-id2">${escapeHtml(row.id2 ?? "")}</div>
@@ -776,7 +783,7 @@ function buildGroupContent(row) {
       <div class="cell-demarrage">${escapeHtml(row.demarrage ?? "")}</div>
       <div class="cell-indice">${escapeHtml(row.indice ?? "")}</div>
       <div class="cell-realise">${escapeHtml(row.realise ?? "")}</div>
-      <div class="cell-retards">${escapeHtml(row.retards ?? "")}</div>
+      <div class="${retardClassName}">${escapeHtml(retardLabel)}</div>
     </div>
   `;
 }

@@ -819,6 +819,36 @@ function showHoverTooltip(html, eventLike) {
   placeHoverTooltip(eventLike);
 }
 
+function getPhaseTooltipMetaFromClassName(className) {
+  const cls = String(className || "");
+
+  if (cls.includes("phase-coffrage")) {
+    return {
+      label: "Coffrage",
+      startLabel: "Date limite",
+      endLabel: "Diff coffrage",
+    };
+  }
+
+  if (cls.includes("phase-armature")) {
+    return {
+      label: "Armature",
+      startLabel: "Diff coffrage",
+      endLabel: "Diff armature",
+    };
+  }
+
+  if (cls.includes("phase-ndc")) {
+    return {
+      label: "NDC",
+      startLabel: "Date limite",
+      endLabel: "Diff coffrage",
+    };
+  }
+
+  return null;
+}
+
 function buildPhaseTooltipHtml(item, group) {
   const cls = String(item?.className || "");
   const tache = String(item?.taskLabel || group?.tachesLabel || "Tache");
@@ -827,21 +857,22 @@ function buildPhaseTooltipHtml(item, group) {
     : [];
 
   if (aggregateTasks.length > 0) {
-    const isCoffrage = cls.includes("phase-coffrage");
-    const typeLabel = isCoffrage ? "Coffrage" : "Armature";
-    const startLabel = isCoffrage ? "Date limite" : "Diff coffrage";
-    const endLabel = isCoffrage ? "Diff coffrage" : "Diff armature";
+    const meta = getPhaseTooltipMetaFromClassName(cls) || {
+      label: "Phase",
+      startLabel: "Debut",
+      endLabel: "Fin",
+    };
     const rows = aggregateTasks
       .map((task) => {
         const taskLabel = escapeHtml(task.label || "Tache");
         const startDateLabel = escapeHtml(getExactIsoDate(task.start));
         const endDateLabel = escapeHtml(getExactIsoDate(task.end));
-        return `<div><strong>${taskLabel}</strong> : ${startLabel} ${startDateLabel} -> ${endLabel} ${endDateLabel}</div>`;
+        return `<div><strong>${taskLabel}</strong> : ${meta.startLabel} ${startDateLabel} -> ${meta.endLabel} ${endDateLabel}</div>`;
       })
       .join("");
 
     return `
-      <div><strong>${typeLabel}</strong></div>
+      <div><strong>${meta.label}</strong></div>
       ${rows}
     `;
   }
@@ -864,6 +895,15 @@ function buildPhaseTooltipHtml(item, group) {
     `;
   }
 
+  if (cls.includes("phase-ndc")) {
+    return `
+      <div><strong>${escapeHtml(tache)}</strong></div>
+      <div>NDC</div>
+      <div>Date limite : <strong>${escapeHtml(getExactIsoDate(item.start))}</strong></div>
+      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(item.end))}</strong></div>
+    `;
+  }
+
   if (cls.includes("phase-demarrage")) {
     return `
       <div><strong>${escapeHtml(tache)}</strong></div>
@@ -883,15 +923,16 @@ function getNativePhaseTitle(item, group) {
     : [];
 
   if (aggregateTasks.length > 0) {
-    const isCoffrage = cls.includes("phase-coffrage");
-    const typeLabel = isCoffrage ? "Coffrage" : "Armature";
-    const startLabel = isCoffrage ? "Date limite" : "Diff coffrage";
-    const endLabel = isCoffrage ? "Diff coffrage" : "Diff armature";
+    const meta = getPhaseTooltipMetaFromClassName(cls) || {
+      label: "Phase",
+      startLabel: "Debut",
+      endLabel: "Fin",
+    };
     return [
-      typeLabel,
+      meta.label,
       ...aggregateTasks.map((task) => {
         const taskLabel = String(task.label || "Tache");
-        return `${taskLabel} : ${startLabel} ${getExactIsoDate(task.start)} -> ${endLabel} ${getExactIsoDate(task.end)}`;
+        return `${taskLabel} : ${meta.startLabel} ${getExactIsoDate(task.start)} -> ${meta.endLabel} ${getExactIsoDate(task.end)}`;
       }),
     ].join("\n");
   }
@@ -911,6 +952,15 @@ function getNativePhaseTitle(item, group) {
       `Armature`,
       `Diff coffrage : ${getExactIsoDate(item.start)}`,
       `Diff armature : ${getExactIsoDate(item.end)}`,
+    ].join("\n");
+  }
+
+  if (cls.includes("phase-ndc")) {
+    return [
+      tache,
+      `NDC`,
+      `Date limite : ${getExactIsoDate(item.start)}`,
+      `Diff coffrage : ${getExactIsoDate(item.end)}`,
     ].join("\n");
   }
 
@@ -1713,6 +1763,35 @@ function computeReferenceDetailsDurationWeeks(segmentStartIso = "", dateLimiteVa
   return diffDays / 7;
 }
 
+function computeReferenceDetailsRetardDays(recuValue = "", dateLimiteValue = "") {
+  const recuDate = parseReferenceDetailsIsoDate(recuValue);
+  const limitDate = parseReferenceDetailsIsoDate(dateLimiteValue);
+  if (!recuDate || !limitDate) return null;
+
+  const diffDays = Math.round((recuDate.getTime() - limitDate.getTime()) / REFERENCE_DETAILS_DAY_MS);
+  return diffDays > 0 ? diffDays : null;
+}
+
+function formatReferenceDetailsRetardValue(value) {
+  if (value == null || value === "") return "";
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) && numericValue > 0
+    ? String(Math.trunc(numericValue))
+    : "";
+}
+
+function formatPositiveRetardValue(value) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) && numericValue > 0
+    ? String(Math.trunc(numericValue))
+    : "";
+}
+
+function hasPositiveReferenceDetailsRetard(value) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) && numericValue > 0;
+}
+
 function renderReferenceDetailsBody(dialog, data = {}) {
   const body = dialog.querySelector(".planning-reference-details-dialog__body");
   if (!(body instanceof HTMLElement)) return;
@@ -1724,6 +1803,7 @@ function renderReferenceDetailsBody(dialog, data = {}) {
   }
 
   const segmentStartIso = String(data.segmentStartIso || "").trim();
+  const hasSegmentStartIso = /^\d{4}-\d{2}-\d{2}$/.test(segmentStartIso);
 
   body.innerHTML = `
     <table class="planning-reference-details-table">
@@ -1734,6 +1814,7 @@ function renderReferenceDetailsBody(dialog, data = {}) {
           <th><label class="planning-ref-select-all-label"><input type="checkbox" class="planning-ref-select-all" title="Tout sélectionner / désélectionner"> Bloquant</label></th>
           <th>Durée (sem.)</th>
           <th>Durée Limite</th>
+          <th>Retards</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -1773,13 +1854,22 @@ function renderReferenceDetailsBody(dialog, data = {}) {
     const dateLimite = document.createElement("input");
     dateLimite.type = "date";
     dateLimite.className = "planning-reference-details-table__date-limite";
-    if (segmentStartIso) {
+    dateLimite.disabled = !hasSegmentStartIso;
+    if (hasSegmentStartIso) {
       dateLimite.max = segmentStartIso;
     }
     const savedDurationValue = duration.value;
-    const savedDateLimiteIso = normalizeReferenceDetailsLimitDateIso(reference?.dateLimite);
+    const savedDateLimiteIso = hasSegmentStartIso
+      ? normalizeReferenceDetailsLimitDateIso(reference?.dateLimite)
+      : "";
     dateLimite.value = savedDateLimiteIso;
     dateLimiteCell.append(dateLimite);
+
+    const retardCell = document.createElement("td");
+    retardCell.className = "planning-reference-details-table__retard";
+    const savedRetardValue = computeReferenceDetailsRetardDays(reference?.recu, savedDateLimiteIso);
+    retardCell.textContent = formatReferenceDetailsRetardValue(savedRetardValue);
+    retardCell.classList.toggle("has-retard", hasPositiveReferenceDetailsRetard(savedRetardValue));
 
     let syncingReferenceDetailsInputs = false;
 
@@ -1788,16 +1878,32 @@ function renderReferenceDetailsBody(dialog, data = {}) {
       const currentDateIso = normalizeReferenceDetailsLimitDateIso(dateLimite.value);
       const hasDuration = Boolean(durationText);
       const hasDate = Boolean(currentDateIso);
+      const durationWeeks = parseReferenceDetailsDurationWeeks(durationText);
       const dateFromDurationIso = computeReferenceDetailsLimitDateIso(segmentStartIso, durationText);
       const durationFromDate = computeReferenceDetailsDurationWeeks(segmentStartIso, currentDateIso);
-      const invalidDuration = hasDuration && !dateFromDurationIso;
-      const invalidDate = hasDate && durationFromDate == null;
+      const invalidDuration =
+        hasDuration &&
+        (
+          durationWeeks == null ||
+          (hasSegmentStartIso && !dateFromDurationIso)
+        );
+      const invalidDate = hasDate && (!hasSegmentStartIso || durationFromDate == null);
       const changed =
         durationText !== savedDurationValue ||
         currentDateIso !== savedDateLimiteIso;
+      const currentRetardValue = computeReferenceDetailsRetardDays(reference?.recu, currentDateIso);
 
       duration.classList.toggle("is-preview", changed && !invalidDuration && !invalidDate);
-      dateLimite.classList.toggle("is-preview", changed && !invalidDuration && !invalidDate);
+      dateLimite.classList.toggle(
+        "is-preview",
+        hasSegmentStartIso && changed && !invalidDuration && !invalidDate
+      );
+      retardCell.textContent = formatReferenceDetailsRetardValue(currentRetardValue);
+      retardCell.classList.toggle("is-preview", changed && !invalidDuration && !invalidDate);
+      retardCell.classList.toggle(
+        "has-retard",
+        hasPositiveReferenceDetailsRetard(currentRetardValue)
+      );
       duration.classList.toggle("is-invalid-preview", invalidDuration || invalidDate);
       dateLimite.classList.toggle("is-invalid-preview", invalidDuration || invalidDate);
     };
@@ -1833,7 +1939,7 @@ function renderReferenceDetailsBody(dialog, data = {}) {
     dateLimite.addEventListener("change", updateDurationPreview);
     updateReferenceDetailsPreviewState();
 
-    tr.append(emetteur, referenceCell, bloquantCell, durationCell, dateLimiteCell);
+    tr.append(emetteur, referenceCell, bloquantCell, durationCell, dateLimiteCell, retardCell);
     tbody?.append(tr);
   });
 
@@ -3326,7 +3432,27 @@ function createAggregateGroup(id, label, className, sortIndex) {
 }
 
 function getAggregateGroupId(type = "") {
-  return type === "coffrage" ? "aggregate-coffrage" : "aggregate-armatures";
+  const normalizedType = String(type || "");
+  if (normalizedType === "coffrage") return "aggregate-coffrage";
+  if (normalizedType === "armatures") return "aggregate-armatures";
+  if (normalizedType === "ndc") return "aggregate-ndc";
+  return `aggregate-${normalizedType || "unknown"}`;
+}
+
+function getAggregatePhaseClassName(type = "") {
+  const normalizedType = String(type || "");
+  if (normalizedType === "coffrage") return "phase-coffrage";
+  if (normalizedType === "armatures") return "phase-armature";
+  if (normalizedType === "ndc") return "phase-ndc";
+  return "";
+}
+
+function isPlanningNdcTypeDoc(typeDoc) {
+  return (
+    isPlanningTypeDocMatch(typeDoc, "NDC") ||
+    isPlanningTypeDocMatch(typeDoc, "NOTE DE CALCUL") ||
+    isPlanningTypeDocMatch(typeDoc, "NOTE CALCUL")
+  );
 }
 
 function parseAggregateDate(value) {
@@ -3427,6 +3553,26 @@ function getAggregatePhasePalette(className) {
       text: "#475569",
       overdueBackground: "#fee2e2",
       overdueBorder: "#fecaca",
+    };
+  }
+
+  if (normalizedClassName.includes("phase-ndc")) {
+    if (normalizedClassName.includes("phase-past")) {
+      return {
+        background: "#d8d2e6",
+        border: "#b8aecf",
+        text: "#3f365a",
+        overdueBackground: "#e7bdd7",
+        overdueBorder: "#d99bc4",
+      };
+    }
+
+    return {
+      background: "#e9e6f2",
+      border: "#c9c0de",
+      text: "#4d426a",
+      overdueBackground: "#fce7f3",
+      overdueBorder: "#fbcfe8",
     };
   }
 
@@ -3609,6 +3755,7 @@ function buildAggregateItemsFromGroups(groups = []) {
   const segmentsByType = {
     coffrage: [],
     armatures: [],
+    ndc: [],
   };
 
   (groups || []).forEach((group, index) => {
@@ -3618,12 +3765,13 @@ function buildAggregateItemsFromGroups(groups = []) {
     const typeDoc = String(row.typeDoc || group.typeDocLabel || "");
     const isCoffrage = isPlanningTypeDocMatch(typeDoc, "COFFRAGE");
     const isArmature = isPlanningTypeDocMatch(typeDoc, "ARMATURE");
-    if (!isCoffrage && !isArmature) return;
+    const isNdc = isPlanningNdcTypeDoc(typeDoc);
+    if (!isCoffrage && !isArmature && !isNdc) return;
 
-    const aggregateType = isCoffrage ? "coffrage" : "armatures";
-    const range = isCoffrage
-      ? createAggregateRange(row.dateLimite, row.diffCoffrage)
-      : createAggregateRange(row.diffCoffrage, row.diffArmature);
+    const aggregateType = isCoffrage ? "coffrage" : isArmature ? "armatures" : "ndc";
+    const range = isArmature
+      ? createAggregateRange(row.diffCoffrage, row.diffArmature)
+      : createAggregateRange(row.dateLimite, row.diffCoffrage);
     if (!range) return;
 
     const realiseValue =
@@ -3633,7 +3781,7 @@ function buildAggregateItemsFromGroups(groups = []) {
     segmentsByType[aggregateType].push({
       type: aggregateType,
       groupId: getAggregateGroupId(aggregateType),
-      label: isCoffrage ? "Coffrage" : "Armature",
+      label: isCoffrage ? "Coffrage" : isArmature ? "Armature" : "NDC",
       start: range.start,
       end: range.end,
       tasks: [
@@ -3655,7 +3803,7 @@ function buildAggregateItemsFromGroups(groups = []) {
       const maxRealiseValue = Math.max(0, ...segment.realiseValues);
       const maxRetardValue = Math.max(0, ...segment.retardValues);
       const baseClassName = buildAggregatePhaseClassName(
-        aggregateType === "coffrage" ? "phase-coffrage" : "phase-armature",
+        getAggregatePhaseClassName(aggregateType),
         maxRealiseValue
       );
 
@@ -3696,6 +3844,12 @@ function buildVisualAggregateTimelineData(timelineData = {}) {
       "Armatures",
       "planning-aggregate-group planning-aggregate-group--armatures",
       1
+    ),
+    createAggregateGroup(
+      "aggregate-ndc",
+      "NDC",
+      "planning-aggregate-group planning-aggregate-group--ndc",
+      2
     ),
   ];
 
@@ -3817,9 +3971,7 @@ function buildGroupLabelElement(group) {
   const typeDocLabel = String(group?.typeDocLabel ?? "");
   const isCoffrageRow = isPlanningTypeDocMatch(typeDocLabel, "COFFRAGE");
   const isArmatureRow = isPlanningTypeDocMatch(typeDocLabel, "ARMATURE");
-  const isNdcRow = isPlanningTypeDocMatch(typeDocLabel, "NDC") ||
-    isPlanningTypeDocMatch(typeDocLabel, "NOTE DE CALCUL") ||
-    isPlanningTypeDocMatch(typeDocLabel, "NOTE CALCUL");
+  const isNdcRow = isPlanningNdcTypeDoc(typeDocLabel);
   const isRealiseComplete = isPlanningRealiseComplete(group?.realiseLabel);
 
   if (isCoffrageRow) {
@@ -3914,7 +4066,9 @@ function buildGroupLabelElement(group) {
 
   const retards = document.createElement("div");
   retards.className = "cell-retards";
-  retards.textContent = String(group?.retardsLabel ?? "");
+  const positiveRetardLabel = formatPositiveRetardValue(group?.retardsLabel);
+  retards.textContent = positiveRetardLabel;
+  retards.classList.toggle("has-retard", Boolean(positiveRetardLabel));
   retards.dataset.rowId = String(group?.rowId ?? "");
   retards.dataset.id2 = String(group?.id2Label ?? "");
   retards.dataset.task = String(group?.tachesLabel ?? "");

@@ -829,6 +829,10 @@ body.planning-sync-embedded #planningTimeline .vis-time-axis .vis-grid.vis-major
   background: #ffffff !important;
 }
 
+#planningTimeline .planning-aggregate-group--ndc {
+  background: #ffffff !important;
+}
+
 body.planning-visual-aggregate-mode.planning-sync-external-axis #timelineWrapper {
   overflow-y: hidden !important;
   scrollbar-gutter: auto !important;
@@ -1158,12 +1162,22 @@ body.planning-row-dragging {
   cursor: context-menu;
 }
 
+#planningTimeline .group-row-grid .cell-retards.has-retard {
+  color: #dc2626 !important;
+  font-weight: 700;
+}
+
 #planningTimeline .group-row-grid .cell-retards.has-retard-justification {
   cursor: help;
   color: #92400e !important;
   font-weight: 700;
   text-decoration: underline dotted #92400e;
   text-underline-offset: 3px;
+}
+
+#planningTimeline .group-row-grid .cell-retards.has-retard.has-retard-justification {
+  color: #dc2626 !important;
+  text-decoration-color: #dc2626;
 }
 
 .planning-retard-context-menu {
@@ -1276,7 +1290,7 @@ body.planning-row-dragging {
 }
 
 .planning-reference-details-dialog {
-  width: min(760px, calc(100vw - 32px));
+  width: min(860px, calc(100vw - 32px));
   border: 1px solid #bcc9d6;
   border-radius: 8px;
   padding: 18px;
@@ -1387,10 +1401,30 @@ body.planning-row-dragging {
   font-variant-numeric: tabular-nums;
 }
 
+.planning-reference-details-table__retard {
+  width: 84px;
+  text-align: center !important;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #475569;
+}
+
+.planning-reference-details-table__retard.has-retard {
+  color: #dc2626;
+}
+
 .planning-reference-details-table__duration.is-preview,
 .planning-reference-details-table__date-limite.is-preview {
   border-color: #004990;
   font-weight: 700;
+}
+
+.planning-reference-details-table__retard.is-preview {
+  color: #004990;
+}
+
+.planning-reference-details-table__retard.has-retard.is-preview {
+  color: #dc2626;
 }
 
 .planning-reference-details-table__date-limite.is-preview {

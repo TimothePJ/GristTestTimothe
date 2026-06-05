@@ -68,6 +68,16 @@ body {
       color: #004990;
     }
 
+    .retard-cell {
+      text-align: center;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .retard-cell.has-retard {
+      color: #dc2626;
+    }
+
     input[type="date"] {
       -webkit-appearance: none;
       -moz-appearance: none;
