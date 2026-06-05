@@ -40,18 +40,17 @@ export function getViewportSourceApi(sourceApp = "") {
 }
 
 export function getViewportTargetApis(sourceApp = "") {
+  // Non utilisé par flushViewportSyncQueue (logique directe).
+  // Conservé pour compatibilité si d'autres modules l'importent.
   if (sourceApp === "planning-projet-axis") {
     return [state.planningApi].filter(Boolean);
   }
-
   if (sourceApp === "planning-projet-main") {
     return [state.planningAxisApi].filter(Boolean);
   }
-
   if (sourceApp === "gestion-depenses2") {
     return [state.planningApi, state.planningAxisApi].filter(Boolean);
   }
-
   return [];
 }
 

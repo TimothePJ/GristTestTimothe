@@ -25,7 +25,7 @@ import {
   clearSharedProjectSelection,
   readSharedProjectSelection,
 } from "../services/projectSync.js";
-import { bindExpensesPlanningShellControls, handleViewportChange } from "../services/viewportSync.js";
+import { bindExpensesPlanningShellControls, handleViewportChange, syncViewportToExpensesNow } from "../services/viewportSync.js";
 
 const COMPACT_PLANNING_FRAME_MIN_HEIGHT = 80;
 const COMPACT_PLANNING_FRAME_FALLBACK_HEIGHT = 124;
@@ -353,20 +353,29 @@ function normalizeNumericProjectSelectionKey(value = "") {
 function findAvailableProjectKey(projectKeys = [], requestedProjectKey = "") {
   const requestedKey = normalizeProjectSelectionKey(requestedProjectKey);
   const requestedNumericKey = normalizeNumericProjectSelectionKey(requestedProjectKey);
+  // Gestion du format "numéro - nom" (ex. "232032 - BONNE-NOUVELLE" → "bonne-nouvelle")
+  const requestedNamePart = normalizeProjectSelectionKey(
+    String(requestedProjectKey || "").replace(/^\s*\d+\s*[-–]\s*/, "").trim()
+  );
+
   if (!requestedKey) return "";
 
   return (projectKeys || []).find((projectKey) => {
-    const normalizedProjectKey = normalizeProjectSelectionKey(projectKey);
-    const normalizedNumericProjectKey = normalizeNumericProjectSelectionKey(projectKey);
+    const normalizedKey = normalizeProjectSelectionKey(projectKey);
+    const normalizedNumericKey = normalizeNumericProjectSelectionKey(projectKey);
+    // Partie nom extraite de la clé candidate (si elle aussi contient un préfixe numérique)
+    const keyNamePart = normalizeProjectSelectionKey(
+      String(projectKey || "").replace(/^\s*\d+\s*[-–]\s*/, "").trim()
+    );
+
     return (
-      // Correspondance exacte (insensible à la casse et aux accents)
-      normalizedProjectKey === requestedKey ||
-      // Correspondance par numéro de projet pur (ex: "001" == "1")
-      (
-        requestedNumericKey &&
-        normalizedNumericProjectKey &&
-        normalizedNumericProjectKey === requestedNumericKey
-      )
+      normalizedKey === requestedKey ||
+      // Correspondance par numéro pur (ex: "001" == "1")
+      (requestedNumericKey && normalizedNumericKey && normalizedNumericKey === requestedNumericKey) ||
+      // "232032 - BONNE-NOUVELLE" stocké → correspond à "BONNE-NOUVELLE" dans la liste
+      (requestedNamePart && requestedNamePart !== requestedKey && normalizedKey === requestedNamePart) ||
+      // Cas inverse : la liste contient "232032 - BONNE-NOUVELLE", on cherche "BONNE-NOUVELLE"
+      (keyNamePart && keyNamePart !== normalizedKey && keyNamePart === requestedKey)
     );
   }) || "";
 }
@@ -473,6 +482,28 @@ async function applySelectedProjectFromHub(projectKey = "") {
   await refreshPlanningAggregatePresentation();
 }
 
+/**
+ * Recharge la liste des projets depuis Grist + planningApi, puis applique la
+ * sélection partagée. À utiliser dans les handlers (storage, pageshow, focus,
+ * visibilitychange) pour éviter la liste périmée capturée au bootstrap.
+ */
+async function refreshProjectKeysAndApplySharedSelection() {
+  if (state.projectSyncInProgress) return;
+  try {
+    const [gristKeys, planningKeys] = await Promise.all([
+      fetchProjectKeysFromGrist().catch(() => []),
+      Promise.resolve(state.planningApi?.listProjects?.() || []),
+    ]);
+    const freshKeys = mergeProjectKeys(planningKeys, gristKeys);
+    if (freshKeys.length) {
+      renderProjectOptions(freshKeys, state.activeProjectKey);
+    }
+    await applyRestoredSharedProject(freshKeys.length ? freshKeys : []);
+  } catch (err) {
+    console.warn("refreshProjectKeysAndApplySharedSelection :", err);
+  }
+}
+
 
 
 export async function bootstrapHubApp() {
@@ -519,9 +550,13 @@ export async function bootstrapHubApp() {
     }
     syncSharedPlanningControlsAvailability();
 
-    state.planningApi.subscribeViewportChange((payload) =>
-      handleViewportChange({ ...payload, app: "planning-projet-main" })
-    );
+    // Subscription Planning Projet main → synchro planning-axis + gestion-depenses2
+    state.planningApi.subscribeViewportChange((payload) => {
+      handleViewportChange({ ...payload, app: "planning-projet-main" });
+      // Sync direct et immédiat vers gestion-depenses2 (ne passe pas par la queue)
+      void syncViewportToExpensesNow(payload?.viewport);
+    });
+
     if (typeof state.planningApi.subscribeSelectionChange === "function") {
       state.planningApi.subscribeSelectionChange((payload) => {
         if (!String(state.activeProjectKey || "").trim()) {
@@ -532,9 +567,13 @@ export async function bootstrapHubApp() {
         setSelectionWarning(payload?.selection || null);
       });
     }
-    state.planningAxisApi.subscribeViewportChange((payload) =>
-      handleViewportChange({ ...payload, app: "planning-projet-axis" })
-    );
+
+    // Subscription Planning Projet axis (frise) → synchro planning-main + gestion-depenses2
+    state.planningAxisApi.subscribeViewportChange((payload) => {
+      handleViewportChange({ ...payload, app: "planning-projet-axis" });
+      // Sync direct et immédiat vers gestion-depenses2 (ne passe pas par la queue)
+      void syncViewportToExpensesNow(payload?.viewport);
+    });
 
     if (dom.projectSelectEl instanceof HTMLSelectElement) {
       dom.projectSelectEl.addEventListener("change", () => {
@@ -543,11 +582,17 @@ export async function bootstrapHubApp() {
       });
     }
 
-    await attachExpensesFrameApi();
+    // Accéder au contentWindow de l'iframe gestion-depenses2 pour inciter le browser
+    // à la charger même si elle est hors viewport (certains browsers ignorent loading="eager").
+    if (dom.expensesFrameEl instanceof HTMLIFrameElement) {
+      void dom.expensesFrameEl.contentWindow;
+    }
 
+    // Appliquer le projet partagé avant de lancer gestion-depenses2 pour que
+    // getDesiredProjectKey() retourne déjà le bon projet (state.activeProjectKey défini).
     const requestedSavedProjectKey = getRequestedSharedProjectKey();
     if (await applyRestoredSharedProject(planningProjects)) {
-      // Projet restauré depuis la sélection commune — popup retards affichée dans applySharedProject
+      // Projet restauré depuis la sélection commune.
     } else if (requestedSavedProjectKey && planningProjects.length) {
       setHubStatus("Projet mémorisé introuvable dans la synchronisation.");
     } else if (planningProjects.length) {
@@ -557,16 +602,59 @@ export async function bootstrapHubApp() {
       setHubStatus("Aucun projet disponible.");
     }
 
-    // Synchro uniquement si un autre widget (même origin) change le projet en temps réel.
-    // On ne réagit PAS à pageshow/focus/visibilitychange pour éviter de fermer
-    // la popup des retards déjà affichée.
+    // Si applyRestoredSharedProject a échoué mais que les iframes Planning Projet
+    // ont déjà leur propre projet (chargé depuis localStorage au démarrage),
+    // promouvoir ce projet dans le hub pour que gestion-depenses2 le reçoive.
+    if (!state.activeProjectKey) {
+      const planningCurrentProject =
+        state.planningApi?.getSelectedProject?.() ||
+        state.planningAxisApi?.getSelectedProject?.() ||
+        "";
+      if (planningCurrentProject) {
+        const matched = findAvailableProjectKey(planningProjects, planningCurrentProject)
+          || planningCurrentProject;
+        state.activeProjectKey = matched;
+        state.requestedProjectKey = matched;
+        setActiveProjectSelection(matched);
+        setProjectContentVisibility(true);
+      }
+    }
+
+    // Lancer gestion-depenses2 maintenant que le projet est connu.
+    void attachExpensesFrameApi();
+
+    // --- Listeners de synchronisation cross-widget ---
+
+    // Synchro en temps réel : un autre widget change le projet dans localStorage.
     window.addEventListener("storage", (event) => {
       if (event.key !== "grist.selected-project" || !event.newValue) return;
       if (state.projectSyncInProgress) return;
       const requested = normalizeProjectSelectionKey(String(event.newValue).trim());
       const active   = normalizeProjectSelectionKey(state.activeProjectKey || "");
       if (requested && requested !== active) {
-        void applyRestoredSharedProject(planningProjects);
+        // Relire la liste depuis Grist pour éviter la liste périmée du bootstrap.
+        void refreshProjectKeysAndApplySharedSelection();
+      }
+    });
+
+    // Synchro quand synchronisation-plannings redevient visible (navigation Grist).
+    window.addEventListener("pageshow", () => {
+      if (!state.projectSyncInProgress) {
+        void refreshProjectKeysAndApplySharedSelection();
+      }
+    });
+
+    // Synchro sur changement de visibilité (passage d'onglet Grist).
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && !state.projectSyncInProgress) {
+        void refreshProjectKeysAndApplySharedSelection();
+      }
+    });
+
+    // Synchro sur focus fenêtre (comme Avancement, Reference2, etc.).
+    window.addEventListener("focus", () => {
+      if (!state.projectSyncInProgress) {
+        void refreshProjectKeysAndApplySharedSelection();
       }
     });
 

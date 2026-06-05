@@ -28,8 +28,29 @@ const SHARED_PROJECT_STORAGE_FALLBACK_KEYS = [
 export function readSharedProjectSelection() {
   try {
     for (const key of SHARED_PROJECT_STORAGE_FALLBACK_KEYS) {
-      const value = String(localStorage.getItem(key) || "").trim();
-      if (value) return value;
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const trimmed = String(raw).trim();
+      if (!trimmed) continue;
+
+      // "nouveau-projet.selected-project" stocke un objet JSON complet ;
+      // on en extrait le champ selectedProject si nécessaire.
+      if (key === "nouveau-projet.selected-project") {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed && typeof parsed.selectedProject === "string" && parsed.selectedProject.trim()) {
+            return parsed.selectedProject.trim();
+          }
+        } catch (_) {
+          // pas du JSON → utiliser la valeur brute si elle ne ressemble pas à un objet
+          if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+            return trimmed;
+          }
+          continue;
+        }
+      }
+
+      return trimmed;
     }
     return "";
   } catch (_error) {
@@ -87,13 +108,24 @@ export async function applySharedProject(projectKey) {
   setHubStatus(`Chargement du projet ${normalizedProjectKey}...`);
 
   try {
-    // 1. Appliquer le projet sur les 2 iframes Planning Projet et attendre leur rendu.
-    //    Après setSelectedProject, le viewport est déjà positionné sur les données
-    //    grâce au fix RAF (setWindow sur la plage réelle des items).
-    await Promise.all([
-      Promise.resolve(state.planningApi.setSelectedProject(normalizedProjectKey)),
-      Promise.resolve(state.planningAxisApi?.setSelectedProject?.(normalizedProjectKey)),
-    ]);
+    // 1. Appliquer le projet sur les iframes Planning Projet.
+    //    Optimisation : si une iframe a déjà le bon projet chargé (ex. depuis localStorage
+    //    au démarrage), on skip setSelectedProject pour éviter un double fetch Grist.
+    //    On appelle quand même waitForPlanningViewportSettled pour que le viewport soit stable.
+    const currentMain = state.planningApi.getSelectedProject?.() || "";
+    const currentAxis = state.planningAxisApi?.getSelectedProject?.() || "";
+
+    const calls = [];
+    if (currentMain !== normalizedProjectKey) {
+      calls.push(Promise.resolve(state.planningApi.setSelectedProject(normalizedProjectKey)));
+    }
+    if (state.planningAxisApi && currentAxis !== normalizedProjectKey) {
+      calls.push(Promise.resolve(state.planningAxisApi.setSelectedProject(normalizedProjectKey)));
+    }
+    if (calls.length > 0) {
+      await Promise.all(calls);
+    }
+
     state.activeProjectKey = normalizedProjectKey;
     setActiveProjectSelection(normalizedProjectKey);
 
@@ -101,20 +133,23 @@ export async function applySharedProject(projectKey) {
     const referencePlanningApi = getReferencePlanningApi() || state.planningApi;
     const planningViewport = referencePlanningApi.getViewport?.() || null;
 
-    // 3. Synchroniser gestion-depenses2 EN ATTENDANT (dans la fenêtre projectSyncInProgress).
-    //    Les émissions viewport de gestion-depenses2 pendant son chargement sont
-    //    mises en file d'attente (projectSyncInProgress=true → pas de flush immédiat).
-    //    Les boutons ne s'activent qu'une fois tout stabilisé.
+    // 3. Synchroniser gestion-depenses2 en arrière-plan.
+    //    Son iframe peut mettre du temps à charger (hors viewport au démarrage).
+    //    On ne bloque pas : les boutons s'activent dès que Planning Projet est synced.
+    //    Si gestion-depenses2 n'est pas encore prêt (expensesApi null), attachExpensesFrameApi
+    //    s'en chargera automatiquement quand l'iframe sera chargée.
     if (state.expensesApi) {
-      try {
-        await Promise.resolve(state.expensesApi.setSelectedProject(normalizedProjectKey));
-        if (planningViewport?.firstVisibleDate && state.activeProjectKey === normalizedProjectKey) {
-          await Promise.resolve(state.expensesApi.applyViewport?.(planningViewport));
-        }
-        scheduleExpensesFramePresentation();
-      } catch (err) {
-        console.error("Erreur sync gestion-depenses2 :", err);
-      }
+      const expensesApi = state.expensesApi;
+      const viewportToApply = planningViewport;
+      Promise.resolve(expensesApi.setSelectedProject(normalizedProjectKey))
+        .then(() => {
+          if (state.activeProjectKey !== normalizedProjectKey || state.expensesApi !== expensesApi) return;
+          if (viewportToApply?.firstVisibleDate) {
+            return Promise.resolve(expensesApi.applyViewport?.(viewportToApply));
+          }
+        })
+        .then(() => scheduleExpensesFramePresentation())
+        .catch((err) => console.error("Erreur sync gestion-depenses2 :", err));
     }
 
     // 4. Mettre à jour l'état partagé et l'affichage.

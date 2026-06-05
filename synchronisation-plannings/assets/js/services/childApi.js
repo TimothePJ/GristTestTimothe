@@ -13,7 +13,6 @@ import {
   syncExpensesPlanningShell,
   syncSharedPlanningControlsAvailability,
 } from "../layout/shell.js";
-import { alignExpensesViewportToPlanning } from "../viewport/alignment.js";
 import {
   buildCanonicalSharedViewport,
   buildPlanningLedProjectSelectionViewport,
@@ -23,7 +22,8 @@ import {
   getDesiredProjectKey,
   getViewportLogicalSignature,
 } from "../viewport/normalize.js";
-import { flushViewportSyncQueue, handleViewportChange } from "./viewportSync.js";
+import { drainExpensesViewportQueue, flushViewportSyncQueue, handleViewportChange } from "./viewportSync.js";
+import { readSharedProjectSelection } from "./projectSync.js";
 
 export function sleep(ms) {
   return new Promise((resolve) => {
@@ -117,43 +117,43 @@ export async function attachExpensesFrameApi({ force = false } = {}) {
       state.expensesApi = api;
       syncSharedPlanningControlsAvailability();
       schedulePlanningFramePresentation();
-      scheduleExpensesFramePresentation();
 
-      const targetProjectKey = getDesiredProjectKey();
+      // Drainer immédiatement le viewport en attente : si Planning Projet a scrollé
+      // pendant que l'API n'était pas disponible, le viewport est stocké dans
+      // _pendingExpensesViewport et peut être appliqué maintenant.
+      void drainExpensesViewportQueue();
+
+      // Masquer gestion-depenses2 pendant la synchro projet + alignement viewport.
+      // Il sera révélé (.is-aligned) une fois les dates alignées avec Planning Projet.
+      dom.expensesFrameEl?.classList.remove("is-aligned");
+
+      // Récupérer le projet à appliquer.
+      // getDesiredProjectKey() regarde state.requestedProjectKey et state.activeProjectKey.
+      // Si les deux sont vides (applyRestoredSharedProject a échoué), chercher dans :
+      //   1. les iframes Planning Projet (déjà chargé depuis leur propre localStorage)
+      //   2. localStorage directement (readSharedProjectSelection)
+      let targetProjectKey = getDesiredProjectKey();
+      if (!targetProjectKey) {
+        targetProjectKey =
+          state.planningApi?.getSelectedProject?.() ||
+          state.planningAxisApi?.getSelectedProject?.() ||
+          readSharedProjectSelection() ||
+          "";
+        // Promouvoir dans le hub pour que les futures synchros fonctionnent
+        if (targetProjectKey) {
+          state.activeProjectKey = targetProjectKey;
+          state.requestedProjectKey = targetProjectKey;
+        }
+      }
       if (targetProjectKey) {
         await Promise.resolve(api.setSelectedProject(targetProjectKey));
       }
 
-      let referenceViewport = getLateAttachReferenceViewport();
+      // Appliquer le viewport partagé actuel à gestion-depenses2 (une fois, sans boucle de retry).
+      const referenceViewport = getLateAttachReferenceViewport();
       if (referenceViewport?.firstVisibleDate) {
         syncPlanningViewportBounds(referenceViewport);
-        const stabilizedViewport = await alignExpensesViewportToPlanning(referenceViewport, {
-          onAfterApply: () => scheduleExpensesFramePresentation(),
-        });
-        if (stabilizedViewport?.firstVisibleDate) {
-          referenceViewport = buildCanonicalSharedViewport({
-            ...referenceViewport,
-            ...stabilizedViewport,
-          });
-        }
-
-        // Lire le viewport RÉEL de gestion-depenses2 après stabilisation (peut être clampé
-        // par ses propres bornes) et le renvoyer vers Planning Projet pour que les deux
-        // plannings affichent exactement la même période.
-        const actualExpensesViewport = buildCanonicalSharedViewport(
-          api.getViewport?.() || referenceViewport
-        );
-        if (
-          actualExpensesViewport?.firstVisibleDate &&
-          actualExpensesViewport.firstVisibleDate !== referenceViewport.firstVisibleDate
-        ) {
-          await Promise.all([
-            Promise.resolve(state.planningApi?.applyViewport?.(actualExpensesViewport)),
-            Promise.resolve(state.planningAxisApi?.applyViewport?.(actualExpensesViewport)),
-          ]);
-          referenceViewport = actualExpensesViewport;
-        }
-
+        await Promise.resolve(api.applyViewport(referenceViewport));
         state.sharedViewportState = referenceViewport;
         state.lastAppliedViewportLogicalSignature = getViewportLogicalSignature(
           targetProjectKey || state.activeProjectKey,
@@ -163,11 +163,19 @@ export async function attachExpensesFrameApi({ force = false } = {}) {
         setLastRange(referenceViewport);
       }
 
+      // Révéler gestion-depenses2 maintenant que les dates sont alignées avec Planning Projet.
+      dom.expensesFrameEl?.classList.add("is-aligned");
       schedulePlanningFramePresentation();
       scheduleExpensesFramePresentation();
 
+      // S'abonner aux changements viewport de gestion-depenses2.
+      // IMPORTANT : passer app: "gestion-depenses2" dans le payload pour que le routage
+      // dans flushViewportSyncQueue puisse correctement cibler Planning Projet.
+      // Sans ce champ, getViewportTargetApis("") retourne [] → Planning Projet ne suit jamais.
       if (state.expensesViewportSubscriptionApi !== api) {
-        api.subscribeViewportChange(handleViewportChange);
+        api.subscribeViewportChange((payload) =>
+          handleViewportChange({ ...payload, app: "gestion-depenses2" })
+        );
         state.expensesViewportSubscriptionApi = api;
       }
 
@@ -180,6 +188,8 @@ export async function attachExpensesFrameApi({ force = false } = {}) {
     .catch((error) => {
       if (attachAttempt === state.expensesFrameAttachAttempt) {
         console.error("Erreur attache du planning gestion-depenses2 :", error);
+        // Restaurer la visibilité en cas d'échec (timeout, etc.)
+        dom.expensesFrameEl?.classList.add("is-aligned");
       }
       return null;
     })

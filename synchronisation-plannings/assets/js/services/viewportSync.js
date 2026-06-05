@@ -6,7 +6,6 @@ import {
 } from "../layout/framePresentation.js";
 import {
   appendLog,
-  getViewportSourceApi,
   getViewportSourceLabel,
   getViewportTargetApis,
   isSharedPlanningControlsLocked,
@@ -29,150 +28,79 @@ import {
 } from "../viewport/normalize.js";
 
 let viewportSyncTraceSequence = 0;
-let expensesViewportSyncSequence = 0;
-
-function roundViewportTraceNumber(value, digits = 2) {
-  const numericValue = Number(value);
-  if (!Number.isFinite(numericValue)) {
-    return null;
-  }
-
-  const precision = 10 ** digits;
-  return Math.round(numericValue * precision) / precision;
-}
-
-function summarizeViewportTrace(viewport = {}) {
-  if (!viewport || typeof viewport !== "object") {
-    return null;
-  }
-
-  return {
-    mode: String(viewport.mode || "").trim(),
-    anchorDate:
-      normalizeIsoDate(viewport.anchorDate) || String(viewport.anchorDate || "").trim() || "",
-    firstVisibleDate:
-      normalizeIsoDate(viewport.firstVisibleDate) ||
-      normalizeIsoDate(viewport.rangeStartDate) ||
-      "",
-    rangeEndDate: normalizeIsoDate(viewport.rangeEndDate) || "",
-    visibleDays: roundViewportTraceNumber(viewport.visibleDays, 4),
-    leftDayOffset: roundViewportTraceNumber(viewport.leftDayOffset, 6),
-    windowStartMs: roundViewportTraceNumber(viewport.windowStartMs, 0),
-    windowEndMs: roundViewportTraceNumber(viewport.windowEndMs, 0),
-  };
-}
-
-function getViewportTraceApiLabel(api) {
-  if (!api) {
-    return "unknown";
-  }
-
-  if (api === state.planningApi) {
-    return "planning-projet-main";
-  }
-
-  if (api === state.planningAxisApi) {
-    return "planning-projet-axis";
-  }
-
-  if (api === state.expensesApi) {
-    return "gestion-depenses2";
-  }
-
-  return "custom-api";
-}
 
 function traceViewportSync(event, details = {}) {
   viewportSyncTraceSequence += 1;
   console.info(`[sync-trace][hub][${viewportSyncTraceSequence}] ${event}`, details);
 }
 
-function hasUsableViewport(viewport = {}) {
-  const canonicalViewport = buildCanonicalSharedViewport(viewport);
-  return Boolean(
-    normalizeIsoDate(canonicalViewport.firstVisibleDate) ||
-      normalizeIsoDate(canonicalViewport.rangeStartDate)
-  );
-}
+// ---------------------------------------------------------------------------
+// File d'attente dédiée pour gestion-depenses2
+//
+// Problèmes résolus :
+//   1. viewport perdu si expensesApi null → stocké dans _pendingExpensesViewport
+//   2. pas de retry depuis flushViewportSyncQueue → requestExpensesViewport appelé là aussi
+//   3. races entre applyViewport concurrents → sérialisés par _expensesApplyInProgress
+//   4. sharedViewportState pas mis à jour sur chemin direct → mis à jour dans requestExpensesViewport
+//   5. viewport en attente non appliqué à l'attachement → drainExpensesViewportQueue exporté
+// ---------------------------------------------------------------------------
 
-function shouldMirrorViewportToExpenses(sourceApp = "") {
-  const normalizedSource = String(sourceApp || "").trim();
-  return (
-    normalizedSource === "Pilotage commun" ||
-    normalizedSource === "planning-projet-axis" ||
-    normalizedSource === "planning-projet-main"
-  );
-}
+let _pendingExpensesViewport = null; // dernier viewport demandé, appliqué dès que l'API est prête
+let _expensesApplyInProgress = false;
 
-function syncExpensesViewportInBackground(viewport = {}, { sourceApp = "" } = {}) {
-  const expensesApi = state.expensesApi;
-  if (!expensesApi?.applyViewport || !shouldMirrorViewportToExpenses(sourceApp)) {
-    return;
+/**
+ * Enregistre un viewport à appliquer à gestion-depenses2 et lance le drain.
+ * Met à jour sharedViewportState immédiatement pour éviter que framePresentation
+ * ne réapplique un viewport périmé.
+ */
+function requestExpensesViewport(viewport) {
+  if (!viewport) return;
+
+  const exact = buildPlanningExactSharedViewport(viewport);
+  if (!normalizeIsoDate(exact.firstVisibleDate)) return;
+
+  // Mise à jour de sharedViewportState AVANT tout scheduleExpensesFramePresentation
+  // pour que framePresentation.js ne réapplique pas un viewport ancien.
+  const canonical = buildCanonicalSharedViewport(exact);
+  if (canonical.firstVisibleDate) {
+    state.sharedViewportState = canonical;
+    syncExpensesPlanningShell(canonical);
   }
 
-  const viewportToApply = viewport && typeof viewport === "object" ? { ...viewport } : {};
-  const canonicalViewport = buildCanonicalSharedViewport(viewportToApply);
-  const viewportLogicalSignature = getViewportLogicalSignature(
-    state.activeProjectKey,
-    canonicalViewport
-  );
-  const syncSequence = ++expensesViewportSyncSequence;
-
-  traceViewportSync("expenses-background-queue", {
-    source: sourceApp,
-    viewportLogicalSignature,
-    viewport: summarizeViewportTrace(canonicalViewport),
-  });
-
-  Promise.resolve()
-    .then(async () => {
-      if (state.expensesApi !== expensesApi) {
-        return;
-      }
-
-      if (
-        viewportLogicalSignature &&
-        state.lastAppliedViewportLogicalSignature &&
-        viewportLogicalSignature !== state.lastAppliedViewportLogicalSignature
-      ) {
-        traceViewportSync("expenses-background-skip-stale", {
-          source: sourceApp,
-          viewportLogicalSignature,
-          lastAppliedViewportLogicalSignature: state.lastAppliedViewportLogicalSignature,
-        });
-        return;
-      }
-
-      await Promise.resolve(expensesApi.applyViewport(viewportToApply));
-
-      if (syncSequence !== expensesViewportSyncSequence || state.expensesApi !== expensesApi) {
-        return;
-      }
-
-      if (
-        viewportLogicalSignature &&
-        state.lastAppliedViewportLogicalSignature &&
-        viewportLogicalSignature !== state.lastAppliedViewportLogicalSignature
-      ) {
-        traceViewportSync("expenses-background-complete-stale", {
-          source: sourceApp,
-          viewportLogicalSignature,
-          lastAppliedViewportLogicalSignature: state.lastAppliedViewportLogicalSignature,
-        });
-        return;
-      }
-
-      scheduleExpensesFramePresentation();
-      traceViewportSync("expenses-background-complete", {
-        source: sourceApp,
-        viewportLogicalSignature,
-      });
-    })
-    .catch((error) => {
-      console.error("Erreur synchro differee gestion-depenses2 :", error);
-      appendLog(`Erreur synchro gestion-depenses2 : ${error.message}`);
-    });
+  _pendingExpensesViewport = exact;
+  void drainExpensesViewportQueue();
 }
+
+/**
+ * Applique le viewport en attente à gestion-depenses2 de façon sérialisée.
+ * Exporté pour être appelé depuis childApi.js dès que l'API devient disponible.
+ */
+export async function drainExpensesViewportQueue() {
+  if (_expensesApplyInProgress) return; // déjà en cours, le finally relancera
+
+  let viewport = _pendingExpensesViewport;
+  while (viewport) {
+    _pendingExpensesViewport = null;
+    _expensesApplyInProgress = true;
+    try {
+      if (state.expensesApi?.applyViewport) {
+        await Promise.resolve(state.expensesApi.applyViewport(viewport));
+        scheduleExpensesFramePresentation();
+        traceViewportSync("expenses-applied", { firstVisibleDate: viewport.firstVisibleDate });
+      }
+    } catch (err) {
+      console.error("drainExpensesViewportQueue error:", err);
+    } finally {
+      _expensesApplyInProgress = false;
+    }
+    // "last-wins" : si un nouveau viewport est arrivé pendant l'apply, l'appliquer
+    viewport = _pendingExpensesViewport;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Toolbar partagé (< > Semaine Mois Année)
+// ---------------------------------------------------------------------------
 
 async function runSharedToolbarViewportAction({
   actionLabel = "Pilotage commun",
@@ -190,18 +118,19 @@ async function runSharedToolbarViewportAction({
   try {
     const rawViewport = typeof execute === "function" ? await Promise.resolve(execute()) : null;
     const fallbackViewport =
-      typeof fallbackViewportFactory === "function" ? fallbackViewportFactory() : fallbackViewportFactory;
-    const nextViewport = hasUsableViewport(rawViewport) ? rawViewport : fallbackViewport;
-    if (!hasUsableViewport(nextViewport)) {
+      typeof fallbackViewportFactory === "function"
+        ? fallbackViewportFactory()
+        : fallbackViewportFactory;
+    const nextViewport = rawViewport ?? fallbackViewport;
+    const canonical = buildCanonicalSharedViewport(nextViewport || {});
+    if (!normalizeIsoDate(canonical.firstVisibleDate)) {
       return false;
     }
 
-    await applyViewportFromParentControls(nextViewport, { sourceLabel: actionLabel });
+    await applyViewportFromParentControls(canonical, { sourceLabel: actionLabel });
     return true;
   } catch (error) {
-    console.error("Erreur action toolbar partage :", error);
-    setHubStatus(`Erreur pilotage : ${error.message}`);
-    appendLog(`Erreur toolbar partage : ${error.message}`);
+    console.error("Erreur action toolbar partagé :", error);
     return false;
   } finally {
     state.sharedToolbarActionInProgress = false;
@@ -223,43 +152,33 @@ export async function applyViewportFromParentControls(
     return;
   }
 
-  const canonicalViewport = buildCanonicalSharedViewport(viewport);
-  syncPlanningViewportBounds(canonicalViewport);
-  const viewportLogicalSignature = getViewportLogicalSignature(state.activeProjectKey, canonicalViewport);
+  const canonical = buildCanonicalSharedViewport(viewport);
+  syncPlanningViewportBounds(canonical);
+  const sig = getViewportLogicalSignature(state.activeProjectKey, canonical);
+
   state.viewportSyncInProgress = true;
   syncSharedPlanningControlsAvailability();
 
-  traceViewportSync("parent-controls-apply", {
-    activeProjectKey: state.activeProjectKey,
-    viewport: summarizeViewportTrace(canonicalViewport),
-    viewportLogicalSignature,
-  });
-
   try {
-    const applyCalls = [
-      Promise.resolve(state.planningApi.applyViewport(canonicalViewport)),
-      Promise.resolve(state.planningAxisApi.applyViewport(canonicalViewport)),
-    ];
+    // 1. Appliquer aux 2 planning iframes
+    await Promise.all([
+      Promise.resolve(state.planningApi.applyViewport(canonical)),
+      Promise.resolve(state.planningAxisApi.applyViewport(canonical)),
+    ]);
 
-    await Promise.all(applyCalls);
+    // 2. Demander l'application à gestion-depenses2 via la file dédiée (sérialisé, avec retry)
+    requestExpensesViewport(viewport);
 
-    state.lastAppliedViewportLogicalSignature = viewportLogicalSignature;
-    state.sharedViewportState = canonicalViewport;
-    syncExpensesPlanningShell(canonicalViewport);
+    state.lastAppliedViewportLogicalSignature = sig;
+    state.sharedViewportState = canonical;
+    syncExpensesPlanningShell(canonical);
     schedulePlanningFramePresentation();
-    syncExpensesViewportInBackground(canonicalViewport, { sourceApp: sourceLabel });
     setLastSource(getViewportSourceLabel(sourceLabel));
-    setLastRange(canonicalViewport);
-    setHubStatus(`Synchro active depuis ${getViewportSourceLabel(sourceLabel)}`);
-    appendLog(
-      `${getViewportSourceLabel(sourceLabel)} -> ${canonicalViewport.firstVisibleDate || "?"} / ${
-        canonicalViewport.rangeEndDate || "?"
-      } / ${canonicalViewport.mode || "?"}`
-    );
+    setLastRange(canonical);
+    setHubStatus(`Synchro : ${getViewportSourceLabel(sourceLabel)}`);
+    appendLog(`${getViewportSourceLabel(sourceLabel)} → ${canonical.firstVisibleDate || "?"} / ${canonical.mode || "?"}`);
   } catch (error) {
-    console.error("Erreur controle planning synchronise :", error);
-    setHubStatus(`Erreur pilotage : ${error.message}`);
-    appendLog(`Erreur pilotage : ${error.message}`);
+    console.error("Erreur contrôle toolbar :", error);
   } finally {
     state.viewportSyncInProgress = false;
     syncSharedPlanningControlsAvailability();
@@ -270,44 +189,32 @@ export async function applyViewportFromParentControls(
 }
 
 export function shiftViewportByMode(viewport = {}, direction = 1) {
-  const canonicalViewport = buildCanonicalSharedViewport(viewport);
+  const canonical = buildCanonicalSharedViewport(viewport);
   const baseDateValue =
-    normalizeIsoDate(canonicalViewport.firstVisibleDate) ||
-    normalizeIsoDate(canonicalViewport.rangeStartDate);
-  if (!baseDateValue) {
-    return canonicalViewport;
-  }
+    normalizeIsoDate(canonical.firstVisibleDate) || normalizeIsoDate(canonical.rangeStartDate);
+  if (!baseDateValue) return canonical;
 
   const baseDate = new Date(`${baseDateValue}T12:00:00`);
-  if (Number.isNaN(baseDate.getTime())) {
-    return canonicalViewport;
-  }
+  if (Number.isNaN(baseDate.getTime())) return canonical;
 
-  const safeDirection = direction >= 0 ? 1 : -1;
-  const nextDate = new Date(baseDate);
-  const mode = String(canonicalViewport.mode || "").trim();
+  const d = direction >= 0 ? 1 : -1;
+  const next = new Date(baseDate);
+  const mode = String(canonical.mode || "").trim();
 
-  if (mode === "week") {
-    nextDate.setDate(nextDate.getDate() + safeDirection * 7);
-  } else if (mode === "month") {
-    nextDate.setMonth(nextDate.getMonth() + safeDirection);
-  } else if (mode === "year") {
-    nextDate.setFullYear(nextDate.getFullYear() + safeDirection);
-  } else {
-    nextDate.setDate(nextDate.getDate() + safeDirection * canonicalViewport.visibleDays);
-  }
+  if (mode === "week") next.setDate(next.getDate() + d * 7);
+  else if (mode === "month") next.setMonth(next.getMonth() + d);
+  else if (mode === "year") next.setFullYear(next.getFullYear() + d);
+  else next.setDate(next.getDate() + d * (canonical.visibleDays || 7));
 
-  const nextDateValue = normalizeIsoDate(
-    `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}-${String(
-      nextDate.getDate()
-    ).padStart(2, "0")}`
+  const nextDate = normalizeIsoDate(
+    `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`
   );
 
   return buildCanonicalSharedViewport({
-    ...canonicalViewport,
-    anchorDate: nextDateValue,
-    firstVisibleDate: nextDateValue,
-    rangeStartDate: nextDateValue,
+    ...canonical,
+    anchorDate: nextDate,
+    firstVisibleDate: nextDate,
+    rangeStartDate: nextDate,
     rangeEndDate: "",
   });
 }
@@ -316,25 +223,15 @@ export function bindExpensesPlanningShellControls() {
   dom.expensesModeButtons.forEach((buttonEl) => {
     buttonEl.addEventListener("click", () => {
       const nextMode = String(buttonEl.dataset.expensesSyncMode || "").trim();
-      if (!nextMode) {
-        return;
-      }
-
+      if (!nextMode) return;
       void runSharedToolbarViewportAction({
         actionLabel: "Pilotage commun",
         execute: () => state.planningAxisApi?.setZoomMode?.(nextMode),
         fallbackViewportFactory: () => {
-          const currentViewport = getCurrentSharedViewport();
-          if (!currentViewport) {
-            return null;
-          }
-
-          return {
-            ...currentViewport,
-            mode: nextMode,
-            visibleDays: getTargetVisibleDaysForMode(nextMode, currentViewport),
-            rangeEndDate: "",
-          };
+          const cur = getCurrentSharedViewport();
+          return cur
+            ? { ...cur, mode: nextMode, visibleDays: getTargetVisibleDaysForMode(nextMode, cur), rangeEndDate: "" }
+            : null;
         },
       });
     });
@@ -345,8 +242,8 @@ export function bindExpensesPlanningShellControls() {
       actionLabel: "Pilotage commun",
       execute: () => state.planningAxisApi?.moveViewportByMode?.(-1),
       fallbackViewportFactory: () => {
-        const currentViewport = getCurrentSharedViewport();
-        return currentViewport ? shiftViewportByMode(currentViewport, -1) : null;
+        const cur = getCurrentSharedViewport();
+        return cur ? shiftViewportByMode(cur, -1) : null;
       },
     });
   });
@@ -364,8 +261,8 @@ export function bindExpensesPlanningShellControls() {
       actionLabel: "Pilotage commun",
       execute: () => state.planningAxisApi?.moveViewportByMode?.(1),
       fallbackViewportFactory: () => {
-        const currentViewport = getCurrentSharedViewport();
-        return currentViewport ? shiftViewportByMode(currentViewport, 1) : null;
+        const cur = getCurrentSharedViewport();
+        return cur ? shiftViewportByMode(cur, 1) : null;
       },
     });
   });
@@ -385,6 +282,10 @@ export function bindExpensesPlanningShellControls() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Synchro viewport entre les 3 iframes (planning-main, planning-axis, expenses)
+// ---------------------------------------------------------------------------
+
 export async function flushViewportSyncQueue() {
   if (
     state.projectSyncInProgress ||
@@ -397,56 +298,43 @@ export async function flushViewportSyncQueue() {
 
   const payload = state.pendingViewportPayload;
   state.pendingViewportPayload = null;
+
+  const source = String(payload.app || "").trim();
   const payloadProjectKey = String(payload.projectKey || "").trim();
-  traceViewportSync("flush-start", {
-    source: payload.app,
-    payloadProjectKey,
-    activeProjectKey: state.activeProjectKey,
-    meta: payload.meta || null,
-    viewport: summarizeViewportTrace(payload.viewport),
-  });
+
+  traceViewportSync("flush-start", { source, payloadProjectKey, activeProjectKey: state.activeProjectKey });
+
+  // Ignorer si le projet ne correspond pas
   if (
     state.activeProjectKey &&
     payloadProjectKey &&
     normalizeProjectKey(payloadProjectKey) !== normalizeProjectKey(state.activeProjectKey)
   ) {
-    traceViewportSync("flush-skip-project-mismatch", {
-      source: payload.app,
-      payloadProjectKey,
-      activeProjectKey: state.activeProjectKey,
-    });
+    traceViewportSync("flush-skip-project-mismatch", { source, payloadProjectKey, activeProjectKey: state.activeProjectKey });
     void flushViewportSyncQueue();
     return;
   }
 
-  const sourceApi = getViewportSourceApi(payload.app);
-  const targetApis = getViewportTargetApis(payload.app);
-  if (targetApis.length === 0) {
-    traceViewportSync("flush-skip-no-target", {
-      source: payload.app,
-      sourceApi: getViewportTraceApiLabel(sourceApi),
-    });
+  const canonical = buildCanonicalSharedViewport(payload.viewport || {});
+  if (!normalizeIsoDate(canonical.firstVisibleDate)) {
+    traceViewportSync("flush-skip-no-date", { source });
     void flushViewportSyncQueue();
     return;
   }
 
-  const canonicalViewport = buildCanonicalSharedViewport(payload.viewport);
-  const exactSharedViewport = buildPlanningExactSharedViewport(payload.viewport);
-  syncPlanningViewportBounds(canonicalViewport);
-  const viewportLogicalSignature = getViewportLogicalSignature(payloadProjectKey, canonicalViewport);
-  if (
-    viewportLogicalSignature &&
-    viewportLogicalSignature === state.lastAppliedViewportLogicalSignature
-  ) {
-    traceViewportSync("flush-skip-duplicate-signature", {
-      source: payload.app,
-      viewportLogicalSignature,
-      viewport: summarizeViewportTrace(canonicalViewport),
-    });
-    state.sharedViewportState = canonicalViewport;
-    syncExpensesPlanningShell(canonicalViewport);
+  syncPlanningViewportBounds(canonical);
+
+  const sig = getViewportLogicalSignature(
+    payloadProjectKey || state.activeProjectKey,
+    canonical
+  );
+
+  // Déduplication : évite les boucles infinies
+  if (sig && sig === state.lastAppliedViewportLogicalSignature) {
+    traceViewportSync("flush-skip-duplicate", { source, sig });
+    state.sharedViewportState = canonical;
+    syncExpensesPlanningShell(canonical);
     schedulePlanningFramePresentation();
-    syncExpensesViewportInBackground(exactSharedViewport, { sourceApp: payload.app });
     scheduleExpensesFramePresentation();
     void flushViewportSyncQueue();
     return;
@@ -456,53 +344,38 @@ export async function flushViewportSyncQueue() {
   syncSharedPlanningControlsAvailability();
 
   try {
-    const sourceLogicalSignature = getViewportLogicalSignature(payloadProjectKey, payload.viewport);
-    const getViewportForApi = () => exactSharedViewport;
-    const reapplySource = Boolean(sourceApi && sourceLogicalSignature !== viewportLogicalSignature);
-    traceViewportSync("flush-apply", {
-      source: payload.app,
-      sourceApi: getViewportTraceApiLabel(sourceApi),
-      targetApis: targetApis.map((api) => getViewportTraceApiLabel(api)),
-      reapplySource,
-      sourceLogicalSignature,
-      viewportLogicalSignature,
-      sourceViewport: summarizeViewportTrace(payload.viewport),
-      exactSharedViewport: summarizeViewportTrace(exactSharedViewport),
-      canonicalViewport: summarizeViewportTrace(canonicalViewport),
-    });
-    const applyCalls = targetApis.map((api) =>
-      Promise.resolve(api.applyViewport(getViewportForApi(api)))
-    );
+    const exact = buildPlanningExactSharedViewport(payload.viewport || {});
 
-    if (reapplySource) {
-      applyCalls.push(Promise.resolve(sourceApi.applyViewport(getViewportForApi(sourceApi))));
+    // Appliquer aux planning iframes (sauf la source)
+    const planningCalls = [];
+    if (source !== "planning-projet-main" && state.planningApi?.applyViewport) {
+      planningCalls.push(Promise.resolve(state.planningApi.applyViewport(exact)));
+    }
+    if (source !== "planning-projet-axis" && state.planningAxisApi?.applyViewport) {
+      planningCalls.push(Promise.resolve(state.planningAxisApi.applyViewport(exact)));
+    }
+    if (planningCalls.length > 0) {
+      await Promise.all(planningCalls);
     }
 
-    await Promise.all(applyCalls);
-    traceViewportSync("flush-apply-complete", {
-      source: payload.app,
-      targetApis: targetApis.map((api) => getViewportTraceApiLabel(api)),
-      reapplySource,
-      viewportLogicalSignature,
-    });
-    state.lastAppliedViewportLogicalSignature = viewportLogicalSignature;
-    state.sharedViewportState = canonicalViewport;
-    syncExpensesPlanningShell(canonicalViewport);
+    // Appliquer à gestion-depenses2 si la source est Planning Projet
+    // (pas si c'est gestion-depenses2 lui-même pour éviter la boucle)
+    if (source !== "gestion-depenses2") {
+      requestExpensesViewport(payload.viewport);
+    }
+
+    traceViewportSync("flush-applied", { source, sig });
+
+    state.lastAppliedViewportLogicalSignature = sig;
+    state.sharedViewportState = canonical;
+    syncExpensesPlanningShell(canonical);
     schedulePlanningFramePresentation();
-    syncExpensesViewportInBackground(exactSharedViewport, { sourceApp: payload.app });
-    scheduleExpensesFramePresentation();
-    setLastSource(getViewportSourceLabel(payload.app));
-    setLastRange(canonicalViewport);
-    setHubStatus(`Synchro active depuis ${getViewportSourceLabel(payload.app)}`);
-    appendLog(
-      `${getViewportSourceLabel(payload.app)} -> ${canonicalViewport.firstVisibleDate || "?"} / ${
-        canonicalViewport.rangeEndDate || "?"
-      } / ${canonicalViewport.mode || "?"}`
-    );
+    setLastSource(getViewportSourceLabel(source));
+    setLastRange(canonical);
+    setHubStatus(`Synchro : ${getViewportSourceLabel(source)}`);
+    appendLog(`${getViewportSourceLabel(source)} → ${canonical.firstVisibleDate || "?"} / ${canonical.mode || "?"}`);
   } catch (error) {
     console.error("Erreur synchro viewport :", error);
-    setHubStatus(`Erreur synchro : ${error.message}`);
-    appendLog(`Erreur synchro viewport : ${error.message}`);
   } finally {
     state.viewportSyncInProgress = false;
     syncSharedPlanningControlsAvailability();
@@ -512,28 +385,22 @@ export async function flushViewportSyncQueue() {
   }
 }
 
+/**
+ * Appelé directement depuis les subscriptions Planning Projet (bootstrap.js).
+ * Achemine le viewport vers la file gestion-depenses2 de façon fiable.
+ */
+export function syncViewportToExpensesNow(viewport) {
+  if (!viewport) return;
+  requestExpensesViewport(viewport);
+}
+
 export function handleViewportChange(payload) {
   if (!payload || state.projectSyncInProgress) {
     return;
   }
-
   if (state.sharedToolbarActionInProgress) {
-    traceViewportSync("received-ignored-toolbar-action", {
-      source: payload.app,
-      projectKey: String(payload.projectKey || "").trim(),
-      meta: payload.meta || null,
-      viewport: summarizeViewportTrace(payload.viewport),
-    });
     return;
   }
-
-  traceViewportSync("received", {
-    source: payload.app,
-    projectKey: String(payload.projectKey || "").trim(),
-    meta: payload.meta || null,
-    replacingPendingSource: state.pendingViewportPayload?.app || "",
-    viewport: summarizeViewportTrace(payload.viewport),
-  });
   state.pendingViewportPayload = payload;
   void flushViewportSyncQueue();
 }
