@@ -1235,8 +1235,8 @@ body.planning-row-dragging {
   border-radius: 6px;
   padding: 10px;
   font: inherit;
-  background: #1f2937;
-  color: #ffffff;
+  background: #ffffff;
+  color: #1f2937;
 }
 
 .planning-retard-dialog__actions {
@@ -1362,7 +1362,48 @@ body.planning-row-dragging {
   border: 1px solid #bfd0e7;
   border-radius: 6px;
   padding: 6px 8px;
+  background: #ffffff;
+  color: #000000;
   font: inherit;
+}
+
+.planning-reference-details-table__bloquant,
+.planning-ref-select-all {
+  background: #ffffff;
+}
+
+.planning-reference-details-table__date-limite-cell {
+  width: 132px;
+}
+
+.planning-reference-details-table__date-limite {
+  width: 132px;
+  border: 1px solid #bfd0e7;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #ffffff;
+  color: #334155;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.planning-reference-details-table__duration.is-preview,
+.planning-reference-details-table__date-limite.is-preview {
+  border-color: #004990;
+  font-weight: 700;
+}
+
+.planning-reference-details-table__date-limite.is-preview {
+  color: #004990;
+}
+
+.planning-reference-details-table__duration.is-invalid-preview,
+.planning-reference-details-table__date-limite.is-invalid-preview {
+  border-color: #b91c1c;
+}
+
+.planning-reference-details-table__date-limite.is-invalid-preview {
+  color: #b91c1c;
 }
 
 .planning-reference-details-dialog__actions {

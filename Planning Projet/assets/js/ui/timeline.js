@@ -83,6 +83,8 @@ let visualAggregateModeEnabled = false;
 let lastPlanningTimelineData = { groups: [], items: [] };
 
 const PLANNING_PARENT_TOOLTIP_MESSAGE_TYPE = "planning-projet-hover-tooltip";
+const REFERENCE_DETAILS_EMPTY_DATE_ISO = "1900-01-01";
+const REFERENCE_DETAILS_DAY_MS = 86400000;
 
 const PLANNING_ROW_DRAG_HANDLED_FLAG = "__planningRowDragHandled";
 const PLANNING_PANE_MIN_WIDTH = 260;
@@ -1649,6 +1651,68 @@ function ensureReferenceDetailsDialog() {
   return referenceDetailsDialogEl;
 }
 
+function normalizeReferenceDetailsLimitDateIso(value = "") {
+  const rawValue = String(value || "").trim();
+  const isoMatch = rawValue.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (isoMatch) {
+    if (
+      `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}` === REFERENCE_DETAILS_EMPTY_DATE_ISO
+    ) {
+      return "";
+    }
+    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  }
+
+  const frMatch = rawValue.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (frMatch) {
+    const day = frMatch[1].padStart(2, "0");
+    const month = frMatch[2].padStart(2, "0");
+    const year = frMatch[3];
+    if (`${year}-${month}-${day}` === REFERENCE_DETAILS_EMPTY_DATE_ISO) return "";
+    return `${year}-${month}-${day}`;
+  }
+
+  return "";
+}
+
+function parseReferenceDetailsDurationWeeks(value = "") {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const numericValue = Number(text.replace(",", "."));
+  if (!Number.isFinite(numericValue) || !Number.isInteger(numericValue) || numericValue < 0) {
+    return null;
+  }
+  return numericValue;
+}
+
+function computeReferenceDetailsLimitDateIso(segmentStartIso = "", durationWeeksValue = "") {
+  const startIso = String(segmentStartIso || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startIso)) return "";
+
+  const durationWeeks = parseReferenceDetailsDurationWeeks(durationWeeksValue);
+  if (durationWeeks == null) return "";
+
+  return shiftIsoDateValue(startIso, -(durationWeeks * 7));
+}
+
+function parseReferenceDetailsIsoDate(value = "") {
+  const isoValue = normalizeReferenceDetailsLimitDateIso(value);
+  if (!isoValue) return null;
+
+  const date = new Date(`${isoValue}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function computeReferenceDetailsDurationWeeks(segmentStartIso = "", dateLimiteValue = "") {
+  const startDate = parseReferenceDetailsIsoDate(segmentStartIso);
+  const limitDate = parseReferenceDetailsIsoDate(dateLimiteValue);
+  if (!startDate || !limitDate) return null;
+
+  const diffDays = Math.round((startDate.getTime() - limitDate.getTime()) / REFERENCE_DETAILS_DAY_MS);
+  if (diffDays < 0 || diffDays % 7 !== 0) return null;
+  return diffDays / 7;
+}
+
 function renderReferenceDetailsBody(dialog, data = {}) {
   const body = dialog.querySelector(".planning-reference-details-dialog__body");
   if (!(body instanceof HTMLElement)) return;
@@ -1659,6 +1723,8 @@ function renderReferenceDetailsBody(dialog, data = {}) {
     return;
   }
 
+  const segmentStartIso = String(data.segmentStartIso || "").trim();
+
   body.innerHTML = `
     <table class="planning-reference-details-table">
       <thead>
@@ -1667,6 +1733,7 @@ function renderReferenceDetailsBody(dialog, data = {}) {
           <th>Reference</th>
           <th><label class="planning-ref-select-all-label"><input type="checkbox" class="planning-ref-select-all" title="Tout sélectionner / désélectionner"> Bloquant</label></th>
           <th>Durée (sem.)</th>
+          <th>Durée Limite</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -1701,7 +1768,72 @@ function renderReferenceDetailsBody(dialog, data = {}) {
     duration.value = reference?.durationWeeks == null ? "" : String(reference.durationWeeks);
     durationCell.append(duration);
 
-    tr.append(emetteur, referenceCell, bloquantCell, durationCell);
+    const dateLimiteCell = document.createElement("td");
+    dateLimiteCell.className = "planning-reference-details-table__date-limite-cell";
+    const dateLimite = document.createElement("input");
+    dateLimite.type = "date";
+    dateLimite.className = "planning-reference-details-table__date-limite";
+    if (segmentStartIso) {
+      dateLimite.max = segmentStartIso;
+    }
+    const savedDurationValue = duration.value;
+    const savedDateLimiteIso = normalizeReferenceDetailsLimitDateIso(reference?.dateLimite);
+    dateLimite.value = savedDateLimiteIso;
+    dateLimiteCell.append(dateLimite);
+
+    let syncingReferenceDetailsInputs = false;
+
+    const updateReferenceDetailsPreviewState = () => {
+      const durationText = String(duration.value || "").trim();
+      const currentDateIso = normalizeReferenceDetailsLimitDateIso(dateLimite.value);
+      const hasDuration = Boolean(durationText);
+      const hasDate = Boolean(currentDateIso);
+      const dateFromDurationIso = computeReferenceDetailsLimitDateIso(segmentStartIso, durationText);
+      const durationFromDate = computeReferenceDetailsDurationWeeks(segmentStartIso, currentDateIso);
+      const invalidDuration = hasDuration && !dateFromDurationIso;
+      const invalidDate = hasDate && durationFromDate == null;
+      const changed =
+        durationText !== savedDurationValue ||
+        currentDateIso !== savedDateLimiteIso;
+
+      duration.classList.toggle("is-preview", changed && !invalidDuration && !invalidDate);
+      dateLimite.classList.toggle("is-preview", changed && !invalidDuration && !invalidDate);
+      duration.classList.toggle("is-invalid-preview", invalidDuration || invalidDate);
+      dateLimite.classList.toggle("is-invalid-preview", invalidDuration || invalidDate);
+    };
+
+    const updateDateLimitePreview = () => {
+      if (syncingReferenceDetailsInputs) return;
+
+      const durationText = String(duration.value || "").trim();
+      syncingReferenceDetailsInputs = true;
+      dateLimite.value = durationText
+        ? computeReferenceDetailsLimitDateIso(segmentStartIso, durationText)
+        : "";
+      syncingReferenceDetailsInputs = false;
+      updateReferenceDetailsPreviewState();
+    };
+
+    const updateDurationPreview = () => {
+      if (syncingReferenceDetailsInputs) return;
+
+      const dateLimiteIso = normalizeReferenceDetailsLimitDateIso(dateLimite.value);
+      const durationWeeks = computeReferenceDetailsDurationWeeks(segmentStartIso, dateLimiteIso);
+      syncingReferenceDetailsInputs = true;
+      if (!dateLimiteIso && dateLimite.value) {
+        dateLimite.value = "";
+      }
+      duration.value = dateLimiteIso && durationWeeks != null ? String(durationWeeks) : "";
+      syncingReferenceDetailsInputs = false;
+      updateReferenceDetailsPreviewState();
+    };
+
+    duration.addEventListener("input", updateDateLimitePreview);
+    dateLimite.addEventListener("input", updateDurationPreview);
+    dateLimite.addEventListener("change", updateDurationPreview);
+    updateReferenceDetailsPreviewState();
+
+    tr.append(emetteur, referenceCell, bloquantCell, durationCell, dateLimiteCell);
     tbody?.append(tr);
   });
 
@@ -1778,10 +1910,12 @@ async function commitReferenceDetailsDialog() {
     const id = Number(row.dataset.referenceId || "");
     const bloquant = row.querySelector(".planning-reference-details-table__bloquant");
     const duration = row.querySelector(".planning-reference-details-table__duration");
+    const dateLimite = row.querySelector(".planning-reference-details-table__date-limite");
     return {
       id,
       bloquant: Boolean(bloquant instanceof HTMLInputElement && bloquant.checked),
       durationWeeks: duration instanceof HTMLInputElement ? duration.value : "",
+      dateLimite: dateLimite instanceof HTMLInputElement ? dateLimite.value : "",
     };
   });
 

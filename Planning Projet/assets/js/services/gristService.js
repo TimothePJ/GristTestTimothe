@@ -2,6 +2,8 @@ import { APP_CONFIG } from "../config.js";
 import { normalizePlanningDocumentType } from "../../../../gestion-depenses2/assets/js/utils/planningRealisation.js";
 
 const REFERENCES_TABLE_NAME = "References";
+const REFERENCE_EMPTY_DATE_ISO = "1900-01-01";
+const DAY_MS = 86400000;
 const LISTEPLAN_TABLE_CANDIDATES = [
   "ListePlan_NDC_COF",
   "ListePlan NDC+COF",
@@ -134,7 +136,8 @@ function parseCalendarDate(value) {
   }
 
   if (typeof value === "number") {
-    const n = value > 1e9 && value < 1e11 ? value * 1000 : value;
+    const absValue = Math.abs(value);
+    const n = absValue >= 86400 && absValue < 1e11 ? value * 1000 : value;
     return normalizeUtcDateToLocalCalendar(new Date(n));
   }
 
@@ -675,6 +678,23 @@ function parseReferenceDurationLimit(value) {
   return numericValue;
 }
 
+function getReferenceDurationWeeksFromLimitDate(startDate, limitDate) {
+  if (
+    !(startDate instanceof Date) ||
+    Number.isNaN(startDate.getTime()) ||
+    !(limitDate instanceof Date) ||
+    Number.isNaN(limitDate.getTime())
+  ) {
+    return null;
+  }
+
+  const startMs = Date.UTC(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const limitMs = Date.UTC(limitDate.getFullYear(), limitDate.getMonth(), limitDate.getDate());
+  const diffDays = Math.round((startMs - limitMs) / DAY_MS);
+  if (diffDays < 0 || diffDays % 7 !== 0) return null;
+  return diffDays / 7;
+}
+
 function buildPlanningReferenceChange(row, columns = {}) {
   return {
     projectName: row?.[columns.projectLink || columns.nomProjet || "NomProjet"],
@@ -741,7 +761,9 @@ async function buildReferenceOffsetSnapshotForPlanningRow(planningRow, columns =
   const offsets = linkedRows
     .map((row) => {
       const referenceId = Number(row?.id);
-      const durationWeeks = parseReferenceDurationLimit(row?.DureeLimite);
+      const durationWeeks =
+        parseReferenceDurationLimit(row?.DureeLimite) ??
+        getReferenceDurationWeeksFromLimitDate(startDate, parseCalendarDate(row?.DateLimite));
       if (!Number.isInteger(referenceId) || referenceId <= 0 || durationWeeks == null) {
         return null;
       }
@@ -2584,6 +2606,48 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
       }
 
       const durationText = toText(update?.durationWeeks);
+      const rawDateLimiteText = toText(update?.dateLimite);
+      const rawDateLimiteIsEmptyValue =
+        !rawDateLimiteText ||
+        rawDateLimiteText === REFERENCE_EMPTY_DATE_ISO ||
+        rawDateLimiteText.startsWith(`${REFERENCE_EMPTY_DATE_ISO}T`) ||
+        rawDateLimiteText === "01/01/1900";
+      const parsedDateLimite = parseCalendarDate(rawDateLimiteText);
+      const hasRawDateLimite = Boolean(rawDateLimiteText);
+      const dateLimiteIso = isEmptyReferenceDate(parsedDateLimite)
+        ? ""
+        : formatIsoDate(parsedDateLimite);
+
+      if (hasRawDateLimite && !rawDateLimiteIsEmptyValue && !dateLimiteIso) {
+        throw new Error("Date limite invalide.");
+      }
+
+      if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) {
+        if (durationText || dateLimiteIso) {
+          throw new Error("Date de debut du segment introuvable.");
+        }
+      }
+
+      if (dateLimiteIso) {
+        const durationWeeks = getReferenceDurationWeeksFromLimitDate(startDate, parsedDateLimite);
+        if (durationWeeks == null) {
+          throw new Error(
+            "La date limite doit etre un nombre entier de semaines avant le debut du segment."
+          );
+        }
+
+        return [
+          "UpdateRecord",
+          REFERENCES_TABLE_NAME,
+          referenceId,
+          {
+            Bloquant: Boolean(update?.bloquant),
+            DureeLimite: durationWeeks,
+            DateLimite: dateLimiteIso,
+          },
+        ];
+      }
+
       if (!durationText) {
         return [
           "UpdateRecord",
@@ -2592,6 +2656,7 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
           {
             Bloquant: Boolean(update?.bloquant),
             DureeLimite: "",
+            DateLimite: REFERENCE_EMPTY_DATE_ISO,
           },
         ];
       }
@@ -2600,13 +2665,10 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
       if (durationWeeks == null) {
         throw new Error("La duree doit etre un nombre entier de semaines.");
       }
-      if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) {
-        throw new Error("Date de debut du segment introuvable.");
-      }
 
       const dateLimite = subtractWeeksFromDate(startDate, durationWeeks);
-      const dateLimiteIso = formatIsoDate(dateLimite);
-      if (!dateLimiteIso) {
+      const computedDateLimiteIso = formatIsoDate(dateLimite);
+      if (!computedDateLimiteIso) {
         throw new Error("Impossible de calculer DateLimite.");
       }
 
@@ -2617,7 +2679,7 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
         {
           Bloquant: Boolean(update?.bloquant),
           DureeLimite: durationWeeks,
-          DateLimite: dateLimiteIso,
+          DateLimite: computedDateLimiteIso,
         },
       ];
     })
