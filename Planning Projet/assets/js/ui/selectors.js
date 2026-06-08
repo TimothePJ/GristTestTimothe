@@ -2,6 +2,15 @@ import { state, setState } from "../state.js";
 
 const ADD_ZONE_OPTION_VALUE = "__add_zone__";
 const MANAGE_ZONE_OPTION_VALUE = "__manage_zone__";
+const SHARED_PROJECT_NAME_KEY = "grist.selected-project";
+const SHARED_PROJECT_ID_KEY = "grist.selected-project-id";
+const PROJECT_STORAGE_SYNC_DELAY_MS = 30;
+let projectRegistry = [];
+let projectChangeHandler = null;
+let missingProjectHandler = null;
+let projectStorageSyncTimer = 0;
+let projectSelectorBound = false;
+let activeProjectId = null;
 
 function fillSelect(
   selectEl,
@@ -50,8 +59,6 @@ function fillSelect(
   }
 }
 
-const SHARED_PROJECT_ID_KEY = 'grist.selected-project-id';
-
 function readSharedProjectId() {
   try {
     const raw = localStorage.getItem(SHARED_PROJECT_ID_KEY);
@@ -60,13 +67,74 @@ function readSharedProjectId() {
   } catch (_e) { return null; }
 }
 
-export function initProjectSelector(projectOptions, { onChange, emitInitialChange = true } = {}) {
-  const projectSelect = document.getElementById("projectDropdown");
-  if (!projectSelect) {
-    throw new Error("Dropdown projet introuvable (#projectDropdown).");
+function readSharedProjectName() {
+  try {
+    return String(localStorage.getItem(SHARED_PROJECT_NAME_KEY) || "").trim();
+  } catch (_error) {
+    return "";
+  }
+}
+
+function normalizeProjectKey(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("fr");
+}
+
+function normalizeProjectNumber(value = "") {
+  const normalized = String(value || "").trim();
+  return /^\d+$/.test(normalized) ? String(Number(normalized)) : normalizeProjectKey(normalized);
+}
+
+function normalizeProjectObjects(projectOptions = []) {
+  const projectsById = new Map();
+  (projectOptions || []).forEach((project) => {
+    const normalized =
+      project && typeof project === "object"
+        ? {
+            id: Number(project.id),
+            number: String(project.number || "").trim(),
+            name: String(project.name || "").trim(),
+          }
+        : {
+            id: null,
+            number: "",
+            name: String(project || "").trim(),
+          };
+    if (!normalized.name) return;
+    const key = Number.isInteger(normalized.id) && normalized.id > 0
+      ? `id:${normalized.id}`
+      : `name:${normalizeProjectKey(normalized.name)}`;
+    if (!projectsById.has(key)) {
+      projectsById.set(key, normalized);
+    }
+  });
+  return [...projectsById.values()];
+}
+
+export function resolveProjectSelection(projectSelection = "", projectId = null) {
+  const numericId = Number(projectId);
+  if (Number.isInteger(numericId) && numericId > 0) {
+    const byId = projectRegistry.find((project) => project.id === numericId);
+    if (byId) return byId;
   }
 
-  projectSelect.disabled = false;
+  const requestedKey = normalizeProjectKey(projectSelection);
+  if (!requestedKey) return null;
+
+  return projectRegistry.find((project) =>
+    normalizeProjectKey(project.name) === requestedKey
+  ) || projectRegistry.find((project) =>
+    normalizeProjectNumber(project.number) === normalizeProjectNumber(projectSelection)
+  ) || projectRegistry.find((project) =>
+    normalizeProjectKey(`${project.number} - ${project.name}`) === requestedKey
+  ) || null;
+}
+
+function renderProjectOptions(projectSelect) {
   projectSelect.innerHTML = "";
 
   const first = document.createElement("option");
@@ -74,75 +142,177 @@ export function initProjectSelector(projectOptions, { onChange, emitInitialChang
   first.textContent = "Choisir un projet";
   projectSelect.appendChild(first);
 
-  // projectOptions peut être [{id, number, name}] ou string[]
-  const projectObjects = (projectOptions || []).map((p) =>
-    typeof p === "object" ? p : { id: null, number: "", name: String(p) }
-  );
-
-  projectObjects.forEach((p) => {
+  projectRegistry.forEach((project) => {
     const option = document.createElement("option");
-    option.value = p.name;
-    option.textContent = `${p.number} - ${p.name}`;
-    if (p.id) option.dataset.projectId = String(p.id);
+    option.value = project.name;
+    option.textContent = project.number
+      ? `${project.number} - ${project.name}`
+      : project.name;
+    if (Number.isInteger(project.id) && project.id > 0) {
+      option.dataset.projectId = String(project.id);
+    }
     projectSelect.appendChild(option);
   });
+  projectSelect.disabled = projectRegistry.length === 0;
+}
 
-  // Restaurer par ID d'abord, puis par nom
-  const savedId = readSharedProjectId();
-  let selectedProject = "";
-  if (savedId) {
-    const byId = projectObjects.find((p) => p.id === savedId);
-    if (byId) selectedProject = byId.name;
+function applyCanonicalProject(project, {
+  notify = true,
+  persist = true,
+} = {}) {
+  const projectSelect = document.getElementById("projectDropdown");
+  if (!projectSelect) {
+    throw new Error("Dropdown projet introuvable (#projectDropdown).");
   }
-  if (!selectedProject) {
-    selectedProject = projectObjects.some((p) => p.name === state.selectedProject)
-      ? state.selectedProject
-      : "";
+
+  const canonicalName = project?.name || "";
+  const canonicalId =
+    Number.isInteger(project?.id) && project.id > 0 ? project.id : null;
+  const changed =
+    state.selectedProject !== canonicalName ||
+    activeProjectId !== canonicalId;
+  const matchingOptionIndex = Array.from(projectSelect.options).findIndex((option) =>
+    canonicalId != null
+      ? Number(option.dataset?.projectId) === canonicalId
+      : option.value === canonicalName
+  );
+  projectSelect.selectedIndex = matchingOptionIndex >= 0 ? matchingOptionIndex : 0;
+  activeProjectId = canonicalId;
+
+  if (persist) {
+    setState({
+      selectedProject: canonicalName,
+      selectedZone: changed ? "" : state.selectedZone,
+    });
+  } else {
+    state.selectedProject = canonicalName;
+    if (changed) state.selectedZone = "";
   }
-  if (!selectedProject && state.selectedProject) {
-    setState({ selectedProject: "", selectedZone: "" });
+
+  if (notify && changed) {
+    projectChangeHandler?.({ ...state });
   }
-  projectSelect.value = selectedProject;
+  return { project: project || null, changed, missing: false };
+}
+
+export function applyProjectSelection(projectSelection = "", {
+  projectId = null,
+  notify = true,
+  persist = true,
+  clearInvalid = false,
+} = {}) {
+  const project = resolveProjectSelection(projectSelection, projectId);
+  if (project) {
+    return applyCanonicalProject(project, { notify, persist });
+  }
+
+  const requested = String(projectSelection || "").trim() || projectId != null;
+  if (!requested || clearInvalid) {
+    return applyCanonicalProject(null, { notify, persist });
+  }
+  return { project: null, changed: false, missing: true };
+}
+
+export function reconcileSharedProjectSelection({
+  notify = true,
+  clearInvalid = false,
+  fallbackToState = true,
+} = {}) {
+  const sharedName = readSharedProjectName();
+  const sharedId = readSharedProjectId();
+  const fallbackName = sharedName || (fallbackToState ? state.selectedProject : "");
+  return applyProjectSelection(fallbackName, {
+    projectId: sharedId,
+    notify,
+    persist: true,
+    clearInvalid,
+  });
+}
+
+function scheduleSharedProjectReconciliation() {
+  if (projectStorageSyncTimer) {
+    window.clearTimeout(projectStorageSyncTimer);
+  }
+  projectStorageSyncTimer = window.setTimeout(() => {
+    projectStorageSyncTimer = 0;
+    const result = reconcileSharedProjectSelection({
+      notify: true,
+      clearInvalid: false,
+      fallbackToState: false,
+    });
+    if (result.missing) {
+      void missingProjectHandler?.();
+    }
+  }, PROJECT_STORAGE_SYNC_DELAY_MS);
+}
+
+function bindProjectSelector(projectSelect) {
+  if (projectSelectorBound) return;
+  projectSelectorBound = true;
 
   projectSelect.addEventListener("change", () => {
-    setState({
-      selectedProject: projectSelect.value,
-      selectedZone: "",
+    const selectedOption = projectSelect.selectedOptions?.[0];
+    applyProjectSelection(projectSelect.value, {
+      projectId: selectedOption?.dataset?.projectId || null,
+      notify: true,
+      persist: true,
+      clearInvalid: true,
     });
-    onChange?.({ ...state });
   });
 
-  // Synchronisation inter-widgets : réagit quand un autre widget change le projet sélectionné
-  if (!window.__lpStorageSyncAdded_planningProjet) {
-    window.__lpStorageSyncAdded_planningProjet = true;
-    const _nk = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
-    window.addEventListener('storage', (event) => {
-      // Priorité : synchronisation par ID canonique
-      if (event.key === SHARED_PROJECT_ID_KEY && event.newValue) {
-        const idStr = String(event.newValue).trim();
-        const match = Array.from(projectSelect.options).find((o) => o.dataset.projectId === idStr);
-        if (match && projectSelect.value !== match.value) {
-          projectSelect.value = match.value;
-          setState({ selectedProject: match.value, selectedZone: '' });
-          onChange?.({ ...state });
-        }
-        return;
-      }
-      // Compatibilité : synchronisation par nom
-      if (event.key !== 'grist.selected-project' || !event.newValue) return;
-      const newProject = String(event.newValue).trim();
-      const match = Array.from(projectSelect.options).find((o) => _nk(o.value) === _nk(newProject));
-      if (match && projectSelect.value !== match.value) {
-        projectSelect.value = match.value;
-        setState({ selectedProject: match.value, selectedZone: '' });
-        onChange?.({ ...state });
-      }
-    });
+  window.addEventListener("storage", (event) => {
+    if (
+      event.key !== SHARED_PROJECT_ID_KEY &&
+      event.key !== SHARED_PROJECT_NAME_KEY
+    ) {
+      return;
+    }
+    scheduleSharedProjectReconciliation();
+  });
+}
+
+export function updateProjectSelectorOptions(projectOptions, {
+  notify = false,
+  clearInvalid = true,
+  fallbackToState = false,
+} = {}) {
+  const projectSelect = document.getElementById("projectDropdown");
+  if (!projectSelect) {
+    throw new Error("Dropdown projet introuvable (#projectDropdown).");
   }
 
-  if (emitInitialChange) {
-    onChange?.({ ...state });
+  projectRegistry = normalizeProjectObjects(projectOptions);
+  renderProjectOptions(projectSelect);
+  return reconcileSharedProjectSelection({
+    notify,
+    clearInvalid,
+    fallbackToState,
+  });
+}
+
+export function initProjectSelector(projectOptions, {
+  onChange,
+  onMissingProject,
+  emitInitialChange = true,
+} = {}) {
+  const projectSelect = document.getElementById("projectDropdown");
+  if (!projectSelect) {
+    throw new Error("Dropdown projet introuvable (#projectDropdown).");
   }
+
+  projectChangeHandler = typeof onChange === "function" ? onChange : null;
+  missingProjectHandler =
+    typeof onMissingProject === "function" ? onMissingProject : null;
+  bindProjectSelector(projectSelect);
+  const result = updateProjectSelectorOptions(projectOptions, {
+    notify: false,
+    clearInvalid: true,
+    fallbackToState: true,
+  });
+  if (emitInitialChange) {
+    projectChangeHandler?.({ ...state });
+  }
+  return result;
 }
 
 export function initZoneSelector({ onChange, onAddZone, onManageZone } = {}) {

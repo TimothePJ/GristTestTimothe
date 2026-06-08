@@ -23,8 +23,10 @@ import {
 } from "./services/planningService.js";
 import { synchronizePlanningDerivedData } from "./services/planningSyncCoordinator.js";
 import {
+  applyProjectSelection,
   initProjectSelector,
   initZoneSelector,
+  updateProjectSelectorOptions,
   updateZoneSelector,
 } from "./ui/selectors.js";
 import {
@@ -61,6 +63,8 @@ let lastAutoSyncAt = 0;
 let lastAutoSyncProject = "";
 let lastRenderedProject = "";
 let planningLifecycleRefreshBound = false;
+let planningLifecycleRefreshTimer = 0;
+let projectRegistryRefreshPromise = null;
 let addZoneModalBound = false;
 let addZoneModalOpen = false;
 let manageZoneModalBound = false;
@@ -86,6 +90,7 @@ const EXTERNAL_AXIS_EMBEDDED_MODE =
   new URLSearchParams(window.location.search).get("externalAxis") === "1";
 const PLANNING_AUTO_SYNC_INTERVAL_MS = 60000;
 const PLANNING_REFRESH_DEBOUNCE_MS = 30;
+const PLANNING_LIFECYCLE_REFRESH_DELAY_MS = 50;
 const PLANNING_PERF_DEBUG =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).get("planningDebug") === "1";
@@ -1159,11 +1164,68 @@ function refreshPlanning(options = {}) {
   return refreshQueuePromise;
 }
 
+function applyProjectBootstrapData({
+  projectOptions = [],
+  projectAvancementConfigs = [],
+} = {}, {
+  notify = false,
+  clearInvalid = true,
+  fallbackToState = false,
+} = {}) {
+  cachedProjectAvancementConfigs = projectAvancementConfigs;
+  cachedRealisationTargetLookup = buildProjectRealisationTargetLookup(
+    cachedProjectAvancementConfigs
+  );
+  planningProjectOptions = projectOptions.map((project) => project.name);
+  return updateProjectSelectorOptions(projectOptions, {
+    notify,
+    clearInvalid,
+    fallbackToState,
+  });
+}
+
+function refreshProjectRegistryFromGrist({
+  notify = true,
+  clearInvalid = true,
+} = {}) {
+  if (HEADER_ONLY_EMBEDDED_MODE) {
+    return Promise.resolve({ project: null, changed: false, missing: false });
+  }
+  if (projectRegistryRefreshPromise) {
+    return projectRegistryRefreshPromise;
+  }
+
+  projectRegistryRefreshPromise = fetchProjectBootstrapData()
+    .then((bootstrapData) => {
+      const result = applyProjectBootstrapData(bootstrapData, {
+        notify,
+        clearInvalid,
+        fallbackToState: false,
+      });
+      return result;
+    })
+    .catch((error) => {
+      console.warn("Impossible de recharger la liste des projets :", error);
+      return { project: null, changed: false, missing: true };
+    })
+    .finally(() => {
+      projectRegistryRefreshPromise = null;
+    });
+  return projectRegistryRefreshPromise;
+}
+
 function bindPlanningLifecycleRefresh() {
   if (planningLifecycleRefreshBound || HEADER_ONLY_EMBEDDED_MODE) return;
   planningLifecycleRefreshBound = true;
 
-  const requestIfDue = () => {
+  const requestIfDue = async () => {
+    const projectResult = await refreshProjectRegistryFromGrist({
+      notify: true,
+      clearInvalid: true,
+    });
+    if (projectResult.changed) {
+      return;
+    }
     if (
       !state.selectedProject ||
       (
@@ -1180,10 +1242,21 @@ function bindPlanningLifecycleRefresh() {
     });
   };
 
-  window.addEventListener("focus", requestIfDue);
+  const scheduleRequest = () => {
+    if (planningLifecycleRefreshTimer) {
+      window.clearTimeout(planningLifecycleRefreshTimer);
+    }
+    planningLifecycleRefreshTimer = window.setTimeout(() => {
+      planningLifecycleRefreshTimer = 0;
+      void requestIfDue();
+    }, PLANNING_LIFECYCLE_REFRESH_DELAY_MS);
+  };
+
+  window.addEventListener("pageshow", scheduleRequest);
+  window.addEventListener("focus", scheduleRequest);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
-      requestIfDue();
+      scheduleRequest();
     }
   });
 }
@@ -1220,8 +1293,6 @@ async function bootstrap() {
     setPlanningReferenceDetailsHandler(handleReferenceDetailsAction);
     setPlanningMsProjectDropHandler(handleMsProjectRowDrop);
     setPlanningRowDropHandler(handlePlanningRowDrop);
-    bindPlanningLifecycleRefresh();
-
     const {
       projectOptions,
       projectAvancementConfigs,
@@ -1230,8 +1301,7 @@ async function bootstrap() {
     cachedRealisationTargetLookup = buildProjectRealisationTargetLookup(
       cachedProjectAvancementConfigs
     );
-    // planningProjectOptions expose les noms pour l'API sync inter-iframes
-    planningProjectOptions = projectOptions.map((p) => p.name);
+    planningProjectOptions = projectOptions.map((project) => project.name);
 
     initZoneSelector({
       onChange: handleZoneChange,
@@ -1245,8 +1315,14 @@ async function bootstrap() {
 
     initProjectSelector(projectOptions, {
       onChange: handleProjectChange,
+      onMissingProject: () =>
+        refreshProjectRegistryFromGrist({
+          notify: true,
+          clearInvalid: true,
+        }),
       emitInitialChange: false,
     });
+    bindPlanningLifecycleRefresh();
 
     await refreshPlanning({
       sync: true,
@@ -1289,14 +1365,31 @@ function exposePlanningSyncApi() {
     },
     async setSelectedProject(projectName = "") {
       const normalizedProject = toText(projectName);
-      setState({
-        selectedProject: normalizedProject,
-        selectedZone: "",
-      });
-
-      const projectSelect = document.getElementById("projectDropdown");
-      if (projectSelect instanceof HTMLSelectElement) {
-        projectSelect.value = normalizedProject;
+      if (HEADER_ONLY_EMBEDDED_MODE) {
+        setState({
+          selectedProject: normalizedProject,
+          selectedZone: "",
+        });
+      } else {
+        let selectionResult = applyProjectSelection(normalizedProject, {
+          notify: false,
+          persist: true,
+          clearInvalid: !normalizedProject,
+        });
+        if (selectionResult.missing) {
+          await refreshProjectRegistryFromGrist({
+            notify: false,
+            clearInvalid: false,
+          });
+          selectionResult = applyProjectSelection(normalizedProject, {
+            notify: false,
+            persist: true,
+            clearInvalid: false,
+          });
+        }
+        if (normalizedProject && !selectionResult.project) {
+          return false;
+        }
       }
 
       const zoneSelect = document.getElementById("zoneDropdown");

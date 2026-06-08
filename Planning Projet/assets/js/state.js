@@ -56,9 +56,17 @@ export function setState(patch) {
         // Écrire aussi l'ID canonique si on peut le retrouver via l'option sélectionnée
         const projectSelect = document.getElementById("projectDropdown");
         if (projectSelect instanceof HTMLSelectElement) {
-          const selectedOpt = Array.from(projectSelect.options).find((o) => o.value === state.selectedProject);
+          const currentOption = projectSelect.selectedOptions?.[0];
+          const selectedOpt =
+            currentOption?.value === state.selectedProject
+              ? currentOption
+              : Array.from(projectSelect.options).find(
+                  (option) => option.value === state.selectedProject
+                );
           if (selectedOpt?.dataset?.projectId) {
             localStorage.setItem(SHARED_PROJECT_ID_KEY, selectedOpt.dataset.projectId);
+          } else if (selectedOpt) {
+            localStorage.removeItem(SHARED_PROJECT_ID_KEY);
           }
         }
       } else {
