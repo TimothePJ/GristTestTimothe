@@ -246,10 +246,15 @@ export function initGrist() {
   }
 }
 
-export async function fetchExpenseAppTables() {
+// Charge uniquement la table Projets — légère, pour peupler le sélecteur au démarrage.
+export async function fetchProjectsForDropdown() {
+  return fetchTableRows(APP_CONFIG.grist.tables.projects);
+}
+
+// Charge les 8 tables de données (hors Projets), uniquement quand un projet est sélectionné.
+export async function fetchProjectDataTables() {
   const tables = APP_CONFIG.grist.tables;
   const [
-    projectRows,
     budgetRows,
     listePlanRows,
     planningProjectRows,
@@ -259,7 +264,6 @@ export async function fetchExpenseAppTables() {
     timeRealRows,
     teamRows,
   ] = await Promise.all([
-    fetchTableRows(tables.projects),
     fetchTableRows(tables.budget),
     fetchOptionalTableRows(tables.listePlan),
     fetchOptionalTableRows(tables.planningProject),
@@ -271,7 +275,6 @@ export async function fetchExpenseAppTables() {
   ]);
 
   return {
-    projectRows,
     budgetRows,
     listePlanRows,
     planningProjectRows,
@@ -281,6 +284,13 @@ export async function fetchExpenseAppTables() {
     timeRealRows,
     teamRows,
   };
+}
+
+// Conservé pour rétrocompatibilité interne.
+export async function fetchExpenseAppTables() {
+  const projectRows = await fetchProjectsForDropdown();
+  const dataTables = await fetchProjectDataTables();
+  return { projectRows, ...dataTables };
 }
 
 export async function applyActions(actions) {

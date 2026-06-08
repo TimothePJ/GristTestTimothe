@@ -1220,28 +1220,11 @@ function syncNativeItemTitles(containerEl) {
   });
 }
 
-function bindItemHoverInteractions(containerEl) {
-  if (!containerEl) return;
-
-  const itemElements = containerEl.querySelectorAll(".vis-item");
-  itemElements.forEach((itemEl) => {
-    if (itemEl.dataset.planningTooltipBound === "1") return;
-    itemEl.dataset.planningTooltipBound = "1";
-
-    itemEl.addEventListener("mouseenter", (event) => {
-      const item = getTimelineItemFromElement(itemEl) || getTimelineItemFromEvent(event, containerEl);
-      showTooltipForItem(item, event);
-    });
-
-    itemEl.addEventListener("mousemove", (event) => {
-      const item = getTimelineItemFromElement(itemEl) || getTimelineItemFromEvent(event, containerEl);
-      showTooltipForItem(item, event);
-    });
-
-    itemEl.addEventListener("mouseleave", () => {
-      hideHoverTooltip();
-    });
-  });
+function bindItemHoverInteractions(_containerEl) {
+  // Le tooltip est géré par délégation sur le container via pointermove + mouseleave
+  // (cf. bindHoverTooltip). Ajouter des listeners sur chaque .vis-item accumulait
+  // des milliers de closures en mémoire à chaque re-render du timeline (vis.js
+  // recrée les éléments DOM à chaque mise à jour). Aucun listener per-item nécessaire.
 }
 
 function bindHoverTooltip(containerEl) {

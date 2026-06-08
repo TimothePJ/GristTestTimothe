@@ -145,9 +145,7 @@ function renderProjectOptions(projectSelect) {
   projectRegistry.forEach((project) => {
     const option = document.createElement("option");
     option.value = project.name;
-    option.textContent = project.number
-      ? `${project.number} - ${project.name}`
-      : project.name;
+    option.textContent = `${project.number} - ${project.name}`;
     if (Number.isInteger(project.id) && project.id > 0) {
       option.dataset.projectId = String(project.id);
     }

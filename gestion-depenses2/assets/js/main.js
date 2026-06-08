@@ -13,7 +13,8 @@ import {
   addWorkerToProject,
   createTimeSegment,
   createProjectWithBudget,
-  fetchExpenseAppTables,
+  fetchProjectsForDropdown,
+  fetchProjectDataTables,
   initGrist,
   removeProjectWorker,
   removeTimeSegment,
@@ -122,6 +123,9 @@ let planningManagementMonthKey = getMonthKeyFromDate(new Date());
 let planningManagementMonthPickerOpen = false;
 let planningManagementMonthPickerViewYear = new Date().getFullYear();
 let chargePlanSyncApiReady = false;
+// Lignes de la table Projets mises en cache au démarrage (chargement léger).
+// Les 8 autres tables ne sont chargées qu'après sélection d'un projet.
+let cachedProjectRows = null;
 let suppressChargePlanSyncEvents = false;
 let chargePlanSyncSuppressionToken = 0;
 let suppressChargePlanProjectChangeEvents = false;
@@ -2235,8 +2239,51 @@ function applyChargePlanSyncViewport(viewport = {}) {
   return settledPromise;
 }
 
-async function loadData({ preferredProjectNumber = "" } = {}) {
-  const tables = await fetchExpenseAppTables();
+// Chargement léger au démarrage : uniquement la table Projets pour peupler le sélecteur.
+// Les 8 autres tables sont chargées par loadData() après sélection d'un projet.
+async function initProjectDropdown() {
+  cachedProjectRows = await fetchProjectsForDropdown();
+  const emptyTables = {
+    projectRows: cachedProjectRows,
+    budgetRows: [], listePlanRows: [], planningProjectRows: [],
+    projectTeamRows: [], timesheetRows: [], timeSegmentRows: [],
+    timeRealRows: [], teamRows: [],
+  };
+  const { projects } = buildExpenseData(emptyTables);
+  setState({ projects });
+  window.__depenses2Projects = projects;
+
+  // Restaurer la sélection partagée sans charger les données métier
+  let selectedProject = null;
+  try {
+    const sharedId = Number(localStorage.getItem('grist.selected-project-id'));
+    if (sharedId > 0) selectedProject = projects.find((p) => p.id === sharedId) || null;
+  } catch (_e) {}
+  if (!selectedProject) {
+    selectedProject = findProjectBySharedSelection(projects, readSharedProjectSelection());
+  }
+
+  if (selectedProject) {
+    setState({ selectedProjectId: selectedProject.id });
+    saveSharedProjectSelection(selectedProject.name || selectedProject.projectNumber || "");
+    try { localStorage.setItem('grist.selected-project-id', String(selectedProject.id)); } catch (_e) {}
+    syncStateToProjectStart(selectedProject);
+    // Charger les données maintenant qu'un projet est connu
+    await loadData({ preferredProjectNumber: selectedProject.projectNumber });
+  } else {
+    setState({ selectedProjectId: null });
+    renderApp(); // affiche l'état vide avec le sélecteur peuplé
+  }
+}
+
+async function loadData({ preferredProjectNumber = "", refreshProjects = false } = {}) {
+  // Rafraîchir la liste de projets uniquement si demandé explicitement (ex: création/suppression)
+  if (refreshProjects || !cachedProjectRows) {
+    cachedProjectRows = await fetchProjectsForDropdown();
+  }
+  // Charger les 8 tables de données (hors Projets)
+  const dataTables = await fetchProjectDataTables();
+  const tables = { projectRows: cachedProjectRows, ...dataTables };
   const { projects, teamMembers } = buildExpenseData(tables);
   planningManagementHover = null;
 
@@ -2322,7 +2369,7 @@ async function handleProjectSave() {
   });
 
   resetNewProjectForm();
-  await loadData({ preferredProjectNumber: projectNumber });
+  await loadData({ preferredProjectNumber: projectNumber, refreshProjects: true });
   emitChargePlanSyncProjectChange("project-create");
 }
 
@@ -4222,7 +4269,7 @@ function closeChargePlanContextMenu(boardEl = null) {
   });
 }
 
-function handleProjectSelectionChange() {
+async function handleProjectSelectionChange() {
   const selectedValue = String(dom.projectSelect.value || "").trim();
   const selectedProjectId = selectedValue ? Number(selectedValue) : null;
   clearChargePlanWheelZoomFrame();
@@ -4237,12 +4284,15 @@ function handleProjectSelectionChange() {
   const selectedProject = getSelectedProject();
   if (selectedProject) {
     saveSharedProjectSelection(selectedProject.name || selectedProject.projectNumber || "");
+    try { localStorage.setItem('grist.selected-project-id', String(selectedProject.id)); } catch (_e) {}
     syncStateToProjectStart(selectedProject);
+    // Charger les 8 tables de données pour le projet sélectionné
+    await loadData({ preferredProjectNumber: selectedProject.projectNumber });
   } else {
     saveSharedProjectSelection("");
+    try { localStorage.removeItem('grist.selected-project-id'); } catch (_e) {}
+    renderApp();
   }
-
-  renderApp();
   schedulePlanningAlertsPopupOnArrival();
   emitChargePlanSyncProjectChange("project-change");
   if (!EMBEDDED_OVERVIEW_MODE) {
@@ -5551,7 +5601,9 @@ export async function bootstrap() {
 
   initGrist();
   bindEvents();
-  await loadData();
+  // Chargement initial : uniquement la table Projets pour peupler le sélecteur.
+  // Les 8 tables de données sont chargées par loadData() après sélection d'un projet.
+  await initProjectDropdown();
   chargePlanSyncApiReady = true;
 }
 
