@@ -132,6 +132,102 @@ document.addEventListener('DOMContentLoaded', () => {
         return normalizeText(value).toLocaleUpperCase('fr');
     }
 
+    function escapeReviewHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function getDocumentTypeSortRank(type) {
+        const normalizedType = normalizeDocumentType(type);
+        const defaultTypeIndex = DEFAULT_DOCUMENT_TYPES.indexOf(normalizedType);
+        return defaultTypeIndex === -1 ? DEFAULT_DOCUMENT_TYPES.length : defaultTypeIndex;
+    }
+
+    function compareProjectDocuments(left = {}, right = {}) {
+        const leftType = normalizeDocumentType(left.type || 'COFFRAGE') || 'AUTRE';
+        const rightType = normalizeDocumentType(right.type || 'COFFRAGE') || 'AUTRE';
+        const typeRankDifference =
+            getDocumentTypeSortRank(leftType) - getDocumentTypeSortRank(rightType);
+        if (typeRankDifference !== 0) return typeRankDifference;
+
+        const typeDifference = leftType.localeCompare(rightType, 'fr', {
+            sensitivity: 'base',
+            numeric: true
+        });
+        if (typeDifference !== 0) return typeDifference;
+
+        const leftZone = normalizeZoneValue(left.zone);
+        const rightZone = normalizeZoneValue(right.zone);
+        const leftWithoutZone = leftZone ? 0 : 1;
+        const rightWithoutZone = rightZone ? 0 : 1;
+        if (leftWithoutZone !== rightWithoutZone) {
+            return leftWithoutZone - rightWithoutZone;
+        }
+
+        const zoneDifference = formatZoneLabel(leftZone).localeCompare(
+            formatZoneLabel(rightZone),
+            'fr',
+            { sensitivity: 'base', numeric: true }
+        );
+        if (zoneDifference !== 0) return zoneDifference;
+
+        const numberDifference = normalizeText(left.numero).localeCompare(
+            normalizeText(right.numero),
+            'fr',
+            { sensitivity: 'base', numeric: true }
+        );
+        if (numberDifference !== 0) return numberDifference;
+
+        return normalizeText(left.name).localeCompare(normalizeText(right.name), 'fr', {
+            sensitivity: 'base',
+            numeric: true
+        });
+    }
+
+    function buildReviewDocumentsHtml(documents = []) {
+        const sortedDocuments = [...(Array.isArray(documents) ? documents : [])]
+            .sort(compareProjectDocuments);
+        if (!sortedDocuments.length) {
+            return '<p>-</p>';
+        }
+
+        const rowsHtml = sortedDocuments.map((documentEntry) => {
+            const type = normalizeDocumentType(documentEntry?.type || 'COFFRAGE') || 'AUTRE';
+            const zone = formatZoneLabel(documentEntry?.zone);
+            const numero = normalizeText(documentEntry?.numero) || '-';
+            const name = normalizeText(documentEntry?.name) || '-';
+
+            return `
+                <tr>
+                    <td class="review-documents-table__type">${escapeReviewHtml(type)}</td>
+                    <td class="review-documents-table__zone">${escapeReviewHtml(zone)}</td>
+                    <td class="review-documents-table__numero">${escapeReviewHtml(numero)}</td>
+                    <td class="review-documents-table__name">${escapeReviewHtml(name)}</td>
+                </tr>
+            `;
+        }).join('');
+
+        return `
+            <div class="review-documents-table-scroll">
+                <table class="review-documents-table">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Zone</th>
+                            <th>N&deg; document</th>
+                            <th>Document</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rowsHtml}</tbody>
+                </table>
+            </div>
+        `;
+    }
+
     function isCoffrageDocumentType(typeDoc) {
         const normalizedType = normalizeDocumentType(typeDoc);
         return normalizedType.includes('COFFRAGE') || normalizedType.includes('COF');
@@ -1270,16 +1366,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const reviewContainer = document.getElementById('review-container');
         sortBudgetLines();
 
-        const docsHtml = (projectData.documents && projectData.documents.length)
-            ? projectData.documents
-                .map((d) => {
-                    const numeroLabel = d.numero ? ` [${d.numero}]` : '';
-                    const typeLabel = normalizeDocumentType(d.type || 'COFFRAGE');
-                    const zoneLabel = ` - ${formatZoneLabel(d.zone)}`;
-                    return `${d.name}${numeroLabel} (${typeLabel}${zoneLabel})`;
-                })
-                .join(', ')
-            : '-';
+        const docsHtml = buildReviewDocumentsHtml(projectData.documents);
 
         const emittersHtml = (projectData.emitters && projectData.emitters.length)
             ? projectData.emitters.join(', ')
@@ -1344,7 +1431,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ${teamHtml || '<p>-</p>'}
 
             <h3>Documents</h3>
-            <p>${docsHtml}</p>
+            ${docsHtml}
 
             <h3>Émetteurs</h3>
             <p>${emittersHtml}</p>

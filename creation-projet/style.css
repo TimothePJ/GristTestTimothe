@@ -273,6 +273,75 @@ button:hover {
     margin-top: 0;
 }
 
+.review-documents-table-scroll {
+    width: 100%;
+    overflow-x: auto;
+    margin: 0 0 18px;
+    border: 1px solid rgba(0, 73, 144, 0.22);
+    border-radius: 6px;
+    background: #ffffff;
+}
+
+.review-documents-table {
+    width: 100%;
+    min-width: 760px;
+    border-collapse: collapse;
+}
+
+.review-documents-table th,
+.review-documents-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #d9e1e8;
+    text-align: left;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.review-documents-table th {
+    background: #004990;
+    color: #ffffff;
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.review-documents-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.review-documents-table tbody tr:nth-child(even) {
+    background: #f4f7fa;
+}
+
+.review-documents-table th:nth-child(1),
+.review-documents-table__type {
+    width: 20%;
+}
+
+.review-documents-table__type {
+    color: #004990;
+    font-weight: 700;
+}
+
+.review-documents-table th:nth-child(2),
+.review-documents-table__zone {
+    width: 22%;
+}
+
+.review-documents-table th:nth-child(3),
+.review-documents-table__numero {
+    width: 18%;
+    font-variant-numeric: tabular-nums;
+}
+
+.review-documents-table th:nth-child(4),
+.review-documents-table__name {
+    width: 40%;
+}
+
+.review-documents-table__name {
+    font-weight: 600;
+}
+
 #documents-selection-container,
 #emitters-selection-container {
   display: grid;
