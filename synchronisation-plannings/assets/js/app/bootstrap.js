@@ -464,6 +464,9 @@ function tableToRows(table) {
   });
 }
 
+// Cache : normalizedKey → Projets.id (pour écriture de grist.selected-project-id)
+const _projectIdByNormalizedKey = new Map();
+
 async function fetchProjectKeysFromGrist() {
   try {
     if (!window.grist?.docApi || typeof window.grist.docApi.fetchTable !== "function") {
@@ -482,6 +485,11 @@ async function fetchProjectKeysFromGrist() {
             projectNumber,
             projectName && projectNumber ? `${projectNumber} - ${projectName}` : "",
           ]);
+          // Mémoriser l'ID Grist pour ce projet
+          const id = Number(row?.id);
+          if (Number.isInteger(id) && id > 0) {
+            _projectIdByNormalizedKey.set(normalizeProjectSelectionKey(canonicalProjectKey), id);
+          }
         }
         return canonicalProjectKey;
       })
@@ -655,6 +663,15 @@ export async function bootstrapHubApp() {
     if (dom.projectSelectEl instanceof HTMLSelectElement) {
       dom.projectSelectEl.addEventListener("change", () => {
         const nextProjectKey = String(dom.projectSelectEl.value || "").trim();
+        // Écrire l'ID canonique si connu
+        if (nextProjectKey) {
+          const id = _projectIdByNormalizedKey.get(normalizeProjectSelectionKey(nextProjectKey));
+          if (id) {
+            try { localStorage.setItem('grist.selected-project-id', String(id)); } catch (_e) {}
+          }
+        } else {
+          try { localStorage.removeItem('grist.selected-project-id'); } catch (_e) {}
+        }
         void applySelectedProjectFromHub(nextProjectKey);
       });
     }
@@ -704,8 +721,16 @@ export async function bootstrapHubApp() {
 
     // Synchro en temps réel : un autre widget change le projet dans localStorage.
     window.addEventListener("storage", (event) => {
-      if (event.key !== "grist.selected-project" || !event.newValue) return;
       if (state.projectSyncInProgress) return;
+      // Priorité : clé ID canonique
+      if (event.key === "grist.selected-project-id" && event.newValue) {
+        const id = Number(event.newValue);
+        if (Number.isInteger(id) && id > 0) {
+          void refreshProjectKeysAndApplySharedSelection();
+        }
+        return;
+      }
+      if (event.key !== "grist.selected-project" || !event.newValue) return;
       const requested = normalizeProjectSelectionKey(String(event.newValue).trim());
       const active   = normalizeProjectSelectionKey(state.activeProjectKey || "");
       if (requested && requested !== active) {

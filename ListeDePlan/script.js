@@ -20,10 +20,12 @@
   // ---- Mémoire locale de la sélection projet/type ----
   const LS_KEYS = {
     SHARED_PROJECT_LABEL: 'grist.selected-project',
+    SHARED_PROJECT_ID: 'grist.selected-project-id',
     PROJECT_LABEL: 'LP_LAST_PROJECT_LABEL',
     PROJECT_ID: 'LP_LAST_PROJECT_ID',
     TYPE_LABEL: 'LP_LAST_TYPE_LABEL',
   };
+  let _projectsData = []; // [{id, number, name}]
 
   function saveLastSelection({ projectLabel, projectId, typeLabel }) {
     try {
@@ -33,8 +35,12 @@
       if (projectLabel === "") {
         localStorage.removeItem(LS_KEYS.PROJECT_LABEL);
         localStorage.removeItem(LS_KEYS.PROJECT_ID);
+        localStorage.removeItem(LS_KEYS.SHARED_PROJECT_ID);
       }
-      if (projectId != null) localStorage.setItem(LS_KEYS.PROJECT_ID, String(projectId));
+      if (projectId != null) {
+        localStorage.setItem(LS_KEYS.PROJECT_ID, String(projectId));
+        localStorage.setItem(LS_KEYS.SHARED_PROJECT_ID, String(projectId));
+      }
       if (typeLabel) localStorage.setItem(LS_KEYS.TYPE_LABEL, typeLabel);
     } catch {}
   }
@@ -45,7 +51,10 @@
         localStorage.getItem(LS_KEYS.SHARED_PROJECT_LABEL) ||
         localStorage.getItem(LS_KEYS.PROJECT_LABEL) ||
         '';
-      const idStr = localStorage.getItem(LS_KEYS.PROJECT_ID);
+      // Lire l'ID canonique en priorité depuis la clé partagée
+      const sharedIdStr = localStorage.getItem(LS_KEYS.SHARED_PROJECT_ID);
+      const localIdStr = localStorage.getItem(LS_KEYS.PROJECT_ID);
+      const idStr = sharedIdStr || localIdStr;
       const t = localStorage.getItem(LS_KEYS.TYPE_LABEL) || '';
       const id = idStr && /^\d+$/.test(idStr) ? Number(idStr) : null;
       return { projectLabel: lbl, projectId: id, typeLabel: t };
@@ -584,20 +593,48 @@ async function refreshProjectDropdownFromProjectsTable() {
     if (!grist?.docApi || typeof grist.docApi.fetchTable !== "function") return;
 
     const rawProjects = await grist.docApi.fetchTable("Projets");
-    const names = Array.isArray(rawProjects?.Nom_de_projet)
-      ? rawProjects.Nom_de_projet
-      : normalizeManageRows(rawProjects).map((row) => row?.Nom_de_projet);
-    const projects = [...new Set(
-      (names || [])
-        .map((value) => String(value || "").trim())
-        .filter(Boolean)
-    )].sort((left, right) => left.localeCompare(right, "fr", {
-      sensitivity: "base",
-      numeric: true
-    }));
+    const ids = Array.isArray(rawProjects?.id) ? rawProjects.id : [];
+    const numbers = Array.isArray(rawProjects?.Numero_de_projet) ? rawProjects.Numero_de_projet : [];
+    const names = Array.isArray(rawProjects?.Nom_de_projet) ? rawProjects.Nom_de_projet : [];
+    _projectsData = ids
+      .map((id, i) => ({
+        id: Number(id),
+        number: String(numbers[i] || '').trim(),
+        name: String(names[i] || '').trim(),
+      }))
+      .filter((p) => p.id > 0 && p.name)
+      .sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base", numeric: true }));
 
-    if (!projects.length) return;
-    populateDropdown("projectDropdown", projects);
+    if (!_projectsData.length) return;
+
+    const dropdown = document.getElementById("projectDropdown");
+    if (!dropdown) return;
+
+    const { projectLabel, projectId } = loadLastSelection();
+    const defaultOption = dropdown.options[0]?.textContent || "Choisir";
+    dropdown.innerHTML = `<option value="">${defaultOption}</option>`;
+
+    _projectsData.forEach((p) => {
+      const opt = document.createElement("option");
+      opt.value = p.name;
+      opt.textContent = p.number ? `${p.number} - ${p.name}` : p.name;
+      opt.dataset.projectId = String(p.id);
+      dropdown.appendChild(opt);
+    });
+
+    // Restaurer par ID d'abord, puis par nom
+    let restored = '';
+    if (projectId) {
+      const found = _projectsData.find((p) => p.id === projectId);
+      if (found) restored = found.name;
+    }
+    if (!restored && projectLabel) {
+      const found = _projectsData.find(
+        (p) => normalizeProjectSelectionKey(p.name) === normalizeProjectSelectionKey(projectLabel)
+      );
+      if (found) restored = found.name;
+    }
+    dropdown.value = restored;
   } catch (error) {
     console.warn("Impossible de precharger la liste des projets :", error);
   }
@@ -1452,7 +1489,9 @@ function resetZoneDropdown(disabled = false) {
 
 document.getElementById("projectDropdown").addEventListener("change", () => {
   const selectedProject = document.getElementById("projectDropdown").value;
-  saveLastSelection({ projectLabel: selectedProject, projectId: null, typeLabel: null });
+  const selectedOpt = document.getElementById("projectDropdown").selectedOptions?.[0];
+  const selectedProjectId = selectedOpt?.dataset?.projectId ? Number(selectedOpt.dataset.projectId) : null;
+  saveLastSelection({ projectLabel: selectedProject, projectId: selectedProjectId, typeLabel: null });
   if (!selectedProject) {
     populateTypeDocumentDropdown([]);
     resetZoneDropdown(true);
@@ -2126,10 +2165,19 @@ document.addEventListener("DOMContentLoaded", () => {
     return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
   };
   window.addEventListener('storage', function (event) {
-    if (event.key !== 'grist.selected-project' || !event.newValue) return;
-    var newProject = String(event.newValue).trim();
     var dropdown = document.getElementById('projectDropdown');
     if (!dropdown) return;
+    if (event.key === 'grist.selected-project-id' && event.newValue) {
+      var idStr = String(event.newValue).trim();
+      var match = Array.from(dropdown.options).find(function (o) { return o.dataset.projectId === idStr; });
+      if (match && dropdown.value !== match.value) {
+        dropdown.value = match.value;
+        dropdown.dispatchEvent(new Event('change'));
+      }
+      return;
+    }
+    if (event.key !== 'grist.selected-project' || !event.newValue) return;
+    var newProject = String(event.newValue).trim();
     var match = Array.from(dropdown.options).find(function (o) { return _nk(o.value) === _nk(newProject); });
     if (match && dropdown.value !== match.value) {
       dropdown.value = match.value;

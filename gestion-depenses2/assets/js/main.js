@@ -2145,6 +2145,7 @@ function setSelectedProjectForPlanningSync(projectKey = "") {
       selectedProjectId: nextProject.id,
     });
     saveSharedProjectSelection(nextProject.name || nextProject.projectNumber || "");
+    try { localStorage.setItem('grist.selected-project-id', String(nextProject.id)); } catch (_e) {}
     syncStateToProjectStart(nextProject);
     renderApp();
   } finally {
@@ -2243,6 +2244,7 @@ async function loadData({ preferredProjectNumber = "" } = {}) {
     projects,
     teamMembers,
   });
+  window.__depenses2Projects = projects; // exposé pour le listener storage (fallback nom)
 
   let selectedProject =
     projects.find((project) => project.id === state.selectedProjectId) || null;
@@ -2256,10 +2258,17 @@ async function loadData({ preferredProjectNumber = "" } = {}) {
       syncStateToProjectStart(preferredProject);
     }
   } else {
-    const sharedProject = findProjectBySharedSelection(
-      projects,
-      readSharedProjectSelection()
-    );
+    // Priorité : résolution par ID canonique
+    let sharedProject = null;
+    try {
+      const sharedIdStr = localStorage.getItem('grist.selected-project-id');
+      const sharedId = sharedIdStr ? Number(sharedIdStr) : null;
+      if (sharedId) sharedProject = projects.find((p) => p.id === sharedId) || null;
+    } catch (_e) {}
+    // Fallback : résolution par nom
+    if (!sharedProject) {
+      sharedProject = findProjectBySharedSelection(projects, readSharedProjectSelection());
+    }
     if (sharedProject && (!selectedProject || selectedProject.id !== sharedProject.id)) {
       setState({ selectedProjectId: sharedProject.id });
       selectedProject = sharedProject;
@@ -5644,18 +5653,35 @@ if (typeof document !== "undefined") {
 (function () {
   if (window.__lpStorageSyncAdded_gestionDepenses2) return;
   window.__lpStorageSyncAdded_gestionDepenses2 = true;
-  var _nk = function (s) {
-    return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
-  };
   window.addEventListener('storage', function (event) {
-    if (event.key !== 'grist.selected-project' || !event.newValue) return;
-    var newProject = String(event.newValue).trim();
     var dropdown = document.getElementById('project-select');
     if (!dropdown) return;
-    var match = Array.from(dropdown.options).find(function (o) { return _nk(o.value) === _nk(newProject); });
-    if (match && dropdown.value !== match.value) {
-      dropdown.value = match.value;
-      dropdown.dispatchEvent(new Event('change'));
+    // Priorité : synchronisation par ID canonique (les options ont value=ID dans ce widget)
+    if (event.key === 'grist.selected-project-id' && event.newValue) {
+      var idStr = String(event.newValue).trim();
+      var match = Array.from(dropdown.options).find(function (o) { return String(o.value) === idStr; });
+      if (match && dropdown.value !== match.value) {
+        dropdown.value = match.value;
+        dropdown.dispatchEvent(new Event('change'));
+      }
+      return;
+    }
+    // Compatibilité : synchronisation par nom — tenter de retrouver l'ID dans l'état interne
+    if (event.key !== 'grist.selected-project' || !event.newValue) return;
+    // Si grist.selected-project-id est déjà défini, la synchro ID aura déjà été traitée.
+    try {
+      if (localStorage.getItem('grist.selected-project-id')) return;
+    } catch (_e) {}
+    // Résoudre le nom via findProjectBySharedSelection si disponible
+    if (typeof findProjectBySharedSelection === 'function' && Array.isArray(window.__depenses2Projects)) {
+      var found = findProjectBySharedSelection(window.__depenses2Projects, String(event.newValue).trim());
+      if (found) {
+        var match = Array.from(dropdown.options).find(function (o) { return String(o.value) === String(found.id); });
+        if (match && dropdown.value !== match.value) {
+          dropdown.value = match.value;
+          dropdown.dispatchEvent(new Event('change'));
+        }
+      }
     }
   });
 })();

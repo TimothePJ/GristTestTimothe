@@ -1127,7 +1127,8 @@ async function bootstrap() {
     setPlanningRowDropHandler(handlePlanningRowDrop);
 
     const projectOptions = await buildProjectOptions();
-    planningProjectOptions = [...projectOptions];
+    // planningProjectOptions expose les noms pour l'API sync inter-iframes
+    planningProjectOptions = projectOptions.map((p) => p.name);
 
     initZoneSelector({
       onChange: handleZoneChange,

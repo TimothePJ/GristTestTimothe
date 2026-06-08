@@ -19,6 +19,7 @@ import { getViewportLogicalSignature } from "../viewport/normalize.js";
 import { flushViewportSyncQueue, syncViewportToExpensesNow } from "./viewportSync.js";
 
 const SHARED_PROJECT_STORAGE_KEY = "grist.selected-project";
+const SHARED_PROJECT_ID_STORAGE_KEY = "grist.selected-project-id";
 const SHARED_PROJECT_STORAGE_FALLBACK_KEYS = [
   SHARED_PROJECT_STORAGE_KEY,
   "LP_LAST_PROJECT_LABEL",
@@ -58,19 +59,23 @@ export function readSharedProjectSelection() {
   }
 }
 
-function saveSharedProjectSelection(projectKey = "") {
+function saveSharedProjectSelection(projectKey = "", projectId = null) {
   try {
     const normalized = String(projectKey || "").trim();
     if (normalized) {
       localStorage.setItem(SHARED_PROJECT_STORAGE_KEY, normalized);
+      if (projectId != null) {
+        localStorage.setItem(SHARED_PROJECT_ID_STORAGE_KEY, String(projectId));
+      }
     } else {
       localStorage.removeItem(SHARED_PROJECT_STORAGE_KEY);
+      localStorage.removeItem(SHARED_PROJECT_ID_STORAGE_KEY);
     }
   } catch (_error) {}
 }
 
 export function clearSharedProjectSelection() {
-  saveSharedProjectSelection("");
+  saveSharedProjectSelection("", null);
   state.activeProjectKey = "";
   state.requestedProjectKey = "";
   state.lastAppliedViewportLogicalSignature = "";
@@ -89,7 +94,8 @@ export async function applySharedProject(projectKey) {
   const normalizedProjectKey = String(projectKey || "").trim();
   if (!normalizedProjectKey || !state.planningApi) return;
 
-  // Toujours sauvegarder la dernière sélection.
+  // Toujours sauvegarder la dernière sélection (nom). L'ID est écrit par bootstrap.js
+  // depuis _projectIdByNormalizedKey lors de la sélection dans le hub.
   saveSharedProjectSelection(normalizedProjectKey);
 
   // Anti-concurrence : mémoriser le projet et laisser la synchro en cours finir.

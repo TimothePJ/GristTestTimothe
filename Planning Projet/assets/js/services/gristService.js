@@ -2534,15 +2534,23 @@ export async function addPlanningZoneRow({
 
 export async function buildProjectOptions() {
   const table = APP_CONFIG.grist.projectsTable;
+  const columns = table.columns || {};
   const rows = await fetchTableRows(table.sourceTable);
 
-  const values = new Set();
+  const seen = new Set();
+  const result = [];
   for (const row of rows) {
-    const v = toText(row[table.columns.project]);
-    if (v) values.add(v);
+    const id = Number(row?.id);
+    const name = toText(row[columns.project || "Nom_de_projet"]);
+    const number = toText(row[columns.projectNumber || "Numero_de_projet"]);
+    if (!name || !Number.isInteger(id) || id <= 0) continue;
+    // Pas de dédoublonnage par nom : chaque ligne Projets est distincte par ID
+    if (seen.has(id)) continue;
+    seen.add(id);
+    result.push({ id, number, name });
   }
 
-  return [...values].sort((a, b) => a.localeCompare(b, "fr"));
+  return result.sort((a, b) => a.name.localeCompare(b.name, "fr"));
 }
 
 export async function fetchProjectAvancementConfigs() {

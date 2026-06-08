@@ -43,6 +43,8 @@ export function loadState() {
   }
 }
 
+const SHARED_PROJECT_ID_KEY = "grist.selected-project-id";
+
 export function setState(patch) {
   Object.assign(state, patch);
 
@@ -51,8 +53,17 @@ export function setState(patch) {
     if (typeof state.selectedProject === "string") {
       if (state.selectedProject.trim()) {
         localStorage.setItem(APP_CONFIG.sharedProjectStorageKey, state.selectedProject.trim());
+        // Écrire aussi l'ID canonique si on peut le retrouver via l'option sélectionnée
+        const projectSelect = document.getElementById("projectDropdown");
+        if (projectSelect instanceof HTMLSelectElement) {
+          const selectedOpt = Array.from(projectSelect.options).find((o) => o.value === state.selectedProject);
+          if (selectedOpt?.dataset?.projectId) {
+            localStorage.setItem(SHARED_PROJECT_ID_KEY, selectedOpt.dataset.projectId);
+          }
+        }
       } else {
         localStorage.removeItem(APP_CONFIG.sharedProjectStorageKey);
+        localStorage.removeItem(SHARED_PROJECT_ID_KEY);
       }
     }
   } catch (error) {

@@ -62,6 +62,8 @@ const SPECIAL_BUDGET_KEYS = {
 };
 
 const SHARED_PROJECT_STORAGE_KEY = 'grist.selected-project';
+const SHARED_PROJECT_ID_STORAGE_KEY = 'grist.selected-project-id';
+let _projectsData = []; // [{id, number, name}] chargé depuis la table Projets
 
 const CHART_COLORS = {
   done: {
@@ -122,12 +124,22 @@ function init() {
 
   grist.onRecords((newRecords) => {
     state.records = newRecords || [];
-    // La liste des projets vient uniquement de refreshProjectDropdownFromProjectsTable()
-    // (Projets.Nom_de_projet) pour rester cohérente avec tous les autres widgets.
-    // On restaure juste la sélection si le dropdown est déjà peuplé.
-    const saved = readSharedProjectSelection();
-    if (saved && !elements.projectDropdown.value && elements.projectDropdown.options.length > 1) {
-      restoreSelectedProject(saved, Array.from(elements.projectDropdown.options).map(o => o.value).filter(Boolean));
+    if (!elements.projectDropdown.value && elements.projectDropdown.options.length > 1) {
+      // Priorité : restauration par ID canonique
+      const savedId = readSharedProjectId();
+      if (savedId) {
+        const idMatch = Array.from(elements.projectDropdown.options).find(
+          (o) => Number(o.dataset.projectId) === savedId
+        );
+        if (idMatch) elements.projectDropdown.value = idMatch.value;
+      }
+      // Fallback : restauration par nom (compatibilité)
+      if (!elements.projectDropdown.value) {
+        const saved = readSharedProjectSelection();
+        if (saved) {
+          restoreSelectedProject(saved, Array.from(elements.projectDropdown.options).map(o => o.value).filter(Boolean));
+        }
+      }
     }
     updateDashboard();
   });
@@ -171,23 +183,55 @@ function restoreSelectedProject(currentValue, projects) {
   }
 }
 
+function readSharedProjectId() {
+  try {
+    const raw = localStorage.getItem(SHARED_PROJECT_ID_STORAGE_KEY);
+    const id = Number(raw);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
 async function refreshProjectDropdownFromProjectsTable() {
   try {
     if (!grist?.docApi || typeof grist.docApi.fetchTable !== 'function') return;
 
     const projectsTable = await grist.docApi.fetchTable(TABLES.projects);
-    const projects = tableToRows(projectsTable)
-      .map((row) => normalizeText(row[PROJECT_COLUMNS.name]))
-      .filter(Boolean)
-      .filter((project, index, allProjects) => allProjects.indexOf(project) === index)
-      .sort(compareText);
+    const rows = tableToRows(projectsTable);
+    _projectsData = rows
+      .map((row) => ({
+        id: Number(row[PROJECT_COLUMNS.id]),
+        number: String(row[PROJECT_COLUMNS.projectNumber] || '').trim(),
+        name: normalizeText(row[PROJECT_COLUMNS.name]),
+      }))
+      .filter((p) => p.id > 0 && p.name);
 
-    if (!projects.length) return;
+    if (!_projectsData.length) return;
 
+    const currentId = readSharedProjectId();
     const currentValue = elements.projectDropdown.value || readSharedProjectSelection();
     clearProjectOptions();
-    addProjectOptions(projects);
-    restoreSelectedProject(currentValue, projects);
+    _projectsData.sort((a, b) => compareText(a.name, b.name));
+    _projectsData.forEach((p) => {
+      const option = document.createElement('option');
+      option.value = p.name;
+      option.textContent = p.number ? `${p.number} - ${p.name}` : p.name;
+      option.dataset.projectId = String(p.id);
+      elements.projectDropdown.appendChild(option);
+    });
+
+    // Restauration : priorité à l'ID, sinon par nom
+    let restoredName = '';
+    if (currentId) {
+      const found = _projectsData.find((p) => p.id === currentId);
+      if (found) restoredName = found.name;
+    }
+    if (!restoredName) {
+      restoredName = findMatchingProject(_projectsData.map((p) => p.name), currentValue);
+    }
+    elements.projectDropdown.value = restoredName;
+    if (restoredName) saveSharedProjectSelection(restoredName);
   } catch (error) {
     console.warn('Impossible de precharger la liste des projets Avancement :', error);
   }
@@ -206,8 +250,15 @@ function saveSharedProjectSelection(projectName = '') {
     const normalizedProject = normalizeText(projectName);
     if (normalizedProject) {
       localStorage.setItem(SHARED_PROJECT_STORAGE_KEY, normalizedProject);
+      const project = _projectsData.find(
+        (p) => normalizeProjectSelectionKey(p.name) === normalizeProjectSelectionKey(normalizedProject)
+      );
+      if (project) {
+        localStorage.setItem(SHARED_PROJECT_ID_STORAGE_KEY, String(project.id));
+      }
     } else {
       localStorage.removeItem(SHARED_PROJECT_STORAGE_KEY);
+      localStorage.removeItem(SHARED_PROJECT_ID_STORAGE_KEY);
     }
   } catch (_error) {
     // localStorage peut etre indisponible dans certains contextes embarques.
@@ -1861,10 +1912,21 @@ function formatInputNumber(value) {
     return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
   };
   window.addEventListener('storage', function (event) {
-    if (event.key !== 'grist.selected-project' || !event.newValue) return;
-    var newProject = String(event.newValue).trim();
     var dropdown = document.getElementById('projectDropdown');
     if (!dropdown) return;
+    // Priorité : synchronisation par ID canonique
+    if (event.key === 'grist.selected-project-id' && event.newValue) {
+      var idStr = String(event.newValue).trim();
+      var match = Array.from(dropdown.options).find(function (o) { return o.dataset.projectId === idStr; });
+      if (match && dropdown.value !== match.value) {
+        dropdown.value = match.value;
+        dropdown.dispatchEvent(new Event('change'));
+      }
+      return;
+    }
+    // Compatibilité : synchronisation par nom
+    if (event.key !== 'grist.selected-project' || !event.newValue) return;
+    var newProject = String(event.newValue).trim();
     var match = Array.from(dropdown.options).find(function (o) { return _nk(o.value) === _nk(newProject); });
     if (match && dropdown.value !== match.value) {
       dropdown.value = match.value;

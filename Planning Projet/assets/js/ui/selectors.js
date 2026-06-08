@@ -50,6 +50,16 @@ function fillSelect(
   }
 }
 
+const SHARED_PROJECT_ID_KEY = 'grist.selected-project-id';
+
+function readSharedProjectId() {
+  try {
+    const raw = localStorage.getItem(SHARED_PROJECT_ID_KEY);
+    const id = Number(raw);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  } catch (_e) { return null; }
+}
+
 export function initProjectSelector(projectOptions, { onChange } = {}) {
   const projectSelect = document.getElementById("projectDropdown");
   if (!projectSelect) {
@@ -57,16 +67,42 @@ export function initProjectSelector(projectOptions, { onChange } = {}) {
   }
 
   projectSelect.disabled = false;
+  projectSelect.innerHTML = "";
 
-  // Toujours démarrer sur "Choisir un projet"
-  const selectedProject = projectOptions.includes(state.selectedProject)
-    ? state.selectedProject
-    : "";
+  const first = document.createElement("option");
+  first.value = "";
+  first.textContent = "Choisir un projet";
+  projectSelect.appendChild(first);
+
+  // projectOptions peut être [{id, number, name}] ou string[]
+  const projectObjects = (projectOptions || []).map((p) =>
+    typeof p === "object" ? p : { id: null, number: "", name: String(p) }
+  );
+
+  projectObjects.forEach((p) => {
+    const option = document.createElement("option");
+    option.value = p.name;
+    option.textContent = p.number ? `${p.number} - ${p.name}` : p.name;
+    if (p.id) option.dataset.projectId = String(p.id);
+    projectSelect.appendChild(option);
+  });
+
+  // Restaurer par ID d'abord, puis par nom
+  const savedId = readSharedProjectId();
+  let selectedProject = "";
+  if (savedId) {
+    const byId = projectObjects.find((p) => p.id === savedId);
+    if (byId) selectedProject = byId.name;
+  }
+  if (!selectedProject) {
+    selectedProject = projectObjects.some((p) => p.name === state.selectedProject)
+      ? state.selectedProject
+      : "";
+  }
   if (!selectedProject && state.selectedProject) {
     setState({ selectedProject: "", selectedZone: "" });
   }
-
-  fillSelect(projectSelect, projectOptions, "Choisir un projet", selectedProject);
+  projectSelect.value = selectedProject;
 
   projectSelect.addEventListener("change", () => {
     setState({
@@ -81,6 +117,18 @@ export function initProjectSelector(projectOptions, { onChange } = {}) {
     window.__lpStorageSyncAdded_planningProjet = true;
     const _nk = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
     window.addEventListener('storage', (event) => {
+      // Priorité : synchronisation par ID canonique
+      if (event.key === SHARED_PROJECT_ID_KEY && event.newValue) {
+        const idStr = String(event.newValue).trim();
+        const match = Array.from(projectSelect.options).find((o) => o.dataset.projectId === idStr);
+        if (match && projectSelect.value !== match.value) {
+          projectSelect.value = match.value;
+          setState({ selectedProject: match.value, selectedZone: '' });
+          onChange?.({ ...state });
+        }
+        return;
+      }
+      // Compatibilité : synchronisation par nom
       if (event.key !== 'grist.selected-project' || !event.newValue) return;
       const newProject = String(event.newValue).trim();
       const match = Array.from(projectSelect.options).find((o) => _nk(o.value) === _nk(newProject));

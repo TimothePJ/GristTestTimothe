@@ -2,6 +2,16 @@ let selectedProject = "";
 let selectedDocName = "";
 let selectedDocNumber = null;
 const SHARED_PROJECT_STORAGE_KEY = "grist.selected-project";
+const SHARED_PROJECT_ID_STORAGE_KEY = "grist.selected-project-id";
+let _projectsData = []; // [{id, number, name}]
+
+function readSharedProjectId() {
+  try {
+    const raw = localStorage.getItem(SHARED_PROJECT_ID_STORAGE_KEY);
+    const id = Number(raw);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  } catch (_e) { return null; }
+}
 
 // "ALL" | "NO_INDICE_NOT_BLOCKING" | "NO_INDICE_BLOCKING" | "WITH_INDICE"
 let sliceFilter = "ALL";
@@ -24,8 +34,13 @@ function saveSharedProjectSelection(projectName = "") {
     const normalizedProject = String(projectName || "").trim();
     if (normalizedProject) {
       localStorage.setItem(SHARED_PROJECT_STORAGE_KEY, normalizedProject);
+      const project = _projectsData.find(
+        (p) => p.name.trim().toLowerCase() === normalizedProject.toLowerCase()
+      );
+      if (project) localStorage.setItem(SHARED_PROJECT_ID_STORAGE_KEY, String(project.id));
     } else {
       localStorage.removeItem(SHARED_PROJECT_STORAGE_KEY);
+      localStorage.removeItem(SHARED_PROJECT_ID_STORAGE_KEY);
     }
   } catch (_error) {
     // localStorage peut etre indisponible dans certains contextes embarques.
@@ -40,19 +55,33 @@ function setSecondDropdownDisabled(disabled) {
 
 function populateFirstColumnDropdown(projects) {
   const current = firstDropdown.value || selectedProject || readSharedProjectSelection();
+  const currentId = readSharedProjectId();
 
   firstDropdown.innerHTML = `<option value="">Selectionner un projet</option>`;
   (projects || []).forEach(p => {
-    const v = String(p || "").trim();
+    const v = typeof p === "object" ? p.name : String(p || "").trim();
     if (!v) return;
     const opt = document.createElement("option");
     opt.value = v;
-    opt.textContent = v;
+    if (typeof p === "object" && p.id) {
+      opt.textContent = p.number ? `${p.number} - ${p.name}` : p.name;
+      opt.dataset.projectId = String(p.id);
+    } else {
+      opt.textContent = v;
+    }
     firstDropdown.appendChild(opt);
   });
 
-  if ([...firstDropdown.options].some(o => o.value === current)) firstDropdown.value = current;
-  else firstDropdown.value = "";
+  // Restaurer par ID d'abord, puis par nom
+  let restored = "";
+  if (currentId) {
+    const match = Array.from(firstDropdown.options).find(o => Number(o.dataset.projectId) === currentId);
+    if (match) restored = match.value;
+  }
+  if (!restored && current) {
+    if ([...firstDropdown.options].some(o => o.value === current)) restored = current;
+  }
+  firstDropdown.value = restored;
   selectedProject = firstDropdown.value || selectedProject || "";
 }
 
@@ -379,16 +408,20 @@ async function refreshProjectDropdownFromProjectsTable() {
   try {
     if (!grist?.docApi || typeof grist.docApi.fetchTable !== "function") return;
     const table = await grist.docApi.fetchTable("Projets");
+    const ids = Array.isArray(table?.id) ? table.id : [];
+    const numbers = Array.isArray(table?.Numero_de_projet) ? table.Numero_de_projet : [];
     const names = Array.isArray(table?.Nom_de_projet) ? table.Nom_de_projet : [];
-    const projects = [...new Set(names.map(v => String(v || "").trim()).filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b, "fr", { sensitivity: "base", numeric: true }));
-    if (!projects.length) return;
-    const current = firstDropdown.value || readSharedProjectSelection();
-    populateFirstColumnDropdown(projects);
-    if (current && [...firstDropdown.options].some(o => o.value === current)) {
-      firstDropdown.value = current;
-      selectedProject = current;
-    }
+    _projectsData = ids
+      .map((id, i) => ({
+        id: Number(id),
+        number: String(numbers[i] || '').trim(),
+        name: String(names[i] || '').trim(),
+      }))
+      .filter((p) => p.id > 0 && p.name)
+      .sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base", numeric: true }));
+    if (!_projectsData.length) return;
+    populateFirstColumnDropdown(_projectsData);
+    selectedProject = firstDropdown.value || selectedProject || "";
   } catch (err) {
     console.warn("EnAttente: impossible de charger la liste Projets :", err);
   }
@@ -473,10 +506,19 @@ function buildRowsForTable(listRows, allRows = listRows) {
     return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
   };
   window.addEventListener('storage', function (event) {
-    if (event.key !== 'grist.selected-project' || !event.newValue) return;
-    var newProject = String(event.newValue).trim();
     var dropdown = document.getElementById('firstColumnDropdown');
     if (!dropdown) return;
+    if (event.key === 'grist.selected-project-id' && event.newValue) {
+      var idStr = String(event.newValue).trim();
+      var match = Array.from(dropdown.options).find(function (o) { return o.dataset.projectId === idStr; });
+      if (match && dropdown.value !== match.value) {
+        dropdown.value = match.value;
+        dropdown.dispatchEvent(new Event('change'));
+      }
+      return;
+    }
+    if (event.key !== 'grist.selected-project' || !event.newValue) return;
+    var newProject = String(event.newValue).trim();
     var match = Array.from(dropdown.options).find(function (o) { return _nk(o.value) === _nk(newProject); });
     if (match && dropdown.value !== match.value) {
       dropdown.value = match.value;

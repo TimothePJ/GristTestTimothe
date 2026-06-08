@@ -13,6 +13,16 @@ const BORDEREAU_TABLE = "Envois";
 const PLANS_TABLE = "ListePlan_NDC_COF";
 const PROJET_TABLE = "Projets";
 const SHARED_PROJECT_STORAGE_KEY = "grist.selected-project";
+const SHARED_PROJECT_ID_STORAGE_KEY = "grist.selected-project-id";
+let _projectsData = []; // [{id, number, name}]
+
+function readSharedProjectId() {
+  try {
+    const raw = localStorage.getItem(SHARED_PROJECT_ID_STORAGE_KEY);
+    const id = Number(raw);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  } catch (_e) { return null; }
+}
 
 /** -------------------------
  *  Helpers DOM
@@ -36,8 +46,13 @@ function saveSharedProjectSelection(projectName = "") {
     const normalizedProject = String(projectName || "").trim();
     if (normalizedProject) {
       localStorage.setItem(SHARED_PROJECT_STORAGE_KEY, normalizedProject);
+      const project = _projectsData.find(
+        (p) => p.name.trim().toLowerCase() === normalizedProject.toLowerCase()
+      );
+      if (project) localStorage.setItem(SHARED_PROJECT_ID_STORAGE_KEY, String(project.id));
     } else {
       localStorage.removeItem(SHARED_PROJECT_STORAGE_KEY);
+      localStorage.removeItem(SHARED_PROJECT_ID_STORAGE_KEY);
     }
   } catch (_error) {
     // localStorage peut etre indisponible dans certains contextes embarques.
@@ -134,22 +149,45 @@ grist.onRecords(async (newRecords) => {
  *  ------------------------- */
 function populateProjectDropdown() {
   const projectDropdown = $("projectDropdown");
-  const projects = [...new Set(allProjects.Nom_de_projet)].filter(Boolean).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base', numeric: true }));
 
+  // Construire _projectsData depuis allProjects (table Projets complète)
+  const ids = Array.isArray(allProjects.id) ? allProjects.id : [];
+  const numbers = Array.isArray(allProjects.Numero_de_projet) ? allProjects.Numero_de_projet : [];
+  const names = Array.isArray(allProjects.Nom_de_projet) ? allProjects.Nom_de_projet : [];
+  _projectsData = ids
+    .map((id, i) => ({
+      id: Number(id),
+      number: String(numbers[i] || '').trim(),
+      name: String(names[i] || '').trim(),
+    }))
+    .filter((p) => p.id > 0 && p.name)
+    .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base', numeric: true }));
+
+  const currentId = readSharedProjectId();
   const currentValue = projectDropdown.value || readSharedProjectSelection();
 
-  // On garde l'option 0 "Sélectionner..." puis on reconstruit le reste
   while (projectDropdown.options.length > 1) projectDropdown.remove(1);
 
-  projects.forEach((project) => {
+  _projectsData.forEach((p) => {
     const option = document.createElement("option");
-    option.value = project;
-    option.textContent = project;
+    option.value = p.name;
+    option.textContent = p.number ? `${p.number} - ${p.name}` : p.name;
+    option.dataset.projectId = String(p.id);
     projectDropdown.appendChild(option);
   });
 
-  // restore si possible
-  projectDropdown.value = projects.includes(currentValue) ? currentValue : "";
+  // Restaurer par ID d'abord, puis par nom
+  let restored = '';
+  if (currentId) {
+    const found = _projectsData.find((p) => p.id === currentId);
+    if (found) restored = found.name;
+  }
+  if (!restored) {
+    const norm = (s) => String(s || '').trim().toLowerCase();
+    const found = _projectsData.find((p) => norm(p.name) === norm(currentValue));
+    if (found) restored = found.name;
+  }
+  projectDropdown.value = restored;
 }
 
 /** -------------------------
@@ -657,10 +695,19 @@ const logo1 = await fetch("../img/VC_Logotype_Digital_RVB.jpg").then((res) => re
     return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
   };
   window.addEventListener('storage', function (event) {
-    if (event.key !== 'grist.selected-project' || !event.newValue) return;
-    var newProject = String(event.newValue).trim();
     var dropdown = document.getElementById('projectDropdown');
     if (!dropdown) return;
+    if (event.key === 'grist.selected-project-id' && event.newValue) {
+      var idStr = String(event.newValue).trim();
+      var match = Array.from(dropdown.options).find(function (o) { return o.dataset.projectId === idStr; });
+      if (match && dropdown.value !== match.value) {
+        dropdown.value = match.value;
+        dropdown.dispatchEvent(new Event('change'));
+      }
+      return;
+    }
+    if (event.key !== 'grist.selected-project' || !event.newValue) return;
+    var newProject = String(event.newValue).trim();
     var match = Array.from(dropdown.options).find(function (o) { return _nk(o.value) === _nk(newProject); });
     if (match && dropdown.value !== match.value) {
       dropdown.value = match.value;
