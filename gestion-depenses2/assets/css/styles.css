@@ -691,6 +691,15 @@ body.spending-chart-sync-embedded .avancement-dashboard-section {
   letter-spacing: 0.04em;
 }
 
+.planning-management-item.is-realised {
+  border-color: rgba(34, 139, 34, 0.3);
+  background: rgba(34, 139, 34, 0.04);
+}
+
+.planning-management-item.is-realised .planning-management-item-realisation strong {
+  color: #1a7a1a;
+}
+
 .planning-management-empty-state {
   color: var(--color-text-muted);
   text-align: center;

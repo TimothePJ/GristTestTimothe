@@ -1,4 +1,3 @@
-import { getPlanningTasksOverlappingRange } from "../services/projectService.js";
 import {
   getMonthEndDate,
   getMonthKeyFromDate,
@@ -104,6 +103,24 @@ function getTaskExecutionWindowForMonth(task, monthWindow) {
   return { startAt, endAt };
 }
 
+function getPlanningTasksWithDeadlineInMonth(planningTasks, monthWindow) {
+  return (planningTasks || [])
+    .filter((task) => {
+      const deadline = task?.deadlineAt;
+      if (!(deadline instanceof Date) || Number.isNaN(deadline.getTime())) return false;
+      return deadline >= monthWindow.startAt && deadline <= monthWindow.endAt;
+    })
+    .sort((left, right) => {
+      const ld = left?.deadlineAt instanceof Date ? left.deadlineAt.getTime() : Number.MAX_SAFE_INTEGER;
+      const rd = right?.deadlineAt instanceof Date ? right.deadlineAt.getTime() : Number.MAX_SAFE_INTEGER;
+      if (ld !== rd) return ld - rd;
+      const ls = left?.startAt instanceof Date ? left.startAt.getTime() : Number.MAX_SAFE_INTEGER;
+      const rs = right?.startAt instanceof Date ? right.startAt.getTime() : Number.MAX_SAFE_INTEGER;
+      if (ls !== rs) return ls - rs;
+      return String(left?.name ?? "").localeCompare(String(right?.name ?? ""), "fr", { sensitivity: "base", numeric: true });
+    });
+}
+
 export function clearPlanningManagement(boardEl) {
   if (!(boardEl instanceof HTMLElement)) {
     return;
@@ -190,10 +207,9 @@ export function renderPlanningManagement(
     return;
   }
 
-  const overlappingTasks = getPlanningTasksOverlappingRange(
+  const overlappingTasks = getPlanningTasksWithDeadlineInMonth(
     project.planningTasks || [],
-    monthWindow.startAt,
-    monthWindow.endAt
+    monthWindow
   );
   const monthLabel = formatPlanningMonth(monthWindow.monthKey);
 
@@ -266,7 +282,7 @@ export function renderPlanningManagement(
               : task.name;
 
             return `
-              <article class="planning-management-item">
+              <article class="planning-management-item${task.realisationPct >= 100 ? ' is-realised' : ''}">
                 <div class="planning-management-item-main">
                   <strong class="planning-management-item-title">${escapeHtml(taskLabel)}</strong>
                   <span class="planning-management-item-meta">${escapeHtml(
@@ -305,7 +321,7 @@ export function renderPlanningManagement(
       </div>
       `
           : renderPlanningManagementEmptyState(
-              `Aucun plan Planning Projet en execution sur ${monthLabel}.`
+              `Aucun plan avec echeance en ${monthLabel}.`
             )
       }
     </section>
