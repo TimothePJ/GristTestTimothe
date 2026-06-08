@@ -60,7 +60,7 @@ function readSharedProjectId() {
   } catch (_e) { return null; }
 }
 
-export function initProjectSelector(projectOptions, { onChange } = {}) {
+export function initProjectSelector(projectOptions, { onChange, emitInitialChange = true } = {}) {
   const projectSelect = document.getElementById("projectDropdown");
   if (!projectSelect) {
     throw new Error("Dropdown projet introuvable (#projectDropdown).");
@@ -140,7 +140,9 @@ export function initProjectSelector(projectOptions, { onChange } = {}) {
     });
   }
 
-  onChange?.({ ...state });
+  if (emitInitialChange) {
+    onChange?.({ ...state });
+  }
 }
 
 export function initZoneSelector({ onChange, onAddZone, onManageZone } = {}) {

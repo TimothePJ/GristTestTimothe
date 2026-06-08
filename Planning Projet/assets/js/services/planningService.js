@@ -1185,7 +1185,20 @@ export function buildTimelineDataFromPlanningRows(
     .trim()
     .toLocaleLowerCase("fr");
 
-  let rows = rawRows.map((r) => {
+  const sourceRows = !selectedProject
+    ? []
+    : (rawRows || []).filter((row) => {
+        if (projectLinkCol && toText(row?.[projectLinkCol]) !== selectedProject) {
+          return false;
+        }
+        const zoneKey = toText(row?.[cfg.zone]).toLocaleLowerCase("fr");
+        if (selectedZoneKey && zoneKey !== selectedZoneKey) {
+          return false;
+        }
+        return isAllowedTypeDoc(row?.[cfg.typeDoc]);
+      });
+
+  let rows = sourceRows.map((r) => {
     const id2Text = toText(r[cfg.id2]);
     const groupeText = toText(r[cfg.groupe]);
     const zoneText = toText(r[cfg.zone]);
@@ -1321,17 +1334,6 @@ export function buildTimelineDataFromPlanningRows(
     };
   });
 
-  // Filtre projet (actif seulement si colonne configuree)
-  if (!selectedProject) {
-    rows = [];
-  } else if (projectLinkCol) {
-    rows = rows.filter((r) => r.projectLink === selectedProject);
-  }
-
-  if (selectedZoneKey) {
-    rows = rows.filter((row) => row.zoneKey === selectedZoneKey);
-  }
-
   const zoneCatalog = new Map();
   rows.forEach((row) => {
     const zoneKey = String(row.zoneKey || "");
@@ -1339,8 +1341,6 @@ export function buildTimelineDataFromPlanningRows(
       zoneCatalog.set(zoneKey, String(row.zone || ""));
     }
   });
-
-  rows = rows.filter((row) => isAllowedTypeDoc(row.typeDoc));
 
   const minArmatureDiffByGroup = new Map();
   rows.forEach((row) => {

@@ -2,14 +2,9 @@ import { APP_CONFIG } from "./config.js";
 import { state, loadState, setState } from "./state.js";
 import {
   initGrist,
-  buildProjectOptions,
-  fetchProjectAvancementConfigs,
-  fetchListePlanRows,
+  fetchProjectBootstrapData,
   fetchPlanningRows,
-  syncPlanningComputedValues,
-  syncPlanningRealiseValues,
-  syncPlanningRetardValues,
-  syncCoffrageDiffCoffrageFromGroups,
+  getPlanningServiceDiagnostics,
   updatePlanningDurationAndLeftDate,
   updatePlanningRetardJustification,
   fetchPlanningReferenceDetails,
@@ -24,11 +19,9 @@ import {
 } from "./services/gristService.js";
 import {
   buildProjectRealisationTargetLookup,
-  buildPlanningListePlanSyncUpdates,
-  buildPlanningRealiseUpdates,
-  buildPlanningRetardUpdates,
   buildTimelineDataFromPlanningRows,
 } from "./services/planningService.js";
+import { synchronizePlanningDerivedData } from "./services/planningSyncCoordinator.js";
 import {
   initProjectSelector,
   initZoneSelector,
@@ -58,7 +51,16 @@ import {
 } from "./ui/timeline.js";
 
 let toolbarBound = false;
-let refreshInProgress = false;
+let pendingRefreshOptions = null;
+let refreshQueuePromise = null;
+let resolveRefreshQueue = null;
+let cachedPlanningRows = null;
+let cachedProjectAvancementConfigs = [];
+let cachedRealisationTargetLookup = null;
+let lastAutoSyncAt = 0;
+let lastAutoSyncProject = "";
+let lastRenderedProject = "";
+let planningLifecycleRefreshBound = false;
 let addZoneModalBound = false;
 let addZoneModalOpen = false;
 let manageZoneModalBound = false;
@@ -82,6 +84,11 @@ const HEADER_ONLY_EMBEDDED_MODE =
 const EXTERNAL_AXIS_EMBEDDED_MODE =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).get("externalAxis") === "1";
+const PLANNING_AUTO_SYNC_INTERVAL_MS = 60000;
+const PLANNING_REFRESH_DEBOUNCE_MS = 30;
+const PLANNING_PERF_DEBUG =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("planningDebug") === "1";
 
 function toFiniteNumber(value) {
   const numericValue = Number(value);
@@ -328,7 +335,12 @@ function bindAddZoneModal() {
           zoneName: normalizedZone,
         });
         closeAddZoneModal();
-        await refreshPlanning();
+        await refreshPlanning({
+          sync: true,
+          forceLoad: true,
+          forceSync: true,
+          reason: "zone-add",
+        });
         setPlanningStatus(`Zone ajoutee: ${normalizedZone}`);
       } catch (error) {
         setAddZoneModalHint(`Erreur: ${error.message}`);
@@ -569,7 +581,12 @@ function bindManageZoneModal() {
         });
         closeManageZoneModal({ restoreSelection: false });
         setState({ selectedZone: targetZone });
-        await refreshPlanning();
+        await refreshPlanning({
+          sync: true,
+          forceLoad: true,
+          forceSync: true,
+          reason: "zone-rename",
+        });
         setPlanningStatus(`Zone renommee: ${sourceZone} -> ${targetZone}.`);
       } catch (error) {
         setManageZoneModalBusy(false);
@@ -608,7 +625,12 @@ function bindManageZoneModal() {
         });
         closeManageZoneModal({ restoreSelection: false });
         setState({ selectedZone: "" });
-        await refreshPlanning();
+        await refreshPlanning({
+          sync: true,
+          forceLoad: true,
+          forceSync: true,
+          reason: "zone-delete",
+        });
         setPlanningStatus(`Zone supprimee: ${sourceZone}.`);
       } catch (error) {
         setManageZoneModalBusy(false);
@@ -739,7 +761,12 @@ async function handleDurationCellEdit({
       leftIsoDate
     );
 
-    await refreshPlanning();
+    await refreshPlanning({
+      sync: true,
+      forceLoad: true,
+      forceSync: true,
+      reason: "duration-edit",
+    });
   } catch (error) {
     setPlanningStatus(
       `Erreur mise à jour ${slotLabel.toLowerCase()} : ${error.message}`
@@ -757,7 +784,7 @@ async function handleRetardJustificationEdit({ rowId, remarque }) {
   try {
     setPlanningStatus("Sauvegarde de la justification du retard...");
     await updatePlanningRetardJustification(recordId, remarque);
-    await refreshPlanning();
+    await refreshPlanning({ forceLoad: true, reason: "retard-justification" });
   } catch (error) {
     setPlanningStatus(`Erreur justification retard : ${error.message}`);
     throw error;
@@ -777,7 +804,7 @@ async function handleReferenceDetailsAction({ action, context = {}, updates = []
   if (action === "save") {
     setPlanningStatus("Sauvegarde des détails références...");
     const result = await updatePlanningReferenceDetails(recordId, updates);
-    await refreshPlanning();
+    await refreshPlanning({ forceLoad: true, reason: "reference-details-save" });
     return result;
   }
 
@@ -819,7 +846,12 @@ async function handleMsProjectRowDrop({
       msStartIso: droppedStartIso,
       msEndIso: droppedEndIso,
     });
-    await refreshPlanning();
+    await refreshPlanning({
+      sync: true,
+      forceLoad: true,
+      forceSync: true,
+      reason: "ms-project-drop",
+    });
     const appliedDateSuffix = droppedDateLabel ? ` | ${droppedDateLabel}` : "";
     setPlanningStatus(
       `Drop applique: Ligne_planning=${normalizedUniqueNumber}${taskSuffix}${appliedDateSuffix}`
@@ -884,7 +916,12 @@ async function handlePlanningRowDrop({
       });
 
       if (result?.updated) {
-        await refreshPlanning();
+        await refreshPlanning({
+          sync: true,
+          forceLoad: true,
+          forceSync: true,
+          reason: "planning-row-drop",
+        });
         const appliedParts = [];
         if (toText(result.groupe)) appliedParts.push(`Groupe=${toText(result.groupe)}`);
         if (toText(result.zone)) appliedParts.push(`Zone=${toText(result.zone)}`);
@@ -914,7 +951,12 @@ async function handlePlanningRowDrop({
     });
 
     if (zoneResult?.updated) {
-      await refreshPlanning();
+      await refreshPlanning({
+        sync: true,
+        forceLoad: true,
+        forceSync: true,
+        reason: "planning-zone-drop",
+      });
       const appliedZoneLabel = toText(zoneResult?.zone) || "Sans zone";
       const zoneGroupLabel = toText(zoneResult?.groupe);
       const linkedCount = Number(zoneResult?.linkedUpdatedCount) || 0;
@@ -937,80 +979,70 @@ async function handlePlanningRowDrop({
   }
 }
 
-async function refreshPlanning() {
-  if (refreshInProgress) return;
-  refreshInProgress = true;
+function mergeRefreshOptions(current = null, next = {}) {
+  return {
+    sync: Boolean(current?.sync || next?.sync),
+    forceLoad: Boolean(current?.forceLoad || next?.forceLoad),
+    forceSync: Boolean(current?.forceSync || next?.forceSync),
+    reason: [current?.reason, next?.reason].filter(Boolean).join(",") || "refresh",
+  };
+}
 
+function tracePlanningPerformance(label, details = {}) {
+  if (!PLANNING_PERF_DEBUG) return;
+  console.info(`[Planning Projet perf] ${label}`, details);
+}
+
+async function performPlanningRefresh(options = {}) {
+  const startedAt = performance.now();
+  const diagnosticsBefore = getPlanningServiceDiagnostics();
   try {
-    setPlanningStatus("Chargement du planning...");
+    if (HEADER_ONLY_EMBEDDED_MODE) {
+      return;
+    }
 
     const selectedProject = state.selectedProject || "";
-    const projectAvancementConfigs = await fetchProjectAvancementConfigs();
-    const realisationTargetLookup = buildProjectRealisationTargetLookup(projectAvancementConfigs);
-    let planningRows = await fetchPlanningRows();
+    if (!selectedProject) {
+      currentPlanningDateBounds = null;
+      lastRenderedProject = "";
+      clearPlanningTimeline();
+      emitPlanningWarningsChange("", []);
+      updateZoneSelector([], { selectedValue: "", enabled: false });
+      setPlanningStatus("");
+      return;
+    }
+
+    setPlanningStatus("Chargement du planning...");
+    if (options.forceLoad || !Array.isArray(cachedPlanningRows)) {
+      cachedPlanningRows = await fetchPlanningRows();
+    }
+
     let syncResult = { updatedCount: 0 };
-
-    try {
-      syncResult = await syncCoffrageDiffCoffrageFromGroups(
-        planningRows,
-        selectedProject
-      );
-      if (syncResult.updatedCount > 0) {
-        planningRows = await fetchPlanningRows();
-      }
-    } catch (syncError) {
-      console.error("Erreur sync Diff_coffrage (groupes) :", syncError);
-    }
-
-    let listePlanSyncResult = { updatedCount: 0 };
-    try {
-      const listePlanResult = await fetchListePlanRows();
-      if (listePlanResult?.tableName) {
-        const listePlanUpdates = buildPlanningListePlanSyncUpdates(
-          planningRows,
-          listePlanResult.rows,
-          projectAvancementConfigs,
-          realisationTargetLookup
-        );
-        if (listePlanUpdates.length > 0) {
-          listePlanSyncResult = await syncPlanningComputedValues(listePlanUpdates);
-          planningRows = await fetchPlanningRows();
+    const syncDue =
+      options.forceSync ||
+      lastAutoSyncProject !== selectedProject ||
+      !lastAutoSyncAt ||
+      Date.now() - lastAutoSyncAt >= PLANNING_AUTO_SYNC_INTERVAL_MS;
+    if (options.sync && syncDue) {
+      try {
+        syncResult = await synchronizePlanningDerivedData({
+          planningRows: cachedPlanningRows,
+          selectedProject,
+          projectAvancementConfigs: cachedProjectAvancementConfigs,
+          realisationTargetLookup: cachedRealisationTargetLookup,
+        });
+        lastAutoSyncAt = Date.now();
+        lastAutoSyncProject = selectedProject;
+        if (syncResult.updatedCount > 0) {
+          cachedPlanningRows = await fetchPlanningRows();
         }
+      } catch (syncError) {
+        console.error("Erreur synchronisation Planning Projet :", syncError);
       }
-    } catch (listePlanSyncError) {
-      console.error("Erreur sync ListeDePlan -> Planning_Projet :", listePlanSyncError);
     }
 
-    let realiseSyncResult = { updatedCount: 0 };
-    try {
-      const realiseUpdates = buildPlanningRealiseUpdates(planningRows, realisationTargetLookup);
-      if (realiseUpdates.length > 0) {
-        realiseSyncResult = await syncPlanningRealiseValues(realiseUpdates);
-        planningRows = await fetchPlanningRows();
-      }
-    } catch (realiseSyncError) {
-      console.error("Erreur sync Realise (Indice) :", realiseSyncError);
-    }
-
-    let retardSyncResult = { updatedCount: 0 };
-    try {
-      const retardUpdates = buildPlanningRetardUpdates(
-        planningRows,
-        undefined,
-        realisationTargetLookup
-      );
-      if (retardUpdates.length > 0) {
-        retardSyncResult = await syncPlanningRetardValues(retardUpdates);
-        planningRows = await fetchPlanningRows();
-      }
-    } catch (retardSyncError) {
-      console.error("Erreur sync Retards :", retardSyncError);
-    }
-
-    const zoneOptions = buildZoneOptionsForSelectedProject(
-      planningRows,
-      selectedProject
-    );
+    const planningRows = cachedPlanningRows || [];
+    const zoneOptions = buildZoneOptionsForSelectedProject(planningRows, selectedProject);
     const normalizedZone = normalizeSelectedZone(zoneOptions, state.selectedZone);
     if (normalizedZone !== (state.selectedZone || "")) {
       setState({ selectedZone: normalizedZone });
@@ -1025,8 +1057,10 @@ async function refreshPlanning() {
       planningRows,
       selectedProject,
       normalizedZone,
-      realisationTargetLookup
+      cachedRealisationTargetLookup
     );
+    timelineData.resetViewport = lastRenderedProject !== selectedProject;
+    lastRenderedProject = selectedProject;
     const planningWarnings = buildPlanningWarningsFromGroups(
       timelineData?.groups || []
     );
@@ -1046,6 +1080,7 @@ async function refreshPlanning() {
     }
 
     renderPlanningTimeline(timelineData);
+    await waitForPlanningViewportSettled();
     emitPlanningWarningsChange(selectedProject, planningWarnings);
 
     if (!toolbarBound) {
@@ -1071,25 +1106,7 @@ async function refreshPlanning() {
     if (syncResult.updatedCount > 0) {
       const currentStatus = document.getElementById("planningStatus")?.textContent || "";
       setPlanningStatus(
-        `${currentStatus} | Sync Diff_coffrage: ${syncResult.updatedCount} ligne(s)`
-      );
-    }
-    if (listePlanSyncResult.updatedCount > 0) {
-      const currentStatus = document.getElementById("planningStatus")?.textContent || "";
-      setPlanningStatus(
-        `${currentStatus} | Sync ListeDePlan: ${listePlanSyncResult.updatedCount} ligne(s)`
-      );
-    }
-    if (realiseSyncResult.updatedCount > 0) {
-      const currentStatus = document.getElementById("planningStatus")?.textContent || "";
-      setPlanningStatus(
-        `${currentStatus} | Sync Realise: ${realiseSyncResult.updatedCount} ligne(s)`
-      );
-    }
-    if (retardSyncResult.updatedCount > 0) {
-      const currentStatus = document.getElementById("planningStatus")?.textContent || "";
-      setPlanningStatus(
-        `${currentStatus} | Sync Retards: ${retardSyncResult.updatedCount} ligne(s)`
+        `${currentStatus} | Synchronisation: ${syncResult.updatedCount} ligne(s)`
       );
     }
   } catch (error) {
@@ -1098,18 +1115,87 @@ async function refreshPlanning() {
     emitPlanningWarningsChange(state.selectedProject || "", []);
     setPlanningStatus(`Erreur planning : ${error.message}`);
   } finally {
-    refreshInProgress = false;
+    const diagnosticsAfter = getPlanningServiceDiagnostics();
+    tracePlanningPerformance("refresh", {
+      reason: options.reason,
+      sync: Boolean(options.sync),
+      durationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+      cachedRowCount: cachedPlanningRows?.length || 0,
+      fetchTableCount:
+        diagnosticsAfter.fetchTableCount - diagnosticsBefore.fetchTableCount,
+      actionBatchCount:
+        diagnosticsAfter.actionBatchCount - diagnosticsBefore.actionBatchCount,
+      actionCount:
+        diagnosticsAfter.actionCount - diagnosticsBefore.actionCount,
+    });
   }
+}
+
+async function drainPlanningRefreshQueue() {
+  try {
+    while (pendingRefreshOptions) {
+      const options = pendingRefreshOptions;
+      pendingRefreshOptions = null;
+      await performPlanningRefresh(options);
+    }
+  } finally {
+    const resolve = resolveRefreshQueue;
+    refreshQueuePromise = null;
+    resolveRefreshQueue = null;
+    resolve?.();
+  }
+}
+
+function refreshPlanning(options = {}) {
+  pendingRefreshOptions = mergeRefreshOptions(pendingRefreshOptions, options);
+  if (!refreshQueuePromise) {
+    refreshQueuePromise = new Promise((resolve) => {
+      resolveRefreshQueue = resolve;
+    });
+    window.setTimeout(() => {
+      void drainPlanningRefreshQueue();
+    }, PLANNING_REFRESH_DEBOUNCE_MS);
+  }
+  return refreshQueuePromise;
+}
+
+function bindPlanningLifecycleRefresh() {
+  if (planningLifecycleRefreshBound || HEADER_ONLY_EMBEDDED_MODE) return;
+  planningLifecycleRefreshBound = true;
+
+  const requestIfDue = () => {
+    if (
+      !state.selectedProject ||
+      (
+        lastAutoSyncProject === state.selectedProject &&
+        Date.now() - lastAutoSyncAt < PLANNING_AUTO_SYNC_INTERVAL_MS
+      )
+    ) {
+      return;
+    }
+    void refreshPlanning({
+      sync: true,
+      forceLoad: true,
+      reason: "widget-resume",
+    });
+  };
+
+  window.addEventListener("focus", requestIfDue);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      requestIfDue();
+    }
+  });
 }
 
 async function handleProjectChange(currentState) {
   console.log("Projet sélectionné :", currentState.selectedProject || "(aucun)");
-  await refreshPlanning();
+  await refreshPlanning({ sync: true, forceLoad: true, reason: "project-change" });
 }
 
 async function handleZoneChange(currentState) {
   console.log("Zone sélectionnée :", currentState.selectedZone || "(toutes)");
-  await refreshPlanning();
+  await refreshPlanning({ reason: "zone-change" });
 }
 
 async function bootstrap() {
@@ -1118,6 +1204,15 @@ async function bootstrap() {
     loadState();
 
     initGrist();
+    if (HEADER_ONLY_EMBEDDED_MODE) {
+      renderPlanningTimeline({ groups: [], items: [] });
+      bindTimelineToolbar();
+      toolbarBound = true;
+      await waitForPlanningViewportSettled();
+      planningSyncApiReady = true;
+      return;
+    }
+
     bindAddZoneModal();
     bindManageZoneModal();
     setPlanningDurationEditHandler(handleDurationCellEdit);
@@ -1125,8 +1220,16 @@ async function bootstrap() {
     setPlanningReferenceDetailsHandler(handleReferenceDetailsAction);
     setPlanningMsProjectDropHandler(handleMsProjectRowDrop);
     setPlanningRowDropHandler(handlePlanningRowDrop);
+    bindPlanningLifecycleRefresh();
 
-    const projectOptions = await buildProjectOptions();
+    const {
+      projectOptions,
+      projectAvancementConfigs,
+    } = await fetchProjectBootstrapData();
+    cachedProjectAvancementConfigs = projectAvancementConfigs;
+    cachedRealisationTargetLookup = buildProjectRealisationTargetLookup(
+      cachedProjectAvancementConfigs
+    );
     // planningProjectOptions expose les noms pour l'API sync inter-iframes
     planningProjectOptions = projectOptions.map((p) => p.name);
 
@@ -1142,9 +1245,14 @@ async function bootstrap() {
 
     initProjectSelector(projectOptions, {
       onChange: handleProjectChange,
+      emitInitialChange: false,
     });
 
-    await refreshPlanning();
+    await refreshPlanning({
+      sync: true,
+      forceLoad: true,
+      reason: "bootstrap",
+    });
     planningSyncApiReady = true;
   } catch (error) {
     console.error("Erreur d'initialisation :", error);
@@ -1196,7 +1304,11 @@ function exposePlanningSyncApi() {
         zoneSelect.value = "";
       }
 
-      await refreshPlanning();
+      await refreshPlanning({
+        sync: !HEADER_ONLY_EMBEDDED_MODE,
+        forceLoad: !HEADER_ONLY_EMBEDDED_MODE,
+        reason: "sync-api-project-change",
+      });
       await waitForPlanningViewportSettled();
       return Boolean(normalizedProject);
     },

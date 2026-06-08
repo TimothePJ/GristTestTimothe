@@ -7,6 +7,9 @@ let hoverTooltipEl = null;
 let hoverTooltipBound = false;
 let clickTooltipTimer = null;
 let itemElementsObserver = null;
+let timelineBulkUpdateInProgress = false;
+let lastRenderedTimelineSignature = "";
+let timelineHasRenderedData = false;
 let durationCellEditHandler = null;
 let durationCellEditBound = false;
 let activeDurationEditor = null;
@@ -1277,6 +1280,7 @@ function bindHoverTooltip(containerEl) {
 
   if (!itemElementsObserver && typeof MutationObserver !== "undefined") {
     itemElementsObserver = new MutationObserver(() => {
+      if (timelineBulkUpdateInProgress) return;
       requestAnimationFrame(syncInteractiveElements);
     });
     itemElementsObserver.observe(containerEl, {
@@ -5162,10 +5166,50 @@ export function setPlanningRowDropHandler(handler) {
   planningRowDropHandler = typeof handler === "function" ? handler : null;
 }
 
+function buildTimelineRenderSignature(groups = [], items = []) {
+  return JSON.stringify({ groups, items });
+}
+
+function syncTimelineDataSet(dataSet, records = []) {
+  if (!dataSet) return;
+  const nextRecords = Array.isArray(records) ? records : [];
+  const currentRecords = dataSet.get();
+  const currentById = new Map(currentRecords.map((record) => [record?.id, record]));
+  const nextIds = new Set(nextRecords.map((record) => record?.id));
+  const removedIds = currentRecords
+    .filter((record) => !nextIds.has(record?.id))
+    .map((record) => record.id);
+  const changedRecords = nextRecords.filter((record) => {
+    const current = currentById.get(record?.id);
+    return !current || JSON.stringify(current) !== JSON.stringify(record);
+  });
+  const changedIds = changedRecords
+    .filter((record) => currentById.has(record?.id))
+    .map((record) => record.id);
+  const idsToRemove = [...new Set([...removedIds, ...changedIds])];
+  if (idsToRemove.length) {
+    dataSet.remove(idsToRemove);
+  }
+  if (changedRecords.length) {
+    dataSet.add(changedRecords);
+  }
+}
+
+function isUsableTimelineWindow(range) {
+  return (
+    range?.start instanceof Date &&
+    range?.end instanceof Date &&
+    !Number.isNaN(range.start.getTime()) &&
+    !Number.isNaN(range.end.getTime()) &&
+    range.end > range.start
+  );
+}
+
 export function renderPlanningTimeline(timelineData = {}) {
   lastPlanningTimelineData = {
     groups: timelineData.groups || [],
     items: timelineData.items || [],
+    resetViewport: Boolean(timelineData.resetViewport),
   };
   const { groups, items } = getDisplayedTimelineData(lastPlanningTimelineData);
   const container = getTimelineContainer();
@@ -5174,6 +5218,18 @@ export function renderPlanningTimeline(timelineData = {}) {
   if (!window.vis || !window.vis.DataSet || !window.vis.Timeline) {
     throw new Error("vis-timeline non chargé.");
   }
+
+  const renderSignature = buildTimelineRenderSignature(groups, items);
+  const shouldResetViewport =
+    Boolean(timelineData.resetViewport) || !timelineHasRenderedData;
+  if (
+    timelineInstance &&
+    renderSignature === lastRenderedTimelineSignature &&
+    !shouldResetViewport
+  ) {
+    return;
+  }
+  const previousWindow = timelineInstance?.getWindow?.() || null;
 
   // Création de l'instance une seule fois
   if (!timelineInstance) {
@@ -5274,16 +5330,17 @@ export function renderPlanningTimeline(timelineData = {}) {
     timelineInstance.setWindow(_s0, _e0, { animation: false });
   }
 
-  // Mise à jour datasets
-  groupsDataSet.clear();
-  itemsDataSet.clear();
-
-  groupsDataSet.add(groups || []);
-  itemsDataSet.add(items || []);
+  // Mise à jour différentielle : évite de détruire et reconstruire tout le DOM.
+  timelineBulkUpdateInProgress = true;
+  syncTimelineDataSet(groupsDataSet, groups || []);
+  syncTimelineDataSet(itemsDataSet, items || []);
+  lastRenderedTimelineSignature = renderSignature;
+  timelineHasRenderedData = true;
   const settleToken = beginPlanningViewportSettle();
 
   // Recalage automatique sur les dates des données
   requestAnimationFrame(() => {
+    timelineBulkUpdateInProgress = false;
     timelineInstance.redraw();
     decorateRenderedTimelineItems(container);
     syncNativeItemTitles(container);
@@ -5291,7 +5348,12 @@ export function renderPlanningTimeline(timelineData = {}) {
 
     const range = computePlanningDataRange(items || [], lastPlanningTimelineData);
     const hasNonBackgroundItems = hasPlanningDataItems(items || [], lastPlanningTimelineData);
-    if (EMBEDDED_PLANNING_SYNC_MODE) {
+    if (!shouldResetViewport && isUsableTimelineWindow(previousWindow)) {
+      if (range) {
+        dataAnchorDate = computeRangeCenter(range);
+      }
+      timelineInstance.setWindow(previousWindow.start, previousWindow.end, { animation: false });
+    } else if (EMBEDDED_PLANNING_SYNC_MODE) {
       if (range) {
         dataAnchorDate = computeRangeCenter(range);
         // Positionner vis-timeline sur la plage réelle des données.
@@ -5403,6 +5465,8 @@ export function clearPlanningTimeline() {
 
   groupsDataSet.clear();
   itemsDataSet.clear();
+  lastRenderedTimelineSignature = "";
+  timelineHasRenderedData = false;
   lastPlanningViewportEmissionSignature = "";
   lastPlanningSelectionEmissionSignature = "";
   clearPendingProgrammaticPlanningViewport();

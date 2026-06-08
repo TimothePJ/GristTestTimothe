@@ -14,6 +14,17 @@ const LISTEPLAN_TABLE_CANDIDATES = [
 // Cache léger pour le dialog "Détails" — évite de re-fetcher les tables à chaque clic
 let _planningRowsCache = null;  // tableau de lignes Planning_Projet
 let _refsTableCache = null;     // tableau de lignes References
+let _listePlanTableNameCache = "";
+const PLANNING_ACTION_CHUNK_SIZE = 250;
+const _planningServiceDiagnostics = {
+  fetchTableCount: 0,
+  actionBatchCount: 0,
+  actionCount: 0,
+};
+
+export function getPlanningServiceDiagnostics() {
+  return { ..._planningServiceDiagnostics };
+}
 
 function emitReferenceDataChangeSignal() {
   try {
@@ -102,6 +113,7 @@ async function fetchTableRows(tableName) {
     throw new Error("grist.docApi.fetchTable(...) indisponible.");
   }
 
+  _planningServiceDiagnostics.fetchTableCount += 1;
   const raw = await grist.docApi.fetchTable(tableName);
   return normalizeFetchTableResult(raw);
 }
@@ -514,13 +526,25 @@ function getFirstNonEmptyRowValue(row, columnNames = []) {
 
 async function fetchFirstAvailableTable(candidates = []) {
   let lastError = null;
-  for (const candidate of candidates) {
+  const orderedCandidates = _listePlanTableNameCache
+    ? [
+        _listePlanTableNameCache,
+        ...candidates.filter((candidate) => candidate !== _listePlanTableNameCache),
+      ]
+    : candidates;
+  for (const candidate of orderedCandidates) {
     const tableName = String(candidate || "").trim();
     if (!tableName) continue;
     try {
       const rows = await fetchTableRows(tableName);
+      if (LISTEPLAN_TABLE_CANDIDATES.includes(tableName)) {
+        _listePlanTableNameCache = tableName;
+      }
       return { tableName, rows };
     } catch (error) {
+      if (_listePlanTableNameCache === tableName) {
+        _listePlanTableNameCache = "";
+      }
       lastError = error;
     }
   }
@@ -746,12 +770,7 @@ async function syncReferenceRetardRows(referenceRows = [], currentDateValue = ne
 
   if (!actions.length) return 0;
 
-  const grist = getGrist();
-  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
-    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
-  }
-
-  await grist.docApi.applyUserActions(actions);
+  await applyUserActionsInChunks(actions);
   _refsTableCache = null;
   emitReferenceDataChangeSignal();
   return actions.length;
@@ -818,6 +837,79 @@ function findLinkedReferenceRowsForPlanningRow(planningRow, referenceRows, colum
       });
 }
 
+function addReferenceLookupRow(map, key, row) {
+  if (!map.has(key)) {
+    map.set(key, []);
+  }
+  map.get(key).push(row);
+}
+
+function buildLinkedReferenceLookup(referenceRows = []) {
+  const context = buildZoneSyncTableContext(REFERENCES_TABLE_NAME, referenceRows, {
+    projectCandidates: ["NomProjetString", "NomProjet", "Nom_projet"],
+    numberCandidates: ["NumeroDocument"],
+    typeCandidates: ["Type_document", "TypeDocument"],
+    zoneCandidates: ["Zone"],
+    designationCandidates: ["NomDocument", "Designation"],
+  });
+  if (!context) return null;
+
+  const strict = new Map();
+  const loose = new Map();
+  context.rows.forEach((row) => {
+    const rowId = Number(row?.id);
+    if (!Number.isInteger(rowId) || rowId <= 0) return;
+    const project = context.projectCol ? normalizeLookupText(row?.[context.projectCol]) : "";
+    const number = normalizeDocumentNumberForMatch(row?.[context.numberCol]);
+    const type = context.typeCol ? normalizeLookupText(row?.[context.typeCol]) : "";
+    const designation = context.designationCols.length
+      ? normalizeLookupText(getFirstNonEmptyRowValue(row, context.designationCols))
+      : "";
+    const zone = context.zoneCol ? normalizeZoneValueForStorage(row?.[context.zoneCol]) : "";
+    addReferenceLookupRow(strict, [project, number, type, designation, zone].join("||"), row);
+    addReferenceLookupRow(loose, [project, number, type, zone].join("||"), row);
+  });
+  return { context, strict, loose };
+}
+
+function getUniqueReferenceLookupRows(map, keys = []) {
+  const rowsById = new Map();
+  keys.forEach((key) => {
+    (map.get(key) || []).forEach((row) => rowsById.set(Number(row.id), row));
+  });
+  return [...rowsById.values()];
+}
+
+function findLinkedReferenceRowsFromLookup(planningRow, lookup, columns = {}) {
+  if (!lookup?.context) return [];
+  const change = buildPlanningReferenceChange(planningRow, columns);
+  const project = lookup.context.projectCol ? normalizeLookupText(change.projectName) : "";
+  const number = normalizeDocumentNumberForMatch(change.numeroDocument);
+  const type = lookup.context.typeCol ? normalizeLookupText(change.typeDocument) : "";
+  const designation = lookup.context.designationCols.length
+    ? normalizeLookupText(change.designation)
+    : "";
+  const sourceZone = lookup.context.zoneCol
+    ? normalizeZoneValueForStorage(change.sourceZone)
+    : "";
+  const zones = sourceZone ? [sourceZone, ""] : [""];
+
+  for (const zone of zones) {
+    const strictRows = getUniqueReferenceLookupRows(lookup.strict, [
+      [project, number, type, designation, zone].join("||"),
+      [project, number, type, "", zone].join("||"),
+    ]);
+    if (strictRows.length) return strictRows;
+  }
+  for (const zone of zones) {
+    const looseRows = getUniqueReferenceLookupRows(lookup.loose, [
+      [project, number, type, zone].join("||"),
+    ]);
+    if (looseRows.length) return looseRows;
+  }
+  return [];
+}
+
 async function fetchPlanningRowById(rowId) {
   const table = APP_CONFIG.grist.planningTable;
   if (!table?.sourceTable) {
@@ -843,7 +935,8 @@ async function fetchPlanningRowById(rowId) {
 async function buildReferenceOffsetSnapshotForPlanningRow(
   planningRow,
   columns = {},
-  referenceRowsOverride = null
+  referenceRowsOverride = null,
+  referenceLookupOverride = null
 ) {
   const startDate = getPlanningSegmentStartDate(planningRow, columns);
   const hasValidStartDate = startDate instanceof Date && !Number.isNaN(startDate.getTime());
@@ -851,7 +944,9 @@ async function buildReferenceOffsetSnapshotForPlanningRow(
   const referenceRows = Array.isArray(referenceRowsOverride)
     ? referenceRowsOverride
     : await fetchTableRows(REFERENCES_TABLE_NAME).catch(() => []);
-  const linkedRows = findLinkedReferenceRowsForPlanningRow(planningRow, referenceRows, columns);
+  const linkedRows = referenceLookupOverride
+    ? findLinkedReferenceRowsFromLookup(planningRow, referenceLookupOverride, columns)
+    : findLinkedReferenceRowsForPlanningRow(planningRow, referenceRows, columns);
   const seenReferenceIds = new Set();
   const offsets = [];
 
@@ -896,9 +991,15 @@ async function buildReferenceOffsetSnapshotsForPlanningRows(planningRows = [], c
   }
 
   const referenceRows = await fetchTableRows(REFERENCES_TABLE_NAME).catch(() => []);
+  const referenceLookup = buildLinkedReferenceLookup(referenceRows);
   const snapshotsByRowId = new Map();
   for (const [rowId, row] of uniqueRowsById.entries()) {
-    const snapshot = await buildReferenceOffsetSnapshotForPlanningRow(row, columns, referenceRows);
+    const snapshot = await buildReferenceOffsetSnapshotForPlanningRow(
+      row,
+      columns,
+      referenceRows,
+      referenceLookup
+    );
     if (snapshot?.offsets?.length) {
       snapshotsByRowId.set(rowId, snapshot);
     }
@@ -951,7 +1052,7 @@ async function applyReferenceDateLimiteSyncActions(actions = []) {
     throw new Error("grist.docApi.applyUserActions(...) indisponible.");
   }
 
-  await grist.docApi.applyUserActions(dedupedActions);
+  await applyUserActionsInChunks(dedupedActions);
   _planningRowsCache = null;
   _refsTableCache = null;
   emitReferenceDataChangeSignal();
@@ -1413,7 +1514,7 @@ export async function renameProjectZone({
     throw new Error("grist.docApi.applyUserActions(...) indisponible.");
   }
 
-  await grist.docApi.applyUserActions(actions);
+  await applyUserActionsInChunks(actions);
 
   return {
     updated: true,
@@ -1463,7 +1564,7 @@ export async function clearProjectZone({
     throw new Error("grist.docApi.applyUserActions(...) indisponible.");
   }
 
-  await grist.docApi.applyUserActions(actions);
+  await applyUserActionsInChunks(actions);
 
   return {
     updated: true,
@@ -1472,10 +1573,7 @@ export async function clearProjectZone({
   };
 }
 
-export async function syncCoffrageDiffCoffrageFromGroups(
-  planningRows,
-  selectedProject = ""
-) {
+export function buildCoffrageDiffCoffrageUpdates(planningRows, selectedProject = "") {
   const table = APP_CONFIG.grist.planningTable;
   const columns = table?.columns || {};
 
@@ -1495,12 +1593,12 @@ export async function syncCoffrageDiffCoffrageFromGroups(
 
   const rows = Array.isArray(planningRows) ? planningRows : [];
   if (!rows.length) {
-    return { updatedCount: 0, matchedCoffrageCount: 0, skipped: true };
+    return { updates: [], rows, matchedCoffrageCount: 0, skipped: true };
   }
 
   const selectedProjectText = toText(selectedProject);
   if (!selectedProjectText) {
-    return { updatedCount: 0, matchedCoffrageCount: 0, skipped: true };
+    return { updates: [], rows, matchedCoffrageCount: 0, skipped: true };
   }
 
   const scopedRows = rows.filter((row) => {
@@ -1508,7 +1606,7 @@ export async function syncCoffrageDiffCoffrageFromGroups(
   });
 
   if (!scopedRows.length) {
-    return { updatedCount: 0, matchedCoffrageCount: 0, skipped: true };
+    return { updates: [], rows, matchedCoffrageCount: 0, skipped: true };
   }
 
   const minArmatureDiffByGroup = new Map();
@@ -1526,7 +1624,7 @@ export async function syncCoffrageDiffCoffrageFromGroups(
     }
   });
 
-  const actions = [];
+  const derivedUpdates = [];
   let matchedCoffrageCount = 0;
 
   scopedRows.forEach((row) => {
@@ -1566,40 +1664,129 @@ export async function syncCoffrageDiffCoffrageFromGroups(
 
     if (!Object.keys(updates).length) return;
 
-    actions.push([
-      "UpdateRecord",
-      table.sourceTable,
-      recordId,
-      updates,
-    ]);
+    derivedUpdates.push({ id: recordId, fields: updates });
   });
 
-  if (!actions.length) {
-    return { updatedCount: 0, matchedCoffrageCount, skipped: false };
-  }
-
-  const referenceSyncContext = await captureReferenceDateLimiteSyncContext(
-    rows,
-    actions,
-    table.sourceTable,
-    columns
+  const fieldsById = new Map(
+    derivedUpdates.map((update) => [Number(update.id), update.fields])
   );
+  const mergedRows = fieldsById.size
+    ? rows.map((row) => {
+        const fields = fieldsById.get(Number(row?.[idCol]));
+        return fields ? { ...row, ...fields } : row;
+      })
+    : rows;
 
+  return {
+    updates: derivedUpdates,
+    rows: mergedRows,
+    matchedCoffrageCount,
+    skipped: false,
+  };
+}
+
+function buildPlanningComputedActions(updates = []) {
+  const table = APP_CONFIG.grist.planningTable;
+  const columns = table?.columns || {};
+  const indiceCol = String(columns.indice || "Indice").trim();
+  const realiseCol = String(columns.realise || "Realise").trim();
+  const dateRealiseCol = String(columns.dateRealise || "Date_Realise").trim();
+  const retardsCol = String(columns.retards || "Retards").trim();
+  const fieldsById = new Map();
+
+  (Array.isArray(updates) ? updates : []).forEach((update) => {
+    const rowId = Number(update?.id);
+    if (!Number.isInteger(rowId) || rowId <= 0) return;
+
+    const fields = {
+      ...(fieldsById.get(rowId) || {}),
+      ...(update?.fields && typeof update.fields === "object" ? update.fields : {}),
+    };
+
+    if (Object.prototype.hasOwnProperty.call(update, "indice")) {
+      fields[indiceCol] = toText(update.indice);
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(update, "realise") &&
+      (update.realise == null || Number.isFinite(Number(update.realise)))
+    ) {
+      fields[realiseCol] = update.realise == null ? null : Number(update.realise);
+    }
+    if (Object.prototype.hasOwnProperty.call(update, "dateRealise")) {
+      fields[dateRealiseCol] = update.dateRealise || null;
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(update, "retards") &&
+      (update.retards == null || Number.isFinite(Number(update.retards)))
+    ) {
+      fields[retardsCol] = update.retards == null ? null : Number(update.retards);
+    }
+
+    if (Object.keys(fields).length) {
+      fieldsById.set(rowId, fields);
+    }
+  });
+
+  return [...fieldsById.entries()].map(([rowId, fields]) => [
+    "UpdateRecord",
+    table.sourceTable,
+    rowId,
+    fields,
+  ]);
+}
+
+async function applyUserActionsInChunks(actions = []) {
   const grist = getGrist();
   if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
     throw new Error("grist.docApi.applyUserActions(...) indisponible.");
   }
 
-  await grist.docApi.applyUserActions(actions);
+  for (let offset = 0; offset < actions.length; offset += PLANNING_ACTION_CHUNK_SIZE) {
+    const chunk = actions.slice(offset, offset + PLANNING_ACTION_CHUNK_SIZE);
+    _planningServiceDiagnostics.actionBatchCount += 1;
+    _planningServiceDiagnostics.actionCount += chunk.length;
+    await grist.docApi.applyUserActions(
+      chunk
+    );
+  }
+}
+
+export async function syncPlanningDerivedValues({
+  planningRows = [],
+  updates = [],
+} = {}) {
+  const table = APP_CONFIG.grist.planningTable;
+  const columns = table?.columns || {};
+  const actions = buildPlanningComputedActions(updates);
+  if (!actions.length) {
+    return { updatedCount: 0, referenceDateLimiteUpdatedCount: 0 };
+  }
+
+  const referenceDateFields = new Set([
+    columns.dateLimite || "Date_limite",
+    columns.diffCoffrage || "Diff_coffrage",
+    columns.diffArmature || "Diff_armature",
+    columns.demarragesTravaux || "Demarrages_travaux",
+  ]);
+  const referenceRelevantActions = actions.filter((action) =>
+    Object.keys(action?.[3] || {}).some((fieldName) => referenceDateFields.has(fieldName))
+  );
+  const referenceSyncContext = await captureReferenceDateLimiteSyncContext(
+    planningRows,
+    referenceRelevantActions,
+    table.sourceTable,
+    columns
+  );
+
+  await applyUserActionsInChunks(actions);
   const referenceDateLimiteUpdatedCount = await syncReferenceDateLimitesFromContext(
     referenceSyncContext,
     columns
   );
+  _planningRowsCache = null;
   return {
     updatedCount: actions.length,
-    matchedCoffrageCount,
     referenceDateLimiteUpdatedCount,
-    skipped: false,
   };
 }
 
@@ -1756,7 +1943,7 @@ export async function updatePlanningDurationAndLeftDate(
     columns
   );
 
-  await grist.docApi.applyUserActions(actions);
+  await applyUserActionsInChunks(actions);
   const referenceDateLimiteUpdatedCount = await syncReferenceDateLimitesFromContext(
     referenceSyncContext,
     columns
@@ -2003,7 +2190,7 @@ export async function updatePlanningFromMsProjectDrop({
     columns
   );
 
-  await grist.docApi.applyUserActions(actions);
+  await applyUserActionsInChunks(actions);
   const referenceDateLimiteUpdatedCount = await syncReferenceDateLimitesFromContext(
     referenceSyncContext,
     columns
@@ -2271,7 +2458,7 @@ export async function updatePlanningGroupZoneFromPlanningDrop({
     columns
   );
 
-  await grist.docApi.applyUserActions(actions);
+  await applyUserActionsInChunks(actions);
   const referenceDateLimiteUpdatedCount = await syncReferenceDateLimitesFromContext(
     referenceSyncContext,
     columns
@@ -2494,7 +2681,7 @@ export async function updatePlanningZoneFromZoneHeaderDrop({
     columns
   );
 
-  await grist.docApi.applyUserActions(actions);
+  await applyUserActionsInChunks(actions);
   const referenceDateLimiteUpdatedCount = await syncReferenceDateLimitesFromContext(
     referenceSyncContext,
     columns
@@ -2602,10 +2789,9 @@ export async function addPlanningZoneRow({
 
 /* ---------- Projets ---------- */
 
-export async function buildProjectOptions() {
+function buildProjectOptionsFromRows(rows = []) {
   const table = APP_CONFIG.grist.projectsTable;
   const columns = table.columns || {};
-  const rows = await fetchTableRows(table.sourceTable);
 
   const seen = new Set();
   const result = [];
@@ -2623,9 +2809,8 @@ export async function buildProjectOptions() {
   return result.sort((a, b) => a.name.localeCompare(b.name, "fr"));
 }
 
-export async function fetchProjectAvancementConfigs() {
+function buildProjectAvancementConfigsFromRows(rows = []) {
   const table = APP_CONFIG.grist.projectsTable;
-  const rows = await fetchTableRows(table.sourceTable);
   const columns = table.columns || {};
 
   return rows.map((row) => ({
@@ -2634,6 +2819,15 @@ export async function fetchProjectAvancementConfigs() {
     projectNumber: toText(row?.[columns.projectNumber]),
     avancementConfigRaw: row?.[columns.avancement],
   }));
+}
+
+export async function fetchProjectBootstrapData() {
+  const table = APP_CONFIG.grist.projectsTable;
+  const rows = await fetchTableRows(table.sourceTable);
+  return {
+    projectOptions: buildProjectOptionsFromRows(rows),
+    projectAvancementConfigs: buildProjectAvancementConfigsFromRows(rows),
+  };
 }
 
 /* ---------- Planning ---------- */
@@ -2647,171 +2841,6 @@ export async function fetchPlanningRows() {
 
 export async function fetchListePlanRows() {
   return fetchFirstAvailableTable(LISTEPLAN_TABLE_CANDIDATES);
-}
-
-export async function syncPlanningComputedValues(updates) {
-  const normalizedUpdates = (updates || []).filter((update) => {
-    const rowId = Number(update?.id);
-    return Number.isInteger(rowId) && rowId > 0;
-  });
-
-  if (!normalizedUpdates.length) {
-    return { updatedCount: 0 };
-  }
-
-  const table = APP_CONFIG.grist.planningTable;
-  if (!table?.sourceTable) {
-    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
-  }
-
-  const columns = table.columns || {};
-  const indiceCol = String(columns.indice || "Indice").trim();
-  const realiseCol = String(columns.realise || "Realise").trim();
-  const dateRealiseCol = String(columns.dateRealise || "Date_Realise").trim();
-  const retardsCol = String(columns.retards || "Retards").trim();
-
-  const actions = normalizedUpdates
-    .map((update) => {
-      const fields = {};
-
-      if (Object.prototype.hasOwnProperty.call(update, "indice")) {
-        fields[indiceCol] = toText(update.indice);
-      }
-
-      if (
-        Object.prototype.hasOwnProperty.call(update, "realise") &&
-        (update.realise == null || Number.isFinite(Number(update.realise)))
-      ) {
-        fields[realiseCol] = update.realise == null ? null : Number(update.realise);
-      }
-
-      if (Object.prototype.hasOwnProperty.call(update, "dateRealise")) {
-        fields[dateRealiseCol] = update.dateRealise || null;
-      }
-
-      if (
-        Object.prototype.hasOwnProperty.call(update, "retards") &&
-        (update.retards == null || Number.isFinite(Number(update.retards)))
-      ) {
-        fields[retardsCol] = update.retards == null ? null : Number(update.retards);
-      }
-
-      if (!Object.keys(fields).length) {
-        return null;
-      }
-
-      return [
-        "UpdateRecord",
-        table.sourceTable,
-        Number(update.id),
-        fields,
-      ];
-    })
-    .filter(Boolean);
-
-  if (!actions.length) {
-    return { updatedCount: 0 };
-  }
-
-  const grist = getGrist();
-  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
-    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
-  }
-
-  await grist.docApi.applyUserActions(actions);
-
-  return {
-    updatedCount: actions.length,
-  };
-}
-
-export async function syncPlanningRealiseValues(updates) {
-  const normalizedUpdates = (updates || []).filter((update) => {
-    const rowId = Number(update?.id);
-    const realiseValue = update?.realise;
-    return (
-      Number.isInteger(rowId) &&
-      rowId > 0 &&
-      (realiseValue == null || Number.isFinite(Number(realiseValue)))
-    );
-  });
-
-  if (!normalizedUpdates.length) {
-    return { updatedCount: 0 };
-  }
-
-  const table = APP_CONFIG.grist.planningTable;
-  if (!table?.sourceTable) {
-    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
-  }
-
-  const columns = table.columns || {};
-  const realiseCol = String(columns.realise || "Realise").trim();
-
-  const grist = getGrist();
-  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
-    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
-  }
-
-  await grist.docApi.applyUserActions(
-    normalizedUpdates.map((update) => [
-      "UpdateRecord",
-      table.sourceTable,
-      Number(update.id),
-      {
-        [realiseCol]: update.realise == null ? null : Number(update.realise),
-      },
-    ])
-  );
-
-  return {
-    updatedCount: normalizedUpdates.length,
-  };
-}
-
-/* Utilitaires exportés pour planningService */
-export async function syncPlanningRetardValues(updates) {
-  const normalizedUpdates = (updates || []).filter((update) => {
-    const rowId = Number(update?.id);
-    const retardValue = update?.retards;
-    return (
-      Number.isInteger(rowId) &&
-      rowId > 0 &&
-      (retardValue == null || Number.isFinite(Number(retardValue)))
-    );
-  });
-
-  if (!normalizedUpdates.length) {
-    return { updatedCount: 0 };
-  }
-
-  const table = APP_CONFIG.grist.planningTable;
-  if (!table?.sourceTable) {
-    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
-  }
-
-  const columns = table.columns || {};
-  const retardsCol = String(columns.retards || "Retards").trim();
-
-  const grist = getGrist();
-  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
-    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
-  }
-
-  await grist.docApi.applyUserActions(
-    normalizedUpdates.map((update) => [
-      "UpdateRecord",
-      table.sourceTable,
-      Number(update.id),
-      {
-        [retardsCol]: update.retards == null ? null : Number(update.retards),
-      },
-    ])
-  );
-
-  return {
-    updatedCount: normalizedUpdates.length,
-  };
 }
 
 export async function updatePlanningRetardJustification(rowId, remarque) {
@@ -3011,7 +3040,7 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
     throw new Error("grist.docApi.applyUserActions(...) indisponible.");
   }
 
-  await grist.docApi.applyUserActions(actions);
+  await applyUserActionsInChunks(actions);
   // Invalider le cache après écriture — prochain "Détails" rechargera des données fraîches
   _planningRowsCache = null;
   _refsTableCache = null;
