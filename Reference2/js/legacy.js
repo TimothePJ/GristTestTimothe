@@ -57,7 +57,19 @@
 
 const SHARED_PROJECT_STORAGE_KEY = 'grist.selected-project';
 const SHARED_PROJECT_ID_STORAGE_KEY = 'grist.selected-project-id';
+const REFERENCE_DATA_CHANGE_STORAGE_KEY = 'grist.references-data-change';
 let _projectsData = []; // [{id, number, name}]
+
+function emitReferenceDataChangeSignal() {
+  try {
+    localStorage.setItem(
+      REFERENCE_DATA_CHANGE_STORAGE_KEY,
+      JSON.stringify({ at: Date.now(), source: 'reference2', nonce: Math.random() })
+    );
+  } catch (_error) {
+    // localStorage peut etre indisponible dans certains contextes embarques.
+  }
+}
 
 function readSharedProjectSelection() {
   try {
@@ -152,7 +164,17 @@ function parseNumeroForStorage(v) {
             }
             return a;
           });
-          return _apply(fixed);
+          const referencesChanged = fixed.some(a =>
+            Array.isArray(a) &&
+            String(a[1] || '').trim().toLowerCase() === 'references' &&
+            ['AddRecord', 'UpdateRecord', 'RemoveRecord'].includes(String(a[0] || ''))
+          );
+          return Promise.resolve(_apply(fixed)).then(result => {
+            if (referencesChanged) {
+              emitReferenceDataChangeSignal();
+            }
+            return result;
+          });
         };
       }
     } catch (e) { }
@@ -1271,21 +1293,111 @@ function getReferenceRetardCalendarMs(date) {
   return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
-function computeReferenceRetardDays(recuValue, dateLimiteValue) {
+function computeReferenceRetardDays(recuValue, dateLimiteValue, currentDateValue = new Date()) {
   const recuDate = parseReferenceRetardCalendarDate(recuValue);
   const dateLimite = parseReferenceRetardCalendarDate(dateLimiteValue);
+  const currentDate = parseReferenceRetardCalendarDate(currentDateValue);
 
-  if (isEmptyReferenceRetardDate(recuDate) || isEmptyReferenceRetardDate(dateLimite)) {
+  if (isEmptyReferenceRetardDate(dateLimite)) {
     return null;
   }
 
-  const recuMs = getReferenceRetardCalendarMs(recuDate);
+  const comparisonDate = isEmptyReferenceRetardDate(recuDate) ? currentDate : recuDate;
+  if (isEmptyReferenceRetardDate(comparisonDate)) {
+    return null;
+  }
+
+  const recuMs = getReferenceRetardCalendarMs(comparisonDate);
   const limiteMs = getReferenceRetardCalendarMs(dateLimite);
   if (recuMs <= limiteMs) {
     return null;
   }
 
   return Math.floor((recuMs - limiteMs) / REFERENCE_RETARD_DAY_MS);
+}
+
+let referenceRetardReconcileInFlight = false;
+let referenceRetardReconcilePending = false;
+let referenceRetardReconcileTimer = 0;
+let referenceRetardMidnightTimer = 0;
+let referenceRetardRenderInProgress = false;
+
+function referenceRetardStoredValueMatches(currentValue, expectedValue) {
+  if (expectedValue == null) {
+    return currentValue == null || String(currentValue).trim() === '';
+  }
+
+  const numericValue = Number(currentValue);
+  return Number.isFinite(numericValue) && Math.trunc(numericValue) === expectedValue;
+}
+
+function scheduleReferenceRetardReconciliation(delayMs = 0) {
+  if (referenceRetardReconcileTimer) return;
+  referenceRetardReconcileTimer = window.setTimeout(() => {
+    referenceRetardReconcileTimer = 0;
+    void reconcileReferenceRetards();
+  }, Math.max(0, Number(delayMs) || 0));
+}
+
+function scheduleReferenceRetardMidnightRefresh() {
+  if (referenceRetardMidnightTimer) {
+    window.clearTimeout(referenceRetardMidnightTimer);
+  }
+
+  const now = new Date();
+  const nextMidnight = new Date(now);
+  nextMidnight.setHours(24, 0, 1, 0);
+  referenceRetardMidnightTimer = window.setTimeout(() => {
+    referenceRetardMidnightTimer = 0;
+    scheduleReferenceRetardReconciliation();
+    scheduleReferenceRetardMidnightRefresh();
+  }, Math.max(1000, nextMidnight.getTime() - now.getTime()));
+}
+
+async function reconcileReferenceRetards() {
+  if (referenceRetardReconcileInFlight) {
+    referenceRetardReconcilePending = true;
+    return;
+  }
+
+  referenceRetardReconcileInFlight = true;
+  try {
+    const currentRecords = Array.isArray(records) ? records : [];
+    const today = new Date();
+    const actions = [];
+
+    currentRecords.forEach(record => {
+      const recordId = Number(record?.id);
+      if (!Number.isInteger(recordId) || recordId <= 0) return;
+
+      const nextRetard = computeReferenceRetardDays(record?.Recu, record?.DateLimite, today);
+      if (referenceRetardStoredValueMatches(record?.Retard, nextRetard)) return;
+
+      record.Retard = nextRetard;
+      actions.push(['UpdateRecord', 'References', recordId, { Retard: nextRetard }]);
+    });
+
+    if (!actions.length) return;
+
+    if (selectedFirstValue && selectedSecondValue) {
+      referenceRetardRenderInProgress = true;
+      try {
+        populateTable();
+      } finally {
+        referenceRetardRenderInProgress = false;
+      }
+    }
+
+    await grist.docApi.applyUserActions(actions);
+  } catch (error) {
+    console.error('Erreur synchronisation References.Retard :', error);
+  } finally {
+    referenceRetardReconcileInFlight = false;
+    if (referenceRetardReconcilePending) {
+      referenceRetardReconcilePending = false;
+      scheduleReferenceRetardReconciliation();
+    }
+  }
 }
 
 function withComputedReferenceRetard(fields) {
@@ -2443,6 +2555,7 @@ function setupUnifiedAddDocumentsUi() {
 grist.ready();
 setupUnifiedAddDocumentsUi();
 renderUnifiedPendingDocuments();
+scheduleReferenceRetardMidnightRefresh();
 
 // Variable globale pour stocker les enregistrements de la table "Team"
 let teamRecords = [];
@@ -2478,6 +2591,7 @@ async function refreshProjectsDropdownFromProjets() {
 // Fonction pour peupler la première liste déroulante avec des valeurs uniques de la première colonne
 window.addEventListener('pageshow', () => {
   refreshProjectsDropdownFromProjets();
+  scheduleReferenceRetardReconciliation();
 });
 
 window.addEventListener('focus', () => {
@@ -2485,6 +2599,13 @@ window.addEventListener('focus', () => {
   const savedProject = readSharedProjectSelection();
   if (!dropdown || dropdown.options.length <= 1 || (savedProject && !dropdown.value)) {
     refreshProjectsDropdownFromProjets();
+  }
+  scheduleReferenceRetardReconciliation();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    scheduleReferenceRetardReconciliation();
   }
 });
 
@@ -2694,6 +2815,10 @@ document.getElementById('hideArchivedToggle').addEventListener('change', () => {
 
 // Function to populate the table based on the selected first and second column values
 function populateTable() {
+  if (!referenceRetardRenderInProgress) {
+    scheduleReferenceRetardReconciliation();
+  }
+
   const selections = getCurrentSelections();
   if (!selections) return;
 
@@ -2844,9 +2969,10 @@ function populateTable() {
           }
         });
       } else if (header === 'Retard') {
+        const liveRetardValue = computeReferenceRetardDays(record?.Recu, record?.DateLimite);
         td.classList.add('retard-cell');
-        td.classList.toggle('has-retard', hasPositiveReferenceRetard(value));
-        td.textContent = formatReferenceRetardValue(value);
+        td.classList.toggle('has-retard', hasPositiveReferenceRetard(liveRetardValue));
+        td.textContent = formatReferenceRetardValue(liveRetardValue);
       } else {
         td.textContent = value;
       }
@@ -3255,10 +3381,12 @@ function hideContextMenu() {
 }
 
 // Fetch records from Grist
-grist.onRecords(function (receivedRecords) {
+grist.onRecords(function (receivedRecords, tableId) {
+  if (tableId === 'Team') return;
   console.log("Records received from Grist:", receivedRecords);
 
   records = receivedRecords;
+  scheduleReferenceRetardReconciliation();
   try { scheduleReferencesNumeroCacheRefresh(); } catch (e) { }
 
   if (newTable) {
@@ -5383,6 +5511,7 @@ grist.onRecords(function (receivedRecords, tableId) {
   if (!Array.isArray(receivedRecords)) return;
 
   records = receivedRecords;
+  scheduleReferenceRetardReconciliation();
   const tableBody = document.getElementById('tableBody');
   const tableHeader = document.getElementById('tableHeader');
 
@@ -5470,6 +5599,11 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
     return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
   };
   window.addEventListener('storage', function (event) {
+    if (event.key === REFERENCE_DATA_CHANGE_STORAGE_KEY) {
+      scheduleReferenceRetardReconciliation();
+      return;
+    }
+
     var dropdown = document.getElementById('firstColumnDropdown');
     if (!dropdown) return;
     if (event.key === 'grist.selected-project-id' && event.newValue) {

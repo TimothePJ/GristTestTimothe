@@ -1176,8 +1176,8 @@ body.planning-row-dragging {
 }
 
 #planningTimeline .group-row-grid .cell-retards.has-retard.has-retard-justification {
-  color: #dc2626 !important;
-  text-decoration-color: #dc2626;
+  color: #ea580c !important;
+  text-decoration-color: #ea580c;
 }
 
 .planning-retard-context-menu {

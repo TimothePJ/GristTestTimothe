@@ -16,6 +16,10 @@ let activeRetardJustificationContext = null;
 let retardContextMenuEl = null;
 let retardDialogEl = null;
 let referenceDetailsDialogEl = null;
+let referenceDetailsRefreshInFlight = false;
+let referenceDetailsRefreshPending = false;
+let referenceDetailsLifecycleBound = false;
+let referenceDetailsMidnightTimer = 0;
 let stickyAxisBound = false;
 let stickyAxisRafPending = false;
 let axisLeftFillerEl = null;
@@ -44,6 +48,7 @@ let planningDragAutoScrollTargetEl = null;
 let planningDragAutoScrollLastTs = 0;
 const planningViewportListeners = new Set();
 const planningSelectionListeners = new Set();
+const REFERENCE_DATA_CHANGE_STORAGE_KEY = "grist.references-data-change";
 let lastPlanningViewportEmissionSignature = "";
 let lastPlanningSelectionEmissionSignature = "";
 let pendingProgrammaticPlanningViewportSignature = "";
@@ -1696,6 +1701,11 @@ function ensureReferenceDetailsDialog() {
     dialog.close();
   });
 
+  dialog.addEventListener("close", () => {
+    dialog.dataset.referenceDetailsDirty = "false";
+    referenceDetailsRefreshPending = false;
+  });
+
   document.body.appendChild(dialog);
   referenceDetailsDialogEl = dialog;
   return referenceDetailsDialogEl;
@@ -1763,12 +1773,28 @@ function computeReferenceDetailsDurationWeeks(segmentStartIso = "", dateLimiteVa
   return diffDays / 7;
 }
 
-function computeReferenceDetailsRetardDays(recuValue = "", dateLimiteValue = "") {
+function computeReferenceDetailsRetardDays(
+  recuValue = "",
+  dateLimiteValue = "",
+  currentDateValue = new Date()
+) {
   const recuDate = parseReferenceDetailsIsoDate(recuValue);
   const limitDate = parseReferenceDetailsIsoDate(dateLimiteValue);
-  if (!recuDate || !limitDate) return null;
+  const currentDate = currentDateValue instanceof Date
+    ? currentDateValue
+    : parseReferenceDetailsIsoDate(currentDateValue);
+  const comparisonDate = recuDate || (
+    !(currentDate instanceof Date) || Number.isNaN(currentDate.getTime()) ? null : currentDate
+  );
+  if (!comparisonDate || !limitDate) return null;
 
-  const diffDays = Math.round((recuDate.getTime() - limitDate.getTime()) / REFERENCE_DETAILS_DAY_MS);
+  const comparisonMs = Date.UTC(
+    comparisonDate.getFullYear(),
+    comparisonDate.getMonth(),
+    comparisonDate.getDate()
+  );
+  const limitMs = Date.UTC(limitDate.getFullYear(), limitDate.getMonth(), limitDate.getDate());
+  const diffDays = Math.floor((comparisonMs - limitMs) / REFERENCE_DETAILS_DAY_MS);
   return diffDays > 0 ? diffDays : null;
 }
 
@@ -1792,9 +1818,176 @@ function hasPositiveReferenceDetailsRetard(value) {
   return Number.isFinite(numericValue) && numericValue > 0;
 }
 
+function isReferenceDetailsDialogOpen() {
+  return referenceDetailsDialogEl instanceof HTMLDialogElement && referenceDetailsDialogEl.open;
+}
+
+function isReferenceDetailsDialogDirty(dialog = referenceDetailsDialogEl) {
+  return dialog instanceof HTMLDialogElement && dialog.dataset.referenceDetailsDirty === "true";
+}
+
+function markReferenceDetailsDialogDirty(dialog = referenceDetailsDialogEl) {
+  if (dialog instanceof HTMLDialogElement) {
+    dialog.dataset.referenceDetailsDirty = "true";
+  }
+}
+
+function markReferenceDetailsControlDirty(control, dialog = referenceDetailsDialogEl) {
+  if (control instanceof HTMLInputElement) {
+    control.dataset.referenceDetailsDirty = "true";
+  }
+  markReferenceDetailsDialogDirty(dialog);
+}
+
+function refreshReferenceDetailsRetardCells(dialog = referenceDetailsDialogEl) {
+  if (!(dialog instanceof HTMLDialogElement)) return;
+
+  dialog.querySelectorAll("tbody tr").forEach((row) => {
+    const dateLimite = row.querySelector(".planning-reference-details-table__date-limite");
+    const retardCell = row.querySelector(".planning-reference-details-table__retard");
+    if (!(dateLimite instanceof HTMLInputElement) || !(retardCell instanceof HTMLElement)) return;
+
+    const currentRetardValue = computeReferenceDetailsRetardDays(
+      row.dataset.referenceRecu || "",
+      normalizeReferenceDetailsLimitDateIso(dateLimite.value)
+    );
+    retardCell.textContent = formatReferenceDetailsRetardValue(currentRetardValue);
+    retardCell.classList.toggle(
+      "has-retard",
+      hasPositiveReferenceDetailsRetard(currentRetardValue)
+    );
+  });
+}
+
+function applyReferenceDetailsFreshReceptionData(dialog, data = {}) {
+  if (!(dialog instanceof HTMLDialogElement)) return;
+
+  const referencesById = new Map(
+    (Array.isArray(data.references) ? data.references : [])
+      .map((reference) => [String(reference?.id ?? ""), reference])
+      .filter(([id]) => id)
+  );
+
+  dialog.querySelectorAll("tbody tr").forEach((row) => {
+    const freshReference = referencesById.get(String(row.dataset.referenceId || ""));
+    if (!freshReference) return;
+
+    row.dataset.referenceRecu = String(freshReference.recu || "");
+
+    const bloquant = row.querySelector(".planning-reference-details-table__bloquant");
+    if (
+      bloquant instanceof HTMLInputElement &&
+      bloquant.dataset.referenceDetailsDirty !== "true"
+    ) {
+      bloquant.checked = Boolean(freshReference.bloquant);
+    }
+
+    const duration = row.querySelector(".planning-reference-details-table__duration");
+    const dateLimite = row.querySelector(".planning-reference-details-table__date-limite");
+    const durationIsDirty =
+      duration instanceof HTMLInputElement &&
+      duration.dataset.referenceDetailsDirty === "true";
+    const dateLimiteIsDirty =
+      dateLimite instanceof HTMLInputElement &&
+      dateLimite.dataset.referenceDetailsDirty === "true";
+
+    if (
+      duration instanceof HTMLInputElement &&
+      dateLimite instanceof HTMLInputElement &&
+      !durationIsDirty &&
+      !dateLimiteIsDirty
+    ) {
+      const freshDuration = freshReference.durationWeeks == null
+        ? ""
+        : String(freshReference.durationWeeks);
+      const freshDateLimite = dateLimite.disabled
+        ? ""
+        : normalizeReferenceDetailsLimitDateIso(freshReference.dateLimite);
+      duration.value = freshDuration;
+      dateLimite.value = freshDateLimite;
+      row.dataset.referenceSavedDuration = freshDuration;
+      row.dataset.referenceSavedDateLimite = freshDateLimite;
+    }
+  });
+  refreshReferenceDetailsRetardCells(dialog);
+}
+
+async function refreshOpenReferenceDetailsDialog() {
+  if (
+    !referenceDetailsHandler ||
+    !activeRetardJustificationContext ||
+    !isReferenceDetailsDialogOpen()
+  ) {
+    return;
+  }
+
+  if (referenceDetailsRefreshInFlight) {
+    referenceDetailsRefreshPending = true;
+    return;
+  }
+
+  referenceDetailsRefreshInFlight = true;
+  try {
+    const context = { ...activeRetardJustificationContext };
+    const data = await referenceDetailsHandler({ action: "load", context });
+    const dialog = referenceDetailsDialogEl;
+    if (!(dialog instanceof HTMLDialogElement) || !dialog.open) return;
+
+    if (isReferenceDetailsDialogDirty(dialog)) {
+      applyReferenceDetailsFreshReceptionData(dialog, data);
+    } else {
+      renderReferenceDetailsBody(dialog, data);
+    }
+  } catch (error) {
+    console.error("Erreur actualisation détails références :", error);
+  } finally {
+    referenceDetailsRefreshInFlight = false;
+    if (referenceDetailsRefreshPending) {
+      referenceDetailsRefreshPending = false;
+      void refreshOpenReferenceDetailsDialog();
+    }
+  }
+}
+
+function scheduleReferenceDetailsMidnightRefresh() {
+  if (referenceDetailsMidnightTimer) {
+    window.clearTimeout(referenceDetailsMidnightTimer);
+  }
+
+  const now = new Date();
+  const nextMidnight = new Date(now);
+  nextMidnight.setHours(24, 0, 1, 0);
+  referenceDetailsMidnightTimer = window.setTimeout(() => {
+    referenceDetailsMidnightTimer = 0;
+    void refreshOpenReferenceDetailsDialog();
+    scheduleReferenceDetailsMidnightRefresh();
+  }, Math.max(1000, nextMidnight.getTime() - now.getTime()));
+}
+
+function bindReferenceDetailsLifecycleRefresh() {
+  if (referenceDetailsLifecycleBound || typeof window === "undefined") return;
+  referenceDetailsLifecycleBound = true;
+
+  window.addEventListener("storage", (event) => {
+    if (event.key === REFERENCE_DATA_CHANGE_STORAGE_KEY) {
+      void refreshOpenReferenceDetailsDialog();
+    }
+  });
+  window.addEventListener("focus", () => {
+    void refreshOpenReferenceDetailsDialog();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      void refreshOpenReferenceDetailsDialog();
+    }
+  });
+  scheduleReferenceDetailsMidnightRefresh();
+}
+
 function renderReferenceDetailsBody(dialog, data = {}) {
   const body = dialog.querySelector(".planning-reference-details-dialog__body");
   if (!(body instanceof HTMLElement)) return;
+  dialog.dataset.referenceDetailsDirty = "false";
 
   const references = Array.isArray(data.references) ? data.references : [];
   if (!references.length) {
@@ -1825,6 +2018,7 @@ function renderReferenceDetailsBody(dialog, data = {}) {
   references.forEach((reference) => {
     const tr = document.createElement("tr");
     tr.dataset.referenceId = String(reference?.id ?? "");
+    tr.dataset.referenceRecu = String(reference?.recu || "");
 
     const emetteur = document.createElement("td");
     emetteur.textContent = String(reference?.emetteur ?? "");
@@ -1864,10 +2058,15 @@ function renderReferenceDetailsBody(dialog, data = {}) {
       : "";
     dateLimite.value = savedDateLimiteIso;
     dateLimiteCell.append(dateLimite);
+    tr.dataset.referenceSavedDuration = savedDurationValue;
+    tr.dataset.referenceSavedDateLimite = savedDateLimiteIso;
 
     const retardCell = document.createElement("td");
     retardCell.className = "planning-reference-details-table__retard";
-    const savedRetardValue = computeReferenceDetailsRetardDays(reference?.recu, savedDateLimiteIso);
+    const savedRetardValue = computeReferenceDetailsRetardDays(
+      tr.dataset.referenceRecu,
+      savedDateLimiteIso
+    );
     retardCell.textContent = formatReferenceDetailsRetardValue(savedRetardValue);
     retardCell.classList.toggle("has-retard", hasPositiveReferenceDetailsRetard(savedRetardValue));
 
@@ -1889,9 +2088,12 @@ function renderReferenceDetailsBody(dialog, data = {}) {
         );
       const invalidDate = hasDate && (!hasSegmentStartIso || durationFromDate == null);
       const changed =
-        durationText !== savedDurationValue ||
-        currentDateIso !== savedDateLimiteIso;
-      const currentRetardValue = computeReferenceDetailsRetardDays(reference?.recu, currentDateIso);
+        durationText !== String(tr.dataset.referenceSavedDuration || "") ||
+        currentDateIso !== String(tr.dataset.referenceSavedDateLimite || "");
+      const currentRetardValue = computeReferenceDetailsRetardDays(
+        tr.dataset.referenceRecu,
+        currentDateIso
+      );
 
       duration.classList.toggle("is-preview", changed && !invalidDuration && !invalidDate);
       dateLimite.classList.toggle(
@@ -1934,9 +2136,24 @@ function renderReferenceDetailsBody(dialog, data = {}) {
       updateReferenceDetailsPreviewState();
     };
 
-    duration.addEventListener("input", updateDateLimitePreview);
-    dateLimite.addEventListener("input", updateDurationPreview);
-    dateLimite.addEventListener("change", updateDurationPreview);
+    bloquant.addEventListener("change", () => {
+      markReferenceDetailsControlDirty(bloquant, dialog);
+    });
+    duration.addEventListener("input", () => {
+      markReferenceDetailsControlDirty(duration, dialog);
+      markReferenceDetailsControlDirty(dateLimite, dialog);
+      updateDateLimitePreview();
+    });
+    dateLimite.addEventListener("input", () => {
+      markReferenceDetailsControlDirty(dateLimite, dialog);
+      markReferenceDetailsControlDirty(duration, dialog);
+      updateDurationPreview();
+    });
+    dateLimite.addEventListener("change", () => {
+      markReferenceDetailsControlDirty(dateLimite, dialog);
+      markReferenceDetailsControlDirty(duration, dialog);
+      updateDurationPreview();
+    });
     updateReferenceDetailsPreviewState();
 
     tr.append(emetteur, referenceCell, bloquantCell, durationCell, dateLimiteCell, retardCell);
@@ -1957,7 +2174,11 @@ function renderReferenceDetailsBody(dialog, data = {}) {
 
   if (selectAllCb) {
     selectAllCb.addEventListener("change", () => {
-      bloquantCbs.forEach((cb) => { cb.checked = selectAllCb.checked; });
+      markReferenceDetailsDialogDirty(dialog);
+      bloquantCbs.forEach((cb) => {
+        cb.checked = selectAllCb.checked;
+        markReferenceDetailsControlDirty(cb, dialog);
+      });
     });
     syncSelectAll();
     bloquantCbs.forEach((cb) => cb.addEventListener("change", syncSelectAll));
@@ -1968,6 +2189,7 @@ async function openReferenceDetailsDialog() {
   if (!referenceDetailsHandler || !activeRetardJustificationContext) return;
 
   const dialog = ensureReferenceDetailsDialog();
+  dialog.dataset.referenceDetailsDirty = "false";
   const lineEl = dialog.querySelector(".planning-reference-details-dialog__line");
   const body = dialog.querySelector(".planning-reference-details-dialog__body");
   const saveButton = dialog.querySelector(".planning-reference-details-dialog__save");
@@ -4927,6 +5149,9 @@ export function setPlanningRetardJustificationHandler(handler) {
 
 export function setPlanningReferenceDetailsHandler(handler) {
   referenceDetailsHandler = typeof handler === "function" ? handler : null;
+  if (referenceDetailsHandler) {
+    bindReferenceDetailsLifecycleRefresh();
+  }
 }
 
 export function setPlanningMsProjectDropHandler(handler) {

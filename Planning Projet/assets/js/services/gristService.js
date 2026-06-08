@@ -3,6 +3,7 @@ import { normalizePlanningDocumentType } from "../../../../gestion-depenses2/ass
 
 const REFERENCES_TABLE_NAME = "References";
 const REFERENCE_EMPTY_DATE_ISO = "1900-01-01";
+const REFERENCE_DATA_CHANGE_STORAGE_KEY = "grist.references-data-change";
 const DAY_MS = 86400000;
 const LISTEPLAN_TABLE_CANDIDATES = [
   "ListePlan_NDC_COF",
@@ -13,6 +14,17 @@ const LISTEPLAN_TABLE_CANDIDATES = [
 // Cache léger pour le dialog "Détails" — évite de re-fetcher les tables à chaque clic
 let _planningRowsCache = null;  // tableau de lignes Planning_Projet
 let _refsTableCache = null;     // tableau de lignes References
+
+function emitReferenceDataChangeSignal() {
+  try {
+    window.localStorage?.setItem(
+      REFERENCE_DATA_CHANGE_STORAGE_KEY,
+      JSON.stringify({ at: Date.now(), source: "planning-projet", nonce: Math.random() })
+    );
+  } catch (_error) {
+    // localStorage can be unavailable in embedded contexts.
+  }
+}
 
 function getGrist() {
   try {
@@ -671,21 +683,78 @@ function getReferenceCalendarMs(date) {
   return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
-function computeReferenceRetardDays(recuValue, dateLimiteValue) {
+function computeReferenceRetardDays(recuValue, dateLimiteValue, currentDateValue = new Date()) {
   const recuDate = parseCalendarDate(recuValue);
   const dateLimite = parseCalendarDate(dateLimiteValue);
+  const currentDate = currentDateValue instanceof Date
+    ? new Date(
+        currentDateValue.getFullYear(),
+        currentDateValue.getMonth(),
+        currentDateValue.getDate()
+      )
+    : parseCalendarDate(currentDateValue);
 
-  if (isEmptyReferenceDate(recuDate) || isEmptyReferenceDate(dateLimite)) {
+  if (isEmptyReferenceDate(dateLimite)) {
     return null;
   }
 
-  const recuMs = getReferenceCalendarMs(recuDate);
+  const comparisonDate = isEmptyReferenceDate(recuDate) ? currentDate : recuDate;
+  if (isEmptyReferenceDate(comparisonDate)) {
+    return null;
+  }
+
+  const recuMs = getReferenceCalendarMs(comparisonDate);
   const limiteMs = getReferenceCalendarMs(dateLimite);
   if (recuMs <= limiteMs) {
     return null;
   }
 
   return Math.floor((recuMs - limiteMs) / DAY_MS);
+}
+
+function referenceRetardStoredValueMatches(currentValue, expectedValue) {
+  if (expectedValue == null) {
+    return currentValue == null || toText(currentValue) === "";
+  }
+
+  const numericValue = Number(currentValue);
+  return Number.isFinite(numericValue) && Math.trunc(numericValue) === expectedValue;
+}
+
+async function syncReferenceRetardRows(referenceRows = [], currentDateValue = new Date()) {
+  const actions = [];
+
+  (Array.isArray(referenceRows) ? referenceRows : []).forEach((referenceRow) => {
+    const referenceId = Number(referenceRow?.id);
+    if (!Number.isInteger(referenceId) || referenceId <= 0) return;
+
+    const nextRetard = computeReferenceRetardDays(
+      referenceRow?.Recu,
+      referenceRow?.DateLimite,
+      currentDateValue
+    );
+    if (referenceRetardStoredValueMatches(referenceRow?.Retard, nextRetard)) return;
+
+    referenceRow.Retard = nextRetard;
+    actions.push([
+      "UpdateRecord",
+      REFERENCES_TABLE_NAME,
+      referenceId,
+      { Retard: nextRetard },
+    ]);
+  });
+
+  if (!actions.length) return 0;
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  await grist.docApi.applyUserActions(actions);
+  _refsTableCache = null;
+  emitReferenceDataChangeSignal();
+  return actions.length;
 }
 
 function parseReferenceDurationLimit(value) {
@@ -885,6 +954,7 @@ async function applyReferenceDateLimiteSyncActions(actions = []) {
   await grist.docApi.applyUserActions(dedupedActions);
   _planningRowsCache = null;
   _refsTableCache = null;
+  emitReferenceDataChangeSignal();
   return dedupedActions.length;
 }
 
@@ -2786,9 +2856,10 @@ export async function fetchPlanningReferenceDetails(rowId) {
   const { row, columns } = await fetchPlanningRowById(rowId);
   const startDate = getPlanningSegmentStartDate(row, columns);
   const startIso = formatIsoDate(startDate);
-  if (!_refsTableCache) _refsTableCache = await fetchTableRows(REFERENCES_TABLE_NAME);
+  _refsTableCache = await fetchTableRows(REFERENCES_TABLE_NAME);
   const referenceRows = _refsTableCache;
   const linkedRows = findLinkedReferenceRowsForPlanningRow(row, referenceRows, columns);
+  await syncReferenceRetardRows(linkedRows);
 
   return {
     planningRowId: Number(rowId),
@@ -2944,6 +3015,7 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
   // Invalider le cache après écriture — prochain "Détails" rechargera des données fraîches
   _planningRowsCache = null;
   _refsTableCache = null;
+  emitReferenceDataChangeSignal();
   return { updatedCount: actions.length };
 }
 
