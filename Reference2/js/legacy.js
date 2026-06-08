@@ -2029,6 +2029,7 @@ function openReferenceDocsBuilderModal() {
   const modal = document.getElementById('referenceDocsBuilderModal');
   if (!modal) return;
   resetReferenceDocsBuilderFields();
+  void refreshReferenceTypeSuggestionLists(selectedFirstValue);
   modal.hidden = false;
 }
 
@@ -2339,6 +2340,13 @@ function setupUnifiedAddDocumentsUi() {
     patternTypeInput,
   ].forEach((inputElement) => {
     if (!inputElement) return;
+    inputElement.addEventListener('click', () => {
+      try {
+        inputElement.showPicker?.();
+      } catch (_error) {
+        // Le navigateur affichera naturellement la datalist.
+      }
+    });
     ['change', 'blur'].forEach((eventName) => {
       inputElement.addEventListener(eventName, () => {
         normalizeTypeDocumentInput(inputElement);
@@ -4001,7 +4009,7 @@ async function resetAddDocumentDialog() {
   document.getElementById('defaultDatelimite').value = '';
   await refreshReferenceTypeSuggestionLists(selectedFirstValue);
   const typeSel = document.getElementById('documentType');
-  if (typeSel) typeSel.value = getReferenceDocumentBuilderDefaultType();
+  if (typeSel) typeSel.value = '';
 
   // Récupérer le projet sélectionné
   const selectedProject = document.getElementById('firstColumnDropdown').value;
@@ -4542,7 +4550,7 @@ function resetAddMultipleDocumentDialog() {
   });
   refreshReferenceTypeSuggestionLists(selectedFirstValue);
   const typeSel = document.getElementById('multipleDocumentType');
-  if (typeSel) typeSel.value = getReferenceDocumentBuilderDefaultType();
+  if (typeSel) typeSel.value = '';
   const zoneInput = document.getElementById('multipleDocumentZone');
   if (zoneInput) zoneInput.value = '';
 

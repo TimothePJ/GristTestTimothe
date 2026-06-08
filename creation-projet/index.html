@@ -89,14 +89,8 @@
                         </div>
                         <div class="form-group">
                             <label for="manual-doc-type">Type de document :</label>
-                            <select id="manual-doc-type" required>
-                                <option value="" selected>Choisir un type</option>
-                                <option value="COFFRAGE">COFFRAGE</option>
-                                <option value="ARMATURES">ARMATURES</option>
-                                <option value="COUPES">COUPES</option>
-                                <option value="D&Eacute;MOLITION">D&Eacute;MOLITION</option>
-                                <option value="NDC">NDC</option>
-                            </select>
+                            <input type="text" id="manual-doc-type" list="manual-doc-type-list" placeholder="Saisir ou sélectionner un type" autocomplete="off" required>
+                            <datalist id="manual-doc-type-list"></datalist>
                         </div>
                         <div class="form-group">
                             <label for="manual-doc-name">Nom du document :</label>
@@ -116,14 +110,8 @@
                         </div>
                         <div class="form-group">
                             <label for="pattern-doc-type">Type de document :</label>
-                            <select id="pattern-doc-type" required>
-                                <option value="" selected>Choisir un type</option>
-                                <option value="COFFRAGE">COFFRAGE</option>
-                                <option value="ARMATURES">ARMATURES</option>
-                                <option value="COUPES">COUPES</option>
-                                <option value="D&Eacute;MOLITION">D&Eacute;MOLITION</option>
-                                <option value="NDC">NDC</option>
-                            </select>
+                            <input type="text" id="pattern-doc-type" list="pattern-doc-type-list" placeholder="Saisir ou sélectionner un type" autocomplete="off" required>
+                            <datalist id="pattern-doc-type-list"></datalist>
                         </div>
                         <div class="form-group">
                             <label for="pattern-prefix">Préfixe :</label>

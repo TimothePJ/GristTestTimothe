@@ -117,6 +117,45 @@
     return t.includes('COFFRAGE') || t.includes('COF');
   }
 
+  function collectPendingDocumentTypes() {
+    return pendingDocs.map((doc) => normalizeTypeDocument(doc?.type)).filter(Boolean);
+  }
+
+  function populateDocumentTypeSuggestionLists(types) {
+    ['lp-manual-type-list', 'lp-pattern-type-list'].forEach((listId) => {
+      const datalist = document.getElementById(listId);
+      if (!(datalist instanceof HTMLDataListElement)) return;
+      datalist.innerHTML = '';
+      (types || []).forEach((type) => {
+        const option = document.createElement('option');
+        option.value = type;
+        datalist.appendChild(option);
+      });
+    });
+  }
+
+  async function refreshProjectTypeSuggestionLists(projectName = getSelectedProject()) {
+    let table = projetsTableCache;
+    if (!table) {
+      table = await refreshProjectsTableCache();
+    }
+
+    const seen = new Set();
+    const types = [];
+    [
+      ...DEFAULT_DOC_TYPES,
+      ...collectProjectCustomDocumentTypes(projectName, table),
+      ...collectPendingDocumentTypes(),
+    ].forEach((type) => {
+      const normalized = normalizeTypeDocument(type);
+      if (!normalized || seen.has(normalized)) return;
+      seen.add(normalized);
+      types.push(normalized);
+    });
+    if (_norm(projectName) !== _norm(getSelectedProject())) return;
+    populateDocumentTypeSuggestionLists(types);
+  }
+
   // ============================================================
   //  ZONES (cache asynchrone chargé à l'ouverture du dialog)
   // ============================================================
@@ -308,6 +347,7 @@
     });
     renderPendingDocs();
     refreshZoneLists();
+    void refreshProjectTypeSuggestionLists();
   }
 
   function renderPendingDocs() {
@@ -477,6 +517,7 @@
     const modal = document.getElementById('lp-docs-builder-modal');
     if (!modal) return;
     resetBuilderFields();
+    void refreshProjectTypeSuggestionLists();
     modal.hidden = false;
   }
 
@@ -568,6 +609,9 @@
   function prefetchForProject(projectName) {
     if (!projectName) return;
     fetchAndCacheProjectZones(projectName).catch(() => {});
+    refreshProjectsTableCache()
+      .then(() => refreshProjectTypeSuggestionLists(projectName))
+      .catch(() => {});
     if (cachedProjectForEmitters !== projectName) {
       cachedProjectForEmitters = projectName;
       cachedEmittersData = null;
@@ -640,6 +684,9 @@
     Promise.all([
       fetchAndCacheProjectZones(project).then(() => refreshZoneLists()).catch(() => {}),
       populateEmetteurDropdownForDialog().catch(() => {}),
+      refreshProjectsTableCache()
+        .then(() => refreshProjectTypeSuggestionLists(project))
+        .catch(() => {}),
     ]);
   }
 
@@ -1148,6 +1195,24 @@
 
     // Bouton ouvrir builder
     document.getElementById('lp-open-builder-btn')?.addEventListener('click', openBuilderModal);
+
+    ['lp-manual-type', 'lp-pattern-type'].forEach((id) => {
+      const input = document.getElementById(id);
+      if (!(input instanceof HTMLInputElement)) return;
+      input.addEventListener('click', () => {
+        try {
+          input.showPicker?.();
+        } catch (_error) {
+          // Le navigateur affichera naturellement la datalist.
+        }
+      });
+      ['change', 'blur'].forEach((eventName) => {
+        input.addEventListener(eventName, () => {
+          input.value = normalizeTypeDocument(input.value);
+          if (id === 'lp-pattern-type') updatePatternPreview();
+        });
+      });
+    });
 
     // Bouton fermer builder
     document.getElementById('lp-close-builder-btn')?.addEventListener('click', closeBuilderModal);

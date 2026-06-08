@@ -35,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
         documents: [],
         emitters: []
     };
+    let projectTypeDocSuggestions = [];
 
     function cleanProjectName(name) {
         return String(name ?? "").replace(/\s+$/g, "");
@@ -364,7 +365,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function refreshDocumentTypeSuggestionLists() {
-        const types = collectAvailableDocumentTypes(customDocuments.map((doc) => doc?.type));
+        const types = collectAvailableDocumentTypes([
+            ...projectTypeDocSuggestions,
+            ...customDocuments.map((doc) => doc?.type)
+        ]);
         ['manual-doc-type-list', 'pattern-doc-type-list'].forEach((listId) => {
             const datalist = document.getElementById(listId);
             if (!(datalist instanceof HTMLDataListElement)) return;
@@ -375,6 +379,40 @@ document.addEventListener('DOMContentLoaded', () => {
                 datalist.appendChild(option);
             });
         });
+    }
+
+    async function refreshProjectTypeDocSuggestions() {
+        try {
+            const projetsTable = await grist.docApi.fetchTable('Projets');
+            const names = getTableColumnArray(projetsTable, 'Nom_de_projet');
+            const numbers = getTableColumnArray(projetsTable, 'Numero_de_projet');
+            const typeDocs = getTableColumnArray(projetsTable, 'TypeDoc');
+            const projectName = normalizeText(projectData.name).toLocaleLowerCase('fr');
+            const projectNumber = normalizeText(projectData.number).toLocaleLowerCase('fr');
+            const seen = new Set();
+            const nextTypes = [];
+
+            for (let index = 0; index < Math.max(names.length, numbers.length, typeDocs.length); index += 1) {
+                const nameMatches =
+                    projectName &&
+                    normalizeText(names[index]).toLocaleLowerCase('fr') === projectName;
+                const numberMatches =
+                    projectNumber &&
+                    normalizeText(numbers[index]).toLocaleLowerCase('fr') === projectNumber;
+                if (!nameMatches && !numberMatches) continue;
+
+                parseProjectTypeDocValue(typeDocs[index]).forEach((type) => {
+                    if (seen.has(type)) return;
+                    seen.add(type);
+                    nextTypes.push(type);
+                });
+            }
+
+            projectTypeDocSuggestions = nextTypes;
+        } catch (_error) {
+            projectTypeDocSuggestions = [];
+        }
+        refreshDocumentTypeSuggestionLists();
     }
 
     function normalizeDocumentTypeInput(inputElement) {
@@ -1433,7 +1471,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <h3>Documents</h3>
             ${docsHtml}
 
-            <h3>Émetteurs</h3>
+            <h3>Données d'entrée</h3>
             <p>${emittersHtml}</p>
         `;
     }
@@ -2101,6 +2139,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         [manualTypeInput, patternTypeInput].forEach((inputElement) => {
             if (!inputElement) return;
+            inputElement.addEventListener('click', () => {
+                try {
+                    inputElement.showPicker?.();
+                } catch (_error) {
+                    // Le navigateur affichera naturellement la datalist.
+                }
+            });
             ['change', 'blur'].forEach((eventName) => {
                 inputElement.addEventListener(eventName, () => {
                     normalizeDocumentTypeInput(inputElement);
@@ -2116,8 +2161,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         openBtn.addEventListener('click', () => {
+            manualTypeInput.value = '';
+            patternTypeInput.value = '';
             refreshDocumentZoneSuggestionLists();
             refreshDocumentTypeSuggestionLists();
+            void refreshProjectTypeDocSuggestions();
             modal.style.display = 'flex';
         });
 

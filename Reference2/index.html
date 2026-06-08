@@ -153,14 +153,8 @@
       <datalist id="documentZoneList"></datalist>
 
       <label for="documentType">Type de document :</label>
-      <select id="documentType" name="documentType" required>
-        <option value="" selected>Choisir un type</option>
-        <option value="COFFRAGE">COFFRAGE</option>
-        <option value="ARMATURES">ARMATURES</option>
-        <option value="COUPES">COUPES</option>
-        <option value="D&Eacute;MOLITION">D&Eacute;MOLITION</option>
-        <option value="NDC">NDC</option>
-      </select>
+      <input type="text" id="documentType" name="documentType" list="documentTypeList" placeholder="Saisir ou sélectionner un type" autocomplete="off" required>
+      <datalist id="documentTypeList"></datalist>
 
       <label for="defaultDatelimite">Date Limite réception données par défaut:</label>
       <input type="date" id="defaultDatelimite" name="defaultDatelimite">
@@ -207,14 +201,8 @@
       <datalist id="multipleDocumentZoneList"></datalist>
 
       <label for="multipleDocumentType">Type de document :</label>
-      <select id="multipleDocumentType" required>
-        <option value="" selected>Choisir un type</option>
-        <option value="COFFRAGE">COFFRAGE</option>
-        <option value="ARMATURES">ARMATURES</option>
-        <option value="COUPES">COUPES</option>
-        <option value="D&Eacute;MOLITION">D&Eacute;MOLITION</option>
-        <option value="NDC">NDC</option>
-      </select>
+      <input type="text" id="multipleDocumentType" list="multipleDocumentTypeList" placeholder="Saisir ou sélectionner un type" autocomplete="off" required>
+      <datalist id="multipleDocumentTypeList"></datalist>
 
       <label for="multipleDefaultDatelimite">Date Limite réception données par défaut:</label>
       <input type="date" id="multipleDefaultDatelimite" name="defaultDatelimite">
@@ -277,14 +265,8 @@
 
             <div class="reference-form-group form-group">
               <label for="referenceManualDocType">Type de document :</label>
-              <select id="referenceManualDocType">
-                <option value="" selected>Choisir un type</option>
-                <option value="COFFRAGE">COFFRAGE</option>
-                <option value="ARMATURES">ARMATURES</option>
-                <option value="COUPES">COUPES</option>
-                <option value="D&Eacute;MOLITION">D&Eacute;MOLITION</option>
-                <option value="NDC">NDC</option>
-              </select>
+              <input type="text" id="referenceManualDocType" list="referenceManualDocTypeList" placeholder="Saisir ou sélectionner un type" autocomplete="off">
+              <datalist id="referenceManualDocTypeList"></datalist>
             </div>
 
             <div class="reference-form-group form-group">
@@ -309,14 +291,8 @@
 
             <div class="reference-form-group form-group">
               <label for="referencePatternDocType">Type de document :</label>
-              <select id="referencePatternDocType">
-                <option value="" selected>Choisir un type</option>
-                <option value="COFFRAGE">COFFRAGE</option>
-                <option value="ARMATURES">ARMATURES</option>
-                <option value="COUPES">COUPES</option>
-                <option value="D&Eacute;MOLITION">D&Eacute;MOLITION</option>
-                <option value="NDC">NDC</option>
-              </select>
+              <input type="text" id="referencePatternDocType" list="referencePatternDocTypeList" placeholder="Saisir ou sélectionner un type" autocomplete="off">
+              <datalist id="referencePatternDocTypeList"></datalist>
             </div>
 
             <div class="reference-form-group form-group">

@@ -233,14 +233,8 @@
             </div>
             <div class="lp-form-group">
               <label for="lp-manual-type">Type de document :</label>
-              <select id="lp-manual-type">
-                <option value="" selected>Choisir un type</option>
-                <option value="COFFRAGE">COFFRAGE</option>
-                <option value="ARMATURES">ARMATURES</option>
-                <option value="COUPES">COUPES</option>
-                <option value="DÉMOLITION">DÉMOLITION</option>
-                <option value="NDC">NDC</option>
-              </select>
+              <input type="text" id="lp-manual-type" list="lp-manual-type-list" placeholder="Saisir ou sélectionner un type" autocomplete="off">
+              <datalist id="lp-manual-type-list"></datalist>
             </div>
             <div class="lp-form-group">
               <label for="lp-manual-name">Nom du document :</label>
@@ -262,14 +256,8 @@
             </div>
             <div class="lp-form-group">
               <label for="lp-pattern-type">Type de document :</label>
-              <select id="lp-pattern-type">
-                <option value="" selected>Choisir un type</option>
-                <option value="COFFRAGE">COFFRAGE</option>
-                <option value="ARMATURES">ARMATURES</option>
-                <option value="COUPES">COUPES</option>
-                <option value="DÉMOLITION">DÉMOLITION</option>
-                <option value="NDC">NDC</option>
-              </select>
+              <input type="text" id="lp-pattern-type" list="lp-pattern-type-list" placeholder="Saisir ou sélectionner un type" autocomplete="off">
+              <datalist id="lp-pattern-type-list"></datalist>
             </div>
             <div class="lp-form-group">
               <label for="lp-pattern-prefix">Préfixe :</label>
