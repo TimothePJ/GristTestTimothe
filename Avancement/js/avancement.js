@@ -216,7 +216,7 @@ async function refreshProjectDropdownFromProjectsTable() {
     _projectsData.forEach((p) => {
       const option = document.createElement('option');
       option.value = p.name;
-      option.textContent = p.number ? `${p.number} - ${p.name}` : p.name;
+      option.textContent = `${p.number} - ${p.name}`;
       option.dataset.projectId = String(p.id);
       elements.projectDropdown.appendChild(option);
     });

@@ -466,6 +466,8 @@ function tableToRows(table) {
 
 // Cache : normalizedKey → Projets.id (pour écriture de grist.selected-project-id)
 const _projectIdByNormalizedKey = new Map();
+// Cache : canonicalKey → libellé affiché "Numero - Nom"
+const _projectDisplayByKey = new Map();
 
 async function fetchProjectKeysFromGrist() {
   try {
@@ -490,6 +492,8 @@ async function fetchProjectKeysFromGrist() {
           if (Number.isInteger(id) && id > 0) {
             _projectIdByNormalizedKey.set(normalizeProjectSelectionKey(canonicalProjectKey), id);
           }
+          // Mémoriser le libellé d'affichage "Numero - Nom"
+          _projectDisplayByKey.set(canonicalProjectKey, `${projectNumber} - ${projectName}`);
         }
         return canonicalProjectKey;
       })
@@ -541,7 +545,7 @@ async function applyRestoredSharedProject(projectKeys = []) {
       savedProjectKey = findAvailableProjectKey(freshKeys, requestedSavedProjectKey);
       if (savedProjectKey && freshKeys.length) {
         const mergedKeys = mergeProjectKeys(projectKeys, freshKeys);
-        renderProjectOptions(mergedKeys, savedProjectKey);
+        renderProjectOptions(mergedKeys, savedProjectKey, _projectDisplayByKey);
       }
     } catch (_e) {
       // Ignorer silencieusement
@@ -585,7 +589,7 @@ async function refreshProjectKeysAndApplySharedSelection() {
     if (freshKeys.length) {
       const selectedFreshProjectKey =
         findAvailableProjectKey(freshKeys, state.activeProjectKey) || state.activeProjectKey;
-      renderProjectOptions(freshKeys, selectedFreshProjectKey);
+      renderProjectOptions(freshKeys, selectedFreshProjectKey, _projectDisplayByKey);
     }
     await applyRestoredSharedProject(freshKeys.length ? freshKeys : []);
   } catch (err) {
@@ -632,7 +636,7 @@ export async function bootstrapHubApp() {
       planningProjects,
       getRequestedSharedProjectKey()
     );
-    renderProjectOptions(planningProjects, initiallySelectedProjectKey);
+    renderProjectOptions(planningProjects, initiallySelectedProjectKey, _projectDisplayByKey);
     setProjectContentVisibility(Boolean(initiallySelectedProjectKey));
     if (initiallySelectedProjectKey) {
       state.requestedProjectKey = initiallySelectedProjectKey;

@@ -58,7 +58,7 @@ export function renderProjectOptions(projectSelect, projects, selectedProjectId)
     projectSelect,
     (projects || []).map((project) => ({
       value: project.id,
-      label: `${project.projectNumber} - ${project.name}`.trim(),
+      label: `${project.projectNumber} - ${project.name}`,
     })),
     {
       placeholder: "Choisir un projet",

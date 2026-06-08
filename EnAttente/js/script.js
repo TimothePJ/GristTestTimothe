@@ -64,7 +64,7 @@ function populateFirstColumnDropdown(projects) {
     const opt = document.createElement("option");
     opt.value = v;
     if (typeof p === "object" && p.id) {
-      opt.textContent = p.number ? `${p.number} - ${p.name}` : p.name;
+      opt.textContent = `${p.number} - ${p.name}`;
       opt.dataset.projectId = String(p.id);
     } else {
       opt.textContent = v;

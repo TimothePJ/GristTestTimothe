@@ -82,7 +82,7 @@ export function initProjectSelector(projectOptions, { onChange } = {}) {
   projectObjects.forEach((p) => {
     const option = document.createElement("option");
     option.value = p.name;
-    option.textContent = p.number ? `${p.number} - ${p.name}` : p.name;
+    option.textContent = `${p.number} - ${p.name}`;
     if (p.id) option.dataset.projectId = String(p.id);
     projectSelect.appendChild(option);
   });

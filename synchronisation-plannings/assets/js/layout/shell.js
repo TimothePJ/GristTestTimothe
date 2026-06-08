@@ -302,7 +302,7 @@ export function syncExpensesPlanningShell(viewport = null) {
 
 export function appendLog() {}
 
-export function renderProjectOptions(projectKeys, selectedProjectKey = "") {
+export function renderProjectOptions(projectKeys, selectedProjectKey = "", displayLabels = null) {
   if (!(dom.projectSelectEl instanceof HTMLSelectElement)) {
     return;
   }
@@ -325,7 +325,8 @@ export function renderProjectOptions(projectKeys, selectedProjectKey = "") {
   normalizedProjectKeys.forEach((normalizedProjectKey) => {
     const optionEl = document.createElement("option");
     optionEl.value = normalizedProjectKey;
-    optionEl.textContent = normalizedProjectKey;
+    // Afficher "Numero - Nom" si disponible dans le map, sinon la clé brute
+    optionEl.textContent = displayLabels?.get(normalizedProjectKey) || normalizedProjectKey;
     optionEl.selected = normalizedProjectKey === normalizedSelectedProjectKey;
     if (optionEl.selected) {
       optionEl.setAttribute("selected", "selected");
@@ -336,7 +337,7 @@ export function renderProjectOptions(projectKeys, selectedProjectKey = "") {
   if (normalizedSelectedProjectKey && !hasSelectedProjectOption) {
     const selectedOptionEl = document.createElement("option");
     selectedOptionEl.value = normalizedSelectedProjectKey;
-    selectedOptionEl.textContent = normalizedSelectedProjectKey;
+    selectedOptionEl.textContent = displayLabels?.get(normalizedSelectedProjectKey) || normalizedSelectedProjectKey;
     selectedOptionEl.selected = true;
     selectedOptionEl.setAttribute("selected", "selected");
     dom.projectSelectEl.appendChild(selectedOptionEl);
