@@ -153,7 +153,6 @@ export const APP_CONFIG = {
         projectNumber: "NumeroProjet",
         name: "Name",
         collaboratorId: "ID_Collaborateur",
-        dop: "DOP",
         startDate: "Start_At",
         endDate: "End_At",
         allocationDays: "Allocation_Days",

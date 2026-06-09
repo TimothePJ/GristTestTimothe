@@ -24,7 +24,9 @@ import {
   buildAggregatedProject,
   buildGlobalExpenseData,
   filterProjectsByDop,
+  getAvailableDopValues,
   getDopLabel,
+  WITHOUT_DOP_FILTER,
 } from "./services/globalProjectService.js";
 
 const VIEW_STATE = (() => {
@@ -38,6 +40,10 @@ const VIEW_STATE = (() => {
 
 const state = {
   projects: [],
+  diagnostics: {
+    dopConflicts: [],
+    unmatchedRows: [],
+  },
   selectedDop: "all",
   selectedProjectIds: new Set(),
   selectionMode: "single",
@@ -51,7 +57,7 @@ const dom = {};
 function getDomRefs() {
   Object.assign(dom, {
     status: document.getElementById("global-status"),
-    dopButtons: [...document.querySelectorAll(".dop-filter-btn")],
+    dopFilter: document.getElementById("dop-filter"),
     projectList: document.getElementById("project-list"),
     projectListSummary: document.getElementById("project-list-summary"),
     selectionModeButtons: [...document.querySelectorAll(".project-selection-mode-btn")],
@@ -306,9 +312,23 @@ function setStatus(message, isError = false) {
 }
 
 function renderDopButtons() {
-  dom.dopButtons.forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.dop === state.selectedDop);
-  });
+  const dopValues = getAvailableDopValues(state.projects);
+  const buttons = [
+    { value: "all", label: "TOUT" },
+    { value: WITHOUT_DOP_FILTER, label: "Sans DOP" },
+    ...dopValues.map((dop) => ({ value: dop, label: getDopLabel(dop) })),
+  ];
+
+  dom.dopFilter.innerHTML = buttons
+    .map(({ value, label }) => `
+      <button
+        type="button"
+        class="dop-filter-btn${value === state.selectedDop ? " is-active" : ""}"
+        data-dop="${escapeHtml(value)}"
+        aria-pressed="${value === state.selectedDop ? "true" : "false"}"
+      >${escapeHtml(label)}</button>
+    `)
+    .join("");
 }
 
 function renderSelectionModeControls(projects) {
@@ -474,11 +494,13 @@ function renderApp() {
 }
 
 function bindEvents() {
-  dom.dopButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      state.selectedDop = button.dataset.dop || "all";
-      renderApp();
-    });
+  dom.dopFilter.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const button = target.closest(".dop-filter-btn");
+    if (!(button instanceof HTMLButtonElement)) return;
+    state.selectedDop = button.dataset.dop || "all";
+    renderApp();
   });
 
   dom.selectionModeButtons.forEach((button) => {
@@ -588,13 +610,26 @@ function bindEvents() {
 async function loadData() {
   setStatus("Chargement des projets...");
   const tables = await fetchExpenseAppTables();
-  const { projects } = buildGlobalExpenseData(tables);
+  const { projects, diagnostics } = buildGlobalExpenseData(tables);
 
   state.projects = projects;
+  state.diagnostics = diagnostics;
   state.selectedProjectIds = new Set();
 
   const selectableProjectCount = projects.filter(isSelectableProject).length;
-  setStatus(`${selectableProjectCount} projet(s) charge(s)`);
+  const conflictLabels = (diagnostics?.dopConflicts || [])
+    .map((conflict) => conflict.projectNumber || conflict.projectNames?.join(" / ") || "sans numero");
+  const unmatchedCount = diagnostics?.unmatchedRows?.length || 0;
+  const warnings = [];
+  if (conflictLabels.length) {
+    warnings.push(`DOP en conflit : ${conflictLabels.join(", ")}`);
+  }
+  if (unmatchedCount) {
+    warnings.push(`${unmatchedCount} ligne(s) sans projet correspondant`);
+  }
+  setStatus(
+    `${selectableProjectCount} projet(s) charge(s)${warnings.length ? ` - ${warnings.join(" - ")}` : ""}`
+  );
   renderApp();
 }
 

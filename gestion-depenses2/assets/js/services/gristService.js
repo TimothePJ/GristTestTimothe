@@ -32,7 +32,6 @@ const TIME_REAL_COLUMN_ALIASES = {
   projectNumber: ["NumeroProjet", "Numero_Projet", "Project_Number", "ProjectNumber"],
   name: ["Name", "Nom", "Worker_Name", "Team_Member_Name"],
   collaboratorId: ["ID_Collaborateur", "Collaborateur", "Collaborator_Id", "CollaboratorId"],
-  dop: ["DOP"],
   startDate: ["Start_At", "Start_Date", "StartAt", "Start"],
   endDate: ["End_At", "End_Date", "EndAt", "End"],
   allocationDays: [
@@ -231,7 +230,6 @@ async function fetchNormalizedTimeRealRows() {
     [canonicalColumns.projectNumber]: row?.[resolvedColumns.projectNumber],
     [canonicalColumns.name]: row?.[resolvedColumns.name],
     [canonicalColumns.collaboratorId]: row?.[resolvedColumns.collaboratorId],
-    [canonicalColumns.dop]: row?.[resolvedColumns.dop],
     [canonicalColumns.startDate]: row?.[resolvedColumns.startDate],
     [canonicalColumns.endDate]: row?.[resolvedColumns.endDate],
     [canonicalColumns.allocationDays]: row?.[resolvedColumns.allocationDays],

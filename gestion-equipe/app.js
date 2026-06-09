@@ -4,64 +4,6 @@ const DOP_COLUMN = 'DOP';
 const PROJECT_NAME_COLUMN = 'Nom_de_projet';
 const PROJECT_NUMBER_COLUMN = 'Numero_de_projet';
 
-const DOP_TARGETS = [
-  {
-    tableName: PROJECTS_TABLE,
-    label: 'Projets',
-    relation: 'projectName',
-    matchColumns: [PROJECT_NAME_COLUMN],
-  },
-  {
-    tableName: 'Planning_Projet',
-    label: 'Planning_Projet',
-    relation: 'projectName',
-    matchColumns: ['NomProjet', 'Nom_projet'],
-  },
-  {
-    tableName: 'MsProject',
-    label: 'MsProject',
-    relation: 'projectName',
-    matchColumns: ['NomProjet', 'Nom'],
-  },
-  {
-    tableName: 'References',
-    label: 'References',
-    relation: 'projectName',
-    matchColumns: ['NomProjet', 'NomProjetString'],
-  },
-  {
-    tableName: 'ListePlan_NDC_COF',
-    label: 'ListePlan_NDC_COF',
-    relation: 'projectName',
-    matchColumns: ['Nom_projet', 'NomProjet'],
-  },
-  {
-    tableName: 'Budget',
-    label: 'Budget',
-    relation: 'projectNumber',
-    matchColumns: ['NumeroProjet'],
-  },
-  {
-    tableName: 'ProjectTeam',
-    label: 'ProjectTeam',
-    relation: 'projectNumber',
-    matchColumns: ['NumeroProjet'],
-  },
-  {
-    tableName: 'TimeSegment',
-    label: 'TimeSegment',
-    relation: 'timeSegment',
-    matchColumns: ['NumeroProjet'],
-    linkColumns: ['ProjectTeam_Link', 'ProjectTeamLink', 'ProjectTeam'],
-  },
-  {
-    tableName: 'TimeReal',
-    label: 'TimeReal',
-    relation: 'projectNumber',
-    matchColumns: ['NumeroProjet'],
-  },
-];
-
 let records = [];
 let selectedRecordId = null;
 let projectRecords = [];
@@ -98,15 +40,12 @@ function normalizeIdTrefle(value) {
 }
 
 function normalizeDopValue(value) {
-  const text = asText(value);
-  return text === '1' || text === '2' ? text : '';
+  return asText(value).replace(/^dop\s*/i, '').trim();
 }
 
 function formatDopLabel(value) {
   const dop = normalizeDopValue(value);
-  if (dop === '1') return 'DOP 1';
-  if (dop === '2') return 'DOP 2';
-  return 'Commun';
+  return dop ? `DOP ${dop}` : 'Commun';
 }
 
 function toBooleanFlag(value) {
@@ -174,77 +113,9 @@ function hasColumn(columnNames, columnName) {
   return columnNames.includes(columnName);
 }
 
-function findExistingColumn(columnNames, candidates) {
-  return candidates.find(column => hasColumn(columnNames, column)) || '';
-}
-
-function findExistingColumns(columnNames, candidates) {
-  return candidates.filter(column => hasColumn(columnNames, column));
-}
-
 function toRecordId(value) {
   const number = Number(value);
   return Number.isInteger(number) && number > 0 ? number : null;
-}
-
-function toReferenceId(value) {
-  if (typeof value === 'number') return toRecordId(value);
-
-  if (typeof value === 'string') {
-    return toRecordId(value.trim());
-  }
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const id = toReferenceId(item);
-      if (id != null) return id;
-    }
-    return null;
-  }
-
-  if (value && typeof value === 'object') {
-    for (const key of ['id', 'rowId', 'recordId']) {
-      const id = toReferenceId(value[key]);
-      if (id != null) return id;
-    }
-  }
-
-  return null;
-}
-
-function valuesMatch(left, right) {
-  const leftText = asText(left);
-  const rightText = asText(right);
-  if (!leftText || !rightText) return false;
-  if (leftText === rightText) return true;
-
-  const leftNumber = Number(leftText);
-  const rightNumber = Number(rightText);
-  return Number.isFinite(leftNumber) && Number.isFinite(rightNumber) && leftNumber === rightNumber;
-}
-
-function rowMatchesAnyColumn(row, columns, expectedValue) {
-  return columns.some(column => valuesMatch(row[column], expectedValue));
-}
-
-function rowMatchesAnyValue(row, columns, expectedValues) {
-  return expectedValues
-    .filter(value => asText(value))
-    .some(value => rowMatchesAnyColumn(row, columns, value));
-}
-
-function applyUserActionsInBatches(actions, batchSize = 200) {
-  if (!actions.length) return Promise.resolve();
-
-  const batches = [];
-  for (let index = 0; index < actions.length; index += batchSize) {
-    batches.push(actions.slice(index, index + batchSize));
-  }
-
-  return batches.reduce(
-    (promise, batch) => promise.then(() => grist.docApi.applyUserActions(batch)),
-    Promise.resolve()
-  );
 }
 
 function getSelectedRecord() {
@@ -526,7 +397,23 @@ function syncDopValueFromSelectedProject() {
   const selectedProject = getSelectedProject();
 
   if (dopValueSelect && selectedProject) {
-    dopValueSelect.value = normalizeDopValue(selectedProject.dop);
+    const selectedDop = normalizeDopValue(selectedProject.dop);
+    Array.from(dopValueSelect.options)
+      .filter(option => option.dataset.dynamicDop === 'true')
+      .forEach(option => option.remove());
+
+    if (
+      selectedDop &&
+      !Array.from(dopValueSelect.options).some(option => option.value === selectedDop)
+    ) {
+      const option = document.createElement('option');
+      option.value = selectedDop;
+      option.textContent = formatDopLabel(selectedDop);
+      option.dataset.dynamicDop = 'true';
+      dopValueSelect.appendChild(option);
+    }
+
+    dopValueSelect.value = selectedDop;
   }
 
   updateDopApplyButton();
@@ -613,157 +500,6 @@ function setDopBusy(isBusy) {
   updateDopApplyButton();
 }
 
-function createTargetResult(target, status, data = {}) {
-  return {
-    label: target.label,
-    status,
-    updatedCount: 0,
-    ...data,
-  };
-}
-
-function findTargetRows(target, snapshot, context) {
-  if (target.relation === 'projectName') {
-    if (!context.projectName) {
-      return { rows: [], skipReason: 'nom projet vide' };
-    }
-
-    const matchColumns = findExistingColumns(snapshot.columnNames, target.matchColumns);
-    if (!matchColumns.length) {
-      return { rows: [], skipReason: `colonnes liaison absentes (${target.matchColumns.join(', ')})` };
-    }
-
-    return {
-      rows: snapshot.rows.filter(row =>
-        rowMatchesAnyValue(row, matchColumns, [context.projectName, context.projectId])
-      ),
-      skipReason: '',
-    };
-  }
-
-  if (target.relation === 'projectNumber') {
-    if (!context.projectNumber) {
-      return { rows: [], skipReason: 'numero projet vide' };
-    }
-
-    const matchColumns = findExistingColumns(snapshot.columnNames, target.matchColumns);
-    if (!matchColumns.length) {
-      return { rows: [], skipReason: `colonnes liaison absentes (${target.matchColumns.join(', ')})` };
-    }
-
-    return {
-      rows: snapshot.rows.filter(row => rowMatchesAnyColumn(row, matchColumns, context.projectNumber)),
-      skipReason: '',
-    };
-  }
-
-  if (target.relation === 'timeSegment') {
-    const directColumns = findExistingColumns(snapshot.columnNames, target.matchColumns);
-    if (context.projectNumber && directColumns.length) {
-      return {
-        rows: snapshot.rows.filter(row => rowMatchesAnyColumn(row, directColumns, context.projectNumber)),
-        skipReason: '',
-      };
-    }
-
-    const linkColumn = findExistingColumn(snapshot.columnNames, target.linkColumns || []);
-    if (!linkColumn) {
-      return { rows: [], skipReason: 'colonnes NumeroProjet et ProjectTeam_Link absentes' };
-    }
-    if (!context.projectTeamIds.size) {
-      return { rows: [], skipReason: '' };
-    }
-
-    return {
-      rows: snapshot.rows.filter(row => context.projectTeamIds.has(toReferenceId(row[linkColumn]))),
-      skipReason: '',
-    };
-  }
-
-  return { rows: [], skipReason: 'relation non configuree' };
-}
-
-async function updateTargetDop(target, context) {
-  let snapshot;
-  try {
-    snapshot = await fetchTableSnapshot(target.tableName);
-  } catch (error) {
-    return createTargetResult(target, 'skipped', {
-      reason: `table inaccessible (${error.message})`,
-    });
-  }
-
-  const { rows: matchingRows, skipReason } = findTargetRows(target, snapshot, context);
-
-  if (target.tableName === 'ProjectTeam') {
-    matchingRows.forEach(row => {
-      const rowId = toRecordId(row.id);
-      if (rowId != null) {
-        context.projectTeamIds.add(rowId);
-      }
-    });
-  }
-
-  if (skipReason) {
-    return createTargetResult(target, 'skipped', { reason: skipReason });
-  }
-
-  if (!hasColumn(snapshot.columnNames, DOP_COLUMN)) {
-    return createTargetResult(target, 'skipped', { reason: 'colonne DOP absente' });
-  }
-
-  if (!hasColumn(snapshot.columnNames, 'id')) {
-    return createTargetResult(target, 'skipped', { reason: 'colonne id absente' });
-  }
-
-  const actions = matchingRows
-    .map(row => {
-      const rowId = toRecordId(row.id);
-      if (rowId == null) return null;
-      return ['UpdateRecord', target.tableName, rowId, { [DOP_COLUMN]: context.dopValue }];
-    })
-    .filter(Boolean);
-
-  if (!actions.length) {
-    return createTargetResult(target, 'updated', { updatedCount: 0 });
-  }
-
-  try {
-    await applyUserActionsInBatches(actions);
-    return createTargetResult(target, 'updated', { updatedCount: actions.length });
-  } catch (error) {
-    return createTargetResult(target, 'error', {
-      reason: error.message,
-    });
-  }
-}
-
-function buildDopSummary(project, dopValue, results) {
-  const lines = [
-    `${formatDopLabel(dopValue)} applique au projet "${project.name}".`,
-  ];
-
-  results.forEach(result => {
-    if (result.status === 'updated') {
-      lines.push(`${result.label}: ${result.updatedCount} ligne(s) mise(s) a jour`);
-      return;
-    }
-    if (result.status === 'error') {
-      lines.push(`${result.label}: erreur (${result.reason})`);
-      return;
-    }
-    lines.push(`${result.label}: ignore (${result.reason})`);
-  });
-
-  return lines.join('\n');
-}
-
-function getDopSummaryType(results) {
-  if (results.some(result => result.status === 'error')) return 'error';
-  if (results.some(result => result.status === 'skipped')) return 'warning';
-  return 'success';
-}
-
 async function handleApplyDop() {
   const selectedProject = getSelectedProject();
   if (!selectedProject) {
@@ -772,25 +508,23 @@ async function handleApplyDop() {
   }
 
   const dopValue = normalizeDopValue(document.getElementById('dopValueSelect')?.value);
-  const context = {
-    projectId: selectedProject.id,
-    projectName: selectedProject.name,
-    projectNumber: selectedProject.projectNumber,
-    dopValue,
-    projectTeamIds: new Set(),
-  };
+  if (selectedProject.id == null) {
+    setDopStatus('Impossible de modifier ce projet : identifiant Grist introuvable.', 'error');
+    return;
+  }
 
   setDopBusy(true);
-  setDopStatus(`Application de ${formatDopLabel(dopValue)} au projet "${selectedProject.name}"...`);
+  setDopStatus(`Mise a jour de ${formatDopLabel(dopValue)} pour "${selectedProject.name}"...`);
 
   try {
-    const results = [];
-    for (const target of DOP_TARGETS) {
-      results.push(await updateTargetDop(target, context));
-    }
-
+    await grist.docApi.applyUserActions([
+      ['UpdateRecord', PROJECTS_TABLE, selectedProject.id, { [DOP_COLUMN]: dopValue }],
+    ]);
     await loadProjectsForDop(selectedProject.key);
-    setDopStatus(buildDopSummary(selectedProject, dopValue, results), getDopSummaryType(results));
+    setDopStatus(
+      `${formatDopLabel(dopValue)} enregistree uniquement dans Projets.DOP pour "${selectedProject.name}".`,
+      'success'
+    );
   } finally {
     setDopBusy(false);
   }

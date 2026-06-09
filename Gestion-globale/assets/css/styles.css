@@ -42,6 +42,7 @@ body {
 .dop-filter {
   display: inline-flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   overflow: hidden;
   border: 1px solid rgba(0, 73, 144, 0.18);
   border-radius: var(--radius-sm);

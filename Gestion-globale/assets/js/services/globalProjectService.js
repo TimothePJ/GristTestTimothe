@@ -15,6 +15,7 @@ import {
 } from "../../../../gestion-depenses2/assets/js/utils/format.js";
 
 const DOP_COLUMN = "DOP";
+export const WITHOUT_DOP_FILTER = "__without_dop__";
 
 function clampPercentage(value) {
   return Math.max(0, Math.min(100, toFiniteNumber(value, 0)));
@@ -699,62 +700,379 @@ function buildGlobalExpenseMonthBounds(projects) {
 }
 
 export function normalizeDopValue(value) {
-  const raw = toText(value).replace(/^dop\s*/i, "").trim();
-  if (raw === "1" || raw === "2" || raw === "") {
-    return raw;
-  }
-
-  return raw;
+  return toText(value).replace(/^dop\s*/i, "").trim();
 }
 
 export function getDopLabel(value) {
   const dop = normalizeDopValue(value);
-  if (dop === "1" || dop === "2") {
-    return `DOP ${dop}`;
-  }
-
   return dop ? `DOP ${dop}` : "Sans DOP";
 }
 
+function normalizeRelationKey(value) {
+  return toText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("fr-FR");
+}
+
+function normalizeDopKey(value) {
+  return normalizeRelationKey(normalizeDopValue(value));
+}
+
+function toRecordId(value) {
+  const numericId = Number(value);
+  return Number.isInteger(numericId) && numericId > 0 ? numericId : null;
+}
+
+function toReferenceId(value) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const id = toReferenceId(item);
+      if (id != null) return id;
+    }
+    return null;
+  }
+
+  if (value && typeof value === "object") {
+    for (const key of ["id", "rowId", "recordId"]) {
+      const id = toReferenceId(value[key]);
+      if (id != null) return id;
+    }
+    return null;
+  }
+
+  return toRecordId(value);
+}
+
+function getFirstMeaningfulValue(rows, columnId) {
+  if (!columnId) return "";
+  const row = (rows || []).find((candidate) => {
+    const value = candidate?.[columnId];
+    return value != null && !(typeof value === "string" && value.trim() === "");
+  });
+  return row?.[columnId] ?? "";
+}
+
+function getUniqueTexts(values) {
+  const byKey = new Map();
+  (values || []).forEach((value) => {
+    const text = toText(value);
+    const key = normalizeRelationKey(text);
+    if (key && !byKey.has(key)) {
+      byKey.set(key, text);
+    }
+  });
+  return [...byKey.values()];
+}
+
+function buildMergedProjectName(projectNumber, names) {
+  const uniqueNames = getUniqueTexts(names);
+  if (uniqueNames.length === 1) return uniqueNames[0];
+  if (uniqueNames.length > 1) return uniqueNames.join(" / ");
+  return projectNumber ? `Projet ${projectNumber}` : "Projet sans nom";
+}
+
+function buildCanonicalProjectRegistry(projectRows = []) {
+  const columns = APP_CONFIG.grist.columns.projects;
+  const groupedRows = new Map();
+
+  projectRows.forEach((row, index) => {
+    const projectNumber = toText(row?.[columns.projectNumber]);
+    const rowId = toRecordId(row?.[columns.id]);
+    const groupKey = projectNumber
+      ? `number:${normalizeRelationKey(projectNumber)}`
+      : `row:${rowId || index}`;
+    const group = groupedRows.get(groupKey) || {
+      key: groupKey,
+      number: projectNumber,
+      rows: [],
+    };
+    group.rows.push(row);
+    groupedRows.set(groupKey, group);
+  });
+
+  const groups = [];
+  const dopConflicts = [];
+
+  groupedRows.forEach((group) => {
+    const sourceIds = group.rows.map((row) => toRecordId(row?.[columns.id])).filter(Boolean);
+    const sourceNames = getUniqueTexts(group.rows.map((row) => row?.[columns.name]));
+    const dopByKey = new Map();
+    group.rows.forEach((row) => {
+      const dop = normalizeDopValue(row?.[columns.dop || DOP_COLUMN]);
+      const dopKey = normalizeDopKey(dop);
+      if (!dopByKey.has(dopKey)) dopByKey.set(dopKey, dop);
+    });
+
+    if (dopByKey.size > 1) {
+      dopConflicts.push({
+        projectNumber: group.number,
+        projectNames: sourceNames,
+        dopValues: [...dopByKey.values()],
+      });
+      return;
+    }
+
+    const canonicalId = sourceIds[0] || null;
+    const canonicalName = buildMergedProjectName(group.number, sourceNames);
+    const canonicalDop = [...dopByKey.values()][0] || "";
+    const canonicalRow = {
+      ...(group.rows[0] || {}),
+      [columns.id]: canonicalId,
+      [columns.projectNumber]: group.number,
+      [columns.name]: canonicalName,
+      [columns.dop || DOP_COLUMN]: canonicalDop,
+    };
+
+    [
+      columns.avancement,
+      columns.billingPercentage,
+      columns.billingPercentageByMonth,
+    ].filter(Boolean).forEach((columnId) => {
+      canonicalRow[columnId] = getFirstMeaningfulValue(group.rows, columnId);
+    });
+
+    groups.push({
+      ...group,
+      canonicalId,
+      canonicalName,
+      canonicalDop,
+      canonicalRow,
+      sourceIds,
+      sourceNames,
+    });
+  });
+
+  const byNumber = new Map();
+  const byName = new Map();
+  groups.forEach((group) => {
+    const numberKey = normalizeRelationKey(group.number);
+    if (numberKey) byNumber.set(numberKey, group);
+
+    [group.number, ...group.sourceNames, ...group.sourceIds].forEach((alias) => {
+      const aliasKey = normalizeRelationKey(alias);
+      if (!aliasKey) return;
+      const matches = byName.get(aliasKey) || [];
+      matches.push(group);
+      byName.set(aliasKey, matches);
+    });
+  });
+
+  return { groups, byNumber, byName, dopConflicts };
+}
+
+function dedupeRowsById(rows = []) {
+  const seenIds = new Set();
+  return rows.filter((row) => {
+    const rowId = toRecordId(row?.id);
+    if (rowId == null) return true;
+    if (seenIds.has(rowId)) return false;
+    seenIds.add(rowId);
+    return true;
+  });
+}
+
+function addUnmatchedDiagnostic(diagnostics, table, row, relation, value, reason = "projet introuvable") {
+  diagnostics.unmatchedRows.push({
+    table,
+    rowId: toRecordId(row?.id),
+    relation,
+    value: toText(value),
+    reason,
+  });
+}
+
+function resolveGroupByNumber(registry, value) {
+  const key = normalizeRelationKey(value);
+  return key ? registry.byNumber.get(key) || null : null;
+}
+
+function resolveGroupByNames(registry, values = []) {
+  const matches = new Map();
+  values.forEach((value) => {
+    const key = normalizeRelationKey(value);
+    (registry.byName.get(key) || []).forEach((group) => matches.set(group.key, group));
+  });
+  return matches.size === 1 ? [...matches.values()][0] : null;
+}
+
+function normalizeRowsLinkedByNumber(rows, tableName, projectNumberColumn, registry, diagnostics) {
+  return dedupeRowsById((rows || []).flatMap((row) => {
+    const projectNumber = row?.[projectNumberColumn];
+    const group = resolveGroupByNumber(registry, projectNumber);
+    if (!group) {
+      addUnmatchedDiagnostic(diagnostics, tableName, row, projectNumberColumn, projectNumber);
+      return [];
+    }
+    return [{ ...row, [projectNumberColumn]: group.number }];
+  }));
+}
+
+function normalizeRowsLinkedByName(
+  rows,
+  tableName,
+  projectNameColumns,
+  canonicalProjectNameColumn,
+  registry,
+  diagnostics
+) {
+  return dedupeRowsById((rows || []).flatMap((row) => {
+    const names = projectNameColumns.flatMap((columnId) => {
+      const value = row?.[columnId];
+      const referenceId = toReferenceId(value);
+      return referenceId != null ? [value, referenceId] : [value];
+    }).filter((value) => toText(value));
+    const group = resolveGroupByNames(registry, names);
+    if (!group) {
+      addUnmatchedDiagnostic(
+        diagnostics,
+        tableName,
+        row,
+        projectNameColumns.join(", "),
+        names.join(" / "),
+        names.length ? "projet introuvable ou ambigu" : "liaison projet vide"
+      );
+      return [];
+    }
+    return [{ ...row, [canonicalProjectNameColumn]: group.canonicalName }];
+  }));
+}
+
+function normalizeGlobalTables(tables = {}) {
+  const registry = buildCanonicalProjectRegistry(tables.projectRows || []);
+  const columns = APP_CONFIG.grist.columns;
+  const diagnostics = {
+    dopConflicts: registry.dopConflicts,
+    unmatchedRows: [],
+  };
+  const projectTeamRows = normalizeRowsLinkedByNumber(
+    tables.projectTeamRows,
+    APP_CONFIG.grist.tables.projectTeam,
+    columns.projectTeam.projectNumber,
+    registry,
+    diagnostics
+  );
+  const retainedProjectTeamIds = new Set(
+    projectTeamRows.map((row) => toRecordId(row?.[columns.projectTeam.id])).filter(Boolean)
+  );
+  const timesheetRows = dedupeRowsById((tables.timesheetRows || []).flatMap((row) => {
+    const workerId = toReferenceId(row?.[columns.timesheet.workerId]);
+    if (workerId != null && retainedProjectTeamIds.has(workerId)) {
+      return [{ ...row, [columns.timesheet.workerId]: workerId }];
+    }
+    addUnmatchedDiagnostic(
+      diagnostics,
+      APP_CONFIG.grist.tables.timesheet,
+      row,
+      columns.timesheet.workerId,
+      workerId,
+      "collaborateur projet introuvable"
+    );
+    return [];
+  }));
+
+  const normalizedTables = {
+    ...tables,
+    projectRows: registry.groups.map((group) => group.canonicalRow),
+    budgetRows: normalizeRowsLinkedByNumber(
+      tables.budgetRows,
+      APP_CONFIG.grist.tables.budget,
+      columns.budget.projectNumber,
+      registry,
+      diagnostics
+    ),
+    listePlanRows: normalizeRowsLinkedByName(
+      tables.listePlanRows,
+      APP_CONFIG.grist.tables.listePlan,
+      [
+        columns.listePlan.projectName,
+        columns.listePlan.projectNameAlt,
+        "NomProjetString",
+        "Nom_de_projet",
+      ],
+      columns.listePlan.projectName,
+      registry,
+      diagnostics
+    ),
+    planningProjectRows: normalizeRowsLinkedByName(
+      tables.planningProjectRows,
+      APP_CONFIG.grist.tables.planningProject,
+      [columns.planningProject.projectName, "Nom_projet"],
+      columns.planningProject.projectName,
+      registry,
+      diagnostics
+    ),
+    projectTeamRows,
+    timesheetRows,
+    timeSegmentRows: normalizeRowsLinkedByNumber(
+      tables.timeSegmentRows,
+      APP_CONFIG.grist.tables.timeSegment,
+      columns.timeSegment.projectNumber,
+      registry,
+      diagnostics
+    ),
+    timeRealRows: normalizeRowsLinkedByNumber(
+      tables.timeRealRows,
+      APP_CONFIG.grist.tables.timeReal,
+      columns.timeReal.projectNumber,
+      registry,
+      diagnostics
+    ),
+  };
+
+  return { normalizedTables, registry, diagnostics };
+}
+
+export function getAvailableDopValues(projects) {
+  const byKey = new Map();
+  (projects || []).forEach((project) => {
+    const dop = normalizeDopValue(project?.dop);
+    const key = normalizeDopKey(dop);
+    if (key && !byKey.has(key)) byKey.set(key, dop);
+  });
+  return [...byKey.values()].sort((left, right) =>
+    left.localeCompare(right, "fr", { numeric: true, sensitivity: "base" })
+  );
+}
+
 export function buildGlobalExpenseData(tables) {
+  const { normalizedTables, registry, diagnostics } = normalizeGlobalTables(tables);
   const expenseData = buildExpenseData({
-    ...(tables || {}),
+    ...normalizedTables,
     timeRealRows: [],
   });
-  const projectNumberColumn = APP_CONFIG.grist.columns.projects.projectNumber;
-  const projectDopColumn = APP_CONFIG.grist.columns.projects.dop || DOP_COLUMN;
-  const dopByProjectNumber = new Map(
-    (tables?.projectRows || []).map((row) => [
-      toText(row?.[projectNumberColumn]),
-      normalizeDopValue(row?.[projectDopColumn]),
-    ])
+  const groupByCanonicalId = new Map(
+    registry.groups.map((group) => [group.canonicalId, group])
   );
   const projects = completeProjectsWithTimeRealRows(
-    expenseData.projects.map((project) => ({
-      ...project,
-      dop:
-        normalizeDopValue(project.dop) ||
-        dopByProjectNumber.get(project.projectNumber) ||
-        "",
-    })),
-    tables?.timeRealRows
+    expenseData.projects.map((project) => {
+      const group = groupByCanonicalId.get(toRecordId(project?.id));
+      return {
+        ...project,
+        dop: normalizeDopValue(group?.canonicalDop),
+        sourceProjectIds: [...(group?.sourceIds || [])],
+        sourceProjectNames: [...(group?.sourceNames || [])],
+      };
+    }),
+    normalizedTables.timeRealRows
   );
 
   return {
     ...expenseData,
     projects,
+    diagnostics,
   };
 }
 
 export function filterProjectsByDop(projects, selectedDop) {
+  if (selectedDop === "all") return [...(projects || [])];
+
   return (projects || []).filter((project) => {
     const dop = normalizeDopValue(project?.dop);
-
-    if (selectedDop === "1" || selectedDop === "2") {
-      return dop === selectedDop;
-    }
-
-    return true;
+    if (selectedDop === WITHOUT_DOP_FILTER) return !dop;
+    return normalizeDopKey(dop) === normalizeDopKey(selectedDop);
   });
 }
 
