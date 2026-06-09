@@ -58,9 +58,17 @@
 const SHARED_PROJECT_STORAGE_KEY = 'grist.selected-project';
 const SHARED_PROJECT_ID_STORAGE_KEY = 'grist.selected-project-id';
 const REFERENCE_DATA_CHANGE_STORAGE_KEY = 'grist.references-data-change';
+const REFERENCE_ACTION_CHUNK_SIZE = 250;
 let _projectsData = []; // [{id, number, name}]
+let referenceDataChangeSignalBatchDepth = 0;
+let referenceDataChangeSignalPending = false;
 
 function emitReferenceDataChangeSignal() {
+  if (referenceDataChangeSignalBatchDepth > 0) {
+    referenceDataChangeSignalPending = true;
+    return;
+  }
+
   try {
     localStorage.setItem(
       REFERENCE_DATA_CHANGE_STORAGE_KEY,
@@ -69,6 +77,32 @@ function emitReferenceDataChangeSignal() {
   } catch (_error) {
     // localStorage peut etre indisponible dans certains contextes embarques.
   }
+}
+
+async function runWithBatchedReferenceDataChangeSignal(callback) {
+  referenceDataChangeSignalBatchDepth += 1;
+  try {
+    return await callback();
+  } finally {
+    referenceDataChangeSignalBatchDepth = Math.max(0, referenceDataChangeSignalBatchDepth - 1);
+    if (referenceDataChangeSignalBatchDepth === 0 && referenceDataChangeSignalPending) {
+      referenceDataChangeSignalPending = false;
+      emitReferenceDataChangeSignal();
+    }
+  }
+}
+
+async function applyUserActionsInChunks(actions = []) {
+  const normalizedActions = Array.isArray(actions) ? actions.filter(Boolean) : [];
+  if (!normalizedActions.length) return;
+
+  await runWithBatchedReferenceDataChangeSignal(async () => {
+    for (let offset = 0; offset < normalizedActions.length; offset += REFERENCE_ACTION_CHUNK_SIZE) {
+      await grist.docApi.applyUserActions(
+        normalizedActions.slice(offset, offset + REFERENCE_ACTION_CHUNK_SIZE)
+      );
+    }
+  });
 }
 
 function readSharedProjectSelection() {
@@ -169,7 +203,25 @@ function parseNumeroForStorage(v) {
             String(a[1] || '').trim().toLowerCase() === 'references' &&
             ['AddRecord', 'UpdateRecord', 'RemoveRecord'].includes(String(a[0] || ''))
           );
-          return Promise.resolve(_apply(fixed)).then(result => {
+          const containsReferenceRetardActions = fixed.some(a =>
+            Array.isArray(a) &&
+            String(a[1] || '').trim().toLowerCase() === 'references' &&
+            a[3] &&
+            typeof a[3] === 'object' &&
+            hasOwnField(a[3], 'Retard')
+          );
+          const applyFixedActions = async () => {
+            if (!containsReferenceRetardActions || fixed.length <= REFERENCE_ACTION_CHUNK_SIZE) {
+              return _apply(fixed);
+            }
+
+            let lastResult;
+            for (let offset = 0; offset < fixed.length; offset += REFERENCE_ACTION_CHUNK_SIZE) {
+              lastResult = await _apply(fixed.slice(offset, offset + REFERENCE_ACTION_CHUNK_SIZE));
+            }
+            return lastResult;
+          };
+          return Promise.resolve(applyFixedActions()).then(result => {
             if (referencesChanged) {
               emitReferenceDataChangeSignal();
             }
@@ -580,7 +632,7 @@ function findPlanningIndex(planningTable, projectName, numeroDocStr, typeDocStr,
 
 
 
-// --- Cache full References to get NumeroDocument even if the current view doesn't include the column ---
+// --- Cache local des numeros, avec chargement complet uniquement en fallback paresseux ---
 let __refsDocNumCache = new Map(); // key: "<NomProjet>||<NomDocument>" -> NumeroDocument (max seen)
 let __refsDocNumCacheInFlight = null;
 let __refsDocNumCacheTimer = null;
@@ -594,40 +646,47 @@ function getCachedNumeroDocument(proj, doc) {
   return __refsDocNumCache.has(key) ? __refsDocNumCache.get(key) : null;
 }
 
+function buildReferencesNumeroCache(sourceRecords = [], { merge = false } = {}) {
+  const map = merge ? new Map(__refsDocNumCache) : new Map();
+  (Array.isArray(sourceRecords) ? sourceRecords : []).forEach((record) => {
+    const project = String(record?.NomProjet ?? '').trim();
+    const documentName = String(record?.NomDocument ?? '').trim();
+    if (!project || !documentName) return;
+
+    const numero = parseNumeroForStorage(record?.NumeroDocument);
+    if (numero == null) return;
+
+    const key = __docKey(project, documentName);
+    const previous = map.get(key);
+    if (previous == null || (previous === '0' && numero !== '0')) {
+      map.set(key, numero);
+    }
+  });
+  __refsDocNumCache = map;
+  return map;
+}
+
 async function refreshReferencesNumeroCache() {
   if (__refsDocNumCacheInFlight) return __refsDocNumCacheInFlight;
   __refsDocNumCacheInFlight = (async () => {
     try {
-      const t = await grist.docApi.fetchTable('References');
-      const projs = t.NomProjet || [];
-      const docs = t.NomDocument || [];
-      const nums = t.NumeroDocument || [];
+      const table = await grist.docApi.fetchTable('References');
+      const projects = table.NomProjet || [];
+      const documents = table.NomDocument || [];
+      const numbers = table.NumeroDocument || [];
+      const rows = [];
+      const length = Math.max(projects.length, documents.length, numbers.length);
 
-      const map = new Map();
-      const L = Math.max(projs.length, docs.length, nums.length);
-
-      for (let i = 0; i < L; i++) {
-        const proj = String(projs[i] ?? '').trim();
-        const doc = String(docs[i] ?? '').trim();
-        if (!proj || !doc) continue;
-
-        const n = parseNumeroForStorage(nums[i]);
-        if (n == null) continue;
-
-        const key = __docKey(proj, doc);
-        const prev = map.get(key);
-        if (prev != null) {
-          if (prev === '0' && n !== '0') map.set(key, n);
-          continue;
-        }
-        map.set(key, n);
-        continue;
-        if (prev == null || n > prev) map.set(key, n); // ✅ on garde le max (corrige les 0 parasites)
+      for (let index = 0; index < length; index++) {
+        rows.push({
+          NomProjet: projects[index],
+          NomDocument: documents[index],
+          NumeroDocument: numbers[index],
+        });
       }
-
-      __refsDocNumCache = map;
-    } catch (e) {
-      console.warn('refreshReferencesNumeroCache failed:', e);
+      buildReferencesNumeroCache(rows, { merge: true });
+    } catch (error) {
+      console.warn('refreshReferencesNumeroCache failed:', error);
     } finally {
       __refsDocNumCacheInFlight = null;
     }
@@ -698,7 +757,7 @@ function getSelectedDocPair() {
   let name = parsed.name || String(raw || '').trim();
   let zone = normalizeZoneValue(parsed.zone);
 
-  // Fallback 1: cache (table complète) si la colonne NumeroDocument n'est pas présente dans la vue
+  // Fallback 1: cache local si la colonne NumeroDocument n'est pas presente dans la vue
   if (numero == null) {
     try {
       const proj =
@@ -773,7 +832,7 @@ function parseDocValue(raw) {
     }
   } catch (e) { }
 
-  // 2b) Fallback via cache (table complète References)
+  // 2b) Fallback via le cache local
   if (numero == null && selectedProject) {
     try {
       const cached = getCachedNumeroDocument(selectedProject, name);
@@ -1320,15 +1379,35 @@ let referenceRetardReconcileInFlight = false;
 let referenceRetardReconcilePending = false;
 let referenceRetardReconcileTimer = 0;
 let referenceRetardMidnightTimer = 0;
-let referenceRetardRenderInProgress = false;
+
+function toReferenceRetardStorageValue(value) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) && numericValue > 0
+    ? String(Math.trunc(numericValue))
+    : '';
+}
 
 function referenceRetardStoredValueMatches(currentValue, expectedValue) {
-  if (expectedValue == null) {
-    return currentValue == null || String(currentValue).trim() === '';
-  }
+  return String(currentValue ?? '').trim() === toReferenceRetardStorageValue(expectedValue);
+}
 
-  const numericValue = Number(currentValue);
-  return Number.isFinite(numericValue) && Math.trunc(numericValue) === expectedValue;
+function getOpenReferenceDocumentRecords() {
+  const selections = getCurrentSelections();
+  if (!selections) return [];
+
+  const selectedProject = _norm(selections.selectedProject);
+  const selectedDocument = _norm(selections.selectedTable);
+  const selectedNumero = parseNumeroForStorage(selections.selectedDoc?.numero);
+  const selectedZoneKey = normalizeZoneMatchKey(selections.selectedDoc?.zone);
+  if (!selectedProject || !selectedDocument) return [];
+
+  return (Array.isArray(records) ? records : []).filter((record) => {
+    if (_norm(record?.NomProjet) !== selectedProject) return false;
+    if (_norm(record?.NomDocument) !== selectedDocument) return false;
+    if (normalizeZoneMatchKey(record?.Zone) !== selectedZoneKey) return false;
+    if (selectedNumero == null) return true;
+    return parseNumeroForStorage(record?.NumeroDocument) === selectedNumero;
+  });
 }
 
 function scheduleReferenceRetardReconciliation(delayMs = 0) {
@@ -1362,7 +1441,9 @@ async function reconcileReferenceRetards() {
 
   referenceRetardReconcileInFlight = true;
   try {
-    const currentRecords = Array.isArray(records) ? records : [];
+    const currentRecords = getOpenReferenceDocumentRecords();
+    if (!currentRecords.length) return;
+
     const today = new Date();
     const actions = [];
 
@@ -1370,7 +1451,9 @@ async function reconcileReferenceRetards() {
       const recordId = Number(record?.id);
       if (!Number.isInteger(recordId) || recordId <= 0) return;
 
-      const nextRetard = computeReferenceRetardDays(record?.Recu, record?.DateLimite, today);
+      const nextRetard = toReferenceRetardStorageValue(
+        computeReferenceRetardDays(record?.Recu, record?.DateLimite, today)
+      );
       if (referenceRetardStoredValueMatches(record?.Retard, nextRetard)) return;
 
       record.Retard = nextRetard;
@@ -1379,16 +1462,8 @@ async function reconcileReferenceRetards() {
 
     if (!actions.length) return;
 
-    if (selectedFirstValue && selectedSecondValue) {
-      referenceRetardRenderInProgress = true;
-      try {
-        populateTable();
-      } finally {
-        referenceRetardRenderInProgress = false;
-      }
-    }
-
-    await grist.docApi.applyUserActions(actions);
+    populateTable();
+    await applyUserActionsInChunks(actions);
   } catch (error) {
     console.error('Erreur synchronisation References.Retard :', error);
   } finally {
@@ -1403,7 +1478,9 @@ async function reconcileReferenceRetards() {
 function withComputedReferenceRetard(fields) {
   return {
     ...fields,
-    Retard: computeReferenceRetardDays(fields?.Recu, fields?.DateLimite),
+    Retard: toReferenceRetardStorageValue(
+      computeReferenceRetardDays(fields?.Recu, fields?.DateLimite)
+    ),
   };
 }
 
@@ -1447,7 +1524,9 @@ function normalizeReferenceActionFieldsForRetard(action, fields) {
   const hasRecuUpdate = hasOwnField(fields, 'Recu');
   const hasDateLimiteUpdate = hasOwnField(fields, 'DateLimite');
   if (!hasRecuUpdate && !hasDateLimiteUpdate) {
-    return fields;
+    return hasOwnField(fields, 'Retard')
+      ? { ...fields, Retard: toReferenceRetardStorageValue(fields.Retard) }
+      : fields;
   }
 
   const existingRecord = getReferenceRecordById(action[2]);
@@ -1462,7 +1541,9 @@ function normalizeReferenceActionFieldsForRetard(action, fields) {
 
   return {
     ...fields,
-    Retard: computeReferenceRetardDays(recuValue, dateLimiteValue),
+    Retard: toReferenceRetardStorageValue(
+      computeReferenceRetardDays(recuValue, dateLimiteValue)
+    ),
   };
 }
 
@@ -2286,7 +2367,7 @@ async function createDocumentsBatch({
   });
 
   try {
-    await grist.docApi.applyUserActions(actions);
+    await applyUserActionsInChunks(actions);
   } catch (error) {
     restoreDocumentSelectionState(previousSelectionState);
     throw error;
@@ -2823,10 +2904,6 @@ document.getElementById('hideArchivedToggle').addEventListener('change', () => {
 
 // Function to populate the table based on the selected first and second column values
 function populateTable() {
-  if (!referenceRetardRenderInProgress) {
-    scheduleReferenceRetardReconciliation();
-  }
-
   const selections = getCurrentSelections();
   if (!selections) return;
 
@@ -3256,7 +3333,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
       userActions.push(['AddRecord', 'References', null, newRow]);
     }
 
-    await grist.docApi.applyUserActions(userActions);
+    await applyUserActionsInChunks(userActions);
     console.log("Ligne(s) ajoutée(s) avec succès.");
 
     document.getElementById('addRowDialog').close();
@@ -3391,11 +3468,10 @@ function hideContextMenu() {
 // Fetch records from Grist
 grist.onRecords(function (receivedRecords, tableId) {
   if (tableId === 'Team') return;
-  console.log("Records received from Grist:", receivedRecords);
 
   records = receivedRecords;
+  buildReferencesNumeroCache(receivedRecords);
   scheduleReferenceRetardReconciliation();
-  try { scheduleReferencesNumeroCacheRefresh(); } catch (e) { }
 
   if (newTable) {
     newTable = false; // Reset the flag after handling the new table
@@ -3451,6 +3527,7 @@ document.getElementById('secondColumnListbox').addEventListener('change', functi
   console.log("selectedFirstValue:", selectedFirstValue, "selectedSecondValue:", selectedSecondValue);
   if (selectedFirstValue && selectedSecondValue) {
     populateTable();
+    scheduleReferenceRetardReconciliation();
   }
 });
 
@@ -3650,7 +3727,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
       zone: documentZone,
       type: '',
     });
-    await grist.docApi.applyUserActions(actions);
+    await applyUserActionsInChunks(actions);
     await refreshReferenceTypeSuggestionLists(selectedProject);
     selectedTypeValue = '';
     restoreLastDocumentSelection();
@@ -4127,6 +4204,19 @@ function removeCustomEmitter(rowToRemove) {
   allRows[allRows.length - 1].remove();
 }
 
+function collectProjectReferenceEmitters(projectName) {
+  const project = _norm(projectName);
+  if (!project) return [];
+
+  return (Array.isArray(records) ? records : [])
+    .filter((record) =>
+      [record?.NomProjetString, record?.NomProjet, record?.Nom_projet]
+        .some((value) => _norm(value) === project)
+    )
+    .map((record) => _norm(record?.Emetteur))
+    .filter(Boolean);
+}
+
 async function updateEmetteurList(excludeCustom = false, targetDropdownId = "emetteurDropdown") {
   const selectedProject = document.getElementById('firstColumnDropdown').value;
   if (!selectedProject) return;
@@ -4135,18 +4225,7 @@ async function updateEmetteurList(excludeCustom = false, targetDropdownId = "eme
     // Liste des émetteurs prédéfinis
     const defaultEmetteurs = await getDefaultEmetteurs();
 
-    // Récupérer toutes les lignes de la table "References"
-    const referenceTable = await grist.docApi.fetchTable('References');
-
-    if (!referenceTable.NomProjetString || referenceTable.NomProjetString.length === 0) {
-      console.error("La colonne NomProjetString est vide ou introuvable !");
-      return;
-    }
-
-    // Filtrer les émetteurs liés au projet sélectionné
-    let emetteursFromProject = referenceTable.Emetteur.filter((_, index) =>
-      referenceTable.NomProjetString[index] === selectedProject
-    );
+    const emetteursFromProject = collectProjectReferenceEmitters(selectedProject);
 
     // Supprimer les doublons et trier
     let uniqueEmetteursFromProject = [...new Set(emetteursFromProject)]
@@ -4417,17 +4496,7 @@ async function updateEmetteurList(excludeCustom = false, targetDropdownIds = ["e
     // Liste par défaut
     const defaultEmetteurs = await getDefaultEmetteurs();
 
-    // Récupérer les enregistrements depuis Grist
-    const referenceTable = await grist.docApi.fetchTable('References');
-    if (!referenceTable.NomProjetString || referenceTable.NomProjetString.length === 0) {
-      console.error("Erreur : La colonne NomProjetString est vide ou introuvable !");
-      return;
-    }
-
-    // Récupérer les émetteurus liés au projet sélectionné
-    let emetteursFromProject = referenceTable.Emetteur.filter((_, index) =>
-      referenceTable.NomProjetString[index] === selectedProject
-    );
+    const emetteursFromProject = collectProjectReferenceEmitters(selectedProject);
 
     // Supprimer les doublons et conserver uniquement ceux qui ne sont pas dans defaultEmetteurs
     let uniqueEmetteursFromProject = [...new Set(emetteursFromProject)]
@@ -4964,7 +5033,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
         type: '',
       });
     }
-    await grist.docApi.applyUserActions(actions);
+    await applyUserActionsInChunks(actions);
     await refreshReferenceTypeSuggestionLists(selectedProject);
     selectedTypeValue = '';
     console.log("Documents ajoutés :", documentsData);
@@ -5468,6 +5537,7 @@ document.getElementById('thirdColumnDropdown').addEventListener('change', functi
 
   if (selectedFirstValue && selectedSecondValue) {
     populateTable();
+    scheduleReferenceRetardReconciliation();
   } else {
     tableBody.innerHTML = '';
     tableHeader.innerHTML = '';

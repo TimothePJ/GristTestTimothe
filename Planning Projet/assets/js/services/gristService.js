@@ -11,9 +11,8 @@ const LISTEPLAN_TABLE_CANDIDATES = [
   "ListePlan_NDC+COF",
 ];
 
-// Cache léger pour le dialog "Détails" — évite de re-fetcher les tables à chaque clic
+// Cache leger pour les lignes Planning_Projet du dialog "Details".
 let _planningRowsCache = null;  // tableau de lignes Planning_Projet
-let _refsTableCache = null;     // tableau de lignes References
 let _listePlanTableNameCache = "";
 const PLANNING_ACTION_CHUNK_SIZE = 250;
 const _planningServiceDiagnostics = {
@@ -736,13 +735,51 @@ function computeReferenceRetardDays(recuValue, dateLimiteValue, currentDateValue
   return Math.floor((recuMs - limiteMs) / DAY_MS);
 }
 
-function referenceRetardStoredValueMatches(currentValue, expectedValue) {
-  if (expectedValue == null) {
-    return currentValue == null || toText(currentValue) === "";
-  }
+function toReferenceRetardStorageValue(value) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) && numericValue > 0
+    ? String(Math.trunc(numericValue))
+    : "";
+}
 
-  const numericValue = Number(currentValue);
-  return Number.isFinite(numericValue) && Math.trunc(numericValue) === expectedValue;
+function referenceRetardStoredValueMatches(currentValue, expectedValue) {
+  return toText(currentValue) === toReferenceRetardStorageValue(expectedValue);
+}
+
+function buildChangedReferenceFields(referenceRow, fields = {}) {
+  const changedFields = {};
+  Object.entries(fields || {}).forEach(([fieldName, nextValue]) => {
+    if (fieldName === "Bloquant") {
+      if (Boolean(referenceRow?.Bloquant) !== Boolean(nextValue)) {
+        changedFields[fieldName] = Boolean(nextValue);
+      }
+      return;
+    }
+    if (fieldName === "DureeLimite") {
+      const currentDuration = parseReferenceDurationLimit(referenceRow?.DureeLimite);
+      const nextDuration = parseReferenceDurationLimit(nextValue);
+      if (currentDuration !== nextDuration) {
+        changedFields[fieldName] = nextValue;
+      }
+      return;
+    }
+    if (fieldName === "DateLimite") {
+      if (formatReferenceDateIso(referenceRow?.DateLimite) !== formatReferenceDateIso(nextValue)) {
+        changedFields[fieldName] = nextValue;
+      }
+      return;
+    }
+    if (fieldName === "Retard") {
+      if (!referenceRetardStoredValueMatches(referenceRow?.Retard, nextValue)) {
+        changedFields[fieldName] = toReferenceRetardStorageValue(nextValue);
+      }
+      return;
+    }
+    if (toText(referenceRow?.[fieldName]) !== toText(nextValue)) {
+      changedFields[fieldName] = nextValue;
+    }
+  });
+  return changedFields;
 }
 
 async function syncReferenceRetardRows(referenceRows = [], currentDateValue = new Date()) {
@@ -752,10 +789,12 @@ async function syncReferenceRetardRows(referenceRows = [], currentDateValue = ne
     const referenceId = Number(referenceRow?.id);
     if (!Number.isInteger(referenceId) || referenceId <= 0) return;
 
-    const nextRetard = computeReferenceRetardDays(
-      referenceRow?.Recu,
-      referenceRow?.DateLimite,
-      currentDateValue
+    const nextRetard = toReferenceRetardStorageValue(
+      computeReferenceRetardDays(
+        referenceRow?.Recu,
+        referenceRow?.DateLimite,
+        currentDateValue
+      )
     );
     if (referenceRetardStoredValueMatches(referenceRow?.Retard, nextRetard)) return;
 
@@ -771,7 +810,6 @@ async function syncReferenceRetardRows(referenceRows = [], currentDateValue = ne
   if (!actions.length) return 0;
 
   await applyUserActionsInChunks(actions);
-  _refsTableCache = null;
   emitReferenceDataChangeSignal();
   return actions.length;
 }
@@ -812,6 +850,27 @@ function buildPlanningReferenceChange(row, columns = {}) {
     designation: row?.[columns.taches || columns.tacheAlt || "Taches"],
     sourceZone: row?.[columns.zone || "Zone"],
   };
+}
+
+function filterReferenceRowsForPlanningRows(referenceRows = [], planningRows = [], columns = {}) {
+  const targetKeys = new Set();
+  (Array.isArray(planningRows) ? planningRows : []).forEach((planningRow) => {
+    const change = buildPlanningReferenceChange(planningRow, columns);
+    const project = normalizeLookupText(change.projectName);
+    const number = normalizeDocumentNumberForMatch(change.numeroDocument);
+    if (project && number) {
+      targetKeys.add(`${project}||${number}`);
+    }
+  });
+  if (!targetKeys.size) return [];
+
+  return (Array.isArray(referenceRows) ? referenceRows : []).filter((referenceRow) => {
+    const project = normalizeLookupText(
+      getFirstNonEmptyRowValue(referenceRow, ["NomProjetString", "NomProjet", "Nom_projet"])
+    );
+    const number = normalizeDocumentNumberForMatch(referenceRow?.NumeroDocument);
+    return project && number && targetKeys.has(`${project}||${number}`);
+  });
 }
 
 function findLinkedReferenceRowsForPlanningRow(planningRow, referenceRows, columns = {}) {
@@ -941,9 +1000,10 @@ async function buildReferenceOffsetSnapshotForPlanningRow(
   const startDate = getPlanningSegmentStartDate(planningRow, columns);
   const hasValidStartDate = startDate instanceof Date && !Number.isNaN(startDate.getTime());
 
-  const referenceRows = Array.isArray(referenceRowsOverride)
+  const allReferenceRows = Array.isArray(referenceRowsOverride)
     ? referenceRowsOverride
     : await fetchTableRows(REFERENCES_TABLE_NAME).catch(() => []);
+  const referenceRows = filterReferenceRowsForPlanningRows(allReferenceRows, [planningRow], columns);
   const linkedRows = referenceLookupOverride
     ? findLinkedReferenceRowsFromLookup(planningRow, referenceLookupOverride, columns)
     : findLinkedReferenceRowsForPlanningRow(planningRow, referenceRows, columns);
@@ -970,7 +1030,14 @@ async function buildReferenceOffsetSnapshotForPlanningRow(
     }
 
     seenReferenceIds.add(referenceId);
-    offsets.push({ referenceId, durationWeeks, recuValue: row?.Recu });
+    offsets.push({
+      referenceId,
+      durationWeeks,
+      recuValue: row?.Recu,
+      currentDateLimiteIso: formatReferenceDateIso(row?.DateLimite),
+      currentDurationWeeks: parseReferenceDurationLimit(row?.DureeLimite),
+      currentRetardValue: row?.Retard,
+    });
   });
 
   return offsets.length ? { offsets } : null;
@@ -990,7 +1057,12 @@ async function buildReferenceOffsetSnapshotsForPlanningRows(planningRows = [], c
     return new Map();
   }
 
-  const referenceRows = await fetchTableRows(REFERENCES_TABLE_NAME).catch(() => []);
+  const allReferenceRows = await fetchTableRows(REFERENCES_TABLE_NAME).catch(() => []);
+  const referenceRows = filterReferenceRowsForPlanningRows(
+    allReferenceRows,
+    [...uniqueRowsById.values()],
+    columns
+  );
   const referenceLookup = buildLinkedReferenceLookup(referenceRows);
   const snapshotsByRowId = new Map();
   for (const [rowId, row] of uniqueRowsById.entries()) {
@@ -1021,15 +1093,26 @@ function buildReferenceDateLimiteSyncActions(snapshot, planningRow, columns = {}
       const dateLimite = subtractWeeksFromDate(startDate, offset.durationWeeks);
       const dateLimiteIso = formatIsoDate(dateLimite);
       if (!dateLimiteIso) return null;
+      const nextRetard = toReferenceRetardStorageValue(
+        computeReferenceRetardDays(offset.recuValue, dateLimiteIso)
+      );
+      const fields = {};
+      if (offset.currentDateLimiteIso !== dateLimiteIso) {
+        fields.DateLimite = dateLimiteIso;
+      }
+      if (offset.currentDurationWeeks !== offset.durationWeeks) {
+        fields.DureeLimite = offset.durationWeeks;
+      }
+      if (!referenceRetardStoredValueMatches(offset.currentRetardValue, nextRetard)) {
+        fields.Retard = nextRetard;
+      }
+      if (!Object.keys(fields).length) return null;
+
       return [
         "UpdateRecord",
         REFERENCES_TABLE_NAME,
         offset.referenceId,
-        {
-          DateLimite: dateLimiteIso,
-          DureeLimite: offset.durationWeeks,
-          Retard: computeReferenceRetardDays(offset.recuValue, dateLimiteIso),
-        },
+        fields,
       ];
     })
     .filter(Boolean);
@@ -1054,7 +1137,6 @@ async function applyReferenceDateLimiteSyncActions(actions = []) {
 
   await applyUserActionsInChunks(dedupedActions);
   _planningRowsCache = null;
-  _refsTableCache = null;
   emitReferenceDataChangeSignal();
   return dedupedActions.length;
 }
@@ -2885,8 +2967,8 @@ export async function fetchPlanningReferenceDetails(rowId) {
   const { row, columns } = await fetchPlanningRowById(rowId);
   const startDate = getPlanningSegmentStartDate(row, columns);
   const startIso = formatIsoDate(startDate);
-  _refsTableCache = await fetchTableRows(REFERENCES_TABLE_NAME);
-  const referenceRows = _refsTableCache;
+  const allReferenceRows = await fetchTableRows(REFERENCES_TABLE_NAME);
+  const referenceRows = filterReferenceRowsForPlanningRows(allReferenceRows, [row], columns);
   const linkedRows = findLinkedReferenceRowsForPlanningRow(row, referenceRows, columns);
   await syncReferenceRetardRows(linkedRows);
 
@@ -2914,8 +2996,8 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
   const startDate = getPlanningSegmentStartDate(row, columns);
   const hasStartDate = startDate instanceof Date && !Number.isNaN(startDate.getTime());
 
-  if (!_refsTableCache) _refsTableCache = await fetchTableRows(REFERENCES_TABLE_NAME);
-  const referenceRows = _refsTableCache;
+  const allReferenceRows = await fetchTableRows(REFERENCES_TABLE_NAME);
+  const referenceRows = filterReferenceRowsForPlanningRows(allReferenceRows, [row], columns);
   const linkedRows = findLinkedReferenceRowsForPlanningRow(row, referenceRows, columns);
   const linkedIds = new Set(
     linkedRows
@@ -2928,7 +3010,7 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
       .filter(([id]) => Number.isInteger(id) && id > 0)
   );
 
-  const actions = (Array.isArray(updates) ? updates : [])
+  const candidateActions = (Array.isArray(updates) ? updates : [])
     .map((update) => {
       const referenceId = Number(update?.id);
       if (!Number.isInteger(referenceId) || referenceId <= 0 || !linkedIds.has(referenceId)) {
@@ -2973,7 +3055,9 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
             Bloquant: Boolean(update?.bloquant),
             DureeLimite: durationWeeks,
             DateLimite: dateLimiteIso,
-            Retard: computeReferenceRetardDays(linkedReferenceRow?.Recu, dateLimiteIso),
+            Retard: toReferenceRetardStorageValue(
+              computeReferenceRetardDays(linkedReferenceRow?.Recu, dateLimiteIso)
+            ),
           },
         ];
       }
@@ -2987,7 +3071,7 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
             Bloquant: Boolean(update?.bloquant),
             DureeLimite: "",
             DateLimite: REFERENCE_EMPTY_DATE_ISO,
-            Retard: null,
+            Retard: "",
           },
         ];
       }
@@ -3006,7 +3090,7 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
             Bloquant: Boolean(update?.bloquant),
             DureeLimite: durationWeeks,
             DateLimite: REFERENCE_EMPTY_DATE_ISO,
-            Retard: null,
+            Retard: "",
           },
         ];
       }
@@ -3025,9 +3109,21 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
           Bloquant: Boolean(update?.bloquant),
           DureeLimite: durationWeeks,
           DateLimite: computedDateLimiteIso,
-          Retard: computeReferenceRetardDays(linkedReferenceRow?.Recu, computedDateLimiteIso),
+          Retard: toReferenceRetardStorageValue(
+            computeReferenceRetardDays(linkedReferenceRow?.Recu, computedDateLimiteIso)
+          ),
         },
       ];
+    })
+    .filter(Boolean);
+  const actions = candidateActions
+    .map((action) => {
+      const referenceId = Number(action?.[2]);
+      const linkedReferenceRow = linkedRowsById.get(referenceId) || null;
+      const changedFields = buildChangedReferenceFields(linkedReferenceRow, action?.[3]);
+      return Object.keys(changedFields).length
+        ? [action[0], action[1], referenceId, changedFields]
+        : null;
     })
     .filter(Boolean);
 
@@ -3043,14 +3139,12 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
   await applyUserActionsInChunks(actions);
   // Invalider le cache après écriture — prochain "Détails" rechargera des données fraîches
   _planningRowsCache = null;
-  _refsTableCache = null;
   emitReferenceDataChangeSignal();
   return { updatedCount: actions.length };
 }
 
 export function invalidateDetailsCache() {
   _planningRowsCache = null;
-  _refsTableCache = null;
 }
 
 export { toText };
