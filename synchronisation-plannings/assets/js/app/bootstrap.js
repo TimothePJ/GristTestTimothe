@@ -13,8 +13,6 @@ import {
 } from "../layout/resizeHandle.js";
 import {
   appendLog,
-  renderProjectOptions,
-  setActiveProjectSelection,
   syncSharedPlanningControlsAvailability,
   setProjectContentVisibility,
   setHubStatus,
@@ -464,136 +462,234 @@ function tableToRows(table) {
   });
 }
 
-// Cache : normalizedKey → Projets.id (pour écriture de grist.selected-project-id)
+// --- Registre de projets (source unique : table Grist "Projets") ---
+
+// Tableau canonique [{id, number, name, label}] chargé depuis Projets uniquement.
+let _gristProjectRegistry = [];
+// Coalescence : une seule requête active à la fois vers fetchTable("Projets").
+let _fetchProjectsInFlight = null;
+// Debounce pour les événements storage rapprochés (écriture nom + ID simultanée).
+let _storageReconcileTimer = 0;
+
+// Conservés pour compatibilité avec renderProjectOptions de shell.js (utilisé plus bas).
 const _projectIdByNormalizedKey = new Map();
-// Cache : canonicalKey → libellé affiché "Numero - Nom"
 const _projectDisplayByKey = new Map();
 
-async function fetchProjectKeysFromGrist() {
-  try {
-    if (!window.grist?.docApi || typeof window.grist.docApi.fetchTable !== "function") {
-      return [];
-    }
+/**
+ * Charge la table Projets depuis Grist et reconstruit le registre canonique.
+ * Les appels simultanés sont coalescés : une seule requête est active à la fois.
+ */
+async function fetchProjectsFromGrist() {
+  if (_fetchProjectsInFlight) return _fetchProjectsInFlight;
 
-    const projectsTable = await window.grist.docApi.fetchTable("Projets");
-    return tableToRows(projectsTable)
-      .map((row) => {
-        const projectName = String(row?.Nom_de_projet || "").trim();
-        const projectNumber = String(row?.Numero_de_projet || "").trim();
-        const canonicalProjectKey = projectName || projectNumber;
-        if (canonicalProjectKey) {
-          rememberProjectAliases(canonicalProjectKey, [
-            projectName,
-            projectNumber,
-            projectName && projectNumber ? `${projectNumber} - ${projectName}` : "",
-          ]);
-          // Mémoriser l'ID Grist pour ce projet
+  _fetchProjectsInFlight = (async () => {
+    try {
+      if (!window.grist?.docApi || typeof window.grist.docApi.fetchTable !== "function") {
+        return _gristProjectRegistry;
+      }
+      const projectsTable = await window.grist.docApi.fetchTable("Projets");
+      const rows = tableToRows(projectsTable);
+
+      _gristProjectRegistry = rows
+        .map((row) => {
           const id = Number(row?.id);
-          if (Number.isInteger(id) && id > 0) {
-            _projectIdByNormalizedKey.set(normalizeProjectSelectionKey(canonicalProjectKey), id);
-          }
-          // Mémoriser le libellé d'affichage "Numero - Nom"
-          _projectDisplayByKey.set(canonicalProjectKey, `${projectNumber} - ${projectName}`);
-        }
-        return canonicalProjectKey;
-      })
-      .filter(Boolean);
-  } catch (error) {
-    console.warn("Impossible de charger la liste Projets pour la synchronisation :", error);
-    return [];
+          const number = String(row?.Numero_de_projet || "").trim();
+          const name = String(row?.Nom_de_projet || "").trim();
+          if (!name || !Number.isInteger(id) || id <= 0) return null;
+          return { id, number, name, label: number ? `${number} - ${name}` : name };
+        })
+        .filter(Boolean);
+
+      // Reconstruire les maps de compatibilité et les alias de résolution.
+      _projectIdByNormalizedKey.clear();
+      _projectDisplayByKey.clear();
+      projectAliasLookup.clear();
+      _gristProjectRegistry.forEach((p) => {
+        const nk = normalizeProjectSelectionKey(p.name);
+        _projectIdByNormalizedKey.set(nk, p.id);
+        _projectDisplayByKey.set(p.name, p.label);
+        rememberProjectAliases(p.name, [p.number, p.label]);
+      });
+
+      return _gristProjectRegistry;
+    } catch (error) {
+      console.warn("Impossible de charger la liste Projets :", error);
+      return _gristProjectRegistry;
+    } finally {
+      _fetchProjectsInFlight = null;
+    }
+  })();
+
+  return _fetchProjectsInFlight;
+}
+
+/**
+ * Résout une sélection vers un projet réel du registre.
+ * Priorité : ID Grist → nom exact → libellé "N - Nom" → numéro unique.
+ * Retourne null si aucune correspondance fiable n'est trouvée.
+ */
+function resolveProjectFromRegistry(key, id = null) {
+  // 1. Par ID Grist (le plus précis).
+  const numId = Number(id);
+  if (Number.isInteger(numId) && numId > 0) {
+    const byId = _gristProjectRegistry.find((p) => p.id === numId);
+    if (byId) return byId;
+  }
+
+  const requested = normalizeProjectSelectionKey(String(key || "").trim());
+  if (!requested) return null;
+
+  // 2. Par nom exact (insensible à la casse et aux accents).
+  const byName = _gristProjectRegistry.find(
+    (p) => normalizeProjectSelectionKey(p.name) === requested
+  );
+  if (byName) return byName;
+
+  // 3. Par libellé complet "Numero - Nom".
+  const byLabel = _gristProjectRegistry.find(
+    (p) => normalizeProjectSelectionKey(p.label) === requested
+  );
+  if (byLabel) return byLabel;
+
+  // 4. Par numéro — seulement si ce numéro est unique dans le registre.
+  const requestedNum = normalizeNumericProjectSelectionKey(requested);
+  if (requestedNum) {
+    const byNumber = _gristProjectRegistry.filter(
+      (p) => p.number && normalizeNumericProjectSelectionKey(p.number) === requestedNum
+    );
+    if (byNumber.length === 1) return byNumber[0]; // ambigu si > 1 → pas de sélection
+  }
+
+  return null;
+}
+
+/** Lit l'ID Grist partagé depuis localStorage. */
+function readSharedProjectId() {
+  try {
+    const raw = localStorage.getItem("grist.selected-project-id");
+    const id = Number(raw);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  } catch (_e) {
+    return null;
   }
 }
 
-function mergeProjectKeys(...projectKeyLists) {
-  const projectsByKey = new Map();
+/**
+ * Retourne le projet réel qui correspond à la sélection partagée actuelle.
+ * Lit d'abord l'ID canonique, puis le nom en fallback.
+ */
+function getRequestedSharedProject() {
+  const id = readSharedProjectId();
+  const name = readSharedProjectSelection();
+  const resolved = resolveProjectFromRegistry(name, id);
+  if (resolved) return resolved;
 
-  projectKeyLists.flat().forEach((projectKey) => {
-    const normalizedProject = String(projectKey || "").trim();
-    const lookupKey = normalizeProjectSelectionKey(normalizedProject);
-    if (normalizedProject && !projectsByKey.has(lookupKey)) {
-      rememberProjectAliases(normalizedProject, [
-        getProjectNamePart(normalizedProject),
-        getProjectNumberPart(normalizedProject),
-      ]);
-      projectsByKey.set(lookupKey, normalizedProject);
-    }
-  });
-
-  return [...projectsByKey.values()].sort((left, right) =>
-    left.localeCompare(right, "fr", { sensitivity: "base", numeric: true })
-  );
-}
-
-function getRequestedSharedProjectKey() {
-  return (
-    readSharedProjectSelection() ||
+  // Fallback : projet actuellement chargé dans une iframe Planning Projet.
+  const planningProject =
     state.planningApi?.getSelectedProject?.() ||
     state.planningAxisApi?.getSelectedProject?.() ||
-    ""
-  );
+    "";
+  if (planningProject) {
+    return resolveProjectFromRegistry(planningProject, null);
+  }
+  return null;
 }
 
-async function applyRestoredSharedProject(projectKeys = []) {
-  const requestedSavedProjectKey = getRequestedSharedProjectKey();
-  let savedProjectKey = findAvailableProjectKey(projectKeys, requestedSavedProjectKey);
+/**
+ * Reconstruit la liste du sélecteur uniquement depuis le registre Grist.
+ * Aucune option fantôme n'est créée.
+ */
+function renderProjectOptionsFromRegistry(selectedProject = null) {
+  if (!(dom.projectSelectEl instanceof HTMLSelectElement)) return;
 
-  // Si le projet n'est pas trouvé dans la liste actuelle (liste vide ou format différent),
-  // tenter un re-fetch direct depuis Grist pour avoir la liste à jour.
-  if (!savedProjectKey && requestedSavedProjectKey) {
-    try {
-      const freshKeys = await fetchProjectKeysFromGrist();
-      savedProjectKey = findAvailableProjectKey(freshKeys, requestedSavedProjectKey);
-      if (savedProjectKey && freshKeys.length) {
-        const mergedKeys = mergeProjectKeys(projectKeys, freshKeys);
-        renderProjectOptions(mergedKeys, savedProjectKey, _projectDisplayByKey);
-      }
-    } catch (_e) {
-      // Ignorer silencieusement
-    }
-  }
+  dom.projectSelectEl.innerHTML = "";
 
-  if (!savedProjectKey) {
-    return false;
-  }
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Choisir un projet";
+  placeholder.selected = !selectedProject;
+  dom.projectSelectEl.appendChild(placeholder);
 
-  setActiveProjectSelection(savedProjectKey);
+  const sorted = [..._gristProjectRegistry].sort((a, b) =>
+    a.label.localeCompare(b.label, "fr", { sensitivity: "base", numeric: true })
+  );
+
+  sorted.forEach((p) => {
+    const opt = document.createElement("option");
+    opt.value = p.name;
+    opt.textContent = p.label;
+    opt.dataset.projectId = String(p.id);
+    const isSelected = Boolean(selectedProject && selectedProject.id === p.id);
+    opt.selected = isSelected;
+    if (isSelected) opt.setAttribute("selected", "selected");
+    dom.projectSelectEl.appendChild(opt);
+  });
+
+  dom.projectSelectEl.value = selectedProject ? selectedProject.name : "";
+  dom.projectSelectEl.disabled = _gristProjectRegistry.length === 0;
+}
+
+/**
+ * Planifie une réconciliation de la sélection avec un délai de 50 ms.
+ * Coalesce les événements storage nom + ID déclenchés simultanément.
+ */
+function scheduleStorageReconciliation() {
+  if (_storageReconcileTimer) window.clearTimeout(_storageReconcileTimer);
+  _storageReconcileTimer = window.setTimeout(() => {
+    _storageReconcileTimer = 0;
+    if (!state.projectSyncInProgress) void refreshProjectsAndApplySharedSelection();
+  }, 50);
+}
+
+async function applyRestoredSharedProject() {
+  const project = getRequestedSharedProject();
+  if (!project) return false;
+
+  renderProjectOptionsFromRegistry(project);
   setProjectContentVisibility(true);
-  await applySelectedProjectFromHub(savedProjectKey);
+  await applySelectedProjectFromHub(project);
   return true;
 }
 
-async function applySelectedProjectFromHub(projectKey = "") {
-  const normalizedProjectKey = String(projectKey || "").trim();
-  if (!normalizedProjectKey) {
+async function applySelectedProjectFromHub(projectOrKey) {
+  // Accepte soit un objet projet {id, name, ...} soit une chaîne (compatibilité).
+  const project =
+    projectOrKey && typeof projectOrKey === "object"
+      ? projectOrKey
+      : resolveProjectFromRegistry(String(projectOrKey || "").trim(), null);
+
+  const canonicalName = project?.name || String(projectOrKey || "").trim();
+  if (!canonicalName) {
     clearSharedProjectSelection();
     return;
   }
 
-  await applySharedProject(normalizedProjectKey);
+  // Écrire les deux clés dans localStorage pour la cohérence inter-widgets.
+  if (project?.id) {
+    try {
+      localStorage.setItem("grist.selected-project-id", String(project.id));
+      localStorage.setItem("grist.selected-project", canonicalName);
+    } catch (_e) {}
+  }
+
+  await applySharedProject(canonicalName);
   await refreshPlanningAggregatePresentation();
 }
 
 /**
- * Recharge la liste des projets depuis Grist + planningApi, puis applique la
- * sélection partagée. À utiliser dans les handlers (storage, pageshow, focus,
- * visibilitychange) pour éviter la liste périmée capturée au bootstrap.
+ * Recharge la table Projets depuis Grist, reconstruit le sélecteur et
+ * applique la sélection partagée. Utilisé par les listeners storage / focus /
+ * visibilitychange / pageshow pour éviter une liste périmée.
  */
-async function refreshProjectKeysAndApplySharedSelection() {
+async function refreshProjectsAndApplySharedSelection() {
   if (state.projectSyncInProgress) return;
   try {
-    const [gristKeys, planningKeys] = await Promise.all([
-      fetchProjectKeysFromGrist().catch(() => []),
-      Promise.resolve(state.planningApi?.listProjects?.() || []),
-    ]);
-    const freshKeys = mergeProjectKeys(planningKeys, gristKeys);
-    if (freshKeys.length) {
-      const selectedFreshProjectKey =
-        findAvailableProjectKey(freshKeys, state.activeProjectKey) || state.activeProjectKey;
-      renderProjectOptions(freshKeys, selectedFreshProjectKey, _projectDisplayByKey);
-    }
-    await applyRestoredSharedProject(freshKeys.length ? freshKeys : []);
+    await fetchProjectsFromGrist();
+    const currentProject = resolveProjectFromRegistry(state.activeProjectKey || "", null);
+    renderProjectOptionsFromRegistry(currentProject);
+    await applyRestoredSharedProject();
   } catch (err) {
-    console.warn("refreshProjectKeysAndApplySharedSelection :", err);
+    console.warn("refreshProjectsAndApplySharedSelection :", err);
   }
 }
 
@@ -613,6 +709,16 @@ export async function bootstrapHubApp() {
       window.grist.ready({ requiredAccess: "full" });
     }
 
+    // Charger la liste des projets immédiatement après grist.ready(), sans attendre les
+    // iframes de planning — comme tous les autres widgets (Avancement, Reference2, etc.).
+    await fetchProjectsFromGrist();
+    const initialProject = getRequestedSharedProject();
+    renderProjectOptionsFromRegistry(initialProject);
+    setProjectContentVisibility(Boolean(initialProject));
+    if (initialProject) {
+      state.requestedProjectKey = initialProject.name;
+    }
+
     setHubStatus("Connexion aux plannings...");
 
     [state.planningApi, state.planningAxisApi] = await Promise.all([
@@ -628,19 +734,6 @@ export async function bootstrapHubApp() {
     bindPlanningAggregateToggle();
     void applyPlanningAggregateModeFromToggle();
 
-    const planningProjects = mergeProjectKeys(
-      state.planningApi.listProjects?.() || [],
-      await fetchProjectKeysFromGrist()
-    );
-    const initiallySelectedProjectKey = findAvailableProjectKey(
-      planningProjects,
-      getRequestedSharedProjectKey()
-    );
-    renderProjectOptions(planningProjects, initiallySelectedProjectKey, _projectDisplayByKey);
-    setProjectContentVisibility(Boolean(initiallySelectedProjectKey));
-    if (initiallySelectedProjectKey) {
-      state.requestedProjectKey = initiallySelectedProjectKey;
-    }
     syncSharedPlanningControlsAvailability();
 
     // Subscription Planning Projet main → synchro planning-axis + gestion-depenses2
@@ -687,13 +780,13 @@ export async function bootstrapHubApp() {
     }
 
     // Appliquer le projet partagé avant de lancer gestion-depenses2 pour que
-    // getDesiredProjectKey() retourne déjà le bon projet (state.activeProjectKey défini).
-    const requestedSavedProjectKey = getRequestedSharedProjectKey();
-    if (await applyRestoredSharedProject(planningProjects)) {
+    // son API reçoive déjà le bon projet (state.activeProjectKey défini).
+    const hasStoredProject = Boolean(readSharedProjectId() || readSharedProjectSelection());
+    if (await applyRestoredSharedProject()) {
       // Projet restauré depuis la sélection commune.
-    } else if (requestedSavedProjectKey && planningProjects.length) {
-      setHubStatus("Projet mémorisé introuvable dans la synchronisation.");
-    } else if (planningProjects.length) {
+    } else if (hasStoredProject) {
+      setHubStatus("Projet mémorisé introuvable.");
+    } else if (_gristProjectRegistry.length) {
       setHubStatus("Choisis un projet pour afficher les plannings.");
     } else {
       clearSharedProjectSelection();
@@ -709,11 +802,11 @@ export async function bootstrapHubApp() {
         state.planningAxisApi?.getSelectedProject?.() ||
         "";
       if (planningCurrentProject) {
-        const matched = findAvailableProjectKey(planningProjects, planningCurrentProject)
-          || planningCurrentProject;
+        const resolvedFallback = resolveProjectFromRegistry(planningCurrentProject, null);
+        const matched = resolvedFallback?.name || planningCurrentProject;
         state.activeProjectKey = matched;
         state.requestedProjectKey = matched;
-        setActiveProjectSelection(matched);
+        if (resolvedFallback) renderProjectOptionsFromRegistry(resolvedFallback);
         setProjectContentVisibility(true);
       }
     }
@@ -724,43 +817,32 @@ export async function bootstrapHubApp() {
     // --- Listeners de synchronisation cross-widget ---
 
     // Synchro en temps réel : un autre widget change le projet dans localStorage.
+    // Les deux clés (nom + ID) sont regroupées avec un debounce de 50 ms pour
+    // éviter un double refresh quand les deux sont écrites simultanément.
     window.addEventListener("storage", (event) => {
-      if (state.projectSyncInProgress) return;
-      // Priorité : clé ID canonique
-      if (event.key === "grist.selected-project-id" && event.newValue) {
-        const id = Number(event.newValue);
-        if (Number.isInteger(id) && id > 0) {
-          void refreshProjectKeysAndApplySharedSelection();
-        }
-        return;
-      }
-      if (event.key !== "grist.selected-project" || !event.newValue) return;
-      const requested = normalizeProjectSelectionKey(String(event.newValue).trim());
-      const active   = normalizeProjectSelectionKey(state.activeProjectKey || "");
-      if (requested && requested !== active) {
-        // Relire la liste depuis Grist pour éviter la liste périmée du bootstrap.
-        void refreshProjectKeysAndApplySharedSelection();
+      if (event.key === "grist.selected-project-id" || event.key === "grist.selected-project") {
+        scheduleStorageReconciliation();
       }
     });
 
     // Synchro quand synchronisation-plannings redevient visible (navigation Grist).
     window.addEventListener("pageshow", () => {
       if (!state.projectSyncInProgress) {
-        void refreshProjectKeysAndApplySharedSelection();
+        void refreshProjectsAndApplySharedSelection();
       }
     });
 
     // Synchro sur changement de visibilité (passage d'onglet Grist).
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && !state.projectSyncInProgress) {
-        void refreshProjectKeysAndApplySharedSelection();
+        void refreshProjectsAndApplySharedSelection();
       }
     });
 
     // Synchro sur focus fenêtre (comme Avancement, Reference2, etc.).
     window.addEventListener("focus", () => {
       if (!state.projectSyncInProgress) {
-        void refreshProjectKeysAndApplySharedSelection();
+        void refreshProjectsAndApplySharedSelection();
       }
     });
 
