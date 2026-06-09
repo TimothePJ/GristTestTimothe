@@ -12,7 +12,7 @@ const SELECTORS = {
 };
 
 const TABLES = {
-  projects: 'Projets',
+  projects: 'Projets2',
   budget: 'Budget',
   projectTeam: 'ProjectTeam',
   timeReal: 'TimeReal',
@@ -364,7 +364,7 @@ async function fetchProjectConfig(selectedProject) {
     if (!projectRow) {
       return createProjectConfig({
         canSave: false,
-        warning: 'Projet introuvable dans la table Projets.',
+        warning: 'Projet introuvable dans la table Projets2.',
       });
     }
 
@@ -373,7 +373,7 @@ async function fetchProjectConfig(selectedProject) {
         id: projectRow[PROJECT_COLUMNS.id],
         projectNumber: normalizeText(projectRow[PROJECT_COLUMNS.projectNumber]),
         canSave: false,
-        warning: 'Colonne Projets.Avancement introuvable.',
+        warning: 'Colonne Projets2.Avancement introuvable.',
       });
     }
 
@@ -386,11 +386,11 @@ async function fetchProjectConfig(selectedProject) {
       budgetProgress: parsedConfig.budgetProgress,
       canSave: !parsedConfig.error,
       warning: parsedConfig.error
-        ? 'JSON invalide dans Projets.Avancement. Corrige ou vide la cellule.'
+        ? 'JSON invalide dans Projets2.Avancement. Corrige ou vide la cellule.'
         : '',
     });
   } catch (error) {
-    console.error('Erreur chargement Projets.Avancement :', error);
+    console.error('Erreur chargement Projets2.Avancement :', error);
     return createProjectConfig({
       canSave: false,
       warning: 'Impossible de charger la configuration Avancement du projet.',
@@ -1374,7 +1374,7 @@ async function saveAvancementConfig({ selections, budgetProgress, successMessage
     state.selectionFeedback = { type: 'success', message: successMessage };
     await updateDashboard();
   } catch (error) {
-    console.error('Erreur sauvegarde Projets.Avancement :', error);
+    console.error('Erreur sauvegarde Projets2.Avancement :', error);
     setSelectionFeedback('error', 'Erreur lors de la sauvegarde.');
   } finally {
     setIndexSelectionControlsBusy(false);

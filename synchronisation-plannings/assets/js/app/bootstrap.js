@@ -462,11 +462,11 @@ function tableToRows(table) {
   });
 }
 
-// --- Registre de projets (source unique : table Grist "Projets") ---
+// --- Registre de projets (source unique : table Grist "Projets2") ---
 
 // Tableau canonique [{id, number, name, label}] chargé depuis Projets uniquement.
 let _gristProjectRegistry = [];
-// Coalescence : une seule requête active à la fois vers fetchTable("Projets").
+// Coalescence : une seule requête active à la fois vers fetchTable("Projets2").
 let _fetchProjectsInFlight = null;
 // Debounce pour les événements storage rapprochés (écriture nom + ID simultanée).
 let _storageReconcileTimer = 0;
@@ -493,7 +493,7 @@ async function fetchProjectsFromGrist() {
       if (!window.grist?.docApi || typeof window.grist.docApi.fetchTable !== "function") {
         return _gristProjectRegistry;
       }
-      const projectsTable = await window.grist.docApi.fetchTable("Projets");
+      const projectsTable = await window.grist.docApi.fetchTable("Projets2");
       const rows = tableToRows(projectsTable);
 
       _gristProjectRegistry = rows
@@ -519,7 +519,7 @@ async function fetchProjectsFromGrist() {
 
       return _gristProjectRegistry;
     } catch (error) {
-      console.warn("Impossible de charger la liste Projets :", error);
+      console.warn("Impossible de charger la liste Projets2 :", error);
       return _gristProjectRegistry;
     } finally {
       _fetchProjectsInFlight = null;

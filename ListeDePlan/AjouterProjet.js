@@ -108,7 +108,7 @@
 
   // Trouve l'ID du projet courant depuis le libellé exact
   async function resolveProjectId(projectName) {
-    const t = await grist.docApi.fetchTable("Projets");
+    const t = await grist.docApi.fetchTable("Projets2");
     // format colonnes attendu: t.Nom_de_projet[], t.id[]
     if (t && t.Nom_de_projet && t.id && Array.isArray(t.Nom_de_projet) && Array.isArray(t.id)) {
       const idx = t.Nom_de_projet.findIndex(p => String(p) === String(projectName));
@@ -156,7 +156,7 @@
   // Récupère les émetteurs déjà utilisés pour le projet dans References
   async function getProjectEmetteurs(projetId) {
     try {
-      const t = await grist.docApi.fetchTable('References');
+      const t = await grist.docApi.fetchTable('References2');
       let rows = [];
       if (t && Array.isArray(t.id) && Array.isArray(t.NomProjet) && Array.isArray(t.Emetteur)) {
         for (let i = 0; i < t.id.length; i++) {
@@ -369,7 +369,7 @@
     // 1) Ajouts dans References (un par émetteur)
     const actions = [];
     for (const em of selectedEmitters) {
-      actions.push(["AddRecord", "References", null, {
+      actions.push(["AddRecord", "References2", null, {
         // On écrit le LIBELLÉ du projet, pas l'ID (conforme à tes données)
         NomProjet: (STATE.projectId ?? STATE.projectName),  // Ref (id) si dispo, sinon libellé
         NomDocument: nom,

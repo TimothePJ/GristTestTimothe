@@ -9,7 +9,7 @@ let planningRealisationHelpersPromise = null;
 async function chargerProjetsMap() {
   if (projetsDictGlobal) return projetsDictGlobal;
 
-  const data = await grist.docApi.fetchTable("Projets");
+  const data = await grist.docApi.fetchTable("Projets2");
   projetsDictGlobal = {};
 
   if (data && data.id && data.Nom_de_projet) {
@@ -845,7 +845,7 @@ async function buildReferencesTextUpdateActions({
   zone
 }) {
   try {
-    const referencesRaw = await grist.docApi.fetchTable("References");
+    const referencesRaw = await grist.docApi.fetchTable("References2");
     const referenceRows = normalizeRows(referencesRaw);
     const referenceColumns = getColumnNames(referencesRaw, referenceRows);
 
@@ -876,7 +876,7 @@ async function buildReferencesTextUpdateActions({
     const projectId = projetsMap?.[normalizeText(nomProjet)] ?? null;
 
     return buildDocumentTextSyncActions({
-      tableName: "References",
+      tableName: "References2",
       rows: referenceRows,
       updateFields,
       cellIndex,
@@ -891,10 +891,10 @@ async function buildReferencesTextUpdateActions({
       nomProjet,
       zone,
       projectId,
-      warningLabel: "References"
+      warningLabel: "References2"
     });
   } catch (err) {
-    console.error("Erreur lors de la préparation de la synchro vers References :", err);
+    console.error("Erreur lors de la préparation de la synchro vers References2 :", err);
     return [];
   }
 }
@@ -989,7 +989,7 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
 
     const listeRaw = await grist.docApi.fetchTable("ListePlan_NDC_COF");
     const planningRaw = await grist.docApi.fetchTable("Planning_Projet");
-    const projetsRaw = await grist.docApi.fetchTable("Projets");
+    const projetsRaw = await grist.docApi.fetchTable("Projets2");
 
     const listeRows = normalizeRows(listeRaw);
     const planningRows = normalizeRows(planningRaw);
@@ -1628,7 +1628,7 @@ document.addEventListener("click", async (e) => {
                 ["UpdateRecord", "ListePlan_NDC_COF", recordIdInt, fieldsToUpdate],
 
                 // (je conserve ton AddRecord dans References, mais sans rowData)
-                // ["AddRecord", "References", null, {
+                // ["AddRecord", "References2", null, {
                 //   NomProjet: nomProjet,
                 //   NomDocument: Designation,
                 //   NumeroDocument: (() => {
@@ -1646,7 +1646,7 @@ document.addEventListener("click", async (e) => {
                 ["UpdateRecord", "ListePlan_NDC_COF", recordIdInt, { DateDiffusion: isoDate }],
 
                 // (je conserve ton AddRecord dans References, mais sans rowData)
-                // ["AddRecord", "References", null, {
+                // ["AddRecord", "References2", null, {
                 //   NomProjet: nomProjet,
                 //   NomDocument: Designation,
                 //   NumeroDocument: (() => {
@@ -1703,7 +1703,7 @@ document.addEventListener("click", async (e) => {
         try {
           await grist.docApi.applyUserActions([
             ["AddRecord", "ListePlan_NDC_COF", null, rowData],
-            // ["AddRecord", "References", null, {
+            // ["AddRecord", "References2", null, {
             //   NomProjet: rowData.Nom_projet,
             //   NomDocument: rowData.Designation,
             //   NumeroDocument: (() => {

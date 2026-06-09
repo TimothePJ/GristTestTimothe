@@ -210,7 +210,7 @@ window.LISTE_DE_PLAN_ALL_ZONES_LABEL = "Toutes les zones";
 window.LISTE_DE_PLAN_NO_ZONE_VALUE = "__NO_ZONE__";
 window.LISTE_DE_PLAN_NO_ZONE_LABEL = "Sans zone";
 
-const MANAGE_ZONE_REFERENCES_TABLE = "References";
+const MANAGE_ZONE_REFERENCES_TABLE = "References2";
 const MANAGE_ZONE_LISTEPLAN_TABLE_CANDIDATES = [
   "ListePlan_NDC_COF",
   "ListePlan NDC+COF",
@@ -592,7 +592,7 @@ async function refreshProjectDropdownFromProjectsTable() {
   try {
     if (!grist?.docApi || typeof grist.docApi.fetchTable !== "function") return;
 
-    const rawProjects = await grist.docApi.fetchTable("Projets");
+    const rawProjects = await grist.docApi.fetchTable("Projets2");
     const ids = Array.isArray(rawProjects?.id) ? rawProjects.id : [];
     const numbers = Array.isArray(rawProjects?.Numero_de_projet) ? rawProjects.Numero_de_projet : [];
     const names = Array.isArray(rawProjects?.Nom_de_projet) ? rawProjects.Nom_de_projet : [];
@@ -882,7 +882,7 @@ async function buildZoneManageProjectAliasKeys(projectName) {
   const projectKey = normalizeManageProjectKey(projectName);
 
   try {
-    const raw = await grist.docApi.fetchTable("Projets");
+    const raw = await grist.docApi.fetchTable("Projets2");
     const rows = normalizeManageRows(raw);
     const columnNames = collectManageColumnNames(rows);
     const projectCol = findManageColumn(columnNames, [

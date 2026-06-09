@@ -407,7 +407,7 @@ setSecondDropdownDisabled(true);
 async function refreshProjectDropdownFromProjectsTable() {
   try {
     if (!grist?.docApi || typeof grist.docApi.fetchTable !== "function") return;
-    const table = await grist.docApi.fetchTable("Projets");
+    const table = await grist.docApi.fetchTable("Projets2");
     const ids = Array.isArray(table?.id) ? table.id : [];
     const numbers = Array.isArray(table?.Numero_de_projet) ? table.Numero_de_projet : [];
     const names = Array.isArray(table?.Nom_de_projet) ? table.Nom_de_projet : [];
@@ -423,7 +423,7 @@ async function refreshProjectDropdownFromProjectsTable() {
     populateFirstColumnDropdown(_projectsData);
     selectedProject = firstDropdown.value || selectedProject || "";
   } catch (err) {
-    console.warn("EnAttente: impossible de charger la liste Projets :", err);
+    console.warn("EnAttente: impossible de charger la liste Projets2 :", err);
   }
 }
 

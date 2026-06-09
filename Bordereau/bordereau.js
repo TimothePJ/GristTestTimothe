@@ -11,7 +11,7 @@ let allProjects = [];
 
 const BORDEREAU_TABLE = "Envois";
 const PLANS_TABLE = "ListePlan_NDC_COF";
-const PROJET_TABLE = "Projets";
+const PROJET_TABLE = "Projets2";
 const SHARED_PROJECT_STORAGE_KEY = "grist.selected-project";
 const SHARED_PROJECT_ID_STORAGE_KEY = "grist.selected-project-id";
 let _projectsData = []; // [{id, number, name}]

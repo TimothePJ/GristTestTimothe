@@ -164,7 +164,7 @@
       return cachedProjectZones;
     }
     try {
-      const refs = await grist.docApi.fetchTable('References');
+      const refs = await grist.docApi.fetchTable('References2');
       const projs = refs.NomProjet || [];
       const zones = refs.Zone || [];
       const p = _norm(projectName);
@@ -587,7 +587,7 @@
     const defaultEmetteurs = await getDefaultEmetteurs();
     let projectEmetteurs = [];
     try {
-      const refs = await grist.docApi.fetchTable('References');
+      const refs = await grist.docApi.fetchTable('References2');
       const projs = refs.NomProjet || [];
       const emetteurs = refs.Emetteur || [];
       const p = _norm(projectName);
@@ -919,7 +919,7 @@
   // ============================================================
   async function refreshProjectsTableCache() {
     try {
-      projetsTableCache = await grist.docApi.fetchTable('Projets');
+      projetsTableCache = await grist.docApi.fetchTable('Projets2');
     } catch (_e) {
       projetsTableCache = null;
     }
@@ -997,7 +997,7 @@
     if (mergedTypeDocValue === currentTypeDocValue) return [];
 
     const ids = Array.isArray(projetsTable.id) ? projetsTable.id : [];
-    return rowIndexes.map((i) => ['UpdateRecord', 'Projets', ids[i], { TypeDoc: mergedTypeDocValue }]);
+    return rowIndexes.map((i) => ['UpdateRecord', 'Projets2', ids[i], { TypeDoc: mergedTypeDocValue }]);
   }
 
   async function getTeamService() {
@@ -1136,7 +1136,7 @@
     uniqueDocuments.forEach((doc) => {
       const numeroValue = parseNumeroForStorage(doc.documentNumber);
       normalizedEmitters.forEach((emetteur) => {
-        actions.push(['AddRecord', 'References', null, {
+        actions.push(['AddRecord', 'References2', null, {
           NomProjet: normalizedProject,
           NomDocument: doc.documentName,
           NumeroDocument: numeroOrZero(numeroValue),

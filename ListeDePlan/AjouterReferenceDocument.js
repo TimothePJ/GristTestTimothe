@@ -44,7 +44,7 @@
   // =======================
   async function loadProjetsTable() {
     if (state.projets) return state.projets;
-    const t = await grist.docApi.fetchTable("Projets");
+    const t = await grist.docApi.fetchTable("Projets2");
     const ids = t.id || [];
     const cols = t.columns || {};
     const names = Array.isArray(cols.Nom_de_projet) ? cols.Nom_de_projet.map(v => String(v == null ? "" : v).trim()) : [];
@@ -321,7 +321,7 @@
 
     const actions = [
       // 1) Table des references
-      ["AddRecord", "References", null, {
+      ["AddRecord", "References2", null, {
         NomProjet: projetId,      // Ref (ID projet)
         NomDocument: nom,
         NumeroDocument: String(numeroStr)

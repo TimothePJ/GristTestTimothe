@@ -1,5 +1,5 @@
 const TEAM_TABLE = 'Team';
-const PROJECTS_TABLE = 'Projets';
+const PROJECTS_TABLE = 'Projets2';
 const EMETTEURS_TABLE = 'Emetteurs';
 const DOP_REGISTRY_ROW_ID = 1;
 const DEFAULT_DOP_VALUES = ['1', '2', '3', '4', '5'];
@@ -606,7 +606,7 @@ async function loadProjectsForDop(selectedProjectKey = '') {
     if (!hasColumn(snapshot.columnNames, PROJECT_NAME_COLUMN)) {
       projectRecords = [];
       populateProjectSelect('');
-      setDopStatus('Colonne Nom_de_projet introuvable dans Projets.', 'error');
+      setDopStatus('Colonne Nom_de_projet introuvable dans Projets2.', 'error');
       return;
     }
 
@@ -676,7 +676,7 @@ async function handleApplyDop() {
     emitDopDataChange('project-dop-updated');
     await loadProjectsForDop(selectedProject.key);
     setDopStatus(
-      `${formatDopLabel(dopValue)} enregistree uniquement dans Projets.DOP pour "${selectedProject.name}".`,
+      `${formatDopLabel(dopValue)} enregistree uniquement dans Projets2.DOP pour "${selectedProject.name}".`,
       'success'
     );
   } finally {

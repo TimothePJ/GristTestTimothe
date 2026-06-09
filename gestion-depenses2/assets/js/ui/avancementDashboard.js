@@ -248,7 +248,7 @@ function getProjectConfig(project) {
     budgetProgress: parsedConfig.budgetProgress,
     canSave: Boolean(project?.id) && !parsedConfig.error,
     warning: parsedConfig.error
-      ? "JSON invalide dans Projets.Avancement. Corrige ou vide la cellule."
+      ? "JSON invalide dans Projets2.Avancement. Corrige ou vide la cellule."
       : "",
   };
 }
@@ -1056,7 +1056,7 @@ async function saveAvancementConfig(
     setProjectFeedback(project, "success", successMessage || "Configuration mise a jour.");
     renderAvancementDashboard(rootEl, project, options);
   } catch (error) {
-    console.error("Erreur sauvegarde Projets.Avancement :", error);
+    console.error("Erreur sauvegarde Projets2.Avancement :", error);
     setProjectFeedback(project, "error", "Erreur lors de la sauvegarde.");
     renderAvancementDashboard(rootEl, project, options);
   } finally {

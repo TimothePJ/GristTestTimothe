@@ -4,7 +4,7 @@ export const APP_CONFIG = {
 
   grist: {
     projectsTable: {
-      sourceTable: "Projets",
+      sourceTable: "Projets2",
       columns: {
         project: "Nom_de_projet",
         projectNumber: "Numero_de_projet",

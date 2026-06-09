@@ -383,7 +383,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function refreshProjectTypeDocSuggestions() {
         try {
-            const projetsTable = await grist.docApi.fetchTable('Projets');
+            const projetsTable = await grist.docApi.fetchTable('Projets2');
             const names = getTableColumnArray(projetsTable, 'Nom_de_projet');
             const numbers = getTableColumnArray(projetsTable, 'Numero_de_projet');
             const typeDocs = getTableColumnArray(projetsTable, 'TypeDoc');
@@ -2358,7 +2358,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             projectData.name = cleanProjectName(projectData.name);
             projectData.number = (projectData.number ?? "").toString().trim();
-            const projetsTable = await grist.docApi.fetchTable("Projets");
+            const projetsTable = await grist.docApi.fetchTable("Projets2");
             const projetsColumns = getTableColumnNames(projetsTable);
             const projectFields = {
                 Nom_de_projet: projectData.name,
@@ -2368,7 +2368,7 @@ document.addEventListener('DOMContentLoaded', () => {
             setFieldIfPresent(projetsColumns, projectFields, 'TypeDoc', serializeProjectTypeDocValue(projectData.documents));
             // 1. Create Project
             const projectActions = [
-                ["AddRecord", "Projets", null, projectFields]
+                ["AddRecord", "Projets2", null, projectFields]
             ];
             await grist.docApi.applyUserActions(projectActions);
 
@@ -2392,7 +2392,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // 4. Create References (documents x emitters)
-            const refTable = await grist.docApi.fetchTable("References");
+            const refTable = await grist.docApi.fetchTable("References2");
             const refCols = new Set(Object.keys(refTable)); // colonnes existantes dans Grist
 
             const descCol =
@@ -2426,7 +2426,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (!refCols.has(key)) delete row[key];
                     }
 
-                    referencesActions.push(["AddRecord", "References", null, row]);
+                    referencesActions.push(["AddRecord", "References2", null, row]);
                 }
             }
 

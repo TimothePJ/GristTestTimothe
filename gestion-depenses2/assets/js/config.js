@@ -66,7 +66,7 @@ export const APP_CONFIG = {
   ],
   grist: {
     tables: {
-      projects: "Projets",
+      projects: "Projets2",
       budget: "Budget",
       listePlan: "ListePlan_NDC_COF",
       planningProject: "Planning_Projet",

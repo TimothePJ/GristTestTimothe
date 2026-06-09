@@ -1,7 +1,7 @@
 import { APP_CONFIG } from "../config.js";
 import { normalizePlanningDocumentType } from "../../../../gestion-depenses2/assets/js/utils/planningRealisation.js";
 
-const REFERENCES_TABLE_NAME = "References";
+const REFERENCES_TABLE_NAME = "References2";
 const REFERENCE_EMPTY_DATE_ISO = "1900-01-01";
 const REFERENCE_DATA_CHANGE_STORAGE_KEY = "grist.references-data-change";
 const DAY_MS = 86400000;

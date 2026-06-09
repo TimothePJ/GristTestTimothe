@@ -46,7 +46,7 @@ function createProjectNumberIndex(projects) {
 
     if (index.has(project.projectNumber)) {
       console.warn(
-        "Numero de projet duplique detecte dans Projets :",
+        "Numero de projet duplique detecte dans Projets2 :",
         project.projectNumber
       );
     }

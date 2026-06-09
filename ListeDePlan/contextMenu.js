@@ -164,7 +164,7 @@ async function buildLinkedDeletionActions({
   const projectId = await getContextMenuProjectId(nomProjet);
 
   try {
-    const referencesRaw = await grist.docApi.fetchTable("References");
+    const referencesRaw = await grist.docApi.fetchTable("References2");
     const referenceRows = normalizeContextMenuRows(referencesRaw);
     const referenceColumns = getContextMenuColumnNames(referencesRaw, referenceRows);
 
@@ -188,12 +188,12 @@ async function buildLinkedDeletionActions({
           zone,
           projectId
         })) {
-          actions.push(["RemoveRecord", "References", row.id]);
+          actions.push(["RemoveRecord", "References2", row.id]);
         }
       }
     }
   } catch (err) {
-    console.error("Erreur lors de la préparation de suppression dans References :", err);
+    console.error("Erreur lors de la préparation de suppression dans References2 :", err);
   }
 
   try {

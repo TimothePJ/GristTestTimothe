@@ -670,7 +670,7 @@ async function refreshReferencesNumeroCache() {
   if (__refsDocNumCacheInFlight) return __refsDocNumCacheInFlight;
   __refsDocNumCacheInFlight = (async () => {
     try {
-      const table = await grist.docApi.fetchTable('References');
+      const table = await grist.docApi.fetchTable('References2');
       const projects = table.NomProjet || [];
       const documents = table.NomDocument || [];
       const numbers = table.NumeroDocument || [];
@@ -1457,7 +1457,7 @@ async function reconcileReferenceRetards() {
       if (referenceRetardStoredValueMatches(record?.Retard, nextRetard)) return;
 
       record.Retard = nextRetard;
-      actions.push(['UpdateRecord', 'References', recordId, { Retard: nextRetard }]);
+      actions.push(['UpdateRecord', 'References2', recordId, { Retard: nextRetard }]);
     });
 
     if (!actions.length) return;
@@ -1465,7 +1465,7 @@ async function reconcileReferenceRetards() {
     populateTable();
     await applyUserActionsInChunks(actions);
   } catch (error) {
-    console.error('Erreur synchronisation References.Retard :', error);
+    console.error('Erreur synchronisation References2.Retard :', error);
   } finally {
     referenceRetardReconcileInFlight = false;
     if (referenceRetardReconcilePending) {
@@ -1549,7 +1549,7 @@ function normalizeReferenceActionFieldsForRetard(action, fields) {
 
 async function refreshProjectsTableCache() {
   try {
-    projetsTableCache = await grist.docApi.fetchTable('Projets');
+    projetsTableCache = await grist.docApi.fetchTable('Projets2');
   } catch (error) {
     projetsTableCache = null;
     throw error;
@@ -1572,7 +1572,7 @@ async function refreshReferenceTypeSuggestionLists(projectName = selectedFirstVa
   try {
     await refreshProjectsTableCache();
   } catch (error) {
-    console.warn("Projets: impossible de recharger les types de documents.", error);
+    console.warn("Projets2: impossible de recharger les types de documents.", error);
   }
 
   const types = collectProjectDocumentTypes(
@@ -1601,7 +1601,7 @@ async function buildProjectTypeDocUpdateActions(projectName, types = []) {
   try {
     projetsTable = await refreshProjectsTableCache();
   } catch (error) {
-    console.warn("Projets: impossible de synchroniser TypeDoc.", error);
+    console.warn("Projets2: impossible de synchroniser TypeDoc.", error);
     return [];
   }
 
@@ -1633,7 +1633,7 @@ async function buildProjectTypeDocUpdateActions(projectName, types = []) {
       const recordId = ids[rowIndex];
       if (recordId == null) return null;
       projetsTable.TypeDoc[rowIndex] = mergedTypeDocValue;
-      return ['UpdateRecord', 'Projets', recordId, { TypeDoc: mergedTypeDocValue }];
+      return ['UpdateRecord', 'Projets2', recordId, { TypeDoc: mergedTypeDocValue }];
     })
     .filter(Boolean);
 }
@@ -2333,7 +2333,7 @@ async function createDocumentsBatch({
   uniqueDocuments.forEach((doc) => {
     const numeroValue = parseNumeroForStorage(doc.documentNumber);
     normalizedEmitters.forEach((emetteur) => {
-      actions.push(['AddRecord', 'References', null, withComputedReferenceRetard({
+      actions.push(['AddRecord', 'References2', null, withComputedReferenceRetard({
         NomProjet: normalizedProject,
         NomDocument: doc.documentName,
         NumeroDocument: numeroOrZero(numeroValue),
@@ -2673,7 +2673,7 @@ async function refreshProjectsDropdownFromProjets() {
       .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base', numeric: true }));
     populateFirstColumnDropdown(_projectsData);
   } catch (err) {
-    console.error("Erreur chargement Projets pour dropdown:", err);
+    console.error("Erreur chargement Projets2 pour dropdown:", err);
   }
 }
 
@@ -3019,7 +3019,7 @@ function populateTable() {
           const newValue = !value;
           try {
             await grist.docApi.applyUserActions([
-              ['UpdateRecord', 'References', record.id, { Bloquant: newValue }]
+              ['UpdateRecord', 'References2', record.id, { Bloquant: newValue }]
             ]);
             td.textContent = newValue ? '✓' : '';
           } catch (error) {
@@ -3038,7 +3038,7 @@ function populateTable() {
 
           try {
             await grist.docApi.applyUserActions([
-              ['UpdateRecord', 'References', record.id, { Archive: newValue }]
+              ['UpdateRecord', 'References2', record.id, { Archive: newValue }]
             ]);
 
             // Mise à jour locale immédiate (UX)
@@ -3312,7 +3312,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
           Service: serviceValue,
           Chemin: cheminFromAddFile
         });
-        userActions.push(['AddRecord', 'References', null, newRow]);
+        userActions.push(['AddRecord', 'References2', null, newRow]);
       });
     } else {
       const newRow = withComputedReferenceRetard({
@@ -3330,7 +3330,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
         DateLimite: datelimite,
         Service: serviceValue
       });
-      userActions.push(['AddRecord', 'References', null, newRow]);
+      userActions.push(['AddRecord', 'References2', null, newRow]);
     }
 
     await applyUserActionsInChunks(userActions);
@@ -3374,7 +3374,7 @@ document.getElementById('editRowDialog').addEventListener('submit', (e) => {
 
   if (selectedRecordId) {
     grist.docApi.applyUserActions([
-      ['UpdateRecord', 'References', selectedRecordId, updatedRow]
+      ['UpdateRecord', 'References2', selectedRecordId, updatedRow]
     ])
       .then(() => {
         console.log('Row updated successfully');
@@ -3402,7 +3402,7 @@ document.getElementById('archiveOption').addEventListener('click', async () => {
 
   try {
     await grist.docApi.applyUserActions([
-      ['UpdateRecord', 'References', selectedRecordId, { Archive: newValue }]
+      ['UpdateRecord', 'References2', selectedRecordId, { Archive: newValue }]
     ]);
 
     if (record) record.Archive = newValue;
@@ -3442,7 +3442,7 @@ document.getElementById('deleteOption').addEventListener('click', async () => {
   // Suppression après validation du mot de passe
   try {
     await grist.docApi.applyUserActions([
-      ['RemoveRecord', 'References', selectedRecordId]
+      ['RemoveRecord', 'References2', selectedRecordId]
     ]);
 
     console.log(`Ligne ${selectedRecordId} supprimée avec succès.`);
@@ -3717,7 +3717,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
     const actions = [];
     if (planAction) actions.push(planAction);
     planningActions.forEach((action) => actions.push(action));
-    newRows.forEach(row => actions.push(['AddRecord', 'References', null, row]));
+    newRows.forEach(row => actions.push(['AddRecord', 'References2', null, row]));
     const typeDocActions = await buildProjectTypeDocUpdateActions(selectedProject, [documentType]);
     typeDocActions.forEach((action) => actions.unshift(action));
     previousSelectionState = captureDocumentSelectionState();
@@ -3928,7 +3928,7 @@ document.getElementById('addProjectDialog').addEventListener('submit', async (e)
 
   try {
     const result = await grist.docApi.applyUserActions([
-      ['AddRecord', 'Projets', null, { 'Numero_de_projet': projectNumber, 'Nom_de_projet': projectName }]
+      ['AddRecord', 'Projets2', null, { 'Numero_de_projet': projectNumber, 'Nom_de_projet': projectName }]
     ]);
 
     const newProjectId = result.retValues[0];
@@ -4436,7 +4436,7 @@ document.getElementById('editRowDialog').addEventListener('submit', async (e) =>
     try {
       console.log("Mise à jour envoyée à Grist :", updatedRow);
       await grist.docApi.applyUserActions([
-        ['UpdateRecord', 'References', selectedRecordId, updatedRow]
+        ['UpdateRecord', 'References2', selectedRecordId, updatedRow]
       ]);
       console.log("Mise à jour réussie !");
       await populateTable();
@@ -5016,7 +5016,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
           Service: serviceValue
         });
 
-        actions.push(['AddRecord', 'References', null, newRow]);
+        actions.push(['AddRecord', 'References2', null, newRow]);
       });
     });
 
