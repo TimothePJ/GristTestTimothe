@@ -249,6 +249,10 @@ export async function fetchProjectsForDropdown() {
   return fetchTableRows(APP_CONFIG.grist.tables.projects);
 }
 
+export async function fetchDopRegistryRows() {
+  return fetchOptionalTableRows("Emetteurs");
+}
+
 // Charge les 8 tables de données (hors Projets), uniquement quand un projet est sélectionné.
 export async function fetchProjectDataTables() {
   const tables = APP_CONFIG.grist.tables;

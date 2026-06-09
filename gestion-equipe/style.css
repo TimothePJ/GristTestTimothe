@@ -31,6 +31,34 @@ body {
   min-width: 220px;
 }
 
+.dop-registry {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #d6e0ea;
+}
+
+.dop-registry-heading,
+.dop-registry-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.dop-registry-values {
+  color: #31516f;
+}
+
+.dop-registry-add label {
+  margin: 0;
+}
+
+.dop-registry-add input {
+  width: 120px;
+}
+
 .dop-status {
   margin-top: 10px;
   color: #31516f;

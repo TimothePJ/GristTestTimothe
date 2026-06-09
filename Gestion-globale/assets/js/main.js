@@ -1,4 +1,8 @@
-import { fetchExpenseAppTables, initGrist } from "../../../gestion-depenses2/assets/js/services/gristService.js";
+import {
+  fetchDopRegistryRows,
+  fetchExpenseAppTables,
+  initGrist,
+} from "../../../gestion-depenses2/assets/js/services/gristService.js";
 import {
   getProjectKpis,
 } from "../../../gestion-depenses2/assets/js/services/projectService.js";
@@ -37,9 +41,12 @@ const VIEW_STATE = (() => {
     monthSpan: 6,
   };
 })();
+const DOP_DATA_CHANGE_STORAGE_KEY = "grist.dop-data-changed";
+let dopReloadTimer = 0;
 
 const state = {
   projects: [],
+  dopRegistryRows: [],
   diagnostics: {
     dopConflicts: [],
     unmatchedRows: [],
@@ -312,7 +319,7 @@ function setStatus(message, isError = false) {
 }
 
 function renderDopButtons() {
-  const dopValues = getAvailableDopValues(state.projects);
+  const dopValues = getAvailableDopValues(state.dopRegistryRows);
   const buttons = [
     { value: "all", label: "TOUT" },
     { value: WITHOUT_DOP_FILTER, label: "Sans DOP" },
@@ -609,12 +616,20 @@ function bindEvents() {
 
 async function loadData() {
   setStatus("Chargement des projets...");
-  const tables = await fetchExpenseAppTables();
+  const previousSelectedProjectIds = new Set(state.selectedProjectIds);
+  const [tables, dopRegistryRows] = await Promise.all([
+    fetchExpenseAppTables(),
+    fetchDopRegistryRows(),
+  ]);
   const { projects, diagnostics } = buildGlobalExpenseData(tables);
 
   state.projects = projects;
+  state.dopRegistryRows = dopRegistryRows;
   state.diagnostics = diagnostics;
-  state.selectedProjectIds = new Set();
+  const availableProjectIds = new Set(projects.map(getProjectId).filter(Boolean));
+  state.selectedProjectIds = new Set(
+    [...previousSelectedProjectIds].filter((projectId) => availableProjectIds.has(projectId))
+  );
 
   const selectableProjectCount = projects.filter(isSelectableProject).length;
   const conflictLabels = (diagnostics?.dopConflicts || [])
@@ -633,12 +648,26 @@ async function loadData() {
   renderApp();
 }
 
+function scheduleDopDataReload() {
+  if (dopReloadTimer) window.clearTimeout(dopReloadTimer);
+  dopReloadTimer = window.setTimeout(() => {
+    dopReloadTimer = 0;
+    loadData().catch((error) => {
+      console.error("Erreur actualisation DOP Gestion-globale :", error);
+      setStatus("Impossible d'actualiser les DOP.", true);
+    });
+  }, 100);
+}
+
 async function bootstrap() {
   getDomRefs();
   bindEvents();
 
   try {
     initGrist();
+    window.addEventListener("storage", (event) => {
+      if (event.key === DOP_DATA_CHANGE_STORAGE_KEY) scheduleDopDataReload();
+    });
     await loadData();
   } catch (error) {
     console.error("Erreur initialisation Gestion-globale :", error);

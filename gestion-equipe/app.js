@@ -1,5 +1,9 @@
 const TEAM_TABLE = 'Team';
 const PROJECTS_TABLE = 'Projets';
+const EMETTEURS_TABLE = 'Emetteurs';
+const DOP_REGISTRY_ROW_ID = 1;
+const DEFAULT_DOP_VALUES = ['1', '2', '3', '4', '5'];
+const DOP_DATA_CHANGE_STORAGE_KEY = 'grist.dop-data-changed';
 const DOP_COLUMN = 'DOP';
 const PROJECT_NAME_COLUMN = 'Nom_de_projet';
 const PROJECT_NUMBER_COLUMN = 'Numero_de_projet';
@@ -7,7 +11,9 @@ const PROJECT_NUMBER_COLUMN = 'Numero_de_projet';
 let records = [];
 let selectedRecordId = null;
 let projectRecords = [];
+let dopRegistryValues = [];
 let dopApplyInProgress = false;
+let dopRegistryInProgress = false;
 
 function asText(value) {
   if (value == null) return '';
@@ -43,9 +49,60 @@ function normalizeDopValue(value) {
   return asText(value).replace(/^dop\s*/i, '').trim();
 }
 
+function normalizeDopKey(value) {
+  return normalizeDopValue(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('fr');
+}
+
+function parseDopRegistryValue(value) {
+  let values = [];
+  if (Array.isArray(value)) {
+    values = value[0] === 'L' ? value.slice(1) : value;
+  } else if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        values = Array.isArray(parsed) ? parsed : [trimmed];
+      } catch (_error) {
+        values = trimmed.split(/[,;\n]+/);
+      }
+    } else {
+      values = trimmed.split(/[,;\n]+/);
+    }
+  } else if (value != null) {
+    values = [value];
+  }
+
+  const byKey = new Map();
+  values.forEach((item) => {
+    const dop = normalizeDopValue(item);
+    const key = normalizeDopKey(dop);
+    if (key && !byKey.has(key)) byKey.set(key, dop);
+  });
+  return [...byKey.values()].sort((left, right) =>
+    left.localeCompare(right, 'fr', { numeric: true, sensitivity: 'base' })
+  );
+}
+
+function serializeDopRegistryValue(values) {
+  return parseDopRegistryValue(values).join(', ');
+}
+
 function formatDopLabel(value) {
   const dop = normalizeDopValue(value);
   return dop ? `DOP ${dop}` : 'Commun';
+}
+
+function emitDopDataChange(reason) {
+  try {
+    localStorage.setItem(DOP_DATA_CHANGE_STORAGE_KEY, JSON.stringify({
+      reason,
+      timestamp: Date.now(),
+    }));
+  } catch (_error) {}
 }
 
 function toBooleanFlag(value) {
@@ -392,14 +449,111 @@ function updateDopApplyButton() {
   applyButton.disabled = dopApplyInProgress || !getSelectedProject();
 }
 
+function renderDopRegistry() {
+  const valuesEl = document.getElementById('dopRegistryValues');
+  const dopValueSelect = document.getElementById('dopValueSelect');
+  const addButton = document.getElementById('addDopButton');
+  const input = document.getElementById('newDopValue');
+
+  if (valuesEl) {
+    valuesEl.textContent = dopRegistryValues.length
+      ? dopRegistryValues.map(formatDopLabel).join(', ')
+      : 'Aucune DOP';
+  }
+
+  if (dopValueSelect) {
+    const selectedValue = normalizeDopValue(dopValueSelect.value);
+    dopValueSelect.innerHTML = '';
+    const commonOption = document.createElement('option');
+    commonOption.value = '';
+    commonOption.textContent = 'Commun';
+    dopValueSelect.appendChild(commonOption);
+    dopRegistryValues.forEach((dop) => {
+      const option = document.createElement('option');
+      option.value = dop;
+      option.textContent = formatDopLabel(dop);
+      dopValueSelect.appendChild(option);
+    });
+    dopValueSelect.value = selectedValue;
+    if (dopValueSelect.value !== selectedValue) dopValueSelect.value = '';
+    dopValueSelect.disabled = dopApplyInProgress || dopRegistryInProgress;
+  }
+
+  if (addButton) addButton.disabled = dopRegistryInProgress;
+  if (input) input.disabled = dopRegistryInProgress;
+}
+
+async function loadDopRegistry({ initializeDefaults = true } = {}) {
+  dopRegistryInProgress = true;
+  renderDopRegistry();
+  try {
+    const snapshot = await fetchTableSnapshot(EMETTEURS_TABLE);
+    if (!hasColumn(snapshot.columnNames, DOP_COLUMN)) {
+      throw new Error('Colonne DOP introuvable dans Emetteurs.');
+    }
+    const registryRow = snapshot.rows.find((row) => toRecordId(row.id) === DOP_REGISTRY_ROW_ID);
+    if (!registryRow) {
+      throw new Error(`Ligne id ${DOP_REGISTRY_ROW_ID} introuvable dans Emetteurs.`);
+    }
+
+    dopRegistryValues = parseDopRegistryValue(registryRow[DOP_COLUMN]);
+    if (!dopRegistryValues.length && initializeDefaults) {
+      dopRegistryValues = [...DEFAULT_DOP_VALUES];
+      await grist.docApi.applyUserActions([
+        ['UpdateRecord', EMETTEURS_TABLE, DOP_REGISTRY_ROW_ID, {
+          [DOP_COLUMN]: serializeDopRegistryValue(dopRegistryValues),
+        }],
+      ]);
+      emitDopDataChange('registry-initialized');
+      setDopStatus('Referentiel DOP initialise avec DOP 1 a DOP 5.', 'success');
+    }
+  } finally {
+    dopRegistryInProgress = false;
+    renderDopRegistry();
+  }
+}
+
+async function handleAddDop() {
+  const input = document.getElementById('newDopValue');
+  const newDop = normalizeDopValue(input?.value);
+  if (!newDop) {
+    setDopStatus('Saisis une DOP a ajouter.', 'warning');
+    return;
+  }
+  if (dopRegistryValues.some((dop) => normalizeDopKey(dop) === normalizeDopKey(newDop))) {
+    setDopStatus(`${formatDopLabel(newDop)} existe deja.`, 'warning');
+    return;
+  }
+
+  dopRegistryInProgress = true;
+  renderDopRegistry();
+  try {
+    const nextValues = parseDopRegistryValue([...dopRegistryValues, newDop]);
+    await grist.docApi.applyUserActions([
+      ['UpdateRecord', EMETTEURS_TABLE, DOP_REGISTRY_ROW_ID, {
+        [DOP_COLUMN]: serializeDopRegistryValue(nextValues),
+      }],
+    ]);
+    dopRegistryValues = nextValues;
+    emitDopDataChange('registry-updated');
+    if (input) input.value = '';
+    setDopStatus(`${formatDopLabel(newDop)} ajoutee au referentiel.`, 'success');
+  } finally {
+    dopRegistryInProgress = false;
+    renderDopRegistry();
+    syncDopValueFromSelectedProject();
+  }
+}
+
 function syncDopValueFromSelectedProject() {
   const dopValueSelect = document.getElementById('dopValueSelect');
   const selectedProject = getSelectedProject();
 
   if (dopValueSelect && selectedProject) {
     const selectedDop = normalizeDopValue(selectedProject.dop);
+    const registryKeys = new Set(dopRegistryValues.map(normalizeDopKey));
     Array.from(dopValueSelect.options)
-      .filter(option => option.dataset.dynamicDop === 'true')
+      .filter(option => option.value && !registryKeys.has(normalizeDopKey(option.value)))
       .forEach(option => option.remove());
 
     if (
@@ -409,7 +563,6 @@ function syncDopValueFromSelectedProject() {
       const option = document.createElement('option');
       option.value = selectedDop;
       option.textContent = formatDopLabel(selectedDop);
-      option.dataset.dynamicDop = 'true';
       dopValueSelect.appendChild(option);
     }
 
@@ -520,6 +673,7 @@ async function handleApplyDop() {
     await grist.docApi.applyUserActions([
       ['UpdateRecord', PROJECTS_TABLE, selectedProject.id, { [DOP_COLUMN]: dopValue }],
     ]);
+    emitDopDataChange('project-dop-updated');
     await loadProjectsForDop(selectedProject.key);
     setDopStatus(
       `${formatDopLabel(dopValue)} enregistree uniquement dans Projets.DOP pour "${selectedProject.name}".`,
@@ -544,6 +698,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const cancelEditRowButton = document.getElementById('cancelEditRowButton');
   const dopProjectSelect = document.getElementById('dopProjectSelect');
   const applyDopButton = document.getElementById('applyDopButton');
+  const addDopButton = document.getElementById('addDopButton');
+  const newDopValue = document.getElementById('newDopValue');
 
   tableBody.addEventListener('click', event => {
     const row = event.target.closest('tr[data-record-id]');
@@ -619,9 +775,25 @@ document.addEventListener('DOMContentLoaded', () => {
       setDopBusy(false);
     });
   });
+  addDopButton.addEventListener('click', () => {
+    handleAddDop().catch(error => {
+      console.error('Erreur ajout DOP:', error);
+      setDopStatus(`Erreur ajout DOP : ${error.message}`, 'error');
+      dopRegistryInProgress = false;
+      renderDopRegistry();
+    });
+  });
+  newDopValue.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    addDopButton.click();
+  });
 
   updateActionButtons();
-  loadProjectsForDop();
+  Promise.all([loadDopRegistry(), loadProjectsForDop()]).catch(error => {
+    console.error('Erreur initialisation DOP:', error);
+    setDopStatus(`Erreur initialisation DOP : ${error.message}`, 'error');
+  });
 });
 
 grist.ready({ requiredAccess: 'full' });

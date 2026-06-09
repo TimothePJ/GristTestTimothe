@@ -15,6 +15,7 @@ import {
 } from "../../../../gestion-depenses2/assets/js/utils/format.js";
 
 const DOP_COLUMN = "DOP";
+const DEFAULT_DOP_VALUES = ["1", "2", "3", "4", "5"];
 export const WITHOUT_DOP_FILTER = "__without_dop__";
 
 function clampPercentage(value) {
@@ -1025,16 +1026,41 @@ function normalizeGlobalTables(tables = {}) {
   return { normalizedTables, registry, diagnostics };
 }
 
-export function getAvailableDopValues(projects) {
+function parseDopRegistryValue(value) {
+  let values = [];
+  if (Array.isArray(value)) {
+    values = value[0] === "L" ? value.slice(1) : value;
+  } else if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        values = Array.isArray(parsed) ? parsed : [trimmed];
+      } catch (_error) {
+        values = trimmed.split(/[,;\n]+/);
+      }
+    } else {
+      values = trimmed.split(/[,;\n]+/);
+    }
+  } else if (value != null) {
+    values = [value];
+  }
+
   const byKey = new Map();
-  (projects || []).forEach((project) => {
-    const dop = normalizeDopValue(project?.dop);
+  values.forEach((value) => {
+    const dop = normalizeDopValue(value);
     const key = normalizeDopKey(dop);
     if (key && !byKey.has(key)) byKey.set(key, dop);
   });
   return [...byKey.values()].sort((left, right) =>
     left.localeCompare(right, "fr", { numeric: true, sensitivity: "base" })
   );
+}
+
+export function getAvailableDopValues(dopRegistryRows) {
+  const registryRow = (dopRegistryRows || []).find((row) => toRecordId(row?.id) === 1);
+  const configuredValues = parseDopRegistryValue(registryRow?.[DOP_COLUMN]);
+  return configuredValues.length ? configuredValues : [...DEFAULT_DOP_VALUES];
 }
 
 export function buildGlobalExpenseData(tables) {

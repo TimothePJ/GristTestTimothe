@@ -28,6 +28,17 @@
       </div>
       <button type="button" id="applyDopButton" disabled>Appliquer</button>
     </div>
+    <div class="dop-registry">
+      <div class="dop-registry-heading">
+        <strong>DOP disponibles</strong>
+        <span id="dopRegistryValues" class="dop-registry-values">Chargement...</span>
+      </div>
+      <div class="dop-registry-add">
+        <label for="newDopValue">Ajouter une DOP</label>
+        <input type="text" id="newDopValue" inputmode="numeric" autocomplete="off" placeholder="Ex. 6">
+        <button type="button" id="addDopButton">Ajouter</button>
+      </div>
+    </div>
     <div id="dopStatus" class="dop-status" role="status" aria-live="polite"></div>
   </section>
 
