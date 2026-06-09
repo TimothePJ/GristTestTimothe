@@ -1,7 +1,16 @@
 document.addEventListener('DOMContentLoaded', () => {
     const steps = document.querySelectorAll('.wizard-step');
+    const EMETTEURS_TABLE = 'Emetteurs';
+    const DOP_REGISTRY_ROW_ID = 1;
+    const DOP_COLUMN = 'DOP';
+    const DEFAULT_DOP_VALUES = ['1', '2', '3', '4', '5'];
+    const DOP_DATA_CHANGE_STORAGE_KEY = 'grist.dop-data-changed';
     let currentStep = 1;
     let teamMembers = [];
+    let dopRegistryValues = [...DEFAULT_DOP_VALUES];
+    let dopRegistryLoadPromise = null;
+    let dopRegistryReloadTimer = 0;
+    let emittersTableFetchPromise = null;
     const DEFAULT_BUDGET_CHAPTERS = [
         '01-Analyse Dossier-Organisation',
         '02-Réunions-Visite sur chantier',
@@ -39,6 +48,155 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function cleanProjectName(name) {
         return String(name ?? "").replace(/\s+$/g, "");
+    }
+
+    function normalizeDopValue(value) {
+        return String(value ?? '').replace(/^dop\s*/i, '').trim();
+    }
+
+    function normalizeDopKey(value) {
+        return normalizeDopValue(value)
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLocaleLowerCase('fr');
+    }
+
+    function parseDopRegistryValue(value) {
+        let values = [];
+        if (Array.isArray(value)) {
+            values = value[0] === 'L' ? value.slice(1) : value;
+        } else if (typeof value === 'string') {
+            const trimmed = value.trim();
+            if (trimmed.startsWith('[')) {
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    values = Array.isArray(parsed) ? parsed : [trimmed];
+                } catch (_error) {
+                    values = trimmed.split(/[,;\n]+/);
+                }
+            } else {
+                values = trimmed.split(/[,;\n]+/);
+            }
+        } else if (value != null) {
+            values = [value];
+        }
+
+        const byKey = new Map();
+        values.forEach((item) => {
+            const dop = normalizeDopValue(item);
+            const key = normalizeDopKey(dop);
+            if (key && !byKey.has(key)) byKey.set(key, dop);
+        });
+
+        return [...byKey.values()].sort((left, right) =>
+            left.localeCompare(right, 'fr', { numeric: true, sensitivity: 'base' })
+        );
+    }
+
+    function serializeDopRegistryValue(values) {
+        return parseDopRegistryValue(values).join(', ');
+    }
+
+    function formatDopLabel(value) {
+        const dop = normalizeDopValue(value);
+        return dop ? `DOP ${dop}` : 'Sans DOP';
+    }
+
+    function emitDopDataChange(reason) {
+        try {
+            localStorage.setItem(DOP_DATA_CHANGE_STORAGE_KEY, JSON.stringify({
+                reason,
+                timestamp: Date.now()
+            }));
+        } catch (_error) {}
+    }
+
+    function fetchEmittersTable() {
+        if (!emittersTableFetchPromise) {
+            emittersTableFetchPromise = grist.docApi.fetchTable(EMETTEURS_TABLE)
+                .finally(() => {
+                    emittersTableFetchPromise = null;
+                });
+        }
+        return emittersTableFetchPromise;
+    }
+
+    function renderDopSelect() {
+        const select = document.getElementById('project-dop');
+        if (!(select instanceof HTMLSelectElement)) return;
+
+        const selectedDop = normalizeDopValue(select.value || projectData.dop);
+        select.innerHTML = '';
+
+        const emptyOption = document.createElement('option');
+        emptyOption.value = '';
+        emptyOption.textContent = 'Sans DOP';
+        select.appendChild(emptyOption);
+
+        dopRegistryValues.forEach((dop) => {
+            const option = document.createElement('option');
+            option.value = dop;
+            option.textContent = formatDopLabel(dop);
+            select.appendChild(option);
+        });
+
+        const selectedKey = normalizeDopKey(selectedDop);
+        const resolvedDop = dopRegistryValues.find(
+            (dop) => normalizeDopKey(dop) === selectedKey
+        ) || '';
+        select.value = resolvedDop;
+        projectData.dop = resolvedDop;
+    }
+
+    async function loadDopRegistry() {
+        if (dopRegistryLoadPromise) return dopRegistryLoadPromise;
+
+        dopRegistryLoadPromise = (async () => {
+            try {
+                const table = await fetchEmittersTable();
+                const ids = getTableColumnArray(table, 'id');
+                const dopValues = getTableColumnArray(table, DOP_COLUMN);
+                const registryIndex = ids.findIndex(
+                    (id) => Number(id) === DOP_REGISTRY_ROW_ID
+                );
+                if (registryIndex === -1) {
+                    throw new Error(`Ligne id ${DOP_REGISTRY_ROW_ID} introuvable dans ${EMETTEURS_TABLE}.`);
+                }
+
+                const configuredValues = parseDopRegistryValue(dopValues[registryIndex]);
+                if (configuredValues.length) {
+                    dopRegistryValues = configuredValues;
+                } else {
+                    dopRegistryValues = [...DEFAULT_DOP_VALUES];
+                    await grist.docApi.applyUserActions([
+                        ['UpdateRecord', EMETTEURS_TABLE, DOP_REGISTRY_ROW_ID, {
+                            [DOP_COLUMN]: serializeDopRegistryValue(dopRegistryValues)
+                        }]
+                    ]);
+                    emitDopDataChange('registry-initialized');
+                }
+            } catch (error) {
+                dopRegistryValues = [...DEFAULT_DOP_VALUES];
+                console.warn('Impossible de charger le referentiel DOP, valeurs par defaut utilisees.', error);
+            }
+
+            renderDopSelect();
+            return dopRegistryValues;
+        })();
+
+        try {
+            return await dopRegistryLoadPromise;
+        } finally {
+            dopRegistryLoadPromise = null;
+        }
+    }
+
+    function scheduleDopRegistryReload() {
+        if (dopRegistryReloadTimer) window.clearTimeout(dopRegistryReloadTimer);
+        dopRegistryReloadTimer = window.setTimeout(() => {
+            dopRegistryReloadTimer = 0;
+            loadDopRegistry();
+        }, 100);
     }
 
     function formatBudgetAmount(amount) {
@@ -589,7 +747,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('next-to-step-2').addEventListener('click', () => {
         projectData.name = cleanProjectName(document.getElementById('project-name').value);
         projectData.number = document.getElementById('project-number').value.trim();
-        projectData.dop = String(document.getElementById('project-dop')?.value || "").trim();
+        projectData.dop = normalizeDopValue(document.getElementById('project-dop')?.value);
 
         // (optionnel mais pratique) mettre à jour le champ affiché
         document.getElementById('project-name').value = projectData.name;
@@ -1456,7 +1614,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <h3>Détails du Projet</h3>
             <p><strong>Nom:</strong> ${projectData.name}</p>
             <p><strong>Numéro:</strong> ${projectData.number}</p>
-            <p><strong>DOP:</strong> ${projectData.dop ? `DOP ${projectData.dop}` : 'Sans DOP'}</p>
+            <p><strong>DOP:</strong> ${formatDopLabel(projectData.dop)}</p>
 
             <h3>Lignes Budgétaires</h3>
             <p><strong>Budget total indicatif:</strong> ${budgetTotalIndicatif == null ? 'Non renseigné' : `${formatBudgetAmount(budgetTotalIndicatif)} €`}</p>
@@ -2324,7 +2482,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const container = document.getElementById('emitters-selection-container');
         container.innerHTML = '';
 
-        const emitterTable = await grist.docApi.fetchTable('Emetteurs');
+        const emitterTable = await fetchEmittersTable();
 
         function normalizeEmitterName(v) {
             if (v == null) return "";
@@ -2364,7 +2522,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 Nom_de_projet: projectData.name,
                 Numero_de_projet: projectData.number
             };
-            setFieldIfPresent(projetsColumns, projectFields, 'DOP', projectData.dop);
+            setFieldIfPresent(projetsColumns, projectFields, 'DOP', normalizeDopValue(projectData.dop));
             setFieldIfPresent(projetsColumns, projectFields, 'TypeDoc', serializeProjectTypeDocValue(projectData.documents));
             // 1. Create Project
             const projectActions = [
@@ -2509,6 +2667,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 await grist.docApi.applyUserActions(planningActions);
             }
 
+            emitDopDataChange('project-created');
             alert('Projet créé avec succès !');
             // Optionally, redirect or clear the form
             window.location.reload();
@@ -2519,6 +2678,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     grist.ready();
+    renderDopSelect();
+    loadDopRegistry();
+    window.addEventListener('storage', (event) => {
+        if (event.key === DOP_DATA_CHANGE_STORAGE_KEY) scheduleDopRegistryReload();
+    });
+    window.addEventListener('focus', scheduleDopRegistryReload);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') scheduleDopRegistryReload();
+    });
     populateTeamSelection();
     initDocumentsSection();
     populateEmittersSelection();
