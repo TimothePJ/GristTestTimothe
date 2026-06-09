@@ -353,16 +353,8 @@ export function renderProjectOptions(projectKeys, selectedProjectKey = "", displ
 export function setActiveProjectSelection(projectKey = "") {
   if (dom.projectSelectEl instanceof HTMLSelectElement) {
     const normalizedProjectKey = String(projectKey || "").trim();
-    if (
-      normalizedProjectKey &&
-      !Array.from(dom.projectSelectEl.options).some((optionEl) => optionEl.value === normalizedProjectKey)
-    ) {
-      const optionEl = document.createElement("option");
-      optionEl.value = normalizedProjectKey;
-      optionEl.textContent = normalizedProjectKey;
-      dom.projectSelectEl.appendChild(optionEl);
-      dom.projectSelectEl.disabled = false;
-    }
+    // Ne jamais créer d'option fantôme : uniquement mettre à jour si l'option existe déjà.
+    // Le sélecteur est géré exclusivement par renderProjectOptionsFromRegistry dans bootstrap.js.
     dom.projectSelectEl.value = normalizedProjectKey;
     Array.from(dom.projectSelectEl.options).forEach((optionEl) => {
       optionEl.selected = optionEl.value === normalizedProjectKey;

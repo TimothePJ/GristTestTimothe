@@ -470,6 +470,12 @@ let _gristProjectRegistry = [];
 let _fetchProjectsInFlight = null;
 // Debounce pour les événements storage rapprochés (écriture nom + ID simultanée).
 let _storageReconcileTimer = 0;
+// Timer de retry pour les réconciliations bloquées par une synchronisation active.
+let _reconcileRetryTimer = 0;
+// Timer de retry pour le chemin rapide (_syncFromStorage).
+let _syncRetryTimer = 0;
+// Debounce pour le rechargement complet (focus / pageshow / visibilitychange).
+let _fullRefreshTimer = 0;
 
 // Conservés pour compatibilité avec renderProjectOptions de shell.js (utilisé plus bas).
 const _projectIdByNormalizedKey = new Map();
@@ -581,18 +587,9 @@ function readSharedProjectId() {
 function getRequestedSharedProject() {
   const id = readSharedProjectId();
   const name = readSharedProjectSelection();
-  const resolved = resolveProjectFromRegistry(name, id);
-  if (resolved) return resolved;
-
-  // Fallback : projet actuellement chargé dans une iframe Planning Projet.
-  const planningProject =
-    state.planningApi?.getSelectedProject?.() ||
-    state.planningAxisApi?.getSelectedProject?.() ||
-    "";
-  if (planningProject) {
-    return resolveProjectFromRegistry(planningProject, null);
-  }
-  return null;
+  // Résoudre uniquement depuis localStorage. Pas de fallback vers les iframes :
+  // elles peuvent avoir une ancienne valeur qui remplacerait une demande récente.
+  return resolveProjectFromRegistry(name, id);
 }
 
 /**
@@ -633,12 +630,56 @@ function renderProjectOptionsFromRegistry(selectedProject = null) {
  * Planifie une réconciliation de la sélection avec un délai de 50 ms.
  * Coalesce les événements storage nom + ID déclenchés simultanément.
  */
+/**
+ * Chemin RAPIDE — lit le registre en mémoire, pas de réseau sauf si introuvable.
+ * Utilisé par les événements storage (un autre widget a changé de projet).
+ */
+async function _syncFromStorage() {
+  if (_syncRetryTimer) { window.clearTimeout(_syncRetryTimer); _syncRetryTimer = 0; }
+  if (state.projectSyncInProgress) {
+    _syncRetryTimer = window.setTimeout(
+      () => { _syncRetryTimer = 0; void _syncFromStorage(); }, 100
+    );
+    return;
+  }
+  try {
+    const id = readSharedProjectId();
+    const name = readSharedProjectSelection();
+    let project = resolveProjectFromRegistry(name, id);
+    // Projet absent du registre courant → recharger une fois depuis Grist.
+    if (!project && (id || name)) {
+      await fetchProjectsFromGrist();
+      project = resolveProjectFromRegistry(name, id);
+    }
+    if (!project) return;
+    if (project.name === state.activeProjectKey) return; // déjà actif
+    renderProjectOptionsFromRegistry(project);
+    setProjectContentVisibility(true);
+    void applySelectedProjectFromHub(project);
+  } catch (err) {
+    console.warn("_syncFromStorage :", err);
+  }
+}
+
+/** Debounce 50 ms — regroupe les écriture nom+ID simultanées d'un même widget. */
 function scheduleStorageReconciliation() {
   if (_storageReconcileTimer) window.clearTimeout(_storageReconcileTimer);
   _storageReconcileTimer = window.setTimeout(() => {
     _storageReconcileTimer = 0;
-    if (!state.projectSyncInProgress) void refreshProjectsAndApplySharedSelection();
+    void _syncFromStorage();
   }, 50);
+}
+
+/**
+ * Chemin COMPLET — recharge la liste Projets depuis Grist puis synchronise.
+ * Utilisé pour pageshow / visibilitychange / focus (retour longue absence).
+ */
+function scheduleFullRefresh() {
+  if (_fullRefreshTimer) window.clearTimeout(_fullRefreshTimer);
+  _fullRefreshTimer = window.setTimeout(() => {
+    _fullRefreshTimer = 0;
+    void refreshProjectsAndApplySharedSelection();
+  }, 100);
 }
 
 async function applyRestoredSharedProject() {
@@ -664,13 +705,16 @@ async function applySelectedProjectFromHub(projectOrKey) {
     return;
   }
 
-  // Écrire les deux clés dans localStorage pour la cohérence inter-widgets.
-  if (project?.id) {
-    try {
+  // Toujours écrire ID et nom ensemble, ou supprimer l'ID si inconnu.
+  // Ne jamais laisser un ancien ID associé à un nouveau nom.
+  try {
+    if (project?.id) {
       localStorage.setItem("grist.selected-project-id", String(project.id));
-      localStorage.setItem("grist.selected-project", canonicalName);
-    } catch (_e) {}
-  }
+    } else {
+      localStorage.removeItem("grist.selected-project-id");
+    }
+    localStorage.setItem("grist.selected-project", canonicalName);
+  } catch (_e) {}
 
   await applySharedProject(canonicalName);
   await refreshPlanningAggregatePresentation();
@@ -682,7 +726,18 @@ async function applySelectedProjectFromHub(projectOrKey) {
  * visibilitychange / pageshow pour éviter une liste périmée.
  */
 async function refreshProjectsAndApplySharedSelection() {
-  if (state.projectSyncInProgress) return;
+  if (_reconcileRetryTimer) {
+    window.clearTimeout(_reconcileRetryTimer);
+    _reconcileRetryTimer = 0;
+  }
+  if (state.projectSyncInProgress) {
+    // Réessayer après la synchronisation active — ne jamais abandonner l'événement.
+    _reconcileRetryTimer = window.setTimeout(
+      () => { _reconcileRetryTimer = 0; void refreshProjectsAndApplySharedSelection(); },
+      100
+    );
+    return;
+  }
   try {
     await fetchProjectsFromGrist();
     const currentProject = resolveProjectFromRegistry(state.activeProjectKey || "", null);
@@ -708,6 +763,19 @@ export async function bootstrapHubApp() {
     if (window.grist && typeof window.grist.ready === "function") {
       window.grist.ready({ requiredAccess: "full" });
     }
+
+    // Enregistrer les listeners IMMÉDIATEMENT — avant tout await — pour ne jamais
+    // manquer un événement émis pendant le chargement des iframes.
+    window.addEventListener("storage", (event) => {
+      if (event.key === "grist.selected-project-id" || event.key === "grist.selected-project") {
+        scheduleStorageReconciliation();
+      }
+    });
+    window.addEventListener("pageshow", () => scheduleFullRefresh());
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") scheduleFullRefresh();
+    });
+    window.addEventListener("focus", () => scheduleFullRefresh());
 
     // Charger la liste des projets immédiatement après grist.ready(), sans attendre les
     // iframes de planning — comme tous les autres widgets (Avancement, Reference2, etc.).
@@ -759,17 +827,18 @@ export async function bootstrapHubApp() {
 
     if (dom.projectSelectEl instanceof HTMLSelectElement) {
       dom.projectSelectEl.addEventListener("change", () => {
+        const selectedOption = dom.projectSelectEl.selectedOptions?.[0];
         const nextProjectKey = String(dom.projectSelectEl.value || "").trim();
-        // Écrire l'ID canonique si connu
         if (nextProjectKey) {
-          const id = _projectIdByNormalizedKey.get(normalizeProjectSelectionKey(nextProjectKey));
-          if (id) {
-            try { localStorage.setItem('grist.selected-project-id', String(id)); } catch (_e) {}
-          }
+          // Résoudre depuis le registre via l'ID du dataset (source la plus fiable).
+          const optionId = Number(selectedOption?.dataset?.projectId);
+          const resolved = Number.isInteger(optionId) && optionId > 0
+            ? resolveProjectFromRegistry("", optionId)
+            : resolveProjectFromRegistry(nextProjectKey, null);
+          void applySelectedProjectFromHub(resolved ?? nextProjectKey);
         } else {
-          try { localStorage.removeItem('grist.selected-project-id'); } catch (_e) {}
+          clearSharedProjectSelection();
         }
-        void applySelectedProjectFromHub(nextProjectKey);
       });
     }
 
@@ -793,58 +862,8 @@ export async function bootstrapHubApp() {
       setHubStatus("Aucun projet disponible.");
     }
 
-    // Si applyRestoredSharedProject a échoué mais que les iframes Planning Projet
-    // ont déjà leur propre projet (chargé depuis localStorage au démarrage),
-    // promouvoir ce projet dans le hub pour que gestion-depenses2 le reçoive.
-    if (!state.activeProjectKey) {
-      const planningCurrentProject =
-        state.planningApi?.getSelectedProject?.() ||
-        state.planningAxisApi?.getSelectedProject?.() ||
-        "";
-      if (planningCurrentProject) {
-        const resolvedFallback = resolveProjectFromRegistry(planningCurrentProject, null);
-        const matched = resolvedFallback?.name || planningCurrentProject;
-        state.activeProjectKey = matched;
-        state.requestedProjectKey = matched;
-        if (resolvedFallback) renderProjectOptionsFromRegistry(resolvedFallback);
-        setProjectContentVisibility(true);
-      }
-    }
-
     // Lancer gestion-depenses2 maintenant que le projet est connu.
     void attachExpensesFrameApi();
-
-    // --- Listeners de synchronisation cross-widget ---
-
-    // Synchro en temps réel : un autre widget change le projet dans localStorage.
-    // Les deux clés (nom + ID) sont regroupées avec un debounce de 50 ms pour
-    // éviter un double refresh quand les deux sont écrites simultanément.
-    window.addEventListener("storage", (event) => {
-      if (event.key === "grist.selected-project-id" || event.key === "grist.selected-project") {
-        scheduleStorageReconciliation();
-      }
-    });
-
-    // Synchro quand synchronisation-plannings redevient visible (navigation Grist).
-    window.addEventListener("pageshow", () => {
-      if (!state.projectSyncInProgress) {
-        void refreshProjectsAndApplySharedSelection();
-      }
-    });
-
-    // Synchro sur changement de visibilité (passage d'onglet Grist).
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible" && !state.projectSyncInProgress) {
-        void refreshProjectsAndApplySharedSelection();
-      }
-    });
-
-    // Synchro sur focus fenêtre (comme Avancement, Reference2, etc.).
-    window.addEventListener("focus", () => {
-      if (!state.projectSyncInProgress) {
-        void refreshProjectsAndApplySharedSelection();
-      }
-    });
 
     schedulePlanningLayoutDebug("bootstrap-ready");
   } catch (error) {

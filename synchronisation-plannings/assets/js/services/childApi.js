@@ -129,29 +129,11 @@ export async function attachExpensesFrameApi({ force = false } = {}) {
       // Il sera révélé (.is-aligned) une fois les dates alignées avec Planning Projet.
       dom.expensesFrameEl?.classList.remove("is-aligned");
 
-      // Récupérer le projet à appliquer.
-      // getDesiredProjectKey() regarde state.requestedProjectKey et state.activeProjectKey.
-      // Si les deux sont vides (applyRestoredSharedProject a échoué), chercher dans :
-      //   1. les iframes Planning Projet (déjà chargé depuis leur propre localStorage)
-      //   2. localStorage directement (readSharedProjectSelection)
-      let targetProjectKey = getDesiredProjectKey();
-      if (!targetProjectKey) {
-        targetProjectKey =
-          state.planningApi?.getSelectedProject?.() ||
-          state.planningAxisApi?.getSelectedProject?.() ||
-          readSharedProjectSelection() ||
-          "";
-        if (targetProjectKey) {
-          state.activeProjectKey = targetProjectKey;
-          state.requestedProjectKey = targetProjectKey;
-        }
-      }
+      // Récupérer le projet à appliquer depuis l'état du hub uniquement.
+      // Ne pas promouvoir une valeur venant d'une iframe : elle peut être périmée
+      // et écraserait une demande récente venue d'un autre widget.
+      const targetProjectKey = getDesiredProjectKey() || readSharedProjectSelection();
       if (targetProjectKey) {
-        state.activeProjectKey = targetProjectKey;
-        state.requestedProjectKey = targetProjectKey;
-        setActiveProjectSelection(targetProjectKey);
-        setProjectContentVisibility(true);
-        syncSharedPlanningControlsAvailability();
         await Promise.resolve(api.setSelectedProject(targetProjectKey));
       }
 
