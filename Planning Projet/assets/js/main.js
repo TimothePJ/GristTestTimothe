@@ -1290,7 +1290,9 @@ async function bootstrap() {
     bindManageZoneModal();
     setPlanningDurationEditHandler(handleDurationCellEdit);
     setPlanningRetardJustificationHandler(handleRetardJustificationEdit);
-    setPlanningReferenceDetailsHandler(handleReferenceDetailsAction);
+    if (!EMBEDDED_PLANNING_SYNC_MODE) {
+      setPlanningReferenceDetailsHandler(handleReferenceDetailsAction);
+    }
     setPlanningMsProjectDropHandler(handleMsProjectRowDrop);
     setPlanningRowDropHandler(handlePlanningRowDrop);
     const {

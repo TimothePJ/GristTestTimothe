@@ -4329,9 +4329,11 @@ function buildGroupLabelElement(group) {
     });
   });
 
-  row.addEventListener("contextmenu", (event) => {
-    openRetardContextMenu(event, row);
-  });
+  if (!EMBEDDED_PLANNING_SYNC_MODE) {
+    row.addEventListener("contextmenu", (event) => {
+      openRetardContextMenu(event, row);
+    });
+  }
 
   row.append(
     id2,
