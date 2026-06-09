@@ -26,11 +26,9 @@ import {
   normalizeProjectKey,
 } from "../viewport/normalize.js";
 
-let viewportSyncTraceSequence = 0;
-
-function traceViewportSync(event, details = {}) {
-  viewportSyncTraceSequence += 1;
-  console.info(`[sync-trace][hub][${viewportSyncTraceSequence}] ${event}`, details);
+// eslint-disable-next-line no-unused-vars
+function traceViewportSync(_event, _details = {}) {
+  // Traces désactivées — console.info impacte la fluidité du scroll.
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +190,7 @@ export async function applyViewportFromParentControls(
     state.viewportSyncInProgress = false;
     syncSharedPlanningControlsAvailability();
     if (state.pendingViewportPayload) {
-      void flushViewportSyncQueue();
+      flushViewportSyncQueue();
     }
   }
 }
@@ -295,7 +293,12 @@ export function bindExpensesPlanningShellControls() {
 // Synchro viewport entre les 3 iframes (planning-main, planning-axis, expenses)
 // ---------------------------------------------------------------------------
 
-export async function flushViewportSyncQueue() {
+/**
+ * Applique le viewport en attente aux iframes planning (fire-and-forget).
+ * Synchrone — pas d'await pour ne pas bloquer les événements scroll suivants.
+ * La déduplication par signature empêche les boucles de rétroaction.
+ */
+export function flushViewportSyncQueue() {
   if (
     state.projectSyncInProgress ||
     state.viewportSyncInProgress ||
@@ -311,23 +314,19 @@ export async function flushViewportSyncQueue() {
   const source = String(payload.app || "").trim();
   const payloadProjectKey = String(payload.projectKey || "").trim();
 
-  traceViewportSync("flush-start", { source, payloadProjectKey, activeProjectKey: state.activeProjectKey });
-
-  // Ignorer si le projet ne correspond pas
+  // Ignorer si le projet ne correspond pas.
   if (
     state.activeProjectKey &&
     payloadProjectKey &&
     normalizeProjectKey(payloadProjectKey) !== normalizeProjectKey(state.activeProjectKey)
   ) {
-    traceViewportSync("flush-skip-project-mismatch", { source, payloadProjectKey, activeProjectKey: state.activeProjectKey });
-    void flushViewportSyncQueue();
+    flushViewportSyncQueue();
     return;
   }
 
   const canonical = buildCanonicalSharedViewport(payload.viewport || {});
   if (!normalizeIsoDate(canonical.firstVisibleDate)) {
-    traceViewportSync("flush-skip-no-date", { source });
-    void flushViewportSyncQueue();
+    flushViewportSyncQueue();
     return;
   }
 
@@ -338,61 +337,46 @@ export async function flushViewportSyncQueue() {
     canonical
   );
 
-  // Déduplication : évite les boucles infinies
+  // Déduplication : si la signature est identique, on ne renvoie que vers expenses.
   if (sig && sig === state.lastAppliedViewportLogicalSignature) {
-    traceViewportSync("flush-skip-duplicate", { source, sig });
     if (source !== "gestion-depenses2") {
       requestExpensesViewport(payload.viewport);
     }
     state.sharedViewportState = canonical;
     syncExpensesPlanningShell(canonical);
     schedulePlanningFramePresentation();
-    void flushViewportSyncQueue();
+    flushViewportSyncQueue();
     return;
   }
 
-  state.viewportSyncInProgress = true;
-  syncSharedPlanningControlsAvailability();
+  // Mettre à jour l'état AVANT d'envoyer aux iframes : les événements en retour
+  // seront ainsi reconnus comme doublon et ignorés (prévient la boucle ping-pong).
+  state.lastAppliedViewportLogicalSignature = sig;
+  state.sharedViewportState = canonical;
+  syncExpensesPlanningShell(canonical);
+  schedulePlanningFramePresentation();
+  setLastSource(getViewportSourceLabel(source));
+  setLastRange(canonical);
 
-  try {
-    const exact = buildPlanningExactSharedViewport(payload.viewport || {});
+  // Appliquer aux iframes planning (fire-and-forget — aucun await).
+  const exact = buildPlanningExactSharedViewport(payload.viewport || {});
+  if (source !== "planning-projet-main" && state.planningApi?.applyViewport) {
+    void Promise.resolve(state.planningApi.applyViewport(exact))
+      .catch((err) => console.error("applyViewport main:", err));
+  }
+  if (source !== "planning-projet-axis" && state.planningAxisApi?.applyViewport) {
+    void Promise.resolve(state.planningAxisApi.applyViewport(exact))
+      .catch((err) => console.error("applyViewport axis:", err));
+  }
 
-    // Appliquer aux planning iframes (sauf la source)
-    const planningCalls = [];
-    if (source !== "planning-projet-main" && state.planningApi?.applyViewport) {
-      planningCalls.push(Promise.resolve(state.planningApi.applyViewport(exact)));
-    }
-    if (source !== "planning-projet-axis" && state.planningAxisApi?.applyViewport) {
-      planningCalls.push(Promise.resolve(state.planningAxisApi.applyViewport(exact)));
-    }
-    if (planningCalls.length > 0) {
-      await Promise.all(planningCalls);
-    }
+  // Acheminer vers gestion-depenses2 via la file RAF (coalescing).
+  if (source !== "gestion-depenses2") {
+    requestExpensesViewport(payload.viewport);
+  }
 
-    // Appliquer à gestion-depenses2 si la source est Planning Projet
-    // (pas si c'est gestion-depenses2 lui-même pour éviter la boucle)
-    if (source !== "gestion-depenses2") {
-      requestExpensesViewport(payload.viewport);
-    }
-
-    traceViewportSync("flush-applied", { source, sig });
-
-    state.lastAppliedViewportLogicalSignature = sig;
-    state.sharedViewportState = canonical;
-    syncExpensesPlanningShell(canonical);
-    schedulePlanningFramePresentation();
-    setLastSource(getViewportSourceLabel(source));
-    setLastRange(canonical);
-    setHubStatus(`Synchro : ${getViewportSourceLabel(source)}`);
-    appendLog(`${getViewportSourceLabel(source)} → ${canonical.firstVisibleDate || "?"} / ${canonical.mode || "?"}`);
-  } catch (error) {
-    console.error("Erreur synchro viewport :", error);
-  } finally {
-    state.viewportSyncInProgress = false;
-    syncSharedPlanningControlsAvailability();
-    if (state.pendingViewportPayload) {
-      void flushViewportSyncQueue();
-    }
+  // Traiter le viewport suivant en attente.
+  if (state.pendingViewportPayload) {
+    flushViewportSyncQueue();
   }
 }
 
@@ -406,12 +390,9 @@ export function syncViewportToExpensesNow(viewport) {
 }
 
 export function handleViewportChange(payload) {
-  if (!payload || state.projectSyncInProgress) {
-    return;
-  }
-  if (state.sharedToolbarActionInProgress) {
+  if (!payload || state.projectSyncInProgress || state.sharedToolbarActionInProgress) {
     return;
   }
   state.pendingViewportPayload = payload;
-  void flushViewportSyncQueue();
+  flushViewportSyncQueue();
 }

@@ -11,37 +11,9 @@ import {
 } from "../viewport/alignment.js";
 import { schedulePlanningLayoutDebug } from "./debugLayout.js";
 
-let expensesFrameTraceSequence = 0;
-
-function roundExpensesFrameTraceNumber(value, digits = 2) {
-  const numericValue = Number(value);
-  if (!Number.isFinite(numericValue)) {
-    return null;
-  }
-
-  const precision = 10 ** digits;
-  return Math.round(numericValue * precision) / precision;
-}
-
-function summarizeExpensesFrameViewport(viewport = {}) {
-  if (!viewport || typeof viewport !== "object") {
-    return null;
-  }
-
-  return {
-    mode: String(viewport.mode || "").trim(),
-    firstVisibleDate: String(viewport.firstVisibleDate || viewport.rangeStartDate || "").trim(),
-    rangeEndDate: String(viewport.rangeEndDate || "").trim(),
-    visibleDays: roundExpensesFrameTraceNumber(viewport.visibleDays, 4),
-    leftDayOffset: roundExpensesFrameTraceNumber(viewport.leftDayOffset, 6),
-    windowStartMs: roundExpensesFrameTraceNumber(viewport.windowStartMs, 0),
-    windowEndMs: roundExpensesFrameTraceNumber(viewport.windowEndMs, 0),
-  };
-}
-
-function traceExpensesFramePresentation(event, details = {}) {
-  expensesFrameTraceSequence += 1;
-  console.info(`[sync-trace][hub-expenses-frame][${expensesFrameTraceSequence}] ${event}`, details);
+// eslint-disable-next-line no-unused-vars
+function traceExpensesFramePresentation(_event, _details = {}) {
+  // Traces désactivées — console.info impacte la fluidité du rendu.
 }
 
 function scheduleExpensesPresentationBurst() {
@@ -295,20 +267,6 @@ export function ensureExpensesFramePresentation() {
   }
 
   if (visibleWidthAdjustmentChanged || referenceVisibleWidthChanged || referenceDayWidthChanged) {
-    traceExpensesFramePresentation("width-adjustment-detected", {
-      visibleWidthAdjustmentChanged,
-      referenceVisibleWidthChanged,
-      referenceDayWidthChanged,
-      mainPlanningVisibleWidthAdjustment: roundExpensesFrameTraceNumber(
-        mainPlanningVisibleWidthAdjustment
-      ),
-      mainPlanningReferenceVisibleWidth: roundExpensesFrameTraceNumber(
-        mainPlanningReferenceVisibleWidth
-      ),
-      mainPlanningReferenceDayWidth: roundExpensesFrameTraceNumber(mainPlanningReferenceDayWidth, 6),
-      embeddedScrollWidth: roundExpensesFrameTraceNumber(embeddedScrollWidth),
-      rerenderPending: state.expensesVisibleWidthAdjustmentRerenderPending,
-    });
     if (!state.expensesVisibleWidthAdjustmentRerenderPending && state.expensesApi?.applyViewport) {
       state.expensesVisibleWidthAdjustmentRerenderPending = true;
       requestAnimationFrame(() => {
@@ -316,9 +274,6 @@ export function ensureExpensesFramePresentation() {
           const viewportToReapply =
             state.sharedViewportState || state.expensesApi.getViewport?.() || getCurrentSharedViewport() || null;
           if (viewportToReapply) {
-            traceExpensesFramePresentation("reapply-viewport-for-width", {
-              viewport: summarizeExpensesFrameViewport(viewportToReapply),
-            });
             void Promise.resolve(state.expensesApi.applyViewport(viewportToReapply))
               .catch((error) => console.error("reapply-viewport-for-width error:", error));
           }
@@ -336,9 +291,6 @@ export function ensureExpensesFramePresentation() {
   requestAnimationFrame(() => {
     const calibrationAdjusted = calibrateExpensesViewportPixelOffset(frameDocument);
     if (calibrationAdjusted) {
-      traceExpensesFramePresentation("pixel-calibration-rerender", {
-        activeProjectKey: state.activeProjectKey,
-      });
       scheduleExpensesFramePresentation(1);
     }
   });
