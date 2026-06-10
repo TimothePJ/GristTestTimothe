@@ -5,7 +5,8 @@ body {
   margin: 10px;
 }
 
-.dop-panel {
+.dop-panel,
+.project-edit-panel {
   border: 1px solid #d6e0ea;
   border-left: 4px solid #004990;
   border-radius: 6px;
@@ -14,21 +15,32 @@ body {
   background-color: #f8fbff;
 }
 
-.dop-panel h2 {
+.dop-panel h2,
+.project-edit-panel h2 {
   margin: 0 0 12px;
   font-size: 18px;
   color: #004990;
 }
 
-.dop-controls {
+.dop-controls,
+.project-edit-controls {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   align-items: end;
 }
 
-.dop-controls .dropdown-container {
+.dop-controls .dropdown-container,
+.project-edit-controls .dropdown-container {
   min-width: 220px;
+}
+
+.project-edit-controls .project-edit-project {
+  min-width: 280px;
+}
+
+.project-edit-controls input {
+  min-width: 200px;
 }
 
 .dop-registry {
@@ -75,6 +87,69 @@ body {
 
 .dop-status.error {
   color: #991b1b;
+}
+
+.project-edit-status {
+  margin-top: 10px;
+  color: #31516f;
+  white-space: pre-line;
+}
+
+.project-edit-status.success {
+  color: #166534;
+}
+
+.project-edit-status.warning {
+  color: #92400e;
+}
+
+.project-edit-status.error {
+  color: #991b1b;
+}
+
+.project-update-values {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.project-update-values div {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 10px;
+}
+
+.project-update-values dt {
+  font-weight: bold;
+}
+
+.project-update-values dd {
+  margin: 0;
+}
+
+.project-update-summary {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.project-update-summary table {
+  min-width: 360px;
+}
+
+.project-update-summary th {
+  position: static;
+}
+
+.project-update-summary th:last-child,
+.project-update-summary td:last-child {
+  text-align: right;
+}
+
+.project-update-note {
+  margin: 4px 0 0;
+  color: #526b86;
+  font-size: 13px;
 }
 
 .toolbar {

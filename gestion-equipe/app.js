@@ -4,9 +4,67 @@ const EMETTEURS_TABLE = 'Emetteurs';
 const DOP_REGISTRY_ROW_ID = 1;
 const DEFAULT_DOP_VALUES = ['1', '2', '3', '4', '5'];
 const DOP_DATA_CHANGE_STORAGE_KEY = 'grist.dop-data-changed';
+const PROJECT_DATA_CHANGE_STORAGE_KEY = 'grist.project-data-changed';
+const SHARED_PROJECT_STORAGE_KEY = 'grist.selected-project';
+const SHARED_PROJECT_ID_STORAGE_KEY = 'grist.selected-project-id';
 const DOP_COLUMN = 'DOP';
 const PROJECT_NAME_COLUMN = 'Nom_de_projet';
 const PROJECT_NUMBER_COLUMN = 'Numero_de_projet';
+const PROJECT_RELATION_GROUPS = [
+  {
+    relation: 'name',
+    tableNames: ['Planning_Projet', 'Planning_Project'],
+    columns: [
+      'NomProjetString',
+      'NomProjet',
+      'Nom_projet',
+      'Nom_Projet',
+      'Projet',
+      'Project',
+      'Nom_de_projet',
+    ],
+  },
+  {
+    relation: 'name',
+    tableNames: ['References2'],
+    columns: ['NomProjetString', 'NomProjet', 'Nom_projet', 'Nom_Projet', 'Nom_de_projet'],
+  },
+  {
+    relation: 'name',
+    tableNames: ['ListePlan_NDC_COF', 'ListePlan NDC+COF', 'ListePlan_NDC+COF'],
+    columns: ['NomProjetString', 'NomProjet', 'Nom_projet', 'Nom_Projet', 'Nom_de_projet'],
+  },
+  {
+    relation: 'name',
+    tableNames: ['MsProject'],
+    columns: [
+      'NomProjetString',
+      'NomProjet',
+      'Nom_projet',
+      'Nom_Projet',
+      'Projet',
+      'Project',
+      'Nom_de_projet',
+    ],
+  },
+  {
+    relation: 'name',
+    tableNames: ['Envois'],
+    columns: ['NomProjetString', 'Projet', 'NomProjet', 'Nom_projet', 'Nom_Projet', 'Nom_de_projet'],
+  },
+  {
+    relation: 'number',
+    tableNames: ['Budget', 'ProjectTeam', 'TimeSegment', 'TimeReal'],
+    columns: [
+      'NumeroProjetString',
+      'NumeroProjet',
+      'Numero_Projet',
+      'Numero_de_projet',
+      'Project_Number',
+      'ProjectNumber',
+    ],
+  },
+];
 
 let records = [];
 let selectedRecordId = null;
@@ -14,6 +72,9 @@ let projectRecords = [];
 let dopRegistryValues = [];
 let dopApplyInProgress = false;
 let dopRegistryInProgress = false;
+let projectEditInProgress = false;
+let pendingProjectUpdatePreview = null;
+let gristSchemaPromise = null;
 
 function asText(value) {
   if (value == null) return '';
@@ -53,6 +114,15 @@ function normalizeDopKey(value) {
   return normalizeDopValue(value)
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('fr');
+}
+
+function normalizeProjectRelationKey(value) {
+  return asText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
     .toLocaleLowerCase('fr');
 }
 
@@ -100,6 +170,16 @@ function emitDopDataChange(reason) {
   try {
     localStorage.setItem(DOP_DATA_CHANGE_STORAGE_KEY, JSON.stringify({
       reason,
+      timestamp: Date.now(),
+    }));
+  } catch (_error) {}
+}
+
+function emitProjectDataChange(reason, projectId) {
+  try {
+    localStorage.setItem(PROJECT_DATA_CHANGE_STORAGE_KEY, JSON.stringify({
+      reason,
+      projectId,
       timestamp: Date.now(),
     }));
   } catch (_error) {}
@@ -173,6 +253,85 @@ function hasColumn(columnNames, columnName) {
 function toRecordId(value) {
   const number = Number(value);
   return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+async function loadGristSchema() {
+  if (!gristSchemaPromise) {
+    gristSchemaPromise = Promise.all([
+      fetchTableSnapshot('_grist_Tables'),
+      fetchTableSnapshot('_grist_Tables_column'),
+    ]).then(([tablesSnapshot, columnsSnapshot]) => {
+      const tablesByName = new Map();
+
+      tablesSnapshot.rows.forEach((tableRow) => {
+        const tableName = asText(tableRow.tableId);
+        const tableRef = toRecordId(tableRow.id);
+        if (!tableName || tableRef == null) return;
+        tablesByName.set(tableName, {
+          id: tableRef,
+          name: tableName,
+          columns: new Map(),
+        });
+      });
+
+      columnsSnapshot.rows.forEach((columnRow) => {
+        const parentId = toRecordId(columnRow.parentId);
+        const columnId = asText(columnRow.colId);
+        if (parentId == null || !columnId) return;
+
+        const table = [...tablesByName.values()].find(candidate => candidate.id === parentId);
+        if (!table) return;
+        table.columns.set(columnId, columnRow);
+      });
+
+      return { tablesByName };
+    }).catch((error) => {
+      gristSchemaPromise = null;
+      throw error;
+    });
+  }
+
+  return gristSchemaPromise;
+}
+
+function isFormulaColumn(columnMetadata) {
+  return toBooleanFlag(columnMetadata?.isFormula) || Boolean(asText(columnMetadata?.formula));
+}
+
+function getColumnType(columnMetadata) {
+  return asText(columnMetadata?.type);
+}
+
+function isProjectReferenceColumn(columnMetadata) {
+  const type = getColumnType(columnMetadata).toLocaleLowerCase('fr');
+  return type === 'ref:projets2' || type === 'reflist:projets2';
+}
+
+function isWritableProjectRelationColumn(columnMetadata) {
+  const baseType = getColumnType(columnMetadata).split(':')[0];
+  return ['Text', 'Choice', 'Any'].includes(baseType);
+}
+
+function getWritableProjectRelationColumns(tableSchema, candidateColumns) {
+  const writableColumns = [];
+
+  candidateColumns.forEach((columnId) => {
+    const columnMetadata = tableSchema.columns.get(columnId);
+    if (!columnMetadata || isFormulaColumn(columnMetadata)) return;
+    if (isProjectReferenceColumn(columnMetadata)) return;
+
+    if (!isWritableProjectRelationColumn(columnMetadata)) {
+      const type = getColumnType(columnMetadata) || 'inconnu';
+      throw new Error(
+        `Impossible de propager la modification dans ${tableSchema.name}.${columnId} : ` +
+        `le type ${type} n'est ni un texte, ni une référence vers Projets2, ni une formule.`
+      );
+    }
+
+    writableColumns.push(columnId);
+  });
+
+  return writableColumns;
 }
 
 function getSelectedRecord() {
@@ -421,6 +580,432 @@ async function deleteSelectedRecord() {
   hideContextMenu();
 }
 
+function setProjectEditStatus(message = '', type = '') {
+  const statusEl = document.getElementById('projectEditStatus');
+  if (!statusEl) return;
+
+  statusEl.textContent = message;
+  statusEl.classList.remove('success', 'warning', 'error');
+  if (type) statusEl.classList.add(type);
+}
+
+function buildProjectEditOptionLabel(project) {
+  return project.projectNumber ? `${project.projectNumber} - ${project.name}` : project.name;
+}
+
+function getSelectedProjectForEdit() {
+  const projectSelect = document.getElementById('projectEditSelect');
+  if (!projectSelect) return null;
+  return projectRecords.find(project => project.key === projectSelect.value) || null;
+}
+
+function updateProjectEditControls() {
+  const selectedProject = getSelectedProjectForEdit();
+  const projectSelect = document.getElementById('projectEditSelect');
+  const nameInput = document.getElementById('projectNameInput');
+  const numberInput = document.getElementById('projectNumberInput');
+  const previewButton = document.getElementById('previewProjectUpdateButton');
+  const confirmButton = document.getElementById('confirmProjectUpdateButton');
+
+  if (projectSelect) {
+    projectSelect.disabled =
+      projectEditInProgress || !projectRecords.some(project => project.id != null);
+  }
+  if (nameInput) nameInput.disabled = projectEditInProgress || !selectedProject;
+  if (numberInput) numberInput.disabled = projectEditInProgress || !selectedProject;
+  if (previewButton) previewButton.disabled = projectEditInProgress || !selectedProject;
+  if (confirmButton) confirmButton.disabled = projectEditInProgress || !pendingProjectUpdatePreview;
+}
+
+function syncProjectEditFieldsFromSelection() {
+  const selectedProject = getSelectedProjectForEdit();
+  const nameInput = document.getElementById('projectNameInput');
+  const numberInput = document.getElementById('projectNumberInput');
+
+  if (nameInput) nameInput.value = selectedProject?.name || '';
+  if (numberInput) numberInput.value = selectedProject?.projectNumber || '';
+  pendingProjectUpdatePreview = null;
+  updateProjectEditControls();
+}
+
+function populateProjectEditSelect(selectedProjectKey = '') {
+  const projectSelect = document.getElementById('projectEditSelect');
+  if (!projectSelect) return;
+
+  const previousValue = selectedProjectKey || projectSelect.value;
+  const editableProjects = projectRecords.filter(project => project.id != null);
+  projectSelect.innerHTML = '';
+
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = editableProjects.length ? 'Choisir un projet' : 'Aucun projet disponible';
+  projectSelect.appendChild(placeholder);
+
+  editableProjects.forEach((project) => {
+    const option = document.createElement('option');
+    option.value = project.key;
+    option.textContent = buildProjectEditOptionLabel(project);
+    projectSelect.appendChild(option);
+  });
+
+  projectSelect.value = previousValue;
+  if (projectSelect.value !== previousValue) projectSelect.value = '';
+  syncProjectEditFieldsFromSelection();
+}
+
+function setProjectEditBusy(isBusy) {
+  projectEditInProgress = isBusy;
+  const previewButton = document.getElementById('previewProjectUpdateButton');
+  const confirmButton = document.getElementById('confirmProjectUpdateButton');
+  const cancelButton = document.getElementById('cancelProjectUpdateButton');
+
+  if (previewButton) {
+    previewButton.textContent = isBusy ? 'Analyse en cours...' : 'Prévisualiser les modifications';
+  }
+  if (confirmButton) {
+    confirmButton.textContent = isBusy ? 'Application...' : 'Appliquer';
+  }
+  if (cancelButton) cancelButton.disabled = isBusy;
+
+  updateProjectEditControls();
+}
+
+function mergeProjectUpdateAction(actionMap, tableName, rowId, fields) {
+  const recordId = toRecordId(rowId);
+  if (!Object.keys(fields).length) return;
+  if (recordId == null) {
+    throw new Error(`Identifiant de ligne introuvable dans ${tableName}.`);
+  }
+
+  const key = `${tableName}:${recordId}`;
+  const existingAction = actionMap.get(key);
+  if (existingAction) {
+    Object.assign(existingAction[3], fields);
+    return;
+  }
+
+  actionMap.set(key, ['UpdateRecord', tableName, recordId, { ...fields }]);
+}
+
+function assertProjectColumnWritable(tableSchema, columnId) {
+  const columnMetadata = tableSchema?.columns.get(columnId);
+  if (!columnMetadata) {
+    throw new Error(`Colonne ${tableSchema?.name || PROJECTS_TABLE}.${columnId} introuvable.`);
+  }
+  if (isFormulaColumn(columnMetadata) || !isWritableProjectRelationColumn(columnMetadata)) {
+    throw new Error(`La colonne ${tableSchema.name}.${columnId} n'est pas modifiable comme texte.`);
+  }
+}
+
+function findProjectValueDuplicate(rows, columnId, value, ignoredProjectId) {
+  const targetKey = normalizeProjectRelationKey(value);
+  return rows.find((row) => {
+    const rowId = toRecordId(row.id);
+    return rowId !== ignoredProjectId &&
+      normalizeProjectRelationKey(row[columnId]) === targetKey;
+  }) || null;
+}
+
+function assertProjectUpdateIsUnambiguous(projectRows, selectedProject, changes) {
+  if (changes.nameChanged) {
+    const duplicateTarget = findProjectValueDuplicate(
+      projectRows,
+      PROJECT_NAME_COLUMN,
+      changes.nextName,
+      selectedProject.id
+    );
+    if (duplicateTarget) {
+      throw new Error(`Le nom "${changes.nextName}" est déjà utilisé par un autre projet.`);
+    }
+
+    const duplicateSource = findProjectValueDuplicate(
+      projectRows,
+      PROJECT_NAME_COLUMN,
+      changes.oldName,
+      selectedProject.id
+    );
+    if (duplicateSource) {
+      throw new Error(
+        `Le nom actuel "${changes.oldName}" est partagé par plusieurs projets. ` +
+        `La propagation automatique est bloquée.`
+      );
+    }
+  }
+
+  if (changes.numberChanged) {
+    const duplicateTarget = findProjectValueDuplicate(
+      projectRows,
+      PROJECT_NUMBER_COLUMN,
+      changes.nextNumber,
+      selectedProject.id
+    );
+    if (duplicateTarget) {
+      throw new Error(`Le numéro "${changes.nextNumber}" est déjà utilisé par un autre projet.`);
+    }
+
+    const duplicateSource = findProjectValueDuplicate(
+      projectRows,
+      PROJECT_NUMBER_COLUMN,
+      changes.oldNumber,
+      selectedProject.id
+    );
+    if (duplicateSource) {
+      throw new Error(
+        `Le numéro actuel "${changes.oldNumber}" est partagé par plusieurs projets. ` +
+        `La propagation automatique est bloquée.`
+      );
+    }
+  }
+}
+
+function buildProjectUpdatePreviewSignature(preview) {
+  return JSON.stringify({
+    projectId: preview.projectId,
+    oldName: preview.oldName,
+    oldNumber: preview.oldNumber,
+    nextName: preview.nextName,
+    nextNumber: preview.nextNumber,
+    actions: preview.actions,
+  });
+}
+
+async function buildProjectUpdatePreview({ projectId, nextName, nextNumber }) {
+  const normalizedProjectId = toRecordId(projectId);
+  const normalizedNextName = asText(nextName);
+  const normalizedNextNumber = asText(nextNumber);
+
+  if (normalizedProjectId == null) {
+    throw new Error('Identifiant Grist du projet introuvable.');
+  }
+  if (!normalizedNextName) {
+    throw new Error('Le nom du projet est obligatoire.');
+  }
+  if (!normalizedNextNumber) {
+    throw new Error('Le numéro du projet est obligatoire.');
+  }
+
+  const [schema, projectsSnapshot] = await Promise.all([
+    loadGristSchema(),
+    fetchTableSnapshot(PROJECTS_TABLE),
+  ]);
+  const projectsSchema = schema.tablesByName.get(PROJECTS_TABLE);
+  if (!projectsSchema) {
+    throw new Error(`Table ${PROJECTS_TABLE} introuvable.`);
+  }
+
+  assertProjectColumnWritable(projectsSchema, PROJECT_NAME_COLUMN);
+  assertProjectColumnWritable(projectsSchema, PROJECT_NUMBER_COLUMN);
+
+  const selectedProject = projectsSnapshot.rows.find(
+    row => toRecordId(row.id) === normalizedProjectId
+  );
+  if (!selectedProject) {
+    throw new Error('Le projet sélectionné n’existe plus dans Projets2.');
+  }
+
+  const oldName = asText(selectedProject[PROJECT_NAME_COLUMN]);
+  const oldNumber = asText(selectedProject[PROJECT_NUMBER_COLUMN]);
+  const nameChanged = oldName !== normalizedNextName;
+  const numberChanged = oldNumber !== normalizedNextNumber;
+  if (!nameChanged && !numberChanged) {
+    throw new Error('Aucune modification à prévisualiser.');
+  }
+  if (nameChanged && !oldName) {
+    throw new Error('Le nom actuel est vide : la propagation automatique est impossible.');
+  }
+  if (numberChanged && !oldNumber) {
+    throw new Error('Le numéro actuel est vide : la propagation automatique est impossible.');
+  }
+
+  const changes = {
+    oldName,
+    oldNumber,
+    nextName: normalizedNextName,
+    nextNumber: normalizedNextNumber,
+    nameChanged,
+    numberChanged,
+  };
+  assertProjectUpdateIsUnambiguous(projectsSnapshot.rows, {
+    id: normalizedProjectId,
+  }, changes);
+
+  const actionMap = new Map();
+  const tableOrder = [PROJECTS_TABLE];
+  const projectFields = {};
+  if (nameChanged) projectFields[PROJECT_NAME_COLUMN] = normalizedNextName;
+  if (numberChanged) projectFields[PROJECT_NUMBER_COLUMN] = normalizedNextNumber;
+  mergeProjectUpdateAction(actionMap, PROJECTS_TABLE, normalizedProjectId, projectFields);
+
+  for (const relationGroup of PROJECT_RELATION_GROUPS) {
+    const relationChanged = relationGroup.relation === 'name' ? nameChanged : numberChanged;
+    if (!relationChanged) continue;
+
+    const sourceValue = relationGroup.relation === 'name' ? oldName : oldNumber;
+    const targetValue = relationGroup.relation === 'name' ? normalizedNextName : normalizedNextNumber;
+    const sourceKey = normalizeProjectRelationKey(sourceValue);
+
+    for (const tableName of relationGroup.tableNames) {
+      const tableSchema = schema.tablesByName.get(tableName);
+      if (!tableSchema) continue;
+
+      tableOrder.push(tableName);
+      const writableColumns = getWritableProjectRelationColumns(
+        tableSchema,
+        relationGroup.columns
+      );
+      const snapshot = await fetchTableSnapshot(tableName);
+      if (!writableColumns.length) continue;
+
+      snapshot.rows.forEach((row) => {
+        const updates = {};
+        writableColumns.forEach((columnId) => {
+          if (normalizeProjectRelationKey(row[columnId]) === sourceKey) {
+            updates[columnId] = targetValue;
+          }
+        });
+        mergeProjectUpdateAction(actionMap, tableName, row.id, updates);
+      });
+    }
+  }
+
+  const actions = [...actionMap.values()];
+  const countsByTable = new Map(tableOrder.map(tableName => [tableName, 0]));
+  actions.forEach((action) => {
+    countsByTable.set(action[1], (countsByTable.get(action[1]) || 0) + 1);
+  });
+
+  const preview = {
+    projectId: normalizedProjectId,
+    oldName,
+    oldNumber,
+    nextName: normalizedNextName,
+    nextNumber: normalizedNextNumber,
+    actions,
+    tableCounts: [...countsByTable.entries()].map(([tableName, count]) => ({
+      tableName,
+      count,
+    })),
+  };
+  preview.signature = buildProjectUpdatePreviewSignature(preview);
+  return preview;
+}
+
+function renderProjectUpdatePreview(preview) {
+  document.getElementById('projectUpdateOldName').textContent = preview.oldName;
+  document.getElementById('projectUpdateNewName').textContent = preview.nextName;
+  document.getElementById('projectUpdateOldNumber').textContent = preview.oldNumber;
+  document.getElementById('projectUpdateNewNumber').textContent = preview.nextNumber;
+  document.getElementById('projectUpdateTotal').textContent =
+    `${preview.actions.length} ligne(s) seront modifiées.`;
+
+  const previewBody = document.getElementById('projectUpdatePreviewBody');
+  previewBody.innerHTML = '';
+  preview.tableCounts.forEach(({ tableName, count }) => {
+    const row = document.createElement('tr');
+    appendCell(row, tableName);
+    appendCell(row, String(count));
+    previewBody.appendChild(row);
+  });
+}
+
+async function handlePreviewProjectUpdate() {
+  const selectedProject = getSelectedProjectForEdit();
+  if (!selectedProject?.id) {
+    setProjectEditStatus('Sélectionne un projet à modifier.', 'warning');
+    return;
+  }
+
+  setProjectEditBusy(true);
+  setProjectEditStatus('Analyse des liaisons du projet...');
+  try {
+    const preview = await buildProjectUpdatePreview({
+      projectId: selectedProject.id,
+      nextName: document.getElementById('projectNameInput')?.value,
+      nextNumber: document.getElementById('projectNumberInput')?.value,
+    });
+    pendingProjectUpdatePreview = preview;
+    renderProjectUpdatePreview(preview);
+    setProjectEditStatus(
+      `Aperçu prêt : ${preview.actions.length} ligne(s) à modifier.`,
+      'success'
+    );
+    document.getElementById('projectUpdateDialog').showModal();
+  } finally {
+    setProjectEditBusy(false);
+  }
+}
+
+function updateSharedProjectSelectionAfterRename(preview) {
+  try {
+    const sharedProjectId = toRecordId(localStorage.getItem(SHARED_PROJECT_ID_STORAGE_KEY));
+    const sharedProjectName = asText(localStorage.getItem(SHARED_PROJECT_STORAGE_KEY));
+    const selectedById = sharedProjectId === preview.projectId;
+    const selectedByName =
+      normalizeProjectRelationKey(sharedProjectName) === normalizeProjectRelationKey(preview.oldName);
+
+    if (selectedById || selectedByName) {
+      localStorage.setItem(SHARED_PROJECT_STORAGE_KEY, preview.nextName);
+      localStorage.setItem(SHARED_PROJECT_ID_STORAGE_KEY, String(preview.projectId));
+    }
+  } catch (_error) {}
+}
+
+async function handleConfirmProjectUpdate() {
+  const preview = pendingProjectUpdatePreview;
+  if (!preview) {
+    setProjectEditStatus('Aucun aperçu à appliquer.', 'warning');
+    return;
+  }
+
+  setProjectEditBusy(true);
+  setProjectEditStatus('Revalidation des données avant application...');
+  try {
+    const freshPreview = await buildProjectUpdatePreview({
+      projectId: preview.projectId,
+      nextName: preview.nextName,
+      nextNumber: preview.nextNumber,
+    });
+
+    if (freshPreview.signature !== preview.signature) {
+      pendingProjectUpdatePreview = null;
+      document.getElementById('projectUpdateDialog').close();
+      setProjectEditStatus(
+        'Les données liées ont changé depuis l’aperçu. Relance la prévisualisation.',
+        'warning'
+      );
+      return;
+    }
+
+    setProjectEditStatus(`Application de ${freshPreview.actions.length} modification(s)...`);
+    await grist.docApi.applyUserActions(freshPreview.actions);
+
+    updateSharedProjectSelectionAfterRename(freshPreview);
+    emitProjectDataChange('project-renamed', freshPreview.projectId);
+    pendingProjectUpdatePreview = null;
+    document.getElementById('projectUpdateDialog').close();
+
+    const selectedDopProjectKey = document.getElementById('dopProjectSelect')?.value || '';
+    const projectsReloaded = await loadProjectsForDop(
+      selectedDopProjectKey,
+      String(freshPreview.projectId)
+    );
+    if (projectsReloaded) {
+      setProjectEditStatus(
+        `Projet mis à jour : ${freshPreview.actions.length} ligne(s) modifiée(s).`,
+        'success'
+      );
+    } else {
+      setProjectEditStatus(
+        `Projet mis à jour (${freshPreview.actions.length} ligne(s)), ` +
+        `mais la liste des projets n'a pas pu être rechargée.`,
+        'warning'
+      );
+    }
+  } finally {
+    setProjectEditBusy(false);
+  }
+}
+
 function setDopStatus(message = '', type = '') {
   const statusEl = document.getElementById('dopStatus');
   if (!statusEl) return;
@@ -600,14 +1185,16 @@ function populateProjectSelect(selectedProjectKey = '') {
   syncDopValueFromSelectedProject();
 }
 
-async function loadProjectsForDop(selectedProjectKey = '') {
+async function loadProjectsForDop(selectedProjectKey = '', selectedEditProjectKey = '') {
   try {
     const snapshot = await fetchTableSnapshot(PROJECTS_TABLE);
     if (!hasColumn(snapshot.columnNames, PROJECT_NAME_COLUMN)) {
       projectRecords = [];
       populateProjectSelect('');
+      populateProjectEditSelect('');
       setDopStatus('Colonne Nom_de_projet introuvable dans Projets2.', 'error');
-      return;
+      setProjectEditStatus('Colonne Nom_de_projet introuvable dans Projets2.', 'error');
+      return false;
     }
 
     projectRecords = snapshot.rows
@@ -626,11 +1213,16 @@ async function loadProjectsForDop(selectedProjectKey = '') {
       .sort((left, right) => left.name.localeCompare(right.name, 'fr', { sensitivity: 'base' }));
 
     populateProjectSelect(selectedProjectKey);
+    populateProjectEditSelect(selectedEditProjectKey);
+    return true;
   } catch (error) {
     console.error('Erreur chargement projets DOP:', error);
     projectRecords = [];
     populateProjectSelect('');
+    populateProjectEditSelect('');
     setDopStatus(`Erreur chargement projets : ${error.message}`, 'error');
+    setProjectEditStatus(`Erreur chargement projets : ${error.message}`, 'error');
+    return false;
   }
 }
 
@@ -700,6 +1292,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const applyDopButton = document.getElementById('applyDopButton');
   const addDopButton = document.getElementById('addDopButton');
   const newDopValue = document.getElementById('newDopValue');
+  const projectEditSelect = document.getElementById('projectEditSelect');
+  const projectNameInput = document.getElementById('projectNameInput');
+  const projectNumberInput = document.getElementById('projectNumberInput');
+  const previewProjectUpdateButton = document.getElementById('previewProjectUpdateButton');
+  const projectUpdateDialog = document.getElementById('projectUpdateDialog');
+  const confirmProjectUpdateButton = document.getElementById('confirmProjectUpdateButton');
+  const cancelProjectUpdateButton = document.getElementById('cancelProjectUpdateButton');
 
   tableBody.addEventListener('click', event => {
     const row = event.target.closest('tr[data-record-id]');
@@ -767,6 +1366,45 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  projectEditSelect.addEventListener('change', () => {
+    syncProjectEditFieldsFromSelection();
+    setProjectEditStatus('');
+  });
+  [projectNameInput, projectNumberInput].forEach((input) => {
+    input.addEventListener('input', () => {
+      pendingProjectUpdatePreview = null;
+      updateProjectEditControls();
+    });
+  });
+  previewProjectUpdateButton.addEventListener('click', () => {
+    handlePreviewProjectUpdate().catch((error) => {
+      console.error('Erreur prévisualisation modification projet:', error);
+      pendingProjectUpdatePreview = null;
+      setProjectEditStatus(`Modification impossible : ${error.message}`, 'error');
+      setProjectEditBusy(false);
+    });
+  });
+  confirmProjectUpdateButton.addEventListener('click', () => {
+    handleConfirmProjectUpdate().catch((error) => {
+      console.error('Erreur modification projet:', error);
+      setProjectEditStatus(`Erreur pendant la modification : ${error.message}`, 'error');
+      setProjectEditBusy(false);
+    });
+  });
+  cancelProjectUpdateButton.addEventListener('click', () => {
+    pendingProjectUpdatePreview = null;
+    projectUpdateDialog.close();
+    updateProjectEditControls();
+  });
+  projectUpdateDialog.addEventListener('cancel', (event) => {
+    if (projectEditInProgress) {
+      event.preventDefault();
+      return;
+    }
+    pendingProjectUpdatePreview = null;
+    updateProjectEditControls();
+  });
+
   dopProjectSelect.addEventListener('change', syncDopValueFromSelectedProject);
   applyDopButton.addEventListener('click', () => {
     handleApplyDop().catch(error => {
@@ -790,9 +1428,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   updateActionButtons();
+  updateProjectEditControls();
   Promise.all([loadDopRegistry(), loadProjectsForDop()]).catch(error => {
     console.error('Erreur initialisation DOP:', error);
     setDopStatus(`Erreur initialisation DOP : ${error.message}`, 'error');
+    setProjectEditStatus(`Erreur initialisation projets : ${error.message}`, 'error');
   });
 });
 

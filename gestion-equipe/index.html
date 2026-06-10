@@ -9,6 +9,28 @@
 </head>
 
 <body>
+  <section class="project-edit-panel" aria-labelledby="projectEditPanelTitle">
+    <h2 id="projectEditPanelTitle">Modification d'un projet</h2>
+    <div class="project-edit-controls">
+      <div class="dropdown-container project-edit-project">
+        <label for="projectEditSelect">Projet</label>
+        <select id="projectEditSelect" disabled>
+          <option value="">Chargement des projets...</option>
+        </select>
+      </div>
+      <div class="dropdown-container">
+        <label for="projectNameInput">Nom du projet</label>
+        <input type="text" id="projectNameInput" autocomplete="off" disabled>
+      </div>
+      <div class="dropdown-container">
+        <label for="projectNumberInput">Numéro du projet</label>
+        <input type="text" id="projectNumberInput" autocomplete="off" disabled>
+      </div>
+      <button type="button" id="previewProjectUpdateButton" disabled>Prévisualiser les modifications</button>
+    </div>
+    <div id="projectEditStatus" class="project-edit-status" role="status" aria-live="polite"></div>
+  </section>
+
   <section class="dop-panel" aria-labelledby="dopPanelTitle">
     <h2 id="dopPanelTitle">Attribution DOP projet</h2>
     <div class="dop-controls">
@@ -70,6 +92,41 @@
     <button id="editOption">Modifier</button>
     <button id="deleteOption">Supprimer</button>
   </div>
+
+  <dialog id="projectUpdateDialog">
+    <form method="dialog">
+      <h3>Confirmer la modification du projet</h3>
+      <dl class="project-update-values">
+        <div>
+          <dt>Nom</dt>
+          <dd><span id="projectUpdateOldName"></span> → <strong id="projectUpdateNewName"></strong></dd>
+        </div>
+        <div>
+          <dt>Numéro</dt>
+          <dd><span id="projectUpdateOldNumber"></span> → <strong id="projectUpdateNewNumber"></strong></dd>
+        </div>
+      </dl>
+      <div class="project-update-summary">
+        <strong id="projectUpdateTotal"></strong>
+        <table>
+          <thead>
+            <tr>
+              <th>Table</th>
+              <th>Lignes modifiées</th>
+            </tr>
+          </thead>
+          <tbody id="projectUpdatePreviewBody"></tbody>
+        </table>
+      </div>
+      <p class="project-update-note">
+        Les colonnes de référence vers Projets2 et les formules seront laissées à Grist.
+      </p>
+      <div class="dialog-buttons">
+        <button type="button" id="confirmProjectUpdateButton">Appliquer</button>
+        <button type="button" id="cancelProjectUpdateButton">Annuler</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="addRowDialog">
     <form method="dialog">
