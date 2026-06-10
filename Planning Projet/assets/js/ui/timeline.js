@@ -299,9 +299,6 @@ function refreshPlanningPaneLayout() {
   }
 
   requestStickyAxisSync();
-  requestAnimationFrame(() => {
-    updateCurrentTimeLineBounds();
-  });
 }
 
 function setPlanningPaneWidth(width, { redraw = true } = {}) {
@@ -516,84 +513,6 @@ function bindStickyTimelineAxis() {
   requestStickyAxisSync();
 }
 
-function getPlanningDateMs(value) {
-  const date = value instanceof Date ? value : new Date(value);
-  const ms = date.getTime();
-  return Number.isFinite(ms) ? ms : null;
-}
-
-function getCurrentTimeLineLeft(range = null, centerPanel = null) {
-  const effectiveRange = range || timelineInstance?.getWindow?.() || null;
-  const startMs = getPlanningDateMs(effectiveRange?.start);
-  const endMs = getPlanningDateMs(effectiveRange?.end);
-  const panelWidth =
-    centerPanel instanceof HTMLElement ? centerPanel.getBoundingClientRect().width : 0;
-
-  if (startMs != null && endMs != null && endMs > startMs && panelWidth > 0) {
-    return ((Date.now() - startMs) / (endMs - startMs)) * panelWidth;
-  }
-
-  if (timelineInstance && typeof timelineInstance.toScreen === "function") {
-    const screenLeft = Number(timelineInstance.toScreen(new Date()));
-    if (Number.isFinite(screenLeft)) {
-      return screenLeft;
-    }
-  }
-
-  return null;
-}
-
-function syncCurrentTimeLinePosition(range = null, currentLines = null, centerPanel = null) {
-  const lines =
-    currentLines || document.getElementById("planningTimeline")?.querySelectorAll(".vis-current-time");
-  if (!lines?.length) return;
-
-  const left = getCurrentTimeLineLeft(range, centerPanel);
-  if (!Number.isFinite(left)) return;
-
-  const leftValue = `${Math.round(left * 100) / 100}px`;
-  lines.forEach((line) => {
-    line.style.left = leftValue;
-  });
-}
-
-function updateCurrentTimeLineBounds(range = null) {
-  const container = document.getElementById("planningTimeline");
-  if (!container) return;
-
-  const topPanel = container.querySelector(".vis-panel.vis-top");
-  const centerPanel = container.querySelector(".vis-panel.vis-center");
-  const leftPanel = container.querySelector(".vis-panel.vis-left");
-  const labelSet = container.querySelector(".vis-labelset");
-  const centerContent = centerPanel?.querySelector(".vis-content");
-  const foreground = centerPanel?.querySelector(".vis-foreground");
-  const background = centerPanel?.querySelector(".vis-background");
-  const currentLines = container.querySelectorAll(".vis-current-time");
-  if (!currentLines.length) return;
-
-  const topHeight = topPanel ? topPanel.getBoundingClientRect().height : 0;
-  const totalHeight = container.getBoundingClientRect().height;
-  const visibleBodyHeight = Math.max(0, totalHeight - topHeight);
-  const contentHeight = Math.max(
-    visibleBodyHeight,
-    centerPanel?.scrollHeight || 0,
-    leftPanel?.scrollHeight || 0,
-    labelSet?.scrollHeight || 0,
-    centerContent?.scrollHeight || 0,
-    foreground?.scrollHeight || 0,
-    background?.scrollHeight || 0
-  );
-
-  currentLines.forEach((line) => {
-    const parentPanel = line.closest(".vis-panel");
-    const isBodyPanelLine = parentPanel?.classList?.contains("vis-center");
-    line.style.top = isBodyPanelLine ? "0px" : `${topHeight}px`;
-    line.style.height = `${contentHeight}px`;
-  });
-
-  syncCurrentTimeLinePosition(range, currentLines, centerPanel);
-}
-
 function normalizePlanningViewportBounds(bounds = {}) {
   const nextMinVisibleDays = Math.max(1, Math.round(Number(bounds.minVisibleDays) || 7));
   const nextMaxVisibleDays = Math.max(
@@ -658,7 +577,6 @@ function enforceEmbeddedPlanningViewportBounds(range = null) {
   timelineInstance.setWindow(clampedRange.start, clampedRange.end, { animation: false });
   updateDateRangeDisplay();
   updateNavCenterButtonLabel();
-  updateCurrentTimeLineBounds();
   requestStickyAxisSync();
   requestAnimationFrame(() => {
     planningViewportBoundsCorrectionPending = false;
@@ -4830,7 +4748,6 @@ export function refreshPlanningTimelineLayout() {
   timelineInstance.redraw();
   updateDateRangeDisplay();
   updateNavCenterButtonLabel();
-  updateCurrentTimeLineBounds();
   requestStickyAxisSync();
   return getPlanningViewportState();
 }
@@ -4893,7 +4810,6 @@ export function applyPlanningViewportState(viewport = {}) {
       timelineInstance.setWindow(clampedRange.start, clampedRange.end, { animation: false });
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
-      updateCurrentTimeLineBounds();
       requestStickyAxisSync();
       queuePlanningViewportSettled(settleToken);
       return waitForPlanningViewportSettled();
@@ -4917,7 +4833,6 @@ export function applyPlanningViewportState(viewport = {}) {
       timelineInstance.setWindow(start, end, { animation: false });
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
-      updateCurrentTimeLineBounds();
       requestStickyAxisSync();
       queuePlanningViewportSettled(settleToken);
       return waitForPlanningViewportSettled();
@@ -4938,7 +4853,6 @@ export function applyPlanningViewportState(viewport = {}) {
     setWindowForMode(nextMode, anchorDate);
     rememberProgrammaticPlanningViewport(getPlanningViewportLogicalSignature(getPlanningViewportState()));
     updateNavCenterButtonLabel();
-    updateCurrentTimeLineBounds();
     requestStickyAxisSync();
     queuePlanningViewportSettled(settleToken);
     return waitForPlanningViewportSettled();
@@ -5093,7 +5007,6 @@ export function setPlanningZoomMode(mode, anchorDate = null) {
   const settleToken = beginPlanningViewportSettle();
   setWindowForMode(nextMode, nextAnchorDate);
   updateNavCenterButtonLabel();
-  updateCurrentTimeLineBounds();
   requestStickyAxisSync();
   queuePlanningViewportSettled(settleToken);
   return waitForPlanningViewportSettled();
@@ -5107,7 +5020,6 @@ export function movePlanningViewportByMode(direction = 1) {
   const settleToken = beginPlanningViewportSettle();
   moveWindowByMode(direction >= 0 ? 1 : -1);
   updateNavCenterButtonLabel();
-  updateCurrentTimeLineBounds();
   requestStickyAxisSync();
   queuePlanningViewportSettled(settleToken);
   return waitForPlanningViewportSettled();
@@ -5122,7 +5034,6 @@ export function focusPlanningDataAnchor() {
   const settleToken = beginPlanningViewportSettle();
   setWindowForMode(mode, dataAnchorDate || getWindowCenterDate());
   updateNavCenterButtonLabel();
-  updateCurrentTimeLineBounds();
   requestStickyAxisSync();
   queuePlanningViewportSettled(settleToken);
   return waitForPlanningViewportSettled();
@@ -5377,7 +5288,6 @@ export function renderPlanningTimeline(timelineData = {}) {
 
     updateDateRangeDisplay();
     updateNavCenterButtonLabel();
-    updateCurrentTimeLineBounds();
     requestStickyAxisSync();
     queuePlanningViewportSettled(settleToken);
   });
@@ -5418,21 +5328,19 @@ export function bindTimelineToolbar() {
 
   // Mettre à jour le texte quand l’utilisateur déplace/zoome à la souris
   if (timelineInstance) {
-    timelineInstance.on("rangechange", (properties = {}) => {
+    timelineInstance.on("rangechange", () => {
       if (enforceEmbeddedPlanningViewportBounds()) {
         return;
       }
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
-      syncCurrentTimeLinePosition(properties);
     });
-    timelineInstance.on("rangechanged", (properties = {}) => {
+    timelineInstance.on("rangechanged", () => {
       if (enforceEmbeddedPlanningViewportBounds()) {
         return;
       }
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
-      updateCurrentTimeLineBounds(properties);
       emitPlanningViewportChange("rangechanged");
     });
   }
@@ -5497,7 +5405,6 @@ export function setPlanningVisualAggregateMode(enabled = false) {
         timelineInstance.setWindow(previousWindow.start, previousWindow.end, { animation: false });
         updateDateRangeDisplay();
         updateNavCenterButtonLabel();
-        updateCurrentTimeLineBounds();
         requestStickyAxisSync();
       });
     }

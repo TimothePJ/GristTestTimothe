@@ -857,10 +857,6 @@ body.planning-visual-aggregate-mode #planningTimeline .vis-item.planning-aggrega
   z-index: 10 !important;
 }
 
-body.planning-visual-aggregate-mode #planningTimeline .vis-current-time {
-  z-index: 20 !important;
-}
-
 #planningTimeline .group-row-grid.planning-draggable-row,
 #planningTimeline .group-row-grid.planning-draggable-row > div {
   cursor: grab !important;
@@ -1582,9 +1578,7 @@ body.planning-row-dragging {
   width: 2px !important;
   background-color: #ed1b2d !important;
   opacity: 0.9;
-  z-index: 5;
-  transition: none !important;
-  will-change: left;
+  z-index: 20 !important;
 }
 
 /* ==========================================================
