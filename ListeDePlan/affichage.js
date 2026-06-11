@@ -1,4 +1,5 @@
 const INDICES = ["0", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
+const DOCUMENT_PLANNING_TABLE_CANDIDATES = ["Planning_Projet", "Planning_Project"];
 let projetsDictGlobal = null;
 let planningRealisationHelpersPromise = null;
 
@@ -821,7 +822,9 @@ function buildDocumentTextSyncActions({
     if (result.status === "accepted") {
       return buildDedupedUpdateActions(tableName, result.candidates, updateFields);
     }
-    if (result.status === "ambiguous") return [];
+    if (result.status === "ambiguous") {
+      throw new Error(`La correspondance du document est ambigue dans ${warningLabel}.`);
+    }
   }
 
   for (const strategy of strategies) {
@@ -829,7 +832,9 @@ function buildDocumentTextSyncActions({
     if (result.status === "accepted") {
       return buildDedupedUpdateActions(tableName, result.candidates, updateFields);
     }
-    if (result.status === "ambiguous") return [];
+    if (result.status === "ambiguous") {
+      throw new Error(`La correspondance du document est ambigue dans ${warningLabel}.`);
+    }
   }
 
   return [];
@@ -895,8 +900,23 @@ async function buildReferencesTextUpdateActions({
     });
   } catch (err) {
     console.error("Erreur lors de la préparation de la synchro vers References2 :", err);
-    return [];
+    throw err;
   }
+}
+
+async function fetchFirstDocumentTable(tableNames) {
+  let lastError = null;
+  for (const tableName of tableNames) {
+    try {
+      return {
+        tableName,
+        raw: await grist.docApi.fetchTable(tableName)
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Table liee introuvable.");
 }
 
 async function buildPlanningProjetTextUpdateActions({
@@ -909,7 +929,8 @@ async function buildPlanningProjetTextUpdateActions({
   zone
 }) {
   try {
-    const planningRaw = await grist.docApi.fetchTable("Planning_Projet");
+    const { tableName: planningTableName, raw: planningRaw } =
+      await fetchFirstDocumentTable(DOCUMENT_PLANNING_TABLE_CANDIDATES);
     const planningRows = normalizeRows(planningRaw);
     const planningColumns = getColumnNames(planningRaw, planningRows);
 
@@ -947,7 +968,7 @@ async function buildPlanningProjetTextUpdateActions({
     const projectId = projetsMap?.[normalizeText(nomProjet)] ?? null;
 
     return buildDocumentTextSyncActions({
-      tableName: "Planning_Projet",
+      tableName: planningTableName,
       rows: planningRows,
       updateFields,
       cellIndex,
@@ -962,12 +983,77 @@ async function buildPlanningProjetTextUpdateActions({
       nomProjet,
       zone,
       projectId,
-      warningLabel: "Planning_Projet"
+      warningLabel: planningTableName
     });
   } catch (err) {
     console.error("Erreur lors de la préparation de la synchro vers Planning_Projet :", err);
-    return [];
+    throw err;
   }
+}
+
+async function assertDocumentSourceUnambiguous({
+  numDocument,
+  designation,
+  typeDocument,
+  nomProjet,
+  zone
+}) {
+  const projetsMap = await chargerProjetsMap();
+  const projectId = projetsMap?.[normalizeText(nomProjet)] ?? null;
+  const conflicts = (window.records || []).filter((row) => {
+    if (!matchesProjectValue(row.Nom_projet, nomProjet, projectId)) return false;
+    if (normalizeText(row.NumeroDocument) !== normalizeText(numDocument)) return false;
+
+    return normalizeText(row.Designation) !== normalizeText(designation) ||
+      normalizeText(row.Type_document) !== normalizeText(typeDocument) ||
+      normalizeZoneText(row.Zone) !== normalizeZoneText(zone);
+  });
+
+  if (conflicts.length) {
+    throw new Error(
+      `Le numero "${normalizeText(numDocument)}" correspond deja a plusieurs documents dans ce projet.`
+    );
+  }
+}
+
+function isTruthyGristValue(value) {
+  if (value === true || value === 1) return true;
+  return ["true", "1", "oui", "yes", "vrai"].includes(
+    String(value ?? "").trim().toLocaleLowerCase("fr")
+  );
+}
+
+async function buildEnvoisTextUpdateActions({
+  cellIndex,
+  texte,
+  numDocument,
+  nomProjet
+}) {
+  const raw = await grist.docApi.fetchTable("Envois");
+  const rows = normalizeRows(raw);
+  const columns = getColumnNames(raw, rows);
+  const projectColumn = findFirstExistingColumn(columns, [
+    "Projet",
+    "NomProjet",
+    "Nom_projet",
+    "NomProjetString"
+  ]);
+  if (!projectColumn || !columns.has("N_Plan")) return [];
+
+  const projetsMap = await chargerProjetsMap();
+  const projectId = projetsMap?.[normalizeText(nomProjet)] ?? null;
+  const updateFields = {};
+  if (cellIndex === 0) updateFields.N_Plan = texte;
+  if (cellIndex === 1 && columns.has("Designation")) updateFields.Designation = texte;
+  if (!Object.keys(updateFields).length) return [];
+
+  const matchingDrafts = rows.filter((row) =>
+    row?.id != null &&
+    !isTruthyGristValue(row.Envoye) &&
+    matchesProjectValue(row[projectColumn], nomProjet, projectId) &&
+    normalizeText(row.N_Plan) === normalizeText(numDocument)
+  );
+  return buildDedupedUpdateActions("Envois", matchingDrafts, updateFields);
 }
 
 async function syncPlanningProjetIndicesFromListeDePlan() {
@@ -1733,6 +1819,42 @@ document.addEventListener("focusout", async (e) => {
   const { numDocument, designation, typeDocument, nomProjet, zone } = td.dataset;
   const currentValue = td.cellIndex === 0 ? normalizeText(numDocument) : normalizeText(designation);
   if (normalizeText(texte) === currentValue) return;
+  if (!texte) {
+    td.textContent = currentValue;
+    alert("Le numero et le nom du document ne peuvent pas etre vides.");
+    return;
+  }
+
+  try {
+    await assertDocumentSourceUnambiguous({
+      numDocument,
+      designation,
+      typeDocument,
+      nomProjet,
+      zone
+    });
+    if (typeof window.assertDocumentNumbersAvailable !== "function") {
+      throw new Error("Le controle d'unicite des numeros de document est indisponible.");
+    }
+    const sourceDocument = {
+      number: numDocument,
+      name: designation,
+      type: typeDocument,
+      zone
+    };
+    await window.assertDocumentNumbersAvailable(nomProjet, [numDocument], {
+      excludeDocument: sourceDocument
+    });
+    if (td.cellIndex === 0) {
+      await window.assertDocumentNumbersAvailable(nomProjet, [texte], {
+        excludeDocument: sourceDocument
+      });
+    }
+  } catch (error) {
+    td.textContent = currentValue;
+    alert(error.message);
+    return;
+  }
 
   const projetsMap = await chargerProjetsMap();
   const projectId = projetsMap?.[normalizeText(nomProjet)] ?? null;
@@ -1751,8 +1873,13 @@ document.addEventListener("focusout", async (e) => {
     champs.Designation = texte;
   }
   if (Object.keys(champs).length > 0) {
-    const actions = recordsToUpdate.map(r => ["UpdateRecord", "ListePlan_NDC_COF", r.id, champs]);
     try {
+      const listePlanTableName = typeof window.getActiveListePlanTableName === "function"
+        ? await window.getActiveListePlanTableName()
+        : "ListePlan_NDC_COF";
+      const actions = recordsToUpdate.map(
+        (record) => ["UpdateRecord", listePlanTableName, record.id, champs]
+      );
       const referenceActions = await buildReferencesTextUpdateActions({
         cellIndex: td.cellIndex,
         texte,
@@ -1771,7 +1898,15 @@ document.addEventListener("focusout", async (e) => {
         nomProjet,
         zone
       });
-      await grist.docApi.applyUserActions(actions.concat(referenceActions, planningActions));
+      const envoisActions = await buildEnvoisTextUpdateActions({
+        cellIndex: td.cellIndex,
+        texte,
+        numDocument,
+        nomProjet
+      });
+      await grist.docApi.applyUserActions(
+        actions.concat(referenceActions, planningActions, envoisActions)
+      );
       recordsToUpdate.forEach((record) => {
         if (td.cellIndex === 0) {
           record.NumeroDocument = texte;
@@ -1785,9 +1920,11 @@ document.addEventListener("focusout", async (e) => {
       });
       await syncPlanningProjetIndicesFromListeDePlan();
     } catch (err) {
+      td.textContent = currentValue;
       console.error("Erreur lors de la mise à jour du texte :", err);
       td.style.backgroundColor = "#842029";
       td.style.color = "#fff";
+      alert(err.message || "La modification du document a echoue.");
     }
   }
 });

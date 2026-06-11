@@ -364,6 +364,20 @@
       return;
     }
 
+    if (typeof window.assertDocumentNumbersAvailable !== "function") {
+      alert("Le controle d'unicite des numeros de document est indisponible.");
+      return;
+    }
+    try {
+      await window.assertDocumentNumbersAvailable(STATE.projectName, [numeroStr]);
+    } catch (error) {
+      alert(error.message);
+      return;
+    }
+    const listePlanTableName = typeof window.getActiveListePlanTableName === "function"
+      ? await window.getActiveListePlanTableName()
+      : "ListePlan_NDC_COF";
+
     const serviceValue = await getTeamService();
 
     // 1) Ajouts dans References (un par émetteur)
@@ -385,7 +399,7 @@
     }
 
     // 2) Ajout côté Liste de plan (une seule ligne "tête" pour apparaitre dans la vue)
-    actions.push(["AddRecord", "ListePlan_NDC_COF", null, {
+    actions.push(["AddRecord", listePlanTableName, null, {
       NumeroDocument: String(numeroStr),
       Type_document: STATE.typeDocLabel,
       DateDiffusion: null,

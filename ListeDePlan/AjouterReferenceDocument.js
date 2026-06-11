@@ -319,6 +319,20 @@
       return;
     }
 
+    if (typeof window.assertDocumentNumbersAvailable !== "function") {
+      alert("Le controle d'unicite des numeros de document est indisponible.");
+      return;
+    }
+    try {
+      await window.assertDocumentNumbersAvailable(state.currentProjectLabel || projetId, [numeroStr]);
+    } catch (error) {
+      alert(error.message);
+      return;
+    }
+    const listePlanTableName = typeof window.getActiveListePlanTableName === "function"
+      ? await window.getActiveListePlanTableName()
+      : "ListePlan_NDC_COF";
+
     const actions = [
       // 1) Table des references
       ["AddRecord", "References2", null, {
@@ -327,7 +341,7 @@
         NumeroDocument: String(numeroStr)
       }],
       // 2) Liste de plan : Type_document = libelle EXACT de la 2e liste
-      ["AddRecord", "ListePlan_NDC_COF", null, {
+      ["AddRecord", listePlanTableName, null, {
         NumeroDocument: String(numeroStr),
         Type_document: typeDocLabel, // texte exact de la liste
         DateDiffusion: null,

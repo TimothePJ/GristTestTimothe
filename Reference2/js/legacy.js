@@ -452,6 +452,69 @@ function _norm(v) {
   return String(v ?? '').trim();
 }
 
+function normalizeDocumentNumberForUniqueness(value) {
+  return String(value ?? '').trim();
+}
+
+function normalizeDocumentProjectKey(value) {
+  const raw = Array.isArray(value)
+    ? value[value.length - 1]
+    : value && typeof value === 'object'
+      ? (value.details ?? value.display ?? value.label ?? value.name ?? value.id ?? value)
+      : value;
+  return String(raw ?? '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('fr');
+}
+
+async function buildDocumentProjectAliasKeys(projectName) {
+  const aliases = new Set([normalizeDocumentProjectKey(projectName)].filter(Boolean));
+  const projects = await grist.docApi.fetchTable('Projets2');
+  const ids = projects.id || [];
+  const names = projects.Nom_de_projet || [];
+  const requestedKey = normalizeDocumentProjectKey(projectName);
+
+  for (let index = 0; index < Math.max(ids.length, names.length); index += 1) {
+    const rowKeys = [ids[index], names[index]]
+      .map(normalizeDocumentProjectKey)
+      .filter(Boolean);
+    if (!rowKeys.includes(requestedKey)) continue;
+    rowKeys.forEach((key) => aliases.add(key));
+  }
+  return aliases;
+}
+
+async function assertReferenceDocumentNumbersAvailable(projectName, documentNumbers) {
+  const numbers = (documentNumbers || [])
+    .map(normalizeDocumentNumberForUniqueness)
+    .filter(Boolean);
+  const seen = new Set();
+  for (const number of numbers) {
+    if (seen.has(number)) {
+      throw new Error(`Le numero de document "${number}" est saisi plusieurs fois.`);
+    }
+    seen.add(number);
+  }
+
+  const [tableName, projectAliases] = await Promise.all([
+    resolveListePlanTableName(),
+    buildDocumentProjectAliasKeys(projectName),
+  ]);
+  const plans = await grist.docApi.fetchTable(tableName);
+  const projects = plans.Nom_projet || plans.NomProjet || plans.NomProjetString || [];
+  const existingNumbers = plans.NumeroDocument || [];
+
+  for (let index = 0; index < Math.max(projects.length, existingNumbers.length); index += 1) {
+    if (!projectAliases.has(normalizeDocumentProjectKey(projects[index]))) continue;
+    const number = normalizeDocumentNumberForUniqueness(existingNumbers[index]);
+    if (seen.has(number)) {
+      throw new Error(`Le numero de document "${number}" est deja utilise dans ce projet.`);
+    }
+  }
+}
+
 function findListePlanIndex(plansTable, projectName, numeroDocStr, typeDocStr = '', zoneStr = '') {
   const projs = plansTable.Nom_projet || [];
   const nums  = plansTable.NumeroDocument || [];
@@ -2217,6 +2280,10 @@ async function createDocumentsBatch({
   if (!uniqueDocuments.length) {
     throw new Error("Veuillez ajouter au moins un document complet.");
   }
+  await assertReferenceDocumentNumbersAvailable(
+    normalizedProject,
+    (documents || []).map((doc) => _norm(doc?.documentNumber ?? doc?.numero)).filter(Boolean)
+  );
 
   const safeDefaultDatelimite = _norm(defaultDatelimite) || DEFAULT_REFERENCE_DATE;
   const serviceValue = await getTeamService();
@@ -2331,12 +2398,11 @@ async function createDocumentsBatch({
   }
 
   uniqueDocuments.forEach((doc) => {
-    const numeroValue = parseNumeroForStorage(doc.documentNumber);
     normalizedEmitters.forEach((emetteur) => {
       actions.push(['AddRecord', 'References2', null, withComputedReferenceRetard({
         NomProjet: normalizedProject,
         NomDocument: doc.documentName,
-        NumeroDocument: numeroOrZero(numeroValue),
+        NumeroDocument: doc.documentNumber,
         Type_document: doc.documentType,
         Zone: doc.documentZone,
         Emetteur: emetteur,
@@ -3299,7 +3365,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
         const newRow = withComputedReferenceRetard({
           NomProjet: selectedProject,
           NomDocument: parsedDoc.name,
-          NumeroDocument: numeroOrZero(parseNumeroForStorage(parsedDoc.numero)),
+          NumeroDocument: _norm(parsedDoc.numero),
           Type_document: getDocumentTypeForProjectDoc(selectedProject, parsedDoc.name, parsedDoc.zone, parsedDoc.numero) || getCurrentSelectedType(),
           Zone: normalizeZoneValue(parsedDoc.zone),
           Emetteur: emetteur,
@@ -3318,7 +3384,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
       const newRow = withComputedReferenceRetard({
         NomProjet: selectedProject,
         NomDocument: currentSelectedDoc.name,
-        NumeroDocument: numeroOrZero(parseNumeroForStorage(currentSelectedDoc.numero)),
+        NumeroDocument: _norm(currentSelectedDoc.numero),
         Type_document: getDocumentTypeForProjectDoc(selectedProject, currentSelectedDoc.name, currentSelectedDoc.zone, currentSelectedDoc.numero) || getCurrentSelectedType(),
         Zone: normalizeZoneValue(currentSelectedDoc.zone),
         Emetteur: emetteur,
@@ -3574,6 +3640,13 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
     return;
   }
 
+  try {
+    await assertReferenceDocumentNumbersAvailable(selectedFirstValue, [documentNumber]);
+  } catch (error) {
+    alert(error.message);
+    return;
+  }
+
   const selectedEmitters = Array.from(
     document.querySelectorAll('#emetteurDropdown input[type="checkbox"]:checked')
   ).filter(checkbox => {
@@ -3615,12 +3688,12 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
     const serviceValue = await getTeamService();
 
     // Création des nouvelles lignes
-    const num = parseNumeroForStorage(documentNumber);
+    const num = _norm(documentNumber);
     const nm = String(documentName).trim();
     const newRows = selectedEmitters.map((emetteur) => withComputedReferenceRetard({
       NomProjet: selectedProject,
       NomDocument: nm,
-      NumeroDocument: numeroOrZero(num),
+      NumeroDocument: num,
       Type_document: documentType,
       Zone: documentZone,
       Emetteur: emetteur,
@@ -3862,7 +3935,7 @@ function addRowWithFileName(fileName, chemin) {
   const newRow = {
     NomProjet: selectedFirstValue,
     NomDocument: getSelectedDocPair().name,
-    NumeroDocument: numeroOrZero(parseNumeroForStorage(getSelectedDocPair().numero)),
+    NumeroDocument: _norm(getSelectedDocPair().numero),
     Emetteur: '',
     Reference: fileNameWithoutExtension, // Nom du fichier sans extension
     Indice: '',
@@ -4837,6 +4910,16 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
   });
 
   // Récupérer les émetteurs sélectionnés dans le conteneur du dialog "Ajouter Plusieurs document"
+  try {
+    await assertReferenceDocumentNumbersAvailable(
+      selectedFirstValue,
+      documentsData.map((doc) => doc.documentNumber)
+    );
+  } catch (error) {
+    alert(error.message);
+    return;
+  }
+
   const selectedEmitters = Array.from(document.querySelectorAll('#multipleEmetteurDropdown input[type="checkbox"]:checked'))
     .filter(checkbox => {
       const checkboxId = String(checkbox?.id || '');
@@ -4998,13 +5081,13 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
     // 2) Ajout dans References : 1 ligne par (document × émetteur)
     documentsData.forEach(doc => {
       selectedEmitters.forEach(emetteur => {
-        const num = parseNumeroForStorage(doc.documentNumber);
+        const num = _norm(doc.documentNumber);
         const nm  = String(doc.documentName).trim();
 
         const newRow = withComputedReferenceRetard({
           NomProjet: selectedProject,
           NomDocument: nm,
-          NumeroDocument: numeroOrZero(num),
+          NumeroDocument: num,
           Type_document: documentType,
           Zone: documentZone,
           Emetteur: emetteur,

@@ -615,11 +615,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function buildDocumentNumeroScopeKey(doc = {}) {
-        return [
-            normalizeText(doc.numero).toLowerCase(),
-            normalizeDocumentType(doc.type),
-            normalizeZoneMatchKey(doc.zone)
-        ].join('||');
+        return normalizeText(doc.numero);
     }
 
     function collectCustomDocumentZones() {
@@ -676,6 +672,45 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         throw lastError || new Error('Aucune table disponible.');
+    }
+
+    async function assertProjectCreationDocumentNumbersAvailable(projectName, documents = []) {
+        const numbers = documents
+            .map((doc) => normalizeText(doc?.numero))
+            .filter(Boolean);
+        const seen = new Set();
+        for (const number of numbers) {
+            if (seen.has(number)) {
+                throw new Error(`Le numero de document "${number}" est saisi plusieurs fois.`);
+            }
+            seen.add(number);
+        }
+
+        const [listePlanContext, projects] = await Promise.all([
+            fetchFirstAvailableTable(LISTEPLAN_TABLE_CANDIDATES),
+            grist.docApi.fetchTable('Projets2')
+        ]);
+        const projectAliases = new Set([normalizeText(projectName)]);
+        const projectNames = projects.Nom_de_projet || [];
+        const projectIds = projects.id || [];
+        for (let index = 0; index < Math.max(projectNames.length, projectIds.length); index += 1) {
+            if (normalizeText(projectNames[index]) !== normalizeText(projectName)) continue;
+            projectAliases.add(normalizeText(projectIds[index]));
+        }
+
+        const rowProjects =
+            listePlanContext.data.Nom_projet ||
+            listePlanContext.data.NomProjet ||
+            listePlanContext.data.NomProjetString ||
+            [];
+        const rowNumbers = listePlanContext.data.NumeroDocument || [];
+        for (let index = 0; index < Math.max(rowProjects.length, rowNumbers.length); index += 1) {
+            if (!projectAliases.has(normalizeText(rowProjects[index]))) continue;
+            const number = normalizeText(rowNumbers[index]);
+            if (seen.has(number)) {
+                throw new Error(`Le numero de document "${number}" est deja utilise dans ce projet.`);
+            }
+        }
     }
 
     function setFieldIfPresent(columnNames, fields, columnName, value) {
@@ -2516,6 +2551,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             projectData.name = cleanProjectName(projectData.name);
             projectData.number = (projectData.number ?? "").toString().trim();
+            await assertProjectCreationDocumentNumbersAvailable(projectData.name, projectData.documents);
             const projetsTable = await grist.docApi.fetchTable("Projets2");
             const projetsColumns = getTableColumnNames(projetsTable);
             const projectFields = {

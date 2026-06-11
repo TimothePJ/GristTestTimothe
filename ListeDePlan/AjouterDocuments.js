@@ -1043,6 +1043,13 @@
     });
 
     if (!uniqueDocuments.length) throw new Error('Veuillez ajouter au moins un document complet.');
+    if (typeof window.assertDocumentNumbersAvailable !== 'function') {
+      throw new Error("Le controle d'unicite des numeros de document est indisponible.");
+    }
+    await window.assertDocumentNumbersAvailable(
+      normalizedProject,
+      (documents || []).map((doc) => _norm(doc?.documentNumber ?? doc?.numero)).filter(Boolean)
+    );
 
     const safeDefaultDate = _norm(defaultDatelimite) || DEFAULT_DATE;
     const serviceValue = await getTeamService();
@@ -1055,7 +1062,6 @@
       const pendingPlanAdds = new Set();
 
       uniqueDocuments.forEach((doc) => {
-        const idxPlan = findListePlanIndex(plans, normalizedProject, doc.documentNumber, doc.documentType, doc.documentZone);
         const key = [
           normalizedProject.toLocaleLowerCase('fr'),
           doc.documentNumber.toLocaleLowerCase('fr'),
@@ -1063,13 +1069,7 @@
           normalizeZoneMatchKey(doc.documentZone),
         ].join('||');
 
-        if (idxPlan >= 0) {
-          actions.push(['UpdateRecord', plansTableName, plans.id[idxPlan], {
-            Type_document: doc.documentType,
-            Zone: doc.documentZone,
-            Designation: doc.documentName,
-          }]);
-        } else if (!pendingPlanAdds.has(key)) {
+        if (!pendingPlanAdds.has(key)) {
           actions.push(['AddRecord', plansTableName, null, {
             Nom_projet: normalizedProject,
             NumeroDocument: doc.documentNumber,
@@ -1134,12 +1134,11 @@
 
     // --- References ---
     uniqueDocuments.forEach((doc) => {
-      const numeroValue = parseNumeroForStorage(doc.documentNumber);
       normalizedEmitters.forEach((emetteur) => {
         actions.push(['AddRecord', 'References2', null, {
           NomProjet: normalizedProject,
           NomDocument: doc.documentName,
-          NumeroDocument: numeroOrZero(numeroValue),
+          NumeroDocument: doc.documentNumber,
           Type_document: doc.documentType,
           Zone: doc.documentZone,
           Emetteur: emetteur,

@@ -223,6 +223,102 @@ const MANAGE_ZONE_PLANNING_TABLE_CANDIDATES = [
 const MANAGE_ZONE_OPTION_VALUE = "__MANAGE_ZONE__";
 let lastRegularZoneSelection = window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__";
 
+function normalizeDocumentNumberForUniqueness(value) {
+  return String(value ?? "").trim();
+}
+
+function normalizeDocumentProjectKey(value) {
+  const raw = Array.isArray(value)
+    ? value[value.length - 1]
+    : value && typeof value === "object"
+      ? (value.details ?? value.display ?? value.label ?? value.name ?? value.id ?? value)
+      : value;
+  return String(raw ?? "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("fr");
+}
+
+async function buildDocumentProjectAliasKeys(projectName) {
+  const aliases = new Set([normalizeDocumentProjectKey(projectName)].filter(Boolean));
+  const projects = await grist.docApi.fetchTable("Projets2");
+  const names = projects.Nom_de_projet || [];
+  const ids = projects.id || [];
+  const requestedKey = normalizeDocumentProjectKey(projectName);
+
+  for (let index = 0; index < Math.max(names.length, ids.length); index += 1) {
+    const rowKeys = [names[index], ids[index]]
+      .map(normalizeDocumentProjectKey)
+      .filter(Boolean);
+    if (!rowKeys.includes(requestedKey)) continue;
+    rowKeys.forEach((key) => aliases.add(key));
+  }
+
+  return aliases;
+}
+
+async function fetchDocumentUniquenessListePlan() {
+  let lastError = null;
+  for (const tableName of MANAGE_ZONE_LISTEPLAN_TABLE_CANDIDATES) {
+    try {
+      const raw = await grist.docApi.fetchTable(tableName);
+      return { tableName, rows: normalizeManageRows(raw) };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Table ListePlan introuvable.");
+}
+
+async function assertDocumentNumbersAvailable(projectName, documentNumbers, {
+  excludeDocument = null,
+} = {}) {
+  const numbers = (documentNumbers || [])
+    .map(normalizeDocumentNumberForUniqueness)
+    .filter(Boolean);
+  const seenNumbers = new Set();
+  for (const number of numbers) {
+    if (seenNumbers.has(number)) {
+      throw new Error(`Le numero de document "${number}" est saisi plusieurs fois.`);
+    }
+    seenNumbers.add(number);
+  }
+
+  const [projectAliases, listePlan] = await Promise.all([
+    buildDocumentProjectAliasKeys(projectName),
+    fetchDocumentUniquenessListePlan(),
+  ]);
+  const excludedNumber = normalizeDocumentNumberForUniqueness(excludeDocument?.number);
+  const excludedName = String(excludeDocument?.name ?? "").trim();
+  const excludedType = String(excludeDocument?.type ?? "").trim();
+  const excludedZone = String(excludeDocument?.zone ?? "").trim();
+
+  for (const row of listePlan.rows) {
+    const rowProject = row.Nom_projet ?? row.NomProjet ?? row.NomProjetString;
+    if (!projectAliases.has(normalizeDocumentProjectKey(rowProject))) continue;
+
+    const rowNumber = normalizeDocumentNumberForUniqueness(row.NumeroDocument);
+    if (!seenNumbers.has(rowNumber)) continue;
+
+    const isExcludedSource = excludeDocument &&
+      rowNumber === excludedNumber &&
+      String(row.Designation ?? row.NomDocument ?? "").trim() === excludedName &&
+      String(row.Type_document ?? row.Type_doc ?? "").trim() === excludedType &&
+      String(row.Zone ?? "").trim() === excludedZone;
+    if (isExcludedSource) continue;
+
+    throw new Error(
+      `Le numero de document "${rowNumber}" est deja utilise dans ce projet.`
+    );
+  }
+
+  return listePlan;
+}
+
+window.assertDocumentNumbersAvailable = assertDocumentNumbersAvailable;
+window.getActiveListePlanTableName = async () => (await fetchDocumentUniquenessListePlan()).tableName;
+
 function getAllTypesValue() {
   return window.LISTE_DE_PLAN_ALL_TYPES_VALUE || "__ALL_TYPES__";
 }
