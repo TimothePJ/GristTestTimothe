@@ -772,6 +772,22 @@ function getPhaseTooltipMetaFromClassName(className) {
     };
   }
 
+  if (cls.includes("phase-coupes")) {
+    return {
+      label: "COUPES",
+      startLabel: "Date limite",
+      endLabel: "Diff coffrage",
+    };
+  }
+
+  if (cls.includes("phase-demolition")) {
+    return {
+      label: "DÉMOLITION",
+      startLabel: "Date limite",
+      endLabel: "Diff coffrage",
+    };
+  }
+
   if (cls.includes("phase-generic")) {
     return {
       label: "Type personnalisé",
@@ -836,6 +852,24 @@ function buildPhaseTooltipHtml(item, group) {
     return `
       <div><strong>${escapeHtml(tache)}</strong></div>
       <div>NDC</div>
+      <div>Date limite : <strong>${escapeHtml(getExactIsoDate(item.start))}</strong></div>
+      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(item.end))}</strong></div>
+    `;
+  }
+
+  if (cls.includes("phase-coupes")) {
+    return `
+      <div><strong>${escapeHtml(tache)}</strong></div>
+      <div>COUPES</div>
+      <div>Date limite : <strong>${escapeHtml(getExactIsoDate(item.start))}</strong></div>
+      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(item.end))}</strong></div>
+    `;
+  }
+
+  if (cls.includes("phase-demolition")) {
+    return `
+      <div><strong>${escapeHtml(tache)}</strong></div>
+      <div>DÉMOLITION</div>
       <div>Date limite : <strong>${escapeHtml(getExactIsoDate(item.start))}</strong></div>
       <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(item.end))}</strong></div>
     `;
@@ -911,6 +945,24 @@ function getNativePhaseTitle(item, group) {
     return [
       tache,
       `NDC`,
+      `Date limite : ${getExactIsoDate(item.start)}`,
+      `Diff coffrage : ${getExactIsoDate(item.end)}`,
+    ].join("\n");
+  }
+
+  if (cls.includes("phase-coupes")) {
+    return [
+      tache,
+      `COUPES`,
+      `Date limite : ${getExactIsoDate(item.start)}`,
+      `Diff coffrage : ${getExactIsoDate(item.end)}`,
+    ].join("\n");
+  }
+
+  if (cls.includes("phase-demolition")) {
+    return [
+      tache,
+      `DÉMOLITION`,
       `Date limite : ${getExactIsoDate(item.start)}`,
       `Diff coffrage : ${getExactIsoDate(item.end)}`,
     ].join("\n");
@@ -3598,6 +3650,8 @@ function getAggregateGroupId(type = "") {
   if (normalizedType === "coffrage") return "aggregate-coffrage";
   if (normalizedType === "armatures") return "aggregate-armatures";
   if (normalizedType === "ndc") return "aggregate-ndc";
+  if (normalizedType === "coupes") return "aggregate-coupes";
+  if (normalizedType === "demolition") return "aggregate-demolition";
   const slug = normalizedType
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -3612,6 +3666,8 @@ function getAggregatePhaseClassName(type = "") {
   if (normalizedType === "coffrage") return "phase-coffrage";
   if (normalizedType === "armatures") return "phase-armature";
   if (normalizedType === "ndc") return "phase-ndc";
+  if (normalizedType === "coupes") return "phase-coupes";
+  if (normalizedType === "demolition") return "phase-demolition";
   if (normalizedType.startsWith("generic:")) return "phase-generic";
   return "";
 }
@@ -3621,6 +3677,17 @@ function isPlanningNdcTypeDoc(typeDoc) {
     isPlanningTypeDocMatch(typeDoc, "NDC") ||
     isPlanningTypeDocMatch(typeDoc, "NOTE DE CALCUL") ||
     isPlanningTypeDocMatch(typeDoc, "NOTE CALCUL")
+  );
+}
+
+function isPlanningCoupesTypeDoc(typeDoc) {
+  return isPlanningTypeDocMatch(typeDoc, "COUPE");
+}
+
+function isPlanningDemolitionTypeDoc(typeDoc) {
+  return isPlanningTypeDocMatch(
+    String(typeDoc ?? "").normalize("NFD").replace(/[̀-ͯ]/g, ""),
+    "DEMOLITION"
   );
 }
 
@@ -3761,6 +3828,46 @@ function getAggregatePhasePalette(className) {
       text: "#4d426a",
       overdueBackground: "#fce7f3",
       overdueBorder: "#fbcfe8",
+    };
+  }
+
+  if (normalizedClassName.includes("phase-coupes")) {
+    if (normalizedClassName.includes("phase-past")) {
+      return {
+        background: "#b8e8d0",
+        border: "#2da862",
+        text: "#14452a",
+        overdueBackground: "#fef08a",
+        overdueBorder: "#facc15",
+      };
+    }
+
+    return {
+      background: "#d4f7e6",
+      border: "#43CD80",
+      text: "#1a5c38",
+      overdueBackground: "#fef9c3",
+      overdueBorder: "#fde047",
+    };
+  }
+
+  if (normalizedClassName.includes("phase-demolition")) {
+    if (normalizedClassName.includes("phase-past")) {
+      return {
+        background: "#f5cfcf",
+        border: "#a80000",
+        text: "#5c0000",
+        overdueBackground: "#fde68a",
+        overdueBorder: "#f59e0b",
+      };
+    }
+
+    return {
+      background: "#fde8e8",
+      border: "#CD0000",
+      text: "#7a0000",
+      overdueBackground: "#fef3c7",
+      overdueBorder: "#fcd34d",
     };
   }
 
@@ -3965,9 +4072,11 @@ function buildAggregateItemsFromGroups(groups = []) {
     ["coffrage", []],
     ["armatures", []],
     ["ndc", []],
+    ["coupes", []],
+    ["demolition", []],
   ]);
 
-  (groups || []).forEach((group, index) => {
+  (groups || []).forEach((group) => {
     if (!group || group.isZoneHeader || !group.meta) return;
 
     const row = group.meta;
@@ -3975,8 +4084,10 @@ function buildAggregateItemsFromGroups(groups = []) {
     const isCoffrage = isPlanningTypeDocMatch(typeDoc, "COFFRAGE");
     const isArmature = isPlanningTypeDocMatch(typeDoc, "ARMATURE");
     const isNdc = isPlanningNdcTypeDoc(typeDoc);
+    const isCoupes = isPlanningCoupesTypeDoc(typeDoc);
+    const isDemolition = isPlanningDemolitionTypeDoc(typeDoc);
     const isCustom = isPlanningCustomTypeDoc(typeDoc);
-    if (!isCoffrage && !isArmature && !isNdc && !isCustom) return;
+    if (!isCoffrage && !isArmature && !isNdc && !isCoupes && !isDemolition && !isCustom) return;
 
     const aggregateType = isCoffrage
       ? "coffrage"
@@ -3984,7 +4095,11 @@ function buildAggregateItemsFromGroups(groups = []) {
         ? "armatures"
         : isNdc
           ? "ndc"
-          : getPlanningCustomAggregateType(typeDoc);
+          : isCoupes
+            ? "coupes"
+            : isDemolition
+              ? "demolition"
+              : getPlanningCustomAggregateType(typeDoc);
     const range = isArmature
       ? createAggregateRange(row.diffCoffrage, row.diffArmature)
       : createAggregateRange(row.dateLimite, row.diffCoffrage);
@@ -4006,7 +4121,11 @@ function buildAggregateItemsFromGroups(groups = []) {
           ? "Armature"
           : isNdc
             ? "NDC"
-            : String(typeDoc).trim(),
+            : isCoupes
+              ? "COUPES"
+              : isDemolition
+                ? "DÉMOLITION"
+                : String(typeDoc).trim(),
       start: range.start,
       end: range.end,
       tasks: [
@@ -4076,6 +4195,18 @@ function buildVisualAggregateTimelineData(timelineData = {}) {
       "planning-aggregate-group planning-aggregate-group--ndc",
       2
     ),
+    createAggregateGroup(
+      "aggregate-coupes",
+      "COUPES",
+      "planning-aggregate-group planning-aggregate-group--coupes",
+      3
+    ),
+    createAggregateGroup(
+      "aggregate-demolition",
+      "DÉMOLITION",
+      "planning-aggregate-group planning-aggregate-group--demolition",
+      4
+    ),
   ];
 
   const customTypes = new Map();
@@ -4095,7 +4226,7 @@ function buildVisualAggregateTimelineData(timelineData = {}) {
           getAggregateGroupId(aggregateType),
           label,
           "planning-aggregate-group planning-aggregate-group--generic",
-          3 + index
+          5 + index
         )
       );
     });
@@ -4219,6 +4350,8 @@ function buildGroupLabelElement(group) {
   const isCoffrageRow = isPlanningTypeDocMatch(typeDocLabel, "COFFRAGE");
   const isArmatureRow = isPlanningTypeDocMatch(typeDocLabel, "ARMATURE");
   const isNdcRow = isPlanningNdcTypeDoc(typeDocLabel);
+  const isCoupesRow = isPlanningCoupesTypeDoc(typeDocLabel);
+  const isDemolitionRow = isPlanningDemolitionTypeDoc(typeDocLabel);
   const isGenericRow = isPlanningCustomTypeDoc(typeDocLabel);
   const isRealiseComplete = isPlanningRealiseComplete(group?.realiseLabel);
 
@@ -4230,6 +4363,12 @@ function buildGroupLabelElement(group) {
   }
   if (isNdcRow) {
     row.classList.add("row-type-ndc");
+  }
+  if (isCoupesRow) {
+    row.classList.add("row-type-coupes");
+  }
+  if (isDemolitionRow) {
+    row.classList.add("row-type-demolition");
   }
   if (isGenericRow) {
     row.classList.add("row-type-generic");

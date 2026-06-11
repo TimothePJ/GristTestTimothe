@@ -243,10 +243,7 @@ async function showModifyDocumentTypeDialog(cell) {
     const promptedType = window.prompt("Nouveau type de document :", currentType);
     if (promptedType == null) return;
     try {
-      const result = await modifierTypeDocument(cell, promptedType);
-      setDocumentTypeUpdateStatus(
-        `Type modifié : ${result.updatedCount} ligne(s) mise(s) à jour.`
-      );
+      await modifierTypeDocument(cell, promptedType);
     } catch (error) {
       console.error("Modification du type de document échouée :", error);
       setDocumentTypeUpdateStatus(error?.message || "La modification a échoué.", true);
@@ -313,10 +310,7 @@ async function showModifyDocumentTypeDialog(cell) {
 
     try {
       input.value = normalizeContextMenuType(input.value);
-      const result = await modifierTypeDocument(cell, input.value);
-      setDocumentTypeUpdateStatus(
-        `Type modifié : ${result.updatedCount} ligne(s) mise(s) à jour.`
-      );
+      await modifierTypeDocument(cell, input.value);
       closeDialog();
     } catch (error) {
       console.error("Modification du type de document échouée :", error);

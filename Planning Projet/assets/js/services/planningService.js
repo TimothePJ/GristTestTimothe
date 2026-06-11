@@ -129,6 +129,14 @@ function isNdcTypeDoc(value) {
   return normalizePlanningDocumentType(value) === "NDC";
 }
 
+function isCoupesTypeDoc(value) {
+  return normalizePlanningDocumentType(value) === "COUPES";
+}
+
+function isDemolitionTypeDoc(value) {
+  return normalizePlanningDocumentType(value) === "DEMOLITION";
+}
+
 function isCustomTypeDoc(value) {
   if (!toText(value)) return false;
   const normalizedType = normalizePlanningDocumentType(value);
@@ -599,7 +607,7 @@ function resolveCoffrageDateLimiteDate(dateLimiteRaw, diffCoffrageRaw, duree1Raw
 function resolveBandStartDate(typeDoc, dateLimiteRaw, diffCoffrageRaw, duree1Raw) {
   const normalized = String(typeDoc ?? "").toUpperCase();
   if (normalized.includes("ARMATURES")) return parseDate(diffCoffrageRaw);
-  if (normalized.includes("COFFRAGE") || isNdcTypeDoc(typeDoc)) {
+  if (normalized.includes("COFFRAGE") || isNdcTypeDoc(typeDoc) || isCoupesTypeDoc(typeDoc) || isDemolitionTypeDoc(typeDoc)) {
     return resolveCoffrageDateLimiteDate(dateLimiteRaw, diffCoffrageRaw, duree1Raw);
   }
   if (isCustomTypeDoc(typeDoc)) return parseDate(dateLimiteRaw);
@@ -609,7 +617,7 @@ function resolveBandStartDate(typeDoc, dateLimiteRaw, diffCoffrageRaw, duree1Raw
 function resolveBandEndDate(typeDoc, diffCoffrageRaw, diffArmatureRaw) {
   const normalized = String(typeDoc ?? "").toUpperCase();
   if (normalized.includes("ARMATURES")) return parseDate(diffArmatureRaw);
-  if (normalized.includes("COFFRAGE") || isNdcTypeDoc(typeDoc)) return parseDate(diffCoffrageRaw);
+  if (normalized.includes("COFFRAGE") || isNdcTypeDoc(typeDoc) || isCoupesTypeDoc(typeDoc) || isDemolitionTypeDoc(typeDoc)) return parseDate(diffCoffrageRaw);
   if (isCustomTypeDoc(typeDoc)) return parseDate(diffCoffrageRaw);
   return null;
 }
@@ -637,7 +645,7 @@ function resolveDisplayedDurations(
     };
   }
 
-  if (isNdcTypeDoc(typeDoc)) {
+  if (isNdcTypeDoc(typeDoc) || isCoupesTypeDoc(typeDoc) || isDemolitionTypeDoc(typeDoc)) {
     return {
       dureeDebutFin: toText(duree1Raw),
       dureeFinDemarrage: toText(duree3Raw),
@@ -891,6 +899,46 @@ function getPhasePalette(className) {
     };
   }
 
+  if (normalizedClassName.includes("phase-coupes")) {
+    if (normalizedClassName.includes("phase-past")) {
+      return {
+        background: "#b8e8d0",
+        border: "#2da862",
+        text: "#14452a",
+        overdueBackground: "#fef08a",
+        overdueBorder: "#facc15",
+      };
+    }
+
+    return {
+      background: "#d4f7e6",
+      border: "#43CD80",
+      text: "#1a5c38",
+      overdueBackground: "#fef9c3",
+      overdueBorder: "#fde047",
+    };
+  }
+
+  if (normalizedClassName.includes("phase-demolition")) {
+    if (normalizedClassName.includes("phase-past")) {
+      return {
+        background: "#f5cfcf",
+        border: "#a80000",
+        text: "#5c0000",
+        overdueBackground: "#fde68a",
+        overdueBorder: "#f59e0b",
+      };
+    }
+
+    return {
+      background: "#fde8e8",
+      border: "#CD0000",
+      text: "#7a0000",
+      overdueBackground: "#fef3c7",
+      overdueBorder: "#fcd34d",
+    };
+  }
+
   if (normalizedClassName.includes("phase-generic")) {
     if (normalizedClassName.includes("phase-past")) {
       return {
@@ -1088,7 +1136,7 @@ function resolveDurationEditMeta(
     };
   }
 
-  if (isNdcTypeDoc(typeDoc)) {
+  if (isNdcTypeDoc(typeDoc) || isCoupesTypeDoc(typeDoc) || isDemolitionTypeDoc(typeDoc)) {
     return {
       dureeDebutFinColumnKey: "duree1",
       dureeDebutFinLeftDateColumnKey: "dateLimite",
@@ -1245,6 +1293,8 @@ export function buildTimelineDataFromPlanningRows(
     const demarrageTravauxDate = parseDate(demarrageTravauxValue);
     const isCoffrage = isCoffrageTypeDoc(typeDocText);
     const isNdc = isNdcTypeDoc(typeDocText);
+    const isCoupes = isCoupesTypeDoc(typeDocText);
+    const isDemolition = isDemolitionTypeDoc(typeDocText);
     const isPlanningLinkedCoffrage =
       isCoffrage && hasPlanningLinkValue(lignePlanningText);
     const resolvedDiffCoffrageDate = resolveCoffrageDiffCoffrageDate({
@@ -1255,7 +1305,7 @@ export function buildTimelineDataFromPlanningRows(
       duree3Raw: duree3Value,
     });
     const diffCoffrageForDisplay = resolvedDiffCoffrageDate || diffCoffrageValue;
-    const dateLimiteDate = isCoffrage || isNdc
+    const dateLimiteDate = isCoffrage || isNdc || isCoupes || isDemolition
       ? resolveCoffrageDateLimiteDate(
           dateLimiteValue,
           diffCoffrageForDisplay,
@@ -1300,10 +1350,10 @@ export function buildTimelineDataFromPlanningRows(
       // Colonnes affichees
       id2: id2Text,
       groupe: groupeText,
-      groupeKey: !isNdc && groupeText ? groupeText.toLocaleLowerCase("fr") : "",
+      groupeKey: !(isNdc || isCoupes || isDemolition) && groupeText ? groupeText.toLocaleLowerCase("fr") : "",
       zone: zoneText,
       zoneKey: zoneText ? zoneText.toLocaleLowerCase("fr") : "",
-      groupCompositeKey: isNdc
+      groupCompositeKey: (isNdc || isCoupes || isDemolition)
         ? ""
         : buildGroupCompositeKey(
             zoneText ? zoneText.toLocaleLowerCase("fr") : "",
@@ -1662,6 +1712,62 @@ export function buildTimelineDataFromPlanningRows(
               NDC<br>
               Date limite : ${fmtDate(pNdc.start)} (${fmtDateIso(pNdc.start)})<br>
               Diff coffrage : ${fmtDate(pNdc.end)} (${fmtDateIso(pNdc.end)})
+            `,
+          })
+        );
+      }
+    } else if (isCoupesTypeDoc(row.typeDoc)) {
+      // COUPES : Date_limite -> Diff_coffrage, sans logique de groupe.
+      const pCoupes = createRangeBetweenDates(row.dateLimite, row.diffCoffrage);
+      if (pCoupes) {
+        const coupesClassName = buildPhaseClassName("phase-coupes", realiseValue);
+        items.push(
+          ...createSplitPhaseItems({
+            itemIdBase: `${groupId}-p-coupes`,
+            groupId,
+            start: pCoupes.start,
+            end: pCoupes.end,
+            label: "COUPES",
+            className: coupesClassName,
+            style: buildRetardPhaseStyle(coupesClassName, realiseValue, row.retards),
+            pastStyle: buildRetardPhaseStyle(
+              `${coupesClassName} phase-past`,
+              realiseValue,
+              row.retards
+            ),
+            title: `
+              <b>${escapeHtml(row.taches || "Tache")}</b><br>
+              COUPES<br>
+              Date limite : ${fmtDate(pCoupes.start)} (${fmtDateIso(pCoupes.start)})<br>
+              Diff coffrage : ${fmtDate(pCoupes.end)} (${fmtDateIso(pCoupes.end)})
+            `,
+          })
+        );
+      }
+    } else if (isDemolitionTypeDoc(row.typeDoc)) {
+      // DÉMOLITION : Date_limite -> Diff_coffrage, sans logique de groupe.
+      const pDemolition = createRangeBetweenDates(row.dateLimite, row.diffCoffrage);
+      if (pDemolition) {
+        const demolitionClassName = buildPhaseClassName("phase-demolition", realiseValue);
+        items.push(
+          ...createSplitPhaseItems({
+            itemIdBase: `${groupId}-p-demolition`,
+            groupId,
+            start: pDemolition.start,
+            end: pDemolition.end,
+            label: "DÉMOLITION",
+            className: demolitionClassName,
+            style: buildRetardPhaseStyle(demolitionClassName, realiseValue, row.retards),
+            pastStyle: buildRetardPhaseStyle(
+              `${demolitionClassName} phase-past`,
+              realiseValue,
+              row.retards
+            ),
+            title: `
+              <b>${escapeHtml(row.taches || "Tache")}</b><br>
+              DÉMOLITION<br>
+              Date limite : ${fmtDate(pDemolition.start)} (${fmtDateIso(pDemolition.start)})<br>
+              Diff coffrage : ${fmtDate(pDemolition.end)} (${fmtDateIso(pDemolition.end)})
             `,
           })
         );

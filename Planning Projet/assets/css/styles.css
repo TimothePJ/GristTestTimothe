@@ -833,6 +833,14 @@ body.planning-sync-embedded #planningTimeline .vis-time-axis .vis-grid.vis-major
   background: #ffffff !important;
 }
 
+#planningTimeline .planning-aggregate-group--coupes {
+  background: #ffffff !important;
+}
+
+#planningTimeline .planning-aggregate-group--demolition {
+  background: #ffffff !important;
+}
+
 #planningTimeline .planning-aggregate-group--generic {
   background: #ffffff !important;
 }
@@ -1025,6 +1033,14 @@ body.planning-row-dragging {
   background: #d8d2e6 !important;
 }
 
+#planningTimeline .group-row-grid.row-type-coupes.is-ms-drop-target {
+  background: #b8e8d0 !important;
+}
+
+#planningTimeline .group-row-grid.row-type-demolition.is-ms-drop-target {
+  background: #f5cfcf !important;
+}
+
 #planningTimeline .group-row-grid .cell-ligne-planning.is-ms-drop-target-cell {
   background: #dbeafe;
   border-radius: 4px;
@@ -1044,6 +1060,14 @@ body.planning-row-dragging {
 
 #planningTimeline .group-row-grid.row-type-ndc {
   background: #e9e6f2 !important;
+}
+
+#planningTimeline .group-row-grid.row-type-coupes {
+  background: #d4f7e6 !important;
+}
+
+#planningTimeline .group-row-grid.row-type-demolition {
+  background: #fde8e8 !important;
 }
 
 #planningTimeline .group-row-grid.row-type-generic {
@@ -1560,6 +1584,38 @@ body.planning-row-dragging {
 }
 
 #planningTimeline .vis-item.phase-ndc.phase-realise-complete {
+  border-color: #a7f3d0 !important;
+}
+
+#planningTimeline .vis-item.phase-coupes {
+  background-color: #d4f7e6 !important;
+  border-color: #43CD80 !important;
+  color: #1a5c38 !important;
+}
+
+#planningTimeline .vis-item.phase-coupes.phase-past {
+  background-color: #b8e8d0 !important;
+  border-color: #2da862 !important;
+  color: #14452a !important;
+}
+
+#planningTimeline .vis-item.phase-coupes.phase-realise-complete {
+  border-color: #a7f3d0 !important;
+}
+
+#planningTimeline .vis-item.phase-demolition {
+  background-color: #fde8e8 !important;
+  border-color: #CD0000 !important;
+  color: #7a0000 !important;
+}
+
+#planningTimeline .vis-item.phase-demolition.phase-past {
+  background-color: #f5cfcf !important;
+  border-color: #a80000 !important;
+  color: #5c0000 !important;
+}
+
+#planningTimeline .vis-item.phase-demolition.phase-realise-complete {
   border-color: #a7f3d0 !important;
 }
 
