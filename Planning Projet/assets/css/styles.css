@@ -1071,7 +1071,7 @@ body.planning-row-dragging {
 }
 
 #planningTimeline .group-row-grid.row-type-generic {
-  background: #e0f2f1 !important;
+  background: #ede9ff !important;
 }
 
 #planningTimeline .zone-header-band {
@@ -1651,19 +1651,19 @@ body.planning-row-dragging {
 }
 
 #planningTimeline .vis-item.phase-generic {
-  background-color: #e0f2f1 !important;
-  border-color: #99d5d1 !important;
-  color: #155e75 !important;
+  background-color: #ede9ff !important;
+  border-color: #8470FF !important;
+  color: #3d2e8a !important;
 }
 
 #planningTimeline .vis-item.phase-generic.phase-past {
-  background-color: #cde4e7 !important;
-  border-color: #9bc9cf !important;
-  color: #164e63 !important;
+  background-color: #dad4ff !important;
+  border-color: #6858e0 !important;
+  color: #2d2266 !important;
 }
 
 #planningTimeline .vis-item.phase-generic.phase-realise-complete {
-  border-color: #6ee7b7 !important;
+  border-color: #a7f3d0 !important;
 }
 
 #planningTimeline .vis-item.phase-travaux {

@@ -3889,20 +3889,20 @@ function getAggregatePhasePalette(className) {
   if (normalizedClassName.includes("phase-generic")) {
     if (normalizedClassName.includes("phase-past")) {
       return {
-        background: "#cde4e7",
-        border: "#9bc9cf",
-        text: "#164e63",
-        overdueBackground: "#e1b6be",
-        overdueBorder: "#c98794",
+        background: "#dad4ff",
+        border: "#6858e0",
+        text: "#2d2266",
+        overdueBackground: "#fef08a",
+        overdueBorder: "#facc15",
       };
     }
 
     return {
-      background: "#e0f2f1",
-      border: "#99d5d1",
-      text: "#155e75",
-      overdueBackground: "#f3cbd2",
-      overdueBorder: "#dda6b0",
+      background: "#ede9ff",
+      border: "#8470FF",
+      text: "#3d2e8a",
+      overdueBackground: "#fef9c3",
+      overdueBorder: "#fde047",
     };
   }
 

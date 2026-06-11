@@ -607,10 +607,9 @@ function resolveCoffrageDateLimiteDate(dateLimiteRaw, diffCoffrageRaw, duree1Raw
 function resolveBandStartDate(typeDoc, dateLimiteRaw, diffCoffrageRaw, duree1Raw) {
   const normalized = String(typeDoc ?? "").toUpperCase();
   if (normalized.includes("ARMATURES")) return parseDate(diffCoffrageRaw);
-  if (normalized.includes("COFFRAGE") || isNdcTypeDoc(typeDoc) || isCoupesTypeDoc(typeDoc) || isDemolitionTypeDoc(typeDoc)) {
+  if (normalized.includes("COFFRAGE") || isNdcTypeDoc(typeDoc) || isCoupesTypeDoc(typeDoc) || isDemolitionTypeDoc(typeDoc) || isCustomTypeDoc(typeDoc)) {
     return resolveCoffrageDateLimiteDate(dateLimiteRaw, diffCoffrageRaw, duree1Raw);
   }
-  if (isCustomTypeDoc(typeDoc)) return parseDate(dateLimiteRaw);
   return null;
 }
 
@@ -645,7 +644,7 @@ function resolveDisplayedDurations(
     };
   }
 
-  if (isNdcTypeDoc(typeDoc) || isCoupesTypeDoc(typeDoc) || isDemolitionTypeDoc(typeDoc)) {
+  if (isNdcTypeDoc(typeDoc) || isCoupesTypeDoc(typeDoc) || isDemolitionTypeDoc(typeDoc) || isCustomTypeDoc(typeDoc)) {
     return {
       dureeDebutFin: toText(duree1Raw),
       dureeFinDemarrage: toText(duree3Raw),
@@ -942,20 +941,20 @@ function getPhasePalette(className) {
   if (normalizedClassName.includes("phase-generic")) {
     if (normalizedClassName.includes("phase-past")) {
       return {
-        background: "#cde4e7",
-        border: "#9bc9cf",
-        text: "#164e63",
-        overdueBackground: "#e1b6be",
-        overdueBorder: "#c98794",
+        background: "#dad4ff",
+        border: "#6858e0",
+        text: "#2d2266",
+        overdueBackground: "#fef08a",
+        overdueBorder: "#facc15",
       };
     }
 
     return {
-      background: "#e0f2f1",
-      border: "#99d5d1",
-      text: "#155e75",
-      overdueBackground: "#f3cbd2",
-      overdueBorder: "#dda6b0",
+      background: "#ede9ff",
+      border: "#8470FF",
+      text: "#3d2e8a",
+      overdueBackground: "#fef9c3",
+      overdueBorder: "#fde047",
     };
   }
 
@@ -1136,7 +1135,7 @@ function resolveDurationEditMeta(
     };
   }
 
-  if (isNdcTypeDoc(typeDoc) || isCoupesTypeDoc(typeDoc) || isDemolitionTypeDoc(typeDoc)) {
+  if (isNdcTypeDoc(typeDoc) || isCoupesTypeDoc(typeDoc) || isDemolitionTypeDoc(typeDoc) || isCustomTypeDoc(typeDoc)) {
     return {
       dureeDebutFinColumnKey: "duree1",
       dureeDebutFinLeftDateColumnKey: "dateLimite",
@@ -1298,6 +1297,7 @@ export function buildTimelineDataFromPlanningRows(
     const isNdc = isNdcTypeDoc(typeDocText);
     const isCoupes = isCoupesTypeDoc(typeDocText);
     const isDemolition = isDemolitionTypeDoc(typeDocText);
+    const isCustom = isCustomTypeDoc(typeDocText);
     const isPlanningLinkedCoffrage =
       isCoffrage && hasPlanningLinkValue(lignePlanningText);
     const resolvedDiffCoffrageDate = resolveCoffrageDiffCoffrageDate({
@@ -1308,7 +1308,7 @@ export function buildTimelineDataFromPlanningRows(
       duree3Raw: duree3Value,
     });
     const diffCoffrageForDisplay = resolvedDiffCoffrageDate || diffCoffrageValue;
-    const dateLimiteDate = isCoffrage || isNdc || isCoupes || isDemolition
+    const dateLimiteDate = isCoffrage || isNdc || isCoupes || isDemolition || isCustom
       ? resolveCoffrageDateLimiteDate(
           dateLimiteValue,
           diffCoffrageForDisplay,
@@ -1353,10 +1353,10 @@ export function buildTimelineDataFromPlanningRows(
       // Colonnes affichees
       id2: id2Text,
       groupe: groupeText,
-      groupeKey: !(isNdc || isCoupes || isDemolition) && groupeText ? groupeText.toLocaleLowerCase("fr") : "",
+      groupeKey: !(isNdc || isCoupes || isDemolition || isCustom) && groupeText ? groupeText.toLocaleLowerCase("fr") : "",
       zone: zoneText,
       zoneKey: zoneText ? zoneText.toLocaleLowerCase("fr") : "",
-      groupCompositeKey: (isNdc || isCoupes || isDemolition)
+      groupCompositeKey: (isNdc || isCoupes || isDemolition || isCustom)
         ? ""
         : buildGroupCompositeKey(
             zoneText ? zoneText.toLocaleLowerCase("fr") : "",

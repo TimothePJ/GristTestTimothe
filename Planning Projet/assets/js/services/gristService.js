@@ -231,6 +231,12 @@ function isDemolitionTypeDoc(value) {
   return normalizePlanningDocumentType(value) === "DEMOLITION";
 }
 
+function isCustomTypeDoc(value) {
+  if (!toText(value)) return false;
+  const normalizedType = normalizePlanningDocumentType(value);
+  return !["NDC", "COFFRAGE", "ARMATURES", "DEMOLITION", "COUPES"].includes(normalizedType);
+}
+
 function normalizeZoneValueForStorage(value) {
   const text = toText(value);
   if (!text) return "";
@@ -2134,7 +2140,8 @@ export async function updatePlanningFromMsProjectDrop({
   const isNdc = isNdcTypeDoc(currentRow[typeDocCol]);
   const isCoupes = isCoupesTypeDoc(currentRow[typeDocCol]);
   const isDemolition = isDemolitionTypeDoc(currentRow[typeDocCol]);
-  const isNdcLike = isNdc || isCoupes || isDemolition;
+  const isCustom = isCustomTypeDoc(currentRow[typeDocCol]);
+  const isNdcLike = isNdc || isCoupes || isDemolition || isCustom;
   const currentGroup = toText(currentRow[groupCol]);
   const currentZone = normalizeZoneValueForStorage(currentRow[zoneCol]);
   const currentProject = toText(currentRow[projectCol]);
