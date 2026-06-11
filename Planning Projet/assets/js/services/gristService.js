@@ -223,6 +223,14 @@ function isNdcTypeDoc(value) {
   return normalizePlanningDocumentType(value) === "NDC";
 }
 
+function isCoupesTypeDoc(value) {
+  return normalizePlanningDocumentType(value) === "COUPES";
+}
+
+function isDemolitionTypeDoc(value) {
+  return normalizePlanningDocumentType(value) === "DEMOLITION";
+}
+
 function normalizeZoneValueForStorage(value) {
   const text = toText(value);
   if (!text) return "";
@@ -2124,6 +2132,9 @@ export async function updatePlanningFromMsProjectDrop({
   }
   const typeDoc = String(currentRow[typeDocCol] ?? "").toUpperCase();
   const isNdc = isNdcTypeDoc(currentRow[typeDocCol]);
+  const isCoupes = isCoupesTypeDoc(currentRow[typeDocCol]);
+  const isDemolition = isDemolitionTypeDoc(currentRow[typeDocCol]);
+  const isNdcLike = isNdc || isCoupes || isDemolition;
   const currentGroup = toText(currentRow[groupCol]);
   const currentZone = normalizeZoneValueForStorage(currentRow[zoneCol]);
   const currentProject = toText(currentRow[projectCol]);
@@ -2139,7 +2150,7 @@ export async function updatePlanningFromMsProjectDrop({
     updates[nomXmlField] = toText(xmlName);
   }
 
-  if (isCoffrageTypeDoc(typeDoc) || isNdc) {
+  if (isCoffrageTypeDoc(typeDoc) || isNdcLike) {
     let demarrageDate = droppedStartDate || parseCalendarDate(currentRow[demarrageCol]);
     let diffCoffrageDate = parseCalendarDate(currentRow[diffCoffrageCol]);
     let dateLimiteDate = parseCalendarDate(currentRow[dateLimiteCol]);
@@ -2168,7 +2179,7 @@ export async function updatePlanningFromMsProjectDrop({
     if (computedDemarrageIso) updates[demarrageCol] = computedDemarrageIso;
     if (computedDateLimiteIso) updates[dateLimiteCol] = computedDateLimiteIso;
     if (computedDiffCoffrageIso) updates[diffCoffrageCol] = computedDiffCoffrageIso;
-    if (isNdc && groupCol) updates[groupCol] = "";
+    if (isNdcLike && groupCol) updates[groupCol] = "";
   } else if (isArmaturesTypeDoc(typeDoc)) {
     let demarrageDate =
       droppedStartDate ||
@@ -2209,7 +2220,7 @@ export async function updatePlanningFromMsProjectDrop({
   }
 
   const groupHasArmatures =
-    !isNdc &&
+    !isNdcLike &&
     Boolean(currentZone) &&
     Boolean(currentGroup) &&
     groupHasArmaturesRow(rows, {
@@ -2230,7 +2241,7 @@ export async function updatePlanningFromMsProjectDrop({
   }
 
   const shouldResetGroupCoffragePlanningLinks =
-    !isNdc &&
+    !isNdcLike &&
     Boolean(currentZone) &&
     Boolean(currentGroup) &&
     (
@@ -2913,6 +2924,118 @@ export async function fetchProjectBootstrapData() {
 }
 
 /* ---------- Planning ---------- */
+
+export async function initializePlanningRow(rowId) {
+  const table = APP_CONFIG.grist.planningTable;
+  if (!table?.sourceTable) {
+    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
+  }
+  const columns = table.columns || {};
+  const recordId = Number(rowId);
+  if (!Number.isInteger(recordId) || recordId <= 0) {
+    throw new Error("Identifiant de ligne Planning_Projet invalide.");
+  }
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  const updates = {
+    [columns.dateLimite || "Date_limite"]: null,
+    [columns.duree1 || "Duree_1"]: null,
+    [columns.diffCoffrage || "Diff_coffrage"]: null,
+    [columns.duree2 || "Duree_2"]: null,
+    [columns.diffArmature || "Diff_armature"]: null,
+    [columns.duree3 || "Duree_3"]: null,
+    [columns.demarragesTravaux || "Demarrages_travaux"]: null,
+    [columns.lignePlanning || "Ligne_planning"]: null,
+  };
+  if (columns.nomXml) {
+    updates[columns.nomXml] = null;
+  }
+
+  await grist.docApi.applyUserActions([
+    ["UpdateRecord", table.sourceTable, recordId, updates],
+  ]);
+}
+
+export async function reorganizePlanningRowForTypeChange({ rowId, oldTypeDoc, newTypeDoc }) {
+  const table = APP_CONFIG.grist.planningTable;
+  if (!table?.sourceTable) return;
+  const columns = table.columns || {};
+  const recordId = Number(rowId);
+  if (!Number.isInteger(recordId) || recordId <= 0) return;
+
+  const oldIsArmatures = isArmaturesTypeDoc(oldTypeDoc);
+  const newIsArmatures = isArmaturesTypeDoc(newTypeDoc);
+  const newIsCoffrage = isCoffrageTypeDoc(newTypeDoc);
+
+  const rows = await fetchTableRows(table.sourceTable);
+  const idCol = columns.id || "id";
+  const currentRow = rows.find((row) => Number(row?.[idCol]) === recordId);
+  if (!currentRow) return;
+
+  const dateLimiteCol = columns.dateLimite || "Date_limite";
+  const duree1Col = columns.duree1 || "Duree_1";
+  const diffCoffrageCol = columns.diffCoffrage || "Diff_coffrage";
+  const duree2Col = columns.duree2 || "Duree_2";
+  const diffArmatureCol = columns.diffArmature || "Diff_armature";
+  const groupeCol = columns.groupe || "Groupe";
+
+  const updates = {};
+
+  // Non-COFFRAGE, non-ARMATURES → vider le Groupe.
+  if (!newIsCoffrage && !newIsArmatures) {
+    updates[groupeCol] = "";
+  }
+
+  if (oldIsArmatures && !newIsArmatures) {
+    // ARMATURES → autre : Diff_coffrage → Date_limite, Diff_armature → Diff_coffrage.
+    // Les dates brutes Grist sont des timestamps : on passe par parseCalendarDate + formatIsoDate.
+    const diffCoffrageDate = parseCalendarDate(currentRow[diffCoffrageCol]);
+    const diffArmatureDate = parseCalendarDate(currentRow[diffArmatureCol]);
+    const duree2Int = toInteger(currentRow[duree2Col]);
+
+    const dateLimiteIso = formatIsoDate(diffCoffrageDate);
+    const diffCoffrageIso = formatIsoDate(diffArmatureDate);
+
+    if (dateLimiteIso) updates[dateLimiteCol] = dateLimiteIso;
+    if (diffCoffrageIso) updates[diffCoffrageCol] = diffCoffrageIso;
+    updates[duree1Col] = duree2Int ?? null;
+    updates[diffArmatureCol] = null;
+    updates[duree2Col] = null;
+
+  } else if (!oldIsArmatures && newIsArmatures) {
+    // Autre → ARMATURES : Date_limite effective → Diff_coffrage, Diff_coffrage → Diff_armature.
+    const dateLimiteDate = parseCalendarDate(currentRow[dateLimiteCol]);
+    const diffCoffrageDate = parseCalendarDate(currentRow[diffCoffrageCol]);
+    const duree1Int = toInteger(currentRow[duree1Col]);
+
+    // Date_limite effective = Diff_coffrage − Duree_1 semaines (préserve le segment affiché).
+    const effectiveDateLimite =
+      diffCoffrageDate && duree1Int != null && duree1Int >= 0
+        ? subtractWeeksFromDate(diffCoffrageDate, duree1Int)
+        : dateLimiteDate;
+
+    const newDiffCoffrageIso = formatIsoDate(effectiveDateLimite);
+    const newDiffArmatureIso = formatIsoDate(diffCoffrageDate);
+
+    if (newDiffCoffrageIso) updates[diffCoffrageCol] = newDiffCoffrageIso;
+    if (newDiffArmatureIso) updates[diffArmatureCol] = newDiffArmatureIso;
+    updates[duree2Col] = duree1Int ?? null;
+    updates[dateLimiteCol] = null;
+    updates[duree1Col] = null;
+  }
+
+  if (Object.keys(updates).length === 0) return;
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") return;
+  await grist.docApi.applyUserActions([
+    ["UpdateRecord", table.sourceTable, recordId, updates],
+  ]);
+}
 
 export async function fetchPlanningRows() {
   const table = APP_CONFIG.grist.planningTable;

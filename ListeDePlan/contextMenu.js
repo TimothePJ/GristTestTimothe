@@ -174,6 +174,124 @@ function serializeContextMenuProjectTypes(types) {
     .join("; ");
 }
 
+// ── Helpers de réorganisation des dates Planning_Projet ──────────────────────
+
+function contextMenuParseCalendarDate(value) {
+  if (value == null || value === "") return null;
+  if (value instanceof Date) {
+    return new Date(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate());
+  }
+  if (typeof value === "number") {
+    const abs = Math.abs(value);
+    // Grist stocke les dates en secondes depuis epoch (1e8 < abs < 1e11).
+    if (abs > 1e8 && abs < 1e11) {
+      const d = new Date(value * 1000);
+      return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    }
+    // Certaines variantes stockent en jours depuis epoch.
+    if (abs > 0 && abs < 1e6) {
+      const d = new Date(value * 86400 * 1000);
+      return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    }
+    return null;
+  }
+  const str = String(value).trim();
+  if (!str) return null;
+  const fr = str.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (fr) return new Date(+fr[3], +fr[2] - 1, +fr[1]);
+  const iso = new Date(str);
+  return Number.isNaN(iso.getTime()) ? null : iso;
+}
+
+function contextMenuFormatIsoDate(date) {
+  if (!date || Number.isNaN(date.getTime())) return null;
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function contextMenuSubtractWeeks(date, weeks) {
+  if (!date) return null;
+  const d = new Date(date);
+  d.setDate(d.getDate() - weeks * 7);
+  return d;
+}
+
+function contextMenuToInteger(value) {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) && Number.isInteger(n) ? n : null;
+}
+
+function isContextMenuArmaturesType(value) {
+  return String(value ?? "").toUpperCase().includes("ARMATURE");
+}
+
+function isContextMenuCoffrageType(value) {
+  return String(value ?? "").toUpperCase().includes("COFFRAGE");
+}
+
+/**
+ * Renvoie les champs à mettre à jour dans Planning_Projet lors d'un
+ * changement de type, afin de conserver le même segment chronologique.
+ *
+ * ARMATURES → autre  : Diff_coffrage → Date_limite, Diff_armature → Diff_coffrage
+ * autre → ARMATURES  : Date_limite effective → Diff_coffrage, Diff_coffrage → Diff_armature
+ * Tout changement vers non-COFFRAGE/non-ARMATURES : vide le Groupe.
+ */
+function buildPlanningDateReorganizationFields(planningRow, oldTypeDoc, newTypeDoc) {
+  const fields = {};
+  const oldIsArmatures = isContextMenuArmaturesType(oldTypeDoc);
+  const newIsArmatures = isContextMenuArmaturesType(newTypeDoc);
+  const newIsCoffrage  = isContextMenuCoffrageType(newTypeDoc);
+
+  if (!newIsCoffrage && !newIsArmatures) {
+    fields["Groupe"] = "";
+  }
+
+  if (oldIsArmatures && !newIsArmatures) {
+    // ARMATURES → autre
+    const startDate = contextMenuParseCalendarDate(planningRow["Diff_coffrage"]);
+    const endDate   = contextMenuParseCalendarDate(planningRow["Diff_armature"]);
+    const duree2    = contextMenuToInteger(planningRow["Duree_2"]);
+
+    const dateLimiteIso   = contextMenuFormatIsoDate(startDate);
+    const diffCoffrageIso = contextMenuFormatIsoDate(endDate);
+
+    if (dateLimiteIso)   fields["Date_limite"]   = dateLimiteIso;
+    if (diffCoffrageIso) fields["Diff_coffrage"]  = diffCoffrageIso;
+    fields["Duree_1"]      = duree2 ?? null;
+    fields["Diff_armature"] = null;
+    fields["Duree_2"]       = null;
+
+  } else if (!oldIsArmatures && newIsArmatures) {
+    // autre → ARMATURES
+    const dateLimiteDate  = contextMenuParseCalendarDate(planningRow["Date_limite"]);
+    const diffCoffrageDate = contextMenuParseCalendarDate(planningRow["Diff_coffrage"]);
+    const duree1           = contextMenuToInteger(planningRow["Duree_1"]);
+
+    // Date_limite effective = Diff_coffrage − Duree_1 semaines (préserve le segment affiché).
+    const effectiveStart =
+      diffCoffrageDate && duree1 != null && duree1 >= 0
+        ? contextMenuSubtractWeeks(diffCoffrageDate, duree1)
+        : dateLimiteDate;
+
+    const newDiffCoffrageIso  = contextMenuFormatIsoDate(effectiveStart);
+    const newDiffArmatureIso  = contextMenuFormatIsoDate(diffCoffrageDate);
+
+    if (newDiffCoffrageIso)  fields["Diff_coffrage"]  = newDiffCoffrageIso;
+    if (newDiffArmatureIso)  fields["Diff_armature"]  = newDiffArmatureIso;
+    fields["Duree_2"]     = duree1 ?? null;
+    fields["Date_limite"] = null;
+    fields["Duree_1"]     = null;
+  }
+
+  return fields;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function setDocumentTypeUpdateStatus(message, isError = false) {
   const status = document.getElementById("document-type-update-status");
   if (!status) return;
@@ -633,6 +751,24 @@ async function buildDocumentTypeUpdateActions(documentContext, newType) {
       TypeDoc: serializedTypes
     });
   });
+
+  // Réorganisation des dates/durées dans Planning_Projet lors du changement de type.
+  if (planning) {
+    const planningDocColumns = getContextMenuDocumentColumns(planning);
+    const matchingPlanningRows = planning.rows.filter((row) =>
+      rowMatchesStrictContextMenuDocument(row, planningDocColumns, documentContext, projectAliases)
+    );
+    for (const row of matchingPlanningRows) {
+      const extraFields = buildPlanningDateReorganizationFields(
+        row,
+        documentContext.typeDocument,
+        newType
+      );
+      if (Object.keys(extraFields).length > 0) {
+        mergeContextMenuUpdateAction(actionsByRow, planning.tableName, row.id, extraFields);
+      }
+    }
+  }
 
   return [...actionsByRow.values()];
 }

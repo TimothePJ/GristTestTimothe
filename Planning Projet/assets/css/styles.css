@@ -1114,6 +1114,22 @@ body.planning-row-dragging {
   background: #eef6ff;
 }
 
+#planningTimeline .group-row-grid.row-type-coupes .editable-duration-cell:hover {
+  background: #a3e8c4 !important;
+}
+
+#planningTimeline .group-row-grid.row-type-coupes .editable-duration-cell.is-editing-duration {
+  background: #b8e8d0 !important;
+}
+
+#planningTimeline .group-row-grid.row-type-demolition .editable-duration-cell:hover {
+  background: #f5b0b0 !important;
+}
+
+#planningTimeline .group-row-grid.row-type-demolition .editable-duration-cell.is-editing-duration {
+  background: #f5cfcf !important;
+}
+
 #planningTimeline .group-row-grid .editable-duration-cell.is-editing-duration {
   padding: 2px 6px !important;
   overflow: visible !important;
@@ -1232,6 +1248,21 @@ body.planning-row-dragging {
 
 .planning-retard-context-menu__button:hover {
   background: #eef6ff;
+}
+
+.planning-retard-context-menu__separator {
+  margin: 4px 0;
+  border: 0;
+  border-top: 1px solid #e5e7eb;
+}
+
+.planning-retard-context-menu__button--danger {
+  color: #b91c1c;
+}
+
+.planning-retard-context-menu__button--danger:hover {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .planning-retard-dialog {

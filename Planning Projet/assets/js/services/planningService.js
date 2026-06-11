@@ -1261,7 +1261,8 @@ export function buildTimelineDataFromPlanningRows(
     .trim()
     .toLocaleLowerCase("fr");
 
-  const sourceRows = !selectedProject
+  // Toutes les lignes du projet (y compris sans typeDoc) pour le catalogue de zones.
+  const allProjectRows = !selectedProject
     ? []
     : (rawRows || []).filter((row) => {
         if (projectLinkCol && toText(row?.[projectLinkCol]) !== selectedProject) {
@@ -1271,8 +1272,10 @@ export function buildTimelineDataFromPlanningRows(
         if (selectedZoneKey && zoneKey !== selectedZoneKey) {
           return false;
         }
-        return isAllowedTypeDoc(row?.[cfg.typeDoc]);
+        return true;
       });
+
+  const sourceRows = allProjectRows.filter((row) => isAllowedTypeDoc(row?.[cfg.typeDoc]));
 
   let rows = sourceRows.map((r) => {
     const id2Text = toText(r[cfg.id2]);
@@ -1412,13 +1415,27 @@ export function buildTimelineDataFromPlanningRows(
     };
   });
 
+  // Catalogue de zones construit depuis toutes les lignes du projet,
+  // y compris les lignes sans typeDoc utilisées comme marqueurs de zone.
   const zoneCatalog = new Map();
+  allProjectRows.forEach((row) => {
+    const zoneText = toText(row[cfg.zone]);
+    const zoneKey = zoneText.toLocaleLowerCase("fr");
+    if (!zoneCatalog.has(zoneKey)) {
+      zoneCatalog.set(zoneKey, zoneText);
+    }
+  });
+  // Complète avec les zones issues des lignes traitées (sécurité).
   rows.forEach((row) => {
     const zoneKey = String(row.zoneKey || "");
     if (!zoneCatalog.has(zoneKey)) {
       zoneCatalog.set(zoneKey, String(row.zone || ""));
     }
   });
+  // "Sans zone" toujours présente par défaut.
+  if (!zoneCatalog.has("")) {
+    zoneCatalog.set("", "");
+  }
 
   const minArmatureDiffByGroup = new Map();
   rows.forEach((row) => {

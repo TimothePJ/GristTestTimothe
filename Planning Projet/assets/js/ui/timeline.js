@@ -14,6 +14,7 @@ let durationCellEditHandler = null;
 let durationCellEditBound = false;
 let activeDurationEditor = null;
 let retardJustificationHandler = null;
+let planningInitializeHandler = null;
 let referenceDetailsHandler = null;
 let activeRetardJustificationContext = null;
 let retardContextMenuEl = null;
@@ -1479,6 +1480,14 @@ function closeRetardContextMenu() {
   }
 }
 
+async function handlePlanningRowInitializeFromMenu() {
+  if (!planningInitializeHandler || !activeRetardJustificationContext) return;
+  const rowId = Number(activeRetardJustificationContext.rowId);
+  if (!Number.isInteger(rowId) || rowId <= 0) return;
+  if (!window.confirm("Initialiser cette ligne ? Les dates, durées et la ligne planning seront effacées.")) return;
+  await planningInitializeHandler({ rowId });
+}
+
 function positionFixedElementNearPointer(element, event) {
   if (!(element instanceof HTMLElement)) return;
 
@@ -1508,6 +1517,10 @@ function ensureRetardContextMenu() {
     <button type="button" class="planning-retard-context-menu__button" data-planning-retard-action="details">
       Détails
     </button>
+    <hr class="planning-retard-context-menu__separator">
+    <button type="button" class="planning-retard-context-menu__button planning-retard-context-menu__button--danger" data-planning-retard-action="initialize">
+      Initialiser
+    </button>
   `;
 
   menu.addEventListener("click", (event) => {
@@ -1522,6 +1535,8 @@ function ensureRetardContextMenu() {
     const action = button.dataset.planningRetardAction || "";
     if (action === "details") {
       void openReferenceDetailsDialog();
+    } else if (action === "initialize") {
+      void handlePlanningRowInitializeFromMenu();
     } else {
       openRetardJustificationDialog();
     }
@@ -5308,6 +5323,10 @@ export function setPlanningDurationEditHandler(handler) {
 
 export function setPlanningRetardJustificationHandler(handler) {
   retardJustificationHandler = typeof handler === "function" ? handler : null;
+}
+
+export function setPlanningInitializeHandler(handler) {
+  planningInitializeHandler = typeof handler === "function" ? handler : null;
 }
 
 export function setPlanningReferenceDetailsHandler(handler) {

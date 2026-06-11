@@ -15,6 +15,7 @@ import {
   addPlanningZoneRow,
   renameProjectZone,
   clearProjectZone,
+  initializePlanningRow,
   toText,
 } from "./services/gristService.js";
 import {
@@ -48,6 +49,7 @@ import {
   setPlanningReferenceDetailsHandler,
   setPlanningMsProjectDropHandler,
   setPlanningRowDropHandler,
+  setPlanningInitializeHandler,
   subscribePlanningSelectionChanges,
   subscribePlanningViewportChanges,
 } from "./ui/timeline.js";
@@ -816,6 +818,21 @@ async function handleReferenceDetailsAction({ action, context = {}, updates = []
   throw new Error("Action détails références invalide.");
 }
 
+async function handlePlanningRowInitialize({ rowId }) {
+  try {
+    setPlanningStatus("Initialisation de la ligne...");
+    await initializePlanningRow(rowId);
+    await refreshPlanning({
+      sync: false,
+      forceLoad: true,
+      reason: "initialize-row",
+    });
+  } catch (err) {
+    setPlanningStatus(`Erreur initialisation : ${err.message}`);
+    throw err;
+  }
+}
+
 async function handleMsProjectRowDrop({
   planningRowId,
   uniqueNumber,
@@ -1295,6 +1312,7 @@ async function bootstrap() {
     }
     setPlanningMsProjectDropHandler(handleMsProjectRowDrop);
     setPlanningRowDropHandler(handlePlanningRowDrop);
+    setPlanningInitializeHandler(handlePlanningRowInitialize);
     const {
       projectOptions,
       projectAvancementConfigs,
