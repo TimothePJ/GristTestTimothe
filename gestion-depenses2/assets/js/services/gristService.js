@@ -24,7 +24,7 @@ const TIME_SEGMENT_COLUMN_ALIASES = {
     "Days",
   ],
   effectif: ["Effectif"],
-  label: ["Label", "Name", "Title"],
+  label: ["Label", "Title"],
 };
 
 const TIME_REAL_COLUMN_ALIASES = {
@@ -196,6 +196,19 @@ async function getResolvedTimeRealColumns() {
     APP_CONFIG.grist.columns.timeReal,
     TIME_REAL_COLUMN_ALIASES
   );
+}
+
+function setTimeSegmentLabelField(fields, columns, label) {
+  if (
+    !columns.label ||
+    columns.label === columns.name ||
+    columns.label === columns.projectNumber ||
+    Object.prototype.hasOwnProperty.call(fields, columns.label)
+  ) {
+    return;
+  }
+
+  fields[columns.label] = label;
 }
 
 async function fetchNormalizedTimeSegmentRows() {
@@ -567,27 +580,31 @@ export async function createTimeSegment({
     throw new Error("Segment invalide : numero projet, nom, date debut ou date fin manquant.");
   }
 
+  const fields = Object.fromEntries(
+    Object.entries({
+      [columns.projectNumber]: normalizedProjectNumber,
+      [columns.name]: normalizedName,
+      [columns.startDate]: startValue,
+      [columns.endDate]: endValue,
+      [columns.allocationDays]: toFiniteNumber(allocationDays, 0),
+      [columns.effectif]:
+        effectif === undefined
+          ? undefined
+          : effectif === ""
+          ? ""
+          : toFiniteNumber(effectif, 0),
+    }).filter(([, value]) => value !== undefined)
+  );
+  if (toText(label)) {
+    setTimeSegmentLabelField(fields, columns, label);
+  }
+
   const result = await applyActions([
     [
       "AddRecord",
       tableName,
       null,
-      Object.fromEntries(
-        Object.entries({
-          [columns.projectNumber]: normalizedProjectNumber,
-          [columns.name]: normalizedName,
-          [columns.startDate]: startValue,
-          [columns.endDate]: endValue,
-          [columns.allocationDays]: toFiniteNumber(allocationDays, 0),
-          [columns.effectif]:
-            effectif === undefined
-              ? undefined
-              : effectif === ""
-              ? ""
-              : toFiniteNumber(effectif, 0),
-          [columns.label]: label,
-        }).filter(([, value]) => value !== undefined)
-      ),
+      fields,
     ],
   ]);
 
@@ -596,6 +613,8 @@ export async function createTimeSegment({
 
 export async function updateTimeSegment({
   segmentId,
+  projectNumber,
+  name,
   startDate,
   endDate,
   allocationDays,
@@ -609,6 +628,22 @@ export async function updateTimeSegment({
 
   const columns = await getResolvedTimeSegmentColumns();
   const fields = {};
+
+  if (projectNumber != null) {
+    const normalizedProjectNumber = toText(projectNumber);
+    if (!normalizedProjectNumber) {
+      throw new Error("Numero projet invalide pour la mise a jour du segment.");
+    }
+    fields[columns.projectNumber] = normalizedProjectNumber;
+  }
+
+  if (name != null) {
+    const normalizedName = toText(name);
+    if (!normalizedName) {
+      throw new Error("Nom invalide pour la mise a jour du segment.");
+    }
+    fields[columns.name] = normalizedName;
+  }
 
   if (startDate != null) {
     const startValue = toGristDateTimeValue(startDate);
@@ -636,7 +671,7 @@ export async function updateTimeSegment({
   }
 
   if (label != null) {
-    fields[columns.label] = label;
+    setTimeSegmentLabelField(fields, columns, label);
   }
 
   if (!Object.keys(fields).length) {

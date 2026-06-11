@@ -2785,6 +2785,9 @@ async function updateChargePlanSegmentSelection(segmentContext, selection, board
   const shouldPersistEffectif =
     hasEffectifUpdate || nextEffectifDays !== previousEffectifDays;
   const previousSegment = cloneChargePlanSegment(segmentContext.segment);
+  const segmentProject = state.projects.find(
+    (project) => Number(project?.id) === Number(segmentContext.projectId)
+  );
   const nextSegment = cloneChargePlanSegment(segmentContext.segment, {
     startAt: selection.startDate,
     endAt: selection.endDate,
@@ -2802,6 +2805,8 @@ async function updateChargePlanSegmentSelection(segmentContext, selection, board
   try {
     await updateTimeSegment({
       segmentId: previousSegment.id,
+      projectNumber: segmentProject?.projectNumber,
+      name: segmentContext.worker?.name,
       startDate: selection.startDate,
       endDate: selection.endDate,
       allocationDays: selection.totalDays,
