@@ -442,8 +442,7 @@ function isArmaturesTypeDoc(value) {
 }
 
 function isAllowedPlanningTypeDoc(value) {
-  const normalizedType = normalizePlanningDocumentTypeLocal(value);
-  return ["COFFRAGE", "ARMATURES", "DEMOLITION", "COUPES"].includes(normalizedType);
+  return Boolean(normalizeText(value));
 }
 
 function hasPlanningLinkValue(value) {

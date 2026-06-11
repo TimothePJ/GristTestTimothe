@@ -90,6 +90,8 @@
     
   </div>
 
+  <p id="document-type-update-status" class="document-type-update-status" aria-live="polite"></p>
+
   <div id="dialog-placeholder">
 
   </div>
@@ -183,6 +185,32 @@
       <menu class="dialog-buttons" style="margin:8px 0 0;">
         <button type="button" id="confirm-delete-document-cancel" class="cancel-button">Annuler</button>
         <button type="button" id="confirm-delete-document-confirm">Supprimer</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-modify-document-type" class="modify-document-type-dialog">
+    <form method="dialog" class="dialog-body modify-document-type-body">
+      <h3>Modifier Type Document</h3>
+      <p id="modify-document-type-document" class="modify-document-type-document"></p>
+      <p class="modify-document-type-current-line">
+        Type actuel :
+        <strong id="modify-document-type-current"></strong>
+      </p>
+      <label for="modify-document-type-input">Nouveau type</label>
+      <input
+        id="modify-document-type-input"
+        type="text"
+        list="modify-document-type-list"
+        autocomplete="off"
+        maxlength="120"
+        required
+      >
+      <datalist id="modify-document-type-list"></datalist>
+      <p id="modify-document-type-status" class="modify-document-type-status" aria-live="polite"></p>
+      <menu class="dialog-buttons modify-document-type-actions">
+        <button type="button" id="modify-document-type-cancel" class="cancel-button">Annuler</button>
+        <button type="button" id="modify-document-type-apply">Modifier</button>
       </menu>
     </form>
   </dialog>

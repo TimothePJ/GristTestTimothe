@@ -772,6 +772,14 @@ function getPhaseTooltipMetaFromClassName(className) {
     };
   }
 
+  if (cls.includes("phase-generic")) {
+    return {
+      label: "Type personnalisé",
+      startLabel: "Date limite",
+      endLabel: "Diff coffrage",
+    };
+  }
+
   return null;
 }
 
@@ -788,6 +796,9 @@ function buildPhaseTooltipHtml(item, group) {
       startLabel: "Debut",
       endLabel: "Fin",
     };
+    if (cls.includes("phase-generic")) {
+      meta.label = String(item?.phaseLabel || item?.content || "Type personnalisé");
+    }
     const rows = aggregateTasks
       .map((task) => {
         const taskLabel = escapeHtml(task.label || "Tache");
@@ -830,6 +841,18 @@ function buildPhaseTooltipHtml(item, group) {
     `;
   }
 
+  if (cls.includes("phase-generic")) {
+    const typeLabel = String(
+      group?.typeDocLabel || item?.phaseLabel || item?.content || "Type personnalisé"
+    );
+    return `
+      <div><strong>${escapeHtml(tache)}</strong></div>
+      <div>${escapeHtml(typeLabel)}</div>
+      <div>Date limite : <strong>${escapeHtml(getExactIsoDate(item.start))}</strong></div>
+      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(item.end))}</strong></div>
+    `;
+  }
+
   if (cls.includes("phase-demarrage")) {
     return `
       <div><strong>${escapeHtml(tache)}</strong></div>
@@ -854,6 +877,9 @@ function getNativePhaseTitle(item, group) {
       startLabel: "Debut",
       endLabel: "Fin",
     };
+    if (cls.includes("phase-generic")) {
+      meta.label = String(item?.phaseLabel || item?.content || "Type personnalisé");
+    }
     return [
       meta.label,
       ...aggregateTasks.map((task) => {
@@ -885,6 +911,15 @@ function getNativePhaseTitle(item, group) {
     return [
       tache,
       `NDC`,
+      `Date limite : ${getExactIsoDate(item.start)}`,
+      `Diff coffrage : ${getExactIsoDate(item.end)}`,
+    ].join("\n");
+  }
+
+  if (cls.includes("phase-generic")) {
+    return [
+      tache,
+      String(group?.typeDocLabel || item?.phaseLabel || item?.content || "Type personnalisé"),
       `Date limite : ${getExactIsoDate(item.start)}`,
       `Diff coffrage : ${getExactIsoDate(item.end)}`,
     ].join("\n");
@@ -3563,7 +3598,13 @@ function getAggregateGroupId(type = "") {
   if (normalizedType === "coffrage") return "aggregate-coffrage";
   if (normalizedType === "armatures") return "aggregate-armatures";
   if (normalizedType === "ndc") return "aggregate-ndc";
-  return `aggregate-${normalizedType || "unknown"}`;
+  const slug = normalizedType
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("fr")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `aggregate-${slug || "unknown"}`;
 }
 
 function getAggregatePhaseClassName(type = "") {
@@ -3571,6 +3612,7 @@ function getAggregatePhaseClassName(type = "") {
   if (normalizedType === "coffrage") return "phase-coffrage";
   if (normalizedType === "armatures") return "phase-armature";
   if (normalizedType === "ndc") return "phase-ndc";
+  if (normalizedType.startsWith("generic:")) return "phase-generic";
   return "";
 }
 
@@ -3580,6 +3622,25 @@ function isPlanningNdcTypeDoc(typeDoc) {
     isPlanningTypeDocMatch(typeDoc, "NOTE DE CALCUL") ||
     isPlanningTypeDocMatch(typeDoc, "NOTE CALCUL")
   );
+}
+
+function isPlanningCustomTypeDoc(typeDoc) {
+  const normalized = String(typeDoc ?? "").trim();
+  if (!normalized) return false;
+  return !(
+    isPlanningTypeDocMatch(normalized, "COFFRAGE") ||
+    isPlanningTypeDocMatch(normalized, "ARMATURE") ||
+    isPlanningNdcTypeDoc(normalized) ||
+    isPlanningTypeDocMatch(normalized, "COUPE") ||
+    isPlanningTypeDocMatch(
+      normalized.normalize("NFD").replace(/[\u0300-\u036f]/g, ""),
+      "DEMOLITION"
+    )
+  );
+}
+
+function getPlanningCustomAggregateType(typeDoc) {
+  return `generic:${String(typeDoc ?? "").trim().toLocaleUpperCase("fr")}`;
 }
 
 function parseAggregateDate(value) {
@@ -3703,6 +3764,26 @@ function getAggregatePhasePalette(className) {
     };
   }
 
+  if (normalizedClassName.includes("phase-generic")) {
+    if (normalizedClassName.includes("phase-past")) {
+      return {
+        background: "#cde4e7",
+        border: "#9bc9cf",
+        text: "#164e63",
+        overdueBackground: "#e1b6be",
+        overdueBorder: "#c98794",
+      };
+    }
+
+    return {
+      background: "#e0f2f1",
+      border: "#99d5d1",
+      text: "#155e75",
+      overdueBackground: "#f3cbd2",
+      overdueBorder: "#dda6b0",
+    };
+  }
+
   return null;
 }
 
@@ -3758,6 +3839,7 @@ function createAggregatePhaseItem({
     start,
     end,
     content: label,
+    phaseLabel: label,
     className: [className, "planning-aggregate-phase"].filter(Boolean).join(" "),
     taskLabel,
     aggregateTasks,
@@ -3879,11 +3961,11 @@ function mergeOverlappingAggregateSegments(segments = []) {
 }
 
 function buildAggregateItemsFromGroups(groups = []) {
-  const segmentsByType = {
-    coffrage: [],
-    armatures: [],
-    ndc: [],
-  };
+  const segmentsByType = new Map([
+    ["coffrage", []],
+    ["armatures", []],
+    ["ndc", []],
+  ]);
 
   (groups || []).forEach((group, index) => {
     if (!group || group.isZoneHeader || !group.meta) return;
@@ -3893,9 +3975,16 @@ function buildAggregateItemsFromGroups(groups = []) {
     const isCoffrage = isPlanningTypeDocMatch(typeDoc, "COFFRAGE");
     const isArmature = isPlanningTypeDocMatch(typeDoc, "ARMATURE");
     const isNdc = isPlanningNdcTypeDoc(typeDoc);
-    if (!isCoffrage && !isArmature && !isNdc) return;
+    const isCustom = isPlanningCustomTypeDoc(typeDoc);
+    if (!isCoffrage && !isArmature && !isNdc && !isCustom) return;
 
-    const aggregateType = isCoffrage ? "coffrage" : isArmature ? "armatures" : "ndc";
+    const aggregateType = isCoffrage
+      ? "coffrage"
+      : isArmature
+        ? "armatures"
+        : isNdc
+          ? "ndc"
+          : getPlanningCustomAggregateType(typeDoc);
     const range = isArmature
       ? createAggregateRange(row.diffCoffrage, row.diffArmature)
       : createAggregateRange(row.dateLimite, row.diffCoffrage);
@@ -3905,10 +3994,19 @@ function buildAggregateItemsFromGroups(groups = []) {
       toFiniteNumber(row.realise) ?? toFiniteNumber(group.realiseLabel) ?? 0;
     const taskLabel = String(row.taches || group.tachesLabel || "").trim();
 
-    segmentsByType[aggregateType].push({
+    if (!segmentsByType.has(aggregateType)) {
+      segmentsByType.set(aggregateType, []);
+    }
+    segmentsByType.get(aggregateType).push({
       type: aggregateType,
       groupId: getAggregateGroupId(aggregateType),
-      label: isCoffrage ? "Coffrage" : isArmature ? "Armature" : "NDC",
+      label: isCoffrage
+        ? "Coffrage"
+        : isArmature
+          ? "Armature"
+          : isNdc
+            ? "NDC"
+            : String(typeDoc).trim(),
       start: range.start,
       end: range.end,
       tasks: [
@@ -3924,7 +4022,7 @@ function buildAggregateItemsFromGroups(groups = []) {
   });
 
   const items = [];
-  Object.entries(segmentsByType).forEach(([aggregateType, segments]) => {
+  segmentsByType.forEach((segments, aggregateType) => {
     const mergedSegments = mergeOverlappingAggregateSegments(segments);
     mergedSegments.forEach((segment, index) => {
       const maxRealiseValue = Math.max(0, ...segment.realiseValues);
@@ -3979,6 +4077,28 @@ function buildVisualAggregateTimelineData(timelineData = {}) {
       2
     ),
   ];
+
+  const customTypes = new Map();
+  (timelineData.groups || []).forEach((group) => {
+    const typeDoc = String(group?.meta?.typeDoc || group?.typeDocLabel || "").trim();
+    if (!isPlanningCustomTypeDoc(typeDoc)) return;
+    const aggregateType = getPlanningCustomAggregateType(typeDoc);
+    if (!customTypes.has(aggregateType)) customTypes.set(aggregateType, typeDoc);
+  });
+  [...customTypes.entries()]
+    .sort((left, right) =>
+      left[1].localeCompare(right[1], "fr", { sensitivity: "base", numeric: true })
+    )
+    .forEach(([aggregateType, label], index) => {
+      groups.push(
+        createAggregateGroup(
+          getAggregateGroupId(aggregateType),
+          label,
+          "planning-aggregate-group planning-aggregate-group--generic",
+          3 + index
+        )
+      );
+    });
 
   const items = buildAggregateItemsFromGroups(timelineData.groups || []);
 
@@ -4099,6 +4219,7 @@ function buildGroupLabelElement(group) {
   const isCoffrageRow = isPlanningTypeDocMatch(typeDocLabel, "COFFRAGE");
   const isArmatureRow = isPlanningTypeDocMatch(typeDocLabel, "ARMATURE");
   const isNdcRow = isPlanningNdcTypeDoc(typeDocLabel);
+  const isGenericRow = isPlanningCustomTypeDoc(typeDocLabel);
   const isRealiseComplete = isPlanningRealiseComplete(group?.realiseLabel);
 
   if (isCoffrageRow) {
@@ -4109,6 +4230,9 @@ function buildGroupLabelElement(group) {
   }
   if (isNdcRow) {
     row.classList.add("row-type-ndc");
+  }
+  if (isGenericRow) {
+    row.classList.add("row-type-generic");
   }
   if (isRealiseComplete) {
     row.classList.add("row-realise-complete");

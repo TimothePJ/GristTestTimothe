@@ -112,8 +112,7 @@ function getDelayDays(segmentEndDate, referenceDate) {
 }
 
 function isAllowedTypeDoc(value) {
-  const normalizedType = normalizePlanningDocumentType(value);
-  return ["NDC", "COFFRAGE", "ARMATURES", "DEMOLITION", "COUPES"].includes(normalizedType);
+  return Boolean(toText(value));
 }
 
 function isCoffrageTypeDoc(value) {
@@ -128,6 +127,12 @@ function isArmaturesTypeDoc(value) {
 
 function isNdcTypeDoc(value) {
   return normalizePlanningDocumentType(value) === "NDC";
+}
+
+function isCustomTypeDoc(value) {
+  if (!toText(value)) return false;
+  const normalizedType = normalizePlanningDocumentType(value);
+  return !["NDC", "COFFRAGE", "ARMATURES", "DEMOLITION", "COUPES"].includes(normalizedType);
 }
 
 function normalizeProjectLookupKey(value) {
@@ -597,6 +602,7 @@ function resolveBandStartDate(typeDoc, dateLimiteRaw, diffCoffrageRaw, duree1Raw
   if (normalized.includes("COFFRAGE") || isNdcTypeDoc(typeDoc)) {
     return resolveCoffrageDateLimiteDate(dateLimiteRaw, diffCoffrageRaw, duree1Raw);
   }
+  if (isCustomTypeDoc(typeDoc)) return parseDate(dateLimiteRaw);
   return null;
 }
 
@@ -604,6 +610,7 @@ function resolveBandEndDate(typeDoc, diffCoffrageRaw, diffArmatureRaw) {
   const normalized = String(typeDoc ?? "").toUpperCase();
   if (normalized.includes("ARMATURES")) return parseDate(diffArmatureRaw);
   if (normalized.includes("COFFRAGE") || isNdcTypeDoc(typeDoc)) return parseDate(diffCoffrageRaw);
+  if (isCustomTypeDoc(typeDoc)) return parseDate(diffCoffrageRaw);
   return null;
 }
 
@@ -804,6 +811,7 @@ function createPhaseItem({
     start,
     end,
     content: label,
+    phaseLabel: label,
     className,
     title,
     type: "range",
@@ -880,6 +888,26 @@ function getPhasePalette(className) {
       text: "#4d426a",
       overdueBackground: "#efd0d9",
       overdueBorder: "#d8a8b8",
+    };
+  }
+
+  if (normalizedClassName.includes("phase-generic")) {
+    if (normalizedClassName.includes("phase-past")) {
+      return {
+        background: "#cde4e7",
+        border: "#9bc9cf",
+        text: "#164e63",
+        overdueBackground: "#e1b6be",
+        overdueBorder: "#c98794",
+      };
+    }
+
+    return {
+      background: "#e0f2f1",
+      border: "#99d5d1",
+      text: "#155e75",
+      overdueBackground: "#f3cbd2",
+      overdueBorder: "#dda6b0",
     };
   }
 
@@ -1634,6 +1662,34 @@ export function buildTimelineDataFromPlanningRows(
               NDC<br>
               Date limite : ${fmtDate(pNdc.start)} (${fmtDateIso(pNdc.start)})<br>
               Diff coffrage : ${fmtDate(pNdc.end)} (${fmtDateIso(pNdc.end)})
+            `,
+          })
+        );
+      }
+    } else if (isCustomTypeDoc(row.typeDoc)) {
+      const genericPhase = createRangeBetweenDates(row.dateLimite, row.diffCoffrage);
+      if (genericPhase) {
+        const genericLabel = toText(row.typeDoc) || "Type personnalisé";
+        const genericClassName = buildPhaseClassName("phase-generic", realiseValue);
+        items.push(
+          ...createSplitPhaseItems({
+            itemIdBase: `${groupId}-p-generic`,
+            groupId,
+            start: genericPhase.start,
+            end: genericPhase.end,
+            label: genericLabel,
+            className: genericClassName,
+            style: buildRetardPhaseStyle(genericClassName, realiseValue, row.retards),
+            pastStyle: buildRetardPhaseStyle(
+              `${genericClassName} phase-past`,
+              realiseValue,
+              row.retards
+            ),
+            title: `
+              <b>${escapeHtml(row.taches || "Tache")}</b><br>
+              ${escapeHtml(genericLabel)}<br>
+              Date limite : ${fmtDate(genericPhase.start)} (${fmtDateIso(genericPhase.start)})<br>
+              Diff coffrage : ${fmtDate(genericPhase.end)} (${fmtDateIso(genericPhase.end)})
             `,
           })
         );

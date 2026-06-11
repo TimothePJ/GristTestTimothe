@@ -16,3 +16,88 @@
     background-color: #004990;
     color: #ffffff;
   }
+
+.document-type-update-status {
+  min-height: 20px;
+  margin: 8px 12px;
+  color: #166534;
+  font-weight: 700;
+}
+
+.document-type-update-status.is-error,
+.modify-document-type-status.is-error {
+  color: #b91c1c;
+}
+
+.modify-document-type-dialog {
+  width: min(520px, calc(100vw - 32px));
+  border: 1px solid #ed1b2d;
+  border-radius: 8px;
+  color: #004990;
+}
+
+.modify-document-type-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.modify-document-type-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.modify-document-type-body h3,
+.modify-document-type-body p {
+  margin: 0;
+}
+
+.modify-document-type-document {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.modify-document-type-current-line {
+  color: #374151;
+}
+
+.modify-document-type-body input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #9ca3af;
+  border-radius: 4px;
+  font: inherit;
+  text-transform: uppercase;
+}
+
+.modify-document-type-status {
+  min-height: 18px;
+  color: #374151;
+  font-size: 13px;
+}
+
+.modify-document-type-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.modify-document-type-actions button {
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.modify-document-type-actions button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+#modify-document-type-apply {
+  background: #004990;
+  color: #ffffff;
+}
