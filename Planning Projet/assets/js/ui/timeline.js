@@ -811,9 +811,19 @@ function getPhaseTooltipMetaFromClassName(className) {
   return null;
 }
 
+function getPhaseBusinessStart(item) {
+  return item?.businessStart ?? item?.start;
+}
+
+function getPhaseBusinessEnd(item) {
+  return item?.businessEnd ?? item?.end;
+}
+
 function buildPhaseTooltipHtml(item, group) {
   const cls = String(item?.className || "");
   const tache = String(item?.taskLabel || group?.tachesLabel || "Tache");
+  const businessStart = getPhaseBusinessStart(item);
+  const businessEnd = getPhaseBusinessEnd(item);
   const aggregateTasks = Array.isArray(item?.aggregateTasks)
     ? item.aggregateTasks.filter(Boolean)
     : [];
@@ -830,8 +840,8 @@ function buildPhaseTooltipHtml(item, group) {
     const rows = aggregateTasks
       .map((task) => {
         const taskLabel = escapeHtml(task.label || "Tache");
-        const startDateLabel = escapeHtml(getExactIsoDate(task.start));
-        const endDateLabel = escapeHtml(getExactIsoDate(task.end));
+        const startDateLabel = escapeHtml(getExactIsoDate(getPhaseBusinessStart(task)));
+        const endDateLabel = escapeHtml(getExactIsoDate(getPhaseBusinessEnd(task)));
         return `<div><strong>${taskLabel}</strong> : ${meta.startLabel} ${startDateLabel} -> ${meta.endLabel} ${endDateLabel}</div>`;
       })
       .join("");
@@ -846,8 +856,8 @@ function buildPhaseTooltipHtml(item, group) {
     return `
       <div><strong>${escapeHtml(tache)}</strong></div>
       <div>Coffrage</div>
-      <div>Date limite : <strong>${escapeHtml(getExactIsoDate(item.start))}</strong></div>
-      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(item.end))}</strong></div>
+      <div>Date limite : <strong>${escapeHtml(getExactIsoDate(businessStart))}</strong></div>
+      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(businessEnd))}</strong></div>
     `;
   }
 
@@ -855,8 +865,8 @@ function buildPhaseTooltipHtml(item, group) {
     return `
       <div><strong>${escapeHtml(tache)}</strong></div>
       <div>Armature</div>
-      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(item.start))}</strong></div>
-      <div>Diff armature : <strong>${escapeHtml(getExactIsoDate(item.end))}</strong></div>
+      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(businessStart))}</strong></div>
+      <div>Diff armature : <strong>${escapeHtml(getExactIsoDate(businessEnd))}</strong></div>
     `;
   }
 
@@ -864,8 +874,8 @@ function buildPhaseTooltipHtml(item, group) {
     return `
       <div><strong>${escapeHtml(tache)}</strong></div>
       <div>NDC</div>
-      <div>Date limite : <strong>${escapeHtml(getExactIsoDate(item.start))}</strong></div>
-      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(item.end))}</strong></div>
+      <div>Date limite : <strong>${escapeHtml(getExactIsoDate(businessStart))}</strong></div>
+      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(businessEnd))}</strong></div>
     `;
   }
 
@@ -873,8 +883,8 @@ function buildPhaseTooltipHtml(item, group) {
     return `
       <div><strong>${escapeHtml(tache)}</strong></div>
       <div>COUPES</div>
-      <div>Date limite : <strong>${escapeHtml(getExactIsoDate(item.start))}</strong></div>
-      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(item.end))}</strong></div>
+      <div>Date limite : <strong>${escapeHtml(getExactIsoDate(businessStart))}</strong></div>
+      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(businessEnd))}</strong></div>
     `;
   }
 
@@ -882,8 +892,8 @@ function buildPhaseTooltipHtml(item, group) {
     return `
       <div><strong>${escapeHtml(tache)}</strong></div>
       <div>DÉMOLITION</div>
-      <div>Date limite : <strong>${escapeHtml(getExactIsoDate(item.start))}</strong></div>
-      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(item.end))}</strong></div>
+      <div>Date limite : <strong>${escapeHtml(getExactIsoDate(businessStart))}</strong></div>
+      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(businessEnd))}</strong></div>
     `;
   }
 
@@ -894,8 +904,8 @@ function buildPhaseTooltipHtml(item, group) {
     return `
       <div><strong>${escapeHtml(tache)}</strong></div>
       <div>${escapeHtml(typeLabel)}</div>
-      <div>Date limite : <strong>${escapeHtml(getExactIsoDate(item.start))}</strong></div>
-      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(item.end))}</strong></div>
+      <div>Date limite : <strong>${escapeHtml(getExactIsoDate(businessStart))}</strong></div>
+      <div>Diff coffrage : <strong>${escapeHtml(getExactIsoDate(businessEnd))}</strong></div>
     `;
   }
 
@@ -903,7 +913,7 @@ function buildPhaseTooltipHtml(item, group) {
     return `
       <div><strong>${escapeHtml(tache)}</strong></div>
       <div>Debut des travaux</div>
-      <div>Date : <strong>${escapeHtml(getExactIsoDate(item.start))}</strong></div>
+      <div>Date : <strong>${escapeHtml(getExactIsoDate(businessStart))}</strong></div>
     `;
   }
 
@@ -913,6 +923,8 @@ function buildPhaseTooltipHtml(item, group) {
 function getNativePhaseTitle(item, group) {
   const cls = String(item?.className || "");
   const tache = String(item?.taskLabel || group?.tachesLabel || "Tache");
+  const businessStart = getPhaseBusinessStart(item);
+  const businessEnd = getPhaseBusinessEnd(item);
   const aggregateTasks = Array.isArray(item?.aggregateTasks)
     ? item.aggregateTasks.filter(Boolean)
     : [];
@@ -930,7 +942,7 @@ function getNativePhaseTitle(item, group) {
       meta.label,
       ...aggregateTasks.map((task) => {
         const taskLabel = String(task.label || "Tache");
-        return `${taskLabel} : ${meta.startLabel} ${getExactIsoDate(task.start)} -> ${meta.endLabel} ${getExactIsoDate(task.end)}`;
+        return `${taskLabel} : ${meta.startLabel} ${getExactIsoDate(getPhaseBusinessStart(task))} -> ${meta.endLabel} ${getExactIsoDate(getPhaseBusinessEnd(task))}`;
       }),
     ].join("\n");
   }
@@ -939,8 +951,8 @@ function getNativePhaseTitle(item, group) {
     return [
       tache,
       `Coffrage`,
-      `Date limite : ${getExactIsoDate(item.start)}`,
-      `Diff coffrage : ${getExactIsoDate(item.end)}`,
+      `Date limite : ${getExactIsoDate(businessStart)}`,
+      `Diff coffrage : ${getExactIsoDate(businessEnd)}`,
     ].join("\n");
   }
 
@@ -948,8 +960,8 @@ function getNativePhaseTitle(item, group) {
     return [
       tache,
       `Armature`,
-      `Diff coffrage : ${getExactIsoDate(item.start)}`,
-      `Diff armature : ${getExactIsoDate(item.end)}`,
+      `Diff coffrage : ${getExactIsoDate(businessStart)}`,
+      `Diff armature : ${getExactIsoDate(businessEnd)}`,
     ].join("\n");
   }
 
@@ -957,8 +969,8 @@ function getNativePhaseTitle(item, group) {
     return [
       tache,
       `NDC`,
-      `Date limite : ${getExactIsoDate(item.start)}`,
-      `Diff coffrage : ${getExactIsoDate(item.end)}`,
+      `Date limite : ${getExactIsoDate(businessStart)}`,
+      `Diff coffrage : ${getExactIsoDate(businessEnd)}`,
     ].join("\n");
   }
 
@@ -966,8 +978,8 @@ function getNativePhaseTitle(item, group) {
     return [
       tache,
       `COUPES`,
-      `Date limite : ${getExactIsoDate(item.start)}`,
-      `Diff coffrage : ${getExactIsoDate(item.end)}`,
+      `Date limite : ${getExactIsoDate(businessStart)}`,
+      `Diff coffrage : ${getExactIsoDate(businessEnd)}`,
     ].join("\n");
   }
 
@@ -975,8 +987,8 @@ function getNativePhaseTitle(item, group) {
     return [
       tache,
       `DÉMOLITION`,
-      `Date limite : ${getExactIsoDate(item.start)}`,
-      `Diff coffrage : ${getExactIsoDate(item.end)}`,
+      `Date limite : ${getExactIsoDate(businessStart)}`,
+      `Diff coffrage : ${getExactIsoDate(businessEnd)}`,
     ].join("\n");
   }
 
@@ -984,8 +996,8 @@ function getNativePhaseTitle(item, group) {
     return [
       tache,
       String(group?.typeDocLabel || item?.phaseLabel || item?.content || "Type personnalisé"),
-      `Date limite : ${getExactIsoDate(item.start)}`,
-      `Diff coffrage : ${getExactIsoDate(item.end)}`,
+      `Date limite : ${getExactIsoDate(businessStart)}`,
+      `Diff coffrage : ${getExactIsoDate(businessEnd)}`,
     ].join("\n");
   }
 
@@ -993,7 +1005,7 @@ function getNativePhaseTitle(item, group) {
     return [
       tache,
       `Debut des travaux`,
-      `Date : ${getExactIsoDate(item.start)}`,
+      `Date : ${getExactIsoDate(businessStart)}`,
     ].join("\n");
   }
 
@@ -3878,14 +3890,47 @@ function parseAggregateDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function createAggregateRange(startDateRaw, endDateRaw) {
-  const start = parseAggregateDate(startDateRaw);
-  const end = parseAggregateDate(endDateRaw);
-  if (!start || !end || end <= start) {
+function getAggregateDayValue(date) {
+  const day = new Date(date);
+  day.setHours(0, 0, 0, 0);
+  return day.getTime();
+}
+
+function createAggregateVisualRange(startDateRaw, endDateRaw, demarrageDateRaw) {
+  const businessStart = parseAggregateDate(startDateRaw);
+  const businessEnd = parseAggregateDate(endDateRaw);
+  if (!businessStart || !businessEnd) {
     return null;
   }
 
-  return { start, end };
+  const businessStartDay = getAggregateDayValue(businessStart);
+  const businessEndDay = getAggregateDayValue(businessEnd);
+  if (businessEndDay < businessStartDay) {
+    return null;
+  }
+
+  if (businessEndDay > businessStartDay) {
+    return {
+      start: businessStart,
+      end: businessEnd,
+      businessStart,
+      businessEnd,
+    };
+  }
+
+  const demarrageDate = parseAggregateDate(demarrageDateRaw);
+  if (!demarrageDate || getAggregateDayValue(demarrageDate) <= businessEndDay) {
+    return null;
+  }
+
+  const visualEnd = new Date(businessStart);
+  visualEnd.setDate(visualEnd.getDate() + 1);
+  return {
+    start: businessStart,
+    end: visualEnd,
+    businessStart,
+    businessEnd,
+  };
 }
 
 function clampAggregatePercentage(value) {
@@ -4230,8 +4275,16 @@ function buildAggregateItemsFromGroups(groups = []) {
               ? "demolition"
               : getPlanningCustomAggregateType(typeDoc);
     const range = isArmature
-      ? createAggregateRange(row.diffCoffrage, row.diffArmature)
-      : createAggregateRange(row.dateLimite, row.diffCoffrage);
+      ? createAggregateVisualRange(
+          row.diffCoffrage,
+          row.diffArmature,
+          row.demarragesTravaux
+        )
+      : createAggregateVisualRange(
+          row.dateLimite,
+          row.diffCoffrage,
+          row.demarragesTravaux
+        );
     if (!range) return;
 
     const realiseValue =
@@ -4260,8 +4313,10 @@ function buildAggregateItemsFromGroups(groups = []) {
       tasks: [
         {
           label: taskLabel,
-          start: range.start,
-          end: range.end,
+          start: range.businessStart,
+          end: range.businessEnd,
+          businessStart: range.businessStart,
+          businessEnd: range.businessEnd,
         },
       ],
       realiseValues: [realiseValue],

@@ -807,6 +807,8 @@ function createPhaseItem({
   groupId,
   start,
   end,
+  businessStart = start,
+  businessEnd = end,
   label,
   className,
   title,
@@ -817,6 +819,8 @@ function createPhaseItem({
     group: groupId,
     start,
     end,
+    businessStart,
+    businessEnd,
     content: label,
     phaseLabel: label,
     className,
@@ -1003,6 +1007,8 @@ function createSplitPhaseItems({
   groupId,
   start,
   end,
+  businessStart = start,
+  businessEnd = end,
   label,
   className,
   title,
@@ -1022,6 +1028,8 @@ function createSplitPhaseItems({
         groupId,
         start,
         end,
+        businessStart,
+        businessEnd,
         label,
         className: `${className} phase-past`,
         title,
@@ -1037,6 +1045,8 @@ function createSplitPhaseItems({
         groupId,
         start,
         end,
+        businessStart,
+        businessEnd,
         label,
         className,
         title,
@@ -1051,6 +1061,8 @@ function createSplitPhaseItems({
       groupId,
       start,
       end: currentInstant,
+      businessStart,
+      businessEnd,
       label: "",
       className: `${className} phase-past`,
       title,
@@ -1061,6 +1073,8 @@ function createSplitPhaseItems({
       groupId,
       start: currentInstant,
       end,
+      businessStart,
+      businessEnd,
       label,
       className,
       title,
@@ -1089,12 +1103,33 @@ function createRangeFromStartAndDays(startDateRaw, daysRaw) {
   return { start, end, durationLabel: `${days} j` };
 }
 
-function createRangeBetweenDates(startDateRaw, endDateRaw) {
-  const start = parseDate(startDateRaw);
-  const end = parseDate(endDateRaw);
-  if (!start || !end) return null;
-  if (end <= start) return null;
-  return { start, end };
+function createVisualRangeBetweenDates(startDateRaw, endDateRaw, demarrageDateRaw) {
+  const businessStart = parseDate(startDateRaw);
+  const businessEnd = parseDate(endDateRaw);
+  if (!businessStart || !businessEnd) return null;
+
+  const businessStartDay = startOfDay(businessStart);
+  const businessEndDay = startOfDay(businessEnd);
+  if (businessEndDay < businessStartDay) return null;
+
+  if (businessEndDay > businessStartDay) {
+    return {
+      start: businessStart,
+      end: businessEnd,
+      businessStart,
+      businessEnd,
+    };
+  }
+
+  const demarrageDate = parseDate(demarrageDateRaw);
+  if (!demarrageDate || startOfDay(demarrageDate) <= businessEndDay) return null;
+
+  return {
+    start: businessStart,
+    end: addDays(businessStart, 1),
+    businessStart,
+    businessEnd,
+  };
 }
 
 function resolveDurationEditMeta(
@@ -1651,7 +1686,11 @@ export function buildTimelineDataFromPlanningRows(
 
     if (isCoffrageTypeDoc(row.typeDoc)) {
       // COFFRAGE : Date_limite -> Diff_coffrage
-      const pCoffrage = createRangeBetweenDates(row.dateLimite, row.diffCoffrage);
+      const pCoffrage = createVisualRangeBetweenDates(
+        row.dateLimite,
+        row.diffCoffrage,
+        row.demarragesTravaux
+      );
       if (pCoffrage) {
         const coffrageClassName = buildPhaseClassName("phase-coffrage", realiseValue);
         items.push(
@@ -1660,6 +1699,8 @@ export function buildTimelineDataFromPlanningRows(
             groupId,
             start: pCoffrage.start,
             end: pCoffrage.end,
+            businessStart: pCoffrage.businessStart,
+            businessEnd: pCoffrage.businessEnd,
             label: "Coffrage",
             className: coffrageClassName,
             style: buildRetardPhaseStyle(coffrageClassName, realiseValue, row.retards),
@@ -1671,15 +1712,19 @@ export function buildTimelineDataFromPlanningRows(
             title: `
               <b>${escapeHtml(row.taches || "Tache")}</b><br>
               Coffrage<br>
-              Date limite : ${fmtDate(pCoffrage.start)} (${fmtDateIso(pCoffrage.start)})<br>
-              Diff coffrage : ${fmtDate(pCoffrage.end)} (${fmtDateIso(pCoffrage.end)})
+              Date limite : ${fmtDate(pCoffrage.businessStart)} (${fmtDateIso(pCoffrage.businessStart)})<br>
+              Diff coffrage : ${fmtDate(pCoffrage.businessEnd)} (${fmtDateIso(pCoffrage.businessEnd)})
             `,
           })
         );
       }
     } else if (isArmaturesTypeDoc(row.typeDoc)) {
       // ARMATURES : Diff_coffrage -> Diff_armature
-      const pArmature = createRangeBetweenDates(row.diffCoffrage, row.diffArmature);
+      const pArmature = createVisualRangeBetweenDates(
+        row.diffCoffrage,
+        row.diffArmature,
+        row.demarragesTravaux
+      );
       if (pArmature) {
         const armatureClassName = buildPhaseClassName("phase-armature", realiseValue);
         items.push(
@@ -1688,6 +1733,8 @@ export function buildTimelineDataFromPlanningRows(
             groupId,
             start: pArmature.start,
             end: pArmature.end,
+            businessStart: pArmature.businessStart,
+            businessEnd: pArmature.businessEnd,
             label: "Armature",
             className: armatureClassName,
             style: buildRetardPhaseStyle(armatureClassName, realiseValue, row.retards),
@@ -1699,15 +1746,19 @@ export function buildTimelineDataFromPlanningRows(
             title: `
               <b>${escapeHtml(row.taches || "Tache")}</b><br>
               Armature<br>
-              Diff coffrage : ${fmtDate(pArmature.start)} (${fmtDateIso(pArmature.start)})<br>
-              Diff armature : ${fmtDate(pArmature.end)} (${fmtDateIso(pArmature.end)})
+              Diff coffrage : ${fmtDate(pArmature.businessStart)} (${fmtDateIso(pArmature.businessStart)})<br>
+              Diff armature : ${fmtDate(pArmature.businessEnd)} (${fmtDateIso(pArmature.businessEnd)})
             `,
           })
         );
       }
     } else if (isNdcTypeDoc(row.typeDoc)) {
       // NDC : Date_limite -> Diff_coffrage, sans logique de groupe.
-      const pNdc = createRangeBetweenDates(row.dateLimite, row.diffCoffrage);
+      const pNdc = createVisualRangeBetweenDates(
+        row.dateLimite,
+        row.diffCoffrage,
+        row.demarragesTravaux
+      );
       if (pNdc) {
         const ndcClassName = buildPhaseClassName("phase-ndc", realiseValue);
         items.push(
@@ -1716,6 +1767,8 @@ export function buildTimelineDataFromPlanningRows(
             groupId,
             start: pNdc.start,
             end: pNdc.end,
+            businessStart: pNdc.businessStart,
+            businessEnd: pNdc.businessEnd,
             label: "NDC",
             className: ndcClassName,
             style: buildRetardPhaseStyle(ndcClassName, realiseValue, row.retards),
@@ -1727,15 +1780,19 @@ export function buildTimelineDataFromPlanningRows(
             title: `
               <b>${escapeHtml(row.taches || "Tache")}</b><br>
               NDC<br>
-              Date limite : ${fmtDate(pNdc.start)} (${fmtDateIso(pNdc.start)})<br>
-              Diff coffrage : ${fmtDate(pNdc.end)} (${fmtDateIso(pNdc.end)})
+              Date limite : ${fmtDate(pNdc.businessStart)} (${fmtDateIso(pNdc.businessStart)})<br>
+              Diff coffrage : ${fmtDate(pNdc.businessEnd)} (${fmtDateIso(pNdc.businessEnd)})
             `,
           })
         );
       }
     } else if (isCoupesTypeDoc(row.typeDoc)) {
       // COUPES : Date_limite -> Diff_coffrage, sans logique de groupe.
-      const pCoupes = createRangeBetweenDates(row.dateLimite, row.diffCoffrage);
+      const pCoupes = createVisualRangeBetweenDates(
+        row.dateLimite,
+        row.diffCoffrage,
+        row.demarragesTravaux
+      );
       if (pCoupes) {
         const coupesClassName = buildPhaseClassName("phase-coupes", realiseValue);
         items.push(
@@ -1744,6 +1801,8 @@ export function buildTimelineDataFromPlanningRows(
             groupId,
             start: pCoupes.start,
             end: pCoupes.end,
+            businessStart: pCoupes.businessStart,
+            businessEnd: pCoupes.businessEnd,
             label: "COUPES",
             className: coupesClassName,
             style: buildRetardPhaseStyle(coupesClassName, realiseValue, row.retards),
@@ -1755,15 +1814,19 @@ export function buildTimelineDataFromPlanningRows(
             title: `
               <b>${escapeHtml(row.taches || "Tache")}</b><br>
               COUPES<br>
-              Date limite : ${fmtDate(pCoupes.start)} (${fmtDateIso(pCoupes.start)})<br>
-              Diff coffrage : ${fmtDate(pCoupes.end)} (${fmtDateIso(pCoupes.end)})
+              Date limite : ${fmtDate(pCoupes.businessStart)} (${fmtDateIso(pCoupes.businessStart)})<br>
+              Diff coffrage : ${fmtDate(pCoupes.businessEnd)} (${fmtDateIso(pCoupes.businessEnd)})
             `,
           })
         );
       }
     } else if (isDemolitionTypeDoc(row.typeDoc)) {
       // DÉMOLITION : Date_limite -> Diff_coffrage, sans logique de groupe.
-      const pDemolition = createRangeBetweenDates(row.dateLimite, row.diffCoffrage);
+      const pDemolition = createVisualRangeBetweenDates(
+        row.dateLimite,
+        row.diffCoffrage,
+        row.demarragesTravaux
+      );
       if (pDemolition) {
         const demolitionClassName = buildPhaseClassName("phase-demolition", realiseValue);
         items.push(
@@ -1772,6 +1835,8 @@ export function buildTimelineDataFromPlanningRows(
             groupId,
             start: pDemolition.start,
             end: pDemolition.end,
+            businessStart: pDemolition.businessStart,
+            businessEnd: pDemolition.businessEnd,
             label: "DÉMOLITION",
             className: demolitionClassName,
             style: buildRetardPhaseStyle(demolitionClassName, realiseValue, row.retards),
@@ -1783,14 +1848,18 @@ export function buildTimelineDataFromPlanningRows(
             title: `
               <b>${escapeHtml(row.taches || "Tache")}</b><br>
               DÉMOLITION<br>
-              Date limite : ${fmtDate(pDemolition.start)} (${fmtDateIso(pDemolition.start)})<br>
-              Diff coffrage : ${fmtDate(pDemolition.end)} (${fmtDateIso(pDemolition.end)})
+              Date limite : ${fmtDate(pDemolition.businessStart)} (${fmtDateIso(pDemolition.businessStart)})<br>
+              Diff coffrage : ${fmtDate(pDemolition.businessEnd)} (${fmtDateIso(pDemolition.businessEnd)})
             `,
           })
         );
       }
     } else if (isCustomTypeDoc(row.typeDoc)) {
-      const genericPhase = createRangeBetweenDates(row.dateLimite, row.diffCoffrage);
+      const genericPhase = createVisualRangeBetweenDates(
+        row.dateLimite,
+        row.diffCoffrage,
+        row.demarragesTravaux
+      );
       if (genericPhase) {
         const genericLabel = toText(row.typeDoc) || "Type personnalisé";
         const genericClassName = buildPhaseClassName("phase-generic", realiseValue);
@@ -1800,6 +1869,8 @@ export function buildTimelineDataFromPlanningRows(
             groupId,
             start: genericPhase.start,
             end: genericPhase.end,
+            businessStart: genericPhase.businessStart,
+            businessEnd: genericPhase.businessEnd,
             label: genericLabel,
             className: genericClassName,
             style: buildRetardPhaseStyle(genericClassName, realiseValue, row.retards),
@@ -1811,8 +1882,8 @@ export function buildTimelineDataFromPlanningRows(
             title: `
               <b>${escapeHtml(row.taches || "Tache")}</b><br>
               ${escapeHtml(genericLabel)}<br>
-              Date limite : ${fmtDate(genericPhase.start)} (${fmtDateIso(genericPhase.start)})<br>
-              Diff coffrage : ${fmtDate(genericPhase.end)} (${fmtDateIso(genericPhase.end)})
+              Date limite : ${fmtDate(genericPhase.businessStart)} (${fmtDateIso(genericPhase.businessStart)})<br>
+              Diff coffrage : ${fmtDate(genericPhase.businessEnd)} (${fmtDateIso(genericPhase.businessEnd)})
             `,
           })
         );
