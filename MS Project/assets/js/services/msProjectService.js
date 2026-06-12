@@ -621,7 +621,9 @@ export function buildTimelineDataFromMsProjectRows(
   const items = [];
 
   rows.forEach((row, index) => {
-    const groupId = `ms-${row.rowId}-${index}`;
+    // Identifiant stable basé sur la ligne Grist (indépendant du tri), pour
+    // permettre une synchronisation différentielle du dataset vis-timeline.
+    const groupId = `ms-${row.rowId}`;
 
     groups.push({
       id: groupId,

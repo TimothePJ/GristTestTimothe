@@ -720,6 +720,44 @@ function normalizeSelectedZone(zoneOptions, selectedZone) {
   return exact || "";
 }
 
+// Ré-affiche immédiatement le planning à partir du cache local (sans aller
+// chercher les données sur Grist), pour donner un retour visuel instantané
+// après une édition. La réconciliation complète arrive ensuite via
+// refreshPlanning({ forceLoad: true, ... }).
+function renderPlanningFromCache() {
+  const selectedProject = state.selectedProject || "";
+  if (!selectedProject || !Array.isArray(cachedPlanningRows)) return;
+
+  const zoneOptions = buildZoneOptionsForSelectedProject(cachedPlanningRows, selectedProject);
+  const normalizedZone = normalizeSelectedZone(zoneOptions, state.selectedZone);
+  const timelineData = buildTimelineDataFromPlanningRows(
+    cachedPlanningRows,
+    selectedProject,
+    normalizedZone,
+    cachedRealisationTargetLookup
+  );
+  if (!timelineData.rowCount) return;
+  timelineData.resetViewport = false;
+  renderPlanningTimeline(timelineData);
+}
+
+// Applique localement les champs modifiés sur la ligne en cache (mise à jour
+// optimiste) et redessine immédiatement, avant que l'écriture Grist et la
+// réconciliation complète ne se terminent.
+function applyOptimisticPlanningRowUpdate(rowId, fieldUpdates) {
+  if (!Array.isArray(cachedPlanningRows)) return;
+
+  const cfg = APP_CONFIG.grist.planningTable?.columns || {};
+  const targetId = Number(rowId);
+  const index = cachedPlanningRows.findIndex((row) => Number(row?.[cfg.id]) === targetId);
+  if (index === -1) return;
+
+  cachedPlanningRows = cachedPlanningRows.slice();
+  cachedPlanningRows[index] = { ...cachedPlanningRows[index], ...fieldUpdates };
+
+  renderPlanningFromCache();
+}
+
 async function handleDurationCellEdit({
   rowId,
   durationWeeks,
@@ -759,6 +797,13 @@ async function handleDurationCellEdit({
   const slotLabel = durationSlot === "2" ? "Durée 2" : "Durée 1";
   try {
     setPlanningStatus(`Mise à jour ${slotLabel} en cours...`);
+
+    // Mise à jour optimiste : retour visuel immédiat avant la confirmation
+    // Grist, qui arrive via la réconciliation complète ci-dessous.
+    applyOptimisticPlanningRowUpdate(rowId, {
+      [durationColumnName]: normalizedWeeks,
+      [leftDateColumnName]: leftIsoDate,
+    });
 
     await updatePlanningDurationAndLeftDate(
       rowId,
@@ -1018,6 +1063,10 @@ function tracePlanningPerformance(label, details = {}) {
 async function performPlanningRefresh(options = {}) {
   const startedAt = performance.now();
   const diagnosticsBefore = getPlanningServiceDiagnostics();
+  let fetchDurationMs = 0;
+  let syncDurationMs = 0;
+  let buildDurationMs = 0;
+  let renderDurationMs = 0;
   try {
     if (HEADER_ONLY_EMBEDDED_MODE) {
       return;
@@ -1036,7 +1085,9 @@ async function performPlanningRefresh(options = {}) {
 
     setPlanningStatus("Chargement du planning...");
     if (options.forceLoad || !Array.isArray(cachedPlanningRows)) {
+      const fetchStartedAt = performance.now();
       cachedPlanningRows = await fetchPlanningRows();
+      fetchDurationMs += performance.now() - fetchStartedAt;
     }
 
     let syncResult = { updatedCount: 0 };
@@ -1046,6 +1097,7 @@ async function performPlanningRefresh(options = {}) {
       !lastAutoSyncAt ||
       Date.now() - lastAutoSyncAt >= PLANNING_AUTO_SYNC_INTERVAL_MS;
     if (options.sync && syncDue) {
+      const syncStartedAt = performance.now();
       try {
         syncResult = await synchronizePlanningDerivedData({
           planningRows: cachedPlanningRows,
@@ -1056,10 +1108,14 @@ async function performPlanningRefresh(options = {}) {
         lastAutoSyncAt = Date.now();
         lastAutoSyncProject = selectedProject;
         if (syncResult.updatedCount > 0) {
+          const resyncStartedAt = performance.now();
           cachedPlanningRows = await fetchPlanningRows();
+          fetchDurationMs += performance.now() - resyncStartedAt;
         }
       } catch (syncError) {
         console.error("Erreur synchronisation Planning Projet :", syncError);
+      } finally {
+        syncDurationMs += performance.now() - syncStartedAt;
       }
     }
 
@@ -1075,12 +1131,14 @@ async function performPlanningRefresh(options = {}) {
       enabled: Boolean(selectedProject),
     });
 
+    const buildStartedAt = performance.now();
     const timelineData = buildTimelineDataFromPlanningRows(
       planningRows,
       selectedProject,
       normalizedZone,
       cachedRealisationTargetLookup
     );
+    buildDurationMs += performance.now() - buildStartedAt;
     timelineData.resetViewport = lastRenderedProject !== selectedProject;
     lastRenderedProject = selectedProject;
     const planningWarnings = buildPlanningWarningsFromGroups(
@@ -1101,8 +1159,10 @@ async function performPlanningRefresh(options = {}) {
       return;
     }
 
+    const renderStartedAt = performance.now();
     renderPlanningTimeline(timelineData);
     await waitForPlanningViewportSettled();
+    renderDurationMs += performance.now() - renderStartedAt;
     emitPlanningWarningsChange(selectedProject, planningWarnings);
 
     if (!toolbarBound) {
@@ -1145,10 +1205,18 @@ async function performPlanningRefresh(options = {}) {
       cachedRowCount: cachedPlanningRows?.length || 0,
       fetchTableCount:
         diagnosticsAfter.fetchTableCount - diagnosticsBefore.fetchTableCount,
+      fetchTableDurationMs:
+        Math.round((diagnosticsAfter.fetchTableDurationMs - diagnosticsBefore.fetchTableDurationMs) * 10) / 10,
       actionBatchCount:
         diagnosticsAfter.actionBatchCount - diagnosticsBefore.actionBatchCount,
       actionCount:
         diagnosticsAfter.actionCount - diagnosticsBefore.actionCount,
+      actionDurationMs:
+        Math.round((diagnosticsAfter.actionDurationMs - diagnosticsBefore.actionDurationMs) * 10) / 10,
+      fetchDurationMs: Math.round(fetchDurationMs * 10) / 10,
+      syncDurationMs: Math.round(syncDurationMs * 10) / 10,
+      buildDurationMs: Math.round(buildDurationMs * 10) / 10,
+      renderDurationMs: Math.round(renderDurationMs * 10) / 10,
     });
   }
 }

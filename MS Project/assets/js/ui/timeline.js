@@ -22,6 +22,15 @@ let pendingInlineRowEl = null;
 let persistentHeaderBound = false;
 let persistentHeaderFrame = 0;
 let headerAxisWheelBound = false;
+let lastChromeSignature = "";
+let chromeHeaderGridLineEls = [];
+let chromeHeaderLabelEls = [];
+let chromeOverlayLineEls = [];
+let chromeSyncRafPending = false;
+let hoverTooltipRafPending = false;
+let pendingHoverTooltipEvent = null;
+let groupRecordFingerprints = new Map();
+let itemRecordFingerprints = new Map();
 
 const DRAG_DEBUG = true;
 const ENABLE_INLINE_PREVIEW = false;
@@ -304,18 +313,22 @@ function renderTimelineHeaderAxis(chrome) {
 
   if (!chrome) {
     target.replaceChildren();
+    chromeHeaderGridLineEls = [];
+    chromeHeaderLabelEls = [];
     return;
   }
 
   const gridLayer = document.createElement("div");
   gridLayer.className = "ms-project-header-axis-grid";
-  chrome.lines.forEach((line) => {
-    gridLayer.appendChild(createTimelineGridLine(line, "ms-project-header-axis-grid-line"));
+  chromeHeaderGridLineEls = chrome.lines.map((line) => {
+    const lineEl = createTimelineGridLine(line, "ms-project-header-axis-grid-line");
+    gridLayer.appendChild(lineEl);
+    return lineEl;
   });
 
   const labelLayer = document.createElement("div");
   labelLayer.className = "ms-project-header-axis-labels";
-  chrome.labels.forEach((label) => {
+  chromeHeaderLabelEls = chrome.labels.map((label) => {
     const clone = label.sourceLabel.cloneNode(true);
     clone.classList.add("ms-project-header-axis-label");
     clone.removeAttribute("id");
@@ -325,6 +338,7 @@ function renderTimelineHeaderAxis(chrome) {
     if (label.width > 0) clone.style.width = `${label.width}px`;
     if (label.height > 0) clone.style.height = `${label.height}px`;
     labelLayer.appendChild(clone);
+    return clone;
   });
 
   target.replaceChildren(gridLayer, labelLayer);
@@ -359,6 +373,7 @@ function renderTimelineGridOverlay(containerEl, chrome) {
 
   if (!chrome) {
     overlay.replaceChildren();
+    chromeOverlayLineEls = [];
     return;
   }
 
@@ -366,8 +381,10 @@ function renderTimelineGridOverlay(containerEl, chrome) {
   overlay.style.width = chrome.width > 0 ? `${chrome.width}px` : "100%";
   overlay.replaceChildren();
 
-  chrome.lines.forEach((line) => {
-    overlay.appendChild(createTimelineGridLine(line, "ms-project-grid-overlay-line"));
+  chromeOverlayLineEls = chrome.lines.map((line) => {
+    const lineEl = createTimelineGridLine(line, "ms-project-grid-overlay-line");
+    overlay.appendChild(lineEl);
+    return lineEl;
   });
 }
 
@@ -416,21 +433,80 @@ function renderCurrentTimeOverlay(containerEl = getTimelineContainer()) {
   overlay.replaceChildren(line);
 }
 
+function computeChromeSignature(chrome) {
+  if (!chrome) return "";
+  const linesSig = chrome.lines.map((line) => line.kind).join(",");
+  const labelsSig = chrome.labels
+    .map((label) => `${label.kind}:${(label.sourceLabel.textContent || "").trim()}`)
+    .join("|");
+  return `${chrome.lines.length}#${linesSig}::${chrome.labels.length}#${labelsSig}`;
+}
+
+// Repositionne les lignes/labels déjà rendus sans reconstruire le DOM, tant que
+// l'ensemble des lignes de grille et labels (signature) n'a pas changé.
+function repositionChromeElements(chrome, containerEl = getTimelineContainer()) {
+  chrome.lines.forEach((line, index) => {
+    const headerLineEl = chromeHeaderGridLineEls[index];
+    if (headerLineEl) {
+      headerLineEl.style.transform = `translate(${line.x}px, 0px)`;
+    }
+    const overlayLineEl = chromeOverlayLineEls[index];
+    if (overlayLineEl) {
+      overlayLineEl.style.transform = `translate(${line.x}px, 0px)`;
+    }
+  });
+
+  chrome.labels.forEach((label, index) => {
+    const labelEl = chromeHeaderLabelEls[index];
+    if (!labelEl) return;
+    labelEl.style.transform = `translate(${label.x}px, ${label.y}px)`;
+    if (label.width > 0) labelEl.style.width = `${label.width}px`;
+    if (label.height > 0) labelEl.style.height = `${label.height}px`;
+  });
+
+  const overlay = getOrCreateTimelineGridOverlay();
+  if (overlay) {
+    overlay.style.width = chrome.width > 0 ? `${chrome.width}px` : "100%";
+    overlay.style.height = `${getTimelineContentHeight(containerEl)}px`;
+  }
+}
+
 function syncTimelineChrome(containerEl = getTimelineContainer()) {
   const chrome = readTimelineChrome(containerEl);
-  renderTimelineHeaderAxis(chrome);
-  renderTimelineGridOverlay(containerEl, chrome);
+  const signature = computeChromeSignature(chrome);
+
+  if (!chrome) {
+    if (lastChromeSignature !== "") {
+      renderTimelineHeaderAxis(null);
+      renderTimelineGridOverlay(containerEl, null);
+      lastChromeSignature = "";
+    }
+  } else if (signature !== lastChromeSignature) {
+    renderTimelineHeaderAxis(chrome);
+    renderTimelineGridOverlay(containerEl, chrome);
+    lastChromeSignature = signature;
+  } else {
+    repositionChromeElements(chrome, containerEl);
+  }
+
   renderCurrentTimeOverlay(containerEl);
   updateCurrentTimeLineBounds();
 }
 
-function scheduleTimelineChromeSync(containerEl = getTimelineContainer()) {
+// Coalesce les synchronisations de chrome (axe sticky, grille, overlay temps
+// courant) à une exécution maximum par frame, quel que soit le nombre
+// d'évènements rangechange déclenchés entre deux frames.
+function requestChromeSync(containerEl = getTimelineContainer()) {
+  if (chromeSyncRafPending) return;
+  chromeSyncRafPending = true;
   requestAnimationFrame(() => {
+    chromeSyncRafPending = false;
     syncTimelineChrome(containerEl);
-    requestAnimationFrame(() => {
-      syncTimelineChrome(containerEl);
-    });
   });
+}
+
+function scheduleTimelineChromeSync(containerEl = getTimelineContainer()) {
+  requestChromeSync(containerEl);
 }
 
 function getNormalizedWheelDelta(event) {
@@ -788,44 +864,11 @@ function syncNativeItemTitles(containerEl) {
   });
 }
 
-function bindItemHoverInteractions(containerEl) {
-  if (!containerEl) return;
-
-  const itemElements = containerEl.querySelectorAll(".vis-item");
-  debugLog("Bind hover interactions scan.", { count: itemElements.length });
-  itemElements.forEach((itemEl) => {
-    if (itemEl.dataset.msTooltipBound === "1") return;
-    itemEl.dataset.msTooltipBound = "1";
-    debugLog("Hover listeners bound to item element.", {
-      rawId:
-        itemEl.getAttribute("data-id") ||
-        itemEl.getAttribute("data-item-id") ||
-        itemEl.dataset?.id ||
-        "",
-    });
-
-    itemEl.addEventListener("mouseenter", (event) => {
-      const item = getTimelineItemFromElement(itemEl) || getTimelineItemFromEvent(event, containerEl);
-      debugLog("mouseenter on item.", {
-        resolved: Boolean(item),
-        title: itemEl.getAttribute("title") || "",
-      });
-      showTooltipForItem(item, event);
-    });
-
-    itemEl.addEventListener("mousemove", (event) => {
-      const item = getTimelineItemFromElement(itemEl) || getTimelineItemFromEvent(event, containerEl);
-      if (!item) {
-        debugLog("mousemove on item but no data item resolved.");
-      }
-      showTooltipForItem(item, event);
-    });
-
-    itemEl.addEventListener("mouseleave", () => {
-      debugLog("mouseleave on item.");
-      hideHoverTooltip();
-    });
-  });
+function bindItemHoverInteractions(_containerEl) {
+  // Le tooltip est géré par délégation sur le container via pointermove +
+  // mouseleave (cf. bindHoverTooltip). Ajouter mouseenter/mousemove/mouseleave
+  // sur chaque .vis-item accumulait des listeners à chaque re-render de
+  // vis-timeline (les noeuds DOM sont recréés à chaque mise à jour).
 }
 
 function bindDebugTimelineEvents() {
@@ -860,25 +903,37 @@ function bindHoverTooltip(containerEl) {
   ensureHoverTooltip();
 
   containerEl.addEventListener("pointermove", (event) => {
-    const hoverEl = getHoverElementFromPoint(event, containerEl);
-    if (!hoverEl || !containerEl.contains(hoverEl)) {
-      hideHoverTooltip();
-      return;
-    }
+    pendingHoverTooltipEvent = event;
+    if (hoverTooltipRafPending) return;
+    hoverTooltipRafPending = true;
+    requestAnimationFrame(() => {
+      hoverTooltipRafPending = false;
+      const pointerEvent = pendingHoverTooltipEvent;
+      pendingHoverTooltipEvent = null;
+      if (!pointerEvent) return;
 
-    const item = getTimelineItemFromElement(hoverEl) || getTimelineItemFromEvent(event, containerEl);
-    if (!item) {
-      debugLog("pointermove found no item.", {
-        targetClass: event.target?.className || "",
+      const hoverEl = getHoverElementFromPoint(pointerEvent, containerEl);
+      if (!hoverEl || !containerEl.contains(hoverEl)) {
+        hideHoverTooltip();
+        return;
+      }
+
+      const item =
+        getTimelineItemFromElement(hoverEl) ||
+        getTimelineItemFromEvent(pointerEvent, containerEl);
+      if (!item) {
+        debugLog("pointermove found no item.", {
+          targetClass: pointerEvent.target?.className || "",
+        });
+        hideHoverTooltip();
+        return;
+      }
+
+      debugLog("pointermove resolved item.", {
+        itemId: item.id,
       });
-      hideHoverTooltip();
-      return;
-    }
-
-    debugLog("pointermove resolved item.", {
-      itemId: item.id,
+      showTooltipForItem(item, pointerEvent);
     });
-    showTooltipForItem(item, event);
   });
 
   containerEl.addEventListener("mouseleave", () => {
@@ -895,9 +950,19 @@ function bindHoverTooltip(containerEl) {
   syncInteractiveElements();
 
   if (!itemElementsObserver && typeof MutationObserver !== "undefined") {
-    itemElementsObserver = new MutationObserver(() => {
-      debugLog("MutationObserver detected timeline DOM changes.");
-      requestAnimationFrame(syncInteractiveElements);
+    let itemElementsSyncRafPending = false;
+    itemElementsObserver = new MutationObserver((mutationsList) => {
+      const hasAddedNodes = mutationsList.some(
+        (mutation) => mutation.addedNodes && mutation.addedNodes.length > 0
+      );
+      if (!hasAddedNodes) return;
+      if (itemElementsSyncRafPending) return;
+      itemElementsSyncRafPending = true;
+      requestAnimationFrame(() => {
+        itemElementsSyncRafPending = false;
+        debugLog("MutationObserver detected timeline DOM changes.");
+        syncInteractiveElements();
+      });
     });
     itemElementsObserver.observe(containerEl, {
       childList: true,
@@ -1792,6 +1857,55 @@ export function setMsProjectDateEditHandler(handler) {
   dateCellEditHandler = typeof handler === "function" ? handler : null;
 }
 
+function fingerprintTimelineRecord(record) {
+  return JSON.stringify(record);
+}
+
+// Synchronisation différentielle : met à jour uniquement les enregistrements
+// dont l'empreinte a changé (update = ajout ou mise à jour selon vis-data) et
+// supprime ceux qui ont disparu, au lieu d'un clear()/add() systématique.
+function syncTimelineDataSet(dataSet, records = [], fingerprintCache) {
+  if (!dataSet) return;
+  const nextRecords = Array.isArray(records) ? records : [];
+  const nextIds = new Set();
+  const updatedRecords = [];
+
+  nextRecords.forEach((record) => {
+    const id = record?.id;
+    nextIds.add(id);
+    const fingerprint = fingerprintTimelineRecord(record);
+    if (fingerprintCache.get(id) !== fingerprint) {
+      // dataSet.update() fait un merge superficiel : on complète le nouvel
+      // enregistrement avec les clés disparues (mises à `undefined`) pour
+      // garantir un remplacement complet, sans repasser par clear()/add().
+      const current = dataSet.get(id);
+      if (current) {
+        const merged = { ...record };
+        Object.keys(current).forEach((key) => {
+          if (!(key in merged)) merged[key] = undefined;
+        });
+        updatedRecords.push(merged);
+      } else {
+        updatedRecords.push(record);
+      }
+      fingerprintCache.set(id, fingerprint);
+    }
+  });
+
+  const removedIds = [];
+  fingerprintCache.forEach((_, id) => {
+    if (!nextIds.has(id)) removedIds.push(id);
+  });
+  if (removedIds.length) {
+    dataSet.remove(removedIds);
+    removedIds.forEach((id) => fingerprintCache.delete(id));
+  }
+
+  if (updatedRecords.length) {
+    dataSet.update(updatedRecords);
+  }
+}
+
 export function renderMsProjectTimeline({ groups, items }) {
   const container = getTimelineContainer();
   bindPersistentHeader();
@@ -1833,11 +1947,9 @@ export function renderMsProjectTimeline({ groups, items }) {
       zoomable: false,
       moveable: true,
       verticalScroll: true,
-      tooltip: {
-        followMouse: true,
-        overflowMethod: "cap",
-      },
-      showTooltips: true,
+      // Tooltips natifs vis-timeline désactivés : un seul système de tooltip
+      // délégué (bindHoverTooltip) gère l'affichage au survol.
+      showTooltips: false,
       groupTemplate: (group) => buildGroupLabelElement(group),
       groupOrder: (a, b) => a.sortIndex - b.sortIndex,
     });
@@ -1848,11 +1960,9 @@ export function renderMsProjectTimeline({ groups, items }) {
     bindRowDragging(container);
   }
 
-  groupsDataSet.clear();
-  itemsDataSet.clear();
-
-  groupsDataSet.add(groups || []);
-  itemsDataSet.add(items || []);
+  // Mise à jour différentielle : évite de détruire et reconstruire tout le DOM.
+  syncTimelineDataSet(groupsDataSet, groups || [], groupRecordFingerprints);
+  syncTimelineDataSet(itemsDataSet, items || [], itemRecordFingerprints);
   debugLog("Datasets updated.", {
     groupCount: groupsDataSet.length,
     itemCount: itemsDataSet.length,
@@ -1934,17 +2044,15 @@ export function bindTimelineToolbar({ onSortChange = null } = {}) {
 
   if (timelineInstance) {
     timelineInstance.on("rangechange", () => {
-      syncTimelineChrome();
+      requestChromeSync();
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
-      updateCurrentTimeLineBounds();
     });
 
     timelineInstance.on("rangechanged", () => {
-      syncTimelineChrome();
+      requestChromeSync();
       updateDateRangeDisplay();
       updateNavCenterButtonLabel();
-      updateCurrentTimeLineBounds();
     });
   }
 
@@ -1956,6 +2064,8 @@ export function bindTimelineToolbar({ onSortChange = null } = {}) {
 export function clearMsProjectTimeline() {
   if (groupsDataSet) groupsDataSet.clear();
   if (itemsDataSet) itemsDataSet.clear();
+  groupRecordFingerprints.clear();
+  itemRecordFingerprints.clear();
 
   const rangeEl = document.getElementById("current-date-range");
   if (rangeEl) rangeEl.textContent = "";

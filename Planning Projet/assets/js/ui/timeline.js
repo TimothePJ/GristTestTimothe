@@ -10,6 +10,8 @@ let itemElementsObserver = null;
 let timelineBulkUpdateInProgress = false;
 let lastRenderedTimelineSignature = "";
 let timelineHasRenderedData = false;
+let groupRecordFingerprints = new Map();
+let itemRecordFingerprints = new Map();
 let durationCellEditHandler = null;
 let durationCellEditBound = false;
 let activeDurationEditor = null;
@@ -50,6 +52,11 @@ let planningDragAutoScrollRafId = 0;
 let planningDragAutoScrollVelocityY = 0;
 let planningDragAutoScrollTargetEl = null;
 let planningDragAutoScrollLastTs = 0;
+let planningDropCandidateRectsCache = null;
+let hoverTooltipRafPending = false;
+let pendingHoverTooltipEvent = null;
+let planningDropPreviewRafPending = false;
+let pendingPlanningDropPreviewEvent = null;
 const planningViewportListeners = new Set();
 const planningSelectionListeners = new Set();
 const REFERENCE_DATA_CHANGE_STORAGE_KEY = "grist.references-data-change";
@@ -499,7 +506,8 @@ function requestStickyAxisSync() {
 }
 
 function syncStickyTimelineAxisOnScroll() {
-  syncStickyTimelineAxisWithWrapperScroll();
+  invalidatePlanningDropCandidateRectsCache();
+  requestStickyAxisSync();
 }
 
 function bindStickyTimelineAxis() {
@@ -510,7 +518,10 @@ function bindStickyTimelineAxis() {
 
   stickyAxisBound = true;
   wrapper.addEventListener("scroll", syncStickyTimelineAxisOnScroll, { passive: true });
-  window.addEventListener("resize", requestStickyAxisSync);
+  window.addEventListener("resize", () => {
+    invalidatePlanningDropCandidateRectsCache();
+    requestStickyAxisSync();
+  });
   requestStickyAxisSync();
 }
 
@@ -1082,10 +1093,31 @@ function applyRenderedPlanningItemStyle(node, styleText) {
     });
 }
 
-function decorateRenderedTimelineItems(containerEl) {
+function getVisItemElementsById(containerEl) {
+  const map = new Map();
+  if (!containerEl) return map;
+
+  containerEl.querySelectorAll(".vis-item").forEach((candidate) => {
+    if (!(candidate instanceof HTMLElement)) return;
+    const dataId = candidate.getAttribute("data-id");
+    const dataItemId = candidate.getAttribute("data-item-id");
+    if (dataId != null && !map.has(dataId)) map.set(dataId, candidate);
+    if (dataItemId != null && !map.has(dataItemId)) map.set(dataItemId, candidate);
+  });
+
+  return map;
+}
+
+function decorateRenderedTimelineItems(containerEl, itemElementsById = null) {
   if (!containerEl || !timelineInstance) return;
 
   const entries = getRenderedTimelineItemEntries();
+  if (!entries.length) return;
+
+  // Index des éléments .vis-item une seule fois (au lieu d'un querySelectorAll
+  // par item, qui coûtait O(items x noeuds DOM) à chaque synchronisation).
+  const elementsById = itemElementsById || getVisItemElementsById(containerEl);
+
   entries.forEach((entry) => {
     const itemId = entry?.data?.id ?? entry?.id;
     if (itemId == null) return;
@@ -1121,15 +1153,19 @@ function decorateRenderedTimelineItems(containerEl) {
       styledNodes.add(node);
     });
 
-    const itemElement = [...containerEl.querySelectorAll(".vis-item")].find((candidate) => {
-      if (!(candidate instanceof HTMLElement)) return false;
-      return (
-        candidate.getAttribute("data-id") === String(itemId) ||
-        candidate.getAttribute("data-item-id") === String(itemId)
-      );
-    });
+    const itemElement = elementsById.get(String(itemId)) || null;
     if (itemElement instanceof HTMLElement && !styledNodes.has(itemElement)) {
       applyRenderedPlanningItemStyle(itemElement, item.style);
+      if (title) {
+        itemElement.setAttribute("title", title);
+        itemElement.setAttribute("aria-label", title);
+
+        const contentEl = itemElement.querySelector(".vis-item-content");
+        if (contentEl) {
+          contentEl.setAttribute("title", title);
+          contentEl.setAttribute("aria-label", title);
+        }
+      }
     }
   });
 }
@@ -1203,11 +1239,15 @@ function showTooltipForItem(item, eventLike) {
   }
 }
 
-function syncNativeItemTitles(containerEl) {
+function syncNativeItemTitles(containerEl, itemElementsById = null) {
   if (!containerEl || !itemsDataSet) return;
 
-  const itemElements = containerEl.querySelectorAll(".vis-item");
-  itemElements.forEach((itemEl) => {
+  const elementsById = itemElementsById || getVisItemElementsById(containerEl);
+  const seen = new Set();
+  elementsById.forEach((itemEl) => {
+    if (seen.has(itemEl)) return;
+    seen.add(itemEl);
+
     const item = getTimelineItemFromElement(itemEl);
     if (!item) return;
 
@@ -1240,19 +1280,31 @@ function bindHoverTooltip(containerEl) {
   ensureHoverTooltip();
 
   containerEl.addEventListener("pointermove", (event) => {
-    const hoverEl = getHoverElementFromPoint(event, containerEl);
-    if (!hoverEl || !containerEl.contains(hoverEl)) {
-      hideHoverTooltip();
-      return;
-    }
+    pendingHoverTooltipEvent = event;
+    if (hoverTooltipRafPending) return;
+    hoverTooltipRafPending = true;
+    requestAnimationFrame(() => {
+      hoverTooltipRafPending = false;
+      const pointerEvent = pendingHoverTooltipEvent;
+      pendingHoverTooltipEvent = null;
+      if (!pointerEvent) return;
 
-    const item = getTimelineItemFromElement(hoverEl) || getTimelineItemFromEvent(event, containerEl);
-    if (!item) {
-      hideHoverTooltip();
-      return;
-    }
+      const hoverEl = getHoverElementFromPoint(pointerEvent, containerEl);
+      if (!hoverEl || !containerEl.contains(hoverEl)) {
+        hideHoverTooltip();
+        return;
+      }
 
-    showTooltipForItem(item, event);
+      const item =
+        getTimelineItemFromElement(hoverEl) ||
+        getTimelineItemFromEvent(pointerEvent, containerEl);
+      if (!item) {
+        hideHoverTooltip();
+        return;
+      }
+
+      showTooltipForItem(item, pointerEvent);
+    });
   });
 
   containerEl.addEventListener("mouseleave", () => {
@@ -1260,17 +1312,29 @@ function bindHoverTooltip(containerEl) {
   });
 
   const syncInteractiveElements = () => {
-    decorateRenderedTimelineItems(containerEl);
-    syncNativeItemTitles(containerEl);
+    const itemElementsById = getVisItemElementsById(containerEl);
+    decorateRenderedTimelineItems(containerEl, itemElementsById);
+    syncNativeItemTitles(containerEl, itemElementsById);
     bindItemHoverInteractions(containerEl);
+    invalidatePlanningDropCandidateRectsCache();
   };
 
   syncInteractiveElements();
 
   if (!itemElementsObserver && typeof MutationObserver !== "undefined") {
-    itemElementsObserver = new MutationObserver(() => {
+    let itemElementsSyncRafPending = false;
+    itemElementsObserver = new MutationObserver((mutationsList) => {
       if (timelineBulkUpdateInProgress) return;
-      requestAnimationFrame(syncInteractiveElements);
+      const hasAddedNodes = mutationsList.some(
+        (mutation) => mutation.addedNodes && mutation.addedNodes.length > 0
+      );
+      if (!hasAddedNodes) return;
+      if (itemElementsSyncRafPending) return;
+      itemElementsSyncRafPending = true;
+      requestAnimationFrame(() => {
+        itemElementsSyncRafPending = false;
+        syncInteractiveElements();
+      });
     });
     itemElementsObserver.observe(containerEl, {
       childList: true,
@@ -2647,6 +2711,7 @@ function clearPlanningRowDraggingState(containerEl = null) {
   activePlanningDraggedLinkedRowEls = [];
   activePlanningDraggedRowEl = null;
   clearPlanningNativeDragImage();
+  invalidatePlanningDropCandidateRectsCache();
 
   const effectiveContainer =
     containerEl instanceof HTMLElement
@@ -2710,6 +2775,7 @@ function handlePlanningNativeDragStart(event, forcedRowEl = null) {
   activePlanningDraggedLinkedRowEls = linkedArmatureRows;
   activePlanningDraggedRowEl = rowEl;
   setPlanningRowDraggingClass(true);
+  invalidatePlanningDropCandidateRectsCache();
 }
 
 function bindGlobalPlanningRowDragging() {
@@ -2721,7 +2787,18 @@ function bindGlobalPlanningRowDragging() {
     (event) => {
       if (!hasPlanningRowPayloadType(event.dataTransfer)) return;
       updatePlanningDragAutoScrollFromPointer(event.clientX, event.clientY);
-      updatePlanningDropTargetPreview(event);
+
+      pendingPlanningDropPreviewEvent = event;
+      if (planningDropPreviewRafPending) return;
+      planningDropPreviewRafPending = true;
+      requestAnimationFrame(() => {
+        planningDropPreviewRafPending = false;
+        const dragEvent = pendingPlanningDropPreviewEvent;
+        pendingPlanningDropPreviewEvent = null;
+        if (!dragEvent) return;
+        if (!(activePlanningDraggedRowEl instanceof HTMLElement)) return;
+        updatePlanningDropTargetPreview(dragEvent);
+      });
     },
     true
   );
@@ -2830,17 +2907,34 @@ function getPlanningDropCandidateElements(containerEl) {
   ).filter((element) => element instanceof HTMLElement);
 }
 
+function invalidatePlanningDropCandidateRectsCache() {
+  planningDropCandidateRectsCache = null;
+}
+
+// Mesure les positions des lignes/zones une seule fois par drag (ou jusqu'à
+// invalidation par scroll/resize/redraw) pour éviter un getBoundingClientRect
+// par candidat à chaque dragover.
+function getPlanningDropCandidateRects(containerEl) {
+  if (planningDropCandidateRectsCache) return planningDropCandidateRectsCache;
+
+  const candidates = getPlanningDropCandidateElements(containerEl);
+  planningDropCandidateRectsCache = candidates.map((el) => {
+    const rect = el.getBoundingClientRect();
+    return { el, top: rect.top, bottom: rect.bottom };
+  });
+  return planningDropCandidateRectsCache;
+}
+
 function findPlanningDropCandidateAtClientY(containerEl, clientY) {
   if (!(containerEl instanceof HTMLElement)) return null;
 
   const pointerY = Number(clientY);
   if (!Number.isFinite(pointerY)) return null;
 
-  const candidates = getPlanningDropCandidateElements(containerEl);
-  for (const candidate of candidates) {
-    const rect = candidate.getBoundingClientRect();
-    if (pointerY >= rect.top && pointerY <= rect.bottom) {
-      return candidate;
+  const candidateRects = getPlanningDropCandidateRects(containerEl);
+  for (const { el, top, bottom } of candidateRects) {
+    if (pointerY >= top && pointerY <= bottom) {
+      return el;
     }
   }
 
@@ -5344,32 +5438,56 @@ export function setPlanningRowDropHandler(handler) {
   planningRowDropHandler = typeof handler === "function" ? handler : null;
 }
 
-function buildTimelineRenderSignature(groups = [], items = []) {
-  return JSON.stringify({ groups, items });
+function fingerprintTimelineRecord(record) {
+  return JSON.stringify(record);
 }
 
-function syncTimelineDataSet(dataSet, records = []) {
+function buildTimelineRenderSignature(groupFingerprints = [], itemFingerprints = []) {
+  return `${groupFingerprints.join("")}::${itemFingerprints.join("")}`;
+}
+
+// Synchronisation différentielle : met à jour uniquement les enregistrements
+// dont l'empreinte a changé (update = ajout ou mise à jour selon vis-data) et
+// supprime ceux qui ont disparu, au lieu d'un remove/add systématique.
+function syncTimelineDataSet(dataSet, records = [], fingerprints = [], fingerprintCache) {
   if (!dataSet) return;
   const nextRecords = Array.isArray(records) ? records : [];
-  const currentRecords = dataSet.get();
-  const currentById = new Map(currentRecords.map((record) => [record?.id, record]));
-  const nextIds = new Set(nextRecords.map((record) => record?.id));
-  const removedIds = currentRecords
-    .filter((record) => !nextIds.has(record?.id))
-    .map((record) => record.id);
-  const changedRecords = nextRecords.filter((record) => {
-    const current = currentById.get(record?.id);
-    return !current || JSON.stringify(current) !== JSON.stringify(record);
+  const nextIds = new Set();
+  const updatedRecords = [];
+
+  nextRecords.forEach((record, index) => {
+    const id = record?.id;
+    nextIds.add(id);
+    const fingerprint = fingerprints[index];
+    if (fingerprintCache.get(id) !== fingerprint) {
+      // dataSet.update() fait un merge superficiel : on complète le nouvel
+      // enregistrement avec les clés disparues (mises à `undefined`) pour
+      // garantir un remplacement complet, sans repasser par remove()+add().
+      const current = dataSet.get(id);
+      if (current) {
+        const merged = { ...record };
+        Object.keys(current).forEach((key) => {
+          if (!(key in merged)) merged[key] = undefined;
+        });
+        updatedRecords.push(merged);
+      } else {
+        updatedRecords.push(record);
+      }
+      fingerprintCache.set(id, fingerprint);
+    }
   });
-  const changedIds = changedRecords
-    .filter((record) => currentById.has(record?.id))
-    .map((record) => record.id);
-  const idsToRemove = [...new Set([...removedIds, ...changedIds])];
-  if (idsToRemove.length) {
-    dataSet.remove(idsToRemove);
+
+  const removedIds = [];
+  fingerprintCache.forEach((_, id) => {
+    if (!nextIds.has(id)) removedIds.push(id);
+  });
+  if (removedIds.length) {
+    dataSet.remove(removedIds);
+    removedIds.forEach((id) => fingerprintCache.delete(id));
   }
-  if (changedRecords.length) {
-    dataSet.add(changedRecords);
+
+  if (updatedRecords.length) {
+    dataSet.update(updatedRecords);
   }
 }
 
@@ -5397,7 +5515,9 @@ export function renderPlanningTimeline(timelineData = {}) {
     throw new Error("vis-timeline non chargé.");
   }
 
-  const renderSignature = buildTimelineRenderSignature(groups, items);
+  const groupFingerprints = groups.map(fingerprintTimelineRecord);
+  const itemFingerprints = items.map(fingerprintTimelineRecord);
+  const renderSignature = buildTimelineRenderSignature(groupFingerprints, itemFingerprints);
   const shouldResetViewport =
     Boolean(timelineData.resetViewport) || !timelineHasRenderedData;
   if (
@@ -5510,8 +5630,8 @@ export function renderPlanningTimeline(timelineData = {}) {
 
   // Mise à jour différentielle : évite de détruire et reconstruire tout le DOM.
   timelineBulkUpdateInProgress = true;
-  syncTimelineDataSet(groupsDataSet, groups || []);
-  syncTimelineDataSet(itemsDataSet, items || []);
+  syncTimelineDataSet(groupsDataSet, groups || [], groupFingerprints, groupRecordFingerprints);
+  syncTimelineDataSet(itemsDataSet, items || [], itemFingerprints, itemRecordFingerprints);
   lastRenderedTimelineSignature = renderSignature;
   timelineHasRenderedData = true;
   const settleToken = beginPlanningViewportSettle();
@@ -5520,8 +5640,9 @@ export function renderPlanningTimeline(timelineData = {}) {
   requestAnimationFrame(() => {
     timelineBulkUpdateInProgress = false;
     timelineInstance.redraw();
-    decorateRenderedTimelineItems(container);
-    syncNativeItemTitles(container);
+    const itemElementsById = getVisItemElementsById(container);
+    decorateRenderedTimelineItems(container, itemElementsById);
+    syncNativeItemTitles(container, itemElementsById);
     bindItemHoverInteractions(container);
 
     const range = computePlanningDataRange(items || [], lastPlanningTimelineData);
@@ -5640,6 +5761,8 @@ export function clearPlanningTimeline() {
 
   groupsDataSet.clear();
   itemsDataSet.clear();
+  groupRecordFingerprints.clear();
+  itemRecordFingerprints.clear();
   lastRenderedTimelineSignature = "";
   timelineHasRenderedData = false;
   lastPlanningViewportEmissionSignature = "";

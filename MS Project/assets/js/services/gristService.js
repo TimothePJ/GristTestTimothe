@@ -1,5 +1,17 @@
 import { APP_CONFIG } from "../config.js";
 
+const _msProjectServiceDiagnostics = {
+  fetchTableCount: 0,
+  fetchTableDurationMs: 0,
+  actionBatchCount: 0,
+  actionCount: 0,
+  actionDurationMs: 0,
+};
+
+export function getMsProjectServiceDiagnostics() {
+  return { ..._msProjectServiceDiagnostics };
+}
+
 function getGrist() {
   if (!window.grist) {
     throw new Error("API Grist introuvable (window.grist).");
@@ -62,7 +74,10 @@ async function fetchTableRows(tableName) {
     throw new Error("grist.docApi.fetchTable(...) indisponible.");
   }
 
+  _msProjectServiceDiagnostics.fetchTableCount += 1;
+  const fetchStartedAt = performance.now();
   const raw = await grist.docApi.fetchTable(tableName);
+  _msProjectServiceDiagnostics.fetchTableDurationMs += performance.now() - fetchStartedAt;
   return normalizeFetchTableResult(raw);
 }
 
@@ -87,7 +102,10 @@ async function fetchTableSnapshot(tableName) {
     throw new Error("grist.docApi.fetchTable(...) indisponible.");
   }
 
+  _msProjectServiceDiagnostics.fetchTableCount += 1;
+  const fetchStartedAt = performance.now();
   const raw = await grist.docApi.fetchTable(tableName);
+  _msProjectServiceDiagnostics.fetchTableDurationMs += performance.now() - fetchStartedAt;
   return {
     rows: normalizeFetchTableResult(raw),
     columnNames: extractColumnNamesFromFetchResult(raw),
@@ -448,7 +466,11 @@ async function applyUserActionsInBatches(actions, batchSize = 200) {
 
   for (let index = 0; index < actions.length; index += batchSize) {
     const batch = actions.slice(index, index + batchSize);
+    _msProjectServiceDiagnostics.actionBatchCount += 1;
+    _msProjectServiceDiagnostics.actionCount += batch.length;
+    const actionsStartedAt = performance.now();
     await grist.docApi.applyUserActions(batch);
+    _msProjectServiceDiagnostics.actionDurationMs += performance.now() - actionsStartedAt;
   }
 }
 
@@ -652,6 +674,9 @@ export async function updateMsProjectDate(rowId, columnName, isoDate) {
     throw new Error("grist.docApi.applyUserActions(...) indisponible.");
   }
 
+  _msProjectServiceDiagnostics.actionBatchCount += 1;
+  _msProjectServiceDiagnostics.actionCount += 1;
+  const actionsStartedAt = performance.now();
   await grist.docApi.applyUserActions([
     [
       "UpdateRecord",
@@ -662,6 +687,7 @@ export async function updateMsProjectDate(rowId, columnName, isoDate) {
       },
     ],
   ]);
+  _msProjectServiceDiagnostics.actionDurationMs += performance.now() - actionsStartedAt;
 }
 
 export async function syncPlanningDemarrageFromMsProjectStart(
@@ -854,7 +880,11 @@ export async function syncPlanningDemarrageFromMsProjectStart(
     throw new Error("grist.docApi.applyUserActions(...) indisponible.");
   }
 
+  _msProjectServiceDiagnostics.actionBatchCount += 1;
+  _msProjectServiceDiagnostics.actionCount += actions.length;
+  const actionsStartedAt = performance.now();
   await grist.docApi.applyUserActions(actions);
+  _msProjectServiceDiagnostics.actionDurationMs += performance.now() - actionsStartedAt;
   return {
     updatedCount: actions.length,
     matchedCount: matchingRows.length,

@@ -17,8 +17,10 @@ let _listePlanTableNameCache = "";
 const PLANNING_ACTION_CHUNK_SIZE = 250;
 const _planningServiceDiagnostics = {
   fetchTableCount: 0,
+  fetchTableDurationMs: 0,
   actionBatchCount: 0,
   actionCount: 0,
+  actionDurationMs: 0,
 };
 
 export function getPlanningServiceDiagnostics() {
@@ -113,7 +115,9 @@ async function fetchTableRows(tableName) {
   }
 
   _planningServiceDiagnostics.fetchTableCount += 1;
+  const fetchStartedAt = performance.now();
   const raw = await grist.docApi.fetchTable(tableName);
+  _planningServiceDiagnostics.fetchTableDurationMs += performance.now() - fetchStartedAt;
   return normalizeFetchTableResult(raw);
 }
 
@@ -1841,9 +1845,11 @@ async function applyUserActionsInChunks(actions = []) {
     const chunk = actions.slice(offset, offset + PLANNING_ACTION_CHUNK_SIZE);
     _planningServiceDiagnostics.actionBatchCount += 1;
     _planningServiceDiagnostics.actionCount += chunk.length;
+    const actionsStartedAt = performance.now();
     await grist.docApi.applyUserActions(
       chunk
     );
+    _planningServiceDiagnostics.actionDurationMs += performance.now() - actionsStartedAt;
   }
 }
 

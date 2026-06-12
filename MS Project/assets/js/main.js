@@ -8,6 +8,7 @@ import {
   updateMsProjectDate,
   syncPlanningDemarrageFromMsProjectStart,
   importMsProjectXmlFile,
+  getMsProjectServiceDiagnostics,
 } from "./services/gristService.js";
 import { buildTimelineDataFromMsProjectRows } from "./services/msProjectService.js";
 import { state, setState } from "./state.js";
@@ -25,10 +26,20 @@ let importButtonBound = false;
 let importFileInputEl = null;
 let importInProgress = false;
 let sortMode = "xml-order";
+let cachedMsProjectRows = null;
+
+const MS_PROJECT_PERF_DEBUG =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("msProjectDebug") === "1";
 
 function setMsProjectStatus(message = "") {
   const el = document.getElementById("msProjectStatus");
   if (el) el.textContent = message;
+}
+
+function traceMsProjectPerformance(label, details = {}) {
+  if (!MS_PROJECT_PERF_DEBUG) return;
+  console.info(`[MS Project perf] ${label}`, details);
 }
 
 function ensureImportFileInput() {
@@ -122,6 +133,41 @@ function resolveDateColumnName(field) {
   return "";
 }
 
+// Ré-affiche immédiatement le planning MS Project à partir du cache local
+// (sans aller chercher les données sur Grist), pour un retour visuel
+// instantané après une édition. La réconciliation complète arrive ensuite
+// via refreshMsProject().
+function renderMsProjectFromCache() {
+  if (!Array.isArray(cachedMsProjectRows) || !state.selectedProject) return;
+
+  const timelineData = buildTimelineDataFromMsProjectRows(
+    cachedMsProjectRows,
+    state.selectedProject || "",
+    sortMode
+  );
+  if (!timelineData.rowCount) return;
+  renderMsProjectTimeline(timelineData);
+}
+
+// Applique localement le champ modifié sur la ligne en cache (mise à jour
+// optimiste) et redessine immédiatement, avant que l'écriture Grist et la
+// réconciliation complète ne se terminent.
+function applyOptimisticMsProjectRowUpdate(rowId, fieldUpdates) {
+  if (!Array.isArray(cachedMsProjectRows)) return;
+
+  const columns = APP_CONFIG.grist.msProjectTable?.columns || {};
+  const targetId = Number(rowId);
+  const index = cachedMsProjectRows.findIndex(
+    (row) => Number(row?.[columns.id]) === targetId
+  );
+  if (index === -1) return;
+
+  cachedMsProjectRows = cachedMsProjectRows.slice();
+  cachedMsProjectRows[index] = { ...cachedMsProjectRows[index], ...fieldUpdates };
+
+  renderMsProjectFromCache();
+}
+
 async function handleDateCellEdit({ rowId, field, isoDate }) {
   const columnName = resolveDateColumnName(field);
   if (!columnName) {
@@ -131,6 +177,11 @@ async function handleDateCellEdit({ rowId, field, isoDate }) {
   const fieldLabel = field === "end" ? "Fin" : "Debut";
   try {
     setMsProjectStatus(`Mise a jour ${fieldLabel} en cours...`);
+
+    // Mise à jour optimiste : retour visuel immédiat avant la confirmation
+    // Grist, qui arrive via la réconciliation complète (refreshMsProject).
+    applyOptimisticMsProjectRowUpdate(rowId, { [columnName]: isoDate });
+
     await updateMsProjectDate(rowId, columnName, isoDate);
 
     let planningSyncResult = null;
@@ -162,6 +213,12 @@ async function refreshMsProject() {
   if (refreshInProgress) return;
   refreshInProgress = true;
 
+  const startedAt = performance.now();
+  const diagnosticsBefore = getMsProjectServiceDiagnostics();
+  let fetchDurationMs = 0;
+  let buildDurationMs = 0;
+  let renderDurationMs = 0;
+
   try {
     if (!isMsProjectEnabled()) {
       clearMsProjectTimeline();
@@ -171,12 +228,18 @@ async function refreshMsProject() {
 
     setMsProjectStatus("Chargement des donnees MS Project...");
 
+    const fetchStartedAt = performance.now();
     const rows = await fetchMsProjectRows();
+    fetchDurationMs += performance.now() - fetchStartedAt;
+    cachedMsProjectRows = rows;
+
+    const buildStartedAt = performance.now();
     const timelineData = buildTimelineDataFromMsProjectRows(
       rows,
       state.selectedProject || "",
       sortMode
     );
+    buildDurationMs += performance.now() - buildStartedAt;
 
     if (!timelineData.rowCount) {
       clearMsProjectTimeline();
@@ -189,7 +252,9 @@ async function refreshMsProject() {
       return;
     }
 
+    const renderStartedAt = performance.now();
     renderMsProjectTimeline(timelineData);
+    renderDurationMs += performance.now() - renderStartedAt;
 
     if (!toolbarBound) {
       bindTimelineToolbar({
@@ -207,6 +272,23 @@ async function refreshMsProject() {
     setMsProjectStatus(`Erreur MS Project : ${error.message}`);
   } finally {
     refreshInProgress = false;
+    const diagnosticsAfter = getMsProjectServiceDiagnostics();
+    traceMsProjectPerformance("refresh", {
+      durationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+      fetchDurationMs: Math.round(fetchDurationMs * 10) / 10,
+      buildDurationMs: Math.round(buildDurationMs * 10) / 10,
+      renderDurationMs: Math.round(renderDurationMs * 10) / 10,
+      fetchTableCount:
+        diagnosticsAfter.fetchTableCount - diagnosticsBefore.fetchTableCount,
+      fetchTableDurationMs:
+        Math.round((diagnosticsAfter.fetchTableDurationMs - diagnosticsBefore.fetchTableDurationMs) * 10) / 10,
+      actionBatchCount:
+        diagnosticsAfter.actionBatchCount - diagnosticsBefore.actionBatchCount,
+      actionCount:
+        diagnosticsAfter.actionCount - diagnosticsBefore.actionCount,
+      actionDurationMs:
+        Math.round((diagnosticsAfter.actionDurationMs - diagnosticsBefore.actionDurationMs) * 10) / 10,
+    });
   }
 }
 
