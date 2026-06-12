@@ -2797,6 +2797,11 @@ function bindGlobalPlanningRowDragging() {
         pendingPlanningDropPreviewEvent = null;
         if (!dragEvent) return;
         if (!(activePlanningDraggedRowEl instanceof HTMLElement)) return;
+        // Le contenu peut avoir défilé (scroll natif, pan vertical vis-timeline,
+        // auto-scroll pendant le drag...) sans qu'un évènement détectable ne
+        // soit reçu : on revalide les positions une fois par frame, ce qui ne
+        // coûte pas plus que l'ancien calcul (déjà limité à 1/frame).
+        invalidatePlanningDropCandidateRectsCache();
         updatePlanningDropTargetPreview(dragEvent);
       });
     },
@@ -3068,14 +3073,18 @@ function updatePlanningDropTargetPreview(eventLike) {
 
   const clientX = Number(eventLike?.clientX);
   const clientY = getPlanningDropEventClientY(eventLike);
-  const containerRect = containerEl.getBoundingClientRect();
+  // #planningTimeline (height: 100%) défile avec le contenu de #timelineWrapper :
+  // son rect se décale vers le haut quand on scrolle vers le bas, jusqu'à sortir
+  // du viewport visible. On teste donc l'appartenance au viewport via
+  // #timelineWrapper, dont le rect ne varie pas avec son propre scroll.
+  const viewportRect = (getPlanningScrollWrapper() || containerEl).getBoundingClientRect();
   const isInsideContainer =
     Number.isFinite(clientX) &&
     Number.isFinite(clientY) &&
-    clientX >= containerRect.left &&
-    clientX <= containerRect.right &&
-    clientY >= containerRect.top &&
-    clientY <= containerRect.bottom;
+    clientX >= viewportRect.left &&
+    clientX <= viewportRect.right &&
+    clientY >= viewportRect.top &&
+    clientY <= viewportRect.bottom;
 
   if (!isInsideContainer) {
     clearPlanningRowDropTarget(containerEl);
@@ -3152,24 +3161,27 @@ function setPlanningRowDropTarget(rowEl, containerEl, position = "after") {
   }
 
   const normalizedPosition = normalizePlanningDropPosition(position);
-  if (
+  const isSameTarget =
     activePlanningDropRowEl === rowEl &&
-    activePlanningDropPosition === normalizedPosition
-  ) {
-    return;
+    activePlanningDropPosition === normalizedPosition;
+
+  if (!isSameTarget) {
+    clearPlanningRowDropTarget(containerEl);
+    containerEl.classList.add("is-planning-row-drop-active");
+    rowEl.classList.add("is-planning-row-drop-target");
+    rowEl.classList.add(
+      normalizedPosition === "before"
+        ? "is-planning-row-drop-before"
+        : "is-planning-row-drop-after"
+    );
+    activePlanningDropRowEl = rowEl;
+    activePlanningDropPosition = normalizedPosition;
+    setPlanningDropPreviewRow(rowEl);
   }
 
-  clearPlanningRowDropTarget(containerEl);
-  containerEl.classList.add("is-planning-row-drop-active");
-  rowEl.classList.add("is-planning-row-drop-target");
-  rowEl.classList.add(
-    normalizedPosition === "before"
-      ? "is-planning-row-drop-before"
-      : "is-planning-row-drop-after"
-  );
-  activePlanningDropRowEl = rowEl;
-  activePlanningDropPosition = normalizedPosition;
-  setPlanningDropPreviewRow(rowEl);
+  // Repositionne toujours la barre (position: fixed) : la ligne ciblée peut
+  // avoir bougé à l'écran (scroll) même si elle reste la même ligne / le
+  // même côté avant/après.
   setPlanningDropPlacementOverlay(rowEl, containerEl, normalizedPosition);
 }
 
@@ -3185,12 +3197,16 @@ function setPlanningZoneDropTarget(zoneEl, containerEl) {
     return;
   }
 
-  if (activePlanningDropZoneEl === zoneEl) return;
+  if (activePlanningDropZoneEl !== zoneEl) {
+    clearPlanningRowDropTarget(containerEl);
+    containerEl.classList.add("is-planning-row-drop-active");
+    zoneEl.classList.add("is-planning-zone-drop-target");
+    activePlanningDropZoneEl = zoneEl;
+  }
 
-  clearPlanningRowDropTarget(containerEl);
-  containerEl.classList.add("is-planning-row-drop-active");
-  zoneEl.classList.add("is-planning-zone-drop-target");
-  activePlanningDropZoneEl = zoneEl;
+  // Recalculé et repositionné à chaque appel (position: fixed) : la ligne de
+  // prévisualisation peut avoir bougé à l'écran (scroll) même si la zone
+  // ciblée reste la même.
   const previewRow = findPlanningZonePreviewRow(zoneEl, containerEl);
   setPlanningDropPreviewRow(previewRow);
   setPlanningDropPlacementOverlay(
@@ -3357,7 +3373,9 @@ function bindPlanningRowDrop(containerEl) {
 
   containerEl.addEventListener("dragleave", (event) => {
     if (!containerEl.classList.contains("is-planning-row-drop-active")) return;
-    const rect = containerEl.getBoundingClientRect();
+    // Cf. updatePlanningDropTargetPreview : on compare au viewport de
+    // #timelineWrapper, pas au rect de #planningTimeline qui se décale avec le scroll.
+    const rect = (getPlanningScrollWrapper() || containerEl).getBoundingClientRect();
     const x = Number(event.clientX);
     const y = Number(event.clientY);
     const outsideContainer =
@@ -3665,7 +3683,9 @@ function bindMsProjectRowDrop(containerEl) {
 
   containerEl.addEventListener("dragleave", (event) => {
     if (!containerEl.classList.contains("is-ms-drop-active")) return;
-    const rect = containerEl.getBoundingClientRect();
+    // Cf. updatePlanningDropTargetPreview : on compare au viewport de
+    // #timelineWrapper, pas au rect de #planningTimeline qui se décale avec le scroll.
+    const rect = (getPlanningScrollWrapper() || containerEl).getBoundingClientRect();
     const x = Number(event.clientX);
     const y = Number(event.clientY);
     const outsideContainer =
