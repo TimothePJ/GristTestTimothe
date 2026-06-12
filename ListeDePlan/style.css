@@ -222,7 +222,7 @@ select {
   border-radius: 6px;
   color: #004990;
   padding: 0;
-  width: min(520px, calc(100vw - 32px));
+  width: min(580px, calc(100vw - 32px));
 }
 
 .print-options-dialog::backdrop {
@@ -233,12 +233,21 @@ select {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
   padding: 18px;
   background: #ffffff;
 }
 
-.print-options-body h3 {
+.print-options-body h3,
+.print-options-body h4 {
   margin: 0;
+}
+
+.print-options-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .print-options-intro {
@@ -246,41 +255,69 @@ select {
   font-size: 13px;
 }
 
-.print-type-order-list {
+.print-type-order-list,
+.print-order-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: min(50vh, 360px);
-  overflow: auto;
+  max-height: min(32vh, 280px);
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
-.print-type-order-item {
+.print-type-order-item,
+.print-zone-order-item,
+.print-index-item {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) 32px;
   align-items: center;
   gap: 8px;
+  min-height: 40px;
+  margin: 0;
   padding: 9px 10px;
   border: 1px solid #ed1b2d;
   border-radius: 4px;
+  box-sizing: border-box;
   background: #ffffff;
   color: #004990;
+  font-weight: bold;
+  line-height: 20px;
   cursor: grab;
 }
 
-.print-type-order-item.is-dragging {
+.print-index-item {
+  grid-template-columns: 28px minmax(0, 1fr);
+  cursor: pointer;
+}
+
+.print-type-order-item.is-dragging,
+.print-zone-order-item.is-dragging {
   opacity: 0.55;
 }
 
-.print-type-order-item input[type="checkbox"] {
+.print-type-order-item input[type="checkbox"],
+.print-zone-order-item input[type="checkbox"],
+.print-index-item input[type="checkbox"] {
+  width: auto;
+  height: auto;
+  padding: 0;
   margin: 0;
+  border: initial;
+  box-sizing: content-box;
+  background: initial;
+  accent-color: #004990;
+  justify-self: center;
 }
 
-.print-type-order-label {
+.print-type-order-label,
+.print-zone-order-label,
+.print-index-label {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.print-type-order-handle {
+.print-type-order-handle,
+.print-zone-order-handle {
   color: #004990;
   font-weight: bold;
   text-align: center;

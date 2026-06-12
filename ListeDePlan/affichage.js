@@ -1237,7 +1237,7 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
   }
 }
 
-function renderPlanTableSection(container, filtres, projet) {
+function renderPlanTableSection(container, filtres, projet, selectedIndices = null) {
   if (!container || filtres.length === 0) return;
   /*
     zone.innerHTML = "<p>Aucun plan trouvé pour cette sélection.</p>";
@@ -1267,6 +1267,9 @@ function renderPlanTableSection(container, filtres, projet) {
 
   const warningDiv = document.createElement('div');
   warningDiv.className = 'warnings';
+  const selectedIndexSet = Array.isArray(selectedIndices)
+    ? new Set(selectedIndices.map(normalizeIndice).filter(Boolean))
+    : null;
 
   // Designation conflict warnings
   const docToDesignations = new Map();
@@ -1301,6 +1304,7 @@ function renderPlanTableSection(container, filtres, projet) {
   let hasMultiDateError = false;
   for (const plan of plansMap.values()) {
     for (const indice in plan.lignes) {
+      if (selectedIndexSet && !selectedIndexSet.has(normalizeIndice(indice))) continue;
       if (plan.lignes[indice].length > 1) {
         hasMultiDateError = true;
         break;
@@ -1330,6 +1334,7 @@ function renderPlanTableSection(container, filtres, projet) {
       // Check all cells from the beginning up to the last valid date
       for (let i = 0; i < last; i++) {
         const currentIndice = INDICES[i];
+        if (selectedIndexSet && !selectedIndexSet.has(currentIndice)) continue;
         if (!plan.lignes[currentIndice] || plan.lignes[currentIndice].length === 0) {
           hasMissingDateError = true;
           // Mark this cell for highlighting
@@ -1374,14 +1379,7 @@ function renderPlanTableSection(container, filtres, projet) {
     }
   }
 
-  const allIndicesUsed = new Set();
-  for (const plan of plansMap.values()) {
-    for (const ind in plan.lignes) {
-      allIndicesUsed.add(ind);
-    }
-  }
-  let lastUsedIndex = Math.max(-1, ...[...allIndicesUsed].map(i => INDICES.indexOf(i)).filter(i => i >= 0));
-  const indicesToShow = INDICES.slice(0, lastUsedIndex + 2);
+  const indicesToShow = getPlanTableIndicesToShow(plansMap, selectedIndices);
 
   const table = document.createElement("table");
   table.className = "plan-table";
@@ -1470,7 +1468,55 @@ function renderPlanTableSection(container, filtres, projet) {
   container.appendChild(table);
 }
 
-function renderZoneSections(container, rows, projet) {
+function getPlanTableIndicesToShow(plansMap, selectedIndices = null) {
+  if (Array.isArray(selectedIndices)) {
+    return selectedIndices
+      .map(normalizeIndice)
+      .filter((indice, index, values) => indice && values.indexOf(indice) === index);
+  }
+
+  const allIndicesUsed = new Set();
+  for (const plan of plansMap.values()) {
+    for (const indice in plan.lignes) {
+      allIndicesUsed.add(indice);
+    }
+  }
+
+  const lastUsedIndex = Math.max(
+    -1,
+    ...[...allIndicesUsed].map((indice) => INDICES.indexOf(indice)).filter((index) => index >= 0)
+  );
+  return INDICES.slice(0, lastUsedIndex + 2);
+}
+
+function getOrderedZoneKeys(zoneKeys, zoneOrder = null) {
+  const defaultSort = (left, right) => compareNormalizedText(left, right, { blankLast: true });
+  if (!Array.isArray(zoneOrder) || zoneOrder.length === 0) {
+    return [...zoneKeys].sort(defaultSort);
+  }
+
+  const noZoneValue = normalizeText(window.LISTE_DE_PLAN_NO_ZONE_VALUE || "__NO_ZONE__");
+  const orderByZone = new Map();
+  zoneOrder.forEach((zoneValue, index) => {
+    const normalizedZone = normalizeText(zoneValue) === noZoneValue
+      ? ""
+      : normalizeZoneText(zoneValue);
+    if (!orderByZone.has(normalizedZone)) {
+      orderByZone.set(normalizedZone, index);
+    }
+  });
+
+  return [...zoneKeys].sort((left, right) => {
+    const leftIndex = orderByZone.get(left);
+    const rightIndex = orderByZone.get(right);
+    if (leftIndex != null && rightIndex != null) return leftIndex - rightIndex;
+    if (leftIndex != null) return -1;
+    if (rightIndex != null) return 1;
+    return defaultSort(left, right);
+  });
+}
+
+function renderZoneSections(container, rows, projet, zoneOrder = null, selectedIndices = null) {
   const rowsByZone = new Map();
   for (const record of rows) {
     const zoneKey = getRecordZone(record);
@@ -1480,7 +1526,7 @@ function renderZoneSections(container, rows, projet) {
     rowsByZone.get(zoneKey).push(record);
   }
 
-  const zoneKeys = [...rowsByZone.keys()].sort((left, right) => compareNormalizedText(left, right, { blankLast: true }));
+  const zoneKeys = getOrderedZoneKeys([...rowsByZone.keys()], zoneOrder);
   for (const zoneKey of zoneKeys) {
     const zoneSection = document.createElement("section");
     zoneSection.className = "plan-zone-section";
@@ -1490,7 +1536,7 @@ function renderZoneSections(container, rows, projet) {
     title.textContent = formatZoneSectionTitle(zoneKey);
     zoneSection.appendChild(title);
 
-    renderPlanTableSection(zoneSection, rowsByZone.get(zoneKey), projet);
+    renderPlanTableSection(zoneSection, rowsByZone.get(zoneKey), projet, selectedIndices);
     container.appendChild(zoneSection);
   }
 }
@@ -1499,13 +1545,13 @@ function hasNamedZone(rows) {
   return rows.some((record) => normalizeZoneText(getRecordZone(record)));
 }
 
-function renderRowsForSelectedType(container, rows, projet) {
+function renderRowsForSelectedType(container, rows, projet, zoneOrder = null, selectedIndices = null) {
   if (hasNamedZone(rows)) {
-    renderZoneSections(container, rows, projet);
+    renderZoneSections(container, rows, projet, zoneOrder, selectedIndices);
     return;
   }
 
-  renderPlanTableSection(container, rows, projet);
+  renderPlanTableSection(container, rows, projet, selectedIndices);
 }
 
 function renderVisibleTypeConsistencyWarnings(container, rows, projet) {

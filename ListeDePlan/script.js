@@ -1905,6 +1905,82 @@ function getDefaultPrintSelectedTypes(availableTypes) {
   return new Set(selection.values.filter((type) => availableTypes.includes(type)));
 }
 
+function getPrintZoneLabel(zoneValue) {
+  const noZoneValue = window.LISTE_DE_PLAN_NO_ZONE_VALUE || "__NO_ZONE__";
+  if (zoneValue === noZoneValue) {
+    return window.LISTE_DE_PLAN_NO_ZONE_LABEL || "Sans zone";
+  }
+  return getZoneDropdownOptionLabel(zoneValue);
+}
+
+function getPrintAvailableZoneValues(selectedProject) {
+  const projectName = normalizeProjectName(selectedProject);
+  const zoneSet = new Set();
+
+  for (const record of window.records || []) {
+    const recordProject = typeof getRecordProjectName === "function"
+      ? getRecordProjectName(record)
+      : getNomProjet(record);
+    if (normalizeProjectName(recordProject) !== projectName) continue;
+    if (!normalizeTypeDocumentValue(record?.Type_document)) continue;
+
+    zoneSet.add(getZoneDropdownOptionValue(record?.Zone));
+  }
+
+  const noZoneValue = window.LISTE_DE_PLAN_NO_ZONE_VALUE || "__NO_ZONE__";
+  return [...zoneSet].sort((left, right) => {
+    if (left === noZoneValue && right !== noZoneValue) return 1;
+    if (left !== noZoneValue && right === noZoneValue) return -1;
+    return getPrintZoneLabel(left).localeCompare(getPrintZoneLabel(right), "fr", {
+      sensitivity: "base",
+      numeric: true
+    });
+  });
+}
+
+function getDefaultPrintSelectedZones(availableZones) {
+  const allZonesValue = window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__";
+  const selectedZone = document.getElementById("zoneDropdown")?.value || allZonesValue;
+  if (selectedZone === allZonesValue) return new Set(availableZones);
+
+  return new Set(availableZones.includes(selectedZone) ? [selectedZone] : []);
+}
+
+function normalizePrintIndexValue(value) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function comparePrintIndexValues(left, right) {
+  const orderedIndices = ["0", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
+  const leftIndex = orderedIndices.indexOf(left);
+  const rightIndex = orderedIndices.indexOf(right);
+  if (leftIndex !== -1 && rightIndex !== -1) return leftIndex - rightIndex;
+  if (leftIndex !== -1) return -1;
+  if (rightIndex !== -1) return 1;
+  return left.localeCompare(right, "fr", {
+    sensitivity: "base",
+    numeric: true
+  });
+}
+
+function getPrintAvailableIndexValues(selectedProject) {
+  const projectName = normalizeProjectName(selectedProject);
+  const indexSet = new Set();
+
+  for (const record of window.records || []) {
+    const recordProject = typeof getRecordProjectName === "function"
+      ? getRecordProjectName(record)
+      : getNomProjet(record);
+    if (normalizeProjectName(recordProject) !== projectName) continue;
+    if (!normalizeTypeDocumentValue(record?.Type_document)) continue;
+
+    const indice = normalizePrintIndexValue(record?.Indice);
+    if (indice) indexSet.add(indice);
+  }
+
+  return [...indexSet].sort(comparePrintIndexValues);
+}
+
 function syncMainTypeSelectionFromPrintOrder(orderedTypes, availableTypes) {
   if (!Array.isArray(orderedTypes) || orderedTypes.length === 0) return;
 
@@ -1918,7 +1994,7 @@ function syncMainTypeSelectionFromPrintOrder(orderedTypes, availableTypes) {
   } else {
     setSelectedTypeDocumentValues(orderedTypes);
   }
-  refreshCurrentPlanDisplay();
+  refreshCurrentPlanDisplay({ refreshZones: false });
 }
 
 function createPrintTypeOrderItem(type, checked) {
@@ -1946,8 +2022,51 @@ function createPrintTypeOrderItem(type, checked) {
   return item;
 }
 
-function getPrintDragAfterElement(container, y) {
-  const items = [...container.querySelectorAll(".print-type-order-item:not(.is-dragging)")];
+function createPrintZoneOrderItem(zoneValue, checked) {
+  const item = document.createElement("label");
+  item.className = "print-zone-order-item";
+  item.draggable = true;
+  item.dataset.zoneValue = zoneValue;
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = checked;
+
+  const text = document.createElement("span");
+  text.className = "print-zone-order-label";
+  text.textContent = getPrintZoneLabel(zoneValue);
+
+  const handle = document.createElement("span");
+  handle.className = "print-zone-order-handle";
+  handle.textContent = "::";
+  handle.setAttribute("aria-hidden", "true");
+
+  item.appendChild(checkbox);
+  item.appendChild(text);
+  item.appendChild(handle);
+  return item;
+}
+
+function createPrintIndexItem(indice) {
+  const item = document.createElement("label");
+  item.className = "print-index-item";
+  item.dataset.indice = indice;
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = true;
+
+  const text = document.createElement("span");
+  text.className = "print-index-label";
+  text.textContent = indice;
+
+  item.appendChild(checkbox);
+  item.appendChild(text);
+  return item;
+}
+
+function getPrintDragAfterElement(container, y, itemSelector) {
+  const items = [...container.querySelectorAll(`${itemSelector}:not(.is-dragging)`)];
 
   return items.reduce((closest, child) => {
     const box = child.getBoundingClientRect();
@@ -1959,18 +2078,18 @@ function getPrintDragAfterElement(container, y) {
   }, { offset: Number.NEGATIVE_INFINITY, element: null }).element;
 }
 
-function setupPrintTypeOrderDrag(list) {
+function setupPrintOrderDrag(list, itemSelector, dataKey) {
   list.addEventListener("dragstart", (event) => {
-    const item = event.target.closest(".print-type-order-item");
+    const item = event.target.closest(itemSelector);
     if (!item) return;
 
     item.classList.add("is-dragging");
     event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", item.dataset.typeDocument || "");
+    event.dataTransfer.setData("text/plain", item.dataset[dataKey] || "");
   });
 
   list.addEventListener("dragend", (event) => {
-    event.target.closest(".print-type-order-item")?.classList.remove("is-dragging");
+    event.target.closest(itemSelector)?.classList.remove("is-dragging");
   });
 
   list.addEventListener("dragover", (event) => {
@@ -1978,7 +2097,7 @@ function setupPrintTypeOrderDrag(list) {
     const dragging = list.querySelector(".is-dragging");
     if (!dragging) return;
 
-    const afterElement = getPrintDragAfterElement(list, event.clientY);
+    const afterElement = getPrintDragAfterElement(list, event.clientY, itemSelector);
     if (afterElement == null) {
       list.appendChild(dragging);
     } else {
@@ -1987,32 +2106,63 @@ function setupPrintTypeOrderDrag(list) {
   });
 }
 
-function openPrintOptionsDialog(availableTypes) {
+function openPrintOptionsDialog(availableTypes, availableZones, availableIndices) {
   return new Promise((resolve) => {
     const dialog = document.getElementById("dlg-print-options");
-    const list = document.getElementById("printTypeOrderList");
+    const typeList = document.getElementById("printTypeOrderList");
+    const zoneList = document.getElementById("printZoneOrderList");
+    const indexList = document.getElementById("printIndexList");
     const cancelBtn = document.getElementById("print-options-cancel");
     const confirmBtn = document.getElementById("print-options-confirm");
 
-    if (!dialog || !list || !cancelBtn || !confirmBtn || typeof dialog.showModal !== "function") {
-      resolve(availableTypes);
+    if (!dialog || !typeList || !zoneList || !indexList || !cancelBtn || !confirmBtn || typeof dialog.showModal !== "function") {
+      resolve({
+        orderedTypes: [...getDefaultPrintSelectedTypes(availableTypes)],
+        orderedZones: [...getDefaultPrintSelectedZones(availableZones)],
+        selectedIndices: [...availableIndices]
+      });
       return;
     }
 
     const selectedTypes = getDefaultPrintSelectedTypes(availableTypes);
-    list.innerHTML = "";
+    typeList.innerHTML = "";
     availableTypes.forEach((type) => {
-      list.appendChild(createPrintTypeOrderItem(type, selectedTypes.has(type)));
+      typeList.appendChild(createPrintTypeOrderItem(type, selectedTypes.has(type)));
     });
 
-    if (!list.__printDragBound) {
-      setupPrintTypeOrderDrag(list);
-      list.__printDragBound = true;
+    const selectedZones = getDefaultPrintSelectedZones(availableZones);
+    zoneList.innerHTML = "";
+    availableZones.forEach((zoneValue) => {
+      zoneList.appendChild(createPrintZoneOrderItem(zoneValue, selectedZones.has(zoneValue)));
+    });
+
+    indexList.innerHTML = "";
+    availableIndices.forEach((indice) => {
+      indexList.appendChild(createPrintIndexItem(indice));
+    });
+
+    if (!typeList.__printDragBound) {
+      setupPrintOrderDrag(typeList, ".print-type-order-item", "typeDocument");
+      typeList.__printDragBound = true;
+    }
+    if (!zoneList.__printDragBound) {
+      setupPrintOrderDrag(zoneList, ".print-zone-order-item", "zoneValue");
+      zoneList.__printDragBound = true;
     }
 
-    const getDialogSelection = () => Array.from(list.querySelectorAll(".print-type-order-item"))
+    const getSelectedTypes = () => Array.from(typeList.querySelectorAll(".print-type-order-item"))
       .filter((item) => item.querySelector('input[type="checkbox"]')?.checked)
       .map((item) => normalizeTypeDocumentValue(item.dataset.typeDocument))
+      .filter(Boolean);
+
+    const getSelectedZones = () => Array.from(zoneList.querySelectorAll(".print-zone-order-item"))
+      .filter((item) => item.querySelector('input[type="checkbox"]')?.checked)
+      .map((item) => item.dataset.zoneValue)
+      .filter(Boolean);
+
+    const getSelectedIndices = () => Array.from(indexList.querySelectorAll(".print-index-item"))
+      .filter((item) => item.querySelector('input[type="checkbox"]')?.checked)
+      .map((item) => normalizePrintIndexValue(item.dataset.indice))
       .filter(Boolean);
 
     const cleanup = () => {
@@ -2032,12 +2182,22 @@ function openPrintOptionsDialog(availableTypes) {
       closeWith(null);
     };
     const onConfirm = () => {
-      const selected = getDialogSelection();
-      if (selected.length === 0) {
+      const orderedTypes = getSelectedTypes();
+      if (orderedTypes.length === 0) {
         alert("Selectionnez au moins un type de document a imprimer.");
         return;
       }
-      closeWith(selected);
+      const orderedZones = getSelectedZones();
+      if (orderedZones.length === 0) {
+        alert("Selectionnez au moins une zone a imprimer.");
+        return;
+      }
+      const selectedIndices = getSelectedIndices();
+      if (selectedIndices.length === 0) {
+        alert("Selectionnez au moins un indice a imprimer.");
+        return;
+      }
+      closeWith({ orderedTypes, orderedZones, selectedIndices });
     };
     const onClose = () => {
       const value = Object.prototype.hasOwnProperty.call(dialog, "__printResult")
@@ -2056,14 +2216,17 @@ function openPrintOptionsDialog(availableTypes) {
   });
 }
 
-function matchesCurrentPrintZone(record, selectedZoneDocument) {
+function matchesCurrentPrintZones(record, orderedZones) {
+  if (!Array.isArray(orderedZones) || orderedZones.length === 0) return false;
+
   if (typeof matchesZoneSelection === "function") {
-    return matchesZoneSelection(record, selectedZoneDocument);
+    return orderedZones.some((zoneValue) => matchesZoneSelection(record, zoneValue));
   }
-  return true;
+
+  return orderedZones.includes(getZoneDropdownOptionValue(record?.Zone));
 }
 
-function buildPrintContainer(selectedProject, orderedTypes, selectedZoneDocument) {
+function buildPrintContainer(selectedProject, orderedTypes, orderedZones, selectedIndices) {
   const container = document.createElement("div");
   container.id = "plans-print-output";
   container.style.position = "absolute";
@@ -2079,7 +2242,7 @@ function buildPrintContainer(selectedProject, orderedTypes, selectedZoneDocument
       : getNomProjet(record);
     return normalizeProjectName(recordProject) === normalizedProject &&
       normalizeTypeDocumentValue(record?.Type_document) &&
-      matchesCurrentPrintZone(record, selectedZoneDocument);
+      matchesCurrentPrintZones(record, orderedZones);
   });
 
   if (typeof renderVisibleTypeConsistencyWarnings === "function") {
@@ -2100,7 +2263,7 @@ function buildPrintContainer(selectedProject, orderedTypes, selectedZoneDocument
     typeSection.appendChild(title);
 
     if (typeof renderRowsForSelectedType === "function") {
-      renderRowsForSelectedType(typeSection, rowsForType, normalizedProject);
+      renderRowsForSelectedType(typeSection, rowsForType, normalizedProject, orderedZones, selectedIndices);
     }
 
     container.appendChild(typeSection);
@@ -2159,10 +2322,8 @@ async function savePlansPdfFromChildren(selectedProject, children) {
   doc.save(`${selectedProject} - Plans.pdf`);
 }
 
-async function generatePlansPdfFromOrderedTypes(selectedProject, orderedTypes) {
-  const selectedZoneDocument = document.getElementById("zoneDropdown")?.value ||
-    (window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__");
-  const printContainer = buildPrintContainer(selectedProject, orderedTypes, selectedZoneDocument);
+async function generatePlansPdfFromOrderedTypes(selectedProject, orderedTypes, orderedZones, selectedIndices) {
+  const printContainer = buildPrintContainer(selectedProject, orderedTypes, orderedZones, selectedIndices);
 
   try {
     const children = Array.from(printContainer.querySelectorAll("h2, h3, table"));
@@ -2245,11 +2406,23 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const orderedTypes = await openPrintOptionsDialog(availableTypes);
-    if (!orderedTypes) return;
+    const availableZones = getPrintAvailableZoneValues(selectedProject);
+    const availableIndices = getPrintAvailableIndexValues(selectedProject);
+    if (availableIndices.length === 0) {
+      alert("Aucun indice a imprimer.");
+      return;
+    }
 
-    syncMainTypeSelectionFromPrintOrder(orderedTypes, availableTypes);
-    await generatePlansPdfFromOrderedTypes(selectedProject, orderedTypes);
+    const printSelection = await openPrintOptionsDialog(availableTypes, availableZones, availableIndices);
+    if (!printSelection) return;
+
+    syncMainTypeSelectionFromPrintOrder(printSelection.orderedTypes, availableTypes);
+    await generatePlansPdfFromOrderedTypes(
+      selectedProject,
+      printSelection.orderedTypes,
+      printSelection.orderedZones,
+      printSelection.selectedIndices
+    );
   }, true);
 });
 
