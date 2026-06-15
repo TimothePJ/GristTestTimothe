@@ -261,6 +261,22 @@ function buildDocumentIdentityKey(documentValue) {
   ].join("||");
 }
 
+function buildDocumentUniquenessKey(documentValue) {
+  const number = normalizeDocumentIdentityPart(
+    documentValue?.number ?? documentValue?.numero ?? documentValue?.documentNumber
+  );
+  const type = normalizeDocumentIdentityPart(
+    documentValue?.type ?? documentValue?.documentType ?? documentValue?.typeDocument
+  );
+  if (!number || !type) {
+    throw new Error("Le numero et le type du document sont obligatoires.");
+  }
+  return [
+    number,
+    type,
+  ].join("||");
+}
+
 function normalizeDocumentProjectKey(value) {
   const raw = Array.isArray(value)
     ? value[value.length - 1]
@@ -310,15 +326,15 @@ async function assertDocumentIdentitiesAvailable(projectName, documents, {
   excludeDocument = null,
 } = {}) {
   const normalizedDocuments = (documents || []).map(normalizeDocumentIdentityInput);
-  const requestedIdentityKeys = new Set();
+  const requestedUniquenessKeys = new Set();
   for (const documentIdentity of normalizedDocuments) {
-    const identityKey = buildDocumentIdentityKey(documentIdentity);
-    if (requestedIdentityKeys.has(identityKey)) {
+    const uniquenessKey = buildDocumentUniquenessKey(documentIdentity);
+    if (requestedUniquenessKeys.has(uniquenessKey)) {
       throw new Error(
-        `Le document "${documentIdentity.number} - ${documentIdentity.name}" (${documentIdentity.type}) est saisi plusieurs fois.`
+        `Le numero de document "${documentIdentity.number}" est saisi plusieurs fois pour le type "${documentIdentity.type}".`
       );
     }
-    requestedIdentityKeys.add(identityKey);
+    requestedUniquenessKeys.add(uniquenessKey);
   }
 
   const [projectAliases, listePlan] = await Promise.all([
@@ -340,16 +356,21 @@ async function assertDocumentIdentitiesAvailable(projectName, documents, {
     };
     if (
       !normalizeDocumentIdentityPart(rowIdentity.number) ||
-      !normalizeDocumentIdentityPart(rowIdentity.name) ||
       !normalizeDocumentIdentityPart(rowIdentity.type)
     ) continue;
-    const rowIdentityKey = buildDocumentIdentityKey(rowIdentity);
-    if (!requestedIdentityKeys.has(rowIdentityKey) || rowIdentityKey === excludedIdentityKey) {
+    const rowIdentityKey = normalizeDocumentIdentityPart(rowIdentity.name)
+      ? buildDocumentIdentityKey(rowIdentity)
+      : "";
+    const rowUniquenessKey = buildDocumentUniquenessKey(rowIdentity);
+    if (
+      !requestedUniquenessKeys.has(rowUniquenessKey) ||
+      rowIdentityKey === excludedIdentityKey
+    ) {
       continue;
     }
 
     throw new Error(
-      `Le document "${rowIdentity.number} - ${rowIdentity.name}" (${rowIdentity.type}) existe deja dans ce projet.`
+      `Le numero de document "${rowIdentity.number}" existe deja pour le type "${rowIdentity.type}" dans ce projet.`
     );
   }
 

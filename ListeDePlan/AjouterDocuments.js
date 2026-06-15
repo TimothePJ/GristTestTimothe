@@ -327,7 +327,6 @@
   // ============================================================
   function buildDocKey(doc) {
     return [
-      normalizeDocumentIdentityPart(doc.name),
       normalizeDocumentIdentityPart(doc.numero),
       normalizeDocumentIdentityPart(normalizeTypeDocument(doc.type)),
     ].join('||');
@@ -919,20 +918,18 @@
     const projects = planningTable?.[projectCol] || [];
     const numbers = planningTable?.ID2 || planningTable?.NumeroDocument || [];
     const types = planningTable?.Type_doc || planningTable?.Type_document || [];
-    const tasks = planningTable?.[taskCol] || [];
 
     const identityExists = Array.from(
-      { length: Math.max(projects.length, numbers.length, types.length, tasks.length) },
+      { length: Math.max(projects.length, numbers.length, types.length) },
       (_, index) => index
     ).some((index) =>
       projectKeys.has(normalizeDocumentIdentityPart(projects[index])) &&
       normalizeDocumentIdentityPart(numbers[index]) === normalizeDocumentIdentityPart(documentNumber) &&
-      normalizeDocumentIdentityPart(tasks[index]) === normalizeDocumentIdentityPart(documentName) &&
       normalizeDocumentIdentityPart(types[index]) === normalizeDocumentIdentityPart(documentType)
     );
     if (identityExists) {
       throw new Error(
-        `Le document "${documentNumber} - ${documentName}" (${documentType}) existe deja dans Planning.`
+        `Le numero de document "${documentNumber}" existe deja pour le type "${documentType}" dans Planning.`
       );
     }
 
@@ -1100,12 +1097,11 @@
       if (!normalizedDoc.documentNumber || !normalizedDoc.documentName || !normalizedDoc.documentType) return;
       const key = [
         normalizeDocumentIdentityPart(normalizedDoc.documentNumber),
-        normalizeDocumentIdentityPart(normalizedDoc.documentName),
         normalizeDocumentIdentityPart(normalizedDoc.documentType),
       ].join('||');
       if (seenDocuments.has(key)) {
         throw new Error(
-          `Le document "${normalizedDoc.documentNumber} - ${normalizedDoc.documentName}" (${normalizedDoc.documentType}) est saisi plusieurs fois.`
+          `Le numero de document "${normalizedDoc.documentNumber}" est saisi plusieurs fois pour le type "${normalizedDoc.documentType}".`
         );
       }
       seenDocuments.add(key);
@@ -1139,7 +1135,6 @@
         const key = [
           normalizeDocumentIdentityPart(normalizedProject),
           normalizeDocumentIdentityPart(doc.documentNumber),
-          normalizeDocumentIdentityPart(doc.documentName),
           normalizeDocumentIdentityPart(doc.documentType),
         ].join('||');
 
@@ -1177,7 +1172,6 @@
         const planningKey = [
           normalizeDocumentIdentityPart(normalizedProject),
           normalizeDocumentIdentityPart(doc.documentNumber),
-          normalizeDocumentIdentityPart(doc.documentName),
           normalizeDocumentIdentityPart(doc.documentType),
         ].join('||');
 

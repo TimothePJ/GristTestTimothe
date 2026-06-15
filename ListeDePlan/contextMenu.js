@@ -692,15 +692,11 @@ async function buildDocumentTypeUpdateActions(documentContext, newType) {
       normalizeContextMenuIdentityText(row?.[sourceColumns.typeColumn]) !==
       normalizeContextMenuIdentityText(newType)
     ) return false;
-    return sourceColumns.designationColumns.some(
-      (columnName) =>
-        normalizeContextMenuIdentityText(row?.[columnName]) ===
-        normalizeContextMenuIdentityText(documentContext.designation)
-    );
+    return true;
   });
   if (targetIdentityExists) {
     throw new Error(
-      `Le document "${documentContext.numDocument} - ${documentContext.designation}" existe deja avec le type "${newType}".`
+      `Le numero de document "${documentContext.numDocument}" existe deja avec le type "${newType}".`
     );
   }
 

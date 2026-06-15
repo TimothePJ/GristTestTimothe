@@ -613,7 +613,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function buildDocumentIdentityKey(doc = {}) {
         return [
-            normalizeDocumentIdentityPart(doc.name),
             normalizeDocumentIdentityPart(doc.numero),
             normalizeDocumentIdentityPart(normalizeDocumentType(doc.type))
         ].join('||');
@@ -693,7 +692,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const identityKey = buildDocumentIdentityKey(documentIdentity);
             if (requestedIdentities.has(identityKey)) {
                 throw new Error(
-                    `Le document "${documentIdentity.numero} - ${documentIdentity.name}" (${documentIdentity.type}) est saisi plusieurs fois.`
+                    `Le numero de document "${documentIdentity.numero}" est saisi plusieurs fois pour le type "${documentIdentity.type}".`
                 );
             }
             requestedIdentities.set(identityKey, documentIdentity);
@@ -720,23 +719,20 @@ document.addEventListener('DOMContentLoaded', () => {
             listePlanContext.data.NomProjetString ||
             [];
         const rowNumbers = listePlanContext.data.NumeroDocument || [];
-        const rowNames = listePlanContext.data.Designation || listePlanContext.data.NomDocument || [];
         const rowTypes = listePlanContext.data.Type_document || listePlanContext.data.Type_doc || [];
-        for (let index = 0; index < Math.max(rowProjects.length, rowNumbers.length, rowNames.length, rowTypes.length); index += 1) {
+        for (let index = 0; index < Math.max(rowProjects.length, rowNumbers.length, rowTypes.length); index += 1) {
             if (!projectAliases.has(normalizeDocumentIdentityPart(rowProjects[index]))) continue;
             if (
                 !normalizeDocumentIdentityPart(rowNumbers[index]) ||
-                !normalizeDocumentIdentityPart(rowNames[index]) ||
                 !normalizeDocumentIdentityPart(rowTypes[index])
             ) continue;
             const rowIdentity = {
                 numero: rowNumbers[index],
-                name: rowNames[index],
                 type: rowTypes[index],
             };
             if (requestedIdentities.has(buildDocumentIdentityKey(rowIdentity))) {
                 throw new Error(
-                    `Le document "${rowIdentity.numero} - ${rowIdentity.name}" (${rowIdentity.type}) existe deja dans ce projet.`
+                    `Le numero de document "${rowIdentity.numero}" existe deja pour le type "${rowIdentity.type}" dans ce projet.`
                 );
             }
         }
@@ -903,7 +899,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (hasDuplicate) {
-            alert("Des documents identiques (numero, nom et type) sont en doublon");
+            alert("Des numeros de document sont en doublon pour un meme type");
             return;
         }
 
@@ -1800,7 +1796,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const isDuplicate = doc.numero && numeroCounts[duplicateKey] > 1;
                         if (isDuplicate) {
                             chip.style.borderColor = 'red';
-                            chip.title = `Document identique en doublon (${type})`;
+                            chip.title = `Numero de document duplique pour le type ${type}`;
                         }
 
                         const checkbox = document.createElement('input');
@@ -2168,7 +2164,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const isDuplicate = normalizeText(doc.numero) && duplicateCounts[duplicateKey] > 1;
                         if (isDuplicate) {
                             chip.style.borderColor = 'red';
-                            chip.title = `Document identique en doublon (${typeKey})`;
+                            chip.title = `Numero de document duplique pour le type ${typeKey}`;
                         }
 
                         const checkbox = document.createElement('input');

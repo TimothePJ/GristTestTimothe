@@ -476,12 +476,19 @@ function normalizeReferenceDocumentIdentityInput(documentValue) {
   return documentIdentity;
 }
 
-function buildReferenceDocumentIdentityKey(documentValue) {
-  const documentIdentity = normalizeReferenceDocumentIdentityInput(documentValue);
+function buildReferenceDocumentUniquenessKey(documentValue) {
+  const number = normalizeReferenceDocumentIdentityPart(
+    documentValue?.number ?? documentValue?.numero ?? documentValue?.documentNumber
+  );
+  const type = normalizeReferenceDocumentIdentityPart(
+    documentValue?.type ?? documentValue?.documentType ?? documentValue?.typeDocument
+  );
+  if (!number || !type) {
+    throw new Error("Le numero et le type du document sont obligatoires.");
+  }
   return [
-    normalizeReferenceDocumentIdentityPart(documentIdentity.number),
-    normalizeReferenceDocumentIdentityPart(documentIdentity.name),
-    normalizeReferenceDocumentIdentityPart(documentIdentity.type),
+    number,
+    type,
   ].join('||');
 }
 
@@ -518,15 +525,15 @@ async function buildDocumentProjectAliasKeys(projectName) {
 
 async function assertReferenceDocumentIdentitiesAvailable(projectName, documents) {
   const normalizedDocuments = (documents || []).map(normalizeReferenceDocumentIdentityInput);
-  const requestedIdentityKeys = new Set();
+  const requestedUniquenessKeys = new Set();
   for (const documentIdentity of normalizedDocuments) {
-    const identityKey = buildReferenceDocumentIdentityKey(documentIdentity);
-    if (requestedIdentityKeys.has(identityKey)) {
+    const uniquenessKey = buildReferenceDocumentUniquenessKey(documentIdentity);
+    if (requestedUniquenessKeys.has(uniquenessKey)) {
       throw new Error(
-        `Le document "${documentIdentity.number} - ${documentIdentity.name}" (${documentIdentity.type}) est saisi plusieurs fois.`
+        `Le numero de document "${documentIdentity.number}" est saisi plusieurs fois pour le type "${documentIdentity.type}".`
       );
     }
-    requestedIdentityKeys.add(identityKey);
+    requestedUniquenessKeys.add(uniquenessKey);
   }
 
   const [tableName, projectAliases] = await Promise.all([
@@ -536,24 +543,21 @@ async function assertReferenceDocumentIdentitiesAvailable(projectName, documents
   const plans = await grist.docApi.fetchTable(tableName);
   const projects = plans.Nom_projet || plans.NomProjet || plans.NomProjetString || [];
   const numbers = plans.NumeroDocument || plans.ID2 || [];
-  const names = plans.Designation || plans.NomDocument || plans.Taches || plans.Tache || [];
   const types = plans.Type_document || plans.Type_doc || plans.TypeDocument || plans.TypeDoc || [];
 
-  for (let index = 0; index < Math.max(projects.length, numbers.length, names.length, types.length); index += 1) {
+  for (let index = 0; index < Math.max(projects.length, numbers.length, types.length); index += 1) {
     if (!projectAliases.has(normalizeDocumentProjectKey(projects[index]))) continue;
     if (
       !normalizeReferenceDocumentIdentityPart(numbers[index]) ||
-      !normalizeReferenceDocumentIdentityPart(names[index]) ||
       !normalizeReferenceDocumentIdentityPart(types[index])
     ) continue;
     const rowIdentity = {
       number: numbers[index],
-      name: names[index],
       type: types[index],
     };
-    if (requestedIdentityKeys.has(buildReferenceDocumentIdentityKey(rowIdentity))) {
+    if (requestedUniquenessKeys.has(buildReferenceDocumentUniquenessKey(rowIdentity))) {
       throw new Error(
-        `Le document "${rowIdentity.number} - ${rowIdentity.name}" (${rowIdentity.type}) existe deja dans ce projet.`
+        `Le numero de document "${rowIdentity.number}" existe deja pour le type "${rowIdentity.type}" dans ce projet.`
       );
     }
   }
@@ -1896,7 +1900,6 @@ function getAlphabetRangeValues(startValue, endValue) {
 
 function buildPendingReferenceDocumentIdentityKey(doc = {}) {
   return [
-    normalizeReferenceDocumentIdentityPart(doc.name),
     normalizeReferenceDocumentIdentityPart(doc.numero),
     normalizeReferenceDocumentIdentityPart(normalizeTypeDocument(doc.type)),
   ].join('||');
@@ -2344,13 +2347,12 @@ async function createDocumentsBatch({
 
     const key = [
       normalizeReferenceDocumentIdentityPart(normalizedDoc.documentNumber),
-      normalizeReferenceDocumentIdentityPart(normalizedDoc.documentName),
       normalizeReferenceDocumentIdentityPart(normalizedDoc.documentType),
     ].join('||');
 
     if (seenDocuments.has(key)) {
       throw new Error(
-        `Le document "${normalizedDoc.documentNumber} - ${normalizedDoc.documentName}" (${normalizedDoc.documentType}) est saisi plusieurs fois.`
+        `Le numero de document "${normalizedDoc.documentNumber}" est saisi plusieurs fois pour le type "${normalizedDoc.documentType}".`
       );
     }
     seenDocuments.add(key);
@@ -2390,7 +2392,6 @@ async function createDocumentsBatch({
       const key = [
         normalizeReferenceDocumentIdentityPart(normalizedProject),
         normalizeReferenceDocumentIdentityPart(doc.documentNumber),
-        normalizeReferenceDocumentIdentityPart(doc.documentName),
         normalizeReferenceDocumentIdentityPart(doc.documentType),
       ].join('||');
 
@@ -2447,7 +2448,6 @@ async function createDocumentsBatch({
       const planningKey = [
         normalizeReferenceDocumentIdentityPart(normalizedProject),
         normalizeReferenceDocumentIdentityPart(doc.documentNumber),
-        normalizeReferenceDocumentIdentityPart(doc.documentName),
         normalizeReferenceDocumentIdentityPart(doc.documentType),
       ].join('||');
 
@@ -5097,22 +5097,20 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
       const plansTableName = await resolveListePlanTableName();
       const plans = await grist.docApi.fetchTable(plansTableName);
 
-      // Index des lignes existantes par identite documentaire complete.
+      // Index des lignes existantes par projet + numero + type.
       const existing = new Map();
       const projs = plans.Nom_projet || [];
       const nums  = plans.NumeroDocument || [];
       const types = plans.Type_document || [];
-      const names = plans.Designation || plans.NomDocument || [];
       const ids   = plans.id || [];
-      const L = Math.max(projs.length, nums.length, types.length, names.length, ids.length);
+      const L = Math.max(projs.length, nums.length, types.length, ids.length);
 
       for (let i = 0; i < L; i++) {
         const p = normalizeReferenceDocumentIdentityPart(projs[i]);
         const n = normalizeReferenceDocumentIdentityPart(nums[i]);
         const t = normalizeReferenceDocumentIdentityPart(types[i]);
-        const name = normalizeReferenceDocumentIdentityPart(names[i]);
-        if (!p || !n || !name || !t) continue;
-        existing.set(`${p}||${n}||${name}||${t}`, ids[i]);
+        if (!p || !n || !t) continue;
+        existing.set(`${p}||${n}||${t}`, ids[i]);
       }
       const projKey = normalizeReferenceDocumentIdentityPart(selectedProject);
 
@@ -5122,7 +5120,6 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
         const key = [
           projKey,
           normalizeReferenceDocumentIdentityPart(numStrPlan),
-          normalizeReferenceDocumentIdentityPart(nm),
           normalizeReferenceDocumentIdentityPart(documentType),
         ].join('||');
 
@@ -5171,7 +5168,6 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
         const keyPlanning = [
           projKeyPlanning,
           normalizeReferenceDocumentIdentityPart(numStrPlanning),
-          normalizeReferenceDocumentIdentityPart(nm),
           normalizeReferenceDocumentIdentityPart(documentType),
         ].join('||');
         const idxPlanning = findPlanningIndex(
