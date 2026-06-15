@@ -81,6 +81,12 @@ function normalizeContextMenuText(value) {
   return String(value).trim();
 }
 
+function normalizeContextMenuIdentityText(value) {
+  return normalizeContextMenuText(value)
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("fr");
+}
+
 function normalizeContextMenuRows(raw) {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw;
@@ -117,9 +123,9 @@ function findContextMenuColumn(columnNames, candidates) {
 }
 
 function matchesContextMenuProject(value, projectName, projectId = null) {
-  const normalizedValue = normalizeContextMenuText(value);
-  const normalizedProjectName = normalizeContextMenuText(projectName);
-  const normalizedProjectId = projectId == null ? "" : normalizeContextMenuText(projectId);
+  const normalizedValue = normalizeContextMenuIdentityText(value);
+  const normalizedProjectName = normalizeContextMenuIdentityText(projectName);
+  const normalizedProjectId = projectId == null ? "" : normalizeContextMenuIdentityText(projectId);
 
   return (
     normalizedValue === normalizedProjectName ||
@@ -564,7 +570,7 @@ function getContextMenuDocumentColumns(context) {
     "Tache"
   ].filter((name) => context.columns.has(name));
 
-  if (!projectColumn || !numeroColumn || !typeColumn || !zoneColumn || !designationColumns.length) {
+  if (!projectColumn || !numeroColumn || !typeColumn || !designationColumns.length) {
     throw new Error(
       `La structure de ${context.tableName} ne permet pas d'identifier strictement le document.`
     );
@@ -614,47 +620,19 @@ function rowMatchesStrictContextMenuDocument(row, columns, documentContext, proj
   if (row?.id == null) return false;
   if (!projectAliases.has(normalizeContextMenuProjectKey(row?.[columns.projectColumn]))) return false;
   if (
-    normalizeContextMenuText(row?.[columns.numeroColumn]) !==
-    normalizeContextMenuText(documentContext.numDocument)
+    normalizeContextMenuIdentityText(row?.[columns.numeroColumn]) !==
+    normalizeContextMenuIdentityText(documentContext.numDocument)
   ) return false;
   if (
-    normalizeContextMenuType(row?.[columns.typeColumn]) !==
-    normalizeContextMenuType(documentContext.typeDocument)
-  ) return false;
-  if (
-    normalizeContextMenuText(row?.[columns.zoneColumn]) !==
-    normalizeContextMenuText(documentContext.zone)
+    normalizeContextMenuIdentityText(row?.[columns.typeColumn]) !==
+    normalizeContextMenuIdentityText(documentContext.typeDocument)
   ) return false;
 
   return columns.designationColumns.some(
     (columnName) =>
-      normalizeContextMenuText(row?.[columnName]) ===
-      normalizeContextMenuText(documentContext.designation)
+      normalizeContextMenuIdentityText(row?.[columnName]) ===
+      normalizeContextMenuIdentityText(documentContext.designation)
   );
-}
-
-function assertUnambiguousContextMenuSource(rows, columns, documentContext, projectAliases) {
-  const matchingNumberRows = rows.filter((row) => {
-    return (
-      projectAliases.has(normalizeContextMenuProjectKey(row?.[columns.projectColumn])) &&
-      normalizeContextMenuText(row?.[columns.numeroColumn]) ===
-        normalizeContextMenuText(documentContext.numDocument)
-    );
-  });
-  const logicalDocuments = new Set(
-    matchingNumberRows.map((row) => [
-      columns.designationColumns
-        .map((columnName) => normalizeContextMenuText(row?.[columnName]))
-        .find(Boolean) || "",
-      normalizeContextMenuType(row?.[columns.typeColumn]),
-      normalizeContextMenuText(row?.[columns.zoneColumn])
-    ].join("\u001f"))
-  );
-  if (logicalDocuments.size > 1) {
-    throw new Error(
-      `Le numéro "${documentContext.numDocument}" correspond à plusieurs documents dans ce projet.`
-    );
-  }
 }
 
 function mergeContextMenuUpdateAction(actionsByRow, tableName, rowId, fields) {
@@ -694,17 +672,36 @@ async function buildDocumentTypeUpdateActions(documentContext, newType) {
   }
 
   const sourceColumns = getContextMenuDocumentColumns(listePlan);
-  assertUnambiguousContextMenuSource(
-    listePlan.rows,
-    sourceColumns,
-    documentContext,
-    projectAliases
-  );
   const sourceRows = listePlan.rows.filter((row) =>
     rowMatchesStrictContextMenuDocument(row, sourceColumns, documentContext, projectAliases)
   );
   if (!sourceRows.length) {
     throw new Error("Le document a changé depuis l'ouverture du menu. Recharge la Liste de Plan.");
+  }
+
+  const targetIdentityExists = listePlan.rows.some((row) => {
+    if (row?.id == null) return false;
+    if (!projectAliases.has(normalizeContextMenuProjectKey(row?.[sourceColumns.projectColumn]))) {
+      return false;
+    }
+    if (
+      normalizeContextMenuIdentityText(row?.[sourceColumns.numeroColumn]) !==
+      normalizeContextMenuIdentityText(documentContext.numDocument)
+    ) return false;
+    if (
+      normalizeContextMenuIdentityText(row?.[sourceColumns.typeColumn]) !==
+      normalizeContextMenuIdentityText(newType)
+    ) return false;
+    return sourceColumns.designationColumns.some(
+      (columnName) =>
+        normalizeContextMenuIdentityText(row?.[columnName]) ===
+        normalizeContextMenuIdentityText(documentContext.designation)
+    );
+  });
+  if (targetIdentityExists) {
+    throw new Error(
+      `Le document "${documentContext.numDocument} - ${documentContext.designation}" existe deja avec le type "${newType}".`
+    );
   }
 
   const actionsByRow = new Map();
@@ -814,7 +811,11 @@ async function getContextMenuProjectId(projectName) {
   try {
     if (typeof chargerProjetsMap === "function") {
       const projetsMap = await chargerProjetsMap();
-      return projetsMap?.[normalizeContextMenuText(projectName)] ?? null;
+      const requestedKey = normalizeContextMenuProjectKey(projectName);
+      const matchingEntry = Object.entries(projetsMap || {}).find(
+        ([candidateName]) => normalizeContextMenuProjectKey(candidateName) === requestedKey
+      );
+      return matchingEntry?.[1] ?? null;
     }
   } catch (err) {
     console.error("Impossible de charger la map projets pour la suppression :", err);
@@ -825,36 +826,39 @@ async function getContextMenuProjectId(projectName) {
 function rowMatchesDocumentContext(row, {
   projectColumn,
   typeColumn,
-  zoneColumn,
   designationColumns,
   numeroField,
   numDocument,
   designation,
   typeDocument,
   nomProjet,
-  zone,
   projectId
 }) {
   if (row?.id == null) return false;
-  if (normalizeContextMenuText(row[numeroField]) !== normalizeContextMenuText(numDocument)) return false;
+  if (!projectColumn || !typeColumn || !designationColumns.length) return false;
+  if (
+    normalizeContextMenuIdentityText(row[numeroField]) !==
+    normalizeContextMenuIdentityText(numDocument)
+  ) return false;
 
   if (projectColumn && !matchesContextMenuProject(row[projectColumn], nomProjet, projectId)) {
     return false;
   }
 
   if (typeColumn && normalizeContextMenuText(typeDocument)) {
-    if (normalizeContextMenuText(row[typeColumn]) !== normalizeContextMenuText(typeDocument)) {
+    if (
+      normalizeContextMenuIdentityText(row[typeColumn]) !==
+      normalizeContextMenuIdentityText(typeDocument)
+    ) {
       return false;
     }
   }
 
-  if (zoneColumn && normalizeContextMenuText(row[zoneColumn]) !== normalizeContextMenuText(zone)) {
-    return false;
-  }
-
   if (designationColumns.length > 0) {
     const matchesDesignation = designationColumns.some(
-      (columnName) => normalizeContextMenuText(row[columnName]) === normalizeContextMenuText(designation)
+      (columnName) =>
+        normalizeContextMenuIdentityText(row[columnName]) ===
+        normalizeContextMenuIdentityText(designation)
     );
     if (!matchesDesignation) {
       return false;
@@ -868,8 +872,7 @@ async function buildLinkedDeletionActions({
   numDocument,
   designation,
   typeDocument,
-  nomProjet,
-  zone
+  nomProjet
 }) {
   const actions = [];
   const projectId = await getContextMenuProjectId(nomProjet);
@@ -880,23 +883,20 @@ async function buildLinkedDeletionActions({
     const referenceColumns = getContextMenuColumnNames(referencesRaw, referenceRows);
 
     if (referenceColumns.has("NumeroDocument")) {
-      const projectColumn = findContextMenuColumn(referenceColumns, ["NomProjet", "Nom_projet"]);
+      const projectColumn = findContextMenuColumn(referenceColumns, ["NomProjetString", "NomProjet", "Nom_projet"]);
       const typeColumn = findContextMenuColumn(referenceColumns, ["Type_document", "TypeDocument"]);
-      const zoneColumn = findContextMenuColumn(referenceColumns, ["Zone"]);
       const designationColumns = ["NomDocument", "Designation"].filter((name) => referenceColumns.has(name));
 
       for (const row of referenceRows) {
         if (rowMatchesDocumentContext(row, {
           projectColumn,
           typeColumn,
-          zoneColumn,
           designationColumns,
           numeroField: "NumeroDocument",
           numDocument,
           designation,
           typeDocument,
           nomProjet,
-          zone,
           projectId
         })) {
           actions.push(["RemoveRecord", "References2", row.id]);
@@ -914,44 +914,23 @@ async function buildLinkedDeletionActions({
     const numeroField = findContextMenuColumn(planningColumns, ["ID2", "NumeroDocument"]);
 
     if (numeroField) {
-      const projectColumn = findContextMenuColumn(planningColumns, ["NomProjet", "Nom_projet"]);
+      const projectColumn = findContextMenuColumn(planningColumns, ["NomProjetString", "NomProjet", "Nom_projet"]);
       const typeColumn = findContextMenuColumn(planningColumns, ["Type_doc", "Type_document", "TypeDoc"]);
-      const zoneColumn = findContextMenuColumn(planningColumns, ["Zone"]);
       const designationColumns = ["Taches", "Tache", "Designation"].filter((name) => planningColumns.has(name));
 
-      const exactPlanningMatches = planningRows.filter((row) =>
+      const planningRowsToDelete = planningRows.filter((row) =>
         rowMatchesDocumentContext(row, {
           projectColumn,
           typeColumn,
-          zoneColumn,
           designationColumns,
           numeroField,
           numDocument,
           designation,
           typeDocument,
           nomProjet,
-          zone,
           projectId
         })
       );
-
-      const planningRowsToDelete = exactPlanningMatches.length
-        ? exactPlanningMatches
-        : planningRows.filter((row) =>
-            rowMatchesDocumentContext(row, {
-              projectColumn,
-              typeColumn,
-              zoneColumn: null,
-              designationColumns,
-              numeroField,
-              numDocument,
-              designation,
-              typeDocument,
-              nomProjet,
-              zone,
-              projectId
-            })
-          );
 
       for (const row of planningRowsToDelete) {
         if (row?.id != null) {
@@ -1040,30 +1019,33 @@ async function supprimerLigne(cell) {
     const designation = normalizeContextMenuText(cell.dataset.designation);
     const typeDocument = normalizeContextMenuText(cell.dataset.typeDocument);
     const nomProjet = normalizeContextMenuText(cell.dataset.nomProjet);
-    const zone = normalizeContextMenuText(cell.dataset.zone);
-
+    const projectId = await getContextMenuProjectId(nomProjet);
     const recordsToDelete = (window.records || [])
       .filter((r) =>
-        normalizeContextMenuText(r.NumeroDocument) === numDocument &&
-        normalizeContextMenuText(r.Designation) === designation &&
-        normalizeContextMenuText(r.Type_document) === typeDocument &&
-        normalizeContextMenuText(r.Zone) === zone &&
-        normalizeContextMenuText(r.Nom_projet) === nomProjet
+        normalizeContextMenuIdentityText(r.NumeroDocument) ===
+          normalizeContextMenuIdentityText(numDocument) &&
+        normalizeContextMenuIdentityText(r.Designation) ===
+          normalizeContextMenuIdentityText(designation) &&
+        normalizeContextMenuIdentityText(r.Type_document) ===
+          normalizeContextMenuIdentityText(typeDocument) &&
+        matchesContextMenuProject(r.Nom_projet, nomProjet, projectId)
       )
       .map((r) => r.id)
       .filter(Boolean);
 
     if (recordsToDelete.length === 0) return;
 
-    const actions = recordsToDelete.map((id) => ["RemoveRecord", "ListePlan_NDC_COF", id]);
+    const listePlanTableName = typeof window.getActiveListePlanTableName === "function"
+      ? await window.getActiveListePlanTableName()
+      : "ListePlan_NDC_COF";
+    const actions = recordsToDelete.map((id) => ["RemoveRecord", listePlanTableName, id]);
 
     try {
       const linkedActions = await buildLinkedDeletionActions({
         numDocument,
         designation,
         typeDocument,
-        nomProjet,
-        zone
+        nomProjet
       });
       await grist.docApi.applyUserActions(actions.concat(linkedActions));
       if (typeof syncPlanningProjetIndicesFromListeDePlan === "function") {

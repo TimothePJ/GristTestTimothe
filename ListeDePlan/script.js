@@ -223,8 +223,42 @@ const MANAGE_ZONE_PLANNING_TABLE_CANDIDATES = [
 const MANAGE_ZONE_OPTION_VALUE = "__MANAGE_ZONE__";
 let lastRegularZoneSelection = window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__";
 
-function normalizeDocumentNumberForUniqueness(value) {
-  return String(value ?? "").trim();
+function normalizeDocumentIdentityPart(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("fr");
+}
+
+function normalizeDocumentIdentityInput(documentValue) {
+  if (!documentValue || typeof documentValue !== "object") {
+    throw new Error("Le controle d'identite exige le numero, le nom et le type du document.");
+  }
+
+  const documentIdentity = {
+    number: String(
+      documentValue.number ?? documentValue.numero ?? documentValue.documentNumber ?? ""
+    ).trim(),
+    name: String(
+      documentValue.name ?? documentValue.nom ?? documentValue.documentName ?? ""
+    ).trim(),
+    type: String(
+      documentValue.type ?? documentValue.documentType ?? documentValue.typeDocument ?? ""
+    ).trim(),
+  };
+  if (!documentIdentity.number || !documentIdentity.name || !documentIdentity.type) {
+    throw new Error("Le numero, le nom et le type du document sont obligatoires.");
+  }
+  return documentIdentity;
+}
+
+function buildDocumentIdentityKey(documentValue) {
+  const documentIdentity = normalizeDocumentIdentityInput(documentValue);
+  return [
+    normalizeDocumentIdentityPart(documentIdentity.number),
+    normalizeDocumentIdentityPart(documentIdentity.name),
+    normalizeDocumentIdentityPart(documentIdentity.type),
+  ].join("||");
 }
 
 function normalizeDocumentProjectKey(value) {
@@ -235,6 +269,7 @@ function normalizeDocumentProjectKey(value) {
       : value;
   return String(raw ?? "")
     .trim()
+    .replace(/\s+/g, " ")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLocaleLowerCase("fr");
@@ -271,52 +306,58 @@ async function fetchDocumentUniquenessListePlan() {
   throw lastError || new Error("Table ListePlan introuvable.");
 }
 
-async function assertDocumentNumbersAvailable(projectName, documentNumbers, {
+async function assertDocumentIdentitiesAvailable(projectName, documents, {
   excludeDocument = null,
 } = {}) {
-  const numbers = (documentNumbers || [])
-    .map(normalizeDocumentNumberForUniqueness)
-    .filter(Boolean);
-  const seenNumbers = new Set();
-  for (const number of numbers) {
-    if (seenNumbers.has(number)) {
-      throw new Error(`Le numero de document "${number}" est saisi plusieurs fois.`);
+  const normalizedDocuments = (documents || []).map(normalizeDocumentIdentityInput);
+  const requestedIdentityKeys = new Set();
+  for (const documentIdentity of normalizedDocuments) {
+    const identityKey = buildDocumentIdentityKey(documentIdentity);
+    if (requestedIdentityKeys.has(identityKey)) {
+      throw new Error(
+        `Le document "${documentIdentity.number} - ${documentIdentity.name}" (${documentIdentity.type}) est saisi plusieurs fois.`
+      );
     }
-    seenNumbers.add(number);
+    requestedIdentityKeys.add(identityKey);
   }
 
   const [projectAliases, listePlan] = await Promise.all([
     buildDocumentProjectAliasKeys(projectName),
     fetchDocumentUniquenessListePlan(),
   ]);
-  const excludedNumber = normalizeDocumentNumberForUniqueness(excludeDocument?.number);
-  const excludedName = String(excludeDocument?.name ?? "").trim();
-  const excludedType = String(excludeDocument?.type ?? "").trim();
-  const excludedZone = String(excludeDocument?.zone ?? "").trim();
+  const excludedIdentityKey = excludeDocument
+    ? buildDocumentIdentityKey(excludeDocument)
+    : "";
 
   for (const row of listePlan.rows) {
     const rowProject = row.Nom_projet ?? row.NomProjet ?? row.NomProjetString;
     if (!projectAliases.has(normalizeDocumentProjectKey(rowProject))) continue;
 
-    const rowNumber = normalizeDocumentNumberForUniqueness(row.NumeroDocument);
-    if (!seenNumbers.has(rowNumber)) continue;
-
-    const isExcludedSource = excludeDocument &&
-      rowNumber === excludedNumber &&
-      String(row.Designation ?? row.NomDocument ?? "").trim() === excludedName &&
-      String(row.Type_document ?? row.Type_doc ?? "").trim() === excludedType &&
-      String(row.Zone ?? "").trim() === excludedZone;
-    if (isExcludedSource) continue;
+    const rowIdentity = {
+      number: row.NumeroDocument ?? row.ID2,
+      name: row.Designation ?? row.NomDocument ?? row.Taches ?? row.Tache,
+      type: row.Type_document ?? row.Type_doc ?? row.TypeDocument ?? row.TypeDoc,
+    };
+    if (
+      !normalizeDocumentIdentityPart(rowIdentity.number) ||
+      !normalizeDocumentIdentityPart(rowIdentity.name) ||
+      !normalizeDocumentIdentityPart(rowIdentity.type)
+    ) continue;
+    const rowIdentityKey = buildDocumentIdentityKey(rowIdentity);
+    if (!requestedIdentityKeys.has(rowIdentityKey) || rowIdentityKey === excludedIdentityKey) {
+      continue;
+    }
 
     throw new Error(
-      `Le numero de document "${rowNumber}" est deja utilise dans ce projet.`
+      `Le document "${rowIdentity.number} - ${rowIdentity.name}" (${rowIdentity.type}) existe deja dans ce projet.`
     );
   }
 
   return listePlan;
 }
 
-window.assertDocumentNumbersAvailable = assertDocumentNumbersAvailable;
+window.assertDocumentIdentitiesAvailable = assertDocumentIdentitiesAvailable;
+window.assertDocumentNumbersAvailable = assertDocumentIdentitiesAvailable;
 window.getActiveListePlanTableName = async () => (await fetchDocumentUniquenessListePlan()).tableName;
 
 function getAllTypesValue() {
@@ -600,25 +641,6 @@ grist.onRecords(async (rec) => {
 
   const projetsDict = await chargerProjetsMap();
   const projets = Object.keys(projetsDict).sort();
-
-  // Create a project-specific map to validate document number uniqueness.
-  window.projectDocNumberToTypeMap = new Map();
-  for (const r of window.records) {
-    const projectNameRaw = (typeof r.Nom_projet === 'object' ? r.Nom_projet.details : r.Nom_projet);
-    const projectName = (typeof projectNameRaw === 'string') ? projectNameRaw.trim() : projectNameRaw;
-
-    if (!projectName || !r.NumeroDocument || !r.Type_document) continue;
-
-    if (!window.projectDocNumberToTypeMap.has(projectName)) {
-      window.projectDocNumberToTypeMap.set(projectName, new Map());
-    }
-    const projectMap = window.projectDocNumberToTypeMap.get(projectName);
-
-    if (!projectMap.has(r.NumeroDocument)) {
-      projectMap.set(r.NumeroDocument, new Set());
-    }
-    projectMap.get(r.NumeroDocument).add(r.Type_document);
-  }
 
   populateDropdown("projectDropdown", projets);
 
@@ -2244,11 +2266,6 @@ function buildPrintContainer(selectedProject, orderedTypes, orderedZones, select
       normalizeTypeDocumentValue(record?.Type_document) &&
       matchesCurrentPrintZones(record, orderedZones);
   });
-
-  if (typeof renderVisibleTypeConsistencyWarnings === "function") {
-    const selectedRows = projectRows.filter((record) => orderedTypes.includes(normalizeTypeDocumentValue(record.Type_document)));
-    renderVisibleTypeConsistencyWarnings(container, selectedRows, normalizedProject);
-  }
 
   for (const type of orderedTypes) {
     const rowsForType = projectRows.filter((record) => normalizeTypeDocumentValue(record.Type_document) === type);

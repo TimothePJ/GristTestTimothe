@@ -513,16 +513,11 @@ function findFirstExistingColumnName(columnNames, candidates = [], fallback = ""
 }
 
 function normalizeLookupText(value) {
-  return toText(value).toLocaleLowerCase("fr");
+  return toText(value).replace(/\s+/g, " ").toLocaleLowerCase("fr");
 }
 
 function normalizeDocumentNumberForMatch(value) {
-  const text = toText(value);
-  if (!text) return "";
-  if (/^-?\d+$/.test(text)) {
-    return String(Number(text));
-  }
-  return text.toLocaleLowerCase("fr");
+  return normalizeLookupText(value);
 }
 
 function sameLookupText(left, right) {
@@ -600,6 +595,14 @@ function filterMatchingRowsForZoneSync(context, change, {
   const normalizedType = toText(change?.typeDocument);
   const normalizedDesignation = toText(change?.designation);
   const normalizedSourceZone = normalizeZoneValueForStorage(change?.sourceZone);
+  if (
+    !normalizedProject ||
+    !normalizedNumber ||
+    !normalizedType ||
+    (requireDesignation && (!normalizedDesignation || !context.designationCols.length))
+  ) {
+    return [];
+  }
 
   const baseMatches = (context.rows || []).filter((row) => {
     const rowId = Number(row?.id);
@@ -613,9 +616,9 @@ function filterMatchingRowsForZoneSync(context, change, {
     if (context.typeCol && normalizedType && !sameLookupText(row?.[context.typeCol], normalizedType)) {
       return false;
     }
-    if (requireDesignation && normalizedDesignation && context.designationCols.length) {
+    if (requireDesignation) {
       const rowDesignation = getFirstNonEmptyRowValue(row, context.designationCols);
-      if (rowDesignation && !sameLookupText(rowDesignation, normalizedDesignation)) {
+      if (!rowDesignation || !sameLookupText(rowDesignation, normalizedDesignation)) {
         return false;
       }
     }
@@ -656,18 +659,12 @@ function buildZoneSyncActionsForTable(context, zoneChanges = []) {
   for (const change of zoneChanges) {
     const targetZone = normalizeZoneValueForStorage(change?.targetZone);
 
-    const exactMatches = filterMatchingRowsForZoneSync(context, change, {
+    const matchingRows = filterMatchingRowsForZoneSync(context, change, {
       requireDesignation: true,
       sourceZoneFallbackToBlank: true,
     });
-    const looseMatches = exactMatches.length
-      ? exactMatches
-      : filterMatchingRowsForZoneSync(context, change, {
-          requireDesignation: false,
-          sourceZoneFallbackToBlank: true,
-        });
 
-    for (const row of looseMatches) {
+    for (const row of matchingRows) {
       const rowId = Number(row?.id);
       if (!Number.isInteger(rowId) || rowId <= 0) continue;
       if (normalizeZoneValueForStorage(row?.[context.zoneCol]) === targetZone) continue;
@@ -876,8 +873,10 @@ function filterReferenceRowsForPlanningRows(referenceRows = [], planningRows = [
     const change = buildPlanningReferenceChange(planningRow, columns);
     const project = normalizeLookupText(change.projectName);
     const number = normalizeDocumentNumberForMatch(change.numeroDocument);
-    if (project && number) {
-      targetKeys.add(`${project}||${number}`);
+    const type = normalizeLookupText(change.typeDocument);
+    const designation = normalizeLookupText(change.designation);
+    if (project && number && type && designation) {
+      targetKeys.add([project, number, type, designation].join("||"));
     }
   });
   if (!targetKeys.size) return [];
@@ -887,7 +886,17 @@ function filterReferenceRowsForPlanningRows(referenceRows = [], planningRows = [
       getFirstNonEmptyRowValue(referenceRow, ["NomProjetString", "NomProjet", "Nom_projet"])
     );
     const number = normalizeDocumentNumberForMatch(referenceRow?.NumeroDocument);
-    return project && number && targetKeys.has(`${project}||${number}`);
+    const type = normalizeLookupText(referenceRow?.Type_document ?? referenceRow?.TypeDocument);
+    const designation = normalizeLookupText(
+      getFirstNonEmptyRowValue(referenceRow, ["NomDocument", "Designation"])
+    );
+    return (
+      project &&
+      number &&
+      type &&
+      designation &&
+      targetKeys.has([project, number, type, designation].join("||"))
+    );
   });
 }
 
@@ -902,16 +911,10 @@ function findLinkedReferenceRowsForPlanningRow(planningRow, referenceRows, colum
   if (!context) return [];
 
   const change = buildPlanningReferenceChange(planningRow, columns);
-  const exactMatches = filterMatchingRowsForZoneSync(context, change, {
+  return filterMatchingRowsForZoneSync(context, change, {
     requireDesignation: true,
     sourceZoneFallbackToBlank: true,
   });
-  return exactMatches.length
-    ? exactMatches
-    : filterMatchingRowsForZoneSync(context, change, {
-        requireDesignation: false,
-        sourceZoneFallbackToBlank: true,
-      });
 }
 
 function addReferenceLookupRow(map, key, row) {
@@ -932,7 +935,6 @@ function buildLinkedReferenceLookup(referenceRows = []) {
   if (!context) return null;
 
   const strict = new Map();
-  const loose = new Map();
   context.rows.forEach((row) => {
     const rowId = Number(row?.id);
     if (!Number.isInteger(rowId) || rowId <= 0) return;
@@ -943,10 +945,11 @@ function buildLinkedReferenceLookup(referenceRows = []) {
       ? normalizeLookupText(getFirstNonEmptyRowValue(row, context.designationCols))
       : "";
     const zone = context.zoneCol ? normalizeZoneValueForStorage(row?.[context.zoneCol]) : "";
-    addReferenceLookupRow(strict, [project, number, type, designation, zone].join("||"), row);
-    addReferenceLookupRow(loose, [project, number, type, zone].join("||"), row);
+    if (project && number && type && designation) {
+      addReferenceLookupRow(strict, [project, number, type, designation, zone].join("||"), row);
+    }
   });
-  return { context, strict, loose };
+  return { context, strict };
 }
 
 function getUniqueReferenceLookupRows(map, keys = []) {
@@ -970,19 +973,13 @@ function findLinkedReferenceRowsFromLookup(planningRow, lookup, columns = {}) {
     ? normalizeZoneValueForStorage(change.sourceZone)
     : "";
   const zones = sourceZone ? [sourceZone, ""] : [""];
+  if (!project || !number || !type || !designation) return [];
 
   for (const zone of zones) {
     const strictRows = getUniqueReferenceLookupRows(lookup.strict, [
       [project, number, type, designation, zone].join("||"),
-      [project, number, type, "", zone].join("||"),
     ]);
     if (strictRows.length) return strictRows;
-  }
-  for (const zone of zones) {
-    const looseRows = getUniqueReferenceLookupRows(lookup.loose, [
-      [project, number, type, zone].join("||"),
-    ]);
-    if (looseRows.length) return looseRows;
   }
   return [];
 }
@@ -1256,6 +1253,7 @@ async function buildExternalZoneSyncActionsForPlanningChanges(zoneChanges = []) 
       change.projectName &&
       change.numeroDocument &&
       change.typeDocument &&
+      change.designation &&
       change.sourceZone !== change.targetZone
     );
 

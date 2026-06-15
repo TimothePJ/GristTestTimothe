@@ -38,6 +38,12 @@ function normalizeText(value) {
   return String(value).trim();
 }
 
+function normalizeDocumentIdentityText(value) {
+  return normalizeText(value)
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("fr");
+}
+
 function normalizeZoneText(value) {
   return normalizeText(value);
 }
@@ -581,20 +587,11 @@ function rememberLatestPlanRecord(map, key, candidate) {
 
 function buildPlanningLinkKey(project, numeroDocument, typeDocument, designation, zone = "") {
   return [
-    normalizeText(project).toLowerCase(),
-    normalizeText(numeroDocument).toLowerCase(),
-    normalizeText(typeDocument).toLowerCase(),
-    normalizeText(designation).toLowerCase(),
-    normalizeZoneText(zone).toLowerCase(),
-  ].join("||");
-}
-
-function buildPlanningLinkKeyWithoutDesignation(project, numeroDocument, typeDocument, zone = "") {
-  return [
-    normalizeText(project).toLowerCase(),
-    normalizeText(numeroDocument).toLowerCase(),
-    normalizeText(typeDocument).toLowerCase(),
-    normalizeZoneText(zone).toLowerCase(),
+    normalizeDocumentIdentityText(project),
+    normalizeDocumentIdentityText(numeroDocument),
+    normalizeDocumentIdentityText(typeDocument),
+    normalizeDocumentIdentityText(designation),
+    normalizeDocumentIdentityText(normalizeZoneText(zone)),
   ].join("||");
 }
 
@@ -652,14 +649,22 @@ function findFirstExistingColumn(columnNames, candidates) {
 }
 
 function matchesProjectValue(value, projectName, projectId = null) {
-  const normalizedValue = normalizeText(value);
-  const normalizedProjectName = normalizeText(projectName);
-  const normalizedProjectId = projectId == null ? "" : normalizeText(projectId);
+  const normalizedValue = normalizeDocumentIdentityText(value);
+  const normalizedProjectName = normalizeDocumentIdentityText(projectName);
+  const normalizedProjectId = projectId == null ? "" : normalizeDocumentIdentityText(projectId);
 
   return (
     normalizedValue === normalizedProjectName ||
     (normalizedProjectId !== "" && normalizedValue === normalizedProjectId)
   );
+}
+
+function findProjectIdInMap(projectsMap, projectName) {
+  const requestedProject = normalizeDocumentIdentityText(projectName);
+  const matchingEntry = Object.entries(projectsMap || {}).find(
+    ([candidateName]) => normalizeDocumentIdentityText(candidateName) === requestedProject
+  );
+  return matchingEntry?.[1] ?? null;
 }
 
 function updateRowCellDatasets(tr, updates = {}) {
@@ -688,11 +693,6 @@ function buildDedupedUpdateActions(tableName, rows, updateFields) {
   return [...actionsById.values()];
 }
 
-function getDistinctNormalizedColumnValues(rows, columnName, normalizer = normalizeText) {
-  if (!columnName) return new Set();
-  return new Set(rows.map((row) => normalizer(row?.[columnName])));
-}
-
 function buildDocumentTextSyncActions({
   tableName,
   rows,
@@ -712,131 +712,42 @@ function buildDocumentTextSyncActions({
   warningLabel
 }) {
   const normalizedType = normalizeText(typeDocument);
-  const normalizedZone = normalizeZoneText(zone);
 
-  const matchesBaseContext = (row, { ignoreZone = false } = {}) => {
+  if (!projectColumn || !numeroColumn || !typeColumn || !designationColumns.length) {
+    throw new Error(`La structure de ${warningLabel} ne permet pas d'identifier le document.`);
+  }
+
+  const matchesBaseContext = (row) => {
     if (row?.id == null) return false;
     if (projectColumn && !matchesProjectValue(row[projectColumn], nomProjet, projectId)) {
       return false;
     }
-    if (typeColumn && normalizedType && normalizeText(row[typeColumn]) !== normalizedType) {
-      return false;
-    }
-    if (!ignoreZone && zoneColumn && normalizeZoneText(row[zoneColumn]) !== normalizedZone) {
+    if (
+      normalizedType &&
+      normalizeDocumentIdentityText(row[typeColumn]) !==
+        normalizeDocumentIdentityText(normalizedType)
+    ) {
       return false;
     }
     return true;
   };
 
   const matchesNumero = (row) =>
-    Boolean(numeroColumn) &&
-    normalizeText(row[numeroColumn]) === normalizeText(numDocument);
+    normalizeDocumentIdentityText(row[numeroColumn]) ===
+      normalizeDocumentIdentityText(numDocument);
 
-  const matchesDesignation = (row, { allowMissingColumns = true } = {}) => {
-    if (!designationColumns.length) return allowMissingColumns;
+  const matchesDesignation = (row) => {
     return designationColumns.some(
-      (columnName) => normalizeText(row[columnName]) === normalizeText(designation)
+      (columnName) =>
+        normalizeDocumentIdentityText(row[columnName]) ===
+        normalizeDocumentIdentityText(designation)
     );
   };
 
-  const findCandidates = (strategy) =>
-    rows.filter((row) => {
-      if (!matchesBaseContext(row, { ignoreZone: strategy.ignoreZone })) return false;
-      if (strategy.requireNumero && !matchesNumero(row)) return false;
-      if (
-        strategy.requireDesignation &&
-        !matchesDesignation(row, {
-          allowMissingColumns: strategy.allowMissingDesignationColumns !== false
-        })
-      ) {
-        return false;
-      }
-      return true;
-    });
-
-  const strategies = [
-    {
-      label: "strict",
-      requireNumero: true,
-      requireDesignation: true,
-      allowMissingDesignationColumns: true
-    },
-    cellIndex === 1 && {
-      label: "fallback numero",
-      requireNumero: true,
-      requireDesignation: false
-    },
-    cellIndex === 0 && {
-      label: "fallback designation",
-      requireNumero: false,
-      requireDesignation: true,
-      allowMissingDesignationColumns: false,
-      requireSingleCurrentNumero: true
-    }
-  ].filter(Boolean);
-
-  const resolveStrategy = (strategy) => {
-    const candidates = findCandidates(strategy);
-    if (!candidates.length) return { status: "none", candidates };
-
-    if (strategy.requireSingleCurrentNumero) {
-      const distinctCurrentNumbers = getDistinctNormalizedColumnValues(candidates, numeroColumn);
-      if (distinctCurrentNumbers.size > 1) {
-        console.warn(`Synchro ${warningLabel}: fallback ambigu sur le numero.`, {
-          strategy: strategy.label,
-          nomProjet,
-          typeDocument,
-          zone,
-          numDocument,
-          designation,
-          candidateIds: candidates.map((row) => row.id),
-          currentNumbers: [...distinctCurrentNumbers]
-        });
-        return { status: "ambiguous", candidates };
-      }
-    }
-
-    if (strategy.ignoreZone && zoneColumn) {
-      const distinctZones = getDistinctNormalizedColumnValues(candidates, zoneColumn, normalizeZoneText);
-      if (distinctZones.size > 1) {
-        console.warn(`Synchro ${warningLabel}: fallback ambigu sur la zone.`, {
-          strategy: strategy.label,
-          nomProjet,
-          typeDocument,
-          zone,
-          numDocument,
-          designation,
-          candidateIds: candidates.map((row) => row.id),
-          zones: [...distinctZones]
-        });
-        return { status: "ambiguous", candidates };
-      }
-    }
-
-    return { status: "accepted", candidates };
-  };
-
-  for (const strategy of strategies) {
-    const result = resolveStrategy({ ...strategy, ignoreZone: false });
-    if (result.status === "accepted") {
-      return buildDedupedUpdateActions(tableName, result.candidates, updateFields);
-    }
-    if (result.status === "ambiguous") {
-      throw new Error(`La correspondance du document est ambigue dans ${warningLabel}.`);
-    }
-  }
-
-  for (const strategy of strategies) {
-    const result = resolveStrategy({ ...strategy, ignoreZone: true });
-    if (result.status === "accepted") {
-      return buildDedupedUpdateActions(tableName, result.candidates, updateFields);
-    }
-    if (result.status === "ambiguous") {
-      throw new Error(`La correspondance du document est ambigue dans ${warningLabel}.`);
-    }
-  }
-
-  return [];
+  const candidates = rows.filter(
+    (row) => matchesBaseContext(row) && matchesNumero(row) && matchesDesignation(row)
+  );
+  return buildDedupedUpdateActions(tableName, candidates, updateFields);
 }
 
 async function buildReferencesTextUpdateActions({
@@ -853,7 +764,7 @@ async function buildReferencesTextUpdateActions({
     const referenceRows = normalizeRows(referencesRaw);
     const referenceColumns = getColumnNames(referencesRaw, referenceRows);
 
-    const projectColumn = findFirstExistingColumn(referenceColumns, ["NomProjet", "Nom_projet"]);
+    const projectColumn = findFirstExistingColumn(referenceColumns, ["NomProjetString", "NomProjet", "Nom_projet"]);
     const typeColumn = findFirstExistingColumn(referenceColumns, ["Type_document", "TypeDocument"]);
     const zoneColumn = findFirstExistingColumn(referenceColumns, ["Zone"]);
     const numeroColumn = referenceColumns.has("NumeroDocument") ? "NumeroDocument" : null;
@@ -877,7 +788,7 @@ async function buildReferencesTextUpdateActions({
     }
 
     const projetsMap = await chargerProjetsMap();
-    const projectId = projetsMap?.[normalizeText(nomProjet)] ?? null;
+    const projectId = findProjectIdInMap(projetsMap, nomProjet);
 
     return buildDocumentTextSyncActions({
       tableName: "References2",
@@ -933,7 +844,7 @@ async function buildPlanningProjetTextUpdateActions({
     const planningRows = normalizeRows(planningRaw);
     const planningColumns = getColumnNames(planningRaw, planningRows);
 
-    const projectColumn = findFirstExistingColumn(planningColumns, ["NomProjet", "Nom_projet"]);
+    const projectColumn = findFirstExistingColumn(planningColumns, ["NomProjetString", "NomProjet", "Nom_projet"]);
     const typeColumn = findFirstExistingColumn(planningColumns, ["Type_doc", "Type_document", "TypeDoc"]);
     const zoneColumn = findFirstExistingColumn(planningColumns, ["Zone"]);
     const numeroColumn = findFirstExistingColumn(planningColumns, ["ID2", "NumeroDocument"]);
@@ -964,7 +875,7 @@ async function buildPlanningProjetTextUpdateActions({
     }
 
     const projetsMap = await chargerProjetsMap();
-    const projectId = projetsMap?.[normalizeText(nomProjet)] ?? null;
+    const projectId = findProjectIdInMap(projetsMap, nomProjet);
 
     return buildDocumentTextSyncActions({
       tableName: planningTableName,
@@ -988,71 +899,6 @@ async function buildPlanningProjetTextUpdateActions({
     console.error("Erreur lors de la préparation de la synchro vers Planning_Projet :", err);
     throw err;
   }
-}
-
-async function assertDocumentSourceUnambiguous({
-  numDocument,
-  designation,
-  typeDocument,
-  nomProjet,
-  zone
-}) {
-  const projetsMap = await chargerProjetsMap();
-  const projectId = projetsMap?.[normalizeText(nomProjet)] ?? null;
-  const conflicts = (window.records || []).filter((row) => {
-    if (!matchesProjectValue(row.Nom_projet, nomProjet, projectId)) return false;
-    if (normalizeText(row.NumeroDocument) !== normalizeText(numDocument)) return false;
-
-    return normalizeText(row.Designation) !== normalizeText(designation) ||
-      normalizeText(row.Type_document) !== normalizeText(typeDocument) ||
-      normalizeZoneText(row.Zone) !== normalizeZoneText(zone);
-  });
-
-  if (conflicts.length) {
-    throw new Error(
-      `Le numero "${normalizeText(numDocument)}" correspond deja a plusieurs documents dans ce projet.`
-    );
-  }
-}
-
-function isTruthyGristValue(value) {
-  if (value === true || value === 1) return true;
-  return ["true", "1", "oui", "yes", "vrai"].includes(
-    String(value ?? "").trim().toLocaleLowerCase("fr")
-  );
-}
-
-async function buildEnvoisTextUpdateActions({
-  cellIndex,
-  texte,
-  numDocument,
-  nomProjet
-}) {
-  const raw = await grist.docApi.fetchTable("Envois");
-  const rows = normalizeRows(raw);
-  const columns = getColumnNames(raw, rows);
-  const projectColumn = findFirstExistingColumn(columns, [
-    "Projet",
-    "NomProjet",
-    "Nom_projet",
-    "NomProjetString"
-  ]);
-  if (!projectColumn || !columns.has("N_Plan")) return [];
-
-  const projetsMap = await chargerProjetsMap();
-  const projectId = projetsMap?.[normalizeText(nomProjet)] ?? null;
-  const updateFields = {};
-  if (cellIndex === 0) updateFields.N_Plan = texte;
-  if (cellIndex === 1 && columns.has("Designation")) updateFields.Designation = texte;
-  if (!Object.keys(updateFields).length) return [];
-
-  const matchingDrafts = rows.filter((row) =>
-    row?.id != null &&
-    !isTruthyGristValue(row.Envoye) &&
-    matchesProjectValue(row[projectColumn], nomProjet, projectId) &&
-    normalizeText(row.N_Plan) === normalizeText(numDocument)
-  );
-  return buildDedupedUpdateActions("Envois", matchingDrafts, updateFields);
 }
 
 async function syncPlanningProjetIndicesFromListeDePlan() {
@@ -1086,9 +932,7 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
     const hasDateRealiseColumn = planningColumns.has("Date_Realise");
 
     const latestByKeyStrict = new Map();
-    const latestByKeyNoDesignation = new Map();
     const latestByKeyStrictLegacy = new Map();
-    const latestByKeyNoDesignationLegacy = new Map();
 
     for (const r of listeRows) {
       const indice = normalizeIndice(r.Indice);
@@ -1110,28 +954,15 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
         r.Designation,
         r.Zone
       );
-      const noDesignationKey = buildPlanningLinkKeyWithoutDesignation(
-        normalizeProject(r.Nom_projet),
-        r.NumeroDocument,
-        r.Type_document,
-        r.Zone
-      );
       const strictLegacyKey = buildPlanningLinkKey(
         normalizeProject(r.Nom_projet),
         r.NumeroDocument,
         r.Type_document,
         r.Designation
       );
-      const noDesignationLegacyKey = buildPlanningLinkKeyWithoutDesignation(
-        normalizeProject(r.Nom_projet),
-        r.NumeroDocument,
-        r.Type_document
-      );
 
       rememberLatestPlanRecord(latestByKeyStrict, strictKey, latestRecord);
-      rememberLatestPlanRecord(latestByKeyNoDesignation, noDesignationKey, latestRecord);
       rememberLatestPlanRecord(latestByKeyStrictLegacy, strictLegacyKey, latestRecord);
-      rememberLatestPlanRecord(latestByKeyNoDesignationLegacy, noDesignationLegacyKey, latestRecord);
     }
 
     const actions = [];
@@ -1146,29 +977,16 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
         p.Taches ?? p.Tache,
         p.Zone
       );
-      const noDesignationKey = buildPlanningLinkKeyWithoutDesignation(
-        normalizeProject(p.NomProjet),
-        p.ID2,
-        p.Type_doc,
-        p.Zone
-      );
       const strictLegacyKey = buildPlanningLinkKey(
         normalizeProject(p.NomProjet),
         p.ID2,
         p.Type_doc,
         p.Taches ?? p.Tache
       );
-      const noDesignationLegacyKey = buildPlanningLinkKeyWithoutDesignation(
-        normalizeProject(p.NomProjet),
-        p.ID2,
-        p.Type_doc
-      );
 
       const latestRecord =
         latestByKeyStrict.get(strictKey) ??
-        latestByKeyNoDesignation.get(noDesignationKey) ??
         latestByKeyStrictLegacy.get(strictLegacyKey) ??
-        latestByKeyNoDesignationLegacy.get(noDesignationLegacyKey) ??
         null;
       const latestIndice = latestRecord?.indice ?? "";
       const planningProject = normalizeProject(p.NomProjet);
@@ -1248,7 +1066,12 @@ function renderPlanTableSection(container, filtres, projet, selectedIndices = nu
   const plansMap = new Map();
   for (const r of filtres) {
     const zoneValue = getRecordZone(r);
-    const key = `${normalizeText(r.NumeroDocument)}___${normalizeText(r.Designation)}___${zoneValue}`;
+    const key = [
+      normalizeDocumentIdentityText(r.NumeroDocument),
+      normalizeDocumentIdentityText(r.Designation),
+      normalizeDocumentIdentityText(r.Type_document),
+      normalizeDocumentIdentityText(zoneValue)
+    ].join("___");
     if (!plansMap.has(key)) {
       plansMap.set(key, {
         Num_Document: r.NumeroDocument,
@@ -1270,35 +1093,6 @@ function renderPlanTableSection(container, filtres, projet, selectedIndices = nu
   const selectedIndexSet = Array.isArray(selectedIndices)
     ? new Set(selectedIndices.map(normalizeIndice).filter(Boolean))
     : null;
-
-  // Designation conflict warnings
-  const docToDesignations = new Map();
-  for (const r of filtres) {
-    if (!r.NumeroDocument) continue;
-    const docKey = `${normalizeText(r.NumeroDocument)}___${getRecordZone(r)}`;
-    if (!docToDesignations.has(docKey)) {
-      docToDesignations.set(docKey, {
-        numDocument: r.NumeroDocument,
-        zone: getRecordZone(r),
-        designations: new Set()
-      });
-    }
-    if (r.Designation) {
-      docToDesignations.get(docKey).designations.add(r.Designation);
-    }
-  }
-
-  for (const { numDocument: doc, zone, designations } of docToDesignations.values()) {
-    if (designations.size > 1) {
-      const form = document.createElement('div');
-      form.className = 'warning-form';
-      form.innerHTML = `<p><strong>Attention :</strong> Le document <strong>${doc}</strong> a plusieurs désignations :</p>`;
-      const details = document.createElement('p');
-      details.textContent = `Désignations trouvées : ${[...designations].join(' / ')}. Corrigez-les manuellement.`;
-      form.appendChild(details);
-      warningDiv.appendChild(form);
-    }
-  }
 
   // Multi-date conflict warning
   let hasMultiDateError = false;
@@ -1355,30 +1149,6 @@ function renderPlanTableSection(container, filtres, projet, selectedIndices = nu
     warningDiv.appendChild(p);
   }
 
-  // Document number/type consistency warnings (for the current project)
-  const visibleDocToTypes = new Map();
-  for (const r of filtres) {
-    const doc = normalizeText(r.NumeroDocument);
-    const type = normalizeText(r.Type_document);
-    if (!doc || !type) continue;
-
-    if (!visibleDocToTypes.has(doc)) {
-      visibleDocToTypes.set(doc, new Set());
-    }
-    visibleDocToTypes.get(doc).add(type);
-  }
-
-  if (false && visibleDocToTypes) {
-    for (const [doc, types] of visibleDocToTypes.entries()) {
-      if (types.size > 1) {
-        const p = document.createElement('p');
-        p.className = 'warning-message';
-        p.innerHTML = `<strong>Attention :</strong> Le N° Document <strong>${doc}</strong> est utilisé avec plusieurs types de documents dans ce projet : ${[...types].join(', ')}.`;
-        warningDiv.appendChild(p);
-      }
-    }
-  }
-
   const indicesToShow = getPlanTableIndicesToShow(plansMap, selectedIndices);
 
   const table = document.createElement("table");
@@ -1405,11 +1175,6 @@ function renderPlanTableSection(container, filtres, projet, selectedIndices = nu
   );
   for (const plan of sortedPlans) {
     const tr = document.createElement("tr");
-    const duplicateKey = `${normalizeText(plan.Num_Document)}___${normalizeZoneText(plan.Zone)}`;
-    if ((docToDesignations.get(duplicateKey)?.designations?.size || 0) > 1) {
-      tr.classList.add("duplicate-doc");
-    }
-
     const tdNum = document.createElement("td");
     tdNum.textContent = plan.Num_Document;
     tdNum.dataset.numDocument = plan.Num_Document;
@@ -1554,47 +1319,6 @@ function renderRowsForSelectedType(container, rows, projet, zoneOrder = null, se
   renderPlanTableSection(container, rows, projet, selectedIndices);
 }
 
-function renderVisibleTypeConsistencyWarnings(container, rows, projet) {
-  if (!container || !Array.isArray(rows) || rows.length === 0) return;
-
-  const projectDocMap = window.projectDocNumberToTypeMap?.get?.(projet) || null;
-  if (!projectDocMap) return;
-
-  const visibleDocs = new Set();
-  for (const row of rows) {
-    const doc = normalizeText(row.NumeroDocument);
-    if (doc) visibleDocs.add(doc);
-  }
-
-  const warningDiv = document.createElement("div");
-  warningDiv.className = "warnings";
-
-  const getProjectTypesForDoc = (doc) => {
-    if (projectDocMap.has(doc)) return projectDocMap.get(doc);
-
-    for (const [candidateDoc, types] of projectDocMap.entries()) {
-      if (normalizeText(candidateDoc) === doc) return types;
-    }
-
-    return null;
-  };
-
-  for (const doc of visibleDocs) {
-    const types = getProjectTypesForDoc(doc);
-    if (!types) continue;
-    if (types.size <= 1) continue;
-
-    const p = document.createElement("p");
-    p.className = "warning-message";
-    p.innerHTML = `<strong>Attention :</strong> Le N° Document <strong>${doc}</strong> est utilise avec plusieurs types de documents dans ce projet : ${[...types].join(", ")}.`;
-    warningDiv.appendChild(p);
-  }
-
-  if (warningDiv.childElementCount > 0) {
-    container.appendChild(warningDiv);
-  }
-}
-
 function afficherPlansFiltres(projet, typeDocument, records, zoneSelection = window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__") {
   const output = document.getElementById("plans-output");
   output.innerHTML = "";
@@ -1627,15 +1351,12 @@ function afficherPlansFiltres(projet, typeDocument, records, zoneSelection = win
     }
 
     if (typeSelection.values.size === 1) {
-      renderVisibleTypeConsistencyWarnings(output, filteredRows, normalizedProject);
       renderRowsForSelectedType(output, filteredRows, normalizedProject);
       return;
     }
 
     rowsToRender = filteredRows;
   }
-
-  renderVisibleTypeConsistencyWarnings(output, rowsToRender, normalizedProject);
 
   const rowsByType = new Map();
   for (const record of rowsToRender) {
@@ -1804,17 +1525,6 @@ document.addEventListener("click", async (e) => {
           return;
         }
 
-        // Project-specific validation logic (tu gardes tel quel)
-        const projectDocMap = window.projectDocNumberToTypeMap.get(nomProjet);
-        if (projectDocMap) {
-          const existingTypes = projectDocMap.get(Num_Document);
-          if (existingTypes && !existingTypes.has(typeDocument)) {
-            alert(`Erreur : Le N° Document ${Num_Document} est déjà utilisé pour un autre type de document dans ce projet (${[...existingTypes].join(', ')}).`);
-            td.textContent = '';
-            return;
-          }
-        }
-
         const projetsDict = await chargerProjetsMap();
         if (!projetsDict[nomProjet.trim()]) {
           console.error("Projet non trouvé :", nomProjet);
@@ -1871,30 +1581,22 @@ document.addEventListener("focusout", async (e) => {
   }
 
   try {
-    await assertDocumentSourceUnambiguous({
-      numDocument,
-      designation,
-      typeDocument,
-      nomProjet,
-      zone
-    });
-    if (typeof window.assertDocumentNumbersAvailable !== "function") {
-      throw new Error("Le controle d'unicite des numeros de document est indisponible.");
+    if (typeof window.assertDocumentIdentitiesAvailable !== "function") {
+      throw new Error("Le controle d'identite des documents est indisponible.");
     }
     const sourceDocument = {
       number: numDocument,
       name: designation,
-      type: typeDocument,
-      zone
+      type: typeDocument
     };
-    await window.assertDocumentNumbersAvailable(nomProjet, [numDocument], {
+    const targetDocument = {
+      number: td.cellIndex === 0 ? texte : numDocument,
+      name: td.cellIndex === 1 ? texte : designation,
+      type: typeDocument
+    };
+    await window.assertDocumentIdentitiesAvailable(nomProjet, [targetDocument], {
       excludeDocument: sourceDocument
     });
-    if (td.cellIndex === 0) {
-      await window.assertDocumentNumbersAvailable(nomProjet, [texte], {
-        excludeDocument: sourceDocument
-      });
-    }
   } catch (error) {
     td.textContent = currentValue;
     alert(error.message);
@@ -1902,12 +1604,11 @@ document.addEventListener("focusout", async (e) => {
   }
 
   const projetsMap = await chargerProjetsMap();
-  const projectId = projetsMap?.[normalizeText(nomProjet)] ?? null;
+  const projectId = findProjectIdInMap(projetsMap, nomProjet);
   const recordsToUpdate = window.records.filter((r) =>
-    normalizeText(r.NumeroDocument) === normalizeText(numDocument) &&
-    normalizeText(r.Designation) === normalizeText(designation) &&
-    normalizeText(r.Type_document) === normalizeText(typeDocument) &&
-    normalizeZoneText(r.Zone) === normalizeZoneText(zone) &&
+    normalizeDocumentIdentityText(r.NumeroDocument) === normalizeDocumentIdentityText(numDocument) &&
+    normalizeDocumentIdentityText(r.Designation) === normalizeDocumentIdentityText(designation) &&
+    normalizeDocumentIdentityText(r.Type_document) === normalizeDocumentIdentityText(typeDocument) &&
     matchesProjectValue(r.Nom_projet, nomProjet, projectId)
   );
   if (recordsToUpdate.length === 0) return;
@@ -1943,14 +1644,8 @@ document.addEventListener("focusout", async (e) => {
         nomProjet,
         zone
       });
-      const envoisActions = await buildEnvoisTextUpdateActions({
-        cellIndex: td.cellIndex,
-        texte,
-        numDocument,
-        nomProjet
-      });
       await grist.docApi.applyUserActions(
-        actions.concat(referenceActions, planningActions, envoisActions)
+        actions.concat(referenceActions, planningActions)
       );
       recordsToUpdate.forEach((record) => {
         if (td.cellIndex === 0) {

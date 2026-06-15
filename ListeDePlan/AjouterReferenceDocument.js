@@ -319,12 +319,15 @@
       return;
     }
 
-    if (typeof window.assertDocumentNumbersAvailable !== "function") {
-      alert("Le controle d'unicite des numeros de document est indisponible.");
+    if (typeof window.assertDocumentIdentitiesAvailable !== "function") {
+      alert("Le controle d'identite des documents est indisponible.");
       return;
     }
     try {
-      await window.assertDocumentNumbersAvailable(state.currentProjectLabel || projetId, [numeroStr]);
+      await window.assertDocumentIdentitiesAvailable(
+        state.currentProjectLabel || projetId,
+        [{ number: numeroStr, name: nom, type: typeDocLabel }]
+      );
     } catch (error) {
       alert(error.message);
       return;
@@ -338,7 +341,8 @@
       ["AddRecord", "References2", null, {
         NomProjet: projetId,      // Ref (ID projet)
         NomDocument: nom,
-        NumeroDocument: String(numeroStr)
+        NumeroDocument: String(numeroStr),
+        Type_document: typeDocLabel
       }],
       // 2) Liste de plan : Type_document = libelle EXACT de la 2e liste
       ["AddRecord", listePlanTableName, null, {
@@ -353,6 +357,17 @@
     ];
 
     try {
+      if (typeof window.buildPlanningDocumentCreationAction !== "function") {
+        throw new Error("Le constructeur de document Planning est indisponible.");
+      }
+      actions.push(await window.buildPlanningDocumentCreationAction({
+        projectName: state.currentProjectLabel || projetId,
+        projectAliases: [projetId],
+        documentNumber: numeroStr,
+        documentName: nom,
+        documentType: typeDocLabel,
+        documentZone: ""
+      }));
       await grist.docApi.applyUserActions(actions);
       const dlg = document.getElementById("dlg-ajouter-ref-doc");
       if (dlg && typeof dlg.close === "function") dlg.close();

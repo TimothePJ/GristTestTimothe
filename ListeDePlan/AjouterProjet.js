@@ -364,12 +364,15 @@
       return;
     }
 
-    if (typeof window.assertDocumentNumbersAvailable !== "function") {
-      alert("Le controle d'unicite des numeros de document est indisponible.");
+    if (typeof window.assertDocumentIdentitiesAvailable !== "function") {
+      alert("Le controle d'identite des documents est indisponible.");
       return;
     }
     try {
-      await window.assertDocumentNumbersAvailable(STATE.projectName, [numeroStr]);
+      await window.assertDocumentIdentitiesAvailable(
+        STATE.projectName,
+        [{ number: numeroStr, name: nom, type: STATE.typeDocLabel }]
+      );
     } catch (error) {
       alert(error.message);
       return;
@@ -388,6 +391,7 @@
         NomProjet: (STATE.projectId ?? STATE.projectName),  // Ref (id) si dispo, sinon libellé
         NomDocument: nom,
         NumeroDocument: numeroStr,
+        Type_document: STATE.typeDocLabel,
         Emetteur: em,
         Reference: "_",
         Indice: "-",
@@ -409,6 +413,17 @@
     }]);
 
     try {
+      if (typeof window.buildPlanningDocumentCreationAction !== "function") {
+        throw new Error("Le constructeur de document Planning est indisponible.");
+      }
+      actions.push(await window.buildPlanningDocumentCreationAction({
+        projectName: STATE.projectName,
+        projectAliases: [STATE.projectId],
+        documentNumber: numeroStr,
+        documentName: nom,
+        documentType: STATE.typeDocLabel,
+        documentZone: ""
+      }));
       await grist.docApi.applyUserActions(actions);
       const dlg = document.getElementById('addDocumentDialog');
       if (dlg && typeof dlg.close === "function") dlg.close();

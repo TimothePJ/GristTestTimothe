@@ -347,7 +347,7 @@ function getPlanningDateSortValue(value) {
 }
 
 function normalizePlanningLinkPart(value) {
-  return toText(value).toLocaleLowerCase("fr");
+  return toText(value).replace(/\s+/g, " ").toLocaleLowerCase("fr");
 }
 
 function buildPlanningLinkKey(project, numeroDocument, typeDocument, designation, zone = "") {
@@ -356,15 +356,6 @@ function buildPlanningLinkKey(project, numeroDocument, typeDocument, designation
     normalizePlanningLinkPart(numeroDocument),
     normalizePlanningLinkPart(typeDocument),
     normalizePlanningLinkPart(designation),
-    normalizePlanningLinkPart(zone),
-  ].join("||");
-}
-
-function buildPlanningLinkKeyWithoutDesignation(project, numeroDocument, typeDocument, zone = "") {
-  return [
-    normalizePlanningLinkPart(project),
-    normalizePlanningLinkPart(numeroDocument),
-    normalizePlanningLinkPart(typeDocument),
     normalizePlanningLinkPart(zone),
   ].join("||");
 }
@@ -440,9 +431,7 @@ export function buildPlanningListePlanSyncUpdates(
     targetLookup instanceof Map ? targetLookup : buildProjectRealisationTargetLookup(projectConfigs);
 
   const latestByKeyStrict = new Map();
-  const latestByKeyNoDesignation = new Map();
   const latestByKeyStrictLegacy = new Map();
-  const latestByKeyNoDesignationLegacy = new Map();
 
   (listePlanRows || []).forEach((row) => {
     const indice = normalizePlanningIndice(row?.Indice);
@@ -474,18 +463,8 @@ export function buildPlanningListePlanSyncUpdates(
       latestRecord
     );
     rememberLatestPlanRecord(
-      latestByKeyNoDesignation,
-      buildPlanningLinkKeyWithoutDesignation(projectValue, documentNumber, typeDocument, zone),
-      latestRecord
-    );
-    rememberLatestPlanRecord(
       latestByKeyStrictLegacy,
       buildPlanningLinkKey(projectValue, documentNumber, typeDocument, designation),
-      latestRecord
-    );
-    rememberLatestPlanRecord(
-      latestByKeyNoDesignationLegacy,
-      buildPlanningLinkKeyWithoutDesignation(projectValue, documentNumber, typeDocument),
       latestRecord
     );
   });
@@ -504,9 +483,7 @@ export function buildPlanningListePlanSyncUpdates(
 
     const latestRecord =
       latestByKeyStrict.get(buildPlanningLinkKey(projectValue, documentNumber, typeDoc, designation, zone)) ??
-      latestByKeyNoDesignation.get(buildPlanningLinkKeyWithoutDesignation(projectValue, documentNumber, typeDoc, zone)) ??
       latestByKeyStrictLegacy.get(buildPlanningLinkKey(projectValue, documentNumber, typeDoc, designation)) ??
-      latestByKeyNoDesignationLegacy.get(buildPlanningLinkKeyWithoutDesignation(projectValue, documentNumber, typeDoc)) ??
       null;
 
     const targetIndice = getPlanningTargetIndice(typeDoc, projectValue, effectiveTargetLookup);

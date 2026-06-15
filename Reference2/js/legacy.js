@@ -452,8 +452,37 @@ function _norm(v) {
   return String(v ?? '').trim();
 }
 
-function normalizeDocumentNumberForUniqueness(value) {
-  return String(value ?? '').trim();
+function normalizeReferenceDocumentIdentityPart(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLocaleLowerCase('fr');
+}
+
+function normalizeReferenceDocumentIdentityInput(documentValue) {
+  if (!documentValue || typeof documentValue !== 'object') {
+    throw new Error("Le controle d'identite exige le numero, le nom et le type du document.");
+  }
+  const documentIdentity = {
+    number: _norm(documentValue.number ?? documentValue.numero ?? documentValue.documentNumber),
+    name: _norm(documentValue.name ?? documentValue.nom ?? documentValue.documentName),
+    type: normalizeTypeDocument(
+      documentValue.type ?? documentValue.documentType ?? documentValue.typeDocument
+    ),
+  };
+  if (!documentIdentity.number || !documentIdentity.name || !documentIdentity.type) {
+    throw new Error("Le numero, le nom et le type du document sont obligatoires.");
+  }
+  return documentIdentity;
+}
+
+function buildReferenceDocumentIdentityKey(documentValue) {
+  const documentIdentity = normalizeReferenceDocumentIdentityInput(documentValue);
+  return [
+    normalizeReferenceDocumentIdentityPart(documentIdentity.number),
+    normalizeReferenceDocumentIdentityPart(documentIdentity.name),
+    normalizeReferenceDocumentIdentityPart(documentIdentity.type),
+  ].join('||');
 }
 
 function normalizeDocumentProjectKey(value) {
@@ -464,6 +493,7 @@ function normalizeDocumentProjectKey(value) {
       : value;
   return String(raw ?? '')
     .trim()
+    .replace(/\s+/g, ' ')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLocaleLowerCase('fr');
@@ -486,16 +516,17 @@ async function buildDocumentProjectAliasKeys(projectName) {
   return aliases;
 }
 
-async function assertReferenceDocumentNumbersAvailable(projectName, documentNumbers) {
-  const numbers = (documentNumbers || [])
-    .map(normalizeDocumentNumberForUniqueness)
-    .filter(Boolean);
-  const seen = new Set();
-  for (const number of numbers) {
-    if (seen.has(number)) {
-      throw new Error(`Le numero de document "${number}" est saisi plusieurs fois.`);
+async function assertReferenceDocumentIdentitiesAvailable(projectName, documents) {
+  const normalizedDocuments = (documents || []).map(normalizeReferenceDocumentIdentityInput);
+  const requestedIdentityKeys = new Set();
+  for (const documentIdentity of normalizedDocuments) {
+    const identityKey = buildReferenceDocumentIdentityKey(documentIdentity);
+    if (requestedIdentityKeys.has(identityKey)) {
+      throw new Error(
+        `Le document "${documentIdentity.number} - ${documentIdentity.name}" (${documentIdentity.type}) est saisi plusieurs fois.`
+      );
     }
-    seen.add(number);
+    requestedIdentityKeys.add(identityKey);
   }
 
   const [tableName, projectAliases] = await Promise.all([
@@ -504,31 +535,47 @@ async function assertReferenceDocumentNumbersAvailable(projectName, documentNumb
   ]);
   const plans = await grist.docApi.fetchTable(tableName);
   const projects = plans.Nom_projet || plans.NomProjet || plans.NomProjetString || [];
-  const existingNumbers = plans.NumeroDocument || [];
+  const numbers = plans.NumeroDocument || plans.ID2 || [];
+  const names = plans.Designation || plans.NomDocument || plans.Taches || plans.Tache || [];
+  const types = plans.Type_document || plans.Type_doc || plans.TypeDocument || plans.TypeDoc || [];
 
-  for (let index = 0; index < Math.max(projects.length, existingNumbers.length); index += 1) {
+  for (let index = 0; index < Math.max(projects.length, numbers.length, names.length, types.length); index += 1) {
     if (!projectAliases.has(normalizeDocumentProjectKey(projects[index]))) continue;
-    const number = normalizeDocumentNumberForUniqueness(existingNumbers[index]);
-    if (seen.has(number)) {
-      throw new Error(`Le numero de document "${number}" est deja utilise dans ce projet.`);
+    if (
+      !normalizeReferenceDocumentIdentityPart(numbers[index]) ||
+      !normalizeReferenceDocumentIdentityPart(names[index]) ||
+      !normalizeReferenceDocumentIdentityPart(types[index])
+    ) continue;
+    const rowIdentity = {
+      number: numbers[index],
+      name: names[index],
+      type: types[index],
+    };
+    if (requestedIdentityKeys.has(buildReferenceDocumentIdentityKey(rowIdentity))) {
+      throw new Error(
+        `Le document "${rowIdentity.number} - ${rowIdentity.name}" (${rowIdentity.type}) existe deja dans ce projet.`
+      );
     }
   }
 }
 
-function findListePlanIndex(plansTable, projectName, numeroDocStr, typeDocStr = '', zoneStr = '') {
+function findListePlanIndex(plansTable, projectName, numeroDocStr, typeDocStr = '', zoneStr = '', taskName = '') {
   const projs = plansTable.Nom_projet || [];
   const nums  = plansTable.NumeroDocument || [];
   const types = plansTable.Type_document || [];
   const zones = plansTable.Zone || [];
+  const names = plansTable.Designation || plansTable.NomDocument || [];
   const p = _norm(projectName);
   const n = _norm(numeroDocStr);
   const t = _norm(typeDocStr);
   const z = normalizeZoneMatchKey(zoneStr);
-  for (let i = 0; i < Math.max(projs.length, nums.length, types.length, zones.length); i++) {
+  const task = _norm(taskName);
+  for (let i = 0; i < Math.max(projs.length, nums.length, types.length, zones.length, names.length); i++) {
     if (
       _norm(projs[i]) === p &&
       _norm(nums[i]) === n &&
       _norm(types[i]) === t &&
+      (!task || _norm(names[i]) === task) &&
       normalizeZoneMatchKey(zones[i]) === z
     ) {
       return i;
@@ -674,6 +721,7 @@ function findPlanningIndex(planningTable, projectName, numeroDocStr, typeDocStr,
     if (_norm(projs[i]) !== p) continue;
     if (_norm(ids2[i]) !== n) continue;
     if (_norm(types[i]) !== t) continue;
+    if (_norm(taskName) && _norm(tasks[i]) !== _norm(taskName)) continue;
 
     const currentZone = hasZoneColumn ? normalizeZoneMatchKey(zones[i]) : '';
     if (currentZone === z) return i;
@@ -801,17 +849,18 @@ function formatZoneLabel(value) {
   return normalized || 'Sans zone';
 }
 
-function buildDocSelectValue({ numero = null, name = '', zone = '' } = {}) {
+function buildDocSelectValue({ numero = null, name = '', zone = '', type = '' } = {}) {
   return JSON.stringify({
     numero: parseNumeroForStorage(numero),
     name: String(name ?? '').trim(),
     zone: normalizeZoneValue(zone),
+    type: normalizeTypeDocument(type),
   });
 }
 
 function getSelectedDocPair() {
   const el = document.getElementById('secondColumnListbox');
-  if (!el) return { numero: null, name: '', zone: '' };
+  if (!el) return { numero: null, name: '', zone: '', type: '' };
 
   const raw = el.value;
   const parsed = parseDocValue(raw);
@@ -819,6 +868,7 @@ function getSelectedDocPair() {
   let numero = parsed.numero;
   let name = parsed.name || String(raw || '').trim();
   let zone = normalizeZoneValue(parsed.zone);
+  const type = normalizeTypeDocument(parsed.type || getCurrentSelectedType());
 
   // Fallback 1: cache local si la colonne NumeroDocument n'est pas presente dans la vue
   if (numero == null) {
@@ -844,24 +894,26 @@ function getSelectedDocPair() {
     } catch (e) { }
   }
 
-  return { numero, name, zone };
+  return { numero, name, zone, type };
 }
 
 
 function parseDocValue(raw) {
-  if (!raw) return { numero: null, name: '', zone: '' };
+  if (!raw) return { numero: null, name: '', zone: '', type: '' };
 
   // 1) Cas JSON (certaines parties du code pouvaient stocker un JSON dans la value)
   try {
     const obj = JSON.parse(raw);
-    if (obj && (obj.n != null || obj.numero != null || obj.name != null || obj.nom != null || obj.zone != null)) {
+    if (obj && (obj.n != null || obj.numero != null || obj.name != null || obj.nom != null || obj.zone != null || obj.type != null)) {
       const numero = (obj.n != null) ? obj.n : (obj.numero != null ? obj.numero : null);
       const name = (obj.name != null) ? obj.name : (obj.nom != null ? obj.nom : '');
       const zone = normalizeZoneValue(obj.zone);
+      const type = normalizeTypeDocument(obj.type);
       return {
         numero: parseNumeroForStorage(numero),
         name: String(name).trim(),
         zone,
+        type,
       };
     }
   } catch (e) { /* pas du JSON -> on continue */ }
@@ -870,6 +922,7 @@ function parseDocValue(raw) {
   const name = String(raw).trim();
   let numero = null;
   let zone = '';
+  let type = getCurrentSelectedType();
 
   // Projet courant
   const selectedProject =
@@ -881,8 +934,13 @@ function parseDocValue(raw) {
   try {
     if (selectedProject && Array.isArray(records)) {
       const rec = records.find(r =>
-        String(r.NomProjet || '').trim() === selectedProject &&
-        String(r.NomDocument || '').trim() === name
+        normalizeReferenceDocumentIdentityPart(r.NomProjet) ===
+          normalizeReferenceDocumentIdentityPart(selectedProject) &&
+        normalizeReferenceDocumentIdentityPart(r.NomDocument) ===
+          normalizeReferenceDocumentIdentityPart(name) &&
+        (!type ||
+          normalizeReferenceDocumentIdentityPart(r.Type_document) ===
+            normalizeReferenceDocumentIdentityPart(type))
       );
 
       // ⚠️ Important : si la colonne NumeroDocument n'est pas dans la vue, rec.NumeroDocument sera undefined
@@ -891,6 +949,7 @@ function parseDocValue(raw) {
       }
       if (rec) {
         zone = normalizeZoneValue(rec.Zone);
+        type = normalizeTypeDocument(rec.Type_document);
       }
     }
   } catch (e) { }
@@ -908,7 +967,7 @@ function parseDocValue(raw) {
     try { scheduleReferencesNumeroCacheRefresh(); } catch (e) { }
   }
 
-  return { numero, name, zone };
+  return { numero, name, zone, type };
 }
 
 
@@ -1030,15 +1089,19 @@ function refreshZoneSuggestionList(datalistId, projectName) {
 }
 
 function collectProjectDocumentEntries(projectName, typeValue = '') {
-  const project = _norm(projectName);
+  const project = normalizeReferenceDocumentIdentityPart(projectName);
   const normalizedType = normalizeTypeDocument(typeValue);
   if (!project || !Array.isArray(records)) return [];
 
   const docsByKey = new Map();
 
   records.forEach((record) => {
-    if (_norm(record.NomProjet) !== project) return;
-    if (normalizedType && normalizeTypeDocument(record.Type_document) !== normalizedType) return;
+    if (normalizeReferenceDocumentIdentityPart(record.NomProjet) !== project) return;
+    if (
+      normalizedType &&
+      normalizeReferenceDocumentIdentityPart(record.Type_document) !==
+        normalizeReferenceDocumentIdentityPart(normalizedType)
+    ) return;
 
     const name = _norm(record.NomDocument);
     if (!name) return;
@@ -1047,10 +1110,10 @@ function collectProjectDocumentEntries(projectName, typeValue = '') {
     const numero = parseNumeroForStorage(record.NumeroDocument);
     const zone = normalizeZoneValue(record.Zone);
     const key = [
-      type.toLocaleLowerCase('fr'),
+      normalizeReferenceDocumentIdentityPart(type),
       zone.toLocaleLowerCase('fr'),
-      numero == null ? '' : String(numero),
-      name.toLocaleLowerCase('fr'),
+      normalizeReferenceDocumentIdentityPart(numero),
+      normalizeReferenceDocumentIdentityPart(name),
     ].join('||');
 
     if (docsByKey.has(key)) return;
@@ -1061,7 +1124,7 @@ function collectProjectDocumentEntries(projectName, typeValue = '') {
       type,
       zone,
       label: makeDocLabel(name, numero),
-      value: buildDocSelectValue({ numero, name, zone }),
+      value: buildDocSelectValue({ numero, name, zone, type }),
     });
   });
 
@@ -1104,9 +1167,10 @@ function getCurrentSelectedType() {
   return normalizeTypeDocument(dropdown ? dropdown.value : selectedTypeValue);
 }
 
-function getDocumentTypeForProjectDoc(projectName, docName, zoneName, numeroValue) {
-  const project = _norm(projectName);
-  const documentName = _norm(docName);
+function getDocumentTypeForProjectDoc(projectName, docName, zoneName, numeroValue, preferredTypeValue = '') {
+  const project = normalizeReferenceDocumentIdentityPart(projectName);
+  const documentName = normalizeReferenceDocumentIdentityPart(docName);
+  const preferredType = normalizeTypeDocument(preferredTypeValue || getCurrentSelectedType());
   const normalizedZone = normalizeZoneValue(zoneName);
   const normalizedZoneKey = normalizeZoneMatchKey(normalizedZone);
   const normalizedNumero = parseNumeroForStorage(numeroValue);
@@ -1115,11 +1179,14 @@ function getDocumentTypeForProjectDoc(projectName, docName, zoneName, numeroValu
   if (!project || !documentName || !Array.isArray(records)) return '';
 
   const match = records.find(record =>
-    _norm(record.NomProjet) === project &&
-    _norm(record.NomDocument) === documentName &&
+    normalizeReferenceDocumentIdentityPart(record.NomProjet) === project &&
+    normalizeReferenceDocumentIdentityPart(record.NomDocument) === documentName &&
     (!zoneWasProvided || normalizeZoneMatchKey(record.Zone) === normalizedZoneKey) &&
-    (!numeroWasProvided || parseNumeroForStorage(record.NumeroDocument) === normalizedNumero) &&
-    normalizeTypeDocument(record.Type_document)
+    (!numeroWasProvided ||
+      normalizeReferenceDocumentIdentityPart(record.NumeroDocument) ===
+        normalizeReferenceDocumentIdentityPart(normalizedNumero)) &&
+    normalizeReferenceDocumentIdentityPart(record.Type_document) ===
+      normalizeReferenceDocumentIdentityPart(preferredType)
   );
 
   return match ? normalizeTypeDocument(match.Type_document) : '';
@@ -1458,18 +1525,28 @@ function getOpenReferenceDocumentRecords() {
   const selections = getCurrentSelections();
   if (!selections) return [];
 
-  const selectedProject = _norm(selections.selectedProject);
-  const selectedDocument = _norm(selections.selectedTable);
+  const selectedProject = normalizeReferenceDocumentIdentityPart(selections.selectedProject);
+  const selectedDocument = normalizeReferenceDocumentIdentityPart(selections.selectedTable);
   const selectedNumero = parseNumeroForStorage(selections.selectedDoc?.numero);
   const selectedZoneKey = normalizeZoneMatchKey(selections.selectedDoc?.zone);
+  const selectedType = normalizeTypeDocument(
+    selections.selectedDoc?.type || getCurrentSelectedType()
+  );
   if (!selectedProject || !selectedDocument) return [];
 
   return (Array.isArray(records) ? records : []).filter((record) => {
-    if (_norm(record?.NomProjet) !== selectedProject) return false;
-    if (_norm(record?.NomDocument) !== selectedDocument) return false;
+    if (normalizeReferenceDocumentIdentityPart(record?.NomProjet) !== selectedProject) return false;
+    if (normalizeReferenceDocumentIdentityPart(record?.NomDocument) !== selectedDocument) return false;
+    if (
+      normalizeReferenceDocumentIdentityPart(record?.Type_document) !==
+      normalizeReferenceDocumentIdentityPart(selectedType)
+    ) return false;
     if (normalizeZoneMatchKey(record?.Zone) !== selectedZoneKey) return false;
     if (selectedNumero == null) return true;
-    return parseNumeroForStorage(record?.NumeroDocument) === selectedNumero;
+    return (
+      normalizeReferenceDocumentIdentityPart(record?.NumeroDocument) ===
+      normalizeReferenceDocumentIdentityPart(selectedNumero)
+    );
   });
 }
 
@@ -1740,6 +1817,7 @@ function queueNewDocumentSelection({ numero = null, name = '', zone = '', type =
     numero: normalizedNumero,
     name: normalizedName,
     zone: normalizedZone,
+    type,
   });
 
   newTable = true;
@@ -1818,10 +1896,9 @@ function getAlphabetRangeValues(startValue, endValue) {
 
 function buildPendingReferenceDocumentIdentityKey(doc = {}) {
   return [
-    _norm(doc.name).toLocaleLowerCase('fr'),
-    _norm(doc.numero).toLocaleLowerCase('fr'),
-    normalizeTypeDocument(doc.type).toLocaleLowerCase('fr'),
-    normalizeZoneMatchKey(doc.zone),
+    normalizeReferenceDocumentIdentityPart(doc.name),
+    normalizeReferenceDocumentIdentityPart(doc.numero),
+    normalizeReferenceDocumentIdentityPart(normalizeTypeDocument(doc.type)),
   ].join('||');
 }
 
@@ -2266,13 +2343,16 @@ async function createDocumentsBatch({
     if (!normalizedDoc.documentNumber || !normalizedDoc.documentName || !normalizedDoc.documentType) return;
 
     const key = [
-      normalizedDoc.documentNumber.toLocaleLowerCase('fr'),
-      normalizedDoc.documentName.toLocaleLowerCase('fr'),
-      normalizedDoc.documentType.toLocaleLowerCase('fr'),
-      normalizeZoneMatchKey(normalizedDoc.documentZone),
+      normalizeReferenceDocumentIdentityPart(normalizedDoc.documentNumber),
+      normalizeReferenceDocumentIdentityPart(normalizedDoc.documentName),
+      normalizeReferenceDocumentIdentityPart(normalizedDoc.documentType),
     ].join('||');
 
-    if (seenDocuments.has(key)) return;
+    if (seenDocuments.has(key)) {
+      throw new Error(
+        `Le document "${normalizedDoc.documentNumber} - ${normalizedDoc.documentName}" (${normalizedDoc.documentType}) est saisi plusieurs fois.`
+      );
+    }
     seenDocuments.add(key);
     uniqueDocuments.push(normalizedDoc);
   });
@@ -2280,9 +2360,13 @@ async function createDocumentsBatch({
   if (!uniqueDocuments.length) {
     throw new Error("Veuillez ajouter au moins un document complet.");
   }
-  await assertReferenceDocumentNumbersAvailable(
+  await assertReferenceDocumentIdentitiesAvailable(
     normalizedProject,
-    (documents || []).map((doc) => _norm(doc?.documentNumber ?? doc?.numero)).filter(Boolean)
+    uniqueDocuments.map((doc) => ({
+      number: doc.documentNumber,
+      name: doc.documentName,
+      type: doc.documentType,
+    }))
   );
 
   const safeDefaultDatelimite = _norm(defaultDatelimite) || DEFAULT_REFERENCE_DATE;
@@ -2300,13 +2384,14 @@ async function createDocumentsBatch({
         normalizedProject,
         doc.documentNumber,
         doc.documentType,
-        doc.documentZone
+        doc.documentZone,
+        doc.documentName
       );
       const key = [
-        normalizedProject.toLocaleLowerCase('fr'),
-        doc.documentNumber.toLocaleLowerCase('fr'),
-        doc.documentType.toLocaleLowerCase('fr'),
-        normalizeZoneMatchKey(doc.documentZone),
+        normalizeReferenceDocumentIdentityPart(normalizedProject),
+        normalizeReferenceDocumentIdentityPart(doc.documentNumber),
+        normalizeReferenceDocumentIdentityPart(doc.documentName),
+        normalizeReferenceDocumentIdentityPart(doc.documentType),
       ].join('||');
 
       if (idxPlan >= 0) {
@@ -2360,10 +2445,10 @@ async function createDocumentsBatch({
         doc.documentName
       );
       const planningKey = [
-        normalizedProject.toLocaleLowerCase('fr'),
-        doc.documentNumber.toLocaleLowerCase('fr'),
-        doc.documentType.toLocaleLowerCase('fr'),
-        normalizeZoneMatchKey(doc.documentZone),
+        normalizeReferenceDocumentIdentityPart(normalizedProject),
+        normalizeReferenceDocumentIdentityPart(doc.documentNumber),
+        normalizeReferenceDocumentIdentityPart(doc.documentName),
+        normalizeReferenceDocumentIdentityPart(doc.documentType),
       ].join('||');
 
       if (idxPlanning >= 0) {
@@ -2429,7 +2514,7 @@ async function createDocumentsBatch({
     numero: lastDocNumber,
     name: lastDoc.documentName,
     zone: lastDoc.documentZone,
-    type: '',
+    type: lastDoc.documentType,
   });
 
   try {
@@ -2977,17 +3062,31 @@ function populateTable() {
   const tableBody = document.getElementById('tableBody');
   const tableHeader = document.getElementById('tableHeader');
   const hideArchived = document.getElementById('hideArchivedToggle').checked;
+  const selectedType = normalizeTypeDocument(selectedDoc?.type || getCurrentSelectedType());
 
   tableBody.innerHTML = '';
   const filteredRecords = records.filter(
     (record) => {
-      if (record.NomProjet !== selectedProject) return false;
-      if (_norm(record.NomDocument) !== _norm(selectedTable)) return false;
+      if (
+        normalizeReferenceDocumentIdentityPart(record.NomProjet) !==
+        normalizeReferenceDocumentIdentityPart(selectedProject)
+      ) return false;
+      if (
+        normalizeReferenceDocumentIdentityPart(record.NomDocument) !==
+        normalizeReferenceDocumentIdentityPart(selectedTable)
+      ) return false;
+      if (
+        normalizeReferenceDocumentIdentityPart(record.Type_document) !==
+        normalizeReferenceDocumentIdentityPart(selectedType)
+      ) return false;
       if (normalizeZoneMatchKey(record.Zone) !== normalizeZoneMatchKey(selectedDoc?.zone)) return false;
 
       if (selectedDoc && selectedDoc.numero != null) {
         const recordNumero = parseNumeroForStorage(record.NumeroDocument);
-        if (recordNumero !== parseNumeroForStorage(selectedDoc.numero)) return false;
+        if (
+          normalizeReferenceDocumentIdentityPart(recordNumero) !==
+          normalizeReferenceDocumentIdentityPart(selectedDoc.numero)
+        ) return false;
       }
 
       return !hideArchived || !record.Archive;
@@ -3366,7 +3465,13 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
           NomProjet: selectedProject,
           NomDocument: parsedDoc.name,
           NumeroDocument: _norm(parsedDoc.numero),
-          Type_document: getDocumentTypeForProjectDoc(selectedProject, parsedDoc.name, parsedDoc.zone, parsedDoc.numero) || getCurrentSelectedType(),
+          Type_document: getDocumentTypeForProjectDoc(
+            selectedProject,
+            parsedDoc.name,
+            parsedDoc.zone,
+            parsedDoc.numero,
+            parsedDoc.type
+          ) || normalizeTypeDocument(parsedDoc.type || getCurrentSelectedType()),
           Zone: normalizeZoneValue(parsedDoc.zone),
           Emetteur: emetteur,
           Reference: reference,
@@ -3385,7 +3490,13 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
         NomProjet: selectedProject,
         NomDocument: currentSelectedDoc.name,
         NumeroDocument: _norm(currentSelectedDoc.numero),
-        Type_document: getDocumentTypeForProjectDoc(selectedProject, currentSelectedDoc.name, currentSelectedDoc.zone, currentSelectedDoc.numero) || getCurrentSelectedType(),
+        Type_document: getDocumentTypeForProjectDoc(
+          selectedProject,
+          currentSelectedDoc.name,
+          currentSelectedDoc.zone,
+          currentSelectedDoc.numero,
+          currentSelectedDoc.type
+        ) || normalizeTypeDocument(currentSelectedDoc.type || getCurrentSelectedType()),
         Zone: normalizeZoneValue(currentSelectedDoc.zone),
         Emetteur: emetteur,
         Reference: reference,
@@ -3641,7 +3752,11 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
   }
 
   try {
-    await assertReferenceDocumentNumbersAvailable(selectedFirstValue, [documentNumber]);
+    await assertReferenceDocumentIdentitiesAvailable(selectedFirstValue, [{
+      number: documentNumber,
+      name: documentName,
+      type: documentType,
+    }]);
   } catch (error) {
     alert(error.message);
     return;
@@ -3712,7 +3827,14 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
       const plans = await grist.docApi.fetchTable(plansTableName);
 
       const numStrPlan = _norm(documentNumber);
-      const idxPlan = findListePlanIndex(plans, selectedProject, numStrPlan, documentType, documentZone);
+      const idxPlan = findListePlanIndex(
+        plans,
+        selectedProject,
+        numStrPlan,
+        documentType,
+        documentZone,
+        nm
+      );
 
       if (idxPlan >= 0) {
         planAction = ['UpdateRecord', plansTableName, plans.id[idxPlan], {
@@ -3798,7 +3920,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
       numero: num,
       name: nm,
       zone: documentZone,
-      type: '',
+      type: documentType,
     });
     await applyUserActionsInChunks(actions);
     await refreshReferenceTypeSuggestionLists(selectedProject);
@@ -4911,9 +5033,13 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
 
   // Récupérer les émetteurs sélectionnés dans le conteneur du dialog "Ajouter Plusieurs document"
   try {
-    await assertReferenceDocumentNumbersAvailable(
+    await assertReferenceDocumentIdentitiesAvailable(
       selectedFirstValue,
-      documentsData.map((doc) => doc.documentNumber)
+      documentsData.map((doc) => ({
+        number: doc.documentNumber,
+        name: doc.documentName,
+        type: documentType,
+      }))
     );
   } catch (error) {
     alert(error.message);
@@ -4971,29 +5097,34 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
       const plansTableName = await resolveListePlanTableName();
       const plans = await grist.docApi.fetchTable(plansTableName);
 
-      // Index des lignes existantes (Nom_projet + NumeroDocument + Type_document + Zone)
+      // Index des lignes existantes par identite documentaire complete.
       const existing = new Map();
       const projs = plans.Nom_projet || [];
       const nums  = plans.NumeroDocument || [];
       const types = plans.Type_document || [];
-      const zones = plans.Zone || [];
+      const names = plans.Designation || plans.NomDocument || [];
       const ids   = plans.id || [];
-      const L = Math.max(projs.length, nums.length, types.length, zones.length, ids.length);
+      const L = Math.max(projs.length, nums.length, types.length, names.length, ids.length);
 
       for (let i = 0; i < L; i++) {
-        const p = _norm(projs[i]);
-        const n = _norm(nums[i]);
-        const t = _norm(types[i]);
-        const z = normalizeZoneMatchKey(zones[i]);
-        if (!p || !n || !t) continue;
-        existing.set(`${p}||${n}||${t}||${z}`, ids[i]);
+        const p = normalizeReferenceDocumentIdentityPart(projs[i]);
+        const n = normalizeReferenceDocumentIdentityPart(nums[i]);
+        const t = normalizeReferenceDocumentIdentityPart(types[i]);
+        const name = normalizeReferenceDocumentIdentityPart(names[i]);
+        if (!p || !n || !name || !t) continue;
+        existing.set(`${p}||${n}||${name}||${t}`, ids[i]);
       }
-      const projKey = _norm(selectedProject);
+      const projKey = normalizeReferenceDocumentIdentityPart(selectedProject);
 
       documentsData.forEach(doc => {
         const numStrPlan = _norm(doc.documentNumber);
         const nm = String(doc.documentName).trim();
-        const key = `${projKey}||${numStrPlan}||${_norm(documentType)}||${normalizeZoneMatchKey(documentZone)}`;
+        const key = [
+          projKey,
+          normalizeReferenceDocumentIdentityPart(numStrPlan),
+          normalizeReferenceDocumentIdentityPart(nm),
+          normalizeReferenceDocumentIdentityPart(documentType),
+        ].join('||');
 
         if (existing.has(key)) {
           actions.push(['UpdateRecord', plansTableName, existing.get(key), {
@@ -5032,12 +5163,17 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
         actions.push(planningZoneAnchorAction);
       }
 
-      const projKeyPlanning = _norm(selectedProject);
+      const projKeyPlanning = normalizeReferenceDocumentIdentityPart(selectedProject);
       const pendingPlanningAdds = new Set();
       documentsData.forEach((doc) => {
         const numStrPlanning = _norm(doc.documentNumber);
         const nm = String(doc.documentName).trim();
-        const keyPlanning = `${projKeyPlanning}||${numStrPlanning}||${_norm(documentType)}||${normalizeZoneMatchKey(documentZone)}`;
+        const keyPlanning = [
+          projKeyPlanning,
+          normalizeReferenceDocumentIdentityPart(numStrPlanning),
+          normalizeReferenceDocumentIdentityPart(nm),
+          normalizeReferenceDocumentIdentityPart(documentType),
+        ].join('||');
         const idxPlanning = findPlanningIndex(
           planning,
           selectedProject,
@@ -5113,7 +5249,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
         numero: lastDoc.documentNumber,
         name: String(lastDoc.documentName).trim(),
         zone: documentZone,
-        type: '',
+        type: documentType,
       });
     }
     await applyUserActionsInChunks(actions);

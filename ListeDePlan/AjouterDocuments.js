@@ -41,6 +41,10 @@
     return String(v ?? '').trim().toLocaleUpperCase('fr');
   }
 
+  function normalizeDocumentIdentityPart(v) {
+    return _norm(v).replace(/\s+/g, ' ').toLocaleLowerCase('fr');
+  }
+
   function normalizeZoneValue(v) {
     return String(v ?? '').trim();
   }
@@ -323,10 +327,9 @@
   // ============================================================
   function buildDocKey(doc) {
     return [
-      _norm(doc.name).toLocaleLowerCase('fr'),
-      _norm(doc.numero).toLocaleLowerCase('fr'),
-      normalizeTypeDocument(doc.type).toLocaleLowerCase('fr'),
-      normalizeZoneMatchKey(doc.zone),
+      normalizeDocumentIdentityPart(doc.name),
+      normalizeDocumentIdentityPart(doc.numero),
+      normalizeDocumentIdentityPart(normalizeTypeDocument(doc.type)),
     ].join('||');
   }
 
@@ -750,20 +753,23 @@
     return 'Taches';
   }
 
-  function findListePlanIndex(plansTable, projectName, numeroDocStr, typeDocStr, zoneStr) {
+  function findListePlanIndex(plansTable, projectName, numeroDocStr, typeDocStr, zoneStr, taskName) {
     const projs = plansTable.Nom_projet || [];
     const nums = plansTable.NumeroDocument || [];
     const types = plansTable.Type_document || [];
     const zones = plansTable.Zone || [];
+    const names = plansTable.Designation || plansTable.NomDocument || [];
     const p = _norm(projectName);
     const n = _norm(numeroDocStr);
     const t = _norm(typeDocStr);
     const z = normalizeZoneMatchKey(zoneStr);
-    for (let i = 0; i < Math.max(projs.length, nums.length, types.length, zones.length); i++) {
+    const task = _norm(taskName);
+    for (let i = 0; i < Math.max(projs.length, nums.length, types.length, zones.length, names.length); i++) {
       if (
         _norm(projs[i]) === p &&
         _norm(nums[i]) === n &&
         _norm(types[i]) === t &&
+        (!task || _norm(names[i]) === task) &&
         normalizeZoneMatchKey(zones[i]) === z
       ) return i;
     }
@@ -885,6 +891,67 @@
     return fields;
   }
 
+  async function buildPlanningDocumentCreationAction({
+    projectName,
+    projectAliases = [],
+    documentNumber,
+    documentName,
+    documentType,
+    documentZone = '',
+  }) {
+    const planningTableName = await resolvePlanningTableName();
+    const planningTable = await grist.docApi.fetchTable(planningTableName);
+    const projectCol = getPlanningProjectColumn(planningTable);
+    const taskCol = getPlanningTaskColumn(planningTable);
+    if (
+      !hasPlanningColumn(planningTable, projectCol) ||
+      !hasPlanningColumn(planningTable, 'ID2') ||
+      !hasPlanningColumn(planningTable, taskCol) ||
+      !hasPlanningColumn(planningTable, 'Type_doc')
+    ) {
+      throw new Error("La structure de Planning ne permet pas d'identifier le document.");
+    }
+    const projectKeys = new Set(
+      [projectName, ...(projectAliases || [])]
+        .map((value) => normalizeDocumentIdentityPart(value))
+        .filter(Boolean)
+    );
+    const projects = planningTable?.[projectCol] || [];
+    const numbers = planningTable?.ID2 || planningTable?.NumeroDocument || [];
+    const types = planningTable?.Type_doc || planningTable?.Type_document || [];
+    const tasks = planningTable?.[taskCol] || [];
+
+    const identityExists = Array.from(
+      { length: Math.max(projects.length, numbers.length, types.length, tasks.length) },
+      (_, index) => index
+    ).some((index) =>
+      projectKeys.has(normalizeDocumentIdentityPart(projects[index])) &&
+      normalizeDocumentIdentityPart(numbers[index]) === normalizeDocumentIdentityPart(documentNumber) &&
+      normalizeDocumentIdentityPart(tasks[index]) === normalizeDocumentIdentityPart(documentName) &&
+      normalizeDocumentIdentityPart(types[index]) === normalizeDocumentIdentityPart(documentType)
+    );
+    if (identityExists) {
+      throw new Error(
+        `Le document "${documentNumber} - ${documentName}" (${documentType}) existe deja dans Planning.`
+      );
+    }
+
+    return [
+      'AddRecord',
+      planningTableName,
+      null,
+      buildPlanningDocumentAddFields(planningTable, {
+        projectName,
+        numeroDocStr: documentNumber,
+        taskName: documentName,
+        typeDoc: documentType,
+        zoneStr: documentZone,
+      }),
+    ];
+  }
+
+  window.buildPlanningDocumentCreationAction = buildPlanningDocumentCreationAction;
+
   function findPlanningIndex(planningTable, projectName, numeroDocStr, typeDocStr, zoneStr, taskName) {
     const projectCol = getPlanningProjectColumn(planningTable);
     const taskCol = getPlanningTaskColumn(planningTable);
@@ -904,10 +971,10 @@
       if (_norm(projs[i]) !== p) continue;
       if (_norm(ids2[i]) !== n) continue;
       if (_norm(types[i]) !== t) continue;
+      if (_norm(taskName) && _norm(tasks[i]) !== _norm(taskName)) continue;
       const currentZone = hasZoneColumn ? normalizeZoneMatchKey(zones[i]) : '';
       if (currentZone === z) return i;
       if (z && currentZone === '') {
-        if (_norm(taskName) && _norm(tasks[i]) === _norm(taskName)) return i;
         if (legacyFallbackIndex < 0) legacyFallbackIndex = i;
       }
     }
@@ -1032,23 +1099,30 @@
       };
       if (!normalizedDoc.documentNumber || !normalizedDoc.documentName || !normalizedDoc.documentType) return;
       const key = [
-        normalizedDoc.documentNumber.toLocaleLowerCase('fr'),
-        normalizedDoc.documentName.toLocaleLowerCase('fr'),
-        normalizedDoc.documentType.toLocaleLowerCase('fr'),
-        normalizeZoneMatchKey(normalizedDoc.documentZone),
+        normalizeDocumentIdentityPart(normalizedDoc.documentNumber),
+        normalizeDocumentIdentityPart(normalizedDoc.documentName),
+        normalizeDocumentIdentityPart(normalizedDoc.documentType),
       ].join('||');
-      if (seenDocuments.has(key)) return;
+      if (seenDocuments.has(key)) {
+        throw new Error(
+          `Le document "${normalizedDoc.documentNumber} - ${normalizedDoc.documentName}" (${normalizedDoc.documentType}) est saisi plusieurs fois.`
+        );
+      }
       seenDocuments.add(key);
       uniqueDocuments.push(normalizedDoc);
     });
 
     if (!uniqueDocuments.length) throw new Error('Veuillez ajouter au moins un document complet.');
-    if (typeof window.assertDocumentNumbersAvailable !== 'function') {
-      throw new Error("Le controle d'unicite des numeros de document est indisponible.");
+    if (typeof window.assertDocumentIdentitiesAvailable !== 'function') {
+      throw new Error("Le controle d'identite des documents est indisponible.");
     }
-    await window.assertDocumentNumbersAvailable(
+    await window.assertDocumentIdentitiesAvailable(
       normalizedProject,
-      (documents || []).map((doc) => _norm(doc?.documentNumber ?? doc?.numero)).filter(Boolean)
+      uniqueDocuments.map((doc) => ({
+        number: doc.documentNumber,
+        name: doc.documentName,
+        type: doc.documentType,
+      }))
     );
 
     const safeDefaultDate = _norm(defaultDatelimite) || DEFAULT_DATE;
@@ -1063,10 +1137,10 @@
 
       uniqueDocuments.forEach((doc) => {
         const key = [
-          normalizedProject.toLocaleLowerCase('fr'),
-          doc.documentNumber.toLocaleLowerCase('fr'),
-          doc.documentType.toLocaleLowerCase('fr'),
-          normalizeZoneMatchKey(doc.documentZone),
+          normalizeDocumentIdentityPart(normalizedProject),
+          normalizeDocumentIdentityPart(doc.documentNumber),
+          normalizeDocumentIdentityPart(doc.documentName),
+          normalizeDocumentIdentityPart(doc.documentType),
         ].join('||');
 
         if (!pendingPlanAdds.has(key)) {
@@ -1101,10 +1175,10 @@
 
         const idxPlanning = findPlanningIndex(planning, normalizedProject, doc.documentNumber, doc.documentType, doc.documentZone, doc.documentName);
         const planningKey = [
-          normalizedProject.toLocaleLowerCase('fr'),
-          doc.documentNumber.toLocaleLowerCase('fr'),
-          doc.documentType.toLocaleLowerCase('fr'),
-          normalizeZoneMatchKey(doc.documentZone),
+          normalizeDocumentIdentityPart(normalizedProject),
+          normalizeDocumentIdentityPart(doc.documentNumber),
+          normalizeDocumentIdentityPart(doc.documentName),
+          normalizeDocumentIdentityPart(doc.documentType),
         ].join('||');
 
         if (idxPlanning >= 0) {

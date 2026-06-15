@@ -605,17 +605,22 @@ document.addEventListener('DOMContentLoaded', () => {
         return { error: '', values };
     }
 
+    function normalizeDocumentIdentityPart(value) {
+        return normalizeText(value)
+            .replace(/\s+/g, ' ')
+            .toLocaleLowerCase('fr');
+    }
+
     function buildDocumentIdentityKey(doc = {}) {
         return [
-            normalizeText(doc.name).toLowerCase(),
-            normalizeText(doc.numero).toLowerCase(),
-            normalizeDocumentType(doc.type),
-            normalizeZoneMatchKey(doc.zone)
+            normalizeDocumentIdentityPart(doc.name),
+            normalizeDocumentIdentityPart(doc.numero),
+            normalizeDocumentIdentityPart(normalizeDocumentType(doc.type))
         ].join('||');
     }
 
     function buildDocumentNumeroScopeKey(doc = {}) {
-        return normalizeText(doc.numero);
+        return buildDocumentIdentityKey(doc);
     }
 
     function collectCustomDocumentZones() {
@@ -674,28 +679,39 @@ document.addEventListener('DOMContentLoaded', () => {
         throw lastError || new Error('Aucune table disponible.');
     }
 
-    async function assertProjectCreationDocumentNumbersAvailable(projectName, documents = []) {
-        const numbers = documents
-            .map((doc) => normalizeText(doc?.numero))
-            .filter(Boolean);
-        const seen = new Set();
-        for (const number of numbers) {
-            if (seen.has(number)) {
-                throw new Error(`Le numero de document "${number}" est saisi plusieurs fois.`);
+    async function assertProjectCreationDocumentIdentitiesAvailable(projectName, documents = []) {
+        const requestedIdentities = new Map();
+        for (const doc of documents) {
+            const documentIdentity = {
+                numero: normalizeText(doc?.numero),
+                name: normalizeText(doc?.name),
+                type: normalizeDocumentType(doc?.type),
+            };
+            if (!documentIdentity.numero || !documentIdentity.name || !documentIdentity.type) {
+                throw new Error('Le numero, le nom et le type du document sont obligatoires.');
             }
-            seen.add(number);
+            const identityKey = buildDocumentIdentityKey(documentIdentity);
+            if (requestedIdentities.has(identityKey)) {
+                throw new Error(
+                    `Le document "${documentIdentity.numero} - ${documentIdentity.name}" (${documentIdentity.type}) est saisi plusieurs fois.`
+                );
+            }
+            requestedIdentities.set(identityKey, documentIdentity);
         }
 
         const [listePlanContext, projects] = await Promise.all([
             fetchFirstAvailableTable(LISTEPLAN_TABLE_CANDIDATES),
             grist.docApi.fetchTable('Projets2')
         ]);
-        const projectAliases = new Set([normalizeText(projectName)]);
+        const projectAliases = new Set([normalizeDocumentIdentityPart(projectName)]);
         const projectNames = projects.Nom_de_projet || [];
         const projectIds = projects.id || [];
         for (let index = 0; index < Math.max(projectNames.length, projectIds.length); index += 1) {
-            if (normalizeText(projectNames[index]) !== normalizeText(projectName)) continue;
-            projectAliases.add(normalizeText(projectIds[index]));
+            if (
+                normalizeDocumentIdentityPart(projectNames[index]) !==
+                normalizeDocumentIdentityPart(projectName)
+            ) continue;
+            projectAliases.add(normalizeDocumentIdentityPart(projectIds[index]));
         }
 
         const rowProjects =
@@ -704,11 +720,24 @@ document.addEventListener('DOMContentLoaded', () => {
             listePlanContext.data.NomProjetString ||
             [];
         const rowNumbers = listePlanContext.data.NumeroDocument || [];
-        for (let index = 0; index < Math.max(rowProjects.length, rowNumbers.length); index += 1) {
-            if (!projectAliases.has(normalizeText(rowProjects[index]))) continue;
-            const number = normalizeText(rowNumbers[index]);
-            if (seen.has(number)) {
-                throw new Error(`Le numero de document "${number}" est deja utilise dans ce projet.`);
+        const rowNames = listePlanContext.data.Designation || listePlanContext.data.NomDocument || [];
+        const rowTypes = listePlanContext.data.Type_document || listePlanContext.data.Type_doc || [];
+        for (let index = 0; index < Math.max(rowProjects.length, rowNumbers.length, rowNames.length, rowTypes.length); index += 1) {
+            if (!projectAliases.has(normalizeDocumentIdentityPart(rowProjects[index]))) continue;
+            if (
+                !normalizeDocumentIdentityPart(rowNumbers[index]) ||
+                !normalizeDocumentIdentityPart(rowNames[index]) ||
+                !normalizeDocumentIdentityPart(rowTypes[index])
+            ) continue;
+            const rowIdentity = {
+                numero: rowNumbers[index],
+                name: rowNames[index],
+                type: rowTypes[index],
+            };
+            if (requestedIdentities.has(buildDocumentIdentityKey(rowIdentity))) {
+                throw new Error(
+                    `Le document "${rowIdentity.numero} - ${rowIdentity.name}" (${rowIdentity.type}) existe deja dans ce projet.`
+                );
             }
         }
     }
@@ -874,7 +903,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (hasDuplicate) {
-            alert("Des numeros de documents sont en doublons");
+            alert("Des documents identiques (numero, nom et type) sont en doublon");
             return;
         }
 
@@ -1771,7 +1800,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const isDuplicate = doc.numero && numeroCounts[duplicateKey] > 1;
                         if (isDuplicate) {
                             chip.style.borderColor = 'red';
-                            chip.title = `Numéro de document dupliqué pour ${type} - ${formatZoneLabel(doc.zone)}`;
+                            chip.title = `Document identique en doublon (${type})`;
                         }
 
                         const checkbox = document.createElement('input');
@@ -2139,7 +2168,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const isDuplicate = normalizeText(doc.numero) && duplicateCounts[duplicateKey] > 1;
                         if (isDuplicate) {
                             chip.style.borderColor = 'red';
-                            chip.title = `Numero de document duplique pour ${typeKey} - ${formatZoneLabel(doc.zone)}`;
+                            chip.title = `Document identique en doublon (${typeKey})`;
                         }
 
                         const checkbox = document.createElement('input');
@@ -2551,7 +2580,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             projectData.name = cleanProjectName(projectData.name);
             projectData.number = (projectData.number ?? "").toString().trim();
-            await assertProjectCreationDocumentNumbersAvailable(projectData.name, projectData.documents);
+            await assertProjectCreationDocumentIdentitiesAvailable(projectData.name, projectData.documents);
             const projetsTable = await grist.docApi.fetchTable("Projets2");
             const projetsColumns = getTableColumnNames(projetsTable);
             const projectFields = {
