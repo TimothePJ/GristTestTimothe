@@ -2090,24 +2090,6 @@ function createPrintZoneOrderItem(zoneValue, checked) {
   return item;
 }
 
-function createPrintIndexItem(indice) {
-  const item = document.createElement("label");
-  item.className = "print-index-item";
-  item.dataset.indice = indice;
-
-  const checkbox = document.createElement("input");
-  checkbox.type = "checkbox";
-  checkbox.checked = true;
-
-  const text = document.createElement("span");
-  text.className = "print-index-label";
-  text.textContent = indice;
-
-  item.appendChild(checkbox);
-  item.appendChild(text);
-  return item;
-}
-
 function getPrintDragAfterElement(container, y, itemSelector) {
   const items = [...container.querySelectorAll(`${itemSelector}:not(.is-dragging)`)];
 
@@ -2154,15 +2136,15 @@ function openPrintOptionsDialog(availableTypes, availableZones, availableIndices
     const dialog = document.getElementById("dlg-print-options");
     const typeList = document.getElementById("printTypeOrderList");
     const zoneList = document.getElementById("printZoneOrderList");
-    const indexList = document.getElementById("printIndexList");
     const cancelBtn = document.getElementById("print-options-cancel");
     const confirmBtn = document.getElementById("print-options-confirm");
+    const selectedIndices = [...availableIndices];
 
-    if (!dialog || !typeList || !zoneList || !indexList || !cancelBtn || !confirmBtn || typeof dialog.showModal !== "function") {
+    if (!dialog || !typeList || !zoneList || !cancelBtn || !confirmBtn || typeof dialog.showModal !== "function") {
       resolve({
         orderedTypes: [...getDefaultPrintSelectedTypes(availableTypes)],
         orderedZones: [...getDefaultPrintSelectedZones(availableZones)],
-        selectedIndices: [...availableIndices]
+        selectedIndices
       });
       return;
     }
@@ -2177,11 +2159,6 @@ function openPrintOptionsDialog(availableTypes, availableZones, availableIndices
     zoneList.innerHTML = "";
     availableZones.forEach((zoneValue) => {
       zoneList.appendChild(createPrintZoneOrderItem(zoneValue, selectedZones.has(zoneValue)));
-    });
-
-    indexList.innerHTML = "";
-    availableIndices.forEach((indice) => {
-      indexList.appendChild(createPrintIndexItem(indice));
     });
 
     if (!typeList.__printDragBound) {
@@ -2201,11 +2178,6 @@ function openPrintOptionsDialog(availableTypes, availableZones, availableIndices
     const getSelectedZones = () => Array.from(zoneList.querySelectorAll(".print-zone-order-item"))
       .filter((item) => item.querySelector('input[type="checkbox"]')?.checked)
       .map((item) => item.dataset.zoneValue)
-      .filter(Boolean);
-
-    const getSelectedIndices = () => Array.from(indexList.querySelectorAll(".print-index-item"))
-      .filter((item) => item.querySelector('input[type="checkbox"]')?.checked)
-      .map((item) => normalizePrintIndexValue(item.dataset.indice))
       .filter(Boolean);
 
     const cleanup = () => {
@@ -2233,11 +2205,6 @@ function openPrintOptionsDialog(availableTypes, availableZones, availableIndices
       const orderedZones = getSelectedZones();
       if (orderedZones.length === 0) {
         alert("Selectionnez au moins une zone a imprimer.");
-        return;
-      }
-      const selectedIndices = getSelectedIndices();
-      if (selectedIndices.length === 0) {
-        alert("Selectionnez au moins un indice a imprimer.");
         return;
       }
       closeWith({ orderedTypes, orderedZones, selectedIndices });
