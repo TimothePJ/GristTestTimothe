@@ -269,6 +269,73 @@ document.addEventListener('DOMContentLoaded', () => {
         return candidateColumns.find((columnName) => Array.isArray(teamData?.[columnName])) || null;
     }
 
+    function normalizeTeamIdentityPart(value) {
+        return normalizeText(value)
+            .replace(/\s+/g, ' ')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLocaleLowerCase('fr');
+    }
+
+    function getTeamMemberRole(member = {}) {
+        return normalizeText(member.Role) || 'Non assigné';
+    }
+
+    function getTeamMemberDisplayName(member = {}) {
+        return [
+            normalizeText(member.Prenom),
+            normalizeText(member.Nom)
+        ].filter(Boolean).join(' ');
+    }
+
+    function buildTeamMemberIdentityKey(member = {}) {
+        return [
+            normalizeTeamIdentityPart(getTeamMemberRole(member)),
+            normalizeTeamIdentityPart(member.Prenom),
+            normalizeTeamIdentityPart(member.Nom)
+        ].join('||');
+    }
+
+    function compareTeamMembers(left = {}, right = {}) {
+        const options = { sensitivity: 'base', numeric: true };
+        return getTeamMemberDisplayName(left).localeCompare(getTeamMemberDisplayName(right), 'fr', options) ||
+            normalizeText(left.Nom).localeCompare(normalizeText(right.Nom), 'fr', options) ||
+            normalizeText(left.Prenom).localeCompare(normalizeText(right.Prenom), 'fr', options) ||
+            String(left.id ?? '').localeCompare(String(right.id ?? ''), 'fr', options);
+    }
+
+    function groupTeamMembersByRole(members = []) {
+        const groupedByRole = new Map();
+        const seen = new Set();
+
+        (members || []).forEach((member) => {
+            const role = getTeamMemberRole(member);
+            const memberWithRole = { ...member, Role: role };
+            const identityKey = buildTeamMemberIdentityKey(memberWithRole);
+            if (!getTeamMemberDisplayName(memberWithRole) || seen.has(identityKey)) {
+                return;
+            }
+
+            seen.add(identityKey);
+            if (!groupedByRole.has(role)) {
+                groupedByRole.set(role, []);
+            }
+            groupedByRole.get(role).push(memberWithRole);
+        });
+
+        groupedByRole.forEach((membersForRole) => {
+            membersForRole.sort(compareTeamMembers);
+        });
+
+        return groupedByRole;
+    }
+
+    function getSelectedTeamMembers() {
+        const selectedIds = new Set((projectData.team || []).map((id) => String(id)));
+        const selectedMembers = (teamMembers || []).filter((member) => selectedIds.has(String(member.id)));
+        return Array.from(groupTeamMembersByRole(selectedMembers).values()).flat();
+    }
+
     const LISTEPLAN_TABLE_CANDIDATES = [
         'ListePlan_NDC_COF',
         'ListePlan NDC+COF',
@@ -1550,26 +1617,19 @@ document.addEventListener('DOMContentLoaded', () => {
             Externe: externalColumn ? toBooleanFlag(teamData[externalColumn][index]) : false
         }));
 
-        const groupedByRole = teamMembers.reduce((acc, member) => {
-            const role = member.Role || 'Non assigné';
-            if (!acc[role]) {
-                acc[role] = [];
-            }
-            acc[role].push(member);
-            return acc;
-        }, {});
+        const groupedByRole = groupTeamMembersByRole(teamMembers);
 
         const teamSelectionContainer = document.getElementById('team-selection-container');
         teamSelectionContainer.innerHTML = '';
 
-        for (const role in groupedByRole) {
+        for (const [role, membersForRole] of groupedByRole) {
             const roleTitle = document.createElement('h3');
             roleTitle.textContent = role;
             teamSelectionContainer.appendChild(roleTitle);
 
             const roleContainer = document.createElement('div');
             roleContainer.classList.add('role-group');
-            groupedByRole[role].forEach(member => {
+            membersForRole.forEach(member => {
                 const label = document.createElement('label');
                 label.classList.add('team-member');
                 const checkbox = document.createElement('input');
@@ -1578,7 +1638,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const name = document.createElement('span');
                 name.className = 'team-member-name';
-                name.textContent = `${member.Prenom} ${member.Nom}`;
+                name.textContent = getTeamMemberDisplayName(member);
 
                 label.appendChild(checkbox);
                 label.appendChild(name);
@@ -1650,22 +1710,13 @@ document.addEventListener('DOMContentLoaded', () => {
             .join('');
 
         // Team
-        const selectedTeamMembers = (teamMembers || []).filter(member =>
-            (projectData.team || []).includes(member.id)
-        );
-
-        const groupedByRole = selectedTeamMembers.reduce((acc, member) => {
-            const role = member.Role || 'Non assigné';
-            if (!acc[role]) acc[role] = [];
-            acc[role].push(member);
-            return acc;
-        }, {});
+        const groupedByRole = groupTeamMembersByRole(getSelectedTeamMembers());
 
         let teamHtml = '';
-        for (const role in groupedByRole) {
-            teamHtml += `<h4>${role}</h4><ul>`;
-            groupedByRole[role].forEach(member => {
-                teamHtml += `<li>${member.Prenom} ${member.Nom}</li>`;
+        for (const [role, membersForRole] of groupedByRole) {
+            teamHtml += `<h4>${escapeReviewHtml(role)}</h4><ul>`;
+            membersForRole.forEach(member => {
+                teamHtml += `<li>${escapeReviewHtml(getTeamMemberDisplayName(member))}</li>`;
             });
             teamHtml += `</ul>`;
         }
@@ -2600,10 +2651,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // 3. Add Team Members
-            const selectedTeamMembers = teamMembers.filter(member => projectData.team.includes(member.id));
+            const selectedTeamMembers = getSelectedTeamMembers();
             const teamActions = selectedTeamMembers.map(member => {
-                const name = `${member.Prenom} ${member.Nom}`;
-                const role = member.Role;
+                const name = getTeamMemberDisplayName(member);
+                const role = getTeamMemberRole(member);
                 return ["AddRecord", "ProjectTeam", null, { NumeroProjet: projectData.number, Role: role, Name: name, Daily_Rate: 0 }];
             });
             if (teamActions.length > 0) {
