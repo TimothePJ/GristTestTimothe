@@ -75,6 +75,10 @@ let dopRegistryInProgress = false;
 let projectEditInProgress = false;
 let pendingProjectUpdatePreview = null;
 let gristSchemaPromise = null;
+const MEMBER_TABLE_COLUMN_COUNT = 5;
+const MEMBER_TABLE_HEADERS = ['Prénom', 'Nom', 'Email', 'IdTrefle', ''];
+const collapsedServiceGroups = new Set();
+const collapsedRoleGroups = new Set();
 
 function asText(value) {
   if (value == null) return '';
@@ -368,6 +372,126 @@ function appendCell(row, value) {
   row.appendChild(cell);
 }
 
+function compareFrenchText(left, right) {
+  return asText(left).localeCompare(asText(right), 'fr', {
+    numeric: true,
+    sensitivity: 'base',
+  });
+}
+
+function getGroupLabel(value) {
+  return asText(value) || 'Non renseigné';
+}
+
+function getGroupKey(...values) {
+  return JSON.stringify(values.map(getGroupLabel));
+}
+
+function findGroupToggleButton(groupType, groupKey) {
+  return Array.from(document.querySelectorAll('.group-toggle'))
+    .find(button =>
+      button.dataset.groupType === groupType &&
+      button.dataset.groupKey === groupKey
+    ) || null;
+}
+
+function restoreGroupTogglePosition(groupType, groupKey, anchorTop, scrollContainer) {
+  const nextButton = findGroupToggleButton(groupType, groupKey);
+  if (!nextButton) return;
+
+  let topDelta = nextButton.getBoundingClientRect().top - anchorTop;
+  if (scrollContainer) {
+    scrollContainer.scrollTop += topDelta;
+    topDelta = nextButton.getBoundingClientRect().top - anchorTop;
+  }
+
+  if (topDelta) {
+    window.scrollBy(0, topDelta);
+  }
+
+  nextButton.focus({ preventScroll: true });
+}
+
+function toggleCollapsedGroup(groupType, groupKey, anchorButton = null) {
+  const anchorTop = anchorButton?.getBoundingClientRect().top ?? null;
+  const scrollContainer = anchorButton?.closest('.table-container') || null;
+  const groups = groupType === 'service' ? collapsedServiceGroups : collapsedRoleGroups;
+
+  if (groups.has(groupKey)) {
+    groups.delete(groupKey);
+  } else {
+    groups.add(groupKey);
+  }
+
+  populateTable();
+
+  if (anchorTop !== null) {
+    restoreGroupTogglePosition(groupType, groupKey, anchorTop, scrollContainer);
+    requestAnimationFrame(() => {
+      restoreGroupTogglePosition(groupType, groupKey, anchorTop, scrollContainer);
+    });
+  }
+}
+
+function appendGroupRow(tableBody, className, label, options = {}) {
+  const row = document.createElement('tr');
+  row.className = className;
+
+  const cell = document.createElement('td');
+  cell.colSpan = MEMBER_TABLE_COLUMN_COUNT;
+
+  if (options.groupType && options.groupKey) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'group-toggle';
+    button.dataset.groupType = options.groupType;
+    button.dataset.groupKey = options.groupKey;
+    button.setAttribute('aria-expanded', String(!options.collapsed));
+
+    const arrow = document.createElement('span');
+    arrow.className = 'group-toggle-arrow';
+    arrow.setAttribute('aria-hidden', 'true');
+    arrow.textContent = options.collapsed ? '▶' : '▼';
+
+    const text = document.createElement('span');
+    text.textContent = label;
+
+    button.appendChild(arrow);
+    button.appendChild(text);
+    cell.appendChild(button);
+  } else {
+    cell.textContent = label;
+  }
+
+  row.appendChild(cell);
+  tableBody.appendChild(row);
+}
+
+function appendServiceSpacerRow(tableBody) {
+  const row = document.createElement('tr');
+  row.className = 'service-spacer';
+
+  const cell = document.createElement('td');
+  cell.colSpan = MEMBER_TABLE_COLUMN_COUNT;
+
+  row.appendChild(cell);
+  tableBody.appendChild(row);
+}
+
+function appendMemberHeaderRow(tableBody) {
+  const row = document.createElement('tr');
+  row.className = 'member-header';
+
+  MEMBER_TABLE_HEADERS.forEach((label) => {
+    const cell = document.createElement('th');
+    cell.scope = 'col';
+    cell.textContent = label;
+    row.appendChild(cell);
+  });
+
+  tableBody.appendChild(row);
+}
+
 function populateTable() {
   const tableBody = document.getElementById('tableBody');
   tableBody.innerHTML = '';
@@ -381,7 +505,7 @@ function populateTable() {
     row.className = 'empty-row';
 
     const cell = document.createElement('td');
-    cell.colSpan = 7;
+    cell.colSpan = MEMBER_TABLE_COLUMN_COUNT;
     cell.textContent = 'Aucun membre dans la table Team.';
 
     row.appendChild(cell);
@@ -390,17 +514,69 @@ function populateTable() {
     return;
   }
 
-  records.forEach(record => {
+  const sortedRecords = [...records].sort((left, right) =>
+    compareFrenchText(getGroupLabel(left.Service), getGroupLabel(right.Service)) ||
+    compareFrenchText(getGroupLabel(left.Role), getGroupLabel(right.Role)) ||
+    compareFrenchText(left.Nom, right.Nom) ||
+    compareFrenchText(left.Prenom, right.Prenom) ||
+    compareFrenchText(left.Email, right.Email) ||
+    compareFrenchText(left.id, right.id)
+  );
+
+  let currentService = null;
+  let currentRole = null;
+
+  sortedRecords.forEach(record => {
+    const serviceLabel = getGroupLabel(record.Service);
+    const roleLabel = getGroupLabel(record.Role);
+    const serviceKey = getGroupKey(serviceLabel);
+    const roleKey = getGroupKey(serviceLabel, roleLabel);
+    const isServiceCollapsed = collapsedServiceGroups.has(serviceKey);
+    const isRoleCollapsed = collapsedRoleGroups.has(roleKey);
+
+    if (serviceLabel !== currentService) {
+      if (currentService !== null) {
+        appendServiceSpacerRow(tableBody);
+      }
+
+      currentService = serviceLabel;
+      currentRole = null;
+      appendGroupRow(tableBody, 'service-group', `Service : ${serviceLabel}`, {
+        collapsed: isServiceCollapsed,
+        groupKey: serviceKey,
+        groupType: 'service',
+      });
+    }
+
+    if (isServiceCollapsed) {
+      return;
+    }
+
+    if (roleLabel !== currentRole) {
+      currentRole = roleLabel;
+      appendGroupRow(tableBody, 'role-group', `Rôle : ${roleLabel}`, {
+        collapsed: isRoleCollapsed,
+        groupKey: roleKey,
+        groupType: 'role',
+      });
+
+      if (!isRoleCollapsed) {
+        appendMemberHeaderRow(tableBody);
+      }
+    }
+
+    if (isRoleCollapsed) {
+      return;
+    }
+
     const row = document.createElement('tr');
     row.dataset.recordId = record.id;
 
     appendCell(row, record.Prenom || '');
     appendCell(row, record.Nom || '');
     appendCell(row, record.Email || '');
-    appendCell(row, record.Service || '');
-    appendCell(row, record.Role || '');
     appendCell(row, record.IdTrefle || '');
-    appendCell(row, toBooleanFlag(record.Externe) ? 'Oui' : 'Non');
+    appendCell(row, toBooleanFlag(record.Externe) ? 'Externe' : '');
 
     if (String(record.id) === String(selectedRecordId)) {
       row.classList.add('selected');
@@ -1301,6 +1477,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const cancelProjectUpdateButton = document.getElementById('cancelProjectUpdateButton');
 
   tableBody.addEventListener('click', event => {
+    const toggleButton = event.target.closest('.group-toggle');
+    if (toggleButton) {
+      toggleCollapsedGroup(
+        toggleButton.dataset.groupType,
+        toggleButton.dataset.groupKey,
+        toggleButton
+      );
+      return;
+    }
+
     const row = event.target.closest('tr[data-record-id]');
     if (!row) return;
     setSelectedRecordId(row.dataset.recordId);
@@ -1313,15 +1499,19 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   addMemberButton.addEventListener('click', openAddDialog);
-  editMemberButton.addEventListener('click', openEditDialog);
-  deleteMemberButton.addEventListener('click', async () => {
-    try {
-      await deleteSelectedRecord();
-    } catch (error) {
-      console.error('Error deleting record:', error);
-      alert('Une erreur est survenue pendant la suppression du membre.');
-    }
-  });
+  if (editMemberButton) {
+    editMemberButton.addEventListener('click', openEditDialog);
+  }
+  if (deleteMemberButton) {
+    deleteMemberButton.addEventListener('click', async () => {
+      try {
+        await deleteSelectedRecord();
+      } catch (error) {
+        console.error('Error deleting record:', error);
+        alert('Une erreur est survenue pendant la suppression du membre.');
+      }
+    });
+  }
 
   addRowOption.addEventListener('click', openAddDialog);
   editOption.addEventListener('click', openEditDialog);
