@@ -14,6 +14,7 @@
 /* Tableau */
 .plan-table {
   width: max-content;
+  min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   background-color: #ffffff;
@@ -22,6 +23,19 @@
   border: 1px solid #d6e0ea;
   border-radius: 0 0 8px 8px;
   overflow: hidden;
+}
+
+.plan-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
+}
+
+.plan-table-scroll .plan-table {
+  border-left: 0;
+  border-right: 0;
+  border-radius: 0;
 }
 
 /* Cellules */
@@ -170,18 +184,16 @@
   box-shadow: inset 5px 0 0 #b8d7f2;
 }
 
-.plan-type-section > .plan-table {
-  border-left: 0;
-  border-right: 0;
-  border-radius: 0;
+.plan-type-section > .plan-table-scroll {
   width: 100%;
 }
 
-.plan-zone-section > .plan-table {
-  border-left: 0;
-  border-right: 0;
+.plan-zone-section > .plan-table-scroll {
+  width: 100%;
+}
+
+.plan-zone-section > .plan-table-scroll .plan-table {
   border-bottom: 0;
-  border-radius: 0;
 }
 
 .plan-group-toggle {

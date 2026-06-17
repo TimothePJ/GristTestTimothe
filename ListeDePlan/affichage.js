@@ -1139,7 +1139,7 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
   }
 }
 
-function renderPlanTableSection(container, filtres, projet, selectedIndices = null) {
+function renderPlanTableSection(container, filtres, projet, selectedIndices = null, { wrapTable = true } = {}) {
   if (!container || filtres.length === 0) return;
   /*
     zone.innerHTML = "<p>Aucun plan trouvé pour cette sélection.</p>";
@@ -1314,7 +1314,15 @@ function renderPlanTableSection(container, filtres, projet, selectedIndices = nu
   if (warningDiv.childElementCount > 0) {
     container.appendChild(warningDiv);
   }
-  container.appendChild(table);
+
+  if (wrapTable) {
+    const tableScroll = document.createElement("div");
+    tableScroll.className = "plan-table-scroll";
+    tableScroll.appendChild(table);
+    container.appendChild(tableScroll);
+  } else {
+    container.appendChild(table);
+  }
 }
 
 function getPlanTableIndicesToShow(plansMap, selectedIndices = null) {
@@ -1394,7 +1402,9 @@ function renderZoneSections(container, rows, projet, typeKey, zoneOrder = null, 
     zoneSection.appendChild(title);
 
     if (!isCollapsed) {
-      renderPlanTableSection(zoneSection, rowsByZone.get(zoneKey), projet, selectedIndices);
+      renderPlanTableSection(zoneSection, rowsByZone.get(zoneKey), projet, selectedIndices, {
+        wrapTable: interactive,
+      });
     }
     container.appendChild(zoneSection);
   }
@@ -1410,7 +1420,9 @@ function renderRowsForSelectedType(container, rows, projet, typeKey = "", zoneOr
     return;
   }
 
-  renderPlanTableSection(container, rows, projet, selectedIndices);
+  renderPlanTableSection(container, rows, projet, selectedIndices, {
+    wrapTable: options.interactive !== false,
+  });
 }
 
 function renderTypeSection(container, typeKey, rows, projet, zoneOrder = null, selectedIndices = null, { interactive = true } = {}) {
