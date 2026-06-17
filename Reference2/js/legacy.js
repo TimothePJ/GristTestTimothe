@@ -411,6 +411,9 @@ let selectedFirstValue = '';
 let selectedSecondValue = '';
 let selectedTypeValue = '';
 let selectedDocNumber = null; let selectedDocName = ''; let selectedDocZone = '';
+const REFERENCE_ALL_ZONES_VALUE = '__ALL_ZONES__';
+const REFERENCE_NO_ZONE_VALUE = '__NO_ZONE__';
+let selectedZoneValue = REFERENCE_ALL_ZONES_VALUE;
 
 // --- ListePlan NDC+COF integration (création automatique lors de l'ajout de document(s)) ---
 const LISTEPLAN_TABLE_CANDIDATES = ['ListePlan_NDC_COF', 'ListePlan NDC+COF', 'ListePlan_NDC+COF'];
@@ -860,6 +863,33 @@ function formatZoneLabel(value) {
   return normalized || 'Sans zone';
 }
 
+function getCurrentSelectedZone() {
+  const dropdown = document.getElementById('zoneDropdown');
+  return _norm(dropdown?.value || selectedZoneValue || REFERENCE_ALL_ZONES_VALUE);
+}
+
+function getZoneDropdownOptionValue(zoneValue) {
+  const normalizedZone = normalizeZoneValue(zoneValue);
+  return normalizedZone || REFERENCE_NO_ZONE_VALUE;
+}
+
+function getZoneDropdownOptionLabel(zoneValue) {
+  return normalizeZoneValue(zoneValue) || 'Sans zone';
+}
+
+function isAllReferenceZonesSelection(zoneValue) {
+  const normalizedValue = _norm(zoneValue || REFERENCE_ALL_ZONES_VALUE);
+  return !normalizedValue || normalizedValue === REFERENCE_ALL_ZONES_VALUE;
+}
+
+function matchesReferenceZoneSelection(zoneValue, selectionValue = getCurrentSelectedZone()) {
+  if (isAllReferenceZonesSelection(selectionValue)) return true;
+  if (_norm(selectionValue) === REFERENCE_NO_ZONE_VALUE) {
+    return !normalizeZoneValue(zoneValue);
+  }
+  return normalizeZoneMatchKey(zoneValue) === normalizeZoneMatchKey(selectionValue);
+}
+
 function buildDocSelectValue({ numero = null, name = '', zone = '', type = '' } = {}) {
   return JSON.stringify({
     numero: parseNumeroForStorage(numero),
@@ -1082,6 +1112,75 @@ function collectProjectZones(projectName) {
   return zones.sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base', numeric: true }));
 }
 
+function collectProjectZoneFilterValues(projectName, typeValue = '') {
+  const project = normalizeReferenceDocumentIdentityPart(projectName);
+  const normalizedType = normalizeTypeDocument(typeValue);
+  if (!project || !Array.isArray(records)) return [];
+
+  const zonesByKey = new Map();
+  records.forEach((record) => {
+    if (normalizeReferenceDocumentIdentityPart(record.NomProjet) !== project) return;
+    if (
+      normalizedType &&
+      normalizeReferenceDocumentIdentityPart(record.Type_document) !==
+        normalizeReferenceDocumentIdentityPart(normalizedType)
+    ) return;
+
+    const zone = normalizeZoneValue(record.Zone);
+    const zoneKey = zone ? normalizeZoneMatchKey(zone) : REFERENCE_NO_ZONE_VALUE;
+    if (!zonesByKey.has(zoneKey)) {
+      zonesByKey.set(zoneKey, zone);
+    }
+  });
+
+  return Array.from(zonesByKey.values()).sort(compareZoneKeys);
+}
+
+function resetZoneDropdown(disabled = true) {
+  const dropdown = document.getElementById('zoneDropdown');
+  if (!dropdown) return;
+
+  dropdown.innerHTML = `<option value="${REFERENCE_ALL_ZONES_VALUE}">Toutes les zones</option>`;
+  dropdown.value = REFERENCE_ALL_ZONES_VALUE;
+  dropdown.disabled = disabled;
+  selectedZoneValue = REFERENCE_ALL_ZONES_VALUE;
+}
+
+function populateZoneDropdown(selectedProject, preferredValue = null) {
+  const dropdown = document.getElementById('zoneDropdown');
+  if (!dropdown) return;
+
+  const project = _norm(selectedProject);
+  const desiredValue = _norm(
+    preferredValue != null ? preferredValue : (selectedZoneValue || dropdown.value || REFERENCE_ALL_ZONES_VALUE)
+  );
+
+  dropdown.innerHTML = `<option value="${REFERENCE_ALL_ZONES_VALUE}">Toutes les zones</option>`;
+
+  if (!project) {
+    dropdown.value = REFERENCE_ALL_ZONES_VALUE;
+    dropdown.disabled = true;
+    selectedZoneValue = REFERENCE_ALL_ZONES_VALUE;
+    return;
+  }
+
+  const zoneValues = collectProjectZoneFilterValues(project, getCurrentSelectedType());
+  zoneValues.forEach((zoneValue) => {
+    const option = document.createElement('option');
+    option.value = getZoneDropdownOptionValue(zoneValue);
+    option.textContent = getZoneDropdownOptionLabel(zoneValue);
+    dropdown.appendChild(option);
+  });
+
+  const availableValues = new Set(zoneValues.map((zoneValue) => getZoneDropdownOptionValue(zoneValue)));
+  dropdown.value =
+    desiredValue === REFERENCE_ALL_ZONES_VALUE || availableValues.has(desiredValue)
+      ? desiredValue || REFERENCE_ALL_ZONES_VALUE
+      : REFERENCE_ALL_ZONES_VALUE;
+  selectedZoneValue = dropdown.value || REFERENCE_ALL_ZONES_VALUE;
+  dropdown.disabled = false;
+}
+
 function projectHasStructuredZones(projectName) {
   return collectProjectZones(projectName).length > 0;
 }
@@ -1102,6 +1201,7 @@ function refreshZoneSuggestionList(datalistId, projectName) {
 function collectProjectDocumentEntries(projectName, typeValue = '') {
   const project = normalizeReferenceDocumentIdentityPart(projectName);
   const normalizedType = normalizeTypeDocument(typeValue);
+  const selectedZone = getCurrentSelectedZone();
   if (!project || !Array.isArray(records)) return [];
 
   const docsByKey = new Map();
@@ -1113,6 +1213,7 @@ function collectProjectDocumentEntries(projectName, typeValue = '') {
       normalizeReferenceDocumentIdentityPart(record.Type_document) !==
         normalizeReferenceDocumentIdentityPart(normalizedType)
     ) return;
+    if (!matchesReferenceZoneSelection(record.Zone, selectedZone)) return;
 
     const name = _norm(record.NomDocument);
     if (!name) return;
@@ -2555,6 +2656,7 @@ async function resetUnifiedAddDocumentsDialog() {
 
 async function openUnifiedAddDocumentsDialog() {
   if (!selectedFirstValue) {
+    resetZoneDropdown(true);
     alert("Veuillez sélectionner un projet avant d'ajouter des documents.");
     restoreLastDocumentSelection();
     return;
@@ -3146,6 +3248,7 @@ function populateFirstColumnDropdown(values) {
     selectedFirstValue = restoredProject;
     selectedTypeValue = selectedTypeValue || '';
     populateTypeDocumentDropdown(restoredProject, selectedTypeValue);
+    populateZoneDropdown(restoredProject, selectedZoneValue);
     populateSecondColumnListbox(restoredProject, selectedSecondValue || lastValidDocument || '');
     updateEmetteurList();
   }
@@ -3162,8 +3265,10 @@ document.getElementById('firstColumnDropdown').addEventListener('change', functi
   selectedTypeValue = '';
   selectedSecondValue = '';
   lastValidDocument = '';
+  selectedZoneValue = REFERENCE_ALL_ZONES_VALUE;
 
   if (!selectedFirstValue) {
+    resetZoneDropdown(true);
     secondDropdown.disabled = true; // Désactiver la seconde liste
     secondDropdown.innerHTML = '<option value="">Sélectionner un étage</option>';
     tableBody.innerHTML = '';
@@ -3172,6 +3277,7 @@ document.getElementById('firstColumnDropdown').addEventListener('change', functi
   }
 
   secondDropdown.disabled = false; // Activer la seconde liste si un projet est sélectionné
+  populateZoneDropdown(selectedFirstValue, REFERENCE_ALL_ZONES_VALUE);
   populateSecondColumnListbox(selectedFirstValue); // Actualiser la liste
   updateEmetteurList();
   secondDropdown.value = '';
@@ -3938,7 +4044,10 @@ grist.onRecords(function (receivedRecords, tableId) {
   if (newTable) {
     newTable = false; // Reset the flag after handling the new table
     const preferredType = normalizeTypeDocument(newTableType || selectedTypeValue);
+    const parsedNewDoc = parseDocValue(newTableName);
+    const preferredZone = normalizeZoneValue(parsedNewDoc.zone) || REFERENCE_NO_ZONE_VALUE;
     populateTypeDocumentDropdown(selectedFirstValue, preferredType, preferredType ? [preferredType] : []);
+    populateZoneDropdown(selectedFirstValue, preferredZone);
     populateSecondColumnListbox(selectedFirstValue, newTableName);
     updateEmetteurList(); // Met à jour la liste des émetteurs en fonction du projet sélectionné
 
@@ -3949,7 +4058,6 @@ grist.onRecords(function (receivedRecords, tableId) {
     // Déclenche l'affichage du tableau correspondant
     selectedSecondValue = newTableName;
     lastValidDocument = newTableName;
-    const parsedNewDoc = parseDocValue(newTableName);
     selectedDocName = parsedNewDoc.name || '';
     selectedDocNumber = parseNumeroForStorage(parsedNewDoc.numero);
     selectedDocZone = normalizeZoneValue(parsedNewDoc.zone);
@@ -6091,6 +6199,7 @@ document.getElementById('thirdColumnDropdown').addEventListener('change', functi
   const tableHeader = document.getElementById('tableHeader');
 
   selectedTypeValue = normalizeTypeDocument(this.value);
+  populateZoneDropdown(selectedFirstValue, selectedZoneValue);
   populateSecondColumnListbox(selectedFirstValue, selectedSecondValue || lastValidDocument || '');
 
   if (selectedFirstValue && selectedSecondValue) {
@@ -6099,6 +6208,23 @@ document.getElementById('thirdColumnDropdown').addEventListener('change', functi
   } else {
     tableBody.innerHTML = '';
     tableHeader.innerHTML = '';
+  }
+});
+
+document.getElementById('zoneDropdown')?.addEventListener('change', function () {
+  const tableBody = document.getElementById('tableBody');
+  const tableHeader = document.getElementById('tableHeader');
+  const preferredDocument = selectedSecondValue || lastValidDocument || '';
+
+  selectedZoneValue = _norm(this.value || REFERENCE_ALL_ZONES_VALUE);
+  populateSecondColumnListbox(selectedFirstValue, preferredDocument);
+
+  if (selectedFirstValue && selectedSecondValue) {
+    populateTable();
+    scheduleReferenceRetardReconciliation();
+  } else {
+    if (tableBody) tableBody.innerHTML = '';
+    if (tableHeader) tableHeader.innerHTML = '';
   }
 });
 
@@ -6113,12 +6239,14 @@ document.getElementById('firstColumnDropdown').addEventListener('change', functi
   selectedTypeValue = '';
   selectedSecondValue = '';
   lastValidDocument = '';
+  selectedZoneValue = REFERENCE_ALL_ZONES_VALUE;
   selectedDocName = '';
   selectedDocNumber = null;
   selectedDocZone = '';
 
   if (!project) {
     populateTypeDocumentDropdown('');
+    resetZoneDropdown(true);
     secondDropdown.disabled = true;
     secondDropdown.innerHTML = DOC_SELECT_PLACEHOLDER_HTML;
     tableBody.innerHTML = '';
@@ -6127,6 +6255,7 @@ document.getElementById('firstColumnDropdown').addEventListener('change', functi
   }
 
   populateTypeDocumentDropdown(project);
+  populateZoneDropdown(project, REFERENCE_ALL_ZONES_VALUE);
   populateSecondColumnListbox(project, '');
 });
 
@@ -6153,12 +6282,14 @@ grist.onRecords(function (receivedRecords, tableId) {
 
   if (!selectedFirstValue) {
     populateTypeDocumentDropdown('');
+    resetZoneDropdown(true);
     if (tableBody) tableBody.innerHTML = '';
     if (tableHeader) tableHeader.innerHTML = '';
     return;
   }
 
   populateTypeDocumentDropdown(selectedFirstValue, selectedTypeValue);
+  populateZoneDropdown(selectedFirstValue, selectedZoneValue);
   populateSecondColumnListbox(selectedFirstValue, selectedSecondValue || lastValidDocument || '');
   if (!selectedSecondValue) {
     if (tableBody) tableBody.innerHTML = '';

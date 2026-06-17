@@ -824,6 +824,10 @@ function getPhaseBusinessEnd(item) {
 }
 
 function buildPhaseTooltipHtml(item, group) {
+  if (item?.tooltipHtml) {
+    return String(item.tooltipHtml);
+  }
+
   const cls = String(item?.className || "");
   const tache = String(item?.taskLabel || group?.tachesLabel || "Tache");
   const businessStart = getPhaseBusinessStart(item);
@@ -925,6 +929,10 @@ function buildPhaseTooltipHtml(item, group) {
 }
 
 function getNativePhaseTitle(item, group) {
+  if (item?.nativeTitle) {
+    return String(item.nativeTitle);
+  }
+
   const cls = String(item?.className || "");
   const tache = String(item?.taskLabel || group?.tachesLabel || "Tache");
   const businessStart = getPhaseBusinessStart(item);

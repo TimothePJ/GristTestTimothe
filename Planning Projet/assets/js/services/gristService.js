@@ -215,6 +215,13 @@ function formatIsoDate(date) {
   return `${y}-${m}-${d}`;
 }
 
+function shiftIsoDate(dateValue, dayDelta = 0) {
+  const date = parseCalendarDate(dateValue);
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  date.setDate(date.getDate() + Number(dayDelta || 0));
+  return formatIsoDate(date);
+}
+
 function isCoffrageTypeDoc(value) {
   return String(value ?? "").toUpperCase().includes("COFFRAGE");
 }
@@ -3055,6 +3062,99 @@ export async function fetchPlanningRows() {
   const rows = await fetchTableRows(table.sourceTable);
   _planningRowsCache = rows;  // alimente le cache pour fetchPlanningRowById
   return rows;
+}
+
+export async function fetchPlanningReferenceReceptionSummaries(planningRows = []) {
+  const rows = Array.isArray(planningRows) ? planningRows : [];
+  if (!rows.length) return new Map();
+
+  const table = APP_CONFIG.grist.planningTable;
+  const columns = table.columns || {};
+  const idCol = columns.id || "id";
+  const allReferenceRows = await fetchTableRows(REFERENCES_TABLE_NAME).catch(() => []);
+  const referenceRows = filterReferenceRowsForPlanningRows(allReferenceRows, rows, columns);
+  const referenceLookup = buildLinkedReferenceLookup(referenceRows);
+  const summariesByRowId = new Map();
+
+  rows.forEach((planningRow) => {
+    const rowId = Number(planningRow?.[idCol]);
+    if (!Number.isInteger(rowId) || rowId <= 0) return;
+
+    const startDate = getPlanningSegmentStartDate(planningRow, columns);
+    const hasStartDate = startDate instanceof Date && !Number.isNaN(startDate.getTime());
+    const linkedRows = referenceLookup
+      ? findLinkedReferenceRowsFromLookup(planningRow, referenceLookup, columns)
+      : findLinkedReferenceRowsForPlanningRow(planningRow, referenceRows, columns);
+
+    const references = (linkedRows || [])
+      .filter((referenceRow) => Boolean(referenceRow?.Bloquant))
+      .map((referenceRow) => {
+        const durationText = toText(referenceRow?.DureeLimite);
+        const hasDuration = Boolean(durationText);
+        const durationWeeks = parseReferenceDurationLimit(referenceRow?.DureeLimite);
+        const storedDateLimiteIso = formatReferenceDateIso(referenceRow?.DateLimite);
+        const computedDateLimiteIso =
+          storedDateLimiteIso ||
+          (
+            hasStartDate
+              ? formatIsoDate(subtractWeeksFromDate(startDate, durationWeeks ?? 0))
+              : ""
+          );
+        const timelineDateLimiteIso =
+          !hasDuration && computedDateLimiteIso
+            ? shiftIsoDate(computedDateLimiteIso, -1)
+            : computedDateLimiteIso;
+        const recuIso = formatReferenceDateIso(referenceRow?.Recu);
+        return {
+          id: Number(referenceRow?.id) || null,
+          emetteur: toText(referenceRow?.Emetteur),
+          reference: toText(referenceRow?.Reference),
+          dateLimiteIso: computedDateLimiteIso,
+          timelineDateLimiteIso,
+          durationWeeks,
+          durationIsBlank: !hasDuration,
+          recuIso,
+          received: Boolean(recuIso),
+        };
+      })
+      .filter((reference) => reference.dateLimiteIso)
+      .sort((left, right) => {
+        const dateCmp = String(left.dateLimiteIso || "").localeCompare(String(right.dateLimiteIso || ""));
+        if (dateCmp !== 0) return dateCmp;
+        if (left.durationIsBlank !== right.durationIsBlank) {
+          return left.durationIsBlank ? -1 : 1;
+        }
+        return [left.emetteur, left.reference].join(" ").localeCompare(
+          [right.emetteur, right.reference].join(" "),
+          "fr",
+          { sensitivity: "base", numeric: true }
+        );
+      });
+
+    if (!references.length) return;
+
+    const receivedCount = references.filter((reference) => reference.received).length;
+    const missingCount = references.length - receivedCount;
+    const status =
+      missingCount === 0
+        ? "complete"
+        : receivedCount === 0
+        ? "missing"
+        : "mixed";
+
+    summariesByRowId.set(rowId, {
+      rowId,
+      firstDateLimiteIso: references[0].dateLimiteIso,
+      firstTimelineDateLimiteIso: references[0].timelineDateLimiteIso || references[0].dateLimiteIso,
+      status,
+      receivedCount,
+      missingCount,
+      totalCount: references.length,
+      references,
+    });
+  });
+
+  return summariesByRowId;
 }
 
 export async function fetchListePlanRows() {

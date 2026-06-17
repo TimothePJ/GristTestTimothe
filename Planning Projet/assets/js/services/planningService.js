@@ -668,6 +668,67 @@ function fmtDateIso(date) {
   return `${y}-${m}-${d}`;
 }
 
+function getReferenceReceptionSummary(rowId, lookup) {
+  const normalizedRowId = Number(rowId);
+  if (!Number.isInteger(normalizedRowId) || normalizedRowId <= 0 || !lookup) {
+    return null;
+  }
+
+  if (lookup instanceof Map) {
+    return lookup.get(normalizedRowId) || lookup.get(String(normalizedRowId)) || null;
+  }
+
+  if (typeof lookup === "object") {
+    return lookup[normalizedRowId] || lookup[String(normalizedRowId)] || null;
+  }
+
+  return null;
+}
+
+function buildReferenceReceptionTooltipHtml(row, summary) {
+  const references = Array.isArray(summary?.references) ? summary.references : [];
+  const rows = references
+    .map((reference) => {
+      const isReceived = Boolean(reference?.received);
+      const color = isReceived ? "#86efac" : "#fca5a5";
+      const status = isReceived ? "Recu" : "Manquant";
+      const emetteur = escapeHtml(reference?.emetteur || "Donnee");
+      const refLabel = escapeHtml(reference?.reference || "-");
+      const dateLabel = escapeHtml(reference?.dateLimiteIso || "");
+      const recuLabel = reference?.recuIso ? ` - recu le ${escapeHtml(reference.recuIso)}` : "";
+      return `
+        <div style="display:flex;gap:6px;align-items:flex-start;color:${color};">
+          <span style="font-weight:800;">&bull;</span>
+          <span><strong>${emetteur}</strong> - ${refLabel} : ${status}${recuLabel}${dateLabel ? ` (${dateLabel})` : ""}</span>
+        </div>
+      `;
+    })
+    .join("");
+
+  return `
+    <div><strong>${escapeHtml(row?.taches || "Tache")}</strong></div>
+    <div>Données d'entrées bloquantes</div>
+    <div>Première date limite : <strong>${escapeHtml(summary?.firstDateLimiteIso || "")}</strong></div>
+    <div>${Number(summary?.receivedCount) || 0} recue(s) / ${Number(summary?.missingCount) || 0} manquante(s)</div>
+    <div style="margin-top:6px;display:grid;gap:3px;">${rows}</div>
+  `;
+}
+
+function buildReferenceReceptionNativeTitle(row, summary) {
+  const references = Array.isArray(summary?.references) ? summary.references : [];
+  return [
+    row?.taches || "Tache",
+    "Données d'entrées bloquantes",
+    `Première date limite : ${summary?.firstDateLimiteIso || ""}`,
+    `${Number(summary?.receivedCount) || 0} recue(s) / ${Number(summary?.missingCount) || 0} manquante(s)`,
+    ...references.map((reference) => {
+      const status = reference?.received ? "Recu" : "Manquant";
+      const recuLabel = reference?.recuIso ? ` - recu le ${reference.recuIso}` : "";
+      return `${reference?.emetteur || "Donnee"} - ${reference?.reference || "-"} : ${status}${recuLabel}`;
+    }),
+  ].join("\n");
+}
+
 function isIsoDateValue(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
 }
@@ -790,6 +851,9 @@ function createPhaseItem({
   className,
   title,
   style = "",
+  tooltipHtml = "",
+  nativeTitle = "",
+  referenceReception = null,
 }) {
   return {
     id: itemId,
@@ -802,9 +866,37 @@ function createPhaseItem({
     phaseLabel: label,
     className,
     title,
+    tooltipHtml,
+    nativeTitle,
+    referenceReception,
     type: "range",
     style,
   };
+}
+
+function createReferenceReceptionPhaseItem({ groupId, row, summary }) {
+  const firstDate = parseDate(summary?.firstTimelineDateLimiteIso || summary?.firstDateLimiteIso);
+  if (!firstDate) return null;
+
+  const endDate = addDays(firstDate, 1);
+  const status = ["complete", "missing", "mixed"].includes(summary?.status)
+    ? summary.status
+    : "missing";
+
+  return createPhaseItem({
+    itemId: `${groupId}-reference-reception`,
+    groupId,
+    start: firstDate,
+    end: endDate,
+    businessStart: firstDate,
+    businessEnd: endDate,
+    label: "Données d'entrées",
+    className: `phase-reference-reception phase-reference-reception--${status}`,
+    title: buildReferenceReceptionTooltipHtml(row, summary),
+    tooltipHtml: buildReferenceReceptionTooltipHtml(row, summary),
+    nativeTitle: buildReferenceReceptionNativeTitle(row, summary),
+    referenceReception: summary,
+  });
 }
 
 function clampPercentage(value) {
@@ -1264,7 +1356,8 @@ export function buildTimelineDataFromPlanningRows(
   rawRows,
   selectedProject = "",
   selectedZone = "",
-  targetLookup = null
+  targetLookup = null,
+  referenceReceptionLookup = null
 ) {
   const cfg = APP_CONFIG.grist.planningTable.columns;
   const projectLinkCol = cfg.projectLink || cfg.nomProjet;
@@ -1357,9 +1450,14 @@ export function buildTimelineDataFromPlanningRows(
         allowPlanningLinkedCoffrageDuration2: isPlanningLinkedCoffrage,
       }
     );
+    const planningRowId = r[cfg.id] ?? null;
+    const referenceReception = getReferenceReceptionSummary(
+      planningRowId,
+      referenceReceptionLookup
+    );
 
     return {
-      rowId: r[cfg.id] ?? null,
+      rowId: planningRowId,
       projectLink: projectLinkText,
 
       // Colonnes affichees
@@ -1424,6 +1522,7 @@ export function buildTimelineDataFromPlanningRows(
       })(),
       retards: toText(r[cfg.retards]),
       remarque: toText(r[cfg.remarque || "Remarque"]),
+      referenceReception,
     };
   });
 
@@ -1865,6 +1964,15 @@ export function buildTimelineDataFromPlanningRows(
           })
         );
       }
+    }
+
+    const referenceReceptionItem = createReferenceReceptionPhaseItem({
+      groupId,
+      row,
+      summary: row.referenceReception,
+    });
+    if (referenceReceptionItem) {
+      items.push(referenceReceptionItem);
     }
 
     // Debut des travaux :

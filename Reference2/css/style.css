@@ -1023,6 +1023,10 @@ select {
   width: min(220px, 100%) !important;
 }
 
+#zoneDropdown {
+  width: min(240px, 100%) !important;
+}
+
 #hideArchivedToggle {
   accent-color: var(--vc-blue);
 }

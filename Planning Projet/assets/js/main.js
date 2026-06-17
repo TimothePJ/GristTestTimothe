@@ -4,6 +4,7 @@ import {
   initGrist,
   fetchProjectBootstrapData,
   fetchPlanningRows,
+  fetchPlanningReferenceReceptionSummaries,
   getPlanningServiceDiagnostics,
   updatePlanningDurationAndLeftDate,
   updatePlanningRetardJustification,
@@ -61,6 +62,7 @@ let resolveRefreshQueue = null;
 let cachedPlanningRows = null;
 let cachedProjectAvancementConfigs = [];
 let cachedRealisationTargetLookup = null;
+let cachedPlanningReferenceReceptionLookup = null;
 let lastAutoSyncAt = 0;
 let lastAutoSyncProject = "";
 let lastRenderedProject = "";
@@ -827,7 +829,8 @@ function renderPlanningFromCache() {
     cachedPlanningRows,
     selectedProject,
     normalizedZone,
-    cachedRealisationTargetLookup
+    cachedRealisationTargetLookup,
+    cachedPlanningReferenceReceptionLookup
   );
   if (!timelineData.rowCount) return;
   timelineData.resetViewport = false;
@@ -1181,6 +1184,7 @@ async function performPlanningRefresh(options = {}) {
     const selectedProject = state.selectedProject || "";
     if (!selectedProject) {
       currentPlanningDateBounds = null;
+      cachedPlanningReferenceReceptionLookup = null;
       lastRenderedProject = "";
       clearPlanningTimeline();
       emitPlanningWarningsChange("", []);
@@ -1226,6 +1230,11 @@ async function performPlanningRefresh(options = {}) {
     }
 
     const planningRows = cachedPlanningRows || [];
+    const referenceSummaryStartedAt = performance.now();
+    cachedPlanningReferenceReceptionLookup =
+      await fetchPlanningReferenceReceptionSummaries(planningRows);
+    fetchDurationMs += performance.now() - referenceSummaryStartedAt;
+
     const zoneOptions = buildZoneOptionsForSelectedProject(planningRows, selectedProject);
     const normalizedZone = normalizeSelectedZone(zoneOptions, state.selectedZone);
     if (normalizedZone !== (state.selectedZone || "")) {
@@ -1242,7 +1251,8 @@ async function performPlanningRefresh(options = {}) {
       planningRows,
       selectedProject,
       normalizedZone,
-      cachedRealisationTargetLookup
+      cachedRealisationTargetLookup,
+      cachedPlanningReferenceReceptionLookup
     );
     buildDurationMs += performance.now() - buildStartedAt;
     timelineData.resetViewport = lastRenderedProject !== selectedProject;
