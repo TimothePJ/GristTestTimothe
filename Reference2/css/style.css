@@ -928,3 +928,446 @@ body {
         gap: 0;
       }
     }
+
+/* Modern project DA overrides */
+:root {
+  --vc-blue: #004990;
+  --vc-blue-2: #0b5ea8;
+  --vc-red: #ed1b2d;
+  --vc-bg: #f4f7fb;
+  --vc-text: #173f67;
+  --vc-muted: #31516f;
+  --vc-line: #d6e0ea;
+  --vc-line-soft: #e7eef6;
+  --vc-panel: #ffffff;
+  --vc-panel-soft: #f9fbfe;
+}
+
+body {
+  min-height: 100vh;
+  padding: 12px !important;
+  background-color: var(--vc-bg) !important;
+  color: var(--vc-text) !important;
+  font-family: "Segoe UI", Arial, sans-serif !important;
+}
+
+.sticky-container {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  align-items: end;
+  padding: 10px 0 12px !important;
+  background-color: rgba(244, 247, 251, 0.94) !important;
+  border-bottom: 1px solid rgba(0, 73, 144, 0.12) !important;
+  box-shadow: none !important;
+  backdrop-filter: blur(8px);
+}
+
+.dropdown-container {
+  align-items: stretch !important;
+  min-width: 190px;
+  margin-right: 0 !important;
+}
+
+.sticky-container label,
+dialog label,
+.field-label {
+  color: var(--vc-text);
+  font-weight: 700;
+}
+
+select,
+input[type="text"],
+input[type="number"],
+input[type="date"],
+input[type="email"],
+textarea {
+  box-sizing: border-box;
+  min-height: 38px;
+  background-color: var(--vc-panel) !important;
+  color: var(--vc-blue) !important;
+  border: 1px solid #c9d8e8 !important;
+  border-radius: 4px !important;
+  padding: 8px 10px !important;
+  font: inherit;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+select:focus,
+input[type="text"]:focus,
+input[type="number"]:focus,
+input[type="date"]:focus,
+input[type="email"]:focus,
+textarea:focus {
+  border-color: var(--vc-blue) !important;
+  box-shadow: 0 0 0 3px rgba(0, 73, 144, 0.12);
+  outline: none;
+}
+
+select {
+  margin-bottom: 0 !important;
+}
+
+#firstColumnDropdown {
+  width: min(320px, 100%) !important;
+}
+
+#secondColumnListbox {
+  width: min(360px, 100%) !important;
+}
+
+#thirdColumnDropdown {
+  width: min(220px, 100%) !important;
+}
+
+#hideArchivedToggle {
+  accent-color: var(--vc-blue);
+}
+
+.table-container {
+  max-height: calc(100vh - 128px) !important;
+  margin-top: 16px !important;
+  overflow: auto !important;
+  background-color: var(--vc-panel) !important;
+  border: 1px solid var(--vc-line);
+  border-radius: 8px;
+  box-shadow: 0 14px 32px rgba(0, 73, 144, 0.1);
+}
+
+#dataTable {
+  width: max-content !important;
+  min-width: 100%;
+  max-width: none !important;
+  margin: 0 !important;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  color: var(--vc-text);
+}
+
+#dataTable th,
+#dataTable td {
+  border: 0 !important;
+  border-bottom: 1px solid #dbe6f1 !important;
+  padding: 10px 12px !important;
+  background-color: var(--vc-panel);
+  color: var(--vc-text);
+  vertical-align: top;
+}
+
+#dataTable thead {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+#dataTable thead th {
+  background-color: var(--vc-panel-soft) !important;
+  color: var(--vc-muted) !important;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+#dataTable tbody tr {
+  transition: background-color 140ms ease;
+}
+
+#dataTable tbody tr:hover td {
+  background-color: #f0f8ff !important;
+}
+
+#dataTable th:not(:first-child),
+#dataTable td:not(:first-child) {
+  border-left: 1px solid var(--vc-line-soft) !important;
+}
+
+#dataTable th:nth-child(1),
+#dataTable td:nth-child(1) {
+  display: none;
+}
+
+#dataTable th:nth-child(2),
+#dataTable td:nth-child(2) {
+  position: sticky;
+  left: 0;
+  z-index: 8;
+  min-width: 170px;
+  background-color: inherit;
+  box-shadow: 1px 0 0 var(--vc-line-soft);
+}
+
+#dataTable thead th:nth-child(2) {
+  z-index: 25;
+}
+
+#dataTable th:nth-child(3),
+#dataTable td:nth-child(3) {
+  min-width: 320px !important;
+  max-width: 460px;
+}
+
+#dataTable td:nth-child(3) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+#dataTable td.bloquant-cell,
+#dataTable td.archive-cell,
+#dataTable td.retard-cell {
+  text-align: center;
+  vertical-align: middle;
+}
+
+#dataTable td.bloquant-cell,
+#dataTable td.archive-cell {
+  cursor: pointer;
+  font-weight: 800;
+  color: var(--vc-blue);
+}
+
+#dataTable td.retard-cell.has-retard {
+  color: var(--vc-red);
+}
+
+.highlighted,
+#tableBody tr.highlighted td,
+#tableBody td.highlighted {
+  background-color: #d9ecff !important;
+  color: var(--vc-text) !important;
+  box-shadow: inset 4px 0 0 var(--vc-red);
+}
+
+.add-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px !important;
+  padding: 12px 0 0 !important;
+  background-color: transparent !important;
+}
+
+button,
+.add-form button,
+dialog button {
+  border: none !important;
+  border-radius: 4px !important;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  transition: background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.add-form button,
+dialog button,
+.reference-primary-btn,
+#addDocumentsUnifiedDialog .primary-btn {
+  background-color: var(--vc-blue) !important;
+  color: #ffffff !important;
+  padding: 9px 12px !important;
+}
+
+.add-form button:hover,
+dialog button:hover,
+.reference-primary-btn:hover,
+#addDocumentsUnifiedDialog .primary-btn:hover {
+  background-color: var(--vc-red) !important;
+  box-shadow: 0 6px 16px rgba(237, 27, 45, 0.22);
+  transform: translateY(-1px);
+}
+
+.dialog-buttons button[type="button"],
+#cancelAddRowButton,
+#cancelAddDocumentButton,
+#cancelAddMultipleDocumentButton,
+#cancelAddDocumentsUnifiedButton {
+  background-color: var(--vc-red) !important;
+}
+
+.context-menu {
+  padding: 6px !important;
+  background-color: var(--vc-panel) !important;
+  border: 1px solid var(--vc-line) !important;
+  border-radius: 8px;
+  box-shadow: 0 12px 24px rgba(0, 73, 144, 0.16) !important;
+}
+
+.context-menu button {
+  padding: 8px 12px !important;
+  border-radius: 6px !important;
+  color: var(--vc-blue) !important;
+}
+
+.context-menu button:hover {
+  background-color: #eef6ff !important;
+  color: var(--vc-blue) !important;
+}
+
+dialog {
+  width: min(560px, calc(100vw - 32px)) !important;
+  max-height: calc(100vh - 32px);
+  padding: 20px !important;
+  background-color: var(--vc-panel) !important;
+  color: var(--vc-text) !important;
+  border: 1px solid var(--vc-line) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 18px 48px rgba(0, 73, 144, 0.18);
+}
+
+dialog::backdrop {
+  background-color: rgba(0, 0, 0, 0.36);
+}
+
+dialog h3 {
+  margin: 0 0 12px !important;
+  color: var(--vc-blue);
+}
+
+dialog form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+dialog input,
+dialog textarea,
+dialog select {
+  width: 100% !important;
+  margin-bottom: 0 !important;
+}
+
+#duplicateOptionsContainer,
+#emetteurDropdown,
+#multipleEmetteurDropdown,
+#referenceUnifiedEmetteurDropdown,
+.reference-docs-selection {
+  background-color: var(--vc-panel-soft) !important;
+  color: var(--vc-text) !important;
+  border: 1px solid var(--vc-line) !important;
+  border-radius: 8px !important;
+}
+
+.emetteur-item {
+  gap: 12px !important;
+  padding: 6px 8px !important;
+  border-radius: 6px;
+}
+
+.emetteur-item:nth-child(even),
+.emetteur-item:nth-child(odd) {
+  background-color: transparent !important;
+}
+
+.emetteur-item:hover {
+  background-color: #eef6ff !important;
+}
+
+.reference-unified-dialog {
+  width: min(1040px, calc(100vw - 32px)) !important;
+}
+
+.reference-modal-content,
+#addDocumentsUnifiedDialog .modal-content {
+  border: 1px solid var(--vc-line) !important;
+  box-shadow: 0 18px 48px rgba(0, 73, 144, 0.18) !important;
+}
+
+.reference-modal-header,
+#addDocumentsUnifiedDialog .modal-header {
+  background: linear-gradient(90deg, var(--vc-blue) 0%, var(--vc-blue-2) 100%) !important;
+  border-bottom: 0 !important;
+}
+
+.reference-modal-close,
+#addDocumentsUnifiedDialog .modal-close {
+  width: auto !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  color: #ffffff !important;
+  transform: none !important;
+}
+
+.reference-modal-close:hover,
+.reference-modal-close:focus-visible,
+#addDocumentsUnifiedDialog .modal-close:hover,
+#addDocumentsUnifiedDialog .modal-close:focus-visible {
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--vc-red) !important;
+  transform: none !important;
+}
+
+.reference-tab-btn,
+#addDocumentsUnifiedDialog .tab-btn {
+  color: var(--vc-muted) !important;
+  background-color: var(--vc-panel-soft) !important;
+}
+
+.reference-tab-btn.active,
+#addDocumentsUnifiedDialog .tab-btn.active {
+  color: var(--vc-blue) !important;
+  border-bottom-color: var(--vc-red) !important;
+}
+
+.reference-doc-chip {
+  background-color: #eef6ff !important;
+  border: 1px solid #b8d7f2 !important;
+  color: var(--vc-blue) !important;
+}
+
+.reference-preview-table,
+#addDocumentsUnifiedDialog .preview-table,
+#documentTable {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  overflow: hidden;
+  border: 1px solid var(--vc-line) !important;
+  border-radius: 8px;
+}
+
+.reference-preview-table th,
+.reference-preview-table td,
+#addDocumentsUnifiedDialog .preview-table th,
+#addDocumentsUnifiedDialog .preview-table td,
+#documentTable th,
+#documentTable td {
+  border: 0 !important;
+  border-bottom: 1px solid #dbe6f1 !important;
+  padding: 8px 10px !important;
+}
+
+.reference-preview-table th,
+#addDocumentsUnifiedDialog .preview-table th,
+#documentTable th {
+  background-color: var(--vc-panel-soft) !important;
+  color: var(--vc-muted) !important;
+}
+
+@media (max-width: 820px) {
+  body {
+    padding: 8px !important;
+  }
+
+  .sticky-container {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .dropdown-container,
+  #firstColumnDropdown,
+  #secondColumnListbox,
+  #thirdColumnDropdown {
+    width: 100% !important;
+  }
+
+  .table-container {
+    max-height: calc(100vh - 260px) !important;
+  }
+}

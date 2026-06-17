@@ -200,12 +200,12 @@ function parseNumeroForStorage(v) {
           });
           const referencesChanged = fixed.some(a =>
             Array.isArray(a) &&
-            String(a[1] || '').trim().toLowerCase() === 'references' &&
+            isReferencesActionTableName(a[1]) &&
             ['AddRecord', 'UpdateRecord', 'RemoveRecord'].includes(String(a[0] || ''))
           );
           const containsReferenceRetardActions = fixed.some(a =>
             Array.isArray(a) &&
-            String(a[1] || '').trim().toLowerCase() === 'references' &&
+            isReferencesActionTableName(a[1]) &&
             a[3] &&
             typeof a[3] === 'object' &&
             hasOwnField(a[3], 'Retard')
@@ -318,7 +318,8 @@ function autoFillFields() {
     document.getElementById('recu').value = '1900-01-01';
     document.getElementById('description').value = 'EN ATTENTE';
     document.getElementById('remarque').value = 'Officiel';
-    document.getElementById('datelimite').value = '1900-01-01';
+    document.getElementById('dureeLimite').value = '';
+    void fillAddRowDefaultDurationFromContext({ force: true });
     return;
   }
 
@@ -341,14 +342,19 @@ function autoFillFields() {
     document.getElementById('description').value = matchingRecord.DescriptionObservations || '';
     document.getElementById('remarque').value = normalizeRemarqueValue(matchingRecord.Remarque);
     document.getElementById('recu').value = formatDateForInput(matchingRecord.Recu);
-    document.getElementById('datelimite').value = formatDateForInput(matchingRecord.DateLimite);
+    document.getElementById('dureeLimite').value = formatReferenceDurationInput(matchingRecord.DureeLimite);
+    void resolveReferenceDurationInputValue(matchingRecord).then((durationValue) => {
+      if (document.getElementById('referenceInput')?.value === selectedReference) {
+        document.getElementById('dureeLimite').value = durationValue;
+      }
+    });
   } else {
     // Rien trouvé -> vider les champs (ou gérer autrement)
     document.getElementById('indice').value = '';
     document.getElementById('description').value = '';
     document.getElementById('remarque').value = '';
     document.getElementById('recu').value = '';
-    document.getElementById('datelimite').value = '';
+    document.getElementById('dureeLimite').value = '';
   }
 }
 
@@ -372,6 +378,7 @@ function resetAndUpdateDialog() {
 
   document.getElementById('emetteur').value = currentEmetteur;
   updateReferenceList();
+  void fillAddRowDefaultDurationFromContext();
 }
 
 // Réinitialiser et actualiser les références à chaque ouverture du dialogue
@@ -1509,6 +1516,238 @@ function computeReferenceRetardDays(recuValue, dateLimiteValue, currentDateValue
   return Math.floor((recuMs - limiteMs) / REFERENCE_RETARD_DAY_MS);
 }
 
+function parseReferenceDurationLimit(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+
+  const numericValue = Number(text.replace(',', '.'));
+  if (!Number.isFinite(numericValue) || !Number.isInteger(numericValue) || numericValue < 0) {
+    return null;
+  }
+
+  return numericValue;
+}
+
+function formatReferenceDurationInput(value) {
+  const durationWeeks = parseReferenceDurationLimit(value);
+  return durationWeeks == null ? '' : String(durationWeeks);
+}
+
+function formatReferenceDateIso(value) {
+  const date = parseReferenceRetardCalendarDate(value);
+  if (isEmptyReferenceRetardDate(date)) return '';
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function subtractReferenceWeeksFromDate(date, weeks) {
+  const durationWeeks = parseReferenceDurationLimit(weeks);
+  if (!(date instanceof Date) || Number.isNaN(date.getTime()) || durationWeeks == null) {
+    return null;
+  }
+
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() - durationWeeks * 7);
+  return nextDate;
+}
+
+function isReferenceArmaturesTypeDoc(value) {
+  return String(value ?? '').toLocaleUpperCase('fr').includes('ARMATURES');
+}
+
+function getPlanningRowObject(planningTable, index) {
+  if (!planningTable || !Number.isInteger(index) || index < 0) return null;
+
+  const row = {};
+  Object.keys(planningTable).forEach((key) => {
+    const column = planningTable[key];
+    if (Array.isArray(column)) {
+      row[key] = column[index];
+    }
+  });
+  return row;
+}
+
+function getReferencePlanningSegmentStartDate(planningRow) {
+  if (!planningRow) return null;
+
+  if (isReferenceArmaturesTypeDoc(planningRow.Type_doc)) {
+    return parseReferenceRetardCalendarDate(planningRow.Diff_coffrage);
+  }
+
+  return (
+    parseReferenceRetardCalendarDate(planningRow.Date_limite) ||
+    parseReferenceRetardCalendarDate(planningRow.Diff_coffrage) ||
+    parseReferenceRetardCalendarDate(planningRow.Demarrages_travaux)
+  );
+}
+
+async function fetchReferencePlanningTableForLimits() {
+  try {
+    const planningTableName = await resolvePlanningTableName();
+    return await grist.docApi.fetchTable(planningTableName);
+  } catch (error) {
+    console.warn("Planning: impossible de calculer la date limite reference.", error);
+    return null;
+  }
+}
+
+function findPlanningRowForReferenceLimit(planningTable, {
+  projectName = '',
+  documentNumber = null,
+  documentName = '',
+  documentType = '',
+  documentZone = '',
+} = {}) {
+  const idx = findPlanningIndex(
+    planningTable,
+    projectName,
+    _norm(documentNumber),
+    normalizeTypeDocument(documentType),
+    normalizeZoneValue(documentZone),
+    documentName
+  );
+  return getPlanningRowObject(planningTable, idx);
+}
+
+function buildReferenceLimitFields({
+  planningTable = null,
+  projectName = '',
+  documentInfo = {},
+  durationWeeks = '',
+} = {}) {
+  const parsedDuration = parseReferenceDurationLimit(durationWeeks);
+  if (parsedDuration == null) {
+    return {
+      DureeLimite: '',
+      DateLimite: DEFAULT_REFERENCE_DATE,
+    };
+  }
+
+  const planningRow = findPlanningRowForReferenceLimit(planningTable, {
+    projectName,
+    documentNumber: documentInfo?.numero ?? documentInfo?.documentNumber,
+    documentName: documentInfo?.name ?? documentInfo?.documentName,
+    documentType: documentInfo?.type ?? documentInfo?.documentType,
+    documentZone: documentInfo?.zone ?? documentInfo?.documentZone,
+  });
+  const segmentStartDate = getReferencePlanningSegmentStartDate(planningRow);
+  const dateLimite = subtractReferenceWeeksFromDate(segmentStartDate, parsedDuration);
+  const dateLimiteIso = formatReferenceDateIso(dateLimite);
+
+  return {
+    DureeLimite: parsedDuration,
+    DateLimite: dateLimiteIso || DEFAULT_REFERENCE_DATE,
+  };
+}
+
+function getReferenceDurationWeeksFromLimitDate(startDate, limitDate) {
+  if (
+    !(startDate instanceof Date) ||
+    Number.isNaN(startDate.getTime()) ||
+    isEmptyReferenceRetardDate(limitDate)
+  ) {
+    return null;
+  }
+
+  const startMs = getReferenceRetardCalendarMs(startDate);
+  const limitMs = getReferenceRetardCalendarMs(limitDate);
+  const diffDays = Math.round((startMs - limitMs) / REFERENCE_RETARD_DAY_MS);
+  if (diffDays < 0 || diffDays % 7 !== 0) return null;
+  return diffDays / 7;
+}
+
+function getReferenceDurationFromPlanningAndLimit({
+  planningTable = null,
+  projectName = '',
+  documentInfo = {},
+  dateLimite = '',
+} = {}) {
+  const planningRow = findPlanningRowForReferenceLimit(planningTable, {
+    projectName,
+    documentNumber: documentInfo?.numero ?? documentInfo?.documentNumber,
+    documentName: documentInfo?.name ?? documentInfo?.documentName,
+    documentType: documentInfo?.type ?? documentInfo?.documentType,
+    documentZone: documentInfo?.zone ?? documentInfo?.documentZone,
+  });
+  const segmentStartDate = getReferencePlanningSegmentStartDate(planningRow);
+  const limitDate = parseReferenceRetardCalendarDate(dateLimite);
+  return getReferenceDurationWeeksFromLimitDate(segmentStartDate, limitDate);
+}
+
+async function resolveReferenceDurationInputValue(record) {
+  const storedDuration = formatReferenceDurationInput(record?.DureeLimite);
+  if (storedDuration) return storedDuration;
+  if (!record) return '';
+
+  const planningTable = await fetchReferencePlanningTableForLimits();
+  const computedDuration = getReferenceDurationFromPlanningAndLimit({
+    planningTable,
+    projectName: record.NomProjet || selectedFirstValue,
+    documentInfo: {
+      numero: record.NumeroDocument,
+      name: record.NomDocument,
+      type: record.Type_document,
+      zone: record.Zone,
+    },
+    dateLimite: record.DateLimite,
+  });
+
+  return computedDuration == null ? '' : String(computedDuration);
+}
+
+function getContextReferenceRecordForDefaults() {
+  const numericSelectedId = Number(selectedRecordId);
+  if (Number.isInteger(numericSelectedId) && numericSelectedId > 0) {
+    const selectedRecord = records.find((record) => Number(record.id) === numericSelectedId);
+    if (selectedRecord) return selectedRecord;
+  }
+
+  const selections = typeof getCurrentSelections === 'function' ? getCurrentSelections() : null;
+  if (!selections) return null;
+  const selectedProject = normalizeReferenceDocumentIdentityPart(selections.selectedProject);
+  const selectedDocument = normalizeReferenceDocumentIdentityPart(selections.selectedTable);
+  const selectedNumero = parseNumeroForStorage(selections.selectedDoc?.numero);
+  const selectedZoneKey = normalizeZoneMatchKey(selections.selectedDoc?.zone);
+  const selectedType = normalizeTypeDocument(selections.selectedDoc?.type || getCurrentSelectedType());
+
+  return (records || []).find((record) => {
+    if (normalizeReferenceDocumentIdentityPart(record.NomProjet) !== selectedProject) return false;
+    if (normalizeReferenceDocumentIdentityPart(record.NomDocument) !== selectedDocument) return false;
+    if (normalizeReferenceDocumentIdentityPart(record.Type_document) !== normalizeReferenceDocumentIdentityPart(selectedType)) return false;
+    if (normalizeZoneMatchKey(record.Zone) !== selectedZoneKey) return false;
+    if (selectedNumero != null && normalizeReferenceDocumentIdentityPart(record.NumeroDocument) !== normalizeReferenceDocumentIdentityPart(selectedNumero)) return false;
+    return formatReferenceDurationInput(record.DureeLimite) || !isEmptyReferenceRetardDate(parseReferenceRetardCalendarDate(record.DateLimite));
+  }) || null;
+}
+
+async function fillAddRowDefaultDurationFromContext({ force = false } = {}) {
+  const durationInput = document.getElementById('dureeLimite');
+  if (!(durationInput instanceof HTMLInputElement)) return;
+  if (!force && String(durationInput.value || '').trim()) return;
+
+  const contextRecord = getContextReferenceRecordForDefaults();
+  const durationValue = await resolveReferenceDurationInputValue(contextRecord);
+  if (durationValue && (force || !String(durationInput.value || '').trim())) {
+    durationInput.value = durationValue;
+  }
+}
+
+async function fillEditDurationFromRecord(record, { force = false } = {}) {
+  const durationInput = document.getElementById('editDureeLimite');
+  if (!(durationInput instanceof HTMLInputElement)) return;
+  if (!force && String(durationInput.value || '').trim()) return;
+
+  const durationValue = await resolveReferenceDurationInputValue(record);
+  if (force || durationValue) {
+    durationInput.value = durationValue;
+    durationInput.dataset.initialValue = durationValue;
+  }
+}
+
 let referenceRetardReconcileInFlight = false;
 let referenceRetardReconcilePending = false;
 let referenceRetardReconcileTimer = 0;
@@ -1632,6 +1871,11 @@ function hasOwnField(fields, key) {
   return Object.prototype.hasOwnProperty.call(fields || {}, key);
 }
 
+function isReferencesActionTableName(value) {
+  const tableName = String(value || '').trim().toLowerCase();
+  return tableName === 'references' || tableName === 'references2';
+}
+
 function getReferenceRecordById(recordId) {
   const numericId = Number(recordId);
   if (!Number.isInteger(numericId) || numericId <= 0) return null;
@@ -1652,8 +1896,7 @@ function normalizeReferenceActionFieldsForRetard(action, fields) {
   }
 
   const actionType = String(action[0] || '');
-  const tableName = String(action[1] || '').trim().toLowerCase();
-  if (tableName !== 'references') {
+  if (!isReferencesActionTableName(action[1])) {
     return fields;
   }
 
@@ -2299,8 +2542,8 @@ async function resetUnifiedAddDocumentsDialog() {
   refreshReferenceZoneSuggestionLists();
   resetReferenceDocsBuilderFields();
 
-  const defaultDateInput = document.getElementById('referenceUnifiedDefaultDatelimite');
-  if (defaultDateInput) defaultDateInput.value = '';
+  const defaultDurationInput = document.getElementById('referenceUnifiedDefaultDureeLimite');
+  if (defaultDurationInput) defaultDurationInput.value = '';
 
   await populateReferenceUnifiedEmetteurDropdown();
 }
@@ -2321,7 +2564,7 @@ async function createDocumentsBatch({
   projectName,
   documents,
   selectedEmitters,
-  defaultDatelimite = DEFAULT_REFERENCE_DATE,
+  defaultDureeLimite = '',
 }) {
   const normalizedProject = _norm(projectName || selectedFirstValue);
   if (!normalizedProject) {
@@ -2371,9 +2614,13 @@ async function createDocumentsBatch({
     }))
   );
 
-  const safeDefaultDatelimite = _norm(defaultDatelimite) || DEFAULT_REFERENCE_DATE;
+  const safeDefaultDureeLimite = _norm(defaultDureeLimite);
+  if (safeDefaultDureeLimite && parseReferenceDurationLimit(safeDefaultDureeLimite) == null) {
+    throw new Error("La duree limite par defaut doit etre un nombre entier de semaines.");
+  }
   const serviceValue = await getTeamService();
   const actions = [];
+  let planningTableForLimits = null;
 
   try {
     const plansTableName = await resolveListePlanTableName();
@@ -2419,6 +2666,7 @@ async function createDocumentsBatch({
   try {
     const planningTableName = await resolvePlanningTableName();
     const planning = await grist.docApi.fetchTable(planningTableName);
+    planningTableForLimits = planning;
     const queuedZoneAnchors = new Set();
     const pendingPlanningAdds = new Set();
 
@@ -2495,7 +2743,12 @@ async function createDocumentsBatch({
         Indice: '-',
         Recu: DEFAULT_REFERENCE_DATE,
         DescriptionObservations: 'EN ATTENTE',
-        DateLimite: safeDefaultDatelimite,
+        ...buildReferenceLimitFields({
+          planningTable: planningTableForLimits,
+          projectName: normalizedProject,
+          documentInfo: doc,
+          durationWeeks: safeDefaultDureeLimite,
+        }),
         Service: serviceValue,
       })]);
     });
@@ -2750,7 +3003,7 @@ function setupUnifiedAddDocumentsUi() {
         projectName: selectedFirstValue,
         documents: pendingReferenceDocuments,
         selectedEmitters: collectSelectedEmittersFromContainer('referenceUnifiedEmetteurDropdown'),
-        defaultDatelimite: document.getElementById('referenceUnifiedDefaultDatelimite')?.value || DEFAULT_REFERENCE_DATE,
+        defaultDureeLimite: document.getElementById('referenceUnifiedDefaultDureeLimite')?.value || '',
       });
 
       unifiedDialog?.close();
@@ -2980,12 +3233,17 @@ const REFERENCE_TABLE_PREFERRED_HEADER_ORDER = [
   'Recu',
   'DescriptionObservations',
   'Remarque',
+  'DureeLimite',
   'DateLimite',
   'Retard',
-  'DureeLimite',
   'Bloquant',
   'Archive',
 ];
+
+const REFERENCE_TABLE_HEADER_LABELS = {
+  DureeLimite: 'Durée limite (sem.)',
+  DateLimite: 'Date limite calculée',
+};
 
 function buildReferenceTableHeaders(filteredRecords) {
   const availableHeaders = [];
@@ -3100,7 +3358,7 @@ function populateTable() {
   tableHeader.innerHTML = '<th>ID</th>';
   headers.forEach((header) => {
     const th = document.createElement('th');
-    th.textContent = header;
+    th.textContent = REFERENCE_TABLE_HEADER_LABELS[header] || header;
     tableHeader.appendChild(th);
   });
   // Add click handler for Bloquant column
@@ -3175,20 +3433,27 @@ function populateTable() {
         const formattedDate = formatDate(value);
         value = formattedDate === '01/01/1900' ? '-' : formattedDate;
       }
+      if (header === 'DureeLimite') {
+        value = formatReferenceDurationInput(value);
+      }
 
       // Special handling for Bloquant and Archive columns
       if (header === 'Bloquant') {
         td.classList.add('bloquant-cell');
-        td.textContent = value ? '✓' : '';
+        td.textContent = Boolean(record.Bloquant) ? '\u2713' : '';
+        td.style.cursor = 'pointer';
+        td.title = "Cliquer pour cocher / décocher";
         td.addEventListener('click', async () => {
-          const newValue = !value;
+          const newValue = !Boolean(record.Bloquant);
           try {
             await grist.docApi.applyUserActions([
               ['UpdateRecord', 'References2', record.id, { Bloquant: newValue }]
             ]);
-            td.textContent = newValue ? '✓' : '';
+            record.Bloquant = newValue;
+            td.textContent = newValue ? '\u2713' : '';
           } catch (error) {
             console.error('Error updating Bloquant:', error);
+            alert("Erreur lors de la mise à jour du bloquant.");
           }
         });
       } else if (header === 'Archive') {
@@ -3285,7 +3550,10 @@ function showEditDialog(record) {
   document.getElementById('editDescription').value = record.DescriptionObservations || '';
   document.getElementById('editRemarque').value = normalizeRemarqueValue(record.Remarque);
   document.getElementById('editRecu').value = formatDateForInput(record.Recu);
-  document.getElementById('editDatelimite').value = formatDateForInput(record.DateLimite);
+  const editDureeLimite = document.getElementById('editDureeLimite');
+  editDureeLimite.value = formatReferenceDurationInput(record.DureeLimite);
+  editDureeLimite.dataset.initialValue = editDureeLimite.value;
+  void fillEditDurationFromRecord(record);
 
   dialog.showModal();
 }
@@ -3362,7 +3630,9 @@ function autoFillEditFields() {
     document.getElementById('editDescription').value = 'EN ATTENTE';
     document.getElementById('editRemarque').value = 'Officiel';
     document.getElementById('editRecu').value = '1900-01-01';
-    document.getElementById('editDatelimite').value = '1900-01-01';
+    const editDureeLimite = document.getElementById('editDureeLimite');
+    editDureeLimite.value = '';
+    editDureeLimite.dataset.initialValue = '';
     return;
   }
 
@@ -3384,14 +3654,19 @@ function autoFillEditFields() {
     document.getElementById('editDescription').value = matchingRecord.DescriptionObservations || '';
     document.getElementById('editRemarque').value = normalizeRemarqueValue(matchingRecord.Remarque);
     document.getElementById('editRecu').value = formatDateForInput(matchingRecord.Recu);
-    document.getElementById('editDatelimite').value = formatDateForInput(matchingRecord.DateLimite);
+    const editDureeLimite = document.getElementById('editDureeLimite');
+    editDureeLimite.value = formatReferenceDurationInput(matchingRecord.DureeLimite);
+    editDureeLimite.dataset.initialValue = editDureeLimite.value;
+    void fillEditDurationFromRecord(matchingRecord);
   } else {
     // Aucun matchingRecord -> vider ou laisser par défaut
     document.getElementById('editIndice').value = '';
     document.getElementById('editDescription').value = '';
     document.getElementById('editRemarque').value = '';
     document.getElementById('editRecu').value = '';
-    document.getElementById('editDatelimite').value = '';
+    const editDureeLimite = document.getElementById('editDureeLimite');
+    editDureeLimite.value = '';
+    editDureeLimite.dataset.initialValue = '';
   }
 }
 
@@ -3435,12 +3710,15 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
   let recu = formData.get('recu'); // Peut être vide
   const description = formData.get('description');
   const remarque = normalizeRemarqueValue(formData.get('remarque'));
-  let datelimite = formData.get('datelimite'); // Peut être vide
+  const dureeLimite = formData.get('dureeLimite');
   const isDuplicate = document.getElementById('duplicateCheckbox').checked;
   const cheminFromAddFile = (document.getElementById('referenceFile') && document.getElementById('referenceFile').value) ? document.getElementById('referenceFile').value : null;
 
   if (!recu) recu = "1900-01-01";
-  if (!datelimite) datelimite = "1900-01-01";
+  if (String(dureeLimite ?? '').trim() && parseReferenceDurationLimit(dureeLimite) == null) {
+    alert("La duree limite doit etre un nombre entier de semaines.");
+    return;
+  }
 
   try {
     const selectedProject = selectedFirstValue;
@@ -3448,6 +3726,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
 
     const serviceValue = await getTeamService();
     const currentSelectedDoc = getSelectedDocPair();
+    const planningTableForLimits = await fetchReferencePlanningTableForLimits();
 
     const userActions = [];
 
@@ -3461,17 +3740,22 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
 
       selectedDocuments.forEach(docVal => {
         const parsedDoc = parseDocValue(docVal);
+        const documentType = getDocumentTypeForProjectDoc(
+          selectedProject,
+          parsedDoc.name,
+          parsedDoc.zone,
+          parsedDoc.numero,
+          parsedDoc.type
+        ) || normalizeTypeDocument(parsedDoc.type || getCurrentSelectedType());
+        const documentInfo = {
+          ...parsedDoc,
+          type: documentType,
+        };
         const newRow = withComputedReferenceRetard({
           NomProjet: selectedProject,
           NomDocument: parsedDoc.name,
           NumeroDocument: _norm(parsedDoc.numero),
-          Type_document: getDocumentTypeForProjectDoc(
-            selectedProject,
-            parsedDoc.name,
-            parsedDoc.zone,
-            parsedDoc.numero,
-            parsedDoc.type
-          ) || normalizeTypeDocument(parsedDoc.type || getCurrentSelectedType()),
+          Type_document: documentType,
           Zone: normalizeZoneValue(parsedDoc.zone),
           Emetteur: emetteur,
           Reference: reference,
@@ -3479,24 +3763,34 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
           Recu: recu,
           DescriptionObservations: description,
           Remarque: remarque,
-          DateLimite: datelimite,
+          ...buildReferenceLimitFields({
+            planningTable: planningTableForLimits,
+            projectName: selectedProject,
+            documentInfo,
+            durationWeeks: dureeLimite,
+          }),
           Service: serviceValue,
           Chemin: cheminFromAddFile
         });
         userActions.push(['AddRecord', 'References2', null, newRow]);
       });
     } else {
+      const documentType = getDocumentTypeForProjectDoc(
+        selectedProject,
+        currentSelectedDoc.name,
+        currentSelectedDoc.zone,
+        currentSelectedDoc.numero,
+        currentSelectedDoc.type
+      ) || normalizeTypeDocument(currentSelectedDoc.type || getCurrentSelectedType());
+      const documentInfo = {
+        ...currentSelectedDoc,
+        type: documentType,
+      };
       const newRow = withComputedReferenceRetard({
         NomProjet: selectedProject,
         NomDocument: currentSelectedDoc.name,
         NumeroDocument: _norm(currentSelectedDoc.numero),
-        Type_document: getDocumentTypeForProjectDoc(
-          selectedProject,
-          currentSelectedDoc.name,
-          currentSelectedDoc.zone,
-          currentSelectedDoc.numero,
-          currentSelectedDoc.type
-        ) || normalizeTypeDocument(currentSelectedDoc.type || getCurrentSelectedType()),
+        Type_document: documentType,
         Zone: normalizeZoneValue(currentSelectedDoc.zone),
         Emetteur: emetteur,
         Reference: reference,
@@ -3504,7 +3798,12 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
         Recu: recu,
         DescriptionObservations: description,
         Remarque: remarque,
-        DateLimite: datelimite,
+        ...buildReferenceLimitFields({
+          planningTable: planningTableForLimits,
+          projectName: selectedProject,
+          documentInfo,
+          durationWeeks: dureeLimite,
+        }),
         Service: serviceValue
       });
       userActions.push(['AddRecord', 'References2', null, newRow]);
@@ -3524,45 +3823,6 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
 // Gérer l'annulation du formulaire d'ajout de ligne
 document.getElementById('cancelAddRowButton').addEventListener('click', () => {
   document.getElementById('addRowDialog').close();
-});
-
-// Handle edit dialog form submission
-document.getElementById('editRowDialog').addEventListener('submit', (e) => {
-  e.preventDefault();
-
-  const formData = new FormData(e.target);
-  const updatedRow = withComputedReferenceRetard({
-    Emetteur: formData.get('editEmetteur'),
-    Reference: formData.get('reference'),
-    Indice: formData.get('indice'),
-    Recu: formData.get('recu'),
-    DescriptionObservations: formData.get('description'),
-    Remarque: normalizeRemarqueValue(formData.get('remarque')),
-    DateLimite: formData.get('datelimite')
-  });
-
-  // Handle file upload if a file was selected
-  const fileInput = document.getElementById('editReferenceFile');
-  if (fileInput.files.length > 0) {
-    const file = fileInput.files[0];
-    updatedRow.Reference = file.name;
-    updatedRow.Chemin = fileInput.value || null;
-  }
-
-  if (selectedRecordId) {
-    grist.docApi.applyUserActions([
-      ['UpdateRecord', 'References2', selectedRecordId, updatedRow]
-    ])
-      .then(() => {
-        console.log('Row updated successfully');
-        document.getElementById('editRowDialog').close();
-        populateTable();
-      })
-      .catch(error => {
-        console.error("Error updating row:", error);
-        alert("Error updating row.");
-      });
-  }
 });
 
 // Add event listener for "Archiver" option
@@ -3731,12 +3991,13 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
   const formData = new FormData(e.target);
   const documentNumber = formData.get('documentNumber');
   const documentName = formData.get('documentName');
-  const documentZone = resolveReferenceDocumentZone(formData.get('documentZone'), selectedProject);
+  const documentZone = resolveReferenceDocumentZone(formData.get('documentZone'), selectedFirstValue);
   const documentType = normalizeTypeDocument(formData.get('documentType'));
-  let defaultDatelimite = formData.get('defaultDatelimite');
+  const defaultDureeLimite = formData.get('defaultDureeLimite');
 
-  if (!defaultDatelimite) {
-    defaultDatelimite = "1900-01-01";
+  if (String(defaultDureeLimite ?? '').trim() && parseReferenceDurationLimit(defaultDureeLimite) == null) {
+    alert("La duree limite par defaut doit etre un nombre entier de semaines.");
+    return;
   }
 
   const combinedDocumentName = `${documentNumber}-${documentName}`.trim();
@@ -3805,6 +4066,18 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
     // Création des nouvelles lignes
     const num = _norm(documentNumber);
     const nm = String(documentName).trim();
+    const planningTableForLimits = await fetchReferencePlanningTableForLimits();
+    const referenceLimitFields = buildReferenceLimitFields({
+      planningTable: planningTableForLimits,
+      projectName: selectedProject,
+      documentInfo: {
+        documentNumber: num,
+        documentName: nm,
+        documentType,
+        documentZone,
+      },
+      durationWeeks: defaultDureeLimite,
+    });
     const newRows = selectedEmitters.map((emetteur) => withComputedReferenceRetard({
       NomProjet: selectedProject,
       NomDocument: nm,
@@ -3816,7 +4089,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
       Indice: '-',
       Recu: '1900-01-01',
       DescriptionObservations: 'EN ATTENTE',
-      DateLimite: defaultDatelimite,
+      ...referenceLimitFields,
       Service: serviceValue
     }));
 
@@ -4278,7 +4551,7 @@ async function resetAddDocumentDialog() {
   document.getElementById('documentNumber').value = '';
   document.getElementById('documentName').value = '';
   document.getElementById('documentZone').value = '';
-  document.getElementById('defaultDatelimite').value = '';
+  document.getElementById('defaultDureeLimite').value = '';
   await refreshReferenceTypeSuggestionLists(selectedFirstValue);
   const typeSel = document.getElementById('documentType');
   if (typeSel) typeSel.value = '';
@@ -4610,13 +4883,33 @@ document.getElementById('editRowDialog').addEventListener('submit', async (e) =>
   e.preventDefault();
 
   const formData = new FormData(e.target);
-  let datelimite = formData.get('datelimite');
-
-  // Vérifier si vide, assigner "1900-01-01"
-  if (!datelimite || datelimite.trim() === "") {
-    datelimite = "1900-01-01";
+  const dureeLimite = formData.get('dureeLimite');
+  if (String(dureeLimite ?? '').trim() && parseReferenceDurationLimit(dureeLimite) == null) {
+    alert("La duree limite doit etre un nombre entier de semaines.");
+    return;
   }
 
+  const currentRecord = records.find(record => Number(record.id) === Number(selectedRecordId));
+  const planningTableForLimits = await fetchReferencePlanningTableForLimits();
+  const editDureeLimiteInput = document.getElementById('editDureeLimite');
+  const savedDurationValue = String(editDureeLimiteInput?.dataset?.initialValue ?? '').trim();
+  const nextDurationValue = String(dureeLimite ?? '').trim();
+  const referenceLimitFields = !nextDurationValue && !savedDurationValue && currentRecord
+    ? {
+        DureeLimite: currentRecord.DureeLimite ?? '',
+        DateLimite: currentRecord.DateLimite || DEFAULT_REFERENCE_DATE,
+      }
+    : buildReferenceLimitFields({
+        planningTable: planningTableForLimits,
+        projectName: currentRecord?.NomProjet || selectedFirstValue,
+        documentInfo: {
+          numero: currentRecord?.NumeroDocument,
+          name: currentRecord?.NomDocument,
+          type: currentRecord?.Type_document,
+          zone: currentRecord?.Zone,
+        },
+        durationWeeks: dureeLimite,
+      });
   const updatedRow = withComputedReferenceRetard({
     Emetteur: formData.get('editEmetteur'),
     Reference: formData.get('reference'),
@@ -4624,8 +4917,15 @@ document.getElementById('editRowDialog').addEventListener('submit', async (e) =>
     Recu: formData.get('recu'),
     DescriptionObservations: formData.get('description'),
     Remarque: normalizeRemarqueValue(formData.get('remarque')),
-    DateLimite: datelimite // Valeur corrigée ici
+    ...referenceLimitFields,
   });
+
+  const fileInput = document.getElementById('editReferenceFile');
+  if (fileInput?.files?.length > 0) {
+    const file = fileInput.files[0];
+    updatedRow.Reference = file.name;
+    updatedRow.Chemin = fileInput.value || null;
+  }
 
   if (selectedRecordId) {
     try {
@@ -5087,7 +5387,11 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
     const documentZone = resolveReferenceDocumentZone(document.getElementById('multipleDocumentZone')?.value, selectedFirstValue);
 
     // Récupérer la date limite par défaut
-    const defaultDatelimite = document.getElementById('multipleDefaultDatelimite').value || "1900-01-01";
+    const defaultDureeLimite = document.getElementById('multipleDefaultDureeLimite')?.value || "";
+    if (String(defaultDureeLimite ?? '').trim() && parseReferenceDurationLimit(defaultDureeLimite) == null) {
+      alert("La duree limite par defaut doit etre un nombre entier de semaines.");
+      return;
+    }
 
     // Construire la liste des actions à appliquer (ListePlan + References)
     const actions = [];
@@ -5211,10 +5515,22 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
     }
 
     // 2) Ajout dans References : 1 ligne par (document × émetteur)
+    const planningTableForLimits = await fetchReferencePlanningTableForLimits();
     documentsData.forEach(doc => {
       selectedEmitters.forEach(emetteur => {
         const num = _norm(doc.documentNumber);
         const nm  = String(doc.documentName).trim();
+        const referenceLimitFields = buildReferenceLimitFields({
+          planningTable: planningTableForLimits,
+          projectName: selectedProject,
+          documentInfo: {
+            documentNumber: num,
+            documentName: nm,
+            documentType,
+            documentZone,
+          },
+          durationWeeks: defaultDureeLimite,
+        });
 
         const newRow = withComputedReferenceRetard({
           NomProjet: selectedProject,
@@ -5227,7 +5543,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
           Indice: '-',
           Recu: '1900-01-01',
           DescriptionObservations: 'EN ATTENTE',
-          DateLimite: defaultDatelimite,
+          ...referenceLimitFields,
           Service: serviceValue
         });
 
@@ -5481,7 +5797,7 @@ document.getElementById('copyTableDataButtonImage').addEventListener('click', as
   // Ici, on souhaite retirer "DateLimite", "Bloquant" et "Archive".
   // Dans notre tableau, ces colonnes se trouvent respectivement aux indices 6, 7 et 8
   // On supprime en partant de la plus grande pour éviter que l’indexation ne soit décalée.
-  removeColumnsFromClonedTableByHeaders(clonedTable, ['DateLimite', 'Bloquant', 'Archive']);
+  removeColumnsFromClonedTableByHeaders(clonedTable, ['DateLimite', 'Date limite calculée', 'Bloquant', 'Archive']);
 
   // Créer un conteneur temporaire dans lequel on place le clone pour le rendre capturable.
   const tempContainer = document.createElement('div');
@@ -5591,7 +5907,7 @@ document.getElementById('downloadTableButton').addEventListener('click', async f
     thead.style.top = '0';
   }
 
-  removeColumnsFromClonedTableByHeaders(clonedTable, ['DateLimite', 'Bloquant', 'Archive']);
+  removeColumnsFromClonedTableByHeaders(clonedTable, ['DateLimite', 'Date limite calculée', 'Bloquant', 'Archive']);
 
   // Créer un conteneur temporaire hors écran pour placer le clone
   const tempContainer = document.createElement('div');

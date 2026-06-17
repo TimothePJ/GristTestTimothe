@@ -1945,6 +1945,7 @@ function refreshReferenceDetailsRetardCells(dialog = referenceDetailsDialogEl) {
 function applyReferenceDetailsFreshReceptionData(dialog, data = {}) {
   if (!(dialog instanceof HTMLDialogElement)) return;
 
+  const segmentStartIso = String(data.segmentStartIso || "").trim();
   const referencesById = new Map(
     (Array.isArray(data.references) ? data.references : [])
       .map((reference) => [String(reference?.id ?? ""), reference])
@@ -1983,9 +1984,9 @@ function applyReferenceDetailsFreshReceptionData(dialog, data = {}) {
       const freshDuration = freshReference.durationWeeks == null
         ? ""
         : String(freshReference.durationWeeks);
-      const freshDateLimite = dateLimite.disabled
-        ? ""
-        : normalizeReferenceDetailsLimitDateIso(freshReference.dateLimite);
+      const freshDateLimite =
+        normalizeReferenceDetailsLimitDateIso(freshReference.dateLimite) ||
+        computeReferenceDetailsLimitDateIso(segmentStartIso, freshDuration);
       duration.value = freshDuration;
       dateLimite.value = freshDateLimite;
       row.dataset.referenceSavedDuration = freshDuration;
@@ -2088,8 +2089,8 @@ function renderReferenceDetailsBody(dialog, data = {}) {
           <th>Données d'entrées</th>
           <th>Reference</th>
           <th><label class="planning-ref-select-all-label"><input type="checkbox" class="planning-ref-select-all" title="Tout sélectionner / désélectionner"> Bloquant</label></th>
-          <th>Durée (sem.)</th>
-          <th>Durée Limite</th>
+          <th>Durée limite (sem.)</th>
+          <th>Date limite calculée</th>
           <th>Retards</th>
         </tr>
       </thead>
@@ -2131,13 +2132,18 @@ function renderReferenceDetailsBody(dialog, data = {}) {
     const dateLimite = document.createElement("input");
     dateLimite.type = "date";
     dateLimite.className = "planning-reference-details-table__date-limite";
-    dateLimite.disabled = !hasSegmentStartIso;
-    if (hasSegmentStartIso) {
-      dateLimite.max = segmentStartIso;
-    }
+    dateLimite.disabled = true;
+    dateLimite.readOnly = true;
+    dateLimite.tabIndex = -1;
+    dateLimite.title = hasSegmentStartIso
+      ? "Calcul automatique depuis la duree en semaines."
+      : "Date du segment introuvable.";
     const savedDurationValue = duration.value;
     const savedDateLimiteIso = hasSegmentStartIso
-      ? normalizeReferenceDetailsLimitDateIso(reference?.dateLimite)
+      ? (
+          normalizeReferenceDetailsLimitDateIso(reference?.dateLimite) ||
+          computeReferenceDetailsLimitDateIso(segmentStartIso, savedDurationValue)
+        )
       : "";
     dateLimite.value = savedDateLimiteIso;
     dateLimiteCell.append(dateLimite);
@@ -2205,37 +2211,12 @@ function renderReferenceDetailsBody(dialog, data = {}) {
       updateReferenceDetailsPreviewState();
     };
 
-    const updateDurationPreview = () => {
-      if (syncingReferenceDetailsInputs) return;
-
-      const dateLimiteIso = normalizeReferenceDetailsLimitDateIso(dateLimite.value);
-      const durationWeeks = computeReferenceDetailsDurationWeeks(segmentStartIso, dateLimiteIso);
-      syncingReferenceDetailsInputs = true;
-      if (!dateLimiteIso && dateLimite.value) {
-        dateLimite.value = "";
-      }
-      duration.value = dateLimiteIso && durationWeeks != null ? String(durationWeeks) : "";
-      syncingReferenceDetailsInputs = false;
-      updateReferenceDetailsPreviewState();
-    };
-
     bloquant.addEventListener("change", () => {
       markReferenceDetailsControlDirty(bloquant, dialog);
     });
     duration.addEventListener("input", () => {
       markReferenceDetailsControlDirty(duration, dialog);
-      markReferenceDetailsControlDirty(dateLimite, dialog);
       updateDateLimitePreview();
-    });
-    dateLimite.addEventListener("input", () => {
-      markReferenceDetailsControlDirty(dateLimite, dialog);
-      markReferenceDetailsControlDirty(duration, dialog);
-      updateDurationPreview();
-    });
-    dateLimite.addEventListener("change", () => {
-      markReferenceDetailsControlDirty(dateLimite, dialog);
-      markReferenceDetailsControlDirty(duration, dialog);
-      updateDurationPreview();
     });
     updateReferenceDetailsPreviewState();
 
@@ -2321,12 +2302,10 @@ async function commitReferenceDetailsDialog() {
     const id = Number(row.dataset.referenceId || "");
     const bloquant = row.querySelector(".planning-reference-details-table__bloquant");
     const duration = row.querySelector(".planning-reference-details-table__duration");
-    const dateLimite = row.querySelector(".planning-reference-details-table__date-limite");
     return {
       id,
       bloquant: Boolean(bloquant instanceof HTMLInputElement && bloquant.checked),
       durationWeeks: duration instanceof HTMLInputElement ? duration.value : "",
-      dateLimite: dateLimite instanceof HTMLInputElement ? dateLimite.value : "",
     };
   });
 

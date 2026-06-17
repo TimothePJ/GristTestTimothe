@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 
 <head>
   <meta charset="utf-8">
-  <title>Grist Two-Step Selection with Editable Table</title>
+  <title>Références projet</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
   
@@ -56,7 +56,7 @@
           <th>Indice</th>
           <th>Recu</th>
           <th>DescriptionObservations</th>
-          <th>DateLimite</th>
+          <th>Date limite calculée</th>
           <th>Bloquant</th>
           <th>Archive</th>
         </tr>
@@ -113,8 +113,8 @@
         <option value="Officiel">Officiel</option>
       </select>
 
-      <label for="datelimite">Date Limite:</label>
-      <input type="date" id="datelimite" name="datelimite">
+      <label for="dureeLimite">Durée limite (semaines):</label>
+      <input type="number" id="dureeLimite" name="dureeLimite" min="0" step="1" inputmode="numeric">
 
       <div style="margin-top: 10px; display: flex; align-items: center;">
         <label for="duplicateCheckbox" style="display: flex; align-items: center; gap: 10px; font-weight: bold; white-space: nowrap;">
@@ -156,8 +156,8 @@
       <input type="text" id="documentType" name="documentType" list="documentTypeList" placeholder="Saisir ou sélectionner un type" autocomplete="off" required>
       <datalist id="documentTypeList"></datalist>
 
-      <label for="defaultDatelimite">Date Limite réception données par défaut:</label>
-      <input type="date" id="defaultDatelimite" name="defaultDatelimite">
+      <label for="defaultDureeLimite">Durée limite réception données par défaut (semaines):</label>
+      <input type="number" id="defaultDureeLimite" name="defaultDureeLimite" min="0" step="1" inputmode="numeric">
 
       <div>
         <label>Émetteurs:</label>
@@ -204,8 +204,8 @@
       <input type="text" id="multipleDocumentType" list="multipleDocumentTypeList" placeholder="Saisir ou sélectionner un type" autocomplete="off" required>
       <datalist id="multipleDocumentTypeList"></datalist>
 
-      <label for="multipleDefaultDatelimite">Date Limite réception données par défaut:</label>
-      <input type="date" id="multipleDefaultDatelimite" name="defaultDatelimite">
+      <label for="multipleDefaultDureeLimite">Durée limite réception données par défaut (semaines):</label>
+      <input type="number" id="multipleDefaultDureeLimite" name="defaultDureeLimite" min="0" step="1" inputmode="numeric">
     
       <div>
         <label>Émetteurs:</label>
@@ -232,8 +232,8 @@
       </div>
       <div id="referenceDocumentsSelectionContainer" class="reference-docs-selection"></div>
 
-      <label for="referenceUnifiedDefaultDatelimite">Date Limite réception données par défaut :</label>
-      <input type="date" id="referenceUnifiedDefaultDatelimite" name="referenceUnifiedDefaultDatelimite">
+      <label for="referenceUnifiedDefaultDureeLimite">Durée limite réception données par défaut (semaines) :</label>
+      <input type="number" id="referenceUnifiedDefaultDureeLimite" name="referenceUnifiedDefaultDureeLimite" min="0" step="1" inputmode="numeric">
 
       <div>
         <label>Données d'entrée :</label>
@@ -437,8 +437,8 @@
         <option value="Officiel">Officiel</option>
       </select>
 
-      <label for="editDatelimite">Date Limite:</label>
-      <input type="date" id="editDatelimite" name="datelimite">
+      <label for="editDureeLimite">Durée limite (semaines):</label>
+      <input type="number" id="editDureeLimite" name="dureeLimite" min="0" step="1" inputmode="numeric">
 
       <div class="dialog-buttons">
         <button type="submit">Enregistrer</button>
