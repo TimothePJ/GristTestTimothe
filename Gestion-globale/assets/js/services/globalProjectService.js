@@ -17,6 +17,14 @@ import {
 const DOP_COLUMN = "DOP";
 const DEFAULT_DOP_VALUES = ["1", "2", "3", "4", "5"];
 export const WITHOUT_DOP_FILTER = "__without_dop__";
+const AVANCEMENT_TYPE_ORDER = {
+  ndc: 10,
+  demolition: 20,
+  fondPlans: 30,
+  coffrage: 40,
+  coupesDetails: 50,
+  armatures: 60,
+};
 
 function clampPercentage(value) {
   return Math.max(0, Math.min(100, toFiniteNumber(value, 0)));
@@ -68,6 +76,44 @@ function normalizeAvancementTypeKey(value) {
   }
 
   return normalizedType;
+}
+
+function getAvancementTypeOrderRank(value) {
+  const normalizedType = normalizeAvancementTypeKey(value);
+  const compactType = normalizedType.replace(/\s+/g, "");
+
+  if (!normalizedType) return 900;
+  if (normalizedType === "ndc") return AVANCEMENT_TYPE_ORDER.ndc;
+  if (normalizedType.includes("demolition")) return AVANCEMENT_TYPE_ORDER.demolition;
+  if (
+    normalizedType.includes("fond de plan") ||
+    normalizedType.includes("fonds de plan") ||
+    normalizedType.includes("fond plans") ||
+    normalizedType.includes("fonds plans") ||
+    compactType.includes("fonddeplans") ||
+    compactType.includes("fondsdeplan")
+  ) {
+    return AVANCEMENT_TYPE_ORDER.fondPlans;
+  }
+  if (normalizedType.includes("coffrage")) return AVANCEMENT_TYPE_ORDER.coffrage;
+  if (
+    normalizedType.includes("coupe") ||
+    normalizedType.includes("detail") ||
+    compactType.includes("coupesdetails")
+  ) {
+    return AVANCEMENT_TYPE_ORDER.coupesDetails;
+  }
+  if (normalizedType.includes("armature")) return AVANCEMENT_TYPE_ORDER.armatures;
+  return 900;
+}
+
+function compareAvancementTypes(left, right) {
+  const rankDelta = getAvancementTypeOrderRank(left) - getAvancementTypeOrderRank(right);
+  if (rankDelta !== 0) return rankDelta;
+  return toText(left).localeCompare(toText(right), "fr", {
+    numeric: true,
+    sensitivity: "base",
+  });
 }
 
 function getPersonKeyFromParts(collaboratorId, name) {
@@ -483,18 +529,20 @@ function buildAggregatedSelections(projects) {
     });
   });
 
-  return [...countsByType.entries()].map(([typeDocument, countsByIndice]) => {
-    const [indice] = [...countsByIndice.entries()].sort((left, right) => {
-      const countDelta = right[1] - left[1];
-      if (countDelta !== 0) return countDelta;
-      return String(left[0]).localeCompare(String(right[0]), "fr", {
-        numeric: true,
-        sensitivity: "base",
-      });
-    })[0];
+  return [...countsByType.entries()]
+    .sort(([leftType], [rightType]) => compareAvancementTypes(leftType, rightType))
+    .map(([typeDocument, countsByIndice]) => {
+      const [indice] = [...countsByIndice.entries()].sort((left, right) => {
+        const countDelta = right[1] - left[1];
+        if (countDelta !== 0) return countDelta;
+        return String(left[0]).localeCompare(String(right[0]), "fr", {
+          numeric: true,
+          sensitivity: "base",
+        });
+      })[0];
 
-    return { typeDocument, indice };
-  });
+      return { typeDocument, indice };
+    });
 }
 
 function buildAggregatedAvancementConfig(projects) {

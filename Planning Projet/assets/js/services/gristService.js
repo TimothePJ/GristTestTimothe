@@ -1031,12 +1031,13 @@ async function buildReferenceOffsetSnapshotForPlanningRow(
       return;
     }
 
+    const currentDurationWeeks = parseReferenceDurationLimit(row?.DureeLimite);
     const referenceLimitDate = parseCalendarDate(row?.DateLimite);
     const durationWeeks =
-      parseReferenceDurationLimit(row?.DureeLimite) ??
+      currentDurationWeeks ??
       (
         !hasValidStartDate || isEmptyReferenceDate(referenceLimitDate)
-          ? null
+          ? (Boolean(row?.Bloquant) && hasValidStartDate ? 0 : null)
           : getReferenceDurationWeeksFromLimitDate(startDate, referenceLimitDate)
       );
 
@@ -1048,9 +1049,10 @@ async function buildReferenceOffsetSnapshotForPlanningRow(
     offsets.push({
       referenceId,
       durationWeeks,
+      preserveBlankDuration: currentDurationWeeks == null && Boolean(row?.Bloquant),
       recuValue: row?.Recu,
       currentDateLimiteIso: formatReferenceDateIso(row?.DateLimite),
-      currentDurationWeeks: parseReferenceDurationLimit(row?.DureeLimite),
+      currentDurationWeeks,
       currentRetardValue: row?.Retard,
     });
   });
@@ -1115,7 +1117,7 @@ function buildReferenceDateLimiteSyncActions(snapshot, planningRow, columns = {}
       if (offset.currentDateLimiteIso !== dateLimiteIso) {
         fields.DateLimite = dateLimiteIso;
       }
-      if (offset.currentDurationWeeks !== offset.durationWeeks) {
+      if (offset.currentDurationWeeks !== offset.durationWeeks && !offset.preserveBlankDuration) {
         fields.DureeLimite = offset.durationWeeks;
       }
       if (!referenceRetardStoredValueMatches(offset.currentRetardValue, nextRetard)) {
@@ -3152,6 +3154,7 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
       }
       const linkedReferenceRow = linkedRowsById.get(referenceId) || null;
 
+      const nextBloquant = Boolean(update?.bloquant);
       const durationText = toText(update?.durationWeeks);
       const rawDateLimiteText = toText(update?.dateLimite);
       const rawDateLimiteIsEmptyValue =
@@ -3186,7 +3189,7 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
           REFERENCES_TABLE_NAME,
           referenceId,
           {
-            Bloquant: Boolean(update?.bloquant),
+            Bloquant: nextBloquant,
             DureeLimite: durationWeeks,
             DateLimite: dateLimiteIso,
             Retard: toReferenceRetardStorageValue(
@@ -3197,12 +3200,29 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
       }
 
       if (!durationText) {
+        if (nextBloquant && hasStartDate) {
+          const computedDateLimiteIso = formatIsoDate(startDate);
+          return [
+            "UpdateRecord",
+            REFERENCES_TABLE_NAME,
+            referenceId,
+            {
+              Bloquant: nextBloquant,
+              DureeLimite: "",
+              DateLimite: computedDateLimiteIso || REFERENCE_EMPTY_DATE_ISO,
+              Retard: toReferenceRetardStorageValue(
+                computeReferenceRetardDays(linkedReferenceRow?.Recu, computedDateLimiteIso)
+              ),
+            },
+          ];
+        }
+
         return [
           "UpdateRecord",
           REFERENCES_TABLE_NAME,
           referenceId,
           {
-            Bloquant: Boolean(update?.bloquant),
+            Bloquant: nextBloquant,
             DureeLimite: "",
             DateLimite: REFERENCE_EMPTY_DATE_ISO,
             Retard: "",
@@ -3221,7 +3241,7 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
           REFERENCES_TABLE_NAME,
           referenceId,
           {
-            Bloquant: Boolean(update?.bloquant),
+            Bloquant: nextBloquant,
             DureeLimite: durationWeeks,
             DateLimite: REFERENCE_EMPTY_DATE_ISO,
             Retard: "",
@@ -3240,7 +3260,7 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
         REFERENCES_TABLE_NAME,
         referenceId,
         {
-          Bloquant: Boolean(update?.bloquant),
+          Bloquant: nextBloquant,
           DureeLimite: durationWeeks,
           DateLimite: computedDateLimiteIso,
           Retard: toReferenceRetardStorageValue(

@@ -1618,9 +1618,14 @@ function buildReferenceLimitFields({
   projectName = '',
   documentInfo = {},
   durationWeeks = '',
+  useZeroWhenEmpty = false,
 } = {}) {
   const parsedDuration = parseReferenceDurationLimit(durationWeeks);
-  if (parsedDuration == null) {
+  const usesVirtualZeroDuration =
+    parsedDuration == null && Boolean(useZeroWhenEmpty) && !String(durationWeeks ?? '').trim();
+  const effectiveDuration = usesVirtualZeroDuration ? 0 : parsedDuration;
+
+  if (effectiveDuration == null) {
     return {
       DureeLimite: '',
       DateLimite: DEFAULT_REFERENCE_DATE,
@@ -1635,11 +1640,11 @@ function buildReferenceLimitFields({
     documentZone: documentInfo?.zone ?? documentInfo?.documentZone,
   });
   const segmentStartDate = getReferencePlanningSegmentStartDate(planningRow);
-  const dateLimite = subtractReferenceWeeksFromDate(segmentStartDate, parsedDuration);
+  const dateLimite = subtractReferenceWeeksFromDate(segmentStartDate, effectiveDuration);
   const dateLimiteIso = formatReferenceDateIso(dateLimite);
 
   return {
-    DureeLimite: parsedDuration,
+    DureeLimite: usesVirtualZeroDuration ? '' : parsedDuration,
     DateLimite: dateLimiteIso || DEFAULT_REFERENCE_DATE,
   };
 }
@@ -3446,11 +3451,31 @@ function populateTable() {
         td.addEventListener('click', async () => {
           const newValue = !Boolean(record.Bloquant);
           try {
+            const planningTableForLimits = await fetchReferencePlanningTableForLimits();
+            const referenceLimitFields = buildReferenceLimitFields({
+              planningTable: planningTableForLimits,
+              projectName: record.NomProjet || selectedFirstValue,
+              documentInfo: {
+                numero: record.NumeroDocument,
+                name: record.NomDocument,
+                type: record.Type_document,
+                zone: record.Zone,
+              },
+              durationWeeks: record.DureeLimite,
+              useZeroWhenEmpty: newValue,
+            });
+            const updateFields = {
+              Bloquant: newValue,
+              ...referenceLimitFields,
+              Retard: toReferenceRetardStorageValue(
+                computeReferenceRetardDays(record.Recu, referenceLimitFields.DateLimite)
+              ),
+            };
             await grist.docApi.applyUserActions([
-              ['UpdateRecord', 'References2', record.id, { Bloquant: newValue }]
+              ['UpdateRecord', 'References2', record.id, updateFields]
             ]);
-            record.Bloquant = newValue;
-            td.textContent = newValue ? '\u2713' : '';
+            Object.assign(record, updateFields);
+            populateTable();
           } catch (error) {
             console.error('Error updating Bloquant:', error);
             alert("Erreur lors de la mise à jour du bloquant.");
@@ -4894,7 +4919,8 @@ document.getElementById('editRowDialog').addEventListener('submit', async (e) =>
   const editDureeLimiteInput = document.getElementById('editDureeLimite');
   const savedDurationValue = String(editDureeLimiteInput?.dataset?.initialValue ?? '').trim();
   const nextDurationValue = String(dureeLimite ?? '').trim();
-  const referenceLimitFields = !nextDurationValue && !savedDurationValue && currentRecord
+  const referenceLimitFields =
+    !nextDurationValue && !savedDurationValue && currentRecord && !currentRecord.Bloquant
     ? {
         DureeLimite: currentRecord.DureeLimite ?? '',
         DateLimite: currentRecord.DateLimite || DEFAULT_REFERENCE_DATE,
@@ -4909,6 +4935,7 @@ document.getElementById('editRowDialog').addEventListener('submit', async (e) =>
           zone: currentRecord?.Zone,
         },
         durationWeeks: dureeLimite,
+        useZeroWhenEmpty: Boolean(currentRecord?.Bloquant),
       });
   const updatedRow = withComputedReferenceRetard({
     Emetteur: formData.get('editEmetteur'),

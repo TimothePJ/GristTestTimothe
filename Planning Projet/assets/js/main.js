@@ -74,6 +74,8 @@ let manageZoneModalOpen = false;
 let planningProjectOptions = [];
 let planningSyncApiReady = false;
 let currentPlanningDateBounds = null;
+let planningEditingEnabled = false;
+let planningEditToggleBound = false;
 const planningWarningListeners = new Set();
 let currentPlanningWarnings = [];
 let lastPlanningWarningsSignature = "";
@@ -219,6 +221,81 @@ function setPlanningStatus(message = "") {
   }
 }
 
+function isPlanningEditingUnlocked() {
+  return planningEditingEnabled && !EMBEDDED_PLANNING_SYNC_MODE && !HEADER_ONLY_EMBEDDED_MODE;
+}
+
+function updatePlanningEditToggle() {
+  if (typeof document === "undefined") return;
+
+  const btn = document.getElementById("planningEditToggle");
+  if (!(btn instanceof HTMLButtonElement)) return;
+
+  const isAvailable = !EMBEDDED_PLANNING_SYNC_MODE && !HEADER_ONLY_EMBEDDED_MODE;
+  btn.hidden = !isAvailable;
+  if (!isAvailable) {
+    document.body?.classList.remove("planning-editing-enabled");
+    document.body?.classList.add("planning-editing-locked");
+    return;
+  }
+
+  const enabled = isPlanningEditingUnlocked();
+  btn.textContent = enabled ? "Verrouiller" : "Editer";
+  btn.setAttribute("aria-pressed", enabled ? "true" : "false");
+  btn.title = enabled ? "Verrouiller le planning" : "Activer l'edition du planning";
+  btn.classList.toggle("is-editing", enabled);
+  document.body?.classList.toggle("planning-editing-enabled", enabled);
+  document.body?.classList.toggle("planning-editing-locked", !enabled);
+}
+
+function setPlanningEditingEnabled(nextEnabled, { rerender = true, notify = true } = {}) {
+  planningEditingEnabled =
+    Boolean(nextEnabled) && !EMBEDDED_PLANNING_SYNC_MODE && !HEADER_ONLY_EMBEDDED_MODE;
+  updatePlanningEditToggle();
+
+  if (notify) {
+    setPlanningStatus(
+      planningEditingEnabled
+        ? "Edition du planning activee."
+        : "Planning verrouille."
+    );
+  }
+
+  if (rerender) {
+    renderPlanningFromCache();
+  }
+}
+
+function requirePlanningEditing(actionLabel = "modifier le planning") {
+  if (isPlanningEditingUnlocked()) {
+    return true;
+  }
+
+  setPlanningStatus(`Planning verrouille : clique sur Editer pour ${actionLabel}.`);
+  return false;
+}
+
+function assertPlanningEditing(actionLabel = "modifier le planning") {
+  if (requirePlanningEditing(actionLabel)) return;
+  throw new Error("Planning verrouille.");
+}
+
+function bindPlanningEditToggle() {
+  if (planningEditToggleBound) return;
+  planningEditToggleBound = true;
+
+  const btn = document.getElementById("planningEditToggle");
+  if (!(btn instanceof HTMLButtonElement)) return;
+
+  btn.addEventListener("click", () => {
+    setPlanningEditingEnabled(!planningEditingEnabled, {
+      rerender: true,
+      notify: true,
+    });
+  });
+  updatePlanningEditToggle();
+}
+
 function applyEmbeddedPlanningSyncMode() {
   if (!EMBEDDED_PLANNING_SYNC_MODE || typeof document === "undefined") {
     return;
@@ -270,6 +347,8 @@ function closeAddZoneModal() {
 }
 
 function openAddZoneModal() {
+  if (!requirePlanningEditing("ajouter une zone")) return;
+
   const els = getAddZoneModalElements();
   if (!els) return;
 
@@ -317,6 +396,10 @@ function bindAddZoneModal() {
   if (els.form instanceof HTMLFormElement) {
     els.form.addEventListener("submit", async (event) => {
       event.preventDefault();
+
+      if (!requirePlanningEditing("ajouter une zone")) {
+        return;
+      }
 
       const projectName = state.selectedProject || "";
       const zoneValue =
@@ -486,6 +569,8 @@ function closeManageZoneModal({ restoreSelection = true } = {}) {
 }
 
 function openManageZoneModal() {
+  if (!requirePlanningEditing("modifier les zones")) return;
+
   const els = getManageZoneModalElements();
   if (!els) return;
 
@@ -545,6 +630,10 @@ function bindManageZoneModal() {
 
   if (els.renameBtn instanceof HTMLElement) {
     els.renameBtn.addEventListener("click", async () => {
+      if (!requirePlanningEditing("modifier les zones")) {
+        return;
+      }
+
       const projectName = toText(state.selectedProject);
       const sourceZone =
         els.zoneSelect instanceof HTMLSelectElement ? toText(els.zoneSelect.value) : "";
@@ -604,6 +693,10 @@ function bindManageZoneModal() {
 
   if (els.deleteBtn instanceof HTMLElement) {
     els.deleteBtn.addEventListener("click", async () => {
+      if (!requirePlanningEditing("modifier les zones")) {
+        return;
+      }
+
       const projectName = toText(state.selectedProject);
       const sourceZone =
         els.zoneSelect instanceof HTMLSelectElement ? toText(els.zoneSelect.value) : "";
@@ -738,6 +831,7 @@ function renderPlanningFromCache() {
   );
   if (!timelineData.rowCount) return;
   timelineData.resetViewport = false;
+  timelineData.editingEnabled = isPlanningEditingUnlocked();
   renderPlanningTimeline(timelineData);
 }
 
@@ -766,6 +860,8 @@ async function handleDurationCellEdit({
   leftDateColumnKey,
   rightIsoDate,
 }) {
+  assertPlanningEditing("modifier les durees");
+
   const durationColumnName = resolvePlanningColumnName(durationColumnKey);
   if (!durationColumnName) {
     throw new Error("Colonne de durée introuvable dans la configuration.");
@@ -828,6 +924,8 @@ async function handleDurationCellEdit({
 }
 
 async function handleRetardJustificationEdit({ rowId, remarque }) {
+  assertPlanningEditing("modifier les justifications");
+
   const recordId = Number(rowId);
   if (!Number.isInteger(recordId) || recordId <= 0) {
     throw new Error("Identifiant de ligne Planning_Projet invalide.");
@@ -854,6 +952,8 @@ async function handleReferenceDetailsAction({ action, context = {}, updates = []
   }
 
   if (action === "save") {
+    assertPlanningEditing("modifier les details references");
+
     setPlanningStatus("Sauvegarde des détails références...");
     const result = await updatePlanningReferenceDetails(recordId, updates);
     await refreshPlanning({ forceLoad: true, reason: "reference-details-save" });
@@ -864,6 +964,8 @@ async function handleReferenceDetailsAction({ action, context = {}, updates = []
 }
 
 async function handlePlanningRowInitialize({ rowId }) {
+  assertPlanningEditing("initialiser une ligne");
+
   try {
     setPlanningStatus("Initialisation de la ligne...");
     await initializePlanningRow(rowId);
@@ -884,6 +986,8 @@ async function handleMsProjectRowDrop({
   payload = null,
   targetTask = "",
 }) {
+  assertPlanningEditing("deposer un planning MS Project");
+
   const targetRowId = Number(planningRowId);
   if (!Number.isInteger(targetRowId) || targetRowId <= 0) {
     throw new Error("Ligne planning cible invalide.");
@@ -938,6 +1042,8 @@ async function handlePlanningRowDrop({
   targetZone = "",
   targetZoneKey = "",
 }) {
+  assertPlanningEditing("deplacer une ligne");
+
   const sourceRowId = Number(sourcePlanningRowId);
   const destinationRowId = Number(targetPlanningRowId);
   const hasRowDestination =
@@ -1140,6 +1246,7 @@ async function performPlanningRefresh(options = {}) {
     );
     buildDurationMs += performance.now() - buildStartedAt;
     timelineData.resetViewport = lastRenderedProject !== selectedProject;
+    timelineData.editingEnabled = isPlanningEditingUnlocked();
     lastRenderedProject = selectedProject;
     const planningWarnings = buildPlanningWarningsFromGroups(
       timelineData?.groups || []
@@ -1360,10 +1467,11 @@ async function bootstrap() {
   try {
     applyEmbeddedPlanningSyncMode();
     loadState();
+    bindPlanningEditToggle();
 
     initGrist();
     if (HEADER_ONLY_EMBEDDED_MODE) {
-      renderPlanningTimeline({ groups: [], items: [] });
+      renderPlanningTimeline({ groups: [], items: [], editingEnabled: false });
       bindTimelineToolbar();
       toolbarBound = true;
       await waitForPlanningViewportSettled();
@@ -1394,9 +1502,11 @@ async function bootstrap() {
     initZoneSelector({
       onChange: handleZoneChange,
       onAddZone: () => {
+        if (!requirePlanningEditing("ajouter une zone")) return;
         openAddZoneModal();
       },
       onManageZone: () => {
+        if (!requirePlanningEditing("modifier les zones")) return;
         openManageZoneModal();
       },
     });

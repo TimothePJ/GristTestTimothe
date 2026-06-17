@@ -8,6 +8,15 @@ const DOCUMENT_TYPES = {
   total: "Total",
 };
 
+const DOCUMENT_TYPE_ORDER = {
+  ndc: 10,
+  demolition: 20,
+  fondPlans: 30,
+  coffrage: 40,
+  coupesDetails: 50,
+  armatures: 60,
+};
+
 const INDICES = {
   advanced: "0",
   coffrageDefault: "A",
@@ -113,6 +122,67 @@ function isNoteDeCalculLabel(normalizedValue) {
     normalizedValue.includes("note calcul") ||
     normalizedValue.includes("notes calcul")
   );
+}
+
+function getDocumentTypeOrderRank(value) {
+  const normalizedValue = normalizeLookupText(value);
+  const compactValue = normalizeCompactLookupText(value);
+
+  if (!normalizedValue) {
+    return 900;
+  }
+
+  if (
+    normalizedValue === normalizeLookupText(DOCUMENT_TYPES.ndc) ||
+    compactValue === normalizeCompactLookupText(DOCUMENT_TYPES.ndc) ||
+    isNoteDeCalculLabel(normalizedValue)
+  ) {
+    return DOCUMENT_TYPE_ORDER.ndc;
+  }
+
+  if (normalizedValue.includes("demolition")) {
+    return DOCUMENT_TYPE_ORDER.demolition;
+  }
+
+  if (
+    normalizedValue.includes("fond de plan") ||
+    normalizedValue.includes("fonds de plan") ||
+    normalizedValue.includes("fond plans") ||
+    normalizedValue.includes("fonds plans") ||
+    compactValue.includes("fonddeplans") ||
+    compactValue.includes("fondsdeplan")
+  ) {
+    return DOCUMENT_TYPE_ORDER.fondPlans;
+  }
+
+  if (normalizedValue.includes("coffrage")) {
+    return DOCUMENT_TYPE_ORDER.coffrage;
+  }
+
+  if (
+    normalizedValue.includes("coupe") ||
+    normalizedValue.includes("detail") ||
+    compactValue.includes("coupesdetails")
+  ) {
+    return DOCUMENT_TYPE_ORDER.coupesDetails;
+  }
+
+  if (normalizedValue.includes("armature")) {
+    return DOCUMENT_TYPE_ORDER.armatures;
+  }
+
+  return 900;
+}
+
+function compareDocumentTypes(a, b) {
+  const rankDiff = getDocumentTypeOrderRank(a) - getDocumentTypeOrderRank(b);
+  return rankDiff || compareText(a, b);
+}
+
+function comparePlanRows(a, b) {
+  const rankDiff = getDocumentTypeOrderRank(a?.label || a?.tableLabel || a?.type) -
+    getDocumentTypeOrderRank(b?.label || b?.tableLabel || b?.type);
+  return rankDiff || compareText(a?.label || a?.tableLabel || "", b?.label || b?.tableLabel || "");
 }
 
 function normalizeDocumentType(value) {
@@ -256,7 +326,7 @@ function getProjectConfig(project) {
 function getDocumentTypes(projectRecords) {
   return [...new Set(projectRecords.map(getDocumentType))]
     .filter(Boolean)
-    .sort(compareText);
+    .sort(compareDocumentTypes);
 }
 
 function isCoffrageType(type) {
@@ -484,15 +554,16 @@ function buildDashboardData(projectRecords, ventilation, projectConfig, realExpe
   const selectedIndicesByType = buildSelectedIndicesByType(projectRecords, projectConfig.selections);
   const statsByType = buildStatsByType(projectRecords, selectedIndicesByType);
   const averageIndices = buildAverageIndices(projectRecords);
-  const sortedTypes = Object.keys(statsByType).sort(compareText);
+  const sortedTypes = Object.keys(statsByType).sort(compareDocumentTypes);
   const fondPlansRows = buildFondPlansRows(projectRecords, ventilation);
   const standardRows = buildTableRows(sortedTypes, statsByType, ventilation);
-  const chartRows = [...fondPlansRows, ...standardRows];
+  const planRows = [...fondPlansRows, ...standardRows].sort(comparePlanRows);
+  const chartRows = planRows;
   const budgetRows = buildUnmatchedBudgetRows(
     ventilation.unmatchedRows,
     projectConfig.budgetProgress,
   );
-  const tableRows = [...budgetRows, ...fondPlansRows, ...standardRows];
+  const tableRows = [...budgetRows, ...planRows];
   const totals = buildTotals(ventilation.total, chartRows, tableRows, realExpenses);
   const chart = buildDetailedChartData(chartRows);
 

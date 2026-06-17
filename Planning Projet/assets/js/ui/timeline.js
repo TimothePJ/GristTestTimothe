@@ -96,7 +96,7 @@ let activePlanningPaneResize = null;
 let pendingPlanningPaneResizeWidth = null;
 let planningPaneResizeRafId = 0;
 let visualAggregateModeEnabled = false;
-let lastPlanningTimelineData = { groups: [], items: [] };
+let lastPlanningTimelineData = { groups: [], items: [], editingEnabled: false };
 
 const PLANNING_PARENT_TOOLTIP_MESSAGE_TYPE = "planning-projet-hover-tooltip";
 const REFERENCE_DETAILS_EMPTY_DATE_ISO = "1900-01-01";
@@ -107,6 +107,10 @@ const PLANNING_PANE_MIN_WIDTH = 260;
 const PLANNING_PANE_MIN_TIMELINE_WIDTH = 320;
 const PLANNING_PANE_RESIZE_STEP = 24;
 const LEGACY_PLANNING_PANE_WIDTH_STORAGE_KEY = "planning-projet.left-panel-width";
+
+function isPlanningEditingEnabled() {
+  return Boolean(lastPlanningTimelineData?.editingEnabled) && !EMBEDDED_PLANNING_SYNC_MODE;
+}
 
 function roundPlanningTraceNumber(value, digits = 2) {
   const numericValue = Number(value);
@@ -1828,11 +1832,17 @@ function parseReferenceDetailsDurationWeeks(value = "") {
   return numericValue;
 }
 
-function computeReferenceDetailsLimitDateIso(segmentStartIso = "", durationWeeksValue = "") {
+function computeReferenceDetailsLimitDateIso(
+  segmentStartIso = "",
+  durationWeeksValue = "",
+  useZeroWhenEmpty = false
+) {
   const startIso = String(segmentStartIso || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startIso)) return "";
 
-  const durationWeeks = parseReferenceDetailsDurationWeeks(durationWeeksValue);
+  const durationText = String(durationWeeksValue ?? "").trim();
+  const effectiveDuration = durationText || (useZeroWhenEmpty ? "0" : "");
+  const durationWeeks = parseReferenceDetailsDurationWeeks(effectiveDuration);
   if (durationWeeks == null) return "";
 
   return shiftIsoDateValue(startIso, -(durationWeeks * 7));
@@ -1986,7 +1996,11 @@ function applyReferenceDetailsFreshReceptionData(dialog, data = {}) {
         : String(freshReference.durationWeeks);
       const freshDateLimite =
         normalizeReferenceDetailsLimitDateIso(freshReference.dateLimite) ||
-        computeReferenceDetailsLimitDateIso(segmentStartIso, freshDuration);
+        computeReferenceDetailsLimitDateIso(
+          segmentStartIso,
+          freshDuration,
+          Boolean(freshReference.bloquant)
+        );
       duration.value = freshDuration;
       dateLimite.value = freshDateLimite;
       row.dataset.referenceSavedDuration = freshDuration;
@@ -2142,7 +2156,11 @@ function renderReferenceDetailsBody(dialog, data = {}) {
     const savedDateLimiteIso = hasSegmentStartIso
       ? (
           normalizeReferenceDetailsLimitDateIso(reference?.dateLimite) ||
-          computeReferenceDetailsLimitDateIso(segmentStartIso, savedDurationValue)
+          computeReferenceDetailsLimitDateIso(
+            segmentStartIso,
+            savedDurationValue,
+            Boolean(reference?.bloquant)
+          )
         )
       : "";
     dateLimite.value = savedDateLimiteIso;
@@ -2167,12 +2185,16 @@ function renderReferenceDetailsBody(dialog, data = {}) {
       const hasDuration = Boolean(durationText);
       const hasDate = Boolean(currentDateIso);
       const durationWeeks = parseReferenceDetailsDurationWeeks(durationText);
-      const dateFromDurationIso = computeReferenceDetailsLimitDateIso(segmentStartIso, durationText);
+      const dateFromDurationIso = computeReferenceDetailsLimitDateIso(
+        segmentStartIso,
+        durationText,
+        bloquant.checked
+      );
       const durationFromDate = computeReferenceDetailsDurationWeeks(segmentStartIso, currentDateIso);
       const invalidDuration =
-        hasDuration &&
+        (hasDuration || bloquant.checked) &&
         (
-          durationWeeks == null ||
+          (hasDuration && durationWeeks == null) ||
           (hasSegmentStartIso && !dateFromDurationIso)
         );
       const invalidDate = hasDate && (!hasSegmentStartIso || durationFromDate == null);
@@ -2204,8 +2226,8 @@ function renderReferenceDetailsBody(dialog, data = {}) {
 
       const durationText = String(duration.value || "").trim();
       syncingReferenceDetailsInputs = true;
-      dateLimite.value = durationText
-        ? computeReferenceDetailsLimitDateIso(segmentStartIso, durationText)
+      dateLimite.value = durationText || bloquant.checked
+        ? computeReferenceDetailsLimitDateIso(segmentStartIso, durationText, bloquant.checked)
         : "";
       syncingReferenceDetailsInputs = false;
       updateReferenceDetailsPreviewState();
@@ -2213,6 +2235,7 @@ function renderReferenceDetailsBody(dialog, data = {}) {
 
     bloquant.addEventListener("change", () => {
       markReferenceDetailsControlDirty(bloquant, dialog);
+      updateDateLimitePreview();
     });
     duration.addEventListener("input", () => {
       markReferenceDetailsControlDirty(duration, dialog);
@@ -2242,6 +2265,7 @@ function renderReferenceDetailsBody(dialog, data = {}) {
       bloquantCbs.forEach((cb) => {
         cb.checked = selectAllCb.checked;
         markReferenceDetailsControlDirty(cb, dialog);
+        cb.dispatchEvent(new Event("change", { bubbles: true }));
       });
     });
     syncSelectAll();
@@ -2728,6 +2752,10 @@ function resolvePlanningDragRowElement(event, forcedRowEl = null) {
 function handlePlanningNativeDragStart(event, forcedRowEl = null) {
   if (!event) return;
   if (event[PLANNING_ROW_DRAG_HANDLED_FLAG]) return;
+  if (!isPlanningEditingEnabled()) {
+    event.preventDefault();
+    return;
+  }
 
   const rowEl = resolvePlanningDragRowElement(event, forcedRowEl);
   if (!(rowEl instanceof HTMLElement)) return;
@@ -2777,6 +2805,12 @@ function bindGlobalPlanningRowDragging() {
     "dragover",
     (event) => {
       if (!hasPlanningRowPayloadType(event.dataTransfer)) return;
+      if (!isPlanningEditingEnabled()) {
+        clearPlanningRowDraggingState();
+        clearPlanningRowDropTarget();
+        stopPlanningDragAutoScroll();
+        return;
+      }
       updatePlanningDragAutoScrollFromPointer(event.clientX, event.clientY);
 
       pendingPlanningDropPreviewEvent = event;
@@ -3324,6 +3358,11 @@ function bindPlanningRowDrop(containerEl) {
 
   containerEl.addEventListener("dragover", (event) => {
     if (!hasPlanningRowPayloadType(event.dataTransfer)) return;
+    if (!isPlanningEditingEnabled()) {
+      clearPlanningRowDropTarget(containerEl);
+      stopPlanningDragAutoScroll();
+      return;
+    }
 
     event.preventDefault();
     updatePlanningDragAutoScrollFromPointer(event.clientX, event.clientY);
@@ -3385,6 +3424,11 @@ function bindPlanningRowDrop(containerEl) {
 
   containerEl.addEventListener("drop", async (event) => {
     if (!hasPlanningRowPayloadType(event.dataTransfer)) return;
+    if (!isPlanningEditingEnabled()) {
+      clearPlanningRowDropTarget(containerEl);
+      stopPlanningDragAutoScroll();
+      return;
+    }
 
     event.preventDefault();
     event.stopPropagation();
@@ -3641,6 +3685,11 @@ function bindMsProjectRowDrop(containerEl) {
     "dragenter",
     (event) => {
       if (!hasMsProjectPayloadType(event.dataTransfer)) return;
+      if (!isPlanningEditingEnabled()) {
+        clearMsProjectDropTarget(containerEl);
+        setMsProjectGlobalDragCursor(false);
+        return;
+      }
       setMsProjectGlobalDragCursor(true);
     },
     true
@@ -3650,6 +3699,11 @@ function bindMsProjectRowDrop(containerEl) {
     "dragover",
     (event) => {
       if (!hasMsProjectPayloadType(event.dataTransfer)) return;
+      if (!isPlanningEditingEnabled()) {
+        clearMsProjectDropTarget(containerEl);
+        setMsProjectGlobalDragCursor(false);
+        return;
+      }
       event.preventDefault();
       if (event.dataTransfer) {
         event.dataTransfer.dropEffect = "copy";
@@ -3661,6 +3715,11 @@ function bindMsProjectRowDrop(containerEl) {
 
   containerEl.addEventListener("dragover", (event) => {
     if (!hasMsProjectPayloadType(event.dataTransfer)) return;
+    if (!isPlanningEditingEnabled()) {
+      clearMsProjectDropTarget(containerEl);
+      setMsProjectGlobalDragCursor(false);
+      return;
+    }
 
     event.preventDefault();
     if (event.dataTransfer) {
@@ -3694,6 +3753,11 @@ function bindMsProjectRowDrop(containerEl) {
 
   containerEl.addEventListener("drop", async (event) => {
     if (!hasMsProjectPayloadType(event.dataTransfer)) return;
+    if (!isPlanningEditingEnabled()) {
+      clearMsProjectDropTarget(containerEl);
+      setMsProjectGlobalDragCursor(false);
+      return;
+    }
 
     event.preventDefault();
     event.stopPropagation();
@@ -4487,11 +4551,14 @@ function buildGroupLabelElement(group) {
 
   const row = document.createElement("div");
   row.className = "group-row-grid";
-  // Le drag-and-drop de lignes est désactivé en mode embedded (synchronisation-plannings).
-  if (!EMBEDDED_PLANNING_SYNC_MODE) {
+  const editingEnabled = isPlanningEditingEnabled();
+  if (editingEnabled) {
     row.classList.add("planning-draggable-row");
     row.draggable = true;
     row.setAttribute("draggable", "true");
+  } else {
+    row.draggable = false;
+    row.setAttribute("draggable", "false");
   }
   row.dataset.planningRowId = String(group?.rowId ?? "");
   row.dataset.planningGroupId = String(group?.id ?? "");
@@ -4571,7 +4638,7 @@ function buildGroupLabelElement(group) {
     group?.dureeDebutFinLeftDateColumnKey ?? ""
   );
   dureeDebutFin.dataset.rightIsoDate = String(group?.dureeDebutFinRightIso ?? "");
-  if (group?.dureeDebutFinEditable) {
+  if (editingEnabled && group?.dureeDebutFinEditable) {
     dureeDebutFin.classList.add("editable-duration-cell");
     dureeDebutFin.setAttribute("draggable", "false");
     dureeDebutFin.title = "Cliquer pour modifier la durée";
@@ -4599,7 +4666,7 @@ function buildGroupLabelElement(group) {
   dureeFinDemarrage.dataset.rightIsoDate = String(
     group?.dureeFinDemarrageRightIso ?? ""
   );
-  if (group?.dureeFinDemarrageEditable) {
+  if (editingEnabled && group?.dureeFinDemarrageEditable) {
     dureeFinDemarrage.classList.add("editable-duration-cell");
     dureeFinDemarrage.setAttribute("draggable", "false");
     dureeFinDemarrage.title = "Cliquer pour modifier la durée";
@@ -4648,12 +4715,18 @@ function buildGroupLabelElement(group) {
     realise,
     retards,
   ].forEach((cellEl) => {
-    cellEl.setAttribute("draggable", "true");
+    const isEditableDuration = cellEl.classList.contains("editable-duration-cell");
+    cellEl.setAttribute(
+      "draggable",
+      editingEnabled && !isEditableDuration ? "true" : "false"
+    );
   });
 
-  row.addEventListener("dragstart", (event) => {
-    handlePlanningNativeDragStart(event, row);
-  });
+  if (editingEnabled) {
+    row.addEventListener("dragstart", (event) => {
+      handlePlanningNativeDragStart(event, row);
+    });
+  }
 
   row.addEventListener("mousedown", (event) => {
     if (event.button !== 0) return;
@@ -4673,7 +4746,7 @@ function buildGroupLabelElement(group) {
     });
   });
 
-  if (!EMBEDDED_PLANNING_SYNC_MODE) {
+  if (editingEnabled) {
     row.addEventListener("contextmenu", (event) => {
       openRetardContextMenu(event, row);
     });
@@ -5560,6 +5633,7 @@ export function renderPlanningTimeline(timelineData = {}) {
     groups: timelineData.groups || [],
     items: timelineData.items || [],
     resetViewport: Boolean(timelineData.resetViewport),
+    editingEnabled: Boolean(timelineData.editingEnabled),
   };
   const { groups, items } = getDisplayedTimelineData(lastPlanningTimelineData);
   const container = getTimelineContainer();
@@ -5569,9 +5643,17 @@ export function renderPlanningTimeline(timelineData = {}) {
     throw new Error("vis-timeline non chargé.");
   }
 
-  const groupFingerprints = groups.map(fingerprintTimelineRecord);
+  const editingFingerprint = lastPlanningTimelineData.editingEnabled
+    ? "editing:1"
+    : "editing:0";
+  const groupFingerprints = groups.map((group) =>
+    `${fingerprintTimelineRecord(group)}|${editingFingerprint}`
+  );
   const itemFingerprints = items.map(fingerprintTimelineRecord);
-  const renderSignature = buildTimelineRenderSignature(groupFingerprints, itemFingerprints);
+  const renderSignature = [
+    buildTimelineRenderSignature(groupFingerprints, itemFingerprints),
+    `editing:${lastPlanningTimelineData.editingEnabled ? "1" : "0"}`,
+  ].join("|");
   const shouldResetViewport =
     Boolean(timelineData.resetViewport) || !timelineHasRenderedData;
   if (
