@@ -2268,7 +2268,9 @@ function buildPrintContainer(selectedProject, orderedTypes, orderedZones, select
     typeSection.appendChild(title);
 
     if (typeof renderRowsForSelectedType === "function") {
-      renderRowsForSelectedType(typeSection, rowsForType, normalizedProject, orderedZones, selectedIndices);
+      renderRowsForSelectedType(typeSection, rowsForType, normalizedProject, type, orderedZones, selectedIndices, {
+        interactive: false,
+      });
     }
 
     container.appendChild(typeSection);

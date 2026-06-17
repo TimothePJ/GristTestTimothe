@@ -2,6 +2,8 @@ const INDICES = ["0", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
 const DOCUMENT_PLANNING_TABLE_CANDIDATES = ["Planning_Projet", "Planning_Project"];
 let projetsDictGlobal = null;
 let planningRealisationHelpersPromise = null;
+const collapsedPlanTypeGroups = new Set();
+const collapsedPlanZoneGroups = new Set();
 
 (async () => {
   await chargerProjetsMap();
@@ -82,6 +84,88 @@ function getRecordZone(record) {
 
 function formatZoneSectionTitle(zoneValue) {
   return normalizeZoneText(zoneValue) || "Sans zone";
+}
+
+function getPlanGroupKey(...values) {
+  return JSON.stringify(values.map((value) => normalizeText(value)));
+}
+
+function findPlanGroupToggleButton(groupType, groupKey) {
+  return Array.from(document.querySelectorAll("#plans-output .plan-group-toggle"))
+    .find((button) =>
+      button.dataset.groupType === groupType &&
+      button.dataset.groupKey === groupKey
+    ) || null;
+}
+
+function restorePlanGroupTogglePosition(groupType, groupKey, anchorTop, scrollContainer) {
+  const nextButton = findPlanGroupToggleButton(groupType, groupKey);
+  if (!nextButton) return;
+
+  let topDelta = nextButton.getBoundingClientRect().top - anchorTop;
+  if (scrollContainer) {
+    scrollContainer.scrollTop += topDelta;
+    topDelta = nextButton.getBoundingClientRect().top - anchorTop;
+  }
+
+  if (topDelta) {
+    window.scrollBy(0, topDelta);
+  }
+
+  nextButton.focus({ preventScroll: true });
+}
+
+function togglePlanCollapsedGroup(groupType, groupKey, anchorButton = null) {
+  const groups = groupType === "type" ? collapsedPlanTypeGroups : collapsedPlanZoneGroups;
+  const anchorTop = anchorButton?.getBoundingClientRect().top ?? null;
+  const scrollContainer = anchorButton?.closest("#plans-output") || null;
+
+  if (groups.has(groupKey)) {
+    groups.delete(groupKey);
+  } else {
+    groups.add(groupKey);
+  }
+
+  if (typeof refreshCurrentPlanDisplay === "function") {
+    refreshCurrentPlanDisplay({ refreshZones: false });
+  }
+
+  if (anchorTop !== null) {
+    restorePlanGroupTogglePosition(groupType, groupKey, anchorTop, scrollContainer);
+    requestAnimationFrame(() => {
+      restorePlanGroupTogglePosition(groupType, groupKey, anchorTop, scrollContainer);
+    });
+  }
+}
+
+function buildPlanGroupTitle({ level, className, label, groupType, groupKey, collapsed, interactive = true }) {
+  const title = document.createElement(level);
+  title.className = className;
+
+  if (!interactive) {
+    title.textContent = label;
+    return title;
+  }
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "plan-group-toggle";
+  button.dataset.groupType = groupType;
+  button.dataset.groupKey = groupKey;
+  button.setAttribute("aria-expanded", String(!collapsed));
+
+  const arrow = document.createElement("span");
+  arrow.className = "plan-group-toggle-arrow";
+  arrow.setAttribute("aria-hidden", "true");
+  arrow.textContent = collapsed ? "▶" : "▼";
+
+  const text = document.createElement("span");
+  text.textContent = label;
+
+  button.appendChild(arrow);
+  button.appendChild(text);
+  title.appendChild(button);
+  return title;
 }
 
 function normalizeTypeDocumentSelection(typeDocument) {
@@ -1281,7 +1365,7 @@ function getOrderedZoneKeys(zoneKeys, zoneOrder = null) {
   });
 }
 
-function renderZoneSections(container, rows, projet, zoneOrder = null, selectedIndices = null) {
+function renderZoneSections(container, rows, projet, typeKey, zoneOrder = null, selectedIndices = null, { interactive = true } = {}) {
   const rowsByZone = new Map();
   for (const record of rows) {
     const zoneKey = getRecordZone(record);
@@ -1295,13 +1379,23 @@ function renderZoneSections(container, rows, projet, zoneOrder = null, selectedI
   for (const zoneKey of zoneKeys) {
     const zoneSection = document.createElement("section");
     zoneSection.className = "plan-zone-section";
+    const zoneGroupKey = getPlanGroupKey(projet, typeKey, zoneKey);
+    const isCollapsed = interactive && collapsedPlanZoneGroups.has(zoneGroupKey);
 
-    const title = document.createElement("h3");
-    title.className = "plan-zone-title";
-    title.textContent = formatZoneSectionTitle(zoneKey);
+    const title = buildPlanGroupTitle({
+      className: "plan-zone-title",
+      collapsed: isCollapsed,
+      groupKey: zoneGroupKey,
+      groupType: "zone",
+      interactive,
+      label: formatZoneSectionTitle(zoneKey),
+      level: "h3",
+    });
     zoneSection.appendChild(title);
 
-    renderPlanTableSection(zoneSection, rowsByZone.get(zoneKey), projet, selectedIndices);
+    if (!isCollapsed) {
+      renderPlanTableSection(zoneSection, rowsByZone.get(zoneKey), projet, selectedIndices);
+    }
     container.appendChild(zoneSection);
   }
 }
@@ -1310,13 +1404,37 @@ function hasNamedZone(rows) {
   return rows.some((record) => normalizeZoneText(getRecordZone(record)));
 }
 
-function renderRowsForSelectedType(container, rows, projet, zoneOrder = null, selectedIndices = null) {
+function renderRowsForSelectedType(container, rows, projet, typeKey = "", zoneOrder = null, selectedIndices = null, options = {}) {
   if (hasNamedZone(rows)) {
-    renderZoneSections(container, rows, projet, zoneOrder, selectedIndices);
+    renderZoneSections(container, rows, projet, typeKey, zoneOrder, selectedIndices, options);
     return;
   }
 
   renderPlanTableSection(container, rows, projet, selectedIndices);
+}
+
+function renderTypeSection(container, typeKey, rows, projet, zoneOrder = null, selectedIndices = null, { interactive = true } = {}) {
+  const typeSection = document.createElement("section");
+  typeSection.className = "plan-type-section";
+
+  const typeGroupKey = getPlanGroupKey(projet, typeKey);
+  const isCollapsed = interactive && collapsedPlanTypeGroups.has(typeGroupKey);
+  const title = buildPlanGroupTitle({
+    className: "plan-type-title",
+    collapsed: isCollapsed,
+    groupKey: typeGroupKey,
+    groupType: "type",
+    interactive,
+    label: typeKey,
+    level: "h2",
+  });
+  typeSection.appendChild(title);
+
+  if (!isCollapsed) {
+    renderRowsForSelectedType(typeSection, rows, projet, typeKey, zoneOrder, selectedIndices, { interactive });
+  }
+
+  container.appendChild(typeSection);
 }
 
 function afficherPlansFiltres(projet, typeDocument, records, zoneSelection = window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__") {
@@ -1351,7 +1469,8 @@ function afficherPlansFiltres(projet, typeDocument, records, zoneSelection = win
     }
 
     if (typeSelection.values.size === 1) {
-      renderRowsForSelectedType(output, filteredRows, normalizedProject);
+      const [typeKey] = typeSelection.values;
+      renderTypeSection(output, typeKey, filteredRows, normalizedProject);
       return;
     }
 
@@ -1374,21 +1493,21 @@ function afficherPlansFiltres(projet, typeDocument, records, zoneSelection = win
   }
 
   for (const typeKey of typeKeys) {
-    const typeSection = document.createElement("section");
-    typeSection.className = "plan-type-section";
-
-    const title = document.createElement("h2");
-    title.className = "plan-type-title";
-    title.textContent = typeKey;
-    typeSection.appendChild(title);
-
-    renderZoneSections(typeSection, rowsByType.get(typeKey), normalizedProject);
-    output.appendChild(typeSection);
+    renderTypeSection(output, typeKey, rowsByType.get(typeKey), normalizedProject);
   }
 }
 
 document.addEventListener("click", async (e) => {
   const target = e.target;
+  const groupToggle = target.closest?.(".plan-group-toggle");
+  if (groupToggle && groupToggle.closest("#plans-output")) {
+    togglePlanCollapsedGroup(
+      groupToggle.dataset.groupType,
+      groupToggle.dataset.groupKey,
+      groupToggle
+    );
+    return;
+  }
 
   if (target.matches('th.indice')) {
     ouvrirPickerRemplirColonne(target);

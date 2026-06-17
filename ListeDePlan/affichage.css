@@ -1,9 +1,14 @@
 /* Conteneur scrollable */
 #plans-output {
-  max-height: 80vh;
+  max-height: calc(100vh - 128px);
   overflow: auto;
+  overflow-anchor: none;
   position: relative;
-  background-color: #ffffff;
+  padding: 14px;
+  background-color: #f4f7fb;
+  border: 1px solid #d6e0ea;
+  border-radius: 8px;
+  box-shadow: 0 14px 32px rgba(0, 73, 144, 0.1);
 }
 
 /* Tableau */
@@ -12,15 +17,19 @@
   border-collapse: separate;
   border-spacing: 0;
   background-color: #ffffff;
-  color: #004990;
+  color: #173f67;
   margin: 0;
+  border: 1px solid #d6e0ea;
+  border-radius: 0 0 8px 8px;
+  overflow: hidden;
 }
 
 /* Cellules */
 .plan-table th,
 .plan-table td {
-  border: 1px solid #ed1b2d;
-  padding: 10px;
+  border: 0;
+  border-bottom: 1px solid #dbe6f1;
+  padding: 10px 12px;
   white-space: nowrap;
   text-align: center;
   background-color: #ffffff;
@@ -30,19 +39,32 @@
   background-clip: padding-box;
 }
 
+.plan-table th:last-child,
+.plan-table td:last-child {
+  border-right: 1px solid #dbe6f1;
+}
+
 /* Entêtes fixes en haut */
 .plan-table thead th {
   position: sticky;
   top: 0;
-  background-color: #004990;
+  background-color: #f9fbfe;
   z-index: 50;
-  color: #ffffff;
+  color: #31516f;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 /* Cellules éditables */
 .plan-table td.editable {
   background-color: #ffffff;
   cursor: text;
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.plan-table tbody tr:hover td {
+  background-color: #f0f8ff;
 }
 
 /* Colonnes d’indice */
@@ -51,6 +73,7 @@
   width: 110px;
   min-width: 110px;
   max-width: 110px;
+  border-left: 1px solid #e7eef6;
 }
 
 /* 1ere colonne */
@@ -61,7 +84,7 @@
   width: 120px;
   min-width: 120px;
   max-width: 120px;
-  background-color: #004990;
+  background-color: #f9fbfe;
   z-index: 110;
 }
 
@@ -71,7 +94,7 @@
   width: 120px;
   min-width: 120px;
   max-width: 120px;
-  background-color: #ffffff;
+  background-color: inherit;
   z-index: 102;
 }
 
@@ -80,9 +103,9 @@
   position: sticky;
   top: 0;
   left: 120px;
-  background-color: #004990;
+  background-color: #f9fbfe;
   z-index: 109;
-  border-left: 1px solid #ed1b2d;
+  border-left: 1px solid #e7eef6;
   white-space: normal;
   text-align: left;
 }
@@ -90,9 +113,9 @@
 .plan-table td:nth-child(2) {
   position: sticky;
   left: 120px;
-  background-color: #ffffff;
+  background-color: inherit;
   z-index: 101;
-  border-left: 1px solid #ed1b2d;
+  border-left: 1px solid #e7eef6;
   white-space: normal;
   text-align: left;
 }
@@ -100,37 +123,106 @@
 .warnings {
   padding: 15px;
   background-color: #ffffff;
-  border-bottom: 2px solid #ed1b2d;
+  border: 1px solid #f3b3bb;
+  border-radius: 8px;
+  margin-bottom: 10px;
 }
 
 .plan-type-section {
-  margin-bottom: 28px;
+  margin-bottom: 18px;
+  background-color: #ffffff;
+  border: 1px solid #d6e0ea;
+  border-radius: 8px;
+  box-shadow: 0 10px 22px rgba(0, 73, 144, 0.08);
+  overflow: hidden;
+}
+
+.plan-type-section + .plan-type-section {
+  margin-top: 18px;
 }
 
 .plan-type-title,
 .plan-zone-title {
   margin: 0;
-  padding: 12px 16px;
-  color: #004990;
-  background-color: #ffffff;
-  border-top: 2px solid #ed1b2d;
-  border-left: 1px solid #ed1b2d;
-  border-right: 1px solid #ed1b2d;
+  color: inherit;
 }
 
 .plan-type-title {
   font-size: 22px;
   font-weight: 700;
+  color: #ffffff;
+  background: linear-gradient(90deg, #004990 0%, #0b5ea8 100%);
+  box-shadow: inset 5px 0 0 #ed1b2d;
 }
 
 .plan-zone-section {
-  margin-top: 14px;
+  margin: 12px;
+  border: 1px solid #d6e0ea;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .plan-zone-title {
   font-size: 16px;
   font-weight: 700;
-  background-color: #f8fbff;
+  color: #004990;
+  background-color: #eef6ff;
+  box-shadow: inset 5px 0 0 #b8d7f2;
+}
+
+.plan-type-section > .plan-table {
+  border-left: 0;
+  border-right: 0;
+  border-radius: 0;
+  width: 100%;
+}
+
+.plan-zone-section > .plan-table {
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 0;
+}
+
+.plan-group-toggle {
+  display: flex;
+  width: 100%;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-start;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 12px 16px;
+  text-align: left;
+  transform: none;
+}
+
+.plan-group-toggle:hover,
+.plan-group-toggle:focus {
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  transform: none;
+}
+
+.plan-group-toggle:focus-visible {
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.5);
+}
+
+.plan-zone-title .plan-group-toggle:focus-visible {
+  box-shadow: inset 0 0 0 3px rgba(0, 73, 144, 0.18);
+}
+
+.plan-group-toggle-arrow {
+  display: inline-grid;
+  flex: 0 0 18px;
+  height: 18px;
+  place-items: center;
+  width: 18px;
 }
 
 .warning-form {

@@ -1,22 +1,23 @@
 body {
     margin: 0;
-    padding: 0;
-    font-family: Arial, sans-serif;
-    background-color: #ffffff;
-    color: #004990;
+    padding: 12px;
+    font-family: "Segoe UI", Arial, sans-serif;
+    background-color: #f4f7fb;
+    color: #173f67;
 }
   
 .sticky-container {
     position: sticky;
     top: 0;
-    background-color: #ffffff;
-    padding: 20px 10px;
+    background-color: rgba(244, 247, 251, 0.94);
+    padding: 12px 0 14px;
     display: grid;
     grid-template-columns: 285px 350px 350px auto auto;
     gap: 25px;
     align-items: end;
     z-index: 1000;
-    border-bottom: 1px solid #ed1b2d;
+    border-bottom: 1px solid rgba(0, 73, 144, 0.12);
+    backdrop-filter: blur(8px);
 }
 
 .dropdown-container {
@@ -33,19 +34,27 @@ label {
     font-weight: bold;
     margin: 0 0 10px;
     line-height: 20px;
+    color: #173f67;
 }
 
 select {
     width: 100%;
     height: 38px;
     padding: 8px;
-    background-color: #004990;
-    color: #ffffff;
-    border: 1px solid #ed1b2d;
+    background-color: #ffffff;
+    color: #004990;
+    border: 1px solid #c9d8e8;
     border-radius: 4px;
     box-sizing: border-box;
     font: inherit;
     font-size: 14px;
+    transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+select:focus {
+    border-color: #004990;
+    box-shadow: 0 0 0 3px rgba(0, 73, 144, 0.12);
+    outline: none;
 }
 
 #projectDropdown {
@@ -87,15 +96,23 @@ select {
   justify-content: space-between;
   gap: 10px;
   padding: 8px;
-  background-color: #004990;
-  color: #ffffff;
-  border: 1px solid #ed1b2d;
+  background-color: #ffffff;
+  color: #004990;
+  border: 1px solid #c9d8e8;
   border-radius: 4px;
   box-sizing: border-box;
   cursor: pointer;
   font: inherit;
   font-size: 14px;
   text-align: left;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.checkbox-dropdown-button:hover,
+.checkbox-dropdown-button:focus {
+  border-color: #004990;
+  box-shadow: 0 0 0 3px rgba(0, 73, 144, 0.12);
+  outline: none;
 }
 
 .print-container {
@@ -113,10 +130,13 @@ select {
   cursor: pointer;
   font: inherit;
   font-weight: bold;
+  transition: background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
 #btn-print:hover {
   background-color: #ed1b2d;
+  box-shadow: 0 6px 16px rgba(237, 27, 45, 0.22);
+  transform: translateY(-1px);
 }
 
 #btn-ajouter-docs {
@@ -130,10 +150,13 @@ select {
   font: inherit;
   font-weight: bold;
   white-space: nowrap;
+  transition: background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
 #btn-ajouter-docs:hover {
   background-color: #004990;
+  box-shadow: 0 6px 16px rgba(0, 73, 144, 0.22);
+  transform: translateY(-1px);
 }
 
 @media (max-width: 1180px) {
@@ -187,10 +210,10 @@ select {
   padding: 10px;
   background-color: #ffffff;
   color: #004990;
-  border: 1px solid #ed1b2d;
-  border-radius: 4px;
+  border: 1px solid #d6e0ea;
+  border-radius: 8px;
   box-sizing: border-box;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+  box-shadow: 0 12px 24px rgba(0, 73, 144, 0.16);
   z-index: 1200;
 }
 
@@ -204,9 +227,15 @@ select {
   align-items: center;
   gap: 8px;
   margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
   font-weight: normal;
   line-height: 1.25;
   cursor: pointer;
+}
+
+.checkbox-list-item:hover {
+  background-color: #eef6ff;
 }
 
 .checkbox-list-item input[type="checkbox"] {
