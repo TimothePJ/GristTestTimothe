@@ -705,6 +705,14 @@ function buildUnmatchedBudgetRows(unmatchedRows, budgetProgress) {
 
 function calculateRealExpenses(project) {
   return (project?.workers || []).reduce((projectTotal, worker) => {
+    const workedCosts = worker?.workedCosts;
+    if (workedCosts && typeof workedCosts === "object" && Object.keys(workedCosts).length > 0) {
+      return projectTotal + Object.values(workedCosts).reduce(
+        (total, cost) => total + Math.max(0, toFiniteNumber(cost, 0)),
+        0,
+      );
+    }
+
     const dailyRate = toFiniteNumber(worker?.dailyRate, 0);
     const workerDays = Object.values(worker?.workedDays || {}).reduce(
       (total, days) => total + Math.max(0, toFiniteNumber(days, 0)),

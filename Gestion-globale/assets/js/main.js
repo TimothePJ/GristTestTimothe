@@ -242,6 +242,15 @@ function applyAvancementConfigOverride(aggregatedProject, selectedProjects) {
   return aggregatedProject;
 }
 
+function getAvancementDashboardProject(aggregatedProject, selectedProjects) {
+  const projects = Array.isArray(selectedProjects) ? selectedProjects : [];
+  if (projects.length !== 1) {
+    return aggregatedProject;
+  }
+
+  return applyAvancementConfigOverride({ ...projects[0] }, projects);
+}
+
 function getExpenseNavigationBounds(aggregatedProject) {
   const bounds = aggregatedProject?.globalExpenseMonthBounds;
   if (!bounds) {
@@ -468,7 +477,7 @@ function renderAggregateViews(aggregatedProject, selectedProjects = getVisibleSe
     return;
   }
 
-  renderAvancementDashboard(dom.avancementDashboardSection, aggregatedProject, {
+  renderAvancementDashboard(dom.avancementDashboardSection, getAvancementDashboardProject(aggregatedProject, selectedProjects), {
     onSave: (project, serializedConfig) => (
       saveLocalAvancementConfig(selectedProjects, project, serializedConfig)
     ),
