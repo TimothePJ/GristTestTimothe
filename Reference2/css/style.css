@@ -1258,6 +1258,61 @@ dialog select {
   border-radius: 8px !important;
 }
 
+.duplicate-filter-row {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+  color: var(--vc-text);
+  font-weight: 700;
+}
+
+.duplicate-filter-row select {
+  width: 100% !important;
+  margin: 0 !important;
+  font-weight: 500;
+}
+
+.duplicate-empty-message {
+  margin: 4px 0;
+  color: var(--vc-muted);
+}
+
+.duplicate-document-group {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+  border-top: 1px solid var(--vc-line);
+}
+
+.duplicate-document-group:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.duplicate-type-heading {
+  color: var(--vc-blue);
+  font-size: 0.88rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.duplicate-zone-group {
+  display: grid;
+  gap: 2px;
+  margin-left: 10px;
+}
+
+.duplicate-zone-heading {
+  color: var(--vc-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 2px 0;
+}
+
+.duplicate-document-item {
+  margin-left: 8px;
+}
+
 .emetteur-item {
   gap: 12px !important;
   padding: 6px 8px !important;

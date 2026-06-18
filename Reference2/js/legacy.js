@@ -1484,6 +1484,29 @@ function collectProjectDocumentTypes(projectName, extraTypes = []) {
   return orderedTypes;
 }
 
+function collectReferenceDocumentTypesFromRecords(projectName) {
+  const project = normalizeReferenceDocumentIdentityPart(projectName);
+  const seen = new Set();
+  const types = [];
+
+  if (!project || !Array.isArray(records)) return types;
+
+  records.forEach(record => {
+    if (normalizeReferenceDocumentIdentityPart(record.NomProjet) !== project) return;
+    const type = normalizeTypeDocument(record.Type_document);
+    const typeKey = normalizeReferenceDocumentIdentityPart(type);
+    if (!typeKey || seen.has(typeKey)) return;
+    seen.add(typeKey);
+    types.push(type);
+  });
+
+  return types.sort((left, right) => {
+    const rankDiff = getDocumentTypeSortRank(left) - getDocumentTypeSortRank(right);
+    if (rankDiff !== 0) return rankDiff;
+    return left.localeCompare(right, 'fr', { sensitivity: 'base', numeric: true });
+  });
+}
+
 function populateTypeDocumentDropdown(selectedProject, preferredValue = '', extraTypes = []) {
   const dropdown = document.getElementById('thirdColumnDropdown');
   if (!dropdown) return;
@@ -3862,8 +3885,8 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
     const userActions = [];
 
     if (isDuplicate) {
-      const selectedDocuments = Array.from(document.querySelectorAll('input[name="documents"]:checked'))
-        .map(input => input.value);
+      syncDuplicateSelectedDocumentValues(document.getElementById('duplicateOptionsContainer'));
+      const selectedDocuments = Array.from(duplicateSelectedDocumentValues);
 
       const secondDropdown = document.getElementById('secondColumnListbox');
       const currentVal = secondDropdown.value;
@@ -3943,6 +3966,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
     await applyUserActionsInChunks(userActions);
     console.log("Ligne(s) ajoutée(s) avec succès.");
 
+    resetDuplicateSelectedDocumentValues();
     document.getElementById('addRowDialog').close();
     populateTable();
   } catch (error) {
@@ -3953,6 +3977,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
 
 // Gérer l'annulation du formulaire d'ajout de ligne
 document.getElementById('cancelAddRowButton').addEventListener('click', () => {
+  resetDuplicateSelectedDocumentValues();
   document.getElementById('addRowDialog').close();
 });
 
@@ -4564,12 +4589,127 @@ document.getElementById('addProjectDialog').addEventListener('submit', async (e)
   }
 });
 
-async function renderDocumentCheckboxList() {
+let duplicateSelectedDocumentValues = new Set();
+
+function syncDuplicateSelectedDocumentValues(container) {
+  if (!container) return;
+  container.querySelectorAll("input[name='documents']").forEach(input => {
+    if (input.checked) {
+      duplicateSelectedDocumentValues.add(input.value);
+    } else {
+      duplicateSelectedDocumentValues.delete(input.value);
+    }
+  });
+}
+
+function resetDuplicateSelectedDocumentValues() {
+  duplicateSelectedDocumentValues = new Set();
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function isCurrentDuplicateDocumentEntry(entry, selectedDocumentValue) {
+  if (!entry || !selectedDocumentValue) return false;
+  if (entry.value === selectedDocumentValue) return true;
+
+  const parsedSelected = parseDocValue(selectedDocumentValue);
+  const selectedName = normalizeReferenceDocumentIdentityPart(parsedSelected.name);
+  const entryName = normalizeReferenceDocumentIdentityPart(entry.name);
+  if (!selectedName || !entryName || selectedName !== entryName) return false;
+
+  const selectedType = normalizeReferenceDocumentIdentityPart(parsedSelected.type || getCurrentSelectedType());
+  const entryType = normalizeReferenceDocumentIdentityPart(entry.type);
+  if (selectedType && entryType && selectedType !== entryType) return false;
+
+  if (normalizeZoneMatchKey(parsedSelected.zone) !== normalizeZoneMatchKey(entry.zone)) return false;
+
+  const selectedNumero = parseNumeroForStorage(parsedSelected.numero);
+  const entryNumero = parseNumeroForStorage(entry.numero);
+  return normalizeReferenceDocumentIdentityPart(selectedNumero) ===
+    normalizeReferenceDocumentIdentityPart(entryNumero);
+}
+
+function buildDuplicateDocumentCheckboxMarkup(option, index, preservedCheckedValues) {
+  return `
+        <div class="emetteur-item duplicate-document-item">
+          <input type="checkbox" id="doc-${index}" name="documents" value="${escapeHtml(option.value)}"${preservedCheckedValues.has(option.value) ? ' checked' : ''}>
+          <span>${escapeHtml(option.label)}</span>
+        </div>
+      `;
+}
+
+function buildGroupedDuplicateDocumentList(documentOptions, showZoneSections, preservedCheckedValues) {
+  let checkboxIndex = 0;
+  const groupedTypes = new Map();
+
+  documentOptions.forEach((option) => {
+    const typeKey = normalizeReferenceDocumentIdentityPart(option.type) || '__sans_type__';
+    if (!groupedTypes.has(typeKey)) {
+      groupedTypes.set(typeKey, {
+        type: normalizeTypeDocument(option.type),
+        zones: new Map(),
+      });
+    }
+
+    const zoneKey = normalizeZoneMatchKey(option.zone) || '__sans_zone__';
+    const typeGroup = groupedTypes.get(typeKey);
+    if (!typeGroup.zones.has(zoneKey)) {
+      typeGroup.zones.set(zoneKey, {
+        zone: normalizeZoneValue(option.zone),
+        entries: [],
+      });
+    }
+    typeGroup.zones.get(zoneKey).entries.push(option);
+  });
+
+  return Array.from(groupedTypes.values()).map((typeGroup) => {
+    const zoneGroups = Array.from(typeGroup.zones.values())
+      .sort((left, right) => compareZoneKeys(left.zone, right.zone));
+    const zonesHTML = zoneGroups.map((zoneGroup) => {
+      const entriesHTML = zoneGroup.entries.map((option) =>
+        buildDuplicateDocumentCheckboxMarkup(option, checkboxIndex++, preservedCheckedValues)
+      ).join('');
+
+      return `
+        <div class="duplicate-zone-group">
+          ${showZoneSections ? `<div class="duplicate-zone-heading">${escapeHtml(formatZoneLabel(zoneGroup.zone))}</div>` : ''}
+          ${entriesHTML}
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="duplicate-document-group">
+        <div class="duplicate-type-heading">${escapeHtml(typeGroup.type || 'Sans type')}</div>
+        ${zonesHTML}
+      </div>
+    `;
+  }).join('');
+}
+
+async function renderDocumentCheckboxList(typeFilterValue = null, checkedValues = null) {
   const container = document.getElementById('duplicateOptionsContainer');
   const secondDropdown = document.getElementById('secondColumnListbox');
   const selectedProject = selectedFirstValue; // Projet sélectionné dans la première liste
   const selectedDocument = secondDropdown.value; // Document actuellement sélectionné dans la deuxième liste
   const showZones = projectHasStructuredZones(selectedProject);
+  const currentFilterElement = document.getElementById('duplicateTypeDocumentFilter');
+  const selectedTypeFilter = normalizeTypeDocument(
+    typeFilterValue !== null ? typeFilterValue : (currentFilterElement?.value || '')
+  );
+  const selectedTypeFilterKey = normalizeReferenceDocumentIdentityPart(selectedTypeFilter);
+  if (checkedValues instanceof Set) {
+    checkedValues.forEach(value => duplicateSelectedDocumentValues.add(value));
+  }
+  syncDuplicateSelectedDocumentValues(container);
+  const preservedCheckedValues = duplicateSelectedDocumentValues;
 
   // Vérifier qu'un projet est sélectionné
   if (!selectedProject) {
@@ -4578,22 +4718,36 @@ async function renderDocumentCheckboxList() {
   }
 
   // Obtenir les options disponibles dans la deuxième liste déroulante
-  const documentOptions = Array.from(secondDropdown.options)
-    .filter(option => option.value && !isSpecialDocumentOptionValue(option.value) && option.value !== selectedDocument && !option.disabled) // Exclure le document sélectionné
-    .map(option => {
-      const parsed = parseDocValue(option.value);
-      const zoneLabel = showZones ? ` [${formatZoneLabel(parsed.zone)}]` : '';
-      return {
-        value: option.value,
-        label: `${makeDocLabel(parsed.name || option.textContent || '', parsed.numero)}${zoneLabel}`
-      };
-    });
+  const typeOptions = collectReferenceDocumentTypesFromRecords(selectedProject);
+  const typeFilterHTML = `
+        <label class="duplicate-filter-row" for="duplicateTypeDocumentFilter">
+          <span>Type document</span>
+          <select id="duplicateTypeDocumentFilter">
+            <option value="">Tous les types</option>
+            ${typeOptions.map(type => `
+              <option value="${escapeHtml(type)}"${normalizeReferenceDocumentIdentityPart(type) === selectedTypeFilterKey ? ' selected' : ''}>
+                ${escapeHtml(type)}
+              </option>
+            `).join('')}
+          </select>
+        </label>
+      `;
 
-  // Si aucun document n'est disponible
-  if (documentOptions.length === 0) {
-    container.innerHTML = '<p>Aucun autre document disponible pour ce projet.</p>';
-    return;
-  }
+  const documentOptions = collectProjectDocumentEntries(selectedProject, selectedTypeFilter)
+    .filter(entry => entry.value && !isCurrentDuplicateDocumentEntry(entry, selectedDocument))
+    .map(entry => ({
+      value: entry.value,
+      label: entry.label,
+      type: normalizeTypeDocument(entry.type),
+      zone: normalizeZoneValue(entry.zone),
+      name: entry.name,
+      numero: entry.numero,
+    }));
+  const showZoneSections = showZones || documentOptions.some(option => normalizeZoneValue(option.zone));
+
+  const emptyMessage = selectedTypeFilter
+    ? 'Aucun autre document disponible pour ce type.'
+    : 'Aucun autre document disponible pour ce projet.';
 
   // Générer la case "Tout sélectionner"
   const selectAllDiv = `
@@ -4604,29 +4758,48 @@ async function renderDocumentCheckboxList() {
       `;
 
   // Générer les cases à cocher pour chaque document disponible
-  const listHTML = documentOptions.map(({ value, label }, index) => `
-        <div class="emetteur-item">
-          <input type="checkbox" id="doc-${index}" name="documents" value="${value}">
-          <span>${label}</span>
-        </div>
-      `).join('');
+  const listHTML = buildGroupedDuplicateDocumentList(documentOptions, showZoneSections, preservedCheckedValues);
 
   // Afficher la liste complète avec l'option "Tout sélectionner"
   container.innerHTML = `
+        ${typeFilterHTML}
         <p>Document :</p>
         <div id="documentList" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px;">
-          ${selectAllDiv}
-          ${listHTML}
+          ${documentOptions.length > 0 ? `${selectAllDiv}${listHTML}` : `<p class="duplicate-empty-message">${emptyMessage}</p>`}
         </div>
       `;
 
   // Ajouter un écouteur à la case "Tout sélectionner" pour cocher/décocher tous les documents
+  const typeFilter = document.getElementById('duplicateTypeDocumentFilter');
+  typeFilter?.addEventListener('change', function () {
+    syncDuplicateSelectedDocumentValues(container);
+    renderDocumentCheckboxList(this.value);
+  });
+
   const selectAllCheckbox = document.getElementById('selectAllDocuments');
+  if (!selectAllCheckbox) return;
+  const docCheckboxes = container.querySelectorAll("input[name='documents']");
+  selectAllCheckbox.checked = docCheckboxes.length > 0 && Array.from(docCheckboxes).every(input => input.checked);
+  docCheckboxes.forEach(cb => {
+    cb.addEventListener('change', function () {
+      if (this.checked) {
+        duplicateSelectedDocumentValues.add(this.value);
+      } else {
+        duplicateSelectedDocumentValues.delete(this.value);
+      }
+      selectAllCheckbox.checked = Array.from(docCheckboxes).every(input => input.checked);
+    });
+  });
+
   selectAllCheckbox.addEventListener('change', function () {
     // Récupérer toutes les cases à cocher des documents (excluant la case "Tout sélectionner")
-    const docCheckboxes = container.querySelectorAll("input[name='documents']");
     docCheckboxes.forEach(cb => {
       cb.checked = selectAllCheckbox.checked;
+      if (cb.checked) {
+        duplicateSelectedDocumentValues.add(cb.value);
+      } else {
+        duplicateSelectedDocumentValues.delete(cb.value);
+      }
     });
   });
 }
@@ -4634,9 +4807,11 @@ async function renderDocumentCheckboxList() {
 document.getElementById('duplicateCheckbox').addEventListener('change', async function () {
   const container = document.getElementById('duplicateOptionsContainer');
   if (this.checked) {
+    resetDuplicateSelectedDocumentValues();
     container.style.display = 'block'; // Afficher le conteneur des options de duplication
     await renderDocumentCheckboxList(); // Charger les documents disponibles pour duplication
   } else {
+    resetDuplicateSelectedDocumentValues();
     container.style.display = 'none'; // Cacher le conteneur
     container.innerHTML = ''; // Vider le contenu
   }
@@ -4645,6 +4820,7 @@ document.getElementById('duplicateCheckbox').addEventListener('change', async fu
 // Réinitialiser le formulaire d'ajout de ligne
 function resetAddRowForm() {
   const addRowDialog = document.getElementById('addRowDialog');
+  resetDuplicateSelectedDocumentValues();
   const inputs = addRowDialog.querySelectorAll('input, textarea, select');
   inputs.forEach(input => {
     if (input.type === 'checkbox') {
