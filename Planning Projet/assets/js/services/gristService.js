@@ -87,6 +87,12 @@ function isArchivedReferenceRow(row) {
   return isTruthyGristValue(row?.Archive);
 }
 
+function compareReferenceRowsLikeReference2Table(left, right) {
+  const leftEmitter = toText(left?.Emetteur);
+  const rightEmitter = toText(right?.Emetteur);
+  return leftEmitter.localeCompare(rightEmitter);
+}
+
 function normalizeFetchTableResult(raw) {
   if (!raw) return [];
 
@@ -3222,11 +3228,12 @@ export async function fetchPlanningReferenceDetails(rowId) {
   );
   const linkedRows = findLinkedReferenceRowsForPlanningRow(row, referenceRows, columns);
   await syncReferenceRetardRows(linkedRows);
+  const sortedLinkedRows = [...linkedRows].sort(compareReferenceRowsLikeReference2Table);
 
   return {
     planningRowId: Number(rowId),
     segmentStartIso: startIso,
-    references: linkedRows.map((referenceRow) => {
+    references: sortedLinkedRows.map((referenceRow) => {
       const referenceId = Number(referenceRow?.id);
       return {
         id: Number.isInteger(referenceId) && referenceId > 0 ? referenceId : null,
