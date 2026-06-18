@@ -3886,11 +3886,19 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
 
     if (isDuplicate) {
       syncDuplicateSelectedDocumentValues(document.getElementById('duplicateOptionsContainer'));
-      const selectedDocuments = Array.from(duplicateSelectedDocumentValues);
+      const selectedDocuments = Array.from(duplicateSelectedDocumentValues)
+        .filter(isValidDuplicateDocumentValue);
 
       const secondDropdown = document.getElementById('secondColumnListbox');
       const currentVal = secondDropdown.value;
-      if (!selectedDocuments.includes(currentVal)) selectedDocuments.push(currentVal);
+      if (isValidDuplicateDocumentValue(currentVal) && !selectedDocuments.includes(currentVal)) {
+        selectedDocuments.push(currentVal);
+      }
+
+      if (selectedDocuments.length === 0) {
+        alert("Veuillez sélectionner au moins un document valide pour démultiplier la ligne.");
+        return;
+      }
 
       selectedDocuments.forEach(docVal => {
         const parsedDoc = parseDocValue(docVal);
@@ -3923,9 +3931,11 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
             documentInfo,
             durationWeeks: dureeLimite,
           }),
-          Service: serviceValue,
-          Chemin: cheminFromAddFile
+          Service: serviceValue
         });
+        if (cheminFromAddFile) {
+          newRow.Chemin = cheminFromAddFile;
+        }
         userActions.push(['AddRecord', 'References2', null, newRow]);
       });
     } else {
@@ -3970,8 +3980,8 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
     document.getElementById('addRowDialog').close();
     populateTable();
   } catch (error) {
-    console.error("Erreur lors de l'ajout des lignes :", error);
-    alert("Erreur lors de l'ajout des lignes.");
+    console.error("Erreur lors de l'ajout des lignes :", error?.message || error, error);
+    alert(`Erreur lors de l'ajout des lignes${error?.message ? ` : ${error.message}` : '.'}`);
   }
 });
 
@@ -4604,6 +4614,12 @@ function syncDuplicateSelectedDocumentValues(container) {
 
 function resetDuplicateSelectedDocumentValues() {
   duplicateSelectedDocumentValues = new Set();
+}
+
+function isValidDuplicateDocumentValue(value) {
+  if (!value || isSpecialDocumentOptionValue(value)) return false;
+  const parsed = parseDocValue(value);
+  return Boolean(normalizeReferenceDocumentIdentityPart(parsed.name));
 }
 
 function escapeHtml(value) {
