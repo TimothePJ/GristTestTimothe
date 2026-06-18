@@ -955,8 +955,8 @@ body {
   position: sticky;
   top: 0;
   z-index: 1000;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 320px 360px 220px 240px max-content;
   gap: 12px 18px;
   align-items: end;
   padding: 10px 0 12px !important;
@@ -964,10 +964,14 @@ body {
   border-bottom: 1px solid rgba(0, 73, 144, 0.12) !important;
   box-shadow: none !important;
   backdrop-filter: blur(8px);
+  overflow-x: auto;
 }
 
 .dropdown-container {
+  display: flex !important;
+  flex-direction: column;
   align-items: stretch !important;
+  justify-content: end;
   min-width: 190px;
   margin-right: 0 !important;
 }
@@ -1012,19 +1016,19 @@ select {
 }
 
 #firstColumnDropdown {
-  width: min(320px, 100%) !important;
+  width: 100% !important;
 }
 
 #secondColumnListbox {
-  width: min(360px, 100%) !important;
+  width: 100% !important;
 }
 
 #thirdColumnDropdown {
-  width: min(220px, 100%) !important;
+  width: 100% !important;
 }
 
 #zoneDropdown {
-  width: min(240px, 100%) !important;
+  width: 100% !important;
 }
 
 #hideArchivedToggle {
@@ -1367,7 +1371,8 @@ dialog select {
   .dropdown-container,
   #firstColumnDropdown,
   #secondColumnListbox,
-  #thirdColumnDropdown {
+  #thirdColumnDropdown,
+  #zoneDropdown {
     width: 100% !important;
   }
 
