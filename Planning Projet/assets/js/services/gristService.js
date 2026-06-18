@@ -76,6 +76,17 @@ function toText(value) {
   return String(value).trim();
 }
 
+function isTruthyGristValue(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const text = toText(value).toLocaleLowerCase("fr");
+  return ["1", "true", "oui", "yes", "y", "x", "checked", "✓"].includes(text);
+}
+
+function isArchivedReferenceRow(row) {
+  return isTruthyGristValue(row?.Archive);
+}
+
 function normalizeFetchTableResult(raw) {
   if (!raw) return [];
 
@@ -3204,7 +3215,11 @@ export async function fetchPlanningReferenceDetails(rowId) {
   const startDate = getPlanningSegmentStartDate(row, columns);
   const startIso = formatIsoDate(startDate);
   const allReferenceRows = await fetchTableRows(REFERENCES_TABLE_NAME);
-  const referenceRows = filterReferenceRowsForPlanningRows(allReferenceRows, [row], columns);
+  const referenceRows = filterReferenceRowsForPlanningRows(
+    allReferenceRows.filter((referenceRow) => !isArchivedReferenceRow(referenceRow)),
+    [row],
+    columns
+  );
   const linkedRows = findLinkedReferenceRowsForPlanningRow(row, referenceRows, columns);
   await syncReferenceRetardRows(linkedRows);
 
@@ -3233,7 +3248,11 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
   const hasStartDate = startDate instanceof Date && !Number.isNaN(startDate.getTime());
 
   const allReferenceRows = await fetchTableRows(REFERENCES_TABLE_NAME);
-  const referenceRows = filterReferenceRowsForPlanningRows(allReferenceRows, [row], columns);
+  const referenceRows = filterReferenceRowsForPlanningRows(
+    allReferenceRows.filter((referenceRow) => !isArchivedReferenceRow(referenceRow)),
+    [row],
+    columns
+  );
   const linkedRows = findLinkedReferenceRowsForPlanningRow(row, referenceRows, columns);
   const linkedIds = new Set(
     linkedRows
