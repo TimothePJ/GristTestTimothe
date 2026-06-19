@@ -73,6 +73,10 @@ function getDateValue() {
   return $("dateInput").value;
 }
 
+function textValue(value) {
+  return String(value ?? "").trim();
+}
+
 /** -------------------------
  *  Helpers data (bordereau courant)
  *  ------------------------- */
@@ -116,6 +120,94 @@ function renderEmptyTableRow(message) {
   const cell = row.insertCell();
   cell.colSpan = 5;
   cell.textContent = message;
+}
+
+function getPlanRows() {
+  const ids = Array.isArray(allPlans.id) ? allPlans.id : [];
+  return ids.map((id, i) => ({
+    id,
+    NumeroDocument: allPlans.NumeroDocument?.[i],
+    NomDocument: allPlans.NomDocument?.[i],
+    Designation: allPlans.Designation?.[i],
+    Indice: allPlans.Indice?.[i],
+    Nom_projet: allPlans.Nom_projet?.[i],
+  }));
+}
+
+function isNewerPlanIndice(candidate, current) {
+  return textValue(candidate?.Indice) > textValue(current?.Indice);
+}
+
+function findLatestProjectPlan(projectName, planNumber) {
+  const projectKey = textValue(projectName);
+  const planKey = textValue(planNumber);
+  if (!projectKey || !planKey) return null;
+
+  return getPlanRows()
+    .filter((plan) =>
+      textValue(plan.Nom_projet) === projectKey &&
+      textValue(plan.NumeroDocument) === planKey &&
+      textValue(plan.Indice)
+    )
+    .reduce((latest, current) => {
+      if (!latest) return current;
+      return isNewerPlanIndice(current, latest) ? current : latest;
+    }, null);
+}
+
+function getProjectPlanOptions(projectName) {
+  const latestByNumber = new Map();
+
+  getPlanRows().forEach((plan) => {
+    if (textValue(plan.Nom_projet) !== textValue(projectName)) return;
+    if (!textValue(plan.Indice)) return;
+
+    const number = textValue(plan.NumeroDocument);
+    if (!number) return;
+
+    const current = latestByNumber.get(number);
+    if (!current || isNewerPlanIndice(plan, current)) {
+      latestByNumber.set(number, plan);
+    }
+  });
+
+  return Array.from(latestByNumber.values()).sort((a, b) =>
+    textValue(a.NumeroDocument).localeCompare(textValue(b.NumeroDocument), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    })
+  );
+}
+
+function getPlanDisplayName(plan) {
+  return textValue(plan?.NomDocument) || textValue(plan?.Designation);
+}
+
+function getFullPlanLabel(plan) {
+  const number = textValue(plan?.NumeroDocument);
+  const name = getPlanDisplayName(plan);
+  return name ? `${number} - ${name}` : number;
+}
+
+function setPlanSelectLabels(select, mode) {
+  select.querySelectorAll("option[data-plan-number]").forEach((option) => {
+    const useShortLabel = mode === "short" && option.value === select.value;
+    option.textContent = useShortLabel ? option.dataset.planNumber : option.dataset.fullLabel;
+  });
+}
+
+function attachPlanSelectLabelBehavior(select) {
+  const showFullLabels = () => setPlanSelectLabels(select, "full");
+  const showNumberLabels = () => setTimeout(() => setPlanSelectLabels(select, "short"), 0);
+
+  select.addEventListener("pointerdown", showFullLabels);
+  select.addEventListener("keydown", (event) => {
+    if (["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) showFullLabels();
+  });
+  select.addEventListener("change", showNumberLabels);
+  select.addEventListener("blur", showNumberLabels);
+
+  setPlanSelectLabels(select, "short");
 }
 
 function setSentCheckboxState({ checked, disabled }) {
@@ -352,20 +444,7 @@ function displayInvoiceTable() {
   const exemplairesOptions = [...new Set(allProjectRecords.map((r) => r.NbrExemplaires).filter(Boolean))].sort();
 
   // Options plans : uniquement ceux qui ont un Indice non vide dans ListePlan_NDC_COF
-  const planIndices = allPlans.Nom_projet.reduce((indices, projId, index) => {
-    if (
-      projId === selectedProjectName &&
-      allPlans.Indice[index] &&
-      String(allPlans.Indice[index]).trim()
-    ) {
-      indices.push(index);
-    }
-    return indices;
-  }, []);
-
-  const planNumbers = [...new Set(planIndices.map((i) => allPlans.NumeroDocument[i]))].sort((a, b) =>
-    String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" })
-  );
+  const planOptions = getProjectPlanOptions(selectedProjectName);
 
   refRecords.forEach((record) => {
     const row = tbody.insertRow();
@@ -376,15 +455,19 @@ function displayInvoiceTable() {
     const nPlanSelect = document.createElement("select");
     nPlanSelect.innerHTML = `<option value="">Choisir un plan</option>`;
 
-    planNumbers.forEach((planNumber) => {
+    planOptions.forEach((plan) => {
+      const planNumber = textValue(plan.NumeroDocument);
       const option = document.createElement("option");
       option.value = planNumber;
       option.textContent = planNumber;
+      option.dataset.planNumber = planNumber;
+      option.dataset.fullLabel = getFullPlanLabel(plan);
       nPlanSelect.appendChild(option);
     });
 
-    nPlanSelect.value = record.N_Plan || "";
+    nPlanSelect.value = textValue(record.N_Plan);
     nPlanSelect.disabled = frozen;
+    attachPlanSelectLabelBehavior(nPlanSelect);
     nPlanCell.appendChild(nPlanSelect);
 
     // --- Indice ---
@@ -541,22 +624,10 @@ document.querySelector("#invoiceTable").addEventListener("change", async (e) => 
     const nPlan = target.value;
     const selectedProjectName = getProject();
 
-    const matchingPlans = allPlans.id
-      .map((id, i) => ({
-        id,
-        NumeroDocument: allPlans.NumeroDocument[i],
-        Indice: allPlans.Indice[i],
-        Designation: allPlans.Designation[i],
-        Nom_projet: allPlans.Nom_projet[i],
-      }))
-      .filter((p) => p.NumeroDocument === nPlan && p.Nom_projet === selectedProjectName);
-
-    if (matchingPlans.length > 0) {
-      const latestPlan = matchingPlans.reduce((latest, current) =>
-        latest.Indice > current.Indice ? latest : current
-      );
-
-      const { Indice: indice, Designation: designation } = latestPlan;
+    const latestPlan = findLatestProjectPlan(selectedProjectName, nPlan);
+    if (latestPlan) {
+      const indice = latestPlan.Indice;
+      const designation = textValue(latestPlan.Designation) || textValue(latestPlan.NomDocument);
 
       await grist.docApi.applyUserActions([
         ["UpdateRecord", BORDEREAU_TABLE, recordId, { N_Plan: nPlan, Indice: indice, Designation: designation }],
