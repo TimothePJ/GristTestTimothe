@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Bordereau de Transmission</title>
+  <title>Bordereau de transmission</title>
 
   <!-- Grist Plugin API -->
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
@@ -13,7 +13,6 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
-  <!-- Styles -->
   <link rel="stylesheet" href="bordereau.css">
 </head>
 
@@ -27,46 +26,45 @@
     </div>
 
     <div class="info-container">
-      <label for="refInput">Ref:</label>
+      <label for="refInput">Ref :</label>
       <div class="ref-container">
         <input type="text" id="refInput" value="1" inputmode="numeric">
         <div class="ref-arrows">
-          <button id="refUp" type="button">▲</button>
-          <button id="refDown" type="button">▼</button>
+          <button id="refUp" type="button" aria-label="R&eacute;f&eacute;rence suivante">&#9650;</button>
+          <button id="refDown" type="button" aria-label="R&eacute;f&eacute;rence pr&eacute;c&eacute;dente">&#9660;</button>
         </div>
       </div>
 
-      <label for="dateInput">Date:</label>
+      <label for="dateInput">Date :</label>
       <input type="date" id="dateInput">
     </div>
 
     <div class="button-container">
       <label class="sent-container" for="sentCheckbox">
-        <span>Envoyé :</span>
+        <span>Envoy&eacute; :</span>
         <input type="checkbox" id="sentCheckbox">
       </label>
 
-      <button id="addItem" type="button">Ajouter un élément</button>
-      <button id="generatePdf" type="button">Générer le bordereau</button>
+      <button id="addItem" type="button">Ajouter un &eacute;l&eacute;ment</button>
+      <button id="generatePdf" type="button">G&eacute;n&eacute;rer le bordereau</button>
     </div>
   </div>
 
-  <div class="main-container">
+  <main class="main-container">
     <table id="invoiceTable">
       <thead>
         <tr>
-          <th>N° Plan</th>
+          <th>N&deg; Plan</th>
           <th>Indice</th>
-          <th>Désignation</th>
-          <th>Nbr Exemplaires</th>
+          <th>D&eacute;signation</th>
+          <th>Nbr exemplaires</th>
           <th></th>
         </tr>
       </thead>
       <tbody></tbody>
     </table>
-  </div>
+  </main>
 
-  <!-- Scripts -->
   <script src="bordereau.js" defer></script>
 </body>
 </html>

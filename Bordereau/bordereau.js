@@ -94,6 +94,7 @@ function isFrozen() {
 }
 
 function applyFrozenUI(frozen) {
+  document.body.classList.toggle("is-frozen", !!frozen);
   $("dateInput").disabled = frozen;
   $("addItem").disabled = frozen;
 
@@ -104,6 +105,17 @@ function applyFrozenUI(frozen) {
 
   // Re-render pour désactiver selects + supprimer dans le tableau
   displayInvoiceTable();
+}
+
+function renderEmptyTableRow(message) {
+  const tbody = document.querySelector("#invoiceTable tbody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  const row = tbody.insertRow();
+  row.className = "empty-row";
+  const cell = row.insertCell();
+  cell.colSpan = 5;
+  cell.textContent = message;
 }
 
 function setSentCheckboxState({ checked, disabled }) {
@@ -315,15 +327,24 @@ function displayInvoiceTable() {
   const tbody = document.querySelector("#invoiceTable tbody");
   tbody.innerHTML = "";
 
-  if (!selectedProjectName) return;
-  if (!refValue) return;
+  if (!selectedProjectName) {
+    renderEmptyTableRow("Choisir un projet");
+    return;
+  }
+  if (!refValue) {
+    renderEmptyTableRow("Reference invalide");
+    return;
+  }
 
   const frozen = isFrozen();
 
   const refRecords = records.filter(
     (r) => r.Projet === selectedProjectName && r.Ref == refValue
   );
-  if (refRecords.length === 0) return;
+  if (refRecords.length === 0) {
+    renderEmptyTableRow("Aucun element sur ce bordereau");
+    return;
+  }
 
   const allProjectRecords = records.filter((r) => r.Projet === selectedProjectName);
 
@@ -401,10 +422,6 @@ function displayInvoiceTable() {
     deleteBtn.textContent = "Supprimer";
     deleteBtn.className = "delete-btn";
     deleteBtn.disabled = frozen;
-    if (frozen) {
-      deleteBtn.style.opacity = "0.5";
-      deleteBtn.style.cursor = "not-allowed";
-    }
     deleteCell.appendChild(deleteBtn);
   });
 }
@@ -459,7 +476,7 @@ $("sentCheckbox").addEventListener("change", async (e) => {
 
   const current = getCurrentBordereauRecords();
   if (current.length === 0) {
-    alert("Ajoute au moins un élément avant de marquer 'Envoyé'.");
+    alert("Ajoute au moins un \u00e9l\u00e9ment avant de marquer 'Envoy\u00e9'.");
     e.target.checked = false;
     return;
   }
@@ -473,19 +490,19 @@ $("sentCheckbox").addEventListener("change", async (e) => {
  *  ------------------------- */
 $("addItem").addEventListener("click", async () => {
   if (isFrozen()) {
-    alert("Bordereau marqué 'Envoyé' : modification impossible.");
+    alert("Bordereau marqu\u00e9 'Envoy\u00e9' : modification impossible.");
     return;
   }
 
   const selectedProjectName = getProject();
   if (!selectedProjectName) {
-    alert("Veuillez d'abord sélectionner un projet.");
+    alert("Veuillez d'abord s\u00e9lectionner un projet.");
     return;
   }
 
   const date = getDateValue();
   if (!date) {
-    alert("Veuillez entrer une date valide avant d'ajouter un élément.");
+    alert("Veuillez entrer une date valide avant d'ajouter un \u00e9l\u00e9ment.");
     return;
   }
 
@@ -629,7 +646,7 @@ $("generatePdf").addEventListener("click", async () => {
   const refValue = getRef();
 
   if (!selectedProject) {
-    alert("Veuillez sélectionner un projet pour générer le bordereau.");
+    alert("Veuillez s\u00e9lectionner un projet pour g\u00e9n\u00e9rer le bordereau.");
     return;
   }
 
@@ -660,7 +677,7 @@ const logo1 = await fetch("../img/VC_Logotype_Digital_RVB.jpg").then((res) => re
     const pageHeight = doc.internal.pageSize.getHeight();
     const finalY = doc.lastAutoTable?.finalY || 70;
     if (pageNumber === totalPages) {
-      doc.text("Nous vous en souhaitons bonne réception et restons à votre disposition.", 14, finalY + 10);
+      doc.text("Nous vous en souhaitons bonne r\u00e9ception et restons \u00e0 votre disposition.", 14, finalY + 10);
       doc.text("DRTO", 170, finalY + 20);
     }
     doc.text(`Page ${pageNumber} / ${totalPages}`, pageWidth - 30, pageHeight - 10);
@@ -677,14 +694,14 @@ const logo1 = await fetch("../img/VC_Logotype_Digital_RVB.jpg").then((res) => re
 
     doc.autoTable({
       startY: 75,
-      head: [["N° Plan", "Indice", "Désignation", "Nbr Exemplaires"]],
+      head: [["N\u00b0 Plan", "Indice", "D\u00e9signation", "Nbr Exemplaires"]],
       body,
     });
 
     addFooter(i + 1, totalPages);
   }
 
-  doc.save(`${selectedProject} - Bordereau n°${refValue}.pdf`);
+  doc.save(`${selectedProject} - Bordereau n\u00b0${refValue}.pdf`);
 });
 
 // Synchronisation inter-widgets : réagit quand un autre widget change le projet sélectionné

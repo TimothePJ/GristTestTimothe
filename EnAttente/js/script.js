@@ -70,6 +70,18 @@ function normalizeFilterKey(value) {
     .replace(/\s+/g, " ");
 }
 
+function isTruthyGristValue(value) {
+  if (value === true || value === 1) return true;
+  if (typeof value === "string") {
+    return ["true", "1", "oui", "yes"].includes(value.trim().toLowerCase());
+  }
+  return false;
+}
+
+function isArchivedReferenceRow(record) {
+  return isTruthyGristValue(record?.Archive);
+}
+
 function normalizeTypeDocument(value) {
   return normalizeText(value);
 }
@@ -183,7 +195,8 @@ function getProjectRows(project) {
   if (!projectKey) return [];
 
   return (App.records || []).filter((rec) =>
-    normalizeFilterKey(rec?.NomProjet) === projectKey
+    normalizeFilterKey(rec?.NomProjet) === projectKey &&
+    !isArchivedReferenceRow(rec)
   );
 }
 
