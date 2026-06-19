@@ -565,7 +565,7 @@ function buildDashboardData(projectRecords, ventilation, projectConfig, realExpe
   );
   const tableRows = [...budgetRows, ...planRows];
   const totals = buildTotals(ventilation.total, chartRows, tableRows, realExpenses);
-  const chart = buildDetailedChartData(chartRows);
+  const chart = buildDetailedChartData(chartRows, totals);
 
   return {
     averageIndices,
@@ -779,13 +779,16 @@ function buildTotals(totalVentilation, planRows, valueRows, realExpenses) {
   };
 }
 
-function buildDetailedChartData(rows) {
+function buildDetailedChartData(rows, totals) {
   return {
-    labels: rows.map((row) => row.label),
-    dataWithIndice: rows.map((row) => row.percentage),
-    dataWithoutIndice: rows.map((row) => getRemainingPercentage(row.percentage, row.total)),
-    rawCountsWithIndice: rows.map((row) => row.withIndice),
-    rawCountsWithoutIndice: rows.map((row) => row.withoutIndice),
+    labels: [...rows.map((row) => row.label), "TOTAL"],
+    dataWithIndice: [...rows.map((row) => row.percentage), totals.percentage],
+    dataWithoutIndice: [
+      ...rows.map((row) => getRemainingPercentage(row.percentage, row.total)),
+      getRemainingPercentage(totals.percentage, totals.totalDocs),
+    ],
+    rawCountsWithIndice: [...rows.map((row) => row.withIndice), totals.withIndice],
+    rawCountsWithoutIndice: [...rows.map((row) => row.withoutIndice), totals.withoutIndice],
   };
 }
 
@@ -1228,19 +1231,19 @@ function renderCharts(rootEl, elements, totals) {
     remainingPercentage: getRemainingPercentage(realExpensesPercentage, totals.totalVentilation),
     doneRaw: totals.realExpenses,
     remainingRaw: Math.max(0, totals.totalVentilation - totals.realExpenses),
-    rawFormatter: formatNumber,
+    rawFormatter: formatCurrency,
   });
 
   chartState.generalChart = renderProgressChart({
     canvas: elements.generalChartCanvas,
     title: "Avancement général",
-    doneLabel: "Plans diffusés",
-    remainingLabel: "Plans restants",
-    donePercentage: totals.percentage,
-    remainingPercentage: getRemainingPercentage(totals.percentage, totals.totalDocs),
-    doneRaw: totals.withIndice,
-    remainingRaw: totals.withoutIndice,
-    rawFormatter: formatNumber,
+    doneLabel: "Valeur faite",
+    remainingLabel: "Valeur restante",
+    donePercentage: totals.percentageVentilation,
+    remainingPercentage: getRemainingPercentage(totals.percentageVentilation, totals.totalVentilation),
+    doneRaw: totals.doneValue,
+    remainingRaw: Math.max(0, totals.totalVentilation - totals.doneValue),
+    rawFormatter: formatCurrency,
   });
 }
 
@@ -1634,6 +1637,10 @@ function escapeHtml(value) {
 
 function formatNumber(value) {
   return String(Math.round(toFiniteNumber(value, 0))).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
+
+function formatCurrency(value) {
+  return `${formatNumber(value)} €`;
 }
 
 function formatTableValue(value) {
