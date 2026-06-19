@@ -218,6 +218,49 @@ function hitTestPie(clientX, clientY) {
   return null;
 }
 
+function getMergeCellKey(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function mergeFirstColumnCells(tbody) {
+  let anchorCell = null;
+  let anchorKey = "";
+  let span = 1;
+
+  Array.from(tbody.querySelectorAll("tr")).forEach((row) => {
+    if (row.classList.contains("group-row")) {
+      anchorCell = null;
+      anchorKey = "";
+      span = 1;
+      return;
+    }
+
+    const cell = row.cells?.[0];
+    if (!cell) return;
+
+    cell.rowSpan = 1;
+    cell.style.display = "";
+    cell.classList.remove("merged-emetteur-cell");
+
+    const key = getMergeCellKey(cell.textContent);
+    if (anchorCell && key === anchorKey) {
+      cell.style.display = "none";
+      span += 1;
+      anchorCell.rowSpan = span;
+      anchorCell.classList.add("merged-emetteur-cell");
+      return;
+    }
+
+    anchorCell = cell;
+    anchorKey = key;
+    span = 1;
+  });
+}
+
 function renderDetailsTable({ rows, title, footer }) {
   const tTitle = document.getElementById("detailsTitle");
   const tbody = document.getElementById("detailsTbody");
@@ -249,4 +292,6 @@ function renderDetailsTable({ rows, title, footer }) {
       </tr>
     `;
   }).join("");
+
+  mergeFirstColumnCells(tbody);
 }

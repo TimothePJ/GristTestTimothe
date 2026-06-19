@@ -278,6 +278,13 @@ select:disabled {
   font-weight: 650;
 }
 
+#detailsTable td.merged-emetteur-cell {
+  vertical-align: middle;
+  background: var(--vc-panel-soft);
+  color: var(--vc-blue-700);
+  font-weight: 750;
+}
+
 #detailsTable td:nth-child(2) {
   min-width: 300px;
   overflow-wrap: anywhere;

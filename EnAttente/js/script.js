@@ -464,6 +464,10 @@ function rowToRenderObj(rec) {
   };
 }
 
+function compareReference2RowOrder(a, b) {
+  return String(a?.Emetteur || "").localeCompare(String(b?.Emetteur || ""));
+}
+
 function getBaseRows() {
   if (!selectedProject) return [];
 
@@ -725,7 +729,7 @@ initGrist(() => {
 
 function buildRowsForTable(listRows, allRows = listRows) {
   if (selectedDocName) {
-    const sorted = listRows.slice().sort((a, b) => getRecuMs(b) - getRecuMs(a));
+    const sorted = listRows.slice().sort(compareReference2RowOrder);
     return sorted.map(rowToRenderObj);
   }
 
@@ -765,7 +769,7 @@ function buildRowsForTable(listRows, allRows = listRows) {
 
   const out = [];
   for (const g of groupArr) {
-    g.rows.sort((a, b) => getRecuMs(b) - getRecuMs(a));
+    g.rows.sort(compareReference2RowOrder);
 
     out.push({
       type: "group",
