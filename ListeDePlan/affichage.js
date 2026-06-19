@@ -1592,6 +1592,12 @@ document.addEventListener("click", async (e) => {
       dateFormat: "d/m/Y",
         onClose: async (selectedDates, dateStr, instance) => {
         const isoDate = selectedDates.length > 0 ? convertToISO(dateStr) : null;
+        try {
+          await appliquerDateSurCellules([td], isoDate);
+        } catch (err) {
+          console.error("Erreur lors de la mise a jour de la date :", err);
+        }
+        return;
         const recordIdInt = recordId ? parseInt(recordId, 10) : null;
 
         // === CAS: cellule déjà existante (recordId) -> UPDATE, jamais AddRecord ===
@@ -1827,6 +1833,357 @@ function dateObjToISO(d) {
   return `${year}-${month}-${day}T00:00:00.000Z`;
 }
 
+function getDateCellContext(td) {
+  const tr = td?.parentElement;
+  return {
+    td,
+    tr,
+    recordId: td?.dataset?.recordId ? parseInt(td.dataset.recordId, 10) : null,
+    indice: td?.dataset?.indice || "",
+    typeDocument: td?.dataset?.typeDocument || "",
+    nomProjet: td?.dataset?.nomProjet || "",
+    zone: td?.dataset?.zone || "",
+    numDocument: td?.dataset?.numDocument || tr?.cells?.[0]?.textContent?.trim() || "",
+    designation: td?.dataset?.designation || tr?.cells?.[1]?.textContent?.trim() || ""
+  };
+}
+
+function getOtherDatedIndiceCells(td) {
+  const tr = td?.parentElement;
+  if (!tr) return [];
+  return Array.from(tr.querySelectorAll("td.indice")).filter((cell) =>
+    cell !== td && cell.textContent.trim() !== ""
+  );
+}
+
+function buildDateCellActions(td, isoDate, projetsDict = null) {
+  const {
+    recordId,
+    indice,
+    typeDocument,
+    nomProjet,
+    zone,
+    numDocument,
+    designation
+  } = getDateCellContext(td);
+
+  const actionsUpsert = [];
+  const actionsDelete = [];
+
+  if (td.dataset.conflicts) {
+    const conflicts = JSON.parse(td.dataset.conflicts);
+    const keepId = conflicts[0]?.id;
+    if (keepId) {
+      actionsUpsert.push(["UpdateRecord", "ListePlan_NDC_COF", keepId, { DateDiffusion: isoDate }]);
+    }
+    for (const conflict of conflicts.slice(1)) {
+      if (conflict?.id != null) {
+        actionsDelete.push(["RemoveRecord", "ListePlan_NDC_COF", conflict.id]);
+      }
+    }
+    return { actionsUpsert, actionsDelete, keepRecordId: keepId || null };
+  }
+
+  if (recordId) {
+    if (!isoDate) {
+      const fieldsToUpdate = { DateDiffusion: null };
+      if (getOtherDatedIndiceCells(td).length === 0) {
+        fieldsToUpdate.Indice = null;
+      }
+      actionsUpsert.push(["UpdateRecord", "ListePlan_NDC_COF", recordId, fieldsToUpdate]);
+    } else {
+      actionsUpsert.push(["UpdateRecord", "ListePlan_NDC_COF", recordId, { DateDiffusion: isoDate }]);
+    }
+    return { actionsUpsert, actionsDelete, keepRecordId: recordId };
+  }
+
+  if (!isoDate) return { actionsUpsert, actionsDelete, keepRecordId: null };
+
+  if (!numDocument || !designation || !nomProjet || !typeDocument) {
+    console.warn("Champs obligatoires manquants pour l'ajout :", {
+      numDocument,
+      designation,
+      nomProjet,
+      typeDocument,
+      zone
+    });
+    return { actionsUpsert, actionsDelete, keepRecordId: null };
+  }
+
+  if (projetsDict && !projetsDict[nomProjet.trim()]) {
+    console.error("Projet non trouve :", nomProjet);
+    return { actionsUpsert, actionsDelete, keepRecordId: null };
+  }
+
+  actionsUpsert.push(["AddRecord", "ListePlan_NDC_COF", null, {
+    NumeroDocument: numDocument,
+    Type_document: typeDocument,
+    Designation: designation,
+    Nom_projet: nomProjet,
+    Zone: zone || "",
+    Indice: indice,
+    DateDiffusion: isoDate
+  }]);
+
+  return { actionsUpsert, actionsDelete, keepRecordId: null };
+}
+
+function markDateCellApplied(td, isoDate, keepRecordId = null) {
+  td.classList.remove("missing-date-error", "multi-date-error");
+  delete td.dataset.conflicts;
+  td.textContent = isoDate ? formatDate(isoDate) : "";
+  if (keepRecordId) {
+    td.dataset.recordId = String(keepRecordId);
+  }
+}
+
+async function applyUserActionsInBatches(actions, batchSize = 200) {
+  for (let i = 0; i < actions.length; i += batchSize) {
+    await grist.docApi.applyUserActions(actions.slice(i, i + batchSize));
+  }
+}
+
+async function appliquerDateSurCellules(cells, isoDate, { syncPlanning = true } = {}) {
+  const uniqueCells = Array.from(new Set(cells || [])).filter((cell) =>
+    cell?.matches?.("td.indice.editable")
+  );
+  if (uniqueCells.length === 0) return { updatedCount: 0 };
+
+  const projetsDict = await chargerProjetsMap();
+  const actionsUpsert = [];
+  const actionsDelete = [];
+  const visualUpdates = [];
+
+  for (const td of uniqueCells) {
+    const result = buildDateCellActions(td, isoDate, projetsDict);
+    actionsUpsert.push(...result.actionsUpsert);
+    actionsDelete.push(...result.actionsDelete);
+    if (result.actionsUpsert.length || result.actionsDelete.length) {
+      visualUpdates.push({ td, keepRecordId: result.keepRecordId });
+    }
+  }
+
+  if (actionsUpsert.length) await applyUserActionsInBatches(actionsUpsert);
+  if (actionsDelete.length) await applyUserActionsInBatches(actionsDelete);
+
+  visualUpdates.forEach(({ td, keepRecordId }) => markDateCellApplied(td, isoDate, keepRecordId));
+
+  if (syncPlanning && (actionsUpsert.length || actionsDelete.length)) {
+    await syncPlanningProjetIndicesFromListeDePlan();
+  }
+
+  return { updatedCount: visualUpdates.length };
+}
+
+const dateDragSelection = {
+  active: false,
+  pointerId: null,
+  table: null,
+  colIndex: null,
+  startCell: null,
+  cells: new Set(),
+  didDrag: false,
+  suppressNextClick: false
+};
+
+function getDateCellFromTarget(target) {
+  return target?.closest?.("#plans-output td.indice.editable") || null;
+}
+
+function clearDateDragHighlights(cells = null) {
+  const targets = cells
+    ? Array.from(cells)
+    : Array.from(document.querySelectorAll("#plans-output td.plan-date-drag-selected"));
+  targets.forEach((cell) => cell.classList.remove("plan-date-drag-selected"));
+}
+
+function resetDateDragState({ keepHighlights = false } = {}) {
+  dateDragSelection.active = false;
+  dateDragSelection.pointerId = null;
+  dateDragSelection.table = null;
+  dateDragSelection.colIndex = null;
+  dateDragSelection.startCell = null;
+  if (!keepHighlights) clearDateDragHighlights(dateDragSelection.cells);
+  dateDragSelection.cells = new Set();
+  dateDragSelection.didDrag = false;
+  document.body.classList.remove("plan-date-dragging");
+}
+
+function getDateCellsBetween(startCell, endCell) {
+  if (!startCell || !endCell) return [];
+  const table = startCell.closest("table.plan-table");
+  if (!table || endCell.closest("table.plan-table") !== table) return [];
+  if (startCell.cellIndex !== endCell.cellIndex) return [];
+
+  const rows = Array.from(table.querySelectorAll("tbody tr"))
+    .filter((tr) => !tr.querySelector("td.ajout"));
+  const startRowIndex = rows.indexOf(startCell.parentElement);
+  const endRowIndex = rows.indexOf(endCell.parentElement);
+  if (startRowIndex < 0 || endRowIndex < 0) return [];
+
+  const [from, to] = startRowIndex <= endRowIndex
+    ? [startRowIndex, endRowIndex]
+    : [endRowIndex, startRowIndex];
+
+  return rows
+    .slice(from, to + 1)
+    .map((tr) => tr.cells[startCell.cellIndex])
+    .filter((cell) => cell?.matches?.("td.indice.editable"));
+}
+
+function setDateDragCells(cells) {
+  clearDateDragHighlights(dateDragSelection.cells);
+  dateDragSelection.cells = new Set(cells);
+  dateDragSelection.cells.forEach((cell) => cell.classList.add("plan-date-drag-selected"));
+  dateDragSelection.didDrag = dateDragSelection.cells.size > 1;
+}
+
+function updateDateDragSelectionFromPoint(clientX, clientY) {
+  const target = document.elementFromPoint(clientX, clientY);
+  const cell = getDateCellFromTarget(target);
+  if (!cell) return;
+  const cells = getDateCellsBetween(dateDragSelection.startCell, cell);
+  if (cells.length > 0) setDateDragCells(cells);
+}
+
+function suppressNextDateCellClick() {
+  dateDragSelection.suppressNextClick = true;
+  window.setTimeout(() => {
+    dateDragSelection.suppressNextClick = false;
+  }, 600);
+}
+
+function clampFloatingDatePopup(popup) {
+  if (!popup) return;
+  const popupRect = popup.getBoundingClientRect();
+  const maxLeft = window.innerWidth - popupRect.width - 12;
+  const nextLeft = Math.max(12, Math.min(popupRect.left, maxLeft));
+  popup.style.left = `${nextLeft + window.scrollX}px`;
+}
+
+function ouvrirPickerRemplirCellules(cells, anchorCell) {
+  const selectedCells = Array.from(new Set(cells || [])).filter((cell) =>
+    cell?.matches?.("td.indice.editable")
+  );
+  if (selectedCells.length <= 1) {
+    clearDateDragHighlights(selectedCells);
+    return;
+  }
+
+  const old = document.getElementById("date-drag-fill-popup");
+  if (old) old.remove();
+
+  const indice = anchorCell?.dataset?.indice || selectedCells[0]?.dataset?.indice || "";
+  const popup = document.createElement("div");
+  popup.id = "date-drag-fill-popup";
+  popup.className = "date-drag-fill-popup";
+  popup.innerHTML = `
+    <div class="date-drag-fill-title">
+      Remplir ${selectedCells.length} case(s) de la colonne <strong>${indice}</strong>
+    </div>
+    <input id="date-drag-fill-date" type="text" placeholder="Choisir une date" />
+    <div class="date-drag-fill-actions">
+      <button id="date-drag-fill-cancel" type="button">Annuler</button>
+    </div>
+  `;
+
+  const rect = (anchorCell || selectedCells[selectedCells.length - 1]).getBoundingClientRect();
+  popup.style.left = `${rect.left + window.scrollX}px`;
+  popup.style.top = `${rect.bottom + window.scrollY + 6}px`;
+  document.body.appendChild(popup);
+  clampFloatingDatePopup(popup);
+
+  const input = popup.querySelector("#date-drag-fill-date");
+  const cancelBtn = popup.querySelector("#date-drag-fill-cancel");
+
+  const closePopup = () => {
+    fp.destroy();
+    popup.remove();
+    clearDateDragHighlights(selectedCells);
+  };
+
+  const fp = flatpickr(input, {
+    locale: "fr",
+    dateFormat: "d/m/Y",
+    closeOnSelect: true,
+    onChange: async (selectedDates, dateStr, instance) => {
+      if (!selectedDates || selectedDates.length === 0) return;
+      instance.close();
+
+      const iso = convertToISO(dateStr);
+      try {
+        await appliquerDateSurCellules(selectedCells, iso);
+      } catch (err) {
+        console.error("Erreur lors du remplissage des cellules selectionnees :", err);
+        alert("Erreur lors du remplissage des cellules selectionnees.");
+      } finally {
+        closePopup();
+      }
+    }
+  });
+
+  cancelBtn.onclick = closePopup;
+  fp.open();
+}
+
+document.addEventListener("click", (event) => {
+  if (!dateDragSelection.suppressNextClick) return;
+  if (!getDateCellFromTarget(event.target)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+  dateDragSelection.suppressNextClick = false;
+}, true);
+
+document.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  if (event.target.closest?.(".flatpickr-calendar, #date-fix-popup, #column-fill-popup, #date-drag-fill-popup")) return;
+  const cell = getDateCellFromTarget(event.target);
+  if (!cell) return;
+  if (document.getElementById("date-fix-popup")) return;
+
+  const oldPopup = document.getElementById("date-drag-fill-popup");
+  if (oldPopup) oldPopup.remove();
+  clearDateDragHighlights();
+
+  dateDragSelection.active = true;
+  dateDragSelection.pointerId = event.pointerId;
+  dateDragSelection.table = cell.closest("table.plan-table");
+  dateDragSelection.colIndex = cell.cellIndex;
+  dateDragSelection.startCell = cell;
+  dateDragSelection.cells = new Set([cell]);
+  dateDragSelection.didDrag = false;
+  cell.classList.add("plan-date-drag-selected");
+  document.body.classList.add("plan-date-dragging");
+}, true);
+
+document.addEventListener("pointermove", (event) => {
+  if (!dateDragSelection.active) return;
+  if (dateDragSelection.pointerId !== event.pointerId) return;
+  updateDateDragSelectionFromPoint(event.clientX, event.clientY);
+  if (dateDragSelection.didDrag) event.preventDefault();
+}, true);
+
+document.addEventListener("pointerup", (event) => {
+  if (!dateDragSelection.active) return;
+  if (dateDragSelection.pointerId !== event.pointerId) return;
+
+  updateDateDragSelectionFromPoint(event.clientX, event.clientY);
+  const selectedCells = Array.from(dateDragSelection.cells);
+  const anchorCell = selectedCells[selectedCells.length - 1] || dateDragSelection.startCell;
+  const shouldOpenBulkPicker = dateDragSelection.didDrag && selectedCells.length > 1;
+  resetDateDragState({ keepHighlights: shouldOpenBulkPicker });
+
+  if (shouldOpenBulkPicker) {
+    suppressNextDateCellClick();
+    ouvrirPickerRemplirCellules(selectedCells, anchorCell);
+  }
+}, true);
+
+document.addEventListener("pointercancel", () => {
+  if (dateDragSelection.active) resetDateDragState();
+}, true);
+
 function ouvrirPickerRemplirColonne(th) {
   const indice = th.textContent.trim();
 
@@ -1836,19 +2193,13 @@ function ouvrirPickerRemplirColonne(th) {
 
   const popup = document.createElement("div");
   popup.id = "column-fill-popup";
-  popup.style.position = "absolute";
-  popup.style.zIndex = "9999";
-  popup.style.background = "#fff";
-  popup.style.border = "1px solid #ed1b2d";
-  popup.style.borderRadius = "8px";
-  popup.style.padding = "10px";
-  popup.style.boxShadow = "0 8px 20px rgba(0,0,0,0.15)";
+  popup.className = "date-fill-popup";
   popup.innerHTML = `
-    <div style="margin-bottom:8px; color:#004990;">
+    <div class="date-fill-title">
       Remplir toute la colonne <strong>${indice}</strong>
     </div>
-    <input id="column-fill-date" type="text" placeholder="Choisir une date" style="width:100%; padding:6px;" />
-    <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+    <input id="column-fill-date" type="text" placeholder="Choisir une date" />
+    <div class="date-fill-actions">
       <button id="column-fill-cancel" type="button">Annuler</button>
     </div>
   `;
@@ -1857,6 +2208,7 @@ function ouvrirPickerRemplirColonne(th) {
   popup.style.left = `${rect.left + window.scrollX}px`;
   popup.style.top = `${rect.bottom + window.scrollY + 6}px`;
   document.body.appendChild(popup);
+  clampFloatingDatePopup(popup);
 
   const input = popup.querySelector("#column-fill-date");
   const cancelBtn = popup.querySelector("#column-fill-cancel");
@@ -1873,10 +2225,6 @@ function ouvrirPickerRemplirColonne(th) {
 
       try {
         const iso = convertToISO(dateStr);
-
-        const indice = th.textContent.trim();
-        const ok = confirm(`Appliquer ${formatDate(iso)} à toute la colonne ${indice} ?`);
-        if (!ok) return;
 
         await appliquerDateSurTouteLaColonne(th, iso);
       } finally {
@@ -1902,6 +2250,17 @@ async function appliquerDateSurTouteLaColonne(th, isoDate) {
 
   const rows = Array.from(tbody.querySelectorAll("tr"))
     .filter(tr => !tr.querySelector("td.ajout")); // ignore la ligne d'ajout
+
+  try {
+    await appliquerDateSurCellules(
+      rows.map((tr) => tr.cells[colIndex]).filter(Boolean),
+      isoDate
+    );
+  } catch (err) {
+    console.error("Erreur remplissage colonne :", err);
+    alert("Erreur lors du remplissage de la colonne (regarde la console).");
+  }
+  return;
 
   const actionsUpsert = []; // Update + Add
   const actionsDelete = []; // Remove (multi-date)
