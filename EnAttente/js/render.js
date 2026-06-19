@@ -1,7 +1,7 @@
 const PIE_COLORS = {
-  noIndiceNotBlocking: "#004990", // bleu
-  noIndiceBlocking: "#ed1b2d",    // rouge
-  withIndice: "#808080"           // gris (3e couleur)
+  noIndiceNotBlocking: "#004990",
+  noIndiceBlocking: "#ed1b2d",
+  withIndice: "#808080"
 };
 
 function formatPercent(value, total) {
@@ -9,11 +9,12 @@ function formatPercent(value, total) {
   return `${Math.round((value / total) * 100)}%`;
 }
 
-// hit-test (clic sur les parts)
 window.PIE_HIT = {
-  cx: 0, cy: 0, r: 110,
+  cx: 0,
+  cy: 0,
+  r: 110,
   start: -Math.PI / 2,
-  slices: [] // [{key,start,end}]
+  slices: []
 };
 
 function renderPieChart({
@@ -33,65 +34,64 @@ function renderPieChart({
 
   const total = countNoIndiceNotBlocking + countNoIndiceBlocking + countWithIndice;
 
-  title.textContent = project ? `SUIVI INDICE — ${project}` : "SUIVI INDICE";
+  title.textContent = project ? `SUIVI INDICE - ${project}` : "SUIVI INDICE";
 
-  // Texte à droite
   if (!project) {
-    numbers.textContent = "Sélectionne un projet";
+    numbers.textContent = "Choisir un projet";
   } else if (total === 0) {
     numbers.textContent = "Aucune ligne sur ce projet/document.";
   } else {
     numbers.innerHTML = `
-      <div><b>Total lignes :</b> ${total}</div>
-      <div>• Sans Indice (non bloquant) : ${countNoIndiceNotBlocking} (${formatPercent(countNoIndiceNotBlocking, total)})</div>
-      <div>• Sans Indice (bloquant) : ${countNoIndiceBlocking} (${formatPercent(countNoIndiceBlocking, total)})</div>
-      <div>• Avec Indice : ${countWithIndice} (${formatPercent(countWithIndice, total)})</div>
-      <div style="margin-top:6px; font-size:12px;">
-        Clic sur une couleur pour filtrer la liste.
-      </div>
+      <div class="chart-metric"><b>Total lignes :</b><span>${total}</span></div>
+      <div class="chart-metric"><span>Sans indice (non bloquant) :</span><b>${countNoIndiceNotBlocking}</b><span>(${formatPercent(countNoIndiceNotBlocking, total)})</span></div>
+      <div class="chart-metric"><span>Sans indice (bloquant) :</span><b>${countNoIndiceBlocking}</b><span>(${formatPercent(countNoIndiceBlocking, total)})</span></div>
+      <div class="chart-metric"><span>Avec indice :</span><b>${countWithIndice}</b><span>(${formatPercent(countWithIndice, total)})</span></div>
+      <div class="chart-help">Clique sur une couleur pour filtrer la liste.</div>
     `;
   }
 
-  // Légende (cliquable)
   legend.innerHTML = `
     <div class="legend-item ${activeSlice === "NO_INDICE_NOT_BLOCKING" ? "active" : ""}" data-slice="NO_INDICE_NOT_BLOCKING">
       <span class="legend-swatch" style="background:${PIE_COLORS.noIndiceNotBlocking}"></span>
-      Sans Indice (non bloquant)
+      Sans indice (non bloquant)
     </div>
     <div class="legend-item ${activeSlice === "NO_INDICE_BLOCKING" ? "active" : ""}" data-slice="NO_INDICE_BLOCKING">
       <span class="legend-swatch" style="background:${PIE_COLORS.noIndiceBlocking}; border-color:#ed1b2d;"></span>
-      Sans Indice (bloquant)
+      Sans indice (bloquant)
     </div>
     <div class="legend-item ${activeSlice === "WITH_INDICE" ? "active" : ""}" data-slice="WITH_INDICE">
       <span class="legend-swatch" style="background:${PIE_COLORS.withIndice}; border-color:#808080;"></span>
-      Avec Indice (autres)
+      Avec indice
     </div>
   `;
 
-  // Préparer hit-test
   window.PIE_HIT.cx = canvas.width / 2;
   window.PIE_HIT.cy = canvas.height / 2;
   window.PIE_HIT.r = 110;
   window.PIE_HIT.start = -Math.PI / 2;
   window.PIE_HIT.slices = [];
 
-  // Nettoyer / dessiner
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   if (!project || total === 0) {
     ctx.beginPath();
     ctx.arc(window.PIE_HIT.cx, window.PIE_HIT.cy, window.PIE_HIT.r, 0, Math.PI * 2);
-    ctx.strokeStyle = "#ed1b2d";
+    ctx.strokeStyle = "#d6e0ea";
     ctx.lineWidth = 2;
     ctx.stroke();
+
+    ctx.fillStyle = "#627386";
+    ctx.font = "600 13px Segoe UI, Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(project ? "Aucune ligne" : "Projet requis", window.PIE_HIT.cx, window.PIE_HIT.cy);
     return;
   }
 
-  // Construire slices dans un ordre fixe (bleu -> rouge -> gris)
   const data = [
     { key: "NO_INDICE_NOT_BLOCKING", value: countNoIndiceNotBlocking, color: PIE_COLORS.noIndiceNotBlocking },
     { key: "NO_INDICE_BLOCKING", value: countNoIndiceBlocking, color: PIE_COLORS.noIndiceBlocking },
-    { key: "WITH_INDICE", value: countWithIndice, color: PIE_COLORS.withIndice },
+    { key: "WITH_INDICE", value: countWithIndice, color: PIE_COLORS.withIndice }
   ];
 
   let start = window.PIE_HIT.start;
@@ -102,17 +102,13 @@ function renderPieChart({
     const angle = (s.value / total) * Math.PI * 2;
     const end = start + angle;
 
-    // enregistrer pour clic
     window.PIE_HIT.slices.push({ key: s.key, start, end });
-
-    // dessiner (pop si actif)
     drawSlice(ctx, start, end, s.color, activeSlice === s.key);
     drawSlicePercentLabel(ctx, start, end, s.value, total, activeSlice === s.key);
 
     start = end;
   }
 
-  // contour
   ctx.beginPath();
   ctx.arc(window.PIE_HIT.cx, window.PIE_HIT.cy, window.PIE_HIT.r, 0, Math.PI * 2);
   ctx.strokeStyle = "#ffffff";
@@ -158,7 +154,7 @@ function drawSlicePercentLabel(ctx, a0, a1, value, total, active) {
 
   ctx.save();
   ctx.translate(dx, dy);
-  ctx.font = "bold 15px Arial, sans-serif";
+  ctx.font = "700 15px Segoe UI, Arial, sans-serif";
   ctx.textBaseline = "middle";
 
   if (sliceAngle >= 0.42) {
@@ -211,20 +207,16 @@ function hitTestPie(clientX, clientY) {
   let ang = Math.atan2(dy, dx);
   if (ang < 0) ang += Math.PI * 2;
 
-  // Convertir en angle relatif, aligné sur "start"
   let rel = ang - window.PIE_HIT.start;
   while (rel < 0) rel += Math.PI * 2;
   while (rel >= Math.PI * 2) rel -= Math.PI * 2;
 
-  // retrouver slice correspondant
   const abs = rel + window.PIE_HIT.start;
   for (const s of window.PIE_HIT.slices) {
     if (abs >= s.start && abs < s.end) return s.key;
   }
   return null;
 }
-
-/* -------- Table -------- */
 
 function renderDetailsTable({ rows, title, footer }) {
   const tTitle = document.getElementById("detailsTitle");
@@ -235,19 +227,17 @@ function renderDetailsTable({ rows, title, footer }) {
   tFooter.textContent = footer || "";
 
   tbody.innerHTML = rows.map(r => {
-    // Ligne “séparateur” de groupe
     if (r.type === "group") {
-        return `
-            <tr class="group-row">
-                <td colspan="6">
-                    <span class="group-label">${escapeHtml(r.label)}</span>
-                    <span class="group-count">(${r.count} sur ${r.totalCount ?? r.count})</span>
-                </td>
-            </tr>
-        `;
+      return `
+        <tr class="group-row">
+          <td colspan="6">
+            <span class="group-label">${escapeHtml(r.label)}</span>
+            <span class="group-count">(${r.count} sur ${r.totalCount ?? r.count})</span>
+          </td>
+        </tr>
+      `;
     }
 
-    // Ligne “normale”
     return `
       <tr data-rowid="${r.rowId ?? ""}">
         <td>${escapeHtml(r.emetteur)}</td>
@@ -255,7 +245,7 @@ function renderDetailsTable({ rows, title, footer }) {
         <td>${escapeHtml(r.indice)}</td>
         <td>${escapeHtml(r.recu)}</td>
         <td>${escapeHtml(r.observation)}</td>
-        <td class="bloq-cell">${r.bloquant ? "✓" : ""}</td>
+        <td class="bloq-cell">${r.bloquant ? "&#10003;" : ""}</td>
       </tr>
     `;
   }).join("");

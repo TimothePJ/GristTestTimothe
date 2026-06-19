@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MonWidget</title>
+  <title>En attente</title>
 
   <!-- API Grist -->
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
@@ -13,12 +13,11 @@
 </head>
 
 <body>
-  <!-- Header sticky -->
   <div class="sticky-container">
     <div class="dropdown-container">
       <label for="firstColumnDropdown">Projet :</label>
       <select id="firstColumnDropdown">
-        <option value="">Selectionner un projet</option>
+        <option value="">Choisir un projet</option>
       </select>
     </div>
 
@@ -30,34 +29,28 @@
     </div>
   </div>
 
-  <!-- Contenu principal -->
-  <div id="content" class="content-area">
-    <!-- Carte graphique -->
-    <div class="card" id="chartCard">
+  <main id="content" class="content-area">
+    <section class="card" id="chartCard">
       <div id="chartTitle" class="card-title">EN ATTENTE</div>
 
       <div class="chart-row">
         <canvas id="pieCanvas" width="280" height="280"></canvas>
-
-        <div class="chart-side">
-          <div id="chartNumbers" class="chart-numbers">Sélectionne un projet</div>
-          <div id="legend" class="legend"></div>
-        </div>
+        <div id="legend" class="legend"></div>
+        <div id="chartNumbers" class="chart-numbers">Choisir un projet</div>
       </div>
-    </div>
+    </section>
 
-    <!-- Carte liste -->
-    <div class="card" id="detailsCard" style="margin-top: 14px;">
+    <section class="card" id="detailsCard">
       <div id="detailsTitle" class="card-title">Lignes EN ATTENTE</div>
 
       <div class="table-container">
         <table id="detailsTable">
           <thead>
             <tr>
-              <th>Émetteur</th>
-              <th>Référence</th>
+              <th>&Eacute;metteur</th>
+              <th>R&eacute;f&eacute;rence</th>
               <th>Indice</th>
-              <th>Reçu</th>
+              <th>Re&ccedil;u</th>
               <th>Observation</th>
               <th>Bloquant</th>
             </tr>
@@ -67,10 +60,9 @@
       </div>
 
       <div id="detailsFooter" class="details-footer"></div>
-    </div>
-  </div>
+    </section>
+  </main>
 
-  <!-- Scripts (ordre important) -->
   <script src="./js/utils.js"></script>
   <script src="./js/grist.js"></script>
   <script src="./js/render.js"></script>

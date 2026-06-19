@@ -1,17 +1,22 @@
 .select {
-  background: #111;
-  color: #eee;
-  border: 1px solid #444;
-  padding: 6px 8px;
-  border-radius: 8px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #c9d8e8;
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--vc-blue);
+  font: inherit;
 }
 
 .btn {
-  background: #2b7a2b;
-  color: #fff;
-  border: 1px solid #1d5a1d;
-  padding: 7px 10px;
-  border-radius: 8px;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid var(--vc-blue);
+  border-radius: 4px;
+  background: var(--vc-blue);
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -20,30 +25,37 @@
   cursor: not-allowed;
 }
 
-/* une mini table simple */
 .table {
   width: 100%;
-  border-collapse: collapse;
-  margin-top: 6px;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: #ffffff;
 }
 
-.table th, .table td {
-  border-bottom: 1px solid #333;
-  padding: 8px;
+.table th,
+.table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--vc-line-soft);
   text-align: left;
   vertical-align: top;
 }
 
 .badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid #444;
-  background: #111;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--vc-line);
+  border-radius: 8px;
+  background: var(--vc-panel-soft);
+  color: var(--vc-blue-700);
   font-size: 12px;
+  font-weight: 700;
 }
 
 .legend-item.active {
-  font-weight: bold;
-  text-decoration: underline;
+  border-color: var(--vc-blue);
+  background: rgba(0, 73, 144, 0.08);
+  color: var(--vc-blue);
+  text-decoration: none;
 }

@@ -3,17 +3,18 @@ let selectedDocName = "";
 let selectedDocNumber = null;
 const SHARED_PROJECT_STORAGE_KEY = "grist.selected-project";
 const SHARED_PROJECT_ID_STORAGE_KEY = "grist.selected-project-id";
-let _projectsData = []; // [{id, number, name}]
+let _projectsData = [];
 
 function readSharedProjectId() {
   try {
     const raw = localStorage.getItem(SHARED_PROJECT_ID_STORAGE_KEY);
     const id = Number(raw);
     return Number.isInteger(id) && id > 0 ? id : null;
-  } catch (_e) { return null; }
+  } catch (_e) {
+    return null;
+  }
 }
 
-// "ALL" | "NO_INDICE_NOT_BLOCKING" | "NO_INDICE_BLOCKING" | "WITH_INDICE"
 let sliceFilter = "ALL";
 
 const firstDropdown = document.getElementById("firstColumnDropdown");
@@ -43,7 +44,7 @@ function saveSharedProjectSelection(projectName = "") {
       localStorage.removeItem(SHARED_PROJECT_ID_STORAGE_KEY);
     }
   } catch (_error) {
-    // localStorage peut etre indisponible dans certains contextes embarques.
+    // localStorage can be unavailable inside some embedded contexts.
   }
 }
 
@@ -57,8 +58,8 @@ function populateFirstColumnDropdown(projects) {
   const current = firstDropdown.value || selectedProject || readSharedProjectSelection();
   const currentId = readSharedProjectId();
 
-  firstDropdown.innerHTML = `<option value="">Selectionner un projet</option>`;
-  (projects || []).forEach(p => {
+  firstDropdown.innerHTML = `<option value="">Choisir un projet</option>`;
+  (projects || []).forEach((p) => {
     const v = typeof p === "object" ? p.name : String(p || "").trim();
     if (!v) return;
     const opt = document.createElement("option");
@@ -72,14 +73,13 @@ function populateFirstColumnDropdown(projects) {
     firstDropdown.appendChild(opt);
   });
 
-  // Restaurer par ID d'abord, puis par nom
   let restored = "";
   if (currentId) {
-    const match = Array.from(firstDropdown.options).find(o => Number(o.dataset.projectId) === currentId);
+    const match = Array.from(firstDropdown.options).find((o) => Number(o.dataset.projectId) === currentId);
     if (match) restored = match.value;
   }
   if (!restored && current) {
-    if ([...firstDropdown.options].some(o => o.value === current)) restored = current;
+    if ([...firstDropdown.options].some((o) => o.value === current)) restored = current;
   }
   firstDropdown.value = restored;
   selectedProject = firstDropdown.value || selectedProject || "";
@@ -88,7 +88,7 @@ function populateFirstColumnDropdown(projects) {
 function buildDocumentOptionsForProject(project) {
   const map = new Map();
 
-  (App.records || []).forEach(rec => {
+  (App.records || []).forEach((rec) => {
     if (!rec) return;
     if (String(rec.NomProjet || "").trim() !== project) return;
 
@@ -110,7 +110,7 @@ function buildDocumentOptionsForProject(project) {
       return a - b;
     });
 
-    nums.forEach(n => {
+    nums.forEach((n) => {
       const value = JSON.stringify({ name, n: (n == null ? null : Number(n)) });
       const label = makeDocLabel(name, n);
       opts.push({ value, label, name, n });
@@ -155,26 +155,20 @@ function matchesSelectedDocument(rec) {
 }
 
 function makeGroupLabel(name, num) {
-  // num normalisé : null si 0 / vide / "-" / "_"
   const n = normalizeNumero(num);
-
-  // NOM d'abord
   const base = String(name || "").trim() || "Sans document";
-
-  // puis numéro si présent
   return (n == null) ? base : `${n} ${base}`;
 }
 
 function getDocParts(rec) {
   const nameRaw = String(rec.NomDocument || "").trim();
   const name = nameRaw ? nameRaw : "Sans document";
-
   const n = normalizeNumero(rec.NumeroDocument);
 
   return {
     name,
     n,
-    label: makeGroupLabel(name, rec.NumeroDocument), // Nom puis Numéro, 0 ignoré
+    label: makeGroupLabel(name, rec.NumeroDocument),
     sortN: (n == null ? Infinity : n)
   };
 }
@@ -195,11 +189,11 @@ function rowToRenderObj(rec) {
 function getBaseRows() {
   if (!selectedProject) return [];
 
-  return (App.records || []).filter(rec => {
+  return (App.records || []).filter((rec) => {
     if (!rec) return false;
     if (String(rec.NomProjet || "").trim() !== selectedProject) return false;
     if (!matchesSelectedDocument(rec)) return false;
-    return true; // plus de filtre EN ATTENTE
+    return true;
   });
 }
 
@@ -207,15 +201,14 @@ function applySliceFilter(rows) {
   if (sliceFilter === "ALL") return rows;
 
   if (sliceFilter === "WITH_INDICE") {
-    return rows.filter(r => hasIndice(r));
+    return rows.filter((r) => hasIndice(r));
   }
 
   if (sliceFilter === "NO_INDICE_BLOCKING") {
-    return rows.filter(r => !hasIndice(r) && getBloquant(r));
+    return rows.filter((r) => !hasIndice(r) && getBloquant(r));
   }
 
-  // NO_INDICE_NOT_BLOCKING
-  return rows.filter(r => !hasIndice(r) && !getBloquant(r));
+  return rows.filter((r) => !hasIndice(r) && !getBloquant(r));
 }
 
 function computeCounts(rows) {
@@ -223,12 +216,13 @@ function computeCounts(rows) {
   let countNoIndiceNotBlocking = 0;
   let countWithIndice = 0;
 
-  rows.forEach(r => {
+  rows.forEach((r) => {
     if (hasIndice(r)) {
       countWithIndice++;
+    } else if (getBloquant(r)) {
+      countNoIndiceBlocking++;
     } else {
-      if (getBloquant(r)) countNoIndiceBlocking++;
-      else countNoIndiceNotBlocking++;
+      countNoIndiceNotBlocking++;
     }
   });
 
@@ -237,27 +231,24 @@ function computeCounts(rows) {
 
 function chartLabel() {
   if (!selectedProject) return "";
-  if (!selectedDocName) return `${selectedProject} — Tous`;
+  if (!selectedDocName) return `${selectedProject} - Tous`;
   const docLabel = makeDocLabel(selectedDocName, selectedDocNumber);
-  return `${selectedProject} — ${docLabel}`;
+  return `${selectedProject} - ${docLabel}`;
 }
 
 function tableTitle() {
   const base = chartLabel();
   if (!base) return "Lignes";
 
-  if (sliceFilter === "WITH_INDICE") return `Avec Indice — ${base}`;
-  if (sliceFilter === "NO_INDICE_BLOCKING") return `Sans Indice (bloquant) — ${base}`;
-  if (sliceFilter === "NO_INDICE_NOT_BLOCKING") return `Sans Indice (non bloquant) — ${base}`;
-  return `Toutes lignes — ${base}`;
+  if (sliceFilter === "WITH_INDICE") return `Avec indice - ${base}`;
+  if (sliceFilter === "NO_INDICE_BLOCKING") return `Sans indice (bloquant) - ${base}`;
+  if (sliceFilter === "NO_INDICE_NOT_BLOCKING") return `Sans indice (non bloquant) - ${base}`;
+  return `Toutes lignes - ${base}`;
 }
 
 function refreshUI() {
-  // La liste des projets vient de refreshProjectDropdownFromProjectsTable() (Projets.Nom_de_projet).
-  // On ne la reconstruit pas depuis les records pour rester cohérent avec les autres widgets.
-  const projects = [...firstDropdown.options].map(o => o.value).filter(Boolean);
+  const projects = [...firstDropdown.options].map((o) => o.value).filter(Boolean);
 
-  // Reset si aucun projet ou projet invalide
   if (!selectedProject || !projects.includes(selectedProject)) {
     selectedProject = "";
     selectedDocName = "";
@@ -277,7 +268,6 @@ function refreshUI() {
     return;
   }
 
-  // Dropdown document
   secondDropdown.disabled = false;
   populateSecondColumnListbox(selectedProject);
 
@@ -285,7 +275,7 @@ function refreshUI() {
     ? JSON.stringify({ name: selectedDocName, n: selectedDocNumber })
     : "ALL";
 
-  if ([...secondDropdown.options].some(o => o.value === desiredValue)) {
+  if ([...secondDropdown.options].some((o) => o.value === desiredValue)) {
     secondDropdown.value = desiredValue;
   } else {
     secondDropdown.value = "ALL";
@@ -293,10 +283,7 @@ function refreshUI() {
     selectedDocNumber = null;
   }
 
-  // Base rows (projet + doc (ou Tous))
   const baseRows = getBaseRows();
-
-  // Pie counts (3 catégories)
   const { countNoIndiceBlocking, countNoIndiceNotBlocking, countWithIndice } = computeCounts(baseRows);
 
   renderPieChart({
@@ -307,12 +294,7 @@ function refreshUI() {
     activeSlice: sliceFilter
   });
 
-  // Table : filtrage par slice (couleur), puis regroupement si document = Tous
-  const listRows = applySliceFilter(baseRows); // plus de limite, pas besoin de slice/sort ici
-
-  // buildRowsForTable() gère :
-  // - tri simple si un document est sélectionné
-  // - regroupement par document + séparateurs si "Tous"
+  const listRows = applySliceFilter(baseRows);
   const rowsForRender = buildRowsForTable(listRows, baseRows);
 
   renderDetailsTable({
@@ -322,9 +304,6 @@ function refreshUI() {
   });
 }
 
-/* EVENTS */
-
-// Projet
 firstDropdown.addEventListener("change", () => {
   selectedProject = firstDropdown.value.trim();
   saveSharedProjectSelection(selectedProject);
@@ -344,7 +323,6 @@ firstDropdown.addEventListener("change", () => {
   refreshUI();
 });
 
-// Document
 secondDropdown.addEventListener("change", () => {
   const val = secondDropdown.value;
 
@@ -370,7 +348,6 @@ secondDropdown.addEventListener("change", () => {
   refreshUI();
 });
 
-// Clic sur pie (toggle)
 pieCanvas.addEventListener("click", (e) => {
   const slice = hitTestPie(e.clientX, e.clientY);
   if (!slice) return;
@@ -378,7 +355,6 @@ pieCanvas.addEventListener("click", (e) => {
   refreshUI();
 });
 
-// Clic sur légende (toggle)
 legend.addEventListener("click", (e) => {
   const item = e.target.closest("[data-slice]");
   if (!item) return;
@@ -387,7 +363,6 @@ legend.addEventListener("click", (e) => {
   refreshUI();
 });
 
-// Clic ligne => sélection dans Grist
 document.getElementById("detailsTbody").addEventListener("click", async (e) => {
   const tr = e.target.closest("tr[data-rowid]");
   if (!tr) return;
@@ -399,11 +374,8 @@ document.getElementById("detailsTbody").addEventListener("click", async (e) => {
   } catch {}
 });
 
-/* INIT */
 setSecondDropdownDisabled(true);
 
-// Charger la liste complète des projets depuis Projets.Nom_de_projet
-// (même source que tous les autres widgets pour cohérence de synchronisation).
 async function refreshProjectDropdownFromProjectsTable() {
   try {
     if (!grist?.docApi || typeof grist.docApi.fetchTable !== "function") return;
@@ -414,8 +386,8 @@ async function refreshProjectDropdownFromProjectsTable() {
     _projectsData = ids
       .map((id, i) => ({
         id: Number(id),
-        number: String(numbers[i] || '').trim(),
-        name: String(names[i] || '').trim(),
+        number: String(numbers[i] || "").trim(),
+        name: String(names[i] || "").trim()
       }))
       .filter((p) => p.id > 0 && p.name)
       .sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base", numeric: true }));
@@ -435,9 +407,6 @@ window.addEventListener("focus", () => {
 
 initGrist(() => {
   if (!selectedProject) selectedProject = firstDropdown.value.trim();
-  // Ne pas reconstruire le dropdown depuis les records (liste filtrée) :
-  // la liste vient de refreshProjectDropdownFromProjectsTable().
-  // On met juste à jour l'affichage des données.
   if (firstDropdown.options.length <= 1) {
     void refreshProjectDropdownFromProjectsTable().then(() => refreshUI());
   } else {
@@ -446,14 +415,12 @@ initGrist(() => {
 });
 
 function buildRowsForTable(listRows, allRows = listRows) {
-  // Si un document est sélectionné => pas de regroupement
   if (selectedDocName) {
     const sorted = listRows.slice().sort((a, b) => getRecuMs(b) - getRecuMs(a));
     return sorted.map(rowToRenderObj);
   }
 
-  // Sinon (Tous) => regrouper par document
-  const groups = new Map(); // key -> {name,n,label,sortN,rows:[]}
+  const groups = new Map();
   const totalCountsByGroup = new Map();
 
   for (const rec of allRows) {
@@ -464,24 +431,21 @@ function buildRowsForTable(listRows, allRows = listRows) {
 
   for (const rec of listRows) {
     const p = getDocParts(rec);
-    const key = JSON.stringify({ name: p.name, n: p.n }); // stable
+    const key = JSON.stringify({ name: p.name, n: p.n });
     if (!groups.has(key)) {
       groups.set(key, { ...p, rows: [], totalCount: totalCountsByGroup.get(key) || 0 });
     }
     groups.get(key).rows.push(rec);
   }
 
-  // trier les groupes comme ta dropdown (numero asc, null à la fin, puis nom)
   const groupArr = Array.from(groups.values());
   groupArr.sort((a, b) => {
     if (a.sortN !== b.sortN) return a.sortN - b.sortN;
     return a.name.localeCompare(b.name, "fr", { sensitivity: "base" });
   });
 
-  // construire le tableau final : header groupe + ses lignes
   const out = [];
   for (const g of groupArr) {
-    // tri interne des lignes du groupe (reçu récent -> ancien)
     g.rows.sort((a, b) => getRecuMs(b) - getRecuMs(a));
 
     out.push({
@@ -498,31 +462,36 @@ function buildRowsForTable(listRows, allRows = listRows) {
   return out;
 }
 
-// Synchronisation inter-widgets : réagit quand un autre widget change le projet sélectionné
 (function () {
   if (window.__lpStorageSyncAdded_enAttente) return;
   window.__lpStorageSyncAdded_enAttente = true;
-  var _nk = function (s) {
-    return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
+  const normalizeKey = function (s) {
+    return String(s ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, " ");
   };
-  window.addEventListener('storage', function (event) {
-    var dropdown = document.getElementById('firstColumnDropdown');
+
+  window.addEventListener("storage", function (event) {
+    const dropdown = document.getElementById("firstColumnDropdown");
     if (!dropdown) return;
-    if (event.key === 'grist.selected-project-id' && event.newValue) {
-      var idStr = String(event.newValue).trim();
-      var match = Array.from(dropdown.options).find(function (o) { return o.dataset.projectId === idStr; });
+    if (event.key === "grist.selected-project-id" && event.newValue) {
+      const idStr = String(event.newValue).trim();
+      const match = Array.from(dropdown.options).find((o) => o.dataset.projectId === idStr);
       if (match && dropdown.value !== match.value) {
         dropdown.value = match.value;
-        dropdown.dispatchEvent(new Event('change'));
+        dropdown.dispatchEvent(new Event("change"));
       }
       return;
     }
-    if (event.key !== 'grist.selected-project' || !event.newValue) return;
-    var newProject = String(event.newValue).trim();
-    var match = Array.from(dropdown.options).find(function (o) { return _nk(o.value) === _nk(newProject); });
+    if (event.key !== "grist.selected-project" || !event.newValue) return;
+    const newProject = String(event.newValue).trim();
+    const match = Array.from(dropdown.options).find((o) => normalizeKey(o.value) === normalizeKey(newProject));
     if (match && dropdown.value !== match.value) {
       dropdown.value = match.value;
-      dropdown.dispatchEvent(new Event('change'));
+      dropdown.dispatchEvent(new Event("change"));
     }
   });
 })();
