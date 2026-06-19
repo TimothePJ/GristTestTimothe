@@ -64,22 +64,26 @@ function getRowId(rec) {
 function parseMaybeDate(v) {
   if (!v) return null;
 
-  if (v instanceof Date && !isNaN(v.getTime())) return v;
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return v.getFullYear() === 1900 && v.getMonth() === 0 && v.getDate() === 1 ? null : v;
+  }
 
   // format Grist ["D", seconds]
   if (Array.isArray(v) && (v[0] === "D" || v[0] === "d") && typeof v[1] === "number") {
     const d = new Date(v[1] * 1000);
-    return isNaN(d.getTime()) ? null : d;
+    if (isNaN(d.getTime())) return null;
+    return d.getFullYear() === 1900 && d.getMonth() === 0 && d.getDate() === 1 ? null : d;
   }
 
   if (typeof v === "string") {
     const s = v.trim();
-    if (!s || s === "-" || s.startsWith("1900-01-01")) return null;
+    if (!s || s === "-" || s.startsWith("1900-01-01") || s === "01/01/1900") return null;
 
     // dd/mm/yyyy
     const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s);
     if (m) {
       const dd = Number(m[1]), mm = Number(m[2]), yyyy = Number(m[3]);
+      if (yyyy === 1900 && mm === 1 && dd === 1) return null;
       const d = new Date(Date.UTC(yyyy, mm - 1, dd));
       return isNaN(d.getTime()) ? null : d;
     }
@@ -98,7 +102,10 @@ function formatDateFR(d) {
 
 function getRecuText(rec) {
   const rs = (rec?.RecuString != null) ? String(rec.RecuString).trim() : "";
-  if (rs && rs !== "-") return rs;
+  if (rs && rs !== "-") {
+    const parsed = parseMaybeDate(rs);
+    return parsed ? formatDateFR(parsed) : "-";
+  }
 
   const d = parseMaybeDate(rec?.Recu);
   return formatDateFR(d);
