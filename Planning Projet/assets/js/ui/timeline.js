@@ -1572,7 +1572,7 @@ async function handlePlanningRowInitializeFromMenu() {
   if (!planningInitializeHandler || !activeRetardJustificationContext) return;
   const rowId = Number(activeRetardJustificationContext.rowId);
   if (!Number.isInteger(rowId) || rowId <= 0) return;
-  if (!window.confirm("Initialiser cette ligne ? Les dates, durées et la ligne planning seront effacées.")) return;
+  if (!window.confirm("Initialiser cette ligne ? Les dates et la ligne planning seront effacées, les durées seront mises à 0.")) return;
   await planningInitializeHandler({ rowId });
 }
 

@@ -2980,11 +2980,11 @@ export async function initializePlanningRow(rowId) {
 
   const updates = {
     [columns.dateLimite || "Date_limite"]: null,
-    [columns.duree1 || "Duree_1"]: null,
+    [columns.duree1 || "Duree_1"]: 0,
     [columns.diffCoffrage || "Diff_coffrage"]: null,
-    [columns.duree2 || "Duree_2"]: null,
+    [columns.duree2 || "Duree_2"]: 0,
     [columns.diffArmature || "Diff_armature"]: null,
-    [columns.duree3 || "Duree_3"]: null,
+    [columns.duree3 || "Duree_3"]: 0,
     [columns.demarragesTravaux || "Demarrages_travaux"]: null,
     [columns.lignePlanning || "Ligne_planning"]: null,
   };

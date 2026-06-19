@@ -1215,6 +1215,11 @@ body.planning-row-dragging {
   font-weight: 600;
 }
 
+#planningTimeline .group-row-grid.row-realise-complete .cell-realise {
+  color: #15803d !important;
+  font-weight: 700;
+}
+
 #planningTimeline .group-row-grid.row-realise-complete.row-type-armature .cell-realise {
   color: #22c55e !important;
   font-weight: 700;
