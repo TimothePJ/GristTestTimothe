@@ -1,8 +1,16 @@
 let selectedProject = "";
 let selectedDocName = "";
 let selectedDocNumber = null;
+let selectedDocType = null;
+let selectedDocZone = null;
+let selectedTypeValue = "";
+let selectedZoneValue = "__ALL_ZONES__";
+
 const SHARED_PROJECT_STORAGE_KEY = "grist.selected-project";
 const SHARED_PROJECT_ID_STORAGE_KEY = "grist.selected-project-id";
+const ALL_ZONES_VALUE = "__ALL_ZONES__";
+const NO_ZONE_VALUE = "__NO_ZONE__";
+
 let _projectsData = [];
 
 function readSharedProjectId() {
@@ -19,6 +27,8 @@ let sliceFilter = "ALL";
 
 const firstDropdown = document.getElementById("firstColumnDropdown");
 const secondDropdown = document.getElementById("secondColumnListbox");
+const typeDropdown = document.getElementById("thirdColumnDropdown");
+const zoneDropdown = document.getElementById("zoneDropdown");
 const pieCanvas = document.getElementById("pieCanvas");
 const legend = document.getElementById("legend");
 
@@ -48,10 +58,93 @@ function saveSharedProjectSelection(projectName = "") {
   }
 }
 
+function normalizeText(value) {
+  return String(value ?? "").trim();
+}
+
+function normalizeFilterKey(value) {
+  return normalizeText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function normalizeTypeDocument(value) {
+  return normalizeText(value);
+}
+
+function normalizeZoneValue(value) {
+  return normalizeText(value);
+}
+
+function formatZoneLabel(value) {
+  return normalizeZoneValue(value) || "Sans zone";
+}
+
+function getZoneOptionValue(zoneValue) {
+  return normalizeZoneValue(zoneValue) || NO_ZONE_VALUE;
+}
+
+function normalizeZoneSelection(value) {
+  const raw = normalizeText(value);
+  if (!raw || raw === ALL_ZONES_VALUE) return ALL_ZONES_VALUE;
+  if (raw === NO_ZONE_VALUE) return NO_ZONE_VALUE;
+  return normalizeZoneValue(raw);
+}
+
+function isAllZoneSelection(value) {
+  return normalizeZoneSelection(value) === ALL_ZONES_VALUE;
+}
+
+function formatZoneSelectionLabel(value) {
+  const selection = normalizeZoneSelection(value);
+  return selection === NO_ZONE_VALUE ? "Sans zone" : formatZoneLabel(selection);
+}
+
+function compareTextFr(left, right) {
+  return normalizeText(left).localeCompare(normalizeText(right), "fr", {
+    sensitivity: "base",
+    numeric: true
+  });
+}
+
+function compareZoneValues(left, right) {
+  const leftZone = normalizeZoneValue(left);
+  const rightZone = normalizeZoneValue(right);
+  const leftEmpty = leftZone ? 0 : 1;
+  const rightEmpty = rightZone ? 0 : 1;
+  if (leftEmpty !== rightEmpty) return leftEmpty - rightEmpty;
+  return compareTextFr(formatZoneLabel(leftZone), formatZoneLabel(rightZone));
+}
+
+function resetSelectedDocument() {
+  selectedDocName = "";
+  selectedDocNumber = null;
+  selectedDocType = null;
+  selectedDocZone = null;
+}
+
 function setSecondDropdownDisabled(disabled) {
   secondDropdown.disabled = disabled;
   secondDropdown.innerHTML = `<option value="ALL">Tous</option>`;
   secondDropdown.value = "ALL";
+}
+
+function resetTypeDropdown(disabled = true) {
+  if (!typeDropdown) return;
+  typeDropdown.innerHTML = `<option value="">Tous les types</option>`;
+  typeDropdown.value = "";
+  typeDropdown.disabled = disabled;
+  selectedTypeValue = "";
+}
+
+function resetZoneDropdown(disabled = true) {
+  if (!zoneDropdown) return;
+  zoneDropdown.innerHTML = `<option value="${ALL_ZONES_VALUE}">Toutes les zones</option>`;
+  zoneDropdown.value = ALL_ZONES_VALUE;
+  zoneDropdown.disabled = disabled;
+  selectedZoneValue = ALL_ZONES_VALUE;
 }
 
 function populateFirstColumnDropdown(projects) {
@@ -85,43 +178,181 @@ function populateFirstColumnDropdown(projects) {
   selectedProject = firstDropdown.value || selectedProject || "";
 }
 
-function buildDocumentOptionsForProject(project) {
-  const map = new Map();
+function getProjectRows(project) {
+  const projectKey = normalizeFilterKey(project);
+  if (!projectKey) return [];
 
-  (App.records || []).forEach((rec) => {
-    if (!rec) return;
-    if (String(rec.NomProjet || "").trim() !== project) return;
+  return (App.records || []).filter((rec) =>
+    normalizeFilterKey(rec?.NomProjet) === projectKey
+  );
+}
 
-    const name = String(rec.NomDocument || "").trim();
-    if (!name) return;
-
-    const num = normalizeNumero(rec.NumeroDocument);
-    if (!map.has(name)) map.set(name, new Set());
-    map.get(name).add(num);
+function collectTypesForProject(project) {
+  const typesByKey = new Map();
+  getProjectRows(project).forEach((rec) => {
+    const type = normalizeTypeDocument(rec?.Type_document);
+    const key = normalizeFilterKey(type);
+    if (!key || typesByKey.has(key)) return;
+    typesByKey.set(key, type);
   });
 
-  const opts = [];
-  for (const [name, setNums] of map.entries()) {
-    const nums = Array.from(setNums);
-    nums.sort((a, b) => {
-      if (a == null && b == null) return 0;
-      if (a == null) return 1;
-      if (b == null) return -1;
-      return a - b;
-    });
+  return Array.from(typesByKey.values()).sort(compareTextFr);
+}
 
-    nums.forEach((n) => {
-      const value = JSON.stringify({ name, n: (n == null ? null : Number(n)) });
-      const label = makeDocLabel(name, n);
-      opts.push({ value, label, name, n });
-    });
+function populateTypeDropdown(project, preferredValue = selectedTypeValue) {
+  if (!typeDropdown) return;
+
+  typeDropdown.innerHTML = `<option value="">Tous les types</option>`;
+  const projectKey = normalizeFilterKey(project);
+  if (!projectKey) {
+    typeDropdown.value = "";
+    typeDropdown.disabled = true;
+    selectedTypeValue = "";
+    return;
   }
 
+  const types = collectTypesForProject(project);
+  const typesByKey = new Map();
+  types.forEach((type) => {
+    const option = document.createElement("option");
+    option.value = type;
+    option.textContent = type;
+    typeDropdown.appendChild(option);
+    typesByKey.set(normalizeFilterKey(type), type);
+  });
+
+  const preferredKey = normalizeFilterKey(preferredValue);
+  typeDropdown.value = preferredKey ? (typesByKey.get(preferredKey) || "") : "";
+  selectedTypeValue = typeDropdown.value;
+  typeDropdown.disabled = false;
+}
+
+function matchesTypeFilter(rec, typeValue = selectedTypeValue) {
+  const type = normalizeTypeDocument(typeValue);
+  if (!type) return true;
+  return normalizeFilterKey(rec?.Type_document) === normalizeFilterKey(type);
+}
+
+function collectZonesForProject(project, typeValue = selectedTypeValue) {
+  const zonesByKey = new Map();
+  getProjectRows(project).forEach((rec) => {
+    if (!matchesTypeFilter(rec, typeValue)) return;
+    const zone = normalizeZoneValue(rec?.Zone);
+    const key = zone ? normalizeFilterKey(zone) : NO_ZONE_VALUE;
+    if (zonesByKey.has(key)) return;
+    zonesByKey.set(key, zone);
+  });
+
+  return Array.from(zonesByKey.values()).sort(compareZoneValues);
+}
+
+function populateZoneDropdown(project, preferredValue = selectedZoneValue) {
+  if (!zoneDropdown) return;
+
+  zoneDropdown.innerHTML = `<option value="${ALL_ZONES_VALUE}">Toutes les zones</option>`;
+  const projectKey = normalizeFilterKey(project);
+  if (!projectKey) {
+    zoneDropdown.value = ALL_ZONES_VALUE;
+    zoneDropdown.disabled = true;
+    selectedZoneValue = ALL_ZONES_VALUE;
+    return;
+  }
+
+  const zones = collectZonesForProject(project, selectedTypeValue);
+  zones.forEach((zone) => {
+    const option = document.createElement("option");
+    option.value = getZoneOptionValue(zone);
+    option.textContent = formatZoneLabel(zone);
+    zoneDropdown.appendChild(option);
+  });
+
+  const desiredValue = normalizeZoneSelection(preferredValue);
+  const availableValues = new Set(zones.map((zone) => getZoneOptionValue(zone)));
+  zoneDropdown.value =
+    desiredValue === ALL_ZONES_VALUE || availableValues.has(desiredValue)
+      ? desiredValue
+      : ALL_ZONES_VALUE;
+  selectedZoneValue = zoneDropdown.value || ALL_ZONES_VALUE;
+  zoneDropdown.disabled = false;
+}
+
+function matchesZoneFilter(rec, zoneValue = selectedZoneValue) {
+  const selection = normalizeZoneSelection(zoneValue);
+  if (selection === ALL_ZONES_VALUE) return true;
+
+  const recordZone = normalizeZoneValue(rec?.Zone);
+  if (selection === NO_ZONE_VALUE) return !recordZone;
+  return normalizeFilterKey(recordZone) === normalizeFilterKey(selection);
+}
+
+function buildDocumentOptionValue({ name = "", n = null, type = "", zone = "" } = {}) {
+  return JSON.stringify({
+    name: normalizeText(name),
+    n: n == null ? null : Number(n),
+    type: normalizeTypeDocument(type),
+    zone: normalizeZoneValue(zone)
+  });
+}
+
+function buildDocumentOptionsForProject(project) {
+  const docsByKey = new Map();
+
+  getProjectRows(project).forEach((rec) => {
+    if (!matchesTypeFilter(rec)) return;
+    if (!matchesZoneFilter(rec)) return;
+
+    const name = normalizeText(rec?.NomDocument);
+    if (!name) return;
+
+    const n = normalizeNumero(rec?.NumeroDocument);
+    const type = normalizeTypeDocument(rec?.Type_document);
+    const zone = normalizeZoneValue(rec?.Zone);
+    const key = [
+      normalizeFilterKey(type),
+      normalizeFilterKey(zone),
+      n == null ? "" : String(n),
+      normalizeFilterKey(name)
+    ].join("||");
+
+    if (docsByKey.has(key)) return;
+    docsByKey.set(key, {
+      value: buildDocumentOptionValue({ name, n, type, zone }),
+      label: makeDocLabel(name, n),
+      identityKey: `${n == null ? "" : String(n)}||${normalizeFilterKey(name)}`,
+      name,
+      n,
+      type,
+      zone
+    });
+  });
+
+  const opts = Array.from(docsByKey.values());
+  const identityCounts = new Map();
+  opts.forEach((entry) => {
+    identityCounts.set(entry.identityKey, (identityCounts.get(entry.identityKey) || 0) + 1);
+  });
+
+  opts.forEach((entry) => {
+    if ((identityCounts.get(entry.identityKey) || 0) <= 1) return;
+    const context = [entry.type || "Sans type", formatZoneLabel(entry.zone)].filter(Boolean).join(" / ");
+    entry.label = `${entry.label} - ${context}`;
+  });
+
   opts.sort((a, b) => {
+    if (!selectedTypeValue) {
+      const typeCompare = compareTextFr(a.type, b.type);
+      if (typeCompare !== 0) return typeCompare;
+    }
+
+    if (isAllZoneSelection(selectedZoneValue)) {
+      const zoneCompare = compareZoneValues(a.zone, b.zone);
+      if (zoneCompare !== 0) return zoneCompare;
+    }
+
     const an = a.n == null ? Infinity : a.n;
     const bn = b.n == null ? Infinity : b.n;
     if (an !== bn) return an - bn;
-    return a.name.localeCompare(b.name, "fr", { sensitivity: "base" });
+    return compareTextFr(a.name, b.name);
   });
 
   return opts;
@@ -147,41 +378,75 @@ function populateSecondColumnListbox(project) {
 function matchesSelectedDocument(rec) {
   if (!selectedDocName) return true;
 
-  const recName = String(rec.NomDocument || "").trim();
-  if (recName !== selectedDocName) return false;
+  const recName = normalizeText(rec?.NomDocument);
+  if (normalizeFilterKey(recName) !== normalizeFilterKey(selectedDocName)) return false;
 
-  const recNum = normalizeNumero(rec.NumeroDocument);
-  return (recNum == null && selectedDocNumber == null) || (recNum === selectedDocNumber);
+  const recNum = normalizeNumero(rec?.NumeroDocument);
+  if (!((recNum == null && selectedDocNumber == null) || (recNum === selectedDocNumber))) return false;
+
+  if (selectedDocType !== null && normalizeFilterKey(rec?.Type_document) !== normalizeFilterKey(selectedDocType)) {
+    return false;
+  }
+
+  if (selectedDocZone !== null && normalizeFilterKey(rec?.Zone) !== normalizeFilterKey(selectedDocZone)) {
+    return false;
+  }
+
+  return true;
 }
 
-function makeGroupLabel(name, num) {
+function makeGroupLabel(name, num, type = "", zone = "") {
   const n = normalizeNumero(num);
-  const base = String(name || "").trim() || "Sans document";
-  return (n == null) ? base : `${n} ${base}`;
+  const baseName = normalizeText(name) || "Sans document";
+  const base = (n == null) ? baseName : `${n} ${baseName}`;
+  const suffix = [];
+
+  if (!selectedTypeValue && normalizeTypeDocument(type)) {
+    suffix.push(normalizeTypeDocument(type));
+  }
+
+  if (isAllZoneSelection(selectedZoneValue)) {
+    suffix.push(formatZoneLabel(zone));
+  }
+
+  return suffix.length ? `${base} - ${suffix.join(" / ")}` : base;
 }
 
 function getDocParts(rec) {
-  const nameRaw = String(rec.NomDocument || "").trim();
+  const nameRaw = normalizeText(rec?.NomDocument);
   const name = nameRaw ? nameRaw : "Sans document";
-  const n = normalizeNumero(rec.NumeroDocument);
+  const n = normalizeNumero(rec?.NumeroDocument);
+  const type = normalizeTypeDocument(rec?.Type_document);
+  const zone = normalizeZoneValue(rec?.Zone);
 
   return {
     name,
     n,
-    label: makeGroupLabel(name, rec.NumeroDocument),
+    type,
+    zone,
+    label: makeGroupLabel(name, rec?.NumeroDocument, type, zone),
     sortN: (n == null ? Infinity : n)
   };
+}
+
+function getDocGroupKey(parts) {
+  return [
+    normalizeFilterKey(parts.type),
+    normalizeFilterKey(parts.zone),
+    parts.n == null ? "" : String(parts.n),
+    normalizeFilterKey(parts.name)
+  ].join("||");
 }
 
 function rowToRenderObj(rec) {
   return {
     type: "row",
     rowId: getRowId(rec),
-    emetteur: String(rec.Emetteur || "-"),
-    reference: String(rec.Reference || "-"),
-    indice: String(rec.Indice || "-"),
+    emetteur: String(rec?.Emetteur || "-"),
+    reference: String(rec?.Reference || "-"),
+    indice: String(rec?.Indice || "-"),
     recu: getRecuText(rec),
-    observation: String((rec.DescriptionObservations ?? rec.DescriptionObservationss ?? "-")),
+    observation: String((rec?.DescriptionObservations ?? rec?.DescriptionObservationss ?? "-")),
     bloquant: !!getBloquant(rec)
   };
 }
@@ -189,9 +454,10 @@ function rowToRenderObj(rec) {
 function getBaseRows() {
   if (!selectedProject) return [];
 
-  return (App.records || []).filter((rec) => {
+  return getProjectRows(selectedProject).filter((rec) => {
     if (!rec) return false;
-    if (String(rec.NomProjet || "").trim() !== selectedProject) return false;
+    if (!matchesTypeFilter(rec)) return false;
+    if (!matchesZoneFilter(rec)) return false;
     if (!matchesSelectedDocument(rec)) return false;
     return true;
   });
@@ -231,9 +497,21 @@ function computeCounts(rows) {
 
 function chartLabel() {
   if (!selectedProject) return "";
-  if (!selectedDocName) return `${selectedProject} - Tous`;
-  const docLabel = makeDocLabel(selectedDocName, selectedDocNumber);
-  return `${selectedProject} - ${docLabel}`;
+
+  const parts = [
+    selectedProject,
+    selectedDocName ? makeDocLabel(selectedDocName, selectedDocNumber) : "Tous documents"
+  ];
+
+  const typeForLabel = selectedTypeValue || (selectedDocName && selectedDocType !== null ? selectedDocType : "");
+  if (typeForLabel) parts.push(typeForLabel);
+
+  const zoneForLabel = !isAllZoneSelection(selectedZoneValue)
+    ? selectedZoneValue
+    : (selectedDocName && selectedDocZone !== null ? getZoneOptionValue(selectedDocZone) : ALL_ZONES_VALUE);
+  if (!isAllZoneSelection(zoneForLabel)) parts.push(formatZoneSelectionLabel(zoneForLabel));
+
+  return parts.join(" - ");
 }
 
 function tableTitle() {
@@ -251,10 +529,13 @@ function refreshUI() {
 
   if (!selectedProject || !projects.includes(selectedProject)) {
     selectedProject = "";
-    selectedDocName = "";
-    selectedDocNumber = null;
-    sliceFilter = "ALL";
+    resetSelectedDocument();
+    selectedTypeValue = "";
+    selectedZoneValue = ALL_ZONES_VALUE;
+    resetTypeDropdown(true);
+    resetZoneDropdown(true);
     setSecondDropdownDisabled(true);
+    sliceFilter = "ALL";
 
     renderPieChart({
       project: "",
@@ -268,19 +549,26 @@ function refreshUI() {
     return;
   }
 
+  populateTypeDropdown(selectedProject, selectedTypeValue);
+  populateZoneDropdown(selectedProject, selectedZoneValue);
+
   secondDropdown.disabled = false;
   populateSecondColumnListbox(selectedProject);
 
   const desiredValue = selectedDocName
-    ? JSON.stringify({ name: selectedDocName, n: selectedDocNumber })
+    ? buildDocumentOptionValue({
+        name: selectedDocName,
+        n: selectedDocNumber,
+        type: selectedDocType ?? "",
+        zone: selectedDocZone ?? ""
+      })
     : "ALL";
 
   if ([...secondDropdown.options].some((o) => o.value === desiredValue)) {
     secondDropdown.value = desiredValue;
   } else {
     secondDropdown.value = "ALL";
-    selectedDocName = "";
-    selectedDocNumber = null;
+    resetSelectedDocument();
   }
 
   const baseRows = getBaseRows();
@@ -307,19 +595,25 @@ function refreshUI() {
 firstDropdown.addEventListener("change", () => {
   selectedProject = firstDropdown.value.trim();
   saveSharedProjectSelection(selectedProject);
-  selectedDocName = "";
-  selectedDocNumber = null;
+  resetSelectedDocument();
+  selectedTypeValue = "";
+  selectedZoneValue = ALL_ZONES_VALUE;
   sliceFilter = "ALL";
+  refreshUI();
+});
 
-  if (!selectedProject) {
-    setSecondDropdownDisabled(true);
-    refreshUI();
-    return;
-  }
+typeDropdown?.addEventListener("change", () => {
+  selectedTypeValue = normalizeTypeDocument(typeDropdown.value);
+  selectedZoneValue = ALL_ZONES_VALUE;
+  resetSelectedDocument();
+  sliceFilter = "ALL";
+  refreshUI();
+});
 
-  secondDropdown.disabled = false;
-  populateSecondColumnListbox(selectedProject);
-  secondDropdown.value = "ALL";
+zoneDropdown?.addEventListener("change", () => {
+  selectedZoneValue = normalizeZoneSelection(zoneDropdown.value);
+  resetSelectedDocument();
+  sliceFilter = "ALL";
   refreshUI();
 });
 
@@ -327,8 +621,7 @@ secondDropdown.addEventListener("change", () => {
   const val = secondDropdown.value;
 
   if (val === "ALL" || !val) {
-    selectedDocName = "";
-    selectedDocNumber = null;
+    resetSelectedDocument();
     sliceFilter = "ALL";
     refreshUI();
     return;
@@ -336,11 +629,12 @@ secondDropdown.addEventListener("change", () => {
 
   try {
     const parsed = JSON.parse(val);
-    selectedDocName = parsed.name || "";
+    selectedDocName = normalizeText(parsed.name);
     selectedDocNumber = parsed.n == null ? null : Number(parsed.n);
+    selectedDocType = parsed.type == null ? null : normalizeTypeDocument(parsed.type);
+    selectedDocZone = parsed.zone == null ? null : normalizeZoneValue(parsed.zone);
   } catch {
-    selectedDocName = "";
-    selectedDocNumber = null;
+    resetSelectedDocument();
     secondDropdown.value = "ALL";
   }
 
@@ -375,6 +669,8 @@ document.getElementById("detailsTbody").addEventListener("click", async (e) => {
 });
 
 setSecondDropdownDisabled(true);
+resetTypeDropdown(true);
+resetZoneDropdown(true);
 
 async function refreshProjectDropdownFromProjectsTable() {
   try {
@@ -425,13 +721,13 @@ function buildRowsForTable(listRows, allRows = listRows) {
 
   for (const rec of allRows) {
     const p = getDocParts(rec);
-    const key = JSON.stringify({ name: p.name, n: p.n });
+    const key = getDocGroupKey(p);
     totalCountsByGroup.set(key, (totalCountsByGroup.get(key) || 0) + 1);
   }
 
   for (const rec of listRows) {
     const p = getDocParts(rec);
-    const key = JSON.stringify({ name: p.name, n: p.n });
+    const key = getDocGroupKey(p);
     if (!groups.has(key)) {
       groups.set(key, { ...p, rows: [], totalCount: totalCountsByGroup.get(key) || 0 });
     }
@@ -440,8 +736,18 @@ function buildRowsForTable(listRows, allRows = listRows) {
 
   const groupArr = Array.from(groups.values());
   groupArr.sort((a, b) => {
+    if (!selectedTypeValue) {
+      const typeCompare = compareTextFr(a.type, b.type);
+      if (typeCompare !== 0) return typeCompare;
+    }
+
+    if (isAllZoneSelection(selectedZoneValue)) {
+      const zoneCompare = compareZoneValues(a.zone, b.zone);
+      if (zoneCompare !== 0) return zoneCompare;
+    }
+
     if (a.sortN !== b.sortN) return a.sortN - b.sortN;
-    return a.name.localeCompare(b.name, "fr", { sensitivity: "base" });
+    return compareTextFr(a.name, b.name);
   });
 
   const out = [];
