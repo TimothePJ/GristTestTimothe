@@ -15,6 +15,14 @@ const PROJET_TABLE = "Projets2";
 const SHARED_PROJECT_STORAGE_KEY = "grist.selected-project";
 const SHARED_PROJECT_ID_STORAGE_KEY = "grist.selected-project-id";
 let _projectsData = []; // [{id, number, name}]
+const addElementsState = {
+  selectedPlanKeys: new Set(),
+  plansByKey: new Map(),
+  dragActive: false,
+  dragSelectState: true,
+  pointerId: null,
+  suppressNextClick: false,
+};
 
 function readSharedProjectId() {
   try {
@@ -74,7 +82,46 @@ function getDateValue() {
 }
 
 function textValue(value) {
+  if (value && typeof value === "object") {
+    if (typeof value.details === "string") return value.details.trim();
+    if (typeof value.display === "string") return value.display.trim();
+    if (typeof value.label === "string") return value.label.trim();
+    if (typeof value.name === "string") return value.name.trim();
+  }
   return String(value ?? "").trim();
+}
+
+function normalizeCompareValue(value) {
+  return textValue(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function resolveProjectName(value) {
+  const raw = textValue(value);
+  if (!raw) return "";
+
+  const projectById = _projectsData.find((project) => String(project.id) === raw);
+  if (projectById) return projectById.name;
+
+  const projectByName = _projectsData.find(
+    (project) => normalizeCompareValue(project.name) === normalizeCompareValue(raw)
+  );
+  return projectByName ? projectByName.name : raw;
+}
+
+function compareText(left, right) {
+  return textValue(left).localeCompare(textValue(right), "fr", {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function getPlanKey(plan) {
+  return normalizeCompareValue(plan?.NumeroDocument);
 }
 
 /** -------------------------
@@ -101,6 +148,7 @@ function applyFrozenUI(frozen) {
   document.body.classList.toggle("is-frozen", !!frozen);
   $("dateInput").disabled = frozen;
   $("addItem").disabled = frozen;
+  if (frozen) closeAddElementsDialog();
 
   // $("refUp").disabled = frozen;
   // $("refDown").disabled = frozen;
@@ -130,7 +178,10 @@ function getPlanRows() {
     NomDocument: allPlans.NomDocument?.[i],
     Designation: allPlans.Designation?.[i],
     Indice: allPlans.Indice?.[i],
-    Nom_projet: allPlans.Nom_projet?.[i],
+    Type_document: allPlans.Type_document?.[i],
+    Nom_projet: resolveProjectName(allPlans.Nom_projet?.[i]),
+    Zone: allPlans.Zone?.[i],
+    DateDiffusion: allPlans.DateDiffusion?.[i],
   }));
 }
 
@@ -139,14 +190,14 @@ function isNewerPlanIndice(candidate, current) {
 }
 
 function findLatestProjectPlan(projectName, planNumber) {
-  const projectKey = textValue(projectName);
-  const planKey = textValue(planNumber);
+  const projectKey = normalizeCompareValue(projectName);
+  const planKey = normalizeCompareValue(planNumber);
   if (!projectKey || !planKey) return null;
 
   return getPlanRows()
     .filter((plan) =>
-      textValue(plan.Nom_projet) === projectKey &&
-      textValue(plan.NumeroDocument) === planKey &&
+      normalizeCompareValue(plan.Nom_projet) === projectKey &&
+      normalizeCompareValue(plan.NumeroDocument) === planKey &&
       textValue(plan.Indice)
     )
     .reduce((latest, current) => {
@@ -157,9 +208,10 @@ function findLatestProjectPlan(projectName, planNumber) {
 
 function getProjectPlanOptions(projectName) {
   const latestByNumber = new Map();
+  const projectKey = normalizeCompareValue(projectName);
 
   getPlanRows().forEach((plan) => {
-    if (textValue(plan.Nom_projet) !== textValue(projectName)) return;
+    if (normalizeCompareValue(plan.Nom_projet) !== projectKey) return;
     if (!textValue(plan.Indice)) return;
 
     const number = textValue(plan.NumeroDocument);
@@ -172,10 +224,7 @@ function getProjectPlanOptions(projectName) {
   });
 
   return Array.from(latestByNumber.values()).sort((a, b) =>
-    textValue(a.NumeroDocument).localeCompare(textValue(b.NumeroDocument), undefined, {
-      numeric: true,
-      sensitivity: "base",
-    })
+    compareText(a.NumeroDocument, b.NumeroDocument)
   );
 }
 
@@ -187,6 +236,311 @@ function getFullPlanLabel(plan) {
   const number = textValue(plan?.NumeroDocument);
   const name = getPlanDisplayName(plan);
   return name ? `${number} - ${name}` : number;
+}
+
+function getPlanTypeLabel(plan) {
+  return textValue(plan?.Type_document) || "Sans type";
+}
+
+function getPlanZoneLabel(plan) {
+  return textValue(plan?.Zone) || "Sans zone";
+}
+
+function getLatestProjectPlanElements(projectName) {
+  const selectedProjectKey = normalizeCompareValue(projectName);
+  const latestByNumber = new Map();
+
+  getPlanRows().forEach((plan) => {
+    if (normalizeCompareValue(plan.Nom_projet) !== selectedProjectKey) return;
+    if (!textValue(plan.Indice)) return;
+
+    const number = textValue(plan.NumeroDocument);
+    if (!number) return;
+
+    const key = getPlanKey(plan);
+    const current = latestByNumber.get(key);
+    if (!current || isNewerPlanIndice(plan, current)) {
+      latestByNumber.set(key, plan);
+    }
+  });
+
+  return Array.from(latestByNumber.values()).sort((left, right) =>
+    compareText(getPlanTypeLabel(left), getPlanTypeLabel(right)) ||
+    compareText(getPlanZoneLabel(left), getPlanZoneLabel(right)) ||
+    compareText(left.NumeroDocument, right.NumeroDocument) ||
+    compareText(getPlanDisplayName(left), getPlanDisplayName(right))
+  );
+}
+
+function getCurrentBordereauPlanKeys() {
+  return new Set(
+    getCurrentBordereauRecords()
+      .map((record) => normalizeCompareValue(record.N_Plan))
+      .filter(Boolean)
+  );
+}
+
+function resetAddElementsState() {
+  addElementsState.selectedPlanKeys.clear();
+  addElementsState.plansByKey.clear();
+  addElementsState.dragActive = false;
+  addElementsState.dragSelectState = true;
+  addElementsState.pointerId = null;
+  addElementsState.suppressNextClick = false;
+}
+
+function getAddElementsElements() {
+  return {
+    dialog: $("addElementsDialog"),
+    subtitle: $("addElementsSubtitle"),
+    list: $("addElementsList"),
+    status: $("addElementsStatus"),
+    confirmBtn: $("confirmAddElements"),
+  };
+}
+
+function updateAddElementsStatus() {
+  const { status, confirmBtn } = getAddElementsElements();
+  const count = addElementsState.selectedPlanKeys.size;
+  if (status) {
+    status.textContent = count > 0
+      ? `${count} element(s) selectionne(s)`
+      : "Clique ou glisse sur les elements a ajouter.";
+  }
+  if (confirmBtn) confirmBtn.disabled = count === 0;
+}
+
+function getAddElementButtonFromTarget(target) {
+  return target?.closest?.(".add-element-option") || null;
+}
+
+function setAddElementSelected(button, selected) {
+  if (!button || button.disabled) return;
+  const key = button.dataset.planKey;
+  if (!key) return;
+
+  if (selected) {
+    addElementsState.selectedPlanKeys.add(key);
+  } else {
+    addElementsState.selectedPlanKeys.delete(key);
+  }
+
+  const isSelected = addElementsState.selectedPlanKeys.has(key);
+  button.classList.toggle("is-selected", isSelected);
+  button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+  updateAddElementsStatus();
+}
+
+function toggleAddElementSelected(button) {
+  if (!button || button.disabled) return;
+  setAddElementSelected(button, !addElementsState.selectedPlanKeys.has(button.dataset.planKey));
+}
+
+function createAddElementOption(plan, disabled) {
+  const button = document.createElement("button");
+  const key = getPlanKey(plan);
+  button.type = "button";
+  button.className = "add-element-option";
+  button.dataset.planKey = key;
+  button.disabled = disabled;
+  button.setAttribute("aria-pressed", "false");
+
+  const number = document.createElement("span");
+  number.className = "add-element-number";
+  number.textContent = textValue(plan.NumeroDocument);
+  button.appendChild(number);
+
+  const indice = document.createElement("span");
+  indice.className = "add-element-indice";
+  indice.textContent = textValue(plan.Indice) || "-";
+  button.appendChild(indice);
+
+  const designation = document.createElement("span");
+  designation.className = "add-element-designation";
+  designation.textContent = getPlanDisplayName(plan) || "Sans designation";
+  button.appendChild(designation);
+
+  const state = document.createElement("span");
+  state.className = "add-element-state";
+  state.textContent = disabled ? "Deja present" : "Ajouter";
+  button.appendChild(state);
+
+  return button;
+}
+
+function appendAddElementsGroup(parent, title, className) {
+  const section = document.createElement("section");
+  section.className = className;
+
+  const heading = document.createElement(className === "add-elements-type-group" ? "h3" : "h4");
+  heading.textContent = title;
+  section.appendChild(heading);
+  parent.appendChild(section);
+  return section;
+}
+
+function renderAddElementsList(plans, existingKeys) {
+  const { list } = getAddElementsElements();
+  if (!list) return;
+
+  list.innerHTML = "";
+  addElementsState.plansByKey.clear();
+
+  if (!plans.length) {
+    const empty = document.createElement("p");
+    empty.className = "add-elements-empty";
+    empty.textContent = "Aucun element trouve dans la liste de plan pour ce projet.";
+    list.appendChild(empty);
+    updateAddElementsStatus();
+    return;
+  }
+
+  let currentType = "";
+  let currentZone = "";
+  let typeSection = null;
+  let zoneSection = null;
+
+  plans.forEach((plan) => {
+    const key = getPlanKey(plan);
+    if (!key) return;
+    addElementsState.plansByKey.set(key, plan);
+
+    const typeLabel = getPlanTypeLabel(plan);
+    const zoneLabel = getPlanZoneLabel(plan);
+    if (typeLabel !== currentType) {
+      currentType = typeLabel;
+      currentZone = "";
+      typeSection = appendAddElementsGroup(list, typeLabel, "add-elements-type-group");
+    }
+    if (zoneLabel !== currentZone) {
+      currentZone = zoneLabel;
+      zoneSection = appendAddElementsGroup(typeSection, zoneLabel, "add-elements-zone-group");
+    }
+
+    const disabled = existingKeys.has(key);
+    zoneSection.appendChild(createAddElementOption(plan, disabled));
+  });
+
+  updateAddElementsStatus();
+}
+
+function openAddElementsDialog() {
+  const selectedProjectName = getProject();
+  const ref = getRef();
+  const { dialog, subtitle } = getAddElementsElements();
+  if (!dialog) return;
+
+  resetAddElementsState();
+  const plans = getLatestProjectPlanElements(selectedProjectName);
+  const existingKeys = getCurrentBordereauPlanKeys();
+
+  if (subtitle) {
+    subtitle.textContent = `${selectedProjectName} - Bordereau n\u00b0${ref || "1"}`;
+  }
+  renderAddElementsList(plans, existingKeys);
+
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+}
+
+function closeAddElementsDialog() {
+  const { dialog } = getAddElementsElements();
+  if (!dialog) return;
+  if (typeof dialog.close === "function") {
+    dialog.close();
+  } else {
+    dialog.removeAttribute("open");
+  }
+  resetAddElementsState();
+}
+
+function handleAddElementsPointerDown(event) {
+  const button = getAddElementButtonFromTarget(event.target);
+  if (!button || button.disabled) return;
+
+  event.preventDefault();
+  addElementsState.dragActive = true;
+  addElementsState.pointerId = event.pointerId;
+  addElementsState.dragSelectState = !addElementsState.selectedPlanKeys.has(button.dataset.planKey);
+  addElementsState.suppressNextClick = true;
+  setAddElementSelected(button, addElementsState.dragSelectState);
+}
+
+function handleAddElementsPointerMove(event) {
+  if (!addElementsState.dragActive || addElementsState.pointerId !== event.pointerId) return;
+  const target = document.elementFromPoint(event.clientX, event.clientY);
+  const button = getAddElementButtonFromTarget(target);
+  if (!button || button.disabled) return;
+  event.preventDefault();
+  setAddElementSelected(button, addElementsState.dragSelectState);
+}
+
+function handleAddElementsPointerUp(event) {
+  if (!addElementsState.dragActive || addElementsState.pointerId !== event.pointerId) return;
+  addElementsState.dragActive = false;
+  addElementsState.pointerId = null;
+  window.setTimeout(() => {
+    addElementsState.suppressNextClick = false;
+  }, 0);
+}
+
+async function applyUserActionsInBatches(actions, batchSize = 200) {
+  for (let i = 0; i < actions.length; i += batchSize) {
+    await grist.docApi.applyUserActions(actions.slice(i, i + batchSize));
+  }
+}
+
+async function addSelectedElementsToBordereau() {
+  if (isFrozen()) return;
+
+  const selectedProjectName = getProject();
+  const date = getDateValue();
+  const ref = getRef() || "1";
+  const selectedPlans = Array.from(addElementsState.selectedPlanKeys)
+    .map((key) => addElementsState.plansByKey.get(key))
+    .filter(Boolean);
+
+  if (selectedPlans.length === 0) return;
+
+  const existingKeys = getCurrentBordereauPlanKeys();
+  const actions = selectedPlans
+    .filter((plan) => !existingKeys.has(getPlanKey(plan)))
+    .map((plan) => [
+      "AddRecord",
+      BORDEREAU_TABLE,
+      null,
+      {
+        Projet: selectedProjectName,
+        Ref: Number(ref),
+        Date_Bordereau: date,
+        Envoye: false,
+        N_Plan: textValue(plan.NumeroDocument),
+        Indice: textValue(plan.Indice),
+        Designation: getPlanDisplayName(plan),
+      },
+    ]);
+
+  if (actions.length === 0) {
+    closeAddElementsDialog();
+    return;
+  }
+
+  const { confirmBtn, status } = getAddElementsElements();
+  if (confirmBtn) confirmBtn.disabled = true;
+  if (status) status.textContent = "Ajout en cours...";
+
+  try {
+    await applyUserActionsInBatches(actions);
+    closeAddElementsDialog();
+  } catch (error) {
+    console.error("Erreur lors de l'ajout des elements au bordereau :", error);
+    if (status) status.textContent = "Erreur lors de l'ajout.";
+    if (confirmBtn) confirmBtn.disabled = false;
+    alert("Erreur lors de l'ajout des elements au bordereau.");
+  }
 }
 
 function setPlanSelectLabels(select, mode) {
@@ -590,21 +944,28 @@ $("addItem").addEventListener("click", async () => {
   }
 
   const ref = getRef() || "1";
-
-  await grist.docApi.applyUserActions([
-    [
-      "AddRecord",
-      BORDEREAU_TABLE,
-      null,
-      {
-        Projet: selectedProjectName,
-        Ref: Number(ref),
-        Date_Bordereau: date,
-        Envoye: false, // défaut
-      },
-    ],
-  ]);
+  setRef(ref);
+  openAddElementsDialog();
 });
+
+$("closeAddElementsDialog")?.addEventListener("click", closeAddElementsDialog);
+$("cancelAddElements")?.addEventListener("click", closeAddElementsDialog);
+$("confirmAddElements")?.addEventListener("click", addSelectedElementsToBordereau);
+$("addElementsDialog")?.addEventListener("close", resetAddElementsState);
+$("addElementsList")?.addEventListener("pointerdown", handleAddElementsPointerDown);
+$("addElementsList")?.addEventListener("click", (event) => {
+  const button = getAddElementButtonFromTarget(event.target);
+  if (!button || button.disabled) return;
+  if (addElementsState.suppressNextClick) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+  toggleAddElementSelected(button);
+});
+document.addEventListener("pointermove", handleAddElementsPointerMove, true);
+document.addEventListener("pointerup", handleAddElementsPointerUp, true);
+document.addEventListener("pointercancel", handleAddElementsPointerUp, true);
 
 /** -------------------------
  *  Table events (change / delete / dblclick)

@@ -45,7 +45,7 @@
         <input type="checkbox" id="sentCheckbox">
       </label>
 
-      <button id="addItem" type="button">Ajouter un &eacute;l&eacute;ment</button>
+      <button id="addItem" type="button">Ajouter des &eacute;l&eacute;ments</button>
       <button id="generatePdf" type="button">G&eacute;n&eacute;rer le bordereau</button>
     </div>
   </div>
@@ -64,6 +64,28 @@
       <tbody></tbody>
     </table>
   </main>
+
+  <dialog id="addElementsDialog" class="add-elements-dialog">
+    <form method="dialog" class="add-elements-panel">
+      <header class="add-elements-header">
+        <div>
+          <h2>Ajouter des &eacute;l&eacute;ments</h2>
+          <p id="addElementsSubtitle"></p>
+        </div>
+        <button id="closeAddElementsDialog" class="dialog-icon-button" type="button" aria-label="Fermer">x</button>
+      </header>
+
+      <div id="addElementsList" class="add-elements-list"></div>
+
+      <footer class="add-elements-footer">
+        <p id="addElementsStatus" aria-live="polite"></p>
+        <div class="add-elements-actions">
+          <button id="cancelAddElements" type="button" class="secondary-button">Annuler</button>
+          <button id="confirmAddElements" type="button">Ajouter la s&eacute;lection</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
 
   <script src="bordereau.js" defer></script>
 </body>

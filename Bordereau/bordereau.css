@@ -318,6 +318,214 @@ button:hover:not(:disabled) {
   text-align: center;
 }
 
+.add-elements-dialog {
+  width: min(920px, calc(100vw - 28px));
+  max-height: min(760px, calc(100vh - 28px));
+  padding: 0;
+  border: 1px solid var(--vc-line);
+  border-radius: 8px;
+  background: var(--vc-panel);
+  color: var(--vc-text);
+  box-shadow: 0 24px 60px rgba(18, 37, 63, 0.24);
+}
+
+.add-elements-dialog::backdrop {
+  background: rgba(15, 32, 52, 0.38);
+}
+
+.add-elements-panel {
+  display: grid;
+  grid-template-rows: auto minmax(220px, 1fr) auto;
+  max-height: min(760px, calc(100vh - 28px));
+  margin: 0;
+}
+
+.add-elements-header,
+.add-elements-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  background: var(--vc-panel);
+}
+
+.add-elements-header {
+  border-bottom: 1px solid var(--vc-line);
+}
+
+.add-elements-footer {
+  border-top: 1px solid var(--vc-line);
+}
+
+.add-elements-header h2 {
+  margin: 0;
+  color: var(--vc-blue-700);
+  font-size: 1.15rem;
+  line-height: 1.2;
+}
+
+.add-elements-header p,
+.add-elements-footer p {
+  margin: 3px 0 0;
+  color: var(--vc-muted);
+  font-size: 0.9rem;
+}
+
+.dialog-icon-button {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-color: var(--vc-line);
+  background: var(--vc-panel-soft);
+  color: var(--vc-blue-700);
+}
+
+.secondary-button {
+  border-color: var(--vc-line);
+  background: var(--vc-panel);
+  color: var(--vc-blue);
+}
+
+.secondary-button:hover:not(:disabled) {
+  border-color: var(--vc-blue);
+  background: #eef5fd;
+  color: var(--vc-blue-700);
+}
+
+.add-elements-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.add-elements-list {
+  overflow: auto;
+  padding: 14px 16px 18px;
+  background: #f6f9fc;
+  user-select: none;
+}
+
+.add-elements-empty {
+  margin: 0;
+  padding: 22px;
+  border: 1px dashed var(--vc-line);
+  border-radius: 6px;
+  background: var(--vc-panel);
+  color: var(--vc-muted);
+  font-weight: 650;
+  text-align: center;
+}
+
+.add-elements-type-group {
+  margin: 0 0 14px;
+}
+
+.add-elements-type-group > h3 {
+  position: sticky;
+  top: -14px;
+  z-index: 2;
+  margin: 0 0 8px;
+  padding: 9px 10px;
+  border-left: 5px solid var(--vc-red);
+  background: var(--vc-blue);
+  color: #ffffff;
+  font-size: 0.92rem;
+  line-height: 1.25;
+}
+
+.add-elements-zone-group {
+  margin: 8px 0 12px;
+  border: 1px solid var(--vc-line);
+  border-radius: 6px;
+  background: var(--vc-panel);
+  overflow: hidden;
+}
+
+.add-elements-zone-group > h4 {
+  margin: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--vc-line-soft);
+  background: #eef5fd;
+  color: var(--vc-blue-700);
+  font-size: 0.86rem;
+}
+
+.add-element-option {
+  width: 100%;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: minmax(110px, 150px) 58px minmax(220px, 1fr) 112px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--vc-line-soft);
+  border-radius: 0;
+  background: var(--vc-panel);
+  color: var(--vc-text);
+  font-weight: 600;
+  text-align: left;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.add-element-option:last-child {
+  border-bottom: 0;
+}
+
+.add-element-option:hover:not(:disabled) {
+  background: #eef5fd;
+  border-color: var(--vc-line-soft);
+  box-shadow: none;
+}
+
+.add-element-option.is-selected {
+  background: #dcecff;
+  box-shadow: inset 4px 0 0 var(--vc-blue);
+}
+
+.add-element-option:disabled {
+  background: #f0f2f5;
+  color: #8794a3;
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.add-element-number {
+  color: var(--vc-blue-700);
+  font-weight: 800;
+}
+
+.add-element-indice {
+  display: inline-grid;
+  min-width: 34px;
+  min-height: 26px;
+  place-items: center;
+  border: 1px solid var(--vc-line);
+  border-radius: 4px;
+  background: var(--vc-panel-soft);
+  color: var(--vc-blue);
+  font-weight: 800;
+}
+
+.add-element-designation {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.add-element-state {
+  justify-self: end;
+  color: var(--vc-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.add-element-option.is-selected .add-element-state {
+  color: var(--vc-blue-700);
+}
+
 body.is-frozen .main-container {
   border-color: rgba(0, 73, 144, 0.28);
 }
@@ -356,6 +564,33 @@ body.is-frozen #invoiceTable tbody tr {
 
   .button-container button {
     flex: 1 1 180px;
+  }
+
+  .add-elements-footer,
+  .add-elements-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .add-elements-actions {
+    width: 100%;
+  }
+
+  .add-elements-actions button {
+    flex: 1 1 0;
+  }
+
+  .add-element-option {
+    grid-template-columns: minmax(80px, 1fr) 48px;
+  }
+
+  .add-element-designation,
+  .add-element-state {
+    grid-column: 1 / -1;
+  }
+
+  .add-element-state {
+    justify-self: start;
   }
 
   .main-container {
