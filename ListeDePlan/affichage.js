@@ -1582,6 +1582,13 @@ document.addEventListener("click", async (e) => {
   if (target.matches('td.indice.editable')) {
     const td = target;
     if (document.getElementById('date-fix-popup')) return;
+    if (dateCtrlSelection.cells.has(td) && getDateCtrlSelectedCells().length > 1) {
+      openDateCtrlSelectionPicker();
+      return;
+    }
+    if (dateCtrlSelection.cells.size) {
+      clearDateCtrlSelection();
+    }
     const { recordId, indice, typeDocument, nomProjet, zone } = td.dataset;
     const tr = td.parentElement;
     const Num_Document = tr.cells[0]?.textContent.trim();
@@ -1983,18 +1990,100 @@ const dateDragSelection = {
   startCell: null,
   cells: new Set(),
   didDrag: false,
+  additive: false,
   suppressNextClick: false
+};
+
+const dateCtrlSelection = {
+  cells: new Set(),
+  anchorCell: null,
+  openWhenReady: false
 };
 
 function getDateCellFromTarget(target) {
   return target?.closest?.("#plans-output td.indice.editable") || null;
 }
 
-function clearDateDragHighlights(cells = null) {
+function isDateMultiSelectModifier(event) {
+  return Boolean(event?.ctrlKey || event?.metaKey);
+}
+
+function clearDateDragHighlights(cells = null, { preserveCtrlSelection = false } = {}) {
   const targets = cells
     ? Array.from(cells)
     : Array.from(document.querySelectorAll("#plans-output td.plan-date-drag-selected"));
-  targets.forEach((cell) => cell.classList.remove("plan-date-drag-selected"));
+  targets.forEach((cell) => {
+    if (preserveCtrlSelection && dateCtrlSelection.cells.has(cell)) return;
+    cell.classList.remove("plan-date-drag-selected");
+  });
+}
+
+function getDateCtrlSelectedCells() {
+  return Array.from(dateCtrlSelection.cells).filter((cell) =>
+    cell?.isConnected && cell.matches?.("td.indice.editable")
+  );
+}
+
+function clearDateCtrlSelection({ keepHighlights = false } = {}) {
+  const cells = getDateCtrlSelectedCells();
+  if (!keepHighlights) clearDateDragHighlights(cells);
+  dateCtrlSelection.cells.clear();
+  dateCtrlSelection.anchorCell = null;
+  dateCtrlSelection.openWhenReady = false;
+}
+
+function toggleDateCtrlSelection(cell) {
+  if (!cell?.matches?.("td.indice.editable")) return;
+
+  if (dateCtrlSelection.cells.has(cell)) {
+    dateCtrlSelection.cells.delete(cell);
+    cell.classList.remove("plan-date-drag-selected");
+  } else {
+    dateCtrlSelection.cells.add(cell);
+    cell.classList.add("plan-date-drag-selected");
+    dateCtrlSelection.anchorCell = cell;
+  }
+
+  if (!dateCtrlSelection.cells.size) {
+    dateCtrlSelection.anchorCell = null;
+  }
+}
+
+function addDateCtrlSelectionCells(cells, anchorCell = null) {
+  const selectedCells = Array.from(new Set(cells || [])).filter((cell) =>
+    cell?.isConnected && cell.matches?.("td.indice.editable")
+  );
+  selectedCells.forEach((cell) => {
+    dateCtrlSelection.cells.add(cell);
+    cell.classList.add("plan-date-drag-selected");
+  });
+  if (anchorCell?.isConnected) {
+    dateCtrlSelection.anchorCell = anchorCell;
+  } else if (selectedCells.length) {
+    dateCtrlSelection.anchorCell = selectedCells[selectedCells.length - 1];
+  }
+}
+
+function openDateCtrlSelectionPicker() {
+  if (dateDragSelection.active && dateDragSelection.additive) {
+    dateCtrlSelection.openWhenReady = true;
+    return;
+  }
+
+  const selectedCells = getDateCtrlSelectedCells();
+  const anchorCell = dateCtrlSelection.anchorCell?.isConnected
+    ? dateCtrlSelection.anchorCell
+    : selectedCells[selectedCells.length - 1];
+
+  if (selectedCells.length <= 1) {
+    clearDateCtrlSelection();
+    return;
+  }
+
+  clearDateCtrlSelection({ keepHighlights: true });
+  dateCtrlSelection.openWhenReady = false;
+  suppressNextDateCellClick();
+  ouvrirPickerRemplirCellules(selectedCells, anchorCell);
 }
 
 function resetDateDragState({ keepHighlights = false } = {}) {
@@ -2003,9 +2092,14 @@ function resetDateDragState({ keepHighlights = false } = {}) {
   dateDragSelection.table = null;
   dateDragSelection.colIndex = null;
   dateDragSelection.startCell = null;
-  if (!keepHighlights) clearDateDragHighlights(dateDragSelection.cells);
+  if (!keepHighlights) {
+    clearDateDragHighlights(dateDragSelection.cells, {
+      preserveCtrlSelection: dateDragSelection.additive
+    });
+  }
   dateDragSelection.cells = new Set();
   dateDragSelection.didDrag = false;
+  dateDragSelection.additive = false;
   document.body.classList.remove("plan-date-dragging");
 }
 
@@ -2032,10 +2126,25 @@ function getDateCellsBetween(startCell, endCell) {
 }
 
 function setDateDragCells(cells) {
-  clearDateDragHighlights(dateDragSelection.cells);
+  clearDateDragHighlights(dateDragSelection.cells, {
+    preserveCtrlSelection: dateDragSelection.additive
+  });
   dateDragSelection.cells = new Set(cells);
   dateDragSelection.cells.forEach((cell) => cell.classList.add("plan-date-drag-selected"));
   dateDragSelection.didDrag = dateDragSelection.cells.size > 1;
+}
+
+function startDateDragSelection(cell, event, { additive = false } = {}) {
+  dateDragSelection.active = true;
+  dateDragSelection.pointerId = event.pointerId;
+  dateDragSelection.table = cell.closest("table.plan-table");
+  dateDragSelection.colIndex = cell.cellIndex;
+  dateDragSelection.startCell = cell;
+  dateDragSelection.cells = new Set([cell]);
+  dateDragSelection.didDrag = false;
+  dateDragSelection.additive = additive;
+  cell.classList.add("plan-date-drag-selected");
+  document.body.classList.add("plan-date-dragging");
 }
 
 function updateDateDragSelectionFromPoint(clientX, clientY) {
@@ -2073,28 +2182,46 @@ function ouvrirPickerRemplirCellules(cells, anchorCell) {
   const old = document.getElementById("date-drag-fill-popup");
   if (old) old.remove();
 
-  const indice = anchorCell?.dataset?.indice || selectedCells[0]?.dataset?.indice || "";
   const popup = document.createElement("div");
   popup.id = "date-drag-fill-popup";
   popup.className = "date-drag-fill-popup";
-  popup.innerHTML = `
-    <div class="date-drag-fill-title">
-      Remplir ${selectedCells.length} case(s) de la colonne <strong>${indice}</strong>
-    </div>
-    <input id="date-drag-fill-date" type="text" placeholder="Choisir une date" />
-    <div class="date-drag-fill-actions">
-      <button id="date-drag-fill-cancel" type="button">Annuler</button>
-    </div>
-  `;
+
+  const selectedIndices = [...new Set(
+    selectedCells.map((cell) => cell.dataset.indice || "").filter(Boolean)
+  )];
+  const title = document.createElement("div");
+  title.className = "date-drag-fill-title";
+  title.append(`Remplir ${selectedCells.length} case(s)`);
+  if (selectedIndices.length === 1) {
+    title.append(" de la colonne ");
+    const strong = document.createElement("strong");
+    strong.textContent = selectedIndices[0];
+    title.appendChild(strong);
+  } else {
+    title.append(" selectionnees");
+  }
+  popup.appendChild(title);
+
+  const input = document.createElement("input");
+  input.id = "date-drag-fill-date";
+  input.type = "text";
+  input.placeholder = "Choisir une date";
+  popup.appendChild(input);
+
+  const actions = document.createElement("div");
+  actions.className = "date-drag-fill-actions";
+  const cancelBtn = document.createElement("button");
+  cancelBtn.id = "date-drag-fill-cancel";
+  cancelBtn.type = "button";
+  cancelBtn.textContent = "Annuler";
+  actions.appendChild(cancelBtn);
+  popup.appendChild(actions);
 
   const rect = (anchorCell || selectedCells[selectedCells.length - 1]).getBoundingClientRect();
   popup.style.left = `${rect.left + window.scrollX}px`;
   popup.style.top = `${rect.bottom + window.scrollY + 6}px`;
   document.body.appendChild(popup);
   clampFloatingDatePopup(popup);
-
-  const input = popup.querySelector("#date-drag-fill-date");
-  const cancelBtn = popup.querySelector("#date-drag-fill-cancel");
 
   const closePopup = () => {
     fp.destroy();
@@ -2127,34 +2254,57 @@ function ouvrirPickerRemplirCellules(cells, anchorCell) {
 }
 
 document.addEventListener("click", (event) => {
-  if (!dateDragSelection.suppressNextClick) return;
-  if (!getDateCellFromTarget(event.target)) return;
-  event.preventDefault();
-  event.stopPropagation();
-  event.stopImmediatePropagation();
-  dateDragSelection.suppressNextClick = false;
+  const cell = getDateCellFromTarget(event.target);
+
+  if (dateDragSelection.suppressNextClick && cell) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    dateDragSelection.suppressNextClick = false;
+    return;
+  }
+
+  if (isDateMultiSelectModifier(event) && cell) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    if (document.getElementById("date-fix-popup")) return;
+    const oldPopup = document.getElementById("date-drag-fill-popup");
+    if (oldPopup) oldPopup.remove();
+    toggleDateCtrlSelection(cell);
+    return;
+  }
 }, true);
 
 document.addEventListener("pointerdown", (event) => {
   if (event.button !== 0) return;
   if (event.target.closest?.(".flatpickr-calendar, #date-fix-popup, #column-fill-popup, #date-drag-fill-popup")) return;
   const cell = getDateCellFromTarget(event.target);
-  if (!cell) return;
+  if (!cell) {
+    if (!isDateMultiSelectModifier(event) && dateCtrlSelection.cells.size) {
+      clearDateCtrlSelection();
+    }
+    return;
+  }
   if (document.getElementById("date-fix-popup")) return;
+  if (isDateMultiSelectModifier(event)) {
+    event.preventDefault();
+    const oldPopup = document.getElementById("date-drag-fill-popup");
+    if (oldPopup) oldPopup.remove();
+    startDateDragSelection(cell, event, { additive: true });
+    return;
+  }
+
+  if (dateCtrlSelection.cells.has(cell) && getDateCtrlSelectedCells().length > 1) {
+    event.preventDefault();
+    return;
+  }
 
   const oldPopup = document.getElementById("date-drag-fill-popup");
   if (oldPopup) oldPopup.remove();
+  clearDateCtrlSelection();
   clearDateDragHighlights();
-
-  dateDragSelection.active = true;
-  dateDragSelection.pointerId = event.pointerId;
-  dateDragSelection.table = cell.closest("table.plan-table");
-  dateDragSelection.colIndex = cell.cellIndex;
-  dateDragSelection.startCell = cell;
-  dateDragSelection.cells = new Set([cell]);
-  dateDragSelection.didDrag = false;
-  cell.classList.add("plan-date-drag-selected");
-  document.body.classList.add("plan-date-dragging");
+  startDateDragSelection(cell, event);
 }, true);
 
 document.addEventListener("pointermove", (event) => {
@@ -2171,6 +2321,25 @@ document.addEventListener("pointerup", (event) => {
   updateDateDragSelectionFromPoint(event.clientX, event.clientY);
   const selectedCells = Array.from(dateDragSelection.cells);
   const anchorCell = selectedCells[selectedCells.length - 1] || dateDragSelection.startCell;
+  const isAdditiveSelection = dateDragSelection.additive;
+
+  if (isAdditiveSelection) {
+    if (dateDragSelection.didDrag) {
+      addDateCtrlSelectionCells(selectedCells, anchorCell);
+    } else {
+      toggleDateCtrlSelection(dateDragSelection.startCell);
+    }
+
+    const shouldOpenAfterPointer = dateCtrlSelection.openWhenReady || !isDateMultiSelectModifier(event);
+    resetDateDragState({ keepHighlights: true });
+    suppressNextDateCellClick();
+
+    if (shouldOpenAfterPointer) {
+      openDateCtrlSelectionPicker();
+    }
+    return;
+  }
+
   const shouldOpenBulkPicker = dateDragSelection.didDrag && selectedCells.length > 1;
   resetDateDragState({ keepHighlights: shouldOpenBulkPicker });
 
@@ -2183,6 +2352,17 @@ document.addEventListener("pointerup", (event) => {
 document.addEventListener("pointercancel", () => {
   if (dateDragSelection.active) resetDateDragState();
 }, true);
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && dateCtrlSelection.cells.size) {
+    clearDateCtrlSelection();
+  }
+});
+
+document.addEventListener("keyup", (event) => {
+  if (event.key !== "Control" && event.key !== "Meta") return;
+  openDateCtrlSelectionPicker();
+});
 
 function ouvrirPickerRemplirColonne(th) {
   const indice = th.textContent.trim();
