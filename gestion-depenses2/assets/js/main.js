@@ -217,6 +217,9 @@ function findProjectBySharedSelection(projects = [], projectSelection = "") {
 let chargePlanSyncTraceSequence = 0;
 let lastPlanningAlertsPopupSignature = "";
 let planningAlertsArrivalTimer = null;
+let planningAlertsActivationTimer = null;
+let lastPlanningAlertsActivationAt = 0;
+const PLANNING_ALERTS_ACTIVATION_COOLDOWN_MS = 900;
 
 function roundChargePlanTraceNumber(value, digits = 2) {
   const numericValue = Number(value);
@@ -473,6 +476,42 @@ function schedulePlanningAlertsPopupOnArrival() {
 
   planningAlertsArrivalTimer = window.setTimeout(() => {
     planningAlertsArrivalTimer = null;
+    showPlanningAlertsPopup({ force: true });
+  }, 0);
+}
+
+function isPlanningAlertsPopupOpen() {
+  return Boolean(dom?.planningAlertsModal && !dom.planningAlertsModal.hidden);
+}
+
+function schedulePlanningAlertsPopupOnWidgetActivation({ force = false } = {}) {
+  if (!shouldShowLocalPlanningAlerts()) {
+    return;
+  }
+
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+    return;
+  }
+
+  if (isPlanningAlertsPopupOpen()) {
+    return;
+  }
+
+  const now = Date.now();
+  if (!force && now - lastPlanningAlertsActivationAt < PLANNING_ALERTS_ACTIVATION_COOLDOWN_MS) {
+    return;
+  }
+  lastPlanningAlertsActivationAt = now;
+
+  if (planningAlertsActivationTimer != null) {
+    window.clearTimeout(planningAlertsActivationTimer);
+  }
+
+  planningAlertsActivationTimer = window.setTimeout(() => {
+    planningAlertsActivationTimer = null;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      return;
+    }
     showPlanningAlertsPopup({ force: true });
   }, 0);
 }
@@ -5554,6 +5593,17 @@ function bindEvents() {
     },
     true
   );
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      schedulePlanningAlertsPopupOnWidgetActivation();
+    }
+  });
+  window.addEventListener("pageshow", () => {
+    schedulePlanningAlertsPopupOnWidgetActivation();
+  });
+  window.addEventListener("focus", () => {
+    schedulePlanningAlertsPopupOnWidgetActivation();
+  });
   window.addEventListener("pointermove", handleChargePlanPointerMove);
   window.addEventListener("pointerup", () => {
     clearChargePlanScrollSyncFrame();
@@ -5610,6 +5660,7 @@ export async function bootstrap() {
   // Les 8 tables de données sont chargées par loadData() après sélection d'un projet.
   await initProjectDropdown();
   chargePlanSyncApiReady = true;
+  schedulePlanningAlertsPopupOnWidgetActivation({ force: true });
 }
 
 function exposeChargePlanSyncApi() {
