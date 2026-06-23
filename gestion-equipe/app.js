@@ -629,7 +629,7 @@ function buildRecordFromForm(form, fieldNames) {
     Role: asText(formData.get(fieldNames.role)),
     IdTrefle: normalizeIdTrefle(formData.get(fieldNames.idTrefle)),
     Externe: formData.has(fieldNames.externe),
-    PrenonNom: buildFullName(prenom, nom),
+    PrenomNom: buildFullName(prenom, nom),
   };
 }
 
