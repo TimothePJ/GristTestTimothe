@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gestion Previsionnelle</title>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <div>
+        <h1>Gestion Previsionnelle</h1>
+      </div>
+    </header>
+
+    <section class="control-panel" aria-label="Filtres">
+      <div class="field employee-field">
+        <span id="employee-picker-heading">Employe</span>
+        <select id="employee-select" hidden>
+          <option value="">Chargement...</option>
+        </select>
+        <div id="employee-picker" class="employee-picker">
+          <button
+            id="employee-picker-toggle"
+            class="employee-picker-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="employee-picker-panel"
+            aria-labelledby="employee-picker-heading employee-picker-label"
+            disabled
+          >
+            <span id="employee-picker-label">Chargement...</span>
+          </button>
+          <div
+            id="employee-picker-panel"
+            class="employee-picker-panel"
+            role="listbox"
+            aria-labelledby="employee-picker-heading"
+            hidden
+          ></div>
+        </div>
+      </div>
+
+      <fieldset class="period-mode" aria-label="Periode">
+        <legend>Periode</legend>
+        <label>
+          <input type="radio" name="period-mode" value="week" checked>
+          <span>Semaine</span>
+        </label>
+        <label>
+          <input type="radio" name="period-mode" value="month">
+          <span>Mois</span>
+        </label>
+        <label>
+          <input type="radio" name="period-mode" value="custom">
+          <span>Plage</span>
+        </label>
+      </fieldset>
+
+      <div class="period-navigator">
+        <button id="period-prev" class="period-nav-btn" type="button" aria-label="Periode precedente">&lt;</button>
+        <button
+          id="period-picker-toggle"
+          class="period-current-btn"
+          type="button"
+          aria-expanded="false"
+          aria-controls="period-fields"
+        >
+          <span id="period-current-label">Choisir une periode</span>
+        </button>
+        <button id="period-next" class="period-nav-btn" type="button" aria-label="Periode suivante">&gt;</button>
+        <div id="period-fields" class="period-fields" hidden></div>
+      </div>
+    </section>
+
+    <section class="content-grid">
+      <section class="chart-panel" aria-labelledby="chart-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="chart-title">Occupation par projet</h2>
+            <p id="range-label"></p>
+          </div>
+        </div>
+        <div class="chart-frame">
+          <canvas id="occupation-chart"></canvas>
+          <p id="empty-state" class="empty-state" hidden>Aucune occupation sur cette periode.</p>
+        </div>
+      </section>
+
+      <aside class="summary-panel" aria-labelledby="summary-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="summary-title">Repartition</h2>
+            <p id="employee-meta"></p>
+          </div>
+        </div>
+        <div id="capacity-summary" class="capacity-summary"></div>
+        <div id="summary-list" class="summary-list"></div>
+      </aside>
+    </section>
+  </main>
+
+  <script type="module" src="assets/js/app.js"></script>
+</body>
+</html>
