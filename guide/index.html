@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Guide d'utilisation - Gestion Previsionnelle</title>
+  <link rel="stylesheet" href="../Gestion-Prev/assets/css/styles.css">
+</head>
+<body>
+  <main class="app-shell guide-shell">
+    <header class="app-header">
+      <div>
+        <h1>Guide d'utilisation</h1>
+        <p class="app-status">Gestion Previsionnelle</p>
+      </div>
+      <nav class="header-actions" aria-label="Navigation">
+        <a class="secondary-link" href="../Gestion-Prev/index.html">Retour</a>
+      </nav>
+    </header>
+
+    <section class="guide-panel" aria-labelledby="guide-title">
+      <div class="section-heading">
+        <div>
+          <h2 id="guide-title">Guide Plateforme Gestion</h2>
+          <p>Acces au PDF du guide d'utilisation du site.</p>
+        </div>
+      </div>
+      <div class="guide-content">
+        <div class="guide-actions">
+          <a
+            class="primary-action"
+            href="file://vicprdafsxvcf40.vc-ic.grpsc.net/DRTO/Bureau%20d%27Etudes%20Structures/01-BET%20VCF%20OF%20REHA/04-QUALITE/01-PROCESSUS%20SERVICE/01-PROCESSUS%20GENERAL/GUIDE%20PLATEFORME%20GESTION"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Ouvrir le guide
+          </a>
+          <button id="copy-guide-path" class="secondary-action" type="button">Copier le chemin</button>
+        </div>
+
+        <div class="guide-path-block">
+          <span>Chemin reseau</span>
+          <code id="guide-path">\\vicprdafsxvcf40.vc-ic.grpsc.net\DRTO\Bureau d'Etudes Structures\01-BET VCF OF REHA\04-QUALITE\01-PROCESSUS SERVICE\01-PROCESSUS GENERAL\GUIDE PLATEFORME GESTION</code>
+        </div>
+        <p id="copy-feedback" class="guide-feedback" aria-live="polite"></p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const copyButton = document.getElementById("copy-guide-path");
+    const guidePath = document.getElementById("guide-path");
+    const copyFeedback = document.getElementById("copy-feedback");
+
+    function copyWithFallback(text) {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      textarea.remove();
+      return copied;
+    }
+
+    copyButton.addEventListener("click", async () => {
+      const text = guidePath.textContent.trim();
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else if (!copyWithFallback(text)) {
+          throw new Error("Copie impossible");
+        }
+        copyFeedback.textContent = "Chemin copie.";
+      } catch (error) {
+        if (copyWithFallback(text)) {
+          copyFeedback.textContent = "Chemin copie.";
+          return;
+        }
+        copyFeedback.textContent = "Copie impossible. Le chemin reste selectionnable.";
+      }
+    });
+  </script>
+</body>
+</html>
