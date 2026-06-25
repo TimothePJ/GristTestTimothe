@@ -27,20 +27,12 @@
       </div>
       <div class="guide-content">
         <div class="guide-actions">
-          <a
-            class="primary-action"
-            href="file://vicprdafsxvcf40.vc-ic.grpsc.net/DRTO/Bureau%20d%27Etudes%20Structures/01-BET%20VCF%20OF%20REHA/04-QUALITE/01-PROCESSUS%20SERVICE/01-PROCESSUS%20GENERAL/GUIDE%20PLATEFORME%20GESTION"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Ouvrir le guide
-          </a>
-          <button id="copy-guide-path" class="secondary-action" type="button">Copier le chemin</button>
+          <button id="copy-guide-path" class="secondary-action" type="button">Copier le chemin du guide</button>
         </div>
 
         <div class="guide-path-block">
           <span>Chemin reseau</span>
-          <code id="guide-path">\\vicprdafsxvcf40.vc-ic.grpsc.net\DRTO\Bureau d'Etudes Structures\01-BET VCF OF REHA\04-QUALITE\01-PROCESSUS SERVICE\01-PROCESSUS GENERAL\GUIDE PLATEFORME GESTION</code>
+          <code id="guide-path">\\vicprdafsxvcf40.vc-ic.grpsc.net\DRTO\Bureau d'Etudes Structures\01-BET VCF OF REHA\04-QUALITE\01-PROCESSUS SERVICE\01-PROCESSUS GENERAL\GUIDE PLATEFORME GESTION\Manuel_Gestion.pdf</code>
         </div>
         <p id="copy-feedback" class="guide-feedback" aria-live="polite"></p>
       </div>
@@ -65,7 +57,7 @@
       return copied;
     }
 
-    copyButton.addEventListener("click", async () => {
+    async function copyGuidePath() {
       const text = guidePath.textContent.trim();
       try {
         if (navigator.clipboard?.writeText) {
@@ -73,14 +65,20 @@
         } else if (!copyWithFallback(text)) {
           throw new Error("Copie impossible");
         }
-        copyFeedback.textContent = "Chemin copie.";
+        return true;
       } catch (error) {
-        if (copyWithFallback(text)) {
-          copyFeedback.textContent = "Chemin copie.";
-          return;
+        try {
+          return copyWithFallback(text);
+        } catch (fallbackError) {
+          return false;
         }
-        copyFeedback.textContent = "Copie impossible. Le chemin reste selectionnable.";
       }
+    }
+
+    copyButton.addEventListener("click", async () => {
+      copyFeedback.textContent = await copyGuidePath()
+        ? "Chemin copie."
+        : "Copie impossible. Le chemin reste selectionnable.";
     });
   </script>
 </body>
