@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gestion Utilisateurs</title>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <div>
+        <h1>Gestion Utilisateurs</h1>
+        <p id="data-status" class="app-status">Chargement...</p>
+      </div>
+    </header>
+
+    <section class="control-panel user-controls" aria-label="Filtres">
+      <div class="year-navigator" aria-label="Navigation par année">
+        <button id="year-prev" class="period-nav-btn" type="button" aria-label="Année précédente">&lt;</button>
+        <div class="field">
+          <span>Année</span>
+          <select id="year-select"></select>
+        </div>
+        <button id="year-next" class="period-nav-btn" type="button" aria-label="Année suivante">&gt;</button>
+      </div>
+
+      <div class="filter-grid" aria-label="Filtres equipe">
+        <label class="field">
+          <span>Service</span>
+          <select id="service-filter">
+            <option value="">Tous les services</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Rôle</span>
+          <select id="role-filter">
+            <option value="">Tous les rôles</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="legend-list" aria-label="Legende">
+        <span class="legend-item"><i class="legend-swatch is-balanced"></i>Charge 100 %</span>
+        <span class="legend-item"><i class="legend-swatch is-partial"></i>Charge partielle</span>
+        <span class="legend-item"><i class="legend-swatch is-overload"></i>Surcharge</span>
+      </div>
+    </section>
+
+    <section class="table-panel" aria-labelledby="table-title">
+      <div class="section-heading">
+        <div>
+          <h2 id="table-title">Répartition hebdomadaire par employé et projet</h2>
+          <p id="table-caption"></p>
+        </div>
+      </div>
+
+      <div id="allocation-table-wrap" class="allocation-table-wrap">
+        <div class="allocation-split">
+          <div class="frozen-head-pane">
+            <table class="allocation-table frozen-table frozen-head-table">
+              <colgroup id="frozen-head-cols"></colgroup>
+              <thead id="frozen-head"></thead>
+            </table>
+          </div>
+          <div id="timeline-head-scroll" class="timeline-head-pane">
+            <table class="allocation-table timeline-table">
+              <colgroup id="timeline-head-cols"></colgroup>
+              <thead id="timeline-head"></thead>
+            </table>
+          </div>
+          <div id="frozen-body-scroll" class="frozen-body-pane">
+            <table class="allocation-table frozen-table">
+              <colgroup id="frozen-body-cols"></colgroup>
+              <tbody id="frozen-body"></tbody>
+            </table>
+          </div>
+          <div id="timeline-body-scroll" class="timeline-body-pane">
+            <table class="allocation-table timeline-table">
+              <colgroup id="timeline-body-cols"></colgroup>
+              <tbody id="timeline-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <p id="empty-state" class="empty-state" hidden>Aucune donnée à afficher.</p>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="assets/js/app.js"></script>
+</body>
+</html>
