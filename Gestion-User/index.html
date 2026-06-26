@@ -39,6 +39,31 @@
             <option value="">Tous les rôles</option>
           </select>
         </label>
+        <div class="field project-filter-field">
+          <span>Projets</span>
+          <div id="project-filter" class="project-filter">
+            <button
+              id="project-filter-toggle"
+              class="project-filter-toggle"
+              type="button"
+              aria-expanded="false"
+              aria-controls="project-filter-panel"
+            >
+              <span id="project-filter-label">Tous les projets</span>
+            </button>
+            <div id="project-filter-panel" class="project-filter-panel" hidden>
+              <div class="project-filter-actions">
+                <button id="project-select-all" type="button">Tout sélectionner</button>
+                <button id="project-clear-all" type="button">Tout désélectionner</button>
+              </div>
+              <div id="project-option-list" class="project-option-list"></div>
+            </div>
+          </div>
+        </div>
+        <label class="checkbox-field">
+          <input id="include-empty-employees" type="checkbox">
+          <span>Afficher les employés sans projet</span>
+        </label>
       </div>
 
       <div class="legend-list" aria-label="Legende">

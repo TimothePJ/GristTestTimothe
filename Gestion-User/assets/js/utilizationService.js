@@ -117,7 +117,15 @@ export function formatEmployeeDisplayName(employee) {
   return getEmployeeDisplayName(employee);
 }
 
-export function computeWeeklyUtilizationMatrix({ employees, segments = [], segmentsByEmployee = null, projects, weeks }) {
+export function computeWeeklyUtilizationMatrix({
+  employees,
+  segments = [],
+  segmentsByEmployee = null,
+  projects,
+  weeks,
+  visibleProjectNumbers = null,
+  includeEmployeesWithoutProjects = false,
+}) {
   const normalizedWeeks = getPreparedWeeks(weeks);
   const groupedSegments = segmentsByEmployee || groupSegmentsByEmployee(segments);
   const matrixEmployees = getEmployeesWithSegmentOnlyEntries(employees, groupedSegments);
@@ -129,6 +137,8 @@ export function computeWeeklyUtilizationMatrix({ employees, segments = [], segme
 
     employeeSegments.forEach((segment) => {
       const projectNumber = segment.projectNumber || "Sans projet";
+      if (visibleProjectNumbers && !visibleProjectNumbers.has(projectNumber)) return;
+
       let row = projectRowsByNumber.get(projectNumber);
       if (!row) {
         row = {
@@ -172,6 +182,10 @@ export function computeWeeklyUtilizationMatrix({ employees, segments = [], segme
       });
     });
 
+    if (!projectRows.length && !includeEmployeesWithoutProjects) {
+      return null;
+    }
+
     const visibleProjectRows = projectRows.length
       ? projectRows
       : [{
@@ -196,5 +210,5 @@ export function computeWeeklyUtilizationMatrix({ employees, segments = [], segme
         weekPercents: totals,
       },
     };
-  });
+  }).filter(Boolean);
 }

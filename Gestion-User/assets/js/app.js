@@ -19,9 +19,12 @@ const state = {
   weekCache: new Map(),
   renderedCalendarYear: null,
   viewRows: [],
+  projectOptions: [],
   filters: {
     service: "",
     role: "",
+    includeEmptyEmployees: false,
+    visibleProjectNumbers: new Set(),
   },
 };
 
@@ -32,6 +35,15 @@ const dom = {
   yearNext: document.getElementById("year-next"),
   serviceFilter: document.getElementById("service-filter"),
   roleFilter: document.getElementById("role-filter"),
+  includeEmptyEmployees: document.getElementById("include-empty-employees"),
+  projectFilter: document.getElementById("project-filter"),
+  projectFilterToggle: document.getElementById("project-filter-toggle"),
+  projectFilterLabel: document.getElementById("project-filter-label"),
+  projectFilterPanel: document.getElementById("project-filter-panel"),
+  projectOptionList: document.getElementById("project-option-list"),
+  projectSelectAll: document.getElementById("project-select-all"),
+  projectClearAll: document.getElementById("project-clear-all"),
+  allocationTableWrap: document.getElementById("allocation-table-wrap"),
   frozenHeadCols: document.getElementById("frozen-head-cols"),
   timelineHeadCols: document.getElementById("timeline-head-cols"),
   frozenBodyCols: document.getElementById("frozen-body-cols"),
@@ -73,6 +85,7 @@ function setStatus(message, type = "") {
     if (type === "error") console.error(message);
     return;
   }
+  dom.status.hidden = !message;
   dom.status.textContent = message;
   dom.status.dataset.type = type;
 }
@@ -236,6 +249,87 @@ function populateFilters(employees) {
   );
   dom.serviceFilter.value = state.filters.service;
   dom.roleFilter.value = state.filters.role;
+}
+
+function getProjectLabel(projectNumber) {
+  const number = toText(projectNumber) || "Sans projet";
+  const project = state.data?.projects.get(number);
+  if (!project) return `${number} - Projet introuvable`;
+  return project.name ? `${number} - ${project.name}` : number;
+}
+
+function buildProjectOptions(data) {
+  const projectNumbers = new Set(
+    data.segments.map((segment) => segment.projectNumber).filter(Boolean)
+  );
+
+  return Array.from(projectNumbers)
+    .map((number) => ({
+      number,
+      label: getProjectLabel(number),
+    }))
+    .sort((left, right) => compareText(left.label, right.label));
+}
+
+function updateProjectFilterLabel() {
+  const selectedCount = state.filters.visibleProjectNumbers.size;
+  const totalCount = state.projectOptions.length;
+
+  if (totalCount === 0 || selectedCount === 0) {
+    dom.projectFilterLabel.textContent = "Aucun projet";
+  } else if (selectedCount === totalCount) {
+    dom.projectFilterLabel.textContent = "Tous les projets";
+  } else {
+    dom.projectFilterLabel.textContent = `${selectedCount} projets s\u00e9lectionn\u00e9s`;
+  }
+
+  dom.projectOptionList.querySelectorAll("[data-project-number]").forEach((input) => {
+    input.checked = state.filters.visibleProjectNumbers.has(input.value);
+  });
+}
+
+function renderProjectFilterOptions() {
+  dom.projectOptionList.replaceChildren();
+
+  state.projectOptions.forEach((project) => {
+    const label = document.createElement("label");
+    label.className = "project-option";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = project.number;
+    checkbox.dataset.projectNumber = project.number;
+    checkbox.checked = state.filters.visibleProjectNumbers.has(project.number);
+
+    const text = document.createElement("span");
+    text.textContent = project.label;
+
+    label.append(checkbox, text);
+    dom.projectOptionList.appendChild(label);
+  });
+}
+
+function populateProjectFilter(data) {
+  state.projectOptions = buildProjectOptions(data);
+  state.filters.visibleProjectNumbers = new Set(
+    state.projectOptions.map((project) => project.number)
+  );
+  renderProjectFilterOptions();
+  updateProjectFilterLabel();
+}
+
+function setProjectFilterOpen(forceOpen = null) {
+  const shouldOpen = forceOpen == null ? dom.projectFilterPanel.hidden : forceOpen;
+  dom.projectFilterPanel.hidden = !shouldOpen;
+  dom.projectFilterToggle.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+}
+
+function setAllProjectsSelected(selected) {
+  state.filters.visibleProjectNumbers = selected
+    ? new Set(state.projectOptions.map((project) => project.number))
+    : new Set();
+  updateProjectFilterLabel();
+  scheduleRender();
 }
 
 function createHeaderCell(text, className = "") {
@@ -450,6 +544,22 @@ function getMatrixRowHeight() {
   return getCssPixelValue("--matrix-row-height") || 28;
 }
 
+function updateTableHeight(rowCount = state.viewRows.length) {
+  if (!dom.allocationTableWrap) return;
+
+  const rowHeight = getMatrixRowHeight();
+  const headerHeight = getCssPixelValue("--planner-header-height") || 98;
+  const scrollbarHeight = 18;
+  const viewportGap = window.innerWidth <= 900 ? 10 : 18;
+  const wrapTop = dom.allocationTableWrap.getBoundingClientRect().top;
+  const availableHeight = Math.max(160, window.innerHeight - wrapTop - viewportGap);
+  const compactHeight = rowCount > 0
+    ? headerHeight + (rowCount * rowHeight) + scrollbarHeight + 2
+    : 180;
+
+  dom.allocationTableWrap.style.height = `${Math.ceil(Math.min(compactHeight, availableHeight))}px`;
+}
+
 function renderVisibleRows() {
   const rowHeight = getMatrixRowHeight();
   const viewportHeight = dom.timelineBodyScroll.clientHeight || rowHeight * 20;
@@ -504,6 +614,7 @@ function scheduleVisibleRowsRender() {
 
 function renderMatrix(matrix) {
   state.viewRows = flattenMatrixRows(matrix);
+  updateTableHeight(state.viewRows.length);
   dom.timelineBodyScroll.scrollTop = 0;
   dom.frozenBodyScroll.scrollTop = 0;
   renderVisibleRows();
@@ -551,6 +662,7 @@ function sortEmployeesForView(employees) {
 
 function getFilteredEmployeesAndSegments() {
   const visibleRange = getVisibleTimelineRange();
+  const visibleProjectNumbers = state.filters.visibleProjectNumbers;
   const employees = sortEmployeesForView(
     state.data.employees.filter(employeeMatchesFilters)
   );
@@ -559,6 +671,7 @@ function getFilteredEmployeesAndSegments() {
   employees.forEach((employee) => {
     const sourceSegments = state.data.segmentsByEmployee.get(employee.key) || [];
     const visibleSegments = sourceSegments.filter((segment) =>
+      visibleProjectNumbers.has(segment.projectNumber) &&
       segmentOverlapsRange(segment, visibleRange)
     );
     if (visibleSegments.length) {
@@ -591,6 +704,8 @@ function render() {
     segmentsByEmployee: filteredData.segmentsByEmployee,
     projects: state.data.projects,
     weeks: state.weeks,
+    visibleProjectNumbers: state.filters.visibleProjectNumbers,
+    includeEmployeesWithoutProjects: state.filters.includeEmptyEmployees,
   });
 
   renderMatrix(matrix);
@@ -598,7 +713,7 @@ function render() {
   syncTimelineLayout();
 
   dom.emptyState.hidden = matrix.length > 0;
-  setStatus("Pr\u00eat", "ready");
+  setStatus("", "ready");
 }
 
 function scheduleRender() {
@@ -630,9 +745,36 @@ function bindEvents() {
     state.filters.role = dom.roleFilter.value;
     scheduleRender();
   });
+  dom.includeEmptyEmployees.addEventListener("change", () => {
+    state.filters.includeEmptyEmployees = dom.includeEmptyEmployees.checked;
+    scheduleRender();
+  });
+  dom.projectFilterToggle.addEventListener("click", () => {
+    setProjectFilterOpen();
+  });
+  dom.projectSelectAll.addEventListener("click", () => {
+    setAllProjectsSelected(true);
+  });
+  dom.projectClearAll.addEventListener("click", () => {
+    setAllProjectsSelected(false);
+  });
+  dom.projectOptionList.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (!target.dataset.projectNumber) return;
+
+    if (target.checked) {
+      state.filters.visibleProjectNumbers.add(target.value);
+    } else {
+      state.filters.visibleProjectNumbers.delete(target.value);
+    }
+    updateProjectFilterLabel();
+    scheduleRender();
+  });
   dom.yearPrev.addEventListener("click", () => shiftYear(-1));
   dom.yearNext.addEventListener("click", () => shiftYear(1));
   window.addEventListener("resize", () => {
+    updateTableHeight();
     syncTimelineTableWidths();
     syncTimelineLayout();
     scheduleVisibleRowsRender();
@@ -649,6 +791,13 @@ function bindEvents() {
     dom.timelineBodyScroll.scrollLeft += event.deltaX;
     dom.timelineBodyScroll.scrollTop += event.deltaY;
   }, { passive: false });
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+    if (!dom.projectFilter.contains(target)) {
+      setProjectFilterOpen(false);
+    }
+  });
 }
 
 async function init() {
@@ -663,6 +812,7 @@ async function init() {
     const bounds = getSegmentYearBounds(data.segments);
     populateYearSelect(bounds.minYear, bounds.maxYear);
     populateFilters(data.employees);
+    populateProjectFilter(data);
     render();
   } catch (error) {
     console.error("Erreur initialisation Gestion-User :", error);
