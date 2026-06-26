@@ -64,6 +64,7 @@ function buildProjects(projectTable, projectRows) {
     projects.set(number, {
       number,
       name: toText(getCell(row, columns.name)),
+      dop: toText(getCell(row, columns.dop)),
     });
   });
 

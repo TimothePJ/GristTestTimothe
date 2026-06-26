@@ -23,6 +23,7 @@ const state = {
   filters: {
     service: "",
     role: "",
+    dop: "",
     includeEmptyEmployees: false,
     visibleProjectNumbers: new Set(),
   },
@@ -35,6 +36,7 @@ const dom = {
   yearNext: document.getElementById("year-next"),
   serviceFilter: document.getElementById("service-filter"),
   roleFilter: document.getElementById("role-filter"),
+  dopFilter: document.getElementById("dop-filter"),
   includeEmptyEmployees: document.getElementById("include-empty-employees"),
   projectFilter: document.getElementById("project-filter"),
   projectFilterToggle: document.getElementById("project-filter-toggle"),
@@ -202,6 +204,10 @@ function getRoleLabel(employee) {
   return toText(employee.role) || "R\u00f4le non renseign\u00e9";
 }
 
+function getProjectDopLabel(project) {
+  return toText(project?.dop) || "DOP non renseign\u00e9e";
+}
+
 function getFilterKey(label) {
   return normalizeKey(label);
 }
@@ -236,7 +242,7 @@ function getUniqueFilterOptions(employees, getLabel) {
   );
 }
 
-function populateFilters(employees) {
+function populateFilters(employees, projects) {
   setSelectOptions(
     dom.serviceFilter,
     getUniqueFilterOptions(employees, getServiceLabel),
@@ -247,8 +253,14 @@ function populateFilters(employees) {
     getUniqueFilterOptions(employees, getRoleLabel),
     "Tous les r\u00f4les"
   );
+  setSelectOptions(
+    dom.dopFilter,
+    getUniqueFilterOptions(Array.from(projects.values()), getProjectDopLabel),
+    "Toutes les DOP"
+  );
   dom.serviceFilter.value = state.filters.service;
   dom.roleFilter.value = state.filters.role;
+  dom.dopFilter.value = state.filters.dop;
 }
 
 function getProjectLabel(projectNumber) {
@@ -644,6 +656,22 @@ function segmentOverlapsRange(segment, range) {
   return segment.startTime < range.end.getTime() && segment.endTime > range.start.getTime();
 }
 
+function projectMatchesDop(projectNumber) {
+  if (!state.filters.dop) return true;
+  const project = state.data.projects.get(projectNumber);
+  return getFilterKey(getProjectDopLabel(project)) === state.filters.dop;
+}
+
+function getVisibleProjectNumbersForFilters() {
+  if (!state.filters.dop) {
+    return state.filters.visibleProjectNumbers;
+  }
+
+  return new Set(
+    Array.from(state.filters.visibleProjectNumbers).filter(projectMatchesDop)
+  );
+}
+
 function employeeMatchesFilters(employee) {
   const serviceKey = getFilterKey(getServiceLabel(employee));
   const roleKey = getFilterKey(getRoleLabel(employee));
@@ -660,9 +688,8 @@ function sortEmployeesForView(employees) {
   );
 }
 
-function getFilteredEmployeesAndSegments() {
+function getFilteredEmployeesAndSegments(visibleProjectNumbers) {
   const visibleRange = getVisibleTimelineRange();
-  const visibleProjectNumbers = state.filters.visibleProjectNumbers;
   const employees = sortEmployeesForView(
     state.data.employees.filter(employeeMatchesFilters)
   );
@@ -697,14 +724,15 @@ function render() {
     state.renderedCalendarYear = state.year;
   }
 
-  const filteredData = getFilteredEmployeesAndSegments();
+  const visibleProjectNumbers = getVisibleProjectNumbersForFilters();
+  const filteredData = getFilteredEmployeesAndSegments(visibleProjectNumbers);
 
   const matrix = computeWeeklyUtilizationMatrix({
     employees: filteredData.employees,
     segmentsByEmployee: filteredData.segmentsByEmployee,
     projects: state.data.projects,
     weeks: state.weeks,
-    visibleProjectNumbers: state.filters.visibleProjectNumbers,
+    visibleProjectNumbers,
     includeEmployeesWithoutProjects: state.filters.includeEmptyEmployees,
   });
 
@@ -743,6 +771,10 @@ function bindEvents() {
   });
   dom.roleFilter.addEventListener("change", () => {
     state.filters.role = dom.roleFilter.value;
+    scheduleRender();
+  });
+  dom.dopFilter.addEventListener("change", () => {
+    state.filters.dop = dom.dopFilter.value;
     scheduleRender();
   });
   dom.includeEmptyEmployees.addEventListener("change", () => {
@@ -811,7 +843,7 @@ async function init() {
 
     const bounds = getSegmentYearBounds(data.segments);
     populateYearSelect(bounds.minYear, bounds.maxYear);
-    populateFilters(data.employees);
+    populateFilters(data.employees, data.projects);
     populateProjectFilter(data);
     render();
   } catch (error) {

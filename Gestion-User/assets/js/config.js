@@ -26,6 +26,7 @@ export const COLUMN_CANDIDATES = {
   projects: {
     number: ["Numero_de_projet", "Numero de projet", "Num\u00e9ro de projet", "Num\u00c3\u00a9ro de projet", "NumeroProjet", "Numero"],
     name: ["Nom_de_projet", "Nom de projet", "NomProjet", "Nom_Projet", "Projet"],
+    dop: ["DOP", "Dop", "dop", "D.O.P", "D.O.P.", "DirectionOperationnelle", "Direction_Operationnelle", "Direction operationnelle", "Direction op\u00e9rationnelle", "Direction op\u00c3\u00a9rationnelle"],
   },
 };
 
