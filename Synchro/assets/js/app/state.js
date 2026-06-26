@@ -17,7 +17,6 @@ export function createHubState() {
     lastExpensesReferenceVisibleWidth: Number.NaN,
     lastExpensesReferenceDayWidth: Number.NaN,
     lastExpensesPixelAlignmentDelta: Number.NaN,
-    lastUserScrollActivityAt: 0,
     expensesVisibleWidthAdjustmentRerenderPending: false,
     planningLayoutDebugRafId: 0,
     planningLayoutDebugCleanup: null,

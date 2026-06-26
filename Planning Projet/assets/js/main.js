@@ -76,6 +76,7 @@ let manageZoneModalOpen = false;
 let planningProjectOptions = [];
 let planningSyncApiReady = false;
 let currentPlanningDateBounds = null;
+let currentFirstRowFirstSegment = null;
 let planningEditingEnabled = false;
 let planningEditToggleBound = false;
 const planningWarningListeners = new Set();
@@ -1184,6 +1185,7 @@ async function performPlanningRefresh(options = {}) {
     const selectedProject = state.selectedProject || "";
     if (!selectedProject) {
       currentPlanningDateBounds = null;
+      currentFirstRowFirstSegment = null;
       cachedPlanningReferenceReceptionLookup = null;
       lastRenderedProject = "";
       clearPlanningTimeline();
@@ -1262,9 +1264,11 @@ async function performPlanningRefresh(options = {}) {
       timelineData?.groups || []
     );
     currentPlanningDateBounds = timelineData?.dateBounds || null;
+    currentFirstRowFirstSegment = timelineData?.firstRowFirstSegment || null;
 
     if (!timelineData.rowCount) {
       currentPlanningDateBounds = null;
+      currentFirstRowFirstSegment = null;
       clearPlanningTimeline();
       emitPlanningWarningsChange(selectedProject, []);
 
@@ -1310,6 +1314,8 @@ async function performPlanningRefresh(options = {}) {
     }
   } catch (error) {
     console.error("Erreur refresh planning :", error);
+    currentPlanningDateBounds = null;
+    currentFirstRowFirstSegment = null;
     clearPlanningTimeline();
     emitPlanningWarningsChange(state.selectedProject || "", []);
     setPlanningStatus(`Erreur planning : ${error.message}`);
@@ -1621,6 +1627,9 @@ function exposePlanningSyncApi() {
     },
     getProjectDateBounds() {
       return currentPlanningDateBounds ? { ...currentPlanningDateBounds } : null;
+    },
+    getFirstRowFirstSegment() {
+      return currentFirstRowFirstSegment ? { ...currentFirstRowFirstSegment } : null;
     },
     setViewportBounds(bounds = {}) {
       setPlanningViewportBounds(bounds);

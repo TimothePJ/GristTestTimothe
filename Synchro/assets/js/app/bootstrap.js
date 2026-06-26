@@ -15,7 +15,6 @@ import {
   appendLog,
   syncSharedPlanningControlsAvailability,
   setProjectContentVisibility,
-  setProjectSyncVisualState,
   setHubStatus,
   setSelectionWarning,
 } from "../layout/shell.js";
@@ -783,9 +782,6 @@ export async function bootstrapHubApp() {
     await fetchProjectsFromGrist();
     const initialProject = getRequestedSharedProject();
     renderProjectOptionsFromRegistry(initialProject);
-    if (initialProject) {
-      setProjectSyncVisualState(true);
-    }
     setProjectContentVisibility(Boolean(initialProject));
     if (initialProject) {
       state.requestedProjectKey = initialProject.name;
@@ -872,7 +868,6 @@ export async function bootstrapHubApp() {
     schedulePlanningLayoutDebug("bootstrap-ready");
   } catch (error) {
     console.error("Erreur synchronisation plannings :", error);
-    setProjectSyncVisualState(false);
     setHubStatus(`Erreur : ${error.message}`);
     appendLog(`Erreur initialisation : ${error.message}`);
   }

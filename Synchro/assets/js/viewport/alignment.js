@@ -1,9 +1,19 @@
 import {
   DAY_IN_MS,
+  EXPENSES_ALIGNMENT_INITIAL_DELAY_MS,
+  EXPENSES_ALIGNMENT_RETRY_DELAY_MS,
 } from "../app/constants.js";
 import { dom } from "../app/dom.js";
 import { getReferencePlanningApi, state } from "../app/state.js";
-import { parseSharedExactNumber } from "./normalize.js";
+import { buildCanonicalSharedViewport } from "./build.js";
+import { syncPlanningViewportBounds } from "./bounds.js";
+import { normalizeIsoDate, parseSharedExactNumber } from "./normalize.js";
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
 
 export function getPlanningMainScrollbarGutterWidth() {
   const planningDocument = dom.planningFrameEl?.contentDocument;
@@ -337,4 +347,61 @@ export function getPlanningMainVisibleWidthAdjustment(expensesFrameDocument = nu
   const adjustment = Math.max(0, rightDelta, widthDelta);
 
   return Math.round(adjustment * 100) / 100;
+}
+
+export async function alignExpensesViewportToPlanning(
+  baseViewport = null,
+  { maxAttempts = 4, onAfterApply = null } = {}
+) {
+  const referencePlanningApi = getReferencePlanningApi();
+  if (!referencePlanningApi || !state.expensesApi) {
+    return null;
+  }
+
+  let planningViewport = buildCanonicalSharedViewport(
+    referencePlanningApi.getViewport?.() || baseViewport || state.sharedViewportState || {}
+  );
+  if (!planningViewport.firstVisibleDate) {
+    return null;
+  }
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    syncPlanningViewportBounds(planningViewport);
+    await Promise.resolve(state.expensesApi.applyViewport(planningViewport));
+    if (typeof onAfterApply === "function") {
+      onAfterApply();
+    }
+    await sleep(attempt === 0 ? EXPENSES_ALIGNMENT_INITIAL_DELAY_MS : EXPENSES_ALIGNMENT_RETRY_DELAY_MS);
+
+    const refreshedPlanningViewport = buildCanonicalSharedViewport(
+      referencePlanningApi.getViewport?.() || planningViewport
+    );
+    const refreshedExpensesViewport = buildCanonicalSharedViewport(
+      state.expensesApi.getViewport?.() || planningViewport
+    );
+    const planningWindowStartMs = parseSharedExactNumber(refreshedPlanningViewport.windowStartMs);
+    const planningWindowEndMs = parseSharedExactNumber(refreshedPlanningViewport.windowEndMs);
+    const expensesWindowStartMs = parseSharedExactNumber(refreshedExpensesViewport.windowStartMs);
+    const expensesWindowEndMs = parseSharedExactNumber(refreshedExpensesViewport.windowEndMs);
+    const exactWindowAligned =
+      Number.isFinite(planningWindowStartMs) &&
+      Number.isFinite(planningWindowEndMs) &&
+      Number.isFinite(expensesWindowStartMs) &&
+      Number.isFinite(expensesWindowEndMs) &&
+      Math.abs(planningWindowStartMs - expensesWindowStartMs) <= 10 &&
+      Math.abs(planningWindowEndMs - expensesWindowEndMs) <= 10;
+
+    const isAligned =
+      exactWindowAligned ||
+      (refreshedPlanningViewport.firstVisibleDate === refreshedExpensesViewport.firstVisibleDate &&
+        refreshedPlanningViewport.visibleDays === refreshedExpensesViewport.visibleDays &&
+        refreshedPlanningViewport.mode === refreshedExpensesViewport.mode);
+
+    planningViewport = refreshedPlanningViewport;
+    if (isAligned) {
+      return refreshedPlanningViewport;
+    }
+  }
+
+  return planningViewport;
 }

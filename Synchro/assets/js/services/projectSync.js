@@ -9,11 +9,9 @@ import {
   setActiveProjectSelection,
   getViewportSourceLabel,
   setProjectContentVisibility,
-  setExpensesFrameAligned,
   setHubStatus,
   setLastRange,
   setLastSource,
-  setProjectSyncVisualState,
   syncSharedPlanningControlsAvailability,
   syncExpensesPlanningShell,
 } from "../layout/shell.js";
@@ -25,7 +23,7 @@ import {
   normalizeIsoDate,
   shiftIsoDateValue,
 } from "../viewport/normalize.js";
-import { flushViewportSyncQueue } from "./viewportSync.js";
+import { flushViewportSyncQueue, syncViewportToExpensesNow } from "./viewportSync.js";
 
 const SHARED_PROJECT_STORAGE_KEY = "grist.selected-project";
 const SHARED_PROJECT_ID_STORAGE_KEY = "grist.selected-project-id";
@@ -81,24 +79,6 @@ function saveSharedProjectSelection(projectKey = "", projectId = null) {
       localStorage.removeItem(SHARED_PROJECT_ID_STORAGE_KEY);
     }
   } catch (_error) {}
-}
-
-function waitForAnimationFrames(count = 1) {
-  const frameCount = Math.max(1, Number(count) || 1);
-  return new Promise((resolve) => {
-    const step = (remaining) => {
-      window.requestAnimationFrame(() => {
-        if (remaining <= 1) {
-          resolve();
-          return;
-        }
-
-        step(remaining - 1);
-      });
-    };
-
-    step(frameCount);
-  });
 }
 
 function getPlanningFirstRowFirstSegmentDate() {
@@ -201,7 +181,6 @@ export function clearSharedProjectSelection() {
   state.lastAppliedViewportLogicalSignature = "";
   state.sharedViewportState = null;
   state.sharedToolbarActionInProgress = false;
-  setProjectSyncVisualState(false);
   setActiveProjectSelection("");
   setProjectContentVisibility(false);
   setLastSource("");
@@ -229,7 +208,6 @@ export async function applySharedProject(projectKey) {
   state.projectSyncInProgress = true;
   state.pendingViewportPayload = null;
 
-  setProjectSyncVisualState(true);
   setActiveProjectSelection(normalizedProjectKey);
   setProjectContentVisibility(true);
   syncSharedPlanningControlsAvailability();
@@ -257,29 +235,26 @@ export async function applySharedProject(projectKey) {
     state.activeProjectKey = normalizedProjectKey;
     setActiveProjectSelection(normalizedProjectKey);
 
-    // 2. Appliquer le cadrage final aux deux iframes avant la suite de la synchro.
+    // 2. Cadrer la vue sur un an depuis le premier segment de la premiere ligne.
     const planningViewport = await applyInitialOneYearPlanningViewport();
 
-    // 3. Synchroniser gestion-depenses2 avant de reveler les frames.
+    // 3. Synchroniser gestion-depenses2 en arrière-plan.
     //    Son iframe peut mettre du temps à charger (hors viewport au démarrage).
     //    On ne bloque pas : les boutons s'activent dès que Planning Projet est synced.
     //    Si gestion-depenses2 n'est pas encore prêt (expensesApi null), attachExpensesFrameApi
     //    s'en chargera automatiquement quand l'iframe sera chargée.
     if (state.expensesApi) {
       const expensesApi = state.expensesApi;
-      try {
-        await Promise.resolve(expensesApi.setSelectedProject(normalizedProjectKey));
-        if (state.requestedProjectKey === normalizedProjectKey && state.expensesApi === expensesApi) {
-          if (planningViewport?.firstVisibleDate && typeof expensesApi.applyViewport === "function") {
-            await Promise.resolve(expensesApi.applyViewport(planningViewport));
+      const viewportToApply = planningViewport;
+      Promise.resolve(expensesApi.setSelectedProject(normalizedProjectKey))
+        .then(() => {
+          if (state.activeProjectKey !== normalizedProjectKey || state.expensesApi !== expensesApi) return;
+          if (viewportToApply?.firstVisibleDate) {
+            syncViewportToExpensesNow(viewportToApply);
           }
-          setExpensesFrameAligned(true);
-          scheduleExpensesFramePresentation();
-        }
-      } catch (err) {
-        console.error("Erreur sync gestion-depenses2 :", err);
-        setExpensesFrameAligned(true);
-      }
+        })
+        .then(() => scheduleExpensesFramePresentation())
+        .catch((err) => console.error("Erreur sync gestion-depenses2 :", err));
     }
 
     // 4. Mettre à jour l'état partagé et l'affichage.
@@ -300,19 +275,12 @@ export async function applySharedProject(projectKey) {
     setHubStatus(`Projet : ${normalizedProjectKey}`);
     appendLog(`Projet partage applique : ${normalizedProjectKey}`);
   } finally {
-    const next = String(state.requestedProjectKey || "").trim();
-    if (!next || next === normalizedProjectKey) {
-      schedulePlanningFramePresentation();
-      scheduleExpensesFramePresentation();
-      await waitForAnimationFrames(2);
-      setProjectSyncVisualState(false);
-    }
-
     state.projectSyncInProgress = false;
     syncSharedPlanningControlsAvailability();
     void flushViewportSyncQueue();
 
     // Si l'utilisateur a sélectionné un autre projet pendant cette synchro, l'appliquer.
+    const next = String(state.requestedProjectKey || "").trim();
     if (next && next !== normalizedProjectKey) {
       void applySharedProject(next);
     }

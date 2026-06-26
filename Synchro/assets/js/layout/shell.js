@@ -383,25 +383,6 @@ export function setProjectContentVisibility(hasProject = false) {
   syncSharedPlanningControlsAvailability();
 }
 
-export function setProjectSyncVisualState(isSyncing = false) {
-  const syncing = Boolean(isSyncing);
-
-  if (dom.syncPlanningCardSectionEl instanceof HTMLElement) {
-    dom.syncPlanningCardSectionEl.classList.toggle("is-syncing-project", syncing);
-    dom.syncPlanningCardSectionEl.setAttribute("aria-busy", syncing ? "true" : "false");
-  }
-
-  if (syncing) {
-    setExpensesFrameAligned(false);
-  }
-}
-
-export function setExpensesFrameAligned(isAligned = true) {
-  if (dom.expensesFrameEl instanceof HTMLElement) {
-    dom.expensesFrameEl.classList.toggle("is-aligned", Boolean(isAligned));
-  }
-}
-
 export function setSelectionWarning(selection = null) {
   if (!(dom.selectionWarningEl instanceof HTMLElement)) {
     return;

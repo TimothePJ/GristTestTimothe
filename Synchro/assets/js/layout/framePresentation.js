@@ -11,67 +11,9 @@ import {
 } from "../viewport/alignment.js";
 import { schedulePlanningLayoutDebug } from "./debugLayout.js";
 
-const USER_SCROLL_SETTLE_MS = 260;
-
-const scrollActivityBoundElements = new WeakSet();
-let parentScrollActivityBound = false;
-let deferredPlanningPresentationTimer = 0;
-let deferredExpensesPresentationTimer = 0;
-
 // eslint-disable-next-line no-unused-vars
 function traceExpensesFramePresentation(_event, _details = {}) {
   // Traces désactivées — console.info impacte la fluidité du rendu.
-}
-
-function getNow() {
-  return typeof performance !== "undefined" && typeof performance.now === "function"
-    ? performance.now()
-    : Date.now();
-}
-
-function markUserScrollActivity() {
-  state.lastUserScrollActivityAt = getNow();
-}
-
-function isUserScrollSettling() {
-  const lastScrollAt = Number(state.lastUserScrollActivityAt) || 0;
-  return lastScrollAt > 0 && getNow() - lastScrollAt < USER_SCROLL_SETTLE_MS;
-}
-
-function bindScrollActivity(element) {
-  if (!element || typeof element.addEventListener !== "function" || scrollActivityBoundElements.has(element)) {
-    return;
-  }
-
-  scrollActivityBoundElements.add(element);
-  element.addEventListener("scroll", markUserScrollActivity, { passive: true });
-}
-
-function bindParentScrollActivity() {
-  if (parentScrollActivityBound || typeof window === "undefined") {
-    return;
-  }
-
-  parentScrollActivityBound = true;
-  window.addEventListener("scroll", markUserScrollActivity, { passive: true });
-  window.visualViewport?.addEventListener?.("scroll", markUserScrollActivity, { passive: true });
-}
-
-function schedulePlanningPresentationAfterScroll(reason = "planning-scroll-idle") {
-  window.clearTimeout(deferredPlanningPresentationTimer);
-  deferredPlanningPresentationTimer = window.setTimeout(() => {
-    deferredPlanningPresentationTimer = 0;
-    schedulePlanningFramePresentation(1);
-    schedulePlanningLayoutDebug(reason);
-  }, USER_SCROLL_SETTLE_MS);
-}
-
-function scheduleExpensesPresentationAfterScroll() {
-  window.clearTimeout(deferredExpensesPresentationTimer);
-  deferredExpensesPresentationTimer = window.setTimeout(() => {
-    deferredExpensesPresentationTimer = 0;
-    scheduleExpensesFramePresentation(1);
-  }, USER_SCROLL_SETTLE_MS);
 }
 
 function scheduleExpensesPresentationBurst() {
@@ -85,15 +27,11 @@ function scheduleExpensesPresentationBurst() {
 }
 
 export function ensurePlanningFramePresentation() {
-  bindParentScrollActivity();
-
   const syncPlanningCardEl = document.querySelector(".sync-planning-card");
   const planningWrapperEl = dom.planningFrameEl?.contentDocument?.getElementById("timelineWrapper");
   if (!(syncPlanningCardEl instanceof HTMLElement) || !planningWrapperEl) {
     return false;
   }
-
-  bindScrollActivity(planningWrapperEl);
 
   const scrollbarShift = getPlanningMainScrollbarGutterWidth();
   syncPlanningCardEl.style.setProperty("--sync-planning-scrollbar-shift", `${scrollbarShift}px`);
@@ -103,11 +41,6 @@ export function ensurePlanningFramePresentation() {
     Math.abs(scrollbarShift - state.lastPlanningScrollbarShift) > 0.25
   ) {
     state.lastPlanningScrollbarShift = scrollbarShift;
-    if (isUserScrollSettling()) {
-      schedulePlanningPresentationAfterScroll("planning-scrollbar-shift-after-scroll");
-      return true;
-    }
-
     requestAnimationFrame(() => {
       state.planningAxisApi?.refreshLayout?.();
       state.planningApi?.refreshLayout?.();
@@ -131,8 +64,6 @@ export function schedulePlanningFramePresentation(attempt = 0) {
 }
 
 export function ensureExpensesFramePresentation() {
-  bindParentScrollActivity();
-
   const frameDocument = dom.expensesFrameEl?.contentDocument;
   if (!frameDocument?.head || !frameDocument?.body) {
     return false;
@@ -229,8 +160,6 @@ export function ensureExpensesFramePresentation() {
     (parseFloat(boardStyles.getPropertyValue("--charge-plan-name-col-width")) || 150) +
     (parseFloat(boardStyles.getPropertyValue("--charge-plan-total-col-width")) || 100);
   const embeddedScrollEl = boardEl.querySelector(".charge-plan-scroll");
-  bindScrollActivity(embeddedScrollEl);
-
   const embeddedScrollStyles =
     embeddedScrollEl instanceof frameDocument.defaultView.HTMLElement
       ? frameDocument.defaultView.getComputedStyle(embeddedScrollEl)
@@ -238,19 +167,11 @@ export function ensureExpensesFramePresentation() {
   const embeddedScrollBorderWidth =
     (parseFloat(embeddedScrollStyles?.borderLeftWidth || "0") || 0) +
     (parseFloat(embeddedScrollStyles?.borderRightWidth || "0") || 0);
-  const planningReferencePanelContext = getPlanningReferencePanelContext();
-  const mainPlanningReferenceVisibleWidth = getPlanningMainTimelineViewportWidth();
-  const mainPlanningReferenceDayWidth =
-    getPlanningMainReferenceDayWidth(planningReferencePanelContext);
-  if (
-    !planningReferencePanelContext ||
-    mainPlanningReferenceVisibleWidth <= 0 ||
-    mainPlanningReferenceDayWidth <= 0
-  ) {
-    return false;
-  }
-
   const mainPlanningVisibleWidthAdjustment = getPlanningMainVisibleWidthAdjustment(frameDocument);
+  const mainPlanningReferenceVisibleWidth = getPlanningMainTimelineViewportWidth();
+  const mainPlanningReferenceDayWidth = getPlanningMainReferenceDayWidth(
+    getPlanningReferencePanelContext()
+  );
   const embeddedScrollWidth = Math.max(
     280,
     fixedColumnsWidth + mainPlanningReferenceVisibleWidth + embeddedScrollBorderWidth
@@ -347,12 +268,7 @@ export function ensureExpensesFramePresentation() {
     state.lastExpensesReferenceDayWidth = mainPlanningReferenceDayWidth;
   }
 
-  if (
-    (visibleWidthAdjustmentChanged || referenceVisibleWidthChanged || referenceDayWidthChanged) &&
-    isUserScrollSettling()
-  ) {
-    scheduleExpensesPresentationAfterScroll();
-  } else if (visibleWidthAdjustmentChanged || referenceVisibleWidthChanged || referenceDayWidthChanged) {
+  if (visibleWidthAdjustmentChanged || referenceVisibleWidthChanged || referenceDayWidthChanged) {
     if (!state.expensesVisibleWidthAdjustmentRerenderPending && state.expensesApi?.applyViewport) {
       state.expensesVisibleWidthAdjustmentRerenderPending = true;
       requestAnimationFrame(() => {
@@ -375,17 +291,6 @@ export function ensureExpensesFramePresentation() {
   }
 
   requestAnimationFrame(() => {
-    if (
-      isUserScrollSettling() ||
-      state.projectSyncInProgress ||
-      state.viewportSyncInProgress ||
-      state.sharedToolbarActionInProgress ||
-      state.expensesVisibleWidthAdjustmentRerenderPending
-    ) {
-      scheduleExpensesPresentationAfterScroll();
-      return;
-    }
-
     const calibrationAdjusted = calibrateExpensesViewportPixelOffset(frameDocument);
     if (calibrationAdjusted) {
       scheduleExpensesFramePresentation(1);

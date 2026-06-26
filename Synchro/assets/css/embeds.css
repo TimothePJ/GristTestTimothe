@@ -35,33 +35,17 @@
   height: 620px;
   /* Caché jusqu'à ce que l'alignement viewport soit terminé (classe .is-aligned) */
   opacity: 0;
-  transition: none;
-  will-change: opacity;
+  transition: opacity 0.15s ease;
 }
 
-.embedded-app-frame--expenses.is-ready.is-aligned {
+.embedded-app-frame--expenses.is-aligned {
   opacity: 1;
-  transition: opacity 0.12s ease;
 }
 
 .sync-planning-pane--expenses .embedded-app-frame--expenses {
   border: none;
   border-radius: 0;
   background: transparent;
-}
-
-.sync-planning-card.is-syncing-project .shared-timeline-shell,
-.sync-planning-card.is-syncing-project .sync-planning-frames {
-  visibility: hidden;
-  pointer-events: none;
-}
-
-.sync-planning-card.is-syncing-project .embedded-app-frame {
-  transition: none !important;
-}
-
-.sync-planning-card.is-syncing-project .embedded-app-frame--expenses.is-ready.is-aligned {
-  opacity: 0;
 }
 
 body.is-sync-planning-resizing,

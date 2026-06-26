@@ -820,6 +820,46 @@ function getTimelineItemsDateBounds(items) {
   };
 }
 
+function getFirstRowFirstSegment(groups = [], items = []) {
+  const firstRowGroup = (groups || []).find((group) => group && !group.isZoneHeader);
+  if (!firstRowGroup?.id) {
+    return null;
+  }
+
+  const rowSegments = (items || [])
+    .filter((item) => item?.group === firstRowGroup.id && item?.type !== "background")
+    .map((item) => {
+      const startDate = parseDate(item?.businessStart || item?.start);
+      if (!startDate) return null;
+
+      return {
+        startDate,
+        startDateIso: fmtIsoCellDate(startDate),
+        itemId: String(item?.id || ""),
+        label: toText(item?.phaseLabel || item?.content || ""),
+      };
+    })
+    .filter((segment) => segment?.startDateIso)
+    .sort((left, right) => left.startDate - right.startDate);
+
+  const firstSegment = rowSegments[0] || null;
+  if (!firstSegment) {
+    return null;
+  }
+
+  return {
+    startDate: firstSegment.startDateIso,
+    itemId: firstSegment.itemId,
+    label: firstSegment.label,
+    groupId: String(firstRowGroup.id || ""),
+    rowId: String(firstRowGroup.rowId || ""),
+    rowLabel: [firstRowGroup.id2Label, firstRowGroup.tachesLabel]
+      .map(toText)
+      .filter(Boolean)
+      .join(" - "),
+  };
+}
+
 function buildGroupContent(row) {
   const retardLabel = formatPositiveRetardValue(row.retards);
   const retardClassName = `cell-retards${retardLabel ? " has-retard" : ""}`;
@@ -2051,5 +2091,6 @@ export function buildTimelineDataFromPlanningRows(
     items,
     rowCount: rows.length || orderedZoneKeys.length,
     dateBounds: getTimelineItemsDateBounds(items) || getTimelineRowsDateBounds(rows),
+    firstRowFirstSegment: getFirstRowFirstSegment(groups, items),
   };
 }
