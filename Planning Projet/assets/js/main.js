@@ -243,7 +243,7 @@ function updatePlanningEditToggle() {
   }
 
   const enabled = isPlanningEditingUnlocked();
-  btn.textContent = enabled ? "Verrouiller" : "Editer";
+  btn.textContent = "Editer";
   btn.setAttribute("aria-pressed", enabled ? "true" : "false");
   btn.title = enabled ? "Verrouiller le planning" : "Activer l'edition du planning";
   btn.classList.toggle("is-editing", enabled);

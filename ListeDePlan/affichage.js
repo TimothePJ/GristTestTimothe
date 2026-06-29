@@ -1139,7 +1139,18 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
   }
 }
 
-function renderPlanTableSection(container, filtres, projet, selectedIndices = null, { wrapTable = true } = {}) {
+function renderPlanTableSection(
+  container,
+  filtres,
+  projet,
+  selectedIndices = null,
+  {
+    wrapTable = true,
+    includeNextIndiceColumn = true,
+    datedIndicesOnly = false,
+    maxIndiceColumns = null,
+  } = {}
+) {
   if (!container || filtres.length === 0) return;
   /*
     zone.innerHTML = "<p>Aucun plan trouvé pour cette sélection.</p>";
@@ -1177,12 +1188,23 @@ function renderPlanTableSection(container, filtres, projet, selectedIndices = nu
   const selectedIndexSet = Array.isArray(selectedIndices)
     ? new Set(selectedIndices.map(normalizeIndice).filter(Boolean))
     : null;
+  const indicesToShow = getPlanTableIndicesToShow(plansMap, selectedIndices, {
+    includeNextIndiceColumn,
+    datedIndicesOnly,
+    maxIndiceColumns,
+  });
+  const visibleIndexSet = new Set(indicesToShow.map(normalizeIndice));
+  const shouldCheckIndice = (indice) => {
+    const normalizedIndice = normalizeIndice(indice);
+    if (!normalizedIndice || !visibleIndexSet.has(normalizedIndice)) return false;
+    return !selectedIndexSet || selectedIndexSet.has(normalizedIndice);
+  };
 
   // Multi-date conflict warning
   let hasMultiDateError = false;
   for (const plan of plansMap.values()) {
     for (const indice in plan.lignes) {
-      if (selectedIndexSet && !selectedIndexSet.has(normalizeIndice(indice))) continue;
+      if (!shouldCheckIndice(indice)) continue;
       if (plan.lignes[indice].length > 1) {
         hasMultiDateError = true;
         break;
@@ -1202,7 +1224,11 @@ function renderPlanTableSection(container, filtres, projet, selectedIndices = nu
   let hasMissingDateError = false;
   for (const plan of plansMap.values()) {
     const datedIndices = Object.keys(plan.lignes)
-      .filter(indice => plan.lignes[indice] && plan.lignes[indice].length > 0 && !plan.lignes[indice].isMissing)
+      .filter(indice => {
+        const line = plan.lignes[indice];
+        if (!line || line.isMissing) return false;
+        return datedIndicesOnly ? hasPlanLineDate(line) : line.length > 0;
+      })
       .map(indice => INDICES.indexOf(indice))
       .filter(index => index !== -1)
       .sort((a, b) => a - b);
@@ -1212,7 +1238,7 @@ function renderPlanTableSection(container, filtres, projet, selectedIndices = nu
       // Check all cells from the beginning up to the last valid date
       for (let i = 0; i < last; i++) {
         const currentIndice = INDICES[i];
-        if (selectedIndexSet && !selectedIndexSet.has(currentIndice)) continue;
+        if (!shouldCheckIndice(currentIndice)) continue;
         if (!plan.lignes[currentIndice] || plan.lignes[currentIndice].length === 0) {
           hasMissingDateError = true;
           // Mark this cell for highlighting
@@ -1232,8 +1258,6 @@ function renderPlanTableSection(container, filtres, projet, selectedIndices = nu
     p.textContent = "Des dates sont manquantes, veuillez les remplir.";
     warningDiv.appendChild(p);
   }
-
-  const indicesToShow = getPlanTableIndicesToShow(plansMap, selectedIndices);
 
   const table = document.createElement("table");
   table.className = "plan-table";
@@ -1325,17 +1349,34 @@ function renderPlanTableSection(container, filtres, projet, selectedIndices = nu
   }
 }
 
-function getPlanTableIndicesToShow(plansMap, selectedIndices = null) {
+function hasPlanLineDate(line) {
+  return Array.isArray(line) && line.some((record) => hasValidDate(record?.DateDiffusion));
+}
+
+function getPlanTableIndicesToShow(
+  plansMap,
+  selectedIndices = null,
+  { includeNextIndiceColumn = true, datedIndicesOnly = false, maxIndiceColumns = null } = {}
+) {
+  const applyMaxColumns = (indices) => {
+    const maxColumns = Number(maxIndiceColumns);
+    if (!Number.isInteger(maxColumns) || maxColumns <= 0 || indices.length <= maxColumns) {
+      return indices;
+    }
+    return indices.slice(indices.length - maxColumns);
+  };
+
   if (Array.isArray(selectedIndices)) {
-    return selectedIndices
+    return applyMaxColumns(selectedIndices
       .map(normalizeIndice)
-      .filter((indice, index, values) => indice && values.indexOf(indice) === index);
+      .filter((indice, index, values) => indice && values.indexOf(indice) === index));
   }
 
   const allIndicesUsed = new Set();
   for (const plan of plansMap.values()) {
     for (const indice in plan.lignes) {
-      allIndicesUsed.add(indice);
+      if (datedIndicesOnly && !hasPlanLineDate(plan.lignes[indice])) continue;
+      allIndicesUsed.add(normalizeIndice(indice));
     }
   }
 
@@ -1343,7 +1384,8 @@ function getPlanTableIndicesToShow(plansMap, selectedIndices = null) {
     -1,
     ...[...allIndicesUsed].map((indice) => INDICES.indexOf(indice)).filter((index) => index >= 0)
   );
-  return INDICES.slice(0, lastUsedIndex + 2);
+  const extraColumnCount = includeNextIndiceColumn ? 2 : 1;
+  return applyMaxColumns(INDICES.slice(0, lastUsedIndex + extraColumnCount));
 }
 
 function getOrderedZoneKeys(zoneKeys, zoneOrder = null) {
@@ -1373,7 +1415,20 @@ function getOrderedZoneKeys(zoneKeys, zoneOrder = null) {
   });
 }
 
-function renderZoneSections(container, rows, projet, typeKey, zoneOrder = null, selectedIndices = null, { interactive = true } = {}) {
+function renderZoneSections(
+  container,
+  rows,
+  projet,
+  typeKey,
+  zoneOrder = null,
+  selectedIndices = null,
+  {
+    interactive = true,
+    includeNextIndiceColumn = true,
+    datedIndicesOnly = false,
+    maxIndiceColumns = null,
+  } = {}
+) {
   const rowsByZone = new Map();
   for (const record of rows) {
     const zoneKey = getRecordZone(record);
@@ -1403,6 +1458,9 @@ function renderZoneSections(container, rows, projet, typeKey, zoneOrder = null, 
 
     if (!isCollapsed) {
       renderPlanTableSection(zoneSection, rowsByZone.get(zoneKey), projet, selectedIndices, {
+        datedIndicesOnly,
+        includeNextIndiceColumn,
+        maxIndiceColumns,
         wrapTable: interactive,
       });
     }
@@ -1421,6 +1479,9 @@ function renderRowsForSelectedType(container, rows, projet, typeKey = "", zoneOr
   }
 
   renderPlanTableSection(container, rows, projet, selectedIndices, {
+    datedIndicesOnly: options.datedIndicesOnly === true,
+    includeNextIndiceColumn: options.includeNextIndiceColumn !== false,
+    maxIndiceColumns: options.maxIndiceColumns ?? null,
     wrapTable: options.interactive !== false,
   });
 }

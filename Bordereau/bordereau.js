@@ -148,6 +148,8 @@ function applyFrozenUI(frozen) {
   document.body.classList.toggle("is-frozen", !!frozen);
   $("dateInput").disabled = frozen;
   $("addItem").disabled = frozen;
+  const bulkFillButton = $("bulkNbrExemplairesButton");
+  if (bulkFillButton) bulkFillButton.disabled = frozen;
   if (frozen) closeAddElementsDialog();
 
   // $("refUp").disabled = frozen;
@@ -166,7 +168,7 @@ function renderEmptyTableRow(message) {
   const row = tbody.insertRow();
   row.className = "empty-row";
   const cell = row.insertCell();
-  cell.colSpan = 5;
+  cell.colSpan = document.querySelectorAll("#invoiceTable thead th").length || 6;
   cell.textContent = message;
 }
 
@@ -204,6 +206,46 @@ function findLatestProjectPlan(projectName, planNumber) {
       if (!latest) return current;
       return isNewerPlanIndice(current, latest) ? current : latest;
     }, null);
+}
+
+function findProjectPlanForRecord(projectName, record) {
+  const projectKey = normalizeCompareValue(projectName);
+  const planKey = normalizeCompareValue(record?.N_Plan);
+  if (!projectKey || !planKey) return null;
+
+  const matchingPlans = getPlanRows().filter((plan) =>
+    normalizeCompareValue(plan.Nom_projet) === projectKey &&
+    normalizeCompareValue(plan.NumeroDocument) === planKey
+  );
+  if (!matchingPlans.length) return null;
+
+  const indiceKey = normalizeCompareValue(record?.Indice);
+  if (indiceKey) {
+    const sameIndice = matchingPlans.find((plan) => normalizeCompareValue(plan.Indice) === indiceKey);
+    if (sameIndice) return sameIndice;
+  }
+
+  return matchingPlans.reduce((latest, current) => {
+    if (!latest) return current;
+    return isNewerPlanIndice(current, latest) ? current : latest;
+  }, null);
+}
+
+function parseGristDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value === "number") {
+    const milliseconds = Math.abs(value) < 100000000000 ? value * 1000 : value;
+    return new Date(milliseconds);
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDisplayDate(value) {
+  const date = parseGristDate(value);
+  if (!date || date.getFullYear() < 1900 || date.getFullYear() > 3000) return "";
+  return date.toLocaleDateString("fr-FR");
 }
 
 function getProjectPlanOptions(projectName) {
@@ -771,6 +813,8 @@ function displayInvoiceTable() {
   const selectedProjectName = getProject();
   const refValue = getRef();
   const tbody = document.querySelector("#invoiceTable tbody");
+  const bulkFillButton = $("bulkNbrExemplairesButton");
+  if (bulkFillButton) bulkFillButton.disabled = true;
   tbody.innerHTML = "";
 
   if (!selectedProjectName) {
@@ -791,6 +835,7 @@ function displayInvoiceTable() {
     renderEmptyTableRow("Aucun element sur ce bordereau");
     return;
   }
+  if (bulkFillButton) bulkFillButton.disabled = frozen;
 
   const allProjectRecords = records.filter((r) => r.Projet === selectedProjectName);
 
@@ -799,6 +844,11 @@ function displayInvoiceTable() {
 
   // Options plans : uniquement ceux qui ont un Indice non vide dans ListePlan_NDC_COF
   const planOptions = getProjectPlanOptions(selectedProjectName);
+  const selectedPlanKeys = new Set(
+    refRecords
+      .map((record) => normalizeCompareValue(record.N_Plan))
+      .filter(Boolean)
+  );
 
   refRecords.forEach((record) => {
     const row = tbody.insertRow();
@@ -808,8 +858,12 @@ function displayInvoiceTable() {
     const nPlanCell = row.insertCell();
     const nPlanSelect = document.createElement("select");
     nPlanSelect.innerHTML = `<option value="">Choisir un plan</option>`;
+    const currentPlanKey = normalizeCompareValue(record.N_Plan);
 
     planOptions.forEach((plan) => {
+      const planKey = getPlanKey(plan);
+      if (planKey && planKey !== currentPlanKey && selectedPlanKeys.has(planKey)) return;
+
       const planNumber = textValue(plan.NumeroDocument);
       const option = document.createElement("option");
       option.value = planNumber;
@@ -831,6 +885,12 @@ function displayInvoiceTable() {
     // --- Désignation ---
     const designationCell = row.insertCell();
     designationCell.textContent = record.Designation || "";
+
+    // --- Date diffusion ---
+    const diffusionCell = row.insertCell();
+    diffusionCell.className = "diffusion-column no-print";
+    const matchingPlan = findProjectPlanForRecord(selectedProjectName, record);
+    diffusionCell.textContent = formatDisplayDate(matchingPlan?.DateDiffusion);
 
     // --- Nbr Exemplaires ---
     const nbrExemplairesCell = row.insertCell();
@@ -855,12 +915,41 @@ function displayInvoiceTable() {
 
     // --- Supprimer ---
     const deleteCell = row.insertCell();
+    deleteCell.className = "action-column no-print";
     const deleteBtn = document.createElement("button");
     deleteBtn.textContent = "Supprimer";
     deleteBtn.className = "delete-btn";
     deleteBtn.disabled = frozen;
     deleteCell.appendChild(deleteBtn);
   });
+}
+
+async function applyNbrExemplairesToCurrentBordereau() {
+  if (isFrozen()) {
+    alert("Bordereau marqu\u00e9 'Envoy\u00e9' : modification impossible.");
+    return;
+  }
+
+  const current = getCurrentBordereauRecords();
+  if (current.length === 0) return;
+
+  const defaultValue = textValue(current.find((record) => textValue(record.NbrExemplaires))?.NbrExemplaires);
+  const value = window.prompt("Nbr exemplaires a appliquer a toutes les lignes :", defaultValue);
+  if (value === null) return;
+
+  const nbrExemplaires = String(value).trim();
+  const updates = current.map((record) => [
+    "UpdateRecord",
+    BORDEREAU_TABLE,
+    record.id,
+    { NbrExemplaires: nbrExemplaires },
+  ]);
+
+  await applyUserActionsInBatches(updates);
+  current.forEach((record) => {
+    record.NbrExemplaires = nbrExemplaires;
+  });
+  displayInvoiceTable();
 }
 
 /** -------------------------
@@ -901,6 +990,7 @@ $("dateInput").addEventListener("change", () => updateBordereauData());
 
 $("refUp").addEventListener("click", () => updateRefValue(1));
 $("refDown").addEventListener("click", () => updateRefValue(-1));
+$("nbrExemplairesHeader")?.addEventListener("click", applyNbrExemplairesToCurrentBordereau);
 
 $("sentCheckbox").addEventListener("change", async (e) => {
   const sent = e.target.checked;
@@ -1001,8 +1091,8 @@ document.querySelector("#invoiceTable").addEventListener("change", async (e) => 
     }
   }
 
-  // NbrExemplaires (col 3)
-  if (target.tagName === "SELECT" && target.parentElement.cellIndex === 3) {
+  // NbrExemplaires (col 4)
+  if (target.tagName === "SELECT" && target.parentElement.cellIndex === 4) {
     const nbrExemplaires = target.value;
     await grist.docApi.applyUserActions([
       ["UpdateRecord", BORDEREAU_TABLE, recordId, { NbrExemplaires: nbrExemplaires }],
@@ -1028,8 +1118,8 @@ document.querySelector("#invoiceTable").addEventListener("dblclick", (e) => {
 
   const target = e.target;
 
-  // Double-clic sur NbrExemplaires (col 3) => input libre
-  if (target.tagName === "SELECT" && target.parentElement.cellIndex === 3) {
+  // Double-clic sur NbrExemplaires (col 4) => input libre
+  if (target.tagName === "SELECT" && target.parentElement.cellIndex === 4) {
     const cell = target.parentElement;
     const originalValue = target.value;
 

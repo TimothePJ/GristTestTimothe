@@ -57,8 +57,19 @@
           <th>N&deg; Plan</th>
           <th>Indice</th>
           <th>D&eacute;signation</th>
-          <th>Nbr exemplaires</th>
-          <th></th>
+          <th class="diffusion-column no-print">Date de diffusion</th>
+          <th id="nbrExemplairesHeader" class="bulk-fill-header" title="Appliquer a toutes les lignes">
+            <div class="bulk-fill-content">
+              <span>Nbr exemplaires</span>
+              <button
+                id="bulkNbrExemplairesButton"
+                class="bulk-fill-button no-print"
+                type="button"
+                aria-label="Appliquer un nombre d'exemplaires a toutes les lignes"
+              >Remplir</button>
+            </div>
+          </th>
+          <th class="action-column no-print"></th>
         </tr>
       </thead>
       <tbody></tbody>

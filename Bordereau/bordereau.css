@@ -226,7 +226,7 @@ button:hover:not(:disabled) {
 
 #invoiceTable {
   width: 100%;
-  min-width: 860px;
+  min-width: 1000px;
   border-collapse: separate;
   border-spacing: 0;
   background: var(--vc-panel);
@@ -284,12 +284,57 @@ button:hover:not(:disabled) {
 }
 
 #invoiceTable td:nth-child(4) {
-  width: 170px;
+  width: 145px;
+  color: var(--vc-blue-700);
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
 }
 
 #invoiceTable td:nth-child(5) {
+  width: 170px;
+}
+
+#invoiceTable td:nth-child(6) {
   width: 116px;
   text-align: right;
+}
+
+.bulk-fill-header {
+  cursor: pointer;
+}
+
+.bulk-fill-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bulk-fill-header:hover {
+  background: var(--vc-blue-700);
+}
+
+.bulk-fill-button {
+  min-height: 24px;
+  padding: 3px 8px;
+  border-color: rgba(255, 255, 255, 0.72);
+  background: #ffffff;
+  color: var(--vc-blue);
+  font-size: 0.74rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.bulk-fill-button:hover:not(:disabled) {
+  border-color: #ffffff;
+  background: #eef5fd;
+  color: var(--vc-blue-700);
+  box-shadow: none;
+}
+
+body.is-frozen .bulk-fill-header {
+  cursor: not-allowed;
 }
 
 #invoiceTable select,
@@ -532,6 +577,12 @@ body.is-frozen .main-container {
 
 body.is-frozen #invoiceTable tbody tr {
   background: #f6f8fb;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
 }
 
 @media (max-width: 1120px) {

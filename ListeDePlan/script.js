@@ -2016,6 +2016,10 @@ function getPrintAvailableIndexValues(selectedProject) {
       : getNomProjet(record);
     if (normalizeProjectName(recordProject) !== projectName) continue;
     if (!normalizeTypeDocumentValue(record?.Type_document)) continue;
+    const hasDateDiffusion = typeof hasValidDate === "function"
+      ? hasValidDate(record?.DateDiffusion)
+      : record?.DateDiffusion != null && String(record.DateDiffusion).trim() !== "";
+    if (!hasDateDiffusion) continue;
 
     const indice = normalizePrintIndexValue(record?.Indice);
     if (indice) indexSet.add(indice);
@@ -2131,20 +2135,18 @@ function setupPrintOrderDrag(list, itemSelector, dataKey) {
   });
 }
 
-function openPrintOptionsDialog(availableTypes, availableZones, availableIndices) {
+function openPrintOptionsDialog(availableTypes, availableZones) {
   return new Promise((resolve) => {
     const dialog = document.getElementById("dlg-print-options");
     const typeList = document.getElementById("printTypeOrderList");
     const zoneList = document.getElementById("printZoneOrderList");
     const cancelBtn = document.getElementById("print-options-cancel");
     const confirmBtn = document.getElementById("print-options-confirm");
-    const selectedIndices = [...availableIndices];
 
     if (!dialog || !typeList || !zoneList || !cancelBtn || !confirmBtn || typeof dialog.showModal !== "function") {
       resolve({
         orderedTypes: [...getDefaultPrintSelectedTypes(availableTypes)],
-        orderedZones: [...getDefaultPrintSelectedZones(availableZones)],
-        selectedIndices
+        orderedZones: [...getDefaultPrintSelectedZones(availableZones)]
       });
       return;
     }
@@ -2207,7 +2209,7 @@ function openPrintOptionsDialog(availableTypes, availableZones, availableIndices
         alert("Selectionnez au moins une zone a imprimer.");
         return;
       }
-      closeWith({ orderedTypes, orderedZones, selectedIndices });
+      closeWith({ orderedTypes, orderedZones });
     };
     const onClose = () => {
       const value = Object.prototype.hasOwnProperty.call(dialog, "__printResult")
@@ -2236,7 +2238,7 @@ function matchesCurrentPrintZones(record, orderedZones) {
   return orderedZones.includes(getZoneDropdownOptionValue(record?.Zone));
 }
 
-function buildPrintContainer(selectedProject, orderedTypes, orderedZones, selectedIndices) {
+function buildPrintContainer(selectedProject, orderedTypes, orderedZones) {
   const container = document.createElement("div");
   container.id = "plans-print-output";
   container.style.position = "absolute";
@@ -2268,8 +2270,11 @@ function buildPrintContainer(selectedProject, orderedTypes, orderedZones, select
     typeSection.appendChild(title);
 
     if (typeof renderRowsForSelectedType === "function") {
-      renderRowsForSelectedType(typeSection, rowsForType, normalizedProject, type, orderedZones, selectedIndices, {
+      renderRowsForSelectedType(typeSection, rowsForType, normalizedProject, type, orderedZones, null, {
+        datedIndicesOnly: true,
+        includeNextIndiceColumn: false,
         interactive: false,
+        maxIndiceColumns: 6,
       });
     }
 
@@ -2329,8 +2334,8 @@ async function savePlansPdfFromChildren(selectedProject, children) {
   doc.save(`${selectedProject} - Plans.pdf`);
 }
 
-async function generatePlansPdfFromOrderedTypes(selectedProject, orderedTypes, orderedZones, selectedIndices) {
-  const printContainer = buildPrintContainer(selectedProject, orderedTypes, orderedZones, selectedIndices);
+async function generatePlansPdfFromOrderedTypes(selectedProject, orderedTypes, orderedZones) {
+  const printContainer = buildPrintContainer(selectedProject, orderedTypes, orderedZones);
 
   try {
     const children = Array.from(printContainer.querySelectorAll("h2, h3, table"));
@@ -2420,15 +2425,14 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const printSelection = await openPrintOptionsDialog(availableTypes, availableZones, availableIndices);
+    const printSelection = await openPrintOptionsDialog(availableTypes, availableZones);
     if (!printSelection) return;
 
     syncMainTypeSelectionFromPrintOrder(printSelection.orderedTypes, availableTypes);
     await generatePlansPdfFromOrderedTypes(
       selectedProject,
       printSelection.orderedTypes,
-      printSelection.orderedZones,
-      printSelection.selectedIndices
+      printSelection.orderedZones
     );
   }, true);
 });
