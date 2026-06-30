@@ -84,8 +84,16 @@ function ensureImportFileInput() {
       }
       await refreshMsProject();
 
+      const planningSyncSuffix = result.planningSyncSkipped
+        ? ""
+        : result.planningSyncUpdatedCount > 0
+          ? `, ${result.planningSyncUpdatedCount} ligne(s) Planning_Projet synchronisee(s)`
+          : result.planningSyncMatchedCount > 0
+            ? ", aucune date Planning_Projet modifiee"
+            : ", aucune liaison Planning_Projet trouvee";
+
       setMsProjectStatus(
-        `Import termine (${result.sourceFileName}) : ${result.deletedCount || 0} ancienne(s) ligne(s) supprimee(s), ${result.importedCount} ligne(s) ajoutee(s).`
+        `Import termine (${result.sourceFileName}) : ${result.deletedCount || 0} ancienne(s) ligne(s) supprimee(s), ${result.importedCount} ligne(s) ajoutee(s)${planningSyncSuffix}.`
       );
     } catch (error) {
       console.error("Erreur import XML MS Project :", error);

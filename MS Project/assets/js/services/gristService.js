@@ -510,6 +510,259 @@ function equalsByTextOrNumber(a, b) {
   return aNumber === bNumber;
 }
 
+function buildComparableKeys(value) {
+  const text = toText(value);
+  if (!text) return [];
+
+  const keys = [`text:${text}`];
+  const number = parseComparableNumber(text);
+  if (number != null) {
+    keys.push(`number:${number}`);
+  }
+  return keys;
+}
+
+function buildMsProjectRowsByUniqueNumber(rows, uniqueNumberCol) {
+  const lookup = new Map();
+  for (const row of rows || []) {
+    for (const key of buildComparableKeys(row?.[uniqueNumberCol])) {
+      if (!lookup.has(key)) {
+        lookup.set(key, row);
+      }
+    }
+  }
+  return lookup;
+}
+
+function findMsProjectRowForPlanningLine(lookup, planningLineValue) {
+  for (const key of buildComparableKeys(planningLineValue)) {
+    if (lookup.has(key)) {
+      return lookup.get(key);
+    }
+  }
+  return null;
+}
+
+function resolvePlanningDemarrageSyncColumns(planningRows, planningTable) {
+  const columns = planningTable.columns || {};
+  return {
+    idCol: columns.id || "id",
+    lineCol: resolveColumn(
+      planningRows,
+      columns.linePlanning,
+      planningTable.linePlanningCandidates || []
+    ),
+    nomXmlCol: resolveColumn(
+      planningRows,
+      columns.nomXml,
+      planningTable.nomXmlCandidates || []
+    ),
+    demarrageCol: resolveColumn(
+      planningRows,
+      columns.demarragesTravaux,
+      planningTable.demarrageCandidates || []
+    ),
+    typeDocCol: resolveColumn(
+      planningRows,
+      columns.typeDoc || "Type_doc",
+      ["Type_doc", "TypeDoc"]
+    ),
+    dateLimiteCol: resolveColumn(
+      planningRows,
+      columns.dateLimite || "Date_limite",
+      ["Date_limite", "DateLimite"]
+    ),
+    duree1Col: resolveColumn(
+      planningRows,
+      columns.duree1 || "Duree_1",
+      ["Duree_1", "Duree1"]
+    ),
+    diffCoffrageCol: resolveColumn(
+      planningRows,
+      columns.diffCoffrage || "Diff_coffrage",
+      ["Diff_coffrage", "DiffCoffrage"]
+    ),
+    duree2Col: resolveColumn(
+      planningRows,
+      columns.duree2 || "Duree_2",
+      ["Duree_2", "Duree2"]
+    ),
+    diffArmatureCol: resolveColumn(
+      planningRows,
+      columns.diffArmature || "Diff_armature",
+      ["Diff_armature", "DiffArmature"]
+    ),
+    duree3Col: resolveColumn(
+      planningRows,
+      columns.duree3 || "Duree_3",
+      ["Duree_3", "Duree3"]
+    ),
+  };
+}
+
+function buildPlanningDemarrageSyncAction(
+  row,
+  normalizedIsoDate,
+  planningTable,
+  syncColumns,
+  msEndIso = ""
+) {
+  const planningRowId = Number(row?.[syncColumns.idCol]);
+  if (!Number.isInteger(planningRowId) || planningRowId <= 0) return null;
+
+  const demarrageDate = parseCalendarDate(normalizedIsoDate);
+  const msEndDate = parseCalendarDate(msEndIso);
+  const updates = {
+    [syncColumns.demarrageCol]: normalizedIsoDate,
+  };
+
+  const typeDoc = toText(row?.[syncColumns.typeDocCol]);
+  const isGenericMsLinkedTypeDoc =
+    Boolean(typeDoc) &&
+    !isCoffrageTypeDoc(typeDoc) &&
+    !isArmaturesTypeDoc(typeDoc);
+
+  if (isCoffrageTypeDoc(typeDoc) || isGenericMsLinkedTypeDoc) {
+    const duree1 = toInteger(row?.[syncColumns.duree1Col]);
+    const duree3 = toInteger(row?.[syncColumns.duree3Col]);
+    const diffCoffrageDate =
+      demarrageDate && duree3 != null && duree3 >= 0
+        ? subtractWeeksFromDate(demarrageDate, duree3)
+        : parseCalendarDate(row?.[syncColumns.diffCoffrageCol]) || msEndDate;
+    const dateLimiteDate =
+      diffCoffrageDate && duree1 != null && duree1 >= 0
+        ? subtractWeeksFromDate(diffCoffrageDate, duree1)
+        : parseCalendarDate(row?.[syncColumns.dateLimiteCol]);
+
+    const diffCoffrageIso = formatIsoDate(diffCoffrageDate);
+    const dateLimiteIso = formatIsoDate(dateLimiteDate);
+    if (syncColumns.diffCoffrageCol && diffCoffrageIso) {
+      updates[syncColumns.diffCoffrageCol] = diffCoffrageIso;
+    }
+    if (syncColumns.dateLimiteCol && dateLimiteIso) {
+      updates[syncColumns.dateLimiteCol] = dateLimiteIso;
+    } else if (syncColumns.dateLimiteCol && normalizedIsoDate) {
+      updates[syncColumns.dateLimiteCol] = normalizedIsoDate;
+    }
+  } else if (isArmaturesTypeDoc(typeDoc)) {
+    const duree2 = toInteger(row?.[syncColumns.duree2Col]);
+    const duree3 = toInteger(row?.[syncColumns.duree3Col]);
+    const diffArmatureDate =
+      demarrageDate && duree3 != null && duree3 >= 0
+        ? subtractWeeksFromDate(demarrageDate, duree3)
+        : parseCalendarDate(row?.[syncColumns.diffArmatureCol]) || msEndDate;
+    const diffCoffrageDate =
+      diffArmatureDate && duree2 != null && duree2 >= 0
+        ? subtractWeeksFromDate(diffArmatureDate, duree2)
+        : parseCalendarDate(row?.[syncColumns.diffCoffrageCol]);
+
+    const diffArmatureIso = formatIsoDate(diffArmatureDate);
+    const diffCoffrageIso = formatIsoDate(diffCoffrageDate);
+    if (syncColumns.diffArmatureCol && diffArmatureIso) {
+      updates[syncColumns.diffArmatureCol] = diffArmatureIso;
+    }
+    if (syncColumns.diffCoffrageCol && diffCoffrageIso) {
+      updates[syncColumns.diffCoffrageCol] = diffCoffrageIso;
+    }
+  }
+
+  return [
+    "UpdateRecord",
+    planningTable.sourceTable,
+    planningRowId,
+    updates,
+  ];
+}
+
+async function applyPlanningSyncActions(actions) {
+  if (!actions.length) return;
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  _msProjectServiceDiagnostics.actionBatchCount += 1;
+  _msProjectServiceDiagnostics.actionCount += actions.length;
+  const actionsStartedAt = performance.now();
+  await grist.docApi.applyUserActions(actions);
+  _msProjectServiceDiagnostics.actionDurationMs += performance.now() - actionsStartedAt;
+}
+
+async function syncPlanningDemarragesFromImportedMsProjectRows(
+  importedRecords,
+  sourceFileName
+) {
+  const msTable = APP_CONFIG.grist.msProjectTable;
+  const planningTable = APP_CONFIG.grist.planningSyncTable;
+
+  if (!planningTable?.enabled) {
+    return { updatedCount: 0, matchedCount: 0, skipped: true, invalidStartCount: 0 };
+  }
+  if (!planningTable?.sourceTable) {
+    throw new Error("Configuration table Planning_Projet manquante.");
+  }
+
+  const uniqueNumberCol = msTable.columns?.uniqueNumber;
+  const startCol = msTable.columns?.start;
+  const endCol = msTable.columns?.end;
+  if (!uniqueNumberCol || !startCol || !endCol) {
+    throw new Error("Mapping MS Project incomplet pour la synchronisation Planning_Projet.");
+  }
+
+  const planningRows = await fetchTableRows(planningTable.sourceTable);
+  const syncColumns = resolvePlanningDemarrageSyncColumns(planningRows, planningTable);
+  if (!syncColumns.lineCol || !syncColumns.demarrageCol) {
+    throw new Error("Colonnes Planning_Projet introuvables pour la synchronisation.");
+  }
+
+  const msRowsByUniqueNumber = buildMsProjectRowsByUniqueNumber(
+    importedRecords,
+    uniqueNumberCol
+  );
+  const xmlName = toText(sourceFileName);
+  const actions = [];
+  let matchedCount = 0;
+  let invalidStartCount = 0;
+
+  for (const row of planningRows) {
+    const msRow = findMsProjectRowForPlanningLine(
+      msRowsByUniqueNumber,
+      row?.[syncColumns.lineCol]
+    );
+    if (!msRow) continue;
+    if (syncColumns.nomXmlCol && xmlName && toText(row?.[syncColumns.nomXmlCol]) !== xmlName) {
+      continue;
+    }
+
+    matchedCount += 1;
+    const startIso = toText(msRow?.[startCol]);
+    if (!isIsoDate(startIso)) {
+      invalidStartCount += 1;
+      continue;
+    }
+
+    const action = buildPlanningDemarrageSyncAction(
+      row,
+      startIso,
+      planningTable,
+      syncColumns,
+      toText(msRow?.[endCol])
+    );
+    if (action) {
+      actions.push(action);
+    }
+  }
+
+  await applyPlanningSyncActions(actions);
+  return {
+    updatedCount: actions.length,
+    matchedCount,
+    skipped: false,
+    invalidStartCount,
+  };
+}
+
 export async function importMsProjectXmlFile(file) {
   const table = APP_CONFIG.grist.msProjectTable;
   if (!table?.sourceTable) {
@@ -636,6 +889,10 @@ export async function importMsProjectXmlFile(file) {
   }
 
   await applyUserActionsInBatches(actions);
+  const planningSyncResult = await syncPlanningDemarragesFromImportedMsProjectRows(
+    importedRecords,
+    sourceFileName
+  );
 
   return {
     extractedTaskCount: taskNodes.length,
@@ -644,6 +901,10 @@ export async function importMsProjectXmlFile(file) {
     addedCount,
     deletedCount: rowIdsToDelete.length,
     updatedCount: 0,
+    planningSyncUpdatedCount: planningSyncResult.updatedCount,
+    planningSyncMatchedCount: planningSyncResult.matchedCount,
+    planningSyncSkipped: planningSyncResult.skipped,
+    planningSyncInvalidStartCount: planningSyncResult.invalidStartCount,
     sourceFileName,
   };
 }
