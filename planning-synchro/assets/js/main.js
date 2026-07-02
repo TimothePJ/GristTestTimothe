@@ -215,11 +215,19 @@ function bootstrapApp() {
       controllerBounds = bounds;
 
       const initialViewport = buildInitialProjectViewport({ firstPlanningDate, bounds });
+      // Only reuse a persisted window for the SAME project it was saved from
+      // (persisted.projectId === project.id) AND only if it still fits the
+      // current bounds. Any other case (different project, or a window that no
+      // longer fits) always falls back to the fresh ~1-year initial window —
+      // this preserves same-project reload continuity without letting Project
+      // A's stale window leak onto Project B just because B's bounds happen to
+      // contain it.
       const persisted = loadPersistedViewport();
-      viewport =
-        persisted && viewportFitsWithinBounds(persisted, bounds)
-          ? buildCanonicalSharedViewport(persisted)
-          : initialViewport;
+      const canReusePersisted =
+        persisted &&
+        persisted.projectId === project.id &&
+        viewportFitsWithinBounds(persisted.viewport, bounds);
+      viewport = canReusePersisted ? buildCanonicalSharedViewport(persisted.viewport) : initialViewport;
 
       chargeBoard.render({ workers, viewport, editMode: false });
     } else {

@@ -18,6 +18,12 @@ export const state = {
   viewport: null,
 };
 
+// Returns the FULL persisted record `{ viewport, projectId, projectName }`
+// (or `null`), NOT just the bare viewport: callers must be able to check the
+// stored `projectId` so a persisted window is only ever reused for the SAME
+// project it was saved from. A window that geometrically fits within a
+// DIFFERENT project's bounds must not silently override that project's fresh
+// ~1-year initial window (see main.js loadProject).
 export function loadPersistedViewport() {
   if (typeof localStorage === "undefined") return null;
 
@@ -26,9 +32,15 @@ export function loadPersistedViewport() {
     if (!raw) return null;
 
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" && parsed.viewport && typeof parsed.viewport === "object"
-      ? parsed.viewport
-      : null;
+    if (!parsed || typeof parsed !== "object" || !parsed.viewport || typeof parsed.viewport !== "object") {
+      return null;
+    }
+
+    return {
+      viewport: parsed.viewport,
+      projectId: Number.isInteger(parsed.projectId) ? parsed.projectId : null,
+      projectName: typeof parsed.projectName === "string" ? parsed.projectName : "",
+    };
   } catch (error) {
     console.warn("Erreur lecture localStorage planning-synchro :", error);
     return null;
