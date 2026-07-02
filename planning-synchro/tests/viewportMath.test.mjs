@@ -18,6 +18,16 @@ test("clampToBounds keeps window inside bounds", () => {
   assert.ok(v.rangeEndDate <= "2027-06-30");
 });
 
+test("clampToBounds keeps anchorDate within the window for narrow bounds", () => {
+  const v = clampToBounds(
+    buildCanonicalSharedViewport({ firstVisibleDate: "2027-01-01", visibleDays: 31 }),
+    { startDate: "2027-01-01", endDate: "2027-01-03" }
+  );
+  assert.ok(v.rangeEndDate <= "2027-01-03", `rangeEndDate ${v.rangeEndDate}`);
+  assert.ok(v.anchorDate >= v.firstVisibleDate && v.anchorDate <= v.rangeEndDate,
+    `anchorDate ${v.anchorDate} must be within [${v.firstVisibleDate}, ${v.rangeEndDate}]`);
+});
+
 test("getDayBoundaryLeftPx is proportional", () => {
   const w = 620; // content width
   const x0 = getDayBoundaryLeftPx(base, "2027-01-01", w);

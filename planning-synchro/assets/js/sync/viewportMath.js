@@ -79,11 +79,16 @@ export function clampToBounds(viewport, bounds) {
   // buildCanonicalSharedViewport re-imposes a minVisibleDays floor on
   // visibleDays; for a bounds span narrower than that floor, re-apply the
   // shrink so the returned window still never extends past bounds.endDate
-  // (the invariant this function must guarantee).
+  // (the invariant this function must guarantee). anchorDate must also be
+  // re-derived from the FINAL shrunk visibleDays, otherwise it (computed
+  // by buildCanonicalSharedViewport off the floored visibleDays) can land
+  // past the shrunk rangeEndDate — an invalid canonical viewport that
+  // later centering / today-marker logic keys off.
   if (canonicalViewport.rangeEndDate > boundsEnd) {
     return {
       ...canonicalViewport,
       visibleDays,
+      anchorDate: shiftIsoDateValue(firstVisibleDate, Math.floor(visibleDays / 2)),
       rangeEndDate: shiftIsoDateValue(firstVisibleDate, visibleDays - 1),
     };
   }
