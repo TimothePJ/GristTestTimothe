@@ -27,3 +27,11 @@ test("initial viewport clamps anchor to bounds start when planning precedes boun
   });
   assert.ok(v.firstVisibleDate >= "2026-04-06");
 });
+
+test("initial viewport never exceeds bounds end for a sub-7-day bounds span", () => {
+  const v = buildInitialProjectViewport({
+    firstPlanningDate: "2027-01-01",
+    bounds: { startDate: "2027-01-01", endDate: "2027-01-03" },
+  });
+  assert.ok(v.rangeEndDate <= "2027-01-03", `rangeEndDate ${v.rangeEndDate} must be <= 2027-01-03`);
+});

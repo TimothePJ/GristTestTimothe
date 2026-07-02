@@ -76,9 +76,23 @@ export function buildInitialProjectViewport({ firstPlanningDate, bounds }) {
   // keep window within bounds end
   if (boundsEnd && anchor) {
     const maxSpanFromAnchor = getInclusiveDaySpan(anchor, boundsEnd);
-    visibleDays = clamp(Math.min(visibleDays, maxSpanFromAnchor), minVisibleDays, maxVisibleDays);
+    // The "don't exceed bounds end" cap takes priority over the minVisibleDays
+    // floor: for a narrow bounds span (< minVisibleDays) we must NOT clamp back
+    // up, or rangeEndDate would run past bounds.endDate.
+    visibleDays = Math.max(1, Math.min(visibleDays, maxSpanFromAnchor));
   }
-  return buildCanonicalSharedViewport({
+  const canonicalViewport = buildCanonicalSharedViewport({
     firstVisibleDate: anchor, rangeStartDate: anchor, anchorDate: anchor, visibleDays,
   });
+  // buildCanonicalSharedViewport re-imposes the minVisibleDays floor on
+  // visibleDays; re-apply the narrow-span cap so the returned window still
+  // never extends past bounds.endDate (the invariant later tasks depend on).
+  if (boundsEnd && canonicalViewport.rangeEndDate > boundsEnd) {
+    return {
+      ...canonicalViewport,
+      visibleDays,
+      rangeEndDate: shiftIsoDateValue(anchor, visibleDays - 1),
+    };
+  }
+  return canonicalViewport;
 }
