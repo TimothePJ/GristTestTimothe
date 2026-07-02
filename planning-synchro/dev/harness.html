@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Planning + Plan de charge</title>
+  <script type="module" src="./mock-grist.js"></script>
+  <script src="https://unpkg.com/vis-timeline/standalone/umd/vis-timeline-graph2d.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/vis-timeline/styles/vis-timeline-graph2d.min.css" />
+  <link rel="stylesheet" href="../assets/css/variables.css" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script type="module" src="../assets/js/main.js"></script>
+</head>
+<body>
+  <header id="ps-toolbar" class="ps-toolbar">
+    <div class="ps-project">
+      <label for="ps-project-select">Projet :</label>
+      <select id="ps-project-select"><option value="">Choisir un projet</option></select>
+    </div>
+    <div class="ps-nav">
+      <button id="ps-prev" type="button" title="Periode precedente">&lt;</button>
+      <button id="ps-today" type="button">Aujourd'hui</button>
+      <button id="ps-next" type="button" title="Periode suivante">&gt;</button>
+    </div>
+    <div class="ps-zoom" role="group" aria-label="Zoom">
+      <button type="button" data-ps-zoom="week">Semaine</button>
+      <button type="button" data-ps-zoom="month" class="is-active">Mois</button>
+      <button type="button" data-ps-zoom="year">Annee</button>
+    </div>
+    <div id="ps-range" class="ps-range" aria-live="polite">-</div>
+  </header>
+
+  <section id="ps-empty" class="ps-empty" hidden>
+    <p>Selectionne un projet pour afficher les plannings.</p>
+  </section>
+
+  <main id="ps-main" class="ps-main" hidden>
+    <div class="ps-pane ps-pane--planning">
+      <label class="ps-aggregate">
+        <input id="ps-aggregate-toggle" type="checkbox" />
+        <span>Rassembler visuellement le planning</span>
+      </label>
+      <div id="ps-planning" class="ps-planning"></div>
+    </div>
+    <div class="ps-pane ps-pane--charge">
+      <div id="ps-charge" class="ps-charge"></div>
+      <div id="ps-charge-empty" class="ps-charge-empty" hidden>Aucun previsionnel pour ce projet.</div>
+    </div>
+  </main>
+</body>
+</html>
