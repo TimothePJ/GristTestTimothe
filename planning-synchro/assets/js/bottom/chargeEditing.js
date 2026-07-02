@@ -573,5 +573,16 @@ export function attachChargeEditing(boardEl, { getProjectNumber, getVisibleSlots
     dragState = null;
   }
 
-  return { detach };
+  // Exposes the live edit-mode flag so main.js's onChanged() can re-render the
+  // charge board with the CORRECT editMode instead of a hardcoded false: this
+  // module's persistWrite().finally re-asserts the sticky edit mode
+  // synchronously after a write, but a subsequent chargeBoard.render()/
+  // setWindow() (triggered by onChanged + the controller's follow-up rAF)
+  // would otherwise overwrite it back to locked using chargeBoard.lastEditMode.
+  // Reading editModeEnabled here keeps ONE source of truth.
+  function isEditModeEnabled() {
+    return editModeEnabled;
+  }
+
+  return { detach, isEditModeEnabled };
 }

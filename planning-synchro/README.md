@@ -29,10 +29,14 @@ correction pixel.
 | `TimeSegment` | Plan de charge prévisionnel (bas, éditable), filtré par `NumeroProjet` | `NumeroProjet`, `Name`, `Start_At`, `End_At`, `Allocation_Days`, `Effectif`, `Label` |
 | `ProjectTeam` | Rôle de chaque personne pour le regroupement (Projeteurs / Ingénieurs / Autres), filtré par `NumeroProjet` | `NumeroProjet`, `Name`, `Role`, `Daily_Rate` |
 
-Les colonnes `TimeSegment` sont résolues avec des alias tolérants
+La tolérance d'alias sur les colonnes `TimeSegment`
 (`Start_At`/`Start_Date`/`StartAt`/`StartDate`/`Start`, etc. — voir
-`assets/js/services/gristService.js`), pour rester compatible avec les
-variantes de nommage déjà en usage sur d'autres documents.
+`assets/js/services/gristService.js`) s'applique **uniquement au chemin
+d'écriture** (`createTimeSegment`/`updateTimeSegment`). Le chemin de
+**lecture** (filtre `fetchProjectData`, `buildWorkersFromSegments`,
+`computeTimeSegmentBounds`) utilise les identifiants de colonnes tels que
+configurés dans `assets/js/config.js`, qui correspondent aux noms réels des
+tables livrées.
 
 ## Accès Grist
 

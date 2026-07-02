@@ -288,7 +288,14 @@ function bootstrapApp() {
           els.charge.hidden = true;
         }
 
-        chargeBoard.render({ workers: nextWorkers, viewport: controller.getViewport(), editMode: false });
+        // Preserve the sticky edit mode across the post-write re-render:
+        // chargeEditing.persistWrite() re-asserts editModeEnabled synchronously
+        // in its finally, but this render() (and the controller's follow-up rAF
+        // re-render below, which reuses chargeBoard.lastEditMode) would reset it
+        // to locked if we hardcoded false here. Read the live flag from the
+        // editing controller so ONE source of truth drives both.
+        const currentEditMode = editing ? editing.isEditModeEnabled() : false;
+        chargeBoard.render({ workers: nextWorkers, viewport: controller.getViewport(), editMode: currentEditMode });
         controller.setViewport(controller.getViewport());
       },
     });
