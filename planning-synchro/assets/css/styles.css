@@ -1,0 +1,755 @@
+/* planning-synchro — visual coherence pass (Task 15).
+   Tokens (colors/spacing/radius/shadow) come from variables.css, ported from
+   `gestion-depenses2/assets/css/variables.css` and cross-checked against
+   `Planning Projet/assets/css/variables.css` — see that file's header
+   comment. The single most important section below is "CRITICAL:
+   left-column alignment", which makes the top pane's vis-timeline and the
+   bottom pane's charge-plan grid share the exact same left-column width
+   (--ps-left-col-width) so their timeline content areas start at the same
+   x — the whole point of this widget. */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  padding: var(--spacing-2) var(--spacing-3);
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color: var(--color-text);
+  background: var(--color-surface-muted);
+}
+
+/* ==========================================================
+   Toolbar
+   ========================================================== */
+
+.ps-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: var(--spacing-2) var(--spacing-3);
+  margin-bottom: var(--spacing-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.ps-project {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  font-weight: 600;
+}
+
+.ps-project label {
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
+#ps-project-select {
+  min-width: 220px;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.ps-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ps-nav button,
+.ps-zoom button {
+  padding: 8px 14px;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: var(--color-primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.ps-nav button:hover,
+.ps-zoom button:hover {
+  background: var(--color-accent);
+  transform: translateY(-1px);
+}
+
+#ps-prev,
+#ps-next {
+  min-width: 34px;
+  padding-inline: 0;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.ps-zoom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  background: var(--color-surface-muted);
+  border-radius: var(--radius-sm);
+}
+
+.ps-zoom button {
+  padding: 6px 12px;
+  color: var(--color-text-muted);
+  background: transparent;
+}
+
+.ps-zoom button:hover {
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  transform: none;
+}
+
+.ps-zoom button.is-active {
+  color: #fff;
+  background: var(--color-primary);
+}
+
+.ps-range {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* ==========================================================
+   Empty states
+   ========================================================== */
+
+.ps-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  padding: var(--spacing-5);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.ps-empty p {
+  margin: 0;
+  font-size: 1rem;
+}
+
+/* `.ps-empty { display: flex; }` above is an author rule, so — per normal
+   CSS cascade origin rules — it beats the UA stylesheet's `[hidden] {
+   display: none; }` at equal specificity even though the UA rule "should"
+   feel more fundamental. Restate it explicitly so the `hidden` attribute
+   (toggled by main.js) still hides this element. */
+.ps-empty[hidden] {
+  display: none;
+}
+
+.ps-charge-empty {
+  padding: var(--spacing-3);
+  margin-top: var(--spacing-2);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+  text-align: center;
+  font-weight: 600;
+}
+
+/* ==========================================================
+   Panes layout
+   ========================================================== */
+
+.ps-main {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Same fix as .ps-empty[hidden] above: restate [hidden] so main.js's
+   els.main.hidden toggle still hides this element (an author `display: flex`
+   rule otherwise beats the UA `[hidden] { display: none; }` rule). */
+.ps-main[hidden] {
+  display: none;
+}
+
+.ps-pane {
+  padding: 0;
+}
+
+.ps-pane--planning {
+  padding-bottom: var(--spacing-3);
+  margin-bottom: var(--spacing-3);
+  border-bottom: 2px solid var(--color-border);
+}
+
+.ps-pane--charge {
+  padding-bottom: var(--spacing-3);
+}
+
+/* Aggregate checkbox, above the top (planning) pane */
+.ps-aggregate {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: var(--spacing-2);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ps-aggregate input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+/* ==========================================================
+   Top pane: vis-timeline (read-only Planning_Projet phases)
+   ========================================================== */
+
+#ps-planning {
+  /* No real border/padding on this element: it is vis-timeline's own mount
+     point, so its content box left edge must sit at literally 0px from its
+     own bounding rect for the left-column math below to be exact (a real
+     border/padding here would shift vis-timeline's internal panels by that
+     amount, relative to the charge board's own content offset — see the
+     "CRITICAL" section right below). The card look (border + rounded
+     corners) is drawn with an INSET box-shadow instead, which is purely
+     decorative and does not participate in the box model. */
+  position: relative;
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  box-shadow:
+    inset 0 0 0 1px var(--color-border),
+    var(--shadow-card);
+  overflow: hidden;
+}
+
+/* Neutralize vis-timeline's own default border/margin on its root element,
+   so it fills #ps-planning's content box exactly (no extra inset beyond the
+   decorative box-shadow above). */
+#ps-planning .vis-timeline {
+  margin: 0 !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+/* ==========================================================
+   CRITICAL: left-column alignment between the two panes.
+
+   Both panes' timeline CONTENT area must start at the SAME x so a given
+   date sits at the same horizontal pixel in both. The charge board's left
+   name column is --ps-left-col-width (see .charge-plan-board below, which
+   binds --charge-plan-name-col-width to this same token). This makes
+   vis-timeline's left label panel that SAME width and shifts its
+   center/top/bottom panels accordingly — the same technique
+   `Planning Projet/assets/css/styles.css` uses under
+   `body.planning-sync-embedded #planningTimeline .vis-panel.*` (search
+   --planning-sync-reference-left-width there), scoped here to #ps-planning
+   instead of a body class since this app only ever runs in this one
+   aligned layout (no axis-only/header-only/external-axis variants).
+   ========================================================== */
+
+#ps-planning .vis-panel.vis-left {
+  width: var(--ps-left-col-width) !important;
+  min-width: var(--ps-left-col-width) !important;
+  max-width: var(--ps-left-col-width) !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+  background: var(--color-surface-muted) !important;
+  border-right: 1px solid var(--color-border) !important;
+}
+
+#ps-planning .vis-panel.vis-center,
+#ps-planning .vis-panel.vis-top,
+#ps-planning .vis-panel.vis-bottom {
+  left: var(--ps-left-col-width) !important;
+  width: calc(100% - var(--ps-left-col-width)) !important;
+}
+
+#ps-planning .vis-panel.vis-top {
+  background: var(--color-surface) !important;
+  border-bottom: 1px solid var(--color-border) !important;
+}
+
+/* Left-align the group labels (task names), matching the charge board's
+   .charge-plan-cell--name (also left-aligned). */
+#ps-planning .vis-labelset .vis-label {
+  box-sizing: border-box !important;
+}
+
+#ps-planning .vis-labelset .vis-label .vis-inner {
+  width: 100% !important;
+  box-sizing: border-box !important;
+  padding: 0 12px !important;
+  text-align: left !important;
+  justify-content: flex-start !important;
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--color-text);
+}
+
+/* ==========================================================
+   vis-timeline chrome (axis / grid / items) — token-driven polish
+   ========================================================== */
+
+#ps-planning .vis-time-axis {
+  background: var(--color-surface);
+}
+
+#ps-planning .vis-time-axis .vis-grid.vis-minor {
+  border-color: var(--color-primary-soft) !important;
+}
+
+#ps-planning .vis-time-axis .vis-grid.vis-major {
+  border-color: var(--color-border) !important;
+}
+
+#ps-planning .vis-time-axis .vis-text {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}
+
+#ps-planning .vis-item {
+  color: var(--color-text);
+  font-size: 0.78rem;
+  line-height: normal;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+#ps-planning .vis-item .vis-item-content {
+  height: 100%;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+/* Planning phase colors (top pane, read-only vis-timeline items). Scoped to
+   #ps-planning so these never leak onto any other `.vis-item` on the page.
+   Ported from `Planning Projet/assets/css/styles.css` (search .phase-coffrage,
+   .phase-armature, .phase-ndc, .phase-coupes, .phase-demolition, .phase-generic,
+   .phase-demarrage). Only the base (non "-past"/"-realise-complete") colors are
+   kept: this mini pane is read-only and does not track realisation/retard state. */
+#ps-planning .vis-item.phase-coffrage {
+  background-color: #fef3c7 !important;
+  border-color: #fde68a !important;
+  color: #92400e !important;
+}
+
+#ps-planning .vis-item.phase-armature {
+  background-color: #f3f4f6 !important;
+  border-color: #d1d5db !important;
+  color: #475569 !important;
+}
+
+#ps-planning .vis-item.phase-ndc {
+  background-color: #e9e6f2 !important;
+  border-color: #c9c0de !important;
+  color: #4d426a !important;
+}
+
+#ps-planning .vis-item.phase-coupes {
+  background-color: #d4f7e6 !important;
+  border-color: #43CD80 !important;
+  color: #1a5c38 !important;
+}
+
+#ps-planning .vis-item.phase-demolition {
+  background-color: #fde8e8 !important;
+  border-color: #CD0000 !important;
+  color: #7a0000 !important;
+}
+
+#ps-planning .vis-item.phase-generic {
+  background-color: #ede9ff !important;
+  border-color: #8470FF !important;
+  color: #3d2e8a !important;
+}
+
+#ps-planning .vis-item.phase-demarrage {
+  background-color: #dcfce7 !important;
+  border-color: #86efac !important;
+  color: transparent !important;
+}
+
+#ps-planning .vis-item.phase-demarrage .vis-item-content {
+  padding: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+}
+
+/* ==========================================================
+   Bottom pane: charge-plan grid (editable plan de charge)
+
+   Layout rules ported from `gestion-depenses2/assets/css/styles.css`
+   (search .charge-plan-row, .charge-plan-segment-bar, .charge-plan-role-row,
+   .charge-plan-cell--name), adapted for the roles-only header (Task 11):
+   - Only a "name" column remains (the source's "Total jours" column and header
+     month band are dropped), so .charge-plan-row/.charge-plan-role-row use a
+     2-track grid (name, timeline) instead of 3, and the role label/filler
+     split is grid-column 1/2 + 2/3 instead of 1/3 + 3/4.
+   - The source's `.charge-plan-grid-month` per-month decorative background
+     wrapper is dropped: this port lays out one flat day grid across the exact
+     viewport window (see bottom/chargeBoard.js "KEY ADAPTATIONS"), so
+     `.charge-plan-grid-day` (weekend shading) sits directly under
+     `.charge-plan-track-grid`.
+   - `--charge-plan-name-col-width` is bound to the shared `--ps-left-col-width`
+     token so this pane's name column matches the top pane's task column width.
+   - Selectors scope on the `.charge-plan-board` class (added by
+     createChargeBoard) rather than the source's `#charge-plan-board` id, since
+     containerEl's id is caller-chosen.
+   - Task 15 token pass: solid brand colors (#004990 / #fff-as-surface) now
+     use the shared --color-* tokens from variables.css; the many rgba(0, 73,
+     144, alpha) borders/shadows are kept as literals (alpha layering, not a
+     single token) — this matches how gestion-depenses2/Planning Projet
+     themselves use ad hoc rgba(0, 73, 144, alpha) throughout rather than
+     tokenizing every shade. .charge-plan-scroll's border is drawn as an
+     INSET box-shadow (not a real `border`) for the same reason #ps-planning
+     uses one above: it must not add to the box model, so the timeline
+     content column starts at the exact same x as the top pane's. */
+.charge-plan-board {
+  --charge-plan-name-col-width: var(--ps-left-col-width);
+}
+
+.charge-plan-scroll {
+  position: relative;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  box-shadow: inset 0 0 0 1px var(--color-border);
+  isolation: isolate;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
+}
+
+.charge-plan-timeline {
+  min-width: calc(var(--charge-plan-name-col-width) + var(--timeline-width));
+}
+
+.charge-plan-row,
+.charge-plan-role-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--charge-plan-name-col-width) var(--timeline-width);
+  min-width: calc(var(--charge-plan-name-col-width) + var(--timeline-width));
+  isolation: isolate;
+}
+
+.charge-plan-cell,
+.charge-plan-role-cell {
+  min-height: var(--row-height, 72px);
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(0, 73, 144, 0.08);
+  background: var(--color-surface);
+}
+
+.charge-plan-cell--name {
+  position: sticky;
+  left: 0;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: left;
+  width: var(--charge-plan-name-col-width);
+  min-width: var(--charge-plan-name-col-width);
+  max-width: var(--charge-plan-name-col-width);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  box-shadow:
+    1px 0 0 rgba(0, 73, 144, 0.08),
+    10px 0 18px rgba(8, 21, 38, 0.04);
+  background: var(--color-surface);
+  background-clip: padding-box;
+}
+
+.charge-plan-role-cell {
+  min-height: auto;
+  padding-block: 7px;
+  padding-inline: 14px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  line-height: 1.2;
+  color: #fff;
+  background: rgba(0, 73, 144, 0.9);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.charge-plan-role-cell--label {
+  grid-column: 1 / 2;
+  position: sticky;
+  left: 0;
+  z-index: 14;
+  text-align: left;
+  box-shadow:
+    1px 0 0 rgba(0, 73, 144, 0.12),
+    10px 0 18px rgba(8, 21, 38, 0.05),
+    0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.charge-plan-role-cell--filler {
+  grid-column: 2 / 3;
+}
+
+.charge-plan-cell--timeline {
+  position: relative;
+  z-index: 1;
+  padding: 0;
+  overflow: hidden;
+}
+
+.charge-plan-track {
+  position: relative;
+  min-width: var(--timeline-width);
+  min-height: var(--row-height, 72px);
+  user-select: none;
+  touch-action: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(245, 248, 252, 0.92));
+}
+
+.charge-plan-track-grid {
+  position: absolute;
+  inset: 0;
+  min-width: var(--timeline-width);
+  min-height: var(--row-height, 72px);
+  pointer-events: none;
+}
+
+.charge-plan-grid-day {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  background: rgba(8, 21, 38, 0.08);
+}
+
+.charge-plan-track-bars {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.charge-plan-segment-bar {
+  position: absolute;
+  height: 24px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0;
+  padding: 0 18px;
+  border: 1px solid rgba(6, 60, 123, 0.16);
+  border-radius: 999px;
+  background: linear-gradient(135deg, #3b7ed8, #0f5bb8);
+  box-shadow: 0 10px 18px rgba(15, 91, 184, 0.18);
+  color: #fff;
+  cursor: pointer;
+  pointer-events: auto;
+  overflow: visible;
+}
+
+.charge-plan-segment-bar:hover {
+  filter: brightness(1.03);
+}
+
+.charge-plan-board.is-segment-editing-locked .charge-plan-track {
+  cursor: not-allowed;
+}
+
+.charge-plan-board.is-segment-editing-locked .charge-plan-segment-bar {
+  cursor: default;
+  filter: saturate(0.78);
+}
+
+.charge-plan-board.is-segment-editing-locked .charge-plan-segment-bar:hover {
+  filter: saturate(0.78);
+}
+
+.charge-plan-board.is-segment-editing-locked .charge-plan-segment-handle {
+  display: none;
+}
+
+.charge-plan-segment-bar.is-resizing {
+  opacity: 0.38;
+}
+
+.charge-plan-segment-bar.is-compact {
+  padding: 0 10px;
+  cursor: ew-resize;
+}
+
+.charge-plan-segment-bar.is-compact .charge-plan-segment-handle {
+  display: none;
+}
+
+.charge-plan-segment-handle {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  cursor: ew-resize;
+  transform: translateY(-50%);
+  box-shadow: 0 0 0 1px rgba(6, 60, 123, 0.08);
+}
+
+.charge-plan-segment-handle.is-start {
+  left: 3px;
+}
+
+.charge-plan-segment-handle.is-end {
+  right: 3px;
+}
+
+.charge-plan-segment-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.charge-plan-selection-preview {
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  z-index: 4;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 6px;
+  border: 1px dashed rgba(0, 73, 144, 0.55);
+  border-radius: 16px;
+  background: rgba(0, 73, 144, 0.16);
+  pointer-events: none;
+}
+
+.charge-plan-selection-preview[hidden] {
+  display: none !important;
+}
+
+.charge-plan-selection-preview.is-invalid {
+  border-color: rgba(180, 35, 24, 0.72);
+  background: rgba(180, 35, 24, 0.16);
+}
+
+.charge-plan-selection-preview.is-invalid .charge-plan-selection-label {
+  color: #b42318;
+}
+
+.charge-plan-selection-label {
+  color: var(--color-primary);
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.charge-plan-edit-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.charge-plan-edit-mode-toggle {
+  padding: 9px 16px;
+  border: 1px solid rgba(0, 73, 144, 0.18);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-primary);
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(8, 21, 38, 0.06);
+}
+
+.charge-plan-edit-mode-toggle:hover {
+  background: rgba(0, 73, 144, 0.06);
+}
+
+.charge-plan-edit-mode-toggle.is-active {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: #fff;
+  box-shadow: 0 10px 20px rgba(0, 73, 144, 0.18);
+}
+
+.charge-plan-context-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 210px;
+  padding: 6px;
+  border: 1px solid rgba(0, 73, 144, 0.14);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: 0 18px 40px rgba(8, 21, 38, 0.22);
+}
+
+.charge-plan-context-menu[hidden] {
+  display: none !important;
+}
+
+.charge-plan-context-action {
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: #172433;
+  text-align: left;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.charge-plan-context-action:hover {
+  background: rgba(0, 73, 144, 0.06);
+}
+
+.charge-plan-context-action[data-action="edit-segment"] {
+  color: #0b63c8;
+}
+
+.charge-plan-context-action[data-action="edit-segment"]:hover {
+  background: rgba(11, 99, 200, 0.12);
+}
+
+.charge-plan-context-action[data-action="delete-segment"] {
+  color: #b42318;
+}
+
+.charge-plan-context-action[data-action="delete-segment"]:hover {
+  background: rgba(180, 35, 24, 0.08);
+}
