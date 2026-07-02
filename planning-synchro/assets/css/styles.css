@@ -1,1 +1,54 @@
 body { margin: 0; font-family: system-ui, sans-serif; }
+
+/* Planning phase colors (top pane, read-only vis-timeline items).
+   Ported from `Planning Projet/assets/css/styles.css` (search .phase-coffrage,
+   .phase-armature, .phase-ndc, .phase-coupes, .phase-demolition, .phase-generic,
+   .phase-demarrage). Only the base (non "-past"/"-realise-complete") colors are
+   kept: this mini pane is read-only and does not track realisation/retard state. */
+.vis-item.phase-coffrage {
+  background-color: #fef3c7 !important;
+  border-color: #fde68a !important;
+  color: #92400e !important;
+}
+
+.vis-item.phase-armature {
+  background-color: #f3f4f6 !important;
+  border-color: #d1d5db !important;
+  color: #475569 !important;
+}
+
+.vis-item.phase-ndc {
+  background-color: #e9e6f2 !important;
+  border-color: #c9c0de !important;
+  color: #4d426a !important;
+}
+
+.vis-item.phase-coupes {
+  background-color: #d4f7e6 !important;
+  border-color: #43CD80 !important;
+  color: #1a5c38 !important;
+}
+
+.vis-item.phase-demolition {
+  background-color: #fde8e8 !important;
+  border-color: #CD0000 !important;
+  color: #7a0000 !important;
+}
+
+.vis-item.phase-generic {
+  background-color: #ede9ff !important;
+  border-color: #8470FF !important;
+  color: #3d2e8a !important;
+}
+
+.vis-item.phase-demarrage {
+  background-color: #dcfce7 !important;
+  border-color: #86efac !important;
+  color: transparent !important;
+}
+
+.vis-item.phase-demarrage .vis-item-content {
+  padding: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+}
