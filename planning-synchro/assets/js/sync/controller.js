@@ -84,6 +84,7 @@ function formatRangeLabel(viewport) {
 export function createSyncController({ planningRenderer, chargeBoard, bounds, onRangeLabel } = {}) {
   let current = null;
   let pendingFrameId = null;
+  let pendingAssertFrameId = null; // follow-up alignment-assertion rAF (see setViewport).
   let toolbarEl = null;
   let toolbarClickHandler = null;
   const wheelBindings = []; // [{ el, handler }] — bindWheel may be called once per pane.
@@ -166,9 +167,18 @@ export function createSyncController({ planningRenderer, chargeBoard, bounds, on
     current = next;
     refreshToolbarZoomButtons();
 
-    if (pendingFrameId != null && typeof cancelAnimationFrame === "function") {
-      cancelAnimationFrame(pendingFrameId);
-      pendingFrameId = null;
+    if (typeof cancelAnimationFrame === "function") {
+      if (pendingFrameId != null) {
+        cancelAnimationFrame(pendingFrameId);
+        pendingFrameId = null;
+      }
+      // Also coalesce-cancel any not-yet-fired follow-up assertion rAF from a
+      // prior setViewport(), so a superseded alignment check can't run against
+      // a stale window (and so destroy() has a single tracked id to cancel).
+      if (pendingAssertFrameId != null) {
+        cancelAnimationFrame(pendingAssertFrameId);
+        pendingAssertFrameId = null;
+      }
     }
 
     if (typeof requestAnimationFrame !== "function") {
@@ -196,8 +206,12 @@ export function createSyncController({ planningRenderer, chargeBoard, bounds, on
 
       // Follow-up rAF: run the single post-layout alignment assertion after
       // both panes have had a chance to lay out from the setWindow() calls
-      // above (no retry loop — see assertAlignment's own comment).
-      requestAnimationFrame(() => {
+      // above (no retry loop — see assertAlignment's own comment). Its id is
+      // tracked so destroy() and the next setViewport()'s coalescing cancel
+      // can stop it before it fires (a stray assertion must not run after
+      // destroy()).
+      pendingAssertFrameId = requestAnimationFrame(() => {
+        pendingAssertFrameId = null;
         assertAlignment(next);
       });
     });
@@ -331,9 +345,15 @@ export function createSyncController({ planningRenderer, chargeBoard, bounds, on
   }
 
   function destroy() {
-    if (pendingFrameId != null && typeof cancelAnimationFrame === "function") {
-      cancelAnimationFrame(pendingFrameId);
-      pendingFrameId = null;
+    if (typeof cancelAnimationFrame === "function") {
+      if (pendingFrameId != null) {
+        cancelAnimationFrame(pendingFrameId);
+        pendingFrameId = null;
+      }
+      if (pendingAssertFrameId != null) {
+        cancelAnimationFrame(pendingAssertFrameId);
+        pendingAssertFrameId = null;
+      }
     }
     unbindToolbar();
     unbindWheel();
