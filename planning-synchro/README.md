@@ -142,6 +142,25 @@ cheval sur le bord). Les bornes de la frise couvrent les **phases** (union avec
 `TimeSegment`) mais **pas** les bandes de réception, pour ne pas étirer la frise
 vers la gauche jusqu'à une bande isolée.
 
+À l'arrivée sur un projet, le pane haut est **remis en haut** de la liste
+(`planningRenderer.scrollToTop`) et la police de la **colonne de gauche** est
+réduite pour tenir plus de tâches à l'écran.
+
+### Vue « Graphique » (premier planning)
+
+Quand la case **« Rassembler visuellement le planning »** est cochée, un
+sélecteur **Planning / Graphique** apparaît au-dessus du pane haut. **Graphique**
+**remplace** la timeline par un graphique en **courbes** (`top/planningChart.js`)
+utilisant **Chart.js** — la **même technologie** que la section « Graphique des
+dépenses » de `gestion-depenses2` (`assets/js/ui/chart.js`). Il trace, par mois,
+le **nombre de tâches à réaliser** (date de diffusion de la phase) avec **une
+ligne par type de document** (Coffrage / Armature / NDC / Coupes / Démolition /
+Autres) **et une ligne Total**. Son axe des temps est **coordonné avec la frise**
+(mêmes dates visibles que le pane bas ; `min`/`max` = fenêtre courante), donc il
+**suit le zoom et le déplacement** du planning (chaque viewport appliqué est
+transmis via `onRangeLabel` -> `planningChart.setViewport`). Sa hauteur suit le
+splitter (même hauteur que la timeline remplacée).
+
 En mode **Editer**, le **clic droit** sur un segment ouvre le menu contextuel
 **Modifier** / **Supprimer le segment**, avec la **même fenêtre et les mêmes
 fonctionnalités que `gestion-depenses2`** : **Modifier** ouvre la modale

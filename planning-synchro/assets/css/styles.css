@@ -289,6 +289,61 @@ body.ps-panning * {
   cursor: pointer;
 }
 
+/* Header row above the top pane: aggregate toggle on the left, the
+   Planning/Graphique view switch on the right (shown only in aggregate mode). */
+.ps-planning-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+  flex-wrap: wrap;
+}
+.ps-planning-header .ps-aggregate {
+  margin-bottom: var(--spacing-2);
+}
+
+.ps-view-switch {
+  display: inline-flex;
+  margin-bottom: var(--spacing-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--color-surface);
+}
+.ps-view-switch button {
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.ps-view-switch button + button {
+  border-left: 1px solid var(--color-border);
+}
+.ps-view-switch button.is-active {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+/* Chart view: replaces #ps-planning when "Graphique" is selected. The height is
+   set from JS (planningChart.setHeight) to match the timeline it replaces; the
+   canvas fills the container (Chart.js maintainAspectRatio:false). */
+.ps-chart {
+  position: relative;
+  width: 100%;
+  min-height: 220px;
+  padding: 6px 8px 2px;
+  box-sizing: border-box;
+  background: var(--color-surface);
+}
+.ps-chart canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
 /* ==========================================================
    Top pane: vis-timeline (read-only Planning_Projet phases)
    ========================================================== */
@@ -385,8 +440,8 @@ body.ps-panning * {
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
-  font-weight: 700;
-  font-size: 0.92rem;
+  font-weight: 600;
+  font-size: 0.74rem;
   color: var(--color-text);
 }
 

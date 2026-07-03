@@ -1,0 +1,237 @@
+// Task-load line chart for the top pane — an alternative "Graphique" view that
+// REPLACES the read-only planning timeline when the aggregate ("Rassembler
+// visuellement le planning") mode is on. It plots, over the SAME visible
+// chronology as the frise / bottom pane, the number of tasks to realize per
+// month, one line per document type (Coffrage / Armature / NDC / Coupes /
+// Démolition / Autres) plus a Total line.
+//
+// Charting technology: Chart.js (globalThis.Chart, loaded from the CDN in
+// index.html / dev/harness.html) — the SAME library gestion-depenses2 uses for
+// its "Graphique des dépenses" (assets/js/ui/chart.js). This is a DOM module
+// (touches window.Chart only inside createPlanningChart); buildTaskLoadSeries is
+// pure and unit-tested.
+//
+// Time coordination: the x-axis is a linear timestamp axis whose min/max are the
+// viewport's firstVisibleDate .. rangeEndDate, and each month's point is plotted
+// at its mid-month timestamp — so the chart spans exactly the frise's visible
+// window and pans/zooms with it (main.js feeds every applied viewport to
+// setViewport()).
+
+import { APP_CONFIG } from "../config.js";
+import { buildDisplayedMonths } from "../utils/format.js";
+import { parseCalendarDate, toText } from "../utils/dates.js";
+import { buildRowPhases, normalizePlanningDocumentType } from "./phases.js";
+
+const KNOWN_TYPES = ["COFFRAGE", "ARMATURES", "NDC", "COUPES", "DEMOLITION"];
+
+// Display order + colours per document-type line (solid line colours chosen to
+// echo the phase palette while staying distinguishable as thin lines).
+const TYPE_META = {
+  COFFRAGE: { label: "Coffrage", color: "#d97706" },
+  ARMATURES: { label: "Armature", color: "#475569" },
+  NDC: { label: "NDC", color: "#7c3aed" },
+  COUPES: { label: "Coupes", color: "#16a34a" },
+  DEMOLITION: { label: "Démolition", color: "#dc2626" },
+  AUTRES: { label: "Autres", color: "#8470ff" },
+};
+const TYPE_ORDER = ["COFFRAGE", "ARMATURES", "NDC", "COUPES", "DEMOLITION", "AUTRES"];
+const TOTAL_META = { label: "Total", color: "#004990" };
+
+function monthKeyOf(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function taskTypeKey(row, columns) {
+  const key = normalizePlanningDocumentType(toText(row?.[columns.typeDoc]));
+  return KNOWN_TYPES.includes(key) ? key : "AUTRES";
+}
+
+// A row's "à réaliser" date = the end (diffusion) date of its main phase
+// (démarrage markers excluded); that's when the document is due.
+function taskDueDate(row, columns) {
+  const phases = buildRowPhases(row, columns).filter((phase) => phase.type !== "demarrage");
+  if (!phases.length) return null;
+  const main = phases[0];
+  const due = main.end instanceof Date ? main.end : main.start;
+  return due instanceof Date && !Number.isNaN(due.getTime()) ? due : null;
+}
+
+// PURE: rows + columns + viewport -> { points, byType, total, typesPresent }.
+// `points` are the months spanning [firstVisibleDate .. rangeEndDate]; byType and
+// total are per-month task counts aligned to `points`. Tasks whose due date falls
+// outside the visible months are not counted (the chart follows the frise).
+export function buildTaskLoadSeries(rows, columns, viewport, monthsNames = APP_CONFIG.months) {
+  const first = parseCalendarDate(viewport?.firstVisibleDate);
+  const last = parseCalendarDate(viewport?.rangeEndDate);
+  if (!first || !last || last < first) {
+    return { points: [], byType: {}, total: [], typesPresent: [] };
+  }
+
+  const span =
+    last.getFullYear() * 12 + last.getMonth() - (first.getFullYear() * 12 + first.getMonth()) + 1;
+  const months = buildDisplayedMonths(first.getFullYear(), first.getMonth(), span, monthsNames);
+  const indexByMonthKey = new Map(months.map((month, index) => [month.monthKey, index]));
+
+  const byType = {};
+  const total = new Array(months.length).fill(0);
+  const typesPresent = new Set();
+
+  (rows || []).forEach((row) => {
+    const due = taskDueDate(row, columns);
+    if (!due) return;
+    const index = indexByMonthKey.get(monthKeyOf(due));
+    if (index == null) return; // outside the visible range
+
+    const typeKey = taskTypeKey(row, columns);
+    if (!byType[typeKey]) byType[typeKey] = new Array(months.length).fill(0);
+    byType[typeKey][index] += 1;
+    total[index] += 1;
+    typesPresent.add(typeKey);
+  });
+
+  const points = months.map((month) => ({
+    monthKey: month.monthKey,
+    year: month.year,
+    monthNumber: month.monthNumber,
+    label: `${String(month.monthLabel || "").slice(0, 3)} ${month.year}`,
+    midTs: new Date(month.year, month.monthNumber - 1, 15).getTime(),
+  }));
+
+  return {
+    points,
+    byType,
+    total,
+    typesPresent: TYPE_ORDER.filter((type) => typesPresent.has(type)),
+  };
+}
+
+function shortMonthLabel(ts) {
+  const date = new Date(ts);
+  const name = APP_CONFIG.months[date.getMonth()] || "";
+  return `${name.slice(0, 3)} ${String(date.getFullYear()).slice(2)}`;
+}
+
+// createPlanningChart(canvasEl) -> { render, setViewport, setHeight, destroy }.
+export function createPlanningChart(canvasEl) {
+  let chart = null;
+  let lastRows = [];
+  let lastColumns = null;
+
+  function buildDatasets(series) {
+    const datasets = series.typesPresent.map((type) => ({
+      label: TYPE_META[type].label,
+      data: series.points.map((point, index) => ({ x: point.midTs, y: series.byType[type][index] })),
+      borderColor: TYPE_META[type].color,
+      backgroundColor: TYPE_META[type].color,
+      borderWidth: 2,
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      tension: 0.25,
+      fill: false,
+      spanGaps: true,
+    }));
+
+    datasets.push({
+      label: TOTAL_META.label,
+      data: series.points.map((point, index) => ({ x: point.midTs, y: series.total[index] })),
+      borderColor: TOTAL_META.color,
+      backgroundColor: TOTAL_META.color,
+      borderWidth: 3,
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      tension: 0.25,
+      fill: false,
+      spanGaps: true,
+    });
+
+    return datasets;
+  }
+
+  function ensureChart() {
+    if (chart) return true;
+    const ChartCtor = globalThis.Chart;
+    if (!canvasEl || typeof ChartCtor !== "function") return false;
+
+    chart = new ChartCtor(canvasEl, {
+      type: "line",
+      data: { datasets: [] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        parsing: false,
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          x: {
+            type: "linear",
+            ticks: {
+              maxRotation: 0,
+              autoSkip: true,
+              callback: (value) => shortMonthLabel(value),
+            },
+            grid: { color: "rgba(0, 73, 144, 0.06)" },
+          },
+          y: {
+            beginAtZero: true,
+            ticks: { precision: 0, stepSize: 1 },
+            title: { display: true, text: "Tâches à réaliser" },
+            grid: { color: "rgba(0, 73, 144, 0.08)" },
+          },
+        },
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: { usePointStyle: true, pointStyle: "line", boxWidth: 26, padding: 12, font: { size: 11 } },
+          },
+          tooltip: {
+            callbacks: {
+              title: (items) => (items.length ? shortMonthLabel(items[0].parsed.x) : ""),
+              label: (context) => `${context.dataset.label}: ${context.parsed.y}`,
+            },
+          },
+        },
+      },
+    });
+    return true;
+  }
+
+  function applyViewport(viewport) {
+    if (!chart) return;
+    const series = buildTaskLoadSeries(lastRows, lastColumns, viewport);
+    const first = parseCalendarDate(viewport?.firstVisibleDate);
+    const last = parseCalendarDate(viewport?.rangeEndDate);
+    if (first) chart.options.scales.x.min = first.getTime();
+    if (last) chart.options.scales.x.max = new Date(last.getFullYear(), last.getMonth(), last.getDate(), 23, 59, 59).getTime();
+    chart.data.datasets = buildDatasets(series);
+    chart.update("none");
+  }
+
+  function render({ rows, columns, viewport } = {}) {
+    lastRows = rows || [];
+    lastColumns = columns || null;
+    if (!ensureChart()) return;
+    applyViewport(viewport);
+  }
+
+  function setViewport(viewport) {
+    applyViewport(viewport);
+  }
+
+  // Match the top pane's current height (driven by the splitter/resizer) so the
+  // chart occupies the same vertical space as the timeline it replaces.
+  function setHeight(px) {
+    const host = canvasEl?.parentElement;
+    if (host instanceof HTMLElement && Number.isFinite(px) && px > 0) {
+      host.style.height = `${Math.round(px)}px`;
+      if (chart && typeof chart.resize === "function") chart.resize();
+    }
+  }
+
+  function destroy() {
+    if (chart && typeof chart.destroy === "function") chart.destroy();
+    chart = null;
+    lastRows = [];
+    lastColumns = null;
+  }
+
+  return { render, setViewport, setHeight, destroy };
+}

@@ -226,6 +226,21 @@ export function createPlanningRenderer(containerEl) {
     timeline.setWindow(startAt, endAt, { animation: false });
   }
 
+  // Reset the internal vertical scroll to the FIRST rows. vis-timeline keeps its
+  // own vertical scroll offset when content exceeds maxHeight (verticalScroll);
+  // on a project switch we want the top of the list, not wherever the previous
+  // project was scrolled. Reset the scrollable panels' scrollTop and let vis
+  // reconcile via redraw().
+  function scrollToTop() {
+    if (!timeline || !(containerEl instanceof HTMLElement)) return;
+    containerEl
+      .querySelectorAll(".vis-panel.vis-center, .vis-panel.vis-left, .vis-panel.vis-right, .vis-vertical-scroll")
+      .forEach((el) => {
+        if (el instanceof HTMLElement) el.scrollTop = 0;
+      });
+    if (typeof timeline.redraw === "function") timeline.redraw();
+  }
+
   // Cap the pane at `px` and let vis scroll internally past it (sticky axis).
   // Driven by the splitter (ui/topPaneResizer.js); setOptions triggers vis's own
   // redraw, so the drag stays visually crisp with no extra reflow call.
@@ -270,6 +285,7 @@ export function createPlanningRenderer(containerEl) {
     setWindow,
     setMaxHeight,
     setAggregate,
+    scrollToTop,
     getFirstPhaseDate: getFirstPhaseDateForCurrentData,
     getGroupCount,
     destroy,

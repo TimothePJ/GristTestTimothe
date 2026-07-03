@@ -29,6 +29,7 @@ import {
 import { getFirstPhaseDate, buildRowPhases, computePlanningPhaseBounds } from "./top/phases.js";
 import { computeTimeSegmentBounds } from "./top/bounds.js";
 import { createPlanningRenderer } from "./top/planningRenderer.js";
+import { createPlanningChart } from "./top/planningChart.js";
 import { createChargeBoard, buildWorkersFromSegments } from "./bottom/chargeBoard.js";
 import { attachChargeEditing } from "./bottom/chargeEditing.js";
 import { createTopPaneResizer } from "./ui/topPaneResizer.js";
@@ -130,6 +131,9 @@ function bootstrapApp() {
     aggregateToggle: document.getElementById("ps-aggregate-toggle"),
     range: document.getElementById("ps-range"),
     editModal: document.getElementById("ps-edit-segment-modal"),
+    viewSwitch: document.getElementById("ps-view-switch"),
+    chart: document.getElementById("ps-chart"),
+    chartCanvas: document.getElementById("ps-chart-canvas"),
   };
 
   if (!(els.select instanceof HTMLElement)) {
@@ -142,12 +146,21 @@ function bootstrapApp() {
   // first, so there is never more than one live planningRenderer/chargeBoard/
   // controller/editing at a time — no listener leaks, no double-mount.
   let planningRenderer = null;
+  let planningChart = null;
   let chargeBoard = null;
   let controller = null;
   let editing = null;
   let topPaneResizer = null;
   let loadSeq = 0;
   let lastAppliedSelectionKey = "";
+
+  // Top-pane view: "planning" (the read-only timeline) or "chart" (the task-load
+  // graph). The chart view is only reachable when the aggregate toggle is on.
+  let topView = "planning";
+  let lastTopPaneHeightPx = 0;
+  // Planning rows/columns kept for the chart (same data the timeline renders).
+  let chartRows = [];
+  let chartColumns = null;
 
   // Session-scoped visible-rows target for the top pane's splitter: kept here
   // (not per-project, not persisted to localStorage) so a height chosen on one
@@ -164,6 +177,10 @@ function bootstrapApp() {
     if (editing) {
       editing.detach();
       editing = null;
+    }
+    if (planningChart) {
+      planningChart.destroy();
+      planningChart = null;
     }
     if (topPaneResizer) {
       topPaneResizer.destroy();
@@ -258,6 +275,12 @@ function bootstrapApp() {
 
     planningRenderer = createPlanningRenderer(els.planning);
     chargeBoard = createChargeBoard(els.charge);
+    planningChart = createPlanningChart(els.chartCanvas);
+    // Keep the planning data for the chart view; always arrive on the planning
+    // (timeline) view, scrolled to the first rows (see scrollToTop below).
+    chartRows = planningRows;
+    chartColumns = pc.planningProject;
+    topView = "planning";
 
     const aggregate = Boolean(els.aggregateToggle && els.aggregateToggle.checked);
     planningRenderer.render({
@@ -319,6 +342,9 @@ function bootstrapApp() {
         // The top-axis band height changes with the zoom mode (week/month/year),
         // so recompute the top pane's bounded height after every viewport apply.
         if (topPaneResizer) topPaneResizer.refresh();
+        // Keep the chart's chronology in sync with the frise (both panes move
+        // together) when the chart view is showing.
+        if (topView === "chart" && planningChart) planningChart.setViewport(appliedViewport);
       },
     });
 
@@ -330,7 +356,11 @@ function bootstrapApp() {
       splitterEl: els.splitter,
       getGroupCount: () => (planningRenderer ? planningRenderer.getGroupCount() : 0),
       setMaxHeight: (px) => {
+        lastTopPaneHeightPx = px;
         if (planningRenderer) planningRenderer.setMaxHeight(px);
+        // Keep the chart the same height as the timeline it replaces so the
+        // layout does not jump when switching views or dragging the splitter.
+        if (planningChart) planningChart.setHeight(px);
       },
       config: APP_CONFIG.topPane,
       getDesiredRows: () => desiredTopRows,
@@ -344,6 +374,13 @@ function bootstrapApp() {
     controller.bindPan(els.planning);
     controller.setViewport(viewport);
     topPaneResizer.refresh();
+
+    // Arrive on the planning view, at the FIRST rows (not wherever the previous
+    // project was scrolled), and show/hide the Planning/Graphique switch to match
+    // the current aggregate state.
+    planningRenderer.scrollToTop();
+    updateViewSwitchVisibility();
+    applyTopView();
 
     editing = attachChargeEditing(els.charge, {
       getProjectNumber: () => project.number,
@@ -424,8 +461,60 @@ function bootstrapApp() {
 
   function handleAggregateToggle() {
     if (!planningRenderer || !controller) return;
-    planningRenderer.setAggregate(Boolean(els.aggregateToggle.checked));
+    const aggregate = Boolean(els.aggregateToggle.checked);
+    planningRenderer.setAggregate(aggregate);
+    // The "Graphique" view is only offered in aggregate mode; leaving aggregate
+    // forces back to the planning (timeline) view.
+    if (!aggregate) topView = "planning";
+    updateViewSwitchVisibility();
+    applyTopView();
     controller.setViewport(controller.getViewport());
+  }
+
+  // Show the Planning/Graphique switch only while the aggregate toggle is on.
+  function updateViewSwitchVisibility() {
+    if (!(els.viewSwitch instanceof HTMLElement)) return;
+    els.viewSwitch.hidden = !(els.aggregateToggle && els.aggregateToggle.checked);
+  }
+
+  function setTopView(view) {
+    topView = view === "chart" ? "chart" : "planning";
+    applyTopView();
+  }
+
+  // Swap the top pane between the timeline (#ps-planning) and the chart
+  // (#ps-chart), reflect the active button, and (when showing the chart) size it
+  // to the current top-pane height and render it for the current viewport.
+  function applyTopView() {
+    const chartActive = topView === "chart" && els.aggregateToggle && els.aggregateToggle.checked;
+
+    if (els.planning instanceof HTMLElement) els.planning.hidden = chartActive;
+    if (els.chart instanceof HTMLElement) els.chart.hidden = !chartActive;
+
+    if (els.viewSwitch instanceof HTMLElement) {
+      els.viewSwitch.querySelectorAll("[data-ps-view]").forEach((button) => {
+        const isActive = button.dataset.psView === (chartActive ? "chart" : "planning");
+        button.classList.toggle("is-active", isActive);
+        button.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+    }
+
+    if (chartActive && planningChart && controller) {
+      const heightPx = lastTopPaneHeightPx || (els.planning ? els.planning.offsetHeight : 0) || 320;
+      planningChart.setHeight(heightPx);
+      planningChart.render({
+        rows: chartRows,
+        columns: chartColumns,
+        viewport: controller.getViewport(),
+      });
+    }
+  }
+
+  function handleViewSwitchClick(event) {
+    const button = event.target instanceof Element ? event.target.closest("[data-ps-view]") : null;
+    if (!(button instanceof HTMLElement)) return;
+    event.preventDefault();
+    setTopView(button.dataset.psView === "chart" ? "chart" : "planning");
   }
 
   async function bootstrap() {
@@ -459,6 +548,9 @@ function bootstrapApp() {
     els.select.addEventListener("change", handleProjectSelectChange);
     if (els.aggregateToggle) {
       els.aggregateToggle.addEventListener("change", handleAggregateToggle);
+    }
+    if (els.viewSwitch) {
+      els.viewSwitch.addEventListener("click", handleViewSwitchClick);
     }
     window.addEventListener("storage", handleStorageEvent);
 

@@ -7,6 +7,7 @@
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <script src="https://unpkg.com/vis-timeline/standalone/umd/vis-timeline-graph2d.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/vis-timeline/styles/vis-timeline-graph2d.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="./assets/css/variables.css" />
   <link rel="stylesheet" href="./assets/css/styles.css" />
   <script type="module" src="./assets/js/main.js"></script>
@@ -36,11 +37,18 @@
 
   <main id="ps-main" class="ps-main" hidden>
     <div class="ps-pane ps-pane--planning">
-      <label class="ps-aggregate">
-        <input id="ps-aggregate-toggle" type="checkbox" />
-        <span>Rassembler visuellement le planning</span>
-      </label>
+      <div class="ps-planning-header">
+        <label class="ps-aggregate">
+          <input id="ps-aggregate-toggle" type="checkbox" />
+          <span>Rassembler visuellement le planning</span>
+        </label>
+        <div id="ps-view-switch" class="ps-view-switch" role="group" aria-label="Vue du premier planning" hidden>
+          <button type="button" data-ps-view="planning" class="is-active">Planning</button>
+          <button type="button" data-ps-view="chart">Graphique</button>
+        </div>
+      </div>
       <div id="ps-planning" class="ps-planning"></div>
+      <div id="ps-chart" class="ps-chart" hidden><canvas id="ps-chart-canvas"></canvas></div>
     </div>
     <div id="ps-splitter" class="ps-splitter" role="separator" aria-orientation="horizontal"
          aria-label="Redimensionner la hauteur du planning" tabindex="0">
