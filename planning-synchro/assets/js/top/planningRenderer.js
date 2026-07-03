@@ -17,6 +17,15 @@ import {
   getFirstPhaseDate,
 } from "./phases.js";
 
+const DAY_MS = 24 * 3600 * 1000;
+// Pixel buffer around the visible window for the item-windowing filter
+// (applyWindowedItems). Large enough to keep near-off-screen items (which vis
+// positions and the panes expect just outside the view), small enough to stay
+// within vis-timeline's pixel threshold for positioning an out-of-window item —
+// beyond it vis leaves the node unpositioned at left:0 (the stray "far-left"
+// segment, most visible when zoomed out).
+const WINDOW_ITEM_BUFFER_PX = 200;
+
 const TIMELINE_OPTIONS = {
   editable: false,
   selectable: false,
@@ -127,22 +136,35 @@ export function createPlanningRenderer(containerEl) {
   let lastWindowEndMs = null;
   let appliedItemKey = null;
 
-  // Push into the vis DataSet only the items whose date range is near the current
-  // window (± one window-span margin); background bands (zone fills) always pass.
+  // Push into the vis DataSet only the items within a small PIXEL buffer of the
+  // current visible window; background bands (zone fills) always pass.
   // WHY: vis-timeline keeps a DOM node for an item that is far outside the window
   // but leaves it UNPOSITIONED (no transform) — it then renders at left:0, i.e. a
-  // stray segment pinned at the far-left edge of the frise (typically a reception
-  // "Données d'entrées" band whose date precedes its phase by weeks). Removing
-  // out-of-window items from the DataSet means vis never holds such a node, so an
-  // out-of-chronology segment is simply not shown. Called on render and on every
-  // setWindow (cheap: the top pane has few items).
+  // stray segment pinned at the far-left edge of the frise (a reception band
+  // before its phase, or — when zoomed out — a segment whose real date is far to
+  // the right). vis's "too far to position" threshold is PIXEL-based, so the
+  // margin must be too: a time-proportional margin (e.g. ±1 span) grows at wide
+  // zoom and, in pixels, overshoots that threshold — which is why the phantom
+  // came back at max zoom. Convert a fixed pixel buffer (WINDOW_ITEM_BUFFER_PX)
+  // to a time margin via the current day width, so we keep near-off-screen items
+  // (which vis positions, and which the panes/tests expect just outside the view)
+  // but drop anything far enough that vis would leave it unpositioned. Called on
+  // render and on every setWindow (cheap: few items + one getBoundingClientRect).
   function applyWindowedItems() {
     if (!itemsDataSet) return;
     let visible = allItems;
     if (Number.isFinite(lastWindowStartMs) && Number.isFinite(lastWindowEndMs)) {
-      const spanMs = Math.max(lastWindowEndMs - lastWindowStartMs, 24 * 3600 * 1000);
-      const lo = lastWindowStartMs - spanMs;
-      const hi = lastWindowEndMs + spanMs;
+      const spanMs = Math.max(lastWindowEndMs - lastWindowStartMs, DAY_MS);
+      const centerEl =
+        containerEl && typeof containerEl.querySelector === "function"
+          ? containerEl.querySelector(".vis-panel.vis-center")
+          : null;
+      const contentWidthPx = centerEl ? centerEl.getBoundingClientRect().width : 0;
+      const dayWidthPx = contentWidthPx > 0 ? contentWidthPx / (spanMs / DAY_MS) : 0;
+      // Fall back to a strict-intersect margin (0) before the panel is measurable.
+      const marginMs = dayWidthPx > 0 ? (WINDOW_ITEM_BUFFER_PX / dayWidthPx) * DAY_MS : 0;
+      const lo = lastWindowStartMs - marginMs;
+      const hi = lastWindowEndMs + marginMs;
       visible = allItems.filter((item) => {
         if ((item.type || "range") === "background") return true;
         const startMs = new Date(item.start).getTime();

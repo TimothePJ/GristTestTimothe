@@ -140,15 +140,20 @@ bas** affiche **toutes les personnes** liées au projet (`ProjectTeam`), même s
 `TimeSegment`, comme `gestion-depenses2`.
 
 Aucun segment ne s'affiche **hors de la chronologie visible** : le renderer ne
-pousse dans vis que les items proches de la fenêtre courante (± une largeur de
-fenêtre) — les bandes « Données d'entrées » précèdent leur phase de plusieurs
-semaines, et vis-timeline laissait un item très hors-fenêtre **non positionné**
-(sans `transform`), donc collé au **bord gauche** de la frise (`left:0`). En le
-retirant du jeu de données, il n'y a plus de segment fantôme à gauche (l'option
-vis `align:'center'` empêche par ailleurs l'épinglage du **contenu** d'un item à
-cheval sur le bord). Les bornes de la frise couvrent les **phases** (union avec
-`TimeSegment`) mais **pas** les bandes de réception, pour ne pas étirer la frise
-vers la gauche jusqu'à une bande isolée.
+pousse dans vis que les items proches de la fenêtre courante. vis-timeline laisse
+un item **trop loin** hors-fenêtre **non positionné** (sans `transform`), donc
+collé au **bord gauche** de la frise (`left:0`) — une bande « Données d'entrées »
+avant sa phase, ou (au **dézoom max**) un segment dont la vraie date est loin à
+droite. Le seuil de vis est **en pixels** : la marge de filtrage l'est donc aussi
+(`WINDOW_ITEM_BUFFER_PX`, convertie en marge temporelle via la largeur du jour
+courante), au lieu d'une marge proportionnelle à la fenêtre qui **grandit au
+dézoom** et ré-inclut justement ces items lointains (le fantôme réapparaissait au
+zoom max). On garde ainsi les items **juste** hors écran (que vis positionne)
+mais on retire ceux assez loin pour être non-positionnés. `align:'center'` empêche
+en plus l'épinglage du **contenu** d'un item à cheval sur le bord. Les bornes de
+la frise couvrent les **phases** (union avec `TimeSegment`) mais **pas** les
+bandes de réception, pour ne pas étirer la frise vers la gauche jusqu'à une bande
+isolée.
 
 À l'arrivée sur un projet, le pane haut est **remis en haut** de la liste
 (`planningRenderer.scrollToTop`) et la police de la **colonne de gauche** est
