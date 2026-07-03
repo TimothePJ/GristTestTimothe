@@ -576,20 +576,25 @@ body.ps-panning * {
   color: #166534 !important;
 }
 
-/* Démarrage de travaux: rendered EXACTLY like Planning Projet — a compact green
-   marker (transparent content, zero-width inner) at the start-of-works date.
-   Produced by the vendored builder for ARMATURES (always) and planning-linked
-   COFFRAGE; dropped only from the aggregate view (see aggregatePlanningItems). */
+/* Démarrage de travaux ("Début des travaux"): a solid green segment sized like
+   the other phase bars — same height as the coffrage/armature/… bands and a
+   min-width so the single-day milestone stays visible at any zoom (instead of
+   the crushed ~2px marker it used to be). Produced by the vendored builder for
+   ARMATURES (always) and planning-linked COFFRAGE; dropped only from the
+   aggregate view (see aggregatePlanningItems). */
 #ps-planning .vis-item.phase-demarrage {
-  background-color: #dcfce7 !important;
-  border-color: #86efac !important;
+  background-color: #16a34a !important;
+  border-color: #15803d !important;
   color: transparent !important;
+  min-width: 12px;
 }
 
+/* Force the same row height as the labelled bars even though this item has no
+   text content (the general .vis-item-content rule sizes from the label, which
+   is empty here). */
 #ps-planning .vis-item.phase-demarrage .vis-item-content {
-  padding: 0 !important;
-  width: 0 !important;
-  overflow: hidden !important;
+  min-height: 18px;
+  padding: 3px 6px !important;
 }
 
 /* Zone header rows (Planning Projet's zone-header-group / zone-header-fill).
@@ -607,6 +612,31 @@ body.ps-panning * {
 #ps-planning .vis-item.vis-background.zone-header-fill {
   background: #e8f2ff !important;
   border: 0 !important;
+}
+
+/* Left task-column tint per document type — mirrors Planning Projet's
+   `.group-row-grid.row-type-*` backgrounds (coffrage/ndc/coupes/demolition/
+   generic). Scoped to the LEFT labelset only, so the timeline side is untouched.
+   ARMATURES keeps the default (no tint), exactly like the source. */
+#ps-planning .vis-labelset .vis-label.row-type-coffrage,
+#ps-planning .vis-labelset .vis-label.row-type-coffrage .vis-inner {
+  background: #fff8dc !important;
+}
+#ps-planning .vis-labelset .vis-label.row-type-ndc,
+#ps-planning .vis-labelset .vis-label.row-type-ndc .vis-inner {
+  background: #e9e6f2 !important;
+}
+#ps-planning .vis-labelset .vis-label.row-type-coupes,
+#ps-planning .vis-labelset .vis-label.row-type-coupes .vis-inner {
+  background: #d4f7e6 !important;
+}
+#ps-planning .vis-labelset .vis-label.row-type-demolition,
+#ps-planning .vis-labelset .vis-label.row-type-demolition .vis-inner {
+  background: #fde8e8 !important;
+}
+#ps-planning .vis-labelset .vis-label.row-type-generic,
+#ps-planning .vis-labelset .vis-label.row-type-generic .vis-inner {
+  background: #ede9ff !important;
 }
 
 /* ==========================================================

@@ -79,6 +79,26 @@ function getTypeDisplayLabel(typeKey, rawTypeDoc) {
   return TYPE_DISPLAY_LABELS[typeKey] || rawTypeDoc || typeKey || "Type personnalisé";
 }
 
+// Left-column tint per document type, mirroring Planning Projet's
+// `.group-row-grid.row-type-*` backgrounds (coffrage/ndc/coupes/demolition/
+// generic). ARMATURES has no tint in the source (default white). Returns the
+// class name to hang on the vis group so styles.css can colour the left label
+// cell; "" for zone headers or untyped rows.
+const ROW_TYPE_CLASS_BY_KEY = {
+  COFFRAGE: "row-type-coffrage",
+  ARMATURES: "row-type-armature",
+  NDC: "row-type-ndc",
+  COUPES: "row-type-coupes",
+  DEMOLITION: "row-type-demolition",
+};
+
+function getRowTypeClass(rawTypeDoc) {
+  const raw = toText(rawTypeDoc);
+  if (!raw) return "";
+  const typeKey = normalizePlanningDocumentType(raw);
+  return ROW_TYPE_CLASS_BY_KEY[typeKey] || "row-type-generic";
+}
+
 // --- phase construction -------------------------------------------------------
 
 function getRowTaskLabel(row, columns) {
@@ -171,6 +191,8 @@ export function buildPlanningItems(rows, columns, options = {}) {
     id: group.id,
     isZoneHeader: Boolean(group.isZoneHeader),
     className: group.className || "",
+    // Left-column tint per Planning Projet document type (zone headers keep none).
+    typeClass: group.isZoneHeader ? "" : getRowTypeClass(group.typeDocLabel),
     label: group.isZoneHeader
       ? group.zoneHeaderLabel || group.zoneLabel || ""
       : group.tachesLabel || "",
@@ -250,7 +272,12 @@ export function aggregatePlanningItems(rows, columns) {
   let itemSeq = 0;
 
   groupByType.forEach((group) => {
-    groups.push({ id: group.id, label: group.label, typeDoc: group.typeDoc });
+    groups.push({
+      id: group.id,
+      label: group.label,
+      typeDoc: group.typeDoc,
+      typeClass: ROW_TYPE_CLASS_BY_KEY[group.typeDoc] || (group.typeDoc ? "row-type-generic" : ""),
+    });
 
     group.bucketsByPhaseType.forEach((phaseList) => {
       const sorted = [...phaseList].sort((a, b) => a.start - b.start);

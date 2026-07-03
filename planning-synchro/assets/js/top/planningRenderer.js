@@ -25,6 +25,13 @@ const TIMELINE_OPTIONS = {
   stack: true,
   orientation: { axis: "top" },
   margin: { item: 4, axis: 4 },
+  // Anchor each item's content to its own box (NOT the viewport). vis-timeline's
+  // default `align:'auto'` keeps a partially/fully off-screen item's label pinned
+  // at the visible edge, so a segment whose date is left of the current window
+  // showed its content stuck at the far-left of the frise ("un segment au bout à
+  // gauche alors qu'il devrait pas s'afficher"). 'center' makes the content
+  // scroll off with its box, so out-of-window segments are simply not seen.
+  align: "center",
   showCurrentTime: false,
   // Row height +50% is driven from CSS on the LABEL (styles.css
   // `#ps-planning .vis-label .vis-inner` vertical padding): vis sizes each row
@@ -50,27 +57,13 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-// The rich tooltip built by buildPhaseTooltipHtml() is a small stack of
-// `<div>...<strong>...</strong>...</div>` rows. vis-timeline's native `item.title`
-// is applied to the DOM element's `title` attribute, which only ever renders as
-// plain text (a browser tooltip): passing raw HTML would show literal tag markup.
-// Convert the rich HTML tooltip to a readable multi-line plain-text version instead
-// of duplicating the phases.js tooltip-building rules here.
-function htmlTooltipToPlainText(html) {
-  return String(html || "")
-    .replace(/<\/(div|p)>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join("\n");
-}
+// vis-timeline (standalone build) renders an item's `title` as HTML inside its
+// own `.vis-tooltip` popup (NOT as a plain `title` attribute — the item elements
+// carry none). So the rich HTML built by buildPhaseTooltipHtml() /the vendored
+// builder (`<div><strong>…</strong>…</div>` rows, `<b>…</b><br>…`) renders as a
+// readable multi-line tooltip — exactly like Planning Projet. In the aggregate
+// ("Rassembler") view this is what surfaces the FULL list of tasks composing a
+// merged segment. It is passed through verbatim (no plain-text flattening).
 
 function toVisGroups(groups) {
   return (groups || []).map((group) => {
@@ -89,9 +82,11 @@ function toVisGroups(groups) {
     // the shared-frise left column stays aligned; the record's ID2/Zone/Groupe
     // linkage rides on the group `title` (vis sanitizes injected HTML attributes,
     // so a titled <span> in content does not work). Aggregate-mode groups have no
-    // titleText -> fall back to the label.
+    // titleText -> fall back to the label. `typeClass` (row-type-*) tints the left
+    // label cell with the document-type colour from Planning Projet (styles.css).
     return {
       id: group.id,
+      className: group.typeClass || "",
       content: escapeHtml(label),
       title: group.titleText || label,
     };
@@ -111,7 +106,7 @@ function toVisItems(items) {
     className: item.className || "",
     style: item.style || "",
     content: escapeHtml(item.phaseLabel || ""),
-    title: htmlTooltipToPlainText(item.tooltip),
+    title: item.tooltip || "",
   }));
 }
 

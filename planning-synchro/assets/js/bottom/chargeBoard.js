@@ -383,7 +383,7 @@ function renderSegmentBars(assignedBars) {
 
 function renderRoleRow(roleLabel, timelineWidth) {
   return `
-    <div class="charge-plan-role-row" style="--timeline-width:${timelineWidth}px; --row-height:54px">
+    <div class="charge-plan-role-row" style="--timeline-width:${timelineWidth}px; --row-height:36px">
       <div class="charge-plan-role-cell charge-plan-role-cell--label">${escapeHtml(roleLabel)}</div>
       <div class="charge-plan-role-cell charge-plan-role-cell--filler"></div>
     </div>
@@ -397,8 +397,7 @@ function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWid
     1,
     assignedBars.reduce((maxLane, bar) => Math.max(maxLane, bar.laneIndex + 1), 0)
   );
-  // Row height raised ~50% (72->108 base, 32->48 per overlap lane).
-  const rowHeight = Math.max(108, 30 + laneCount * 48);
+  const rowHeight = Math.max(72, 20 + laneCount * 32);
 
   return `
     <div class="charge-plan-row" style="--timeline-width:${timelineWidth}px; --row-height:${rowHeight}px">

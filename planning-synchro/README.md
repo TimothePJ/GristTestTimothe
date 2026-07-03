@@ -120,12 +120,21 @@ tronqué en `…` si trop long, avec le nom complet en info-bulle native (`title
   zoom. Le handler molette du contrôleur distingue la région (axe vs lignes).
 - **Toolbar** (semaine/mois/année, précédent/suivant/aujourd'hui) inchangée.
 
-Le segment **démarrage de travaux** est rendu **exactement comme Planning Projet**
-(marqueur vert compact) et produit pour les armatures (toujours) et coffrages liés
-au planning ; il est simplement **retiré du mode « Rassembler visuellement le
-planning »** (agrégat par `Type_doc`, dont l'info-bulle liste toutes les tâches
-composant un segment). Le **pane bas** affiche **toutes les personnes** liées au
-projet (`ProjectTeam`), même sans `TimeSegment`, comme `gestion-depenses2`.
+Le segment **démarrage de travaux** est rendu comme un **segment vert plein de
+même hauteur que les autres barres** (avec une largeur minimale pour rester
+visible au dézoom), produit pour les armatures (toujours) et coffrages liés au
+planning ; il est simplement **retiré du mode « Rassembler visuellement le
+planning »** (agrégat par `Type_doc`, dont l'info-bulle HTML liste **toutes les
+tâches** composant un segment). La **colonne de gauche** (tâches) est **teintée
+par type de document** comme dans Planning Projet (coffrage, NDC, coupes,
+démolition, générique ; armature sans teinte). Le **pane bas** affiche **toutes
+les personnes** liées au projet (`ProjectTeam`), même sans `TimeSegment`, comme
+`gestion-depenses2`.
+
+Les items dont la date est **hors de la fenêtre visible** ne sont plus
+« épinglés » au bord gauche de la frise : l'option vis `align:'center'` ancre le
+contenu de chaque segment à sa propre boîte, donc un segment hors chronologie
+n'est tout simplement pas visible tant qu'on n'a pas navigué jusqu'à lui.
 
 En mode **Editer**, le **clic droit** sur un segment ouvre le menu contextuel
 **Modifier** / **Supprimer le segment**, avec la **même fenêtre et les mêmes
