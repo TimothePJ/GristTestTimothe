@@ -194,14 +194,79 @@ body {
   padding: 0;
 }
 
+/* The draggable splitter (below) is now the divider between the two panes, so
+   the planning pane no longer carries its own bottom border/margin. */
 .ps-pane--planning {
-  padding-bottom: var(--spacing-3);
-  margin-bottom: var(--spacing-3);
-  border-bottom: 2px solid var(--color-border);
+  padding-bottom: 0;
+  margin-bottom: 0;
 }
 
 .ps-pane--charge {
   padding-bottom: var(--spacing-3);
+}
+
+/* ==========================================================
+   Splitter: drag to resize the top (planning) pane's visible height.
+   Bounds (min 5 / max 16 rows) + measurement live in JS
+   (assets/js/ui/topPaneResizer.js + top/paneMath.js).
+   ========================================================== */
+
+.ps-splitter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 16px;
+  margin: 6px 0;
+  cursor: row-resize;
+  touch-action: none; /* let pointermove drive the drag, not native scroll */
+  border-radius: 999px;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+
+.ps-splitter:hover,
+.ps-splitter:focus-visible {
+  background: var(--color-primary-soft);
+}
+
+.ps-splitter:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.ps-splitter-grip {
+  width: 48px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-border);
+  transition: background-color 120ms ease;
+}
+
+.ps-splitter:hover .ps-splitter-grip,
+.ps-splitter:focus-visible .ps-splitter-grip {
+  background: var(--color-primary);
+}
+
+/* While dragging the splitter, keep the resize cursor everywhere and suppress
+   text selection (body.ps-resizing is toggled by topPaneResizer.js). */
+body.ps-resizing,
+body.ps-resizing * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+/* Drag-to-pan the frise: "grab" cursor over the read-only top pane's timeline
+   area, "grabbing" while a pan is in progress (body.ps-panning is toggled by the
+   sync controller). Vertical row scrolling is on the wheel/scrollbar. */
+#ps-planning .vis-panel.vis-top,
+#ps-planning .vis-panel.vis-center,
+#ps-planning .vis-panel.vis-left {
+  cursor: grab;
+}
+body.ps-panning,
+body.ps-panning * {
+  cursor: grabbing !important;
+  user-select: none !important;
 }
 
 /* Aggregate checkbox, above the top (planning) pane */
@@ -244,6 +309,9 @@ body {
     inset 0 0 0 1px var(--color-border),
     var(--shadow-card);
   overflow: hidden;
+  /* No fixed height: vis-timeline caps its own height via the `maxHeight` option
+     (driven by topPaneResizer.js -> planningRenderer.setMaxHeight) and scrolls
+     internally past it with the axis sticky; #ps-planning wraps that. */
 }
 
 /* Neutralize vis-timeline's own default border/margin on its root element,
@@ -299,15 +367,42 @@ body {
   box-sizing: border-box !important;
 }
 
+/* One task = one line: the label content is plain text in .vis-inner; truncate
+   it to a single line with an ellipsis. The full name is on the .vis-label's
+   `title` attribute (set via the vis group `title` option in planningRenderer.js),
+   so it shows on hover. The left column width is fixed (--ps-left-col-width), so
+   the truncation is bounded. */
 #ps-planning .vis-labelset .vis-label .vis-inner {
+  display: block !important;
   width: 100% !important;
+  min-width: 0 !important;
   box-sizing: border-box !important;
-  padding: 0 12px !important;
+  /* Row height +50%: vis derives each row's height from the LABEL's natural
+     height, so the vertical padding here is what actually grows the rows
+     (~20px -> ~31px, ×1.5). The item bars sit within the taller row. */
+  padding: 5px 12px !important;
   text-align: left !important;
-  justify-content: flex-start !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
   font-weight: 700;
   font-size: 0.92rem;
   color: var(--color-text);
+}
+
+/* Internal vertical scroll (vis verticalScroll) when the pane is shorter than
+   its rows: HIDE the scrollbar so it never steals width from the top pane's
+   center panel — otherwise the top timeline content becomes ~15px narrower than
+   the bottom pane and the shared frise drifts (arithmetic alignment needs equal
+   content widths). Row scrolling is done with the wheel (over the rows) or the
+   trackpad, so a visible scrollbar is not needed. */
+#ps-planning {
+  scrollbar-width: none;
+}
+
+#ps-planning ::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 /* ==========================================================
@@ -339,9 +434,12 @@ body {
   box-sizing: border-box;
 }
 
+/* The rows are grown via the vis vertical item margin (see TIMELINE_OPTIONS);
+   the bar itself gets a modest extra height so it stays proportionate within the
+   taller row without overflowing it. */
 #ps-planning .vis-item .vis-item-content {
   height: 100%;
-  padding: 0 6px;
+  padding: 3px 6px;
   display: flex;
   align-items: center;
   white-space: nowrap;
@@ -349,14 +447,28 @@ body {
 
 /* Planning phase colors (top pane, read-only vis-timeline items). Scoped to
    #ps-planning so these never leak onto any other `.vis-item` on the page.
-   Ported from `Planning Projet/assets/css/styles.css` (search .phase-coffrage,
-   .phase-armature, .phase-ndc, .phase-coupes, .phase-demolition, .phase-generic,
-   .phase-demarrage). Only the base (non "-past"/"-realise-complete") colors are
-   kept: this mini pane is read-only and does not track realisation/retard state. */
+   Ported VERBATIM from `Planning Projet/assets/css/styles.css` (#planningTimeline
+   .vis-item.phase-*), including the "-past" and "-realise-complete" states so the
+   bars render exactly like Planning Projet. Retard colours arrive as inline
+   `style` on the items (from the vendored builder), so no CSS is needed for them. */
+#ps-planning .vis-item.phase-limite {
+  background-color: #dbeafe !important;
+  border-color: #bfdbfe !important;
+  color: #1e3a8a !important;
+}
+
 #ps-planning .vis-item.phase-coffrage {
   background-color: #fef3c7 !important;
   border-color: #fde68a !important;
   color: #92400e !important;
+}
+#ps-planning .vis-item.phase-coffrage.phase-past {
+  background-color: #ead7a2 !important;
+  border-color: #d6bd74 !important;
+  color: #7a4b12 !important;
+}
+#ps-planning .vis-item.phase-coffrage.phase-realise-complete {
+  border-color: #86efac !important;
 }
 
 #ps-planning .vis-item.phase-armature {
@@ -364,11 +476,27 @@ body {
   border-color: #d1d5db !important;
   color: #475569 !important;
 }
+#ps-planning .vis-item.phase-armature.phase-past {
+  background-color: #e5e7eb !important;
+  border-color: #cbd5e1 !important;
+  color: #334155 !important;
+}
+#ps-planning .vis-item.phase-armature.phase-realise-complete {
+  border-color: #bbf7d0 !important;
+}
 
 #ps-planning .vis-item.phase-ndc {
   background-color: #e9e6f2 !important;
   border-color: #c9c0de !important;
   color: #4d426a !important;
+}
+#ps-planning .vis-item.phase-ndc.phase-past {
+  background-color: #d8d2e6 !important;
+  border-color: #b8aecf !important;
+  color: #3f365a !important;
+}
+#ps-planning .vis-item.phase-ndc.phase-realise-complete {
+  border-color: #a7f3d0 !important;
 }
 
 #ps-planning .vis-item.phase-coupes {
@@ -376,11 +504,27 @@ body {
   border-color: #43CD80 !important;
   color: #1a5c38 !important;
 }
+#ps-planning .vis-item.phase-coupes.phase-past {
+  background-color: #b8e8d0 !important;
+  border-color: #2da862 !important;
+  color: #14452a !important;
+}
+#ps-planning .vis-item.phase-coupes.phase-realise-complete {
+  border-color: #a7f3d0 !important;
+}
 
 #ps-planning .vis-item.phase-demolition {
   background-color: #fde8e8 !important;
   border-color: #CD0000 !important;
   color: #7a0000 !important;
+}
+#ps-planning .vis-item.phase-demolition.phase-past {
+  background-color: #f5cfcf !important;
+  border-color: #a80000 !important;
+  color: #5c0000 !important;
+}
+#ps-planning .vis-item.phase-demolition.phase-realise-complete {
+  border-color: #a7f3d0 !important;
 }
 
 #ps-planning .vis-item.phase-generic {
@@ -388,7 +532,54 @@ body {
   border-color: #8470FF !important;
   color: #3d2e8a !important;
 }
+#ps-planning .vis-item.phase-generic.phase-past {
+  background-color: #dad4ff !important;
+  border-color: #6858e0 !important;
+  color: #2d2266 !important;
+}
+#ps-planning .vis-item.phase-generic.phase-realise-complete {
+  border-color: #a7f3d0 !important;
+}
 
+/* Reception band ("Données d'entrées") — CSS pre-staged; the band items are
+   emitted once Stage 3 wires the References2 lookup. */
+#ps-planning .vis-item.phase-reference-reception {
+  font-weight: 700 !important;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.14);
+}
+#ps-planning .vis-item.phase-reference-reception .vis-item-content {
+  justify-content: center;
+  font-size: 11px;
+  padding: 0 5px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+#ps-planning .vis-item.phase-reference-reception--complete {
+  background-color: #dcfce7 !important;
+  border-color: #22c55e !important;
+  color: #14532d !important;
+}
+#ps-planning .vis-item.phase-reference-reception--missing {
+  background-color: #fee2e2 !important;
+  border-color: #ef4444 !important;
+  color: #7f1d1d !important;
+}
+#ps-planning .vis-item.phase-reference-reception--mixed {
+  background-color: #ffedd5 !important;
+  border-color: #f97316 !important;
+  color: #7c2d12 !important;
+}
+
+#ps-planning .vis-item.phase-travaux {
+  background-color: #dcfce7 !important;
+  border-color: #bbf7d0 !important;
+  color: #166534 !important;
+}
+
+/* Démarrage de travaux: rendered EXACTLY like Planning Projet — a compact green
+   marker (transparent content, zero-width inner) at the start-of-works date.
+   Produced by the vendored builder for ARMATURES (always) and planning-linked
+   COFFRAGE; dropped only from the aggregate view (see aggregatePlanningItems). */
 #ps-planning .vis-item.phase-demarrage {
   background-color: #dcfce7 !important;
   border-color: #86efac !important;
@@ -399,6 +590,23 @@ body {
   padding: 0 !important;
   width: 0 !important;
   overflow: hidden !important;
+}
+
+/* Zone header rows (Planning Projet's zone-header-group / zone-header-fill).
+   Read-only bands; the left cell shows the zone name (single-line, ellipsis via
+   the .vis-inner rule above), the timeline side gets the light-blue background
+   band from the vendored builder's zone-header-fill background item. */
+#ps-planning .vis-labelset .vis-label.zone-header-group,
+#ps-planning .vis-labelset .vis-label.zone-header-group .vis-inner {
+  background: #e8f2ff !important;
+  border-bottom: 1px solid #c6dbff !important;
+  color: #17324d !important;
+  text-transform: uppercase;
+}
+
+#ps-planning .vis-item.vis-background.zone-header-fill {
+  background: #e8f2ff !important;
+  border: 0 !important;
 }
 
 /* ==========================================================

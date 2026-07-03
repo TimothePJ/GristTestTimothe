@@ -88,6 +88,12 @@ export function createSyncController({ planningRenderer, chargeBoard, bounds, on
   let toolbarEl = null;
   let toolbarClickHandler = null;
   const wheelBindings = []; // [{ el, handler }] — bindWheel may be called once per pane.
+  const panBindings = []; // [{ el }] — bindPan (drag-to-pan the frise horizontally).
+  let panPointerId = null;
+  let panStartX = 0;
+  let panStartFirstVisibleDate = "";
+  let panStartVisibleDays = 0;
+  let panDayWidthPx = 0;
 
   function getBaseViewport() {
     // Before the first setViewport() call, `current` is null: fall back to
@@ -299,7 +305,21 @@ export function createSyncController({ planningRenderer, chargeBoard, bounds, on
   // ctrl+wheel zoom, just computed off viewport day-math instead of a
   // pixel-precise DOM slot lookup — "keep it simple", per the brief).
   function handleWheel(event) {
+    // Wheel semantics by region:
+    //   - over the top pane's TASK ROWS  -> let the vis-timeline verticalScroll
+    //     the rows (do nothing here so the event reaches vis).
+    //   - over the time axis (frise) OR the bottom pane -> zoom.
+    // Bound in CAPTURE on #ps-main (bindWheel) so that, for the zoom regions,
+    // stopPropagation() below runs BEFORE vis and prevents a double action.
+    const target = event.target instanceof Element ? event.target : null;
+    const overTopPane = Boolean(target && target.closest(PLANNING_PANE_SELECTOR));
+    const overAxis = Boolean(target && target.closest(".vis-panel.vis-top"));
+    if (overTopPane && !overAxis) {
+      return; // rows: vis verticalScroll handles the wheel (scroll up/down)
+    }
+
     event.preventDefault();
+    event.stopPropagation();
 
     const base = getBaseViewport();
     if (!base.firstVisibleDate || !(base.visibleDays > 0)) return;
@@ -332,16 +352,105 @@ export function createSyncController({ planningRenderer, chargeBoard, bounds, on
     setViewport({ firstVisibleDate: nextFirstVisibleDate, visibleDays: nextVisibleDays });
   }
 
+  // Capture phase so this ancestor handler runs BEFORE the top pane's
+  // vis-timeline (a descendant) and can stopPropagation() the wheel to keep
+  // zoom the sole wheel action — see handleWheel.
+  const WHEEL_OPTIONS = { passive: false, capture: true };
+
   function bindWheel(targetEl) {
     if (!(targetEl instanceof HTMLElement)) return;
-    targetEl.addEventListener("wheel", handleWheel, { passive: false });
+    targetEl.addEventListener("wheel", handleWheel, WHEEL_OPTIONS);
     wheelBindings.push({ el: targetEl, handler: handleWheel });
   }
 
   function unbindWheel() {
     wheelBindings.splice(0).forEach(({ el, handler }) => {
-      el.removeEventListener("wheel", handler);
+      el.removeEventListener("wheel", handler, WHEEL_OPTIONS);
     });
+  }
+
+  // Drag-to-pan the shared frise horizontally. Bound on the read-only top pane
+  // (bindPan, from main.js). A drag shifts firstVisibleDate through the SAME
+  // setViewport() path as the toolbar/wheel, so BOTH panes pan together and stay
+  // pixel-aligned. Vertical dragging is ignored (rows scroll via wheel/scrollbar).
+  function getSharedContentWidthPx() {
+    if (typeof chargeBoard?.getContentWidthPx === "function") {
+      const width = chargeBoard.getContentWidthPx();
+      if (width > 0) return width;
+    }
+    if (typeof document !== "undefined") {
+      const el = document.querySelector(`${PLANNING_PANE_SELECTOR} .vis-panel.vis-center`);
+      if (el) return el.getBoundingClientRect().width;
+    }
+    return 0;
+  }
+
+  function onPanPointerDown(event) {
+    if (panPointerId != null) return;
+    if (event.button != null && event.button !== 0) return; // primary button only
+    // Don't hijack a drag on the vertical scrollbar (rows are scrolled there).
+    if (event.target instanceof Element && event.target.closest(".vis-vertical-scroll")) return;
+
+    const base = getBaseViewport();
+    if (!base.firstVisibleDate || !(base.visibleDays > 0)) return;
+    const contentWidthPx = getSharedContentWidthPx();
+    if (!(contentWidthPx > 0)) return;
+
+    panPointerId = event.pointerId;
+    panStartX = event.clientX;
+    panStartFirstVisibleDate = base.firstVisibleDate;
+    panStartVisibleDays = base.visibleDays;
+    panDayWidthPx = contentWidthPx / base.visibleDays;
+
+    if (event.currentTarget && typeof event.currentTarget.setPointerCapture === "function") {
+      try {
+        event.currentTarget.setPointerCapture(panPointerId);
+      } catch (_) {
+        /* best-effort capture */
+      }
+    }
+    if (typeof document !== "undefined") document.body.classList.add("ps-panning");
+    event.preventDefault(); // suppress text selection while dragging
+  }
+
+  function onPanPointerMove(event) {
+    if (event.pointerId !== panPointerId || !(panDayWidthPx > 0)) return;
+    // Drag right => reveal EARLIER dates (content follows the cursor, like a map).
+    const deltaDays = Math.round(-(event.clientX - panStartX) / panDayWidthPx);
+    const nextFirstVisibleDate = shiftIsoDateValue(panStartFirstVisibleDate, deltaDays);
+    setViewport({ firstVisibleDate: nextFirstVisibleDate, visibleDays: panStartVisibleDays });
+  }
+
+  function endPan(event) {
+    if (event.pointerId !== panPointerId) return;
+    if (event.currentTarget && typeof event.currentTarget.releasePointerCapture === "function") {
+      try {
+        event.currentTarget.releasePointerCapture(panPointerId);
+      } catch (_) {
+        /* capture may already be gone */
+      }
+    }
+    panPointerId = null;
+    if (typeof document !== "undefined") document.body.classList.remove("ps-panning");
+  }
+
+  function bindPan(targetEl) {
+    if (!(targetEl instanceof HTMLElement)) return;
+    targetEl.addEventListener("pointerdown", onPanPointerDown);
+    targetEl.addEventListener("pointermove", onPanPointerMove);
+    targetEl.addEventListener("pointerup", endPan);
+    targetEl.addEventListener("pointercancel", endPan);
+    panBindings.push({ el: targetEl });
+  }
+
+  function unbindPan() {
+    panBindings.splice(0).forEach(({ el }) => {
+      el.removeEventListener("pointerdown", onPanPointerDown);
+      el.removeEventListener("pointermove", onPanPointerMove);
+      el.removeEventListener("pointerup", endPan);
+      el.removeEventListener("pointercancel", endPan);
+    });
+    if (typeof document !== "undefined") document.body.classList.remove("ps-panning");
   }
 
   function destroy() {
@@ -357,6 +466,7 @@ export function createSyncController({ planningRenderer, chargeBoard, bounds, on
     }
     unbindToolbar();
     unbindWheel();
+    unbindPan();
   }
 
   return {
@@ -367,6 +477,7 @@ export function createSyncController({ planningRenderer, chargeBoard, bounds, on
     today,
     bindToolbar,
     bindWheel,
+    bindPan,
     destroy,
   };
 }

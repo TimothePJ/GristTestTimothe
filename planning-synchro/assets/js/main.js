@@ -26,11 +26,14 @@ import {
   readSharedSelection,
   writeSharedSelection,
 } from "./services/projectRegistry.js";
-import { getFirstPhaseDate, buildRowPhases } from "./top/phases.js";
+import { getFirstPhaseDate, buildRowPhases, computePlanningPhaseBounds } from "./top/phases.js";
 import { computeTimeSegmentBounds } from "./top/bounds.js";
 import { createPlanningRenderer } from "./top/planningRenderer.js";
 import { createChargeBoard, buildWorkersFromSegments } from "./bottom/chargeBoard.js";
 import { attachChargeEditing } from "./bottom/chargeEditing.js";
+import { createTopPaneResizer } from "./ui/topPaneResizer.js";
+import { buildProjectRealisationTargetLookup } from "./top/vendor/planningProjetBuilder.js";
+import { fetchPlanningReferenceReceptionSummaries } from "./services/referenceReception.js";
 import { buildInitialProjectViewport, buildCanonicalSharedViewport } from "./viewport/build.js";
 import { normalizeIsoDate } from "./viewport/normalize.js";
 import { formatIsoDate } from "./utils/dates.js";
@@ -59,6 +62,17 @@ function selectionKeyFor(project) {
 // window's own start/end when there isn't a single dated phase either (e.g.
 // an entirely empty project) so the controller always gets a non-null,
 // internally consistent bounds object.
+// Union of two { startDate, endDate } ISO bounds (either may be null). ISO dates
+// compare lexicographically, so min-start / max-end is a plain string compare.
+function unionDateBounds(a, b) {
+  if (!a) return b || null;
+  if (!b) return a || null;
+  return {
+    startDate: a.startDate < b.startDate ? a.startDate : b.startDate,
+    endDate: a.endDate > b.endDate ? a.endDate : b.endDate,
+  };
+}
+
 function computePlanningDerivedBounds(planningRows, columns, fallbackViewport) {
   let minMs = Infinity;
   let maxMs = -Infinity;
@@ -110,6 +124,7 @@ function bootstrapApp() {
     empty: document.getElementById("ps-empty"),
     main: document.getElementById("ps-main"),
     planning: document.getElementById("ps-planning"),
+    splitter: document.getElementById("ps-splitter"),
     charge: document.getElementById("ps-charge"),
     chargeEmpty: document.getElementById("ps-charge-empty"),
     aggregateToggle: document.getElementById("ps-aggregate-toggle"),
@@ -129,13 +144,29 @@ function bootstrapApp() {
   let chargeBoard = null;
   let controller = null;
   let editing = null;
+  let topPaneResizer = null;
   let loadSeq = 0;
   let lastAppliedSelectionKey = "";
+
+  // Session-scoped visible-rows target for the top pane's splitter: kept here
+  // (not per-project, not persisted to localStorage) so a height chosen on one
+  // project carries to the next, re-clamped to that project's row count by the
+  // resizer (see ui/topPaneResizer.js + top/paneMath.js).
+  let desiredTopRows = APP_CONFIG.topPane.defaultRows;
+
+  // Realisation target-indice lookup, keyed by project (name/number/id), built
+  // from Projets2.Avancement — feeds the vendored builder so a row with an empty
+  // `Realise` still gets the exact realisation state Planning Projet would show.
+  let realisationTargetLookup = null;
 
   function teardown() {
     if (editing) {
       editing.detach();
       editing = null;
+    }
+    if (topPaneResizer) {
+      topPaneResizer.destroy();
+      topPaneResizer = null;
     }
     if (controller) {
       controller.destroy();
@@ -200,11 +231,35 @@ function bootstrapApp() {
     const bounds = computeTimeSegmentBounds(timeSegmentRows, pc.timeSegment);
     const firstPlanningDate = getFirstPhaseDate(planningRows, pc.planningProject);
 
+    // "Données d'entrées" (reception) band data: link the planning rows to their
+    // blocking References2 documents. Best-effort — an empty/failed read just
+    // omits the band; the top pane still renders.
+    let referenceReceptionLookup = null;
+    try {
+      referenceReceptionLookup = await fetchPlanningReferenceReceptionSummaries(planningRows, pc.planningProject);
+    } catch (error) {
+      console.error("Erreur chargement reception (References2) :", error);
+    }
+
+    // Widen the shared frise to cover every top-pane segment — phases AND
+    // reception bands — so rows outside the prévisionnel window stay visible and
+    // no reception band gets pinned before the left edge (union bounds). Computed
+    // AFTER the reception fetch so the bands are included.
+    const planBounds = computePlanningPhaseBounds(planningRows, project.name, referenceReceptionLookup);
+    if (seq !== loadSeq) return; // superseded while awaiting References2
+
     planningRenderer = createPlanningRenderer(els.planning);
     chargeBoard = createChargeBoard(els.charge);
 
     const aggregate = Boolean(els.aggregateToggle && els.aggregateToggle.checked);
-    planningRenderer.render({ rows: planningRows, columns: pc.planningProject, aggregate });
+    planningRenderer.render({
+      rows: planningRows,
+      columns: pc.planningProject,
+      aggregate,
+      project: project.name,
+      targetLookup: realisationTargetLookup,
+      referenceReceptionLookup,
+    });
 
     let viewport;
     let controllerBounds;
@@ -212,9 +267,9 @@ function bootstrapApp() {
     if (bounds) {
       els.chargeEmpty.hidden = true;
       els.charge.hidden = false;
-      controllerBounds = bounds;
+      controllerBounds = unionDateBounds(bounds, planBounds) || bounds;
 
-      const initialViewport = buildInitialProjectViewport({ firstPlanningDate, bounds });
+      const initialViewport = buildInitialProjectViewport({ firstPlanningDate, bounds: controllerBounds });
       // Only reuse a persisted window for the SAME project it was saved from
       // (persisted.projectId === project.id) AND only if it still fits the
       // current bounds. Any other case (different project, or a window that no
@@ -226,7 +281,7 @@ function bootstrapApp() {
       const canReusePersisted =
         persisted &&
         persisted.projectId === project.id &&
-        viewportFitsWithinBounds(persisted.viewport, bounds);
+        viewportFitsWithinBounds(persisted.viewport, controllerBounds);
       viewport = canReusePersisted ? buildCanonicalSharedViewport(persisted.viewport) : initialViewport;
 
       chargeBoard.render({ workers, viewport, editMode: false });
@@ -239,7 +294,9 @@ function bootstrapApp() {
       els.charge.hidden = true;
 
       viewport = buildDefaultMonthViewport(firstPlanningDate);
-      controllerBounds = computePlanningDerivedBounds(planningRows, pc.planningProject, viewport);
+      // No TimeSegment: the frise still spans the planning phases (builder bounds),
+      // falling back to the phase-derived range when the builder yields none.
+      controllerBounds = planBounds || computePlanningDerivedBounds(planningRows, pc.planningProject, viewport);
       chargeBoard.render({ workers: [], viewport, editMode: false });
     }
 
@@ -251,12 +308,34 @@ function bootstrapApp() {
         if (els.range) els.range.textContent = label || "-";
         state.viewport = appliedViewport;
         persistViewport(appliedViewport, state.selectedProject);
+        // The top-axis band height changes with the zoom mode (week/month/year),
+        // so recompute the top pane's bounded height after every viewport apply.
+        if (topPaneResizer) topPaneResizer.refresh();
+      },
+    });
+
+    // Splitter/resizer for the top pane's visible height (min 5 / max 16 rows).
+    // Created after render so the first refresh() can measure the rendered axis
+    // and row heights; shares the session-scoped desiredTopRows.
+    topPaneResizer = createTopPaneResizer({
+      planningEl: els.planning,
+      splitterEl: els.splitter,
+      getGroupCount: () => (planningRenderer ? planningRenderer.getGroupCount() : 0),
+      setMaxHeight: (px) => {
+        if (planningRenderer) planningRenderer.setMaxHeight(px);
+      },
+      config: APP_CONFIG.topPane,
+      getDesiredRows: () => desiredTopRows,
+      setDesiredRows: (rows) => {
+        desiredTopRows = rows;
       },
     });
 
     controller.bindToolbar(els.toolbar);
     controller.bindWheel(els.main);
+    controller.bindPan(els.planning);
     controller.setViewport(viewport);
+    topPaneResizer.refresh();
 
     editing = attachChargeEditing(els.charge, {
       getProjectNumber: () => project.number,
@@ -355,6 +434,17 @@ function bootstrapApp() {
     }
 
     state.registry = buildRegistry(projectRows, APP_CONFIG.grist.columns.projects);
+
+    const pcp = APP_CONFIG.grist.columns.projects;
+    realisationTargetLookup = buildProjectRealisationTargetLookup(
+      (projectRows || []).map((row) => ({
+        projectId: String(row?.id ?? ""),
+        projectName: String(row?.[pcp.name] ?? ""),
+        projectNumber: String(row?.[pcp.number] ?? ""),
+        avancementConfigRaw: row?.[pcp.avancement],
+      }))
+    );
+
     populateProjectSelect();
 
     els.select.addEventListener("change", handleProjectSelectChange);

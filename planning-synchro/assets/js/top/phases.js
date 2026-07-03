@@ -18,6 +18,7 @@
 // builds one.
 
 import { parseCalendarDate, formatIsoDate, toText } from "../utils/dates.js";
+import { buildTimelineDataFromPlanningRows } from "./vendor/planningProjetBuilder.js";
 
 // --- normalizePlanningDocumentType (ported) ---------------------------------
 
@@ -133,50 +134,80 @@ export function buildRowPhases(row, columns) {
   return phases;
 }
 
-// --- non-aggregated view: 1 group per Ligne_planning (fallback task label) ---
+// --- non-aggregated view: EXACT Planning Projet rendering (vendored builder) ---
+//
+// One timeline row per record + Zone header rows, with the exact phase bands,
+// realisation/retard states, inline styles and tooltips of Planning Projet —
+// produced by the vendored buildTimelineDataFromPlanningRows (top/vendor/). We
+// only ADAPT its rich output for the shared-frise pane: the visible left label
+// is the Tâche alone (or the zone name on a header row), so the left column
+// stays aligned at --ps-left-col-width; the record's ID2/Zone/Groupe linkage
+// goes to the hover title. Rendering stays strictly read-only (planningRenderer).
 
-export function buildPlanningItems(rows, columns) {
-  const groups = [];
-  const groupByKey = new Map();
-  const items = [];
-  let itemSeq = 0;
+// Plain-text hover title for a task row: task name on line 1, then the
+// ID2/Zone/Groupe linkage (the identity the task-only column deliberately hides).
+function buildTaskTitleText(group) {
+  const meta = [
+    group.id2Label && `ID2 : ${group.id2Label}`,
+    group.zoneLabel && `Zone : ${group.zoneLabel}`,
+    group.groupeLabel && `Groupe : ${group.groupeLabel}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return [group.tachesLabel || "", meta].filter(Boolean).join("\n");
+}
 
-  (rows || []).forEach((row, rowIndex) => {
-    const phases = buildRowPhases(row, columns);
-    if (!phases.length) return;
+export function buildPlanningItems(rows, columns, options = {}) {
+  const { project = "", zone = "", targetLookup = null, referenceReceptionLookup = null } = options;
+  const { groups, items } = buildTimelineDataFromPlanningRows(
+    rows || [],
+    project,
+    zone,
+    targetLookup,
+    referenceReceptionLookup
+  );
 
-    const taskLabel = getRowTaskLabel(row, columns);
-    const lignePlanning = toText(row?.[columns.lignePlanning]);
-    const groupKey = lignePlanning || taskLabel || `__row-${rowIndex}`;
+  const adaptedGroups = (groups || []).map((group) => ({
+    id: group.id,
+    isZoneHeader: Boolean(group.isZoneHeader),
+    className: group.className || "",
+    label: group.isZoneHeader
+      ? group.zoneHeaderLabel || group.zoneLabel || ""
+      : group.tachesLabel || "",
+    titleText: group.isZoneHeader
+      ? group.zoneHeaderLabel || group.zoneLabel || ""
+      : buildTaskTitleText(group),
+  }));
 
-    let group = groupByKey.get(groupKey);
-    if (!group) {
-      const rawTypeDoc = toText(row?.[columns.typeDoc]);
-      group = {
-        id: `g-${groupKey}`,
-        label: taskLabel || groupKey,
-        typeDoc: normalizePlanningDocumentType(rawTypeDoc),
-      };
-      groupByKey.set(groupKey, group);
-      groups.push(group);
-    }
+  const adaptedItems = (items || []).map((item) => ({
+    id: item.id,
+    group: item.group,
+    start: item.start,
+    end: item.end,
+    type: item.type || "range",
+    className: item.className || "",
+    style: item.style || "",
+    phaseLabel: item.phaseLabel ?? item.content ?? "",
+    tooltip: item.title || item.tooltipHtml || "",
+  }));
 
-    phases.forEach((phase) => {
-      const item = {
-        id: `i-${itemSeq++}`,
-        group: group.id,
-        start: phase.start,
-        end: phase.end,
-        className: phase.className,
-        taskLabel: phase.taskLabel,
-        phaseLabel: phase.label,
-      };
-      item.tooltip = buildPhaseTooltipHtml(item);
-      items.push(item);
-    });
-  });
+  return { groups: adaptedGroups, items: adaptedItems };
+}
 
-  return { groups, items };
+// Date range (ISO { startDate, endDate }) covered by ALL rendered top-pane
+// segments — phases AND reception ("Données d'entrées") bands — from the vendored
+// builder's authoritative dateBounds. Used to WIDEN the shared frise (union with
+// the TimeSegment bounds) so everything the top pane draws stays in-bounds. The
+// reception lookup MUST be passed: a reception band precedes its phase (received
+// N weeks before), so omitting it would leave that band before the frise's left
+// edge, where vis pins it as a stray "far-left" segment.
+export function computePlanningPhaseBounds(rows, project = "", referenceReceptionLookup = null) {
+  const { dateBounds } = buildTimelineDataFromPlanningRows(
+    rows || [], project, "", null, referenceReceptionLookup
+  );
+  return dateBounds && dateBounds.startDate && dateBounds.endDate
+    ? { startDate: dateBounds.startDate, endDate: dateBounds.endDate }
+    : null;
 }
 
 // --- aggregated view: 1 group per Type_doc, overlapping same-type phases merged ---
@@ -203,6 +234,10 @@ export function aggregatePlanningItems(rows, columns) {
     }
 
     phases.forEach((phase) => {
+      // Aggregate view ("Rassembler visuellement") drops the start-of-works
+      // markers: they clutter the merged type-doc bands and Planning Projet's own
+      // timeline shows no separate démarrage segment either.
+      if (phase.type === "demarrage") return;
       if (!group.bucketsByPhaseType.has(phase.type)) {
         group.bucketsByPhaseType.set(phase.type, []);
       }

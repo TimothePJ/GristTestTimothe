@@ -10,6 +10,7 @@ import {
 import { formatIsoDate, parseCalendarDate } from "../assets/js/utils/dates.js";
 
 const cols = {
+  id: "id", id2: "ID2", groupe: "Groupe",
   taskName: "Taches", taskNameAlt: "Tache", typeDoc: "Type_doc", lignePlanning: "Ligne_planning",
   zone: "Zone", dateLimite: "Date_limite", diffCoffrage: "Diff_coffrage", diffArmature: "Diff_armature",
   demarragesTravaux: "Demarrages_travaux",
@@ -45,55 +46,44 @@ test("getFirstPhaseDate returns earliest phase start", () => {
   assert.equal(getFirstPhaseDate(rows, cols), "2027-01-10");
 });
 
-test("buildPlanningItems: one group per Ligne_planning, items link to groups", () => {
+test("buildPlanningItems (adapter): task-only labels + zone headers + item type/className", () => {
+  // Delegates to the vendored Planning Projet builder; the adapter keeps the
+  // visible label = Tâche only and preserves zone headers + item type/style.
+  // (Grouping/ordering fidelity is covered by planningProjetBuilder.test.mjs.)
+  const P = "ERA";
   const rows = [
-    { id: 1, Ligne_planning: "1", Taches: "SEMELLE S1", Type_doc: "COFFRAGE", Date_limite: "2027-01-01", Diff_coffrage: "2027-02-01" },
-    { id: 2, Ligne_planning: "2", Taches: "SEMELLE S2", Type_doc: "COFFRAGE", Date_limite: "2027-03-01", Diff_coffrage: "2027-04-01" },
+    { id: 10, NomProjet: P, ID2: "3002", Zone: "Zone 2 / BAT B", Taches: "FONDATIONS - COF", Type_doc: "COFFRAGE", Date_limite: "2026-08-19", Diff_coffrage: "2026-09-02" },
+    { id: 11, NomProjet: P, ID2: "3001", Zone: "Zone 1 / BAT BC", Taches: "FONDATIONS - COF", Type_doc: "COFFRAGE", Date_limite: "2026-12-30", Diff_coffrage: "2027-01-13" },
   ];
-  const { groups, items } = buildPlanningItems(rows, cols);
+  const { groups, items } = buildPlanningItems(rows, cols, { project: P });
 
-  // One group per distinct Ligne_planning.
-  assert.equal(groups.length, 2);
-  const groupIds = new Set(groups.map((g) => g.id));
-  assert.equal(groupIds.size, 2);
+  const taskGroups = groups.filter((g) => !g.isZoneHeader);
+  const zoneHeaders = groups.filter((g) => g.isZoneHeader);
+  assert.equal(taskGroups.length, 2, "homonyms stay distinct task rows");
+  assert.ok(zoneHeaders.length >= 2, "zone header rows present");
+  taskGroups.forEach((g) => assert.equal(g.label, "FONDATIONS - COF", "visible label = task name only"));
+  const z1 = taskGroups.find((g) => g.titleText.includes("Zone 1 / BAT BC"));
+  assert.ok(z1 && z1.titleText.includes("3001"), "task hover title carries ID2 + Zone");
+  assert.ok(zoneHeaders.some((g) => g.label.includes("Zone 1")), "zone header label = zone name");
 
-  // Two coffrage items, one per row; each links to an existing group.
-  assert.equal(items.length, 2);
-  items.forEach((item) => {
-    assert.ok(groupIds.has(item.group), `item.group ${item.group} must match an existing group id`);
-    assert.equal(typeof item.tooltip, "string");
-    assert.ok(item.tooltip.length > 0);
-  });
-
-  const s1Item = items.find((i) => i.taskLabel === "SEMELLE S1");
-  assert.ok(s1Item, "expected an item for SEMELLE S1");
-  assert.equal(s1Item.className, "phase-coffrage");
-  assert.equal(formatIsoDate(s1Item.start), "2027-01-01");
-  assert.equal(formatIsoDate(s1Item.end), "2027-02-01");
-
-  const s2Item = items.find((i) => i.taskLabel === "SEMELLE S2");
-  assert.ok(s2Item, "expected an item for SEMELLE S2");
-  assert.equal(s2Item.className, "phase-coffrage");
-  // The two items must belong to different groups (different Ligne_planning).
-  assert.notEqual(s1Item.group, s2Item.group);
+  const phaseItems = items.filter((it) => String(it.className).includes("phase-coffrage"));
+  assert.equal(phaseItems.length, 2, "one coffrage band per task record");
+  phaseItems.forEach((it) => assert.equal(it.type, "range"));
+  assert.ok(
+    items.some((it) => it.type === "background" && String(it.className).includes("zone-header-fill")),
+    "zone header background band present"
+  );
 });
 
-test("buildPhaseTooltipHtml: non-aggregated coffrage tooltip carries label and both dates", () => {
-  const rows = [
-    { id: 1, Ligne_planning: "1", Taches: "SEMELLE S1", Type_doc: "COFFRAGE", Date_limite: "2027-01-01", Diff_coffrage: "2027-02-01" },
-  ];
-  const { items } = buildPlanningItems(rows, cols);
-  const item = items[0];
+test("buildPhaseTooltipHtml: coffrage tooltip carries label and both dates", () => {
+  const start = parseCalendarDate("2027-01-01");
+  const end = parseCalendarDate("2027-02-01");
+  const item = { className: "phase-coffrage", taskLabel: "SEMELLE S1", start, end, phaseLabel: "Coffrage" };
   const html = buildPhaseTooltipHtml(item);
 
-  const startExpected = formatIsoDate(parseCalendarDate("2027-01-01"));
-  const endExpected = formatIsoDate(parseCalendarDate("2027-02-01"));
-
   assert.ok(html.includes("SEMELLE S1"), "tooltip should contain the task label");
-  assert.ok(html.includes(startExpected), `tooltip should contain start date ${startExpected}`);
-  assert.ok(html.includes(endExpected), `tooltip should contain end date ${endExpected}`);
-  // Item's own precomputed tooltip must match the standalone builder output.
-  assert.equal(item.tooltip, html);
+  assert.ok(html.includes(formatIsoDate(start)), "tooltip should contain start date");
+  assert.ok(html.includes(formatIsoDate(end)), "tooltip should contain end date");
 });
 
 test("buildPhaseTooltipHtml: aggregated tooltip lists both composing task labels", () => {

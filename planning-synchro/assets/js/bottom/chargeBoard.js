@@ -101,15 +101,18 @@ export function buildWorkersFromSegments(timeSegmentRows, projectTeamRows, colum
   const tsCols = columns?.timeSegment || {};
   const ptCols = columns?.projectTeam || {};
 
-  const roleByNameKey = new Map();
-  (projectTeamRows || []).forEach((row) => {
-    const nameKey = normalizeNameKey(row?.[ptCols.name]);
-    if (!nameKey || roleByNameKey.has(nameKey)) return;
-    roleByNameKey.set(nameKey, toText(row?.[ptCols.role]));
-  });
-
   const workersByNameKey = new Map();
   let segmentSeq = 0;
+
+  // Seed EVERY connected team member first (even those with no TimeSegment), the
+  // way gestion-depenses2 does (projectService.buildExpenseData): all people
+  // linked to the project appear in the bottom pane; segments are attached below.
+  (projectTeamRows || []).forEach((row) => {
+    const name = toText(row?.[ptCols.name]);
+    const nameKey = normalizeNameKey(name);
+    if (!nameKey || workersByNameKey.has(nameKey)) return;
+    workersByNameKey.set(nameKey, { name, role: toText(row?.[ptCols.role]) || "", segments: [] });
+  });
 
   (timeSegmentRows || []).forEach((row) => {
     const name = toText(row?.[tsCols.name]);
@@ -122,9 +125,9 @@ export function buildWorkersFromSegments(timeSegmentRows, projectTeamRows, colum
     const nameKey = normalizeNameKey(name);
     let worker = workersByNameKey.get(nameKey);
     if (!worker) {
-      // Fallback role is "" (unknown): groupWorkersByRole buckets an unknown
-      // role into "Autres", so the "Autres"/"" fallback split lives there.
-      worker = { name, role: roleByNameKey.get(nameKey) || "", segments: [] };
+      // A TimeSegment name absent from ProjectTeam still gets a row. Unknown role
+      // ("") is bucketed into "Autres" by groupWorkersByRole.
+      worker = { name, role: "", segments: [] };
       workersByNameKey.set(nameKey, worker);
     }
 
@@ -375,7 +378,7 @@ function renderSegmentBars(assignedBars) {
 
 function renderRoleRow(roleLabel, timelineWidth) {
   return `
-    <div class="charge-plan-role-row" style="--timeline-width:${timelineWidth}px; --row-height:36px">
+    <div class="charge-plan-role-row" style="--timeline-width:${timelineWidth}px; --row-height:54px">
       <div class="charge-plan-role-cell charge-plan-role-cell--label">${escapeHtml(roleLabel)}</div>
       <div class="charge-plan-role-cell charge-plan-role-cell--filler"></div>
     </div>
@@ -389,7 +392,8 @@ function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWid
     1,
     assignedBars.reduce((maxLane, bar) => Math.max(maxLane, bar.laneIndex + 1), 0)
   );
-  const rowHeight = Math.max(72, 20 + laneCount * 32);
+  // Row height raised ~50% (72->108 base, 32->48 per overlap lane).
+  const rowHeight = Math.max(108, 30 + laneCount * 48);
 
   return `
     <div class="charge-plan-row" style="--timeline-width:${timelineWidth}px; --row-height:${rowHeight}px">

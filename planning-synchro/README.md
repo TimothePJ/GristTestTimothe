@@ -25,7 +25,7 @@ correction pixel.
 | Table | Rôle | Colonnes utilisées |
 |---|---|---|
 | `Projets2` | Registre canonique des projets, pont nom ↔ numéro | `id`, `Nom_de_projet`, `Numero_de_projet` |
-| `Planning_Projet` | Planning projet (haut, lecture seule), filtré par `NomProjet` | `NomProjet`, `Taches`/`Tache`, `Type_doc`, `Ligne_planning`, `Zone`, `Date_limite`, `Diff_coffrage`, `Diff_armature`, `Demarrages_travaux` |
+| `Planning_Projet` | Planning projet (haut, lecture seule), filtré par `NomProjet` | `id`, `ID2`, `NomProjet`, `Taches`/`Tache`, `Type_doc`, `Groupe`, `Ligne_planning`, `Zone`, `Date_limite`, `Diff_coffrage`, `Diff_armature`, `Demarrages_travaux` |
 | `TimeSegment` | Plan de charge prévisionnel (bas, éditable), filtré par `NumeroProjet` | `NumeroProjet`, `Name`, `Start_At`, `End_At`, `Allocation_Days`, `Effectif`, `Label` |
 | `ProjectTeam` | Rôle de chaque personne pour le regroupement (Projeteurs / Ingénieurs / Autres), filtré par `NumeroProjet` | `NumeroProjet`, `Name`, `Role`, `Daily_Rate` |
 
@@ -60,9 +60,72 @@ pixel des deux frises — est **arithmétique, vraie par construction**, plutôt
 que mesurée puis corrigée après coup : l'ancienne boucle
 mesure-DOM-puis-nudge-puis-retry de `Synchro/` disparaît, remplacée par une
 unique assertion de garde (`console.warn` si écart > 1px, jamais de boucle de
-correction). Les bornes de la frise viennent **uniquement** de `TimeSegment`
-(`min(Start_At)` → `max(End_At)`) ; `Planning_Projet` ne les élargit jamais et
-son contenu hors bornes est simplement hors champ.
+correction). Les bornes de la frise sont l'**union** de la plage `TimeSegment`
+(`min(Start_At)` → `max(End_At)`) **et** de la plage de toutes les phases
+`Planning_Projet` (dateBounds du builder, via `computePlanningPhaseBounds` +
+`unionDateBounds` dans `main.js`), afin qu'une tâche dont les phases tombent hors
+du prévisionnel reste visible et navigable. La fenêtre visible se déplace
+librement dans ces bornes (toolbar / molette-zoom sur l'axe / glisser) et
+s'ouvre au maximum sur **14 mois** (`viewport.maxVisibleDays`).
+
+## Pane haut = rendu Planning Projet exact (lecture seule, colonne Tâche)
+
+Le pane haut reproduit **exactement** le planning de `Planning Projet` : mêmes
+phases (coffrage/armature/NDC/coupes/démolition/générique + démarrage), mêmes
+couleurs, **états réalisé/retard** (bandes `phase-past`, styles inline de retard),
+en-têtes de zone et info-bulles. Il **réutilise le vrai builder** de Planning
+Projet, *vendorisé* (copié pour rester auto-contenu) sous
+`assets/js/top/vendor/planningProjetBuilder.js` (avec `planningRealisation.js` et
+`columnsConfig.js`) : `buildTimelineDataFromPlanningRows()` produit une ligne par
+enregistrement + les en-têtes de zone, ordonnées Zone → `Ligne_planning` → `ID2` →
+`Type_doc` → `Taches`. Les états réalisé/retard viennent des colonnes `Realise` /
+`Retards` / `Indice` du record (aucun appel Grist supplémentaire), avec repli sur
+`Projets2.Avancement` (target-indice). `assets/js/top/phases.js` **adapte** cette
+sortie au pane partagé : la **colonne de gauche n'affiche que la Tâche** (une ligne,
+tronquée) — ou le nom de zone sur une ligne d'en-tête — pour garder l'alignement de
+la frise ; l'identité (**ID2 · Zone · Groupe**) est portée par l'info-bulle. Le
+rendu reste **strictement en lecture seule** (aucune édition, aucun drag, aucune
+modale), piloté par le contrôleur de synchro (on ne réutilise pas `timeline.js` de
+Planning Projet, qui a son propre contrôleur de viewport).
+
+La bande **« Données d'entrées »** (réception) est incluse :
+`assets/js/services/referenceReception.js` lit la table `References2` et lie chaque
+ligne planning à ses documents **bloquants** (clé `NomProjet` + `ID2` +
+`Type_doc` + `Taches` + `Zone`, repli zone vide) pour produire un statut
+**complet / manquant / mixte** (bande verte / rouge / orange), exactement comme
+Planning Projet — sans dépendre de son moteur générique de correspondance.
+
+## Mise en page du pane haut (frise sticky, séparateur, libellés)
+
+Le pane haut a une **hauteur visible bornée** entre **5 et 16 lignes de tâches**
+(défaut : 10). Un **séparateur** déplaçable entre les deux panes (poignée sous le
+planning, `#ps-splitter`, aussi pilotable au clavier ↑/↓) ajuste cette hauteur et
+se fige à l'endroit relâché. Sous le contenu, la hauteur s'adapte au nombre réel
+de tâches (aucune ligne vide) ; au-delà de 16 lignes, le pane haut **scrolle
+verticalement en interne** tandis que la **frise (axe de temps) reste figée en
+haut** (sticky). Mécanisme : option `maxHeight` + `verticalScroll` de
+vis-timeline, cap calculé par `assets/js/top/paneMath.js` (pur, testé) et appliqué
+par `assets/js/ui/topPaneResizer.js` (mesure de l'axe et de la hauteur de ligne,
+drag pointer/clavier). Chaque **libellé de tâche tient sur une seule ligne**,
+tronqué en `…` si trop long, avec le nom complet en info-bulle native (`title`).
+
+### Navigation dans la frise
+
+- **Glisser-déposer horizontal** : attraper la frise du pane haut et la faire
+  glisser gauche/droite panote dans le temps ; les **deux panes suivent** (via
+  `sync/controller.js` → `bindPan`, même chemin `setViewport` que la toolbar,
+  donc alignement conservé).
+- **Molette** : sur l'**axe de temps (frise)** = zoom / dézoom ; sur les **lignes
+  de tâches** = **scroll vertical** interne (frise sticky) ; sur le **pane bas** =
+  zoom. Le handler molette du contrôleur distingue la région (axe vs lignes).
+- **Toolbar** (semaine/mois/année, précédent/suivant/aujourd'hui) inchangée.
+
+Le segment **démarrage de travaux** est rendu **exactement comme Planning Projet**
+(marqueur vert compact) et produit pour les armatures (toujours) et coffrages liés
+au planning ; il est simplement **retiré du mode « Rassembler visuellement le
+planning »** (agrégat par `Type_doc`, dont l'info-bulle liste toutes les tâches
+composant un segment). Le **pane bas** affiche **toutes les personnes** liées au
+projet (`ProjectTeam`), même sans `TimeSegment`, comme `gestion-depenses2`.
 
 ## Développement
 
