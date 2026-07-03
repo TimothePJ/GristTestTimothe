@@ -125,7 +125,15 @@ Projet** — un marqueur vert clair (`#dcfce7` / `#86efac`, contenu transparent 
 largeur nulle) à pleine hauteur de ligne — produit pour les armatures (toujours)
 et coffrages liés au planning ; il est simplement **retiré du mode « Rassembler
 visuellement le planning »** (agrégat par `Type_doc`, dont l'info-bulle HTML
-liste **toutes les tâches** composant un segment). La **colonne de gauche**
+liste **toutes les tâches** composant un segment). En mode agrégé, chaque type
+de document tient sur **une seule ligne** : le stacking vis est désactivé
+(`stack:false`) pour que deux segments de même type dans des périodes proches
+restent **fusionnés visuellement** sur la même ligne (au lieu d'être poussés sur
+une 2ᵉ ligne quand leurs boîtes tombent dans la marge de stacking au dézoom ;
+les phases réellement chevauchantes sont déjà unies en une barre par
+`aggregatePlanningItems`). Le mode non-agrégé garde le stacking (les phases /
+bande de réception d'un même enregistrement peuvent légitimement partager sa
+ligne). La **colonne de gauche**
 (tâches) est **teintée par type de document** comme dans Planning Projet
 (coffrage, NDC, coupes, démolition, générique ; armature sans teinte). Le **pane
 bas** affiche **toutes les personnes** liées au projet (`ProjectTeam`), même sans

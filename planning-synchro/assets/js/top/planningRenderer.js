@@ -205,6 +205,17 @@ export function createPlanningRenderer(containerEl) {
       ? aggregatePlanningItems(lastRows, lastColumns)
       : buildPlanningItems(lastRows, lastColumns, lastOptions);
 
+    // Aggregate view = ONE line per document type: disable vis stacking so two
+    // same-type segments in nearby periods stay on a single line ("fusionner
+    // visuellement") instead of being pushed onto a 2nd lane when their boxes
+    // fall within the stacking margin at a wide zoom. aggregatePlanningItems
+    // already unions genuinely-overlapping same-type phases into one bar, so the
+    // items on that single line never overlap. The non-aggregate view keeps
+    // stacking (a record's own phases/reception band may legitimately share a row).
+    if (timeline && typeof timeline.setOptions === "function") {
+      timeline.setOptions({ stack: !lastAggregate });
+    }
+
     lastGroupCount = groups.length;
 
     groupsDataSet.clear();

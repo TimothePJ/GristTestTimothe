@@ -52,6 +52,7 @@ export const FIXTURE_TABLES = {
     { id: 3, Nom_de_projet: "TEST SCROLL 20 TACHES", Numero_de_projet: MANY_TASK_NUMBER }, // >16 tasks -> scroll demo
     { id: 4, Nom_de_projet: "TEST ZONES HOMONYMES", Numero_de_projet: HOMONYM_NUMBER }, // homonym tasks across zones
     { id: 5, Nom_de_projet: "TEST BORD GAUCHE", Numero_de_projet: "555555" }, // reception band months before the only phase -> must NOT show at far-left
+    { id: 6, Nom_de_projet: "TEST FUSION", Numero_de_projet: "666666" }, // 2 close same-type segments -> aggregate must keep them on ONE line
   ],
   Planning_Projet: [
     // Mixed date formats (FR + ISO) on purpose to exercise the robust parser.
@@ -67,6 +68,11 @@ export const FIXTURE_TABLES = {
     // before the phase. The frise bounds must NOT extend to the band (phases
     // only), so it never appears as a stray segment at the far-left edge.
     { id: 5001, NomProjet: "TEST BORD GAUCHE", ID2: "5001", Zone: "Z1", Taches: "DALLE - COF", Type_doc: "COFFRAGE", Date_limite: "2027-06-01", Diff_coffrage: "2027-06-20" },
+    // TEST FUSION: two COFFRAGE tasks in nearby (disjoint) periods. In aggregate
+    // mode they must render on ONE line for the Coffrage type — zoomed out, their
+    // "Coffrage" labels collide, which used to push one onto a 2nd lane (stacking).
+    { id: 6001, NomProjet: "TEST FUSION", ID2: "6001", Zone: "Z1", Taches: "MUR A - COF", Type_doc: "COFFRAGE", Date_limite: "2027-02-01", Diff_coffrage: "2027-02-10" },
+    { id: 6002, NomProjet: "TEST FUSION", ID2: "6002", Zone: "Z1", Taches: "MUR B - COF", Type_doc: "COFFRAGE", Date_limite: "2027-02-11", Diff_coffrage: "2027-02-20" },
   ],
   TimeSegment: [
     { id: 1, NumeroProjet: "252035", Name: "Fouzia Raggui", Start_At: "02/02/2027 08:00", End_At: "26/02/2027 17:00", Allocation_Days: "18", Effectif: "1", Label: "" },
@@ -81,6 +87,8 @@ export const FIXTURE_TABLES = {
     // task falls inside the frise window and its phase-past band is visible.
     { id: 7, NumeroProjet: HOMONYM_NUMBER, Name: "Equipe Zones", Start_At: "01/01/2026 08:00", End_At: "01/04/2027 17:00", Allocation_Days: "40", Effectif: "2", Label: "" },
     { id: 20, NumeroProjet: "555555", Name: "Equipe BG", Start_At: "01/06/2027 08:00", End_At: "20/06/2027 17:00", Allocation_Days: "10", Effectif: "1", Label: "" },
+    // Spans all of 2027 so the frise can zoom out to a year (labels then collide).
+    { id: 30, NumeroProjet: "666666", Name: "Equipe Fusion", Start_At: "01/01/2027 08:00", End_At: "31/12/2027 17:00", Allocation_Days: "20", Effectif: "1", Label: "" },
   ],
   ProjectTeam: [
     { id: 1, NumeroProjet: "252035", Name: "Fouzia Raggui", Role: "Projeteur", Daily_Rate: 0 },
@@ -92,6 +100,7 @@ export const FIXTURE_TABLES = {
     { id: 6, NumeroProjet: MANY_TASK_NUMBER, Name: "BE Externe", Role: "Sous-traitant", Daily_Rate: 0 },
     { id: 7, NumeroProjet: HOMONYM_NUMBER, Name: "Equipe Zones", Role: "Projeteur", Daily_Rate: 0 },
     { id: 20, NumeroProjet: "555555", Name: "Equipe BG", Role: "Projeteur", Daily_Rate: 0 },
+    { id: 30, NumeroProjet: "666666", Name: "Equipe Fusion", Role: "Projeteur", Daily_Rate: 0 },
   ],
   // "Données d'entrées" (reception) references, linked to planning rows by
   // NomProjet + NumeroDocument(=ID2) + Type_document + NomDocument(=Taches) + Zone.
