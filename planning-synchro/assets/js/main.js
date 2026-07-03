@@ -133,6 +133,7 @@ function bootstrapApp() {
     viewSwitch: document.getElementById("ps-view-switch"),
     chart: document.getElementById("ps-chart"),
     chartCanvas: document.getElementById("ps-chart-canvas"),
+    chartFilter: document.getElementById("ps-chart-filter"),
   };
 
   if (!(els.select instanceof HTMLElement)) {
@@ -264,7 +265,7 @@ function bootstrapApp() {
 
     planningRenderer = createPlanningRenderer(els.planning);
     chargeBoard = createChargeBoard(els.charge);
-    planningChart = createPlanningChart(els.chartCanvas);
+    planningChart = createPlanningChart(els.chartCanvas, els.chartFilter);
     // Keep the planning data for the chart view; always arrive on the planning
     // (timeline) view, scrolled to the first rows (see scrollToTop below).
     chartRows = planningRows;
@@ -485,6 +486,7 @@ function bootstrapApp() {
 
     if (els.planning instanceof HTMLElement) els.planning.hidden = chartActive;
     if (els.chart instanceof HTMLElement) els.chart.hidden = !chartActive;
+    if (els.chartFilter instanceof HTMLElement) els.chartFilter.hidden = !chartActive;
 
     if (els.viewSwitch instanceof HTMLElement) {
       els.viewSwitch.querySelectorAll("[data-ps-view]").forEach((button) => {

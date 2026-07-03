@@ -190,11 +190,13 @@ déplacement** (`controller.bindPan(#ps-chart)`), toolbar semaine/mois/année �
 deux panes bougent ensemble. Sa hauteur suit le splitter (même hauteur que la
 timeline remplacée).
 
-**Filtre par la légende** : cliquer sur une entrée de la légende affiche
-**uniquement** ce type (sa ligne pleine + sa ligne pointillée « réalisé ») et
-masque les autres ; recliquer sur le même type ré-affiche tout. Le filtre est
-conservé au **zoom / déplacement** (ré-appliqué à chaque reconstruction des
-séries) et se réinitialise au changement de projet.
+**Filtre par cases à cocher** (`#ps-chart-filter`, au-dessus du graphique) : une
+case **par type de document présent** dans le projet (+ Total), toutes cochées au
+départ. Décocher un type **masque** ses deux lignes (pleine + « réalisé »), le
+cocher les ré-affiche ; on affiche donc uniquement les types voulus. Le filtre
+est conservé au **zoom / déplacement** (ré-appliqué à chaque reconstruction des
+séries) et se réinitialise (tout coché) au changement de projet. La légende est
+en lecture seule (le filtre pilote la visibilité).
 
 En mode **Editer**, le **clic droit** sur un segment ouvre le menu contextuel
 **Modifier** / **Supprimer le segment**, avec la **même fenêtre et les mêmes

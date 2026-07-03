@@ -130,20 +130,79 @@ function shortMonthLabel(ts) {
 }
 
 // A type's base label groups its solid line and its dotted "(réalisé)" companion
-// under one name (e.g. "Coffrage" + "Coffrage (réalisé)" -> "Coffrage"), so a
-// legend click filters the whole type at once.
+// under one name (e.g. "Coffrage" + "Coffrage (réalisé)" -> "Coffrage"), so the
+// checkbox filter toggles the whole type at once.
 function baseLabel(label) {
   return String(label || "").replace(/\s*\(réalisé\)\s*$/, "");
 }
 
-// createPlanningChart(canvasEl) -> { render, setViewport, setHeight, destroy }.
-export function createPlanningChart(canvasEl) {
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+// createPlanningChart(canvasEl, filterEl) -> { render, setViewport, setHeight, destroy }.
+export function createPlanningChart(canvasEl, filterEl) {
   let chart = null;
   let lastRows = [];
   let lastColumns = null;
-  // Legend filter: when set, only the datasets of this type (base label) are
-  // shown. Preserved across viewport re-renders (buildDatasets re-applies it).
-  let soloBase = null;
+  // Type filter: Set of base labels (e.g. "Coffrage", "Total") currently CHECKED.
+  // A dataset is shown iff its base label is in the set. Rebuilt per project and
+  // re-applied on every viewport re-render (buildDatasets reads it).
+  let visibleTypes = null;
+
+  // Which document types actually occur in the project (all rows, not just the
+  // visible window) — the checkbox filter only lists these + Total.
+  function computeAvailableLabels() {
+    const present = new Set();
+    (lastRows || []).forEach((row) => {
+      if (!taskDueDate(row, lastColumns)) return;
+      present.add(taskTypeKey(row, lastColumns));
+    });
+    const items = TYPE_ORDER.filter((type) => present.has(type)).map((type) => ({
+      label: TYPE_META[type].label,
+      color: TYPE_META[type].color,
+    }));
+    items.push({ label: TOTAL_META.label, color: TOTAL_META.color });
+    return items;
+  }
+
+  function applyVisibility() {
+    if (!chart || !visibleTypes) return;
+    chart.data.datasets.forEach((ds) => {
+      ds.hidden = !visibleTypes.has(baseLabel(ds.label));
+    });
+    chart.update();
+  }
+
+  function handleFilterChange() {
+    if (!(filterEl instanceof HTMLElement)) return;
+    const checked = [...filterEl.querySelectorAll('input[type="checkbox"]')]
+      .filter((input) => input.checked)
+      .map((input) => input.dataset.typeLabel);
+    visibleTypes = new Set(checked);
+    applyVisibility();
+  }
+
+  // (Re)build the checkbox filter for the current project; everything checked.
+  function buildFilter() {
+    if (!(filterEl instanceof HTMLElement)) return;
+    const items = computeAvailableLabels();
+    visibleTypes = new Set(items.map((item) => item.label));
+    filterEl.innerHTML = items
+      .map(
+        (item) => `
+        <label class="ps-chart-filter-item">
+          <input type="checkbox" data-type-label="${escapeHtml(item.label)}" checked>
+          <span class="ps-chart-filter-swatch" style="background:${escapeHtml(item.color)}"></span>
+          <span>${escapeHtml(item.label)}</span>
+        </label>`
+      )
+      .join("");
+  }
 
   // Each series is drawn as TWO lines of the same colour: a solid line (all tasks
   // to realize) and a dotted companion line (the subset already réalisé à 100%).
@@ -192,9 +251,9 @@ export function createPlanningChart(canvasEl) {
     datasets.push(
       dottedLine(`${TOTAL_META.label} (réalisé)`, TOTAL_META.color, series.points, series.totalRealized, 3)
     );
-    // Re-apply the active legend filter so it survives viewport re-renders.
+    // Re-apply the active type filter so it survives viewport re-renders.
     datasets.forEach((ds) => {
-      ds.hidden = soloBase != null && baseLabel(ds.label) !== soloBase;
+      ds.hidden = visibleTypes != null && !visibleTypes.has(baseLabel(ds.label));
     });
     return datasets;
   }
@@ -233,19 +292,9 @@ export function createPlanningChart(canvasEl) {
           legend: {
             position: "bottom",
             labels: { usePointStyle: true, pointStyle: "line", boxWidth: 26, padding: 12, font: { size: 11 } },
-            // Click a legend entry to show ONLY that type (its solid + dotted
-            // "réalisé" line); click the same one again to show everything.
-            onClick(event, legendItem, legend) {
-              const activeChart = legend.chart;
-              const clicked = activeChart.data.datasets[legendItem.datasetIndex];
-              if (!clicked) return;
-              const base = baseLabel(clicked.label);
-              soloBase = soloBase === base ? null : base;
-              activeChart.data.datasets.forEach((ds) => {
-                ds.hidden = soloBase != null && baseLabel(ds.label) !== soloBase;
-              });
-              activeChart.update();
-            },
+            // Type visibility is driven by the checkbox filter (buildFilter), so
+            // the legend is display-only here (no click toggle to fight it).
+            onClick: () => {},
           },
           tooltip: {
             callbacks: {
@@ -273,6 +322,7 @@ export function createPlanningChart(canvasEl) {
   function render({ rows, columns, viewport } = {}) {
     lastRows = rows || [];
     lastColumns = columns || null;
+    buildFilter(); // rebuild checkboxes for this project (all checked)
     if (!ensureChart()) return;
     applyViewport(viewport);
   }
@@ -296,6 +346,15 @@ export function createPlanningChart(canvasEl) {
     chart = null;
     lastRows = [];
     lastColumns = null;
+    visibleTypes = null;
+    if (filterEl instanceof HTMLElement) {
+      filterEl.removeEventListener("change", handleFilterChange);
+      filterEl.innerHTML = "";
+    }
+  }
+
+  if (filterEl instanceof HTMLElement) {
+    filterEl.addEventListener("change", handleFilterChange);
   }
 
   return { render, setViewport, setHeight, destroy };
