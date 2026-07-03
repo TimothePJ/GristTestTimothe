@@ -51,6 +51,7 @@ export const FIXTURE_TABLES = {
     { id: 2, Nom_de_projet: "HOTEL DIEU", Numero_de_projet: "12345" }, // no TimeSegment -> empty-state demo
     { id: 3, Nom_de_projet: "TEST SCROLL 20 TACHES", Numero_de_projet: MANY_TASK_NUMBER }, // >16 tasks -> scroll demo
     { id: 4, Nom_de_projet: "TEST ZONES HOMONYMES", Numero_de_projet: HOMONYM_NUMBER }, // homonym tasks across zones
+    { id: 5, Nom_de_projet: "TEST BORD GAUCHE", Numero_de_projet: "555555" }, // reception band months before the only phase -> must NOT show at far-left
   ],
   Planning_Projet: [
     // Mixed date formats (FR + ISO) on purpose to exercise the robust parser.
@@ -61,6 +62,11 @@ export const FIXTURE_TABLES = {
     { id: 5, NomProjet: "ERA QUAI D'ORSAY", Taches: "", Type_doc: "", Zone: "Z02" }, // zone-only header -> excluded
     ...MANY_TASK_ROWS,
     ...HOMONYM_ROWS,
+    // TEST BORD GAUCHE: a single phase in June 2027 with a blocking reference
+    // whose 14-week lead puts the "Données d'entrées" band ~2027-02-23, MONTHS
+    // before the phase. The frise bounds must NOT extend to the band (phases
+    // only), so it never appears as a stray segment at the far-left edge.
+    { id: 5001, NomProjet: "TEST BORD GAUCHE", ID2: "5001", Zone: "Z1", Taches: "DALLE - COF", Type_doc: "COFFRAGE", Date_limite: "2027-06-01", Diff_coffrage: "2027-06-20" },
   ],
   TimeSegment: [
     { id: 1, NumeroProjet: "252035", Name: "Fouzia Raggui", Start_At: "02/02/2027 08:00", End_At: "26/02/2027 17:00", Allocation_Days: "18", Effectif: "1", Label: "" },
@@ -74,6 +80,7 @@ export const FIXTURE_TABLES = {
     // Project 4 (homonym zones): span from early 2026 so the past-dated (réalisé)
     // task falls inside the frise window and its phase-past band is visible.
     { id: 7, NumeroProjet: HOMONYM_NUMBER, Name: "Equipe Zones", Start_At: "01/01/2026 08:00", End_At: "01/04/2027 17:00", Allocation_Days: "40", Effectif: "2", Label: "" },
+    { id: 20, NumeroProjet: "555555", Name: "Equipe BG", Start_At: "01/06/2027 08:00", End_At: "20/06/2027 17:00", Allocation_Days: "10", Effectif: "1", Label: "" },
   ],
   ProjectTeam: [
     { id: 1, NumeroProjet: "252035", Name: "Fouzia Raggui", Role: "Projeteur", Daily_Rate: 0 },
@@ -84,6 +91,7 @@ export const FIXTURE_TABLES = {
     { id: 5, NumeroProjet: MANY_TASK_NUMBER, Name: "Equipe Etudes", Role: "Projeteur", Daily_Rate: 0 },
     { id: 6, NumeroProjet: MANY_TASK_NUMBER, Name: "BE Externe", Role: "Sous-traitant", Daily_Rate: 0 },
     { id: 7, NumeroProjet: HOMONYM_NUMBER, Name: "Equipe Zones", Role: "Projeteur", Daily_Rate: 0 },
+    { id: 20, NumeroProjet: "555555", Name: "Equipe BG", Role: "Projeteur", Daily_Rate: 0 },
   ],
   // "Données d'entrées" (reception) references, linked to planning rows by
   // NomProjet + NumeroDocument(=ID2) + Type_document + NomDocument(=Taches) + Zone.
@@ -93,5 +101,7 @@ export const FIXTURE_TABLES = {
     { id: 1, NomProjet: "TEST ZONES HOMONYMES", NumeroDocument: "3001", Type_document: "COFFRAGE", NomDocument: "FONDATIONS - COF", Zone: "Zone 1 / BAT BC", Bloquant: true, DureeLimite: "2", Recu: "", Emetteur: "BET", Reference: "PLA-330-A" },
     { id: 2, NomProjet: "TEST ZONES HOMONYMES", NumeroDocument: "3001", Type_document: "COFFRAGE", NomDocument: "FONDATIONS - COF", Zone: "Zone 1 / BAT BC", Bloquant: true, DureeLimite: "3", Recu: "15/01/2027", Emetteur: "Archi", Reference: "PLA-330-B" },
     { id: 3, NomProjet: "TEST ZONES HOMONYMES", NumeroDocument: "3032", Type_document: "COFFRAGE", NomDocument: "PH RDC - COF", Zone: "Zone 2 / BAT B", Bloquant: true, DureeLimite: "2", Recu: "", Emetteur: "BET", Reference: "PLA-331-A" },
+    // TEST BORD GAUCHE: 14-week lead -> band ~2027-02-23, months before the phase (2027-06-01).
+    { id: 4, NomProjet: "TEST BORD GAUCHE", NumeroDocument: "5001", Type_document: "COFFRAGE", NomDocument: "DALLE - COF", Zone: "Z1", Bloquant: true, DureeLimite: "14", Recu: "", Emetteur: "BET", Reference: "PLA-500-A" },
   ],
 };

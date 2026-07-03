@@ -216,16 +216,20 @@ export function buildPlanningItems(rows, columns, options = {}) {
   return { groups: adaptedGroups, items: adaptedItems };
 }
 
-// Date range (ISO { startDate, endDate }) covered by ALL rendered top-pane
-// segments — phases AND reception ("Données d'entrées") bands — from the vendored
-// builder's authoritative dateBounds. Used to WIDEN the shared frise (union with
-// the TimeSegment bounds) so everything the top pane draws stays in-bounds. The
-// reception lookup MUST be passed: a reception band precedes its phase (received
-// N weeks before), so omitting it would leave that band before the frise's left
-// edge, where vis pins it as a stray "far-left" segment.
-export function computePlanningPhaseBounds(rows, project = "", referenceReceptionLookup = null) {
+// Date range (ISO { startDate, endDate }) covered by the top-pane PHASE segments
+// (coffrage/armature/…/démarrage) from the vendored builder's dateBounds. Used to
+// WIDEN the shared frise (union with the TimeSegment bounds) so every phase row
+// stays visible/scrollable.
+//
+// Reception ("Données d'entrées") bands are intentionally NOT counted (the
+// reference lookup is not passed to the builder here): a band precedes its phase,
+// so including it would drag bounds.start left of all phases and park the band at
+// the far-left edge of the frise. Left out of the bounds, a band that precedes
+// the first phase is simply out of range (never a stray leftmost segment), and
+// vis `align:'center'` keeps it from pinning its content to the edge either.
+export function computePlanningPhaseBounds(rows, project = "") {
   const { dateBounds } = buildTimelineDataFromPlanningRows(
-    rows || [], project, "", null, referenceReceptionLookup
+    rows || [], project, "", null, null
   );
   return dateBounds && dateBounds.startDate && dateBounds.endDate
     ? { startDate: dateBounds.startDate, endDate: dateBounds.endDate }

@@ -40,10 +40,12 @@ test("buildReceptionSummaries: links blocking References2 rows to the planning r
   assert.equal(s2.status, "complete");
 });
 
-test("frise bounds INCLUDE reception bands (no far-left clipping)", () => {
+test("frise bounds EXCLUDE reception bands (band precedes phase -> stays out of range)", () => {
   // Earliest phase = 2027-02-01; a blocking reference with 8-week DureeLimite
-  // sits ~2026-12 (BEFORE the phase). The frise bounds must extend to cover it,
-  // otherwise vis pins that band at the far-left edge.
+  // sits ~2026-12 (BEFORE the phase). computePlanningPhaseBounds counts PHASES
+  // only: the band deliberately falls before bounds.startDate, so it is never
+  // parked at the far-left edge of the frise (it stays out of range; vis
+  // align:'center' also prevents any content pinning).
   const P = "X";
   const cols2 = { id: "id", projectName: "NomProjet", id2: "ID2", taskName: "Taches", typeDoc: "Type_doc", zone: "Zone", dateLimite: "Date_limite", diffCoffrage: "Diff_coffrage", demarragesTravaux: "Demarrages_travaux" };
   const rows = [{ id: 1, NomProjet: P, ID2: "1", Zone: "Z1", Taches: "T", Type_doc: "COFFRAGE", Date_limite: "2027-02-01", Diff_coffrage: "2027-02-15" }];
@@ -51,14 +53,11 @@ test("frise bounds INCLUDE reception bands (no far-left clipping)", () => {
   const lookup = buildReceptionSummaries(rows, refs, cols2);
   const bandDate = lookup.get(1).firstTimelineDateLimiteIso;
 
-  const boundsNoRecep = computePlanningPhaseBounds(rows, P);
-  const boundsWithRecep = computePlanningPhaseBounds(rows, P, lookup);
+  const bounds = computePlanningPhaseBounds(rows, P);
 
-  assert.ok(bandDate < boundsNoRecep.startDate, "the reception band precedes the earliest phase");
-  assert.ok(
-    boundsWithRecep.startDate <= bandDate,
-    `bounds with reception (${boundsWithRecep.startDate}) must reach the band (${bandDate})`
-  );
+  // Bounds start at the earliest PHASE (2027-02-01), not the earlier band.
+  assert.equal(bounds.startDate, "2027-02-01");
+  assert.ok(bandDate < bounds.startDate, "the reception band precedes bounds.start (stays out of range)");
 });
 
 test("buildReceptionSummaries: no reference rows -> empty map", () => {

@@ -119,6 +119,47 @@ export function createPlanningRenderer(containerEl) {
   let lastGroupCount = 0;
   let lastAggregate = false;
   let lastOptions = {};
+  // Full item set (every phase/reception/démarrage/background) plus the current
+  // window, so we can feed vis ONLY the items near the visible window (see
+  // applyWindowedItems).
+  let allItems = [];
+  let lastWindowStartMs = null;
+  let lastWindowEndMs = null;
+  let appliedItemKey = null;
+
+  // Push into the vis DataSet only the items whose date range is near the current
+  // window (± one window-span margin); background bands (zone fills) always pass.
+  // WHY: vis-timeline keeps a DOM node for an item that is far outside the window
+  // but leaves it UNPOSITIONED (no transform) — it then renders at left:0, i.e. a
+  // stray segment pinned at the far-left edge of the frise (typically a reception
+  // "Données d'entrées" band whose date precedes its phase by weeks). Removing
+  // out-of-window items from the DataSet means vis never holds such a node, so an
+  // out-of-chronology segment is simply not shown. Called on render and on every
+  // setWindow (cheap: the top pane has few items).
+  function applyWindowedItems() {
+    if (!itemsDataSet) return;
+    let visible = allItems;
+    if (Number.isFinite(lastWindowStartMs) && Number.isFinite(lastWindowEndMs)) {
+      const spanMs = Math.max(lastWindowEndMs - lastWindowStartMs, 24 * 3600 * 1000);
+      const lo = lastWindowStartMs - spanMs;
+      const hi = lastWindowEndMs + spanMs;
+      visible = allItems.filter((item) => {
+        if ((item.type || "range") === "background") return true;
+        const startMs = new Date(item.start).getTime();
+        const endMs = new Date(item.end != null ? item.end : item.start).getTime();
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return false;
+        return startMs <= hi && endMs >= lo;
+      });
+    }
+    // Skip the DataSet churn when the visible SET is unchanged (panning within
+    // the same items): vis repositions the existing nodes on setWindow, so we
+    // only clear+add when an item actually enters or leaves the windowed set.
+    const key = visible.map((item) => item.id).join("|");
+    if (key === appliedItemKey) return;
+    appliedItemKey = key;
+    itemsDataSet.clear();
+    itemsDataSet.add(toVisItems(visible));
+  }
 
   function ensureTimeline() {
     if (timeline) return;
@@ -168,17 +209,21 @@ export function createPlanningRenderer(containerEl) {
 
     groupsDataSet.clear();
     groupsDataSet.add(toVisGroups(groups));
-    itemsDataSet.clear();
-    itemsDataSet.add(toVisItems(items));
+    allItems = items;
+    appliedItemKey = null; // force a fresh apply for the new data set
+    applyWindowedItems();
   }
 
   function setWindow(startDate, endDate) {
     if (!timeline) return;
-    timeline.setWindow(
-      new Date(startDate + "T00:00:00"),
-      new Date(endDate + "T23:59:59"),
-      { animation: false }
-    );
+    const startAt = new Date(startDate + "T00:00:00");
+    const endAt = new Date(endDate + "T23:59:59");
+    lastWindowStartMs = startAt.getTime();
+    lastWindowEndMs = endAt.getTime();
+    // Re-window the item set BEFORE moving the view so vis never briefly holds an
+    // out-of-window item unpositioned at the left edge.
+    applyWindowedItems();
+    timeline.setWindow(startAt, endAt, { animation: false });
   }
 
   // Cap the pane at `px` and let vis scroll internally past it (sticky axis).
@@ -214,6 +259,10 @@ export function createPlanningRenderer(containerEl) {
     lastRows = [];
     lastColumns = null;
     lastGroupCount = 0;
+    allItems = [];
+    lastWindowStartMs = null;
+    lastWindowEndMs = null;
+    appliedItemKey = null;
   }
 
   return {

@@ -120,21 +120,27 @@ tronqué en `…` si trop long, avec le nom complet en info-bulle native (`title
   zoom. Le handler molette du contrôleur distingue la région (axe vs lignes).
 - **Toolbar** (semaine/mois/année, précédent/suivant/aujourd'hui) inchangée.
 
-Le segment **démarrage de travaux** est rendu comme un **segment vert plein de
-même hauteur que les autres barres** (avec une largeur minimale pour rester
-visible au dézoom), produit pour les armatures (toujours) et coffrages liés au
-planning ; il est simplement **retiré du mode « Rassembler visuellement le
-planning »** (agrégat par `Type_doc`, dont l'info-bulle HTML liste **toutes les
-tâches** composant un segment). La **colonne de gauche** (tâches) est **teintée
-par type de document** comme dans Planning Projet (coffrage, NDC, coupes,
-démolition, générique ; armature sans teinte). Le **pane bas** affiche **toutes
-les personnes** liées au projet (`ProjectTeam`), même sans `TimeSegment`, comme
-`gestion-depenses2`.
+Le segment **démarrage de travaux** est rendu **exactement comme Planning
+Projet** — un marqueur vert clair (`#dcfce7` / `#86efac`, contenu transparent de
+largeur nulle) à pleine hauteur de ligne — produit pour les armatures (toujours)
+et coffrages liés au planning ; il est simplement **retiré du mode « Rassembler
+visuellement le planning »** (agrégat par `Type_doc`, dont l'info-bulle HTML
+liste **toutes les tâches** composant un segment). La **colonne de gauche**
+(tâches) est **teintée par type de document** comme dans Planning Projet
+(coffrage, NDC, coupes, démolition, générique ; armature sans teinte). Le **pane
+bas** affiche **toutes les personnes** liées au projet (`ProjectTeam`), même sans
+`TimeSegment`, comme `gestion-depenses2`.
 
-Les items dont la date est **hors de la fenêtre visible** ne sont plus
-« épinglés » au bord gauche de la frise : l'option vis `align:'center'` ancre le
-contenu de chaque segment à sa propre boîte, donc un segment hors chronologie
-n'est tout simplement pas visible tant qu'on n'a pas navigué jusqu'à lui.
+Aucun segment ne s'affiche **hors de la chronologie visible** : le renderer ne
+pousse dans vis que les items proches de la fenêtre courante (± une largeur de
+fenêtre) — les bandes « Données d'entrées » précèdent leur phase de plusieurs
+semaines, et vis-timeline laissait un item très hors-fenêtre **non positionné**
+(sans `transform`), donc collé au **bord gauche** de la frise (`left:0`). En le
+retirant du jeu de données, il n'y a plus de segment fantôme à gauche (l'option
+vis `align:'center'` empêche par ailleurs l'épinglage du **contenu** d'un item à
+cheval sur le bord). Les bornes de la frise couvrent les **phases** (union avec
+`TimeSegment`) mais **pas** les bandes de réception, pour ne pas étirer la frise
+vers la gauche jusqu'à une bande isolée.
 
 En mode **Editer**, le **clic droit** sur un segment ouvre le menu contextuel
 **Modifier** / **Supprimer le segment**, avec la **même fenêtre et les mêmes

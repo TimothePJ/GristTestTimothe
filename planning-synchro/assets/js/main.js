@@ -242,11 +242,18 @@ function bootstrapApp() {
       console.error("Erreur chargement reception (References2) :", error);
     }
 
-    // Widen the shared frise to cover every top-pane segment — phases AND
-    // reception bands — so rows outside the prévisionnel window stay visible and
-    // no reception band gets pinned before the left edge (union bounds). Computed
-    // AFTER the reception fetch so the bands are included.
-    const planBounds = computePlanningPhaseBounds(planningRows, project.name, referenceReceptionLookup);
+    // Widen the shared frise to cover the planning PHASES (union with the
+    // TimeSegment bounds) so rows outside the prévisionnel window stay visible.
+    // Reception ("Données d'entrées") bands are deliberately NOT included in the
+    // bounds: a band precedes its phase (received N weeks before the deadline),
+    // so counting it would drag bounds.start left of every phase and leave the
+    // band sitting at the far-left edge of the frise (the "segment généré à
+    // gauche" bug). Excluded, a band that would fall before the first phase is
+    // simply out of range — never shown as a stray leftmost segment — while bands
+    // near their phase (the normal case) still render in context. vis
+    // `align:'center'` (planningRenderer) makes sure an out-of-window band never
+    // pins its content to the left edge either.
+    const planBounds = computePlanningPhaseBounds(planningRows, project.name);
     if (seq !== loadSeq) return; // superseded while awaiting References2
 
     planningRenderer = createPlanningRenderer(els.planning);
