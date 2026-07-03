@@ -34,7 +34,6 @@ import { createChargeBoard, buildWorkersFromSegments } from "./bottom/chargeBoar
 import { attachChargeEditing } from "./bottom/chargeEditing.js";
 import { createTopPaneResizer } from "./ui/topPaneResizer.js";
 import { buildProjectRealisationTargetLookup } from "./top/vendor/planningProjetBuilder.js";
-import { fetchPlanningReferenceReceptionSummaries } from "./services/referenceReception.js";
 import { buildInitialProjectViewport, buildCanonicalSharedViewport } from "./viewport/build.js";
 import { normalizeIsoDate } from "./viewport/normalize.js";
 import { formatIsoDate } from "./utils/dates.js";
@@ -249,16 +248,6 @@ function bootstrapApp() {
     const bounds = computeTimeSegmentBounds(timeSegmentRows, pc.timeSegment);
     const firstPlanningDate = getFirstPhaseDate(planningRows, pc.planningProject);
 
-    // "Données d'entrées" (reception) band data: link the planning rows to their
-    // blocking References2 documents. Best-effort — an empty/failed read just
-    // omits the band; the top pane still renders.
-    let referenceReceptionLookup = null;
-    try {
-      referenceReceptionLookup = await fetchPlanningReferenceReceptionSummaries(planningRows, pc.planningProject);
-    } catch (error) {
-      console.error("Erreur chargement reception (References2) :", error);
-    }
-
     // Widen the shared frise to cover the planning PHASES (union with the
     // TimeSegment bounds) so rows outside the prévisionnel window stay visible.
     // Reception ("Données d'entrées") bands are deliberately NOT included in the
@@ -289,7 +278,8 @@ function bootstrapApp() {
       aggregate,
       project: project.name,
       targetLookup: realisationTargetLookup,
-      referenceReceptionLookup,
+      // Reception ("Données d'entrées") bands are intentionally NOT rendered
+      // (referenceReceptionLookup omitted) — removed at the user's request.
     });
 
     let viewport;

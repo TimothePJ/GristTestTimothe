@@ -266,12 +266,23 @@ export function createPlanningRenderer(containerEl) {
   // reconcile via redraw().
   function scrollToTop() {
     if (!timeline || !(containerEl instanceof HTMLElement)) return;
-    containerEl
-      .querySelectorAll(".vis-panel.vis-center, .vis-panel.vis-left, .vis-panel.vis-right, .vis-vertical-scroll")
-      .forEach((el) => {
-        if (el instanceof HTMLElement) el.scrollTop = 0;
-      });
+    const reset = () => {
+      containerEl
+        .querySelectorAll(".vis-panel.vis-center, .vis-panel.vis-left, .vis-panel.vis-right, .vis-vertical-scroll")
+        .forEach((el) => {
+          if (el instanceof HTMLElement) el.scrollTop = 0;
+        });
+    };
+    reset();
     if (typeof timeline.redraw === "function") timeline.redraw();
+    // vis can re-adjust the vertical scroll during its own post-render redraw
+    // (maxHeight change, window apply), so re-assert the top on the next frames.
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => {
+        reset();
+        requestAnimationFrame(reset);
+      });
+    }
   }
 
   // Cap the pane at `px` and let vis scroll internally past it (sticky axis).

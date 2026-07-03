@@ -63,6 +63,8 @@ import {
   getHalfDaySlotRange,
   createHalfDaySlotKey,
   getSegmentEffectiveDays,
+  getSegmentAllocationDays,
+  getBusinessHalfDaySlotsBetween,
 } from "../utils/timeSegments.js";
 import { APP_CONFIG } from "../config.js";
 
@@ -419,6 +421,111 @@ function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWid
   `;
 }
 
+// --- Total row: aggregate monthly workload -----------------------------------
+// Port of gestion-depenses2 chargeTimeline.renderTotalRow + renderReadonlyTrack:
+// a bottom "Total" row whose read-only track shows, per visible month, the total
+// effective person-days planned across ALL workers, as a proportional fill bar
+// with a "X j" label, plus the grand total in the name cell.
+
+function countMonthBusinessDays(year, monthNumber) {
+  let count = 0;
+  const cursor = new Date(year, monthNumber - 1, 1);
+  while (cursor.getMonth() === monthNumber - 1) {
+    if (isBusinessDay(cursor)) count += 1;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return count;
+}
+
+// Group the window's calendar days into months, each with its pixel span (left/
+// width within the frise) and the FULL month's business-day count.
+function getWindowMonths(windowDays, dayWidth) {
+  const byKey = new Map();
+  windowDays.forEach((date, dayIndex) => {
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    let month = byKey.get(key);
+    if (!month) {
+      month = { key, year: date.getFullYear(), monthNumber: date.getMonth() + 1, firstIndex: dayIndex, dayCount: 0 };
+      byKey.set(key, month);
+    }
+    month.dayCount += 1;
+  });
+  return [...byKey.values()].map((month) => ({
+    ...month,
+    widthPx: month.dayCount * dayWidth,
+    businessDayCount: countMonthBusinessDays(month.year, month.monthNumber),
+  }));
+}
+
+// Business days of a segment that fall inside [rangeStart, rangeEnd].
+function segmentBusinessDaysInRange(segment, rangeStart, rangeEnd) {
+  const start = segment?.startAt instanceof Date ? segment.startAt : null;
+  const end = segment?.endAt instanceof Date ? segment.endAt : null;
+  if (!start || !end) return 0;
+  const clampStart = start > rangeStart ? start : rangeStart;
+  const clampEnd = end < rangeEnd ? end : rangeEnd;
+  if (clampStart >= clampEnd) return 0;
+  return getBusinessHalfDaySlotsBetween(clampStart, clampEnd).length / 2;
+}
+
+// Total effective person-days across all workers whose segments fall in `month`,
+// each segment's effective days spread proportionally over its business days.
+function computeMonthTotalDays(workers, month) {
+  const rangeStart = new Date(month.year, month.monthNumber - 1, 1, 0, 0, 0);
+  const rangeEnd = new Date(month.year, month.monthNumber, 0, 23, 59, 59);
+  let total = 0;
+  (workers || []).forEach((worker) => {
+    (worker?.segments || []).forEach((segment) => {
+      const effectiveDays = getSegmentEffectiveDays(segment);
+      if (!(effectiveDays > 0)) return;
+      const totalBusinessDays = getSegmentAllocationDays(segment);
+      if (!(totalBusinessDays > 0)) return;
+      const businessDaysInMonth = segmentBusinessDaysInRange(segment, rangeStart, rangeEnd);
+      if (!(businessDaysInMonth > 0)) return;
+      total += effectiveDays * (businessDaysInMonth / totalBusinessDays);
+    });
+  });
+  return Math.round(total * 100) / 100;
+}
+
+function renderReadonlyMonthTrack(workers, months) {
+  return months
+    .map((month) => {
+      const totalDays = computeMonthTotalDays(workers, month);
+      const fillRatio =
+        totalDays > 0 ? Math.min(1, Math.max(0.08, totalDays / Math.max(1, month.businessDayCount))) : 0;
+      const fill =
+        totalDays > 0
+          ? `<span class="charge-plan-month-fill" style="width:calc((100% - 12px) * ${fillRatio})">
+               <span class="charge-plan-month-label">${formatDayValue(totalDays)} j</span>
+             </span>`
+          : "";
+      return `<span class="charge-plan-month-segment" style="width:${month.widthPx}px">${fill}</span>`;
+    })
+    .join("");
+}
+
+function renderTotalRow(workers, months, timelineWidth) {
+  const grandTotal = (workers || []).reduce(
+    (sum, worker) =>
+      sum + (worker?.segments || []).reduce((segSum, segment) => segSum + getSegmentEffectiveDays(segment), 0),
+    0
+  );
+  return `
+    <div class="charge-plan-row charge-plan-row--total" style="--timeline-width:${timelineWidth}px; --row-height:72px">
+      <div class="charge-plan-cell charge-plan-cell--name">
+        <span>Total</span>
+        <strong class="charge-plan-total-days">${formatDayValue(grandTotal)} j</strong>
+      </div>
+      <div class="charge-plan-cell charge-plan-cell--timeline">
+        <div class="charge-plan-track charge-plan-track--readonly">
+          ${renderReadonlyMonthTrack(workers, months)}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // --- Editer toggle (port of renderTimelineEditToolbar) ------------------------
 
 function renderTimelineEditToolbar(editModeEnabled) {
@@ -527,6 +634,11 @@ export function createChargeBoard(containerEl) {
       )
       .join("");
 
+    // Aggregate "Total" row at the bottom (like gestion-depenses2): total
+    // effective person-days per visible month across all workers.
+    const windowMonths = getWindowMonths(windowDays, dayWidth);
+    const totalRowHtml = renderTotalRow(lastWorkers, windowMonths, timelineWidth);
+
     containerEl.classList.toggle("is-segment-editing-enabled", lastEditMode);
     containerEl.classList.toggle("is-segment-editing-locked", !lastEditMode);
     containerEl.dataset.segmentEditMode = lastEditMode ? "enabled" : "locked";
@@ -535,6 +647,7 @@ export function createChargeBoard(containerEl) {
       <div class="charge-plan-scroll">
         <div class="charge-plan-timeline" style="--timeline-width:${timelineWidth}px">
           ${rowsHtml}
+          ${totalRowHtml}
         </div>
       </div>
       ${renderTimelineEditToolbar(lastEditMode)}

@@ -88,12 +88,12 @@ rendu reste **strictement en lecture seule** (aucune édition, aucun drag, aucun
 modale), piloté par le contrôleur de synchro (on ne réutilise pas `timeline.js` de
 Planning Projet, qui a son propre contrôleur de viewport).
 
-La bande **« Données d'entrées »** (réception) est incluse :
-`assets/js/services/referenceReception.js` lit la table `References2` et lie chaque
-ligne planning à ses documents **bloquants** (clé `NomProjet` + `ID2` +
-`Type_doc` + `Taches` + `Zone`, repli zone vide) pour produire un statut
-**complet / manquant / mixte** (bande verte / rouge / orange), exactement comme
-Planning Projet — sans dépendre de son moteur générique de correspondance.
+La bande **« Données d'entrées »** (réception) n'est **plus affichée** (retirée à
+la demande) : `main.js` ne fournit plus le lookup de réception au renderer, donc
+le builder ne crée aucune bande. Le module
+`assets/js/services/referenceReception.js` (lecture `References2`, liaison des
+lignes planning à leurs documents **bloquants**) reste présent mais **non câblé**,
+au cas où la bande serait réactivée.
 
 ## Mise en page du pane haut (frise sticky, séparateur, libellés)
 
@@ -137,7 +137,16 @@ ligne). La **colonne de gauche**
 (tâches) est **teintée par type de document** comme dans Planning Projet
 (coffrage, NDC, coupes, démolition, générique ; armature sans teinte). Le **pane
 bas** affiche **toutes les personnes** liées au projet (`ProjectTeam`), même sans
-`TimeSegment`, comme `gestion-depenses2`.
+`TimeSegment`, comme `gestion-depenses2`, et se termine par une **ligne « Total »**
+identique à celle de `gestion-depenses2` : une piste en lecture seule
+(`bottom/chargeBoard.js` — port de `renderTotalRow` / `renderReadonlyTrack`) qui
+montre, **par mois visible**, le total des **jours‑personne effectifs** planifiés
+tous collaborateurs confondus (barre de remplissage proportionnelle + « X j »),
+avec le **total général** dans la cellule de nom.
+
+À la sélection d'un projet, le pane haut est **remis en haut** (première ligne) —
+`planningRenderer.scrollToTop`, ré‑appliqué sur les frames suivantes car vis peut
+ré‑ajuster son scroll après son propre redraw.
 
 Aucun segment ne s'affiche **hors de la chronologie visible** : le renderer ne
 pousse dans vis que les items proches de la fenêtre courante. vis-timeline laisse

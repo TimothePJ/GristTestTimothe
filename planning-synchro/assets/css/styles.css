@@ -833,6 +833,62 @@ body.ps-panning * {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(245, 248, 252, 0.92));
 }
 
+/* Total row (aggregate monthly workload) — port of gestion-depenses2's
+   renderTotalRow/renderReadonlyTrack: a bottom "Total" row whose read-only track
+   shows a proportional fill bar per month, plus the grand total in the name cell. */
+.charge-plan-row--total .charge-plan-cell {
+  background: #f3f7fb;
+  border-top: 2px solid rgba(0, 73, 144, 0.16);
+}
+.charge-plan-row--total .charge-plan-cell--name {
+  gap: 6px;
+  background: #eef3f9;
+}
+.charge-plan-total-days {
+  margin-left: auto;
+  color: var(--color-primary);
+  font-weight: 800;
+  white-space: nowrap;
+}
+.charge-plan-track--readonly {
+  display: flex;
+  pointer-events: none;
+  background: none;
+}
+.charge-plan-month-segment {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: var(--row-height, 72px);
+  background-image: repeating-linear-gradient(
+    to right,
+    rgba(0, 73, 144, 0.06) 0,
+    rgba(0, 73, 144, 0.06) 1px,
+    transparent 1px,
+    transparent 100%
+  );
+}
+.charge-plan-month-fill {
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  height: 30px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  min-width: 10px;
+  max-width: calc(100% - 12px);
+  padding: 0 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(0, 73, 144, 0.35), rgba(0, 73, 144, 0.55));
+  overflow: hidden;
+}
+.charge-plan-month-label {
+  white-space: nowrap;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #fff;
+}
+
 .charge-plan-track-grid {
   position: absolute;
   inset: 0;
