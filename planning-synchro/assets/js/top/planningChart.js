@@ -129,11 +129,21 @@ function shortMonthLabel(ts) {
   return `${name.slice(0, 3)} ${String(date.getFullYear()).slice(2)}`;
 }
 
+// A type's base label groups its solid line and its dotted "(réalisé)" companion
+// under one name (e.g. "Coffrage" + "Coffrage (réalisé)" -> "Coffrage"), so a
+// legend click filters the whole type at once.
+function baseLabel(label) {
+  return String(label || "").replace(/\s*\(réalisé\)\s*$/, "");
+}
+
 // createPlanningChart(canvasEl) -> { render, setViewport, setHeight, destroy }.
 export function createPlanningChart(canvasEl) {
   let chart = null;
   let lastRows = [];
   let lastColumns = null;
+  // Legend filter: when set, only the datasets of this type (base label) are
+  // shown. Preserved across viewport re-renders (buildDatasets re-applies it).
+  let soloBase = null;
 
   // Each series is drawn as TWO lines of the same colour: a solid line (all tasks
   // to realize) and a dotted companion line (the subset already réalisé à 100%).
@@ -182,6 +192,10 @@ export function createPlanningChart(canvasEl) {
     datasets.push(
       dottedLine(`${TOTAL_META.label} (réalisé)`, TOTAL_META.color, series.points, series.totalRealized, 3)
     );
+    // Re-apply the active legend filter so it survives viewport re-renders.
+    datasets.forEach((ds) => {
+      ds.hidden = soloBase != null && baseLabel(ds.label) !== soloBase;
+    });
     return datasets;
   }
 
@@ -219,6 +233,19 @@ export function createPlanningChart(canvasEl) {
           legend: {
             position: "bottom",
             labels: { usePointStyle: true, pointStyle: "line", boxWidth: 26, padding: 12, font: { size: 11 } },
+            // Click a legend entry to show ONLY that type (its solid + dotted
+            // "réalisé" line); click the same one again to show everything.
+            onClick(event, legendItem, legend) {
+              const activeChart = legend.chart;
+              const clicked = activeChart.data.datasets[legendItem.datasetIndex];
+              if (!clicked) return;
+              const base = baseLabel(clicked.label);
+              soloBase = soloBase === base ? null : base;
+              activeChart.data.datasets.forEach((ds) => {
+                ds.hidden = soloBase != null && baseLabel(ds.label) !== soloBase;
+              });
+              activeChart.update();
+            },
           },
           tooltip: {
             callbacks: {
