@@ -372,6 +372,11 @@ function bootstrapApp() {
     controller.bindToolbar(els.toolbar);
     controller.bindWheel(els.main);
     controller.bindPan(els.planning);
+    // The chart view keeps the SAME navigable chronology: drag-to-pan the chart
+    // (wheel-zoom already works — #ps-chart is not #ps-planning — as does the
+    // toolbar), so both panes move together whether the timeline or the chart is
+    // showing.
+    controller.bindPan(els.chart);
     controller.setViewport(viewport);
     topPaneResizer.refresh();
 

@@ -18,7 +18,7 @@
 // setViewport()).
 
 import { APP_CONFIG } from "../config.js";
-import { buildDisplayedMonths } from "../utils/format.js";
+import { buildDisplayedMonths, toFiniteNumber } from "../utils/format.js";
 import { parseCalendarDate, toText } from "../utils/dates.js";
 import { buildRowPhases, normalizePlanningDocumentType } from "./phases.js";
 
@@ -56,15 +56,23 @@ function taskDueDate(row, columns) {
   return due instanceof Date && !Number.isNaN(due.getTime()) ? due : null;
 }
 
-// PURE: rows + columns + viewport -> { points, byType, total, typesPresent }.
-// `points` are the months spanning [firstVisibleDate .. rangeEndDate]; byType and
-// total are per-month task counts aligned to `points`. Tasks whose due date falls
-// outside the visible months are not counted (the chart follows the frise).
+// A task is "réalisé à 100%" when its Realise column reaches 100.
+function isTaskRealized(row, columns) {
+  return toFiniteNumber(row?.[columns.realise], 0) >= 100;
+}
+
+// PURE: rows + columns + viewport -> { points, byType, total, byTypeRealized,
+// totalRealized, typesPresent }. `points` are the months spanning
+// [firstVisibleDate .. rangeEndDate]; byType/total are per-month task counts
+// aligned to `points`, and byTypeRealized/totalRealized are the SAME counts
+// restricted to tasks already realized at 100% (the dotted companion lines).
+// Tasks whose due date falls outside the visible months are not counted (the
+// chart follows the frise).
 export function buildTaskLoadSeries(rows, columns, viewport, monthsNames = APP_CONFIG.months) {
   const first = parseCalendarDate(viewport?.firstVisibleDate);
   const last = parseCalendarDate(viewport?.rangeEndDate);
   if (!first || !last || last < first) {
-    return { points: [], byType: {}, total: [], typesPresent: [] };
+    return { points: [], byType: {}, total: [], byTypeRealized: {}, totalRealized: [], typesPresent: [] };
   }
 
   const span =
@@ -73,7 +81,9 @@ export function buildTaskLoadSeries(rows, columns, viewport, monthsNames = APP_C
   const indexByMonthKey = new Map(months.map((month, index) => [month.monthKey, index]));
 
   const byType = {};
+  const byTypeRealized = {};
   const total = new Array(months.length).fill(0);
+  const totalRealized = new Array(months.length).fill(0);
   const typesPresent = new Set();
 
   (rows || []).forEach((row) => {
@@ -84,9 +94,15 @@ export function buildTaskLoadSeries(rows, columns, viewport, monthsNames = APP_C
 
     const typeKey = taskTypeKey(row, columns);
     if (!byType[typeKey]) byType[typeKey] = new Array(months.length).fill(0);
+    if (!byTypeRealized[typeKey]) byTypeRealized[typeKey] = new Array(months.length).fill(0);
     byType[typeKey][index] += 1;
     total[index] += 1;
     typesPresent.add(typeKey);
+
+    if (isTaskRealized(row, columns)) {
+      byTypeRealized[typeKey][index] += 1;
+      totalRealized[index] += 1;
+    }
   });
 
   const points = months.map((month) => ({
@@ -101,6 +117,8 @@ export function buildTaskLoadSeries(rows, columns, viewport, monthsNames = APP_C
     points,
     byType,
     total,
+    byTypeRealized,
+    totalRealized,
     typesPresent: TYPE_ORDER.filter((type) => typesPresent.has(type)),
   };
 }
@@ -117,33 +135,53 @@ export function createPlanningChart(canvasEl) {
   let lastRows = [];
   let lastColumns = null;
 
+  // Each series is drawn as TWO lines of the same colour: a solid line (all tasks
+  // to realize) and a dotted companion line (the subset already réalisé à 100%).
+  function solidLine(label, color, points, values, width) {
+    return {
+      label,
+      data: points.map((point, index) => ({ x: point.midTs, y: values[index] })),
+      borderColor: color,
+      backgroundColor: color,
+      borderWidth: width,
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      tension: 0.25,
+      fill: false,
+      spanGaps: true,
+    };
+  }
+
+  function dottedLine(label, color, points, values, width) {
+    return {
+      label,
+      data: points.map((point, index) => ({ x: point.midTs, y: values[index] })),
+      borderColor: color,
+      backgroundColor: color,
+      borderWidth: width,
+      borderDash: [3, 3],
+      pointRadius: 2,
+      pointStyle: "circle",
+      pointHoverRadius: 4,
+      tension: 0.25,
+      fill: false,
+      spanGaps: true,
+    };
+  }
+
   function buildDatasets(series) {
-    const datasets = series.typesPresent.map((type) => ({
-      label: TYPE_META[type].label,
-      data: series.points.map((point, index) => ({ x: point.midTs, y: series.byType[type][index] })),
-      borderColor: TYPE_META[type].color,
-      backgroundColor: TYPE_META[type].color,
-      borderWidth: 2,
-      pointRadius: 3,
-      pointHoverRadius: 5,
-      tension: 0.25,
-      fill: false,
-      spanGaps: true,
-    }));
-
-    datasets.push({
-      label: TOTAL_META.label,
-      data: series.points.map((point, index) => ({ x: point.midTs, y: series.total[index] })),
-      borderColor: TOTAL_META.color,
-      backgroundColor: TOTAL_META.color,
-      borderWidth: 3,
-      pointRadius: 3,
-      pointHoverRadius: 5,
-      tension: 0.25,
-      fill: false,
-      spanGaps: true,
+    const datasets = [];
+    series.typesPresent.forEach((type) => {
+      const meta = TYPE_META[type];
+      datasets.push(solidLine(meta.label, meta.color, series.points, series.byType[type], 2));
+      datasets.push(
+        dottedLine(`${meta.label} (réalisé)`, meta.color, series.points, series.byTypeRealized[type] || [], 2)
+      );
     });
-
+    datasets.push(solidLine(TOTAL_META.label, TOTAL_META.color, series.points, series.total, 3));
+    datasets.push(
+      dottedLine(`${TOTAL_META.label} (réalisé)`, TOTAL_META.color, series.points, series.totalRealized, 3)
+    );
     return datasets;
   }
 

@@ -155,11 +155,18 @@ utilisant **Chart.js** — la **même technologie** que la section « Graphique 
 dépenses » de `gestion-depenses2` (`assets/js/ui/chart.js`). Il trace, par mois,
 le **nombre de tâches à réaliser** (date de diffusion de la phase) avec **une
 ligne par type de document** (Coffrage / Armature / NDC / Coupes / Démolition /
-Autres) **et une ligne Total**. Son axe des temps est **coordonné avec la frise**
-(mêmes dates visibles que le pane bas ; `min`/`max` = fenêtre courante), donc il
-**suit le zoom et le déplacement** du planning (chaque viewport appliqué est
-transmis via `onRangeLabel` -> `planningChart.setViewport`). Sa hauteur suit le
-splitter (même hauteur que la timeline remplacée).
+Autres) **et une ligne Total**. **Chaque ligne est doublée d'une ligne en
+pointillé « (réalisé) »** montrant, aux mêmes dates, le sous-ensemble de ces
+tâches **réalisées à 100 %** (colonne `Realise` ≥ 100).
+
+Son axe des temps est **coordonné avec la frise** (mêmes dates visibles que le
+pane bas ; `min`/`max` = fenêtre courante), donc il **suit le zoom et le
+déplacement** du planning (chaque viewport appliqué est transmis via
+`onRangeLabel` -> `planningChart.setViewport`). La **chronologie reste
+navigable** dans la vue graphique : molette = zoom, **glisser sur le graphique =
+déplacement** (`controller.bindPan(#ps-chart)`), toolbar semaine/mois/année — les
+deux panes bougent ensemble. Sa hauteur suit le splitter (même hauteur que la
+timeline remplacée).
 
 En mode **Editer**, le **clic droit** sur un segment ouvre le menu contextuel
 **Modifier** / **Supprimer le segment**, avec la **même fenêtre et les mêmes

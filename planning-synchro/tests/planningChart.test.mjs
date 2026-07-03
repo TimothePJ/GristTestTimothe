@@ -10,24 +10,25 @@ const columns = {
   diffCoffrage: "Diff_coffrage",
   diffArmature: "Diff_armature",
   demarragesTravaux: "Demarrages_travaux",
+  realise: "Realise",
 };
 
 // Window covering all of 2027 (month buckets Jan..Dec 2027).
 const viewport = { firstVisibleDate: "2027-01-01", rangeEndDate: "2027-12-31" };
 
 const rows = [
-  // Coffrage due (Diff_coffrage) in Feb 2027.
-  { Taches: "FOND", Type_doc: "COFFRAGE", Date_limite: "2027-02-01", Diff_coffrage: "2027-02-20" },
-  // Another coffrage due in Feb 2027.
-  { Taches: "PH RDC", Type_doc: "COFFRAGE", Date_limite: "2027-02-05", Diff_coffrage: "2027-02-25" },
-  // Armature due (Diff_armature) in Mar 2027.
-  { Taches: "LONG", Type_doc: "ARMATURES", Diff_coffrage: "2027-03-01", Diff_armature: "2027-03-20" },
-  // NDC due (Diff_coffrage) in Feb 2027.
-  { Taches: "RSO", Type_doc: "NDC", Date_limite: "2027-02-10", Diff_coffrage: "2027-02-28" },
-  // Custom type -> "AUTRES", due May 2027.
-  { Taches: "PLAN X", Type_doc: "PLAN SPECIAL", Date_limite: "2027-05-01", Diff_coffrage: "2027-05-15" },
+  // Coffrage due (Diff_coffrage) in Feb 2027 — REALISED 100.
+  { Taches: "FOND", Type_doc: "COFFRAGE", Date_limite: "2027-02-01", Diff_coffrage: "2027-02-20", Realise: "100" },
+  // Another coffrage due in Feb 2027 — only 50% (not realised).
+  { Taches: "PH RDC", Type_doc: "COFFRAGE", Date_limite: "2027-02-05", Diff_coffrage: "2027-02-25", Realise: "50" },
+  // Armature due (Diff_armature) in Mar 2027 — REALISED 100.
+  { Taches: "LONG", Type_doc: "ARMATURES", Diff_coffrage: "2027-03-01", Diff_armature: "2027-03-20", Realise: "100" },
+  // NDC due (Diff_coffrage) in Feb 2027 — 0%.
+  { Taches: "RSO", Type_doc: "NDC", Date_limite: "2027-02-10", Diff_coffrage: "2027-02-28", Realise: "0" },
+  // Custom type -> "AUTRES", due May 2027 — REALISED 100.
+  { Taches: "PLAN X", Type_doc: "PLAN SPECIAL", Date_limite: "2027-05-01", Diff_coffrage: "2027-05-15", Realise: "100" },
   // Outside the window (2029) -> not counted.
-  { Taches: "FUTUR", Type_doc: "COFFRAGE", Date_limite: "2029-01-01", Diff_coffrage: "2029-01-20" },
+  { Taches: "FUTUR", Type_doc: "COFFRAGE", Date_limite: "2029-01-01", Diff_coffrage: "2029-01-20", Realise: "100" },
 ];
 
 test("buildTaskLoadSeries: buckets tasks per month by type + total", () => {
@@ -72,11 +73,44 @@ test("buildTaskLoadSeries: typesPresent is ordered and only includes present typ
   assert.deepEqual(series.typesPresent, ["COFFRAGE", "ARMATURES", "NDC", "AUTRES"]);
 });
 
+test("buildTaskLoadSeries: realized (100%) counts feed the dotted companion lines", () => {
+  const series = buildTaskLoadSeries(rows, columns, viewport);
+  const febIndex = series.points.findIndex((p) => p.monthKey === "2027-02");
+  const marIndex = series.points.findIndex((p) => p.monthKey === "2027-03");
+  const mayIndex = series.points.findIndex((p) => p.monthKey === "2027-05");
+
+  // Feb coffrage: 2 due, only FOND realized -> 1 realized.
+  assert.equal(series.byType.COFFRAGE[febIndex], 2);
+  assert.equal(series.byTypeRealized.COFFRAGE[febIndex], 1);
+  // Feb NDC: 1 due, 0 realized.
+  assert.equal(series.byTypeRealized.NDC[febIndex], 0);
+  // Feb total realized = 1 (FOND only).
+  assert.equal(series.totalRealized[febIndex], 1);
+
+  // Mar armature realized, May "autres" realized.
+  assert.equal(series.byTypeRealized.ARMATURES[marIndex], 1);
+  assert.equal(series.byTypeRealized.AUTRES[mayIndex], 1);
+});
+
+test("buildTaskLoadSeries: realized never exceeds total per month/type", () => {
+  const series = buildTaskLoadSeries(rows, columns, viewport);
+  series.typesPresent.forEach((type) => {
+    series.points.forEach((_, index) => {
+      assert.ok(series.byTypeRealized[type][index] <= series.byType[type][index]);
+    });
+  });
+  series.points.forEach((_, index) => {
+    assert.ok(series.totalRealized[index] <= series.total[index]);
+  });
+});
+
 test("buildTaskLoadSeries: empty / invalid viewport -> empty series", () => {
   assert.deepEqual(buildTaskLoadSeries(rows, columns, {}), {
     points: [],
     byType: {},
     total: [],
+    byTypeRealized: {},
+    totalRealized: [],
     typesPresent: [],
   });
 });
