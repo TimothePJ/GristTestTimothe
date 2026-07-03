@@ -961,3 +961,192 @@ body.ps-panning * {
 .charge-plan-context-action[data-action="delete-segment"]:hover {
   background: rgba(180, 35, 24, 0.08);
 }
+
+/* --- Edit-segment modal ("Modifier le segment") -----------------------------
+   Scoped port of gestion-depenses2's #edit-segment-modal (.modal /
+   .modal-content--segment / .segment-edit-* rules), renamed with a ps- prefix
+   so this self-contained widget carries its own modal styling. Same layout and
+   VINCI tokens (variables.css) so the window reads identically. */
+.ps-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 21, 38, 0.62);
+  backdrop-filter: blur(3px);
+}
+
+.ps-modal-content {
+  width: min(640px, calc(100vw - 32px));
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  color: var(--color-text);
+}
+
+.ps-modal-content--segment {
+  width: min(560px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.ps-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ps-modal-header h2 {
+  margin: 0 0 6px;
+}
+
+.ps-modal-subtitle {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.ps-modal-close-btn {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  padding: 8px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ps-modal-close-btn:hover {
+  background: #eaeef5;
+}
+
+.ps-segment-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ps-segment-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.ps-segment-edit-section {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(0, 73, 144, 0.12);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(0, 73, 144, 0.03), rgba(255, 255, 255, 0.98));
+}
+
+.ps-segment-edit-section-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.ps-segment-edit-section-copy h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--color-text);
+}
+
+.ps-segment-edit-grid--effectif {
+  align-items: end;
+}
+
+.ps-segment-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.ps-segment-edit-field input,
+.ps-segment-edit-field select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.ps-segment-edit-metric {
+  display: grid;
+  gap: 6px;
+  min-height: 52px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 73, 144, 0.06);
+  border: 1px solid rgba(0, 73, 144, 0.08);
+}
+
+.ps-segment-edit-metric-label {
+  font-size: 0.88rem;
+  color: var(--color-text-muted);
+}
+
+.ps-segment-edit-metric strong {
+  color: var(--color-primary);
+  font-size: 1.1rem;
+}
+
+.ps-segment-edit-feedback {
+  margin: 0;
+  min-height: 22px;
+  color: #b42318;
+  font-weight: 600;
+}
+
+.ps-segment-edit-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.ps-segment-edit-footer button {
+  padding: 10px 18px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ps-segment-edit-footer button:hover {
+  background: #003a73;
+}
+
+@media (max-width: 640px) {
+  .ps-modal-content--segment {
+    width: min(100%, 100vw - 16px);
+    padding: 18px;
+  }
+
+  .ps-modal-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ps-modal-close-btn {
+    width: 100%;
+  }
+
+  .ps-segment-edit-grid {
+    grid-template-columns: 1fr;
+  }
+}

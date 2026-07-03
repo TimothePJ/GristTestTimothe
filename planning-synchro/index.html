@@ -51,5 +51,62 @@
       <div id="ps-charge-empty" class="ps-charge-empty" hidden>Aucun previsionnel pour ce projet.</div>
     </div>
   </main>
+
+  <div id="ps-edit-segment-modal" class="ps-modal" style="display: none;">
+    <div class="ps-modal-content ps-modal-content--segment">
+      <div class="ps-modal-header">
+        <div>
+          <h2>Modifier le segment</h2>
+          <p class="ps-modal-subtitle">Choisissez une nouvelle plage au demi-jour pres.</p>
+        </div>
+        <button id="ps-edit-segment-cancel" type="button" class="ps-modal-close-btn">Fermer</button>
+      </div>
+      <div class="ps-segment-edit-form">
+        <div class="ps-segment-edit-grid">
+          <label class="ps-segment-edit-field">
+            <span>Debut</span>
+            <input type="date" id="ps-edit-segment-start-date">
+          </label>
+          <label class="ps-segment-edit-field">
+            <span>Periode</span>
+            <select id="ps-edit-segment-start-part">
+              <option value="am">Matin</option>
+              <option value="pm">Apres-midi</option>
+            </select>
+          </label>
+          <label class="ps-segment-edit-field">
+            <span>Fin</span>
+            <input type="date" id="ps-edit-segment-end-date">
+          </label>
+          <label class="ps-segment-edit-field">
+            <span>Periode</span>
+            <select id="ps-edit-segment-end-part">
+              <option value="am">Matin</option>
+              <option value="pm">Apres-midi</option>
+            </select>
+          </label>
+        </div>
+        <section class="ps-segment-edit-section">
+          <div class="ps-segment-edit-section-copy">
+            <h3>Jours Effectifs :</h3>
+          </div>
+          <div class="ps-segment-edit-grid ps-segment-edit-grid--effectif">
+            <label class="ps-segment-edit-field">
+              <span>Jours effectifs travailles</span>
+              <input type="number" id="ps-edit-segment-effectif" min="0" step="0.5" placeholder="0">
+            </label>
+            <div class="ps-segment-edit-metric">
+              <span class="ps-segment-edit-metric-label">Jours disponibles dans la plage</span>
+              <strong id="ps-edit-segment-calculated-days">--</strong>
+            </div>
+          </div>
+        </section>
+        <p id="ps-edit-segment-feedback" class="ps-segment-edit-feedback" hidden></p>
+      </div>
+      <div class="ps-segment-edit-footer">
+        <button id="ps-edit-segment-save" type="button">Enregistrer</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

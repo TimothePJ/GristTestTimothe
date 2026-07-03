@@ -129,6 +129,7 @@ function bootstrapApp() {
     chargeEmpty: document.getElementById("ps-charge-empty"),
     aggregateToggle: document.getElementById("ps-aggregate-toggle"),
     range: document.getElementById("ps-range"),
+    editModal: document.getElementById("ps-edit-segment-modal"),
   };
 
   if (!(els.select instanceof HTMLElement)) {
@@ -340,6 +341,7 @@ function bootstrapApp() {
     editing = attachChargeEditing(els.charge, {
       getProjectNumber: () => project.number,
       getVisibleSlots: () => (chargeBoard ? chargeBoard.getVisibleSlots() : []),
+      editSegmentModalEl: els.editModal,
       onChanged: async () => {
         if (seq !== loadSeq || !chargeBoard || !controller) return;
 

@@ -127,6 +127,17 @@ planning »** (agrégat par `Type_doc`, dont l'info-bulle liste toutes les tâch
 composant un segment). Le **pane bas** affiche **toutes les personnes** liées au
 projet (`ProjectTeam`), même sans `TimeSegment`, comme `gestion-depenses2`.
 
+En mode **Editer**, le **clic droit** sur un segment ouvre le menu contextuel
+**Modifier** / **Supprimer le segment**, avec la **même fenêtre et les mêmes
+fonctionnalités que `gestion-depenses2`** : **Modifier** ouvre la modale
+« Modifier le segment » (`bottom/editSegmentModal.js`, portée depuis
+`#edit-segment-modal`) — plage au demi-jour près (Début / Fin + Matin /
+Après-midi), « jours effectifs travaillés » optionnel et « jours disponibles
+dans la plage » recalculés en direct, avec contrôle de chevauchement et
+d'effectif (multiple de 0,5, ≤ jours de la plage) avant écriture
+(`updateTimeSegment` + rafraîchissement). **Supprimer le segment** appelle
+`removeTimeSegment` (comme `gestion-depenses2`, sans confirmation).
+
 ## Développement
 
 Tests unitaires purs (parsing dates/décimales, modèle de phases, agrégation,
@@ -149,7 +160,10 @@ python -m http.server 8791
 # puis ouvrir http://localhost:8791/dev/harness.html
 ```
 
-Les écritures `TimeSegment` faites via le mock sont capturées dans
-`window.__appliedActions` (tuples `["AddRecord"|"UpdateRecord"|"RemoveRecord", "TimeSegment", ...]`),
-utile pour vérifier par script (CDP/console) que le bouton **Editer** produit
-bien les actions attendues sans dépendre d'un document Grist réel.
+Les écritures `TimeSegment` faites via le mock sont **appliquées aux fixtures
+en mémoire** (`AddRecord` / `UpdateRecord` / `RemoveRecord`) — le harnais se
+comporte donc comme un vrai Grist : créer / modifier / supprimer un segment se
+reflète après re-rendu. Elles sont aussi capturées dans `window.__appliedActions`
+(mêmes tuples), utile pour vérifier par script (CDP/console) que le bouton
+**Editer** et la modale **Modifier** produisent bien les actions attendues sans
+dépendre d'un document Grist réel.

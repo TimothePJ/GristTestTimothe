@@ -323,6 +323,10 @@ function buildVisibleSegmentBars(worker, visibleSlots) {
         endSlotIndex: slotRange.lastSlot.slotIndex,
         startAtMs: startAt.getTime(),
         endAtMs: endAt.getTime(),
+        // Raw stored effectif (may be null) so the edit-segment modal can
+        // pre-fill "jours effectifs travailles" exactly as stored, blank when
+        // unset — this module is DOM-driven, so the value rides on the bar.
+        effectif: segment?.effectif == null ? "" : segment.effectif,
         leftPx,
         widthPx,
         label,
@@ -364,6 +368,7 @@ function renderSegmentBars(assignedBars) {
           data-end-slot-index="${bar.endSlotIndex}"
           data-start-at-ms="${bar.startAtMs}"
           data-end-at-ms="${bar.endAtMs}"
+          data-effectif="${escapeHtml(String(bar.effectif))}"
         >
           <span class="charge-plan-segment-handle is-start" data-resize-edge="start"></span>
           <span class="charge-plan-segment-label">${escapeHtml(bar.label)}</span>

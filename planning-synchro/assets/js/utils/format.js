@@ -26,6 +26,19 @@ export function formatNumber(value) {
     .replace(".", ",");
 }
 
+// Parses an optional numeric text input (French decimal comma allowed) into a
+// finite Number, or null when the field is empty/blank/non-numeric. Ported from
+// gestion-depenses2/assets/js/utils/format.js (parseOptionalNumberInput +
+// normalizeNumericInput, inlined) — used by the edit-segment modal's Effectif
+// field so a blank value stays "unset" (null) rather than becoming 0.
+export function parseOptionalNumberInput(value) {
+  if (value == null) return null;
+  const normalized = String(value).trim().replace(",", ".");
+  if (!normalized) return null;
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : null;
+}
+
 function toMonthKey(year, monthNumber) {
   return `${year}-${String(monthNumber).padStart(2, "0")}`;
 }

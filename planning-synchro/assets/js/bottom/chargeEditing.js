@@ -48,11 +48,16 @@
 //    `boardEl.classList.contains("is-segment-editing-enabled")` at attach
 //    time) and stays "sticky" across writes so the user doesn't fall back to
 //    Verrouiller after every create/resize/delete.
-// 7. "Modifier" (the `edit-segment` context action) has no modal in this
-//    widget's `index.html` (unlike the source's `#editSegmentModal`): a
-//    minimal `window.prompt()` for a new Effectif value is used instead,
-//    writing only `updateTimeSegment({ segmentId, effectif })` — see
-//    task-12-report.md for the rationale.
+// 7. "Modifier" (the `edit-segment` context action) opens the same edit-segment
+//    modal as the source: `#ps-edit-segment-modal` (bottom/editSegmentModal.js,
+//    a port of gestion-depenses2's #edit-segment-modal). The modal element lives
+//    OUTSIDE `boardEl` (a body-level sibling of #ps-charge) so it survives the
+//    `boardEl.innerHTML` re-render an `onChanged()` write triggers. The modal
+//    only builds/validates the new range + Effectif; the overlap check and the
+//    `updateTimeSegment({ segmentId, startDate, endDate, allocationDays,
+//    effectif })` write happen here in `handleEditSegmentSubmit` (this module
+//    owns the track DOM the overlap check reads). The Modifier action degrades to
+//    a `window.prompt()` Effectif-only fallback if no modal element is provided.
 //
 // DOM/event module: window/document/HTMLElement are only referenced inside
 // `attachChargeEditing()`'s closures (never at module top level or inside the
@@ -65,6 +70,16 @@
 
 import { clamp, formatNumber } from "../utils/format.js";
 import { createTimeSegment, updateTimeSegment, removeTimeSegment } from "../services/gristService.js";
+import { createEditSegmentModal } from "./editSegmentModal.js";
+
+function cssEscapeValue(value) {
+  const text = String(value);
+  if (typeof window !== "undefined" && window.CSS && typeof window.CSS.escape === "function") {
+    return window.CSS.escape(text);
+  }
+  // Minimal fallback for the ids we emit (digits or `s-N`): escape quotes/backslashes.
+  return text.replace(/["\\]/g, "\\$&");
+}
 
 const EDIT_TOGGLE_SELECTOR = "[data-charge-plan-edit-toggle]";
 const TRACK_SELECTOR = ".charge-plan-track";
@@ -247,13 +262,31 @@ function showContextMenu(boardEl, { clientX, clientY, segmentId }) {
 // container). All listeners are delegated on `boardEl`/window/document (never
 // on inner elements), so they survive `boardEl.innerHTML` being replaced by a
 // subsequent `chargeBoard.render()` call triggered from `onChanged()`.
-export function attachChargeEditing(boardEl, { getProjectNumber, getVisibleSlots, onChanged } = {}) {
+export function attachChargeEditing(
+  boardEl,
+  { getProjectNumber, getVisibleSlots, onChanged, editSegmentModalEl } = {}
+) {
   if (!(boardEl instanceof HTMLElement)) {
     return { detach() {} };
   }
 
   let editModeEnabled = boardEl.classList.contains("is-segment-editing-enabled");
   let dragState = null;
+
+  // "Modifier" modal (same window/functionality as gestion-depenses2). Its
+  // element is a body-level sibling of the board, so it is not wiped by the
+  // board's re-render. `onSubmit` runs the overlap check against THIS module's
+  // track DOM, then persists via updateTimeSegment + onChanged().
+  const editSegmentModal =
+    editSegmentModalEl instanceof HTMLElement
+      ? createEditSegmentModal(editSegmentModalEl, { onSubmit: handleEditSegmentSubmit })
+      : null;
+
+  function findSegmentBar(segmentId) {
+    return boardEl.querySelector(
+      `${SEGMENT_BAR_SELECTOR}[data-segment-id="${cssEscapeValue(segmentId)}"]`
+    );
+  }
 
   function resolveSlots() {
     const slots = typeof getVisibleSlots === "function" ? getVisibleSlots() : [];
@@ -490,12 +523,80 @@ export function attachChargeEditing(boardEl, { getProjectNumber, getVisibleSlots
     showContextMenu(boardEl, { clientX: event.clientX, clientY: event.clientY, segmentId });
   }
 
-  // Minimal "Modifier": index.html has no edit-segment modal in this widget,
-  // so a window.prompt() collects a new Effectif value and writes only that
-  // field (see adaptation #7 above). Cancelling the prompt (null) or leaving
-  // it blank is a no-op; a non-numeric/negative value shows an alert and
-  // aborts without writing.
-  async function handleModifySegment(segmentId) {
+  // "Modifier": open the edit-segment modal seeded from the clicked bar's
+  // dataset (start/end from data-*-at-ms, current Effectif from data-effectif).
+  // If no modal element was provided, fall back to the minimal Effectif-only
+  // window.prompt() (legacy behaviour).
+  function handleModifySegment(segmentId) {
+    const barEl = findSegmentBar(segmentId);
+    if (!(barEl instanceof HTMLElement)) return;
+
+    if (!editSegmentModal) {
+      void handleModifySegmentPrompt(segmentId);
+      return;
+    }
+
+    const startAtMs = Number(barEl.dataset.startAtMs);
+    const endAtMs = Number(barEl.dataset.endAtMs);
+    if (!Number.isFinite(startAtMs) || !Number.isFinite(endAtMs)) return;
+
+    editSegmentModal.open({
+      segmentId,
+      startAt: new Date(startAtMs),
+      endAt: new Date(endAtMs),
+      effectif: barEl.dataset.effectif ?? "",
+    });
+  }
+
+  // Called by the modal on Enregistrer with an already-internally-valid range +
+  // Effectif. Rejects overlaps against the segment's own track (DOM-sourced,
+  // ignoring the edited bar), then writes and refreshes. Returns { ok, error }.
+  async function handleEditSegmentSubmit({ segmentId, selection }) {
+    if (!editModeEnabled) {
+      return { ok: false, error: "Cliquez sur Editer pour modifier le planning." };
+    }
+
+    const barEl = findSegmentBar(segmentId);
+    const trackEl = barEl instanceof HTMLElement ? barEl.closest(TRACK_SELECTOR) : null;
+    const annotated = annotateOverlap(
+      trackEl,
+      { startDate: selection.startDate, endDate: selection.endDate },
+      { ignoreSegmentId: segmentId }
+    );
+    if (annotated?.hasOverlap) {
+      return {
+        ok: false,
+        error:
+          "Impossible de definir un segment qui chevauche deja une autre barre pour cette personne.",
+      };
+    }
+
+    let writeError = null;
+    await persistWrite(async () => {
+      try {
+        await updateTimeSegment({
+          segmentId,
+          startDate: selection.startDate,
+          endDate: selection.endDate,
+          allocationDays: selection.totalDays,
+          effectif: selection.effectifValueForSave,
+        });
+      } catch (error) {
+        writeError = error;
+        throw error;
+      }
+    });
+
+    if (writeError) {
+      return { ok: false, error: "La mise a jour du segment a echoue." };
+    }
+    return { ok: true };
+  }
+
+  // Legacy Effectif-only fallback (no modal element wired). Cancelling the
+  // prompt (null) or leaving it blank is a no-op; a non-numeric/negative value
+  // shows an alert and aborts without writing.
+  async function handleModifySegmentPrompt(segmentId) {
     const input = window.prompt("Nouvel effectif pour ce segment :", "");
     if (input == null) return;
 
@@ -570,6 +671,7 @@ export function attachChargeEditing(boardEl, { getProjectNumber, getVisibleSlots
     window.removeEventListener("pointerup", handlePointerUpSafe);
     document.removeEventListener("click", handleDocumentClick);
     document.removeEventListener("keydown", handleKeyDown);
+    if (editSegmentModal) editSegmentModal.destroy();
     dragState = null;
   }
 
