@@ -54,6 +54,7 @@ export const FIXTURE_TABLES = {
     { id: 5, Nom_de_projet: "TEST BORD GAUCHE", Numero_de_projet: "555555" }, // reception band months before the only phase -> must NOT show at far-left
     { id: 6, Nom_de_projet: "TEST FUSION", Numero_de_projet: "666666" }, // 2 close same-type segments -> aggregate must keep them on ONE line
     { id: 7, Nom_de_projet: "TEST MAXZOOM", Numero_de_projet: "777777" }, // bounds span > max window -> at max zoom an early phase is off-screen (placement/phantom test)
+    { id: 8, Nom_de_projet: "TEST EN COURS", Numero_de_projet: "888888" }, // a phase spanning today -> past/current split must stay on ONE line
   ],
   Planning_Projet: [
     // Mixed date formats (FR + ISO) on purpose to exercise the robust parser.
@@ -79,6 +80,13 @@ export const FIXTURE_TABLES = {
     // sits entirely off-screen-left of the max-zoom window (which ends ~2028-08).
     { id: 7001, NomProjet: "TEST MAXZOOM", ID2: "7001", Zone: "Z1", Taches: "DEBUT - COF", Type_doc: "COFFRAGE", Date_limite: "2027-01-15", Diff_coffrage: "2027-01-25" },
     { id: 7002, NomProjet: "TEST MAXZOOM", ID2: "7002", Zone: "Z1", Taches: "FIN - COF", Type_doc: "COFFRAGE", Date_limite: "2028-07-01", Diff_coffrage: "2028-07-20" },
+    // TEST EN COURS: a COFFRAGE phase straddling "today" (2026) — the vendored
+    // builder splits it into a past + a current item; both must render on ONE
+    // line (colour changing at the red today line), not stacked on two.
+    { id: 8001, NomProjet: "TEST EN COURS", ID2: "8001", Zone: "Z1", Taches: "DALLE EN COURS - COF", Type_doc: "COFFRAGE", Date_limite: "2026-06-01", Diff_coffrage: "2026-08-15" },
+    // A TINY past portion (starts a few days before today) — its darker "past"
+    // half must be the SAME height as the current half, not appear shorter.
+    { id: 8002, NomProjet: "TEST EN COURS", ID2: "8002", Zone: "Z1", Taches: "MUR PETIT PASSE - COF", Type_doc: "COFFRAGE", Date_limite: "2026-07-02", Diff_coffrage: "2026-11-01" },
   ],
   TimeSegment: [
     { id: 1, NumeroProjet: "252035", Name: "Fouzia Raggui", Start_At: "02/02/2027 08:00", End_At: "26/02/2027 17:00", Allocation_Days: "18", Effectif: "1", Label: "" },
@@ -97,6 +105,8 @@ export const FIXTURE_TABLES = {
     { id: 30, NumeroProjet: "666666", Name: "Equipe Fusion", Start_At: "01/01/2027 08:00", End_At: "31/12/2027 17:00", Allocation_Days: "20", Effectif: "1", Label: "" },
     // ~600-day span so the frise bounds exceed the 426-day max window.
     { id: 40, NumeroProjet: "777777", Name: "Equipe MZ", Start_At: "01/01/2027 08:00", End_At: "31/08/2028 17:00", Allocation_Days: "50", Effectif: "1", Label: "" },
+    // TEST EN COURS: spans mid-2026 so today (2026) is inside the window.
+    { id: 50, NumeroProjet: "888888", Name: "Equipe EC", Start_At: "01/06/2026 08:00", End_At: "30/09/2026 17:00", Allocation_Days: "40", Effectif: "1", Label: "" },
   ],
   ProjectTeam: [
     { id: 1, NumeroProjet: "252035", Name: "Fouzia Raggui", Role: "Projeteur", Daily_Rate: 0 },
@@ -110,6 +120,7 @@ export const FIXTURE_TABLES = {
     { id: 20, NumeroProjet: "555555", Name: "Equipe BG", Role: "Projeteur", Daily_Rate: 0 },
     { id: 30, NumeroProjet: "666666", Name: "Equipe Fusion", Role: "Projeteur", Daily_Rate: 0 },
     { id: 40, NumeroProjet: "777777", Name: "Equipe MZ", Role: "Projeteur", Daily_Rate: 0 },
+    { id: 50, NumeroProjet: "888888", Name: "Equipe EC", Role: "Projeteur", Daily_Rate: 0 },
   ],
   // "Données d'entrées" (reception) references, linked to planning rows by
   // NomProjet + NumeroDocument(=ID2) + Type_document + NomDocument(=Taches) + Zone.

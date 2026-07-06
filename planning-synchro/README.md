@@ -73,7 +73,18 @@ s'ouvre au maximum sur **14 mois** (`viewport.maxVisibleDays`).
 Le pane haut reproduit **exactement** le planning de `Planning Projet` : mêmes
 phases (coffrage/armature/NDC/coupes/démolition/générique + démarrage), mêmes
 couleurs, **états réalisé/retard** (bandes `phase-past`, styles inline de retard),
-en-têtes de zone et info-bulles. Il **réutilise le vrai builder** de Planning
+en-têtes de zone et info-bulles. La **partie passée / en cours** d'un segment est
+coloriée comme dans Planning Projet : le builder scinde chaque phase à
+l'**instant courant** (`createSplitPhaseItems` / `getCurrentInstant`), la portion
+écoulée prenant la classe `phase-past` (plus foncée) et la portion en cours/à
+venir la couleur normale. Les deux moitiés tiennent sur **une seule ligne** (une
+barre continue dont la couleur change au niveau du trait rouge) : le stacking vis
+est désactivé (`stack:false`) et tous les items `.vis-range` ont une **hauteur
+fixe** (comme Planning Projet), sinon la moitié « passée » (label vide) serait
+écrasée ou poussée sur une 2ᵉ ligne. Un **trait rouge vertical « aujourd'hui »**
+(`showCurrentTime` / vis `.vis-current-time`, comme Planning Projet) marque cette
+frontière, **uniquement sur le premier planning** (pane haut). Il
+**réutilise le vrai builder** de Planning
 Projet, *vendorisé* (copié pour rester auto-contenu) sous
 `assets/js/top/vendor/planningProjetBuilder.js` (avec `planningRealisation.js` et
 `columnsConfig.js`) : `buildTimelineDataFromPlanningRows()` produit une ligne par

@@ -1169,6 +1169,11 @@ function createSplitPhaseItems({
     ];
   }
 
+  // Split at "today": the past half and the current half are two vis items that
+  // abut at currentInstant. Tag them (phase-split-left / phase-split-right) so the
+  // CSS can square + de-border the shared edge and render them as ONE continuous
+  // bar of uniform height — otherwise each rounded end leaves a gap at the red
+  // line and a short past half looks like a detached little pill.
   return [
     createPhaseItem({
       itemId: `${itemIdBase}-past`,
@@ -1178,7 +1183,7 @@ function createSplitPhaseItems({
       businessStart,
       businessEnd,
       label: "",
-      className: `${className} phase-past`,
+      className: `${className} phase-past phase-split-left`,
       title,
       style: pastStyle,
     }),
@@ -1190,7 +1195,7 @@ function createSplitPhaseItems({
       businessStart,
       businessEnd,
       label,
-      className,
+      className: `${className} phase-split-right`,
       title,
       style,
     }),

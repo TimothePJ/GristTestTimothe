@@ -41,6 +41,11 @@ const TIMELINE_OPTIONS = {
   // gauche alors qu'il devrait pas s'afficher"). 'center' makes the content
   // scroll off with its box, so out-of-window segments are simply not seen.
   align: "center",
+  // vis's own current-time line is NOT used: it spans the date axis too (the user
+  // wants the marker only on the rows) and it advances in real time, drifting away
+  // from the past/current split (which is frozen at build time). A custom line is
+  // drawn instead (updateTodayLine), inside the rows panel only and at the SAME
+  // instant as the split -> always aligned, never on the frise/axis.
   showCurrentTime: false,
   // Row height +50% is driven from CSS on the LABEL (styles.css
   // `#ps-planning .vis-label .vis-inner` vertical padding): vis sizes each row
@@ -119,6 +124,10 @@ function toVisItems(items) {
   }));
 }
 
+function startOfMinuteMs(ms) {
+  return Math.floor(ms / 60000) * 60000;
+}
+
 export function createPlanningRenderer(containerEl) {
   let timeline = null;
   let groupsDataSet = null;
@@ -135,6 +144,49 @@ export function createPlanningRenderer(containerEl) {
   let lastWindowStartMs = null;
   let lastWindowEndMs = null;
   let appliedItemKey = null;
+  // Instant of the "today" marker, captured at render time and floored to the
+  // MINUTE so it stays in lock-step with the past/current split (which the builder
+  // computes at build time) — same minute, no real-time drift. See updateTodayLine.
+  let todayInstantMs = startOfMinuteMs(Date.now());
+
+  // Draw the red "today" line ourselves, as a child of the ROWS panel
+  // (.vis-panel.vis-center) only — never over the date axis. It is positioned with
+  // vis's OWN scale (`body.util.toScreen`), so it lands on the exact same pixel as
+  // the items vis draws (accounting for the scroll-gutter width vis reserves) —
+  // this is what fixes the "sometimes misaligned until I zoom" drift, since a DOM
+  // width measurement could be stale or ignore that gutter. Re-run on every vis
+  // redraw ('changed') and setWindow; hidden when today is outside the window.
+  function updateTodayLine() {
+    if (!timeline || !(containerEl instanceof HTMLElement)) return;
+    const centerEl = containerEl.querySelector(".vis-panel.vis-center");
+    if (!(centerEl instanceof HTMLElement)) return;
+    let line = centerEl.querySelector(":scope > .ps-today-line");
+    if (!line) {
+      line = document.createElement("div");
+      line.className = "ps-today-line";
+      centerEl.appendChild(line);
+    }
+
+    const width = centerEl.getBoundingClientRect().width;
+    let x = null;
+    const util = timeline.body && timeline.body.util;
+    if (util && typeof util.toScreen === "function") {
+      // vis coordinate — same reference the items are drawn with.
+      x = util.toScreen(new Date(todayInstantMs));
+    } else {
+      const spanMs = lastWindowEndMs - lastWindowStartMs;
+      if (Number.isFinite(spanMs) && spanMs > 0) {
+        x = ((todayInstantMs - lastWindowStartMs) / spanMs) * width;
+      }
+    }
+
+    if (x == null || x < 0 || x > width) {
+      line.style.display = "none";
+      return;
+    }
+    line.style.display = "block";
+    line.style.left = `${x}px`;
+  }
 
   // Push into the vis DataSet only the items within a small PIXEL buffer of the
   // current visible window; background bands (zone fills) always pass.
@@ -203,6 +255,12 @@ export function createPlanningRenderer(containerEl) {
       groupsDataSet,
       TIMELINE_OPTIONS
     );
+    // Re-place the today line whenever vis re-lays-out (initial settle, zoom,
+    // resize, scroll-gutter appearing/disappearing) — this is what keeps it glued
+    // to the split instead of drifting until the next manual zoom.
+    if (typeof timeline.on === "function") {
+      timeline.on("changed", updateTodayLine);
+    }
   }
 
   function render({
@@ -218,6 +276,9 @@ export function createPlanningRenderer(containerEl) {
     lastColumns = columns || null;
     lastAggregate = Boolean(aggregate);
     lastOptions = { project, zone, targetLookup, referenceReceptionLookup };
+    // Freeze the today marker to build time (floored to the minute), so it matches
+    // the past/current split the vendored builder just computed (same minute).
+    todayInstantMs = startOfMinuteMs(Date.now());
 
     ensureTimeline();
 
@@ -227,15 +288,18 @@ export function createPlanningRenderer(containerEl) {
       ? aggregatePlanningItems(lastRows, lastColumns)
       : buildPlanningItems(lastRows, lastColumns, lastOptions);
 
-    // Aggregate view = ONE line per document type: disable vis stacking so two
-    // same-type segments in nearby periods stay on a single line ("fusionner
-    // visuellement") instead of being pushed onto a 2nd lane when their boxes
-    // fall within the stacking margin at a wide zoom. aggregatePlanningItems
-    // already unions genuinely-overlapping same-type phases into one bar, so the
-    // items on that single line never overlap. The non-aggregate view keeps
-    // stacking (a record's own phases/reception band may legitimately share a row).
+    // Stacking OFF in both views: everything a group holds must stay on ONE line.
+    //  - Aggregate: two same-type segments in nearby periods would otherwise be
+    //    pushed onto a 2nd lane (aggregatePlanningItems already unions truly
+    //    overlapping same-type phases into one bar).
+    //  - Non-aggregate: a phase straddling "today" is split into a past + a
+    //    current item (adjacent at the red today-line); with stacking they landed
+    //    on two lanes, but they must render as ONE continuous bar whose colour
+    //    changes at the red line — exactly like Planning Projet. A record's items
+    //    (split phase + démarrage) never overlap in time, so one lane is enough
+    //    (reception bands, the only other same-row item, were removed).
     if (timeline && typeof timeline.setOptions === "function") {
-      timeline.setOptions({ stack: !lastAggregate });
+      timeline.setOptions({ stack: false });
     }
 
     lastGroupCount = groups.length;
@@ -257,6 +321,7 @@ export function createPlanningRenderer(containerEl) {
     // out-of-window item unpositioned at the left edge.
     applyWindowedItems();
     timeline.setWindow(startAt, endAt, { animation: false });
+    updateTodayLine();
   }
 
   // Reset the internal vertical scroll to the FIRST rows. vis-timeline keeps its

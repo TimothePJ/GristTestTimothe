@@ -531,6 +531,34 @@ body.ps-panning * {
   box-sizing: border-box;
 }
 
+/* Fixed height for ALL range items (like Planning Projet's
+   `.vis-item.vis-range { height: calc(--planning-row-height - 8px) }`): vis sizes
+   an item from its content, so an EMPTY-label part — the "past" half of a phase
+   split at today, or the démarrage marker — would collapse to a few px. A fixed
+   height keeps the past and current halves the SAME height so a straddling phase
+   renders as one continuous bar whose colour changes at the red today line. */
+#ps-planning .vis-item.vis-range {
+  height: 24px !important;
+  min-height: 24px !important;
+}
+
+/* A phase that straddles "today" is drawn as two abutting items — the past half
+   (phase-split-left) and the current half (phase-split-right) — that meet at the
+   red today line. Square and un-border their SHARED edge so the pair reads as ONE
+   continuous bar of uniform height: no rounded pinch, no white gap at the red
+   line, and a short past half no longer looks like a small detached pill. The
+   outer edges keep their rounded corners. */
+#ps-planning .vis-item.vis-range.phase-split-left {
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+  border-right-width: 0 !important;
+}
+#ps-planning .vis-item.vis-range.phase-split-right {
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+  border-left-width: 0 !important;
+}
+
 /* The rows are grown via the vis vertical item margin (see TIMELINE_OPTIONS);
    the bar itself gets a modest extra height so it stays proportionate within the
    taller row without overflowing it. */
@@ -714,6 +742,22 @@ body.ps-panning * {
 #ps-planning .vis-item.vis-background.zone-header-fill {
   background: #e8f2ff !important;
   border: 0 !important;
+}
+
+/* Vertical red "today" line — drawn by planningRenderer.updateTodayLine as a
+   child of the ROWS panel (.vis-panel.vis-center) only, so it marks the
+   past/current split boundary on the task lines WITHOUT crossing the date axis
+   above. Positioned at the same instant as the split (no real-time drift). */
+#ps-planning .vis-panel.vis-center > .ps-today-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background-color: #ed1b2d;
+  opacity: 0.9;
+  z-index: 20;
+  pointer-events: none;
 }
 
 /* Left task-column tint per document type — mirrors Planning Projet's
