@@ -593,8 +593,26 @@ export function createChargeBoard(containerEl) {
   let contentWidthPx = 0;
   let lastWorkers = [];
   let lastEditMode = false;
+  // Rebuild throttling. A zoom/pan gesture drives setWindow ~60x/s and each call
+  // used to rebuild the whole innerHTML — the dominant jank source. We throttle
+  // the rebuild to at most one per REBUILD_THROTTLE_MS (leading + trailing): the
+  // top pane stays smooth every frame while the bottom pane still tracks ~8x/s
+  // and lands exactly right on the trailing edge. `renderSeq` counts real
+  // rebuilds (exposed on the container for the perf check).
+  const REBUILD_THROTTLE_MS = 120;
+  let lastRebuildAt = 0;
+  let rebuildTimerId = null;
+  let renderSeq = 0;
+
+  function cancelPendingRebuild() {
+    if (rebuildTimerId != null) {
+      clearTimeout(rebuildTimerId);
+      rebuildTimerId = null;
+    }
+  }
 
   function clear() {
+    cancelPendingRebuild();
     if (containerEl instanceof HTMLElement) {
       containerEl.innerHTML = "";
       containerEl.classList.remove("is-segment-editing-enabled", "is-segment-editing-locked");
@@ -608,6 +626,13 @@ export function createChargeBoard(containerEl) {
       clear();
       return;
     }
+
+    // A real (committed) rebuild: drop any queued throttle-trailing rebuild and
+    // reset the throttle clock so the NEXT setWindow throttles from here.
+    cancelPendingRebuild();
+    lastRebuildAt = Date.now();
+    renderSeq += 1;
+    containerEl.dataset.psRenderSeq = String(renderSeq);
 
     lastWorkers = workers || [];
     lastEditMode = Boolean(editMode);
@@ -655,8 +680,27 @@ export function createChargeBoard(containerEl) {
     `;
   }
 
+  // Viewport-only change (zoom/pan): throttle the full rebuild. `render()` is the
+  // single committer (it resets the clock and clears any pending trailing timer),
+  // so this only decides "rebuild now" (enough time elapsed — leading edge) vs
+  // "rebuild soon" (coalesce a burst into one trailing rebuild). No CSS transform
+  // is used because the worker/role LABEL cells share the scaled layer and would
+  // distort — see docs/superpowers/plans/2026-07-06-planning-synchro-fluidity.md.
   function setWindow(viewport) {
-    render({ workers: lastWorkers, viewport, editMode: lastEditMode });
+    if (typeof setTimeout !== "function") {
+      render({ workers: lastWorkers, viewport, editMode: lastEditMode });
+      return;
+    }
+    cancelPendingRebuild();
+    const elapsed = Date.now() - lastRebuildAt;
+    if (elapsed >= REBUILD_THROTTLE_MS) {
+      render({ workers: lastWorkers, viewport, editMode: lastEditMode });
+      return;
+    }
+    rebuildTimerId = setTimeout(() => {
+      rebuildTimerId = null;
+      render({ workers: lastWorkers, viewport, editMode: lastEditMode });
+    }, REBUILD_THROTTLE_MS - elapsed);
   }
 
   function getVisibleSlots() {

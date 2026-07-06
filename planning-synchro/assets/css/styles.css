@@ -255,12 +255,11 @@ body.ps-resizing * {
   user-select: none !important;
 }
 
-/* Drag-to-pan the frise: "grab" cursor over the read-only top pane's timeline
-   area, "grabbing" while a pan is in progress (body.ps-panning is toggled by the
-   sync controller). Vertical row scrolling is on the wheel/scrollbar. */
-#ps-planning .vis-panel.vis-top,
-#ps-planning .vis-panel.vis-center,
-#ps-planning .vis-panel.vis-left {
+/* Drag-to-pan the frise: "grab" cursor ONLY over the date axis (the frise), since
+   that is the sole region that pans the chronology; "grabbing" while a pan is in
+   progress (body.ps-panning is toggled by the sync controller). The task rows and
+   left labels are NOT draggable — they scroll vertically via the wheel/scrollbar. */
+#ps-planning .vis-panel.vis-top {
   cursor: grab;
 }
 body.ps-panning,

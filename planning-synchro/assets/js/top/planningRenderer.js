@@ -143,7 +143,11 @@ export function createPlanningRenderer(containerEl) {
   let allItems = [];
   let lastWindowStartMs = null;
   let lastWindowEndMs = null;
-  let appliedItemKey = null;
+  // Ids actuellement dans le DataSet vis (fenêtrage). On diffe contre cet
+  // ensemble pour ne créer/détruire que les nœuds entrant/sortant de la fenêtre,
+  // au lieu de tout recréer (clear()+add()) — vis re-rendait alors TOUS les
+  // segments à chaque dézoom.
+  let appliedItemIds = new Set();
   // Instant of the "today" marker, captured at render time and floored to the
   // MINUTE so it stays in lock-step with the past/current split (which the builder
   // computes at build time) — same minute, no real-time drift. See updateTodayLine.
@@ -156,7 +160,7 @@ export function createPlanningRenderer(containerEl) {
   // this is what fixes the "sometimes misaligned until I zoom" drift, since a DOM
   // width measurement could be stale or ignore that gutter. Re-run on every vis
   // redraw ('changed') and setWindow; hidden when today is outside the window.
-  function updateTodayLine() {
+  function drawTodayLine() {
     if (!timeline || !(containerEl instanceof HTMLElement)) return;
     const centerEl = containerEl.querySelector(".vis-panel.vis-center");
     if (!(centerEl instanceof HTMLElement)) return;
@@ -186,6 +190,22 @@ export function createPlanningRenderer(containerEl) {
     }
     line.style.display = "block";
     line.style.left = `${x}px`;
+  }
+
+  // Coalesce à un seul passage par frame : vis émet 'changed' plusieurs fois par
+  // zoom et setWindow appelle aussi ; sans coalescing on force plusieurs reflows
+  // (getBoundingClientRect) par frame. Un rAF gardé regroupe tout en un seul draw.
+  let todayLineFrameId = null;
+  function updateTodayLine() {
+    if (typeof requestAnimationFrame !== "function") {
+      drawTodayLine();
+      return;
+    }
+    if (todayLineFrameId != null) return;
+    todayLineFrameId = requestAnimationFrame(() => {
+      todayLineFrameId = null;
+      drawTodayLine();
+    });
   }
 
   // Push into the vis DataSet only the items within a small PIXEL buffer of the
@@ -225,14 +245,20 @@ export function createPlanningRenderer(containerEl) {
         return startMs <= hi && endMs >= lo;
       });
     }
-    // Skip the DataSet churn when the visible SET is unchanged (panning within
-    // the same items): vis repositions the existing nodes on setWindow, so we
-    // only clear+add when an item actually enters or leaves the windowed set.
-    const key = visible.map((item) => item.id).join("|");
-    if (key === appliedItemKey) return;
-    appliedItemKey = key;
-    itemsDataSet.clear();
-    itemsDataSet.add(toVisItems(visible));
+    // Diff contre l'ensemble appliqué : ne toucher que le delta (vis ne recrée
+    // alors que les nœuds entrants/sortants, pas tout le jeu d'items). Les items
+    // déjà présents ne changent pas selon la fenêtre (leurs start/end/className/
+    // style ne dépendent que des données), donc aucun update n'est nécessaire.
+    const nextIds = new Set(visible.map((item) => item.id));
+    const toRemove = [];
+    appliedItemIds.forEach((existingId) => {
+      if (!nextIds.has(existingId)) toRemove.push(existingId);
+    });
+    const toAdd = visible.filter((item) => !appliedItemIds.has(item.id));
+    if (toRemove.length === 0 && toAdd.length === 0) return;
+    if (toRemove.length) itemsDataSet.remove(toRemove);
+    if (toAdd.length) itemsDataSet.add(toVisItems(toAdd));
+    appliedItemIds = nextIds;
   }
 
   function ensureTimeline() {
@@ -307,7 +333,10 @@ export function createPlanningRenderer(containerEl) {
     groupsDataSet.clear();
     groupsDataSet.add(toVisGroups(groups));
     allItems = items;
-    appliedItemKey = null; // force a fresh apply for the new data set
+    // Nouveau projet/données : vider le DataSet et l'ensemble suivi, puis laisser
+    // applyWindowedItems ajouter la fenêtre courante par diff (depuis vide).
+    itemsDataSet.clear();
+    appliedItemIds = new Set();
     applyWindowedItems();
   }
 
@@ -374,6 +403,10 @@ export function createPlanningRenderer(containerEl) {
   }
 
   function destroy() {
+    if (todayLineFrameId != null && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(todayLineFrameId);
+      todayLineFrameId = null;
+    }
     if (timeline) {
       timeline.destroy();
     }
@@ -386,7 +419,7 @@ export function createPlanningRenderer(containerEl) {
     allItems = [];
     lastWindowStartMs = null;
     lastWindowEndMs = null;
-    appliedItemKey = null;
+    appliedItemIds = new Set();
   }
 
   return {

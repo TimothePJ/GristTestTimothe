@@ -39,6 +39,15 @@ import { APP_CONFIG } from "../config.js";
 // "≤ 1px" acceptance threshold.
 const ALIGNMENT_TOLERANCE_PX = 1;
 
+// The alignment assertion is a DEV-only safety net (console.warn). It reads the
+// DOM (2 getBoundingClientRect) on every apply, i.e. 2 forced reflows per zoom
+// tick — pure waste in production. We therefore only SCHEDULE it when a dev opts
+// in via window.__PS_ALIGN_DEBUG === true. Alignment itself is guaranteed by
+// construction (arithmetic) and covered by the render acceptance check.
+function isAlignmentDebugEnabled() {
+  return typeof window !== "undefined" && window.__PS_ALIGN_DEBUG === true;
+}
+
 // Fixed DOM ids from index.html / dev/harness.html — this widget mounts a
 // single instance per page (no multi-instance/component-reuse requirement),
 // so the alignment assertion queries these directly rather than requiring
@@ -212,14 +221,16 @@ export function createSyncController({ planningRenderer, chargeBoard, bounds, on
 
       // Follow-up rAF: run the single post-layout alignment assertion after
       // both panes have had a chance to lay out from the setWindow() calls
-      // above (no retry loop — see assertAlignment's own comment). Its id is
-      // tracked so destroy() and the next setViewport()'s coalescing cancel
-      // can stop it before it fires (a stray assertion must not run after
-      // destroy()).
-      pendingAssertFrameId = requestAnimationFrame(() => {
-        pendingAssertFrameId = null;
-        assertAlignment(next);
-      });
+      // above (no retry loop — see assertAlignment's own comment). DEV-only:
+      // only scheduled when window.__PS_ALIGN_DEBUG is on, so production pays no
+      // per-tick reflow. Its id is tracked so destroy() and the next
+      // setViewport()'s coalescing cancel can stop it before it fires.
+      if (isAlignmentDebugEnabled()) {
+        pendingAssertFrameId = requestAnimationFrame(() => {
+          pendingAssertFrameId = null;
+          assertAlignment(next);
+        });
+      }
     });
 
     return next;
@@ -385,9 +396,14 @@ export function createSyncController({ planningRenderer, chargeBoard, bounds, on
     return 0;
   }
 
-  function onPanPointerDown(event) {
+  function onPanPointerDown(event, startFilter) {
     if (panPointerId != null) return;
     if (event.button != null && event.button !== 0) return; // primary button only
+    // Restrict where a pan can START. The planning pane passes a filter that only
+    // allows the date axis (the "frise"), so dragging the task ROWS never pans —
+    // they scroll vertically. The chart pane passes no filter (drag anywhere pans
+    // its chronology).
+    if (typeof startFilter === "function" && !startFilter(event)) return;
     // Don't hijack a drag on the vertical scrollbar (rows are scrolled there).
     if (event.target instanceof Element && event.target.closest(".vis-vertical-scroll")) return;
 
@@ -434,18 +450,21 @@ export function createSyncController({ planningRenderer, chargeBoard, bounds, on
     if (typeof document !== "undefined") document.body.classList.remove("ps-panning");
   }
 
-  function bindPan(targetEl) {
+  function bindPan(targetEl, options = {}) {
     if (!(targetEl instanceof HTMLElement)) return;
-    targetEl.addEventListener("pointerdown", onPanPointerDown);
+    const startFilter = typeof options.startFilter === "function" ? options.startFilter : null;
+    // Per-binding pointerdown wrapper so each pane can carry its own start filter.
+    const down = (event) => onPanPointerDown(event, startFilter);
+    targetEl.addEventListener("pointerdown", down);
     targetEl.addEventListener("pointermove", onPanPointerMove);
     targetEl.addEventListener("pointerup", endPan);
     targetEl.addEventListener("pointercancel", endPan);
-    panBindings.push({ el: targetEl });
+    panBindings.push({ el: targetEl, down });
   }
 
   function unbindPan() {
-    panBindings.splice(0).forEach(({ el }) => {
-      el.removeEventListener("pointerdown", onPanPointerDown);
+    panBindings.splice(0).forEach(({ el, down }) => {
+      el.removeEventListener("pointerdown", down);
       el.removeEventListener("pointermove", onPanPointerMove);
       el.removeEventListener("pointerup", endPan);
       el.removeEventListener("pointercancel", endPan);

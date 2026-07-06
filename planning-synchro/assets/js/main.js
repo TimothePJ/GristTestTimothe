@@ -322,6 +322,12 @@ function bootstrapApp() {
       chargeBoard.render({ workers: [], viewport, editMode: false });
     }
 
+    // Dernier mode de zoom appliqué (semaine/mois/année). La hauteur bornée du
+    // pane haut ne dépend que du nombre de lignes (invariant au zoom/pan) et de la
+    // hauteur de bande d'axe, qui ne change qu'au changement de mode — on évite
+    // donc de re-mesurer + rappeler setMaxHeight (redraw vis) à chaque cran.
+    let lastAppliedMode = null;
+
     controller = createSyncController({
       planningRenderer,
       chargeBoard,
@@ -330,9 +336,12 @@ function bootstrapApp() {
         if (els.range) els.range.textContent = label || "-";
         state.viewport = appliedViewport;
         persistViewport(appliedViewport, state.selectedProject);
-        // The top-axis band height changes with the zoom mode (week/month/year),
-        // so recompute the top pane's bounded height after every viewport apply.
-        if (topPaneResizer) topPaneResizer.refresh();
+        // Ne re-mesurer/re-borner que si le MODE a changé (bande d'axe) ; un pan
+        // ou un zoom intra-mode ne change ni le nb de lignes ni l'axe.
+        if (topPaneResizer && appliedViewport && appliedViewport.mode !== lastAppliedMode) {
+          lastAppliedMode = appliedViewport.mode;
+          topPaneResizer.refresh();
+        }
         // Keep the chart's chronology in sync with the frise (both panes move
         // together) when the chart view is showing.
         if (topView === "chart" && planningChart) planningChart.setViewport(appliedViewport);
@@ -362,7 +371,12 @@ function bootstrapApp() {
 
     controller.bindToolbar(els.toolbar);
     controller.bindWheel(els.main);
-    controller.bindPan(els.planning);
+    // Drag-to-pan the planning ONLY from the date axis (the "frise"): dragging the
+    // task rows must not move the chronology (they scroll vertically instead).
+    controller.bindPan(els.planning, {
+      startFilter: (event) =>
+        event.target instanceof Element && Boolean(event.target.closest(".vis-panel.vis-top")),
+    });
     // The chart view keeps the SAME navigable chronology: drag-to-pan the chart
     // (wheel-zoom already works — #ps-chart is not #ps-planning — as does the
     // toolbar), so both panes move together whether the timeline or the chart is
