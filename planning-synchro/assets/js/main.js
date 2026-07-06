@@ -155,7 +155,9 @@ function bootstrapApp() {
   let lastAppliedSelectionKey = "";
 
   // Top-pane view: "planning" (the read-only timeline) or "chart" (the task-load
-  // graph). The chart view is only reachable when the aggregate toggle is on.
+  // graph). The chart is available at any time — it does NOT require the aggregate
+  // ("Rassembler visuellement") toggle (its data is derived from the planning rows
+  // directly, independent of how the timeline is grouped).
   let topView = "planning";
   let lastTopPaneHeightPx = 0;
   // Planning rows/columns kept for the chart (same data the timeline renders).
@@ -477,18 +479,18 @@ function bootstrapApp() {
     if (!planningRenderer || !controller) return;
     const aggregate = Boolean(els.aggregateToggle.checked);
     planningRenderer.setAggregate(aggregate);
-    // The "Graphique" view is only offered in aggregate mode; leaving aggregate
-    // forces back to the planning (timeline) view.
-    if (!aggregate) topView = "planning";
-    updateViewSwitchVisibility();
+    // The chart is available regardless of aggregate mode, so toggling aggregate no
+    // longer changes the top view — it only re-aggregates the timeline. applyTopView
+    // re-bounds the (visible) timeline height for the new row count.
     applyTopView();
     controller.setViewport(controller.getViewport());
   }
 
-  // Show the Planning/Graphique switch only while the aggregate toggle is on.
+  // Show the Planning/Graphique switch whenever the project has planning data —
+  // independent of the aggregate toggle (the chart is always available).
   function updateViewSwitchVisibility() {
     if (!(els.viewSwitch instanceof HTMLElement)) return;
-    els.viewSwitch.hidden = !(els.aggregateToggle && els.aggregateToggle.checked);
+    els.viewSwitch.hidden = !(Array.isArray(chartRows) && chartRows.length > 0);
   }
 
   function setTopView(view) {
@@ -500,7 +502,9 @@ function bootstrapApp() {
   // (#ps-chart), reflect the active button, and (when showing the chart) size it
   // to the current top-pane height and render it for the current viewport.
   function applyTopView() {
-    const chartActive = topView === "chart" && els.aggregateToggle && els.aggregateToggle.checked;
+    // The chart no longer depends on the aggregate toggle — it is shown whenever
+    // the user selected the "Graphique" view.
+    const chartActive = topView === "chart";
 
     if (els.planning instanceof HTMLElement) els.planning.hidden = chartActive;
     if (els.chart instanceof HTMLElement) els.chart.hidden = !chartActive;
@@ -522,6 +526,11 @@ function bootstrapApp() {
         columns: chartColumns,
         viewport: controller.getViewport(),
       });
+    } else if (!chartActive && topPaneResizer) {
+      // Timeline is (re)shown: re-bound its height for the current row count, which
+      // may have changed while it was hidden (e.g. an aggregate toggle). onRangeLabel's
+      // own refresh is mode-gated and wouldn't catch a row-count change.
+      topPaneResizer.refresh();
     }
   }
 
