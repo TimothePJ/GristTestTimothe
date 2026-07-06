@@ -14,6 +14,8 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  # Needed to delete leftover artifacts from a previous run attempt
+  actions: write
 
 # Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
 # However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
@@ -33,6 +35,27 @@ jobs:
         uses: actions/checkout@v4
       - name: Setup Pages
         uses: actions/configure-pages@v5
+      # A re-run of a failed attempt keeps the previous attempt's "github-pages"
+      # artifact, so deploy-pages then finds 2 and aborts. Remove any leftover
+      # before uploading a fresh one.
+      - name: Remove stale github-pages artifacts from this run
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            });
+            for (const artifact of data.artifacts) {
+              if (artifact.name === 'github-pages') {
+                await github.rest.actions.deleteArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: artifact.id,
+                });
+              }
+            }
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
