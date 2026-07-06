@@ -236,6 +236,70 @@ export function computePlanningPhaseBounds(rows, project = "") {
     : null;
 }
 
+// --- planning task ranges (for the bottom-pane segment hover count) -----------
+//
+// One work-period range { startAt, endAt } per planning row, derived from its
+// phases (reusing buildRowPhases). The démarrage marker is a milestone, not a
+// work period, so it does NOT define the range; a row carrying ONLY a démarrage
+// falls back to that single day. Mirrors gestion-depenses2's per-row
+// getPlanningTaskRange — used by the bottom pane to show, when hovering a
+// TimeSegment bar, how many planning tasks fall within that period.
+export function buildPlanningTaskRanges(rows, columns) {
+  const ranges = [];
+
+  (rows || []).forEach((row) => {
+    const phases = buildRowPhases(row, columns);
+    let startAt = null;
+    let endAt = null;
+
+    phases.forEach((phase) => {
+      if (phase.type === "demarrage") return;
+      if (!(phase.start instanceof Date) || !(phase.end instanceof Date)) return;
+      if (!startAt || phase.start < startAt) startAt = phase.start;
+      if (!endAt || phase.end > endAt) endAt = phase.end;
+    });
+
+    if (!startAt || !endAt) {
+      const demarrage = phases.find((phase) => phase.type === "demarrage");
+      if (demarrage && demarrage.start instanceof Date) {
+        startAt = demarrage.start;
+        endAt = demarrage.start;
+      }
+    }
+
+    if (startAt && endAt) ranges.push({ startAt, endAt });
+  });
+
+  return ranges;
+}
+
+function taskDayFloor(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+}
+
+function taskDayCeil(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+}
+
+// Number of planning task ranges overlapping [startAt, endAt] at day granularity.
+// Ported from gestion-depenses2's countPlanningTasksOverlappingRange /
+// getPlanningTasksOverlappingRange (services/projectService.js).
+export function countPlanningTasksOverlappingRange(taskRanges, startAt, endAt) {
+  if (!(startAt instanceof Date) || !(endAt instanceof Date)) return 0;
+  const rangeStart = taskDayFloor(startAt);
+  const rangeEnd = taskDayCeil(endAt);
+  if (Number.isNaN(rangeStart.getTime()) || Number.isNaN(rangeEnd.getTime())) return 0;
+
+  let count = 0;
+  (taskRanges || []).forEach((task) => {
+    const taskStart = task?.startAt instanceof Date ? taskDayFloor(task.startAt) : null;
+    const taskEnd = task?.endAt instanceof Date ? taskDayCeil(task.endAt) : null;
+    if (!taskStart || !taskEnd) return;
+    if (taskStart <= rangeEnd && taskEnd >= rangeStart) count += 1;
+  });
+  return count;
+}
+
 // --- aggregated view: 1 group per Type_doc, overlapping same-type phases merged ---
 
 export function aggregatePlanningItems(rows, columns) {

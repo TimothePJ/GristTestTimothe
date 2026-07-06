@@ -6,6 +6,8 @@ import {
   aggregatePlanningItems,
   getFirstPhaseDate,
   buildPhaseTooltipHtml,
+  buildPlanningTaskRanges,
+  countPlanningTasksOverlappingRange,
 } from "../assets/js/top/phases.js";
 import { formatIsoDate, parseCalendarDate } from "../assets/js/utils/dates.js";
 
@@ -72,6 +74,44 @@ test("buildPlanningItems (adapter): task-only labels + zone headers + item type/
   assert.ok(
     items.some((it) => it.type === "background" && String(it.className).includes("zone-header-fill")),
     "zone header background band present"
+  );
+});
+
+test("buildPlanningTaskRanges: one main-phase range per row (démarrage excluded)", () => {
+  const rows = [
+    { id: 1, Taches: "A", Type_doc: "COFFRAGE", Date_limite: "2027-01-01", Diff_coffrage: "2027-02-01", Demarrages_travaux: "2027-06-01" },
+    { id: 2, Taches: "B", Type_doc: "ARMATURES", Diff_coffrage: "2027-03-01", Diff_armature: "2027-04-01" },
+    { id: 3, Taches: "", Type_doc: "", Zone: "Z" }, // no phases -> no range
+  ];
+  const ranges = buildPlanningTaskRanges(rows, cols);
+  assert.equal(ranges.length, 2, "only rows with phases yield a range");
+  // Row 1 range is the coffrage span, NOT extended to the 2027-06-01 démarrage.
+  assert.equal(formatIsoDate(ranges[0].startAt), "2027-01-01");
+  assert.equal(formatIsoDate(ranges[0].endAt), "2027-02-01");
+});
+
+test("countPlanningTasksOverlappingRange: counts tasks whose period overlaps the segment", () => {
+  const ranges = buildPlanningTaskRanges(
+    [
+      { id: 1, Taches: "A", Type_doc: "COFFRAGE", Date_limite: "2027-01-01", Diff_coffrage: "2027-02-01" },
+      { id: 2, Taches: "B", Type_doc: "COFFRAGE", Date_limite: "2027-03-01", Diff_coffrage: "2027-04-01" },
+    ],
+    cols
+  );
+  // Segment covering Jan → only task A overlaps.
+  assert.equal(
+    countPlanningTasksOverlappingRange(ranges, parseCalendarDate("2027-01-10"), parseCalendarDate("2027-01-20")),
+    1
+  );
+  // Segment spanning both periods → 2.
+  assert.equal(
+    countPlanningTasksOverlappingRange(ranges, parseCalendarDate("2027-01-15"), parseCalendarDate("2027-03-15")),
+    2
+  );
+  // Segment before any task → 0.
+  assert.equal(
+    countPlanningTasksOverlappingRange(ranges, parseCalendarDate("2026-11-01"), parseCalendarDate("2026-12-01")),
+    0
   );
 });
 

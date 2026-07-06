@@ -426,11 +426,20 @@ export function createSyncController({ planningRenderer, chargeBoard, bounds, on
       }
     }
     if (typeof document !== "undefined") document.body.classList.add("ps-panning");
+    // Bound in CAPTURE (see bindPan): stop the pointerdown here so vis-timeline's
+    // own drag handler (on descendant panels) never starts — otherwise vis would
+    // ALSO scroll the rows vertically in response to the drag's vertical
+    // component. The frise pan must move the chronology HORIZONTALLY only.
+    event.stopPropagation();
     event.preventDefault(); // suppress text selection while dragging
   }
 
   function onPanPointerMove(event) {
     if (event.pointerId !== panPointerId || !(panDayWidthPx > 0)) return;
+    // Keep the whole gesture away from vis (belt-and-suspenders alongside the
+    // pointer capture): horizontal pan only, never a vertical row scroll.
+    event.stopPropagation();
+    if (typeof event.preventDefault === "function") event.preventDefault();
     // Drag right => reveal EARLIER dates (content follows the cursor, like a map).
     const deltaDays = Math.round(-(event.clientX - panStartX) / panDayWidthPx);
     const nextFirstVisibleDate = shiftIsoDateValue(panStartFirstVisibleDate, deltaDays);
@@ -455,19 +464,22 @@ export function createSyncController({ planningRenderer, chargeBoard, bounds, on
     const startFilter = typeof options.startFilter === "function" ? options.startFilter : null;
     // Per-binding pointerdown wrapper so each pane can carry its own start filter.
     const down = (event) => onPanPointerDown(event, startFilter);
-    targetEl.addEventListener("pointerdown", down);
-    targetEl.addEventListener("pointermove", onPanPointerMove);
-    targetEl.addEventListener("pointerup", endPan);
-    targetEl.addEventListener("pointercancel", endPan);
+    // CAPTURE phase: run before vis-timeline's descendant drag handlers so a frise
+    // pan can stopPropagation() and keep vis from vertically scrolling the rows
+    // (see onPanPointerDown / onPanPointerMove).
+    targetEl.addEventListener("pointerdown", down, true);
+    targetEl.addEventListener("pointermove", onPanPointerMove, true);
+    targetEl.addEventListener("pointerup", endPan, true);
+    targetEl.addEventListener("pointercancel", endPan, true);
     panBindings.push({ el: targetEl, down });
   }
 
   function unbindPan() {
     panBindings.splice(0).forEach(({ el, down }) => {
-      el.removeEventListener("pointerdown", down);
-      el.removeEventListener("pointermove", onPanPointerMove);
-      el.removeEventListener("pointerup", endPan);
-      el.removeEventListener("pointercancel", endPan);
+      el.removeEventListener("pointerdown", down, true);
+      el.removeEventListener("pointermove", onPanPointerMove, true);
+      el.removeEventListener("pointerup", endPan, true);
+      el.removeEventListener("pointercancel", endPan, true);
     });
     if (typeof document !== "undefined") document.body.classList.remove("ps-panning");
   }

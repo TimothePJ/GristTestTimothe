@@ -66,6 +66,7 @@ import {
   getSegmentAllocationDays,
   getBusinessHalfDaySlotsBetween,
 } from "../utils/timeSegments.js";
+import { countPlanningTasksOverlappingRange } from "../top/phases.js";
 import { APP_CONFIG } from "../config.js";
 
 const MIN_CONTENT_WIDTH_PX = 280;
@@ -300,7 +301,7 @@ function getVisibleSlotRange(startAt, endAt, visibleSlots) {
   return { firstSlot, lastSlot };
 }
 
-function buildVisibleSegmentBars(worker, visibleSlots) {
+function buildVisibleSegmentBars(worker, visibleSlots, planningTasks = []) {
   return (worker?.segments || [])
     .map((segment) => {
       const startAt = segment?.startAt instanceof Date ? segment.startAt : null;
@@ -317,6 +318,9 @@ function buildVisibleSegmentBars(worker, visibleSlots) {
       const leftPx = slotRange.firstSlot.leftPx;
       const widthPx =
         slotRange.lastSlot.leftPx + slotRange.lastSlot.widthPx - slotRange.firstSlot.leftPx;
+      // Like gestion-depenses2: how many planning tasks fall within this segment's
+      // period — surfaced as the bar's hover title (see renderSegmentBars).
+      const planningTaskCount = countPlanningTasksOverlappingRange(planningTasks, startAt, endAt);
 
       return {
         segmentId: segment.id,
@@ -325,6 +329,7 @@ function buildVisibleSegmentBars(worker, visibleSlots) {
         endSlotIndex: slotRange.lastSlot.slotIndex,
         startAtMs: startAt.getTime(),
         endAtMs: endAt.getTime(),
+        planningTaskCount,
         // Raw stored effectif (may be null) so the edit-segment modal can
         // pre-fill "jours effectifs travailles" exactly as stored, blank when
         // unset — this module is DOM-driven, so the value rides on the bar.
@@ -360,6 +365,10 @@ function renderSegmentBars(assignedBars) {
   return assignedBars
     .map((bar) => {
       const compact = bar.widthPx < 64;
+      // Hover title (like gestion-depenses2): number of planning tasks to do
+      // during this segment's period.
+      const taskCount = Number(bar.planningTaskCount) || 0;
+      const planningTooltip = `${taskCount} tâche(s) Planning Projet sur cette période`;
       return `
         <div
           class="charge-plan-segment-bar ${compact ? "is-compact" : ""}"
@@ -371,6 +380,8 @@ function renderSegmentBars(assignedBars) {
           data-start-at-ms="${bar.startAtMs}"
           data-end-at-ms="${bar.endAtMs}"
           data-effectif="${escapeHtml(String(bar.effectif))}"
+          data-planning-tooltip="${escapeHtml(planningTooltip)}"
+          title="${escapeHtml(planningTooltip)}"
         >
           <span class="charge-plan-segment-handle is-start" data-resize-edge="start"></span>
           <span class="charge-plan-segment-label">${escapeHtml(bar.label)}</span>
@@ -392,8 +403,8 @@ function renderRoleRow(roleLabel, timelineWidth) {
   `;
 }
 
-function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWidth) {
-  const visibleSegmentBars = buildVisibleSegmentBars(worker, visibleSlots);
+function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWidth, planningTasks = []) {
+  const visibleSegmentBars = buildVisibleSegmentBars(worker, visibleSlots, planningTasks);
   const assignedBars = assignSegmentLanes(visibleSegmentBars);
   const laneCount = Math.max(
     1,
@@ -593,6 +604,10 @@ export function createChargeBoard(containerEl) {
   let contentWidthPx = 0;
   let lastWorkers = [];
   let lastEditMode = false;
+  // Planning task ranges (one per Planning_Projet row) used to count, per segment
+  // bar, how many planning tasks fall in its period (hover title). Kept across the
+  // viewport-only re-renders (setWindow) since the tasks don't change on zoom/pan.
+  let lastPlanningTasks = [];
   // Rebuild throttling. A zoom/pan gesture drives setWindow ~60x/s and each call
   // used to rebuild the whole innerHTML — the dominant jank source. We throttle
   // the rebuild to at most one per REBUILD_THROTTLE_MS (leading + trailing): the
@@ -621,7 +636,7 @@ export function createChargeBoard(containerEl) {
     activeVisibleSlots = [];
   }
 
-  function render({ workers, viewport, editMode } = {}) {
+  function render({ workers, viewport, editMode, planningTasks } = {}) {
     if (!(containerEl instanceof HTMLElement) || !viewport) {
       clear();
       return;
@@ -636,6 +651,9 @@ export function createChargeBoard(containerEl) {
 
     lastWorkers = workers || [];
     lastEditMode = Boolean(editMode);
+    // Only the data-driven render() (from main.js) carries planningTasks; the
+    // viewport-only re-render (setWindow) omits it and keeps the last set.
+    if (planningTasks !== undefined) lastPlanningTasks = Array.isArray(planningTasks) ? planningTasks : [];
 
     containerEl.classList.add("charge-plan-board");
 
@@ -653,7 +671,7 @@ export function createChargeBoard(containerEl) {
         [
           renderRoleRow(roleLabel, timelineWidth),
           ...roleWorkers.map((worker) =>
-            renderWorkerRow(worker, activeVisibleSlots, timelineWidth, windowDays, dayWidth)
+            renderWorkerRow(worker, activeVisibleSlots, timelineWidth, windowDays, dayWidth, lastPlanningTasks)
           ),
         ].join("")
       )

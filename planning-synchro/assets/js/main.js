@@ -26,7 +26,7 @@ import {
   readSharedSelection,
   writeSharedSelection,
 } from "./services/projectRegistry.js";
-import { getFirstPhaseDate, buildRowPhases, computePlanningPhaseBounds } from "./top/phases.js";
+import { getFirstPhaseDate, buildRowPhases, computePlanningPhaseBounds, buildPlanningTaskRanges } from "./top/phases.js";
 import { computeTimeSegmentBounds } from "./top/bounds.js";
 import { createPlanningRenderer } from "./top/planningRenderer.js";
 import { createPlanningChart } from "./top/planningChart.js";
@@ -286,6 +286,10 @@ function bootstrapApp() {
     let viewport;
     let controllerBounds;
 
+    // Planning task ranges for the bottom-pane segment hover title (how many
+    // planning tasks to do during each segment) — like gestion-depenses2.
+    const planningTasks = buildPlanningTaskRanges(planningRows, pc.planningProject);
+
     if (bounds) {
       els.chargeEmpty.hidden = true;
       els.charge.hidden = false;
@@ -306,7 +310,7 @@ function bootstrapApp() {
         viewportFitsWithinBounds(persisted.viewport, controllerBounds);
       viewport = canReusePersisted ? buildCanonicalSharedViewport(persisted.viewport) : initialViewport;
 
-      chargeBoard.render({ workers, viewport, editMode: false });
+      chargeBoard.render({ workers, viewport, editMode: false, planningTasks });
     } else {
       // No TimeSegment data for this project: bottom pane stays empty, but
       // the top (Planning_Projet) pane must still render on a sane default
