@@ -1140,13 +1140,38 @@ export function buildGlobalExpenseData(tables) {
   };
 }
 
-export function filterProjectsByDop(projects, selectedDop) {
-  if (selectedDop === "all") return [...(projects || [])];
+function getSelectedDopFilterParts(selectedDops) {
+  const selectedValues =
+    selectedDops instanceof Set
+      ? [...selectedDops]
+      : Array.isArray(selectedDops)
+        ? selectedDops
+        : selectedDops == null
+          ? []
+          : [selectedDops];
+  const includeWithoutDop = selectedValues.includes(WITHOUT_DOP_FILTER);
+  const hasAllFilter = selectedValues.includes("all");
+  const dopKeys = new Set(
+    selectedValues
+      .filter((value) => value !== WITHOUT_DOP_FILTER && value !== "all")
+      .map(normalizeDopKey)
+      .filter(Boolean)
+  );
+
+  return { dopKeys, hasAllFilter, includeWithoutDop };
+}
+
+export function filterProjectsByDop(projects, selectedDops, options = {}) {
+  if (options?.allSelected || selectedDops === "all") return [...(projects || [])];
+
+  const { dopKeys, hasAllFilter, includeWithoutDop } = getSelectedDopFilterParts(selectedDops);
+  if (hasAllFilter) return [...(projects || [])];
+  if (!includeWithoutDop && !dopKeys.size) return [];
 
   return (projects || []).filter((project) => {
     const dop = normalizeDopValue(project?.dop);
-    if (selectedDop === WITHOUT_DOP_FILTER) return !dop;
-    return normalizeDopKey(dop) === normalizeDopKey(selectedDop);
+    if (!dop) return includeWithoutDop;
+    return dopKeys.has(normalizeDopKey(dop));
   });
 }
 

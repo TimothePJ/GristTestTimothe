@@ -42,6 +42,7 @@ const VIEW_STATE = (() => {
   };
 })();
 const DOP_DATA_CHANGE_STORAGE_KEY = "grist.dop-data-changed";
+const ALL_DOP_FILTER = "all";
 let dopReloadTimer = 0;
 
 const state = {
@@ -51,7 +52,7 @@ const state = {
     dopConflicts: [],
     unmatchedRows: [],
   },
-  selectedDop: "all",
+  selectedDopValues: new Set(getDopFilterValues()),
   selectedProjectIds: new Set(),
   selectionMode: "single",
   expenseNavigationMode: "month",
@@ -165,8 +166,68 @@ function isSelectableProject(project) {
   return !project?.isTimeRealSynthetic;
 }
 
+function getDopFilterValues(dopRegistryRows = []) {
+  return [WITHOUT_DOP_FILTER, ...getAvailableDopValues(dopRegistryRows)];
+}
+
+function getCurrentDopFilterValues() {
+  return getDopFilterValues(state.dopRegistryRows);
+}
+
+function areAllDopFiltersSelected(filterValues = getCurrentDopFilterValues()) {
+  return filterValues.length > 0 && filterValues.every((value) => (
+    state.selectedDopValues.has(value)
+  ));
+}
+
+function selectAllDopFilters() {
+  state.selectedDopValues = new Set(getCurrentDopFilterValues());
+}
+
+function reconcileDopSelectionAfterRegistryUpdate(wasAllSelected) {
+  const filterValues = getCurrentDopFilterValues();
+
+  if (wasAllSelected) {
+    state.selectedDopValues = new Set(filterValues);
+    return;
+  }
+
+  const availableValues = new Set(filterValues);
+  state.selectedDopValues = new Set(
+    [...state.selectedDopValues].filter((value) => availableValues.has(value))
+  );
+}
+
+function handleDopFilterSelection(value) {
+  if (value === ALL_DOP_FILTER) {
+    if (areAllDopFiltersSelected()) {
+      state.selectedDopValues = new Set();
+    } else {
+      selectAllDopFilters();
+    }
+    return;
+  }
+
+  const nextValues = new Set(state.selectedDopValues);
+  if (areAllDopFiltersSelected()) {
+    getCurrentDopFilterValues().forEach((filterValue) => nextValues.add(filterValue));
+    nextValues.delete(value);
+    state.selectedDopValues = nextValues;
+    return;
+  }
+
+  if (nextValues.has(value)) {
+    nextValues.delete(value);
+  } else {
+    nextValues.add(value);
+  }
+  state.selectedDopValues = nextValues;
+}
+
 function getSelectableProjects() {
-  return filterProjectsByDop(state.projects, state.selectedDop)
+  return filterProjectsByDop(state.projects, state.selectedDopValues, {
+    allSelected: areAllDopFiltersSelected(),
+  })
     .filter(isSelectableProject)
     .sort(compareProjects);
 }
@@ -329,21 +390,28 @@ function setStatus(message, isError = false) {
 
 function renderDopButtons() {
   const dopValues = getAvailableDopValues(state.dopRegistryRows);
+  const allDopFiltersSelected = areAllDopFiltersSelected();
   const buttons = [
-    { value: "all", label: "TOUT" },
+    { value: ALL_DOP_FILTER, label: "TOUT" },
     { value: WITHOUT_DOP_FILTER, label: "Sans DOP" },
     ...dopValues.map((dop) => ({ value: dop, label: getDopLabel(dop) })),
   ];
 
   dom.dopFilter.innerHTML = buttons
-    .map(({ value, label }) => `
+    .map(({ value, label }) => {
+      const isActive = value === ALL_DOP_FILTER
+        ? allDopFiltersSelected
+        : state.selectedDopValues.has(value);
+
+      return `
       <button
         type="button"
-        class="dop-filter-btn${value === state.selectedDop ? " is-active" : ""}"
+        class="dop-filter-btn${isActive ? " is-active" : ""}"
         data-dop="${escapeHtml(value)}"
-        aria-pressed="${value === state.selectedDop ? "true" : "false"}"
+        aria-pressed="${isActive ? "true" : "false"}"
       >${escapeHtml(label)}</button>
-    `)
+    `;
+    })
     .join("");
 }
 
@@ -515,7 +583,7 @@ function bindEvents() {
     if (!(target instanceof HTMLElement)) return;
     const button = target.closest(".dop-filter-btn");
     if (!(button instanceof HTMLButtonElement)) return;
-    state.selectedDop = button.dataset.dop || "all";
+    handleDopFilterSelection(button.dataset.dop || ALL_DOP_FILTER);
     renderApp();
   });
 
@@ -626,6 +694,7 @@ function bindEvents() {
 async function loadData() {
   setStatus("Chargement des projets...");
   const previousSelectedProjectIds = new Set(state.selectedProjectIds);
+  const wasAllDopSelected = areAllDopFiltersSelected();
   const [tables, dopRegistryRows] = await Promise.all([
     fetchExpenseAppTables(),
     fetchDopRegistryRows(),
@@ -635,6 +704,7 @@ async function loadData() {
   state.projects = projects;
   state.dopRegistryRows = dopRegistryRows;
   state.diagnostics = diagnostics;
+  reconcileDopSelectionAfterRegistryUpdate(wasAllDopSelected);
   const availableProjectIds = new Set(projects.map(getProjectId).filter(Boolean));
   state.selectedProjectIds = new Set(
     [...previousSelectedProjectIds].filter((projectId) => availableProjectIds.has(projectId))
