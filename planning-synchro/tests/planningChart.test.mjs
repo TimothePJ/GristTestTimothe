@@ -104,6 +104,31 @@ test("buildTaskLoadSeries: realized never exceeds total per month/type", () => {
   });
 });
 
+test("buildTaskLoadSeries: week granularity buckets tasks per ISO week", () => {
+  // Feb 2027 Mondays are the 1st, 8th, 15th, 22nd. FOND due 2027-02-20 (Sat) is in
+  // the week of Mon 2027-02-15; PH RDC due 2027-02-25 (Thu) and RSO due 2027-02-28
+  // (Sun) are both in the week of Mon 2027-02-22.
+  const series = buildTaskLoadSeries(rows, columns, viewport, { granularity: "week" });
+
+  // Weekly buckets across the whole 2027 window (~53 weeks) — far more than 12.
+  assert.ok(series.points.length > 40, "weekly buckets span the year");
+  assert.ok(series.points.every((p) => typeof p.weekKey === "string"), "week points carry weekKey");
+
+  const wk15 = series.points.findIndex((p) => p.weekKey === "2027-02-15");
+  const wk22 = series.points.findIndex((p) => p.weekKey === "2027-02-22");
+  assert.ok(wk15 >= 0 && wk22 >= 0, "both February weeks exist");
+
+  // FOND alone in the week of the 15th; PH RDC + RSO in the week of the 22nd.
+  assert.equal(series.byType.COFFRAGE[wk15], 1);
+  assert.equal(series.total[wk15], 1);
+  assert.equal(series.byType.COFFRAGE[wk22], 1);
+  assert.equal(series.byType.NDC[wk22], 1);
+  assert.equal(series.total[wk22], 2);
+
+  // Same grand total as the month view (5 in-window tasks), just spread by week.
+  assert.equal(series.total.reduce((a, b) => a + b, 0), 5);
+});
+
 test("buildTaskLoadSeries: empty / invalid viewport -> empty series", () => {
   assert.deepEqual(buildTaskLoadSeries(rows, columns, {}), {
     points: [],

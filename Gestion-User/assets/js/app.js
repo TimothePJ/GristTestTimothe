@@ -283,9 +283,24 @@ function buildProjectOptions(data) {
     .sort((left, right) => compareText(left.label, right.label));
 }
 
+function projectOptionMatchesDop(projectNumber) {
+  if (!state.filters.dop) return true;
+  const project = state.data?.projects.get(projectNumber);
+  return getFilterKey(getProjectDopLabel(project)) === state.filters.dop;
+}
+
+function getDisplayedProjectOptions() {
+  return state.projectOptions.filter((project) =>
+    projectOptionMatchesDop(project.number)
+  );
+}
+
 function updateProjectFilterLabel() {
-  const selectedCount = state.filters.visibleProjectNumbers.size;
-  const totalCount = state.projectOptions.length;
+  const displayedOptions = getDisplayedProjectOptions();
+  const selectedCount = displayedOptions.filter((project) =>
+    state.filters.visibleProjectNumbers.has(project.number)
+  ).length;
+  const totalCount = displayedOptions.length;
 
   if (totalCount === 0 || selectedCount === 0) {
     dom.projectFilterLabel.textContent = "Aucun projet";
@@ -303,7 +318,7 @@ function updateProjectFilterLabel() {
 function renderProjectFilterOptions() {
   dom.projectOptionList.replaceChildren();
 
-  state.projectOptions.forEach((project) => {
+  getDisplayedProjectOptions().forEach((project) => {
     const label = document.createElement("label");
     label.className = "project-option";
 
@@ -337,9 +352,15 @@ function setProjectFilterOpen(forceOpen = null) {
 }
 
 function setAllProjectsSelected(selected) {
-  state.filters.visibleProjectNumbers = selected
-    ? new Set(state.projectOptions.map((project) => project.number))
-    : new Set();
+  const nextProjectNumbers = new Set(state.filters.visibleProjectNumbers);
+  getDisplayedProjectOptions().forEach((project) => {
+    if (selected) {
+      nextProjectNumbers.add(project.number);
+    } else {
+      nextProjectNumbers.delete(project.number);
+    }
+  });
+  state.filters.visibleProjectNumbers = nextProjectNumbers;
   updateProjectFilterLabel();
   scheduleRender();
 }
@@ -657,9 +678,7 @@ function segmentOverlapsRange(segment, range) {
 }
 
 function projectMatchesDop(projectNumber) {
-  if (!state.filters.dop) return true;
-  const project = state.data.projects.get(projectNumber);
-  return getFilterKey(getProjectDopLabel(project)) === state.filters.dop;
+  return projectOptionMatchesDop(projectNumber);
 }
 
 function getVisibleProjectNumbersForFilters() {
@@ -775,6 +794,8 @@ function bindEvents() {
   });
   dom.dopFilter.addEventListener("change", () => {
     state.filters.dop = dom.dopFilter.value;
+    renderProjectFilterOptions();
+    updateProjectFilterLabel();
     scheduleRender();
   });
   dom.includeEmptyEmployees.addEventListener("change", () => {

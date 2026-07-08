@@ -369,6 +369,40 @@ body.ps-panning * {
   border-radius: 2px;
 }
 
+/* Mois / Semaine granularity control for the chart (a small segmented toggle). */
+.ps-chart-granularity {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--spacing-2);
+}
+.ps-chart-granularity[hidden] {
+  display: none;
+}
+.ps-chart-gran-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin-right: 2px;
+}
+.ps-chart-gran-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ps-chart-gran-btn.is-active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
 /* Chart view: replaces #ps-planning when "Graphique" is selected. The height is
    set from JS (planningChart.setHeight) to match the timeline it replaces; the
    canvas fills the container (Chart.js maintainAspectRatio:false). */

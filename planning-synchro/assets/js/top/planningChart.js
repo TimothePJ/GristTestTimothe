@@ -2,8 +2,9 @@
 // REPLACES the read-only planning timeline when the aggregate ("Rassembler
 // visuellement le planning") mode is on. It plots, over the SAME visible
 // chronology as the frise / bottom pane, the number of tasks to realize per
-// month, one line per document type (Coffrage / Armature / NDC / Coupes /
-// Démolition / Autres) plus a Total line.
+// month OR per week (user's choice, via the Mois/Semaine control), one line per
+// document type (Coffrage / Armature / NDC / Coupes / Démolition / Autres) plus a
+// Total line.
 //
 // Charting technology: Chart.js (globalThis.Chart, loaded from the CDN in
 // index.html / dev/harness.html) — the SAME library gestion-depenses2 uses for
@@ -61,40 +62,106 @@ function isTaskRealized(row, columns) {
   return toFiniteNumber(row?.[columns.realise], 0) >= 100;
 }
 
-// PURE: rows + columns + viewport -> { points, byType, total, byTypeRealized,
-// totalRealized, typesPresent }. `points` are the months spanning
-// [firstVisibleDate .. rangeEndDate]; byType/total are per-month task counts
-// aligned to `points`, and byTypeRealized/totalRealized are the SAME counts
-// restricted to tasks already realized at 100% (the dotted companion lines).
-// Tasks whose due date falls outside the visible months are not counted (the
-// chart follows the frise).
-export function buildTaskLoadSeries(rows, columns, viewport, monthsNames = APP_CONFIG.months) {
+// Monday 00:00 of the ISO week containing `date`.
+export function startOfWeekMonday(date) {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = d.getDay(); // 0=Sun..6=Sat
+  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+// Month buckets spanning [first..last]. `points` carry monthKey/year/monthNumber;
+// indexOf(date) -> the bucket index for a due date (null if outside).
+function buildMonthBuckets(first, last, monthsNames) {
+  const span =
+    last.getFullYear() * 12 + last.getMonth() - (first.getFullYear() * 12 + first.getMonth()) + 1;
+  const months = buildDisplayedMonths(first.getFullYear(), first.getMonth(), span, monthsNames);
+  const indexByMonthKey = new Map(months.map((month, index) => [month.monthKey, index]));
+  const points = months.map((month) => ({
+    monthKey: month.monthKey,
+    year: month.year,
+    monthNumber: month.monthNumber,
+    label: `${String(month.monthLabel || "").slice(0, 3)} ${month.year}`,
+    midTs: new Date(month.year, month.monthNumber - 1, 15).getTime(),
+  }));
+  return {
+    points,
+    indexOf: (date) => {
+      const index = indexByMonthKey.get(monthKeyOf(date));
+      return index == null ? null : index;
+    },
+  };
+}
+
+// Weekly (Monday-based) buckets spanning [first..last]. `points` carry weekKey
+// (the Monday ISO date) + midTs (Thursday, so the point sits mid-week).
+function buildWeekBuckets(first, last) {
+  const points = [];
+  const indexByWeekStartMs = new Map();
+  const end = startOfWeekMonday(last).getTime();
+  let cursor = startOfWeekMonday(first);
+  let index = 0;
+  while (cursor.getTime() <= end) {
+    const startMs = cursor.getTime();
+    indexByWeekStartMs.set(startMs, index);
+    points.push({
+      weekKey: `${cursor.getFullYear()}-${pad2(cursor.getMonth() + 1)}-${pad2(cursor.getDate())}`,
+      weekStartTs: startMs,
+      label: `${pad2(cursor.getDate())}/${pad2(cursor.getMonth() + 1)}`,
+      midTs: new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 3, 12, 0, 0).getTime(),
+    });
+    index += 1;
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 7);
+  }
+  return {
+    points,
+    indexOf: (date) => {
+      const idx = indexByWeekStartMs.get(startOfWeekMonday(date).getTime());
+      return idx == null ? null : idx;
+    },
+  };
+}
+
+// PURE: rows + columns + viewport (+ options.granularity "month"|"week") ->
+// { points, byType, total, byTypeRealized, totalRealized, typesPresent }.
+// `points` are the month OR week buckets spanning [firstVisibleDate ..
+// rangeEndDate]; byType/total are per-bucket task counts aligned to `points`, and
+// byTypeRealized/totalRealized are the SAME counts restricted to tasks already
+// realized at 100% (the dotted companion lines). Tasks whose due date falls
+// outside the visible buckets are not counted (the chart follows the frise).
+export function buildTaskLoadSeries(rows, columns, viewport, options = {}) {
+  const granularity = options.granularity === "week" ? "week" : "month";
+  const monthsNames = options.monthsNames || APP_CONFIG.months;
   const first = parseCalendarDate(viewport?.firstVisibleDate);
   const last = parseCalendarDate(viewport?.rangeEndDate);
   if (!first || !last || last < first) {
     return { points: [], byType: {}, total: [], byTypeRealized: {}, totalRealized: [], typesPresent: [] };
   }
 
-  const span =
-    last.getFullYear() * 12 + last.getMonth() - (first.getFullYear() * 12 + first.getMonth()) + 1;
-  const months = buildDisplayedMonths(first.getFullYear(), first.getMonth(), span, monthsNames);
-  const indexByMonthKey = new Map(months.map((month, index) => [month.monthKey, index]));
+  const buckets =
+    granularity === "week" ? buildWeekBuckets(first, last) : buildMonthBuckets(first, last, monthsNames);
+  const points = buckets.points;
 
   const byType = {};
   const byTypeRealized = {};
-  const total = new Array(months.length).fill(0);
-  const totalRealized = new Array(months.length).fill(0);
+  const total = new Array(points.length).fill(0);
+  const totalRealized = new Array(points.length).fill(0);
   const typesPresent = new Set();
 
   (rows || []).forEach((row) => {
     const due = taskDueDate(row, columns);
     if (!due) return;
-    const index = indexByMonthKey.get(monthKeyOf(due));
+    const index = buckets.indexOf(due);
     if (index == null) return; // outside the visible range
 
     const typeKey = taskTypeKey(row, columns);
-    if (!byType[typeKey]) byType[typeKey] = new Array(months.length).fill(0);
-    if (!byTypeRealized[typeKey]) byTypeRealized[typeKey] = new Array(months.length).fill(0);
+    if (!byType[typeKey]) byType[typeKey] = new Array(points.length).fill(0);
+    if (!byTypeRealized[typeKey]) byTypeRealized[typeKey] = new Array(points.length).fill(0);
     byType[typeKey][index] += 1;
     total[index] += 1;
     typesPresent.add(typeKey);
@@ -104,14 +171,6 @@ export function buildTaskLoadSeries(rows, columns, viewport, monthsNames = APP_C
       totalRealized[index] += 1;
     }
   });
-
-  const points = months.map((month) => ({
-    monthKey: month.monthKey,
-    year: month.year,
-    monthNumber: month.monthNumber,
-    label: `${String(month.monthLabel || "").slice(0, 3)} ${month.year}`,
-    midTs: new Date(month.year, month.monthNumber - 1, 15).getTime(),
-  }));
 
   return {
     points,
@@ -144,15 +203,34 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-// createPlanningChart(canvasEl, filterEl) -> { render, setViewport, setHeight, destroy }.
-export function createPlanningChart(canvasEl, filterEl) {
+// createPlanningChart(canvasEl, filterEl, granularityEl) ->
+// { render, setViewport, setHeight, destroy }.
+export function createPlanningChart(canvasEl, filterEl, granularityEl) {
   let chart = null;
   let lastRows = [];
   let lastColumns = null;
+  // Bucket granularity for the task-load lines: "month" (default) or "week". The
+  // user picks it via the Mois/Semaine control (granularityEl).
+  let granularity = "month";
+  // Last applied viewport, so a granularity change can re-render in place.
+  let lastViewport = null;
   // Type filter: Set of base labels (e.g. "Coffrage", "Total") currently CHECKED.
   // A dataset is shown iff its base label is in the set. Rebuilt per project and
   // re-applied on every viewport re-render (buildDatasets reads it).
   let visibleTypes = null;
+
+  // Axis / tooltip labels adapt to the granularity: months read "jui 26", weeks
+  // read the week's Monday "dd/MM" (axis) / "Semaine du dd/MM/YYYY" (tooltip).
+  function axisLabel(ts) {
+    if (granularity !== "week") return shortMonthLabel(ts);
+    const monday = startOfWeekMonday(new Date(ts));
+    return `${pad2(monday.getDate())}/${pad2(monday.getMonth() + 1)}`;
+  }
+  function tooltipTitle(ts) {
+    if (granularity !== "week") return shortMonthLabel(ts);
+    const monday = startOfWeekMonday(new Date(ts));
+    return `Semaine du ${pad2(monday.getDate())}/${pad2(monday.getMonth() + 1)}/${monday.getFullYear()}`;
+  }
 
   // Which document types actually occur in the project (all rows, not just the
   // visible window) — the checkbox filter only lists these + Total.
@@ -277,7 +355,7 @@ export function createPlanningChart(canvasEl, filterEl) {
             ticks: {
               maxRotation: 0,
               autoSkip: true,
-              callback: (value) => shortMonthLabel(value),
+              callback: (value) => axisLabel(value),
             },
             grid: { color: "rgba(0, 73, 144, 0.06)" },
           },
@@ -298,7 +376,7 @@ export function createPlanningChart(canvasEl, filterEl) {
           },
           tooltip: {
             callbacks: {
-              title: (items) => (items.length ? shortMonthLabel(items[0].parsed.x) : ""),
+              title: (items) => (items.length ? tooltipTitle(items[0].parsed.x) : ""),
               label: (context) => `${context.dataset.label}: ${context.parsed.y}`,
             },
           },
@@ -310,13 +388,58 @@ export function createPlanningChart(canvasEl, filterEl) {
 
   function applyViewport(viewport) {
     if (!chart) return;
-    const series = buildTaskLoadSeries(lastRows, lastColumns, viewport);
-    const first = parseCalendarDate(viewport?.firstVisibleDate);
-    const last = parseCalendarDate(viewport?.rangeEndDate);
+    if (viewport) lastViewport = viewport;
+    const vp = lastViewport;
+    const series = buildTaskLoadSeries(lastRows, lastColumns, vp, { granularity });
+    const first = parseCalendarDate(vp?.firstVisibleDate);
+    const last = parseCalendarDate(vp?.rangeEndDate);
     if (first) chart.options.scales.x.min = first.getTime();
     if (last) chart.options.scales.x.max = new Date(last.getFullYear(), last.getMonth(), last.getDate(), 23, 59, 59).getTime();
     chart.data.datasets = buildDatasets(series);
     chart.update("none");
+  }
+
+  // Mois / Semaine control (granularityEl). Built once (static); a click switches
+  // the bucketing and re-renders the chart in place for the current viewport.
+  function buildGranularityControl() {
+    if (!(granularityEl instanceof HTMLElement)) return;
+    const options = [
+      { value: "month", label: "Mois" },
+      { value: "week", label: "Semaine" },
+    ];
+    granularityEl.innerHTML = `
+      <span class="ps-chart-gran-label">Regrouper par :</span>
+      ${options
+        .map(
+          (option) => `
+        <button
+          type="button"
+          class="ps-chart-gran-btn${option.value === granularity ? " is-active" : ""}"
+          data-granularity="${option.value}"
+          aria-pressed="${option.value === granularity ? "true" : "false"}"
+        >${option.label}</button>`
+        )
+        .join("")}
+    `;
+  }
+
+  function updateGranularityActive() {
+    if (!(granularityEl instanceof HTMLElement)) return;
+    granularityEl.querySelectorAll("[data-granularity]").forEach((button) => {
+      const active = button.dataset.granularity === granularity;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+  }
+
+  function handleGranularityClick(event) {
+    const button = event.target instanceof Element ? event.target.closest("[data-granularity]") : null;
+    if (!button) return;
+    const next = button.dataset.granularity === "week" ? "week" : "month";
+    if (next === granularity) return;
+    granularity = next;
+    updateGranularityActive();
+    applyViewport(lastViewport);
   }
 
   function render({ rows, columns, viewport } = {}) {
@@ -346,15 +469,24 @@ export function createPlanningChart(canvasEl, filterEl) {
     chart = null;
     lastRows = [];
     lastColumns = null;
+    lastViewport = null;
     visibleTypes = null;
     if (filterEl instanceof HTMLElement) {
       filterEl.removeEventListener("change", handleFilterChange);
       filterEl.innerHTML = "";
     }
+    if (granularityEl instanceof HTMLElement) {
+      granularityEl.removeEventListener("click", handleGranularityClick);
+      granularityEl.innerHTML = "";
+    }
   }
 
   if (filterEl instanceof HTMLElement) {
     filterEl.addEventListener("change", handleFilterChange);
+  }
+  if (granularityEl instanceof HTMLElement) {
+    granularityEl.addEventListener("click", handleGranularityClick);
+    buildGranularityControl();
   }
 
   return { render, setViewport, setHeight, destroy };
