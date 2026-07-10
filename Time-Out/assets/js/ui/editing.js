@@ -7,8 +7,9 @@
 //     onChanged, openEditModal })`.
 //   - The `mode:"resize"` branch machinery (resize handles + resize commit) is
 //     removed — this widget is drag-create + modal-edit only.
-//   - `handlePointerDown` / `handleContextMenuEvent` gate on the track's owner via
-//     `canEditTrack(trackEl.dataset.ownerEmail)` (ownership: own line or admin).
+//   - `handlePointerDown` / `handleContextMenuEvent` gate on the track's person via
+//     `canEditTrack(trackEl.dataset.personKey)` (ownership: own line or admin). The
+//     reason modal still reads `data-owner-email` (the write email) for the Owner.
 //   - The create-commit in `handlePointerUp` hands off to `openReasonModal({
 //     ownerEmail, startAt, endAt })`; the returned `{ write }` (from the reason
 //     modal, Task 11) owns the actual `createSegment` write.
@@ -288,9 +289,8 @@ export function attachLeaveEditing(
     const trackEl = event.target.closest(TRACK_SELECTOR);
     if (!(trackEl instanceof HTMLElement)) return;
 
-    // Ownership gate: only the line's owner (or an admin) may create here.
-    const ownerEmail = trackEl.dataset.ownerEmail || "";
-    if (typeof canEditTrack === "function" && !canEditTrack(ownerEmail)) return;
+    // Ownership gate: only this person's line (or an admin) may create here.
+    if (typeof canEditTrack === "function" && !canEditTrack(trackEl.dataset.personKey || "")) return;
 
     // Clicking an existing bar starts no create-drag (bars are edited via the
     // right-click context menu, not dragged over).
@@ -377,10 +377,10 @@ export function attachLeaveEditing(
 
     event.preventDefault();
 
-    // Ownership gate: only the bar owner (or an admin) gets the context menu.
+    // Ownership gate: only this person's line (or an admin) gets the context menu.
     const trackEl = segmentEl.closest(TRACK_SELECTOR);
-    const ownerEmail = trackEl instanceof HTMLElement ? trackEl.dataset.ownerEmail || "" : "";
-    if (typeof canEditTrack === "function" && !canEditTrack(ownerEmail)) {
+    const personKey = trackEl instanceof HTMLElement ? trackEl.dataset.personKey || "" : "";
+    if (typeof canEditTrack === "function" && !canEditTrack(personKey)) {
       hideContextMenu(boardEl);
       return;
     }
@@ -453,8 +453,8 @@ export function attachLeaveEditing(
     hideContextMenu(boardEl);
     if (!segmentId) return;
 
-    const ownerEmail = trackEl instanceof HTMLElement ? trackEl.dataset.ownerEmail || "" : "";
-    if (typeof canEditTrack === "function" && !canEditTrack(ownerEmail)) return;
+    const personKey = trackEl instanceof HTMLElement ? trackEl.dataset.personKey || "" : "";
+    if (typeof canEditTrack === "function" && !canEditTrack(personKey)) return;
 
     if (action === "delete-segment") {
       void persistWrite(() => removeSegment(segmentId));

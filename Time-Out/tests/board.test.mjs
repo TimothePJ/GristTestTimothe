@@ -3,13 +3,20 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildMembersFromLeaves, groupMembersByService, buildMonthGroups } from "../assets/js/ui/board.js";
 
-test("buildMembersFromLeaves seeds every member and attaches leaves by email", () => {
-  const members = [{ name: "A", email: "a@x", service: "Structure" }, { name: "B", email: "b@x", service: "Structure" }];
-  const segs = [{ id: 1, owner: "A@X", type: "RTT" }];
+test("buildMembersFromLeaves seeds every person and attaches leaves by email-SET membership (case-insensitive)", () => {
+  const members = [
+    { personKey: "a", name: "A", service: "Structure", emails: ["a@x", "a.alt@x"], primaryEmail: "a@x" },
+    { personKey: "b", name: "B", service: "Structure", emails: ["b@x"], primaryEmail: "b@x" },
+  ];
+  const segs = [
+    { id: 1, owner: "A@X", type: "RTT" },    // person A, primary email, upper-case → case-insensitive match
+    { id: 2, owner: "A.ALT@x", type: "CP" }, // person A, secondary email → same single line
+  ];
   const built = buildMembersFromLeaves(members, segs);
   assert.equal(built.length, 2);
-  assert.equal(built.find((m) => m.email === "a@x").segments.length, 1); // case-insensitive owner match
-  assert.equal(built.find((m) => m.email === "b@x").segments.length, 0);
+  // Leave posted under EITHER of A's emails lands on A's one line; B keeps none.
+  assert.equal(built.find((m) => m.personKey === "a").segments.length, 2);
+  assert.equal(built.find((m) => m.personKey === "b").segments.length, 0);
 });
 test("groupMembersByService buckets + sorts", () => {
   const grouped = groupMembersByService([

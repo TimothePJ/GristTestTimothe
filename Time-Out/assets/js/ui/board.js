@@ -4,12 +4,15 @@
 // Task 5). Deltas vs the source:
 //   - Total-row block + its helpers removed.
 //   - Fixed role-bucket grouping replaced by `groupMembersByService`.
-//   - `buildWorkersFromSegments` replaced by `buildMembersFromLeaves` (Team-seeded,
-//     owner-email keyed; segments arrive already as { id, owner, type, startAt, endAt }).
+//   - `buildWorkersFromSegments` replaced by `buildMembersFromLeaves` (seeded from
+//     deduped people, leaves attached by email-SET membership; segments arrive
+//     already as { id, owner, type, startAt, endAt }).
 //   - Segment bars carry a leave `type`/`color` (config.leaveTypeColor) and no
 //     effectif/planning-task machinery; resize handles + planning tooltip removed.
 //   - `renderRoleRow` -> `renderServiceRow`; `createChargeBoard` -> `createLeaveBoard`.
-//   - `.charge-plan-track` rows expose `data-owner-email` for the ownership gate.
+//   - `.charge-plan-track` rows expose `data-person-key` (the ownership gate) and
+//     `data-owner-email` (the write email: the viewer's own login on their line, a
+//     person's primaryEmail for an admin acting on someone else's).
 //
 // The half-day slot math (buildVisibleSlots), exact-window day enumeration
 // (buildWindowDays), weekend grid (renderTrackGrid), visible-slot range lookup
@@ -151,25 +154,23 @@ function buildDisplayedMonths(selectedYear, selectedMonth, monthSpan, months = [
 
 // --- member building (pure) --------------------------------------------------
 
-// Seeds one entry per Team member (keyed by lowercased email) then attaches each
-// leave segment to its owner by lowercased email. Segments arrive already shaped
-// as { id, owner, type, startAt: Date, endAt: Date } from main.js's ingestion.
+// Takes deduped people ({ personKey, name, service, emails, primaryEmail }) and
+// attaches each leave segment to the person whose email SET contains the leave's
+// owner email (lowercased) — so leave posted under any of a person's emails lands
+// on their single line. Segments arrive already shaped as { id, owner, type,
+// startAt: Date, endAt: Date } from main.js's ingestion.
 export function buildMembersFromLeaves(teamMembers, segments) {
-  const byEmail = new Map();
-  (teamMembers || []).forEach((m) => {
-    byEmail.set(String(m.email || "").toLowerCase(), {
-      name: m.name,
-      email: m.email,
-      service: m.service,
-      segments: [],
-    });
+  const emailToPerson = new Map();
+  const members = (teamMembers || []).map((m) => {
+    const person = { ...m, segments: [] };
+    (m.emails || []).forEach((e) => emailToPerson.set(String(e).toLowerCase(), person));
+    return person;
   });
   (segments || []).forEach((seg) => {
-    const key = String(seg.owner || "").toLowerCase();
-    const member = byEmail.get(key);
-    if (member) member.segments.push(seg);
+    const person = emailToPerson.get(String(seg.owner || "").toLowerCase());
+    if (person) person.segments.push(seg);
   });
-  return [...byEmail.values()];
+  return members;
 }
 
 // --- service grouping (pure) -------------------------------------------------
@@ -461,14 +462,16 @@ function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWid
   const rowHeight = Math.max(72, 20 + laneCount * 32);
 
   // Role-based greying (Task 15): grey + not-allowed the track when the viewer can
-  // neither own nor administer it — i.e. not an admin AND not this row's owner. This
-  // is a purely visual cue; the real edit gate is enforced by editing.js's
-  // canEditTrack (and server-side by Grist Access Rules).
-  const ownerEmail = String(worker.email || "");
-  const viewer = currentUser || { email: "", isAdmin: false };
-  const isNotEditable =
-    !viewer.isAdmin && ownerEmail.toLowerCase() !== String(viewer.email).toLowerCase();
+  // neither own nor administer it — i.e. not an admin AND not this person's line
+  // (matched by personKey). This is a purely visual cue; the real edit gate is
+  // enforced by editing.js's canEditTrack (and server-side by Grist Access Rules).
+  const viewer = currentUser || { email: "", isAdmin: false, personKey: "" };
+  const isNotEditable = !viewer.isAdmin && worker.personKey !== viewer.personKey;
   const trackClass = isNotEditable ? "charge-plan-track is-not-editable" : "charge-plan-track";
+  // Email to WRITE as Owner on create: the current user's login email on their own
+  // line (ACL requires user.Email == newRec.Owner); a person's primaryEmail for an
+  // admin acting on someone else's line.
+  const writeEmail = worker.personKey === viewer.personKey ? viewer.email : worker.primaryEmail;
 
   return `
     <div class="charge-plan-row" style="--timeline-width:${timelineWidth}px; --row-height:${rowHeight}px">
@@ -477,7 +480,8 @@ function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWid
         <div
           class="${trackClass}"
           data-worker-name="${escapeHtml(worker.name)}"
-          data-owner-email="${escapeHtml(worker.email)}"
+          data-person-key="${escapeHtml(worker.personKey)}"
+          data-owner-email="${escapeHtml(writeEmail || "")}"
           data-timeline-width="${timelineWidth}"
         >
           ${renderTrackGrid(windowDays, dayWidth)}
@@ -541,7 +545,7 @@ export function createLeaveBoard(containerEl) {
   let contentWidthPx = 0;
   let lastMembers = [];
   let lastSegments = [];
-  let lastCurrentUser = { email: "", isAdmin: false };
+  let lastCurrentUser = { email: "", isAdmin: false, personKey: "" };
   // Rebuild throttling for viewport-only re-renders (setWindow). render() is the
   // single committer: it resets the clock and drops any pending trailing rebuild.
   const REBUILD_THROTTLE_MS = 120;
@@ -581,7 +585,7 @@ export function createLeaveBoard(containerEl) {
 
     lastMembers = members || [];
     lastSegments = segments || [];
-    lastCurrentUser = currentUser || { email: "", isAdmin: false };
+    lastCurrentUser = currentUser || { email: "", isAdmin: false, personKey: "" };
 
     containerEl.classList.add("charge-plan-board");
 
@@ -654,7 +658,7 @@ export function createLeaveBoard(containerEl) {
     contentWidthPx = 0;
     lastMembers = [];
     lastSegments = [];
-    lastCurrentUser = { email: "", isAdmin: false };
+    lastCurrentUser = { email: "", isAdmin: false, personKey: "" };
     if (containerEl instanceof HTMLElement) {
       containerEl.classList.remove("charge-plan-board");
     }

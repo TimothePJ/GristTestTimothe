@@ -7,22 +7,13 @@ import { createReasonModal } from "./ui/reasonModal.js";
 import { createEditModal } from "./ui/editModal.js";
 import { segmentToDates } from "./utils/textSegments.js";
 import { toText, parseCalendarDate } from "./utils/dates.js";
+import { dedupeTeamMembers, findPersonKeyForEmail, filterMembersByService } from "./utils/teamPeople.js";
 import { state, loadPersistedViewport, persistViewport } from "./state.js";
 
 // Drag/editing controller (Task 12). Module-level so render() can detach the
 // previous instance before a re-render replaces the board's DOM.
 let editing = null;
 
-function buildTeamMembers(rows, cols) {
-  return (rows || []).map((r) => {
-    const email = toText(r[cols.email]);
-    // Fall back a blank composed name to the email so a member with an email never
-    // renders data-worker-name="" (editing.js's handlePointerDown bails on an empty
-    // worker name, which would make that person's own line undraggable).
-    const name = toText(r[cols.prenomNom]) || `${toText(r[cols.prenom])} ${toText(r[cols.nom])}`.trim() || email;
-    return { email, name, service: toText(r[cols.service]) };
-  }).filter((m) => m.email || m.name);
-}
 function buildSegments(rows, cols) {
   return (rows || []).map((r) => {
     const dates = segmentToDates({
@@ -102,40 +93,66 @@ function bootstrapApp() {
     const [teamRows, segRows] = await Promise.all([fetchTeamRows().catch(() => []), fetchSegments().catch(() => [])]);
     const teamCols = await getResolvedTeamColumns();
     const outCols = await getResolvedTimeOutColumns();
-    state.teamMembers = buildTeamMembers(teamRows, teamCols);
-    state.currentUser = findCurrentUser(teamRows, teamCols) || { email: "", isAdmin: false };
+    state.teamMembers = dedupeTeamMembers(teamRows, teamCols);
+    const cu = findCurrentUser(teamRows, teamCols) || { email: "", isAdmin: false };
+    cu.personKey = findPersonKeyForEmail(state.teamMembers, cu.email);
+    cu.service = (state.teamMembers.find((m) => m.personKey === cu.personKey) || {}).service || "";
+    state.currentUser = cu;
     state.segments = buildSegments(segRows, outCols);
   }
   function render() {
+    // Preserve scroll across the board's innerHTML rebuild (onChanged → render
+    // after a write) so the user is not thrown back to the top.
+    const prevScroll = els.main.querySelector(".charge-plan-scroll");
+    const savedTop = prevScroll ? prevScroll.scrollTop : 0;
+    const savedLeft = prevScroll ? prevScroll.scrollLeft : 0;
+
     if (editing) editing.detach();
     if (board) board.destroy();
-    // Keep the current viewport across re-renders (onRecords refresh, write →
-    // refetch) so pan/zoom choices survive; only build it the first time.
     state.viewport = state.viewport || buildInitialViewport();
-    // Empty state: no Team members → hide the board, show the placeholder.
+
     const hasMembers = state.teamMembers.length > 0;
-    // Read-only state: findCurrentUser returned null (no visible Moi row / ACL
-    // mismatch) → currentUser.email is "". The board then greys ALL tracks
-    // (none owned) and canEditTrack denies every drag, so it is read-only; the
-    // banner just makes that explicit to the viewer.
-    const unrecognized = !state.currentUser.email;
+    const unrecognized = !state.currentUser.personKey;
+
+    // Unrecognized user (login email maps to no Team person) → NO access to the
+    // board: hide it and show only the refusal message. Do not build the board.
+    if (unrecognized) {
+      els.empty.hidden = true;
+      els.main.hidden = true;
+      if (els.banner) {
+        els.banner.hidden = false;
+        els.banner.textContent = "Vous n'êtes pas reconnu — accès au planning refusé.";
+      }
+      return;
+    }
+    if (els.banner) els.banner.hidden = true;
     els.empty.hidden = hasMembers;
     els.main.hidden = !hasMembers;
-    if (els.banner) els.banner.hidden = !(hasMembers && unrecognized);
+
+    // Service visibility: a non-admin sees only their own service; an admin, all.
+    const visibleMembers = filterMembersByService(
+      state.teamMembers,
+      state.currentUser.service,
+      state.currentUser.isAdmin
+    );
+
     board = createLeaveBoard(els.main);
-    board.render({ members: state.teamMembers, segments: state.segments, viewport: state.viewport, currentUser: state.currentUser });
+    board.render({ members: visibleMembers, segments: state.segments, viewport: state.viewport, currentUser: state.currentUser });
+
+    // Restore the pre-render scroll on the freshly rebuilt scroll container.
+    const newScroll = els.main.querySelector(".charge-plan-scroll");
+    if (newScroll) { newScroll.scrollTop = savedTop; newScroll.scrollLeft = savedLeft; }
+
     persistViewport(state.viewport);
     renderLegend();
     if (els.range) els.range.textContent = formatViewportRange(state.viewport);
     updateZoomButtons(state.viewport.visibleDays);
 
-    // Drag-create + reason pop-up + context menu. Delegated listeners on els.main
-    // survive the board's innerHTML swap; detached at the top of the next render().
     editing = attachLeaveEditing(els.main, {
       getVisibleSlots: () => (board ? board.getVisibleSlots() : []),
-      canEditTrack: (ownerEmail) =>
+      canEditTrack: (personKey) =>
         state.currentUser.isAdmin ||
-        Boolean(ownerEmail && ownerEmail.toLowerCase() === String(state.currentUser.email).toLowerCase()),
+        Boolean(personKey && personKey === state.currentUser.personKey),
       openReasonModal: reasonModal
         ? ({ ownerEmail, startAt, endAt }) => reasonModal.open({ ownerEmail, startAt, endAt })
         : undefined,
