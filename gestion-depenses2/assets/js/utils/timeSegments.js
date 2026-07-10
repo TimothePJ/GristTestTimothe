@@ -1,4 +1,5 @@
 import { toFiniteNumber } from "./format.js";
+import { isFrenchHoliday } from "./frenchHolidays.js";
 
 export const HALF_DAY_PARTS = ["am", "pm"];
 
@@ -82,7 +83,7 @@ export function toGristDateTimeValue(value) {
 
 export function isBusinessDay(date) {
   const day = date.getDay();
-  return day !== 0 && day !== 6;
+  return day !== 0 && day !== 6 && !isFrenchHoliday(date);
 }
 
 export function toDateKey(date) {

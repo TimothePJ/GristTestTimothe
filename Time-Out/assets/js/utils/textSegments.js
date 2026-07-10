@@ -2,6 +2,7 @@
 // TEXT half-day math. Time stored as "YYYY-MM-DD" + "AM"/"PM".
 // Boundary hours mirror planning-synchro HALF_DAY_TIMES (AM 08-12, PM 13-17).
 import { parseCalendarDate, createLocalDate, isValidDate, toDateKey } from "./dates.js";
+import { isFrenchHoliday } from "./frenchHolidays.js";
 
 export const PERIOD_HOURS = { AM: { startHour: 8, endHour: 12 }, PM: { startHour: 13, endHour: 17 } };
 
@@ -42,5 +43,5 @@ export function segmentsOverlap(a, b) {
 }
 export function isBusinessDay(date) {
   const day = date.getDay();
-  return day !== 0 && day !== 6;
+  return day !== 0 && day !== 6 && !isFrenchHoliday(date);
 }

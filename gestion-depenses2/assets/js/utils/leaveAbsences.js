@@ -1,3 +1,4 @@
+import { isFrenchHoliday } from "./frenchHolidays.js";
 // planning-synchro/assets/js/utils/leaveAbsences.js
 // Self-contained, pure. Coordinates Time-Out leave with the charge board.
 // No DOM, no Grist. BYTE-IDENTICAL copy in gestion-depenses2. Node-testable.
@@ -38,7 +39,7 @@ function normalizePart(period) {
 }
 function isBusinessDay(date) {
   const day = date.getDay();
-  return day !== 0 && day !== 6;
+  return day !== 0 && day !== 6 && !isFrenchHoliday(date);
 }
 // Business half-day slots overlapping [startAt, endAt]; each carries key "YYYY-MM-DD:part".
 function businessHalfDaySlotsBetween(startAt, endAt) {
