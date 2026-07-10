@@ -233,20 +233,41 @@ export async function applyActions(actions) {
   return grist.docApi.applyUserActions(actions);
 }
 
+// Grist maps `Time-Out` (hyphen) to a `Time_Out` table id; some docs also use
+// `TimeOut`. Try each id in turn and keep the first that fetches without error.
+async function resolveTimeOutTableId() {
+  for (const id of ["Time-Out", "Time_Out", "TimeOut"]) {
+    try {
+      await fetchTableRows(id);
+      return id;
+    } catch (_e) {
+      // next
+    }
+  }
+  return "Time-Out";
+}
+
 // Charge Planning_Projet (filtre par NomProjet), TimeSegment + ProjectTeam
-// (filtres par NumeroProjet) pour un projet donne.
+// (filtres par NumeroProjet) pour un projet donne. Team + Time-Out sont
+// recuperes globalement (non filtres) pour construire l'index d'absences.
 export async function fetchProjectData({ name, number }) {
   const t = APP_CONFIG.grist.tables;
-  const [planningRows, timeSegmentRows, projectTeamRows] = await Promise.all([
+  const timeOutTableId = await resolveTimeOutTableId();
+  const [planningRows, timeSegmentRows, projectTeamRows, teamRows, timeOutRows] = await Promise.all([
     fetchTableRows(t.planningProject).catch(() => []),
     fetchTableRows(t.timeSegment).catch(() => []),
     fetchTableRows(t.projectTeam).catch(() => []),
+    fetchTableRows(t.team).catch(() => []),
+    fetchTableRows(timeOutTableId).catch(() => []),
   ]);
   const pc = APP_CONFIG.grist.columns;
   return {
     planningRows: planningRows.filter((r) => String(r?.[pc.planningProject.projectName] ?? "").trim() === name),
     timeSegmentRows: timeSegmentRows.filter((r) => String(r?.[pc.timeSegment.projectNumber] ?? "").trim() === String(number).trim()),
     projectTeamRows: projectTeamRows.filter((r) => String(r?.[pc.projectTeam.projectNumber] ?? "").trim() === String(number).trim()),
+    // Team + Time-Out are global (unfiltered): buildAbsenceIndex maps them per-worker.
+    teamRows,
+    timeOutRows,
   };
 }
 

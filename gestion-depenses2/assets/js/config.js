@@ -75,6 +75,7 @@ export const APP_CONFIG = {
       timeSegment: "TimeSegment",
       timeReal: "TimeReal",
       team: "Team",
+      timeOut: "Time-Out",
     },
     columns: {
       projects: {
@@ -163,7 +164,22 @@ export const APP_CONFIG = {
         firstName: "Prenom",
         lastName: "Nom",
         role: "Role",
+        email: "Email",
+        prenomNom: "PrenomNom",
+        // prenom/nom mirror firstName/lastName so leaveAbsences.buildAbsenceIndex's
+        // "PrenomNom || (Prenom + ' ' + Nom)" fallback works here too (spec §4).
+        prenom: "Prenom",
+        nom: "Nom",
+      },
+      timeOut: {
+        owner: "Owner",
+        startDate: "Start_Date",
+        startPeriod: "Start_Period",
+        endDate: "End_Date",
+        endPeriod: "End_Period",
+        type: "Type",
       },
     },
   },
+  absenceTypes: ["Congé Payé", "Congé Non Payé", "RTT", "Congé Parental"],
 };

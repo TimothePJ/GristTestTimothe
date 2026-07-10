@@ -266,9 +266,24 @@ export async function fetchDopRegistryRows() {
   return fetchOptionalTableRows("Emetteurs");
 }
 
+// Grist mappe les noms de table avec tiret (Time-Out) vers un id à underscore (Time_Out).
+// On essaie les variantes connues et on retourne le premier id lisible.
+async function resolveTimeOutTableId() {
+  for (const id of ["Time-Out", "Time_Out", "TimeOut"]) {
+    try {
+      await fetchTableRows(id);
+      return id;
+    } catch (_error) {
+      // Variante suivante.
+    }
+  }
+  return "Time-Out";
+}
+
 // Charge les 8 tables de données (hors Projets), uniquement quand un projet est sélectionné.
 export async function fetchProjectDataTables() {
   const tables = APP_CONFIG.grist.tables;
+  const timeOutTableId = await resolveTimeOutTableId();
   const [
     budgetRows,
     listePlanRows,
@@ -278,6 +293,7 @@ export async function fetchProjectDataTables() {
     timeSegmentRows,
     timeRealRows,
     teamRows,
+    timeOutRows,
   ] = await Promise.all([
     fetchTableRows(tables.budget),
     fetchOptionalTableRows(tables.listePlan),
@@ -287,6 +303,7 @@ export async function fetchProjectDataTables() {
     fetchNormalizedTimeSegmentRows(),
     fetchNormalizedTimeRealRows(),
     fetchTableRows(tables.team),
+    fetchOptionalTableRows(timeOutTableId),
   ]);
 
   return {
@@ -298,6 +315,7 @@ export async function fetchProjectDataTables() {
     timeSegmentRows,
     timeRealRows,
     teamRows,
+    timeOutRows,
   };
 }
 

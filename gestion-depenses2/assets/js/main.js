@@ -102,6 +102,7 @@ import {
   getSegmentAllocationDays,
   parseRawDateTime,
 } from "./utils/timeSegments.js";
+import { availableDaysAfterLeave } from "./utils/leaveAbsences.js";
 
 let dom = null;
 let chargeTimelineDrag = null;
@@ -1430,6 +1431,8 @@ function buildChargePlanSelectionFromEditValues({
   return {
     startDate: startAt.toISOString(),
     endDate: endAt.toISOString(),
+    startAt,
+    endAt,
     totalDays,
   };
 }
@@ -1487,16 +1490,36 @@ function syncEditChargePlanDerivedValues() {
   if (selection?.error) {
     if (dom.editSegmentEffectifInput instanceof HTMLInputElement) {
       dom.editSegmentEffectifInput.removeAttribute("max");
+      dom.editSegmentEffectifInput.classList.remove("is-over-available");
     }
     setEditChargePlanMetricValue(dom.editSegmentCalculatedDays, null);
     return;
   }
 
+  const absenceSet =
+    editingChargePlanSegment?.absenceSet instanceof Set
+      ? editingChargePlanSegment.absenceSet
+      : new Set();
+  const availableDays = availableDaysAfterLeave(
+    selection.startAt,
+    selection.endAt,
+    absenceSet
+  );
+
   if (dom.editSegmentEffectifInput instanceof HTMLInputElement) {
     dom.editSegmentEffectifInput.max = String(selection.totalDays);
+    const effectifValue = Number(dom.editSegmentEffectifInput.value);
+    const isOverAvailable =
+      dom.editSegmentEffectifInput.value !== "" &&
+      Number.isFinite(effectifValue) &&
+      effectifValue > availableDays;
+    dom.editSegmentEffectifInput.classList.toggle(
+      "is-over-available",
+      isOverAvailable
+    );
   }
 
-  setEditChargePlanMetricValue(dom.editSegmentCalculatedDays, selection.totalDays);
+  setEditChargePlanMetricValue(dom.editSegmentCalculatedDays, availableDays);
 }
 
 function formatEditSegmentInputValue(value) {
@@ -1618,6 +1641,9 @@ function openEditChargePlanModal(segmentId, boardEl) {
   }
 
   editingChargePlanSegment = segmentContext;
+  const workerAbsenceSet = segmentContext.worker?.absenceSet;
+  editingChargePlanSegment.absenceSet =
+    workerAbsenceSet instanceof Set ? workerAbsenceSet : new Set();
   dom.editSegmentStartDateInput.value = toDateInputValue(startAt);
   dom.editSegmentStartPartInput.value = getSegmentHalfDayPart(startAt, "start");
   dom.editSegmentEndDateInput.value = toDateInputValue(endAt);
@@ -1663,13 +1689,6 @@ async function saveEditedChargePlanSegment() {
   if (rawEffectifInput != null && !isHalfDayIncrement(rawEffectifInput)) {
     setEditChargePlanFeedback(
       "Le nombre de jours effectifs doit etre un entier ou un multiple de 0,5."
-    );
-    return;
-  }
-
-  if (rawEffectifInput != null && rawEffectifInput > selection.totalDays) {
-    setEditChargePlanFeedback(
-      "Le nombre de jours effectifs ne peut pas depasser le nombre de jours de la plage."
     );
     return;
   }

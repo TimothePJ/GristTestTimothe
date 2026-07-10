@@ -32,6 +32,7 @@ import { createPlanningRenderer } from "./top/planningRenderer.js";
 import { createPlanningChart } from "./top/planningChart.js";
 import { createChargeBoard, buildWorkersFromSegments } from "./bottom/chargeBoard.js";
 import { attachChargeEditing } from "./bottom/chargeEditing.js";
+import { buildAbsenceIndex, normalizeName } from "./utils/leaveAbsences.js";
 import { createTopPaneResizer } from "./ui/topPaneResizer.js";
 import { buildProjectRealisationTargetLookup } from "./top/vendor/planningProjetBuilder.js";
 import { buildInitialProjectViewport, buildCanonicalSharedViewport } from "./viewport/build.js";
@@ -235,7 +236,7 @@ function bootstrapApp() {
       return;
     }
 
-    let data = { planningRows: [], timeSegmentRows: [], projectTeamRows: [] };
+    let data = { planningRows: [], timeSegmentRows: [], projectTeamRows: [], teamRows: [], timeOutRows: [] };
     try {
       data = await fetchProjectData({ name: project.name, number: project.number });
     } catch (error) {
@@ -247,6 +248,18 @@ function bootstrapApp() {
     const pc = APP_CONFIG.grist.columns;
     const { planningRows, timeSegmentRows, projectTeamRows } = data;
     const workerColumns = { timeSegment: pc.timeSegment, projectTeam: pc.projectTeam };
+
+    // Per-worker absence index (Map<normalizeName, Set<"YYYY-MM-DD:am|pm">>) built
+    // from the global Team + Time-Out rows. Time-Out is global and unaffected by
+    // charge-segment edits, so the same index is reused for the onChanged re-render
+    // (closure) and provided to the editing layer via getAbsenceSet.
+    const absencesByWorker = buildAbsenceIndex(
+      data.timeOutRows,
+      data.teamRows,
+      pc.timeOut,
+      pc.team,
+      APP_CONFIG.absenceTypes
+    );
 
     const workers = buildWorkersFromSegments(timeSegmentRows, projectTeamRows, workerColumns);
     const bounds = computeTimeSegmentBounds(timeSegmentRows, pc.timeSegment);
@@ -313,7 +326,7 @@ function bootstrapApp() {
         viewportFitsWithinBounds(persisted.viewport, controllerBounds);
       viewport = canReusePersisted ? buildCanonicalSharedViewport(persisted.viewport) : initialViewport;
 
-      chargeBoard.render({ workers, viewport, editMode: false, planningTasks });
+      chargeBoard.render({ workers, viewport, editMode: false, planningTasks, absencesByWorker });
     } else {
       // No TimeSegment data for this project: bottom pane stays empty, but
       // the top (Planning_Projet) pane must still render on a sane default
@@ -326,7 +339,7 @@ function bootstrapApp() {
       // No TimeSegment: the frise still spans the planning phases (builder bounds),
       // falling back to the phase-derived range when the builder yields none.
       controllerBounds = planBounds || computePlanningDerivedBounds(planningRows, pc.planningProject, viewport);
-      chargeBoard.render({ workers: [], viewport, editMode: false });
+      chargeBoard.render({ workers: [], viewport, editMode: false, absencesByWorker });
     }
 
     // Dernier mode de zoom appliqué (semaine/mois/année). La hauteur bornée du
@@ -403,6 +416,9 @@ function bootstrapApp() {
       getProjectNumber: () => project.number,
       getVisibleSlots: () => (chargeBoard ? chargeBoard.getVisibleSlots() : []),
       editSegmentModalEl: els.editModal,
+      // Per-worker absence half-day set for the edit modal's leave-adjusted
+      // readout (consumed in Task 7). Harmless extra option until then.
+      getAbsenceSet: (workerName) => absencesByWorker.get(normalizeName(workerName)) || new Set(),
       onChanged: async () => {
         if (seq !== loadSeq || !chargeBoard || !controller) return;
 
@@ -437,7 +453,7 @@ function bootstrapApp() {
         // to locked if we hardcoded false here. Read the live flag from the
         // editing controller so ONE source of truth drives both.
         const currentEditMode = editing ? editing.isEditModeEnabled() : false;
-        chargeBoard.render({ workers: nextWorkers, viewport: controller.getViewport(), editMode: currentEditMode });
+        chargeBoard.render({ workers: nextWorkers, viewport: controller.getViewport(), editMode: currentEditMode, absencesByWorker });
         controller.setViewport(controller.getViewport());
       },
     });

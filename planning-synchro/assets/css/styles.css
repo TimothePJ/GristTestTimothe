@@ -1024,6 +1024,10 @@ body.ps-panning * {
   background: rgba(8, 21, 38, 0.08);
 }
 
+.charge-plan-grid-day.is-absence {
+  background: rgba(8, 21, 38, 0.28);
+}
+
 .charge-plan-track-bars {
   position: absolute;
   inset: 0;
@@ -1048,6 +1052,10 @@ body.ps-panning * {
   cursor: pointer;
   pointer-events: auto;
   overflow: visible;
+}
+
+.charge-plan-segment-bar.is-incoherent {
+  background: linear-gradient(135deg, #e5534b, #b42318);
 }
 
 .charge-plan-segment-bar:hover {
@@ -1346,6 +1354,13 @@ body.ps-panning * {
   background: var(--color-surface);
   color: var(--color-text);
   font: inherit;
+}
+
+/* Non-blocking "over available" state: Effectif exceeds the leave-adjusted
+   jours disponibles. Visual only — the save still proceeds. */
+#ps-edit-segment-effectif.is-over-available {
+  border-color: #b42318;
+  color: #b42318;
 }
 
 .ps-segment-edit-metric {

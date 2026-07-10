@@ -69,10 +69,19 @@ test("validateEditSegmentEffectif: blank clears effectif (null / empty string)",
   assert.equal(result.effectifValueForSave, "");
 });
 
-test("validateEditSegmentEffectif: negative / non-half-day / over-range are rejected", () => {
-  assert.match(validateEditSegmentEffectif("-1", 2).error, /negatif/);
-  assert.match(validateEditSegmentEffectif("1.25", 2).error, /entier ou un multiple/);
-  assert.match(validateEditSegmentEffectif("3", 2).error, /depasser/);
+test("validateEditSegmentEffectif: negative / non-half-day are rejected", () => {
+  assert.match(validateEditSegmentEffectif("-1").error, /negatif/);
+  assert.match(validateEditSegmentEffectif("1.25").error, /entier ou un multiple/);
+});
+
+test("validateEditSegmentEffectif: effectif over available is non-blocking (visual only)", () => {
+  // The old hard-block ("...ne peut pas depasser...") was removed: an Effectif
+  // exceeding the leave-adjusted availability is now surfaced as a red field
+  // (is-over-available) in syncDerived, not a save-blocking validation error.
+  const result = validateEditSegmentEffectif("3");
+  assert.equal(result.error, undefined);
+  assert.equal(result.effectifDays, 3);
+  assert.equal(result.effectifValueForSave, 3);
 });
 
 test("getSegmentHalfDayPart: start snaps am<noon, end snaps am<=noon", () => {

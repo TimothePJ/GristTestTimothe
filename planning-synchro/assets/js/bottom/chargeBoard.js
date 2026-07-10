@@ -67,6 +67,7 @@ import {
   getBusinessHalfDaySlotsBetween,
 } from "../utils/timeSegments.js";
 import { countPlanningTasksOverlappingRange } from "../top/phases.js";
+import { availableDaysAfterLeave, isAbsenceSlot, normalizeName } from "../utils/leaveAbsences.js";
 import { APP_CONFIG } from "../config.js";
 
 const MIN_CONTENT_WIDTH_PX = 280;
@@ -267,21 +268,31 @@ function buildVisibleSlots(windowDays, dayWidth) {
 
 // --- track grid (weekend shading), port of renderTrackGrid -------------------
 
-function renderTrackGrid(windowDays, dayWidth) {
-  const weekendSpans = windowDays
+function renderTrackGrid(windowDays, dayWidth, absenceSet = new Set()) {
+  const gridSpans = windowDays
     .map((date, dayIndex) => {
-      if (isBusinessDay(date)) return "";
-      return `
+      const dateKey = formatIsoDate(date);
+      const weekendSpan = isBusinessDay(date)
+        ? ""
+        : `
         <span
           class="charge-plan-grid-day is-weekend"
           style="left:${dayIndex * dayWidth}px; width:${dayWidth}px"
-          data-date-key="${formatIsoDate(date)}"
+          data-date-key="${dateKey}"
         ></span>
       `;
+      const halfDayWidth = dayWidth / 2;
+      const absenceSpans = ["am", "pm"]
+        .map((part, partIndex) =>
+          isAbsenceSlot(absenceSet, dateKey, part)
+            ? `<span class="charge-plan-grid-day is-absence" style="left:${dayIndex * dayWidth + partIndex * halfDayWidth}px; width:${halfDayWidth}px" data-date-key="${dateKey}" data-part="${part}"></span>`
+            : "")
+        .join("");
+      return weekendSpan + absenceSpans;
     })
     .join("");
 
-  return `<div class="charge-plan-track-grid">${weekendSpans}</div>`;
+  return `<div class="charge-plan-track-grid">${gridSpans}</div>`;
 }
 
 // --- segment bars (port of buildVisibleSegmentBars / assignSegmentLanes / renderSegmentBars) ---
@@ -301,7 +312,7 @@ function getVisibleSlotRange(startAt, endAt, visibleSlots) {
   return { firstSlot, lastSlot };
 }
 
-function buildVisibleSegmentBars(worker, visibleSlots, planningTasks = []) {
+function buildVisibleSegmentBars(worker, visibleSlots, planningTasks = [], absenceSet = new Set()) {
   return (worker?.segments || [])
     .map((segment) => {
       const startAt = segment?.startAt instanceof Date ? segment.startAt : null;
@@ -321,6 +332,11 @@ function buildVisibleSegmentBars(worker, visibleSlots, planningTasks = []) {
       // Like gestion-depenses2: how many planning tasks fall within this segment's
       // period — surfaced as the bar's hover title (see renderSegmentBars).
       const planningTaskCount = countPlanningTasksOverlappingRange(planningTasks, startAt, endAt);
+      // Leave-aware coherence check: the RAW stored effectif vs the geometry-based
+      // days actually available in the range after removing absence half-days.
+      const rawEffectif = segment?.effectif ?? segment?.effectifDays ?? null;
+      const available = availableDaysAfterLeave(segment.startAt, segment.endAt, absenceSet);
+      const incoherent = rawEffectif != null && Number(rawEffectif) > available;
 
       return {
         segmentId: segment.id,
@@ -334,6 +350,8 @@ function buildVisibleSegmentBars(worker, visibleSlots, planningTasks = []) {
         // pre-fill "jours effectifs travailles" exactly as stored, blank when
         // unset — this module is DOM-driven, so the value rides on the bar.
         effectif: segment?.effectif == null ? "" : segment.effectif,
+        incoherent,
+        available,
         leftPx,
         widthPx,
         label,
@@ -369,9 +387,14 @@ function renderSegmentBars(assignedBars) {
       // during this segment's period.
       const taskCount = Number(bar.planningTaskCount) || 0;
       const planningTooltip = `${taskCount} tâche(s) Planning Projet sur cette période`;
+      // When the stored effectif exceeds the leave-adjusted availability, the bar
+      // turns red and its tooltip explains the mismatch (see is-incoherent CSS).
+      const title = bar.incoherent
+        ? `Effectif ${bar.effectif} j > disponible après absences ${bar.available} j`
+        : planningTooltip;
       return `
         <div
-          class="charge-plan-segment-bar ${compact ? "is-compact" : ""}"
+          class="charge-plan-segment-bar ${compact ? "is-compact" : ""} ${bar.incoherent ? "is-incoherent" : ""}"
           style="left:${bar.leftPx}px; top:${10 + bar.laneIndex * 32}px; width:${Math.max(12, bar.widthPx)}px"
           data-segment-id="${escapeHtml(String(bar.segmentId))}"
           data-worker-name="${escapeHtml(bar.workerName)}"
@@ -381,7 +404,7 @@ function renderSegmentBars(assignedBars) {
           data-end-at-ms="${bar.endAtMs}"
           data-effectif="${escapeHtml(String(bar.effectif))}"
           data-planning-tooltip="${escapeHtml(planningTooltip)}"
-          title="${escapeHtml(planningTooltip)}"
+          title="${escapeHtml(title)}"
         >
           <span class="charge-plan-segment-handle is-start" data-resize-edge="start"></span>
           <span class="charge-plan-segment-label">${escapeHtml(bar.label)}</span>
@@ -403,8 +426,8 @@ function renderRoleRow(roleLabel, timelineWidth) {
   `;
 }
 
-function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWidth, planningTasks = []) {
-  const visibleSegmentBars = buildVisibleSegmentBars(worker, visibleSlots, planningTasks);
+function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWidth, planningTasks = [], absenceSet = new Set()) {
+  const visibleSegmentBars = buildVisibleSegmentBars(worker, visibleSlots, planningTasks, absenceSet);
   const assignedBars = assignSegmentLanes(visibleSegmentBars);
   const laneCount = Math.max(
     1,
@@ -421,7 +444,7 @@ function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWid
           data-worker-name="${escapeHtml(worker.name)}"
           data-timeline-width="${timelineWidth}"
         >
-          ${renderTrackGrid(windowDays, dayWidth)}
+          ${renderTrackGrid(windowDays, dayWidth, absenceSet)}
           <div class="charge-plan-track-bars">${renderSegmentBars(assignedBars)}</div>
           <div class="charge-plan-selection-preview" hidden>
             <span class="charge-plan-selection-label"></span>
@@ -608,6 +631,11 @@ export function createChargeBoard(containerEl) {
   // bar, how many planning tasks fall in its period (hover title). Kept across the
   // viewport-only re-renders (setWindow) since the tasks don't change on zoom/pan.
   let lastPlanningTasks = [];
+  // Per-worker leave absence sets (Map<normalizeName, Set<slotKey>>). Like
+  // lastPlanningTasks, only the data-driven render() carries it; the
+  // viewport-only re-render (setWindow) omits it, so we keep the last value to
+  // preserve grey shading + red bars across zoom/pan.
+  let lastAbsencesByWorker = new Map();
   // Rebuild throttling. A zoom/pan gesture drives setWindow ~60x/s and each call
   // used to rebuild the whole innerHTML — the dominant jank source. We throttle
   // the rebuild to at most one per REBUILD_THROTTLE_MS (leading + trailing): the
@@ -636,7 +664,7 @@ export function createChargeBoard(containerEl) {
     activeVisibleSlots = [];
   }
 
-  function render({ workers, viewport, editMode, planningTasks } = {}) {
+  function render({ workers, viewport, editMode, planningTasks, absencesByWorker } = {}) {
     if (!(containerEl instanceof HTMLElement) || !viewport) {
       clear();
       return;
@@ -654,6 +682,9 @@ export function createChargeBoard(containerEl) {
     // Only the data-driven render() (from main.js) carries planningTasks; the
     // viewport-only re-render (setWindow) omits it and keeps the last set.
     if (planningTasks !== undefined) lastPlanningTasks = Array.isArray(planningTasks) ? planningTasks : [];
+    if (absencesByWorker !== undefined) {
+      lastAbsencesByWorker = absencesByWorker instanceof Map ? absencesByWorker : new Map();
+    }
 
     containerEl.classList.add("charge-plan-board");
 
@@ -670,9 +701,18 @@ export function createChargeBoard(containerEl) {
       .map(([roleLabel, roleWorkers]) =>
         [
           renderRoleRow(roleLabel, timelineWidth),
-          ...roleWorkers.map((worker) =>
-            renderWorkerRow(worker, activeVisibleSlots, timelineWidth, windowDays, dayWidth, lastPlanningTasks)
-          ),
+          ...roleWorkers.map((worker) => {
+            const absenceSet = lastAbsencesByWorker.get(normalizeName(worker.name)) || new Set();
+            return renderWorkerRow(
+              worker,
+              activeVisibleSlots,
+              timelineWidth,
+              windowDays,
+              dayWidth,
+              lastPlanningTasks,
+              absenceSet
+            );
+          }),
         ].join("")
       )
       .join("");

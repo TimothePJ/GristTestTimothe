@@ -18,6 +18,7 @@ import {
   computePlanningRealisationValue as computeIndexedPlanningRealisationValue,
   getTargetIndiceForDocumentType,
 } from "../utils/planningRealisation.js";
+import { buildAbsenceIndex, normalizeName } from "../utils/leaveAbsences.js";
 
 function parseBillingPercentageByMonth(rawValue, projectNumber) {
   if (!rawValue) return {};
@@ -332,6 +333,7 @@ export function buildExpenseData({
   timeSegmentRows,
   timeRealRows,
   teamRows,
+  timeOutRows,
 }) {
   const columns = APP_CONFIG.grist.columns;
 
@@ -501,6 +503,16 @@ export function buildExpenseData({
   const workersByProjectPerson = new Map();
   const inferredRolesByName = new Map();
 
+  // Index des absences (Time-Out) par collaborateur, construit une seule fois.
+  // La clé utilise normalizeName, identique à normalizePersonName, donc les clés s'alignent.
+  const absenceByPerson = buildAbsenceIndex(
+    timeOutRows,
+    teamRows,
+    columns.timeOut,
+    columns.team,
+    APP_CONFIG.absenceTypes
+  );
+
   (projectTeamRows || []).forEach((row) => {
     const project = projectsByNumber.get(
       toText(row?.[columns.projectTeam.projectNumber])
@@ -518,6 +530,8 @@ export function buildExpenseData({
       workedDays: {},
       timesheetWorkedDays: {},
     };
+
+    worker.absenceSet = absenceByPerson.get(normalizeName(worker.name)) || new Set();
 
     project.workers.push(worker);
     workersById.set(worker.id, worker);

@@ -24,6 +24,8 @@ export const APP_CONFIG = {
       planningProject: "Planning_Projet",
       timeSegment: "TimeSegment",
       projectTeam: "ProjectTeam",
+      team: "Team",
+      timeOut: "Time-Out",
     },
     columns: {
       projects:  { id: "id", name: "Nom_de_projet", number: "Numero_de_projet", avancement: "Avancement" },
@@ -41,6 +43,9 @@ export const APP_CONFIG = {
         allocationDays: "Allocation_Days", effectif: "Effectif", label: "Label",
       },
       projectTeam: { id: "id", projectNumber: "NumeroProjet", role: "Role", name: "Name", dailyRate: "Daily_Rate" },
+      team: { email: "Email", prenomNom: "PrenomNom", prenom: "Prenom", nom: "Nom" },
+      timeOut: { owner: "Owner", startDate: "Start_Date", startPeriod: "Start_Period", endDate: "End_Date", endPeriod: "End_Period", type: "Type" },
     },
   },
+  absenceTypes: ["Congé Payé", "Congé Non Payé", "RTT", "Congé Parental"],
 };

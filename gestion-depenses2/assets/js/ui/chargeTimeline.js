@@ -17,6 +17,7 @@ import {
   getHalfDaySlotRange,
   getSegmentEffectiveDays,
 } from "../utils/timeSegments.js";
+import { availableDaysAfterLeave, isAbsenceSlot } from "../utils/leaveAbsences.js";
 
 const activeVisibleSlotsByBoard = new WeakMap();
 let currentBoardEl = null;
@@ -579,7 +580,8 @@ function renderTrackGrid(
   months,
   zoomMode,
   zoomScale = APP_CONFIG.chargeTimeline.defaultZoomScale,
-  sizingContext = null
+  sizingContext = null,
+  absenceSet = new Set()
 ) {
   return `
     <div class="charge-plan-track-grid">
@@ -590,21 +592,36 @@ function renderTrackGrid(
             month.calendarDayCount > 0
               ? monthWidth / month.calendarDayCount
               : monthWidth;
-          const weekendBlocks = (month.calendarDayDates || [])
+          const halfDayWidth = dayWidth / 2;
+          const dayBlocks = (month.calendarDayDates || [])
             .map((date, dayIndex) => {
-              if (isBusinessDay(date)) {
-                return "";
-              }
-
-              return `
+              const dateKey = toDateInputValue(date);
+              const weekendSpan = isBusinessDay(date)
+                ? ""
+                : `
                 <span
                   class="charge-plan-grid-day ${
                     dayIndex === 0 ? "is-first-day" : ""
                   } is-weekend"
                   style="left:${dayIndex * dayWidth}px; width:${dayWidth}px"
-                  data-date-key="${toDateInputValue(date)}"
+                  data-date-key="${dateKey}"
                 ></span>
               `;
+
+              const absenceSpans = HALF_DAY_PARTS.map((part, partIndex) =>
+                isAbsenceSlot(absenceSet, dateKey, part)
+                  ? `
+                <span
+                  class="charge-plan-grid-day is-absence"
+                  style="left:${dayIndex * dayWidth + partIndex * halfDayWidth}px; width:${halfDayWidth}px"
+                  data-date-key="${dateKey}"
+                  data-part="${part}"
+                ></span>
+              `
+                  : ""
+              ).join("");
+
+              return `${weekendSpan}${absenceSpans}`;
             })
             .join("");
 
@@ -613,7 +630,7 @@ function renderTrackGrid(
               class="charge-plan-grid-month ${monthIndex === 0 ? "is-first-month" : ""}"
               style="width:${monthWidth}px; --charge-plan-day-width:${dayWidth}px"
             >
-              ${weekendBlocks}
+              ${dayBlocks}
             </span>
           `;
         })
@@ -645,7 +662,7 @@ function getVisibleSlotRange(startAt, endAt, visibleSlots) {
   };
 }
 
-function buildVisibleSegmentBars(worker, visibleSlots, options = {}) {
+function buildVisibleSegmentBars(worker, visibleSlots, options = {}, absenceSet = new Set()) {
   const timelineOptions = getTimelineOptions(options);
   const planningTasks = timelineOptions.planningTasks || [];
 
@@ -669,6 +686,9 @@ function buildVisibleSegmentBars(worker, visibleSlots, options = {}) {
         startAt,
         endAt
       );
+      const rawEffectif = segment?.effectifDays ?? null;
+      const available = availableDaysAfterLeave(startAt, endAt, absenceSet);
+      const incoherent = rawEffectif != null && Number(rawEffectif) > available;
       const leftPx = slotRange.firstSlot.leftPx;
       const widthPx =
         slotRange.lastSlot.leftPx +
@@ -686,6 +706,9 @@ function buildVisibleSegmentBars(worker, visibleSlots, options = {}) {
         widthPx,
         label,
         planningTaskCount,
+        incoherent,
+        available,
+        rawEffectif,
       };
     })
     .filter(Boolean)
@@ -720,9 +743,16 @@ function renderSegmentBars(assignedBars) {
     .map((bar) => {
       const compact = bar.widthPx < 64;
       const planningTooltip = `${bar.planningTaskCount} plan(s) Planning Projet sur cette periode`;
+      const tooltip = bar.incoherent
+        ? `Effectif ${formatDayValue(bar.rawEffectif)} j > disponible apres absences ${formatDayValue(
+            bar.available
+          )} j`
+        : planningTooltip;
       return `
         <div
-          class="charge-plan-segment-bar ${compact ? "is-compact" : ""}"
+          class="charge-plan-segment-bar ${compact ? "is-compact" : ""} ${
+            bar.incoherent ? "is-incoherent" : ""
+          }"
           style="left:${bar.leftPx}px; top:${10 + bar.laneIndex * 32}px; width:${Math.max(
             12,
             bar.widthPx
@@ -734,7 +764,7 @@ function renderSegmentBars(assignedBars) {
           data-start-at-ms="${bar.startAtMs}"
           data-end-at-ms="${bar.endAtMs}"
           data-planning-tooltip="${escapeHtml(planningTooltip)}"
-          title="${escapeHtml(planningTooltip)}"
+          title="${escapeHtml(tooltip)}"
         >
           <span
             class="charge-plan-segment-handle is-start"
@@ -761,9 +791,15 @@ function renderWorkerRow(
   options = {}
 ) {
   const timelineOptions = getTimelineOptions(options);
+  const absenceSet = worker?.absenceSet instanceof Set ? worker.absenceSet : new Set();
   const totalDays = getWorkerTotalDays(worker?.[timelineOptions.daysField]);
   const timelineWidth = getTimelineWidth(months, zoomMode, zoomScale, sizingContext);
-  const visibleSegmentBars = buildVisibleSegmentBars(worker, visibleSlots, timelineOptions);
+  const visibleSegmentBars = buildVisibleSegmentBars(
+    worker,
+    visibleSlots,
+    timelineOptions,
+    absenceSet
+  );
   const assignedBars = assignSegmentLanes(visibleSegmentBars);
   const laneCount = Math.max(
     1,
@@ -784,7 +820,7 @@ function renderWorkerRow(
           data-worker-id="${worker.id}"
           data-timeline-width="${timelineWidth}"
         >
-          ${renderTrackGrid(months, zoomMode, zoomScale, sizingContext)}
+          ${renderTrackGrid(months, zoomMode, zoomScale, sizingContext, absenceSet)}
           <div class="charge-plan-track-bars">
             ${renderSegmentBars(assignedBars)}
           </div>

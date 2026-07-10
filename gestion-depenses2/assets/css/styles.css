@@ -1588,6 +1588,10 @@ td input {
   background: rgba(8, 21, 38, 0.08);
 }
 
+.charge-plan-grid-day.is-absence {
+  background: rgba(8, 21, 38, 0.28);
+}
+
 .charge-plan-track-bars {
   position: absolute;
   inset: 0;
@@ -1654,6 +1658,10 @@ td input {
 
 .charge-plan-segment-bar:hover {
   filter: brightness(1.03);
+}
+
+.charge-plan-segment-bar.is-incoherent {
+  background: linear-gradient(135deg, #e5534b, #b42318);
 }
 
 #charge-plan-board.is-segment-editing-locked .charge-plan-track:not(.charge-plan-track--readonly) {
@@ -1778,6 +1786,11 @@ td input {
 }
 
 .charge-plan-selection-preview.is-invalid .charge-plan-selection-label {
+  color: #b42318;
+}
+
+#edit-segment-effectif.is-over-available {
+  border-color: #b42318;
   color: #b42318;
 }
 

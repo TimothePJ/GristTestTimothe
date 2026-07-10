@@ -264,7 +264,7 @@ function showContextMenu(boardEl, { clientX, clientY, segmentId }) {
 // subsequent `chargeBoard.render()` call triggered from `onChanged()`.
 export function attachChargeEditing(
   boardEl,
-  { getProjectNumber, getVisibleSlots, onChanged, editSegmentModalEl } = {}
+  { getProjectNumber, getVisibleSlots, onChanged, editSegmentModalEl, getAbsenceSet } = {}
 ) {
   if (!(boardEl instanceof HTMLElement)) {
     return { detach() {} };
@@ -540,11 +540,21 @@ export function attachChargeEditing(
     const endAtMs = Number(barEl.dataset.endAtMs);
     if (!Number.isFinite(startAtMs) || !Number.isFinite(endAtMs)) return;
 
+    // Leave-aware readout: pass the edited segment's OWNER absence set so the
+    // modal can subtract absence half-days from "jours disponibles" and flag an
+    // over-available Effectif in red (non-blocking). Worker name comes off the
+    // owning track's dataset (Task 11 emits data-worker-name per track).
+    const trackEl = barEl.closest(TRACK_SELECTOR);
+    const workerName = trackEl instanceof HTMLElement ? trackEl.dataset.workerName || "" : "";
+    const absenceSet =
+      typeof getAbsenceSet === "function" ? getAbsenceSet(workerName) : undefined;
+
     editSegmentModal.open({
       segmentId,
       startAt: new Date(startAtMs),
       endAt: new Date(endAtMs),
       effectif: barEl.dataset.effectif ?? "",
+      absenceSet,
     });
   }
 

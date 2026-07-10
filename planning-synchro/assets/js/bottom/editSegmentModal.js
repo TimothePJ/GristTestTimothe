@@ -24,6 +24,7 @@
 
 import { formatNumber, parseOptionalNumberInput } from "../utils/format.js";
 import { getHalfDaySlotRange, getSegmentAllocationDays } from "../utils/timeSegments.js";
+import { availableDaysAfterLeave } from "../utils/leaveAbsences.js";
 
 // --- pure helpers (no DOM) ---------------------------------------------------
 
@@ -88,6 +89,8 @@ export function buildEditSegmentSelection({ startDateValue, startPart, endDateVa
   }
 
   return {
+    startAt,
+    endAt,
     startDate: startAt.toISOString(),
     endDate: endAt.toISOString(),
     totalDays,
@@ -113,11 +116,14 @@ function normalizeOptionalEffectifDays(value) {
   return Math.max(0, numericValue);
 }
 
-// Validates the Effectif field against the selected range's total days. Returns
-// { error } when invalid, otherwise { effectifDays, effectifValueForSave } where
-// effectifValueForSave is "" (clear the field) or a number (matches
+// Validates the Effectif field. Rejects negative or non-half-day-increment
+// values. An Effectif that EXCEEDS the leave-adjusted availability is no longer
+// a save-blocking error — it is surfaced as a non-blocking visual state (the
+// `is-over-available` red field, toggled in syncDerived), so the save proceeds.
+// Returns { error } when invalid, otherwise { effectifDays, effectifValueForSave }
+// where effectifValueForSave is "" (clear the field) or a number (matches
 // updateTimeSegment's effectif contract).
-export function validateEditSegmentEffectif(rawEffectifValue, totalDays) {
+export function validateEditSegmentEffectif(rawEffectifValue) {
   const rawEffectifInput = parseOptionalNumberInput(rawEffectifValue);
 
   if (rawEffectifInput != null && rawEffectifInput < 0) {
@@ -125,9 +131,6 @@ export function validateEditSegmentEffectif(rawEffectifValue, totalDays) {
   }
   if (rawEffectifInput != null && !isHalfDayIncrement(rawEffectifInput)) {
     return { error: "Le nombre de jours effectifs doit etre un entier ou un multiple de 0,5." };
-  }
-  if (rawEffectifInput != null && rawEffectifInput > totalDays) {
-    return { error: "Le nombre de jours effectifs ne peut pas depasser le nombre de jours de la plage." };
   }
 
   const effectifDays = normalizeOptionalEffectifDays(rawEffectifInput);
@@ -183,6 +186,7 @@ export function createEditSegmentModal(rootEl, { onSubmit } = {}) {
   const cancelBtn = rootEl.querySelector("#ps-edit-segment-cancel");
 
   let currentSegmentId = null;
+  let currentAbsenceSet = new Set();
   let submitting = false;
 
   function setFeedback(message) {
@@ -206,20 +210,30 @@ export function createEditSegmentModal(rootEl, { onSubmit } = {}) {
     if (selection?.error) {
       if (effectifInput instanceof HTMLInputElement) {
         effectifInput.removeAttribute("max");
+        effectifInput.classList.remove("is-over-available");
       }
       if (calculatedEl instanceof HTMLElement) calculatedEl.textContent = "--";
       return;
     }
+    // "Jours disponibles" = the range geometry MINUS the owner's absence
+    // half-days (leave-adjusted). This is the number we display and compare the
+    // Effectif against for the non-blocking red state.
+    const available = availableDaysAfterLeave(selection.startAt, selection.endAt, currentAbsenceSet);
+    if (calculatedEl instanceof HTMLElement) {
+      calculatedEl.textContent = formatEditSegmentDayValue(available);
+    }
     if (effectifInput instanceof HTMLInputElement) {
       effectifInput.max = String(selection.totalDays);
-    }
-    if (calculatedEl instanceof HTMLElement) {
-      calculatedEl.textContent = formatEditSegmentDayValue(selection.totalDays);
+      const effectifVal = Number(effectifInput.value);
+      const over =
+        effectifInput.value !== "" && Number.isFinite(effectifVal) && effectifVal > available;
+      effectifInput.classList.toggle("is-over-available", over);
     }
   }
 
-  function open({ segmentId, startAt, endAt, effectif } = {}) {
+  function open({ segmentId, startAt, endAt, effectif, absenceSet } = {}) {
     currentSegmentId = segmentId != null ? String(segmentId) : null;
+    currentAbsenceSet = absenceSet instanceof Set ? absenceSet : new Set();
 
     if (startDateInput instanceof HTMLInputElement) {
       startDateInput.value = toDateInputValue(startAt);
@@ -263,7 +277,7 @@ export function createEditSegmentModal(rootEl, { onSubmit } = {}) {
       return;
     }
 
-    const effectifResult = validateEditSegmentEffectif(effectifInput?.value, selection.totalDays);
+    const effectifResult = validateEditSegmentEffectif(effectifInput?.value);
     if (effectifResult.error) {
       setFeedback(effectifResult.error);
       return;
