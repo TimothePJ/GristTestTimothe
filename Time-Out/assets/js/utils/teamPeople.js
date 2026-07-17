@@ -45,10 +45,3 @@ export function findPersonKeyForEmail(members, email) {
   const m = (members || []).find((mm) => (mm.emails || []).includes(e));
   return m ? m.personKey : "";
 }
-
-// Non-admin: only members of the given service (accent/case-insensitive). Admin: all.
-export function filterMembersByService(members, service, isAdmin) {
-  if (isAdmin) return members || [];
-  const target = normalizeName(service);
-  return (members || []).filter((m) => normalizeName(m?.service) === target);
-}

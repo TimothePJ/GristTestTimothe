@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dedupeTeamMembers, findPersonKeyForEmail, normalizeName, filterMembersByService } from "../assets/js/utils/teamPeople.js";
+import { dedupeTeamMembers, findPersonKeyForEmail, normalizeName } from "../assets/js/utils/teamPeople.js";
 
 const COLS = { email: "Email", prenom: "Prenom", nom: "Nom", prenomNom: "PrenomNom", service: "Service" };
 
@@ -43,17 +43,4 @@ test("findPersonKeyForEmail matches any of a person's emails, case-insensitively
   const key = normalizeName("Maria Fernandes");
   assert.equal(findPersonKeyForEmail(members, "MARIA.fernandesdasilva@vinci-construction.com"), key);
   assert.equal(findPersonKeyForEmail(members, "unknown@x.com"), "");
-});
-
-test("filterMembersByService: admin sees all; non-admin only own service (accent/case-insensitive)", () => {
-  const members = [
-    { name: "A", service: "Structure" },
-    { name: "B", service: "Topographie" },
-    { name: "C", service: "" },
-  ];
-  assert.equal(filterMembersByService(members, "Structure", true).length, 3);        // admin → all
-  assert.deepEqual(filterMembersByService(members, "Structure", false).map((m) => m.name), ["A"]);
-  assert.deepEqual(filterMembersByService(members, "topographie", false).map((m) => m.name), ["B"]); // case-insensitive
-  assert.deepEqual(filterMembersByService(members, "", false).map((m) => m.name), ["C"]);            // empty → "Sans service"
-  assert.deepEqual(filterMembersByService(members, "Structure", false), [{ name: "A", service: "Structure" }]);
 });

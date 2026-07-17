@@ -7,7 +7,8 @@ import { createReasonModal } from "./ui/reasonModal.js";
 import { createEditModal } from "./ui/editModal.js";
 import { segmentToDates } from "./utils/textSegments.js";
 import { toText, parseCalendarDate } from "./utils/dates.js";
-import { dedupeTeamMembers, findPersonKeyForEmail, filterMembersByService } from "./utils/teamPeople.js";
+import { dedupeTeamMembers, findPersonKeyForEmail } from "./utils/teamPeople.js";
+import { computeViewport, shiftAnchor } from "./utils/viewportModes.js";
 import { state, loadPersistedViewport, persistViewport } from "./state.js";
 
 // Drag/editing controller (Task 12). Module-level so render() can detach the
@@ -23,12 +24,6 @@ function buildSegments(rows, cols) {
     if (!dates) return null;
     return { id: r.id, owner: toText(r[cols.owner]), type: toText(r[cols.type]), startAt: dates.startAt, endAt: dates.endAt };
   }).filter(Boolean);
-}
-function addDaysIso(iso, days) {
-  const base = parseCalendarDate(iso);
-  if (!base) return iso;
-  const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + days);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 function renderLegend() {
   const el = document.getElementById("to-legend");
@@ -46,25 +41,16 @@ function formatViewportRange(viewport) {
   const fmt = (d) => `${d.getDate()} ${APP_CONFIG.months[d.getMonth()]} ${d.getFullYear()}`;
   return `${fmt(start)} → ${fmt(end)}`;
 }
-// Highlight the zoom button matching the current window width (Task 16).
-function updateZoomButtons(visibleDays) {
+// Highlight the zoom button matching the current viewport mode.
+function updateZoomButtons(mode) {
   document.querySelectorAll("[data-to-zoom]").forEach((btn) => {
-    btn.classList.toggle("is-active", Number(btn.dataset.toZoom) === Number(visibleDays));
+    btn.classList.toggle("is-active", btn.dataset.toZoom === mode);
   });
 }
 function buildInitialViewport() {
   const persisted = loadPersistedViewport();
-  if (persisted && persisted.firstVisibleDate && persisted.rangeEndDate) return persisted;
-  const today = new Date();
-  const first = new Date(today.getFullYear(), today.getMonth(), 1);
-  const firstVisibleDate = `${first.getFullYear()}-${String(first.getMonth() + 1).padStart(2, "0")}-01`;
-  const visibleDays = APP_CONFIG.initialWindowDays;
-  return {
-    firstVisibleDate,
-    visibleDays,
-    rangeStartDate: firstVisibleDate,
-    rangeEndDate: addDaysIso(firstVisibleDate, visibleDays - 1),
-  };
+  if (persisted && persisted.mode && persisted.firstVisibleDate && persisted.rangeEndDate) return persisted;
+  return computeViewport("quarter", new Date());
 }
 
 function bootstrapApp() {
@@ -129,15 +115,8 @@ function bootstrapApp() {
     els.empty.hidden = hasMembers;
     els.main.hidden = !hasMembers;
 
-    // Service visibility: a non-admin sees only their own service; an admin, all.
-    const visibleMembers = filterMembersByService(
-      state.teamMembers,
-      state.currentUser.service,
-      state.currentUser.isAdmin
-    );
-
     board = createLeaveBoard(els.main);
-    board.render({ members: visibleMembers, segments: state.segments, viewport: state.viewport, currentUser: state.currentUser });
+    board.render({ members: state.teamMembers, segments: state.segments, viewport: state.viewport, currentUser: state.currentUser });
 
     // Restore the pre-render scroll on the freshly rebuilt scroll container.
     const newScroll = els.main.querySelector(".charge-plan-scroll");
@@ -146,7 +125,7 @@ function bootstrapApp() {
     persistViewport(state.viewport);
     renderLegend();
     if (els.range) els.range.textContent = formatViewportRange(state.viewport);
-    updateZoomButtons(state.viewport.visibleDays);
+    updateZoomButtons(state.viewport.mode);
 
     editing = attachLeaveEditing(els.main, {
       getVisibleSlots: () => (board ? board.getVisibleSlots() : []),
@@ -165,35 +144,34 @@ function bootstrapApp() {
   // state.viewport in place, then re-render + persist.
   function wireViewportControls() {
     const ensureVp = () => (state.viewport = state.viewport || buildInitialViewport());
-    const recalcRange = (vp) => {
-      vp.rangeStartDate = vp.firstVisibleDate;
-      vp.rangeEndDate = addDaysIso(vp.firstVisibleDate, vp.visibleDays - 1);
-    };
-    const commit = (mutate) => {
-      const vp = ensureVp();
-      mutate(vp);
-      recalcRange(vp);
+    const apply = (vp) => {
+      if (!vp) return;
+      state.viewport = vp;
       render();
       persistViewport(state.viewport);
     };
     const prev = document.getElementById("to-prev");
     const next = document.getElementById("to-next");
     const today = document.getElementById("to-today");
-    if (prev) prev.addEventListener("click", () => commit((vp) => {
-      vp.firstVisibleDate = addDaysIso(vp.firstVisibleDate, -vp.visibleDays);
-    }));
-    if (next) next.addEventListener("click", () => commit((vp) => {
-      vp.firstVisibleDate = addDaysIso(vp.firstVisibleDate, vp.visibleDays);
-    }));
-    if (today) today.addEventListener("click", () => commit((vp) => {
-      const now = new Date();
-      vp.firstVisibleDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-    }));
+    if (prev) prev.addEventListener("click", () => {
+      ensureVp();
+      apply(computeViewport(state.viewport.mode, shiftAnchor(state.viewport.mode, state.viewport.firstVisibleDate, -1)));
+    });
+    if (next) next.addEventListener("click", () => {
+      ensureVp();
+      apply(computeViewport(state.viewport.mode, shiftAnchor(state.viewport.mode, state.viewport.firstVisibleDate, 1)));
+    });
+    if (today) today.addEventListener("click", () => {
+      ensureVp();
+      apply(computeViewport(state.viewport.mode, new Date()));
+    });
     document.querySelectorAll("[data-to-zoom]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const n = Number(btn.dataset.toZoom);
-        if (!Number.isFinite(n) || n <= 0) return;
-        commit((vp) => { vp.visibleDays = n; });
+        const mode = btn.dataset.toZoom;
+        if (mode !== "week" && mode !== "month" && mode !== "quarter") return;
+        ensureVp();
+        const anchor = parseCalendarDate(state.viewport.firstVisibleDate) || new Date();
+        apply(computeViewport(mode, anchor));
       });
     });
   }

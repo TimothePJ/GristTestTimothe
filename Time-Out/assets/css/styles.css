@@ -1758,6 +1758,31 @@ body.ps-panning * {
   color: var(--color-primary, #004990);
 }
 
+/* Pinned "Moi" row — a sticky copy of the current user's row under the axis.
+   Backgrounds MUST be OPAQUE: the scrolling rows pass UNDER this sticky row, so a
+   translucent tint (rgba .08) let them show through. #ebf0f6 = that same blue tint
+   composited over white, fully opaque. The row itself also gets an opaque backstop. */
+.charge-plan-row.charge-plan-pinned-row {
+  position: sticky;
+  top: 48px; /* = axis (.charge-plan-axis-row) height */
+  z-index: 18; /* below the axis (20), above normal rows */
+  background: #ebf0f6;
+}
+.charge-plan-pinned-row .charge-plan-cell {
+  background: #ebf0f6;
+  box-shadow: inset 0 -2px 0 rgba(0, 73, 144, 0.22);
+}
+.charge-plan-pinned-row .charge-plan-cell--timeline {
+  background: #ebf0f6;
+}
+.charge-plan-pinned-row .charge-plan-track {
+  background: #ebf0f6;
+}
+.charge-plan-pinned-row .charge-plan-cell--name {
+  color: var(--color-primary, #004990);
+  font-weight: 800;
+}
+
 .charge-plan-axis {
   position: relative;
   height: 48px;

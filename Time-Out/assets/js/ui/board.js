@@ -34,6 +34,7 @@ import {
   createLocalDate,
 } from "../utils/dates.js";
 import { isBusinessDay } from "../utils/textSegments.js";
+import { normalizeName } from "../utils/teamPeople.js";
 import { APP_CONFIG, leaveTypeColor } from "../config.js";
 
 const MIN_CONTENT_WIDTH_PX = 280;
@@ -452,7 +453,7 @@ function renderServiceRow(serviceLabel, timelineWidth) {
   `;
 }
 
-function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWidth, currentUser) {
+function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWidth, currentUser, options = {}) {
   const visibleSegmentBars = buildVisibleSegmentBars(worker, visibleSlots);
   const assignedBars = assignSegmentLanes(visibleSegmentBars);
   const laneCount = Math.max(
@@ -473,9 +474,12 @@ function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWid
   // admin acting on someone else's line.
   const writeEmail = worker.personKey === viewer.personKey ? viewer.email : worker.primaryEmail;
 
+  const rowClass = options.pinned ? "charge-plan-row charge-plan-pinned-row" : "charge-plan-row";
+  const displayName = options.pinned ? `Moi — ${worker.name}` : worker.name;
+
   return `
-    <div class="charge-plan-row" style="--timeline-width:${timelineWidth}px; --row-height:${rowHeight}px">
-      <div class="charge-plan-cell charge-plan-cell--name">${escapeHtml(worker.name)}</div>
+    <div class="${rowClass}" style="--timeline-width:${timelineWidth}px; --row-height:${rowHeight}px">
+      <div class="charge-plan-cell charge-plan-cell--name">${escapeHtml(displayName)}</div>
       <div class="charge-plan-cell charge-plan-cell--timeline">
         <div
           class="${trackClass}"
@@ -599,7 +603,14 @@ export function createLeaveBoard(containerEl) {
 
     activeVisibleSlots = buildVisibleSlots(windowDays, dayWidth);
 
-    const rowsHtml = Object.entries(groupedWorkers)
+    const currentServiceKey = normalizeName((lastCurrentUser && lastCurrentUser.service) || "");
+    const orderedEntries = Object.entries(groupedWorkers).sort((a, b) => {
+      if (!currentServiceKey) return 0;
+      const aMine = normalizeName(a[0]) === currentServiceKey ? 0 : 1;
+      const bMine = normalizeName(b[0]) === currentServiceKey ? 0 : 1;
+      return aMine - bMine; // stable sort keeps the rest in alphabetical order
+    });
+    const rowsHtml = orderedEntries
       .map(([serviceLabel, serviceWorkers]) =>
         [
           renderServiceRow(serviceLabel, timelineWidth),
@@ -610,6 +621,14 @@ export function createLeaveBoard(containerEl) {
       )
       .join("");
 
+    const pinnedWorker =
+      lastCurrentUser && lastCurrentUser.personKey
+        ? workers.find((w) => w.personKey === lastCurrentUser.personKey)
+        : null;
+    const pinnedHtml = pinnedWorker
+      ? renderWorkerRow(pinnedWorker, activeVisibleSlots, timelineWidth, windowDays, dayWidth, lastCurrentUser, { pinned: true })
+      : "";
+
     // Editing is always on (no lock toggle); keep the enabled hook class for CSS.
     containerEl.classList.add("is-segment-editing-enabled");
     containerEl.classList.remove("is-segment-editing-locked");
@@ -619,6 +638,7 @@ export function createLeaveBoard(containerEl) {
       <div class="charge-plan-scroll">
         <div class="charge-plan-timeline" style="--timeline-width:${timelineWidth}px">
           ${renderTimelineHeader(windowDays, dayWidth, timelineWidth, APP_CONFIG.months)}
+          ${pinnedHtml}
           ${rowsHtml}
         </div>
       </div>
