@@ -204,7 +204,13 @@ function truthyFlag(value) {
   const t = String(value).trim().toLowerCase();
   return t === "true" || t === "1" || t === "oui" || t === "yes";
 }
-export const isMoiPresent = truthyFlag;
+// L'utilisateur courant est identifié par le CENSURAGE ACL : la colonne `Moi` de la
+// table Team n'est lisible (non censurée) QUE sur la ligne du viewer. La VALEUR du
+// toggle n'a aucune importance — une cellule `Moi` lisible (même `false`) désigne
+// « moi ». On se base donc sur la NON-censure, pas sur la véracité (sinon un `Moi`
+// à `false`/décoché — ou un « Voir en tant que » d'un user qui n'a pas coché — casse
+// la détection et renvoie « non reconnu »).
+export const isMoiPresent = (value) => !isCensoredCell(value);
 export const isAdminValue = truthyFlag;
 
 export function findCurrentUser(teamRows, columns) {
