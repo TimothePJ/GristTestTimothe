@@ -1,5 +1,6 @@
 window.App = {
   records: [],
+  recordsReady: false,
 };
 
 window.initGrist = function(onUpdate) {
@@ -7,6 +8,7 @@ window.initGrist = function(onUpdate) {
 
   grist.onRecords((recs) => {
     App.records = recs || [];
+    App.recordsReady = true;
     if (typeof onUpdate === "function") onUpdate();
   });
 };

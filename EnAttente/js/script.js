@@ -707,6 +707,9 @@ async function refreshProjectDropdownFromProjectsTable() {
     if (!_projectsData.length) return;
     populateFirstColumnDropdown(_projectsData);
     selectedProject = firstDropdown.value || selectedProject || "";
+    if (App.recordsReady) {
+      refreshUI();
+    }
   } catch (err) {
     console.warn("EnAttente: impossible de charger la liste Projets2 :", err);
   }
@@ -715,7 +718,15 @@ async function refreshProjectDropdownFromProjectsTable() {
 void refreshProjectDropdownFromProjectsTable();
 window.addEventListener("pageshow", () => { void refreshProjectDropdownFromProjectsTable(); });
 window.addEventListener("focus", () => {
-  if (firstDropdown.options.length <= 1) void refreshProjectDropdownFromProjectsTable();
+  const savedProject = readSharedProjectSelection();
+  if (
+    firstDropdown.options.length <= 1 ||
+    (savedProject && normalizeFilterKey(savedProject) !== normalizeFilterKey(firstDropdown.value))
+  ) {
+    void refreshProjectDropdownFromProjectsTable();
+  } else if (App.recordsReady) {
+    refreshUI();
+  }
 });
 
 initGrist(() => {

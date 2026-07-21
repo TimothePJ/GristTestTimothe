@@ -74,6 +74,8 @@ const SHARED_PROJECT_STORAGE_KEY = 'grist.selected-project';
 const SHARED_PROJECT_ID_STORAGE_KEY = 'grist.selected-project-id';
 let _projectsData = []; // [{id, number, name}] chargé depuis la table Projets
 
+let dashboardUpdateRevision = 0;
+
 const CHART_COLORS = {
   done: {
     solid: 'rgba(43, 123, 201, 1)',
@@ -87,6 +89,7 @@ const CHART_COLORS = {
 
 const state = {
   records: [],
+  recordsReady: false,
   detailedChart: null,
   generalChart: null,
   expensesChart: null,
@@ -122,6 +125,8 @@ function init() {
       (savedSelection && !elements.projectDropdown.value)
     ) {
       void refreshProjectDropdownFromProjectsTable();
+    } else if (state.recordsReady && elements.projectDropdown.value) {
+      void updateDashboard();
     }
   });
 
@@ -133,6 +138,7 @@ function init() {
 
   grist.onRecords((newRecords) => {
     state.records = newRecords || [];
+    state.recordsReady = true;
     if (!elements.projectDropdown.value && elements.projectDropdown.options.length > 1) {
       // Priorité : restauration par ID canonique
       const savedId = readSharedProjectId();
@@ -241,6 +247,9 @@ async function refreshProjectDropdownFromProjectsTable() {
     }
     elements.projectDropdown.value = restoredName;
     if (restoredName) saveSharedProjectSelection(restoredName);
+    if (state.recordsReady) {
+      await updateDashboard();
+    }
   } catch (error) {
     console.warn('Impossible de precharger la liste des projets Avancement :', error);
   }
@@ -293,6 +302,7 @@ function findMatchingProject(projects = [], requestedProject = '') {
 }
 
 async function updateDashboard() {
+  const updateRevision = ++dashboardUpdateRevision;
   const selectedProject = elements.projectDropdown.value;
   clearOutput();
 
@@ -315,10 +325,22 @@ async function updateDashboard() {
   }
 
   const projectConfig = await fetchProjectConfig(selectedProject);
+  if (
+    updateRevision !== dashboardUpdateRevision ||
+    elements.projectDropdown.value !== selectedProject
+  ) {
+    return;
+  }
   const [ventilation, realExpenses] = await Promise.all([
     fetchBudgetVentilation(projectConfig, projectRecords),
     fetchRealExpenses(projectConfig),
   ]);
+  if (
+    updateRevision !== dashboardUpdateRevision ||
+    elements.projectDropdown.value !== selectedProject
+  ) {
+    return;
+  }
   const dashboardData = buildDashboardData(
     projectRecords,
     ventilation,

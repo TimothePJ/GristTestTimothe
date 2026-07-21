@@ -1434,12 +1434,16 @@ function bindPlanningLifecycleRefresh() {
     if (projectResult.changed) {
       return;
     }
+    if (!state.selectedProject) {
+      return;
+    }
+    const selectedProjectIsRendered =
+      lastRenderedProject === state.selectedProject &&
+      Array.isArray(cachedPlanningRows);
     if (
-      !state.selectedProject ||
-      (
-        lastAutoSyncProject === state.selectedProject &&
-        Date.now() - lastAutoSyncAt < PLANNING_AUTO_SYNC_INTERVAL_MS
-      )
+      selectedProjectIsRendered &&
+      lastAutoSyncProject === state.selectedProject &&
+      Date.now() - lastAutoSyncAt < PLANNING_AUTO_SYNC_INTERVAL_MS
     ) {
       return;
     }

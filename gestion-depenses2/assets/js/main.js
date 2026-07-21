@@ -127,6 +127,9 @@ let chargePlanSyncApiReady = false;
 // Lignes de la table Projets mises en cache au démarrage (chargement léger).
 // Les 8 autres tables ne sont chargées qu'après sélection d'un projet.
 let cachedProjectRows = null;
+let expenseDataReady = false;
+let expenseDataLoadingPromise = null;
+let projectActivationRefreshPromise = null;
 let suppressChargePlanSyncEvents = false;
 let chargePlanSyncSuppressionToken = 0;
 let suppressChargePlanProjectChangeEvents = false;
@@ -2334,7 +2337,18 @@ async function initProjectDropdown() {
   }
 }
 
-async function loadData({ preferredProjectNumber = "", refreshProjects = false } = {}) {
+function loadData(options = {}) {
+  const loadPromise = performLoadData(options);
+  expenseDataLoadingPromise = loadPromise;
+  return loadPromise.finally(() => {
+    if (expenseDataLoadingPromise === loadPromise) {
+      expenseDataLoadingPromise = null;
+    }
+  });
+}
+
+async function performLoadData({ preferredProjectNumber = "", refreshProjects = false } = {}) {
+  expenseDataReady = false;
   // Rafraîchir la liste de projets uniquement si demandé explicitement (ex: création/suppression)
   if (refreshProjects || !cachedProjectRows) {
     cachedProjectRows = await fetchProjectsForDropdown();
@@ -2392,6 +2406,7 @@ async function loadData({ preferredProjectNumber = "", refreshProjects = false }
 
   saveSharedProjectSelection(selectedProject?.name || selectedProject?.projectNumber || "");
   renderApp();
+  expenseDataReady = true;
 }
 
 function resetNewProjectForm() {
@@ -4363,6 +4378,62 @@ async function handleProjectSelectionChange() {
   }
 }
 
+function findSharedProjectForActivation() {
+  let sharedProjectId = null;
+  try {
+    const rawId = localStorage.getItem("grist.selected-project-id");
+    const parsedId = Number(rawId);
+    if (Number.isInteger(parsedId) && parsedId > 0) {
+      sharedProjectId = parsedId;
+    }
+  } catch (_error) {}
+
+  if (sharedProjectId != null) {
+    const projectById = state.projects.find((project) => project.id === sharedProjectId);
+    if (projectById) return projectById;
+  }
+
+  return findProjectBySharedSelection(state.projects, readSharedProjectSelection());
+}
+
+function reconcileProjectOnWidgetActivation() {
+  if (projectActivationRefreshPromise) return projectActivationRefreshPromise;
+
+  projectActivationRefreshPromise = (async () => {
+    if (!dom || !state.projects.length) return false;
+
+    const sharedProject = findSharedProjectForActivation();
+    if (!sharedProject) return false;
+
+    if (state.selectedProjectId !== sharedProject.id) {
+      dom.projectSelect.value = String(sharedProject.id);
+      await handleProjectSelectionChange();
+      return true;
+    }
+
+    if (!expenseDataReady && expenseDataLoadingPromise) {
+      await expenseDataLoadingPromise;
+    }
+
+    if (!expenseDataReady) {
+      await loadData({ preferredProjectNumber: sharedProject.projectNumber });
+      return true;
+    }
+
+    if (dom.projectSelect.value !== String(sharedProject.id)) {
+      renderApp();
+    }
+    return true;
+  })().catch((error) => {
+    console.warn("Impossible de restaurer les donnees du projet actif :", error);
+    return false;
+  }).finally(() => {
+    projectActivationRefreshPromise = null;
+  });
+
+  return projectActivationRefreshPromise;
+}
+
 async function handleTableInputChange(event) {
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) return;
@@ -5619,9 +5690,11 @@ function bindEvents() {
   });
   window.addEventListener("pageshow", () => {
     schedulePlanningAlertsPopupOnWidgetActivation();
+    void reconcileProjectOnWidgetActivation();
   });
   window.addEventListener("focus", () => {
     schedulePlanningAlertsPopupOnWidgetActivation();
+    void reconcileProjectOnWidgetActivation();
   });
   window.addEventListener("pointermove", handleChargePlanPointerMove);
   window.addEventListener("pointerup", () => {

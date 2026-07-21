@@ -407,6 +407,7 @@ document.getElementById('referenceFile').addEventListener('change', function () 
 //   debugger;
 // }
 let records = [];
+let referenceRecordsReady = false;
 let selectedFirstValue = '';
 let selectedSecondValue = '';
 let selectedTypeValue = '';
@@ -3222,6 +3223,8 @@ window.addEventListener('focus', () => {
   const savedProject = readSharedProjectSelection();
   if (!dropdown || dropdown.options.length <= 1 || (savedProject && !dropdown.value)) {
     refreshProjectsDropdownFromProjets();
+  } else {
+    refreshRestoredReferenceProject();
   }
   scheduleReferenceRetardReconciliation();
 });
@@ -3269,12 +3272,41 @@ function populateFirstColumnDropdown(values) {
   if (restoredProject) {
     saveSharedProjectSelection(restoredProject);
     selectedFirstValue = restoredProject;
-    selectedTypeValue = selectedTypeValue || '';
-    populateTypeDocumentDropdown(restoredProject, selectedTypeValue);
-    populateZoneDropdown(restoredProject, selectedZoneValue);
-    populateSecondColumnListbox(restoredProject, selectedSecondValue || lastValidDocument || '');
-    updateEmetteurList();
+    refreshRestoredReferenceProject();
   }
+}
+
+function refreshRestoredReferenceProject() {
+  if (!referenceRecordsReady) return false;
+
+  const dropdown = document.getElementById('firstColumnDropdown');
+  const project = String(dropdown?.value || selectedFirstValue || '').trim();
+  const tableBody = document.getElementById('tableBody');
+  const tableHeader = document.getElementById('tableHeader');
+
+  if (!project) {
+    selectedFirstValue = '';
+    populateTypeDocumentDropdown('');
+    resetZoneDropdown(true);
+    if (tableBody) tableBody.innerHTML = '';
+    if (tableHeader) tableHeader.innerHTML = '';
+    return false;
+  }
+
+  selectedFirstValue = project;
+  selectedTypeValue = selectedTypeValue || '';
+  populateTypeDocumentDropdown(project, selectedTypeValue);
+  populateZoneDropdown(project, selectedZoneValue);
+  populateSecondColumnListbox(project, selectedSecondValue || lastValidDocument || '');
+  updateEmetteurList();
+
+  if (selectedSecondValue || lastValidDocument) {
+    populateTable();
+  } else {
+    if (tableBody) tableBody.innerHTML = '';
+    if (tableHeader) tableHeader.innerHTML = '';
+  }
+  return true;
 }
 
 // Réinitialise et désactive la seconde liste si aucun projet n'est sélectionné
@@ -4073,6 +4105,7 @@ grist.onRecords(function (receivedRecords, tableId) {
   if (tableId === 'Team') return;
 
   records = receivedRecords;
+  referenceRecordsReady = true;
   buildReferencesNumeroCache(receivedRecords);
   scheduleReferenceRetardReconciliation();
 
@@ -6468,6 +6501,7 @@ grist.onRecords(function (receivedRecords, tableId) {
   if (!Array.isArray(receivedRecords)) return;
 
   records = receivedRecords;
+  referenceRecordsReady = true;
   scheduleReferenceRetardReconciliation();
   const tableBody = document.getElementById('tableBody');
   const tableHeader = document.getElementById('tableHeader');

@@ -26,6 +26,7 @@
     TYPE_LABEL: 'LP_LAST_TYPE_LABEL',
   };
   let _projectsData = []; // [{id, number, name}]
+  let listeDePlanRecordsReady = false;
 
   function saveLastSelection({ projectLabel, projectId, typeLabel }) {
     try {
@@ -637,6 +638,8 @@ window.addEventListener("focus", () => {
   const savedSelection = loadLastSelection().projectLabel;
   if (!dropdown || dropdown.options.length <= 1 || (savedSelection && !dropdown.value)) {
     void refreshProjectDropdownFromProjectsTable();
+  } else {
+    refreshListeDePlanProjectFromRecords();
   }
 });
 
@@ -646,6 +649,7 @@ async function initializeListeDePlanShell() {
 }
 
 grist.onRecords(async (rec) => {
+  listeDePlanRecordsReady = false;
   window.records = rec.sort((a, b) => {
     const aDoc = a.NumeroDocument || "";
     const bDoc = b.NumeroDocument || "";
@@ -663,46 +667,67 @@ grist.onRecords(async (rec) => {
   const projetsDict = await chargerProjetsMap();
   const projets = Object.keys(projetsDict).sort();
 
-  populateDropdown("projectDropdown", projets);
-
-  const selectedProject = document.getElementById("projectDropdown").value;
-  if (selectedProject) {
-    const projetsDict = await chargerProjetsMap();
-    for (const r of window.records) {
-      if (typeof r.Nom_projet === "number") {
-        const projId = r.Nom_projet;
-        const projLabel = Object.entries(projetsDict).find(([label, id]) => id === projId)?.[0] || null;
-        if (projLabel) {
-          r.Nom_projet = { id: projId, details: projLabel };
-        }
+  for (const r of window.records) {
+    if (typeof r.Nom_projet === "number") {
+      const projId = r.Nom_projet;
+      const projLabel = Object.entries(projetsDict).find(([, id]) => id === projId)?.[0] || null;
+      if (projLabel) {
+        r.Nom_projet = { id: projId, details: projLabel };
       }
-    }  
-
-    const typesDocument = [...new Set(
-      window.records
-        .filter(r => {
-          const nomRaw = (typeof r.Nom_projet === "object" ? r.Nom_projet.details : r.Nom_projet);
-          const nom = (typeof nomRaw === "string") ? nomRaw.trim() : nomRaw;
-          return nom === selectedProject.trim();
-        })
-        .map(r => r.Type_document)
-        .filter(val => typeof val === "string" && val.trim())
-    )].sort();
-
-    populateTypeDocumentDropdown(typesDocument);
-    const selectedTypeValue = getSelectedTypeDocumentValues();
-    populateZoneDropdown(collectZoneValues(selectedProject, selectedTypeValue, window.records));
-  } else {
-    resetZoneDropdown(true);
+    }
   }
 
-  const selectedTypeDocument = getSelectedTypeDocumentValues();
+  populateDropdown("projectDropdown", projets);
+  listeDePlanRecordsReady = true;
+  refreshListeDePlanProjectFromRecords();
+});
+
+function refreshListeDePlanProjectFromRecords() {
+  if (!listeDePlanRecordsReady || !Array.isArray(window.records)) return false;
+
+  const selectedProject = document.getElementById("projectDropdown")?.value || "";
+  if (!selectedProject) {
+    populateTypeDocumentDropdown([]);
+    resetZoneDropdown(true);
+    const output = document.getElementById("plans-output");
+    if (output) output.innerHTML = "";
+    return false;
+  }
+
+  const selectedProjectKey = normalizeProjectSelectionKey(selectedProject);
+  const typesDocument = [...new Set(
+    window.records
+      .filter((record) =>
+        normalizeProjectSelectionKey(getNomProjet(record)) === selectedProjectKey
+      )
+      .map((record) => record.Type_document)
+      .filter((value) => typeof value === "string" && value.trim())
+      .map((value) => value.trim())
+  )].sort((left, right) => left.localeCompare(right, "fr", {
+    sensitivity: "base",
+    numeric: true
+  }));
+
+  populateTypeDocumentDropdown(typesDocument);
+  const selectedTypeDocuments = getSelectedTypeDocumentValues();
   const selectedZoneDocument = document.getElementById("zoneDropdown")?.value ||
     (window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__");
-  if (selectedProject && selectedTypeDocument.length > 0) {
-    afficherPlansFiltres(selectedProject, selectedTypeDocument, window.records, selectedZoneDocument);
+  populateZoneDropdown(
+    collectZoneValues(selectedProject, selectedTypeDocuments, window.records),
+    selectedZoneDocument
+  );
+
+  if (selectedTypeDocuments.length > 0) {
+    afficherPlansFiltres(
+      selectedProject,
+      selectedTypeDocuments,
+      window.records,
+      document.getElementById("zoneDropdown")?.value ||
+        (window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__")
+    );
   }
-});
+  return true;
+}
 
 function populateDropdown(id, values) {
   const dropdown = document.getElementById(id);
@@ -774,6 +799,9 @@ async function refreshProjectDropdownFromProjectsTable() {
       if (found) restored = found.name;
     }
     dropdown.value = restored;
+    if (restored) {
+      refreshListeDePlanProjectFromRecords();
+    }
   } catch (error) {
     console.warn("Impossible de precharger la liste des projets :", error);
   }
