@@ -8,6 +8,7 @@ grist.ready({ requiredAccess: "full" });
 let records = [];
 let allPlans = [];
 let allProjects = [];
+let allEnvois = [];
 
 const BORDEREAU_TABLE = "Envois";
 const PLANS_TABLE = "ListePlan_NDC_COF";
@@ -18,6 +19,7 @@ let _projectsData = []; // [{id, number, name}]
 const addElementsState = {
   selectedPlanKeys: new Set(),
   plansByKey: new Map(),
+  displayMode: "latest",
   dragActive: false,
   dragSelectState: true,
   pointerId: null,
@@ -122,6 +124,50 @@ function compareText(left, right) {
 
 function getPlanKey(plan) {
   return normalizeCompareValue(plan?.NumeroDocument);
+}
+
+function getPlanIndiceKey(planNumber, indice) {
+  return JSON.stringify([
+    normalizeCompareValue(planNumber),
+    normalizeCompareValue(indice),
+  ]);
+}
+
+function getPlanIndiceKeyFromPlan(plan) {
+  return getPlanIndiceKey(plan?.NumeroDocument, plan?.Indice);
+}
+
+function isEnvoyeValue(value) {
+  return value === true || value === 1 || normalizeCompareValue(value) === "true";
+}
+
+function getEnvoiRows(tableData) {
+  const ids = Array.isArray(tableData?.id) ? tableData.id : [];
+  return ids.map((id, index) => ({
+    id,
+    Projet: tableData.Projet?.[index],
+    N_Plan: tableData.N_Plan?.[index],
+    Indice: tableData.Indice?.[index],
+    Envoye: tableData.Envoye?.[index],
+  }));
+}
+
+function getSentPlanIndiceKeys(projectName) {
+  const selectedProjectKey = normalizeCompareValue(projectName);
+  const sentKeys = new Set();
+  if (!selectedProjectKey) return sentKeys;
+
+  allEnvois.forEach((record) => {
+    if (!isEnvoyeValue(record?.Envoye)) return;
+    if (normalizeCompareValue(resolveProjectName(record?.Projet)) !== selectedProjectKey) return;
+
+    const planKey = normalizeCompareValue(record?.N_Plan);
+    const indiceKey = normalizeCompareValue(record?.Indice);
+    if (!planKey || !indiceKey) return;
+    sentKeys.add(getPlanIndiceKey(record.N_Plan, record.Indice));
+  });
+
+  return sentKeys;
 }
 
 /** -------------------------
@@ -387,7 +433,14 @@ function getLatestProjectPlanElements(projectName) {
   return sortProjectPlanElements(Array.from(latestByNumber.values()));
 }
 
-function getProjectPlanElementsForDate(projectName, dateValue) {
+function getAvailableLatestProjectPlanElements(projectName) {
+  const sentPlanIndiceKeys = getSentPlanIndiceKeys(projectName);
+  return getLatestProjectPlanElements(projectName).filter(
+    (plan) => !sentPlanIndiceKeys.has(getPlanIndiceKeyFromPlan(plan))
+  );
+}
+
+function getProjectPlanElementsForDate(projectName, dateValue, isEligible = () => true) {
   const selectedProjectKey = normalizeCompareValue(projectName);
   const selectedDateKey = getCalendarDateKey(dateValue);
   const matchingByNumber = new Map();
@@ -397,6 +450,7 @@ function getProjectPlanElementsForDate(projectName, dateValue) {
     if (normalizeCompareValue(plan.Nom_projet) !== selectedProjectKey) return;
     if (!textValue(plan.Indice)) return;
     if (getCalendarDateKey(plan.DateDiffusion) !== selectedDateKey) return;
+    if (!isEligible(plan)) return;
 
     const key = getPlanKey(plan);
     if (!key) return;
@@ -411,8 +465,18 @@ function getProjectPlanElementsForDate(projectName, dateValue) {
 }
 
 function getDateAwareProjectPlanElements(projectName, dateValue) {
-  const latestPlans = getLatestProjectPlanElements(projectName);
-  const matchingPlans = getProjectPlanElementsForDate(projectName, dateValue);
+  const sentPlanIndiceKeys = getSentPlanIndiceKeys(projectName);
+  const latestPlans = getLatestProjectPlanElements(projectName).filter(
+    (plan) => !sentPlanIndiceKeys.has(getPlanIndiceKeyFromPlan(plan))
+  );
+  const eligiblePlanKeys = new Set(latestPlans.map((plan) => getPlanKey(plan)));
+  const matchingPlans = getProjectPlanElementsForDate(
+    projectName,
+    dateValue,
+    (plan) =>
+      eligiblePlanKeys.has(getPlanKey(plan)) &&
+      !sentPlanIndiceKeys.has(getPlanIndiceKeyFromPlan(plan))
+  );
   const matchingByKey = new Map(matchingPlans.map((plan) => [getPlanKey(plan), plan]));
   const plans = latestPlans.map((plan) => matchingByKey.get(getPlanKey(plan)) || plan);
 
@@ -433,6 +497,7 @@ function getCurrentBordereauPlanKeys() {
 function resetAddElementsState() {
   addElementsState.selectedPlanKeys.clear();
   addElementsState.plansByKey.clear();
+  addElementsState.displayMode = "latest";
   addElementsState.dragActive = false;
   addElementsState.dragSelectState = true;
   addElementsState.pointerId = null;
@@ -547,7 +612,13 @@ function appendAddElementsGroup(parent, title, className) {
   return section;
 }
 
-function renderAddElementsList(plans, existingKeys) {
+function getNoAvailablePlansMessage(projectName) {
+  return getLatestProjectPlanElements(projectName).length > 0
+    ? "Tous les derniers indices de ce projet ont d\u00e9j\u00e0 \u00e9t\u00e9 envoy\u00e9s."
+    : "Aucun document disponible pour ce projet.";
+}
+
+function renderAddElementsList(plans, existingKeys, emptyMessage = "") {
   const { list, selectDateBtn, selectAllBtn } = getAddElementsElements();
   if (!list) return;
 
@@ -558,11 +629,12 @@ function renderAddElementsList(plans, existingKeys) {
   if (selectAllBtn) selectAllBtn.disabled = plans.length === 0;
 
   if (!plans.length) {
+    const message = emptyMessage || "Aucun document disponible pour ce projet.";
     const empty = document.createElement("p");
     empty.className = "add-elements-empty";
-    empty.textContent = "Aucun element trouve dans la liste de plan pour ce projet.";
+    empty.textContent = message;
     list.appendChild(empty);
-    updateAddElementsStatus("Aucun document disponible pour ce projet.");
+    updateAddElementsStatus(message);
     return;
   }
 
@@ -605,12 +677,14 @@ function selectAddElementsByBordereauDate() {
     return;
   }
 
+  addElementsState.displayMode = "date";
   const existingKeys = getCurrentBordereauPlanKeys();
   const { plans, matchingPlans } = getDateAwareProjectPlanElements(
     selectedProjectName,
     dateValue
   );
-  renderAddElementsList(plans, existingKeys);
+  renderAddElementsList(plans, existingKeys, getNoAvailablePlansMessage(selectedProjectName));
+  if (plans.length === 0) return;
 
   const availableKeys = matchingPlans
     .map((plan) => getPlanKey(plan))
@@ -627,9 +701,11 @@ function selectAddElementsByBordereauDate() {
 
 function selectAllAddElements() {
   const selectedProjectName = getProject();
-  const plans = getLatestProjectPlanElements(selectedProjectName);
+  addElementsState.displayMode = "latest";
+  const plans = getAvailableLatestProjectPlanElements(selectedProjectName);
   const existingKeys = getCurrentBordereauPlanKeys();
-  renderAddElementsList(plans, existingKeys);
+  renderAddElementsList(plans, existingKeys, getNoAvailablePlansMessage(selectedProjectName));
+  if (plans.length === 0) return;
 
   const availableKeys = plans
     .map((plan) => getPlanKey(plan))
@@ -647,7 +723,7 @@ function openAddElementsDialog() {
   if (!dialog) return;
 
   resetAddElementsState();
-  const plans = getLatestProjectPlanElements(selectedProjectName);
+  const plans = getAvailableLatestProjectPlanElements(selectedProjectName);
   const existingKeys = getCurrentBordereauPlanKeys();
 
   if (subtitle) {
@@ -659,13 +735,42 @@ function openAddElementsDialog() {
       ? `S\u00e9lectionner les diffusions du ${displayDate}`
       : "S\u00e9lectionner les diffusions \u00e0 la date du bordereau";
   }
-  renderAddElementsList(plans, existingKeys);
+  renderAddElementsList(plans, existingKeys, getNoAvailablePlansMessage(selectedProjectName));
 
   if (typeof dialog.showModal === "function") {
     dialog.showModal();
   } else {
     dialog.setAttribute("open", "");
   }
+}
+
+function isAddElementsDialogOpen() {
+  const { dialog } = getAddElementsElements();
+  return !!dialog && (dialog.open === true || dialog.hasAttribute?.("open"));
+}
+
+function refreshOpenAddElementsDialog() {
+  if (!isAddElementsDialogOpen()) return;
+
+  const selectedProjectName = getProject();
+  const existingKeys = getCurrentBordereauPlanKeys();
+  const selectedPlanIndiceKeys = new Set(
+    Array.from(addElementsState.selectedPlanKeys)
+      .map((key) => addElementsState.plansByKey.get(key))
+      .filter(Boolean)
+      .map((plan) => getPlanIndiceKeyFromPlan(plan))
+  );
+  const plans = addElementsState.displayMode === "date"
+    ? getDateAwareProjectPlanElements(selectedProjectName, getDateValue()).plans
+    : getAvailableLatestProjectPlanElements(selectedProjectName);
+
+  renderAddElementsList(plans, existingKeys, getNoAvailablePlansMessage(selectedProjectName));
+  if (plans.length === 0 || selectedPlanIndiceKeys.size === 0) return;
+
+  const selectedKeys = plans
+    .filter((plan) => selectedPlanIndiceKeys.has(getPlanIndiceKeyFromPlan(plan)))
+    .map((plan) => getPlanKey(plan));
+  replaceAddElementsSelection(selectedKeys);
 }
 
 function closeAddElementsDialog() {
@@ -814,14 +919,23 @@ grist.onRecords(async (newRecords) => {
   records = newRecords || [];
 
   // Tables de référence
-  allPlans = await grist.docApi.fetchTable(PLANS_TABLE);
-  allProjects = await grist.docApi.fetchTable(PROJET_TABLE);
+  const envoisPromise = grist.docApi.fetchTable(BORDEREAU_TABLE).catch((error) => {
+    console.warn("Impossible de charger l'historique complet des envois :", error);
+    return null;
+  });
+  [allPlans, allProjects] = await Promise.all([
+    grist.docApi.fetchTable(PLANS_TABLE),
+    grist.docApi.fetchTable(PROJET_TABLE),
+  ]);
+  const envoisTable = await envoisPromise;
+  allEnvois = envoisTable ? getEnvoiRows(envoisTable) : records.slice();
 
   populateProjectDropdown();
 
   // sync UI (date + envoyé + table)
   await loadBordereauData();
   displayInvoiceTable();
+  refreshOpenAddElementsDialog();
 });
 
 /** -------------------------

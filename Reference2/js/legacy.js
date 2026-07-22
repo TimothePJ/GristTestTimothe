@@ -3898,7 +3898,6 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
   const remarque = normalizeRemarqueValue(formData.get('remarque'));
   const dureeLimite = formData.get('dureeLimite');
   const isDuplicate = document.getElementById('duplicateCheckbox').checked;
-  const cheminFromAddFile = (document.getElementById('referenceFile') && document.getElementById('referenceFile').value) ? document.getElementById('referenceFile').value : null;
 
   if (!recu) recu = "1900-01-01";
   if (String(dureeLimite ?? '').trim() && parseReferenceDurationLimit(dureeLimite) == null) {
@@ -3965,9 +3964,6 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
           }),
           Service: serviceValue
         });
-        if (cheminFromAddFile) {
-          newRow.Chemin = cheminFromAddFile;
-        }
         userActions.push(['AddRecord', 'References2', null, newRow]);
       });
     } else {
@@ -5284,7 +5280,6 @@ document.getElementById('editRowDialog').addEventListener('submit', async (e) =>
   if (fileInput?.files?.length > 0) {
     const file = fileInput.files[0];
     updatedRow.Reference = file.name;
-    updatedRow.Chemin = fileInput.value || null;
   }
 
   if (selectedRecordId) {
