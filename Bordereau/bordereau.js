@@ -248,6 +248,75 @@ function formatDisplayDate(value) {
   return date.toLocaleDateString("fr-FR");
 }
 
+function buildCalendarDateKey(year, month, day) {
+  if (![year, month, day].every(Number.isInteger)) return "";
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return "";
+  }
+
+  return [
+    String(year).padStart(4, "0"),
+    String(month).padStart(2, "0"),
+    String(day).padStart(2, "0"),
+  ].join("-");
+}
+
+function getCalendarDateKey(value) {
+  if (value === null || value === undefined || value === "") return "";
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return "";
+    return buildCalendarDateKey(
+      value.getUTCFullYear(),
+      value.getUTCMonth() + 1,
+      value.getUTCDate()
+    );
+  }
+
+  if (typeof value === "number") {
+    const milliseconds = Math.abs(value) < 100000000000 ? value * 1000 : value;
+    return getCalendarDateKey(new Date(milliseconds));
+  }
+
+  const raw = textValue(value);
+  if (!raw) return "";
+
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (isoMatch) {
+    return buildCalendarDateKey(
+      Number(isoMatch[1]),
+      Number(isoMatch[2]),
+      Number(isoMatch[3])
+    );
+  }
+
+  const frenchMatch = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+.*)?$/);
+  if (frenchMatch) {
+    return buildCalendarDateKey(
+      Number(frenchMatch[3]),
+      Number(frenchMatch[2]),
+      Number(frenchMatch[1])
+    );
+  }
+
+  if (/^-?\d+(?:\.\d+)?$/.test(raw)) {
+    return getCalendarDateKey(Number(raw));
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? "" : getCalendarDateKey(parsed);
+}
+
+function formatCalendarDateKey(dateKey) {
+  const match = String(dateKey || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : "";
+}
+
 function getProjectPlanOptions(projectName) {
   const latestByNumber = new Map();
   const projectKey = normalizeCompareValue(projectName);
@@ -288,6 +357,15 @@ function getPlanZoneLabel(plan) {
   return textValue(plan?.Zone) || "Sans zone";
 }
 
+function sortProjectPlanElements(plans) {
+  return plans.sort((left, right) =>
+    compareText(getPlanTypeLabel(left), getPlanTypeLabel(right)) ||
+    compareText(getPlanZoneLabel(left), getPlanZoneLabel(right)) ||
+    compareText(left.NumeroDocument, right.NumeroDocument) ||
+    compareText(getPlanDisplayName(left), getPlanDisplayName(right))
+  );
+}
+
 function getLatestProjectPlanElements(projectName) {
   const selectedProjectKey = normalizeCompareValue(projectName);
   const latestByNumber = new Map();
@@ -306,12 +384,42 @@ function getLatestProjectPlanElements(projectName) {
     }
   });
 
-  return Array.from(latestByNumber.values()).sort((left, right) =>
-    compareText(getPlanTypeLabel(left), getPlanTypeLabel(right)) ||
-    compareText(getPlanZoneLabel(left), getPlanZoneLabel(right)) ||
-    compareText(left.NumeroDocument, right.NumeroDocument) ||
-    compareText(getPlanDisplayName(left), getPlanDisplayName(right))
-  );
+  return sortProjectPlanElements(Array.from(latestByNumber.values()));
+}
+
+function getProjectPlanElementsForDate(projectName, dateValue) {
+  const selectedProjectKey = normalizeCompareValue(projectName);
+  const selectedDateKey = getCalendarDateKey(dateValue);
+  const matchingByNumber = new Map();
+  if (!selectedProjectKey || !selectedDateKey) return [];
+
+  getPlanRows().forEach((plan) => {
+    if (normalizeCompareValue(plan.Nom_projet) !== selectedProjectKey) return;
+    if (!textValue(plan.Indice)) return;
+    if (getCalendarDateKey(plan.DateDiffusion) !== selectedDateKey) return;
+
+    const key = getPlanKey(plan);
+    if (!key) return;
+
+    const current = matchingByNumber.get(key);
+    if (!current || isNewerPlanIndice(plan, current)) {
+      matchingByNumber.set(key, plan);
+    }
+  });
+
+  return sortProjectPlanElements(Array.from(matchingByNumber.values()));
+}
+
+function getDateAwareProjectPlanElements(projectName, dateValue) {
+  const latestPlans = getLatestProjectPlanElements(projectName);
+  const matchingPlans = getProjectPlanElementsForDate(projectName, dateValue);
+  const matchingByKey = new Map(matchingPlans.map((plan) => [getPlanKey(plan), plan]));
+  const plans = latestPlans.map((plan) => matchingByKey.get(getPlanKey(plan)) || plan);
+
+  return {
+    plans: sortProjectPlanElements(plans),
+    matchingPlans,
+  };
 }
 
 function getCurrentBordereauPlanKeys() {
@@ -338,16 +446,20 @@ function getAddElementsElements() {
     list: $("addElementsList"),
     status: $("addElementsStatus"),
     confirmBtn: $("confirmAddElements"),
+    selectDateBtn: $("selectAddElementsByDate"),
+    selectAllBtn: $("selectAllAddElements"),
   };
 }
 
-function updateAddElementsStatus() {
+function updateAddElementsStatus(emptyMessage = "") {
   const { status, confirmBtn } = getAddElementsElements();
   const count = addElementsState.selectedPlanKeys.size;
   if (status) {
-    status.textContent = count > 0
-      ? `${count} element(s) selectionne(s)`
-      : "Clique ou glisse sur les elements a ajouter.";
+    status.textContent = count === 1
+      ? `1 \u00e9l\u00e9ment s\u00e9lectionn\u00e9`
+      : count > 1
+        ? `${count} \u00e9l\u00e9ments s\u00e9lectionn\u00e9s`
+        : emptyMessage || "Clique ou glisse sur les \u00e9l\u00e9ments \u00e0 ajouter.";
   }
   if (confirmBtn) confirmBtn.disabled = count === 0;
 }
@@ -376,6 +488,20 @@ function setAddElementSelected(button, selected) {
 function toggleAddElementSelected(button) {
   if (!button || button.disabled) return;
   setAddElementSelected(button, !addElementsState.selectedPlanKeys.has(button.dataset.planKey));
+}
+
+function replaceAddElementsSelection(planKeys, emptyMessage = "") {
+  const keys = new Set(planKeys);
+  addElementsState.selectedPlanKeys.clear();
+
+  document.querySelectorAll("#addElementsList .add-element-option").forEach((button) => {
+    const isSelected = !button.disabled && keys.has(button.dataset.planKey);
+    if (isSelected) addElementsState.selectedPlanKeys.add(button.dataset.planKey);
+    button.classList.toggle("is-selected", isSelected);
+    button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+  });
+
+  updateAddElementsStatus(emptyMessage);
 }
 
 function createAddElementOption(plan, disabled) {
@@ -422,18 +548,21 @@ function appendAddElementsGroup(parent, title, className) {
 }
 
 function renderAddElementsList(plans, existingKeys) {
-  const { list } = getAddElementsElements();
+  const { list, selectDateBtn, selectAllBtn } = getAddElementsElements();
   if (!list) return;
 
   list.innerHTML = "";
+  addElementsState.selectedPlanKeys.clear();
   addElementsState.plansByKey.clear();
+  if (selectDateBtn) selectDateBtn.disabled = plans.length === 0;
+  if (selectAllBtn) selectAllBtn.disabled = plans.length === 0;
 
   if (!plans.length) {
     const empty = document.createElement("p");
     empty.className = "add-elements-empty";
     empty.textContent = "Aucun element trouve dans la liste de plan pour ce projet.";
     list.appendChild(empty);
-    updateAddElementsStatus();
+    updateAddElementsStatus("Aucun document disponible pour ce projet.");
     return;
   }
 
@@ -466,10 +595,55 @@ function renderAddElementsList(plans, existingKeys) {
   updateAddElementsStatus();
 }
 
+function selectAddElementsByBordereauDate() {
+  const selectedProjectName = getProject();
+  const dateValue = getDateValue();
+  const dateKey = getCalendarDateKey(dateValue);
+  const displayDate = formatCalendarDateKey(dateKey);
+  if (!selectedProjectName || !dateKey) {
+    replaceAddElementsSelection([], "La date du bordereau est invalide.");
+    return;
+  }
+
+  const existingKeys = getCurrentBordereauPlanKeys();
+  const { plans, matchingPlans } = getDateAwareProjectPlanElements(
+    selectedProjectName,
+    dateValue
+  );
+  renderAddElementsList(plans, existingKeys);
+
+  const availableKeys = matchingPlans
+    .map((plan) => getPlanKey(plan))
+    .filter((key) => key && !existingKeys.has(key));
+
+  let emptyMessage = "";
+  if (matchingPlans.length === 0) {
+    emptyMessage = `Aucun document diffus\u00e9 le ${displayDate}.`;
+  } else if (availableKeys.length === 0) {
+    emptyMessage = `Tous les documents diffus\u00e9s le ${displayDate} sont d\u00e9j\u00e0 pr\u00e9sents.`;
+  }
+  replaceAddElementsSelection(availableKeys, emptyMessage);
+}
+
+function selectAllAddElements() {
+  const selectedProjectName = getProject();
+  const plans = getLatestProjectPlanElements(selectedProjectName);
+  const existingKeys = getCurrentBordereauPlanKeys();
+  renderAddElementsList(plans, existingKeys);
+
+  const availableKeys = plans
+    .map((plan) => getPlanKey(plan))
+    .filter((key) => key && !existingKeys.has(key));
+  const emptyMessage = plans.length > 0 && availableKeys.length === 0
+    ? "Tous les documents sont d\u00e9j\u00e0 pr\u00e9sents dans ce bordereau."
+    : "Aucun document disponible pour ce projet.";
+  replaceAddElementsSelection(availableKeys, emptyMessage);
+}
+
 function openAddElementsDialog() {
   const selectedProjectName = getProject();
   const ref = getRef();
-  const { dialog, subtitle } = getAddElementsElements();
+  const { dialog, subtitle, selectDateBtn } = getAddElementsElements();
   if (!dialog) return;
 
   resetAddElementsState();
@@ -478,6 +652,12 @@ function openAddElementsDialog() {
 
   if (subtitle) {
     subtitle.textContent = `${selectedProjectName} - Bordereau n\u00b0${ref || "1"}`;
+  }
+  if (selectDateBtn) {
+    const displayDate = formatCalendarDateKey(getCalendarDateKey(getDateValue()));
+    selectDateBtn.textContent = displayDate
+      ? `S\u00e9lectionner les diffusions du ${displayDate}`
+      : "S\u00e9lectionner les diffusions \u00e0 la date du bordereau";
   }
   renderAddElementsList(plans, existingKeys);
 
@@ -1041,6 +1221,8 @@ $("addItem").addEventListener("click", async () => {
 $("closeAddElementsDialog")?.addEventListener("click", closeAddElementsDialog);
 $("cancelAddElements")?.addEventListener("click", closeAddElementsDialog);
 $("confirmAddElements")?.addEventListener("click", addSelectedElementsToBordereau);
+$("selectAddElementsByDate")?.addEventListener("click", selectAddElementsByBordereauDate);
+$("selectAllAddElements")?.addEventListener("click", selectAllAddElements);
 $("addElementsDialog")?.addEventListener("close", resetAddElementsState);
 $("addElementsList")?.addEventListener("pointerdown", handleAddElementsPointerDown);
 $("addElementsList")?.addEventListener("click", (event) => {

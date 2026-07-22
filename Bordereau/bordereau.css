@@ -380,7 +380,7 @@ body.is-frozen .bulk-fill-header {
 
 .add-elements-panel {
   display: grid;
-  grid-template-rows: auto minmax(220px, 1fr) auto;
+  grid-template-rows: auto auto minmax(220px, 1fr) auto;
   max-height: min(760px, calc(100vh - 28px));
   margin: 0;
 }
@@ -397,6 +397,20 @@ body.is-frozen .bulk-fill-header {
 
 .add-elements-header {
   border-bottom: 1px solid var(--vc-line);
+}
+
+.add-elements-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--vc-line);
+  background: var(--vc-panel-soft);
+}
+
+.add-elements-toolbar button {
+  min-height: 36px;
 }
 
 .add-elements-footer {
@@ -629,6 +643,15 @@ body.is-frozen #invoiceTable tbody tr {
 
   .add-elements-actions button {
     flex: 1 1 0;
+  }
+
+  .add-elements-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .add-elements-toolbar button {
+    width: 100%;
   }
 
   .add-element-option {
