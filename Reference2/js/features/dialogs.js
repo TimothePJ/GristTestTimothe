@@ -1,10 +1,4 @@
 export function initDialogs() {
-  const cancelAddRowButton = document.getElementById('cancelAddRowButton');
-  if (cancelAddRowButton) cancelAddRowButton.addEventListener('click', () => {
-    const dlg = document.getElementById('addRowDialog');
-    if (dlg) dlg.close();
-  });
-
   const addProjectButton = document.getElementById('addProjectButton');
   if (addProjectButton) addProjectButton.addEventListener('click', () => {
     const dlg = document.getElementById('addProjectDialog');

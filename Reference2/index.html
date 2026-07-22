@@ -81,66 +81,97 @@
   </div>
 
   <!-- Add Row Dialog -->
-  <dialog id="addRowDialog">
-    <form method="dialog">
-      <h3>Ajouter une nouvelle ligne</h3>
-
-      <label for="emetteur">Émetteur:</label>
-      <input type="text" id="emetteur" name="emetteur" list="emetteurList" required placeholder="Sélectionner ou entrer un émetteur">
-      <datalist id="emetteurList"></datalist>
-
-      <label for="reference">Reference:</label>
-      <div style="display: flex; gap: 10px; position: relative;">
-        <input type="text" id="referenceInput" name="reference" required 
-               list="referenceList" placeholder="Entrez ou sélectionnez une référence"
-               style="flex: 1; background-color: #444; border: 1px solid #454545; color: white; padding-right: 30px;" autocomplete="off">
-        <datalist id="referenceList"></datalist>
-        <input type="file" id="referenceFile" style="display: none;" accept="*.*">
-        <button type="button" onclick="document.getElementById('referenceFile').click()" 
-                style="padding: 0px 5px; background-color: #666; border: 1px solid #888; color: white;">
-          Select File
-        </button>
+  <dialog id="addRowDialog" class="reference-row-dialog" aria-labelledby="addRowDialogTitle">
+    <form method="dialog" novalidate>
+      <div class="reference-dialog-heading">
+        <div>
+          <h3 id="addRowDialogTitle">Ajouter une référence</h3>
+          <p>Renseignez la référence à ajouter au document sélectionné.</p>
+        </div>
       </div>
-      
-      
-      
-      <label for="indice">Indice:</label>
-      <input type="text" id="indice" name="indice" required placeholder="Entrez un indice (Exemple : 0)">
 
-      <label for="recu">Recu:</label>
-      <input type="date" id="recu" name="recu" placeholder="YYYY-MM-DD">
+      <div class="reference-dialog-context" aria-label="Contexte de l'ajout">
+        <div><span>Projet</span><strong id="addContextProject">—</strong></div>
+        <div><span>Document</span><strong id="addContextDocument">—</strong></div>
+        <div><span>Zone</span><strong id="addContextZone">—</strong></div>
+        <div><span>Type</span><strong id="addContextType">—</strong></div>
+      </div>
 
-      <label for="description">Description:</label>
-      <textarea id="description" name="description" required placeholder="Entrez une description (Exemple : EN ATTENTE)"></textarea>
+      <fieldset class="reference-form-section">
+        <legend>Identification</legend>
+        <div class="reference-form-grid">
+          <div class="reference-field reference-field-wide">
+            <label for="emetteur">Émetteur <span aria-hidden="true">*</span></label>
+            <input type="text" id="emetteur" name="emetteur" list="emetteurList" required autocomplete="off" placeholder="Sélectionner ou saisir un émetteur">
+            <datalist id="emetteurList"></datalist>
+          </div>
 
-      <label for="remarque">Remarque:</label>
-      <select id="remarque" name="remarque" required>
-        <option value="" selected disabled>Choisir une remarque</option>
-        <option value="Conservatoire">Conservatoire</option>
-        <option value="Officiel">Officiel</option>
-      </select>
+          <div class="reference-field reference-field-wide">
+            <label for="referenceInput">Référence <span aria-hidden="true">*</span></label>
+            <div class="reference-file-row">
+              <input type="text" id="referenceInput" name="reference" required list="referenceList" autocomplete="off" placeholder="Saisir ou sélectionner une référence">
+              <datalist id="referenceList"></datalist>
+              <input type="file" id="referenceFile" class="reference-hidden-file" accept="*.*">
+              <button type="button" id="selectReferenceFileButton" class="reference-secondary-action">Select File</button>
+            </div>
+            <div class="reference-file-feedback">
+              <span id="referenceFileStatus">Aucun fichier sélectionné. Seul son nom sera utilisé.</span>
+              <button type="button" id="clearReferenceFileButton" class="reference-link-button" hidden>Retirer</button>
+            </div>
+          </div>
 
-      <label for="dureeLimite">Durée limite (semaines):</label>
-      <input type="number" id="dureeLimite" name="dureeLimite" min="0" step="1" inputmode="numeric">
+          <div class="reference-field reference-field-wide">
+            <label for="indice">Indice <span aria-hidden="true">*</span></label>
+            <input type="text" id="indice" name="indice" required placeholder="Exemple : A">
+          </div>
+        </div>
+      </fieldset>
 
-      <div style="margin-top: 10px; display: flex; align-items: center;">
-        <label for="duplicateCheckbox" style="display: flex; align-items: center; gap: 10px; font-weight: bold; white-space: nowrap;">
-          <input type="checkbox" id="duplicateCheckbox" name="duplicateCheckbox" style="margin: 0;">
-          Ajouter sur d'autres documents
+      <fieldset class="reference-form-section">
+        <legend>Réception et informations</legend>
+        <div class="reference-form-grid">
+          <div class="reference-field">
+            <label for="recu">Date reçue</label>
+            <input type="date" id="recu" name="recu">
+            <small>Laissez vide si la référence n'a pas encore été reçue.</small>
+          </div>
+
+          <div class="reference-field">
+            <label for="dureeLimite">Durée limite (semaines)</label>
+            <input type="number" id="dureeLimite" name="dureeLimite" min="0" step="1" inputmode="numeric" placeholder="Exemple : 2">
+          </div>
+
+          <div class="reference-field reference-field-wide">
+            <label for="description">Description <span aria-hidden="true">*</span></label>
+            <textarea id="description" name="description" required placeholder="Exemple : EN ATTENTE"></textarea>
+          </div>
+
+          <div class="reference-field reference-field-wide">
+            <label for="remarque">Remarque <span aria-hidden="true">*</span></label>
+            <select id="remarque" name="remarque" required>
+              <option value="" selected disabled>Choisir une remarque</option>
+              <option value="Conservatoire">Conservatoire</option>
+              <option value="Officiel">Officiel</option>
+            </select>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="reference-form-section reference-duplicate-section">
+        <legend>Documents concernés</legend>
+        <label for="duplicateCheckbox" class="reference-switch-row">
+          <input type="checkbox" id="duplicateCheckbox" name="duplicateCheckbox">
+          <span>Ajouter également sur d'autres documents</span>
         </label>
-      </div>     
-      
-      <div id="duplicateOptionsContainer" style="display: none; margin-top: 10px; padding: 10px; border: 1px solid #444; border-radius: 5px; background-color: #2c2c2c;">
-        <!-- Contenu de la box sera inséré ici -->
-      </div>   
-      <div class="dialog-buttons" style="display: flex; justify-content: flex-end; gap: 10px;">
-        <button type="submit" id="confirmAddRowButton" style="background-color: #4CAF50; color: white;">
-          Ajouter
-        </button>
-        <button type="button" id="cancelAddRowButton" style="padding: 8px 15px; background-color: #666; color: white;">
-          Annuler
-        </button>
-      </div>   
+        <div id="duplicateOptionsContainer" hidden></div>
+        <div id="duplicateSelectionSummary" class="reference-selection-summary" aria-live="polite">1 document concerné.</div>
+      </fieldset>
+
+      <div id="addRowFormStatus" class="reference-form-status" role="status" aria-live="polite"></div>
+      <div class="dialog-buttons reference-dialog-actions">
+        <button type="button" id="cancelAddRowButton" class="reference-cancel-button">Annuler</button>
+        <button type="submit" id="confirmAddRowButton">Ajouter</button>
+      </div>
     </form>
   </dialog>
 
@@ -407,52 +438,91 @@
   </dialog>
 
   <!-- Edit Row Dialog -->
-  <dialog id="editRowDialog">
-    <form method="dialog">
-      <h3>Modifier la ligne</h3>
-
-      <label for="editEmetteur">Émetteur:</label>
-      <input type="text" id="editEmetteur" name="editEmetteur" list="editEmetteurList" required placeholder="Sélectionner ou entrer un émetteur">
-      <datalist id="editEmetteurList"></datalist>
-
-      <label for="editReference">Reference:</label>
-      <div style="display: flex; gap: 10px; position: relative;">
-          <input type="text" id="editReference" name="reference" required 
-                 list="editReferenceList" placeholder="Entrez ou sélectionnez une référence"
-                 style="flex: 1; background-color: #444; border: 1px solid #666; color: white; padding-right: 30px;">
-          <datalist id="editReferenceList"></datalist>
-          <input type="file" id="editReferenceFile" style="display: none;" accept="*.*">
-          <button type="button" onclick="document.getElementById('editReferenceFile').click()" 
-                  style="padding: 0px 5px; background-color: #666; border: 1px solid #888; color: white;">
-              Select File
-          </button>
+  <dialog id="editRowDialog" class="reference-row-dialog" aria-labelledby="editRowDialogTitle">
+    <form method="dialog" novalidate>
+      <div class="reference-dialog-heading">
+        <div>
+          <h3 id="editRowDialogTitle">Modifier la référence</h3>
+          <p>Vérifiez les informations de la ligne avant de les enregistrer.</p>
+        </div>
       </div>
-      
-      <label for="editIndice">Indice:</label>
-      <input type="text" id="editIndice" name="indice" required placeholder="Entrez un indice (Exemple : 0)">
 
-      <label for="editRecu">Recu:</label>
-      <input type="date" id="editRecu" name="recu" required>
+      <div class="reference-dialog-context" aria-label="Contexte de la modification">
+        <div><span>Projet</span><strong id="editContextProject">—</strong></div>
+        <div><span>Document</span><strong id="editContextDocument">—</strong></div>
+        <div><span>Zone</span><strong id="editContextZone">—</strong></div>
+        <div><span>Type</span><strong id="editContextType">—</strong></div>
+      </div>
 
-      <label for="editDescription">Description:</label>
-      <textarea id="editDescription" name="description" required placeholder="Entrez une description (Exemple : EN ATTENTE)"></textarea>
+      <fieldset class="reference-form-section">
+        <legend>Identification</legend>
+        <div class="reference-form-grid">
+          <div class="reference-field reference-field-wide">
+            <label for="editEmetteur">Émetteur <span aria-hidden="true">*</span></label>
+            <input type="text" id="editEmetteur" name="editEmetteur" list="editEmetteurList" required autocomplete="off" placeholder="Sélectionner ou saisir un émetteur">
+            <datalist id="editEmetteurList"></datalist>
+          </div>
 
-      <label for="editRemarque">Remarque:</label>
-      <select id="editRemarque" name="remarque" required>
-        <option value="" disabled>Choisir une remarque</option>
-        <option value="Conservatoire">Conservatoire</option>
-        <option value="Officiel">Officiel</option>
-      </select>
+          <div class="reference-field reference-field-wide">
+            <label for="editReference">Référence <span aria-hidden="true">*</span></label>
+            <div class="reference-file-row">
+              <input type="text" id="editReference" name="reference" required list="editReferenceList" autocomplete="off" placeholder="Saisir ou sélectionner une référence">
+              <datalist id="editReferenceList"></datalist>
+              <input type="file" id="editReferenceFile" class="reference-hidden-file" accept="*.*">
+              <button type="button" id="selectEditReferenceFileButton" class="reference-secondary-action">Select File</button>
+            </div>
+            <div class="reference-file-feedback">
+              <span id="editReferenceFileStatus">Aucun nouveau fichier sélectionné. Seul son nom sera utilisé.</span>
+              <button type="button" id="clearEditReferenceFileButton" class="reference-link-button" hidden>Retirer</button>
+            </div>
+          </div>
 
-      <label for="editDureeLimite">Durée limite (semaines):</label>
-      <input type="number" id="editDureeLimite" name="dureeLimite" min="0" step="1" inputmode="numeric">
+          <div class="reference-field reference-field-wide">
+            <label for="editIndice">Indice <span aria-hidden="true">*</span></label>
+            <input type="text" id="editIndice" name="indice" required placeholder="Exemple : A">
+          </div>
+        </div>
+      </fieldset>
 
-      <div class="dialog-buttons">
-        <button type="submit">Enregistrer</button>
-        <button type="button" onclick="document.getElementById('editRowDialog').close()">Annuler</button>
+      <fieldset class="reference-form-section">
+        <legend>Réception et informations</legend>
+        <div class="reference-form-grid">
+          <div class="reference-field">
+            <label for="editRecu">Date reçue</label>
+            <input type="date" id="editRecu" name="recu">
+            <small>Laissez vide si la référence n'a pas encore été reçue.</small>
+          </div>
+
+          <div class="reference-field">
+            <label for="editDureeLimite">Durée limite (semaines)</label>
+            <input type="number" id="editDureeLimite" name="dureeLimite" min="0" step="1" inputmode="numeric" placeholder="Exemple : 2">
+          </div>
+
+          <div class="reference-field reference-field-wide">
+            <label for="editDescription">Description <span aria-hidden="true">*</span></label>
+            <textarea id="editDescription" name="description" required placeholder="Exemple : EN ATTENTE"></textarea>
+          </div>
+
+          <div class="reference-field reference-field-wide">
+            <label for="editRemarque">Remarque <span aria-hidden="true">*</span></label>
+            <select id="editRemarque" name="remarque" required>
+              <option value="" disabled>Choisir une remarque</option>
+              <option value="Conservatoire">Conservatoire</option>
+              <option value="Officiel">Officiel</option>
+            </select>
+          </div>
+        </div>
+      </fieldset>
+
+      <div id="editRowFormStatus" class="reference-form-status" role="status" aria-live="polite"></div>
+      <div class="dialog-buttons reference-dialog-actions">
+        <button type="button" id="cancelEditRowButton" class="reference-cancel-button">Annuler</button>
+        <button type="submit" id="confirmEditRowButton">Enregistrer</button>
       </div>
     </form>
   </dialog>
+
+  <div id="referenceToast" class="reference-toast" role="status" aria-live="polite" hidden></div>
 
   <!-- Form to add new rows -->
   <div class="add-form">

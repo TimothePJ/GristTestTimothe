@@ -315,7 +315,7 @@ function autoFillFields() {
   // Si c'est "_", on remplit avec les valeurs par défaut
   if (selectedReference === '_') {
     document.getElementById('indice').value = '-';
-    document.getElementById('recu').value = '1900-01-01';
+    document.getElementById('recu').value = '';
     document.getElementById('description').value = 'EN ATTENTE';
     document.getElementById('remarque').value = 'Officiel';
     document.getElementById('dureeLimite').value = '';
@@ -330,18 +330,12 @@ function autoFillFields() {
     record.Reference === selectedReference
   );
 
-  function formatDateForInput(dateString) {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    return isNaN(date.getTime()) ? '' : date.toISOString().split('T')[0];
-  }
-
   if (matchingRecord) {
     // Remplir avec les infos réelles
     document.getElementById('indice').value = matchingRecord.Indice || '';
     document.getElementById('description').value = matchingRecord.DescriptionObservations || '';
     document.getElementById('remarque').value = normalizeRemarqueValue(matchingRecord.Remarque);
-    document.getElementById('recu').value = formatDateForInput(matchingRecord.Recu);
+    document.getElementById('recu').value = formatReferenceDialogDate(matchingRecord.Recu);
     document.getElementById('dureeLimite').value = formatReferenceDurationInput(matchingRecord.DureeLimite);
     void resolveReferenceDurationInputValue(matchingRecord).then((durationValue) => {
       if (document.getElementById('referenceInput')?.value === selectedReference) {
@@ -358,44 +352,343 @@ function autoFillFields() {
   }
 }
 
-// Fonction pour réinitialiser le formulaire et actualiser les références à chaque ouverture
-function resetAndUpdateDialog() {
-  const addRowDialog = document.getElementById('addRowDialog');
-  const inputs = addRowDialog.querySelectorAll('input, textarea, select');
+const REFERENCE_ROW_FORM_CONFIG = {
+  add: {
+    dialogId: 'addRowDialog',
+    statusId: 'addRowFormStatus',
+    submitId: 'confirmAddRowButton',
+    cancelId: 'cancelAddRowButton',
+    fileId: 'referenceFile',
+    fileStatusId: 'referenceFileStatus',
+    fileClearId: 'clearReferenceFileButton',
+    contextPrefix: 'add',
+    fields: {
+      emetteur: 'emetteur',
+      reference: 'referenceInput',
+      indice: 'indice',
+      recu: 'recu',
+      description: 'description',
+      remarque: 'remarque',
+      dureeLimite: 'dureeLimite',
+    },
+  },
+  edit: {
+    dialogId: 'editRowDialog',
+    statusId: 'editRowFormStatus',
+    submitId: 'confirmEditRowButton',
+    cancelId: 'cancelEditRowButton',
+    fileId: 'editReferenceFile',
+    fileStatusId: 'editReferenceFileStatus',
+    fileClearId: 'clearEditReferenceFileButton',
+    contextPrefix: 'edit',
+    fields: {
+      emetteur: 'editEmetteur',
+      reference: 'editReference',
+      indice: 'editIndice',
+      recu: 'editRecu',
+      description: 'editDescription',
+      remarque: 'editRemarque',
+      dureeLimite: 'editDureeLimite',
+    },
+  },
+};
 
-  // Réinitialiser tous les champs sauf "emetteur"
-  inputs.forEach(input => {
-    if (input.type === 'checkbox') {
-      input.checked = false;
-    } else if (input.id !== 'emetteur') {
-      input.value = '';
+const REFERENCES2_DIALOG_WRITABLE_FIELDS = new Set([
+  'NomProjet',
+  'NomDocument',
+  'NumeroDocument',
+  'Type_document',
+  'Zone',
+  'Emetteur',
+  'Reference',
+  'Indice',
+  'Recu',
+  'DescriptionObservations',
+  'Remarque',
+  'DureeLimite',
+  'DateLimite',
+  'Retard',
+  'Service',
+]);
+
+let referenceEditInitialSnapshot = '';
+let referenceToastTimer = 0;
+const referenceFormBusyState = { add: false, edit: false };
+
+function getReferenceRowFormConfig(mode) {
+  return REFERENCE_ROW_FORM_CONFIG[mode] || REFERENCE_ROW_FORM_CONFIG.add;
+}
+
+function getReferenceRowForm(mode) {
+  const dialog = document.getElementById(getReferenceRowFormConfig(mode).dialogId);
+  return dialog?.querySelector('form') || null;
+}
+
+function getReferenceRowField(mode, fieldName) {
+  const fieldId = getReferenceRowFormConfig(mode).fields[fieldName];
+  return fieldId ? document.getElementById(fieldId) : null;
+}
+
+function sanitizeReferences2DialogFields(fields) {
+  return Object.fromEntries(
+    Object.entries(fields || {}).filter(([key, value]) =>
+      REFERENCES2_DIALOG_WRITABLE_FIELDS.has(key) && value !== undefined
+    )
+  );
+}
+
+function formatReferenceDialogDate(value) {
+  const date = parseReferenceRetardCalendarDate(value);
+  return isEmptyReferenceRetardDate(date) ? '' : formatReferenceDateIso(date);
+}
+
+function setReferenceFormStatus(mode, message = '', type = '') {
+  const status = document.getElementById(getReferenceRowFormConfig(mode).statusId);
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle('is-error', type === 'error');
+  status.classList.toggle('is-info', type === 'info');
+}
+
+function showReferenceToast(message, { warning = false } = {}) {
+  const toast = document.getElementById('referenceToast');
+  if (!toast) return;
+  window.clearTimeout(referenceToastTimer);
+  toast.textContent = message;
+  toast.classList.toggle('is-warning', warning);
+  toast.hidden = false;
+  referenceToastTimer = window.setTimeout(() => {
+    toast.hidden = true;
+  }, 4500);
+}
+
+function clearReferenceFieldError(input) {
+  if (!(input instanceof HTMLElement)) return;
+  input.classList.remove('is-invalid');
+  input.removeAttribute('aria-invalid');
+  const field = input.closest('.reference-field');
+  field?.querySelector('.reference-field-error')?.remove();
+}
+
+function setReferenceFieldError(input, message) {
+  if (!(input instanceof HTMLElement)) return;
+  clearReferenceFieldError(input);
+  input.classList.add('is-invalid');
+  input.setAttribute('aria-invalid', 'true');
+  const field = input.closest('.reference-field');
+  if (!field) return;
+  const error = document.createElement('p');
+  error.className = 'reference-field-error';
+  error.textContent = message;
+  field.appendChild(error);
+}
+
+function clearReferenceFormErrors(mode) {
+  const form = getReferenceRowForm(mode);
+  form?.querySelectorAll('.is-invalid').forEach(clearReferenceFieldError);
+  form?.querySelectorAll('.reference-field-error').forEach(error => error.remove());
+}
+
+function validateReferenceRowForm(mode, { focus = true } = {}) {
+  clearReferenceFormErrors(mode);
+  const requiredFields = [
+    ['emetteur', "L'émetteur est obligatoire."],
+    ['reference', 'La référence est obligatoire.'],
+    ['indice', "L'indice est obligatoire."],
+    ['description', 'La description est obligatoire.'],
+    ['remarque', 'La remarque est obligatoire.'],
+  ];
+  let firstInvalid = null;
+
+  requiredFields.forEach(([fieldName, message]) => {
+    const input = getReferenceRowField(mode, fieldName);
+    if (!String(input?.value || '').trim()) {
+      setReferenceFieldError(input, message);
+      firstInvalid ||= input;
     }
   });
 
-  const duplicateOptionsContainer = document.getElementById('duplicateOptionsContainer');
-  duplicateOptionsContainer.style.display = 'none';
-  duplicateOptionsContainer.innerHTML = '';
+  const durationInput = getReferenceRowField(mode, 'dureeLimite');
+  const durationValue = String(durationInput?.value || '').trim();
+  if (durationValue && parseReferenceDurationLimit(durationValue) == null) {
+    setReferenceFieldError(durationInput, 'Saisissez un nombre entier positif ou nul.');
+    firstInvalid ||= durationInput;
+  }
 
-  document.getElementById('emetteur').value = currentEmetteur;
-  updateReferenceList();
-  void fillAddRowDefaultDurationFromContext();
+  if (firstInvalid && focus) {
+    firstInvalid.focus();
+  }
+  return !firstInvalid;
 }
 
-// Réinitialiser et actualiser les références à chaque ouverture du dialogue
-document.getElementById('addRowDialog').addEventListener('show', resetAndUpdateDialog);
+function getReferenceFormSnapshot(mode) {
+  const config = getReferenceRowFormConfig(mode);
+  return JSON.stringify(Object.fromEntries(
+    Object.entries(config.fields).map(([name, id]) => [
+      name,
+      String(document.getElementById(id)?.value || '').trim(),
+    ])
+  ));
+}
+
+function updateEditSubmitState() {
+  const submit = document.getElementById('confirmEditRowButton');
+  if (!submit) return;
+  const unchanged = Boolean(referenceEditInitialSnapshot) &&
+    getReferenceFormSnapshot('edit') === referenceEditInitialSnapshot;
+  submit.disabled = referenceFormBusyState.edit || unchanged;
+  submit.title = unchanged ? 'Aucune modification à enregistrer' : '';
+}
+
+function setReferenceFormBusy(mode, busy, message = '') {
+  const config = getReferenceRowFormConfig(mode);
+  referenceFormBusyState[mode] = Boolean(busy);
+  const dialog = document.getElementById(config.dialogId);
+  const submit = document.getElementById(config.submitId);
+  const cancel = document.getElementById(config.cancelId);
+  dialog?.setAttribute('aria-busy', busy ? 'true' : 'false');
+  if (submit) submit.disabled = Boolean(busy);
+  if (cancel) cancel.disabled = Boolean(busy);
+  if (message) setReferenceFormStatus(mode, message, 'info');
+  if (!busy && mode === 'edit') updateEditSubmitState();
+}
+
+function resetReferenceFilePicker(mode) {
+  const config = getReferenceRowFormConfig(mode);
+  const fileInput = document.getElementById(config.fileId);
+  const status = document.getElementById(config.fileStatusId);
+  const clearButton = document.getElementById(config.fileClearId);
+  if (fileInput) fileInput.value = '';
+  if (status) {
+    status.textContent = mode === 'edit'
+      ? 'Aucun nouveau fichier sélectionné. Seul son nom sera utilisé.'
+      : 'Aucun fichier sélectionné. Seul son nom sera utilisé.';
+  }
+  if (clearButton) clearButton.hidden = true;
+}
+
+function applyReferenceFileSelection(mode) {
+  const config = getReferenceRowFormConfig(mode);
+  const fileInput = document.getElementById(config.fileId);
+  const referenceInput = getReferenceRowField(mode, 'reference');
+  const status = document.getElementById(config.fileStatusId);
+  const clearButton = document.getElementById(config.fileClearId);
+  const file = fileInput?.files?.[0];
+  if (!file || !referenceInput) {
+    resetReferenceFilePicker(mode);
+    return;
+  }
+
+  const referenceName = removeFileExtension(file.name);
+  referenceInput.value = referenceName;
+  clearReferenceFieldError(referenceInput);
+  if (status) status.textContent = `Fichier : ${file.name} · Référence : ${referenceName}`;
+  if (clearButton) clearButton.hidden = false;
+  if (mode === 'edit') updateEditSubmitState();
+  if (mode === 'add') updateDuplicateSelectionSummary();
+}
+
+function updateReferenceDialogContext(mode, record = null) {
+  const config = getReferenceRowFormConfig(mode);
+  const documentInfo = record
+    ? {
+        name: record.NomDocument,
+        numero: record.NumeroDocument,
+        zone: record.Zone,
+        type: record.Type_document,
+      }
+    : getSelectedDocPair();
+  const project = record?.NomProjet || selectedFirstValue ||
+    document.getElementById('firstColumnDropdown')?.value || '';
+  const values = {
+    Project: project || '—',
+    Document: documentInfo?.name ? makeDocLabel(documentInfo.name, documentInfo.numero) : '—',
+    Zone: normalizeZoneValue(documentInfo?.zone) || '—',
+    Type: normalizeTypeDocument(documentInfo?.type) || '—',
+  };
+
+  Object.entries(values).forEach(([suffix, value]) => {
+    const target = document.getElementById(`${config.contextPrefix}Context${suffix}`);
+    if (target) {
+      target.textContent = value;
+      target.title = value;
+    }
+  });
+}
+
+function getReferenceDuplicateIdentity(fields) {
+  return [
+    fields?.NomProjet,
+    fields?.NomDocument,
+    fields?.NumeroDocument,
+    fields?.Type_document,
+    normalizeZoneValue(fields?.Zone),
+    fields?.Emetteur,
+    fields?.Reference,
+    fields?.Indice,
+  ].map(normalizeReferenceDocumentIdentityPart).join('||');
+}
+
+function findReferenceDialogDuplicate(fields, { ignoreRecordId = null } = {}) {
+  const identity = getReferenceDuplicateIdentity(fields);
+  if (!identity) return null;
+  return (records || []).find(record =>
+    Number(record?.id) !== Number(ignoreRecordId) &&
+    !record?.Archive &&
+    getReferenceDuplicateIdentity(record) === identity
+  ) || null;
+}
+
+// Réinitialise l'ajout depuis une seule source de vérité.
+async function resetAndUpdateDialog() {
+  const form = getReferenceRowForm('add');
+  form?.reset();
+  clearReferenceFormErrors('add');
+  setReferenceFormStatus('add');
+  resetReferenceFilePicker('add');
+  resetDuplicateSelectedDocumentValues();
+
+  const duplicateOptionsContainer = document.getElementById('duplicateOptionsContainer');
+  if (duplicateOptionsContainer) {
+    duplicateOptionsContainer.hidden = true;
+    duplicateOptionsContainer.innerHTML = '';
+  }
+
+  const emitter = document.getElementById('emetteur');
+  if (emitter) emitter.value = currentEmetteur || '';
+  updateReferenceDialogContext('add');
+  updateReferenceList();
+  updateDuplicateSelectionSummary();
+
+  await Promise.all([
+    updateEmetteurList(false, 'emetteurList'),
+    fillAddRowDefaultDurationFromContext(),
+  ]);
+}
 
 // Mise à jour de la liste des références lorsqu'on change le projet ou l'émetteur
 document.getElementById('firstColumnDropdown').addEventListener('change', updateReferenceList);
 document.getElementById('emetteur').addEventListener('change', updateReferenceList);
 
-// Auto-remplissage des champs lors de la sélection ou de la saisie d'une référence
-document.getElementById('referenceInput').addEventListener('input', autoFillFields);
+// L'auto-remplissage se déclenche après validation d'une valeur, pas à chaque frappe.
+document.getElementById('referenceInput').addEventListener('change', autoFillFields);
 
-// Gestion de l'importation de fichiers pour remplir la référence
-document.getElementById('referenceFile').addEventListener('change', function () {
-  if (this.files.length > 0) {
-    const fileName = this.files[0].name;
-    document.getElementById('referenceInput').value = removeFileExtension(fileName);
+document.getElementById('selectReferenceFileButton').addEventListener('click', () => {
+  document.getElementById('referenceFile').click();
+});
+document.getElementById('referenceFile').addEventListener('change', () => {
+  applyReferenceFileSelection('add');
+});
+document.getElementById('clearReferenceFileButton').addEventListener('click', () => {
+  resetReferenceFilePicker('add');
+  document.getElementById('referenceInput')?.focus();
+});
+
+getReferenceRowForm('add')?.addEventListener('input', (event) => {
+  if (event.target.closest?.('.reference-field')) {
+    clearReferenceFieldError(event.target);
+    setReferenceFormStatus('add');
+    updateDuplicateSelectionSummary();
   }
 });
 
@@ -1871,7 +2164,9 @@ async function fillEditDurationFromRecord(record, { force = false } = {}) {
   if (!(durationInput instanceof HTMLInputElement)) return;
   if (!force && String(durationInput.value || '').trim()) return;
 
+  const valueBeforeLoading = durationInput.value;
   const durationValue = await resolveReferenceDurationInputValue(record);
+  if (!force && durationInput.value !== valueBeforeLoading) return;
   if (force || durationValue) {
     durationInput.value = durationValue;
     durationInput.dataset.initialValue = durationValue;
@@ -3708,7 +4003,7 @@ function formatTable() {
 }
 
 // Show edit dialog with row data
-function showEditDialog(record) {
+async function showEditDialog(record) {
   const dialog = document.getElementById('editRowDialog');
 
   if (!record) {
@@ -3717,12 +4012,12 @@ function showEditDialog(record) {
   }
   console.log("Enregistrement en cours de modification :", record);
 
-  // --- Convertir la date en format YYYY-MM-DD si besoin ---
-  function formatDateForInput(dateString) {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    return isNaN(date.getTime()) ? '' : date.toISOString().split('T')[0];
-  }
+  getReferenceRowForm('edit')?.reset();
+  clearReferenceFormErrors('edit');
+  resetReferenceFilePicker('edit');
+  referenceEditInitialSnapshot = '';
+  updateReferenceDialogContext('edit', record);
+  setReferenceFormBusy('edit', true, 'Chargement de la ligne…');
 
   // Assigne D'ABORD l'émetteur au champ "editEmetteur".
   document.getElementById('editEmetteur').value = record.Emetteur || '';
@@ -3735,13 +4030,33 @@ function showEditDialog(record) {
   document.getElementById('editIndice').value = record.Indice || '';
   document.getElementById('editDescription').value = record.DescriptionObservations || '';
   document.getElementById('editRemarque').value = normalizeRemarqueValue(record.Remarque);
-  document.getElementById('editRecu').value = formatDateForInput(record.Recu);
+  document.getElementById('editRecu').value = formatReferenceDialogDate(record.Recu);
   const editDureeLimite = document.getElementById('editDureeLimite');
   editDureeLimite.value = formatReferenceDurationInput(record.DureeLimite);
   editDureeLimite.dataset.initialValue = editDureeLimite.value;
-  void fillEditDurationFromRecord(record);
 
   dialog.showModal();
+  document.getElementById('editEmetteur')?.focus();
+
+  try {
+    await Promise.all([
+      updateEmetteurList(false, 'editEmetteurList'),
+      updateEditEmetteurList(),
+      fillEditDurationFromRecord(record),
+    ]);
+    setReferenceFormStatus('edit');
+  } catch (error) {
+    console.error('Erreur lors de la préparation du formulaire :', error);
+    setReferenceFormStatus(
+      'edit',
+      'Certaines suggestions n’ont pas pu être chargées. Les valeurs de la ligne restent modifiables.',
+      'error'
+    );
+  } finally {
+    editDureeLimite.dataset.initialValue = editDureeLimite.value;
+    referenceEditInitialSnapshot = getReferenceFormSnapshot('edit');
+    setReferenceFormBusy('edit', false);
+  }
 }
 
 // Gestion du menu contextuel et récupération de l'émetteur
@@ -3765,10 +4080,21 @@ function showContextMenu(event, recordId) {
 }
 
 // Add event listener for "Ajouter une ligne" option
-document.getElementById('addRowOption').addEventListener('click', () => {
-  resetAndUpdateDialog();
+document.getElementById('addRowOption').addEventListener('click', async () => {
+  const preparation = resetAndUpdateDialog();
   document.getElementById('addRowDialog').showModal();
   hideContextMenu();
+  document.getElementById('emetteur')?.focus();
+  try {
+    await preparation;
+  } catch (error) {
+    console.error('Erreur lors de la préparation du formulaire :', error);
+    setReferenceFormStatus(
+      'add',
+      'Certaines suggestions n’ont pas pu être chargées. Vous pouvez tout de même saisir les valeurs.',
+      'error'
+    );
+  }
 });
 
 function updateEditReferenceList() {
@@ -3815,7 +4141,7 @@ function autoFillEditFields() {
     document.getElementById('editIndice').value = '-';
     document.getElementById('editDescription').value = 'EN ATTENTE';
     document.getElementById('editRemarque').value = 'Officiel';
-    document.getElementById('editRecu').value = '1900-01-01';
+    document.getElementById('editRecu').value = '';
     const editDureeLimite = document.getElementById('editDureeLimite');
     editDureeLimite.value = '';
     editDureeLimite.dataset.initialValue = '';
@@ -3829,17 +4155,11 @@ function autoFillEditFields() {
     record.Reference === selectedReference
   );
 
-  function formatDateForInput(dateString) {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    return isNaN(date.getTime()) ? '' : date.toISOString().split('T')[0];
-  }
-
   if (matchingRecord) {
     document.getElementById('editIndice').value = matchingRecord.Indice || '';
     document.getElementById('editDescription').value = matchingRecord.DescriptionObservations || '';
     document.getElementById('editRemarque').value = normalizeRemarqueValue(matchingRecord.Remarque);
-    document.getElementById('editRecu').value = formatDateForInput(matchingRecord.Recu);
+    document.getElementById('editRecu').value = formatReferenceDialogDate(matchingRecord.Recu);
     const editDureeLimite = document.getElementById('editDureeLimite');
     editDureeLimite.value = formatReferenceDurationInput(matchingRecord.DureeLimite);
     editDureeLimite.dataset.initialValue = editDureeLimite.value;
@@ -3861,15 +4181,25 @@ document.getElementById('firstColumnDropdown').addEventListener('change', update
 document.getElementById('editEmetteur').addEventListener('change', updateEditReferenceList);
 
 // Auto-remplissage des champs lors de la sélection ou de la saisie d'une référence
-document.getElementById('editReference').addEventListener('input', autoFillEditFields);
+document.getElementById('editReference').addEventListener('change', autoFillEditFields);
 
-// Gestion de l’importation de fichiers pour remplir la référence
-document.getElementById('editReferenceFile').addEventListener('change', function () {
-  if (this.files.length > 0) {
-    const fileName = this.files[0].name;
-    document.getElementById('editReference').value = removeFileExtension(fileName);
-  }
+document.getElementById('selectEditReferenceFileButton').addEventListener('click', () => {
+  document.getElementById('editReferenceFile').click();
 });
+document.getElementById('editReferenceFile').addEventListener('change', () => {
+  applyReferenceFileSelection('edit');
+});
+document.getElementById('clearEditReferenceFileButton').addEventListener('click', () => {
+  resetReferenceFilePicker('edit');
+  document.getElementById('editReference')?.focus();
+});
+
+getReferenceRowForm('edit')?.addEventListener('input', (event) => {
+  clearReferenceFieldError(event.target);
+  setReferenceFormStatus('edit');
+  updateEditSubmitState();
+});
+getReferenceRowForm('edit')?.addEventListener('change', updateEditSubmitState);
 
 // Add event listener for "Modifier" option
 document.getElementById('editOption').addEventListener('click', () => {
@@ -3879,8 +4209,7 @@ document.getElementById('editOption').addEventListener('click', () => {
   if (selectedRecordId) {
     const record = records.find(rec => rec.id === selectedRecordId);
     if (record) {
-      updateEmetteurList(false, "editEmetteurList");
-      showEditDialog(record);
+      void showEditDialog(record);
     }
   }
 });
@@ -3888,36 +4217,31 @@ document.getElementById('editOption').addEventListener('click', () => {
 // Handle dialog form submission
 document.getElementById('addRowDialog').addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (referenceFormBusyState.add || !validateReferenceRowForm('add')) return;
 
   const formData = new FormData(e.target);
-  const emetteur = formData.get('emetteur');
-  const reference = formData.get('reference');
-  const indice = formData.get('indice');
-  let recu = formData.get('recu'); // Peut être vide
-  const description = formData.get('description');
+  const emetteur = String(formData.get('emetteur') || '').trim();
+  const reference = String(formData.get('reference') || '').trim();
+  const indice = String(formData.get('indice') || '').trim();
+  const recu = String(formData.get('recu') || '').trim() || DEFAULT_REFERENCE_DATE;
+  const description = String(formData.get('description') || '').trim();
   const remarque = normalizeRemarqueValue(formData.get('remarque'));
-  const dureeLimite = formData.get('dureeLimite');
+  const dureeLimite = String(formData.get('dureeLimite') || '').trim();
   const isDuplicate = document.getElementById('duplicateCheckbox').checked;
 
-  if (!recu) recu = "1900-01-01";
-  if (String(dureeLimite ?? '').trim() && parseReferenceDurationLimit(dureeLimite) == null) {
-    alert("La duree limite doit etre un nombre entier de semaines.");
-    return;
-  }
+  setReferenceFormBusy('add', true, 'Enregistrement en cours…');
 
   try {
     const selectedProject = selectedFirstValue;
     if (!selectedProject) throw new Error("Aucun projet sélectionné.");
 
     const serviceValue = await getTeamService();
-    const currentSelectedDoc = getSelectedDocPair();
     const planningTableForLimits = await fetchReferencePlanningTableForLimits();
 
-    const userActions = [];
-
+    let selectedDocuments = [];
     if (isDuplicate) {
       syncDuplicateSelectedDocumentValues(document.getElementById('duplicateOptionsContainer'));
-      const selectedDocuments = Array.from(duplicateSelectedDocumentValues)
+      selectedDocuments = Array.from(duplicateSelectedDocumentValues)
         .filter(isValidDuplicateDocumentValue);
 
       const secondDropdown = document.getElementById('secondColumnListbox');
@@ -3927,63 +4251,41 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
       }
 
       if (selectedDocuments.length === 0) {
-        alert("Veuillez sélectionner au moins un document valide pour démultiplier la ligne.");
+        setReferenceFormStatus('add', 'Sélectionnez au moins un document valide.', 'error');
         return;
       }
-
-      selectedDocuments.forEach(docVal => {
-        const parsedDoc = parseDocValue(docVal);
-        const documentType = getDocumentTypeForProjectDoc(
-          selectedProject,
-          parsedDoc.name,
-          parsedDoc.zone,
-          parsedDoc.numero,
-          parsedDoc.type
-        ) || normalizeTypeDocument(parsedDoc.type || getCurrentSelectedType());
-        const documentInfo = {
-          ...parsedDoc,
-          type: documentType,
-        };
-        const newRow = withComputedReferenceRetard({
-          NomProjet: selectedProject,
-          NomDocument: parsedDoc.name,
-          NumeroDocument: _norm(parsedDoc.numero),
-          Type_document: documentType,
-          Zone: normalizeZoneValue(parsedDoc.zone),
-          Emetteur: emetteur,
-          Reference: reference,
-          Indice: indice,
-          Recu: recu,
-          DescriptionObservations: description,
-          Remarque: remarque,
-          ...buildReferenceLimitFields({
-            planningTable: planningTableForLimits,
-            projectName: selectedProject,
-            documentInfo,
-            durationWeeks: dureeLimite,
-          }),
-          Service: serviceValue
-        });
-        userActions.push(['AddRecord', 'References2', null, newRow]);
-      });
     } else {
+      const currentDocument = getSelectedDocPair();
+      if (currentDocument?.name) {
+        selectedDocuments = [buildDocSelectValue(currentDocument)];
+      }
+    }
+
+    if (selectedDocuments.length === 0) {
+      throw new Error('Aucun document sélectionné.');
+    }
+
+    const userActions = [];
+    const skippedDuplicates = [];
+    selectedDocuments.forEach(docVal => {
+      const parsedDoc = parseDocValue(docVal);
       const documentType = getDocumentTypeForProjectDoc(
         selectedProject,
-        currentSelectedDoc.name,
-        currentSelectedDoc.zone,
-        currentSelectedDoc.numero,
-        currentSelectedDoc.type
-      ) || normalizeTypeDocument(currentSelectedDoc.type || getCurrentSelectedType());
+        parsedDoc.name,
+        parsedDoc.zone,
+        parsedDoc.numero,
+        parsedDoc.type
+      ) || normalizeTypeDocument(parsedDoc.type || getCurrentSelectedType());
       const documentInfo = {
-        ...currentSelectedDoc,
+        ...parsedDoc,
         type: documentType,
       };
-      const newRow = withComputedReferenceRetard({
+      const newRow = sanitizeReferences2DialogFields(withComputedReferenceRetard({
         NomProjet: selectedProject,
-        NomDocument: currentSelectedDoc.name,
-        NumeroDocument: _norm(currentSelectedDoc.numero),
+        NomDocument: parsedDoc.name,
+        NumeroDocument: _norm(parsedDoc.numero),
         Type_document: documentType,
-        Zone: normalizeZoneValue(currentSelectedDoc.zone),
+        Zone: normalizeZoneValue(parsedDoc.zone),
         Emetteur: emetteur,
         Reference: reference,
         Indice: indice,
@@ -3997,19 +4299,50 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
           durationWeeks: dureeLimite,
         }),
         Service: serviceValue
-      });
+      }));
+
+      if (findReferenceDialogDuplicate(newRow)) {
+        skippedDuplicates.push(makeDocLabel(parsedDoc.name, parsedDoc.numero));
+        return;
+      }
       userActions.push(['AddRecord', 'References2', null, newRow]);
+    });
+
+    if (userActions.length === 0) {
+      setReferenceFormStatus(
+        'add',
+        skippedDuplicates.length > 1
+          ? `Ces ${skippedDuplicates.length} références existent déjà. Aucune ligne ajoutée.`
+          : 'Cette référence existe déjà sur le document. Aucune ligne ajoutée.',
+        'error'
+      );
+      return;
     }
 
-    await applyUserActionsInChunks(userActions);
+    // Un seul appel conserve l'ajout multiple dans une transaction Grist unique.
+    await grist.docApi.applyUserActions(userActions);
     console.log("Ligne(s) ajoutée(s) avec succès.");
 
     resetDuplicateSelectedDocumentValues();
     document.getElementById('addRowDialog').close();
-    populateTable();
+    await populateTable();
+    const addedCount = userActions.length;
+    showReferenceToast(
+      `${addedCount} référence${addedCount > 1 ? 's ajoutées' : ' ajoutée'}.` +
+      (skippedDuplicates.length
+        ? ` ${skippedDuplicates.length} doublon${skippedDuplicates.length > 1 ? 's ignorés' : ' ignoré'}.`
+        : ''),
+      { warning: skippedDuplicates.length > 0 }
+    );
   } catch (error) {
     console.error("Erreur lors de l'ajout des lignes :", error?.message || error, error);
-    alert(`Erreur lors de l'ajout des lignes${error?.message ? ` : ${error.message}` : '.'}`);
+    setReferenceFormStatus(
+      'add',
+      `Impossible d'ajouter la référence${error?.message ? ` : ${error.message}` : '.'}`,
+      'error'
+    );
+  } finally {
+    setReferenceFormBusy('add', false);
   }
 });
 
@@ -4017,6 +4350,17 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
 document.getElementById('cancelAddRowButton').addEventListener('click', () => {
   resetDuplicateSelectedDocumentValues();
   document.getElementById('addRowDialog').close();
+});
+
+document.getElementById('cancelEditRowButton').addEventListener('click', () => {
+  document.getElementById('editRowDialog').close();
+});
+
+['add', 'edit'].forEach(mode => {
+  const dialog = document.getElementById(getReferenceRowFormConfig(mode).dialogId);
+  dialog?.addEventListener('cancel', event => {
+    if (referenceFormBusyState[mode]) event.preventDefault();
+  });
 });
 
 // Add event listener for "Archiver" option
@@ -4682,10 +5026,13 @@ function isCurrentDuplicateDocumentEntry(entry, selectedDocumentValue) {
 }
 
 function buildDuplicateDocumentCheckboxMarkup(option, index, preservedCheckedValues) {
+  const searchText = [option.label, option.type, option.zone, option.numero]
+    .map(value => String(value ?? '').toLocaleLowerCase('fr'))
+    .join(' ');
   return `
-        <div class="emetteur-item duplicate-document-item">
+        <div class="emetteur-item duplicate-document-item" data-duplicate-search="${escapeHtml(searchText)}">
           <input type="checkbox" id="doc-${index}" name="documents" value="${escapeHtml(option.value)}"${preservedCheckedValues.has(option.value) ? ' checked' : ''}>
-          <span>${escapeHtml(option.label)}</span>
+          <label for="doc-${index}">${escapeHtml(option.label)}</label>
         </div>
       `;
 }
@@ -4737,6 +5084,105 @@ function buildGroupedDuplicateDocumentList(documentOptions, showZoneSections, pr
       </div>
     `;
   }).join('');
+}
+
+function getVisibleDuplicateDocumentCheckboxes() {
+  const container = document.getElementById('duplicateOptionsContainer');
+  if (!container) return [];
+  return Array.from(container.querySelectorAll("input[name='documents']"))
+    .filter(input => !input.closest('.duplicate-document-item')?.hidden);
+}
+
+function filterDuplicateDocumentList(query = '') {
+  const container = document.getElementById('duplicateOptionsContainer');
+  if (!container) return;
+  const normalizedQuery = String(query || '').trim().toLocaleLowerCase('fr');
+  const items = Array.from(container.querySelectorAll('.duplicate-document-item'));
+  items.forEach(item => {
+    item.hidden = Boolean(normalizedQuery) &&
+      !String(item.dataset.duplicateSearch || '').includes(normalizedQuery);
+  });
+
+  container.querySelectorAll('.duplicate-zone-group').forEach(group => {
+    group.hidden = !Array.from(group.querySelectorAll('.duplicate-document-item'))
+      .some(item => !item.hidden);
+  });
+  container.querySelectorAll('.duplicate-document-group').forEach(group => {
+    group.hidden = !Array.from(group.querySelectorAll('.duplicate-document-item'))
+      .some(item => !item.hidden);
+  });
+
+  const empty = document.getElementById('duplicateSearchEmpty');
+  if (empty) empty.hidden = items.length === 0 || items.some(item => !item.hidden);
+}
+
+function getAddDialogTargetDocumentValues() {
+  const values = new Set();
+  const currentValue = document.getElementById('secondColumnListbox')?.value;
+  if (isValidDuplicateDocumentValue(currentValue)) values.add(currentValue);
+  if (document.getElementById('duplicateCheckbox')?.checked) {
+    duplicateSelectedDocumentValues.forEach(value => {
+      if (isValidDuplicateDocumentValue(value)) values.add(value);
+    });
+  }
+  if (values.size === 0) {
+    const currentDocument = getSelectedDocPair();
+    if (currentDocument?.name) values.add(buildDocSelectValue(currentDocument));
+  }
+  return Array.from(values);
+}
+
+function updateDuplicateSelectionSummary() {
+  const values = getAddDialogTargetDocumentValues();
+  const total = Math.max(1, values.length);
+  const summary = document.getElementById('duplicateSelectionSummary');
+  const submit = document.getElementById('confirmAddRowButton');
+  const count = document.getElementById('duplicateSelectionCount');
+  const emitter = String(document.getElementById('emetteur')?.value || '').trim();
+  const reference = String(document.getElementById('referenceInput')?.value || '').trim();
+  const indice = String(document.getElementById('indice')?.value || '').trim();
+  let duplicateCount = 0;
+
+  if (emitter && reference && indice) {
+    values.forEach(value => {
+      const documentInfo = parseDocValue(value);
+      const candidate = {
+        NomProjet: selectedFirstValue,
+        NomDocument: documentInfo.name,
+        NumeroDocument: documentInfo.numero,
+        Type_document: documentInfo.type || getCurrentSelectedType(),
+        Zone: documentInfo.zone,
+        Emetteur: emitter,
+        Reference: reference,
+        Indice: indice,
+      };
+      if (findReferenceDialogDuplicate(candidate)) duplicateCount += 1;
+    });
+  }
+
+  if (summary) {
+    const duplicateMessage = emitter && reference && indice
+      ? (duplicateCount
+          ? ` ${duplicateCount} doublon${duplicateCount > 1 ? 's seront ignorés' : ' sera ignoré'}.`
+          : ' Aucun doublon détecté.')
+      : ' Complétez l’émetteur, la référence et l’indice pour vérifier les doublons.';
+    summary.textContent = `${total} document${total > 1 ? 's concernés' : ' concerné'}.${duplicateMessage}`;
+  }
+  if (count) {
+    count.textContent = `${duplicateSelectedDocumentValues.size} autre${duplicateSelectedDocumentValues.size > 1 ? 's' : ''} sélectionné${duplicateSelectedDocumentValues.size > 1 ? 's' : ''}`;
+  }
+  if (submit && !referenceFormBusyState.add) {
+    submit.textContent = total > 1 ? `Ajouter sur ${total} documents` : 'Ajouter';
+  }
+}
+
+function refreshDuplicateSelectionUi() {
+  const visible = getVisibleDuplicateDocumentCheckboxes();
+  const selectVisibleButton = document.getElementById('selectVisibleDocuments');
+  if (selectVisibleButton) {
+    selectVisibleButton.disabled = visible.length === 0 || visible.every(input => input.checked);
+  }
+  updateDuplicateSelectionSummary();
 }
 
 async function renderDocumentCheckboxList(typeFilterValue = null, checkedValues = null) {
@@ -4794,23 +5240,26 @@ async function renderDocumentCheckboxList(typeFilterValue = null, checkedValues 
     ? 'Aucun autre document disponible pour ce type.'
     : 'Aucun autre document disponible pour ce projet.';
 
-  // Générer la case "Tout sélectionner"
-  const selectAllDiv = `
-        <div class="emetteur-item">
-          <input type="checkbox" id="selectAllDocuments" class="select-all-documents">
-          <span>Tout sélectionner</span>
-        </div>
-      `;
-
   // Générer les cases à cocher pour chaque document disponible
   const listHTML = buildGroupedDuplicateDocumentList(documentOptions, showZoneSections, preservedCheckedValues);
 
-  // Afficher la liste complète avec l'option "Tout sélectionner"
+  // Afficher la liste complète avec recherche, compteur et actions de sélection.
   container.innerHTML = `
-        ${typeFilterHTML}
-        <p>Document :</p>
-        <div id="documentList" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px;">
-          ${documentOptions.length > 0 ? `${selectAllDiv}${listHTML}` : `<p class="duplicate-empty-message">${emptyMessage}</p>`}
+        <div class="duplicate-toolbar">
+          <label for="duplicateDocumentSearch">
+            Rechercher un document
+            <input type="search" id="duplicateDocumentSearch" placeholder="Nom, numéro, zone…" autocomplete="off">
+          </label>
+          ${typeFilterHTML}
+        </div>
+        <div class="duplicate-list-actions">
+          <button type="button" id="selectVisibleDocuments">Tout sélectionner (filtrés)</button>
+          <button type="button" id="clearSelectedDocuments">Tout désélectionner</button>
+          <span id="duplicateSelectionCount" class="duplicate-selection-count"></span>
+        </div>
+        <div id="documentList" class="duplicate-document-list">
+          ${documentOptions.length > 0 ? listHTML : `<p class="duplicate-empty-message">${emptyMessage}</p>`}
+          <p id="duplicateSearchEmpty" class="duplicate-empty-message" hidden>Aucun document ne correspond à la recherche.</p>
         </div>
       `;
 
@@ -4821,10 +5270,7 @@ async function renderDocumentCheckboxList(typeFilterValue = null, checkedValues 
     renderDocumentCheckboxList(this.value);
   });
 
-  const selectAllCheckbox = document.getElementById('selectAllDocuments');
-  if (!selectAllCheckbox) return;
   const docCheckboxes = container.querySelectorAll("input[name='documents']");
-  selectAllCheckbox.checked = docCheckboxes.length > 0 && Array.from(docCheckboxes).every(input => input.checked);
   docCheckboxes.forEach(cb => {
     cb.addEventListener('change', function () {
       if (this.checked) {
@@ -4832,60 +5278,48 @@ async function renderDocumentCheckboxList(typeFilterValue = null, checkedValues 
       } else {
         duplicateSelectedDocumentValues.delete(this.value);
       }
-      selectAllCheckbox.checked = Array.from(docCheckboxes).every(input => input.checked);
+      refreshDuplicateSelectionUi();
     });
   });
 
-  selectAllCheckbox.addEventListener('change', function () {
-    // Récupérer toutes les cases à cocher des documents (excluant la case "Tout sélectionner")
-    docCheckboxes.forEach(cb => {
-      cb.checked = selectAllCheckbox.checked;
-      if (cb.checked) {
-        duplicateSelectedDocumentValues.add(cb.value);
-      } else {
-        duplicateSelectedDocumentValues.delete(cb.value);
-      }
-    });
+  document.getElementById('duplicateDocumentSearch')?.addEventListener('input', event => {
+    filterDuplicateDocumentList(event.target.value);
   });
+
+  document.getElementById('selectVisibleDocuments')?.addEventListener('click', () => {
+    getVisibleDuplicateDocumentCheckboxes().forEach(cb => {
+      cb.checked = true;
+      duplicateSelectedDocumentValues.add(cb.value);
+    });
+    refreshDuplicateSelectionUi();
+  });
+
+  document.getElementById('clearSelectedDocuments')?.addEventListener('click', () => {
+    duplicateSelectedDocumentValues.clear();
+    docCheckboxes.forEach(cb => { cb.checked = false; });
+    refreshDuplicateSelectionUi();
+  });
+
+  refreshDuplicateSelectionUi();
 }
 
 document.getElementById('duplicateCheckbox').addEventListener('change', async function () {
   const container = document.getElementById('duplicateOptionsContainer');
   if (this.checked) {
     resetDuplicateSelectedDocumentValues();
-    container.style.display = 'block'; // Afficher le conteneur des options de duplication
+    container.hidden = false;
     await renderDocumentCheckboxList(); // Charger les documents disponibles pour duplication
   } else {
     resetDuplicateSelectedDocumentValues();
-    container.style.display = 'none'; // Cacher le conteneur
-    container.innerHTML = ''; // Vider le contenu
+    container.hidden = true;
+    container.innerHTML = '';
   }
+  updateDuplicateSelectionSummary();
 });
 
-// Réinitialiser le formulaire d'ajout de ligne
-function resetAddRowForm() {
-  const addRowDialog = document.getElementById('addRowDialog');
-  resetDuplicateSelectedDocumentValues();
-  const inputs = addRowDialog.querySelectorAll('input, textarea, select');
-  inputs.forEach(input => {
-    if (input.type === 'checkbox') {
-      input.checked = false; // Décoche toutes les cases
-    } else if (input.id !== 'emetteur') {
-      input.value = ''; // Réinitialise tous les champs sauf "emetteur"
-    }
-  });
-
-  // Cacher les options liées à la duplication
-  const duplicateOptionsContainer = document.getElementById('duplicateOptionsContainer');
-  if (duplicateOptionsContainer) {
-    duplicateOptionsContainer.style.display = 'none'; // Cacher le conteneur de duplication
-    duplicateOptionsContainer.innerHTML = ''; // Vider les options de duplication
-  }
-}
-
-// Réinitialiser également lorsqu'on change de tableau dans la deuxième liste déroulante
+// Le contexte sera repris proprement à la prochaine ouverture du formulaire.
 document.getElementById('secondColumnListbox').addEventListener('change', () => {
-  resetAddRowForm(); // Réinitialise les champs du formulaire d'ajout
+  updateReferenceDialogContext('add');
 });
 
 // Fonction pour réinitialiser et assurer qu'il y a une seule case personnalisée vide et décochée
@@ -5235,66 +5669,82 @@ async function updateEditEmetteurList() {
 
 document.getElementById('editRowDialog').addEventListener('submit', async (e) => {
   e.preventDefault();
-
-  const formData = new FormData(e.target);
-  const dureeLimite = formData.get('dureeLimite');
-  if (String(dureeLimite ?? '').trim() && parseReferenceDurationLimit(dureeLimite) == null) {
-    alert("La duree limite doit etre un nombre entier de semaines.");
+  if (referenceFormBusyState.edit || !validateReferenceRowForm('edit')) return;
+  if (referenceEditInitialSnapshot && getReferenceFormSnapshot('edit') === referenceEditInitialSnapshot) {
+    setReferenceFormStatus('edit', 'Aucune modification à enregistrer.', 'info');
+    return;
+  }
+  if (!selectedRecordId) {
+    setReferenceFormStatus('edit', 'La ligne à modifier est introuvable.', 'error');
     return;
   }
 
-  const currentRecord = records.find(record => Number(record.id) === Number(selectedRecordId));
-  const planningTableForLimits = await fetchReferencePlanningTableForLimits();
-  const editDureeLimiteInput = document.getElementById('editDureeLimite');
-  const savedDurationValue = String(editDureeLimiteInput?.dataset?.initialValue ?? '').trim();
-  const nextDurationValue = String(dureeLimite ?? '').trim();
-  const referenceLimitFields =
-    !nextDurationValue && !savedDurationValue && currentRecord && !currentRecord.Bloquant
-    ? {
-        DureeLimite: currentRecord.DureeLimite ?? '',
-        DateLimite: currentRecord.DateLimite || DEFAULT_REFERENCE_DATE,
-      }
-    : buildReferenceLimitFields({
-        planningTable: planningTableForLimits,
-        projectName: currentRecord?.NomProjet || selectedFirstValue,
-        documentInfo: {
-          numero: currentRecord?.NumeroDocument,
-          name: currentRecord?.NomDocument,
-          type: currentRecord?.Type_document,
-          zone: currentRecord?.Zone,
-        },
-        durationWeeks: dureeLimite,
-        useZeroWhenEmpty: Boolean(currentRecord?.Bloquant),
-      });
-  const updatedRow = withComputedReferenceRetard({
-    Emetteur: formData.get('editEmetteur'),
-    Reference: formData.get('reference'),
-    Indice: formData.get('indice'),
-    Recu: formData.get('recu'),
-    DescriptionObservations: formData.get('description'),
-    Remarque: normalizeRemarqueValue(formData.get('remarque')),
-    ...referenceLimitFields,
-  });
+  const formData = new FormData(e.target);
+  const dureeLimite = String(formData.get('dureeLimite') || '').trim();
+  setReferenceFormBusy('edit', true, 'Enregistrement des modifications…');
 
-  const fileInput = document.getElementById('editReferenceFile');
-  if (fileInput?.files?.length > 0) {
-    const file = fileInput.files[0];
-    updatedRow.Reference = file.name;
-  }
+  try {
+    const currentRecord = records.find(record => Number(record.id) === Number(selectedRecordId));
+    if (!currentRecord) throw new Error('La ligne a été supprimée ou n’est plus disponible.');
 
-  if (selectedRecordId) {
-    try {
-      console.log("Mise à jour envoyée à Grist :", updatedRow);
-      await grist.docApi.applyUserActions([
-        ['UpdateRecord', 'References2', selectedRecordId, updatedRow]
-      ]);
-      console.log("Mise à jour réussie !");
-      await populateTable();
-      document.getElementById('editRowDialog').close();
-    } catch (error) {
-      console.error("Erreur lors de la mise à jour :", error);
-      alert("Erreur lors de la modification.");
+    const planningTableForLimits = await fetchReferencePlanningTableForLimits();
+    const editDureeLimiteInput = document.getElementById('editDureeLimite');
+    const savedDurationValue = String(editDureeLimiteInput?.dataset?.initialValue ?? '').trim();
+    const referenceLimitFields =
+      !dureeLimite && !savedDurationValue && !currentRecord.Bloquant
+      ? {
+          DureeLimite: currentRecord.DureeLimite ?? '',
+          DateLimite: currentRecord.DateLimite || DEFAULT_REFERENCE_DATE,
+        }
+      : buildReferenceLimitFields({
+          planningTable: planningTableForLimits,
+          projectName: currentRecord.NomProjet || selectedFirstValue,
+          documentInfo: {
+            numero: currentRecord.NumeroDocument,
+            name: currentRecord.NomDocument,
+            type: currentRecord.Type_document,
+            zone: currentRecord.Zone,
+          },
+          durationWeeks: dureeLimite,
+          useZeroWhenEmpty: Boolean(currentRecord.Bloquant),
+        });
+    const updatedRow = sanitizeReferences2DialogFields(withComputedReferenceRetard({
+      Emetteur: String(formData.get('editEmetteur') || '').trim(),
+      Reference: String(formData.get('reference') || '').trim(),
+      Indice: String(formData.get('indice') || '').trim(),
+      Recu: String(formData.get('recu') || '').trim() || DEFAULT_REFERENCE_DATE,
+      DescriptionObservations: String(formData.get('description') || '').trim(),
+      Remarque: normalizeRemarqueValue(formData.get('remarque')),
+      ...referenceLimitFields,
+    }));
+
+    const duplicateCandidate = { ...currentRecord, ...updatedRow };
+    if (findReferenceDialogDuplicate(duplicateCandidate, { ignoreRecordId: selectedRecordId })) {
+      setReferenceFormStatus(
+        'edit',
+        'Une référence identique existe déjà sur ce document. Modifiez la référence ou l’indice.',
+        'error'
+      );
+      return;
     }
+
+    console.log("Mise à jour envoyée à Grist :", updatedRow);
+    await grist.docApi.applyUserActions([
+      ['UpdateRecord', 'References2', selectedRecordId, updatedRow]
+    ]);
+    console.log("Mise à jour réussie !");
+    await populateTable();
+    document.getElementById('editRowDialog').close();
+    showReferenceToast('Référence modifiée avec succès.');
+  } catch (error) {
+    console.error("Erreur lors de la mise à jour :", error);
+    setReferenceFormStatus(
+      'edit',
+      `Impossible de modifier la référence${error?.message ? ` : ${error.message}` : '.'}`,
+      'error'
+    );
+  } finally {
+    setReferenceFormBusy('edit', false);
   }
 });
 
@@ -5311,26 +5761,21 @@ document.getElementById('editRowDialog').addEventListener('close', refreshEmette
 
 // Rafraîchir les émetteurs après modification
 document.getElementById('editRowDialog').addEventListener('close', () => {
+  resetReferenceFilePicker('edit');
+  clearReferenceFormErrors('edit');
+  setReferenceFormStatus('edit');
+  referenceEditInitialSnapshot = '';
   const rows = document.querySelectorAll('#tableBody tr');
   rows.forEach(row => row.classList.remove('highlighted'));
 });
 
 document.getElementById('addRowDialog').addEventListener('close', () => {
+  resetReferenceFilePicker('add');
+  clearReferenceFormErrors('add');
+  setReferenceFormStatus('add');
+  resetDuplicateSelectedDocumentValues();
   const rows = document.querySelectorAll('#tableBody tr');
   rows.forEach(row => row.classList.remove('highlighted'));
-});
-
-document.getElementById('addRowDialog').addEventListener('show', () => {
-  resetAndUpdateDialog(); // Réinitialise le formulaire
-  updateEmetteurList(false, "emetteurList"); // Actualise la liste en incluant les émetteurs personnalisés
-});
-
-document.getElementById('editRowDialog').addEventListener('show', () => {
-  updateEmetteurList(false, "editEmetteurList");
-});
-
-document.getElementById('editRowDialog').addEventListener('show', async () => {
-  await updateEmetteurList(false, "editEmetteurList");
 });
 
 async function updateEmetteurList(excludeCustom = false, targetDropdownIds = ["emetteurList", "editEmetteurList"]) {
@@ -5384,13 +5829,9 @@ document.getElementById('emetteur').addEventListener('blur', () => {
   updateEmetteurList(false, "emetteurList");
 });
 
-document.getElementById('editRowDialog').addEventListener('show', () => updateEmetteurList(false));
-
 document.getElementById('firstColumnDropdown').addEventListener('change', () => {
   updateEmetteurList(true, ["editEmetteurList"]);
 });
-
-document.getElementById('editRowDialog').addEventListener('show', updateEditEmetteurList);
 
 async function getDefaultEmetteurs() {
   try {
@@ -5424,28 +5865,6 @@ async function getTeamService() {
     console.error("Erreur lors de la récupération du service depuis la table Team :", error);
     return "";
   }
-}
-
-function resetAddRowDialog() {
-  const dialog = document.getElementById('addRowDialog');
-  const inputs = dialog.querySelectorAll('input, textarea, select');
-
-  inputs.forEach(input => {
-    if (input.type === 'checkbox') {
-      input.checked = false; // Décoche toutes les cases
-    } else if (input.id !== 'emetteur') {
-      input.value = ''; // Réinitialise tous les champs sauf "emetteur"
-    }
-  });
-
-  // Assurez-vous que la case "Ajouter sur d'autres documents" est décochée
-  const duplicateCheckbox = document.getElementById('duplicateCheckbox');
-  duplicateCheckbox.checked = false;
-
-  // Masquez et videz le conteneur des options de duplication
-  const duplicateOptionsContainer = document.getElementById('duplicateOptionsContainer');
-  duplicateOptionsContainer.style.display = 'none';
-  duplicateOptionsContainer.innerHTML = '';
 }
 
 // Fonction pour retirer l'extension d'un fichier
