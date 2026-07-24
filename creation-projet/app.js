@@ -342,7 +342,6 @@ document.addEventListener('DOMContentLoaded', () => {
         'ListePlan_NDC+COF'
     ];
     const PLANNING_TABLE_CANDIDATES = ['Planning_Projet', 'Planning_Project'];
-    const CREATION_PROJECT_SERVICE = 'Structure';
     const DEFAULT_DOCUMENT_TYPES = [
         'COFFRAGE',
         'ARMATURES',
@@ -749,7 +748,11 @@ document.addEventListener('DOMContentLoaded', () => {
         throw lastError || new Error('Aucune table disponible.');
     }
 
-    async function assertProjectCreationDocumentIdentitiesAvailable(projectName, documents = []) {
+    async function assertProjectCreationDocumentIdentitiesAvailable(projectName, documents = [], service = '') {
+        const serviceKey = normalizeText(service).toLowerCase();
+        if (!serviceKey) {
+            throw new Error('Le service est obligatoire pour controler les documents existants.');
+        }
         const requestedIdentities = new Map();
         for (const doc of documents) {
             const documentIdentity = {
@@ -794,7 +797,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const rowServices = listePlanContext.data.Service || [];
         for (let index = 0; index < Math.max(rowProjects.length, rowNumbers.length, rowTypes.length, rowServices.length); index += 1) {
             const rowService = normalizeText(rowServices[index]);
-            if (rowService && rowService.toLowerCase() !== CREATION_PROJECT_SERVICE.toLowerCase()) continue;
+            if (rowService.toLowerCase() !== serviceKey) continue;
             if (!projectAliases.has(normalizeDocumentIdentityPart(rowProjects[index]))) continue;
             if (
                 !normalizeDocumentIdentityPart(rowNumbers[index]) ||
@@ -1702,29 +1705,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         return service;
     }
-
-    async function hasCreationProjectOwnerOverride() {
-        try {
-            // La table Hidden est lisible uniquement par les Owners dans les règles Grist.
-            const hiddenTable = await grist.docApi.fetchTable('Hidden');
-            const hiddenValues = Array.isArray(hiddenTable)
-                ? hiddenTable.map((row) => row?.A)
-                : Array.isArray(hiddenTable?.records)
-                    ? hiddenTable.records.map((record) => record?.fields?.A ?? record?.A)
-                    : Array.isArray(hiddenTable?.A)
-                        ? hiddenTable.A
-                        : [];
-
-            return hiddenValues.length > 0 && hiddenValues.some((value) => {
-                if (Array.isArray(value) && value[0] === 'C') return false;
-                const normalized = String(value ?? '').trim().toUpperCase();
-                return normalized !== 'C' && normalized !== 'CENSORED';
-            });
-        } catch (_error) {
-            return false;
-        }
-    }
-
 
     function renderReview() {
         const reviewContainer = document.getElementById('review-container');
@@ -2675,28 +2655,12 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             projectData.name = cleanProjectName(projectData.name);
             projectData.number = (projectData.number ?? "").toString().trim();
-            let currentUserService = '';
-            let ownerOverride = false;
-            try {
-                currentUserService = await getTeamService();
-            } catch (serviceError) {
-                ownerOverride = await hasCreationProjectOwnerOverride();
-                if (!ownerOverride) throw serviceError;
-            }
-            if (
-                currentUserService.toLowerCase() !== CREATION_PROJECT_SERVICE.toLowerCase() &&
-                !ownerOverride
-            ) {
-                ownerOverride = await hasCreationProjectOwnerOverride();
-            }
-            if (
-                currentUserService.toLowerCase() !== CREATION_PROJECT_SERVICE.toLowerCase() &&
-                !ownerOverride
-            ) {
-                throw new Error('La creation de projet est reservee au service Structure.');
-            }
-            const serviceValue = CREATION_PROJECT_SERVICE;
-            await assertProjectCreationDocumentIdentitiesAvailable(projectData.name, projectData.documents);
+            const serviceValue = await getTeamService();
+            await assertProjectCreationDocumentIdentitiesAvailable(
+                projectData.name,
+                projectData.documents,
+                serviceValue
+            );
             const [refTable, listePlanContext, planningContext] = await Promise.all([
                 grist.docApi.fetchTable("References2"),
                 fetchFirstAvailableTable(LISTEPLAN_TABLE_CANDIDATES),
