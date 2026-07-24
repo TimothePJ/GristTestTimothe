@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Harnais — Gestion des accès projets</title>
+    <link rel="stylesheet" href="../style.css">
+  </head>
+  <body>
+    <script type="module">
+      const [pageResponse, mockModule] = await Promise.all([
+        fetch("../index.html"),
+        import("./mock-grist.js"),
+      ]);
+      const pageSource = await pageResponse.text();
+      const parsedPage = new DOMParser().parseFromString(pageSource, "text/html");
+      const appShell = parsedPage.querySelector(".app-shell");
+      document.body.prepend(document.importNode(appShell, true));
+      window.grist = mockModule.grist;
+      await import("../app.js");
+    </script>
+  </body>
+</html>

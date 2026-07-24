@@ -669,13 +669,14 @@ function rememberLatestPlanRecord(map, key, candidate) {
   }
 }
 
-function buildPlanningLinkKey(project, numeroDocument, typeDocument, designation, zone = "") {
+function buildPlanningLinkKey(project, numeroDocument, typeDocument, designation, zone = "", service = "") {
   return [
     normalizeDocumentIdentityText(project),
     normalizeDocumentIdentityText(numeroDocument),
     normalizeDocumentIdentityText(typeDocument),
     normalizeDocumentIdentityText(designation),
     normalizeDocumentIdentityText(normalizeZoneText(zone)),
+    normalizeDocumentIdentityText(service),
   ].join("||");
 }
 
@@ -792,10 +793,16 @@ function buildDocumentTextSyncActions({
   typeDocument,
   nomProjet,
   zone,
+  service,
   projectId,
   warningLabel
 }) {
   const normalizedType = normalizeText(typeDocument);
+  const normalizedService = normalizeDocumentIdentityText(service);
+
+  if (!normalizedService) {
+    throw new Error(`Le service est obligatoire pour synchroniser ${warningLabel}.`);
+  }
 
   if (!projectColumn || !numeroColumn || !typeColumn || !designationColumns.length) {
     throw new Error(`La structure de ${warningLabel} ne permet pas d'identifier le document.`);
@@ -811,6 +818,9 @@ function buildDocumentTextSyncActions({
       normalizeDocumentIdentityText(row[typeColumn]) !==
         normalizeDocumentIdentityText(normalizedType)
     ) {
+      return false;
+    }
+    if (normalizeDocumentIdentityText(row.Service) !== normalizedService) {
       return false;
     }
     return true;
@@ -841,7 +851,8 @@ async function buildReferencesTextUpdateActions({
   designation,
   typeDocument,
   nomProjet,
-  zone
+  zone,
+  service
 }) {
   try {
     const referencesRaw = await grist.docApi.fetchTable("References2");
@@ -889,6 +900,7 @@ async function buildReferencesTextUpdateActions({
       typeDocument,
       nomProjet,
       zone,
+      service,
       projectId,
       warningLabel: "References2"
     });
@@ -920,7 +932,8 @@ async function buildPlanningProjetTextUpdateActions({
   designation,
   typeDocument,
   nomProjet,
-  zone
+  zone,
+  service
 }) {
   try {
     const { tableName: planningTableName, raw: planningRaw } =
@@ -976,6 +989,7 @@ async function buildPlanningProjetTextUpdateActions({
       typeDocument,
       nomProjet,
       zone,
+      service,
       projectId,
       warningLabel: planningTableName
     });
@@ -1036,13 +1050,16 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
         r.NumeroDocument,
         r.Type_document,
         r.Designation,
-        r.Zone
+        r.Zone,
+        r.Service
       );
       const strictLegacyKey = buildPlanningLinkKey(
         normalizeProject(r.Nom_projet),
         r.NumeroDocument,
         r.Type_document,
-        r.Designation
+        r.Designation,
+        "",
+        r.Service
       );
 
       rememberLatestPlanRecord(latestByKeyStrict, strictKey, latestRecord);
@@ -1059,13 +1076,16 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
         p.ID2,
         p.Type_doc,
         p.Taches ?? p.Tache,
-        p.Zone
+        p.Zone,
+        p.Service
       );
       const strictLegacyKey = buildPlanningLinkKey(
         normalizeProject(p.NomProjet),
         p.ID2,
         p.Type_doc,
-        p.Taches ?? p.Tache
+        p.Taches ?? p.Tache,
+        "",
+        p.Service
       );
 
       const latestRecord =
@@ -1165,7 +1185,8 @@ function renderPlanTableSection(
       normalizeDocumentIdentityText(r.NumeroDocument),
       normalizeDocumentIdentityText(r.Designation),
       normalizeDocumentIdentityText(r.Type_document),
-      normalizeDocumentIdentityText(zoneValue)
+      normalizeDocumentIdentityText(zoneValue),
+      normalizeDocumentIdentityText(r.Service)
     ].join("___");
     if (!plansMap.has(key)) {
       plansMap.set(key, {
@@ -1174,6 +1195,7 @@ function renderPlanTableSection(
         Type_document: r.Type_document,
         Nom_projet: getRecordProjectName(r),
         Zone: zoneValue,
+        Service: r.Service,
         lignes: {}
       });
     }
@@ -1288,6 +1310,7 @@ function renderPlanTableSection(
     tdNum.dataset.numDocument = plan.Num_Document;
     tdNum.dataset.designation = plan.Designation;
     tdNum.dataset.zone = plan.Zone;
+    tdNum.dataset.service = plan.Service || "";
     tdNum.contentEditable = true;
     tdNum.classList.add("editable");
     tdNum.dataset.typeDocument = plan.Type_document;
@@ -1299,6 +1322,7 @@ function renderPlanTableSection(
     tdNom.dataset.numDocument = plan.Num_Document;
     tdNom.dataset.designation = plan.Designation;
     tdNom.dataset.zone = plan.Zone;
+    tdNom.dataset.service = plan.Service || "";
     tdNom.contentEditable = true;
     tdNom.classList.add("editable", "nomplan");
     tdNom.dataset.typeDocument = plan.Type_document;
@@ -1313,6 +1337,7 @@ function renderPlanTableSection(
       td.dataset.numDocument = plan.Num_Document;
       td.dataset.designation = plan.Designation;
       td.dataset.zone = plan.Zone;
+      td.dataset.service = plan.Service || "";
       td.dataset.indice = indice;
 
       const recs = plan.lignes[indice];
@@ -1743,7 +1768,8 @@ document.addEventListener("click", async (e) => {
           Nom_projet: nomProjet,
           Zone: zone || "",
           Indice: indice,
-          DateDiffusion: isoDate
+          DateDiffusion: isoDate,
+          Service: td.dataset.service || ""
         };
 
         try {
@@ -1776,7 +1802,7 @@ document.addEventListener("focusout", async (e) => {
   td.style.backgroundColor = "";
   td.style.color = "";
   const texte = td.textContent.trim();
-  const { numDocument, designation, typeDocument, nomProjet, zone } = td.dataset;
+  const { numDocument, designation, typeDocument, nomProjet, zone, service } = td.dataset;
   const currentValue = td.cellIndex === 0 ? normalizeText(numDocument) : normalizeText(designation);
   if (normalizeText(texte) === currentValue) return;
   if (!texte) {
@@ -1786,6 +1812,10 @@ document.addEventListener("focusout", async (e) => {
   }
 
   try {
+    if (typeof window.getCurrentTeamService !== "function") {
+      throw new Error("Le service de l'utilisateur courant est indisponible.");
+    }
+    await window.getCurrentTeamService();
     if (typeof window.assertDocumentIdentitiesAvailable !== "function") {
       throw new Error("Le controle d'identite des documents est indisponible.");
     }
@@ -1800,7 +1830,8 @@ document.addEventListener("focusout", async (e) => {
       type: typeDocument
     };
     await window.assertDocumentIdentitiesAvailable(nomProjet, [targetDocument], {
-      excludeDocument: sourceDocument
+      excludeDocument: sourceDocument,
+      service
     });
   } catch (error) {
     td.textContent = currentValue;
@@ -1814,6 +1845,7 @@ document.addEventListener("focusout", async (e) => {
     normalizeDocumentIdentityText(r.NumeroDocument) === normalizeDocumentIdentityText(numDocument) &&
     normalizeDocumentIdentityText(r.Designation) === normalizeDocumentIdentityText(designation) &&
     normalizeDocumentIdentityText(r.Type_document) === normalizeDocumentIdentityText(typeDocument) &&
+    normalizeDocumentIdentityText(r.Service) === normalizeDocumentIdentityText(service) &&
     matchesProjectValue(r.Nom_projet, nomProjet, projectId)
   );
   if (recordsToUpdate.length === 0) return;
@@ -1838,7 +1870,8 @@ document.addEventListener("focusout", async (e) => {
         designation,
         typeDocument,
         nomProjet,
-        zone
+        zone,
+        service
       });
       const planningActions = await buildPlanningProjetTextUpdateActions({
         cellIndex: td.cellIndex,
@@ -1847,7 +1880,8 @@ document.addEventListener("focusout", async (e) => {
         designation,
         typeDocument,
         nomProjet,
-        zone
+        zone,
+        service
       });
       await grist.docApi.applyUserActions(
         actions.concat(referenceActions, planningActions)
@@ -1911,6 +1945,7 @@ function getDateCellContext(td) {
     typeDocument: td?.dataset?.typeDocument || "",
     nomProjet: td?.dataset?.nomProjet || "",
     zone: td?.dataset?.zone || "",
+    service: td?.dataset?.service || "",
     numDocument: td?.dataset?.numDocument || tr?.cells?.[0]?.textContent?.trim() || "",
     designation: td?.dataset?.designation || tr?.cells?.[1]?.textContent?.trim() || ""
   };
@@ -1924,16 +1959,18 @@ function getOtherDatedIndiceCells(td) {
   );
 }
 
-function buildDateCellActions(td, isoDate, projetsDict = null) {
+function buildDateCellActions(td, isoDate, projetsDict = null, fallbackService = "") {
   const {
     recordId,
     indice,
     typeDocument,
     nomProjet,
     zone,
+    service,
     numDocument,
     designation
   } = getDateCellContext(td);
+  const serviceValue = normalizeText(service || fallbackService);
 
   const actionsUpsert = [];
   const actionsDelete = [];
@@ -1977,6 +2014,9 @@ function buildDateCellActions(td, isoDate, projetsDict = null) {
     });
     return { actionsUpsert, actionsDelete, keepRecordId: null };
   }
+  if (!serviceValue) {
+    throw new Error("Le service est obligatoire pour ajouter une ligne ListePlan.");
+  }
 
   if (projetsDict && !projetsDict[nomProjet.trim()]) {
     console.error("Projet non trouve :", nomProjet);
@@ -1990,7 +2030,8 @@ function buildDateCellActions(td, isoDate, projetsDict = null) {
     Nom_projet: nomProjet,
     Zone: zone || "",
     Indice: indice,
-    DateDiffusion: isoDate
+    DateDiffusion: isoDate,
+    Service: serviceValue
   }]);
 
   return { actionsUpsert, actionsDelete, keepRecordId: null };
@@ -2018,12 +2059,16 @@ async function appliquerDateSurCellules(cells, isoDate, { syncPlanning = true } 
   if (uniqueCells.length === 0) return { updatedCount: 0 };
 
   const projetsDict = await chargerProjetsMap();
+  if (typeof window.getCurrentTeamService !== "function") {
+    throw new Error("Le service de l'utilisateur courant est indisponible.");
+  }
+  const currentService = await window.getCurrentTeamService();
   const actionsUpsert = [];
   const actionsDelete = [];
   const visualUpdates = [];
 
   for (const td of uniqueCells) {
-    const result = buildDateCellActions(td, isoDate, projetsDict);
+    const result = buildDateCellActions(td, isoDate, projetsDict, currentService);
     actionsUpsert.push(...result.actionsUpsert);
     actionsDelete.push(...result.actionsDelete);
     if (result.actionsUpsert.length || result.actionsDelete.length) {
@@ -2544,7 +2589,8 @@ async function appliquerDateSurTouteLaColonne(th, isoDate) {
       Nom_projet: nomProjet,
       Zone: zone || "",
       Indice: indice,
-      DateDiffusion: isoDate
+      DateDiffusion: isoDate,
+      Service: td.dataset.service || ""
     }]);
 
     // ✅ Mise à jour visuelle immédiate (même si Grist met 0.5s à refresh)

@@ -342,6 +342,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'ListePlan_NDC+COF'
     ];
     const PLANNING_TABLE_CANDIDATES = ['Planning_Projet', 'Planning_Project'];
+    const CREATION_PROJECT_SERVICE = 'Structure';
     const DEFAULT_DOCUMENT_TYPES = [
         'COFFRAGE',
         'ARMATURES',
@@ -465,15 +466,18 @@ document.addEventListener('DOMContentLoaded', () => {
         return 'NomProjet';
     }
 
-    function collectProjectPlanningGroups(planningData, projectName) {
+    function collectProjectPlanningGroups(planningData, projectName, service) {
         const projectCol = getPlanningProjectColumnFromData(planningData);
         const projects = getTableColumnArray(planningData, projectCol);
         const groups = getTableColumnArray(planningData, 'Groupe');
+        const services = getTableColumnArray(planningData, 'Service');
         const projectKey = normalizeText(projectName).toLowerCase();
+        const serviceKey = normalizeText(service).toLowerCase();
         const usedGroups = new Set();
 
-        for (let index = 0; index < Math.max(projects.length, groups.length); index += 1) {
+        for (let index = 0; index < Math.max(projects.length, groups.length, services.length); index += 1) {
             if (normalizeText(projects[index]).toLowerCase() !== projectKey) continue;
+            if (normalizeText(services[index]).toLowerCase() !== serviceKey) continue;
 
             const group = normalizeText(groups[index]);
             if (group) usedGroups.add(group.toLowerCase());
@@ -482,8 +486,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return usedGroups;
     }
 
-    function getNextAvailablePlanningGroupNumber(planningData, projectName, usedGroups = null) {
-        const existingGroups = usedGroups || collectProjectPlanningGroups(planningData, projectName);
+    function getNextAvailablePlanningGroupNumber(planningData, projectName, service, usedGroups = null) {
+        const existingGroups = usedGroups || collectProjectPlanningGroups(planningData, projectName, service);
         let nextGroupNumber = 1;
 
         while (existingGroups.has(String(nextGroupNumber).toLowerCase())) {
@@ -495,9 +499,9 @@ document.addEventListener('DOMContentLoaded', () => {
         return candidate;
     }
 
-    function getDefaultPlanningGroupForType(typeDoc, planningData = null, projectName = '', usedGroups = null) {
+    function getDefaultPlanningGroupForType(typeDoc, planningData = null, projectName = '', service = '', usedGroups = null) {
         return isCoffrageDocumentType(typeDoc)
-            ? getNextAvailablePlanningGroupNumber(planningData, projectName, usedGroups)
+            ? getNextAvailablePlanningGroupNumber(planningData, projectName, service, usedGroups)
             : '';
     }
 
@@ -787,7 +791,10 @@ document.addEventListener('DOMContentLoaded', () => {
             [];
         const rowNumbers = listePlanContext.data.NumeroDocument || [];
         const rowTypes = listePlanContext.data.Type_document || listePlanContext.data.Type_doc || [];
-        for (let index = 0; index < Math.max(rowProjects.length, rowNumbers.length, rowTypes.length); index += 1) {
+        const rowServices = listePlanContext.data.Service || [];
+        for (let index = 0; index < Math.max(rowProjects.length, rowNumbers.length, rowTypes.length, rowServices.length); index += 1) {
+            const rowService = normalizeText(rowServices[index]);
+            if (rowService && rowService.toLowerCase() !== CREATION_PROJECT_SERVICE.toLowerCase()) continue;
             if (!projectAliases.has(normalizeDocumentIdentityPart(rowProjects[index]))) continue;
             if (
                 !normalizeDocumentIdentityPart(rowNumbers[index]) ||
@@ -816,17 +823,19 @@ document.addEventListener('DOMContentLoaded', () => {
         return Array.isArray(tableData[columnName]) ? tableData[columnName] : [];
     }
 
-    function planningZoneExists(planningData, projectName, zoneName) {
+    function planningZoneExists(planningData, projectName, zoneName, service) {
         const normalizedZone = normalizeZoneValue(zoneName);
         if (!normalizedZone) return true;
 
         const projects = getTableColumnArray(planningData, 'NomProjet');
         const zones = getTableColumnArray(planningData, 'Zone');
+        const services = getTableColumnArray(planningData, 'Service');
 
-        for (let index = 0; index < Math.max(projects.length, zones.length); index += 1) {
+        for (let index = 0; index < Math.max(projects.length, zones.length, services.length); index += 1) {
             if (
                 normalizeText(projects[index]).toLowerCase() === normalizeText(projectName).toLowerCase() &&
-                normalizeZoneMatchKey(zones[index]) === normalizeZoneMatchKey(normalizedZone)
+                normalizeZoneMatchKey(zones[index]) === normalizeZoneMatchKey(normalizedZone) &&
+                normalizeText(services[index]).toLowerCase() === normalizeText(service).toLowerCase()
             ) {
                 return true;
             }
@@ -835,7 +844,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return false;
     }
 
-    function buildPlanningZoneAnchorFields(columnNames, projectName, zoneName) {
+    function buildPlanningZoneAnchorFields(columnNames, projectName, zoneName, service) {
         const normalizedZone = normalizeZoneValue(zoneName);
         const fields = {};
 
@@ -857,6 +866,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setFieldIfPresent(columnNames, fields, 'NomProjet', projectName);
         setFieldIfPresent(columnNames, fields, 'Groupe', '');
         setFieldIfPresent(columnNames, fields, 'Zone', normalizedZone);
+        setFieldIfPresent(columnNames, fields, 'Service', service);
 
         return fields;
     }
@@ -1657,23 +1667,61 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function getTeamService() {
+        const teamTable = await grist.docApi.fetchTable('Team');
+        let rows = [];
+
+        if (Array.isArray(teamTable)) {
+            rows = teamTable;
+        } else if (Array.isArray(teamTable?.records)) {
+            rows = teamTable.records.map((record) => record?.fields ? { id: record.id, ...record.fields } : record);
+        } else if (teamTable && typeof teamTable === 'object') {
+            const columns = Object.entries(teamTable).filter(([, values]) => Array.isArray(values));
+            const rowCount = columns.reduce((count, [, values]) => Math.max(count, values.length), 0);
+            rows = Array.from({ length: rowCount }, (_, index) =>
+                Object.fromEntries(columns.map(([column, values]) => [column, values[index]]))
+            );
+        }
+
+        const readableRows = rows.filter((row) => {
+            const value = row?.Moi;
+            if (value === null || value === undefined || value === '') return false;
+            const normalized = String(value).trim().toUpperCase();
+            return normalized !== 'C' && normalized !== 'CENSORED';
+        });
+        if (readableRows.length !== 1) {
+            throw new Error(
+                readableRows.length === 0
+                    ? 'Utilisateur non reconnu dans Team : aucune ligne Moi lisible.'
+                    : 'Utilisateur ambigu dans Team : plusieurs lignes Moi sont lisibles.'
+            );
+        }
+
+        const service = String(readableRows[0]?.Service ?? '').trim();
+        if (!service || service.toUpperCase() === 'C' || service.toUpperCase() === 'CENSORED') {
+            throw new Error('Le service de l utilisateur connecte est vide ou illisible dans Team.');
+        }
+        return service;
+    }
+
+    async function hasCreationProjectOwnerOverride() {
         try {
-            const teamTable = await grist.docApi.fetchTable('Team');
+            // La table Hidden est lisible uniquement par les Owners dans les règles Grist.
+            const hiddenTable = await grist.docApi.fetchTable('Hidden');
+            const hiddenValues = Array.isArray(hiddenTable)
+                ? hiddenTable.map((row) => row?.A)
+                : Array.isArray(hiddenTable?.records)
+                    ? hiddenTable.records.map((record) => record?.fields?.A ?? record?.A)
+                    : Array.isArray(hiddenTable?.A)
+                        ? hiddenTable.A
+                        : [];
 
-            // Cas 1: Grist renvoie un tableau d'objets
-            if (Array.isArray(teamTable) && teamTable.length > 0) {
-                return teamTable[0].Service || "";
-            }
-
-            // Cas 2: Grist renvoie un objet de colonnes
-            if (teamTable && Array.isArray(teamTable.Service) && teamTable.Service.length > 0) {
-                return teamTable.Service[0] || "";
-            }
-
-            return "";
-        } catch (error) {
-            console.error("Erreur récupération service depuis Team:", error);
-            return "";
+            return hiddenValues.length > 0 && hiddenValues.some((value) => {
+                if (Array.isArray(value) && value[0] === 'C') return false;
+                const normalized = String(value ?? '').trim().toUpperCase();
+                return normalized !== 'C' && normalized !== 'CENSORED';
+            });
+        } catch (_error) {
+            return false;
         }
     }
 
@@ -2627,7 +2675,43 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             projectData.name = cleanProjectName(projectData.name);
             projectData.number = (projectData.number ?? "").toString().trim();
+            let currentUserService = '';
+            let ownerOverride = false;
+            try {
+                currentUserService = await getTeamService();
+            } catch (serviceError) {
+                ownerOverride = await hasCreationProjectOwnerOverride();
+                if (!ownerOverride) throw serviceError;
+            }
+            if (
+                currentUserService.toLowerCase() !== CREATION_PROJECT_SERVICE.toLowerCase() &&
+                !ownerOverride
+            ) {
+                ownerOverride = await hasCreationProjectOwnerOverride();
+            }
+            if (
+                currentUserService.toLowerCase() !== CREATION_PROJECT_SERVICE.toLowerCase() &&
+                !ownerOverride
+            ) {
+                throw new Error('La creation de projet est reservee au service Structure.');
+            }
+            const serviceValue = CREATION_PROJECT_SERVICE;
             await assertProjectCreationDocumentIdentitiesAvailable(projectData.name, projectData.documents);
+            const [refTable, listePlanContext, planningContext] = await Promise.all([
+                grist.docApi.fetchTable("References2"),
+                fetchFirstAvailableTable(LISTEPLAN_TABLE_CANDIDATES),
+                fetchFirstAvailableTable(PLANNING_TABLE_CANDIDATES)
+            ]);
+            const refCols = new Set(Object.keys(refTable));
+            if (!refCols.has('Service')) {
+                throw new Error('La colonne Service est absente de References2.');
+            }
+            if (!listePlanContext.columns.has('Service')) {
+                throw new Error('La colonne Service est absente de ListePlan_NDC_COF.');
+            }
+            if (!planningContext.columns.has('Service')) {
+                throw new Error('La colonne Service est absente de Planning_Projet.');
+            }
             const projetsTable = await grist.docApi.fetchTable("Projets2");
             const projetsColumns = getTableColumnNames(projetsTable);
             const projectFields = {
@@ -2662,14 +2746,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // 4. Create References (documents x emitters)
-            const refTable = await grist.docApi.fetchTable("References2");
-            const refCols = new Set(Object.keys(refTable)); // colonnes existantes dans Grist
-
             const descCol =
                 refCols.has("DescriptionObservations") ? "DescriptionObservations" :
                     (refCols.has("DescriptionObservation") ? "DescriptionObservation" : null);
-
-            const serviceValue = await getTeamService();
 
             const referencesActions = [];
             for (const doc of projectData.documents) {
@@ -2705,7 +2784,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // 5. Add to ListePlan_NDC_COF
-            const listePlanContext = await fetchFirstAvailableTable(LISTEPLAN_TABLE_CANDIDATES);
             const listePlanActions = projectData.documents.map((doc) => {
                 const fields = {};
                 setFieldIfPresent(listePlanContext.columns, fields, 'Nom_projet', projectData.name);
@@ -2718,6 +2796,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 setFieldIfPresent(listePlanContext.columns, fields, 'Zone', normalizeZoneValue(doc.zone));
                 setFieldIfPresent(listePlanContext.columns, fields, 'Indice', null);
                 setFieldIfPresent(listePlanContext.columns, fields, 'DateDiffusion', null);
+                setFieldIfPresent(listePlanContext.columns, fields, 'Service', serviceValue);
                 return ["AddRecord", listePlanContext.tableName, null, fields];
             });
 
@@ -2725,7 +2804,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 await grist.docApi.applyUserActions(listePlanActions);
             }
 
-            const planningContext = await fetchFirstAvailableTable(PLANNING_TABLE_CANDIDATES);
             const planningActions = [];
             const uniqueZones = [...new Set(
                 projectData.documents
@@ -2737,17 +2815,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }));
 
             uniqueZones.forEach((zoneName) => {
-                if (!planningZoneExists(planningContext.data, projectData.name, zoneName)) {
+                if (!planningZoneExists(planningContext.data, projectData.name, zoneName, serviceValue)) {
                     planningActions.push([
                         "AddRecord",
                         planningContext.tableName,
                         null,
-                        buildPlanningZoneAnchorFields(planningContext.columns, projectData.name, zoneName)
+                        buildPlanningZoneAnchorFields(planningContext.columns, projectData.name, zoneName, serviceValue)
                     ]);
                 }
             });
 
-            const usedPlanningGroups = collectProjectPlanningGroups(planningContext.data, projectData.name);
+            const usedPlanningGroups = collectProjectPlanningGroups(planningContext.data, projectData.name, serviceValue);
 
             projectData.documents.forEach((doc) => {
                 const numeroText = String(doc.numero ?? '').trim();
@@ -2767,10 +2845,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         doc.type || 'COFFRAGE',
                         planningContext.data,
                         projectData.name,
+                        serviceValue,
                         usedPlanningGroups
                     )
                 );
                 setFieldIfPresent(planningContext.columns, fields, 'Zone', normalizeZoneValue(doc.zone));
+                setFieldIfPresent(planningContext.columns, fields, 'Service', serviceValue);
 
                 planningActions.push(["AddRecord", planningContext.tableName, null, fields]);
             });
@@ -2785,7 +2865,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.location.reload();
         } catch (error) {
             console.error('Error creating project:', error);
-            alert('Erreur lors de la création du projet.');
+            alert(error?.message || 'Erreur lors de la création du projet.');
         }
     });
 

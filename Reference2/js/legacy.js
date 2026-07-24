@@ -626,6 +626,7 @@ function getReferenceDuplicateIdentity(fields) {
     fields?.Emetteur,
     fields?.Reference,
     fields?.Indice,
+    fields?.Service,
   ].map(normalizeReferenceDocumentIdentityPart).join('||');
 }
 
@@ -756,6 +757,10 @@ function _norm(v) {
   return String(v ?? '').trim();
 }
 
+function normalizeServiceMatchKey(value) {
+  return _norm(value).toLocaleLowerCase('fr');
+}
+
 function normalizeReferenceDocumentIdentityPart(value) {
   return String(value ?? '')
     .trim()
@@ -827,7 +832,11 @@ async function buildDocumentProjectAliasKeys(projectName) {
   return aliases;
 }
 
-async function assertReferenceDocumentIdentitiesAvailable(projectName, documents) {
+async function assertReferenceDocumentIdentitiesAvailable(projectName, documents, service) {
+  const serviceKey = normalizeServiceMatchKey(service);
+  if (!serviceKey) {
+    throw new Error('Le service est obligatoire pour controler les documents existants.');
+  }
   const normalizedDocuments = (documents || []).map(normalizeReferenceDocumentIdentityInput);
   const requestedUniquenessKeys = new Set();
   for (const documentIdentity of normalizedDocuments) {
@@ -848,8 +857,10 @@ async function assertReferenceDocumentIdentitiesAvailable(projectName, documents
   const projects = plans.Nom_projet || plans.NomProjet || plans.NomProjetString || [];
   const numbers = plans.NumeroDocument || plans.ID2 || [];
   const types = plans.Type_document || plans.Type_doc || plans.TypeDocument || plans.TypeDoc || [];
+  const services = plans.Service || [];
 
-  for (let index = 0; index < Math.max(projects.length, numbers.length, types.length); index += 1) {
+  for (let index = 0; index < Math.max(projects.length, numbers.length, types.length, services.length); index += 1) {
+    if (normalizeServiceMatchKey(services[index]) !== serviceKey) continue;
     if (!projectAliases.has(normalizeDocumentProjectKey(projects[index]))) continue;
     if (
       !normalizeReferenceDocumentIdentityPart(numbers[index]) ||
@@ -867,22 +878,25 @@ async function assertReferenceDocumentIdentitiesAvailable(projectName, documents
   }
 }
 
-function findListePlanIndex(plansTable, projectName, numeroDocStr, typeDocStr = '', zoneStr = '', taskName = '') {
+function findListePlanIndex(plansTable, projectName, numeroDocStr, typeDocStr = '', zoneStr = '', taskName = '', service = '') {
   const projs = plansTable.Nom_projet || [];
   const nums  = plansTable.NumeroDocument || [];
   const types = plansTable.Type_document || [];
   const zones = plansTable.Zone || [];
   const names = plansTable.Designation || plansTable.NomDocument || [];
+  const services = plansTable.Service || [];
   const p = _norm(projectName);
   const n = _norm(numeroDocStr);
   const t = _norm(typeDocStr);
   const z = normalizeZoneMatchKey(zoneStr);
   const task = _norm(taskName);
-  for (let i = 0; i < Math.max(projs.length, nums.length, types.length, zones.length, names.length); i++) {
+  const serviceKey = normalizeServiceMatchKey(service);
+  for (let i = 0; i < Math.max(projs.length, nums.length, types.length, zones.length, names.length, services.length); i++) {
     if (
       _norm(projs[i]) === p &&
       _norm(nums[i]) === n &&
       _norm(types[i]) === t &&
+      normalizeServiceMatchKey(services[i]) === serviceKey &&
       (!task || _norm(names[i]) === task) &&
       normalizeZoneMatchKey(zones[i]) === z
     ) {
@@ -915,7 +929,7 @@ function getPlanningTaskColumn(planningTable) {
   return 'Taches';
 }
 
-function planningZoneExists(planningTable, projectName, zoneStr = '') {
+function planningZoneExists(planningTable, projectName, zoneStr = '', service = '') {
   const normalizedZone = normalizeZoneValue(zoneStr);
   const normalizedZoneKey = normalizeZoneMatchKey(normalizedZone);
   if (!normalizedZone) return true;
@@ -923,21 +937,32 @@ function planningZoneExists(planningTable, projectName, zoneStr = '') {
   const projectCol = getPlanningProjectColumn(planningTable);
   const projs = planningTable?.[projectCol] || [];
   const zones = planningTable?.Zone || [];
+  const services = planningTable?.Service || [];
   const p = _norm(projectName);
+  const serviceKey = normalizeServiceMatchKey(service);
 
-  for (let i = 0; i < Math.max(projs.length, zones.length); i++) {
-    if (_norm(projs[i]) === p && normalizeZoneMatchKey(zones[i]) === normalizedZoneKey) {
+  for (let i = 0; i < Math.max(projs.length, zones.length, services.length); i++) {
+    if (
+      _norm(projs[i]) === p &&
+      normalizeZoneMatchKey(zones[i]) === normalizedZoneKey &&
+      normalizeServiceMatchKey(services[i]) === serviceKey
+    ) {
       return true;
     }
   }
   return false;
 }
 
-function buildPlanningZoneAnchorFields(planningTable, projectName, zoneStr = '') {
+function buildPlanningZoneAnchorFields(planningTable, projectName, zoneStr = '', service = '') {
   const projectCol = getPlanningProjectColumn(planningTable);
   const taskCol = getPlanningTaskColumn(planningTable);
   const normalizedZone = normalizeZoneValue(zoneStr);
   const fields = {};
+  const serviceValue = _norm(service);
+  if (!serviceValue) throw new Error('Le service est obligatoire pour creer une zone Planning.');
+  if (!hasPlanningColumn(planningTable, 'Service')) {
+    throw new Error('La colonne Service est absente de Planning_Projet.');
+  }
 
   setPlanningFieldIfPresent(planningTable, fields, 'ID2', '');
   setPlanningFieldIfPresent(planningTable, fields, taskCol, '');
@@ -956,16 +981,17 @@ function buildPlanningZoneAnchorFields(planningTable, projectName, zoneStr = '')
   setPlanningFieldIfPresent(planningTable, fields, projectCol, _norm(projectName));
   setPlanningFieldIfPresent(planningTable, fields, 'Groupe', '');
   setPlanningFieldIfPresent(planningTable, fields, 'Zone', normalizedZone);
+  setPlanningFieldIfPresent(planningTable, fields, 'Service', serviceValue);
 
   return fields;
 }
 
-function buildPlanningZoneAnchorActionIfMissing(planningTableName, planningTable, projectName, zoneStr = '') {
+function buildPlanningZoneAnchorActionIfMissing(planningTableName, planningTable, projectName, zoneStr = '', service = '') {
   const normalizedZone = normalizeZoneValue(zoneStr);
   if (!normalizedZone) return null;
-  if (planningZoneExists(planningTable, projectName, normalizedZone)) return null;
+  if (planningZoneExists(planningTable, projectName, normalizedZone, service)) return null;
 
-  return ['AddRecord', planningTableName, null, buildPlanningZoneAnchorFields(planningTable, projectName, normalizedZone)];
+  return ['AddRecord', planningTableName, null, buildPlanningZoneAnchorFields(planningTable, projectName, normalizedZone, service)];
 }
 
 function buildPlanningDocumentUpdateFields(planningTable, {
@@ -988,11 +1014,17 @@ function buildPlanningDocumentAddFields(planningTable, {
   numeroDocStr = '',
   taskName = '',
   typeDoc = '',
-  zoneStr = ''
+  zoneStr = '',
+  service = ''
 } = {}) {
   const projectCol = getPlanningProjectColumn(planningTable);
   const taskCol = getPlanningTaskColumn(planningTable);
   const fields = {};
+  const serviceValue = _norm(service);
+  if (!serviceValue) throw new Error('Le service est obligatoire pour creer un document Planning.');
+  if (!hasPlanningColumn(planningTable, 'Service')) {
+    throw new Error('La colonne Service est absente de Planning_Projet.');
+  }
 
   setPlanningFieldIfPresent(planningTable, fields, projectCol, _norm(projectName));
   setPlanningFieldIfPresent(planningTable, fields, 'ID2', _norm(numeroDocStr));
@@ -1003,14 +1035,15 @@ function buildPlanningDocumentAddFields(planningTable, {
     planningTable,
     fields,
     'Groupe',
-    getDefaultPlanningGroupForType(typeDoc, planningTable, projectName)
+    getDefaultPlanningGroupForType(typeDoc, planningTable, projectName, serviceValue)
   );
   setPlanningFieldIfPresent(planningTable, fields, 'Zone', normalizeZoneValue(zoneStr));
+  setPlanningFieldIfPresent(planningTable, fields, 'Service', serviceValue);
 
   return fields;
 }
 
-function findPlanningIndex(planningTable, projectName, numeroDocStr, typeDocStr, zoneStr = '', taskName = '') {
+function findPlanningIndex(planningTable, projectName, numeroDocStr, typeDocStr, zoneStr = '', taskName = '', service = '') {
   const projectCol = getPlanningProjectColumn(planningTable);
   const taskCol = getPlanningTaskColumn(planningTable);
   const projs = planningTable?.[projectCol] || [];
@@ -1018,17 +1051,20 @@ function findPlanningIndex(planningTable, projectName, numeroDocStr, typeDocStr,
   const types = planningTable?.Type_doc || [];
   const zones = planningTable?.Zone || [];
   const tasks = planningTable?.[taskCol] || [];
+  const services = planningTable?.Service || [];
   const p = _norm(projectName);
   const n = _norm(numeroDocStr);
   const t = _norm(typeDocStr);
   const z = normalizeZoneMatchKey(zoneStr);
+  const serviceKey = normalizeServiceMatchKey(service);
   let legacyFallbackIndex = -1;
   const hasZoneColumn = hasPlanningColumn(planningTable, 'Zone');
 
-  for (let i = 0; i < Math.max(projs.length, ids2.length, types.length, zones.length, tasks.length); i++) {
+  for (let i = 0; i < Math.max(projs.length, ids2.length, types.length, zones.length, tasks.length, services.length); i++) {
     if (_norm(projs[i]) !== p) continue;
     if (_norm(ids2[i]) !== n) continue;
     if (_norm(types[i]) !== t) continue;
+    if (normalizeServiceMatchKey(services[i]) !== serviceKey) continue;
     if (_norm(taskName) && _norm(tasks[i]) !== _norm(taskName)) continue;
 
     const currentZone = hasZoneColumn ? normalizeZoneMatchKey(zones[i]) : '';
@@ -1335,15 +1371,18 @@ function isCoffrageDocumentType(typeDoc) {
   return normalizedType.includes('COFFRAGE') || normalizedType.includes('COF');
 }
 
-function collectProjectPlanningGroups(planningTable, projectName) {
+function collectProjectPlanningGroups(planningTable, projectName, service) {
   const projectCol = getPlanningProjectColumn(planningTable);
   const projects = planningTable?.[projectCol] || [];
   const groups = planningTable?.Groupe || [];
+  const services = planningTable?.Service || [];
   const projectKey = _norm(projectName);
+  const serviceKey = normalizeServiceMatchKey(service);
   const usedGroups = new Set();
 
-  for (let i = 0; i < Math.max(projects.length, groups.length); i++) {
+  for (let i = 0; i < Math.max(projects.length, groups.length, services.length); i++) {
     if (_norm(projects[i]) !== projectKey) continue;
+    if (normalizeServiceMatchKey(services[i]) !== serviceKey) continue;
 
     const group = _norm(groups[i]);
     if (group) usedGroups.add(group.toLocaleLowerCase('fr'));
@@ -1352,7 +1391,7 @@ function collectProjectPlanningGroups(planningTable, projectName) {
   return usedGroups;
 }
 
-function getPlanningPendingGroupSet(planningTable, projectName) {
+function getPlanningPendingGroupSet(planningTable, projectName, service) {
   if (!planningTable.__pendingOutOfProjectGroups) {
     Object.defineProperty(planningTable, '__pendingOutOfProjectGroups', {
       value: new Map(),
@@ -1360,16 +1399,16 @@ function getPlanningPendingGroupSet(planningTable, projectName) {
     });
   }
 
-  const projectKey = _norm(projectName).toLocaleLowerCase('fr');
+  const projectKey = `${_norm(projectName).toLocaleLowerCase('fr')}||${normalizeServiceMatchKey(service)}`;
   if (!planningTable.__pendingOutOfProjectGroups.has(projectKey)) {
-    planningTable.__pendingOutOfProjectGroups.set(projectKey, collectProjectPlanningGroups(planningTable, projectName));
+    planningTable.__pendingOutOfProjectGroups.set(projectKey, collectProjectPlanningGroups(planningTable, projectName, service));
   }
 
   return planningTable.__pendingOutOfProjectGroups.get(projectKey);
 }
 
-function getNextAvailablePlanningGroupNumber(planningTable, projectName) {
-  const usedGroups = getPlanningPendingGroupSet(planningTable, projectName);
+function getNextAvailablePlanningGroupNumber(planningTable, projectName, service) {
+  const usedGroups = getPlanningPendingGroupSet(planningTable, projectName, service);
   let nextGroupNumber = 1;
 
   while (usedGroups.has(String(nextGroupNumber).toLocaleLowerCase('fr'))) {
@@ -1381,9 +1420,9 @@ function getNextAvailablePlanningGroupNumber(planningTable, projectName) {
   return candidate;
 }
 
-function getDefaultPlanningGroupForType(typeDoc, planningTable = null, projectName = '') {
+function getDefaultPlanningGroupForType(typeDoc, planningTable = null, projectName = '', service = '') {
   return isCoffrageDocumentType(typeDoc)
-    ? getNextAvailablePlanningGroupNumber(planningTable, projectName)
+    ? getNextAvailablePlanningGroupNumber(planningTable, projectName, service)
     : '';
 }
 
@@ -2019,6 +2058,7 @@ function findPlanningRowForReferenceLimit(planningTable, {
   documentName = '',
   documentType = '',
   documentZone = '',
+  service = '',
 } = {}) {
   const idx = findPlanningIndex(
     planningTable,
@@ -2026,7 +2066,8 @@ function findPlanningRowForReferenceLimit(planningTable, {
     _norm(documentNumber),
     normalizeTypeDocument(documentType),
     normalizeZoneValue(documentZone),
-    documentName
+    documentName,
+    service
   );
   return getPlanningRowObject(planningTable, idx);
 }
@@ -2037,6 +2078,7 @@ function buildReferenceLimitFields({
   documentInfo = {},
   durationWeeks = '',
   useZeroWhenEmpty = false,
+  service = '',
 } = {}) {
   const parsedDuration = parseReferenceDurationLimit(durationWeeks);
   const usesVirtualZeroDuration =
@@ -2056,6 +2098,7 @@ function buildReferenceLimitFields({
     documentName: documentInfo?.name ?? documentInfo?.documentName,
     documentType: documentInfo?.type ?? documentInfo?.documentType,
     documentZone: documentInfo?.zone ?? documentInfo?.documentZone,
+    service: service || documentInfo?.service || documentInfo?.Service,
   });
   const segmentStartDate = getReferencePlanningSegmentStartDate(planningRow);
   const dateLimite = subtractReferenceWeeksFromDate(segmentStartDate, effectiveDuration);
@@ -3031,20 +3074,21 @@ async function createDocumentsBatch({
   if (!uniqueDocuments.length) {
     throw new Error("Veuillez ajouter au moins un document complet.");
   }
+  const serviceValue = await getTeamService();
   await assertReferenceDocumentIdentitiesAvailable(
     normalizedProject,
     uniqueDocuments.map((doc) => ({
       number: doc.documentNumber,
       name: doc.documentName,
       type: doc.documentType,
-    }))
+    })),
+    serviceValue
   );
 
   const safeDefaultDureeLimite = _norm(defaultDureeLimite);
   if (safeDefaultDureeLimite && parseReferenceDurationLimit(safeDefaultDureeLimite) == null) {
     throw new Error("La duree limite par defaut doit etre un nombre entier de semaines.");
   }
-  const serviceValue = await getTeamService();
   const actions = [];
   let planningTableForLimits = null;
 
@@ -3060,12 +3104,14 @@ async function createDocumentsBatch({
         doc.documentNumber,
         doc.documentType,
         doc.documentZone,
-        doc.documentName
+        doc.documentName,
+        serviceValue
       );
       const key = [
         normalizeReferenceDocumentIdentityPart(normalizedProject),
         normalizeReferenceDocumentIdentityPart(doc.documentNumber),
         normalizeReferenceDocumentIdentityPart(doc.documentType),
+        normalizeServiceMatchKey(serviceValue),
       ].join('||');
 
       if (idxPlan >= 0) {
@@ -3081,12 +3127,13 @@ async function createDocumentsBatch({
           Type_document: doc.documentType,
           Zone: doc.documentZone,
           Designation: doc.documentName,
+          Service: serviceValue,
         }]);
         pendingPlanAdds.add(key);
       }
     });
   } catch (error) {
-    console.warn("ListePlan: impossible d'ajouter / mettre à jour les documents.", error);
+    throw new Error(`ListePlan: impossible de preparer les documents. ${error.message || error}`);
   }
 
   try {
@@ -3103,7 +3150,8 @@ async function createDocumentsBatch({
           planningTableName,
           planning,
           normalizedProject,
-          doc.documentZone
+          doc.documentZone,
+          serviceValue
         );
         if (planningZoneAnchorAction) {
           actions.push(planningZoneAnchorAction);
@@ -3117,12 +3165,14 @@ async function createDocumentsBatch({
         doc.documentNumber,
         doc.documentType,
         doc.documentZone,
-        doc.documentName
+        doc.documentName,
+        serviceValue
       );
       const planningKey = [
         normalizeReferenceDocumentIdentityPart(normalizedProject),
         normalizeReferenceDocumentIdentityPart(doc.documentNumber),
         normalizeReferenceDocumentIdentityPart(doc.documentType),
+        normalizeServiceMatchKey(serviceValue),
       ].join('||');
 
       if (idxPlanning >= 0) {
@@ -3147,13 +3197,14 @@ async function createDocumentsBatch({
             taskName: doc.documentName,
             typeDoc: doc.documentType,
             zoneStr: doc.documentZone,
+            service: serviceValue,
           }),
         ]);
         pendingPlanningAdds.add(planningKey);
       }
     });
   } catch (error) {
-    console.warn("Planning: impossible d'ajouter / mettre à jour les documents.", error);
+    throw new Error(`Planning: impossible de preparer les documents. ${error.message || error}`);
   }
 
   uniqueDocuments.forEach((doc) => {
@@ -3174,6 +3225,7 @@ async function createDocumentsBatch({
           projectName: normalizedProject,
           documentInfo: doc,
           durationWeeks: safeDefaultDureeLimite,
+          service: serviceValue,
         }),
         Service: serviceValue,
       })]);
@@ -3919,6 +3971,7 @@ function populateTable() {
               },
               durationWeeks: record.DureeLimite,
               useZeroWhenEmpty: newValue,
+              service: record.Service,
             });
             const updateFields = {
               Bloquant: newValue,
@@ -4297,6 +4350,7 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
           projectName: selectedProject,
           documentInfo,
           durationWeeks: dureeLimite,
+          service: serviceValue,
         }),
         Service: serviceValue
       }));
@@ -4553,12 +4607,14 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
     return;
   }
 
+  let serviceValue = '';
   try {
+    serviceValue = await getTeamService();
     await assertReferenceDocumentIdentitiesAvailable(selectedFirstValue, [{
       number: documentNumber,
       name: documentName,
       type: documentType,
-    }]);
+    }], serviceValue);
   } catch (error) {
     alert(error.message);
     return;
@@ -4601,9 +4657,6 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
     if (!selectedProject) throw new Error("Aucun projet sélectionné.");
 
 
-    // Récupérer le service depuis la table Team (la première ligne)
-    const serviceValue = await getTeamService();
-
     // Création des nouvelles lignes
     const num = _norm(documentNumber);
     const nm = String(documentName).trim();
@@ -4618,6 +4671,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
         documentZone,
       },
       durationWeeks: defaultDureeLimite,
+      service: serviceValue,
     });
     const newRows = selectedEmitters.map((emetteur) => withComputedReferenceRetard({
       NomProjet: selectedProject,
@@ -4647,7 +4701,8 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
         numStrPlan,
         documentType,
         documentZone,
-        nm
+        nm,
+        serviceValue
       );
 
       if (idxPlan >= 0) {
@@ -4662,11 +4717,12 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
           NumeroDocument: numStrPlan,
           Type_document: documentType,
           Zone: documentZone,
-          Designation: nm
+          Designation: nm,
+          Service: serviceValue
         }];
       }
     } catch (err) {
-      console.warn("ListePlan: impossible d'ajouter / mettre à jour le document (vérifie le nom de table et les colonnes).", err);
+      throw new Error(`ListePlan: impossible de preparer le document. ${err.message || err}`);
     }
 
     // 1b) Upsert dans Planning_Projet / Planning_Project
@@ -4678,7 +4734,8 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
         planningTableName,
         planning,
         selectedProject,
-        documentZone
+        documentZone,
+        serviceValue
       );
       if (planningZoneAnchorAction) {
         planningActions.push(planningZoneAnchorAction);
@@ -4691,7 +4748,8 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
         numStrPlanning,
         documentType,
         documentZone,
-        nm
+        nm,
+        serviceValue
       );
       if (idxPlanning >= 0) {
         planningActions.push([
@@ -4714,12 +4772,13 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
             numeroDocStr: numStrPlanning,
             taskName: nm,
             typeDoc: documentType,
-            zoneStr: documentZone
+            zoneStr: documentZone,
+            service: serviceValue
           })
         ]);
       }
     } catch (err) {
-      console.warn("Planning: impossible d'ajouter / mettre à jour le document (vérifie le nom de table et les colonnes).", err);
+      throw new Error(`Planning: impossible de preparer le document. ${err.message || err}`);
     }
 
     // 2) Ajout des lignes dans References
@@ -5707,6 +5766,7 @@ document.getElementById('editRowDialog').addEventListener('submit', async (e) =>
           },
           durationWeeks: dureeLimite,
           useZeroWhenEmpty: Boolean(currentRecord.Bloquant),
+          service: currentRecord.Service,
         });
     const updatedRow = sanitizeReferences2DialogFields(withComputedReferenceRetard({
       Emetteur: String(formData.get('editEmetteur') || '').trim(),
@@ -5848,23 +5908,40 @@ async function getDefaultEmetteurs() {
 }
 
 async function getTeamService() {
-  try {
-    const teamTable = await grist.docApi.fetchTable('Team');
-    // Vérifier si la table est au format tableau d'objets
-    if (Array.isArray(teamTable) && teamTable.length > 0) {
-      console.log("Service récupéré (tableau d'objets) :", teamTable[0].Service);
-      return teamTable[0].Service || "";
+  const isCensoredCell = (value) => {
+    if (value == null || value === '') return true;
+    if (Array.isArray(value) && value[0] === 'C') return true;
+    const normalized = String(value).trim().toUpperCase();
+    return normalized === 'C' || normalized === 'CENSORED';
+  };
+  const normalizeRows = (raw) => {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    if (Array.isArray(raw.records)) {
+      return raw.records.map((record) => record?.fields ? { id: record.id, ...record.fields } : record);
     }
-    // Vérifier si la table est au format colonnes (objet avec des tableaux)
-    else if (teamTable.Service && Array.isArray(teamTable.Service)) {
-      console.log("Service récupéré (format colonnes) :", teamTable.Service[0]);
-      return teamTable.Service[0] || "";
-    }
-    return "";
-  } catch (error) {
-    console.error("Erreur lors de la récupération du service depuis la table Team :", error);
-    return "";
+    if (typeof raw !== 'object') return [];
+    const keys = Object.keys(raw);
+    const rowCount = Math.max(0, ...keys.map((key) => Array.isArray(raw[key]) ? raw[key].length : 0));
+    return Array.from({ length: rowCount }, (_, index) =>
+      Object.fromEntries(keys.map((key) => [key, Array.isArray(raw[key]) ? raw[key][index] : undefined]))
+    );
+  };
+
+  const teamTable = await grist.docApi.fetchTable('Team');
+  const currentRows = normalizeRows(teamTable).filter((row) => !isCensoredCell(row?.Moi));
+  if (currentRows.length !== 1) {
+    throw new Error(
+      currentRows.length === 0
+        ? 'Utilisateur non reconnu dans Team : aucune ligne Moi lisible.'
+        : 'Utilisateur ambigu dans Team : plusieurs lignes Moi sont lisibles.'
+    );
   }
+  const service = String(currentRows[0]?.Service ?? '').trim();
+  if (!service || isCensoredCell(currentRows[0]?.Service)) {
+    throw new Error("Le service de l'utilisateur courant est vide ou inaccessible dans Team.");
+  }
+  return service;
 }
 
 // Fonction pour retirer l'extension d'un fichier
@@ -6106,14 +6183,17 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
   });
 
   // Récupérer les émetteurs sélectionnés dans le conteneur du dialog "Ajouter Plusieurs document"
+  let serviceValue = '';
   try {
+    serviceValue = await getTeamService();
     await assertReferenceDocumentIdentitiesAvailable(
       selectedFirstValue,
       documentsData.map((doc) => ({
         number: doc.documentNumber,
         name: doc.documentName,
         type: documentType,
-      }))
+      })),
+      serviceValue
     );
   } catch (error) {
     alert(error.message);
@@ -6156,8 +6236,6 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
     if (!selectedProject) throw new Error("Aucun projet sélectionné.");
 
 
-    // Récupérer le service depuis la table Team
-    const serviceValue = await getTeamService();
     const documentZone = resolveReferenceDocumentZone(document.getElementById('multipleDocumentZone')?.value, selectedFirstValue);
 
     // Récupérer la date limite par défaut
@@ -6180,15 +6258,17 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
       const projs = plans.Nom_projet || [];
       const nums  = plans.NumeroDocument || [];
       const types = plans.Type_document || [];
+      const services = plans.Service || [];
       const ids   = plans.id || [];
-      const L = Math.max(projs.length, nums.length, types.length, ids.length);
+      const L = Math.max(projs.length, nums.length, types.length, services.length, ids.length);
 
       for (let i = 0; i < L; i++) {
         const p = normalizeReferenceDocumentIdentityPart(projs[i]);
         const n = normalizeReferenceDocumentIdentityPart(nums[i]);
         const t = normalizeReferenceDocumentIdentityPart(types[i]);
+        const serviceKey = normalizeServiceMatchKey(services[i]);
         if (!p || !n || !t) continue;
-        existing.set(`${p}||${n}||${t}`, ids[i]);
+        existing.set(`${p}||${n}||${t}||${serviceKey}`, ids[i]);
       }
       const projKey = normalizeReferenceDocumentIdentityPart(selectedProject);
 
@@ -6199,6 +6279,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
           projKey,
           normalizeReferenceDocumentIdentityPart(numStrPlan),
           normalizeReferenceDocumentIdentityPart(documentType),
+          normalizeServiceMatchKey(serviceValue),
         ].join('||');
 
         if (existing.has(key)) {
@@ -6213,7 +6294,8 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
             NumeroDocument: numStrPlan,
             Type_document: documentType,
             Zone: documentZone,
-            Designation: nm
+            Designation: nm,
+            Service: serviceValue
           }]);
           // évite les doublons si deux fois le même numéro est tapé dans le tableau
           existing.set(key, null);
@@ -6221,7 +6303,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
       });
 
     } catch (err) {
-      console.warn("ListePlan: impossible d'ajouter / mettre à jour les documents (vérifie le nom de table et les colonnes).", err);
+      throw new Error(`ListePlan: impossible de preparer les documents. ${err.message || err}`);
     }
 
     // 1b) Upsert dans Planning_Projet / Planning_Project : 1 ligne par document
@@ -6232,7 +6314,8 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
         planningTableName,
         planning,
         selectedProject,
-        documentZone
+        documentZone,
+        serviceValue
       );
       if (planningZoneAnchorAction) {
         actions.push(planningZoneAnchorAction);
@@ -6247,6 +6330,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
           projKeyPlanning,
           normalizeReferenceDocumentIdentityPart(numStrPlanning),
           normalizeReferenceDocumentIdentityPart(documentType),
+          normalizeServiceMatchKey(serviceValue),
         ].join('||');
         const idxPlanning = findPlanningIndex(
           planning,
@@ -6254,7 +6338,8 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
           numStrPlanning,
           documentType,
           documentZone,
-          nm
+          nm,
+          serviceValue
         );
 
         if (idxPlanning >= 0) {
@@ -6278,14 +6363,15 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
               numeroDocStr: numStrPlanning,
               taskName: nm,
               typeDoc: documentType,
-              zoneStr: documentZone
+              zoneStr: documentZone,
+              service: serviceValue
             })
           ]);
           pendingPlanningAdds.add(keyPlanning);
         }
       });
     } catch (err) {
-      console.warn("Planning: impossible d'ajouter / mettre à jour les documents (vérifie le nom de table et les colonnes).", err);
+      throw new Error(`Planning: impossible de preparer les documents. ${err.message || err}`);
     }
 
     // 2) Ajout dans References : 1 ligne par (document × émetteur)
@@ -6304,6 +6390,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
             documentZone,
           },
           durationWeeks: defaultDureeLimite,
+          service: serviceValue,
         });
 
         const newRow = withComputedReferenceRetard({

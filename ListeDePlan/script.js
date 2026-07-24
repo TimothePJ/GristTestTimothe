@@ -211,6 +211,56 @@ window.LISTE_DE_PLAN_ALL_ZONES_LABEL = "Toutes les zones";
 window.LISTE_DE_PLAN_NO_ZONE_VALUE = "__NO_ZONE__";
 window.LISTE_DE_PLAN_NO_ZONE_LABEL = "Sans zone";
 
+function isCensoredTeamCell(value) {
+  if (value == null || value === "") return true;
+  if (Array.isArray(value) && value[0] === "C") return true;
+  const normalized = String(value).trim().toUpperCase();
+  return normalized === "C" || normalized === "CENSORED";
+}
+
+function normalizeTeamTableRows(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (Array.isArray(raw.records)) {
+    return raw.records.map((record) => record?.fields ? { id: record.id, ...record.fields } : record);
+  }
+  if (typeof raw !== "object") return [];
+
+  const keys = Object.keys(raw);
+  const rowCount = Math.max(
+    0,
+    ...keys.map((key) => Array.isArray(raw[key]) ? raw[key].length : 0)
+  );
+  return Array.from({ length: rowCount }, (_, index) =>
+    Object.fromEntries(keys.map((key) => [
+      key,
+      Array.isArray(raw[key]) ? raw[key][index] : undefined,
+    ]))
+  );
+}
+
+async function getCurrentTeamService() {
+  const teamTable = await grist.docApi.fetchTable("Team");
+  const currentRows = normalizeTeamTableRows(teamTable)
+    .filter((row) => !isCensoredTeamCell(row?.Moi));
+
+  if (currentRows.length !== 1) {
+    throw new Error(
+      currentRows.length === 0
+        ? "Utilisateur non reconnu dans Team : aucune ligne Moi lisible."
+        : "Utilisateur ambigu dans Team : plusieurs lignes Moi sont lisibles."
+    );
+  }
+
+  const service = String(currentRows[0]?.Service ?? "").trim();
+  if (!service || isCensoredTeamCell(currentRows[0]?.Service)) {
+    throw new Error("Le service de l'utilisateur courant est vide ou inaccessible dans Team.");
+  }
+  return service;
+}
+
+window.getCurrentTeamService = getCurrentTeamService;
+
 const MANAGE_ZONE_REFERENCES_TABLE = "References2";
 const MANAGE_ZONE_LISTEPLAN_TABLE_CANDIDATES = [
   "ListePlan_NDC_COF",
@@ -325,7 +375,12 @@ async function fetchDocumentUniquenessListePlan() {
 
 async function assertDocumentIdentitiesAvailable(projectName, documents, {
   excludeDocument = null,
+  service = "",
 } = {}) {
+  const normalizedService = normalizeDocumentIdentityPart(service);
+  if (!normalizedService) {
+    throw new Error("Le service est obligatoire pour contrôler l'identité d'un document.");
+  }
   const normalizedDocuments = (documents || []).map(normalizeDocumentIdentityInput);
   const requestedUniquenessKeys = new Set();
   for (const documentIdentity of normalizedDocuments) {
@@ -347,6 +402,7 @@ async function assertDocumentIdentitiesAvailable(projectName, documents, {
     : "";
 
   for (const row of listePlan.rows) {
+    if (normalizeDocumentIdentityPart(row.Service) !== normalizedService) continue;
     const rowProject = row.Nom_projet ?? row.NomProjet ?? row.NomProjetString;
     if (!projectAliases.has(normalizeDocumentProjectKey(rowProject))) continue;
 
@@ -1100,6 +1156,7 @@ function buildManageZoneContext(tableName, rows, {
     rows: Array.isArray(rows) ? rows : [],
     projectCol: findManageColumn(columnNames, projectCandidates),
     zoneCol: findManageColumn(columnNames, zoneCandidates),
+    serviceCol: findManageColumn(columnNames, ["Service"]),
     id2Col: findManageColumn(columnNames, id2Candidates),
     taskCols: (taskCandidates || []).filter((candidate) => columnNames.has(candidate)),
     typeCol: findManageColumn(columnNames, typeCandidates),
@@ -1139,6 +1196,16 @@ function rowMatchesManageProject(row, projectCol, projectAliasKeys) {
   return getManageLookupKeys(row?.[projectCol]).some((key) => projectAliasKeys.has(key));
 }
 
+function ensureManageZoneServiceColumns(contexts) {
+  const missingTables = (contexts || [])
+    .filter((context) => !context?.serviceCol)
+    .map((context) => context?.tableName)
+    .filter(Boolean);
+  if (missingTables.length) {
+    throw new Error(`La colonne Service est absente de : ${missingTables.join(", ")}.`);
+  }
+}
+
 function isManageZoneAnchorRow(row, context) {
   if (!context?.planning) return false;
   if (context.id2Col && normalizeManageLookupText(row?.[context.id2Col])) return false;
@@ -1155,14 +1222,16 @@ function ensureNoManageZoneDuplicate({
   projectAliasKeys,
   sourceZoneKey,
   targetZoneKey,
+  service,
 }) {
   if (!targetZoneKey || targetZoneKey === sourceZoneKey) return;
 
   for (const context of contexts || []) {
-    if (!context.projectCol || !context.zoneCol) continue;
+    if (!context.projectCol || !context.zoneCol || !context.serviceCol) continue;
 
     for (const row of context.rows || []) {
       if (!rowMatchesManageProject(row, context.projectCol, projectAliasKeys)) continue;
+      if (normalizeDocumentIdentityPart(row?.[context.serviceCol]) !== normalizeDocumentIdentityPart(service)) continue;
 
       const zoneKey = normalizeZoneManageKey(row?.[context.zoneCol]);
       if (zoneKey && zoneKey === targetZoneKey) {
@@ -1178,18 +1247,20 @@ function buildManageZoneActions({
   sourceZoneKey,
   targetZone,
   removeAnchors = false,
+  service,
 }) {
   const actions = [];
   const seenRows = new Set();
   const normalizedTargetZone = normalizeZoneManageStorageValue(targetZone);
 
   for (const context of contexts || []) {
-    if (!context.tableName || !context.projectCol || !context.zoneCol) continue;
+    if (!context.tableName || !context.projectCol || !context.zoneCol || !context.serviceCol) continue;
 
     for (const row of context.rows || []) {
       const rowId = Number(row?.id);
       if (!Number.isInteger(rowId) || rowId <= 0) continue;
       if (!rowMatchesManageProject(row, context.projectCol, projectAliasKeys)) continue;
+      if (normalizeDocumentIdentityPart(row?.[context.serviceCol]) !== normalizeDocumentIdentityPart(service)) continue;
       if (normalizeZoneManageKey(row?.[context.zoneCol]) !== sourceZoneKey) continue;
 
       const rowKey = `${context.tableName}:${rowId}`;
@@ -1252,17 +1323,20 @@ async function renameManageProjectZone({ projectName, sourceZone, targetZone }) 
   if (!normalizedProject) throw new Error("Projet obligatoire.");
   if (!sourceZoneKey) throw new Error("Zone source obligatoire.");
   if (!targetZoneKey) throw new Error("Nouveau nom de zone obligatoire.");
+  const service = await getCurrentTeamService();
 
   const [projectAliasKeys, contexts] = await Promise.all([
     buildZoneManageProjectAliasKeys(normalizedProject),
     fetchManageZoneContexts(),
   ]);
+  ensureManageZoneServiceColumns(contexts);
 
   ensureNoManageZoneDuplicate({
     contexts,
     projectAliasKeys,
     sourceZoneKey,
     targetZoneKey,
+    service,
   });
 
   const actions = buildManageZoneActions({
@@ -1270,6 +1344,7 @@ async function renameManageProjectZone({ projectName, sourceZone, targetZone }) 
     projectAliasKeys,
     sourceZoneKey,
     targetZone: normalizedTargetZone,
+    service,
   });
 
   await applyManageZoneActions(actions);
@@ -1277,6 +1352,7 @@ async function renameManageProjectZone({ projectName, sourceZone, targetZone }) 
   return {
     sourceZone: normalizedSourceZone,
     targetZone: normalizedTargetZone,
+    service,
     ...countManageZoneActions(actions),
   };
 }
@@ -1288,11 +1364,13 @@ async function clearManageProjectZone({ projectName, sourceZone }) {
 
   if (!normalizedProject) throw new Error("Projet obligatoire.");
   if (!sourceZoneKey) throw new Error("Zone source obligatoire.");
+  const service = await getCurrentTeamService();
 
   const [projectAliasKeys, contexts] = await Promise.all([
     buildZoneManageProjectAliasKeys(normalizedProject),
     fetchManageZoneContexts(),
   ]);
+  ensureManageZoneServiceColumns(contexts);
 
   const actions = buildManageZoneActions({
     contexts,
@@ -1300,12 +1378,14 @@ async function clearManageProjectZone({ projectName, sourceZone }) {
     sourceZoneKey,
     targetZone: "",
     removeAnchors: true,
+    service,
   });
 
   await applyManageZoneActions(actions);
 
   return {
     sourceZone: normalizedSourceZone,
+    service,
     ...countManageZoneActions(actions),
   };
 }
@@ -1351,12 +1431,13 @@ function setManageZoneStatus(message = "") {
   if (status) status.textContent = String(message || "");
 }
 
-function updateLocalRecordsProjectZone({ projectName, sourceZone, targetZone }) {
+function updateLocalRecordsProjectZone({ projectName, sourceZone, targetZone, service }) {
   const normalizedProject = normalizeProjectName(projectName);
   const sourceZoneKey = normalizeZoneManageKey(sourceZone);
 
   for (const record of window.records || []) {
     if (getNomProjet(record) !== normalizedProject) continue;
+    if (normalizeDocumentIdentityPart(record?.Service) !== normalizeDocumentIdentityPart(service)) continue;
     if (normalizeZoneManageKey(record?.Zone) !== sourceZoneKey) continue;
     record.Zone = normalizeZoneManageStorageValue(targetZone);
   }
@@ -1514,15 +1595,6 @@ function bindManageZoneDialog() {
         return;
       }
 
-      const duplicate = collectProjectZoneValues(projectName, window.records).some((zone) => {
-        const key = normalizeZoneManageKey(zone);
-        return key === targetKey && key !== sourceKey;
-      });
-      if (duplicate) {
-        setManageZoneHint("Une zone avec ce nom existe deja pour ce projet.");
-        return;
-      }
-
       try {
         setManageZoneBusy(true);
         setManageZoneHint("Renommage en cours...");
@@ -1534,7 +1606,7 @@ function bindManageZoneDialog() {
         const updatedCount = Number(result.updatedCount) || 0;
 
         if (updatedCount > 0) {
-          updateLocalRecordsProjectZone({ projectName, sourceZone, targetZone });
+          updateLocalRecordsProjectZone({ projectName, sourceZone, targetZone, service: result.service });
         }
         closeManageZoneDialog();
         populateZoneDropdown(
@@ -1579,7 +1651,12 @@ function bindManageZoneDialog() {
         const deletedCount = Number(result.deletedCount) || 0;
 
         if (updatedCount + deletedCount > 0) {
-          updateLocalRecordsProjectZone({ projectName, sourceZone, targetZone: "" });
+          updateLocalRecordsProjectZone({
+            projectName,
+            sourceZone,
+            targetZone: "",
+            service: result.service,
+          });
         }
         closeManageZoneDialog();
         populateZoneDropdown(

@@ -122,19 +122,11 @@
     return null;
   }
 
-  // Table Team.Service (1ère ligne)
   async function getTeamService() {
-    try {
-      const teamTable = await grist.docApi.fetchTable('Team');
-      if (Array.isArray(teamTable) && teamTable.length > 0) {
-        return teamTable[0].Service || "";
-      } else if (teamTable && Array.isArray(teamTable.Service)) {
-        return teamTable.Service[0] || "";
-      }
-    } catch (e) {
-      console.warn("getTeamService() warn:", e);
+    if (typeof window.getCurrentTeamService !== "function") {
+      throw new Error("Le service de l'utilisateur courant est indisponible.");
     }
-    return "";
+    return window.getCurrentTeamService();
   }
 
   // Table Emetteurs (colonne Emetteurs)
@@ -364,6 +356,14 @@
       return;
     }
 
+    let serviceValue;
+    try {
+      serviceValue = await getTeamService();
+    } catch (error) {
+      alert(error.message);
+      return;
+    }
+
     if (typeof window.assertDocumentIdentitiesAvailable !== "function") {
       alert("Le controle d'identite des documents est indisponible.");
       return;
@@ -371,7 +371,8 @@
     try {
       await window.assertDocumentIdentitiesAvailable(
         STATE.projectName,
-        [{ number: numeroStr, name: nom, type: STATE.typeDocLabel }]
+        [{ number: numeroStr, name: nom, type: STATE.typeDocLabel }],
+        { service: serviceValue }
       );
     } catch (error) {
       alert(error.message);
@@ -380,8 +381,6 @@
     const listePlanTableName = typeof window.getActiveListePlanTableName === "function"
       ? await window.getActiveListePlanTableName()
       : "ListePlan_NDC_COF";
-
-    const serviceValue = await getTeamService();
 
     // 1) Ajouts dans References (un par émetteur)
     const actions = [];
@@ -409,7 +408,8 @@
       DateDiffusion: null,
       Indice: "",
       Nom_projet: STATE.projectId,
-      Designation: nom
+      Designation: nom,
+      Service: serviceValue
     }]);
 
     try {
@@ -422,7 +422,8 @@
         documentNumber: numeroStr,
         documentName: nom,
         documentType: STATE.typeDocLabel,
-        documentZone: ""
+        documentZone: "",
+        service: serviceValue
       }));
       await grist.docApi.applyUserActions(actions);
       const dlg = document.getElementById('addDocumentDialog');

@@ -319,6 +319,17 @@
       return;
     }
 
+    let serviceValue;
+    try {
+      if (typeof window.getCurrentTeamService !== "function") {
+        throw new Error("Le service de l'utilisateur courant est indisponible.");
+      }
+      serviceValue = await window.getCurrentTeamService();
+    } catch (error) {
+      alert(error.message);
+      return;
+    }
+
     if (typeof window.assertDocumentIdentitiesAvailable !== "function") {
       alert("Le controle d'identite des documents est indisponible.");
       return;
@@ -326,7 +337,8 @@
     try {
       await window.assertDocumentIdentitiesAvailable(
         state.currentProjectLabel || projetId,
-        [{ number: numeroStr, name: nom, type: typeDocLabel }]
+        [{ number: numeroStr, name: nom, type: typeDocLabel }],
+        { service: serviceValue }
       );
     } catch (error) {
       alert(error.message);
@@ -342,7 +354,8 @@
         NomProjet: projetId,      // Ref (ID projet)
         NomDocument: nom,
         NumeroDocument: String(numeroStr),
-        Type_document: typeDocLabel
+        Type_document: typeDocLabel,
+        Service: serviceValue
       }],
       // 2) Liste de plan : Type_document = libelle EXACT de la 2e liste
       ["AddRecord", listePlanTableName, null, {
@@ -352,7 +365,8 @@
         Indice: "",
         Nom_projet: projetId,        // Ref (ID projet)
         Designation: nom,
-        Zone: ""
+        Zone: "",
+        Service: serviceValue
       }]
     ];
 
@@ -366,7 +380,8 @@
         documentNumber: numeroStr,
         documentName: nom,
         documentType: typeDocLabel,
-        documentZone: ""
+        documentZone: "",
+        service: serviceValue
       }));
       await grist.docApi.applyUserActions(actions);
       const dlg = document.getElementById("dlg-ajouter-ref-doc");

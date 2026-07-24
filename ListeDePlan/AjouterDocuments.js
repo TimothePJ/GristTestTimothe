@@ -752,48 +752,61 @@
     return 'Taches';
   }
 
-  function findListePlanIndex(plansTable, projectName, numeroDocStr, typeDocStr, zoneStr, taskName) {
+  function findListePlanIndex(plansTable, projectName, numeroDocStr, typeDocStr, zoneStr, taskName, service) {
     const projs = plansTable.Nom_projet || [];
     const nums = plansTable.NumeroDocument || [];
     const types = plansTable.Type_document || [];
     const zones = plansTable.Zone || [];
     const names = plansTable.Designation || plansTable.NomDocument || [];
+    const services = plansTable.Service || [];
     const p = _norm(projectName);
     const n = _norm(numeroDocStr);
     const t = _norm(typeDocStr);
     const z = normalizeZoneMatchKey(zoneStr);
     const task = _norm(taskName);
-    for (let i = 0; i < Math.max(projs.length, nums.length, types.length, zones.length, names.length); i++) {
+    const serviceKey = _norm(service);
+    for (let i = 0; i < Math.max(projs.length, nums.length, types.length, zones.length, names.length, services.length); i++) {
       if (
         _norm(projs[i]) === p &&
         _norm(nums[i]) === n &&
         _norm(types[i]) === t &&
         (!task || _norm(names[i]) === task) &&
-        normalizeZoneMatchKey(zones[i]) === z
+        normalizeZoneMatchKey(zones[i]) === z &&
+        _norm(services[i]) === serviceKey
       ) return i;
     }
     return -1;
   }
 
-  function planningZoneExists(planningTable, projectName, zoneStr) {
+  function planningZoneExists(planningTable, projectName, zoneStr, service) {
     const normalizedZone = normalizeZoneValue(zoneStr);
     const normalizedZoneKey = normalizeZoneMatchKey(normalizedZone);
     if (!normalizedZone) return true;
     const projectCol = getPlanningProjectColumn(planningTable);
     const projs = planningTable?.[projectCol] || [];
     const zones = planningTable?.Zone || [];
+    const services = planningTable?.Service || [];
     const p = _norm(projectName);
-    for (let i = 0; i < Math.max(projs.length, zones.length); i++) {
-      if (_norm(projs[i]) === p && normalizeZoneMatchKey(zones[i]) === normalizedZoneKey) return true;
+    const serviceKey = _norm(service);
+    for (let i = 0; i < Math.max(projs.length, zones.length, services.length); i++) {
+      if (
+        _norm(projs[i]) === p &&
+        normalizeZoneMatchKey(zones[i]) === normalizedZoneKey &&
+        _norm(services[i]) === serviceKey
+      ) return true;
     }
     return false;
   }
 
-  function buildPlanningZoneAnchorFields(planningTable, projectName, zoneStr) {
+  function buildPlanningZoneAnchorFields(planningTable, projectName, zoneStr, service) {
     const projectCol = getPlanningProjectColumn(planningTable);
     const taskCol = getPlanningTaskColumn(planningTable);
     const normalizedZone = normalizeZoneValue(zoneStr);
     const fields = {};
+    if (!_norm(service)) throw new Error("Le service est obligatoire pour créer une zone Planning.");
+    if (!hasPlanningColumn(planningTable, 'Service')) {
+      throw new Error("La colonne Service est absente de Planning_Projet.");
+    }
     setPlanningFieldIfPresent(planningTable, fields, 'ID2', '');
     setPlanningFieldIfPresent(planningTable, fields, taskCol, '');
     setPlanningFieldIfPresent(planningTable, fields, 'Type_doc', '');
@@ -811,17 +824,18 @@
     setPlanningFieldIfPresent(planningTable, fields, projectCol, _norm(projectName));
     setPlanningFieldIfPresent(planningTable, fields, 'Groupe', '');
     setPlanningFieldIfPresent(planningTable, fields, 'Zone', normalizedZone);
+    setPlanningFieldIfPresent(planningTable, fields, 'Service', service);
     return fields;
   }
 
-  function buildPlanningZoneAnchorActionIfMissing(planningTableName, planningTable, projectName, zoneStr) {
+  function buildPlanningZoneAnchorActionIfMissing(planningTableName, planningTable, projectName, zoneStr, service) {
     const normalizedZone = normalizeZoneValue(zoneStr);
     if (!normalizedZone) return null;
-    if (planningZoneExists(planningTable, projectName, normalizedZone)) return null;
-    return ['AddRecord', planningTableName, null, buildPlanningZoneAnchorFields(planningTable, projectName, normalizedZone)];
+    if (planningZoneExists(planningTable, projectName, normalizedZone, service)) return null;
+    return ['AddRecord', planningTableName, null, buildPlanningZoneAnchorFields(planningTable, projectName, normalizedZone, service)];
   }
 
-  function getPlanningPendingGroupSet(planningTable, projectName) {
+  function getPlanningPendingGroupSet(planningTable, projectName, service) {
     if (!planningTable.__lpPendingGroups) {
       Object.defineProperty(planningTable, '__lpPendingGroups', {
         value: new Map(),
@@ -832,23 +846,27 @@
     }
     const map = planningTable.__lpPendingGroups;
     const p = _norm(projectName).toLocaleLowerCase('fr');
-    if (!map.has(p)) {
+    const serviceKey = _norm(service).toLocaleLowerCase('fr');
+    const mapKey = `${p}||${serviceKey}`;
+    if (!map.has(mapKey)) {
       const projectCol = getPlanningProjectColumn(planningTable);
       const projs = planningTable?.[projectCol] || [];
       const groups = planningTable?.Groupe || [];
+      const services = planningTable?.Service || [];
       const usedGroups = new Set();
-      for (let i = 0; i < Math.max(projs.length, groups.length); i++) {
+      for (let i = 0; i < Math.max(projs.length, groups.length, services.length); i++) {
         if (_norm(projs[i]).toLocaleLowerCase('fr') !== p) continue;
+        if (_norm(services[i]).toLocaleLowerCase('fr') !== serviceKey) continue;
         const g = _norm(groups[i]);
         if (g) usedGroups.add(g.toLocaleLowerCase('fr'));
       }
-      map.set(p, usedGroups);
+      map.set(mapKey, usedGroups);
     }
-    return map.get(p);
+    return map.get(mapKey);
   }
 
-  function getNextAvailablePlanningGroupNumber(planningTable, projectName) {
-    const usedGroups = getPlanningPendingGroupSet(planningTable, projectName);
+  function getNextAvailablePlanningGroupNumber(planningTable, projectName, service) {
+    const usedGroups = getPlanningPendingGroupSet(planningTable, projectName, service);
     let nextGroupNumber = 1;
     while (usedGroups.has(String(nextGroupNumber).toLocaleLowerCase('fr'))) {
       nextGroupNumber++;
@@ -858,9 +876,9 @@
     return candidate;
   }
 
-  function getDefaultPlanningGroupForType(typeDoc, planningTable, projectName) {
+  function getDefaultPlanningGroupForType(typeDoc, planningTable, projectName, service) {
     return isCoffrageDocumentType(typeDoc)
-      ? getNextAvailablePlanningGroupNumber(planningTable, projectName)
+      ? getNextAvailablePlanningGroupNumber(planningTable, projectName, service)
       : '';
   }
 
@@ -873,10 +891,14 @@
     return fields;
   }
 
-  function buildPlanningDocumentAddFields(planningTable, { projectName, numeroDocStr, taskName, typeDoc, zoneStr }) {
+  function buildPlanningDocumentAddFields(planningTable, { projectName, numeroDocStr, taskName, typeDoc, zoneStr, service }) {
     const projectCol = getPlanningProjectColumn(planningTable);
     const taskCol = getPlanningTaskColumn(planningTable);
     const fields = {};
+    if (!_norm(service)) throw new Error("Le service est obligatoire pour créer un document Planning.");
+    if (!hasPlanningColumn(planningTable, 'Service')) {
+      throw new Error("La colonne Service est absente de Planning_Projet.");
+    }
     setPlanningFieldIfPresent(planningTable, fields, projectCol, _norm(projectName));
     setPlanningFieldIfPresent(planningTable, fields, 'ID2', _norm(numeroDocStr));
     setPlanningFieldIfPresent(planningTable, fields, taskCol, String(taskName ?? '').trim());
@@ -884,9 +906,10 @@
     setPlanningFieldIfPresent(planningTable, fields, 'Indice', '');
     setPlanningFieldIfPresent(
       planningTable, fields, 'Groupe',
-      getDefaultPlanningGroupForType(typeDoc, planningTable, projectName)
+      getDefaultPlanningGroupForType(typeDoc, planningTable, projectName, service)
     );
     setPlanningFieldIfPresent(planningTable, fields, 'Zone', normalizeZoneValue(zoneStr));
+    setPlanningFieldIfPresent(planningTable, fields, 'Service', service);
     return fields;
   }
 
@@ -897,7 +920,10 @@
     documentName,
     documentType,
     documentZone = '',
+    service,
   }) {
+    const normalizedService = _norm(service);
+    if (!normalizedService) throw new Error("Le service est obligatoire pour créer un document Planning.");
     const planningTableName = await resolvePlanningTableName();
     const planningTable = await grist.docApi.fetchTable(planningTableName);
     const projectCol = getPlanningProjectColumn(planningTable);
@@ -906,7 +932,8 @@
       !hasPlanningColumn(planningTable, projectCol) ||
       !hasPlanningColumn(planningTable, 'ID2') ||
       !hasPlanningColumn(planningTable, taskCol) ||
-      !hasPlanningColumn(planningTable, 'Type_doc')
+      !hasPlanningColumn(planningTable, 'Type_doc') ||
+      !hasPlanningColumn(planningTable, 'Service')
     ) {
       throw new Error("La structure de Planning ne permet pas d'identifier le document.");
     }
@@ -918,14 +945,16 @@
     const projects = planningTable?.[projectCol] || [];
     const numbers = planningTable?.ID2 || planningTable?.NumeroDocument || [];
     const types = planningTable?.Type_doc || planningTable?.Type_document || [];
+    const services = planningTable?.Service || [];
 
     const identityExists = Array.from(
-      { length: Math.max(projects.length, numbers.length, types.length) },
+      { length: Math.max(projects.length, numbers.length, types.length, services.length) },
       (_, index) => index
     ).some((index) =>
       projectKeys.has(normalizeDocumentIdentityPart(projects[index])) &&
       normalizeDocumentIdentityPart(numbers[index]) === normalizeDocumentIdentityPart(documentNumber) &&
-      normalizeDocumentIdentityPart(types[index]) === normalizeDocumentIdentityPart(documentType)
+      normalizeDocumentIdentityPart(types[index]) === normalizeDocumentIdentityPart(documentType) &&
+      _norm(services[index]) === normalizedService
     );
     if (identityExists) {
       throw new Error(
@@ -943,13 +972,14 @@
         taskName: documentName,
         typeDoc: documentType,
         zoneStr: documentZone,
+        service: normalizedService,
       }),
     ];
   }
 
   window.buildPlanningDocumentCreationAction = buildPlanningDocumentCreationAction;
 
-  function findPlanningIndex(planningTable, projectName, numeroDocStr, typeDocStr, zoneStr, taskName) {
+  function findPlanningIndex(planningTable, projectName, numeroDocStr, typeDocStr, zoneStr, taskName, service) {
     const projectCol = getPlanningProjectColumn(planningTable);
     const taskCol = getPlanningTaskColumn(planningTable);
     const projs = planningTable?.[projectCol] || [];
@@ -957,17 +987,20 @@
     const types = planningTable?.Type_doc || [];
     const zones = planningTable?.Zone || [];
     const tasks = planningTable?.[taskCol] || [];
+    const services = planningTable?.Service || [];
     const p = _norm(projectName);
     const n = _norm(numeroDocStr);
     const t = _norm(typeDocStr);
     const z = normalizeZoneMatchKey(zoneStr);
     const hasZoneColumn = hasPlanningColumn(planningTable, 'Zone');
+    const serviceKey = _norm(service);
     let legacyFallbackIndex = -1;
 
-    for (let i = 0; i < Math.max(projs.length, ids2.length, types.length, zones.length, tasks.length); i++) {
+    for (let i = 0; i < Math.max(projs.length, ids2.length, types.length, zones.length, tasks.length, services.length); i++) {
       if (_norm(projs[i]) !== p) continue;
       if (_norm(ids2[i]) !== n) continue;
       if (_norm(types[i]) !== t) continue;
+      if (_norm(services[i]) !== serviceKey) continue;
       if (_norm(taskName) && _norm(tasks[i]) !== _norm(taskName)) continue;
       const currentZone = hasZoneColumn ? normalizeZoneMatchKey(zones[i]) : '';
       if (currentZone === z) return i;
@@ -1065,14 +1098,10 @@
   }
 
   async function getTeamService() {
-    try {
-      const t = await grist.docApi.fetchTable('Team');
-      if (Array.isArray(t) && t.length > 0) return t[0].Service || '';
-      if (t?.Service && Array.isArray(t.Service)) return t.Service[0] || '';
-      return '';
-    } catch (_e) {
-      return '';
+    if (typeof window.getCurrentTeamService !== 'function') {
+      throw new Error("Le service de l'utilisateur courant est indisponible.");
     }
+    return window.getCurrentTeamService();
   }
 
   // ============================================================
@@ -1109,6 +1138,7 @@
     });
 
     if (!uniqueDocuments.length) throw new Error('Veuillez ajouter au moins un document complet.');
+    const serviceValue = await getTeamService();
     if (typeof window.assertDocumentIdentitiesAvailable !== 'function') {
       throw new Error("Le controle d'identite des documents est indisponible.");
     }
@@ -1118,11 +1148,11 @@
         number: doc.documentNumber,
         name: doc.documentName,
         type: doc.documentType,
-      }))
+      })),
+      { service: serviceValue }
     );
 
     const safeDefaultDate = _norm(defaultDatelimite) || DEFAULT_DATE;
-    const serviceValue = await getTeamService();
     const actions = [];
 
     // --- ListePlan ---
@@ -1136,6 +1166,7 @@
           normalizeDocumentIdentityPart(normalizedProject),
           normalizeDocumentIdentityPart(doc.documentNumber),
           normalizeDocumentIdentityPart(doc.documentType),
+          normalizeDocumentIdentityPart(serviceValue),
         ].join('||');
 
         if (!pendingPlanAdds.has(key)) {
@@ -1145,12 +1176,13 @@
             Type_document: doc.documentType,
             Zone: doc.documentZone,
             Designation: doc.documentName,
+            Service: serviceValue,
           }]);
           pendingPlanAdds.add(key);
         }
       });
     } catch (error) {
-      console.warn('ListePlan: impossible d\'ajouter / mettre à jour les documents.', error);
+      throw new Error(`ListePlan: impossible de préparer les documents. ${error.message || error}`);
     }
 
     // --- Planning ---
@@ -1163,16 +1195,31 @@
       uniqueDocuments.forEach((doc) => {
         const zoneKey = normalizeZoneMatchKey(doc.documentZone);
         if (zoneKey && !queuedZoneAnchors.has(zoneKey)) {
-          const anchorAction = buildPlanningZoneAnchorActionIfMissing(planningTableName, planning, normalizedProject, doc.documentZone);
+          const anchorAction = buildPlanningZoneAnchorActionIfMissing(
+            planningTableName,
+            planning,
+            normalizedProject,
+            doc.documentZone,
+            serviceValue
+          );
           if (anchorAction) actions.push(anchorAction);
           queuedZoneAnchors.add(zoneKey);
         }
 
-        const idxPlanning = findPlanningIndex(planning, normalizedProject, doc.documentNumber, doc.documentType, doc.documentZone, doc.documentName);
+        const idxPlanning = findPlanningIndex(
+          planning,
+          normalizedProject,
+          doc.documentNumber,
+          doc.documentType,
+          doc.documentZone,
+          doc.documentName,
+          serviceValue
+        );
         const planningKey = [
           normalizeDocumentIdentityPart(normalizedProject),
           normalizeDocumentIdentityPart(doc.documentNumber),
           normalizeDocumentIdentityPart(doc.documentType),
+          normalizeDocumentIdentityPart(serviceValue),
         ].join('||');
 
         if (idxPlanning >= 0) {
@@ -1191,13 +1238,14 @@
               taskName: doc.documentName,
               typeDoc: doc.documentType,
               zoneStr: doc.documentZone,
+              service: serviceValue,
             })
           ]);
           pendingPlanningAdds.add(planningKey);
         }
       });
     } catch (error) {
-      console.warn('Planning: impossible d\'ajouter / mettre à jour les documents.', error);
+      throw new Error(`Planning: impossible de préparer les documents. ${error.message || error}`);
     }
 
     // --- References ---
