@@ -1620,15 +1620,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Team Selection
     async function populateTeamSelection() {
-        const teamData = await grist.docApi.fetchTable("Team");
+        const [teamData, currentService] = await Promise.all([
+            grist.docApi.fetchTable("Team"),
+            getTeamService()
+        ]);
         const externalColumn = getTeamExternalColumn(teamData);
         teamMembers = teamData.id.map((id, index) => ({
             id: id,
             Prenom: teamData.Prenom[index],
             Nom: teamData.Nom[index],
             Role: teamData.Role[index],
+            Service: String(teamData.Service?.[index] ?? '').trim(),
             Externe: externalColumn ? toBooleanFlag(teamData[externalColumn][index]) : false
-        }));
+        })).filter((member) => member.Service === currentService);
 
         const groupedByRole = groupTeamMembersByRole(teamMembers);
 
@@ -2670,11 +2674,20 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!refCols.has('Service')) {
                 throw new Error('La colonne Service est absente de References2.');
             }
+            if (!refCols.has('NumeroProjet')) {
+                throw new Error('La colonne NumeroProjet est absente de References2.');
+            }
             if (!listePlanContext.columns.has('Service')) {
                 throw new Error('La colonne Service est absente de ListePlan_NDC_COF.');
             }
+            if (!listePlanContext.columns.has('NumeroProjet')) {
+                throw new Error('La colonne NumeroProjet est absente de ListePlan_NDC_COF.');
+            }
             if (!planningContext.columns.has('Service')) {
                 throw new Error('La colonne Service est absente de Planning_Projet.');
+            }
+            if (!planningContext.columns.has('NumeroProjet')) {
+                throw new Error('La colonne NumeroProjet est absente de Planning_Projet.');
             }
             const projetsTable = await grist.docApi.fetchTable("Projets2");
             const projetsColumns = getTableColumnNames(projetsTable);
@@ -2692,7 +2705,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // 2. Add Budget Lines
             const budgetActions = getBudgetLinesForProjectCreation().map(line =>
-                ["AddRecord", "Budget", null, { NumeroProjet: projectData.number, Chapter: line.chapter, Amount: line.amount }]
+                ["AddRecord", "Budget", null, {
+                    NumeroProjet: projectData.number,
+                    Chapter: line.chapter,
+                    Amount: line.amount,
+                    Service: serviceValue
+                }]
             );
             if (budgetActions.length > 0) {
                 await grist.docApi.applyUserActions(budgetActions);
@@ -2703,7 +2721,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const teamActions = selectedTeamMembers.map(member => {
                 const name = getTeamMemberDisplayName(member);
                 const role = getTeamMemberRole(member);
-                return ["AddRecord", "ProjectTeam", null, { NumeroProjet: projectData.number, Role: role, Name: name, Daily_Rate: 0 }];
+                return ["AddRecord", "ProjectTeam", null, {
+                    NumeroProjet: projectData.number,
+                    Role: role,
+                    Name: name,
+                    Daily_Rate: 0,
+                    Service: serviceValue
+                }];
             });
             if (teamActions.length > 0) {
                 await grist.docApi.applyUserActions(teamActions);
@@ -2719,6 +2743,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 for (const emitter of projectData.emitters) {
                     const row = {
                         NomProjet: projectData.name,       // nom écrit
+                        NumeroProjet: projectData.number,
                         NomDocument: doc.name,
                         NumeroDocument: doc.numero || '',
                         Type_document: doc.type || "COFFRAGE",
@@ -2752,6 +2777,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const fields = {};
                 setFieldIfPresent(listePlanContext.columns, fields, 'Nom_projet', projectData.name);
                 setFieldIfPresent(listePlanContext.columns, fields, 'NomProjet', projectData.name);
+                setFieldIfPresent(listePlanContext.columns, fields, 'NumeroProjet', projectData.number);
                 setFieldIfPresent(listePlanContext.columns, fields, 'Type_document', doc.type || 'COFFRAGE');
                 setFieldIfPresent(listePlanContext.columns, fields, 'Type_doc', doc.type || 'COFFRAGE');
                 setFieldIfPresent(listePlanContext.columns, fields, 'NumeroDocument', doc.numero || '');
@@ -2780,11 +2806,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
             uniqueZones.forEach((zoneName) => {
                 if (!planningZoneExists(planningContext.data, projectData.name, zoneName, serviceValue)) {
+                    const zoneAnchorFields = buildPlanningZoneAnchorFields(
+                        planningContext.columns,
+                        projectData.name,
+                        zoneName,
+                        serviceValue
+                    );
+                    setFieldIfPresent(
+                        planningContext.columns,
+                        zoneAnchorFields,
+                        'NumeroProjet',
+                        projectData.number
+                    );
                     planningActions.push([
                         "AddRecord",
                         planningContext.tableName,
                         null,
-                        buildPlanningZoneAnchorFields(planningContext.columns, projectData.name, zoneName, serviceValue)
+                        zoneAnchorFields
                     ]);
                 }
             });
@@ -2796,6 +2834,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const fields = {};
 
                 setFieldIfPresent(planningContext.columns, fields, 'NomProjet', projectData.name);
+                setFieldIfPresent(planningContext.columns, fields, 'NumeroProjet', projectData.number);
                 setFieldIfPresent(planningContext.columns, fields, 'ID2', numeroText);
                 setFieldIfPresent(planningContext.columns, fields, 'Taches', doc.name);
                 setFieldIfPresent(planningContext.columns, fields, 'Tache', doc.name);

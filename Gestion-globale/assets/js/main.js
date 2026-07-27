@@ -62,6 +62,50 @@ const state = {
 
 const dom = {};
 
+function normalizePersonKey(value) {
+  return toText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("fr");
+}
+
+function filterTablesByPersonService(tables) {
+  const selectedService = toText(
+    window.GristServiceContext?.getService?.()
+      || window.localStorage?.getItem("grist.selected-service")
+  );
+  if (!selectedService) {
+    return {
+      ...tables,
+      teamRows: [],
+      projectTeamRows: [],
+      timeSegmentRows: [],
+      timeRealRows: [],
+    };
+  }
+
+  const teamRows = (tables?.teamRows || []).filter(
+    (row) => toText(row?.Service) === selectedService
+  );
+  const allowedPeople = new Set(teamRows.map((row) => normalizePersonKey(
+    toText(row?.PrenomNom)
+      || [toText(row?.Prenom), toText(row?.Nom)].filter(Boolean).join(" ")
+  )).filter(Boolean));
+  const keepPersonRow = (row) => allowedPeople.has(normalizePersonKey(
+    row?.Name ?? row?.Nom ?? row?.PrenomNom
+  ));
+
+  return {
+    ...tables,
+    teamRows,
+    projectTeamRows: (tables?.projectTeamRows || []).filter(keepPersonRow),
+    timeSegmentRows: (tables?.timeSegmentRows || []).filter(keepPersonRow),
+    timeRealRows: (tables?.timeRealRows || []).filter(keepPersonRow),
+  };
+}
+
 function getDomRefs() {
   Object.assign(dom, {
     status: document.getElementById("global-status"),
@@ -699,7 +743,9 @@ async function loadData() {
     fetchExpenseAppTables(),
     fetchDopRegistryRows(),
   ]);
-  const { projects, diagnostics } = buildGlobalExpenseData(tables);
+  const { projects, diagnostics } = buildGlobalExpenseData(
+    filterTablesByPersonService(tables)
+  );
 
   state.projects = projects;
   state.dopRegistryRows = dopRegistryRows;

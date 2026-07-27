@@ -425,6 +425,18 @@ function completeProjectsWithTimeRealRows(projects, timeRealRows) {
   return completedProjects;
 }
 
+function getActiveService() {
+  if (typeof globalThis === "undefined") return "Structure";
+  const runtimeService = globalThis.GristServiceContext?.getService?.();
+  if (runtimeService) return runtimeService;
+  try {
+    return String(globalThis.localStorage?.getItem("grist.selected-service") || "").trim()
+      || "Structure";
+  } catch (_error) {
+    return "Structure";
+  }
+}
+
 function parseAvancementConfig(rawValue) {
   if (rawValue == null || rawValue === "") {
     return [];
@@ -432,7 +444,9 @@ function parseAvancementConfig(rawValue) {
 
   try {
     const parsed = typeof rawValue === "string" ? JSON.parse(rawValue) : rawValue;
-    return Array.isArray(parsed) ? parsed : [];
+    if (Array.isArray(parsed)) return getActiveService() === "Structure" ? parsed : [];
+    const scoped = parsed?.services?.[getActiveService()];
+    return Array.isArray(scoped) ? scoped : [];
   } catch (_error) {
     return [];
   }
@@ -546,10 +560,19 @@ function buildAggregatedSelections(projects) {
 }
 
 function buildAggregatedAvancementConfig(projects) {
-  return JSON.stringify([
+  const activeService = getActiveService();
+  const items = [
     ...buildAggregatedSelections(projects),
     ...buildAggregatedBudgetProgress(projects),
-  ]);
+  ];
+  return JSON.stringify({
+    version: 2,
+    services: {
+      Structure: activeService === "Structure" ? items : [],
+      Synthese: activeService === "Synthese" ? items : [],
+      Topographie: activeService === "Topographie" ? items : [],
+    },
+  });
 }
 
 function buildAggregatedWorkers(projects) {

@@ -72,6 +72,18 @@ const SPECIAL_BUDGET_KEYS = {
 
 const SHARED_PROJECT_STORAGE_KEY = 'grist.selected-project';
 const SHARED_PROJECT_ID_STORAGE_KEY = 'grist.selected-project-id';
+
+function getActiveService() {
+  return window.GristServiceContext?.getService?.()
+    || window.GristServiceContextCore?.normalizeService?.(
+      localStorage.getItem('grist.selected-service')
+    )
+    || 'Structure';
+}
+
+function isExternalServiceReadOnly() {
+  return Boolean(window.GristServiceContext?.isReadOnly?.());
+}
 let _projectsData = []; // [{id, number, name}] chargé depuis la table Projets
 
 let dashboardUpdateRevision = 0;
@@ -408,17 +420,20 @@ async function fetchProjectConfig(selectedProject) {
       });
     }
 
-    const parsedConfig = parseAvancementConfig(projectRow[PROJECT_COLUMNS.avancement]);
+    const rawAvancementValue = projectRow[PROJECT_COLUMNS.avancement];
+    const parsedConfig = parseAvancementConfig(rawAvancementValue);
+    const readOnly = isExternalServiceReadOnly();
 
     return createProjectConfig({
       id: projectRow[PROJECT_COLUMNS.id],
       projectNumber: normalizeText(projectRow[PROJECT_COLUMNS.projectNumber]),
+      rawAvancementValue,
       selections: parsedConfig.selections,
       budgetProgress: parsedConfig.budgetProgress,
-      canSave: !parsedConfig.error,
+      canSave: !parsedConfig.error && !readOnly,
       warning: parsedConfig.error
         ? 'JSON invalide dans Projets2.Avancement. Corrige ou vide la cellule.'
-        : '',
+        : (readOnly ? 'Service externe : consultation en lecture seule.' : ''),
     });
   } catch (error) {
     console.error('Erreur chargement Projets2.Avancement :', error);
@@ -432,6 +447,7 @@ async function fetchProjectConfig(selectedProject) {
 function createProjectConfig({
   id = null,
   projectNumber = '',
+  rawAvancementValue = '',
   selections = [],
   budgetProgress = [],
   canSave = false,
@@ -440,6 +456,7 @@ function createProjectConfig({
   return {
     id,
     projectNumber,
+    rawAvancementValue,
     selections,
     budgetProgress,
     canSave,
@@ -449,6 +466,11 @@ function createProjectConfig({
 
 function findProjectRow(projectsTable, selectedProject) {
   const rows = tableToRows(projectsTable);
+  const selectedProjectId = readSharedProjectId();
+  if (selectedProjectId) {
+    const rowById = rows.find((row) => Number(row[PROJECT_COLUMNS.id]) === selectedProjectId);
+    if (rowById) return rowById;
+  }
 
   return rows.find(
     (row) => normalizeText(row[PROJECT_COLUMNS.name]) === selectedProject,
@@ -486,20 +508,26 @@ function tableHasColumn(table, columnName) {
 }
 
 function parseAvancementConfig(rawValue) {
-  if (rawValue == null || rawValue === '') {
-    return { selections: [], budgetProgress: [], error: null };
-  }
-
   try {
-    const parsed = typeof rawValue === 'string' ? JSON.parse(rawValue) : rawValue;
-
-    if (!Array.isArray(parsed)) {
-      return { selections: [], budgetProgress: [], error: new Error('Avancement must be an array') };
-    }
+    const scoped = window.GristServiceContextCore?.getServiceAvancementItems
+      ? window.GristServiceContextCore.getServiceAvancementItems(rawValue, getActiveService())
+      : {
+          items: (() => {
+            if (rawValue == null || rawValue === '') return [];
+            const parsed = typeof rawValue === 'string' ? JSON.parse(rawValue) : rawValue;
+            if (Array.isArray(parsed)) return getActiveService() === 'Structure' ? parsed : [];
+            return Array.isArray(parsed?.services?.[getActiveService()])
+              ? parsed.services[getActiveService()]
+              : [];
+          })(),
+          error: null,
+        };
+    if (scoped.error) throw scoped.error;
+    if (!Array.isArray(scoped.items)) throw new Error('Avancement service must be an array');
 
     return {
-      selections: dedupeSelections(parsed.map(normalizeSelection).filter(Boolean)),
-      budgetProgress: dedupeBudgetProgress(parsed.map(normalizeBudgetProgress).filter(Boolean)),
+      selections: dedupeSelections(scoped.items.map(normalizeSelection).filter(Boolean)),
+      budgetProgress: dedupeBudgetProgress(scoped.items.map(normalizeBudgetProgress).filter(Boolean)),
       error: null,
     };
   } catch (error) {
@@ -1389,8 +1417,22 @@ async function handleIndexSelectionChange(projectRecords, selectedIndicesByType)
 
 async function saveAvancementConfig({ selections, budgetProgress, successMessage }) {
   try {
+    if (isExternalServiceReadOnly()) {
+      throw new Error('Ce service est accessible en lecture seule.');
+    }
     setIndexSelectionControlsBusy(true);
     setBudgetProgressControlsBusy(true);
+    const serviceItems = [
+      ...dedupeSelections(selections),
+      ...dedupeBudgetProgress(budgetProgress),
+    ];
+    const serializedConfig = window.GristServiceContextCore?.updateServiceAvancement
+      ? window.GristServiceContextCore.updateServiceAvancement(
+          state.currentProjectConfig.rawAvancementValue,
+          getActiveService(),
+          serviceItems,
+        )
+      : JSON.stringify(serviceItems);
 
     await grist.docApi.applyUserActions([
       [
@@ -1398,14 +1440,12 @@ async function saveAvancementConfig({ selections, budgetProgress, successMessage
         TABLES.projects,
         state.currentProjectConfig.id,
         {
-          [PROJECT_COLUMNS.avancement]: JSON.stringify([
-            ...dedupeSelections(selections),
-            ...dedupeBudgetProgress(budgetProgress),
-          ]),
+          [PROJECT_COLUMNS.avancement]: serializedConfig,
         },
       ],
     ]);
 
+    state.currentProjectConfig.rawAvancementValue = serializedConfig;
     state.selectionFeedback = { type: 'success', message: successMessage };
     await updateDashboard();
   } catch (error) {

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gestion des accès interservices</title>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <script src="../shared/service-context-core.js"></script>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="access-app">
+    <header>
+      <div>
+        <p class="eyebrow">Administration Grist</p>
+        <h1>Accès interservices</h1>
+        <p>Attribuer la lecture d’un projet appartenant à un autre service.</p>
+      </div>
+      <span id="admin-status" class="status">Chargement…</span>
+    </header>
+
+    <section id="editor" class="panel" hidden>
+      <div class="form-grid">
+        <label>
+          <span>Personne</span>
+          <select id="user-select"></select>
+        </label>
+        <div class="identity-card">
+          <span>Service principal</span>
+          <strong id="user-home-service">—</strong>
+        </div>
+        <label>
+          <span>Projet</span>
+          <select id="project-select"></select>
+        </label>
+        <label>
+          <span>Service à ouvrir</span>
+          <select id="service-select"></select>
+        </label>
+      </div>
+      <div class="form-actions">
+        <button id="grant-button" type="button">Ajouter l’accès en lecture</button>
+        <p id="form-message" class="message" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <section id="grants-panel" class="panel" hidden>
+      <div class="panel-heading">
+        <div>
+          <h2>Autorisations actuelles</h2>
+          <p id="grants-summary"></p>
+        </div>
+      </div>
+      <div id="grants-list" class="grants-list"></div>
+    </section>
+
+    <section id="fatal-panel" class="panel error-panel" hidden>
+      <h2>Accès impossible</h2>
+      <p id="fatal-message"></p>
+    </section>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>

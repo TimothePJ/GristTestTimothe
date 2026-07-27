@@ -243,11 +243,11 @@ function getUniqueFilterOptions(employees, getLabel) {
 }
 
 function populateFilters(employees, projects) {
-  setSelectOptions(
-    dom.serviceFilter,
-    getUniqueFilterOptions(employees, getServiceLabel),
-    "Tous les services"
+  const activeService = toText(
+    window.GristServiceContext?.getService?.()
+      || window.localStorage?.getItem("grist.selected-service")
   );
+  state.filters.service = getFilterKey(activeService);
   setSelectOptions(
     dom.roleFilter,
     getUniqueFilterOptions(employees, getRoleLabel),
@@ -258,7 +258,7 @@ function populateFilters(employees, projects) {
     getUniqueFilterOptions(Array.from(projects.values()), getProjectDopLabel),
     "Toutes les DOP"
   );
-  dom.serviceFilter.value = state.filters.service;
+  dom.serviceFilter.value = activeService;
   dom.roleFilter.value = state.filters.role;
   dom.dopFilter.value = state.filters.dop;
 }
@@ -785,8 +785,7 @@ function bindEvents() {
     scheduleRender();
   });
   dom.serviceFilter.addEventListener("change", () => {
-    state.filters.service = dom.serviceFilter.value;
-    scheduleRender();
+    state.filters.service = getFilterKey(dom.serviceFilter.value);
   });
   dom.roleFilter.addEventListener("change", () => {
     state.filters.role = dom.roleFilter.value;

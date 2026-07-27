@@ -160,11 +160,20 @@ export async function loadGestionUserData() {
   const projectRows = tableToRows(projectTable);
   const segmentRows = tableToRows(timeSegmentTable);
 
-  const employees = buildEmployees(teamTable, teamRows);
-  const segments = buildSegments(timeSegmentTable, segmentRows);
+  const selectedService = toText(
+    window.GristServiceContext?.getService?.()
+      || window.localStorage?.getItem("grist.selected-service")
+  );
+  const employees = buildEmployees(teamTable, teamRows).filter(
+    (employee) => selectedService && toText(employee.service) === selectedService
+  );
+  const employeeKeys = new Set(employees.map((employee) => employee.key));
+  const segments = buildSegments(timeSegmentTable, segmentRows).filter(
+    (segment) => employeeKeys.has(segment.employeeKey)
+  );
 
   return {
-    employees: addSegmentOnlyEmployees(employees, segments),
+    employees,
     projects: buildProjects(projectTable, projectRows),
     segments,
     segmentsByEmployee: buildSegmentsByEmployee(segments),
