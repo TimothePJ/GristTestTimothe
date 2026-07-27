@@ -2,11 +2,12 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const core = require("../service-context-core.js");
 
-test("parseGrants compare les numéros exactement et déduplique", () => {
-  const grants = core.parseGrants("252035|ERA\n25203|Autre\r\n252035|Doublon");
+test("parseGrants compare les numéros exactement et conserve les alias de nom", () => {
+  const grants = core.parseGrants("252035|ERA\n25203|Autre\r\n252035|Doublon\n252035|ERA");
   assert.deepEqual(grants, [
     { projectNumber: "252035", projectName: "ERA" },
     { projectNumber: "25203", projectName: "Autre" },
+    { projectNumber: "252035", projectName: "Doublon" },
   ]);
   assert.equal(core.hasProjectGrant("252035|ERA", "252035"), true);
   assert.equal(core.hasProjectGrant("252035|ERA", "25203"), false);
@@ -55,10 +56,10 @@ test("filterRawTableByService filtre les objets colonnaires et traite le vide co
   });
 });
 
-test("transformActions ajoute Service et NumeroProjet aux créations concernées", () => {
+test("transformActions ajoute Service et réserve NumeroProjet aux tables qui le possèdent", () => {
   const actions = core.transformActions([
     ["AddRecord", "References2", null, { NomProjet: "ERA" }],
-    ["AddRecord", "Budget", null, { NumeroProjet: "252035", Chapter: "01" }],
+    ["AddRecord", "Budget", null, { Chapter: "01" }],
     ["UpdateRecord", "References2", 1, { Indice: "A" }],
   ], {
     selectedService: "Structure",
@@ -67,7 +68,6 @@ test("transformActions ajoute Service et NumeroProjet aux créations concernées
   assert.deepEqual(actions[0][3], {
     NomProjet: "ERA",
     Service: "Structure",
-    NumeroProjet: "252035",
   });
   assert.deepEqual(actions[1][3], {
     NumeroProjet: "252035",
@@ -81,7 +81,6 @@ test("transformActions ajoute Service et NumeroProjet aux créations concernées
     {
       Indice: "A",
       Service: "Structure",
-      NumeroProjet: "252035",
     },
   ]);
 });

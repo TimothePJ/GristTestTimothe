@@ -69,14 +69,18 @@
       groups.set(number, current);
     });
     return [...groups.values()]
-      .map((group) => ({
-        number: group.number,
-        name: [...group.names].sort((a, b) => a.localeCompare(b, "fr", {
+      .map((group) => {
+        const names = [...group.names].sort((a, b) => a.localeCompare(b, "fr", {
           numeric: true,
           sensitivity: "base",
-        })).join(" / "),
-        ids: group.ids,
-      }))
+        }));
+        return {
+          number: group.number,
+          name: names.join(" / "),
+          names,
+          ids: group.ids,
+        };
+      })
       .sort((left, right) => left.number.localeCompare(right.number, "fr", {
         numeric: true,
         sensitivity: "base",
@@ -129,10 +133,27 @@
   }
 
   function getAllGrants(teamRow) {
-    return core.SERVICES.flatMap((service) => (
-      core.parseGrants(teamRow?.[core.GRANT_COLUMNS[service]])
-        .map((grant) => ({ ...grant, service }))
-    )).sort((left, right) => (
+    const grouped = new Map();
+    core.SERVICES.forEach((service) => {
+      core.parseGrants(teamRow?.[core.GRANT_COLUMNS[service]]).forEach((grant) => {
+        const key = `${service}\u0000${grant.projectNumber}`;
+        const current = grouped.get(key) || {
+          service,
+          projectNumber: grant.projectNumber,
+          names: new Set(),
+        };
+        if (grant.projectName) current.names.add(grant.projectName);
+        grouped.set(key, current);
+      });
+    });
+    return [...grouped.values()].map((grant) => ({
+      service: grant.service,
+      projectNumber: grant.projectNumber,
+      projectName: [...grant.names].sort((left, right) => left.localeCompare(right, "fr", {
+        numeric: true,
+        sensitivity: "base",
+      })).join(" / "),
+    })).sort((left, right) => (
       left.service.localeCompare(right.service, "fr") ||
       left.projectNumber.localeCompare(right.projectNumber, "fr", { numeric: true })
     ));
@@ -221,7 +242,8 @@
     try {
       await updateGrantColumn(teamRow, service, [
         ...existing,
-        { projectNumber, projectName: project?.name || "" },
+        ...(project?.names?.length ? project.names : [project?.name || ""])
+          .map((projectName) => ({ projectNumber, projectName })),
       ]);
       setMessage("Accès ajouté en lecture seule.", "success");
       renderGrants();

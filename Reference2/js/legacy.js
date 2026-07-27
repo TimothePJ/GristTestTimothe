@@ -3532,7 +3532,7 @@ scheduleReferenceRetardMidnightRefresh();
 let teamRecords = [];
 
 // Lorsque les enregistrements de la table sont disponibles, on les stocke
-grist.onRecords((records, tableId) => {
+window.GristServiceContext.onRecords((records, tableId) => {
   if (tableId === "Team") {
     teamRecords = records;
     console.log("Team records loaded :", teamRecords);
@@ -4495,7 +4495,7 @@ function hideContextMenu() {
 }
 
 // Fetch records from Grist
-grist.onRecords(function (receivedRecords, tableId) {
+window.GristServiceContext.onRecords(function (receivedRecords, tableId) {
   if (tableId === 'Team') return;
 
   records = receivedRecords;
@@ -6997,7 +6997,7 @@ try {
   }
 } catch (e) { }
 
-grist.onRecords(function (receivedRecords, tableId) {
+window.GristServiceContext.onRecords(function (receivedRecords, tableId) {
   if (tableId === 'Team') return;
   if (!Array.isArray(receivedRecords)) return;
 

@@ -31,10 +31,10 @@
     "Emetteurs",
   ]));
   const PROJECT_NUMBER_TABLES = Object.freeze(new Set([
-    "References2",
-    "ListePlan_NDC_COF",
-    "Planning_Projet",
-    "Envois",
+    "Budget",
+    "ProjectTeam",
+    "TimeSegment",
+    "TimeReal",
   ]));
 
   function toText(value) {
@@ -71,7 +71,7 @@
   }
 
   function parseGrants(rawValue) {
-    const grantsByNumber = new Map();
+    const grantsByIdentity = new Map();
     toText(rawValue)
       .replace(/\r\n?/g, "\n")
       .split("\n")
@@ -81,27 +81,30 @@
         const projectNumber = normalizeProjectNumber(line.slice(0, separatorIndex));
         const projectName = toText(line.slice(separatorIndex + 1));
         if (!projectNumber) return;
-        const previous = grantsByNumber.get(projectNumber);
-        if (!previous || (!previous.projectName && projectName)) {
-          grantsByNumber.set(projectNumber, { projectNumber, projectName });
+        const identity = `${projectNumber}\u0000${projectName}`;
+        if (!grantsByIdentity.has(identity)) {
+          grantsByIdentity.set(identity, { projectNumber, projectName });
         }
       });
-    return [...grantsByNumber.values()];
+    return [...grantsByIdentity.values()];
   }
 
   function serializeGrants(grants) {
-    const byNumber = new Map();
+    const byIdentity = new Map();
     (Array.isArray(grants) ? grants : []).forEach((grant) => {
       const projectNumber = normalizeProjectNumber(grant?.projectNumber);
       if (!projectNumber) return;
       const projectName = toText(grant?.projectName);
-      const previous = byNumber.get(projectNumber);
-      if (!previous || (!previous.projectName && projectName)) {
-        byNumber.set(projectNumber, { projectNumber, projectName });
+      const identity = `${projectNumber}\u0000${projectName}`;
+      if (!byIdentity.has(identity)) {
+        byIdentity.set(identity, { projectNumber, projectName });
       }
     });
-    return [...byNumber.values()]
+    return [...byIdentity.values()]
       .sort((left, right) => left.projectNumber.localeCompare(right.projectNumber, "fr", {
+        numeric: true,
+        sensitivity: "base",
+      }) || left.projectName.localeCompare(right.projectName, "fr", {
         numeric: true,
         sensitivity: "base",
       }))

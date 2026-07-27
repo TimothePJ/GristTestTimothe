@@ -96,7 +96,6 @@ export const APP_CONFIG = {
       },
       listePlan: {
         id: "id",
-        projectNumber: "NumeroProjet",
         projectName: "Nom_projet",
         projectNameAlt: "NomProjet",
         documentNumber: "NumeroDocument",
@@ -111,7 +110,6 @@ export const APP_CONFIG = {
       },
       planningProject: {
         id: "id",
-        projectNumber: "NumeroProjet",
         projectName: "NomProjet",
         taskName: "Taches",
         taskNameAlt: "Tache",

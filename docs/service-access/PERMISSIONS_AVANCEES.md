@@ -15,17 +15,6 @@ user.TeamRec.Admin
 
 ## Tables projet + service
 
-Appliquer le principe aux tables suivantes :
-
-- `References2`
-- `ListePlan_NDC_COF`
-- `Planning_Projet`
-- `Envois`
-- `Budget`
-- `ProjectTeam`
-- `TimeSegment`
-- `TimeReal`
-
 ### Lecture du service principal
 
 Condition :
@@ -36,18 +25,60 @@ rec.Service == user.TeamRec.Service
 
 Permission : `+R`
 
-### Lecture externe Structure
+### Lecture externe des tables identifiées par nom
+
+Ajouter une seule règle couvrant les trois services, avec `+R` uniquement,
+juste avant le refus final. Le modèle ci-dessous utilise `rec.NomProjet` :
 
 ```python
-rec.Service == "Structure" and (
-  "\n" + user.TeamRec.Projets_Lecture_Structure + "\n"
-).find("\n" + str(rec.NumeroProjet) + "|") >= 0
+(
+  rec.Service == "Structure"
+  and ("|" + rec.NomProjet + "\n") in (
+    "\n" + (user.TeamRec.Projets_Lecture_Structure or "") + "\n"
+  )
+) or (
+  rec.Service == "Synthese"
+  and ("|" + rec.NomProjet + "\n") in (
+    "\n" + (user.TeamRec.Projets_Lecture_Synthese or "") + "\n"
+  )
+) or (
+  rec.Service == "Topographie"
+  and ("|" + rec.NomProjet + "\n") in (
+    "\n" + (user.TeamRec.Projets_Lecture_Topographie or "") + "\n"
+  )
+)
 ```
 
-Permission : `+R`
+Adapter uniquement le nom de colonne :
 
-Créer la même règle pour Synthese et Topographie en remplaçant le nom du
-service et la colonne `Team`.
+- `References2` : `rec.NomProjet`
+- `ListePlan_NDC_COF` : `rec.Nom_projet`
+- `Planning_Projet` : `rec.NomProjet`
+- `Envois` : `rec.Projet`
+
+### Lecture externe des tables identifiées par numéro
+
+Ajouter une seule règle avec `+R` uniquement dans `Budget`, `ProjectTeam`,
+`TimeSegment` et `TimeReal` :
+
+```python
+(
+  rec.Service == "Structure"
+  and ("\n" + rec.NumeroProjet + "|") in (
+    "\n" + (user.TeamRec.Projets_Lecture_Structure or "") + "\n"
+  )
+) or (
+  rec.Service == "Synthese"
+  and ("\n" + rec.NumeroProjet + "|") in (
+    "\n" + (user.TeamRec.Projets_Lecture_Synthese or "") + "\n"
+  )
+) or (
+  rec.Service == "Topographie"
+  and ("\n" + rec.NumeroProjet + "|") in (
+    "\n" + (user.TeamRec.Projets_Lecture_Topographie or "") + "\n"
+  )
+)
+```
 
 ### Création dans le service principal
 
@@ -85,13 +116,21 @@ sur le service principal. Pour lire un service externe dès qu'au moins un
 projet de ce service est accordé :
 
 ```python
-rec.Service == "Structure" and user.TeamRec.Projets_Lecture_Structure != ""
+(
+  rec.Service == "Structure"
+  and (user.TeamRec.Projets_Lecture_Structure or "") != ""
+) or (
+  rec.Service == "Synthese"
+  and (user.TeamRec.Projets_Lecture_Synthese or "") != ""
+) or (
+  rec.Service == "Topographie"
+  and (user.TeamRec.Projets_Lecture_Topographie or "") != ""
+)
 ```
 
-Permission : `+R`
-
-Décliner pour les deux autres services. Les écritures externes restent
-interdites.
+Permission : `+R`. Les écritures externes restent interdites. Une éventuelle
+règle de colonne sur `Emetteurs.Service` ne doit pas refuser `R`, faute de quoi
+la valeur nécessaire au filtrage du widget est censurée.
 
 ## Time-Out
 

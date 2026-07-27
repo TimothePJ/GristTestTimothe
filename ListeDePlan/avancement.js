@@ -28,7 +28,7 @@ function saveSharedProjectSelection(projectName = '') {
 // Register the datalabels plugin
 Chart.register(ChartDataLabels);
 
-grist.onRecords((newRecords) => {
+window.GristServiceContext.onRecords((newRecords) => {
   records = newRecords;
   populateProjectDropdown();
   updateDashboard();

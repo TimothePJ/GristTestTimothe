@@ -30,7 +30,7 @@ export const APP_CONFIG = {
     columns: {
       projects:  { id: "id", name: "Nom_de_projet", number: "Numero_de_projet", avancement: "Avancement" },
       planningProject: {
-        id: "id", projectNumber: "NumeroProjet", projectName: "NomProjet", id2: "ID2", taskName: "Taches", taskNameAlt: "Tache",
+        id: "id", projectName: "NomProjet", id2: "ID2", taskName: "Taches", taskNameAlt: "Tache",
         typeDoc: "Type_doc", groupe: "Groupe", lignePlanning: "Ligne_planning", zone: "Zone",
         dateLimite: "Date_limite", duree1: "Duree_1", diffCoffrage: "Diff_coffrage",
         duree2: "Duree_2", diffArmature: "Diff_armature", duree3: "Duree_3",

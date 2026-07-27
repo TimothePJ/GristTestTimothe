@@ -148,7 +148,7 @@ function init() {
     updateDashboard();
   });
 
-  grist.onRecords((newRecords) => {
+  window.GristServiceContext.onRecords((newRecords) => {
     state.records = newRecords || [];
     state.recordsReady = true;
     if (!elements.projectDropdown.value && elements.projectDropdown.options.length > 1) {

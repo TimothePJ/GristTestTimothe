@@ -378,6 +378,29 @@
     return filterExternalProjectScope(serviceFiltered, "");
   }
 
+  function subscribeToRecords(callback, ...args) {
+    const grist = getGrist();
+    if (typeof grist?.onRecords !== "function") {
+      throw new Error("API Grist onRecords indisponible.");
+    }
+    return grist.onRecords((records, mappings) => (
+      initialize().then(() => callback(filterRecords(records), mappings))
+    ), ...args);
+  }
+
+  function subscribeToRecord(callback, ...args) {
+    const grist = getGrist();
+    if (typeof grist?.onRecord !== "function") {
+      throw new Error("API Grist onRecord indisponible.");
+    }
+    return grist.onRecord((record, mappings) => (
+      initialize().then(() => {
+        const filtered = filterRecords(record ? [record] : []);
+        return callback(filtered[0] || null, mappings);
+      })
+    ), ...args);
+  }
+
   function getExternalGrantScope() {
     if (!state.teamRow || !state.selectedService || state.selectedService === state.homeService) {
       return null;
@@ -461,28 +484,6 @@
       Object.defineProperty(docApi, "__serviceContextPatched", { value: true });
     }
 
-    if (typeof grist.onRecords === "function" && !grist.__serviceContextOnRecordsPatched) {
-      const rawOnRecords = grist.onRecords.bind(grist);
-      grist.onRecords = function serviceAwareOnRecords(callback, ...args) {
-        return rawOnRecords((records, mappings) => {
-          initialize().then(() => callback(filterRecords(records), mappings));
-        }, ...args);
-      };
-      Object.defineProperty(grist, "__serviceContextOnRecordsPatched", { value: true });
-    }
-
-    if (typeof grist.onRecord === "function" && !grist.__serviceContextOnRecordPatched) {
-      const rawOnRecord = grist.onRecord.bind(grist);
-      grist.onRecord = function serviceAwareOnRecord(callback, ...args) {
-        return rawOnRecord((record, mappings) => {
-          initialize().then(() => {
-            const filtered = filterRecords(record ? [record] : []);
-            callback(filtered[0] || null, mappings);
-          });
-        }, ...args);
-      };
-      Object.defineProperty(grist, "__serviceContextOnRecordPatched", { value: true });
-    }
     return true;
   }
 
@@ -503,6 +504,8 @@
     getHomeService: () => state.homeService,
     getCurrentProject: () => state.currentProject ? { ...state.currentProject } : null,
     isReadOnly: () => !state.homeService || state.selectedService !== state.homeService,
+    onRecords: subscribeToRecords,
+    onRecord: subscribeToRecord,
     subscribe(listener) {
       if (typeof listener !== "function") return () => {};
       listeners.add(listener);

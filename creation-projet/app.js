@@ -2674,20 +2674,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!refCols.has('Service')) {
                 throw new Error('La colonne Service est absente de References2.');
             }
-            if (!refCols.has('NumeroProjet')) {
-                throw new Error('La colonne NumeroProjet est absente de References2.');
-            }
             if (!listePlanContext.columns.has('Service')) {
                 throw new Error('La colonne Service est absente de ListePlan_NDC_COF.');
             }
-            if (!listePlanContext.columns.has('NumeroProjet')) {
-                throw new Error('La colonne NumeroProjet est absente de ListePlan_NDC_COF.');
-            }
             if (!planningContext.columns.has('Service')) {
                 throw new Error('La colonne Service est absente de Planning_Projet.');
-            }
-            if (!planningContext.columns.has('NumeroProjet')) {
-                throw new Error('La colonne NumeroProjet est absente de Planning_Projet.');
             }
             const projetsTable = await grist.docApi.fetchTable("Projets2");
             const projetsColumns = getTableColumnNames(projetsTable);
@@ -2743,7 +2734,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 for (const emitter of projectData.emitters) {
                     const row = {
                         NomProjet: projectData.name,       // nom écrit
-                        NumeroProjet: projectData.number,
                         NomDocument: doc.name,
                         NumeroDocument: doc.numero || '',
                         Type_document: doc.type || "COFFRAGE",
@@ -2777,7 +2767,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const fields = {};
                 setFieldIfPresent(listePlanContext.columns, fields, 'Nom_projet', projectData.name);
                 setFieldIfPresent(listePlanContext.columns, fields, 'NomProjet', projectData.name);
-                setFieldIfPresent(listePlanContext.columns, fields, 'NumeroProjet', projectData.number);
                 setFieldIfPresent(listePlanContext.columns, fields, 'Type_document', doc.type || 'COFFRAGE');
                 setFieldIfPresent(listePlanContext.columns, fields, 'Type_doc', doc.type || 'COFFRAGE');
                 setFieldIfPresent(listePlanContext.columns, fields, 'NumeroDocument', doc.numero || '');
@@ -2812,12 +2801,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         zoneName,
                         serviceValue
                     );
-                    setFieldIfPresent(
-                        planningContext.columns,
-                        zoneAnchorFields,
-                        'NumeroProjet',
-                        projectData.number
-                    );
                     planningActions.push([
                         "AddRecord",
                         planningContext.tableName,
@@ -2834,7 +2817,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const fields = {};
 
                 setFieldIfPresent(planningContext.columns, fields, 'NomProjet', projectData.name);
-                setFieldIfPresent(planningContext.columns, fields, 'NumeroProjet', projectData.number);
                 setFieldIfPresent(planningContext.columns, fields, 'ID2', numeroText);
                 setFieldIfPresent(planningContext.columns, fields, 'Taches', doc.name);
                 setFieldIfPresent(planningContext.columns, fields, 'Tache', doc.name);

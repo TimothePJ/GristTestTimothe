@@ -16,7 +16,6 @@ export const APP_CONFIG = {
       sourceTable: "Planning_Projet", // ou "Planning projet" selon ton vrai nom exact
       columns: {
         id: "id",
-        numeroProjet: "NumeroProjet",
         nomProjet: "NomProjet",
         id2: "ID2",
         taches: "Taches",

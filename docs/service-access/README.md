@@ -52,7 +52,10 @@ Chaque ligne suit le format :
 NumeroProjet|NomProjet
 ```
 
-Le numéro est la clé d'autorisation. Le nom est un libellé.
+Les tables qui possèdent `NumeroProjet` vérifient le numéro exact. Les tables
+historiques qui possèdent seulement un nom de projet vérifient le libellé exact
+placé après `|`. Si plusieurs lignes de `Projets2` partagent un numéro avec des
+noms différents, le widget écrit une ligne d'autorisation par nom.
 
 ## Widget d'administration
 

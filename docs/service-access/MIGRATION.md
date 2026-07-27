@@ -5,14 +5,8 @@ Faire une copie du document Grist avant toute modification.
 ## 1. Colonnes ordinaires requises
 
 Toutes les colonnes ci-dessous sont des colonnes `Text` ordinaires. Aucune
-colonne formule n'est nécessaire.
-
-Ajouter `NumeroProjet` si elle n'existe pas dans :
-
-- `References2`
-- `ListePlan_NDC_COF`
-- `Planning_Projet`
-- `Envois`
+colonne formule ni nouvelle colonne `NumeroProjet` n'est nécessaire dans les
+tables historiques identifiées par le nom du projet.
 
 Vérifier la présence de `Service` dans :
 
@@ -42,15 +36,21 @@ Les widgets traitent temporairement une valeur `Service` vide comme
 Cette compatibilité est transitoire : remplir explicitement `Service` avant
 d'activer les permissions avancées.
 
-Pour les quatre nouvelles colonnes `NumeroProjet` :
+Vérifier que les identifiants projet existants sont remplis et correspondent
+exactement aux valeurs de `Projets2` :
 
-1. retrouver le projet grâce au nom existant ;
-2. copier `Projets2.Numero_de_projet` ;
-3. ne pas convertir automatiquement un nom correspondant à plusieurs numéros ;
-4. traiter manuellement les noms ambigus, notamment les variantes de `TMM` et
-   `Test`.
+- `References2.NomProjet`
+- `ListePlan_NDC_COF.Nom_projet`
+- `Planning_Projet.NomProjet`
+- `Envois.Projet`
+- `Budget.NumeroProjet`
+- `ProjectTeam.NumeroProjet`
+- `TimeSegment.NumeroProjet`
+- `TimeReal.NumeroProjet`
 
-Plusieurs noms portant le même numéro restent un seul groupe d'accès.
+Un numéro partagé reste un seul groupe d'accès. Lorsque ce numéro possède
+plusieurs noms, une ligne `NumeroProjet|NomProjet` est conservée pour chaque
+nom afin que les tables historiques puissent toutes être reconnues.
 
 ## 3. Budget
 
@@ -98,10 +98,10 @@ Les colonnes suivantes restent communes au projet :
 ## 5. Contrôles avant ACL
 
 - aucune ligne métier ne doit conserver un `Service` vide ;
-- les nouvelles colonnes `NumeroProjet` doivent être remplies ;
-- les lignes ambiguës doivent avoir été corrigées manuellement ;
+- les noms et numéros projet existants doivent être remplis ;
+- les noms doivent correspondre exactement au libellé enregistré après `|` ;
 - les budgets doivent être cohérents par service ;
-- les écritures depuis chaque widget doivent produire `Service` et
-  `NumeroProjet` ;
+- les écritures doivent produire `Service`, ainsi que `NumeroProjet` seulement
+  dans les tables qui possèdent déjà cette colonne ;
 - le scénario ERA QUAI D'ORSAY doit fonctionner avec un utilisateur Synthese
   et un accès Structure.
