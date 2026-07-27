@@ -200,10 +200,20 @@
     const column = core.GRANT_COLUMNS[service];
     if (!column) throw new Error("Colonne d’autorisation inconnue.");
     const serialized = core.serializeGrants(nextGrants);
+    const originalEmail = core.toText(teamRow?.Email);
+    const normalizedEmail = originalEmail.toLocaleLowerCase("en-US");
+    const fields = { [column]: serialized };
+    if (
+      /^[^@\s]+@[^@\s]+$/.test(normalizedEmail) &&
+      normalizedEmail !== originalEmail
+    ) {
+      fields.Email = normalizedEmail;
+    }
     await window.grist.docApi.applyUserActions([
-      ["UpdateRecord", "Team", Number(teamRow.id), { [column]: serialized }],
+      ["UpdateRecord", "Team", Number(teamRow.id), fields],
     ]);
     teamRow[column] = serialized;
+    if (fields.Email) teamRow.Email = fields.Email;
     try {
       localStorage.setItem("grist.service-grants-changed", JSON.stringify({
         at: Date.now(),

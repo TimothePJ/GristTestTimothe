@@ -23,11 +23,17 @@ Vérifier la présence de `Service` dans :
 Vérifier dans `Team` :
 
 - `Service`
+- `Email`, entièrement en minuscules
 - `Projets_Lecture_Structure`
 - `Projets_Lecture_Synthese`
 - `Projets_Lecture_Topographie`
 
 Les trois colonnes `Projets_Lecture_*` restent de type `Text`.
+
+Grist normalise l'adresse des utilisateurs partagés en minuscules. La propriété
+utilisateur associe `user.Email` à `Team.Email` par égalité exacte : convertir
+toutes les anciennes valeurs de `Team.Email` en minuscules et vérifier qu'il
+n'existe qu'une seule ligne par adresse.
 
 ## 2. Remplissage des anciennes lignes
 

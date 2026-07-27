@@ -6,6 +6,10 @@ sécurité côté Grist et doivent être appliquées après la migration.
 Les exemples supposent que l'attribut utilisateur `TeamRec` existe déjà et
 retourne la ligne `Team` correspondant à l'adresse e-mail Grist.
 
+La colonne `Team.Email` doit être stockée en minuscules, comme `user.Email`.
+L'appariement est exact et chaque adresse doit identifier une seule ligne
+`Team`.
+
 Adapter le test administrateur au champ déjà utilisé dans le document. Les
 exemples utilisent :
 
