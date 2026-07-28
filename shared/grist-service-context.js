@@ -402,15 +402,11 @@
   }
 
   function getExternalGrantScope() {
-    if (!state.teamRow || !state.selectedService || state.selectedService === state.homeService) {
-      return null;
-    }
-    const grantColumn = core.GRANT_COLUMNS[state.selectedService];
-    const grants = core.parseGrants(state.teamRow?.[grantColumn]);
-    return {
-      numbers: new Set(grants.map((grant) => grant.projectNumber)),
-      names: new Set(grants.map((grant) => grant.projectName).filter(Boolean)),
-    };
+    return core.getExternalProjectGrantScope(
+      state.teamRow,
+      state.selectedService,
+      state.homeService
+    );
   }
 
   function getFirstProjectValue(row, candidates) {

@@ -151,6 +151,21 @@
     return SERVICES.filter((service) => allowed.has(service));
   }
 
+  function getExternalProjectGrantScope(teamRow, selectedService, homeService) {
+    const selected = normalizeService(selectedService);
+    const home = normalizeService(homeService || teamRow?.Service);
+    if (!teamRow || isAdminTeamRow(teamRow) || !selected || selected === home) {
+      return null;
+    }
+
+    const grantColumn = GRANT_COLUMNS[selected];
+    const grants = parseGrants(teamRow?.[grantColumn]);
+    return {
+      numbers: new Set(grants.map((grant) => grant.projectNumber)),
+      names: new Set(grants.map((grant) => grant.projectName).filter(Boolean)),
+    };
+  }
+
   function tableToRows(raw) {
     if (!raw) return [];
     if (Array.isArray(raw)) return raw;
@@ -372,6 +387,7 @@
     isAdminTeamRow,
     findCurrentTeamRow,
     getAllowedServices,
+    getExternalProjectGrantScope,
     tableToRows,
     filterRawTable,
     filterRawTableByService,

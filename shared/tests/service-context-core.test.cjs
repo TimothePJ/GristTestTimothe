@@ -23,6 +23,34 @@ test("getAllowedServices conserve le service propre et ajoute les droits du proj
   assert.deepEqual(core.getAllowedServices(row, "5"), ["Synthese"]);
 });
 
+test("un administrateur accede aux services externes sans filtre projet", () => {
+  const admin = {
+    Service: "Structure",
+    Admin: true,
+    Projets_Lecture_Synthese: "",
+  };
+  assert.deepEqual(core.getAllowedServices(admin, ""), [
+    "Structure",
+    "Synthese",
+    "Topographie",
+  ]);
+  assert.equal(
+    core.getExternalProjectGrantScope(admin, "Synthese", "Structure"),
+    null
+  );
+});
+
+test("un non-admin reste limite aux projets accordes dans un service externe", () => {
+  const member = {
+    Service: "Structure",
+    Admin: false,
+    Projets_Lecture_Synthese: "252035|ERA",
+  };
+  const scope = core.getExternalProjectGrantScope(member, "Synthese", "Structure");
+  assert.deepEqual([...scope.numbers], ["252035"]);
+  assert.deepEqual([...scope.names], ["ERA"]);
+});
+
 test("Avancement legacy est lu dans Structure puis converti en version 2", () => {
   const legacy = JSON.stringify([{ typeDocument: "NDC", indice: "0" }]);
   assert.deepEqual(core.getServiceAvancementItems(legacy, "Structure").items, [
