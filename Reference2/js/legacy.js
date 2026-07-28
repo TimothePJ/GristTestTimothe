@@ -5519,6 +5519,35 @@ function removeCustomEmitter(rowToRemove) {
   allRows[allRows.length - 1].remove();
 }
 
+function normalizeEmetteurListValue(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function getEmetteurListKey(value) {
+  return normalizeEmetteurListValue(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('fr');
+}
+
+function getUniqueEmetteurs(values) {
+  const seen = new Set();
+  const uniqueValues = [];
+
+  (Array.isArray(values) ? values : []).forEach((value) => {
+    const normalizedValue = normalizeEmetteurListValue(value);
+    const key = getEmetteurListKey(normalizedValue);
+    if (!key || seen.has(key)) return;
+
+    seen.add(key);
+    uniqueValues.push(normalizedValue);
+  });
+
+  return uniqueValues;
+}
+
 function collectProjectReferenceEmitters(projectName) {
   const project = _norm(projectName);
   if (!project) return [];
@@ -5637,7 +5666,7 @@ function populateDatalist(datalistId, values) {
     return;
   }
   datalist.innerHTML = ''; // Vider la liste existante
-  values.forEach(value => {
+  getUniqueEmetteurs(values).forEach(value => {
     const option = document.createElement('option');
     option.value = value;
     datalist.appendChild(option);
@@ -5669,7 +5698,7 @@ async function updateEmetteurListForInputs() {
     .filter((value, index, self) => value && self.indexOf(value) === index)
     .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
-  const allEmetteurs = [...new Set([...defaultEmetteurs, ...projectEmetteurs])]
+  const allEmetteurs = getUniqueEmetteurs([...defaultEmetteurs, ...projectEmetteurs])
     .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
   updateDatalist('emetteurList', allEmetteurs);
@@ -5684,7 +5713,7 @@ function updateDatalist(listId, values) {
     return;
   }
   datalist.innerHTML = ''; // Vider la liste existante
-  values.forEach(value => {
+  getUniqueEmetteurs(values).forEach(value => {
     const option = document.createElement('option');
     option.value = value;
     datalist.appendChild(option);
@@ -5713,7 +5742,7 @@ async function updateEditEmetteurList() {
     .filter((value, index, self) => value && self.indexOf(value) === index)
     .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
-  const allEmetteurs = [...new Set([...defaultEmetteurs, ...projectEmetteurs])]
+  const allEmetteurs = getUniqueEmetteurs([...defaultEmetteurs, ...projectEmetteurs])
     .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
   emetteurList.innerHTML = '';
@@ -5864,7 +5893,7 @@ async function updateEmetteurList(excludeCustom = false, targetDropdownIds = ["e
     }
 
     // Fusionner et trier la liste finale
-    let finalEmetteurList = [...defaultEmetteurs, ...uniqueEmetteursFromProject]
+    let finalEmetteurList = getUniqueEmetteurs([...defaultEmetteurs, ...uniqueEmetteursFromProject])
       .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
     // Pour la cible "emetteurList" (formulaire Ajouter une ligne),
@@ -5872,8 +5901,8 @@ async function updateEmetteurList(excludeCustom = false, targetDropdownIds = ["e
     if (targetDropdownIds.includes("emetteurList")) {
       const emitterInput = document.getElementById('emetteur');
       const currentValue = emitterInput.value.trim();
-      if (currentValue && !finalEmetteurList.includes(currentValue)) {
-        finalEmetteurList.push(currentValue);
+      if (currentValue) {
+        finalEmetteurList = getUniqueEmetteurs([...finalEmetteurList, currentValue]);
         finalEmetteurList.sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
       }
     }
@@ -5897,7 +5926,7 @@ async function getDefaultEmetteurs() {
   try {
     const emitterTable = await grist.docApi.fetchTable('Emetteurs');
     if (emitterTable && emitterTable.Emetteurs && emitterTable.Emetteurs.length > 0) {
-      return emitterTable.Emetteurs.filter(val => !!val)
+      return getUniqueEmetteurs(emitterTable.Emetteurs)
         .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
     }
     return [];
