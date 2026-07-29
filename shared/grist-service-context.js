@@ -216,6 +216,9 @@
   }
 
   function selectorHost() {
+    const explicitHost = document.querySelector("[data-grist-service-context-host]");
+    if (explicitHost instanceof HTMLElement) return explicitHost;
+
     const projectSelect = document.querySelector(
       "#firstColumnDropdown, #projectDropdown, #ps-project-select, #project-select"
     );
@@ -224,7 +227,45 @@
         ".dropdown-container, .filters, .ps-project, .project-selection"
       )?.parentElement || projectSelect.parentElement;
     }
-    return document.querySelector(".global-header, .app-header, header, body");
+    return document.querySelector(".global-header") ||
+      document.querySelector(".app-header") ||
+      document.querySelector("header") ||
+      document.body;
+  }
+
+  function prepareSelectorHost(host) {
+    if (!(host instanceof HTMLElement)) return null;
+    host.classList.add("grist-service-context-host");
+    if (host.classList.contains("sticky-container")) {
+      host.classList.add("grist-service-context-host--sticky");
+    }
+    return host;
+  }
+
+  function createSelectorWrapper(select) {
+    const wrapper = document.createElement("div");
+    wrapper.id = "grist-service-context-control";
+    wrapper.className = "grist-service-context-control";
+    wrapper.setAttribute("role", "group");
+    wrapper.setAttribute("aria-label", "Service actif");
+
+    const label = document.createElement("label");
+    label.htmlFor = select?.id || "grist-service-select";
+    label.textContent = "Service :";
+
+    const serviceSelect = select || document.createElement("select");
+    if (!serviceSelect.id) serviceSelect.id = "grist-service-select";
+    serviceSelect.dataset.gristServiceSelector = "";
+    serviceSelect.dataset.gristServiceManaged = "true";
+
+    const badge = document.createElement("span");
+    badge.id = "grist-service-context-badge";
+    badge.className = "grist-service-context-badge";
+    badge.setAttribute("role", "status");
+    badge.setAttribute("aria-live", "polite");
+
+    wrapper.append(label, serviceSelect, badge);
+    return wrapper;
   }
 
   function injectStyles() {
@@ -232,13 +273,27 @@
     const style = document.createElement("style");
     style.id = "grist-service-context-styles";
     style.textContent = `
-      .grist-service-context-control{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 10px;border:1px solid #d7e1eb;border-radius:8px;background:#fff;color:#17324d;font:600 13px/1.25 Arial,sans-serif;box-sizing:border-box}
-      .grist-service-context-control label{font-weight:700}
-      .grist-service-context-control select{min-width:130px;padding:5px 8px;border:1px solid #aebdca;border-radius:5px;background:#fff;color:#17324d}
-      .grist-service-context-badge{padding:4px 8px;border-radius:999px;background:#e8f5ec;color:#1e6b37;font-size:11px;white-space:nowrap}
+      .grist-service-context-host{min-width:0}
+      .grist-service-context-host--sticky{display:flex!important;flex-wrap:wrap!important;align-items:flex-end!important;gap:10px 12px!important;overflow-x:visible!important}
+      .grist-service-context-host--sticky>.dropdown-container{flex:1 1 190px;max-width:360px;min-width:min(190px,100%)}
+      .grist-service-context-host--sticky>.dropdown-container:has(>button){flex:0 1 auto;max-width:none}
+      .grist-service-context-host--sticky>.info-container{flex:1 1 280px}
+      .grist-service-context-host--sticky>.button-container{flex:0 1 auto}
+      .grist-service-context-host#toolbar,.grist-service-context-host.ps-toolbar,.grist-service-context-host.global-header,.grist-service-context-host.header,.grist-service-context-host.app-header{flex-wrap:wrap!important;height:auto!important}
+      .grist-service-context-control{order:1000;display:grid!important;grid-template-columns:max-content minmax(118px,160px) max-content;align-items:center;gap:6px;min-width:0;min-height:38px;max-width:100%;margin-left:auto;padding:3px 6px;border:1px solid #d7e1eb;border-radius:7px;background:#fff;color:#17324d;font:600 13px/1.2 Arial,sans-serif;box-sizing:border-box;box-shadow:0 1px 3px rgba(18,50,77,.06)}
+      .grist-service-context-control label{display:block!important;margin:0!important;color:#17324d!important;font:700 12px/1.2 Arial,sans-serif!important;white-space:nowrap}
+      #grist-service-context-control select{box-sizing:border-box!important;width:100%!important;min-width:0!important;max-width:160px!important;height:30px!important;min-height:30px!important;margin:0!important;padding:4px 26px 4px 8px!important;border:1px solid #aebdca!important;border-radius:5px!important;background-color:#fff!important;color:#17324d!important;font:600 13px/1.2 Arial,sans-serif!important}
+      #grist-service-context-control select:focus{border-color:#004990!important;box-shadow:0 0 0 2px rgba(0,73,144,.12)!important;outline:none!important}
+      .grist-service-context-badge{display:inline-flex;align-items:center;min-height:24px;margin:0;padding:3px 7px;border-radius:999px;background:#e8f5ec;color:#1e6b37;font-size:11px;line-height:1.15;white-space:nowrap}
       .grist-service-context-badge.is-readonly{background:#fff0d8;color:#8b4e00}
-      .grist-service-context-badge.is-error{background:#fde7e7;color:#a51d1d}
+      .grist-service-context-badge.is-error{max-width:min(260px,40vw);background:#fde7e7;color:#a51d1d;white-space:normal;overflow-wrap:anywhere}
       body[data-grist-service-readonly="true"] [data-service-write-control]{opacity:.55;cursor:not-allowed}
+      @media (max-width:720px){
+        .grist-service-context-host--sticky>.dropdown-container,.grist-service-context-host--sticky>.info-container{flex:1 1 min(220px,100%);max-width:none}
+        .grist-service-context-host--sticky>.button-container{flex:1 1 100%;justify-content:flex-start}
+        .grist-service-context-control{grid-template-columns:max-content minmax(110px,160px);width:min(100%,290px);margin-left:auto}
+        .grist-service-context-badge{grid-column:1/-1;justify-self:end}
+      }
     `;
     document.head.appendChild(style);
   }
@@ -247,29 +302,38 @@
     const adopted = document.querySelector("[data-grist-service-selector]");
     if (adopted instanceof HTMLSelectElement) {
       adopted.dataset.gristServiceManaged = "true";
-      let badge = document.getElementById("grist-service-context-badge");
-      if (!badge) {
-        badge = document.createElement("span");
-        badge.id = "grist-service-context-badge";
-        badge.className = "grist-service-context-badge";
-        adopted.parentElement?.appendChild(badge);
+      let wrapper = adopted.closest("#grist-service-context-control");
+      if (!(wrapper instanceof HTMLElement)) {
+        const previousField = adopted.closest("label.field, label, .field");
+        const host = prepareSelectorHost(selectorHost());
+        if (!host) return {};
+        wrapper = createSelectorWrapper(adopted);
+        host.appendChild(wrapper);
+        if (
+          previousField instanceof HTMLElement &&
+          previousField !== host &&
+          !previousField.querySelector("select, input, button, textarea")
+        ) {
+          previousField.remove();
+        }
+      } else {
+        prepareSelectorHost(wrapper.parentElement);
       }
-      return { select: adopted, badge, wrapper: adopted.closest("label") || adopted.parentElement };
+      return {
+        select: adopted,
+        badge: wrapper.querySelector(".grist-service-context-badge"),
+        wrapper,
+      };
     }
 
     let wrapper = document.getElementById("grist-service-context-control");
     if (!wrapper) {
-      const host = selectorHost();
+      const host = prepareSelectorHost(selectorHost());
       if (!host) return {};
-      wrapper = document.createElement("div");
-      wrapper.id = "grist-service-context-control";
-      wrapper.className = "grist-service-context-control";
-      wrapper.innerHTML = `
-        <label for="grist-service-select">Service :</label>
-        <select id="grist-service-select" data-grist-service-selector data-grist-service-managed="true"></select>
-        <span id="grist-service-context-badge" class="grist-service-context-badge"></span>
-      `;
+      wrapper = createSelectorWrapper();
       host.appendChild(wrapper);
+    } else {
+      prepareSelectorHost(wrapper.parentElement);
     }
     return {
       wrapper,

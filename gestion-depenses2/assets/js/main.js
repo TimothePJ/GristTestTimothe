@@ -5340,13 +5340,6 @@ function handleChargePlanScroll(event) {
 function bindEvents() {
   dom.projectSelect.addEventListener("change", handleProjectSelectionChange);
 
-  dom.addProjectBtn.addEventListener("click", (event) => {
-    if (!event.isTrusted) return;
-
-    const shouldShow = dom.addProjectForm.hidden;
-    toggleElement(dom.addProjectForm, shouldShow);
-  });
-
   dom.addBudgetLineBtn.addEventListener("click", () => {
     const chapter = dom.budgetChapterInput.value.trim();
     const amount = parseOptionalNumberInput(dom.budgetAmountInput.value);

@@ -5,7 +5,6 @@ export function getDomRefs() {
 
   return {
     projectSelect: document.getElementById("project-select"),
-    addProjectBtn: document.getElementById("add-project-btn"),
     addProjectForm: document.getElementById("add-project-form"),
     projectNameInput: document.getElementById("project-name"),
     projectNumberInput: document.getElementById("project-number"),
@@ -69,7 +68,6 @@ export function getDomRefs() {
 export function assertDomRefs(domRefs) {
   const requiredKeys = [
     "projectSelect",
-    "addProjectBtn",
     "addProjectForm",
     "projectNameInput",
     "projectNumberInput",

@@ -3189,3 +3189,171 @@ canvas {
     max-width: 132px;
   }
 }
+
+/* ==========================================================
+   En-tête principal compact sur une seule ligne
+
+   Le formulaire de création conserve sa propre ligne lorsqu'il est ouvert,
+   mais les contrôles courants restent toujours alignés : titre, projet,
+   action et contexte de service.
+   ========================================================== */
+
+body .header.grist-service-context-host {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  grid-template-areas:
+    "title title"
+    "project service";
+  align-items: center;
+  flex-wrap: nowrap !important;
+  gap: 10px 18px;
+  min-height: 92px;
+  padding: 14px 18px;
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+body .header.grist-service-context-host::-webkit-scrollbar {
+  display: none;
+}
+
+body .header.grist-service-context-host > h1 {
+  grid-area: title;
+  margin: 0;
+  font-size: clamp(22px, 1.8vw, 29px);
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+body .header.grist-service-context-host > .project-selection {
+  grid-area: project;
+  display: grid;
+  grid-template-columns: max-content minmax(190px, 420px);
+  align-items: center;
+  justify-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+body .header.grist-service-context-host .project-selection > h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+body .header.grist-service-context-host #project-select {
+  width: clamp(190px, 24vw, 420px);
+  min-width: 0;
+  height: 36px;
+  padding: 6px 10px;
+}
+
+body .header.grist-service-context-host #add-project-form {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin-top: 4px;
+}
+
+body .header.grist-service-context-host > #grist-service-context-control {
+  grid-area: service;
+  justify-self: end;
+  flex: 0 0 auto;
+  grid-template-columns: max-content minmax(104px, 132px) max-content !important;
+  gap: 4px;
+  width: auto !important;
+  min-height: 36px;
+  margin: 0;
+  padding: 2px 5px;
+  border-radius: 6px;
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+body .header.grist-service-context-host > #grist-service-context-control select {
+  width: 100% !important;
+  max-width: 132px !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  padding-block: 3px !important;
+  font-size: 12px !important;
+}
+
+body .header.grist-service-context-host > #grist-service-context-control .grist-service-context-badge {
+  grid-column: auto !important;
+  min-height: 22px;
+  padding: 3px 6px;
+  font-size: 10px;
+}
+
+@media (max-width: 1400px) {
+  body .header.grist-service-context-host {
+    grid-template-columns: minmax(0, 1fr) max-content;
+    gap: 10px;
+    padding-inline: 14px;
+  }
+
+  body .header.grist-service-context-host > h1 {
+    font-size: 24px;
+  }
+
+  body .header.grist-service-context-host > .project-selection {
+    grid-template-columns: max-content minmax(170px, 320px);
+    gap: 6px;
+  }
+
+  body .header.grist-service-context-host #project-select {
+    width: clamp(170px, 22vw, 320px);
+  }
+
+  body .header.grist-service-context-host .project-selection > h2 {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 1100px) {
+  body .header.grist-service-context-host {
+    grid-template-columns: minmax(0, 1fr) max-content;
+    gap: 8px;
+    min-height: 84px;
+    padding: 9px 10px;
+  }
+
+  body .header.grist-service-context-host > h1 {
+    font-size: 21px;
+  }
+
+  body .header.grist-service-context-host > .project-selection {
+    grid-template-columns: max-content minmax(150px, 240px);
+    gap: 5px;
+  }
+
+  body .header.grist-service-context-host #project-select {
+    width: clamp(150px, 20vw, 240px);
+    font-size: 13px;
+  }
+
+  body .header.grist-service-context-host > #grist-service-context-control {
+    grid-template-columns: max-content minmax(92px, 112px) max-content !important;
+  }
+
+  body .header.grist-service-context-host > #grist-service-context-control select {
+    max-width: 112px !important;
+  }
+}
+
+@media (max-width: 800px) {
+  body .header.grist-service-context-host {
+    grid-template-columns: minmax(300px, 1fr) max-content;
+  }
+
+  body .header.grist-service-context-host > .project-selection {
+    grid-template-columns: max-content 150px;
+  }
+
+  body .header.grist-service-context-host #project-select {
+    width: 150px;
+  }
+}
