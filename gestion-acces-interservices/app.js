@@ -120,11 +120,13 @@
     const previous = core.normalizeService(dom.serviceSelect.value);
     dom.serviceSelect.replaceChildren();
     core.SERVICES
-      .filter((service) => service !== homeService)
+      .filter((service) => homeService !== "Structure" || service !== "Structure")
       .forEach((service) => {
         const option = document.createElement("option");
         option.value = service;
-        option.textContent = service;
+        option.textContent = service === homeService
+          ? `${service} — modification autorisée`
+          : `${service} — lecture seule`;
         dom.serviceSelect.appendChild(option);
       });
     if ([...dom.serviceSelect.options].some((option) => option.value === previous)) {
@@ -173,7 +175,9 @@
     if (!grants.length) {
       const empty = document.createElement("p");
       empty.className = "empty";
-      empty.textContent = "Aucun accès interservice attribué.";
+      empty.textContent = homeService === "Structure"
+        ? "Aucun accès externe attribué. Les projets Structure restent accessibles automatiquement."
+        : "Aucun projet attribué.";
       dom.grantsList.appendChild(empty);
       return;
     }
@@ -234,8 +238,9 @@
       setMessage("Sélection incomplète.", "error");
       return;
     }
-    if (service === core.normalizeService(teamRow.Service)) {
-      setMessage("Le service principal ne nécessite pas d’autorisation.", "error");
+    const homeService = core.normalizeService(teamRow.Service);
+    if (service === "Structure" && homeService === "Structure") {
+      setMessage("Les personnes Structure ont déjà accès à tous les projets Structure.", "error");
       return;
     }
 
@@ -255,7 +260,12 @@
         ...(project?.names?.length ? project.names : [project?.name || ""])
           .map((projectName) => ({ projectNumber, projectName })),
       ]);
-      setMessage("Accès ajouté en lecture seule.", "success");
+      setMessage(
+        service === homeService
+          ? "Projet attribué dans le service personnel : modification autorisée."
+          : "Projet attribué dans un autre service : lecture seule.",
+        "success"
+      );
       renderGrants();
     } catch (error) {
       console.error("Ajout de l’autorisation impossible :", error);

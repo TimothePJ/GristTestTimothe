@@ -19,6 +19,13 @@
     Synthese: "Projets_Lecture_Synthese",
     Topographie: "Projets_Lecture_Topographie",
   });
+  const PROJECTS_TABLE = "Projets2";
+  const PROJECT_NAME_COLUMNS = Object.freeze({
+    References2: "NomProjet",
+    ListePlan_NDC_COF: "Nom_projet",
+    Planning_Projet: "NomProjet",
+    Envois: "Projet",
+  });
   const SERVICE_AWARE_TABLES = Object.freeze(new Set([
     "References2",
     "ListePlan_NDC_COF",
@@ -35,6 +42,10 @@
     "ProjectTeam",
     "TimeSegment",
     "TimeReal",
+  ]));
+  const PROJECT_AWARE_TABLES = Object.freeze(new Set([
+    ...Object.keys(PROJECT_NAME_COLUMNS),
+    ...PROJECT_NUMBER_TABLES,
   ]));
 
   function toText(value) {
@@ -117,6 +128,82 @@
     return Boolean(expected) && parseGrants(rawValue).some((grant) => grant.projectNumber === expected);
   }
 
+  function getProjectNumber(project) {
+    return normalizeProjectNumber(
+      project?.number ??
+      project?.projectNumber ??
+      project?.Numero_de_projet ??
+      project?.NumeroProjet ??
+      project?.Numero
+    );
+  }
+
+  function getProjectName(project) {
+    return toText(
+      project?.name ??
+      project?.projectName ??
+      project?.Nom_de_projet ??
+      project?.NomProjet ??
+      project?.Nom_projet ??
+      project?.Projet
+    );
+  }
+
+  function dedupeProjectsByNumber(projects) {
+    const seen = new Set();
+    return (Array.isArray(projects) ? projects : []).filter((project) => {
+      const number = getProjectNumber(project);
+      if (!number || seen.has(number)) return false;
+      seen.add(number);
+      return true;
+    });
+  }
+
+  function getGrantedProjectNumbers(teamRow) {
+    const numbers = new Set();
+    SERVICES.forEach((service) => {
+      parseGrants(teamRow?.[GRANT_COLUMNS[service]]).forEach((grant) => {
+        numbers.add(grant.projectNumber);
+      });
+    });
+    return numbers;
+  }
+
+  function getAllowedProjects(teamRow, projects) {
+    const homeService = normalizeService(teamRow?.Service);
+    if (!homeService) return [];
+    const uniqueProjects = dedupeProjectsByNumber(projects);
+    if (homeService === "Structure") return uniqueProjects;
+    const grantedNumbers = getGrantedProjectNumbers(teamRow);
+    return uniqueProjects.filter((project) => grantedNumbers.has(getProjectNumber(project)));
+  }
+
+  function selectAllowedProject(projects, {
+    projectId,
+    projectName,
+    projectNumber,
+  } = {}) {
+    const allowedProjects = Array.isArray(projects) ? projects : [];
+    const expectedId = Number(projectId);
+    if (Number.isInteger(expectedId) && expectedId > 0) {
+      const byId = allowedProjects.find((project) => Number(project?.id) === expectedId);
+      if (byId) return byId;
+    }
+    const expectedNumber = normalizeProjectNumber(projectNumber);
+    if (expectedNumber) {
+      const byNumber = allowedProjects.find((project) => getProjectNumber(project) === expectedNumber);
+      if (byNumber) return byNumber;
+    }
+    const expectedName = toText(projectName).toLocaleLowerCase("fr");
+    if (expectedName) {
+      const byName = allowedProjects.find(
+        (project) => getProjectName(project).toLocaleLowerCase("fr") === expectedName
+      );
+      if (byName) return byName;
+    }
+    return allowedProjects[0] || null;
+  }
+
   function isAdminTeamRow(teamRow) {
     if (!teamRow) return false;
     if (isTruthy(teamRow.Admin) || isTruthy(teamRow.IsAdmin) || isTruthy(teamRow.Administrateur)) {
@@ -136,27 +223,56 @@
 
   function getAllowedServices(teamRow, projectNumber) {
     const homeService = normalizeService(teamRow?.Service);
-    if (!homeService) return [];
-    if (isAdminTeamRow(teamRow)) return [...SERVICES];
-
-    const allowed = new Set([homeService]);
     const normalizedNumber = normalizeProjectNumber(projectNumber);
-    if (normalizedNumber) {
-      SERVICES.forEach((service) => {
-        if (hasProjectGrant(teamRow?.[GRANT_COLUMNS[service]], normalizedNumber)) {
-          allowed.add(service);
-        }
-      });
-    }
+    if (!homeService || !normalizedNumber) return [];
+
+    const allowed = new Set();
+    if (homeService === "Structure") allowed.add("Structure");
+    SERVICES.forEach((service) => {
+      if (hasProjectGrant(teamRow?.[GRANT_COLUMNS[service]], normalizedNumber)) {
+        allowed.add(service);
+      }
+    });
     return SERVICES.filter((service) => allowed.has(service));
   }
 
-  function getExternalProjectGrantScope(teamRow, selectedService, homeService) {
+  function getAllowedServicesForProjects(teamRow, projects) {
+    const homeService = normalizeService(teamRow?.Service);
+    const allowedProjects = getAllowedProjects(teamRow, projects);
+    if (!homeService || !allowedProjects.length) return [];
+    const allowedNumbers = new Set(allowedProjects.map(getProjectNumber));
+    const allowed = new Set();
+    if (homeService === "Structure") allowed.add("Structure");
+    SERVICES.forEach((service) => {
+      const hasAllowedGrant = parseGrants(teamRow?.[GRANT_COLUMNS[service]])
+        .some((grant) => allowedNumbers.has(grant.projectNumber));
+      if (hasAllowedGrant) allowed.add(service);
+    });
+    return SERVICES.filter((service) => allowed.has(service));
+  }
+
+  function canEditCurrentContext(teamRow, projectNumber, selectedService) {
+    const homeService = normalizeService(teamRow?.Service);
+    const service = normalizeService(selectedService);
+    const normalizedNumber = normalizeProjectNumber(projectNumber);
+    if (!homeService || !service || !normalizedNumber || service !== homeService) return false;
+    if (homeService === "Structure") return true;
+    return hasProjectGrant(teamRow?.[GRANT_COLUMNS[service]], normalizedNumber);
+  }
+
+  function getProjectAccessMode(teamRow, projectNumber, selectedService) {
+    const service = normalizeService(selectedService);
+    const normalizedNumber = normalizeProjectNumber(projectNumber);
+    if (!service || !normalizedNumber) return "hidden";
+    if (!getAllowedServices(teamRow, normalizedNumber).includes(service)) return "hidden";
+    return canEditCurrentContext(teamRow, normalizedNumber, service) ? "editable" : "readonly";
+  }
+
+  function getProjectGrantScope(teamRow, selectedService, homeService) {
     const selected = normalizeService(selectedService);
     const home = normalizeService(homeService || teamRow?.Service);
-    if (!teamRow || isAdminTeamRow(teamRow) || !selected || selected === home) {
-      return null;
-    }
+    if (!teamRow || !selected || !home) return { numbers: new Set(), names: new Set() };
+    if (home === "Structure" && selected === "Structure") return null;
 
     const grantColumn = GRANT_COLUMNS[selected];
     const grants = parseGrants(teamRow?.[grantColumn]);
@@ -164,6 +280,13 @@
       numbers: new Set(grants.map((grant) => grant.projectNumber)),
       names: new Set(grants.map((grant) => grant.projectName).filter(Boolean)),
     };
+  }
+
+  function getExternalProjectGrantScope(teamRow, selectedService, homeService) {
+    const selected = normalizeService(selectedService);
+    const home = normalizeService(homeService || teamRow?.Service);
+    if (!teamRow || !selected || selected === home) return null;
+    return getProjectGrantScope(teamRow, selected, home);
   }
 
   function tableToRows(raw) {
@@ -265,6 +388,62 @@
     ]));
   }
 
+  function getRowProjectIdentity(row, tableName = "") {
+    const normalizedTableName = toText(tableName);
+    if (PROJECT_NUMBER_TABLES.has(normalizedTableName)) {
+      return {
+        kind: "number",
+        value: normalizeProjectNumber(row?.NumeroProjet),
+      };
+    }
+    const configuredNameColumn = PROJECT_NAME_COLUMNS[normalizedTableName];
+    if (configuredNameColumn) {
+      return {
+        kind: "name",
+        value: toText(row?.[configuredNameColumn]),
+      };
+    }
+
+    const number = getProjectNumber(row);
+    if (number) return { kind: "number", value: number };
+    const name = getProjectName(row);
+    if (name) return { kind: "name", value: name };
+    return { kind: "", value: "" };
+  }
+
+  function filterRawTableByProject(raw, tableName, project) {
+    const normalizedTableName = toText(tableName);
+    if (normalizedTableName === "Emetteurs") return raw;
+    const projectNumber = getProjectNumber(project);
+    const projectName = getProjectName(project);
+    if (!projectNumber && !projectName) {
+      return filterRawTable(raw, () => false);
+    }
+    return filterRawTable(raw, (row) => {
+      const identity = getRowProjectIdentity(row, normalizedTableName);
+      if (identity.kind === "number") return Boolean(projectNumber) && identity.value === projectNumber;
+      if (identity.kind === "name") return Boolean(projectName) && identity.value === projectName;
+      return !PROJECT_AWARE_TABLES.has(normalizedTableName);
+    });
+  }
+
+  function filterRawTableByProjectScope(raw, tableName, scope) {
+    const normalizedTableName = toText(tableName);
+    if (normalizedTableName === "Emetteurs" || scope === null) return raw;
+    const safeScope = scope || { numbers: new Set(), names: new Set() };
+    return filterRawTable(raw, (row) => {
+      const identity = getRowProjectIdentity(row, normalizedTableName);
+      if (identity.kind === "number") return safeScope.numbers.has(identity.value);
+      if (identity.kind === "name") return safeScope.names.has(identity.value);
+      return !PROJECT_AWARE_TABLES.has(normalizedTableName);
+    });
+  }
+
+  function filterProjectsRaw(raw, allowedProjects) {
+    const allowedNumbers = new Set((Array.isArray(allowedProjects) ? allowedProjects : []).map(getProjectNumber));
+    return filterRawTable(raw, (row) => allowedNumbers.has(getProjectNumber(row)));
+  }
+
   function parseAvancementEnvelope(rawValue) {
     const emptyServices = Object.fromEntries(SERVICES.map((service) => [service, []]));
     if (rawValue == null || rawValue === "") {
@@ -347,23 +526,92 @@
     return ["AddRecord", "BulkAddRecord", "UpdateRecord", "BulkUpdateRecord", "RemoveRecord", "BulkRemoveRecord"].includes(verb);
   }
 
+  function isProtectedMutationAction(action) {
+    if (!isMutationAction(action)) return false;
+    const tableName = toText(action?.[1]);
+    return tableName === PROJECTS_TABLE || SERVICE_AWARE_TABLES.has(tableName);
+  }
+
+  function assertContextValue(actualValue, expectedValue, normalize, label) {
+    const actual = normalize(actualValue);
+    if (actual && actual !== expectedValue) {
+      throw new Error(`${label} ne correspond pas au contexte sélectionné.`);
+    }
+  }
+
+  function transformRecordFields(tableName, sourceFields, {
+    selectedService,
+    projectNumber,
+    projectName,
+  }) {
+    const fields = { ...(sourceFields || {}) };
+    if (!SERVICE_AWARE_TABLES.has(tableName)) return fields;
+    if (selectedService) fields.Service = selectedService;
+
+    if (PROJECT_NUMBER_TABLES.has(tableName) && projectNumber) {
+      assertContextValue(fields.NumeroProjet, projectNumber, normalizeProjectNumber, "NumeroProjet");
+      fields.NumeroProjet = projectNumber;
+    }
+    const projectNameColumn = PROJECT_NAME_COLUMNS[tableName];
+    if (projectNameColumn && projectName) {
+      assertContextValue(fields[projectNameColumn], projectName, toText, projectNameColumn);
+      fields[projectNameColumn] = projectName;
+    }
+    return fields;
+  }
+
+  function getBulkActionLength(action, fields) {
+    if (Array.isArray(action?.[2])) return action[2].length;
+    return Math.max(0, ...Object.values(fields || {}).map((value) => (
+      Array.isArray(value) ? value.length : 0
+    )));
+  }
+
+  function transformBulkFields(tableName, sourceFields, context, rowCount) {
+    const fields = { ...(sourceFields || {}) };
+    const selectedService = normalizeService(context.selectedService);
+    const projectNumber = normalizeProjectNumber(context.projectNumber);
+    const projectName = toText(context.projectName);
+    if (!SERVICE_AWARE_TABLES.has(tableName)) return fields;
+
+    const transformColumn = (column, expected, normalize, label) => {
+      if (!expected) return;
+      const currentValues = Array.isArray(fields[column]) ? fields[column] : [];
+      currentValues.forEach((value) => assertContextValue(value, expected, normalize, label));
+      fields[column] = Array.from({ length: rowCount }, () => expected);
+    };
+    transformColumn("Service", selectedService, normalizeService, "Service");
+    if (PROJECT_NUMBER_TABLES.has(tableName)) {
+      transformColumn("NumeroProjet", projectNumber, normalizeProjectNumber, "NumeroProjet");
+    }
+    const projectNameColumn = PROJECT_NAME_COLUMNS[tableName];
+    if (projectNameColumn) transformColumn(projectNameColumn, projectName, toText, projectNameColumn);
+    return fields;
+  }
+
   function transformActions(actions, {
     selectedService,
     projectNumber,
+    projectName,
   } = {}) {
     const normalizedService = normalizeService(selectedService);
     const normalizedNumber = normalizeProjectNumber(projectNumber);
+    const normalizedName = toText(projectName);
     return (Array.isArray(actions) ? actions : []).map((action) => {
-      if (!Array.isArray(action) || !["AddRecord", "UpdateRecord"].includes(action[0])) {
+      if (!Array.isArray(action) || !["AddRecord", "UpdateRecord", "BulkAddRecord", "BulkUpdateRecord"].includes(action[0])) {
         return action;
       }
       const tableName = toText(action[1]);
       if (!SERVICE_AWARE_TABLES.has(tableName)) return action;
-      const fields = { ...(action[3] || {}) };
-      if (normalizedService) fields.Service = normalizedService;
-      if (PROJECT_NUMBER_TABLES.has(tableName) && normalizedNumber && !toText(fields.NumeroProjet)) {
-        fields.NumeroProjet = normalizedNumber;
-      }
+      const context = {
+        selectedService: normalizedService,
+        projectNumber: normalizedNumber,
+        projectName: normalizedName,
+      };
+      const sourceFields = action[3] || {};
+      const fields = ["BulkAddRecord", "BulkUpdateRecord"].includes(action[0])
+        ? transformBulkFields(tableName, sourceFields, context, getBulkActionLength(action, sourceFields))
+        : transformRecordFields(tableName, sourceFields, context);
       return [action[0], action[1], action[2], fields, ...action.slice(4)];
     });
   }
@@ -375,8 +623,11 @@
     PROJECT_ID_STORAGE_KEY,
     LEGACY_DEFAULT_SERVICE,
     GRANT_COLUMNS,
+    PROJECTS_TABLE,
+    PROJECT_NAME_COLUMNS,
     SERVICE_AWARE_TABLES,
     PROJECT_NUMBER_TABLES,
+    PROJECT_AWARE_TABLES,
     toText,
     normalizeProjectNumber,
     normalizeService,
@@ -384,17 +635,31 @@
     parseGrants,
     serializeGrants,
     hasProjectGrant,
+    getProjectNumber,
+    getProjectName,
+    getGrantedProjectNumbers,
+    getAllowedProjects,
+    selectAllowedProject,
     isAdminTeamRow,
     findCurrentTeamRow,
     getAllowedServices,
+    getAllowedServicesForProjects,
+    canEditCurrentContext,
+    getProjectAccessMode,
+    getProjectGrantScope,
     getExternalProjectGrantScope,
     tableToRows,
     filterRawTable,
     filterRawTableByService,
+    getRowProjectIdentity,
+    filterRawTableByProject,
+    filterRawTableByProjectScope,
+    filterProjectsRaw,
     parseAvancementEnvelope,
     getServiceAvancementItems,
     updateServiceAvancement,
     isMutationAction,
+    isProtectedMutationAction,
     transformActions,
   });
 });

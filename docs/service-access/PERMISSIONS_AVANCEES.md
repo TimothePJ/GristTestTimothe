@@ -1,173 +1,321 @@
 # Permissions avancées Grist
 
-Les filtres des widgets protègent l'interface. Les règles ci-dessous assurent la
-sécurité côté Grist et doivent être appliquées après la migration.
+Les filtres des widgets protègent l'interface. Ces règles assurent la sécurité
+côté Grist et doivent être appliquées manuellement après la migration.
 
-Les exemples supposent que l'attribut utilisateur `TeamRec` existe déjà et
-retourne la ligne `Team` correspondant à l'adresse e-mail Grist.
+## Propriété utilisateur
 
-La colonne `Team.Email` doit être stockée en minuscules, comme `user.Email`.
-L'appariement est exact et chaque adresse doit identifier une seule ligne
-`Team`.
+Créer ou conserver une propriété utilisateur nommée `TeamAccess` :
 
-Adapter le test administrateur au champ déjà utilisé dans le document. Les
-exemples utilisent :
+- propriété d'appariage : `user.Email` ;
+- table : `Team` ;
+- colonne cible : `Email`.
 
-```python
-user.TeamRec.Admin
-```
+`Team.Email` doit être en minuscules et identifier une seule ligne.
 
-## Tables projet + service
+Ne pas utiliser `champ or ""` dans les conditions ACL. Dans le langage restreint
+des prédicats Grist, `and` et `or` produisent des booléens. Les conditions
+ci-dessous concatènent directement les colonnes Text.
 
-### Lecture du service principal
+## Matrice d'accès
 
-Condition :
+- `Structure` lit et modifie tous les projets `Structure` ;
+- `Structure` lit un autre service uniquement lorsque le projet est attribué ;
+- `Synthese` et `Topographie` ne lisent que leurs projets attribués, y compris
+  dans leur service personnel ;
+- une attribution dans le service personnel est modifiable ;
+- une attribution dans un autre service est en lecture seule ;
+- un projet non attribué est invisible.
 
-```python
-rec.Service == user.TeamRec.Service
-```
+## Ordre commun des règles projet + service
 
-Permission : `+R`
+Dans chaque groupe `All`, utiliser cet ordre :
 
-### Lecture externe des tables identifiées par nom
+1. `user.Access == OWNER` : `+R +U +C +D` ;
+2. condition de lecture : `+R` uniquement ;
+3. condition de modification : `+U` uniquement ;
+4. condition de création : `+C` uniquement ;
+5. condition de suppression : `+D` uniquement ;
+6. tous les autres : `-R -U -C -D`.
 
-Ajouter une seule règle couvrant les trois services, avec `+R` uniquement,
-juste avant le refus final. Le modèle ci-dessous utilise `rec.NomProjet` :
+Conserver les règles de colonnes particulières déjà validées, par exemple la
+règle `References2.Bloquant`.
+
+## Tables identifiées par le nom du projet
+
+Correspondances :
+
+- `References2` : `NomProjet` ;
+- `ListePlan_NDC_COF` : `Nom_projet` ;
+- `Planning_Projet` : `NomProjet` ;
+- `Envois` : `Projet`.
+
+Les exemples utilisent `rec.NomProjet`. Remplacer littéralement `NomProjet` par
+la colonne indiquée ci-dessus dans la table concernée.
+
+### Lecture
 
 ```python
 (
+  user.TeamAccess.Service == "Structure"
+  and rec.Service == "Structure"
+)
+or (
   rec.Service == "Structure"
   and ("|" + rec.NomProjet + "\n") in (
-    "\n" + (user.TeamRec.Projets_Lecture_Structure or "") + "\n"
+    user.TeamAccess.Projets_Lecture_Structure + "\n"
   )
-) or (
+)
+or (
   rec.Service == "Synthese"
   and ("|" + rec.NomProjet + "\n") in (
-    "\n" + (user.TeamRec.Projets_Lecture_Synthese or "") + "\n"
+    user.TeamAccess.Projets_Lecture_Synthese + "\n"
   )
-) or (
+)
+or (
   rec.Service == "Topographie"
   and ("|" + rec.NomProjet + "\n") in (
-    "\n" + (user.TeamRec.Projets_Lecture_Topographie or "") + "\n"
+    user.TeamAccess.Projets_Lecture_Topographie + "\n"
   )
 )
 ```
 
-Adapter uniquement le nom de colonne :
-
-- `References2` : `rec.NomProjet`
-- `ListePlan_NDC_COF` : `rec.Nom_projet`
-- `Planning_Projet` : `rec.NomProjet`
-- `Envois` : `rec.Projet`
-
-### Lecture externe des tables identifiées par numéro
-
-Ajouter une seule règle avec `+R` uniquement dans `Budget`, `ProjectTeam`,
-`TimeSegment` et `TimeReal` :
+### Modification
 
 ```python
 (
-  rec.Service == "Structure"
-  and ("\n" + rec.NumeroProjet + "|") in (
-    "\n" + (user.TeamRec.Projets_Lecture_Structure or "") + "\n"
+  user.TeamAccess.Service == "Structure"
+  and rec.Service == "Structure"
+  and newRec.Service == "Structure"
+)
+or (
+  user.TeamAccess.Service == "Synthese"
+  and rec.Service == "Synthese"
+  and newRec.Service == "Synthese"
+  and ("|" + rec.NomProjet + "\n") in (
+    user.TeamAccess.Projets_Lecture_Synthese + "\n"
   )
-) or (
-  rec.Service == "Synthese"
-  and ("\n" + rec.NumeroProjet + "|") in (
-    "\n" + (user.TeamRec.Projets_Lecture_Synthese or "") + "\n"
+  and ("|" + newRec.NomProjet + "\n") in (
+    user.TeamAccess.Projets_Lecture_Synthese + "\n"
   )
-) or (
-  rec.Service == "Topographie"
-  and ("\n" + rec.NumeroProjet + "|") in (
-    "\n" + (user.TeamRec.Projets_Lecture_Topographie or "") + "\n"
+)
+or (
+  user.TeamAccess.Service == "Topographie"
+  and rec.Service == "Topographie"
+  and newRec.Service == "Topographie"
+  and ("|" + rec.NomProjet + "\n") in (
+    user.TeamAccess.Projets_Lecture_Topographie + "\n"
+  )
+  and ("|" + newRec.NomProjet + "\n") in (
+    user.TeamAccess.Projets_Lecture_Topographie + "\n"
   )
 )
 ```
 
-### Création dans le service principal
+### Création
 
 ```python
-newRec.Service == user.TeamRec.Service
+(
+  user.TeamAccess.Service == "Structure"
+  and newRec.Service == "Structure"
+)
+or (
+  user.TeamAccess.Service == "Synthese"
+  and newRec.Service == "Synthese"
+  and ("|" + newRec.NomProjet + "\n") in (
+    user.TeamAccess.Projets_Lecture_Synthese + "\n"
+  )
+)
+or (
+  user.TeamAccess.Service == "Topographie"
+  and newRec.Service == "Topographie"
+  and ("|" + newRec.NomProjet + "\n") in (
+    user.TeamAccess.Projets_Lecture_Topographie + "\n"
+  )
+)
 ```
 
-Permission : `+C`
-
-### Modification sans déplacement de service
+### Suppression
 
 ```python
-rec.Service == user.TeamRec.Service and newRec.Service == user.TeamRec.Service
+(
+  user.TeamAccess.Service == "Structure"
+  and rec.Service == "Structure"
+)
+or (
+  user.TeamAccess.Service == "Synthese"
+  and rec.Service == "Synthese"
+  and ("|" + rec.NomProjet + "\n") in (
+    user.TeamAccess.Projets_Lecture_Synthese + "\n"
+  )
+)
+or (
+  user.TeamAccess.Service == "Topographie"
+  and rec.Service == "Topographie"
+  and ("|" + rec.NomProjet + "\n") in (
+    user.TeamAccess.Projets_Lecture_Topographie + "\n"
+  )
+)
 ```
 
-Permission : `+U`
+## Tables identifiées par `NumeroProjet`
 
-### Suppression dans le service principal
+Appliquer les mêmes règles dans :
+
+- `Budget` ;
+- `ProjectTeam` ;
+- `TimeSegment` ;
+- `TimeReal`.
+
+Dans les quatre conditions précédentes, remplacer chaque test de nom :
 
 ```python
-rec.Service == user.TeamRec.Service
+("|" + rec.NomProjet + "\n") in (
+  user.TeamAccess.Projets_Lecture_Synthese + "\n"
+)
 ```
 
-Permission : `+D`
+par le test de numéro correspondant :
 
-Les règles de lecture externe ne reçoivent jamais `C`, `U` ou `D`.
+```python
+("\n" + rec.NumeroProjet + "|") in (
+  "\n" + user.TeamAccess.Projets_Lecture_Synthese + "\n"
+)
+```
 
-Ajouter en première position la règle administrateur existante avec `+CRUD`,
-puis terminer par une règle par défaut refusant les permissions non accordées.
+Pour une création ou le nouvel état d'une modification, utiliser
+`newRec.NumeroProjet`. Appliquer la même substitution pour `Structure` et
+`Topographie`.
+
+## Projets2
+
+`Projets2` n'a pas de colonne `Service`. Le catalogue doit être filtré par
+`Numero_de_projet`.
+
+Ordre :
+
+1. Owner : CRUD ;
+2. condition ci-dessous : R uniquement ;
+3. condition de modification ci-dessous : U uniquement ;
+4. tous les autres : refus total.
+
+### Lecture du catalogue
+
+```python
+user.TeamAccess.Admin == True
+or user.TeamAccess.Service == "Structure"
+or ("\n" + rec.Numero_de_projet + "|") in (
+  "\n" + user.TeamAccess.Projets_Lecture_Structure + "\n"
+)
+or ("\n" + rec.Numero_de_projet + "|") in (
+  "\n" + user.TeamAccess.Projets_Lecture_Synthese + "\n"
+)
+or ("\n" + rec.Numero_de_projet + "|") in (
+  "\n" + user.TeamAccess.Projets_Lecture_Topographie + "\n"
+)
+```
+
+La clause `Admin` permet au widget d'administration de charger le catalogue.
+Elle ne constitue pas un droit automatique sur les tables opérationnelles.
+
+### Modification d'une ligne existante
+
+```python
+user.TeamAccess.Service == "Structure"
+or (
+  user.TeamAccess.Service == "Synthese"
+  and ("\n" + rec.Numero_de_projet + "|") in (
+    "\n" + user.TeamAccess.Projets_Lecture_Synthese + "\n"
+  )
+  and ("\n" + newRec.Numero_de_projet + "|") in (
+    "\n" + user.TeamAccess.Projets_Lecture_Synthese + "\n"
+  )
+)
+or (
+  user.TeamAccess.Service == "Topographie"
+  and ("\n" + rec.Numero_de_projet + "|") in (
+    "\n" + user.TeamAccess.Projets_Lecture_Topographie + "\n"
+  )
+  and ("\n" + newRec.Numero_de_projet + "|") in (
+    "\n" + user.TeamAccess.Projets_Lecture_Topographie + "\n"
+  )
+)
+```
+
+Ne pas accorder C ou D aux utilisateurs ordinaires sur `Projets2`.
+
+`Avancement` reste une cellule JSON commune : Grist ne peut pas sécuriser
+séparément ses blocs `services.Structure`, `services.Synthese` et
+`services.Topographie`.
 
 ## Emetteurs
 
-`Emetteurs` est une table de service sans projet. Conserver les droits complets
-sur le service principal. Pour lire un service externe dès qu'au moins un
-projet de ce service est accordé :
+Supprimer toute ancienne règle de colonne `Service` qui refuse R. Puis utiliser :
 
 ```python
 (
   rec.Service == "Structure"
-  and (user.TeamRec.Projets_Lecture_Structure or "") != ""
-) or (
+  and (
+    user.TeamAccess.Service == "Structure"
+    or user.TeamAccess.Projets_Lecture_Structure not in [None, ""]
+  )
+)
+or (
   rec.Service == "Synthese"
-  and (user.TeamRec.Projets_Lecture_Synthese or "") != ""
-) or (
+  and user.TeamAccess.Projets_Lecture_Synthese not in [None, ""]
+)
+or (
   rec.Service == "Topographie"
-  and (user.TeamRec.Projets_Lecture_Topographie or "") != ""
+  and user.TeamAccess.Projets_Lecture_Topographie not in [None, ""]
 )
 ```
 
-Permission : `+R`. Les écritures externes restent interdites. Une éventuelle
-règle de colonne sur `Emetteurs.Service` ne doit pas refuser `R`, faute de quoi
-la valeur nécessaire au filtrage du widget est censurée.
-
-## Time-Out
-
-Ne pas ajouter de filtre projet. Conserver la règle existante permettant la
-lecture des absences conformément au fonctionnement validé.
+Permission R uniquement. Les écritures restent réservées aux Owners. Comme
+`Emetteurs` n'a pas de projet, une attribution dans un service ouvre la liste
+d'émetteurs de ce service.
 
 ## Team
 
-Créer une règle de colonnes portant sur :
+Créer une règle de colonnes sur :
 
-- `Projets_Lecture_Structure`
-- `Projets_Lecture_Synthese`
-- `Projets_Lecture_Topographie`
+- `Projets_Lecture_Structure` ;
+- `Projets_Lecture_Synthese` ;
+- `Projets_Lecture_Topographie`.
 
-Autoriser la modification uniquement aux administrateurs/Owners. Refuser la
-modification à tous les autres utilisateurs, y compris sur leur propre ligne
-`Team`.
+Ordre de cette règle de colonnes :
 
-## Projets2 et Avancement
+1. Owner : R/U ;
+2. `user.TeamAccess.Admin == True` : R/U ;
+3. `user.Email == rec.Email` : R autorisé, U refusé ;
+4. tous les autres : R/U refusés.
 
-`Projets2` n'a pas de colonne `Service`. Conserver les règles actuelles du
-catalogue projet. Une permission Grist ne peut pas contrôler séparément
-`services.Structure`, `services.Synthese` et `services.Topographie` à
-l'intérieur de la même cellule `Avancement`.
+Règles `All` de `Team` :
+
+1. Owner : CRUD ;
+2. `user.TeamAccess.Admin == True` : R ;
+3. `user.Email == rec.Email` : R ;
+4. `rec.Service == user.TeamAccess.Service` : R ;
+5. tous les autres : refus total.
+
+Conserver une règle de colonne `Moi` qui autorise Owner, autorise R uniquement
+sur la propre ligne de l'utilisateur, puis refuse R/U à tous les autres.
+
+## Time_Out
+
+Ne pas ajouter de filtre projet. Conserver le fonctionnement validé des
+absences. Remplacer seulement les anciennes références `TeamRec.Admin` par
+`TeamAccess.Admin` lors de l'uniformisation des propriétés utilisateur.
 
 ## Tests « Voir en tant que »
 
-Avec une personne Synthese :
+Tester au minimum :
 
-1. sans droit Structure, le service Structure ne doit pas être proposé ;
-2. avec `252035|ERA QUAI D'ORSAY`, Structure doit être proposé sur ce projet ;
-3. les lignes Structure du projet doivent être lisibles ;
-4. une création, modification ou suppression directe doit être refusée ;
-5. les autres projets Structure doivent rester invisibles ;
-6. après révocation, l'accès doit disparaître ;
-7. le service Synthese doit rester modifiable normalement.
+1. Structure sans attribution : tous les projets Structure sont visibles et
+   modifiables ;
+2. Synthese sans attribution : aucun projet n'est visible ;
+3. projet attribué en Synthese à une personne Synthese : modification permise ;
+4. projet attribué en Structure à cette personne : lecture seule ;
+5. autre projet Structure non attribué : invisible ;
+6. tentative d'écriture directe dans un service externe : refusée ;
+7. révocation : le projet disparaît après actualisation ;
+8. `2520` ne donne jamais accès à `252035`.

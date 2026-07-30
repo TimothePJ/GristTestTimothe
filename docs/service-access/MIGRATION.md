@@ -30,6 +30,12 @@ Vérifier dans `Team` :
 
 Les trois colonnes `Projets_Lecture_*` restent de type `Text`.
 
+Contrairement à l'ancien fonctionnement, remplir également la colonne du
+service personnel pour les personnes `Synthese` et `Topographie`. Sans cette
+attribution explicite, le projet n'apparaît pas, même dans leur propre service.
+Les personnes `Structure` n'ont pas besoin d'une ligne dans
+`Projets_Lecture_Structure` pour leurs projets Structure.
+
 Grist normalise l'adresse des utilisateurs partagés en minuscules. La propriété
 utilisateur associe `user.Email` à `Team.Email` par égalité exacte : convertir
 toutes les anciennes valeurs de `Team.Email` en minuscules et vérifier qu'il
