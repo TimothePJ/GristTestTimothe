@@ -492,6 +492,10 @@ function bootstrapApp() {
     reconcileAndLoad();
   }
 
+  function handleServiceChange() {
+    reconcileAndLoad({ force: true });
+  }
+
   function handleAggregateToggle() {
     if (!planningRenderer || !controller) return;
     const aggregate = Boolean(els.aggregateToggle.checked);
@@ -595,6 +599,7 @@ function bootstrapApp() {
       els.viewSwitch.addEventListener("click", handleViewSwitchClick);
     }
     window.addEventListener("storage", handleStorageEvent);
+    window.GristServiceContext?.onServiceChange?.(handleServiceChange);
 
     reconcileAndLoad({ force: true });
   }

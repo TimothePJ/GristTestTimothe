@@ -13,16 +13,9 @@ function readSharedProjectSelection() {
 }
 
 function saveSharedProjectSelection(projectName = '') {
-  try {
-    const normalizedProject = String(projectName || '').trim();
-    if (normalizedProject) {
-      localStorage.setItem(SHARED_PROJECT_STORAGE_KEY, normalizedProject);
-    } else {
-      localStorage.removeItem(SHARED_PROJECT_STORAGE_KEY);
-    }
-  } catch (_error) {
-    // localStorage peut etre indisponible dans certains contextes embarques.
-  }
+  const normalizedProject = String(projectName || '').trim();
+  if (!normalizedProject) return Promise.resolve(null);
+  return window.GristServiceContext.selectProject(normalizedProject).catch(() => null);
 }
 
 // Register the datalabels plugin

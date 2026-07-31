@@ -129,6 +129,8 @@ let chargePlanSyncApiReady = false;
 let cachedProjectRows = null;
 let expenseDataReady = false;
 let expenseDataLoadingPromise = null;
+let expenseDataLoadGeneration = 0;
+let expenseServiceRefreshBound = false;
 let projectActivationRefreshPromise = null;
 let suppressChargePlanSyncEvents = false;
 let chargePlanSyncSuppressionToken = 0;
@@ -183,17 +185,13 @@ function readSharedProjectSelection() {
   }
 }
 
-function saveSharedProjectSelection(projectName = "") {
-  try {
-    const normalizedProject = String(projectName || "").trim();
-    if (normalizedProject) {
-      localStorage.setItem(APP_CONFIG.sharedProjectStorageKey, normalizedProject);
-    } else {
-      localStorage.removeItem(APP_CONFIG.sharedProjectStorageKey);
-    }
-  } catch (_error) {
-    // localStorage peut etre indisponible dans certains contextes embarques.
-  }
+function saveSharedProjectSelection(projectName = "", projectId = null) {
+  const normalizedProject = String(projectName || "").trim();
+  if (!normalizedProject) return Promise.resolve(null);
+  return window.GristServiceContext.selectProject({
+    projectId,
+    projectName: normalizedProject,
+  }).catch(() => null);
 }
 
 function normalizeSharedProjectKey(value) {
@@ -2209,8 +2207,7 @@ function setSelectedProjectForPlanningSync(projectKey = "") {
     setState({
       selectedProjectId: nextProject.id,
     });
-    saveSharedProjectSelection(nextProject.name || nextProject.projectNumber || "");
-    try { localStorage.setItem('grist.selected-project-id', String(nextProject.id)); } catch (_e) {}
+    saveSharedProjectSelection(nextProject.name || nextProject.projectNumber || "", nextProject.id);
     syncStateToProjectStart(nextProject);
     renderApp();
   } finally {
@@ -2326,8 +2323,10 @@ async function initProjectDropdown() {
 
   if (selectedProject) {
     setState({ selectedProjectId: selectedProject.id });
-    saveSharedProjectSelection(selectedProject.name || selectedProject.projectNumber || "");
-    try { localStorage.setItem('grist.selected-project-id', String(selectedProject.id)); } catch (_e) {}
+    saveSharedProjectSelection(
+      selectedProject.name || selectedProject.projectNumber || "",
+      selectedProject.id
+    );
     syncStateToProjectStart(selectedProject);
     // Charger les données maintenant qu'un projet est connu
     await loadData({ preferredProjectNumber: selectedProject.projectNumber });
@@ -2338,7 +2337,8 @@ async function initProjectDropdown() {
 }
 
 function loadData(options = {}) {
-  const loadPromise = performLoadData(options);
+  const loadGeneration = ++expenseDataLoadGeneration;
+  const loadPromise = performLoadData(options, loadGeneration);
   expenseDataLoadingPromise = loadPromise;
   return loadPromise.finally(() => {
     if (expenseDataLoadingPromise === loadPromise) {
@@ -2347,14 +2347,32 @@ function loadData(options = {}) {
   });
 }
 
-async function performLoadData({ preferredProjectNumber = "", refreshProjects = false } = {}) {
+async function performLoadData(
+  { preferredProjectNumber = "", refreshProjects = false } = {},
+  loadGeneration = expenseDataLoadGeneration
+) {
   expenseDataReady = false;
   // Rafraîchir la liste de projets uniquement si demandé explicitement (ex: création/suppression)
   if (refreshProjects || !cachedProjectRows) {
-    cachedProjectRows = await fetchProjectsForDropdown();
+    let projectRows;
+    try {
+      projectRows = await fetchProjectsForDropdown();
+    } catch (error) {
+      if (loadGeneration !== expenseDataLoadGeneration) return false;
+      throw error;
+    }
+    if (loadGeneration !== expenseDataLoadGeneration) return false;
+    cachedProjectRows = projectRows;
   }
   // Charger les 8 tables de données (hors Projets)
-  const dataTables = await fetchProjectDataTables();
+  let dataTables;
+  try {
+    dataTables = await fetchProjectDataTables();
+  } catch (error) {
+    if (loadGeneration !== expenseDataLoadGeneration) return false;
+    throw error;
+  }
+  if (loadGeneration !== expenseDataLoadGeneration) return false;
   const tables = { projectRows: cachedProjectRows, ...dataTables };
   const { projects, teamMembers } = buildExpenseData(tables);
   planningManagementHover = null;
@@ -2407,6 +2425,22 @@ async function performLoadData({ preferredProjectNumber = "", refreshProjects = 
   saveSharedProjectSelection(selectedProject?.name || selectedProject?.projectNumber || "");
   renderApp();
   expenseDataReady = true;
+  return true;
+}
+
+function bindExpenseServiceRefresh() {
+  if (expenseServiceRefreshBound) return;
+  const serviceContext = window.GristServiceContext;
+  if (typeof serviceContext?.onServiceChange !== "function") return;
+
+  expenseServiceRefreshBound = true;
+  serviceContext.onServiceChange(() => {
+    if (!cachedProjectRows) return;
+    const preferredProjectNumber = getSelectedProject()?.projectNumber || "";
+    void loadData({ preferredProjectNumber }).catch((error) => {
+      console.error("Erreur actualisation service gestion-depenses2 :", error);
+    });
+  });
 }
 
 function resetNewProjectForm() {
@@ -4361,14 +4395,15 @@ async function handleProjectSelectionChange() {
 
   const selectedProject = getSelectedProject();
   if (selectedProject) {
-    saveSharedProjectSelection(selectedProject.name || selectedProject.projectNumber || "");
-    try { localStorage.setItem('grist.selected-project-id', String(selectedProject.id)); } catch (_e) {}
+    saveSharedProjectSelection(
+      selectedProject.name || selectedProject.projectNumber || "",
+      selectedProject.id
+    );
     syncStateToProjectStart(selectedProject);
     // Charger les 8 tables de données pour le projet sélectionné
     await loadData({ preferredProjectNumber: selectedProject.projectNumber });
   } else {
     saveSharedProjectSelection("");
-    try { localStorage.removeItem('grist.selected-project-id'); } catch (_e) {}
     renderApp();
   }
   schedulePlanningAlertsPopupOnArrival();
@@ -5741,6 +5776,7 @@ export async function bootstrap() {
 
   initGrist();
   bindEvents();
+  bindExpenseServiceRefresh();
   // Chargement initial : uniquement la table Projets pour peupler le sélecteur.
   // Les 8 tables de données sont chargées par loadData() après sélection d'un projet.
   await initProjectDropdown();

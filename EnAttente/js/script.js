@@ -41,21 +41,9 @@ function readSharedProjectSelection() {
 }
 
 function saveSharedProjectSelection(projectName = "") {
-  try {
-    const normalizedProject = String(projectName || "").trim();
-    if (normalizedProject) {
-      localStorage.setItem(SHARED_PROJECT_STORAGE_KEY, normalizedProject);
-      const project = _projectsData.find(
-        (p) => p.name.trim().toLowerCase() === normalizedProject.toLowerCase()
-      );
-      if (project) localStorage.setItem(SHARED_PROJECT_ID_STORAGE_KEY, String(project.id));
-    } else {
-      localStorage.removeItem(SHARED_PROJECT_STORAGE_KEY);
-      localStorage.removeItem(SHARED_PROJECT_ID_STORAGE_KEY);
-    }
-  } catch (_error) {
-    // localStorage can be unavailable inside some embedded contexts.
-  }
+  const normalizedProject = String(projectName || "").trim();
+  if (!normalizedProject) return Promise.resolve(null);
+  return window.GristServiceContext.selectProject(normalizedProject).catch(() => null);
 }
 
 function normalizeText(value) {

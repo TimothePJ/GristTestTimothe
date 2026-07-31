@@ -11,6 +11,8 @@
   const state = {
     ready: false,
     teamRow: null,
+    teamRows: [],
+    projectTeamRows: [],
     catalogProjects: [],
     projects: [],
     homeService: "",
@@ -18,15 +20,33 @@
     allowedServices: [],
     currentProject: null,
     isAdmin: false,
+    effectiveProjectNumbers: new Set(),
+    teamProjectNumbersById: new Map(),
+    projectByNumber: new Map(),
+    projectScope: { numbers: new Set(), names: new Set() },
+    unresolvedProjectTeamCount: 0,
     error: null,
   };
+  const ACCESS_CACHE_TTL_MS = 45000;
+  const ACCESS_TABLES = new Set(["Team", core.PROJECTS_TABLE, core.PROJECT_TEAM_TABLE]);
   const listeners = new Set();
+  const recordSubscribers = new Set();
   let initializePromise = null;
   let refreshPromise = null;
-  let reloadTimer = 0;
   let rawFetchTable = null;
   let rawApplyUserActions = null;
   let readonlyObserver = null;
+  let recordsSubscription = null;
+  let recordsSubscriptionStarted = false;
+  let latestRawRecords = null;
+  let latestRecordMappings = null;
+  let rawRecordsVersion = 0;
+  let selectionGeneration = 0;
+  let accessLoadedAt = 0;
+  let accessCacheInvalidated = true;
+  let accessSignalSequence = 0;
+  let storageSelectionTimer = 0;
+  const rawTableCache = new Map();
 
   function getGrist() {
     return window.grist || null;
@@ -55,29 +75,28 @@
 
   function writeStorage(key, value) {
     try {
-      if (value) window.localStorage?.setItem(key, value);
+      const normalizedValue = value == null ? "" : String(value);
+      const previousValue = window.localStorage?.getItem(key) || "";
+      if (previousValue === normalizedValue) return false;
+      if (normalizedValue) window.localStorage?.setItem(key, normalizedValue);
       else window.localStorage?.removeItem(key);
+      return true;
     } catch (_error) {
       // localStorage may be unavailable in sandboxed widgets.
+      return false;
     }
   }
 
   function buildProjects(rawProjects) {
-    return core.tableToRows(rawProjects)
-      .map((row) => ({
-        id: Number(row?.id),
-        number: core.normalizeProjectNumber(
-          row?.Numero_de_projet ?? row?.NumeroProjet ?? row?.Numero
-        ),
-        name: core.toText(row?.Nom_de_projet ?? row?.NomProjet ?? row?.Projet),
-      }))
-      .filter((project) => Number.isInteger(project.id) && project.id > 0 && project.number);
+    return core.groupProjectsByNumber(rawProjects)
+      .filter((project) => Number(project.id) > 0);
   }
 
   function resolveCurrentProject() {
     return core.selectAllowedProject(state.projects, {
       projectId: readStorage(core.PROJECT_ID_STORAGE_KEY),
       projectName: readStorage(core.PROJECT_STORAGE_KEY),
+      projectNumber: readStorage(core.PROJECT_STORAGE_KEY),
     });
   }
 
@@ -95,25 +114,90 @@
     return Boolean(document.body?.hasAttribute("data-service-context-multiproject"));
   }
 
-  function reconcileSelection({ persist = true } = {}) {
+  function buildAccessIndex() {
     state.homeService = core.normalizeService(state.teamRow?.Service);
     state.isAdmin = core.isAdminTeamRow(state.teamRow);
-    state.projects = core.getAllowedProjects(state.teamRow, state.catalogProjects);
-    state.currentProject = resolveCurrentProject();
+    const resolvedAssignments = core.resolveProjectTeamRows(
+      state.teamRows,
+      state.projectTeamRows
+    );
+    const projectNumbersByTeamId = new Map();
+
+    state.teamRows.forEach((row) => {
+      const teamId = Number(row?.id);
+      if (teamId > 0) projectNumbersByTeamId.set(teamId, new Set());
+    });
+    core.groupTeamPeople(state.teamRows).forEach((person) => {
+      const numbers = new Set();
+      person.teamRows.forEach((row) => {
+        core.parseProjectAccess(row?.[core.ACCESS_COLUMN]).forEach((grant) => {
+          numbers.add(grant.projectNumber);
+        });
+      });
+      person.teamIds.forEach((teamId) => {
+        projectNumbersByTeamId.set(Number(teamId), new Set(numbers));
+      });
+    });
+    resolvedAssignments.matched.forEach((assignment) => {
+      const teamId = Number(assignment.teamId);
+      if (!projectNumbersByTeamId.has(teamId)) projectNumbersByTeamId.set(teamId, new Set());
+      projectNumbersByTeamId.get(teamId).add(assignment.projectNumber);
+    });
+
+    const effectiveNumbers = new Set();
+    core.getEquivalentTeamRows(state.teamRow, state.teamRows).forEach((row) => {
+      const teamId = Number(row?.id);
+      projectNumbersByTeamId.get(teamId)?.forEach((number) => effectiveNumbers.add(number));
+    });
+
+    state.teamProjectNumbersById = projectNumbersByTeamId;
+    state.effectiveProjectNumbers = effectiveNumbers;
+    state.unresolvedProjectTeamCount = resolvedAssignments.unresolved.length;
+    state.projectByNumber = new Map(
+      state.catalogProjects.map((project) => [project.number, project])
+    );
+    state.projects = state.isAdmin
+      ? [...state.catalogProjects]
+      : state.catalogProjects.filter((project) => effectiveNumbers.has(project.number));
+    state.projectScope = core.getProjectScope(state.projects, state.catalogProjects);
+  }
+
+  function reconcileServices() {
     if (isMultiProjectContext()) {
-      state.allowedServices = core.getAllowedServicesForProjects(state.teamRow, state.projects);
+      state.allowedServices = state.homeService && state.projects.length
+        ? [...core.SERVICES]
+        : [];
     } else {
-      state.allowedServices = core.getAllowedServices(
-        state.teamRow,
+      const hasProjectAccess = state.isAdmin || state.effectiveProjectNumbers.has(
         state.currentProject?.number || ""
       );
+      state.allowedServices = state.homeService && state.currentProject && hasProjectAccess
+        ? [...core.SERVICES]
+        : [];
     }
     const storedService = core.normalizeService(readStorage(core.SERVICE_STORAGE_KEY));
-    state.selectedService = state.allowedServices.includes(storedService)
-      ? storedService
+    const requestedService = state.allowedServices.includes(state.selectedService)
+      ? state.selectedService
+      : storedService;
+    state.selectedService = state.allowedServices.includes(requestedService)
+      ? requestedService
       : (state.allowedServices.includes(state.homeService)
-          ? state.homeService
-          : (state.allowedServices[0] || ""));
+        ? state.homeService
+        : (state.allowedServices[0] || ""));
+  }
+
+  function reconcileSelection({ persist = true, keepCurrentProject = false } = {}) {
+    buildAccessIndex();
+    if (!keepCurrentProject || !state.projects.some(
+      (project) => project.number === state.currentProject?.number
+    )) {
+      state.currentProject = resolveCurrentProject();
+    } else {
+      state.currentProject = state.projects.find(
+        (project) => project.number === state.currentProject?.number
+      ) || null;
+    }
+    reconcileServices();
     if (persist) {
       persistCurrentProject(state.currentProject);
       writeStorage(core.SERVICE_STORAGE_KEY, state.selectedService);
@@ -122,45 +206,47 @@
 
   function getCurrentAccessMode() {
     if (!state.currentProject || !state.selectedService) return "hidden";
-    if (!isMultiProjectContext()) {
-      return core.getProjectAccessMode(
-        state.teamRow,
-        state.currentProject.number,
-        state.selectedService
-      );
-    }
     if (!state.allowedServices.includes(state.selectedService)) return "hidden";
     if (state.selectedService !== state.homeService) return "readonly";
-    if (state.homeService === "Structure") return "editable";
-    return state.projects.some((project) => core.canEditCurrentContext(
-      state.teamRow,
-      project.number,
-      state.selectedService
-    )) ? "editable" : "hidden";
+    return "editable";
   }
 
   function canEditCurrentSelection() {
     return getCurrentAccessMode() === "editable";
   }
 
-  function getPublicState() {
+  function cloneProject(project) {
+    if (!project) return null;
+    return {
+      ...project,
+      ids: Array.isArray(project.ids) ? [...project.ids] : [],
+      names: Array.isArray(project.names) ? [...project.names] : [],
+    };
+  }
+
+  function getPublicState(generation = selectionGeneration) {
+    const currentProject = cloneProject(state.currentProject);
     return {
       ready: state.ready,
       teamRow: state.teamRow ? { ...state.teamRow } : null,
       homeService: state.homeService,
       selectedService: state.selectedService,
       allowedServices: [...state.allowedServices],
-      allowedProjects: state.projects.map((project) => ({ ...project })),
-      currentProject: state.currentProject ? { ...state.currentProject } : null,
+      allowedProjects: state.projects.map(cloneProject),
+      currentProject,
+      projectAliases: currentProject?.names?.length
+        ? [...currentProject.names]
+        : [currentProject?.name].filter(Boolean),
       isAdmin: state.isAdmin,
+      unresolvedProjectTeamCount: state.unresolvedProjectTeamCount,
       accessMode: getCurrentAccessMode(),
       isReadOnly: !canEditCurrentSelection(),
+      generation,
       error: state.error,
     };
   }
 
-  function notify() {
-    const detail = getPublicState();
+  function notify(detail = getPublicState()) {
     window.dispatchEvent(new CustomEvent("grist-service-context-change", { detail }));
     listeners.forEach((listener) => {
       try {
@@ -171,18 +257,70 @@
     });
   }
 
-  async function loadIdentityAndProjects() {
+  function isFreshTimestamp(timestamp, ttl = ACCESS_CACHE_TTL_MS) {
+    return timestamp > 0 && Date.now() - timestamp < ttl;
+  }
+
+  function invalidateRawTableCache(tableName) {
+    const normalizedTableName = core.toText(tableName);
+    if (normalizedTableName) rawTableCache.delete(normalizedTableName);
+  }
+
+  function invalidateAccessCache() {
+    accessCacheInvalidated = true;
+    accessLoadedAt = 0;
+    ACCESS_TABLES.forEach(invalidateRawTableCache);
+  }
+
+  async function fetchRawTableCached(tableName, { forceRefresh = false, ttl = ACCESS_CACHE_TTL_MS } = {}) {
+    const normalizedTableName = core.toText(tableName);
+    if (!ACCESS_TABLES.has(normalizedTableName)) return rawFetchTable(normalizedTableName);
+
+    const cached = rawTableCache.get(normalizedTableName);
+    if (!forceRefresh && cached?.value != null && isFreshTimestamp(cached.loadedAt, ttl)) {
+      return cached.value;
+    }
+    if (cached?.promise) return cached.promise;
+
+    const entry = cached || { value: null, loadedAt: 0, promise: null };
+    entry.promise = Promise.resolve(rawFetchTable(normalizedTableName)).then((value) => {
+      entry.value = value;
+      entry.loadedAt = Date.now();
+      return value;
+    }).finally(() => {
+      entry.promise = null;
+    });
+    rawTableCache.set(normalizedTableName, entry);
+    return entry.promise;
+  }
+
+  async function loadIdentityAndProjects({ forceRefresh = false } = {}) {
     const grist = await waitForDocApi();
     if (!rawFetchTable) {
       rawFetchTable = grist.docApi.fetchTable.bind(grist.docApi);
     }
-    const [rawTeam, rawProjects] = await Promise.all([
-      rawFetchTable("Team"),
-      rawFetchTable("Projets2"),
+    if (
+      !forceRefresh &&
+      !accessCacheInvalidated &&
+      isFreshTimestamp(accessLoadedAt) &&
+      state.teamRows.length
+    ) {
+      reconcileSelection({ keepCurrentProject: true });
+      return;
+    }
+    const [rawTeam, rawProjects, rawProjectTeam] = await Promise.all([
+      fetchRawTableCached("Team", { forceRefresh }),
+      fetchRawTableCached(core.PROJECTS_TABLE, { forceRefresh }),
+      fetchRawTableCached(core.PROJECT_TEAM_TABLE, { forceRefresh }),
     ]);
     const teamRows = core.tableToRows(rawTeam);
-    state.teamRow = core.findCurrentTeamRow(teamRows);
+    state.teamRows = teamRows.filter((row) => Number(row?.id) > 0);
+    state.projectTeamRows = core.tableToRows(rawProjectTeam)
+      .filter((row) => Number(row?.id) > 0);
+    state.teamRow = core.findCurrentTeamRow(state.teamRows);
     state.catalogProjects = buildProjects(rawProjects);
+    accessLoadedAt = Date.now();
+    accessCacheInvalidated = false;
     state.error = state.teamRow
       ? null
       : new Error("Utilisateur courant introuvable dans Team (colonne Moi).");
@@ -214,38 +352,114 @@
     return initializePromise;
   }
 
-  async function refresh() {
+  async function refresh({ forceRefresh = true } = {}) {
     if (refreshPromise) return refreshPromise;
     refreshPromise = (async () => {
-      const previousService = state.selectedService;
-      const previousAllowed = state.allowedServices.join("|");
-      const previousProject = state.currentProject?.number || "";
-      const previousProjects = state.projects.map((project) => project.number).join("|");
-      await loadIdentityAndProjects();
+      const previous = getPublicState();
+      await loadIdentityAndProjects({ forceRefresh });
       state.ready = true;
+      const contextChanged =
+        previous.currentProject?.number !== state.currentProject?.number ||
+        previous.selectedService !== state.selectedService ||
+        previous.homeService !== state.homeService ||
+        previous.accessMode !== getCurrentAccessMode();
+      if (contextChanged) selectionGeneration += 1;
+      const snapshot = getPublicState();
       mountSelector();
-      applyReadonlyUi();
-      notify();
-      if (
-        previousService !== state.selectedService ||
-        previousAllowed !== state.allowedServices.join("|") ||
-        previousProject !== (state.currentProject?.number || "") ||
-        previousProjects !== state.projects.map((project) => project.number).join("|")
-      ) {
-        scheduleReload();
-      }
-      return getPublicState();
+      applyReadonlyUi(snapshot);
+      notify(snapshot);
+      await emitLatestRecords("refresh", snapshot);
+      return snapshot;
     })().finally(() => {
       refreshPromise = null;
     });
     return refreshPromise;
   }
 
-  function scheduleReload() {
-    if (reloadTimer) return;
-    reloadTimer = window.setTimeout(() => {
-      window.location.reload();
-    }, 40);
+  function resolveAllowedProject(selection) {
+    const value = selection && typeof selection === "object" ? selection : {};
+    const textValue = selection && typeof selection !== "object"
+      ? core.toText(selection)
+      : "";
+    const requestedId = Number(value.projectId ?? value.id);
+    const requestedNumber = core.normalizeProjectNumber(
+      value.projectNumber ?? value.number ?? textValue
+    );
+    const requestedName = core.normalizeProjectNameKey(
+      value.projectName ?? value.name ?? textValue
+    );
+
+    if (Number.isInteger(requestedId) && requestedId > 0) {
+      const byId = state.projects.find((project) => (
+        Number(project.id) === requestedId ||
+        project.ids?.map(Number).includes(requestedId)
+      ));
+      if (byId) return byId;
+    }
+    if (requestedNumber) {
+      const byNumber = state.projects.find((project) => project.number === requestedNumber);
+      if (byNumber) return byNumber;
+    }
+    if (requestedName) {
+      const byName = state.projects.find((project) => (
+        core.normalizeProjectNameKey(project.name) === requestedName ||
+        project.names?.some(
+          (name) => core.normalizeProjectNameKey(name) === requestedName
+        )
+      ));
+      if (byName) return byName;
+    }
+    return null;
+  }
+
+  async function selectProject(selection, { persist = true, reason = "selection" } = {}) {
+    if (!state.ready) await initialize();
+
+    const project = resolveAllowedProject(selection);
+    if (!project) {
+      throw new Error("Ce projet n'est pas autorisé pour l'utilisateur courant.");
+    }
+    if (state.currentProject?.number === project.number) return getPublicState();
+
+    const previousProjectNumber = state.currentProject?.number || "";
+    const previousService = state.selectedService;
+    const requestGeneration = ++selectionGeneration;
+    state.currentProject = project;
+    reconcileServices();
+    if (persist) {
+      persistCurrentProject(project);
+      writeStorage(core.SERVICE_STORAGE_KEY, state.selectedService);
+    }
+    mountSelector();
+    const snapshot = getPublicState(requestGeneration);
+    applyReadonlyUi(snapshot);
+    if (
+      previousProjectNumber !== (snapshot.currentProject?.number || "") ||
+      previousService !== snapshot.selectedService
+    ) {
+      notify(snapshot);
+      await emitLatestRecords(reason, snapshot);
+    }
+    return snapshot;
+  }
+
+  async function selectService(service, { persist = true, reason = "service-selection" } = {}) {
+    if (!state.ready) await initialize();
+    const normalizedService = core.normalizeService(service);
+    if (!state.allowedServices.includes(normalizedService)) {
+      throw new Error(`Le service ${core.toText(service) || "demandé"} n'est pas autorisé.`);
+    }
+    if (normalizedService === state.selectedService) return getPublicState();
+
+    const requestGeneration = ++selectionGeneration;
+    state.selectedService = normalizedService;
+    if (persist) writeStorage(core.SERVICE_STORAGE_KEY, normalizedService);
+    mountSelector();
+    const snapshot = getPublicState(requestGeneration);
+    applyReadonlyUi(snapshot);
+    notify(snapshot);
+    await emitLatestRecords(reason, snapshot);
+    return snapshot;
   }
 
   function selectorHost() {
@@ -321,6 +535,14 @@
       .grist-service-context-badge.is-readonly{background:#fff0d8;color:#8b4e00}
       .grist-service-context-badge.is-error{max-width:min(260px,40vw);background:#fde7e7;color:#a51d1d;white-space:normal;overflow-wrap:anywhere}
       body[data-grist-service-readonly="true"] [data-service-write-control]{opacity:.55;cursor:not-allowed}
+      body[data-grist-service-readonly="true"] select:not([data-grist-service-selector]):not(#grist-service-select){opacity:1!important;background-color:#fff7e8!important;border-color:#d8ad69!important;color:#764500!important;-webkit-text-fill-color:#764500!important}
+      body[data-grist-service-readonly="true"] select:not([data-grist-service-selector]):not(#grist-service-select):open{background-color:#fffaf3!important;color:#9a7441!important;-webkit-text-fill-color:#9a7441!important}
+      body[data-grist-service-readonly="true"] select:not([data-grist-service-selector]):not(#grist-service-select) option,
+      body[data-grist-service-readonly="true"] select:not([data-grist-service-selector]):not(#grist-service-select) optgroup{background-color:#fffaf3!important;color:#9a7441!important;-webkit-text-fill-color:#9a7441!important}
+      body[data-grist-service-readonly="true"] select:not([data-grist-service-selector]):not(#grist-service-select) option:checked{background:linear-gradient(#ffedcc,#ffedcc)!important;color:#6a3c00!important;-webkit-text-fill-color:#6a3c00!important}
+      body[data-grist-service-readonly="true"] .checkbox-dropdown-button{opacity:1!important;background-color:#fff7e8!important;border-color:#d8ad69!important;color:#764500!important}
+      body[data-grist-service-readonly="true"] .checkbox-dropdown .checkbox-list:not([hidden]){background-color:#fffaf3!important;border-color:#e4c28b!important;color:#9a7441!important}
+      body[data-grist-service-readonly="true"] .checkbox-dropdown .checkbox-list-item:hover{background-color:#ffedcc!important;color:#6a3c00!important}
       @media (max-width:720px){
         .grist-service-context-host--sticky>.dropdown-container,.grist-service-context-host--sticky>.info-container{flex:1 1 min(220px,100%);max-width:none}
         .grist-service-context-host--sticky>.button-container{flex:1 1 100%;justify-content:flex-start}
@@ -384,13 +606,14 @@
     const currentOptions = [...select.options].map((option) => option.value).join("|");
     const expectedOptions = state.allowedServices.join("|");
     if (currentOptions !== expectedOptions) {
-      select.replaceChildren();
+      const fragment = document.createDocumentFragment();
       state.allowedServices.forEach((service) => {
         const option = document.createElement("option");
         option.value = service;
         option.textContent = service;
-        select.appendChild(option);
+        fragment.appendChild(option);
       });
+      select.replaceChildren(fragment);
     }
     select.value = state.selectedService;
     select.disabled = !state.ready || state.allowedServices.length < 2;
@@ -402,11 +625,10 @@
           select.value = state.selectedService;
           return;
         }
-        state.selectedService = nextService;
-        writeStorage(core.SERVICE_STORAGE_KEY, nextService);
-        applyReadonlyUi();
-        notify();
-        scheduleReload();
+        selectService(nextService).catch((error) => {
+          select.value = state.selectedService;
+          console.warn("Changement de service impossible :", error);
+        });
       });
     }
 
@@ -441,35 +663,46 @@
     return /(add|ajout|create|cré|edit|modif|save|enregistr|suppr|delete|remove|retir|manage|gér|bulk|archive|valider|confirmer)/.test(marker);
   }
 
-  function applyReadonlyUi() {
+  function applyReadonlyUi(contextSnapshot = getPublicState()) {
     if (!document.body) return;
-    const readOnly = !canEditCurrentSelection();
+    const accessMode = contextSnapshot?.accessMode || getCurrentAccessMode();
+    const readOnly = accessMode !== "editable";
     document.body.dataset.gristServiceReadonly = String(readOnly);
+    document.body.dataset.gristServiceAccessMode = accessMode;
     document.querySelectorAll("button, input, select, textarea, [contenteditable]").forEach((element) => {
       if (!isWriteControl(element)) return;
       element.dataset.serviceWriteControl = "true";
+      element.dataset.serviceContextAccessMode = accessMode;
       if (readOnly) {
-        if ("disabled" in element && !element.disabled) {
+        if ("disabled" in element) {
+          if (element.dataset.serviceContextDisabled !== "true") {
+            element.dataset.serviceContextWasDisabled = String(Boolean(element.disabled));
+          }
           element.dataset.serviceContextDisabled = "true";
           element.disabled = true;
         }
         if (element.hasAttribute("contenteditable")) {
-          element.dataset.serviceContextContenteditable = element.getAttribute("contenteditable") || "true";
+          if (element.dataset.serviceContextContenteditable == null) {
+            element.dataset.serviceContextContenteditable = element.getAttribute("contenteditable") || "true";
+          }
           element.setAttribute("contenteditable", "false");
         }
+        element.setAttribute("aria-disabled", "true");
       } else {
         if (element.dataset.serviceContextDisabled === "true") {
-          element.disabled = false;
+          element.disabled = element.dataset.serviceContextWasDisabled === "true";
           delete element.dataset.serviceContextDisabled;
+          delete element.dataset.serviceContextWasDisabled;
         }
         if (element.dataset.serviceContextContenteditable != null) {
           element.setAttribute("contenteditable", element.dataset.serviceContextContenteditable);
           delete element.dataset.serviceContextContenteditable;
         }
+        element.removeAttribute("aria-disabled");
       }
     });
     if (!readonlyObserver) {
-      readonlyObserver = new MutationObserver(() => applyReadonlyUi());
+      readonlyObserver = new MutationObserver(() => applyReadonlyUi(getPublicState()));
       readonlyObserver.observe(document.body, { childList: true, subtree: true });
     }
   }
@@ -480,17 +713,17 @@
     ));
   }
 
-  function filterTableData(raw, tableName = "") {
+  function filterTableData(raw, tableName = "", contextSnapshot = getPublicState()) {
     const normalizedTableName = core.toText(tableName);
     if (normalizedTableName === core.PROJECTS_TABLE || (!normalizedTableName && looksLikeProjectsTable(raw))) {
-      return core.filterProjectsRaw(raw, state.projects);
+      return core.filterProjectsRaw(raw, contextSnapshot.allowedProjects);
     }
 
     const serviceFiltered = normalizedTableName
       ? (core.SERVICE_AWARE_TABLES.has(normalizedTableName)
-          ? core.filterRawTableByService(raw, state.selectedService)
+          ? core.filterRawTableByService(raw, contextSnapshot.selectedService)
           : raw)
-      : core.filterRawTableByService(raw, state.selectedService);
+      : core.filterRawTableByService(raw, contextSnapshot.selectedService);
     if (normalizedTableName && !core.SERVICE_AWARE_TABLES.has(normalizedTableName)) {
       return serviceFiltered;
     }
@@ -498,28 +731,88 @@
       return core.filterRawTableByProjectScope(
         serviceFiltered,
         normalizedTableName,
-        core.getProjectGrantScope(state.teamRow, state.selectedService, state.homeService)
+        core.getProjectScope(contextSnapshot.allowedProjects, contextSnapshot.allowedProjects)
       );
     }
     return core.filterRawTableByProject(
       serviceFiltered,
       normalizedTableName,
-      state.currentProject
+      contextSnapshot.currentProject
     );
   }
 
-  function filterRecords(records) {
-    return filterTableData(records, "");
+  function filterRecords(records, contextSnapshot = getPublicState()) {
+    return filterTableData(records, "", contextSnapshot);
   }
 
-  function subscribeToRecords(callback, ...args) {
+  function deliverRecordsToSubscriber(subscriber, reason, contextSnapshot = getPublicState()) {
+    if (latestRawRecords == null || !recordSubscribers.has(subscriber)) return Promise.resolve();
+    try {
+      const filteredRecords = filterRecords(latestRawRecords, contextSnapshot);
+      const delivery = {
+        reason,
+        generation: contextSnapshot.generation,
+        rawVersion: rawRecordsVersion,
+        context: {
+          ...contextSnapshot,
+          records: filteredRecords,
+        },
+      };
+      return Promise.resolve(subscriber(
+        filteredRecords,
+        latestRecordMappings,
+        delivery
+      )).catch((error) => {
+        console.error("Erreur abonné aux enregistrements Grist :", error);
+      });
+    } catch (error) {
+      console.error("Erreur abonné aux enregistrements Grist :", error);
+      return Promise.resolve();
+    }
+  }
+
+  function emitLatestRecords(reason = "context-change", contextSnapshot = getPublicState()) {
+    if (latestRawRecords == null) return Promise.resolve();
+    return Promise.all(
+      [...recordSubscribers].map((subscriber) => (
+        deliverRecordsToSubscriber(subscriber, reason, contextSnapshot)
+      ))
+    );
+  }
+
+  function ensureRecordsSubscription(args = []) {
+    if (recordsSubscriptionStarted) return recordsSubscription;
     const grist = getGrist();
     if (typeof grist?.onRecords !== "function") {
       throw new Error("API Grist onRecords indisponible.");
     }
-    return grist.onRecords((records, mappings) => (
-      initialize().then(() => callback(filterRecords(records), mappings))
-    ), ...args);
+    recordsSubscriptionStarted = true;
+    try {
+      recordsSubscription = grist.onRecords((records, mappings) => {
+        latestRawRecords = records;
+        latestRecordMappings = mappings;
+        const version = ++rawRecordsVersion;
+        initialize().then(() => {
+          if (version !== rawRecordsVersion) return;
+          return emitLatestRecords("records", getPublicState());
+        });
+      }, ...args);
+    } catch (error) {
+      recordsSubscriptionStarted = false;
+      throw error;
+    }
+    return recordsSubscription;
+  }
+
+  function subscribeToRecords(callback, ...args) {
+    if (typeof callback !== "function") return () => {};
+    recordSubscribers.add(callback);
+    // Les arguments supplémentaires sont les mappings Grist, jamais un nom de table.
+    ensureRecordsSubscription(args);
+    if (state.ready && latestRawRecords != null) {
+      deliverRecordsToSubscriber(callback, "subscribe", getPublicState());
+    }
+    return () => recordSubscribers.delete(callback);
   }
 
   function subscribeToRecord(callback, ...args) {
@@ -529,10 +822,106 @@
     }
     return grist.onRecord((record, mappings) => (
       initialize().then(() => {
-        const filtered = filterRecords(record ? [record] : []);
+        const snapshot = getPublicState();
+        const filtered = filterRecords(record ? [record] : [], snapshot);
         return callback(filtered[0] || null, mappings);
       })
     ), ...args);
+  }
+
+  function subscribeToServiceChanges(listener, { immediate = false } = {}) {
+    if (typeof listener !== "function") return () => {};
+
+    let initialized = state.ready && !immediate;
+    let previousService = state.ready ? state.selectedService : "";
+    const contextListener = (contextState) => {
+      const selectedService = core.normalizeService(contextState?.selectedService);
+      if (!initialized) {
+        initialized = true;
+        previousService = selectedService;
+        if (immediate) {
+          listener(contextState, { previousService: "", selectedService });
+        }
+        return;
+      }
+      if (selectedService === previousService) return;
+
+      const replacedService = previousService;
+      previousService = selectedService;
+      listener(contextState, {
+        previousService: replacedService,
+        selectedService,
+      });
+    };
+
+    listeners.add(contextListener);
+    if (state.ready) contextListener(getPublicState());
+    return () => listeners.delete(contextListener);
+  }
+
+  async function validateProtectedMutationTargets(actions, contextSnapshot) {
+    const targetsByTable = new Map();
+    (Array.isArray(actions) ? actions : []).forEach((action) => {
+      if (!core.isProtectedMutationAction(action)) return;
+      const recordIds = core.getMutationRecordIds(action);
+      if (!recordIds.length) return;
+      const tableName = core.toText(action?.[1]);
+      if (!targetsByTable.has(tableName)) targetsByTable.set(tableName, new Set());
+      recordIds.forEach((recordId) => targetsByTable.get(tableName).add(recordId));
+    });
+
+    const project = contextSnapshot?.currentProject;
+    const projectNames = Array.isArray(project?.names) ? project.names : [];
+    for (const [tableName, recordIds] of targetsByTable) {
+      const raw = await rawFetchTable(tableName);
+      const rowsById = new Map(
+        core.tableToRows(raw)
+          .filter((row) => Number(row?.id) > 0)
+          .map((row) => [Number(row.id), row])
+      );
+      for (const recordId of recordIds) {
+        const row = rowsById.get(recordId);
+        if (!row || !core.rowMatchesContext(row, tableName, {
+          selectedService: contextSnapshot?.selectedService,
+          projectNumber: project?.number || "",
+          projectName: project?.name || "",
+          projectNames,
+        })) {
+          throw new Error(
+            `La ligne ${recordId} de ${tableName} n'appartient pas au projet et au service sélectionnés.`
+          );
+        }
+      }
+    }
+  }
+
+  function signalAccessAssignmentsChanged(actions) {
+    if (!(actions || []).some(core.isAccessAssignmentMutationAction)) return;
+    invalidateAccessCache();
+    writeStorage(core.ACCESS_CHANGED_STORAGE_KEY, JSON.stringify({
+      version: core.ACCESS_SIGNAL_VERSION,
+      at: Date.now(),
+      sequence: ++accessSignalSequence,
+      source: "runtime",
+    }));
+    window.setTimeout(() => {
+      refresh({ forceRefresh: true }).catch((error) => console.warn(
+        "Actualisation des affectations projet impossible :",
+        error
+      ));
+    }, 0);
+  }
+
+  function projectCatalogIdentityChanged(actions) {
+    return (actions || []).some((action) => {
+      if (core.toText(action?.[1]) !== core.PROJECTS_TABLE) return false;
+      if (["AddRecord", "BulkAddRecord", "RemoveRecord", "BulkRemoveRecord"].includes(action?.[0])) {
+        return true;
+      }
+      const fields = action?.[3] || {};
+      return ["Numero_de_projet", "NumeroProjet", "Numero", "Nom_de_projet", "NomProjet"]
+        .some((column) => Object.prototype.hasOwnProperty.call(fields, column));
+    });
   }
 
   function patchGristApi() {
@@ -545,25 +934,47 @@
       rawApplyUserActions = docApi.applyUserActions?.bind(docApi) || null;
       docApi.fetchTable = async function serviceAwareFetchTable(tableName) {
         await initialize();
-        const raw = await rawFetchTable(tableName);
-        return filterTableData(raw, tableName);
+        const snapshot = getPublicState();
+        const raw = await fetchRawTableCached(tableName);
+        return filterTableData(raw, tableName, snapshot);
       };
       if (rawApplyUserActions) {
         docApi.applyUserActions = async function serviceAwareApplyUserActions(actions) {
           await initialize();
+          const snapshot = getPublicState();
           const hasProtectedMutation = (actions || []).some(core.isProtectedMutationAction);
-          if (hasProtectedMutation && !canEditCurrentSelection()) {
-            const mode = getCurrentAccessMode();
+          if (hasProtectedMutation && snapshot.accessMode !== "editable") {
+            const mode = snapshot.accessMode;
             throw new Error(mode === "hidden"
               ? "Aucun projet autorisé n'est sélectionné."
-              : `Le service ${state.selectedService || "sélectionné"} est accessible en lecture seule.`);
+              : `Le service ${snapshot.selectedService || "sélectionné"} est accessible en lecture seule.`);
           }
-          const project = resolveCurrentProject();
-          return rawApplyUserActions(core.transformActions(actions, {
-            selectedService: state.selectedService,
+          const project = snapshot.currentProject;
+          await validateProtectedMutationTargets(actions, snapshot);
+          if (snapshot.generation !== selectionGeneration) {
+            throw new Error("Le projet ou le service a changé pendant l'écriture. Veuillez recommencer.");
+          }
+          const transformedActions = core.transformActions(actions, {
+            selectedService: snapshot.selectedService,
             projectNumber: project?.number || "",
             projectName: project?.name || "",
-          }));
+          });
+          const result = await rawApplyUserActions(transformedActions);
+          (actions || []).forEach((action) => {
+            const tableName = core.toText(action?.[1]);
+            if (ACCESS_TABLES.has(tableName)) invalidateRawTableCache(tableName);
+          });
+          signalAccessAssignmentsChanged(actions);
+          if (projectCatalogIdentityChanged(actions)) {
+            invalidateAccessCache();
+            window.setTimeout(() => {
+              refresh({ forceRefresh: true }).catch((error) => console.warn(
+                "Actualisation du catalogue projets impossible :",
+                error
+              ));
+            }, 0);
+          }
+          return result;
         };
       }
       Object.defineProperty(docApi, "__serviceContextPatched", { value: true });
@@ -584,6 +995,17 @@
   window.GristServiceContext = Object.freeze({
     whenReady: initialize,
     refresh,
+    selectProject,
+    selectService,
+    invalidateCache(tableName) {
+      const normalizedTableName = core.toText(tableName);
+      if (!ACCESS_TABLES.has(normalizedTableName)) return;
+      if (normalizedTableName === "Team" || normalizedTableName === core.PROJECT_TEAM_TABLE) {
+        invalidateAccessCache();
+      } else {
+        invalidateRawTableCache(normalizedTableName);
+      }
+    },
     getState: getPublicState,
     getService: () => state.selectedService || core.normalizeService(readStorage(core.SERVICE_STORAGE_KEY)),
     getHomeService: () => state.homeService,
@@ -594,6 +1016,7 @@
     isReadOnly: () => !canEditCurrentSelection(),
     onRecords: subscribeToRecords,
     onRecord: subscribeToRecord,
+    onServiceChange: subscribeToServiceChanges,
     subscribe(listener) {
       if (typeof listener !== "function") return () => {};
       listeners.add(listener);
@@ -607,52 +1030,47 @@
     const target = event.target;
     if (!(target instanceof HTMLSelectElement)) return;
     if (!target.matches("#firstColumnDropdown, #projectDropdown, #ps-project-select, #project-select")) return;
-    window.setTimeout(() => {
-      const selectedValue = core.toText(target.value);
-      const normalizedNumber = core.normalizeProjectNumber(selectedValue);
-      const normalizedName = selectedValue.toLocaleLowerCase("fr");
-      const selectedProject = state.projects.find((project) => (
-        project.number === normalizedNumber ||
-        project.name.toLocaleLowerCase("fr") === normalizedName ||
-        String(project.id) === selectedValue
-      )) || null;
-      persistCurrentProject(selectedProject);
-      const previousService = state.selectedService;
-      reconcileSelection();
-      mountSelector();
-      applyReadonlyUi();
-      notify();
-      if (previousService && previousService !== state.selectedService) scheduleReload();
-    }, 0);
-  });
+    if (target.dataset.gristProjectController === "true") return;
+    const selectedValue = core.toText(target.value);
+    if (!selectedValue) return;
+    selectProject(selectedValue, { reason: "widget-selector" }).catch((error) => {
+      console.warn("Changement de projet impossible :", error);
+    });
+  }, true);
   window.addEventListener("storage", (event) => {
-    if (event.key === "grist.service-grants-changed") {
-      refresh().catch((error) => console.warn("Actualisation des autorisations impossible :", error));
+    if (event.key === core.ACCESS_CHANGED_STORAGE_KEY) {
+      invalidateAccessCache();
+      refresh({ forceRefresh: true }).catch((error) => console.warn(
+        "Actualisation des autorisations impossible :",
+        error
+      ));
       return;
     }
     if (event.key === core.SERVICE_STORAGE_KEY) {
       const nextService = core.normalizeService(event.newValue);
-      if (nextService && nextService !== state.selectedService) scheduleReload();
+      if (nextService && nextService !== state.selectedService) {
+        selectService(nextService, { persist: false, reason: "storage" }).catch(() => {});
+      }
       return;
     }
     if ([core.PROJECT_STORAGE_KEY, core.PROJECT_ID_STORAGE_KEY].includes(event.key)) {
-      window.setTimeout(() => {
-        const previousService = state.selectedService;
-        const previousProject = state.currentProject?.number || "";
-        reconcileSelection();
-        mountSelector();
-        applyReadonlyUi();
-        notify();
-        if (
-          previousService !== state.selectedService ||
-          previousProject !== (state.currentProject?.number || "")
-        ) scheduleReload();
+      window.clearTimeout(storageSelectionTimer);
+      storageSelectionTimer = window.setTimeout(() => {
+        storageSelectionTimer = 0;
+        selectProject({
+          projectId: readStorage(core.PROJECT_ID_STORAGE_KEY),
+          projectName: readStorage(core.PROJECT_STORAGE_KEY),
+          projectNumber: readStorage(core.PROJECT_STORAGE_KEY),
+        }, { persist: false, reason: "storage" }).catch(() => {});
       }, 0);
     }
   });
   window.addEventListener("focus", () => {
-    if (state.ready) {
-      refresh().catch((error) => console.warn("Actualisation du contexte Service impossible :", error));
+    if (state.ready && (accessCacheInvalidated || !isFreshTimestamp(accessLoadedAt))) {
+      refresh({ forceRefresh: false }).catch((error) => console.warn(
+        "Actualisation du contexte Service impossible :",
+        error
+      ));
     }
   });
   if (document.readyState === "loading") {

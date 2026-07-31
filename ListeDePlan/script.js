@@ -30,17 +30,19 @@
 
   function saveLastSelection({ projectLabel, projectId, typeLabel }) {
     try {
-      if (projectLabel) localStorage.setItem(LS_KEYS.SHARED_PROJECT_LABEL, projectLabel);
-      if (projectLabel === "") localStorage.removeItem(LS_KEYS.SHARED_PROJECT_LABEL);
+      if (projectLabel) {
+        void window.GristServiceContext.selectProject({
+          projectId,
+          projectName: projectLabel,
+        }).catch(() => {});
+      }
       if (projectLabel) localStorage.setItem(LS_KEYS.PROJECT_LABEL, projectLabel);
       if (projectLabel === "") {
         localStorage.removeItem(LS_KEYS.PROJECT_LABEL);
         localStorage.removeItem(LS_KEYS.PROJECT_ID);
-        localStorage.removeItem(LS_KEYS.SHARED_PROJECT_ID);
       }
       if (projectId != null) {
         localStorage.setItem(LS_KEYS.PROJECT_ID, String(projectId));
-        localStorage.setItem(LS_KEYS.SHARED_PROJECT_ID, String(projectId));
       }
       if (typeLabel) localStorage.setItem(LS_KEYS.TYPE_LABEL, typeLabel);
     } catch {}

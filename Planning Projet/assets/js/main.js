@@ -59,6 +59,7 @@ let toolbarBound = false;
 let pendingRefreshOptions = null;
 let refreshQueuePromise = null;
 let resolveRefreshQueue = null;
+let planningServiceRefreshBound = false;
 let cachedPlanningRows = null;
 let cachedProjectAvancementConfigs = [];
 let cachedRealisationTargetLookup = null;
@@ -1473,6 +1474,20 @@ function bindPlanningLifecycleRefresh() {
   });
 }
 
+function bindPlanningServiceRefresh() {
+  if (planningServiceRefreshBound || HEADER_ONLY_EMBEDDED_MODE) return;
+  const serviceContext = window.GristServiceContext;
+  if (typeof serviceContext?.onServiceChange !== "function") return;
+
+  planningServiceRefreshBound = true;
+  serviceContext.onServiceChange(() => {
+    void refreshPlanning({
+      forceLoad: true,
+      reason: "service-change",
+    });
+  });
+}
+
 async function handleProjectChange(currentState) {
   console.log("Projet sélectionné :", currentState.selectedProject || "(aucun)");
   await refreshPlanning({ sync: true, forceLoad: true, reason: "project-change" });
@@ -1541,6 +1556,7 @@ async function bootstrap() {
       emitInitialChange: false,
     });
     bindPlanningLifecycleRefresh();
+    bindPlanningServiceRefresh();
 
     await refreshPlanning({
       sync: true,

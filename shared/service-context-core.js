@@ -13,12 +13,11 @@
   const SERVICE_STORAGE_KEY = "grist.selected-service";
   const PROJECT_STORAGE_KEY = "grist.selected-project";
   const PROJECT_ID_STORAGE_KEY = "grist.selected-project-id";
+  const ACCESS_CHANGED_STORAGE_KEY = "grist.project-access-changed";
+  const ACCESS_SIGNAL_VERSION = 2;
+  const ACCESS_COLUMN = "Projets_Access";
+  const PROJECT_TEAM_TABLE = "ProjectTeam";
   const LEGACY_DEFAULT_SERVICE = "Structure";
-  const GRANT_COLUMNS = Object.freeze({
-    Structure: "Projets_Lecture_Structure",
-    Synthese: "Projets_Lecture_Synthese",
-    Topographie: "Projets_Lecture_Topographie",
-  });
   const PROJECTS_TABLE = "Projets2";
   const PROJECT_NAME_COLUMNS = Object.freeze({
     References2: "NomProjet",
@@ -70,10 +69,200 @@
 
   function normalizeService(value) {
     const normalized = toText(value)
+      .replace(/[\u200B-\u200D\uFEFF]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toLocaleLowerCase("fr");
-    return SERVICES.find((service) => service.toLocaleLowerCase("fr") === normalized) || "";
+    return SERVICES.find((service) => (
+      service.normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLocaleLowerCase("fr") === normalized
+    )) || "";
+  }
+
+  function normalizeProjectNameKey(value) {
+    return toText(value)
+      .replace(/[\u200B-\u200D\uFEFF]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLocaleLowerCase("fr");
+  }
+
+  function normalizePersonName(value) {
+    return toText(value)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLocaleLowerCase("fr")
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function getTeamDisplayName(row) {
+    return toText(row?.PrenomNom) ||
+      [toText(row?.Prenom), toText(row?.Nom)].filter(Boolean).join(" ") ||
+      toText(row?.Name) ||
+      toText(row?.Email) ||
+      (Number(row?.id) > 0 ? `Ligne Team ${row.id}` : "Personne inconnue");
+  }
+
+  function getTeamFullNameAliases(row) {
+    const aliases = new Set();
+    const add = (value) => {
+      const normalized = normalizePersonName(value);
+      if (normalized) aliases.add(normalized);
+    };
+    add(row?.PrenomNom);
+    add([toText(row?.Prenom), toText(row?.Nom)].filter(Boolean).join(" "));
+    add(row?.Name);
+    return aliases;
+  }
+
+  function getTeamPersonIdentity(row) {
+    const nameIdentity = normalizePersonName(
+      toText(row?.PrenomNom) ||
+      [toText(row?.Prenom), toText(row?.Nom)].filter(Boolean).join(" ") ||
+      toText(row?.Name)
+    );
+    if (nameIdentity) return `name:${nameIdentity}`;
+    const email = toText(row?.Email).toLocaleLowerCase("en-US");
+    if (email) return `email:${email}`;
+    const id = Number(row?.id);
+    return id > 0 ? `team:${id}` : "";
+  }
+
+  function groupTeamPeople(teamRows) {
+    const groups = new Map();
+    (Array.isArray(teamRows) ? teamRows : [])
+      .filter((row) => Number(row?.id) > 0)
+      .forEach((row) => {
+        const personKey = getTeamPersonIdentity(row);
+        if (!personKey) return;
+        const group = groups.get(personKey) || {
+          personKey,
+          personName: getTeamDisplayName(row),
+          teamRows: [],
+          teamIds: [],
+          emails: [],
+          services: [],
+        };
+        group.teamRows.push(row);
+        group.teamIds.push(Number(row.id));
+        const email = toText(row?.Email).toLocaleLowerCase("en-US");
+        const service = normalizeService(row?.Service);
+        if (email && !group.emails.includes(email)) group.emails.push(email);
+        if (service && !group.services.includes(service)) group.services.push(service);
+        groups.set(personKey, group);
+      });
+    return [...groups.values()].sort((left, right) => left.personName.localeCompare(
+      right.personName,
+      "fr",
+      { sensitivity: "base" }
+    ));
+  }
+
+  function getEquivalentTeamRows(teamRow, teamRows) {
+    const identity = getTeamPersonIdentity(teamRow);
+    if (!identity) return teamRow ? [teamRow] : [];
+    const matches = (Array.isArray(teamRows) ? teamRows : [])
+      .filter((row) => getTeamPersonIdentity(row) === identity);
+    return matches.length ? matches : (teamRow ? [teamRow] : []);
+  }
+
+  function resolveTeamPerson(personName, teamRows) {
+    const normalizedName = normalizePersonName(personName);
+    const rows = (Array.isArray(teamRows) ? teamRows : [])
+      .filter((row) => Number(row?.id) > 0);
+    if (!normalizedName) {
+      return {
+        status: "unmatched",
+        normalizedName,
+        teamRow: null,
+        teamRows: [],
+        candidates: [],
+      };
+    }
+
+    const fullMatches = rows.filter((row) => getTeamFullNameAliases(row).has(normalizedName));
+    if (fullMatches.length) {
+      return {
+        status: "matched",
+        normalizedName,
+        teamRow: fullMatches[0],
+        teamRows: fullMatches,
+        candidates: fullMatches,
+        matchKind: fullMatches.length > 1 ? "duplicate-full-name" : "full-name",
+      };
+    }
+
+    const firstNameMatches = rows.filter(
+      (row) => normalizePersonName(row?.Prenom) === normalizedName
+    );
+    const firstNameGroups = groupTeamPeople(firstNameMatches);
+    if (firstNameGroups.length === 1) {
+      return {
+        status: "matched",
+        normalizedName,
+        teamRow: firstNameGroups[0].teamRows[0],
+        teamRows: firstNameGroups[0].teamRows,
+        candidates: firstNameMatches,
+        matchKind: "unique-first-name",
+      };
+    }
+    return {
+      status: firstNameMatches.length > 1 ? "ambiguous" : "unmatched",
+      normalizedName,
+      teamRow: null,
+      teamRows: [],
+      candidates: firstNameMatches,
+      matchKind: firstNameMatches.length ? "first-name" : "",
+    };
+  }
+
+  function getTeamReferenceId(value) {
+    if (typeof value === "number" && Number.isInteger(value) && value > 0) return value;
+    if (Array.isArray(value) && ["R", "r"].includes(value[0])) {
+      const id = Number(value[1]);
+      return Number.isInteger(id) && id > 0 ? id : null;
+    }
+    if (value && typeof value === "object") {
+      const id = Number(value.id ?? value.rowId ?? value.recordId);
+      return Number.isInteger(id) && id > 0 ? id : null;
+    }
+    return null;
+  }
+
+  function resolveTeamPersonValue(value, teamRows) {
+    const referenceId = getTeamReferenceId(value);
+    if (referenceId) {
+      const matches = (Array.isArray(teamRows) ? teamRows : [])
+        .filter((row) => Number(row?.id) === referenceId);
+      const equivalentRows = matches.length === 1
+        ? getEquivalentTeamRows(matches[0], teamRows)
+        : [];
+      return matches.length === 1
+        ? {
+            status: "matched",
+            normalizedName: "",
+            teamRow: matches[0],
+            teamRows: equivalentRows,
+            candidates: equivalentRows,
+            matchKind: "team-reference",
+          }
+        : {
+            status: "unmatched",
+            normalizedName: "",
+            teamRow: null,
+            teamRows: [],
+            candidates: [],
+            matchKind: "team-reference",
+          };
+    }
+    return resolveTeamPerson(value, teamRows);
   }
 
   function isTruthy(value) {
@@ -81,7 +270,7 @@
     return ["true", "1", "oui", "yes", "x"].includes(toText(value).toLocaleLowerCase("fr"));
   }
 
-  function parseGrants(rawValue) {
+  function parseProjectAccess(rawValue) {
     const grantsByIdentity = new Map();
     toText(rawValue)
       .replace(/\r\n?/g, "\n")
@@ -100,7 +289,7 @@
     return [...grantsByIdentity.values()];
   }
 
-  function serializeGrants(grants) {
+  function serializeProjectAccess(grants) {
     const byIdentity = new Map();
     (Array.isArray(grants) ? grants : []).forEach((grant) => {
       const projectNumber = normalizeProjectNumber(grant?.projectNumber);
@@ -121,11 +310,6 @@
       }))
       .map(({ projectNumber, projectName }) => `${projectNumber}|${projectName}`)
       .join("\n");
-  }
-
-  function hasProjectGrant(rawValue, projectNumber) {
-    const expected = normalizeProjectNumber(projectNumber);
-    return Boolean(expected) && parseGrants(rawValue).some((grant) => grant.projectNumber === expected);
   }
 
   function getProjectNumber(project) {
@@ -149,6 +333,32 @@
     );
   }
 
+  function groupProjectsByNumber(rawProjects) {
+    const groups = new Map();
+    tableToRows(rawProjects).forEach((row) => {
+      const id = Number(row?.id);
+      const number = getProjectNumber(row);
+      const name = getProjectName(row);
+      if (!number) return;
+      const group = groups.get(number) || {
+        id: id > 0 ? id : null,
+        ids: [],
+        number,
+        name: "",
+        names: [],
+      };
+      if (id > 0 && !group.ids.includes(id)) group.ids.push(id);
+      if (name && !group.names.includes(name)) group.names.push(name);
+      if (!group.name && name) group.name = name;
+      groups.set(number, group);
+    });
+    return [...groups.values()].sort((left, right) => left.number.localeCompare(
+      right.number,
+      "fr",
+      { numeric: true, sensitivity: "base" }
+    ));
+  }
+
   function dedupeProjectsByNumber(projects) {
     const seen = new Set();
     return (Array.isArray(projects) ? projects : []).filter((project) => {
@@ -159,23 +369,76 @@
     });
   }
 
-  function getGrantedProjectNumbers(teamRow) {
+  function resolveProjectTeamRows(teamRows, projectTeamRows) {
+    const matched = [];
+    const unresolved = [];
+    (Array.isArray(projectTeamRows) ? projectTeamRows : []).forEach((row) => {
+      const projectNumber = normalizeProjectNumber(
+        row?.NumeroProjet ?? row?.Numero_de_projet ?? row?.Numero
+      );
+      const personValue = row?.Name ?? row?.PrenomNom ?? row?.Personne;
+      const resolution = resolveTeamPersonValue(personValue, teamRows);
+      const personName = resolution.status === "matched"
+        ? getTeamDisplayName(resolution.teamRow)
+        : toText(personValue);
+      if (!projectNumber || !personName) return;
+      const entry = {
+        projectNumber,
+        personName,
+        role: toText(row?.Role),
+        projectTeamRow: row,
+        projectTeamRowId: Number(row?.id) > 0 ? Number(row.id) : null,
+        resolutionStatus: resolution.status,
+        matchKind: resolution.matchKind || "",
+      };
+      if (resolution.status === "matched") {
+        (resolution.teamRows || [resolution.teamRow]).forEach((matchedTeamRow) => {
+          matched.push({
+            ...entry,
+            teamId: Number(matchedTeamRow.id),
+            teamRow: matchedTeamRow,
+          });
+        });
+      } else {
+        unresolved.push({
+          ...entry,
+          candidates: resolution.candidates.map((candidate) => ({
+            id: Number(candidate.id),
+            name: getTeamDisplayName(candidate),
+          })),
+        });
+      }
+    });
+    return { matched, unresolved };
+  }
+
+  function getEffectiveProjectNumbers(teamRow, {
+    teamRows = [],
+    projectTeamRows = [],
+  } = {}) {
+    const equivalentRows = getEquivalentTeamRows(teamRow, teamRows);
+    const teamIds = new Set(equivalentRows.map((row) => Number(row?.id)).filter((id) => id > 0));
     const numbers = new Set();
-    SERVICES.forEach((service) => {
-      parseGrants(teamRow?.[GRANT_COLUMNS[service]]).forEach((grant) => {
+    equivalentRows.forEach((row) => {
+      parseProjectAccess(row?.[ACCESS_COLUMN]).forEach((grant) => {
         numbers.add(grant.projectNumber);
       });
     });
+    if (teamIds.size) {
+      resolveProjectTeamRows(teamRows, projectTeamRows).matched.forEach((assignment) => {
+        if (teamIds.has(assignment.teamId)) numbers.add(assignment.projectNumber);
+      });
+    }
     return numbers;
   }
 
-  function getAllowedProjects(teamRow, projects) {
+  function getAllowedProjects(teamRow, projects, context = {}) {
     const homeService = normalizeService(teamRow?.Service);
     if (!homeService) return [];
-    const uniqueProjects = dedupeProjectsByNumber(projects);
-    if (homeService === "Structure") return uniqueProjects;
-    const grantedNumbers = getGrantedProjectNumbers(teamRow);
-    return uniqueProjects.filter((project) => grantedNumbers.has(getProjectNumber(project)));
+    if (isAdminTeamRow(teamRow)) return dedupeProjectsByNumber(projects);
+    const allowedNumbers = getEffectiveProjectNumbers(teamRow, context);
+    return dedupeProjectsByNumber(projects)
+      .filter((project) => allowedNumbers.has(getProjectNumber(project)));
   }
 
   function selectAllowedProject(projects, {
@@ -186,7 +449,10 @@
     const allowedProjects = Array.isArray(projects) ? projects : [];
     const expectedId = Number(projectId);
     if (Number.isInteger(expectedId) && expectedId > 0) {
-      const byId = allowedProjects.find((project) => Number(project?.id) === expectedId);
+      const byId = allowedProjects.find((project) => (
+        Number(project?.id) === expectedId ||
+        (Array.isArray(project?.ids) && project.ids.map(Number).includes(expectedId))
+      ));
       if (byId) return byId;
     }
     const expectedNumber = normalizeProjectNumber(projectNumber);
@@ -197,7 +463,12 @@
     const expectedName = toText(projectName).toLocaleLowerCase("fr");
     if (expectedName) {
       const byName = allowedProjects.find(
-        (project) => getProjectName(project).toLocaleLowerCase("fr") === expectedName
+        (project) => (
+          getProjectName(project).toLocaleLowerCase("fr") === expectedName ||
+          (Array.isArray(project?.names) && project.names.some(
+            (name) => toText(name).toLocaleLowerCase("fr") === expectedName
+          ))
+        )
       );
       if (byName) return byName;
     }
@@ -221,72 +492,127 @@
     return null;
   }
 
-  function getAllowedServices(teamRow, projectNumber) {
+  function getAllowedServices(teamRow, projectNumber, context = {}) {
     const homeService = normalizeService(teamRow?.Service);
     const normalizedNumber = normalizeProjectNumber(projectNumber);
     if (!homeService || !normalizedNumber) return [];
-
-    const allowed = new Set();
-    if (homeService === "Structure") allowed.add("Structure");
-    SERVICES.forEach((service) => {
-      if (hasProjectGrant(teamRow?.[GRANT_COLUMNS[service]], normalizedNumber)) {
-        allowed.add(service);
-      }
-    });
-    return SERVICES.filter((service) => allowed.has(service));
+    return (isAdminTeamRow(teamRow) || getEffectiveProjectNumbers(teamRow, context).has(normalizedNumber))
+      ? [...SERVICES]
+      : [];
   }
 
-  function getAllowedServicesForProjects(teamRow, projects) {
+  function getAllowedServicesForProjects(teamRow, projects, context = {}) {
     const homeService = normalizeService(teamRow?.Service);
-    const allowedProjects = getAllowedProjects(teamRow, projects);
-    if (!homeService || !allowedProjects.length) return [];
-    const allowedNumbers = new Set(allowedProjects.map(getProjectNumber));
-    const allowed = new Set();
-    if (homeService === "Structure") allowed.add("Structure");
-    SERVICES.forEach((service) => {
-      const hasAllowedGrant = parseGrants(teamRow?.[GRANT_COLUMNS[service]])
-        .some((grant) => allowedNumbers.has(grant.projectNumber));
-      if (hasAllowedGrant) allowed.add(service);
-    });
-    return SERVICES.filter((service) => allowed.has(service));
+    if (!homeService || !getAllowedProjects(teamRow, projects, context).length) return [];
+    return [...SERVICES];
   }
 
-  function canEditCurrentContext(teamRow, projectNumber, selectedService) {
+  function canEditCurrentContext(teamRow, projectNumber, selectedService, context = {}) {
     const homeService = normalizeService(teamRow?.Service);
     const service = normalizeService(selectedService);
     const normalizedNumber = normalizeProjectNumber(projectNumber);
     if (!homeService || !service || !normalizedNumber || service !== homeService) return false;
-    if (homeService === "Structure") return true;
-    return hasProjectGrant(teamRow?.[GRANT_COLUMNS[service]], normalizedNumber);
+    return isAdminTeamRow(teamRow) || getEffectiveProjectNumbers(teamRow, context).has(normalizedNumber);
   }
 
-  function getProjectAccessMode(teamRow, projectNumber, selectedService) {
+  function getProjectAccessMode(teamRow, projectNumber, selectedService, context = {}) {
     const service = normalizeService(selectedService);
     const normalizedNumber = normalizeProjectNumber(projectNumber);
     if (!service || !normalizedNumber) return "hidden";
-    if (!getAllowedServices(teamRow, normalizedNumber).includes(service)) return "hidden";
-    return canEditCurrentContext(teamRow, normalizedNumber, service) ? "editable" : "readonly";
+    if (!getAllowedServices(teamRow, normalizedNumber, context).includes(service)) return "hidden";
+    return canEditCurrentContext(teamRow, normalizedNumber, service, context)
+      ? "editable"
+      : "readonly";
   }
 
-  function getProjectGrantScope(teamRow, selectedService, homeService) {
-    const selected = normalizeService(selectedService);
-    const home = normalizeService(homeService || teamRow?.Service);
-    if (!teamRow || !selected || !home) return { numbers: new Set(), names: new Set() };
-    if (home === "Structure" && selected === "Structure") return null;
-
-    const grantColumn = GRANT_COLUMNS[selected];
-    const grants = parseGrants(teamRow?.[grantColumn]);
+  function getProjectScope(projects, catalogProjects = projects) {
+    const safeProjects = Array.isArray(projects) ? projects : [];
+    const allowedNumbers = new Set(safeProjects.map(getProjectNumber).filter(Boolean));
+    const names = new Set();
+    (Array.isArray(catalogProjects) ? catalogProjects : []).forEach((project) => {
+      if (!allowedNumbers.has(getProjectNumber(project))) return;
+      const projectNames = Array.isArray(project?.names)
+        ? project.names
+        : [getProjectName(project)];
+      projectNames.map(toText).filter(Boolean).forEach((name) => names.add(name));
+    });
     return {
-      numbers: new Set(grants.map((grant) => grant.projectNumber)),
-      names: new Set(grants.map((grant) => grant.projectName).filter(Boolean)),
+      numbers: allowedNumbers,
+      names,
     };
   }
 
-  function getExternalProjectGrantScope(teamRow, selectedService, homeService) {
-    const selected = normalizeService(selectedService);
-    const home = normalizeService(homeService || teamRow?.Service);
-    if (!teamRow || !selected || selected === home) return null;
-    return getProjectGrantScope(teamRow, selected, home);
+  function getProjectAssignees(teamRows, projectTeamRows, projectNumber) {
+    const expectedNumber = normalizeProjectNumber(projectNumber);
+    const rows = (Array.isArray(teamRows) ? teamRows : []).filter((row) => Number(row?.id) > 0);
+    const resolved = resolveProjectTeamRows(rows, projectTeamRows);
+    const peopleByKey = new Map(groupTeamPeople(rows).map((person) => [person.personKey, person]));
+    const byPersonKey = new Map();
+    const ensure = (teamRow) => {
+      const personKey = getTeamPersonIdentity(teamRow);
+      const person = peopleByKey.get(personKey) || {
+        personKey,
+        personName: getTeamDisplayName(teamRow),
+        teamRows: [teamRow],
+        teamIds: [Number(teamRow.id)],
+        emails: [toText(teamRow?.Email)].filter(Boolean),
+        services: [normalizeService(teamRow?.Service)].filter(Boolean),
+      };
+      if (!byPersonKey.has(personKey)) {
+        byPersonKey.set(personKey, {
+          personKey,
+          teamId: person.teamIds[0],
+          teamIds: [...person.teamIds],
+          teamRow: person.teamRows[0],
+          teamRows: [...person.teamRows],
+          emails: [...person.emails],
+          personName: person.personName,
+          homeService: person.services.length === 1 ? person.services[0] : "",
+          homeServices: [...person.services],
+          sources: new Set(),
+          roles: new Set(),
+          projectTeamRows: [],
+          projectTeamRowIds: new Set(),
+        });
+      }
+      return byPersonKey.get(personKey);
+    };
+
+    rows.forEach((teamRow) => {
+      if (parseProjectAccess(teamRow?.[ACCESS_COLUMN])
+        .some((grant) => grant.projectNumber === expectedNumber)) {
+        ensure(teamRow).sources.add("manual");
+      }
+    });
+    resolved.matched
+      .filter((assignment) => assignment.projectNumber === expectedNumber)
+      .forEach((assignment) => {
+        const assignee = ensure(assignment.teamRow);
+        assignee.sources.add("project-team");
+        if (assignment.role) assignee.roles.add(assignment.role);
+        const rowIdentity = assignment.projectTeamRowId || assignment.projectTeamRow;
+        if (!assignee.projectTeamRowIds.has(rowIdentity)) {
+          assignee.projectTeamRowIds.add(rowIdentity);
+          assignee.projectTeamRows.push(assignment.projectTeamRow);
+        }
+      });
+
+    const assignees = [...byPersonKey.values()].map((assignee) => {
+      const { projectTeamRowIds: _projectTeamRowIds, ...publicAssignee } = assignee;
+      return {
+        ...publicAssignee,
+        sources: [...assignee.sources].sort(),
+        roles: [...assignee.roles].sort((left, right) => left.localeCompare(right, "fr")),
+      };
+    }).sort((left, right) => left.personName.localeCompare(right.personName, "fr", {
+      sensitivity: "base",
+    }));
+    return {
+      assignees,
+      unresolved: resolved.unresolved.filter(
+        (assignment) => assignment.projectNumber === expectedNumber
+      ),
+    };
   }
 
   function tableToRows(raw) {
@@ -336,7 +662,7 @@
   }
 
   function filterRawTableByService(raw, selectedService, {
-    legacyDefaultService = LEGACY_DEFAULT_SERVICE,
+    legacyDefaultService = "",
   } = {}) {
     const expectedService = normalizeService(selectedService);
     if (!expectedService) {
@@ -415,14 +741,18 @@
     const normalizedTableName = toText(tableName);
     if (normalizedTableName === "Emetteurs") return raw;
     const projectNumber = getProjectNumber(project);
-    const projectName = getProjectName(project);
-    if (!projectNumber && !projectName) {
+    const projectNames = new Set(
+      (Array.isArray(project?.names) ? project.names : [getProjectName(project)])
+        .map(normalizeProjectNameKey)
+        .filter(Boolean)
+    );
+    if (!projectNumber && !projectNames.size) {
       return filterRawTable(raw, () => false);
     }
     return filterRawTable(raw, (row) => {
       const identity = getRowProjectIdentity(row, normalizedTableName);
       if (identity.kind === "number") return Boolean(projectNumber) && identity.value === projectNumber;
-      if (identity.kind === "name") return Boolean(projectName) && identity.value === projectName;
+      if (identity.kind === "name") return projectNames.has(normalizeProjectNameKey(identity.value));
       return !PROJECT_AWARE_TABLES.has(normalizedTableName);
     });
   }
@@ -431,10 +761,13 @@
     const normalizedTableName = toText(tableName);
     if (normalizedTableName === "Emetteurs" || scope === null) return raw;
     const safeScope = scope || { numbers: new Set(), names: new Set() };
+    const normalizedNames = new Set(
+      [...(safeScope.names || [])].map(normalizeProjectNameKey).filter(Boolean)
+    );
     return filterRawTable(raw, (row) => {
       const identity = getRowProjectIdentity(row, normalizedTableName);
       if (identity.kind === "number") return safeScope.numbers.has(identity.value);
-      if (identity.kind === "name") return safeScope.names.has(identity.value);
+      if (identity.kind === "name") return normalizedNames.has(normalizeProjectNameKey(identity.value));
       return !PROJECT_AWARE_TABLES.has(normalizedTableName);
     });
   }
@@ -532,6 +865,54 @@
     return tableName === PROJECTS_TABLE || SERVICE_AWARE_TABLES.has(tableName);
   }
 
+  function isAccessAssignmentMutationAction(action) {
+    if (!isMutationAction(action)) return false;
+    const tableName = toText(action?.[1]);
+    if (tableName === PROJECT_TEAM_TABLE) return true;
+    if (tableName !== "Team") return false;
+    const fields = action?.[3] || {};
+    return Object.prototype.hasOwnProperty.call(fields, ACCESS_COLUMN);
+  }
+
+  function getMutationRecordIds(action) {
+    if (!Array.isArray(action)) return [];
+    if (["UpdateRecord", "RemoveRecord"].includes(action[0])) {
+      const id = Number(action[2]);
+      return id > 0 ? [id] : [];
+    }
+    if (["BulkUpdateRecord", "BulkRemoveRecord"].includes(action[0])) {
+      return (Array.isArray(action[2]) ? action[2] : [])
+        .map(Number)
+        .filter((id) => id > 0);
+    }
+    return [];
+  }
+
+  function rowMatchesContext(row, tableName, {
+    selectedService,
+    projectNumber,
+    projectName,
+    projectNames = [],
+  } = {}) {
+    const normalizedTableName = toText(tableName);
+    const expectedNumber = normalizeProjectNumber(projectNumber);
+    if (!row || !expectedNumber) return false;
+    if (normalizedTableName === PROJECTS_TABLE) {
+      return getProjectNumber(row) === expectedNumber;
+    }
+    if (!SERVICE_AWARE_TABLES.has(normalizedTableName)) return true;
+    if (normalizeService(row?.Service) !== normalizeService(selectedService)) return false;
+    if (normalizedTableName === "Emetteurs") return true;
+
+    const identity = getRowProjectIdentity(row, normalizedTableName);
+    if (identity.kind === "number") return identity.value === expectedNumber;
+    if (identity.kind === "name") {
+      const allowedNames = new Set([projectName, ...projectNames].map(toText).filter(Boolean));
+      return allowedNames.has(identity.value);
+    }
+    return !PROJECT_AWARE_TABLES.has(normalizedTableName);
+  }
+
   function assertContextValue(actualValue, expectedValue, normalize, label) {
     const actual = normalize(actualValue);
     if (actual && actual !== expectedValue) {
@@ -545,6 +926,17 @@
     projectName,
   }) {
     const fields = { ...(sourceFields || {}) };
+    if (tableName === PROJECTS_TABLE) {
+      if (projectNumber) {
+        ["Numero_de_projet", "NumeroProjet", "Numero"].forEach((column) => {
+          if (Object.prototype.hasOwnProperty.call(fields, column)) {
+            assertContextValue(fields[column], projectNumber, normalizeProjectNumber, column);
+          }
+        });
+        fields.Numero_de_projet = projectNumber;
+      }
+      return fields;
+    }
     if (!SERVICE_AWARE_TABLES.has(tableName)) return fields;
     if (selectedService) fields.Service = selectedService;
 
@@ -572,14 +964,34 @@
     const selectedService = normalizeService(context.selectedService);
     const projectNumber = normalizeProjectNumber(context.projectNumber);
     const projectName = toText(context.projectName);
-    if (!SERVICE_AWARE_TABLES.has(tableName)) return fields;
-
     const transformColumn = (column, expected, normalize, label) => {
       if (!expected) return;
       const currentValues = Array.isArray(fields[column]) ? fields[column] : [];
       currentValues.forEach((value) => assertContextValue(value, expected, normalize, label));
       fields[column] = Array.from({ length: rowCount }, () => expected);
     };
+    if (tableName === PROJECTS_TABLE) {
+      ["Numero_de_projet", "NumeroProjet", "Numero"].forEach((column) => {
+        if (Object.prototype.hasOwnProperty.call(fields, column)) {
+          const currentValues = Array.isArray(fields[column]) ? fields[column] : [];
+          currentValues.forEach((value) => assertContextValue(
+            value,
+            projectNumber,
+            normalizeProjectNumber,
+            column
+          ));
+        }
+      });
+      transformColumn(
+        "Numero_de_projet",
+        projectNumber,
+        normalizeProjectNumber,
+        "Numero_de_projet"
+      );
+      return fields;
+    }
+    if (!SERVICE_AWARE_TABLES.has(tableName)) return fields;
+
     transformColumn("Service", selectedService, normalizeService, "Service");
     if (PROJECT_NUMBER_TABLES.has(tableName)) {
       transformColumn("NumeroProjet", projectNumber, normalizeProjectNumber, "NumeroProjet");
@@ -602,7 +1014,7 @@
         return action;
       }
       const tableName = toText(action[1]);
-      if (!SERVICE_AWARE_TABLES.has(tableName)) return action;
+      if (tableName !== PROJECTS_TABLE && !SERVICE_AWARE_TABLES.has(tableName)) return action;
       const context = {
         selectedService: normalizedService,
         projectNumber: normalizedNumber,
@@ -621,8 +1033,11 @@
     SERVICE_STORAGE_KEY,
     PROJECT_STORAGE_KEY,
     PROJECT_ID_STORAGE_KEY,
+    ACCESS_CHANGED_STORAGE_KEY,
+    ACCESS_SIGNAL_VERSION,
+    ACCESS_COLUMN,
+    PROJECT_TEAM_TABLE,
     LEGACY_DEFAULT_SERVICE,
-    GRANT_COLUMNS,
     PROJECTS_TABLE,
     PROJECT_NAME_COLUMNS,
     SERVICE_AWARE_TABLES,
@@ -630,14 +1045,25 @@
     PROJECT_AWARE_TABLES,
     toText,
     normalizeProjectNumber,
+    normalizeProjectNameKey,
     normalizeService,
+    normalizePersonName,
+    getTeamDisplayName,
+    getTeamFullNameAliases,
+    getTeamPersonIdentity,
+    groupTeamPeople,
+    getEquivalentTeamRows,
+    resolveTeamPerson,
+    getTeamReferenceId,
+    resolveTeamPersonValue,
     isTruthy,
-    parseGrants,
-    serializeGrants,
-    hasProjectGrant,
+    parseProjectAccess,
+    serializeProjectAccess,
     getProjectNumber,
     getProjectName,
-    getGrantedProjectNumbers,
+    groupProjectsByNumber,
+    resolveProjectTeamRows,
+    getEffectiveProjectNumbers,
     getAllowedProjects,
     selectAllowedProject,
     isAdminTeamRow,
@@ -646,8 +1072,8 @@
     getAllowedServicesForProjects,
     canEditCurrentContext,
     getProjectAccessMode,
-    getProjectGrantScope,
-    getExternalProjectGrantScope,
+    getProjectScope,
+    getProjectAssignees,
     tableToRows,
     filterRawTable,
     filterRawTableByService,
@@ -660,6 +1086,9 @@
     updateServiceAvancement,
     isMutationAction,
     isProtectedMutationAction,
+    isAccessAssignmentMutationAction,
+    getMutationRecordIds,
+    rowMatchesContext,
     transformActions,
   });
 });

@@ -75,6 +75,8 @@ let renderFrame = null;
 let visibleRowsFrame = null;
 let timelineLayoutFrame = null;
 let isRenderingVisibleRows = false;
+let gestionUserLoadGeneration = 0;
+let gestionUserServiceRefreshBound = false;
 
 function addDays(date, days) {
   const next = new Date(date);
@@ -852,25 +854,54 @@ function bindEvents() {
   });
 }
 
+async function refreshGestionUserData() {
+  const loadGeneration = ++gestionUserLoadGeneration;
+  setStatus("Chargement des donnees...");
+  let data;
+  try {
+    data = await loadGestionUserData();
+  } catch (error) {
+    if (loadGeneration !== gestionUserLoadGeneration) return false;
+    throw error;
+  }
+  if (loadGeneration !== gestionUserLoadGeneration) return false;
+
+  state.data = data;
+  const bounds = getSegmentYearBounds(data.segments);
+  populateYearSelect(bounds.minYear, bounds.maxYear);
+  populateFilters(data.employees, data.projects);
+  populateProjectFilter(data);
+  render();
+  return true;
+}
+
+function showGestionUserLoadError(error) {
+  console.error("Erreur initialisation Gestion-User :", error);
+  setStatus(error?.message || "Erreur de chargement.", "error");
+  dom.emptyState.hidden = false;
+  dom.emptyState.textContent = error?.message || "Erreur de chargement.";
+}
+
+function bindGestionUserServiceRefresh() {
+  if (gestionUserServiceRefreshBound) return;
+  const serviceContext = window.GristServiceContext;
+  if (typeof serviceContext?.onServiceChange !== "function") return;
+
+  gestionUserServiceRefreshBound = true;
+  serviceContext.onServiceChange(() => {
+    void refreshGestionUserData().catch(showGestionUserLoadError);
+  });
+}
+
 async function init() {
   try {
     window.grist?.ready?.({ requiredAccess: "full" });
     bindEvents();
+    bindGestionUserServiceRefresh();
     populateYearSelect(state.year - 1, state.year + 1);
-
-    const data = await loadGestionUserData();
-    state.data = data;
-
-    const bounds = getSegmentYearBounds(data.segments);
-    populateYearSelect(bounds.minYear, bounds.maxYear);
-    populateFilters(data.employees, data.projects);
-    populateProjectFilter(data);
-    render();
+    await refreshGestionUserData();
   } catch (error) {
-    console.error("Erreur initialisation Gestion-User :", error);
-    setStatus(error?.message || "Erreur de chargement.", "error");
-    dom.emptyState.hidden = false;
-    dom.emptyState.textContent = error?.message || "Erreur de chargement.";
+    showGestionUserLoadError(error);
   }
 }
 

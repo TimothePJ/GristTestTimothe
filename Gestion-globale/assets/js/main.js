@@ -44,6 +44,8 @@ const VIEW_STATE = (() => {
 const DOP_DATA_CHANGE_STORAGE_KEY = "grist.dop-data-changed";
 const ALL_DOP_FILTER = "all";
 let dopReloadTimer = 0;
+let globalDataLoadGeneration = 0;
+let globalServiceRefreshBound = false;
 
 const state = {
   projects: [],
@@ -736,13 +738,22 @@ function bindEvents() {
 }
 
 async function loadData() {
+  const loadGeneration = ++globalDataLoadGeneration;
   setStatus("Chargement des projets...");
   const previousSelectedProjectIds = new Set(state.selectedProjectIds);
   const wasAllDopSelected = areAllDopFiltersSelected();
-  const [tables, dopRegistryRows] = await Promise.all([
-    fetchExpenseAppTables(),
-    fetchDopRegistryRows(),
-  ]);
+  let tables;
+  let dopRegistryRows;
+  try {
+    [tables, dopRegistryRows] = await Promise.all([
+      fetchExpenseAppTables(),
+      fetchDopRegistryRows(),
+    ]);
+  } catch (error) {
+    if (loadGeneration !== globalDataLoadGeneration) return false;
+    throw error;
+  }
+  if (loadGeneration !== globalDataLoadGeneration) return false;
   const { projects, diagnostics } = buildGlobalExpenseData(
     filterTablesByPersonService(tables)
   );
@@ -771,6 +782,21 @@ async function loadData() {
     `${selectableProjectCount} projet(s) charge(s)${warnings.length ? ` - ${warnings.join(" - ")}` : ""}`
   );
   renderApp();
+  return true;
+}
+
+function bindGlobalServiceRefresh() {
+  if (globalServiceRefreshBound) return;
+  const serviceContext = window.GristServiceContext;
+  if (typeof serviceContext?.onServiceChange !== "function") return;
+
+  globalServiceRefreshBound = true;
+  serviceContext.onServiceChange(() => {
+    void loadData().catch((error) => {
+      console.error("Erreur actualisation service Gestion-globale :", error);
+      setStatus("Impossible d'actualiser les donnees du service.", true);
+    });
+  });
 }
 
 function scheduleDopDataReload() {
@@ -790,6 +816,7 @@ async function bootstrap() {
 
   try {
     initGrist();
+    bindGlobalServiceRefresh();
     window.addEventListener("storage", (event) => {
       if (event.key === DOP_DATA_CHANGE_STORAGE_KEY) scheduleDopDataReload();
     });

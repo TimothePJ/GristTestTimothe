@@ -276,23 +276,9 @@ function readSharedProjectSelection() {
 }
 
 function saveSharedProjectSelection(projectName = '') {
-  try {
-    const normalizedProject = normalizeText(projectName);
-    if (normalizedProject) {
-      localStorage.setItem(SHARED_PROJECT_STORAGE_KEY, normalizedProject);
-      const project = _projectsData.find(
-        (p) => normalizeProjectSelectionKey(p.name) === normalizeProjectSelectionKey(normalizedProject)
-      );
-      if (project) {
-        localStorage.setItem(SHARED_PROJECT_ID_STORAGE_KEY, String(project.id));
-      }
-    } else {
-      localStorage.removeItem(SHARED_PROJECT_STORAGE_KEY);
-      localStorage.removeItem(SHARED_PROJECT_ID_STORAGE_KEY);
-    }
-  } catch (_error) {
-    // localStorage peut etre indisponible dans certains contextes embarques.
-  }
+  const normalizedProject = normalizeText(projectName);
+  if (!normalizedProject) return Promise.resolve(null);
+  return window.GristServiceContext.selectProject(normalizedProject).catch(() => null);
 }
 
 function normalizeProjectSelectionKey(value = '') {
