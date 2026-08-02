@@ -44,6 +44,8 @@ const VIEW_STATE = (() => {
 const DOP_DATA_CHANGE_STORAGE_KEY = "grist.dop-data-changed";
 const ALL_DOP_FILTER = "all";
 let dopReloadTimer = 0;
+let globalDataLoadGeneration = 0;
+let globalServiceRefreshBound = false;
 
 const state = {
   projects: [],
@@ -61,6 +63,50 @@ const state = {
 };
 
 const dom = {};
+
+function normalizePersonKey(value) {
+  return toText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("fr");
+}
+
+function filterTablesByPersonService(tables) {
+  const selectedService = toText(
+    window.GristServiceContext?.getService?.()
+      || window.localStorage?.getItem("grist.selected-service")
+  );
+  if (!selectedService) {
+    return {
+      ...tables,
+      teamRows: [],
+      projectTeamRows: [],
+      timeSegmentRows: [],
+      timeRealRows: [],
+    };
+  }
+
+  const teamRows = (tables?.teamRows || []).filter(
+    (row) => toText(row?.Service) === selectedService
+  );
+  const allowedPeople = new Set(teamRows.map((row) => normalizePersonKey(
+    toText(row?.PrenomNom)
+      || [toText(row?.Prenom), toText(row?.Nom)].filter(Boolean).join(" ")
+  )).filter(Boolean));
+  const keepPersonRow = (row) => allowedPeople.has(normalizePersonKey(
+    row?.Name ?? row?.Nom ?? row?.PrenomNom
+  ));
+
+  return {
+    ...tables,
+    teamRows,
+    projectTeamRows: (tables?.projectTeamRows || []).filter(keepPersonRow),
+    timeSegmentRows: (tables?.timeSegmentRows || []).filter(keepPersonRow),
+    timeRealRows: (tables?.timeRealRows || []).filter(keepPersonRow),
+  };
+}
 
 function getDomRefs() {
   Object.assign(dom, {
@@ -692,14 +738,25 @@ function bindEvents() {
 }
 
 async function loadData() {
+  const loadGeneration = ++globalDataLoadGeneration;
   setStatus("Chargement des projets...");
   const previousSelectedProjectIds = new Set(state.selectedProjectIds);
   const wasAllDopSelected = areAllDopFiltersSelected();
-  const [tables, dopRegistryRows] = await Promise.all([
-    fetchExpenseAppTables(),
-    fetchDopRegistryRows(),
-  ]);
-  const { projects, diagnostics } = buildGlobalExpenseData(tables);
+  let tables;
+  let dopRegistryRows;
+  try {
+    [tables, dopRegistryRows] = await Promise.all([
+      fetchExpenseAppTables(),
+      fetchDopRegistryRows(),
+    ]);
+  } catch (error) {
+    if (loadGeneration !== globalDataLoadGeneration) return false;
+    throw error;
+  }
+  if (loadGeneration !== globalDataLoadGeneration) return false;
+  const { projects, diagnostics } = buildGlobalExpenseData(
+    filterTablesByPersonService(tables)
+  );
 
   state.projects = projects;
   state.dopRegistryRows = dopRegistryRows;
@@ -725,6 +782,21 @@ async function loadData() {
     `${selectableProjectCount} projet(s) charge(s)${warnings.length ? ` - ${warnings.join(" - ")}` : ""}`
   );
   renderApp();
+  return true;
+}
+
+function bindGlobalServiceRefresh() {
+  if (globalServiceRefreshBound) return;
+  const serviceContext = window.GristServiceContext;
+  if (typeof serviceContext?.onServiceChange !== "function") return;
+
+  globalServiceRefreshBound = true;
+  serviceContext.onServiceChange(() => {
+    void loadData().catch((error) => {
+      console.error("Erreur actualisation service Gestion-globale :", error);
+      setStatus("Impossible d'actualiser les donnees du service.", true);
+    });
+  });
 }
 
 function scheduleDopDataReload() {
@@ -744,6 +816,7 @@ async function bootstrap() {
 
   try {
     initGrist();
+    bindGlobalServiceRefresh();
     window.addEventListener("storage", (event) => {
       if (event.key === DOP_DATA_CHANGE_STORAGE_KEY) scheduleDopDataReload();
     });

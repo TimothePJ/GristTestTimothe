@@ -39,6 +39,9 @@ function emitReferenceDataChangeSignal() {
 }
 
 function getGrist() {
+  if (window.grist) {
+    return window.grist;
+  }
   try {
     if (window.parent && window.parent !== window && window.parent.grist) {
       return window.parent.grist;
@@ -47,10 +50,7 @@ function getGrist() {
     // Ignore cross-context access issues and fallback to local window.
   }
 
-  if (!window.grist) {
-    throw new Error("API Grist introuvable (window.grist).");
-  }
-  return window.grist;
+  throw new Error("API Grist introuvable (window.grist).");
 }
 
 export function initGrist() {

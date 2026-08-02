@@ -25,6 +25,7 @@ const TIME_SEGMENT_COLUMN_ALIASES = {
   ],
   effectif: ["Effectif"],
   label: ["Label", "Title"],
+  service: ["Service"],
 };
 
 const TIME_REAL_COLUMN_ALIASES = {
@@ -41,9 +42,22 @@ const TIME_REAL_COLUMN_ALIASES = {
     "Days",
   ],
   month: ["Mois", "Month"],
+  service: ["Service"],
 };
 
+function getActiveService() {
+  if (typeof globalThis === "undefined") return "Structure";
+  return globalThis.GristServiceContext?.getService?.()
+    || globalThis.GristServiceContextCore?.normalizeService?.(
+      globalThis.localStorage?.getItem("grist.selected-service")
+    )
+    || "Structure";
+}
+
 function getGrist() {
+  if (window.grist) {
+    return window.grist;
+  }
   try {
     if (window.parent && window.parent !== window && window.parent.grist) {
       return window.parent.grist;
@@ -52,10 +66,7 @@ function getGrist() {
     // Ignore cross-context access issues and fallback to local window.
   }
 
-  if (!window.grist) {
-    throw new Error("API Grist introuvable (window.grist).");
-  }
-  return window.grist;
+  throw new Error("API Grist introuvable (window.grist).");
 }
 
 function normalizeFetchTableResult(raw) {
@@ -228,6 +239,7 @@ async function fetchNormalizedTimeSegmentRows() {
     [canonicalColumns.allocationDays]: row?.[resolvedColumns.allocationDays],
     [canonicalColumns.effectif]: row?.[resolvedColumns.effectif],
     [canonicalColumns.label]: row?.[resolvedColumns.label],
+    [canonicalColumns.service]: row?.[resolvedColumns.service],
   }));
 }
 
@@ -247,6 +259,7 @@ async function fetchNormalizedTimeRealRows() {
     [canonicalColumns.endDate]: row?.[resolvedColumns.endDate],
     [canonicalColumns.allocationDays]: row?.[resolvedColumns.allocationDays],
     [canonicalColumns.month]: row?.[resolvedColumns.month],
+    [canonicalColumns.service]: row?.[resolvedColumns.service],
   }));
 }
 
@@ -289,7 +302,6 @@ export async function fetchProjectDataTables() {
     listePlanRows,
     planningProjectRows,
     projectTeamRows,
-    timesheetRows,
     timeSegmentRows,
     timeRealRows,
     teamRows,
@@ -299,7 +311,6 @@ export async function fetchProjectDataTables() {
     fetchOptionalTableRows(tables.listePlan),
     fetchOptionalTableRows(tables.planningProject),
     fetchTableRows(tables.projectTeam),
-    fetchTableRows(tables.timesheet),
     fetchNormalizedTimeSegmentRows(),
     fetchNormalizedTimeRealRows(),
     fetchTableRows(tables.team),
@@ -311,7 +322,7 @@ export async function fetchProjectDataTables() {
     listePlanRows,
     planningProjectRows,
     projectTeamRows,
-    timesheetRows,
+    timesheetRows: [],
     timeSegmentRows,
     timeRealRows,
     teamRows,
@@ -362,6 +373,7 @@ export async function createProjectWithBudget({ name, projectNumber, dop = "", b
       [columns.budget.projectNumber]: projectNumber,
       [columns.budget.chapter]: line.chapter,
       [columns.budget.amount]: line.amount,
+      [columns.budget.service]: getActiveService(),
     },
   ]);
 
@@ -392,6 +404,7 @@ export async function saveBudgetChanges(project, editedLines) {
         [columns.budget.projectNumber]: project.projectNumber,
         [columns.budget.chapter]: line.chapter,
         [columns.budget.amount]: line.amount,
+        [columns.budget.service]: getActiveService(),
       },
     ]);
   });
@@ -413,6 +426,7 @@ export async function addWorkerToProject(project, teamMember) {
         [columns.projectTeam.role]: teamMember.role,
         [columns.projectTeam.name]: `${teamMember.firstName} ${teamMember.lastName}`.trim(),
         [columns.projectTeam.dailyRate]: 0,
+        [columns.projectTeam.service]: getActiveService(),
       },
     ],
   ]);
@@ -611,6 +625,7 @@ export async function createTimeSegment({
           : effectif === ""
           ? ""
           : toFiniteNumber(effectif, 0),
+      [columns.service]: getActiveService(),
     }).filter(([, value]) => value !== undefined)
   );
   if (toText(label)) {

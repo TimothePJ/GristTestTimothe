@@ -1015,6 +1015,83 @@ select {
   margin-bottom: 0 !important;
 }
 
+body[data-reference-access-mode="editable"] .sticky-container select[data-reference-access-mode="editable"] {
+  background-color: #ffffff !important;
+  border-color: #9fc3e4 !important;
+  color: var(--vc-blue) !important;
+}
+
+body[data-reference-access-mode="editable"] .sticky-container select[data-reference-access-mode="editable"] option,
+body[data-reference-access-mode="editable"] .sticky-container select[data-reference-access-mode="editable"] optgroup {
+  background-color: #ffffff !important;
+  color: var(--vc-blue) !important;
+}
+
+body[data-reference-access-mode="editable"] .sticky-container select[data-reference-access-mode="editable"] option:checked {
+  background: linear-gradient(#dceeff, #dceeff) !important;
+  color: #003e78 !important;
+}
+
+body[data-reference-access-mode="readonly"] .sticky-container select[data-reference-access-mode="readonly"],
+body[data-reference-access-mode="hidden"] .sticky-container select[data-reference-access-mode="hidden"] {
+  background-color: #fff7e8 !important;
+  border-color: #d8ad69 !important;
+  color: #764500 !important;
+}
+
+body[data-reference-access-mode="readonly"] .sticky-container select[data-reference-access-mode="readonly"] option,
+body[data-reference-access-mode="readonly"] .sticky-container select[data-reference-access-mode="readonly"] optgroup,
+body[data-reference-access-mode="hidden"] .sticky-container select[data-reference-access-mode="hidden"] option,
+body[data-reference-access-mode="hidden"] .sticky-container select[data-reference-access-mode="hidden"] optgroup {
+  background-color: #fff7e8 !important;
+  color: #764500 !important;
+}
+
+body[data-reference-access-mode="readonly"] .sticky-container select[data-reference-access-mode="readonly"] option:checked,
+body[data-reference-access-mode="hidden"] .sticky-container select[data-reference-access-mode="hidden"] option:checked {
+  background: linear-gradient(#ffe3b5, #ffe3b5) !important;
+  color: #5e3500 !important;
+}
+
+body[data-reference-access-mode="editable"] .sticky-container select[data-reference-disabled-loading="true"],
+body[data-reference-access-mode="editable"] .sticky-container select[data-reference-disabled-empty="true"] {
+  background-color: #eef2f6 !important;
+  border-color: #c8d1da !important;
+  color: #667788 !important;
+  cursor: wait;
+}
+
+.sticky-container select[data-reference-disabled-empty="true"]:not([data-reference-disabled-loading="true"]) {
+  cursor: not-allowed;
+}
+
+body[data-reference-access-mode="readonly"] .sticky-container select[data-reference-disabled-loading="true"],
+body[data-reference-access-mode="readonly"] .sticky-container select[data-reference-disabled-empty="true"],
+body[data-reference-access-mode="hidden"] .sticky-container select[data-reference-disabled-loading="true"],
+body[data-reference-access-mode="hidden"] .sticky-container select[data-reference-disabled-empty="true"] {
+  opacity: 1 !important;
+  background-color: #fff7e8 !important;
+  border-color: #d8ad69 !important;
+  color: #764500 !important;
+  -webkit-text-fill-color: #764500 !important;
+}
+
+body[data-reference-access-mode="readonly"] [data-reference-write-control="true"],
+body[data-reference-access-mode="hidden"] [data-reference-write-control="true"] {
+  cursor: not-allowed !important;
+}
+
+body[data-reference-access-mode="readonly"] input[data-reference-write-control="true"],
+body[data-reference-access-mode="readonly"] textarea[data-reference-write-control="true"],
+body[data-reference-access-mode="readonly"] select[data-reference-write-control="true"],
+body[data-reference-access-mode="hidden"] input[data-reference-write-control="true"],
+body[data-reference-access-mode="hidden"] textarea[data-reference-write-control="true"],
+body[data-reference-access-mode="hidden"] select[data-reference-write-control="true"] {
+  background-color: #fff7e8 !important;
+  border-color: #d8ad69 !important;
+  color: #764500 !important;
+}
+
 #firstColumnDropdown {
   width: 100% !important;
 }

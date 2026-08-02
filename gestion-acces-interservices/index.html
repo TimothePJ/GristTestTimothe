@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Affectations projets</title>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <script src="../shared/service-context-core.js"></script>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="access-app">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Administration Grist</p>
+        <h1>Affectations projets</h1>
+        <p class="hero-copy">
+          Une personne affectée peut modifier les données de son service et consulter les autres services en lecture seule.
+        </p>
+      </div>
+      <span id="admin-status" class="status" role="status" aria-live="polite">Chargement…</span>
+    </header>
+
+    <section id="workspace" class="workspace" aria-busy="false" hidden>
+      <aside class="panel project-panel" aria-labelledby="project-panel-title">
+        <div class="panel-heading">
+          <div>
+            <h2 id="project-panel-title">Choisir un projet</h2>
+          </div>
+          <span id="project-count" class="count-pill"></span>
+        </div>
+
+        <label class="field">
+          <span>Rechercher</span>
+          <input id="project-search" type="search" autocomplete="off" placeholder="Numéro ou nom du projet">
+        </label>
+
+        <label class="field">
+          <span>Projet</span>
+          <select id="project-select"></select>
+        </label>
+
+        <div id="project-card" class="project-card" aria-live="polite">
+          <span id="project-number">—</span>
+          <strong id="project-name">Aucun projet sélectionné</strong>
+          <small id="project-aliases"></small>
+        </div>
+      </aside>
+
+      <div class="content-column">
+        <section class="panel" aria-labelledby="assignees-title">
+          <div class="panel-heading">
+            <div>
+              <h2 id="assignees-title">Personnes affectées</h2>
+              <p id="assignees-summary" class="panel-copy"></p>
+            </div>
+            <span id="assignees-count" class="count-pill">0</span>
+          </div>
+
+          <div id="assignees-list" class="assignees-list" role="list" aria-live="polite"></div>
+
+          <details id="unresolved-panel" class="unresolved" hidden>
+            <summary><span id="unresolved-summary"></span></summary>
+            <p>Certaines personnes enregistrées dans la gestion du projet ne correspondent pas à un profil utilisateur unique.</p>
+            <div id="unresolved-list" class="unresolved-list"></div>
+          </details>
+        </section>
+
+        <section class="panel add-panel" aria-labelledby="add-title">
+          <div class="panel-heading">
+            <div>
+              <h2 id="add-title">Ajouter des personnes</h2>
+              <p class="panel-copy">Les personnes sont classées par service, puis par rôle et par nom. Utilise Ctrl ou Cmd pour une sélection multiple.</p>
+            </div>
+          </div>
+
+          <div class="add-layout">
+            <div>
+              <label class="field">
+                <span>Rechercher une personne</span>
+                <input id="person-search" type="search" autocomplete="off" placeholder="Nom, service ou email">
+              </label>
+              <label class="field">
+                <span>Personnes disponibles</span>
+                <select id="person-select" multiple size="7" aria-describedby="selection-help"></select>
+              </label>
+              <p id="selection-help" class="field-help"></p>
+            </div>
+            <div class="add-action">
+              <button id="add-button" class="primary" type="button">Ajouter au projet</button>
+              <p id="form-message" class="message" role="status" aria-live="polite"></p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section id="fatal-panel" class="panel error-panel" hidden>
+      <h2>Configuration requise</h2>
+      <p id="fatal-message"></p>
+    </section>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>

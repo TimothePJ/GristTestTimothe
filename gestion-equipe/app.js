@@ -624,7 +624,7 @@ function buildRecordFromForm(form, fieldNames) {
   return {
     Prenom: prenom,
     Nom: nom,
-    Email: asText(formData.get(fieldNames.email)),
+    Email: normalizeEmail(formData.get(fieldNames.email)),
     Service: asText(formData.get(fieldNames.service)),
     Role: asText(formData.get(fieldNames.role)),
     IdTrefle: normalizeIdTrefle(formData.get(fieldNames.idTrefle)),

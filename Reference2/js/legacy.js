@@ -121,24 +121,6 @@ function readSharedProjectId() {
   } catch (_e) { return null; }
 }
 
-function saveSharedProjectSelection(projectName) {
-  try {
-    const normalizedProject = String(projectName || '').trim();
-    if (normalizedProject) {
-      localStorage.setItem(SHARED_PROJECT_STORAGE_KEY, normalizedProject);
-      const project = _projectsData.find(
-        (p) => p.name.trim().toLowerCase() === normalizedProject.toLowerCase()
-      );
-      if (project) localStorage.setItem(SHARED_PROJECT_ID_STORAGE_KEY, String(project.id));
-    } else {
-      localStorage.removeItem(SHARED_PROJECT_STORAGE_KEY);
-      localStorage.removeItem(SHARED_PROJECT_ID_STORAGE_KEY);
-    }
-  } catch (_error) {
-    // localStorage peut etre indisponible dans certains contextes embarques.
-  }
-}
-
 function normalizeSharedProjectKey(projectName) {
   return String(projectName || '')
     .normalize('NFD')
@@ -203,6 +185,8 @@ function parseNumeroForStorage(v) {
             isReferencesActionTableName(a[1]) &&
             ['AddRecord', 'UpdateRecord', 'RemoveRecord'].includes(String(a[0] || ''))
           );
+          const projectsChanged = fixed.some(a => Array.isArray(a) && a[1] === 'Projets2');
+          const emittersChanged = fixed.some(a => Array.isArray(a) && a[1] === 'Emetteurs');
           const containsReferenceRetardActions = fixed.some(a =>
             Array.isArray(a) &&
             isReferencesActionTableName(a[1]) &&
@@ -225,6 +209,8 @@ function parseNumeroForStorage(v) {
             if (referencesChanged) {
               emitReferenceDataChangeSignal();
             }
+            if (projectsChanged) invalidateProjectsTableCache();
+            if (emittersChanged) defaultEmetteursCache.clear();
             return result;
           });
         };
@@ -538,6 +524,7 @@ function updateEditSubmitState() {
     getReferenceFormSnapshot('edit') === referenceEditInitialSnapshot;
   submit.disabled = referenceFormBusyState.edit || unchanged;
   submit.title = unchanged ? 'Aucune modification à enregistrer' : '';
+  applyReferenceAccessUi(activeReferenceContextSnapshot || createReferenceContextSnapshot());
 }
 
 function setReferenceFormBusy(mode, busy, message = '') {
@@ -551,6 +538,7 @@ function setReferenceFormBusy(mode, busy, message = '') {
   if (cancel) cancel.disabled = Boolean(busy);
   if (message) setReferenceFormStatus(mode, message, 'info');
   if (!busy && mode === 'edit') updateEditSubmitState();
+  else applyReferenceAccessUi(activeReferenceContextSnapshot || createReferenceContextSnapshot());
 }
 
 function resetReferenceFilePicker(mode) {
@@ -668,7 +656,6 @@ async function resetAndUpdateDialog() {
 }
 
 // Mise à jour de la liste des références lorsqu'on change le projet ou l'émetteur
-document.getElementById('firstColumnDropdown').addEventListener('change', updateReferenceList);
 document.getElementById('emetteur').addEventListener('change', updateReferenceList);
 
 // L'auto-remplissage se déclenche après validation d'une valeur, pas à chaque frappe.
@@ -758,7 +745,14 @@ function _norm(v) {
 }
 
 function normalizeServiceMatchKey(value) {
-  return _norm(value).toLocaleLowerCase('fr');
+  const canonicalService = window.GristServiceContextCore?.normalizeService?.(value);
+  if (canonicalService) return canonicalService.toLocaleLowerCase('fr');
+  return _norm(value)
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('fr');
 }
 
 function normalizeReferenceDocumentIdentityPart(value) {
@@ -766,6 +760,202 @@ function normalizeReferenceDocumentIdentityPart(value) {
     .trim()
     .replace(/\s+/g, ' ')
     .toLocaleLowerCase('fr');
+}
+
+let activeReferenceContextSnapshot = null;
+let referenceLatestRawVersion = 0;
+let referenceAccessObserver = null;
+let referenceAccessObserverQueued = false;
+
+function createReferenceContextSnapshot(source = null, sourceRecords = null) {
+  const delivery = source?.context ? source : null;
+  const context = delivery?.context || source || window.GristServiceContext?.getState?.() || {};
+  const project = context.currentProject || null;
+  const aliases = [
+    ...(Array.isArray(context.projectAliases) ? context.projectAliases : []),
+    project?.name,
+    ...(Array.isArray(project?.names) ? project.names : []),
+  ].map(_norm).filter((value, index, values) => value && values.indexOf(value) === index);
+  const snapshotRecords = Array.isArray(sourceRecords)
+    ? sourceRecords
+    : (Array.isArray(context.records) ? context.records : []);
+
+  return {
+    currentProject: project ? {
+      ...project,
+      ids: Array.isArray(project.ids) ? [...project.ids] : [],
+      names: Array.isArray(project.names) ? [...project.names] : [...aliases],
+    } : null,
+    projectNumber: _norm(project?.number),
+    projectAliases: aliases,
+    selectedService: window.GristServiceContextCore?.normalizeService?.(context.selectedService) ||
+      _norm(context.selectedService),
+    homeService: window.GristServiceContextCore?.normalizeService?.(context.homeService) ||
+      _norm(context.homeService),
+    accessMode: ['editable', 'readonly', 'hidden'].includes(context.accessMode)
+      ? context.accessMode
+      : 'hidden',
+    generation: Number(context.generation ?? delivery?.generation ?? 0) || 0,
+    rawVersion: Number(delivery?.rawVersion ?? context.rawVersion ?? 0) || 0,
+    records: snapshotRecords,
+  };
+}
+
+function isReferenceContextSnapshotCurrent(snapshot) {
+  if (!snapshot) return false;
+  const current = window.GristServiceContext?.getState?.();
+  if (!current) return true;
+  const currentProjectNumber = _norm(current.currentProject?.number);
+  const currentService = window.GristServiceContextCore?.normalizeService?.(current.selectedService) ||
+    _norm(current.selectedService);
+  if (snapshot.projectNumber !== currentProjectNumber) return false;
+  if (snapshot.selectedService !== currentService) return false;
+  if (snapshot.accessMode !== current.accessMode) return false;
+  if (Number(current.generation || 0) !== Number(snapshot.generation || 0)) return false;
+  return true;
+}
+
+function getReferenceDisabledReasonKey(reason) {
+  return `referenceDisabled${reason.charAt(0).toUpperCase()}${reason.slice(1)}`;
+}
+
+function syncReferenceContextControlDisabled(control) {
+  if (!control) return;
+  const disabled = control.dataset.referenceDisabledLoading === 'true' ||
+    control.dataset.referenceDisabledEmpty === 'true';
+  control.disabled = disabled;
+  control.setAttribute('aria-disabled', String(disabled));
+}
+
+function setReferenceControlDisabledReason(control, reason, active) {
+  if (!control || !['loading', 'empty', 'readonly'].includes(reason)) return;
+  control.dataset[getReferenceDisabledReasonKey(reason)] = String(Boolean(active));
+  if (reason !== 'readonly') syncReferenceContextControlDisabled(control);
+}
+
+function applyReferenceReadonlyToElement(element, readOnly) {
+  if (!(element instanceof HTMLElement)) return;
+  const supportsReadOnly = 'readOnly' in element &&
+    !['checkbox', 'radio', 'file', 'button', 'submit'].includes(element.type) &&
+    element.tagName !== 'SELECT';
+
+  if (readOnly) {
+    if (element.dataset.referenceReadonlyApplied !== 'true') {
+      const disabledBeforeServiceReadonly = element.dataset.serviceContextDisabled === 'true'
+        ? element.dataset.serviceContextWasDisabled === 'true'
+        : Boolean(element.disabled);
+      element.dataset.referenceReadonlyApplied = 'true';
+      element.dataset.referenceReadonlyWasDisabled = String(disabledBeforeServiceReadonly);
+      element.dataset.referenceReadonlyWasReadOnly = String(Boolean(element.readOnly));
+      element.dataset.referenceReadonlyAriaDisabled = element.getAttribute('aria-disabled') ?? '';
+      if (element.hasAttribute('contenteditable')) {
+        element.dataset.referenceReadonlyContenteditable =
+          element.getAttribute('contenteditable') || 'true';
+      }
+    }
+    element.dataset.referenceDisabledReadonly = 'true';
+    if (supportsReadOnly) element.readOnly = true;
+    else if ('disabled' in element) element.disabled = true;
+    if (element.hasAttribute('contenteditable')) element.setAttribute('contenteditable', 'false');
+    element.setAttribute('aria-disabled', 'true');
+    return;
+  }
+
+  if (element.dataset.referenceReadonlyApplied !== 'true') return;
+  if (supportsReadOnly) element.readOnly = element.dataset.referenceReadonlyWasReadOnly === 'true';
+  else if ('disabled' in element) {
+    element.disabled = element.dataset.referenceReadonlyWasDisabled === 'true';
+  }
+  if (element.dataset.referenceReadonlyContenteditable != null) {
+    element.setAttribute('contenteditable', element.dataset.referenceReadonlyContenteditable);
+  }
+  const previousAriaDisabled = element.dataset.referenceReadonlyAriaDisabled;
+  if (previousAriaDisabled) element.setAttribute('aria-disabled', previousAriaDisabled);
+  else element.removeAttribute('aria-disabled');
+  delete element.dataset.referenceReadonlyApplied;
+  delete element.dataset.referenceReadonlyWasDisabled;
+  delete element.dataset.referenceReadonlyWasReadOnly;
+  delete element.dataset.referenceReadonlyAriaDisabled;
+  delete element.dataset.referenceReadonlyContenteditable;
+  delete element.dataset.referenceDisabledReadonly;
+}
+
+function getReferenceWriteElements() {
+  const elements = new Set();
+  document.querySelectorAll('dialog input, dialog select, dialog textarea, dialog [contenteditable]')
+    .forEach((element) => elements.add(element));
+  document.querySelectorAll('dialog button').forEach((button) => {
+    const marker = `${button.id} ${button.textContent || ''}`.toLocaleLowerCase('fr');
+    if (/cancel|close|annuler|fermer/.test(marker)) return;
+    elements.add(button);
+  });
+  document.querySelectorAll('#tableBody .bloquant-cell, #tableBody .archive-cell')
+    .forEach((element) => elements.add(element));
+  [
+    'addRowOption',
+    'editOption',
+    'archiveOption',
+    'deleteOption',
+  ].forEach((id) => {
+    const element = document.getElementById(id);
+    if (element) elements.add(element);
+  });
+  return [...elements];
+}
+
+function applyReferenceAccessUi(contextSnapshot = null) {
+  const snapshot = contextSnapshot?.projectNumber != null
+    ? contextSnapshot
+    : createReferenceContextSnapshot(contextSnapshot);
+  if (!isReferenceContextSnapshotCurrent(snapshot)) return false;
+
+  activeReferenceContextSnapshot = snapshot;
+  const readOnly = snapshot.accessMode !== 'editable';
+  document.body.dataset.referenceAccessMode = snapshot.accessMode;
+  document.body.dataset.gristServiceReadonly = String(readOnly);
+  document.body.classList.toggle('reference-is-editable', snapshot.accessMode === 'editable');
+  document.body.classList.toggle('reference-is-readonly', readOnly);
+
+  ['firstColumnDropdown', 'thirdColumnDropdown', 'zoneDropdown', 'secondColumnListbox']
+    .forEach((id) => {
+      const control = document.getElementById(id);
+      if (!control) return;
+      control.classList.toggle('reference-control-editable', snapshot.accessMode === 'editable');
+      control.classList.toggle('reference-control-readonly', readOnly);
+      control.dataset.referenceAccessMode = snapshot.accessMode;
+      control.setAttribute('aria-readonly', String(readOnly));
+      syncReferenceContextControlDisabled(control);
+    });
+
+  const addDocumentOption = document.querySelector(
+    '#secondColumnListbox option[value="addDocuments"]'
+  );
+  if (addDocumentOption) {
+    addDocumentOption.disabled = readOnly;
+    addDocumentOption.dataset.referenceDisabledReadonly = String(readOnly);
+  }
+
+  getReferenceWriteElements().forEach((element) => {
+    element.dataset.referenceWriteControl = 'true';
+    element.classList.toggle('reference-control-editable', snapshot.accessMode === 'editable');
+    element.classList.toggle('reference-control-readonly', readOnly);
+    applyReferenceReadonlyToElement(element, readOnly);
+  });
+
+  return true;
+}
+
+function ensureReferenceAccessObserver() {
+  if (referenceAccessObserver || !document.body) return;
+  referenceAccessObserver = new MutationObserver(() => {
+    if (referenceAccessObserverQueued) return;
+    referenceAccessObserverQueued = true;
+    Promise.resolve().then(() => {
+      referenceAccessObserverQueued = false;
+      applyReferenceAccessUi(createReferenceContextSnapshot());
+    });
+  });
+  referenceAccessObserver.observe(document.body, { childList: true, subtree: true });
 }
 
 function normalizeReferenceDocumentIdentityInput(documentValue) {
@@ -820,13 +1010,25 @@ async function buildDocumentProjectAliasKeys(projectName) {
   const projects = await grist.docApi.fetchTable('Projets2');
   const ids = projects.id || [];
   const names = projects.Nom_de_projet || [];
+  const numbers = projects.Numero_de_projet || projects.NumeroProjet || [];
   const requestedKey = normalizeDocumentProjectKey(projectName);
+  let requestedNumber = '';
 
   for (let index = 0; index < Math.max(ids.length, names.length); index += 1) {
     const rowKeys = [ids[index], names[index]]
       .map(normalizeDocumentProjectKey)
       .filter(Boolean);
-    if (!rowKeys.includes(requestedKey)) continue;
+    if (rowKeys.includes(requestedKey)) {
+      requestedNumber = String(numbers[index] || '').trim();
+      break;
+    }
+  }
+  for (let index = 0; index < Math.max(ids.length, names.length, numbers.length); index += 1) {
+    if (requestedNumber && String(numbers[index] || '').trim() !== requestedNumber) continue;
+    const rowKeys = [ids[index], names[index]]
+      .map(normalizeDocumentProjectKey)
+      .filter(Boolean);
+    if (!requestedNumber && !rowKeys.includes(requestedKey)) continue;
     rowKeys.forEach((key) => aliases.add(key));
   }
   return aliases;
@@ -1472,28 +1674,36 @@ function collectProjectZoneFilterValues(projectName, typeValue = '') {
 function resetZoneDropdown(disabled = true) {
   const dropdown = document.getElementById('zoneDropdown');
   if (!dropdown) return;
-
-  dropdown.innerHTML = `<option value="${REFERENCE_ALL_ZONES_VALUE}">Toutes les zones</option>`;
+  const option = document.createElement('option');
+  option.value = REFERENCE_ALL_ZONES_VALUE;
+  option.textContent = 'Toutes les zones';
+  dropdown.replaceChildren(option);
   dropdown.value = REFERENCE_ALL_ZONES_VALUE;
-  dropdown.disabled = disabled;
+  setReferenceControlDisabledReason(dropdown, 'empty', disabled);
   selectedZoneValue = REFERENCE_ALL_ZONES_VALUE;
+  applyReferenceAccessUi(activeReferenceContextSnapshot || createReferenceContextSnapshot());
 }
 
 function populateZoneDropdown(selectedProject, preferredValue = null) {
   const dropdown = document.getElementById('zoneDropdown');
   if (!dropdown) return;
+  const fragment = document.createDocumentFragment();
+  const allZonesOption = document.createElement('option');
+  allZonesOption.value = REFERENCE_ALL_ZONES_VALUE;
+  allZonesOption.textContent = 'Toutes les zones';
+  fragment.appendChild(allZonesOption);
 
   const project = _norm(selectedProject);
   const desiredValue = _norm(
     preferredValue != null ? preferredValue : (selectedZoneValue || dropdown.value || REFERENCE_ALL_ZONES_VALUE)
   );
 
-  dropdown.innerHTML = `<option value="${REFERENCE_ALL_ZONES_VALUE}">Toutes les zones</option>`;
-
   if (!project) {
+    dropdown.replaceChildren(fragment);
     dropdown.value = REFERENCE_ALL_ZONES_VALUE;
-    dropdown.disabled = true;
+    setReferenceControlDisabledReason(dropdown, 'empty', true);
     selectedZoneValue = REFERENCE_ALL_ZONES_VALUE;
+    applyReferenceAccessUi(activeReferenceContextSnapshot || createReferenceContextSnapshot());
     return;
   }
 
@@ -1502,8 +1712,9 @@ function populateZoneDropdown(selectedProject, preferredValue = null) {
     const option = document.createElement('option');
     option.value = getZoneDropdownOptionValue(zoneValue);
     option.textContent = getZoneDropdownOptionLabel(zoneValue);
-    dropdown.appendChild(option);
+    fragment.appendChild(option);
   });
+  dropdown.replaceChildren(fragment);
 
   const availableValues = new Set(zoneValues.map((zoneValue) => getZoneDropdownOptionValue(zoneValue)));
   dropdown.value =
@@ -1511,7 +1722,8 @@ function populateZoneDropdown(selectedProject, preferredValue = null) {
       ? desiredValue || REFERENCE_ALL_ZONES_VALUE
       : REFERENCE_ALL_ZONES_VALUE;
   selectedZoneValue = dropdown.value || REFERENCE_ALL_ZONES_VALUE;
-  dropdown.disabled = false;
+  setReferenceControlDisabledReason(dropdown, 'empty', false);
+  applyReferenceAccessUi(activeReferenceContextSnapshot || createReferenceContextSnapshot());
 }
 
 function projectHasStructuredZones(projectName) {
@@ -1645,7 +1857,10 @@ const DEFAULT_DOCUMENT_TYPES = [
   'NDC',
 ];
 
+const REFERENCE_LOOKUP_CACHE_TTL_MS = 45000;
 let projetsTableCache = null;
+let projetsTableCachePromise = null;
+let projetsTableCacheLoadedAt = 0;
 
 function isDefaultDocumentType(type) {
   return DEFAULT_DOCUMENT_TYPES.includes(normalizeTypeDocument(type));
@@ -1681,9 +1896,22 @@ function getMatchingProjectRowIndexes(projectName, projetsTable = projetsTableCa
   if (!project) return [];
 
   const names = Array.isArray(projetsTable.Nom_de_projet) ? projetsTable.Nom_de_projet : [];
+  const numbers = Array.isArray(projetsTable.Numero_de_projet)
+    ? projetsTable.Numero_de_projet
+    : [];
+  const currentProject = window.GristServiceContext?.getCurrentProject?.();
+  const currentAliases = new Set(
+    [currentProject?.name, ...(currentProject?.names || [])].map(_norm).filter(Boolean)
+  );
+  const requestedNumber = currentAliases.has(project)
+    ? String(currentProject?.number || '').trim()
+    : '';
   const indexes = [];
   names.forEach((value, index) => {
-    if (_norm(value) === project) {
+    if (
+      _norm(value) === project ||
+      (requestedNumber && String(numbers[index] || '').trim() === requestedNumber)
+    ) {
       indexes.push(index);
     }
   });
@@ -1843,16 +2071,21 @@ function collectReferenceDocumentTypesFromRecords(projectName) {
 function populateTypeDocumentDropdown(selectedProject, preferredValue = '', extraTypes = []) {
   const dropdown = document.getElementById('thirdColumnDropdown');
   if (!dropdown) return;
+  const fragment = document.createDocumentFragment();
+  const allTypesOption = document.createElement('option');
+  allTypesOption.value = '';
+  allTypesOption.textContent = 'Tous les types';
+  fragment.appendChild(allTypesOption);
 
   const project = _norm(selectedProject);
   const desiredValue = normalizeTypeDocument(preferredValue || selectedTypeValue);
 
-  dropdown.innerHTML = '<option value="">Tous les types</option>';
-
   if (!project) {
-    dropdown.disabled = true;
+    dropdown.replaceChildren(fragment);
+    setReferenceControlDisabledReason(dropdown, 'empty', true);
     dropdown.value = '';
     selectedTypeValue = '';
+    applyReferenceAccessUi(activeReferenceContextSnapshot || createReferenceContextSnapshot());
     return;
   }
 
@@ -1861,14 +2094,16 @@ function populateTypeDocumentDropdown(selectedProject, preferredValue = '', extr
     const option = document.createElement('option');
     option.value = type;
     option.textContent = type;
-    dropdown.appendChild(option);
+    fragment.appendChild(option);
   });
+  dropdown.replaceChildren(fragment);
 
-  dropdown.disabled = false;
+  setReferenceControlDisabledReason(dropdown, 'empty', false);
   const hasDesired = desiredValue &&
     Array.from(dropdown.options).some(option => option.value === desiredValue);
   dropdown.value = hasDesired ? desiredValue : '';
   selectedTypeValue = dropdown.value;
+  applyReferenceAccessUi(activeReferenceContextSnapshot || createReferenceContextSnapshot());
 }
 
 let currentEmetteur = '';
@@ -2402,25 +2637,47 @@ function normalizeReferenceActionFieldsForRetard(action, fields) {
   };
 }
 
-async function refreshProjectsTableCache() {
-  try {
-    projetsTableCache = await grist.docApi.fetchTable('Projets2');
-  } catch (error) {
-    projetsTableCache = null;
-    throw error;
+function isReferenceLookupCacheFresh(loadedAt) {
+  return loadedAt > 0 && Date.now() - loadedAt < REFERENCE_LOOKUP_CACHE_TTL_MS;
+}
+
+function invalidateProjectsTableCache() {
+  projetsTableCache = null;
+  projetsTableCacheLoadedAt = 0;
+  window.GristServiceContext?.invalidateCache?.('Projets2');
+}
+
+async function refreshProjectsTableCache({ forceRefresh = false } = {}) {
+  if (!forceRefresh && projetsTableCache && isReferenceLookupCacheFresh(projetsTableCacheLoadedAt)) {
+    return projetsTableCache;
   }
-  return projetsTableCache;
+  if (projetsTableCachePromise) return projetsTableCachePromise;
+
+  if (forceRefresh) window.GristServiceContext?.invalidateCache?.('Projets2');
+  projetsTableCachePromise = grist.docApi.fetchTable('Projets2').then((table) => {
+    projetsTableCache = table;
+    projetsTableCacheLoadedAt = Date.now();
+    return table;
+  }).catch((error) => {
+    projetsTableCache = null;
+    projetsTableCacheLoadedAt = 0;
+    throw error;
+  }).finally(() => {
+    projetsTableCachePromise = null;
+  });
+  return projetsTableCachePromise;
 }
 
 function populateDocumentTypeDatalist(datalistId, types) {
   const datalist = document.getElementById(datalistId);
   if (!(datalist instanceof HTMLDataListElement)) return;
-  datalist.innerHTML = '';
+  const fragment = document.createDocumentFragment();
   (types || []).forEach((type) => {
     const option = document.createElement('option');
     option.value = type;
-    datalist.appendChild(option);
+    fragment.appendChild(option);
   });
+  datalist.replaceChildren(fragment);
 }
 
 async function refreshReferenceTypeSuggestionLists(projectName = selectedFirstValue) {
@@ -3491,6 +3748,7 @@ function setupUnifiedAddDocumentsUi() {
       alert(error?.message || "Une erreur s'est produite lors de l'ajout des documents.");
     } finally {
       if (confirmUnifiedBtn) confirmUnifiedBtn.disabled = false;
+      applyReferenceAccessUi(activeReferenceContextSnapshot || createReferenceContextSnapshot());
     }
   }
 
@@ -3528,30 +3786,12 @@ setupUnifiedAddDocumentsUi();
 renderUnifiedPendingDocuments();
 scheduleReferenceRetardMidnightRefresh();
 
-// Variable globale pour stocker les enregistrements de la table "Team"
-let teamRecords = [];
-
-// Lorsque les enregistrements de la table sont disponibles, on les stocke
-grist.onRecords((records, tableId) => {
-  if (tableId === "Team") {
-    teamRecords = records;
-    console.log("Team records loaded :", teamRecords);
-  }
-});
-
 async function refreshProjectsDropdownFromProjets() {
   try {
-    const projets = await refreshProjectsTableCache();
-    const ids = Array.isArray(projets.id) ? projets.id : [];
-    const numbers = Array.isArray(projets.Numero_de_projet) ? projets.Numero_de_projet : [];
-    const names = Array.isArray(projets.Nom_de_projet) ? projets.Nom_de_projet : [];
-    _projectsData = ids
-      .map((id, i) => ({
-        id: Number(id),
-        number: String(numbers[i] || '').trim(),
-        name: String(names[i] || '').trim(),
-      }))
-      .filter((p) => p.id > 0 && p.name)
+    await window.GristServiceContext.whenReady();
+    await refreshProjectsTableCache();
+    _projectsData = window.GristServiceContext.getAllowedProjects()
+      .filter((project) => Number(project.id) > 0 && project.name)
       .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base', numeric: true }));
     populateFirstColumnDropdown(_projectsData);
   } catch (err) {
@@ -3567,8 +3807,7 @@ window.addEventListener('pageshow', () => {
 
 window.addEventListener('focus', () => {
   const dropdown = document.getElementById('firstColumnDropdown');
-  const savedProject = readSharedProjectSelection();
-  if (!dropdown || dropdown.options.length <= 1 || (savedProject && !dropdown.value)) {
+  if (!dropdown || dropdown.options.length <= 1 || !isReferenceLookupCacheFresh(projetsTableCacheLoadedAt)) {
     refreshProjectsDropdownFromProjets();
   } else {
     refreshRestoredReferenceProject();
@@ -3591,18 +3830,25 @@ function populateFirstColumnDropdown(values) {
     typeof v === 'object' && v !== null ? v : { id: null, number: '', name: String(v || '').trim() }
   ).filter((p) => p.name);
 
-  const currentId = readSharedProjectId();
-  const currentSelection = dropdown.value || readSharedProjectSelection();
-
-  dropdown.innerHTML = '<option value="">Selectionner un projet</option>';
+  const currentProject = window.GristServiceContext?.getCurrentProject?.();
+  const currentId = Number(currentProject?.id) || readSharedProjectId();
+  const currentSelection = currentProject?.name || dropdown.value || readSharedProjectSelection();
+  const fragment = document.createDocumentFragment();
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'Selectionner un projet';
+  placeholder.disabled = Boolean(currentProject);
+  fragment.appendChild(placeholder);
 
   projectObjects.forEach((p) => {
     const option = document.createElement('option');
     option.value = p.name;
     option.text = `${p.number} - ${p.name}`;
     if (p.id) option.dataset.projectId = String(p.id);
-    dropdown.appendChild(option);
+    option.dataset.projectNumber = String(p.number || '');
+    fragment.appendChild(option);
   });
+  dropdown.replaceChildren(fragment);
 
   // Restaurer par ID d'abord, puis par nom
   let restoredProject = '';
@@ -3617,7 +3863,6 @@ function populateFirstColumnDropdown(values) {
   dropdown.value = restoredProject;
   selectedFirstValue = dropdown.value || selectedFirstValue || '';
   if (restoredProject) {
-    saveSharedProjectSelection(restoredProject);
     selectedFirstValue = restoredProject;
     refreshRestoredReferenceProject();
   }
@@ -3657,64 +3902,6 @@ function refreshRestoredReferenceProject() {
 }
 
 // Réinitialise et désactive la seconde liste si aucun projet n'est sélectionné
-document.getElementById('firstColumnDropdown').addEventListener('change', function () {
-  const secondDropdown = document.getElementById('secondColumnListbox');
-  const typeDropdown = document.getElementById('thirdColumnDropdown');
-  const tableBody = document.getElementById('tableBody');
-  const tableHeader = document.getElementById('tableHeader');
-
-  selectedFirstValue = this.value.trim();
-  selectedTypeValue = '';
-  selectedSecondValue = '';
-  lastValidDocument = '';
-  selectedZoneValue = REFERENCE_ALL_ZONES_VALUE;
-
-  if (!selectedFirstValue) {
-    resetZoneDropdown(true);
-    secondDropdown.disabled = true; // Désactiver la seconde liste
-    secondDropdown.innerHTML = '<option value="">Sélectionner un étage</option>';
-    tableBody.innerHTML = '';
-    tableHeader.innerHTML = '';
-    return;
-  }
-
-  secondDropdown.disabled = false; // Activer la seconde liste si un projet est sélectionné
-  populateZoneDropdown(selectedFirstValue, REFERENCE_ALL_ZONES_VALUE);
-  populateSecondColumnListbox(selectedFirstValue); // Actualiser la liste
-  updateEmetteurList();
-  secondDropdown.value = '';
-  selectedSecondValue = '';
-  tableBody.innerHTML = '';
-  tableHeader.innerHTML = '';
-});
-
-// Function to populate the second dropdown based on the selected first column value
-function populateSecondColumnListbox(selectedValue) {
-  const listbox = document.getElementById('secondColumnListbox');
-  listbox.innerHTML = '<option value="">Sélectionner un étage</option>'; // Réinitialise la liste
-
-  const secondColumnValues = records
-    .filter(record => record.NomProjet === selectedValue) // Filtre selon le projet
-    .map(record => record.NomDocument) // Extrait les valeurs
-    .filter((value, index, self) => value && self.indexOf(value) === index) // Supprime les doublons
-    .sort();
-
-  secondColumnValues.forEach(value => {
-    const option = document.createElement('option');
-    option.value = value;
-    option.text = value;
-    listbox.appendChild(option);
-  });
-
-  // Ajoute l'option "Ajouter document"
-  const addOption = document.createElement('option');
-  addOption.value = DOC_ADD_SPECIAL_VALUE;
-  addOption.text = 'Ajouter documents';
-  addOption.style.fontWeight = '700';
-  listbox.appendChild(addOption);
-}
-
-
 // Helper function to check if a string is a valid date
 function isValidDate(dateString) {
   const date = new Date(dateString);
@@ -4230,7 +4417,6 @@ function autoFillEditFields() {
 }
 
 // Mise à jour de la liste des références lorsqu'on change le projet ou l'émetteur
-document.getElementById('firstColumnDropdown').addEventListener('change', updateEditReferenceList);
 document.getElementById('editEmetteur').addEventListener('change', updateEditReferenceList);
 
 // Auto-remplissage des champs lors de la sélection ou de la saisie d'une référence
@@ -4495,43 +4681,6 @@ function hideContextMenu() {
 }
 
 // Fetch records from Grist
-grist.onRecords(function (receivedRecords, tableId) {
-  if (tableId === 'Team') return;
-
-  records = receivedRecords;
-  referenceRecordsReady = true;
-  buildReferencesNumeroCache(receivedRecords);
-  scheduleReferenceRetardReconciliation();
-
-  if (newTable) {
-    newTable = false; // Reset the flag after handling the new table
-    const preferredType = normalizeTypeDocument(newTableType || selectedTypeValue);
-    const parsedNewDoc = parseDocValue(newTableName);
-    const preferredZone = normalizeZoneValue(parsedNewDoc.zone) || REFERENCE_NO_ZONE_VALUE;
-    populateTypeDocumentDropdown(selectedFirstValue, preferredType, preferredType ? [preferredType] : []);
-    populateZoneDropdown(selectedFirstValue, preferredZone);
-    populateSecondColumnListbox(selectedFirstValue, newTableName);
-    updateEmetteurList(); // Met à jour la liste des émetteurs en fonction du projet sélectionné
-
-    // Sélectionne automatiquement le nouveau tableau
-    const listbox = document.getElementById('secondColumnListbox');
-    listbox.value = newTableName;
-
-    // Déclenche l'affichage du tableau correspondant
-    selectedSecondValue = newTableName;
-    lastValidDocument = newTableName;
-    selectedDocName = parsedNewDoc.name || '';
-    selectedDocNumber = parseNumeroForStorage(parsedNewDoc.numero);
-    selectedDocZone = normalizeZoneValue(parsedNewDoc.zone);
-    newTableType = '';
-    populateTable();
-  } else {
-    populateTable()
-    // Populate the first dropdown with unique values from 'NomProjet'
-    refreshProjectsDropdownFromProjets();
-  }
-});
-
 document.getElementById('secondColumnListbox').addEventListener('change', function () {
   const selectedValue = this.value;
   console.log("Tableau sélectionné :", selectedValue);
@@ -5242,6 +5391,7 @@ function refreshDuplicateSelectionUi() {
     selectVisibleButton.disabled = visible.length === 0 || visible.every(input => input.checked);
   }
   updateDuplicateSelectionSummary();
+  applyReferenceAccessUi(activeReferenceContextSnapshot || createReferenceContextSnapshot());
 }
 
 async function renderDocumentCheckboxList(typeFilterValue = null, checkedValues = null) {
@@ -5519,6 +5669,35 @@ function removeCustomEmitter(rowToRemove) {
   allRows[allRows.length - 1].remove();
 }
 
+function normalizeEmetteurListValue(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function getEmetteurListKey(value) {
+  return normalizeEmetteurListValue(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('fr');
+}
+
+function getUniqueEmetteurs(values) {
+  const seen = new Set();
+  const uniqueValues = [];
+
+  (Array.isArray(values) ? values : []).forEach((value) => {
+    const normalizedValue = normalizeEmetteurListValue(value);
+    const key = getEmetteurListKey(normalizedValue);
+    if (!key || seen.has(key)) return;
+
+    seen.add(key);
+    uniqueValues.push(normalizedValue);
+  });
+
+  return uniqueValues;
+}
+
 function collectProjectReferenceEmitters(projectName) {
   const project = _norm(projectName);
   if (!project) return [];
@@ -5530,36 +5709,6 @@ function collectProjectReferenceEmitters(projectName) {
     )
     .map((record) => _norm(record?.Emetteur))
     .filter(Boolean);
-}
-
-async function updateEmetteurList(excludeCustom = false, targetDropdownId = "emetteurDropdown") {
-  const selectedProject = document.getElementById('firstColumnDropdown').value;
-  if (!selectedProject) return;
-
-  try {
-    // Liste des émetteurs prédéfinis
-    const defaultEmetteurs = await getDefaultEmetteurs();
-
-    const emetteursFromProject = collectProjectReferenceEmitters(selectedProject);
-
-    // Supprimer les doublons et trier
-    let uniqueEmetteursFromProject = [...new Set(emetteursFromProject)]
-      .filter(emetteur => emetteur && !defaultEmetteurs.includes(emetteur))
-      .sort();
-
-    console.log(`Émetteurs trouvés pour ${selectedProject} :`, uniqueEmetteursFromProject);
-
-    // Exclure les émetteurs personnalisés si demandé
-    if (excludeCustom) {
-      uniqueEmetteursFromProject = uniqueEmetteursFromProject.filter(emetteur => defaultEmetteurs.includes(emetteur));
-    }
-
-    // Mise à jour de la liste
-    populateDatalist(targetDropdownId, [...defaultEmetteurs, ...uniqueEmetteursFromProject]);
-
-  } catch (error) {
-    console.error("Erreur lors de la récupération des émetteurs :", error);
-  }
 }
 
 function populateEmetteurDropdown(projectEmetteurs, defaultEmetteurs) {
@@ -5626,9 +5775,6 @@ function populateEmetteurDropdown(projectEmetteurs, defaultEmetteurs) {
   addCustomEmetteurRow();
 }
 
-document.getElementById('firstColumnDropdown').addEventListener('change', function () {
-  updateEmetteurList();
-});
 
 function populateDatalist(datalistId, values) {
   const datalist = document.getElementById(datalistId);
@@ -5636,12 +5782,13 @@ function populateDatalist(datalistId, values) {
     console.error(`Erreur : Datalist ${datalistId} introuvable.`);
     return;
   }
-  datalist.innerHTML = ''; // Vider la liste existante
-  values.forEach(value => {
+  const fragment = document.createDocumentFragment();
+  getUniqueEmetteurs(values).forEach(value => {
     const option = document.createElement('option');
     option.value = value;
-    datalist.appendChild(option);
+    fragment.appendChild(option);
   });
+  datalist.replaceChildren(fragment);
 }
 
 document.getElementById('addDocumentDialog').addEventListener('show', () => {
@@ -5669,7 +5816,7 @@ async function updateEmetteurListForInputs() {
     .filter((value, index, self) => value && self.indexOf(value) === index)
     .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
-  const allEmetteurs = [...new Set([...defaultEmetteurs, ...projectEmetteurs])]
+  const allEmetteurs = getUniqueEmetteurs([...defaultEmetteurs, ...projectEmetteurs])
     .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
   updateDatalist('emetteurList', allEmetteurs);
@@ -5678,17 +5825,7 @@ async function updateEmetteurListForInputs() {
 
 // Fonction pour remplir une liste `datalist`
 function updateDatalist(listId, values) {
-  const datalist = document.getElementById(listId);
-  if (!datalist) {
-    console.error(`Erreur : Datalist ${listId} introuvable.`);
-    return;
-  }
-  datalist.innerHTML = ''; // Vider la liste existante
-  values.forEach(value => {
-    const option = document.createElement('option');
-    option.value = value;
-    datalist.appendChild(option);
-  });
+  populateDatalist(listId, values);
 }
 
 document.getElementById('editEmetteur').addEventListener('input', (event) => {
@@ -5713,7 +5850,7 @@ async function updateEditEmetteurList() {
     .filter((value, index, self) => value && self.indexOf(value) === index)
     .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
-  const allEmetteurs = [...new Set([...defaultEmetteurs, ...projectEmetteurs])]
+  const allEmetteurs = getUniqueEmetteurs([...defaultEmetteurs, ...projectEmetteurs])
     .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
   emetteurList.innerHTML = '';
@@ -5809,7 +5946,6 @@ document.getElementById('editRowDialog').addEventListener('submit', async (e) =>
 });
 
 // Met à jour la liste si l'utilisateur change de projet avant d'éditer une ligne
-document.getElementById('firstColumnDropdown').addEventListener('change', updateEditEmetteurList);
 
 // Fonction pour forcer la mise à jour des émetteurs après modification
 function refreshEmetteurList() {
@@ -5864,7 +6000,7 @@ async function updateEmetteurList(excludeCustom = false, targetDropdownIds = ["e
     }
 
     // Fusionner et trier la liste finale
-    let finalEmetteurList = [...defaultEmetteurs, ...uniqueEmetteursFromProject]
+    let finalEmetteurList = getUniqueEmetteurs([...defaultEmetteurs, ...uniqueEmetteursFromProject])
       .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
     // Pour la cible "emetteurList" (formulaire Ajouter une ligne),
@@ -5872,8 +6008,8 @@ async function updateEmetteurList(excludeCustom = false, targetDropdownIds = ["e
     if (targetDropdownIds.includes("emetteurList")) {
       const emitterInput = document.getElementById('emetteur');
       const currentValue = emitterInput.value.trim();
-      if (currentValue && !finalEmetteurList.includes(currentValue)) {
-        finalEmetteurList.push(currentValue);
+      if (currentValue) {
+        finalEmetteurList = getUniqueEmetteurs([...finalEmetteurList, currentValue]);
         finalEmetteurList.sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
       }
     }
@@ -5889,15 +6025,12 @@ document.getElementById('emetteur').addEventListener('blur', () => {
   updateEmetteurList(false, "emetteurList");
 });
 
-document.getElementById('firstColumnDropdown').addEventListener('change', () => {
-  updateEmetteurList(true, ["editEmetteurList"]);
-});
 
-async function getDefaultEmetteurs() {
+async function fetchDefaultEmetteurs() {
   try {
     const emitterTable = await grist.docApi.fetchTable('Emetteurs');
     if (emitterTable && emitterTable.Emetteurs && emitterTable.Emetteurs.length > 0) {
-      return emitterTable.Emetteurs.filter(val => !!val)
+      return getUniqueEmetteurs(emitterTable.Emetteurs)
         .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
     }
     return [];
@@ -5905,6 +6038,33 @@ async function getDefaultEmetteurs() {
     console.error("Erreur lors de la récupération des émetteurs par défaut :", error);
     return [];
   }
+}
+
+const defaultEmetteursCache = new Map();
+
+function getDefaultEmetteursCacheKey() {
+  const context = window.GristServiceContext?.getState?.();
+  return `${context?.currentProject?.number || ''}|${context?.selectedService || ''}`;
+}
+
+async function getDefaultEmetteurs({ forceRefresh = false } = {}) {
+  const cacheKey = getDefaultEmetteursCacheKey();
+  const cached = defaultEmetteursCache.get(cacheKey);
+  if (!forceRefresh && cached?.value && isReferenceLookupCacheFresh(cached.loadedAt)) {
+    return cached.value;
+  }
+  if (cached?.promise) return cached.promise;
+
+  const entry = cached || { value: null, loadedAt: 0, promise: null };
+  entry.promise = fetchDefaultEmetteurs().then((values) => {
+    entry.value = values;
+    entry.loadedAt = Date.now();
+    return values;
+  }).finally(() => {
+    entry.promise = null;
+  });
+  defaultEmetteursCache.set(cacheKey, entry);
+  return entry.promise;
 }
 
 async function getTeamService() {
@@ -6844,6 +7004,11 @@ function enforceDocPlaceholderText() {
 function populateSecondColumnListbox(selectedValue, preferredValue = null) {
   const listbox = document.getElementById('secondColumnListbox');
   if (!listbox) return;
+  const fragment = document.createDocumentFragment();
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = DOC_SELECT_PLACEHOLDER_TEXT;
+  fragment.appendChild(placeholder);
 
   const selectedProject = _norm(selectedValue);
   const selectedType = getCurrentSelectedType();
@@ -6851,8 +7016,6 @@ function populateSecondColumnListbox(selectedValue, preferredValue = null) {
     preferredValue != null ? preferredValue : (selectedSecondValue || listbox.value || lastValidDocument)
   );
 
-
-  listbox.innerHTML = DOC_SELECT_PLACEHOLDER_HTML;
 
   const documentEntries = collectProjectDocumentEntries(selectedProject, selectedType);
   const hasZones = projectHasStructuredZones(selectedProject);
@@ -6886,19 +7049,22 @@ function populateSecondColumnListbox(selectedValue, preferredValue = null) {
         typeEntries.forEach((entry) => appendDocumentOption(group, entry));
       }
 
-      listbox.appendChild(group);
+      fragment.appendChild(group);
     });
   } else if (hasZones) {
-    appendZoneOptions(listbox, documentEntries, false);
+    appendZoneOptions(fragment, documentEntries, false);
   } else {
-    documentEntries.forEach((entry) => appendDocumentOption(listbox, entry));
+    documentEntries.forEach((entry) => appendDocumentOption(fragment, entry));
   }
 
   const addOption = document.createElement('option');
   addOption.value = DOC_ADD_SPECIAL_VALUE;
   addOption.text = 'Ajouter documents';
   addOption.style.fontWeight = '700';
-  listbox.appendChild(addOption);
+  addOption.dataset.referenceWriteOption = 'true';
+  fragment.appendChild(addOption);
+  listbox.replaceChildren(fragment);
+  setReferenceControlDisabledReason(listbox, 'empty', !selectedProject);
 
   const hasDesiredValue = desiredValue &&
     Array.from(listbox.options).some(option => option.value === desiredValue);
@@ -6918,6 +7084,7 @@ function populateSecondColumnListbox(selectedValue, preferredValue = null) {
     selectedDocNumber = null;
     selectedDocZone = '';
   }
+  applyReferenceAccessUi(activeReferenceContextSnapshot || createReferenceContextSnapshot());
 }
 
 document.getElementById('thirdColumnDropdown').addEventListener('change', function () {
@@ -6954,14 +7121,29 @@ document.getElementById('zoneDropdown')?.addEventListener('change', function () 
   }
 });
 
-document.getElementById('firstColumnDropdown').addEventListener('change', function () {
-  const project = _norm(this.value);
-  saveSharedProjectSelection(project);
-  const secondDropdown = document.getElementById('secondColumnListbox');
-  const tableBody = document.getElementById('tableBody');
-  const tableHeader = document.getElementById('tableHeader');
+let referenceProjectChangeGeneration = 0;
+let referenceProjectChangeInFlight = false;
+let lastReferenceContextKey = '';
 
-  selectedFirstValue = project;
+function setReferenceProjectLoading(isLoading) {
+  const secondDropdown = document.getElementById('secondColumnListbox');
+  const typeDropdown = document.getElementById('thirdColumnDropdown');
+  const zoneDropdown = document.getElementById('zoneDropdown');
+  [secondDropdown, typeDropdown, zoneDropdown].forEach((control) => {
+    if (!control) return;
+    setReferenceControlDisabledReason(control, 'loading', isLoading);
+    control.setAttribute('aria-busy', isLoading ? 'true' : 'false');
+  });
+  if (isLoading && secondDropdown) {
+    const loadingOption = document.createElement('option');
+    loadingOption.value = '';
+    loadingOption.textContent = 'Chargement...';
+    secondDropdown.replaceChildren(loadingOption);
+  }
+  applyReferenceAccessUi(activeReferenceContextSnapshot || createReferenceContextSnapshot());
+}
+
+function resetReferenceProjectSelections() {
   selectedTypeValue = '';
   selectedSecondValue = '';
   lastValidDocument = '';
@@ -6969,26 +7151,108 @@ document.getElementById('firstColumnDropdown').addEventListener('change', functi
   selectedDocName = '';
   selectedDocNumber = null;
   selectedDocZone = '';
+}
 
-  if (!project) {
+function clearReferenceProjectRender() {
+  const tableBody = document.getElementById('tableBody');
+  const tableHeader = document.getElementById('tableHeader');
+  if (tableBody) tableBody.replaceChildren();
+  if (tableHeader) tableHeader.replaceChildren();
+}
+
+async function handleReferenceProjectChange(projectValue) {
+  const generation = ++referenceProjectChangeGeneration;
+  const dropdown = document.getElementById('firstColumnDropdown');
+  const requestedProject = _norm(projectValue ?? dropdown?.value);
+  const previousProject = selectedFirstValue;
+
+  resetReferenceProjectSelections();
+  if (!requestedProject) {
+    const currentState = window.GristServiceContext.getState();
+    if (currentState?.currentProject) {
+      selectedFirstValue = currentState.currentProject.name;
+      if (dropdown) dropdown.value = selectedFirstValue;
+      populateTypeDocumentDropdown(selectedFirstValue);
+      populateZoneDropdown(selectedFirstValue, REFERENCE_ALL_ZONES_VALUE);
+      populateSecondColumnListbox(selectedFirstValue, '');
+      return currentState;
+    }
+    selectedFirstValue = '';
     populateTypeDocumentDropdown('');
     resetZoneDropdown(true);
-    secondDropdown.disabled = true;
-    secondDropdown.innerHTML = DOC_SELECT_PLACEHOLDER_HTML;
-    tableBody.innerHTML = '';
-    tableHeader.innerHTML = '';
-    return;
+    const secondDropdown = document.getElementById('secondColumnListbox');
+    if (secondDropdown) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = DOC_SELECT_PLACEHOLDER_TEXT;
+      secondDropdown.replaceChildren(placeholder);
+      setReferenceControlDisabledReason(secondDropdown, 'empty', true);
+    }
+    clearReferenceProjectRender();
+    return null;
   }
 
-  populateTypeDocumentDropdown(project);
-  populateZoneDropdown(project, REFERENCE_ALL_ZONES_VALUE);
-  populateSecondColumnListbox(project, '');
+  referenceProjectChangeInFlight = true;
+  setReferenceProjectLoading(true);
+  try {
+    const nextState = await window.GristServiceContext.selectProject(requestedProject, {
+      reason: 'reference2-project-selection',
+    });
+    const nextSnapshot = createReferenceContextSnapshot(nextState);
+    if (
+      generation !== referenceProjectChangeGeneration ||
+      !isReferenceContextSnapshotCurrent(nextSnapshot)
+    ) return null;
+    activeReferenceContextSnapshot = nextSnapshot;
+
+    const currentProject = nextSnapshot.currentProject;
+    if (!currentProject) throw new Error("Le projet selectionne n'est plus autorise.");
+    selectedFirstValue = currentProject.name;
+    if (dropdown) dropdown.value = currentProject.name;
+
+    updateReferenceList();
+    updateEditReferenceList();
+    populateTypeDocumentDropdown(selectedFirstValue);
+    populateZoneDropdown(selectedFirstValue, REFERENCE_ALL_ZONES_VALUE);
+    populateSecondColumnListbox(selectedFirstValue, '');
+    await updateEmetteurList(false, ['emetteurList', 'editEmetteurList']);
+    if (
+      generation !== referenceProjectChangeGeneration ||
+      !isReferenceContextSnapshotCurrent(nextSnapshot)
+    ) return null;
+
+    clearReferenceProjectRender();
+    scheduleReferenceRetardReconciliation();
+    applyReferenceAccessUi(nextSnapshot);
+    return nextState;
+  } catch (error) {
+    if (generation === referenceProjectChangeGeneration) {
+      selectedFirstValue = previousProject;
+      if (dropdown) dropdown.value = previousProject;
+      showReferenceToast(error?.message || 'Changement de projet impossible.', { warning: true });
+    }
+    throw error;
+  } finally {
+    if (generation === referenceProjectChangeGeneration) {
+      referenceProjectChangeInFlight = false;
+      setReferenceProjectLoading(false);
+    }
+  }
+}
+
+const referenceProjectDropdown = document.getElementById('firstColumnDropdown');
+referenceProjectDropdown.dataset.gristProjectController = 'true';
+referenceProjectDropdown.addEventListener('change', function () {
+  handleReferenceProjectChange(this.value).catch(() => {});
 });
 
 try {
   const secondDropdown = document.getElementById('secondColumnListbox');
   if (secondDropdown) {
-    secondDropdown.innerHTML = DOC_SELECT_PLACEHOLDER_HTML;
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = DOC_SELECT_PLACEHOLDER_TEXT;
+    secondDropdown.replaceChildren(placeholder);
     enforceDocPlaceholderText();
     const placeholderObserver = new MutationObserver(() => {
       enforceDocPlaceholderText();
@@ -6997,13 +7261,68 @@ try {
   }
 } catch (e) { }
 
-grist.onRecords(function (receivedRecords, tableId) {
-  if (tableId === 'Team') return;
+window.GristServiceContext.onRecords(async function handleReferenceRecords(
+  receivedRecords,
+  _mappings,
+  delivery
+) {
   if (!Array.isArray(receivedRecords)) return;
+  const contextSnapshot = createReferenceContextSnapshot(delivery, receivedRecords);
+  if (!isReferenceContextSnapshotCurrent(contextSnapshot)) return;
+  if (
+    contextSnapshot.rawVersion &&
+    contextSnapshot.rawVersion < referenceLatestRawVersion
+  ) return;
+  referenceLatestRawVersion = Math.max(referenceLatestRawVersion, contextSnapshot.rawVersion);
+  activeReferenceContextSnapshot = contextSnapshot;
 
-  records = receivedRecords;
+  const contextKey = `${contextSnapshot.projectNumber}|${contextSnapshot.selectedService}`;
+  if (lastReferenceContextKey && contextKey !== lastReferenceContextKey) {
+    resetReferenceProjectSelections();
+  }
+  lastReferenceContextKey = contextKey;
+  const contextProject = contextSnapshot.currentProject;
+  const projectAliases = new Set(
+    contextSnapshot.projectAliases
+      .map(normalizeReferenceDocumentIdentityPart)
+      .filter(Boolean)
+  );
+  records = receivedRecords.map((record) => {
+    const recordProject = normalizeReferenceDocumentIdentityPart(
+      record?.NomProjet ?? record?.NomProjetString ?? record?.Nom_projet
+    );
+    if (!contextProject?.name || !projectAliases.has(recordProject)) return record;
+    return { ...record, NomProjet: contextProject.name };
+  });
   referenceRecordsReady = true;
+  buildReferencesNumeroCache(records);
   scheduleReferenceRetardReconciliation();
+  if (contextProject?.name) selectedFirstValue = contextProject.name;
+
+  const projectDropdown = document.getElementById('firstColumnDropdown');
+  const dropdownProjectNumbers = projectDropdown
+    ? Array.from(projectDropdown.options)
+      .map((option) => option.dataset.projectNumber || '')
+      .filter(Boolean)
+      .sort()
+      .join('|')
+    : '';
+  const allowedProjectNumbers = window.GristServiceContext.getAllowedProjects()
+    .map((project) => project.number)
+    .sort()
+    .join('|');
+  if (
+    projectDropdown &&
+    (projectDropdown.options.length <= 1 ||
+      dropdownProjectNumbers !== allowedProjectNumbers ||
+      !Array.from(projectDropdown.options).some((option) => option.value === selectedFirstValue))
+  ) {
+    await refreshProjectsDropdownFromProjets();
+    if (!isReferenceContextSnapshotCurrent(contextSnapshot)) return;
+  } else if (projectDropdown && selectedFirstValue) {
+    projectDropdown.value = selectedFirstValue;
+  }
+
   const tableBody = document.getElementById('tableBody');
   const tableHeader = document.getElementById('tableHeader');
 
@@ -7012,16 +7331,69 @@ grist.onRecords(function (receivedRecords, tableId) {
     resetZoneDropdown(true);
     if (tableBody) tableBody.innerHTML = '';
     if (tableHeader) tableHeader.innerHTML = '';
+    setReferenceProjectLoading(false);
+    applyReferenceAccessUi(contextSnapshot);
+    return;
+  }
+
+  if (newTable) {
+    newTable = false;
+    const preferredType = normalizeTypeDocument(newTableType || selectedTypeValue);
+    const parsedNewDoc = parseDocValue(newTableName);
+    const preferredZone = normalizeZoneValue(parsedNewDoc.zone) || REFERENCE_NO_ZONE_VALUE;
+    populateTypeDocumentDropdown(selectedFirstValue, preferredType, preferredType ? [preferredType] : []);
+    populateZoneDropdown(selectedFirstValue, preferredZone);
+    populateSecondColumnListbox(selectedFirstValue, newTableName);
+    await updateEmetteurList(false, ['emetteurList', 'editEmetteurList']);
+    if (!isReferenceContextSnapshotCurrent(contextSnapshot)) return;
+    const listbox = document.getElementById('secondColumnListbox');
+    listbox.value = newTableName;
+    selectedSecondValue = newTableName;
+    lastValidDocument = newTableName;
+    selectedDocName = parsedNewDoc.name || '';
+    selectedDocNumber = parseNumeroForStorage(parsedNewDoc.numero);
+    selectedDocZone = normalizeZoneValue(parsedNewDoc.zone);
+    newTableType = '';
+    populateTable();
+    setReferenceProjectLoading(false);
+    applyReferenceAccessUi(contextSnapshot);
     return;
   }
 
   populateTypeDocumentDropdown(selectedFirstValue, selectedTypeValue);
   populateZoneDropdown(selectedFirstValue, selectedZoneValue);
   populateSecondColumnListbox(selectedFirstValue, selectedSecondValue || lastValidDocument || '');
+  await updateEmetteurList(false, ['emetteurList', 'editEmetteurList']);
+  if (!isReferenceContextSnapshotCurrent(contextSnapshot)) return;
   if (!selectedSecondValue) {
     if (tableBody) tableBody.innerHTML = '';
     if (tableHeader) tableHeader.innerHTML = '';
+  } else {
+    populateTable();
   }
+  setReferenceProjectLoading(false);
+  applyReferenceAccessUi(contextSnapshot);
+});
+
+ensureReferenceAccessObserver();
+window.GristServiceContext.subscribe((contextState) => {
+  const snapshot = createReferenceContextSnapshot(contextState, records);
+  if (!isReferenceContextSnapshotCurrent(snapshot)) return;
+  const previousSnapshot = activeReferenceContextSnapshot;
+  const contextChanged = !previousSnapshot ||
+    previousSnapshot.projectNumber !== snapshot.projectNumber ||
+    previousSnapshot.selectedService !== snapshot.selectedService ||
+    previousSnapshot.accessMode !== snapshot.accessMode ||
+    previousSnapshot.generation !== snapshot.generation;
+  activeReferenceContextSnapshot = snapshot;
+  if (contextChanged) {
+    records = [];
+    referenceRecordsReady = false;
+    resetReferenceProjectSelections();
+    clearReferenceProjectRender();
+    setReferenceProjectLoading(true);
+  }
+  applyReferenceAccessUi(snapshot);
 });
 
 // --- Force labels in the 2nd dropdown to "<NumeroDocument> <NomDocument>" ---
@@ -7098,23 +7470,10 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
       return;
     }
 
-    var dropdown = document.getElementById('firstColumnDropdown');
-    if (!dropdown) return;
-    if (event.key === 'grist.selected-project-id' && event.newValue) {
-      var idStr = String(event.newValue).trim();
-      var match = Array.from(dropdown.options).find(function (o) { return o.dataset.projectId === idStr; });
-      if (match && dropdown.value !== match.value) {
-        dropdown.value = match.value;
-        dropdown.dispatchEvent(new Event('change'));
-      }
-      return;
-    }
-    if (event.key !== 'grist.selected-project' || !event.newValue) return;
-    var newProject = String(event.newValue).trim();
-    var match = Array.from(dropdown.options).find(function (o) { return _nk(o.value) === _nk(newProject); });
-    if (match && dropdown.value !== match.value) {
-      dropdown.value = match.value;
-      dropdown.dispatchEvent(new Event('change'));
+    if (event.key === 'grist.project-access-changed') {
+      invalidateProjectsTableCache();
+      defaultEmetteursCache.clear();
+      refreshProjectsDropdownFromProjets();
     }
   });
 })();

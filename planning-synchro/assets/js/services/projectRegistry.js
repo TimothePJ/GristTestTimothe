@@ -103,6 +103,13 @@ export function readSharedSelection() {
 }
 
 export function writeSharedSelection({ name, id }) {
+  const runtime = globalThis.GristServiceContext;
+  if (runtime?.selectProject) {
+    if (name || (Number.isInteger(id) && id > 0)) {
+      void runtime.selectProject({ projectId: id, projectName: name }).catch(() => {});
+    }
+    return;
+  }
   if (typeof localStorage === "undefined") return;
   if (name) localStorage.setItem(APP_CONFIG.sharedProjectStorageKey, name);
   else localStorage.removeItem(APP_CONFIG.sharedProjectStorageKey);

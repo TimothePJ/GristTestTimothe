@@ -41,6 +41,51 @@ const CHART_COLORS = {
 const chartStateByRoot = new WeakMap();
 const feedbackByProjectId = new Map();
 
+function getActiveService() {
+  if (typeof window === "undefined") return "Structure";
+  return window.GristServiceContext?.getService?.()
+    || window.GristServiceContextCore?.normalizeService?.(
+      window.localStorage?.getItem("grist.selected-service")
+    )
+    || "Structure";
+}
+
+function isExternalServiceReadOnly() {
+  return typeof window !== "undefined" && Boolean(window.GristServiceContext?.isReadOnly?.());
+}
+
+function getServiceScopedAvancementItems(rawValue) {
+  if (typeof window !== "undefined" && window.GristServiceContextCore?.getServiceAvancementItems) {
+    return window.GristServiceContextCore.getServiceAvancementItems(
+      rawValue,
+      getActiveService()
+    );
+  }
+  try {
+    const parsed = rawValue == null || rawValue === ""
+      ? []
+      : (typeof rawValue === "string" ? JSON.parse(rawValue) : rawValue);
+    if (Array.isArray(parsed)) {
+      return { items: getActiveService() === "Structure" ? parsed : [], error: null };
+    }
+    const items = parsed?.services?.[getActiveService()];
+    return { items: Array.isArray(items) ? items : [], error: null };
+  } catch (error) {
+    return { items: [], error };
+  }
+}
+
+function serializeServiceScopedAvancement(rawValue, items) {
+  if (typeof window !== "undefined" && window.GristServiceContextCore?.updateServiceAvancement) {
+    return window.GristServiceContextCore.updateServiceAvancement(
+      rawValue,
+      getActiveService(),
+      items
+    );
+  }
+  return JSON.stringify(items);
+}
+
 function getElements(rootEl) {
   return {
     chartContainer: rootEl.querySelector("#avancement-chart-container"),
@@ -239,24 +284,14 @@ function getProjectRecords(project) {
 }
 
 function parseAvancementConfig(rawValue) {
-  if (rawValue == null || rawValue === "") {
-    return { selections: [], budgetProgress: [], error: null };
-  }
-
   try {
-    const parsed = typeof rawValue === "string" ? JSON.parse(rawValue) : rawValue;
-
-    if (!Array.isArray(parsed)) {
-      return {
-        selections: [],
-        budgetProgress: [],
-        error: new Error("Avancement must be an array"),
-      };
-    }
+    const scoped = getServiceScopedAvancementItems(rawValue);
+    if (scoped.error) throw scoped.error;
+    if (!Array.isArray(scoped.items)) throw new Error("Avancement service must be an array");
 
     return {
-      selections: dedupeSelections(parsed.map(normalizeSelection).filter(Boolean)),
-      budgetProgress: dedupeBudgetProgress(parsed.map(normalizeBudgetProgress).filter(Boolean)),
+      selections: dedupeSelections(scoped.items.map(normalizeSelection).filter(Boolean)),
+      budgetProgress: dedupeBudgetProgress(scoped.items.map(normalizeBudgetProgress).filter(Boolean)),
       error: null,
     };
   } catch (error) {
@@ -310,16 +345,17 @@ function dedupeBudgetProgress(progressItems) {
 
 function getProjectConfig(project) {
   const parsedConfig = parseAvancementConfig(project?.avancementConfigRaw);
+  const readOnly = isExternalServiceReadOnly();
 
   return {
     id: project?.id ?? null,
     projectNumber: normalizeText(project?.projectNumber),
     selections: parsedConfig.selections,
     budgetProgress: parsedConfig.budgetProgress,
-    canSave: Boolean(project?.id) && !parsedConfig.error,
+    canSave: Boolean(project?.id) && !parsedConfig.error && !readOnly,
     warning: parsedConfig.error
       ? "JSON invalide dans Projets2.Avancement. Corrige ou vide la cellule."
-      : "",
+      : (readOnly ? "Service externe : consultation en lecture seule." : ""),
   };
 }
 
@@ -1125,13 +1161,20 @@ async function saveAvancementConfig(
   }
 
   try {
+    if (isExternalServiceReadOnly()) {
+      throw new Error("Ce service est accessible en lecture seule.");
+    }
     setIndexSelectionControlsBusy(rootEl, true);
     setBudgetProgressControlsBusy(rootEl, true);
 
-    const serializedConfig = JSON.stringify([
+    const serviceItems = [
       ...dedupeSelections(selections),
       ...dedupeBudgetProgress(budgetProgress),
-    ]);
+    ];
+    const serializedConfig = serializeServiceScopedAvancement(
+      project?.avancementConfigRaw,
+      serviceItems
+    );
 
     await onSave(project, serializedConfig);
     project.avancementConfigRaw = serializedConfig;

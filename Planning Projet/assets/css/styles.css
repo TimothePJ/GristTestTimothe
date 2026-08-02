@@ -2037,3 +2037,166 @@ body.is-manage-zone-modal-open {
     font-size: 11px;
   }
 }
+
+/* ==========================================================
+   Barre principale compacte sur une seule ligne
+
+   Le contexte de service partagé autorise normalement les en-têtes à
+   revenir à la ligne. Le planning possède déjà une zone de travail très
+   dense : on conserve donc ici une hauteur stable et on réduit les
+   contrôles progressivement. Le défilement horizontal n'intervient qu'en
+   dernier recours (fort zoom ou fenêtre particulièrement étroite).
+   ========================================================== */
+
+body #toolbar.grist-service-context-host {
+  flex-wrap: nowrap !important;
+  gap: 8px;
+  height: var(--toolbar-height) !important;
+  min-height: var(--toolbar-height);
+  padding: 6px 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+body #toolbar.grist-service-context-host::-webkit-scrollbar {
+  display: none;
+}
+
+body #toolbar.grist-service-context-host > .nav-buttons,
+body #toolbar.grist-service-context-host > .zoom-buttons {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+body #toolbar.grist-service-context-host > .filters {
+  flex: 1 1 430px;
+  min-width: 350px;
+  white-space: nowrap;
+}
+
+body #toolbar.grist-service-context-host > #current-date-range {
+  flex: 1 1 230px;
+  min-width: 96px;
+  max-width: 300px;
+  margin-left: 0;
+}
+
+body #toolbar.grist-service-context-host > #grist-service-context-control {
+  flex: 0 0 auto;
+  grid-template-columns: max-content minmax(104px, 128px) max-content !important;
+  gap: 4px;
+  width: auto !important;
+  min-height: 32px;
+  margin-left: 0;
+  padding: 2px 5px;
+  border-radius: 5px;
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+body #toolbar.grist-service-context-host > #grist-service-context-control select {
+  width: 100% !important;
+  max-width: 128px !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  padding-block: 3px !important;
+  font-size: 12px !important;
+}
+
+body #toolbar.grist-service-context-host > #grist-service-context-control .grist-service-context-badge {
+  grid-column: auto !important;
+  min-height: 22px;
+  padding: 3px 6px;
+  font-size: 10px;
+}
+
+@media (max-width: 1600px) {
+  body #toolbar.grist-service-context-host {
+    gap: 6px;
+    padding-inline: 8px;
+  }
+
+  body #toolbar.grist-service-context-host > .filters {
+    flex-basis: 390px;
+    min-width: 320px;
+    gap: 3px;
+  }
+
+  body #toolbar.grist-service-context-host #projectDropdown,
+  body #toolbar.grist-service-context-host #zoneDropdown {
+    width: clamp(108px, 11vw, 175px);
+    max-width: 175px;
+  }
+
+  body #toolbar.grist-service-context-host .planning-edit-toggle {
+    min-width: 76px;
+  }
+
+  body #toolbar.grist-service-context-host > #current-date-range {
+    flex-basis: 180px;
+    max-width: 210px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 1250px) {
+  body #toolbar.grist-service-context-host {
+    gap: 5px;
+    padding-inline: 6px;
+  }
+
+  body #toolbar.grist-service-context-host > .filters {
+    flex-basis: 340px;
+    min-width: 300px;
+  }
+
+  body #toolbar.grist-service-context-host #projectDropdown,
+  body #toolbar.grist-service-context-host #zoneDropdown {
+    width: clamp(96px, 10vw, 132px);
+    max-width: 132px;
+  }
+
+  body #toolbar.grist-service-context-host button {
+    padding-inline: 7px;
+    font-size: 12px;
+  }
+
+  body #toolbar.grist-service-context-host .planning-edit-toggle {
+    min-width: 68px;
+  }
+
+  body #toolbar.grist-service-context-host > #current-date-range {
+    flex-basis: 120px;
+    min-width: 80px;
+    max-width: 150px;
+    font-size: 11px;
+  }
+
+  body #toolbar.grist-service-context-host > #grist-service-context-control {
+    grid-template-columns: max-content minmax(92px, 112px) max-content !important;
+  }
+
+  body #toolbar.grist-service-context-host > #grist-service-context-control select {
+    max-width: 112px !important;
+  }
+}
+
+@media (max-width: 980px) {
+  body #toolbar.grist-service-context-host > .filters {
+    flex-basis: 300px;
+    min-width: 282px;
+  }
+
+  body #toolbar.grist-service-context-host .toolbar-label {
+    margin-right: 1px;
+    font-size: 11px;
+  }
+
+  body #toolbar.grist-service-context-host > #current-date-range {
+    flex-basis: 96px;
+    min-width: 72px;
+    max-width: 110px;
+  }
+}

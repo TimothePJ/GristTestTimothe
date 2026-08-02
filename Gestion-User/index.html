@@ -5,9 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Gestion Utilisateurs</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <script src="../shared/service-context-core.js"></script>
+  <script src="../shared/grist-service-context.js"></script>
   <link rel="stylesheet" href="assets/css/styles.css">
 </head>
-<body>
+<body data-service-context-multiproject>
   <main class="app-shell">
     <header class="app-header">
       <div>
@@ -29,8 +31,8 @@
       <div class="filter-grid" aria-label="Filtres equipe">
         <label class="field">
           <span>Service</span>
-          <select id="service-filter">
-            <option value="">Tous les services</option>
+          <select id="service-filter" data-grist-service-selector>
+            <option value="">Chargement...</option>
           </select>
         </label>
         <label class="field">

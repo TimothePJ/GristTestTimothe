@@ -92,6 +92,7 @@ export const APP_CONFIG = {
         projectNumber: "NumeroProjet",
         chapter: "Chapter",
         amount: "Amount",
+        service: "Service",
       },
       listePlan: {
         id: "id",
@@ -105,6 +106,7 @@ export const APP_CONFIG = {
         zone: "Zone",
         indice: "Indice",
         diffusionDate: "DateDiffusion",
+        service: "Service",
       },
       planningProject: {
         id: "id",
@@ -123,6 +125,7 @@ export const APP_CONFIG = {
         diffArmature: "Diff_armature",
         duree3: "Duree_3",
         demarragesTravaux: "Demarrages_travaux",
+        service: "Service",
       },
       projectTeam: {
         id: "id",
@@ -130,6 +133,7 @@ export const APP_CONFIG = {
         role: "Role",
         name: "Name",
         dailyRate: "Daily_Rate",
+        service: "Service",
       },
       timesheet: {
         id: "id",
@@ -148,6 +152,7 @@ export const APP_CONFIG = {
         allocationDays: "Allocation_Days",
         effectif: "Effectif",
         label: "Label",
+        service: "Service",
       },
       timeReal: {
         id: "id",
@@ -158,6 +163,7 @@ export const APP_CONFIG = {
         endDate: "End_At",
         allocationDays: "Allocation_Days",
         month: "Mois",
+        service: "Service",
       },
       team: {
         id: "id",
@@ -170,6 +176,7 @@ export const APP_CONFIG = {
         // "PrenomNom || (Prenom + ' ' + Nom)" fallback works here too (spec §4).
         prenom: "Prenom",
         nom: "Nom",
+        service: "Service",
       },
       timeOut: {
         owner: "Owner",

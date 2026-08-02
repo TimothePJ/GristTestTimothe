@@ -1620,15 +1620,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Team Selection
     async function populateTeamSelection() {
-        const teamData = await grist.docApi.fetchTable("Team");
+        const [teamData, currentService] = await Promise.all([
+            grist.docApi.fetchTable("Team"),
+            getTeamService()
+        ]);
         const externalColumn = getTeamExternalColumn(teamData);
         teamMembers = teamData.id.map((id, index) => ({
             id: id,
             Prenom: teamData.Prenom[index],
             Nom: teamData.Nom[index],
             Role: teamData.Role[index],
+            Service: String(teamData.Service?.[index] ?? '').trim(),
             Externe: externalColumn ? toBooleanFlag(teamData[externalColumn][index]) : false
-        }));
+        })).filter((member) => member.Service === currentService);
 
         const groupedByRole = groupTeamMembersByRole(teamMembers);
 
@@ -2692,7 +2696,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // 2. Add Budget Lines
             const budgetActions = getBudgetLinesForProjectCreation().map(line =>
-                ["AddRecord", "Budget", null, { NumeroProjet: projectData.number, Chapter: line.chapter, Amount: line.amount }]
+                ["AddRecord", "Budget", null, {
+                    NumeroProjet: projectData.number,
+                    Chapter: line.chapter,
+                    Amount: line.amount,
+                    Service: serviceValue
+                }]
             );
             if (budgetActions.length > 0) {
                 await grist.docApi.applyUserActions(budgetActions);
@@ -2703,7 +2712,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const teamActions = selectedTeamMembers.map(member => {
                 const name = getTeamMemberDisplayName(member);
                 const role = getTeamMemberRole(member);
-                return ["AddRecord", "ProjectTeam", null, { NumeroProjet: projectData.number, Role: role, Name: name, Daily_Rate: 0 }];
+                return ["AddRecord", "ProjectTeam", null, {
+                    NumeroProjet: projectData.number,
+                    Role: role,
+                    Name: name,
+                    Daily_Rate: 0,
+                    Service: serviceValue
+                }];
             });
             if (teamActions.length > 0) {
                 await grist.docApi.applyUserActions(teamActions);
@@ -2780,11 +2795,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
             uniqueZones.forEach((zoneName) => {
                 if (!planningZoneExists(planningContext.data, projectData.name, zoneName, serviceValue)) {
+                    const zoneAnchorFields = buildPlanningZoneAnchorFields(
+                        planningContext.columns,
+                        projectData.name,
+                        zoneName,
+                        serviceValue
+                    );
                     planningActions.push([
                         "AddRecord",
                         planningContext.tableName,
                         null,
-                        buildPlanningZoneAnchorFields(planningContext.columns, projectData.name, zoneName, serviceValue)
+                        zoneAnchorFields
                     ]);
                 }
             });

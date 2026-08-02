@@ -35,7 +35,17 @@ const TIME_SEGMENT_COLUMN_ALIASES = {
   ],
   effectif: ["Effectif"],
   label: ["Label", "Title"],
+  service: ["Service"],
 };
+
+function getActiveService() {
+  if (typeof globalThis === "undefined") return "Structure";
+  return globalThis.GristServiceContext?.getService?.()
+    || globalThis.GristServiceContextCore?.normalizeService?.(
+      globalThis.localStorage?.getItem("grist.selected-service")
+    )
+    || "Structure";
+}
 
 function toReferenceId(value) {
   if (value == null || value === "") return null;
@@ -69,6 +79,9 @@ function toReferenceId(value) {
 }
 
 function getGrist() {
+  if (window.grist) {
+    return window.grist;
+  }
   try {
     if (window.parent && window.parent !== window && window.parent.grist) {
       return window.parent.grist;
@@ -77,10 +90,7 @@ function getGrist() {
     // Ignore cross-context access issues and fallback to local window.
   }
 
-  if (!window.grist) {
-    throw new Error("API Grist introuvable (window.grist).");
-  }
-  return window.grist;
+  throw new Error("API Grist introuvable (window.grist).");
 }
 
 export function normalizeFetchTableResult(raw) {
@@ -304,6 +314,7 @@ export async function createTimeSegment({
           : effectif === ""
           ? ""
           : toFiniteNumber(effectif, 0),
+      [columns.service]: getActiveService(),
     }).filter(([, value]) => value !== undefined)
   );
   if (toText(label)) {

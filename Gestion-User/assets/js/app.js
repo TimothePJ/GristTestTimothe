@@ -75,6 +75,8 @@ let renderFrame = null;
 let visibleRowsFrame = null;
 let timelineLayoutFrame = null;
 let isRenderingVisibleRows = false;
+let gestionUserLoadGeneration = 0;
+let gestionUserServiceRefreshBound = false;
 
 function addDays(date, days) {
   const next = new Date(date);
@@ -243,11 +245,11 @@ function getUniqueFilterOptions(employees, getLabel) {
 }
 
 function populateFilters(employees, projects) {
-  setSelectOptions(
-    dom.serviceFilter,
-    getUniqueFilterOptions(employees, getServiceLabel),
-    "Tous les services"
+  const activeService = toText(
+    window.GristServiceContext?.getService?.()
+      || window.localStorage?.getItem("grist.selected-service")
   );
+  state.filters.service = getFilterKey(activeService);
   setSelectOptions(
     dom.roleFilter,
     getUniqueFilterOptions(employees, getRoleLabel),
@@ -258,7 +260,7 @@ function populateFilters(employees, projects) {
     getUniqueFilterOptions(Array.from(projects.values()), getProjectDopLabel),
     "Toutes les DOP"
   );
-  dom.serviceFilter.value = state.filters.service;
+  dom.serviceFilter.value = activeService;
   dom.roleFilter.value = state.filters.role;
   dom.dopFilter.value = state.filters.dop;
 }
@@ -785,8 +787,7 @@ function bindEvents() {
     scheduleRender();
   });
   dom.serviceFilter.addEventListener("change", () => {
-    state.filters.service = dom.serviceFilter.value;
-    scheduleRender();
+    state.filters.service = getFilterKey(dom.serviceFilter.value);
   });
   dom.roleFilter.addEventListener("change", () => {
     state.filters.role = dom.roleFilter.value;
@@ -853,25 +854,54 @@ function bindEvents() {
   });
 }
 
+async function refreshGestionUserData() {
+  const loadGeneration = ++gestionUserLoadGeneration;
+  setStatus("Chargement des donnees...");
+  let data;
+  try {
+    data = await loadGestionUserData();
+  } catch (error) {
+    if (loadGeneration !== gestionUserLoadGeneration) return false;
+    throw error;
+  }
+  if (loadGeneration !== gestionUserLoadGeneration) return false;
+
+  state.data = data;
+  const bounds = getSegmentYearBounds(data.segments);
+  populateYearSelect(bounds.minYear, bounds.maxYear);
+  populateFilters(data.employees, data.projects);
+  populateProjectFilter(data);
+  render();
+  return true;
+}
+
+function showGestionUserLoadError(error) {
+  console.error("Erreur initialisation Gestion-User :", error);
+  setStatus(error?.message || "Erreur de chargement.", "error");
+  dom.emptyState.hidden = false;
+  dom.emptyState.textContent = error?.message || "Erreur de chargement.";
+}
+
+function bindGestionUserServiceRefresh() {
+  if (gestionUserServiceRefreshBound) return;
+  const serviceContext = window.GristServiceContext;
+  if (typeof serviceContext?.onServiceChange !== "function") return;
+
+  gestionUserServiceRefreshBound = true;
+  serviceContext.onServiceChange(() => {
+    void refreshGestionUserData().catch(showGestionUserLoadError);
+  });
+}
+
 async function init() {
   try {
     window.grist?.ready?.({ requiredAccess: "full" });
     bindEvents();
+    bindGestionUserServiceRefresh();
     populateYearSelect(state.year - 1, state.year + 1);
-
-    const data = await loadGestionUserData();
-    state.data = data;
-
-    const bounds = getSegmentYearBounds(data.segments);
-    populateYearSelect(bounds.minYear, bounds.maxYear);
-    populateFilters(data.employees, data.projects);
-    populateProjectFilter(data);
-    render();
+    await refreshGestionUserData();
   } catch (error) {
-    console.error("Erreur initialisation Gestion-User :", error);
-    setStatus(error?.message || "Erreur de chargement.", "error");
-    dom.emptyState.hidden = false;
-    dom.emptyState.textContent = error?.message || "Erreur de chargement.";
+    showGestionUserLoadError(error);
   }
 }
 

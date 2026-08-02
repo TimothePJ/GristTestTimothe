@@ -5409,7 +5409,9 @@ function updateNavCenterButtonLabel() {
   if (!todayBtn) return;
   const mode = getCurrentZoomMode();
   const anchorDate = getWindowCenterDate();
-  todayBtn.textContent = getDynamicNavLabel(mode, anchorDate);
+  const label = getDynamicNavLabel(mode, anchorDate);
+  todayBtn.textContent = label;
+  todayBtn.title = label;
 }
 
 function getDynamicNavLabel(mode, anchorDate = new Date()) {

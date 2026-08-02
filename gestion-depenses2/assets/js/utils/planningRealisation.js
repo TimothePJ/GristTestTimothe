@@ -154,14 +154,34 @@ export function computePlanningRealisationValue(typeDoc, indice, targetIndice = 
   return computeIndexedRealisation(indice, effectiveTargetIndice);
 }
 
-export function buildTargetIndiceByTypeFromAvancement(rawValue) {
+function getSelectedAvancementService() {
+  if (typeof globalThis !== "undefined") {
+    const runtimeService = globalThis.GristServiceContext?.getService?.();
+    if (runtimeService) return runtimeService;
+    try {
+      const storedService = globalThis.localStorage?.getItem("grist.selected-service");
+      if (storedService) return String(storedService).trim();
+    } catch (_error) {
+      // localStorage can be unavailable in tests or sandboxed frames.
+    }
+  }
+  return "Structure";
+}
+
+export function buildTargetIndiceByTypeFromAvancement(
+  rawValue,
+  selectedService = getSelectedAvancementService()
+) {
   const targetIndiceByType = new Map();
   if (rawValue == null || rawValue === "") {
     return targetIndiceByType;
   }
 
   try {
-    const parsed = typeof rawValue === "string" ? JSON.parse(rawValue) : rawValue;
+    const parsedValue = typeof rawValue === "string" ? JSON.parse(rawValue) : rawValue;
+    const parsed = Array.isArray(parsedValue)
+      ? (selectedService === "Structure" ? parsedValue : [])
+      : parsedValue?.services?.[selectedService];
     if (!Array.isArray(parsed)) {
       return targetIndiceByType;
     }
