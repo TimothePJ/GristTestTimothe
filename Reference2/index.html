@@ -516,8 +516,19 @@
         </div>
       </fieldset>
 
+      <fieldset class="reference-form-section reference-duplicate-section">
+        <legend>Autres documents</legend>
+        <label for="editOtherDocumentsCheckbox" class="reference-switch-row">
+          <input type="checkbox" id="editOtherDocumentsCheckbox" name="editOtherDocumentsCheckbox">
+          <span>Modifier également sur d'autres documents</span>
+        </label>
+        <div id="editOtherDocumentsContainer" class="reference-edit-other-documents" hidden></div>
+        <div id="editOtherDocumentsSummary" class="reference-selection-summary" aria-live="polite">1 ligne concernée.</div>
+      </fieldset>
+
       <div id="editRowFormStatus" class="reference-form-status" role="status" aria-live="polite"></div>
       <div class="dialog-buttons reference-dialog-actions">
+        <button type="button" id="deleteEditRowsButton" class="reference-danger-button">Supprimer</button>
         <button type="button" id="cancelEditRowButton" class="reference-cancel-button">Annuler</button>
         <button type="submit" id="confirmEditRowButton">Enregistrer</button>
       </div>
@@ -538,6 +549,7 @@
   </div>
 
   
+  <script src="./js/edit-group-utils.js" defer></script>
   <script src="./js/legacy.js" defer></script>
   <script type="module" src="./js/main.js"></script>
 </body>

@@ -1325,6 +1325,7 @@ dialog select {
 }
 
 #duplicateOptionsContainer,
+#editOtherDocumentsContainer,
 #emetteurDropdown,
 #multipleEmetteurDropdown,
 #referenceUnifiedEmetteurDropdown,
@@ -1591,12 +1592,14 @@ dialog select {
   flex: 0 0 auto;
 }
 
-#duplicateOptionsContainer {
+#duplicateOptionsContainer,
+#editOtherDocumentsContainer {
   margin-top: 12px;
   padding: 12px;
 }
 
-#duplicateOptionsContainer[hidden] {
+#duplicateOptionsContainer[hidden],
+#editOtherDocumentsContainer[hidden] {
   display: none !important;
 }
 
@@ -1605,6 +1608,10 @@ dialog select {
   grid-template-columns: minmax(0, 1fr) minmax(160px, 220px);
   gap: 10px;
   margin-bottom: 10px;
+}
+
+.reference-edit-other-documents .duplicate-toolbar {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .duplicate-toolbar label {
@@ -1699,6 +1706,51 @@ dialog select {
   background: #ffffff !important;
   border: 1px solid var(--vc-line) !important;
   color: var(--vc-text) !important;
+}
+
+.reference-row-dialog .reference-danger-button {
+  margin-right: auto;
+  background: var(--vc-red) !important;
+  border: 1px solid var(--vc-red) !important;
+  color: #ffffff !important;
+}
+
+.reference-edit-other-documents input[type="checkbox"] {
+  width: auto !important;
+  flex: 0 0 auto;
+}
+
+.reference-edit-match-label {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  align-items: center;
+}
+
+.reference-edit-match-document {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.reference-edit-match-number {
+  flex: 0 0 auto;
+  color: var(--vc-blue);
+}
+
+.reference-edit-match-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-edit-match-meta {
+  color: var(--vc-muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
 }
 
 .reference-row-dialog button:disabled {

@@ -398,8 +398,13 @@ const REFERENCES2_DIALOG_WRITABLE_FIELDS = new Set([
 ]);
 
 let referenceEditInitialSnapshot = '';
+let referenceEditInitialRecord = null;
+let referenceEditContextSnapshot = null;
+let referenceEditMatchingRecords = [];
+let referenceEditSelectedRecordIds = new Set();
 let referenceToastTimer = 0;
 const referenceFormBusyState = { add: false, edit: false };
+const REFERENCE_DELETE_PASSWORD = 'admin';
 
 function getReferenceRowFormConfig(mode) {
   return REFERENCE_ROW_FORM_CONFIG[mode] || REFERENCE_ROW_FORM_CONFIG.add;
@@ -520,10 +525,23 @@ function getReferenceFormSnapshot(mode) {
 function updateEditSubmitState() {
   const submit = document.getElementById('confirmEditRowButton');
   if (!submit) return;
+  const selectedOtherCount = getReferenceEditSelectedRecordIds().length;
   const unchanged = Boolean(referenceEditInitialSnapshot) &&
-    getReferenceFormSnapshot('edit') === referenceEditInitialSnapshot;
-  submit.disabled = referenceFormBusyState.edit || unchanged;
+    getReferenceFormSnapshot('edit') === referenceEditInitialSnapshot &&
+    selectedOtherCount === 0;
+  const hasEditableRecord = Boolean(referenceEditInitialRecord && selectedRecordId);
+  submit.disabled = referenceFormBusyState.edit || !hasEditableRecord || unchanged;
   submit.title = unchanged ? 'Aucune modification à enregistrer' : '';
+  submit.textContent = selectedOtherCount > 0
+    ? `Enregistrer sur ${selectedOtherCount + 1} lignes`
+    : 'Enregistrer';
+  const deleteButton = document.getElementById('deleteEditRowsButton');
+  if (deleteButton) {
+    deleteButton.disabled = referenceFormBusyState.edit || !hasEditableRecord;
+    deleteButton.textContent = selectedOtherCount > 0
+      ? `Supprimer ${selectedOtherCount + 1} lignes`
+      : 'Supprimer';
+  }
   applyReferenceAccessUi(activeReferenceContextSnapshot || createReferenceContextSnapshot());
 }
 
@@ -536,8 +554,17 @@ function setReferenceFormBusy(mode, busy, message = '') {
   dialog?.setAttribute('aria-busy', busy ? 'true' : 'false');
   if (submit) submit.disabled = Boolean(busy);
   if (cancel) cancel.disabled = Boolean(busy);
+  if (mode === 'edit') {
+    const groupControls = dialog?.querySelectorAll(
+      '#deleteEditRowsButton, #editOtherDocumentsCheckbox, #editOtherDocumentsContainer input, #editOtherDocumentsContainer button'
+    ) || [];
+    groupControls.forEach((control) => {
+      control.disabled = Boolean(busy);
+      control.dataset.referenceEditGroupBusy = String(Boolean(busy));
+    });
+  }
   if (message) setReferenceFormStatus(mode, message, 'info');
-  if (!busy && mode === 'edit') updateEditSubmitState();
+  if (!busy && mode === 'edit') updateReferenceEditGroupSelectionUi();
   else applyReferenceAccessUi(activeReferenceContextSnapshot || createReferenceContextSnapshot());
 }
 
@@ -626,6 +653,418 @@ function findReferenceDialogDuplicate(fields, { ignoreRecordId = null } = {}) {
     !record?.Archive &&
     getReferenceDuplicateIdentity(record) === identity
   ) || null;
+}
+
+function getReferenceEditGroupUtils() {
+  const utils = window.ReferenceEditGroupUtils;
+  if (!utils) {
+    throw new Error('Les outils de modification groupée ne sont pas disponibles. Rechargez le widget.');
+  }
+  return utils;
+}
+
+function getReferenceEditSelectedRecordIds() {
+  if (!document.getElementById('editOtherDocumentsCheckbox')?.checked) return [];
+  return Array.from(referenceEditSelectedRecordIds)
+    .map(Number)
+    .filter((recordId) => Number.isInteger(recordId) && recordId > 0);
+}
+
+function getReferenceEditTargetRecordIds() {
+  return getReferenceEditGroupUtils().getTargetRecordIds(
+    selectedRecordId,
+    getReferenceEditSelectedRecordIds()
+  );
+}
+
+function resetReferenceEditGroupState({ clearInitial = true } = {}) {
+  referenceEditMatchingRecords = [];
+  referenceEditSelectedRecordIds = new Set();
+  const checkbox = document.getElementById('editOtherDocumentsCheckbox');
+  const container = document.getElementById('editOtherDocumentsContainer');
+  const summary = document.getElementById('editOtherDocumentsSummary');
+  if (checkbox) checkbox.checked = false;
+  if (container) {
+    container.hidden = true;
+    container.replaceChildren();
+  }
+  if (summary) summary.textContent = '1 ligne concernée.';
+  if (clearInitial) {
+    referenceEditInitialRecord = null;
+    referenceEditContextSnapshot = null;
+  }
+}
+
+function captureReferenceEditInitialState(record) {
+  const contextSnapshot = createReferenceContextSnapshot();
+  referenceEditContextSnapshot = contextSnapshot;
+  referenceEditInitialRecord = {
+    ...record,
+    NomProjet: record?.NomProjet || contextSnapshot.currentProject?.name || '',
+    Service: record?.Service || contextSnapshot.selectedService || '',
+  };
+}
+
+function getVisibleReferenceEditMatchCheckboxes() {
+  const container = document.getElementById('editOtherDocumentsContainer');
+  if (!container) return [];
+  return Array.from(container.querySelectorAll("input[name='editOtherDocumentRows']"))
+    .filter((input) => !input.closest('.duplicate-document-item')?.hidden);
+}
+
+function updateReferenceEditGroupSelectionUi() {
+  const checkbox = document.getElementById('editOtherDocumentsCheckbox');
+  const container = document.getElementById('editOtherDocumentsContainer');
+  const matchingIds = new Set(referenceEditMatchingRecords.map((record) => Number(record.id)));
+  referenceEditSelectedRecordIds = new Set(
+    Array.from(referenceEditSelectedRecordIds).filter((recordId) => matchingIds.has(Number(recordId)))
+  );
+
+  container?.querySelectorAll("input[name='editOtherDocumentRows']").forEach((input) => {
+    input.checked = referenceEditSelectedRecordIds.has(Number(input.value));
+  });
+
+  const selectedCount = checkbox?.checked ? referenceEditSelectedRecordIds.size : 0;
+  const total = selectedCount + 1;
+  const summary = document.getElementById('editOtherDocumentsSummary');
+  if (summary) {
+    summary.textContent = `${total} ligne${total > 1 ? 's concernées' : ' concernée'}.`;
+  }
+  const count = document.getElementById('editOtherDocumentsSelectionCount');
+  if (count) {
+    count.textContent = `${selectedCount} autre${selectedCount > 1 ? 's' : ''} sélectionnée${selectedCount > 1 ? 's' : ''}`;
+  }
+
+  const visible = getVisibleReferenceEditMatchCheckboxes();
+  const selectVisible = document.getElementById('selectVisibleEditOtherDocuments');
+  if (selectVisible) {
+    selectVisible.disabled = visible.length === 0 || visible.every((input) => input.checked);
+  }
+  const clearSelected = document.getElementById('clearSelectedEditOtherDocuments');
+  if (clearSelected) clearSelected.disabled = selectedCount === 0;
+  updateEditSubmitState();
+}
+
+function filterReferenceEditMatchList(query = '') {
+  const container = document.getElementById('editOtherDocumentsContainer');
+  if (!container) return;
+  const normalizedQuery = String(query || '').trim().toLocaleLowerCase('fr');
+  const items = Array.from(container.querySelectorAll('.duplicate-document-item'));
+  items.forEach((item) => {
+    item.hidden = Boolean(normalizedQuery) &&
+      !String(item.dataset.editMatchSearch || '').includes(normalizedQuery);
+  });
+  container.querySelectorAll('.duplicate-zone-group').forEach((group) => {
+    group.hidden = !Array.from(group.querySelectorAll('.duplicate-document-item'))
+      .some((item) => !item.hidden);
+  });
+  container.querySelectorAll('.duplicate-document-group').forEach((group) => {
+    group.hidden = !Array.from(group.querySelectorAll('.duplicate-document-item'))
+      .some((item) => !item.hidden);
+  });
+  const empty = document.getElementById('editOtherDocumentsSearchEmpty');
+  if (empty) empty.hidden = items.length === 0 || items.some((item) => !item.hidden);
+  updateReferenceEditGroupSelectionUi();
+}
+
+function buildReferenceEditMatchListMarkup(matchingRecords) {
+  const groupedTypes = new Map();
+  matchingRecords.forEach((record) => {
+    const type = normalizeTypeDocument(record.Type_document);
+    const typeKey = normalizeReferenceDocumentIdentityPart(type) || '__sans_type__';
+    if (!groupedTypes.has(typeKey)) groupedTypes.set(typeKey, { type, zones: new Map() });
+    const zone = normalizeZoneValue(record.Zone);
+    const zoneKey = normalizeZoneMatchKey(zone) || '__sans_zone__';
+    const typeGroup = groupedTypes.get(typeKey);
+    if (!typeGroup.zones.has(zoneKey)) typeGroup.zones.set(zoneKey, { zone, records: [] });
+    typeGroup.zones.get(zoneKey).records.push(record);
+  });
+
+  return Array.from(groupedTypes.values()).map((typeGroup) => {
+    const zonesMarkup = Array.from(typeGroup.zones.values())
+      .sort((left, right) => compareZoneKeys(left.zone, right.zone))
+      .map((zoneGroup) => {
+        const recordsMarkup = zoneGroup.records
+          .slice()
+          .sort((left, right) => {
+            const numberDifference = numeroSortable(left.NumeroDocument) - numeroSortable(right.NumeroDocument);
+            if (numberDifference) return numberDifference;
+            return _norm(left.NomDocument).localeCompare(_norm(right.NomDocument), 'fr', {
+              sensitivity: 'base',
+              numeric: true,
+            });
+          })
+          .map((record) => {
+            const recordId = Number(record.id);
+            const inputId = `edit-other-row-${recordId}`;
+            const number = _norm(record.NumeroDocument) || '—';
+            const name = _norm(record.NomDocument) || 'Document sans nom';
+            const type = normalizeTypeDocument(record.Type_document) || 'Sans type';
+            const zone = formatZoneLabel(record.Zone);
+            const searchText = [number, name, type, zone]
+              .join(' ')
+              .toLocaleLowerCase('fr');
+            return `
+              <div class="emetteur-item duplicate-document-item" data-edit-match-search="${escapeHtml(searchText)}">
+                <input type="checkbox" id="${inputId}" name="editOtherDocumentRows" value="${recordId}">
+                <label for="${inputId}" class="reference-edit-match-label">
+                  <span class="reference-edit-match-document">
+                    <strong class="reference-edit-match-number">${escapeHtml(number)}</strong>
+                    <span class="reference-edit-match-name">${escapeHtml(name)}</span>
+                  </span>
+                  <span class="reference-edit-match-meta">${escapeHtml(type)} · ${escapeHtml(zone)}</span>
+                </label>
+              </div>
+            `;
+          }).join('');
+        return `
+          <div class="duplicate-zone-group">
+            <div class="duplicate-zone-heading">${escapeHtml(formatZoneLabel(zoneGroup.zone))}</div>
+            ${recordsMarkup}
+          </div>
+        `;
+      }).join('');
+    return `
+      <div class="duplicate-document-group">
+        <div class="duplicate-type-heading">${escapeHtml(typeGroup.type || 'Sans type')}</div>
+        ${zonesMarkup}
+      </div>
+    `;
+  }).join('');
+}
+
+function renderReferenceEditMatchingRows() {
+  const container = document.getElementById('editOtherDocumentsContainer');
+  if (!container || !referenceEditInitialRecord) return;
+  const utils = getReferenceEditGroupUtils();
+  referenceEditSelectedRecordIds = new Set();
+  referenceEditMatchingRecords = utils.findMatchingOtherRows(records, referenceEditInitialRecord, {
+    currentRecordId: selectedRecordId,
+    projectValue: referenceEditInitialRecord.NomProjet,
+    serviceValue: referenceEditInitialRecord.Service || referenceEditContextSnapshot?.selectedService,
+    projectNormalizer: normalizeReferenceDocumentIdentityPart,
+    serviceNormalizer: normalizeServiceMatchKey,
+  }).map((record) => ({ ...record }));
+  container.hidden = false;
+
+  if (!referenceEditMatchingRecords.length) {
+    container.innerHTML = '<p class="duplicate-empty-message">Aucune ligne identique trouvée sur les autres documents.</p>';
+    updateReferenceEditGroupSelectionUi();
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="duplicate-toolbar">
+      <label for="editOtherDocumentsSearch">
+        Rechercher un document
+        <input type="search" id="editOtherDocumentsSearch" placeholder="Nom, numéro, type, zone…" autocomplete="off">
+      </label>
+    </div>
+    <div class="duplicate-list-actions">
+      <button type="button" id="selectVisibleEditOtherDocuments">Tout sélectionner (filtrés)</button>
+      <button type="button" id="clearSelectedEditOtherDocuments">Tout désélectionner</button>
+      <span id="editOtherDocumentsSelectionCount" class="duplicate-selection-count"></span>
+    </div>
+    <div class="duplicate-document-list">
+      ${buildReferenceEditMatchListMarkup(referenceEditMatchingRecords)}
+      <p id="editOtherDocumentsSearchEmpty" class="duplicate-empty-message" hidden>Aucun document ne correspond à la recherche.</p>
+    </div>
+  `;
+
+  container.querySelectorAll("input[name='editOtherDocumentRows']").forEach((input) => {
+    input.addEventListener('change', () => {
+      const recordId = Number(input.value);
+      if (input.checked) referenceEditSelectedRecordIds.add(recordId);
+      else referenceEditSelectedRecordIds.delete(recordId);
+      updateReferenceEditGroupSelectionUi();
+    });
+  });
+  document.getElementById('editOtherDocumentsSearch')?.addEventListener('input', (event) => {
+    filterReferenceEditMatchList(event.target.value);
+  });
+  document.getElementById('selectVisibleEditOtherDocuments')?.addEventListener('click', () => {
+    getVisibleReferenceEditMatchCheckboxes().forEach((input) => {
+      input.checked = true;
+      referenceEditSelectedRecordIds.add(Number(input.value));
+    });
+    updateReferenceEditGroupSelectionUi();
+  });
+  document.getElementById('clearSelectedEditOtherDocuments')?.addEventListener('click', () => {
+    referenceEditSelectedRecordIds.clear();
+    updateReferenceEditGroupSelectionUi();
+  });
+  updateReferenceEditGroupSelectionUi();
+}
+
+function ensureReferenceEditContextIsWritable() {
+  const currentSnapshot = createReferenceContextSnapshot();
+  if (currentSnapshot.accessMode !== 'editable') {
+    throw new Error('Le contexte courant est en lecture seule.');
+  }
+  if (!referenceEditContextSnapshot || !isReferenceContextSnapshotCurrent(referenceEditContextSnapshot)) {
+    throw new Error('Le projet ou le service a changé. Fermez puis rouvrez la fenêtre de modification.');
+  }
+  const initialProject = normalizeReferenceDocumentIdentityPart(referenceEditInitialRecord?.NomProjet);
+  const currentProject = normalizeReferenceDocumentIdentityPart(currentSnapshot.currentProject?.name);
+  if (!initialProject || initialProject !== currentProject) {
+    throw new Error('La ligne ouverte ne correspond plus au projet courant.');
+  }
+  if (
+    normalizeServiceMatchKey(referenceEditInitialRecord?.Service) !==
+    normalizeServiceMatchKey(currentSnapshot.selectedService)
+  ) {
+    throw new Error('La ligne ouverte ne correspond plus au service courant.');
+  }
+  return currentSnapshot;
+}
+
+async function fetchFreshReferenceEditRecords() {
+  const beforeFetchSnapshot = ensureReferenceEditContextIsWritable();
+  const rawTable = await grist.docApi.fetchTable('References2');
+  ensureReferenceEditContextIsWritable();
+  const utils = getReferenceEditGroupUtils();
+  const tableToRows = window.GristServiceContextCore?.tableToRows || utils.tableToRows;
+  const aliases = new Set(
+    (beforeFetchSnapshot.projectAliases || [])
+      .map(normalizeReferenceDocumentIdentityPart)
+      .filter(Boolean)
+  );
+  return tableToRows(rawTable).map((record) => {
+    const projectKey = normalizeReferenceDocumentIdentityPart(record?.NomProjet);
+    if (!aliases.has(projectKey)) return record;
+    return { ...record, NomProjet: beforeFetchSnapshot.currentProject?.name || record.NomProjet };
+  });
+}
+
+async function prepareFreshReferenceEditTargets() {
+  ensureReferenceEditContextIsWritable();
+  const utils = getReferenceEditGroupUtils();
+  const targetIds = getReferenceEditTargetRecordIds();
+  const currentId = Number(selectedRecordId);
+  if (!targetIds.length || currentId !== Number(referenceEditInitialRecord?.id)) {
+    throw new Error('La ligne courante ne correspond plus à la fenêtre ouverte.');
+  }
+
+  const matchingById = new Map(
+    referenceEditMatchingRecords.map((record) => [Number(record.id), record])
+  );
+  getReferenceEditSelectedRecordIds().forEach((recordId) => {
+    if (!matchingById.has(Number(recordId))) {
+      throw new Error(`La ligne ${recordId} ne fait plus partie des correspondances proposées.`);
+    }
+  });
+
+  const freshRecords = await fetchFreshReferenceEditRecords();
+  const freshById = new Map(freshRecords.map((record) => [Number(record.id), record]));
+  const comparisonKey = utils.getComparisonKey(referenceEditInitialRecord);
+  const currentDocumentKey = utils.getDocumentIdentityKey(referenceEditInitialRecord, {
+    projectNormalizer: normalizeReferenceDocumentIdentityPart,
+    serviceNormalizer: normalizeServiceMatchKey,
+  });
+  const targets = targetIds.map((recordId) => {
+    const freshRecord = freshById.get(Number(recordId));
+    if (!freshRecord) {
+      throw new Error(`La ligne ${recordId} a été supprimée ou n'est plus accessible dans ce contexte.`);
+    }
+    if (
+      normalizeReferenceDocumentIdentityPart(freshRecord.NomProjet) !==
+      normalizeReferenceDocumentIdentityPart(referenceEditInitialRecord.NomProjet) ||
+      normalizeServiceMatchKey(freshRecord.Service) !==
+      normalizeServiceMatchKey(referenceEditInitialRecord.Service)
+    ) {
+      throw new Error(`La ligne ${recordId} n'appartient plus au projet et au service courants.`);
+    }
+    if (utils.getComparisonKey(freshRecord) !== comparisonKey) {
+      throw new Error(`La ligne ${recordId} a changé depuis l'ouverture de la fenêtre. Aucune écriture n'a été effectuée.`);
+    }
+
+    const expectedRecord = Number(recordId) === currentId
+      ? referenceEditInitialRecord
+      : matchingById.get(Number(recordId));
+    const freshDocumentKey = utils.getDocumentIdentityKey(freshRecord, {
+      projectNormalizer: normalizeReferenceDocumentIdentityPart,
+      serviceNormalizer: normalizeServiceMatchKey,
+    });
+    const expectedDocumentKey = utils.getDocumentIdentityKey(expectedRecord, {
+      projectNormalizer: normalizeReferenceDocumentIdentityPart,
+      serviceNormalizer: normalizeServiceMatchKey,
+    });
+    if (freshDocumentKey !== expectedDocumentKey) {
+      throw new Error(`Le document de la ligne ${recordId} a changé depuis l'ouverture de la fenêtre.`);
+    }
+    if (Number(recordId) !== currentId && freshDocumentKey === currentDocumentKey) {
+      throw new Error(`La ligne ${recordId} appartient désormais au document courant.`);
+    }
+    return freshRecord;
+  });
+  return { freshRecords, targets };
+}
+
+function buildReferenceEditUpdateEntries(targets, planningTable, formData, durationWeeks) {
+  const utils = getReferenceEditGroupUtils();
+  const sharedFields = {
+    Emetteur: String(formData.get('editEmetteur') || '').trim(),
+    Reference: String(formData.get('reference') || '').trim(),
+    Indice: String(formData.get('indice') || '').trim(),
+    Recu: String(formData.get('recu') || '').trim() || DEFAULT_REFERENCE_DATE,
+    DescriptionObservations: String(formData.get('description') || '').trim(),
+    Remarque: normalizeRemarqueValue(formData.get('remarque')),
+  };
+  return utils.createPerTargetUpdates({
+    targets,
+    sharedFields,
+    durationWeeks,
+    planningTable,
+    buildLimitFields: buildReferenceLimitFields,
+    withComputedRetard: withComputedReferenceRetard,
+  }).map(({ target, fields }) => ({
+    target,
+    fields: sanitizeReferences2DialogFields(fields),
+  }));
+}
+
+function assertNoReferenceEditDuplicates(freshRecords, updateEntries) {
+  const conflict = getReferenceEditGroupUtils().findUpdateDuplicateConflict(
+    freshRecords,
+    updateEntries,
+    { getIdentity: getReferenceDuplicateIdentity }
+  );
+  if (!conflict) return;
+  if (conflict.type === 'selected-targets') {
+    throw new Error(
+      `La modification créerait plusieurs références identiques sur ${makeDocLabel(conflict.target.NomDocument, conflict.target.NumeroDocument)}.`
+    );
+  }
+  throw new Error(
+    `Une référence identique existe déjà sur ${makeDocLabel(conflict.target.NomDocument, conflict.target.NumeroDocument)}.`
+  );
+}
+
+function applyReferenceEditUpdatesLocally(updateEntries) {
+  const updatesById = new Map(
+    updateEntries.map(({ target, fields }) => [Number(target.id), fields])
+  );
+  records = records.map((record) => {
+    const fields = updatesById.get(Number(record.id));
+    return fields ? { ...record, ...fields } : record;
+  });
+}
+
+function getReferenceEditTargetPreviewRecords() {
+  const matchingById = new Map(
+    referenceEditMatchingRecords.map((record) => [Number(record.id), record])
+  );
+  return getReferenceEditTargetRecordIds().map((recordId) =>
+    Number(recordId) === Number(referenceEditInitialRecord?.id)
+      ? referenceEditInitialRecord
+      : matchingById.get(Number(recordId))
+  ).filter(Boolean);
+}
+
+function formatReferenceEditDocumentDescription(record) {
+  const type = normalizeTypeDocument(record?.Type_document) || 'Sans type';
+  const zone = formatZoneLabel(record?.Zone);
+  return `${makeDocLabel(record?.NomDocument, record?.NumeroDocument)} · ${type} · ${zone}`;
 }
 
 // Réinitialise l'ajout depuis une seule source de vérité.
@@ -4255,6 +4694,8 @@ async function showEditDialog(record) {
   getReferenceRowForm('edit')?.reset();
   clearReferenceFormErrors('edit');
   resetReferenceFilePicker('edit');
+  resetReferenceEditGroupState();
+  captureReferenceEditInitialState(record);
   referenceEditInitialSnapshot = '';
   updateReferenceDialogContext('edit', record);
   setReferenceFormBusy('edit', true, 'Chargement de la ligne…');
@@ -4439,6 +4880,32 @@ getReferenceRowForm('edit')?.addEventListener('input', (event) => {
   updateEditSubmitState();
 });
 getReferenceRowForm('edit')?.addEventListener('change', updateEditSubmitState);
+
+document.getElementById('editOtherDocumentsCheckbox')?.addEventListener('change', function () {
+  const container = document.getElementById('editOtherDocumentsContainer');
+  if (this.checked) {
+    try {
+      ensureReferenceEditContextIsWritable();
+      renderReferenceEditMatchingRows();
+    } catch (error) {
+      this.checked = false;
+      if (container) {
+        container.hidden = true;
+        container.replaceChildren();
+      }
+      setReferenceFormStatus('edit', error?.message || 'La sélection groupée est indisponible.', 'error');
+    }
+  } else {
+    referenceEditMatchingRecords = [];
+    referenceEditSelectedRecordIds = new Set();
+    if (container) {
+      container.hidden = true;
+      container.replaceChildren();
+    }
+    setReferenceFormStatus('edit');
+    updateReferenceEditGroupSelectionUi();
+  }
+});
 
 // Add event listener for "Modifier" option
 document.getElementById('editOption').addEventListener('click', () => {
@@ -4646,7 +5113,7 @@ document.getElementById('deleteOption').addEventListener('click', async () => {
   // Demander un mot de passe avant de supprimer
   const password = prompt("Veuillez entrer le mot de passe pour supprimer cette ligne :");
 
-  const correctPassword = "admin";
+  const correctPassword = REFERENCE_DELETE_PASSWORD;
 
   if (password !== correctPassword) {
     alert("Mot de passe incorrect. Suppression annulée.");
@@ -5866,7 +6333,11 @@ async function updateEditEmetteurList() {
 document.getElementById('editRowDialog').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (referenceFormBusyState.edit || !validateReferenceRowForm('edit')) return;
-  if (referenceEditInitialSnapshot && getReferenceFormSnapshot('edit') === referenceEditInitialSnapshot) {
+  if (
+    referenceEditInitialSnapshot &&
+    getReferenceFormSnapshot('edit') === referenceEditInitialSnapshot &&
+    getReferenceEditSelectedRecordIds().length === 0
+  ) {
     setReferenceFormStatus('edit', 'Aucune modification à enregistrer.', 'info');
     return;
   }
@@ -5880,64 +6351,96 @@ document.getElementById('editRowDialog').addEventListener('submit', async (e) =>
   setReferenceFormBusy('edit', true, 'Enregistrement des modifications…');
 
   try {
-    const currentRecord = records.find(record => Number(record.id) === Number(selectedRecordId));
-    if (!currentRecord) throw new Error('La ligne a été supprimée ou n’est plus disponible.');
-
-    const planningTableForLimits = await fetchReferencePlanningTableForLimits();
-    const editDureeLimiteInput = document.getElementById('editDureeLimite');
-    const savedDurationValue = String(editDureeLimiteInput?.dataset?.initialValue ?? '').trim();
-    const referenceLimitFields =
-      !dureeLimite && !savedDurationValue && !currentRecord.Bloquant
-      ? {
-          DureeLimite: currentRecord.DureeLimite ?? '',
-          DateLimite: currentRecord.DateLimite || DEFAULT_REFERENCE_DATE,
-        }
-      : buildReferenceLimitFields({
-          planningTable: planningTableForLimits,
-          projectName: currentRecord.NomProjet || selectedFirstValue,
-          documentInfo: {
-            numero: currentRecord.NumeroDocument,
-            name: currentRecord.NomDocument,
-            type: currentRecord.Type_document,
-            zone: currentRecord.Zone,
-          },
-          durationWeeks: dureeLimite,
-          useZeroWhenEmpty: Boolean(currentRecord.Bloquant),
-          service: currentRecord.Service,
-        });
-    const updatedRow = sanitizeReferences2DialogFields(withComputedReferenceRetard({
-      Emetteur: String(formData.get('editEmetteur') || '').trim(),
-      Reference: String(formData.get('reference') || '').trim(),
-      Indice: String(formData.get('indice') || '').trim(),
-      Recu: String(formData.get('recu') || '').trim() || DEFAULT_REFERENCE_DATE,
-      DescriptionObservations: String(formData.get('description') || '').trim(),
-      Remarque: normalizeRemarqueValue(formData.get('remarque')),
-      ...referenceLimitFields,
-    }));
-
-    const duplicateCandidate = { ...currentRecord, ...updatedRow };
-    if (findReferenceDialogDuplicate(duplicateCandidate, { ignoreRecordId: selectedRecordId })) {
-      setReferenceFormStatus(
-        'edit',
-        'Une référence identique existe déjà sur ce document. Modifiez la référence ou l’indice.',
-        'error'
-      );
-      return;
-    }
-
-    console.log("Mise à jour envoyée à Grist :", updatedRow);
-    await grist.docApi.applyUserActions([
-      ['UpdateRecord', 'References2', selectedRecordId, updatedRow]
+    const [planningTableForLimits, preparedTargets] = await Promise.all([
+      resolvePlanningTableName().then((tableName) => grist.docApi.fetchTable(tableName)),
+      prepareFreshReferenceEditTargets(),
     ]);
-    console.log("Mise à jour réussie !");
+    ensureReferenceEditContextIsWritable();
+    const updateEntries = buildReferenceEditUpdateEntries(
+      preparedTargets.targets,
+      planningTableForLimits,
+      formData,
+      dureeLimite
+    );
+    assertNoReferenceEditDuplicates(preparedTargets.freshRecords, updateEntries);
+
+    const actions = getReferenceEditGroupUtils().buildUpdateActions(updateEntries);
+    await grist.docApi.applyUserActions(actions);
+    applyReferenceEditUpdatesLocally(updateEntries);
     await populateTable();
     document.getElementById('editRowDialog').close();
-    showReferenceToast('Référence modifiée avec succès.');
+    const updatedCount = actions.length;
+    showReferenceToast(
+      `${updatedCount} ligne${updatedCount > 1 ? 's modifiées' : ' modifiée'} avec succès.`
+    );
   } catch (error) {
     console.error("Erreur lors de la mise à jour :", error);
     setReferenceFormStatus(
       'edit',
       `Impossible de modifier la référence${error?.message ? ` : ${error.message}` : '.'}`,
+      'error'
+    );
+  } finally {
+    setReferenceFormBusy('edit', false);
+  }
+});
+
+document.getElementById('deleteEditRowsButton')?.addEventListener('click', async () => {
+  if (referenceFormBusyState.edit) return;
+
+  try {
+    ensureReferenceEditContextIsWritable();
+    const previewRecords = getReferenceEditTargetPreviewRecords();
+    if (!previewRecords.length) {
+      throw new Error('Aucune ligne accessible à supprimer.');
+    }
+    const total = previewRecords.length;
+    const documents = Array.from(new Set(
+      previewRecords.map(formatReferenceEditDocumentDescription)
+    ));
+    const confirmationMessage = [
+      `Supprimer définitivement ${total} ligne${total > 1 ? 's' : ''} ?`,
+      '',
+      'Documents concernés :',
+      ...documents.map((documentLabel) => `- ${documentLabel}`),
+      '',
+      'Aucune ligne non cochée ne sera supprimée.',
+    ].join('\n');
+    if (!confirm(confirmationMessage)) {
+      setReferenceFormStatus('edit', 'Suppression annulée.', 'info');
+      return;
+    }
+
+    const password = prompt('Veuillez entrer le mot de passe pour supprimer ces lignes :');
+    if (password !== REFERENCE_DELETE_PASSWORD) {
+      if (password !== null) alert('Mot de passe incorrect. Suppression annulée.');
+      setReferenceFormStatus(
+        'edit',
+        password === null ? 'Suppression annulée.' : 'Mot de passe incorrect. Suppression annulée.',
+        password === null ? 'info' : 'error'
+      );
+      return;
+    }
+
+    setReferenceFormBusy('edit', true, 'Vérification des lignes avant suppression…');
+    const preparedTargets = await prepareFreshReferenceEditTargets();
+    ensureReferenceEditContextIsWritable();
+    const targetIds = preparedTargets.targets.map((record) => Number(record.id));
+    await grist.docApi.applyUserActions(
+      getReferenceEditGroupUtils().buildRemoveActions(targetIds)
+    );
+    const removedIds = new Set(targetIds);
+    records = records.filter((record) => !removedIds.has(Number(record.id)));
+    await populateTable();
+    document.getElementById('editRowDialog').close();
+    showReferenceToast(
+      `${targetIds.length} ligne${targetIds.length > 1 ? 's supprimées' : ' supprimée'} avec succès.`
+    );
+  } catch (error) {
+    console.error('Erreur lors de la suppression groupée :', error);
+    setReferenceFormStatus(
+      'edit',
+      `Impossible de supprimer les lignes${error?.message ? ` : ${error.message}` : '.'}`,
       'error'
     );
   } finally {
@@ -5961,6 +6464,7 @@ document.getElementById('editRowDialog').addEventListener('close', () => {
   clearReferenceFormErrors('edit');
   setReferenceFormStatus('edit');
   referenceEditInitialSnapshot = '';
+  resetReferenceEditGroupState();
   const rows = document.querySelectorAll('#tableBody tr');
   rows.forEach(row => row.classList.remove('highlighted'));
 });
