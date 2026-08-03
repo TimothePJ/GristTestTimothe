@@ -110,6 +110,26 @@
     return Boolean(parsePlanningCalendarDate(value));
   }
 
+  function getPlanningIndiceRank(value) {
+    const indice = toText(value).toUpperCase();
+    if (!indice) return null;
+    if (indice === "0") return 1;
+    return /^[A-Z]$/.test(indice) ? indice.charCodeAt(0) - 63 : null;
+  }
+
+  function isPlanningDocumentAdvanced({ dateCloture, indice, targetIndice } = {}) {
+    if (hasValidPlanningClosureDate(dateCloture)) return true;
+
+    const normalizedIndice = toText(indice).toUpperCase();
+    const normalizedTargetIndice = toText(targetIndice).toUpperCase();
+    if (!normalizedIndice) return false;
+    if (!normalizedTargetIndice) return true;
+
+    const indiceRank = getPlanningIndiceRank(normalizedIndice);
+    const targetRank = getPlanningIndiceRank(normalizedTargetIndice);
+    return indiceRank != null && targetRank != null && indiceRank >= targetRank;
+  }
+
   function normalizePlanningIdentityPart(value) {
     return toText(value)
       .normalize("NFD")
@@ -241,6 +261,7 @@
     formatPlanningCalendarDateIso,
     formatPlanningCalendarDateFr,
     hasValidPlanningClosureDate,
+    isPlanningDocumentAdvanced,
     normalizePlanningIdentityPart,
     normalizePlanningIdentityType,
     buildPlanningDocumentIdentity,

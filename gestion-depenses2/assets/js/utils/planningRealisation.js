@@ -2,7 +2,7 @@ import "../../../../shared/planning-closure-core.js";
 
 const planningClosureCore = globalThis.PlanningClosureCore;
 if (!planningClosureCore) {
-  throw new Error("Noyau de clôture Planning Projet indisponible.");
+  throw new Error("Noyau de réalisation forcée Planning Projet indisponible.");
 }
 
 export const {
@@ -10,6 +10,7 @@ export const {
   formatPlanningCalendarDateIso,
   formatPlanningCalendarDateFr,
   hasValidPlanningClosureDate,
+  isPlanningDocumentAdvanced,
   buildPlanningDocumentIdentity,
   buildPlanningDocumentIdentityKey,
   findBestPlanningDocumentMatches,

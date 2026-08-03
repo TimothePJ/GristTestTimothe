@@ -949,7 +949,7 @@ async function handleRetardJustificationEdit({ rowId, remarque }) {
 }
 
 async function handlePlanningClosureAction({ action, context = {}, dateCloture = null } = {}) {
-  assertPlanningEditing("modifier la clôture du plan");
+  assertPlanningEditing("modifier la réalisation du plan");
 
   const recordId = Number(context?.rowId);
   if (!Number.isInteger(recordId) || recordId <= 0) {
@@ -957,18 +957,18 @@ async function handlePlanningClosureAction({ action, context = {}, dateCloture =
   }
   if (!context?.dateClotureColumnAvailable) {
     throw new Error(
-      "La colonne Planning_Projet.Date_Cloture est absente de cet environnement."
+      "La réalisation forcée est indisponible : la colonne Planning_Projet.Date_Cloture est absente de cet environnement."
     );
   }
   if (action !== "save" && action !== "delete") {
-    throw new Error("Action de clôture invalide.");
+    throw new Error("Action de réalisation forcée invalide.");
   }
 
   try {
     setPlanningStatus(
       action === "delete"
-        ? "Suppression de la clôture forcée..."
-        : "Sauvegarde de la clôture forcée..."
+        ? "Suppression de la réalisation forcée..."
+        : "Sauvegarde de la réalisation forcée..."
     );
     await updatePlanningClosureDate(recordId, action === "delete" ? null : dateCloture);
     await refreshPlanning({
@@ -978,7 +978,7 @@ async function handlePlanningClosureAction({ action, context = {}, dateCloture =
       reason: action === "delete" ? "forced-closure-delete" : "forced-closure-save",
     });
   } catch (error) {
-    setPlanningStatus(`Erreur clôture forcée : ${error.message}`);
+    setPlanningStatus(`Erreur réalisation forcée : ${error.message}`);
     throw error;
   }
 }

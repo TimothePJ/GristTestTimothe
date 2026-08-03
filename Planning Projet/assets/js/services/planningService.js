@@ -875,7 +875,7 @@ function buildGroupContent(row) {
   const retardLabel = formatPositiveRetardValue(row.retards);
   const retardClassName = `cell-retards${retardLabel ? " has-retard" : ""}`;
   const realiseLabel = row.dateClotureLabel
-    ? `100 % — clôture forcée le ${row.dateClotureLabel}`
+    ? `100 % — réalisation forcée le ${row.dateClotureLabel}`
     : row.realise ?? "";
   return `
     <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-realise) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">

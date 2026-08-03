@@ -7,6 +7,7 @@ import {
   findBestPlanningDocumentMatches,
   formatPlanningCalendarDateIso,
   hasValidPlanningClosureDate,
+  isPlanningDocumentAdvanced,
   isPlanningIndiceAtLeast,
 } from "../../gestion-depenses2/assets/js/utils/planningRealisation.js";
 import {
@@ -85,6 +86,21 @@ test("Date_Cloture a priorité sur les indices et la suppression restaure le cal
   assert.equal(computePlanningRealisationValue("COFFRAGE", "B", "C"), 75);
   assert.equal(computePlanningRealisationValue("COFFRAGE", "B", "C", "2026-07-15"), 100);
   assert.equal(computePlanningRealisationValue("COFFRAGE", "B", "C", null), 75);
+  assert.equal(isPlanningDocumentAdvanced({
+    dateCloture: "2026-07-15",
+    indice: "B",
+    targetIndice: "C",
+  }), true);
+  assert.equal(isPlanningDocumentAdvanced({
+    dateCloture: null,
+    indice: "B",
+    targetIndice: "C",
+  }), false);
+  assert.equal(isPlanningDocumentAdvanced({
+    dateCloture: null,
+    indice: "D",
+    targetIndice: "C",
+  }), true);
   assert.equal(isPlanningIndiceAtLeast("B", "B"), true);
   assert.equal(isPlanningIndiceAtLeast("C", "B"), true);
   assert.equal(isPlanningIndiceAtLeast("A", "B"), false);

@@ -1,8 +1,7 @@
 import { toFiniteNumber, toText } from "../utils/format.js";
 import {
   buildPlanningDocumentIdentityKey,
-  hasValidPlanningClosureDate,
-  isPlanningIndiceAtLeast,
+  isPlanningDocumentAdvanced,
 } from "../utils/planningRealisation.js";
 
 const DOCUMENT_TYPES = {
@@ -437,8 +436,11 @@ function createStatsBucket(selectedIndice) {
 }
 
 export function isAvancementRecordComplete(record, selectedIndice) {
-  return hasValidPlanningClosureDate(record?.Date_Cloture) ||
-    isPlanningIndiceAtLeast(getRecordIndice(record), selectedIndice);
+  return isPlanningDocumentAdvanced({
+    dateCloture: record?.Date_Cloture,
+    indice: getRecordIndice(record),
+    targetIndice: selectedIndice,
+  });
 }
 
 export function buildStatsByType(projectRecords, selectedIndicesByType) {
@@ -859,8 +861,8 @@ function renderStatsTable(outputEl, tableRows, totals, canSave) {
       <thead>
         <tr>
           <th>Type de document</th>
-          <th>Plans diffusés</th>
-          <th>Plans restants</th>
+          <th>Plans avancés</th>
+          <th>Plans non avancés</th>
           <th>Total</th>
           <th>Ventilation prix</th>
           <th>% fait</th>
@@ -1253,13 +1255,13 @@ function renderDetailedChart(rootEl, canvas, chartData) {
       labels: chartData.labels,
       datasets: [
         buildArrayChartDataset(
-          "Avance",
+          "Avancés",
           chartData.dataWithIndice,
           chartData.rawCountsWithIndice,
           CHART_COLORS.done,
         ),
         buildArrayChartDataset(
-          "Non avance",
+          "Non avancés",
           chartData.dataWithoutIndice,
           chartData.rawCountsWithoutIndice,
           CHART_COLORS.remaining,

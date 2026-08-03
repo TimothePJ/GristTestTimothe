@@ -3246,10 +3246,10 @@ export async function updatePlanningClosureDate(rowId, dateCloture) {
   const isRemoval = dateCloture == null || String(dateCloture).trim() === "";
   const normalizedDate = isRemoval ? null : formatPlanningCalendarDateIso(dateCloture);
   if (!isRemoval && !normalizedDate) {
-    throw new Error("La date de clôture est invalide.");
+    throw new Error("La date de réalisation est invalide.");
   }
   if (normalizedDate && normalizedDate > formatPlanningCalendarDateIso(new Date())) {
-    throw new Error("La date de clôture ne peut pas être future.");
+    throw new Error("La date de réalisation ne peut pas être future.");
   }
 
   const grist = getGrist();

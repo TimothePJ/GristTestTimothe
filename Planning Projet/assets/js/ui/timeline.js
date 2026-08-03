@@ -1609,13 +1609,13 @@ function ensureRetardContextMenu() {
     </button>
     <hr class="planning-retard-context-menu__separator">
     <button type="button" class="planning-retard-context-menu__button" data-planning-retard-action="closure-edit">
-      Forcer la clôture du plan…
+      Forcer la réalisation du plan…
     </button>
     <button type="button" class="planning-retard-context-menu__button planning-retard-context-menu__button--danger" data-planning-retard-action="closure-delete">
-      Supprimer la clôture forcée
+      Supprimer la réalisation forcée
     </button>
     <button type="button" class="planning-retard-context-menu__button" data-planning-retard-action="closure-unavailable" disabled>
-      Clôture indisponible (colonne absente)
+      Réalisation forcée indisponible (colonne absente)
     </button>
     <hr class="planning-retard-context-menu__separator" data-planning-closure-separator>
     <button type="button" class="planning-retard-context-menu__button planning-retard-context-menu__button--danger" data-planning-retard-action="initialize">
@@ -1691,7 +1691,7 @@ function ensurePlanningClosureDialog() {
   dialog.innerHTML = `
     <form class="planning-closure-dialog__form">
       <header class="planning-closure-dialog__header">
-        <h3>Forcer la clôture du plan</h3>
+        <h3>Forcer la réalisation du plan</h3>
         <button type="button" class="planning-closure-dialog__close" aria-label="Fermer">×</button>
       </header>
       <dl class="planning-closure-dialog__summary">
@@ -1706,7 +1706,7 @@ function ensurePlanningClosureDialog() {
         Cette action considérera le plan comme terminé à 100 %, même si son indice cible n’est pas atteint.
       </p>
       <label class="planning-closure-dialog__field">
-        <span>Date de clôture <strong aria-hidden="true">*</strong></span>
+        <span>Date de réalisation <strong aria-hidden="true">*</strong></span>
         <input type="date" name="dateCloture" required>
       </label>
       <p class="planning-closure-dialog__error" role="alert" aria-live="polite"></p>
@@ -1741,7 +1741,7 @@ function openPlanningClosureDialog() {
   if (!planningClosureHandler || !activeRetardJustificationContext) return;
   const context = activeRetardJustificationContext;
   if (!context.dateClotureColumnAvailable) {
-    alert("La colonne Planning_Projet.Date_Cloture est absente de cet environnement.");
+    alert("La réalisation forcée est indisponible : la colonne Planning_Projet.Date_Cloture est absente de cet environnement.");
     return;
   }
 
@@ -1749,8 +1749,8 @@ function openPlanningClosureDialog() {
   const existingDate = String(context.dateCloture || "").trim();
   const title = dialog.querySelector("h3");
   if (title) title.textContent = existingDate
-    ? "Modifier la date de clôture"
-    : "Forcer la clôture du plan";
+    ? "Modifier la date de réalisation"
+    : "Forcer la réalisation du plan";
 
   ["id2", "task", "typeDoc", "zone", "indice", "realise"].forEach((key) => {
     const output = dialog.querySelector(`[data-planning-closure-summary="${key}"]`);
@@ -1790,12 +1790,12 @@ async function savePlanningClosureDialog() {
     parsed.getDate() === Number(isoMatch[3])
   );
   if (!valid) {
-    if (errorEl) errorEl.textContent = "Saisissez une date de clôture valide.";
+    if (errorEl) errorEl.textContent = "Saisissez une date de réalisation valide.";
     input?.focus();
     return;
   }
   if (value > getLocalTodayIso()) {
-    if (errorEl) errorEl.textContent = "La date de clôture ne peut pas être future.";
+    if (errorEl) errorEl.textContent = "La date de réalisation ne peut pas être future.";
     input?.focus();
     return;
   }
@@ -1814,7 +1814,7 @@ async function savePlanningClosureDialog() {
     });
     dialog.close();
   } catch (error) {
-    console.error("Erreur clôture forcée :", error);
+    console.error("Erreur réalisation forcée :", error);
     if (errorEl) errorEl.textContent = error?.message || "Échec de la sauvegarde.";
   } finally {
     dialog.dataset.saving = "false";
@@ -1827,7 +1827,7 @@ async function savePlanningClosureDialog() {
 async function deletePlanningClosureFromMenu() {
   if (!planningClosureHandler || !activeRetardJustificationContext) return;
   if (!window.confirm(
-    "Supprimer la clôture forcée de ce plan ? Son avancement sera de nouveau calculé selon son indice cible."
+    "Supprimer la réalisation forcée de ce plan ? Son avancement sera de nouveau calculé selon son indice cible."
   )) return;
 
   try {
@@ -1837,8 +1837,8 @@ async function deletePlanningClosureFromMenu() {
       dateCloture: null,
     });
   } catch (error) {
-    console.error("Erreur suppression clôture forcée :", error);
-    alert(`Erreur suppression clôture forcée : ${error?.message || error}`);
+    console.error("Erreur suppression réalisation forcée :", error);
+    alert(`Erreur suppression réalisation forcée : ${error?.message || error}`);
   }
 }
 
@@ -2593,8 +2593,8 @@ function openRetardContextMenu(event, rowEl) {
   if (editButton instanceof HTMLElement) {
     editButton.hidden = !closureAvailable;
     editButton.textContent = hasClosure
-      ? "Modifier la date de clôture…"
-      : "Forcer la clôture du plan…";
+      ? "Modifier la date de réalisation…"
+      : "Forcer la réalisation du plan…";
   }
   if (deleteButton instanceof HTMLElement) {
     deleteButton.hidden = !closureAvailable || !hasClosure;
@@ -4906,11 +4906,11 @@ function buildGroupLabelElement(group) {
   realise.className = "cell-realise";
   const forcedClosureLabel = String(group?.dateClotureLabel ?? "").trim();
   realise.textContent = forcedClosureLabel
-    ? `100 % — clôture forcée le ${forcedClosureLabel}`
+    ? `100 % — réalisation forcée le ${forcedClosureLabel}`
     : String(group?.realiseLabel ?? "");
   if (forcedClosureLabel) {
     realise.classList.add("is-forced-closure");
-    realise.title = `Clôturé manuellement le ${forcedClosureLabel}`;
+    realise.title = `Réalisé manuellement le ${forcedClosureLabel}`;
   }
 
   const retards = document.createElement("div");

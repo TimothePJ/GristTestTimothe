@@ -963,6 +963,14 @@ function isPlanningIndiceAtLeast(indice, targetIndice) {
 }
 
 function isAvancementRecordComplete(record, targetIndice) {
+  if (typeof window.PlanningClosureCore?.isPlanningDocumentAdvanced === 'function') {
+    return window.PlanningClosureCore.isPlanningDocumentAdvanced({
+      dateCloture: record?.Date_Cloture,
+      indice: getRecordIndice(record),
+      targetIndice,
+    });
+  }
+
   return Boolean(
     window.PlanningClosureCore?.hasValidPlanningClosureDate(record?.Date_Cloture)
   ) || isPlanningIndiceAtLeast(getRecordIndice(record), targetIndice);
@@ -1251,8 +1259,8 @@ function renderStatsTable(tableRows, totals) {
       <thead>
         <tr>
           <th>Type de document</th>
-          <th>Plans diffusés</th>
-          <th>Plans restants</th>
+          <th>Plans avancés</th>
+          <th>Plans non avancés</th>
           <th>Total</th>
           <th>Ventilation prix</th>
           <th>% fait</th>
@@ -1643,13 +1651,13 @@ function renderDetailedChart(chartData) {
       labels: chartData.labels,
       datasets: [
         buildArrayChartDataset(
-          'Avance',
+          'Avancés',
           chartData.dataWithIndice,
           chartData.rawCountsWithIndice,
           CHART_COLORS.done,
         ),
         buildArrayChartDataset(
-          'Non avance',
+          'Non avancés',
           chartData.dataWithoutIndice,
           chartData.rawCountsWithoutIndice,
           CHART_COLORS.remaining,

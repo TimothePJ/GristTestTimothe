@@ -295,7 +295,7 @@ export function renderPlanningManagement(
                   )}</span>
                   ${task.dateCloture ? `
                     <span class="planning-management-item-window">
-                      Clôturé manuellement le ${escapeHtml(formatPlanningClosureDate(task.dateCloture))}
+                      Réalisé manuellement le ${escapeHtml(formatPlanningClosureDate(task.dateCloture))}
                     </span>
                   ` : ""}
                   <span class="planning-management-item-window">
