@@ -37,6 +37,7 @@ export const APP_CONFIG = {
         indice: "Indice",
         realise: "Realise",
         dateRealise: "Date_Realise",
+        dateCloture: "Date_Cloture",
         projectLink: "NomProjet",
         service: "Service"
       }

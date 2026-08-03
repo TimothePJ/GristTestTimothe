@@ -16,7 +16,7 @@ export const APP_CONFIG = {
         nomXml: "Nom_XML", dateLimite: "Date_limite", duree1: "Duree_1", diffCoffrage: "Diff_coffrage",
         duree2: "Duree_2", diffArmature: "Diff_armature", duree3: "Duree_3",
         demarragesTravaux: "Demarrages_travaux", retards: "Retards", remarque: "Remarque",
-        indice: "Indice", realise: "Realise", dateRealise: "Date_Realise", projectLink: "NomProjet",
+        indice: "Indice", realise: "Realise", dateRealise: "Date_Realise", dateCloture: "Date_Cloture", projectLink: "NomProjet",
       },
     },
   },

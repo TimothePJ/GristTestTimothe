@@ -26,6 +26,11 @@ function formatPlanningDate(date) {
   }).format(date);
 }
 
+function formatPlanningClosureDate(value) {
+  const match = String(value ?? "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : "";
+}
+
 function formatPlanningRealisation(value) {
   const normalizedValue = Number.isFinite(Number(value)) ? Number(value) : 0;
   return `${normalizedValue} %`;
@@ -288,6 +293,11 @@ export function renderPlanningManagement(
                   <span class="planning-management-item-meta">${escapeHtml(
                     task.typeDoc || "Type non renseigne"
                   )}</span>
+                  ${task.dateCloture ? `
+                    <span class="planning-management-item-window">
+                      Clôturé manuellement le ${escapeHtml(formatPlanningClosureDate(task.dateCloture))}
+                    </span>
+                  ` : ""}
                   <span class="planning-management-item-window">
                     Execution ce mois :
                     ${escapeHtml(

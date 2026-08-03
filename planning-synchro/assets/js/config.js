@@ -35,7 +35,7 @@ export const APP_CONFIG = {
         dateLimite: "Date_limite", duree1: "Duree_1", diffCoffrage: "Diff_coffrage",
         duree2: "Duree_2", diffArmature: "Diff_armature", duree3: "Duree_3",
         demarragesTravaux: "Demarrages_travaux", indice: "Indice", nomXml: "Nom_XML",
-        realise: "Realise", retards: "Retards", dateRealise: "Date_Realise", remarque: "Remarque", service: "Service",
+        realise: "Realise", retards: "Retards", dateRealise: "Date_Realise", dateCloture: "Date_Cloture", remarque: "Remarque", service: "Service",
       },
       timeSegment: {
         id: "id", projectNumber: "NumeroProjet", name: "Name",

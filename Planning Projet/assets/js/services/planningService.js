@@ -2,12 +2,17 @@
 import { toText } from "./gristService.js";
 import {
   buildPlanningIndiceProgress,
+  buildPlanningDocumentIdentity,
   buildTargetIndiceByTypeFromAvancement,
   computePlanningRealisationValue,
+  findBestPlanningDocumentMatches,
+  formatPlanningCalendarDateFr,
+  formatPlanningCalendarDateIso,
   getPlanningIndiceRank,
   getTargetIndiceForDocumentType,
   normalizePlanningDocumentType,
   normalizePlanningIndice,
+  parsePlanningCalendarDate,
 } from "../../../../gestion-depenses2/assets/js/utils/planningRealisation.js";
 
 function toNumber(value) {
@@ -190,8 +195,13 @@ function getPlanningTargetIndice(typeDoc, projectKey, targetLookup) {
   );
 }
 
-export function computePlanningRealiseValue(typeDoc, indice, targetIndice = "") {
-  return computePlanningRealisationValue(typeDoc, indice, targetIndice);
+export function computePlanningRealiseValue(
+  typeDoc,
+  indice,
+  targetIndice = "",
+  dateCloture = null
+) {
+  return computePlanningRealisationValue(typeDoc, indice, targetIndice, dateCloture);
 }
 
 function resolvePlanningSegmentEndDate({
@@ -235,6 +245,7 @@ export function computePlanningRetardValue(
     demarrageRaw,
     duree3Raw,
     dateRealiseRaw,
+    dateClotureRaw,
   },
   currentInstant = getCurrentInstant()
 ) {
@@ -242,7 +253,13 @@ export function computePlanningRetardValue(
     return 0;
   }
 
-  const realiseValue = computePlanningRealiseValue(typeDoc, indice, targetIndice);
+  const closureDate = parsePlanningCalendarDate(dateClotureRaw);
+  const realiseValue = computePlanningRealiseValue(
+    typeDoc,
+    indice,
+    targetIndice,
+    dateClotureRaw
+  );
   const segmentEndDate = resolvePlanningSegmentEndDate({
     typeDoc,
     lignePlanningRaw,
@@ -253,7 +270,7 @@ export function computePlanningRetardValue(
   });
 
   if (realiseValue >= 100) {
-    const dateRealise = parseDate(dateRealiseRaw);
+    const dateRealise = closureDate || parseDate(dateRealiseRaw);
     if (dateRealise && segmentEndDate) {
       return getDelayDays(segmentEndDate, dateRealise);
     }
@@ -283,17 +300,24 @@ export function buildPlanningRealiseUpdates(rawRows, targetLookup = null) {
     const nextRealise = computePlanningRealiseValue(
       typeDoc,
       toText(row?.[cfg.indice]),
-      getPlanningTargetIndice(typeDoc, row?.[projectLinkCol], targetLookup)
+      getPlanningTargetIndice(typeDoc, row?.[projectLinkCol], targetLookup),
+      row?.[cfg.dateCloture]
     );
     const currentRealise = toNumber(row?.[cfg.realise]);
-    if (currentRealise === nextRealise) {
-      return updates;
+    const forcedClosureIso = formatPlanningCalendarDateIso(row?.[cfg.dateCloture]);
+    const currentDateRealise = normalizeIsoDateValue(row?.[cfg.dateRealise]) || "";
+    const update = { id: rowId };
+
+    if (currentRealise !== nextRealise) {
+      update.realise = nextRealise;
+    }
+    if (forcedClosureIso && currentDateRealise !== forcedClosureIso) {
+      update.dateRealise = forcedClosureIso;
+    } else if (!forcedClosureIso && nextRealise < 100 && currentDateRealise) {
+      update.dateRealise = null;
     }
 
-    updates.push({
-      id: rowId,
-      realise: nextRealise,
-    });
+    if (Object.keys(update).length > 1) updates.push(update);
     return updates;
   }, []);
 }
@@ -325,6 +349,7 @@ export function buildPlanningRetardUpdates(
         demarrageRaw: row?.[cfg.demarragesTravaux],
         duree3Raw: row?.[cfg.duree3],
         dateRealiseRaw: row?.[cfg.dateRealise],
+        dateClotureRaw: row?.[cfg.dateCloture],
       },
       currentInstant
     );
@@ -344,20 +369,6 @@ export function buildPlanningRetardUpdates(
 function getPlanningDateSortValue(value) {
   const date = parseDate(value);
   return date ? date.getTime() : Number.NEGATIVE_INFINITY;
-}
-
-function normalizePlanningLinkPart(value) {
-  return toText(value).replace(/\s+/g, " ").toLocaleLowerCase("fr");
-}
-
-function buildPlanningLinkKey(project, numeroDocument, typeDocument, designation, zone = "") {
-  return [
-    normalizePlanningLinkPart(project),
-    normalizePlanningLinkPart(numeroDocument),
-    normalizePlanningLinkPart(typeDocument),
-    normalizePlanningLinkPart(designation),
-    normalizePlanningLinkPart(zone),
-  ].join("||");
 }
 
 function getFirstPlanningValue(row, columnNames = []) {
@@ -393,21 +404,6 @@ function normalizeSyncProjectValue(value, projectIdToName = null) {
   return rawValue;
 }
 
-function shouldReplaceLatestPlanRecord(current, candidate) {
-  if (!current) return true;
-  if (candidate.indiceRank !== current.indiceRank) {
-    return candidate.indiceRank > current.indiceRank;
-  }
-
-  return candidate.dateSortValue > current.dateSortValue;
-}
-
-function rememberLatestPlanRecord(map, key, candidate) {
-  if (shouldReplaceLatestPlanRecord(map.get(key), candidate)) {
-    map.set(key, candidate);
-  }
-}
-
 function normalizeIsoDateValue(value) {
   const parsed = parseDate(value);
   if (parsed) {
@@ -430,8 +426,7 @@ export function buildPlanningListePlanSyncUpdates(
   const effectiveTargetLookup =
     targetLookup instanceof Map ? targetLookup : buildProjectRealisationTargetLookup(projectConfigs);
 
-  const latestByKeyStrict = new Map();
-  const latestByKeyStrictLegacy = new Map();
+  const listePlanCandidates = [];
 
   (listePlanRows || []).forEach((row) => {
     const indice = normalizePlanningIndice(row?.Indice);
@@ -450,23 +445,22 @@ export function buildPlanningListePlanSyncUpdates(
     const typeDocument = getFirstPlanningValue(row, ["Type_document", "Type_doc", "TypeDoc"]);
     const designation = getFirstPlanningValue(row, ["Designation", "NomDocument", "Taches", "Tache"]);
     const zone = getFirstPlanningValue(row, ["Zone"]);
+    const service = getFirstPlanningValue(row, ["Service"]);
     const latestRecord = {
       indice,
       indiceRank,
       dateDiffusion,
       dateSortValue,
+      identity: buildPlanningDocumentIdentity({
+        project: projectValue,
+        service,
+        documentNumber,
+        typeDocument,
+        zone,
+        designation,
+      }),
     };
-
-    rememberLatestPlanRecord(
-      latestByKeyStrict,
-      buildPlanningLinkKey(projectValue, documentNumber, typeDocument, designation, zone),
-      latestRecord
-    );
-    rememberLatestPlanRecord(
-      latestByKeyStrictLegacy,
-      buildPlanningLinkKey(projectValue, documentNumber, typeDocument, designation),
-      latestRecord
-    );
+    listePlanCandidates.push(latestRecord);
   });
 
   return (planningRows || []).reduce((updates, row) => {
@@ -480,22 +474,38 @@ export function buildPlanningListePlanSyncUpdates(
     const typeDoc = toText(row?.[cfg.typeDoc]);
     const designation = row?.[cfg.taches] ?? row?.[cfg.tacheAlt];
     const zone = row?.[cfg.zone];
-
-    const latestRecord =
-      latestByKeyStrict.get(buildPlanningLinkKey(projectValue, documentNumber, typeDoc, designation, zone)) ??
-      latestByKeyStrictLegacy.get(buildPlanningLinkKey(projectValue, documentNumber, typeDoc, designation)) ??
-      null;
+    const service = row?.[cfg.service];
+    const matchingRecords = findBestPlanningDocumentMatches(
+      {
+        project: projectValue,
+        service,
+        documentNumber,
+        typeDocument: typeDoc,
+        zone,
+        designation,
+      },
+      listePlanCandidates,
+      (candidate) => candidate.identity
+    );
 
     const targetIndice = getPlanningTargetIndice(typeDoc, projectValue, effectiveTargetLookup);
     const progress = buildPlanningIndiceProgress(
-      latestRecord ? [latestRecord] : [],
+      matchingRecords,
       targetIndice
     );
     const latestIndice = progress.latestIndice;
-    const targetRealise = progress.realisation;
-    const nextDateRealise = progress.targetReached && progress.latestRecord
-      ? fmtIsoCellDate(parseDate(progress.latestRecord.dateDiffusion))
-      : null;
+    const forcedClosureIso = formatPlanningCalendarDateIso(row?.[cfg.dateCloture]);
+    const targetRealise = computePlanningRealiseValue(
+      typeDoc,
+      latestIndice,
+      targetIndice,
+      row?.[cfg.dateCloture]
+    );
+    const nextDateRealise = forcedClosureIso || (
+      progress.targetReached && progress.latestRecord
+        ? fmtIsoCellDate(parseDate(progress.latestRecord.dateDiffusion))
+        : null
+    );
     const targetRetard = computePlanningRetardValue(
       {
         typeDoc,
@@ -508,6 +518,7 @@ export function buildPlanningListePlanSyncUpdates(
         demarrageRaw: row?.[cfg.demarragesTravaux],
         duree3Raw: row?.[cfg.duree3],
         dateRealiseRaw: targetRealise >= 100 ? nextDateRealise : "",
+        dateClotureRaw: row?.[cfg.dateCloture],
       },
       currentInstant
     );
@@ -863,6 +874,9 @@ function getFirstRowFirstSegment(groups = [], items = []) {
 function buildGroupContent(row) {
   const retardLabel = formatPositiveRetardValue(row.retards);
   const retardClassName = `cell-retards${retardLabel ? " has-retard" : ""}`;
+  const realiseLabel = row.dateClotureLabel
+    ? `100 % — clôture forcée le ${row.dateClotureLabel}`
+    : row.realise ?? "";
   return `
     <div class="group-row-grid" style="display:grid;grid-template-columns:var(--col-id2) var(--col-task) var(--col-ligne-planning) var(--col-start) var(--col-duration-1) var(--col-end) var(--col-duration-2) var(--col-demarrage) var(--col-indice) var(--col-realise) var(--col-retards);align-items:center;width:var(--left-grid-width);min-height:var(--planning-row-height);padding:0 var(--left-pad-x);box-sizing:content-box;">
       <div class="cell-id2">${escapeHtml(row.id2 ?? "")}</div>
@@ -874,7 +888,7 @@ function buildGroupContent(row) {
       <div class="cell-duration-2">${escapeHtml(row.dureeFinDemarrage ?? "")}</div>
       <div class="cell-demarrage">${escapeHtml(row.demarrage ?? "")}</div>
       <div class="cell-indice">${escapeHtml(row.indice ?? "")}</div>
-      <div class="cell-realise">${escapeHtml(row.realise ?? "")}</div>
+      <div class="cell-realise${row.dateClotureLabel ? " is-forced-closure" : ""}">${escapeHtml(realiseLabel)}</div>
       <div class="${retardClassName}">${escapeHtml(retardLabel)}</div>
     </div>
   `;
@@ -1552,11 +1566,19 @@ export function buildTimelineDataFromPlanningRows(
       demarragesTravauxDate: demarrageTravauxDate,
       indice: toText(r[cfg.indice]),
       targetIndice,
+      service: toText(r[cfg.service]),
+      dateCloture: formatPlanningCalendarDateIso(r[cfg.dateCloture]),
+      dateClotureLabel: formatPlanningCalendarDateFr(r[cfg.dateCloture]),
+      dateClotureColumnAvailable: Object.prototype.hasOwnProperty.call(
+        r || {},
+        cfg.dateCloture
+      ),
       realise: (() => {
         const computedRealise = computePlanningRealiseValue(
           typeDocText,
           toText(r[cfg.indice]),
-          targetIndice
+          targetIndice,
+          r[cfg.dateCloture]
         );
         return String(computedRealise ?? 0);
       })(),
@@ -1767,6 +1789,7 @@ export function buildTimelineDataFromPlanningRows(
       id2Label: row.id2 ?? "",
       tachesLabel: row.taches ?? "",
       typeDocLabel: row.typeDoc ?? "",
+      serviceLabel: row.service ?? "",
       groupeLabel: row.groupe ?? "",
       zoneLabel: row.zone ?? "",
       debutLabel: row.debut ?? "",
@@ -1788,6 +1811,9 @@ export function buildTimelineDataFromPlanningRows(
       lignePlanningLabel: row.lignePlanning ?? "",
       indiceLabel: row.indice ?? "",
       realiseLabel: row.realise ?? "",
+      dateClotureIso: row.dateCloture ?? "",
+      dateClotureLabel: row.dateClotureLabel ?? "",
+      dateClotureColumnAvailable: Boolean(row.dateClotureColumnAvailable),
       retardsLabel: row.retards ?? "",
       remarqueLabel: row.remarque ?? "",
 

@@ -193,6 +193,9 @@ export function buildPlanningItems(rows, columns, options = {}) {
     className: group.className || "",
     // Left-column tint per Planning Projet document type (zone headers keep none).
     typeClass: group.isZoneHeader ? "" : getRowTypeClass(group.typeDocLabel),
+    realiseLabel: group.realiseLabel || "",
+    dateClotureIso: group.dateClotureIso || "",
+    dateClotureLabel: group.dateClotureLabel || "",
     label: group.isZoneHeader
       ? group.zoneHeaderLabel || group.zoneLabel || ""
       : group.tachesLabel || "",

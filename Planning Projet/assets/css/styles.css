@@ -22,7 +22,7 @@
   --col-duration-2: 64px;
   --col-demarrage: 100px;
   --col-indice: 60px;
-  --col-realise: 92px;
+  --col-realise: 190px;
   --col-retards: 64px;
 
   --left-pad-x: 4px;
@@ -1280,6 +1280,12 @@ body.planning-row-dragging {
   background: #eef6ff;
 }
 
+.planning-retard-context-menu__button:disabled {
+  color: #64748b;
+  cursor: not-allowed;
+  background: #f8fafc;
+}
+
 .planning-retard-context-menu__separator {
   margin: 4px 0;
   border: 0;
@@ -1376,6 +1382,144 @@ body.planning-row-dragging {
 .planning-retard-dialog textarea:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+#planningTimeline .group-row-grid .cell-realise.is-forced-closure {
+  color: #166534 !important;
+  background: #dcfce7 !important;
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.planning-closure-dialog {
+  width: min(620px, calc(100vw - 32px));
+  border: 1px solid #bcc9d6;
+  border-radius: 8px;
+  padding: 0;
+  color: #1f2937;
+  background: #ffffff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+}
+
+.planning-closure-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.planning-closure-dialog__form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+}
+
+.planning-closure-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.planning-closure-dialog__header h3 {
+  margin: 0;
+  color: #004990;
+}
+
+.planning-closure-dialog__close {
+  border: 0;
+  background: transparent;
+  color: #475569;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.planning-closure-dialog__summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.planning-closure-dialog__summary div {
+  min-width: 0;
+}
+
+.planning-closure-dialog__summary dt {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.planning-closure-dialog__summary dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.planning-closure-dialog__warning {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  color: #78350f;
+  background: #fffbeb;
+}
+
+.planning-closure-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.planning-closure-dialog__field input {
+  width: min(240px, 100%);
+  border: 1px solid #bcc9d6;
+  border-radius: 6px;
+  padding: 9px 10px;
+  color: #1f2937;
+  background: #ffffff;
+  font: inherit;
+}
+
+.planning-closure-dialog__error {
+  min-height: 18px;
+  margin: 0;
+  color: #b91c1c;
+  font-size: 13px;
+}
+
+.planning-closure-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.planning-closure-dialog__actions button {
+  padding: 8px 12px;
+  border: 1px solid #bcc9d6;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #1f2937;
+  cursor: pointer;
+}
+
+.planning-closure-dialog__actions .planning-closure-dialog__save {
+  border-color: #004990;
+  background: #004990;
+  color: #ffffff;
+}
+
+.planning-closure-dialog__actions button:disabled,
+.planning-closure-dialog__field input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 620px) {
+  .planning-closure-dialog__summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .planning-reference-details-dialog {
@@ -1980,7 +2124,7 @@ body.is-manage-zone-modal-open {
     --col-duration-2: 68px;
     --col-demarrage: 96px;
     --col-indice: 64px;
-    --col-realise: 96px;
+    --col-realise: 160px;
     --col-retards: 84px;
   }
 

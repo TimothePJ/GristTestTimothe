@@ -15,7 +15,10 @@ import {
 } from "../utils/timeSegments.js";
 import {
   buildTargetIndiceByTypeFromAvancement,
+  buildPlanningDocumentIdentity,
   computePlanningRealisationValue as computeIndexedPlanningRealisationValue,
+  findBestPlanningDocumentMatches,
+  formatPlanningCalendarDateIso,
   getTargetIndiceForDocumentType,
 } from "../utils/planningRealisation.js";
 import { buildAbsenceIndex, normalizeName } from "../utils/leaveAbsences.js";
@@ -207,8 +210,18 @@ function getPlanningTaskLabel(row, planningColumns) {
   );
 }
 
-export function computePlanningRealisationValue(typeDoc, indice, targetIndice = "") {
-  return computeIndexedPlanningRealisationValue(typeDoc, indice, targetIndice);
+export function computePlanningRealisationValue(
+  typeDoc,
+  indice,
+  targetIndice = "",
+  dateCloture = null
+) {
+  return computeIndexedPlanningRealisationValue(
+    typeDoc,
+    indice,
+    targetIndice,
+    dateCloture
+  );
 }
 
 function getDayFloor(date) {
@@ -364,6 +377,51 @@ export function buildExpenseData({
   const projectsByNumber = createProjectNumberIndex(projects);
   const projectsByAvancementKey = createProjectLookupIndex(projects);
 
+  const projectsByPlanningKey = new Map();
+  projects.forEach((project) => {
+    const projectNameKey = normalizeLookupText(project.name);
+    const projectNumberKey = normalizeLookupText(project.projectNumber);
+
+    if (projectNameKey) {
+      const existingProjects = projectsByPlanningKey.get(projectNameKey) || [];
+      existingProjects.push(project);
+      projectsByPlanningKey.set(projectNameKey, existingProjects);
+    }
+
+    if (projectNumberKey && projectNumberKey !== projectNameKey) {
+      const existingProjects = projectsByPlanningKey.get(projectNumberKey) || [];
+      existingProjects.push(project);
+      projectsByPlanningKey.set(projectNumberKey, existingProjects);
+    }
+  });
+
+  const planningColumns = columns.planningProject;
+  const planningDocumentCandidatesByProjectId = new Map();
+  (planningProjectRows || []).forEach((row) => {
+    if (!planningColumns) return;
+    const planningProjectKey = normalizeLookupText(row?.[planningColumns.projectName]);
+    const linkedProjects = projectsByPlanningKey.get(planningProjectKey) || [];
+    linkedProjects.forEach((project) => {
+      const projectCandidates = planningDocumentCandidatesByProjectId.get(project.id) || [];
+      projectCandidates.push({
+        row,
+        projectId: project.id,
+        rowId: Number(row?.[planningColumns.id]),
+        dateCloture: formatPlanningCalendarDateIso(row?.[planningColumns.dateCloture]),
+        identity: buildPlanningDocumentIdentity({
+          project: project.name,
+          service: row?.[planningColumns.service],
+          documentNumber: row?.[planningColumns.taskCode],
+          typeDocument: row?.[planningColumns.typeDoc],
+          zone: row?.[planningColumns.zone],
+          designation:
+            row?.[planningColumns.taskName] ?? row?.[planningColumns.taskNameAlt],
+        }),
+      });
+      planningDocumentCandidatesByProjectId.set(project.id, projectCandidates);
+    });
+  });
+
   (budgetRows || []).forEach((row) => {
     const project = projectsByNumber.get(toText(row?.[columns.budget.projectNumber]));
     if (!project) return;
@@ -411,7 +469,7 @@ export function buildExpenseData({
       return;
     }
 
-    const avancementRecord = {
+    const avancementRecordBase = {
       id: Number(row?.[listePlanColumns.id]),
       NumeroDocument: documentNumber,
       Designation: getFirstText(row, [
@@ -422,34 +480,32 @@ export function buildExpenseData({
       ]),
       Type_document: documentType,
       Zone: getFirstText(row, [listePlanColumns.zone]),
+      Service: getFirstText(row, [listePlanColumns.service]),
       Indice: getFirstText(row, [listePlanColumns.indice]),
       DateDiffusion: getFirstText(row, [listePlanColumns.diffusionDate]),
     };
 
     linkedProjects.forEach((project) => {
-      project.avancementRecords.push(avancementRecord);
+      const matches = findBestPlanningDocumentMatches(
+        {
+          project: project.name,
+          service: avancementRecordBase.Service,
+          documentNumber: avancementRecordBase.NumeroDocument,
+          typeDocument: avancementRecordBase.Type_document,
+          zone: avancementRecordBase.Zone,
+          designation: avancementRecordBase.Designation,
+        },
+        planningDocumentCandidatesByProjectId.get(project.id) || [],
+        (candidate) => candidate.identity
+      );
+      const planningMatch = matches.length === 1 ? matches[0] : null;
+      project.avancementRecords.push({
+        ...avancementRecordBase,
+        PlanningRowId: planningMatch?.rowId || null,
+        Date_Cloture: planningMatch?.dateCloture || null,
+      });
     });
   });
-
-  const projectsByPlanningKey = new Map();
-  projects.forEach((project) => {
-    const projectNameKey = normalizeLookupText(project.name);
-    const projectNumberKey = normalizeLookupText(project.projectNumber);
-
-    if (projectNameKey) {
-      const existingProjects = projectsByPlanningKey.get(projectNameKey) || [];
-      existingProjects.push(project);
-      projectsByPlanningKey.set(projectNameKey, existingProjects);
-    }
-
-    if (projectNumberKey && projectNumberKey !== projectNameKey) {
-      const existingProjects = projectsByPlanningKey.get(projectNumberKey) || [];
-      existingProjects.push(project);
-      projectsByPlanningKey.set(projectNumberKey, existingProjects);
-    }
-  });
-
-  const planningColumns = columns.planningProject;
 
   (planningProjectRows || []).forEach((row) => {
     if (!planningColumns) {
@@ -478,13 +534,22 @@ export function buildExpenseData({
       const typeDoc = toText(row?.[planningColumns.typeDoc]);
       const indice = toText(row?.[planningColumns.indice]);
       const targetIndice = getTargetIndiceForDocumentType(typeDoc, targetIndiceByType);
+      const dateCloture = formatPlanningCalendarDateIso(row?.[planningColumns.dateCloture]);
       const task = {
         id: Number(row?.[planningColumns.id]),
         name: getPlanningTaskLabel(row, planningColumns),
         taskCode: toText(row?.[planningColumns.taskCode]),
         typeDoc,
+        zone: toText(row?.[planningColumns.zone]),
+        service: toText(row?.[planningColumns.service]),
         indice,
-        realisationPct: computePlanningRealisationValue(typeDoc, indice, targetIndice),
+        dateCloture: dateCloture || null,
+        realisationPct: computePlanningRealisationValue(
+          typeDoc,
+          indice,
+          targetIndice,
+          dateCloture
+        ),
         retardsDays: toFiniteNumber(row?.[planningColumns.retards], 0),
         startAt: range.startAt,
         endAt: range.endAt,

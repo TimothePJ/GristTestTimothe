@@ -1,5 +1,8 @@
 import { APP_CONFIG } from "../config.js";
-import { normalizePlanningDocumentType } from "../../../../gestion-depenses2/assets/js/utils/planningRealisation.js";
+import {
+  formatPlanningCalendarDateIso,
+  normalizePlanningDocumentType,
+} from "../../../../gestion-depenses2/assets/js/utils/planningRealisation.js";
 
 const REFERENCES_TABLE_NAME = "References2";
 const REFERENCE_EMPTY_DATE_ISO = "1900-01-01";
@@ -3214,6 +3217,53 @@ export async function updatePlanningRetardJustification(rowId, remarque) {
   return {
     updatedCount: 1,
   };
+}
+
+export async function updatePlanningClosureDate(rowId, dateCloture) {
+  const table = APP_CONFIG.grist.planningTable;
+  if (!table?.sourceTable) {
+    throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
+  }
+
+  const recordId = Number(rowId);
+  if (!Number.isInteger(recordId) || recordId <= 0) {
+    throw new Error("Identifiant de ligne Planning_Projet invalide.");
+  }
+
+  const columns = table.columns || {};
+  const dateClotureCol = String(columns.dateCloture || "Date_Cloture").trim();
+  if (!dateClotureCol) {
+    throw new Error("Colonne Date_Cloture invalide dans la configuration.");
+  }
+
+  const { row } = await fetchPlanningRowById(recordId);
+  if (!Object.prototype.hasOwnProperty.call(row, dateClotureCol)) {
+    throw new Error(
+      "La colonne Planning_Projet.Date_Cloture est absente de cet environnement."
+    );
+  }
+
+  const isRemoval = dateCloture == null || String(dateCloture).trim() === "";
+  const normalizedDate = isRemoval ? null : formatPlanningCalendarDateIso(dateCloture);
+  if (!isRemoval && !normalizedDate) {
+    throw new Error("La date de clôture est invalide.");
+  }
+  if (normalizedDate && normalizedDate > formatPlanningCalendarDateIso(new Date())) {
+    throw new Error("La date de clôture ne peut pas être future.");
+  }
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  // Cette action ne modifie que le déclencheur métier. Realise, Date_Realise et
+  // Retards sont recalculés ensuite par le coordinateur de synchronisation.
+  await grist.docApi.applyUserActions([
+    ["UpdateRecord", table.sourceTable, recordId, { [dateClotureCol]: normalizedDate }],
+  ]);
+  _planningRowsCache = null;
+  return { updatedCount: 1, dateCloture: normalizedDate };
 }
 
 export async function fetchPlanningReferenceDetails(rowId) {
