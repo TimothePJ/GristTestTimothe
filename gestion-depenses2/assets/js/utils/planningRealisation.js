@@ -1,3 +1,21 @@
+import "../../../../shared/planning-closure-core.js";
+
+const planningClosureCore = globalThis.PlanningClosureCore;
+if (!planningClosureCore) {
+  throw new Error("Noyau de réalisation forcée Planning Projet indisponible.");
+}
+
+export const {
+  parsePlanningCalendarDate,
+  formatPlanningCalendarDateIso,
+  formatPlanningCalendarDateFr,
+  hasValidPlanningClosureDate,
+  isPlanningDocumentAdvanced,
+  buildPlanningDocumentIdentity,
+  buildPlanningDocumentIdentityKey,
+  findBestPlanningDocumentMatches,
+} = planningClosureCore;
+
 function toCleanText(value) {
   return String(value ?? "").trim();
 }
@@ -147,7 +165,16 @@ export function buildPlanningIndiceProgress(records = [], targetIndice = "") {
   };
 }
 
-export function computePlanningRealisationValue(typeDoc, indice, targetIndice = "") {
+export function computePlanningRealisationValue(
+  typeDoc,
+  indice,
+  targetIndice = "",
+  dateCloture = null
+) {
+  if (hasValidPlanningClosureDate(dateCloture)) {
+    return 100;
+  }
+
   const effectiveTargetIndice =
     normalizePlanningIndice(targetIndice) || getDefaultTargetIndiceForDocumentType(typeDoc);
 

@@ -391,10 +391,14 @@ function getTargetIndiceForDocumentTypeLocal(typeDoc, targetIndiceByType = null)
 function getLocalPlanningRealisationHelpers() {
   return {
     buildPlanningIndiceProgress: buildPlanningIndiceProgressLocal,
+    buildPlanningDocumentIdentity: (source) => source,
     buildTargetIndiceByTypeFromAvancement: buildTargetIndiceByTypeFromAvancementLocal,
     computePlanningRealisationValue: computePlanningRealiseValue,
+    formatPlanningCalendarDateIso: toGristDateValue,
+    hasValidPlanningClosureDate: hasValidDate,
     getPlanningIndiceRank: getPlanningIndiceRankLocal,
     getTargetIndiceForDocumentType: getTargetIndiceForDocumentTypeLocal,
+    findBestPlanningDocumentMatches: findBestPlanningDocumentMatchesLocal,
   };
 }
 
@@ -427,14 +431,14 @@ function parsePlanningSyncDate(value) {
 
   if (value instanceof Date) {
     if (Number.isNaN(value.getTime())) return null;
-    return new Date(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate());
+    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
   }
 
   if (typeof value === "number") {
     const normalized = value > 1e9 && value < 1e11 ? value * 1000 : value;
     const date = new Date(normalized);
     if (Number.isNaN(date.getTime())) return null;
-    return new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
   }
 
   const text = String(value).trim();
@@ -547,7 +551,8 @@ function hasPlanningLinkValue(value) {
   return true;
 }
 
-function computePlanningRealiseValue(typeDoc, indice, targetIndice = "") {
+function computePlanningRealiseValue(typeDoc, indice, targetIndice = "", dateCloture = null) {
+  if (hasValidDate(dateCloture)) return 100;
   const effectiveTargetIndice =
     normalizeIndice(targetIndice) || getDefaultTargetIndiceForDocumentTypeLocal(typeDoc);
 
@@ -615,13 +620,16 @@ function computePlanningRetardValue({
   demarrageRaw,
   duree3Raw,
   dateRealiseRaw,
+  dateClotureRaw,
 }, currentInstant = new Date()) {
   if (!isAllowedPlanningTypeDoc(typeDoc)) {
     return 0;
   }
 
   const effectiveRealiseValue =
-    toNumber(realiseValue) ?? computePlanningRealiseValue(typeDoc, indice, targetIndice);
+    hasValidDate(dateClotureRaw)
+      ? 100
+      : toNumber(realiseValue) ?? computePlanningRealiseValue(typeDoc, indice, targetIndice);
   const segmentEndDate = resolvePlanningSegmentEndDate({
     typeDoc,
     lignePlanningRaw,
@@ -632,7 +640,7 @@ function computePlanningRetardValue({
   });
 
   if (effectiveRealiseValue >= 100) {
-    const dateRealise = parsePlanningSyncDate(dateRealiseRaw);
+    const dateRealise = parsePlanningSyncDate(dateClotureRaw) || parsePlanningSyncDate(dateRealiseRaw);
     if (dateRealise && segmentEndDate) {
       return getPlanningDelayDays(segmentEndDate, dateRealise);
     }
@@ -653,31 +661,54 @@ function getPlanningDateSortValue(value) {
   return date ? date.getTime() : Number.NEGATIVE_INFINITY;
 }
 
-function shouldReplaceLatestPlanRecord(current, candidate) {
-  if (!current) return true;
-  if (candidate.order !== current.order) {
-    return candidate.order > current.order;
-  }
+function findBestPlanningDocumentMatchesLocal(target, candidates = [], identitySelector) {
+  const normalizeIdentity = (source = {}) => ({
+    project: normalizeDocumentIdentityText(source.project),
+    documentNumber: normalizeDocumentIdentityText(source.documentNumber),
+    typeDocument: normalizeDocumentIdentityText(source.typeDocument),
+    designation: normalizeDocumentIdentityText(source.designation),
+    zone: normalizeDocumentIdentityText(normalizeZoneText(source.zone)),
+    service: normalizeDocumentIdentityText(source.service),
+  });
+  const wanted = normalizeIdentity(target);
+  if (!wanted.project || !wanted.documentNumber || !wanted.typeDocument) return [];
 
-  return getPlanningDateSortValue(candidate.dateDiffusion) >
-    getPlanningDateSortValue(current.dateDiffusion);
-}
+  const normalized = (candidates || []).map((candidate) => ({
+    candidate,
+    identity: normalizeIdentity(
+      typeof identitySelector === "function" ? identitySelector(candidate) : candidate
+    ),
+  }));
+  const strict = normalized.filter(({ identity }) =>
+    ["project", "documentNumber", "typeDocument", "designation", "zone", "service"]
+      .every((key) => identity[key] === wanted[key])
+  );
+  if (strict.length) return strict.map(({ candidate }) => candidate);
 
-function rememberLatestPlanRecord(map, key, candidate) {
-  if (shouldReplaceLatestPlanRecord(map.get(key), candidate)) {
-    map.set(key, candidate);
-  }
-}
-
-function buildPlanningLinkKey(project, numeroDocument, typeDocument, designation, zone = "", service = "") {
-  return [
-    normalizeDocumentIdentityText(project),
-    normalizeDocumentIdentityText(numeroDocument),
-    normalizeDocumentIdentityText(typeDocument),
-    normalizeDocumentIdentityText(designation),
-    normalizeDocumentIdentityText(normalizeZoneText(zone)),
-    normalizeDocumentIdentityText(service),
-  ].join("||");
+  const compatible = normalized
+    .map(({ candidate, identity }) => {
+      if (
+        identity.project !== wanted.project ||
+        identity.documentNumber !== wanted.documentNumber ||
+        identity.typeDocument !== wanted.typeDocument
+      ) return null;
+      if (["designation", "zone", "service"].some(
+        (key) => identity[key] && wanted[key] && identity[key] !== wanted[key]
+      )) return null;
+      const score =
+        (identity.service && identity.service === wanted.service ? 4 : 0) +
+        (identity.zone && identity.zone === wanted.zone ? 2 : 0) +
+        (identity.designation && identity.designation === wanted.designation ? 1 : 0);
+      return { candidate, identity, score };
+    })
+    .filter(Boolean);
+  if (!compatible.length) return [];
+  const bestScore = Math.max(...compatible.map(({ score }) => score));
+  const best = compatible.filter(({ score }) => score === bestScore);
+  const signatures = new Set(
+    best.map(({ identity }) => [identity.service, identity.zone, identity.designation].join("||"))
+  );
+  return signatures.size === 1 ? best.map(({ candidate }) => candidate) : [];
 }
 
 function normalizeProjectLookupKey(value) {
@@ -1028,9 +1059,7 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
     const hasRealiseColumn = planningColumns.has("Realise");
     const hasRetardsColumn = planningColumns.has("Retards");
     const hasDateRealiseColumn = planningColumns.has("Date_Realise");
-
-    const latestByKeyStrict = new Map();
-    const latestByKeyStrictLegacy = new Map();
+    const listePlanCandidates = [];
 
     for (const r of listeRows) {
       const indice = normalizeIndice(r.Indice);
@@ -1043,27 +1072,16 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
         indiceRank: order,
         dateDiffusion: r.DateDiffusion,
         dateSortValue: getPlanningDateSortValue(r.DateDiffusion),
+        identity: planningHelpers.buildPlanningDocumentIdentity({
+          project: normalizeProject(r.Nom_projet),
+          service: r.Service,
+          documentNumber: r.NumeroDocument,
+          typeDocument: r.Type_document,
+          zone: r.Zone,
+          designation: r.Designation,
+        }),
       };
-
-      const strictKey = buildPlanningLinkKey(
-        normalizeProject(r.Nom_projet),
-        r.NumeroDocument,
-        r.Type_document,
-        r.Designation,
-        r.Zone,
-        r.Service
-      );
-      const strictLegacyKey = buildPlanningLinkKey(
-        normalizeProject(r.Nom_projet),
-        r.NumeroDocument,
-        r.Type_document,
-        r.Designation,
-        "",
-        r.Service
-      );
-
-      rememberLatestPlanRecord(latestByKeyStrict, strictKey, latestRecord);
-      rememberLatestPlanRecord(latestByKeyStrictLegacy, strictLegacyKey, latestRecord);
+      listePlanCandidates.push(latestRecord);
     }
 
     const actions = [];
@@ -1071,28 +1089,19 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
       const planningId = p.id;
       if (planningId == null) continue;
 
-      const strictKey = buildPlanningLinkKey(
-        normalizeProject(p.NomProjet),
-        p.ID2,
-        p.Type_doc,
-        p.Taches ?? p.Tache,
-        p.Zone,
-        p.Service
+      const planningIdentity = {
+        project: normalizeProject(p.NomProjet),
+        service: p.Service,
+        documentNumber: p.ID2,
+        typeDocument: p.Type_doc,
+        zone: p.Zone,
+        designation: p.Taches ?? p.Tache,
+      };
+      const matchingRecords = planningHelpers.findBestPlanningDocumentMatches(
+        planningIdentity,
+        listePlanCandidates,
+        (candidate) => candidate.identity
       );
-      const strictLegacyKey = buildPlanningLinkKey(
-        normalizeProject(p.NomProjet),
-        p.ID2,
-        p.Type_doc,
-        p.Taches ?? p.Tache,
-        "",
-        p.Service
-      );
-
-      const latestRecord =
-        latestByKeyStrict.get(strictKey) ??
-        latestByKeyStrictLegacy.get(strictLegacyKey) ??
-        null;
-      const latestIndice = latestRecord?.indice ?? "";
       const planningProject = normalizeProject(p.NomProjet);
       const effectiveTargetIndice = getProjectTargetIndiceForType(
         planningProject,
@@ -1101,18 +1110,25 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
         planningHelpers
       );
       const progress = planningHelpers.buildPlanningIndiceProgress(
-        latestRecord ? [latestRecord] : [],
+        matchingRecords,
         effectiveTargetIndice
       );
+      const latestIndice = progress.latestIndice;
       const currentIndice = normalizeText(p.Indice);
       const currentRealiseStored = toNumber(p.Realise);
-      const targetRealise = progress.realisation;
+      const forcedClosureIso = planningHelpers.formatPlanningCalendarDateIso?.(p.Date_Cloture) || "";
+      const targetRealise = planningHelpers.computePlanningRealisationValue(
+        p.Type_doc,
+        latestIndice,
+        effectiveTargetIndice,
+        p.Date_Cloture
+      );
       const currentDateRealise = toGristDateValue(p.Date_Realise) || normalizeText(p.Date_Realise);
       const targetDateRealiseFromListe = progress.targetReached && progress.latestRecord
         ? toGristDateValue(progress.latestRecord.dateDiffusion)
         : null;
 
-      const nextDateRealise = targetDateRealiseFromListe || null;
+      const nextDateRealise = forcedClosureIso || targetDateRealiseFromListe || null;
       const shouldUpdateDateRealise =
         (currentDateRealise || "") !== (nextDateRealise || "");
 
@@ -1129,6 +1145,7 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
         demarrageRaw: p.Demarrages_travaux,
         duree3Raw: p.Duree_3,
         dateRealiseRaw: dateRealiseForRetard,
+        dateClotureRaw: p.Date_Cloture,
       });
       const currentRetard = toNumber(p.Retards);
 

@@ -1,4 +1,8 @@
 import { toFiniteNumber, toText } from "../utils/format.js";
+import {
+  buildPlanningDocumentIdentityKey,
+  isPlanningDocumentAdvanced,
+} from "../utils/planningRealisation.js";
 
 const DOCUMENT_TYPES = {
   coffrage: "COFFRAGE",
@@ -257,13 +261,14 @@ function getDocumentType(record) {
 }
 
 function getRecordDocumentKey(record) {
-  return [
-    normalizeText(record?.NumeroDocument),
-    normalizeText(record?.Designation),
-    normalizeText(record?.Zone),
-  ]
-    .map((value) => normalizeLookupText(value))
-    .join("||");
+  return buildPlanningDocumentIdentityKey({
+    project: record?.Nom_projet ?? record?.NomProjet,
+    service: record?.Service,
+    documentNumber: record?.NumeroDocument,
+    typeDocument: record?.Type_document,
+    zone: record?.Zone,
+    designation: record?.Designation,
+  });
 }
 
 function getProjectRecords(project) {
@@ -274,8 +279,10 @@ function getProjectRecords(project) {
       Designation: normalizeText(record?.Designation),
       Type_document: normalizeText(record?.Type_document),
       Zone: normalizeText(record?.Zone),
+      Service: normalizeText(record?.Service),
       Indice: normalizeIndice(record?.Indice),
       DateDiffusion: record?.DateDiffusion,
+      Date_Cloture: record?.Date_Cloture,
       AvancementSelectedIndice: normalizeIndice(
         record?.AvancementSelectedIndice ?? record?.avancementSelectedIndice,
       ),
@@ -428,7 +435,15 @@ function createStatsBucket(selectedIndice) {
   };
 }
 
-function buildStatsByType(projectRecords, selectedIndicesByType) {
+export function isAvancementRecordComplete(record, selectedIndice) {
+  return isPlanningDocumentAdvanced({
+    dateCloture: record?.Date_Cloture,
+    indice: getRecordIndice(record),
+    targetIndice: selectedIndice,
+  });
+}
+
+export function buildStatsByType(projectRecords, selectedIndicesByType) {
   const statsByType = {};
   const documentTypes = getDocumentTypes(projectRecords);
 
@@ -448,7 +463,10 @@ function buildStatsByType(projectRecords, selectedIndicesByType) {
 
     statsByType[type].totalDocs.add(documentKey);
 
-    if (getRecordIndice(record) === getSelectedIndiceForRecord(record, selectedIndicesByType)) {
+    if (isAvancementRecordComplete(
+      record,
+      getSelectedIndiceForRecord(record, selectedIndicesByType)
+    )) {
       statsByType[type].advancedDocs.add(documentKey);
     }
   });
@@ -684,7 +702,7 @@ function buildRowFromRecords({
 
     totalDocs.add(documentKey);
 
-    if (getRecordIndice(record) === indice) {
+    if (isAvancementRecordComplete(record, indice)) {
       docsWithIndice.add(documentKey);
     }
   });
@@ -843,8 +861,8 @@ function renderStatsTable(outputEl, tableRows, totals, canSave) {
       <thead>
         <tr>
           <th>Type de document</th>
-          <th>Plans diffusés</th>
-          <th>Plans restants</th>
+          <th>Plans avancés</th>
+          <th>Plans non avancés</th>
           <th>Total</th>
           <th>Ventilation prix</th>
           <th>% fait</th>
@@ -1237,13 +1255,13 @@ function renderDetailedChart(rootEl, canvas, chartData) {
       labels: chartData.labels,
       datasets: [
         buildArrayChartDataset(
-          "Avance",
+          "Avancés",
           chartData.dataWithIndice,
           chartData.rawCountsWithIndice,
           CHART_COLORS.done,
         ),
         buildArrayChartDataset(
-          "Non avance",
+          "Non avancés",
           chartData.dataWithoutIndice,
           chartData.rawCountsWithoutIndice,
           CHART_COLORS.remaining,

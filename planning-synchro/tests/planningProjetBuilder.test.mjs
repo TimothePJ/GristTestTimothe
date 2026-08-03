@@ -28,6 +28,20 @@ test("builder: task groups expose taches + zone for the renderer", () => {
   assert.ok(task.zoneLabel === "Zone 1" || task.zoneLabel === "Zone 2");
 });
 
+test("builder: Date_Cloture force 100 % et reste exposée au renderer", () => {
+  const closedRows = [{
+    ...rows[0],
+    Indice: "",
+    Realise: "0",
+    Date_Cloture: "2026-07-15",
+  }];
+  const { groups } = buildTimelineDataFromPlanningRows(closedRows, P, "", null, null);
+  const task = groups.find((group) => !group.isZoneHeader);
+  assert.equal(task.realiseLabel, "100");
+  assert.equal(task.dateClotureIso, "2026-07-15");
+  assert.equal(task.dateClotureLabel, "15/07/2026");
+});
+
 test("builder: past phase splits into a phase-past band, retard yields a red inline style", () => {
   const pastRows = [
     { id: 9, NomProjet: P, ID2: "1", Zone: "Zone 1", Taches: "PAST", Type_doc: "COFFRAGE", Date_limite: "2020-01-01", Diff_coffrage: "2020-02-01", Realise: "100" },

@@ -16,6 +16,19 @@ const TABLES = {
   budget: 'Budget',
   projectTeam: 'ProjectTeam',
   timeReal: 'TimeReal',
+  planningProject: 'Planning_Projet',
+};
+
+const PLANNING_COLUMNS = {
+  id: 'id',
+  project: 'NomProjet',
+  documentNumber: 'ID2',
+  designation: 'Taches',
+  designationAlt: 'Tache',
+  typeDocument: 'Type_doc',
+  zone: 'Zone',
+  service: 'Service',
+  dateCloture: 'Date_Cloture',
 };
 
 const PROJECT_COLUMNS = {
@@ -315,14 +328,22 @@ async function updateDashboard() {
     return;
   }
 
-  const projectRecords = getProjectRecords(selectedProject);
+  let projectRecords = getProjectRecords(selectedProject);
   if (projectRecords.length === 0) {
     state.currentProjectConfig = null;
     showEmptyState('Aucune donnee pour ce projet.');
     return;
   }
 
-  const projectConfig = await fetchProjectConfig(selectedProject);
+  const [projectConfig, planningClosureCandidates] = await Promise.all([
+    fetchProjectConfig(selectedProject),
+    fetchPlanningClosureCandidates(selectedProject),
+  ]);
+  projectRecords = enrichRecordsWithPlanningClosures(
+    projectRecords,
+    selectedProject,
+    planningClosureCandidates,
+  );
   if (
     updateRevision !== dashboardUpdateRevision ||
     elements.projectDropdown.value !== selectedProject
@@ -382,6 +403,89 @@ function getProjectRecords(selectedProject) {
   return state.records.filter(
     (record) => getRecordProjectName(record) === selectedProject,
   );
+}
+
+async function fetchPlanningClosureCandidates(selectedProject) {
+  const core = window.PlanningClosureCore;
+  if (!core) {
+    console.warn('Noyau Date_Cloture indisponible ; calcul normal par indice conservé.');
+    return [];
+  }
+
+  try {
+    const raw = await grist.docApi.fetchTable(TABLES.planningProject);
+    if (!tableHasColumn(raw, PLANNING_COLUMNS.dateCloture)) {
+      console.warn(
+        'Colonne Planning_Projet.Date_Cloture absente ; calcul normal par indice conservé.',
+      );
+      return [];
+    }
+
+    const selectedProjectData = _projectsData.find(
+      (project) => normalizeProjectSelectionKey(project?.name) ===
+        normalizeProjectSelectionKey(selectedProject),
+    );
+    const projectAliases = new Set(
+      [selectedProject, selectedProjectData?.name, selectedProjectData?.number, selectedProjectData?.id]
+        .map(normalizeProjectSelectionKey)
+        .filter(Boolean),
+    );
+
+    return tableToRows(raw)
+      .filter((row) => projectAliases.has(
+        normalizeProjectSelectionKey(row?.[PLANNING_COLUMNS.project]),
+      ))
+      .map((row) => ({
+        rowId: Number(row?.[PLANNING_COLUMNS.id]),
+        dateCloture: core.formatPlanningCalendarDateIso(
+          row?.[PLANNING_COLUMNS.dateCloture],
+        ),
+        identity: core.buildPlanningDocumentIdentity({
+          project: selectedProject,
+          service: row?.[PLANNING_COLUMNS.service],
+          documentNumber: row?.[PLANNING_COLUMNS.documentNumber],
+          typeDocument: row?.[PLANNING_COLUMNS.typeDocument],
+          zone: row?.[PLANNING_COLUMNS.zone],
+          designation:
+            row?.[PLANNING_COLUMNS.designation] ??
+            row?.[PLANNING_COLUMNS.designationAlt],
+        }),
+      }));
+  } catch (error) {
+    console.warn(
+      'Lecture Planning_Projet impossible ; calcul normal par indice conservé :',
+      error,
+    );
+    return [];
+  }
+}
+
+function enrichRecordsWithPlanningClosures(records, selectedProject, candidates) {
+  const core = window.PlanningClosureCore;
+  if (!core || !Array.isArray(candidates) || !candidates.length) {
+    return records;
+  }
+
+  return (records || []).map((record) => {
+    const matches = core.findBestPlanningDocumentMatches(
+      {
+        project: selectedProject,
+        service: record?.Service,
+        documentNumber: record?.NumeroDocument,
+        typeDocument: record?.Type_document,
+        zone: record?.Zone,
+        designation: record?.Designation ?? record?.NomDocument,
+      },
+      candidates,
+      (candidate) => candidate.identity,
+    );
+    const planningMatch = matches.length === 1 ? matches[0] : null;
+    return {
+      ...record,
+      PlanningRowId: planningMatch?.rowId || null,
+      Date_Cloture: planningMatch?.dateCloture || null,
+    };
+  });
 }
 
 async function fetchProjectConfig(selectedProject) {
@@ -812,7 +916,7 @@ function buildStatsByType(projectRecords, selectedIndicesByType) {
 
   projectRecords.forEach((record) => {
     const type = getDocumentType(record);
-    const documentNumber = normalizeText(record.NumeroDocument);
+    const documentNumber = getRecordDocumentKey(record);
 
     if (!documentNumber) {
       return;
@@ -820,12 +924,56 @@ function buildStatsByType(projectRecords, selectedIndicesByType) {
 
     statsByType[type].totalDocs.add(documentNumber);
 
-    if (getRecordIndice(record) === statsByType[type].selectedIndice) {
+    if (isAvancementRecordComplete(record, statsByType[type].selectedIndice)) {
       statsByType[type].advancedDocs.add(documentNumber);
     }
   });
 
   return statsByType;
+}
+
+function getRecordDocumentKey(record) {
+  const core = window.PlanningClosureCore;
+  if (core) {
+    return core.buildPlanningDocumentIdentityKey({
+      project: record?.Nom_projet ?? record?.NomProjet,
+      service: record?.Service,
+      documentNumber: record?.NumeroDocument,
+      typeDocument: record?.Type_document,
+      zone: record?.Zone,
+      designation: record?.Designation ?? record?.NomDocument,
+    });
+  }
+  return [record?.NumeroDocument, record?.Type_document, record?.Zone, record?.Service]
+    .map(normalizeLookupText)
+    .join('||');
+}
+
+function getPlanningIndiceRank(value) {
+  const indice = normalizeIndice(value).toUpperCase();
+  if (!indice) return null;
+  if (indice === '0') return 1;
+  return /^[A-Z]$/.test(indice) ? indice.charCodeAt(0) - 63 : null;
+}
+
+function isPlanningIndiceAtLeast(indice, targetIndice) {
+  const indiceRank = getPlanningIndiceRank(indice);
+  const targetRank = getPlanningIndiceRank(targetIndice);
+  return indiceRank != null && targetRank != null && indiceRank >= targetRank;
+}
+
+function isAvancementRecordComplete(record, targetIndice) {
+  if (typeof window.PlanningClosureCore?.isPlanningDocumentAdvanced === 'function') {
+    return window.PlanningClosureCore.isPlanningDocumentAdvanced({
+      dateCloture: record?.Date_Cloture,
+      indice: getRecordIndice(record),
+      targetIndice,
+    });
+  }
+
+  return Boolean(
+    window.PlanningClosureCore?.hasValidPlanningClosureDate(record?.Date_Cloture)
+  ) || isPlanningIndiceAtLeast(getRecordIndice(record), targetIndice);
 }
 
 function getDocumentTypes(projectRecords) {
@@ -960,14 +1108,14 @@ function buildRowFromRecords({
       return;
     }
 
-    const documentNumber = normalizeText(record.NumeroDocument);
+    const documentNumber = getRecordDocumentKey(record);
     if (!documentNumber) {
       return;
     }
 
     totalDocs.add(documentNumber);
 
-    if (getRecordIndice(record) === indice) {
+    if (isAvancementRecordComplete(record, indice)) {
       docsWithIndice.add(documentNumber);
     }
   });
@@ -1111,8 +1259,8 @@ function renderStatsTable(tableRows, totals) {
       <thead>
         <tr>
           <th>Type de document</th>
-          <th>Plans diffusés</th>
-          <th>Plans restants</th>
+          <th>Plans avancés</th>
+          <th>Plans non avancés</th>
           <th>Total</th>
           <th>Ventilation prix</th>
           <th>% fait</th>
@@ -1503,13 +1651,13 @@ function renderDetailedChart(chartData) {
       labels: chartData.labels,
       datasets: [
         buildArrayChartDataset(
-          'Avance',
+          'Avancés',
           chartData.dataWithIndice,
           chartData.rawCountsWithIndice,
           CHART_COLORS.done,
         ),
         buildArrayChartDataset(
-          'Non avance',
+          'Non avancés',
           chartData.dataWithoutIndice,
           chartData.rawCountsWithoutIndice,
           CHART_COLORS.remaining,

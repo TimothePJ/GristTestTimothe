@@ -16,11 +16,13 @@ let durationCellEditHandler = null;
 let durationCellEditBound = false;
 let activeDurationEditor = null;
 let retardJustificationHandler = null;
+let planningClosureHandler = null;
 let planningInitializeHandler = null;
 let referenceDetailsHandler = null;
 let activeRetardJustificationContext = null;
 let retardContextMenuEl = null;
 let retardDialogEl = null;
+let planningClosureDialogEl = null;
 let referenceDetailsDialogEl = null;
 let referenceDetailsRefreshInFlight = false;
 let referenceDetailsRefreshPending = false;
@@ -1606,6 +1608,16 @@ function ensureRetardContextMenu() {
       Détails
     </button>
     <hr class="planning-retard-context-menu__separator">
+    <button type="button" class="planning-retard-context-menu__button" data-planning-retard-action="closure-edit">
+      Forcer la réalisation du plan…
+    </button>
+    <button type="button" class="planning-retard-context-menu__button planning-retard-context-menu__button--danger" data-planning-retard-action="closure-delete">
+      Supprimer la réalisation forcée
+    </button>
+    <button type="button" class="planning-retard-context-menu__button" data-planning-retard-action="closure-unavailable" disabled>
+      Réalisation forcée indisponible (colonne absente)
+    </button>
+    <hr class="planning-retard-context-menu__separator" data-planning-closure-separator>
     <button type="button" class="planning-retard-context-menu__button planning-retard-context-menu__button--danger" data-planning-retard-action="initialize">
       Initialiser
     </button>
@@ -1625,6 +1637,10 @@ function ensureRetardContextMenu() {
       void openReferenceDetailsDialog();
     } else if (action === "initialize") {
       void handlePlanningRowInitializeFromMenu();
+    } else if (action === "closure-edit") {
+      openPlanningClosureDialog();
+    } else if (action === "closure-delete") {
+      void deletePlanningClosureFromMenu();
     } else {
       openRetardJustificationDialog();
     }
@@ -1656,6 +1672,174 @@ function ensureRetardContextMenu() {
   });
 
   return retardContextMenuEl;
+}
+
+function getLocalTodayIso() {
+  const today = new Date();
+  return [
+    String(today.getFullYear()).padStart(4, "0"),
+    String(today.getMonth() + 1).padStart(2, "0"),
+    String(today.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function ensurePlanningClosureDialog() {
+  if (planningClosureDialogEl instanceof HTMLDialogElement) return planningClosureDialogEl;
+
+  const dialog = document.createElement("dialog");
+  dialog.className = "planning-closure-dialog";
+  dialog.innerHTML = `
+    <form class="planning-closure-dialog__form">
+      <header class="planning-closure-dialog__header">
+        <h3>Forcer la réalisation du plan</h3>
+        <button type="button" class="planning-closure-dialog__close" aria-label="Fermer">×</button>
+      </header>
+      <dl class="planning-closure-dialog__summary">
+        <div><dt>Numéro</dt><dd data-planning-closure-summary="id2"></dd></div>
+        <div><dt>Désignation</dt><dd data-planning-closure-summary="task"></dd></div>
+        <div><dt>Type documentaire</dt><dd data-planning-closure-summary="typeDoc"></dd></div>
+        <div data-planning-closure-zone-row><dt>Zone</dt><dd data-planning-closure-summary="zone"></dd></div>
+        <div><dt>Indice actuel</dt><dd data-planning-closure-summary="indice"></dd></div>
+        <div><dt>Avancement actuel</dt><dd data-planning-closure-summary="realise"></dd></div>
+      </dl>
+      <p class="planning-closure-dialog__warning">
+        Cette action considérera le plan comme terminé à 100 %, même si son indice cible n’est pas atteint.
+      </p>
+      <label class="planning-closure-dialog__field">
+        <span>Date de réalisation <strong aria-hidden="true">*</strong></span>
+        <input type="date" name="dateCloture" required>
+      </label>
+      <p class="planning-closure-dialog__error" role="alert" aria-live="polite"></p>
+      <footer class="planning-closure-dialog__actions">
+        <button type="button" class="planning-closure-dialog__cancel">Annuler</button>
+        <button type="submit" class="planning-closure-dialog__save">Enregistrer</button>
+      </footer>
+    </form>
+  `;
+
+  const form = dialog.querySelector("form");
+  const cancel = () => {
+    if (dialog.dataset.saving === "true") return;
+    dialog.close();
+  };
+  dialog.querySelector(".planning-closure-dialog__close")?.addEventListener("click", cancel);
+  dialog.querySelector(".planning-closure-dialog__cancel")?.addEventListener("click", cancel);
+  dialog.addEventListener("cancel", (event) => {
+    if (dialog.dataset.saving === "true") event.preventDefault();
+  });
+  form?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void savePlanningClosureDialog();
+  });
+
+  document.body.appendChild(dialog);
+  planningClosureDialogEl = dialog;
+  return dialog;
+}
+
+function openPlanningClosureDialog() {
+  if (!planningClosureHandler || !activeRetardJustificationContext) return;
+  const context = activeRetardJustificationContext;
+  if (!context.dateClotureColumnAvailable) {
+    alert("La réalisation forcée est indisponible : la colonne Planning_Projet.Date_Cloture est absente de cet environnement.");
+    return;
+  }
+
+  const dialog = ensurePlanningClosureDialog();
+  const existingDate = String(context.dateCloture || "").trim();
+  const title = dialog.querySelector("h3");
+  if (title) title.textContent = existingDate
+    ? "Modifier la date de réalisation"
+    : "Forcer la réalisation du plan";
+
+  ["id2", "task", "typeDoc", "zone", "indice", "realise"].forEach((key) => {
+    const output = dialog.querySelector(`[data-planning-closure-summary="${key}"]`);
+    if (output) output.textContent = String(context[key] || "Non renseigné");
+  });
+  const zoneRow = dialog.querySelector("[data-planning-closure-zone-row]");
+  if (zoneRow instanceof HTMLElement) zoneRow.hidden = !String(context.zone || "").trim();
+
+  const input = dialog.querySelector('input[name="dateCloture"]');
+  if (input instanceof HTMLInputElement) {
+    input.max = getLocalTodayIso();
+    input.value = existingDate || getLocalTodayIso();
+  }
+  const errorEl = dialog.querySelector(".planning-closure-dialog__error");
+  if (errorEl) errorEl.textContent = "";
+  dialog.dataset.saving = "false";
+  dialog.showModal();
+  input?.focus();
+}
+
+async function savePlanningClosureDialog() {
+  if (!planningClosureHandler || !activeRetardJustificationContext) return;
+  const dialog = ensurePlanningClosureDialog();
+  if (dialog.dataset.saving === "true") return;
+
+  const input = dialog.querySelector('input[name="dateCloture"]');
+  const errorEl = dialog.querySelector(".planning-closure-dialog__error");
+  const value = input instanceof HTMLInputElement ? input.value : "";
+  const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const parsed = isoMatch
+    ? new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]))
+    : null;
+  const valid = Boolean(
+    parsed &&
+    parsed.getFullYear() === Number(isoMatch[1]) &&
+    parsed.getMonth() === Number(isoMatch[2]) - 1 &&
+    parsed.getDate() === Number(isoMatch[3])
+  );
+  if (!valid) {
+    if (errorEl) errorEl.textContent = "Saisissez une date de réalisation valide.";
+    input?.focus();
+    return;
+  }
+  if (value > getLocalTodayIso()) {
+    if (errorEl) errorEl.textContent = "La date de réalisation ne peut pas être future.";
+    input?.focus();
+    return;
+  }
+
+  dialog.dataset.saving = "true";
+  dialog.querySelectorAll("button, input").forEach((control) => {
+    control.disabled = true;
+  });
+  if (errorEl) errorEl.textContent = "";
+
+  try {
+    await planningClosureHandler({
+      action: "save",
+      context: { ...activeRetardJustificationContext },
+      dateCloture: value,
+    });
+    dialog.close();
+  } catch (error) {
+    console.error("Erreur réalisation forcée :", error);
+    if (errorEl) errorEl.textContent = error?.message || "Échec de la sauvegarde.";
+  } finally {
+    dialog.dataset.saving = "false";
+    dialog.querySelectorAll("button, input").forEach((control) => {
+      control.disabled = false;
+    });
+  }
+}
+
+async function deletePlanningClosureFromMenu() {
+  if (!planningClosureHandler || !activeRetardJustificationContext) return;
+  if (!window.confirm(
+    "Supprimer la réalisation forcée de ce plan ? Son avancement sera de nouveau calculé selon son indice cible."
+  )) return;
+
+  try {
+    await planningClosureHandler({
+      action: "delete",
+      context: { ...activeRetardJustificationContext },
+      dateCloture: null,
+    });
+  } catch (error) {
+    console.error("Erreur suppression réalisation forcée :", error);
+    alert(`Erreur suppression réalisation forcée : ${error?.message || error}`);
+  }
 }
 
 async function commitRetardJustification(nextValue) {
@@ -2375,6 +2559,11 @@ function buildRetardContextFromRow(rowEl) {
     task: rowEl.dataset.planningTask || "",
     typeDoc: rowEl.dataset.planningTypeDoc || "",
     zone: rowEl.dataset.planningZone || "",
+    service: rowEl.dataset.planningService || "",
+    indice: rowEl.dataset.planningIndice || "",
+    realise: rowEl.dataset.planningRealise || "",
+    dateCloture: rowEl.dataset.planningDateCloture || "",
+    dateClotureColumnAvailable: rowEl.dataset.planningDateClotureAvailable === "true",
     debutIso: rowEl.dataset.planningStartIso || "",
     retards: rowEl.dataset.planningRetards || "",
     remarque: rowEl.dataset.planningRemarque || "",
@@ -2382,7 +2571,10 @@ function buildRetardContextFromRow(rowEl) {
 }
 
 function openRetardContextMenu(event, rowEl) {
-  if (!(rowEl instanceof HTMLElement) || (!retardJustificationHandler && !referenceDetailsHandler)) return;
+  if (
+    !(rowEl instanceof HTMLElement) ||
+    (!retardJustificationHandler && !referenceDetailsHandler && !planningClosureHandler)
+  ) return;
 
   const context = buildRetardContextFromRow(rowEl);
   if (!context) return;
@@ -2393,6 +2585,23 @@ function openRetardContextMenu(event, rowEl) {
   activeRetardJustificationContext = context;
 
   const menu = ensureRetardContextMenu();
+  const hasClosure = Boolean(context.dateCloture);
+  const closureAvailable = Boolean(context.dateClotureColumnAvailable && planningClosureHandler);
+  const editButton = menu.querySelector('[data-planning-retard-action="closure-edit"]');
+  const deleteButton = menu.querySelector('[data-planning-retard-action="closure-delete"]');
+  const unavailableButton = menu.querySelector('[data-planning-retard-action="closure-unavailable"]');
+  if (editButton instanceof HTMLElement) {
+    editButton.hidden = !closureAvailable;
+    editButton.textContent = hasClosure
+      ? "Modifier la date de réalisation…"
+      : "Forcer la réalisation du plan…";
+  }
+  if (deleteButton instanceof HTMLElement) {
+    deleteButton.hidden = !closureAvailable || !hasClosure;
+  }
+  if (unavailableButton instanceof HTMLElement) {
+    unavailableButton.hidden = closureAvailable;
+  }
   positionFixedElementNearPointer(menu, event);
 }
 
@@ -4577,11 +4786,16 @@ function buildGroupLabelElement(group) {
   row.dataset.planningZone = String(group?.zoneLabel ?? "");
   row.dataset.planningLignePlanning = String(group?.lignePlanningLabel ?? "");
   row.dataset.planningTypeDoc = String(group?.typeDocLabel ?? "");
+  row.dataset.planningService = String(group?.serviceLabel ?? "");
   row.dataset.planningStartIso = String(group?.debutIso ?? "");
   row.dataset.planningEndIso = String(group?.finIso ?? "");
   row.dataset.planningDemarrageIso = String(group?.demarrageIso ?? "");
   row.dataset.planningIndice = String(group?.indiceLabel ?? "");
   row.dataset.planningRealise = String(group?.realiseLabel ?? "");
+  row.dataset.planningDateCloture = String(group?.dateClotureIso ?? "");
+  row.dataset.planningDateClotureAvailable = String(
+    Boolean(group?.dateClotureColumnAvailable)
+  );
   row.dataset.planningRetards = String(group?.retardsLabel ?? "");
   row.dataset.planningRemarque = String(group?.remarqueLabel ?? "");
   const typeDocLabel = String(group?.typeDocLabel ?? "");
@@ -4690,7 +4904,14 @@ function buildGroupLabelElement(group) {
 
   const realise = document.createElement("div");
   realise.className = "cell-realise";
-  realise.textContent = String(group?.realiseLabel ?? "");
+  const forcedClosureLabel = String(group?.dateClotureLabel ?? "").trim();
+  realise.textContent = forcedClosureLabel
+    ? `100 % — réalisation forcée le ${forcedClosureLabel}`
+    : String(group?.realiseLabel ?? "");
+  if (forcedClosureLabel) {
+    realise.classList.add("is-forced-closure");
+    realise.title = `Réalisé manuellement le ${forcedClosureLabel}`;
+  }
 
   const retards = document.createElement("div");
   retards.className = "cell-retards";
@@ -5554,6 +5775,10 @@ export function setPlanningDurationEditHandler(handler) {
 
 export function setPlanningRetardJustificationHandler(handler) {
   retardJustificationHandler = typeof handler === "function" ? handler : null;
+}
+
+export function setPlanningClosureHandler(handler) {
+  planningClosureHandler = typeof handler === "function" ? handler : null;
 }
 
 export function setPlanningInitializeHandler(handler) {

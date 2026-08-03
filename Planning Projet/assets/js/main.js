@@ -7,6 +7,7 @@ import {
   fetchPlanningReferenceReceptionSummaries,
   getPlanningServiceDiagnostics,
   updatePlanningDurationAndLeftDate,
+  updatePlanningClosureDate,
   updatePlanningRetardJustification,
   fetchPlanningReferenceDetails,
   updatePlanningReferenceDetails,
@@ -47,6 +48,7 @@ import {
   setPlanningVisualAggregateMode,
   setPlanningDurationEditHandler,
   setPlanningRetardJustificationHandler,
+  setPlanningClosureHandler,
   setPlanningReferenceDetailsHandler,
   setPlanningMsProjectDropHandler,
   setPlanningRowDropHandler,
@@ -946,6 +948,41 @@ async function handleRetardJustificationEdit({ rowId, remarque }) {
   }
 }
 
+async function handlePlanningClosureAction({ action, context = {}, dateCloture = null } = {}) {
+  assertPlanningEditing("modifier la réalisation du plan");
+
+  const recordId = Number(context?.rowId);
+  if (!Number.isInteger(recordId) || recordId <= 0) {
+    throw new Error("Identifiant de ligne Planning_Projet invalide.");
+  }
+  if (!context?.dateClotureColumnAvailable) {
+    throw new Error(
+      "La réalisation forcée est indisponible : la colonne Planning_Projet.Date_Cloture est absente de cet environnement."
+    );
+  }
+  if (action !== "save" && action !== "delete") {
+    throw new Error("Action de réalisation forcée invalide.");
+  }
+
+  try {
+    setPlanningStatus(
+      action === "delete"
+        ? "Suppression de la réalisation forcée..."
+        : "Sauvegarde de la réalisation forcée..."
+    );
+    await updatePlanningClosureDate(recordId, action === "delete" ? null : dateCloture);
+    await refreshPlanning({
+      sync: true,
+      forceLoad: true,
+      forceSync: true,
+      reason: action === "delete" ? "forced-closure-delete" : "forced-closure-save",
+    });
+  } catch (error) {
+    setPlanningStatus(`Erreur réalisation forcée : ${error.message}`);
+    throw error;
+  }
+}
+
 async function handleReferenceDetailsAction({ action, context = {}, updates = [] } = {}) {
   const recordId = Number(context?.rowId);
   if (!Number.isInteger(recordId) || recordId <= 0) {
@@ -1518,6 +1555,7 @@ async function bootstrap() {
     bindManageZoneModal();
     setPlanningDurationEditHandler(handleDurationCellEdit);
     setPlanningRetardJustificationHandler(handleRetardJustificationEdit);
+    setPlanningClosureHandler(handlePlanningClosureAction);
     if (!EMBEDDED_PLANNING_SYNC_MODE) {
       setPlanningReferenceDetailsHandler(handleReferenceDetailsAction);
     }
