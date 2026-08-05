@@ -73,8 +73,12 @@ function normalizePersonKey(value) {
     .toLocaleLowerCase("fr");
 }
 
+function normalizeContextService(value) {
+  return window.GristServiceContextCore?.normalizeService?.(value) || toText(value);
+}
+
 function filterTablesByPersonService(tables) {
-  const selectedService = toText(
+  const selectedService = normalizeContextService(
     window.GristServiceContext?.getService?.()
       || window.localStorage?.getItem("grist.selected-service")
   );
@@ -89,7 +93,7 @@ function filterTablesByPersonService(tables) {
   }
 
   const teamRows = (tables?.teamRows || []).filter(
-    (row) => toText(row?.Service) === selectedService
+    (row) => normalizeContextService(row?.Service) === selectedService
   );
   const allowedPeople = new Set(teamRows.map((row) => normalizePersonKey(
     toText(row?.PrenomNom)

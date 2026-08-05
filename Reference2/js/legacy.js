@@ -4220,7 +4220,7 @@ function setupUnifiedAddDocumentsUi() {
 }
 
 // Ready Grist
-grist.ready();
+grist.ready({ requiredAccess: "full" });
 setupUnifiedAddDocumentsUi();
 renderUnifiedPendingDocuments();
 scheduleReferenceRetardMidnightRefresh();
@@ -7765,7 +7765,7 @@ try {
   }
 } catch (e) { }
 
-window.GristServiceContext.onRecords(async function handleReferenceRecords(
+window.GristServiceContext.watchContextTable('References2', async function handleReferenceRecords(
   receivedRecords,
   _mappings,
   delivery

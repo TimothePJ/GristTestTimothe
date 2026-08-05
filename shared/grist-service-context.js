@@ -28,6 +28,12 @@
     error: null,
   };
   const ACCESS_CACHE_TTL_MS = 45000;
+  const CONTEXT_TABLE_CACHE_TTL_MS = 30000;
+  const REST_PROJECT_VALUES_PER_REQUEST = 40;
+  const REST_FILTER_MAX_ENCODED_LENGTH = 1800;
+  const REST_MAX_CONCURRENCY = 3;
+  const REST_ADMIN_MAX_CHUNKS = 12;
+  const DEFAULT_WATCH_POLL_INTERVAL_MS = 30000;
   const ACCESS_TABLES = new Set(["Team", core.PROJECTS_TABLE, core.PROJECT_TEAM_TABLE]);
   const listeners = new Set();
   const recordSubscribers = new Set();
@@ -47,6 +53,13 @@
   let accessSignalSequence = 0;
   let storageSelectionTimer = 0;
   const rawTableCache = new Map();
+  const contextTableCache = new Map();
+  const contextTableEpochs = new Map();
+  const contextWatchers = new Set();
+  let accessTokenEntry = null;
+  let accessTokenPromise = null;
+  let restVisibilityEntry = null;
+  let restFallbackWarningShown = false;
 
   function getGrist() {
     return window.grist || null;
@@ -261,6 +274,20 @@
     return timestamp > 0 && Date.now() - timestamp < ttl;
   }
 
+  function getTableRowCount(table) {
+    try {
+      return core.tableToRows(table).length;
+    } catch (_error) {
+      return 0;
+    }
+  }
+
+  function logDataPath(mode, tableName, details = {}) {
+    const label = `[GristData][${mode}] ${core.toText(tableName) || "table inconnue"}`;
+    const logger = mode.includes("FALLBACK") ? console.warn : console.info;
+    logger.call(console, label, details);
+  }
+
   function invalidateRawTableCache(tableName) {
     const normalizedTableName = core.toText(tableName);
     if (normalizedTableName) rawTableCache.delete(normalizedTableName);
@@ -269,15 +296,20 @@
   function invalidateAccessCache() {
     accessCacheInvalidated = true;
     accessLoadedAt = 0;
-    ACCESS_TABLES.forEach(invalidateRawTableCache);
+    ACCESS_TABLES.forEach(invalidateContextTable);
   }
 
   async function fetchRawTableCached(tableName, { forceRefresh = false, ttl = ACCESS_CACHE_TTL_MS } = {}) {
     const normalizedTableName = core.toText(tableName);
-    if (!ACCESS_TABLES.has(normalizedTableName)) return rawFetchTable(normalizedTableName);
+    const effectiveTtl = ACCESS_TABLES.has(normalizedTableName)
+      ? ttl
+      : Math.min(ttl, CONTEXT_TABLE_CACHE_TTL_MS);
 
     const cached = rawTableCache.get(normalizedTableName);
-    if (!forceRefresh && cached?.value != null && isFreshTimestamp(cached.loadedAt, ttl)) {
+    if (!forceRefresh && cached?.value != null && isFreshTimestamp(cached.loadedAt, effectiveTtl)) {
+      logDataPath("CACHE FETCHTABLE", normalizedTableName, {
+        lignes: getTableRowCount(cached.value),
+      });
       return cached.value;
     }
     if (cached?.promise) return cached.promise;
@@ -286,12 +318,454 @@
     entry.promise = Promise.resolve(rawFetchTable(normalizedTableName)).then((value) => {
       entry.value = value;
       entry.loadedAt = Date.now();
+      logDataPath("FETCHTABLE COMPLET", normalizedTableName, {
+        lignes: getTableRowCount(value),
+      });
       return value;
     }).finally(() => {
       entry.promise = null;
     });
     rawTableCache.set(normalizedTableName, entry);
     return entry.promise;
+  }
+
+  function emptyTableData() {
+    return { id: [] };
+  }
+
+  function getContextTableEpoch(tableName) {
+    return contextTableEpochs.get(core.toText(tableName)) || 0;
+  }
+
+  function invalidateContextTable(tableName) {
+    const normalizedTableName = core.toText(tableName);
+    if (!normalizedTableName) return;
+    contextTableEpochs.set(normalizedTableName, getContextTableEpoch(normalizedTableName) + 1);
+    for (const [key, entry] of contextTableCache) {
+      if (entry.tableName === normalizedTableName) contextTableCache.delete(key);
+    }
+    invalidateRawTableCache(normalizedTableName);
+  }
+
+  function getContextTableCacheKey(tableName, contextSnapshot) {
+    const multiProject = isMultiProjectContext();
+    const projects = multiProject
+      ? contextSnapshot.allowedProjects
+      : [contextSnapshot.currentProject].filter(Boolean);
+    const projectScope = projects.map((project) => ({
+      number: core.normalizeProjectNumber(project?.number),
+      names: core.uniqueExactValues([project?.name, ...(project?.names || [])]).sort(),
+    })).sort((left, right) => (
+      left.number.localeCompare(right.number) || left.names.join("\u0000").localeCompare(right.names.join("\u0000"))
+    ));
+    return JSON.stringify({
+      tableName: core.toText(tableName),
+      service: core.normalizeService(contextSnapshot.selectedService),
+      multiProject,
+      projectScope,
+    });
+  }
+
+  function createRestUnavailableError(message, { status = 0, cause = null } = {}) {
+    const error = new Error(message);
+    error.name = "GristContextRestUnavailableError";
+    error.isContextRestUnavailable = true;
+    error.status = Number(status) || 0;
+    if (cause) error.cause = cause;
+    return error;
+  }
+
+  function warnRestFallback() {
+    if (restFallbackWarningShown) return;
+    restFallbackWarningShown = true;
+    console.warn("Chargement REST filtré indisponible ; repli local Grist activé.");
+  }
+
+  function invalidateAccessToken() {
+    accessTokenEntry = null;
+    restVisibilityEntry = null;
+  }
+
+  function hasRestApiSupport() {
+    const grist = getGrist();
+    return Boolean(
+      typeof window.fetch === "function" &&
+      typeof grist?.docApi?.getAccessToken === "function"
+    );
+  }
+
+  async function getReadOnlyAccessToken({ forceRefresh = false } = {}) {
+    const grist = getGrist();
+    if (typeof grist?.docApi?.getAccessToken !== "function") {
+      throw createRestUnavailableError("Jeton temporaire Grist indisponible.");
+    }
+    const now = Date.now();
+    if (
+      !forceRefresh &&
+      accessTokenEntry &&
+      accessTokenEntry.expiresAt - accessTokenEntry.renewBeforeMs > now
+    ) {
+      return accessTokenEntry.access;
+    }
+    if (accessTokenPromise) return accessTokenPromise;
+
+    accessTokenPromise = Promise.resolve(
+      grist.docApi.getAccessToken({ readOnly: true })
+    ).then((access) => {
+      const baseUrl = core.toText(access?.baseUrl);
+      const token = typeof access?.token === "string" ? access.token : "";
+      const ttlMsecs = Math.max(0, Number(access?.ttlMsecs) || 0);
+      if (!baseUrl || !token || !ttlMsecs) {
+        throw createRestUnavailableError("Jeton temporaire Grist invalide.");
+      }
+      const renewBeforeMs = Math.min(
+        30000,
+        Math.max(100, Math.floor(ttlMsecs * 0.1)),
+        Math.max(0, ttlMsecs - 1)
+      );
+      if (accessTokenEntry?.access?.token !== token) {
+        restVisibilityEntry = null;
+      }
+      accessTokenEntry = {
+        access: { baseUrl, token, ttlMsecs },
+        expiresAt: Date.now() + ttlMsecs,
+        renewBeforeMs,
+      };
+      return accessTokenEntry.access;
+    }).catch((error) => {
+      if (error?.isContextRestUnavailable) throw error;
+      throw createRestUnavailableError("Obtention du jeton temporaire Grist impossible.", { cause: error });
+    }).finally(() => {
+      accessTokenPromise = null;
+    });
+    return accessTokenPromise;
+  }
+
+  async function fetchRestRecords(tableName, filter = null, {
+    signal = null,
+    authRetry = false,
+    limit = null,
+    cacheMode = "",
+    accessOverride = null,
+  } = {}) {
+    if (typeof window.fetch !== "function") {
+      throw createRestUnavailableError("API fetch indisponible.");
+    }
+    const access = accessOverride || await getReadOnlyAccessToken();
+    const baseUrl = access.baseUrl.replace(/\/+$/, "");
+    const query = [];
+    if (filter && typeof filter === "object") {
+      query.push(`filter=${encodeURIComponent(JSON.stringify(filter))}`);
+    }
+    const normalizedLimit = Math.floor(Number(limit));
+    if (normalizedLimit > 0) query.push(`limit=${normalizedLimit}`);
+    query.push(`auth=${encodeURIComponent(access.token)}`);
+    const url = `${baseUrl}/tables/${encodeURIComponent(tableName)}/records?${query.join("&")}`;
+    const fetchOptions = {};
+    if (signal) fetchOptions.signal = signal;
+    if (cacheMode) fetchOptions.cache = cacheMode;
+    let response;
+    try {
+      response = await window.fetch(
+        url,
+        Object.keys(fetchOptions).length ? fetchOptions : undefined
+      );
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+      throw createRestUnavailableError("Requête REST Grist impossible.", { cause: error });
+    }
+
+    if ([401, 403].includes(Number(response?.status))) {
+      invalidateAccessToken();
+      if (!authRetry) {
+        await getReadOnlyAccessToken({ forceRefresh: true });
+        return fetchRestRecords(tableName, filter, {
+          signal,
+          authRetry: true,
+          limit,
+          cacheMode,
+          accessOverride: null,
+        });
+      }
+    }
+    if (!response?.ok) {
+      throw createRestUnavailableError("Réponse REST Grist en erreur.", {
+        status: response?.status,
+      });
+    }
+
+    let envelope;
+    try {
+      envelope = await response.json();
+    } catch (error) {
+      throw createRestUnavailableError("Réponse JSON Grist invalide.", { cause: error });
+    }
+    if (!envelope || !Array.isArray(envelope.records)) {
+      throw createRestUnavailableError("Réponse REST Grist invalide.");
+    }
+    return envelope;
+  }
+
+  async function ensureRestDocumentVisibility() {
+    if (!state.catalogProjects.length) return null;
+
+    const access = await getReadOnlyAccessToken();
+    if (restVisibilityEntry?.access === access) {
+      if (restVisibilityEntry.status === "available") return restVisibilityEntry.access;
+      if (restVisibilityEntry.status === "unavailable") {
+        throw restVisibilityEntry.error || createRestUnavailableError(
+          "Le jeton REST Grist ne voit aucune donnée du document."
+        );
+      }
+      return restVisibilityEntry.promise;
+    }
+
+    const entry = {
+      access,
+      status: "checking",
+      error: null,
+      promise: null,
+    };
+    restVisibilityEntry = entry;
+    entry.promise = fetchRestRecords(core.PROJECTS_TABLE, null, {
+      limit: 1,
+      cacheMode: "no-store",
+      accessOverride: access,
+    }).then((envelope) => {
+      if (!envelope.records.length) {
+        throw createRestUnavailableError(
+          "Le serveur Grist ne transmet pas l'identite du widget au jeton REST. " +
+          "Une mise a jour du serveur Grist est necessaire."
+        );
+      }
+      logDataPath("SONDE REST OK", core.PROJECTS_TABLE, {
+        lignes: envelope.records.length,
+      });
+      if (restVisibilityEntry === entry) entry.status = "available";
+      return accessTokenEntry?.access || access;
+    }).catch((error) => {
+      if (error?.name === "AbortError") {
+        if (restVisibilityEntry === entry) restVisibilityEntry = null;
+        throw error;
+      }
+      const unavailableError = error?.isContextRestUnavailable
+        ? error
+        : createRestUnavailableError(
+            "Vérification de la visibilité REST Grist impossible.",
+            { cause: error }
+          );
+      if (restVisibilityEntry === entry) {
+        entry.status = "unavailable";
+        entry.error = unavailableError;
+      }
+      throw unavailableError;
+    });
+    return entry.promise;
+  }
+
+  async function verifyEmptyRestTable(tableName, access, { signal = null } = {}) {
+    const probe = await fetchRestRecords(tableName, null, {
+      signal,
+      limit: 1,
+      cacheMode: "no-store",
+      accessOverride: access,
+    });
+    if (probe.records.length) return null;
+
+    const raw = await fetchRawTableCached(tableName);
+    if (!core.tableToRows(raw).length) return null;
+
+    const error = createRestUnavailableError(
+      `Le serveur Grist ne transmet pas l'identite du widget au jeton REST pour la table ${tableName}. ` +
+      "Une mise a jour du serveur Grist est necessaire."
+    );
+    if (restVisibilityEntry?.access === access) {
+      restVisibilityEntry.status = "unavailable";
+      restVisibilityEntry.error = error;
+    }
+    return raw;
+  }
+
+  async function mapWithConcurrency(values, limit, mapper) {
+    const source = Array.isArray(values) ? values : [];
+    const results = new Array(source.length);
+    let nextIndex = 0;
+    const worker = async () => {
+      while (nextIndex < source.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await mapper(source[index], index);
+      }
+    };
+    const workerCount = Math.min(Math.max(1, Number(limit) || 1), source.length);
+    await Promise.all(Array.from({ length: workerCount }, worker));
+    return results;
+  }
+
+  function buildContextFilterPlan(tableName, contextSnapshot) {
+    const spec = core.buildContextTableFilter(tableName, {
+      selectedService: contextSnapshot.selectedService,
+      currentProject: contextSnapshot.currentProject,
+      allowedProjects: contextSnapshot.allowedProjects,
+      multiProject: isMultiProjectContext(),
+    });
+    if (!spec.complete || !spec.filter) return { ...spec, filters: [] };
+
+    let filters = core.splitContextTableFilter(spec.filter, spec.projectColumn, {
+      maxValues: REST_PROJECT_VALUES_PER_REQUEST,
+      maxEncodedLength: REST_FILTER_MAX_ENCODED_LENGTH,
+    });
+    if (contextSnapshot.isAdmin && filters.length > REST_ADMIN_MAX_CHUNKS) {
+      filters = [{ Service: [...spec.filter.Service] }];
+    }
+    return { ...spec, filters };
+  }
+
+  async function loadRestContextTable(tableName, contextSnapshot, filterPlan, { signal = null } = {}) {
+    const access = await ensureRestDocumentVisibility();
+    const envelopes = await mapWithConcurrency(
+      filterPlan.filters,
+      REST_MAX_CONCURRENCY,
+      (filter) => fetchRestRecords(tableName, filter, { signal, accessOverride: access })
+    );
+    const merged = core.mergeRestRecordEnvelopes(envelopes);
+    if (!merged.records.length) {
+      const rawFallback = await verifyEmptyRestTable(tableName, access, { signal });
+      if (rawFallback) {
+        warnRestFallback();
+        const table = filterTableData(rawFallback, tableName, contextSnapshot);
+        logDataPath("FALLBACK FETCHTABLE", tableName, {
+          raison: "REST ne voit aucune ligne alors que la table Grist contient des donnees.",
+          lignesUtiles: getTableRowCount(table),
+        });
+        return {
+          table,
+          source: "fallback",
+        };
+      }
+    }
+    const table = core.restRecordsToTableData(merged);
+    const filteredTable = filterTableData(table, tableName, contextSnapshot);
+    logDataPath("REST FILTRE", tableName, {
+      lignesRecues: merged.records.length,
+      lignesUtiles: getTableRowCount(filteredTable),
+      requetes: envelopes.length,
+      service: contextSnapshot.selectedService,
+      projet: contextSnapshot.currentProject?.number || contextSnapshot.currentProject?.name || "multi-projets",
+    });
+    return {
+      table: filteredTable,
+      source: "rest",
+    };
+  }
+
+  async function loadFallbackContextTable(tableName, contextSnapshot, reason = "REST indisponible") {
+    const raw = await fetchRawTableCached(tableName);
+    const table = filterTableData(raw, tableName, contextSnapshot);
+    logDataPath("FALLBACK FETCHTABLE", tableName, {
+      raison: reason,
+      lignesCompletes: getTableRowCount(raw),
+      lignesUtiles: getTableRowCount(table),
+    });
+    return {
+      table,
+      source: "fallback",
+    };
+  }
+
+  async function fetchContextTableInternal(tableName, {
+    forceRefresh = false,
+    ttl = CONTEXT_TABLE_CACHE_TTL_MS,
+    signal = null,
+  } = {}) {
+    await initialize();
+    const normalizedTableName = core.toText(tableName);
+    const contextSnapshot = getPublicState();
+    const filterPlan = buildContextFilterPlan(normalizedTableName, contextSnapshot);
+
+    if (filterPlan.supported && !filterPlan.complete) {
+      return { table: emptyTableData(), source: "empty", stale: false };
+    }
+    if (!filterPlan.supported) {
+      return loadFallbackContextTable(
+        normalizedTableName,
+        contextSnapshot,
+        "Cette table n'a pas de filtre REST configure."
+      );
+    }
+
+    const cacheKey = getContextTableCacheKey(normalizedTableName, contextSnapshot);
+    const cached = contextTableCache.get(cacheKey);
+    if (!forceRefresh && cached?.value && isFreshTimestamp(cached.loadedAt, ttl)) {
+      logDataPath("CACHE", normalizedTableName, {
+        source: cached.value.source,
+        lignes: getTableRowCount(cached.value.table),
+      });
+      return cached.value;
+    }
+    if (cached?.promise) return cached.promise;
+
+    const requestGeneration = contextSnapshot.generation;
+    const requestEpoch = getContextTableEpoch(normalizedTableName);
+    const entry = cached || {
+      tableName: normalizedTableName,
+      value: null,
+      loadedAt: 0,
+      promise: null,
+    };
+    const promise = (async () => {
+      let loaded;
+      if (hasRestApiSupport()) {
+        try {
+          loaded = await loadRestContextTable(
+            normalizedTableName,
+            contextSnapshot,
+            filterPlan,
+            { signal }
+          );
+        } catch (error) {
+          if (error?.name === "AbortError") throw error;
+          if (!error?.isContextRestUnavailable) throw error;
+          warnRestFallback();
+          loaded = await loadFallbackContextTable(
+            normalizedTableName,
+            contextSnapshot,
+            error?.message || "REST indisponible"
+          );
+        }
+      } else {
+        loaded = await loadFallbackContextTable(
+          normalizedTableName,
+          contextSnapshot,
+          "fetch ou getAccessToken est indisponible."
+        );
+      }
+
+      const stale = requestGeneration !== selectionGeneration ||
+        requestEpoch !== getContextTableEpoch(normalizedTableName);
+      const value = stale
+        ? { table: emptyTableData(), source: loaded.source, stale: true }
+        : { ...loaded, stale: false };
+      if (!stale) {
+        entry.value = value;
+        entry.loadedAt = Date.now();
+      }
+      return value;
+    })().finally(() => {
+      if (entry.promise === promise) entry.promise = null;
+    });
+    entry.promise = promise;
+    contextTableCache.set(cacheKey, entry);
+    return promise;
+  }
+
+  async function fetchContextTable(tableName, options = {}) {
+    const result = await fetchContextTableInternal(tableName, options);
+    return result.table;
+  }
+
+  async function fetchContextRows(tableName, options = {}) {
+    return core.tableToRows(await fetchContextTable(tableName, options));
   }
 
   async function loadIdentityAndProjects({ forceRefresh = false } = {}) {
@@ -368,7 +842,10 @@
       mountSelector();
       applyReadonlyUi(snapshot);
       notify(snapshot);
-      await emitLatestRecords("refresh", snapshot);
+      await Promise.all([
+        emitLatestRecords("refresh", snapshot),
+        refreshContextWatchers(null, "refresh"),
+      ]);
       return snapshot;
     })().finally(() => {
       refreshPromise = null;
@@ -438,7 +915,10 @@
       previousService !== snapshot.selectedService
     ) {
       notify(snapshot);
-      await emitLatestRecords(reason, snapshot);
+      await Promise.all([
+        emitLatestRecords(reason, snapshot),
+        refreshContextWatchers(null, reason),
+      ]);
     }
     return snapshot;
   }
@@ -458,7 +938,10 @@
     const snapshot = getPublicState(requestGeneration);
     applyReadonlyUi(snapshot);
     notify(snapshot);
-    await emitLatestRecords(reason, snapshot);
+    await Promise.all([
+      emitLatestRecords(reason, snapshot),
+      refreshContextWatchers(null, reason),
+    ]);
     return snapshot;
   }
 
@@ -655,7 +1138,7 @@
   function isWriteControl(element) {
     if (!(element instanceof HTMLElement)) return false;
     if (element.closest("#grist-service-context-control")) return false;
-    if (element.matches("[data-grist-service-selector], #firstColumnDropdown, #projectDropdown, #ps-project-select, #project-select")) {
+    if (element.matches("[data-service-context-navigation], [data-grist-service-selector], #firstColumnDropdown, #projectDropdown, #ps-project-select, #project-select")) {
       return false;
     }
     const marker = `${element.id} ${element.className} ${element.getAttribute("aria-label") || ""} ${element.title || ""} ${element instanceof HTMLButtonElement ? element.textContent : ""}`
@@ -815,6 +1298,125 @@
     return () => recordSubscribers.delete(callback);
   }
 
+  function deliverContextWatcher(watcher, rows, mappings, reason, source) {
+    if (!watcher.active) return Promise.resolve();
+    const contextSnapshot = getPublicState();
+    const delivery = {
+      reason,
+      source,
+      generation: contextSnapshot.generation,
+      rawVersion: ++watcher.version,
+      context: {
+        ...contextSnapshot,
+        records: rows,
+      },
+    };
+    return Promise.resolve(watcher.callback(rows, mappings, delivery)).catch((error) => {
+      console.error(`Erreur watcher ${watcher.tableName} :`, error);
+    });
+  }
+
+  function ensureWatcherPolling(watcher) {
+    if (!watcher.active || watcher.pollTimer || watcher.pollIntervalMs <= 0) return;
+    watcher.pollTimer = window.setInterval(() => {
+      if (!watcher.active || document.hidden) return;
+      watcher.reload("poll", { forceRefresh: true }).catch(() => {});
+    }, watcher.pollIntervalMs);
+  }
+
+  function ensureWatcherFallbackSubscription(watcher) {
+    if (!watcher.active || watcher.fallbackUnsubscribe) return;
+    watcher.fallbackUnsubscribe = subscribeToRecords((records, mappings, delivery) => {
+      if (!watcher.active) return;
+      const contextSnapshot = getPublicState();
+      const tableRows = core.tableToRows(filterTableData(
+        records,
+        watcher.tableName,
+        contextSnapshot
+      ));
+      return deliverContextWatcher(
+        watcher,
+        tableRows,
+        mappings,
+        delivery?.reason || "records",
+        "fallback"
+      );
+    });
+  }
+
+  function watchContextTable(tableName, callback, {
+    pollIntervalMs = DEFAULT_WATCH_POLL_INTERVAL_MS,
+    forceRefresh = true,
+  } = {}) {
+    const normalizedTableName = core.toText(tableName);
+    if (!normalizedTableName || typeof callback !== "function") return () => {};
+
+    const watcher = {
+      tableName: normalizedTableName,
+      callback,
+      active: true,
+      requestSequence: 0,
+      version: 0,
+      pollTimer: 0,
+      fallbackUnsubscribe: null,
+      pollIntervalMs: Math.max(0, Number(pollIntervalMs) || 0),
+      reload: null,
+    };
+    watcher.reload = async (reason = "refresh", options = {}) => {
+      if (!watcher.active) return;
+      const requestSequence = ++watcher.requestSequence;
+      const requestGeneration = selectionGeneration;
+      const result = await fetchContextTableInternal(watcher.tableName, {
+        forceRefresh: options.forceRefresh !== false,
+        signal: options.signal || null,
+      });
+      if (
+        !watcher.active ||
+        requestSequence !== watcher.requestSequence ||
+        requestGeneration !== selectionGeneration ||
+        result.stale
+      ) return;
+
+      if (result.source === "rest") ensureWatcherPolling(watcher);
+      if (result.source === "fallback") ensureWatcherFallbackSubscription(watcher);
+      const rows = core.tableToRows(result.table);
+      await deliverContextWatcher(watcher, rows, null, reason, result.source);
+    };
+    contextWatchers.add(watcher);
+    watcher.reload("initial", { forceRefresh }).catch((error) => {
+      if (error?.name !== "AbortError") {
+        console.warn(`Chargement initial de ${normalizedTableName} impossible.`);
+      }
+    });
+
+    return () => {
+      if (!watcher.active) return;
+      watcher.active = false;
+      watcher.requestSequence += 1;
+      contextWatchers.delete(watcher);
+      if (watcher.pollTimer) window.clearInterval(watcher.pollTimer);
+      watcher.pollTimer = 0;
+      watcher.fallbackUnsubscribe?.();
+      watcher.fallbackUnsubscribe = null;
+    };
+  }
+
+  function refreshContextWatchers(tableNames = null, reason = "refresh") {
+    const tableList = tableNames == null
+      ? []
+      : (typeof tableNames === "string" ? [tableNames] : [...tableNames]);
+    const selectedTables = tableNames == null
+      ? null
+      : new Set(tableList.map(core.toText).filter(Boolean));
+    return Promise.all([...contextWatchers]
+      .filter((watcher) => !selectedTables || selectedTables.has(watcher.tableName))
+      .map((watcher) => watcher.reload(reason, { forceRefresh: true }).catch((error) => {
+        if (error?.name !== "AbortError") {
+          console.warn(`Actualisation de ${watcher.tableName} impossible.`);
+        }
+      })));
+  }
+
   function subscribeToRecord(callback, ...args) {
     const grist = getGrist();
     if (typeof grist?.onRecord !== "function") {
@@ -924,6 +1526,16 @@
     });
   }
 
+  function getModifiedTables(actions) {
+    const tables = new Set();
+    (Array.isArray(actions) ? actions : []).forEach((action) => {
+      if (!core.isMutationAction(action)) return;
+      const tableName = core.toText(action?.[1]);
+      if (tableName) tables.add(tableName);
+    });
+    return tables;
+  }
+
   function patchGristApi() {
     const grist = getGrist();
     if (!grist) return false;
@@ -932,11 +1544,8 @@
       const docApi = grist.docApi;
       rawFetchTable = docApi.fetchTable.bind(docApi);
       rawApplyUserActions = docApi.applyUserActions?.bind(docApi) || null;
-      docApi.fetchTable = async function serviceAwareFetchTable(tableName) {
-        await initialize();
-        const snapshot = getPublicState();
-        const raw = await fetchRawTableCached(tableName);
-        return filterTableData(raw, tableName, snapshot);
+      docApi.fetchTable = async function serviceAwareFetchTable(tableName, options = {}) {
+        return fetchContextTable(tableName, options);
       };
       if (rawApplyUserActions) {
         docApi.applyUserActions = async function serviceAwareApplyUserActions(actions) {
@@ -960,10 +1569,8 @@
             projectName: project?.name || "",
           });
           const result = await rawApplyUserActions(transformedActions);
-          (actions || []).forEach((action) => {
-            const tableName = core.toText(action?.[1]);
-            if (ACCESS_TABLES.has(tableName)) invalidateRawTableCache(tableName);
-          });
+          const modifiedTables = getModifiedTables(actions);
+          modifiedTables.forEach(invalidateContextTable);
           signalAccessAssignmentsChanged(actions);
           if (projectCatalogIdentityChanged(actions)) {
             invalidateAccessCache();
@@ -974,6 +1581,9 @@
               ));
             }, 0);
           }
+          await refreshContextWatchers(modifiedTables, snapshot.generation === selectionGeneration
+            ? "mutation"
+            : "mutation-after-context-change");
           return result;
         };
       }
@@ -997,13 +1607,17 @@
     refresh,
     selectProject,
     selectService,
+    fetchContextTable,
+    fetchContextRows,
+    watchContextTable,
+    invalidateContextTable,
     invalidateCache(tableName) {
       const normalizedTableName = core.toText(tableName);
-      if (!ACCESS_TABLES.has(normalizedTableName)) return;
+      if (!normalizedTableName) return;
       if (normalizedTableName === "Team" || normalizedTableName === core.PROJECT_TEAM_TABLE) {
         invalidateAccessCache();
       } else {
-        invalidateRawTableCache(normalizedTableName);
+        invalidateContextTable(normalizedTableName);
       }
     },
     getState: getPublicState,
@@ -1071,6 +1685,9 @@
         "Actualisation du contexte Service impossible :",
         error
       ));
+    }
+    if (state.ready && !document.hidden) {
+      refreshContextWatchers(null, "focus").catch(() => {});
     }
   });
   if (document.readyState === "loading") {

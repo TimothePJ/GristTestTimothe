@@ -6,7 +6,7 @@ window.App = {
 window.initGrist = function(onUpdate) {
   grist.ready({ requiredAccess: "full" });
 
-  window.GristServiceContext.onRecords((recs) => {
+  window.GristServiceContext.watchContextTable("References2", (recs) => {
     App.records = recs || [];
     App.recordsReady = true;
     if (typeof onUpdate === "function") onUpdate();

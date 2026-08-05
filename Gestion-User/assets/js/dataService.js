@@ -16,6 +16,10 @@ function getCell(row, columnName) {
   return columnName ? row?.[columnName] : "";
 }
 
+function normalizeContextService(value) {
+  return window.GristServiceContextCore?.normalizeService?.(value) || toText(value);
+}
+
 function resolveColumns(tableData, columnConfig) {
   return Object.fromEntries(
     Object.entries(columnConfig).map(([key, candidates]) => [key, findColumn(tableData, candidates)])
@@ -160,12 +164,12 @@ export async function loadGestionUserData() {
   const projectRows = tableToRows(projectTable);
   const segmentRows = tableToRows(timeSegmentTable);
 
-  const selectedService = toText(
+  const selectedService = normalizeContextService(
     window.GristServiceContext?.getService?.()
       || window.localStorage?.getItem("grist.selected-service")
   );
   const employees = buildEmployees(teamTable, teamRows).filter(
-    (employee) => selectedService && toText(employee.service) === selectedService
+    (employee) => selectedService && normalizeContextService(employee.service) === selectedService
   );
   const employeeKeys = new Set(employees.map((employee) => employee.key));
   const segments = buildSegments(timeSegmentTable, segmentRows).filter(

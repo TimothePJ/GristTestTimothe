@@ -903,7 +903,7 @@ async function updateEnvoyeForCurrentBordereau(sent) {
 /** -------------------------
  *  Grist records (view)
  *  ------------------------- */
-window.GristServiceContext.onRecords(async (newRecords) => {
+window.GristServiceContext.watchContextTable(BORDEREAU_TABLE, async (newRecords) => {
   records = newRecords || [];
 
   // Tables de référence

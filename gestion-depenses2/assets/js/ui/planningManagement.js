@@ -148,6 +148,7 @@ function renderPlanningMonthPicker(selectedMonthKey, options = {}) {
       <div class="planning-management-month-picker-header">
         <button
           type="button"
+          data-service-context-navigation
           class="planning-management-month-picker-nav-btn"
           data-month-picker-year-delta="-1"
           aria-label="Annee precedente"
@@ -159,6 +160,7 @@ function renderPlanningMonthPicker(selectedMonthKey, options = {}) {
         )}</strong>
         <button
           type="button"
+          data-service-context-navigation
           class="planning-management-month-picker-nav-btn"
           data-month-picker-year-delta="1"
           aria-label="Annee suivante"
@@ -176,6 +178,7 @@ function renderPlanningMonthPicker(selectedMonthKey, options = {}) {
           return `
             <button
               type="button"
+              data-service-context-navigation
               class="planning-management-month-picker-month-btn${
                 isSelected ? " is-selected" : ""
               }${isCurrent ? " is-current" : ""}"
@@ -228,6 +231,7 @@ export function renderPlanningManagement(
         <div class="planning-management-controls">
           <button
             type="button"
+            data-service-context-navigation
             class="planning-management-nav-btn"
             data-month-delta="-1"
             aria-label="Mois precedent"
@@ -237,6 +241,7 @@ export function renderPlanningManagement(
           <div class="planning-management-month-picker-wrap">
             <button
               type="button"
+              data-service-context-navigation
               class="planning-management-month-trigger${
                 options.monthPickerOpen ? " is-open" : ""
               }"
@@ -254,6 +259,7 @@ export function renderPlanningManagement(
           </div>
           <button
             type="button"
+            data-service-context-navigation
             class="planning-management-nav-btn"
             data-month-delta="1"
             aria-label="Mois suivant"

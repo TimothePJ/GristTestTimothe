@@ -365,3 +365,111 @@ test("les mutations d'affectation sont détectées sans protéger toute la table
   ), false);
   assert.deepEqual(core.getMutationRecordIds(["BulkRemoveRecord", "Budget", [1, 2]]), [1, 2]);
 });
+
+test("les filtres REST mono-projet combinent Service et identité projet exacte", () => {
+  const currentProject = PROJECTS[0];
+  const references = core.buildContextTableFilter("References2", {
+    selectedService: "Synthèse",
+    currentProject,
+  });
+  assert.deepEqual(references.filter, {
+    Service: ["Synthese", "Synthèse"],
+    NomProjet: ["ERA QUAI D'ORSAY", "Alias ERA"],
+  });
+  assert.deepEqual(core.buildContextTableFilter("ListePlan_NDC_COF", {
+    selectedService: "Structure",
+    currentProject,
+  }).filter, {
+    Service: ["Structure"],
+    Nom_projet: ["ERA QUAI D'ORSAY", "Alias ERA"],
+  });
+  assert.deepEqual(core.buildContextTableFilter("Budget", {
+    selectedService: "Structure",
+    currentProject,
+  }).filter, {
+    Service: ["Structure"],
+    NumeroProjet: ["252035"],
+  });
+  assert.deepEqual(core.buildContextTableFilter("Emetteurs", {
+    selectedService: "Structure",
+    currentProject,
+  }).filter, { Service: ["Structure"] });
+});
+
+test("les filtres REST multiprojets regroupent tous les numéros, noms et alias", () => {
+  assert.deepEqual(core.buildContextTableFilter("TimeSegment", {
+    selectedService: "Topographie",
+    allowedProjects: PROJECTS.slice(0, 3),
+    multiProject: true,
+  }).filter, {
+    Service: ["Topographie"],
+    NumeroProjet: ["252035", "2520", "9999"],
+  });
+  assert.deepEqual(core.buildContextTableFilter("Planning_Projet", {
+    selectedService: "Structure",
+    allowedProjects: PROJECTS.slice(0, 3),
+    multiProject: true,
+  }).filter, {
+    Service: ["Structure"],
+    NomProjet: ["ERA QUAI D'ORSAY", "Alias ERA", "Projet court", "Projet topo"],
+  });
+});
+
+test("un contexte REST incomplet interdit toute requête métier", () => {
+  assert.equal(core.buildContextTableFilter("References2", {
+    selectedService: "",
+    currentProject: PROJECTS[0],
+  }).complete, false);
+  assert.equal(core.buildContextTableFilter("Budget", {
+    selectedService: "Structure",
+    currentProject: null,
+  }).complete, false);
+});
+
+test("les filtres REST trop longs sont découpés sans perdre leur Service", () => {
+  const filter = {
+    Service: ["Structure"],
+    NumeroProjet: ["1", "2", "3", "4", "5"],
+  };
+  const chunks = core.splitContextTableFilter(filter, "NumeroProjet", { maxValues: 2 });
+  assert.deepEqual(chunks, [
+    { Service: ["Structure"], NumeroProjet: ["1", "2"] },
+    { Service: ["Structure"], NumeroProjet: ["3", "4"] },
+    { Service: ["Structure"], NumeroProjet: ["5"] },
+  ]);
+  assert.deepEqual(filter.NumeroProjet, ["1", "2", "3", "4", "5"]);
+});
+
+test("les enveloppes REST sont converties sans mutation et conservent les types", () => {
+  const envelope = {
+    records: [
+      { id: 1, fields: { Service: "Structure", Nullable: null, Active: false, Amount: 12.5 } },
+      { id: 2, fields: { Service: "Structure", Active: true } },
+    ],
+  };
+  const before = structuredClone(envelope);
+  assert.deepEqual(core.restRecordsToRows(envelope), [
+    { id: 1, Service: "Structure", Nullable: null, Active: false, Amount: 12.5 },
+    { id: 2, Service: "Structure", Active: true },
+  ]);
+  assert.deepEqual(core.restRecordsToTableData(envelope), {
+    id: [1, 2],
+    Service: ["Structure", "Structure"],
+    Nullable: [null, null],
+    Active: [false, true],
+    Amount: [12.5, null],
+  });
+  assert.deepEqual(envelope, before);
+});
+
+test("la fusion REST déduplique les alias par id et garde un ordre stable", () => {
+  const merged = core.mergeRestRecordEnvelopes([
+    { records: [{ id: 1, fields: { Name: "A" } }, { id: 2, fields: { Name: "B" } }] },
+    { records: [{ id: 2, fields: { Name: "B bis" } }, { id: 3, fields: { Name: "C" } }] },
+  ]);
+  assert.deepEqual(core.restRecordsToRows(merged), [
+    { id: 1, Name: "A" },
+    { id: 2, Name: "B" },
+    { id: 3, Name: "C" },
+  ]);
+});

@@ -161,7 +161,7 @@ function init() {
     updateDashboard();
   });
 
-  window.GristServiceContext.onRecords((newRecords) => {
+  window.GristServiceContext.watchContextTable('ListePlan_NDC_COF', (newRecords) => {
     state.records = newRecords || [];
     state.recordsReady = true;
     if (!elements.projectDropdown.value && elements.projectDropdown.options.length > 1) {

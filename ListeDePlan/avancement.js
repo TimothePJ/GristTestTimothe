@@ -1,4 +1,4 @@
-grist.ready();
+grist.ready({ requiredAccess: "full" });
 
 let records = [];
 let avancementChart = null;
@@ -21,7 +21,7 @@ function saveSharedProjectSelection(projectName = '') {
 // Register the datalabels plugin
 Chart.register(ChartDataLabels);
 
-window.GristServiceContext.onRecords((newRecords) => {
+window.GristServiceContext.watchContextTable('ListePlan_NDC_COF', (newRecords) => {
   records = newRecords;
   populateProjectDropdown();
   updateDashboard();

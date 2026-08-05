@@ -706,7 +706,7 @@ async function initializeListeDePlanShell() {
   await refreshProjectDropdownFromProjectsTable();
 }
 
-window.GristServiceContext.onRecords(async (rec) => {
+window.GristServiceContext.watchContextTable("ListePlan_NDC_COF", async (rec) => {
   listeDePlanRecordsReady = false;
   window.records = rec.sort((a, b) => {
     const aDoc = a.NumeroDocument || "";
