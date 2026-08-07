@@ -42,6 +42,13 @@ export const APP_CONFIG = {
       ],
     },
 
+    msProjectNamesTable: {
+      sourceTable: "MsProjectNom",
+      columns: {
+        name: "Nom",
+      },
+    },
+
     planningSyncTable: {
       enabled: true,
       sourceTable: "Planning_Projet",

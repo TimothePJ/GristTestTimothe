@@ -255,6 +255,9 @@ export async function getResolvedTimeOutColumns() {
 }
 export async function fetchTeamRows() { return fetchTableRows(await resolveTeamTableId()); }
 export async function fetchSegments() { return fetchTableRows(await resolveTimeOutTableId()); }
+// Le runtime partagé surveille une table par son identifiant réel, que seule la
+// résolution des variantes ("Time-Out" / "Time_Out" / "TimeOut") connaît.
+export async function getTimeOutTableId() { return resolveTimeOutTableId(); }
 
 // --- all-Text CRUD ---
 export async function createSegment({ owner, startDate, startPeriod, endDate, endPeriod, type }) {

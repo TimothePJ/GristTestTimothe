@@ -9,6 +9,16 @@ const collapsedPlanZoneGroups = new Set();
   await chargerProjetsMap();
 })();
 
+// La table des projets est éditée depuis d'autres widgets. Le cache ci-dessous
+// n'expire jamais de lui-même : sans cette reprise, une création ou un renommage
+// n'apparaîtrait qu'après rechargement de la page.
+window.GristServiceContext.watchContextTables(["Projets2"], async () => {
+  projetsDictGlobal = null;
+  const projetsDict = await chargerProjetsMap();
+  populateDropdown("projectDropdown", Object.keys(projetsDict).sort());
+  refreshListeDePlanProjectFromRecords();
+});
+
 async function chargerProjetsMap() {
   if (projetsDictGlobal) return projetsDictGlobal;
 

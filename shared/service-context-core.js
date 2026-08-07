@@ -15,6 +15,9 @@
   const PROJECT_ID_STORAGE_KEY = "grist.selected-project-id";
   const ACCESS_CHANGED_STORAGE_KEY = "grist.project-access-changed";
   const ACCESS_SIGNAL_VERSION = 2;
+  // Signal « le document a changé », diffusé aux autres widgets du navigateur.
+  const DATA_CHANGED_STORAGE_KEY = "grist.service-context.data-changed";
+  const DATA_SIGNAL_VERSION = 1;
   const ACCESS_COLUMN = "Projets_Access";
   const PROJECT_TEAM_TABLE = "ProjectTeam";
   const LEGACY_DEFAULT_SERVICE = "Structure";
@@ -24,6 +27,73 @@
     ListePlan_NDC_COF: "Nom_projet",
     Planning_Projet: "NomProjet",
     Envois: "Projet",
+  });
+  const TABLE_POLICY_MODES = Object.freeze({
+    REST_PROJECT_SERVICE: "rest-project-service",
+    REST_PROJECT: "rest-project",
+    REST_SERVICE: "rest-service",
+    REST_FULL: "rest-full",
+    RPC: "rpc",
+  });
+  const TABLE_POLICIES = Object.freeze({
+    References2: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      projectColumn: "NomProjet",
+      projectIdentity: "name",
+    }),
+    ListePlan_NDC_COF: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      projectColumn: "Nom_projet",
+      projectIdentity: "name",
+    }),
+    Planning_Projet: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      projectColumn: "NomProjet",
+      projectIdentity: "name",
+    }),
+    Envois: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      projectColumn: "Projet",
+      projectIdentity: "name",
+    }),
+    Budget: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      projectColumn: "NumeroProjet",
+      projectIdentity: "number",
+    }),
+    ProjectTeam: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      projectColumn: "NumeroProjet",
+      projectIdentity: "number",
+    }),
+    TimeSegment: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      projectColumn: "NumeroProjet",
+      projectIdentity: "number",
+    }),
+    TimeReal: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      projectColumn: "NumeroProjet",
+      projectIdentity: "number",
+    }),
+    Emetteurs: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_SERVICE,
+      projectColumn: "",
+      projectIdentity: "",
+    }),
+    Team: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "table de droits sans filtre métier" }),
+    Projets2: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "catalogue de droits sans filtre métier" }),
+    "Time-Out": Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "aucun filtre Service direct fiable" }),
+    Time_Out: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "alias Time-Out sans filtre Service direct fiable" }),
+    TimeOut: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "alias Time-Out sans filtre Service direct fiable" }),
+    Timesheet: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "aucun filtre direct fiable" }),
+    Ventilation: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "aucun filtre direct fiable" }),
+    MsProject: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "lecture globale par défaut ; le widget filtre explicitement sur Nom" }),
+    Planning_Project: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "alias sans schéma de filtre confirmé" }),
+    "ListePlan NDC+COF": Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "alias sans schéma de filtre confirmé" }),
+    "ListePlan_NDC+COF": Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "alias sans schéma de filtre confirmé" }),
+    _grist_Tables: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "métadonnées administratives" }),
+    _grist_Tables_column: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "métadonnées administratives" }),
   });
   const SERVICE_AWARE_TABLES = Object.freeze(new Set([
     "References2",
@@ -133,6 +203,57 @@
     return [];
   }
 
+  function getTablePolicy(tableName) {
+    const normalizedTableName = toText(tableName);
+    return TABLE_POLICIES[normalizedTableName] || Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_FULL,
+      reason: "aucun filtre métier configuré : REST complet",
+      configured: false,
+    });
+  }
+
+  function buildTableFilterFromPolicy(policy, {
+    selectedService = "",
+    currentProject = null,
+    allowedProjects = [],
+    multiProject = false,
+  } = {}) {
+    const safePolicy = policy && typeof policy === "object" ? policy : {};
+    const mode = toText(safePolicy.mode);
+    if (mode === TABLE_POLICY_MODES.REST_FULL) {
+      return { supported: true, complete: true, filter: null, unfiltered: true };
+    }
+    const needsService = [
+      TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      TABLE_POLICY_MODES.REST_SERVICE,
+    ].includes(mode);
+    const needsProject = [
+      TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      TABLE_POLICY_MODES.REST_PROJECT,
+    ].includes(mode);
+    if (!needsService && !needsProject) {
+      return { supported: false, complete: true, filter: null, unfiltered: false };
+    }
+
+    const serviceValues = needsService ? getServiceFilterValues(selectedService) : [];
+    const projects = multiProject ? allowedProjects : [currentProject].filter(Boolean);
+    const projectValues = needsProject
+      ? (safePolicy.projectIdentity === "number"
+          ? uniqueExactValues(projects.map((project) => normalizeProjectNumber(
+              project?.number ?? project?.NumeroProjet ?? project?.Numero_de_projet
+            )))
+          : uniqueExactValues(projects.flatMap((project) => {
+              const names = Array.isArray(project?.names) ? project.names : [];
+              return [project?.name, ...names];
+            })))
+      : [];
+    const complete = Boolean((!needsService || serviceValues.length) && (!needsProject || projectValues.length));
+    const filter = complete ? {} : null;
+    if (filter && needsService) filter.Service = serviceValues;
+    if (filter && needsProject) filter[toText(safePolicy.projectColumn)] = projectValues;
+    return { supported: true, complete, filter, unfiltered: false };
+  }
+
   function buildContextTableFilter(tableName, {
     selectedService = "",
     currentProject = null,
@@ -140,7 +261,14 @@
     multiProject = false,
   } = {}) {
     const normalizedTableName = toText(tableName);
-    if (!SERVICE_AWARE_TABLES.has(normalizedTableName)) {
+    const policy = getTablePolicy(normalizedTableName);
+    const policyFilter = buildTableFilterFromPolicy(policy, {
+      selectedService,
+      currentProject,
+      allowedProjects,
+      multiProject,
+    });
+    if (!policyFilter.supported) {
       return {
         supported: false,
         complete: true,
@@ -150,24 +278,14 @@
       };
     }
 
-    const serviceValues = getServiceFilterValues(selectedService);
-    const projectColumn = PROJECT_NUMBER_TABLES.has(normalizedTableName)
-      ? "NumeroProjet"
-      : (PROJECT_NAME_COLUMNS[normalizedTableName] || "");
-    const projects = multiProject ? allowedProjects : [currentProject].filter(Boolean);
-    const projectValues = projectColumn
-      ? getProjectFilterValues(normalizedTableName, projects)
-      : [];
-    const complete = Boolean(serviceValues.length && (!projectColumn || projectValues.length));
-    const filter = complete ? { Service: serviceValues } : null;
-    if (filter && projectColumn) filter[projectColumn] = projectValues;
-
     return {
       supported: true,
-      complete,
+      complete: policyFilter.complete,
       tableName: normalizedTableName,
-      projectColumn,
-      filter,
+      projectColumn: toText(policy.projectColumn),
+      filter: policyFilter.filter,
+      unfiltered: Boolean(policyFilter.unfiltered),
+      mode: policy.mode,
     };
   }
 
@@ -1197,6 +1315,20 @@
     });
   }
 
+
+  function parseDataChangeSignal(rawValue) {
+    if (!rawValue) return [];
+    let payload = null;
+    try {
+      payload = JSON.parse(rawValue);
+    } catch (_error) {
+      return [];
+    }
+    if (!payload || payload.version !== DATA_SIGNAL_VERSION) return [];
+    if (!Array.isArray(payload.tables)) return [];
+    return [...new Set(payload.tables.map(toText).filter(Boolean))];
+  }
+
   return Object.freeze({
     SERVICES,
     SERVICE_STORAGE_KEY,
@@ -1204,11 +1336,16 @@
     PROJECT_ID_STORAGE_KEY,
     ACCESS_CHANGED_STORAGE_KEY,
     ACCESS_SIGNAL_VERSION,
+    DATA_CHANGED_STORAGE_KEY,
+    DATA_SIGNAL_VERSION,
+    parseDataChangeSignal,
     ACCESS_COLUMN,
     PROJECT_TEAM_TABLE,
     LEGACY_DEFAULT_SERVICE,
     PROJECTS_TABLE,
     PROJECT_NAME_COLUMNS,
+    TABLE_POLICY_MODES,
+    TABLE_POLICIES,
     SERVICE_AWARE_TABLES,
     PROJECT_NUMBER_TABLES,
     PROJECT_AWARE_TABLES,
@@ -1220,6 +1357,8 @@
     uniqueExactValues,
     getServiceFilterValues,
     getProjectFilterValues,
+    getTablePolicy,
+    buildTableFilterFromPolicy,
     buildContextTableFilter,
     splitContextTableFilter,
     restRecordsToRows,

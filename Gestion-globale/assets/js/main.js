@@ -6,6 +6,7 @@ import {
 import {
   getProjectKpis,
 } from "../../../gestion-depenses2/assets/js/services/projectService.js";
+import { APP_CONFIG } from "../../../gestion-depenses2/assets/js/config.js";
 import { formatNumber, toText } from "../../../gestion-depenses2/assets/js/utils/format.js";
 import {
   clearAvancementDashboard,
@@ -46,6 +47,7 @@ const ALL_DOP_FILTER = "all";
 let dopReloadTimer = 0;
 let globalDataLoadGeneration = 0;
 let globalServiceRefreshBound = false;
+let globalDataRefreshBound = false;
 
 const state = {
   projects: [],
@@ -611,6 +613,54 @@ function renderAggregateViews(aggregatedProject, selectedProjects = getVisibleSe
   );
 }
 
+// Conteneurs a defilement propre de la page (cf. assets/css/styles.css et la
+// feuille partagee de gestion-depenses2). `.expense-graph-scroll` est volontairement
+// absente : expenseTimeline.js restitue deja sa position horizontale.
+const SCROLLABLE_PANE_SELECTORS = [
+  ".project-list",
+  ".avancement-side-panel",
+  ".expense-graph-legend",
+];
+
+function captureAppScroll() {
+  const scroller = document.scrollingElement || document.documentElement;
+  const documentTop = scroller ? scroller.scrollTop : 0;
+  const panePositions = SCROLLABLE_PANE_SELECTORS.map((selector) => [
+    selector,
+    [...document.querySelectorAll(selector)].map((pane) => ({
+      top: pane.scrollTop,
+      left: pane.scrollLeft,
+    })),
+  ]);
+
+  return () => {
+    const restore = () => {
+      if (scroller) scroller.scrollTop = documentTop;
+      panePositions.forEach(([selector, positions]) => {
+        // Le rendu recree une partie de ces panneaux : on les retrouve par selecteur.
+        const panes = document.querySelectorAll(selector);
+        positions.forEach((position, index) => {
+          const pane = panes[index];
+          if (!(pane instanceof HTMLElement)) return;
+          pane.scrollTop = position.top;
+          pane.scrollLeft = position.left;
+        });
+      });
+    };
+    // Une fois tout de suite, une fois apres la mise en page : les graphiques
+    // ne fixent leur hauteur qu'une frame plus tard.
+    restore();
+    requestAnimationFrame(restore);
+  };
+}
+
+function isSameProjectSelection(previousProjectIds, nextProjectIds) {
+  return (
+    previousProjectIds.size === nextProjectIds.size &&
+    [...previousProjectIds].every((projectId) => nextProjectIds.has(projectId))
+  );
+}
+
 function renderApp() {
   const filteredProjects = getSelectableProjects();
   ensureSelectionForMode(filteredProjects);
@@ -785,7 +835,13 @@ async function loadData() {
   setStatus(
     `${selectableProjectCount} projet(s) charge(s)${warnings.length ? ` - ${warnings.join(" - ")}` : ""}`
   );
+  // Une simple relecture des donnees ne doit pas renvoyer l'utilisateur en haut
+  // de page ; un changement de selection, si : on repart alors du haut.
+  const restoreScroll = isSameProjectSelection(previousSelectedProjectIds, state.selectedProjectIds)
+    ? captureAppScroll()
+    : null;
   renderApp();
+  restoreScroll?.();
   return true;
 }
 
@@ -801,6 +857,35 @@ function bindGlobalServiceRefresh() {
       setStatus("Impossible d'actualiser les donnees du service.", true);
     });
   });
+}
+
+// La vue globale agrège les mêmes tables que le suivi des dépenses, toutes
+// alimentées par d'autres widgets. Une saisie faite ailleurs doit s'y voir sans
+// rechargement de page.
+function bindGlobalDataRefresh() {
+  if (globalDataRefreshBound) return;
+  const serviceContext = window.GristServiceContext;
+  if (typeof serviceContext?.watchContextTables !== "function") return;
+
+  const tables = APP_CONFIG.grist.tables;
+  globalDataRefreshBound = true;
+  serviceContext.watchContextTables(
+    [
+      tables.projects,
+      tables.budget,
+      tables.listePlan,
+      tables.planningProject,
+      tables.projectTeam,
+      tables.timeSegment,
+      tables.timeReal,
+    ],
+    () => {
+      void loadData().catch((error) => {
+        console.error("Erreur actualisation des donnees Gestion-globale :", error);
+        setStatus("Impossible d'actualiser les donnees.", true);
+      });
+    }
+  );
 }
 
 function scheduleDopDataReload() {
@@ -821,6 +906,7 @@ async function bootstrap() {
   try {
     initGrist();
     bindGlobalServiceRefresh();
+    bindGlobalDataRefresh();
     window.addEventListener("storage", (event) => {
       if (event.key === DOP_DATA_CHANGE_STORAGE_KEY) scheduleDopDataReload();
     });

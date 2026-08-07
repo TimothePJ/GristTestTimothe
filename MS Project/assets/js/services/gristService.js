@@ -8,6 +8,8 @@ const _msProjectServiceDiagnostics = {
   actionDurationMs: 0,
 };
 
+let _cachedProjectNames = null;
+
 export function getMsProjectServiceDiagnostics() {
   return { ..._msProjectServiceDiagnostics };
 }
@@ -67,7 +69,7 @@ function normalizeFetchTableResult(raw) {
   return [];
 }
 
-async function fetchTableRows(tableName) {
+async function fetchTableRows(tableName, options = {}) {
   const grist = getGrist();
 
   if (!grist.docApi || typeof grist.docApi.fetchTable !== "function") {
@@ -76,7 +78,7 @@ async function fetchTableRows(tableName) {
 
   _msProjectServiceDiagnostics.fetchTableCount += 1;
   const fetchStartedAt = performance.now();
-  const raw = await grist.docApi.fetchTable(tableName);
+  const raw = await grist.docApi.fetchTable(tableName, options);
   _msProjectServiceDiagnostics.fetchTableDurationMs += performance.now() - fetchStartedAt;
   return normalizeFetchTableResult(raw);
 }
@@ -95,7 +97,7 @@ function extractColumnNamesFromFetchResult(raw) {
   return [];
 }
 
-async function fetchTableSnapshot(tableName) {
+async function fetchTableSnapshot(tableName, options = {}) {
   const grist = getGrist();
 
   if (!grist.docApi || typeof grist.docApi.fetchTable !== "function") {
@@ -104,12 +106,30 @@ async function fetchTableSnapshot(tableName) {
 
   _msProjectServiceDiagnostics.fetchTableCount += 1;
   const fetchStartedAt = performance.now();
-  const raw = await grist.docApi.fetchTable(tableName);
+  const raw = await grist.docApi.fetchTable(tableName, options);
   _msProjectServiceDiagnostics.fetchTableDurationMs += performance.now() - fetchStartedAt;
   return {
     rows: normalizeFetchTableResult(raw),
     columnNames: extractColumnNamesFromFetchResult(raw),
   };
+}
+
+function invalidateRuntimeTableCache(tableName) {
+  const normalizedTableName = toText(tableName);
+  if (!normalizedTableName) return;
+  const runtime = window.GristServiceContext;
+  if (typeof runtime?.invalidateCache === "function") {
+    runtime.invalidateCache(normalizedTableName);
+  }
+}
+
+function invalidateMsProjectCaches({ catalog = false } = {}) {
+  const msProjectTableName = APP_CONFIG.grist.msProjectTable?.sourceTable;
+  invalidateRuntimeTableCache(msProjectTableName);
+  if (!catalog) return;
+
+  _cachedProjectNames = null;
+  invalidateRuntimeTableCache(APP_CONFIG.grist.msProjectNamesTable?.sourceTable);
 }
 
 function isIsoDate(value) {
@@ -783,6 +803,7 @@ export async function importMsProjectXmlFile(file) {
   const projectLinkCol = columns.projectLink;
   const titleCol = columns.title;
   const boldCol = columns.bold;
+  const sourceNameCol = columns.sourceName || "Nom";
 
   if (!uniqueNumberCol || !taskNameCol || !startCol || !endCol || !durationCol) {
     throw new Error("Mapping des colonnes MS Project incomplet dans la configuration.");
@@ -841,7 +862,7 @@ export async function importMsProjectXmlFile(file) {
     // Some tables use "Style" instead of the configured "Style_Barre".
     record.Style = normalizedStyle;
 
-    record.Nom = sourceFileName;
+    record[sourceNameCol] = sourceFileName;
 
     importedRecords.push(record);
   }
@@ -850,21 +871,36 @@ export async function importMsProjectXmlFile(file) {
     throw new Error("Aucune tache exploitable trouvee (UID/Name manquants).");
   }
 
-  const { rows: existingRows, columnNames } = await fetchTableSnapshot(table.sourceTable);
+  let { rows: existingRows, columnNames } = await fetchTableSnapshot(
+    table.sourceTable,
+    {
+      restFilter: { [sourceNameCol]: [sourceFileName] },
+      requiredColumns: [sourceNameCol],
+    }
+  );
+  if (!columnNames.includes(sourceNameCol)) {
+    ({ rows: existingRows, columnNames } = await fetchTableSnapshot(
+      table.sourceTable,
+      {
+        fullTable: true,
+        requiredColumns: [sourceNameCol],
+      }
+    ));
+  }
   const hasKnownColumns = columnNames.length > 0;
   const canUseColumn = (columnName) => {
     if (!columnName) return false;
     return !hasKnownColumns || columnNames.includes(columnName);
   };
 
-  const sourceNameCol = resolveColumn(
+  const resolvedSourceNameCol = resolveColumn(
     existingRows,
-    columns.sourceName || "Nom",
+    sourceNameCol,
     table.sourceNameCandidates || ["Nom"]
   );
   const idCol = columns.id || "id";
   const rowIdsToDelete = existingRows
-    .filter((row) => sourceNameCol && toText(row?.[sourceNameCol]) === sourceFileName)
+    .filter((row) => resolvedSourceNameCol && row?.[resolvedSourceNameCol] === sourceFileName)
     .map((row) => Number(row?.[idCol]))
     .filter((rowId) => Number.isInteger(rowId) && rowId > 0);
 
@@ -888,7 +924,26 @@ export async function importMsProjectXmlFile(file) {
     addedCount += 1;
   }
 
+  if (addedCount !== importedRecords.length) {
+    throw new Error(
+      "Le schema MsProject ne permet pas d'importer toutes les taches ; aucune ecriture n'a ete lancee."
+    );
+  }
+
   await applyUserActionsInBatches(actions);
+  invalidateMsProjectCaches();
+
+  let catalogNameAdded = false;
+  try {
+    catalogNameAdded = await ensureProjectNameInCatalog(sourceFileName);
+  } catch (error) {
+    const catalogTableName = APP_CONFIG.grist.msProjectNamesTable?.sourceTable || "catalogue MS Project";
+    throw new Error(
+      `Les donnees MS Project ont ete importees, mais la synchronisation de ${catalogTableName} a echoue : ${error.message}`,
+      { cause: error }
+    );
+  }
+
   const planningSyncResult = await syncPlanningDemarragesFromImportedMsProjectRows(
     importedRecords,
     sourceFileName
@@ -905,6 +960,7 @@ export async function importMsProjectXmlFile(file) {
     planningSyncMatchedCount: planningSyncResult.matchedCount,
     planningSyncSkipped: planningSyncResult.skipped,
     planningSyncInvalidStartCount: planningSyncResult.invalidStartCount,
+    catalogNameAdded,
     sourceFileName,
   };
 }
@@ -953,7 +1009,8 @@ export async function updateMsProjectDate(rowId, columnName, isoDate) {
 
 export async function syncPlanningDemarrageFromMsProjectStart(
   rowId,
-  isoDate
+  isoDate,
+  selectedProject = ""
 ) {
   const msTable = APP_CONFIG.grist.msProjectTable;
   const planningTable = APP_CONFIG.grist.planningSyncTable;
@@ -979,9 +1036,19 @@ export async function syncPlanningDemarrageFromMsProjectStart(
     throw new Error("Format de date invalide (attendu YYYY-MM-DD).");
   }
 
-  const msRows = await fetchTableRows(msTable.sourceTable);
+  const sourceNameColumn = msTable.columns?.sourceName || "Nom";
   const msIdCol = msTable.columns?.id || "id";
   const msUniqueCol = msTable.columns?.uniqueNumber;
+  const normalizedProject = toText(selectedProject);
+  const msRows = await fetchTableRows(
+    msTable.sourceTable,
+    normalizedProject
+      ? {
+          restFilter: { [sourceNameColumn]: [normalizedProject] },
+          requiredColumns: [sourceNameColumn, msIdCol, msUniqueCol].filter(Boolean),
+        }
+      : {}
+  );
   const msSourceNameCol = resolveColumn(
     msRows,
     msTable.columns?.sourceName || "Nom",
@@ -1162,40 +1229,82 @@ export function getMsProjectSetupMessage() {
   return `Base MS Project creee. Active APP_CONFIG.grist.msProjectTable.enabled puis ajuste le mapping de la table ${sourceTable}.`;
 }
 
-export async function buildProjectOptions() {
-  const table = APP_CONFIG.grist.msProjectTable;
-  if (!table?.sourceTable) {
-    throw new Error("Nom de table MS Project manquant dans la configuration.");
-  }
-
-  const rows = await fetchTableRows(table.sourceTable);
-  const preferredColumn = table.columns?.sourceName || "Nom";
-  const candidateColumns = [
-    preferredColumn,
-    ...(table.sourceNameCandidates || []),
-    "Nom",
-  ].filter(Boolean);
-
-  const selectedColumn =
-    candidateColumns.find((column) =>
-      rows.some((row) => row && Object.prototype.hasOwnProperty.call(row, column))
-    ) || preferredColumn;
-
-  const values = new Set();
-  for (const row of rows) {
-    const value = toText(row[selectedColumn]);
-    if (value) values.add(value);
-  }
-
-  return [...values].sort((a, b) => a.localeCompare(b, "fr"));
+function normalizeProjectNames(rows, nameColumn) {
+  return [...new Set(
+    rows
+      .map((row) => toText(row?.[nameColumn]))
+      .filter(Boolean)
+  )].sort((left, right) => left.localeCompare(right, "fr"));
 }
 
-export async function fetchMsProjectRows() {
+export async function buildProjectOptions({ forceRefresh = false } = {}) {
+  const table = APP_CONFIG.grist.msProjectNamesTable;
+  const tableName = table?.sourceTable;
+  const nameColumn = table?.columns?.name;
+  if (!tableName || !nameColumn) {
+    throw new Error("Configuration de la table des noms MS Project incomplete.");
+  }
+
+  if (!forceRefresh && Array.isArray(_cachedProjectNames)) {
+    console.info(`[GristData][CACHE] ${tableName}`, {
+      valeurs: _cachedProjectNames.length,
+    });
+    return [..._cachedProjectNames];
+  }
+
+  const rows = await fetchTableRows(tableName, {
+    fullTable: true,
+    forceRefresh,
+    requiredColumns: [nameColumn],
+  });
+  _cachedProjectNames = normalizeProjectNames(rows, nameColumn);
+  return [..._cachedProjectNames];
+}
+
+async function ensureProjectNameInCatalog(projectName) {
+  const normalizedProjectName = toText(projectName);
+  if (!normalizedProjectName) {
+    throw new Error("Le nom du projet importe est vide.");
+  }
+
+  const table = APP_CONFIG.grist.msProjectNamesTable;
+  const tableName = table?.sourceTable;
+  const nameColumn = table?.columns?.name;
+  if (!tableName || !nameColumn) {
+    throw new Error("Configuration de la table des noms MS Project incomplete.");
+  }
+
+  _cachedProjectNames = null;
+  invalidateRuntimeTableCache(tableName);
+  const existingNames = await buildProjectOptions({ forceRefresh: true });
+  if (existingNames.includes(normalizedProjectName)) return false;
+
+  await applyUserActionsInBatches([
+    ["AddRecord", tableName, null, { [nameColumn]: normalizedProjectName }],
+  ]);
+  invalidateMsProjectCaches({ catalog: true });
+  return true;
+}
+
+export async function fetchMsProjectRows(selectedProject = "") {
   const table = APP_CONFIG.grist.msProjectTable;
   if (!table?.sourceTable) {
     throw new Error("Nom de table MS Project manquant dans la configuration.");
   }
-  return fetchTableRows(table.sourceTable);
+  const normalizedProject = toText(selectedProject);
+  if (!normalizedProject) return [];
+  const sourceNameColumn = table.columns?.sourceName || "Nom";
+  const rows = await fetchTableRows(table.sourceTable, {
+    restFilter: { [sourceNameColumn]: [normalizedProject] },
+    requiredColumns: [sourceNameColumn],
+  });
+  const filteredRows = rows.filter((row) => Object.is(row?.[sourceNameColumn], normalizedProject));
+  console.info(`[GristData][FILTRE_LOCAL] ${table.sourceTable}`, {
+    projet: normalizedProject,
+    lignesRecues: rows.length,
+    lignesUtiles: filteredRows.length,
+  });
+  return filteredRows;
 }
 
 export { toText };

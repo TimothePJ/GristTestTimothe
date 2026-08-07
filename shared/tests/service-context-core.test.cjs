@@ -396,6 +396,72 @@ test("les filtres REST mono-projet combinent Service et identité projet exacte"
   }).filter, { Service: ["Structure"] });
 });
 
+test("les politiques classent explicitement les tables REST filtrées et REST complètes", () => {
+  const expectedModes = {
+    References2: core.TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+    ListePlan_NDC_COF: core.TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+    Planning_Projet: core.TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+    Envois: core.TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+    Budget: core.TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+    ProjectTeam: core.TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+    TimeSegment: core.TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+    TimeReal: core.TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+    Emetteurs: core.TABLE_POLICY_MODES.REST_SERVICE,
+    Team: core.TABLE_POLICY_MODES.REST_FULL,
+    Projets2: core.TABLE_POLICY_MODES.REST_FULL,
+    "Time-Out": core.TABLE_POLICY_MODES.REST_FULL,
+    Time_Out: core.TABLE_POLICY_MODES.REST_FULL,
+    TimeOut: core.TABLE_POLICY_MODES.REST_FULL,
+    Timesheet: core.TABLE_POLICY_MODES.REST_FULL,
+    Ventilation: core.TABLE_POLICY_MODES.REST_FULL,
+    MsProject: core.TABLE_POLICY_MODES.REST_FULL,
+    Planning_Project: core.TABLE_POLICY_MODES.REST_FULL,
+    "ListePlan NDC+COF": core.TABLE_POLICY_MODES.REST_FULL,
+    "ListePlan_NDC+COF": core.TABLE_POLICY_MODES.REST_FULL,
+    _grist_Tables: core.TABLE_POLICY_MODES.REST_FULL,
+    _grist_Tables_column: core.TABLE_POLICY_MODES.REST_FULL,
+  };
+  Object.entries(expectedModes).forEach(([tableName, mode]) => {
+    assert.equal(core.getTablePolicy(tableName).mode, mode, tableName);
+  });
+  const timeOut = core.buildContextTableFilter("Time-Out", {
+    selectedService: "Structure",
+    currentProject: PROJECTS[0],
+  });
+  assert.equal(timeOut.supported, true);
+  assert.equal(timeOut.unfiltered, true);
+  assert.equal(timeOut.filter, null);
+  const msProject = core.buildContextTableFilter("MsProject", {
+    selectedService: "Structure",
+    currentProject: PROJECTS[0],
+  });
+  assert.equal(msProject.supported, true);
+  assert.equal(msProject.unfiltered, true);
+  assert.equal(msProject.filter, null);
+  const unknown = core.buildContextTableFilter("TableMetierNonConfiguree", {
+    selectedService: "Structure",
+    currentProject: PROJECTS[0],
+  });
+  assert.equal(unknown.mode, core.TABLE_POLICY_MODES.REST_FULL);
+  assert.equal(unknown.unfiltered, true);
+});
+
+test("une politique future projet uniquement n'invente aucun filtre Service", () => {
+  const result = core.buildTableFilterFromPolicy({
+    mode: core.TABLE_POLICY_MODES.REST_PROJECT,
+    projectColumn: "NomProjet",
+    projectIdentity: "name",
+  }, {
+    selectedService: "Synthese",
+    currentProject: PROJECTS[0],
+  });
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.filter, {
+    NomProjet: ["ERA QUAI D'ORSAY", "Alias ERA"],
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(result.filter, "Service"), false);
+});
+
 test("les filtres REST multiprojets regroupent tous les numéros, noms et alias", () => {
   assert.deepEqual(core.buildContextTableFilter("TimeSegment", {
     selectedService: "Topographie",

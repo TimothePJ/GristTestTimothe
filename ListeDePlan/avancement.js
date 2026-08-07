@@ -2,6 +2,7 @@ grist.ready({ requiredAccess: "full" });
 
 let records = [];
 let avancementChart = null;
+let lastSelectedProject = '';
 const SHARED_PROJECT_STORAGE_KEY = 'grist.selected-project';
 
 function readSharedProjectSelection() {
@@ -27,6 +28,12 @@ window.GristServiceContext.watchContextTable('ListePlan_NDC_COF', (newRecords) =
   updateDashboard();
 });
 
+// Le tableau de bord agrège aussi la ventilation des heures, saisie depuis un
+// autre widget : elle doit se répercuter ici sans rechargement.
+window.GristServiceContext.watchContextTables(['Ventilation'], () => {
+  updateDashboard();
+});
+
 function populateProjectDropdown() {
   const projectDropdown = document.getElementById('projectDropdown');
   const projects = [...new Set(records.map(r => r.Nom_projet))].filter(Boolean).sort();
@@ -48,12 +55,47 @@ document.getElementById('projectDropdown').addEventListener('change', () => {
   updateDashboard();
 });
 
+// Filet de sécurité : le nouveau tableau peut être plus court que l'ancien, et le
+// navigateur ramène alors le défilement dans les limites de la nouvelle hauteur.
+// On remet la position d'avant le rendu. Seul un changement de projet justifie de
+// repartir du haut.
+function captureDashboardScroll() {
+    const scroller = document.scrollingElement || document.documentElement;
+    const avgContainer = document.getElementById('average-indices-container');
+    const documentTop = scroller ? scroller.scrollTop : 0;
+    const avgTop = avgContainer ? avgContainer.scrollTop : 0;
+
+    return () => {
+        const restore = () => {
+            if (scroller) scroller.scrollTop = documentTop;
+            if (avgContainer) avgContainer.scrollTop = avgTop;
+        };
+        // Une fois tout de suite, une fois après la mise en page : le graphique ne
+        // fixe pas toujours sa hauteur au premier passage.
+        restore();
+        requestAnimationFrame(restore);
+    };
+}
+
 async function updateDashboard() {
     const selectedProject = document.getElementById('projectDropdown').value;
     const statsOutput = document.getElementById('stats-output');
     const chartContainer = document.querySelector('.chart-container');
     const avgContainer = document.getElementById('average-indices-container');
-    statsOutput.innerHTML = ''; // Clear old stats
+    // À projet constant, le tableau précédent reste affiché pendant le recalcul :
+    // le vider ici ferait s'effondrer la hauteur de page et renverrait l'utilisateur
+    // en haut, et un rendu concurrent laisserait l'écran blanc. Toutes les sorties
+    // de cette fonction réécrivent `#stats-output` de toute façon.
+    const restoreScroll = selectedProject && selectedProject === lastSelectedProject
+        ? captureDashboardScroll()
+        : null;
+    if (selectedProject !== lastSelectedProject) {
+        // Changement de projet : la lecture de Ventilation qui suit prend un aller-retour
+        // réseau, garder le tableau précédent afficherait les chiffres du projet A sous
+        // le nom du projet B.
+        statsOutput.innerHTML = '';
+    }
+    lastSelectedProject = selectedProject;
 
     if (!selectedProject) {
         if(avancementChart) avancementChart.destroy();
@@ -83,6 +125,7 @@ async function updateDashboard() {
 
     chartContainer.style.display = 'block';
     generateChartDataAndTable(projectRecords, devisMap);
+    restoreScroll?.();
 }
 
 function numberWithCommas(x) {

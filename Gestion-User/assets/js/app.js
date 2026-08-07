@@ -1,3 +1,4 @@
+import { TABLES } from "./config.js";
 import { loadGestionUserData } from "./dataService.js";
 import {
   getRangeCapacityDays,
@@ -77,6 +78,7 @@ let timelineLayoutFrame = null;
 let isRenderingVisibleRows = false;
 let gestionUserLoadGeneration = 0;
 let gestionUserServiceRefreshBound = false;
+let gestionUserDataRefreshBound = false;
 
 function addDays(date, days) {
   const next = new Date(date);
@@ -893,11 +895,29 @@ function bindGestionUserServiceRefresh() {
   });
 }
 
+// La matrice est construite à partir des affectations, de l'annuaire et des
+// projets — trois tables éditées depuis d'autres widgets. Une modification doit
+// s'y voir sans rechargement de page.
+function bindGestionUserDataRefresh() {
+  if (gestionUserDataRefreshBound) return;
+  const serviceContext = window.GristServiceContext;
+  if (typeof serviceContext?.watchContextTables !== "function") return;
+
+  gestionUserDataRefreshBound = true;
+  serviceContext.watchContextTables(
+    [TABLES.timeSegment, TABLES.team, TABLES.projects],
+    () => {
+      void refreshGestionUserData().catch(showGestionUserLoadError);
+    }
+  );
+}
+
 async function init() {
   try {
     window.grist?.ready?.({ requiredAccess: "full" });
     bindEvents();
     bindGestionUserServiceRefresh();
+    bindGestionUserDataRefresh();
     populateYearSelect(state.year - 1, state.year + 1);
     await refreshGestionUserData();
   } catch (error) {

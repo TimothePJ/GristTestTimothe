@@ -130,6 +130,7 @@ let cachedProjectRows = null;
 let expenseDataReady = false;
 let expenseDataLoadingPromise = null;
 let expenseDataLoadGeneration = 0;
+let expenseDataRefreshBound = false;
 let expenseServiceRefreshBound = false;
 let projectActivationRefreshPromise = null;
 let suppressChargePlanSyncEvents = false;
@@ -1806,10 +1807,68 @@ async function saveProjectAvancementConfig(project, serializedConfig) {
   project.avancementConfigRaw = serializedConfig;
 }
 
+// Conteneurs a defilement propre du widget (cf. assets/css/styles.css).
+// `.charge-plan-scroll` et `.expense-graph-scroll` sont volontairement absentes :
+// elles disposent deja de leur propre restitution de position horizontale.
+const SCROLLABLE_PANE_SELECTORS = [
+  ".avancement-side-panel",
+  ".expense-graph-legend",
+  ".expense-plan-scroll",
+  ".real-worked-table-shell",
+  ".billing-editor-scroll",
+];
+
+function captureAppScroll() {
+  const scroller = document.scrollingElement || document.documentElement;
+  const documentTop = scroller ? scroller.scrollTop : 0;
+  const panePositions = SCROLLABLE_PANE_SELECTORS.map((selector) => [
+    selector,
+    [...document.querySelectorAll(selector)].map((pane) => ({
+      top: pane.scrollTop,
+      left: pane.scrollLeft,
+    })),
+  ]);
+
+  return () => {
+    const restore = () => {
+      if (scroller) scroller.scrollTop = documentTop;
+      panePositions.forEach(([selector, positions]) => {
+        // Le rendu recree une partie de ces panneaux : on les retrouve par selecteur.
+        const panes = document.querySelectorAll(selector);
+        positions.forEach((position, index) => {
+          const pane = panes[index];
+          if (!(pane instanceof HTMLElement)) return;
+          pane.scrollTop = position.top;
+          pane.scrollLeft = position.left;
+        });
+      });
+    };
+    // Une fois tout de suite, une fois apres la mise en page : les graphiques
+    // et les images ne fixent leur hauteur qu'une frame plus tard.
+    restore();
+    requestAnimationFrame(restore);
+  };
+}
+
+// A utiliser quand le projet affiche ne change pas : l'ecran est reconstruit sur
+// place, l'utilisateur doit rester ou il en etait.
+function renderAppPreservingScroll() {
+  const restoreScroll = captureAppScroll();
+  renderApp();
+  restoreScroll();
+}
+
+// Dernier projet reellement peint a l'ecran. `state.selectedProjectId` est deja
+// mis a jour avant le rechargement des donnees : il ne dit pas ce que
+// l'utilisateur a sous les yeux, donc il ne permet pas de distinguer un
+// changement de projet d'une simple relecture.
+let lastRenderedProjectId = null;
+
 function renderApp() {
   cancelDeferredProjectViewsRender();
   renderProjectOptions(dom.projectSelect, state.projects, state.selectedProjectId);
   const selectedProject = getSelectedProject();
+  lastRenderedProjectId = selectedProject?.id ?? null;
   if (
     editingChargePlanSegment &&
     (!selectedProject || Number(selectedProject.id) !== editingChargePlanSegment.projectId)
@@ -2422,8 +2481,15 @@ async function performLoadData(
     setState({ selectedProjectId: null });
   }
 
+  // Une relecture des donnees sur le projet deja affiche ne doit pas renvoyer
+  // l'utilisateur en haut de page ; un changement de projet, si : on repart du haut.
+  const restoreScroll =
+    selectedProject?.id != null && selectedProject.id === lastRenderedProjectId
+      ? captureAppScroll()
+      : null;
   saveSharedProjectSelection(selectedProject?.name || selectedProject?.projectNumber || "");
   renderApp();
+  restoreScroll?.();
   expenseDataReady = true;
   return true;
 }
@@ -2441,6 +2507,37 @@ function bindExpenseServiceRefresh() {
       console.error("Erreur actualisation service gestion-depenses2 :", error);
     });
   });
+}
+
+// Le suivi des dépenses agrège huit tables, toutes alimentées par d'autres
+// widgets : budget, plans, planning, équipe projet, temps prévus et réalisés.
+// Une saisie faite ailleurs doit se voir ici sans rechargement de page.
+function bindExpenseDataRefresh() {
+  if (expenseDataRefreshBound) return;
+  const serviceContext = window.GristServiceContext;
+  if (typeof serviceContext?.watchContextTables !== "function") return;
+
+  const tables = APP_CONFIG.grist.tables;
+  expenseDataRefreshBound = true;
+  serviceContext.watchContextTables(
+    [
+      tables.projects,
+      tables.budget,
+      tables.listePlan,
+      tables.planningProject,
+      tables.projectTeam,
+      tables.timeSegment,
+      tables.timeReal,
+    ],
+    () => {
+      // Avant la première sélection il n'y a rien à redessiner.
+      if (!cachedProjectRows) return;
+      const preferredProjectNumber = getSelectedProject()?.projectNumber || "";
+      void loadData({ preferredProjectNumber }).catch((error) => {
+        console.error("Erreur actualisation des données gestion-depenses2 :", error);
+      });
+    }
+  );
 }
 
 function resetNewProjectForm() {
@@ -4456,7 +4553,7 @@ function reconcileProjectOnWidgetActivation() {
     }
 
     if (dom.projectSelect.value !== String(sharedProject.id)) {
-      renderApp();
+      renderAppPreservingScroll();
     }
     return true;
   })().catch((error) => {
@@ -4485,7 +4582,7 @@ async function handleTableInputChange(event) {
     const dailyRate = parseOptionalNumberInput(target.value) ?? 0;
     worker.dailyRate = dailyRate;
     await updateWorkerDailyRate(worker.id, dailyRate);
-    renderApp();
+    renderAppPreservingScroll();
     return;
   }
 
@@ -4506,7 +4603,7 @@ async function handleTableInputChange(event) {
       selectedProject.id,
       selectedProject.billingPercentageByMonth
     );
-    renderApp();
+    renderAppPreservingScroll();
     return;
   }
 
@@ -4530,7 +4627,7 @@ async function handleTableInputChange(event) {
       selectedProject.id,
       selectedProject.billingPercentageByMonth
     );
-    renderApp();
+    renderAppPreservingScroll();
     return;
   }
 }
@@ -5777,6 +5874,7 @@ export async function bootstrap() {
   initGrist();
   bindEvents();
   bindExpenseServiceRefresh();
+  bindExpenseDataRefresh();
   // Chargement initial : uniquement la table Projets pour peupler le sélecteur.
   // Les 8 tables de données sont chargées par loadData() après sélection d'un projet.
   await initProjectDropdown();

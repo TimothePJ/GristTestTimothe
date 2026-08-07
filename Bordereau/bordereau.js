@@ -903,8 +903,37 @@ async function updateEnvoyeForCurrentBordereau(sent) {
 /** -------------------------
  *  Grist records (view)
  *  ------------------------- */
-window.GristServiceContext.watchContextTable(BORDEREAU_TABLE, async (newRecords) => {
-  records = newRecords || [];
+// Bordereau affiché lors du dernier rendu : sert à distinguer un simple
+// rafraîchissement de données (le défilement appartient à l'utilisateur) d'un
+// changement de projet ou de référence (repartir du haut est attendu).
+let lastRenderedBordereauKey = "";
+
+function getBordereauRenderKey() {
+  return `${getProject()}|${getRef()}`;
+}
+
+// Restitue le défilement une fois tout de suite, une fois après la mise en page :
+// le tableau ne fige la hauteur de ses lignes qu'une frame plus tard.
+function captureBordereauScroll() {
+  const scroller = document.scrollingElement || document.documentElement;
+  const panes = [document.querySelector(".main-container"), $("addElementsList")];
+  const documentTop = scroller ? scroller.scrollTop : 0;
+  const paneTops = panes.map((pane) => (pane ? pane.scrollTop : 0));
+
+  return () => {
+    const restore = () => {
+      if (scroller) scroller.scrollTop = documentTop;
+      panes.forEach((pane, index) => {
+        if (pane) pane.scrollTop = paneTops[index];
+      });
+    };
+    restore();
+    requestAnimationFrame(restore);
+  };
+}
+
+async function refreshBordereauFromRecords(newRecords) {
+  records = newRecords || records;
 
   // Tables de référence
   const envoisPromise = grist.docApi.fetchTable(BORDEREAU_TABLE).catch((error) => {
@@ -920,10 +949,24 @@ window.GristServiceContext.watchContextTable(BORDEREAU_TABLE, async (newRecords)
 
   populateProjectDropdown();
 
+  const restoreScroll = getBordereauRenderKey() === lastRenderedBordereauKey
+    ? captureBordereauScroll()
+    : null;
+
   // sync UI (date + envoyé + table)
   await loadBordereauData();
   displayInvoiceTable();
   refreshOpenAddElementsDialog();
+  if (restoreScroll) restoreScroll();
+}
+
+window.GristServiceContext.watchContextTable(BORDEREAU_TABLE, refreshBordereauFromRecords);
+
+// Le bordereau ne montre pas que les envois : ses lignes viennent de la liste des
+// plans et son sélecteur de la table des projets. Ces deux tables sont éditées
+// depuis d'autres widgets, et le rendu doit suivre sans rechargement.
+window.GristServiceContext.watchContextTables([PLANS_TABLE, PROJET_TABLE], () => {
+  void refreshBordereauFromRecords(records);
 });
 
 /** -------------------------
@@ -1094,6 +1137,7 @@ async function updateBordereauData() {
 function displayInvoiceTable() {
   const selectedProjectName = getProject();
   const refValue = getRef();
+  lastRenderedBordereauKey = `${selectedProjectName}|${refValue}`;
   const tbody = document.querySelector("#invoiceTable tbody");
   const bulkFillButton = $("bulkNbrExemplairesButton");
   if (bulkFillButton) bulkFillButton.disabled = true;

@@ -105,7 +105,9 @@ Le runtime :
 - expose `editable`, `readonly` ou `hidden` ;
 - désactive les commandes d'écriture en lecture seule ;
 - bloque les mutations protégées ;
-- vérifie que les lignes modifiées ou supprimées appartiennent au contexte ;
+- vérifie que les lignes modifiées ou supprimées appartiennent au contexte, en
+  s'appuyant d'abord sur les lignes déjà chargées du contexte et en ne rechargeant
+  la table complète que pour les identifiants introuvables ;
 - injecte le projet et le service dans les créations et modifications ;
 - propage les changements d'affectation via `localStorage` et au focus.
 
@@ -163,10 +165,121 @@ L'API publique propose :
 - `invalidateContextTable(tableName)` pour une invalidation ciblée.
 
 Les watchers filtrés remplacent `onRecords` dans `Reference2`, `EnAttente`, les
-deux vues concernées de `ListeDePlan`, `Bordereau` et `Avancement`. Ils
-rechargent au changement de projet ou de service, après une écriture locale, au
-retour de focus et toutes les 30 secondes par défaut. Le polling est suspendu
-quand la page est cachée et un seul timer existe par watcher.
+deux vues concernées de `ListeDePlan`, `Bordereau` et `Avancement`.
+
+**Aucune interrogation périodique.** Un rechargement re-livre les lignes, donc
+re-rend le widget : le défilement, la sélection et les graphiques repartent de
+zéro. Un timer rendrait la page inutilisable. Les watchers se rafraîchissent donc
+sur évènement uniquement — écriture locale, changement de projet ou de service,
+retour de focus, signal natif Grist — et un widget qui veut malgré tout un timer
+passe explicitement `pollIntervalMs`.
+
+Ces déclencheurs n'ont pas la même exigence. Une écriture doit court-circuiter le
+cache : ce qui vient d'être écrit doit être relu. Un retour de focus veut
+seulement une fraîcheur raisonnable et passe donc par le cache : revenir deux fois
+sur l'onglet en dix secondes ne déclenche aucune requête.
+
+**Une livraison n'a lieu que si quelque chose a changé.** Avant de rappeler
+l'abonné, le runtime compare une empreinte des lignes livrées (nombre de lignes +
+hachage du contenu) combinée au projet, au service et à la source. Empreinte
+identique, pas de rappel : un rechargement inutile n'a donc plus d'effet visible.
+
+**Le flux natif `onRecords` sert de signal, dans tous les modes.** Grist pousse
+déjà les modifications du document vers chaque client ouvert : écouter ce flux ne
+coûte aucune requête, c'est le rafraîchissement le moins cher disponible. Il ne
+fournit jamais les lignes — la section hôte n'est plus forcément la table
+surveillée — il invalide les copies en cache de la table surveillée puis déclenche
+une relecture, filtrée comme les autres.
+
+Portée exacte : ce flux ne signale que les changements de **la table source de la
+section**. Un widget dont la section est posée sur `Projets2` est donc prévenu des
+écritures dans `Projets2`, pas de celles faites dans `ListePlan_NDC_COF` ou
+`References2`. Pour couvrir ces dernières sans interrogation périodique, il faut
+que la section repose sur une table qui bouge avec elles — une table de synthèse
+du domaine surveillé.
+
+## Revalidation conditionnelle
+
+Chaque lot REST mémorise l'`ETag` renvoyé par Grist. Tout rechargement ultérieur
+du même lot renvoie cet `ETag` dans un en-tête `If-None-Match` et force
+`cache: "no-store"`, afin que le navigateur ne transforme pas un `304` serveur en
+`200` servi localement.
+
+Deux cas :
+
+- le serveur répond `304` : aucun corps n'est transmis, les enregistrements déjà
+  détenus sont réutilisés tels quels ;
+- le serveur répond `200` : les nouvelles lignes remplacent celles du lot.
+
+Les lots sont appariés par position, et les `ETag` mémorisés ne sont réutilisés
+que si le découpage du filtre est rigoureusement identique. Un filtre découpé
+autrement, un repli `fetchTable()` ou une invalidation de table rompent la chaîne
+et le passage suivant repart d'un chargement complet.
+
+Lorsque **tous** les lots répondent `304`, la table précédente est réutilisée sans
+refiltrage, la trace `[GristData][REST INCHANGE]` est émise, et les abonnés ne
+sont pas re-notifiés : le widget ne se re-rend pas inutilement. Un service depuis
+le cache reste en revanche une livraison normale.
+
+Le coût d'un rechargement cesse ainsi de dépendre de la taille de la table : une
+relecture qui ne trouve aucun changement coûte quelques centaines d'octets au lieu
+d'une réponse complète.
+
+Ce mécanisme suppose que Grist émette un `ETag` sur `/records`. S'il n'en émet
+pas, `revalidations` reste à `0` dans les traces et chaque relecture retélécharge
+la tranche complète — sans erreur, mais sans économie. Les rechargements étant
+désormais déclenchés par évènement et non par un timer, leur fréquence reste
+faible dans les deux cas.
+
+Comme le filtre projet et service fait partie de l'URL, l'`ETag` ne porte que sur
+la tranche demandée : une modification faite sur un autre projet laisse la
+réponse inchangée, et l'utilisateur concerné ne retélécharge rien.
+
+## Rafraîchissement sans rechargement
+
+Une modification doit s'afficher immédiatement, sans que l'utilisateur recharge
+la page. Trois maillons y concourent, et il faut les trois : l'absence d'un seul
+ramène le symptôme « il faut recharger pour voir ».
+
+**1. Le widget déclare les tables dont dépend son affichage.**
+`watchContextTables(tables, rendu)` enregistre une surveillance par table, groupe
+les livraisons rapprochées en un seul rendu, et ignore la première livraison de
+chaque table — le widget vient de dessiner ces données. Un widget qui ne surveille
+que sa table principale reste figé quand une table secondaire change : le tableau
+de bord d'avancement croise cinq tables, le suivi des dépenses sept.
+
+**2. Une écriture rafraîchit dans les deux modes d'intégration.**
+En mode `automatic`, `applyUserActions` est détourné pour réécrire les actions et
+appliquer les gardes de service. En mode `rest-first` il ne l'est pas, et ce
+n'est pas un oubli : les widgets d'administration écrivent sans réécriture ni
+filtre. La conséquence tenait de l'angle mort — rien n'invalidait les copies
+locales après l'écriture, et l'écran gardait l'état d'avant. Les deux modes
+partagent désormais la même reprise après écriture ; seule la réécriture des
+actions reste propre au mode `automatic`.
+
+**3. L'écriture est annoncée aux widgets voisins.**
+Deux widgets côte à côte sur une page Grist sont deux iframes : ni les caches ni
+les surveillances de l'un n'atteignent l'autre. Après chaque écriture, la liste
+des tables modifiées est publiée dans `localStorage` sous
+`grist.service-context.data-changed`. Chaque runtime à l'écoute invalide ces
+tables et ne réveille que les surveillances concernées. Le signal ne sort pas du
+navigateur : il ne coûte rien au serveur.
+
+`gestion-acces-interservices` lit les tables sans filtre et ne charge donc pas le
+runtime ; il écoute directement ce même signal, avec la même clé.
+
+### Ce que ce dispositif ne couvre pas
+
+La modification d'un **autre utilisateur** n'emprunte aucun de ces trois chemins :
+elle n'est ni une écriture locale, ni un signal du même navigateur. Elle n'arrive
+que par le flux natif de Grist, que le runtime utilise comme signal de changement
+— et ce flux ne concerne que la table source de la section hôte. Pour les autres
+tables, la modification distante apparaît au retour de focus, qui traverse le
+cache de 30 secondes.
+
+Aucune minuterie n'est armée nulle part : le défaut d'intervalle de surveillance
+vaut zéro, et deux tests de contrat interdisent à un widget de rouvrir un
+`setInterval` ou de reprendre l'abonnement natif à son compte.
 
 ## Repli et limites réseau
 
@@ -185,9 +298,22 @@ l'écriture du seul bloc du service actif, avec l'ancien format rattaché à
 Les tables sans colonne `Service` ne reçoivent aucun filtre inventé. Cela
 concerne notamment `Team`, `Projets2`, `Time-Out`, `Timesheet` et `Ventilation`.
 `Gestion-User` filtre localement les personnes de `Team` par service, puis les
-segments par ces personnes. `Time-Out`, `Timesheet` et `Ventilation` conservent
-leur chargement historique lorsqu'ils sont utilisés ; aucun filtre indirect
-n'est supposé sans schéma fiable.
+segments par ces personnes. Ces tables utilisent REST complet sans filtre
+serveur, puis reviennent à `fetchTable()` si REST est indisponible ou incohérent.
+Aucun filtre indirect n'est supposé sans schéma fiable.
+
+Dans le widget MS Project, le chargement des tâches utilise un filtre REST exact
+sur `MsProject.Nom`, avec la valeur choisie dans `projectDropdown`. La défense
+cliente et le fallback `fetchTable()` appliquent ensuite une égalité stricte sur
+le même nom. La liste est alimentée exclusivement par la petite table
+`MsProjectNom` (colonne texte `Nom`) : lecture REST complète de cette table,
+puis fallback automatique `fetchTable("MsProjectNom")`. Les valeurs sont
+nettoyées, les vides ignorés, les doublons supprimés et le résultat trié.
+L'ouverture du widget ne demande donc jamais `MsProject`. Après la réussite des
+écritures d'un import, le nom est ajouté à `MsProjectNom` uniquement s'il est
+absent ; un remplacement portant le même nom ne crée aucune ligne de catalogue.
+Les caches `MsProject` et `MsProjectNom` sont invalidés après ces mutations.
+Aucun filtre `Service` ou `NomProjet` n'est inventé pour ces tables.
 
 Avant la première lecture métier REST de chaque jeton, une sonde légère demande
 au plus une ligne de `Projets2`, sans cache. Si le catalogue brut déjà chargé
@@ -196,24 +322,33 @@ contient des projets mais que le jeton REST répond en HTTP `200` avec
 document et active le repli historique pour la session du jeton.
 Lorsqu'une lecture métier filtrée est vide malgré une sonde globale réussie,
 une seconde vérification limitée à une ligne est faite sur cette table. Si REST
-la voit vide alors que `fetchTable()` y voit des lignes, le même repli est
-activé. Cette vérification supplémentaire n'a lieu que pour une réponse vide.
+la voit vide alors que `fetchTable()` y voit des lignes ou un schéma nécessaire,
+le repli est activé uniquement pour cette table. Les autres tables continuent
+de tenter REST. Cette vérification supplémentaire n'a lieu que pour une réponse
+vide.
+
+Lorsqu'un endpoint de table répond avec une erreur REST avérée ou une réponse
+inexploitable (colonne obligatoire absente), cette indisponibilité est mémorisée
+pour la session. Les sélections suivantes passent directement par le snapshot
+`fetchTable()` en cache, sans répéter en boucle le même appel REST en échec.
 
 Si `getAccessToken`, `fetch` ou l'endpoint REST est indisponible, si le réseau
 échoue, si la réponse JSON est invalide ou si cette sonde de visibilité échoue,
 le runtime revient à `fetchTable()` puis applique les filtres clients existants.
-Un watcher revient de la même façon à `onRecords`. Si le service ou le projet
-requis est vide, aucune requête métier complète n'est cependant lancée : une
-table vide est retournée immédiatement.
+Le watcher continue de lire la table surveillée, par `fetchTable()` cette fois.
+Son abonnement `onRecords` reste ce qu'il est en REST : un signal, pas une source
+de lignes. Si le service ou le projet requis est vide, aucune requête métier
+complète n'est cependant lancée : une table vide est retournée immédiatement.
 
-Les versions de Grist antérieures à la correction serveur du 21 mai 2026
-traitent le porteur d'un jeton temporaire comme anonyme dans les règles d'accès.
-Dans un document dont les règles dépendent de l'identité, REST peut alors
-répondre `200` avec `records: []`. Ce défaut ne peut pas être corrigé par
-l'hébergement localhost du widget : le serveur Grist doit intégrer la correction
-`edd620537f` ou une version ultérieure. En attendant, les tables complètes du
-repli sont conservées 30 secondes en mémoire afin qu'un changement de projet ou
-de service ne retransfère pas immédiatement les mêmes données.
+Sur un serveur ancien, notamment Grist 1.3.3, un jeton temporaire peut apparaître
+anonyme aux règles d'accès identitaires et REST peut répondre `200` avec
+`records: []`. Une réponse vide ne prouve cependant pas à elle seule cette cause :
+REST peut être indisponible, la table peut ne pas être visible avec ce jeton ou
+la table peut être réellement vide. Le runtime journalise donc une explication
+neutre et active le repli RPC seulement lorsqu'une erreur ou la comparaison avec
+`fetchTable()` le justifie. Les tables complètes du repli sont conservées 30
+secondes en mémoire afin qu'un changement de projet ou de service ne retransfère
+pas immédiatement les mêmes données.
 
 Cette optimisation diminue le transfert et le traitement dans le navigateur ;
 elle ne remplace pas les règles d'accès configurées côté serveur dans Grist.
@@ -230,6 +365,24 @@ elle ne remplace pas les règles d'accès configurées côté serveur dans Grist
 - `gestion-depenses2`
 - `Gestion-globale`
 - `Gestion-User`
+- `creation-projet` (REST-first complet ; mutations préservées)
+- `MS Project` (catalogue `MsProjectNom` ; tâches `MsProject` filtrées par `Nom` sélectionné)
+- `Time-Out` (REST complet sans filtre inventé)
+- `gestion-equipe` (snapshots REST complets ; mutations préservées)
+
+Le mode `rest-first` garde les snapshots globaux de `creation-projet`,
+`Time-Out` et `gestion-equipe` complets. Il remplace leurs lectures par
+REST + fallback sans jamais réécrire leurs actions d'écriture ni leur imposer un
+contrôle de service. Leurs mutations passent malgré tout par une enveloppe
+minimale : elle appelle l'écriture telle quelle, puis invalide les copies locales
+des tables touchées et prévient les widgets voisins. Sans elle, l'écran resterait
+sur l'état d'avant l'écriture jusqu'au rechargement de la page. L'audit détaillé est dans
+[WIDGET_INTEGRATION_AUDIT.md](./WIDGET_INTEGRATION_AUDIT.md).
+
+Le mode Grist « Voir en tant que » ne modifie que la session RPC ; le jeton REST
+reste celui du compte réellement connecté. Aucune détection client officielle et
+fiable n'est utilisée actuellement. Le runtime n'ajoute jamais `aclAsUser` et ne
+prétend pas simuler l'utilisateur sélectionné via REST.
 
 ## Limite de sécurité actuelle
 

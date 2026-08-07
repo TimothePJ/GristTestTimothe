@@ -243,6 +243,13 @@ function extractColumnNames(raw) {
 }
 
 async function fetchTableSnapshot(tableName) {
+  // Le runtime partagé sert les lectures depuis un cache de quelques dizaines de
+  // secondes et, en mode rest-first, ne détourne pas applyUserActions : rien
+  // n'invalide ce cache après nos propres écritures. Or ces instantanés servent
+  // justement à relire juste après une écriture (revalidation d'un renommage,
+  // rechargement du référentiel DOP) : ils doivent venir du document, pas d'une
+  // copie prise avant l'écriture.
+  window.GristServiceContext?.invalidateContextTable?.(tableName);
   const raw = await grist.docApi.fetchTable(tableName);
   return {
     rows: normalizeFetchTableResult(raw),
@@ -490,6 +497,32 @@ function appendMemberHeaderRow(tableBody) {
   });
 
   tableBody.appendChild(row);
+}
+
+// Le nouveau contenu peut être plus court que l'ancien : le navigateur ramène alors
+// le défilement dans les limites de la nouvelle hauteur et l'utilisateur repart en
+// haut de la liste. On remet la position d'avant le rendu. Un pliage de groupe garde
+// sa propre reprise, calée sur le bouton cliqué.
+function captureMemberTableScroll() {
+  const scroller = document.scrollingElement || document.documentElement;
+  const container = document.querySelector('.table-container');
+  const documentTop = scroller ? scroller.scrollTop : 0;
+  const containerTop = container ? container.scrollTop : 0;
+  const containerLeft = container ? container.scrollLeft : 0;
+
+  return () => {
+    const restore = () => {
+      if (scroller) scroller.scrollTop = documentTop;
+      if (container) {
+        container.scrollTop = containerTop;
+        container.scrollLeft = containerLeft;
+      }
+    };
+    // Une fois tout de suite, une fois après la mise en page : la hauteur des
+    // lignes n'est pas figée au premier passage.
+    restore();
+    requestAnimationFrame(restore);
+  };
 }
 
 function populateTable() {
@@ -1627,7 +1660,28 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 grist.ready({ requiredAccess: 'full' });
-grist.onRecords(function(initialRecords) {
-  records = normalizeFetchTableResult(initialRecords);
+// Team est une table de droits sans filtre métier (politique REST complet) : la
+// surveiller livre bien toutes les lignes, et le runtime détient déjà l'abonnement
+// natif aux changements du document. Il relit sur écriture, changement de contexte,
+// retour de focus ou signal Grist, et ne relivre que si les lignes ont changé.
+// Les listes DOP et projets sont bâties sur Emetteurs et Projets2, toutes deux
+// éditées depuis d'autres widgets : leurs modifications doivent apparaître ici
+// sans rechargement de page.
+window.GristServiceContext.watchContextTables(
+  [PROJECTS_TABLE, EMETTEURS_TABLE],
+  ({ tables }) => {
+    const reloads = [];
+    if (tables.includes(EMETTEURS_TABLE)) reloads.push(loadDopRegistry({ initializeDefaults: false }));
+    if (tables.includes(PROJECTS_TABLE)) reloads.push(loadProjectsForDop());
+    Promise.all(reloads).catch(error => {
+      console.error('Erreur actualisation DOP/projets :', error);
+    });
+  }
+);
+
+window.GristServiceContext.watchContextTable(TEAM_TABLE, function(teamRows) {
+  const restoreScroll = captureMemberTableScroll();
+  records = normalizeFetchTableResult(teamRows);
   populateTable();
+  restoreScroll();
 });

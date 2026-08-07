@@ -27,6 +27,7 @@ function createRuntimeHarness({
   restTableProbeRecords = [{ id: 999, fields: {} }],
   accessTokenFactory = null,
   applyUserActions = null,
+  integrationMode = "automatic",
 } = {}) {
   const windowListeners = new Map();
   const documentListeners = new Map();
@@ -131,6 +132,7 @@ function createRuntimeHarness({
   }
   const window = {
     GristServiceContextCore: core,
+    GristServiceContextConfig: { mode: integrationMode },
     grist,
     document,
     localStorage: {
@@ -250,15 +252,31 @@ async function flushAsyncWork(turns = 8) {
   }
 }
 
-function restResponse(records, { status = 200, jsonError = null } = {}) {
+function restResponse(records, { status = 200, jsonError = null, etag = "" } = {}) {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: { get: (name) => (String(name).toLowerCase() === "etag" ? etag || null : null) },
     async json() {
       if (jsonError) throw jsonError;
       return { records };
     },
   };
+}
+
+function restNotModified(etag) {
+  return {
+    ok: false,
+    status: 304,
+    headers: { get: (name) => (String(name).toLowerCase() === "etag" ? etag : null) },
+    async json() {
+      throw new Error("un 304 n'a pas de corps");
+    },
+  };
+}
+
+function conditionalTag(request) {
+  return request?.options?.headers?.["If-None-Match"] || "";
 }
 
 function requestFilter(request) {
@@ -946,7 +964,7 @@ test("le contrôleur Reference2 conserve B quand la sélection A se termine apr�
     populateZoneDropdown() {},
     populateSecondColumnListbox() {},
     async updateEmetteurList() {},
-    scheduleReferenceRetardReconciliation() {},
+    scheduleReferenceLimitReconciliation() {},
     showReferenceToast() {},
     REFERENCE_ALL_ZONES_VALUE: "__ALL_ZONES__",
     DOC_SELECT_PLACEHOLDER_HTML: '<option value="">Document</option>',
@@ -1052,6 +1070,383 @@ test("filtered views request full Grist access before their REST token", () => {
     const source = fs.readFileSync(path.join(__dirname, "..", "..", relativePath), "utf8");
     assert.match(source, /grist\.ready\(\{\s*requiredAccess:\s*["']full["']\s*\}\)/);
   });
+});
+
+test("les quatre widgets audités respectent leur mode d'intégration", () => {
+  const read = (relativePath) => fs.readFileSync(
+    path.join(__dirname, "..", "..", relativePath),
+    "utf8"
+  );
+  const assertScriptOrder = (html, scripts) => {
+    let previous = -1;
+    scripts.forEach((script) => {
+      const index = html.indexOf(script);
+      assert.ok(index > previous, `${script} doit être chargé dans l'ordre attendu`);
+      previous = index;
+    });
+  };
+
+  const creationHtml = read("creation-projet/index.html");
+  const creationSource = read("creation-projet/app.js");
+  assertScriptOrder(creationHtml, [
+    "grist-plugin-api.js",
+    "service-context-core.js",
+    "grist-service-context.js",
+    "app.js",
+  ]);
+  assert.match(creationHtml, /mode:\s*['"]rest-first['"]/);
+  assert.match(creationSource, /fetchContextTable\(tableName\)/);
+  assert.match(creationSource, /grist\.ready\(\{\s*requiredAccess:\s*["']full["']\s*\}\)/);
+  assert.match(creationSource, /assertProjectCreationDocumentIdentitiesAvailable/);
+  assert.match(creationSource, /applyUserActions\(projectActions\)/);
+
+  const msHtml = read("MS Project/Index.html");
+  const msMain = read("MS Project/assets/js/main.js");
+  const msService = read("MS Project/assets/js/services/gristService.js");
+  const msConfig = read("MS Project/assets/js/config.js");
+  assertScriptOrder(msHtml, [
+    "grist-plugin-api.js",
+    "service-context-core.js",
+    "grist-service-context.js",
+    "assets/js/main.js",
+  ]);
+  assert.match(msHtml, /id="projectDropdown"[^>]*data-grist-project-controller="true"/);
+  assert.match(msMain, /fetchMsProjectRows\(requestedProject\)/);
+  assert.match(msService, /grist\.ready\(\{\s*requiredAccess:\s*["']full["']\s*\}\)/);
+  assert.match(msService, /restFilter:\s*\{\s*\[sourceNameColumn\]:\s*\[normalizedProject\]\s*\}/);
+  const projectOptionsSource = msService.slice(
+    msService.indexOf("export async function buildProjectOptions"),
+    msService.indexOf("export async function fetchMsProjectRows")
+  );
+  assert.match(msConfig, /msProjectNamesTable:\s*\{[\s\S]*sourceTable:\s*["']MsProjectNom["'][\s\S]*name:\s*["']Nom["']/);
+  assert.match(projectOptionsSource, /APP_CONFIG\.grist\.msProjectNamesTable/);
+  assert.match(projectOptionsSource, /fullTable:\s*true/);
+  assert.doesNotMatch(projectOptionsSource, /fetchDistinctValues|msProjectTable|planningSyncTable|Nom_XML/);
+  assert.doesNotMatch(msService, /SELECT\s+DISTINCT|\/sql/);
+  assert.match(msService, /ensureProjectNameInCatalog\(sourceFileName\)/);
+  assert.match(msService, /applyUserActionsInBatches\(actions\)/);
+  assert.match(msService, /planningTable\.sourceTable/);
+
+  const timeOutHtml = read("Time-Out/index.html");
+  const timeOutMain = read("Time-Out/assets/js/main.js");
+  const timeOutService = read("Time-Out/assets/js/services/gristService.js");
+  assertScriptOrder(timeOutHtml, [
+    "grist-plugin-api.js",
+    "service-context-core.js",
+    "grist-service-context.js",
+    "assets/js/main.js",
+  ]);
+  assert.match(timeOutHtml, /mode:\s*["']rest-first["']/);
+  assert.match(timeOutMain, /GristServiceContext\?\.whenReady/);
+  assert.match(timeOutMain, /grist\.onRecords/);
+  assert.match(timeOutService, /fetchTeamRows\(\).*fetchTableRows/);
+  assert.match(timeOutService, /fetchSegments\(\).*fetchTableRows/);
+  assert.match(timeOutService, /applyActions\(\[\["AddRecord"/);
+
+  const adminHtml = read("gestion-equipe/index.html");
+  const adminSource = read("gestion-equipe/app.js");
+  assertScriptOrder(adminHtml, [
+    "grist-plugin-api.js",
+    "service-context-core.js",
+    "grist-service-context.js",
+    "app.js",
+  ]);
+  assert.match(adminHtml, /mode:\s*["']rest-first["']/);
+  assert.match(adminHtml, /REST complet en lecture/);
+  assert.match(adminSource, /fetchTableSnapshot\(tableName\)/);
+  assert.match(adminSource, /applyUserActions\(freshPreview\.actions\)/);
+});
+
+test("le mode contexte uniquement ne contamine ni snapshots ni mutations administratives", async () => {
+  const applied = [];
+  const harness = createRuntimeHarness({
+    integrationMode: "context-only",
+    rest: true,
+    applyUserActions: async (actions) => { applied.push(actions); },
+  });
+  await harness.api.whenReady();
+  assert.equal(harness.api.getIntegrationMode(), "context-only");
+  assert.equal(harness.grist.docApi.__serviceContextPatched, undefined);
+
+  const emitters = await harness.grist.docApi.fetchTable("Emetteurs");
+  assert.deepEqual(Array.from(emitters.id), [1]);
+  assert.equal(harness.fetchCount("Emetteurs"), 1);
+  assert.equal(harness.restRequests.length, 0);
+
+  const actions = [["AddRecord", "References2", null, {
+    Service: "Topographie",
+    NomProjet: "Projet administratif",
+  }]];
+  await harness.grist.docApi.applyUserActions(actions);
+  assert.deepEqual(applied, [actions]);
+});
+
+test("le mode REST-first charge les snapshots complets en REST et conserve les mutations", async () => {
+  const applied = [];
+  const harness = createRuntimeHarness({
+    integrationMode: "rest-first",
+    rest: true,
+    restFetch: async (url) => {
+      const tableName = new URL(url).pathname.split("/").at(-2);
+      if (tableName === "MsProject") {
+        return restResponse([
+          { id: 41, fields: { Nom: "XML A", NomProjet: "" } },
+          { id: 42, fields: { Nom: "XML B", NomProjet: "" } },
+        ]);
+      }
+      return restResponse([]);
+    },
+    applyUserActions: async (actions) => { applied.push(actions); },
+  });
+  harness.tables.MsProject = {
+    id: [1], Nom: ["RPC ne doit pas être lu"], NomProjet: [""],
+  };
+  await harness.api.whenReady();
+  assert.equal(harness.api.getIntegrationMode(), "rest-first");
+
+  const table = await harness.grist.docApi.fetchTable("MsProject");
+  assert.deepEqual(Array.from(table.id), [41, 42]);
+  assert.equal(harness.fetchCount("MsProject"), 0);
+  assert.equal(harness.restRequests.length, 1);
+  assert.equal(new URL(harness.restRequests[0].url).searchParams.has("filter"), false);
+  assert.match(JSON.stringify(harness.consoleEntries), /REST COMPLET.*MsProject/);
+
+  const actions = [["AddRecord", "References2", null, {
+    Service: "Topographie",
+    NomProjet: "Projet administratif",
+  }]];
+  await harness.grist.docApi.applyUserActions(actions);
+  assert.deepEqual(applied, [actions]);
+});
+
+test("en mode rest-first une table service-aware est lue entiere, sans filtre", async () => {
+  // gestion-equipe propage un renommage de projet dans Budget, ProjectTeam,
+  // TimeSegment et TimeReal : ces tables portent la politique REST_PROJECT_SERVICE,
+  // mais la propagation doit voir TOUTES les lignes. Filtrer ici laisserait les
+  // lignes des autres services pointer sur l'ancien nom de projet.
+  const harness = createRuntimeHarness({
+    integrationMode: "rest-first",
+    rest: true,
+    restFetch: async () => restResponse([
+      { id: 1, fields: { NumeroProjet: "100", Service: "Structure" } },
+      { id: 2, fields: { NumeroProjet: "100", Service: "Synthese" } },
+      { id: 3, fields: { NumeroProjet: "200", Service: "Topographie" } },
+    ]),
+  });
+  await harness.api.whenReady();
+
+  const table = await harness.grist.docApi.fetchTable("ProjectTeam");
+  assert.deepEqual(Array.from(table.id), [1, 2, 3]);
+  assert.equal(
+    new URL(harness.restRequests.at(-1).url).searchParams.has("filter"),
+    false,
+    "une lecture administrative ne doit porter aucun filtre projet ou service"
+  );
+});
+
+test("le repli fetchTable conserve lui aussi la table entiere en mode rest-first", async () => {
+  // Cas de la production tant que le serveur n'est pas à jour : REST indisponible,
+  // tout passe par fetchTable(). Le filtre client ne doit pas plus s'appliquer.
+  const harness = createRuntimeHarness({ integrationMode: "rest-first" });
+  harness.tables.ProjectTeam = {
+    id: [1, 2, 3],
+    NumeroProjet: ["100", "100", "200"],
+    Service: ["Structure", "Synthese", "Topographie"],
+  };
+  await harness.api.whenReady();
+
+  const table = await harness.grist.docApi.fetchTable("ProjectTeam");
+  assert.deepEqual(Array.from(table.id), [1, 2, 3]);
+});
+
+test("MS Project filtre REST sur la valeur exacte de Nom et conserve ce filtre au fallback", async () => {
+  const restHarness = createRuntimeHarness({
+    rest: true,
+    restFetch: async () => restResponse([
+      { id: 41, fields: { Nom: "XML A", Nom_Tache: "Tâche A" } },
+      { id: 42, fields: { Nom: "XML B", Nom_Tache: "Tâche B" } },
+    ]),
+  });
+  restHarness.tables.MsProject = {
+    id: [51, 52],
+    Nom: ["XML A", "XML B"],
+    Nom_Tache: ["RPC A", "RPC B"],
+  };
+  await restHarness.api.whenReady();
+
+  const xmlA = await restHarness.grist.docApi.fetchTable("MsProject", {
+    restFilter: { Nom: ["XML A"] },
+  });
+  const xmlB = await restHarness.grist.docApi.fetchTable("MsProject", {
+    restFilter: { Nom: ["XML B"] },
+  });
+
+  assert.deepEqual(Array.from(xmlA.id), [41]);
+  assert.deepEqual(Array.from(xmlB.id), [42]);
+  assert.deepEqual(requestFilter(restHarness.restRequests[0]), { Nom: ["XML A"] });
+  assert.deepEqual(requestFilter(restHarness.restRequests[1]), { Nom: ["XML B"] });
+  assert.equal(restHarness.fetchCount("MsProject"), 0);
+  assert.match(JSON.stringify(restHarness.consoleEntries), /REST FILTRE.*MsProject/);
+
+  const fallbackHarness = createRuntimeHarness();
+  fallbackHarness.tables.MsProject = {
+    id: [61, 62],
+    Nom: ["XML A", "XML B"],
+    Nom_Tache: ["RPC A", "RPC B"],
+  };
+  await fallbackHarness.api.whenReady();
+  const fallback = await fallbackHarness.grist.docApi.fetchTable("MsProject", {
+    restFilter: { Nom: ["XML B"] },
+  });
+  const fallbackOtherProject = await fallbackHarness.grist.docApi.fetchTable("MsProject", {
+    restFilter: { Nom: ["XML A"] },
+  });
+  assert.deepEqual(Array.from(fallback.id), [62]);
+  assert.deepEqual(Array.from(fallback.Nom), ["XML B"]);
+  assert.deepEqual(Array.from(fallbackOtherProject.id), [61]);
+  assert.equal(fallbackHarness.fetchCount("MsProject"), 1);
+  assert.match(JSON.stringify(fallbackHarness.consoleEntries), /CACHE FETCHTABLE.*MsProject/);
+});
+
+test("MS Project ne retente pas un endpoint REST indisponible à chaque sélection", async () => {
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async () => restResponse([], { status: 404 }),
+  });
+  harness.tables.MsProject = {
+    id: [61, 62],
+    Nom: ["XML A", "XML B"],
+  };
+  await harness.api.whenReady();
+
+  const xmlA = await harness.grist.docApi.fetchTable("MsProject", {
+    restFilter: { Nom: ["XML A"] },
+  });
+  const xmlB = await harness.grist.docApi.fetchTable("MsProject", {
+    restFilter: { Nom: ["XML B"] },
+  });
+
+  assert.deepEqual(Array.from(xmlA.id), [61]);
+  assert.deepEqual(Array.from(xmlB.id), [62]);
+  assert.equal(harness.restRequests.length, 1);
+  assert.equal(harness.fetchCount("MsProject"), 1);
+  assert.match(JSON.stringify(harness.consoleEntries), /CACHE FETCHTABLE.*MsProject/);
+});
+
+test("MS Project charge le catalogue MsProjectNom en REST sans lire MsProject", async () => {
+  const restHarness = createRuntimeHarness({
+    rest: true,
+    restFetch: async () => {
+      return restResponse([
+        { id: 1, fields: { Nom: "XML C" } },
+        { id: 2, fields: { Nom: "XML A" } },
+        { id: 3, fields: { Nom: "XML B" } },
+      ]);
+    },
+  });
+  restHarness.tables.MsProjectNom = {
+    id: [10, 11, 12],
+    Nom: ["RPC A", "RPC B", "RPC C"],
+  };
+  await restHarness.api.whenReady();
+  const table = await restHarness.grist.docApi.fetchTable("MsProjectNom", {
+    fullTable: true,
+    requiredColumns: ["Nom"],
+  });
+
+  assert.deepEqual(Array.from(table.Nom), ["XML C", "XML A", "XML B"]);
+  assert.equal(restHarness.fetchCount("MsProjectNom"), 0);
+  assert.equal(restHarness.fetchCount("MsProject"), 0);
+  assert.equal(restHarness.restRequests.length, 1);
+  assert.match(new URL(restHarness.restRequests[0].url).pathname, /\/tables\/MsProjectNom\/records$/);
+  assert.match(JSON.stringify(restHarness.consoleEntries), /REST COMPLET.*MsProjectNom/);
+
+  const fallbackHarness = createRuntimeHarness();
+  fallbackHarness.tables.MsProjectNom = {
+    id: [1, 2, 3, 4],
+    Nom: [" XML B ", "XML A", "XML B", ""],
+  };
+  await fallbackHarness.api.whenReady();
+  const fallbackTable = await fallbackHarness.grist.docApi.fetchTable("MsProjectNom", {
+    fullTable: true,
+    requiredColumns: ["Nom"],
+  });
+  assert.deepEqual(Array.from(fallbackTable.Nom), [" XML B ", "XML A", "XML B", ""]);
+  assert.equal(fallbackHarness.fetchCount("MsProjectNom"), 1);
+  assert.equal(fallbackHarness.fetchCount("MsProject"), 0);
+  assert.match(JSON.stringify(fallbackHarness.consoleEntries), /FALLBACK FETCHTABLE.*MsProjectNom/);
+});
+
+test("une réponse REST sans colonne requise bascule automatiquement sur fetchTable", async () => {
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async () => restResponse([
+      { id: 1, fields: { MauvaiseColonne: "inexploitable" } },
+    ]),
+  });
+  harness.tables.MsProjectNom = {
+    id: [10, 11],
+    Nom: ["XML A", "XML B"],
+  };
+  await harness.api.whenReady();
+  const table = await harness.grist.docApi.fetchTable("MsProjectNom", {
+    fullTable: true,
+    requiredColumns: ["Nom"],
+  });
+
+  assert.deepEqual(Array.from(table.Nom), ["XML A", "XML B"]);
+  assert.equal(harness.fetchCount("MsProjectNom"), 1);
+  assert.match(JSON.stringify(harness.consoleEntries), /FALLBACK FETCHTABLE.*colonne requise absente/);
+});
+
+test("REST complet vide ou indisponible revient au fetchTable complet", async () => {
+  const emptyRest = createRuntimeHarness({
+    integrationMode: "rest-first",
+    rest: true,
+    restFetch: async () => restResponse([]),
+    restTableProbeRecords: [],
+  });
+  emptyRest.tables.MsProject = {
+    id: [51, 52], Nom: ["RPC A", "RPC B"], NomProjet: ["", ""],
+  };
+  await emptyRest.api.whenReady();
+  const emptyFallback = await emptyRest.grist.docApi.fetchTable("MsProject");
+  assert.deepEqual(Array.from(emptyFallback.id), [51, 52]);
+  assert.equal(emptyRest.fetchCount("MsProject"), 1);
+  assert.equal(emptyRest.restTableProbeRequests.length, 1);
+
+  const noRest = createRuntimeHarness({ integrationMode: "rest-first" });
+  noRest.tables.MsProject = {
+    id: [61], Nom: ["RPC sans API REST"], NomProjet: [""],
+  };
+  await noRest.api.whenReady();
+  const unavailableFallback = await noRest.grist.docApi.fetchTable("MsProject");
+  assert.deepEqual(Array.from(unavailableFallback.id), [61]);
+  assert.equal(noRest.fetchCount("MsProject"), 1);
+});
+
+test("une table REST vide revient au fetchTable pour conserver son schéma", async () => {
+  const harness = createRuntimeHarness({
+    integrationMode: "rest-first",
+    rest: true,
+    restFetch: async (url) => {
+      const tableName = new URL(url).pathname.split("/").at(-2);
+      return tableName === "TableVide"
+        ? restResponse([])
+        : restResponse([{ id: 71, fields: { Valeur: "REST toujours actif" } }]);
+    },
+    restTableProbeRecords: [],
+  });
+  harness.tables.TableVide = {
+    id: [], Service: [], NomProjet: [], ColonneMetier: [],
+  };
+  await harness.api.whenReady();
+  const table = await harness.grist.docApi.fetchTable("TableVide");
+  assert.deepEqual(Object.keys(table), ["id", "Service", "NomProjet", "ColonneMetier"]);
+  assert.equal(harness.fetchCount("TableVide"), 1);
+  const nextTable = await harness.grist.docApi.fetchTable("AutreTable");
+  assert.deepEqual(Array.from(nextTable.id), [71]);
+  assert.equal(harness.fetchCount("AutreTable"), 0);
 });
 
 test("les widgets multi-tables rechargent leurs donnees au changement de service", () => {
@@ -1170,10 +1565,15 @@ test("une sonde REST vide en HTTP 200 active le repli brut pour tous les widgets
   )));
 });
 
-test("une table métier REST vide mais non vide via fetchTable active aussi le repli", async () => {
+test("une table métier REST vide bascule seule sur fetchTable et les suivantes retentent REST", async () => {
   const harness = createRuntimeHarness({
     rest: true,
-    restFetch: async () => restResponse([]),
+    restFetch: async (url) => {
+      const tableName = new URL(url).pathname.split("/").at(-2);
+      return tableName === "References2"
+        ? restResponse([])
+        : restResponse([{ id: 7, fields: { Service: "Structure", NumeroProjet: "100", Amount: 10 } }]);
+    },
     restTableProbeRecords: [],
   });
   harness.tables.References2 = {
@@ -1196,14 +1596,17 @@ test("une table métier REST vide mais non vide via fetchTable active aussi le r
   assert.deepEqual(Array.from(references.id), [1]);
   assert.deepEqual(Array.from(budget.id), [7]);
   assert.equal(harness.restProbeRequests.length, 1);
-  assert.equal(harness.restRequests.length, 1);
+  assert.equal(harness.restRequests.length, 2);
   assert.equal(harness.restTableProbeRequests.length, 1);
   const tableProbeUrl = new URL(harness.restTableProbeRequests[0].url);
   assert.match(tableProbeUrl.pathname, /\/tables\/References2\/records$/);
   assert.equal(tableProbeUrl.searchParams.get("limit"), "1");
   assert.equal(harness.restTableProbeRequests[0].options.cache, "no-store");
   assert.equal(harness.fetchCount("References2"), 1);
-  assert.equal(harness.fetchCount("Budget"), 1);
+  assert.equal(harness.fetchCount("Budget"), 0);
+  assert.ok(harness.consoleEntries.some(([level, label]) => (
+    level === "info" && String(label).includes("[GristData][REST FILTRE] Budget")
+  )));
 });
 
 test("les requêtes REST simultanées partagent une seule demande de jeton sans stockage", async () => {
@@ -1238,6 +1641,26 @@ test("les requêtes REST simultanées partagent une seule demande de jeton sans 
     harness.storageWrites.some((entry) => entry.some((value) => String(value).includes("memory-only-token"))),
     false
   );
+  const logs = JSON.stringify(harness.consoleEntries);
+  assert.match(logs, /JETON REST OK/);
+  assert.match(logs, /lectureSeule/);
+  assert.doesNotMatch(logs, /memory-only-token/);
+});
+
+test("les messages de repli restent neutres sur la cause d'une visibilité REST vide", async () => {
+  const harness = createRuntimeHarness({
+    rest: true,
+    restProbeRecords: [],
+  });
+  harness.tables.References2 = {
+    id: [1], Service: ["Structure"], NomProjet: ["Alpha"],
+  };
+  await harness.api.whenReady();
+  await harness.api.fetchContextTable("References2");
+  const logs = JSON.stringify(harness.consoleEntries);
+  assert.match(logs, /visibilite est limitee|visibilité est limitée/);
+  assert.match(logs, /repli RPC/);
+  assert.doesNotMatch(logs, /mise a jour du serveur Grist est necessaire/i);
 });
 
 test("le jeton est renouvelé avant expiration", async () => {
@@ -1511,7 +1934,7 @@ test("écriture readonly et cible hors contexte sont bloquées avant Grist", asy
   assert.equal(applyCount, 0);
 });
 
-test("le watcher REST charge et recharge sans abonnement onRecords natif", async () => {
+test("le watcher REST lit ses lignes en REST et n'utilise onRecords que comme signal", async () => {
   const harness = createRuntimeHarness({
     rest: true,
     restFetch: async (url) => {
@@ -1530,10 +1953,59 @@ test("le watcher REST charge et recharge sans abonnement onRecords natif", async
   });
   await flushAsyncWork();
   assert.deepEqual(deliveries.at(-1), { project: "Alpha", reason: "initial" });
-  assert.equal(harness.nativeOnRecordsCount(), 0);
+  // Un seul abonnement natif, et il ne sert qu'à être prévenu : les lignes
+  // livrées viennent des réponses REST, pas du flux de la section.
+  assert.equal(harness.nativeOnRecordsCount(), 1);
+  assert.equal(deliveries.length, 1);
   await harness.api.selectProject("Beta");
   assert.deepEqual(deliveries.at(-1), { project: "Beta", reason: "selection" });
-  assert.equal(harness.nativeOnRecordsCount(), 0);
+  assert.equal(harness.nativeOnRecordsCount(), 1);
+  unsubscribe();
+});
+
+test("le signal natif ne reveille que le watcher de la table de la section", async () => {
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async (url) => {
+      const table = new URL(url).pathname.split("/tables/")[1].split("/")[0];
+      return restResponse([{ id: 1, fields: { Service: "Structure", NomProjet: "Alpha", Table: table } }]);
+    },
+  });
+  // La section est posée sur Projets2 : une écriture dans Projets2 ne doit pas
+  // faire relire References2, qui n'apprend rien de ce signal.
+  harness.grist.selectedTable = { async getTableId() { return "Projets2"; } };
+  await harness.api.whenReady();
+  const unsubscribe = harness.api.watchContextTable("References2", () => {});
+  await flushAsyncWork();
+
+  const requestCount = harness.restRequests.length;
+  harness.emitRecords(RAW_REFERENCE_RECORDS);
+  await flushAsyncWork();
+  assert.equal(harness.restRequests.length, requestCount);
+  unsubscribe();
+});
+
+test("le signal natif rafraichit un watcher REST sans requete supplementaire cote signal", async () => {
+  let currentReference = "A";
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async () => restResponse([
+      { id: 1, fields: { Service: "Structure", NomProjet: "Alpha", Reference: currentReference } },
+    ]),
+  });
+  await harness.api.whenReady();
+  const deliveries = [];
+  const unsubscribe = harness.api.watchContextTable("References2", (rows) => {
+    deliveries.push(rows[0]?.Reference);
+  });
+  await flushAsyncWork();
+  assert.deepEqual(deliveries, ["A"]);
+
+  // Le flux natif ne porte pas la donnée : il déclenche une relecture REST.
+  currentReference = "B";
+  harness.emitRecords(RAW_REFERENCE_RECORDS);
+  await flushAsyncWork();
+  assert.deepEqual(deliveries, ["A", "B"]);
   unsubscribe();
 });
 
@@ -1567,7 +2039,7 @@ test("le watcher ignore une réponse obsolète et se rafraîchit après mutation
   unsubscribe();
 });
 
-test("le watcher bascule vers onRecords lorsque REST est indisponible", async () => {
+test("le flux natif declenche un rechargement, il ne fournit pas les lignes", async () => {
   const harness = createRuntimeHarness();
   harness.tables.References2 = {
     id: [1], Service: ["Structure"], NomProjet: ["Alpha"], Reference: ["A"],
@@ -1579,9 +2051,54 @@ test("le watcher bascule vers onRecords lorsque REST est indisponible", async ()
   });
   await flushAsyncWork();
   assert.equal(harness.nativeOnRecordsCount(), 1);
+  assert.deepEqual(deliveries.at(-1), ["A"]);
+
+  // La section hôte peut être une autre table (Projets2) : ses lignes ne doivent
+  // jamais être livrées à la place de celles de la table surveillée.
+  harness.tables.References2 = {
+    id: [1, 2],
+    Service: ["Structure", "Structure"],
+    NomProjet: ["Alpha", "Alpha"],
+    Reference: ["A", "B"],
+  };
   harness.emitRecords(RAW_REFERENCE_RECORDS);
   await flushAsyncWork();
-  assert.deepEqual(deliveries.at(-1), ["A", "AA"]);
+  assert.deepEqual(deliveries.at(-1), ["A", "B"]);
+  unsubscribe();
+});
+
+test("aucune interrogation periodique n'est armee par defaut", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "grist-service-context.js"),
+    "utf8"
+  );
+  assert.match(source, /const DEFAULT_WATCH_POLL_INTERVAL_MS = 0;/);
+});
+
+test("des lignes inchangees ne sont pas relivrees au widget", async () => {
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async () => restResponse([
+      { id: 1, fields: { Service: "Structure", NomProjet: "Alpha", Reference: "A" } },
+    ]),
+  });
+  await harness.api.whenReady();
+  const deliveries = [];
+  const unsubscribe = harness.api.watchContextTable("References2", (rows) => {
+    deliveries.push(rows.length);
+  });
+  await flushAsyncWork();
+  assert.equal(deliveries.length, 1);
+
+  // Une écriture force la relecture : la requête part, mais le contenu est
+  // identique donc le widget ne doit pas être re-rendu.
+  const requestCount = harness.restRequests.length;
+  await harness.grist.docApi.applyUserActions([
+    ["AddRecord", "References2", null, { Reference: "B" }],
+  ]);
+  await flushAsyncWork();
+  assert.ok(harness.restRequests.length > requestCount);
+  assert.equal(deliveries.length, 1);
   unsubscribe();
 });
 
@@ -1614,4 +2131,239 @@ test("les six widgets de source migrent vers leur table filtrée", () => {
     assert.match(source, pattern);
     assert.doesNotMatch(source, /GristServiceContext\.onRecords\s*\(/);
   });
+});
+
+test("une revalidation 304 evite le retelechargement et le re-rendu du widget", async () => {
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async (url, options, count) => {
+      const request = { url, options };
+      if (count === 1) {
+        return restResponse(
+          [{ id: 1, fields: { Service: "Structure", NomProjet: "Alpha", Reference: "A" } }],
+          { etag: 'W/"v1"' }
+        );
+      }
+      assert.equal(conditionalTag(request), 'W/"v1"', "la revalidation doit porter l'ETag memorise");
+      assert.equal(options?.cache, "no-store", "la revalidation ne doit pas passer par le cache navigateur");
+      return restNotModified('W/"v1"');
+    },
+  });
+  await harness.api.whenReady();
+  const deliveries = [];
+  const unsubscribe = harness.api.watchContextTable("References2", (rows, _mappings, delivery) => {
+    deliveries.push({ lignes: rows.length, reason: delivery.reason });
+  });
+  await flushAsyncWork();
+  assert.deepEqual(deliveries, [{ lignes: 1, reason: "initial" }]);
+
+  const table = await harness.api.fetchContextTable("References2", { forceRefresh: true });
+  assert.equal(harness.restRequests.length, 2, "la revalidation emet bien une requete");
+  assert.deepEqual(Array.from(table.id), [1], "les lignes memorisees sont conservees");
+  assert.deepEqual(deliveries, [{ lignes: 1, reason: "initial" }], "aucun re-rendu inutile");
+  unsubscribe();
+});
+
+test("un lot partiellement modifie fusionne le neuf et les lignes revalidees", async () => {
+  const harness = createRuntimeHarness({
+    multiProject: true,
+    rest: true,
+    restFetch: async (url, options, count) => {
+      const filter = JSON.parse(new URL(url).searchParams.get("filter"));
+      const batch = filter.NumeroProjet[0];
+      if (count <= 2) {
+        return restResponse(
+          [{ id: count, fields: { Service: "Structure", NumeroProjet: batch, Etat: "initial" } }],
+          { etag: `W/"${batch}"` }
+        );
+      }
+      // Second passage : le premier lot est inchange, le second a bouge.
+      if (conditionalTag({ options }) === 'W/"1000"') return restNotModified('W/"1000"');
+      return restResponse(
+        [{ id: 2, fields: { Service: "Structure", NumeroProjet: batch, Etat: "modifie" } }],
+        { etag: `W/"${batch}-bis"` }
+      );
+    },
+  });
+  const numbers = Array.from({ length: 45 }, (_unused, index) => String(1000 + index));
+  harness.tables.Team.Projets_Access = [numbers.map((number) => `${number}|Projet ${number}`).join("\n")];
+  harness.tables.Projets2 = {
+    id: numbers.map((_number, index) => index + 1),
+    Numero_de_projet: numbers,
+    Nom_de_projet: numbers.map((number) => `Projet ${number}`),
+  };
+  await harness.api.whenReady();
+  const first = await harness.api.fetchContextTable("TimeSegment");
+  assert.equal(harness.restRequests.length, 2, "le filtre est decoupe en deux lots");
+  assert.deepEqual(Array.from(first.id), [1, 2]);
+
+  const second = await harness.api.fetchContextTable("TimeSegment", { forceRefresh: true });
+  assert.equal(harness.restRequests.length, 4);
+  const rows = core.tableToRows(second);
+  assert.deepEqual(rows.map((row) => row.id).sort((a, b) => a - b), [1, 2]);
+  assert.equal(
+    rows.find((row) => row.id === 1).Etat,
+    "initial",
+    "le lot revalide conserve ses lignes"
+  );
+  assert.equal(
+    rows.find((row) => row.id === 2).Etat,
+    "modifie",
+    "le lot modifie apporte ses nouvelles lignes"
+  );
+});
+
+test("le garde-fou d'ecriture s'appuie sur le contexte sans recharger la table entiere", async () => {
+  let applied = null;
+  const harness = createRuntimeHarness({
+    rest: true,
+    applyUserActions: async (actions) => { applied = actions; },
+    restFetch: async () => restResponse(
+      [{ id: 7, fields: { Service: "Structure", NomProjet: "Alpha", Reference: "A" } }],
+      { etag: 'W/"v1"' }
+    ),
+  });
+  // Table complete disponible uniquement pour le chemin de repli du garde-fou.
+  harness.tables.References2 = {
+    id: [7],
+    Service: ["Structure"],
+    NomProjet: ["Alpha"],
+    Reference: ["A"],
+  };
+  await harness.api.whenReady();
+  await harness.api.fetchContextTable("References2");
+  const fetchesAvantEcriture = harness.fetchCount("References2");
+
+  await harness.grist.docApi.applyUserActions([
+    ["UpdateRecord", "References2", 7, { Reference: "B" }],
+  ]);
+  assert.ok(applied, "l'ecriture doit atteindre Grist");
+  assert.equal(
+    harness.fetchCount("References2"),
+    fetchesAvantEcriture,
+    "aucun fetchTable complet ne doit etre declenche pour valider une ligne visible"
+  );
+
+  await assert.rejects(
+    harness.grist.docApi.applyUserActions([
+      ["UpdateRecord", "References2", 4242, { Reference: "C" }],
+    ]),
+    /n'appartient pas au projet et au service/,
+    "une ligne absente du contexte reste refusee"
+  );
+});
+
+// --- Rafraîchissement sans rechargement de page --------------------------------
+// Le widget doit montrer une modification dès qu'elle est faite : par lui, par un
+// widget voisin, ou par un autre utilisateur. Ces trois tests couvrent les trois
+// maillons, chacun étant une cause distincte de « il faut recharger la page ».
+
+const settleTimers = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+test("watchContextTables ignore le chargement initial et regroupe les livraisons", async () => {
+  const harness = createRuntimeHarness({ applyUserActions: async () => "ok" });
+  harness.tables.References2 = { id: [1], Service: ["Structure"], NomProjet: ["Alpha"], Reference: ["A"] };
+  harness.tables.Budget = { id: [1], Service: ["Structure"], NumeroProjet: ["100"], Montant: [10] };
+  await harness.api.whenReady();
+
+  const calls = [];
+  const unsubscribe = harness.api.watchContextTables(["References2", "Budget"], (detail) => {
+    calls.push([...detail.tables].sort());
+  }, { debounceMs: 5 });
+  await flushAsyncWork();
+  await settleTimers();
+  assert.equal(calls.length, 0, "le widget vient de dessiner ces données : aucun re-rendu");
+
+  harness.tables.References2 = {
+    id: [1, 2], Service: ["Structure", "Structure"],
+    NomProjet: ["Alpha", "Alpha"], Reference: ["A", "B"],
+  };
+  harness.tables.Budget = { id: [1], Service: ["Structure"], NumeroProjet: ["100"], Montant: [20] };
+  await harness.grist.docApi.applyUserActions([
+    ["AddRecord", "References2", null, { Reference: "B" }],
+    ["AddRecord", "Budget", null, { Montant: 20 }],
+  ]);
+  await flushAsyncWork();
+  await settleTimers();
+  assert.equal(calls.length, 1, "deux tables changées ne doivent produire qu'un seul rendu");
+  assert.deepEqual(calls[0], ["Budget", "References2"]);
+  unsubscribe();
+});
+
+test("en rest-first une ecriture rafraichit le widget sans rechargement", async () => {
+  const applied = [];
+  const harness = createRuntimeHarness({
+    integrationMode: "rest-first",
+    applyUserActions: async (actions) => { applied.push(actions); return "ok"; },
+  });
+  harness.tables.ProjectTeam = { id: [1], NumeroProjet: ["100"], Name: ["Alice"], Role: ["Chef"] };
+  await harness.api.whenReady();
+
+  const deliveries = [];
+  const unsubscribe = harness.api.watchContextTable("ProjectTeam", (rows) => deliveries.push(rows.length));
+  await flushAsyncWork();
+  assert.equal(deliveries.length, 1);
+
+  harness.tables.ProjectTeam = {
+    id: [1, 2], NumeroProjet: ["100", "100"],
+    Name: ["Alice", "Bob"], Role: ["Chef", "Dessinateur"],
+  };
+  await harness.grist.docApi.applyUserActions([["AddRecord", "ProjectTeam", null, { Name: "Bob" }]]);
+  await flushAsyncWork();
+  assert.equal(deliveries.length, 2, "l'écriture doit redessiner le widget");
+  assert.deepEqual(
+    applied[0],
+    [["AddRecord", "ProjectTeam", null, { Name: "Bob" }]],
+    "le mode rest-first ne réécrit pas les actions : seule la relecture est ajoutée"
+  );
+  unsubscribe();
+});
+
+test("une ecriture est annoncee aux widgets voisins", async () => {
+  const harness = createRuntimeHarness({ applyUserActions: async () => "ok" });
+  await harness.api.whenReady();
+  await harness.grist.docApi.applyUserActions([
+    ["AddRecord", "References2", null, { Reference: "A" }],
+  ]);
+  const signal = harness.storageWrites
+    .filter(([kind, key]) => kind === "set" && key === core.DATA_CHANGED_STORAGE_KEY)
+    .at(-1);
+  assert.ok(signal, "l'écriture doit être annoncée aux autres iframes");
+  assert.deepEqual(JSON.parse(signal[2]).tables, ["References2"]);
+});
+
+test("le signal d'un widget voisin rafraichit la table concernee", async () => {
+  const harness = createRuntimeHarness();
+  harness.tables.References2 = { id: [1], Service: ["Structure"], NomProjet: ["Alpha"], Reference: ["A"] };
+  await harness.api.whenReady();
+
+  const deliveries = [];
+  const unsubscribe = harness.api.watchContextTable("References2", (rows) => deliveries.push(rows.length));
+  await flushAsyncWork();
+  assert.equal(deliveries.length, 1);
+
+  harness.tables.References2 = {
+    id: [1, 2], Service: ["Structure", "Structure"],
+    NomProjet: ["Alpha", "Alpha"], Reference: ["A", "B"],
+  };
+  harness.dispatch("storage", {
+    key: core.DATA_CHANGED_STORAGE_KEY,
+    newValue: JSON.stringify({
+      version: core.DATA_SIGNAL_VERSION,
+      at: 1,
+      sequence: 1,
+      tables: ["References2"],
+    }),
+  });
+  await flushAsyncWork();
+  assert.equal(deliveries.length, 2, "le voisin doit relire la table annoncée");
+
+  // Un message d'une autre version est ignoré plutôt que mal interprété.
+  harness.dispatch("storage", {
+    key: core.DATA_CHANGED_STORAGE_KEY,
+    newValue: JSON.stringify({ version: 99, tables: ["References2"] }),
+  });
+  await flushAsyncWork();
+  assert.equal(deliveries.length, 2);
+  unsubscribe();
 });

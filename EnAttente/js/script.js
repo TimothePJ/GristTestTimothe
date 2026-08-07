@@ -529,6 +529,25 @@ function tableTitle() {
   return `Toutes lignes - ${base}`;
 }
 
+// Un rafraîchissement piloté par les données ne doit pas renvoyer l'utilisateur
+// en haut de page : on restitue le défilement une fois tout de suite, une fois
+// après la mise en page car le camembert fixe sa hauteur une frame plus tard.
+function captureContentScroll() {
+  const scroller = document.scrollingElement || document.documentElement;
+  const pane = document.querySelector(".table-container");
+  const documentTop = scroller ? scroller.scrollTop : 0;
+  const paneTop = pane ? pane.scrollTop : 0;
+
+  return () => {
+    const restore = () => {
+      if (scroller) scroller.scrollTop = documentTop;
+      if (pane) pane.scrollTop = paneTop;
+    };
+    restore();
+    requestAnimationFrame(restore);
+  };
+}
+
 function refreshUI() {
   const projects = [...firstDropdown.options].map((o) => o.value).filter(Boolean);
 
@@ -704,7 +723,9 @@ async function refreshProjectDropdownFromProjectsTable() {
 }
 
 void refreshProjectDropdownFromProjectsTable();
-window.addEventListener("pageshow", () => { void refreshProjectDropdownFromProjectsTable(); });
+// Le runtime partagé relit déjà les références au retour de focus et ne livre
+// que si elles ont changé : on ne relit ici que pour réparer un état dégradé
+// (liste de projets vide ou sélection partagée perdue).
 window.addEventListener("focus", () => {
   const savedProject = readSharedProjectSelection();
   if (
@@ -712,18 +733,32 @@ window.addEventListener("focus", () => {
     (savedProject && normalizeFilterKey(savedProject) !== normalizeFilterKey(firstDropdown.value))
   ) {
     void refreshProjectDropdownFromProjectsTable();
-  } else if (App.recordsReady) {
-    refreshUI();
   }
 });
 
 initGrist(() => {
+  // Livraison de données à sélection constante : le défilement lui appartient.
+  const restoreScroll = captureContentScroll();
   if (!selectedProject) selectedProject = firstDropdown.value.trim();
   if (firstDropdown.options.length <= 1) {
-    void refreshProjectDropdownFromProjectsTable().then(() => refreshUI());
+    void refreshProjectDropdownFromProjectsTable().then(() => {
+      refreshUI();
+      restoreScroll();
+    });
   } else {
     refreshUI();
+    restoreScroll();
   }
+});
+
+// La liste déroulante des projets vient de Projets2, table éditée depuis d'autres
+// widgets : une création ou un renommage doit s'y voir sans rechargement.
+window.GristServiceContext.watchContextTables(["Projets2"], () => {
+  const restoreScroll = captureContentScroll();
+  void refreshProjectDropdownFromProjectsTable().then(() => {
+    refreshUI();
+    restoreScroll();
+  });
 });
 
 function buildRowsForTable(listRows, allRows = listRows) {

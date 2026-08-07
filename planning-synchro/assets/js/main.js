@@ -118,6 +118,28 @@ function viewportFitsWithinBounds(viewport, bounds) {
   return firstVisibleDate >= bounds.startDate && rangeEndDate <= bounds.endDate;
 }
 
+// Mémorise le défilement autour d'un re-rendu du plan de charge : le tableau est
+// reconstruit d'un bloc et, si sa hauteur bouge, le navigateur ramène la page en
+// haut — l'utilisateur perd la ligne qu'il vient d'éditer.
+function captureChargeScroll() {
+  const scroller = document.scrollingElement || document.documentElement;
+  const documentTop = scroller ? scroller.scrollTop : 0;
+  const chargeScrollLeft = document.querySelector(".charge-plan-scroll")?.scrollLeft || 0;
+
+  return () => {
+    const restore = () => {
+      if (scroller) scroller.scrollTop = documentTop;
+      // Le conteneur est recréé par le rendu : on le relit au moment de restituer.
+      const chargeScrollEl = document.querySelector(".charge-plan-scroll");
+      if (chargeScrollEl instanceof HTMLElement) chargeScrollEl.scrollLeft = chargeScrollLeft;
+    };
+    // Une fois tout de suite, une fois après la mise en page : la hauteur des
+    // lignes n'est figée qu'à la frame suivante.
+    restore();
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(restore);
+  };
+}
+
 function bootstrapApp() {
   const els = {
     select: document.getElementById("ps-project-select"),
@@ -226,15 +248,20 @@ function bootstrapApp() {
 
   async function loadProject(project) {
     const seq = ++loadSeq;
-    teardown();
 
     state.selectedProject = project || null;
 
     if (!project) {
+      teardown();
       els.empty.hidden = false;
       els.main.hidden = true;
       return;
     }
+
+    // Le teardown n'a volontairement pas lieu ici : il viderait les deux panneaux
+    // pendant tout le fetch, la page s'effondrerait en hauteur et le navigateur
+    // ramènerait le défilement à zéro (écran blanc entre-temps). On garde
+    // l'affichage précédent et on ne démonte qu'au moment de reconstruire.
 
     let data = { planningRows: [], timeSegmentRows: [], projectTeamRows: [], teamRows: [], timeOutRows: [] };
     try {
@@ -279,6 +306,9 @@ function bootstrapApp() {
     const planBounds = computePlanningPhaseBounds(planningRows, project.name);
     if (seq !== loadSeq) return; // superseded while awaiting References2
 
+    // Démontage juste avant la reconstruction : tout ce qui suit est synchrone,
+    // l'ancien affichage est donc remplacé sans passer par un écran vide.
+    teardown();
     planningRenderer = createPlanningRenderer(els.planning);
     chargeBoard = createChargeBoard(els.charge);
     planningChart = createPlanningChart(els.chartCanvas, els.chartFilter, els.chartGranularity);
@@ -355,7 +385,15 @@ function bootstrapApp() {
       onRangeLabel: (label, appliedViewport) => {
         if (els.range) els.range.textContent = label || "-";
         state.viewport = appliedViewport;
-        persistViewport(appliedViewport, state.selectedProject);
+        // On persiste sous le projet DE CE contrôleur (`project`), pas sous
+        // `state.selectedProject` : le démontage n'a plus lieu au début de
+        // loadProject(), donc l'ancien contrôleur reste vivant pendant le fetch
+        // du projet suivant, alors que `state.selectedProject` pointe déjà sur
+        // ce dernier. Un pan/zoom pendant cette fenêtre enregistrerait la
+        // fenêtre du projet A sous l'identifiant du projet B, et B s'ouvrirait
+        // sur la chronologie de A (le cas que loadPersistedViewport cherche
+        // justement à empêcher).
+        persistViewport(appliedViewport, project);
         // Ne re-mesurer/re-borner que si le MODE a changé (bande d'axe) ; un pan
         // ou un zoom intra-mode ne change ni le nb de lignes ni l'axe.
         if (topPaneResizer && appliedViewport && appliedViewport.mode !== lastAppliedMode) {
@@ -453,8 +491,10 @@ function bootstrapApp() {
         // to locked if we hardcoded false here. Read the live flag from the
         // editing controller so ONE source of truth drives both.
         const currentEditMode = editing ? editing.isEditModeEnabled() : false;
+        const restoreScroll = captureChargeScroll();
         chargeBoard.render({ workers: nextWorkers, viewport: controller.getViewport(), editMode: currentEditMode, absencesByWorker });
         controller.setViewport(controller.getViewport());
+        restoreScroll();
       },
     });
 
@@ -600,6 +640,17 @@ function bootstrapApp() {
     }
     window.addEventListener("storage", handleStorageEvent);
     window.GristServiceContext?.onServiceChange?.(handleServiceChange);
+
+    // Le planning synchronisé croise quatre tables, toutes éditées depuis
+    // d'autres widgets. Sans cette liaison, une modification n'apparaîtrait
+    // qu'après rechargement de la page.
+    const psTables = APP_CONFIG.grist.tables;
+    window.GristServiceContext?.watchContextTables?.(
+      [psTables.planningProject, psTables.projects, psTables.timeSegment, psTables.projectTeam],
+      () => {
+        reconcileAndLoad({ force: true });
+      }
+    );
 
     reconcileAndLoad({ force: true });
   }

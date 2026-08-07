@@ -111,9 +111,26 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (_error) {}
     }
 
+    async function fetchServiceScopedBusinessTable(tableName) {
+        const runtime = window.GristServiceContext;
+        if (runtime?.whenReady && runtime?.fetchContextTable) {
+            const context = await runtime.whenReady();
+            const hasCompleteContext = Boolean(
+                context?.ready &&
+                !context?.error &&
+                context?.selectedService &&
+                context?.currentProject
+            );
+            if (hasCompleteContext) {
+                return runtime.fetchContextTable(tableName);
+            }
+        }
+        return grist.docApi.fetchTable(tableName);
+    }
+
     function fetchEmittersTable() {
         if (!emittersTableFetchPromise) {
-            emittersTableFetchPromise = grist.docApi.fetchTable(EMETTEURS_TABLE)
+            emittersTableFetchPromise = fetchServiceScopedBusinessTable(EMETTEURS_TABLE)
                 .finally(() => {
                     emittersTableFetchPromise = null;
                 });
@@ -2623,8 +2640,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function populateEmittersSelection() {
         const container = document.getElementById('emitters-selection-container');
-        container.innerHTML = '';
-
+        // La liste précédente reste affichée le temps de la lecture : la vider avant
+        // d'avoir les nouvelles données ferait s'effondrer la hauteur de l'étape et
+        // renverrait l'utilisateur en haut du formulaire.
         const emitterTable = await fetchEmittersTable();
 
         function normalizeEmitterName(v) {
@@ -2646,6 +2664,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const emitters = Array.from(map.values())
             .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
+        container.innerHTML = '';
         emitters.forEach(em => {
             const label = document.createElement('label');
             label.className = 'checkbox-item';
@@ -2854,16 +2873,31 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    grist.ready();
+    grist.ready({ requiredAccess: "full" });
     renderDopSelect();
     loadDopRegistry();
     window.addEventListener('storage', (event) => {
         if (event.key === DOP_DATA_CHANGE_STORAGE_KEY) scheduleDopRegistryReload();
     });
-    window.addEventListener('focus', scheduleDopRegistryReload);
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') scheduleDopRegistryReload();
-    });
+    // Le référentiel DOP vit dans Emetteurs. Plutôt que de relire à chaque retour de
+    // focus ou d'onglet — la table n'avait presque jamais bougé —, on se branche sur
+    // le contexte partagé : il ne prévient que si la table a réellement changé, et il
+    // relit déjà de lui-même au retour de focus et sur signal Grist. La première
+    // livraison correspond au chargement initial déjà fait par loadDopRegistry().
+    window.GristServiceContext?.watchContextTables?.(
+        [EMETTEURS_TABLE, 'Team', 'Projets2'],
+        ({ tables }) => {
+            if (tables.includes(EMETTEURS_TABLE)) scheduleDopRegistryReload();
+            if (tables.includes('Team')) {
+                // L'étape « équipe » liste l'annuaire : une arrivée ou un départ
+                // saisi dans gestion-equipe doit s'y voir sans rechargement.
+                void populateTeamSelection();
+            }
+            if (tables.includes('Projets2')) {
+                void refreshProjectTypeDocSuggestions();
+            }
+        }
+    );
     populateTeamSelection();
     initDocumentsSection();
     populateEmittersSelection();

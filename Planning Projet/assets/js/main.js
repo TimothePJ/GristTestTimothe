@@ -61,6 +61,7 @@ let toolbarBound = false;
 let pendingRefreshOptions = null;
 let refreshQueuePromise = null;
 let resolveRefreshQueue = null;
+let planningDataRefreshBound = false;
 let planningServiceRefreshBound = false;
 let cachedPlanningRows = null;
 let cachedProjectAvancementConfigs = [];
@@ -1464,31 +1465,16 @@ function bindPlanningLifecycleRefresh() {
   if (planningLifecycleRefreshBound || HEADER_ONLY_EMBEDDED_MODE) return;
   planningLifecycleRefreshBound = true;
 
+  // Au retour sur le widget on ne recharge plus le planning : un rechargement
+  // aveugle renvoie l'utilisateur en haut de la liste et relance une
+  // synchronisation d'écriture alors que rien n'a forcément bougé. On se limite
+  // ici à réparer un état dégradé (liste de projets vide, sélection perdue) ; si
+  // la sélection a effectivement changé, le changement de projet déclenche
+  // lui-même le rechargement.
   const requestIfDue = async () => {
-    const projectResult = await refreshProjectRegistryFromGrist({
+    await refreshProjectRegistryFromGrist({
       notify: true,
       clearInvalid: true,
-    });
-    if (projectResult.changed) {
-      return;
-    }
-    if (!state.selectedProject) {
-      return;
-    }
-    const selectedProjectIsRendered =
-      lastRenderedProject === state.selectedProject &&
-      Array.isArray(cachedPlanningRows);
-    if (
-      selectedProjectIsRendered &&
-      lastAutoSyncProject === state.selectedProject &&
-      Date.now() - lastAutoSyncAt < PLANNING_AUTO_SYNC_INTERVAL_MS
-    ) {
-      return;
-    }
-    void refreshPlanning({
-      sync: true,
-      forceLoad: true,
-      reason: "widget-resume",
     });
   };
 
@@ -1509,6 +1495,26 @@ function bindPlanningLifecycleRefresh() {
       scheduleRequest();
     }
   });
+}
+
+// Le planning est alimenté par quatre tables, toutes éditées depuis d'autres
+// widgets : le planning lui-même, la liste des projets, les références et la
+// liste des plans. Une modification doit s'afficher ici sans rechargement.
+function bindPlanningDataRefresh() {
+  if (planningDataRefreshBound || HEADER_ONLY_EMBEDDED_MODE) return;
+  const serviceContext = window.GristServiceContext;
+  if (typeof serviceContext?.watchContextTables !== "function") return;
+
+  planningDataRefreshBound = true;
+  serviceContext.watchContextTables(
+    ["Planning_Projet", "Projets2", "References2", "ListePlan_NDC_COF"],
+    ({ tables }) => {
+      void refreshPlanning({
+        forceLoad: true,
+        reason: `donnees-modifiees:${tables.join(",")}`,
+      });
+    }
+  );
 }
 
 function bindPlanningServiceRefresh() {
@@ -1595,6 +1601,7 @@ async function bootstrap() {
     });
     bindPlanningLifecycleRefresh();
     bindPlanningServiceRefresh();
+    bindPlanningDataRefresh();
 
     await refreshPlanning({
       sync: true,

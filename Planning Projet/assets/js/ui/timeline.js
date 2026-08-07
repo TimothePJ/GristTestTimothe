@@ -27,7 +27,6 @@ let referenceDetailsDialogEl = null;
 let referenceDetailsRefreshInFlight = false;
 let referenceDetailsRefreshPending = false;
 let referenceDetailsLifecycleBound = false;
-let referenceDetailsMidnightTimer = 0;
 let stickyAxisBound = false;
 let stickyAxisRafPending = false;
 let axisLeftFillerEl = null;
@@ -2239,21 +2238,10 @@ async function refreshOpenReferenceDetailsDialog() {
   }
 }
 
-function scheduleReferenceDetailsMidnightRefresh() {
-  if (referenceDetailsMidnightTimer) {
-    window.clearTimeout(referenceDetailsMidnightTimer);
-  }
-
-  const now = new Date();
-  const nextMidnight = new Date(now);
-  nextMidnight.setHours(24, 0, 1, 0);
-  referenceDetailsMidnightTimer = window.setTimeout(() => {
-    referenceDetailsMidnightTimer = 0;
-    void refreshOpenReferenceDetailsDialog();
-    scheduleReferenceDetailsMidnightRefresh();
-  }, Math.max(1000, nextMidnight.getTime() - now.getTime()));
-}
-
+// Le dialog "Détails références" ne se recharge plus ni sur minuterie ni au
+// simple retour de focus : ces relectures repartaient chercher Grist sans
+// qu'aucune donnée n'ait bougé. Le signal d'écriture inter-widgets (storage)
+// reste le seul déclencheur, complété par la réouverture du dialog.
 function bindReferenceDetailsLifecycleRefresh() {
   if (referenceDetailsLifecycleBound || typeof window === "undefined") return;
   referenceDetailsLifecycleBound = true;
@@ -2263,15 +2251,6 @@ function bindReferenceDetailsLifecycleRefresh() {
       void refreshOpenReferenceDetailsDialog();
     }
   });
-  window.addEventListener("focus", () => {
-    void refreshOpenReferenceDetailsDialog();
-  });
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {
-      void refreshOpenReferenceDetailsDialog();
-    }
-  });
-  scheduleReferenceDetailsMidnightRefresh();
 }
 
 function renderReferenceDetailsBody(dialog, data = {}) {
@@ -5863,6 +5842,30 @@ function isUsableTimelineWindow(range) {
   );
 }
 
+// Mémorise le défilement avant un re-rendu : vis-timeline reconstruit ses
+// panneaux et la hauteur du contenu passe transitoirement à zéro, ce qui ramène
+// #timelineWrapper (et la page) en haut et fait perdre à l'utilisateur la ligne
+// qu'il regardait.
+function capturePlanningScroll() {
+  const scroller = document.scrollingElement || document.documentElement;
+  const panes = [document.getElementById("timelineWrapper")];
+  const documentTop = scroller ? scroller.scrollTop : 0;
+  const paneTops = panes.map((pane) => (pane instanceof HTMLElement ? pane.scrollTop : 0));
+
+  return () => {
+    const restore = () => {
+      if (scroller) scroller.scrollTop = documentTop;
+      panes.forEach((pane, index) => {
+        if (pane instanceof HTMLElement) pane.scrollTop = paneTops[index];
+      });
+    };
+    // Une fois tout de suite, une fois après la mise en page : vis-timeline ne
+    // fige la hauteur de ses groupes qu'à la frame suivante.
+    restore();
+    requestAnimationFrame(restore);
+  };
+}
+
 export function renderPlanningTimeline(timelineData = {}) {
   lastPlanningTimelineData = {
     groups: timelineData.groups || [],
@@ -5898,6 +5901,9 @@ export function renderPlanningTimeline(timelineData = {}) {
   ) {
     return;
   }
+  // Sur changement de projet, repartir du haut est le comportement attendu :
+  // on ne mémorise le défilement que pour un rafraîchissement de données.
+  const restorePlanningScroll = shouldResetViewport ? null : capturePlanningScroll();
   const previousWindow = timelineInstance?.getWindow?.() || null;
 
   // Création de l'instance une seule fois
@@ -6062,6 +6068,7 @@ export function renderPlanningTimeline(timelineData = {}) {
 
     updateDateRangeDisplay();
     updateNavCenterButtonLabel();
+    restorePlanningScroll?.();
     requestStickyAxisSync();
     queuePlanningViewportSettled(settleToken);
   });

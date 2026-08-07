@@ -6,6 +6,8 @@
   <title>MS Project</title>
 
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <script src="../shared/service-context-core.js"></script>
+  <script src="../shared/grist-service-context.js"></script>
   <script src="https://unpkg.com/vis-timeline/standalone/umd/vis-timeline-graph2d.min.js"></script>
   <link
     rel="stylesheet"
@@ -36,7 +38,7 @@
 
     <div class="filters">
       <label for="projectDropdown" class="toolbar-label">Projet :</label>
-      <select id="projectDropdown" disabled>
+      <select id="projectDropdown" data-grist-project-controller="true" disabled>
         <option value="">Choisir un projet</option>
       </select>
     </div>

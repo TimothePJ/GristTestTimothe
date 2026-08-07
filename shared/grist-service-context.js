@@ -7,6 +7,13 @@
     console.error("GristServiceContextCore est introuvable.");
     return;
   }
+  const integrationConfig = window.GristServiceContextConfig || {};
+  const integrationMode = ["context-only", "rest-first"].includes(integrationConfig.mode)
+    ? integrationConfig.mode
+    : "automatic";
+  const isContextOnlyIntegration = integrationMode === "context-only";
+  const isAutomaticIntegration = integrationMode === "automatic";
+  const useFullRestByDefault = integrationMode === "rest-first";
 
   const state = {
     ready: false,
@@ -33,7 +40,13 @@
   const REST_FILTER_MAX_ENCODED_LENGTH = 1800;
   const REST_MAX_CONCURRENCY = 3;
   const REST_ADMIN_MAX_CHUNKS = 12;
-  const DEFAULT_WATCH_POLL_INTERVAL_MS = 30000;
+  // Aucune interrogation périodique : un rechargement remet le widget à zéro
+  // (défilement, sélection, graphiques). Les watchers se rafraîchissent sur
+  // évènement — écriture locale, changement de projet ou de service, retour de
+  // focus — et un widget qui veut vraiment un timer passe son propre intervalle.
+  const DEFAULT_WATCH_POLL_INTERVAL_MS = 0;
+  // Regroupement des livraisons rapprochées avant de redessiner le widget.
+  const DEFAULT_WATCH_DEBOUNCE_MS = 100;
   const ACCESS_TABLES = new Set(["Team", core.PROJECTS_TABLE, core.PROJECT_TEAM_TABLE]);
   const listeners = new Set();
   const recordSubscribers = new Set();
@@ -55,6 +68,7 @@
   const rawTableCache = new Map();
   const contextTableCache = new Map();
   const contextTableEpochs = new Map();
+  const restUnavailableTables = new Map();
   const contextWatchers = new Set();
   let accessTokenEntry = null;
   let accessTokenPromise = null;
@@ -288,6 +302,23 @@
     logger.call(console, label, details);
   }
 
+  // Le chemin « écriture -> réveil du widget -> rendu » est invisible depuis la
+  // console, et les tests ne peuvent pas le reproduire : ils simulent Grist. Cette
+  // trace est muette par défaut et s'allume depuis la console du navigateur :
+  //   localStorage.setItem("grist.debug-refresh", "1")  puis rechargement.
+  let refreshDebugEnabled = null;
+  function isRefreshDebugEnabled() {
+    if (refreshDebugEnabled === null) {
+      refreshDebugEnabled = readStorage("grist.debug-refresh") === "1";
+    }
+    return refreshDebugEnabled;
+  }
+
+  function logRefresh(step, details = {}) {
+    if (!isRefreshDebugEnabled()) return;
+    console.info(`[GristRefresh] ${step}`, details);
+  }
+
   function invalidateRawTableCache(tableName) {
     const normalizedTableName = core.toText(tableName);
     if (normalizedTableName) rawTableCache.delete(normalizedTableName);
@@ -347,7 +378,34 @@
     invalidateRawTableCache(normalizedTableName);
   }
 
-  function getContextTableCacheKey(tableName, contextSnapshot) {
+  function normalizeExplicitRestFilter(restFilter) {
+    if (!restFilter || typeof restFilter !== "object" || Array.isArray(restFilter)) return null;
+    const normalizedEntries = Object.entries(restFilter)
+      .map(([column, rawValues]) => {
+        const normalizedColumn = core.toText(column);
+        const sourceValues = Array.isArray(rawValues) ? rawValues : [rawValues];
+        const values = sourceValues.filter((value, index) => (
+          value != null &&
+          value !== "" &&
+          sourceValues.findIndex((candidate) => Object.is(candidate, value)) === index
+        ));
+        return [normalizedColumn, values];
+      })
+      .filter(([column, values]) => column && values.length)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return normalizedEntries.length ? Object.fromEntries(normalizedEntries) : null;
+  }
+
+  function normalizeRequiredColumns(requiredColumns) {
+    const source = Array.isArray(requiredColumns) ? requiredColumns : [requiredColumns];
+    return core.uniqueExactValues(source.map(core.toText).filter(Boolean)).sort();
+  }
+
+  function getContextTableCacheKey(
+    tableName,
+    contextSnapshot,
+    { fullTable = false, restFilter = null, requiredColumns = [] } = {}
+  ) {
     const multiProject = isMultiProjectContext();
     const projects = multiProject
       ? contextSnapshot.allowedProjects
@@ -360,6 +418,9 @@
     ));
     return JSON.stringify({
       tableName: core.toText(tableName),
+      fullTable: Boolean(fullTable),
+      restFilter: normalizeExplicitRestFilter(restFilter),
+      requiredColumns: normalizeRequiredColumns(requiredColumns),
       service: core.normalizeService(contextSnapshot.selectedService),
       multiProject,
       projectScope,
@@ -378,7 +439,13 @@
   function warnRestFallback() {
     if (restFallbackWarningShown) return;
     restFallbackWarningShown = true;
-    console.warn("Chargement REST filtré indisponible ; repli local Grist activé.");
+    console.warn("Chargement REST indisponible ; repli local Grist activé.");
+  }
+
+  function markRestTableUnavailable(tableName, reason = "REST indisponible pour cette table.") {
+    const normalizedTableName = core.toText(tableName);
+    if (!normalizedTableName) return;
+    restUnavailableTables.set(normalizedTableName, core.toText(reason) || "REST indisponible pour cette table.");
   }
 
   function invalidateAccessToken() {
@@ -431,6 +498,10 @@
         expiresAt: Date.now() + ttlMsecs,
         renewBeforeMs,
       };
+      console.info("[GristData][JETON REST OK]", {
+        lectureSeule: true,
+        validiteMs: ttlMsecs,
+      });
       return accessTokenEntry.access;
     }).catch((error) => {
       if (error?.isContextRestUnavailable) throw error;
@@ -441,12 +512,21 @@
     return accessTokenPromise;
   }
 
+  function readResponseEtag(response) {
+    try {
+      return core.toText(response?.headers?.get?.("ETag")) || "";
+    } catch (_error) {
+      return "";
+    }
+  }
+
   async function fetchRestRecords(tableName, filter = null, {
     signal = null,
     authRetry = false,
     limit = null,
     cacheMode = "",
     accessOverride = null,
+    ifNoneMatch = "",
   } = {}) {
     if (typeof window.fetch !== "function") {
       throw createRestUnavailableError("API fetch indisponible.");
@@ -461,9 +541,14 @@
     if (normalizedLimit > 0) query.push(`limit=${normalizedLimit}`);
     query.push(`auth=${encodeURIComponent(access.token)}`);
     const url = `${baseUrl}/tables/${encodeURIComponent(tableName)}/records?${query.join("&")}`;
+    const conditionalTag = core.toText(ifNoneMatch);
     const fetchOptions = {};
     if (signal) fetchOptions.signal = signal;
-    if (cacheMode) fetchOptions.cache = cacheMode;
+    // Une revalidation doit court-circuiter le cache du navigateur, sinon celui-ci
+    // peut transformer le 304 du serveur en 200 servi localement.
+    const effectiveCacheMode = conditionalTag ? "no-store" : cacheMode;
+    if (effectiveCacheMode) fetchOptions.cache = effectiveCacheMode;
+    if (conditionalTag) fetchOptions.headers = { "If-None-Match": conditionalTag };
     let response;
     try {
       response = await window.fetch(
@@ -485,8 +570,14 @@
           limit,
           cacheMode,
           accessOverride: null,
+          ifNoneMatch: conditionalTag,
         });
       }
+    }
+    // 304 : le serveur confirme que la tranche demandée n'a pas changé. Aucun corps
+    // n'est transmis ; l'appelant réutilise les enregistrements qu'il détient déjà.
+    if (conditionalTag && Number(response?.status) === 304) {
+      return { notModified: true, etag: conditionalTag, records: null };
     }
     if (!response?.ok) {
       throw createRestUnavailableError("Réponse REST Grist en erreur.", {
@@ -503,6 +594,7 @@
     if (!envelope || !Array.isArray(envelope.records)) {
       throw createRestUnavailableError("Réponse REST Grist invalide.");
     }
+    envelope.etag = readResponseEtag(response);
     return envelope;
   }
 
@@ -534,8 +626,9 @@
     }).then((envelope) => {
       if (!envelope.records.length) {
         throw createRestUnavailableError(
-          "Le serveur Grist ne transmet pas l'identite du widget au jeton REST. " +
-          "Une mise a jour du serveur Grist est necessaire."
+          "Le jeton REST temporaire ne voit aucune ligne de Projets2. " +
+          "REST est indisponible ou sa visibilite est limitee (serveur ancien possible) ; " +
+          "le repli RPC est active."
         );
       }
       logDataPath("SONDE REST OK", core.PROJECTS_TABLE, {
@@ -573,16 +666,15 @@
     if (probe.records.length) return null;
 
     const raw = await fetchRawTableCached(tableName);
-    if (!core.tableToRows(raw).length) return null;
-
-    const error = createRestUnavailableError(
-      `Le serveur Grist ne transmet pas l'identite du widget au jeton REST pour la table ${tableName}. ` +
-      "Une mise a jour du serveur Grist est necessaire."
+    const rawRows = core.tableToRows(raw);
+    const hasRpcColumnMetadata = Boolean(
+      raw &&
+      typeof raw === "object" &&
+      !Array.isArray(raw) &&
+      Object.keys(raw).some((column) => column !== "id")
     );
-    if (restVisibilityEntry?.access === access) {
-      restVisibilityEntry.status = "unavailable";
-      restVisibilityEntry.error = error;
-    }
+    if (!rawRows.length && !hasRpcColumnMetadata) return null;
+
     return raw;
   }
 
@@ -602,13 +694,44 @@
     return results;
   }
 
-  function buildContextFilterPlan(tableName, contextSnapshot) {
-    const spec = core.buildContextTableFilter(tableName, {
-      selectedService: contextSnapshot.selectedService,
-      currentProject: contextSnapshot.currentProject,
-      allowedProjects: contextSnapshot.allowedProjects,
-      multiProject: isMultiProjectContext(),
-    });
+  function buildContextFilterPlan(
+    tableName,
+    contextSnapshot,
+    { fullTable = false, restFilter = null } = {}
+  ) {
+    const explicitFilter = normalizeExplicitRestFilter(restFilter);
+    if (restFilter != null) {
+      return {
+        supported: true,
+        complete: Boolean(explicitFilter),
+        tableName: core.toText(tableName),
+        projectColumn: "",
+        filter: explicitFilter,
+        filters: explicitFilter ? [explicitFilter] : [],
+        unfiltered: false,
+        fullTable: false,
+        explicitFilter,
+        mode: "rest-explicit",
+      };
+    }
+    const spec = fullTable
+      ? {
+          supported: true,
+          complete: true,
+          tableName: core.toText(tableName),
+          projectColumn: "",
+          filter: null,
+          unfiltered: true,
+          fullTable: true,
+          mode: core.TABLE_POLICY_MODES.REST_FULL,
+        }
+      : core.buildContextTableFilter(tableName, {
+          selectedService: contextSnapshot.selectedService,
+          currentProject: contextSnapshot.currentProject,
+          allowedProjects: contextSnapshot.allowedProjects,
+          multiProject: isMultiProjectContext(),
+        });
+    if (spec.unfiltered) return { ...spec, filters: [null] };
     if (!spec.complete || !spec.filter) return { ...spec, filters: [] };
 
     let filters = core.splitContextTableFilter(spec.filter, spec.projectColumn, {
@@ -621,21 +744,97 @@
     return { ...spec, filters };
   }
 
-  async function loadRestContextTable(tableName, contextSnapshot, filterPlan, { signal = null } = {}) {
+  // Les ETags mémorisés ne sont réutilisables que si le découpage du filtre est
+  // rigoureusement identique : les lots sont appariés par position.
+  function getReusableRestChunks(previousRest, filters) {
+    const signature = JSON.stringify(filters || []);
+    if (
+      !previousRest ||
+      previousRest.signature !== signature ||
+      !Array.isArray(previousRest.chunks) ||
+      previousRest.chunks.length !== (filters || []).length ||
+      !previousRest.chunks.every((chunk) => core.toText(chunk?.etag))
+    ) {
+      return { signature, chunks: null };
+    }
+    return { signature, chunks: previousRest.chunks };
+  }
+
+  async function loadRestContextTable(
+    tableName,
+    contextSnapshot,
+    filterPlan,
+    {
+      signal = null,
+      requiredColumns = [],
+      previousRest = null,
+      previousTable = null,
+    } = {}
+  ) {
     const access = await ensureRestDocumentVisibility();
-    const envelopes = await mapWithConcurrency(
+    const { signature, chunks: reusableChunks } = getReusableRestChunks(
+      previousRest,
+      filterPlan.filters
+    );
+    const responses = await mapWithConcurrency(
       filterPlan.filters,
       REST_MAX_CONCURRENCY,
-      (filter) => fetchRestRecords(tableName, filter, { signal, accessOverride: access })
+      (filter, index) => fetchRestRecords(tableName, filter, {
+        signal,
+        accessOverride: access,
+        ifNoneMatch: reusableChunks?.[index]?.etag || "",
+      })
     );
+    const chunks = responses.map((response, index) => (
+      response?.notModified && reusableChunks?.[index]
+        ? reusableChunks[index]
+        : {
+            etag: core.toText(response?.etag) || "",
+            records: Array.isArray(response?.records) ? response.records : [],
+          }
+    ));
+    const nextRest = { signature, chunks };
+    const allNotModified = Boolean(reusableChunks) &&
+      responses.length > 0 &&
+      responses.every((response) => response?.notModified);
+
+    // Rien n'a bougé côté serveur : on réutilise la table déjà calculée, sans
+    // retélécharger ni refiltrer, et sans re-notifier les abonnés.
+    if (allNotModified && previousTable) {
+      logDataPath("REST INCHANGE", tableName, {
+        requetes: responses.length,
+        lignesUtiles: getTableRowCount(previousTable),
+        service: contextSnapshot.selectedService,
+        projet: contextSnapshot.currentProject?.number || contextSnapshot.currentProject?.name || "multi-projets",
+      });
+      return {
+        table: previousTable,
+        source: "rest",
+        rest: nextRest,
+        notModified: true,
+      };
+    }
+
+    const envelopes = chunks.map((chunk) => ({ records: chunk.records }));
     const merged = core.mergeRestRecordEnvelopes(envelopes);
     if (!merged.records.length) {
       const rawFallback = await verifyEmptyRestTable(tableName, access, { signal });
       if (rawFallback) {
+        if (getTableRowCount(rawFallback) > 0) {
+          markRestTableUnavailable(
+            tableName,
+            "REST vide alors que fetchTable contient des lignes."
+          );
+        }
         warnRestFallback();
-        const table = filterTableData(rawFallback, tableName, contextSnapshot);
+        const table = filterTableDataForPlan(
+          rawFallback,
+          tableName,
+          contextSnapshot,
+          filterPlan
+        );
         logDataPath("FALLBACK FETCHTABLE", tableName, {
-          raison: "REST ne voit aucune ligne alors que la table Grist contient des donnees.",
+          raison: "REST vide ; fetchTable requis pour conserver les lignes ou le schema Grist.",
           lignesUtiles: getTableRowCount(table),
         });
         return {
@@ -644,24 +843,70 @@
         };
       }
     }
+    const normalizedRequiredColumns = normalizeRequiredColumns(requiredColumns);
+    const missingRequiredColumns = normalizedRequiredColumns.filter((column) => (
+      !merged.records.some((record) => (
+        record?.fields && Object.prototype.hasOwnProperty.call(record.fields, column)
+      ))
+    ));
+    if (merged.records.length && missingRequiredColumns.length) {
+      markRestTableUnavailable(
+        tableName,
+        "Reponse REST inexploitable : colonne requise absente."
+      );
+      const rawFallback = await fetchRawTableCached(tableName);
+      const table = filterTableDataForPlan(
+        rawFallback,
+        tableName,
+        contextSnapshot,
+        filterPlan
+      );
+      warnRestFallback();
+      logDataPath("FALLBACK FETCHTABLE", tableName, {
+        raison: "Reponse REST inexploitable : colonne requise absente.",
+        colonnesAbsentes: missingRequiredColumns,
+        lignesCompletes: getTableRowCount(rawFallback),
+        lignesUtiles: getTableRowCount(table),
+      });
+      return {
+        table,
+        source: "fallback",
+      };
+    }
     const table = core.restRecordsToTableData(merged);
-    const filteredTable = filterTableData(table, tableName, contextSnapshot);
-    logDataPath("REST FILTRE", tableName, {
+    const filteredTable = filterTableDataForPlan(
+      table,
+      tableName,
+      contextSnapshot,
+      filterPlan
+    );
+    logDataPath(filterPlan.unfiltered ? "REST COMPLET" : "REST FILTRE", tableName, {
       lignesRecues: merged.records.length,
       lignesUtiles: getTableRowCount(filteredTable),
       requetes: envelopes.length,
+      revalidations: responses.filter((response) => response?.notModified).length,
+      filtreColonnes: Object.keys(filterPlan.explicitFilter || filterPlan.filter || {}),
       service: contextSnapshot.selectedService,
       projet: contextSnapshot.currentProject?.number || contextSnapshot.currentProject?.name || "multi-projets",
     });
     return {
       table: filteredTable,
       source: "rest",
+      rest: nextRest,
     };
   }
 
-  async function loadFallbackContextTable(tableName, contextSnapshot, reason = "REST indisponible") {
+  async function loadFallbackContextTable(
+    tableName,
+    contextSnapshot,
+    reason = "REST indisponible",
+    { fullTable = false, explicitFilter = null } = {}
+  ) {
     const raw = await fetchRawTableCached(tableName);
-    const table = filterTableData(raw, tableName, contextSnapshot);
+    const table = filterTableDataForPlan(raw, tableName, contextSnapshot, {
+      fullTable,
+      explicitFilter,
+    });
     logDataPath("FALLBACK FETCHTABLE", tableName, {
       raison: reason,
       lignesCompletes: getTableRowCount(raw),
@@ -677,11 +922,17 @@
     forceRefresh = false,
     ttl = CONTEXT_TABLE_CACHE_TTL_MS,
     signal = null,
+    fullTable = false,
+    restFilter = null,
+    requiredColumns = [],
   } = {}) {
     await initialize();
     const normalizedTableName = core.toText(tableName);
     const contextSnapshot = getPublicState();
-    const filterPlan = buildContextFilterPlan(normalizedTableName, contextSnapshot);
+    const filterPlan = buildContextFilterPlan(normalizedTableName, contextSnapshot, {
+      fullTable,
+      restFilter,
+    });
 
     if (filterPlan.supported && !filterPlan.complete) {
       return { table: emptyTableData(), source: "empty", stale: false };
@@ -690,18 +941,25 @@
       return loadFallbackContextTable(
         normalizedTableName,
         contextSnapshot,
-        "Cette table n'a pas de filtre REST configure."
+        "Cette table n'a pas de politique REST configuree.",
+        { fullTable: filterPlan.fullTable, explicitFilter: filterPlan.explicitFilter }
       );
     }
 
-    const cacheKey = getContextTableCacheKey(normalizedTableName, contextSnapshot);
+    const cacheKey = getContextTableCacheKey(normalizedTableName, contextSnapshot, {
+      fullTable: filterPlan.fullTable,
+      restFilter: filterPlan.explicitFilter,
+      requiredColumns,
+    });
     const cached = contextTableCache.get(cacheKey);
     if (!forceRefresh && cached?.value && isFreshTimestamp(cached.loadedAt, ttl)) {
       logDataPath("CACHE", normalizedTableName, {
         source: cached.value.source,
         lignes: getTableRowCount(cached.value.table),
       });
-      return cached.value;
+      // Un service depuis le cache reste une livraison : `notModified` ne doit pas
+      // faire sauter la notification des abonnés.
+      return { ...cached.value, notModified: false };
     }
     if (cached?.promise) return cached.promise;
 
@@ -712,32 +970,52 @@
       value: null,
       loadedAt: 0,
       promise: null,
+      rest: null,
     };
     const promise = (async () => {
       let loaded;
-      if (hasRestApiSupport()) {
+      const unavailableReason = restUnavailableTables.get(normalizedTableName);
+      if (unavailableReason) {
+        loaded = await loadFallbackContextTable(
+          normalizedTableName,
+          contextSnapshot,
+          unavailableReason,
+          { fullTable: filterPlan.fullTable, explicitFilter: filterPlan.explicitFilter }
+        );
+      } else if (hasRestApiSupport()) {
         try {
           loaded = await loadRestContextTable(
             normalizedTableName,
             contextSnapshot,
             filterPlan,
-            { signal }
+            {
+              signal,
+              requiredColumns,
+              previousRest: entry.rest || null,
+              previousTable: entry.value?.table || null,
+            }
           );
         } catch (error) {
           if (error?.name === "AbortError") throw error;
           if (!error?.isContextRestUnavailable) throw error;
+          markRestTableUnavailable(
+            normalizedTableName,
+            error?.message || "REST indisponible"
+          );
           warnRestFallback();
           loaded = await loadFallbackContextTable(
             normalizedTableName,
             contextSnapshot,
-            error?.message || "REST indisponible"
+            error?.message || "REST indisponible",
+            { fullTable: filterPlan.fullTable, explicitFilter: filterPlan.explicitFilter }
           );
         }
       } else {
         loaded = await loadFallbackContextTable(
           normalizedTableName,
           contextSnapshot,
-          "fetch ou getAccessToken est indisponible."
+          "fetch ou getAccessToken est indisponible.",
+          { fullTable: filterPlan.fullTable, explicitFilter: filterPlan.explicitFilter }
         );
       }
 
@@ -745,10 +1023,18 @@
         requestEpoch !== getContextTableEpoch(normalizedTableName);
       const value = stale
         ? { table: emptyTableData(), source: loaded.source, stale: true }
-        : { ...loaded, stale: false };
+        : {
+            table: loaded.table,
+            source: loaded.source,
+            stale: false,
+            notModified: Boolean(loaded.notModified),
+          };
       if (!stale) {
         entry.value = value;
         entry.loadedAt = Date.now();
+        // Un repli casse la chaîne de revalidation : le prochain passage REST
+        // repart d'un chargement complet.
+        entry.rest = loaded.rest || null;
       }
       return value;
     })().finally(() => {
@@ -1081,6 +1367,7 @@
   }
 
   function mountSelector() {
+    if (!isAutomaticIntegration) return;
     if (!document.body) return;
     injectStyles();
     const { select, badge } = getOrCreateSelector();
@@ -1147,6 +1434,7 @@
   }
 
   function applyReadonlyUi(contextSnapshot = getPublicState()) {
+    if (!isAutomaticIntegration) return;
     if (!document.body) return;
     const accessMode = contextSnapshot?.accessMode || getCurrentAccessMode();
     const readOnly = accessMode !== "editable";
@@ -1222,6 +1510,23 @@
       normalizedTableName,
       contextSnapshot.currentProject
     );
+  }
+
+  function filterTableDataForPlan(
+    raw,
+    tableName = "",
+    contextSnapshot = getPublicState(),
+    filterPlan = {}
+  ) {
+    if (filterPlan.fullTable) return raw;
+    const contextFiltered = filterTableData(raw, tableName, contextSnapshot);
+    const explicitFilter = normalizeExplicitRestFilter(filterPlan.explicitFilter);
+    if (!explicitFilter) return contextFiltered;
+    return core.filterRawTable(contextFiltered, (row) => (
+      Object.entries(explicitFilter).every(([column, values]) => (
+        values.some((expectedValue) => Object.is(row?.[column], expectedValue))
+      ))
+    ));
   }
 
   function filterRecords(records, contextSnapshot = getPublicState()) {
@@ -1316,6 +1621,50 @@
     });
   }
 
+  // Empreinte des lignes livrées : un re-rendu réinitialise le défilement, la
+  // sélection et les graphiques du widget. Tant que le contenu et le contexte sont
+  // identiques, l'abonné ne doit rien recevoir.
+  function computeWatcherRowsSignature(rows) {
+    const list = Array.isArray(rows) ? rows : [];
+    let hash = 0x811c9dc5;
+    const mix = (value) => {
+      const text = value == null ? "" : String(value);
+      for (let index = 0; index < text.length; index += 1) {
+        hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193);
+      }
+      hash = Math.imul(hash ^ 0x1f, 0x01000193);
+    };
+
+    list.forEach((row) => {
+      Object.keys(row || {}).sort().forEach((key) => {
+        mix(key);
+        mix(row[key]);
+      });
+    });
+    return `${list.length}:${(hash >>> 0).toString(36)}`;
+  }
+
+  function shouldDeliverWatcherRows(watcher, rows, source) {
+    const contextSnapshot = getPublicState();
+    const signature = [
+      source,
+      contextSnapshot.currentProject?.number || "",
+      core.normalizeService(contextSnapshot.selectedService),
+      computeWatcherRowsSignature(rows),
+    ].join("|");
+
+    if (watcher.deliveredSignature === signature) {
+      logRefresh("livraison supprimee : contenu identique", {
+        table: watcher.tableName,
+        lignes: rows.length,
+      });
+      return false;
+    }
+    watcher.deliveredSignature = signature;
+    logRefresh("livraison au widget", { table: watcher.tableName, lignes: rows.length, source });
+    return true;
+  }
+
   function ensureWatcherPolling(watcher) {
     if (!watcher.active || watcher.pollTimer || watcher.pollIntervalMs <= 0) return;
     watcher.pollTimer = window.setInterval(() => {
@@ -1324,24 +1673,45 @@
     }, watcher.pollIntervalMs);
   }
 
-  function ensureWatcherFallbackSubscription(watcher) {
-    if (!watcher.active || watcher.fallbackUnsubscribe) return;
-    watcher.fallbackUnsubscribe = subscribeToRecords((records, mappings, delivery) => {
-      if (!watcher.active) return;
-      const contextSnapshot = getPublicState();
-      const tableRows = core.tableToRows(filterTableData(
-        records,
-        watcher.tableName,
-        contextSnapshot
-      ));
-      return deliverContextWatcher(
-        watcher,
-        tableRows,
-        mappings,
-        delivery?.reason || "records",
-        "fallback"
-      );
-    });
+  // Grist pousse déjà les modifications du document vers chaque client ouvert :
+  // écouter ce flux ne coûte aucune requête, c'est le rafraîchissement le moins
+  // cher possible. Il sert de signal, jamais de source de données — la section
+  // hôte n'est plus forcément la table surveillée — donc le signal invalide les
+  // copies en cache puis relit la bonne table, quel que soit le mode de lecture.
+  // Le flux natif ne parle que de la table qui alimente la section hôte : réveiller
+  // les watchers des autres tables leur ferait relire pour rien. L'identifiant est
+  // résolu une fois ; s'il reste inconnu, on garde le comportement large.
+  let sectionTableIdPromise = null;
+  function getSectionTableId() {
+    if (sectionTableIdPromise) return sectionTableIdPromise;
+    sectionTableIdPromise = Promise.resolve()
+      .then(() => getGrist()?.selectedTable?.getTableId?.())
+      .then((tableId) => core.toText(tableId))
+      .catch(() => "");
+    return sectionTableIdPromise;
+  }
+
+  function ensureWatcherChangeSignal(watcher) {
+    if (!watcher.active || watcher.changeSignalUnsubscribe) return;
+    try {
+      // L'abonnement rejoue tout de suite le dernier lot connu : ce n'est pas un
+      // changement, le chargement initial du watcher vient de le couvrir.
+      let subscribing = true;
+      const unsubscribe = subscribeToRecords(() => {
+        if (subscribing || !watcher.active) return;
+        return getSectionTableId().then((sectionTableId) => {
+          if (!watcher.active) return;
+          if (sectionTableId && sectionTableId !== watcher.tableName) return;
+          // invalidateContextTable vide aussi la copie brute de la table.
+          invalidateContextTable(watcher.tableName);
+          return watcher.reload("records", { forceRefresh: true });
+        }).catch(() => {});
+      });
+      subscribing = false;
+      watcher.changeSignalUnsubscribe = unsubscribe;
+    } catch (_error) {
+      // onRecords indisponible : le widget se rafraîchit sur les autres évènements.
+    }
   }
 
   function watchContextTable(tableName, callback, {
@@ -1358,11 +1728,13 @@
       requestSequence: 0,
       version: 0,
       pollTimer: 0,
-      fallbackUnsubscribe: null,
+      changeSignalUnsubscribe: null,
       pollIntervalMs: Math.max(0, Number(pollIntervalMs) || 0),
+      deliveredSignature: null,
       reload: null,
     };
-    watcher.reload = async (reason = "refresh", options = {}) => {
+    watcher.reload = async (raison = "refresh", options = {}) => {
+      const reason = raison;
       if (!watcher.active) return;
       const requestSequence = ++watcher.requestSequence;
       const requestGeneration = selectionGeneration;
@@ -1375,11 +1747,25 @@
         requestSequence !== watcher.requestSequence ||
         requestGeneration !== selectionGeneration ||
         result.stale
-      ) return;
+      ) {
+        logRefresh("relecture abandonnee", {
+          table: watcher.tableName,
+          raison,
+          inactif: !watcher.active,
+          depassee: requestSequence !== watcher.requestSequence,
+          contexte_change: requestGeneration !== selectionGeneration,
+          perimee: Boolean(result.stale),
+        });
+        return;
+      }
 
       if (result.source === "rest") ensureWatcherPolling(watcher);
-      if (result.source === "fallback") ensureWatcherFallbackSubscription(watcher);
+      ensureWatcherChangeSignal(watcher);
+      // Le serveur a confirmé que rien n'a changé : inutile de re-livrer les mêmes
+      // lignes et de provoquer un re-rendu du widget.
+      if (result.notModified) return;
       const rows = core.tableToRows(result.table);
+      if (!shouldDeliverWatcherRows(watcher, rows, result.source)) return;
       await deliverContextWatcher(watcher, rows, null, reason, result.source);
     };
     contextWatchers.add(watcher);
@@ -1396,25 +1782,124 @@
       contextWatchers.delete(watcher);
       if (watcher.pollTimer) window.clearInterval(watcher.pollTimer);
       watcher.pollTimer = 0;
-      watcher.fallbackUnsubscribe?.();
-      watcher.fallbackUnsubscribe = null;
+      watcher.changeSignalUnsubscribe?.();
+      watcher.changeSignalUnsubscribe = null;
     };
   }
 
-  function refreshContextWatchers(tableNames = null, reason = "refresh") {
+  // Un widget affiche rarement une seule table : le tableau de bord Avancement
+  // croise les plans, le budget, le planning, l'équipe et les temps réels. Il
+  // déclare ici toutes les tables dont dépend son rendu, et son rendu est rappelé
+  // dès que l'une d'elles change — que le changement vienne de lui, d'un autre
+  // widget de la page, ou d'un autre utilisateur. Aucune minuterie n'est armée.
+  //
+  // Deux précautions valent pour tous les appelants, d'où leur place ici :
+  // les livraisons rapprochées sont regroupées en un seul rendu (un changement de
+  // projet réveille toutes les surveillances d'un coup), et la première livraison
+  // de chaque table est ignorée, car le widget vient de dessiner ces données.
+  function watchContextTables(tableNames, callback, {
+    debounceMs = DEFAULT_WATCH_DEBOUNCE_MS,
+    skipInitial = true,
+    forceRefresh = true,
+  } = {}) {
+    const requested = Array.isArray(tableNames) ? tableNames : [tableNames];
+    const uniqueTableNames = [...new Set(requested.map(core.toText).filter(Boolean))];
+    if (!uniqueTableNames.length || typeof callback !== "function") return () => {};
+
+    const delay = Math.max(0, Number(debounceMs) || 0);
+    let refreshTimer = 0;
+    let changedTables = new Set();
+    let stopped = false;
+
+    const runCallback = () => {
+      refreshTimer = 0;
+      if (stopped) return;
+      const tables = [...changedTables];
+      changedTables = new Set();
+      try {
+        callback({ tables });
+      } catch (error) {
+        console.warn("Rafraîchissement du widget impossible :", error);
+      }
+    };
+
+    const unsubscribers = uniqueTableNames.map((tableName) => {
+      let initialDeliveryConsumed = !skipInitial;
+      return watchContextTable(tableName, () => {
+        if (!initialDeliveryConsumed) {
+          initialDeliveryConsumed = true;
+          return;
+        }
+        changedTables.add(tableName);
+        if (refreshTimer) window.clearTimeout(refreshTimer);
+        refreshTimer = window.setTimeout(runCallback, delay);
+      }, { forceRefresh });
+    });
+
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      if (refreshTimer) window.clearTimeout(refreshTimer);
+      refreshTimer = 0;
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }
+
+  // Deux besoins distincts : après une écriture il faut court-circuiter le cache,
+  // alors qu'un retour de focus veut seulement une fraîcheur raisonnable et doit
+  // rester gratuit quand rien n'a eu le temps de changer.
+  function refreshContextWatchers(tableNames = null, reason = "refresh", { forceRefresh = true } = {}) {
     const tableList = tableNames == null
       ? []
       : (typeof tableNames === "string" ? [tableNames] : [...tableNames]);
     const selectedTables = tableNames == null
       ? null
       : new Set(tableList.map(core.toText).filter(Boolean));
-    return Promise.all([...contextWatchers]
-      .filter((watcher) => !selectedTables || selectedTables.has(watcher.tableName))
-      .map((watcher) => watcher.reload(reason, { forceRefresh: true }).catch((error) => {
+    const concerned = [...contextWatchers]
+      .filter((watcher) => !selectedTables || selectedTables.has(watcher.tableName));
+    logRefresh("reveil des surveillances", {
+      raison: reason,
+      tables: selectedTables ? [...selectedTables] : "toutes",
+      surveillances_enregistrees: contextWatchers.size,
+      surveillances_concernees: concerned.length,
+      tables_surveillees: [...contextWatchers].map((watcher) => watcher.tableName),
+    });
+    return Promise.all(concerned
+      .map((watcher) => watcher.reload(reason, { forceRefresh }).catch((error) => {
         if (error?.name !== "AbortError") {
           console.warn(`Actualisation de ${watcher.tableName} impossible.`);
         }
       })));
+  }
+
+  let dataSignalSequence = 0;
+  // Deux widgets côte à côte sur une page Grist sont deux iframes distinctes :
+  // l'écriture de l'un n'atteint pas l'autre. Ce signal reste dans le navigateur,
+  // ne coûte rien au serveur, et évite au voisin d'afficher un état périmé.
+  function signalDataChanged(modifiedTables) {
+    const tables = [...new Set(Array.from(modifiedTables || [], core.toText).filter(Boolean))];
+    if (!tables.length) return;
+    logRefresh("annonce aux widgets voisins", { tables });
+    writeStorage(core.DATA_CHANGED_STORAGE_KEY, JSON.stringify({
+      version: core.DATA_SIGNAL_VERSION,
+      at: Date.now(),
+      sequence: ++dataSignalSequence,
+      tables,
+    }));
+  }
+
+  // Une écriture périme trois choses : les copies locales des tables touchées, ce
+  // que ce widget affiche, et ce qu'affichent ses voisins. Le geste est le même
+  // quel que soit le mode d'intégration, d'où sa mise en commun.
+  async function synchronizeAfterMutation(modifiedTables, reason = "mutation") {
+    const touched = Array.from(modifiedTables || [], core.toText).filter(Boolean);
+    logRefresh("ecriture interceptee", { mode: integrationMode, tables: touched, raison: reason });
+    if (!touched.length) {
+      logRefresh("AUCUNE table reconnue dans l'action : aucun widget ne sera reveille", {});
+    }
+    modifiedTables.forEach(invalidateContextTable);
+    signalDataChanged(modifiedTables);
+    await refreshContextWatchers(modifiedTables, reason);
   }
 
   function subscribeToRecord(callback, ...args) {
@@ -1461,6 +1946,22 @@
     return () => listeners.delete(contextListener);
   }
 
+  async function collectContextRowsById(tableName, recordIds) {
+    const wanted = new Set([...recordIds].map(Number).filter((id) => id > 0));
+    const rowsById = new Map();
+    if (!wanted.size) return rowsById;
+    try {
+      const contextTable = await fetchContextTable(tableName);
+      core.tableToRows(contextTable).forEach((row) => {
+        const id = Number(row?.id);
+        if (wanted.has(id)) rowsById.set(id, row);
+      });
+    } catch (_error) {
+      // Contexte inexploitable : l'appelant retombera sur la table complète.
+    }
+    return rowsById;
+  }
+
   async function validateProtectedMutationTargets(actions, contextSnapshot) {
     const targetsByTable = new Map();
     (Array.isArray(actions) ? actions : []).forEach((action) => {
@@ -1475,12 +1976,18 @@
     const project = contextSnapshot?.currentProject;
     const projectNames = Array.isArray(project?.names) ? project.names : [];
     for (const [tableName, recordIds] of targetsByTable) {
-      const raw = await rawFetchTable(tableName);
-      const rowsById = new Map(
-        core.tableToRows(raw)
-          .filter((row) => Number(row?.id) > 0)
-          .map((row) => [Number(row.id), row])
-      );
+      // Les lignes visibles dans le contexte suffisent presque toujours : elles sont
+      // déjà chargées et filtrées. On ne retombe sur la table complète que pour les
+      // identifiants introuvables, afin de produire le même refus qu'auparavant.
+      const rowsById = await collectContextRowsById(tableName, recordIds);
+      const missingIds = [...recordIds].filter((recordId) => !rowsById.has(Number(recordId)));
+      if (missingIds.length) {
+        const raw = await fetchRawTableCached(tableName);
+        core.tableToRows(raw).forEach((row) => {
+          const id = Number(row?.id);
+          if (id > 0 && !rowsById.has(id)) rowsById.set(id, row);
+        });
+      }
       for (const recordId of recordIds) {
         const row = rowsById.get(recordId);
         if (!row || !core.rowMatchesContext(row, tableName, {
@@ -1539,15 +2046,22 @@
   function patchGristApi() {
     const grist = getGrist();
     if (!grist) return false;
+    if (isContextOnlyIntegration) return true;
 
     if (grist.docApi?.fetchTable && !grist.docApi.__serviceContextPatched) {
       const docApi = grist.docApi;
       rawFetchTable = docApi.fetchTable.bind(docApi);
       rawApplyUserActions = docApi.applyUserActions?.bind(docApi) || null;
       docApi.fetchTable = async function serviceAwareFetchTable(tableName, options = {}) {
-        return fetchContextTable(tableName, options);
+        const safeOptions = options && typeof options === "object" ? options : {};
+        return fetchContextTable(tableName, {
+          ...safeOptions,
+          fullTable: safeOptions.fullTable == null
+            ? (safeOptions.restFilter == null && useFullRestByDefault)
+            : Boolean(safeOptions.fullTable),
+        });
       };
-      if (rawApplyUserActions) {
+      if (rawApplyUserActions && isAutomaticIntegration) {
         docApi.applyUserActions = async function serviceAwareApplyUserActions(actions) {
           await initialize();
           const snapshot = getPublicState();
@@ -1570,7 +2084,6 @@
           });
           const result = await rawApplyUserActions(transformedActions);
           const modifiedTables = getModifiedTables(actions);
-          modifiedTables.forEach(invalidateContextTable);
           signalAccessAssignmentsChanged(actions);
           if (projectCatalogIdentityChanged(actions)) {
             invalidateAccessCache();
@@ -1581,9 +2094,19 @@
               ));
             }, 0);
           }
-          await refreshContextWatchers(modifiedTables, snapshot.generation === selectionGeneration
+          await synchronizeAfterMutation(modifiedTables, snapshot.generation === selectionGeneration
             ? "mutation"
             : "mutation-after-context-change");
+          return result;
+        };
+      } else if (rawApplyUserActions) {
+        // Mode rest-first : ni réécriture d'action ni garde de service, c'est le
+        // principe de ce mode et les widgets d'administration en dépendent. Le
+        // document a pourtant changé — sans cette reprise, la page continuerait
+        // d'afficher l'état d'avant l'écriture jusqu'au prochain rechargement.
+        docApi.applyUserActions = async function refreshingApplyUserActions(actions) {
+          const result = await rawApplyUserActions(actions);
+          await synchronizeAfterMutation(getModifiedTables(actions));
           return result;
         };
       }
@@ -1610,6 +2133,7 @@
     fetchContextTable,
     fetchContextRows,
     watchContextTable,
+    watchContextTables,
     invalidateContextTable,
     invalidateCache(tableName) {
       const normalizedTableName = core.toText(tableName);
@@ -1621,6 +2145,7 @@
       }
     },
     getState: getPublicState,
+    getIntegrationMode: () => integrationMode,
     getService: () => state.selectedService || core.normalizeService(readStorage(core.SERVICE_STORAGE_KEY)),
     getHomeService: () => state.homeService,
     getCurrentProject: () => state.currentProject ? { ...state.currentProject } : null,
@@ -1641,6 +2166,7 @@
 
   patchWhenReady();
   document.addEventListener("change", (event) => {
+    if (!isAutomaticIntegration) return;
     const target = event.target;
     if (!(target instanceof HTMLSelectElement)) return;
     if (!target.matches("#firstColumnDropdown, #projectDropdown, #ps-project-select, #project-select")) return;
@@ -1658,6 +2184,14 @@
         "Actualisation des autorisations impossible :",
         error
       ));
+      return;
+    }
+    if (event.key === core.DATA_CHANGED_STORAGE_KEY) {
+      const changedTables = core.parseDataChangeSignal(event.newValue);
+      logRefresh("signal recu d'un widget voisin", { tables: changedTables });
+      if (!changedTables.length) return;
+      changedTables.forEach(invalidateContextTable);
+      refreshContextWatchers(changedTables, "mutation-voisine").catch(() => {});
       return;
     }
     if (event.key === core.SERVICE_STORAGE_KEY) {
@@ -1687,7 +2221,7 @@
       ));
     }
     if (state.ready && !document.hidden) {
-      refreshContextWatchers(null, "focus").catch(() => {});
+      refreshContextWatchers(null, "focus", { forceRefresh: false }).catch(() => {});
     }
   });
   if (document.readyState === "loading") {

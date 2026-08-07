@@ -5,6 +5,11 @@
   <meta charset="utf-8">
   <title>Gestion Équipe</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <script>
+    window.GristServiceContextConfig = Object.freeze({ mode: "rest-first" });
+  </script>
+  <script src="../shared/service-context-core.js"></script>
+  <script src="../shared/grist-service-context.js"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 
@@ -183,6 +188,7 @@
     </form>
   </dialog>
 
+  <!-- REST complet en lecture ; mutations administratives RPC inchangées. -->
   <script src="app.js"></script>
 </body>
 
