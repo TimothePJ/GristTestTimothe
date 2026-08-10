@@ -649,6 +649,11 @@ function bootstrapApp() {
       [psTables.planningProject, psTables.projects, psTables.timeSegment, psTables.projectTeam],
       () => {
         reconcileAndLoad({ force: true });
+      },
+      {
+        nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
+        projectScopedSignals: true,
+        acceptAnyNativeTableSignal: true,
       }
     );
 

@@ -740,6 +740,13 @@ window.GristServiceContext.watchContextTable("ListePlan_NDC_COF", async (rec) =>
   populateDropdown("projectDropdown", projets);
   listeDePlanRecordsReady = true;
   refreshListeDePlanProjectFromRecords();
+}, {
+  // Une installation historique peut porter le widget sur une vue liee. Le flux
+  // onRecords reste uniquement un signal ; les lignes sont relues dans la vraie
+  // table ListePlan_NDC_COF avant d'etre livrees.
+  acceptAnyNativeTableSignal: true,
+  nativeSignalFilter: window.ListePlanSyncRelay?.acceptNativeSignalForCurrentProject,
+  projectScopedSignals: true,
 });
 
 // Filet de sécurité autour d'un réaffichage déclenché par une livraison de données :
@@ -835,6 +842,12 @@ function populateDropdown(id, values) {
     const opt = document.createElement("option");
     opt.value = val;
     opt.textContent = val;
+    if (id === "projectDropdown") {
+      const project = _projectsData.find((candidate) => (
+        normalizeProjectSelectionKey(candidate.name) === normalizeProjectSelectionKey(val)
+      ));
+      if (project?.id) opt.dataset.projectId = String(project.id);
+    }
     dropdown.appendChild(opt);
   });
 

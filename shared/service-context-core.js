@@ -1316,17 +1316,27 @@
   }
 
 
-  function parseDataChangeSignal(rawValue) {
-    if (!rawValue) return [];
+  function parseDataChangeSignalDetail(rawValue) {
+    const empty = { tables: [], projectId: null, projectNumber: "" };
+    if (!rawValue) return empty;
     let payload = null;
     try {
-      payload = JSON.parse(rawValue);
+      payload = typeof rawValue === "string" ? JSON.parse(rawValue) : rawValue;
     } catch (_error) {
-      return [];
+      return empty;
     }
-    if (!payload || payload.version !== DATA_SIGNAL_VERSION) return [];
-    if (!Array.isArray(payload.tables)) return [];
-    return [...new Set(payload.tables.map(toText).filter(Boolean))];
+    if (!payload || payload.version !== DATA_SIGNAL_VERSION) return empty;
+    if (!Array.isArray(payload.tables)) return empty;
+    const projectId = Number(payload.projectId);
+    return {
+      tables: [...new Set(payload.tables.map(toText).filter(Boolean))],
+      projectId: Number.isInteger(projectId) && projectId > 0 ? projectId : null,
+      projectNumber: normalizeProjectNumber(payload.projectNumber),
+    };
+  }
+
+  function parseDataChangeSignal(rawValue) {
+    return parseDataChangeSignalDetail(rawValue).tables;
   }
 
   return Object.freeze({
@@ -1339,6 +1349,7 @@
     DATA_CHANGED_STORAGE_KEY,
     DATA_SIGNAL_VERSION,
     parseDataChangeSignal,
+    parseDataChangeSignalDetail,
     ACCESS_COLUMN,
     PROJECT_TEAM_TABLE,
     LEGACY_DEFAULT_SERVICE,

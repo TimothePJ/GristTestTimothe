@@ -7,8 +7,29 @@
 
   <!-- Grist -->
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-  <script src="../shared/service-context-core.js"></script>
-  <script src="../shared/grist-service-context.js"></script>
+  <script src="../shared/service-context-core.js?v=20260810-sync3"></script>
+  <script src="../shared/grist-service-context.js?v=20260810-sync3"></script>
+  <script>
+    window.ProjectMutationSyncConfig = {
+      mutationSignals: {
+        PlanningProjet_Sync: ["Planning_Projet"],
+        ChargePlanning_Sync: ["Planning_Projet"],
+        Avancement_Sync: ["Planning_Projet"]
+      },
+      observedSignalColumns: [
+        "PlanningProjet_Sync", "References2_Sync", "ListePlan_Sync", "Avancement_Sync"
+      ],
+      observedSignalTables: {
+        PlanningProjet_Sync: ["Planning_Projet"],
+        References2_Sync: ["References2"],
+        ListePlan_Sync: ["ListePlan_NDC_COF"],
+        Avancement_Sync: ["Projets2"]
+      },
+      directSignalTables: ["Planning_Projet", "References2", "ListePlan_NDC_COF"],
+      dropdownIds: ["projectDropdown"]
+    };
+  </script>
+  <script src="../shared/project-mutation-sync-relay.js?v=20260810-sync3"></script>
 
   <!-- vis-timeline (même système que timeline-calendar.zip) -->
   <script src="https://unpkg.com/vis-timeline/standalone/umd/vis-timeline-graph2d.min.js"></script>
@@ -22,7 +43,7 @@
   <link rel="stylesheet" href="./assets/css/styles.css" />
 
   <!-- App -->
-  <script type="module" src="./assets/js/main.js" defer></script>
+  <script type="module" src="./assets/js/main.js?v=20260810-sync3" defer></script>
 </head>
 <body>
   <!-- Toolbar style timeline-calendar -->

@@ -23,6 +23,7 @@ import {
   updateProjectAvancementConfig,
   updateProjectBillingPercentages,
   updateWorkerDailyRate,
+  resolveTimeOutTableId,
 } from "./services/gristService.js";
 import {
   buildExpenseData,
@@ -118,6 +119,10 @@ let renderedChargePlanRangeStartDate = "";
 let chargePlanRangeStartDate = "";
 let chargePlanSegmentEditModeEnabled = false;
 let editingBudgetLineIndex = null;
+// Photo du budget au moment ou la modale a ete ouverte. L'enregistrement supprime
+// toutes les lignes puis recree celles de la modale : si le budget a bouge entre
+// temps, ecrire ecraserait la modification d'autrui sans que personne ne le voie.
+let editingBudgetBaseline = null;
 let editingChargePlanSegment = null;
 let planningManagementHover = null;
 let planningManagementMonthKey = getMonthKeyFromDate(new Date());
@@ -1863,6 +1868,8 @@ function renderAppPreservingScroll() {
 // l'utilisateur a sous les yeux, donc il ne permet pas de distinguer un
 // changement de projet d'une simple relecture.
 let lastRenderedProjectId = null;
+// Un rendu des taux a ete saute parce que l'utilisateur y saisissait : il reste du.
+let teamRatesRenderPending = false;
 
 function renderApp() {
   cancelDeferredProjectViewsRender();
@@ -1914,10 +1921,20 @@ function renderDeferredProjectViews(selectedProject = getSelectedProject()) {
     return;
   }
 
+  // Seule une saisie de taux doit retarder le rendu. Un bouton d'action garde
+  // aussi le focus pendant son traitement asynchrone : assimiler ce focus a une
+  // saisie empechait notamment la fiche supprimee de disparaitre avant un reload.
+  const dailyRateInputFocused =
+    document.activeElement instanceof HTMLInputElement &&
+    document.activeElement.classList.contains("daily-rate") &&
+    dom.teamManagementRates instanceof HTMLElement &&
+    dom.teamManagementRates.contains(document.activeElement);
+  if (dailyRateInputFocused) teamRatesRenderPending = true;
   renderTables(dom, selectedProject, {
     selectedYear: state.selectedYear,
     selectedMonth: state.selectedMonth,
     monthSpan: state.monthSpan,
+    skipRateControls: dailyRateInputFocused,
   });
   renderSpendingBillingEditor(dom.spendingBillingEditor, selectedProject, {
     selectedYear: state.selectedYear,
@@ -2449,9 +2466,16 @@ async function performLoadData(
     const preferredProject =
       projects.find((project) => project.projectNumber === preferredProjectNumber) || null;
     if (preferredProject) {
+      // Le rafraîchissement déclenché par une donnée passe ici avec le projet déjà
+      // affiché. syncStateToProjectStart réancre la timeline sur le début du projet :
+      // appelée à chaque relecture, elle ramenait le Prévisionnel - Pointage à sa
+      // date de départ alors que l'utilisateur consultait un autre mois. On réancre
+      // seulement quand le projet affiché change réellement — la même règle que
+      // celle déjà appliquée plus bas au défilement vertical.
+      const isProjectChange = preferredProject.id !== lastRenderedProjectId;
       setState({ selectedProjectId: preferredProject.id });
       selectedProject = preferredProject;
-      syncStateToProjectStart(preferredProject);
+      if (isProjectChange) syncStateToProjectStart(preferredProject);
     }
   } else {
     // Priorité : résolution par ID canonique
@@ -2519,6 +2543,35 @@ function bindExpenseDataRefresh() {
 
   const tables = APP_CONFIG.grist.tables;
   expenseDataRefreshBound = true;
+  // La liste doit couvrir TOUT ce que fetchProjectDataTables relit, sinon une
+  // section se redessine avec des données que personne n'a rafraîchies. Il y
+  // manquait l'annuaire — d'où « Gestion - Equipe » figée — et les absences, que
+  // le plan de charge déduit des jours travaillés.
+  // Les absences n'ont pas le même identifiant selon les documents, et le réveil
+  // compare les noms au caractère près : on enregistre donc l'identifiant résolu.
+  void resolveTimeOutTableId().then((timeOutTableId) => {
+    serviceContext.watchContextTables(
+      [timeOutTableId],
+      () => {
+        if (!cachedProjectRows) return;
+        const preferredProjectNumber = getSelectedProject()?.projectNumber || "";
+        void loadData({ preferredProjectNumber }).catch((error) => {
+          console.error("Erreur actualisation des absences gestion-depenses2 :", error);
+        });
+      },
+      {
+        nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
+        projectScopedSignals: true,
+        acceptAnyNativeTableSignal: true,
+      }
+    );
+  }).catch(() => {
+    // Document sans table d'absences : rien à surveiller.
+  });
+  // Synchronisation sans minuterie, comme Avancement : le flux Grist reveille la
+  // table qui porte la section, les mutations du runtime annoncent exactement les
+  // tables touchees aux autres fenetres, et le focus effectue une revalidation
+  // conditionnelle. Les watchers ci-dessous ne relisent donc que sur evenement.
   serviceContext.watchContextTables(
     [
       tables.projects,
@@ -2528,14 +2581,24 @@ function bindExpenseDataRefresh() {
       tables.projectTeam,
       tables.timeSegment,
       tables.timeReal,
+      tables.team,
     ],
-    () => {
+    ({ tables: changedTables }) => {
       // Avant la première sélection il n'y a rien à redessiner.
       if (!cachedProjectRows) return;
       const preferredProjectNumber = getSelectedProject()?.projectNumber || "";
-      void loadData({ preferredProjectNumber }).catch((error) => {
+      // La liste des projets est mise en cache et n'est relue que sur demande
+      // explicite : sans ce drapeau, le widget se redessinerait avec les anciennes
+      // lignes projet et écraserait l'écran par un état périmé.
+      const refreshProjects = changedTables.includes(tables.projects);
+      void loadData({ preferredProjectNumber, refreshProjects }).catch((error) => {
         console.error("Erreur actualisation des données gestion-depenses2 :", error);
       });
+    },
+    {
+      nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
+      projectScopedSignals: true,
+      acceptAnyNativeTableSignal: true,
     }
   );
 }
@@ -2550,7 +2613,28 @@ function resetNewProjectForm() {
   toggleElement(dom.addProjectForm, false);
 }
 
+function setEditBudgetFeedback(message = "") {
+  if (!(dom?.editBudgetFeedback instanceof HTMLElement)) {
+    return;
+  }
+
+  const text = String(message || "").trim();
+  dom.editBudgetFeedback.textContent = text;
+  dom.editBudgetFeedback.hidden = !text;
+}
+
+// Deux budgets sont identiques si ce sont les memes lignes, dans le meme ordre,
+// avec le meme chapitre et le meme montant, sur le meme projet.
+function describeBudgetLines(project) {
+  return JSON.stringify({
+    projectId: project?.id ?? null,
+    lines: (project?.budgetLines || []).map((line) => [line?.id ?? null, line?.chapter ?? "", line?.amount ?? null]),
+  });
+}
+
 function resetEditBudgetForm() {
+  editingBudgetBaseline = null;
+  setEditBudgetFeedback("");
   dom.editBudgetLinesContainer.innerHTML = "";
   resetBudgetLineEditor();
   setState({ editingBudgetLines: [] });
@@ -5503,7 +5587,9 @@ function bindEvents() {
     setState({
       editingBudgetLines: cloneBudgetLines(selectedProject.budgetLines),
     });
+    editingBudgetBaseline = describeBudgetLines(selectedProject);
     resetBudgetLineEditor();
+    setEditBudgetFeedback("");
     renderEditingBudgetLines();
     openModal(dom.editBudgetModal);
   });
@@ -5643,10 +5729,40 @@ function bindEvents() {
   });
 
   dom.saveEditedBudgetBtn.addEventListener("click", async () => {
+    // Un rafraichissement peut etre arrive quelques millisecondes avant le clic :
+    // on le laisse finir avant de comparer, sinon la garde compare a du perime.
+    if (expenseDataLoadingPromise) {
+      try {
+        await expenseDataLoadingPromise;
+      } catch (_error) {
+        // L'echec est deja signale par le chargement lui-meme.
+      }
+    }
     const selectedProject = getSelectedProject();
     if (!selectedProject) return;
 
-    await saveBudgetChanges(selectedProject, state.editingBudgetLines);
+    if (editingBudgetBaseline && describeBudgetLines(selectedProject) !== editingBudgetBaseline) {
+      // Enregistrer supprimerait les lignes actuelles pour recreer une photo
+      // perimee : la modification faite ailleurs disparaitrait en silence.
+      setEditBudgetFeedback(
+        "Le budget a été modifié ailleurs depuis l'ouverture. Les valeurs à jour sont réaffichées : vérifiez-les avant d'enregistrer."
+      );
+      setState({ editingBudgetLines: cloneBudgetLines(selectedProject.budgetLines) });
+      editingBudgetBaseline = describeBudgetLines(selectedProject);
+      resetBudgetLineEditor();
+      renderEditingBudgetLines();
+      return;
+    }
+
+    try {
+      await saveBudgetChanges(selectedProject, state.editingBudgetLines);
+    } catch (error) {
+      // Sans ce filet, l'echec ne se voyait nulle part : la modale restait ouverte,
+      // muette, et l'utilisateur croyait a un bouton mort.
+      console.error("Enregistrement du budget impossible :", error);
+      setEditBudgetFeedback(`Enregistrement impossible : ${error?.message || "erreur inconnue"}`);
+      return;
+    }
     resetEditBudgetForm();
     await loadData();
   });
@@ -5743,6 +5859,16 @@ function bindEvents() {
   dom.teamManagementRates.addEventListener("change", handleTeamManagementSummaryToggleChange);
   dom.teamManagementRates.addEventListener("change", handleTableInputChange);
   dom.teamManagementRates.addEventListener("click", handleDeleteWorker);
+  // Sans cette reprise, une section sautee pendant la saisie resterait perimee
+  // indefiniment : quitter le champ sans rien modifier n'emet aucun evenement.
+  dom.teamManagementRates.addEventListener("focusout", () => {
+    window.setTimeout(() => {
+      if (!teamRatesRenderPending) return;
+      if (dom.teamManagementRates.contains(document.activeElement)) return;
+      teamRatesRenderPending = false;
+      renderDeferredProjectViews();
+    }, 0);
+  });
   const timelineBoards = [dom.chargePlanBoard];
 
   timelineBoards.forEach((boardEl) => {

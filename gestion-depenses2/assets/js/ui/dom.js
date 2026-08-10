@@ -15,6 +15,7 @@ export function getDomRefs() {
     saveProjectBtn: document.getElementById("save-project-btn"),
     editBudgetBtn: document.getElementById("edit-budget-btn"),
     editBudgetModal: document.getElementById("edit-budget-modal"),
+    editBudgetFeedback: document.getElementById("edit-budget-feedback"),
     editSegmentModal: document.getElementById("edit-segment-modal"),
     planningAlertsModal: document.getElementById("planning-alerts-modal"),
     planningAlertsSummary: document.getElementById("planning-alerts-summary"),

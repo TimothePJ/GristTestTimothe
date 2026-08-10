@@ -7,8 +7,21 @@
 
   <!-- Grist Plugin API -->
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-  <script src="../shared/service-context-core.js"></script>
-  <script src="../shared/grist-service-context.js"></script>
+  <script src="../shared/service-context-core.js?v=20260810-sync3"></script>
+  <script src="../shared/grist-service-context.js?v=20260810-sync3"></script>
+  <script>
+    window.ProjectMutationSyncConfig = {
+      mutationSignals: { Bordereau_Sync: ["Envois"] },
+      observedSignalColumns: ["Bordereau_Sync", "ListePlan_Sync"],
+      observedSignalTables: {
+        Bordereau_Sync: ["Envois"],
+        ListePlan_Sync: ["ListePlan_NDC_COF"]
+      },
+      directSignalTables: ["Envois", "ListePlan_NDC_COF"],
+      dropdownIds: ["projectDropdown"]
+    };
+  </script>
+  <script src="../shared/project-mutation-sync-relay.js?v=20260810-sync3"></script>
 
   <!-- jsPDF and html2canvas -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -109,6 +122,6 @@
     </form>
   </dialog>
 
-  <script src="bordereau.js" defer></script>
+  <script src="bordereau.js?v=20260810-sync3" defer></script>
 </body>
 </html>

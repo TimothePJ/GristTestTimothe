@@ -7,7 +7,12 @@ import {
 } from "./expenseTimeline.js";
 
 export function renderTables(dom, project, viewState) {
-  renderExpenseRateControls(dom.teamManagementRates, project);
+  // Reconstruire les taux pendant que l'utilisateur y saisit detruirait son champ
+  // sans prevenir : la valeur tapee disparait et aucun evenement de validation ne
+  // part. L'appelant nous dit de sauter ce bloc et le redessinera au depart du focus.
+  if (!viewState?.skipRateControls) {
+    renderExpenseRateControls(dom.teamManagementRates, project);
+  }
   renderExpenseTimeline(dom.expenseBoard, project);
   renderRealExpenseTimeline(dom.realExpenseBoard, project);
 }

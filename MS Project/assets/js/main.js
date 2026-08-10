@@ -390,14 +390,25 @@ async function bootstrap() {
 
     await refreshMsProject();
 
-    // Le planning affiché vient de Planning_Projet et le sélecteur de Projets2 :
-    // ces deux tables sont éditées depuis d'autres widgets, et une modification
-    // doit apparaître ici sans rechargement de la page.
+    // Le widget affiche les taches de MsProject et son selecteur liste MsProjectNom ;
+    // il croise aussi le planning et le catalogue de projets. Ces quatre tables sont
+    // ecrites depuis d'autres widgets — et par l'import XML d'ici meme.
+    const msTables = APP_CONFIG.grist;
     window.GristServiceContext?.watchContextTables?.(
-      ["Planning_Projet", "Projets2"],
+      [
+        msTables.msProjectTable.sourceTable,
+        msTables.msProjectNamesTable.sourceTable,
+        msTables.planningSyncTable.sourceTable,
+        msTables.projectsTable.sourceTable,
+      ],
       async ({ tables }) => {
-        if (tables.includes("Projets2")) {
-          const refreshedOptions = await buildProjectOptions();
+        const catalogueChange =
+          tables.includes(msTables.msProjectNamesTable.sourceTable) ||
+          tables.includes(msTables.projectsTable.sourceTable);
+        if (catalogueChange) {
+          // forceRefresh imperatif : la liste des noms est mise en cache dans le
+          // module et ne serait sinon jamais relue.
+          const refreshedOptions = await buildProjectOptions({ forceRefresh: true });
           const selectedProject = updateProjectSelector(
             refreshedOptions,
             state.selectedProject

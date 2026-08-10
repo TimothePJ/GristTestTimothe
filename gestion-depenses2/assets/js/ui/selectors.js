@@ -53,6 +53,37 @@ function getWorkerRoleGroup(role) {
   return "Autres";
 }
 
+export function getAvailableTeamMembers(teamMembers, project = null) {
+  const existingNames = new Set(
+    (project?.workers || []).map((worker) => normalizeName(worker?.name))
+  );
+  const uniqueMembersByName = new Map();
+
+  (teamMembers || []).forEach((member) => {
+    const displayName = getWorkerDisplayName(member);
+    const personKey = normalizeName(displayName);
+
+    // Une personne peut avoir plusieurs lignes Team pour ses differentes
+    // adresses mail. Pour l'affectation projet, son prenom + nom constituent une
+    // seule identite et la premiere ligne conserve un id Grist valide a utiliser.
+    if (
+      !personKey ||
+      existingNames.has(personKey) ||
+      uniqueMembersByName.has(personKey)
+    ) {
+      return;
+    }
+
+    uniqueMembersByName.set(personKey, member);
+  });
+
+  return [...uniqueMembersByName.values()].sort((left, right) =>
+    getWorkerDisplayName(left).localeCompare(getWorkerDisplayName(right), "fr", {
+      sensitivity: "base",
+    })
+  );
+}
+
 export function renderProjectOptions(projectSelect, projects, selectedProjectId) {
   fillSelect(
     projectSelect,
@@ -70,17 +101,7 @@ export function renderProjectOptions(projectSelect, projects, selectedProjectId)
 export function renderWorkerOptions(workerSelect, teamMembers, project = null) {
   workerSelect.innerHTML = "";
 
-  const existingNames = new Set(
-    (project?.workers || []).map((worker) => normalizeName(worker?.name))
-  );
-
-  const availableMembers = (teamMembers || [])
-    .filter((member) => !existingNames.has(normalizeName(getWorkerDisplayName(member))))
-    .sort((left, right) =>
-      getWorkerDisplayName(left).localeCompare(getWorkerDisplayName(right), "fr", {
-        sensitivity: "base",
-      })
-    );
+  const availableMembers = getAvailableTeamMembers(teamMembers, project);
 
   const placeholderOption = document.createElement("option");
   placeholderOption.value = "";

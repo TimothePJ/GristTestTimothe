@@ -130,9 +130,12 @@ function resolveColumnId(availableColumns, requestedColumnId, aliases = []) {
 
 function getAvailableColumnIds(raw) {
   if (Array.isArray(raw)) {
-    return raw.length > 0 && typeof raw[0] === "object" && raw[0] != null
-      ? Object.keys(raw[0])
-      : [];
+    const availableColumns = new Set();
+    raw.forEach((row) => {
+      if (!row || typeof row !== "object") return;
+      Object.keys(row).forEach((columnId) => availableColumns.add(columnId));
+    });
+    return [...availableColumns];
   }
 
   if (raw && typeof raw === "object") {
@@ -142,13 +145,17 @@ function getAvailableColumnIds(raw) {
   return [];
 }
 
-async function fetchTableRaw(tableName) {
+async function fetchTableRaw(tableName, options = undefined) {
   const grist = getGrist();
   if (!grist.docApi || typeof grist.docApi.fetchTable !== "function") {
     throw new Error("grist.docApi.fetchTable(...) indisponible.");
   }
 
-  return grist.docApi.fetchTable(tableName);
+  // Les options sont celles du wrapper de contexte local, pas de l'API RPC
+  // Grist native (qui n'accepte que le nom de table).
+  return options && grist.docApi.__serviceContextPatched
+    ? grist.docApi.fetchTable(tableName, options)
+    : grist.docApi.fetchTable(tableName);
 }
 
 async function fetchTableRows(tableName) {
@@ -169,13 +176,21 @@ async function fetchOptionalTableRows(tableName) {
   }
 }
 
-async function getResolvedColumns(tableName, configuredColumns, aliasesByKey = {}) {
+async function getResolvedColumns(
+  tableName,
+  configuredColumns,
+  aliasesByKey = {},
+  { forceRefresh = false } = {}
+) {
   const cacheKey = tableName;
-  if (resolvedColumnCache.has(cacheKey)) {
+  if (!forceRefresh && resolvedColumnCache.has(cacheKey)) {
     return resolvedColumnCache.get(cacheKey);
   }
 
-  const raw = await fetchTableRaw(cacheKey);
+  const raw = await fetchTableRaw(
+    cacheKey,
+    forceRefresh ? { forceRefresh: true } : undefined
+  );
   const availableColumns = getAvailableColumnIds(raw);
 
   const resolved = Object.fromEntries(
@@ -193,11 +208,12 @@ async function getResolvedColumns(tableName, configuredColumns, aliasesByKey = {
   return resolved;
 }
 
-async function getResolvedTimeSegmentColumns() {
+async function getResolvedTimeSegmentColumns(options = undefined) {
   return getResolvedColumns(
     APP_CONFIG.grist.tables.timeSegment,
     APP_CONFIG.grist.columns.timeSegment,
-    TIME_SEGMENT_COLUMN_ALIASES
+    TIME_SEGMENT_COLUMN_ALIASES,
+    options
   );
 }
 
@@ -281,16 +297,27 @@ export async function fetchDopRegistryRows() {
 
 // Grist mappe les noms de table avec tiret (Time-Out) vers un id à underscore (Time_Out).
 // On essaie les variantes connues et on retourne le premier id lisible.
-async function resolveTimeOutTableId() {
-  for (const id of ["Time-Out", "Time_Out", "TimeOut"]) {
-    try {
-      await fetchTableRows(id);
-      return id;
-    } catch (_error) {
-      // Variante suivante.
+// L'identifiant reel de la table des absences varie selon les documents. La
+// resolution coutait jusqu'a trois lectures de table A CHAQUE chargement ; elle est
+// desormais faite une fois. Elle est aussi exportee, car la surveillance doit
+// s'enregistrer sous l'identifiant EXACT : le reveil compare les noms au caractere
+// pres, et un watcher pose sur "Time-Out" resterait sourd a un document en "Time_Out".
+let _timeOutTableIdPromise = null;
+
+export function resolveTimeOutTableId() {
+  if (_timeOutTableIdPromise) return _timeOutTableIdPromise;
+  _timeOutTableIdPromise = (async () => {
+    for (const id of ["Time-Out", "Time_Out", "TimeOut"]) {
+      try {
+        await fetchTableRows(id);
+        return id;
+      } catch (_error) {
+        // Variante suivante.
+      }
     }
-  }
-  return "Time-Out";
+    return "Time-Out";
+  })();
+  return _timeOutTableIdPromise;
 }
 
 // Charge les 8 tables de données (hors Projets), uniquement quand un projet est sélectionné.
@@ -602,7 +629,10 @@ export async function createTimeSegment({
   label = "",
 }) {
   const tableName = APP_CONFIG.grist.tables.timeSegment;
-  const columns = await getResolvedTimeSegmentColumns();
+  // Le contexte interservices et ce module mettent les lectures en cache. Une
+  // colonne peut avoir ete renommee depuis le chargement (End_Date -> End_At) :
+  // une ecriture doit donc repartir du schema courant, pas de cette ancienne photo.
+  const columns = await getResolvedTimeSegmentColumns({ forceRefresh: true });
   const startValue = toGristDateTimeValue(startDate);
   const endValue = toGristDateTimeValue(endDate);
   const normalizedProjectNumber = toText(projectNumber);
@@ -659,7 +689,7 @@ export async function updateTimeSegment({
     throw new Error("Segment invalide : id manquant.");
   }
 
-  const columns = await getResolvedTimeSegmentColumns();
+  const columns = await getResolvedTimeSegmentColumns({ forceRefresh: true });
   const fields = {};
 
   if (projectNumber != null) {

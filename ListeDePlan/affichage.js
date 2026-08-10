@@ -20,7 +20,10 @@ window.GristServiceContext.watchContextTables(["Projets2"], async () => {
 });
 
 async function chargerProjetsMap() {
-  if (projetsDictGlobal) return projetsDictGlobal;
+  // Un dictionnaire vide n'est pas un résultat : c'est le signe d'une lecture
+  // qui n'a rien ramené. Le mémoriser figeait la liste déroulante à vide
+  // jusqu'au rechargement de la page.
+  if (projetsDictGlobal && Object.keys(projetsDictGlobal).length) return projetsDictGlobal;
 
   const data = await grist.docApi.fetchTable("Projets2");
   projetsDictGlobal = {};
@@ -448,11 +451,18 @@ function parsePlanningSyncDate(value) {
     const normalized = value > 1e9 && value < 1e11 ? value * 1000 : value;
     const date = new Date(normalized);
     if (Number.isNaN(date.getTime())) return null;
-    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    // Une colonne Date Grist est un instant UTC en secondes. En extraire les
+    // composantes locales peut changer de jour selon le fuseau du navigateur.
+    return new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
   }
 
   const text = String(value).trim();
   if (!text) return null;
+
+  // Certaines voies REST/RPC sérialisent les secondes Grist en texte.
+  if (/^-?\d+(?:\.\d+)?$/.test(text)) {
+    return parsePlanningSyncDate(Number(text));
+  }
 
   const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
   if (isoMatch) {
@@ -1936,18 +1946,20 @@ document.addEventListener("focusout", async (e) => {
 });
 
 function convertFrToDate(dateStr) {
-  const [day, month, year] = dateStr.split("/");
-  return new Date(year, month - 1, day);
+  return parsePlanningSyncDate(dateStr);
 }
 
 function convertToISO(dateStr) {
-  const [day, month, year] = dateStr.split("/");
-  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T00:00:00.000Z`;
+  const isoDate = toGristDateValue(dateStr);
+  return isoDate ? `${isoDate}T00:00:00.000Z` : null;
 }
 
 function formatDate(dateStr) {
-  const d = new Date(dateStr);
-  if (isNaN(d)) return "";
+  // Ne jamais confier JJ/MM/AAAA directement au parseur natif : selon le jour,
+  // il inverse jour/mois ou renvoie Invalid Date. Le parseur strict accepte aussi
+  // les dates ISO et les timestamps Grist en secondes ou millisecondes.
+  const d = parsePlanningSyncDate(dateStr);
+  if (!d) return "";
   const day = String(d.getDate()).padStart(2, '0');
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const year = d.getFullYear();

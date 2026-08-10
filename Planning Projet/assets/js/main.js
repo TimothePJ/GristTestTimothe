@@ -1513,6 +1513,11 @@ function bindPlanningDataRefresh() {
         forceLoad: true,
         reason: `donnees-modifiees:${tables.join(",")}`,
       });
+    },
+    {
+      nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
+      projectScopedSignals: true,
+      acceptAnyNativeTableSignal: true,
     }
   );
 }

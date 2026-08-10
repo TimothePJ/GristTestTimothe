@@ -960,13 +960,21 @@ async function refreshBordereauFromRecords(newRecords) {
   if (restoreScroll) restoreScroll();
 }
 
-window.GristServiceContext.watchContextTable(BORDEREAU_TABLE, refreshBordereauFromRecords);
+window.GristServiceContext.watchContextTable(BORDEREAU_TABLE, refreshBordereauFromRecords, {
+  nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
+  projectScopedSignals: true,
+  acceptAnyNativeTableSignal: true,
+});
 
 // Le bordereau ne montre pas que les envois : ses lignes viennent de la liste des
 // plans et son sélecteur de la table des projets. Ces deux tables sont éditées
 // depuis d'autres widgets, et le rendu doit suivre sans rechargement.
 window.GristServiceContext.watchContextTables([PLANS_TABLE, PROJET_TABLE], () => {
   void refreshBordereauFromRecords(records);
+}, {
+  nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
+  projectScopedSignals: true,
+  acceptAnyNativeTableSignal: true,
 });
 
 /** -------------------------

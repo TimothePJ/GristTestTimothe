@@ -2075,6 +2075,31 @@ test("aucune interrogation periodique n'est armee par defaut", () => {
   assert.match(source, /const DEFAULT_WATCH_POLL_INTERVAL_MS = 0;/);
 });
 
+test("le signal Grist est ecoute avant la fin de la lecture initiale", async () => {
+  let releaseInitialRead;
+  const initialRead = new Promise((resolve) => { releaseInitialRead = resolve; });
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async (url) => {
+      const table = decodeURIComponent(new URL(url).pathname.split("/tables/")[1].split("/")[0]);
+      if (table === "References2") await initialRead;
+      return restResponse([]);
+    },
+  });
+  await harness.api.whenReady();
+
+  const unsubscribe = harness.api.watchContextTable("References2", () => {});
+  assert.equal(
+    harness.nativeOnRecordsCount(),
+    1,
+    "onRecords doit etre branche sans attendre REST ni un clic dans la fenetre"
+  );
+
+  releaseInitialRead();
+  await flushAsyncWork();
+  unsubscribe();
+});
+
 test("des lignes inchangees ne sont pas relivrees au widget", async () => {
   const harness = createRuntimeHarness({
     rest: true,
@@ -2114,6 +2139,156 @@ test("le polling du watcher est suspendu lorsque la page est cachée", async () 
   harness.document.hidden = false;
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.ok(harness.restRequests.length > hiddenRequestCount);
+  unsubscribe();
+});
+
+test("un watcher peut accepter le signal natif d'une section historique", async () => {
+  let currentReference = "A";
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async () => restResponse([
+      { id: 1, fields: { Service: "Structure", NomProjet: "Alpha", Reference: currentReference } },
+    ]),
+  });
+  harness.grist.selectedTable = { async getTableId() { return "Fusion"; } };
+  await harness.api.whenReady();
+  const deliveries = [];
+  const unsubscribe = harness.api.watchContextTable(
+    "References2",
+    (rows) => deliveries.push(rows[0]?.Reference),
+    { acceptAnyNativeTableSignal: true }
+  );
+  await flushAsyncWork();
+  assert.deepEqual(deliveries, ["A"]);
+
+  currentReference = "B";
+  harness.emitRecords(RAW_REFERENCE_RECORDS);
+  await flushAsyncWork();
+  assert.deepEqual(deliveries, ["A", "B"]);
+  unsubscribe();
+});
+
+test("un filtre natif évite toute relecture pour un signal non pertinent", async () => {
+  let currentReference = "A";
+  let acceptSignal = false;
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async () => restResponse([
+      { id: 1, fields: { Service: "Structure", NomProjet: "Alpha", Reference: currentReference } },
+    ]),
+  });
+  harness.grist.selectedTable = { async getTableId() { return "Projets2"; } };
+  await harness.api.whenReady();
+
+  const deliveries = [];
+  const unsubscribe = harness.api.watchContextTable(
+    "References2",
+    (rows) => deliveries.push(rows[0]?.Reference),
+    {
+      acceptAnyNativeTableSignal: true,
+      nativeSignalFilter: () => acceptSignal,
+    }
+  );
+  await flushAsyncWork();
+  assert.deepEqual(deliveries, ["A"]);
+
+  const requestCount = harness.restRequests.length;
+  harness.emitRecords(RAW_REFERENCE_RECORDS);
+  await flushAsyncWork();
+  assert.equal(
+    harness.restRequests.length,
+    requestCount,
+    "un autre projet ne doit provoquer aucune relecture REST"
+  );
+
+  acceptSignal = true;
+  currentReference = "B";
+  harness.emitRecords(RAW_REFERENCE_RECORDS);
+  await flushAsyncWork();
+  assert.equal(harness.restRequests.length, requestCount + 1);
+  assert.deepEqual(deliveries, ["A", "B"]);
+  unsubscribe();
+});
+
+test("watchContextTables detecte par REST une modification d'un autre utilisateur", async () => {
+  let teamVersion = 1;
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async (url) => {
+      const table = decodeURIComponent(new URL(url).pathname.split("/tables/")[1].split("/")[0]);
+      if (table === "ProjectTeam") {
+        return restResponse(Array.from({ length: teamVersion }, (_unused, index) => ({
+          id: index + 1,
+          fields: {
+            Service: "Structure",
+            NumeroProjet: "100",
+            Name: index === 0 ? "Alice" : "Bob",
+            Role: "Projeteur",
+          },
+        })));
+      }
+      return restResponse([{
+        id: 1,
+        fields: { Service: "Structure", NumeroProjet: "100", Amount: 10 },
+      }]);
+    },
+  });
+  await harness.api.whenReady();
+
+  const changes = [];
+  const unsubscribe = harness.api.watchContextTables(
+    ["ProjectTeam", "Budget"],
+    ({ tables }) => changes.push([...tables]),
+    {
+      debounceMs: 1,
+      pollIntervalMs: 5,
+      pollTableNames: ["ProjectTeam"],
+    }
+  );
+  await flushAsyncWork();
+  await settleTimers();
+  changes.length = 0;
+
+  // Aucun applyUserActions local et aucun onRecords : le changement simule un
+  // autre navigateur et doit etre decouvert par la revalidation REST.
+  teamVersion = 2;
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await flushAsyncWork();
+  assert.ok(changes.some((tables) => tables.includes("ProjectTeam")));
+  assert.equal(changes.some((tables) => tables.includes("Budget")), false);
+  unsubscribe();
+});
+
+test("le polling garde la synchronisation quand REST replie sur fetchTable", async () => {
+  const harness = createRuntimeHarness();
+  harness.tables.ProjectTeam = {
+    id: [1],
+    NumeroProjet: ["100"],
+    Name: ["Alice"],
+    Role: ["Projeteur"],
+    Service: ["Structure"],
+  };
+  await harness.api.whenReady();
+
+  const deliveries = [];
+  const unsubscribe = harness.api.watchContextTable(
+    "ProjectTeam",
+    (rows) => deliveries.push(rows.length),
+    { pollIntervalMs: 5 }
+  );
+  await flushAsyncWork();
+  assert.equal(deliveries.at(-1), 1);
+
+  harness.tables.ProjectTeam = {
+    id: [1, 2],
+    NumeroProjet: ["100", "100"],
+    Name: ["Alice", "Bob"],
+    Role: ["Projeteur", "Projeteur"],
+    Service: ["Structure", "Structure"],
+  };
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await flushAsyncWork();
+  assert.equal(deliveries.at(-1), 2);
   unsubscribe();
 });
 
@@ -2329,7 +2504,10 @@ test("une ecriture est annoncee aux widgets voisins", async () => {
     .filter(([kind, key]) => kind === "set" && key === core.DATA_CHANGED_STORAGE_KEY)
     .at(-1);
   assert.ok(signal, "l'écriture doit être annoncée aux autres iframes");
-  assert.deepEqual(JSON.parse(signal[2]).tables, ["References2"]);
+  const payload = JSON.parse(signal[2]);
+  assert.deepEqual(payload.tables, ["References2"]);
+  assert.equal(payload.projectId, 10);
+  assert.equal(payload.projectNumber, "100");
 });
 
 test("le signal d'un widget voisin rafraichit la table concernee", async () => {
@@ -2365,5 +2543,180 @@ test("le signal d'un widget voisin rafraichit la table concernee", async () => {
   });
   await flushAsyncWork();
   assert.equal(deliveries.length, 2);
+  unsubscribe();
+});
+
+test("un signal borne a un autre projet ne provoque aucune relecture", async () => {
+  const harness = createRuntimeHarness();
+  harness.tables.References2 = {
+    id: [1], Service: ["Structure"], NomProjet: ["Alpha"], Reference: ["A"],
+  };
+  await harness.api.whenReady();
+
+  const deliveries = [];
+  const unsubscribe = harness.api.watchContextTable(
+    "References2",
+    (rows) => deliveries.push(rows.map((row) => row.Reference)),
+    { projectScopedSignals: true }
+  );
+  await flushAsyncWork();
+  const fetchesBeforeSignals = harness.fetchCount("References2");
+
+  harness.dispatch("storage", {
+    key: core.DATA_CHANGED_STORAGE_KEY,
+    newValue: JSON.stringify({
+      version: core.DATA_SIGNAL_VERSION,
+      tables: ["References2"],
+      projectId: 20,
+      projectNumber: "200",
+    }),
+  });
+  await flushAsyncWork();
+  assert.equal(harness.fetchCount("References2"), fetchesBeforeSignals);
+  assert.equal(deliveries.length, 1);
+
+  harness.tables.References2 = {
+    id: [1, 2], Service: ["Structure", "Structure"],
+    NomProjet: ["Alpha", "Alpha"], Reference: ["A", "B"],
+  };
+  harness.dispatch("storage", {
+    key: core.DATA_CHANGED_STORAGE_KEY,
+    newValue: JSON.stringify({
+      version: core.DATA_SIGNAL_VERSION,
+      tables: ["References2"],
+      projectId: 11,
+      projectNumber: "100",
+    }),
+  });
+  await flushAsyncWork();
+  assert.equal(harness.fetchCount("References2"), fetchesBeforeSignals + 1);
+  assert.deepEqual(deliveries.at(-1), ["A", "B"]);
+  unsubscribe();
+});
+
+test("refreshContextTables reveille seulement les tables annoncees", async () => {
+  const harness = createRuntimeHarness();
+  harness.tables.References2 = {
+    id: [1], Service: ["Structure"], NomProjet: ["Alpha"], Reference: ["A"],
+  };
+  harness.tables.Budget = { id: [1], NumeroProjet: ["100"], Amount: [10] };
+  await harness.api.whenReady();
+
+  const referenceDeliveries = [];
+  const budgetDeliveries = [];
+  const unsubscribeReference = harness.api.watchContextTable(
+    "References2",
+    (rows) => referenceDeliveries.push(rows.map((row) => row.Reference))
+  );
+  const unsubscribeBudget = harness.api.watchContextTable(
+    "Budget",
+    (rows) => budgetDeliveries.push(rows.length)
+  );
+  await flushAsyncWork();
+
+  harness.tables.References2 = {
+    id: [1, 2], Service: ["Structure", "Structure"],
+    NomProjet: ["Alpha", "Alpha"], Reference: ["A", "B"],
+  };
+  await harness.api.refreshContextTables(
+    ["References2"],
+    { reason: "reference2-window-signal" }
+  );
+  await flushAsyncWork();
+
+  assert.deepEqual(referenceDeliveries.at(-1), ["A", "B"]);
+  assert.equal(budgetDeliveries.length, 1, "Budget ne doit pas etre relu");
+  unsubscribeReference();
+  unsubscribeBudget();
+});
+
+// --- Le defaut qui obligeait a recharger la page ------------------------------
+// watchContextTables ignorait « la premiere livraison ». Or une lecture initiale
+// peut n'en produire aucune : le widget avait deja lu la table, l'ETag etait
+// memorise, la revalidation repondait 304. Le compteur restait arme et jetait la
+// PREMIERE VRAIE MODIFICATION. Recharger la page le rearmait, d'ou le symptome
+// « a chaque modification je dois actualiser ». On se fie desormais au motif.
+
+test("une lecture prealable ne doit pas faire avaler la premiere modification", async () => {
+  let version = 1;
+  const lignes = () => Array.from({ length: version }, (_unused, index) => ({
+    id: index + 1,
+    fields: { Service: "Structure", NomProjet: "Alpha", Reference: `R${index + 1}` },
+  }));
+  const harness = createRuntimeHarness({
+    rest: true,
+    applyUserActions: async () => "ok",
+    restFetch: async (url, options) => {
+      const etag = `W/"v${version}"`;
+      // Le serveur revalide : tant que rien n'a change, il repond 304.
+      if (conditionalTag({ url, options }) === etag) return restNotModified(etag);
+      return restResponse(lignes(), { etag });
+    },
+  });
+  await harness.api.whenReady();
+
+  // Le widget lit la table pour son premier rendu — c'est ce que font
+  // planning-synchro et Planning Projet avant d'enregistrer leur surveillance.
+  await harness.grist.docApi.fetchTable("References2");
+
+  const calls = [];
+  const unsubscribe = harness.api.watchContextTables(["References2"], ({ tables }) => {
+    calls.push([...tables]);
+  }, { debounceMs: 5 });
+  await flushAsyncWork();
+  await settleTimers();
+  assert.deepEqual(calls, [], "le chargement initial ne redessine pas");
+
+  // Premiere modification de l'utilisateur : elle doit se voir immediatement.
+  version = 2;
+  await harness.grist.docApi.applyUserActions([
+    ["AddRecord", "References2", null, { Reference: "R2" }],
+  ]);
+  await flushAsyncWork();
+  await settleTimers();
+  assert.deepEqual(
+    calls,
+    [["References2"]],
+    "la premiere modification doit redessiner le widget, sans rechargement de page"
+  );
+
+  unsubscribe();
+});
+
+test("un chargement initial en echec ne fait pas avaler la modification suivante", async () => {
+  let premiereLecture = true;
+  const harness = createRuntimeHarness({
+    rest: true,
+    applyUserActions: async () => "ok",
+    restFetch: async () => {
+      if (premiereLecture) {
+        premiereLecture = false;
+        throw new TypeError("reseau indisponible");
+      }
+      return restResponse([
+        { id: 1, fields: { Service: "Structure", NomProjet: "Alpha", Reference: "A" } },
+      ]);
+    },
+  });
+  harness.tables.References2 = { id: [], Service: [], NomProjet: [], Reference: [] };
+  await harness.api.whenReady();
+
+  const calls = [];
+  const unsubscribe = harness.api.watchContextTables(["References2"], ({ tables }) => {
+    calls.push([...tables]);
+  }, { debounceMs: 5 });
+  await flushAsyncWork();
+  await settleTimers();
+
+  harness.tables.References2 = {
+    id: [1], Service: ["Structure"], NomProjet: ["Alpha"], Reference: ["A"],
+  };
+  await harness.grist.docApi.applyUserActions([
+    ["AddRecord", "References2", null, { Reference: "A" }],
+  ]);
+  await flushAsyncWork();
+  await settleTimers();
+  assert.deepEqual(calls, [["References2"]], "la modification doit passer malgre l'echec initial");
+
   unsubscribe();
 });

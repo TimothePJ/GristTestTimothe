@@ -70,9 +70,21 @@ function emitReferenceDataChangeSignal() {
   }
 
   try {
+    const scope = window.ReferenceProjectSyncRelay?.getCurrentProjectScope?.() || {
+      projectId: readSharedProjectId(),
+      projectNumber: window.GristServiceContext?.getCurrentProject?.()?.number || '',
+    };
     localStorage.setItem(
       REFERENCE_DATA_CHANGE_STORAGE_KEY,
-      JSON.stringify({ at: Date.now(), source: 'reference2', nonce: Math.random() })
+      JSON.stringify({
+        version: window.GristServiceContextCore?.DATA_SIGNAL_VERSION || 1,
+        at: Date.now(),
+        source: 'reference2',
+        nonce: Math.random(),
+        tables: ['References2'],
+        projectId: scope.projectId || null,
+        projectNumber: scope.projectNumber || '',
+      })
     );
   } catch (_error) {
     // localStorage peut etre indisponible dans certains contextes embarques.
@@ -8002,6 +8014,13 @@ window.GristServiceContext.watchContextTable('References2', async function handl
   }
   setReferenceProjectLoading(false);
   applyReferenceAccessUi(contextSnapshot);
+}, {
+  // Certaines sections historiques de Reference2 sont encore portees par une
+  // vue/ancienne table. Leur onRecords reste un signal Grist valable : les lignes
+  // affichees sont toujours relues depuis References2 avant livraison.
+  acceptAnyNativeTableSignal: true,
+  nativeSignalFilter: window.ReferenceProjectSyncRelay?.acceptNativeSignalForCurrentProject,
+  projectScopedSignals: true,
 });
 
 // Le tableau n'affiche pas que References2 : la date limite est calculée à partir
@@ -8120,7 +8139,28 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
   };
   window.addEventListener('storage', function (event) {
     if (event.key === REFERENCE_DATA_CHANGE_STORAGE_KEY) {
+      let signal = { projectId: null, projectNumber: '' };
+      try {
+        const payload = JSON.parse(event.newValue || '{}');
+        signal = {
+          projectId: Number(payload.projectId) || null,
+          projectNumber: String(payload.projectNumber || '').trim(),
+        };
+      } catch (_error) { }
+      const matchesCurrentProject = window.GristServiceContext?.isSignalForCurrentProject;
+      if (typeof matchesCurrentProject === 'function' && !matchesCurrentProject(signal)) return;
       scheduleReferenceLimitReconciliation();
+      window.GristServiceContext?.refreshContextTables?.(
+        ['References2'],
+        {
+          reason: 'reference2-window-signal',
+          forceRefresh: true,
+          signalProjectId: signal.projectId,
+          signalProjectNumber: signal.projectNumber,
+        }
+      )?.catch((error) => {
+        console.warn('Actualisation References2 depuis une autre fenetre impossible :', error);
+      });
       return;
     }
 

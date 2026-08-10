@@ -183,6 +183,10 @@ function init() {
       }
     }
     updateDashboard();
+  }, {
+    nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
+    projectScopedSignals: true,
+    acceptAnyNativeTableSignal: true,
   });
 
   // Le tableau de bord n'agrège pas que les plans : la saisie d'avancement vit
@@ -201,6 +205,10 @@ function init() {
   ];
   window.GristServiceContext.watchContextTables(dashboardSourceTables, () => {
     if (state.recordsReady && elements.projectDropdown.value) void updateDashboard();
+  }, {
+    nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
+    projectScopedSignals: true,
+    acceptAnyNativeTableSignal: true,
   });
 }
 

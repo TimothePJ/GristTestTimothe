@@ -539,3 +539,27 @@ test("la fusion REST déduplique les alias par id et garde un ordre stable", () 
     { id: 3, Name: "C" },
   ]);
 });
+
+test("le signal de donnees conserve sa portee projet sans casser l'ancien parseur", () => {
+  const rawSignal = JSON.stringify({
+    version: core.DATA_SIGNAL_VERSION,
+    tables: ["References2", "References2", "ListePlan_NDC_COF"],
+    projectId: 12,
+    projectNumber: " 00100 ",
+  });
+
+  assert.deepEqual(core.parseDataChangeSignal(rawSignal), [
+    "References2",
+    "ListePlan_NDC_COF",
+  ]);
+  assert.deepEqual(core.parseDataChangeSignalDetail(rawSignal), {
+    tables: ["References2", "ListePlan_NDC_COF"],
+    projectId: 12,
+    projectNumber: "00100",
+  });
+  assert.deepEqual(core.parseDataChangeSignalDetail("invalide"), {
+    tables: [],
+    projectId: null,
+    projectNumber: "",
+  });
+});

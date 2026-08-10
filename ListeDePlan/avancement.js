@@ -26,6 +26,12 @@ window.GristServiceContext.watchContextTable('ListePlan_NDC_COF', (newRecords) =
   records = newRecords;
   populateProjectDropdown();
   updateDashboard();
+}, {
+  // Accepte aussi le signal d'une vue historique, sans utiliser ses lignes comme
+  // source : le watcher relit toujours ListePlan_NDC_COF.
+  acceptAnyNativeTableSignal: true,
+  nativeSignalFilter: window.ListePlanSyncRelay?.acceptNativeSignalForCurrentProject,
+  projectScopedSignals: true,
 });
 
 // Le tableau de bord agrège aussi la ventilation des heures, saisie depuis un
