@@ -379,7 +379,7 @@ export async function createProjectWithBudget({ name, projectNumber, dop = "", b
   const tables = APP_CONFIG.grist.tables;
   const columns = APP_CONFIG.grist.columns;
 
-  await applyActions([
+  const actions = [
     [
       "AddRecord",
       tables.projects,
@@ -390,20 +390,22 @@ export async function createProjectWithBudget({ name, projectNumber, dop = "", b
         [columns.projects.dop]: dop,
       },
     ],
-  ]);
+    ...(budgetLines || []).map((line) => [
+      "AddRecord",
+      tables.budget,
+      null,
+      {
+        [columns.budget.projectNumber]: projectNumber,
+        [columns.budget.chapter]: line.chapter,
+        [columns.budget.amount]: line.amount,
+        [columns.budget.service]: getActiveService(),
+      },
+    ]),
+  ];
 
-  const actions = (budgetLines || []).map((line) => [
-    "AddRecord",
-    tables.budget,
-    null,
-    {
-      [columns.budget.projectNumber]: projectNumber,
-      [columns.budget.chapter]: line.chapter,
-      [columns.budget.amount]: line.amount,
-      [columns.budget.service]: getActiveService(),
-    },
-  ]);
-
+  // Projet, budget et signal temps reel partent dans une seule transaction :
+  // aucune autre fenetre ne peut observer un projet encore prive de son budget,
+  // et une seule ecriture serveur suffit.
   await applyActions(actions);
 }
 

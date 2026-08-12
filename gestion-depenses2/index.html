@@ -128,10 +128,17 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-    <script src="../shared/service-context-core.js?v=20260810-sync3"></script>
-    <script src="../shared/grist-service-context.js?v=20260810-sync3"></script>
+    <script src="../shared/service-context-core.js?v=20260812-sync6"></script>
+    <script src="../shared/grist-service-context.js?v=20260812-sync6"></script>
     <script>
+      // Contrat explicite des donnees modifiables depuis ce widget. Le test de
+      // couverture compare cette liste aux ecritures du service : ajouter un
+      // nouveau champ metier sans son canal de synchronisation fera echouer le test.
+      const gestionDepensesEditableTables = Object.freeze([
+        "Projets2", "Budget", "ProjectTeam", "TimeSegment", "TimeReal"
+      ]);
       window.ProjectMutationSyncConfig = {
+        editableTables: gestionDepensesEditableTables,
         mutationSignals: {
           GestionDepenses_Sync: [
             "Projets2", "Budget", "ListePlan_NDC_COF", "Planning_Projet",
@@ -164,13 +171,14 @@
         },
         directSignalTables: [
           "Budget", "ListePlan_NDC_COF", "Planning_Projet", "ProjectTeam",
-          "Timesheet", "TimeSegment", "TimeReal", "Team", "Time-Out", "Time_Out"
+          "Timesheet", "TimeSegment", "TimeReal", "Team",
+          "Time-Out", "Time_Out", "TimeOut"
         ],
         dropdownIds: ["project-select"]
       };
     </script>
-    <script src="../shared/project-mutation-sync-relay.js?v=20260810-sync3"></script>
-    <script type="module" src="assets/js/main.js?v=20260810-sync3"></script>
+    <script src="../shared/project-mutation-sync-relay.js?v=20260812-sync6"></script>
+    <script type="module" src="assets/js/main.js?v=20260812-sync6"></script>
 
     <div id="edit-budget-modal" class="modal" style="display: none;">
         <div class="modal-content modal-content--budget">

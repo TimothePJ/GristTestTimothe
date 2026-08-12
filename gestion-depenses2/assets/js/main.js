@@ -1868,8 +1868,6 @@ function renderAppPreservingScroll() {
 // l'utilisateur a sous les yeux, donc il ne permet pas de distinguer un
 // changement de projet d'une simple relecture.
 let lastRenderedProjectId = null;
-// Un rendu des taux a ete saute parce que l'utilisateur y saisissait : il reste du.
-let teamRatesRenderPending = false;
 
 function renderApp() {
   cancelDeferredProjectViewsRender();
@@ -1921,21 +1919,13 @@ function renderDeferredProjectViews(selectedProject = getSelectedProject()) {
     return;
   }
 
-  // Seule une saisie de taux doit retarder le rendu. Un bouton d'action garde
-  // aussi le focus pendant son traitement asynchrone : assimiler ce focus a une
-  // saisie empechait notamment la fiche supprimee de disparaitre avant un reload.
-  const dailyRateInputFocused =
-    document.activeElement instanceof HTMLInputElement &&
-    document.activeElement.classList.contains("daily-rate") &&
-    dom.teamManagementRates instanceof HTMLElement &&
-    dom.teamManagementRates.contains(document.activeElement);
-  if (dailyRateInputFocused) teamRatesRenderPending = true;
+  const rateDraft = captureDailyRateDraft(dom.teamManagementRates, selectedProject);
   renderTables(dom, selectedProject, {
     selectedYear: state.selectedYear,
     selectedMonth: state.selectedMonth,
     monthSpan: state.monthSpan,
-    skipRateControls: dailyRateInputFocused,
   });
+  restoreDailyRateDraft(dom.teamManagementRates, rateDraft);
   renderSpendingBillingEditor(dom.spendingBillingEditor, selectedProject, {
     selectedYear: state.selectedYear,
     selectedMonth: state.selectedMonth,
@@ -2511,7 +2501,13 @@ async function performLoadData(
     selectedProject?.id != null && selectedProject.id === lastRenderedProjectId
       ? captureAppScroll()
       : null;
-  saveSharedProjectSelection(selectedProject?.name || selectedProject?.projectNumber || "");
+  // Conserver aussi l'ID canonique. Le relais le lit pour porter chaque
+  // modification sur la bonne ligne Projets2, y compris apres un rafraichissement
+  // automatique qui a reconstruit le selecteur.
+  saveSharedProjectSelection(
+    selectedProject?.name || selectedProject?.projectNumber || "",
+    selectedProject?.id ?? null
+  );
   renderApp();
   restoreScroll?.();
   expenseDataReady = true;
@@ -2601,6 +2597,62 @@ function bindExpenseDataRefresh() {
       acceptAnyNativeTableSignal: true,
     }
   );
+}
+
+// Un simple focus ne doit jamais bloquer une mise a jour distante de Gestion -
+// Equipe. Si l'utilisateur a vraiment commence a modifier un taux, on redessine
+// quand meme toute la section avec les nouvelles lignes puis on restitue seulement
+// son brouillon dans le champ correspondant.
+export function captureDailyRateDraft(boardEl, project) {
+  const activeInput = document.activeElement;
+  if (
+    !(activeInput instanceof HTMLInputElement) ||
+    !activeInput.classList.contains("daily-rate") ||
+    !(boardEl instanceof HTMLElement) ||
+    !boardEl.contains(activeInput)
+  ) {
+    return null;
+  }
+
+  const workerId = Number(activeInput.dataset.workerId);
+  const worker = (project?.workers || []).find(
+    (currentWorker) => Number(currentWorker?.id) === workerId
+  );
+  if (!worker) return null;
+
+  // Comparer a la valeur qui etait peinte avant la notification, pas au nouvel
+  // etat du projet : sinon un taux modifie a distance serait pris pour un brouillon
+  // local et l'ancienne valeur resterait visible jusqu'au clic suivant.
+  const persistedValue = String(activeInput.dataset.persistedRate || "");
+  if (activeInput.value === persistedValue) return null;
+  return {
+    workerId,
+    value: activeInput.value,
+    selectionStart: activeInput.selectionStart,
+    selectionEnd: activeInput.selectionEnd,
+  };
+}
+
+export function restoreDailyRateDraft(boardEl, draft) {
+  if (!(boardEl instanceof HTMLElement) || !draft) return false;
+  const input = Array.from(boardEl.querySelectorAll("input.daily-rate")).find(
+    (candidate) => Number(candidate?.dataset?.workerId) === Number(draft.workerId)
+  );
+  if (!(input instanceof HTMLInputElement)) return false;
+  input.value = draft.value;
+  input.focus({ preventScroll: true });
+  if (
+    Number.isInteger(draft.selectionStart) &&
+    Number.isInteger(draft.selectionEnd) &&
+    typeof input.setSelectionRange === "function"
+  ) {
+    try {
+      input.setSelectionRange(draft.selectionStart, draft.selectionEnd);
+    } catch (_error) {
+      // Certains navigateurs ne permettent pas la selection sur input number.
+    }
+  }
+  return true;
 }
 
 function resetNewProjectForm() {
@@ -5859,16 +5911,6 @@ function bindEvents() {
   dom.teamManagementRates.addEventListener("change", handleTeamManagementSummaryToggleChange);
   dom.teamManagementRates.addEventListener("change", handleTableInputChange);
   dom.teamManagementRates.addEventListener("click", handleDeleteWorker);
-  // Sans cette reprise, une section sautee pendant la saisie resterait perimee
-  // indefiniment : quitter le champ sans rien modifier n'emet aucun evenement.
-  dom.teamManagementRates.addEventListener("focusout", () => {
-    window.setTimeout(() => {
-      if (!teamRatesRenderPending) return;
-      if (dom.teamManagementRates.contains(document.activeElement)) return;
-      teamRatesRenderPending = false;
-      renderDeferredProjectViews();
-    }, 0);
-  });
   const timelineBoards = [dom.chargePlanBoard];
 
   timelineBoards.forEach((boardEl) => {

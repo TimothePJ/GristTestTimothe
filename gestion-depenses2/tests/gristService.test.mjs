@@ -11,6 +11,49 @@ async function importFreshService(label) {
   return import(url.href);
 }
 
+test("la creation du projet et de son budget est une transaction unique", async () => {
+  const appliedTransactions = [];
+  const previousWindow = globalThis.window;
+  const previousServiceContext = globalThis.GristServiceContext;
+  globalThis.GristServiceContext = { getService: () => "Structure" };
+  globalThis.window = {
+    grist: {
+      docApi: {
+        async fetchTable() { return emptyTable(); },
+        async applyUserActions(actions) {
+          appliedTransactions.push(actions);
+          return { retValues: [52, 53, 54] };
+        },
+      },
+    },
+  };
+
+  try {
+    const service = await importFreshService("atomic-project-budget");
+    await service.createProjectWithBudget({
+      name: "Projet synchronise",
+      projectNumber: "4242",
+      budgetLines: [
+        { chapter: "Etudes", amount: 1000 },
+        { chapter: "Travaux", amount: 2000 },
+      ],
+    });
+
+    assert.equal(appliedTransactions.length, 1);
+    assert.deepEqual(
+      appliedTransactions[0].map((action) => [action[0], action[1]]),
+      [
+        ["AddRecord", "Projets2"],
+        ["AddRecord", "Budget"],
+        ["AddRecord", "Budget"],
+      ]
+    );
+  } finally {
+    globalThis.window = previousWindow;
+    globalThis.GristServiceContext = previousServiceContext;
+  }
+});
+
 test("createTimeSegment rafraichit les alias de colonnes avant l'ecriture", async () => {
   let timeSegmentTable = {
     id: [1],

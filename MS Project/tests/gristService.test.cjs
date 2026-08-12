@@ -46,13 +46,13 @@ const TEST_CONFIG = {
 
 let moduleSequence = 0;
 
-async function loadService({ grist, runtime = null, DOMParser = null }) {
+async function loadService({ grist, fetch = null, DOMParser = null }) {
   const source = fs.readFileSync(servicePath, "utf8").replace(
     'import { APP_CONFIG } from "../config.js";',
     "const APP_CONFIG = globalThis.__MS_PROJECT_TEST_CONFIG;"
   );
   global.__MS_PROJECT_TEST_CONFIG = TEST_CONFIG;
-  global.window = { grist, GristServiceContext: runtime };
+  global.window = { grist, fetch };
   if (DOMParser) global.DOMParser = DOMParser;
   moduleSequence += 1;
   const url = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}#${moduleSequence}`;
@@ -61,22 +61,26 @@ async function loadService({ grist, runtime = null, DOMParser = null }) {
 
 function createGristHarness(
   initialTables,
-  { failMsProjectMutation = false, fetchTableOverride = null } = {}
+  { failMsProjectMutation = false } = {}
 ) {
   const tables = structuredClone(initialTables);
   const fetchCalls = [];
   const actionBatches = [];
+  const restCalls = [];
   let nextId = 1000;
 
   const grist = {
     ready() {},
     docApi: {
+      async getAccessToken() {
+        return {
+          baseUrl: "https://grist.invalid/api/docs/test-doc",
+          token: "test-token",
+          ttlMsecs: 60000,
+        };
+      },
       async fetchTable(tableName, options = {}) {
         fetchCalls.push({ tableName, options });
-        if (typeof fetchTableOverride === "function") {
-          const overridden = await fetchTableOverride({ tableName, options, tables });
-          if (overridden !== undefined) return overridden;
-        }
         if (!Object.prototype.hasOwnProperty.call(tables, tableName)) {
           throw new Error(`Table inconnue: ${tableName}`);
         }
@@ -117,7 +121,32 @@ function createGristHarness(
     },
   };
 
-  return { grist, tables, fetchCalls, actionBatches };
+  const fetch = async (url) => {
+    const parsed = new URL(url);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const tableName = decodeURIComponent(segments.at(-2));
+    const filter = JSON.parse(parsed.searchParams.get("filter") || "null");
+    restCalls.push({ tableName, filter, url });
+    if (!Object.prototype.hasOwnProperty.call(tables, tableName)) {
+      return { ok: false, status: 404, async json() { return {}; } };
+    }
+    const rows = [];
+    const table = tables[tableName];
+    const ids = Array.isArray(table.id) ? table.id : [];
+    for (let index = 0; index < ids.length; index += 1) {
+      const fields = {};
+      Object.entries(table).forEach(([column, values]) => {
+        if (column !== "id" && Array.isArray(values)) fields[column] = values[index];
+      });
+      const matches = !filter || Object.entries(filter).every(([column, values]) => (
+        (Array.isArray(values) ? values : [values]).some((value) => Object.is(fields[column], value))
+      ));
+      if (matches) rows.push({ id: ids[index], fields });
+    }
+    return { ok: true, status: 200, async json() { return { records: rows }; } };
+  };
+
+  return { grist, fetch, tables, fetchCalls, restCalls, actionBatches };
 }
 
 function createXmlParser() {
@@ -176,14 +205,27 @@ test("le démarrage construit les options uniquement depuis MsProjectNom", async
       Nom: ["Ne doit pas être lu"],
     },
   });
-  const service = await loadService({ grist: harness.grist });
+  const service = await loadService({ grist: harness.grist, fetch: harness.fetch });
 
   const names = await service.buildProjectOptions();
 
   assert.deepEqual(names, ["Projet A", "Projet B"]);
   assert.deepEqual(harness.fetchCalls.map((call) => call.tableName), ["MsProjectNom"]);
-  assert.equal(harness.fetchCalls[0].options.fullTable, true);
-  assert.deepEqual(harness.fetchCalls[0].options.requiredColumns, ["Nom"]);
+  assert.deepEqual(harness.restCalls, []);
+});
+
+test("aucun nom sélectionné ne déclenche aucune lecture de MsProject", async () => {
+  const harness = createGristHarness({
+    MsProjectNom: { id: [1], Nom: ["Projet A"] },
+    MsProject: { id: [10], Nom: ["Projet A"] },
+  });
+  const service = await loadService({ grist: harness.grist, fetch: harness.fetch });
+
+  const rows = await service.fetchMsProjectRows("");
+
+  assert.deepEqual(rows, []);
+  assert.deepEqual(harness.fetchCalls, []);
+  assert.deepEqual(harness.restCalls, []);
 });
 
 test("le projet sélectionné est demandé par filtre REST puis vérifié strictement localement", async () => {
@@ -195,18 +237,15 @@ test("le projet sélectionné est demandé par filtre REST puis vérifié strict
       Nom_Tache: ["A", "B", "A avec espaces"],
     },
   });
-  const service = await loadService({ grist: harness.grist });
+  const service = await loadService({ grist: harness.grist, fetch: harness.fetch });
 
   const rows = await service.fetchMsProjectRows("Projet A");
 
   assert.deepEqual(rows.map((row) => row.id), [10]);
-  assert.deepEqual(harness.fetchCalls[0], {
-    tableName: "MsProject",
-    options: {
-      restFilter: { Nom: ["Projet A"] },
-      requiredColumns: ["Nom"],
-    },
-  });
+  assert.deepEqual(harness.fetchCalls, []);
+  assert.deepEqual(harness.restCalls.map(({ tableName, filter }) => ({ tableName, filter })), [
+    { tableName: "MsProject", filter: { Nom: ["Projet A"] } },
+  ]);
 });
 
 test("un import réussi ajoute le nom après MsProject et un remplacement ne le duplique pas", async () => {
@@ -214,11 +253,9 @@ test("un import réussi ajoute le nom après MsProject et un remplacement ne le 
     MsProjectNom: { id: [], Nom: [] },
     MsProject: emptyMsProjectTable(),
   });
-  const invalidated = [];
-  const runtime = { invalidateCache(tableName) { invalidated.push(tableName); } };
   const service = await loadService({
     grist: harness.grist,
-    runtime,
+    fetch: harness.fetch,
     DOMParser: createXmlParser(),
   });
   const file = {
@@ -249,25 +286,17 @@ test("un import réussi ajoute le nom après MsProject et un remplacement ne le 
   assert.equal(allCatalogActions.length, 1);
   assert.deepEqual(harness.tables.MsProjectNom.Nom, ["Projet A"]);
   assert.equal(harness.tables.MsProject.Nom.filter((name) => name === "Projet A").length, 1);
-  assert.ok(invalidated.includes("MsProject"));
-  assert.ok(invalidated.includes("MsProjectNom"));
+  assert.equal(harness.fetchCalls.some((call) => call.tableName === "MsProject"), false);
 });
 
-test("un nouvel import récupère le schéma si le filtre REST ne renvoie encore aucune ligne", async () => {
-  const harness = createGristHarness(
-    {
-      MsProjectNom: { id: [], Nom: [] },
-      MsProject: emptyMsProjectTable(),
-    },
-    {
-      fetchTableOverride({ tableName, options }) {
-        if (tableName === "MsProject" && options.restFilter) return { id: [] };
-        return undefined;
-      },
-    }
-  );
+test("un nouvel import ne lit pas toute la table quand le filtre REST ne renvoie aucune ligne", async () => {
+  const harness = createGristHarness({
+    MsProjectNom: { id: [], Nom: [] },
+    MsProject: emptyMsProjectTable(),
+  });
   const service = await loadService({
     grist: harness.grist,
+    fetch: harness.fetch,
     DOMParser: createXmlParser(),
   });
   const file = {
@@ -276,7 +305,7 @@ test("un nouvel import récupère le schéma si le filtre REST ne renvoie encore
   };
 
   const result = await service.importMsProjectXmlFile(file);
-  const msProjectFetches = harness.fetchCalls.filter(
+  const msProjectFetches = harness.restCalls.filter(
     (call) => call.tableName === "MsProject"
   );
   const importedAction = harness.actionBatches
@@ -284,9 +313,8 @@ test("un nouvel import récupère le schéma si le filtre REST ne renvoie encore
     .find((action) => action[0] === "AddRecord" && action[1] === "MsProject");
 
   assert.equal(result.importedCount, 1);
-  assert.equal(msProjectFetches.length, 2);
-  assert.deepEqual(msProjectFetches[0].options.restFilter, { Nom: ["Nouveau projet"] });
-  assert.equal(msProjectFetches[1].options.fullTable, true);
+  assert.equal(msProjectFetches.length, 1);
+  assert.deepEqual(msProjectFetches[0].filter, { Nom: ["Nouveau projet"] });
   assert.equal(importedAction[3].Nom, "Nouveau projet");
   assert.deepEqual(harness.tables.MsProjectNom.Nom, ["Nouveau projet"]);
 });
@@ -301,6 +329,7 @@ test("un import dont l'écriture MsProject échoue ne modifie jamais MsProjectNo
   );
   const service = await loadService({
     grist: harness.grist,
+    fetch: harness.fetch,
     DOMParser: createXmlParser(),
   });
   const file = {

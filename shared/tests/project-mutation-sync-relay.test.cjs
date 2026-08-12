@@ -143,6 +143,30 @@ test("les changements d'un autre projet sont ignores", () => {
   }), true);
 });
 
+test("la creation d'un projet reveille le catalogue meme sans projet courant", () => {
+  const harness = createHarness({ projectId: null });
+  const accepts = harness.window.ProjectMutationSyncRelay.acceptNativeSignalForCurrentProject;
+
+  assert.equal(accepts({
+    sectionTableId: "Projets2",
+    watchedTableName: "Projets2",
+    delivery: { reason: "selection" },
+    records: [{ id: 12 }, { id: 99 }],
+  }), false);
+  assert.equal(accepts({
+    sectionTableId: "Projets2",
+    watchedTableName: "Projets2",
+    delivery: { reason: "records" },
+    records: [{ id: 12 }, { id: 99 }, { id: 123 }],
+  }), true);
+  assert.equal(accepts({
+    sectionTableId: "Projets2",
+    watchedTableName: "Budget",
+    delivery: { reason: "records" },
+    records: [{ id: 12 }, { id: 99 }, { id: 123 }],
+  }), false, "seul le catalogue Projets2 doit etre relu");
+});
+
 test("le signal invalide la table metier ciblee et pas les autres caches", () => {
   const harness = createHarness();
   const accepts = harness.window.ProjectMutationSyncRelay.acceptNativeSignalForCurrentProject;

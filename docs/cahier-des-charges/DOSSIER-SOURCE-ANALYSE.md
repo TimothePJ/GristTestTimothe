@@ -75,7 +75,9 @@
 | Lecteur | Le **service informatique** |
 | Socle technique | **Grist est conservé** |
 | Version Grist | 1.3.3 aujourd'hui, montée prévue — **information de contexte, ne pas en faire un sujet du document** |
-| Périmètre décrit | **Branche `main` uniquement** (production) ; travaux en cours exclus |
+| Périmètre décrit | **État courant de la plateforme**, chantier de synchronisation inter-widgets inclus (terminé, en attente de fusion vers `main`) |
+| Lecture des données | **REST Grist en premier**, avec repli automatique sur l'API historique `fetchTable()` — cf. §6.9 bis |
+| Synchronisation inter-widgets | **Colonnes-signal dans `Projets2`** (7 colonnes `*_Sync`), sans interrogation périodique — cf. §8.1 |
 | Traitement des 15 applications | **À plat**, sans hiérarchisation par fréquence d'usage |
 | Dossiers hérités | **Hors périmètre** — conservés uniquement comme traces historiques |
 | Situation antérieure | **Fichiers Excel** : macros cassées, duplication de fichiers non mis à jour |
@@ -181,9 +183,9 @@ Autres éléments de contexte présents dans le dépôt :
 | Services couverts | **`Structure` uniquement** (extension en cours) |
 | Collaborateurs externes | aucun |
 | Applications en production | 15 |
-| Lignes de code | ~100 600 |
+| Lignes de code | ~104 200 |
 | Fichiers source | 164 |
-| Fichiers de tests | 37 |
+| Fichiers de tests | 50 (352 tests, tous au vert) |
 | Contributeurs | 1 |
 
 **Nuance importante à faire passer** `[FACTUEL]` : la mise en service s'est faite
@@ -248,23 +250,23 @@ supérieur soutiennent la démarche.
 
 | # | Application | LOC | Rôle en une phrase |
 |---|---|---|---|
-| 1 | `gestion-depenses2` | 18 922 | Gestion économique complète d'un projet |
-| 2 | `Planning Projet` | 16 730 | Planning de production documentaire |
-| 3 | `ListeDePlan` | 11 344 | Liste des plans et éditions PDF |
-| 4 | `Reference2` | 10 894 | Suivi des données d'entrée |
-| 5 | `planning-synchro` | 10 884 | Planning + plan de charge sur une frise unique |
-| 6 | `MS Project` | 5 902 | Import et visualisation du planning travaux |
-| 7 | `Time-Out` | 4 218 | Congés et absences |
-| 8 | `creation-projet` | 3 871 | Assistant de création de projet |
-| 9 | `Avancement` | 2 658 | Tableau de bord d'avancement |
-| 10 | `Gestion-globale` | 2 634 | Vue consolidée multiprojets |
-| 11 | `Gestion-User` | 2 516 | Taux d'occupation des collaborateurs |
-| 12 | `Bordereau` | 2 327 | Bordereaux de transmission |
-| 13 | `gestion-equipe` | 2 298 | Administration de l'équipe et des projets |
-| 14 | `EnAttente` | 1 805 | Tableau de bord des données d'entrée manquantes |
-| 15 | `gestion-acces-interservices` | 1 121 | Administration des affectations projet/personne |
-| — | `shared` (socle commun) | 2 448 | Contexte projet/service partagé |
-| | **Total** | **100 572** | |
+| 1 | `gestion-depenses2` | 19 305 | Gestion économique complète d'un projet |
+| 2 | `Planning Projet` | 16 770 | Planning de production documentaire |
+| 3 | `ListeDePlan` | 11 664 | Liste des plans et éditions PDF |
+| 4 | `Reference2` | 11 089 | Suivi des données d'entrée |
+| 5 | `planning-synchro` | 10 650 | Planning + plan de charge sur une frise unique |
+| 6 | `MS Project` | 6 110 | Import et visualisation du planning travaux |
+| 7 | `Time-Out` | 4 268 | Congés et absences |
+| 8 | `creation-projet` | 3 910 | Assistant de création de projet |
+| 9 | `Avancement` | 2 740 | Tableau de bord d'avancement |
+| 10 | `Gestion-globale` | 2 724 | Vue consolidée multiprojets |
+| 11 | `Gestion-User` | 2 540 | Taux d'occupation des collaborateurs |
+| 12 | `Bordereau` | 2 392 | Bordereaux de transmission |
+| 13 | `gestion-equipe` | 2 358 | Administration de l'équipe et des projets |
+| 14 | `EnAttente` | 1 879 | Tableau de bord des données d'entrée manquantes |
+| 15 | `gestion-acces-interservices` | 1 175 | Administration des affectations projet/personne |
+| — | `shared` (socle commun) | 4 656 | Contexte projet/service, chargement REST et synchronisation |
+| | **Total** | **~104 200** | |
 
 ### 2.2 Hors périmètre
 
@@ -457,16 +459,26 @@ chantier de consolidation identifié.
 
 ### 3.7 Le socle commun `shared/`
 
-`[FACTUEL]` — 3 fichiers, 2 448 lignes, chargés par **12 pages** :
+`[FACTUEL]` — **5 fichiers, 4 656 lignes**, chargés par la quasi-totalité des
+pages :
 
 | Fichier | Lignes | Rôle |
 |---|---|---|
-| `service-context-core.js` | 1 094 | **Noyau de calcul** : détermination des droits, normalisation des noms, sérialisation de `Projets2.Avancement`. Écrit pour être testable hors navigateur. |
-| `grist-service-context.js` | 1 083 | **Runtime navigateur** : interception des lectures et des écritures Grist, filtrage, mise en lecture seule de l'interface. |
-| `planning-closure-core.js` | 271 | Règles de **clôture** d'une ligne de planning, avec traitement des dates sans dérive de fuseau horaire. |
+| `grist-service-context.js` | 2 440 | **Moteur navigateur** : lecture REST filtrée, cache, repli automatique, interception des lectures et des écritures, mise en lecture seule de l'interface |
+| `service-context-core.js` | 1 423 | **Noyau de calcul** : droits, normalisation des noms, politique de filtrage par table, sérialisation de `Projets2.Avancement`. Écrit pour être testable hors navigateur |
+| `project-mutation-sync-relay.js` | 329 | **Relais de synchronisation générique** : émission et écoute des colonnes-signal (§4.7 bis) |
+| `planning-closure-core.js` | 271 | Règles de **clôture** d'une ligne de planning, sans dérive de fuseau horaire |
+| `reference-project-sync-relay.js` | 193 | Relais de synchronisation dédié aux **données d'entrée** |
 
-C'est la pièce d'architecture la plus intéressante à présenter : elle montre que
-la logique d'accès a été factorisée plutôt que répétée dans chaque application.
+C'est la pièce d'architecture la plus intéressante à présenter : la logique
+d'accès, de chargement et de synchronisation est **factorisée en un socle unique**
+plutôt que répétée dans chaque application. Le noyau de calcul est séparé du
+moteur navigateur précisément pour pouvoir être testé automatiquement — ce qui
+est fait, avec 149 tests sur le seul socle.
+
+`[FACTUEL]` — Un huitième relais existe côté application
+(`ListeDePlan/liste-plan-sync-relay.js`, 198 lignes) pour la liste des plans.
+`[INFÉRÉ]` — Il gagnerait à rejoindre `shared/`, comme les deux autres.
 
 ---
 
@@ -526,6 +538,7 @@ de la plateforme.
 | `Pourcentage_Facturation_Par_Mois` | Text | **JSON** — facturation mensuelle |
 | `TypeDoc` | Text | Types de documents propres au projet |
 | `Pourcentage` | Text | — |
+| **7 colonnes `*_Sync`** | Text | **Colonnes techniques de synchronisation entre écrans** — cf. §4.7 bis |
 
 > Particularité importante : un même **numéro** de projet peut porter
 > **plusieurs noms** (alias historiques). Le code gère explicitement cette
@@ -656,6 +669,73 @@ lecture défensive présent dans les applications.
 | Table `Ventilation` | **N'existe plus** — encore référencée par `ListeDePlan` (code mort) |
 | Tables `Projets`, `References`, `Transfert` | Anciennes versions, **plus utilisées** par aucune des 15 applications |
 | Colonnes `Team.Projets_Lecture_Structure` / `_Synthese` / `_Topographie` | **Ne donnent plus aucun droit** ; conservées pour historique |
+
+### 4.7 bis — Les colonnes de synchronisation de `Projets2`
+
+`[FACTUEL]` — Ajout récent, à présenter comme une **évolution d'architecture
+aboutie**, pas comme un détail technique.
+
+**Le problème résolu.** Quand un utilisateur modifie une donnée dans un écran,
+les autres écrans ouverts — sur son poste comme sur celui d'un collègue —
+affichent encore l'ancienne valeur. La première réponse avait été
+d'**interroger périodiquement** le serveur toutes les 30 secondes : coûteux en
+réseau, et malgré tout en retard d'une demi-minute.
+
+**La solution retenue.** Sept colonnes techniques ont été ajoutées à `Projets2`,
+une par domaine fonctionnel :
+
+| Colonne | Domaine | Écrite par |
+|---|---|---|
+| `References2_Sync` | données d'entrée | `Reference2` |
+| `ListePlan_Sync` | liste des plans | `ListeDePlan` |
+| `PlanningProjet_Sync` | planning d'études | `Planning Projet`, `planning-synchro`, `gestion-depenses2` |
+| `ChargePlanning_Sync` | plan de charge | `Planning Projet`, `planning-synchro`, `gestion-depenses2` |
+| `Avancement_Sync` | avancement | `Avancement`, `Planning Projet`, `planning-synchro`, `gestion-depenses2` |
+| `Bordereau_Sync` | bordereaux | `Bordereau` |
+| `GestionDepenses_Sync` | économie du projet | `gestion-depenses2` |
+
+**Le principe.** Après avoir écrit une donnée, un écran inscrit une nouvelle
+valeur dans la colonne-signal correspondante, **sur la ligne du projet
+concerné**. Comme `Projets2` est déjà chargée et surveillée par tous les écrans,
+Grist pousse ce changement à tous les postes connectés. Chaque écran regarde
+alors si le signal le concerne, et **ne recharge que les tables réellement
+touchées**.
+
+```
+Utilisateur A modifie un plan dans ListeDePlan
+        │
+        ├─▶ écriture dans ListePlan_NDC_COF
+        └─▶ Projets2[projet].ListePlan_Sync = nouvelle valeur
+                    │
+                    └─▶ Grist pousse le changement à tous les postes
+                              │
+                              ├─▶ Bordereau     recharge ListePlan_NDC_COF
+                              ├─▶ Avancement    recharge ListePlan_NDC_COF
+                              ├─▶ Planning Projet recharge ListePlan_NDC_COF
+                              └─▶ les autres écrans ignorent le signal
+```
+
+Chaque écran déclare, dans sa page, **ce qu'il émet** et **ce qu'il observe** —
+avec pour chaque signal la liste des tables à relire. La configuration est donc
+lisible et vérifiable, écran par écran.
+
+**Résultats.** `[FACTUEL]`
+
+- **L'interrogation périodique a été supprimée** : l'intervalle par défaut est
+  désormais à zéro. Des tests automatisés vérifient qu'**aucun widget n'arme de
+  minuterie de relecture** et qu'**aucun n'impose d'intervalle**.
+- La mise à jour est **immédiate** au lieu d'être différée jusqu'à 30 secondes.
+- Un test vérifie que **chaque écran branché sur le socle observe au moins une
+  table**, et un autre que `gestion-depenses2` **surveille bien toutes les
+  tables qu'il relit**.
+
+**Point à signaler honnêtement** `[FACTUEL]` : les colonnes-signal sont
+**créées automatiquement** dans `Projets2` (action `AddColumn`, type `Text`) si
+elles sont absentes. C'est un **écart avec le principe posé pour l'outil
+d'administration des accès**, qui refuse au contraire de démarrer si une colonne
+manque et ne modifie jamais le schéma (§6.8). L'écart est défendable — il s'agit
+de colonnes purement techniques, sans donnée métier — mais il mérite d'être
+énoncé plutôt que découvert.
 
 ### 4.8 Matrice Application × Table
 
@@ -986,6 +1066,155 @@ fonctionnelle y sont implémentées :
 la session, mais il n'existe pas de détection fiable côté widget. La
 recommandation est de **recetter avec de vrais comptes de test** plutôt qu'avec
 ce mode.
+
+### 6.9 bis — Chargement des données : REST d'abord, repli automatique
+
+`[FACTUEL]` — Deuxième évolution majeure récente, à présenter comme un travail
+d'optimisation abouti.
+
+**Le problème résolu.** Historiquement, chaque écran demandait à Grist la
+**table entière**, puis filtrait dans le navigateur. Sur un document qui grossit,
+cela transfère beaucoup de lignes qu'on jette aussitôt.
+
+**La solution retenue.** Le socle commun demande désormais à Grist, via son
+**API REST**, uniquement les lignes du projet et du service en cours. Le filtre
+est appliqué **côté serveur**. Une politique explicite est déclarée par table :
+
+| Politique | Filtre envoyé au serveur | Tables concernées |
+|---|---|---|
+| **Projet + Service** | numéro ou nom de projet **et** service | `References2`, `ListePlan_NDC_COF`, `Planning_Projet`, `Envois`, `Budget`, `ProjectTeam`, `TimeSegment`, `TimeReal` |
+| **Service seul** | service | `Emetteurs` |
+| **Lecture complète** | aucun filtre | `Team`, `Projets2`, `Time-Out`, `Timesheet`, `MsProject`, métadonnées Grist, alias non confirmés |
+| **API historique** | — | réservée au repli |
+
+Deux principes de prudence méritent d'être soulignés :
+
+1. **Aucun filtre n'est inventé.** Une table sans colonne `Service` fiable est
+   lue en entier plutôt que filtrée sur une colonne supposée. C'est explicite
+   dans le code, table par table, avec la raison inscrite à côté.
+2. **Le filtre serveur ne remplace pas le filtre client.** Toute réponse REST
+   est **re-filtrée dans le navigateur** avant d'être livrée à l'écran.
+
+**Le repli, en cascade.** Si quoi que ce soit empêche la lecture REST, l'écran
+revient automatiquement à l'API historique `fetchTable()` puis applique les
+filtres dans le navigateur :
+
+```
+Lecture REST filtrée
+   ↓  erreur réseau · jeton indisponible · réponse illisible
+   ↓  colonne obligatoire absente de la réponse
+   ↓  réponse vide contredite par l'API historique
+Lecture complète via fetchTable() + filtrage dans le navigateur
+   ↓
+Table vide immédiate si le projet ou le service requis est vide
+```
+
+Le repli est **ciblé** : il s'applique à la table concernée, pas à tout l'écran,
+et l'indisponibilité constatée est mémorisée pour la session afin de ne pas
+répéter un appel voué à l'échec.
+
+**Aucune perte de fonctionnalité en cas de repli.** C'est le point important
+pour un lecteur extérieur : le mode REST est une **optimisation**. S'il ne
+fonctionne pas — serveur ancien, jeton restreint, table non filtrable — les
+écrans continuent de fonctionner exactement comme avant, simplement en
+transférant plus de données.
+
+**Trois modes d'intégration** selon les besoins de l'écran :
+
+| Mode | Écrans | Comportement |
+|---|---|---|
+| Automatique | les 11 écrans de production courante | filtrage projet + service complet, lectures **et** écritures contrôlées |
+| Lecture complète prioritaire | `creation-projet`, `gestion-equipe`, `Time-Out` | lectures REST sans filtre inventé ; écritures **non** interceptées, car ces écrans travaillent par nature sur l'ensemble du document |
+| Contexte seul | *(aucun actuellement)* | contexte exposé, aucune interception |
+
+**Comment le vérifier** `[FACTUEL]` : chaque lecture est journalisée dans la
+console du navigateur sous une étiquette explicite — `[GristData][REST FILTRE]`,
+`[GristData][REST COMPLET]`, `[GristData][FALLBACK FETCHTABLE]` (avec la raison
+du repli), `[GristData][CACHE]`. C'est un point à mentionner : le comportement
+est **observable et diagnosticable**, il n'y a pas de boîte noire.
+
+**Dépendance à la version du serveur** `[FACTUEL]` : le jeton REST demandé est
+volontairement en lecture seule et n'est jamais stocké. Sur un serveur Grist
+ancien, ce jeton peut ne pas être reconnu par les règles d'accès et renvoyer une
+réponse vide ; le mécanisme de sonde détecte cette situation et bascule sur le
+repli pour la durée de la session. **C'est le comportement attendu, pas une
+panne.**
+
+### 6.9 ter — Effet estimé sur la charge serveur
+
+`[INFÉRÉ]` — **Modèle d'estimation**, à présenter comme tel : calculé à partir du
+schéma réel des tables et d'hypothèses explicites, non mesuré en production. Il
+donne un **ordre de grandeur** et un **facteur de réduction**.
+
+**Hypothèses**
+
+| Paramètre | Valeur |
+|---|---|
+| Projets | 40 (donc 40 lignes dans `Projets2` et `MsProjectNom`) |
+| Tables métier | 25 000 lignes |
+| Part d'un projet dans une table | ~625 lignes |
+| Avant | relecture complète de chaque table surveillée toutes les 30 s |
+| Après | rechargement des seules tables concernées, uniquement sur modification réelle |
+| Compression HTTP | ~10× (JSON très répétitif) |
+
+**Un choix d'architecture déterminant : la table de section**
+
+`[FACTUEL]` — Un widget Grist reçoit **toute la table à laquelle sa section est
+rattachée**, indépendamment de ce qu'il lit ensuite lui-même. Ce flux natif
+échappe complètement à l'optimisation REST. Le choix des tables de section est
+donc structurant, et il a été bien fait :
+
+| Table de section | Lignes | Widgets rattachés | Coût du flux natif |
+|---|---|---|---|
+| `Projets2` | 40 | 11 widgets | **~40 Ko chacun** |
+| `MsProjectNom` | 40 | `MS Project` | **~2 Ko** |
+| `Team` | ~60 | `gestion-equipe`, `gestion-acces-interservices` | **~18 Ko** |
+| `TimeSegment` | 25 000 | `Gestion-User` | **~4,6 Mo** |
+
+Rattacher 11 widgets à un catalogue de 40 lignes plutôt qu'à leur table métier
+ramène le flux natif de plusieurs mégaoctets à quelques dizaines de kilooctets.
+C'est aussi ce qui rend le mécanisme de colonnes-signal (§4.7 bis) pratiquement
+gratuit : le signal voyage sur une table que les widgets reçoivent déjà.
+
+**Résultat, 15 écrans ouverts, une heure de régime établi**
+
+| Poste | Volume |
+|---|---|
+| Flux natif Grist (sections) | 5,0 Mo — dont **4,6 Mo pour `Gestion-User` seul** |
+| `MS Project` (`MsProject` lue en entier) | 18,7 Mo |
+| Widgets à colonnes-signal (rechargement ciblé) | 13,3 Mo |
+| Autres écrans | 9,7 Mo |
+| **Total après** | **~47 Mo/h** |
+| **Total avant** | **~24 770 Mo/h** |
+| **Facteur de réduction** | **× 530** |
+
+**Trois effets se cumulent**, et il est utile de les distinguer car ils ne
+dépendent pas des mêmes conditions :
+
+1. **Le choix des tables de section** — acquis, indépendant de tout le reste.
+2. **La suppression de l'interrogation périodique** — acquise, **indépendante de
+   la version du serveur**. À elle seule, elle divise le nombre de lectures par
+   ~20.
+3. **Le filtrage serveur** — divise le volume de chaque lecture par ~40
+   (25 000 lignes → 625). C'est le seul des trois qui attend la montée de
+   version.
+
+Autrement dit : même si le filtrage REST devait rester indisponible, l'essentiel
+du gain est déjà acquis.
+
+**Le rechargement est ciblé, pas global** `[FACTUEL]` : chaque colonne-signal
+déclare les tables qu'elle invalide. Un signal « liste des plans modifiée » ne
+recharge que la liste des plans, pas les sept tables surveillées par l'écran.
+Sur `gestion-depenses2`, cette précision divise le trafic récurrent par quatre.
+
+**Les deux points qui restent** `[FACTUEL]`
+
+| Point | Poids | Nature |
+|---|---|---|
+| `MsProject` est déclarée en lecture complète alors que le widget filtre lui-même sur `Nom` | **~40 % du trafic résiduel** | La colonne existe et la valeur est connue : le filtrage serveur est possible |
+| `Gestion-User` a sa section sur `TimeSegment` (25 000 lignes) | **~10 % du trafic résiduel**, et incompressible par REST | Déplacer sa section vers une petite table réglerait le point |
+
+Traiter ces deux points ferait passer la réduction de × 530 à environ × 1 000.
 
 ### 6.10 Prérequis de données
 
@@ -1712,22 +1941,38 @@ personne reste affectée au projet.
 
 ### 8.1 Sélection de projet partagée entre écrans
 
-`[FACTUEL]` — Quand un écran change de projet, les autres suivent. Le mécanisme
-repose sur le stockage local du navigateur :
+`[FACTUEL]` — Deux mécanismes complémentaires, chacun sur son terrain.
+
+**1. Le projet sélectionné — stockage local du navigateur.**
+Quand un écran change de projet, les autres écrans **du même poste** suivent.
 
 | Clé | Rôle |
 |---|---|
 | `grist.selected-project-id` | identifiant du projet courant |
 | `grist.selected-project` | nom du projet courant |
 | `grist.selected-service` | service actif |
-| `grist.references-data-change` | signal : données d'entrée modifiées |
 | `grist.project-access-changed` | signal : droits modifiés |
 | `grist.dop-data-changed` | signal : registre DOP modifié |
 | `grist.project-data-changed` | signal : projet renommé ou renuméroté |
 
-`[INFÉRÉ]` — Limites : ne fonctionne qu'entre écrans servis depuis la même
-origine, pas de manière fiable entre onglets distincts, et aucun mécanisme de
-résolution de conflit. C'est un mécanisme pragmatique, à remplacer à terme.
+Ce mécanisme est adapté à ce qu'il fait : une préférence d'affichage locale n'a
+pas à traverser le réseau. `[INFÉRÉ]` — Sa limite est qu'il ne franchit pas la
+frontière du poste.
+
+**2. Les données modifiées — colonnes-signal dans `Projets2`.**
+C'est le mécanisme décrit en **§4.7 bis**, et c'est lui qui a remplacé
+l'interrogation périodique. Il passe par Grist, donc il **traverse les postes** :
+une modification faite par un collègue se répercute immédiatement sur l'écran
+d'un autre.
+
+**Ce que cela change concrètement** :
+
+| Avant | Maintenant |
+|---|---|
+| Relecture toutes les 30 secondes, que quelque chose ait changé ou non | Relecture **uniquement quand une donnée a changé** |
+| Jusqu'à 30 secondes de retard | Mise à jour immédiate |
+| Toutes les tables surveillées rechargées | **Seules les tables concernées** par le signal |
+| Trafic réseau permanent | Trafic proportionnel à l'activité réelle |
 
 ### 8.2 Segments au demi-jour
 
@@ -1875,24 +2120,32 @@ stables, fuseau horaire unique. C'est un axe d'amélioration structurel.
 
 ### 9.1 Tests unitaires
 
-`[FACTUEL]` — 37 fichiers, exécutés avec `node --test`.
+`[FACTUEL]` — **50 fichiers de tests, 352 tests, exécutés avec `node --test`.
+Résultat au 12 août 2026 : 352 réussites, 0 échec.**
 
-| Application | Fichiers | Couverture |
+| Périmètre | Tests | Couverture |
 |---|---|---|
-| `planning-synchro` | **19** | fenêtre temporelle, dates, phases, segments, plan de charge, graphique, accès aux données, registre projets, réception des références, avancement par service, jours fériés, absences, fenêtres modales |
-| `Time-Out` | **11** | tableau, configuration, dates, fenêtres d'édition et de motif, édition, jours fériés, accès aux données, identités, segments texte, modes d'affichage |
-| `gestion-depenses2` | 3 | jours fériés, absences, clôture |
-| `shared` | 2 | noyau du contexte, runtime |
-| `Planning Projet` | 1 | clôture |
-| `Reference2` | 1 | utilitaires d'édition groupée |
+| `shared` (socle) | **149** | droits, politique de filtrage par table, repli REST, relais de synchronisation, **couverture de synchronisation de tous les widgets** |
+| `planning-synchro` | **86** | fenêtre temporelle, dates, phases, segments, plan de charge, graphique, accès aux données, réception des références, jours fériés, absences |
+| `Time-Out` | **36** | tableau, configuration, dates, édition, jours fériés, accès aux données, identités, segments texte |
+| `Reference2` | **32** | édition groupée, dates limites, rendu du tableau |
+| `gestion-depenses2` | **23** | jours fériés, absences, clôture, lecture seule, sélecteurs, couverture de synchronisation |
+| `ListeDePlan` | **14** | format de dates, relais de synchronisation |
+| `Planning Projet` | 7 | clôture |
+| `MS Project` | 5 | accès aux données |
 
-**Sans aucun test** : `ListeDePlan` (11 344 lignes), `MS Project`, `Bordereau`,
-`EnAttente`, `creation-projet`, `gestion-equipe`, `Gestion-globale`,
-`Gestion-User`, `Avancement`, `gestion-acces-interservices`.
+**Point remarquable à mettre en avant** : le socle contient des tests qui
+vérifient l'**architecture elle-même**, pas seulement des fonctions isolées —
+par exemple que tous les widgets livrés sont bien déclarés, qu'aucun n'arme de
+minuterie de relecture, que chaque écran branché sur le socle observe au moins
+une table, et que `gestion-depenses2` surveille bien toutes les tables qu'il
+relit. Ce sont des garde-fous contre la régression d'architecture, ce qui est
+rare dans un projet de cette taille.
 
-Le déséquilibre est net : les deux applications les plus récentes sont
-massivement testées, les plus anciennes ne le sont pas. C'est le signe d'une
-pratique qui s'est installée en cours de route.
+**Sans test dédié** : `creation-projet`, `Bordereau`, `EnAttente`,
+`gestion-equipe`, `Gestion-globale`, `Gestion-User`, `Avancement`,
+`gestion-acces-interservices` — étant entendu que leur comportement de
+synchronisation est couvert par les tests du socle.
 
 ### 9.2 Exécution
 
@@ -1991,7 +2244,7 @@ Deux remarques mineures :
 | L9 | **Couplage par chemin relatif** entre `Gestion-globale` et `gestion-depenses2` | Maintenance | À corriger |
 | L10 | **Couverture de tests inégale** : 10 applications sur 15 sans test | Qualité | À rattraper progressivement |
 | L11 | **Création de projet non transactionnelle** (6 tables) | Données | À évaluer |
-| L12 | **Synchronisation entre écrans par le stockage du navigateur** | Technique | Pragmatique, à remplacer à terme |
+| L12 | **Création automatique des colonnes-signal** dans `Projets2` — écart avec le principe « aucune modification silencieuse du schéma » appliqué ailleurs (§4.7 bis) | Données | Assumé, à énoncer |
 | L13 | **Aucune trace** des attributions d'accès et des propagations de masse | Exploitation | À traiter |
 | L14 | **Format XML MS Project non documenté**, alors que les fichiers viennent d'un autre service | Fonctionnel | À formaliser |
 | L15 | Référence morte à la table `Ventilation` | Données | Nettoyage simple |
@@ -2095,12 +2348,14 @@ Elles montrent que l'auteur connaît son sujet.
 
 | Sujet | Constat |
 |---|---|
-| **Tests automatiques au déploiement** | 37 fichiers de tests existent mais ne sont pas exécutés automatiquement. |
+| **Tests automatiques au déploiement** | 352 tests existent et passent, mais ne sont pas exécutés automatiquement à chaque modification. |
 | **Environnement de recette** | Il n'en existe pas ; les évolutions passent directement en service. |
 | **Dépendances tierces** | Plusieurs bibliothèques sont chargées sans version épinglée. |
 | **Traçabilité des actions sensibles** | Les attributions d'accès et les renommages de projet ne laissent pas de trace exploitable. |
 | **Références stables dans le modèle** | Les liens entre projets, données et personnes reposent sur du texte plutôt que sur des références. |
 | **Séparation de `Projets2.Avancement`** | Les trois services partagent une même cellule ; une table dédiée serait plus propre. |
+| **Filtrage serveur de `MsProject`** | Seule table métier encore lue en entier ; ~40 % du trafic résiduel (§6.9 ter). |
+| **Table de section de `Gestion-User`** | Rattachée à `TimeSegment` (25 000 lignes) ; ~10 % du trafic résiduel, incompressible par REST (§6.9 ter). |
 | **Consolidation du code partagé** | Quelques modules existent en double ou en triple. |
 | **Couverture de tests** | Inégale : très bonne sur les applications récentes, absente sur les plus anciennes. |
 | **Nettoyage** | Référence morte à `Ventilation` ; page `guide/` à rendre autonome ; dossiers hérités à archiver. |

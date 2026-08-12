@@ -214,6 +214,9 @@ test('les widgets projet agreges utilisent le relais cible sans polling', () => 
 // même signal inter-widgets.
 test('un widget sans runtime ecoute quand meme le signal de modification', () => {
   WIDGETS.filter((directory) => !loadsSharedRuntime(directory)).forEach((directory) => {
+    // MS Project est volontairement figé tant qu'aucun nom n'est choisi et ne
+    // doit pas recevoir de signal global qui déclencherait une lecture métier.
+    if (directory === 'MS Project') return;
     const listens = collectScripts(directory).some((script) => {
       const source = fs.readFileSync(script, 'utf8');
       return source.includes('DATA_CHANGED_STORAGE_KEY');

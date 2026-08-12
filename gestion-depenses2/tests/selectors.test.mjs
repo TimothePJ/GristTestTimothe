@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getAvailableTeamMembers } from "../assets/js/ui/selectors.js";
+import {
+  getAvailableTeamMembers,
+  renderProjectOptions,
+} from "../assets/js/ui/selectors.js";
 
 test("la liste des collaborateurs fusionne les adresses mail d'une meme personne", () => {
   const members = [
@@ -46,4 +49,34 @@ test("une personne deja affectee masque toutes ses lignes Team", () => {
   const availableMembers = getAvailableTeamMembers(members, project);
 
   assert.deepEqual(availableMembers.map((member) => member.id), [23]);
+});
+
+test("le selecteur expose l'ID canonique au relais de synchronisation", () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = {
+    createElement() {
+      return { value: "", textContent: "", dataset: {} };
+    },
+  };
+  const select = {
+    innerHTML: "",
+    value: "",
+    options: [],
+    appendChild(option) { this.options.push(option); },
+  };
+
+  try {
+    renderProjectOptions(select, [{
+      id: 42,
+      projectNumber: "1111",
+      name: "Projet Test",
+    }], 42);
+
+    const projectOption = select.options[1];
+    assert.equal(projectOption.value, "42");
+    assert.equal(projectOption.dataset.projectId, "42");
+    assert.equal(projectOption.dataset.projectNumber, "1111");
+  } finally {
+    globalThis.document = previousDocument;
+  }
 });

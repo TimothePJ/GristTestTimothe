@@ -49,6 +49,7 @@
     "grist.selected-project-id",
   ].map(toText).filter(Boolean))];
   const lastSignalsByProjectId = new Map();
+  const lastProjectCatalogSignatures = new Map();
   const readySignalColumns = new Set();
   let signalSequence = 0;
   let preparePromise = null;
@@ -145,6 +146,34 @@
     return getSignalTables(column, signal).has(normalizedWatchedTable);
   }
 
+  function getProjectCatalogSignature(records) {
+    return (Array.isArray(records) ? records : [])
+      .map((row) => Number(row?.id))
+      .filter((id) => Number.isInteger(id) && id > 0)
+      .sort((left, right) => left - right)
+      .join(",");
+  }
+
+  // La creation d'un projet est le seul geste editable qui peut arriver alors
+  // qu'aucun projet courant n'existe encore. Elle ne peut donc pas porter son
+  // signal sur une ligne deja selectionnee. Le flux natif Projets2 suffit : une
+  // variation de la liste d'IDs reveille uniquement le watcher du catalogue.
+  function projectCatalogChanged(records, delivery, watchedTableName) {
+    if (toText(watchedTableName) !== PROJECTS_TABLE) return false;
+    const watcherKey = toText(watchedTableName) || "*";
+    const signature = getProjectCatalogSignature(records);
+    if (!lastProjectCatalogSignatures.has(watcherKey)) {
+      lastProjectCatalogSignatures.set(watcherKey, signature);
+      // Sans photo precedente, une section Projets2 peut deja livrer sa premiere
+      // mutation. On ne la traite que si aucun projet n'est encore selectionne :
+      // avec un projet courant, les colonnes techniques font le filtrage precis.
+      return delivery?.reason === "records" && !getCurrentProjectId() && Boolean(signature);
+    }
+    const previousSignature = lastProjectCatalogSignatures.get(watcherKey);
+    lastProjectCatalogSignatures.set(watcherKey, signature);
+    return delivery?.reason === "records" && signature !== previousSignature;
+  }
+
   function warnRelayUnavailable(error) {
     if (warningShown) return;
     warningShown = true;
@@ -213,12 +242,13 @@
     }
     if (normalizedSection && normalizedSection !== PROJECTS_TABLE) return false;
 
+    const catalogChanged = projectCatalogChanged(records, delivery, watchedTableName);
     const projectId = getCurrentProjectId();
-    if (!projectId) return false;
+    if (!projectId) return catalogChanged;
     const projectRow = (Array.isArray(records) ? records : []).find(
       (row) => Number(row?.id) === projectId
     );
-    if (!projectRow) return false;
+    if (!projectRow) return catalogChanged;
 
     let projectWatchers = lastSignalsByProjectId.get(projectId);
     if (!projectWatchers) {
@@ -254,7 +284,7 @@
         signalTargetsWatcher(column, signal, watchedTableName)
       ) changed = true;
     }
-    return changed;
+    return catalogChanged || changed;
   }
 
   function install() {

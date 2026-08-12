@@ -12,6 +12,9 @@ function fillSelect(selectEl, options, { placeholder = "", selectedValue = "" } 
     const option = document.createElement("option");
     option.value = String(optionConfig.value);
     option.textContent = optionConfig.label;
+    Object.entries(optionConfig.dataset || {}).forEach(([key, value]) => {
+      if (value != null && String(value).trim()) option.dataset[key] = String(value);
+    });
     selectEl.appendChild(option);
   });
 
@@ -90,6 +93,10 @@ export function renderProjectOptions(projectSelect, projects, selectedProjectId)
     (projects || []).map((project) => ({
       value: project.id,
       label: `${project.projectNumber} - ${project.name}`,
+      dataset: {
+        projectId: project.id,
+        projectNumber: project.projectNumber,
+      },
     })),
     {
       placeholder: "Choisir un projet",

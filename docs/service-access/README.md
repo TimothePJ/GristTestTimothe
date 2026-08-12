@@ -302,18 +302,19 @@ segments par ces personnes. Ces tables utilisent REST complet sans filtre
 serveur, puis reviennent à `fetchTable()` si REST est indisponible ou incohérent.
 Aucun filtre indirect n'est supposé sans schéma fiable.
 
-Dans le widget MS Project, le chargement des tâches utilise un filtre REST exact
-sur `MsProject.Nom`, avec la valeur choisie dans `projectDropdown`. La défense
-cliente et le fallback `fetchTable()` appliquent ensuite une égalité stricte sur
-le même nom. La liste est alimentée exclusivement par la petite table
-`MsProjectNom` (colonne texte `Nom`) : lecture REST complète de cette table,
-puis fallback automatique `fetchTable("MsProjectNom")`. Les valeurs sont
+Le widget MS Project n'embarque pas le runtime Projet/Service. Le chargement des
+tâches utilise une requête REST autonome avec un filtre exact sur
+`MsProject.Nom`, avec la valeur choisie dans `projectDropdown`. La défense
+cliente applique ensuite une égalité stricte sur le même nom et il n'existe
+aucun fallback complet sur `MsProject`. La liste est alimentée exclusivement par
+la petite table `MsProjectNom` (colonne texte `Nom`) via
+`fetchTable("MsProjectNom")`. Les valeurs sont
 nettoyées, les vides ignorés, les doublons supprimés et le résultat trié.
 L'ouverture du widget ne demande donc jamais `MsProject`. Après la réussite des
 écritures d'un import, le nom est ajouté à `MsProjectNom` uniquement s'il est
 absent ; un remplacement portant le même nom ne crée aucune ligne de catalogue.
-Les caches `MsProject` et `MsProjectNom` sont invalidés après ces mutations.
-Aucun filtre `Service` ou `NomProjet` n'est inventé pour ces tables.
+Le cache local de `MsProjectNom` est invalidé après ces mutations. Aucun filtre
+`Service` ou `NomProjet` n'est inventé pour ces tables.
 
 Avant la première lecture métier REST de chaque jeton, une sonde légère demande
 au plus une ligne de `Projets2`, sans cache. Si le catalogue brut déjà chargé

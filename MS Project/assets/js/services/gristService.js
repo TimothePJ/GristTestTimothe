@@ -3,12 +3,16 @@ import { APP_CONFIG } from "../config.js";
 const _msProjectServiceDiagnostics = {
   fetchTableCount: 0,
   fetchTableDurationMs: 0,
+  restFetchCount: 0,
+  restFetchDurationMs: 0,
   actionBatchCount: 0,
   actionCount: 0,
   actionDurationMs: 0,
 };
 
 let _cachedProjectNames = null;
+let _readOnlyAccessTokenEntry = null;
+let _readOnlyAccessTokenPromise = null;
 
 export function getMsProjectServiceDiagnostics() {
   return { ..._msProjectServiceDiagnostics };
@@ -83,53 +87,89 @@ async function fetchTableRows(tableName, options = {}) {
   return normalizeFetchTableResult(raw);
 }
 
-function extractColumnNamesFromFetchResult(raw) {
-  if (!raw) return [];
-  if (Array.isArray(raw.records) && raw.records.length > 0) {
-    return Object.keys(raw.records[0] || {});
-  }
-  if (Array.isArray(raw) && raw.length > 0) {
-    return Object.keys(raw[0] || {});
-  }
-  if (typeof raw === "object") {
-    return Object.keys(raw);
-  }
-  return [];
+function restRecordsToRows(raw) {
+  if (!raw || !Array.isArray(raw.records)) return [];
+  return raw.records.map((record) => ({
+    id: record?.id,
+    ...(record?.fields && typeof record.fields === "object" ? record.fields : {}),
+  }));
 }
 
-async function fetchTableSnapshot(tableName, options = {}) {
+async function getReadOnlyAccessToken({ forceRefresh = false } = {}) {
   const grist = getGrist();
-
-  if (!grist.docApi || typeof grist.docApi.fetchTable !== "function") {
-    throw new Error("grist.docApi.fetchTable(...) indisponible.");
+  if (typeof grist.docApi?.getAccessToken !== "function") {
+    throw new Error("Jeton REST Grist indisponible.");
   }
 
-  _msProjectServiceDiagnostics.fetchTableCount += 1;
-  const fetchStartedAt = performance.now();
-  const raw = await grist.docApi.fetchTable(tableName, options);
-  _msProjectServiceDiagnostics.fetchTableDurationMs += performance.now() - fetchStartedAt;
-  return {
-    rows: normalizeFetchTableResult(raw),
-    columnNames: extractColumnNamesFromFetchResult(raw),
-  };
+  const now = Date.now();
+  if (
+    !forceRefresh &&
+    _readOnlyAccessTokenEntry &&
+    _readOnlyAccessTokenEntry.expiresAt > now
+  ) {
+    return _readOnlyAccessTokenEntry.access;
+  }
+  if (_readOnlyAccessTokenPromise) return _readOnlyAccessTokenPromise;
+
+  _readOnlyAccessTokenPromise = Promise.resolve(
+    grist.docApi.getAccessToken({ readOnly: true })
+  ).then((access) => {
+    const baseUrl = toText(access?.baseUrl);
+    const token = typeof access?.token === "string" ? access.token : "";
+    const ttlMsecs = Math.max(0, Number(access?.ttlMsecs) || 0);
+    if (!baseUrl || !token || !ttlMsecs) {
+      throw new Error("Jeton REST Grist invalide.");
+    }
+    const renewBeforeMs = Math.min(30000, Math.max(100, Math.floor(ttlMsecs * 0.1)));
+    _readOnlyAccessTokenEntry = {
+      access: { baseUrl, token },
+      expiresAt: Date.now() + Math.max(0, ttlMsecs - renewBeforeMs),
+    };
+    return _readOnlyAccessTokenEntry.access;
+  }).finally(() => {
+    _readOnlyAccessTokenPromise = null;
+  });
+  return _readOnlyAccessTokenPromise;
 }
 
-function invalidateRuntimeTableCache(tableName) {
-  const normalizedTableName = toText(tableName);
-  if (!normalizedTableName) return;
-  const runtime = window.GristServiceContext;
-  if (typeof runtime?.invalidateCache === "function") {
-    runtime.invalidateCache(normalizedTableName);
+async function fetchRestRows(tableName, filter = null, { authRetry = false } = {}) {
+  if (typeof window.fetch !== "function") {
+    throw new Error("API fetch indisponible pour la lecture REST Grist.");
   }
+
+  const access = await getReadOnlyAccessToken();
+  const query = [];
+  if (filter && typeof filter === "object") {
+    query.push(`filter=${encodeURIComponent(JSON.stringify(filter))}`);
+  }
+  query.push(`auth=${encodeURIComponent(access.token)}`);
+  const baseUrl = access.baseUrl.replace(/\/+$/, "");
+  const url = `${baseUrl}/tables/${encodeURIComponent(tableName)}/records?${query.join("&")}`;
+  _msProjectServiceDiagnostics.restFetchCount += 1;
+  const fetchStartedAt = performance.now();
+  const response = await window.fetch(url);
+  _msProjectServiceDiagnostics.restFetchDurationMs += performance.now() - fetchStartedAt;
+
+  if ([401, 403].includes(Number(response?.status)) && !authRetry) {
+    _readOnlyAccessTokenEntry = null;
+    await getReadOnlyAccessToken({ forceRefresh: true });
+    return fetchRestRows(tableName, filter, { authRetry: true });
+  }
+  if (!response?.ok) {
+    throw new Error(`Lecture REST Grist impossible (${Number(response?.status) || "reseau"}).`);
+  }
+
+  const raw = await response.json();
+  if (!raw || !Array.isArray(raw.records)) {
+    throw new Error("Reponse REST Grist invalide.");
+  }
+  return restRecordsToRows(raw);
 }
 
 function invalidateMsProjectCaches({ catalog = false } = {}) {
-  const msProjectTableName = APP_CONFIG.grist.msProjectTable?.sourceTable;
-  invalidateRuntimeTableCache(msProjectTableName);
   if (!catalog) return;
 
   _cachedProjectNames = null;
-  invalidateRuntimeTableCache(APP_CONFIG.grist.msProjectNamesTable?.sourceTable);
 }
 
 function isIsoDate(value) {
@@ -871,22 +911,12 @@ export async function importMsProjectXmlFile(file) {
     throw new Error("Aucune tache exploitable trouvee (UID/Name manquants).");
   }
 
-  let { rows: existingRows, columnNames } = await fetchTableSnapshot(
-    table.sourceTable,
-    {
-      restFilter: { [sourceNameCol]: [sourceFileName] },
-      requiredColumns: [sourceNameCol],
-    }
-  );
-  if (!columnNames.includes(sourceNameCol)) {
-    ({ rows: existingRows, columnNames } = await fetchTableSnapshot(
-      table.sourceTable,
-      {
-        fullTable: true,
-        requiredColumns: [sourceNameCol],
-      }
-    ));
-  }
+  const existingRows = await fetchRestRows(table.sourceTable, {
+    [sourceNameCol]: [sourceFileName],
+  });
+  const columnNames = existingRows.length
+    ? Object.keys(existingRows[0])
+    : [...new Set(Object.values(columns).map(toText).filter(Boolean))];
   const hasKnownColumns = columnNames.length > 0;
   const canUseColumn = (columnName) => {
     if (!columnName) return false;
@@ -1040,15 +1070,12 @@ export async function syncPlanningDemarrageFromMsProjectStart(
   const msIdCol = msTable.columns?.id || "id";
   const msUniqueCol = msTable.columns?.uniqueNumber;
   const normalizedProject = toText(selectedProject);
-  const msRows = await fetchTableRows(
-    msTable.sourceTable,
-    normalizedProject
-      ? {
-          restFilter: { [sourceNameColumn]: [normalizedProject] },
-          requiredColumns: [sourceNameColumn, msIdCol, msUniqueCol].filter(Boolean),
-        }
-      : {}
-  );
+  if (!normalizedProject) {
+    return { updatedCount: 0, matchedCount: 0, skipped: true };
+  }
+  const msRows = await fetchRestRows(msTable.sourceTable, {
+    [sourceNameColumn]: [normalizedProject],
+  });
   const msSourceNameCol = resolveColumn(
     msRows,
     msTable.columns?.sourceName || "Nom",
@@ -1252,11 +1279,7 @@ export async function buildProjectOptions({ forceRefresh = false } = {}) {
     return [..._cachedProjectNames];
   }
 
-  const rows = await fetchTableRows(tableName, {
-    fullTable: true,
-    forceRefresh,
-    requiredColumns: [nameColumn],
-  });
+  const rows = await fetchTableRows(tableName);
   _cachedProjectNames = normalizeProjectNames(rows, nameColumn);
   return [..._cachedProjectNames];
 }
@@ -1275,7 +1298,6 @@ async function ensureProjectNameInCatalog(projectName) {
   }
 
   _cachedProjectNames = null;
-  invalidateRuntimeTableCache(tableName);
   const existingNames = await buildProjectOptions({ forceRefresh: true });
   if (existingNames.includes(normalizedProjectName)) return false;
 
@@ -1294,9 +1316,8 @@ export async function fetchMsProjectRows(selectedProject = "") {
   const normalizedProject = toText(selectedProject);
   if (!normalizedProject) return [];
   const sourceNameColumn = table.columns?.sourceName || "Nom";
-  const rows = await fetchTableRows(table.sourceTable, {
-    restFilter: { [sourceNameColumn]: [normalizedProject] },
-    requiredColumns: [sourceNameColumn],
+  const rows = await fetchRestRows(table.sourceTable, {
+    [sourceNameColumn]: [normalizedProject],
   });
   const filteredRows = rows.filter((row) => Object.is(row?.[sourceNameColumn], normalizedProject));
   console.info(`[GristData][FILTRE_LOCAL] ${table.sourceTable}`, {

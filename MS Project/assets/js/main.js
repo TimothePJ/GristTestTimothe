@@ -274,7 +274,7 @@ async function refreshMsProject() {
     if (!requestedProject) {
       cachedMsProjectRows = [];
       clearMsProjectTimeline();
-      setMsProjectStatus("Selectionne un projet pour charger ses taches.");
+      setMsProjectStatus("Selectionne un nom pour charger ses taches.");
       return;
     }
 
@@ -303,7 +303,7 @@ async function refreshMsProject() {
       if (!requestedProject) {
         setMsProjectStatus("");
       } else {
-        setMsProjectStatus("Aucune tache exploitable trouvee pour le projet selectionne.");
+        setMsProjectStatus("Aucune tache exploitable trouvee pour le nom selectionne.");
       }
       return;
     }
@@ -327,7 +327,7 @@ async function refreshMsProject() {
     }
 
     setMsProjectStatus(
-      `${timelineData.rowCount} tache(s) affichee(s) | Projet : ${requestedProject}`
+      `${timelineData.rowCount} tache(s) affichee(s) | Nom : ${requestedProject}`
     );
   } catch (error) {
     console.error("Erreur MS Project :", error);
@@ -345,6 +345,10 @@ async function refreshMsProject() {
         diagnosticsAfter.fetchTableCount - diagnosticsBefore.fetchTableCount,
       fetchTableDurationMs:
         Math.round((diagnosticsAfter.fetchTableDurationMs - diagnosticsBefore.fetchTableDurationMs) * 10) / 10,
+      restFetchCount:
+        diagnosticsAfter.restFetchCount - diagnosticsBefore.restFetchCount,
+      restFetchDurationMs:
+        Math.round((diagnosticsAfter.restFetchDurationMs - diagnosticsBefore.restFetchDurationMs) * 10) / 10,
       actionBatchCount:
         diagnosticsAfter.actionBatchCount - diagnosticsBefore.actionBatchCount,
       actionCount:
@@ -390,36 +394,6 @@ async function bootstrap() {
 
     await refreshMsProject();
 
-    // Le widget affiche les taches de MsProject et son selecteur liste MsProjectNom ;
-    // il croise aussi le planning et le catalogue de projets. Ces quatre tables sont
-    // ecrites depuis d'autres widgets — et par l'import XML d'ici meme.
-    const msTables = APP_CONFIG.grist;
-    window.GristServiceContext?.watchContextTables?.(
-      [
-        msTables.msProjectTable.sourceTable,
-        msTables.msProjectNamesTable.sourceTable,
-        msTables.planningSyncTable.sourceTable,
-        msTables.projectsTable.sourceTable,
-      ],
-      async ({ tables }) => {
-        const catalogueChange =
-          tables.includes(msTables.msProjectNamesTable.sourceTable) ||
-          tables.includes(msTables.projectsTable.sourceTable);
-        if (catalogueChange) {
-          // forceRefresh imperatif : la liste des noms est mise en cache dans le
-          // module et ne serait sinon jamais relue.
-          const refreshedOptions = await buildProjectOptions({ forceRefresh: true });
-          const selectedProject = updateProjectSelector(
-            refreshedOptions,
-            state.selectedProject
-          );
-          if (selectedProject !== state.selectedProject) {
-            setState({ selectedProject });
-          }
-        }
-        await refreshMsProject();
-      }
-    );
   } catch (error) {
     console.error("Erreur d'initialisation MS Project :", error);
 

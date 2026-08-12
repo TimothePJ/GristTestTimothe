@@ -1106,21 +1106,21 @@ test("les quatre widgets audités respectent leur mode d'intégration", () => {
   const msConfig = read("MS Project/assets/js/config.js");
   assertScriptOrder(msHtml, [
     "grist-plugin-api.js",
-    "service-context-core.js",
-    "grist-service-context.js",
     "assets/js/main.js",
   ]);
-  assert.match(msHtml, /id="projectDropdown"[^>]*data-grist-project-controller="true"/);
+  assert.doesNotMatch(msHtml, /service-context|data-grist-project-controller/);
+  assert.match(msHtml, /id="projectDropdown"/);
   assert.match(msMain, /fetchMsProjectRows\(requestedProject\)/);
   assert.match(msService, /grist\.ready\(\{\s*requiredAccess:\s*["']full["']\s*\}\)/);
-  assert.match(msService, /restFilter:\s*\{\s*\[sourceNameColumn\]:\s*\[normalizedProject\]\s*\}/);
+  assert.match(msService, /fetchRestRows\(table\.sourceTable,\s*\{\s*\[sourceNameColumn\]:\s*\[normalizedProject\]\s*,?\s*\}\)/);
+  assert.doesNotMatch(msService, /GristServiceContext|restFilter/);
   const projectOptionsSource = msService.slice(
     msService.indexOf("export async function buildProjectOptions"),
     msService.indexOf("export async function fetchMsProjectRows")
   );
   assert.match(msConfig, /msProjectNamesTable:\s*\{[\s\S]*sourceTable:\s*["']MsProjectNom["'][\s\S]*name:\s*["']Nom["']/);
   assert.match(projectOptionsSource, /APP_CONFIG\.grist\.msProjectNamesTable/);
-  assert.match(projectOptionsSource, /fullTable:\s*true/);
+  assert.match(projectOptionsSource, /fetchTableRows\(tableName\)/);
   assert.doesNotMatch(projectOptionsSource, /fetchDistinctValues|msProjectTable|planningSyncTable|Nom_XML/);
   assert.doesNotMatch(msService, /SELECT\s+DISTINCT|\/sql/);
   assert.match(msService, /ensureProjectNameInCatalog\(sourceFileName\)/);
