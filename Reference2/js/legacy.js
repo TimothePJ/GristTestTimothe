@@ -323,7 +323,7 @@ function autoFillFields() {
   if (selectedReference === '_') {
     document.getElementById('indice').value = '-';
     document.getElementById('recu').value = '';
-    document.getElementById('description').value = 'EN ATTENTE';
+    document.getElementById('description').value = REFERENCE_PENDING_DESCRIPTION;
     document.getElementById('remarque').value = 'Officiel';
     document.getElementById('dureeLimite').value = '';
     void fillAddRowDefaultDurationFromContext({ force: true });
@@ -426,6 +426,11 @@ let referenceEditSelectedRecordIds = new Set();
 let referenceToastTimer = 0;
 const referenceFormBusyState = { add: false, edit: false };
 const REFERENCE_DELETE_PASSWORD = 'admin';
+
+// Description d'une donnée d'entrée encore attendue, et celle que dépose la sélection
+// d'un fichier : le document est arrivé, il est pris en compte.
+const REFERENCE_PENDING_DESCRIPTION = 'EN ATTENTE';
+const REFERENCE_FILE_DESCRIPTION = 'Pris en compte';
 
 function getReferenceRowFormConfig(mode) {
   return REFERENCE_ROW_FORM_CONFIG[mode] || REFERENCE_ROW_FORM_CONFIG.add;
@@ -603,6 +608,27 @@ function resetReferenceFilePicker(mode) {
   if (clearButton) clearButton.hidden = true;
 }
 
+// Date de dernière modification du fichier, en calendrier local. Un horodatage
+// absent ou nul ne vaut rien : le navigateur ne sait alors pas dater le fichier, et
+// écrire 1970 serait pire que ne rien écrire.
+function getReferenceFileReceivedDateIso(file) {
+  const timestamp = Number(file?.lastModified);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
+  // Une Date construite ici, pas un nombre : passé en nombre, l'analyseur commun
+  // devine entre secondes et millisecondes, et se tromperait sur un fichier
+  // antérieur à mars 1973.
+  return formatReferenceDateIso(new Date(timestamp));
+}
+
+// Une description déjà rédigée à la main est un travail de l'utilisateur : seule
+// l'absence de description, ou celle posée par défaut à la création du document,
+// laisse la place à « Pris en compte ».
+function shouldReplaceReferenceDescription(currentValue) {
+  const normalized = normalizeReferenceDocumentIdentityPart(currentValue);
+  return !normalized ||
+    normalized === normalizeReferenceDocumentIdentityPart(REFERENCE_PENDING_DESCRIPTION);
+}
+
 function applyReferenceFileSelection(mode) {
   const config = getReferenceRowFormConfig(mode);
   const fileInput = document.getElementById(config.fileId);
@@ -618,7 +644,28 @@ function applyReferenceFileSelection(mode) {
   const referenceName = removeFileExtension(file.name);
   referenceInput.value = referenceName;
   clearReferenceFieldError(referenceInput);
-  if (status) status.textContent = `Fichier : ${file.name} · Référence : ${referenceName}`;
+
+  // Déposer un fichier, c'est déclarer la donnée d'entrée reçue : la date vient du
+  // fichier lui-même et la description bascule hors de l'attente.
+  const receivedDateIso = getReferenceFileReceivedDateIso(file);
+  const recuInput = getReferenceRowField(mode, 'recu');
+  if (recuInput && receivedDateIso) {
+    recuInput.value = receivedDateIso;
+    clearReferenceFieldError(recuInput);
+  }
+
+  const descriptionInput = getReferenceRowField(mode, 'description');
+  if (descriptionInput && shouldReplaceReferenceDescription(descriptionInput.value)) {
+    descriptionInput.value = REFERENCE_FILE_DESCRIPTION;
+    clearReferenceFieldError(descriptionInput);
+  }
+
+  if (status) {
+    const receivedLabel = receivedDateIso
+      ? ` · Reçu : ${formatReferenceTableDate(receivedDateIso)}`
+      : ' · Date du fichier indisponible';
+    status.textContent = `Fichier : ${file.name} · Référence : ${referenceName}${receivedLabel}`;
+  }
   if (clearButton) clearButton.hidden = false;
   if (mode === 'edit') updateEditSubmitState();
   if (mode === 'add') updateDuplicateSelectionSummary();
@@ -766,28 +813,6 @@ function updateReferenceEditGroupSelectionUi() {
   updateEditSubmitState();
 }
 
-function filterReferenceEditMatchList(query = '') {
-  const container = document.getElementById('editOtherDocumentsContainer');
-  if (!container) return;
-  const normalizedQuery = String(query || '').trim().toLocaleLowerCase('fr');
-  const items = Array.from(container.querySelectorAll('.duplicate-document-item'));
-  items.forEach((item) => {
-    item.hidden = Boolean(normalizedQuery) &&
-      !String(item.dataset.editMatchSearch || '').includes(normalizedQuery);
-  });
-  container.querySelectorAll('.duplicate-zone-group').forEach((group) => {
-    group.hidden = !Array.from(group.querySelectorAll('.duplicate-document-item'))
-      .some((item) => !item.hidden);
-  });
-  container.querySelectorAll('.duplicate-document-group').forEach((group) => {
-    group.hidden = !Array.from(group.querySelectorAll('.duplicate-document-item'))
-      .some((item) => !item.hidden);
-  });
-  const empty = document.getElementById('editOtherDocumentsSearchEmpty');
-  if (empty) empty.hidden = items.length === 0 || items.some((item) => !item.hidden);
-  updateReferenceEditGroupSelectionUi();
-}
-
 function buildReferenceEditMatchListMarkup(matchingRecords) {
   const groupedTypes = new Map();
   matchingRecords.forEach((record) => {
@@ -822,11 +847,14 @@ function buildReferenceEditMatchListMarkup(matchingRecords) {
             const name = _norm(record.NomDocument) || 'Document sans nom';
             const type = normalizeTypeDocument(record.Type_document) || 'Sans type';
             const zone = formatZoneLabel(record.Zone);
-            const searchText = [number, name, type, zone]
-              .join(' ')
-              .toLocaleLowerCase('fr');
+            const filterAttributes = buildReferenceDocumentItemAttributes({
+              numero: record.NumeroDocument,
+              name: record.NomDocument,
+              type: record.Type_document,
+              zone: record.Zone,
+            });
             return `
-              <div class="emetteur-item duplicate-document-item" data-edit-match-search="${escapeHtml(searchText)}">
+              <div class="emetteur-item duplicate-document-item" ${filterAttributes}>
                 <input type="checkbox" id="${inputId}" name="editOtherDocumentRows" value="${recordId}">
                 <label for="${inputId}" class="reference-edit-match-label">
                   <span class="reference-edit-match-document">
@@ -874,13 +902,11 @@ function renderReferenceEditMatchingRows() {
     return;
   }
 
+  const showZoneFilter = referenceEditMatchingRecords
+    .some((record) => normalizeZoneValue(record.Zone));
+
   container.innerHTML = `
-    <div class="duplicate-toolbar">
-      <label for="editOtherDocumentsSearch">
-        Rechercher un document
-        <input type="search" id="editOtherDocumentsSearch" placeholder="Nom, numéro, type, zone…" autocomplete="off">
-      </label>
-    </div>
+    ${buildReferenceDocumentFilterToolbarMarkup('editOtherDocuments', { showZoneFilter })}
     <div class="duplicate-list-actions">
       <button type="button" id="selectVisibleEditOtherDocuments">Tout sélectionner (filtrés)</button>
       <button type="button" id="clearSelectedEditOtherDocuments">Tout désélectionner</button>
@@ -900,8 +926,8 @@ function renderReferenceEditMatchingRows() {
       updateReferenceEditGroupSelectionUi();
     });
   });
-  document.getElementById('editOtherDocumentsSearch')?.addEventListener('input', (event) => {
-    filterReferenceEditMatchList(event.target.value);
+  bindReferenceDocumentFilterControls('editOtherDocuments', 'editOtherDocumentsContainer', {
+    onAfterFilter: updateReferenceEditGroupSelectionUi,
   });
   document.getElementById('selectVisibleEditOtherDocuments')?.addEventListener('click', () => {
     getVisibleReferenceEditMatchCheckboxes().forEach((input) => {
@@ -914,7 +940,11 @@ function renderReferenceEditMatchingRows() {
     referenceEditSelectedRecordIds.clear();
     updateReferenceEditGroupSelectionUi();
   });
-  updateReferenceEditGroupSelectionUi();
+  // Premier passage : il remplit les deux menus avec leurs compteurs et rafraîchit la
+  // sélection ; sans lui les <select> resteraient vides.
+  applyReferenceDocumentListFilters('editOtherDocuments', 'editOtherDocumentsContainer', {
+    onAfterFilter: updateReferenceEditGroupSelectionUi,
+  });
 }
 
 function ensureReferenceEditContextIsWritable() {
@@ -1156,6 +1186,141 @@ let selectedDocNumber = null; let selectedDocName = ''; let selectedDocZone = ''
 const REFERENCE_ALL_ZONES_VALUE = '__ALL_ZONES__';
 const REFERENCE_NO_ZONE_VALUE = '__NO_ZONE__';
 let selectedZoneValue = REFERENCE_ALL_ZONES_VALUE;
+
+// --- Barre de filtres partagée par les listes de documents à cocher ---
+// « Documents concernés » (dialogue Ajouter) et « Autres documents » (dialogue
+// Modifier) rendent la même liste : elles partagent la même barre à trois contrôles
+// et le même moteur de filtrage. La recherche ne regarde que le numéro et le nom ;
+// le type et la zone ont chacun leur menu, et les trois se composent.
+const REFERENCE_DOC_FILTER_ALL_VALUE = '__ALL__';
+const REFERENCE_DOC_FILTER_NO_TYPE = '__sans_type__';
+const REFERENCE_DOC_FILTER_NO_ZONE = '__sans_zone__';
+
+function getReferenceDocumentFilterUtils() {
+  const utils = window.ReferenceDocumentFilterUtils;
+  if (!utils) {
+    throw new Error('Les outils de filtrage des documents ne sont pas disponibles. Rechargez le widget.');
+  }
+  return utils;
+}
+
+function buildReferenceDocumentItemAttributes({ numero, name, type, zone } = {}) {
+  const searchKey = getReferenceDocumentFilterUtils().buildDocumentSearchKey({ numero, name });
+  return [
+    `data-doc-search="${escapeHtml(searchKey)}"`,
+    `data-doc-type="${escapeHtml(normalizeReferenceDocumentIdentityPart(type) || REFERENCE_DOC_FILTER_NO_TYPE)}"`,
+    `data-doc-type-label="${escapeHtml(normalizeTypeDocument(type) || 'Sans type')}"`,
+    `data-doc-zone="${escapeHtml(normalizeZoneMatchKey(zone) || REFERENCE_DOC_FILTER_NO_ZONE)}"`,
+    `data-doc-zone-label="${escapeHtml(formatZoneLabel(zone))}"`,
+  ].join(' ');
+}
+
+// Le menu Zone n'a de sens que si le projet en utilise : sinon il n'est pas rendu.
+function buildReferenceDocumentFilterToolbarMarkup(prefix, { showZoneFilter = true } = {}) {
+  const zoneFilterMarkup = showZoneFilter
+    ? `
+      <label class="duplicate-filter-row" for="${prefix}ZoneFilter">
+        <span>Zone</span>
+        <select id="${prefix}ZoneFilter"></select>
+      </label>`
+    : '';
+
+  return `
+    <div class="duplicate-toolbar">
+      <label for="${prefix}Search">
+        Rechercher un document
+        <input type="search" id="${prefix}Search" placeholder="Numéro ou nom…" autocomplete="off">
+      </label>
+      <label class="duplicate-filter-row" for="${prefix}TypeFilter">
+        <span>Type document</span>
+        <select id="${prefix}TypeFilter"></select>
+      </label>${zoneFilterMarkup}
+    </div>
+  `;
+}
+
+function collectReferenceDocumentFilterEntries(container) {
+  return Array.from(container.querySelectorAll('.duplicate-document-item')).map((element, index) => ({
+    key: index,
+    element,
+    searchKey: element.dataset.docSearch || '',
+    typeKey: element.dataset.docType || REFERENCE_DOC_FILTER_NO_TYPE,
+    typeLabel: element.dataset.docTypeLabel || 'Sans type',
+    zoneKey: element.dataset.docZone || REFERENCE_DOC_FILTER_NO_ZONE,
+    zoneLabel: element.dataset.docZoneLabel || 'Sans zone',
+  }));
+}
+
+function renderReferenceDocumentFilterOptions(select, options, selectedValue) {
+  if (!select) return;
+
+  select.replaceChildren(...options.map((option) => {
+    const element = document.createElement('option');
+    element.value = option.value;
+    element.textContent = `${option.label} (${option.count})`;
+    return element;
+  }));
+  const availableValues = new Set(options.map((option) => option.value));
+  select.value = availableValues.has(String(selectedValue))
+    ? String(selectedValue)
+    : REFERENCE_DOC_FILTER_ALL_VALUE;
+}
+
+// Filtrage par masquage, jamais par reconstruction de la liste : la position de
+// défilement et les cases déjà cochées survivent au changement de filtre.
+function applyReferenceDocumentListFilters(prefix, containerId, {
+  onAfterFilter = null,
+  preferredType = null,
+  preferredZone = null,
+} = {}) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const searchInput = document.getElementById(`${prefix}Search`);
+  const typeSelect = document.getElementById(`${prefix}TypeFilter`);
+  const zoneSelect = document.getElementById(`${prefix}ZoneFilter`);
+  const typeValue = preferredType != null
+    ? preferredType
+    : (typeSelect?.value || REFERENCE_DOC_FILTER_ALL_VALUE);
+  const zoneValue = preferredZone != null
+    ? preferredZone
+    : (zoneSelect?.value || REFERENCE_DOC_FILTER_ALL_VALUE);
+
+  const entries = collectReferenceDocumentFilterEntries(container);
+  const facets = getReferenceDocumentFilterUtils().computeDocumentFacets(entries, {
+    query: searchInput?.value || '',
+    type: typeValue,
+    zone: zoneValue,
+  });
+
+  entries.forEach((entry) => {
+    entry.element.hidden = !facets.visibleKeys.has(entry.key);
+  });
+  // Un groupe vidé par les filtres ne doit pas laisser son titre orphelin.
+  container.querySelectorAll('.duplicate-zone-group').forEach((group) => {
+    group.hidden = !Array.from(group.querySelectorAll('.duplicate-document-item'))
+      .some((item) => !item.hidden);
+  });
+  container.querySelectorAll('.duplicate-document-group').forEach((group) => {
+    group.hidden = !Array.from(group.querySelectorAll('.duplicate-document-item'))
+      .some((item) => !item.hidden);
+  });
+
+  renderReferenceDocumentFilterOptions(typeSelect, facets.typeOptions, typeValue);
+  renderReferenceDocumentFilterOptions(zoneSelect, facets.zoneOptions, zoneValue);
+
+  const empty = document.getElementById(`${prefix}SearchEmpty`);
+  if (empty) empty.hidden = entries.length === 0 || facets.visibleCount > 0;
+
+  onAfterFilter?.();
+}
+
+function bindReferenceDocumentFilterControls(prefix, containerId, { onAfterFilter = null } = {}) {
+  const applyFilters = () => applyReferenceDocumentListFilters(prefix, containerId, { onAfterFilter });
+  document.getElementById(`${prefix}Search`)?.addEventListener('input', applyFilters);
+  document.getElementById(`${prefix}TypeFilter`)?.addEventListener('change', applyFilters);
+  document.getElementById(`${prefix}ZoneFilter`)?.addEventListener('change', applyFilters);
+}
 
 // --- ListePlan NDC+COF integration (création automatique lors de l'ajout de document(s)) ---
 const LISTEPLAN_TABLE_CANDIDATES = ['ListePlan_NDC_COF', 'ListePlan NDC+COF', 'ListePlan_NDC+COF'];
@@ -2203,10 +2368,14 @@ function refreshZoneSuggestionList(datalistId, projectName) {
   });
 }
 
-function collectProjectDocumentEntries(projectName, typeValue = '') {
+// zoneSelection est ouvert en paramètre : les dialogues portent leur propre filtre de
+// zone et ne doivent pas rester enfermés dans celui de la barre du haut.
+function collectProjectDocumentEntries(projectName, typeValue = '', {
+  zoneSelection = getCurrentSelectedZone(),
+} = {}) {
   const project = normalizeReferenceDocumentIdentityPart(projectName);
   const normalizedType = normalizeTypeDocument(typeValue);
-  const selectedZone = getCurrentSelectedZone();
+  const selectedZone = zoneSelection;
   if (!project || !Array.isArray(records)) return [];
 
   const docsByKey = new Map();
@@ -2503,29 +2672,6 @@ function collectProjectDocumentTypes(projectName, extraTypes = []) {
   (extraTypes || []).forEach(pushType);
 
   return orderedTypes;
-}
-
-function collectReferenceDocumentTypesFromRecords(projectName) {
-  const project = normalizeReferenceDocumentIdentityPart(projectName);
-  const seen = new Set();
-  const types = [];
-
-  if (!project || !Array.isArray(records)) return types;
-
-  records.forEach(record => {
-    if (normalizeReferenceDocumentIdentityPart(record.NomProjet) !== project) return;
-    const type = normalizeTypeDocument(record.Type_document);
-    const typeKey = normalizeReferenceDocumentIdentityPart(type);
-    if (!typeKey || seen.has(typeKey)) return;
-    seen.add(typeKey);
-    types.push(type);
-  });
-
-  return types.sort((left, right) => {
-    const rankDiff = getDocumentTypeSortRank(left) - getDocumentTypeSortRank(right);
-    if (rankDiff !== 0) return rankDiff;
-    return left.localeCompare(right, 'fr', { sensitivity: 'base', numeric: true });
-  });
 }
 
 function populateTypeDocumentDropdown(selectedProject, preferredValue = '', extraTypes = []) {
@@ -4075,7 +4221,7 @@ async function createDocumentsBatch({
         Reference: '_',
         Indice: '-',
         Recu: DEFAULT_REFERENCE_DATE,
-        DescriptionObservations: 'EN ATTENTE',
+        DescriptionObservations: REFERENCE_PENDING_DESCRIPTION,
         ...buildReferenceLimitFields({
           planningTable: planningTableForLimits,
           projectName: normalizedProject,
@@ -4948,7 +5094,7 @@ function autoFillEditFields() {
   // Si "_" => valeurs par défaut
   if (selectedReference === '_') {
     document.getElementById('editIndice').value = '-';
-    document.getElementById('editDescription').value = 'EN ATTENTE';
+    document.getElementById('editDescription').value = REFERENCE_PENDING_DESCRIPTION;
     document.getElementById('editRemarque').value = 'Officiel';
     document.getElementById('editRecu').value = '';
     const editDureeLimite = document.getElementById('editDureeLimite');
@@ -5427,7 +5573,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
       Reference: '_',
       Indice: '-',
       Recu: '1900-01-01',
-      DescriptionObservations: 'EN ATTENTE',
+      DescriptionObservations: REFERENCE_PENDING_DESCRIPTION,
       ...referenceLimitFields,
       Service: serviceValue
     }));
@@ -5829,11 +5975,14 @@ function isCurrentDuplicateDocumentEntry(entry, selectedDocumentValue) {
 }
 
 function buildDuplicateDocumentCheckboxMarkup(option, index, preservedCheckedValues) {
-  const searchText = [option.label, option.type, option.zone, option.numero]
-    .map(value => String(value ?? '').toLocaleLowerCase('fr'))
-    .join(' ');
+  const filterAttributes = buildReferenceDocumentItemAttributes({
+    numero: option.numero,
+    name: option.name,
+    type: option.type,
+    zone: option.zone,
+  });
   return `
-        <div class="emetteur-item duplicate-document-item" data-duplicate-search="${escapeHtml(searchText)}">
+        <div class="emetteur-item duplicate-document-item" ${filterAttributes}>
           <input type="checkbox" id="doc-${index}" name="documents" value="${escapeHtml(option.value)}"${preservedCheckedValues.has(option.value) ? ' checked' : ''}>
           <label for="doc-${index}">${escapeHtml(option.label)}</label>
         </div>
@@ -5896,27 +6045,25 @@ function getVisibleDuplicateDocumentCheckboxes() {
     .filter(input => !input.closest('.duplicate-document-item')?.hidden);
 }
 
-function filterDuplicateDocumentList(query = '') {
-  const container = document.getElementById('duplicateOptionsContainer');
-  if (!container) return;
-  const normalizedQuery = String(query || '').trim().toLocaleLowerCase('fr');
-  const items = Array.from(container.querySelectorAll('.duplicate-document-item'));
-  items.forEach(item => {
-    item.hidden = Boolean(normalizedQuery) &&
-      !String(item.dataset.duplicateSearch || '').includes(normalizedQuery);
-  });
+// La barre du haut porte déjà un type et une zone : le dialogue s'ouvre sur la même
+// vue, mais ses propres menus permettent ensuite d'élargir à tout le projet.
+function getAddDialogPreferredDocumentFilters() {
+  const selectedType = getCurrentSelectedType();
+  const selectedZone = getCurrentSelectedZone();
 
-  container.querySelectorAll('.duplicate-zone-group').forEach(group => {
-    group.hidden = !Array.from(group.querySelectorAll('.duplicate-document-item'))
-      .some(item => !item.hidden);
-  });
-  container.querySelectorAll('.duplicate-document-group').forEach(group => {
-    group.hidden = !Array.from(group.querySelectorAll('.duplicate-document-item'))
-      .some(item => !item.hidden);
-  });
+  let preferredZone = REFERENCE_DOC_FILTER_ALL_VALUE;
+  if (!isAllReferenceZonesSelection(selectedZone)) {
+    preferredZone = _norm(selectedZone) === REFERENCE_NO_ZONE_VALUE
+      ? REFERENCE_DOC_FILTER_NO_ZONE
+      : (normalizeZoneMatchKey(selectedZone) || REFERENCE_DOC_FILTER_NO_ZONE);
+  }
 
-  const empty = document.getElementById('duplicateSearchEmpty');
-  if (empty) empty.hidden = items.length === 0 || items.some(item => !item.hidden);
+  return {
+    preferredType: selectedType
+      ? normalizeReferenceDocumentIdentityPart(selectedType)
+      : REFERENCE_DOC_FILTER_ALL_VALUE,
+    preferredZone,
+  };
 }
 
 function getAddDialogTargetDocumentValues() {
@@ -5979,27 +6126,29 @@ function updateDuplicateSelectionSummary() {
   }
 }
 
-function refreshDuplicateSelectionUi() {
+// Seule partie de l'UI qui dépend du filtre : le bouton « Tout sélectionner (filtrés) ».
+// Le résumé, lui, dépend de la sélection et coûte un balayage des enregistrements par
+// document coché — hors de question de le refaire à chaque frappe dans la recherche.
+function refreshDuplicateFilterActionsUi() {
   const visible = getVisibleDuplicateDocumentCheckboxes();
   const selectVisibleButton = document.getElementById('selectVisibleDocuments');
   if (selectVisibleButton) {
     selectVisibleButton.disabled = visible.length === 0 || visible.every(input => input.checked);
   }
+}
+
+function refreshDuplicateSelectionUi() {
+  refreshDuplicateFilterActionsUi();
   updateDuplicateSelectionSummary();
   applyReferenceAccessUi(activeReferenceContextSnapshot || createReferenceContextSnapshot());
 }
 
-async function renderDocumentCheckboxList(typeFilterValue = null, checkedValues = null) {
+async function renderDocumentCheckboxList(checkedValues = null) {
   const container = document.getElementById('duplicateOptionsContainer');
   const secondDropdown = document.getElementById('secondColumnListbox');
   const selectedProject = selectedFirstValue; // Projet sélectionné dans la première liste
   const selectedDocument = secondDropdown.value; // Document actuellement sélectionné dans la deuxième liste
   const showZones = projectHasStructuredZones(selectedProject);
-  const currentFilterElement = document.getElementById('duplicateTypeDocumentFilter');
-  const selectedTypeFilter = normalizeTypeDocument(
-    typeFilterValue !== null ? typeFilterValue : (currentFilterElement?.value || '')
-  );
-  const selectedTypeFilterKey = normalizeReferenceDocumentIdentityPart(selectedTypeFilter);
   if (checkedValues instanceof Set) {
     checkedValues.forEach(value => duplicateSelectedDocumentValues.add(value));
   }
@@ -6012,23 +6161,11 @@ async function renderDocumentCheckboxList(typeFilterValue = null, checkedValues 
     return;
   }
 
-  // Obtenir les options disponibles dans la deuxième liste déroulante
-  const typeOptions = collectReferenceDocumentTypesFromRecords(selectedProject);
-  const typeFilterHTML = `
-        <label class="duplicate-filter-row" for="duplicateTypeDocumentFilter">
-          <span>Type document</span>
-          <select id="duplicateTypeDocumentFilter">
-            <option value="">Tous les types</option>
-            ${typeOptions.map(type => `
-              <option value="${escapeHtml(type)}"${normalizeReferenceDocumentIdentityPart(type) === selectedTypeFilterKey ? ' selected' : ''}>
-                ${escapeHtml(type)}
-              </option>
-            `).join('')}
-          </select>
-        </label>
-      `;
-
-  const documentOptions = collectProjectDocumentEntries(selectedProject, selectedTypeFilter)
+  // Tout le projet est rendu une seule fois : le type et la zone se filtrent ensuite
+  // par masquage, ce qui préserve le défilement et les cases déjà cochées.
+  const documentOptions = collectProjectDocumentEntries(selectedProject, '', {
+    zoneSelection: REFERENCE_ALL_ZONES_VALUE,
+  })
     .filter(entry => entry.value && !isCurrentDuplicateDocumentEntry(entry, selectedDocument))
     .map(entry => ({
       value: entry.value,
@@ -6040,39 +6177,22 @@ async function renderDocumentCheckboxList(typeFilterValue = null, checkedValues 
     }));
   const showZoneSections = showZones || documentOptions.some(option => normalizeZoneValue(option.zone));
 
-  const emptyMessage = selectedTypeFilter
-    ? 'Aucun autre document disponible pour ce type.'
-    : 'Aucun autre document disponible pour ce projet.';
-
   // Générer les cases à cocher pour chaque document disponible
   const listHTML = buildGroupedDuplicateDocumentList(documentOptions, showZoneSections, preservedCheckedValues);
 
-  // Afficher la liste complète avec recherche, compteur et actions de sélection.
+  // Afficher la liste complète avec recherche, filtres, compteur et actions de sélection.
   container.innerHTML = `
-        <div class="duplicate-toolbar">
-          <label for="duplicateDocumentSearch">
-            Rechercher un document
-            <input type="search" id="duplicateDocumentSearch" placeholder="Nom, numéro, zone…" autocomplete="off">
-          </label>
-          ${typeFilterHTML}
-        </div>
+        ${buildReferenceDocumentFilterToolbarMarkup('duplicate', { showZoneFilter: showZoneSections })}
         <div class="duplicate-list-actions">
           <button type="button" id="selectVisibleDocuments">Tout sélectionner (filtrés)</button>
           <button type="button" id="clearSelectedDocuments">Tout désélectionner</button>
           <span id="duplicateSelectionCount" class="duplicate-selection-count"></span>
         </div>
         <div id="documentList" class="duplicate-document-list">
-          ${documentOptions.length > 0 ? listHTML : `<p class="duplicate-empty-message">${emptyMessage}</p>`}
+          ${documentOptions.length > 0 ? listHTML : '<p class="duplicate-empty-message">Aucun autre document disponible pour ce projet.</p>'}
           <p id="duplicateSearchEmpty" class="duplicate-empty-message" hidden>Aucun document ne correspond à la recherche.</p>
         </div>
       `;
-
-  // Ajouter un écouteur à la case "Tout sélectionner" pour cocher/décocher tous les documents
-  const typeFilter = document.getElementById('duplicateTypeDocumentFilter');
-  typeFilter?.addEventListener('change', function () {
-    syncDuplicateSelectedDocumentValues(container);
-    renderDocumentCheckboxList(this.value);
-  });
 
   const docCheckboxes = container.querySelectorAll("input[name='documents']");
   docCheckboxes.forEach(cb => {
@@ -6086,8 +6206,8 @@ async function renderDocumentCheckboxList(typeFilterValue = null, checkedValues 
     });
   });
 
-  document.getElementById('duplicateDocumentSearch')?.addEventListener('input', event => {
-    filterDuplicateDocumentList(event.target.value);
+  bindReferenceDocumentFilterControls('duplicate', 'duplicateOptionsContainer', {
+    onAfterFilter: refreshDuplicateFilterActionsUi,
   });
 
   document.getElementById('selectVisibleDocuments')?.addEventListener('click', () => {
@@ -6104,7 +6224,11 @@ async function renderDocumentCheckboxList(typeFilterValue = null, checkedValues 
     refreshDuplicateSelectionUi();
   });
 
-  refreshDuplicateSelectionUi();
+  // Premier passage : il remplit les deux menus et applique la vue de la barre du haut.
+  applyReferenceDocumentListFilters('duplicate', 'duplicateOptionsContainer', {
+    onAfterFilter: refreshDuplicateSelectionUi,
+    ...getAddDialogPreferredDocumentFilters(),
+  });
 }
 
 document.getElementById('duplicateCheckbox').addEventListener('change', async function () {
@@ -7195,7 +7319,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
           Reference: '_',
           Indice: '-',
           Recu: '1900-01-01',
-          DescriptionObservations: 'EN ATTENTE',
+          DescriptionObservations: REFERENCE_PENDING_DESCRIPTION,
           ...referenceLimitFields,
           Service: serviceValue
         });

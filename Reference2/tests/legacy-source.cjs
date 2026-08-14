@@ -43,6 +43,36 @@ function extractFunction(name) {
   throw new Error(`fonction ${name} non terminée`);
 }
 
+// Lit la valeur d'une constante de données (chaîne, objet, tableau). Comme
+// `extractFunction`, l'analyse est textuelle : elle suppose que la valeur ne contient
+// pas de délimiteur dans une chaîne, ce qui est le cas des constantes visées.
+function extractConst(name) {
+  const marker = `const ${name} = `;
+  const start = SOURCE.indexOf(marker);
+  if (start < 0) throw new Error(`constante ${name} introuvable dans legacy.js`);
+
+  const valueStart = start + marker.length;
+  const opener = SOURCE[valueStart];
+  const closer = { '{': '}', '[': ']' }[opener];
+
+  if (!closer) {
+    const end = SOURCE.indexOf(';', valueStart);
+    if (end < 0) throw new Error(`constante ${name} non terminée`);
+    return new Function(`return ${SOURCE.slice(valueStart, end)};`)();
+  }
+
+  let depth = 0;
+  for (let index = valueStart; index < SOURCE.length; index += 1) {
+    if (SOURCE[index] === opener) depth += 1;
+    else if (SOURCE[index] === closer) {
+      depth -= 1;
+      if (!depth) return new Function(`return ${SOURCE.slice(valueStart, index + 1)};`)();
+    }
+  }
+
+  throw new Error(`constante ${name} non terminée`);
+}
+
 function extractArray(name) {
   const match = SOURCE.match(new RegExp(`const ${name} = (\\[[^\\]]*\\]);`));
   if (!match) throw new Error(`tableau ${name} introuvable dans legacy.js`);
@@ -63,4 +93,4 @@ function loadLegacyFunctions(names, globals = {}) {
   return new Function('__globals', body)(globals);
 }
 
-module.exports = { SOURCE, extractArray, extractFunction, loadLegacyFunctions };
+module.exports = { SOURCE, extractArray, extractConst, extractFunction, loadLegacyFunctions };
