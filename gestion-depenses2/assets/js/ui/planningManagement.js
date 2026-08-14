@@ -291,33 +291,32 @@ export function renderPlanningManagement(
             const taskLabel = task.taskCode
               ? `${task.taskCode} - ${task.name}`
               : task.name;
+            const executionWindow = getTaskExecutionWindowForMonth(task, monthWindow);
+            const executionLabel = executionWindow
+              ? `${formatPlanningDate(executionWindow.startAt)} au ${formatPlanningDate(
+                  executionWindow.endAt
+                )}`
+              : "non renseignee";
+            const closureLabel = task.dateCloture
+              ? `Realise manuellement le ${formatPlanningClosureDate(task.dateCloture)}`
+              : "";
+            const realisedClass = task.realisationPct >= 100 ? " is-realised" : "";
+            const closureHtml = closureLabel
+              ? `<span class="planning-management-item-window">${escapeHtml(
+                  closureLabel
+                )}</span>`
+              : "";
 
             return `
-              <article class="planning-management-item${task.realisationPct >= 100 ? ' is-realised' : ''}">
+              <article class="planning-management-item${realisedClass}">
                 <div class="planning-management-item-main">
                   <strong class="planning-management-item-title">${escapeHtml(taskLabel)}</strong>
                   <span class="planning-management-item-meta">${escapeHtml(
                     task.typeDoc || "Type non renseigne"
                   )}</span>
-                  ${task.dateCloture ? `
-                    <span class="planning-management-item-window">
-                      Réalisé manuellement le ${escapeHtml(formatPlanningClosureDate(task.dateCloture))}
-                    </span>
-                  ` : ""}
+                  ${closureHtml}
                   <span class="planning-management-item-window">
-                    Execution ce mois :
-                    ${escapeHtml(
-                      (() => {
-                        const executionWindow = getTaskExecutionWindowForMonth(task, monthWindow);
-                        if (!executionWindow) {
-                          return "non renseignee";
-                        }
-
-                        return `${formatPlanningDate(executionWindow.startAt)} au ${formatPlanningDate(
-                          executionWindow.endAt
-                        )}`;
-                      })()
-                    )}
+                    Execution ce mois : ${escapeHtml(executionLabel)}
                   </span>
                 </div>
                 <div class="planning-management-item-deadline">
@@ -326,9 +325,7 @@ export function renderPlanningManagement(
                 </div>
                 <div class="planning-management-item-realisation">
                   <span class="planning-management-item-realisation-label">Realisation</span>
-                  <strong>${escapeHtml(
-                    formatPlanningRealisation(task.realisationPct)
-                  )}</strong>
+                  <strong>${escapeHtml(formatPlanningRealisation(task.realisationPct))}</strong>
                 </div>
               </article>
             `;
