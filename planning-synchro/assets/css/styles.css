@@ -405,14 +405,100 @@ body.ps-panning * {
 
 /* Chart view: replaces #ps-planning when "Graphique" is selected. The height is
    set from JS (planningChart.setHeight) to match the timeline it replaces; the
-   canvas fills the container (Chart.js maintainAspectRatio:false). */
+   canvas fills the container (Chart.js maintainAspectRatio:false).
+
+   CALIBRATION (same contract as the "CRITICAL: left-column alignment" section
+   below): the plot area must start at exactly --ps-left-col-width from the
+   pane's left edge, like both timelines. That is achieved structurally rather
+   than by trusting Chart.js's auto layout:
+     legend column (--ps-left-col-width - --ps-chart-axis-width)
+     + Y axis (--ps-chart-axis-width, pinned in planningChart.js via afterFit)
+     = --ps-left-col-width.
+   Hence NO horizontal padding here — any would shift the whole plot. */
 .ps-chart {
   position: relative;
+  display: flex;
+  align-items: stretch;
   width: 100%;
   min-height: 220px;
-  padding: 6px 8px 2px;
+  padding: 6px 0 2px;
   box-sizing: border-box;
   background: var(--color-surface);
+}
+/* Restate [hidden] so main.js's `hidden` toggle beats the `display:flex` above. */
+.ps-chart[hidden] {
+  display: none;
+}
+
+/* Left legend column: display-only (the checkbox filter in the header still
+   drives visibility — see planningChart.js buildLegend/applyVisibility). Its
+   width is the left column MINUS the axis band, so the two together match the
+   planning's Projeteurs/Ingenieurs column exactly. */
+.ps-chart-legend {
+  flex: 0 0 calc(var(--ps-left-col-width) - var(--ps-chart-axis-width));
+  width: calc(var(--ps-left-col-width) - var(--ps-chart-axis-width));
+  min-width: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 2px 10px 2px 4px;
+  overflow: hidden;
+}
+.ps-chart-legend-title {
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
+}
+.ps-chart-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Types unchecked in the header filter grey out here instead of disappearing,
+   so the legend keeps a stable height while reflecting what is plotted. */
+.ps-chart-legend-item.is-off {
+  opacity: 0.35;
+}
+.ps-chart-legend-swatch {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  background: currentColor;
+}
+/* The dotted "(réalisé)" companion lines share their type's colour, so the
+   legend explains the solid/dotted convention once instead of doubling every
+   entry. The dashed swatch is a repeating-gradient echoing borderDash [3,3]. */
+.ps-chart-legend-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+.ps-chart-legend-swatch--dashed {
+  background: repeating-linear-gradient(
+    to right,
+    var(--color-text-muted) 0 3px,
+    transparent 3px 6px
+  );
+}
+
+.ps-chart-canvas-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .ps-chart canvas {
   width: 100% !important;

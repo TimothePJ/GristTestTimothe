@@ -195,7 +195,34 @@ tâches **réalisées à 100 %** (colonne `Realise` ≥ 100).
 Son axe des temps est **coordonné avec la frise** (mêmes dates visibles que le
 pane bas ; `min`/`max` = fenêtre courante), donc il **suit le zoom et le
 déplacement** du planning (chaque viewport appliqué est transmis via
-`onRangeLabel` -> `planningChart.setViewport`). La **chronologie reste
+`onRangeLabel` -> `planningChart.setViewport`).
+
+**Calage horizontal sur le planning du bas** — même contrat que la section
+« CRITICAL: left-column alignment » de `assets/css/styles.css` : la zone de
+tracé démarre exactement à `--ps-left-col-width` du bord du pane, comme les
+colonnes Projeteurs / Ingénieurs. Le montage est structurel, pas laissé à la
+mise en page automatique de Chart.js :
+
+- `#ps-chart` est un flex : **colonne légende** de
+  `--ps-left-col-width - --ps-chart-axis-width` puis le canvas ;
+- l'**axe Y est épinglé** à `--ps-chart-axis-width` (`scales.y.afterFit`), donc
+  légende + axe = `--ps-left-col-width` et `chartArea.left` est déterministe ;
+- `layout.autoPadding: false` + `padding` horizontal nul +
+  `scales.x.afterFit` remettant `paddingLeft/Right` à 0 : sans cela Chart.js
+  réserve une marge (mesurée à 8 px à droite) pour ne pas rogner les libellés
+  d'extrémité, ce qui décale le tracé ;
+- `min`/`max` couvrent des **journées entières** (`getChartWindowBounds` :
+  `firstVisibleDate 00:00` -> `rangeEndDate + 1 jour 00:00`), comme
+  `sync/viewportMath.getDayBoundaryLeftPx` ;
+- les points sont au **vrai milieu** de leur bucket et les **traits verticaux
+  tombent sur les frontières** de bucket (1er du mois / lundi), via
+  `scales.x.afterBuildTicks`.
+
+Écart mesuré sur les trois zooms : **0 à 0,23 px** (le résidu vient des semaines
+de changement d'heure — l'axe est linéaire en millisecondes alors que la frise
+donne à chaque jour calendaire la même largeur).
+
+La **chronologie reste
 navigable** dans la vue graphique : molette = zoom, **glisser sur le graphique =
 déplacement** (`controller.bindPan(#ps-chart)`), toolbar semaine/mois/année — les
 deux panes bougent ensemble. Sa hauteur suit le splitter (même hauteur que la
@@ -206,8 +233,16 @@ case **par type de document présent** dans le projet (+ Total), toutes cochées
 départ. Décocher un type **masque** ses deux lignes (pleine + « réalisé »), le
 cocher les ré-affiche ; on affiche donc uniquement les types voulus. Le filtre
 est conservé au **zoom / déplacement** (ré-appliqué à chaque reconstruction des
-séries) et se réinitialise (tout coché) au changement de projet. La légende est
-en lecture seule (le filtre pilote la visibilité).
+séries) et se réinitialise (tout coché) au changement de projet.
+
+**Légende** (`#ps-chart-legend`, colonne de gauche du graphique) : la légende
+intégrée de Chart.js est désactivée (`plugins.legend.display: false` — placée en
+bas, sa hauteur rognait le tracé) au profit d'une liste HTML verticale dans la
+colonne de gauche, à la même largeur que la colonne des noms du planning du bas.
+Elle porte le titre de l'axe Y (« Tâches à réaliser », sorti du canvas où il
+consommait une partie de la bande d'axe) et rappelle la convention
+plein / pointillé. Elle est **en lecture seule** : le filtre ci-dessus pilote la
+visibilité, et la légende **grise** (`.is-off`) les types décochés.
 
 En mode **Editer**, le **clic droit** sur un segment ouvre le menu contextuel
 **Modifier** / **Supprimer le segment**, avec la **même fenêtre et les mêmes

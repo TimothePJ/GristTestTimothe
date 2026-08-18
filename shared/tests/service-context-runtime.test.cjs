@@ -1520,6 +1520,74 @@ test("fetchTable utilise REST avec le filtre encodé et conserve la défense cli
   assert.equal(JSON.stringify(harness.consoleEntries).includes("temporary-token"), false);
 });
 
+// Un filtre explicite doit RESTREINDRE le contexte, pas s'y substituer : sinon
+// demander « seulement les lignes bloquantes » ferait remonter celles de tous les
+// projets et de tous les services, soit une fuite et davantage de lignes lues.
+test("un filtre explicite s'ajoute au filtre projet+service en REST", async () => {
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async () => restResponse([
+      { id: 1, fields: { Service: "Structure", NomProjet: "Alpha", Bloquant: true } },
+      { id: 2, fields: { Service: "Structure", NomProjet: "Alpha Alias", Bloquant: true } },
+      { id: 3, fields: { Service: "Topographie", NomProjet: "Alpha", Bloquant: true } },
+      { id: 4, fields: { Service: "Structure", NomProjet: "Alpha", Bloquant: false } },
+    ]),
+  });
+  await harness.api.whenReady();
+
+  const table = await harness.grist.docApi.fetchTable("References2", {
+    restFilter: { Bloquant: [true] },
+  });
+
+  assert.deepEqual(requestFilter(harness.restRequests[0]), {
+    Service: ["Structure"],
+    NomProjet: ["Alpha", "Alpha Alias"],
+    Bloquant: [true],
+  });
+  // La défense cliente reste appliquée par-dessus la réponse du serveur.
+  assert.deepEqual(Array.from(table.id), [1, 2]);
+  assert.equal(harness.fetchCount("References2"), 0);
+});
+
+test("le repli fetchTable applique le filtre explicite avec le contexte", async () => {
+  const harness = createRuntimeHarness();
+  harness.tables.References2 = {
+    id: [1, 2, 3, 4],
+    Service: ["Structure", "Structure", "Topographie", "Structure"],
+    NomProjet: ["Alpha", "Beta", "Alpha", "Alpha"],
+    Bloquant: [true, true, true, false],
+  };
+  await harness.api.whenReady();
+
+  const table = await harness.grist.docApi.fetchTable("References2", {
+    restFilter: { Bloquant: [true] },
+  });
+
+  assert.deepEqual(Array.from(table.id), [1]);
+  assert.equal(harness.restRequests.length, 0);
+  assert.equal(harness.fetchCount("References2"), 1);
+});
+
+// Sur une colonne déjà contrainte par la politique, le filtre explicite ne peut
+// qu'intersecter : viser un projet hors périmètre ne doit rien lire, pas tout lire.
+test("un filtre explicite hors du périmètre du contexte ne lit rien", async () => {
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async () => restResponse([
+      { id: 9, fields: { Service: "Structure", NomProjet: "Gamma" } },
+    ]),
+  });
+  await harness.api.whenReady();
+
+  const table = await harness.grist.docApi.fetchTable("References2", {
+    restFilter: { NomProjet: ["Gamma"] },
+  });
+
+  assert.deepEqual(Array.from(table.id || []), []);
+  assert.equal(harness.restRequests.length, 0);
+  assert.equal(harness.fetchCount("References2"), 0);
+});
+
 test("une sonde REST vide en HTTP 200 active le repli brut pour tous les widgets", async () => {
   const harness = createRuntimeHarness({
     rest: true,
@@ -2208,6 +2276,121 @@ test("un filtre natif évite toute relecture pour un signal non pertinent", asyn
   assert.equal(harness.restRequests.length, requestCount + 1);
   assert.deepEqual(deliveries, ["A", "B"]);
   unsubscribe();
+});
+
+// Une surveillance relit la table à chaque signal : sans filtre elle annulait le
+// filtre posé sur les lectures du widget et rapatriait tout le projet.
+test("une surveillance filtrée relit le même sous-ensemble que le widget", async () => {
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async () => restResponse([
+      { id: 1, fields: { Service: "Structure", NomProjet: "Alpha", Bloquant: true } },
+    ]),
+  });
+  await harness.api.whenReady();
+
+  const unsubscribe = harness.api.watchContextTables(["References2"], () => {}, {
+    tableRestFilters: { References2: { Bloquant: [true] } },
+  });
+  await flushAsyncWork();
+
+  assert.ok(harness.restRequests.length >= 1);
+  harness.restRequests.forEach((request) => {
+    assert.deepEqual(requestFilter(request), {
+      Service: ["Structure"],
+      NomProjet: ["Alpha", "Alpha Alias"],
+      Bloquant: [true],
+    });
+  });
+  unsubscribe();
+});
+
+// Même filtre des deux côtés = même clé de cache : la surveillance et la lecture du
+// widget doivent se partager une seule requête, pas en émettre deux.
+test("surveillance et lecture partagent la requête quand le filtre est identique", async () => {
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async () => restResponse([
+      { id: 1, fields: { Service: "Structure", NomProjet: "Alpha", Bloquant: true } },
+    ]),
+  });
+  await harness.api.whenReady();
+
+  const unsubscribe = harness.api.watchContextTables(["References2"], () => {}, {
+    tableRestFilters: { References2: { Bloquant: [true] } },
+  });
+  await flushAsyncWork();
+
+  const requestCount = harness.restRequests.length;
+  await harness.grist.docApi.fetchTable("References2", { restFilter: { Bloquant: [true] } });
+  assert.equal(harness.restRequests.length, requestCount);
+  unsubscribe();
+});
+
+// La validation d'écriture relisait la vue non filtrée de la table. Pour un widget
+// qui ne lit que des sous-ensembles, cela ramenait tout le projet juste avant chaque
+// enregistrement — l'inverse du but du filtre.
+test("valider une écriture réutilise les lignes déjà lues, même filtrées", async () => {
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async (url) => {
+      const filter = JSON.parse(new URL(url).searchParams.get("filter") || "{}");
+      // La vue non filtrée porte tout le projet ; la vue filtrée, deux lignes.
+      const rows = filter.Bloquant
+        ? [
+            { id: 1, fields: { Service: "Structure", NomProjet: "Alpha", Bloquant: true } },
+            { id: 2, fields: { Service: "Structure", NomProjet: "Alpha", Bloquant: true } },
+          ]
+        : Array.from({ length: 50 }, (_unused, index) => ({
+            id: index + 1,
+            fields: { Service: "Structure", NomProjet: "Alpha", Bloquant: index < 2 },
+          }));
+      return restResponse(rows);
+    },
+  });
+  await harness.api.whenReady();
+
+  await harness.grist.docApi.fetchTable("References2", { restFilter: { Bloquant: [true] } });
+  const requestCount = harness.restRequests.length;
+
+  await harness.grist.docApi.applyUserActions([
+    ["UpdateRecord", "References2", 1, { Bloquant: false }],
+    ["UpdateRecord", "References2", 2, { Bloquant: false }],
+  ]);
+
+  assert.equal(
+    harness.restRequests.length,
+    requestCount,
+    "la validation ne doit déclencher aucune lecture supplémentaire"
+  );
+});
+
+test("une écriture sur une ligne jamais lue reste validée contre le contexte", async () => {
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async () => restResponse([
+      { id: 1, fields: { Service: "Structure", NomProjet: "Alpha", Bloquant: true } },
+    ]),
+  });
+  // La table complète sert de dernier recours à la validation : la ligne 99 n'y est
+  // pas non plus.
+  harness.tables.References2 = {
+    id: [1],
+    Service: ["Structure"],
+    NomProjet: ["Alpha"],
+    Bloquant: [true],
+  };
+  await harness.api.whenReady();
+
+  await harness.grist.docApi.fetchTable("References2", { restFilter: { Bloquant: [true] } });
+
+  // La ligne 99 n'apparaît dans aucune lecture du contexte : elle doit être refusée.
+  let rejection = null;
+  await harness.grist.docApi.applyUserActions([
+    ["UpdateRecord", "References2", 99, { Bloquant: false }],
+  ]).catch((error) => { rejection = error; });
+  assert.ok(rejection, `l'écriture aurait dû être refusée (reçu : ${rejection})`);
+  assert.match(String(rejection.message), /n'appartient pas au projet et au service/);
 });
 
 test("watchContextTables detecte par REST une modification d'un autre utilisateur", async () => {

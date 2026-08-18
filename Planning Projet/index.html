@@ -7,8 +7,8 @@
 
   <!-- Grist -->
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-  <script src="../shared/service-context-core.js?v=20260810-sync3"></script>
-  <script src="../shared/grist-service-context.js?v=20260810-sync3"></script>
+  <script src="../shared/service-context-core.js?v=20260818-sync11"></script>
+  <script src="../shared/grist-service-context.js?v=20260818-sync11"></script>
   <script>
     window.ProjectMutationSyncConfig = {
       mutationSignals: {
@@ -29,7 +29,7 @@
       dropdownIds: ["projectDropdown"]
     };
   </script>
-  <script src="../shared/project-mutation-sync-relay.js?v=20260810-sync3"></script>
+  <script src="../shared/project-mutation-sync-relay.js?v=20260818-sync11"></script>
 
   <!-- vis-timeline (même système que timeline-calendar.zip) -->
   <script src="https://unpkg.com/vis-timeline/standalone/umd/vis-timeline-graph2d.min.js"></script>
@@ -43,17 +43,11 @@
   <link rel="stylesheet" href="./assets/css/styles.css" />
 
   <!-- App -->
-  <script type="module" src="./assets/js/main.js?v=20260810-sync3" defer></script>
+  <script type="module" src="./assets/js/main.js?v=20260818-sync11" defer></script>
 </head>
 <body>
   <!-- Toolbar style timeline-calendar -->
   <div id="toolbar">
-    <div class="nav-buttons">
-      <button id="btn-prev" type="button" title="Période précédente">&lt;</button>
-      <button id="btn-today" type="button">Aujourd'hui</button>
-      <button id="btn-next" type="button" title="Période suivante">&gt;</button>
-    </div>
-
     <div class="filters">
       <label for="projectDropdown" class="toolbar-label">Projet :</label>
       <select id="projectDropdown" disabled>
@@ -71,6 +65,12 @@
         aria-pressed="false"
         title="Activer l'édition du planning"
       >Editer</button>
+      <button
+        id="durationDefaultsToggle"
+        type="button"
+        class="planning-duration-defaults-toggle"
+        title="Renseigner les durées par défaut, par type de document"
+      >Dur&eacute;es</button>
     </div>
 
     <!-- Zoom : uniquement semaine / mois / année -->
@@ -214,6 +214,51 @@
       </div>
     </div>
   </div>
+
+  <!-- Durées par défaut, une ligne de saisie par type de document -->
+  <dialog id="durationDefaultsDialog" class="planning-duration-defaults-dialog">
+    <form id="durationDefaultsForm" class="planning-duration-defaults-dialog__form" method="dialog">
+      <div class="planning-duration-defaults-dialog__header">
+        <h3>Dur&eacute;es par d&eacute;faut</h3>
+        <button
+          type="button"
+          id="durationDefaultsCloseBtn"
+          class="planning-duration-defaults-dialog__close"
+          aria-label="Fermer"
+        >&times;</button>
+      </div>
+
+      <p id="durationDefaultsScope" class="planning-duration-defaults-dialog__line"></p>
+
+      <div id="durationDefaultsBody" class="planning-duration-defaults-dialog__body"></div>
+
+      <p
+        id="durationDefaultsSummary"
+        class="planning-duration-defaults-dialog__summary"
+        aria-live="polite"
+      ></p>
+      <p
+        id="durationDefaultsError"
+        class="planning-duration-defaults-dialog__error"
+        role="alert"
+        aria-live="polite"
+        hidden
+      ></p>
+
+      <div class="planning-duration-defaults-dialog__actions">
+        <button
+          type="button"
+          id="durationDefaultsCancelBtn"
+          class="planning-duration-defaults-dialog__cancel"
+        >Annuler</button>
+        <button
+          type="submit"
+          id="durationDefaultsApplyBtn"
+          class="planning-duration-defaults-dialog__apply"
+        >Appliquer</button>
+      </div>
+    </form>
+  </dialog>
 
   <!-- Statut / messages -->
   <div id="planningStatus" class="planning-status"></div>

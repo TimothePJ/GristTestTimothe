@@ -55,23 +55,57 @@ function mergeDerivedUpdatesIntoRows(rows, updates = []) {
   });
 }
 
-async function withPlanningSyncLock(task) {
+// Repli sans `navigator.locks` : on attend que le jeton posé dans localStorage expire
+// ou soit rendu. L'attente est bornée — le verrou lui-même expire en 30 s, patienter
+// au-delà signifierait qu'il n'est plus tenu par personne.
+async function waitForFreeStorageLock({ timeoutMs = 30000, pollMs = 120 } = {}) {
+  const giveUpAt = Date.now() + timeoutMs;
+  for (;;) {
+    let current = null;
+    try {
+      current = JSON.parse(localStorage.getItem(PLANNING_SYNC_LOCK_STORAGE_KEY) || "null");
+    } catch (_error) {
+      return;
+    }
+    if (!(current?.expiresAt > Date.now())) return;
+    if (Date.now() >= giveUpAt) return;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
+// `blocking` distingue deux besoins opposés. La synchronisation automatique est
+// opportuniste : si une autre passe tourne déjà, la sauter ne perd rien. Une écriture
+// demandée par l'utilisateur, elle, doit attendre son tour — l'abandonner
+// silencieusement lui ferait croire que son action n'a servi à rien.
+async function withPlanningSyncLock(task, { blocking = false } = {}) {
   if (typeof navigator !== "undefined" && navigator.locks?.request) {
+    // L'échec de la tâche et l'échec du verrou remontent par le même canal. Sans les
+    // distinguer, une écriture qui échoue serait prise pour un verrou indisponible,
+    // puis REJOUÉE par le chemin de repli : le lot partirait deux fois.
+    let taskStarted = false;
     try {
       return await navigator.locks.request(
         PLANNING_SYNC_LOCK_NAME,
-        { mode: "exclusive", ifAvailable: true },
-        async (lock) => lock ? task() : { skippedByLock: true, updatedCount: 0 }
+        blocking ? { mode: "exclusive" } : { mode: "exclusive", ifAvailable: true },
+        async (lock) => {
+          if (!lock) return { skippedByLock: true, updatedCount: 0 };
+          taskStarted = true;
+          return task();
+        }
       );
     } catch (error) {
+      if (taskStarted) throw error;
       console.warn("Verrou navigateur Planning Projet indisponible :", error);
     }
   }
 
   const token = `${Date.now()}-${Math.random()}`;
-  const now = Date.now();
   let acquiredLocally = false;
   try {
+    if (blocking) {
+      await waitForFreeStorageLock();
+    }
+    const now = Date.now();
     const current = JSON.parse(localStorage.getItem(PLANNING_SYNC_LOCK_STORAGE_KEY) || "null");
     if (current?.expiresAt > now) {
       return { skippedByLock: true, updatedCount: 0 };
@@ -89,6 +123,8 @@ async function withPlanningSyncLock(task) {
     acquiredLocally = true;
     return await task();
   } catch (error) {
+    // Même règle ici : une fois la tâche lancée, son échec lui appartient. Le rejouer
+    // enverrait le lot d'écritures une seconde fois.
     if (!acquiredLocally) {
       console.warn("Verrou local Planning Projet indisponible :", error);
       return task();
@@ -156,4 +192,11 @@ async function runPlanningDerivedSync({
 
 export function synchronizePlanningDerivedData(options = {}) {
   return withPlanningSyncLock(() => runPlanningDerivedSync(options));
+}
+
+// Écriture demandée explicitement par l'utilisateur : elle attend son tour derrière la
+// synchronisation automatique plutôt que d'être sautée. Sans ce verrou, la passe
+// automatique (toutes les 60 s) peut recalculer Diff_coffrage par-dessus le lot.
+export function runExclusivePlanningWrite(task) {
+  return withPlanningSyncLock(task, { blocking: true });
 }

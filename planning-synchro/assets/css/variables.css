@@ -7,6 +7,14 @@
      section for the full mechanism. */
   --ps-left-col-width: 220px;
 
+  /* Width Chart.js is forced to give its Y axis in the "Graphique" view
+     (planningChart.js reads this token and pins the scale via afterFit). The
+     chart's HTML legend column takes the REMAINDER of --ps-left-col-width, so
+     legend + axis add up to exactly the left-column width and the plot area
+     starts at the same x as both panes' timelines. Changing this only moves
+     the boundary between legend and axis, never the plot's left edge. */
+  --ps-chart-axis-width: 44px;
+
   /* Design tokens ported from the sibling widgets so planning-synchro reads
      as part of the same suite rather than templated defaults. Source:
      gestion-depenses2/assets/css/variables.css (its color, shadow-card,

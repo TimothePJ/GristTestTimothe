@@ -28,7 +28,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
-  <link rel="stylesheet" href="bordereau.css">
+  <link rel="stylesheet" href="bordereau.css?v=20260818-type-document">
 </head>
 
 <body>
@@ -71,6 +71,7 @@
         <tr>
           <th>N&deg; Plan</th>
           <th>Indice</th>
+          <th>Type document</th>
           <th>D&eacute;signation</th>
           <th class="diffusion-column no-print">Date de diffusion</th>
           <th id="nbrExemplairesHeader" class="bulk-fill-header" title="Appliquer a toutes les lignes">
@@ -122,6 +123,7 @@
     </form>
   </dialog>
 
-  <script src="bordereau.js?v=20260810-sync3" defer></script>
+  <script src="bordereau-core.js?v=20260818-type-document" defer></script>
+  <script src="bordereau.js?v=20260818-type-document" defer></script>
 </body>
 </html>

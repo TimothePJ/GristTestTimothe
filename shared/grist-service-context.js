@@ -698,26 +698,49 @@
     return results;
   }
 
+  // Un filtre explicite RESTREINT le périmètre du contexte, il ne le remplace pas :
+  // demander « seulement les lignes bloquantes » ne doit pas faire ressortir celles
+  // des autres projets ni des autres services. Sur une colonne déjà contrainte par
+  // la politique, on garde l'intersection ; une intersection vide rend le plan
+  // incomplet, donc la table vide. C'est exactement ce que fait déjà le repli
+  // fetchTable (`filterTableDataForPlan`) : les deux chemins doivent s'accorder,
+  // sinon activer REST changerait les lignes lues.
+  function mergeExplicitRestFilter(policyFilter, explicitFilter) {
+    const merged = { ...(policyFilter || {}) };
+    Object.entries(explicitFilter).forEach(([column, values]) => {
+      const policyValues = merged[column];
+      merged[column] = Array.isArray(policyValues)
+        ? policyValues.filter((policyValue) =>
+            values.some((value) => Object.is(value, policyValue)))
+        : [...values];
+    });
+    return merged;
+  }
+
+  function splitContextFilterPlan(plan, contextSnapshot) {
+    let filters = core.splitContextTableFilter(plan.filter, plan.projectColumn, {
+      maxValues: REST_PROJECT_VALUES_PER_REQUEST,
+      maxEncodedLength: REST_FILTER_MAX_ENCODED_LENGTH,
+    });
+    // Un administrateur peut porter tant de projets que le découpage explose : on
+    // retombe alors sur le seul service, quitte à filtrer le reste côté client. Les
+    // contraintes explicites, elles, restent : ce sont celles qui font le volume.
+    if (
+      contextSnapshot.isAdmin &&
+      filters.length > REST_ADMIN_MAX_CHUNKS &&
+      Array.isArray(plan.filter?.Service)
+    ) {
+      filters = [{ Service: [...plan.filter.Service], ...(plan.explicitFilter || {}) }];
+    }
+    return { ...plan, filters };
+  }
+
   function buildContextFilterPlan(
     tableName,
     contextSnapshot,
     { fullTable = false, restFilter = null } = {}
   ) {
     const explicitFilter = normalizeExplicitRestFilter(restFilter);
-    if (restFilter != null) {
-      return {
-        supported: true,
-        complete: Boolean(explicitFilter),
-        tableName: core.toText(tableName),
-        projectColumn: "",
-        filter: explicitFilter,
-        filters: explicitFilter ? [explicitFilter] : [],
-        unfiltered: false,
-        fullTable: false,
-        explicitFilter,
-        mode: "rest-explicit",
-      };
-    }
     const spec = fullTable
       ? {
           supported: true,
@@ -735,17 +758,37 @@
           allowedProjects: contextSnapshot.allowedProjects,
           multiProject: isMultiProjectContext(),
         });
-    if (spec.unfiltered) return { ...spec, filters: [null] };
-    if (!spec.complete || !spec.filter) return { ...spec, filters: [] };
 
-    let filters = core.splitContextTableFilter(spec.filter, spec.projectColumn, {
-      maxValues: REST_PROJECT_VALUES_PER_REQUEST,
-      maxEncodedLength: REST_FILTER_MAX_ENCODED_LENGTH,
-    });
-    if (contextSnapshot.isAdmin && filters.length > REST_ADMIN_MAX_CHUNKS) {
-      filters = [{ Service: [...spec.filter.Service] }];
+    if (!explicitFilter) {
+      if (spec.unfiltered) return { ...spec, filters: [null] };
+      if (!spec.complete || !spec.filter) return { ...spec, filters: [] };
+      return splitContextFilterPlan(spec, contextSnapshot);
     }
-    return { ...spec, filters };
+
+    // Sans politique REST exploitable, le repli fetchTable applique lui-même le
+    // filtre explicite : le plan reste « non supporté » pour l'y envoyer.
+    if (!spec.supported) return { ...spec, explicitFilter, filters: [] };
+    if (!spec.unfiltered && !spec.complete) {
+      return { ...spec, explicitFilter, filter: null, filters: [] };
+    }
+
+    const mergedFilter = mergeExplicitRestFilter(
+      spec.unfiltered ? null : spec.filter,
+      explicitFilter
+    );
+    const complete = Object.values(mergedFilter).every((values) => values.length);
+    const plan = {
+      supported: true,
+      complete,
+      tableName: core.toText(tableName),
+      projectColumn: spec.unfiltered ? "" : core.toText(spec.projectColumn),
+      filter: complete ? mergedFilter : null,
+      unfiltered: false,
+      fullTable: Boolean(fullTable),
+      explicitFilter,
+      mode: "rest-explicit",
+    };
+    return complete ? splitContextFilterPlan(plan, contextSnapshot) : { ...plan, filters: [] };
   }
 
   // Les ETags mémorisés ne sont réutilisables que si le découpage du filtre est
@@ -896,7 +939,10 @@
       lignesUtiles: getTableRowCount(filteredTable),
       requetes: envelopes.length,
       revalidations: responses.filter((response) => response?.notModified).length,
-      filtreColonnes: Object.keys(filterPlan.explicitFilter || filterPlan.filter || {}),
+      // Les colonnes réellement envoyées, pas seulement celles ajoutées par
+      // l'appelant : lire « 2 colonnes » en croyant voir un filtre explicite alors
+      // que seule la politique s'appliquait masquait une table lue en entier.
+      filtreColonnes: Object.keys(filterPlan.filter || filterPlan.explicitFilter || {}),
       service: contextSnapshot.selectedService,
       projet: contextSnapshot.currentProject?.number || contextSnapshot.currentProject?.name || "multi-projets",
     });
@@ -1559,9 +1605,11 @@
     contextSnapshot = getPublicState(),
     filterPlan = {}
   ) {
-    if (filterPlan.fullTable) return raw;
-    const contextFiltered = filterTableData(raw, tableName, contextSnapshot);
     const explicitFilter = normalizeExplicitRestFilter(filterPlan.explicitFilter);
+    if (filterPlan.fullTable && !explicitFilter) return raw;
+    const contextFiltered = filterPlan.fullTable
+      ? raw
+      : filterTableData(raw, tableName, contextSnapshot);
     if (!explicitFilter) return contextFiltered;
     return core.filterRawTable(contextFiltered, (row) => (
       Object.entries(explicitFilter).every(([column, values]) => (
@@ -1781,6 +1829,7 @@
     acceptAnyNativeTableSignal = false,
     nativeSignalFilter = null,
     projectScopedSignals = false,
+    restFilter = null,
   } = {}) {
     const normalizedTableName = core.toText(tableName);
     if (!normalizedTableName || typeof callback !== "function") return () => {};
@@ -1798,6 +1847,11 @@
       nativeSignalFilter: typeof nativeSignalFilter === "function" ? nativeSignalFilter : null,
       projectScopedSignals: Boolean(projectScopedSignals),
       deliveredSignature: null,
+      // Une surveillance doit relire ce que le widget affiche, pas la table entière :
+      // sans ce filtre, surveiller References2 rapatriait toutes les lignes du projet
+      // à chaque signal, et annulait le filtre posé sur les lectures du widget.
+      // Filtre identique côté widget = même clé de cache, donc une seule requête.
+      restFilter: restFilter || null,
       reload: null,
     };
     watcher.reload = async (raison = "refresh", options = {}) => {
@@ -1810,6 +1864,7 @@
         forceRawRefresh: options.forceRawRefresh === true || reason === "poll",
         quietNotModified: reason === "poll",
         signal: options.signal || null,
+        restFilter: watcher.restFilter,
       });
       if (
         !watcher.active ||
@@ -1889,10 +1944,14 @@
     nativeSignalFilter = null,
     projectScopedSignals = false,
     acceptAnyNativeTableSignal = false,
+    tableRestFilters = null,
   } = {}) {
     const requested = Array.isArray(tableNames) ? tableNames : [tableNames];
     const uniqueTableNames = [...new Set(requested.map(core.toText).filter(Boolean))];
     if (!uniqueTableNames.length || typeof callback !== "function") return () => {};
+    const restFiltersByTable = tableRestFilters && typeof tableRestFilters === "object"
+      ? tableRestFilters
+      : {};
 
     const delay = Math.max(0, Number(debounceMs) || 0);
     const requestedPollIntervalMs = Math.max(0, Number(pollIntervalMs) || 0);
@@ -1938,6 +1997,7 @@
         nativeSignalFilter,
         projectScopedSignals,
         acceptAnyNativeTableSignal,
+        restFilter: restFiltersByTable[tableName] || null,
       })
     ));
 
@@ -2135,10 +2195,30 @@
     return () => listeners.delete(contextListener);
   }
 
+  // Toutes les lectures déjà faites de cette table, quel que soit leur filtre. Elles
+  // sont toutes passées par la politique projet+service : une ligne qui s'y trouve
+  // est donc, par construction, dans le périmètre autorisé.
+  function collectCachedContextRowsById(tableName, wanted, rowsById) {
+    contextTableCache.forEach((entry) => {
+      if (entry?.tableName !== tableName || !entry.value?.table) return;
+      core.tableToRows(entry.value.table).forEach((row) => {
+        const id = Number(row?.id);
+        if (wanted.has(id) && !rowsById.has(id)) rowsById.set(id, row);
+      });
+    });
+  }
+
   async function collectContextRowsById(tableName, recordIds) {
     const wanted = new Set([...recordIds].map(Number).filter((id) => id > 0));
     const rowsById = new Map();
     if (!wanted.size) return rowsById;
+
+    // Un widget qui ne lit que des sous-ensembles filtrés vient presque toujours de
+    // charger les lignes qu'il modifie. Relire la vue non filtrée pour les valider
+    // ferait revenir la table entière du projet, juste avant chaque écriture.
+    collectCachedContextRowsById(tableName, wanted, rowsById);
+    if (rowsById.size === wanted.size) return rowsById;
+
     try {
       const contextTable = await fetchContextTable(tableName);
       core.tableToRows(contextTable).forEach((row) => {

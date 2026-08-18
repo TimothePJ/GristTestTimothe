@@ -127,7 +127,10 @@ function normalizeFetchTableResult(raw) {
   return [];
 }
 
-async function fetchTableRows(tableName) {
+// `options` est transmis au contexte partagé, qui sait en faire un filtre REST et,
+// si l'API REST est indisponible, applique le même filtre après un fetchTable.
+// L'API Grist native ignore ce second argument : le widget reste utilisable seul.
+async function fetchTableRows(tableName, options = {}) {
   const grist = getGrist();
 
   if (!grist.docApi || typeof grist.docApi.fetchTable !== "function") {
@@ -136,9 +139,51 @@ async function fetchTableRows(tableName) {
 
   _planningServiceDiagnostics.fetchTableCount += 1;
   const fetchStartedAt = performance.now();
-  const raw = await grist.docApi.fetchTable(tableName);
+  const raw = await grist.docApi.fetchTable(tableName, options);
   _planningServiceDiagnostics.fetchTableDurationMs += performance.now() - fetchStartedAt;
   return normalizeFetchTableResult(raw);
+}
+
+// La timeline ne montre que les données d'entrée bloquantes : rapatrier les autres
+// n'a aucun usage. Le filtre voyage en REST ; au repli il est rejoué côté client.
+// La surveillance de la table utilise le même filtre : clé de cache identique, donc
+// une seule requête pour les deux, et pas de relecture intégrale à chaque signal.
+export const REFERENCE_BLOQUANT_REST_FILTER = Object.freeze({ Bloquant: [true] });
+
+function fetchBloquantReferenceRows() {
+  return fetchTableRows(REFERENCES_TABLE_NAME, {
+    restFilter: REFERENCE_BLOQUANT_REST_FILTER,
+  });
+}
+
+// Les références d'une ligne de planning se reconnaissent à leur document. Le
+// filtre porte donc sur le couple (nom, numéro) des lignes visées : avec plusieurs
+// lignes il laisse passer quelques croisements en trop, que la jointure client
+// écarte ensuite — mais il divise la lecture par l'ordre de grandeur du document.
+function buildReferenceDocumentRestFilter(planningRows = [], columns = {}) {
+  const nameCol = columns.taches || "Taches";
+  const altNameCol = columns.tacheAlt || "Tache";
+  const numberCol = columns.id2 || "ID2";
+  const names = new Set();
+  const numbers = new Set();
+
+  (Array.isArray(planningRows) ? planningRows : []).forEach((row) => {
+    const name = toText(row?.[nameCol]) || toText(row?.[altNameCol]);
+    const number = toText(row?.[numberCol]);
+    if (!name || !number) return;
+    names.add(name);
+    numbers.add(number);
+  });
+
+  if (!names.size || !numbers.size) return null;
+  return { NomDocument: [...names], NumeroDocument: [...numbers] };
+}
+
+// Sans document exploitable on ne peut rien restreindre : mieux vaut lire la table
+// du contexte que de renvoyer une liste vide et faire croire à l'absence de lien.
+function fetchReferenceRowsForPlanningRows(planningRows = [], columns = {}) {
+  const restFilter = buildReferenceDocumentRestFilter(planningRows, columns);
+  return fetchTableRows(REFERENCES_TABLE_NAME, restFilter ? { restFilter } : {});
 }
 
 function isIsoDate(value) {
@@ -1044,7 +1089,7 @@ async function buildReferenceOffsetSnapshotForPlanningRow(
 
   const allReferenceRows = Array.isArray(referenceRowsOverride)
     ? referenceRowsOverride
-    : await fetchTableRows(REFERENCES_TABLE_NAME).catch(() => []);
+    : await fetchReferenceRowsForPlanningRows([planningRow], columns).catch(() => []);
   const referenceRows = filterReferenceRowsForPlanningRows(allReferenceRows, [planningRow], columns);
   const linkedRows = referenceLookupOverride
     ? findLinkedReferenceRowsFromLookup(planningRow, referenceLookupOverride, columns)
@@ -1101,10 +1146,12 @@ async function buildReferenceOffsetSnapshotsForPlanningRows(planningRows = [], c
     return new Map();
   }
 
-  const allReferenceRows = await fetchTableRows(REFERENCES_TABLE_NAME).catch(() => []);
+  const affectedRows = [...uniqueRowsById.values()];
+  const allReferenceRows = await fetchReferenceRowsForPlanningRows(affectedRows, columns)
+    .catch(() => []);
   const referenceRows = filterReferenceRowsForPlanningRows(
     allReferenceRows,
-    [...uniqueRowsById.values()],
+    affectedRows,
     columns
   );
   const referenceLookup = buildLinkedReferenceLookup(referenceRows);
@@ -1919,6 +1966,136 @@ export async function syncPlanningDerivedValues({
   };
 }
 
+// Une date Grist arrive tantôt en secondes, tantôt en texte : comparer deux dates
+// suppose de les ramener d'abord à une même écriture.
+export function toPlanningIsoDate(value) {
+  return formatIsoDate(parseCalendarDate(value));
+}
+
+// Date d'ancrage moins N semaines, en calendrier local, au format ISO. Utilisée pour
+// déduire la date de gauche d'un segment à partir de sa date de droite.
+export function subtractWeeksFromIsoDate(anchorIsoDate, weeks) {
+  const anchorDate = parseCalendarDate(anchorIsoDate);
+  if (!anchorDate) return "";
+  const numericWeeks = toInteger(weeks);
+  if (numericWeeks == null || numericWeeks < 0) return "";
+  return formatIsoDate(subtractWeeksFromDate(anchorDate, numericWeeks));
+}
+
+// Écrire une durée déplace la date de gauche du segment, qui décale à son tour les
+// autres dates de la ligne. Cette cascade est la même pour une saisie isolée et pour
+// un remplissage groupé : elle vit ici, en fonction pure, pour ne pas exister en deux
+// exemplaires qui divergeraient. `planningRow` absente : on n'écrit que le couple
+// durée + date de gauche, sans recalcul, exactement comme avant.
+//
+// La branche « COFFRAGE-like » couvre la même famille de types que la troisième
+// branche de resolveDurationEditMeta (NDC, COUPES, DEMOLITION, types personnalisés) :
+// ces types affichent une Date_limite dérivée, elle doit exister en base aussi, sans
+// quoi getPlanningSegmentStartDate propage une date périmée dans References2.
+export function buildPlanningDurationUpdateFields(planningRow, columns = {}, {
+  durationField = "",
+  durationValue = null,
+  leftDateField = "",
+  leftIsoDate = "",
+} = {}) {
+  const typeDocCol = columns.typeDoc || "Type_doc";
+  const dateLimiteCol = columns.dateLimite || "Date_limite";
+  const duree1Col = columns.duree1 || "Duree_1";
+  const diffCoffrageCol = columns.diffCoffrage || "Diff_coffrage";
+  const duree2Col = columns.duree2 || "Duree_2";
+  const diffArmatureCol = columns.diffArmature || "Diff_armature";
+  const duree3Col = columns.duree3 || "Duree_3";
+  const demarrageCol = columns.demarragesTravaux || "Demarrages_travaux";
+
+  const updates = {
+    [durationField]: Number(durationValue),
+    [leftDateField]: leftIsoDate,
+  };
+
+  if (!planningRow) return updates;
+
+  const typeDoc = String(planningRow[typeDocCol] ?? "").toUpperCase();
+  const isNdc = isNdcTypeDoc(planningRow[typeDocCol]);
+
+  if (typeDoc.includes("ARMATURES")) {
+    const finalDuree2 = durationField === duree2Col
+      ? toInteger(durationValue)
+      : toInteger(planningRow[duree2Col]);
+    const finalDuree3 = durationField === duree3Col
+      ? toInteger(durationValue)
+      : toInteger(planningRow[duree3Col]);
+
+    let diffArmatureDate = leftDateField === diffArmatureCol
+      ? parseCalendarDate(leftIsoDate)
+      : parseCalendarDate(planningRow[diffArmatureCol]);
+
+    const demarrageDate = parseCalendarDate(planningRow[demarrageCol]);
+    const shouldRecomputeDiffArmature =
+      durationField === duree3Col || leftDateField === diffArmatureCol;
+    if (shouldRecomputeDiffArmature && demarrageDate && finalDuree3 != null && finalDuree3 >= 0) {
+      const computedDiffArmature = subtractWeeksFromDate(demarrageDate, finalDuree3);
+      const computedIso = formatIsoDate(computedDiffArmature);
+      if (computedIso) {
+        updates[diffArmatureCol] = computedIso;
+        diffArmatureDate = computedDiffArmature;
+      }
+    }
+
+    if (diffArmatureDate && finalDuree2 != null && finalDuree2 >= 0) {
+      const computedDiffCoffrage = subtractWeeksFromDate(diffArmatureDate, finalDuree2);
+      const computedIso = formatIsoDate(computedDiffCoffrage);
+      if (computedIso) {
+        updates[diffCoffrageCol] = computedIso;
+      }
+    }
+    // Les types sans durée reconnue (branche par défaut de resolveDurationEditMeta)
+    // n'arrivent jamais ici : aucune de leurs durées n'est éditable.
+  } else if (
+    typeDoc.includes("COFFRAGE") ||
+    isNdc ||
+    isCoupesTypeDoc(planningRow[typeDocCol]) ||
+    isDemolitionTypeDoc(planningRow[typeDocCol]) ||
+    isCustomTypeDoc(planningRow[typeDocCol])
+  ) {
+    const finalDuree1 = durationField === duree1Col
+      ? toInteger(durationValue)
+      : toInteger(planningRow[duree1Col]);
+    const finalDuree3 = durationField === duree3Col
+      ? toInteger(durationValue)
+      : toInteger(planningRow[duree3Col]);
+    const demarrageDate = parseCalendarDate(planningRow[demarrageCol]);
+    let diffCoffrageDate = leftDateField === diffCoffrageCol
+      ? parseCalendarDate(leftIsoDate)
+      : parseCalendarDate(planningRow[diffCoffrageCol]);
+    const shouldRecomputeDiffCoffrage =
+      durationField === duree3Col || leftDateField === diffCoffrageCol;
+
+    if (
+      demarrageDate &&
+      finalDuree3 != null &&
+      finalDuree3 >= 0 &&
+      (shouldRecomputeDiffCoffrage || !diffCoffrageDate)
+    ) {
+      const computedDiffCoffrage = subtractWeeksFromDate(demarrageDate, finalDuree3);
+      const computedIso = formatIsoDate(computedDiffCoffrage);
+      if (computedIso) {
+        updates[diffCoffrageCol] = computedIso;
+        diffCoffrageDate = computedDiffCoffrage;
+      }
+    }
+
+    if (diffCoffrageDate && finalDuree1 != null && finalDuree1 >= 0) {
+      const computedDateLimite = subtractWeeksFromDate(diffCoffrageDate, finalDuree1);
+      const computedIso = formatIsoDate(computedDateLimite);
+      if (computedIso) {
+        updates[dateLimiteCol] = computedIso;
+      }
+    }
+  }
+
+  return updates;
+}
+
 export async function updatePlanningDurationAndLeftDate(
   rowId,
   durationColumnName,
@@ -1962,19 +2139,6 @@ export async function updatePlanningDurationAndLeftDate(
   }
 
   const idCol = columns.id || "id";
-  const typeDocCol = columns.typeDoc || "Type_doc";
-  const dateLimiteCol = columns.dateLimite || "Date_limite";
-  const duree1Col = columns.duree1 || "Duree_1";
-  const diffCoffrageCol = columns.diffCoffrage || "Diff_coffrage";
-  const duree2Col = columns.duree2 || "Duree_2";
-  const diffArmatureCol = columns.diffArmature || "Diff_armature";
-  const duree3Col = columns.duree3 || "Duree_3";
-  const demarrageCol = columns.demarragesTravaux || "Demarrages_travaux";
-
-  const updates = {
-    [durationField]: Number(durationValue),
-    [leftDateField]: normalizedLeftIsoDate,
-  };
 
   let currentRow = null;
   try {
@@ -1984,78 +2148,12 @@ export async function updatePlanningDurationAndLeftDate(
     console.warn("Impossible de relire la ligne planning pour recalcul auto des dates :", error);
   }
 
-  if (currentRow) {
-    const typeDoc = String(currentRow[typeDocCol] ?? "").toUpperCase();
-    const isNdc = isNdcTypeDoc(currentRow[typeDocCol]);
-
-    if (typeDoc.includes("ARMATURES")) {
-      const finalDuree2 = durationField === duree2Col
-        ? toInteger(durationValue)
-        : toInteger(currentRow[duree2Col]);
-      const finalDuree3 = durationField === duree3Col
-        ? toInteger(durationValue)
-        : toInteger(currentRow[duree3Col]);
-
-      let diffArmatureDate = leftDateField === diffArmatureCol
-        ? parseCalendarDate(normalizedLeftIsoDate)
-        : parseCalendarDate(currentRow[diffArmatureCol]);
-
-      const demarrageDate = parseCalendarDate(currentRow[demarrageCol]);
-      const shouldRecomputeDiffArmature =
-        durationField === duree3Col || leftDateField === diffArmatureCol;
-      if (shouldRecomputeDiffArmature && demarrageDate && finalDuree3 != null && finalDuree3 >= 0) {
-        const computedDiffArmature = subtractWeeksFromDate(demarrageDate, finalDuree3);
-        const computedIso = formatIsoDate(computedDiffArmature);
-        if (computedIso) {
-          updates[diffArmatureCol] = computedIso;
-          diffArmatureDate = computedDiffArmature;
-        }
-      }
-
-      if (diffArmatureDate && finalDuree2 != null && finalDuree2 >= 0) {
-        const computedDiffCoffrage = subtractWeeksFromDate(diffArmatureDate, finalDuree2);
-        const computedIso = formatIsoDate(computedDiffCoffrage);
-        if (computedIso) {
-          updates[diffCoffrageCol] = computedIso;
-        }
-      }
-    } else if (typeDoc.includes("COFFRAGE") || isNdc) {
-      const finalDuree1 = durationField === duree1Col
-        ? toInteger(durationValue)
-        : toInteger(currentRow[duree1Col]);
-      const finalDuree3 = durationField === duree3Col
-        ? toInteger(durationValue)
-        : toInteger(currentRow[duree3Col]);
-      const demarrageDate = parseCalendarDate(currentRow[demarrageCol]);
-      let diffCoffrageDate = leftDateField === diffCoffrageCol
-        ? parseCalendarDate(normalizedLeftIsoDate)
-        : parseCalendarDate(currentRow[diffCoffrageCol]);
-      const shouldRecomputeDiffCoffrage =
-        durationField === duree3Col || leftDateField === diffCoffrageCol;
-
-      if (
-        demarrageDate &&
-        finalDuree3 != null &&
-        finalDuree3 >= 0 &&
-        (shouldRecomputeDiffCoffrage || !diffCoffrageDate)
-      ) {
-        const computedDiffCoffrage = subtractWeeksFromDate(demarrageDate, finalDuree3);
-        const computedIso = formatIsoDate(computedDiffCoffrage);
-        if (computedIso) {
-          updates[diffCoffrageCol] = computedIso;
-          diffCoffrageDate = computedDiffCoffrage;
-        }
-      }
-
-      if (diffCoffrageDate && finalDuree1 != null && finalDuree1 >= 0) {
-        const computedDateLimite = subtractWeeksFromDate(diffCoffrageDate, finalDuree1);
-        const computedIso = formatIsoDate(computedDateLimite);
-        if (computedIso) {
-          updates[dateLimiteCol] = computedIso;
-        }
-      }
-    }
-  }
+  const updates = buildPlanningDurationUpdateFields(currentRow, columns, {
+    durationField,
+    durationValue,
+    leftDateField,
+    leftIsoDate: normalizedLeftIsoDate,
+  });
 
   const actions = [
     [
@@ -3091,7 +3189,7 @@ export async function fetchPlanningReferenceReceptionSummaries(planningRows = []
   const table = APP_CONFIG.grist.planningTable;
   const columns = table.columns || {};
   const idCol = columns.id || "id";
-  const allReferenceRows = await fetchTableRows(REFERENCES_TABLE_NAME).catch(() => []);
+  const allReferenceRows = await fetchBloquantReferenceRows().catch(() => []);
   const referenceRows = filterReferenceRowsForPlanningRows(allReferenceRows, rows, columns);
   const referenceLookup = buildLinkedReferenceLookup(referenceRows);
   const summariesByRowId = new Map();
@@ -3270,7 +3368,7 @@ export async function fetchPlanningReferenceDetails(rowId) {
   const { row, columns } = await fetchPlanningRowById(rowId);
   const startDate = getPlanningSegmentStartDate(row, columns);
   const startIso = formatIsoDate(startDate);
-  const allReferenceRows = await fetchTableRows(REFERENCES_TABLE_NAME);
+  const allReferenceRows = await fetchReferenceRowsForPlanningRows([row], columns);
   const referenceRows = filterReferenceRowsForPlanningRows(
     allReferenceRows.filter((referenceRow) => !isArchivedReferenceRow(referenceRow)),
     [row],
@@ -3304,7 +3402,7 @@ export async function updatePlanningReferenceDetails(rowId, updates = []) {
   const startDate = getPlanningSegmentStartDate(row, columns);
   const hasStartDate = startDate instanceof Date && !Number.isNaN(startDate.getTime());
 
-  const allReferenceRows = await fetchTableRows(REFERENCES_TABLE_NAME);
+  const allReferenceRows = await fetchReferenceRowsForPlanningRows([row], columns);
   const referenceRows = filterReferenceRowsForPlanningRows(
     allReferenceRows.filter((referenceRow) => !isArchivedReferenceRow(referenceRow)),
     [row],

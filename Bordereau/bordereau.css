@@ -226,7 +226,7 @@ button:hover:not(:disabled) {
 
 #invoiceTable {
   width: 100%;
-  min-width: 1000px;
+  min-width: 1160px;
   border-collapse: separate;
   border-spacing: 0;
   background: var(--vc-panel);
@@ -265,25 +265,29 @@ button:hover:not(:disabled) {
   background: #eef5fd;
 }
 
-#invoiceTable td:nth-child(1) {
-  width: 180px;
+#invoiceTable td.plan-column {
+  width: 170px;
 }
 
-#invoiceTable td:nth-child(2) {
+#invoiceTable td.type-document-column {
+  width: 170px;
+}
+
+#invoiceTable td.indice-column {
   width: 90px;
   color: var(--vc-blue-700);
   font-weight: 700;
   text-align: center;
 }
 
-#invoiceTable td:nth-child(3) {
-  min-width: 360px;
+#invoiceTable td.designation-column {
+  min-width: 320px;
   color: var(--vc-text);
   font-weight: 600;
   white-space: normal;
 }
 
-#invoiceTable td:nth-child(4) {
+#invoiceTable td.diffusion-column {
   width: 145px;
   color: var(--vc-blue-700);
   font-weight: 700;
@@ -291,13 +295,30 @@ button:hover:not(:disabled) {
   white-space: nowrap;
 }
 
-#invoiceTable td:nth-child(5) {
+#invoiceTable td.exemplaires-column {
   width: 170px;
 }
 
-#invoiceTable td:nth-child(6) {
+#invoiceTable td.action-column {
   width: 116px;
   text-align: right;
+}
+
+#invoiceTable td.type-unresolved {
+  background: #fff6d9;
+}
+
+#invoiceTable td.type-unresolved select {
+  border-color: #c88400;
+}
+
+#invoiceTable td.type-missing {
+  background: #fde8e8;
+}
+
+#invoiceTable td.type-missing select {
+  border-color: var(--vc-red);
+  color: #842029;
 }
 
 .bulk-fill-header {

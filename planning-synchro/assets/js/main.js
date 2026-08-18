@@ -158,6 +158,7 @@ function bootstrapApp() {
     chartCanvas: document.getElementById("ps-chart-canvas"),
     chartFilter: document.getElementById("ps-chart-filter"),
     chartGranularity: document.getElementById("ps-chart-granularity"),
+    chartLegend: document.getElementById("ps-chart-legend"),
   };
 
   if (!(els.select instanceof HTMLElement)) {
@@ -311,7 +312,12 @@ function bootstrapApp() {
     teardown();
     planningRenderer = createPlanningRenderer(els.planning);
     chargeBoard = createChargeBoard(els.charge);
-    planningChart = createPlanningChart(els.chartCanvas, els.chartFilter, els.chartGranularity);
+    planningChart = createPlanningChart(
+      els.chartCanvas,
+      els.chartFilter,
+      els.chartGranularity,
+      els.chartLegend
+    );
     // Keep the planning data for the chart view; always arrive on the planning
     // (timeline) view, scrolled to the first rows (see scrollToTop below).
     chartRows = planningRows;
