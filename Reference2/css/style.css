@@ -1522,8 +1522,20 @@ dialog select {
   min-width: 0;
 }
 
+/* La durée limite n'existe que pour une ligne bloquante : masquée, elle ne doit
+   pas garder sa cellule dans la grille. */
+.reference-field[hidden] {
+  display: none !important;
+}
+
 .reference-field-wide {
   grid-column: 1 / -1;
+}
+
+/* L'interrupteur « Bloquant » voisine un champ à étiquette : on lui rend la
+   hauteur de cette étiquette pour que les deux contrôles s'alignent. */
+.reference-row-dialog .reference-field .reference-switch-row {
+  padding-top: calc(1em + 6px);
 }
 
 .reference-row-dialog .reference-field label {

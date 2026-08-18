@@ -35,7 +35,7 @@ function matchingOtherRecord(id = 2, overrides = {}) {
     NumeroDocument: String(id).padStart(3, '0'),
     DateLimite: '2025-01-01',
     Retard: '999',
-    Bloquant: true,
+    Remarque: 'Officiel',
     Archive: true,
     ...overrides,
   });
@@ -74,9 +74,11 @@ test('une différence sur chacun des sept champs comparés exclut la ligne', asy
     Indice: 'B',
     Recu: '04/08/2026',
     DureeLimite: 1,
+    Bloquant: true,
     DescriptionObservations: 'Autre description',
-    Remarque: 'Officiel',
   };
+
+  assert.deepEqual(Object.keys(differences), [...utils.COMPARISON_FIELDS]);
 
   for (const [field, value] of Object.entries(differences)) {
     await t.test(field, () => {
@@ -86,12 +88,38 @@ test('une différence sur chacun des sept champs comparés exclut la ligne', asy
   }
 });
 
+test('la remarque ne restreint pas les correspondances mais reste surveillée et propagée', () => {
+  const initial = makeRecord({ Remarque: 'Conservatoire' });
+  const candidate = matchingOtherRecord(2, { Remarque: 'Officiel' });
+  assert.deepEqual(
+    utils.findMatchingOtherRows([candidate], initial).map((record) => record.id),
+    [2]
+  );
+
+  // Apparier n'est pas surveiller : la remarque reste dans la clé d'obsolescence,
+  // sinon une remarque changée ailleurs serait écrasée sans avertissement.
+  assert.equal(utils.getComparisonKey(candidate), utils.getComparisonKey(initial));
+  assert.notEqual(utils.getStalenessKey(candidate), utils.getStalenessKey(initial));
+  assert.deepEqual(
+    [...utils.STALENESS_FIELDS],
+    [...utils.COMPARISON_FIELDS, 'Remarque']
+  );
+
+  const [update] = utils.createPerTargetUpdates({
+    targets: [candidate],
+    sharedFields: { Remarque: 'Conservatoire' },
+    durationWeeks: '',
+    buildLimitFields: () => ({}),
+    withComputedRetard: (fields) => fields,
+  });
+  assert.equal(update.fields.Remarque, 'Conservatoire');
+});
+
 test('DateLimite, Retard et les autres champs techniques ne participent pas à la comparaison', () => {
   const initial = makeRecord();
   const candidate = matchingOtherRecord(2, {
     DateLimite: '1900-01-01',
     Retard: '',
-    Bloquant: !initial.Bloquant,
     Archive: !initial.Archive,
     Type_document: 'COFFRAGE',
     Zone: 'Zone 9',
@@ -113,7 +141,7 @@ test('les lignes du même document, d’un autre projet ou d’un autre service 
   );
 });
 
-test('les textes, dates, valeurs vides, date sentinelle, durées nulles et remarques sont normalisés', () => {
+test('les textes, dates, valeurs vides, date sentinelle, durées nulles et booléens sont normalisés', () => {
   assert.equal(utils.normalizeText('  Test  '), 'Test');
   assert.equal(utils.normalizeDate('03/08/2026'), '2026-08-03');
   assert.equal(utils.normalizeDate('2026-08-03T00:00:00Z'), '2026-08-03');
@@ -122,7 +150,15 @@ test('les textes, dates, valeurs vides, date sentinelle, durées nulles et remar
   assert.equal(utils.normalizeDuration(0), '0');
   assert.equal(utils.normalizeDuration('0'), '0');
   assert.equal(utils.normalizeDuration('0.0'), '0');
+  assert.equal(utils.normalizeBoolean(true), '1');
+  assert.equal(utils.normalizeBoolean(1), '1');
+  assert.equal(utils.normalizeBoolean(false), '');
+  assert.equal(utils.normalizeBoolean(null), '');
+  assert.equal(utils.normalizeBoolean(''), '');
+  assert.equal(utils.normalizeBoolean('false'), '');
+  assert.equal(utils.normalizeBoolean('0'), '');
   assert.equal(utils.normalizeRemarque(' Conservatoire '), 'Conservatoire');
+  assert.equal(utils.normalizeRemarque('Autre chose'), '');
 
   const initial = makeRecord({ Recu: '2026-08-03', DureeLimite: '0' });
   const candidate = matchingOtherRecord(2, { Recu: '03/08/2026', DureeLimite: 0 });
@@ -164,6 +200,32 @@ test('les mises à jour recalculent DateLimite et Retard avec l’identité de c
   assert.deepEqual(calls.map((call) => call.documentInfo.zone), ['Zone 1', 'Zone 1']);
   assert.deepEqual(calls.map((call) => call.service), ['Structure', 'Structure']);
   assert.deepEqual(calls.map((call) => call.useZeroWhenEmpty), [false, true]);
+});
+
+test('le bloquant du formulaire prime sur celui stocké dans chaque ligne cible', () => {
+  const targets = [
+    matchingOtherRecord(2, { Bloquant: false }),
+    matchingOtherRecord(3, { Bloquant: true }),
+  ];
+  const calls = [];
+  const run = (sharedFields) => {
+    calls.length = 0;
+    utils.createPerTargetUpdates({
+      targets,
+      sharedFields,
+      durationWeeks: '',
+      buildLimitFields(options) {
+        calls.push(options);
+        return {};
+      },
+      withComputedRetard: (fields) => fields,
+    });
+    return calls.map((call) => call.useZeroWhenEmpty);
+  };
+
+  assert.deepEqual(run({ Bloquant: true }), [true, true]);
+  assert.deepEqual(run({ Bloquant: false }), [false, false]);
+  assert.deepEqual(run({}), [false, true]);
 });
 
 test('la ligne courante reste la seule cible sans sélection groupée', () => {

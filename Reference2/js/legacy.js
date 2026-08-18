@@ -326,7 +326,14 @@ function autoFillFields() {
     document.getElementById('description').value = REFERENCE_PENDING_DESCRIPTION;
     document.getElementById('remarque').value = 'Officiel';
     document.getElementById('dureeLimite').value = '';
-    void fillAddRowDefaultDurationFromContext({ force: true });
+    // La durée par défaut héritée du contexte n'existe que sur une ligne bloquante :
+    // sans cocher la case elle resterait masquée, donc jamais écrite.
+    void fillAddRowDefaultDurationFromContext({ force: true }).then(() => {
+      applyReferenceRowBloquantValue(
+        'add',
+        isReferenceDefaultDurationBloquant(document.getElementById('dureeLimite')?.value)
+      );
+    });
     return;
   }
 
@@ -343,6 +350,7 @@ function autoFillFields() {
     document.getElementById('description').value = matchingRecord.DescriptionObservations || '';
     document.getElementById('remarque').value = normalizeRemarqueValue(matchingRecord.Remarque);
     document.getElementById('recu').value = formatReferenceDialogDate(matchingRecord.Recu);
+    applyReferenceRowBloquantValue('add', isReferenceRecordBloquant(matchingRecord));
     document.getElementById('dureeLimite').value = formatReferenceDurationInput(matchingRecord.DureeLimite);
     void resolveReferenceDurationInputValue(matchingRecord).then((durationValue) => {
       if (document.getElementById('referenceInput')?.value === selectedReference) {
@@ -355,6 +363,7 @@ function autoFillFields() {
     document.getElementById('description').value = '';
     document.getElementById('remarque').value = '';
     document.getElementById('recu').value = '';
+    applyReferenceRowBloquantValue('add', false);
     document.getElementById('dureeLimite').value = '';
   }
 }
@@ -369,6 +378,7 @@ const REFERENCE_ROW_FORM_CONFIG = {
     fileStatusId: 'referenceFileStatus',
     fileClearId: 'clearReferenceFileButton',
     contextPrefix: 'add',
+    durationFieldId: 'dureeLimiteField',
     fields: {
       emetteur: 'emetteur',
       reference: 'referenceInput',
@@ -376,6 +386,7 @@ const REFERENCE_ROW_FORM_CONFIG = {
       recu: 'recu',
       description: 'description',
       remarque: 'remarque',
+      bloquant: 'bloquant',
       dureeLimite: 'dureeLimite',
     },
   },
@@ -388,6 +399,7 @@ const REFERENCE_ROW_FORM_CONFIG = {
     fileStatusId: 'editReferenceFileStatus',
     fileClearId: 'clearEditReferenceFileButton',
     contextPrefix: 'edit',
+    durationFieldId: 'editDureeLimiteField',
     fields: {
       emetteur: 'editEmetteur',
       reference: 'editReference',
@@ -395,6 +407,7 @@ const REFERENCE_ROW_FORM_CONFIG = {
       recu: 'editRecu',
       description: 'editDescription',
       remarque: 'editRemarque',
+      bloquant: 'editBloquant',
       dureeLimite: 'editDureeLimite',
     },
   },
@@ -415,6 +428,7 @@ const REFERENCES2_DIALOG_WRITABLE_FIELDS = new Set([
   'DureeLimite',
   'DateLimite',
   'Retard',
+  'Bloquant',
   'Service',
 ]);
 
@@ -444,6 +458,48 @@ function getReferenceRowForm(mode) {
 function getReferenceRowField(mode, fieldName) {
   const fieldId = getReferenceRowFormConfig(mode).fields[fieldName];
   return fieldId ? document.getElementById(fieldId) : null;
+}
+
+function isReferenceRowBloquant(mode) {
+  const input = getReferenceRowField(mode, 'bloquant');
+  return input instanceof HTMLInputElement && input.checked;
+}
+
+// La durée limite ne veut rien dire hors d'une ligne bloquante : elle ne s'affiche,
+// ne se valide et ne s'écrit que dans ce cas.
+function syncReferenceRowBloquantUi(mode) {
+  const isBloquant = isReferenceRowBloquant(mode);
+  const durationField = document.getElementById(getReferenceRowFormConfig(mode).durationFieldId);
+  if (durationField) durationField.hidden = !isBloquant;
+  return isBloquant;
+}
+
+function getReferenceRowDurationValue(mode) {
+  if (!isReferenceRowBloquant(mode)) return '';
+  return String(getReferenceRowField(mode, 'dureeLimite')?.value || '').trim();
+}
+
+// Recopier une référence existante, c'est aussi reprendre son caractère bloquant :
+// sans lui la durée recopiée tomberait dans un champ masqué, donc à la trappe.
+function applyReferenceRowBloquantValue(mode, value) {
+  const toggle = getReferenceRowField(mode, 'bloquant');
+  if (toggle instanceof HTMLInputElement) toggle.checked = Boolean(value);
+  syncReferenceRowBloquantUi(mode);
+}
+
+// Créer des documents avec une durée limite par défaut, c'est déclarer leurs
+// données d'entrée bloquantes : sans cela la durée posée serait invisible dans la
+// fenêtre de modification, et le premier enregistrement l'effacerait.
+function isReferenceDefaultDurationBloquant(durationWeeks) {
+  return parseReferenceDurationLimit(durationWeeks) != null;
+}
+
+// Une durée limite exploitable vaut déclaration de blocage, même sur une ligne dont
+// la colonne Bloquant est restée à faux : c'est le cas de celles créées avant que la
+// case n'existe et de celles que « Planning Projet » écrit sans la cocher. Les
+// ouvrir case décochée masquerait leur durée, et l'enregistrement l'effacerait.
+function isReferenceRecordBloquant(record) {
+  return Boolean(record?.Bloquant) || isReferenceDefaultDurationBloquant(record?.DureeLimite);
 }
 
 function sanitizeReferences2DialogFields(fields) {
@@ -526,7 +582,7 @@ function validateReferenceRowForm(mode, { focus = true } = {}) {
   });
 
   const durationInput = getReferenceRowField(mode, 'dureeLimite');
-  const durationValue = String(durationInput?.value || '').trim();
+  const durationValue = getReferenceRowDurationValue(mode);
   if (durationValue && parseReferenceDurationLimit(durationValue) == null) {
     setReferenceFieldError(durationInput, 'Saisissez un nombre entier positif ou nul.');
     firstInvalid ||= durationInput;
@@ -541,10 +597,14 @@ function validateReferenceRowForm(mode, { focus = true } = {}) {
 function getReferenceFormSnapshot(mode) {
   const config = getReferenceRowFormConfig(mode);
   return JSON.stringify(Object.fromEntries(
-    Object.entries(config.fields).map(([name, id]) => [
-      name,
-      String(document.getElementById(id)?.value || '').trim(),
-    ])
+    Object.entries(config.fields).map(([name, id]) => {
+      const element = document.getElementById(id);
+      // Une case à cocher garde la même `value` cochée ou non : seul son état compte.
+      if (element instanceof HTMLInputElement && element.type === 'checkbox') {
+        return [name, String(element.checked)];
+      }
+      return [name, String(element?.value || '').trim()];
+    })
   ));
 }
 
@@ -1007,7 +1067,9 @@ async function prepareFreshReferenceEditTargets() {
 
   const freshRecords = await fetchFreshReferenceEditRecords();
   const freshById = new Map(freshRecords.map((record) => [Number(record.id), record]));
-  const comparisonKey = utils.getComparisonKey(referenceEditInitialRecord);
+  // Clé d'obsolescence, plus large que celle d'appariement : elle couvre aussi la
+  // remarque, que le formulaire réécrit sans jamais l'avoir relue.
+  const stalenessKey = utils.getStalenessKey(referenceEditInitialRecord);
   const currentDocumentKey = utils.getDocumentIdentityKey(referenceEditInitialRecord, {
     projectNormalizer: normalizeReferenceDocumentIdentityPart,
     serviceNormalizer: normalizeServiceMatchKey,
@@ -1025,7 +1087,7 @@ async function prepareFreshReferenceEditTargets() {
     ) {
       throw new Error(`La ligne ${recordId} n'appartient plus au projet et au service courants.`);
     }
-    if (utils.getComparisonKey(freshRecord) !== comparisonKey) {
+    if (utils.getStalenessKey(freshRecord) !== stalenessKey) {
       throw new Error(`La ligne ${recordId} a changé depuis l'ouverture de la fenêtre. Aucune écriture n'a été effectuée.`);
     }
 
@@ -1060,6 +1122,7 @@ function buildReferenceEditUpdateEntries(targets, planningTable, formData, durat
     Recu: String(formData.get('recu') || '').trim() || DEFAULT_REFERENCE_DATE,
     DescriptionObservations: String(formData.get('description') || '').trim(),
     Remarque: normalizeRemarqueValue(formData.get('remarque')),
+    Bloquant: isReferenceRowBloquant('edit'),
   };
   return utils.createPerTargetUpdates({
     targets,
@@ -1125,6 +1188,7 @@ async function resetAndUpdateDialog() {
   clearReferenceFormErrors('add');
   setReferenceFormStatus('add');
   resetReferenceFilePicker('add');
+  syncReferenceRowBloquantUi('add');
   resetDuplicateSelectedDocumentValues();
 
   const duplicateOptionsContainer = document.getElementById('duplicateOptionsContainer');
@@ -1169,6 +1233,39 @@ getReferenceRowForm('add')?.addEventListener('input', (event) => {
     updateDuplicateSelectionSummary();
   }
 });
+
+// Décocher « bloquant » retire la durée limite plutôt que de la laisser vivre
+// cachée : une valeur invisible ne doit jamais repartir en base au prochain
+// enregistrement. La recocher restitue la valeur par défaut du contexte.
+function bindReferenceRowBloquantToggle(mode) {
+  const toggle = getReferenceRowField(mode, 'bloquant');
+  if (!(toggle instanceof HTMLInputElement)) return;
+
+  toggle.addEventListener('change', () => {
+    const isBloquant = syncReferenceRowBloquantUi(mode);
+    const durationInput = getReferenceRowField(mode, 'dureeLimite');
+
+    if (!isBloquant) {
+      if (durationInput) durationInput.value = '';
+      clearReferenceFieldError(durationInput);
+    }
+
+    const refilled = !isBloquant
+      ? Promise.resolve()
+      : mode === 'edit'
+        ? fillEditDurationFromRecord(referenceEditInitialRecord)
+        : fillAddRowDefaultDurationFromContext();
+
+    void Promise.resolve(refilled)
+      .catch((error) => console.warn('Durée limite par défaut indisponible :', error))
+      .finally(() => {
+        if (mode === 'edit') updateEditSubmitState();
+        else updateDuplicateSelectionSummary();
+      });
+  });
+}
+
+['add', 'edit'].forEach(bindReferenceRowBloquantToggle);
 
 
 // === Separator between original <script> blocks ===
@@ -4222,6 +4319,7 @@ async function createDocumentsBatch({
         Indice: '-',
         Recu: DEFAULT_REFERENCE_DATE,
         DescriptionObservations: REFERENCE_PENDING_DESCRIPTION,
+        Bloquant: isReferenceDefaultDurationBloquant(safeDefaultDureeLimite),
         ...buildReferenceLimitFields({
           planningTable: planningTableForLimits,
           projectName: normalizedProject,
@@ -4715,7 +4813,9 @@ document.getElementById('hideArchivedToggle').addEventListener('change', () => {
 });
 
 // Bascule "bloquant" : la date limite et le retard sont recalculés avant l'écriture,
-// pour que la ligne reste cohérente sans attendre le rechargement.
+// pour que la ligne reste cohérente sans attendre le rechargement. La durée limite
+// survit à un décochage : un clic sans confirmation ne doit pas détruire une valeur
+// que seule la fenêtre « Modifier » permet de reconstituer.
 function renderReferenceBloquantCell(td, record) {
   td.classList.add('bloquant-cell');
   td.textContent = record.Bloquant ? '✓' : '';
@@ -4986,9 +5086,12 @@ async function showEditDialog(record) {
   document.getElementById('editDescription').value = record.DescriptionObservations || '';
   document.getElementById('editRemarque').value = normalizeRemarqueValue(record.Remarque);
   document.getElementById('editRecu').value = formatReferenceDialogDate(record.Recu);
+  const editBloquant = document.getElementById('editBloquant');
+  if (editBloquant) editBloquant.checked = isReferenceRecordBloquant(record);
   const editDureeLimite = document.getElementById('editDureeLimite');
   editDureeLimite.value = formatReferenceDurationInput(record.DureeLimite);
   editDureeLimite.dataset.initialValue = editDureeLimite.value;
+  syncReferenceRowBloquantUi('edit');
 
   dialog.showModal();
   document.getElementById('editEmetteur')?.focus();
@@ -5115,6 +5218,7 @@ function autoFillEditFields() {
     document.getElementById('editDescription').value = matchingRecord.DescriptionObservations || '';
     document.getElementById('editRemarque').value = normalizeRemarqueValue(matchingRecord.Remarque);
     document.getElementById('editRecu').value = formatReferenceDialogDate(matchingRecord.Recu);
+    applyReferenceRowBloquantValue('edit', isReferenceRecordBloquant(matchingRecord));
     const editDureeLimite = document.getElementById('editDureeLimite');
     editDureeLimite.value = formatReferenceDurationInput(matchingRecord.DureeLimite);
     editDureeLimite.dataset.initialValue = editDureeLimite.value;
@@ -5125,6 +5229,7 @@ function autoFillEditFields() {
     document.getElementById('editDescription').value = '';
     document.getElementById('editRemarque').value = '';
     document.getElementById('editRecu').value = '';
+    applyReferenceRowBloquantValue('edit', false);
     const editDureeLimite = document.getElementById('editDureeLimite');
     editDureeLimite.value = '';
     editDureeLimite.dataset.initialValue = '';
@@ -5206,7 +5311,8 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
   const recu = String(formData.get('recu') || '').trim() || DEFAULT_REFERENCE_DATE;
   const description = String(formData.get('description') || '').trim();
   const remarque = normalizeRemarqueValue(formData.get('remarque'));
-  const dureeLimite = String(formData.get('dureeLimite') || '').trim();
+  const isBloquant = isReferenceRowBloquant('add');
+  const dureeLimite = getReferenceRowDurationValue('add');
   const isDuplicate = document.getElementById('duplicateCheckbox').checked;
 
   setReferenceFormBusy('add', true, 'Enregistrement en cours…');
@@ -5272,11 +5378,13 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
         Recu: recu,
         DescriptionObservations: description,
         Remarque: remarque,
+        Bloquant: isBloquant,
         ...buildReferenceLimitFields({
           planningTable: planningTableForLimits,
           projectName: selectedProject,
           documentInfo,
           durationWeeks: dureeLimite,
+          useZeroWhenEmpty: isBloquant,
           service: serviceValue,
         }),
         Service: serviceValue
@@ -5574,6 +5682,7 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
       Indice: '-',
       Recu: '1900-01-01',
       DescriptionObservations: REFERENCE_PENDING_DESCRIPTION,
+      Bloquant: isReferenceDefaultDurationBloquant(defaultDureeLimite),
       ...referenceLimitFields,
       Service: serviceValue
     }));
@@ -6599,7 +6708,7 @@ document.getElementById('editRowDialog').addEventListener('submit', async (e) =>
   }
 
   const formData = new FormData(e.target);
-  const dureeLimite = String(formData.get('dureeLimite') || '').trim();
+  const dureeLimite = getReferenceRowDurationValue('edit');
   setReferenceFormBusy('edit', true, 'Enregistrement des modifications…');
 
   try {
@@ -7320,6 +7429,7 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
           Indice: '-',
           Recu: '1900-01-01',
           DescriptionObservations: REFERENCE_PENDING_DESCRIPTION,
+          Bloquant: isReferenceDefaultDurationBloquant(defaultDureeLimite),
           ...referenceLimitFields,
           Service: serviceValue
         });
