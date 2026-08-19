@@ -1,6 +1,8 @@
-/* Conteneur scrollable */
+/* Conteneur scrollable : occupe la rangee libre de la grille du body
+   plutot qu'une hauteur calculee a la main. min-height: 0 lui permet de
+   retrecir, sinon la grille le laisse deborder. */
 #plans-output {
-  max-height: calc(100vh - 128px);
+  min-height: 0;
   overflow: auto;
   overflow-anchor: none;
   position: relative;
@@ -9,6 +11,14 @@
   border: 1px solid #d6e0ea;
   border-radius: 8px;
   box-shadow: 0 14px 32px rgba(0, 73, 144, 0.1);
+}
+
+/* Voir style.css : sous 900px c'est la page qui defile, la liste suit le flux. */
+@media (max-width: 900px) {
+  #plans-output {
+    max-height: none;
+    overflow: visible;
+  }
 }
 
 /* Tableau */

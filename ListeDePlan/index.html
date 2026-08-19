@@ -101,21 +101,24 @@
 
   <dialog id="dlg-print-options" class="print-options-dialog">
     <form method="dialog" class="dialog-body print-options-body">
-      <h3>Préparer l'impression</h3>
-      <section class="print-options-section">
-        <h4>Types de document</h4>
+      <header class="print-options-header">
+        <h3>Préparer l'impression</h3>
         <p class="print-options-intro">
-          Coche les types à imprimer et fais-les glisser dans l'ordre voulu.
+          Coche ce qu'il faut imprimer, glisse pour changer l'ordre.
         </p>
-        <div id="printTypeOrderList" class="print-type-order-list"></div>
-      </section>
-      <section class="print-options-section">
-        <h4>Zones</h4>
-        <p class="print-options-intro">
-          Coche les zones à imprimer et fais-les glisser dans l'ordre voulu.
-        </p>
-        <div id="printZoneOrderList" class="print-order-list"></div>
-      </section>
+      </header>
+
+      <div class="print-options-scroll">
+        <section class="print-options-section">
+          <h4>Types de document</h4>
+          <div id="printTypeOrderList" class="print-type-order-list"></div>
+        </section>
+        <section class="print-options-section">
+          <h4>Zones</h4>
+          <div id="printZoneOrderList" class="print-order-list"></div>
+        </section>
+      </div>
+
       <menu class="dialog-buttons print-options-actions">
         <button type="button" id="print-options-cancel" class="cancel-button">Annuler</button>
         <button type="button" id="print-options-confirm">Imprimer</button>
