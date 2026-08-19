@@ -38,6 +38,62 @@
     });
   }
 
+  function projectRows(projects) {
+    if (Array.isArray(projects)) return projects;
+    const ids = Array.isArray(projects?.id) ? projects.id : [];
+    return ids.map((id, index) => ({
+      id,
+      Numero_de_projet: projects?.Numero_de_projet?.[index],
+      Nom_de_projet: projects?.Nom_de_projet?.[index],
+    }));
+  }
+
+  function buildProjectCatalog(projects) {
+    return projectRows(projects)
+      .map((project) => {
+        const ids = [...new Set(
+          [project?.id, ...(Array.isArray(project?.ids) ? project.ids : [])]
+            .map(Number)
+            .filter((id) => Number.isInteger(id) && id > 0)
+        )];
+        const names = [...new Set(
+          [
+            project?.name ??
+            project?.Nom_de_projet ??
+            project?.NomProjet ??
+            project?.Nom_projet,
+            ...(Array.isArray(project?.names) ? project.names : []),
+          ]
+            .map(textValue)
+            .filter(Boolean)
+        )];
+        return {
+          id: ids[0] || null,
+          ids,
+          number: textValue(
+            project?.number ??
+            project?.Numero_de_projet ??
+            project?.NumeroProjet ??
+            project?.Numero
+          ),
+          name: names[0] || "",
+          names,
+        };
+      })
+      .filter((project) => Number.isInteger(project.id) && project.id > 0 && project.name)
+      .sort((left, right) => compareText(left.name, right.name));
+  }
+
+  function isTableColumnDefinitelyMissing(tableData, columnName) {
+    const ids = Array.isArray(tableData?.id) ? tableData.id : [];
+    const column = textValue(columnName);
+    return Boolean(
+      ids.length &&
+      column &&
+      !Object.prototype.hasOwnProperty.call(tableData, column)
+    );
+  }
+
   function getDocumentKey(planNumber, typeDocument) {
     return JSON.stringify([
       normalizeIdentityValue(planNumber),
@@ -150,12 +206,14 @@
   }
 
   return Object.freeze({
+    buildProjectCatalog,
     buildSentDocumentIndiceKeys,
     buildUniqueTypeAssignments,
     collectTypeCandidates,
     compareText,
     getDocumentIndiceKey,
     getDocumentKey,
+    isTableColumnDefinitelyMissing,
     isEnvoyeValue,
     normalizeCompareValue,
     normalizeIdentityValue,

@@ -29,3 +29,34 @@ test("le PDF exporte Type_Document", () => {
 test("les evenements de tableau ne dependent plus des index de colonnes", () => {
   assert.doesNotMatch(script, /cellIndex/);
 });
+
+test("le catalogue projets est surveille independamment des envois", () => {
+  const refreshStart = script.indexOf("async function refreshBordereauFromRecords");
+  const refreshEnd = script.indexOf("window.GristServiceContext.watchContextTable", refreshStart);
+  const refreshSource = script.slice(refreshStart, refreshEnd);
+
+  assert.ok(refreshStart >= 0 && refreshEnd > refreshStart);
+  assert.doesNotMatch(refreshSource, /fetchTable\(PROJET_TABLE/);
+  assert.doesNotMatch(refreshSource, /populateProjectDropdown/);
+  assert.match(
+    script,
+    /watchContextTable\(PROJET_TABLE,\s*async\s*\(projectRows\)\s*=>\s*\{\s*populateProjectDropdown\(projectRows\)/
+  );
+  assert.match(script, /whenReady\(\)/);
+  assert.match(script, /getAllowedProjects\(\)/);
+});
+
+test("la lecture Envois exige Type_Document sans rejeter une table vide", () => {
+  assert.match(
+    script,
+    /fetchTable\(BORDEREAU_TABLE,\s*\{\s*requiredColumns:\s*\[TYPE_DOCUMENT_COLUMN\]/
+  );
+  assert.match(script, /isTableColumnDefinitelyMissing\(/);
+});
+
+test("un ancien rafraichissement ne peut pas remplacer le contexte courant", () => {
+  assert.match(script, /let bordereauRefreshSequence\s*=\s*0/);
+  assert.match(script, /refreshSequence\s*=\s*\+\+bordereauRefreshSequence/);
+  assert.match(script, /contextGeneration\s*===\s*currentGeneration/);
+  assert.ok((script.match(/if \(!isCurrentRefresh\(\)\) return;/g) || []).length >= 2);
+});

@@ -11,8 +11,8 @@ if (!window.BordereauCore) {
  *  ------------------------- */
 let records = [];
 let allPlans = [];
-let allProjects = [];
 let allEnvois = [];
+let bordereauRefreshSequence = 0;
 
 const BORDEREAU_TABLE = "Envois";
 const PLANS_TABLE = "ListePlan_NDC_COF";
@@ -20,7 +20,7 @@ const PROJET_TABLE = "Projets2";
 const TYPE_DOCUMENT_COLUMN = "Type_Document";
 const SHARED_PROJECT_STORAGE_KEY = "grist.selected-project";
 const SHARED_PROJECT_ID_STORAGE_KEY = "grist.selected-project-id";
-let _projectsData = []; // [{id, number, name}]
+let _projectsData = []; // [{id, ids, number, name, names}]
 const addElementsState = {
   selectedPlanKeys: new Set(),
   plansByKey: new Map(),
@@ -92,11 +92,15 @@ function resolveProjectName(value) {
   const raw = textValue(value);
   if (!raw) return "";
 
-  const projectById = _projectsData.find((project) => String(project.id) === raw);
+  const projectById = _projectsData.find((project) => (
+    [project.id, ...(project.ids || [])].some((id) => String(id) === raw)
+  ));
   if (projectById) return projectById.name;
 
   const projectByName = _projectsData.find(
-    (project) => normalizeCompareValue(project.name) === normalizeCompareValue(raw)
+    (project) => [project.name, ...(project.names || [])].some(
+      (name) => normalizeCompareValue(name) === normalizeCompareValue(raw)
+    )
   );
   return projectByName ? projectByName.name : raw;
 }
@@ -988,25 +992,50 @@ async function backfillUniqueLegacyTypes() {
 }
 
 async function refreshBordereauFromRecords(newRecords) {
-  records = newRecords || records;
+  const refreshSequence = ++bordereauRefreshSequence;
+  const contextGeneration = Number(
+    window.GristServiceContext.getState?.()?.generation
+  );
+  const nextRecords = Array.isArray(newRecords) ? newRecords : records;
+  const isCurrentRefresh = () => {
+    const currentGeneration = Number(
+      window.GristServiceContext.getState?.()?.generation
+    );
+    return refreshSequence === bordereauRefreshSequence && (
+      !Number.isFinite(contextGeneration) ||
+      !Number.isFinite(currentGeneration) ||
+      contextGeneration === currentGeneration
+    );
+  };
 
   // Tables de référence
-  const envoisPromise = grist.docApi.fetchTable(BORDEREAU_TABLE).catch((error) => {
+  const projectsPromise = ensureProjectDropdownReady();
+  const envoisPromise = grist.docApi.fetchTable(BORDEREAU_TABLE, {
+    requiredColumns: [TYPE_DOCUMENT_COLUMN],
+  }).catch((error) => {
     console.warn("Impossible de charger l'historique complet des envois :", error);
     return null;
   });
-  [allPlans, allProjects] = await Promise.all([
+  const [nextPlans, , envoisTable] = await Promise.all([
     grist.docApi.fetchTable(PLANS_TABLE),
-    grist.docApi.fetchTable(PROJET_TABLE),
+    projectsPromise,
+    envoisPromise,
   ]);
-  const envoisTable = await envoisPromise;
-  if (envoisTable && !Object.prototype.hasOwnProperty.call(envoisTable, TYPE_DOCUMENT_COLUMN)) {
+  if (!isCurrentRefresh()) return;
+  if (window.BordereauCore.isTableColumnDefinitelyMissing(
+    envoisTable,
+    TYPE_DOCUMENT_COLUMN
+  )) {
     throw new Error(`La colonne ${BORDEREAU_TABLE}.${TYPE_DOCUMENT_COLUMN} est introuvable.`);
   }
-  allEnvois = envoisTable ? getEnvoiRows(envoisTable) : records.slice();
+  const nextEnvois = envoisTable ? getEnvoiRows(envoisTable) : nextRecords.slice();
 
-  populateProjectDropdown();
+  records = nextRecords;
+  allPlans = nextPlans;
+  allEnvois = nextEnvois;
+
   await backfillUniqueLegacyTypes();
+  if (!isCurrentRefresh()) return;
 
   const restoreScroll = getBordereauRenderKey() === lastRenderedBordereauKey
     ? captureBordereauScroll()
@@ -1025,10 +1054,9 @@ window.GristServiceContext.watchContextTable(BORDEREAU_TABLE, refreshBordereauFr
   acceptAnyNativeTableSignal: true,
 });
 
-// Le bordereau ne montre pas que les envois : ses lignes viennent de la liste des
-// plans et son sélecteur de la table des projets. Ces deux tables sont éditées
-// depuis d'autres widgets, et le rendu doit suivre sans rechargement.
-window.GristServiceContext.watchContextTables([PLANS_TABLE, PROJET_TABLE], () => {
+// Les lignes du bordereau dépendent aussi de la liste des plans, qui peut être
+// éditée depuis un autre widget.
+window.GristServiceContext.watchContextTables([PLANS_TABLE], () => {
   void refreshBordereauFromRecords(records);
 }, {
   nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
@@ -1039,24 +1067,16 @@ window.GristServiceContext.watchContextTables([PLANS_TABLE, PROJET_TABLE], () =>
 /** -------------------------
  *  Dropdown projet
  *  ------------------------- */
-function populateProjectDropdown() {
+function populateProjectDropdown(projectRows) {
   const projectDropdown = $("projectDropdown");
 
-  // Construire _projectsData depuis allProjects (table Projets complète)
-  const ids = Array.isArray(allProjects.id) ? allProjects.id : [];
-  const numbers = Array.isArray(allProjects.Numero_de_projet) ? allProjects.Numero_de_projet : [];
-  const names = Array.isArray(allProjects.Nom_de_projet) ? allProjects.Nom_de_projet : [];
-  _projectsData = ids
-    .map((id, i) => ({
-      id: Number(id),
-      number: String(numbers[i] || '').trim(),
-      name: String(names[i] || '').trim(),
-    }))
-    .filter((p) => p.id > 0 && p.name)
-    .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base', numeric: true }));
+  // Le watcher fournit uniquement les projets autorisés et écarte déjà les
+  // réponses périmées lors d'un changement de contexte.
+  _projectsData = window.BordereauCore.buildProjectCatalog(projectRows);
 
-  const currentId = readSharedProjectId();
-  const currentValue = projectDropdown.value || readSharedProjectSelection();
+  const currentProject = window.GristServiceContext?.getCurrentProject?.();
+  const currentId = Number(currentProject?.id) || readSharedProjectId();
+  const currentValue = currentProject?.name || projectDropdown.value || readSharedProjectSelection();
 
   while (projectDropdown.options.length > 1) projectDropdown.remove(1);
 
@@ -1071,16 +1091,40 @@ function populateProjectDropdown() {
   // Restaurer par ID d'abord, puis par nom
   let restored = '';
   if (currentId) {
-    const found = _projectsData.find((p) => p.id === currentId);
+    const found = _projectsData.find((p) => (
+      p.id === currentId || p.ids.includes(currentId)
+    ));
     if (found) restored = found.name;
   }
   if (!restored) {
     const norm = (s) => String(s || '').trim().toLowerCase();
-    const found = _projectsData.find((p) => norm(p.name) === norm(currentValue));
+    const found = _projectsData.find((p) => (
+      [p.name, ...p.names].some((name) => norm(name) === norm(currentValue))
+    ));
     if (found) restored = found.name;
   }
   projectDropdown.value = restored;
 }
+
+async function ensureProjectDropdownReady() {
+  if (_projectsData.length) return;
+  await window.GristServiceContext.whenReady();
+  if (_projectsData.length) return;
+  populateProjectDropdown(window.GristServiceContext.getAllowedProjects());
+}
+
+// Le catalogue projets vit indépendamment d'Envois : même un historique vide
+// doit laisser le choix du projet disponible.
+window.GristServiceContext.watchContextTable(PROJET_TABLE, async (projectRows) => {
+  populateProjectDropdown(projectRows);
+  await loadBordereauData();
+  displayInvoiceTable();
+  refreshOpenAddElementsDialog();
+}, {
+  nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
+  projectScopedSignals: true,
+  acceptAnyNativeTableSignal: true,
+});
 
 /** -------------------------
  *  Ref : input + flèches

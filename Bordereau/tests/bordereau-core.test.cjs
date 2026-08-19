@@ -145,3 +145,60 @@ test("les references projet peuvent etre resolues avant comparaison", () => {
     ["COFFRAGE"]
   );
 });
+
+test("le catalogue projet accepte les lignes livrees par le watcher", () => {
+  assert.deepEqual(
+    core.buildProjectCatalog([
+      { id: 4, Numero_de_projet: "P-002", Nom_de_projet: "Projet Zeta" },
+      { id: 2, Numero_de_projet: "P-001", Nom_de_projet: "Projet Alpha" },
+      { id: 0, Numero_de_projet: "P-000", Nom_de_projet: "Projet invalide" },
+      { id: 5, Numero_de_projet: "P-003", Nom_de_projet: "" },
+    ]),
+    [
+      { id: 2, ids: [2], number: "P-001", name: "Projet Alpha", names: ["Projet Alpha"] },
+      { id: 4, ids: [4], number: "P-002", name: "Projet Zeta", names: ["Projet Zeta"] },
+    ]
+  );
+});
+
+test("le catalogue projet reste compatible avec une table Grist en colonnes", () => {
+  assert.deepEqual(
+    core.buildProjectCatalog({
+      id: [8],
+      Numero_de_projet: [" P-008 "],
+      Nom_de_projet: [" Projet Huit "],
+    }),
+    [{ id: 8, ids: [8], number: "P-008", name: "Projet Huit", names: ["Projet Huit"] }]
+  );
+});
+
+test("le catalogue projet conserve les anciens identifiants et noms", () => {
+  assert.deepEqual(
+    core.buildProjectCatalog([{
+      id: 12,
+      ids: [12, 34],
+      number: "P-012",
+      name: "Projet actuel",
+      names: ["Projet actuel", "Ancien nom"],
+    }]),
+    [{
+      id: 12,
+      ids: [12, 34],
+      number: "P-012",
+      name: "Projet actuel",
+      names: ["Projet actuel", "Ancien nom"],
+    }]
+  );
+});
+
+test("une table Envois vide ne prouve pas que Type_Document manque", () => {
+  assert.equal(core.isTableColumnDefinitelyMissing({ id: [] }, "Type_Document"), false);
+  assert.equal(
+    core.isTableColumnDefinitelyMissing({ id: [1], Projet: ["Projet Alpha"] }, "Type_Document"),
+    true
+  );
+  assert.equal(
+    core.isTableColumnDefinitelyMissing({ id: [1], Type_Document: [null] }, "Type_Document"),
+    false
+  );
+});
