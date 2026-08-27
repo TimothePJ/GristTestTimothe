@@ -3,10 +3,16 @@ import {
   getMonthKeyFromRawMonth,
   toReferenceId,
   toFiniteNumber,
-  toGristMonthValue,
   toText,
+  // Alias conserve pour Timesheet uniquement (upsertTimesheetBatch) : cette
+  // table est hors perimetre de la bascule TimeSegment au mois, et son
+  // contrat d'erreur historique (throw sur mois invalide) ne doit pas
+  // changer. Ne pas utiliser ce nom ailleurs dans ce fichier : partout pour
+  // TimeSegment, c'est la version de monthSegments.js (renvoie null) qui
+  // fait foi.
+  toGristMonthValue as toGristMonthValueLegacy,
 } from "../utils/format.js";
-import { toGristDateTimeValue } from "../utils/timeSegments.js";
+import { toGristMonthValue, getMonthBusinessDays } from "../utils/monthSegments.js";
 
 const resolvedColumnCache = new Map();
 
@@ -15,6 +21,7 @@ const TIME_SEGMENT_COLUMN_ALIASES = {
   projectNumber: ["NumeroProjet", "Numero_Projet", "Project_Number", "ProjectNumber"],
   name: ["Name", "Nom", "Worker_Name", "Team_Member_Name"],
   segmentType: ["Segment_Type", "SegmentType", "Type"],
+  mois: ["Mois", "Month"],
   startDate: ["Start_Date", "Start_At", "StartDate", "Start"],
   endDate: ["End_Date", "End_At", "EndDate", "End"],
   allocationDays: [
@@ -250,6 +257,7 @@ async function fetchNormalizedTimeSegmentRows() {
     [canonicalColumns.projectNumber]: row?.[resolvedColumns.projectNumber],
     [canonicalColumns.name]: row?.[resolvedColumns.name],
     [canonicalColumns.segmentType]: row?.[resolvedColumns.segmentType],
+    [canonicalColumns.mois]: row?.[resolvedColumns.mois],
     [canonicalColumns.startDate]: row?.[resolvedColumns.startDate],
     [canonicalColumns.endDate]: row?.[resolvedColumns.endDate],
     [canonicalColumns.allocationDays]: row?.[resolvedColumns.allocationDays],
@@ -612,7 +620,10 @@ export async function upsertTimesheetBatch({ workerId, updates }) {
       null,
       {
         [columns.workerId]: workerId,
-        [columns.month]: toGristMonthValue(monthKey),
+        // Volontairement la version format.js (throw sur mois invalide) et
+        // non celle de monthSegments.js : Timesheet est hors perimetre de ce
+        // plan, son comportement historique reste inchange.
+        [columns.month]: toGristMonthValueLegacy(monthKey),
         ...fields,
       },
     ]);
@@ -624,9 +635,7 @@ export async function upsertTimesheetBatch({ workerId, updates }) {
 export async function createTimeSegment({
   projectNumber,
   name,
-  startDate,
-  endDate,
-  allocationDays,
+  monthKey,
   effectif,
   label = "",
 }) {
@@ -635,28 +644,21 @@ export async function createTimeSegment({
   // colonne peut avoir ete renommee depuis le chargement (End_Date -> End_At) :
   // une ecriture doit donc repartir du schema courant, pas de cette ancienne photo.
   const columns = await getResolvedTimeSegmentColumns({ forceRefresh: true });
-  const startValue = toGristDateTimeValue(startDate);
-  const endValue = toGristDateTimeValue(endDate);
   const normalizedProjectNumber = toText(projectNumber);
   const normalizedName = toText(name);
-
-  if (!normalizedProjectNumber || !normalizedName || startValue == null || endValue == null) {
-    throw new Error("Segment invalide : numero projet, nom, date debut ou date fin manquant.");
+  const monthValue = toGristMonthValue(monthKey);
+  if (!normalizedProjectNumber || !normalizedName || monthValue == null) {
+    throw new Error("Segment invalide : numero projet, nom ou mois manquant.");
   }
 
   const fields = Object.fromEntries(
     Object.entries({
       [columns.projectNumber]: normalizedProjectNumber,
       [columns.name]: normalizedName,
-      [columns.startDate]: startValue,
-      [columns.endDate]: endValue,
-      [columns.allocationDays]: toFiniteNumber(allocationDays, 0),
-      [columns.effectif]:
-        effectif === undefined
-          ? undefined
-          : effectif === ""
-          ? ""
-          : toFiniteNumber(effectif, 0),
+      [columns.mois]: monthValue,
+      // Denormalise : ecrit pour la lisibilite de la grille Grist, jamais relu.
+      [columns.allocationDays]: getMonthBusinessDays(monthKey),
+      [columns.effectif]: toFiniteNumber(effectif, 0),
       [columns.service]: getActiveService(),
     }).filter(([, value]) => value !== undefined)
   );
@@ -680,9 +682,7 @@ export async function updateTimeSegment({
   segmentId,
   projectNumber,
   name,
-  startDate,
-  endDate,
-  allocationDays,
+  monthKey,
   effectif,
   label,
 }) {
@@ -710,24 +710,13 @@ export async function updateTimeSegment({
     fields[columns.name] = normalizedName;
   }
 
-  if (startDate != null) {
-    const startValue = toGristDateTimeValue(startDate);
-    if (startValue == null) {
-      throw new Error("Date de debut invalide pour la mise a jour du segment.");
+  if (monthKey != null) {
+    const monthValue = toGristMonthValue(monthKey);
+    if (monthValue == null) {
+      throw new Error("Mois invalide pour la mise a jour du segment.");
     }
-    fields[columns.startDate] = startValue;
-  }
-
-  if (endDate != null) {
-    const endValue = toGristDateTimeValue(endDate);
-    if (endValue == null) {
-      throw new Error("Date de fin invalide pour la mise a jour du segment.");
-    }
-    fields[columns.endDate] = endValue;
-  }
-
-  if (allocationDays != null) {
-    fields[columns.allocationDays] = toFiniteNumber(allocationDays, 0);
+    fields[columns.mois] = monthValue;
+    fields[columns.allocationDays] = getMonthBusinessDays(monthKey);
   }
 
   if (effectif !== undefined) {

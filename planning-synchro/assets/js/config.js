@@ -39,7 +39,9 @@ export const APP_CONFIG = {
       },
       timeSegment: {
         id: "id", projectNumber: "NumeroProjet", name: "Name",
-        startDate: "Start_At", endDate: "End_At",
+        // Mois = source unique de verite. startDate lue en repli seulement
+        // (resolveSegmentMonthKey) ; endDate n'est plus lue ni ecrite nulle part.
+        mois: "Mois", startDate: "Start_At", endDate: "End_At",
         allocationDays: "Allocation_Days", effectif: "Effectif", label: "Label", service: "Service",
       },
       projectTeam: { id: "id", projectNumber: "NumeroProjet", role: "Role", name: "Name", dailyRate: "Daily_Rate", service: "Service" },

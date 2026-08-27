@@ -10,9 +10,24 @@ test("buildDisplayedMonths returns contiguous months with day dates", () => {
   assert.equal(months[0].calendarDayDates.length, 31);
 });
 
-test("getSegmentEffectiveDays uses allocation when present", () => {
-  const seg = { allocationDays: 4.5, effectif: 1, startAt: new Date(2026,3,6,8), endAt: new Date(2026,3,10,17) };
-  assert.equal(getSegmentEffectiveDays(seg) > 0, true);
+// Un segment = un mois (Task 5) : getSegmentEffectiveDays raisonne desormais
+// exclusivement sur segment.monthKey (via getMonthBusinessDays), plus jamais
+// sur segment.allocationDays/startAt/endAt. Memes tests, verbatim, que
+// gestion-depenses2/tests/chargeAggregation.test.mjs (Task 2), puisque les
+// deux copies de timeSegments.js partagent desormais la meme logique.
+test("getSegmentEffectiveDays plafonne l'effectif aux jours ouvres du mois", () => {
+  // Septembre 2026 : 22 jours ouvres.
+  assert.equal(getSegmentEffectiveDays({ monthKey: "2026-09", effectifDays: 8 }), 8);
+  assert.equal(getSegmentEffectiveDays({ monthKey: "2026-09", effectifDays: 30 }), 22);
+});
+
+test("getSegmentEffectiveDays vaut 0 sans effectif", () => {
+  assert.equal(getSegmentEffectiveDays({ monthKey: "2026-09", effectifDays: null }), 0);
+  assert.equal(getSegmentEffectiveDays({ monthKey: "2026-09", effectifDays: "" }), 0);
+});
+
+test("getSegmentEffectiveDays vaut 0 sans mois resoluble", () => {
+  assert.equal(getSegmentEffectiveDays({ monthKey: "", effectifDays: 8 }), 0);
 });
 
 test("toFiniteNumber fallback", () => {

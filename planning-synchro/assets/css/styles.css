@@ -1152,6 +1152,14 @@ body.ps-panning * {
   cursor: not-allowed;
 }
 
+/* Mode Editer : un clic n'importe ou sur une piste ouvre la fenetre du mois
+   survole. Le curseur est la seule affordance qui le dit — la piste Total est
+   en lecture seule et n'en beneficie pas. */
+.charge-plan-board.is-segment-editing-enabled
+  .charge-plan-track:not(.charge-plan-track--readonly) {
+  cursor: pointer;
+}
+
 .charge-plan-board.is-segment-editing-locked .charge-plan-segment-bar {
   cursor: default;
   filter: saturate(0.78);
@@ -1161,41 +1169,10 @@ body.ps-panning * {
   filter: saturate(0.78);
 }
 
-.charge-plan-board.is-segment-editing-locked .charge-plan-segment-handle {
-  display: none;
-}
-
-.charge-plan-segment-bar.is-resizing {
-  opacity: 0.38;
-}
-
+/* Un segment = un mois : plus de poignees ni de redimensionnement, donc plus de
+   regles .charge-plan-segment-handle ni d'etat .is-resizing. */
 .charge-plan-segment-bar.is-compact {
   padding: 0 10px;
-  cursor: ew-resize;
-}
-
-.charge-plan-segment-bar.is-compact .charge-plan-segment-handle {
-  display: none;
-}
-
-.charge-plan-segment-handle {
-  position: absolute;
-  top: 50%;
-  width: 14px;
-  height: 18px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.9);
-  cursor: ew-resize;
-  transform: translateY(-50%);
-  box-shadow: 0 0 0 1px rgba(6, 60, 123, 0.08);
-}
-
-.charge-plan-segment-handle.is-start {
-  left: 3px;
-}
-
-.charge-plan-segment-handle.is-end {
-  right: 3px;
 }
 
 .charge-plan-segment-label {
@@ -1227,15 +1204,9 @@ body.ps-panning * {
   display: none !important;
 }
 
-.charge-plan-selection-preview.is-invalid {
-  border-color: rgba(180, 35, 24, 0.72);
-  background: rgba(180, 35, 24, 0.16);
-}
-
-.charge-plan-selection-preview.is-invalid .charge-plan-selection-label {
-  color: #b42318;
-}
-
+/* .charge-plan-selection-preview.is-invalid supprimee avec le controle de
+   chevauchement : plus aucun JS ne pose la classe (la cle unique
+   (projet, personne, mois) a remplace le controle). */
 .charge-plan-selection-label {
   color: var(--color-primary);
   background: rgba(255, 255, 255, 0.92);
@@ -1399,6 +1370,25 @@ body.ps-panning * {
   gap: 14px;
 }
 
+/* Rappel du couple (mois, personne) : la fenetre ne les fait plus saisir. */
+.ps-segment-edit-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 2px 0 6px;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.ps-segment-edit-context span:empty {
+  display: none;
+}
+
+.ps-segment-edit-context span + span {
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
 .ps-segment-edit-section {
   display: grid;
   gap: 14px;
@@ -1495,6 +1485,46 @@ body.ps-panning * {
 
 .ps-segment-edit-footer button:hover {
   background: #003a73;
+}
+
+/* Ecriture en cours : Enregistrer et Fermer sont desactives le temps de
+   l'aller-retour Grist (cf. le verrou de createEditSegmentModal). */
+.ps-segment-edit-footer button:disabled,
+.ps-modal-close-btn:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.ps-segment-edit-footer button:disabled:hover {
+  background: var(--color-primary);
+}
+
+.ps-modal-close-btn:disabled:hover {
+  background: var(--color-surface-muted);
+}
+
+/* Etat de l'ecriture, pose par createEditSegmentModal sur la racine de la
+   fenetre. `is-submitting` : aller-retour Grist en cours, la fenetre est
+   verrouillee. `is-stalled` : le delai de garde a expire, la fenetre redevient
+   fermable mais l'ecriture est TOUJOURS en vol (Enregistrer reste desactive) —
+   c'est un avertissement, pas une erreur : rien n'est perdu, il faut recharger
+   le widget pour savoir si le segment a ete enregistre. Signalement discret,
+   les boutons portent deja l'etat via :disabled. */
+#ps-edit-segment-modal.is-submitting .ps-modal-content--segment {
+  cursor: progress;
+}
+
+#ps-edit-segment-modal.is-submitting .ps-segment-edit-form,
+#ps-edit-segment-modal.is-stalled .ps-segment-edit-form {
+  opacity: 0.72;
+}
+
+#ps-edit-segment-modal.is-stalled .ps-modal-content--segment {
+  box-shadow: inset 0 3px 0 0 #b54708;
+}
+
+#ps-edit-segment-modal.is-stalled .ps-segment-edit-feedback {
+  color: #b54708;
 }
 
 @media (max-width: 640px) {

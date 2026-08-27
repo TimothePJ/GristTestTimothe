@@ -54,14 +54,60 @@ test("la creation du projet et de son budget est une transaction unique", async 
   }
 });
 
+test("createTimeSegment ecrit Mois et n'ecrit plus Start_At/End_At", async () => {
+  const appliedActions = [];
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    grist: {
+      docApi: {
+        async fetchTable() {
+          return {
+            id: [],
+            NumeroProjet: [],
+            Name: [],
+            Mois: [],
+            Allocation_Days: [],
+            Effectif: [],
+            Label: [],
+            Service: [],
+          };
+        },
+        async applyUserActions(actions) {
+          appliedActions.push(...actions);
+          return { retValues: [42] };
+        },
+      },
+    },
+  };
+
+  try {
+    const service = await importFreshService("create-time-segment-mois");
+    await service.createTimeSegment({
+      projectNumber: "25-0142",
+      name: "Marie DUPONT",
+      monthKey: "2026-09",
+      effectif: 8,
+    });
+
+    const fields = appliedActions.at(-1)[3];
+    assert.equal(fields.Mois, Math.floor(new Date(2026, 8, 1).getTime() / 1000));
+    assert.equal(fields.Effectif, 8);
+    assert.equal(fields.Allocation_Days, 22);
+    assert.ok(!("Start_At" in fields), "Start_At ne doit plus etre ecrite");
+    assert.ok(!("End_At" in fields), "End_At ne doit plus etre ecrite");
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
 test("createTimeSegment rafraichit les alias de colonnes avant l'ecriture", async () => {
   let timeSegmentTable = {
     id: [1],
     NumeroProjet: ["1111"],
     Name: ["Abdelkarim Trabelsi"],
-    Start_Date: [1785668400],
-    End_Date: [1789034400],
+    Month: [1785668400],
     Allocation_Days: [28.5],
+    Effectif: [5],
     Service: ["Structure"],
   };
   const fetchCalls = [];
@@ -88,28 +134,27 @@ test("createTimeSegment rafraichit les alias de colonnes avant l'ecriture", asyn
     const service = await importFreshService("fresh-time-segment-columns");
     await service.fetchProjectDataTables();
 
+    // La colonne Mois est renommee en base (repli "Month" -> "Mois") entre le
+    // chargement initial et l'ecriture : createTimeSegment doit repartir du
+    // schema courant, pas de cette ancienne photo mise en cache par
+    // fetchProjectDataTables.
     timeSegmentTable = {
       ...timeSegmentTable,
-      Start_At: timeSegmentTable.Start_Date,
-      End_At: timeSegmentTable.End_Date,
+      Mois: timeSegmentTable.Month,
     };
-    delete timeSegmentTable.Start_Date;
-    delete timeSegmentTable.End_Date;
+    delete timeSegmentTable.Month;
 
     const createdId = await service.createTimeSegment({
       projectNumber: "1111",
       name: "Abdelkarim Trabelsi",
-      startDate: new Date("2026-08-02T07:00:00.000Z"),
-      endDate: new Date("2026-09-10T06:00:00.000Z"),
-      allocationDays: 28.5,
+      monthKey: "2026-09",
+      effectif: 5,
     });
 
     assert.equal(createdId, 42);
     const fields = appliedActions.at(-1)[3];
-    assert.equal(fields.Start_Date, undefined);
-    assert.equal(fields.End_Date, undefined);
-    assert.equal(fields.Start_At, Date.parse("2026-08-02T07:00:00.000Z") / 1000);
-    assert.equal(fields.End_At, Date.parse("2026-09-10T06:00:00.000Z") / 1000);
+    assert.equal(fields.Month, undefined);
+    assert.equal(fields.Mois, Math.floor(new Date(2026, 8, 1).getTime() / 1000));
     assert.equal(
       fetchCalls.some((call) =>
         call.tableName === "TimeSegment" && call.options?.forceRefresh === true
@@ -121,7 +166,7 @@ test("createTimeSegment rafraichit les alias de colonnes avant l'ecriture", asyn
   }
 });
 
-test("le repli de schema vide utilise Start_At et End_At", async () => {
+test("le repli de schema vide utilise Mois et Allocation_Days", async () => {
   const appliedActions = [];
   const previousWindow = globalThis.window;
   globalThis.window = {
@@ -143,16 +188,54 @@ test("le repli de schema vide utilise Start_At et End_At", async () => {
     await service.createTimeSegment({
       projectNumber: "1111",
       name: "Abdelkarim Trabelsi",
-      startDate: new Date("2026-08-02T07:00:00.000Z"),
-      endDate: new Date("2026-09-10T06:00:00.000Z"),
-      allocationDays: 28.5,
+      monthKey: "2026-09",
+      effectif: 5,
     });
 
     const fields = appliedActions.at(-1)[3];
-    assert.equal(fields.Start_Date, undefined);
-    assert.equal(fields.End_Date, undefined);
-    assert.equal(fields.Start_At, Date.parse("2026-08-02T07:00:00.000Z") / 1000);
-    assert.equal(fields.End_At, Date.parse("2026-09-10T06:00:00.000Z") / 1000);
+    assert.equal(fields.Mois, Math.floor(new Date(2026, 8, 1).getTime() / 1000));
+    assert.equal(fields.Allocation_Days, 22);
+    assert.ok(!("Start_At" in fields));
+    assert.ok(!("End_At" in fields));
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("updateTimeSegment ecrit Mois et Allocation_Days derives, plus de Start_At/End_At", async () => {
+  const appliedActions = [];
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    grist: {
+      docApi: {
+        async fetchTable() {
+          return emptyTable();
+        },
+        async applyUserActions(actions) {
+          appliedActions.push(...actions);
+          return { retValues: [] };
+        },
+      },
+    },
+  };
+
+  try {
+    const service = await importFreshService("update-time-segment-mois");
+    await service.updateTimeSegment({
+      segmentId: 7,
+      monthKey: "2026-09",
+      effectif: 12,
+    });
+
+    const [action, tableName, id, fields] = appliedActions.at(-1);
+    assert.equal(action, "UpdateRecord");
+    assert.equal(tableName, "TimeSegment");
+    assert.equal(id, 7);
+    assert.equal(fields.Mois, Math.floor(new Date(2026, 8, 1).getTime() / 1000));
+    assert.equal(fields.Allocation_Days, 22);
+    assert.equal(fields.Effectif, 12);
+    assert.ok(!("Start_At" in fields), "Start_At ne doit plus etre ecrite");
+    assert.ok(!("End_At" in fields), "End_At ne doit plus etre ecrite");
   } finally {
     globalThis.window = previousWindow;
   }
@@ -196,6 +279,47 @@ test("la detection de schema inspecte toutes les lignes d'un tableau", async () 
     const service = await importFreshService("all-row-column-detection");
     const data = await service.fetchProjectDataTables();
     assert.equal(data.timeSegmentRows[1].End_At, 1785841200);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("fetchNormalizedTimeSegmentRows conserve Mois pour une ligne sans Start_At", async () => {
+  const previousWindow = globalThis.window;
+  const moisValue = Math.floor(new Date(2026, 8, 1).getTime() / 1000);
+  globalThis.window = {
+    grist: {
+      docApi: {
+        async fetchTable(tableName) {
+          if (tableName !== "TimeSegment") return emptyTable();
+          // Ligne posterieure a la bascule : Mois est renseigne, Start_At n'a
+          // jamais existe sur cette ligne (colonne absente, pas seulement
+          // vide). C'est le cas normal de tout nouveau segment une fois que
+          // createTimeSegment n'ecrit plus Start_At.
+          return [
+            {
+              id: 5,
+              NumeroProjet: "1111",
+              Name: "Alix Martin",
+              Mois: moisValue,
+              Allocation_Days: 22,
+              Effectif: 10,
+              Service: "Structure",
+            },
+          ];
+        },
+        async applyUserActions() {
+          throw new Error("Aucune ecriture attendue dans ce test.");
+        },
+      },
+    },
+  };
+
+  try {
+    const service = await importFreshService("normalized-rows-mois-without-start-at");
+    const data = await service.fetchProjectDataTables();
+    assert.equal(data.timeSegmentRows[0].Mois, moisValue);
+    assert.equal(data.timeSegmentRows[0].Start_At, undefined);
   } finally {
     globalThis.window = previousWindow;
   }

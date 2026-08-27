@@ -10,9 +10,10 @@ import {
   toText,
 } from "../utils/format.js";
 import {
-  getSegmentAllocationByMonth,
+  getSegmentEffectiveDays,
   parseRawDateTime,
 } from "../utils/timeSegments.js";
+import { resolveSegmentMonthKey, getMonthBounds } from "../utils/monthSegments.js";
 import {
   buildTargetIndiceByTypeFromAvancement,
   buildPlanningDocumentIdentity,
@@ -640,9 +641,13 @@ export function buildExpenseData({
     );
     if (!worker) return;
 
-    const startAt = parseRawDateTime(row?.[columns.timeSegment.startDate]);
-    const endAt = parseRawDateTime(row?.[columns.timeSegment.endDate]);
-    if (!startAt || !endAt) return;
+    // `Mois` fait foi ; repli sur Start_At pour les lignes anterieures a la
+    // bascule, inerte une fois la colonne supprimee de la table.
+    const monthKey = resolveSegmentMonthKey(row, columns.timeSegment);
+    if (!monthKey) return;
+
+    const bounds = getMonthBounds(monthKey);
+    if (!bounds) return;
 
     const rawEffectifValue = row?.[columns.timeSegment.effectif];
     const hasEffectifValue = !(
@@ -653,10 +658,12 @@ export function buildExpenseData({
     const segment = {
       id: Number(row?.[columns.timeSegment.id]),
       projectTeamLink: worker.id,
-      startAt,
-      endAt,
+      monthKey,
+      // startAt/endAt restent derives du mois : toute la geometrie d'affichage
+      // (barres, bornes de frise) continue de raisonner en dates.
+      startAt: bounds.startAt,
+      endAt: bounds.endAt,
       segmentType: "previsionnel",
-      allocationDays: toFiniteNumber(row?.[columns.timeSegment.allocationDays], 0),
       effectifDays: hasEffectifValue
         ? Math.max(0, toFiniteNumber(rawEffectifValue, 0))
         : null,
@@ -665,10 +672,12 @@ export function buildExpenseData({
 
     worker.segments.push(segment);
 
-    const monthlyAllocation = getSegmentAllocationByMonth(segment);
-    Object.entries(monthlyAllocation).forEach(([monthKey, days]) => {
-      mergeMonthlyDays(worker.provisionalDays, monthKey, toFiniteNumber(days, 0));
-    });
+    // Un segment = un mois : la ventilation se reduit a une addition.
+    mergeMonthlyDays(
+      worker.provisionalDays,
+      monthKey,
+      getSegmentEffectiveDays(segment)
+    );
   });
 
   (timeRealRows || []).forEach((row) => {

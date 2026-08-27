@@ -56,18 +56,17 @@
 // --check here, browser-verified once Task 14 wires main.js (see task-11-report.md).
 
 import { toFiniteNumber, formatNumber, buildDisplayedMonths } from "../utils/format.js";
-import { parseDateTime, normalizeDecimal, toText, formatIsoDate, parseCalendarDate } from "../utils/dates.js";
+import { normalizeDecimal, toText, formatIsoDate, parseCalendarDate } from "../utils/dates.js";
 import {
   HALF_DAY_PARTS,
   isBusinessDay,
   getHalfDaySlotRange,
   createHalfDaySlotKey,
   getSegmentEffectiveDays,
-  getSegmentAllocationDays,
-  getBusinessHalfDaySlotsBetween,
 } from "../utils/timeSegments.js";
+import { resolveSegmentMonthKey, getMonthBounds, getMonthAvailableDays } from "../utils/monthSegments.js";
 import { countPlanningTasksOverlappingRange } from "../top/phases.js";
-import { availableDaysAfterLeave, isAbsenceSlot, normalizeName } from "../utils/leaveAbsences.js";
+import { isAbsenceSlot, normalizeName } from "../utils/leaveAbsences.js";
 import { APP_CONFIG } from "../config.js";
 
 const MIN_CONTENT_WIDTH_PX = 280;
@@ -122,9 +121,12 @@ export function buildWorkersFromSegments(timeSegmentRows, projectTeamRows, colum
     const name = toText(row?.[tsCols.name]);
     if (!name) return;
 
-    const startAt = parseDateTime(row?.[tsCols.startDate]);
-    const endAt = parseDateTime(row?.[tsCols.endDate]);
-    if (!startAt || !endAt) return;
+    // Un segment = un mois : Mois d'abord, repli legacy sur Start_At (voir
+    // monthSegments.js). Un mois non resoluble (colonnes disparues) ecarte
+    // silencieusement la ligne, sans erreur.
+    const monthKey = resolveSegmentMonthKey(row, tsCols);
+    const bounds = getMonthBounds(monthKey);
+    if (!bounds) return;
 
     const nameKey = normalizeNameKey(name);
     let worker = workersByNameKey.get(nameKey);
@@ -137,9 +139,9 @@ export function buildWorkersFromSegments(timeSegmentRows, projectTeamRows, colum
 
     worker.segments.push({
       id: row?.[tsCols.id] ?? `s-${segmentSeq++}`,
-      startAt,
-      endAt,
-      allocationDays: normalizeDecimal(row?.[tsCols.allocationDays]) ?? 0,
+      monthKey,
+      startAt: bounds.startAt,
+      endAt: bounds.endAt,
       effectif: normalizeDecimal(row?.[tsCols.effectif]),
       label: toText(row?.[tsCols.label]),
     });
@@ -332,14 +334,16 @@ function buildVisibleSegmentBars(worker, visibleSlots, planningTasks = [], absen
       // Like gestion-depenses2: how many planning tasks fall within this segment's
       // period — surfaced as the bar's hover title (see renderSegmentBars).
       const planningTaskCount = countPlanningTasksOverlappingRange(planningTasks, startAt, endAt);
-      // Leave-aware coherence check: the RAW stored effectif vs the geometry-based
-      // days actually available in the range after removing absence half-days.
+      // Leave-aware coherence check: the RAW stored effectif vs the days actually
+      // available in the segment's MONTH after removing absence half-days (un
+      // segment = un mois, donc plus de geometrie startAt/endAt arbitraire ici).
       const rawEffectif = segment?.effectif ?? segment?.effectifDays ?? null;
-      const available = availableDaysAfterLeave(segment.startAt, segment.endAt, absenceSet);
+      const available = getMonthAvailableDays(segment.monthKey, absenceSet);
       const incoherent = rawEffectif != null && Number(rawEffectif) > available;
 
       return {
         segmentId: segment.id,
+        monthKey: segment.monthKey,
         workerName: worker?.name,
         startSlotIndex: slotRange.firstSlot.slotIndex,
         endSlotIndex: slotRange.lastSlot.slotIndex,
@@ -397,6 +401,7 @@ function renderSegmentBars(assignedBars) {
           class="charge-plan-segment-bar ${compact ? "is-compact" : ""} ${bar.incoherent ? "is-incoherent" : ""}"
           style="left:${bar.leftPx}px; top:${10 + bar.laneIndex * 32}px; width:${Math.max(12, bar.widthPx)}px"
           data-segment-id="${escapeHtml(String(bar.segmentId))}"
+          data-month-key="${escapeHtml(String(bar.monthKey))}"
           data-worker-name="${escapeHtml(bar.workerName)}"
           data-start-slot-index="${bar.startSlotIndex}"
           data-end-slot-index="${bar.endSlotIndex}"
@@ -406,9 +411,7 @@ function renderSegmentBars(assignedBars) {
           data-planning-tooltip="${escapeHtml(planningTooltip)}"
           title="${escapeHtml(title)}"
         >
-          <span class="charge-plan-segment-handle is-start" data-resize-edge="start"></span>
           <span class="charge-plan-segment-label">${escapeHtml(bar.label)}</span>
-          <span class="charge-plan-segment-handle is-end" data-resize-edge="end"></span>
         </div>
       `;
     })
@@ -491,32 +494,13 @@ function getWindowMonths(windowDays, dayWidth) {
   }));
 }
 
-// Business days of a segment that fall inside [rangeStart, rangeEnd].
-function segmentBusinessDaysInRange(segment, rangeStart, rangeEnd) {
-  const start = segment?.startAt instanceof Date ? segment.startAt : null;
-  const end = segment?.endAt instanceof Date ? segment.endAt : null;
-  if (!start || !end) return 0;
-  const clampStart = start > rangeStart ? start : rangeStart;
-  const clampEnd = end < rangeEnd ? end : rangeEnd;
-  if (clampStart >= clampEnd) return 0;
-  return getBusinessHalfDaySlotsBetween(clampStart, clampEnd).length / 2;
-}
-
-// Total effective person-days across all workers whose segments fall in `month`,
-// each segment's effective days spread proportionally over its business days.
+// Un segment = un mois : le total mensuel est une somme, plus un prorata.
 function computeMonthTotalDays(workers, month) {
-  const rangeStart = new Date(month.year, month.monthNumber - 1, 1, 0, 0, 0);
-  const rangeEnd = new Date(month.year, month.monthNumber, 0, 23, 59, 59);
   let total = 0;
   (workers || []).forEach((worker) => {
     (worker?.segments || []).forEach((segment) => {
-      const effectiveDays = getSegmentEffectiveDays(segment);
-      if (!(effectiveDays > 0)) return;
-      const totalBusinessDays = getSegmentAllocationDays(segment);
-      if (!(totalBusinessDays > 0)) return;
-      const businessDaysInMonth = segmentBusinessDaysInRange(segment, rangeStart, rangeEnd);
-      if (!(businessDaysInMonth > 0)) return;
-      total += effectiveDays * (businessDaysInMonth / totalBusinessDays);
+      if (segment?.monthKey !== month.key) return;
+      total += getSegmentEffectiveDays(segment);
     });
   });
   return Math.round(total * 100) / 100;

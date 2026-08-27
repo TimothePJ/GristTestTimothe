@@ -1,74 +1,52 @@
-// Charge-plan editing interactions — Editer mode, drag-create / resize / delete
-// writes to TimeSegment. Ported/adapted from
-// `gestion-depenses2/assets/js/ui/chargeTimeline.js` (getSlotIndexFromClientX,
-// buildSelectionFromSlots, computeChargePlanSelection,
-// computeChargePlanSelectionFromSlotIndexes, updateChargePlanSelectionPreview,
-// clearChargePlanSelectionPreview, showChargePlanContextMenu,
-// hideChargePlanContextMenu, setChargePlanFeedback) and the previsionnel
-// charge-board interaction wiring in `gestion-depenses2/assets/js/main.js`
-// (handleChargePlanEditModeToggle, handleChargePlanPointerDown/Move/Up,
+// Interactions du plan de charge editable — mode Editer, clic-pour-creer/editer,
+// suppression, ecritures TimeSegment. Porte/adapte de
+// `gestion-depenses2/assets/js/ui/chargeTimeline.js`
+// (getSlotIndexFromClientX, showChargePlanContextMenu,
+// hideChargePlanContextMenu), de `gestion-depenses2/assets/js/main.js`
+// (handleChargePlanEditModeToggle, handleChargePlanPointerDown,
 // handleChargePlanContextMenu, handleChargePlanContextAction,
-// createChargePlanSegment, resizeChargePlanSegment /
-// updateChargePlanSegmentSelection, deleteChargePlanSegment).
+// openCreateChargePlanModal / openEditChargePlanModal,
+// saveEditedChargePlanSegment, deleteChargePlanSegment) et de
+// `gestion-depenses2/assets/js/utils/chargePlanSegmentForm.js`
+// (resolveClickedMonthKey, resolveChargePlanClickIntent).
 //
-// KEY ADAPTATIONS vs the source (see task-12 brief):
-// 1. Slots come from the passed `getVisibleSlots()` accessor (Task 11's
-//    `createChargeBoard().getVisibleSlots()`) instead of the source's internal
-//    `activeVisibleSlotsByBoard` WeakMap keyed by board element.
-// 2. Task 11's rendered DOM keys tracks/bars by `data-worker-name` (workers here
-//    are grouped-by-name TimeSegment rows with no stable numeric id), not the
-//    source's `data-worker-id` — create reads the worker name straight off
-//    `trackEl.dataset.workerName`; resize/delete/edit key off
+// MODELE « UN SEGMENT = UN MOIS » : un clic sur une piste vaut le mois entier.
+// Il n'y a plus de glisser-creer, plus de poignees de redimensionnement et plus
+// de controle de chevauchement — la cle metier (projet, personne, mois) est
+// unique, donc un mois deja occupe s'EDITE au lieu de se doubler. Rien n'est
+// ecrit dans Grist tant que la fenetre n'a pas ete validee.
+//
+// ADAPTATIONS vs la source :
+// 1. Les creneaux viennent de l'accesseur `getVisibleSlots()` passe en option
+//    (createChargeBoard().getVisibleSlots()) au lieu de la WeakMap interne
+//    `activeVisibleSlotsByBoard` de la source.
+// 2. Le DOM rendu ici clefe pistes et barres par `data-worker-name` (les
+//    « workers » sont des lignes TimeSegment groupees par nom, sans id numerique
+//    stable) et non par `data-worker-id` ; les editions/suppressions passent par
 //    `segmentEl.dataset.segmentId`.
-// 3. No local optimistic segment cache (the source mutates `state.projects[...]`
-//    directly for instant UI feedback, then reconciles with the Grist
-//    response). This widget has no such client-side project/segment cache to
-//    mutate, so every write is a plain CRUD call followed by `await
-//    onChanged()` (a full re-fetch + re-render) — simpler, at the cost of a
-//    brief round-trip latency instead of the source's instant optimistic row.
-// 4. Overlap detection reads `data-start-at-ms`/`data-end-at-ms` directly off
-//    the sibling `.charge-plan-segment-bar` elements already rendered in the
-//    target track (Task 11 emits those attributes per bar) instead of the
-//    source's `selectionOverlapsWorkerSegments` scanning an in-memory
-//    `worker.segments` array — same overlap math (`selectionStart < segEnd &&
-//    selectionEnd > segStart`), just DOM-sourced since this module keeps no
-//    worker/segment model of its own.
-// 5. No pan/zoom/date-picker chrome: Task 11's board renders none of that
-//    (only the Editer toggle, tracks, segment bars, selection preview and
-//    context menu exist), so only the create/resize/delete/edit-mode wiring
-//    is ported.
-// 6. `is-segment-editing-enabled`/`-locked` and the toggle button's
-//    label/`aria-pressed` are re-applied after every write
-//    (`applyEditModeToDom()`), because `onChanged()` triggers a full
-//    `board.render()` that replaces `boardEl.innerHTML` (wiping whatever this
-//    module set). The source never hits this because its
-//    `renderChargePlanTimeline` is itself driven by state that already
-//    carries `chargePlanSegmentEditModeEnabled`. Here, `editModeEnabled` is
-//    tracked locally in this module's closure (seeded once from
-//    `boardEl.classList.contains("is-segment-editing-enabled")` at attach
-//    time) and stays "sticky" across writes so the user doesn't fall back to
-//    Verrouiller after every create/resize/delete.
-// 7. "Modifier" (the `edit-segment` context action) opens the same edit-segment
-//    modal as the source: `#ps-edit-segment-modal` (bottom/editSegmentModal.js,
-//    a port of gestion-depenses2's #edit-segment-modal). The modal element lives
-//    OUTSIDE `boardEl` (a body-level sibling of #ps-charge) so it survives the
-//    `boardEl.innerHTML` re-render an `onChanged()` write triggers. The modal
-//    only builds/validates the new range + Effectif; the overlap check and the
-//    `updateTimeSegment({ segmentId, startDate, endDate, allocationDays,
-//    effectif })` write happen here in `handleEditSegmentSubmit` (this module
-//    owns the track DOM the overlap check reads). The Modifier action degrades to
-//    a `window.prompt()` Effectif-only fallback if no modal element is provided.
+// 3. Pas de cache optimiste local : chaque ecriture est un CRUD suivi d'un
+//    `await onChanged()` (re-fetch + re-render complet), au prix d'un aller-retour.
+// 4. Pas de barre provisoire hachuree : la source la dessine dans son apercu de
+//    selection, que ce portage n'utilise plus du tout.
+// 5. `is-segment-editing-enabled`/`-locked` et le libelle du bouton sont
+//    re-appliques apres chaque ecriture (`applyEditModeToDom()`), parce que
+//    `onChanged()` declenche un `board.render()` qui remplace `boardEl.innerHTML`.
+//    `editModeEnabled` vit dans la fermeture de ce module (amorce depuis la
+//    classe du board a l'attache) et reste « collant » d'une ecriture a l'autre.
+// 6. La fenetre `#ps-edit-segment-modal` (bottom/editSegmentModal.js) est un
+//    frere de #ps-charge au niveau du body : elle survit donc au re-rendu du
+//    board. Elle ne saisit que l'effectif ; le mois et la personne viennent du
+//    clic et lui sont passes en lecture seule. Il n'y a plus de repli
+//    `window.prompt` : la fenetre est le seul chemin d'edition.
 //
-// DOM/event module: window/document/HTMLElement are only referenced inside
-// `attachChargeEditing()`'s closures (never at module top level or inside the
-// exported pure function), so `buildSelectionFromSlotIndexes` (the pure
-// half-day-slot selection math) imports and runs cleanly under Node — see
-// tests/chargeSelection.test.mjs. `attachChargeEditing()` itself is
-// browser-only, verified here by `node --check` + structural read-through;
-// interactive pointer/click behavior is browser-verified once Task 14 wires
-// main.js (dev harness needs the controller to mount this module).
+// Module DOM/evenements : window/document/HTMLElement ne sont touches que dans
+// les fermetures de `attachChargeEditing()` (jamais au niveau du module ni dans
+// les fonctions pures exportees), si bien que `resolveClickedMonthKey` et
+// `resolveSegmentClickIntent` s'importent et tournent sous Node — cf.
+// tests/chargeSelection.test.mjs.
 
-import { clamp, formatNumber } from "../utils/format.js";
+import { clamp } from "../utils/format.js";
+import { monthKeyFromDate } from "../utils/monthSegments.js";
 import { createTimeSegment, updateTimeSegment, removeTimeSegment } from "../services/gristService.js";
 import { createEditSegmentModal } from "./editSegmentModal.js";
 
@@ -77,57 +55,73 @@ function cssEscapeValue(value) {
   if (typeof window !== "undefined" && window.CSS && typeof window.CSS.escape === "function") {
     return window.CSS.escape(text);
   }
-  // Minimal fallback for the ids we emit (digits or `s-N`): escape quotes/backslashes.
+  // Repli minimal pour ce qu'on emet (ids numeriques ou `s-N`, cles "YYYY-MM") :
+  // on echappe guillemets et antislashs.
   return text.replace(/["\\]/g, "\\$&");
 }
 
 const EDIT_TOGGLE_SELECTOR = "[data-charge-plan-edit-toggle]";
 const TRACK_SELECTOR = ".charge-plan-track";
 const SEGMENT_BAR_SELECTOR = ".charge-plan-segment-bar";
-const SEGMENT_HANDLE_SELECTOR = ".charge-plan-segment-handle";
 const CONTEXT_MENU_SELECTOR = ".charge-plan-context-menu";
 const CONTEXT_ACTION_SELECTOR = ".charge-plan-context-action";
 
-function formatDayValue(value) {
-  const formatted = formatNumber(value);
-  return formatted.endsWith(",00") ? formatted.slice(0, -3) : formatted;
-}
+// --- logique pure du geste (aucun DOM) ---------------------------------------
 
-// --- pure half-day slot selection math (port of buildSelectionFromSlots) ------
-
-// Builds a selection { startDate, endDate, allocationDays, leftPx, widthPx,
-// startSlotIndex, endSlotIndex } spanning [firstSlotIndex..lastSlotIndex]
-// (inclusive, order-independent) out of a flat slots array (Task 11's
-// getVisibleSlots() shape: { slotIndex, leftPx, widthPx, startAt: Date,
-// endAt: Date, isWorkingDay }). Pure: no DOM access anywhere in this
-// function. Returns null if either index isn't present in `slots`.
-export function buildSelectionFromSlotIndexes(slots, firstSlotIndex, lastSlotIndex) {
+// Mois du creneau sous le curseur. `slots` a la forme de getVisibleSlots()
+// ({ slotIndex, leftPx, widthPx, startAt: Date, endAt: Date, isWorkingDay }).
+// Renvoie "" si l'index n'existe pas dans la liste.
+export function resolveClickedMonthKey(slots, slotIndex) {
   const list = Array.isArray(slots) ? slots : [];
-  const firstSlot = list.find((slot) => slot.slotIndex === Number(firstSlotIndex));
-  const lastSlot = list.find((slot) => slot.slotIndex === Number(lastSlotIndex));
-  if (!firstSlot || !lastSlot) return null;
-
-  const orderedFirst = firstSlot.slotIndex <= lastSlot.slotIndex ? firstSlot : lastSlot;
-  const orderedLast = firstSlot.slotIndex <= lastSlot.slotIndex ? lastSlot : firstSlot;
-
-  const selectedSlots = list.filter(
-    (slot) => slot.slotIndex >= orderedFirst.slotIndex && slot.slotIndex <= orderedLast.slotIndex
-  );
-  const workingSlotCount = selectedSlots.filter((slot) => slot.isWorkingDay).length;
-  const allocationDays = Math.round((workingSlotCount / 2) * 100) / 100;
-
-  return {
-    startDate: orderedFirst.startAt.toISOString(),
-    endDate: orderedLast.endAt.toISOString(),
-    allocationDays,
-    leftPx: orderedFirst.leftPx,
-    widthPx: orderedLast.leftPx + orderedLast.widthPx - orderedFirst.leftPx,
-    startSlotIndex: orderedFirst.slotIndex,
-    endSlotIndex: orderedLast.slotIndex,
-  };
+  const slot = list.find((candidate) => candidate?.slotIndex === Number(slotIndex));
+  return slot ? monthKeyFromDate(slot.startAt) : "";
 }
 
-// --- DOM-dependent slot lookup (port of getSlotIndexFromClientX) --------------
+// Un id de segment n'est exploitable pour une ecriture que s'il correspond a une
+// ligne Grist reelle : buildWorkersFromSegments retombe sur un id de synthese
+// (`s-N`) quand la colonne id manque, et toReferenceId le rejetterait.
+// Exporte parce que TOUS les chemins d'ecriture doivent passer par ce meme
+// filtre : le clic gauche (via resolveSegmentClickIntent) comme le menu
+// contextuel (Modifier ET Supprimer, via handleContextAction).
+export function toEditableSegmentId(value) {
+  if (value == null || value === "") return null;
+  const numericValue = Number(value);
+  return Number.isInteger(numericValue) && numericValue > 0 ? numericValue : null;
+}
+
+// Que faire d'un clic sur une piste ? C'est ici que vit l'invariant « un segment
+// = un mois » : un mois deja occupe s'edite, il ne se double jamais.
+//
+// `clickedSegmentId` = id de la barre REELLEMENT sous le curseur (null quand le
+// clic tombe dans le vide du mois) ; `monthSegmentId` = id de la premiere barre
+// du mois trouvee dans la piste. La barre cliquee PRIME : avec des doublons
+// legacy que `assignSegmentLanes` empile en lanes 0 et 1, se fier au seul mois
+// (querySelector rend le premier noeud du DOM) reviendrait a toujours editer
+// celle du dessus, meme quand l'utilisateur a clique celle du dessous.
+export function resolveSegmentClickIntent({
+  monthKey,
+  clickedSegmentId = null,
+  monthSegmentId = null,
+} = {}) {
+  if (!monthKey) {
+    return { action: "ignore" };
+  }
+
+  const clickedOnBar = clickedSegmentId != null && clickedSegmentId !== "";
+  const rawSegmentId = clickedOnBar ? clickedSegmentId : monthSegmentId;
+  const monthOccupied = rawSegmentId != null && rawSegmentId !== "";
+  const segmentId = toEditableSegmentId(rawSegmentId);
+
+  if (segmentId == null) {
+    // Aucun id Grist exploitable : on ne cree que si le mois est vraiment libre,
+    // sinon on ne devine pas quelle barre editer et un doublon violerait la cle.
+    return monthOccupied ? { action: "ignore" } : { action: "create", monthKey };
+  }
+
+  return { action: "edit", segmentId };
+}
+
+// --- recherche de creneau (dependante du DOM, port de getSlotIndexFromClientX) --
 
 function getSlotIndexAtClientX(trackEl, slots, clientX) {
   const list = Array.isArray(slots) ? slots : [];
@@ -147,75 +141,7 @@ function getSlotIndexAtClientX(trackEl, slots, clientX) {
   return list[list.length - 1].slotIndex;
 }
 
-function computeSelectionFromClientX(trackEl, slots, startClientX, endClientX) {
-  const firstSlotIndex = getSlotIndexAtClientX(trackEl, slots, startClientX);
-  const lastSlotIndex = getSlotIndexAtClientX(trackEl, slots, endClientX);
-  if (firstSlotIndex < 0 || lastSlotIndex < 0) return null;
-  return buildSelectionFromSlotIndexes(slots, firstSlotIndex, lastSlotIndex);
-}
-
-// --- overlap check (port of selectionOverlapsWorkerSegments, DOM-sourced) -----
-
-function trackHasOverlap(trackEl, selection, { ignoreSegmentId } = {}) {
-  if (!(trackEl instanceof HTMLElement) || !selection) return false;
-
-  const selectionStart = new Date(selection.startDate).getTime();
-  const selectionEnd = new Date(selection.endDate).getTime();
-  if (!Number.isFinite(selectionStart) || !Number.isFinite(selectionEnd)) return false;
-
-  const barEls = trackEl.querySelectorAll(SEGMENT_BAR_SELECTOR);
-  for (const barEl of barEls) {
-    if (ignoreSegmentId != null && String(barEl.dataset.segmentId) === String(ignoreSegmentId)) {
-      continue;
-    }
-    const startMs = Number(barEl.dataset.startAtMs);
-    const endMs = Number(barEl.dataset.endAtMs);
-    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue;
-    if (selectionStart < endMs && selectionEnd > startMs) return true;
-  }
-  return false;
-}
-
-function annotateOverlap(trackEl, selection, options = {}) {
-  if (!selection) return null;
-  return { ...selection, hasOverlap: trackHasOverlap(trackEl, selection, options) };
-}
-
-// --- selection preview (port of updateChargePlanSelectionPreview / clear...) --
-
-function updateSelectionPreview(trackEl, selection) {
-  const previewEl = trackEl?.querySelector(".charge-plan-selection-preview");
-  const labelEl = previewEl?.querySelector(".charge-plan-selection-label");
-  if (!(previewEl instanceof HTMLElement) || !(labelEl instanceof HTMLElement)) return;
-
-  if (!selection || selection.widthPx <= 0 || selection.allocationDays <= 0) {
-    clearSelectionPreview(trackEl);
-    return;
-  }
-
-  previewEl.hidden = false;
-  previewEl.style.left = `${selection.leftPx}px`;
-  previewEl.style.width = `${selection.widthPx}px`;
-  previewEl.classList.toggle("is-invalid", Boolean(selection.hasOverlap));
-  labelEl.textContent = `${formatDayValue(selection.allocationDays)} j`;
-}
-
-function clearSelectionPreview(trackEl) {
-  const previewEl = trackEl?.querySelector(".charge-plan-selection-preview");
-  if (!(previewEl instanceof HTMLElement)) return;
-
-  previewEl.hidden = true;
-  previewEl.style.left = "0px";
-  previewEl.style.width = "0px";
-  previewEl.classList.remove("is-invalid");
-
-  const labelEl = previewEl.querySelector(".charge-plan-selection-label");
-  if (labelEl instanceof HTMLElement) {
-    labelEl.textContent = "";
-  }
-}
-
-// --- context menu (port of showChargePlanContextMenu / hideChargePlanContextMenu) --
+// --- menu contextuel (port de showChargePlanContextMenu / hide...) -----------
 
 function hideContextMenu(boardEl) {
   const menuEl = boardEl?.querySelector(CONTEXT_MENU_SELECTOR);
@@ -252,16 +178,16 @@ function showContextMenu(boardEl, { clientX, clientY, segmentId }) {
   menuEl.style.top = `${Math.min(clientY, maxTop)}px`;
 }
 
-// --- public factory -------------------------------------------------------------
+// --- fabrique publique -------------------------------------------------------
 
-// attachChargeEditing(boardEl, { getProjectNumber, getVisibleSlots, onChanged })
-//   → { detach() }
+// attachChargeEditing(boardEl, { getProjectNumber, getVisibleSlots, onChanged,
+//   editSegmentModalEl, getAbsenceSet }) → { detach(), isEditModeEnabled() }
 //
-// Wires the Editer toggle, drag-to-create, handle-resize and the
-// Modifier/Supprimer context menu onto `boardEl` (Task 11's charge-board
-// container). All listeners are delegated on `boardEl`/window/document (never
-// on inner elements), so they survive `boardEl.innerHTML` being replaced by a
-// subsequent `chargeBoard.render()` call triggered from `onChanged()`.
+// Cable le bouton Editer, le clic-pour-creer/editer et le menu contextuel
+// Modifier/Supprimer sur `boardEl`. Tous les ecouteurs sont delegues sur
+// `boardEl`/document (jamais sur les elements internes), ils survivent donc au
+// remplacement de `boardEl.innerHTML` par un `chargeBoard.render()` declenche
+// depuis `onChanged()`.
 export function attachChargeEditing(
   boardEl,
   { getProjectNumber, getVisibleSlots, onChanged, editSegmentModalEl, getAbsenceSet } = {}
@@ -271,12 +197,10 @@ export function attachChargeEditing(
   }
 
   let editModeEnabled = boardEl.classList.contains("is-segment-editing-enabled");
-  let dragState = null;
 
-  // "Modifier" modal (same window/functionality as gestion-depenses2). Its
-  // element is a body-level sibling of the board, so it is not wiped by the
-  // board's re-render. `onSubmit` runs the overlap check against THIS module's
-  // track DOM, then persists via updateTimeSegment + onChanged().
+  // Fenetre de saisie (creation ET edition). Son element est un frere du board
+  // au niveau du body : le re-rendu du board ne l'efface pas. `onSubmit` fait
+  // l'ecriture Grist puis `onChanged()`.
   const editSegmentModal =
     editSegmentModalEl instanceof HTMLElement
       ? createEditSegmentModal(editSegmentModalEl, { onSubmit: handleEditSegmentSubmit })
@@ -306,18 +230,9 @@ export function attachChargeEditing(
     }
   }
 
-  function cancelDrag() {
-    if (!dragState) return;
-    if (dragState.segmentEl instanceof HTMLElement) {
-      dragState.segmentEl.classList.remove("is-resizing");
-    }
-    clearSelectionPreview(dragState.trackEl);
-    dragState = null;
-  }
-
-  // Runs a CRUD write, refreshes the board via onChanged(), then re-asserts
-  // this module's edit-mode UI (see adaptation #6 above) regardless of
-  // success/failure so the toggle never silently reverts.
+  // Execute une ecriture CRUD, rafraichit le board via onChanged(), puis
+  // re-affirme le mode Editer (cf. adaptation 5) quoi qu'il arrive, pour que le
+  // bouton ne retombe jamais silencieusement sur Verrouiller.
   async function persistWrite(writeFn) {
     try {
       await writeFn();
@@ -339,7 +254,6 @@ export function attachChargeEditing(
     editModeEnabled = !editModeEnabled;
     applyEditModeToDom();
     if (!editModeEnabled) {
-      cancelDrag();
       hideContextMenu(boardEl);
     }
   }
@@ -350,152 +264,63 @@ export function attachChargeEditing(
     if (event.target.closest(CONTEXT_MENU_SELECTOR)) return;
 
     hideContextMenu(boardEl);
-    if (!editModeEnabled) return; // gate: no create/resize while locked
+    if (!editModeEnabled) return; // garde-fou : rien sans le mode Editer
 
     const trackEl = event.target.closest(TRACK_SELECTOR);
     if (!(trackEl instanceof HTMLElement)) return;
-
-    const segmentEl = event.target.closest(SEGMENT_BAR_SELECTOR);
-    const handleEl = event.target.closest(SEGMENT_HANDLE_SELECTOR);
-
-    if (segmentEl instanceof HTMLElement && handleEl instanceof HTMLElement) {
-      const segmentId = segmentEl.dataset.segmentId;
-      const startSlotIndex = Number(segmentEl.dataset.startSlotIndex);
-      const endSlotIndex = Number(segmentEl.dataset.endSlotIndex);
-      const edge = handleEl.dataset.resizeEdge;
-
-      if (
-        !segmentId ||
-        !Number.isInteger(startSlotIndex) ||
-        !Number.isInteger(endSlotIndex) ||
-        (edge !== "start" && edge !== "end")
-      ) {
-        return;
-      }
-
-      event.preventDefault();
-      const slots = resolveSlots();
-      const initialSelection = annotateOverlap(
-        trackEl,
-        buildSelectionFromSlotIndexes(slots, startSlotIndex, endSlotIndex),
-        { ignoreSegmentId: segmentId }
-      );
-
-      segmentEl.classList.add("is-resizing");
-      dragState = {
-        mode: "resize",
-        trackEl,
-        segmentEl,
-        segmentId,
-        edge,
-        fixedSlotIndex: edge === "start" ? endSlotIndex : startSlotIndex,
-        currentSelection: initialSelection,
-      };
-      updateSelectionPreview(trackEl, initialSelection);
-      return;
-    }
-
-    if (segmentEl instanceof HTMLElement) {
-      // Clicked the bar body (not a resize handle): resize is handle-only,
-      // and whole-segment relocation-by-drag is out of scope for this task.
-      return;
-    }
 
     const workerName = trackEl.dataset.workerName || "";
     if (!workerName) return;
 
     event.preventDefault();
-    const slots = resolveSlots();
-    const initialSelection = annotateOverlap(
-      trackEl,
-      computeSelectionFromClientX(trackEl, slots, event.clientX, event.clientX)
-    );
 
-    dragState = {
-      mode: "create",
-      trackEl,
+    // Un clic vaut le mois entier. La barre sous le curseur, si elle existe, dit
+    // elle-meme son mois : une barre etroite est elargie a 12px minimum au rendu
+    // et peut deborder sur le mois voisin.
+    const clickedBarEl = event.target.closest(SEGMENT_BAR_SELECTOR);
+    const clickedBarMonthKey =
+      clickedBarEl instanceof HTMLElement ? clickedBarEl.dataset.monthKey || "" : "";
+    const slots = resolveSlots();
+    const monthKey =
+      clickedBarMonthKey ||
+      resolveClickedMonthKey(slots, getSlotIndexAtClientX(trackEl, slots, event.clientX));
+    if (!monthKey) return;
+
+    // Repli pour un clic dans le vide : la premiere barre du mois dans la piste.
+    const monthBarEl = trackEl.querySelector(
+      `${SEGMENT_BAR_SELECTOR}[data-month-key="${cssEscapeValue(monthKey)}"]`
+    );
+    const intent = resolveSegmentClickIntent({
+      monthKey,
+      clickedSegmentId: clickedBarEl instanceof HTMLElement ? clickedBarEl.dataset.segmentId : null,
+      monthSegmentId: monthBarEl instanceof HTMLElement ? monthBarEl.dataset.segmentId : null,
+    });
+    if (intent.action === "ignore") return;
+
+    if (intent.action === "create") {
+      openSegmentModal({ segmentId: null, monthKey, workerName, effectif: "" });
+      return;
+    }
+
+    const targetBarEl = clickedBarEl instanceof HTMLElement ? clickedBarEl : monthBarEl;
+    openSegmentModal({
+      segmentId: intent.segmentId,
+      monthKey,
       workerName,
-      startClientX: event.clientX,
-      currentSelection: initialSelection,
-    };
-    updateSelectionPreview(trackEl, initialSelection);
+      effectif: targetBarEl instanceof HTMLElement ? targetBarEl.dataset.effectif ?? "" : "",
+    });
   }
 
-  function handlePointerMove(event) {
-    if (!dragState) return;
-
-    const slots = resolveSlots();
-
-    if (dragState.mode === "resize") {
-      const movingSlotIndex = getSlotIndexAtClientX(dragState.trackEl, slots, event.clientX);
-      if (movingSlotIndex < 0) return;
-
-      const startSlotIndex =
-        dragState.edge === "start"
-          ? Math.min(movingSlotIndex, dragState.fixedSlotIndex)
-          : dragState.fixedSlotIndex;
-      const endSlotIndex =
-        dragState.edge === "end"
-          ? Math.max(movingSlotIndex, dragState.fixedSlotIndex)
-          : dragState.fixedSlotIndex;
-
-      dragState.currentSelection = annotateOverlap(
-        dragState.trackEl,
-        buildSelectionFromSlotIndexes(slots, startSlotIndex, endSlotIndex),
-        { ignoreSegmentId: dragState.segmentId }
-      );
-    } else {
-      dragState.currentSelection = annotateOverlap(
-        dragState.trackEl,
-        computeSelectionFromClientX(dragState.trackEl, slots, dragState.startClientX, event.clientX)
-      );
-    }
-
-    updateSelectionPreview(dragState.trackEl, dragState.currentSelection);
-  }
-
-  async function handlePointerUp() {
-    if (!dragState) return;
-
-    const finished = dragState;
-    if (finished.segmentEl instanceof HTMLElement) {
-      finished.segmentEl.classList.remove("is-resizing");
-    }
-    clearSelectionPreview(finished.trackEl);
-    dragState = null;
-
-    const selection = finished.currentSelection;
-    if (!selection || selection.allocationDays <= 0 || selection.hasOverlap) {
-      return;
-    }
-
-    if (finished.mode === "resize") {
-      await persistWrite(() => {
-        const patch = { segmentId: finished.segmentId, allocationDays: selection.allocationDays };
-        if (finished.edge === "start") {
-          patch.startDate = selection.startDate;
-        } else {
-          patch.endDate = selection.endDate;
-        }
-        return updateTimeSegment(patch);
-      });
-      return;
-    }
-
-    await persistWrite(() =>
-      createTimeSegment({
-        projectNumber: typeof getProjectNumber === "function" ? getProjectNumber() : undefined,
-        name: finished.workerName,
-        startDate: selection.startDate,
-        endDate: selection.endDate,
-        allocationDays: selection.allocationDays,
-      })
-    );
-  }
-
-  function handlePointerUpSafe(event) {
-    handlePointerUp(event).catch((error) => {
-      console.error("Erreur pointerup plan de charge :", error);
+  // Ouvre la fenetre en creation (segmentId null) ou en edition. Rien n'est
+  // ecrit tant que l'utilisateur n'a pas valide.
+  function openSegmentModal({ segmentId, monthKey, workerName, effectif }) {
+    if (!editSegmentModal || !monthKey) return;
+    editSegmentModal.open({
+      segmentId,
+      monthKey,
+      workerName,
+      effectif,
+      absenceSet: typeof getAbsenceSet === "function" ? getAbsenceSet(workerName) : undefined,
     });
   }
 
@@ -523,103 +348,50 @@ export function attachChargeEditing(
     showContextMenu(boardEl, { clientX: event.clientX, clientY: event.clientY, segmentId });
   }
 
-  // "Modifier": open the edit-segment modal seeded from the clicked bar's
-  // dataset (start/end from data-*-at-ms, current Effectif from data-effectif).
-  // If no modal element was provided, fall back to the minimal Effectif-only
-  // window.prompt() (legacy behaviour).
+  // « Modifier » : meme fenetre que le clic, amorcee depuis la barre visee
+  // (mois + effectif sur son dataset, personne sur la piste qui la porte).
   function handleModifySegment(segmentId) {
     const barEl = findSegmentBar(segmentId);
     if (!(barEl instanceof HTMLElement)) return;
 
-    if (!editSegmentModal) {
-      void handleModifySegmentPrompt(segmentId);
-      return;
-    }
-
-    const startAtMs = Number(barEl.dataset.startAtMs);
-    const endAtMs = Number(barEl.dataset.endAtMs);
-    if (!Number.isFinite(startAtMs) || !Number.isFinite(endAtMs)) return;
-
-    // Leave-aware readout: pass the edited segment's OWNER absence set so the
-    // modal can subtract absence half-days from "jours disponibles" and flag an
-    // over-available Effectif in red (non-blocking). Worker name comes off the
-    // owning track's dataset (Task 11 emits data-worker-name per track).
     const trackEl = barEl.closest(TRACK_SELECTOR);
-    const workerName = trackEl instanceof HTMLElement ? trackEl.dataset.workerName || "" : "";
-    const absenceSet =
-      typeof getAbsenceSet === "function" ? getAbsenceSet(workerName) : undefined;
-
-    editSegmentModal.open({
+    openSegmentModal({
       segmentId,
-      startAt: new Date(startAtMs),
-      endAt: new Date(endAtMs),
+      monthKey: barEl.dataset.monthKey || "",
+      workerName: trackEl instanceof HTMLElement ? trackEl.dataset.workerName || "" : "",
       effectif: barEl.dataset.effectif ?? "",
-      absenceSet,
     });
   }
 
-  // Called by the modal on Enregistrer with an already-internally-valid range +
-  // Effectif. Rejects overlaps against the segment's own track (DOM-sourced,
-  // ignoring the edited bar), then writes and refreshes. Returns { ok, error }.
-  async function handleEditSegmentSubmit({ segmentId, selection }) {
+  // Appele par la fenetre sur Enregistrer, avec un effectif deja valide.
+  // Plus de controle de chevauchement : l'unicite (projet, personne, mois) le
+  // remplace, et le clic sur un mois occupe edite au lieu de creer.
+  async function handleEditSegmentSubmit({ segmentId, monthKey, workerName, selection }) {
     if (!editModeEnabled) {
       return { ok: false, error: "Cliquez sur Editer pour modifier le planning." };
-    }
-
-    const barEl = findSegmentBar(segmentId);
-    const trackEl = barEl instanceof HTMLElement ? barEl.closest(TRACK_SELECTOR) : null;
-    const annotated = annotateOverlap(
-      trackEl,
-      { startDate: selection.startDate, endDate: selection.endDate },
-      { ignoreSegmentId: segmentId }
-    );
-    if (annotated?.hasOverlap) {
-      return {
-        ok: false,
-        error:
-          "Impossible de definir un segment qui chevauche deja une autre barre pour cette personne.",
-      };
     }
 
     let writeError = null;
     await persistWrite(async () => {
       try {
-        await updateTimeSegment({
-          segmentId,
-          startDate: selection.startDate,
-          endDate: selection.endDate,
-          allocationDays: selection.totalDays,
-          effectif: selection.effectifValueForSave,
-        });
+        if (segmentId == null) {
+          await createTimeSegment({
+            projectNumber: typeof getProjectNumber === "function" ? getProjectNumber() : undefined,
+            name: workerName,
+            monthKey,
+            effectif: selection.effectifValueForSave,
+          });
+        } else {
+          await updateTimeSegment({ segmentId, effectif: selection.effectifValueForSave });
+        }
       } catch (error) {
         writeError = error;
         throw error;
       }
     });
 
-    if (writeError) {
-      return { ok: false, error: "La mise a jour du segment a echoue." };
-    }
+    if (writeError) return { ok: false, error: "L'enregistrement du segment a echoue." };
     return { ok: true };
-  }
-
-  // Legacy Effectif-only fallback (no modal element wired). Cancelling the
-  // prompt (null) or leaving it blank is a no-op; a non-numeric/negative value
-  // shows an alert and aborts without writing.
-  async function handleModifySegmentPrompt(segmentId) {
-    const input = window.prompt("Nouvel effectif pour ce segment :", "");
-    if (input == null) return;
-
-    const trimmed = input.trim();
-    if (!trimmed) return;
-
-    const effectif = Number(trimmed.replace(",", "."));
-    if (!Number.isFinite(effectif) || effectif < 0) {
-      window.alert("Valeur d'effectif invalide.");
-      return;
-    }
-
-    await persistWrite(() => updateTimeSegment({ segmentId, effectif }));
   }
 
   function handleContextAction(event) {
@@ -630,11 +402,19 @@ export function attachChargeEditing(
 
     event.preventDefault();
     const menuEl = actionEl.closest(CONTEXT_MENU_SELECTOR);
-    const segmentId = actionEl.dataset.segmentId || menuEl?.dataset.segmentId;
+    const rawSegmentId = actionEl.dataset.segmentId || menuEl?.dataset.segmentId;
     const action = actionEl.dataset.action || "";
     hideContextMenu(boardEl);
 
-    if (!segmentId || !editModeEnabled) return;
+    if (!editModeEnabled) return;
+
+    // Meme filtre que le clic gauche : un id de synthese (`s-N`, repli de
+    // buildWorkersFromSegments quand la colonne id manque) ne designe aucune
+    // ligne Grist. Sans ce garde, « Modifier » ouvrait quand meme la fenetre et
+    // l'enregistrement finissait en throw avale par persistWrite, tandis que
+    // « Supprimer » partait dans un removeTimeSegment sans effet.
+    const segmentId = toEditableSegmentId(rawSegmentId);
+    if (segmentId == null) return;
 
     if (action === "delete-segment") {
       void persistWrite(() => removeTimeSegment(segmentId));
@@ -642,7 +422,7 @@ export function attachChargeEditing(
     }
 
     if (action === "edit-segment") {
-      void handleModifySegment(segmentId);
+      handleModifySegment(segmentId);
     }
   }
 
@@ -657,7 +437,6 @@ export function attachChargeEditing(
 
   function handleKeyDown(event) {
     if (event.key !== "Escape") return;
-    cancelDrag();
     hideContextMenu(boardEl);
   }
 
@@ -665,8 +444,6 @@ export function attachChargeEditing(
   boardEl.addEventListener("pointerdown", handlePointerDown);
   boardEl.addEventListener("contextmenu", handleContextMenuEvent);
   boardEl.addEventListener("click", handleContextAction);
-  window.addEventListener("pointermove", handlePointerMove);
-  window.addEventListener("pointerup", handlePointerUpSafe);
   document.addEventListener("click", handleDocumentClick);
   document.addEventListener("keydown", handleKeyDown);
 
@@ -677,21 +454,17 @@ export function attachChargeEditing(
     boardEl.removeEventListener("pointerdown", handlePointerDown);
     boardEl.removeEventListener("contextmenu", handleContextMenuEvent);
     boardEl.removeEventListener("click", handleContextAction);
-    window.removeEventListener("pointermove", handlePointerMove);
-    window.removeEventListener("pointerup", handlePointerUpSafe);
     document.removeEventListener("click", handleDocumentClick);
     document.removeEventListener("keydown", handleKeyDown);
     if (editSegmentModal) editSegmentModal.destroy();
-    dragState = null;
   }
 
-  // Exposes the live edit-mode flag so main.js's onChanged() can re-render the
-  // charge board with the CORRECT editMode instead of a hardcoded false: this
-  // module's persistWrite().finally re-asserts the sticky edit mode
-  // synchronously after a write, but a subsequent chargeBoard.render()/
-  // setWindow() (triggered by onChanged + the controller's follow-up rAF)
-  // would otherwise overwrite it back to locked using chargeBoard.lastEditMode.
-  // Reading editModeEnabled here keeps ONE source of truth.
+  // Expose le mode Editer courant pour que le onChanged() de main.js re-rende le
+  // board avec le BON editMode au lieu d'un false code en dur : le finally de
+  // persistWrite le re-affirme synchroniquement apres une ecriture, mais un
+  // chargeBoard.render()/setWindow() ulterieur (onChanged + rAF du controleur)
+  // le remettrait sinon a « verrouille » via chargeBoard.lastEditMode. Une seule
+  // source de verite.
   function isEditModeEnabled() {
     return editModeEnabled;
   }

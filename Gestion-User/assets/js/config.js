@@ -2,11 +2,25 @@ export const TABLES = {
   timeSegment: "TimeSegment",
   team: "Team",
   projects: "Projets2",
+  timeOut: "Time-Out",
 };
+
+// Libelles exacts de Time-Out.Type comptes comme absence. Memes valeurs que
+// planning-synchro et gestion-depenses2 ; accents ecrits en echappement \u pour
+// suivre la convention du fichier, la chaine produite est identique.
+export const ABSENCE_TYPES = [
+  "Cong\u00e9 Pay\u00e9",
+  "Cong\u00e9 Non Pay\u00e9",
+  "RTT",
+  "Cong\u00e9 Parental",
+];
 
 export const COLUMN_CANDIDATES = {
   timeSegment: {
     employeeName: ["Name", "Nom", "PrenomNom", "Prenom_Nom"],
+    // `Mois` est desormais la source de verite du segment ; startAt reste
+    // declaree uniquement comme repli legacy (cf. resolveSegmentMonthKey).
+    mois: ["Mois", "Month"],
     startAt: ["Start_At", "StartAt", "Debut", "DateDebut", "Date_Debut"],
     endAt: ["End_At", "EndAt", "Fin", "DateFin", "Date_Fin"],
     allocationDays: ["Allocation_Days", "AllocationDays", "Jours", "JoursAllocation"],
@@ -22,6 +36,14 @@ export const COLUMN_CANDIDATES = {
     role: ["Role", "R\u00f4le", "R\u00c3\u00b4le"],
     external: ["Externe"],
     idTrefle: ["IdTrefle", "IDTrefle", "Id_Trefle"],
+  },
+  timeOut: {
+    owner: ["Owner"],
+    startDate: ["Start_Date", "StartDate"],
+    startPeriod: ["Start_Period", "StartPeriod"],
+    endDate: ["End_Date", "EndDate"],
+    endPeriod: ["End_Period", "EndPeriod"],
+    type: ["Type"],
   },
   projects: {
     number: ["Numero_de_projet", "Numero de projet", "Num\u00e9ro de projet", "Num\u00c3\u00a9ro de projet", "NumeroProjet", "Numero"],

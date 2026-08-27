@@ -1,96 +1,138 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildSelectionFromSlotIndexes } from "../assets/js/bottom/chargeEditing.js";
+import {
+  resolveClickedMonthKey,
+  resolveSegmentClickIntent,
+  toEditableSegmentId,
+} from "../assets/js/bottom/chargeEditing.js";
 
-// Builds a synthetic getVisibleSlots()-shaped fixture: two half-day slots
-// (am/pm) per date, laid out left-to-right at a constant half-day width,
-// mirroring bottom/chargeBoard.js's buildVisibleSlots() output shape
+// Fixture a la forme de getVisibleSlots() : deux creneaux demi-journee (am/pm)
+// par date, poses de gauche a droite a largeur constante — meme forme que la
+// sortie de buildVisibleSlots() de bottom/chargeBoard.js
 // ({ slotIndex, leftPx, widthPx, startAt, endAt, isWorkingDay }).
 const HALF_DAY_WIDTH_PX = 40;
 
 function makeSlots(days) {
   const slots = [];
-  days.forEach(({ year, month, day, isWorkingDay }) => {
-    const am = {
-      slotIndex: slots.length,
-      leftPx: slots.length * HALF_DAY_WIDTH_PX,
-      widthPx: HALF_DAY_WIDTH_PX,
-      isWorkingDay,
-      startAt: new Date(year, month - 1, day, 8, 0, 0, 0),
-      endAt: new Date(year, month - 1, day, 12, 0, 0, 0),
-    };
-    slots.push(am);
-    const pm = {
-      slotIndex: slots.length,
-      leftPx: slots.length * HALF_DAY_WIDTH_PX,
-      widthPx: HALF_DAY_WIDTH_PX,
-      isWorkingDay,
-      startAt: new Date(year, month - 1, day, 13, 0, 0, 0),
-      endAt: new Date(year, month - 1, day, 17, 0, 0, 0),
-    };
-    slots.push(pm);
+  days.forEach(({ year, month, day, isWorkingDay = true }) => {
+    ["am", "pm"].forEach((part) => {
+      const startHour = part === "am" ? 8 : 13;
+      const endHour = part === "am" ? 12 : 17;
+      slots.push({
+        slotIndex: slots.length,
+        leftPx: slots.length * HALF_DAY_WIDTH_PX,
+        widthPx: HALF_DAY_WIDTH_PX,
+        isWorkingDay,
+        startAt: new Date(year, month - 1, day, startHour, 0, 0, 0),
+        endAt: new Date(year, month - 1, day, endHour, 0, 0, 0),
+      });
+    });
   });
   return slots;
 }
 
-test("full 2-business-day selection yields allocationDays = workingSlots/2 and ISO start/end", () => {
+// --- resolveClickedMonthKey ---------------------------------------------------
+
+test("resolveClickedMonthKey rend le mois du creneau sous le curseur", () => {
   const slots = makeSlots([
-    { year: 2026, month: 1, day: 5, isWorkingDay: true }, // Monday
-    { year: 2026, month: 1, day: 6, isWorkingDay: true }, // Tuesday
+    { year: 2026, month: 1, day: 30 },
+    { year: 2026, month: 1, day: 31 },
+    { year: 2026, month: 2, day: 1 },
   ]);
 
-  const selection = buildSelectionFromSlotIndexes(slots, 0, 3);
-
-  assert.ok(selection);
-  assert.equal(selection.allocationDays, 2); // 4 working half-day slots / 2
-  assert.equal(selection.startDate, new Date(2026, 0, 5, 8, 0, 0, 0).toISOString());
-  assert.equal(selection.endDate, new Date(2026, 0, 6, 17, 0, 0, 0).toISOString());
-  assert.equal(selection.startSlotIndex, 0);
-  assert.equal(selection.endSlotIndex, 3);
-  assert.equal(selection.leftPx, 0);
-  assert.equal(selection.widthPx, 4 * HALF_DAY_WIDTH_PX);
+  assert.equal(resolveClickedMonthKey(slots, 0), "2026-01");
+  assert.equal(resolveClickedMonthKey(slots, 3), "2026-01");
+  assert.equal(resolveClickedMonthKey(slots, 4), "2026-02");
+  assert.equal(resolveClickedMonthKey(slots, 5), "2026-02");
 });
 
-test("a single half-day slot yields allocationDays = 0.5", () => {
-  const slots = makeSlots([{ year: 2026, month: 1, day: 5, isWorkingDay: true }]);
+test("resolveClickedMonthKey tolere un index texte et refuse un index absent", () => {
+  const slots = makeSlots([{ year: 2026, month: 5, day: 4 }]);
 
-  const selection = buildSelectionFromSlotIndexes(slots, 0, 0);
-
-  assert.ok(selection);
-  assert.equal(selection.allocationDays, 0.5);
-  assert.equal(selection.startDate, new Date(2026, 0, 5, 8, 0, 0, 0).toISOString());
-  assert.equal(selection.endDate, new Date(2026, 0, 5, 12, 0, 0, 0).toISOString());
+  assert.equal(resolveClickedMonthKey(slots, "1"), "2026-05");
+  assert.equal(resolveClickedMonthKey(slots, 99), "");
+  assert.equal(resolveClickedMonthKey(slots, -1), "");
+  assert.equal(resolveClickedMonthKey([], 0), "");
+  assert.equal(resolveClickedMonthKey(null, 0), "");
 });
 
-test("weekend half-day slots inside the range are excluded from allocationDays but still span the full pixel width", () => {
-  const slots = makeSlots([
-    { year: 2026, month: 1, day: 9, isWorkingDay: true }, // Friday
-    { year: 2026, month: 1, day: 10, isWorkingDay: false }, // Saturday
-  ]);
+// --- resolveSegmentClickIntent ------------------------------------------------
 
-  const selection = buildSelectionFromSlotIndexes(slots, 0, 3);
-
-  assert.ok(selection);
-  // Only the 2 Friday half-day slots count; the 2 Saturday slots are excluded.
-  assert.equal(selection.allocationDays, 1);
-  assert.equal(selection.widthPx, 4 * HALF_DAY_WIDTH_PX);
+test("clic dans le vide d'un mois libre -> creation", () => {
+  assert.deepEqual(resolveSegmentClickIntent({ monthKey: "2026-03" }), {
+    action: "create",
+    monthKey: "2026-03",
+  });
 });
 
-test("reversed indices (lastIdx < firstIdx) normalize to the same selection as ascending order", () => {
-  const slots = makeSlots([
-    { year: 2026, month: 1, day: 5, isWorkingDay: true },
-    { year: 2026, month: 1, day: 6, isWorkingDay: true },
-  ]);
-
-  const ascending = buildSelectionFromSlotIndexes(slots, 0, 3);
-  const reversed = buildSelectionFromSlotIndexes(slots, 3, 0);
-
-  assert.deepEqual(reversed, ascending);
+test("clic dans le vide d'un mois deja occupe -> edition de sa barre", () => {
+  assert.deepEqual(
+    resolveSegmentClickIntent({ monthKey: "2026-03", monthSegmentId: "42" }),
+    { action: "edit", segmentId: 42 }
+  );
 });
 
-test("returns null when a slot index isn't present in the slots array", () => {
-  const slots = makeSlots([{ year: 2026, month: 1, day: 5, isWorkingDay: true }]);
+// Le piege des barres empilees : deux segments legacy sur le meme mois sont mis
+// en lanes 0 et 1 par assignSegmentLanes, et querySelector rend le premier noeud
+// du DOM. La barre reellement sous le curseur doit primer, sinon cliquer celle
+// du dessous editerait celle du dessus.
+test("la barre sous le curseur prime sur la premiere barre du mois", () => {
+  assert.deepEqual(
+    resolveSegmentClickIntent({
+      monthKey: "2026-03",
+      clickedSegmentId: "7",
+      monthSegmentId: "42",
+    }),
+    { action: "edit", segmentId: 7 }
+  );
+});
 
-  assert.equal(buildSelectionFromSlotIndexes(slots, 0, 99), null);
-  assert.equal(buildSelectionFromSlotIndexes([], 0, 0), null);
+test("mois non resolu -> on ignore le clic", () => {
+  assert.deepEqual(resolveSegmentClickIntent({ monthKey: "" }), { action: "ignore" });
+  assert.deepEqual(resolveSegmentClickIntent({}), { action: "ignore" });
+  assert.deepEqual(resolveSegmentClickIntent(), { action: "ignore" });
+});
+
+test("id de synthese (colonne id absente) : ni edition ni doublon", () => {
+  // Barre cliquee sans id Grist exploitable : rien, on ne devine pas la ligne.
+  assert.deepEqual(
+    resolveSegmentClickIntent({ monthKey: "2026-03", clickedSegmentId: "s-0" }),
+    { action: "ignore" }
+  );
+  // Clic dans le vide, mais le mois EST occupe par une telle barre : creer
+  // violerait la cle unique (projet, personne, mois).
+  assert.deepEqual(
+    resolveSegmentClickIntent({ monthKey: "2026-03", monthSegmentId: "s-0" }),
+    { action: "ignore" }
+  );
+});
+
+// Ce filtre garde TOUS les chemins d'ecriture : le clic gauche via
+// resolveSegmentClickIntent, mais aussi Modifier ET Supprimer du menu contextuel.
+test("toEditableSegmentId ne laisse passer que de vrais ids de ligne Grist", () => {
+  assert.equal(toEditableSegmentId("77"), 77);
+  assert.equal(toEditableSegmentId(77), 77);
+
+  // Id de synthese de chargeBoard quand la colonne id manque.
+  assert.equal(toEditableSegmentId("s-0"), null);
+  assert.equal(toEditableSegmentId("s-12"), null);
+  // Valeurs que toReferenceId rejetterait de toute facon.
+  assert.equal(toEditableSegmentId("0"), null);
+  assert.equal(toEditableSegmentId(0), null);
+  assert.equal(toEditableSegmentId(-3), null);
+  assert.equal(toEditableSegmentId("12.5"), null);
+  assert.equal(toEditableSegmentId(""), null);
+  assert.equal(toEditableSegmentId(null), null);
+  assert.equal(toEditableSegmentId(undefined), null);
+});
+
+test("id vide ou nul traite comme absent", () => {
+  assert.deepEqual(
+    resolveSegmentClickIntent({ monthKey: "2026-03", clickedSegmentId: "", monthSegmentId: "" }),
+    { action: "create", monthKey: "2026-03" }
+  );
+  assert.deepEqual(
+    resolveSegmentClickIntent({ monthKey: "2026-03", monthSegmentId: "0" }),
+    { action: "ignore" }
+  );
 });

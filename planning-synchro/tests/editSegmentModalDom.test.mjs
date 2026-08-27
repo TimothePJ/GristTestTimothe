@@ -1,0 +1,534 @@
+// Tests du VRAI controleur `createEditSegmentModal` : aucune reimplementation.
+// Un DOM minimal (juste ce que le controleur touche) est installe sur globalThis,
+// puis le module reel est importe et pilote par les memes gestes que l'utilisateur
+// (clic Enregistrer, clic Fermer, Echap, clic sur le fond).
+//
+// POURQUOI CE FICHIER EXISTE : les tests de `editSegmentModal.test.mjs` ne
+// couvrent que les fabriques pures (`createSubmitLock`, `createSubmitSession`).
+// Elles peuvent rester parfaites pendant que le CABLAGE casse — c'est le cablage
+// qui porte les defauts A (fenetre indefermable) et B (resolution tardive qui
+// ecrase une autre session), et c'est lui qui est epingle ici.
+//
+// ISOLATION : le verrou et la session sont des singletons de module (ils doivent
+// survivre au destroy()/re-creation d'un changement de projet). Chaque scenario
+// reimporte donc le module avec une URL differente pour repartir d'un etat neuf.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+// --- DOM minimal -------------------------------------------------------------
+
+class FakeClassList {
+  constructor() {
+    this.names = new Set();
+  }
+  add(name) {
+    this.names.add(name);
+  }
+  remove(name) {
+    this.names.delete(name);
+  }
+  contains(name) {
+    return this.names.has(name);
+  }
+  toggle(name, force) {
+    const on = force === undefined ? !this.names.has(name) : Boolean(force);
+    if (on) this.names.add(name);
+    else this.names.delete(name);
+    return on;
+  }
+}
+
+class FakeElement {
+  constructor(id = "") {
+    this.id = id;
+    this.textContent = "";
+    this.hidden = false;
+    this.style = {};
+    this.classList = new FakeClassList();
+    this.children = [];
+    this.listeners = new Map();
+  }
+  querySelector(selector) {
+    const id = selector.replace("#", "");
+    return this.children.find((child) => child.id === id) || null;
+  }
+  addEventListener(type, fn) {
+    if (!this.listeners.has(type)) this.listeners.set(type, []);
+    this.listeners.get(type).push(fn);
+  }
+  removeEventListener(type, fn) {
+    const bucket = this.listeners.get(type) || [];
+    const index = bucket.indexOf(fn);
+    if (index >= 0) bucket.splice(index, 1);
+  }
+  dispatch(type, event = {}) {
+    (this.listeners.get(type) || [])
+      .slice()
+      .forEach((fn) => fn({ preventDefault() {}, target: this, ...event }));
+  }
+  removeAttribute(name) {
+    delete this[name];
+  }
+}
+class FakeInput extends FakeElement {
+  constructor(id) {
+    super(id);
+    this.value = "";
+  }
+}
+class FakeButton extends FakeElement {
+  constructor(id) {
+    super(id);
+    this.disabled = false;
+  }
+}
+
+globalThis.HTMLElement = FakeElement;
+globalThis.HTMLInputElement = FakeInput;
+globalThis.HTMLButtonElement = FakeButton;
+
+const documentListeners = new Map();
+globalThis.document = {
+  addEventListener(type, fn) {
+    if (!documentListeners.has(type)) documentListeners.set(type, []);
+    documentListeners.get(type).push(fn);
+  },
+  removeEventListener(type, fn) {
+    const bucket = documentListeners.get(type) || [];
+    const index = bucket.indexOf(fn);
+    if (index >= 0) bucket.splice(index, 1);
+  },
+  fire(type, event) {
+    (documentListeners.get(type) || []).slice().forEach((fn) => fn(event));
+  },
+};
+
+// --- outillage ---------------------------------------------------------------
+
+const MODULE_URL = new URL("../assets/js/bottom/editSegmentModal.js", import.meta.url).href;
+let freshCounter = 0;
+
+// Verrou et session vivant au niveau module, chaque scenario a besoin d'un
+// module neuf : la chaine de requete casse le cache d'import de Node.
+function loadFreshModule() {
+  freshCounter += 1;
+  return import(`${MODULE_URL}?fresh=${freshCounter}`);
+}
+
+function buildRoot() {
+  const root = new FakeElement("ps-edit-segment-modal");
+  root.children = [
+    new FakeElement("ps-edit-segment-month-label"),
+    new FakeElement("ps-edit-segment-worker-label"),
+    new FakeInput("ps-edit-segment-effectif"),
+    new FakeElement("ps-edit-segment-calculated-days"),
+    new FakeElement("ps-edit-segment-feedback"),
+    new FakeButton("ps-edit-segment-save"),
+    new FakeButton("ps-edit-segment-cancel"),
+  ];
+  return root;
+}
+
+function deferred() {
+  let settle = null;
+  let fail = null;
+  const promise = new Promise((resolve, reject) => {
+    settle = resolve;
+    fail = reject;
+  });
+  return { promise, resolve: settle, reject: fail };
+}
+
+// Laisse tourner les micro-taches (l'`await onSubmit(...)` du controleur).
+const flush = async () => {
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+};
+
+// Delai de garde volontairement court : la suite ne doit pas durer 30 s.
+const STALL_MS = 15;
+const afterStall = () => new Promise((resolve) => setTimeout(resolve, STALL_MS + 25));
+
+// Monte une fenetre reelle et rend de quoi la piloter.
+async function mountModal({ stallTimeoutMs = STALL_MS, onSubmit } = {}) {
+  const mod = await loadFreshModule();
+  const root = buildRoot();
+  const calls = [];
+  let pending = null;
+
+  const modal = mod.createEditSegmentModal(root, {
+    stallTimeoutMs,
+    onSubmit:
+      onSubmit ||
+      ((payload) => {
+        calls.push(payload);
+        pending = deferred();
+        return pending.promise;
+      }),
+  });
+
+  const el = (id) => root.querySelector(`#${id}`);
+  return {
+    mod,
+    root,
+    modal,
+    calls,
+    el,
+    save: () => el("ps-edit-segment-save"),
+    cancel: () => el("ps-edit-segment-cancel"),
+    input: () => el("ps-edit-segment-effectif"),
+    feedback: () => el("ps-edit-segment-feedback"),
+    monthLabel: () => el("ps-edit-segment-month-label"),
+    pending: () => pending,
+    clickSave: () => el("ps-edit-segment-save").dispatch("click"),
+    remount: () =>
+      mod.createEditSegmentModal(root, {
+        stallTimeoutMs,
+        onSubmit: (payload) => {
+          calls.push(payload);
+          pending = deferred();
+          return pending.promise;
+        },
+      }),
+  };
+}
+
+// --- DEFAUT A : la fenetre ne doit jamais devenir indefermable ---------------
+
+test("controleur reel : pendant l'ecriture, la fenetre refuse toute fermeture", async () => {
+  const h = await mountModal();
+  h.modal.open({ segmentId: 41, monthKey: "2026-03", workerName: "Alice", effectif: 3 });
+  h.input().value = "4";
+  h.clickSave();
+  await flush();
+
+  assert.equal(h.calls.length, 1, "une ecriture est partie");
+  assert.equal(h.save().disabled, true, "Enregistrer bloque");
+  assert.equal(h.cancel().disabled, true, "Fermer bloque");
+  assert.equal(h.root.classList.contains("is-submitting"), true);
+
+  document.fire("keydown", { key: "Escape" });
+  assert.equal(h.modal.isOpen(), true, "Echap refuse");
+  h.root.dispatch("click", { target: h.root });
+  assert.equal(h.modal.isOpen(), true, "clic sur le fond refuse");
+  h.cancel().dispatch("click");
+  assert.equal(h.modal.isOpen(), true, "Fermer refuse");
+
+  h.pending().resolve({ ok: true });
+  await flush();
+  assert.equal(h.modal.isOpen(), false, "le succes ferme la fenetre");
+  h.modal.destroy();
+});
+
+test("defaut A : passe le delai de garde, Echap ferme mais Enregistrer reste bloque", async () => {
+  const h = await mountModal();
+  h.modal.open({ segmentId: 41, monthKey: "2026-03", workerName: "Alice", effectif: 3 });
+  h.input().value = "4";
+  h.clickSave();
+  await flush();
+  await afterStall();
+
+  assert.equal(h.feedback().textContent, h.mod.SUBMIT_STALL_MESSAGE, "l'etat est explique");
+  assert.equal(h.save().disabled, true, "Enregistrer RESTE desactive : l'ecriture est en vol");
+  assert.equal(h.cancel().disabled, false, "Fermer redevient cliquable");
+  assert.equal(h.root.classList.contains("is-stalled"), true);
+  assert.equal(h.root.classList.contains("is-submitting"), false);
+
+  // Un clic force (clavier, DevTools) ne doit lancer AUCUNE seconde ecriture.
+  h.clickSave();
+  await flush();
+  assert.equal(h.calls.length, 1, "aucune seconde ecriture apres expiration");
+
+  document.fire("keydown", { key: "Escape" });
+  assert.equal(h.modal.isOpen(), false, "DEFAUT A : Echap ferme enfin la fenetre");
+  h.modal.destroy();
+});
+
+test("defaut A : une frappe n'efface pas le message d'ecriture bloquee", async () => {
+  const h = await mountModal();
+  h.modal.open({ segmentId: 41, monthKey: "2026-03", workerName: "Alice", effectif: 3 });
+  h.input().value = "4";
+  h.clickSave();
+  await flush();
+  await afterStall();
+
+  h.input().value = "5";
+  h.input().dispatch("input");
+  assert.equal(
+    h.feedback().textContent,
+    h.mod.SUBMIT_STALL_MESSAGE,
+    "sinon l'utilisateur perd la seule explication de l'etat"
+  );
+  h.modal.destroy();
+});
+
+// --- DEFAUT B : une resolution tardive ne pilote pas une autre session -------
+
+test("defaut B : un succes tardif ne ferme pas la fenetre rouverte ailleurs", async () => {
+  const h = await mountModal();
+  h.modal.open({ segmentId: 41, monthKey: "2026-03", workerName: "Alice", effectif: 3 });
+  h.input().value = "4";
+  h.clickSave();
+  await flush();
+  const firstWrite = h.pending();
+  await afterStall();
+  h.modal.close();
+
+  h.modal.open({ segmentId: 88, monthKey: "2026-07", workerName: "Bob", effectif: 2 });
+  assert.equal(h.modal.isOpen(), true, "reouverture possible apres expiration");
+  assert.equal(h.monthLabel().textContent, "Juillet 2026");
+  assert.equal(h.save().disabled, true, "Enregistrer toujours bloque : le verrou tient");
+  h.input().value = "6";
+  h.feedback().textContent = "saisie en cours";
+
+  firstWrite.resolve({ ok: true }); // la PREMIERE ecriture se regle enfin
+  await flush();
+
+  assert.equal(h.modal.isOpen(), true, "DEFAUT B : la fenetre rouverte n'est pas fermee");
+  assert.equal(h.monthLabel().textContent, "Juillet 2026", "contexte intact");
+  assert.equal(h.input().value, "6", "saisie intacte");
+  assert.equal(h.feedback().textContent, "saisie en cours", "aucun message ecrase");
+  assert.equal(h.save().disabled, false, "le verrou est quand meme relache");
+
+  // Et l'ecriture de la session courante, elle, ferme bien la fenetre.
+  h.clickSave();
+  await flush();
+  assert.equal(h.calls.length, 2, "la nouvelle ecriture part");
+  assert.deepEqual(
+    {
+      id: h.calls[1].segmentId,
+      month: h.calls[1].monthKey,
+      effectif: h.calls[1].selection.effectifDays,
+    },
+    { id: 88, month: "2026-07", effectif: 6 },
+    "avec le contexte de la session courante"
+  );
+  h.pending().resolve({ ok: true });
+  await flush();
+  assert.equal(h.modal.isOpen(), false, "sa propre resolution ferme la fenetre");
+  h.modal.destroy();
+});
+
+test("defaut B : un rejet tardif n'affiche pas son message sur la session suivante", async () => {
+  const h = await mountModal();
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    h.modal.open({ segmentId: 41, monthKey: "2026-03", workerName: "Alice", effectif: 3 });
+    h.input().value = "4";
+    h.clickSave();
+    await flush();
+    const firstWrite = h.pending();
+    await afterStall();
+    h.modal.close();
+    h.modal.open({ segmentId: 88, monthKey: "2026-07", workerName: "Bob", effectif: 2 });
+    h.feedback().textContent = "saisie en cours";
+
+    firstWrite.reject(new Error("Grist injoignable"));
+    await flush();
+
+    assert.equal(h.feedback().textContent, "saisie en cours", "pas de message d'erreur perime");
+    assert.equal(h.modal.isOpen(), true, "fenetre toujours ouverte");
+    assert.equal(h.save().disabled, false, "verrou relache par le finally malgre le rejet");
+  } finally {
+    console.error = originalError;
+  }
+  h.modal.destroy();
+});
+
+test("defaut B : la fenetre restee ouverte est bien fermee par sa propre ecriture", async () => {
+  const h = await mountModal();
+  h.modal.open({ segmentId: 41, monthKey: "2026-03", workerName: "Alice", effectif: 3 });
+  h.input().value = "4";
+  h.clickSave();
+  await flush();
+  await afterStall();
+  // L'utilisateur ne touche a rien : la session est toujours la sienne.
+  h.pending().resolve({ ok: true });
+  await flush();
+  assert.equal(h.modal.isOpen(), false, "l'ecriture a fini par aboutir");
+  h.modal.destroy();
+});
+
+test("le message d'ecriture bloquee est retracte quand le verrou est enfin rendu", async () => {
+  const h = await mountModal();
+  h.modal.open({ segmentId: 41, monthKey: "2026-03", workerName: "Alice", effectif: 3 });
+  h.input().value = "4";
+  h.clickSave();
+  await flush();
+  const firstWrite = h.pending();
+  await afterStall();
+  h.modal.close();
+  h.modal.open({ segmentId: 88, monthKey: "2026-07", workerName: "Bob", effectif: 2 });
+  assert.equal(
+    h.feedback().textContent,
+    h.mod.SUBMIT_STALL_MESSAGE,
+    "la reouverture rappelle l'ecriture en vol"
+  );
+
+  firstWrite.resolve({ ok: true });
+  await flush();
+
+  assert.equal(h.feedback().textContent, "", "le message devenu faux disparait");
+  assert.equal(h.save().disabled, false, "et le formulaire redevient utilisable");
+  h.modal.destroy();
+});
+
+test("la retraction n'efface QUE le message d'ecriture bloquee", async () => {
+  const h = await mountModal();
+  h.modal.open({ segmentId: 41, monthKey: "2026-03", workerName: "Alice", effectif: 3 });
+  h.input().value = "4";
+  h.clickSave();
+  await flush();
+  const firstWrite = h.pending();
+  await afterStall();
+  h.modal.close();
+  h.modal.open({ segmentId: 88, monthKey: "2026-07", workerName: "Bob", effectif: 2 });
+  h.feedback().textContent = "saisie en cours";
+
+  firstWrite.resolve({ ok: true });
+  await flush();
+
+  assert.equal(
+    h.feedback().textContent,
+    "saisie en cours",
+    "un message qui n'est pas le sien est intact"
+  );
+  h.modal.destroy();
+});
+
+// --- Verrou partage : il doit survivre au demontage/remontage ----------------
+
+test("verrou partage : un destroy()/re-creation ne rend pas un verrou neuf", async () => {
+  // `main.js` appelle teardown() a chaque loadProject() : detach() ->
+  // editSegmentModal.destroy(), puis attachChargeEditing() reconstruit une
+  // fenetre. Avec un verrou par instance, ce cycle laissait partir un SECOND
+  // AddRecord sur le meme (personne, mois) pendant que le premier etait en vol.
+  const h = await mountModal({ stallTimeoutMs: 5000 });
+  h.modal.open({ segmentId: null, monthKey: "2026-03", workerName: "Alice", effectif: "" });
+  h.input().value = "4";
+  h.clickSave();
+  await flush();
+  assert.equal(h.calls.length, 1, "1re ecriture partie (creation Alice / 2026-03)");
+
+  h.modal.destroy(); // changement de projet
+  const remounted = h.remount(); // attachChargeEditing() re-monte la fenetre
+  remounted.open({ segmentId: null, monthKey: "2026-03", workerName: "Alice", effectif: "" });
+  assert.equal(remounted.isOpen(), false, "la fenetre refuse de s'ouvrir : ecriture en vol");
+  h.input().value = "4";
+  h.clickSave();
+  await flush();
+
+  assert.equal(h.calls.length, 1, "aucun second AddRecord sur la meme cle metier");
+  h.pending().resolve({ ok: true });
+  await flush();
+  remounted.destroy();
+});
+
+test("verrou partage : apres expiration, la fenetre remontee s'ouvre mais n'ecrit pas", async () => {
+  const h = await mountModal();
+  h.modal.open({ segmentId: null, monthKey: "2026-03", workerName: "Alice", effectif: "" });
+  h.input().value = "4";
+  h.clickSave();
+  await flush();
+  const firstWrite = h.pending();
+  await afterStall();
+
+  h.modal.destroy();
+  const remounted = h.remount();
+  remounted.open({ segmentId: null, monthKey: "2026-03", workerName: "Alice", effectif: "" });
+  assert.equal(remounted.isOpen(), true, "delai expire : la fenetre redevient utilisable");
+  assert.equal(h.save().disabled, true, "mais Enregistrer reste bloque, l'ecriture est en vol");
+  h.input().value = "4";
+  h.clickSave();
+  await flush();
+  assert.equal(h.calls.length, 1, "toujours aucun doublon");
+
+  // La resolution tardive rend le verrou a la fenetre remontee.
+  firstWrite.resolve({ ok: true });
+  await flush();
+  assert.equal(h.save().disabled, false, "le controleur remonte voit le verrou rendu");
+  assert.equal(remounted.isOpen(), true, "et il n'est pas ferme de force (session renouvelee)");
+  remounted.destroy();
+});
+
+test("verrou partage : destroy() pendant l'ecriture ne laisse pas le timer toucher un DOM mort", async () => {
+  const h = await mountModal();
+  h.modal.open({ segmentId: 41, monthKey: "2026-03", workerName: "Alice", effectif: 3 });
+  h.input().value = "4";
+  h.clickSave();
+  await flush();
+
+  h.modal.destroy(); // widget demonte pendant l'ecriture
+  h.feedback().textContent = "temoin";
+  await afterStall(); // le delai de garde expire APRES le demontage
+
+  assert.equal(h.feedback().textContent, "temoin", "aucun controleur mort n'ecrit dans le DOM");
+  // Le verrou, lui, a bien enregistre l'expiration : une fenetre remontee peut
+  // s'ouvrir, sans quoi le widget resterait condamne jusqu'au rechargement.
+  const remounted = h.remount();
+  remounted.open({ segmentId: 41, monthKey: "2026-03", workerName: "Alice", effectif: 3 });
+  assert.equal(remounted.isOpen(), true);
+  h.pending().resolve({ ok: true });
+  await flush();
+  remounted.destroy();
+});
+
+// --- Non-regression du geste ------------------------------------------------
+
+test("controleur reel : double-clic sur Enregistrer -> une seule ecriture", async () => {
+  const h = await mountModal({ stallTimeoutMs: 5000 });
+  h.modal.open({ segmentId: null, monthKey: "2026-03", workerName: "Alice", effectif: "" });
+  h.input().value = "4";
+  h.clickSave();
+  h.clickSave();
+  h.clickSave();
+  await flush();
+  assert.equal(h.calls.length, 1, "un seul AddRecord malgre le triple clic");
+  h.pending().resolve({ ok: true });
+  await flush();
+  assert.equal(h.modal.isOpen(), false);
+  h.modal.destroy();
+});
+
+test("controleur reel : la validation de l'effectif est inchangee", async () => {
+  const h = await mountModal({ stallTimeoutMs: 5000 });
+  h.modal.open({ segmentId: 41, monthKey: "2026-03", workerName: "Alice", effectif: 3 });
+
+  h.input().value = "";
+  h.clickSave();
+  await flush();
+  assert.equal(h.calls.length, 0);
+  assert.match(h.feedback().textContent, /superieur a 0/);
+
+  h.input().value = "1.25";
+  h.clickSave();
+  await flush();
+  assert.equal(h.calls.length, 0);
+  assert.match(h.feedback().textContent, /entier ou un multiple/);
+
+  h.input().value = "1,5";
+  h.clickSave();
+  await flush();
+  assert.equal(h.calls.length, 1, "la virgule francaise passe toujours");
+  assert.equal(h.calls[0].selection.effectifValueForSave, 1.5);
+  h.pending().resolve({ ok: true });
+  await flush();
+  h.modal.destroy();
+});
+
+test("controleur reel : un echec renvoye laisse la fenetre ouverte avec son message", async () => {
+  const h = await mountModal({ stallTimeoutMs: 5000 });
+  h.modal.open({ segmentId: 41, monthKey: "2026-03", workerName: "Alice", effectif: 3 });
+  h.input().value = "4";
+  h.clickSave();
+  await flush();
+  h.pending().resolve({ ok: false, error: "L'enregistrement du segment a echoue." });
+  await flush();
+
+  assert.equal(h.modal.isOpen(), true, "la fenetre reste ouverte pour corriger");
+  assert.equal(h.feedback().textContent, "L'enregistrement du segment a echoue.");
+  assert.equal(h.save().disabled, false, "et on peut re-essayer");
+  h.modal.destroy();
+});

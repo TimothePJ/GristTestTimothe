@@ -1,5 +1,6 @@
 import { toFiniteNumber } from "./format.js";
 import { isFrenchHoliday } from "./frenchHolidays.js";
+import { getMonthBusinessDays } from "./monthSegments.js";
 
 export const HALF_DAY_PARTS = ["am", "pm"];
 
@@ -171,111 +172,26 @@ export function getCalendarHalfDaySlotsBetween(startValue, endValue) {
   });
 }
 
+// Capacite d'un segment = jours ouvres de son mois (week-ends et feries exclus).
+// Depuis le passage au mois, `allocationDays` stocke en base n'est plus lu : il
+// reste ecrit pour la lisibilite de la grille Grist, mais la verite est le mois.
 export function getSegmentAllocationDays(segment) {
-  const explicitAllocation = toFiniteNumber(segment?.allocationDays, 0);
-  if (explicitAllocation > 0) {
-    return explicitAllocation;
-  }
-
-  const slots = getBusinessHalfDaySlotsBetween(segment?.startAt, segment?.endAt);
-  return slots.length / 2;
+  return getMonthBusinessDays(segment?.monthKey);
 }
 
 export function getSegmentEffectiveDays(segment) {
   const allocationDays = getSegmentAllocationDays(segment);
-  const rawEffectifDays = segment?.effectifDays ?? segment?.effectif;
+  if (allocationDays <= 0) return 0;
 
-  if (rawEffectifDays == null || rawEffectifDays === "") {
-    return 0;
-  }
+  const rawEffectifDays = segment?.effectifDays ?? segment?.effectif;
+  if (rawEffectifDays == null || rawEffectifDays === "") return 0;
 
   const parsedEffectifDays = Math.max(0, toFiniteNumber(rawEffectifDays, 0));
   return Math.min(allocationDays, parsedEffectifDays);
 }
 
-function buildMonthSlotCounts(slots) {
-  return slots.reduce((accumulator, slot) => {
-    accumulator[slot.monthKey] = (accumulator[slot.monthKey] || 0) + 1;
-    return accumulator;
-  }, {});
-}
-
-export function getSegmentAllocationByMonth(segment) {
-  const slots = getBusinessHalfDaySlotsBetween(segment?.startAt, segment?.endAt);
-  if (!slots.length) return {};
-
-  const totalDays = getSegmentEffectiveDays(segment);
-  if (totalDays <= 0) return {};
-
-  const totalHalfDays = Math.max(
-    0,
-    Math.min(slots.length, Math.round(totalDays * 2))
-  );
-  if (totalHalfDays <= 0) {
-    return {};
-  }
-
-  const monthSlotCounts = buildMonthSlotCounts(slots);
-  const monthEntries = Object.entries(monthSlotCounts).map(([monthKey, slotCount], index) => {
-    const exactHalfDays = (slotCount / slots.length) * totalHalfDays;
-    const floorHalfDays = Math.min(slotCount, Math.floor(exactHalfDays));
-
-    return {
-      monthKey,
-      slotCount,
-      index,
-      exactHalfDays,
-      allocatedHalfDays: floorHalfDays,
-      remainder: exactHalfDays - floorHalfDays,
-    };
-  });
-
-  let remainingHalfDays =
-    totalHalfDays -
-    monthEntries.reduce((sum, entry) => sum + entry.allocatedHalfDays, 0);
-
-  monthEntries
-    .slice()
-    .sort((left, right) => {
-      if (right.remainder !== left.remainder) {
-        return right.remainder - left.remainder;
-      }
-
-      if (right.slotCount !== left.slotCount) {
-        return right.slotCount - left.slotCount;
-      }
-
-      return left.index - right.index;
-    })
-    .forEach((entry) => {
-      if (remainingHalfDays <= 0) {
-        return;
-      }
-
-      if (entry.allocatedHalfDays >= entry.slotCount) {
-        return;
-      }
-
-      entry.allocatedHalfDays += 1;
-      remainingHalfDays -= 1;
-    });
-
-  return monthEntries.reduce((accumulator, entry) => {
-    accumulator[entry.monthKey] = entry.allocatedHalfDays / 2;
-    return accumulator;
-  }, {});
-}
-
-export function buildHalfDaySelectionDates(startSlot, endSlot) {
-  if (!startSlot || !endSlot) return null;
-
-  const startAt = parseRawDateTime(startSlot.startAt);
-  const endAt = parseRawDateTime(endSlot.endAt);
-  if (!startAt || !endAt) return null;
-
-  return {
-    startAt,
-    endAt,
-    allocationDays: 0.5 + Math.max(0, endSlot.slotIndex - startSlot.slotIndex) * 0.5,
-  };
-}
+// getSegmentAllocationByMonth / buildMonthSlotCounts ont disparu avec le passage
+// au mois : un segment ne couvre plus qu'un seul mois, la ventilation au prorata
+// des demi-journees n'a plus d'objet. Les totaux mensuels se posent desormais
+// directement (provisionalDays[monthKey] = effectif) dans projectService.js et
+// dans les mises a jour optimistes de main.js.

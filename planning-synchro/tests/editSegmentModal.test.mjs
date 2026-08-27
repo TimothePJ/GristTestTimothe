@@ -1,100 +1,74 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  getSegmentHalfDayPart,
-  toDateInputValue,
-  buildSegmentHalfDayBoundary,
-  buildEditSegmentSelection,
   validateEditSegmentEffectif,
   formatEditSegmentInputValue,
+  formatSegmentMonthLabel,
+  createSubmitLock,
+  createSubmitSession,
+  SUBMIT_STALL_TIMEOUT_MS,
 } from "../assets/js/bottom/editSegmentModal.js";
 
-// 2027-02-01 is a Monday (business day); 2027-02-06 is a Saturday.
+// Horloge injectee : `createSubmitLock` accepte setTimer/clearTimer pour que le
+// delai de garde soit testable sans attendre 30 secondes.
+function createFakeClock() {
+  const timers = new Map();
+  let nextId = 1;
+  return {
+    setTimer(fn, delay) {
+      const id = nextId++;
+      timers.set(id, { fn, delay });
+      return id;
+    },
+    clearTimer(id) {
+      timers.delete(id);
+    },
+    pending: () => timers.size,
+    // Declenche tous les timers armes, comme le ferait l'expiration du delai.
+    fireAll() {
+      const queued = [...timers.entries()];
+      timers.clear();
+      queued.forEach(([, timer]) => timer.fn());
+      return queued.length;
+    },
+    delays: () => [...timers.values()].map((timer) => timer.delay),
+  };
+}
 
-test("buildEditSegmentSelection: single business day am->pm = 1 day", () => {
-  const selection = buildEditSegmentSelection({
-    startDateValue: "2027-02-01",
-    startPart: "am",
-    endDateValue: "2027-02-01",
-    endPart: "pm",
+test("validateEditSegmentEffectif exige une valeur strictement positive", () => {
+  assert.ok(validateEditSegmentEffectif("").error);
+  assert.ok(validateEditSegmentEffectif("0").error);
+  assert.ok(validateEditSegmentEffectif("-1").error);
+  assert.ok(validateEditSegmentEffectif("2,3").error);
+  assert.deepEqual(validateEditSegmentEffectif("3.5"), {
+    effectifDays: 3.5,
+    effectifValueForSave: 3.5,
   });
-  assert.equal(selection.error, undefined);
-  assert.equal(selection.totalDays, 1);
-  // Local 08:00 start / 17:00 end serialized to ISO (UTC) — assert via re-parse.
-  assert.equal(new Date(selection.startDate).getHours(), 8);
-  assert.equal(new Date(selection.endDate).getHours(), 17);
 });
 
-test("buildEditSegmentSelection: two business days = 2 days", () => {
-  const selection = buildEditSegmentSelection({
-    startDateValue: "2027-02-01",
-    startPart: "am",
-    endDateValue: "2027-02-02",
-    endPart: "pm",
-  });
-  assert.equal(selection.totalDays, 2);
-});
-
-test("buildEditSegmentSelection: end not after start -> error", () => {
-  const selection = buildEditSegmentSelection({
-    startDateValue: "2027-02-01",
-    startPart: "pm",
-    endDateValue: "2027-02-01",
-    endPart: "am",
-  });
-  assert.match(selection.error, /strictement apres/);
-});
-
-test("buildEditSegmentSelection: invalid date -> error", () => {
-  const selection = buildEditSegmentSelection({
-    startDateValue: "",
-    startPart: "am",
-    endDateValue: "2027-02-01",
-    endPart: "pm",
-  });
-  assert.match(selection.error, /date de debut et une date de fin valides/);
-});
-
-test("validateEditSegmentEffectif: valid half-day value within range", () => {
-  const result = validateEditSegmentEffectif("1.5", 2);
-  assert.equal(result.error, undefined);
-  assert.equal(result.effectifDays, 1.5);
-  assert.equal(result.effectifValueForSave, 1.5);
-});
-
-test("validateEditSegmentEffectif: blank clears effectif (null / empty string)", () => {
-  const result = validateEditSegmentEffectif("", 2);
-  assert.equal(result.error, undefined);
-  assert.equal(result.effectifDays, null);
-  assert.equal(result.effectifValueForSave, "");
-});
-
-test("validateEditSegmentEffectif: negative / non-half-day are rejected", () => {
-  assert.match(validateEditSegmentEffectif("-1").error, /negatif/);
+test("validateEditSegmentEffectif: null/undefined/non numerique sont refuses", () => {
+  assert.ok(validateEditSegmentEffectif(null).error);
+  assert.ok(validateEditSegmentEffectif(undefined).error);
+  assert.ok(validateEditSegmentEffectif("abc").error);
+  // Message distinct selon la cause : obligatoire vs pas de demi-journee.
+  assert.match(validateEditSegmentEffectif("").error, /superieur a 0/);
   assert.match(validateEditSegmentEffectif("1.25").error, /entier ou un multiple/);
 });
 
-test("validateEditSegmentEffectif: effectif over available is non-blocking (visual only)", () => {
-  // The old hard-block ("...ne peut pas depasser...") was removed: an Effectif
-  // exceeding the leave-adjusted availability is now surfaced as a red field
-  // (is-over-available) in syncDerived, not a save-blocking validation error.
-  const result = validateEditSegmentEffectif("3");
-  assert.equal(result.error, undefined);
-  assert.equal(result.effectifDays, 3);
-  assert.equal(result.effectifValueForSave, 3);
+test("validateEditSegmentEffectif accepte la virgule decimale francaise", () => {
+  assert.deepEqual(validateEditSegmentEffectif("1,5"), {
+    effectifDays: 1.5,
+    effectifValueForSave: 1.5,
+  });
 });
 
-test("getSegmentHalfDayPart: start snaps am<noon, end snaps am<=noon", () => {
-  assert.equal(getSegmentHalfDayPart(new Date(2027, 1, 1, 8, 0), "start"), "am");
-  assert.equal(getSegmentHalfDayPart(new Date(2027, 1, 1, 13, 0), "start"), "pm");
-  assert.equal(getSegmentHalfDayPart(new Date(2027, 1, 1, 12, 0), "end"), "am");
-  assert.equal(getSegmentHalfDayPart(new Date(2027, 1, 1, 17, 0), "end"), "pm");
-});
-
-test("toDateInputValue / buildSegmentHalfDayBoundary round-trip a boundary", () => {
-  const boundary = buildSegmentHalfDayBoundary("2027-02-01", "am", "start");
-  assert.equal(toDateInputValue(boundary), "2027-02-01");
-  assert.equal(boundary.getHours(), 8);
+test("formatSegmentMonthLabel: cle mois -> libelle capitalise, sinon vide", () => {
+  assert.equal(formatSegmentMonthLabel("2026-03"), "Mars 2026");
+  assert.equal(formatSegmentMonthLabel("2026-12"), "Decembre 2026");
+  assert.equal(formatSegmentMonthLabel("2026-13"), "");
+  assert.equal(formatSegmentMonthLabel("2026-3"), "");
+  assert.equal(formatSegmentMonthLabel(""), "");
+  assert.equal(formatSegmentMonthLabel(null), "");
 });
 
 test("formatEditSegmentInputValue: trims trailing zeros, blanks null/negative", () => {
@@ -104,3 +78,145 @@ test("formatEditSegmentInputValue: trims trailing zeros, blanks null/negative", 
   assert.equal(formatEditSegmentInputValue(""), "");
   assert.equal(formatEditSegmentInputValue(-3), "");
 });
+
+// Le double-clic sur Enregistrer est ce qui creerait deux lignes pour le meme
+// (projet, personne, mois) : le verrou doit refuser la seconde prise tant que la
+// premiere n'est pas relachee.
+test("createSubmitLock: une seule prise a la fois", () => {
+  const lock = createSubmitLock({ ...createFakeClock() });
+
+  assert.equal(lock.isLocked(), false);
+  assert.equal(lock.acquire(), true);
+  assert.equal(lock.isLocked(), true);
+  assert.equal(lock.acquire(), false, "un second Enregistrer doit etre refuse");
+
+  lock.release();
+  assert.equal(lock.isLocked(), false);
+  assert.equal(lock.acquire(), true);
+  lock.release();
+});
+
+test("createSubmitLock: deux verrous sont independants", () => {
+  const first = createSubmitLock({ ...createFakeClock() });
+  const second = createSubmitLock({ ...createFakeClock() });
+
+  first.acquire();
+  assert.equal(second.isLocked(), false);
+  assert.equal(second.acquire(), true);
+  first.release();
+  second.release();
+});
+
+test("createSubmitLock: la garde de fermeture est armee avec le verrou", () => {
+  const clock = createFakeClock();
+  const lock = createSubmitLock({ ...clock });
+
+  assert.equal(lock.blocksClose(), false);
+  lock.acquire();
+  assert.equal(lock.blocksClose(), true, "la fenetre reste ouverte pendant l'ecriture");
+  assert.equal(lock.isStalled(), false);
+  assert.equal(clock.pending(), 1, "un delai de garde est arme a l'acquisition");
+  assert.deepEqual(clock.delays(), [SUBMIT_STALL_TIMEOUT_MS]);
+});
+
+// Le cas qui rendait la fenetre indefermable : la promesse Grist ne se regle
+// jamais, donc le `finally` de l'appelant n'arrive jamais.
+test("createSubmitLock: a l'expiration, la fermeture se debloque mais PAS l'ecriture", () => {
+  const clock = createFakeClock();
+  const stalls = [];
+  const lock = createSubmitLock({ ...clock, onStall: () => stalls.push(Date.now()) });
+
+  lock.acquire();
+  clock.fireAll();
+
+  assert.equal(stalls.length, 1, "onStall notifie une fois");
+  assert.equal(lock.isStalled(), true);
+  assert.equal(lock.blocksClose(), false, "Echap / Fermer / fond redeviennent possibles");
+  assert.equal(lock.isLocked(), true, "le verrou d'ecriture, lui, tient toujours");
+  assert.equal(
+    lock.acquire(),
+    false,
+    "une seconde ecriture partirait pendant que la premiere est en vol"
+  );
+});
+
+test("createSubmitLock: le finally normal desarme le delai de garde", () => {
+  const clock = createFakeClock();
+  const stalls = [];
+  const lock = createSubmitLock({ ...clock, onStall: () => stalls.push(1) });
+
+  lock.acquire();
+  lock.release();
+
+  assert.equal(clock.pending(), 0, "plus aucun timer en attente");
+  assert.equal(clock.fireAll(), 0);
+  assert.equal(stalls.length, 0, "onStall n'est jamais appele apres un release");
+  assert.equal(lock.isLocked(), false);
+  assert.equal(lock.isStalled(), false);
+  assert.equal(lock.blocksClose(), false);
+});
+
+test("createSubmitLock: une reprise apres release rearme un delai neuf", () => {
+  const clock = createFakeClock();
+  const lock = createSubmitLock({ ...clock });
+
+  lock.acquire();
+  clock.fireAll();
+  assert.equal(lock.isStalled(), true);
+
+  lock.release();
+  assert.equal(lock.acquire(), true, "le verrou se reprend une fois relache");
+  assert.equal(lock.isStalled(), false, "l'etat bloque ne colle pas a la prise suivante");
+  assert.equal(clock.pending(), 1);
+});
+
+test("createSubmitLock: stallTimeoutMs <= 0 desactive le delai de garde", () => {
+  const clock = createFakeClock();
+  const lock = createSubmitLock({ ...clock, stallTimeoutMs: 0 });
+
+  lock.acquire();
+  assert.equal(clock.pending(), 0);
+  assert.equal(lock.blocksClose(), true);
+});
+
+// Garde-fou de la suite elle-meme : le delai par defaut est un vrai setTimeout
+// de 30 s. Un test qui l'armerait sans horloge injectee retiendrait la boucle
+// d'evenements de Node pendant 30 secondes.
+test("createSubmitLock: le delai par defaut vaut 30 s et n'est jamais arme ici", () => {
+  assert.equal(SUBMIT_STALL_TIMEOUT_MS, 30000);
+});
+
+// --- Session de saisie : une resolution tardive ne pilote pas une autre fenetre
+
+test("createSubmitSession: chaque ouverture/fermeture perime les jetons precedents", () => {
+  const session = createSubmitSession();
+
+  const beforeOpen = session.current();
+  session.renew(); // open() sur un segment
+  const firstToken = session.current();
+
+  assert.notEqual(firstToken, beforeOpen);
+  assert.equal(session.owns(firstToken), true, "l'ecriture en cours est la sienne");
+
+  session.renew(); // closeNow()
+  assert.equal(session.owns(firstToken), false, "fermer perime le jeton");
+
+  session.renew(); // open() sur un autre segment
+  assert.equal(session.owns(firstToken), false, "rouvrir aussi");
+  assert.equal(session.owns(session.current()), true);
+});
+
+test("createSubmitSession: sans ouverture ni fermeture, le jeton reste valable", () => {
+  const session = createSubmitSession();
+  session.renew();
+  const token = session.current();
+
+  // Chemin nominal : la fenetre ne bouge pas pendant l'aller-retour Grist, donc
+  // la sauvegarde doit continuer de la fermer et d'afficher ses messages.
+  assert.equal(session.owns(token), true);
+});
+
+// Le CONTROLEUR reel (createEditSegmentModal : ouverture, verrou partage, jeton
+// de session, fermeture) est epingle par tests/editSegmentModalDom.test.mjs, qui
+// le pilote avec un vrai DOM minimal. Il ny a volontairement aucun harnais qui
+// le reimplementerait ici : il resterait vert pendant que le vrai cablage casse.

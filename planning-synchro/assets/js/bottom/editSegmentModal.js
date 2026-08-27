@@ -1,101 +1,34 @@
-// Edit-segment modal ("Modifier le segment") for planning-synchro's charge
-// board — a faithful port of gestion-depenses2's #edit-segment-modal: pick a new
-// half-day-precise range (Debut / Fin date + Matin / Apres-midi) and an optional
-// "jours effectifs travailles" value, with a live "jours disponibles dans la
-// plage" readout, then Enregistrer.
+// Fenetre « segment mensuel » du plan de charge de planning-synchro
+// (#ps-edit-segment-modal). Depuis le passage de TimeSegment au modele « un
+// segment = un mois », elle ne fait plus saisir de plage : le mois vient du clic
+// sur la piste, la fenetre ne demande que les jours effectivement travailles.
 //
-// Ported/adapted from gestion-depenses2/assets/js/main.js
-// (getSegmentHalfDayPart, buildSegmentHalfDayBoundary,
-// buildChargePlanSelectionFromEditValues, syncEditChargePlanDerivedValues,
-// normalizeOptionalEffectifDays, isHalfDayIncrement, formatEditSegmentInputValue,
-// formatEditSegmentDayValue, openEditChargePlanModal, saveEditedChargePlanSegment)
-// and index.html's #edit-segment-modal markup + styles.css's .segment-edit-* rules.
+// Portee/adaptee de gestion-depenses2 (utils/chargePlanSegmentForm.js
+// createChargePlanSaveLock + validateEffectifInput, main.js
+// formatChargePlanMonthLabel, syncEditChargePlanDerivedValues,
+// setEditChargePlanFormBusy, formatEditSegmentInputValue,
+// saveEditedChargePlanSegment) et de l'ancien portage du #edit-segment-modal.
 //
-// KEY ADAPTATIONS vs the source:
-// - No `state.projects` / `editingChargePlanSegment` model: the source resolves a
-//   segmentContext from its in-memory project tree; this widget is DOM-driven, so
-//   the caller (chargeEditing.js) hands `open()` the segment's id + start/end/
-//   effectif read straight off the rendered `.charge-plan-segment-bar` dataset,
-//   and the overlap check + Grist write happen back in chargeEditing's `onSubmit`
-//   (which owns the track DOM). This module only builds/validates the selection.
-// - The pure form -> selection / effectif-validation helpers are exported and
-//   DOM-free (tested under node --test); `createEditSegmentModal()` is the
-//   browser-only DOM controller (verified via the dev harness + CDP).
+// ADAPTATIONS vs la source :
+// - Pas de modele `state.projects` / `editingChargePlanSegment` : ce widget est
+//   pilote par le DOM, donc l'appelant (chargeEditing.js) passe a `open()` le
+//   couple (mois, personne) et l'effectif lus sur la barre rendue ; l'ecriture
+//   Grist se fait dans son `onSubmit`.
+// - Creation ET edition partagent la meme fenetre : `segmentId: null` = creation.
+//   RIEN n'est ecrit tant que l'utilisateur n'a pas valide.
+// - Les helpers purs (validation, libelles, verrou) sont exportes et sans DOM
+//   (testes sous `node --test`) ; `createEditSegmentModal()` est le controleur
+//   DOM, verifie dans le harnais dev.
 
 import { formatNumber, parseOptionalNumberInput } from "../utils/format.js";
-import { getHalfDaySlotRange, getSegmentAllocationDays } from "../utils/timeSegments.js";
-import { availableDaysAfterLeave } from "../utils/leaveAbsences.js";
+import {
+  getMonthBounds,
+  getMonthAvailableDays,
+  getMonthBusinessDays,
+} from "../utils/monthSegments.js";
+import { APP_CONFIG } from "../config.js";
 
-// --- pure helpers (no DOM) ---------------------------------------------------
-
-// Which half-day a segment boundary falls on. `start` edges snap am when < noon;
-// `end` edges snap am when <= noon (a segment ending at 12:00 is a morning end).
-export function getSegmentHalfDayPart(date, edge = "start") {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
-    return "am";
-  }
-  const hours = date.getHours();
-  if (edge === "end") {
-    return hours <= 12 ? "am" : "pm";
-  }
-  return hours < 12 ? "am" : "pm";
-}
-
-// "YYYY-MM-DD" for a Date, in local time (matches an <input type="date"> value).
-export function toDateInputValue(date) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
-    return "";
-  }
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-// Turns a date-input value ("YYYY-MM-DD") + half-day part into the exact
-// start/end Date boundary of that half-day slot.
-export function buildSegmentHalfDayBoundary(dateValue, part, edge = "start") {
-  const normalizedDateValue = String(dateValue || "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDateValue)) {
-    return null;
-  }
-  const anchorDate = new Date(`${normalizedDateValue}T12:00:00`);
-  if (Number.isNaN(anchorDate.getTime())) {
-    return null;
-  }
-  const slotRange = getHalfDaySlotRange(anchorDate, part);
-  if (!slotRange) {
-    return null;
-  }
-  return edge === "end" ? slotRange.endAt : slotRange.startAt;
-}
-
-// Builds { startDate, endDate, totalDays } (ISO strings + working half-day count)
-// from the four form fields, or { error } describing the first problem found.
-export function buildEditSegmentSelection({ startDateValue, startPart, endDateValue, endPart }) {
-  const startAt = buildSegmentHalfDayBoundary(startDateValue, startPart, "start");
-  const endAt = buildSegmentHalfDayBoundary(endDateValue, endPart, "end");
-
-  if (!startAt || !endAt) {
-    return { error: "Veuillez choisir une date de debut et une date de fin valides." };
-  }
-  if (endAt <= startAt) {
-    return { error: "La fin doit etre strictement apres le debut." };
-  }
-
-  const totalDays = getSegmentAllocationDays({ startAt, endAt });
-  if (totalDays <= 0) {
-    return { error: "La plage choisie ne contient aucun demi-jour ouvrable." };
-  }
-
-  return {
-    startAt,
-    endAt,
-    startDate: startAt.toISOString(),
-    endDate: endAt.toISOString(),
-    totalDays,
-  };
-}
+// --- helpers purs (aucun DOM) ------------------------------------------------
 
 function isHalfDayIncrement(value) {
   const numericValue = Number(value);
@@ -105,48 +38,171 @@ function isHalfDayIncrement(value) {
   return Math.abs(numericValue * 2 - Math.round(numericValue * 2)) < 1e-9;
 }
 
-function normalizeOptionalEffectifDays(value) {
-  if (value == null || value === "") {
-    return null;
-  }
-  const numericValue = Number(value);
-  if (!Number.isFinite(numericValue)) {
-    return null;
-  }
-  return Math.max(0, numericValue);
-}
-
-// Validates the Effectif field. Rejects negative or non-half-day-increment
-// values. An Effectif that EXCEEDS the leave-adjusted availability is no longer
-// a save-blocking error — it is surfaced as a non-blocking visual state (the
-// `is-over-available` red field, toggled in syncDerived), so the save proceeds.
-// Returns { error } when invalid, otherwise { effectifDays, effectifValueForSave }
-// where effectifValueForSave is "" (clear the field) or a number (matches
-// updateTimeSegment's effectif contract).
+// Un segment mensuel sans effectif ne represente rien : il compterait 0 jour
+// partout tout en occupant une ligne. La valeur est donc obligatoire.
 export function validateEditSegmentEffectif(rawEffectifValue) {
   const rawEffectifInput = parseOptionalNumberInput(rawEffectifValue);
 
-  if (rawEffectifInput != null && rawEffectifInput < 0) {
-    return { error: "Le nombre de jours effectifs ne peut pas etre negatif." };
+  if (rawEffectifInput == null || rawEffectifInput <= 0) {
+    return { error: "Saisissez un nombre de jours effectifs superieur a 0." };
   }
-  if (rawEffectifInput != null && !isHalfDayIncrement(rawEffectifInput)) {
+  if (!isHalfDayIncrement(rawEffectifInput)) {
     return { error: "Le nombre de jours effectifs doit etre un entier ou un multiple de 0,5." };
   }
 
-  const effectifDays = normalizeOptionalEffectifDays(rawEffectifInput);
+  return { effectifDays: rawEffectifInput, effectifValueForSave: rawEffectifInput };
+}
+
+// « Mars 2026 » a partir d'une cle "YYYY-MM". APP_CONFIG.months est deja sans
+// accents, comme le reste des chaines JS du widget.
+export function formatSegmentMonthLabel(monthKey) {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(monthKey ?? ""));
+  if (!match) return "";
+
+  const monthNumber = Number(match[2]);
+  if (monthNumber < 1 || monthNumber > 12) return "";
+
+  const label = APP_CONFIG.months[monthNumber - 1] || "";
+  const capitalized = label ? `${label.charAt(0).toUpperCase()}${label.slice(1)}` : "";
+  return `${capitalized} ${match[1]}`.trim();
+}
+
+// Delai de garde de l'ecriture : au-dela, on considere que la promesse Grist ne
+// se reglera jamais (document deconnecte, frame parente disparue, worker bloque).
+export const SUBMIT_STALL_TIMEOUT_MS = 30000;
+
+export const SUBMIT_STALL_MESSAGE =
+  "L'enregistrement ne repond pas. Fermez la fenetre et rechargez le widget pour verifier si le segment a bien ete enregistre.";
+
+// Verrou d'ecriture de la fenetre. « Enregistrer » n'est dans aucun <form> et
+// l'etat « segment en cours » reste null pendant tout l'await d'une creation :
+// sans verrou, deux clics rapides produisent deux AddRecord sur le meme
+// (projet, personne, mois) — exactement le doublon que la cle unique interdit.
+// Il ferme aussi la course « Enregistrer puis Annuler/Echap ».
+//
+// DEUX ETATS DISTINCTS, et c'est tout l'objet du delai de garde :
+//   - `isLocked()`   : une ecriture est partie, aucune autre ne doit partir ;
+//   - `blocksClose()`: la fenetre doit rester ouverte le temps de l'aller-retour.
+// Si la promesse ne se regle jamais, le `finally` de l'appelant ne s'execute
+// jamais et le verrou resterait tenu a vie : la fenetre deviendrait
+// indeformable, sans meme Echap. Au bout de `stallTimeoutMs` on relache donc la
+// SEULE garde de fermeture (`blocksClose()` retombe a false) ; le verrou de
+// soumission, lui, reste tenu — le relacher autoriserait une seconde ecriture
+// pendant que la premiere est encore en vol. On debloque l'interface, jamais
+// l'ecriture. `setTimer`/`clearTimer` sont injectables pour les tests.
+export function createSubmitLock({
+  stallTimeoutMs = SUBMIT_STALL_TIMEOUT_MS,
+  setTimer = (fn, delay) => setTimeout(fn, delay),
+  clearTimer = (timerId) => clearTimeout(timerId),
+  onStall = null,
+} = {}) {
+  let locked = false;
+  let stalled = false;
+  let timerId = null;
+
+  function cancelTimer() {
+    if (timerId != null) {
+      clearTimer(timerId);
+      timerId = null;
+    }
+  }
+
   return {
-    effectifDays,
-    effectifValueForSave: effectifDays == null ? "" : effectifDays,
+    isLocked: () => locked,
+    isStalled: () => stalled,
+    // Seule garde consultee par les chemins de fermeture (Fermer, Echap, fond).
+    blocksClose: () => locked && !stalled,
+    // true si le verrou vient d'etre pris, false s'il etait deja tenu.
+    // `overrideStallTimeoutMs` : delai propre a CETTE prise. Le verrou etant
+    // partage par toutes les fenetres montees (cf. plus bas), c'est le seul
+    // endroit ou une instance peut encore imposer le sien.
+    acquire(overrideStallTimeoutMs) {
+      if (locked) return false;
+      locked = true;
+      stalled = false;
+      cancelTimer();
+      const delay = Number.isFinite(overrideStallTimeoutMs)
+        ? overrideStallTimeoutMs
+        : stallTimeoutMs;
+      if (delay > 0) {
+        timerId = setTimer(() => {
+          timerId = null;
+          stalled = true;
+          if (typeof onStall === "function") onStall();
+        }, delay);
+      }
+      return true;
+    },
+    release() {
+      cancelTimer();
+      locked = false;
+      stalled = false;
+    },
   };
 }
+
+// Jeton de session de la fenetre, indispensable des lors que le delai de garde
+// existe. Passe ce delai, la fenetre redevient fermable PUIS reouvrable, alors
+// que l'ecriture d'origine est toujours en vol. Si elle finit par se regler, la
+// suite de CE `handleSave` s'executerait sur l'instance de fenetre partagee,
+// c'est-a-dire sur le segment que l'utilisateur vient de rouvrir : elle le
+// fermerait de force (saisie en cours perdue) ou y afficherait le message
+// d'echec perime de la premiere ecriture.
+//
+// Chaque ouverture ET chaque fermeture ouvrent donc une session neuve : une
+// resolution dont le jeton n'est plus le jeton courant ne pilote plus rien. Le
+// verrou, lui, est relache dans tous les cas — il appartient a l'ecriture, pas a
+// la session, et le retenir interdirait toute ecriture ulterieure.
+export function createSubmitSession() {
+  let token = 0;
+
+  return {
+    current: () => token,
+    // Ouverture ou fermeture : tout ce qui etait parti avant devient « tardif ».
+    renew: () => (token += 1),
+    owns: (candidate) => candidate === token,
+  };
+}
+
+// --- verrou et session PARTAGES par toutes les fenetres montees --------------
+//
+// POURQUOI AU NIVEAU MODULE, et pas dans la fermeture de createEditSegmentModal :
+// `main.js` appelle `teardown()` a chaque `loadProject()`, ce qui enchaine
+// `attachChargeEditing().detach()` -> `editSegmentModal.destroy()` puis une
+// re-creation complete. Avec un verrou par instance, ce cycle rendait un verrou
+// NEUF alors que l'ecriture precedente etait toujours en vol : l'utilisateur qui
+// change de projet puis revient (les 30 s du delai de garde lui en laissent
+// largement le temps), rouvre le meme mois et re-enregistre produisait DEUX
+// AddRecord sur le meme (projet, personne, mois) — le doublon meme que la cle
+// unique interdit. `gestion-depenses2` n'a jamais eu le probleme : ses
+// `chargePlanSaveLock`/`chargePlanEditSession` sont des singletons de module.
+// Le verrou appartient donc a l'ECRITURE, pas a l'instance de fenetre.
+//
+// Le delai de garde reste arme apres un `destroy()` : c'est lui, et lui seul,
+// qui finira par rendre la fenetre fermable. Ce qui est demonte a l'occasion,
+// c'est le CONTROLEUR (retire de `liveControllers`), donc le timer ne retient
+// plus aucun noeud DOM mort.
+const liveControllers = new Set();
+
+function notifyLiveControllers(hookName) {
+  [...liveControllers].forEach((controller) => {
+    if (typeof controller?.[hookName] === "function") controller[hookName]();
+  });
+}
+
+export const sharedSubmitLock = createSubmitLock({
+  onStall: () => notifyLiveControllers("onStall"),
+});
+
+export const sharedSubmitSession = createSubmitSession();
 
 function formatEditSegmentDayValue(value) {
   const formatted = formatNumber(value);
   return `${formatted.endsWith(",00") ? formatted.slice(0, -3) : formatted} j`;
 }
 
-// Formats a stored effectif value for the number input (blank when unset, no
-// trailing ".00"/zeros so e.g. 2 shows "2" and 1.5 shows "1.5").
+// Formate un effectif stocke pour le champ nombre (vide si absent, sans zeros
+// de queue : 2 affiche "2" et 1.5 affiche "1.5").
 export function formatEditSegmentInputValue(value) {
   if (value == null || value === "") {
     return "";
@@ -161,24 +217,28 @@ export function formatEditSegmentInputValue(value) {
     .replace(/(\.\d*?)0+$/, "$1");
 }
 
-// --- DOM controller (browser-only) -------------------------------------------
+// --- controleur DOM (navigateur uniquement) ----------------------------------
 
-// createEditSegmentModal(rootEl, { onSubmit }) -> { open, close, isOpen, destroy }
+// createEditSegmentModal(rootEl, { onSubmit, stallTimeoutMs })
+//   -> { open, close, isOpen, destroy }
 //
-// `onSubmit({ segmentId, selection })` is called on Enregistrer once the form is
-// internally valid; it may return (a Promise of) { ok: true } to close the modal,
-// or { ok: false, error } to show `error` as feedback and keep the modal open.
-// `selection` = { segmentId, startDate, endDate, totalDays, effectifDays,
-// effectifValueForSave }.
-export function createEditSegmentModal(rootEl, { onSubmit } = {}) {
+// `open({ segmentId, monthKey, workerName, effectif, absenceSet })` : segmentId
+// null = creation, sinon edition. `onSubmit({ segmentId, monthKey, workerName,
+// selection })` est appele sur Enregistrer une fois le formulaire valide ; il
+// peut renvoyer (une promesse de) { ok: true } pour fermer la fenetre, ou
+// { ok: false, error } pour afficher `error` et la laisser ouverte.
+// `selection` = { effectifDays, effectifValueForSave }.
+// `stallTimeoutMs` : delai au-dela duquel une ecriture qui n'a jamais rendu la
+// main cesse de bloquer la fermeture (defaut SUBMIT_STALL_TIMEOUT_MS). Il est
+// passe a `acquire()` et non a la construction du verrou : celui-ci est partage
+// par toutes les fenetres montees (cf. `sharedSubmitLock`).
+export function createEditSegmentModal(rootEl, { onSubmit, stallTimeoutMs } = {}) {
   if (!(rootEl instanceof HTMLElement)) {
     return { open() {}, close() {}, isOpen: () => false, destroy() {} };
   }
 
-  const startDateInput = rootEl.querySelector("#ps-edit-segment-start-date");
-  const startPartInput = rootEl.querySelector("#ps-edit-segment-start-part");
-  const endDateInput = rootEl.querySelector("#ps-edit-segment-end-date");
-  const endPartInput = rootEl.querySelector("#ps-edit-segment-end-part");
+  const monthLabelEl = rootEl.querySelector("#ps-edit-segment-month-label");
+  const workerLabelEl = rootEl.querySelector("#ps-edit-segment-worker-label");
   const effectifInput = rootEl.querySelector("#ps-edit-segment-effectif");
   const calculatedEl = rootEl.querySelector("#ps-edit-segment-calculated-days");
   const feedbackEl = rootEl.querySelector("#ps-edit-segment-feedback");
@@ -186,8 +246,34 @@ export function createEditSegmentModal(rootEl, { onSubmit } = {}) {
   const cancelBtn = rootEl.querySelector("#ps-edit-segment-cancel");
 
   let currentSegmentId = null;
+  let currentMonthKey = "";
+  let currentWorkerName = "";
   let currentAbsenceSet = new Set();
-  let submitting = false;
+  // Verrou et session PARTAGES (niveau module) : ils survivent au
+  // destroy()/re-creation declenche par un changement de projet, sans quoi une
+  // ecriture encore en vol pourrait etre doublee. Cf. `sharedSubmitLock`.
+  const saveLock = sharedSubmitLock;
+  const session = sharedSubmitSession;
+  // L'ecriture n'a jamais rendu la main : on rend la fenetre fermable et on
+  // l'explique, mais Enregistrer reste desactive (le verrou, lui, tient).
+  // Le verrou etant partage, il previent TOUS les controleurs encore montes.
+  const controllerHooks = {
+    onStall: () => {
+      setFeedback(SUBMIT_STALL_MESSAGE);
+      applyLockStateToUi();
+    },
+    onLockStateChanged: () => {
+      // Le verrou vient d'etre rendu : le message « l'enregistrement ne repond
+      // pas » est devenu faux alors que le formulaire redevient utilisable. On
+      // ne retire QUE ce message-la — jamais une erreur de validation, jamais la
+      // saisie d'une autre session (ce serait le defaut B a l'envers).
+      if (!saveLock.isStalled() && getFeedback() === SUBMIT_STALL_MESSAGE) {
+        setFeedback("");
+      }
+      applyLockStateToUi();
+    },
+  };
+  liveControllers.add(controllerHooks);
 
   function setFeedback(message) {
     if (!(feedbackEl instanceof HTMLElement)) return;
@@ -196,18 +282,14 @@ export function createEditSegmentModal(rootEl, { onSubmit } = {}) {
     feedbackEl.hidden = !text;
   }
 
-  function readSelection() {
-    return buildEditSegmentSelection({
-      startDateValue: startDateInput?.value,
-      startPart: startPartInput?.value,
-      endDateValue: endDateInput?.value,
-      endPart: endPartInput?.value,
-    });
+  function getFeedback() {
+    return feedbackEl instanceof HTMLElement ? feedbackEl.textContent : "";
   }
 
+  // Le mois ne se saisit plus : ne restent derives que les jours disponibles du
+  // mois (absences deduites) et le signalement « au-dela du disponible ».
   function syncDerived() {
-    const selection = readSelection();
-    if (selection?.error) {
+    if (!getMonthBounds(currentMonthKey)) {
       if (effectifInput instanceof HTMLInputElement) {
         effectifInput.removeAttribute("max");
         effectifInput.classList.remove("is-over-available");
@@ -215,50 +297,65 @@ export function createEditSegmentModal(rootEl, { onSubmit } = {}) {
       if (calculatedEl instanceof HTMLElement) calculatedEl.textContent = "--";
       return;
     }
-    // "Jours disponibles" = the range geometry MINUS the owner's absence
-    // half-days (leave-adjusted). This is the number we display and compare the
-    // Effectif against for the non-blocking red state.
-    const available = availableDaysAfterLeave(selection.startAt, selection.endAt, currentAbsenceSet);
+
+    const available = getMonthAvailableDays(currentMonthKey, currentAbsenceSet);
     if (calculatedEl instanceof HTMLElement) {
       calculatedEl.textContent = formatEditSegmentDayValue(available);
     }
     if (effectifInput instanceof HTMLInputElement) {
-      effectifInput.max = String(selection.totalDays);
-      const effectifVal = Number(effectifInput.value);
+      effectifInput.max = String(getMonthBusinessDays(currentMonthKey));
+      const effectifValue = Number(effectifInput.value);
       const over =
-        effectifInput.value !== "" && Number.isFinite(effectifVal) && effectifVal > available;
+        effectifInput.value !== "" && Number.isFinite(effectifValue) && effectifValue > available;
       effectifInput.classList.toggle("is-over-available", over);
     }
   }
 
-  function open({ segmentId, startAt, endAt, effectif, absenceSet } = {}) {
-    currentSegmentId = segmentId != null ? String(segmentId) : null;
+  function open({ segmentId, monthKey, workerName, effectif, absenceSet } = {}) {
+    // Une ecriture est en cours : ne pas ecraser le contexte sous ses pieds.
+    // Apres expiration du delai de garde on laisse rouvrir : mieux vaut
+    // rafficher le message d'echec que laisser le clic sans aucune reponse.
+    if (saveLock.blocksClose()) return;
+
+    // Nouvelle session : une ecriture encore en vol ne parle plus de ce segment.
+    session.renew();
+    currentSegmentId = segmentId != null && segmentId !== "" ? segmentId : null;
+    currentMonthKey = String(monthKey || "");
+    currentWorkerName = String(workerName || "").trim();
     currentAbsenceSet = absenceSet instanceof Set ? absenceSet : new Set();
 
-    if (startDateInput instanceof HTMLInputElement) {
-      startDateInput.value = toDateInputValue(startAt);
+    if (monthLabelEl instanceof HTMLElement) {
+      monthLabelEl.textContent = formatSegmentMonthLabel(currentMonthKey);
     }
-    if (startPartInput instanceof HTMLSelectElement) {
-      startPartInput.value = getSegmentHalfDayPart(startAt, "start");
-    }
-    if (endDateInput instanceof HTMLInputElement) {
-      endDateInput.value = toDateInputValue(endAt);
-    }
-    if (endPartInput instanceof HTMLSelectElement) {
-      endPartInput.value = getSegmentHalfDayPart(endAt, "end");
+    if (workerLabelEl instanceof HTMLElement) {
+      workerLabelEl.textContent = currentWorkerName;
     }
     if (effectifInput instanceof HTMLInputElement) {
       effectifInput.value = formatEditSegmentInputValue(effectif);
     }
 
     syncDerived();
-    setFeedback("");
+    setFeedback(saveLock.isStalled() ? SUBMIT_STALL_MESSAGE : "");
+    applyLockStateToUi();
     rootEl.style.display = "flex";
     rootEl.classList.add("is-open");
   }
 
+  // Fermeture demandee par l'utilisateur (Fermer, Echap, clic hors fenetre) :
+  // refusee tant que l'ecriture n'est pas terminee — mais PLUS refusee une fois
+  // le delai de garde expire, sinon la fenetre serait indeformable a vie.
   function close() {
+    if (saveLock.blocksClose()) return;
+    closeNow();
+  }
+
+  function closeNow() {
+    // Fermer clot la session : ce qui se reglera apres n'a plus rien a fermer.
+    session.renew();
     currentSegmentId = null;
+    currentMonthKey = "";
+    currentWorkerName = "";
+    currentAbsenceSet = new Set();
     rootEl.style.display = "none";
     rootEl.classList.remove("is-open");
     setFeedback("");
@@ -268,12 +365,28 @@ export function createEditSegmentModal(rootEl, { onSubmit } = {}) {
     return rootEl.classList.contains("is-open");
   }
 
-  async function handleSave() {
-    if (currentSegmentId == null || submitting) return;
+  // Une seule source de verite pour l'etat visuel : Enregistrer suit le VERROU
+  // (donc reste desactive apres expiration du delai de garde, l'ecriture etant
+  // toujours en vol), Fermer suit la GARDE DE FERMETURE (donc redevient
+  // cliquable a l'expiration).
+  function applyLockStateToUi() {
+    const busy = saveLock.isLocked();
+    const blocking = saveLock.blocksClose();
+    rootEl.classList.toggle("is-submitting", blocking);
+    rootEl.classList.toggle("is-stalled", busy && !blocking);
+    if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = busy;
+    if (cancelBtn instanceof HTMLButtonElement) cancelBtn.disabled = blocking;
+  }
 
-    const selection = readSelection();
-    if (selection.error) {
-      setFeedback(selection.error);
+  async function handleSave() {
+    if (!isOpen()) return;
+    if (saveLock.isLocked()) {
+      if (saveLock.isStalled()) setFeedback(SUBMIT_STALL_MESSAGE);
+      return;
+    }
+
+    if (!getMonthBounds(currentMonthKey)) {
+      setFeedback("Mois introuvable pour ce segment.");
       return;
     }
 
@@ -284,40 +397,67 @@ export function createEditSegmentModal(rootEl, { onSubmit } = {}) {
     }
 
     if (typeof onSubmit !== "function") {
-      close();
+      closeNow();
       return;
     }
 
-    submitting = true;
+    // Verrou pose AVANT le premier await, relache dans le finally. `acquire()`
+    // arme au passage le delai de garde : si la promesse Grist ne se regle
+    // jamais, ce finally n'arrivera pas et c'est lui qui rendra la main.
+    if (!saveLock.acquire(stallTimeoutMs)) return;
+    // Jeton de la session pour laquelle cette ecriture part : apres expiration
+    // du delai de garde, la fenetre a pu etre fermee puis rouverte sur un autre
+    // segment avant que la promesse ne se regle.
+    const submitToken = session.current();
+    applyLockStateToUi();
     setFeedback("");
+
+    let result;
     try {
-      const result = await onSubmit({
+      result = await onSubmit({
         segmentId: currentSegmentId,
+        monthKey: currentMonthKey,
+        workerName: currentWorkerName,
         selection: {
-          segmentId: currentSegmentId,
-          startDate: selection.startDate,
-          endDate: selection.endDate,
-          totalDays: selection.totalDays,
           effectifDays: effectifResult.effectifDays,
           effectifValueForSave: effectifResult.effectifValueForSave,
         },
       });
-      if (result && result.ok === false) {
-        setFeedback(result.error || "La mise a jour du segment a echoue.");
-        return;
-      }
-      close();
     } catch (error) {
-      console.error("Erreur enregistrement segment (modale) :", error);
-      setFeedback("Une erreur est survenue pendant la modification du segment.");
+      console.error("Erreur enregistrement segment (fenetre) :", error);
+      // Rejet tardif : le message d'echec de CETTE ecriture n'a plus rien a dire
+      // de ce que l'utilisateur est en train de saisir.
+      if (session.owns(submitToken)) {
+        setFeedback("Une erreur est survenue pendant l'enregistrement du segment.");
+      }
+      return;
     } finally {
-      submitting = false;
+      saveLock.release(); // desarme aussi le delai de garde
+      // Le verrou est partage : toutes les fenetres montees doivent voir
+      // Enregistrer redevenir cliquable, pas seulement celle qui a ecrit.
+      notifyLiveControllers("onLockStateChanged");
     }
+
+    // Resolution tardive d'une session abandonnee : le verrou vient d'etre rendu
+    // (ci-dessus), mais on ne ferme rien de force et on n'ecrase aucun message.
+    if (!session.owns(submitToken)) return;
+
+    if (result && result.ok === false) {
+      setFeedback(result.error || "L'enregistrement du segment a echoue.");
+      return;
+    }
+    closeNow();
   }
 
   function handleSaveClick(event) {
     event.preventDefault();
-    void handleSave();
+    // `handleSave` avale deja les erreurs de l'ecriture elle-meme, mais tout ce
+    // qui leve AVANT son `try` (validation, libelles, DOM disparu) partirait en
+    // rejet non gere. Meme enveloppe que gestion-depenses2.
+    handleSave().catch((error) => {
+      console.error("Erreur enregistrement segment (fenetre) :", error);
+      setFeedback("Une erreur est survenue pendant l'enregistrement du segment.");
+    });
   }
 
   function handleCancelClick(event) {
@@ -332,7 +472,9 @@ export function createEditSegmentModal(rootEl, { onSubmit } = {}) {
   }
 
   function handleFieldInput() {
-    setFeedback("");
+    // Le message d'ecriture bloquee doit survivre a la saisie : il est la seule
+    // explication de l'etat, et l'utilisateur ne peut de toute facon plus valider.
+    if (!saveLock.isStalled()) setFeedback("");
     syncDerived();
   }
 
@@ -342,26 +484,28 @@ export function createEditSegmentModal(rootEl, { onSubmit } = {}) {
     }
   }
 
-  const fieldEls = [startDateInput, startPartInput, endDateInput, endPartInput, effectifInput];
-
   saveBtn?.addEventListener("click", handleSaveClick);
   cancelBtn?.addEventListener("click", handleCancelClick);
   rootEl.addEventListener("click", handleBackdropClick);
-  fieldEls.forEach((fieldEl) => {
-    fieldEl?.addEventListener("input", handleFieldInput);
-    fieldEl?.addEventListener("change", handleFieldInput);
-  });
+  effectifInput?.addEventListener("input", handleFieldInput);
+  effectifInput?.addEventListener("change", handleFieldInput);
   document.addEventListener("keydown", handleKeyDown);
 
   function destroy() {
-    close();
+    // `closeNow()` renouvelle la session : une ecriture encore en vol ne pilotera
+    // pas la fenetre que `attachChargeEditing()` va recreer juste apres.
+    closeNow();
+    // Le controleur est demonte, PAS le verrou : le relacher ici rendrait un
+    // verrou neuf a la fenetre recreee alors que l'ecriture est toujours en vol,
+    // et deux AddRecord partiraient sur la meme cle metier. On se contente de
+    // retirer ce controleur des destinataires, si bien que le delai de garde
+    // encore arme ne retient plus aucun noeud DOM mort.
+    liveControllers.delete(controllerHooks);
     saveBtn?.removeEventListener("click", handleSaveClick);
     cancelBtn?.removeEventListener("click", handleCancelClick);
     rootEl.removeEventListener("click", handleBackdropClick);
-    fieldEls.forEach((fieldEl) => {
-      fieldEl?.removeEventListener("input", handleFieldInput);
-      fieldEl?.removeEventListener("change", handleFieldInput);
-    });
+    effectifInput?.removeEventListener("input", handleFieldInput);
+    effectifInput?.removeEventListener("change", handleFieldInput);
     document.removeEventListener("keydown", handleKeyDown);
   }
 

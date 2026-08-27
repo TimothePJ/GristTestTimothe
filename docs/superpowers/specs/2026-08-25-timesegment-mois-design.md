@@ -135,7 +135,9 @@ Pur : aucun DOM, aucun Grist, testable sous `node --test`. Emplacements :
 - `Gestion-User/assets/js/monthSegments.js`
 
 Les trois fichiers sont **identiques octet pour octet**, garanti par
-`shared/tests/month-segments-parity.test.cjs`.
+`shared/tests/vendored-charge-modules-parity.test.cjs` — qui verrouille de la
+même façon les **trois** modules vendorisés du plan de charge :
+`monthSegments.js`, `leaveAbsences.js` et `frenchHolidays.js`.
 
 ```js
 // Résolution
@@ -309,7 +311,7 @@ changement de granularité.
 | Fichier | Couvre |
 |---|---|
 | `*/tests/monthSegments.test.mjs` (×3) | résolution `Mois`/repli, bornes du mois, jours ouvrés, dispo après congés, `getMonthShareForRange` (somme = 1, mois à dispo nulle) |
-| `shared/tests/month-segments-parity.test.cjs` | les 3 copies sont identiques octet à octet |
+| `shared/tests/vendored-charge-modules-parity.test.cjs` | les 3 copies de **chacun** des modules vendorisés (`monthSegments.js`, `leaveAbsences.js`, `frenchHolidays.js`) sont identiques octet à octet |
 | `gestion-depenses2/tests/gristService.test.mjs` | `createTimeSegment` écrit `Mois`, n'écrit plus `Start_At`/`End_At` |
 | `planning-synchro/tests/gristService.test.mjs` | idem |
 | `planning-synchro/tests/chargeWorkers.test.mjs` | `buildWorkersFromSegments` sur `Mois` + repli legacy |

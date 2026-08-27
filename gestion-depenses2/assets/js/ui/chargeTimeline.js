@@ -17,7 +17,8 @@ import {
   getHalfDaySlotRange,
   getSegmentEffectiveDays,
 } from "../utils/timeSegments.js";
-import { availableDaysAfterLeave, isAbsenceSlot } from "../utils/leaveAbsences.js";
+import { getMonthAvailableDays, getMonthBounds } from "../utils/monthSegments.js";
+import { isAbsenceSlot } from "../utils/leaveAbsences.js";
 
 const activeVisibleSlotsByBoard = new WeakMap();
 let currentBoardEl = null;
@@ -29,7 +30,7 @@ const DEFAULT_TIMELINE_OPTIONS = {
   showEditToggle: false,
   editModeEnabled: false,
   helperText:
-    "Glissez dans une ligne pour creer un segment. Redimensionnez-le avec ses poignees. Utilisez le clic droit sur une barre pour la modifier ou la supprimer.",
+    "Cliquez sur un mois dans une ligne pour saisir les jours effectifs de ce mois. Utilisez le clic droit sur une barre pour la modifier ou la supprimer.",
   lockedHelperText:
     "Activez le mode edition pour creer, modifier ou supprimer des segments.",
 };
@@ -668,13 +669,14 @@ function buildVisibleSegmentBars(worker, visibleSlots, options = {}, absenceSet 
 
   return (worker?.[timelineOptions.segmentsField] || [])
     .map((segment) => {
-      const startAt = segment?.startAt instanceof Date ? segment.startAt : null;
-      const endAt = segment?.endAt instanceof Date ? segment.endAt : null;
-      if (!startAt || !endAt || Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) {
+      // Un segment = un mois : la barre epouse les bornes du mois, jamais une
+      // plage libre. Un segment sans `monthKey` (TimeReal) n'est pas affichable.
+      const bounds = getMonthBounds(segment?.monthKey);
+      if (!bounds) {
         return null;
       }
 
-      const slotRange = getVisibleSlotRange(startAt, endAt, visibleSlots);
+      const slotRange = getVisibleSlotRange(bounds.startAt, bounds.endAt, visibleSlots);
       if (!slotRange) {
         return null;
       }
@@ -683,11 +685,11 @@ function buildVisibleSegmentBars(worker, visibleSlots, options = {}, absenceSet 
       const label = segment?.label || `${formatDayValue(effectiveDays)} j`;
       const planningTaskCount = countPlanningTasksOverlappingRange(
         planningTasks,
-        startAt,
-        endAt
+        bounds.startAt,
+        bounds.endAt
       );
       const rawEffectif = segment?.effectifDays ?? null;
-      const available = availableDaysAfterLeave(startAt, endAt, absenceSet);
+      const available = getMonthAvailableDays(segment.monthKey, absenceSet);
       const incoherent = rawEffectif != null && Number(rawEffectif) > available;
       const leftPx = slotRange.firstSlot.leftPx;
       const widthPx =
@@ -698,10 +700,9 @@ function buildVisibleSegmentBars(worker, visibleSlots, options = {}, absenceSet 
       return {
         segmentId: segment.id,
         workerId: worker.id,
-        startSlotIndex: slotRange.firstSlot.slotIndex,
-        endSlotIndex: slotRange.lastSlot.slotIndex,
-        startAtMs: startAt.getTime(),
-        endAtMs: endAt.getTime(),
+        monthKey: segment.monthKey,
+        startAtMs: bounds.startAt.getTime(),
+        endAtMs: bounds.endAt.getTime(),
         leftPx,
         widthPx,
         label,
@@ -759,22 +760,13 @@ function renderSegmentBars(assignedBars) {
           )}px"
           data-segment-id="${bar.segmentId}"
           data-worker-id="${bar.workerId}"
-          data-start-slot-index="${bar.startSlotIndex}"
-          data-end-slot-index="${bar.endSlotIndex}"
+          data-month-key="${escapeHtml(bar.monthKey)}"
           data-start-at-ms="${bar.startAtMs}"
           data-end-at-ms="${bar.endAtMs}"
           data-planning-tooltip="${escapeHtml(planningTooltip)}"
           title="${escapeHtml(tooltip)}"
         >
-          <span
-            class="charge-plan-segment-handle is-start"
-            data-resize-edge="start"
-          ></span>
           <span class="charge-plan-segment-label">${escapeHtml(bar.label)}</span>
-          <span
-            class="charge-plan-segment-handle is-end"
-            data-resize-edge="end"
-          ></span>
         </div>
       `;
     })
@@ -821,6 +813,7 @@ function renderWorkerRow(
           data-timeline-width="${timelineWidth}"
         >
           ${renderTrackGrid(months, zoomMode, zoomScale, sizingContext, absenceSet)}
+          <div class="charge-plan-month-hover" hidden></div>
           <div class="charge-plan-track-bars">
             ${renderSegmentBars(assignedBars)}
           </div>
@@ -1229,18 +1222,6 @@ export function renderChargePlanTimeline(dom, project, viewState, options = {}) 
   `;
 }
 
-export function renderRealChargeTimeline(dom, project, viewState) {
-  return renderChargePlanTimeline(dom, project, viewState, {
-    boardEl: dom?.realChargeBoard || null,
-    daysField: "workedDays",
-    segmentsField: "realSegments",
-    timelineKind: "real",
-    showControls: true,
-    helperText:
-      "Glissez dans une ligne pour creer un segment reel. Redimensionnez-le avec ses poignees. Utilisez le clic droit sur une barre pour la modifier ou la supprimer.",
-  });
-}
-
 export function clearChargePlanTimeline(target) {
   currentBoardEl =
     target instanceof HTMLElement ? target : target?.chargePlanBoard || null;
@@ -1253,14 +1234,6 @@ export function clearChargePlanTimeline(target) {
     );
     delete currentBoardEl.dataset.segmentEditMode;
     currentBoardEl.innerHTML = "";
-  }
-}
-
-export function clearRealChargeTimeline(target) {
-  const boardEl = target instanceof HTMLElement ? target : target?.realChargeBoard || null;
-  if (boardEl) {
-    activeVisibleSlotsByBoard.delete(boardEl);
-    boardEl.innerHTML = "";
   }
 }
 
@@ -1308,29 +1281,10 @@ export function getChargePlanSlotIndexAtClientX(trackEl, clientX) {
   return getSlotIndexFromClientX(trackEl, clientX);
 }
 
-export function computeChargePlanSelection(trackEl, startClientX, endClientX) {
-  const firstSlotIndex = getSlotIndexFromClientX(trackEl, startClientX);
-  const lastSlotIndex = getSlotIndexFromClientX(trackEl, endClientX);
-  return computeChargePlanSelectionFromSlotIndexes(trackEl, firstSlotIndex, lastSlotIndex);
-}
-
-export function updateChargePlanSelectionPreview(trackEl, selection) {
-  const previewEl = trackEl?.querySelector(".charge-plan-selection-preview");
-  const labelEl = previewEl?.querySelector(".charge-plan-selection-label");
-  if (!(previewEl instanceof HTMLElement) || !(labelEl instanceof HTMLElement)) {
-    return;
-  }
-
-  if (!selection || selection.widthPx <= 0 || selection.totalDays <= 0) {
-    clearChargePlanSelectionPreview(trackEl);
-    return;
-  }
-
-  previewEl.hidden = false;
-  previewEl.style.left = `${selection.leftPx}px`;
-  previewEl.style.width = `${selection.widthPx}px`;
-  previewEl.classList.toggle("is-invalid", Boolean(selection.hasOverlap));
-  labelEl.textContent = `${formatDayValue(selection.totalDays)} j`;
+// Accesseur sur la WeakMap interne : main.js en a besoin pour caler la barre
+// provisoire et le surlignage de mois sur la geometrie reellement rendue.
+export function getChargePlanTrackSlots(trackEl) {
+  return getTrackSlots(trackEl);
 }
 
 export function clearChargePlanSelectionPreview(trackEl) {
@@ -1342,7 +1296,6 @@ export function clearChargePlanSelectionPreview(trackEl) {
   previewEl.hidden = true;
   previewEl.style.left = "0px";
   previewEl.style.width = "0px";
-  previewEl.classList.remove("is-invalid");
 
   const labelEl = previewEl.querySelector(".charge-plan-selection-label");
   if (labelEl instanceof HTMLElement) {

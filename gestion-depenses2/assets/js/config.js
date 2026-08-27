@@ -149,6 +149,9 @@ export const APP_CONFIG = {
         projectNumber: "NumeroProjet",
         name: "Name",
         segmentType: "Segment_Type",
+        // Source unique de verite depuis 2026-08 : un segment couvre un mois.
+        // startDate/endDate ne sont plus ecrites, seulement lues en repli.
+        mois: "Mois",
         startDate: "Start_At",
         endDate: "End_At",
         allocationDays: "Allocation_Days",

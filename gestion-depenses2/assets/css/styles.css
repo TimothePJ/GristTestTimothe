@@ -1668,6 +1668,11 @@ td input {
   cursor: not-allowed;
 }
 
+/* Un clic = un mois : la piste editable est cliquable sur toute sa longueur. */
+#charge-plan-board.is-segment-editing-enabled .charge-plan-track:not(.charge-plan-track--readonly) {
+  cursor: pointer;
+}
+
 #charge-plan-board.is-segment-editing-locked .charge-plan-segment-bar {
   cursor: default;
   filter: saturate(0.78);
@@ -1677,59 +1682,20 @@ td input {
   filter: saturate(0.78);
 }
 
-#charge-plan-board.is-segment-editing-locked .charge-plan-segment-handle {
-  display: none;
-}
-
-.charge-plan-segment-bar.is-resizing {
-  opacity: 0.38;
-}
-
 .charge-plan-segment-bar.is-compact {
   padding: 0 10px;
-  cursor: ew-resize;
 }
 
-.charge-plan-segment-bar.is-compact .charge-plan-segment-handle {
-  display: none;
-}
-
-.charge-plan-segment-handle {
+/* Survol : le mois entier sous le curseur s'eclaire, puisque c'est l'unite de
+   creation depuis le passage de TimeSegment au mois. */
+.charge-plan-month-hover {
   position: absolute;
-  top: 50%;
-  width: 14px;
-  height: 18px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.9);
-  cursor: ew-resize;
-  transform: translateY(-50%);
-  box-shadow: 0 0 0 1px rgba(6, 60, 123, 0.08);
-}
-
-.charge-plan-segment-handle.is-start {
-  left: 3px;
-}
-
-.charge-plan-segment-handle.is-end {
-  right: 3px;
-}
-
-.charge-plan-segment-handle.is-start::after,
-.charge-plan-segment-handle.is-end::after {
-  content: "";
-  position: absolute;
-  top: -4px;
-  bottom: -4px;
-}
-
-.charge-plan-segment-handle.is-start::after {
-  right: -4px;
-  left: -8px;
-}
-
-.charge-plan-segment-handle.is-end::after {
-  right: -8px;
-  left: -4px;
+  top: 0;
+  bottom: 0;
+  background: rgba(0, 73, 144, 0.08);
+  border-left: 1px solid rgba(0, 73, 144, 0.25);
+  border-right: 1px solid rgba(0, 73, 144, 0.25);
+  pointer-events: none;
 }
 
 .charge-plan-segment-label {
@@ -1780,13 +1746,11 @@ td input {
   display: none !important;
 }
 
-.charge-plan-selection-preview.is-invalid {
-  border-color: rgba(180, 35, 24, 0.72);
-  background: rgba(180, 35, 24, 0.16);
-}
-
-.charge-plan-selection-preview.is-invalid .charge-plan-selection-label {
-  color: #b42318;
+/* Barre provisoire : rien n'est encore ecrit en base, les hachures le disent. */
+.charge-plan-selection-preview.is-provisional {
+  background-image: repeating-linear-gradient(
+    45deg, rgba(0, 73, 144, 0.18) 0 6px, transparent 6px 12px
+  );
 }
 
 #edit-segment-effectif.is-over-available {
@@ -2811,6 +2775,25 @@ td input {
   gap: 14px;
 }
 
+/* Rappel du couple (mois, personne) : la fenetre ne les fait plus saisir. */
+.segment-edit-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 2px 0 0;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.segment-edit-context span:empty {
+  display: none;
+}
+
+.segment-edit-context span + span {
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
 .segment-edit-section {
   display: grid;
   gap: 14px;
@@ -2886,6 +2869,37 @@ td input {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+}
+
+/* Ecriture en cours : Enregistrer et Annuler sont desactives le temps de
+   l'aller-retour Grist (cf. le verrou de saveEditedChargePlanSegment). */
+.segment-edit-footer button:disabled,
+#edit-segment-modal .budget-modal-close-btn:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* Etat de l'ecriture, pose par applyChargePlanSaveLockToUi sur la racine de la
+   fenetre. `is-submitting` : aller-retour Grist en cours, la fenetre est
+   verrouillee. `is-stalled` : le delai de garde a expire, la fenetre redevient
+   fermable mais l'ecriture est TOUJOURS en vol (Enregistrer reste desactive) —
+   avertissement, pas erreur : il faut recharger le widget pour savoir si le
+   segment a ete enregistre. */
+#edit-segment-modal.is-submitting .modal-content--segment {
+  cursor: progress;
+}
+
+#edit-segment-modal.is-submitting .segment-edit-form,
+#edit-segment-modal.is-stalled .segment-edit-form {
+  opacity: 0.72;
+}
+
+#edit-segment-modal.is-stalled .modal-content--segment {
+  box-shadow: inset 0 3px 0 0 #b54708;
+}
+
+#edit-segment-modal.is-stalled .segment-edit-feedback {
+  color: #b54708;
 }
 
 .budget-edit-list {

@@ -26,11 +26,20 @@ correction pixel.
 |---|---|---|
 | `Projets2` | Registre canonique des projets, pont nom ↔ numéro | `id`, `Nom_de_projet`, `Numero_de_projet` |
 | `Planning_Projet` | Planning projet (haut, lecture seule), filtré par `NomProjet` | `id`, `ID2`, `NomProjet`, `Taches`/`Tache`, `Type_doc`, `Groupe`, `Ligne_planning`, `Zone`, `Date_limite`, `Diff_coffrage`, `Diff_armature`, `Demarrages_travaux` |
-| `TimeSegment` | Plan de charge prévisionnel (bas, éditable), filtré par `NumeroProjet` | `NumeroProjet`, `Name`, `Start_At`, `End_At`, `Allocation_Days`, `Effectif`, `Label` |
+| `TimeSegment` | Plan de charge prévisionnel (bas, éditable), filtré par `NumeroProjet` — **un segment couvre un mois entier** | `NumeroProjet`, `Name`, `Mois`, `Effectif`, `Allocation_Days`, `Label` |
 | `ProjectTeam` | Rôle de chaque personne pour le regroupement (Projeteurs / Ingénieurs / Autres), filtré par `NumeroProjet` | `NumeroProjet`, `Name`, `Role`, `Daily_Rate` |
 
-La tolérance d'alias sur les colonnes `TimeSegment`
-(`Start_At`/`Start_Date`/`StartAt`/`StartDate`/`Start`, etc. — voir
+`Mois` est une colonne **Date** valant le **1er du mois** ; c'est la seule
+source de vérité du segment. `Allocation_Days` est **dénormalisée** : écrite à
+la création/modification (jours ouvrés du mois) pour la lisibilité de la grille
+Grist, elle n'est **jamais relue** — la capacité d'un segment est recalculée
+depuis son mois (`getSegmentAllocationDays`, `assets/js/utils/timeSegments.js`).
+`Start_At`/`End_At` ne sont **plus écrites** ; `Start_At` reste lue en **repli**
+pour les lignes antérieures à la bascule (voir « Migration `TimeSegment` » plus
+bas), `End_At` n'est ni lue ni écrite.
+
+La tolérance d'alias sur les colonnes `TimeSegment` (`Mois`/`Month`,
+`Start_At`/`Start_Date`/`StartAt`/`StartDate`/`Start`, etc. — voir
 `assets/js/services/gristService.js`) s'applique **uniquement au chemin
 d'écriture** (`createTimeSegment`/`updateTimeSegment`). Le chemin de
 **lecture** (filtre `fetchProjectData`, `buildWorkersFromSegments`,
@@ -61,7 +70,8 @@ que mesurée puis corrigée après coup : l'ancienne boucle
 mesure-DOM-puis-nudge-puis-retry de `Synchro/` disparaît, remplacée par une
 unique assertion de garde (`console.warn` si écart > 1px, jamais de boucle de
 correction). Les bornes de la frise sont l'**union** de la plage `TimeSegment`
-(`min(Start_At)` → `max(End_At)`) **et** de la plage de toutes les phases
+(1er jour du plus petit `Mois` → dernier jour du plus grand,
+`top/bounds.computeTimeSegmentBounds`) **et** de la plage de toutes les phases
 `Planning_Projet` (dateBounds du builder, via `computePlanningPhaseBounds` +
 `unionDateBounds` dans `main.js`), afin qu'une tâche dont les phases tombent hors
 du prévisionnel reste visible et navigable. La fenêtre visible se déplace
@@ -244,16 +254,94 @@ consommait une partie de la bande d'axe) et rappelle la convention
 plein / pointillé. Elle est **en lecture seule** : le filtre ci-dessus pilote la
 visibilité, et la légende **grise** (`.is-off`) les types décochés.
 
-En mode **Editer**, le **clic droit** sur un segment ouvre le menu contextuel
-**Modifier** / **Supprimer le segment**, avec la **même fenêtre et les mêmes
-fonctionnalités que `gestion-depenses2`** : **Modifier** ouvre la modale
-« Modifier le segment » (`bottom/editSegmentModal.js`, portée depuis
-`#edit-segment-modal`) — plage au demi-jour près (Début / Fin + Matin /
-Après-midi), « jours effectifs travaillés » optionnel et « jours disponibles
-dans la plage » recalculés en direct, avec contrôle de chevauchement et
-d'effectif (multiple de 0,5, ≤ jours de la plage) avant écriture
-(`updateTimeSegment` + rafraîchissement). **Supprimer le segment** appelle
-`removeTimeSegment` (comme `gestion-depenses2`, sans confirmation).
+## Mode Editer du pane bas : un segment = un mois
+
+Le bouton du pane bas bascule entre **Editer** et **Verrouiller**
+(`bottom/chargeEditing.js`) ; hors mode Editer, un clic sur une piste n'a aucun
+effet et le menu contextuel ne s'ouvre pas. Le mode est **collant** : il est
+ré-appliqué après chaque écriture, parce qu'un rafraîchissement (`onChanged()`)
+remplace tout le HTML du board.
+
+**Le geste : un clic = un mois entier.** Il n'y a **ni glisser-créer, ni
+poignées de redimensionnement, ni sélection au demi-jour** — un segment couvre
+toujours l'intégralité de son mois. Le clic gauche sur une piste résout le mois
+sous le curseur (la barre cliquée, si elle en porte une, fait foi via son
+`data-month-key` ; sinon le créneau-jour sous le pointeur donne le mois), puis :
+
+- mois **libre** → ouverture de la fenêtre en **création** ;
+- mois **déjà occupé** → ouverture de la fenêtre en **édition** de ce segment.
+
+C'est cette règle (`resolveSegmentClickIntent`) qui tient l'**unicité (projet,
+personne, mois)** : un mois occupé se ré-édite, il ne se double jamais. Le
+contrôle de chevauchement de l'ancien modèle a disparu — il n'a plus d'objet.
+Un segment dont l'id n'est pas exploitable (id de synthèse `s-N`, quand la
+colonne `id` manque) est **ignoré** plutôt que dupliqué.
+
+**La fenêtre** (`bottom/editSegmentModal.js`, `#ps-edit-segment-modal`, même
+contenu que `#edit-segment-modal` de `gestion-depenses2`) s'intitule **« Segment
+mensuel »**. Le **mois et la personne** y sont en **lecture seule** (ils
+viennent du clic) ; le seul champ saisissable est **« Jours effectifs
+travaillés »**, en regard de **« Jours disponibles dans le mois »** — jours
+ouvrés du mois (week-ends **et** jours fériés exclus) **moins les demi-journées
+d'absence** de la personne (`Time-Out`), recalculés en direct.
+
+Validation avant écriture (`validateEditSegmentEffectif`) : la valeur est
+**obligatoire**, **strictement > 0** et **multiple de 0,5**. Elle n'est **pas**
+plafonnée : saisir plus que le disponible reste enregistrable, le champ passe
+simplement en `is-over-available` et la barre devient rouge (`is-incoherent`)
+avec l'info-bulle « Effectif X j > disponible après absences Y j ».
+
+**Rien n'est écrit dans Grist tant que la fenêtre n'a pas été validée** :
+« Enregistrer » déclenche `createTimeSegment` (mois libre) ou
+`updateTimeSegment` (mois occupé), puis un `onChanged()` qui re-fetch et
+re-rend. Un **verrou d'écriture partagé** au niveau module interdit toute
+seconde soumission tant que la première est en vol — y compris à travers un
+changement de projet, qui détruit et recrée la fenêtre, et qui rendrait sinon un
+verrou neuf permettant deux `AddRecord` sur le même (projet, personne, mois).
+Un **délai de garde de 30 s** (`SUBMIT_STALL_TIMEOUT_MS`) rend la fenêtre
+fermable si l'écriture ne répond jamais, avec un message explicatif, mais sans
+relâcher le verrou d'écriture.
+
+Le **clic droit** sur un segment ouvre le menu contextuel **Modifier** /
+**Supprimer le segment** : **Modifier** rouvre exactement la même fenêtre,
+amorcée depuis la barre visée ; **Supprimer le segment** appelle
+`removeTimeSegment` (comme `gestion-depenses2`, sans confirmation). `Echap`, un
+clic hors du menu ou la sortie du mode Editer referment le menu.
+
+## Migration `TimeSegment` : créer et remplir la colonne `Mois`
+
+À faire **à la main dans Grist**, sans formule.
+
+1. **Créer la colonne `Mois`** dans `TimeSegment`, de type **Date**.
+2. **La remplir** avec le **1er jour du mois** du segment (`01/09/2026` pour
+   septembre 2026). Le widget ne lit que l'**année et le mois** de cette date,
+   mais garder le 1er évite toute ambiguïté et correspond à ce que les widgets
+   écrivent eux-mêmes (`toGristMonthValue`).
+3. Une fois toutes les lignes reprises, `Start_At` et `End_At` peuvent être
+   **supprimées de la table** quand tu le juges bon. Rien ne les écrit plus.
+
+**Repli sur `Start_At`** — une ligne sans `Mois` reste lue : le mois est alors
+déduit de `Start_At` (`resolveSegmentMonthKey` dans `utils/monthSegments.js`).
+Ce repli est **inerte sans erreur** le jour où la colonne disparaît : la cellule
+vaut `undefined`, la résolution renvoie `""`, et la ligne est simplement écartée
+du rendu. Aucun message, aucun plantage.
+
+> ⚠️ **Une ligne legacy multi-mois s'effondre sur son mois de début.** Un
+> segment `Start_At = 15/09/2026`, `End_At = 20/01/2027` est lu comme un segment
+> de **septembre 2026 uniquement** : **tout son effectif est compté dans ce seul
+> mois**, et les mois d'octobre à janvier n'en voient plus rien. C'est inhérent
+> au repli (une seule date lue, aucune répartition), mais c'est une **perte de
+> données visible**. Ces lignes-là doivent être **éclatées manuellement en un
+> segment par mois** — c'est le seul cas où la reprise ne peut pas se faire par
+> simple recopie.
+
+**Effet attendu dans `Gestion-User`** : certains pourcentages d'occupation vont
+**baisser**. Ce widget proratisait auparavant `Allocation_Days` ; une ligne à
+`Effectif` vide y comptait donc une charge, alors qu'elle comptait déjà **0
+jour** dans `gestion-depenses2`. Désormais `Effectif` est **la** charge dans les
+deux widgets (`buildSegments` écarte les lignes à `Effectif` ≤ 0) : ces lignes
+tombent à 0 partout. Ce n'est pas une régression, c'est la fin d'une divergence
+entre les deux widgets.
 
 ## Développement
 

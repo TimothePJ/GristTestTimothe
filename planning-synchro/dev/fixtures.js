@@ -3,6 +3,40 @@
 // shared frise shows both panes populated within the TimeSegment-derived bounds — mirroring
 // how a real project's resource plan and task deadlines occupy the same period.
 
+import { toGristMonthValue, getMonthBusinessDays } from "../assets/js/utils/monthSegments.js";
+
+// Un segment = un mois : genere une ligne TimeSegment par mois entre startMonthKey
+// et endMonthKey (inclus), au lieu d'une seule ligne Start_At/End_At couvrant toute
+// la plage comme avant la bascule. Mois en epoch secondes (comme un vrai Grist
+// Date) ; Allocation_Days dénormalisé (jamais relu par le code JS, seulement écrit
+// pour la lisibilité de la grille Grist — cf. services/gristService.js).
+function monthlyTimeSegmentRows({ idStart, numeroProjet, name, startMonthKey, endMonthKey, effectif, label = "" }) {
+  const [startYear, startMonth] = startMonthKey.split("-").map(Number);
+  const [endYear, endMonth] = endMonthKey.split("-").map(Number);
+  const rows = [];
+  let year = startYear;
+  let month = startMonth;
+  let id = idStart;
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+    rows.push({
+      id: id++,
+      NumeroProjet: numeroProjet,
+      Name: name,
+      Mois: toGristMonthValue(monthKey),
+      Allocation_Days: getMonthBusinessDays(monthKey),
+      Effectif: effectif,
+      Label: label,
+    });
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+  return rows;
+}
+
 // Project 3 has MORE than 16 tasks (deliberately) to exercise the top pane's
 // 16-row visible ceiling + internal vertical scroll (sticky frise). A long task
 // name is included to exercise single-line truncation (ellipsis + title tooltip).
@@ -88,25 +122,40 @@ export const FIXTURE_TABLES = {
     // half must be the SAME height as the current half, not appear shorter.
     { id: 8002, NomProjet: "TEST EN COURS", ID2: "8002", Zone: "Z1", Taches: "MUR PETIT PASSE - COF", Type_doc: "COFFRAGE", Date_limite: "2026-07-02", Diff_coffrage: "2026-11-01" },
   ],
+  // Un segment = un mois (bascule TimeSegment) : chaque bloc ci-dessous est une
+  // ligne Mois par mois, generee par monthlyTimeSegmentRows() sur EXACTEMENT la
+  // meme plage [debut, fin] que l'ancienne ligne Start_At/End_At qu'elle
+  // remplace (donc les memes bornes de frise, les memes scenarios de zoom/
+  // homonymes/etc. documentes plus haut restent couverts). Derniere ligne du
+  // tableau EXCEPTEE : voir le commentaire "TEST LEGACY MOIS" en bas.
   TimeSegment: [
-    { id: 1, NumeroProjet: "252035", Name: "Fouzia Raggui", Start_At: "02/02/2027 08:00", End_At: "26/02/2027 17:00", Allocation_Days: "18", Effectif: "1", Label: "" },
-    { id: 2, NumeroProjet: "252035", Name: "Guillaume Sadot", Start_At: "01/03/2027 08:00", End_At: "28/05/2027 17:00", Allocation_Days: "40,5", Effectif: "1", Label: "" },
-    { id: 3, NumeroProjet: "252035", Name: "BA INGENERIE", Start_At: "15/02/2027 08:00", End_At: "15/04/2027 17:00", Allocation_Days: "30", Effectif: "2", Label: "" },
-    { id: 4, NumeroProjet: "252035", Name: "Laurent Orven", Start_At: "01/04/2027 08:00", End_At: "30/05/2027 17:00", Allocation_Days: "22", Effectif: "1", Label: "" },
-    // Project 3 (many tasks): two segments spanning the generated phase dates so
-    // the frise bounds cover them.
-    { id: 5, NumeroProjet: MANY_TASK_NUMBER, Name: "Equipe Etudes", Start_At: "01/01/2026 08:00", End_At: "31/12/2027 17:00", Allocation_Days: "120", Effectif: "3", Label: "" },
-    { id: 6, NumeroProjet: MANY_TASK_NUMBER, Name: "BE Externe", Start_At: "15/02/2027 08:00", End_At: "30/06/2027 17:00", Allocation_Days: "80", Effectif: "2", Label: "" },
-    // Project 4 (homonym zones): span from early 2026 so the past-dated (réalisé)
-    // task falls inside the frise window and its phase-past band is visible.
-    { id: 7, NumeroProjet: HOMONYM_NUMBER, Name: "Equipe Zones", Start_At: "01/01/2026 08:00", End_At: "01/04/2027 17:00", Allocation_Days: "40", Effectif: "2", Label: "" },
-    { id: 20, NumeroProjet: "555555", Name: "Equipe BG", Start_At: "01/06/2027 08:00", End_At: "20/06/2027 17:00", Allocation_Days: "10", Effectif: "1", Label: "" },
+    ...monthlyTimeSegmentRows({ idStart: 101, numeroProjet: "252035", name: "Fouzia Raggui", startMonthKey: "2027-02", endMonthKey: "2027-02", effectif: 1 }),
+    ...monthlyTimeSegmentRows({ idStart: 201, numeroProjet: "252035", name: "Guillaume Sadot", startMonthKey: "2027-03", endMonthKey: "2027-05", effectif: 1 }),
+    ...monthlyTimeSegmentRows({ idStart: 301, numeroProjet: "252035", name: "BA INGENERIE", startMonthKey: "2027-02", endMonthKey: "2027-04", effectif: 2 }),
+    ...monthlyTimeSegmentRows({ idStart: 401, numeroProjet: "252035", name: "Laurent Orven", startMonthKey: "2027-04", endMonthKey: "2027-05", effectif: 1 }),
+    // Project 3 (many tasks): mois generes sur toute la plage d'origine si bien
+    // que la frise couvre toujours les dates de phase generees (MANY_TASK_ROWS).
+    ...monthlyTimeSegmentRows({ idStart: 501, numeroProjet: MANY_TASK_NUMBER, name: "Equipe Etudes", startMonthKey: "2026-01", endMonthKey: "2027-12", effectif: 3 }),
+    ...monthlyTimeSegmentRows({ idStart: 601, numeroProjet: MANY_TASK_NUMBER, name: "BE Externe", startMonthKey: "2027-02", endMonthKey: "2027-06", effectif: 2 }),
+    // Project 4 (homonym zones): idem depuis debut 2026 pour couvrir la tache
+    // passee (realisee).
+    ...monthlyTimeSegmentRows({ idStart: 701, numeroProjet: HOMONYM_NUMBER, name: "Equipe Zones", startMonthKey: "2026-01", endMonthKey: "2027-04", effectif: 2 }),
+    ...monthlyTimeSegmentRows({ idStart: 801, numeroProjet: "555555", name: "Equipe BG", startMonthKey: "2027-06", endMonthKey: "2027-06", effectif: 1 }),
     // Spans all of 2027 so the frise can zoom out to a year (labels then collide).
-    { id: 30, NumeroProjet: "666666", Name: "Equipe Fusion", Start_At: "01/01/2027 08:00", End_At: "31/12/2027 17:00", Allocation_Days: "20", Effectif: "1", Label: "" },
+    ...monthlyTimeSegmentRows({ idStart: 901, numeroProjet: "666666", name: "Equipe Fusion", startMonthKey: "2027-01", endMonthKey: "2027-12", effectif: 1 }),
     // ~600-day span so the frise bounds exceed the 426-day max window.
-    { id: 40, NumeroProjet: "777777", Name: "Equipe MZ", Start_At: "01/01/2027 08:00", End_At: "31/08/2028 17:00", Allocation_Days: "50", Effectif: "1", Label: "" },
+    ...monthlyTimeSegmentRows({ idStart: 1001, numeroProjet: "777777", name: "Equipe MZ", startMonthKey: "2027-01", endMonthKey: "2028-08", effectif: 1 }),
     // TEST EN COURS: spans mid-2026 so today (2026) is inside the window.
-    { id: 50, NumeroProjet: "888888", Name: "Equipe EC", Start_At: "01/06/2026 08:00", End_At: "30/09/2026 17:00", Allocation_Days: "40", Effectif: "1", Label: "" },
+    ...monthlyTimeSegmentRows({ idStart: 1101, numeroProjet: "888888", name: "Equipe EC", startMonthKey: "2026-06", endMonthKey: "2026-09", effectif: 1 }),
+    // TEST LEGACY MOIS : ligne volontairement laissee au format pre-migration
+    // (Start_At SEUL, pas de colonne Mois) pour que le harnais exerce le repli
+    // legacy de resolveSegmentMonthKey (Mois absent -> Start_At). Date ISO
+    // (non ambigue) : monthSegments.js ne sait pas lire un datetime FR
+    // "JJ/MM/AAAA" comme le reste de ce fichier (voir task-5-report.md). Mois
+    // (fevrier 2027) volontairement DEJA couvert par Fouzia/BA INGENERIE
+    // ci-dessus : le repli reste exerce sans elargir les bornes de la demo par
+    // defaut (252035 est le 1er projet du selecteur).
+    { id: 1201, NumeroProjet: "252035", Name: "Nadia Ferrand", Start_At: "2027-02-17", Effectif: "2", Label: "" },
   ],
   ProjectTeam: [
     { id: 1, NumeroProjet: "252035", Name: "Fouzia Raggui", Role: "Projeteur", Daily_Rate: 0 },
@@ -114,6 +163,7 @@ export const FIXTURE_TABLES = {
     { id: 3, NumeroProjet: "252035", Name: "BA INGENERIE", Role: "Sous-traitant", Daily_Rate: 0 },
     { id: 4, NumeroProjet: "252035", Name: "Laurent Orven", Role: "Ingenieur", Daily_Rate: 0 },
     { id: 8, NumeroProjet: "252035", Name: "Membre Sans Segment", Role: "Ingenieur", Daily_Rate: 0 }, // no TimeSegment -> must still appear
+    { id: 9, NumeroProjet: "252035", Name: "Nadia Ferrand", Role: "Projeteur", Daily_Rate: 0 }, // TEST LEGACY MOIS (Start_At seul, cf. TimeSegment)
     { id: 5, NumeroProjet: MANY_TASK_NUMBER, Name: "Equipe Etudes", Role: "Projeteur", Daily_Rate: 0 },
     { id: 6, NumeroProjet: MANY_TASK_NUMBER, Name: "BE Externe", Role: "Sous-traitant", Daily_Rate: 0 },
     { id: 7, NumeroProjet: HOMONYM_NUMBER, Name: "Equipe Zones", Role: "Projeteur", Daily_Rate: 0 },

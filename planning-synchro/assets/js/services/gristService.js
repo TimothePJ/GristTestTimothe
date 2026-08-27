@@ -17,7 +17,7 @@
 import { APP_CONFIG } from "../config.js";
 import { toText } from "../utils/dates.js";
 import { toFiniteNumber } from "../utils/format.js";
-import { toGristDateTimeValue } from "../utils/timeSegments.js";
+import { toGristMonthValue, getMonthBusinessDays } from "../utils/monthSegments.js";
 
 const resolvedColumnCache = new Map();
 
@@ -25,6 +25,7 @@ const TIME_SEGMENT_COLUMN_ALIASES = {
   id: ["id"],
   projectNumber: ["NumeroProjet", "Numero_Projet", "Project_Number", "ProjectNumber"],
   name: ["Name", "Nom", "Worker_Name", "Team_Member_Name"],
+  mois: ["Mois", "Month"],
   startDate: ["Start_At", "Start_Date", "StartAt", "StartDate", "Start"],
   endDate: ["End_At", "End_Date", "EndAt", "EndDate", "End"],
   allocationDays: [
@@ -284,36 +285,28 @@ export async function fetchProjectData({ name, number }) {
 export async function createTimeSegment({
   projectNumber,
   name,
-  startDate,
-  endDate,
-  allocationDays,
+  monthKey,
   effectif,
   label = "",
 }) {
   const tableName = APP_CONFIG.grist.tables.timeSegment;
   const columns = await getResolvedTimeSegmentColumns();
-  const startValue = toGristDateTimeValue(startDate);
-  const endValue = toGristDateTimeValue(endDate);
   const normalizedProjectNumber = toText(projectNumber);
   const normalizedName = toText(name);
+  const monthValue = toGristMonthValue(monthKey);
 
-  if (!normalizedProjectNumber || !normalizedName || startValue == null || endValue == null) {
-    throw new Error("Segment invalide : numero projet, nom, date debut ou date fin manquant.");
+  if (!normalizedProjectNumber || !normalizedName || monthValue == null) {
+    throw new Error("Segment invalide : numero projet, nom ou mois manquant.");
   }
 
   const fields = Object.fromEntries(
     Object.entries({
       [columns.projectNumber]: normalizedProjectNumber,
       [columns.name]: normalizedName,
-      [columns.startDate]: startValue,
-      [columns.endDate]: endValue,
-      [columns.allocationDays]: toFiniteNumber(allocationDays, 0),
-      [columns.effectif]:
-        effectif === undefined
-          ? undefined
-          : effectif === ""
-          ? ""
-          : toFiniteNumber(effectif, 0),
+      [columns.mois]: monthValue,
+      // Denormalise : ecrit pour la lisibilite de la grille Grist, jamais relu.
+      [columns.allocationDays]: getMonthBusinessDays(monthKey),
+      [columns.effectif]: toFiniteNumber(effectif, 0),
       [columns.service]: getActiveService(),
     }).filter(([, value]) => value !== undefined)
   );
@@ -337,9 +330,7 @@ export async function updateTimeSegment({
   segmentId,
   projectNumber,
   name,
-  startDate,
-  endDate,
-  allocationDays,
+  monthKey,
   effectif,
   label,
 }) {
@@ -367,24 +358,13 @@ export async function updateTimeSegment({
     fields[columns.name] = normalizedName;
   }
 
-  if (startDate != null) {
-    const startValue = toGristDateTimeValue(startDate);
-    if (startValue == null) {
-      throw new Error("Date de debut invalide pour la mise a jour du segment.");
+  if (monthKey != null) {
+    const monthValue = toGristMonthValue(monthKey);
+    if (monthValue == null) {
+      throw new Error("Mois invalide pour la mise a jour du segment.");
     }
-    fields[columns.startDate] = startValue;
-  }
-
-  if (endDate != null) {
-    const endValue = toGristDateTimeValue(endDate);
-    if (endValue == null) {
-      throw new Error("Date de fin invalide pour la mise a jour du segment.");
-    }
-    fields[columns.endDate] = endValue;
-  }
-
-  if (allocationDays != null) {
-    fields[columns.allocationDays] = toFiniteNumber(allocationDays, 0);
+    fields[columns.mois] = monthValue;
+    fields[columns.allocationDays] = getMonthBusinessDays(monthKey);
   }
 
   if (effectif !== undefined) {

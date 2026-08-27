@@ -49,16 +49,15 @@ import {
 import {
   clearChargePlanSelectionPreview,
   clearChargePlanTimeline,
-  computeChargePlanSelection,
   computeChargePlanSelectionFromSlotIndexes,
   getChargePlanSlotIndexAtClientX,
+  getChargePlanTrackSlots,
   hideChargePlanContextMenu,
   hideChargePlanDatePicker,
   renderChargePlanTimeline,
   setChargePlanFeedback,
   showChargePlanDatePicker,
   showChargePlanContextMenu,
-  updateChargePlanSelectionPreview,
 } from "./ui/chargeTimeline.js";
 import {
   clearRealWorkedDaysTable,
@@ -98,15 +97,38 @@ import {
 } from "./ui/summary.js";
 import { clearTables, renderTables } from "./ui/tables.js";
 import {
-  getHalfDaySlotRange,
-  getSegmentAllocationByMonth,
-  getSegmentAllocationDays,
+  getSegmentEffectiveDays,
   parseRawDateTime,
 } from "./utils/timeSegments.js";
-import { availableDaysAfterLeave } from "./utils/leaveAbsences.js";
+import {
+  getMonthAvailableDays,
+  getMonthBounds,
+  getMonthBusinessDays,
+} from "./utils/monthSegments.js";
+import {
+  CHARGE_PLAN_SAVE_STALL_MESSAGE,
+  computeMonthSlotGeometry,
+  createChargePlanEditSession,
+  createChargePlanSaveLock,
+  resolveChargePlanClickIntent,
+  resolveClickedMonthKey,
+  validateEffectifInput,
+} from "./utils/chargePlanSegmentForm.js";
+
+// Une seule ecriture de segment a la fois : cf. createChargePlanSaveLock.
+// `onStall` : l'ecriture n'a jamais rendu la main, on rend la fenetre fermable
+// et on l'explique, mais Enregistrer reste desactive (le verrou, lui, tient).
+const chargePlanSaveLock = createChargePlanSaveLock({
+  onStall: () => {
+    setEditChargePlanFeedback(CHARGE_PLAN_SAVE_STALL_MESSAGE);
+    applyChargePlanSaveLockToUi();
+  },
+});
+// Session de saisie courante de la fenetre segment : une ecriture partie avant
+// la derniere ouverture/fermeture n'a plus le droit de la piloter.
+const chargePlanEditSession = createChargePlanEditSession();
 
 let dom = null;
-let chargeTimelineDrag = null;
 let chargePlanPan = null;
 let chargePlanVisibleDateTimer = null;
 let chargePlanViewportRestoreFrame = null;
@@ -1345,22 +1367,6 @@ function showChargePlanEditLockedFeedback(boardEl) {
   }
 }
 
-function cancelChargePlanSegmentDrag({ clearFeedback = true } = {}) {
-  if (!chargeTimelineDrag) {
-    return;
-  }
-
-  if (chargeTimelineDrag.segmentEl instanceof HTMLElement) {
-    chargeTimelineDrag.segmentEl.classList.remove("is-resizing");
-  }
-
-  clearChargePlanSelectionPreview(chargeTimelineDrag.trackEl);
-  if (clearFeedback) {
-    setChargePlanFeedback(chargeTimelineDrag.boardEl, "");
-  }
-  chargeTimelineDrag = null;
-}
-
 function setEditChargePlanFeedback(message = "") {
   if (!(dom?.editSegmentFeedback instanceof HTMLElement)) {
     return;
@@ -1371,77 +1377,17 @@ function setEditChargePlanFeedback(message = "") {
   dom.editSegmentFeedback.hidden = !text;
 }
 
-function getSegmentHalfDayPart(date, edge = "start") {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
-    return "am";
+function formatChargePlanMonthLabel(monthKey) {
+  const parsed = parseMonthKey(monthKey);
+  if (!parsed) {
+    return "";
   }
 
-  const hours = date.getHours();
-  if (edge === "end") {
-    return hours <= 12 ? "am" : "pm";
-  }
-
-  return hours < 12 ? "am" : "pm";
-}
-
-function buildSegmentHalfDayBoundary(dateValue, part, edge = "start") {
-  const normalizedDateValue = String(dateValue || "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDateValue)) {
-    return null;
-  }
-
-  const anchorDate = new Date(`${normalizedDateValue}T12:00:00`);
-  if (Number.isNaN(anchorDate.getTime())) {
-    return null;
-  }
-
-  const slotRange = getHalfDaySlotRange(anchorDate, part);
-  if (!slotRange) {
-    return null;
-  }
-
-  return edge === "end" ? slotRange.endAt : slotRange.startAt;
-}
-
-function buildChargePlanSelectionFromEditValues({
-  startDateValue,
-  startPart,
-  endDateValue,
-  endPart,
-}) {
-  const startAt = buildSegmentHalfDayBoundary(startDateValue, startPart, "start");
-  const endAt = buildSegmentHalfDayBoundary(endDateValue, endPart, "end");
-
-  if (!startAt || !endAt) {
-    return {
-      error: "Veuillez choisir une date de debut et une date de fin valides.",
-    };
-  }
-
-  if (endAt <= startAt) {
-    return {
-      error: "La fin doit etre strictement apres le debut.",
-    };
-  }
-
-  const totalDays = getSegmentAllocationDays({
-    startAt,
-    endAt,
-  });
-
-  if (totalDays <= 0) {
-    return {
-      error: "La plage choisie ne contient aucun demi-jour ouvrable.",
-    };
-  }
-
-  return {
-    startDate: startAt.toISOString(),
-    endDate: endAt.toISOString(),
-    startAt,
-    endAt,
-    totalDays,
-  };
+  const monthLabel = APP_CONFIG.months[parsed.monthNumber - 1] || "";
+  const capitalizedLabel = monthLabel
+    ? `${monthLabel.charAt(0).toUpperCase()}${monthLabel.slice(1)}`
+    : "";
+  return `${capitalizedLabel} ${parsed.year}`.trim();
 }
 
 function formatEditSegmentDayValue(value) {
@@ -1462,15 +1408,6 @@ function normalizeOptionalEffectifDays(value) {
   return Math.max(0, numericValue);
 }
 
-function isHalfDayIncrement(value) {
-  const numericValue = Number(value);
-  if (!Number.isFinite(numericValue)) {
-    return false;
-  }
-
-  return Math.abs(numericValue * 2 - Math.round(numericValue * 2)) < 1e-9;
-}
-
 function setEditChargePlanMetricValue(element, value = null) {
   if (!(element instanceof HTMLElement)) {
     return;
@@ -1479,22 +1416,25 @@ function setEditChargePlanMetricValue(element, value = null) {
   element.textContent = value == null ? "--" : formatEditSegmentDayValue(value);
 }
 
+function setEditChargePlanContextLabels(monthKey = "", workerName = "") {
+  if (dom?.editSegmentMonthLabel instanceof HTMLElement) {
+    dom.editSegmentMonthLabel.textContent = formatChargePlanMonthLabel(monthKey);
+  }
+  if (dom?.editSegmentWorkerLabel instanceof HTMLElement) {
+    dom.editSegmentWorkerLabel.textContent = String(workerName || "").trim();
+  }
+}
+
+// Le mois de la fenetre ne se saisit plus : il vient du clic. Ne restent derives
+// que les jours disponibles du mois et le signalement « au-dela du disponible ».
 function syncEditChargePlanDerivedValues() {
   if (!dom) {
     return;
   }
 
-  const selection = buildChargePlanSelectionFromEditValues({
-    startDateValue: dom.editSegmentStartDateInput?.value,
-    startPart: dom.editSegmentStartPartInput?.value,
-    endDateValue: dom.editSegmentEndDateInput?.value,
-    endPart: dom.editSegmentEndPartInput?.value,
-  });
-  const rawEffectifDays = parseOptionalNumberInput(dom.editSegmentEffectifInput?.value);
-  const effectiveDays =
-    rawEffectifDays == null ? 0 : Math.max(0, rawEffectifDays);
+  const monthKey = editingChargePlanSegment?.monthKey || "";
 
-  if (selection?.error) {
+  if (!getMonthBounds(monthKey)) {
     if (dom.editSegmentEffectifInput instanceof HTMLInputElement) {
       dom.editSegmentEffectifInput.removeAttribute("max");
       dom.editSegmentEffectifInput.classList.remove("is-over-available");
@@ -1507,14 +1447,10 @@ function syncEditChargePlanDerivedValues() {
     editingChargePlanSegment?.absenceSet instanceof Set
       ? editingChargePlanSegment.absenceSet
       : new Set();
-  const availableDays = availableDaysAfterLeave(
-    selection.startAt,
-    selection.endAt,
-    absenceSet
-  );
+  const availableDays = getMonthAvailableDays(monthKey, absenceSet);
 
   if (dom.editSegmentEffectifInput instanceof HTMLInputElement) {
-    dom.editSegmentEffectifInput.max = String(selection.totalDays);
+    dom.editSegmentEffectifInput.max = String(getMonthBusinessDays(monthKey));
     const effectifValue = Number(dom.editSegmentEffectifInput.value);
     const isOverAvailable =
       dom.editSegmentEffectifInput.value !== "" &&
@@ -1545,25 +1481,64 @@ function formatEditSegmentInputValue(value) {
     .replace(/(\.\d*?)0+$/, "$1");
 }
 
+// Une seule source de verite pour l'etat visuel des deux boutons : Enregistrer
+// suit le VERROU (donc reste desactive apres expiration du delai de garde,
+// l'ecriture etant toujours en vol), Annuler suit la GARDE DE FERMETURE (donc
+// redevient cliquable a l'expiration, sinon la fenetre serait indefermable).
+function applyChargePlanSaveLockToUi() {
+  const isSaving = chargePlanSaveLock.isSaving();
+  const blocksClose = chargePlanSaveLock.blocksClose();
+
+  // Le verrou vient d'etre rendu : le message « l'enregistrement ne repond pas »
+  // est devenu faux alors que le formulaire redevient utilisable. On ne retire
+  // QUE ce message-la — jamais une erreur de validation, jamais la saisie d'une
+  // autre session (ce serait le defaut B a l'envers).
+  if (
+    !chargePlanSaveLock.isStalled() &&
+    dom?.editSegmentFeedback instanceof HTMLElement &&
+    dom.editSegmentFeedback.textContent === CHARGE_PLAN_SAVE_STALL_MESSAGE
+  ) {
+    setEditChargePlanFeedback("");
+  }
+
+  if (dom?.saveEditSegmentBtn instanceof HTMLButtonElement) {
+    dom.saveEditSegmentBtn.disabled = isSaving;
+  }
+  if (dom?.cancelEditSegmentBtn instanceof HTMLButtonElement) {
+    dom.cancelEditSegmentBtn.disabled = blocksClose;
+  }
+  // Signalement visuel de l'etat, comme dans planning-synchro : sans lui,
+  // l'ecriture bloquee ne se lirait que sur un bouton grise par defaut.
+  if (dom?.editSegmentModal instanceof HTMLElement) {
+    dom.editSegmentModal.classList.toggle("is-submitting", blocksClose);
+    dom.editSegmentModal.classList.toggle("is-stalled", isSaving && !blocksClose);
+  }
+}
+
 function resetEditChargePlanForm() {
+  // Une ecriture est partie : fermer maintenant laisserait croire que rien n'a
+  // ete enregistre. La sauvegarde referme la fenetre elle-meme quand elle rend.
+  // Passe le delai de garde la fermeture redevient possible : sans ca, une
+  // promesse qui ne se regle jamais rendrait la fenetre indefermable a vie.
+  if (chargePlanSaveLock.blocksClose()) {
+    return;
+  }
+
+  // Fermer clot la session de saisie : ce qui se reglera apres n'a plus rien a
+  // fermer ni aucun message a afficher ici.
+  chargePlanEditSession.renew();
+
+  // La barre provisoire vit dans la piste memorisee par editingChargePlanSegment :
+  // il faut l'effacer AVANT de perdre la reference, sinon elle reste a l'ecran.
+  clearProvisionalChargePlanBar(editingChargePlanSegment?.trackEl);
   editingChargePlanSegment = null;
 
-  if (dom?.editSegmentStartDateInput instanceof HTMLInputElement) {
-    dom.editSegmentStartDateInput.value = "";
-  }
-  if (dom?.editSegmentStartPartInput instanceof HTMLSelectElement) {
-    dom.editSegmentStartPartInput.value = "am";
-  }
-  if (dom?.editSegmentEndDateInput instanceof HTMLInputElement) {
-    dom.editSegmentEndDateInput.value = "";
-  }
-  if (dom?.editSegmentEndPartInput instanceof HTMLSelectElement) {
-    dom.editSegmentEndPartInput.value = "pm";
-  }
   if (dom?.editSegmentEffectifInput instanceof HTMLInputElement) {
     dom.editSegmentEffectifInput.value = "";
   }
 
+  applyChargePlanSaveLockToUi();
+  setEditChargePlanContextLabels("", "");
   syncEditChargePlanDerivedValues();
   setEditChargePlanFeedback("");
   closeModal(dom?.editSegmentModal);
@@ -1630,7 +1605,48 @@ async function deleteChargePlanSegment(segmentContext, boardEl = null) {
   }
 }
 
+// Geometrie du mois dans une piste rendue, deduite des creneaux demi-journee
+// reellement affiches (le calcul lui-meme est pur, cf. chargePlanSegmentForm).
+function getChargePlanMonthGeometry(trackEl, monthKey) {
+  if (!(trackEl instanceof HTMLElement)) {
+    return null;
+  }
+
+  return computeMonthSlotGeometry(getChargePlanTrackSlots(trackEl), monthKey);
+}
+
+// Barre provisoire : l'apercu de selection existant, cale sur le mois entier et
+// hachure (classe is-provisional). Rien n'est ecrit en base tant que la fenetre
+// n'est pas validee — c'est purement visuel.
+function showProvisionalChargePlanBar(trackEl, monthKey) {
+  const geometry = getChargePlanMonthGeometry(trackEl, monthKey);
+  if (!geometry) return;
+
+  const previewEl = trackEl.querySelector(".charge-plan-selection-preview");
+  const labelEl = previewEl?.querySelector(".charge-plan-selection-label");
+  if (!(previewEl instanceof HTMLElement)) return;
+
+  previewEl.hidden = false;
+  previewEl.classList.add("is-provisional");
+  previewEl.style.left = `${geometry.leftPx}px`;
+  previewEl.style.width = `${geometry.widthPx}px`;
+  if (labelEl instanceof HTMLElement) labelEl.textContent = "";
+}
+
+function clearProvisionalChargePlanBar(trackEl) {
+  const previewEl = trackEl?.querySelector(".charge-plan-selection-preview");
+  if (previewEl instanceof HTMLElement) previewEl.classList.remove("is-provisional");
+  clearChargePlanSelectionPreview(trackEl);
+}
+
 function openEditChargePlanModal(segmentId, boardEl) {
+  // Une ecriture est en cours : ne pas ecraser son contexte sous ses pieds.
+  // Apres expiration du delai de garde on laisse rouvrir : mieux vaut rafficher
+  // le message d'ecriture bloquee que laisser le clic sans aucune reponse.
+  if (chargePlanSaveLock.blocksClose()) {
+    return;
+  }
+
   if (isChargePlanSegmentEditModeLocked(boardEl)) {
     showChargePlanEditLockedFeedback(boardEl);
     return;
@@ -1641,25 +1657,62 @@ function openEditChargePlanModal(segmentId, boardEl) {
     return;
   }
 
-  const startAt = parseRawDateTime(segmentContext.segment?.startAt);
-  const endAt = parseRawDateTime(segmentContext.segment?.endAt);
-  if (!startAt || !endAt) {
+  const monthKey = String(segmentContext.segment?.monthKey || "");
+  if (!getMonthBounds(monthKey)) {
     return;
   }
 
+  // Nouvelle session : une ecriture encore en vol ne parle plus de ce mois.
+  chargePlanEditSession.renew();
   editingChargePlanSegment = segmentContext;
   const workerAbsenceSet = segmentContext.worker?.absenceSet;
   editingChargePlanSegment.absenceSet =
     workerAbsenceSet instanceof Set ? workerAbsenceSet : new Set();
-  dom.editSegmentStartDateInput.value = toDateInputValue(startAt);
-  dom.editSegmentStartPartInput.value = getSegmentHalfDayPart(startAt, "start");
-  dom.editSegmentEndDateInput.value = toDateInputValue(endAt);
-  dom.editSegmentEndPartInput.value = getSegmentHalfDayPart(endAt, "end");
+  editingChargePlanSegment.monthKey = monthKey;
   dom.editSegmentEffectifInput.value = formatEditSegmentInputValue(
     segmentContext.segment?.effectifDays
   );
+  setEditChargePlanContextLabels(monthKey, segmentContext.worker?.name);
   syncEditChargePlanDerivedValues();
-  setEditChargePlanFeedback("");
+  setEditChargePlanFeedback(
+    chargePlanSaveLock.isStalled() ? CHARGE_PLAN_SAVE_STALL_MESSAGE : ""
+  );
+  applyChargePlanSaveLockToUi();
+  openModal(dom.editSegmentModal);
+}
+
+// Creation : on affiche une barre provisoire et on n'ecrit RIEN tant que
+// l'utilisateur n'a pas valide la fenetre (cf. spec §6). Annuler ne laisse
+// aucune ligne derriere lui.
+function openCreateChargePlanModal({ workerId, monthKey, boardEl, trackEl }) {
+  // Meme garde qu'a l'edition : tant que l'ecriture precedente n'a pas rendu la
+  // main (et n'a pas depasse son delai de garde), on ne rouvre pas la fenetre.
+  if (chargePlanSaveLock.blocksClose()) return;
+
+  const worker = getSelectedProjectWorker(workerId);
+  if (!worker) return;
+
+  // Nouvelle session : une ecriture encore en vol ne parle plus de ce mois.
+  chargePlanEditSession.renew();
+  editingChargePlanSegment = {
+    projectId: Number(getSelectedProject()?.id),
+    boardEl,
+    trackEl,
+    worker,
+    segment: null,
+    monthKey,
+    segmentField: getTimelineSegmentField(boardEl),
+    absenceSet: worker.absenceSet instanceof Set ? worker.absenceSet : new Set(),
+  };
+
+  showProvisionalChargePlanBar(trackEl, monthKey);
+  dom.editSegmentEffectifInput.value = "";
+  setEditChargePlanContextLabels(monthKey, worker.name);
+  syncEditChargePlanDerivedValues();
+  setEditChargePlanFeedback(
+    chargePlanSaveLock.isStalled() ? CHARGE_PLAN_SAVE_STALL_MESSAGE : ""
+  );
+  applyChargePlanSaveLockToUi();
   openModal(dom.editSegmentModal);
 }
 
@@ -1668,70 +1721,86 @@ async function saveEditedChargePlanSegment() {
     return;
   }
 
+  // Deuxieme clic pendant que le premier ecrit encore : sortir ici est ce qui
+  // empeche un second AddRecord sur le meme (projet, personne, mois). Reste vrai
+  // apres expiration du delai de garde : l'ecriture est toujours en vol.
+  if (chargePlanSaveLock.isSaving()) {
+    if (chargePlanSaveLock.isStalled()) {
+      setEditChargePlanFeedback(CHARGE_PLAN_SAVE_STALL_MESSAGE);
+    }
+    return;
+  }
+
   if (isChargePlanSegmentEditModeLocked(editingChargePlanSegment.boardEl)) {
     setEditChargePlanFeedback("Cliquez sur Editer pour modifier le planning.");
     return;
   }
 
-  const selection = buildChargePlanSelectionFromEditValues({
-    startDateValue: dom.editSegmentStartDateInput.value,
-    startPart: dom.editSegmentStartPartInput.value,
-    endDateValue: dom.editSegmentEndDateInput.value,
-    endPart: dom.editSegmentEndPartInput.value,
-  });
-
-  if (selection.error) {
-    setEditChargePlanFeedback(selection.error);
+  const monthKey = String(editingChargePlanSegment.monthKey || "");
+  if (!getMonthBounds(monthKey)) {
+    setEditChargePlanFeedback("Mois introuvable pour ce segment.");
     return;
   }
 
+  // Effectif obligatoire : c'est la seule donnee saisie, elle ne peut pas etre
+  // vide ni nulle. Le mois, lui, vient du clic.
   const rawEffectifInput = parseOptionalNumberInput(dom.editSegmentEffectifInput.value);
-  if (rawEffectifInput != null && rawEffectifInput < 0) {
-    setEditChargePlanFeedback(
-      "Le nombre de jours effectifs ne peut pas etre negatif."
-    );
+  const validation = validateEffectifInput(rawEffectifInput);
+  if (!validation.ok) {
+    setEditChargePlanFeedback(validation.message);
     return;
   }
 
-  if (rawEffectifInput != null && !isHalfDayIncrement(rawEffectifInput)) {
-    setEditChargePlanFeedback(
-      "Le nombre de jours effectifs doit etre un entier ou un multiple de 0,5."
-    );
+  // Plafonne aux jours ouvres du mois : au-dela, la journee n'existe pas.
+  const effectif = Math.min(validation.effectif, getMonthBusinessDays(monthKey));
+  const isCreation = !editingChargePlanSegment.segment;
+  const boardEl = editingChargePlanSegment.boardEl;
+
+  // Verrou pris AVANT le premier await, relache dans le finally. `acquire()`
+  // arme au passage le delai de garde : si la promesse Grist ne se regle jamais,
+  // ce finally n'arrivera pas et c'est lui qui rendra la fenetre fermable.
+  if (!chargePlanSaveLock.acquire()) {
+    return;
+  }
+  // Jeton de la session pour laquelle cette ecriture part : apres expiration du
+  // delai de garde, la fenetre a pu etre fermee puis rouverte sur un autre mois
+  // avant que la promesse ne se regle.
+  const submitToken = chargePlanEditSession.current();
+  applyChargePlanSaveLockToUi();
+
+  let succeeded = false;
+  try {
+    succeeded = isCreation
+      ? await createChargePlanSegment({
+          workerId: editingChargePlanSegment.worker?.id,
+          monthKey,
+          effectif,
+          segmentType: getTimelineSegmentType(boardEl),
+          boardEl,
+        })
+      : await updateChargePlanSegmentSelection(
+          editingChargePlanSegment,
+          { monthKey, effectif },
+          boardEl
+        );
+  } finally {
+    chargePlanSaveLock.release(); // desarme aussi le delai de garde
+    applyChargePlanSaveLockToUi();
+  }
+
+  // Resolution tardive d'une session abandonnee : le verrou vient d'etre rendu
+  // (ci-dessus), mais on ne ferme rien de force et on n'ecrase aucun message de
+  // la saisie en cours.
+  if (!chargePlanEditSession.owns(submitToken)) {
     return;
   }
 
-  const normalizedEffectifDays = normalizeOptionalEffectifDays(rawEffectifInput);
-
-  const nextSelection = {
-    ...selection,
-    effectifDays: normalizedEffectifDays,
-    effectifValueForSave:
-      normalizedEffectifDays == null ? "" : normalizedEffectifDays,
-  };
-
-  const annotatedSelection = annotateChargePlanSelection(
-    editingChargePlanSegment.worker?.id,
-    nextSelection,
-    {
-      ignoreSegmentId: editingChargePlanSegment.segment?.id,
-      segmentField: editingChargePlanSegment.segmentField,
-    }
-  );
-
-  if (annotatedSelection?.hasOverlap) {
+  if (!succeeded) {
     setEditChargePlanFeedback(
-      "Impossible de definir un segment qui chevauche deja une autre barre pour cette personne."
+      isCreation
+        ? "La creation du segment a echoue."
+        : "La mise a jour du segment a echoue."
     );
-    return;
-  }
-
-  const updateSucceeded = await updateChargePlanSegmentSelection(
-    editingChargePlanSegment,
-    nextSelection,
-    editingChargePlanSegment.boardEl
-  );
-  if (!updateSucceeded) {
-    setEditChargePlanFeedback("La mise a jour du segment a echoue.");
     return;
   }
 
@@ -2762,12 +2831,17 @@ function mergeChargePlanMonthlyDays(target, monthKey, value) {
     Math.round((toFiniteNumber(target[monthKey], 0) + toFiniteNumber(value, 0)) * 100) / 100;
 }
 
+// Un segment = un mois : le total mensuel se pose directement, exactement comme
+// le fait projectService.js au chargement. Toute ventilation au prorata a
+// disparu avec getSegmentAllocationByMonth.
 function buildChargePlanDaysByMonthFromSegments(segments = []) {
   return (segments || []).reduce((daysByMonth, segment) => {
-    const allocationByMonth = getSegmentAllocationByMonth(segment);
-    Object.entries(allocationByMonth).forEach(([monthKey, days]) => {
-      mergeChargePlanMonthlyDays(daysByMonth, monthKey, days);
-    });
+    const monthKey = String(segment?.monthKey || "");
+    if (!monthKey) {
+      return daysByMonth;
+    }
+
+    mergeChargePlanMonthlyDays(daysByMonth, monthKey, getSegmentEffectiveDays(segment));
     return daysByMonth;
   }, {});
 }
@@ -2785,21 +2859,25 @@ function sortChargePlanSegments(segments = []) {
   });
 }
 
+// Le mois est la verite du segment : startAt/endAt s'en deduisent, jamais
+// l'inverse. Un clone qui perdrait `monthKey` sortirait le segment de tous les
+// totaux mensuels (getSegmentEffectiveDays renvoie 0 sans mois).
 function cloneChargePlanSegment(segment, overrides = {}) {
-  const nextStartAt = parseRawDateTime(overrides.startAt ?? segment?.startAt);
-  const nextEndAt = parseRawDateTime(overrides.endAt ?? segment?.endAt);
+  const nextMonthKey = String(
+    (Object.prototype.hasOwnProperty.call(overrides, "monthKey")
+      ? overrides.monthKey
+      : segment?.monthKey) || ""
+  );
+  const bounds = getMonthBounds(nextMonthKey);
 
   return {
     ...segment,
     ...overrides,
-    startAt: nextStartAt,
-    endAt: nextEndAt,
-    allocationDays: toFiniteNumber(
-      Object.prototype.hasOwnProperty.call(overrides, "allocationDays")
-        ? overrides.allocationDays
-        : segment?.allocationDays,
-      0
-    ),
+    monthKey: nextMonthKey,
+    startAt: bounds ? bounds.startAt : parseRawDateTime(segment?.startAt),
+    endAt: bounds ? bounds.endAt : parseRawDateTime(segment?.endAt),
+    // Denormalise : jamais relu, garde la grille Grist lisible.
+    allocationDays: getMonthBusinessDays(nextMonthKey),
     effectifDays: normalizeOptionalEffectifDays(
       Object.prototype.hasOwnProperty.call(overrides, "effectifDays")
         ? overrides.effectifDays
@@ -2811,24 +2889,25 @@ function cloneChargePlanSegment(segment, overrides = {}) {
 function buildOptimisticChargePlanSegment({
   segmentId,
   workerId,
-  selection,
+  monthKey,
+  effectif,
   segmentType = "previsionnel",
   label = "",
 }) {
-  const startAt = parseRawDateTime(selection?.startDate);
-  const endAt = parseRawDateTime(selection?.endDate);
-  if (!startAt || !endAt) {
+  const bounds = getMonthBounds(monthKey);
+  if (!bounds) {
     return null;
   }
 
   return {
     id: Number(segmentId),
     projectTeamLink: Number(workerId),
-    startAt,
-    endAt,
+    monthKey: String(monthKey),
+    startAt: bounds.startAt,
+    endAt: bounds.endAt,
     segmentType,
-    allocationDays: toFiniteNumber(selection?.totalDays, 0),
-    effectifDays: normalizeOptionalEffectifDays(selection?.effectifDays),
+    allocationDays: getMonthBusinessDays(monthKey),
+    effectifDays: normalizeOptionalEffectifDays(effectif),
     label: String(label || ""),
     isPendingSync: Number(segmentId) <= 0,
   };
@@ -2842,15 +2921,14 @@ function rebuildWorkerChargePlanState(worker, segmentType, nextSegmentsInput) {
     [segmentField]: nextSegments,
   };
 
-  if (daysField === "provisionalDays") {
-    nextWorker.provisionalDays = buildChargePlanDaysByMonthFromSegments(nextSegments);
+  // Seul le previsionnel se modifie depuis ce widget. Les segments TimeReal ne
+  // portent pas de `monthKey` : recalculer workedDays a partir d'eux remettrait
+  // le mois a zero jusqu'au prochain rechargement.
+  if (daysField !== "provisionalDays") {
     return nextWorker;
   }
 
-  nextWorker.workedDays = nextSegments.length
-    ? buildChargePlanDaysByMonthFromSegments(nextSegments)
-    : {};
-
+  nextWorker.provisionalDays = buildChargePlanDaysByMonthFromSegments(nextSegments);
   return nextWorker;
 }
 
@@ -2997,18 +3075,21 @@ function removeChargePlanSegmentLocally({
   });
 }
 
-async function createChargePlanSegment(
+async function createChargePlanSegment({
   workerId,
-  selection,
+  monthKey,
+  effectif,
   segmentType = "previsionnel",
-  boardEl = null
-) {
+  boardEl = null,
+}) {
   if (isChargePlanSegmentEditModeLocked(boardEl)) {
     showChargePlanEditLockedFeedback(boardEl);
     return false;
   }
 
-  if (!selection?.startDate || !selection?.endDate || selection.totalDays <= 0) {
+  // `effectif` est garanti > 0 par validateEffectifInput en amont : sans ce
+  // garde-fou, createTimeSegment ecrirait Effectif: 0 sans rien signaler.
+  if (!getMonthBounds(monthKey) || !Number.isFinite(effectif) || effectif <= 0) {
     return false;
   }
 
@@ -3027,7 +3108,8 @@ async function createChargePlanSegment(
   const optimisticSegment = buildOptimisticChargePlanSegment({
     segmentId: getNextOptimisticTimeSegmentId(),
     workerId,
-    selection,
+    monthKey,
+    effectif,
     segmentType,
     label: "",
   });
@@ -3046,14 +3128,8 @@ async function createChargePlanSegment(
       await createTimeSegment({
         projectNumber: selectedProject.projectNumber,
         name: selectedWorker.name,
-        startDate: selection.startDate,
-        endDate: selection.endDate,
-        allocationDays: selection.totalDays,
-        effectif:
-          Object.prototype.hasOwnProperty.call(selection, "effectifValueForSave")
-            ? selection.effectifValueForSave
-            : undefined,
-        segmentType,
+        monthKey,
+        effectif,
         label: "",
       })
     );
@@ -3093,46 +3169,31 @@ async function createChargePlanSegment(
   }
 }
 
-async function updateChargePlanSegmentSelection(segmentContext, selection, boardEl = null) {
+// Le mois et l'effectif sont les deux seules choses modifiables. Le controle de
+// chevauchement a disparu : l'unicite (NumeroProjet, Name, Mois) le remplace, et
+// un clic sur un mois deja occupe ouvre l'edition au lieu de creer un doublon.
+async function updateChargePlanSegmentSelection(segmentContext, { monthKey, effectif }, boardEl = null) {
   if (isChargePlanSegmentEditModeLocked(boardEl)) {
     showChargePlanEditLockedFeedback(boardEl);
     return false;
   }
 
   if (
-    !segmentContext ||
-    !selection?.startDate ||
-    !selection?.endDate ||
-    selection.totalDays <= 0
+    !segmentContext?.segment ||
+    !getMonthBounds(monthKey) ||
+    !Number.isFinite(effectif) ||
+    effectif <= 0
   ) {
     return false;
   }
 
-  const hasEffectifUpdate = Object.prototype.hasOwnProperty.call(
-    selection,
-    "effectifDays"
-  );
-  const previousEffectifDays = normalizeOptionalEffectifDays(
-    segmentContext.segment?.effectifDays
-  );
-  const requestedEffectifDays = hasEffectifUpdate
-    ? normalizeOptionalEffectifDays(selection?.effectifDays)
-    : previousEffectifDays;
-  const nextEffectifDays =
-    requestedEffectifDays == null
-      ? null
-      : Math.min(selection.totalDays, requestedEffectifDays);
-  const shouldPersistEffectif =
-    hasEffectifUpdate || nextEffectifDays !== previousEffectifDays;
   const previousSegment = cloneChargePlanSegment(segmentContext.segment);
   const segmentProject = state.projects.find(
     (project) => Number(project?.id) === Number(segmentContext.projectId)
   );
   const nextSegment = cloneChargePlanSegment(segmentContext.segment, {
-    startAt: selection.startDate,
-    endAt: selection.endDate,
-    allocationDays: selection.totalDays,
-    effectifDays: nextEffectifDays,
+    monthKey,
+    effectifDays: effectif,
     isPendingSync: false,
   });
 
@@ -3147,14 +3208,8 @@ async function updateChargePlanSegmentSelection(segmentContext, selection, board
       segmentId: previousSegment.id,
       projectNumber: segmentProject?.projectNumber,
       name: segmentContext.worker?.name,
-      startDate: selection.startDate,
-      endDate: selection.endDate,
-      allocationDays: selection.totalDays,
-      effectif: shouldPersistEffectif
-        ? nextEffectifDays == null
-          ? ""
-          : nextEffectifDays
-        : undefined,
+      monthKey,
+      effectif,
     });
     return true;
   } catch (error) {
@@ -3171,11 +3226,6 @@ async function updateChargePlanSegmentSelection(segmentContext, selection, board
   }
 }
 
-async function resizeChargePlanSegment(segmentId, selection, boardEl = null) {
-  const segmentContext = findChargePlanSegmentContext(segmentId, boardEl);
-  return updateChargePlanSegmentSelection(segmentContext, selection, boardEl);
-}
-
 function getSelectedProjectWorker(workerId) {
   const selectedProject = getSelectedProject();
   if (!selectedProject) return null;
@@ -3183,62 +3233,6 @@ function getSelectedProjectWorker(workerId) {
   return (
     selectedProject.workers.find((currentWorker) => currentWorker.id === workerId) || null
   );
-}
-
-function selectionOverlapsWorkerSegments(worker, selection, options = {}) {
-  const ignoredSegmentId = Number(options.ignoreSegmentId);
-  const segmentField = options.segmentField || "segments";
-  if (!worker || !selection?.startDate || !selection?.endDate) {
-    return false;
-  }
-
-  const selectionStart = parseRawDateTime(selection.startDate);
-  const selectionEnd = parseRawDateTime(selection.endDate);
-  if (!selectionStart || !selectionEnd) {
-    return false;
-  }
-
-  return (worker?.[segmentField] || []).some((segment) => {
-    if (Number(segment?.id) === ignoredSegmentId) {
-      return false;
-    }
-
-    const segmentStart = parseRawDateTime(segment?.startAt);
-    const segmentEnd = parseRawDateTime(segment?.endAt);
-    if (!segmentStart || !segmentEnd) {
-      return false;
-    }
-
-    return selectionStart < segmentEnd && selectionEnd > segmentStart;
-  });
-}
-
-function annotateChargePlanSelection(workerId, selection, options = {}) {
-  if (!selection) return null;
-
-  const worker = getSelectedProjectWorker(workerId);
-  const segmentField = options.segmentField || "segments";
-  return {
-    ...selection,
-    hasOverlap: selectionOverlapsWorkerSegments(worker, selection, {
-      ...options,
-      segmentField,
-    }),
-  };
-}
-
-function syncChargePlanFeedback(selection, boardEl = dom?.chargePlanBoard || null) {
-  if (!(boardEl instanceof HTMLElement)) return;
-
-  if (selection?.hasOverlap) {
-    setChargePlanFeedback(
-      boardEl,
-      "Impossible de definir un segment qui chevauche deja une autre barre pour cette personne."
-    );
-    return;
-  }
-
-  setChargePlanFeedback(boardEl, "");
 }
 
 function getChargePlanScrollElement(boardEl = dom?.chargePlanBoard || null) {
@@ -4131,7 +4125,9 @@ function maybeRebaseChargePlanVirtualTimeline(
     return false;
   }
 
-  if (chargeTimelineDrag) {
+  // Rebaser redessine toute la frise : la barre provisoire de la fenetre
+  // ouverte disparaitrait et sa piste deviendrait orpheline.
+  if (editingChargePlanSegment) {
     return false;
   }
 
@@ -4620,7 +4616,6 @@ async function handleProjectSelectionChange() {
   clearChargePlanWheelZoomFrame();
   clearChargePlanVisibleDateTimer();
   chargePlanSegmentEditModeEnabled = false;
-  cancelChargePlanSegmentDrag({ clearFeedback: false });
   planningManagementHover = null;
   setState({
     selectedProjectId: Number.isInteger(selectedProjectId) ? selectedProjectId : null,
@@ -4958,11 +4953,8 @@ function handleChargePlanEditModeToggle(event) {
   closeChargePlanDatePicker(boardEl);
   clearChargePlanWheelZoomFrame();
 
-  if (!chargePlanSegmentEditModeEnabled) {
-    cancelChargePlanSegmentDrag({ clearFeedback: false });
-    if (editingChargePlanSegment?.boardEl === boardEl) {
-      resetEditChargePlanForm();
-    }
+  if (!chargePlanSegmentEditModeEnabled && editingChargePlanSegment?.boardEl === boardEl) {
+    resetEditChargePlanForm();
   }
 
   renderChargePlanSection();
@@ -5085,40 +5077,74 @@ function handleChargePlanContextMenu(event) {
   });
 }
 
-function handleChargePlanSegmentDoubleClick(event) {
+// Surlignage du mois survole : depuis la disparition du glisser-creer, c'est ce
+// qui rend visible l'unite de creation (un clic = un mois entier).
+function updateChargePlanMonthHover(trackEl, clientX) {
+  const hoverEl = trackEl?.querySelector(".charge-plan-month-hover");
+  if (!(hoverEl instanceof HTMLElement)) return;
+
+  const offsetX = clientX - trackEl.getBoundingClientRect().left;
+  const currentLeft = Number(hoverEl.dataset.leftPx);
+  const currentWidth = Number(hoverEl.dataset.widthPx);
+  // Toujours dans le mois deja surligne : on ne rebalaye pas les creneaux, ce
+  // handler passe a chaque mouvement de souris.
+  if (
+    !hoverEl.hidden &&
+    Number.isFinite(currentLeft) &&
+    Number.isFinite(currentWidth) &&
+    offsetX >= currentLeft &&
+    offsetX < currentLeft + currentWidth
+  ) {
+    return;
+  }
+
+  const slotIndex = getChargePlanSlotIndexAtClientX(trackEl, clientX);
+  const monthKey = resolveClickedMonthKey(
+    computeChargePlanSelectionFromSlotIndexes(trackEl, slotIndex, slotIndex)
+  );
+  const geometry = monthKey ? getChargePlanMonthGeometry(trackEl, monthKey) : null;
+  if (!geometry) {
+    hoverEl.hidden = true;
+    return;
+  }
+
+  hoverEl.hidden = false;
+  hoverEl.style.left = `${geometry.leftPx}px`;
+  hoverEl.style.width = `${geometry.widthPx}px`;
+  hoverEl.dataset.leftPx = String(geometry.leftPx);
+  hoverEl.dataset.widthPx = String(geometry.widthPx);
+}
+
+function clearChargePlanMonthHover(boardEl, exceptTrackEl = null) {
+  if (!(boardEl instanceof HTMLElement)) return;
+
+  boardEl.querySelectorAll(".charge-plan-month-hover").forEach((hoverEl) => {
+    if (!(hoverEl instanceof HTMLElement)) return;
+    if (exceptTrackEl && hoverEl.parentElement === exceptTrackEl) return;
+    hoverEl.hidden = true;
+  });
+}
+
+function handleChargePlanTrackHover(event) {
   const boardEl =
     event.currentTarget instanceof HTMLElement
       ? event.currentTarget
       : getTimelineBoardFromElement(event.target);
   if (!(boardEl instanceof HTMLElement)) return;
   if (!(event.target instanceof Element)) return;
-  if (chargePlanPan || chargeTimelineDrag) return;
 
-  const segmentEl = event.target.closest(".charge-plan-segment-bar");
-  if (!(segmentEl instanceof HTMLElement)) {
-    return;
+  const trackEl = event.target.closest(".charge-plan-track");
+  const isHoverable =
+    trackEl instanceof HTMLElement &&
+    !trackEl.classList.contains("charge-plan-track--readonly") &&
+    !chargePlanPan &&
+    !editingChargePlanSegment &&
+    !isChargePlanSegmentEditModeLocked(boardEl);
+
+  clearChargePlanMonthHover(boardEl, isHoverable ? trackEl : null);
+  if (isHoverable) {
+    updateChargePlanMonthHover(trackEl, event.clientX);
   }
-
-  if (isChargePlanSegmentEditModeLocked(boardEl)) {
-    event.preventDefault();
-    event.stopPropagation();
-    hideChargePlanContextMenu(boardEl);
-    closeChargePlanDatePicker(boardEl);
-    showChargePlanEditLockedFeedback(boardEl);
-    return;
-  }
-
-  const segmentId = Number(segmentEl.dataset.segmentId);
-  if (!Number.isInteger(segmentId) || segmentId <= 0) {
-    return;
-  }
-
-  event.preventDefault();
-  event.stopPropagation();
-  hideChargePlanContextMenu(boardEl);
-  closeChargePlanDatePicker(boardEl);
-  setChargePlanFeedback(boardEl, "");
-  openEditChargePlanModal(segmentId, boardEl);
 }
 
 function handleChargePlanSegmentMouseOver(event) {
@@ -5171,7 +5197,7 @@ function handleChargePlanHeaderWheel(event) {
 
   const headerTrack = event.target.closest(".charge-plan-header-track");
   if (!(headerTrack instanceof HTMLElement)) return;
-  if (chargePlanPan || chargeTimelineDrag) return;
+  if (chargePlanPan) return;
   event.preventDefault();
 
   hideChargePlanContextMenu(boardEl);
@@ -5378,90 +5404,52 @@ function handleChargePlanPointerDown(event) {
 
   if (!trackEl || trackEl.classList.contains("charge-plan-track--readonly")) return;
 
-  const resizeHandleEl = event.target.closest(".charge-plan-segment-handle");
-
   event.preventDefault();
+  // La fenetre va couvrir la frise : le surlignage n'aurait plus de sens et
+  // resterait fige tant qu'aucun mouvement de souris ne revient sur la piste.
+  clearChargePlanMonthHover(boardEl);
 
-  if (segmentEl instanceof HTMLElement) {
-    const workerId = Number(segmentEl.dataset.workerId);
-    const segmentId = Number(segmentEl.dataset.segmentId);
-    const startSlotIndex = Number(segmentEl.dataset.startSlotIndex);
-    const endSlotIndex = Number(segmentEl.dataset.endSlotIndex);
-    let edge = resizeHandleEl?.dataset.resizeEdge || "";
-
-    if (!edge && segmentEl.classList.contains("is-compact")) {
-      const segmentRect = segmentEl.getBoundingClientRect();
-      const clickRatio =
-        segmentRect.width > 0
-          ? (event.clientX - segmentRect.left) / segmentRect.width
-          : 1;
-      edge = clickRatio <= 0.5 ? "start" : "end";
-    }
-
-    if (
-      !Number.isInteger(workerId) ||
-      !Number.isInteger(segmentId) ||
-      !Number.isInteger(startSlotIndex) ||
-      !Number.isInteger(endSlotIndex) ||
-      (edge !== "start" && edge !== "end")
-    ) {
-      if (segmentEl) return;
-    }
-
-    if (edge === "start" || edge === "end") {
-      const initialSelection = annotateChargePlanSelection(
-        workerId,
-        computeChargePlanSelectionFromSlotIndexes(trackEl, startSlotIndex, endSlotIndex),
-        {
-          ignoreSegmentId: segmentId,
-          segmentField: getTimelineSegmentField(boardEl),
-        }
-      );
-
-      setChargePlanFeedback(boardEl, "");
-      segmentEl.classList.add("is-resizing");
-      chargeTimelineDrag = {
-        mode: "resize",
-        boardEl,
-        trackEl,
-        workerId,
-        segmentId,
-        segmentEl,
-        edge,
-        fixedSlotIndex: edge === "start" ? endSlotIndex : startSlotIndex,
-        currentSelection: initialSelection,
-      };
-
-      syncChargePlanFeedback(initialSelection, boardEl);
-      updateChargePlanSelectionPreview(trackEl, initialSelection);
-      return;
-    }
-  }
-
-  if (segmentEl) return;
+  const slotIndex = getChargePlanSlotIndexAtClientX(trackEl, event.clientX);
+  const selection = computeChargePlanSelectionFromSlotIndexes(trackEl, slotIndex, slotIndex);
+  const monthKey = resolveClickedMonthKey(selection);
+  if (!monthKey) return;
 
   const workerId = Number(trackEl.dataset.workerId);
   if (!Number.isInteger(workerId)) return;
 
   setChargePlanFeedback(boardEl, "");
 
-  chargeTimelineDrag = {
-    mode: "create",
-    boardEl,
-    trackEl,
-    workerId,
-    startClientX: event.clientX,
-    currentSelection: annotateChargePlanSelection(
-      workerId,
-      computeChargePlanSelection(trackEl, event.clientX, event.clientX),
-      {
-        segmentField: getTimelineSegmentField(boardEl),
-      }
-    ),
-  };
+  // Un segment = un mois : le mois deja occupe s'edite, il ne se double pas.
+  // La barre reellement sous le curseur prime sur la premiere barre du mois —
+  // sinon, avec des doublons legacy empiles, on editerait toujours celle du haut.
+  const monthBar = trackEl.querySelector(
+    `.charge-plan-segment-bar[data-month-key="${monthKey}"]`
+  );
+  const intent = resolveChargePlanClickIntent({
+    monthKey,
+    clickedSegmentId:
+      segmentEl instanceof HTMLElement ? segmentEl.dataset.segmentId : null,
+    monthSegmentId: monthBar instanceof HTMLElement ? monthBar.dataset.segmentId : null,
+  });
 
-  syncChargePlanFeedback(chargeTimelineDrag.currentSelection, boardEl);
-  updateChargePlanSelectionPreview(trackEl, chargeTimelineDrag.currentSelection);
+  if (intent.action === "edit") {
+    openEditChargePlanModal(intent.segmentId, boardEl);
+    return;
+  }
+
+  if (intent.action === "pending") {
+    // Segment optimiste : son id Grist n'est pas encore connu, l'editer
+    // ecrirait sur un identifiant negatif.
+    setChargePlanFeedback(
+      boardEl,
+      "Segment en cours d'enregistrement, reessayez dans un instant."
+    );
+    return;
+  }
+
+  if (intent.action !== "create") return;
+
+  openCreateChargePlanModal({ workerId, monthKey, boardEl, trackEl });
 }
 
 function handleChargePlanPointerMove(event) {
@@ -5470,125 +5458,18 @@ function handleChargePlanPointerMove(event) {
     const deltaX = event.clientX - chargePlanPan.startClientX;
     chargePlanPan.scrollEl.scrollLeft = chargePlanPan.startScrollLeft - deltaX;
     scheduleChargePlanScrollSync(chargePlanPan.scrollEl, chargePlanPan.boardEl);
-    return;
   }
-
-  if (!chargeTimelineDrag) return;
-
-  if (isChargePlanSegmentEditModeLocked(chargeTimelineDrag.boardEl)) {
-    const lockedBoardEl = chargeTimelineDrag.boardEl;
-    cancelChargePlanSegmentDrag({ clearFeedback: false });
-    showChargePlanEditLockedFeedback(lockedBoardEl);
-    return;
-  }
-
-  if (chargeTimelineDrag.mode === "resize") {
-    const movingSlotIndex = getChargePlanSlotIndexAtClientX(
-      chargeTimelineDrag.trackEl,
-      event.clientX
-    );
-    if (movingSlotIndex < 0) return;
-
-    let startSlotIndex =
-      chargeTimelineDrag.edge === "start"
-        ? Math.min(movingSlotIndex, chargeTimelineDrag.fixedSlotIndex)
-        : chargeTimelineDrag.fixedSlotIndex;
-    let endSlotIndex =
-      chargeTimelineDrag.edge === "end"
-        ? Math.max(movingSlotIndex, chargeTimelineDrag.fixedSlotIndex)
-        : chargeTimelineDrag.fixedSlotIndex;
-
-    if (chargeTimelineDrag.edge === "start") {
-      endSlotIndex = chargeTimelineDrag.fixedSlotIndex;
-    } else {
-      startSlotIndex = chargeTimelineDrag.fixedSlotIndex;
-    }
-
-    chargeTimelineDrag.currentSelection = annotateChargePlanSelection(
-      chargeTimelineDrag.workerId,
-      computeChargePlanSelectionFromSlotIndexes(
-        chargeTimelineDrag.trackEl,
-        startSlotIndex,
-        endSlotIndex
-      ),
-      {
-        ignoreSegmentId: chargeTimelineDrag.segmentId,
-        segmentField: getTimelineSegmentField(chargeTimelineDrag.boardEl),
-      }
-    );
-  } else {
-    chargeTimelineDrag.currentSelection = annotateChargePlanSelection(
-      chargeTimelineDrag.workerId,
-      computeChargePlanSelection(
-        chargeTimelineDrag.trackEl,
-        chargeTimelineDrag.startClientX,
-        event.clientX
-      ),
-      {
-        segmentField: getTimelineSegmentField(chargeTimelineDrag.boardEl),
-      }
-    );
-  }
-
-  syncChargePlanFeedback(chargeTimelineDrag.currentSelection, chargeTimelineDrag.boardEl);
-  updateChargePlanSelectionPreview(
-    chargeTimelineDrag.trackEl,
-    chargeTimelineDrag.currentSelection
-  );
 }
 
 async function handleChargePlanPointerUp() {
-  if (chargePlanPan) {
-    chargePlanPan.scrollEl.classList.remove("is-panning");
-    tryReleasePointerCapture(chargePlanPan.scrollEl, chargePlanPan.pointerId);
-    scheduleChargePlanScrollSync(chargePlanPan.scrollEl, chargePlanPan.boardEl, {
-      persistVisibleDate: true,
-    });
-    chargePlanPan = null;
-  }
+  if (!chargePlanPan) return;
 
-  if (!chargeTimelineDrag) return;
-
-  if (isChargePlanSegmentEditModeLocked(chargeTimelineDrag.boardEl)) {
-    const lockedBoardEl = chargeTimelineDrag.boardEl;
-    cancelChargePlanSegmentDrag({ clearFeedback: false });
-    showChargePlanEditLockedFeedback(lockedBoardEl);
-    return;
-  }
-
-  const { trackEl, workerId, currentSelection } = chargeTimelineDrag;
-  if (chargeTimelineDrag.segmentEl instanceof HTMLElement) {
-    chargeTimelineDrag.segmentEl.classList.remove("is-resizing");
-  }
-  clearChargePlanSelectionPreview(trackEl);
-  const dragState = chargeTimelineDrag;
-  chargeTimelineDrag = null;
-
-  if (
-    !currentSelection ||
-    currentSelection.totalDays <= 0
-  ) {
-    setChargePlanFeedback(dragState.boardEl, "");
-    return;
-  }
-
-  if (currentSelection.hasOverlap) {
-    syncChargePlanFeedback(currentSelection, dragState.boardEl);
-    return;
-  }
-
-  setChargePlanFeedback(dragState.boardEl, "");
-  if (dragState.mode === "resize") {
-    await resizeChargePlanSegment(dragState.segmentId, currentSelection, dragState.boardEl);
-    return;
-  }
-
-  await createChargePlanSegment(
-    workerId,
-    currentSelection,
-    getTimelineSegmentType(dragState.boardEl),
-    dragState.boardEl
-  );
+  chargePlanPan.scrollEl.classList.remove("is-panning");
+  tryReleasePointerCapture(chargePlanPan.scrollEl, chargePlanPan.pointerId);
+  scheduleChargePlanScrollSync(chargePlanPan.scrollEl, chargePlanPan.boardEl, {
+    persistVisibleDate: true,
+  });
+  chargePlanPan = null;
 }
 
 function handleChargePlanScroll(event) {
@@ -5840,8 +5721,14 @@ function bindEvents() {
   });
 
   dom.saveEditSegmentBtn.addEventListener("click", () => {
+    // Jeton capture ici : un rejet tardif n'a plus rien a dire de ce que
+    // l'utilisateur saisit dans une fenetre entre-temps rouverte.
+    const submitToken = chargePlanEditSession.current();
     saveEditedChargePlanSegment().catch((error) => {
       console.error("Erreur modification segment :", error);
+      if (!chargePlanEditSession.owns(submitToken)) {
+        return;
+      }
       setEditChargePlanFeedback("Une erreur est survenue pendant la modification du segment.");
     });
   });
@@ -5856,21 +5743,17 @@ function bindEvents() {
     }
   });
 
-  [
-    dom.editSegmentStartDateInput,
-    dom.editSegmentStartPartInput,
-    dom.editSegmentEndDateInput,
-    dom.editSegmentEndPartInput,
-    dom.editSegmentEffectifInput,
-  ].forEach((fieldEl) => {
-    fieldEl.addEventListener("input", () => {
-      setEditChargePlanFeedback("");
+  [dom.editSegmentEffectifInput].forEach((fieldEl) => {
+    // Le message d'ecriture bloquee doit survivre a la saisie : il est la seule
+    // explication de l'etat, et l'utilisateur ne peut de toute facon plus valider.
+    const handleEditSegmentFieldChange = () => {
+      if (!chargePlanSaveLock.isStalled()) {
+        setEditChargePlanFeedback("");
+      }
       syncEditChargePlanDerivedValues();
-    });
-    fieldEl.addEventListener("change", () => {
-      setEditChargePlanFeedback("");
-      syncEditChargePlanDerivedValues();
-    });
+    };
+    fieldEl.addEventListener("input", handleEditSegmentFieldChange);
+    fieldEl.addEventListener("change", handleEditSegmentFieldChange);
   });
 
   dom.addWorkerBtn.addEventListener("click", () => {
@@ -5929,13 +5812,16 @@ function bindEvents() {
         console.error("Erreur action menu timeline :", error);
       });
     });
-    boardEl.addEventListener("dblclick", handleChargePlanSegmentDoubleClick);
     boardEl.addEventListener("contextmenu", handleChargePlanContextMenu);
     boardEl.addEventListener("wheel", handleChargePlanHeaderWheel, {
       passive: false,
     });
     boardEl.addEventListener("scroll", handleChargePlanScroll, true);
     boardEl.addEventListener("pointerdown", handleChargePlanPointerDown);
+    boardEl.addEventListener("pointermove", handleChargePlanTrackHover);
+    boardEl.addEventListener("pointerleave", () => {
+      clearChargePlanMonthHover(boardEl);
+    });
   });
   document.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) {
@@ -6008,20 +5894,19 @@ function bindEvents() {
       });
       chargePlanPan = null;
     }
-    if (!chargeTimelineDrag) return;
-    if (chargeTimelineDrag.segmentEl instanceof HTMLElement) {
-      chargeTimelineDrag.segmentEl.classList.remove("is-resizing");
-    }
-    clearChargePlanSelectionPreview(chargeTimelineDrag.trackEl);
-    setChargePlanFeedback(chargeTimelineDrag.boardEl, "");
-    closeChargePlanContextMenu();
-    chargeTimelineDrag = null;
   });
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
 
     if (!dom.planningAlertsModal.hidden) {
       closePlanningAlertsPopup();
+      return;
+    }
+
+    // Echap ferme la fenetre du segment : rien n'est ecrit, la barre provisoire
+    // s'efface avec elle.
+    if (editingChargePlanSegment) {
+      resetEditChargePlanForm();
       return;
     }
 

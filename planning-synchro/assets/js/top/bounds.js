@@ -1,14 +1,32 @@
-import { parseDateTime, formatIsoDate } from "../utils/dates.js";
+import { resolveSegmentMonthKey, getMonthBounds } from "../utils/monthSegments.js";
+import { formatIsoDate } from "../utils/dates.js";
+
+// Bornes de la frise cote previsionnel : du 1er jour du plus petit mois au
+// dernier jour du plus grand. Les monthKey "YYYY-MM" se comparent
+// lexicographiquement, donc un simple min/max de chaines suffit.
 export function computeTimeSegmentBounds(rows, columns) {
-  let minMs = Infinity, maxMs = -Infinity;
-  for (const row of rows || []) {
-    const s = parseDateTime(row?.[columns.startDate]);
-    const e = parseDateTime(row?.[columns.endDate]);
-    if (s) minMs = Math.min(minMs, s.getTime());
-    if (e) maxMs = Math.max(maxMs, e.getTime());
-    if (s) maxMs = Math.max(maxMs, s.getTime());
-    if (e) minMs = Math.min(minMs, e.getTime());
-  }
-  if (!Number.isFinite(minMs) || !Number.isFinite(maxMs) || maxMs < minMs) return null;
-  return { startMs: minMs, endMs: maxMs, startDate: formatIsoDate(new Date(minMs)), endDate: formatIsoDate(new Date(maxMs)) };
+  let minMonthKey = "";
+  let maxMonthKey = "";
+
+  (rows || []).forEach((row) => {
+    const monthKey = resolveSegmentMonthKey(row, columns);
+    if (!monthKey) return;
+    if (!minMonthKey || monthKey < minMonthKey) minMonthKey = monthKey;
+    if (!maxMonthKey || monthKey > maxMonthKey) maxMonthKey = monthKey;
+  });
+
+  if (!minMonthKey || !maxMonthKey) return null;
+
+  // La branche ISO de getMonthKeyFromRawMonth ne valide pas l'intervalle du
+  // mois (contrairement a la branche "MM/YYYY") : un monthKey syntaxiquement
+  // valide ("2026-13") peut donc etre semantiquement invalide. getMonthBounds
+  // renvoie null dans ce cas — s'en degrader proprement plutot que planter.
+  const minBounds = getMonthBounds(minMonthKey);
+  const maxBounds = getMonthBounds(maxMonthKey);
+  if (!minBounds || !maxBounds) return null;
+
+  return {
+    startDate: formatIsoDate(minBounds.startAt),
+    endDate: formatIsoDate(maxBounds.endAt),
+  };
 }

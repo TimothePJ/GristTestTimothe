@@ -221,36 +221,16 @@
         <div class="modal-content modal-content--segment">
             <div class="budget-modal-header">
                 <div>
-                    <h2>Modifier le segment</h2>
-                    <p class="budget-modal-subtitle">Choisissez une nouvelle plage au demi-jour pres.</p>
+                    <h2>Segment mensuel</h2>
+                    <p class="segment-edit-context">
+                        <span id="edit-segment-month-label"></span>
+                        <span id="edit-segment-worker-label"></span>
+                    </p>
+                    <p class="budget-modal-subtitle">Saisissez les jours effectivement travaillés sur ce mois.</p>
                 </div>
-                <button id="cancel-edit-segment-btn" type="button" class="budget-modal-close-btn">Fermer</button>
+                <button id="cancel-edit-segment-btn" type="button" class="budget-modal-close-btn">Annuler</button>
             </div>
             <div class="segment-edit-form">
-                <div class="segment-edit-grid">
-                    <label class="segment-edit-field">
-                        <span>Début</span>
-                        <input type="date" id="edit-segment-start-date">
-                    </label>
-                    <label class="segment-edit-field">
-                        <span>Période</span>
-                        <select id="edit-segment-start-part">
-                            <option value="am">Matin</option>
-                            <option value="pm">Apres-midi</option>
-                        </select>
-                    </label>
-                    <label class="segment-edit-field">
-                        <span>Fin</span>
-                        <input type="date" id="edit-segment-end-date">
-                    </label>
-                    <label class="segment-edit-field">
-                        <span>Période</span>
-                        <select id="edit-segment-end-part">
-                            <option value="am">Matin</option>
-                            <option value="pm">Apres-midi</option>
-                        </select>
-                    </label>
-                </div>
                 <section class="segment-edit-section" aria-labelledby="edit-segment-effectif-title">
                     <div class="segment-edit-section-copy">
                         <h3 id="edit-segment-effectif-title">Jours Effectifs :</h3>
@@ -264,13 +244,13 @@
                             <input
                                 type="number"
                                 id="edit-segment-effectif"
-                                min="0"
+                                min="0.5"
                                 step="0.5"
                                 placeholder="0"
                             >
                         </label>
                         <div class="segment-edit-metric">
-                            <span class="segment-edit-metric-label">Jours disponibles dans la plage</span>
+                            <span class="segment-edit-metric-label">Jours disponibles dans le mois</span>
                             <strong id="edit-segment-calculated-days">--</strong>
                         </div>
                     </div>

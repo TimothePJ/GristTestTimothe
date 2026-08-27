@@ -1,10 +1,10 @@
 import { TABLES } from "./config.js";
 import { loadGestionUserData } from "./dataService.js";
 import {
-  getRangeCapacityDays,
   getWeekRange,
   getWeeksGroupedByMonth,
 } from "./dateRange.js";
+import { getMonthBounds } from "./monthSegments.js";
 import { computeWeeklyUtilizationMatrix } from "./utilizationService.js";
 import {
   compareText,
@@ -125,7 +125,8 @@ function buildWeekGroups(year) {
           range,
           startTime: range.start.getTime(),
           endTime: range.end.getTime(),
-          capacityDays: getRangeCapacityDays(range),
+          // Pas de capacityDays ici : la capacite depend desormais des conges
+          // du collaborateur, donc du couple (personne, semaine).
           detail: `${formatShortDate(range.start)} au ${formatShortDate(friday)}`,
         };
       })
@@ -159,12 +160,15 @@ function getWeeksForYear(year) {
   return state.weekCache.get(normalizedYear);
 }
 
+// Un segment ne porte plus de bornes de dates : son annee se lit dans monthKey
+// (« YYYY-MM »). Sans cela le selecteur retombait sur la seule annee courante
+// et masquait toute planification passee ou future.
 function getSegmentYearBounds(segments) {
   const years = new Set([new Date().getFullYear()]);
 
   segments.forEach((segment) => {
-    if (segment.startDate) years.add(segment.startDate.getFullYear());
-    if (segment.endDate) years.add(segment.endDate.getFullYear());
+    const year = Number(String(segment.monthKey || "").slice(0, 4));
+    if (Number.isInteger(year) && year > 0) years.add(year);
   });
 
   const minYear = Math.min(...years);
@@ -488,9 +492,36 @@ function applyTotalCellClass(cell, percent) {
   }
 }
 
+// Jours planifies sur une semaine a capacite nulle. Aucun pourcentage n'est
+// calculable (division par zero) : ce libelle est le seul endroit ou ces jours
+// peuvent encore se lire.
+function formatLeaveDays(days) {
+  const number = Number(days);
+  if (!Number.isFinite(number)) return "0,0";
+  return number.toFixed(1).replace(".", ",");
+}
+
 function createPercentCell(row, week) {
   const cell = document.createElement("td");
   cell.className = "week-cell";
+
+  // Capacite nulle : afficher 0 % laisserait croire que la personne est
+  // disponible, alors qu'elle est en conge ou que la semaine est feriee.
+  const weekState = row.weekStates?.[week.value];
+  if (weekState === "leave" || weekState === "leave-overloaded") {
+    cell.classList.add("is-leave");
+    cell.title = "Semaine non travaillee";
+    cell.textContent = "Cong\u00e9";
+    // ... et des jours y ont pourtant ete planifies. Ils n'ont aucun
+    // pourcentage ou s'afficher : c'est la cellule elle-meme qui doit alerter,
+    // sans quoi la charge disparait sans laisser de trace.
+    if (weekState === "leave-overloaded") {
+      cell.classList.add("is-leave-overloaded");
+      cell.title = `Semaine non travaillee - ${formatLeaveDays(row.weekLeaveDays?.[week.value])} j planifies`;
+    }
+    return cell;
+  }
+
   const percent = row.weekPercents[week.value] || 0;
 
   if (row.type === "total") {
@@ -676,9 +707,14 @@ function getVisibleTimelineRange() {
   };
 }
 
+// Le segment n'a plus de startTime/endTime : ce sont les bornes de son MOIS qui
+// decident de sa visibilite. Comparer les anciens champs, desormais undefined,
+// rendait ce predicat toujours faux et vidait la matrice entiere.
 function segmentOverlapsRange(segment, range) {
-  if (!range || segment.endTime <= segment.startTime) return false;
-  return segment.startTime < range.end.getTime() && segment.endTime > range.start.getTime();
+  if (!range) return false;
+  const bounds = getMonthBounds(segment.monthKey);
+  if (!bounds) return false;
+  return bounds.startAt < range.end && bounds.endAt > range.start;
 }
 
 function projectMatchesDop(projectNumber) {
@@ -755,6 +791,7 @@ function render() {
     segmentsByEmployee: filteredData.segmentsByEmployee,
     projects: state.data.projects,
     weeks: state.weeks,
+    absencesByEmployee: state.data.absencesByEmployee,
     visibleProjectNumbers,
     includeEmployeesWithoutProjects: state.filters.includeEmptyEmployees,
   });
