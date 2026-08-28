@@ -26,6 +26,7 @@ import {
   getMonthAvailableDays,
   getMonthBusinessDays,
 } from "../utils/monthSegments.js";
+import { computeMonthLoad } from "../utils/monthLoad.js";
 import { APP_CONFIG } from "../config.js";
 
 // --- helpers purs (aucun DOM) ------------------------------------------------
@@ -201,6 +202,19 @@ function formatEditSegmentDayValue(value) {
   return `${formatted.endsWith(",00") ? formatted.slice(0, -3) : formatted} j`;
 }
 
+// Legende de la barre de charge mensuelle, dans les termes de la specification.
+// Meme texte que gestion-depenses2 (formatChargePlanMonthLoadMessage) : la meme
+// charge doit se lire a l'identique dans les deux widgets.
+export function formatMonthLoadMessage(load) {
+  if (load?.state === "overload") {
+    return `SURCHARGE : ${formatEditSegmentDayValue(load.overloadDays)} de trop`;
+  }
+  if (load?.state === "balanced") {
+    return "charge complete";
+  }
+  return `il reste ${formatEditSegmentDayValue(load?.remainingDays)} avant 100 %`;
+}
+
 // Formate un effectif stocke pour le champ nombre (vide si absent, sans zeros
 // de queue : 2 affiche "2" et 1.5 affiche "1.5").
 export function formatEditSegmentInputValue(value) {
@@ -232,7 +246,15 @@ export function formatEditSegmentInputValue(value) {
 // main cesse de bloquer la fermeture (defaut SUBMIT_STALL_TIMEOUT_MS). Il est
 // passe a `acquire()` et non a la construction du verrou : celui-ci est partage
 // par toutes les fenetres montees (cf. `sharedSubmitLock`).
-export function createEditSegmentModal(rootEl, { onSubmit, stallTimeoutMs } = {}) {
+// `getAllTimeSegmentRows` : ACCESSEUR (et non un tableau fige) rendant TOUTES les
+// lignes TimeSegment, tous projets et tous services confondus, pour la barre de
+// charge mensuelle. Un accesseur parce que main.js recharge la table apres chaque
+// ecriture (`onChanged`) : un tableau capture a l'attache figerait la barre sur
+// l'instantane d'avant la premiere ecriture.
+export function createEditSegmentModal(
+  rootEl,
+  { onSubmit, stallTimeoutMs, getAllTimeSegmentRows } = {}
+) {
   if (!(rootEl instanceof HTMLElement)) {
     return { open() {}, close() {}, isOpen: () => false, destroy() {} };
   }
@@ -244,6 +266,12 @@ export function createEditSegmentModal(rootEl, { onSubmit, stallTimeoutMs } = {}
   const feedbackEl = rootEl.querySelector("#ps-edit-segment-feedback");
   const saveBtn = rootEl.querySelector("#ps-edit-segment-save");
   const cancelBtn = rootEl.querySelector("#ps-edit-segment-cancel");
+  // Barre de charge mensuelle (charge TOTALE de la personne sur le mois).
+  const loadEl = rootEl.querySelector("#ps-edit-segment-load");
+  const loadTrackEl = rootEl.querySelector("#ps-edit-segment-load-track");
+  const loadFillEl = rootEl.querySelector("#ps-edit-segment-load-fill");
+  const loadDaysEl = rootEl.querySelector("#ps-edit-segment-load-days");
+  const loadMessageEl = rootEl.querySelector("#ps-edit-segment-load-message");
 
   let currentSegmentId = null;
   let currentMonthKey = "";
@@ -286,8 +314,90 @@ export function createEditSegmentModal(rootEl, { onSubmit, stallTimeoutMs } = {}
     return feedbackEl instanceof HTMLElement ? feedbackEl.textContent : "";
   }
 
+  // Toutes les lignes TimeSegment, tous projets et tous services confondus.
+  // La barre raisonne sur la PERSONNE : lui passer les seuls segments du projet
+  // affiche lui ferait montrer une disponibilite qui n'existe pas. Le tri (mois,
+  // nom, segment edite) revient a computeMonthLoad.
+  function readAllSegmentRows() {
+    if (typeof getAllTimeSegmentRows !== "function") return [];
+    const rows = getAllTimeSegmentRows();
+    return Array.isArray(rows) ? rows : [];
+  }
+
+  // Barre de charge du mois : charge TOTALE de la personne sur le mois de la
+  // fenetre, tous projets et tous services confondus, saisie en cours comprise.
+  // Le calcul est entierement porte par utils/monthLoad.js (module vendorise,
+  // identique octet pour octet avec celui de gestion-depenses2) : on ne fait ici
+  // que le nourrir et le rendre.
+  function renderMonthLoadBar() {
+    if (!(loadEl instanceof HTMLElement)) return null;
+
+    // Fenetre fermee ou mois illisible : rien a montrer. On efface au lieu de
+    // laisser les chiffres de la session precedente a l'ecran.
+    if (!getMonthBounds(currentMonthKey)) {
+      loadEl.hidden = true;
+      loadEl.classList.remove("is-partial");
+      loadEl.classList.remove("is-balanced");
+      loadEl.classList.remove("is-overload");
+      if (loadFillEl instanceof HTMLElement) {
+        loadFillEl.style.width = "0%";
+        // Barre vide : le plancher `min-width` du CSS ferait sinon apparaitre
+        // une pastille de 14 px alors qu'il n'y a rien a montrer.
+        loadFillEl.hidden = true;
+      }
+      if (loadDaysEl instanceof HTMLElement) loadDaysEl.textContent = "--";
+      if (loadMessageEl instanceof HTMLElement) loadMessageEl.textContent = "";
+      if (loadTrackEl instanceof HTMLElement) loadTrackEl.setAttribute("aria-valuenow", "0");
+      return null;
+    }
+
+    const load = computeMonthLoad({
+      monthKey: currentMonthKey,
+      personName: currentWorkerName,
+      allSegmentRows: readAllSegmentRows(),
+      columns: APP_CONFIG.grist.columns.timeSegment,
+      absenceSet: currentAbsenceSet instanceof Set ? currentAbsenceSet : null,
+      // EDITION : sans cet id, l'effectif deja stocke du segment ouvert
+      // s'ajouterait a ce que l'utilisateur tape et le mois serait compte deux
+      // fois. CREATION : aucune ligne n'existe encore, `currentSegmentId` est
+      // null et rien n'est ecarte.
+      excludeSegmentId: currentSegmentId,
+      draftEffectif: effectifInput instanceof HTMLInputElement ? effectifInput.value : null,
+    });
+
+    // `ratio` est deja borne par le module ; ce clamp-ci garantit qu'une barre en
+    // surcharge SATURE a 100 % au lieu de deborder de son conteneur.
+    const fillPercent = Math.min(1, Math.max(0, load.ratio)) * 100;
+
+    loadEl.hidden = false;
+    loadEl.classList.toggle("is-partial", load.state === "partial");
+    loadEl.classList.toggle("is-balanced", load.state === "balanced");
+    loadEl.classList.toggle("is-overload", load.state === "overload");
+
+    if (loadFillEl instanceof HTMLElement) {
+      loadFillEl.style.width = `${fillPercent}%`;
+      // Voir la regle `.ps-segment-edit-load-fill[hidden]` : le plancher de
+      // largeur ne doit pas ressusciter le remplissage a 0 j.
+      loadFillEl.hidden = fillPercent <= 0;
+    }
+    if (loadDaysEl instanceof HTMLElement) {
+      loadDaysEl.textContent = `${formatEditSegmentDayValue(
+        load.totalDays
+      )} / ${formatEditSegmentDayValue(load.availableDays)}`;
+    }
+    if (loadMessageEl instanceof HTMLElement) {
+      loadMessageEl.textContent = formatMonthLoadMessage(load);
+    }
+    if (loadTrackEl instanceof HTMLElement) {
+      loadTrackEl.setAttribute("aria-valuenow", String(Math.round(fillPercent)));
+    }
+
+    return load;
+  }
+
   // Le mois ne se saisit plus : ne restent derives que les jours disponibles du
-  // mois (absences deduites) et le signalement « au-dela du disponible ».
+  // mois (absences deduites), le signalement « au-dela du disponible » et la
+  // barre de charge mensuelle.
   function syncDerived() {
     if (!getMonthBounds(currentMonthKey)) {
       if (effectifInput instanceof HTMLInputElement) {
@@ -295,6 +405,7 @@ export function createEditSegmentModal(rootEl, { onSubmit, stallTimeoutMs } = {}
         effectifInput.classList.remove("is-over-available");
       }
       if (calculatedEl instanceof HTMLElement) calculatedEl.textContent = "--";
+      renderMonthLoadBar();
       return;
     }
 
@@ -309,6 +420,11 @@ export function createEditSegmentModal(rootEl, { onSubmit, stallTimeoutMs } = {}
         effectifInput.value !== "" && Number.isFinite(effectifValue) && effectifValue > available;
       effectifInput.classList.toggle("is-over-available", over);
     }
+
+    // Meme point d'accroche que « Jours disponibles » : la barre se recalcule
+    // donc a chaque frappe (handleFieldInput -> syncDerived), sans ecouteur
+    // supplementaire a maintenir.
+    renderMonthLoadBar();
   }
 
   function open({ segmentId, monthKey, workerName, effectif, absenceSet } = {}) {
@@ -359,6 +475,10 @@ export function createEditSegmentModal(rootEl, { onSubmit, stallTimeoutMs } = {}
     rootEl.style.display = "none";
     rootEl.classList.remove("is-open");
     setFeedback("");
+    // `currentMonthKey` vient d'etre vide : la barre s'efface (chiffres, teinte,
+    // largeur). Sans cet appel, la fenetre rouverte sur un AUTRE mois montrerait
+    // la charge du precedent pendant la fraction de seconde precedant la frappe.
+    renderMonthLoadBar();
   }
 
   function isOpen() {

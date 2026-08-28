@@ -27,6 +27,19 @@ const VENDORED_GROUPS = {
     "planning-synchro/assets/js/utils/frenchHolidays.js",
     "Gestion-User/assets/js/frenchHolidays.js",
   ],
+  // Charge mensuelle totale d'une personne : seuls les deux widgets qui editent
+  // un segment via la fenetre modale en ont besoin. Gestion-User ne l'embarque
+  // pas — il n'ouvre aucune fenetre d'edition.
+  "monthLoad.js": [
+    "gestion-depenses2/assets/js/utils/monthLoad.js",
+    "planning-synchro/assets/js/utils/monthLoad.js",
+  ],
+  // Le test du module est duplique lui aussi : sans cette garde, une copie
+  // pourrait rester verte sur une version perimee des regles metier.
+  "monthLoad.test.mjs": [
+    "gestion-depenses2/tests/monthLoad.test.mjs",
+    "planning-synchro/tests/monthLoad.test.mjs",
+  ],
 };
 
 for (const [moduleName, copies] of Object.entries(VENDORED_GROUPS)) {

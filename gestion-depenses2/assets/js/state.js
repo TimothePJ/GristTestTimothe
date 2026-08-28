@@ -195,6 +195,10 @@ const persisted = readPersistedState();
 export const state = {
   projects: [],
   teamMembers: [],
+  // Lignes TimeSegment brutes, tous projets et tous services confondus (cf.
+  // buildExpenseData). Volontairement HORS persistState : c'est un cache de
+  // lecture, pas une preference utilisateur.
+  allTimeSegmentRows: [],
   selectedProjectId: persisted.selectedProjectId,
   selectedYear: persisted.selectedYear,
   selectedMonth: persisted.selectedMonth,

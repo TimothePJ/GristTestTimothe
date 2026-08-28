@@ -324,3 +324,92 @@ test("fetchNormalizedTimeSegmentRows conserve Mois pour une ligne sans Start_At"
     globalThis.window = previousWindow;
   }
 });
+
+// --- BUG : la barre « charge du mois » ne voyait qu un seul projet ------------
+//
+// `grist.docApi.fetchTable` est patche par shared/grist-service-context.js, et
+// TimeSegment y a une politique REST_PROJECT_SERVICE
+// (shared/service-context-core.js) : une lecture ORDINAIRE est deja filtree par
+// projet ET par service avant que ce service ne voie une ligne. Ce que
+// `buildExpenseData` appelait allTimeSegmentRows etait donc en realite restreint
+// au projet affiche. La sortie prevue par le contrat est { fullTable: true },
+// verifiee sur le vrai module partage dans
+// shared/tests/service-context-runtime.test.cjs.
+//
+// Le bouchon ci-dessous imite ce contrat, filtre compris.
+function contextPatchedDocApi(rows, { project = "1111", service = "Structure", patched = true } = {}) {
+  const calls = [];
+  const docApi = {
+    async fetchTable(tableName, options) {
+      calls.push({ tableName, options });
+      if (tableName !== "TimeSegment") return emptyTable();
+      if (options && options.fullTable === true) return rows.map((row) => ({ ...row }));
+      return rows
+        .filter((row) => row.NumeroProjet === project && row.Service === service)
+        .map((row) => ({ ...row }));
+    },
+    async applyUserActions() {
+      throw new Error("Aucune ecriture attendue dans ce test.");
+    },
+  };
+  if (patched) docApi.__serviceContextPatched = true;
+  return { docApi, calls };
+}
+
+const CROSS_PROJECT_SEGMENT_ROWS = [
+  { id: 1, NumeroProjet: "1111", Name: "Alix Martin", Effectif: 4, Allocation_Days: 20, Service: "Structure" },
+  { id: 2, NumeroProjet: "2222", Name: "Alix Martin", Effectif: 5, Allocation_Days: 20, Service: "Fluides" },
+];
+
+test("fetchProjectDataTables expose allTimeSegmentRows : tous projets, tous services", async () => {
+  const previousWindow = globalThis.window;
+  const { docApi, calls } = contextPatchedDocApi(CROSS_PROJECT_SEGMENT_ROWS);
+  globalThis.window = { grist: { docApi } };
+
+  try {
+    const service = await importFreshService("all-time-segment-rows-full-table");
+    const data = await service.fetchProjectDataTables();
+
+    assert.deepEqual(
+      data.timeSegmentRows.map((row) => row.id),
+      [1],
+      "la vue projet reste filtree projet + service (non-regression)"
+    );
+    assert.deepEqual(
+      data.allTimeSegmentRows.map((row) => row.id),
+      [1, 2],
+      "la barre doit voir la ligne du projet 2222, service Fluides"
+    );
+    assert.equal(
+      data.allTimeSegmentRows[1].NumeroProjet,
+      "2222",
+      "les lignes completes restent normalisees comme les autres"
+    );
+    assert.ok(
+      calls.some((call) => call.tableName === "TimeSegment" && call.options && call.options.fullTable === true),
+      "la lecture non filtree doit bien etre demandee au contrat partage"
+    );
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("hors couche de contexte, aucune option n atteint fetchTable", async () => {
+  // Le RPC Grist natif n accepte qu un nom de table : lui passer un second
+  // argument serait au mieux ignore. La barre retombe sur les lignes deja lues.
+  const previousWindow = globalThis.window;
+  const { docApi, calls } = contextPatchedDocApi(CROSS_PROJECT_SEGMENT_ROWS, { patched: false });
+  globalThis.window = { grist: { docApi } };
+
+  try {
+    const service = await importFreshService("all-time-segment-rows-unpatched");
+    const data = await service.fetchProjectDataTables();
+    assert.ok(
+      calls.filter((call) => call.tableName === "TimeSegment").every((call) => call.options === undefined),
+      "aucune option ne doit atteindre un fetchTable non patche"
+    );
+    assert.ok(Array.isArray(data.allTimeSegmentRows), "la barre garde un tableau exploitable");
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});

@@ -532,3 +532,33 @@ test("controleur reel : un echec renvoye laisse la fenetre ouverte avec son mess
   assert.equal(h.save().disabled, false, "et on peut re-essayer");
   h.modal.destroy();
 });
+
+// --- index.html et dev/harness.html : la MEME fenetre -------------------------
+//
+// Le banc de developpement ne sert a rien s il montre un autre balisage que la
+// page reelle : un identifiant renomme d un cote, une legende corrigee d un seul
+// cote, et le banc valide une fenetre que personne n utilise. Les deux fichiers
+// doivent porter la meme tranche de fenetre, octet pour octet.
+
+test("la fenetre de dev/harness.html est identique a celle d index.html", async () => {
+  const fs = await import("node:fs");
+  const read = (relative) => fs.readFileSync(new URL(relative, import.meta.url), "utf8");
+
+  // Tranche de la fenetre : de la premiere a la derniere mention de son prefixe.
+  const modalSlice = (source, label) => {
+    const first = source.indexOf("ps-edit-segment");
+    assert.ok(first > 0, `fenetre introuvable dans ${label}`);
+    const last = source.lastIndexOf("ps-edit-segment");
+    const start = source.lastIndexOf("<", first);
+    const end = source.indexOf(String.fromCharCode(10), last);
+    const slice = source.slice(start, end);
+    assert.ok(slice.length > 500, `tranche de fenetre suspecte dans ${label}`);
+    return slice;
+  };
+
+  assert.equal(
+    modalSlice(read("../dev/harness.html"), "dev/harness.html"),
+    modalSlice(read("../index.html"), "index.html"),
+    "le banc de dev doit montrer exactement la fenetre de la page reelle"
+  );
+});

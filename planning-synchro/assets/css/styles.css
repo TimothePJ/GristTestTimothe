@@ -1169,6 +1169,26 @@ body.ps-panning * {
   filter: saturate(0.78);
 }
 
+/* Survol : le mois entier sous le curseur s eclaire, puisque c est l unite de
+   creation depuis le passage de TimeSegment au mois. Pose par
+   bottom/chargeEditing.js, uniquement en mode Editer et jamais sur la piste
+   Total (lecture seule). */
+.charge-plan-month-hover {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* Pas de z-index : le surlignage du mois passe SOUS les barres, comme dans le
+     jumeau gestion-depenses2. Les deux plannings doivent se lire pareil. */
+  background: rgba(0, 73, 144, 0.08);
+  border-left: 1px solid rgba(0, 73, 144, 0.25);
+  border-right: 1px solid rgba(0, 73, 144, 0.25);
+  pointer-events: none;
+}
+
+.charge-plan-month-hover[hidden] {
+  display: none !important;
+}
+
 /* Un segment = un mois : plus de poignees ni de redimensionnement, donc plus de
    regles .charge-plan-segment-handle ni d'etat .is-resizing. */
 .charge-plan-segment-bar.is-compact {
@@ -1219,8 +1239,19 @@ body.ps-panning * {
 
 .charge-plan-edit-toolbar {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 12px;
   margin-top: 10px;
+}
+
+/* Message d'etat du board (echec de suppression). Vide, il est `hidden` donc
+   retire du flux : le bouton Editer reste colle a droite. Meme rendu que le
+   jumeau gestion-depenses2. */
+.charge-plan-feedback {
+  color: #b42318;
+  font-weight: 700;
+  font-size: 0.85rem;
 }
 
 .charge-plan-edit-mode-toggle {
@@ -1457,6 +1488,115 @@ body.ps-panning * {
 .ps-segment-edit-metric strong {
   color: var(--color-primary);
   font-size: 1.1rem;
+}
+
+/* --- Barre de charge mensuelle -------------------------------------------- */
+/* Charge TOTALE de la personne sur le mois, tous projets et tous services
+   confondus. Les trois teintes sont celles de Gestion-User (--color-partial /
+   --color-balanced / --color-overload) et sont identiques a celles de
+   gestion-depenses2 : la meme charge doit se lire de la meme couleur dans les
+   trois widgets. */
+.ps-segment-edit-load {
+  --load-partial: #edf4fb;
+  --load-balanced: #d7eccb;
+  --load-overload: #ffe1a8;
+  display: grid;
+  gap: 8px;
+}
+
+.ps-segment-edit-load[hidden] {
+  display: none;
+}
+
+.ps-segment-edit-load-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ps-segment-edit-load-label {
+  font-size: 0.88rem;
+  color: var(--color-text-muted);
+}
+
+.ps-segment-edit-load-head strong {
+  color: var(--color-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* LISERE OBLIGATOIRE : --color-partial (#edf4fb) est un bleu si pale qu'il est
+   quasi blanc. En pastille sur le fond gris de Gestion-User il se lit ; ici,
+   sur le fond clair de la fenetre, un remplissage sans contour serait
+   invisible. Le contour du conteneur (et celui du remplissage) est donc ce qui
+   rend la barre lisible — la teinte, elle, reste celle de Gestion-User. */
+.ps-segment-edit-load-track {
+  position: relative;
+  height: 14px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid rgba(0, 73, 144, 0.35);
+  box-shadow: inset 0 1px 2px rgba(18, 37, 63, 0.08);
+}
+
+.ps-segment-edit-load-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  /* PLANCHER DE LARGEUR : mesure navigateur a 0,5 j sur 20, le remplissage
+     tombait a 11,89 x 12 px — plus large que haut, la pastille degenerait en
+     point. 14 px = la hauteur de la piste, donc une pastille ronde lisible.
+     Cf. la regle [hidden] plus bas pour le cas 0 j, qui doit rester VIDE. */
+  min-width: 14px;
+  border-radius: 999px;
+  background: var(--load-partial);
+  /* CONTRASTE : --load-partial (#edf4fb) ne fait que 1,11:1 contre le blanc du
+     vide — invisible seul. Le liseré porte donc tout le travail : 0,55 d'opacite
+     le monte a ~2,6:1 (il etait a 0,28, soit 1,86:1). On renforce le CONTOUR,
+     jamais la teinte, qui reste celle de Gestion-User. Les etats pleine et
+     surcharge gardent leur liseré : leurs teintes, elles, se voient deja. */
+  box-shadow: inset 0 0 0 1px rgba(0, 73, 144, 0.55);
+  transition: width 120ms ease-out;
+}
+
+/* 0 j : le plancher ci-dessus afficherait une pastille de 14 px sur une barre
+   qui doit rester vide. Le rendu pose donc `hidden` sur le remplissage des que
+   la largeur retombe a 0 (main.js / editSegmentModal.js). `display: block`
+   ci-dessus l'emporterait sur le `hidden` natif : d'ou cette regle explicite. */
+.ps-segment-edit-load-fill[hidden] {
+  display: none;
+}
+
+.ps-segment-edit-load.is-balanced .ps-segment-edit-load-fill {
+  background: var(--load-balanced);
+  box-shadow: inset 0 0 0 1px rgba(56, 106, 30, 0.32);
+}
+
+.ps-segment-edit-load.is-overload .ps-segment-edit-load-fill {
+  background: var(--load-overload);
+  box-shadow: inset 0 0 0 1px rgba(109, 59, 0, 0.32);
+}
+
+.ps-segment-edit-load-message {
+  margin: 0;
+  min-height: 20px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.ps-segment-edit-load.is-balanced .ps-segment-edit-load-message {
+  color: #386a1e;
+}
+
+/* Surcharge : #6d3b00 sur #ffe1a8, exactement le couple de Gestion-User. */
+.ps-segment-edit-load.is-overload .ps-segment-edit-load-message {
+  color: #6d3b00;
+  background: var(--load-overload);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  justify-self: start;
 }
 
 .ps-segment-edit-feedback {

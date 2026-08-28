@@ -354,16 +354,24 @@ node --test "tests/**/*.test.mjs"
 ```
 
 Vérification visuelle/interaction (rendu vis-timeline, édition du plan de
-charge, alignement des deux panes) : servir le dossier en HTTP — les modules
+charge, alignement des deux panes) : servir le dépôt en HTTP — les modules
 ES échouent sous `file://` — et ouvrir le harnais de dev, qui charge un mock
 `window.grist` (`dev/mock-grist.js`) avec des données fictives
 (`dev/fixtures.js`) au lieu d'un vrai document Grist :
 
 ```bash
-cd planning-synchro
+# depuis la RACINE du depot, pas depuis planning-synchro/
 python -m http.server 8791
-# puis ouvrir http://localhost:8791/dev/harness.html
+# puis ouvrir http://localhost:8791/planning-synchro/dev/harness.html
 ```
+
+⚠️ **Servir `planning-synchro/` directement ne marche pas** :
+`assets/js/top/vendor/planningRealisation.js` importe
+`../../../../../shared/planning-closure-core.js`, qui sort de la racine du
+serveur. Le 404 est silencieux — il casse tout le graphe de modules ES sans
+lever la moindre erreur en console. Symptôme : la page se charge, mais le
+sélecteur de projet reste vide et `#ps-main` reste masqué. Si tu vois ça,
+vérifie d'abord depuis où tu sers.
 
 Les écritures `TimeSegment` faites via le mock sont **appliquées aux fixtures
 en mémoire** (`AddRecord` / `UpdateRecord` / `RemoveRecord`) — le harnais se

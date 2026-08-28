@@ -167,17 +167,22 @@ function getAvailableColumnIds(raw) {
   return [];
 }
 
-async function fetchTableRaw(tableName) {
+async function fetchTableRaw(tableName, options = undefined) {
   const grist = getGrist();
   if (!grist.docApi || typeof grist.docApi.fetchTable !== "function") {
     throw new Error("grist.docApi.fetchTable(...) indisponible.");
   }
 
-  return grist.docApi.fetchTable(tableName);
+  // Les options sont celles du wrapper de contexte partage, pas de l'API RPC
+  // Grist native (ni du mock de dev/harness.html), qui n'acceptent que le nom de
+  // table : leur passer un second argument serait au mieux ignore.
+  return options && grist.docApi.__serviceContextPatched
+    ? grist.docApi.fetchTable(tableName, options)
+    : grist.docApi.fetchTable(tableName);
 }
 
-export async function fetchTableRows(tableName) {
-  const raw = await fetchTableRaw(tableName);
+export async function fetchTableRows(tableName, options = undefined) {
+  const raw = await fetchTableRaw(tableName, options);
   return normalizeFetchTableResult(raw);
 }
 
@@ -264,9 +269,21 @@ async function resolveTimeOutTableId() {
 export async function fetchProjectData({ name, number }) {
   const t = APP_CONFIG.grist.tables;
   const timeOutTableId = await resolveTimeOutTableId();
-  const [planningRows, timeSegmentRows, projectTeamRows, teamRows, timeOutRows] = await Promise.all([
+  const [
+    planningRows,
+    timeSegmentRows,
+    allTimeSegmentRows,
+    projectTeamRows,
+    teamRows,
+    timeOutRows,
+  ] = await Promise.all([
     fetchTableRows(t.planningProject).catch(() => []),
     fetchTableRows(t.timeSegment).catch(() => []),
+    // Lecture NON FILTREE, pour la seule barre de charge mensuelle de la fenetre
+    // segment (voir le commentaire d'`allTimeSegmentRows` plus bas). La lecture
+    // ordinaire ci-dessus reste filtree projet + service : c'est elle qui
+    // alimente la vue projet, et le pane bas ne doit rien montrer d'autre.
+    fetchTableRows(t.timeSegment, { fullTable: true }).catch(() => null),
     fetchTableRows(t.projectTeam).catch(() => []),
     fetchTableRows(t.team).catch(() => []),
     fetchTableRows(timeOutTableId).catch(() => []),
@@ -276,6 +293,22 @@ export async function fetchProjectData({ name, number }) {
     planningRows: planningRows.filter((r) => String(r?.[pc.planningProject.projectName] ?? "").trim() === name),
     timeSegmentRows: timeSegmentRows.filter((r) => String(r?.[pc.timeSegment.projectNumber] ?? "").trim() === String(number).trim()),
     projectTeamRows: projectTeamRows.filter((r) => String(r?.[pc.projectTeam.projectNumber] ?? "").trim() === String(number).trim()),
+    // Lignes TimeSegment BRUTES, tous projets et tous SERVICES confondus. Deux
+    // filtres les perdaient : celui par projet fait ici meme, et — beaucoup moins
+    // visible — celui que shared/grist-service-context.js applique d'office a
+    // TimeSegment (politique REST_PROJECT_SERVICE), qui restreignait la lecture
+    // au projet ET au service courants avant meme que ce fichier ne voie une
+    // ligne. D'ou la lecture `{ fullTable: true }` dediee ci-dessus.
+    //
+    // La barre de charge mensuelle de la fenetre segment raisonne sur la
+    // PERSONNE, pas sur le projet affiche : une personne a 5 jours ailleurs est
+    // deja a 5 jours pris, que cet ailleurs soit un autre projet ou un autre
+    // service. Le tri (mois, nom, segment edite) est le travail de
+    // utils/monthLoad.js.
+    //
+    // Repli : lecture complete en echec -> les lignes du projet, comme avant. La
+    // barre sous-estime alors la charge, mais la fenetre s'ouvre quand meme.
+    allTimeSegmentRows: allTimeSegmentRows || timeSegmentRows,
     // Team + Time-Out are global (unfiltered): buildAbsenceIndex maps them per-worker.
     teamRows,
     timeOutRows,

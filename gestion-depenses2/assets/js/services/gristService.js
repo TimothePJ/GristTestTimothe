@@ -245,9 +245,13 @@ function setTimeSegmentLabelField(fields, columns, label) {
   fields[columns.label] = label;
 }
 
-async function fetchNormalizedTimeSegmentRows() {
+// `fullTable: true` demande a la couche de contexte partagee de sauter son filtre
+// projet + service (TimeSegment y a une politique REST_PROJECT_SERVICE). Reserve
+// a la barre de charge mensuelle de la fenetre segment, qui raisonne sur la
+// PERSONNE : les lectures qui alimentent la vue projet gardent le filtre.
+async function fetchNormalizedTimeSegmentRows({ fullTable = false } = {}) {
   const tableName = APP_CONFIG.grist.tables.timeSegment;
-  const raw = await fetchTableRaw(tableName);
+  const raw = await fetchTableRaw(tableName, fullTable ? { fullTable: true } : undefined);
   const rows = normalizeFetchTableResult(raw);
   const resolvedColumns = await getResolvedTimeSegmentColumns();
   const canonicalColumns = APP_CONFIG.grist.columns.timeSegment;
@@ -338,6 +342,7 @@ export async function fetchProjectDataTables() {
     planningProjectRows,
     projectTeamRows,
     timeSegmentRows,
+    allTimeSegmentRows,
     timeRealRows,
     teamRows,
     timeOutRows,
@@ -347,6 +352,10 @@ export async function fetchProjectDataTables() {
     fetchOptionalTableRows(tables.planningProject),
     fetchTableRows(tables.projectTeam),
     fetchNormalizedTimeSegmentRows(),
+    // Lecture NON FILTREE, pour la seule barre de charge mensuelle de la fenetre
+    // segment. Repli sur les lignes filtrees si elle echoue : la barre
+    // sous-estime alors la charge, mais la fenetre s'ouvre quand meme.
+    fetchNormalizedTimeSegmentRows({ fullTable: true }).catch(() => null),
     fetchNormalizedTimeRealRows(),
     fetchTableRows(tables.team),
     fetchOptionalTableRows(timeOutTableId),
@@ -359,6 +368,11 @@ export async function fetchProjectDataTables() {
     projectTeamRows,
     timesheetRows: [],
     timeSegmentRows,
+    // Tous projets et tous SERVICES confondus : la barre de charge raisonne sur
+    // la PERSONNE, pas sur le projet affiche. `timeSegmentRows` ci-dessus est
+    // restreinte au projet et au service courants par la couche de contexte
+    // partagee — la barre n'y verrait donc jamais qu'un seul projet.
+    allTimeSegmentRows: allTimeSegmentRows || timeSegmentRows,
     timeRealRows,
     teamRows,
     timeOutRows,

@@ -2858,6 +2858,114 @@ td input {
   color: var(--color-primary);
 }
 
+/* --- Barre de charge mensuelle -------------------------------------------- */
+/* Charge TOTALE de la personne sur le mois, tous projets et tous services
+   confondus. Les trois teintes sont celles de Gestion-User (--color-partial /
+   --color-balanced / --color-overload) : la meme charge doit se lire de la meme
+   couleur dans les deux widgets. */
+.segment-edit-load {
+  --load-partial: #edf4fb;
+  --load-balanced: #d7eccb;
+  --load-overload: #ffe1a8;
+  display: grid;
+  gap: 8px;
+}
+
+.segment-edit-load[hidden] {
+  display: none;
+}
+
+.segment-edit-load-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.segment-edit-load-label {
+  font-size: 0.88rem;
+  color: var(--color-text-muted);
+}
+
+.segment-edit-load-head strong {
+  color: var(--color-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* LISERE OBLIGATOIRE : --color-partial (#edf4fb) est un bleu si pale qu'il est
+   quasi blanc. En pastille sur le fond gris de Gestion-User il se lit ; ici,
+   sur le fond blanc de la fenetre, un remplissage sans contour serait
+   invisible. Le contour du conteneur (et celui du remplissage) est donc ce qui
+   rend la barre lisible — la teinte, elle, reste celle de Gestion-User. */
+.segment-edit-load-track {
+  position: relative;
+  height: 14px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid rgba(0, 73, 144, 0.35);
+  box-shadow: inset 0 1px 2px rgba(18, 37, 63, 0.08);
+}
+
+.segment-edit-load-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  /* PLANCHER DE LARGEUR : mesure navigateur a 0,5 j sur 20, le remplissage
+     tombait a 11,89 x 12 px — plus large que haut, la pastille degenerait en
+     point. 14 px = la hauteur de la piste, donc une pastille ronde lisible.
+     Cf. la regle [hidden] plus bas pour le cas 0 j, qui doit rester VIDE. */
+  min-width: 14px;
+  border-radius: 999px;
+  background: var(--load-partial);
+  /* CONTRASTE : --load-partial (#edf4fb) ne fait que 1,11:1 contre le blanc du
+     vide — invisible seul. Le liseré porte donc tout le travail : 0,55 d'opacite
+     le monte a ~2,6:1 (il etait a 0,28, soit 1,86:1). On renforce le CONTOUR,
+     jamais la teinte, qui reste celle de Gestion-User. Les etats pleine et
+     surcharge gardent leur liseré : leurs teintes, elles, se voient deja. */
+  box-shadow: inset 0 0 0 1px rgba(0, 73, 144, 0.55);
+  transition: width 120ms ease-out;
+}
+
+/* 0 j : le plancher ci-dessus afficherait une pastille de 14 px sur une barre
+   qui doit rester vide. Le rendu pose donc `hidden` sur le remplissage des que
+   la largeur retombe a 0 (main.js / editSegmentModal.js). `display: block`
+   ci-dessus l'emporterait sur le `hidden` natif : d'ou cette regle explicite. */
+.segment-edit-load-fill[hidden] {
+  display: none;
+}
+
+.segment-edit-load.is-balanced .segment-edit-load-fill {
+  background: var(--load-balanced);
+  box-shadow: inset 0 0 0 1px rgba(56, 106, 30, 0.32);
+}
+
+.segment-edit-load.is-overload .segment-edit-load-fill {
+  background: var(--load-overload);
+  box-shadow: inset 0 0 0 1px rgba(109, 59, 0, 0.32);
+}
+
+.segment-edit-load-message {
+  margin: 0;
+  min-height: 20px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.segment-edit-load.is-balanced .segment-edit-load-message {
+  color: #386a1e;
+}
+
+/* Surcharge : #6d3b00 sur #ffe1a8, exactement le couple de Gestion-User. */
+.segment-edit-load.is-overload .segment-edit-load-message {
+  color: #6d3b00;
+  background: var(--load-overload);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  justify-self: start;
+}
+
 .segment-edit-feedback {
   margin: 0;
   min-height: 22px;

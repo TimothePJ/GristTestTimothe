@@ -448,6 +448,10 @@ function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWid
           data-timeline-width="${timelineWidth}"
         >
           ${renderTrackGrid(windowDays, dayWidth, absenceSet)}
+          <!-- Surlignage du mois survole (bottom/chargeEditing.js) : un clic vaut le
+               mois entier, c est la seule chose qui le montre. Absent de la piste
+               Total, en lecture seule. -->
+          <div class="charge-plan-month-hover" hidden></div>
           <div class="charge-plan-track-bars">${renderSegmentBars(assignedBars)}</div>
           <div class="charge-plan-selection-preview" hidden>
             <span class="charge-plan-selection-label"></span>
@@ -546,6 +550,11 @@ function renderTotalRow(workers, months, timelineWidth) {
 
 // --- Editer toggle (port of renderTimelineEditToolbar) ------------------------
 
+// `.charge-plan-feedback` : zone de message d'etat du board, alimentee par
+// `chargeEditing.setBoardFeedback()`. Portee du jumeau gestion-depenses2
+// (ui/chargeTimeline.js renderChargePlanTimeline + setChargePlanFeedback) : sans
+// elle, l'echec d'une suppression n'avait AUCUN endroit ou s'afficher — la seule
+// zone de message du widget vivait dans la fenetre modale, fermee a ce moment-la.
 function renderTimelineEditToolbar(editModeEnabled) {
   return `
     <div class="charge-plan-edit-toolbar">
@@ -557,6 +566,7 @@ function renderTimelineEditToolbar(editModeEnabled) {
       >
         ${editModeEnabled ? "Verrouiller" : "Editer"}
       </button>
+      <span class="charge-plan-feedback" hidden></span>
     </div>
   `;
 }

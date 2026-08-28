@@ -24,8 +24,13 @@
 //    « workers » sont des lignes TimeSegment groupees par nom, sans id numerique
 //    stable) et non par `data-worker-id` ; les editions/suppressions passent par
 //    `segmentEl.dataset.segmentId`.
-// 3. Pas de cache optimiste local : chaque ecriture est un CRUD suivi d'un
-//    `await onChanged()` (re-fetch + re-render complet), au prix d'un aller-retour.
+// 3. Mise a jour locale APRES coup, la ou la source est OPTIMISTE : chaque
+//    ecriture est un CRUD suivi d'un `await onChanged(change)`, ou `change`
+//    decrit ce qui vient d'etre ecrit ({ type, segmentId, monthKey, workerName,
+//    effectif }). L'appelant applique ce changement a ses donnees en memoire et
+//    redessine, sans rechargement visible. Comme le descripteur n'est emis
+//    qu'apres un CRUD reussi, il n'y a pas de retour arriere a prevoir (la source
+//    en a un parce qu'elle pose la modification AVANT d'ecrire).
 // 4. Pas de barre provisoire hachuree : la source la dessine dans son apercu de
 //    selection, que ce portage n'utilise plus du tout.
 // 5. `is-segment-editing-enabled`/`-locked` et le libelle du bouton sont
@@ -46,7 +51,7 @@
 // tests/chargeSelection.test.mjs.
 
 import { clamp } from "../utils/format.js";
-import { monthKeyFromDate } from "../utils/monthSegments.js";
+import { monthKeyFromDate, getMonthBounds } from "../utils/monthSegments.js";
 import { createTimeSegment, updateTimeSegment, removeTimeSegment } from "../services/gristService.js";
 import { createEditSegmentModal } from "./editSegmentModal.js";
 
@@ -62,9 +67,25 @@ function cssEscapeValue(value) {
 
 const EDIT_TOGGLE_SELECTOR = "[data-charge-plan-edit-toggle]";
 const TRACK_SELECTOR = ".charge-plan-track";
+const READONLY_TRACK_CLASS = "charge-plan-track--readonly";
+const MONTH_HOVER_SELECTOR = ".charge-plan-month-hover";
 const SEGMENT_BAR_SELECTOR = ".charge-plan-segment-bar";
 const CONTEXT_MENU_SELECTOR = ".charge-plan-context-menu";
 const CONTEXT_ACTION_SELECTOR = ".charge-plan-context-action";
+const FEEDBACK_SELECTOR = ".charge-plan-feedback";
+
+export const DELETE_SEGMENT_FAILURE_MESSAGE = "La suppression du segment a echoue.";
+
+// Message d'etat du board (port de gestion-depenses2 setChargePlanFeedback).
+// Il vit DANS le board : un `chargeBoard.render()` le remet a zero, ce qui est
+// exactement voulu — un rafraichissement reussi efface le message d'echec.
+function setBoardFeedback(boardEl, message = "") {
+  const feedbackEl = boardEl?.querySelector(FEEDBACK_SELECTOR);
+  if (!(feedbackEl instanceof HTMLElement)) return;
+
+  feedbackEl.textContent = String(message || "").trim();
+  feedbackEl.hidden = !feedbackEl.textContent;
+}
 
 // --- logique pure du geste (aucun DOM) ---------------------------------------
 
@@ -75,6 +96,26 @@ export function resolveClickedMonthKey(slots, slotIndex) {
   const list = Array.isArray(slots) ? slots : [];
   const slot = list.find((candidate) => candidate?.slotIndex === Number(slotIndex));
   return slot ? monthKeyFromDate(slot.startAt) : "";
+}
+
+// Geometrie pixel d'un mois dans une piste rendue, deduite des creneaux
+// demi-journee REELLEMENT affiches (donc coherente avec l'alignement des deux
+// panes, qui est arithmetique). Port de `computeMonthSlotGeometry`
+// (gestion-depenses2/assets/js/utils/chargePlanSegmentForm.js). Renvoie null si
+// le mois ne touche aucun creneau visible.
+export function computeMonthSlotGeometry(slots, monthKey) {
+  const bounds = getMonthBounds(monthKey);
+  const list = Array.isArray(slots) ? slots : [];
+  if (!bounds || !list.length) return null;
+
+  const firstSlot = list.find((slot) => slot?.startAt >= bounds.startAt);
+  const lastSlot = [...list].reverse().find((slot) => slot?.endAt <= bounds.endAt);
+  if (!firstSlot || !lastSlot || lastSlot.leftPx < firstSlot.leftPx) return null;
+
+  return {
+    leftPx: firstSlot.leftPx,
+    widthPx: lastSlot.leftPx + lastSlot.widthPx - firstSlot.leftPx,
+  };
 }
 
 // Un id de segment n'est exploitable pour une ecriture que s'il correspond a une
@@ -181,7 +222,12 @@ function showContextMenu(boardEl, { clientX, clientY, segmentId }) {
 // --- fabrique publique -------------------------------------------------------
 
 // attachChargeEditing(boardEl, { getProjectNumber, getVisibleSlots, onChanged,
-//   editSegmentModalEl, getAbsenceSet }) → { detach(), isEditModeEnabled() }
+//   editSegmentModalEl, getAbsenceSet, getAllTimeSegmentRows })
+//   → { detach(), isEditModeEnabled() }
+//
+// `getAllTimeSegmentRows` : accesseur rendant TOUTES les lignes TimeSegment (tous
+// projets, tous services), simplement relaye a la fenetre pour sa barre de charge
+// mensuelle. Ce module ne les lit jamais lui-meme — il n'edite qu'un projet.
 //
 // Cable le bouton Editer, le clic-pour-creer/editer et le menu contextuel
 // Modifier/Supprimer sur `boardEl`. Tous les ecouteurs sont delegues sur
@@ -190,7 +236,14 @@ function showContextMenu(boardEl, { clientX, clientY, segmentId }) {
 // depuis `onChanged()`.
 export function attachChargeEditing(
   boardEl,
-  { getProjectNumber, getVisibleSlots, onChanged, editSegmentModalEl, getAbsenceSet } = {}
+  {
+    getProjectNumber,
+    getVisibleSlots,
+    onChanged,
+    editSegmentModalEl,
+    getAbsenceSet,
+    getAllTimeSegmentRows,
+  } = {}
 ) {
   if (!(boardEl instanceof HTMLElement)) {
     return { detach() {} };
@@ -203,7 +256,13 @@ export function attachChargeEditing(
   // l'ecriture Grist puis `onChanged()`.
   const editSegmentModal =
     editSegmentModalEl instanceof HTMLElement
-      ? createEditSegmentModal(editSegmentModalEl, { onSubmit: handleEditSegmentSubmit })
+      ? createEditSegmentModal(editSegmentModalEl, {
+          onSubmit: handleEditSegmentSubmit,
+          // Relaye tel quel : la fenetre appelle l'accesseur a CHAQUE rendu de sa
+          // barre, si bien qu'un rechargement post-ecriture (onChanged) se voit
+          // sans re-cabler quoi que ce soit.
+          getAllTimeSegmentRows,
+        })
       : null;
 
   function findSegmentBar(segmentId) {
@@ -217,7 +276,94 @@ export function attachChargeEditing(
     return Array.isArray(slots) ? slots : [];
   }
 
+  // --- surlignage du mois survole -------------------------------------------
+  //
+  // Depuis « un segment = un mois », un clic n'importe ou sur une piste vise le
+  // MOIS entier : sans surlignage, l'utilisateur ne voit pas ce que son clic va
+  // viser. Porte de gestion-depenses2/assets/js/main.js
+  // (updateChargePlanMonthHover / clearChargePlanMonthHover /
+  // handleChargePlanTrackHover).
+  //
+  // SURVIE AUX RECONSTRUCTIONS : `chargeBoard.render()` remplace le HTML du board
+  // d'un bloc (et le fait ~8x/s pendant un zoom/pan, throttle). L'ecouteur est
+  // delegue sur le board, il survit donc ; l'element de surlignage, lui, revient
+  // neuf et masque, sans le cache pose sur son dataset — le mouvement suivant le
+  // recalcule au lieu de se fier a une geometrie perimee.
+
+  function hideHoverElement(hoverEl) {
+    hoverEl.hidden = true;
+    delete hoverEl.dataset.leftPx;
+    delete hoverEl.dataset.widthPx;
+  }
+
+  function clearMonthHover(exceptTrackEl = null) {
+    boardEl.querySelectorAll(MONTH_HOVER_SELECTOR).forEach((hoverEl) => {
+      if (!(hoverEl instanceof HTMLElement)) return;
+      if (exceptTrackEl && hoverEl.parentElement === exceptTrackEl) return;
+      hideHoverElement(hoverEl);
+    });
+  }
+
+  function updateMonthHover(trackEl, clientX) {
+    const hoverEl = trackEl.querySelector(MONTH_HOVER_SELECTOR);
+    if (!(hoverEl instanceof HTMLElement)) return;
+
+    const offsetX = clientX - trackEl.getBoundingClientRect().left;
+    const currentLeft = Number(hoverEl.dataset.leftPx);
+    const currentWidth = Number(hoverEl.dataset.widthPx);
+    // Toujours dans le mois deja surligne : on ne rebalaye pas les creneaux. Ce
+    // gestionnaire passe a CHAQUE mouvement de souris et une piste porte deux
+    // creneaux par jour affiche — sans ce court-circuit, le pane bas ramerait.
+    if (
+      !hoverEl.hidden &&
+      Number.isFinite(currentLeft) &&
+      Number.isFinite(currentWidth) &&
+      offsetX >= currentLeft &&
+      offsetX < currentLeft + currentWidth
+    ) {
+      return;
+    }
+
+    const slots = resolveSlots();
+    const monthKey = resolveClickedMonthKey(slots, getSlotIndexAtClientX(trackEl, slots, clientX));
+    const geometry = monthKey ? computeMonthSlotGeometry(slots, monthKey) : null;
+    if (!geometry) {
+      hideHoverElement(hoverEl);
+      return;
+    }
+
+    hoverEl.hidden = false;
+    hoverEl.style.left = `${geometry.leftPx}px`;
+    hoverEl.style.width = `${geometry.widthPx}px`;
+    hoverEl.dataset.leftPx = String(geometry.leftPx);
+    hoverEl.dataset.widthPx = String(geometry.widthPx);
+  }
+
+  function handleTrackHover(event) {
+    if (!(event.target instanceof Element)) return;
+
+    const trackEl = event.target.closest(TRACK_SELECTOR);
+    // La piste Total est en lecture seule : aucun clic n'y ouvre de fenetre,
+    // donc rien a y surligner. Hors mode Editer non plus.
+    const isHoverable =
+      trackEl instanceof HTMLElement &&
+      !trackEl.classList.contains(READONLY_TRACK_CLASS) &&
+      editModeEnabled;
+
+    clearMonthHover(isHoverable ? trackEl : null);
+    if (isHoverable) {
+      updateMonthHover(trackEl, event.clientX);
+    }
+  }
+
+  function handleBoardPointerLeave() {
+    clearMonthHover();
+  }
+
   function applyEditModeToDom() {
+    // Le mode vient de changer : un surlignage laisse en place mentirait sur ce
+    // qu'un clic ferait (verrouille = rien).
+    if (!editModeEnabled) clearMonthHover();
     boardEl.classList.toggle("is-segment-editing-enabled", editModeEnabled);
     boardEl.classList.toggle("is-segment-editing-locked", !editModeEnabled);
     boardEl.dataset.segmentEditMode = editModeEnabled ? "enabled" : "locked";
@@ -233,14 +379,30 @@ export function attachChargeEditing(
   // Execute une ecriture CRUD, rafraichit le board via onChanged(), puis
   // re-affirme le mode Editer (cf. adaptation 5) quoi qu'il arrive, pour que le
   // bouton ne retombe jamais silencieusement sur Verrouiller.
-  async function persistWrite(writeFn) {
+  //
+  // `writeFn` DECRIT ce qu'elle a ecrit : elle rend un descripteur
+  // { type: "create"|"update"|"delete", segmentId, monthKey, workerName,
+  // effectif } transmis tel quel a `onChanged`. C'est ce descripteur qui permet a
+  // main.js de mettre son etat a jour LOCALEMENT au lieu de recharger tout le
+  // projet (le rechargement faisait clignoter le planning et sauter le
+  // defilement). L'ecriture est deja `await`ee ici : le descripteur n'est emis
+  // qu'apres un CRUD reussi, il n'y a donc jamais d'etat local a annuler.
+  //
+  // `failureMessage` : texte affiche sur le board si l'ecriture echoue. Les
+  // chemins qui passent par la fenetre n'en fournissent pas — ils remontent deja
+  // l'echec a l'appelant via `{ ok: false, error }` et la fenetre l'affiche
+  // elle-meme, un second message ferait doublon. La suppression, elle, part du
+  // menu contextuel : sans message ici son echec serait totalement muet.
+  async function persistWrite(writeFn, { failureMessage = "" } = {}) {
+    setBoardFeedback(boardEl, "");
     try {
-      await writeFn();
+      const change = await writeFn();
       if (typeof onChanged === "function") {
-        await onChanged();
+        await onChanged(change);
       }
     } catch (error) {
       console.error("Erreur ecriture TimeSegment (plan de charge) :", error);
+      setBoardFeedback(boardEl, failureMessage);
     } finally {
       applyEditModeToDom();
     }
@@ -375,14 +537,40 @@ export function attachChargeEditing(
     await persistWrite(async () => {
       try {
         if (segmentId == null) {
-          await createTimeSegment({
+          // L'id du nouvel enregistrement est RELAYE a l'appelant : sans lui, la
+          // barre creee ne serait pas editable avant le prochain rechargement.
+          const createdId = await createTimeSegment({
             projectNumber: typeof getProjectNumber === "function" ? getProjectNumber() : undefined,
             name: workerName,
             monthKey,
             effectif: selection.effectifValueForSave,
           });
+          return {
+            type: "create",
+            segmentId: toEditableSegmentId(createdId),
+            monthKey,
+            workerName,
+            effectif: selection.effectifValueForSave,
+          };
         } else {
-          await updateTimeSegment({ segmentId, effectif: selection.effectifValueForSave });
+          // `monthKey` est passe MEME quand le mois n'a pas change : c'est lui qui
+          // tient la promesse de la spec §12 (« lignes legacy sans Mois -> repli en
+          // lecture sur Start_At ; la premiere re-edition les bascule »). Sans lui,
+          // la garde `if (monthKey != null)` de updateTimeSegment n'ecrit jamais la
+          // colonne Mois et la ligne reste indefiniment legacy — invisible le jour
+          // ou Start_At est retiree de la table (spec §13).
+          await updateTimeSegment({
+            segmentId,
+            monthKey,
+            effectif: selection.effectifValueForSave,
+          });
+          return {
+            type: "update",
+            segmentId: toEditableSegmentId(segmentId),
+            monthKey,
+            workerName,
+            effectif: selection.effectifValueForSave,
+          };
         }
       } catch (error) {
         writeError = error;
@@ -417,7 +605,18 @@ export function attachChargeEditing(
     if (segmentId == null) return;
 
     if (action === "delete-segment") {
-      void persistWrite(() => removeTimeSegment(segmentId));
+      // La promesse est volontairement jetee (`void`) : rien n'attend ce clic.
+      // C'est donc `persistWrite` qui doit rendre l'echec visible, sinon la barre
+      // reste affichee a l'identique et l'utilisateur repart en croyant le
+      // segment supprime — le seul chemin d'ecriture des deux widgets dont
+      // l'echec etait totalement muet.
+      void persistWrite(
+        async () => {
+          await removeTimeSegment(segmentId);
+          return { type: "delete", segmentId };
+        },
+        { failureMessage: DELETE_SEGMENT_FAILURE_MESSAGE }
+      );
       return;
     }
 
@@ -444,6 +643,8 @@ export function attachChargeEditing(
   boardEl.addEventListener("pointerdown", handlePointerDown);
   boardEl.addEventListener("contextmenu", handleContextMenuEvent);
   boardEl.addEventListener("click", handleContextAction);
+  boardEl.addEventListener("pointermove", handleTrackHover);
+  boardEl.addEventListener("pointerleave", handleBoardPointerLeave);
   document.addEventListener("click", handleDocumentClick);
   document.addEventListener("keydown", handleKeyDown);
 
@@ -454,6 +655,8 @@ export function attachChargeEditing(
     boardEl.removeEventListener("pointerdown", handlePointerDown);
     boardEl.removeEventListener("contextmenu", handleContextMenuEvent);
     boardEl.removeEventListener("click", handleContextAction);
+    boardEl.removeEventListener("pointermove", handleTrackHover);
+    boardEl.removeEventListener("pointerleave", handleBoardPointerLeave);
     document.removeEventListener("click", handleDocumentClick);
     document.removeEventListener("keydown", handleKeyDown);
     if (editSegmentModal) editSegmentModal.destroy();

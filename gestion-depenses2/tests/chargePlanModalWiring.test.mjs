@@ -507,7 +507,13 @@ test("cablage reel : la validation de l'effectif est inchangee", async () => {
   h.dom.editSegmentEffectifInput.value = "99";
   const saving = h.api.saveEditedChargePlanSegment();
   await flush();
-  assert.equal(h.writes[0].effectif, 22, "plafonne aux jours ouvres du mois");
+  // CONTRAT PARTAGE PAR LES DEUX PLANNINGS : la valeur saisie est stockee BRUTE.
+  // Le depassement des jours ouvres est « rouge non bloquant » (spec §2), pas une
+  // saisie a corriger : un ecretage silencieux ici stockait 22 la ou
+  // planning-synchro stockait 99, si bien que la meme saisie donnait deux lignes
+  // Grist differentes et deux lectures RH differentes dans Gestion-User. Le
+  // plafond ne vit qu'a la LECTURE (getSegmentEffectiveDays), jamais en base.
+  assert.equal(h.writes[0].effectif, 99, "valeur brute stockee, aucun ecretage silencieux");
   h.pending().resolve(true);
   await saving;
 });

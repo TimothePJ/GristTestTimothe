@@ -2903,3 +2903,78 @@ test("un chargement initial en echec ne fait pas avaler la modification suivante
 
   unsubscribe();
 });
+
+// --- TimeSegment : la barre de charge « tous projets et tous services » ---------
+//
+// La politique de TimeSegment est REST_PROJECT_SERVICE (service-context-core.js) :
+// une lecture ordinaire est donc filtree sur le projet courant ET le service
+// courant. Les deux widgets de plan de charge appelaient cette lecture-la pour
+// alimenter leur barre « charge du mois », qui raisonne pourtant sur la PERSONNE :
+// elle ne pouvait voir qu un seul projet. Ces deux tests etablissent la sortie
+// prevue par le contrat — l option fullTable — sur les DEUX chemins de lecture.
+
+const TIME_SEGMENT_ROWS = {
+  id: [1, 2, 3],
+  NumeroProjet: ["100", "200", "100"],
+  Name: ["Alice Martin", "Alice Martin", "Alice Martin"],
+  Service: ["Structure", "Structure", "Methodes"],
+  Effectif: [5, 7, 3],
+};
+
+test("TimeSegment : fullTable rend les lignes des AUTRES projets et services (REST)", async () => {
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async (url) => {
+      const parsed = new URL(url);
+      const filter = parsed.searchParams.has("filter")
+        ? JSON.parse(parsed.searchParams.get("filter"))
+        : null;
+      const records = TIME_SEGMENT_ROWS.id.map((id, index) => ({
+        id,
+        fields: {
+          NumeroProjet: TIME_SEGMENT_ROWS.NumeroProjet[index],
+          Name: TIME_SEGMENT_ROWS.Name[index],
+          Service: TIME_SEGMENT_ROWS.Service[index],
+          Effectif: TIME_SEGMENT_ROWS.Effectif[index],
+        },
+      })).filter((record) => !filter || Object.entries(filter).every(([column, values]) => (
+        values.includes(record.fields[column])
+      )));
+      return restResponse(records);
+    },
+  });
+  await harness.api.whenReady();
+
+  const scoped = await harness.grist.docApi.fetchTable("TimeSegment");
+  assert.deepEqual(
+    Array.from(scoped.id),
+    [1],
+    "une lecture ordinaire reste bien filtree projet + service"
+  );
+
+  const full = await harness.grist.docApi.fetchTable("TimeSegment", { fullTable: true });
+  assert.deepEqual(
+    Array.from(full.id),
+    [1, 2, 3],
+    "fullTable doit ramener l autre projet (200) et l autre service (Methodes)"
+  );
+  assert.equal(
+    new URL(harness.restRequests.at(-1).url).searchParams.has("filter"),
+    false,
+    "la requete complete ne porte aucun filtre projet ou service"
+  );
+});
+
+test("TimeSegment : fullTable rend aussi la table entiere par le repli fetchTable", async () => {
+  // Sans politique REST exploitable (documents sans jeton), tout passe par le
+  // repli : c est loadFallbackContextTable qui doit alors sauter le filtre client.
+  const harness = createRuntimeHarness();
+  harness.tables.TimeSegment = TIME_SEGMENT_ROWS;
+  await harness.api.whenReady();
+
+  const scoped = await harness.grist.docApi.fetchTable("TimeSegment");
+  assert.deepEqual(Array.from(scoped.id), [1], "le repli filtre lui aussi projet + service");
+
+  const full = await harness.grist.docApi.fetchTable("TimeSegment", { fullTable: true });
+  assert.deepEqual(Array.from(full.id), [1, 2, 3], "fullTable doit sauter le filtre client");
+});

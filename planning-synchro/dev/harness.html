@@ -93,6 +93,26 @@
               <strong id="ps-edit-segment-calculated-days">--</strong>
             </div>
           </div>
+          <!-- Charge TOTALE de la personne sur ce mois, tous projets et tous
+               services confondus (cf. assets/js/utils/monthLoad.js). -->
+          <div class="ps-segment-edit-load" id="ps-edit-segment-load" hidden>
+            <div class="ps-segment-edit-load-head">
+              <span class="ps-segment-edit-load-label">Charge du mois — tous projets et tous services</span>
+              <strong id="ps-edit-segment-load-days">--</strong>
+            </div>
+            <div
+              class="ps-segment-edit-load-track"
+              id="ps-edit-segment-load-track"
+              role="progressbar"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
+              aria-labelledby="ps-edit-segment-load-days"
+            >
+              <span class="ps-segment-edit-load-fill" id="ps-edit-segment-load-fill"></span>
+            </div>
+            <p class="ps-segment-edit-load-message" id="ps-edit-segment-load-message" aria-live="polite"></p>
+          </div>
         </section>
         <p id="ps-edit-segment-feedback" class="ps-segment-edit-feedback" hidden></p>
       </div>

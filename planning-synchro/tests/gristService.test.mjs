@@ -184,3 +184,119 @@ test("fetchProjectData conserve Mois pour un segment (pas de liste blanche qui l
     globalThis.window = previousWindow;
   }
 });
+
+// La barre de charge mensuelle de la fenetre segment raisonne sur la PERSONNE,
+// pas sur le projet affiche : elle a besoin de TOUTES les lignes TimeSegment.
+//
+// PIEGE, ET LE BUG QUI EN EST SORTI : `grist.docApi.fetchTable` est PATCHE par
+// shared/grist-service-context.js, et TimeSegment y a une politique
+// REST_PROJECT_SERVICE (shared/service-context-core.js). Une lecture ordinaire
+// est donc deja filtree par projet ET par service AVANT que ce service ne voie
+// la moindre ligne : ce que le widget appelait allTimeSegmentRows ne contenait
+// en realite que le projet affiche. La sortie prevue par le contrat est
+// l option { fullTable: true } (verifiee sur le vrai module partage dans
+// shared/tests/service-context-runtime.test.cjs).
+//
+// Le bouchon ci-dessous IMITE ce contrat, filtre compris — un bouchon qui rend
+// tout a tout le monde, comme le precedent, ne pouvait pas voir le bug.
+function contextPatchedDocApi(rows, { project = "1111", service = "Structure", patched = true } = {}) {
+  const columnar = (list) => ({
+    id: list.map((row) => row.id),
+    NumeroProjet: list.map((row) => row.NumeroProjet),
+    Name: list.map((row) => row.Name),
+    Effectif: list.map((row) => row.Effectif),
+    Service: list.map((row) => row.Service),
+  });
+  const calls = [];
+  const docApi = {
+    async fetchTable(tableName, options) {
+      calls.push({ tableName, options });
+      if (tableName !== "TimeSegment") return emptyTable();
+      if (options && options.fullTable === true) return columnar(rows);
+      return columnar(rows.filter((row) => (
+        row.NumeroProjet === project && row.Service === service
+      )));
+    },
+  };
+  if (patched) docApi.__serviceContextPatched = true;
+  return { docApi, calls };
+}
+
+const CROSS_PROJECT_ROWS = [
+  { id: 1, NumeroProjet: "1111", Name: "Alix Martin", Effectif: 4, Service: "Structure" },
+  { id: 2, NumeroProjet: "2222", Name: "Alix Martin", Effectif: 5, Service: "Fluides" },
+  { id: 3, NumeroProjet: "1111", Name: "Paul Durand", Effectif: 6, Service: "Structure" },
+];
+
+test("fetchProjectData expose allTimeSegmentRows : tous projets, tous services", async () => {
+  const previousWindow = globalThis.window;
+  const { docApi, calls } = contextPatchedDocApi(CROSS_PROJECT_ROWS);
+  globalThis.window = { grist: { docApi } };
+
+  try {
+    const service = await importFreshService("fetch-project-data-all-rows");
+    const data = await service.fetchProjectData({ name: "Peu importe", number: "1111" });
+
+    assert.deepEqual(
+      data.timeSegmentRows.map((row) => row.id),
+      [1, 3],
+      "la vue projet reste filtree projet + service (non-regression)"
+    );
+    assert.deepEqual(
+      data.allTimeSegmentRows.map((row) => row.id).sort(),
+      [1, 2, 3],
+      "la barre doit voir la ligne du projet 2222, service Fluides"
+    );
+    assert.ok(
+      data.allTimeSegmentRows.some((row) => row.NumeroProjet === "2222"),
+      "sans elle la barre montrerait une disponibilite qui n existe pas"
+    );
+    assert.ok(
+      calls.some((call) => call.tableName === "TimeSegment" && call.options && call.options.fullTable === true),
+      "la lecture non filtree doit bien etre demandee au contrat partage"
+    );
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("fetchProjectData ne relit TimeSegment que deux fois : la vue projet et la barre", async () => {
+  // Le cout compte : la relecture en place (reloadChargeFromGrist) repasse par
+  // fetchProjectData a chaque signal.
+  const previousWindow = globalThis.window;
+  const { docApi, calls } = contextPatchedDocApi(CROSS_PROJECT_ROWS);
+  globalThis.window = { grist: { docApi } };
+
+  try {
+    const service = await importFreshService("fetch-project-data-cost");
+    await service.fetchProjectData({ name: "Peu importe", number: "1111" });
+    assert.equal(
+      calls.filter((call) => call.tableName === "TimeSegment").length,
+      2,
+      "une lecture filtree pour le pane bas, une lecture complete pour la barre"
+    );
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("hors couche de contexte, fetchProjectData n envoie aucune option a Grist", async () => {
+  // dev/harness.html et le RPC Grist natif n acceptent qu un nom de table : leur
+  // passer un second argument serait au mieux ignore, au pire une erreur. La barre
+  // retombe alors sur les lignes deja lues.
+  const previousWindow = globalThis.window;
+  const { docApi, calls } = contextPatchedDocApi(CROSS_PROJECT_ROWS, { patched: false });
+  globalThis.window = { grist: { docApi } };
+
+  try {
+    const service = await importFreshService("fetch-project-data-unpatched");
+    const data = await service.fetchProjectData({ name: "Peu importe", number: "1111" });
+    assert.ok(
+      calls.filter((call) => call.tableName === "TimeSegment").every((call) => call.options === undefined),
+      "aucune option ne doit atteindre un fetchTable non patche"
+    );
+    assert.ok(Array.isArray(data.allTimeSegmentRows), "la barre garde un tableau exploitable");
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});

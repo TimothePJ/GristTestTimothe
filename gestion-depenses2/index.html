@@ -254,6 +254,26 @@
                             <strong id="edit-segment-calculated-days">--</strong>
                         </div>
                     </div>
+                    <!-- Charge TOTALE de la personne sur ce mois, tous projets et
+                         tous services confondus (cf. utils/monthLoad.js). -->
+                    <div class="segment-edit-load" id="edit-segment-load" hidden>
+                        <div class="segment-edit-load-head">
+                            <span class="segment-edit-load-label">Charge du mois — tous projets et tous services</span>
+                            <strong id="edit-segment-load-days">--</strong>
+                        </div>
+                        <div
+                            class="segment-edit-load-track"
+                            id="edit-segment-load-track"
+                            role="progressbar"
+                            aria-valuemin="0"
+                            aria-valuemax="100"
+                            aria-valuenow="0"
+                            aria-labelledby="edit-segment-load-days"
+                        >
+                            <span class="segment-edit-load-fill" id="edit-segment-load-fill"></span>
+                        </div>
+                        <p class="segment-edit-load-message" id="edit-segment-load-message" aria-live="polite"></p>
+                    </div>
                 </section>
                 <p id="edit-segment-feedback" class="segment-edit-feedback" hidden></p>
             </div>

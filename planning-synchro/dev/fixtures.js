@@ -131,6 +131,14 @@ export const FIXTURE_TABLES = {
   TimeSegment: [
     ...monthlyTimeSegmentRows({ idStart: 101, numeroProjet: "252035", name: "Fouzia Raggui", startMonthKey: "2027-02", endMonthKey: "2027-02", effectif: 1 }),
     ...monthlyTimeSegmentRows({ idStart: 201, numeroProjet: "252035", name: "Guillaume Sadot", startMonthKey: "2027-03", endMonthKey: "2027-05", effectif: 1 }),
+    // TEST BARRE MULTI-PROJETS : Guillaume Sadot est engage le MEME mois
+    // (mars 2027) sur un SECOND projet. Sans cette ligne, aucune personne des
+    // fixtures n apparaissait sous deux NumeroProjet, et la barre de charge
+    // « tous projets et tous services » n etait pas observable dans le harnais
+    // sans injection au runtime. Mars 2027 = 22 jours ouvres : en editant son
+    // segment de 1 j sur 252035, la barre affiche 15 j / 22 j (partielle) ;
+    // saisir 8 j la fait basculer sur « charge complete », 10 j sur surcharge.
+    ...monthlyTimeSegmentRows({ idStart: 1301, numeroProjet: MANY_TASK_NUMBER, name: "Guillaume Sadot", startMonthKey: "2027-03", endMonthKey: "2027-03", effectif: 14 }),
     ...monthlyTimeSegmentRows({ idStart: 301, numeroProjet: "252035", name: "BA INGENERIE", startMonthKey: "2027-02", endMonthKey: "2027-04", effectif: 2 }),
     ...monthlyTimeSegmentRows({ idStart: 401, numeroProjet: "252035", name: "Laurent Orven", startMonthKey: "2027-04", endMonthKey: "2027-05", effectif: 1 }),
     // Project 3 (many tasks): mois generes sur toute la plage d'origine si bien
@@ -166,6 +174,7 @@ export const FIXTURE_TABLES = {
     { id: 9, NumeroProjet: "252035", Name: "Nadia Ferrand", Role: "Projeteur", Daily_Rate: 0 }, // TEST LEGACY MOIS (Start_At seul, cf. TimeSegment)
     { id: 5, NumeroProjet: MANY_TASK_NUMBER, Name: "Equipe Etudes", Role: "Projeteur", Daily_Rate: 0 },
     { id: 6, NumeroProjet: MANY_TASK_NUMBER, Name: "BE Externe", Role: "Sous-traitant", Daily_Rate: 0 },
+    { id: 21, NumeroProjet: MANY_TASK_NUMBER, Name: "Guillaume Sadot", Role: "Ingenieur", Daily_Rate: 0 }, // TEST BARRE MULTI-PROJETS (cf. TimeSegment)
     { id: 7, NumeroProjet: HOMONYM_NUMBER, Name: "Equipe Zones", Role: "Projeteur", Daily_Rate: 0 },
     { id: 20, NumeroProjet: "555555", Name: "Equipe BG", Role: "Projeteur", Daily_Rate: 0 },
     { id: 30, NumeroProjet: "666666", Name: "Equipe Fusion", Role: "Projeteur", Daily_Rate: 0 },

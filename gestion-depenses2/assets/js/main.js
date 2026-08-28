@@ -104,7 +104,12 @@ import {
   getMonthAvailableDays,
   getMonthBounds,
   getMonthBusinessDays,
+  toGristMonthValue,
 } from "./utils/monthSegments.js";
+// Noyau pur de la barre de charge mensuelle de la fenetre segment. Module
+// VENDORISE : copie identique octet pour octet dans planning-synchro,
+// verrouillee par shared/tests/vendored-charge-modules-parity.test.cjs.
+import { computeMonthLoad } from "./utils/monthLoad.js";
 import {
   CHARGE_PLAN_SAVE_STALL_MESSAGE,
   computeMonthSlotGeometry,
@@ -1425,8 +1430,118 @@ function setEditChargePlanContextLabels(monthKey = "", workerName = "") {
   }
 }
 
+// Toutes les lignes TimeSegment, tous projets et tous services confondus. La
+// barre de charge raisonne sur la PERSONNE : lui passer les seuls segments du
+// projet affiche lui ferait montrer une disponibilite qui n'existe pas.
+function getAllTimeSegmentRows() {
+  return Array.isArray(state.allTimeSegmentRows) ? state.allTimeSegmentRows : [];
+}
+
+// Legende de la barre de charge mensuelle, dans les termes de la specification.
+// Meme texte que planning-synchro (formatMonthLoadMessage) : la meme charge doit
+// se lire a l'identique dans les deux widgets.
+function formatChargePlanMonthLoadMessage(load) {
+  if (load?.state === "overload") {
+    return `SURCHARGE : ${formatEditSegmentDayValue(load.overloadDays)} de trop`;
+  }
+  if (load?.state === "balanced") {
+    return "charge complete";
+  }
+  return `il reste ${formatEditSegmentDayValue(load?.remainingDays)} avant 100 %`;
+}
+
+// Barre de charge du mois : charge TOTALE de la personne sur le mois de la
+// fenetre, tous projets et tous services confondus, saisie en cours comprise.
+// Le calcul est entierement porte par utils/monthLoad.js : on ne fait ici que
+// le nourrir et le rendre.
+function renderEditChargePlanMonthLoadBar() {
+  const loadEl = dom?.editSegmentLoad;
+  if (!(loadEl instanceof HTMLElement)) {
+    return null;
+  }
+
+  const monthKey = editingChargePlanSegment?.monthKey || "";
+
+  // Fenetre fermee ou mois illisible : rien a montrer. On efface au lieu de
+  // laisser les chiffres de la session precedente a l'ecran.
+  if (!getMonthBounds(monthKey)) {
+    loadEl.hidden = true;
+    loadEl.classList.remove("is-partial");
+    loadEl.classList.remove("is-balanced");
+    loadEl.classList.remove("is-overload");
+    if (dom.editSegmentLoadFill instanceof HTMLElement) {
+      dom.editSegmentLoadFill.style.width = "0%";
+      // Barre vide : le plancher `min-width` du CSS ferait sinon apparaitre une
+      // pastille de 14 px alors qu'il n'y a rien a montrer.
+      dom.editSegmentLoadFill.hidden = true;
+    }
+    if (dom.editSegmentLoadDays instanceof HTMLElement) {
+      dom.editSegmentLoadDays.textContent = "--";
+    }
+    if (dom.editSegmentLoadMessage instanceof HTMLElement) {
+      dom.editSegmentLoadMessage.textContent = "";
+    }
+    if (dom.editSegmentLoadTrack instanceof HTMLElement) {
+      dom.editSegmentLoadTrack.setAttribute("aria-valuenow", "0");
+    }
+    return null;
+  }
+
+  const load = computeMonthLoad({
+    monthKey,
+    personName: editingChargePlanSegment?.worker?.name,
+    allSegmentRows: getAllTimeSegmentRows(),
+    columns: APP_CONFIG.grist.columns.timeSegment,
+    absenceSet:
+      editingChargePlanSegment?.absenceSet instanceof Set
+        ? editingChargePlanSegment.absenceSet
+        : null,
+    // EDITION : sans cet id, l'effectif deja stocke du segment ouvert
+    // s'ajouterait a ce que l'utilisateur tape et le mois serait compte deux
+    // fois. CREATION : aucune ligne n'existe encore, il n'y a rien a ecarter.
+    excludeSegmentId: editingChargePlanSegment?.segment?.id ?? null,
+    draftEffectif:
+      dom.editSegmentEffectifInput instanceof HTMLInputElement
+        ? dom.editSegmentEffectifInput.value
+        : null,
+  });
+
+  // `ratio` est deja borne par le module ; ce clamp-ci garantit qu'une barre en
+  // surcharge SATURE a 100 % au lieu de deborder de son conteneur.
+  const fillPercent = Math.min(1, Math.max(0, load.ratio)) * 100;
+
+  loadEl.hidden = false;
+  loadEl.classList.toggle("is-partial", load.state === "partial");
+  loadEl.classList.toggle("is-balanced", load.state === "balanced");
+  loadEl.classList.toggle("is-overload", load.state === "overload");
+
+  if (dom.editSegmentLoadFill instanceof HTMLElement) {
+    dom.editSegmentLoadFill.style.width = `${fillPercent}%`;
+    // Voir la regle `.segment-edit-load-fill[hidden]` : le plancher de largeur
+    // ne doit pas ressusciter le remplissage a 0 j.
+    dom.editSegmentLoadFill.hidden = fillPercent <= 0;
+  }
+  if (dom.editSegmentLoadDays instanceof HTMLElement) {
+    dom.editSegmentLoadDays.textContent = `${formatEditSegmentDayValue(
+      load.totalDays
+    )} / ${formatEditSegmentDayValue(load.availableDays)}`;
+  }
+  if (dom.editSegmentLoadMessage instanceof HTMLElement) {
+    dom.editSegmentLoadMessage.textContent = formatChargePlanMonthLoadMessage(load);
+  }
+  if (dom.editSegmentLoadTrack instanceof HTMLElement) {
+    dom.editSegmentLoadTrack.setAttribute(
+      "aria-valuenow",
+      String(Math.round(fillPercent))
+    );
+  }
+
+  return load;
+}
+
 // Le mois de la fenetre ne se saisit plus : il vient du clic. Ne restent derives
-// que les jours disponibles du mois et le signalement « au-dela du disponible ».
+// que les jours disponibles du mois, le signalement « au-dela du disponible » et
+// la barre de charge mensuelle.
 function syncEditChargePlanDerivedValues() {
   if (!dom) {
     return;
@@ -1440,6 +1555,7 @@ function syncEditChargePlanDerivedValues() {
       dom.editSegmentEffectifInput.classList.remove("is-over-available");
     }
     setEditChargePlanMetricValue(dom.editSegmentCalculatedDays, null);
+    renderEditChargePlanMonthLoadBar();
     return;
   }
 
@@ -1463,6 +1579,7 @@ function syncEditChargePlanDerivedValues() {
   }
 
   setEditChargePlanMetricValue(dom.editSegmentCalculatedDays, availableDays);
+  renderEditChargePlanMonthLoadBar();
 }
 
 function formatEditSegmentInputValue(value) {
@@ -1751,8 +1868,13 @@ async function saveEditedChargePlanSegment() {
     return;
   }
 
-  // Plafonne aux jours ouvres du mois : au-dela, la journee n'existe pas.
-  const effectif = Math.min(validation.effectif, getMonthBusinessDays(monthKey));
+  // CONTRAT PARTAGE PAR LES DEUX PLANNINGS : la valeur saisie est stockee BRUTE.
+  // Le depassement des jours ouvres est « rouge non bloquant » (spec §2), pas une
+  // saisie a corriger : un ecretage silencieux ici stockait 22 la ou
+  // planning-synchro stockait 99, si bien que la meme saisie donnait deux lignes
+  // Grist differentes et deux lectures RH differentes dans Gestion-User. Le
+  // plafond ne vit qu'a la LECTURE (getSegmentEffectiveDays), jamais en base.
+  const effectif = validation.effectif;
   const isCreation = !editingChargePlanSegment.segment;
   const boardEl = editingChargePlanSegment.boardEl;
 
@@ -2509,12 +2631,15 @@ async function performLoadData(
   }
   if (loadGeneration !== expenseDataLoadGeneration) return false;
   const tables = { projectRows: cachedProjectRows, ...dataTables };
-  const { projects, teamMembers } = buildExpenseData(tables);
+  const { projects, teamMembers, allTimeSegmentRows } = buildExpenseData(tables);
   planningManagementHover = null;
 
   setState({
     projects,
     teamMembers,
+    // Necessaire a la barre de charge de la fenetre segment : elle additionne
+    // les jours de la personne sur TOUS les projets, pas seulement l'affiche.
+    allTimeSegmentRows,
   });
   window.__depenses2Projects = projects; // exposé pour le listener storage (fallback nom)
 
@@ -2981,12 +3106,117 @@ function updateProjectWorkerLocally(projectId, workerId, updater) {
   return true;
 }
 
+// --- cache brut des lignes TimeSegment ---------------------------------------
+//
+// `state.allTimeSegmentRows` est la copie BRUTE de la table, alimentee par
+// performLoadData. C'est elle que lit la barre de charge de la fenetre segment
+// (computeMonthLoad raisonne sur la PERSONNE, tous projets confondus). Les
+// mutations optimistes ne touchaient, elles, que
+// state.projects[].workers[].segments : la barre lisait donc un cache perime
+// jusqu'au prochain rechargement. Creation et modification s'en tiraient PAR
+// CHANCE (la ligne ecrite etait absente du cache ET exclue par
+// excludeSegmentId, les deux erreurs s'annulaient) ; la SUPPRESSION, non.
+
+// « 42 » (dataset DOM) et 42 (retour Grist) designent la meme ligne.
+function isSameTimeSegmentRowId(left, right) {
+  if (left == null || left === "" || right == null || right === "") return false;
+  if (String(left).trim() === String(right).trim()) return true;
+
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+  return (
+    Number.isFinite(leftNumber) && Number.isFinite(rightNumber) && leftNumber === rightNumber
+  );
+}
+
+// Ligne synthetique equivalente a ce que Grist renverra au prochain fetch.
+// Seules les colonnes REELLEMENT relues sont posees : mois, personne et
+// effectif pour computeMonthLoad, plus le numero de projet et les jours ouvres
+// pour que la ligne soit indiscernable d'une vraie.
+function buildTimeSegmentRowFromSegment({ projectId, workerId, segment }) {
+  if (!segment) return null;
+
+  const columns = APP_CONFIG.grist.columns.timeSegment;
+  const monthValue = toGristMonthValue(segment.monthKey);
+  if (monthValue == null) return null;
+
+  const project =
+    state.projects.find((item) => Number(item?.id) === Number(projectId)) || null;
+  const worker =
+    (project?.workers || []).find((item) => Number(item?.id) === Number(workerId)) || null;
+
+  return {
+    id: Number(segment.id),
+    [columns.id]: Number(segment.id),
+    [columns.projectNumber]: project?.projectNumber ?? "",
+    [columns.name]: worker?.name ?? "",
+    [columns.mois]: monthValue,
+    [columns.allocationDays]: getMonthBusinessDays(segment.monthKey),
+    [columns.effectif]: segment.effectifDays,
+  };
+}
+
+// UPSERT : une modification (mois ou effectif) doit ECRASER la ligne existante,
+// une creation l'ajouter. Sans cela le meme segment figurerait deux fois dans le
+// cache et la barre compterait sa charge en double.
+function addTimeSegmentRowLocally({ projectId, workerId, segment }) {
+  const row = buildTimeSegmentRowFromSegment({ projectId, workerId, segment });
+  if (!row) return;
+
+  const columns = APP_CONFIG.grist.columns.timeSegment;
+  const currentRows = getAllTimeSegmentRows();
+  let didReplace = false;
+  const nextRows = currentRows.map((currentRow) => {
+    if (!isSameTimeSegmentRowId(currentRow?.[columns.id] ?? currentRow?.id, row.id)) {
+      return currentRow;
+    }
+    didReplace = true;
+    return row;
+  });
+
+  setState({ allTimeSegmentRows: didReplace ? nextRows : [...currentRows, row] });
+}
+
+function removeTimeSegmentRowLocally(segmentId) {
+  const columns = APP_CONFIG.grist.columns.timeSegment;
+  const currentRows = getAllTimeSegmentRows();
+  const nextRows = currentRows.filter(
+    (row) => !isSameTimeSegmentRowId(row?.[columns.id] ?? row?.id, segmentId)
+  );
+  if (nextRows.length === currentRows.length) return;
+
+  setState({ allTimeSegmentRows: nextRows });
+}
+
+// Grist a rendu son id : sans cette reprise, rouvrir le segment tout juste cree
+// n'ecarterait plus sa propre ligne du cache (excludeSegmentId ne mordrait pas)
+// et la barre compterait la saisie deux fois.
+function replaceTimeSegmentRowIdLocally(currentSegmentId, persistedSegmentId) {
+  const columns = APP_CONFIG.grist.columns.timeSegment;
+  const currentRows = getAllTimeSegmentRows();
+  let didReplace = false;
+  const nextRows = currentRows.map((row) => {
+    if (!isSameTimeSegmentRowId(row?.[columns.id] ?? row?.id, currentSegmentId)) {
+      return row;
+    }
+    didReplace = true;
+    return {
+      ...row,
+      id: Number(persistedSegmentId),
+      [columns.id]: Number(persistedSegmentId),
+    };
+  });
+  if (!didReplace) return;
+
+  setState({ allTimeSegmentRows: nextRows });
+}
+
 function replaceChargePlanSegmentLocally({ projectId, workerId, segment }) {
   if (!segment) {
     return false;
   }
 
-  return updateProjectWorkerLocally(projectId, workerId, (worker) => {
+  const didUpdate = updateProjectWorkerLocally(projectId, workerId, (worker) => {
     const { segmentField } = getChargePlanSegmentStateKeys(segment.segmentType);
     const currentSegments = Array.isArray(worker?.[segmentField]) ? worker[segmentField] : [];
     let didReplace = false;
@@ -3005,6 +3235,11 @@ function replaceChargePlanSegmentLocally({ projectId, workerId, segment }) {
 
     return rebuildWorkerChargePlanState(worker, segment.segmentType, nextSegments);
   });
+
+  if (didUpdate && !isRealChargePlanSegmentType(segment.segmentType)) {
+    addTimeSegmentRowLocally({ projectId, workerId, segment });
+  }
+  return didUpdate;
 }
 
 function replaceChargePlanSegmentIdLocally({
@@ -3014,7 +3249,7 @@ function replaceChargePlanSegmentIdLocally({
   currentSegmentId,
   persistedSegmentId,
 }) {
-  return updateProjectWorkerLocally(projectId, workerId, (worker) => {
+  const didUpdate = updateProjectWorkerLocally(projectId, workerId, (worker) => {
     const { segmentField } = getChargePlanSegmentStateKeys(segmentType);
     const currentSegments = Array.isArray(worker?.[segmentField]) ? worker[segmentField] : [];
     let didReplace = false;
@@ -3037,6 +3272,11 @@ function replaceChargePlanSegmentIdLocally({
 
     return rebuildWorkerChargePlanState(worker, segmentType, nextSegments);
   });
+
+  if (didUpdate && !isRealChargePlanSegmentType(segmentType)) {
+    replaceTimeSegmentRowIdLocally(currentSegmentId, persistedSegmentId);
+  }
+  return didUpdate;
 }
 
 function addChargePlanSegmentLocally({ projectId, workerId, segment }) {
@@ -3044,7 +3284,7 @@ function addChargePlanSegmentLocally({ projectId, workerId, segment }) {
     return false;
   }
 
-  return updateProjectWorkerLocally(projectId, workerId, (worker) => {
+  const didUpdate = updateProjectWorkerLocally(projectId, workerId, (worker) => {
     const { segmentField } = getChargePlanSegmentStateKeys(segment.segmentType);
     const currentSegments = Array.isArray(worker?.[segmentField]) ? worker[segmentField] : [];
     return rebuildWorkerChargePlanState(worker, segment.segmentType, [
@@ -3052,6 +3292,11 @@ function addChargePlanSegmentLocally({ projectId, workerId, segment }) {
       segment,
     ]);
   });
+
+  if (didUpdate && !isRealChargePlanSegmentType(segment.segmentType)) {
+    addTimeSegmentRowLocally({ projectId, workerId, segment });
+  }
+  return didUpdate;
 }
 
 function removeChargePlanSegmentLocally({
@@ -3060,7 +3305,7 @@ function removeChargePlanSegmentLocally({
   segmentType,
   segmentId,
 }) {
-  return updateProjectWorkerLocally(projectId, workerId, (worker) => {
+  const didUpdate = updateProjectWorkerLocally(projectId, workerId, (worker) => {
     const { segmentField } = getChargePlanSegmentStateKeys(segmentType);
     const currentSegments = Array.isArray(worker?.[segmentField]) ? worker[segmentField] : [];
     const nextSegments = currentSegments.filter(
@@ -3073,6 +3318,11 @@ function removeChargePlanSegmentLocally({
 
     return rebuildWorkerChargePlanState(worker, segmentType, nextSegments);
   });
+
+  if (didUpdate && !isRealChargePlanSegmentType(segmentType)) {
+    removeTimeSegmentRowLocally(segmentId);
+  }
+  return didUpdate;
 }
 
 async function createChargePlanSegment({

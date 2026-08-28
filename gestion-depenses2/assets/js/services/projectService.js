@@ -345,6 +345,10 @@ export function buildExpenseData({
   projectTeamRows,
   timesheetRows,
   timeSegmentRows,
+  // Lecture NON FILTREE de TimeSegment (cf. services/gristService.js). Absente
+  // -> repli sur `timeSegmentRows` : les appelants historiques et les tests qui
+  // ne fournissent qu'un seul jeu de lignes gardent le comportement d'avant.
+  allTimeSegmentRows,
   timeRealRows,
   teamRows,
   timeOutRows,
@@ -764,6 +768,20 @@ export function buildExpenseData({
   return {
     projects,
     teamMembers,
+    // Les lignes TimeSegment BRUTES, tous projets et tous SERVICES confondus.
+    // Deux filtres les perdaient : la ventilation par projet faite dans
+    // `projects` ci-dessus, et — beaucoup moins visible — celui que la couche de
+    // contexte partagee applique d'office a TimeSegment (politique
+    // REST_PROJECT_SERVICE), qui restreignait la lecture au projet ET au service
+    // courants. D'ou la lecture dediee `{ fullTable: true }` cote gristService.
+    //
+    // La barre de charge mensuelle raisonne sur la PERSONNE, pas sur le projet
+    // affiche : une personne a 5 jours ailleurs est deja a 5 jours pris, que cet
+    // ailleurs soit un autre projet ou un autre service. Le filtrage (mois, nom,
+    // segment edite) est le travail de computeMonthLoad.
+    allTimeSegmentRows: Array.isArray(allTimeSegmentRows)
+      ? allTimeSegmentRows
+      : (Array.isArray(timeSegmentRows) ? timeSegmentRows : []),
   };
 }
 

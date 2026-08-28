@@ -32,6 +32,7 @@ import { createPlanningRenderer } from "./top/planningRenderer.js";
 import { createPlanningChart } from "./top/planningChart.js";
 import { createChargeBoard, buildWorkersFromSegments } from "./bottom/chargeBoard.js";
 import { attachChargeEditing } from "./bottom/chargeEditing.js";
+import { applySegmentChangeLocally, timeSegmentRowsSignature } from "./bottom/localSegmentUpdate.js";
 import { buildAbsenceIndex, normalizeName } from "./utils/leaveAbsences.js";
 import { createTopPaneResizer } from "./ui/topPaneResizer.js";
 import { buildProjectRealisationTargetLookup } from "./top/vendor/planningProjetBuilder.js";
@@ -140,6 +141,62 @@ function captureChargeScroll() {
   };
 }
 
+// Lignes TimeSegment BRUTES d'un retour de fetchProjectData : tous projets, tous
+// services. Elles alimentent la barre de charge mensuelle de la fenetre segment,
+// qui raisonne sur la PERSONNE et non sur le projet affiche (cf.
+// utils/monthLoad.js). Accesseur defensif : un vieux retour sans la cle, ou un
+// fetch en echec, donne [] plutot qu'un plantage a l'ouverture de la fenetre.
+function readAllTimeSegmentRows(payload) {
+  return Array.isArray(payload?.allTimeSegmentRows) ? payload.allTimeSegmentRows : [];
+}
+
+// Empreinte du CATALOGUE projets : ce que ce widget en affiche vraiment, a savoir
+// l'identifiant, le nom et le numero de chaque projet. Meme principe que
+// timeSegmentRowsSignature (bottom/localSegmentUpdate.js) : comparer le CONTENU
+// plutot que se fier au nom de la table qui a bouge.
+//
+// POURQUOI : le relais de synchronisation inter-widgets
+// (shared/project-mutation-sync-relay.js) ajoute une ecriture de COLONNE DE
+// SIGNAL sur Projets2 au meme lot que chaque mutation. Projets2 est donc annoncee
+// comme « changee » apres absolument toutes nos ecritures, alors que rien de ce
+// que le selecteur montre n'a bouge. L'empreinte ne retient que les colonnes
+// affichees : la colonne de signal, elle, n'y figure pas.
+//
+// Separateurs (unites ASCII 0x1F/0x1E) impossibles a rencontrer dans une valeur
+// Grist, et tri prealable : l'ordre de Projets2 n'est pas significatif.
+function projectRegistrySignature(projects) {
+  const fieldSeparator = "";
+  const rowSeparator = "";
+  return (Array.isArray(projects) ? projects : [])
+    .map((project) => [project?.id, project?.name, project?.number]
+      .map((value) => (value == null ? "" : String(value)))
+      .join(fieldSeparator))
+    .sort()
+    .join(rowSeparator);
+}
+
+// Une livraison de `watchContextTables` annonce les tables qui ont change. Trois
+// suites possibles :
+//
+// - "charge"                       : seul TimeSegment a bouge. Rien d'autre que le
+//                                    pane bas n'est concerne : relecture en place.
+// - "charge-si-catalogue-inchange" : TimeSegment et/ou Projets2. Projets2 est
+//                                    TOUJOURS de la partie apres nos propres
+//                                    ecritures (colonne de signal du relais), donc
+//                                    son nom ne prouve rien : il faut comparer
+//                                    l'empreinte du catalogue avant de choisir.
+// - "full"                         : toute autre table, ou liste vide/absente.
+//                                    Dans le doute on recharge tout, on ne perd
+//                                    jamais un changement.
+function classifyContextSignal(tables, timeSegmentTableName, projectsTableName) {
+  if (!Array.isArray(tables) || tables.length === 0) return "full";
+  if (tables.every((tableName) => tableName === timeSegmentTableName)) return "charge";
+  if (tables.every((tableName) => (
+    tableName === timeSegmentTableName || tableName === projectsTableName
+  ))) return "charge-si-catalogue-inchange";
+  return "full";
+}
+
 function bootstrapApp() {
   const els = {
     select: document.getElementById("ps-project-select"),
@@ -178,6 +235,17 @@ function bootstrapApp() {
   let topPaneResizer = null;
   let loadSeq = 0;
   let lastAppliedSelectionKey = "";
+
+  // Rafraichissement NON DESTRUCTIF du plan de charge du projet courant, publie
+  // par loadProject() (c'est son `reloadChargeFromGrist`). Null tant qu'aucun
+  // projet n'est charge — le signal retombe alors sur le rechargement complet.
+  let refreshChargeOnly = null;
+
+  // Empreinte du catalogue projets tel que ce widget l'affiche, posee par
+  // bootstrap() puis remise a jour a chaque changement REEL. Elle sert a
+  // distinguer une ecriture de colonne de signal sur Projets2 (rien n'a bouge)
+  // d'un vrai changement du catalogue (creation, renommage, suppression).
+  let projectRegistryFingerprint = "";
 
   // Top-pane view: "planning" (the read-only timeline) or "chart" (the task-load
   // graph). The chart is available at any time — it does NOT require the aggregate
@@ -249,6 +317,12 @@ function bootstrapApp() {
 
   async function loadProject(project) {
     const seq = ++loadSeq;
+    // Le rafraichissement en place publie plus bas appartient au projet PRECEDENT :
+    // tant que celui-ci n est pas remplace, un signal TimeSegment partirait relire
+    // l ancien numero et son resultat serait jete par `seq !== loadSeq` — l ecriture
+    // externe serait perdue. Pendant un chargement, le signal doit retomber sur le
+    // chemin complet ; loadProject republiera le sien a la fin.
+    refreshChargeOnly = null;
 
     state.selectedProject = project || null;
 
@@ -276,6 +350,16 @@ function bootstrapApp() {
     const pc = APP_CONFIG.grist.columns;
     const { planningRows, timeSegmentRows, projectTeamRows } = data;
     const workerColumns = { timeSegment: pc.timeSegment, projectTeam: pc.projectTeam };
+
+    // Lignes TimeSegment VIVANTES du projet affiche : point de depart des mises
+    // a jour LOCALES post-ecriture (cf. onChanged plus bas). Mutable, la ou
+    // `timeSegmentRows` reste l'instantane du chargement.
+    let projectTimeSegmentRows = Array.isArray(timeSegmentRows) ? timeSegmentRows : [];
+
+    // Reference MUTABLE, relue par la fenetre a chaque rendu de sa barre de
+    // charge : le chemin onChanged (ci-dessous) la met a jour apres chaque
+    // ecriture, sinon la barre resterait sur l'instantane d'avant.
+    let allTimeSegmentRows = readAllTimeSegmentRows(data);
 
     // Per-worker absence index (Map<normalizeName, Set<"YYYY-MM-DD:am|pm">>) built
     // from the global Team + Time-Out rows. Time-Out is global and unaffected by
@@ -456,6 +540,118 @@ function bootstrapApp() {
     updateViewSwitchVisibility();
     applyTopView();
 
+    // Redessine le pane bas a partir des lignes DEJA en memoire. Aucun fetch :
+    // c'est ce qui supprime le rechargement visible apres chaque ecriture.
+    function renderChargeFromLocalRows() {
+      if (!chargeBoard || !controller) return;
+
+      const nextWorkers = buildWorkersFromSegments(
+        projectTimeSegmentRows,
+        projectTeamRows,
+        workerColumns
+      );
+      const nextBounds = computeTimeSegmentBounds(projectTimeSegmentRows, pc.timeSegment);
+
+      if (nextBounds) {
+        els.chargeEmpty.hidden = true;
+        els.charge.hidden = false;
+      } else {
+        els.chargeEmpty.hidden = false;
+        els.charge.hidden = true;
+      }
+
+      // Un segment cree sur un mois hors des bornes actuelles doit rester
+      // atteignable : la frise partagee s'ELARGIT pour le couvrir. Jamais
+      // l'inverse — retrecir les bornes (apres une suppression) deplacerait la
+      // fenetre courante sous les yeux de l'utilisateur.
+      const widenedBounds = unionDateBounds(
+        controllerBounds,
+        unionDateBounds(nextBounds, planBounds)
+      );
+      if (
+        widenedBounds &&
+        controllerBounds &&
+        (widenedBounds.startDate !== controllerBounds.startDate ||
+          widenedBounds.endDate !== controllerBounds.endDate)
+      ) {
+        controllerBounds = widenedBounds;
+        controller.setBounds(widenedBounds);
+      }
+
+      // Preserve the sticky edit mode across the post-write re-render:
+      // chargeEditing.persistWrite() re-asserts editModeEnabled synchronously
+      // in its finally, but this render() (and the controller's follow-up rAF
+      // re-render below, which reuses chargeBoard.lastEditMode) would reset it
+      // to locked if we hardcoded false here. Read the live flag from the
+      // editing controller so ONE source of truth drives both.
+      const currentEditMode = editing ? editing.isEditModeEnabled() : false;
+      const restoreScroll = captureChargeScroll();
+      chargeBoard.render({
+        workers: nextWorkers,
+        viewport: controller.getViewport(),
+        editMode: currentEditMode,
+        absencesByWorker,
+      });
+      controller.setViewport(controller.getViewport());
+      restoreScroll();
+    }
+
+    // Numero de sequence PROPRE au rafraichissement en place. `loadSeq` ne bouge
+    // pas sur ce chemin : aucun loadProject() n est relance. Sans compteur dedie,
+    // deux relectures concurrentes — le debounce du relais est de 100 ms alors que
+    // fetchProjectData enchaine 5+ requetes REST, donc deux signaux espaces de plus
+    // de 100 ms se chevauchent tres ordinairement — se resolvent dans un ordre que
+    // rien ne garantit, et la reponse PERIMEE ecrase la fraiche : le segment tout
+    // juste cree disparait de l ecran. Une seule reponse compte, la DERNIERE partie.
+    let chargeRefreshSeq = 0;
+
+    // Relit les seules lignes TimeSegment et redessine LE PANE BAS. Deux usages :
+    // le repli des changements qu'on ne sait pas appliquer localement, et le
+    // rafraichissement en place declenche par le relais de synchronisation
+    // (cf. handleContextTablesChanged). Rien n'est demonte : ni la fenetre
+    // d'edition, ni le pane haut, ni le mode Editer, ni la position de defilement.
+    async function reloadChargeFromGrist() {
+      const refreshSeq = ++chargeRefreshSeq;
+      let refreshed;
+      try {
+        refreshed = await fetchProjectData({ name: project.name, number: project.number });
+      } catch (error) {
+        console.error("Erreur rechargement du plan de charge :", error);
+        return;
+      }
+      // Reponse d une relecture DEPASSEE par une plus recente : la jeter. Sans
+      // cela elle repeindrait un instantane plus ancien que celui deja a l ecran.
+      if (seq !== loadSeq || refreshSeq !== chargeRefreshSeq || !chargeBoard || !controller) return;
+
+      const nextProjectRows = Array.isArray(refreshed.timeSegmentRows)
+        ? refreshed.timeSegmentRows
+        : [];
+      const nextAllRows = readAllTimeSegmentRows(refreshed);
+
+      // Relecture qui ne ramene RIEN de neuf : c'est le cas apres notre propre
+      // ecriture, deja posee a l'ecran par la mise a jour locale. Redessiner ne
+      // ferait alors que faire clignoter le pane bas. On compare les lignes plutot
+      // que d'armer un jeton « ignorer le prochain signal » : un jeton avalerait
+      // l'ecriture simultanee d'un autre utilisateur, alors qu'une empreinte
+      // differente redessine toujours.
+      const columns = pc.timeSegment;
+      const sameProjectRows =
+        timeSegmentRowsSignature(nextProjectRows, columns) ===
+        timeSegmentRowsSignature(projectTimeSegmentRows, columns);
+      const sameAllRows =
+        timeSegmentRowsSignature(nextAllRows, columns) ===
+        timeSegmentRowsSignature(allTimeSegmentRows, columns);
+      if (sameProjectRows && sameAllRows) return;
+
+      projectTimeSegmentRows = nextProjectRows;
+      allTimeSegmentRows = nextAllRows;
+      renderChargeFromLocalRows();
+    }
+
+    // Publie pour le relais : un changement qui ne touche que TimeSegment se
+    // rafraichit ainsi, sans repasser par loadProject().
+    refreshChargeOnly = reloadChargeFromGrist;
+
     editing = attachChargeEditing(els.charge, {
       getProjectNumber: () => project.number,
       getVisibleSlots: () => (chargeBoard ? chargeBoard.getVisibleSlots() : []),
@@ -463,44 +659,46 @@ function bootstrapApp() {
       // Per-worker absence half-day set for the edit modal's leave-adjusted
       // readout (consumed in Task 7). Harmless extra option until then.
       getAbsenceSet: (workerName) => absencesByWorker.get(normalizeName(workerName)) || new Set(),
-      onChanged: async () => {
+      // Barre de charge mensuelle de la fenetre : toutes les lignes TimeSegment,
+      // tous projets et tous services. Un ACCESSEUR et non le tableau lui-meme,
+      // pour que la mise a jour locale de `onChanged` soit visible aussitot.
+      getAllTimeSegmentRows: () => allTimeSegmentRows,
+      // MISE A JOUR LOCALE apres une ecriture reussie : plus de
+      // fetchProjectData() ni de re-rendu sur donnees rechargees. Le
+      // rechargement faisait clignoter le planning et sautait la position de
+      // defilement — c'est exactement ce que gestion-depenses2 evite. La
+      // coherence a terme reste assuree par le relais de synchronisation
+      // inter-widgets (watchContextTables) : rien a reconcilier ici.
+      //
+      // `change` decrit l'ecriture qui vient d'aboutir (cf. chargeEditing.js).
+      // La garde `seq !== loadSeq` est conservee : un changement de projet
+      // pendant l'ecriture ne doit jamais appliquer la modification au projet
+      // suivant.
+      onChanged: async (change) => {
         if (seq !== loadSeq || !chargeBoard || !controller) return;
 
-        let refreshed;
-        try {
-          refreshed = await fetchProjectData({ name: project.name, number: project.number });
-        } catch (error) {
-          console.error("Erreur rechargement du plan de charge :", error);
+        const applied = applySegmentChangeLocally({
+          change,
+          projectRows: projectTimeSegmentRows,
+          allRows: allTimeSegmentRows,
+          columns: pc.timeSegment,
+          projectNumber: project.number,
+        });
+
+        if (!applied.applied) {
+          // Changement non applicable a coup sur (creation dont Grist n'a pas
+          // rendu l'id, ligne introuvable) : plutot qu'un etat invente, on
+          // retombe sur le rechargement complet d'avant.
+          await reloadChargeFromGrist();
           return;
         }
-        if (seq !== loadSeq || !chargeBoard || !controller) return;
 
-        const nextWorkers = buildWorkersFromSegments(
-          refreshed.timeSegmentRows,
-          refreshed.projectTeamRows,
-          workerColumns
-        );
-        const nextBounds = computeTimeSegmentBounds(refreshed.timeSegmentRows, pc.timeSegment);
-
-        if (nextBounds) {
-          els.chargeEmpty.hidden = true;
-          els.charge.hidden = false;
-        } else {
-          els.chargeEmpty.hidden = false;
-          els.charge.hidden = true;
-        }
-
-        // Preserve the sticky edit mode across the post-write re-render:
-        // chargeEditing.persistWrite() re-asserts editModeEnabled synchronously
-        // in its finally, but this render() (and the controller's follow-up rAF
-        // re-render below, which reuses chargeBoard.lastEditMode) would reset it
-        // to locked if we hardcoded false here. Read the live flag from the
-        // editing controller so ONE source of truth drives both.
-        const currentEditMode = editing ? editing.isEditModeEnabled() : false;
-        const restoreScroll = captureChargeScroll();
-        chargeBoard.render({ workers: nextWorkers, viewport: controller.getViewport(), editMode: currentEditMode, absencesByWorker });
-        controller.setViewport(controller.getViewport());
-        restoreScroll();
+        // La barre de charge mensuelle de la fenetre lit TOUTES les lignes
+        // TimeSegment : sans cette mise a jour, elle afficherait des chiffres
+        // perimes des la premiere sauvegarde.
+        projectTimeSegmentRows = applied.projectRows;
+        allTimeSegmentRows = applied.allRows;
+        renderChargeFromLocalRows();
       },
     });
 
@@ -539,6 +737,99 @@ function bootstrapApp() {
   }
 
   function handleServiceChange() {
+    reconcileAndLoad({ force: true });
+  }
+
+  // Rappel du relais de synchronisation inter-widgets.
+  //
+  // ATTENTION : il se declenche AUSSI sur NOS PROPRES ecritures. `applyActions`
+  // appelle `grist.docApi.applyUserActions`, que shared/grist-service-context.js
+  // patche pour enchainer `synchronizeAfterMutation` ->
+  // `refreshContextWatchers(["TimeSegment"])` -> livraison « mutation » -> ce
+  // rappel, ~100 ms plus tard. Le fichier partage le dit en toutes lettres : le
+  // rendu est rappele « que le changement vienne de LUI, d'un autre widget de la
+  // page, ou d'un autre utilisateur ».
+  //
+  // Un `reconcileAndLoad({ force: true })` inconditionnel relance donc
+  // loadProject() apres chaque ajout de segment : teardown() de la fenetre
+  // d'edition, recreation des deux panes, scrollToTop() du pane haut et pane bas
+  // re-rendu en lecture seule — le « quand j'ajoute un segment, ca me reactualise
+  // la page » signale par l'utilisateur.
+  //
+  // Une ecriture qui ne touche QUE TimeSegment ne concerne pourtant que le pane
+  // bas : on relit ses seules donnees et on redessine EN PLACE. Le chemin est le
+  // meme pour un changement reellement externe (autre widget, autre utilisateur) :
+  // les lignes sont bien relues depuis Grist, jamais avalees.
+  //
+  // ROUTER SUR LES NOMS DE TABLES NE SUFFIT PAS. Le relais ajoute
+  // `["UpdateRecord", "Projets2", projectId, signalFields]` AU MEME LOT que notre
+  // ecriture, et son enveloppe est plus externe que celle de la couche de
+  // contexte : `getModifiedTables` voit donc toujours TimeSegment ET Projets2, et
+  // un predicat « uniquement TimeSegment » ne pouvait jamais etre vrai pour nos
+  // propres ecritures. On route donc sur ce qui a REELLEMENT change : quand les
+  // tables annoncees tiennent dans {TimeSegment, Projets2}, on compare l'empreinte
+  // du catalogue avant de renoncer au rechargement complet.
+
+  // Relit Projets2 et dit si le catalogue AFFICHE (id / nom / numero) a bouge.
+  // Illisible -> true : dans le doute on recharge tout plutot que d'avaler un
+  // changement.
+  async function projectCatalogHasChanged() {
+    let projectRows = [];
+    try {
+      projectRows = await fetchTableRows(APP_CONFIG.grist.tables.projects);
+    } catch (error) {
+      console.error("Erreur relecture du catalogue projets :", error);
+      return true;
+    }
+
+    const signature = projectRegistrySignature(
+      buildRegistry(projectRows, APP_CONFIG.grist.columns.projects)
+    );
+    if (signature === projectRegistryFingerprint) return false;
+
+    projectRegistryFingerprint = signature;
+    return true;
+  }
+
+  async function refreshChargeUnlessCatalogChanged() {
+    const refresh = refreshChargeOnly;
+    if (await projectCatalogHasChanged()) {
+      reconcileAndLoad({ force: true });
+      return;
+    }
+    // Un chargement de projet a pu demarrer pendant la relecture du catalogue :
+    // son rafraichissement en place a alors change (ou disparu), et celui qu'on
+    // tenait appartient au projet precedent.
+    if (refreshChargeOnly !== refresh || !refreshChargeOnly) {
+      reconcileAndLoad({ force: true });
+      return;
+    }
+    refresh();
+  }
+
+  function handleContextTablesChanged(signal) {
+    const tables = signal && Array.isArray(signal.tables) ? signal.tables : null;
+    const route = refreshChargeOnly
+      ? classifyContextSignal(
+          tables,
+          APP_CONFIG.grist.tables.timeSegment,
+          APP_CONFIG.grist.tables.projects
+        )
+      : "full";
+
+    if (route === "charge") {
+      refreshChargeOnly();
+      return;
+    }
+
+    if (route === "charge-si-catalogue-inchange") {
+      refreshChargeUnlessCatalogChanged().catch((error) => {
+        console.error("Verification du catalogue projets impossible :", error);
+        reconcileAndLoad({ force: true });
+      });
+      return;
+    }
+
     reconcileAndLoad({ force: true });
   }
 
@@ -624,6 +915,9 @@ function bootstrapApp() {
     }
 
     state.registry = buildRegistry(projectRows, APP_CONFIG.grist.columns.projects);
+    // Reference a laquelle comparer les signaux Projets2 a venir : sans elle, le
+    // premier signal croirait voir un changement et rechargerait toute la page.
+    projectRegistryFingerprint = projectRegistrySignature(state.registry);
 
     const pcp = APP_CONFIG.grist.columns.projects;
     realisationTargetLookup = buildProjectRealisationTargetLookup(
@@ -649,13 +943,13 @@ function bootstrapApp() {
 
     // Le planning synchronisé croise quatre tables, toutes éditées depuis
     // d'autres widgets. Sans cette liaison, une modification n'apparaîtrait
-    // qu'après rechargement de la page.
+    // qu'après rechargement de la page. Le rappel est routé (cf.
+    // handleContextTablesChanged) : un rappel inline réintroduirait le
+    // rechargement complet inconditionnel après chaque écriture locale.
     const psTables = APP_CONFIG.grist.tables;
     window.GristServiceContext?.watchContextTables?.(
       [psTables.planningProject, psTables.projects, psTables.timeSegment, psTables.projectTeam],
-      () => {
-        reconcileAndLoad({ force: true });
-      },
+      handleContextTablesChanged,
       {
         nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
         projectScopedSignals: true,
