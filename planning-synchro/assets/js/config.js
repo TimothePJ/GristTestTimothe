@@ -36,6 +36,9 @@ export const APP_CONFIG = {
         duree2: "Duree_2", diffArmature: "Diff_armature", duree3: "Duree_3",
         demarragesTravaux: "Demarrages_travaux", indice: "Indice", nomXml: "Nom_XML",
         realise: "Realise", retards: "Retards", dateRealise: "Date_Realise", dateCloture: "Date_Cloture", remarque: "Remarque", service: "Service",
+        // Charge de reference : trois niveaux resolus en cascade a la lecture
+        // (Force > Zone > Projet), jamais stockes resolus — cf. bottom/documentCharge.js.
+        dureeProjet: "Duree_Projet", dureeZone: "Duree_Zone", dureeForce: "Duree_Force",
       },
       timeSegment: {
         id: "id", projectNumber: "NumeroProjet", name: "Name",

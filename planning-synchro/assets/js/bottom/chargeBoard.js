@@ -67,6 +67,7 @@ import {
 import { resolveSegmentMonthKey, getMonthBounds, getMonthAvailableDays } from "../utils/monthSegments.js";
 import { countPlanningTasksOverlappingRange } from "../top/phases.js";
 import { isAbsenceSlot, normalizeName } from "../utils/leaveAbsences.js";
+import { computeProjectCharge } from "./documentCharge.js";
 import { APP_CONFIG } from "../config.js";
 
 const MIN_CONTENT_WIDTH_PX = 280;
@@ -510,18 +511,24 @@ function computeMonthTotalDays(workers, month) {
   return Math.round(total * 100) / 100;
 }
 
+// Pastille d'un mois : meme geometrie pour la ligne Total et la ligne Charge.
+// Les deux se lisent l'une au-dessus de l'autre — une formule dupliquee finirait
+// par deriver d'un seul cote, en silence.
+// Le plancher a 0,08 garde une pastille visible pour une valeur infime ; les
+// 12 px retranches sont les 6 px de marge de chaque cote (cf. .charge-plan-month-fill).
+function renderMonthFillPill(value, month) {
+  if (!(value > 0)) return "";
+  const fillRatio = Math.min(1, Math.max(0.08, value / Math.max(1, month.businessDayCount)));
+  return `<span class="charge-plan-month-fill" style="width:calc((100% - 12px) * ${fillRatio})">
+               <span class="charge-plan-month-label">${formatDayValue(value)} j</span>
+             </span>`;
+}
+
 function renderReadonlyMonthTrack(workers, months) {
   return months
     .map((month) => {
       const totalDays = computeMonthTotalDays(workers, month);
-      const fillRatio =
-        totalDays > 0 ? Math.min(1, Math.max(0.08, totalDays / Math.max(1, month.businessDayCount))) : 0;
-      const fill =
-        totalDays > 0
-          ? `<span class="charge-plan-month-fill" style="width:calc((100% - 12px) * ${fillRatio})">
-               <span class="charge-plan-month-label">${formatDayValue(totalDays)} j</span>
-             </span>`
-          : "";
+      const fill = renderMonthFillPill(totalDays, month);
       return `<span class="charge-plan-month-segment" style="width:${month.widthPx}px">${fill}</span>`;
     })
     .join("");
@@ -542,6 +549,67 @@ function renderTotalRow(workers, months, timelineWidth) {
       <div class="charge-plan-cell charge-plan-cell--timeline">
         <div class="charge-plan-track charge-plan-track--readonly">
           ${renderReadonlyMonthTrack(workers, months)}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// --- Charge row: required vs. planned days, per month -------------------------
+// La ligne Charge compare, mois par mois, ce qui est REQUIS par le bareme
+// (Task 1, documentCharge.js) a ce qui est PLANIFIE (Task 2 fournit les
+// colonnes Duree_*). Elle vit juste sous Total pour que les deux lignes
+// s'alignent visuellement sur les memes colonnes de mois.
+
+// Etat d'une cellule mensuelle : on compare les jours PLANIFIES — exactement le
+// chiffre que la ligne Total affiche deja, via computeMonthTotalDays — aux jours
+// REQUIS par le bareme. Les deux lignes doivent parler du meme nombre, d'ou la
+// reutilisation de la meme fonction plutot qu'un calcul parallele.
+const CHARGE_EPSILON = 1e-9;
+
+function getChargeCellState(plannedDays, requiredDays) {
+  if (requiredDays <= CHARGE_EPSILON && plannedDays <= CHARGE_EPSILON) return "";
+  if (Math.abs(plannedDays - requiredDays) < CHARGE_EPSILON) return "is-balanced";
+  return plannedDays < requiredDays ? "is-overload" : "is-partial";
+}
+
+function renderChargeMonthTrack(workers, months, chargeByMonth) {
+  return months
+    .map((month) => {
+      const requiredDays = chargeByMonth.get(month.key) || 0;
+      const plannedDays = computeMonthTotalDays(workers, month);
+      const state = getChargeCellState(plannedDays, requiredDays);
+      const fill = renderMonthFillPill(requiredDays, month);
+      return `<span class="charge-plan-month-segment ${state}" style="width:${month.widthPx}px">${fill}</span>`;
+    })
+    .join("");
+}
+
+// La ligne se rend TOUJOURS des qu'un projet est charge, meme sans aucune duree
+// saisie : sinon le bouton « Charge » — seul point d'entree de la fenetre —
+// serait introuvable.
+// Le badge ne porte QUE la valeur : le libelle « non place » vit dans son
+// `title` (deja survole — la pastille est en `cursor: help`). La cellule de nom
+// fait 220 px FIXES et loge deja le bouton « Charge » ; avec le prefixe,
+// « non place : 240 j » y tenait a quelques pixels pres, et l'etat de deploiement
+// attendu — 112 lignes COFFRAGE encore sans dates — donne un total a QUATRE
+// chiffres qui debordait ou se faisait rogner (`white-space: nowrap`).
+function renderChargeRow(workers, months, timelineWidth, charge) {
+  const unplaced =
+    charge.unplacedDays > 0
+      ? `<span class="charge-plan-charge-unplaced" title="Charge non placee : ${formatDayValue(charge.unplacedDays)} j — documents sans dates de planning, leur charge n'est encore rattachee a aucun mois.">
+           ${formatDayValue(charge.unplacedDays)} j
+         </span>`
+      : "";
+  return `
+    <div class="charge-plan-row charge-plan-row--charge" style="--timeline-width:${timelineWidth}px; --row-height:72px">
+      <div class="charge-plan-cell charge-plan-cell--name">
+        <button type="button" class="charge-plan-charge-btn" data-charge-assign-open>Charge</button>
+        ${unplaced}
+      </div>
+      <div class="charge-plan-cell charge-plan-cell--timeline">
+        <div class="charge-plan-track charge-plan-track--readonly">
+          ${renderChargeMonthTrack(workers, months, charge.byMonth)}
         </div>
       </div>
     </div>
@@ -630,6 +698,12 @@ export function createChargeBoard(containerEl) {
   // viewport-only re-render (setWindow) omits it, so we keep the last value to
   // preserve grey shading + red bars across zoom/pan.
   let lastAbsencesByWorker = new Map();
+  // Lignes Planning_Projet (Task 1's computeProjectCharge input). Comme
+  // lastPlanningTasks : seul le render() pilote par les donnees (main.js) les
+  // transmet, la reconstruction de fenetre (setWindow) ne les fait pas
+  // transiter — sans memoire, un zoom/pan viderait la ligne Charge a chaque
+  // rafraichissement de fenetre.
+  let lastPlanningRows = [];
   // Rebuild throttling. A zoom/pan gesture drives setWindow ~60x/s and each call
   // used to rebuild the whole innerHTML — the dominant jank source. We throttle
   // the rebuild to at most one per REBUILD_THROTTLE_MS (leading + trailing): the
@@ -658,7 +732,7 @@ export function createChargeBoard(containerEl) {
     activeVisibleSlots = [];
   }
 
-  function render({ workers, viewport, editMode, planningTasks, absencesByWorker } = {}) {
+  function render({ workers, viewport, editMode, planningTasks, absencesByWorker, planningRows } = {}) {
     if (!(containerEl instanceof HTMLElement) || !viewport) {
       clear();
       return;
@@ -679,6 +753,7 @@ export function createChargeBoard(containerEl) {
     if (absencesByWorker !== undefined) {
       lastAbsencesByWorker = absencesByWorker instanceof Map ? absencesByWorker : new Map();
     }
+    if (planningRows !== undefined) lastPlanningRows = Array.isArray(planningRows) ? planningRows : [];
 
     containerEl.classList.add("charge-plan-board");
 
@@ -716,6 +791,11 @@ export function createChargeBoard(containerEl) {
     const windowMonths = getWindowMonths(windowDays, dayWidth);
     const totalRowHtml = renderTotalRow(lastWorkers, windowMonths, timelineWidth);
 
+    // Ligne Charge : requis (documentCharge.js, Task 1) vs planifie (memes
+    // workers/mois que Total ci-dessus).
+    const charge = computeProjectCharge(lastPlanningRows, APP_CONFIG.grist.columns.planningProject);
+    const chargeRowHtml = renderChargeRow(lastWorkers, windowMonths, timelineWidth, charge);
+
     containerEl.classList.toggle("is-segment-editing-enabled", lastEditMode);
     containerEl.classList.toggle("is-segment-editing-locked", !lastEditMode);
     containerEl.dataset.segmentEditMode = lastEditMode ? "enabled" : "locked";
@@ -725,6 +805,7 @@ export function createChargeBoard(containerEl) {
         <div class="charge-plan-timeline" style="--timeline-width:${timelineWidth}px">
           ${rowsHtml}
           ${totalRowHtml}
+          ${chargeRowHtml}
         </div>
       </div>
       ${renderTimelineEditToolbar(lastEditMode)}

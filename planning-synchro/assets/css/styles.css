@@ -1094,6 +1094,78 @@ body.ps-panning * {
   color: #fff;
 }
 
+/* Ligne Charge : requis (documentCharge.js, Task 1) vs planifie. La classe
+   d'etat est sur le SEGMENT, mais c'est la PASTILLE qu'on teinte : poser un
+   `background` raccourci sur le segment effacerait sa trame de grille, et la
+   pastille opaque recouvrirait la teinte de toute facon. Meme decoupage que la
+   barre de la fenetre de segment. */
+.charge-plan-row--charge .charge-plan-month-segment.is-balanced .charge-plan-month-fill {
+  background: var(--load-balanced);
+  box-shadow: inset 0 0 0 1px rgba(56, 106, 30, 0.32);
+}
+
+.charge-plan-row--charge .charge-plan-month-segment.is-partial .charge-plan-month-fill {
+  background: var(--load-partial);
+  /* Liseré obligatoire : #edf4fb ne fait que 1,11:1 contre le fond. Meme
+     traitement que .ps-segment-edit-load-fill, qui a le meme probleme. */
+  box-shadow: inset 0 0 0 1px rgba(0, 73, 144, 0.55);
+}
+
+.charge-plan-row--charge .charge-plan-month-segment.is-overload .charge-plan-month-fill {
+  background: var(--load-overload);
+  box-shadow: inset 0 0 0 1px rgba(109, 59, 0, 0.32);
+}
+
+/* Le label est blanc par defaut, pour le degrade bleu de la ligne Total. Sur les
+   trois teintes pales de la ligne Charge il disparaitrait : on le repasse en
+   sombre. #6d3b00 sur #ffe1a8 est exactement le couple de Gestion-User. */
+.charge-plan-row--charge .charge-plan-month-segment.is-balanced .charge-plan-month-label { color: #386a1e; }
+.charge-plan-row--charge .charge-plan-month-segment.is-partial  .charge-plan-month-label { color: var(--color-primary); }
+.charge-plan-row--charge .charge-plan-month-segment.is-overload .charge-plan-month-label { color: var(--load-overload-text); }
+
+/* Bouton + badge de la cellule nom : sans gap, ils se touchent (la cellule est
+   deja flex/align-items:center via .charge-plan-cell--name). */
+.charge-plan-row--charge .charge-plan-cell--name {
+  gap: 8px;
+}
+
+/* Ouvre la fenetre d'assignation (Task 4) — meme voix que .ps-nav / .ps-zoom
+   button : fond primaire, coin arrondi std, accent au survol. Pas de
+   reinvention de charte. */
+.charge-plan-charge-btn {
+  padding: 8px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+
+.charge-plan-charge-btn:hover {
+  background: var(--color-accent);
+  transform: translateY(-1px);
+}
+
+/* Badge « non place » : un AVERTISSEMENT discret (des documents attendent une
+   date de planning), pas une erreur — donc la teinte surcharge (--load-overload
+   / --load-overload-text), pas le rouge de .ps-segment-edit-feedback ou de
+   .charge-plan-segment-bar.is-incoherent. Meme vocabulaire de couleur que les
+   pastilles de la ligne juste en-dessous. */
+.charge-plan-charge-unplaced {
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--load-overload);
+  color: var(--load-overload-text);
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: help;
+}
+
 .charge-plan-track-grid {
   position: absolute;
   inset: 0;
@@ -1356,6 +1428,20 @@ body.ps-panning * {
   gap: 18px;
 }
 
+/* --- Charge-assign modal ("Assigner la charge de reference") ---------------
+   Plus large que la fenetre de segment : elle deplie un arbre type -> zone ->
+   document, qui a besoin de place et defile verticalement plutot que
+   d'agrandir la fenetre a l'infini (un projet peut avoir des dizaines de
+   documents par type). Meme charpente ps-modal / ps-modal-header /
+   ps-modal-close-btn / ps-modal-subtitle que la fenetre de segment. */
+.ps-modal-content--charge-assign {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .ps-modal-header {
   display: flex;
   align-items: flex-start;
@@ -1491,15 +1577,21 @@ body.ps-panning * {
 }
 
 /* --- Barre de charge mensuelle -------------------------------------------- */
-/* Charge TOTALE de la personne sur le mois, tous projets et tous services
-   confondus. Les trois teintes sont celles de Gestion-User (--color-partial /
-   --color-balanced / --color-overload) et sont identiques a celles de
-   gestion-depenses2 : la meme charge doit se lire de la meme couleur dans les
-   trois widgets. */
-.ps-segment-edit-load {
+/* Teintes de charge, partagees par la barre de la fenetre de segment ET la ligne
+   Charge du board. Reprises de Gestion-User (--color-partial / --color-balanced /
+   --color-overload) et identiques a celles de gestion-depenses2 : la meme charge
+   doit se lire de la meme couleur dans les trois widgets.
+   Declarees ici et NON sur .ps-segment-edit-load : la ligne Charge vit hors de
+   cette fenetre et n'heriterait pas d'une variable scopee — sans erreur, juste
+   sans couleur. */
+:root {
   --load-partial: #edf4fb;
   --load-balanced: #d7eccb;
   --load-overload: #ffe1a8;
+  --load-overload-text: #6d3b00;
+}
+
+.ps-segment-edit-load {
   display: grid;
   gap: 8px;
 }
@@ -1667,9 +1759,210 @@ body.ps-panning * {
   color: #b54708;
 }
 
+/* --- Contenu de la fenetre d'assignation de charge --------------------------
+   Arbre type -> zone -> document. `.ps-charge-assign-body` porte le seul
+   defilement (l'en-tete/pied restent fixes) : `overflow-y` + le
+   `max-height` pose sur `.ps-modal-content--charge-assign` ci-dessus. */
+.ps-charge-assign-body {
+  overflow-y: auto;
+  padding-right: 4px;
+  display: grid;
+  gap: 12px;
+}
+
+.ps-charge-assign-empty {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.ps-charge-assign-type {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(0, 73, 144, 0.14);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(0, 73, 144, 0.03), rgba(255, 255, 255, 0.98));
+}
+
+.ps-charge-assign-type-head,
+.ps-charge-assign-zone-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.ps-charge-assign-type-name {
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.ps-charge-assign-zone-name {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Bandeau de divergence : avertissement (donnee heterogene issue d'une
+   edition manuelle dans Grist), jamais une erreur — memes teintes que le
+   badge "non place" de la ligne Charge du board (Tache 3). */
+.ps-charge-assign-divergence {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--load-overload);
+  color: var(--load-overload-text);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.ps-charge-assign-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.ps-charge-assign-field input {
+  width: 110px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+/* Champ herite : affiche vide (grise via le placeholder) plutot que la valeur
+   effective, pour que l'utilisateur voie d'un coup d'oeil quels niveaux ont
+   ete fixes explicitement. */
+.ps-charge-assign-field input::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.75;
+  font-style: italic;
+}
+
+/* Saisie illisible (non numerique, <= 0) : Enregistrer refuse tant que ce
+   n'est pas corrige (cf. createChargeAssignModal.handleSave). */
+.ps-charge-assign-input.is-invalid {
+  border-color: #b42318;
+  color: #b42318;
+}
+
+.ps-charge-assign-disclosure {
+  margin-left: 4px;
+}
+
+.ps-charge-assign-disclosure > summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.ps-charge-assign-zones {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ps-charge-assign-zone {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.ps-charge-assign-documents {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.ps-charge-assign-document {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 73, 144, 0.04);
+}
+
+.ps-charge-assign-document-label {
+  color: var(--color-text);
+  font-size: 0.88rem;
+}
+
+.ps-charge-assign-feedback {
+  margin: 0;
+  min-height: 22px;
+  color: #b42318;
+  font-weight: 600;
+}
+
+.ps-charge-assign-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.ps-charge-assign-footer button {
+  padding: 10px 18px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ps-charge-assign-footer button:hover {
+  background: #003a73;
+}
+
+/* Ecriture en cours : Enregistrer et Fermer suivent le meme verrou PARTAGE
+   que la fenetre de segment (cf. createChargeAssignModal). */
+.ps-charge-assign-footer button:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.ps-charge-assign-footer button:disabled:hover {
+  background: var(--color-primary);
+}
+
+#ps-charge-assign-modal.is-submitting .ps-modal-content--charge-assign {
+  cursor: progress;
+}
+
+#ps-charge-assign-modal.is-submitting .ps-charge-assign-body,
+#ps-charge-assign-modal.is-stalled .ps-charge-assign-body {
+  opacity: 0.72;
+}
+
+#ps-charge-assign-modal.is-stalled .ps-modal-content--charge-assign {
+  box-shadow: inset 0 3px 0 0 #b54708;
+}
+
+#ps-charge-assign-modal.is-stalled .ps-charge-assign-feedback {
+  color: #b54708;
+}
+
 @media (max-width: 640px) {
   .ps-modal-content--segment {
     width: min(100%, 100vw - 16px);
+    padding: 18px;
+  }
+
+  .ps-modal-content--charge-assign {
+    width: min(100%, 100vw - 16px);
+    max-height: calc(100vh - 32px);
     padding: 18px;
   }
 
@@ -1684,5 +1977,11 @@ body.ps-panning * {
 
   .ps-segment-edit-grid {
     grid-template-columns: 1fr;
+  }
+
+  .ps-charge-assign-type-head,
+  .ps-charge-assign-zone-head {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

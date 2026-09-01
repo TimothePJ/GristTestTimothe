@@ -59,7 +59,9 @@ const MAIN_PATH = new URL("../assets/js/main.js", import.meta.url);
 const source = fs.readFileSync(MAIN_PATH, "utf8");
 
 const SEGMENT_COLUMNS = APP_CONFIG.grist.columns.timeSegment;
+const PLANNING_COLUMNS = APP_CONFIG.grist.columns.planningProject;
 const TIME_SEGMENT_TABLE = APP_CONFIG.grist.tables.timeSegment;
+const PLANNING_TABLE = APP_CONFIG.grist.tables.planningProject;
 const PROJECTS_TABLE = APP_CONFIG.grist.tables.projects;
 const PROJECT_COLUMNS = APP_CONFIG.grist.columns.projects;
 const PROJECT = { id: 7, name: "Projet A", number: "25-0142" };
@@ -124,7 +126,8 @@ const BLOCK_HEADERS = [
   "function viewportFitsWithinBounds(viewport, bounds) {",
   "function readAllTimeSegmentRows(payload) {",
   "function projectRegistrySignature(projects) {",
-  "function classifyContextSignal(tables, timeSegmentTableName, projectsTableName) {",
+  "function planningRowsSignature(rows, columns, durationsOnly) {",
+  "function classifyContextSignal(tables, timeSegmentTableName, projectsTableName, planningProjectTableName) {",
   "  function teardown() {",
   "  async function loadProject(project) {",
   "  async function projectCatalogHasChanged() {",
@@ -172,9 +175,34 @@ function initialRemoteRows() {
   ];
 }
 
+// Lignes Planning_Projet du projet affiche. Depuis la Tache 5, le widget ECRIT
+// dans cette table (Duree_Projet / Duree_Zone / Duree_Force, jusqu'a ~112 lignes
+// en un lot), et le relais inter-widgets le reveille sur son PROPRE lot : elle
+// suit donc exactement le meme chemin post-ecriture que TimeSegment.
+function planningRow({ id, id2, typeDoc = "COFFRAGE", zone = "Zone 1", taskName = "" }) {
+  return {
+    id,
+    [PLANNING_COLUMNS.projectName]: PROJECT.name,
+    [PLANNING_COLUMNS.id2]: id2,
+    [PLANNING_COLUMNS.taskName]: taskName || `Tache ${id2}`,
+    [PLANNING_COLUMNS.typeDoc]: typeDoc,
+    [PLANNING_COLUMNS.zone]: zone,
+    [PLANNING_COLUMNS.dureeProjet]: "",
+    [PLANNING_COLUMNS.dureeZone]: "",
+    [PLANNING_COLUMNS.dureeForce]: "",
+  };
+}
+
+function initialPlanningRows() {
+  return [
+    planningRow({ id: 501, id2: "3001" }),
+    planningRow({ id: 502, id2: "3002" }),
+  ];
+}
+
 // --- montage du vrai loadProject sur un environnement bouchonne ---------------
 
-async function mount() {
+async function mount({ segmentRows, planningRows = [] } = {}) {
   const calls = {
     fetchProjectData: 0,
     reconcileAndLoad: 0,
@@ -194,7 +222,10 @@ async function mount() {
   const pendingFetches = [];
 
   // La base : mutable, pour simuler l'ecriture d'un autre widget/utilisateur.
-  let remoteRows = initialRemoteRows();
+  let remoteRows = segmentRows === undefined ? initialRemoteRows() : segmentRows;
+  // Les lignes Planning_Projet, mutables pour les memes raisons (notre propre
+  // ecriture de charge, ou celle d'un voisin).
+  let remotePlanningRows = planningRows;
   // Le catalogue Projets2, lui aussi mutable : le relais y ecrit une colonne de
   // signal a CHAQUE mutation, et un vrai widget de creation de projet peut y
   // ajouter une ligne. Les deux se ressemblent par le nom de table, jamais par
@@ -225,7 +256,7 @@ async function mount() {
     // de la base au moment ou la requete est partie, comme un vrai aller-retour.
     const all = remoteRows.map((row) => ({ ...row }));
     const payload = {
-      planningRows: [],
+      planningRows: remotePlanningRows.map((row) => ({ ...row })),
       timeSegmentRows: all.filter((row) => String(row[SEGMENT_COLUMNS.projectNumber]) === String(number)),
       projectTeamRows: [],
       teamRows: [],
@@ -264,6 +295,44 @@ async function mount() {
     };
   };
 
+  // Fenetre d'assignation de charge (Tache 4) : bouchon monte/demonte au meme
+  // rythme qu'attachChargeEditing ci-dessus, mais qui RETIENT ses options —
+  // c'est par `onSubmit` que le VRAI `handleChargeAssignSubmit` de main.js
+  // (ecriture Grist, puis mise a jour EN PLACE de planningRows, puis re-rendu
+  // local) devient executable depuis ce fichier.
+  //
+  // Ce bouchon-la remplace un `handleChargeAssignSubmit: () => {}` pose dans le
+  // bac a sable : il etait MORT. `loadProject` est extrait puis execute, et il
+  // declare `handleChargeAssignSubmit` dans son propre corps — la vraie
+  // fonction masquait donc le bouchon, qui laissait croire a une couverture
+  // inexistante.
+  let chargeAssignOptions = null;
+  const createChargeAssignModal = (_rootEl, options) => {
+    chargeAssignOptions = options;
+    return {
+      open: () => {},
+      close: () => {},
+      isOpen: () => false,
+      destroy: () => {},
+    };
+  };
+
+  // L'ecriture Grist elle-meme (services/gristService.js) : bouchonnee, mais
+  // elle applique bien le lot a la « base » pour que la relecture declenchee
+  // par le relais retrouve ce que Grist a reellement enregistre.
+  const planningWrites = [];
+  const updatePlanningDurations = async (writes) => {
+    planningWrites.push(writes);
+    const fieldsById = new Map();
+    (Array.isArray(writes) ? writes : []).forEach((write) => {
+      const previous = fieldsById.get(write?.recordId) || {};
+      fieldsById.set(write?.recordId, { ...previous, ...(write?.fields || {}) });
+    });
+    remotePlanningRows = remotePlanningRows.map((row) => (
+      fieldsById.has(row.id) ? { ...row, ...fieldsById.get(row.id) } : row
+    ));
+  };
+
   const els = {
     select: {},
     toolbar: {},
@@ -276,6 +345,7 @@ async function mount() {
     aggregateToggle: { checked: false },
     range: { textContent: "" },
     editModal: {},
+    chargeAssignModal: {},
     viewSwitch: null,
     chart: {},
     chartCanvas: {},
@@ -315,6 +385,8 @@ async function mount() {
     fetchProjectData,
     fetchTableRows,
     attachChargeEditing,
+    createChargeAssignModal,
+    updatePlanningDurations,
     loadPersistedViewport: () => null,
     persistViewport: () => {},
     captureChargeScroll: () => () => {},
@@ -390,6 +462,8 @@ async function mount() {
       "let chargeBoard = null;",
       "let controller = null;",
       "let editing = null;",
+      "let chargeAssignModal = null;",
+      "let currentPlanningRows = [];",
       "let topPaneResizer = null;",
       "let loadSeq = 0;",
       "let topView = 'planning';",
@@ -436,10 +510,19 @@ async function mount() {
 
   return {
     api: context.__api,
+    els,
     setRemoteProjectRows: (rows) => {
       remoteProjectRows = rows;
     },
     getRemoteProjectRows: () => remoteProjectRows,
+    setRemotePlanningRows: (rows) => {
+      remotePlanningRows = rows;
+    },
+    getRemotePlanningRows: () => remotePlanningRows,
+    planningWrites,
+    // Options passees a createChargeAssignModal par le VRAI loadProject :
+    // `onSubmit` EST handleChargeAssignSubmit.
+    getChargeAssignOptions: () => chargeAssignOptions,
     breakProjectCatalog: () => {
       projectCatalogBroken = true;
     },
@@ -760,13 +843,21 @@ test("un changement sur une AUTRE table recharge tout le projet", async () => {
   const h = await mount();
   h.reset();
 
-  h.api.handleContextTablesChanged({ tables: [APP_CONFIG.grist.tables.planningProject] });
+  // ProjectTeam : surveillee, mais rien du chemin leger ne sait l'appliquer
+  // (elle change la composition des lignes de personnes).
+  h.api.handleContextTablesChanged({ tables: [APP_CONFIG.grist.tables.projectTeam] });
   assert.equal(h.calls.reconcileAndLoad, 1, "le pane haut ne se met a jour que par loadProject()");
 
   h.reset();
   h.api.handleContextTablesChanged({ tables: [TIME_SEGMENT_TABLE, APP_CONFIG.grist.tables.projectTeam] });
   assert.equal(h.calls.reconcileAndLoad, 1, "des qu'une autre table bouge, on recharge tout");
   assert.equal(h.calls.fetchProjectCatalog, 0, "et sans relire le catalogue pour rien");
+
+  // Le chemin leger ne s'elargit PAS parce que Planning_Projet l'a rejoint :
+  // melangee a une table inconnue de ce chemin, elle retombe sur "full".
+  h.reset();
+  h.api.handleContextTablesChanged({ tables: [PLANNING_TABLE, APP_CONFIG.grist.tables.projectTeam] });
+  assert.equal(h.calls.reconcileAndLoad, 1, "Planning_Projet ne blanchit pas les tables qui l'accompagnent");
 });
 
 test("un signal sans table connue recharge tout : dans le doute, jamais moins", async () => {
@@ -787,20 +878,191 @@ test("un signal sans table connue recharge tout : dans le doute, jamais moins", 
 
 test("classifyContextSignal : TimeSegment seul est direct, Projets2 demande une verification", async () => {
   const h = await mount();
-  const classify = (tables) => h.api.classifyContextSignal(tables, TIME_SEGMENT_TABLE, PROJECTS_TABLE);
+  const classify = (tables) => h.api.classifyContextSignal(
+    tables,
+    TIME_SEGMENT_TABLE,
+    PROJECTS_TABLE,
+    PLANNING_TABLE
+  );
 
   assert.equal(classify([TIME_SEGMENT_TABLE]), "charge");
   assert.equal(classify([TIME_SEGMENT_TABLE, TIME_SEGMENT_TABLE]), "charge");
   // Le lot que le relais fabrique pour NOS PROPRES ecritures.
   assert.equal(classify([TIME_SEGMENT_TABLE, PROJECTS_TABLE]), "charge-si-catalogue-inchange");
   assert.equal(classify([PROJECTS_TABLE]), "charge-si-catalogue-inchange");
+  // Planning_Projet : la table qu'ecrit la fenetre « Assigner la charge de
+  // reference ». Meme chemin que TimeSegment — le rafraichissement en place
+  // sait traiter les deux et decide lui-meme, apres relecture, s'il faut
+  // finalement recharger tout le projet.
+  assert.equal(classify([PLANNING_TABLE]), "charge");
+  assert.equal(classify([PLANNING_TABLE, TIME_SEGMENT_TABLE]), "charge");
+  // Le lot que le relais fabrique pour NOTRE ecriture de charge.
+  assert.equal(classify([PLANNING_TABLE, PROJECTS_TABLE]), "charge-si-catalogue-inchange");
   // Toute autre table : rechargement complet, comme avant.
-  assert.equal(classify([TIME_SEGMENT_TABLE, APP_CONFIG.grist.tables.planningProject]), "full");
+  assert.equal(classify([TIME_SEGMENT_TABLE, APP_CONFIG.grist.tables.projectTeam]), "full");
+  assert.equal(classify([PLANNING_TABLE, APP_CONFIG.grist.tables.projectTeam]), "full");
   assert.equal(classify([APP_CONFIG.grist.tables.projectTeam]), "full");
+  assert.equal(classify([APP_CONFIG.grist.tables.team]), "full");
   // Dans le doute, jamais moins qu'un rechargement complet.
   assert.equal(classify([]), "full");
   assert.equal(classify(null), "full");
   assert.equal(classify(undefined), "full");
+});
+
+// --- 2 quater. Planning_Projet : la charge de reference suit le meme chemin ----
+//
+// La fenetre « Assigner la charge de reference » ecrit les trois colonnes de
+// duree de Planning_Projet — jusqu'a ~112 lignes en un lot. Le relais reveille
+// alors ce widget sur son PROPRE lot. Tant que Planning_Projet n'etait pas
+// routee, le signal tombait sur "full" -> reconcileAndLoad({ force: true }) ->
+// loadProject() complet : le rechargement VISIBLE que ce widget a explicitement
+// retire revenait sur l'ecriture la plus lourde du produit, et ecrasait au
+// passage la mise a jour EN PLACE que handleChargeAssignSubmit venait de poser.
+
+test("Planning_Projet — le signal declenche par NOTRE ecriture de charge ne reactualise pas la page", async () => {
+  const h = await mount({ planningRows: initialPlanningRows() });
+  h.setEditMode(true);
+  h.reset(); // on ne compte plus le chargement initial
+
+  // Le VRAI handleChargeAssignSubmit de main.js : ecriture Grist, mise a jour
+  // EN PLACE des objets-ligne, re-rendu local du pane bas.
+  const result = await h.getChargeAssignOptions().onSubmit([
+    { recordId: 501, fields: { [PLANNING_COLUMNS.dureeProjet]: 5 } },
+    { recordId: 502, fields: { [PLANNING_COLUMNS.dureeProjet]: 5 } },
+  ]);
+  await h.flush();
+
+  // `result` nait dans le vm : sa comparaison stricte de prototype echouerait.
+  assert.equal(result.ok, true, "l'enregistrement est rendu comme reussi a la fenetre");
+  assert.equal(h.planningWrites.length, 1, "un seul lot d'ecriture est parti");
+  assert.equal(h.calls.fetchProjectData, 0, "l'ecriture ne relit rien : la mise a jour est locale");
+  assert.equal(
+    h.lastChargeRender().planningRows.find((row) => row.id === 501)[PLANNING_COLUMNS.dureeProjet],
+    5,
+    "la nouvelle duree est a l'ecran des l'enregistrement"
+  );
+
+  // Grist a enregistre le lot ; le relais nous reveille avec Planning_Projet
+  // ET Projets2 (colonne de signal), comme pour n'importe quelle ecriture.
+  h.setRemoteProjectRows(
+    h.getRemoteProjectRows().map((row) => ({ ...row, PlanningProjet_Sync: "sig-2" }))
+  );
+  h.reset();
+
+  h.api.handleContextTablesChanged({ tables: [PLANNING_TABLE, PROJECTS_TABLE] });
+  await h.flush();
+
+  assert.equal(h.calls.reconcileAndLoad, 0, "PAS de loadProject() complet : c'est lui qui reactualisait la page");
+  assert.equal(h.calls.createPlanningRenderer, 0, "le pane haut n'est pas reconstruit (clignotement)");
+  assert.equal(h.calls.scrollToTop, 0, "le pane haut ne remonte pas en tete de liste");
+  assert.equal(h.calls.detach, 0, "le mode Editer n'est pas perdu");
+  assert.equal(h.calls.chargeRender, 0, "rien de neuf : la mise a jour locale est deja a l'ecran");
+});
+
+test("Planning_Projet — une duree saisie AILLEURS rafraichit la ligne Charge sans rechargement", async () => {
+  const h = await mount({ planningRows: initialPlanningRows() });
+  h.setEditMode(true);
+  const boardRows = h.lastChargeRender().planningRows;
+  h.reset();
+
+  h.setRemotePlanningRows(h.getRemotePlanningRows().map((row) => (
+    row.id === 502 ? { ...row, [PLANNING_COLUMNS.dureeForce]: 3 } : row
+  )));
+
+  h.api.handleContextTablesChanged({ tables: [PLANNING_TABLE] });
+  await h.flush();
+
+  assert.equal(h.calls.reconcileAndLoad, 0, "une duree qui change ne concerne que la ligne Charge");
+  assert.equal(h.calls.scrollToTop, 0);
+  assert.equal(h.calls.chargeRender, 1, "le pane bas est redessine");
+  assert.equal(h.lastChargeRender().editMode, true, "sans perdre le mode Editer au passage");
+  assert.equal(
+    h.lastChargeRender().planningRows.find((row) => row.id === 502)[PLANNING_COLUMNS.dureeForce],
+    3,
+    "la duree saisie par le voisin atteint bien la ligne Charge"
+  );
+  assert.equal(
+    h.lastChargeRender().planningRows,
+    boardRows,
+    "MEME tableau : currentPlanningRows (bouton delegue) et chartRows le tiennent aussi"
+  );
+});
+
+test("Planning_Projet — un changement HORS colonnes de duree recharge tout le projet", async () => {
+  // Une phase deplacee, une tache renommee, une ligne ajoutee : cela dessine le
+  // pane HAUT, que seul loadProject() sait reconstruire. Le chemin leger doit
+  // rendre la main, sinon le routage de Planning_Projet ferait perdre au widget
+  // les changements de planning venus d'un autre widget.
+  const h = await mount({ planningRows: initialPlanningRows() });
+  h.reset();
+
+  h.setRemotePlanningRows(h.getRemotePlanningRows().map((row) => (
+    row.id === 502 ? { ...row, [PLANNING_COLUMNS.taskName]: "Tache renommee" } : row
+  )));
+
+  h.api.handleContextTablesChanged({ tables: [PLANNING_TABLE] });
+  await h.flush();
+
+  assert.equal(h.calls.reconcileAndLoad, 1, "le pane haut ne se met a jour que par loadProject()");
+  assert.equal(h.calls.chargeRender, 0, "et surtout pas un demi-rafraichissement du seul pane bas");
+});
+
+test("Planning_Projet — une ligne ajoutee ailleurs recharge tout le projet", async () => {
+  const h = await mount({ planningRows: initialPlanningRows() });
+  h.reset();
+
+  h.setRemotePlanningRows([...h.getRemotePlanningRows(), planningRow({ id: 503, id2: "3003" })]);
+
+  h.api.handleContextTablesChanged({ tables: [PLANNING_TABLE] });
+  await h.flush();
+
+  assert.equal(h.calls.reconcileAndLoad, 1);
+});
+
+// --- 2 quinquies. le conteneur du pane bas porte AUSSI la ligne Charge ---------
+//
+// `els.charge` etait masque des que le projet n'avait aucune ligne TimeSegment.
+// La ligne Charge s'y rendait quand meme — DANS UN CONTENEUR CACHE — et son
+// bouton « Charge », seul point d'entree de la fenetre d'assignation, devenait
+// introuvable exactement dans le cas que cette fonctionnalite sert : definir les
+// charges de reference AVANT d'avoir pose le moindre previsionnel. Le test de la
+// Tache 3 ne pouvait pas le voir : il appelle `renderChargeRow` dans un vm, deux
+// couches sous le conteneur qui le masque.
+
+test("sans aucun TimeSegment, le conteneur du pane bas reste visible pour la ligne Charge", async () => {
+  const h = await mount({ segmentRows: [], planningRows: initialPlanningRows() });
+
+  assert.equal(h.els.charge.hidden, false, "sinon le bouton « Charge » serait introuvable");
+  assert.equal(
+    h.els.chargeEmpty.hidden,
+    false,
+    "le message « Aucun previsionnel » reste : il parle des lignes de PERSONNES"
+  );
+  assert.equal(h.calls.chargeRender, 1, "la ligne Charge est bien rendue dans ce conteneur visible");
+});
+
+test("sans TimeSegment NI ligne de planning, le pane bas reste masque", async () => {
+  // Contrepartie : rien a montrer, donc rien a afficher — l'etat vide d'origine
+  // n'est pas devenu un conteneur vide toujours visible.
+  const h = await mount({ segmentRows: [], planningRows: [] });
+
+  assert.equal(h.els.charge.hidden, true);
+  assert.equal(h.els.chargeEmpty.hidden, false);
+});
+
+test("la suppression du DERNIER segment ne fait pas disparaitre la ligne Charge", async () => {
+  // Meme regle sur le chemin de RE-rendu (renderChargeFromLocalRows), pas
+  // seulement au premier chargement.
+  const h = await mount({ planningRows: initialPlanningRows() });
+  h.reset();
+
+  h.setRemoteRows([]);
+  h.api.handleContextTablesChanged({ tables: [TIME_SEGMENT_TABLE] });
+  await h.flush();
+
+  assert.equal(h.calls.chargeRender, 1, "le pane bas est bien redessine");
+  assert.equal(h.els.charge.hidden, false, "et son conteneur reste visible pour la ligne Charge");
+  assert.equal(h.els.chargeEmpty.hidden, false);
 });
 
 // --- 2 ter. BUG A : le lot de NOTRE PROPRE ecriture annonce AUSSI Projets2 ------

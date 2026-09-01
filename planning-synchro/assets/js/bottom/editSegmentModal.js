@@ -191,6 +191,32 @@ function notifyLiveControllers(hookName) {
   });
 }
 
+// Point d'abonnement PUBLIC au registre de controleurs vivants de
+// `sharedSubmitLock`. Toute fenetre qui reutilise `sharedSubmitLock`/
+// `sharedSubmitSession` (ex. bottom/chargeAssignModal.js) DOIT s'abonner ICI
+// pour recevoir `onStall`/`onLockStateChanged` — sinon son ecriture peut caler
+// ou se resoudre pendant que SEULES les fenetres de segment sont notifiees, ce
+// qui desactive son Enregistrer A VIE (defaut corrige en Tache 4, fix round 1 :
+// une fenetre de segment qui cale, se ferme, se rouvre ailleurs comme fenetre
+// de charge, puis se resout tardivement, ne notifiait jamais cette derniere).
+// Renvoie une fonction de desabonnement, a appeler depuis le `destroy()` de
+// l'appelant — meme discipline que `liveControllers.delete()` ci-dessous.
+export function subscribeToSharedSubmitLock(hooks) {
+  liveControllers.add(hooks);
+  return () => liveControllers.delete(hooks);
+}
+
+// Point de notification PUBLIC du meme registre : toute fenetre abonnee via
+// `subscribeToSharedSubmitLock` (pas seulement celle qui vient d'ecrire) doit
+// pouvoir prevenir les AUTRES apres avoir pris/rendu le verrou partage —
+// sinon le defaut corrige ci-dessus reapparaitrait a l'envers (ecriture de
+// charge qui cale, fenetre de charge fermee, fenetre de segment ouverte,
+// resolution tardive : sans ce point d'entree, chargeAssignModal.js n'aurait
+// aucun moyen de notifier le registre prive de CE module).
+export function notifySharedSubmitLockSubscribers(hookName) {
+  notifyLiveControllers(hookName);
+}
+
 export const sharedSubmitLock = createSubmitLock({
   onStall: () => notifyLiveControllers("onStall"),
 });
@@ -301,7 +327,7 @@ export function createEditSegmentModal(
       applyLockStateToUi();
     },
   };
-  liveControllers.add(controllerHooks);
+  const unsubscribeFromSharedSubmitLock = subscribeToSharedSubmitLock(controllerHooks);
 
   function setFeedback(message) {
     if (!(feedbackEl instanceof HTMLElement)) return;
@@ -620,7 +646,7 @@ export function createEditSegmentModal(
     // et deux AddRecord partiraient sur la meme cle metier. On se contente de
     // retirer ce controleur des destinataires, si bien que le delai de garde
     // encore arme ne retient plus aucun noeud DOM mort.
-    liveControllers.delete(controllerHooks);
+    unsubscribeFromSharedSubmitLock();
     saveBtn?.removeEventListener("click", handleSaveClick);
     cancelBtn?.removeEventListener("click", handleCancelClick);
     rootEl.removeEventListener("click", handleBackdropClick);

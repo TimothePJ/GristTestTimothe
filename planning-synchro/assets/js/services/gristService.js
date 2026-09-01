@@ -418,6 +418,68 @@ export async function updateTimeSegment({
   ]);
 }
 
+// Ecriture des trois colonnes de duree (Duree_Projet / Duree_Zone /
+// Duree_Force) sur Planning_Projet, a partir des `writes` collectes par
+// bottom/chargeAssignModal.js::collectChargeWrites.
+//
+// Premiere ecriture de ce widget hors TimeSegment. La couche partagee valide
+// chaque ligne mutee (shared/grist-service-context.js -> rowMatchesContext) :
+// pour Planning_Projet elle exige que le Service de la ligne corresponde au
+// service courant, que NomProjet figure parmi les noms du projet selectionne,
+// et qu'un numero de projet soit selectionne. Les trois sont vraies ici — mais
+// un refus ne se verrait qu'a l'enregistrement, en production, d'ou le test
+// « updatePlanningDurations : le lot traverse la couche de contexte partagee »
+// (tests/gristService.test.mjs), qui fait passer le lot REEL produit ici par
+// les VRAIES fonctions du module partage (core.isProtectedMutationAction,
+// core.rowMatchesContext, core.transformActions), et non par un bouchon.
+// Ce test fixe aussi ce que la couche AJOUTE au passage — elle complete chaque
+// UpdateRecord de Planning_Projet avec Service et NomProjet — pour qu'une
+// evolution du contrat partage se voie ici plutot qu'en production.
+//
+// UN SEUL applyUserActions : assigner Duree_Projet au COFFRAGE d'un projet
+// reel touche 112 lignes, et un lot par ligne declencherait 112
+// rafraichissements via le relais de synchronisation inter-widgets.
+//
+// FUSION PAR recordId (et non plusieurs UpdateRecord successifs pour la meme
+// ligne) : collectChargeWrites peut emettre plusieurs entrees pour LA MEME
+// ligne quand l'utilisateur touche le type, la zone ET le document d'une
+// meme ligne dans la meme session de la fenetre — chacune portant une colonne
+// differente. Une seule UpdateRecord par ligne, champs fusionnes, evite de
+// dependre d'un ordre d'application de plusieurs actions visant la meme ligne
+// dans un seul lot, que rien ne garantit cote Grist ; l'oublier perdrait
+// silencieusement l'une des editions de l'utilisateur.
+//
+// Validation de CHAQUE id AVANT de construire les actions : un id invalide
+// fait echouer la fonction avant le moindre appel a applyActions — il n'y a
+// pas de transaction a annuler, donc aucune ecriture partielle ne doit partir.
+export async function updatePlanningDurations(writes) {
+  const list = Array.isArray(writes) ? writes : [];
+
+  const fieldsById = new Map();
+  const order = [];
+  for (const write of list) {
+    const recordId = toReferenceId(write?.recordId);
+    if (!recordId) {
+      throw new Error("Ligne de planning invalide : id manquant.");
+    }
+    if (!fieldsById.has(recordId)) {
+      fieldsById.set(recordId, {});
+      order.push(recordId);
+    }
+    Object.assign(fieldsById.get(recordId), write?.fields || {});
+  }
+
+  const actions = order.map((recordId) => [
+    "UpdateRecord",
+    APP_CONFIG.grist.tables.planningProject,
+    recordId,
+    fieldsById.get(recordId),
+  ]);
+
+  if (!actions.length) return;
+  await applyActions(actions);
+}
+
 export async function removeTimeSegment(segmentId) {
   const normalizedId = toReferenceId(segmentId);
   if (!normalizedId) return;

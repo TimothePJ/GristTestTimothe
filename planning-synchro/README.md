@@ -25,7 +25,7 @@ correction pixel.
 | Table | Rôle | Colonnes utilisées |
 |---|---|---|
 | `Projets2` | Registre canonique des projets, pont nom ↔ numéro | `id`, `Nom_de_projet`, `Numero_de_projet` |
-| `Planning_Projet` | Planning projet (haut, lecture seule), filtré par `NomProjet` | `id`, `ID2`, `NomProjet`, `Taches`/`Tache`, `Type_doc`, `Groupe`, `Ligne_planning`, `Zone`, `Date_limite`, `Diff_coffrage`, `Diff_armature`, `Demarrages_travaux` |
+| `Planning_Projet` | Planning projet (haut, lecture seule), filtré par `NomProjet` | `id`, `ID2`, `NomProjet`, `Taches`/`Tache`, `Type_doc`, `Groupe`, `Ligne_planning`, `Zone`, `Date_limite`, `Diff_coffrage`, `Diff_armature`, `Demarrages_travaux`, `Duree_Force`, `Duree_Zone`, `Duree_Projet` |
 | `TimeSegment` | Plan de charge prévisionnel (bas, éditable), filtré par `NumeroProjet` — **un segment couvre un mois entier** | `NumeroProjet`, `Name`, `Mois`, `Effectif`, `Allocation_Days`, `Label` |
 | `ProjectTeam` | Rôle de chaque personne pour le regroupement (Projeteurs / Ingénieurs / Autres), filtré par `NumeroProjet` | `NumeroProjet`, `Name`, `Role`, `Daily_Rate` |
 
@@ -54,6 +54,54 @@ Le widget appelle `grist.ready({ requiredAccess: "full" })` au démarrage
 `Projets2`/`Planning_Projet`/`TimeSegment`/`ProjectTeam`, et écriture sur
 `TimeSegment` (création/modification/suppression de segments depuis le pane
 bas).
+
+## Charge de référence
+
+Chaque document `Planning_Projet` déclare, dans trois colonnes, le nombre de
+jours de travail qu'il requiert :
+
+- `Duree_Force` — durée de ce document seul ;
+- `Duree_Zone` — durée standard des documents de ce type, dans cette zone ;
+- `Duree_Projet` — durée standard des documents de ce type, par défaut du projet.
+
+Ces valeurs **se résolvent en cascade** à la lecture : `Duree_Force` → `Duree_Zone`
+→ `Duree_Projet`. Un document consulte d'abord sa propre `Duree_Force` ; si elle
+est vide, `null`, négative, non-numérique, ou **explicitement 0**, il la rejette
+et descend au niveau suivant. La valeur résolue n'est **jamais stockée** : un
+document qui change de zone ou de type se reclasse automatiquement avec la valeur
+appropriée du nouveau niveau, sans code de migration.
+
+Les valeurs sont exprimées en **jours, multiples de 0,5** (0, 0.5, 1, 1.5, etc.).
+Pour dire « ce document n'a aucun coût », laisser les trois colonnes vides.
+
+La charge résolue est répartie sur les **mois que sa plage de dates touche**
+(mois du `Demarrages_travaux` jusqu'au mois de la `Date_limite`), **au prorata
+des jours ouvrés** de chaque mois. Ainsi un document de 10 jours en septembre et
+octobre sera réparti selon le nombre de jours ouvrés de chaque mois. La répartition
+utilise l'**algorithme du plus grand reste** pour garantir que les parts mensuelles
+somment exactement à la charge d'entrée. Un document qui n'a aucune date de
+planning (pas de phases) **ne peut s'attacher à aucun mois** ; sa charge apparaît
+dans une figure **« non placé »** affichée sur la ligne du document.
+
+Le **pane bas** affiche une ligne **Charge** sous la ligne **Total**. Par mois
+visible, elle compare les jours *planifiés* (de `TimeSegment`, calculés comme pour
+la ligne Total) contre les jours *requis* (somme des charges des documents). Trois
+couleurs indiquent la tension :
+
+- `--load-balanced` `#d7eccb` (vert clair) : jours planifiés = jours requis ;
+- `--load-overload` `#ffe1a8` (beige clair) : **moins** de jours planifiés que
+  requis ;
+- `--load-partial` `#edf4fb` (bleu clair) : **plus** de jours planifiés que
+  requis.
+
+La charge n'est pas plafonnée : un mois peut requérir plus de jours qu'il n'en
+contient.
+
+Un **bouton Charge** sur cette ligne ouvre une **fenêtre de saisie** qui répartit
+les durées sur trois niveaux : Type de document → Zone → Document. À chaque
+niveau, un champ vide affiche la valeur héritée du niveau au-dessus (grisée, en
+lecture seule) ; seules les valeurs **explicites** sont modifiables. L'enregistrement
+écrit chaque ligne affectée en un **seul lot** d'`UpdateRecord`.
 
 ## Conception : frise partagée et alignement arithmétique
 

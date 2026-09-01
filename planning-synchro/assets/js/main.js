@@ -19,7 +19,7 @@
 // signature (uses the ready-made label directly instead of re-formatting).
 
 import { APP_CONFIG } from "./config.js";
-import { initGrist, fetchTableRows, fetchProjectData } from "./services/gristService.js";
+import { initGrist, fetchTableRows, fetchProjectData, updatePlanningDurations } from "./services/gristService.js";
 import {
   buildRegistry,
   resolveProject,
@@ -32,6 +32,7 @@ import { createPlanningRenderer } from "./top/planningRenderer.js";
 import { createPlanningChart } from "./top/planningChart.js";
 import { createChargeBoard, buildWorkersFromSegments } from "./bottom/chargeBoard.js";
 import { attachChargeEditing } from "./bottom/chargeEditing.js";
+import { createChargeAssignModal } from "./bottom/chargeAssignModal.js";
 import { applySegmentChangeLocally, timeSegmentRowsSignature } from "./bottom/localSegmentUpdate.js";
 import { buildAbsenceIndex, normalizeName } from "./utils/leaveAbsences.js";
 import { createTopPaneResizer } from "./ui/topPaneResizer.js";
@@ -178,9 +179,12 @@ function projectRegistrySignature(projects) {
 // Une livraison de `watchContextTables` annonce les tables qui ont change. Trois
 // suites possibles :
 //
-// - "charge"                       : seul TimeSegment a bouge. Rien d'autre que le
-//                                    pane bas n'est concerne : relecture en place.
-// - "charge-si-catalogue-inchange" : TimeSegment et/ou Projets2. Projets2 est
+// - "charge"                       : seuls TimeSegment et/ou Planning_Projet ont
+//                                    bouge. Le rafraichissement EN PLACE du pane
+//                                    bas (reloadChargeFromGrist) sait traiter les
+//                                    deux, et lui seul decide, apres relecture, si
+//                                    un rechargement complet reste necessaire.
+// - "charge-si-catalogue-inchange" : les memes, plus Projets2. Projets2 est
 //                                    TOUJOURS de la partie apres nos propres
 //                                    ecritures (colonne de signal du relais), donc
 //                                    son nom ne prouve rien : il faut comparer
@@ -188,13 +192,64 @@ function projectRegistrySignature(projects) {
 // - "full"                         : toute autre table, ou liste vide/absente.
 //                                    Dans le doute on recharge tout, on ne perd
 //                                    jamais un changement.
-function classifyContextSignal(tables, timeSegmentTableName, projectsTableName) {
+//
+// POURQUOI Planning_Projet EST ICI. C'est la table qu'ecrit la fenetre « Assigner
+// la charge de reference » (updatePlanningDurations, jusqu'a ~112 lignes en un
+// lot). Sans cette route, le relais rappelait ce widget juste apres l'ecriture,
+// le signal tombait sur "full" -> reconcileAndLoad({ force: true }) ->
+// loadProject() complet, et le rechargement VISIBLE que ce widget a
+// explicitement retire (perte du mode Editer, retour en haut de page) revenait
+// sur l'ecriture la plus lourde du produit — en ecrasant au passage la mise a
+// jour locale que handleChargeAssignSubmit venait de poser. Le rechargement
+// complet n'est pas perdu pour autant : reloadChargeFromGrist y retombe des que
+// la relecture montre qu'AUTRE CHOSE que les colonnes de duree a bouge (une
+// phase deplacee, une ligne ajoutee), car cela concerne le pane HAUT que seul
+// loadProject() sait reconstruire.
+function classifyContextSignal(tables, timeSegmentTableName, projectsTableName, planningProjectTableName) {
   if (!Array.isArray(tables) || tables.length === 0) return "full";
-  if (tables.every((tableName) => tableName === timeSegmentTableName)) return "charge";
+  const isChargeTable = (tableName) => (
+    tableName === timeSegmentTableName || tableName === planningProjectTableName
+  );
+  if (tables.every(isChargeTable)) return "charge";
   if (tables.every((tableName) => (
-    tableName === timeSegmentTableName || tableName === projectsTableName
+    isChargeTable(tableName) || tableName === projectsTableName
   ))) return "charge-si-catalogue-inchange";
   return "full";
+}
+
+// Empreinte des lignes Planning_Projet, en DEUX moities exclusives :
+//   - `durationsOnly = true`  : les seules colonnes Duree_Projet / Duree_Zone /
+//     Duree_Force, dont depend uniquement la LIGNE CHARGE du pane bas ;
+//   - `durationsOnly = false` : tout le reste, c'est-a-dire ce qui dessine le
+//     pane HAUT (dates, libelles, Realise, ...) et la composition des lignes.
+// C'est cette separation qui permet a reloadChargeFromGrist de rafraichir la
+// ligne Charge en place quand SEULES les durees ont bouge, et de retomber sur le
+// rechargement complet des que la frise est concernee.
+//
+// `JSON.stringify` sur un objet aux cles TRIEES : les colonnes Reference/Choice
+// de Grist portent des tableaux ou des objets, qu'un simple String() reduirait
+// tous a "[object Object]" — l'empreinte avalerait alors silencieusement leurs
+// changements. Separateur (unite ASCII 0x1E) impossible dans une valeur Grist,
+// comme projectRegistrySignature plus haut.
+function planningRowsSignature(rows, columns, durationsOnly) {
+  const cols = columns || {};
+  const durationColumns = new Set(
+    [cols.dureeProjet, cols.dureeZone, cols.dureeForce].filter(Boolean)
+  );
+  const rowSeparator = "\u001E";
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => {
+      const source = row || {};
+      const picked = {};
+      Object.keys(source)
+        .filter((key) => durationColumns.has(key) === Boolean(durationsOnly))
+        .sort()
+        .forEach((key) => {
+          picked[key] = source[key] === undefined ? null : source[key];
+        });
+      return JSON.stringify(picked);
+    })
+    .join(rowSeparator);
 }
 
 function bootstrapApp() {
@@ -210,6 +265,7 @@ function bootstrapApp() {
     aggregateToggle: document.getElementById("ps-aggregate-toggle"),
     range: document.getElementById("ps-range"),
     editModal: document.getElementById("ps-edit-segment-modal"),
+    chargeAssignModal: document.getElementById("ps-charge-assign-modal"),
     viewSwitch: document.getElementById("ps-view-switch"),
     chart: document.getElementById("ps-chart"),
     chartCanvas: document.getElementById("ps-chart-canvas"),
@@ -235,6 +291,14 @@ function bootstrapApp() {
   let topPaneResizer = null;
   let loadSeq = 0;
   let lastAppliedSelectionKey = "";
+
+  // Fenetre "Assigner la charge de reference" (Tache 4) : montee/demontee au
+  // meme rythme qu'`editing` (attachChargeEditing), juste a cote. Elle-meme
+  // ne garde jamais planningRows en memoire au-dela d'un `open()` — c'est ce
+  // module (`currentPlanningRows`, ci-dessous) qui tient l'instantane du
+  // projet courant pour le bouton delegue (cf. bootstrap()).
+  let chargeAssignModal = null;
+  let currentPlanningRows = [];
 
   // Rafraichissement NON DESTRUCTIF du plan de charge du projet courant, publie
   // par loadProject() (c'est son `reloadChargeFromGrist`). Null tant qu'aucun
@@ -269,6 +333,10 @@ function bootstrapApp() {
   let realisationTargetLookup = null;
 
   function teardown() {
+    if (chargeAssignModal) {
+      chargeAssignModal.destroy();
+      chargeAssignModal = null;
+    }
     if (editing) {
       editing.detach();
       editing = null;
@@ -328,6 +396,7 @@ function bootstrapApp() {
 
     if (!project) {
       teardown();
+      currentPlanningRows = [];
       els.empty.hidden = false;
       els.main.hidden = true;
       return;
@@ -350,6 +419,9 @@ function bootstrapApp() {
     const pc = APP_CONFIG.grist.columns;
     const { planningRows, timeSegmentRows, projectTeamRows } = data;
     const workerColumns = { timeSegment: pc.timeSegment, projectTeam: pc.projectTeam };
+    // Instantane relu par le bouton "Charge" delegue (cf. bootstrap()) : la
+    // fenetre d'assignation construit son arbre a l'ouverture, jamais avant.
+    currentPlanningRows = Array.isArray(planningRows) ? planningRows : [];
 
     // Lignes TimeSegment VIVANTES du projet affiche : point de depart des mises
     // a jour LOCALES post-ecriture (cf. onChanged plus bas). Mutable, la ou
@@ -446,20 +518,29 @@ function bootstrapApp() {
         viewportFitsWithinBounds(persisted.viewport, controllerBounds);
       viewport = canReusePersisted ? buildCanonicalSharedViewport(persisted.viewport) : initialViewport;
 
-      chargeBoard.render({ workers, viewport, editMode: false, planningTasks, absencesByWorker });
+      chargeBoard.render({ workers, viewport, editMode: false, planningTasks, absencesByWorker, planningRows });
     } else {
       // No TimeSegment data for this project: bottom pane stays empty, but
       // the top (Planning_Projet) pane must still render on a sane default
       // window instead of crashing — anchor on the first phase date (or
       // today) for ~1 month, per the task brief.
       els.chargeEmpty.hidden = false;
-      els.charge.hidden = true;
+      // Le conteneur n'est plus masque sur la seule absence de TimeSegment : la
+      // ligne Charge y est rendue elle aussi, et son bouton « Charge » est le
+      // SEUL point d'entree de la fenetre d'assignation. Le masquer ici le
+      // rendait introuvable exactement dans le cas que cette fonctionnalite
+      // sert — definir les charges de reference AVANT d'avoir pose le moindre
+      // previsionnel (cf. les projets « toutes les lignes COFFRAGE » de
+      // tests/documentCharge.test.mjs). Le message « Aucun previsionnel » reste,
+      // lui, affiche : il parle des lignes de PERSONNES, qui, elles, manquent
+      // bien.
+      els.charge.hidden = !(Array.isArray(planningRows) && planningRows.length > 0);
 
       viewport = buildDefaultMonthViewport(firstPlanningDate);
       // No TimeSegment: the frise still spans the planning phases (builder bounds),
       // falling back to the phase-derived range when the builder yields none.
       controllerBounds = planBounds || computePlanningDerivedBounds(planningRows, pc.planningProject, viewport);
-      chargeBoard.render({ workers: [], viewport, editMode: false, absencesByWorker });
+      chargeBoard.render({ workers: [], viewport, editMode: false, absencesByWorker, planningRows });
     }
 
     // Dernier mode de zoom appliqué (semaine/mois/année). La hauteur bornée du
@@ -556,8 +637,11 @@ function bootstrapApp() {
         els.chargeEmpty.hidden = true;
         els.charge.hidden = false;
       } else {
+        // Meme regle qu'au premier rendu (cf. loadProject) : sans TimeSegment le
+        // pane bas garde sa ligne Charge — donc son bouton — des qu'il y a des
+        // lignes de planning.
         els.chargeEmpty.hidden = false;
-        els.charge.hidden = true;
+        els.charge.hidden = !(Array.isArray(planningRows) && planningRows.length > 0);
       }
 
       // Un segment cree sur un mois hors des bornes actuelles doit rester
@@ -591,6 +675,7 @@ function bootstrapApp() {
         viewport: controller.getViewport(),
         editMode: currentEditMode,
         absencesByWorker,
+        planningRows,
       });
       controller.setViewport(controller.getViewport());
       restoreScroll();
@@ -605,11 +690,20 @@ function bootstrapApp() {
     // juste cree disparait de l ecran. Une seule reponse compte, la DERNIERE partie.
     let chargeRefreshSeq = 0;
 
-    // Relit les seules lignes TimeSegment et redessine LE PANE BAS. Deux usages :
-    // le repli des changements qu'on ne sait pas appliquer localement, et le
+    // Relit les lignes du projet et redessine LE PANE BAS. Deux usages : le repli
+    // des changements qu'on ne sait pas appliquer localement, et le
     // rafraichissement en place declenche par le relais de synchronisation
     // (cf. handleContextTablesChanged). Rien n'est demonte : ni la fenetre
     // d'edition, ni le pane haut, ni le mode Editer, ni la position de defilement.
+    //
+    // Couvre les DEUX tables que classifyContextSignal route ici :
+    //   - TimeSegment      : les barres de personnes du pane bas ;
+    //   - Planning_Projet  : les trois colonnes de duree de la ligne Charge.
+    // Un seul chemin, une seule relecture (fetchProjectData ramene deja les
+    // deux) — un second mecanisme parallele finirait par diverger de celui-ci.
+    // Ce qui, dans Planning_Projet, ne concerne PAS la ligne Charge appartient au
+    // pane HAUT : ce chemin ne sait pas le redessiner et retombe alors, en toute
+    // conscience, sur le rechargement complet.
     async function reloadChargeFromGrist() {
       const refreshSeq = ++chargeRefreshSeq;
       let refreshed;
@@ -628,6 +722,46 @@ function bootstrapApp() {
         : [];
       const nextAllRows = readAllTimeSegmentRows(refreshed);
 
+      // --- Planning_Projet -----------------------------------------------------
+      //
+      // Tout ce qui n'est PAS une colonne de duree dessine le pane haut (dates de
+      // phase, libelles, Realise, composition des lignes) : seul loadProject()
+      // sait le reconstruire, on lui rend donc la main — c'est exactement le
+      // comportement d'avant pour ces changements-la, on ne perd rien.
+      const chargeColumns = pc.planningProject;
+      const nextPlanningRows = Array.isArray(refreshed.planningRows)
+        ? refreshed.planningRows
+        : [];
+      if (
+        planningRowsSignature(nextPlanningRows, chargeColumns, false) !==
+        planningRowsSignature(planningRows, chargeColumns, false)
+      ) {
+        reconcileAndLoad({ force: true });
+        return;
+      }
+
+      // Seules les durees ont bouge : la ligne Charge est la seule concernee. On
+      // recopie les trois colonnes dans les objets-ligne DEJA en memoire plutot
+      // que de remplacer le tableau — `currentPlanningRows` (bouton delegue),
+      // `chartRows` (vue graphique) et le `planningRows` passe au board tiennent
+      // tous CETTE meme reference, et handleChargeAssignSubmit mute de la meme
+      // facon. Les remplacer ici les laisserait pointer sur l'instantane d'avant.
+      const planningDurationsChanged =
+        planningRowsSignature(nextPlanningRows, chargeColumns, true) !==
+        planningRowsSignature(planningRows, chargeColumns, true);
+      if (planningDurationsChanged) {
+        const nextRowsById = new Map(
+          nextPlanningRows.map((row) => [row?.[chargeColumns.id], row])
+        );
+        (Array.isArray(planningRows) ? planningRows : []).forEach((row) => {
+          const nextRow = nextRowsById.get(row?.[chargeColumns.id]);
+          if (!nextRow) return;
+          row[chargeColumns.dureeProjet] = nextRow[chargeColumns.dureeProjet];
+          row[chargeColumns.dureeZone] = nextRow[chargeColumns.dureeZone];
+          row[chargeColumns.dureeForce] = nextRow[chargeColumns.dureeForce];
+        });
+      }
+
       // Relecture qui ne ramene RIEN de neuf : c'est le cas apres notre propre
       // ecriture, deja posee a l'ecran par la mise a jour locale. Redessiner ne
       // ferait alors que faire clignoter le pane bas. On compare les lignes plutot
@@ -641,7 +775,7 @@ function bootstrapApp() {
       const sameAllRows =
         timeSegmentRowsSignature(nextAllRows, columns) ===
         timeSegmentRowsSignature(allTimeSegmentRows, columns);
-      if (sameProjectRows && sameAllRows) return;
+      if (sameProjectRows && sameAllRows && !planningDurationsChanged) return;
 
       projectTimeSegmentRows = nextProjectRows;
       allTimeSegmentRows = nextAllRows;
@@ -700,6 +834,61 @@ function bootstrapApp() {
         allTimeSegmentRows = applied.allRows;
         renderChargeFromLocalRows();
       },
+    });
+
+    // onSubmit de la fenetre d'assignation de charge (bottom/chargeAssignModal.js).
+    // La fenetre elle-meme ne fait AUCUNE ecriture Grist : elle collecte les
+    // intentions de l'utilisateur (buildChargeTree + collectChargeWrites) et
+    // les remet ici, deja sous la forme `writes` attendue par
+    // updatePlanningDurations.
+    //
+    // Meme discipline que renderChargeFromLocalRows/onChanged plus haut :
+    // AUCUN fetchProjectData() apres l'ecriture — un refetch complet
+    // ramenerait le rechargement visible qui a ete retire de ce widget. Ce
+    // n'est vrai que parce que le signal que le relais renvoie sur NOTRE lot
+    // est route (classifyContextSignal -> "charge") : sans la route
+    // Planning_Projet, il tombait sur "full" et un loadProject() complet
+    // ecrasait la mise a jour en place ci-dessous quelques instants plus tard.
+    // Les
+    // objets-ligne de `planningRows` sont donc mutes EN PLACE (pas le tableau
+    // qui les contient) : c'est cette meme reference que `currentPlanningRows`
+    // et `chartRows` retiennent deja, nul besoin de la republier ailleurs.
+    // Une ligne absente de `planningRows` (jamais le cas en pratique, la
+    // fenetre construit ses ecritures a partir de ces memes lignes) est
+    // ignoree plutot que de planter le rendu.
+    //
+    // Un recordId peut revenir plusieurs fois dans `writes` (Tache 5 point B,
+    // meme scenario que dans gristService.updatePlanningDurations) : le
+    // Object.assign ci-dessous fusionne alors chaque entree sur la MEME ligne,
+    // cf. son commentaire pour le detail du choix.
+    async function handleChargeAssignSubmit(writes) {
+      try {
+        await updatePlanningDurations(writes);
+      } catch (error) {
+        console.error("Erreur enregistrement de la charge de reference :", error);
+        return {
+          ok: false,
+          error: "L'enregistrement de la charge a echoue. Reessayez.",
+        };
+      }
+
+      const chargeCols = pc.planningProject;
+      const rowsById = new Map(
+        planningRows.map((row) => [row?.[chargeCols.id], row])
+      );
+      (Array.isArray(writes) ? writes : []).forEach((write) => {
+        const row = rowsById.get(write?.recordId);
+        if (row) Object.assign(row, write?.fields || {});
+      });
+
+      renderChargeFromLocalRows();
+      return { ok: true };
+    }
+
+    // Fenetre "Assigner la charge de reference" (Tache 4) : montee/demontee
+    // au meme rythme qu'`editing` juste au-dessus (teardown()/loadProject()).
+    chargeAssignModal = createChargeAssignModal(els.chargeAssignModal, {
+      onSubmit: handleChargeAssignSubmit,
     });
 
     els.main.hidden = false;
@@ -813,7 +1002,8 @@ function bootstrapApp() {
       ? classifyContextSignal(
           tables,
           APP_CONFIG.grist.tables.timeSegment,
-          APP_CONFIG.grist.tables.projects
+          APP_CONFIG.grist.tables.projects,
+          APP_CONFIG.grist.tables.planningProject
         )
       : "full";
 
@@ -937,6 +1127,27 @@ function bootstrapApp() {
     }
     if (els.viewSwitch) {
       els.viewSwitch.addEventListener("click", handleViewSwitchClick);
+    }
+    // Bouton "Charge" de la ligne Charge du board (Tache 3, [data-charge-assign-open]).
+    // Delegue sur `els.charge` UNE SEULE FOIS ici (pas dans loadProject()) :
+    // `els.charge` lui-meme n'est jamais remplace, seul son contenu l'est a
+    // chaque `chargeBoard.render()` — un ecouteur pose directement sur le
+    // bouton ne survivrait donc pas au premier re-rendu (cf. brief Tache 4).
+    // `chargeAssignModal`/`currentPlanningRows` sont relus au moment du clic
+    // (fermeture sur les `let` du scope englobant), toujours ceux du projet
+    // courant meme si loadProject() les a recrees entre-temps.
+    if (els.charge instanceof HTMLElement) {
+      els.charge.addEventListener("click", (event) => {
+        const target =
+          event.target instanceof Element ? event.target.closest("[data-charge-assign-open]") : null;
+        if (!(target instanceof HTMLElement)) return;
+        event.preventDefault();
+        if (!chargeAssignModal) return;
+        chargeAssignModal.open({
+          planningRows: currentPlanningRows,
+          columns: APP_CONFIG.grist.columns.planningProject,
+        });
+      });
     }
     window.addEventListener("storage", handleStorageEvent);
     window.GristServiceContext?.onServiceChange?.(handleServiceChange);
