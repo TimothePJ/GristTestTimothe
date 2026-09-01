@@ -36,6 +36,10 @@ export function getDomRefs() {
     editSegmentLoadFill: document.getElementById("edit-segment-load-fill"),
     editSegmentLoadDays: document.getElementById("edit-segment-load-days"),
     editSegmentLoadMessage: document.getElementById("edit-segment-load-message"),
+    editSegmentLoadProjects: document.getElementById("edit-segment-load-projects"),
+    editSegmentLoadProjectsList: document.getElementById(
+      "edit-segment-load-projects-list"
+    ),
     editSegmentFeedback: document.getElementById("edit-segment-feedback"),
     saveEditSegmentBtn: document.getElementById("save-edit-segment-btn"),
     cancelEditSegmentBtn: document.getElementById("cancel-edit-segment-btn"),
@@ -102,6 +106,8 @@ export function assertDomRefs(domRefs) {
     "editSegmentLoadFill",
     "editSegmentLoadDays",
     "editSegmentLoadMessage",
+    "editSegmentLoadProjects",
+    "editSegmentLoadProjectsList",
     "editSegmentFeedback",
     "saveEditSegmentBtn",
     "cancelEditSegmentBtn",

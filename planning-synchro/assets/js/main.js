@@ -22,6 +22,7 @@ import { APP_CONFIG } from "./config.js";
 import { initGrist, fetchTableRows, fetchProjectData, updatePlanningDurations } from "./services/gristService.js";
 import {
   buildRegistry,
+  resolveProjectNameByNumber,
   resolveProject,
   readSharedSelection,
   writeSharedSelection,
@@ -518,7 +519,17 @@ function bootstrapApp() {
         viewportFitsWithinBounds(persisted.viewport, controllerBounds);
       viewport = canReusePersisted ? buildCanonicalSharedViewport(persisted.viewport) : initialViewport;
 
-      chargeBoard.render({ workers, viewport, editMode: false, planningTasks, absencesByWorker, planningRows });
+      // `allTimeSegmentRows` : la surcharge d'une personne se compte tous projets
+      // confondus, le board ne peut pas la deduire de ses seuls `workers`.
+      chargeBoard.render({
+        workers,
+        viewport,
+        editMode: false,
+        planningTasks,
+        absencesByWorker,
+        planningRows,
+        allTimeSegmentRows,
+      });
     } else {
       // No TimeSegment data for this project: bottom pane stays empty, but
       // the top (Planning_Projet) pane must still render on a sane default
@@ -540,7 +551,14 @@ function bootstrapApp() {
       // No TimeSegment: the frise still spans the planning phases (builder bounds),
       // falling back to the phase-derived range when the builder yields none.
       controllerBounds = planBounds || computePlanningDerivedBounds(planningRows, pc.planningProject, viewport);
-      chargeBoard.render({ workers: [], viewport, editMode: false, absencesByWorker, planningRows });
+      chargeBoard.render({
+        workers: [],
+        viewport,
+        editMode: false,
+        absencesByWorker,
+        planningRows,
+        allTimeSegmentRows,
+      });
     }
 
     // Dernier mode de zoom appliqué (semaine/mois/année). La hauteur bornée du
@@ -676,6 +694,9 @@ function bootstrapApp() {
         editMode: currentEditMode,
         absencesByWorker,
         planningRows,
+        // Chemin post-ecriture : sans cette ligne, la couleur de surcharge
+        // resterait celle d'avant la modification.
+        allTimeSegmentRows,
       });
       controller.setViewport(controller.getViewport());
       restoreScroll();
@@ -797,6 +818,11 @@ function bootstrapApp() {
       // tous projets et tous services. Un ACCESSEUR et non le tableau lui-meme,
       // pour que la mise a jour locale de `onChanged` soit visible aussitot.
       getAllTimeSegmentRows: () => allTimeSegmentRows,
+      // Lit `state.registry` A CHAQUE APPEL et non une copie capturee : le
+      // catalogue est reconstruit quand Projets2 change, et la fenetre peut
+      // rester ouverte pendant.
+      resolveProjectLabel: (projectNumber) =>
+        resolveProjectNameByNumber(state.registry, projectNumber),
       // MISE A JOUR LOCALE apres une ecriture reussie : plus de
       // fetchProjectData() ni de re-rendu sur donnees rechargees. Le
       // rechargement faisait clignoter le planning et sautait la position de

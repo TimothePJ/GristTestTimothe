@@ -67,8 +67,21 @@ class FakeElement {
       .slice()
       .forEach((fn) => fn({ preventDefault() {}, target: this, ...event }));
   }
+  setAttribute(name, value) {
+    this[name] = String(value);
+  }
   removeAttribute(name) {
     delete this[name];
+  }
+  // La liste « Deja engage ce mois-ci » est construite par API DOM (et non par
+  // innerHTML : les noms de projet viennent de Grist). Le faux DOM doit donc
+  // savoir composer, sinon le rendu de cette liste reste hors de portee des
+  // tests et son comportement de masquage n'est epingle nulle part.
+  append(...nodes) {
+    this.children.push(...nodes);
+  }
+  replaceChildren(...nodes) {
+    this.children = [...nodes];
   }
 }
 class FakeInput extends FakeElement {
@@ -90,6 +103,11 @@ globalThis.HTMLButtonElement = FakeButton;
 
 const documentListeners = new Map();
 globalThis.document = {
+  createElement(tagName) {
+    const element = new FakeElement("");
+    element.tagName = String(tagName).toUpperCase();
+    return element;
+  },
   addEventListener(type, fn) {
     if (!documentListeners.has(type)) documentListeners.set(type, []);
     documentListeners.get(type).push(fn);
@@ -126,6 +144,13 @@ function buildRoot() {
     new FakeElement("ps-edit-segment-feedback"),
     new FakeButton("ps-edit-segment-save"),
     new FakeButton("ps-edit-segment-cancel"),
+    new FakeElement("ps-edit-segment-load"),
+    new FakeElement("ps-edit-segment-load-track"),
+    new FakeElement("ps-edit-segment-load-fill"),
+    new FakeElement("ps-edit-segment-load-days"),
+    new FakeElement("ps-edit-segment-load-message"),
+    new FakeElement("ps-edit-segment-load-projects"),
+    new FakeElement("ps-edit-segment-load-projects-list"),
   ];
   return root;
 }
@@ -151,7 +176,12 @@ const STALL_MS = 15;
 const afterStall = () => new Promise((resolve) => setTimeout(resolve, STALL_MS + 25));
 
 // Monte une fenetre reelle et rend de quoi la piloter.
-async function mountModal({ stallTimeoutMs = STALL_MS, onSubmit } = {}) {
+async function mountModal({
+  stallTimeoutMs = STALL_MS,
+  onSubmit,
+  allTimeSegmentRows = [],
+  resolveProjectLabel,
+} = {}) {
   const mod = await loadFreshModule();
   const root = buildRoot();
   const calls = [];
@@ -159,6 +189,8 @@ async function mountModal({ stallTimeoutMs = STALL_MS, onSubmit } = {}) {
 
   const modal = mod.createEditSegmentModal(root, {
     stallTimeoutMs,
+    getAllTimeSegmentRows: () => allTimeSegmentRows,
+    resolveProjectLabel,
     onSubmit:
       onSubmit ||
       ((payload) => {
@@ -180,6 +212,12 @@ async function mountModal({ stallTimeoutMs = STALL_MS, onSubmit } = {}) {
     input: () => el("ps-edit-segment-effectif"),
     feedback: () => el("ps-edit-segment-feedback"),
     monthLabel: () => el("ps-edit-segment-month-label"),
+    loadProjects: () => el("ps-edit-segment-load-projects"),
+    // Une ligne de la liste = [libelle, jours], dans l'ordre affiche.
+    loadProjectRows: () =>
+      el("ps-edit-segment-load-projects-list").children.map((item) =>
+        item.children.map((cell) => cell.textContent)
+      ),
     pending: () => pending,
     clickSave: () => el("ps-edit-segment-save").dispatch("click"),
     remount: () =>
@@ -571,4 +609,126 @@ test("index.html et dev/harness.html portent des fenetres identiques", async () 
       `le banc de dev doit montrer exactement la fenetre ${prefix} de la page reelle`
     );
   });
+});
+
+// --- Liste « Deja engage ce mois-ci » ----------------------------------------
+//
+// Le detail par projet sous la barre. Le calcul appartient a utils/monthLoad.js
+// (teste ailleurs) ; ce qui est epingle ici est le CABLAGE : la resolution du
+// nom, le repli quand elle echoue, et le masquage de la section.
+
+function segmentRow(id, projectNumber, effectif) {
+  return {
+    id,
+    Mois: "2026-09-01",
+    Name: "Marie Dupont",
+    Effectif: effectif,
+    NumeroProjet: projectNumber,
+  };
+}
+
+const OPEN_SEPTEMBER = {
+  segmentId: null,
+  monthKey: "2026-09",
+  workerName: "Marie Dupont",
+  effectif: 3,
+};
+
+test("la liste nomme les projets et les classe du plus charge au moins charge", async () => {
+  const names = { 252035: "CHU Nantes", 241102: "Pont de Chevire" };
+  const harness = await mountModal({
+    allTimeSegmentRows: [segmentRow(1, "241102", 4), segmentRow(2, "252035", 9)],
+    resolveProjectLabel: (number) => names[number] || "",
+  });
+
+  harness.modal.open(OPEN_SEPTEMBER);
+
+  assert.equal(harness.loadProjects().hidden, false);
+  assert.deepEqual(harness.loadProjectRows(), [
+    ["252035 · CHU Nantes", "9 j"],
+    ["241102 · Pont de Chevire", "4 j"],
+  ]);
+});
+
+test("un projet absent du catalogue s'affiche par son numero, il ne disparait pas", async () => {
+  // Cas normal, pas une anomalie : le catalogue ne porte que les projets
+  // visibles par cet utilisateur (service courant, ACL), alors que la charge se
+  // compte tous projets confondus. Masquer la ligne ferait chercher des jours
+  // manquants qui existent pourtant.
+  const harness = await mountModal({
+    allTimeSegmentRows: [segmentRow(1, "999999", 2)],
+    resolveProjectLabel: () => "",
+  });
+
+  harness.modal.open(OPEN_SEPTEMBER);
+
+  assert.deepEqual(harness.loadProjectRows(), [["999999", "2 j"]]);
+});
+
+test("un catalogue qui jette ne fait pas tomber la fenetre", async () => {
+  const harness = await mountModal({
+    allTimeSegmentRows: [segmentRow(1, "252035", 5)],
+    resolveProjectLabel: () => {
+      throw new Error("catalogue en cours de rechargement");
+    },
+  });
+
+  harness.modal.open(OPEN_SEPTEMBER);
+
+  assert.deepEqual(harness.loadProjectRows(), [["252035", "5 j"]]);
+});
+
+test("la section est masquee quand la personne n'a rien pose ailleurs", async () => {
+  // Un titre « Deja engage ce mois-ci » sans aucune ligne vaudrait moins que rien.
+  const harness = await mountModal({ allTimeSegmentRows: [] });
+
+  harness.modal.open(OPEN_SEPTEMBER);
+
+  assert.equal(harness.loadProjects().hidden, true);
+  assert.deepEqual(harness.loadProjectRows(), []);
+});
+
+test("le segment en cours d'edition n'apparait pas dans la liste", async () => {
+  // La liste repond a « ou sont ses jours EN DEHORS de ce que je suis en train
+  // de saisir » : y voir le segment ouvert le compterait deux fois a l'oeil.
+  const harness = await mountModal({
+    allTimeSegmentRows: [segmentRow(7, "252035", 6), segmentRow(8, "241102", 4)],
+    resolveProjectLabel: () => "",
+  });
+
+  harness.modal.open({ ...OPEN_SEPTEMBER, segmentId: 7, effectif: 6 });
+
+  assert.deepEqual(harness.loadProjectRows(), [["241102", "4 j"]]);
+});
+
+test("la liste se vide quand la fenetre rouvre sur un mois illisible", async () => {
+  // Sans ce nettoyage, le detail de la session precedente resterait a l'ecran
+  // sous une barre effacee.
+  const harness = await mountModal({
+    allTimeSegmentRows: [segmentRow(1, "252035", 5)],
+    resolveProjectLabel: () => "",
+  });
+
+  harness.modal.open(OPEN_SEPTEMBER);
+  assert.equal(harness.loadProjectRows().length, 1);
+
+  harness.modal.open({ ...OPEN_SEPTEMBER, monthKey: "bidon" });
+  assert.equal(harness.loadProjects().hidden, true);
+  assert.deepEqual(harness.loadProjectRows(), []);
+});
+
+test("une ligne sans numero de projet est nommee, jamais tue", async () => {
+  // Ses jours comptent dans le total de la barre : les taire ferait chercher a
+  // l'utilisateur un ecart entre la barre et son detail.
+  const harness = await mountModal({
+    allTimeSegmentRows: [segmentRow(1, "252035", 5), segmentRow(2, "", 2)],
+    resolveProjectLabel: () => "",
+  });
+
+  harness.modal.open(OPEN_SEPTEMBER);
+
+  assert.deepEqual(harness.loadProjectRows(), [
+    ["252035", "5 j"],
+    ["Projet non renseigne", "2 j"],
+  ]);
 });

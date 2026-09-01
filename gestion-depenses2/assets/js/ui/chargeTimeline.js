@@ -19,6 +19,7 @@ import {
 } from "../utils/timeSegments.js";
 import { getMonthAvailableDays, getMonthBounds } from "../utils/monthSegments.js";
 import { isAbsenceSlot } from "../utils/leaveAbsences.js";
+import { buildMonthOverloadIndex } from "../utils/monthLoad.js";
 
 const activeVisibleSlotsByBoard = new WeakMap();
 let currentBoardEl = null;
@@ -691,6 +692,13 @@ function buildVisibleSegmentBars(worker, visibleSlots, options = {}, absenceSet 
       const rawEffectif = segment?.effectifDays ?? null;
       const available = getMonthAvailableDays(segment.monthKey, absenceSet);
       const incoherent = rawEffectif != null && Number(rawEffectif) > available;
+      // Surcharge de la PERSONNE sur ce mois, tous projets confondus : la barre
+      // peut virer sans que rien ne cloche sur le projet affiche, parce que la
+      // charge est ailleurs. D'ou l'infobulle, qui donne les chiffres.
+      const overloadIndex = timelineOptions.overloadIndex || null;
+      const overloadLoad = overloadIndex?.isOverloaded(worker?.name, segment.monthKey)
+        ? overloadIndex.getLoad(worker?.name, segment.monthKey)
+        : null;
       const leftPx = slotRange.firstSlot.leftPx;
       const widthPx =
         slotRange.lastSlot.leftPx +
@@ -708,6 +716,7 @@ function buildVisibleSegmentBars(worker, visibleSlots, options = {}, absenceSet 
         label,
         planningTaskCount,
         incoherent,
+        overloadLoad,
         available,
         rawEffectif,
       };
@@ -744,16 +753,23 @@ function renderSegmentBars(assignedBars) {
     .map((bar) => {
       const compact = bar.widthPx < 64;
       const planningTooltip = `${bar.planningTaskCount} plan(s) Planning Projet sur cette periode`;
+      // Priorite au rouge : `is-incoherent` denonce une saisie fausse, l'ambre
+      // une charge trop lourde. La saisie fausse doit rester la plus visible.
+      const overloadTooltip = bar.overloadLoad
+        ? `Surcharge : ${formatDayValue(bar.overloadLoad.totalDays)} j sur ${formatDayValue(
+            bar.overloadLoad.availableDays
+          )} j disponibles ce mois, tous projets confondus`
+        : "";
       const tooltip = bar.incoherent
         ? `Effectif ${formatDayValue(bar.rawEffectif)} j > disponible apres absences ${formatDayValue(
             bar.available
           )} j`
-        : planningTooltip;
+        : overloadTooltip || planningTooltip;
       return `
         <div
           class="charge-plan-segment-bar ${compact ? "is-compact" : ""} ${
             bar.incoherent ? "is-incoherent" : ""
-          }"
+          } ${!bar.incoherent && bar.overloadLoad ? "is-overloaded" : ""}"
           style="left:${bar.leftPx}px; top:${10 + bar.laneIndex * 32}px; width:${Math.max(
             12,
             bar.widthPx
@@ -1132,6 +1148,22 @@ export function renderChargePlanTimeline(dom, project, viewState, options = {}) 
 
   const activeVisibleSlots = buildVisibleSlots(months, zoomMode, zoomScale, sizingContext);
   activeVisibleSlotsByBoard.set(currentBoardEl, activeVisibleSlots);
+
+  // Index de surcharge : un seul balayage de TimeSegment par couple
+  // (personne, mois) affiche. Le construire ici et non dans le constructeur de
+  // barres evite de rebalayer la table pour chacune des dizaines de barres.
+  timelineOptions.overloadIndex = buildMonthOverloadIndex({
+    entries: (project?.workers || []).flatMap((worker) =>
+      (worker?.[timelineOptions.segmentsField] || []).map((segment) => ({
+        personName: worker?.name,
+        monthKey: segment?.monthKey,
+      }))
+    ),
+    allSegmentRows: timelineOptions.allTimeSegmentRows || [],
+    columns: timelineOptions.timeSegmentColumns || {},
+    resolveAbsenceSet: (personName) =>
+      (project?.workers || []).find((worker) => worker?.name === personName)?.absenceSet || null,
+  });
 
   const groupedWorkers = groupWorkersByRole(project?.workers || []);
   const rows = Object.entries(groupedWorkers)

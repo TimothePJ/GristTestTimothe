@@ -66,6 +66,20 @@ export function buildRegistry(projectRows = [], columns = {}) {
   return normalizeProjectObjects(mapped);
 }
 
+// Nom lisible d'un projet a partir de son SEUL numero, tel que TimeSegment le
+// stocke. Rend "" quand le numero est absent du catalogue — cas normal, pas une
+// anomalie : le catalogue ne contient que les projets visibles par cet
+// utilisateur (service courant, ACL), alors que la charge d'une personne se
+// compte tous projets confondus. L'appelant retombe alors sur le numero nu.
+export function resolveProjectNameByNumber(registry = [], number = "") {
+  const requested = normalizeProjectNumber(number);
+  if (!requested) return "";
+  const found = (registry || []).find(
+    (project) => normalizeProjectNumber(project?.number) === requested
+  );
+  return found ? String(found.name || "").trim() : "";
+}
+
 export function resolveProject(registry = [], { name = "", id = null, number = "" } = {}) {
   const numericId = Number(id);
   if (Number.isInteger(numericId) && numericId > 0) {

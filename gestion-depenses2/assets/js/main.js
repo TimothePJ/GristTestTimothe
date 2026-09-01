@@ -109,7 +109,7 @@ import {
 // Noyau pur de la barre de charge mensuelle de la fenetre segment. Module
 // VENDORISE : copie identique octet pour octet dans planning-synchro,
 // verrouillee par shared/tests/vendored-charge-modules-parity.test.cjs.
-import { computeMonthLoad } from "./utils/monthLoad.js";
+import { computeMonthLoad, formatLoadProjectEntries } from "./utils/monthLoad.js";
 import {
   CHARGE_PLAN_SAVE_STALL_MESSAGE,
   computeMonthSlotGeometry,
@@ -1452,6 +1452,55 @@ function formatChargePlanMonthLoadMessage(load) {
 
 // Barre de charge du mois : charge TOTALE de la personne sur le mois de la
 // fenetre, tous projets et tous services confondus, saisie en cours comprise.
+// Numero de projet -> nom lisible, depuis le catalogue deja charge par ce
+// widget. Rend "" quand le numero est inconnu : cas NORMAL, pas une anomalie —
+// le catalogue ne porte que les projets visibles par cet utilisateur, alors que
+// la charge d'une personne se compte tous projets confondus. L'appelant retombe
+// alors sur le numero nu, cf. formatLoadProjectEntries.
+function resolveChargePlanProjectName(projectNumber) {
+  const requested = String(projectNumber || "").trim();
+  if (!requested) return "";
+  const found = (state.projects || []).find(
+    (project) => String(project?.projectNumber || "").trim() === requested
+  );
+  return found ? String(found.name || "").trim() : "";
+}
+
+// Liste « Deja engage ce mois-ci » : le detail par projet du chiffre porte par
+// la barre. Construite par API DOM et non par innerHTML — les noms de projet
+// viennent de Grist, donc d'une saisie utilisateur ; textContent ferme la
+// question de l'echappement au lieu de la deplacer dans un helper.
+function renderChargePlanLoadProjects(byProject) {
+  if (!dom || !(dom.editSegmentLoadProjects instanceof HTMLElement)) {
+    return;
+  }
+
+  const entries = formatLoadProjectEntries(byProject, resolveChargePlanProjectName);
+  // Mois libre : on masque la section au lieu de laisser un titre sans liste.
+  dom.editSegmentLoadProjects.hidden = entries.length === 0;
+
+  if (!(dom.editSegmentLoadProjectsList instanceof HTMLElement)) {
+    return;
+  }
+  dom.editSegmentLoadProjectsList.replaceChildren(
+    ...entries.map((entry) => {
+      const item = document.createElement("li");
+      item.className = "segment-edit-load-project";
+
+      const name = document.createElement("span");
+      name.className = "segment-edit-load-project-name";
+      name.textContent = entry.label;
+
+      const days = document.createElement("strong");
+      days.className = "segment-edit-load-project-days";
+      days.textContent = formatEditSegmentDayValue(entry.days);
+
+      item.append(name, days);
+      return item;
+    })
+  );
+}
+
 // Le calcul est entierement porte par utils/monthLoad.js : on ne fait ici que
 // le nourrir et le rendre.
 function renderEditChargePlanMonthLoadBar() {
@@ -1484,6 +1533,7 @@ function renderEditChargePlanMonthLoadBar() {
     if (dom.editSegmentLoadTrack instanceof HTMLElement) {
       dom.editSegmentLoadTrack.setAttribute("aria-valuenow", "0");
     }
+    renderChargePlanLoadProjects([]);
     return null;
   }
 
@@ -1535,6 +1585,7 @@ function renderEditChargePlanMonthLoadBar() {
       String(Math.round(fillPercent))
     );
   }
+  renderChargePlanLoadProjects(load.byProject);
 
   return load;
 }
@@ -2398,6 +2449,10 @@ function renderChargePlanSection(selectedProject = getSelectedProject()) {
     {
       showEditToggle: true,
       editModeEnabled: chargePlanSegmentEditModeEnabled,
+      // Surcharge d'une personne : elle se compte tous projets confondus, le
+      // timeline ne peut pas la deduire des seuls workers du projet affiche.
+      allTimeSegmentRows: getAllTimeSegmentRows(),
+      timeSegmentColumns: APP_CONFIG.grist.columns.timeSegment,
     }
   );
   const realChargeBoardVisible =

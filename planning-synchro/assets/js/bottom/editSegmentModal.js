@@ -26,7 +26,7 @@ import {
   getMonthAvailableDays,
   getMonthBusinessDays,
 } from "../utils/monthSegments.js";
-import { computeMonthLoad } from "../utils/monthLoad.js";
+import { computeMonthLoad, formatLoadProjectEntries } from "../utils/monthLoad.js";
 import { APP_CONFIG } from "../config.js";
 
 // --- helpers purs (aucun DOM) ------------------------------------------------
@@ -279,7 +279,7 @@ export function formatEditSegmentInputValue(value) {
 // l'instantane d'avant la premiere ecriture.
 export function createEditSegmentModal(
   rootEl,
-  { onSubmit, stallTimeoutMs, getAllTimeSegmentRows } = {}
+  { onSubmit, stallTimeoutMs, getAllTimeSegmentRows, resolveProjectLabel } = {}
 ) {
   if (!(rootEl instanceof HTMLElement)) {
     return { open() {}, close() {}, isOpen: () => false, destroy() {} };
@@ -298,6 +298,10 @@ export function createEditSegmentModal(
   const loadFillEl = rootEl.querySelector("#ps-edit-segment-load-fill");
   const loadDaysEl = rootEl.querySelector("#ps-edit-segment-load-days");
   const loadMessageEl = rootEl.querySelector("#ps-edit-segment-load-message");
+  // Liste « Deja engage ce mois-ci » : le detail par projet du chiffre porte
+  // par la barre.
+  const loadProjectsEl = rootEl.querySelector("#ps-edit-segment-load-projects");
+  const loadProjectsListEl = rootEl.querySelector("#ps-edit-segment-load-projects-list");
 
   let currentSegmentId = null;
   let currentMonthKey = "";
@@ -355,6 +359,36 @@ export function createEditSegmentModal(
   // Le calcul est entierement porte par utils/monthLoad.js (module vendorise,
   // identique octet pour octet avec celui de gestion-depenses2) : on ne fait ici
   // que le nourrir et le rendre.
+  // Liste construite par API DOM et non par innerHTML : les noms de projet
+  // viennent de Grist, donc d'une saisie utilisateur. textContent ferme la
+  // question de l'echappement au lieu de la deplacer dans un helper.
+  function renderLoadProjects(byProject) {
+    if (!(loadProjectsEl instanceof HTMLElement)) return;
+
+    const entries = formatLoadProjectEntries(byProject, resolveProjectLabel);
+    // Mois libre : on masque la section au lieu de laisser un titre sans liste.
+    loadProjectsEl.hidden = entries.length === 0;
+
+    if (!(loadProjectsListEl instanceof HTMLElement)) return;
+    loadProjectsListEl.replaceChildren(
+      ...entries.map((entry) => {
+        const item = document.createElement("li");
+        item.className = "ps-segment-edit-load-project";
+
+        const name = document.createElement("span");
+        name.className = "ps-segment-edit-load-project-name";
+        name.textContent = entry.label;
+
+        const days = document.createElement("strong");
+        days.className = "ps-segment-edit-load-project-days";
+        days.textContent = formatEditSegmentDayValue(entry.days);
+
+        item.append(name, days);
+        return item;
+      })
+    );
+  }
+
   function renderMonthLoadBar() {
     if (!(loadEl instanceof HTMLElement)) return null;
 
@@ -374,6 +408,7 @@ export function createEditSegmentModal(
       if (loadDaysEl instanceof HTMLElement) loadDaysEl.textContent = "--";
       if (loadMessageEl instanceof HTMLElement) loadMessageEl.textContent = "";
       if (loadTrackEl instanceof HTMLElement) loadTrackEl.setAttribute("aria-valuenow", "0");
+      renderLoadProjects([]);
       return null;
     }
 
@@ -417,6 +452,7 @@ export function createEditSegmentModal(
     if (loadTrackEl instanceof HTMLElement) {
       loadTrackEl.setAttribute("aria-valuenow", String(Math.round(fillPercent)));
     }
+    renderLoadProjects(load.byProject);
 
     return load;
   }

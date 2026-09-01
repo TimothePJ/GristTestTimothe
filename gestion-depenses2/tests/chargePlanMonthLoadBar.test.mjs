@@ -20,7 +20,10 @@ import vm from "node:vm";
 
 import { APP_CONFIG } from "../assets/js/config.js";
 import { buildExpenseData } from "../assets/js/services/projectService.js";
-import { computeMonthLoad } from "../assets/js/utils/monthLoad.js";
+import {
+  computeMonthLoad,
+  formatLoadProjectEntries,
+} from "../assets/js/utils/monthLoad.js";
 import { formatNumber, toFiniteNumber } from "../assets/js/utils/format.js";
 import { getSegmentEffectiveDays, parseRawDateTime } from "../assets/js/utils/timeSegments.js";
 import {
@@ -113,6 +116,8 @@ const WIRED_FUNCTION_NAMES = [
   "setEditChargePlanMetricValue",
   "getAllTimeSegmentRows",
   "formatChargePlanMonthLoadMessage",
+  "resolveChargePlanProjectName",
+  "renderChargePlanLoadProjects",
   "renderEditChargePlanMonthLoadBar",
   "syncEditChargePlanDerivedValues",
 ];
@@ -146,6 +151,7 @@ class FakeElement {
     this.style = {};
     this.attributes = new Map();
     this.listeners = new Map();
+    this.children = [];
   }
   addEventListener(type, handler) {
     if (!this.listeners.has(type)) this.listeners.set(type, []);
@@ -168,6 +174,15 @@ class FakeElement {
   removeAttribute(name) {
     this.attributes.delete(name);
   }
+  // La liste « Deja engage ce mois-ci » est batie par API DOM et non par
+  // innerHTML : les noms de projet viennent de Grist. Le faux DOM doit donc
+  // savoir composer, sinon ce rendu reste hors de portee des tests.
+  append(...nodes) {
+    this.children.push(...nodes);
+  }
+  replaceChildren(...nodes) {
+    this.children = [...nodes];
+  }
 }
 class FakeInput extends FakeElement {
   constructor() {
@@ -177,7 +192,12 @@ class FakeInput extends FakeElement {
 }
 
 // Monte un contexte neuf autour du texte reel de main.js.
-function mountLoadBar({ rows = [], worker = { name: "Alice" }, segment = null } = {}) {
+function mountLoadBar({
+  rows = [],
+  worker = { name: "Alice" },
+  segment = null,
+  projects = [],
+} = {}) {
   const dom = {
     editSegmentEffectifInput: new FakeInput(),
     editSegmentCalculatedDays: new FakeElement(),
@@ -186,8 +206,10 @@ function mountLoadBar({ rows = [], worker = { name: "Alice" }, segment = null } 
     editSegmentLoadFill: new FakeElement(),
     editSegmentLoadDays: new FakeElement(),
     editSegmentLoadMessage: new FakeElement(),
+    editSegmentLoadProjects: new FakeElement(),
+    editSegmentLoadProjectsList: new FakeElement(),
   };
-  const state = { allTimeSegmentRows: rows };
+  const state = { allTimeSegmentRows: rows, projects };
   const feedbacks = [];
 
   const sandbox = {
@@ -201,6 +223,9 @@ function mountLoadBar({ rows = [], worker = { name: "Alice" }, segment = null } 
     Boolean,
     HTMLElement: FakeElement,
     HTMLInputElement: FakeInput,
+    document: {
+      createElement: () => new FakeElement(),
+    },
     dom,
     state,
     APP_CONFIG,
@@ -214,6 +239,7 @@ function mountLoadBar({ rows = [], worker = { name: "Alice" }, segment = null } 
 
     // --- vraies dependances pures --------------------------------------------
     computeMonthLoad,
+    formatLoadProjectEntries,
     formatNumber,
     getMonthAvailableDays,
     getMonthBounds,
@@ -265,6 +291,12 @@ function mountLoadBar({ rows = [], worker = { name: "Alice" }, segment = null } 
       dom.editSegmentEffectifInput.dispatch(eventType);
     },
     feedbacks,
+    // Une ligne = [libelle, jours], dans l'ordre affiche.
+    loadProjectRows: () =>
+      dom.editSegmentLoadProjectsList.children.map((item) =>
+        item.children.map((cell) => cell.textContent)
+      ),
+    loadProjectsHidden: () => dom.editSegmentLoadProjects.hidden,
     read: () => ({
       hidden: dom.editSegmentLoad.hidden,
       partial: dom.editSegmentLoad.classList.contains("is-partial"),
@@ -1080,4 +1112,87 @@ test("bout en bout : la barre voit la charge d un AUTRE projet lue depuis Grist"
   bar.type("8");
   assert.equal(bar.read().days, "13 j / 20 j");
   assert.equal(bar.read().message, "il reste 7 j avant 100 %");
+});
+
+// --- Liste « Deja engage ce mois-ci » ----------------------------------------
+//
+// Le detail par projet sous la barre. Le calcul et les libelles appartiennent au
+// module vendorise utils/monthLoad.js (teste par monthLoad.test.mjs, copie
+// identique dans les deux widgets) ; ce qui est epingle ici est le CABLAGE :
+// resolution du nom depuis state.projects, repli, et masquage de la section.
+
+test("la liste nomme les projets et les classe du plus charge au moins charge", () => {
+  const harness = mountLoadBar({
+    rows: [
+      segmentRow({ id: 1, project: "241102", name: "Alice", effectif: 4 }),
+      segmentRow({ id: 2, project: "252035", name: "Alice", effectif: 9 }),
+    ],
+    projects: [
+      { id: 1, projectNumber: "252035", name: "CHU Nantes" },
+      { id: 2, projectNumber: "241102", name: "Pont de Chevire" },
+    ],
+  });
+  harness.type(3);
+
+  assert.equal(harness.loadProjectsHidden(), false);
+  assert.deepEqual(harness.loadProjectRows(), [
+    ["252035 · CHU Nantes", "9 j"],
+    ["241102 · Pont de Chevire", "4 j"],
+  ]);
+});
+
+test("un projet absent du catalogue s'affiche par son numero, il ne disparait pas", () => {
+  // Cas NORMAL : le catalogue ne porte que les projets visibles par cet
+  // utilisateur (service courant, ACL), alors que la charge se compte tous
+  // projets confondus. Masquer la ligne ferait chercher des jours manquants
+  // qui existent pourtant, et la somme ne tomberait plus juste.
+  const harness = mountLoadBar({
+    rows: [segmentRow({ id: 1, project: "999999", name: "Alice", effectif: 2 })],
+    projects: [{ id: 1, projectNumber: "252035", name: "CHU Nantes" }],
+  });
+  harness.type(1);
+
+  assert.deepEqual(harness.loadProjectRows(), [["999999", "2 j"]]);
+});
+
+test("la section est masquee quand la personne n'a rien pose ailleurs", () => {
+  // Un titre « Deja engage ce mois-ci » sans aucune ligne vaudrait moins que rien.
+  const harness = mountLoadBar({ rows: [], projects: [] });
+  harness.type(5);
+
+  assert.equal(harness.loadProjectsHidden(), true);
+  assert.deepEqual(harness.loadProjectRows(), []);
+});
+
+test("le segment en cours d'edition n'apparait pas dans la liste", () => {
+  // La liste repond a « ou sont ses jours EN DEHORS de ce que je saisis » : y
+  // voir le segment ouvert le compterait deux fois a l'oeil.
+  const harness = mountLoadBar({
+    rows: [
+      segmentRow({ id: 7, project: "252035", name: "Alice", effectif: 6 }),
+      segmentRow({ id: 8, project: "241102", name: "Alice", effectif: 4 }),
+    ],
+    projects: [],
+    segment: { id: 7 },
+  });
+  harness.type(6);
+
+  assert.deepEqual(harness.loadProjectRows(), [["241102", "4 j"]]);
+});
+
+test("les deux widgets affichent la meme liste pour les memes donnees", () => {
+  // Le libelle vient de formatLoadProjectEntries, dans le module vendorise :
+  // planning-synchro et gestion-depenses2 lisent la MEME fonction. Ce test
+  // epingle le cablage local sur son resultat, pour qu'une divergence de
+  // rendu d'un seul cote se voie ici.
+  const byProject = [{ projectNumber: "252035", days: 9 }];
+  const expected = formatLoadProjectEntries(byProject, () => "CHU Nantes");
+
+  const harness = mountLoadBar({
+    rows: [segmentRow({ id: 1, project: "252035", name: "Alice", effectif: 9 })],
+    projects: [{ id: 1, projectNumber: "252035", name: "CHU Nantes" }],
+  });
+  harness.type(0);
+
+  assert.deepEqual(harness.loadProjectRows(), [[expected[0].label, "9 j"]]);
 });

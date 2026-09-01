@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeMonthLoad, parseEffectifDays } from "../assets/js/utils/monthLoad.js";
+import {
+  buildMonthOverloadIndex,
+  computeMonthLoad,
+  formatLoadProjectEntries,
+  parseEffectifDays,
+} from "../assets/js/utils/monthLoad.js";
 
 // Colonnes telles que les deux widgets les declarent dans config.js.
 const COLS = { mois: "Mois", startDate: "Start_At", name: "Name", effectif: "Effectif" };
@@ -241,4 +246,312 @@ test("parseEffectifDays normalise les formes rencontrees dans Grist", () => {
   assert.equal(parseEffectifDays(""), 0);
   assert.equal(parseEffectifDays("bidon"), 0);
   assert.equal(parseEffectifDays(Infinity), 0);
+});
+
+// --- Detail par projet -------------------------------------------------------
+//
+// La barre dit COMBIEN de jours sont deja pris ; `byProject` dit OU. C'est la
+// meme boucle qui produit les deux, donc les deux ne peuvent pas se contredire —
+// l'invariant somme(byProject) === otherDays est verifie plus bas.
+
+const COLS_WITH_PROJECT = { ...COLS, projectNumber: "NumeroProjet" };
+
+test("byProject ventile les jours par projet, du plus charge au moins charge", () => {
+  const rows = [
+    segment(1, "Marie Dupont", 4, { NumeroProjet: "241102" }),
+    segment(2, "Marie Dupont", 9, { NumeroProjet: "252035" }),
+    segment(3, "Marie Dupont", 1, { NumeroProjet: "999999" }),
+  ];
+  const result = load({ allSegmentRows: rows, columns: COLS_WITH_PROJECT });
+
+  assert.deepEqual(result.byProject, [
+    { projectNumber: "252035", days: 9 },
+    { projectNumber: "241102", days: 4 },
+    { projectNumber: "999999", days: 1 },
+  ]);
+});
+
+test("plusieurs lignes sur un meme projet sont cumulees en une seule entree", () => {
+  // Une personne peut porter deux lignes sur le meme projet le meme mois (deux
+  // services, par exemple) : la liste doit montrer UN projet, pas deux.
+  const rows = [
+    segment(1, "Marie Dupont", 3, { NumeroProjet: "252035", Service: "Structure" }),
+    segment(2, "Marie Dupont", 2, { NumeroProjet: "252035", Service: "Fluides" }),
+  ];
+  const result = load({ allSegmentRows: rows, columns: COLS_WITH_PROJECT });
+
+  assert.deepEqual(result.byProject, [{ projectNumber: "252035", days: 5 }]);
+});
+
+test("a jours egaux, l'ordre suit le numero de projet et ne depend pas des lignes", () => {
+  // Sans ce second critere, l'ordre d'affichage suivrait celui, arbitraire, des
+  // lignes renvoyees par Grist : la liste bougerait d'un rafraichissement a
+  // l'autre sans qu'aucune donnee n'ait change.
+  const rows = [
+    segment(1, "Marie Dupont", 2, { NumeroProjet: "300000" }),
+    segment(2, "Marie Dupont", 2, { NumeroProjet: "100000" }),
+    segment(3, "Marie Dupont", 2, { NumeroProjet: "200000" }),
+  ];
+  const result = load({ allSegmentRows: rows, columns: COLS_WITH_PROJECT });
+
+  assert.deepEqual(
+    result.byProject.map((entry) => entry.projectNumber),
+    ["100000", "200000", "300000"]
+  );
+});
+
+test("le segment en cours d'edition est exclu de byProject comme de otherDays", () => {
+  // La liste repond a « ou sont ses jours EN DEHORS de ce que je saisis ».
+  // Le projet courant ne doit donc pas s'y retrouver via la ligne ouverte.
+  const rows = [
+    segment(1, "Marie Dupont", 6, { NumeroProjet: "252035" }),
+    segment(2, "Marie Dupont", 4, { NumeroProjet: "241102" }),
+  ];
+  const result = load({
+    allSegmentRows: rows,
+    columns: COLS_WITH_PROJECT,
+    excludeSegmentId: 1,
+    draftEffectif: 8,
+  });
+
+  assert.deepEqual(result.byProject, [{ projectNumber: "241102", days: 4 }]);
+  assert.equal(result.otherDays, 4);
+  assert.equal(result.totalDays, 12);
+});
+
+test("la somme de byProject vaut EXACTEMENT otherDays", () => {
+  // L'invariant qui rend la liste lisible : le detail doit rendre compte de la
+  // totalite du chiffre affiche par la barre, sinon l'utilisateur cherche des
+  // jours manquants qui n'existent pas.
+  const rows = [
+    segment(1, "Marie Dupont", 0.5, { NumeroProjet: "A" }),
+    segment(2, "Marie Dupont", "2,5", { NumeroProjet: "B" }),
+    segment(3, "Marie Dupont", 7, { NumeroProjet: "A" }),
+    segment(4, "Marie Dupont", 1.5, { NumeroProjet: "C" }),
+  ];
+  const result = load({ allSegmentRows: rows, columns: COLS_WITH_PROJECT });
+
+  const sum = result.byProject.reduce((total, entry) => total + entry.days, 0);
+  assert.equal(sum, result.otherDays);
+  assert.equal(result.otherDays, 11.5);
+});
+
+test("une ligne sans numero de projet lisible est regroupee, jamais perdue", () => {
+  // Ses jours comptent dans le total : les omettre de la liste ferait mentir
+  // l'invariant ci-dessus et donnerait un detail qui ne tombe pas juste.
+  const rows = [
+    segment(1, "Marie Dupont", 5, { NumeroProjet: "252035" }),
+    segment(2, "Marie Dupont", 2, { NumeroProjet: "   " }),
+    segment(3, "Marie Dupont", 1),
+  ];
+  const result = load({ allSegmentRows: rows, columns: COLS_WITH_PROJECT });
+
+  assert.deepEqual(result.byProject, [
+    { projectNumber: "252035", days: 5 },
+    { projectNumber: "", days: 3 },
+  ]);
+  assert.equal(result.otherDays, 8);
+});
+
+test("byProject est un tableau vide quand la personne n'a rien pose", () => {
+  // La fenetre masque la section sur ce tableau vide : il ne doit jamais valoir
+  // null ou undefined, sinon l'appelant doit se defendre a chaque rendu.
+  assert.deepEqual(load({ columns: COLS_WITH_PROJECT }).byProject, []);
+  assert.deepEqual(load({ allSegmentRows: null, columns: COLS_WITH_PROJECT }).byProject, []);
+  assert.deepEqual(computeMonthLoad().byProject, []);
+});
+
+test("les numeros de projet arrivant en nombre depuis Grist sont normalises", () => {
+  // Grist rend NumeroProjet tantot en nombre, tantot en chaine. 252035 et
+  // "252035" designent le meme projet et doivent fusionner en UNE entree.
+  const rows = [
+    segment(1, "Marie Dupont", 3, { NumeroProjet: 252035 }),
+    segment(2, "Marie Dupont", 2, { NumeroProjet: "252035" }),
+  ];
+  const result = load({ allSegmentRows: rows, columns: COLS_WITH_PROJECT });
+
+  assert.deepEqual(result.byProject, [{ projectNumber: "252035", days: 5 }]);
+});
+
+// --- Libelles de la liste ----------------------------------------------------
+
+test("formatLoadProjectEntries nomme les projets connus du catalogue", () => {
+  const names = { 252035: "CHU Nantes" };
+  const entries = formatLoadProjectEntries(
+    [{ projectNumber: "252035", days: 9 }],
+    (number) => names[number] || ""
+  );
+
+  assert.deepEqual(entries, [
+    { projectNumber: "252035", days: 9, label: "252035 · CHU Nantes" },
+  ]);
+});
+
+test("un numero absent du catalogue s'affiche nu, il ne disparait pas", () => {
+  // Cas NORMAL : le catalogue ne porte que les projets visibles par cet
+  // utilisateur (service courant, ACL), alors que la charge se compte tous
+  // projets confondus. Masquer la ligne ferait chercher des jours manquants.
+  const entries = formatLoadProjectEntries([{ projectNumber: "999999", days: 2 }], () => "");
+  assert.deepEqual(entries, [{ projectNumber: "999999", days: 2, label: "999999" }]);
+});
+
+test("le seau sans numero recoit un libelle explicite", () => {
+  const entries = formatLoadProjectEntries([{ projectNumber: "", days: 3 }], () => "Ignore");
+  assert.deepEqual(entries, [
+    { projectNumber: "", days: 3, label: "Projet non renseigne" },
+  ]);
+});
+
+test("un catalogue qui jette ou qui manque fait retomber sur le numero nu", () => {
+  const thrown = formatLoadProjectEntries([{ projectNumber: "252035", days: 1 }], () => {
+    throw new Error("catalogue en cours de rechargement");
+  });
+  assert.equal(thrown[0].label, "252035");
+
+  // Aucun resolveur fourni : la liste reste affichable.
+  assert.equal(formatLoadProjectEntries([{ projectNumber: "252035", days: 1 }])[0].label, "252035");
+  assert.deepEqual(formatLoadProjectEntries(null, () => ""), []);
+});
+
+// --- Index de surcharge ------------------------------------------------------
+//
+// Une barre de segment vire a l'ambre quand la PERSONNE est en surcharge sur le
+// mois, tous projets confondus — pas quand le segment affiche depasse a lui seul
+// (cela, c'est l'etat rouge « incoherent », qui reste distinct).
+//
+// L'index existe pour une raison de cout : un board affiche des dizaines de
+// barres, et computeMonthLoad rebalaie TOUTE la table a chaque appel. Sans
+// dedoublonnage par couple (personne, mois), le rendu serait quadratique.
+
+test("l'index signale la surcharge d'une personne a cheval sur deux projets", () => {
+  // 15 j sur un projet + 12 j sur un autre = 27 j pour 22 disponibles. Aucun des
+  // deux segments ne depasse seul : c'est leur SOMME qui alerte.
+  const rows = [
+    segment(1, "Marie Dupont", 15, { NumeroProjet: "A" }),
+    segment(2, "Marie Dupont", 12, { NumeroProjet: "B" }),
+  ];
+  const index = buildMonthOverloadIndex({
+    entries: [{ personName: "Marie Dupont", monthKey: MONTH }],
+    allSegmentRows: rows,
+    columns: COLS,
+  });
+
+  assert.equal(index.isOverloaded("Marie Dupont", MONTH), true);
+});
+
+test("un mois PILE plein n'est pas une surcharge, un demi-jour de plus l'est", () => {
+  // La frontiere exacte des 100 % appartient a l'etat « plein ». Sans la
+  // tolerance de computeMonthLoad, une somme de flottants ferait basculer a tort.
+  const full = buildMonthOverloadIndex({
+    entries: [{ personName: "Marie Dupont", monthKey: MONTH }],
+    allSegmentRows: [
+      segment(1, "Marie Dupont", 14, { NumeroProjet: "A" }),
+      segment(2, "Marie Dupont", 8, { NumeroProjet: "B" }),
+    ],
+    columns: COLS,
+  });
+  assert.equal(full.isOverloaded("Marie Dupont", MONTH), false);
+
+  const over = buildMonthOverloadIndex({
+    entries: [{ personName: "Marie Dupont", monthKey: MONTH }],
+    allSegmentRows: [
+      segment(1, "Marie Dupont", 14, { NumeroProjet: "A" }),
+      segment(2, "Marie Dupont", 8.5, { NumeroProjet: "B" }),
+    ],
+    columns: COLS,
+  });
+  assert.equal(over.isOverloaded("Marie Dupont", MONTH), true);
+});
+
+test("les absences reduisent la capacite et peuvent creer la surcharge", () => {
+  // 20 j poses sur un mois de 22 : rien a signaler. La personne pose ensuite tout
+  // le mois en conge : sa capacite tombe a 0 et les memes 20 j deviennent une
+  // surcharge, sans qu'aucun segment n'ait bouge.
+  const rows = [segment(1, "Marie Dupont", 20, { NumeroProjet: "A" })];
+  const entries = [{ personName: "Marie Dupont", monthKey: MONTH }];
+
+  assert.equal(
+    buildMonthOverloadIndex({ entries, allSegmentRows: rows, columns: COLS }).isOverloaded(
+      "Marie Dupont",
+      MONTH
+    ),
+    false
+  );
+
+  const absent = buildMonthOverloadIndex({
+    entries,
+    allSegmentRows: rows,
+    columns: COLS,
+    resolveAbsenceSet: () => fullMonthAbsence(),
+  });
+  assert.equal(absent.isOverloaded("Marie Dupont", MONTH), true);
+});
+
+test("getLoad rend de quoi ecrire l'infobulle", () => {
+  // La couleur seule ne dit pas pourquoi : l'infobulle doit pouvoir annoncer
+  // « N j sur M disponibles », sinon la cause (un AUTRE projet) reste invisible.
+  const index = buildMonthOverloadIndex({
+    entries: [{ personName: "Marie Dupont", monthKey: MONTH }],
+    allSegmentRows: [
+      segment(1, "Marie Dupont", 15, { NumeroProjet: "A" }),
+      segment(2, "Marie Dupont", 12, { NumeroProjet: "B" }),
+    ],
+    columns: COLS,
+  });
+
+  const load = index.getLoad("Marie Dupont", MONTH);
+  assert.equal(load.totalDays, 27);
+  assert.equal(load.availableDays, 22);
+  assert.equal(load.overloadDays, 5);
+});
+
+test("une paire absente de l'index ne surcharge rien et ne jette pas", () => {
+  const index = buildMonthOverloadIndex({
+    entries: [{ personName: "Marie Dupont", monthKey: MONTH }],
+    allSegmentRows: [segment(1, "Marie Dupont", 30, { NumeroProjet: "A" })],
+    columns: COLS,
+  });
+
+  assert.equal(index.isOverloaded("Jean Martin", MONTH), false);
+  assert.equal(index.isOverloaded("Marie Dupont", "2026-10"), false);
+  assert.equal(index.getLoad("Jean Martin", MONTH), null);
+  assert.equal(buildMonthOverloadIndex().isOverloaded("Marie Dupont", MONTH), false);
+});
+
+test("le nom est apparie comme partout ailleurs : accents et casse ignores", () => {
+  // Les segments viennent de TimeSegment, les noms affiches de Team : les deux
+  // ne s'ecrivent pas toujours pareil. computeMonthLoad normalise deja, l'index
+  // doit le faire aussi, sinon la barre resterait neutre en silence.
+  const index = buildMonthOverloadIndex({
+    entries: [{ personName: "MARIE DUPONT", monthKey: MONTH }],
+    allSegmentRows: [segment(1, "Marie Dupont", 30, { NumeroProjet: "A" })],
+    columns: COLS,
+  });
+
+  assert.equal(index.isOverloaded("marie dupont", MONTH), true);
+  assert.equal(index.isOverloaded("MARIE DUPONT", MONTH), true);
+});
+
+test("un couple (personne, mois) repete n'est calcule qu'une fois", () => {
+  // C'est la raison d'etre de l'index : sans dedoublonnage, un board de 40 barres
+  // rebalaierait 40 fois la table entiere.
+  let calls = 0;
+  const rows = new Proxy([segment(1, "Marie Dupont", 30, { NumeroProjet: "A" })], {
+    get(target, prop, receiver) {
+      if (prop === Symbol.iterator) calls += 1;
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+
+  buildMonthOverloadIndex({
+    entries: [
+      { personName: "Marie Dupont", monthKey: MONTH },
+      { personName: "Marie Dupont", monthKey: MONTH },
+      { personName: "Marie Dupont", monthKey: MONTH },
+    ],
+    allSegmentRows: rows,
+    columns: COLS,
+  });
+
+  assert.equal(calls, 1, `la table a ete balayee ${calls} fois pour un seul couple`);
 });

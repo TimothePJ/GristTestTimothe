@@ -243,6 +243,7 @@ export function attachChargeEditing(
     editSegmentModalEl,
     getAbsenceSet,
     getAllTimeSegmentRows,
+    resolveProjectLabel,
   } = {}
 ) {
   if (!(boardEl instanceof HTMLElement)) {
@@ -262,6 +263,10 @@ export function attachChargeEditing(
           // barre, si bien qu'un rechargement post-ecriture (onChanged) se voit
           // sans re-cabler quoi que ce soit.
           getAllTimeSegmentRows,
+          // Numero de projet -> nom lisible, pour le detail « Deja engage ce
+          // mois-ci » sous la barre. Relaye tel quel : la fenetre l'appelle a
+          // chaque rendu, donc un catalogue rafraichi se voit sans re-cablage.
+          resolveProjectLabel,
         })
       : null;
 

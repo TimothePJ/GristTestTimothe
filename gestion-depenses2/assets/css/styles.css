@@ -1660,6 +1660,29 @@ td input {
   filter: brightness(1.03);
 }
 
+/* SURCHARGE : la PERSONNE depasse sa capacite du mois, tous projets confondus.
+   La barre peut donc virer sans que rien ne cloche sur le projet affiche — la
+   charge est ailleurs, et c'est l'infobulle qui le dit.
+
+   Teinte PLATE et non degradee : c'est exactement --load-overload, la meme que
+   la barre de la fenetre d'edition, la ligne Charge et Gestion-User. Un degrade
+   la diluerait et la parite visuelle entre les surfaces serait perdue.
+
+   Le label est blanc par defaut (fond bleu fonce) : illisible sur #ffe1a8, il
+   repasse donc en --load-overload-text. Le liseré compense le faible contraste
+   de la pastille claire sur le fond clair de la piste, comme pour
+   .ps-segment-edit-load-fill.
+
+   PRIORITE : .is-incoherent (rouge) est declare APRES et l'emporte donc a
+   specificite egale — et le rendu ne pose de toute facon jamais les deux
+   classes ensemble. Une saisie fausse doit rester plus visible qu'une charge
+   lourde. */
+.charge-plan-segment-bar.is-overloaded {
+  background: var(--load-overload);
+  color: var(--load-overload-text);
+  box-shadow: inset 0 0 0 1px rgba(109, 59, 0, 0.32);
+}
+
 .charge-plan-segment-bar.is-incoherent {
   background: linear-gradient(135deg, #e5534b, #b42318);
 }
@@ -2858,15 +2881,26 @@ td input {
   color: var(--color-primary);
 }
 
-/* --- Barre de charge mensuelle -------------------------------------------- */
-/* Charge TOTALE de la personne sur le mois, tous projets et tous services
-   confondus. Les trois teintes sont celles de Gestion-User (--color-partial /
-   --color-balanced / --color-overload) : la meme charge doit se lire de la meme
-   couleur dans les deux widgets. */
-.segment-edit-load {
+/* Teintes de charge, partagees par la barre de la fenetre d'edition, la liste
+   « Deja engage ce mois-ci » ET les barres de segment du plan de charge.
+   Reprises de Gestion-User (--color-partial / --color-balanced /
+   --color-overload) et identiques a celles de planning-synchro : la meme
+   charge doit se lire de la meme couleur dans les trois widgets.
+
+   Declarees ici sur :root et NON sur .segment-edit-load : les barres de
+   segment vivent hors de cette fenetre et n'heriteraient pas d'une variable
+   scopee — sans erreur, juste sans couleur, en silence. */
+:root {
   --load-partial: #edf4fb;
   --load-balanced: #d7eccb;
   --load-overload: #ffe1a8;
+  --load-overload-text: #6d3b00;
+}
+
+/* --- Barre de charge mensuelle -------------------------------------------- */
+/* Charge TOTALE de la personne sur le mois, tous projets et tous services
+   confondus. */
+.segment-edit-load {
   display: grid;
   gap: 8px;
 }
@@ -2943,6 +2977,57 @@ td input {
 .segment-edit-load.is-overload .segment-edit-load-fill {
   background: var(--load-overload);
   box-shadow: inset 0 0 0 1px rgba(109, 59, 0, 0.32);
+}
+
+/* --- Detail par projet ----------------------------------------------------- */
+/* La barre dit COMBIEN de jours sont deja pris ; cette liste dit OU. Masquee
+   (hidden) quand la personne n'a rien pose ailleurs : un titre sans liste
+   vaudrait moins que rien. Meme decoupage que planning-synchro. */
+.segment-edit-load-projects {
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 73, 144, 0.1);
+}
+
+.segment-edit-load-projects[hidden] {
+  display: none;
+}
+
+.segment-edit-load-projects-label {
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+}
+
+.segment-edit-load-projects-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+
+/* Le nom prend la place restante et se tronque ; les jours gardent la leur.
+   L'inverse ferait sauter la colonne de droite d'une ligne a l'autre selon la
+   longueur du nom, et la liste ne se lirait plus en colonne. */
+.segment-edit-load-project {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.88rem;
+}
+
+.segment-edit-load-project-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.segment-edit-load-project-days {
+  flex: 0 0 auto;
+  color: var(--color-primary);
+  font-variant-numeric: tabular-nums;
 }
 
 .segment-edit-load-message {

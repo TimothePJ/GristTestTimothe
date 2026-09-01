@@ -68,6 +68,7 @@ import { resolveSegmentMonthKey, getMonthBounds, getMonthAvailableDays } from ".
 import { countPlanningTasksOverlappingRange } from "../top/phases.js";
 import { isAbsenceSlot, normalizeName } from "../utils/leaveAbsences.js";
 import { computeProjectCharge } from "./documentCharge.js";
+import { buildMonthOverloadIndex } from "../utils/monthLoad.js";
 import { APP_CONFIG } from "../config.js";
 
 const MIN_CONTENT_WIDTH_PX = 280;
@@ -315,7 +316,13 @@ function getVisibleSlotRange(startAt, endAt, visibleSlots) {
   return { firstSlot, lastSlot };
 }
 
-function buildVisibleSegmentBars(worker, visibleSlots, planningTasks = [], absenceSet = new Set()) {
+function buildVisibleSegmentBars(
+  worker,
+  visibleSlots,
+  planningTasks = [],
+  absenceSet = new Set(),
+  overloadIndex = null
+) {
   return (worker?.segments || [])
     .map((segment) => {
       const startAt = segment?.startAt instanceof Date ? segment.startAt : null;
@@ -341,6 +348,12 @@ function buildVisibleSegmentBars(worker, visibleSlots, planningTasks = [], absen
       const rawEffectif = segment?.effectif ?? segment?.effectifDays ?? null;
       const available = getMonthAvailableDays(segment.monthKey, absenceSet);
       const incoherent = rawEffectif != null && Number(rawEffectif) > available;
+      // Surcharge de la PERSONNE sur ce mois, tous projets confondus : la barre
+      // peut virer sans que rien ne cloche sur le projet affiche, parce que la
+      // charge est ailleurs. D'ou l'infobulle, qui donne les chiffres.
+      const overloadLoad = overloadIndex?.isOverloaded(worker?.name, segment.monthKey)
+        ? overloadIndex.getLoad(worker?.name, segment.monthKey)
+        : null;
 
       return {
         segmentId: segment.id,
@@ -356,6 +369,7 @@ function buildVisibleSegmentBars(worker, visibleSlots, planningTasks = [], absen
         // unset — this module is DOM-driven, so the value rides on the bar.
         effectif: segment?.effectif == null ? "" : segment.effectif,
         incoherent,
+        overloadLoad,
         available,
         leftPx,
         widthPx,
@@ -394,12 +408,21 @@ function renderSegmentBars(assignedBars) {
       const planningTooltip = `${taskCount} tâche(s) Planning Projet sur cette période`;
       // When the stored effectif exceeds the leave-adjusted availability, the bar
       // turns red and its tooltip explains the mismatch (see is-incoherent CSS).
+      // Priorite au rouge : `is-incoherent` denonce une saisie fausse, l'ambre
+      // une charge trop lourde. La saisie fausse doit rester la plus visible.
+      const overloadTooltip = bar.overloadLoad
+        ? `Surcharge : ${formatDayValue(bar.overloadLoad.totalDays)} j sur ${formatDayValue(
+            bar.overloadLoad.availableDays
+          )} j disponibles ce mois, tous projets confondus`
+        : "";
       const title = bar.incoherent
         ? `Effectif ${bar.effectif} j > disponible après absences ${bar.available} j`
-        : planningTooltip;
+        : overloadTooltip || planningTooltip;
       return `
         <div
-          class="charge-plan-segment-bar ${compact ? "is-compact" : ""} ${bar.incoherent ? "is-incoherent" : ""}"
+          class="charge-plan-segment-bar ${compact ? "is-compact" : ""} ${bar.incoherent ? "is-incoherent" : ""} ${
+            !bar.incoherent && bar.overloadLoad ? "is-overloaded" : ""
+          }"
           style="left:${bar.leftPx}px; top:${10 + bar.laneIndex * 32}px; width:${Math.max(12, bar.widthPx)}px"
           data-segment-id="${escapeHtml(String(bar.segmentId))}"
           data-month-key="${escapeHtml(String(bar.monthKey))}"
@@ -430,8 +453,23 @@ function renderRoleRow(roleLabel, timelineWidth) {
   `;
 }
 
-function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWidth, planningTasks = [], absenceSet = new Set()) {
-  const visibleSegmentBars = buildVisibleSegmentBars(worker, visibleSlots, planningTasks, absenceSet);
+function renderWorkerRow(
+  worker,
+  visibleSlots,
+  timelineWidth,
+  windowDays,
+  dayWidth,
+  planningTasks = [],
+  absenceSet = new Set(),
+  overloadIndex = null
+) {
+  const visibleSegmentBars = buildVisibleSegmentBars(
+    worker,
+    visibleSlots,
+    planningTasks,
+    absenceSet,
+    overloadIndex
+  );
   const assignedBars = assignSegmentLanes(visibleSegmentBars);
   const laneCount = Math.max(
     1,
@@ -704,6 +742,11 @@ export function createChargeBoard(containerEl) {
   // transiter — sans memoire, un zoom/pan viderait la ligne Charge a chaque
   // rafraichissement de fenetre.
   let lastPlanningRows = [];
+  // TOUTES les lignes TimeSegment, tous projets et tous services : la surcharge
+  // d'une personne se compte sur l'ensemble de son engagement, pas sur le seul
+  // projet affiche. Memorise comme lastPlanningRows, puisque le re-rendu de
+  // viewport (setWindow) ne le retransmet pas.
+  let lastAllTimeSegmentRows = [];
   // Rebuild throttling. A zoom/pan gesture drives setWindow ~60x/s and each call
   // used to rebuild the whole innerHTML — the dominant jank source. We throttle
   // the rebuild to at most one per REBUILD_THROTTLE_MS (leading + trailing): the
@@ -732,7 +775,15 @@ export function createChargeBoard(containerEl) {
     activeVisibleSlots = [];
   }
 
-  function render({ workers, viewport, editMode, planningTasks, absencesByWorker, planningRows } = {}) {
+  function render({
+    workers,
+    viewport,
+    editMode,
+    planningTasks,
+    absencesByWorker,
+    planningRows,
+    allTimeSegmentRows,
+  } = {}) {
     if (!(containerEl instanceof HTMLElement) || !viewport) {
       clear();
       return;
@@ -750,12 +801,30 @@ export function createChargeBoard(containerEl) {
     // Only the data-driven render() (from main.js) carries planningTasks; the
     // viewport-only re-render (setWindow) omits it and keeps the last set.
     if (planningTasks !== undefined) lastPlanningTasks = Array.isArray(planningTasks) ? planningTasks : [];
+    if (allTimeSegmentRows !== undefined) {
+      lastAllTimeSegmentRows = Array.isArray(allTimeSegmentRows) ? allTimeSegmentRows : [];
+    }
     if (absencesByWorker !== undefined) {
       lastAbsencesByWorker = absencesByWorker instanceof Map ? absencesByWorker : new Map();
     }
     if (planningRows !== undefined) lastPlanningRows = Array.isArray(planningRows) ? planningRows : [];
 
     containerEl.classList.add("charge-plan-board");
+
+    // Index de surcharge : un seul balayage de la table par couple
+    // (personne, mois) affiche. Le construire ici et non dans le constructeur de
+    // barres evite de rebalayer TimeSegment pour chacune des dizaines de barres.
+    const overloadIndex = buildMonthOverloadIndex({
+      entries: lastWorkers.flatMap((worker) =>
+        (worker?.segments || []).map((segment) => ({
+          personName: worker?.name,
+          monthKey: segment?.monthKey,
+        }))
+      ),
+      allSegmentRows: lastAllTimeSegmentRows,
+      columns: APP_CONFIG.grist.columns.timeSegment,
+      resolveAbsenceSet: (personName) => lastAbsencesByWorker.get(normalizeName(personName)) || null,
+    });
 
     const groupedWorkers = groupWorkersByRole(lastWorkers);
     const windowDays = buildWindowDays(viewport);
@@ -779,7 +848,8 @@ export function createChargeBoard(containerEl) {
               windowDays,
               dayWidth,
               lastPlanningTasks,
-              absenceSet
+              absenceSet,
+              overloadIndex
             );
           }),
         ].join("")
