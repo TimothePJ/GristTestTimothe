@@ -6,15 +6,23 @@
   'use strict';
 
   const SENTINEL_DATE = '1900-01-01';
+  // Champs qui définissent « la même ligne sur un autre document ». La remarque en
+  // est volontairement absente : elle se propage à la sélection sans jamais la
+  // restreindre, deux lignes ne cessent pas d'être jumelles parce qu'on a écrit
+  // « Officiel » sur l'une et « Conservatoire » sur l'autre.
   const COMPARISON_FIELDS = Object.freeze([
     'Emetteur',
     'Reference',
     'Indice',
     'Recu',
     'DureeLimite',
+    'Bloquant',
     'DescriptionObservations',
-    'Remarque',
   ]);
+  // Ne plus comparer la remarque pour apparier les lignes ne veut pas dire cesser
+  // de la surveiller : entre l'ouverture de la fenêtre et l'enregistrement, une
+  // remarque changée ailleurs serait écrasée par la valeur périmée du formulaire.
+  const STALENESS_FIELDS = Object.freeze([...COMPARISON_FIELDS, 'Remarque']);
 
   function normalizeText(value) {
     return String(value ?? '').trim();
@@ -85,9 +93,14 @@
     return Number.isFinite(numericValue) ? String(numericValue) : text;
   }
 
-  function normalizeRemarque(value) {
-    const text = normalizeText(value);
-    return text === 'Conservatoire' || text === 'Officiel' ? text : '';
+  // Grist rend un booléen, mais une colonne relue en texte peut arriver en '0',
+  // 'false' ou vide : tous valent « non coché ».
+  function normalizeBoolean(value) {
+    if (typeof value === 'string') {
+      const text = normalizeText(value).toLocaleLowerCase('fr');
+      return !text || text === '0' || text === 'false' ? '' : '1';
+    }
+    return value ? '1' : '';
   }
 
   function getComparableValues(record) {
@@ -97,14 +110,27 @@
       Indice: normalizeText(record?.Indice),
       Recu: normalizeDate(record?.Recu),
       DureeLimite: normalizeDuration(record?.DureeLimite),
+      Bloquant: normalizeBoolean(record?.Bloquant),
       DescriptionObservations: normalizeText(record?.DescriptionObservations),
-      Remarque: normalizeRemarque(record?.Remarque),
     };
+  }
+
+  function normalizeRemarque(value) {
+    const text = normalizeText(value);
+    return text === 'Conservatoire' || text === 'Officiel' ? text : '';
   }
 
   function getComparisonKey(record) {
     const comparable = getComparableValues(record);
     return JSON.stringify(COMPARISON_FIELDS.map((field) => comparable[field]));
+  }
+
+  function getStalenessKey(record) {
+    const values = {
+      ...getComparableValues(record),
+      Remarque: normalizeRemarque(record?.Remarque),
+    };
+    return JSON.stringify(STALENESS_FIELDS.map((field) => values[field]));
   }
 
   function getDocumentIdentityKey(record, {
@@ -236,6 +262,10 @@
       throw new TypeError('Les fonctions de calcul DateLimite et Retard sont obligatoires.');
     }
 
+    // Le formulaire décide du caractère bloquant de toutes les cibles à la fois :
+    // quand il l'impose, la valeur stockée de chaque ligne n'a plus voix au chapitre.
+    const hasSharedBloquant = Object.prototype.hasOwnProperty.call(sharedFields || {}, 'Bloquant');
+
     return targets.map((target) => {
       const limitFields = buildLimitFields({
         planningTable,
@@ -248,7 +278,9 @@
           service: target?.Service,
         },
         durationWeeks,
-        useZeroWhenEmpty: Boolean(target?.Bloquant),
+        useZeroWhenEmpty: hasSharedBloquant
+          ? Boolean(sharedFields.Bloquant)
+          : Boolean(target?.Bloquant),
         service: target?.Service,
       });
       return {
@@ -261,6 +293,7 @@
   return Object.freeze({
     COMPARISON_FIELDS,
     SENTINEL_DATE,
+    STALENESS_FIELDS,
     buildRemoveActions,
     buildUpdateActions,
     createPerTargetUpdates,
@@ -269,7 +302,9 @@
     getComparableValues,
     getComparisonKey,
     getDocumentIdentityKey,
+    getStalenessKey,
     getTargetRecordIds,
+    normalizeBoolean,
     normalizeDate,
     normalizeDuration,
     normalizeIdentityPart,

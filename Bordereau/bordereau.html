@@ -7,15 +7,28 @@
 
   <!-- Grist Plugin API -->
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-  <script src="../shared/service-context-core.js"></script>
-  <script src="../shared/grist-service-context.js"></script>
+  <script src="../shared/service-context-core.js?v=20260810-sync3"></script>
+  <script src="../shared/grist-service-context.js?v=20260810-sync3"></script>
+  <script>
+    window.ProjectMutationSyncConfig = {
+      mutationSignals: { Bordereau_Sync: ["Envois"] },
+      observedSignalColumns: ["Bordereau_Sync", "ListePlan_Sync"],
+      observedSignalTables: {
+        Bordereau_Sync: ["Envois"],
+        ListePlan_Sync: ["ListePlan_NDC_COF"]
+      },
+      directSignalTables: ["Envois", "ListePlan_NDC_COF"],
+      dropdownIds: ["projectDropdown"]
+    };
+  </script>
+  <script src="../shared/project-mutation-sync-relay.js?v=20260810-sync3"></script>
 
   <!-- jsPDF and html2canvas -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
-  <link rel="stylesheet" href="bordereau.css">
+  <link rel="stylesheet" href="bordereau.css?v=20260818-type-document">
 </head>
 
 <body>
@@ -58,6 +71,7 @@
         <tr>
           <th>N&deg; Plan</th>
           <th>Indice</th>
+          <th>Type document</th>
           <th>D&eacute;signation</th>
           <th class="diffusion-column no-print">Date de diffusion</th>
           <th id="nbrExemplairesHeader" class="bulk-fill-header" title="Appliquer a toutes les lignes">
@@ -109,6 +123,7 @@
     </form>
   </dialog>
 
-  <script src="bordereau.js" defer></script>
+  <script src="bordereau-core.js?v=20260819-project-dropdown" defer></script>
+  <script src="bordereau.js?v=20260819-project-dropdown" defer></script>
 </body>
 </html>

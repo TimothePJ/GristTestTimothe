@@ -70,9 +70,21 @@ function emitReferenceDataChangeSignal() {
   }
 
   try {
+    const scope = window.ReferenceProjectSyncRelay?.getCurrentProjectScope?.() || {
+      projectId: readSharedProjectId(),
+      projectNumber: window.GristServiceContext?.getCurrentProject?.()?.number || '',
+    };
     localStorage.setItem(
       REFERENCE_DATA_CHANGE_STORAGE_KEY,
-      JSON.stringify({ at: Date.now(), source: 'reference2', nonce: Math.random() })
+      JSON.stringify({
+        version: window.GristServiceContextCore?.DATA_SIGNAL_VERSION || 1,
+        at: Date.now(),
+        source: 'reference2',
+        nonce: Math.random(),
+        tables: ['References2'],
+        projectId: scope.projectId || null,
+        projectNumber: scope.projectNumber || '',
+      })
     );
   } catch (_error) {
     // localStorage peut etre indisponible dans certains contextes embarques.
@@ -187,6 +199,9 @@ function parseNumeroForStorage(v) {
           );
           const projectsChanged = fixed.some(a => Array.isArray(a) && a[1] === 'Projets2');
           const emittersChanged = fixed.some(a => Array.isArray(a) && a[1] === 'Emetteurs');
+          const planningChanged = fixed.some(a =>
+            Array.isArray(a) && PLANNING_TABLE_CANDIDATES.includes(String(a[1] || ''))
+          );
           const containsReferenceRetardActions = fixed.some(a =>
             Array.isArray(a) &&
             isReferencesActionTableName(a[1]) &&
@@ -211,6 +226,12 @@ function parseNumeroForStorage(v) {
             }
             if (projectsChanged) invalidateProjectsTableCache();
             if (emittersChanged) defaultEmetteursCache.clear();
+            // Le planning a bougé : les dates limites doivent être recalculées
+            // sur la nouvelle ancre, pas sur la copie en cache.
+            if (planningChanged) {
+              invalidateReferencePlanningTableCache();
+              scheduleReferenceLimitReconciliation();
+            }
             return result;
           });
         };
@@ -302,10 +323,17 @@ function autoFillFields() {
   if (selectedReference === '_') {
     document.getElementById('indice').value = '-';
     document.getElementById('recu').value = '';
-    document.getElementById('description').value = 'EN ATTENTE';
+    document.getElementById('description').value = REFERENCE_PENDING_DESCRIPTION;
     document.getElementById('remarque').value = 'Officiel';
     document.getElementById('dureeLimite').value = '';
-    void fillAddRowDefaultDurationFromContext({ force: true });
+    // La durée par défaut héritée du contexte n'existe que sur une ligne bloquante :
+    // sans cocher la case elle resterait masquée, donc jamais écrite.
+    void fillAddRowDefaultDurationFromContext({ force: true }).then(() => {
+      applyReferenceRowBloquantValue(
+        'add',
+        isReferenceDefaultDurationBloquant(document.getElementById('dureeLimite')?.value)
+      );
+    });
     return;
   }
 
@@ -322,6 +350,7 @@ function autoFillFields() {
     document.getElementById('description').value = matchingRecord.DescriptionObservations || '';
     document.getElementById('remarque').value = normalizeRemarqueValue(matchingRecord.Remarque);
     document.getElementById('recu').value = formatReferenceDialogDate(matchingRecord.Recu);
+    applyReferenceRowBloquantValue('add', isReferenceRecordBloquant(matchingRecord));
     document.getElementById('dureeLimite').value = formatReferenceDurationInput(matchingRecord.DureeLimite);
     void resolveReferenceDurationInputValue(matchingRecord).then((durationValue) => {
       if (document.getElementById('referenceInput')?.value === selectedReference) {
@@ -334,6 +363,7 @@ function autoFillFields() {
     document.getElementById('description').value = '';
     document.getElementById('remarque').value = '';
     document.getElementById('recu').value = '';
+    applyReferenceRowBloquantValue('add', false);
     document.getElementById('dureeLimite').value = '';
   }
 }
@@ -348,6 +378,7 @@ const REFERENCE_ROW_FORM_CONFIG = {
     fileStatusId: 'referenceFileStatus',
     fileClearId: 'clearReferenceFileButton',
     contextPrefix: 'add',
+    durationFieldId: 'dureeLimiteField',
     fields: {
       emetteur: 'emetteur',
       reference: 'referenceInput',
@@ -355,6 +386,7 @@ const REFERENCE_ROW_FORM_CONFIG = {
       recu: 'recu',
       description: 'description',
       remarque: 'remarque',
+      bloquant: 'bloquant',
       dureeLimite: 'dureeLimite',
     },
   },
@@ -367,6 +399,7 @@ const REFERENCE_ROW_FORM_CONFIG = {
     fileStatusId: 'editReferenceFileStatus',
     fileClearId: 'clearEditReferenceFileButton',
     contextPrefix: 'edit',
+    durationFieldId: 'editDureeLimiteField',
     fields: {
       emetteur: 'editEmetteur',
       reference: 'editReference',
@@ -374,6 +407,7 @@ const REFERENCE_ROW_FORM_CONFIG = {
       recu: 'editRecu',
       description: 'editDescription',
       remarque: 'editRemarque',
+      bloquant: 'editBloquant',
       dureeLimite: 'editDureeLimite',
     },
   },
@@ -394,6 +428,7 @@ const REFERENCES2_DIALOG_WRITABLE_FIELDS = new Set([
   'DureeLimite',
   'DateLimite',
   'Retard',
+  'Bloquant',
   'Service',
 ]);
 
@@ -405,6 +440,11 @@ let referenceEditSelectedRecordIds = new Set();
 let referenceToastTimer = 0;
 const referenceFormBusyState = { add: false, edit: false };
 const REFERENCE_DELETE_PASSWORD = 'admin';
+
+// Description d'une donnée d'entrée encore attendue, et celle que dépose la sélection
+// d'un fichier : le document est arrivé, il est pris en compte.
+const REFERENCE_PENDING_DESCRIPTION = 'EN ATTENTE';
+const REFERENCE_FILE_DESCRIPTION = 'Pris en compte';
 
 function getReferenceRowFormConfig(mode) {
   return REFERENCE_ROW_FORM_CONFIG[mode] || REFERENCE_ROW_FORM_CONFIG.add;
@@ -418,6 +458,48 @@ function getReferenceRowForm(mode) {
 function getReferenceRowField(mode, fieldName) {
   const fieldId = getReferenceRowFormConfig(mode).fields[fieldName];
   return fieldId ? document.getElementById(fieldId) : null;
+}
+
+function isReferenceRowBloquant(mode) {
+  const input = getReferenceRowField(mode, 'bloquant');
+  return input instanceof HTMLInputElement && input.checked;
+}
+
+// La durée limite ne veut rien dire hors d'une ligne bloquante : elle ne s'affiche,
+// ne se valide et ne s'écrit que dans ce cas.
+function syncReferenceRowBloquantUi(mode) {
+  const isBloquant = isReferenceRowBloquant(mode);
+  const durationField = document.getElementById(getReferenceRowFormConfig(mode).durationFieldId);
+  if (durationField) durationField.hidden = !isBloquant;
+  return isBloquant;
+}
+
+function getReferenceRowDurationValue(mode) {
+  if (!isReferenceRowBloquant(mode)) return '';
+  return String(getReferenceRowField(mode, 'dureeLimite')?.value || '').trim();
+}
+
+// Recopier une référence existante, c'est aussi reprendre son caractère bloquant :
+// sans lui la durée recopiée tomberait dans un champ masqué, donc à la trappe.
+function applyReferenceRowBloquantValue(mode, value) {
+  const toggle = getReferenceRowField(mode, 'bloquant');
+  if (toggle instanceof HTMLInputElement) toggle.checked = Boolean(value);
+  syncReferenceRowBloquantUi(mode);
+}
+
+// Créer des documents avec une durée limite par défaut, c'est déclarer leurs
+// données d'entrée bloquantes : sans cela la durée posée serait invisible dans la
+// fenêtre de modification, et le premier enregistrement l'effacerait.
+function isReferenceDefaultDurationBloquant(durationWeeks) {
+  return parseReferenceDurationLimit(durationWeeks) != null;
+}
+
+// Une durée limite exploitable vaut déclaration de blocage, même sur une ligne dont
+// la colonne Bloquant est restée à faux : c'est le cas de celles créées avant que la
+// case n'existe et de celles que « Planning Projet » écrit sans la cocher. Les
+// ouvrir case décochée masquerait leur durée, et l'enregistrement l'effacerait.
+function isReferenceRecordBloquant(record) {
+  return Boolean(record?.Bloquant) || isReferenceDefaultDurationBloquant(record?.DureeLimite);
 }
 
 function sanitizeReferences2DialogFields(fields) {
@@ -500,7 +582,7 @@ function validateReferenceRowForm(mode, { focus = true } = {}) {
   });
 
   const durationInput = getReferenceRowField(mode, 'dureeLimite');
-  const durationValue = String(durationInput?.value || '').trim();
+  const durationValue = getReferenceRowDurationValue(mode);
   if (durationValue && parseReferenceDurationLimit(durationValue) == null) {
     setReferenceFieldError(durationInput, 'Saisissez un nombre entier positif ou nul.');
     firstInvalid ||= durationInput;
@@ -515,10 +597,14 @@ function validateReferenceRowForm(mode, { focus = true } = {}) {
 function getReferenceFormSnapshot(mode) {
   const config = getReferenceRowFormConfig(mode);
   return JSON.stringify(Object.fromEntries(
-    Object.entries(config.fields).map(([name, id]) => [
-      name,
-      String(document.getElementById(id)?.value || '').trim(),
-    ])
+    Object.entries(config.fields).map(([name, id]) => {
+      const element = document.getElementById(id);
+      // Une case à cocher garde la même `value` cochée ou non : seul son état compte.
+      if (element instanceof HTMLInputElement && element.type === 'checkbox') {
+        return [name, String(element.checked)];
+      }
+      return [name, String(element?.value || '').trim()];
+    })
   ));
 }
 
@@ -582,6 +668,27 @@ function resetReferenceFilePicker(mode) {
   if (clearButton) clearButton.hidden = true;
 }
 
+// Date de dernière modification du fichier, en calendrier local. Un horodatage
+// absent ou nul ne vaut rien : le navigateur ne sait alors pas dater le fichier, et
+// écrire 1970 serait pire que ne rien écrire.
+function getReferenceFileReceivedDateIso(file) {
+  const timestamp = Number(file?.lastModified);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
+  // Une Date construite ici, pas un nombre : passé en nombre, l'analyseur commun
+  // devine entre secondes et millisecondes, et se tromperait sur un fichier
+  // antérieur à mars 1973.
+  return formatReferenceDateIso(new Date(timestamp));
+}
+
+// Une description déjà rédigée à la main est un travail de l'utilisateur : seule
+// l'absence de description, ou celle posée par défaut à la création du document,
+// laisse la place à « Pris en compte ».
+function shouldReplaceReferenceDescription(currentValue) {
+  const normalized = normalizeReferenceDocumentIdentityPart(currentValue);
+  return !normalized ||
+    normalized === normalizeReferenceDocumentIdentityPart(REFERENCE_PENDING_DESCRIPTION);
+}
+
 function applyReferenceFileSelection(mode) {
   const config = getReferenceRowFormConfig(mode);
   const fileInput = document.getElementById(config.fileId);
@@ -597,7 +704,28 @@ function applyReferenceFileSelection(mode) {
   const referenceName = removeFileExtension(file.name);
   referenceInput.value = referenceName;
   clearReferenceFieldError(referenceInput);
-  if (status) status.textContent = `Fichier : ${file.name} · Référence : ${referenceName}`;
+
+  // Déposer un fichier, c'est déclarer la donnée d'entrée reçue : la date vient du
+  // fichier lui-même et la description bascule hors de l'attente.
+  const receivedDateIso = getReferenceFileReceivedDateIso(file);
+  const recuInput = getReferenceRowField(mode, 'recu');
+  if (recuInput && receivedDateIso) {
+    recuInput.value = receivedDateIso;
+    clearReferenceFieldError(recuInput);
+  }
+
+  const descriptionInput = getReferenceRowField(mode, 'description');
+  if (descriptionInput && shouldReplaceReferenceDescription(descriptionInput.value)) {
+    descriptionInput.value = REFERENCE_FILE_DESCRIPTION;
+    clearReferenceFieldError(descriptionInput);
+  }
+
+  if (status) {
+    const receivedLabel = receivedDateIso
+      ? ` · Reçu : ${formatReferenceTableDate(receivedDateIso)}`
+      : ' · Date du fichier indisponible';
+    status.textContent = `Fichier : ${file.name} · Référence : ${referenceName}${receivedLabel}`;
+  }
   if (clearButton) clearButton.hidden = false;
   if (mode === 'edit') updateEditSubmitState();
   if (mode === 'add') updateDuplicateSelectionSummary();
@@ -745,28 +873,6 @@ function updateReferenceEditGroupSelectionUi() {
   updateEditSubmitState();
 }
 
-function filterReferenceEditMatchList(query = '') {
-  const container = document.getElementById('editOtherDocumentsContainer');
-  if (!container) return;
-  const normalizedQuery = String(query || '').trim().toLocaleLowerCase('fr');
-  const items = Array.from(container.querySelectorAll('.duplicate-document-item'));
-  items.forEach((item) => {
-    item.hidden = Boolean(normalizedQuery) &&
-      !String(item.dataset.editMatchSearch || '').includes(normalizedQuery);
-  });
-  container.querySelectorAll('.duplicate-zone-group').forEach((group) => {
-    group.hidden = !Array.from(group.querySelectorAll('.duplicate-document-item'))
-      .some((item) => !item.hidden);
-  });
-  container.querySelectorAll('.duplicate-document-group').forEach((group) => {
-    group.hidden = !Array.from(group.querySelectorAll('.duplicate-document-item'))
-      .some((item) => !item.hidden);
-  });
-  const empty = document.getElementById('editOtherDocumentsSearchEmpty');
-  if (empty) empty.hidden = items.length === 0 || items.some((item) => !item.hidden);
-  updateReferenceEditGroupSelectionUi();
-}
-
 function buildReferenceEditMatchListMarkup(matchingRecords) {
   const groupedTypes = new Map();
   matchingRecords.forEach((record) => {
@@ -801,11 +907,14 @@ function buildReferenceEditMatchListMarkup(matchingRecords) {
             const name = _norm(record.NomDocument) || 'Document sans nom';
             const type = normalizeTypeDocument(record.Type_document) || 'Sans type';
             const zone = formatZoneLabel(record.Zone);
-            const searchText = [number, name, type, zone]
-              .join(' ')
-              .toLocaleLowerCase('fr');
+            const filterAttributes = buildReferenceDocumentItemAttributes({
+              numero: record.NumeroDocument,
+              name: record.NomDocument,
+              type: record.Type_document,
+              zone: record.Zone,
+            });
             return `
-              <div class="emetteur-item duplicate-document-item" data-edit-match-search="${escapeHtml(searchText)}">
+              <div class="emetteur-item duplicate-document-item" ${filterAttributes}>
                 <input type="checkbox" id="${inputId}" name="editOtherDocumentRows" value="${recordId}">
                 <label for="${inputId}" class="reference-edit-match-label">
                   <span class="reference-edit-match-document">
@@ -853,13 +962,11 @@ function renderReferenceEditMatchingRows() {
     return;
   }
 
+  const showZoneFilter = referenceEditMatchingRecords
+    .some((record) => normalizeZoneValue(record.Zone));
+
   container.innerHTML = `
-    <div class="duplicate-toolbar">
-      <label for="editOtherDocumentsSearch">
-        Rechercher un document
-        <input type="search" id="editOtherDocumentsSearch" placeholder="Nom, numéro, type, zone…" autocomplete="off">
-      </label>
-    </div>
+    ${buildReferenceDocumentFilterToolbarMarkup('editOtherDocuments', { showZoneFilter })}
     <div class="duplicate-list-actions">
       <button type="button" id="selectVisibleEditOtherDocuments">Tout sélectionner (filtrés)</button>
       <button type="button" id="clearSelectedEditOtherDocuments">Tout désélectionner</button>
@@ -879,8 +986,8 @@ function renderReferenceEditMatchingRows() {
       updateReferenceEditGroupSelectionUi();
     });
   });
-  document.getElementById('editOtherDocumentsSearch')?.addEventListener('input', (event) => {
-    filterReferenceEditMatchList(event.target.value);
+  bindReferenceDocumentFilterControls('editOtherDocuments', 'editOtherDocumentsContainer', {
+    onAfterFilter: updateReferenceEditGroupSelectionUi,
   });
   document.getElementById('selectVisibleEditOtherDocuments')?.addEventListener('click', () => {
     getVisibleReferenceEditMatchCheckboxes().forEach((input) => {
@@ -893,7 +1000,11 @@ function renderReferenceEditMatchingRows() {
     referenceEditSelectedRecordIds.clear();
     updateReferenceEditGroupSelectionUi();
   });
-  updateReferenceEditGroupSelectionUi();
+  // Premier passage : il remplit les deux menus avec leurs compteurs et rafraîchit la
+  // sélection ; sans lui les <select> resteraient vides.
+  applyReferenceDocumentListFilters('editOtherDocuments', 'editOtherDocumentsContainer', {
+    onAfterFilter: updateReferenceEditGroupSelectionUi,
+  });
 }
 
 function ensureReferenceEditContextIsWritable() {
@@ -956,7 +1067,9 @@ async function prepareFreshReferenceEditTargets() {
 
   const freshRecords = await fetchFreshReferenceEditRecords();
   const freshById = new Map(freshRecords.map((record) => [Number(record.id), record]));
-  const comparisonKey = utils.getComparisonKey(referenceEditInitialRecord);
+  // Clé d'obsolescence, plus large que celle d'appariement : elle couvre aussi la
+  // remarque, que le formulaire réécrit sans jamais l'avoir relue.
+  const stalenessKey = utils.getStalenessKey(referenceEditInitialRecord);
   const currentDocumentKey = utils.getDocumentIdentityKey(referenceEditInitialRecord, {
     projectNormalizer: normalizeReferenceDocumentIdentityPart,
     serviceNormalizer: normalizeServiceMatchKey,
@@ -974,7 +1087,7 @@ async function prepareFreshReferenceEditTargets() {
     ) {
       throw new Error(`La ligne ${recordId} n'appartient plus au projet et au service courants.`);
     }
-    if (utils.getComparisonKey(freshRecord) !== comparisonKey) {
+    if (utils.getStalenessKey(freshRecord) !== stalenessKey) {
       throw new Error(`La ligne ${recordId} a changé depuis l'ouverture de la fenêtre. Aucune écriture n'a été effectuée.`);
     }
 
@@ -1009,6 +1122,7 @@ function buildReferenceEditUpdateEntries(targets, planningTable, formData, durat
     Recu: String(formData.get('recu') || '').trim() || DEFAULT_REFERENCE_DATE,
     DescriptionObservations: String(formData.get('description') || '').trim(),
     Remarque: normalizeRemarqueValue(formData.get('remarque')),
+    Bloquant: isReferenceRowBloquant('edit'),
   };
   return utils.createPerTargetUpdates({
     targets,
@@ -1074,6 +1188,7 @@ async function resetAndUpdateDialog() {
   clearReferenceFormErrors('add');
   setReferenceFormStatus('add');
   resetReferenceFilePicker('add');
+  syncReferenceRowBloquantUi('add');
   resetDuplicateSelectedDocumentValues();
 
   const duplicateOptionsContainer = document.getElementById('duplicateOptionsContainer');
@@ -1119,6 +1234,39 @@ getReferenceRowForm('add')?.addEventListener('input', (event) => {
   }
 });
 
+// Décocher « bloquant » retire la durée limite plutôt que de la laisser vivre
+// cachée : une valeur invisible ne doit jamais repartir en base au prochain
+// enregistrement. La recocher restitue la valeur par défaut du contexte.
+function bindReferenceRowBloquantToggle(mode) {
+  const toggle = getReferenceRowField(mode, 'bloquant');
+  if (!(toggle instanceof HTMLInputElement)) return;
+
+  toggle.addEventListener('change', () => {
+    const isBloquant = syncReferenceRowBloquantUi(mode);
+    const durationInput = getReferenceRowField(mode, 'dureeLimite');
+
+    if (!isBloquant) {
+      if (durationInput) durationInput.value = '';
+      clearReferenceFieldError(durationInput);
+    }
+
+    const refilled = !isBloquant
+      ? Promise.resolve()
+      : mode === 'edit'
+        ? fillEditDurationFromRecord(referenceEditInitialRecord)
+        : fillAddRowDefaultDurationFromContext();
+
+    void Promise.resolve(refilled)
+      .catch((error) => console.warn('Durée limite par défaut indisponible :', error))
+      .finally(() => {
+        if (mode === 'edit') updateEditSubmitState();
+        else updateDuplicateSelectionSummary();
+      });
+  });
+}
+
+['add', 'edit'].forEach(bindReferenceRowBloquantToggle);
+
 
 // === Separator between original <script> blocks ===
 
@@ -1135,6 +1283,141 @@ let selectedDocNumber = null; let selectedDocName = ''; let selectedDocZone = ''
 const REFERENCE_ALL_ZONES_VALUE = '__ALL_ZONES__';
 const REFERENCE_NO_ZONE_VALUE = '__NO_ZONE__';
 let selectedZoneValue = REFERENCE_ALL_ZONES_VALUE;
+
+// --- Barre de filtres partagée par les listes de documents à cocher ---
+// « Documents concernés » (dialogue Ajouter) et « Autres documents » (dialogue
+// Modifier) rendent la même liste : elles partagent la même barre à trois contrôles
+// et le même moteur de filtrage. La recherche ne regarde que le numéro et le nom ;
+// le type et la zone ont chacun leur menu, et les trois se composent.
+const REFERENCE_DOC_FILTER_ALL_VALUE = '__ALL__';
+const REFERENCE_DOC_FILTER_NO_TYPE = '__sans_type__';
+const REFERENCE_DOC_FILTER_NO_ZONE = '__sans_zone__';
+
+function getReferenceDocumentFilterUtils() {
+  const utils = window.ReferenceDocumentFilterUtils;
+  if (!utils) {
+    throw new Error('Les outils de filtrage des documents ne sont pas disponibles. Rechargez le widget.');
+  }
+  return utils;
+}
+
+function buildReferenceDocumentItemAttributes({ numero, name, type, zone } = {}) {
+  const searchKey = getReferenceDocumentFilterUtils().buildDocumentSearchKey({ numero, name });
+  return [
+    `data-doc-search="${escapeHtml(searchKey)}"`,
+    `data-doc-type="${escapeHtml(normalizeReferenceDocumentIdentityPart(type) || REFERENCE_DOC_FILTER_NO_TYPE)}"`,
+    `data-doc-type-label="${escapeHtml(normalizeTypeDocument(type) || 'Sans type')}"`,
+    `data-doc-zone="${escapeHtml(normalizeZoneMatchKey(zone) || REFERENCE_DOC_FILTER_NO_ZONE)}"`,
+    `data-doc-zone-label="${escapeHtml(formatZoneLabel(zone))}"`,
+  ].join(' ');
+}
+
+// Le menu Zone n'a de sens que si le projet en utilise : sinon il n'est pas rendu.
+function buildReferenceDocumentFilterToolbarMarkup(prefix, { showZoneFilter = true } = {}) {
+  const zoneFilterMarkup = showZoneFilter
+    ? `
+      <label class="duplicate-filter-row" for="${prefix}ZoneFilter">
+        <span>Zone</span>
+        <select id="${prefix}ZoneFilter"></select>
+      </label>`
+    : '';
+
+  return `
+    <div class="duplicate-toolbar">
+      <label for="${prefix}Search">
+        Rechercher un document
+        <input type="search" id="${prefix}Search" placeholder="Numéro ou nom…" autocomplete="off">
+      </label>
+      <label class="duplicate-filter-row" for="${prefix}TypeFilter">
+        <span>Type document</span>
+        <select id="${prefix}TypeFilter"></select>
+      </label>${zoneFilterMarkup}
+    </div>
+  `;
+}
+
+function collectReferenceDocumentFilterEntries(container) {
+  return Array.from(container.querySelectorAll('.duplicate-document-item')).map((element, index) => ({
+    key: index,
+    element,
+    searchKey: element.dataset.docSearch || '',
+    typeKey: element.dataset.docType || REFERENCE_DOC_FILTER_NO_TYPE,
+    typeLabel: element.dataset.docTypeLabel || 'Sans type',
+    zoneKey: element.dataset.docZone || REFERENCE_DOC_FILTER_NO_ZONE,
+    zoneLabel: element.dataset.docZoneLabel || 'Sans zone',
+  }));
+}
+
+function renderReferenceDocumentFilterOptions(select, options, selectedValue) {
+  if (!select) return;
+
+  select.replaceChildren(...options.map((option) => {
+    const element = document.createElement('option');
+    element.value = option.value;
+    element.textContent = `${option.label} (${option.count})`;
+    return element;
+  }));
+  const availableValues = new Set(options.map((option) => option.value));
+  select.value = availableValues.has(String(selectedValue))
+    ? String(selectedValue)
+    : REFERENCE_DOC_FILTER_ALL_VALUE;
+}
+
+// Filtrage par masquage, jamais par reconstruction de la liste : la position de
+// défilement et les cases déjà cochées survivent au changement de filtre.
+function applyReferenceDocumentListFilters(prefix, containerId, {
+  onAfterFilter = null,
+  preferredType = null,
+  preferredZone = null,
+} = {}) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const searchInput = document.getElementById(`${prefix}Search`);
+  const typeSelect = document.getElementById(`${prefix}TypeFilter`);
+  const zoneSelect = document.getElementById(`${prefix}ZoneFilter`);
+  const typeValue = preferredType != null
+    ? preferredType
+    : (typeSelect?.value || REFERENCE_DOC_FILTER_ALL_VALUE);
+  const zoneValue = preferredZone != null
+    ? preferredZone
+    : (zoneSelect?.value || REFERENCE_DOC_FILTER_ALL_VALUE);
+
+  const entries = collectReferenceDocumentFilterEntries(container);
+  const facets = getReferenceDocumentFilterUtils().computeDocumentFacets(entries, {
+    query: searchInput?.value || '',
+    type: typeValue,
+    zone: zoneValue,
+  });
+
+  entries.forEach((entry) => {
+    entry.element.hidden = !facets.visibleKeys.has(entry.key);
+  });
+  // Un groupe vidé par les filtres ne doit pas laisser son titre orphelin.
+  container.querySelectorAll('.duplicate-zone-group').forEach((group) => {
+    group.hidden = !Array.from(group.querySelectorAll('.duplicate-document-item'))
+      .some((item) => !item.hidden);
+  });
+  container.querySelectorAll('.duplicate-document-group').forEach((group) => {
+    group.hidden = !Array.from(group.querySelectorAll('.duplicate-document-item'))
+      .some((item) => !item.hidden);
+  });
+
+  renderReferenceDocumentFilterOptions(typeSelect, facets.typeOptions, typeValue);
+  renderReferenceDocumentFilterOptions(zoneSelect, facets.zoneOptions, zoneValue);
+
+  const empty = document.getElementById(`${prefix}SearchEmpty`);
+  if (empty) empty.hidden = entries.length === 0 || facets.visibleCount > 0;
+
+  onAfterFilter?.();
+}
+
+function bindReferenceDocumentFilterControls(prefix, containerId, { onAfterFilter = null } = {}) {
+  const applyFilters = () => applyReferenceDocumentListFilters(prefix, containerId, { onAfterFilter });
+  document.getElementById(`${prefix}Search`)?.addEventListener('input', applyFilters);
+  document.getElementById(`${prefix}TypeFilter`)?.addEventListener('change', applyFilters);
+  document.getElementById(`${prefix}ZoneFilter`)?.addEventListener('change', applyFilters);
+}
 
 // --- ListePlan NDC+COF integration (création automatique lors de l'ajout de document(s)) ---
 const LISTEPLAN_TABLE_CANDIDATES = ['ListePlan_NDC_COF', 'ListePlan NDC+COF', 'ListePlan_NDC+COF'];
@@ -2182,10 +2465,14 @@ function refreshZoneSuggestionList(datalistId, projectName) {
   });
 }
 
-function collectProjectDocumentEntries(projectName, typeValue = '') {
+// zoneSelection est ouvert en paramètre : les dialogues portent leur propre filtre de
+// zone et ne doivent pas rester enfermés dans celui de la barre du haut.
+function collectProjectDocumentEntries(projectName, typeValue = '', {
+  zoneSelection = getCurrentSelectedZone(),
+} = {}) {
   const project = normalizeReferenceDocumentIdentityPart(projectName);
   const normalizedType = normalizeTypeDocument(typeValue);
-  const selectedZone = getCurrentSelectedZone();
+  const selectedZone = zoneSelection;
   if (!project || !Array.isArray(records)) return [];
 
   const docsByKey = new Map();
@@ -2484,29 +2771,6 @@ function collectProjectDocumentTypes(projectName, extraTypes = []) {
   return orderedTypes;
 }
 
-function collectReferenceDocumentTypesFromRecords(projectName) {
-  const project = normalizeReferenceDocumentIdentityPart(projectName);
-  const seen = new Set();
-  const types = [];
-
-  if (!project || !Array.isArray(records)) return types;
-
-  records.forEach(record => {
-    if (normalizeReferenceDocumentIdentityPart(record.NomProjet) !== project) return;
-    const type = normalizeTypeDocument(record.Type_document);
-    const typeKey = normalizeReferenceDocumentIdentityPart(type);
-    if (!typeKey || seen.has(typeKey)) return;
-    seen.add(typeKey);
-    types.push(type);
-  });
-
-  return types.sort((left, right) => {
-    const rankDiff = getDocumentTypeSortRank(left) - getDocumentTypeSortRank(right);
-    if (rankDiff !== 0) return rankDiff;
-    return left.localeCompare(right, 'fr', { sensitivity: 'base', numeric: true });
-  });
-}
-
 function populateTypeDocumentDropdown(selectedProject, preferredValue = '', extraTypes = []) {
   const dropdown = document.getElementById('thirdColumnDropdown');
   if (!dropdown) return;
@@ -2702,28 +2966,68 @@ function getPlanningRowObject(planningTable, index) {
   return row;
 }
 
+// Le planning décrit chaque segment par son début et sa fin : hors ARMATURES
+// [Date_limite -> Diff_coffrage] sur Duree_1 semaines, en ARMATURES
+// [Diff_coffrage -> Diff_armature] sur Duree_2 semaines. Quand le début manque il
+// se reconstruit depuis la fin moins la durée du segment ; prendre la fin telle
+// quelle décalerait toutes les dates limites d'autant de semaines.
 function getReferencePlanningSegmentStartDate(planningRow) {
   if (!planningRow) return null;
 
-  if (isReferenceArmaturesTypeDoc(planningRow.Type_doc)) {
-    return parseReferenceRetardCalendarDate(planningRow.Diff_coffrage);
-  }
+  const isArmatures = isReferenceArmaturesTypeDoc(planningRow.Type_doc);
+  const segmentStart = isArmatures ? planningRow.Diff_coffrage : planningRow.Date_limite;
+  const segmentEnd = isArmatures ? planningRow.Diff_armature : planningRow.Diff_coffrage;
+  const segmentWeeks = isArmatures ? planningRow.Duree_2 : planningRow.Duree_1;
 
   return (
-    parseReferenceRetardCalendarDate(planningRow.Date_limite) ||
-    parseReferenceRetardCalendarDate(planningRow.Diff_coffrage) ||
+    parseReferenceRetardCalendarDate(segmentStart) ||
+    subtractReferenceWeeksFromDate(
+      parseReferenceRetardCalendarDate(segmentEnd),
+      parseReferenceDurationLimit(segmentWeeks) ?? 0
+    ) ||
     parseReferenceRetardCalendarDate(planningRow.Demarrages_travaux)
   );
 }
 
+// Le planning sert d'ancre à toutes les dates limites : il était rechargé
+// intégralement à chaque bascule "bloquant", chaque ouverture de dialogue et
+// chaque réconciliation. Un cache court suffit, invalidé dès que le widget écrit
+// dans le planning (voir le shim applyUserActions).
+let referencePlanningTableCache = null;
+let referencePlanningTableCacheLoadedAt = 0;
+let referencePlanningTableInFlight = null;
+
+function invalidateReferencePlanningTableCache() {
+  referencePlanningTableCache = null;
+  referencePlanningTableCacheLoadedAt = 0;
+}
+
 async function fetchReferencePlanningTableForLimits() {
-  try {
-    const planningTableName = await resolvePlanningTableName();
-    return await grist.docApi.fetchTable(planningTableName);
-  } catch (error) {
-    console.warn("Planning: impossible de calculer la date limite reference.", error);
-    return null;
+  if (
+    referencePlanningTableCache &&
+    isReferenceLookupCacheFresh(referencePlanningTableCacheLoadedAt)
+  ) {
+    return referencePlanningTableCache;
   }
+  if (referencePlanningTableInFlight) return referencePlanningTableInFlight;
+
+  referencePlanningTableInFlight = (async () => {
+    try {
+      const planningTableName = await resolvePlanningTableName();
+      const planningTable = await grist.docApi.fetchTable(planningTableName);
+      referencePlanningTableCache = planningTable;
+      referencePlanningTableCacheLoadedAt = Date.now();
+      return planningTable;
+    } catch (error) {
+      console.warn("Planning: impossible de calculer la date limite reference.", error);
+      invalidateReferencePlanningTableCache();
+      return null;
+    } finally {
+      referencePlanningTableInFlight = null;
+    }
+  })();
+
+  return referencePlanningTableInFlight;
 }
 
 function findPlanningRowForReferenceLimit(planningTable, {
@@ -2805,13 +3109,17 @@ function getReferenceDurationFromPlanningAndLimit({
   projectName = '',
   documentInfo = {},
   dateLimite = '',
+  service = '',
 } = {}) {
+  // Le service fait partie de la clé du planning : sans lui, findPlanningIndex
+  // ne retient que les lignes au service vide et la durée devient introuvable.
   const planningRow = findPlanningRowForReferenceLimit(planningTable, {
     projectName,
     documentNumber: documentInfo?.numero ?? documentInfo?.documentNumber,
     documentName: documentInfo?.name ?? documentInfo?.documentName,
     documentType: documentInfo?.type ?? documentInfo?.documentType,
     documentZone: documentInfo?.zone ?? documentInfo?.documentZone,
+    service: service || documentInfo?.service || documentInfo?.Service,
   });
   const segmentStartDate = getReferencePlanningSegmentStartDate(planningRow);
   const limitDate = parseReferenceRetardCalendarDate(dateLimite);
@@ -2832,8 +3140,10 @@ async function resolveReferenceDurationInputValue(record) {
       name: record.NomDocument,
       type: record.Type_document,
       zone: record.Zone,
+      service: record.Service,
     },
     dateLimite: record.DateLimite,
+    service: record.Service,
   });
 
   return computedDuration == null ? '' : String(computedDuration);
@@ -2890,9 +3200,9 @@ async function fillEditDurationFromRecord(record, { force = false } = {}) {
   }
 }
 
-let referenceRetardReconcileInFlight = false;
-let referenceRetardReconcilePending = false;
-let referenceRetardReconcileTimer = 0;
+let referenceLimitReconcileInFlight = false;
+let referenceLimitReconcilePending = false;
+let referenceLimitReconcileTimer = 0;
 let referenceRetardMidnightTimer = 0;
 
 function toReferenceRetardStorageValue(value) {
@@ -2935,11 +3245,11 @@ function getOpenReferenceDocumentRecords() {
   });
 }
 
-function scheduleReferenceRetardReconciliation(delayMs = 0) {
-  if (referenceRetardReconcileTimer) return;
-  referenceRetardReconcileTimer = window.setTimeout(() => {
-    referenceRetardReconcileTimer = 0;
-    void reconcileReferenceRetards();
+function scheduleReferenceLimitReconciliation(delayMs = 0) {
+  if (referenceLimitReconcileTimer) return;
+  referenceLimitReconcileTimer = window.setTimeout(() => {
+    referenceLimitReconcileTimer = 0;
+    void reconcileReferenceLimits();
   }, Math.max(0, Number(delayMs) || 0));
 }
 
@@ -2953,25 +3263,112 @@ function scheduleReferenceRetardMidnightRefresh() {
   nextMidnight.setHours(24, 0, 1, 0);
   referenceRetardMidnightTimer = window.setTimeout(() => {
     referenceRetardMidnightTimer = 0;
-    scheduleReferenceRetardReconciliation();
+    scheduleReferenceLimitReconciliation();
     scheduleReferenceRetardMidnightRefresh();
   }, Math.max(1000, nextMidnight.getTime() - now.getTime()));
 }
 
-async function reconcileReferenceRetards() {
-  if (referenceRetardReconcileInFlight) {
-    referenceRetardReconcilePending = true;
+// Dernier calcul connu par ligne : sert à expliquer la date affichée au survol,
+// pour qu'un écart avec le planning se constate au lieu de se deviner.
+const referenceDateLimiteDescriptions = new Map();
+
+function rememberReferenceDateLimiteDescription(recordId, description) {
+  if (description?.anchorIso) referenceDateLimiteDescriptions.set(recordId, description);
+  else referenceDateLimiteDescriptions.delete(recordId);
+}
+
+function getReferenceDateLimiteHint(record) {
+  const description = referenceDateLimiteDescriptions.get(Number(record?.id));
+  if (!description?.anchorIso || description.weeks == null) return '';
+  return `Départ planning ${formatReferenceTableDate(description.anchorIso)} − ${description.weeks} sem.`;
+}
+
+// Date limite = ancre du planning moins la durée limite en semaines. Une ligne
+// bloquante sans durée vaut zéro semaine : sa date limite est l'ancre elle-même.
+// L'ancre est renvoyée avec le résultat pour rendre le calcul vérifiable en survol.
+function describeReferenceDateLimite(planningTable, record) {
+  const parsedDuration = parseReferenceDurationLimit(record?.DureeLimite);
+  const usesVirtualZeroDuration =
+    parsedDuration == null &&
+    Boolean(record?.Bloquant) &&
+    !String(record?.DureeLimite ?? '').trim();
+  const weeks = usesVirtualZeroDuration ? 0 : parsedDuration;
+
+  const planningRow = findPlanningRowForReferenceLimit(planningTable, {
+    projectName: record?.NomProjet,
+    documentNumber: record?.NumeroDocument,
+    documentName: record?.NomDocument,
+    documentType: record?.Type_document,
+    documentZone: record?.Zone,
+    service: record?.Service,
+  });
+  const segmentStartDate = getReferencePlanningSegmentStartDate(planningRow);
+
+  return {
+    anchorIso: formatReferenceDateIso(segmentStartDate),
+    weeks,
+    dateLimite: weeks == null
+      ? ''
+      : formatReferenceDateIso(subtractReferenceWeeksFromDate(segmentStartDate, weeks)),
+  };
+}
+
+function computeReferenceDateLimiteIso(planningTable, record) {
+  return describeReferenceDateLimite(planningTable, record).dateLimite;
+}
+
+// Lignes dont la date limite stockée ne correspond plus à leur durée limite ni à
+// l'ancre du planning. Sans ancre exploitable on ne renvoie rien : une date déjà
+// calculée ne doit pas s'effacer parce que le planning est momentanément
+// introuvable. L'effacement reste le fait des actions explicites de l'utilisateur.
+function buildReferenceDateLimiteSyncEntries(planningTable, currentRecords) {
+  if (!planningTable) return [];
+
+  const entries = [];
+  (Array.isArray(currentRecords) ? currentRecords : []).forEach((record) => {
+    const recordId = Number(record?.id);
+    if (!Number.isInteger(recordId) || recordId <= 0) return;
+
+    const description = describeReferenceDateLimite(planningTable, record);
+    rememberReferenceDateLimiteDescription(recordId, description);
+    if (
+      !description.dateLimite ||
+      description.dateLimite === formatReferenceDateIso(record?.DateLimite)
+    ) return;
+
+    entries.push({ record, recordId, dateLimite: description.dateLimite });
+  });
+
+  return entries;
+}
+
+async function reconcileReferenceLimits() {
+  if (referenceLimitReconcileInFlight) {
+    referenceLimitReconcilePending = true;
     return;
   }
 
-  referenceRetardReconcileInFlight = true;
+  referenceLimitReconcileInFlight = true;
   try {
     const currentRecords = getOpenReferenceDocumentRecords();
     if (!currentRecords.length) return;
 
-    const today = new Date();
-    const actions = [];
+    const pendingFields = new Map();
+    const queueUpdate = (recordId, fields) => {
+      pendingFields.set(recordId, { ...(pendingFields.get(recordId) || {}), ...fields });
+    };
 
+    // La date limite d'abord : le retard se calcule dessus.
+    if (createReferenceContextSnapshot().accessMode === 'editable') {
+      const planningTable = await fetchReferencePlanningTableForLimits();
+      buildReferenceDateLimiteSyncEntries(planningTable, currentRecords)
+        .forEach(({ record, recordId, dateLimite }) => {
+          record.DateLimite = dateLimite;
+          queueUpdate(recordId, { DateLimite: dateLimite });
+        });
+    }
+
+    const today = new Date();
     currentRecords.forEach(record => {
       const recordId = Number(record?.id);
       if (!Number.isInteger(recordId) || recordId <= 0) return;
@@ -2982,20 +3379,26 @@ async function reconcileReferenceRetards() {
       if (referenceRetardStoredValueMatches(record?.Retard, nextRetard)) return;
 
       record.Retard = nextRetard;
-      actions.push(['UpdateRecord', 'References2', recordId, { Retard: nextRetard }]);
+      queueUpdate(recordId, { Retard: nextRetard });
     });
 
-    if (!actions.length) return;
+    if (!pendingFields.size) return;
 
+    const restoreScroll = captureReferenceTableScroll();
     populateTable();
-    await applyUserActionsInChunks(actions);
+    restoreScroll();
+    await applyUserActionsInChunks(
+      Array.from(pendingFields, ([recordId, fields]) => (
+        ['UpdateRecord', 'References2', recordId, fields]
+      ))
+    );
   } catch (error) {
-    console.error('Erreur synchronisation References2.Retard :', error);
+    console.error('Erreur synchronisation References2 (date limite / retard) :', error);
   } finally {
-    referenceRetardReconcileInFlight = false;
-    if (referenceRetardReconcilePending) {
-      referenceRetardReconcilePending = false;
-      scheduleReferenceRetardReconciliation();
+    referenceLimitReconcileInFlight = false;
+    if (referenceLimitReconcilePending) {
+      referenceLimitReconcilePending = false;
+      scheduleReferenceLimitReconciliation();
     }
   }
 }
@@ -3915,7 +4318,8 @@ async function createDocumentsBatch({
         Reference: '_',
         Indice: '-',
         Recu: DEFAULT_REFERENCE_DATE,
-        DescriptionObservations: 'EN ATTENTE',
+        DescriptionObservations: REFERENCE_PENDING_DESCRIPTION,
+        Bloquant: isReferenceDefaultDurationBloquant(safeDefaultDureeLimite),
         ...buildReferenceLimitFields({
           planningTable: planningTableForLimits,
           projectName: normalizedProject,
@@ -4220,7 +4624,7 @@ function setupUnifiedAddDocumentsUi() {
 }
 
 // Ready Grist
-grist.ready();
+grist.ready({ requiredAccess: "full" });
 setupUnifiedAddDocumentsUi();
 renderUnifiedPendingDocuments();
 scheduleReferenceRetardMidnightRefresh();
@@ -4238,25 +4642,13 @@ async function refreshProjectsDropdownFromProjets() {
   }
 }
 
-// Fonction pour peupler la première liste déroulante avec des valeurs uniques de la première colonne
-window.addEventListener('pageshow', () => {
-  refreshProjectsDropdownFromProjets();
-  scheduleReferenceRetardReconciliation();
-});
-
+// Le runtime partagé relit déjà References2 au retour de focus et ne livre que
+// si les lignes ont changé : re-rendre ici serait aveugle. On ne répare donc
+// que l'état dégradé, une liste de projets vide.
 window.addEventListener('focus', () => {
   const dropdown = document.getElementById('firstColumnDropdown');
-  if (!dropdown || dropdown.options.length <= 1 || !isReferenceLookupCacheFresh(projetsTableCacheLoadedAt)) {
+  if (!dropdown || dropdown.options.length <= 1) {
     refreshProjectsDropdownFromProjets();
-  } else {
-    refreshRestoredReferenceProject();
-  }
-  scheduleReferenceRetardReconciliation();
-});
-
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    scheduleReferenceRetardReconciliation();
   }
 });
 
@@ -4341,31 +4733,10 @@ function refreshRestoredReferenceProject() {
 }
 
 // Réinitialise et désactive la seconde liste si aucun projet n'est sélectionné
-// Helper function to check if a string is a valid date
-function isValidDate(dateString) {
-  const date = new Date(dateString);
-  return date instanceof Date && !isNaN(date);
-}
-
-// Helper function to format date as DD/MM/YYYY
-function formatDate(dateString) {
-  const date = new Date(dateString);
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const year = date.getFullYear();
-  return `${day}/${month}/${year}`;
-}
-
-const REFERENCE_TABLE_HIDDEN_KEYS = new Set([
-  'NomProjet',
-  'NomDocument',
-  'id',
-  'NumeroDocument',
-  'Type_document',
-  'Zone',
-]);
-
-const REFERENCE_TABLE_PREFERRED_HEADER_ORDER = [
+// Colonnes du tableau, dans l'ordre d'affichage. La liste est fermée : toute
+// autre colonne renvoyée par Grist (Service, NomProjet, Zone, colonnes ajoutées
+// plus tard) reste hors du rendu.
+const REFERENCE_TABLE_COLUMNS = [
   'Emetteur',
   'Reference',
   'Indice',
@@ -4379,33 +4750,24 @@ const REFERENCE_TABLE_PREFERRED_HEADER_ORDER = [
   'Archive',
 ];
 
+const REFERENCE_TABLE_DATE_COLUMNS = new Set(['Recu', 'DateLimite']);
+
 const REFERENCE_TABLE_HEADER_LABELS = {
   DureeLimite: 'Durée limite (sem.)',
   DateLimite: 'Date limite calculée',
 };
 
-function buildReferenceTableHeaders(filteredRecords) {
-  const availableHeaders = [];
-  const seenHeaders = new Set();
+// Une colonne Date de Grist arrive en secondes depuis l'époque : elle doit passer
+// par l'analyseur commun, sinon `new Date()` la lit comme des millisecondes et
+// ramène tout en 1969-1970. Une date vide ou restée au marqueur 1900-01-01
+// signifie « rien reçu » et s'affiche en tiret.
+function formatReferenceTableDate(value) {
+  const date = parseReferenceRetardCalendarDate(value);
+  if (isEmptyReferenceRetardDate(date)) return '-';
 
-  (filteredRecords || []).forEach((record) => {
-    Object.keys(record || {}).forEach((key) => {
-      if (REFERENCE_TABLE_HIDDEN_KEYS.has(key) || seenHeaders.has(key)) {
-        return;
-      }
-      seenHeaders.add(key);
-      availableHeaders.push(key);
-    });
-  });
-
-  const preferredHeaders = REFERENCE_TABLE_PREFERRED_HEADER_ORDER.filter((header) =>
-    seenHeaders.has(header)
-  );
-  const remainingHeaders = availableHeaders.filter((header) =>
-    !REFERENCE_TABLE_PREFERRED_HEADER_ORDER.includes(header)
-  );
-
-  return [...preferredHeaders, ...remainingHeaders];
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${day}/${month}/${date.getFullYear()}`;
 }
 
 function formatReferenceRetardValue(value) {
@@ -4450,7 +4812,102 @@ document.getElementById('hideArchivedToggle').addEventListener('change', () => {
   populateTable();
 });
 
+// Bascule "bloquant" : la date limite et le retard sont recalculés avant l'écriture,
+// pour que la ligne reste cohérente sans attendre le rechargement. La durée limite
+// survit à un décochage : un clic sans confirmation ne doit pas détruire une valeur
+// que seule la fenêtre « Modifier » permet de reconstituer.
+function renderReferenceBloquantCell(td, record) {
+  td.classList.add('bloquant-cell');
+  td.textContent = record.Bloquant ? '✓' : '';
+  td.style.cursor = 'pointer';
+  td.title = "Cliquer pour cocher / décocher";
+  td.addEventListener('click', async () => {
+    const newValue = !record.Bloquant;
+    try {
+      const planningTableForLimits = await fetchReferencePlanningTableForLimits();
+      const referenceLimitFields = buildReferenceLimitFields({
+        planningTable: planningTableForLimits,
+        projectName: record.NomProjet || selectedFirstValue,
+        documentInfo: {
+          numero: record.NumeroDocument,
+          name: record.NomDocument,
+          type: record.Type_document,
+          zone: record.Zone,
+        },
+        durationWeeks: record.DureeLimite,
+        useZeroWhenEmpty: newValue,
+        service: record.Service,
+      });
+      const updateFields = {
+        Bloquant: newValue,
+        ...referenceLimitFields,
+        Retard: toReferenceRetardStorageValue(
+          computeReferenceRetardDays(record.Recu, referenceLimitFields.DateLimite)
+        ),
+      };
+      await grist.docApi.applyUserActions([
+        ['UpdateRecord', 'References2', record.id, updateFields]
+      ]);
+      Object.assign(record, updateFields);
+      populateTable();
+    } catch (error) {
+      console.error('Error updating Bloquant:', error);
+      alert("Erreur lors de la mise à jour du bloquant.");
+    }
+  });
+}
+
+function renderReferenceArchiveCell(td, record) {
+  td.classList.add('archive-cell');
+  td.textContent = record.Archive ? '✓' : '';
+  td.style.cursor = 'pointer';
+  td.title = "Cliquer pour archiver / désarchiver";
+  td.addEventListener('click', async () => {
+    const newValue = !record.Archive;
+    try {
+      await grist.docApi.applyUserActions([
+        ['UpdateRecord', 'References2', record.id, { Archive: newValue }]
+      ]);
+      // Mise à jour locale immédiate (UX), puis re-rendu pour le filtre "Masquer les archives".
+      record.Archive = newValue;
+      td.textContent = newValue ? '✓' : '';
+      populateTable();
+    } catch (error) {
+      console.error('Error updating Archive:', error);
+      alert("Erreur lors de la mise à jour de l'archive.");
+    }
+  });
+}
+
+// Le retard est recalculé à l'affichage : la colonne stockée peut être en retard
+// d'une écriture, et un retard nul ou négatif ne doit rien afficher.
+function renderReferenceRetardCell(td, record) {
+  const liveRetardValue = computeReferenceRetardDays(record?.Recu, record?.DateLimite);
+  td.classList.add('retard-cell');
+  td.classList.toggle('has-retard', hasPositiveReferenceRetard(liveRetardValue));
+  td.textContent = formatReferenceRetardValue(liveRetardValue);
+}
+
 // Function to populate the table based on the selected first and second column values
+// Un re-rendu à sélection constante ne doit pas renvoyer l'utilisateur en haut
+// du tableau. On restitue le défilement une fois tout de suite, une fois après
+// la mise en page : les lignes ne figent leur hauteur qu'une frame plus tard.
+function captureReferenceTableScroll() {
+  const scroller = document.scrollingElement || document.documentElement;
+  const pane = document.querySelector('.table-container');
+  const documentTop = scroller ? scroller.scrollTop : 0;
+  const paneTop = pane ? pane.scrollTop : 0;
+
+  return () => {
+    const restore = () => {
+      if (scroller) scroller.scrollTop = documentTop;
+      if (pane) pane.scrollTop = paneTop;
+    };
+    restore();
+    requestAnimationFrame(restore);
+  };
+}
+
 function populateTable() {
   const selections = getCurrentSelections();
   if (!selections) return;
@@ -4492,26 +4949,11 @@ function populateTable() {
 
   if (filteredRecords.length === 0) return;
 
-  const headers = buildReferenceTableHeaders(filteredRecords);
-
   tableHeader.innerHTML = '<th>ID</th>';
-  headers.forEach((header) => {
+  REFERENCE_TABLE_COLUMNS.forEach((header) => {
     const th = document.createElement('th');
     th.textContent = REFERENCE_TABLE_HEADER_LABELS[header] || header;
     tableHeader.appendChild(th);
-  });
-  // Add click handler for Bloquant column
-  tableHeader.querySelector('th:nth-child(2)').addEventListener('click', (e) => {
-    if (e.target.textContent === 'Bloquant') {
-      // Toggle all Bloquant values
-      const rows = tableBody.querySelectorAll('tr');
-      rows.forEach(row => {
-        const cell = row.querySelector('td:nth-child(2)');
-        if (cell) {
-          cell.click();
-        }
-      });
-    }
   });
 
   filteredRecords.sort((a, b) => {
@@ -4561,96 +5003,28 @@ function populateTable() {
     idCell.textContent = record.id;
     tr.appendChild(idCell);
 
-    headers.forEach((header, index) => {
+    REFERENCE_TABLE_COLUMNS.forEach((header) => {
       const td = document.createElement('td');
       td.contentEditable = false;
-      let value = record[header];
-      if (value == null) value = '';
 
-      // Format date fields (Recu and DateLimite)
-      if ((header === 'Recu' || header === 'DateLimite') && isValidDate(value)) {
-        const formattedDate = formatDate(value);
-        value = formattedDate === '01/01/1900' ? '-' : formattedDate;
-      }
-      if (header === 'DureeLimite') {
-        value = formatReferenceDurationInput(value);
-      }
-
-      // Special handling for Bloquant and Archive columns
       if (header === 'Bloquant') {
-        td.classList.add('bloquant-cell');
-        td.textContent = Boolean(record.Bloquant) ? '\u2713' : '';
-        td.style.cursor = 'pointer';
-        td.title = "Cliquer pour cocher / décocher";
-        td.addEventListener('click', async () => {
-          const newValue = !Boolean(record.Bloquant);
-          try {
-            const planningTableForLimits = await fetchReferencePlanningTableForLimits();
-            const referenceLimitFields = buildReferenceLimitFields({
-              planningTable: planningTableForLimits,
-              projectName: record.NomProjet || selectedFirstValue,
-              documentInfo: {
-                numero: record.NumeroDocument,
-                name: record.NomDocument,
-                type: record.Type_document,
-                zone: record.Zone,
-              },
-              durationWeeks: record.DureeLimite,
-              useZeroWhenEmpty: newValue,
-              service: record.Service,
-            });
-            const updateFields = {
-              Bloquant: newValue,
-              ...referenceLimitFields,
-              Retard: toReferenceRetardStorageValue(
-                computeReferenceRetardDays(record.Recu, referenceLimitFields.DateLimite)
-              ),
-            };
-            await grist.docApi.applyUserActions([
-              ['UpdateRecord', 'References2', record.id, updateFields]
-            ]);
-            Object.assign(record, updateFields);
-            populateTable();
-          } catch (error) {
-            console.error('Error updating Bloquant:', error);
-            alert("Erreur lors de la mise à jour du bloquant.");
-          }
-        });
+        renderReferenceBloquantCell(td, record);
       } else if (header === 'Archive') {
-        td.classList.add('archive-cell');
-        td.textContent = value ? '✓' : '';
-        td.style.cursor = 'pointer';
-        td.title = "Cliquer pour archiver / désarchiver";
-
-        td.addEventListener('click', async () => {
-          // On se base sur la vraie valeur du record (pas sur la variable locale "value")
-          const newValue = !Boolean(record.Archive);
-
-          try {
-            await grist.docApi.applyUserActions([
-              ['UpdateRecord', 'References2', record.id, { Archive: newValue }]
-            ]);
-
-            // Mise à jour locale immédiate (UX)
-            record.Archive = newValue;
-            td.textContent = newValue ? '✓' : '';
-
-            // Rafraîchit le tableau (utile pour le filtre "Masquer les archives")
-            populateTable();
-
-          } catch (error) {
-            console.error('Error updating Archive:', error);
-            alert("Erreur lors de la mise à jour de l'archive.");
-          }
-        });
+        renderReferenceArchiveCell(td, record);
       } else if (header === 'Retard') {
-        const liveRetardValue = computeReferenceRetardDays(record?.Recu, record?.DateLimite);
-        td.classList.add('retard-cell');
-        td.classList.toggle('has-retard', hasPositiveReferenceRetard(liveRetardValue));
-        td.textContent = formatReferenceRetardValue(liveRetardValue);
+        renderReferenceRetardCell(td, record);
+      } else if (REFERENCE_TABLE_DATE_COLUMNS.has(header)) {
+        td.textContent = formatReferenceTableDate(record[header]);
+        if (header === 'DateLimite') {
+          const hint = getReferenceDateLimiteHint(record);
+          if (hint) td.title = hint;
+        }
+      } else if (header === 'DureeLimite') {
+        td.textContent = formatReferenceDurationInput(record[header]);
       } else {
-        td.textContent = value;
+        td.textContent = record[header] == null ? '' : String(record[header]);
       }
+
       tr.appendChild(td);
     });
 
@@ -4712,9 +5086,12 @@ async function showEditDialog(record) {
   document.getElementById('editDescription').value = record.DescriptionObservations || '';
   document.getElementById('editRemarque').value = normalizeRemarqueValue(record.Remarque);
   document.getElementById('editRecu').value = formatReferenceDialogDate(record.Recu);
+  const editBloquant = document.getElementById('editBloquant');
+  if (editBloquant) editBloquant.checked = isReferenceRecordBloquant(record);
   const editDureeLimite = document.getElementById('editDureeLimite');
   editDureeLimite.value = formatReferenceDurationInput(record.DureeLimite);
   editDureeLimite.dataset.initialValue = editDureeLimite.value;
+  syncReferenceRowBloquantUi('edit');
 
   dialog.showModal();
   document.getElementById('editEmetteur')?.focus();
@@ -4820,7 +5197,7 @@ function autoFillEditFields() {
   // Si "_" => valeurs par défaut
   if (selectedReference === '_') {
     document.getElementById('editIndice').value = '-';
-    document.getElementById('editDescription').value = 'EN ATTENTE';
+    document.getElementById('editDescription').value = REFERENCE_PENDING_DESCRIPTION;
     document.getElementById('editRemarque').value = 'Officiel';
     document.getElementById('editRecu').value = '';
     const editDureeLimite = document.getElementById('editDureeLimite');
@@ -4841,6 +5218,7 @@ function autoFillEditFields() {
     document.getElementById('editDescription').value = matchingRecord.DescriptionObservations || '';
     document.getElementById('editRemarque').value = normalizeRemarqueValue(matchingRecord.Remarque);
     document.getElementById('editRecu').value = formatReferenceDialogDate(matchingRecord.Recu);
+    applyReferenceRowBloquantValue('edit', isReferenceRecordBloquant(matchingRecord));
     const editDureeLimite = document.getElementById('editDureeLimite');
     editDureeLimite.value = formatReferenceDurationInput(matchingRecord.DureeLimite);
     editDureeLimite.dataset.initialValue = editDureeLimite.value;
@@ -4851,6 +5229,7 @@ function autoFillEditFields() {
     document.getElementById('editDescription').value = '';
     document.getElementById('editRemarque').value = '';
     document.getElementById('editRecu').value = '';
+    applyReferenceRowBloquantValue('edit', false);
     const editDureeLimite = document.getElementById('editDureeLimite');
     editDureeLimite.value = '';
     editDureeLimite.dataset.initialValue = '';
@@ -4932,7 +5311,8 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
   const recu = String(formData.get('recu') || '').trim() || DEFAULT_REFERENCE_DATE;
   const description = String(formData.get('description') || '').trim();
   const remarque = normalizeRemarqueValue(formData.get('remarque'));
-  const dureeLimite = String(formData.get('dureeLimite') || '').trim();
+  const isBloquant = isReferenceRowBloquant('add');
+  const dureeLimite = getReferenceRowDurationValue('add');
   const isDuplicate = document.getElementById('duplicateCheckbox').checked;
 
   setReferenceFormBusy('add', true, 'Enregistrement en cours…');
@@ -4998,11 +5378,13 @@ document.getElementById('addRowDialog').addEventListener('submit', async (e) => 
         Recu: recu,
         DescriptionObservations: description,
         Remarque: remarque,
+        Bloquant: isBloquant,
         ...buildReferenceLimitFields({
           planningTable: planningTableForLimits,
           projectName: selectedProject,
           documentInfo,
           durationWeeks: dureeLimite,
+          useZeroWhenEmpty: isBloquant,
           service: serviceValue,
         }),
         Service: serviceValue
@@ -5175,7 +5557,7 @@ document.getElementById('secondColumnListbox').addEventListener('change', functi
   console.log("selectedFirstValue:", selectedFirstValue, "selectedSecondValue:", selectedSecondValue);
   if (selectedFirstValue && selectedSecondValue) {
     populateTable();
-    scheduleReferenceRetardReconciliation();
+    scheduleReferenceLimitReconciliation();
   }
 });
 
@@ -5299,7 +5681,8 @@ document.getElementById('addDocumentDialog').addEventListener('submit', async (e
       Reference: '_',
       Indice: '-',
       Recu: '1900-01-01',
-      DescriptionObservations: 'EN ATTENTE',
+      DescriptionObservations: REFERENCE_PENDING_DESCRIPTION,
+      Bloquant: isReferenceDefaultDurationBloquant(defaultDureeLimite),
       ...referenceLimitFields,
       Service: serviceValue
     }));
@@ -5701,11 +6084,14 @@ function isCurrentDuplicateDocumentEntry(entry, selectedDocumentValue) {
 }
 
 function buildDuplicateDocumentCheckboxMarkup(option, index, preservedCheckedValues) {
-  const searchText = [option.label, option.type, option.zone, option.numero]
-    .map(value => String(value ?? '').toLocaleLowerCase('fr'))
-    .join(' ');
+  const filterAttributes = buildReferenceDocumentItemAttributes({
+    numero: option.numero,
+    name: option.name,
+    type: option.type,
+    zone: option.zone,
+  });
   return `
-        <div class="emetteur-item duplicate-document-item" data-duplicate-search="${escapeHtml(searchText)}">
+        <div class="emetteur-item duplicate-document-item" ${filterAttributes}>
           <input type="checkbox" id="doc-${index}" name="documents" value="${escapeHtml(option.value)}"${preservedCheckedValues.has(option.value) ? ' checked' : ''}>
           <label for="doc-${index}">${escapeHtml(option.label)}</label>
         </div>
@@ -5768,27 +6154,25 @@ function getVisibleDuplicateDocumentCheckboxes() {
     .filter(input => !input.closest('.duplicate-document-item')?.hidden);
 }
 
-function filterDuplicateDocumentList(query = '') {
-  const container = document.getElementById('duplicateOptionsContainer');
-  if (!container) return;
-  const normalizedQuery = String(query || '').trim().toLocaleLowerCase('fr');
-  const items = Array.from(container.querySelectorAll('.duplicate-document-item'));
-  items.forEach(item => {
-    item.hidden = Boolean(normalizedQuery) &&
-      !String(item.dataset.duplicateSearch || '').includes(normalizedQuery);
-  });
+// La barre du haut porte déjà un type et une zone : le dialogue s'ouvre sur la même
+// vue, mais ses propres menus permettent ensuite d'élargir à tout le projet.
+function getAddDialogPreferredDocumentFilters() {
+  const selectedType = getCurrentSelectedType();
+  const selectedZone = getCurrentSelectedZone();
 
-  container.querySelectorAll('.duplicate-zone-group').forEach(group => {
-    group.hidden = !Array.from(group.querySelectorAll('.duplicate-document-item'))
-      .some(item => !item.hidden);
-  });
-  container.querySelectorAll('.duplicate-document-group').forEach(group => {
-    group.hidden = !Array.from(group.querySelectorAll('.duplicate-document-item'))
-      .some(item => !item.hidden);
-  });
+  let preferredZone = REFERENCE_DOC_FILTER_ALL_VALUE;
+  if (!isAllReferenceZonesSelection(selectedZone)) {
+    preferredZone = _norm(selectedZone) === REFERENCE_NO_ZONE_VALUE
+      ? REFERENCE_DOC_FILTER_NO_ZONE
+      : (normalizeZoneMatchKey(selectedZone) || REFERENCE_DOC_FILTER_NO_ZONE);
+  }
 
-  const empty = document.getElementById('duplicateSearchEmpty');
-  if (empty) empty.hidden = items.length === 0 || items.some(item => !item.hidden);
+  return {
+    preferredType: selectedType
+      ? normalizeReferenceDocumentIdentityPart(selectedType)
+      : REFERENCE_DOC_FILTER_ALL_VALUE,
+    preferredZone,
+  };
 }
 
 function getAddDialogTargetDocumentValues() {
@@ -5851,27 +6235,29 @@ function updateDuplicateSelectionSummary() {
   }
 }
 
-function refreshDuplicateSelectionUi() {
+// Seule partie de l'UI qui dépend du filtre : le bouton « Tout sélectionner (filtrés) ».
+// Le résumé, lui, dépend de la sélection et coûte un balayage des enregistrements par
+// document coché — hors de question de le refaire à chaque frappe dans la recherche.
+function refreshDuplicateFilterActionsUi() {
   const visible = getVisibleDuplicateDocumentCheckboxes();
   const selectVisibleButton = document.getElementById('selectVisibleDocuments');
   if (selectVisibleButton) {
     selectVisibleButton.disabled = visible.length === 0 || visible.every(input => input.checked);
   }
+}
+
+function refreshDuplicateSelectionUi() {
+  refreshDuplicateFilterActionsUi();
   updateDuplicateSelectionSummary();
   applyReferenceAccessUi(activeReferenceContextSnapshot || createReferenceContextSnapshot());
 }
 
-async function renderDocumentCheckboxList(typeFilterValue = null, checkedValues = null) {
+async function renderDocumentCheckboxList(checkedValues = null) {
   const container = document.getElementById('duplicateOptionsContainer');
   const secondDropdown = document.getElementById('secondColumnListbox');
   const selectedProject = selectedFirstValue; // Projet sélectionné dans la première liste
   const selectedDocument = secondDropdown.value; // Document actuellement sélectionné dans la deuxième liste
   const showZones = projectHasStructuredZones(selectedProject);
-  const currentFilterElement = document.getElementById('duplicateTypeDocumentFilter');
-  const selectedTypeFilter = normalizeTypeDocument(
-    typeFilterValue !== null ? typeFilterValue : (currentFilterElement?.value || '')
-  );
-  const selectedTypeFilterKey = normalizeReferenceDocumentIdentityPart(selectedTypeFilter);
   if (checkedValues instanceof Set) {
     checkedValues.forEach(value => duplicateSelectedDocumentValues.add(value));
   }
@@ -5884,23 +6270,11 @@ async function renderDocumentCheckboxList(typeFilterValue = null, checkedValues 
     return;
   }
 
-  // Obtenir les options disponibles dans la deuxième liste déroulante
-  const typeOptions = collectReferenceDocumentTypesFromRecords(selectedProject);
-  const typeFilterHTML = `
-        <label class="duplicate-filter-row" for="duplicateTypeDocumentFilter">
-          <span>Type document</span>
-          <select id="duplicateTypeDocumentFilter">
-            <option value="">Tous les types</option>
-            ${typeOptions.map(type => `
-              <option value="${escapeHtml(type)}"${normalizeReferenceDocumentIdentityPart(type) === selectedTypeFilterKey ? ' selected' : ''}>
-                ${escapeHtml(type)}
-              </option>
-            `).join('')}
-          </select>
-        </label>
-      `;
-
-  const documentOptions = collectProjectDocumentEntries(selectedProject, selectedTypeFilter)
+  // Tout le projet est rendu une seule fois : le type et la zone se filtrent ensuite
+  // par masquage, ce qui préserve le défilement et les cases déjà cochées.
+  const documentOptions = collectProjectDocumentEntries(selectedProject, '', {
+    zoneSelection: REFERENCE_ALL_ZONES_VALUE,
+  })
     .filter(entry => entry.value && !isCurrentDuplicateDocumentEntry(entry, selectedDocument))
     .map(entry => ({
       value: entry.value,
@@ -5912,39 +6286,22 @@ async function renderDocumentCheckboxList(typeFilterValue = null, checkedValues 
     }));
   const showZoneSections = showZones || documentOptions.some(option => normalizeZoneValue(option.zone));
 
-  const emptyMessage = selectedTypeFilter
-    ? 'Aucun autre document disponible pour ce type.'
-    : 'Aucun autre document disponible pour ce projet.';
-
   // Générer les cases à cocher pour chaque document disponible
   const listHTML = buildGroupedDuplicateDocumentList(documentOptions, showZoneSections, preservedCheckedValues);
 
-  // Afficher la liste complète avec recherche, compteur et actions de sélection.
+  // Afficher la liste complète avec recherche, filtres, compteur et actions de sélection.
   container.innerHTML = `
-        <div class="duplicate-toolbar">
-          <label for="duplicateDocumentSearch">
-            Rechercher un document
-            <input type="search" id="duplicateDocumentSearch" placeholder="Nom, numéro, zone…" autocomplete="off">
-          </label>
-          ${typeFilterHTML}
-        </div>
+        ${buildReferenceDocumentFilterToolbarMarkup('duplicate', { showZoneFilter: showZoneSections })}
         <div class="duplicate-list-actions">
           <button type="button" id="selectVisibleDocuments">Tout sélectionner (filtrés)</button>
           <button type="button" id="clearSelectedDocuments">Tout désélectionner</button>
           <span id="duplicateSelectionCount" class="duplicate-selection-count"></span>
         </div>
         <div id="documentList" class="duplicate-document-list">
-          ${documentOptions.length > 0 ? listHTML : `<p class="duplicate-empty-message">${emptyMessage}</p>`}
+          ${documentOptions.length > 0 ? listHTML : '<p class="duplicate-empty-message">Aucun autre document disponible pour ce projet.</p>'}
           <p id="duplicateSearchEmpty" class="duplicate-empty-message" hidden>Aucun document ne correspond à la recherche.</p>
         </div>
       `;
-
-  // Ajouter un écouteur à la case "Tout sélectionner" pour cocher/décocher tous les documents
-  const typeFilter = document.getElementById('duplicateTypeDocumentFilter');
-  typeFilter?.addEventListener('change', function () {
-    syncDuplicateSelectedDocumentValues(container);
-    renderDocumentCheckboxList(this.value);
-  });
 
   const docCheckboxes = container.querySelectorAll("input[name='documents']");
   docCheckboxes.forEach(cb => {
@@ -5958,8 +6315,8 @@ async function renderDocumentCheckboxList(typeFilterValue = null, checkedValues 
     });
   });
 
-  document.getElementById('duplicateDocumentSearch')?.addEventListener('input', event => {
-    filterDuplicateDocumentList(event.target.value);
+  bindReferenceDocumentFilterControls('duplicate', 'duplicateOptionsContainer', {
+    onAfterFilter: refreshDuplicateFilterActionsUi,
   });
 
   document.getElementById('selectVisibleDocuments')?.addEventListener('click', () => {
@@ -5976,7 +6333,11 @@ async function renderDocumentCheckboxList(typeFilterValue = null, checkedValues 
     refreshDuplicateSelectionUi();
   });
 
-  refreshDuplicateSelectionUi();
+  // Premier passage : il remplit les deux menus et applique la vue de la barre du haut.
+  applyReferenceDocumentListFilters('duplicate', 'duplicateOptionsContainer', {
+    onAfterFilter: refreshDuplicateSelectionUi,
+    ...getAddDialogPreferredDocumentFilters(),
+  });
 }
 
 document.getElementById('duplicateCheckbox').addEventListener('change', async function () {
@@ -6347,7 +6708,7 @@ document.getElementById('editRowDialog').addEventListener('submit', async (e) =>
   }
 
   const formData = new FormData(e.target);
-  const dureeLimite = String(formData.get('dureeLimite') || '').trim();
+  const dureeLimite = getReferenceRowDurationValue('edit');
   setReferenceFormBusy('edit', true, 'Enregistrement des modifications…');
 
   try {
@@ -7067,7 +7428,8 @@ document.getElementById('addMultipleDocumentDialog').addEventListener('submit', 
           Reference: '_',
           Indice: '-',
           Recu: '1900-01-01',
-          DescriptionObservations: 'EN ATTENTE',
+          DescriptionObservations: REFERENCE_PENDING_DESCRIPTION,
+          Bloquant: isReferenceDefaultDurationBloquant(defaultDureeLimite),
           ...referenceLimitFields,
           Service: serviceValue
         });
@@ -7601,7 +7963,7 @@ document.getElementById('thirdColumnDropdown').addEventListener('change', functi
 
   if (selectedFirstValue && selectedSecondValue) {
     populateTable();
-    scheduleReferenceRetardReconciliation();
+    scheduleReferenceLimitReconciliation();
   } else {
     tableBody.innerHTML = '';
     tableHeader.innerHTML = '';
@@ -7618,7 +7980,7 @@ document.getElementById('zoneDropdown')?.addEventListener('change', function () 
 
   if (selectedFirstValue && selectedSecondValue) {
     populateTable();
-    scheduleReferenceRetardReconciliation();
+    scheduleReferenceLimitReconciliation();
   } else {
     if (tableBody) tableBody.innerHTML = '';
     if (tableHeader) tableHeader.innerHTML = '';
@@ -7726,7 +8088,7 @@ async function handleReferenceProjectChange(projectValue) {
     ) return null;
 
     clearReferenceProjectRender();
-    scheduleReferenceRetardReconciliation();
+    scheduleReferenceLimitReconciliation();
     applyReferenceAccessUi(nextSnapshot);
     return nextState;
   } catch (error) {
@@ -7765,7 +8127,7 @@ try {
   }
 } catch (e) { }
 
-window.GristServiceContext.onRecords(async function handleReferenceRecords(
+window.GristServiceContext.watchContextTable('References2', async function handleReferenceRecords(
   receivedRecords,
   _mappings,
   delivery
@@ -7781,6 +8143,8 @@ window.GristServiceContext.onRecords(async function handleReferenceRecords(
   activeReferenceContextSnapshot = contextSnapshot;
 
   const contextKey = `${contextSnapshot.projectNumber}|${contextSnapshot.selectedService}`;
+  const previousContextKey = lastReferenceContextKey;
+  const previousDocumentSelection = selectedSecondValue;
   if (lastReferenceContextKey && contextKey !== lastReferenceContextKey) {
     resetReferenceProjectSelections();
   }
@@ -7800,7 +8164,7 @@ window.GristServiceContext.onRecords(async function handleReferenceRecords(
   });
   referenceRecordsReady = true;
   buildReferencesNumeroCache(records);
-  scheduleReferenceRetardReconciliation();
+  scheduleReferenceLimitReconciliation();
   if (contextProject?.name) selectedFirstValue = contextProject.name;
 
   const projectDropdown = document.getElementById('firstColumnDropdown');
@@ -7873,11 +8237,50 @@ window.GristServiceContext.onRecords(async function handleReferenceRecords(
     if (tableBody) tableBody.innerHTML = '';
     if (tableHeader) tableHeader.innerHTML = '';
   } else {
+    // Même contexte et même document qu'au rendu précédent : la livraison ne
+    // fait que rafraîchir les lignes, le défilement reste celui de l'utilisateur.
+    const restoreScroll =
+      previousContextKey === contextKey && previousDocumentSelection === selectedSecondValue
+        ? captureReferenceTableScroll()
+        : null;
     populateTable();
+    if (restoreScroll) restoreScroll();
   }
   setReferenceProjectLoading(false);
   applyReferenceAccessUi(contextSnapshot);
+}, {
+  // Certaines sections historiques de Reference2 sont encore portees par une
+  // vue/ancienne table. Leur onRecords reste un signal Grist valable : les lignes
+  // affichees sont toujours relues depuis References2 avant livraison.
+  acceptAnyNativeTableSignal: true,
+  nativeSignalFilter: window.ReferenceProjectSyncRelay?.acceptNativeSignalForCurrentProject,
+  projectScopedSignals: true,
 });
+
+// Le tableau n'affiche pas que References2 : la date limite est calculée à partir
+// du planning projet, les listes d'émetteurs viennent d'Emetteurs et la liste des
+// projets de Projets2. Ces trois tables sont éditées depuis d'autres widgets — un
+// changement doit s'y voir sans rechargement de page.
+window.GristServiceContext.watchContextTables(
+  ['Planning_Projet', 'Emetteurs', 'Projets2'],
+  async ({ tables }) => {
+    if (tables.includes('Planning_Projet')) {
+      // Les dates limites sont recalculées à partir du planning : la copie locale
+      // du planning ne vaut plus rien.
+      invalidateReferencePlanningTableCache();
+    }
+    if (tables.includes('Emetteurs')) {
+      await updateEmetteurList(false, ['emetteurList', 'editEmetteurList']);
+    }
+    if (tables.includes('Projets2')) {
+      await refreshProjectsDropdownFromProjets();
+    }
+    if (!selectedSecondValue) return;
+    const restoreScroll = captureReferenceTableScroll();
+    populateTable();
+    restoreScroll?.();
+  }
+);
 
 ensureReferenceAccessObserver();
 window.GristServiceContext.subscribe((contextState) => {
@@ -7970,7 +8373,28 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
   };
   window.addEventListener('storage', function (event) {
     if (event.key === REFERENCE_DATA_CHANGE_STORAGE_KEY) {
-      scheduleReferenceRetardReconciliation();
+      let signal = { projectId: null, projectNumber: '' };
+      try {
+        const payload = JSON.parse(event.newValue || '{}');
+        signal = {
+          projectId: Number(payload.projectId) || null,
+          projectNumber: String(payload.projectNumber || '').trim(),
+        };
+      } catch (_error) { }
+      const matchesCurrentProject = window.GristServiceContext?.isSignalForCurrentProject;
+      if (typeof matchesCurrentProject === 'function' && !matchesCurrentProject(signal)) return;
+      scheduleReferenceLimitReconciliation();
+      window.GristServiceContext?.refreshContextTables?.(
+        ['References2'],
+        {
+          reason: 'reference2-window-signal',
+          forceRefresh: true,
+          signalProjectId: signal.projectId,
+          signalProjectNumber: signal.projectNumber,
+        }
+      )?.catch((error) => {
+        console.warn('Actualisation References2 depuis une autre fenetre impossible :', error);
+      });
       return;
     }
 

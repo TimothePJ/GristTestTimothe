@@ -5,14 +5,32 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Planning + Plan de charge</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-  <script src="../shared/service-context-core.js"></script>
-  <script src="../shared/grist-service-context.js"></script>
+  <script src="../shared/service-context-core.js?v=20260810-sync3"></script>
+  <script src="../shared/grist-service-context.js?v=20260810-sync3"></script>
+  <script>
+    window.ProjectMutationSyncConfig = {
+      mutationSignals: {
+        ChargePlanning_Sync: ["TimeSegment", "ProjectTeam"],
+        PlanningProjet_Sync: ["Planning_Projet"],
+        Avancement_Sync: ["ProjectTeam"]
+      },
+      observedSignalColumns: ["ChargePlanning_Sync", "PlanningProjet_Sync", "Avancement_Sync"],
+      observedSignalTables: {
+        ChargePlanning_Sync: ["Planning_Projet", "TimeSegment", "ProjectTeam"],
+        PlanningProjet_Sync: ["Planning_Projet"],
+        Avancement_Sync: ["Projets2", "ProjectTeam"]
+      },
+      directSignalTables: ["Planning_Projet", "TimeSegment", "ProjectTeam"],
+      dropdownIds: ["ps-project-select"]
+    };
+  </script>
+  <script src="../shared/project-mutation-sync-relay.js?v=20260810-sync3"></script>
   <script src="https://unpkg.com/vis-timeline/standalone/umd/vis-timeline-graph2d.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/vis-timeline/styles/vis-timeline-graph2d.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="./assets/css/variables.css" />
   <link rel="stylesheet" href="./assets/css/styles.css" />
-  <script type="module" src="./assets/js/main.js"></script>
+  <script type="module" src="./assets/js/main.js?v=20260810-sync3"></script>
 </head>
 <body>
   <header id="ps-toolbar" class="ps-toolbar">
@@ -52,7 +70,10 @@
         <div id="ps-chart-filter" class="ps-chart-filter" role="group" aria-label="Filtrer les types de document" hidden></div>
       </div>
       <div id="ps-planning" class="ps-planning"></div>
-      <div id="ps-chart" class="ps-chart" hidden><canvas id="ps-chart-canvas"></canvas></div>
+      <div id="ps-chart" class="ps-chart" hidden>
+        <div id="ps-chart-legend" class="ps-chart-legend"></div>
+        <div class="ps-chart-canvas-wrap"><canvas id="ps-chart-canvas"></canvas></div>
+      </div>
     </div>
     <div id="ps-splitter" class="ps-splitter" role="separator" aria-orientation="horizontal"
          aria-label="Redimensionner la hauteur du planning" tabindex="0">
@@ -68,48 +89,52 @@
     <div class="ps-modal-content ps-modal-content--segment">
       <div class="ps-modal-header">
         <div>
-          <h2>Modifier le segment</h2>
-          <p class="ps-modal-subtitle">Choisissez une nouvelle plage au demi-jour pres.</p>
+          <h2>Segment mensuel</h2>
+          <p class="ps-segment-edit-context">
+            <span id="ps-edit-segment-month-label"></span>
+            <span id="ps-edit-segment-worker-label"></span>
+          </p>
+          <p class="ps-modal-subtitle">Saisissez les jours effectivement travaillés sur ce mois.</p>
         </div>
         <button id="ps-edit-segment-cancel" type="button" class="ps-modal-close-btn">Fermer</button>
       </div>
       <div class="ps-segment-edit-form">
-        <div class="ps-segment-edit-grid">
-          <label class="ps-segment-edit-field">
-            <span>Debut</span>
-            <input type="date" id="ps-edit-segment-start-date">
-          </label>
-          <label class="ps-segment-edit-field">
-            <span>Periode</span>
-            <select id="ps-edit-segment-start-part">
-              <option value="am">Matin</option>
-              <option value="pm">Apres-midi</option>
-            </select>
-          </label>
-          <label class="ps-segment-edit-field">
-            <span>Fin</span>
-            <input type="date" id="ps-edit-segment-end-date">
-          </label>
-          <label class="ps-segment-edit-field">
-            <span>Periode</span>
-            <select id="ps-edit-segment-end-part">
-              <option value="am">Matin</option>
-              <option value="pm">Apres-midi</option>
-            </select>
-          </label>
-        </div>
         <section class="ps-segment-edit-section">
           <div class="ps-segment-edit-section-copy">
             <h3>Jours Effectifs :</h3>
           </div>
           <div class="ps-segment-edit-grid ps-segment-edit-grid--effectif">
             <label class="ps-segment-edit-field">
-              <span>Jours effectifs travailles</span>
-              <input type="number" id="ps-edit-segment-effectif" min="0" step="0.5" placeholder="0">
+              <span>Jours effectifs travaillés</span>
+              <input type="number" id="ps-edit-segment-effectif" min="0.5" step="0.5" placeholder="0">
             </label>
             <div class="ps-segment-edit-metric">
-              <span class="ps-segment-edit-metric-label">Jours disponibles dans la plage</span>
+              <span class="ps-segment-edit-metric-label">Jours disponibles dans le mois</span>
               <strong id="ps-edit-segment-calculated-days">--</strong>
+            </div>
+          </div>
+          <!-- Charge TOTALE de la personne sur ce mois, tous projets et tous
+               services confondus (cf. assets/js/utils/monthLoad.js). -->
+          <div class="ps-segment-edit-load" id="ps-edit-segment-load" hidden>
+            <div class="ps-segment-edit-load-head">
+              <span class="ps-segment-edit-load-label">Charge du mois — tous projets et tous services</span>
+              <strong id="ps-edit-segment-load-days">--</strong>
+            </div>
+            <div
+              class="ps-segment-edit-load-track"
+              id="ps-edit-segment-load-track"
+              role="progressbar"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
+              aria-labelledby="ps-edit-segment-load-days"
+            >
+              <span class="ps-segment-edit-load-fill" id="ps-edit-segment-load-fill"></span>
+            </div>
+            <p class="ps-segment-edit-load-message" id="ps-edit-segment-load-message" aria-live="polite"></p>
+            <div class="ps-segment-edit-load-projects" id="ps-edit-segment-load-projects" hidden>
+              <span class="ps-segment-edit-load-projects-label">Deja engage ce mois-ci</span>
+              <ul class="ps-segment-edit-load-projects-list" id="ps-edit-segment-load-projects-list"></ul>
             </div>
           </div>
         </section>
@@ -117,6 +142,25 @@
       </div>
       <div class="ps-segment-edit-footer">
         <button id="ps-edit-segment-save" type="button">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="ps-charge-assign-modal" class="ps-modal" style="display: none;">
+    <div class="ps-modal-content ps-modal-content--charge-assign">
+      <div class="ps-modal-header">
+        <div>
+          <h2>Assigner la charge de référence</h2>
+          <p class="ps-modal-subtitle">
+            Type de document, puis zone, puis document : un champ laissé vide reprend la valeur du niveau au-dessus.
+          </p>
+        </div>
+        <button id="ps-charge-assign-cancel" type="button" class="ps-modal-close-btn">Fermer</button>
+      </div>
+      <div id="ps-charge-assign-body" class="ps-charge-assign-body"></div>
+      <p id="ps-charge-assign-feedback" class="ps-charge-assign-feedback" hidden></p>
+      <div class="ps-charge-assign-footer">
+        <button id="ps-charge-assign-save" type="button">Enregistrer</button>
       </div>
     </div>
   </div>

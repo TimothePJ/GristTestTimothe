@@ -405,14 +405,100 @@ body.ps-panning * {
 
 /* Chart view: replaces #ps-planning when "Graphique" is selected. The height is
    set from JS (planningChart.setHeight) to match the timeline it replaces; the
-   canvas fills the container (Chart.js maintainAspectRatio:false). */
+   canvas fills the container (Chart.js maintainAspectRatio:false).
+
+   CALIBRATION (same contract as the "CRITICAL: left-column alignment" section
+   below): the plot area must start at exactly --ps-left-col-width from the
+   pane's left edge, like both timelines. That is achieved structurally rather
+   than by trusting Chart.js's auto layout:
+     legend column (--ps-left-col-width - --ps-chart-axis-width)
+     + Y axis (--ps-chart-axis-width, pinned in planningChart.js via afterFit)
+     = --ps-left-col-width.
+   Hence NO horizontal padding here — any would shift the whole plot. */
 .ps-chart {
   position: relative;
+  display: flex;
+  align-items: stretch;
   width: 100%;
   min-height: 220px;
-  padding: 6px 8px 2px;
+  padding: 6px 0 2px;
   box-sizing: border-box;
   background: var(--color-surface);
+}
+/* Restate [hidden] so main.js's `hidden` toggle beats the `display:flex` above. */
+.ps-chart[hidden] {
+  display: none;
+}
+
+/* Left legend column: display-only (the checkbox filter in the header still
+   drives visibility — see planningChart.js buildLegend/applyVisibility). Its
+   width is the left column MINUS the axis band, so the two together match the
+   planning's Projeteurs/Ingenieurs column exactly. */
+.ps-chart-legend {
+  flex: 0 0 calc(var(--ps-left-col-width) - var(--ps-chart-axis-width));
+  width: calc(var(--ps-left-col-width) - var(--ps-chart-axis-width));
+  min-width: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 2px 10px 2px 4px;
+  overflow: hidden;
+}
+.ps-chart-legend-title {
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
+}
+.ps-chart-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Types unchecked in the header filter grey out here instead of disappearing,
+   so the legend keeps a stable height while reflecting what is plotted. */
+.ps-chart-legend-item.is-off {
+  opacity: 0.35;
+}
+.ps-chart-legend-swatch {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  background: currentColor;
+}
+/* The dotted "(réalisé)" companion lines share their type's colour, so the
+   legend explains the solid/dotted convention once instead of doubling every
+   entry. The dashed swatch is a repeating-gradient echoing borderDash [3,3]. */
+.ps-chart-legend-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+.ps-chart-legend-swatch--dashed {
+  background: repeating-linear-gradient(
+    to right,
+    var(--color-text-muted) 0 3px,
+    transparent 3px 6px
+  );
+}
+
+.ps-chart-canvas-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .ps-chart canvas {
   width: 100% !important;
@@ -1008,6 +1094,78 @@ body.ps-panning * {
   color: #fff;
 }
 
+/* Ligne Charge : requis (documentCharge.js, Task 1) vs planifie. La classe
+   d'etat est sur le SEGMENT, mais c'est la PASTILLE qu'on teinte : poser un
+   `background` raccourci sur le segment effacerait sa trame de grille, et la
+   pastille opaque recouvrirait la teinte de toute facon. Meme decoupage que la
+   barre de la fenetre de segment. */
+.charge-plan-row--charge .charge-plan-month-segment.is-balanced .charge-plan-month-fill {
+  background: var(--load-balanced);
+  box-shadow: inset 0 0 0 1px rgba(56, 106, 30, 0.32);
+}
+
+.charge-plan-row--charge .charge-plan-month-segment.is-partial .charge-plan-month-fill {
+  background: var(--load-partial);
+  /* Liseré obligatoire : #edf4fb ne fait que 1,11:1 contre le fond. Meme
+     traitement que .ps-segment-edit-load-fill, qui a le meme probleme. */
+  box-shadow: inset 0 0 0 1px rgba(0, 73, 144, 0.55);
+}
+
+.charge-plan-row--charge .charge-plan-month-segment.is-overload .charge-plan-month-fill {
+  background: var(--load-overload);
+  box-shadow: inset 0 0 0 1px rgba(109, 59, 0, 0.32);
+}
+
+/* Le label est blanc par defaut, pour le degrade bleu de la ligne Total. Sur les
+   trois teintes pales de la ligne Charge il disparaitrait : on le repasse en
+   sombre. #6d3b00 sur #ffe1a8 est exactement le couple de Gestion-User. */
+.charge-plan-row--charge .charge-plan-month-segment.is-balanced .charge-plan-month-label { color: #386a1e; }
+.charge-plan-row--charge .charge-plan-month-segment.is-partial  .charge-plan-month-label { color: var(--color-primary); }
+.charge-plan-row--charge .charge-plan-month-segment.is-overload .charge-plan-month-label { color: var(--load-overload-text); }
+
+/* Bouton + badge de la cellule nom : sans gap, ils se touchent (la cellule est
+   deja flex/align-items:center via .charge-plan-cell--name). */
+.charge-plan-row--charge .charge-plan-cell--name {
+  gap: 8px;
+}
+
+/* Ouvre la fenetre d'assignation (Task 4) — meme voix que .ps-nav / .ps-zoom
+   button : fond primaire, coin arrondi std, accent au survol. Pas de
+   reinvention de charte. */
+.charge-plan-charge-btn {
+  padding: 8px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+
+.charge-plan-charge-btn:hover {
+  background: var(--color-accent);
+  transform: translateY(-1px);
+}
+
+/* Badge « non place » : un AVERTISSEMENT discret (des documents attendent une
+   date de planning), pas une erreur — donc la teinte surcharge (--load-overload
+   / --load-overload-text), pas le rouge de .ps-segment-edit-feedback ou de
+   .charge-plan-segment-bar.is-incoherent. Meme vocabulaire de couleur que les
+   pastilles de la ligne juste en-dessous. */
+.charge-plan-charge-unplaced {
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--load-overload);
+  color: var(--load-overload-text);
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: help;
+}
+
 .charge-plan-track-grid {
   position: absolute;
   inset: 0;
@@ -1054,6 +1212,29 @@ body.ps-panning * {
   overflow: visible;
 }
 
+/* SURCHARGE : la PERSONNE depasse sa capacite du mois, tous projets confondus.
+   La barre peut donc virer sans que rien ne cloche sur le projet affiche — la
+   charge est ailleurs, et c'est l'infobulle qui le dit.
+
+   Teinte PLATE et non degradee : c'est exactement --load-overload, la meme que
+   la barre de la fenetre d'edition, la ligne Charge et Gestion-User. Un degrade
+   la diluerait et la parite visuelle entre les surfaces serait perdue.
+
+   Le label est blanc par defaut (fond bleu fonce) : illisible sur #ffe1a8, il
+   repasse donc en --load-overload-text. Le liseré compense le faible contraste
+   de la pastille claire sur le fond clair de la piste, comme pour
+   .ps-segment-edit-load-fill.
+
+   PRIORITE : .is-incoherent (rouge) est declare APRES et l'emporte donc a
+   specificite egale — et le rendu ne pose de toute facon jamais les deux
+   classes ensemble. Une saisie fausse doit rester plus visible qu'une charge
+   lourde. */
+.charge-plan-segment-bar.is-overloaded {
+  background: var(--load-overload);
+  color: var(--load-overload-text);
+  box-shadow: inset 0 0 0 1px rgba(109, 59, 0, 0.32);
+}
+
 .charge-plan-segment-bar.is-incoherent {
   background: linear-gradient(135deg, #e5534b, #b42318);
 }
@@ -1066,6 +1247,14 @@ body.ps-panning * {
   cursor: not-allowed;
 }
 
+/* Mode Editer : un clic n'importe ou sur une piste ouvre la fenetre du mois
+   survole. Le curseur est la seule affordance qui le dit — la piste Total est
+   en lecture seule et n'en beneficie pas. */
+.charge-plan-board.is-segment-editing-enabled
+  .charge-plan-track:not(.charge-plan-track--readonly) {
+  cursor: pointer;
+}
+
 .charge-plan-board.is-segment-editing-locked .charge-plan-segment-bar {
   cursor: default;
   filter: saturate(0.78);
@@ -1075,41 +1264,30 @@ body.ps-panning * {
   filter: saturate(0.78);
 }
 
-.charge-plan-board.is-segment-editing-locked .charge-plan-segment-handle {
-  display: none;
+/* Survol : le mois entier sous le curseur s eclaire, puisque c est l unite de
+   creation depuis le passage de TimeSegment au mois. Pose par
+   bottom/chargeEditing.js, uniquement en mode Editer et jamais sur la piste
+   Total (lecture seule). */
+.charge-plan-month-hover {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* Pas de z-index : le surlignage du mois passe SOUS les barres, comme dans le
+     jumeau gestion-depenses2. Les deux plannings doivent se lire pareil. */
+  background: rgba(0, 73, 144, 0.08);
+  border-left: 1px solid rgba(0, 73, 144, 0.25);
+  border-right: 1px solid rgba(0, 73, 144, 0.25);
+  pointer-events: none;
 }
 
-.charge-plan-segment-bar.is-resizing {
-  opacity: 0.38;
+.charge-plan-month-hover[hidden] {
+  display: none !important;
 }
 
+/* Un segment = un mois : plus de poignees ni de redimensionnement, donc plus de
+   regles .charge-plan-segment-handle ni d'etat .is-resizing. */
 .charge-plan-segment-bar.is-compact {
   padding: 0 10px;
-  cursor: ew-resize;
-}
-
-.charge-plan-segment-bar.is-compact .charge-plan-segment-handle {
-  display: none;
-}
-
-.charge-plan-segment-handle {
-  position: absolute;
-  top: 50%;
-  width: 14px;
-  height: 18px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.9);
-  cursor: ew-resize;
-  transform: translateY(-50%);
-  box-shadow: 0 0 0 1px rgba(6, 60, 123, 0.08);
-}
-
-.charge-plan-segment-handle.is-start {
-  left: 3px;
-}
-
-.charge-plan-segment-handle.is-end {
-  right: 3px;
 }
 
 .charge-plan-segment-label {
@@ -1141,15 +1319,9 @@ body.ps-panning * {
   display: none !important;
 }
 
-.charge-plan-selection-preview.is-invalid {
-  border-color: rgba(180, 35, 24, 0.72);
-  background: rgba(180, 35, 24, 0.16);
-}
-
-.charge-plan-selection-preview.is-invalid .charge-plan-selection-label {
-  color: #b42318;
-}
-
+/* .charge-plan-selection-preview.is-invalid supprimee avec le controle de
+   chevauchement : plus aucun JS ne pose la classe (la cle unique
+   (projet, personne, mois) a remplace le controle). */
 .charge-plan-selection-label {
   color: var(--color-primary);
   background: rgba(255, 255, 255, 0.92);
@@ -1162,8 +1334,19 @@ body.ps-panning * {
 
 .charge-plan-edit-toolbar {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 12px;
   margin-top: 10px;
+}
+
+/* Message d'etat du board (echec de suppression). Vide, il est `hidden` donc
+   retire du flux : le bouton Editer reste colle a droite. Meme rendu que le
+   jumeau gestion-depenses2. */
+.charge-plan-feedback {
+  color: #b42318;
+  font-weight: 700;
+  font-size: 0.85rem;
 }
 
 .charge-plan-edit-mode-toggle {
@@ -1268,6 +1451,20 @@ body.ps-panning * {
   gap: 18px;
 }
 
+/* --- Charge-assign modal ("Assigner la charge de reference") ---------------
+   Plus large que la fenetre de segment : elle deplie un arbre type -> zone ->
+   document, qui a besoin de place et defile verticalement plutot que
+   d'agrandir la fenetre a l'infini (un projet peut avoir des dizaines de
+   documents par type). Meme charpente ps-modal / ps-modal-header /
+   ps-modal-close-btn / ps-modal-subtitle que la fenetre de segment. */
+.ps-modal-content--charge-assign {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .ps-modal-header {
   display: flex;
   align-items: flex-start;
@@ -1311,6 +1508,25 @@ body.ps-panning * {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+/* Rappel du couple (mois, personne) : la fenetre ne les fait plus saisir. */
+.ps-segment-edit-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 2px 0 6px;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.ps-segment-edit-context span:empty {
+  display: none;
+}
+
+.ps-segment-edit-context span + span {
+  font-weight: 600;
+  color: var(--color-text-muted);
 }
 
 .ps-segment-edit-section {
@@ -1383,6 +1599,172 @@ body.ps-panning * {
   font-size: 1.1rem;
 }
 
+/* --- Barre de charge mensuelle -------------------------------------------- */
+/* Teintes de charge, partagees par la barre de la fenetre de segment ET la ligne
+   Charge du board. Reprises de Gestion-User (--color-partial / --color-balanced /
+   --color-overload) et identiques a celles de gestion-depenses2 : la meme charge
+   doit se lire de la meme couleur dans les trois widgets.
+   Declarees ici et NON sur .ps-segment-edit-load : la ligne Charge vit hors de
+   cette fenetre et n'heriterait pas d'une variable scopee — sans erreur, juste
+   sans couleur. */
+:root {
+  --load-partial: #edf4fb;
+  --load-balanced: #d7eccb;
+  --load-overload: #ffe1a8;
+  --load-overload-text: #6d3b00;
+}
+
+.ps-segment-edit-load {
+  display: grid;
+  gap: 8px;
+}
+
+.ps-segment-edit-load[hidden] {
+  display: none;
+}
+
+.ps-segment-edit-load-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ps-segment-edit-load-label {
+  font-size: 0.88rem;
+  color: var(--color-text-muted);
+}
+
+.ps-segment-edit-load-head strong {
+  color: var(--color-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* LISERE OBLIGATOIRE : --color-partial (#edf4fb) est un bleu si pale qu'il est
+   quasi blanc. En pastille sur le fond gris de Gestion-User il se lit ; ici,
+   sur le fond clair de la fenetre, un remplissage sans contour serait
+   invisible. Le contour du conteneur (et celui du remplissage) est donc ce qui
+   rend la barre lisible — la teinte, elle, reste celle de Gestion-User. */
+.ps-segment-edit-load-track {
+  position: relative;
+  height: 14px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid rgba(0, 73, 144, 0.35);
+  box-shadow: inset 0 1px 2px rgba(18, 37, 63, 0.08);
+}
+
+.ps-segment-edit-load-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  /* PLANCHER DE LARGEUR : mesure navigateur a 0,5 j sur 20, le remplissage
+     tombait a 11,89 x 12 px — plus large que haut, la pastille degenerait en
+     point. 14 px = la hauteur de la piste, donc une pastille ronde lisible.
+     Cf. la regle [hidden] plus bas pour le cas 0 j, qui doit rester VIDE. */
+  min-width: 14px;
+  border-radius: 999px;
+  background: var(--load-partial);
+  /* CONTRASTE : --load-partial (#edf4fb) ne fait que 1,11:1 contre le blanc du
+     vide — invisible seul. Le liseré porte donc tout le travail : 0,55 d'opacite
+     le monte a ~2,6:1 (il etait a 0,28, soit 1,86:1). On renforce le CONTOUR,
+     jamais la teinte, qui reste celle de Gestion-User. Les etats pleine et
+     surcharge gardent leur liseré : leurs teintes, elles, se voient deja. */
+  box-shadow: inset 0 0 0 1px rgba(0, 73, 144, 0.55);
+  transition: width 120ms ease-out;
+}
+
+/* 0 j : le plancher ci-dessus afficherait une pastille de 14 px sur une barre
+   qui doit rester vide. Le rendu pose donc `hidden` sur le remplissage des que
+   la largeur retombe a 0 (main.js / editSegmentModal.js). `display: block`
+   ci-dessus l'emporterait sur le `hidden` natif : d'ou cette regle explicite. */
+.ps-segment-edit-load-fill[hidden] {
+  display: none;
+}
+
+.ps-segment-edit-load.is-balanced .ps-segment-edit-load-fill {
+  background: var(--load-balanced);
+  box-shadow: inset 0 0 0 1px rgba(56, 106, 30, 0.32);
+}
+
+.ps-segment-edit-load.is-overload .ps-segment-edit-load-fill {
+  background: var(--load-overload);
+  box-shadow: inset 0 0 0 1px rgba(109, 59, 0, 0.32);
+}
+
+.ps-segment-edit-load-message {
+  margin: 0;
+  min-height: 20px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.ps-segment-edit-load.is-balanced .ps-segment-edit-load-message {
+  color: #386a1e;
+}
+
+/* --- Detail par projet ----------------------------------------------------- */
+/* La barre dit COMBIEN de jours sont deja pris ; cette liste dit OU. Elle est
+   masquee (hidden) quand la personne n'a rien pose ailleurs : un titre sans
+   liste vaudrait moins que rien. */
+.ps-segment-edit-load-projects {
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 73, 144, 0.1);
+}
+
+.ps-segment-edit-load-projects[hidden] {
+  display: none;
+}
+
+.ps-segment-edit-load-projects-label {
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+}
+
+.ps-segment-edit-load-projects-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+
+/* Le nom prend la place restante et se tronque ; les jours gardent la leur.
+   L'inverse ferait sauter la colonne de droite d'une ligne a l'autre selon la
+   longueur du nom, et la liste ne se lirait plus en colonne. */
+.ps-segment-edit-load-project {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.88rem;
+}
+
+.ps-segment-edit-load-project-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ps-segment-edit-load-project-days {
+  flex: 0 0 auto;
+  color: var(--color-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Surcharge : #6d3b00 sur #ffe1a8, exactement le couple de Gestion-User. */
+.ps-segment-edit-load.is-overload .ps-segment-edit-load-message {
+  color: #6d3b00;
+  background: var(--load-overload);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  justify-self: start;
+}
+
 .ps-segment-edit-feedback {
   margin: 0;
   min-height: 22px;
@@ -1411,9 +1793,250 @@ body.ps-panning * {
   background: #003a73;
 }
 
+/* Ecriture en cours : Enregistrer et Fermer sont desactives le temps de
+   l'aller-retour Grist (cf. le verrou de createEditSegmentModal). */
+.ps-segment-edit-footer button:disabled,
+.ps-modal-close-btn:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.ps-segment-edit-footer button:disabled:hover {
+  background: var(--color-primary);
+}
+
+.ps-modal-close-btn:disabled:hover {
+  background: var(--color-surface-muted);
+}
+
+/* Etat de l'ecriture, pose par createEditSegmentModal sur la racine de la
+   fenetre. `is-submitting` : aller-retour Grist en cours, la fenetre est
+   verrouillee. `is-stalled` : le delai de garde a expire, la fenetre redevient
+   fermable mais l'ecriture est TOUJOURS en vol (Enregistrer reste desactive) —
+   c'est un avertissement, pas une erreur : rien n'est perdu, il faut recharger
+   le widget pour savoir si le segment a ete enregistre. Signalement discret,
+   les boutons portent deja l'etat via :disabled. */
+#ps-edit-segment-modal.is-submitting .ps-modal-content--segment {
+  cursor: progress;
+}
+
+#ps-edit-segment-modal.is-submitting .ps-segment-edit-form,
+#ps-edit-segment-modal.is-stalled .ps-segment-edit-form {
+  opacity: 0.72;
+}
+
+#ps-edit-segment-modal.is-stalled .ps-modal-content--segment {
+  box-shadow: inset 0 3px 0 0 #b54708;
+}
+
+#ps-edit-segment-modal.is-stalled .ps-segment-edit-feedback {
+  color: #b54708;
+}
+
+/* --- Contenu de la fenetre d'assignation de charge --------------------------
+   Arbre type -> zone -> document. `.ps-charge-assign-body` porte le seul
+   defilement (l'en-tete/pied restent fixes) : `overflow-y` + le
+   `max-height` pose sur `.ps-modal-content--charge-assign` ci-dessus. */
+.ps-charge-assign-body {
+  overflow-y: auto;
+  padding-right: 4px;
+  display: grid;
+  gap: 12px;
+}
+
+.ps-charge-assign-empty {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.ps-charge-assign-type {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(0, 73, 144, 0.14);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(0, 73, 144, 0.03), rgba(255, 255, 255, 0.98));
+}
+
+.ps-charge-assign-type-head,
+.ps-charge-assign-zone-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.ps-charge-assign-type-name {
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.ps-charge-assign-zone-name {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Bandeau de divergence : avertissement (donnee heterogene issue d'une
+   edition manuelle dans Grist), jamais une erreur — memes teintes que le
+   badge "non place" de la ligne Charge du board (Tache 3). */
+.ps-charge-assign-divergence {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--load-overload);
+  color: var(--load-overload-text);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.ps-charge-assign-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.ps-charge-assign-field input {
+  width: 110px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+/* Champ herite : affiche vide (grise via le placeholder) plutot que la valeur
+   effective, pour que l'utilisateur voie d'un coup d'oeil quels niveaux ont
+   ete fixes explicitement. */
+.ps-charge-assign-field input::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.75;
+  font-style: italic;
+}
+
+/* Saisie illisible (non numerique, <= 0) : Enregistrer refuse tant que ce
+   n'est pas corrige (cf. createChargeAssignModal.handleSave). */
+.ps-charge-assign-input.is-invalid {
+  border-color: #b42318;
+  color: #b42318;
+}
+
+.ps-charge-assign-disclosure {
+  margin-left: 4px;
+}
+
+.ps-charge-assign-disclosure > summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.ps-charge-assign-zones {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ps-charge-assign-zone {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.ps-charge-assign-documents {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.ps-charge-assign-document {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 73, 144, 0.04);
+}
+
+.ps-charge-assign-document-label {
+  color: var(--color-text);
+  font-size: 0.88rem;
+}
+
+.ps-charge-assign-feedback {
+  margin: 0;
+  min-height: 22px;
+  color: #b42318;
+  font-weight: 600;
+}
+
+.ps-charge-assign-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.ps-charge-assign-footer button {
+  padding: 10px 18px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ps-charge-assign-footer button:hover {
+  background: #003a73;
+}
+
+/* Ecriture en cours : Enregistrer et Fermer suivent le meme verrou PARTAGE
+   que la fenetre de segment (cf. createChargeAssignModal). */
+.ps-charge-assign-footer button:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.ps-charge-assign-footer button:disabled:hover {
+  background: var(--color-primary);
+}
+
+#ps-charge-assign-modal.is-submitting .ps-modal-content--charge-assign {
+  cursor: progress;
+}
+
+#ps-charge-assign-modal.is-submitting .ps-charge-assign-body,
+#ps-charge-assign-modal.is-stalled .ps-charge-assign-body {
+  opacity: 0.72;
+}
+
+#ps-charge-assign-modal.is-stalled .ps-modal-content--charge-assign {
+  box-shadow: inset 0 3px 0 0 #b54708;
+}
+
+#ps-charge-assign-modal.is-stalled .ps-charge-assign-feedback {
+  color: #b54708;
+}
+
 @media (max-width: 640px) {
   .ps-modal-content--segment {
     width: min(100%, 100vw - 16px);
+    padding: 18px;
+  }
+
+  .ps-modal-content--charge-assign {
+    width: min(100%, 100vw - 16px);
+    max-height: calc(100vh - 32px);
     padding: 18px;
   }
 
@@ -1428,5 +2051,11 @@ body.ps-panning * {
 
   .ps-segment-edit-grid {
     grid-template-columns: 1fr;
+  }
+
+  .ps-charge-assign-type-head,
+  .ps-charge-assign-zone-head {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

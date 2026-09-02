@@ -77,18 +77,30 @@ function pad2(value) {
 
 // Month buckets spanning [first..last]. `points` carry monthKey/year/monthNumber;
 // indexOf(date) -> the bucket index for a due date (null if outside).
+//
+// CALIBRATION: midTs is the bucket's TRUE midpoint — (month start + next month
+// start) / 2 — not the 15th at midnight. On the shared frise the x axis is a
+// plain linear timestamp scale, so the 15th at 00:00 sits up to 1.5 days left of
+// a 31-day month's visual centre; startTs is the month's left boundary, used to
+// place the chart's vertical gridlines exactly where the planning below splits
+// its months.
 function buildMonthBuckets(first, last, monthsNames) {
   const span =
     last.getFullYear() * 12 + last.getMonth() - (first.getFullYear() * 12 + first.getMonth()) + 1;
   const months = buildDisplayedMonths(first.getFullYear(), first.getMonth(), span, monthsNames);
   const indexByMonthKey = new Map(months.map((month, index) => [month.monthKey, index]));
-  const points = months.map((month) => ({
-    monthKey: month.monthKey,
-    year: month.year,
-    monthNumber: month.monthNumber,
-    label: `${String(month.monthLabel || "").slice(0, 3)} ${month.year}`,
-    midTs: new Date(month.year, month.monthNumber - 1, 15).getTime(),
-  }));
+  const points = months.map((month) => {
+    const startTs = new Date(month.year, month.monthNumber - 1, 1).getTime();
+    const endTs = new Date(month.year, month.monthNumber, 1).getTime();
+    return {
+      monthKey: month.monthKey,
+      year: month.year,
+      monthNumber: month.monthNumber,
+      label: `${String(month.monthLabel || "").slice(0, 3)} ${month.year}`,
+      startTs,
+      midTs: startTs + (endTs - startTs) / 2,
+    };
+  });
   return {
     points,
     indexOf: (date) => {
@@ -99,7 +111,14 @@ function buildMonthBuckets(first, last, monthsNames) {
 }
 
 // Weekly (Monday-based) buckets spanning [first..last]. `points` carry weekKey
-// (the Monday ISO date) + midTs (Thursday, so the point sits mid-week).
+// (the Monday ISO date) + midTs.
+//
+// CALIBRATION: a week bucket runs Monday 00:00 -> next Monday 00:00, so its
+// midpoint is Thursday 12:00 — which is what the previous literal
+// `date + 3, 12:00` already produced on a normal week. Deriving it from the two
+// boundaries instead keeps it exact across a DST transition (a 167h or 169h
+// week, where the timestamp midpoint shifts by an hour), and gives every point
+// a `startTs` sibling for the boundary gridlines.
 function buildWeekBuckets(first, last) {
   const points = [];
   const indexByWeekStartMs = new Map();
@@ -108,12 +127,18 @@ function buildWeekBuckets(first, last) {
   let index = 0;
   while (cursor.getTime() <= end) {
     const startMs = cursor.getTime();
+    const nextMondayMs = new Date(
+      cursor.getFullYear(),
+      cursor.getMonth(),
+      cursor.getDate() + 7
+    ).getTime();
     indexByWeekStartMs.set(startMs, index);
     points.push({
       weekKey: `${cursor.getFullYear()}-${pad2(cursor.getMonth() + 1)}-${pad2(cursor.getDate())}`,
       weekStartTs: startMs,
+      startTs: startMs,
       label: `${pad2(cursor.getDate())}/${pad2(cursor.getMonth() + 1)}`,
-      midTs: new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 3, 12, 0, 0).getTime(),
+      midTs: startMs + (nextMondayMs - startMs) / 2,
     });
     index += 1;
     cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 7);
@@ -182,6 +207,25 @@ export function buildTaskLoadSeries(rows, columns, viewport, options = {}) {
   };
 }
 
+// PURE: viewport -> { minTs, maxTs }, the x-axis window in timestamps (null for
+// an invalid viewport).
+//
+// CALIBRATION: the frise below covers `visibleDays` WHOLE days — day 0 starts at
+// firstVisibleDate 00:00 and the last day ends at rangeEndDate 24:00, i.e. the
+// start of the NEXT day (see sync/viewportMath.getDayBoundaryLeftPx, where a
+// day's width is contentWidthPx / visibleDays). Ending the axis at rangeEndDate
+// 23:59:59 (the previous behaviour) dropped the last day's width, stretching
+// every earlier date slightly right of its position in the planning below.
+export function getChartWindowBounds(viewport) {
+  const first = parseCalendarDate(viewport?.firstVisibleDate);
+  const last = parseCalendarDate(viewport?.rangeEndDate);
+  if (!first || !last || last < first) return null;
+  return {
+    minTs: new Date(first.getFullYear(), first.getMonth(), first.getDate()).getTime(),
+    maxTs: new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1).getTime(),
+  };
+}
+
 function shortMonthLabel(ts) {
   const date = new Date(ts);
   const name = APP_CONFIG.months[date.getMonth()] || "";
@@ -203,9 +247,13 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-// createPlanningChart(canvasEl, filterEl, granularityEl) ->
+// Fallback when the --ps-chart-axis-width token can't be read (Node, or a
+// stylesheet that failed to load). Must stay in sync with variables.css.
+const DEFAULT_AXIS_WIDTH_PX = 44;
+
+// createPlanningChart(canvasEl, filterEl, granularityEl, legendEl) ->
 // { render, setViewport, setHeight, destroy }.
-export function createPlanningChart(canvasEl, filterEl, granularityEl) {
+export function createPlanningChart(canvasEl, filterEl, granularityEl, legendEl) {
   let chart = null;
   let lastRows = [];
   let lastColumns = null;
@@ -214,6 +262,9 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl) {
   let granularity = "month";
   // Last applied viewport, so a granularity change can re-render in place.
   let lastViewport = null;
+  // Bucket start timestamps of the last rendered series, read back by the x
+  // scale's afterBuildTicks to place gridlines on bucket boundaries.
+  let lastBoundaryTicks = [];
   // Type filter: Set of base labels (e.g. "Coffrage", "Total") currently CHECKED.
   // A dataset is shown iff its base label is in the set. Rebuilt per project and
   // re-applied on every viewport re-render (buildDatasets reads it).
@@ -249,7 +300,9 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl) {
   }
 
   function applyVisibility() {
-    if (!chart || !visibleTypes) return;
+    if (!visibleTypes) return;
+    syncLegend();
+    if (!chart) return;
     chart.data.datasets.forEach((ds) => {
       ds.hidden = !visibleTypes.has(baseLabel(ds.label));
     });
@@ -263,6 +316,57 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl) {
       .map((input) => input.dataset.typeLabel);
     visibleTypes = new Set(checked);
     applyVisibility();
+  }
+
+  // --- left legend column ----------------------------------------------------
+  // Chart.js's own legend is disabled (it sat at the bottom and, more to the
+  // point, its height ate into the plot area). This HTML legend lives in the
+  // chart's left column, whose width plus the pinned Y-axis band equals
+  // --ps-left-col-width — the same left column as the planning below. It is
+  // display-only: the header checkbox filter still drives visibility, and
+  // syncLegend() greys out the types it turned off.
+
+  function buildLegend() {
+    if (!(legendEl instanceof HTMLElement)) return;
+    const items = computeAvailableLabels();
+    legendEl.innerHTML = `
+      <div class="ps-chart-legend-title">Tâches à réaliser</div>
+      ${items
+        .map(
+          (item) => `
+        <div class="ps-chart-legend-item" data-type-label="${escapeHtml(item.label)}">
+          <span class="ps-chart-legend-swatch" style="background:${escapeHtml(item.color)}"></span>
+          <span>${escapeHtml(item.label)}</span>
+        </div>`
+        )
+        .join("")}
+      <div class="ps-chart-legend-note">
+        <span class="ps-chart-legend-swatch ps-chart-legend-swatch--dashed"></span>
+        <span>pointillé = réalisé</span>
+      </div>
+    `;
+    syncLegend();
+  }
+
+  function syncLegend() {
+    if (!(legendEl instanceof HTMLElement) || !visibleTypes) return;
+    legendEl.querySelectorAll("[data-type-label]").forEach((item) => {
+      item.classList.toggle("is-off", !visibleTypes.has(item.dataset.typeLabel));
+    });
+  }
+
+  // The Y axis is pinned to exactly --ps-chart-axis-width so that
+  // legend column + axis == --ps-left-col-width, putting the plot's left edge on
+  // the same x as both timelines' content areas.
+  function readAxisWidthPx() {
+    if (typeof window === "undefined" || !(canvasEl instanceof HTMLElement)) {
+      return DEFAULT_AXIS_WIDTH_PX;
+    }
+    const scope = canvasEl.closest(".ps-chart") || canvasEl.ownerDocument?.documentElement;
+    if (!scope) return DEFAULT_AXIS_WIDTH_PX;
+    const raw = window.getComputedStyle(scope).getPropertyValue("--ps-chart-axis-width");
+    const value = Number.parseFloat(raw);
+    return Number.isFinite(value) && value > 0 ? value : DEFAULT_AXIS_WIDTH_PX;
   }
 
   // (Re)build the checkbox filter for the current project; everything checked.
@@ -349,31 +453,61 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl) {
         maintainAspectRatio: false,
         parsing: false,
         interaction: { mode: "index", intersect: false },
+        // No horizontal padding: the plot must span the canvas edge to edge, so
+        // that its right edge lands on the frise's right edge. The left edge is
+        // set solely by the pinned Y-axis width (see scales.y.afterFit).
+        // autoPadding:false is required — left on (the default), Chart.js adds
+        // its own inset so the outermost tick labels can't be clipped, which
+        // measured 8px on the right here and pulled the plot off the frise.
+        layout: { autoPadding: false, padding: { left: 0, right: 0, top: 8, bottom: 0 } },
         scales: {
           x: {
             type: "linear",
+            // Zero the label-overflow padding Chart.js would otherwise reserve
+            // on both sides: that padding widens chartArea's insets and would
+            // shift the plot off the shared frise. Edge labels may be clipped by
+            // a few pixels — the alignment matters more.
+            afterFit: (scale) => {
+              scale.paddingLeft = 0;
+              scale.paddingRight = 0;
+            },
+            // One tick per bucket BOUNDARY (1st of the month / Monday) rather
+            // than at Chart.js's own round numbers, so the vertical gridlines
+            // fall exactly on the month separations of the planning below.
+            afterBuildTicks: (scale) => {
+              const boundaries = lastBoundaryTicks.filter(
+                (ts) => ts >= scale.min && ts <= scale.max
+              );
+              if (boundaries.length) scale.ticks = boundaries.map((value) => ({ value }));
+            },
             ticks: {
               maxRotation: 0,
               autoSkip: true,
+              // Labels name the bucket that STARTS at the tick, so they read to
+              // the right of their gridline like vis-timeline's month band.
+              align: "start",
               callback: (value) => axisLabel(value),
             },
             grid: { color: "rgba(0, 73, 144, 0.06)" },
           },
           y: {
             beginAtZero: true,
+            // Pin the axis band so chartArea.left is deterministic (see
+            // readAxisWidthPx): legend column + this width == --ps-left-col-width.
+            afterFit: (scale) => {
+              scale.width = readAxisWidthPx();
+            },
             ticks: { precision: 0, stepSize: 1 },
-            title: { display: true, text: "Tâches à réaliser" },
+            // The title moved to the legend column's heading (HTML): inside the
+            // canvas it consumed part of the axis band and pushed the plot right.
+            title: { display: false },
             grid: { color: "rgba(0, 73, 144, 0.08)" },
           },
         },
         plugins: {
-          legend: {
-            position: "bottom",
-            labels: { usePointStyle: true, pointStyle: "line", boxWidth: 26, padding: 12, font: { size: 11 } },
-            // Type visibility is driven by the checkbox filter (buildFilter), so
-            // the legend is display-only here (no click toggle to fight it).
-            onClick: () => {},
-          },
+          // Replaced by the HTML legend in the left column (buildLegend): the
+          // built-in bottom legend stole vertical space from the plot.
+          legend: { display: false },
           tooltip: {
             callbacks: {
               title: (items) => (items.length ? tooltipTitle(items[0].parsed.x) : ""),
@@ -391,10 +525,12 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl) {
     if (viewport) lastViewport = viewport;
     const vp = lastViewport;
     const series = buildTaskLoadSeries(lastRows, lastColumns, vp, { granularity });
-    const first = parseCalendarDate(vp?.firstVisibleDate);
-    const last = parseCalendarDate(vp?.rangeEndDate);
-    if (first) chart.options.scales.x.min = first.getTime();
-    if (last) chart.options.scales.x.max = new Date(last.getFullYear(), last.getMonth(), last.getDate(), 23, 59, 59).getTime();
+    const bounds = getChartWindowBounds(vp);
+    if (bounds) {
+      chart.options.scales.x.min = bounds.minTs;
+      chart.options.scales.x.max = bounds.maxTs;
+    }
+    lastBoundaryTicks = series.points.map((point) => point.startTs).filter(Number.isFinite);
     chart.data.datasets = buildDatasets(series);
     chart.update("none");
   }
@@ -446,6 +582,7 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl) {
     lastRows = rows || [];
     lastColumns = columns || null;
     buildFilter(); // rebuild checkboxes for this project (all checked)
+    buildLegend(); // the left column mirrors those same types, in the same order
     if (!ensureChart()) return;
     applyViewport(viewport);
   }
@@ -457,7 +594,11 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl) {
   // Match the top pane's current height (driven by the splitter/resizer) so the
   // chart occupies the same vertical space as the timeline it replaces.
   function setHeight(px) {
-    const host = canvasEl?.parentElement;
+    // The canvas' direct parent is now .ps-chart-canvas-wrap, so size the
+    // .ps-chart flex container itself (as before the legend column existed) and
+    // let the wrap + legend stretch into it — otherwise the pane would end up
+    // taller than the timeline it replaces by .ps-chart's vertical padding.
+    const host = canvasEl?.closest?.(".ps-chart") || canvasEl?.parentElement;
     if (host instanceof HTMLElement && Number.isFinite(px) && px > 0) {
       host.style.height = `${Math.round(px)}px`;
       if (chart && typeof chart.resize === "function") chart.resize();
@@ -470,7 +611,11 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl) {
     lastRows = [];
     lastColumns = null;
     lastViewport = null;
+    lastBoundaryTicks = [];
     visibleTypes = null;
+    if (legendEl instanceof HTMLElement) {
+      legendEl.innerHTML = "";
+    }
     if (filterEl instanceof HTMLElement) {
       filterEl.removeEventListener("change", handleFilterChange);
       filterEl.innerHTML = "";

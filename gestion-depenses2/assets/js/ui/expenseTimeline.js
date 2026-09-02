@@ -790,6 +790,7 @@ function renderRateGroup(role, workers) {
               type="number"
               class="cell-input daily-rate expense-rate-card-input"
               data-worker-id="${worker.id}"
+              data-persisted-rate="${escapeHtml(worker.dailyRate || "")}"
               step="0.1"
               value="${escapeHtml(worker.dailyRate || "")}"
             >

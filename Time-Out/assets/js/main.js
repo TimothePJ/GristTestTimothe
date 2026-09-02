@@ -1,6 +1,6 @@
 // Time-Out/assets/js/main.js
 import { APP_CONFIG, LEAVE_TYPES } from "./config.js";
-import { initGrist, fetchTeamRows, fetchSegments, getResolvedTeamColumns, getResolvedTimeOutColumns, findCurrentUser } from "./services/gristService.js";
+import { initGrist, fetchTeamRows, fetchSegments, getResolvedTeamColumns, getResolvedTimeOutColumns, findCurrentUser, getTimeOutTableId } from "./services/gristService.js";
 import { createLeaveBoard } from "./ui/board.js";
 import { attachLeaveEditing } from "./ui/editing.js";
 import { createReasonModal } from "./ui/reasonModal.js";
@@ -86,12 +86,30 @@ function bootstrapApp() {
     state.currentUser = cu;
     state.segments = buildSegments(segRows, outCols);
   }
-  function render() {
-    // Preserve scroll across the board's innerHTML rebuild (onChanged → render
-    // after a write) so the user is not thrown back to the top.
+  // Capture le défilement avant la reconstruction du board et le restitue après :
+  // une fois tout de suite, une fois à la frame suivante, car les barres et l'axe
+  // ne figent leur hauteur qu'une fois la mise en page faite. Sans cela un
+  // rafraîchissement (écriture, signal Grist, retour de focus) renvoie
+  // l'utilisateur en haut du planning.
+  function captureBoardScroll() {
+    const scroller = document.scrollingElement || document.documentElement;
     const prevScroll = els.main.querySelector(".charge-plan-scroll");
+    const documentTop = scroller ? scroller.scrollTop : 0;
     const savedTop = prevScroll ? prevScroll.scrollTop : 0;
     const savedLeft = prevScroll ? prevScroll.scrollLeft : 0;
+
+    return () => {
+      const restore = () => {
+        if (scroller) scroller.scrollTop = documentTop;
+        const nextScroll = els.main.querySelector(".charge-plan-scroll");
+        if (nextScroll) { nextScroll.scrollTop = savedTop; nextScroll.scrollLeft = savedLeft; }
+      };
+      restore();
+      requestAnimationFrame(restore);
+    };
+  }
+  function render() {
+    const restoreScroll = captureBoardScroll();
 
     if (editing) editing.detach();
     if (board) board.destroy();
@@ -119,8 +137,7 @@ function bootstrapApp() {
     board.render({ members: state.teamMembers, segments: state.segments, viewport: state.viewport, currentUser: state.currentUser });
 
     // Restore the pre-render scroll on the freshly rebuilt scroll container.
-    const newScroll = els.main.querySelector(".charge-plan-scroll");
-    if (newScroll) { newScroll.scrollTop = savedTop; newScroll.scrollLeft = savedLeft; }
+    restoreScroll();
 
     persistViewport(state.viewport);
     renderLegend();
@@ -176,13 +193,38 @@ function bootstrapApp() {
     });
   }
 
+  // Le runtime partagé possède déjà l'abonnement natif grist.onRecords : on passe
+  // par watchContextTable, qui ne relit que sur un vrai évènement (écriture locale,
+  // signal Grist, retour de focus, changement de projet/service) et ne livre que si
+  // les lignes ont réellement changé. Aucune minuterie n'est demandée.
+  async function watchTimeOutTable() {
+    const runtime = window.GristServiceContext;
+    if (typeof runtime?.watchContextTables !== "function") return;
+
+    let tableId = "";
+    try { tableId = await getTimeOutTableId(); } catch (_e) { return; }
+    if (!tableId) return;
+
+    // Le calendrier affiche les absences, mais les noms et services viennent de
+    // l'annuaire : une arrivée ou un départ saisi ailleurs doit s'y voir.
+    // forceRefresh:false — le chargement initial vient d'être fait, la copie en
+    // cache suffit pour la première lecture.
+    runtime.watchContextTables([tableId, APP_CONFIG.grist.tables.team], async () => {
+      await fetchAll();
+      render();
+    }, { forceRefresh: false });
+  }
+
   async function bootstrap() {
     wireViewportControls();
     try { initGrist(); } catch (e) { console.error("Grist init:", e); }
+    try { await window.GristServiceContext?.whenReady?.(); } catch (e) {
+      console.warn("Contexte Service indisponible, chargement RPC Time-Out conserve :", e);
+    }
     try { await fetchAll(); } catch (e) { console.error("Chargement Time-Out:", e); }
     render();
-    if (window.grist && typeof window.grist.onRecords === "function") {
-      try { window.grist.onRecords(async () => { await fetchAll(); render(); }); } catch (_e) {}
+    try { await watchTimeOutTable(); } catch (e) {
+      console.warn("Surveillance Time-Out indisponible :", e);
     }
   }
   bootstrap().catch((e) => console.error("Init time-out:", e));

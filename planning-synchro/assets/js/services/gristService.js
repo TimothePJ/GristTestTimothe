@@ -17,7 +17,7 @@
 import { APP_CONFIG } from "../config.js";
 import { toText } from "../utils/dates.js";
 import { toFiniteNumber } from "../utils/format.js";
-import { toGristDateTimeValue } from "../utils/timeSegments.js";
+import { toGristMonthValue, getMonthBusinessDays } from "../utils/monthSegments.js";
 
 const resolvedColumnCache = new Map();
 
@@ -25,6 +25,7 @@ const TIME_SEGMENT_COLUMN_ALIASES = {
   id: ["id"],
   projectNumber: ["NumeroProjet", "Numero_Projet", "Project_Number", "ProjectNumber"],
   name: ["Name", "Nom", "Worker_Name", "Team_Member_Name"],
+  mois: ["Mois", "Month"],
   startDate: ["Start_At", "Start_Date", "StartAt", "StartDate", "Start"],
   endDate: ["End_At", "End_Date", "EndAt", "EndDate", "End"],
   allocationDays: [
@@ -166,17 +167,22 @@ function getAvailableColumnIds(raw) {
   return [];
 }
 
-async function fetchTableRaw(tableName) {
+async function fetchTableRaw(tableName, options = undefined) {
   const grist = getGrist();
   if (!grist.docApi || typeof grist.docApi.fetchTable !== "function") {
     throw new Error("grist.docApi.fetchTable(...) indisponible.");
   }
 
-  return grist.docApi.fetchTable(tableName);
+  // Les options sont celles du wrapper de contexte partage, pas de l'API RPC
+  // Grist native (ni du mock de dev/harness.html), qui n'acceptent que le nom de
+  // table : leur passer un second argument serait au mieux ignore.
+  return options && grist.docApi.__serviceContextPatched
+    ? grist.docApi.fetchTable(tableName, options)
+    : grist.docApi.fetchTable(tableName);
 }
 
-export async function fetchTableRows(tableName) {
-  const raw = await fetchTableRaw(tableName);
+export async function fetchTableRows(tableName, options = undefined) {
+  const raw = await fetchTableRaw(tableName, options);
   return normalizeFetchTableResult(raw);
 }
 
@@ -263,9 +269,21 @@ async function resolveTimeOutTableId() {
 export async function fetchProjectData({ name, number }) {
   const t = APP_CONFIG.grist.tables;
   const timeOutTableId = await resolveTimeOutTableId();
-  const [planningRows, timeSegmentRows, projectTeamRows, teamRows, timeOutRows] = await Promise.all([
+  const [
+    planningRows,
+    timeSegmentRows,
+    allTimeSegmentRows,
+    projectTeamRows,
+    teamRows,
+    timeOutRows,
+  ] = await Promise.all([
     fetchTableRows(t.planningProject).catch(() => []),
     fetchTableRows(t.timeSegment).catch(() => []),
+    // Lecture NON FILTREE, pour la seule barre de charge mensuelle de la fenetre
+    // segment (voir le commentaire d'`allTimeSegmentRows` plus bas). La lecture
+    // ordinaire ci-dessus reste filtree projet + service : c'est elle qui
+    // alimente la vue projet, et le pane bas ne doit rien montrer d'autre.
+    fetchTableRows(t.timeSegment, { fullTable: true }).catch(() => null),
     fetchTableRows(t.projectTeam).catch(() => []),
     fetchTableRows(t.team).catch(() => []),
     fetchTableRows(timeOutTableId).catch(() => []),
@@ -275,6 +293,22 @@ export async function fetchProjectData({ name, number }) {
     planningRows: planningRows.filter((r) => String(r?.[pc.planningProject.projectName] ?? "").trim() === name),
     timeSegmentRows: timeSegmentRows.filter((r) => String(r?.[pc.timeSegment.projectNumber] ?? "").trim() === String(number).trim()),
     projectTeamRows: projectTeamRows.filter((r) => String(r?.[pc.projectTeam.projectNumber] ?? "").trim() === String(number).trim()),
+    // Lignes TimeSegment BRUTES, tous projets et tous SERVICES confondus. Deux
+    // filtres les perdaient : celui par projet fait ici meme, et — beaucoup moins
+    // visible — celui que shared/grist-service-context.js applique d'office a
+    // TimeSegment (politique REST_PROJECT_SERVICE), qui restreignait la lecture
+    // au projet ET au service courants avant meme que ce fichier ne voie une
+    // ligne. D'ou la lecture `{ fullTable: true }` dediee ci-dessus.
+    //
+    // La barre de charge mensuelle de la fenetre segment raisonne sur la
+    // PERSONNE, pas sur le projet affiche : une personne a 5 jours ailleurs est
+    // deja a 5 jours pris, que cet ailleurs soit un autre projet ou un autre
+    // service. Le tri (mois, nom, segment edite) est le travail de
+    // utils/monthLoad.js.
+    //
+    // Repli : lecture complete en echec -> les lignes du projet, comme avant. La
+    // barre sous-estime alors la charge, mais la fenetre s'ouvre quand meme.
+    allTimeSegmentRows: allTimeSegmentRows || timeSegmentRows,
     // Team + Time-Out are global (unfiltered): buildAbsenceIndex maps them per-worker.
     teamRows,
     timeOutRows,
@@ -284,36 +318,28 @@ export async function fetchProjectData({ name, number }) {
 export async function createTimeSegment({
   projectNumber,
   name,
-  startDate,
-  endDate,
-  allocationDays,
+  monthKey,
   effectif,
   label = "",
 }) {
   const tableName = APP_CONFIG.grist.tables.timeSegment;
   const columns = await getResolvedTimeSegmentColumns();
-  const startValue = toGristDateTimeValue(startDate);
-  const endValue = toGristDateTimeValue(endDate);
   const normalizedProjectNumber = toText(projectNumber);
   const normalizedName = toText(name);
+  const monthValue = toGristMonthValue(monthKey);
 
-  if (!normalizedProjectNumber || !normalizedName || startValue == null || endValue == null) {
-    throw new Error("Segment invalide : numero projet, nom, date debut ou date fin manquant.");
+  if (!normalizedProjectNumber || !normalizedName || monthValue == null) {
+    throw new Error("Segment invalide : numero projet, nom ou mois manquant.");
   }
 
   const fields = Object.fromEntries(
     Object.entries({
       [columns.projectNumber]: normalizedProjectNumber,
       [columns.name]: normalizedName,
-      [columns.startDate]: startValue,
-      [columns.endDate]: endValue,
-      [columns.allocationDays]: toFiniteNumber(allocationDays, 0),
-      [columns.effectif]:
-        effectif === undefined
-          ? undefined
-          : effectif === ""
-          ? ""
-          : toFiniteNumber(effectif, 0),
+      [columns.mois]: monthValue,
+      // Denormalise : ecrit pour la lisibilite de la grille Grist, jamais relu.
+      [columns.allocationDays]: getMonthBusinessDays(monthKey),
+      [columns.effectif]: toFiniteNumber(effectif, 0),
       [columns.service]: getActiveService(),
     }).filter(([, value]) => value !== undefined)
   );
@@ -337,9 +363,7 @@ export async function updateTimeSegment({
   segmentId,
   projectNumber,
   name,
-  startDate,
-  endDate,
-  allocationDays,
+  monthKey,
   effectif,
   label,
 }) {
@@ -367,24 +391,13 @@ export async function updateTimeSegment({
     fields[columns.name] = normalizedName;
   }
 
-  if (startDate != null) {
-    const startValue = toGristDateTimeValue(startDate);
-    if (startValue == null) {
-      throw new Error("Date de debut invalide pour la mise a jour du segment.");
+  if (monthKey != null) {
+    const monthValue = toGristMonthValue(monthKey);
+    if (monthValue == null) {
+      throw new Error("Mois invalide pour la mise a jour du segment.");
     }
-    fields[columns.startDate] = startValue;
-  }
-
-  if (endDate != null) {
-    const endValue = toGristDateTimeValue(endDate);
-    if (endValue == null) {
-      throw new Error("Date de fin invalide pour la mise a jour du segment.");
-    }
-    fields[columns.endDate] = endValue;
-  }
-
-  if (allocationDays != null) {
-    fields[columns.allocationDays] = toFiniteNumber(allocationDays, 0);
+    fields[columns.mois] = monthValue;
+    fields[columns.allocationDays] = getMonthBusinessDays(monthKey);
   }
 
   if (effectif !== undefined) {
@@ -403,6 +416,68 @@ export async function updateTimeSegment({
   await applyActions([
     ["UpdateRecord", APP_CONFIG.grist.tables.timeSegment, normalizedId, fields],
   ]);
+}
+
+// Ecriture des trois colonnes de duree (Duree_Projet / Duree_Zone /
+// Duree_Force) sur Planning_Projet, a partir des `writes` collectes par
+// bottom/chargeAssignModal.js::collectChargeWrites.
+//
+// Premiere ecriture de ce widget hors TimeSegment. La couche partagee valide
+// chaque ligne mutee (shared/grist-service-context.js -> rowMatchesContext) :
+// pour Planning_Projet elle exige que le Service de la ligne corresponde au
+// service courant, que NomProjet figure parmi les noms du projet selectionne,
+// et qu'un numero de projet soit selectionne. Les trois sont vraies ici — mais
+// un refus ne se verrait qu'a l'enregistrement, en production, d'ou le test
+// « updatePlanningDurations : le lot traverse la couche de contexte partagee »
+// (tests/gristService.test.mjs), qui fait passer le lot REEL produit ici par
+// les VRAIES fonctions du module partage (core.isProtectedMutationAction,
+// core.rowMatchesContext, core.transformActions), et non par un bouchon.
+// Ce test fixe aussi ce que la couche AJOUTE au passage — elle complete chaque
+// UpdateRecord de Planning_Projet avec Service et NomProjet — pour qu'une
+// evolution du contrat partage se voie ici plutot qu'en production.
+//
+// UN SEUL applyUserActions : assigner Duree_Projet au COFFRAGE d'un projet
+// reel touche 112 lignes, et un lot par ligne declencherait 112
+// rafraichissements via le relais de synchronisation inter-widgets.
+//
+// FUSION PAR recordId (et non plusieurs UpdateRecord successifs pour la meme
+// ligne) : collectChargeWrites peut emettre plusieurs entrees pour LA MEME
+// ligne quand l'utilisateur touche le type, la zone ET le document d'une
+// meme ligne dans la meme session de la fenetre — chacune portant une colonne
+// differente. Une seule UpdateRecord par ligne, champs fusionnes, evite de
+// dependre d'un ordre d'application de plusieurs actions visant la meme ligne
+// dans un seul lot, que rien ne garantit cote Grist ; l'oublier perdrait
+// silencieusement l'une des editions de l'utilisateur.
+//
+// Validation de CHAQUE id AVANT de construire les actions : un id invalide
+// fait echouer la fonction avant le moindre appel a applyActions — il n'y a
+// pas de transaction a annuler, donc aucune ecriture partielle ne doit partir.
+export async function updatePlanningDurations(writes) {
+  const list = Array.isArray(writes) ? writes : [];
+
+  const fieldsById = new Map();
+  const order = [];
+  for (const write of list) {
+    const recordId = toReferenceId(write?.recordId);
+    if (!recordId) {
+      throw new Error("Ligne de planning invalide : id manquant.");
+    }
+    if (!fieldsById.has(recordId)) {
+      fieldsById.set(recordId, {});
+      order.push(recordId);
+    }
+    Object.assign(fieldsById.get(recordId), write?.fields || {});
+  }
+
+  const actions = order.map((recordId) => [
+    "UpdateRecord",
+    APP_CONFIG.grist.tables.planningProject,
+    recordId,
+    fieldsById.get(recordId),
+  ]);
+
+  if (!actions.length) return;
+  await applyActions(actions);
 }
 
 export async function removeTimeSegment(segmentId) {

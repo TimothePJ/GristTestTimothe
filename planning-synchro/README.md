@@ -25,12 +25,21 @@ correction pixel.
 | Table | Rôle | Colonnes utilisées |
 |---|---|---|
 | `Projets2` | Registre canonique des projets, pont nom ↔ numéro | `id`, `Nom_de_projet`, `Numero_de_projet` |
-| `Planning_Projet` | Planning projet (haut, lecture seule), filtré par `NomProjet` | `id`, `ID2`, `NomProjet`, `Taches`/`Tache`, `Type_doc`, `Groupe`, `Ligne_planning`, `Zone`, `Date_limite`, `Diff_coffrage`, `Diff_armature`, `Demarrages_travaux` |
-| `TimeSegment` | Plan de charge prévisionnel (bas, éditable), filtré par `NumeroProjet` | `NumeroProjet`, `Name`, `Start_At`, `End_At`, `Allocation_Days`, `Effectif`, `Label` |
+| `Planning_Projet` | Planning projet (haut, lecture seule), filtré par `NomProjet` | `id`, `ID2`, `NomProjet`, `Taches`/`Tache`, `Type_doc`, `Groupe`, `Ligne_planning`, `Zone`, `Date_limite`, `Diff_coffrage`, `Diff_armature`, `Demarrages_travaux`, `Duree_Force`, `Duree_Zone`, `Duree_Projet` |
+| `TimeSegment` | Plan de charge prévisionnel (bas, éditable), filtré par `NumeroProjet` — **un segment couvre un mois entier** | `NumeroProjet`, `Name`, `Mois`, `Effectif`, `Allocation_Days`, `Label` |
 | `ProjectTeam` | Rôle de chaque personne pour le regroupement (Projeteurs / Ingénieurs / Autres), filtré par `NumeroProjet` | `NumeroProjet`, `Name`, `Role`, `Daily_Rate` |
 
-La tolérance d'alias sur les colonnes `TimeSegment`
-(`Start_At`/`Start_Date`/`StartAt`/`StartDate`/`Start`, etc. — voir
+`Mois` est une colonne **Date** valant le **1er du mois** ; c'est la seule
+source de vérité du segment. `Allocation_Days` est **dénormalisée** : écrite à
+la création/modification (jours ouvrés du mois) pour la lisibilité de la grille
+Grist, elle n'est **jamais relue** — la capacité d'un segment est recalculée
+depuis son mois (`getSegmentAllocationDays`, `assets/js/utils/timeSegments.js`).
+`Start_At`/`End_At` ne sont **plus écrites** ; `Start_At` reste lue en **repli**
+pour les lignes antérieures à la bascule (voir « Migration `TimeSegment` » plus
+bas), `End_At` n'est ni lue ni écrite.
+
+La tolérance d'alias sur les colonnes `TimeSegment` (`Mois`/`Month`,
+`Start_At`/`Start_Date`/`StartAt`/`StartDate`/`Start`, etc. — voir
 `assets/js/services/gristService.js`) s'applique **uniquement au chemin
 d'écriture** (`createTimeSegment`/`updateTimeSegment`). Le chemin de
 **lecture** (filtre `fetchProjectData`, `buildWorkersFromSegments`,
@@ -45,6 +54,54 @@ Le widget appelle `grist.ready({ requiredAccess: "full" })` au démarrage
 `Projets2`/`Planning_Projet`/`TimeSegment`/`ProjectTeam`, et écriture sur
 `TimeSegment` (création/modification/suppression de segments depuis le pane
 bas).
+
+## Charge de référence
+
+Chaque document `Planning_Projet` déclare, dans trois colonnes, le nombre de
+jours de travail qu'il requiert :
+
+- `Duree_Force` — durée de ce document seul ;
+- `Duree_Zone` — durée standard des documents de ce type, dans cette zone ;
+- `Duree_Projet` — durée standard des documents de ce type, par défaut du projet.
+
+Ces valeurs **se résolvent en cascade** à la lecture : `Duree_Force` → `Duree_Zone`
+→ `Duree_Projet`. Un document consulte d'abord sa propre `Duree_Force` ; si elle
+est vide, `null`, négative, non-numérique, ou **explicitement 0**, il la rejette
+et descend au niveau suivant. La valeur résolue n'est **jamais stockée** : un
+document qui change de zone ou de type se reclasse automatiquement avec la valeur
+appropriée du nouveau niveau, sans code de migration.
+
+Les valeurs sont exprimées en **jours, multiples de 0,5** (0, 0.5, 1, 1.5, etc.).
+Pour dire « ce document n'a aucun coût », laisser les trois colonnes vides.
+
+La charge résolue est répartie sur les **mois que sa plage de dates touche**
+(mois du `Demarrages_travaux` jusqu'au mois de la `Date_limite`), **au prorata
+des jours ouvrés** de chaque mois. Ainsi un document de 10 jours en septembre et
+octobre sera réparti selon le nombre de jours ouvrés de chaque mois. La répartition
+utilise l'**algorithme du plus grand reste** pour garantir que les parts mensuelles
+somment exactement à la charge d'entrée. Un document qui n'a aucune date de
+planning (pas de phases) **ne peut s'attacher à aucun mois** ; sa charge apparaît
+dans une figure **« non placé »** affichée sur la ligne du document.
+
+Le **pane bas** affiche une ligne **Charge** sous la ligne **Total**. Par mois
+visible, elle compare les jours *planifiés* (de `TimeSegment`, calculés comme pour
+la ligne Total) contre les jours *requis* (somme des charges des documents). Trois
+couleurs indiquent la tension :
+
+- `--load-balanced` `#d7eccb` (vert clair) : jours planifiés = jours requis ;
+- `--load-overload` `#ffe1a8` (beige clair) : **moins** de jours planifiés que
+  requis ;
+- `--load-partial` `#edf4fb` (bleu clair) : **plus** de jours planifiés que
+  requis.
+
+La charge n'est pas plafonnée : un mois peut requérir plus de jours qu'il n'en
+contient.
+
+Un **bouton Charge** sur cette ligne ouvre une **fenêtre de saisie** qui répartit
+les durées sur trois niveaux : Type de document → Zone → Document. À chaque
+niveau, un champ vide affiche la valeur héritée du niveau au-dessus (grisée, en
+lecture seule) ; seules les valeurs **explicites** sont modifiables. L'enregistrement
+écrit chaque ligne affectée en un **seul lot** d'`UpdateRecord`.
 
 ## Conception : frise partagée et alignement arithmétique
 
@@ -61,7 +118,8 @@ que mesurée puis corrigée après coup : l'ancienne boucle
 mesure-DOM-puis-nudge-puis-retry de `Synchro/` disparaît, remplacée par une
 unique assertion de garde (`console.warn` si écart > 1px, jamais de boucle de
 correction). Les bornes de la frise sont l'**union** de la plage `TimeSegment`
-(`min(Start_At)` → `max(End_At)`) **et** de la plage de toutes les phases
+(1er jour du plus petit `Mois` → dernier jour du plus grand,
+`top/bounds.computeTimeSegmentBounds`) **et** de la plage de toutes les phases
 `Planning_Projet` (dateBounds du builder, via `computePlanningPhaseBounds` +
 `unionDateBounds` dans `main.js`), afin qu'une tâche dont les phases tombent hors
 du prévisionnel reste visible et navigable. La fenêtre visible se déplace
@@ -195,7 +253,34 @@ tâches **réalisées à 100 %** (colonne `Realise` ≥ 100).
 Son axe des temps est **coordonné avec la frise** (mêmes dates visibles que le
 pane bas ; `min`/`max` = fenêtre courante), donc il **suit le zoom et le
 déplacement** du planning (chaque viewport appliqué est transmis via
-`onRangeLabel` -> `planningChart.setViewport`). La **chronologie reste
+`onRangeLabel` -> `planningChart.setViewport`).
+
+**Calage horizontal sur le planning du bas** — même contrat que la section
+« CRITICAL: left-column alignment » de `assets/css/styles.css` : la zone de
+tracé démarre exactement à `--ps-left-col-width` du bord du pane, comme les
+colonnes Projeteurs / Ingénieurs. Le montage est structurel, pas laissé à la
+mise en page automatique de Chart.js :
+
+- `#ps-chart` est un flex : **colonne légende** de
+  `--ps-left-col-width - --ps-chart-axis-width` puis le canvas ;
+- l'**axe Y est épinglé** à `--ps-chart-axis-width` (`scales.y.afterFit`), donc
+  légende + axe = `--ps-left-col-width` et `chartArea.left` est déterministe ;
+- `layout.autoPadding: false` + `padding` horizontal nul +
+  `scales.x.afterFit` remettant `paddingLeft/Right` à 0 : sans cela Chart.js
+  réserve une marge (mesurée à 8 px à droite) pour ne pas rogner les libellés
+  d'extrémité, ce qui décale le tracé ;
+- `min`/`max` couvrent des **journées entières** (`getChartWindowBounds` :
+  `firstVisibleDate 00:00` -> `rangeEndDate + 1 jour 00:00`), comme
+  `sync/viewportMath.getDayBoundaryLeftPx` ;
+- les points sont au **vrai milieu** de leur bucket et les **traits verticaux
+  tombent sur les frontières** de bucket (1er du mois / lundi), via
+  `scales.x.afterBuildTicks`.
+
+Écart mesuré sur les trois zooms : **0 à 0,23 px** (le résidu vient des semaines
+de changement d'heure — l'axe est linéaire en millisecondes alors que la frise
+donne à chaque jour calendaire la même largeur).
+
+La **chronologie reste
 navigable** dans la vue graphique : molette = zoom, **glisser sur le graphique =
 déplacement** (`controller.bindPan(#ps-chart)`), toolbar semaine/mois/année — les
 deux panes bougent ensemble. Sa hauteur suit le splitter (même hauteur que la
@@ -206,19 +291,105 @@ case **par type de document présent** dans le projet (+ Total), toutes cochées
 départ. Décocher un type **masque** ses deux lignes (pleine + « réalisé »), le
 cocher les ré-affiche ; on affiche donc uniquement les types voulus. Le filtre
 est conservé au **zoom / déplacement** (ré-appliqué à chaque reconstruction des
-séries) et se réinitialise (tout coché) au changement de projet. La légende est
-en lecture seule (le filtre pilote la visibilité).
+séries) et se réinitialise (tout coché) au changement de projet.
 
-En mode **Editer**, le **clic droit** sur un segment ouvre le menu contextuel
-**Modifier** / **Supprimer le segment**, avec la **même fenêtre et les mêmes
-fonctionnalités que `gestion-depenses2`** : **Modifier** ouvre la modale
-« Modifier le segment » (`bottom/editSegmentModal.js`, portée depuis
-`#edit-segment-modal`) — plage au demi-jour près (Début / Fin + Matin /
-Après-midi), « jours effectifs travaillés » optionnel et « jours disponibles
-dans la plage » recalculés en direct, avec contrôle de chevauchement et
-d'effectif (multiple de 0,5, ≤ jours de la plage) avant écriture
-(`updateTimeSegment` + rafraîchissement). **Supprimer le segment** appelle
-`removeTimeSegment` (comme `gestion-depenses2`, sans confirmation).
+**Légende** (`#ps-chart-legend`, colonne de gauche du graphique) : la légende
+intégrée de Chart.js est désactivée (`plugins.legend.display: false` — placée en
+bas, sa hauteur rognait le tracé) au profit d'une liste HTML verticale dans la
+colonne de gauche, à la même largeur que la colonne des noms du planning du bas.
+Elle porte le titre de l'axe Y (« Tâches à réaliser », sorti du canvas où il
+consommait une partie de la bande d'axe) et rappelle la convention
+plein / pointillé. Elle est **en lecture seule** : le filtre ci-dessus pilote la
+visibilité, et la légende **grise** (`.is-off`) les types décochés.
+
+## Mode Editer du pane bas : un segment = un mois
+
+Le bouton du pane bas bascule entre **Editer** et **Verrouiller**
+(`bottom/chargeEditing.js`) ; hors mode Editer, un clic sur une piste n'a aucun
+effet et le menu contextuel ne s'ouvre pas. Le mode est **collant** : il est
+ré-appliqué après chaque écriture, parce qu'un rafraîchissement (`onChanged()`)
+remplace tout le HTML du board.
+
+**Le geste : un clic = un mois entier.** Il n'y a **ni glisser-créer, ni
+poignées de redimensionnement, ni sélection au demi-jour** — un segment couvre
+toujours l'intégralité de son mois. Le clic gauche sur une piste résout le mois
+sous le curseur (la barre cliquée, si elle en porte une, fait foi via son
+`data-month-key` ; sinon le créneau-jour sous le pointeur donne le mois), puis :
+
+- mois **libre** → ouverture de la fenêtre en **création** ;
+- mois **déjà occupé** → ouverture de la fenêtre en **édition** de ce segment.
+
+C'est cette règle (`resolveSegmentClickIntent`) qui tient l'**unicité (projet,
+personne, mois)** : un mois occupé se ré-édite, il ne se double jamais. Le
+contrôle de chevauchement de l'ancien modèle a disparu — il n'a plus d'objet.
+Un segment dont l'id n'est pas exploitable (id de synthèse `s-N`, quand la
+colonne `id` manque) est **ignoré** plutôt que dupliqué.
+
+**La fenêtre** (`bottom/editSegmentModal.js`, `#ps-edit-segment-modal`, même
+contenu que `#edit-segment-modal` de `gestion-depenses2`) s'intitule **« Segment
+mensuel »**. Le **mois et la personne** y sont en **lecture seule** (ils
+viennent du clic) ; le seul champ saisissable est **« Jours effectifs
+travaillés »**, en regard de **« Jours disponibles dans le mois »** — jours
+ouvrés du mois (week-ends **et** jours fériés exclus) **moins les demi-journées
+d'absence** de la personne (`Time-Out`), recalculés en direct.
+
+Validation avant écriture (`validateEditSegmentEffectif`) : la valeur est
+**obligatoire**, **strictement > 0** et **multiple de 0,5**. Elle n'est **pas**
+plafonnée : saisir plus que le disponible reste enregistrable, le champ passe
+simplement en `is-over-available` et la barre devient rouge (`is-incoherent`)
+avec l'info-bulle « Effectif X j > disponible après absences Y j ».
+
+**Rien n'est écrit dans Grist tant que la fenêtre n'a pas été validée** :
+« Enregistrer » déclenche `createTimeSegment` (mois libre) ou
+`updateTimeSegment` (mois occupé), puis un `onChanged()` qui re-fetch et
+re-rend. Un **verrou d'écriture partagé** au niveau module interdit toute
+seconde soumission tant que la première est en vol — y compris à travers un
+changement de projet, qui détruit et recrée la fenêtre, et qui rendrait sinon un
+verrou neuf permettant deux `AddRecord` sur le même (projet, personne, mois).
+Un **délai de garde de 30 s** (`SUBMIT_STALL_TIMEOUT_MS`) rend la fenêtre
+fermable si l'écriture ne répond jamais, avec un message explicatif, mais sans
+relâcher le verrou d'écriture.
+
+Le **clic droit** sur un segment ouvre le menu contextuel **Modifier** /
+**Supprimer le segment** : **Modifier** rouvre exactement la même fenêtre,
+amorcée depuis la barre visée ; **Supprimer le segment** appelle
+`removeTimeSegment` (comme `gestion-depenses2`, sans confirmation). `Echap`, un
+clic hors du menu ou la sortie du mode Editer referment le menu.
+
+## Migration `TimeSegment` : créer et remplir la colonne `Mois`
+
+À faire **à la main dans Grist**, sans formule.
+
+1. **Créer la colonne `Mois`** dans `TimeSegment`, de type **Date**.
+2. **La remplir** avec le **1er jour du mois** du segment (`01/09/2026` pour
+   septembre 2026). Le widget ne lit que l'**année et le mois** de cette date,
+   mais garder le 1er évite toute ambiguïté et correspond à ce que les widgets
+   écrivent eux-mêmes (`toGristMonthValue`).
+3. Une fois toutes les lignes reprises, `Start_At` et `End_At` peuvent être
+   **supprimées de la table** quand tu le juges bon. Rien ne les écrit plus.
+
+**Repli sur `Start_At`** — une ligne sans `Mois` reste lue : le mois est alors
+déduit de `Start_At` (`resolveSegmentMonthKey` dans `utils/monthSegments.js`).
+Ce repli est **inerte sans erreur** le jour où la colonne disparaît : la cellule
+vaut `undefined`, la résolution renvoie `""`, et la ligne est simplement écartée
+du rendu. Aucun message, aucun plantage.
+
+> ⚠️ **Une ligne legacy multi-mois s'effondre sur son mois de début.** Un
+> segment `Start_At = 15/09/2026`, `End_At = 20/01/2027` est lu comme un segment
+> de **septembre 2026 uniquement** : **tout son effectif est compté dans ce seul
+> mois**, et les mois d'octobre à janvier n'en voient plus rien. C'est inhérent
+> au repli (une seule date lue, aucune répartition), mais c'est une **perte de
+> données visible**. Ces lignes-là doivent être **éclatées manuellement en un
+> segment par mois** — c'est le seul cas où la reprise ne peut pas se faire par
+> simple recopie.
+
+**Effet attendu dans `Gestion-User`** : certains pourcentages d'occupation vont
+**baisser**. Ce widget proratisait auparavant `Allocation_Days` ; une ligne à
+`Effectif` vide y comptait donc une charge, alors qu'elle comptait déjà **0
+jour** dans `gestion-depenses2`. Désormais `Effectif` est **la** charge dans les
+deux widgets (`buildSegments` écarte les lignes à `Effectif` ≤ 0) : ces lignes
+tombent à 0 partout. Ce n'est pas une régression, c'est la fin d'une divergence
+entre les deux widgets.
 
 ## Développement
 
@@ -231,16 +402,24 @@ node --test "tests/**/*.test.mjs"
 ```
 
 Vérification visuelle/interaction (rendu vis-timeline, édition du plan de
-charge, alignement des deux panes) : servir le dossier en HTTP — les modules
+charge, alignement des deux panes) : servir le dépôt en HTTP — les modules
 ES échouent sous `file://` — et ouvrir le harnais de dev, qui charge un mock
 `window.grist` (`dev/mock-grist.js`) avec des données fictives
 (`dev/fixtures.js`) au lieu d'un vrai document Grist :
 
 ```bash
-cd planning-synchro
+# depuis la RACINE du depot, pas depuis planning-synchro/
 python -m http.server 8791
-# puis ouvrir http://localhost:8791/dev/harness.html
+# puis ouvrir http://localhost:8791/planning-synchro/dev/harness.html
 ```
+
+⚠️ **Servir `planning-synchro/` directement ne marche pas** :
+`assets/js/top/vendor/planningRealisation.js` importe
+`../../../../../shared/planning-closure-core.js`, qui sort de la racine du
+serveur. Le 404 est silencieux — il casse tout le graphe de modules ES sans
+lever la moindre erreur en console. Symptôme : la page se charge, mais le
+sélecteur de projet reste vide et `#ps-main` reste masqué. Si tu vois ça,
+vérifie d'abord depuis où tu sers.
 
 Les écritures `TimeSegment` faites via le mock sont **appliquées aux fixtures
 en mémoire** (`AddRecord` / `UpdateRecord` / `RemoveRecord`) — le harnais se

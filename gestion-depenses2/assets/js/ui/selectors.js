@@ -12,6 +12,9 @@ function fillSelect(selectEl, options, { placeholder = "", selectedValue = "" } 
     const option = document.createElement("option");
     option.value = String(optionConfig.value);
     option.textContent = optionConfig.label;
+    Object.entries(optionConfig.dataset || {}).forEach(([key, value]) => {
+      if (value != null && String(value).trim()) option.dataset[key] = String(value);
+    });
     selectEl.appendChild(option);
   });
 
@@ -53,12 +56,47 @@ function getWorkerRoleGroup(role) {
   return "Autres";
 }
 
+export function getAvailableTeamMembers(teamMembers, project = null) {
+  const existingNames = new Set(
+    (project?.workers || []).map((worker) => normalizeName(worker?.name))
+  );
+  const uniqueMembersByName = new Map();
+
+  (teamMembers || []).forEach((member) => {
+    const displayName = getWorkerDisplayName(member);
+    const personKey = normalizeName(displayName);
+
+    // Une personne peut avoir plusieurs lignes Team pour ses differentes
+    // adresses mail. Pour l'affectation projet, son prenom + nom constituent une
+    // seule identite et la premiere ligne conserve un id Grist valide a utiliser.
+    if (
+      !personKey ||
+      existingNames.has(personKey) ||
+      uniqueMembersByName.has(personKey)
+    ) {
+      return;
+    }
+
+    uniqueMembersByName.set(personKey, member);
+  });
+
+  return [...uniqueMembersByName.values()].sort((left, right) =>
+    getWorkerDisplayName(left).localeCompare(getWorkerDisplayName(right), "fr", {
+      sensitivity: "base",
+    })
+  );
+}
+
 export function renderProjectOptions(projectSelect, projects, selectedProjectId) {
   fillSelect(
     projectSelect,
     (projects || []).map((project) => ({
       value: project.id,
       label: `${project.projectNumber} - ${project.name}`,
+      dataset: {
+        projectId: project.id,
+        projectNumber: project.projectNumber,
+      },
     })),
     {
       placeholder: "Choisir un projet",
@@ -70,17 +108,7 @@ export function renderProjectOptions(projectSelect, projects, selectedProjectId)
 export function renderWorkerOptions(workerSelect, teamMembers, project = null) {
   workerSelect.innerHTML = "";
 
-  const existingNames = new Set(
-    (project?.workers || []).map((worker) => normalizeName(worker?.name))
-  );
-
-  const availableMembers = (teamMembers || [])
-    .filter((member) => !existingNames.has(normalizeName(getWorkerDisplayName(member))))
-    .sort((left, right) =>
-      getWorkerDisplayName(left).localeCompare(getWorkerDisplayName(right), "fr", {
-        sensitivity: "base",
-      })
-    );
+  const availableMembers = getAvailableTeamMembers(teamMembers, project);
 
   const placeholderOption = document.createElement("option");
   placeholderOption.value = "";

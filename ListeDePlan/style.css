@@ -1,11 +1,24 @@
+/* La page ne defile pas : #plans-output est la seule zone scrollable.
+   Sinon la hauteur figee de #plans-output (calc(100vh - 128px)) plus
+   l'en-tete, le bandeau de statut et les marges du body depassaient le
+   cadre de ~56px, ce qui ajoutait une deuxieme barre pleine hauteur,
+   collee a la vraie, qui ne faisait presque rien defiler. */
+html,
 body {
+    height: 100%;
+}
+
+body {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
     margin: 0;
     padding: 12px;
+    overflow: hidden;
     font-family: "Segoe UI", Arial, sans-serif;
     background-color: #f4f7fb;
     color: #173f67;
 }
-  
+
 .sticky-container {
     position: sticky;
     top: 0;
@@ -167,6 +180,19 @@ select:focus {
 }
 
 @media (max-width: 900px) {
+  /* La barre d'outils passe sur cinq lignes : il ne reste plus de hauteur
+     utile pour #plans-output. On rend la page defilante et on retire le
+     defilement interne de la liste, ce qui laisse la encore une seule barre. */
+  html,
+  body {
+    height: auto;
+  }
+
+  body {
+    display: block;
+    overflow: visible;
+  }
+
   .sticky-container {
     grid-template-columns: 1fr;
     align-items: stretch;
@@ -246,136 +272,317 @@ select:focus {
   overflow-wrap: anywhere;
 }
 
+/* =========================================================================
+   Boite "Preparer l'impression"
+   Une seule zone de defilement : le bloc entre l'en-tete et les actions.
+   Les deux listes ne defilent plus chacune de leur cote.
+
+   Toutes les regles sont portees par .print-options-dialog : AjouterProjet.css
+   est charge apres style.css et stylise tous les <dialog> (bordures rouges,
+   inputs pleine largeur, boutons blancs), il faut donc passer devant lui.
+   ========================================================================= */
+
 .print-options-dialog {
-  border: 1px solid #ed1b2d;
-  border-radius: 6px;
-  color: #004990;
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 32px));
+  margin: auto;
   padding: 0;
-  width: min(580px, calc(100vw - 32px));
+  border: 1px solid #d6e0ea;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #173f67;
+  box-shadow: 0 24px 64px rgba(18, 37, 63, 0.28);
 }
 
 .print-options-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.32);
+  background: rgba(15, 32, 52, 0.42);
 }
 
-.print-options-body {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-height: calc(100vh - 32px);
-  overflow: auto;
-  padding: 18px;
+.print-options-dialog .print-options-body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: min(720px, calc(100vh - 32px));
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
   background: #ffffff;
 }
 
-.print-options-body h3,
-.print-options-body h4 {
+.print-options-dialog .print-options-header {
+  padding: 15px 18px 12px;
+  border-bottom: 1px solid #e7eef6;
+}
+
+.print-options-dialog .print-options-header h3 {
   margin: 0;
+  color: #004990;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
-.print-options-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.print-options-dialog .print-options-intro {
+  margin: 3px 0 0;
+  color: #6b7d91;
+  font-size: 12.5px;
+  font-weight: 400;
 }
 
-.print-options-intro {
-  margin: 0;
-  font-size: 13px;
-}
-
-.print-type-order-list,
-.print-order-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: min(32vh, 280px);
+/* L'unique barre de defilement de la boite. Le padding droit est reduit
+   de la largeur de la gouttiere pour que le contenu reste aligne sur
+   l'en-tete et le pied. */
+.print-options-dialog .print-options-scroll {
+  min-height: 0;
+  padding: 0 8px 16px 18px;
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #c5d2e0 transparent;
 }
 
-.print-type-order-item,
-.print-zone-order-item,
-.print-index-item {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 32px;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
+.print-options-dialog .print-options-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.print-options-dialog .print-options-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.print-options-dialog .print-options-scroll::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: #c5d2e0;
+  background-clip: padding-box;
+}
+
+.print-options-dialog .print-options-scroll::-webkit-scrollbar-thumb:hover {
+  background: #9db1c7;
+  background-clip: padding-box;
+}
+
+.print-options-dialog .print-options-section {
+  display: block;
   margin: 0;
-  padding: 9px 10px;
-  border: 1px solid #ed1b2d;
-  border-radius: 4px;
-  box-sizing: border-box;
+}
+
+/* Colle en haut du defilement : on sait toujours si on regarde les types
+   ou les zones. */
+.print-options-dialog .print-options-section h4 {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0;
+  padding: 14px 0 7px;
+  border-bottom: 2px solid #004990;
   background: #ffffff;
   color: #004990;
-  font-weight: bold;
-  line-height: 20px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.print-options-dialog .print-type-order-list,
+.print-options-dialog .print-order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: none;
+  margin-top: 10px;
+  overflow: hidden; /* rogne les angles carres des lignes sur le rayon du groupe */
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  counter-reset: print-order;
+}
+
+.print-options-dialog .print-type-order-item,
+.print-options-dialog .print-zone-order-item,
+.print-options-dialog .print-index-item {
+  display: grid;
+  grid-template-columns: 22px 24px minmax(0, 1fr) 26px;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  margin: 0;
+  padding: 7px 10px;
+  border: 0;
+  border-bottom: 1px solid #edf2f8;
+  border-radius: 0;
+  box-sizing: border-box;
+  background: #ffffff;
+  color: #173f67;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
   cursor: grab;
 }
 
-.print-index-item {
-  grid-template-columns: 28px minmax(0, 1fr);
+.print-options-dialog .print-index-item {
+  grid-template-columns: 22px 24px minmax(0, 1fr);
   cursor: pointer;
 }
 
-.print-type-order-item.is-dragging,
-.print-zone-order-item.is-dragging {
-  opacity: 0.55;
+.print-options-dialog .print-type-order-item:last-child,
+.print-options-dialog .print-zone-order-item:last-child,
+.print-options-dialog .print-index-item:last-child {
+  border-bottom: 0;
 }
 
-.print-type-order-item input[type="checkbox"],
-.print-zone-order-item input[type="checkbox"],
-.print-index-item input[type="checkbox"] {
-  width: auto;
-  height: auto;
+.print-options-dialog .print-type-order-item input[type="checkbox"],
+.print-options-dialog .print-zone-order-item input[type="checkbox"],
+.print-options-dialog .print-index-item input[type="checkbox"] {
+  grid-column: 2;
+  width: 15px;
+  height: 15px;
+  min-width: 0;
   padding: 0;
   margin: 0;
-  border: initial;
-  box-sizing: content-box;
+  border: 0;
+  box-sizing: border-box;
   background: initial;
   accent-color: #004990;
   justify-self: center;
+  cursor: pointer;
 }
 
-.print-type-order-label,
-.print-zone-order-label,
-.print-index-label {
+/* L'ordre est l'information que cette boite sert a regler : seules les
+   lignes cochees portent un numero, et la numerotation se recalcule seule
+   au glisser-deposer comme au decochage. Sans support de :has(), les
+   numeros disparaissent simplement, rien d'autre ne bouge. */
+.print-options-dialog .print-type-order-item::before,
+.print-options-dialog .print-zone-order-item::before {
+  grid-column: 1;
+  content: "";
+  justify-self: center;
+  color: #004990;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.print-options-dialog .print-type-order-item:has(input:checked),
+.print-options-dialog .print-zone-order-item:has(input:checked) {
+  counter-increment: print-order;
+  background: #f2f8ff;
+}
+
+.print-options-dialog .print-type-order-item:has(input:checked)::before,
+.print-options-dialog .print-zone-order-item:has(input:checked)::before {
+  content: counter(print-order);
+}
+
+.print-options-dialog .print-type-order-label,
+.print-options-dialog .print-zone-order-label,
+.print-options-dialog .print-index-label {
+  grid-column: 3;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.print-type-order-handle,
-.print-zone-order-handle {
-  color: #004990;
-  font-weight: bold;
-  text-align: center;
-  user-select: none;
+.print-options-dialog .print-type-order-item:has(input:not(:checked)) .print-type-order-label,
+.print-options-dialog .print-zone-order-item:has(input:not(:checked)) .print-zone-order-label {
+  color: #93a2b2;
+  font-weight: 400;
 }
 
-.print-options-actions {
+.print-options-dialog .print-type-order-handle,
+.print-options-dialog .print-zone-order-handle {
+  grid-column: 4;
+  color: #b6c4d3;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: center;
+  user-select: none;
+  cursor: grab;
+}
+
+/* Les variantes :has() sont necessaires pour repasser devant la regle de
+   fond des lignes cochees, plus specifique que :hover seul. */
+.print-options-dialog .print-type-order-item:hover,
+.print-options-dialog .print-zone-order-item:hover,
+.print-options-dialog .print-type-order-item:has(input:checked):hover,
+.print-options-dialog .print-zone-order-item:has(input:checked):hover {
+  background: #e4effc;
+}
+
+.print-options-dialog .print-type-order-item.is-dragging,
+.print-options-dialog .print-zone-order-item.is-dragging,
+.print-options-dialog .print-type-order-item.is-dragging:has(input:checked),
+.print-options-dialog .print-zone-order-item.is-dragging:has(input:checked) {
+  background: #dcecff;
+  cursor: grabbing;
+  opacity: 0.5;
+}
+
+.print-options-dialog .print-options-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin: 4px 0 0;
-  padding: 0;
+  margin: 0;
+  padding: 12px 18px;
+  border-top: 1px solid #e7eef6;
+  background: #ffffff;
+  list-style: none;
 }
 
-.print-options-actions button {
+.print-options-dialog .print-options-actions button {
+  min-height: 36px;
   padding: 8px 14px;
-  border: none;
-  border-radius: 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
-  font-weight: bold;
+  transition: background-color 130ms ease, border-color 130ms ease, color 130ms ease;
 }
 
-#print-options-confirm {
+.print-options-dialog .print-options-actions button.cancel-button {
+  border-color: #c6d4e2;
+  background: #ffffff;
+  color: #004990;
+}
+
+.print-options-dialog .print-options-actions button.cancel-button:hover {
+  border-color: #004990;
+  background: #eef4fb;
+  opacity: 1;
+}
+
+.print-options-dialog #print-options-confirm {
+  border-color: #004990;
   background: #004990;
   color: #ffffff;
 }
 
-#print-options-confirm:hover {
-  background: #ed1b2d;
+.print-options-dialog #print-options-confirm:hover {
+  border-color: #123b68;
+  background: #123b68;
+  opacity: 1;
+}
+
+.print-options-dialog button:focus-visible,
+.print-options-dialog input:focus-visible {
+  outline: 2px solid #004990;
+  outline-offset: 2px;
+}
+
+@media (max-width: 520px) {
+  .print-options-dialog .print-options-actions {
+    flex-direction: column-reverse;
+  }
+
+  .print-options-dialog .print-options-actions button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .print-options-dialog .print-options-actions button {
+    transition-duration: 0.01ms;
+  }
 }
 
 .manage-zone-dialog {

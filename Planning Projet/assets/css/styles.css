@@ -104,7 +104,6 @@ body.is-planning-pane-resizing * {
   min-width: 0;
 }
 
-.nav-buttons,
 .zoom-buttons,
 .filters {
   display: flex;
@@ -112,7 +111,6 @@ body.is-planning-pane-resizing * {
   gap: 4px;
 }
 
-.nav-buttons,
 .zoom-buttons {
   flex: 0 0 auto;
 }
@@ -1604,6 +1602,54 @@ body.planning-row-dragging {
   border-bottom: 0;
 }
 
+/* Application groupée de la durée : l'en-tête garde sa colonne, les deux contrôles
+   se rangent dessous sans l'élargir. */
+.planning-ref-bulk-duration-label {
+  display: block;
+}
+
+.planning-ref-bulk-duration-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.planning-ref-bulk-duration {
+  width: 56px;
+  border: 1px solid #bfd0e7;
+  border-radius: 6px;
+  padding: 2px 6px;
+  background: #ffffff;
+  color: #000000;
+  font: inherit;
+  font-weight: 400;
+}
+
+.planning-ref-bulk-duration-apply {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid #bfd0e7;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #004990;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.planning-ref-bulk-duration-apply:hover:not(:disabled) {
+  background: #e8f0fb;
+  border-color: #004990;
+}
+
+.planning-ref-bulk-duration-apply:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .planning-reference-details-table__duration {
   width: 92px;
   border: 1px solid #bfd0e7;
@@ -1705,6 +1751,202 @@ body.planning-row-dragging {
 .planning-reference-details-table input:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
+   Durées par défaut par type de document.
+   Même coque que la fenêtre « Détails » des références : <dialog> natif, mêmes
+   tokens de bordure, de rayon et de bleu. Seules les colonnes du tableau et le
+   sélecteur de mode ajoutent du style, faute d'équivalent existant.
+   --------------------------------------------------------------------------- */
+.planning-duration-defaults-dialog {
+  width: min(760px, calc(100vw - 32px));
+  border: 1px solid #bcc9d6;
+  border-radius: 8px;
+  padding: 18px;
+  color: #1f2937;
+  background: #ffffff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+}
+
+.planning-duration-defaults-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.planning-duration-defaults-dialog__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.planning-duration-defaults-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.planning-duration-defaults-dialog h3 {
+  margin: 0;
+  color: #004990;
+}
+
+.planning-duration-defaults-dialog__close {
+  border: 0;
+  background: transparent;
+  color: #475569;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.planning-duration-defaults-dialog__line,
+.planning-duration-defaults-dialog__summary,
+.planning-duration-defaults-dialog__empty {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+}
+
+.planning-duration-defaults-dialog__error {
+  margin: 0;
+  color: #b91c1c;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.planning-duration-defaults-dialog__error[hidden] {
+  display: none;
+}
+
+.planning-duration-defaults-dialog__body {
+  max-height: min(420px, calc(100vh - 260px));
+  overflow: auto;
+  border: 1px solid #d8e2f0;
+  border-radius: 6px;
+}
+
+.planning-duration-defaults-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.planning-duration-defaults-table th,
+.planning-duration-defaults-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #e3eaf5;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.planning-duration-defaults-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8fbff;
+  color: #0f294d;
+  font-weight: 700;
+}
+
+.planning-duration-defaults-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.planning-duration-defaults-table__type {
+  font-weight: 600;
+  color: #0f294d;
+}
+
+.planning-duration-defaults-table__count {
+  width: 92px;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.planning-duration-defaults-table__duration {
+  width: 92px;
+  border: 1px solid #bfd0e7;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #ffffff;
+  color: #000000;
+  font: inherit;
+}
+
+.planning-duration-defaults-table__mode {
+  width: 100%;
+  min-width: 150px;
+  border: 1px solid #bfd0e7;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #ffffff;
+  color: #1d2e43;
+  font: inherit;
+}
+
+/* Le résumé renvoie l'utilisateur « aux durées en rouge » : encore faut-il qu'elles
+   le soient. */
+.planning-duration-defaults-table__duration.is-invalid {
+  border-color: #b91c1c;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.planning-duration-defaults-table__duration:focus,
+.planning-duration-defaults-table__mode:focus {
+  outline: none;
+  border-color: #78a6da;
+  box-shadow: 0 0 0 3px rgba(87, 143, 209, 0.18);
+}
+
+/* Un créneau qui n'existe pas pour ce type reste visible mais inerte : le masquer
+   ferait croire à un oubli d'affichage. */
+.planning-duration-defaults-table__unavailable {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.planning-duration-defaults-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.planning-duration-defaults-dialog__actions button {
+  padding: 8px 12px;
+  border: 1px solid #bcc9d6;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #1f2937;
+  cursor: pointer;
+}
+
+.planning-duration-defaults-dialog__actions .planning-duration-defaults-dialog__apply {
+  border-color: #004990;
+  background: #004990;
+  color: #ffffff;
+}
+
+.planning-duration-defaults-dialog__actions button:disabled,
+.planning-duration-defaults-table input:disabled,
+.planning-duration-defaults-table select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+#toolbar .planning-duration-defaults-toggle {
+  min-width: 74px;
+  border-color: #b7c7d9;
+  font-weight: 700;
+  color: #23415f;
+  box-shadow: inset 0 0 0 1px rgba(35, 65, 95, 0.05);
+}
+
+#toolbar .planning-duration-defaults-toggle:hover:not(:disabled) {
+  border-color: #7fa7cf;
+  background-color: #f1f7ff;
 }
 
 #planningTimeline .group-row-grid .cell-type {
@@ -2208,15 +2450,14 @@ body #toolbar.grist-service-context-host::-webkit-scrollbar {
   display: none;
 }
 
-body #toolbar.grist-service-context-host > .nav-buttons,
 body #toolbar.grist-service-context-host > .zoom-buttons {
   flex: 0 0 auto;
   white-space: nowrap;
 }
 
 body #toolbar.grist-service-context-host > .filters {
-  flex: 1 1 430px;
-  min-width: 350px;
+  flex: 1 1 508px;
+  min-width: 428px;
   white-space: nowrap;
 }
 
@@ -2263,8 +2504,8 @@ body #toolbar.grist-service-context-host > #grist-service-context-control .grist
   }
 
   body #toolbar.grist-service-context-host > .filters {
-    flex-basis: 390px;
-    min-width: 320px;
+    flex-basis: 468px;
+    min-width: 398px;
     gap: 3px;
   }
 
@@ -2292,8 +2533,8 @@ body #toolbar.grist-service-context-host > #grist-service-context-control .grist
   }
 
   body #toolbar.grist-service-context-host > .filters {
-    flex-basis: 340px;
-    min-width: 300px;
+    flex-basis: 418px;
+    min-width: 378px;
   }
 
   body #toolbar.grist-service-context-host #projectDropdown,
@@ -2329,8 +2570,8 @@ body #toolbar.grist-service-context-host > #grist-service-context-control .grist
 
 @media (max-width: 980px) {
   body #toolbar.grist-service-context-host > .filters {
-    flex-basis: 300px;
-    min-width: 282px;
+    flex-basis: 378px;
+    min-width: 360px;
   }
 
   body #toolbar.grist-service-context-host .toolbar-label {

@@ -2,20 +2,25 @@
 
 grist.ready({ requiredAccess: "full" });
 
+if (!window.BordereauCore) {
+  throw new Error("BordereauCore est indisponible.");
+}
+
 /** -------------------------
  *  Constantes / état global
  *  ------------------------- */
 let records = [];
 let allPlans = [];
-let allProjects = [];
 let allEnvois = [];
+let bordereauRefreshSequence = 0;
 
 const BORDEREAU_TABLE = "Envois";
 const PLANS_TABLE = "ListePlan_NDC_COF";
 const PROJET_TABLE = "Projets2";
+const TYPE_DOCUMENT_COLUMN = "Type_Document";
 const SHARED_PROJECT_STORAGE_KEY = "grist.selected-project";
 const SHARED_PROJECT_ID_STORAGE_KEY = "grist.selected-project-id";
-let _projectsData = []; // [{id, number, name}]
+let _projectsData = []; // [{id, ids, number, name, names}]
 const addElementsState = {
   selectedPlanKeys: new Set(),
   plansByKey: new Map(),
@@ -72,61 +77,51 @@ function getDateValue() {
 }
 
 function textValue(value) {
-  if (value && typeof value === "object") {
-    if (typeof value.details === "string") return value.details.trim();
-    if (typeof value.display === "string") return value.display.trim();
-    if (typeof value.label === "string") return value.label.trim();
-    if (typeof value.name === "string") return value.name.trim();
-  }
-  return String(value ?? "").trim();
+  return window.BordereauCore.textValue(value);
 }
 
 function normalizeCompareValue(value) {
-  return textValue(value)
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
+  return window.BordereauCore.normalizeCompareValue(value);
+}
+
+function normalizeIdentityValue(value) {
+  return window.BordereauCore.normalizeIdentityValue(value);
 }
 
 function resolveProjectName(value) {
   const raw = textValue(value);
   if (!raw) return "";
 
-  const projectById = _projectsData.find((project) => String(project.id) === raw);
+  const projectById = _projectsData.find((project) => (
+    [project.id, ...(project.ids || [])].some((id) => String(id) === raw)
+  ));
   if (projectById) return projectById.name;
 
   const projectByName = _projectsData.find(
-    (project) => normalizeCompareValue(project.name) === normalizeCompareValue(raw)
+    (project) => [project.name, ...(project.names || [])].some(
+      (name) => normalizeCompareValue(name) === normalizeCompareValue(raw)
+    )
   );
   return projectByName ? projectByName.name : raw;
 }
 
 function compareText(left, right) {
-  return textValue(left).localeCompare(textValue(right), "fr", {
-    numeric: true,
-    sensitivity: "base",
-  });
+  return window.BordereauCore.compareText(left, right);
 }
 
 function getPlanKey(plan) {
-  return normalizeCompareValue(plan?.NumeroDocument);
+  return window.BordereauCore.getDocumentKey(
+    plan?.NumeroDocument,
+    plan?.Type_document ?? plan?.Type_Document
+  );
 }
 
-function getPlanIndiceKey(planNumber, indice) {
-  return JSON.stringify([
-    normalizeCompareValue(planNumber),
-    normalizeCompareValue(indice),
-  ]);
+function getPlanIndiceKey(planNumber, typeDocument, indice) {
+  return window.BordereauCore.getDocumentIndiceKey(planNumber, typeDocument, indice);
 }
 
 function getPlanIndiceKeyFromPlan(plan) {
-  return getPlanIndiceKey(plan?.NumeroDocument, plan?.Indice);
-}
-
-function isEnvoyeValue(value) {
-  return value === true || value === 1 || normalizeCompareValue(value) === "true";
+  return getPlanIndiceKey(plan?.NumeroDocument, plan?.Type_document, plan?.Indice);
 }
 
 function getEnvoiRows(tableData) {
@@ -134,28 +129,25 @@ function getEnvoiRows(tableData) {
   return ids.map((id, index) => ({
     id,
     Projet: tableData.Projet?.[index],
+    Ref: tableData.Ref?.[index],
+    Date_Bordereau: tableData.Date_Bordereau?.[index],
     N_Plan: tableData.N_Plan?.[index],
+    Type_Document: tableData.Type_Document?.[index],
     Indice: tableData.Indice?.[index],
+    Designation: tableData.Designation?.[index],
+    NbrExemplaires: tableData.NbrExemplaires?.[index],
     Envoye: tableData.Envoye?.[index],
+    Service: tableData.Service?.[index],
   }));
 }
 
 function getSentPlanIndiceKeys(projectName) {
-  const selectedProjectKey = normalizeCompareValue(projectName);
-  const sentKeys = new Set();
-  if (!selectedProjectKey) return sentKeys;
-
-  allEnvois.forEach((record) => {
-    if (!isEnvoyeValue(record?.Envoye)) return;
-    if (normalizeCompareValue(resolveProjectName(record?.Projet)) !== selectedProjectKey) return;
-
-    const planKey = normalizeCompareValue(record?.N_Plan);
-    const indiceKey = normalizeCompareValue(record?.Indice);
-    if (!planKey || !indiceKey) return;
-    sentKeys.add(getPlanIndiceKey(record.N_Plan, record.Indice));
-  });
-
-  return sentKeys;
+  return window.BordereauCore.buildSentDocumentIndiceKeys(
+    allEnvois,
+    projectName,
+    getPlanRows(),
+    resolveProjectName
+  );
 }
 
 /** -------------------------
@@ -221,35 +213,43 @@ function getPlanRows() {
   }));
 }
 
+function getProjectPlanTypeCandidates(projectName, planNumber) {
+  return window.BordereauCore.collectTypeCandidates(
+    getPlanRows(),
+    projectName,
+    planNumber,
+    resolveProjectName
+  );
+}
+
+function resolveRecordType(record) {
+  const storedType = textValue(record?.Type_Document);
+  if (storedType) {
+    return { status: "stored", typeDocument: storedType, candidates: [storedType] };
+  }
+  return window.BordereauCore.resolveMissingType(
+    getPlanRows(),
+    resolveProjectName(record?.Projet),
+    record?.N_Plan,
+    resolveProjectName
+  );
+}
+
 function isNewerPlanIndice(candidate, current) {
   return textValue(candidate?.Indice) > textValue(current?.Indice);
 }
 
-function findLatestProjectPlan(projectName, planNumber) {
-  const projectKey = normalizeCompareValue(projectName);
-  const planKey = normalizeCompareValue(planNumber);
-  if (!projectKey || !planKey) return null;
-
-  return getPlanRows()
-    .filter((plan) =>
-      normalizeCompareValue(plan.Nom_projet) === projectKey &&
-      normalizeCompareValue(plan.NumeroDocument) === planKey &&
-      textValue(plan.Indice)
-    )
-    .reduce((latest, current) => {
-      if (!latest) return current;
-      return isNewerPlanIndice(current, latest) ? current : latest;
-    }, null);
-}
-
 function findProjectPlanForRecord(projectName, record) {
   const projectKey = normalizeCompareValue(projectName);
-  const planKey = normalizeCompareValue(record?.N_Plan);
-  if (!projectKey || !planKey) return null;
+  const planKey = normalizeIdentityValue(record?.N_Plan);
+  const resolution = resolveRecordType(record);
+  const typeKey = normalizeIdentityValue(resolution.typeDocument);
+  if (!projectKey || !planKey || !typeKey) return null;
 
   const matchingPlans = getPlanRows().filter((plan) =>
     normalizeCompareValue(plan.Nom_projet) === projectKey &&
-    normalizeCompareValue(plan.NumeroDocument) === planKey
+    normalizeIdentityValue(plan.NumeroDocument) === planKey &&
+    normalizeIdentityValue(plan.Type_document) === typeKey
   );
   if (!matchingPlans.length) return null;
 
@@ -352,7 +352,7 @@ function formatCalendarDateKey(dateKey) {
 }
 
 function getProjectPlanOptions(projectName) {
-  const latestByNumber = new Map();
+  const latestByDocument = new Map();
   const projectKey = normalizeCompareValue(projectName);
 
   getPlanRows().forEach((plan) => {
@@ -360,16 +360,19 @@ function getProjectPlanOptions(projectName) {
     if (!textValue(plan.Indice)) return;
 
     const number = textValue(plan.NumeroDocument);
-    if (!number) return;
+    const typeDocument = textValue(plan.Type_document);
+    if (!number || !typeDocument) return;
 
-    const current = latestByNumber.get(number);
+    const key = getPlanKey(plan);
+    const current = latestByDocument.get(key);
     if (!current || isNewerPlanIndice(plan, current)) {
-      latestByNumber.set(number, plan);
+      latestByDocument.set(key, plan);
     }
   });
 
-  return Array.from(latestByNumber.values()).sort((a, b) =>
-    compareText(a.NumeroDocument, b.NumeroDocument)
+  return Array.from(latestByDocument.values()).sort((a, b) =>
+    compareText(a.NumeroDocument, b.NumeroDocument) ||
+    compareText(a.Type_document, b.Type_document)
   );
 }
 
@@ -379,8 +382,9 @@ function getPlanDisplayName(plan) {
 
 function getFullPlanLabel(plan) {
   const number = textValue(plan?.NumeroDocument);
+  const typeDocument = getPlanTypeLabel(plan);
   const name = getPlanDisplayName(plan);
-  return name ? `${number} - ${name}` : number;
+  return [number, typeDocument, name].filter(Boolean).join(" - ");
 }
 
 function getPlanTypeLabel(plan) {
@@ -402,23 +406,24 @@ function sortProjectPlanElements(plans) {
 
 function getLatestProjectPlanElements(projectName) {
   const selectedProjectKey = normalizeCompareValue(projectName);
-  const latestByNumber = new Map();
+  const latestByDocument = new Map();
 
   getPlanRows().forEach((plan) => {
     if (normalizeCompareValue(plan.Nom_projet) !== selectedProjectKey) return;
     if (!textValue(plan.Indice)) return;
 
     const number = textValue(plan.NumeroDocument);
-    if (!number) return;
+    const typeDocument = textValue(plan.Type_document);
+    if (!number || !typeDocument) return;
 
     const key = getPlanKey(plan);
-    const current = latestByNumber.get(key);
+    const current = latestByDocument.get(key);
     if (!current || isNewerPlanIndice(plan, current)) {
-      latestByNumber.set(key, plan);
+      latestByDocument.set(key, plan);
     }
   });
 
-  return sortProjectPlanElements(Array.from(latestByNumber.values()));
+  return sortProjectPlanElements(Array.from(latestByDocument.values()));
 }
 
 function getAvailableLatestProjectPlanElements(projectName) {
@@ -431,7 +436,7 @@ function getAvailableLatestProjectPlanElements(projectName) {
 function getProjectPlanElementsForDate(projectName, dateValue, isEligible = () => true) {
   const selectedProjectKey = normalizeCompareValue(projectName);
   const selectedDateKey = getCalendarDateKey(dateValue);
-  const matchingByNumber = new Map();
+  const matchingByDocument = new Map();
   if (!selectedProjectKey || !selectedDateKey) return [];
 
   getPlanRows().forEach((plan) => {
@@ -443,13 +448,13 @@ function getProjectPlanElementsForDate(projectName, dateValue, isEligible = () =
     const key = getPlanKey(plan);
     if (!key) return;
 
-    const current = matchingByNumber.get(key);
+    const current = matchingByDocument.get(key);
     if (!current || isNewerPlanIndice(plan, current)) {
-      matchingByNumber.set(key, plan);
+      matchingByDocument.set(key, plan);
     }
   });
 
-  return sortProjectPlanElements(Array.from(matchingByNumber.values()));
+  return sortProjectPlanElements(Array.from(matchingByDocument.values()));
 }
 
 function getDateAwareProjectPlanElements(projectName, dateValue) {
@@ -475,11 +480,20 @@ function getDateAwareProjectPlanElements(projectName, dateValue) {
 }
 
 function getCurrentBordereauPlanKeys() {
-  return new Set(
-    getCurrentBordereauRecords()
-      .map((record) => normalizeCompareValue(record.N_Plan))
-      .filter(Boolean)
-  );
+  const projectName = getProject();
+  const keys = new Set();
+  getCurrentBordereauRecords().forEach((record) => {
+    const planNumber = textValue(record.N_Plan);
+    if (!planNumber) return;
+    const storedType = textValue(record.Type_Document);
+    const typeCandidates = storedType
+      ? [storedType]
+      : getProjectPlanTypeCandidates(projectName, planNumber);
+    typeCandidates.forEach((typeDocument) => {
+      keys.add(window.BordereauCore.getDocumentKey(planNumber, typeDocument));
+    });
+  });
+  return keys;
 }
 
 function resetAddElementsState() {
@@ -833,6 +847,7 @@ async function addSelectedElementsToBordereau() {
         Date_Bordereau: date,
         Envoye: false,
         N_Plan: textValue(plan.NumeroDocument),
+        Type_Document: textValue(plan.Type_document),
         Indice: textValue(plan.Indice),
         Designation: getPlanDisplayName(plan),
       },
@@ -903,50 +918,165 @@ async function updateEnvoyeForCurrentBordereau(sent) {
 /** -------------------------
  *  Grist records (view)
  *  ------------------------- */
-window.GristServiceContext.onRecords(async (newRecords) => {
-  records = newRecords || [];
+// Bordereau affiché lors du dernier rendu : sert à distinguer un simple
+// rafraîchissement de données (le défilement appartient à l'utilisateur) d'un
+// changement de projet ou de référence (repartir du haut est attendu).
+let lastRenderedBordereauKey = "";
+let legacyTypeBackfillPromise = null;
+
+function getBordereauRenderKey() {
+  return `${getProject()}|${getRef()}`;
+}
+
+// Restitue le défilement une fois tout de suite, une fois après la mise en page :
+// le tableau ne fige la hauteur de ses lignes qu'une frame plus tard.
+function captureBordereauScroll() {
+  const scroller = document.scrollingElement || document.documentElement;
+  const panes = [document.querySelector(".main-container"), $("addElementsList")];
+  const documentTop = scroller ? scroller.scrollTop : 0;
+  const paneTops = panes.map((pane) => (pane ? pane.scrollTop : 0));
+
+  return () => {
+    const restore = () => {
+      if (scroller) scroller.scrollTop = documentTop;
+      panes.forEach((pane, index) => {
+        if (pane) pane.scrollTop = paneTops[index];
+      });
+    };
+    restore();
+    requestAnimationFrame(restore);
+  };
+}
+
+function applyResolvedTypesToCaches(resolvedTypesById) {
+  if (!resolvedTypesById.size) return;
+  [records, allEnvois].forEach((rows) => {
+    rows.forEach((record) => {
+      const typeDocument = resolvedTypesById.get(Number(record?.id));
+      if (typeDocument) record.Type_Document = typeDocument;
+    });
+  });
+}
+
+async function backfillUniqueLegacyTypes() {
+  if (legacyTypeBackfillPromise) return legacyTypeBackfillPromise;
+
+  legacyTypeBackfillPromise = (async () => {
+    const assignments = window.BordereauCore.buildUniqueTypeAssignments(
+      allEnvois,
+      getPlanRows(),
+      resolveProjectName
+    );
+    const resolvedTypesById = new Map(
+      assignments.map(({ recordId, typeDocument }) => [recordId, typeDocument])
+    );
+
+    const actions = Array.from(resolvedTypesById, ([recordId, typeDocument]) => [
+      "UpdateRecord",
+      BORDEREAU_TABLE,
+      recordId,
+      { [TYPE_DOCUMENT_COLUMN]: typeDocument },
+    ]);
+    if (!actions.length) return 0;
+
+    await applyUserActionsInBatches(actions);
+    applyResolvedTypesToCaches(resolvedTypesById);
+    return actions.length;
+  })();
+
+  try {
+    return await legacyTypeBackfillPromise;
+  } finally {
+    legacyTypeBackfillPromise = null;
+  }
+}
+
+async function refreshBordereauFromRecords(newRecords) {
+  const refreshSequence = ++bordereauRefreshSequence;
+  const contextGeneration = Number(
+    window.GristServiceContext.getState?.()?.generation
+  );
+  const nextRecords = Array.isArray(newRecords) ? newRecords : records;
+  const isCurrentRefresh = () => {
+    const currentGeneration = Number(
+      window.GristServiceContext.getState?.()?.generation
+    );
+    return refreshSequence === bordereauRefreshSequence && (
+      !Number.isFinite(contextGeneration) ||
+      !Number.isFinite(currentGeneration) ||
+      contextGeneration === currentGeneration
+    );
+  };
 
   // Tables de référence
-  const envoisPromise = grist.docApi.fetchTable(BORDEREAU_TABLE).catch((error) => {
+  const projectsPromise = ensureProjectDropdownReady();
+  const envoisPromise = grist.docApi.fetchTable(BORDEREAU_TABLE, {
+    requiredColumns: [TYPE_DOCUMENT_COLUMN],
+  }).catch((error) => {
     console.warn("Impossible de charger l'historique complet des envois :", error);
     return null;
   });
-  [allPlans, allProjects] = await Promise.all([
+  const [nextPlans, , envoisTable] = await Promise.all([
     grist.docApi.fetchTable(PLANS_TABLE),
-    grist.docApi.fetchTable(PROJET_TABLE),
+    projectsPromise,
+    envoisPromise,
   ]);
-  const envoisTable = await envoisPromise;
-  allEnvois = envoisTable ? getEnvoiRows(envoisTable) : records.slice();
+  if (!isCurrentRefresh()) return;
+  if (window.BordereauCore.isTableColumnDefinitelyMissing(
+    envoisTable,
+    TYPE_DOCUMENT_COLUMN
+  )) {
+    throw new Error(`La colonne ${BORDEREAU_TABLE}.${TYPE_DOCUMENT_COLUMN} est introuvable.`);
+  }
+  const nextEnvois = envoisTable ? getEnvoiRows(envoisTable) : nextRecords.slice();
 
-  populateProjectDropdown();
+  records = nextRecords;
+  allPlans = nextPlans;
+  allEnvois = nextEnvois;
+
+  await backfillUniqueLegacyTypes();
+  if (!isCurrentRefresh()) return;
+
+  const restoreScroll = getBordereauRenderKey() === lastRenderedBordereauKey
+    ? captureBordereauScroll()
+    : null;
 
   // sync UI (date + envoyé + table)
   await loadBordereauData();
   displayInvoiceTable();
   refreshOpenAddElementsDialog();
+  if (restoreScroll) restoreScroll();
+}
+
+window.GristServiceContext.watchContextTable(BORDEREAU_TABLE, refreshBordereauFromRecords, {
+  nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
+  projectScopedSignals: true,
+  acceptAnyNativeTableSignal: true,
+});
+
+// Les lignes du bordereau dépendent aussi de la liste des plans, qui peut être
+// éditée depuis un autre widget.
+window.GristServiceContext.watchContextTables([PLANS_TABLE], () => {
+  void refreshBordereauFromRecords(records);
+}, {
+  nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
+  projectScopedSignals: true,
+  acceptAnyNativeTableSignal: true,
 });
 
 /** -------------------------
  *  Dropdown projet
  *  ------------------------- */
-function populateProjectDropdown() {
+function populateProjectDropdown(projectRows) {
   const projectDropdown = $("projectDropdown");
 
-  // Construire _projectsData depuis allProjects (table Projets complète)
-  const ids = Array.isArray(allProjects.id) ? allProjects.id : [];
-  const numbers = Array.isArray(allProjects.Numero_de_projet) ? allProjects.Numero_de_projet : [];
-  const names = Array.isArray(allProjects.Nom_de_projet) ? allProjects.Nom_de_projet : [];
-  _projectsData = ids
-    .map((id, i) => ({
-      id: Number(id),
-      number: String(numbers[i] || '').trim(),
-      name: String(names[i] || '').trim(),
-    }))
-    .filter((p) => p.id > 0 && p.name)
-    .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base', numeric: true }));
+  // Le watcher fournit uniquement les projets autorisés et écarte déjà les
+  // réponses périmées lors d'un changement de contexte.
+  _projectsData = window.BordereauCore.buildProjectCatalog(projectRows);
 
-  const currentId = readSharedProjectId();
-  const currentValue = projectDropdown.value || readSharedProjectSelection();
+  const currentProject = window.GristServiceContext?.getCurrentProject?.();
+  const currentId = Number(currentProject?.id) || readSharedProjectId();
+  const currentValue = currentProject?.name || projectDropdown.value || readSharedProjectSelection();
 
   while (projectDropdown.options.length > 1) projectDropdown.remove(1);
 
@@ -961,16 +1091,40 @@ function populateProjectDropdown() {
   // Restaurer par ID d'abord, puis par nom
   let restored = '';
   if (currentId) {
-    const found = _projectsData.find((p) => p.id === currentId);
+    const found = _projectsData.find((p) => (
+      p.id === currentId || p.ids.includes(currentId)
+    ));
     if (found) restored = found.name;
   }
   if (!restored) {
     const norm = (s) => String(s || '').trim().toLowerCase();
-    const found = _projectsData.find((p) => norm(p.name) === norm(currentValue));
+    const found = _projectsData.find((p) => (
+      [p.name, ...p.names].some((name) => norm(name) === norm(currentValue))
+    ));
     if (found) restored = found.name;
   }
   projectDropdown.value = restored;
 }
+
+async function ensureProjectDropdownReady() {
+  if (_projectsData.length) return;
+  await window.GristServiceContext.whenReady();
+  if (_projectsData.length) return;
+  populateProjectDropdown(window.GristServiceContext.getAllowedProjects());
+}
+
+// Le catalogue projets vit indépendamment d'Envois : même un historique vide
+// doit laisser le choix du projet disponible.
+window.GristServiceContext.watchContextTable(PROJET_TABLE, async (projectRows) => {
+  populateProjectDropdown(projectRows);
+  await loadBordereauData();
+  displayInvoiceTable();
+  refreshOpenAddElementsDialog();
+}, {
+  nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
+  projectScopedSignals: true,
+  acceptAnyNativeTableSignal: true,
+});
 
 /** -------------------------
  *  Ref : input + flèches
@@ -1088,12 +1242,60 @@ async function updateBordereauData() {
   }
 }
 
+function appendSelectOption(select, value, label, { disabled = false } = {}) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  option.disabled = disabled;
+  select.appendChild(option);
+  return option;
+}
+
+function buildTypeDocumentSelect(record, projectName) {
+  const select = document.createElement("select");
+  select.className = "type-document-select";
+  const storedType = textValue(record.Type_Document);
+  const candidates = getProjectPlanTypeCandidates(projectName, record.N_Plan);
+  const storedTypeKey = normalizeIdentityValue(storedType);
+  const matchingStoredIndex = candidates.findIndex(
+    (candidate) => normalizeIdentityValue(candidate) === storedTypeKey
+  );
+
+  if (!storedType) {
+    appendSelectOption(
+      select,
+      "",
+      candidates.length ? "Choisir un type" : "Type introuvable",
+      { disabled: candidates.length === 0 }
+    );
+  } else if (matchingStoredIndex < 0) {
+    candidates.unshift(storedType);
+  } else {
+    candidates[matchingStoredIndex] = storedType;
+  }
+
+  candidates.forEach((typeDocument) => {
+    appendSelectOption(select, typeDocument, typeDocument);
+  });
+
+  select.value = storedType;
+  // Le type est une donnée d'identité : il n'est sélectionnable que pour
+  // compléter une ancienne ligne encore vide, même si le bordereau est envoyé.
+  select.disabled = candidates.length === 0 || Boolean(storedType);
+  select.dataset.wasMissing = storedType ? "false" : "true";
+  select.title = !storedType && candidates.length > 1
+    ? "Plusieurs types correspondent a ce numero : selection obligatoire."
+    : "";
+  return { select, candidates, storedType };
+}
+
 /** -------------------------
  *  Rendu du tableau
  *  ------------------------- */
 function displayInvoiceTable() {
   const selectedProjectName = getProject();
   const refValue = getRef();
+  lastRenderedBordereauKey = `${selectedProjectName}|${refValue}`;
   const tbody = document.querySelector("#invoiceTable tbody");
   const bulkFillButton = $("bulkNbrExemplairesButton");
   if (bulkFillButton) bulkFillButton.disabled = true;
@@ -1126,11 +1328,7 @@ function displayInvoiceTable() {
 
   // Options plans : uniquement ceux qui ont un Indice non vide dans ListePlan_NDC_COF
   const planOptions = getProjectPlanOptions(selectedProjectName);
-  const selectedPlanKeys = new Set(
-    refRecords
-      .map((record) => normalizeCompareValue(record.N_Plan))
-      .filter(Boolean)
-  );
+  const selectedPlanKeys = getCurrentBordereauPlanKeys();
 
   refRecords.forEach((record) => {
     const row = tbody.insertRow();
@@ -1138,9 +1336,24 @@ function displayInvoiceTable() {
 
     // --- N° Plan ---
     const nPlanCell = row.insertCell();
+    nPlanCell.className = "plan-column";
     const nPlanSelect = document.createElement("select");
     nPlanSelect.innerHTML = `<option value="">Choisir un plan</option>`;
-    const currentPlanKey = normalizeCompareValue(record.N_Plan);
+    const currentTypeDocument = textValue(record.Type_Document);
+    const currentPlanKey = window.BordereauCore.getDocumentKey(
+      record.N_Plan,
+      currentTypeDocument
+    );
+
+    if (textValue(record.N_Plan) && !currentTypeDocument) {
+      const legacyOption = appendSelectOption(
+        nPlanSelect,
+        currentPlanKey,
+        textValue(record.N_Plan)
+      );
+      legacyOption.dataset.planNumber = textValue(record.N_Plan);
+      legacyOption.dataset.fullLabel = `${textValue(record.N_Plan)} - Type a completer`;
+    }
 
     planOptions.forEach((plan) => {
       const planKey = getPlanKey(plan);
@@ -1148,24 +1361,37 @@ function displayInvoiceTable() {
 
       const planNumber = textValue(plan.NumeroDocument);
       const option = document.createElement("option");
-      option.value = planNumber;
+      option.value = planKey;
       option.textContent = planNumber;
       option.dataset.planNumber = planNumber;
+      option.dataset.typeDocument = textValue(plan.Type_document);
       option.dataset.fullLabel = getFullPlanLabel(plan);
       nPlanSelect.appendChild(option);
     });
 
-    nPlanSelect.value = textValue(record.N_Plan);
+    nPlanSelect.value = currentPlanKey;
     nPlanSelect.disabled = frozen;
     attachPlanSelectLabelBehavior(nPlanSelect);
     nPlanCell.appendChild(nPlanSelect);
 
     // --- Indice ---
     const indiceCell = row.insertCell();
+    indiceCell.className = "indice-column";
     indiceCell.textContent = record.Indice || "";
+
+    const typeDocumentCell = row.insertCell();
+    typeDocumentCell.className = "type-document-column";
+    const typeControl = buildTypeDocumentSelect(record, selectedProjectName);
+    if (!typeControl.storedType) {
+      typeDocumentCell.classList.add(
+        typeControl.candidates.length ? "type-unresolved" : "type-missing"
+      );
+    }
+    typeDocumentCell.appendChild(typeControl.select);
 
     // --- Désignation ---
     const designationCell = row.insertCell();
+    designationCell.className = "designation-column";
     designationCell.textContent = record.Designation || "";
 
     // --- Date diffusion ---
@@ -1176,6 +1402,7 @@ function displayInvoiceTable() {
 
     // --- Nbr Exemplaires ---
     const nbrExemplairesCell = row.insertCell();
+    nbrExemplairesCell.className = "exemplaires-column";
     const nbrExemplairesSelect = document.createElement("select");
 
     // option vide en premier
@@ -1234,6 +1461,30 @@ async function applyNbrExemplairesToCurrentBordereau() {
   displayInvoiceTable();
 }
 
+function getRecordById(recordId) {
+  return records.find((record) => Number(record?.id) === Number(recordId)) || null;
+}
+
+function updateRecordCaches(recordId, fields) {
+  [records, allEnvois].forEach((rows) => {
+    const record = rows.find((candidate) => Number(candidate?.id) === Number(recordId));
+    if (record) Object.assign(record, fields);
+  });
+}
+
+function hasCurrentBordereauDocument(recordId, planNumber, typeDocument) {
+  const targetKey = window.BordereauCore.getDocumentKey(planNumber, typeDocument);
+  return getCurrentBordereauRecords().some((record) =>
+    Number(record.id) !== Number(recordId) &&
+    textValue(record.Type_Document) &&
+    window.BordereauCore.getDocumentKey(record.N_Plan, record.Type_Document) === targetKey
+  );
+}
+
+function getCurrentUnresolvedTypeRecords() {
+  return getCurrentBordereauRecords().filter((record) => !textValue(record.Type_Document));
+}
+
 /** -------------------------
  *  Events UI : projet / ref / date / envoyé
  *  ------------------------- */
@@ -1286,6 +1537,12 @@ $("sentCheckbox").addEventListener("change", async (e) => {
   const current = getCurrentBordereauRecords();
   if (current.length === 0) {
     alert("Ajoute au moins un \u00e9l\u00e9ment avant de marquer 'Envoy\u00e9'.");
+    e.target.checked = false;
+    return;
+  }
+
+  if (sent && getCurrentUnresolvedTypeRecords().length > 0) {
+    alert("Complete le type de document de toutes les lignes avant de marquer le bordereau 'Envoye'.");
     e.target.checked = false;
     return;
   }
@@ -1345,42 +1602,76 @@ document.addEventListener("pointercancel", handleAddElementsPointerUp, true);
  *  Table events (change / delete / dblclick)
  *  ------------------------- */
 document.querySelector("#invoiceTable").addEventListener("change", async (e) => {
-  if (isFrozen()) return;
-
   const target = e.target;
   const row = target.closest("tr");
   if (!row) return;
 
   const recordId = parseInt(row.dataset.recordId, 10);
   if (!Number.isFinite(recordId)) return;
+  const record = getRecordById(recordId);
+  if (!record) return;
+  const cell = target.closest("td");
+  const isTypeChange = target.matches("select.type-document-select");
+  if (isFrozen() && (!isTypeChange || textValue(record.Type_Document))) return;
 
   // N_Plan (col 0)
-  if (target.tagName === "SELECT" && target.parentElement.cellIndex === 0) {
-    const nPlan = target.value;
+  if (target.tagName === "SELECT" && cell?.classList.contains("plan-column")) {
     const selectedProjectName = getProject();
+    const selectedPlan = getProjectPlanOptions(selectedProjectName)
+      .find((plan) => getPlanKey(plan) === target.value);
 
-    const latestPlan = findLatestProjectPlan(selectedProjectName, nPlan);
-    if (latestPlan) {
-      const indice = latestPlan.Indice;
-      const designation = textValue(latestPlan.Designation) || textValue(latestPlan.NomDocument);
+    if (selectedPlan) {
+      const fields = {
+        N_Plan: textValue(selectedPlan.NumeroDocument),
+        Type_Document: textValue(selectedPlan.Type_document),
+        Indice: textValue(selectedPlan.Indice),
+        Designation: getPlanDisplayName(selectedPlan),
+      };
 
       await grist.docApi.applyUserActions([
-        ["UpdateRecord", BORDEREAU_TABLE, recordId, { N_Plan: nPlan, Indice: indice, Designation: designation }],
+        ["UpdateRecord", BORDEREAU_TABLE, recordId, fields],
       ]);
-    } else {
+      updateRecordCaches(recordId, fields);
+    } else if (!target.value) {
+      const fields = { N_Plan: "", Type_Document: "", Indice: "", Designation: "" };
       // si plan vidé
       await grist.docApi.applyUserActions([
-        ["UpdateRecord", BORDEREAU_TABLE, recordId, { N_Plan: "", Indice: "", Designation: "" }],
+        ["UpdateRecord", BORDEREAU_TABLE, recordId, fields],
       ]);
+      updateRecordCaches(recordId, fields);
     }
+    displayInvoiceTable();
+    return;
   }
 
-  // NbrExemplaires (col 4)
-  if (target.tagName === "SELECT" && target.parentElement.cellIndex === 4) {
+  // Type document (ancienne ligne a completer)
+  if (isTypeChange) {
+    const typeDocument = textValue(target.value);
+    if (!typeDocument) {
+      displayInvoiceTable();
+      return;
+    }
+    if (hasCurrentBordereauDocument(recordId, record.N_Plan, typeDocument)) {
+      alert("Ce numero de plan et ce type de document sont deja presents dans ce bordereau.");
+      displayInvoiceTable();
+      return;
+    }
+
+    const fields = { Type_Document: typeDocument };
+    await grist.docApi.applyUserActions([
+      ["UpdateRecord", BORDEREAU_TABLE, recordId, fields],
+    ]);
+    updateRecordCaches(recordId, fields);
+    displayInvoiceTable();
+    return;
+  }
+
+  if (target.tagName === "SELECT" && cell?.classList.contains("exemplaires-column")) {
     const nbrExemplaires = target.value;
     await grist.docApi.applyUserActions([
       ["UpdateRecord", BORDEREAU_TABLE, recordId, { NbrExemplaires: nbrExemplaires }],
     ]);
+    updateRecordCaches(recordId, { NbrExemplaires: nbrExemplaires });
   }
 });
 
@@ -1402,9 +1693,9 @@ document.querySelector("#invoiceTable").addEventListener("dblclick", (e) => {
 
   const target = e.target;
 
-  // Double-clic sur NbrExemplaires (col 4) => input libre
-  if (target.tagName === "SELECT" && target.parentElement.cellIndex === 4) {
-    const cell = target.parentElement;
+  // Double-clic sur NbrExemplaires => input libre
+  if (target.tagName === "SELECT" && target.closest("td")?.classList.contains("exemplaires-column")) {
+    const cell = target.closest("td");
     const originalValue = target.value;
 
     const input = document.createElement("input");
@@ -1457,6 +1748,11 @@ $("generatePdf").addEventListener("click", async () => {
   }
 
   const projectRecords = records.filter((r) => r.Projet === selectedProject && r.Ref == refValue);
+  const unresolvedTypes = projectRecords.filter((record) => !textValue(record.Type_Document));
+  if (unresolvedTypes.length > 0) {
+    alert("Complete le type de document de toutes les lignes avant de generer le PDF.");
+    return;
+  }
   const totalPages = Math.ceil(projectRecords.length / ITEMS_PER_PAGE);
 
   const dateStr = new Date(getDateValue()).toLocaleDateString("fr-FR");
@@ -1496,12 +1792,26 @@ const logo1 = await fetch("../img/VC_Logotype_Digital_RVB.jpg").then((res) => re
     const start = i * ITEMS_PER_PAGE;
     const end = start + ITEMS_PER_PAGE;
     const pageRecords = projectRecords.slice(start, end);
-    const body = pageRecords.map((r) => [r.N_Plan, r.Indice, r.Designation, r.NbrExemplaires]);
+    const body = pageRecords.map((r) => [
+      r.N_Plan,
+      r.Indice,
+      r.Type_Document,
+      r.Designation,
+      r.NbrExemplaires,
+    ]);
 
     doc.autoTable({
       startY: 75,
-      head: [["N\u00b0 Plan", "Indice", "D\u00e9signation", "Nbr Exemplaires"]],
+      head: [["N\u00b0 Plan", "Indice", "Type document", "D\u00e9signation", "Nbr Exemplaires"]],
       body,
+      styles: { fontSize: 8, cellPadding: 2 },
+      columnStyles: {
+        0: { cellWidth: 27 },
+        1: { cellWidth: 16, halign: "center" },
+        2: { cellWidth: 34 },
+        3: { cellWidth: "auto" },
+        4: { cellWidth: 27, halign: "center" },
+      },
     });
 
     addFooter(i + 1, totalPages);

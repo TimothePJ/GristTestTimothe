@@ -15,6 +15,9 @@
   const PROJECT_ID_STORAGE_KEY = "grist.selected-project-id";
   const ACCESS_CHANGED_STORAGE_KEY = "grist.project-access-changed";
   const ACCESS_SIGNAL_VERSION = 2;
+  // Signal « le document a changé », diffusé aux autres widgets du navigateur.
+  const DATA_CHANGED_STORAGE_KEY = "grist.service-context.data-changed";
+  const DATA_SIGNAL_VERSION = 1;
   const ACCESS_COLUMN = "Projets_Access";
   const PROJECT_TEAM_TABLE = "ProjectTeam";
   const LEGACY_DEFAULT_SERVICE = "Structure";
@@ -24,6 +27,73 @@
     ListePlan_NDC_COF: "Nom_projet",
     Planning_Projet: "NomProjet",
     Envois: "Projet",
+  });
+  const TABLE_POLICY_MODES = Object.freeze({
+    REST_PROJECT_SERVICE: "rest-project-service",
+    REST_PROJECT: "rest-project",
+    REST_SERVICE: "rest-service",
+    REST_FULL: "rest-full",
+    RPC: "rpc",
+  });
+  const TABLE_POLICIES = Object.freeze({
+    References2: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      projectColumn: "NomProjet",
+      projectIdentity: "name",
+    }),
+    ListePlan_NDC_COF: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      projectColumn: "Nom_projet",
+      projectIdentity: "name",
+    }),
+    Planning_Projet: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      projectColumn: "NomProjet",
+      projectIdentity: "name",
+    }),
+    Envois: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      projectColumn: "Projet",
+      projectIdentity: "name",
+    }),
+    Budget: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      projectColumn: "NumeroProjet",
+      projectIdentity: "number",
+    }),
+    ProjectTeam: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      projectColumn: "NumeroProjet",
+      projectIdentity: "number",
+    }),
+    TimeSegment: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      projectColumn: "NumeroProjet",
+      projectIdentity: "number",
+    }),
+    TimeReal: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      projectColumn: "NumeroProjet",
+      projectIdentity: "number",
+    }),
+    Emetteurs: Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_SERVICE,
+      projectColumn: "",
+      projectIdentity: "",
+    }),
+    Team: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "table de droits sans filtre métier" }),
+    Projets2: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "catalogue de droits sans filtre métier" }),
+    "Time-Out": Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "aucun filtre Service direct fiable" }),
+    Time_Out: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "alias Time-Out sans filtre Service direct fiable" }),
+    TimeOut: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "alias Time-Out sans filtre Service direct fiable" }),
+    Timesheet: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "aucun filtre direct fiable" }),
+    Ventilation: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "aucun filtre direct fiable" }),
+    MsProject: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "lecture globale par défaut ; le widget filtre explicitement sur Nom" }),
+    Planning_Project: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "alias sans schéma de filtre confirmé" }),
+    "ListePlan NDC+COF": Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "alias sans schéma de filtre confirmé" }),
+    "ListePlan_NDC+COF": Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "alias sans schéma de filtre confirmé" }),
+    _grist_Tables: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "métadonnées administratives" }),
+    _grist_Tables_column: Object.freeze({ mode: TABLE_POLICY_MODES.REST_FULL, reason: "métadonnées administratives" }),
   });
   const SERVICE_AWARE_TABLES = Object.freeze(new Set([
     "References2",
@@ -46,6 +116,11 @@
     ...Object.keys(PROJECT_NAME_COLUMNS),
     ...PROJECT_NUMBER_TABLES,
   ]));
+  const REST_SERVICE_VALUES = Object.freeze({
+    Structure: Object.freeze(["Structure"]),
+    Synthese: Object.freeze(["Synthese", "Synthèse"]),
+    Topographie: Object.freeze(["Topographie"]),
+  });
 
   function toText(value) {
     if (value == null) return "";
@@ -90,6 +165,218 @@
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toLocaleLowerCase("fr");
+  }
+
+  function uniqueExactValues(values) {
+    const seen = new Set();
+    const result = [];
+    (Array.isArray(values) ? values : [values]).forEach((value) => {
+      const exact = toText(value);
+      if (!exact || seen.has(exact)) return;
+      seen.add(exact);
+      result.push(exact);
+    });
+    return result;
+  }
+
+  function getServiceFilterValues(service) {
+    const normalizedService = normalizeService(service);
+    return normalizedService
+      ? [...(REST_SERVICE_VALUES[normalizedService] || [normalizedService])]
+      : [];
+  }
+
+  function getProjectFilterValues(tableName, projects) {
+    const normalizedTableName = toText(tableName);
+    const sourceProjects = (Array.isArray(projects) ? projects : [projects]).filter(Boolean);
+    if (PROJECT_NUMBER_TABLES.has(normalizedTableName)) {
+      return uniqueExactValues(sourceProjects.map((project) => normalizeProjectNumber(
+        project?.number ?? project?.NumeroProjet ?? project?.Numero_de_projet
+      )));
+    }
+    if (PROJECT_NAME_COLUMNS[normalizedTableName]) {
+      return uniqueExactValues(sourceProjects.flatMap((project) => {
+        const names = Array.isArray(project?.names) ? project.names : [];
+        return [project?.name, ...names];
+      }));
+    }
+    return [];
+  }
+
+  function getTablePolicy(tableName) {
+    const normalizedTableName = toText(tableName);
+    return TABLE_POLICIES[normalizedTableName] || Object.freeze({
+      mode: TABLE_POLICY_MODES.REST_FULL,
+      reason: "aucun filtre métier configuré : REST complet",
+      configured: false,
+    });
+  }
+
+  function buildTableFilterFromPolicy(policy, {
+    selectedService = "",
+    currentProject = null,
+    allowedProjects = [],
+    multiProject = false,
+  } = {}) {
+    const safePolicy = policy && typeof policy === "object" ? policy : {};
+    const mode = toText(safePolicy.mode);
+    if (mode === TABLE_POLICY_MODES.REST_FULL) {
+      return { supported: true, complete: true, filter: null, unfiltered: true };
+    }
+    const needsService = [
+      TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      TABLE_POLICY_MODES.REST_SERVICE,
+    ].includes(mode);
+    const needsProject = [
+      TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+      TABLE_POLICY_MODES.REST_PROJECT,
+    ].includes(mode);
+    if (!needsService && !needsProject) {
+      return { supported: false, complete: true, filter: null, unfiltered: false };
+    }
+
+    const serviceValues = needsService ? getServiceFilterValues(selectedService) : [];
+    const projects = multiProject ? allowedProjects : [currentProject].filter(Boolean);
+    const projectValues = needsProject
+      ? (safePolicy.projectIdentity === "number"
+          ? uniqueExactValues(projects.map((project) => normalizeProjectNumber(
+              project?.number ?? project?.NumeroProjet ?? project?.Numero_de_projet
+            )))
+          : uniqueExactValues(projects.flatMap((project) => {
+              const names = Array.isArray(project?.names) ? project.names : [];
+              return [project?.name, ...names];
+            })))
+      : [];
+    const complete = Boolean((!needsService || serviceValues.length) && (!needsProject || projectValues.length));
+    const filter = complete ? {} : null;
+    if (filter && needsService) filter.Service = serviceValues;
+    if (filter && needsProject) filter[toText(safePolicy.projectColumn)] = projectValues;
+    return { supported: true, complete, filter, unfiltered: false };
+  }
+
+  function buildContextTableFilter(tableName, {
+    selectedService = "",
+    currentProject = null,
+    allowedProjects = [],
+    multiProject = false,
+  } = {}) {
+    const normalizedTableName = toText(tableName);
+    const policy = getTablePolicy(normalizedTableName);
+    const policyFilter = buildTableFilterFromPolicy(policy, {
+      selectedService,
+      currentProject,
+      allowedProjects,
+      multiProject,
+    });
+    if (!policyFilter.supported) {
+      return {
+        supported: false,
+        complete: true,
+        tableName: normalizedTableName,
+        projectColumn: "",
+        filter: null,
+      };
+    }
+
+    return {
+      supported: true,
+      complete: policyFilter.complete,
+      tableName: normalizedTableName,
+      projectColumn: toText(policy.projectColumn),
+      filter: policyFilter.filter,
+      unfiltered: Boolean(policyFilter.unfiltered),
+      mode: policy.mode,
+    };
+  }
+
+  function splitContextTableFilter(filter, projectColumn, {
+    maxValues = 40,
+    maxEncodedLength = 1800,
+  } = {}) {
+    if (!filter || typeof filter !== "object") return [];
+    const safeProjectColumn = toText(projectColumn);
+    const projectValues = safeProjectColumn && Array.isArray(filter[safeProjectColumn])
+      ? filter[safeProjectColumn]
+      : [];
+    if (!projectValues.length) return [{ ...filter }];
+
+    const safeMaxValues = Math.max(1, Number(maxValues) || 40);
+    const safeMaxLength = Math.max(256, Number(maxEncodedLength) || 1800);
+    const chunks = [];
+    let current = [];
+    const pushCurrent = () => {
+      if (!current.length) return;
+      chunks.push({ ...filter, [safeProjectColumn]: [...current] });
+      current = [];
+    };
+
+    projectValues.forEach((value) => {
+      const candidate = [...current, value];
+      const candidateFilter = { ...filter, [safeProjectColumn]: candidate };
+      const tooLong = encodeURIComponent(JSON.stringify(candidateFilter)).length > safeMaxLength;
+      if (current.length && (candidate.length > safeMaxValues || tooLong)) pushCurrent();
+      current.push(value);
+      if (current.length >= safeMaxValues) pushCurrent();
+    });
+    pushCurrent();
+    return chunks;
+  }
+
+  function restRecordsToRows(envelope) {
+    if (!envelope || !Array.isArray(envelope.records)) {
+      throw new TypeError("Réponse REST Grist invalide : records doit être un tableau.");
+    }
+    return envelope.records.map((record) => {
+      const fields = record?.fields && typeof record.fields === "object"
+        ? { ...record.fields }
+        : {};
+      return { ...fields, id: record?.id };
+    });
+  }
+
+  function rowsToTableData(rows) {
+    const safeRows = Array.isArray(rows) ? rows : [];
+    const columns = ["id"];
+    const knownColumns = new Set(columns);
+    safeRows.forEach((row) => {
+      Object.keys(row || {}).forEach((column) => {
+        if (knownColumns.has(column)) return;
+        knownColumns.add(column);
+        columns.push(column);
+      });
+    });
+    return Object.fromEntries(columns.map((column) => [
+      column,
+      safeRows.map((row) => (
+        Object.prototype.hasOwnProperty.call(row || {}, column) ? row[column] : null
+      )),
+    ]));
+  }
+
+  function restRecordsToTableData(envelope) {
+    return rowsToTableData(restRecordsToRows(envelope));
+  }
+
+  function mergeRestRecordEnvelopes(envelopes) {
+    const records = [];
+    const seenIds = new Set();
+    (Array.isArray(envelopes) ? envelopes : []).forEach((envelope) => {
+      if (!envelope || !Array.isArray(envelope.records)) {
+        throw new TypeError("Réponse REST Grist invalide : records doit être un tableau.");
+      }
+      envelope.records.forEach((record) => {
+        const id = record?.id;
+        if (id != null && seenIds.has(id)) return;
+        if (id != null) seenIds.add(id);
+        records.push({
+          ...(record || {}),
+          fields: record?.fields && typeof record.fields === "object"
+            ? { ...record.fields }
+            : {},
+        });
+      });
+    });
+    return { records };
   }
 
   function normalizePersonName(value) {
@@ -1028,6 +1315,30 @@
     });
   }
 
+
+  function parseDataChangeSignalDetail(rawValue) {
+    const empty = { tables: [], projectId: null, projectNumber: "" };
+    if (!rawValue) return empty;
+    let payload = null;
+    try {
+      payload = typeof rawValue === "string" ? JSON.parse(rawValue) : rawValue;
+    } catch (_error) {
+      return empty;
+    }
+    if (!payload || payload.version !== DATA_SIGNAL_VERSION) return empty;
+    if (!Array.isArray(payload.tables)) return empty;
+    const projectId = Number(payload.projectId);
+    return {
+      tables: [...new Set(payload.tables.map(toText).filter(Boolean))],
+      projectId: Number.isInteger(projectId) && projectId > 0 ? projectId : null,
+      projectNumber: normalizeProjectNumber(payload.projectNumber),
+    };
+  }
+
+  function parseDataChangeSignal(rawValue) {
+    return parseDataChangeSignalDetail(rawValue).tables;
+  }
+
   return Object.freeze({
     SERVICES,
     SERVICE_STORAGE_KEY,
@@ -1035,18 +1346,36 @@
     PROJECT_ID_STORAGE_KEY,
     ACCESS_CHANGED_STORAGE_KEY,
     ACCESS_SIGNAL_VERSION,
+    DATA_CHANGED_STORAGE_KEY,
+    DATA_SIGNAL_VERSION,
+    parseDataChangeSignal,
+    parseDataChangeSignalDetail,
     ACCESS_COLUMN,
     PROJECT_TEAM_TABLE,
     LEGACY_DEFAULT_SERVICE,
     PROJECTS_TABLE,
     PROJECT_NAME_COLUMNS,
+    TABLE_POLICY_MODES,
+    TABLE_POLICIES,
     SERVICE_AWARE_TABLES,
     PROJECT_NUMBER_TABLES,
     PROJECT_AWARE_TABLES,
+    REST_SERVICE_VALUES,
     toText,
     normalizeProjectNumber,
     normalizeProjectNameKey,
     normalizeService,
+    uniqueExactValues,
+    getServiceFilterValues,
+    getProjectFilterValues,
+    getTablePolicy,
+    buildTableFilterFromPolicy,
+    buildContextTableFilter,
+    splitContextTableFilter,
+    restRecordsToRows,
+    rowsToTableData,
+    restRecordsToTableData,
+    mergeRestRecordEnvelopes,
     normalizePersonName,
     getTeamDisplayName,
     getTeamFullNameAliases,

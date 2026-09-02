@@ -7,8 +7,32 @@
 
   <!-- Grist Plugin API -->
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-  <script src="../shared/service-context-core.js"></script>
-  <script src="../shared/grist-service-context.js"></script>
+  <script src="../shared/service-context-core.js?v=20260810-sync3"></script>
+  <script src="../shared/grist-service-context.js?v=20260810-sync3"></script>
+  <script>
+    window.ProjectMutationSyncConfig = {
+      mutationSignals: { Avancement_Sync: ["Projets2"] },
+      observedSignalColumns: [
+        "Avancement_Sync",
+        "ListePlan_Sync",
+        "PlanningProjet_Sync"
+      ],
+      observedSignalTables: {
+        Avancement_Sync: ["Projets2", "Budget", "Planning_Projet", "ProjectTeam", "TimeReal"],
+        ListePlan_Sync: ["ListePlan_NDC_COF"],
+        PlanningProjet_Sync: ["Planning_Projet"]
+      },
+      directSignalTables: [
+        "ListePlan_NDC_COF",
+        "Budget",
+        "ProjectTeam",
+        "TimeReal",
+        "Planning_Projet"
+      ],
+      dropdownIds: ["projectDropdown"]
+    };
+  </script>
+  <script src="../shared/project-mutation-sync-relay.js?v=20260810-sync3"></script>
   <script src="../shared/planning-closure-core.js"></script>
   
   <!-- Chart.js -->
@@ -52,6 +76,6 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/avancement.js" defer></script>
+  <script src="js/avancement.js?v=20260810-sync3" defer></script>
 </body>
 </html>

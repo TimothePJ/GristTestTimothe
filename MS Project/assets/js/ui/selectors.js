@@ -33,7 +33,7 @@ export function updateProjectSelector(projectOptions, selectedValue = "") {
   const projectSelect = getProjectSelect();
   projectSelect.disabled = false;
 
-  fillSelect(projectSelect, projectOptions, "Choisir un projet", selectedValue);
+  fillSelect(projectSelect, projectOptions, "Choisir un nom", selectedValue);
   return projectSelect.value;
 }
 

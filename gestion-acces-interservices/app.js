@@ -10,6 +10,7 @@
     selectedProjectNumber: "",
     busy: false,
     initialized: false,
+    renderedSignature: "",
   };
 
   const dom = {
@@ -149,6 +150,35 @@
     } catch (_error) {
       // Le rafraîchissement au focus reste disponible si localStorage est bloqué.
     }
+  }
+
+  // Empreinte des données affichées : ce widget n'a pas de runtime partagé pour
+  // filtrer les livraisons inutiles, il compare donc lui-même avant de re-rendre.
+  function computeDataSignature() {
+    try {
+      return JSON.stringify([state.teamRows, state.projectTeamRows, state.projects]);
+    } catch (_error) {
+      return `illisible-${Date.now()}`;
+    }
+  }
+
+  // Un re-rendu reconstruit les listes : sans reprise, le navigateur ramène le
+  // défilement en haut de page et remonte la liste des personnes disponibles.
+  function captureWorkspaceScroll() {
+    const scroller = document.scrollingElement || document.documentElement;
+    const documentTop = scroller ? scroller.scrollTop : 0;
+    const peopleTop = dom.personSelect.scrollTop;
+
+    return () => {
+      const restore = () => {
+        if (scroller) scroller.scrollTop = documentTop;
+        dom.personSelect.scrollTop = peopleTop;
+      };
+      // Une fois tout de suite, une fois après la mise en page : la hauteur des
+      // lignes d'affectation n'est pas figée au premier passage.
+      restore();
+      requestAnimationFrame(restore);
+    };
   }
 
   function createBadge(label, className = "") {
@@ -547,17 +577,40 @@
       populatePeople(result.assignees);
     });
     dom.addButton.addEventListener("click", addSelectedPeople);
-    window.addEventListener("focus", () => {
-      if (state.busy) return;
-      loadData().then(() => {
-        populateProjects();
-        dom.workspace.hidden = false;
-        dom.fatalPanel.hidden = true;
-        setStatus("Administrateur", "ready");
-      }).catch((error) => {
-        console.error("Actualisation impossible :", error);
-        fail("Les données n’ont pas pu être actualisées. Réessaie ou contacte un administrateur.");
-      });
+    window.addEventListener("focus", refreshFromDocument);
+    // Ce widget lit les tables sans filtre, il ne charge donc pas le runtime
+    // partagé. Il écoute en revanche le même signal que lui : quand un autre
+    // widget modifie l'annuaire, les projets ou les affectations, l'écran se met
+    // à jour sans attendre un retour de focus ni un rechargement.
+    window.addEventListener("storage", (event) => {
+      if (event.key !== core.DATA_CHANGED_STORAGE_KEY) return;
+      const changedTables = core.parseDataChangeSignal(event.newValue);
+      const watched = ["Team", "Projets2", core.PROJECT_TEAM_TABLE];
+      if (!changedTables.some((tableName) => watched.includes(tableName))) return;
+      refreshFromDocument();
+    });
+  }
+
+  // Relire est bon marché, re-rendre ne l'est pas : tant que les lignes sont
+  // identiques, l'écran ne bouge pas et la position de lecture est conservée.
+  // Seule exception : l'espace de travail masqué après une erreur, qu'il faut
+  // rétablir même si les données n'ont pas bougé.
+  function refreshFromDocument() {
+    if (state.busy) return;
+    loadData().then(() => {
+      const signature = computeDataSignature();
+      if (signature === state.renderedSignature && !dom.workspace.hidden) return;
+      state.renderedSignature = signature;
+
+      const restoreScroll = captureWorkspaceScroll();
+      populateProjects();
+      dom.workspace.hidden = false;
+      dom.fatalPanel.hidden = true;
+      setStatus("Administrateur", "ready");
+      restoreScroll();
+    }).catch((error) => {
+      console.error("Actualisation impossible :", error);
+      fail("Les données n’ont pas pu être actualisées. Réessaie ou contacte un administrateur.");
     });
   }
 
@@ -569,6 +622,7 @@
     window.grist.ready?.({ requiredAccess: "full" });
     try {
       await loadData();
+      state.renderedSignature = computeDataSignature();
       bindEvents();
       populateProjects();
       dom.workspace.hidden = false;

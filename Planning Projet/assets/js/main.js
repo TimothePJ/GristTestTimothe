@@ -2,6 +2,7 @@ import { APP_CONFIG } from "./config.js";
 import { state, loadState, setState } from "./state.js";
 import {
   initGrist,
+  REFERENCE_BLOQUANT_REST_FILTER,
   fetchProjectBootstrapData,
   fetchPlanningRows,
   fetchPlanningReferenceReceptionSummaries,
@@ -18,13 +19,26 @@ import {
   renameProjectZone,
   clearProjectZone,
   initializePlanningRow,
+  syncPlanningDerivedValues,
   toText,
 } from "./services/gristService.js";
 import {
   buildProjectRealisationTargetLookup,
   buildTimelineDataFromPlanningRows,
 } from "./services/planningService.js";
-import { synchronizePlanningDerivedData } from "./services/planningSyncCoordinator.js";
+import {
+  runExclusivePlanningWrite,
+  synchronizePlanningDerivedData,
+} from "./services/planningSyncCoordinator.js";
+import {
+  DURATION_DEFAULT_MODES,
+  DURATION_SLOTS,
+  buildDurationDefaultPlan,
+  buildRawPlanningRowsById,
+  collectDurationDefaultTypes,
+  describeDurationDefaultStats,
+  normalizeDurationDefaultInput,
+} from "./services/durationDefaults.js";
 import {
   applyProjectSelection,
   initProjectSelector,
@@ -61,6 +75,7 @@ let toolbarBound = false;
 let pendingRefreshOptions = null;
 let refreshQueuePromise = null;
 let resolveRefreshQueue = null;
+let planningDataRefreshBound = false;
 let planningServiceRefreshBound = false;
 let cachedPlanningRows = null;
 let cachedProjectAvancementConfigs = [];
@@ -82,6 +97,10 @@ let currentPlanningDateBounds = null;
 let currentFirstRowFirstSegment = null;
 let planningEditingEnabled = false;
 let planningEditToggleBound = false;
+let durationDefaultsBound = false;
+let durationDefaultsBusy = false;
+// Périmètre figé à l'ouverture de la fenêtre : lignes affichées + lignes brutes.
+let durationDefaultsScope = null;
 const planningWarningListeners = new Set();
 let currentPlanningWarnings = [];
 let lastPlanningWarningsSignature = "";
@@ -842,6 +861,37 @@ function renderPlanningFromCache() {
   renderPlanningTimeline(timelineData);
 }
 
+// Le périmètre exact de ce que l'utilisateur a sous les yeux : mêmes lignes, même
+// filtrage projet et zone que le rendu. Reconstruit depuis le cache, sans lecture.
+function getDisplayedPlanningGroups() {
+  const selectedProject = state.selectedProject || "";
+  if (!selectedProject || !Array.isArray(cachedPlanningRows)) {
+    return { selectedProject, selectedZone: "", groups: [] };
+  }
+
+  const zoneOptions = buildZoneOptionsForSelectedProject(cachedPlanningRows, selectedProject);
+  const normalizedZone = normalizeSelectedZone(zoneOptions, state.selectedZone);
+  const timelineData = buildTimelineDataFromPlanningRows(
+    cachedPlanningRows,
+    selectedProject,
+    normalizedZone,
+    cachedRealisationTargetLookup,
+    cachedPlanningReferenceReceptionLookup
+  );
+
+  return {
+    selectedProject,
+    selectedZone: normalizedZone,
+    groups: (timelineData?.groups || []).filter((group) => group && !group.isZoneHeader),
+    // Les lignes Grist telles quelles. `group.meta` ne les remplace pas : c'est la
+    // ligne normalisée pour l'affichage, aux clés camelCase et aux dates dérivées.
+    rawRowsById: buildRawPlanningRowsById(
+      cachedPlanningRows,
+      APP_CONFIG.grist.planningTable?.columns || {}
+    ),
+  };
+}
+
 // Applique localement les champs modifiés sur la ligne en cache (mise à jour
 // optimiste) et redessine immédiatement, avant que l'écriture Grist et la
 // réconciliation complète ne se terminent.
@@ -1464,31 +1514,16 @@ function bindPlanningLifecycleRefresh() {
   if (planningLifecycleRefreshBound || HEADER_ONLY_EMBEDDED_MODE) return;
   planningLifecycleRefreshBound = true;
 
+  // Au retour sur le widget on ne recharge plus le planning : un rechargement
+  // aveugle renvoie l'utilisateur en haut de la liste et relance une
+  // synchronisation d'écriture alors que rien n'a forcément bougé. On se limite
+  // ici à réparer un état dégradé (liste de projets vide, sélection perdue) ; si
+  // la sélection a effectivement changé, le changement de projet déclenche
+  // lui-même le rechargement.
   const requestIfDue = async () => {
-    const projectResult = await refreshProjectRegistryFromGrist({
+    await refreshProjectRegistryFromGrist({
       notify: true,
       clearInvalid: true,
-    });
-    if (projectResult.changed) {
-      return;
-    }
-    if (!state.selectedProject) {
-      return;
-    }
-    const selectedProjectIsRendered =
-      lastRenderedProject === state.selectedProject &&
-      Array.isArray(cachedPlanningRows);
-    if (
-      selectedProjectIsRendered &&
-      lastAutoSyncProject === state.selectedProject &&
-      Date.now() - lastAutoSyncAt < PLANNING_AUTO_SYNC_INTERVAL_MS
-    ) {
-      return;
-    }
-    void refreshPlanning({
-      sync: true,
-      forceLoad: true,
-      reason: "widget-resume",
     });
   };
 
@@ -1509,6 +1544,376 @@ function bindPlanningLifecycleRefresh() {
       scheduleRequest();
     }
   });
+}
+
+/* ---------------------------------------------------------------------------
+   Durées par défaut par type de document.
+   Saisir la même durée sur des dizaines de lignes était le geste le plus répétitif
+   du planning. Une valeur par type, un mode par type, un seul lot d'écriture.
+   --------------------------------------------------------------------------- */
+
+const DURATION_DEFAULT_SLOT_COLUMNS = Object.freeze([
+  { slot: DURATION_SLOTS.DEBUT_FIN, label: "Durée 1 (sem.)" },
+  { slot: DURATION_SLOTS.FIN_DEMARRAGE, label: "Durée 2 (sem.)" },
+]);
+
+function getDurationDefaultsElements() {
+  const root = document.getElementById("durationDefaultsDialog");
+  if (!(root instanceof HTMLElement)) return null;
+
+  return {
+    root,
+    form: document.getElementById("durationDefaultsForm"),
+    scope: document.getElementById("durationDefaultsScope"),
+    body: document.getElementById("durationDefaultsBody"),
+    summary: document.getElementById("durationDefaultsSummary"),
+    error: document.getElementById("durationDefaultsError"),
+    closeBtn: document.getElementById("durationDefaultsCloseBtn"),
+    cancelBtn: document.getElementById("durationDefaultsCancelBtn"),
+    applyBtn: document.getElementById("durationDefaultsApplyBtn"),
+  };
+}
+
+function setDurationDefaultsError(message = "") {
+  const els = getDurationDefaultsElements();
+  if (!els || !(els.error instanceof HTMLElement)) return;
+  const text = String(message ?? "").trim();
+  els.error.textContent = text;
+  els.error.hidden = !text;
+}
+
+// Lit le formulaire tel qu'il est à l'instant : une entrée par type, chaque créneau
+// portant sa valeur normalisée (null = ne rien appliquer) et son mode.
+function readDurationDefaultsSettings() {
+  const els = getDurationDefaultsElements();
+  const settingsByTypeKey = {};
+  if (!els || !(els.body instanceof HTMLElement)) return settingsByTypeKey;
+
+  els.body.querySelectorAll("tr[data-type-key]").forEach((row) => {
+    const typeKey = String(row.dataset.typeKey || "");
+    if (!typeKey) return;
+
+    const mode = row.querySelector(".planning-duration-defaults-table__mode")?.value
+      === DURATION_DEFAULT_MODES.ALL
+      ? DURATION_DEFAULT_MODES.ALL
+      : DURATION_DEFAULT_MODES.EMPTY_ONLY;
+
+    const settings = {};
+    DURATION_DEFAULT_SLOT_COLUMNS.forEach(({ slot }) => {
+      const input = row.querySelector(`input[data-slot="${slot}"]`);
+      settings[slot] = {
+        weeks: input ? normalizeDurationDefaultInput(input.value) : null,
+        mode,
+      };
+    });
+    settingsByTypeKey[typeKey] = settings;
+  });
+
+  return settingsByTypeKey;
+}
+
+// Aperçu vivant : l'utilisateur voit combien de lignes son réglage touche avant de
+// valider quoi que ce soit. Le calcul est celui de l'écriture, pas une estimation.
+// Le périmètre est celui figé à l'ouverture : reconstruire tout le modèle de la
+// timeline à chaque frappe coûterait un rendu complet par caractère saisi.
+function refreshDurationDefaultsPreview(scope = durationDefaultsScope) {
+  const els = getDurationDefaultsElements();
+  if (!els) return { updates: [], stats: {} };
+
+  const plan = buildDurationDefaultPlan({
+    groups: scope?.groups || [],
+    rawRowsById: scope?.rawRowsById || null,
+    columns: APP_CONFIG.grist.planningTable?.columns || {},
+    settingsByTypeKey: readDurationDefaultsSettings(),
+  });
+
+  const hasInvalidInput = Boolean(
+    els.body?.querySelector(".planning-duration-defaults-table__duration.is-invalid")
+  );
+
+  if (els.summary instanceof HTMLElement) {
+    els.summary.textContent = hasInvalidInput
+      ? "Corrigez les durées en rouge : un nombre entier de semaines, ou rien."
+      : `À appliquer : ${describeDurationDefaultStats(plan.stats)}.`;
+  }
+  if (els.applyBtn instanceof HTMLButtonElement) {
+    els.applyBtn.disabled = durationDefaultsBusy || hasInvalidInput || !plan.updates.length;
+  }
+
+  return plan;
+}
+
+function markDurationDefaultsInputValidity(input) {
+  if (!(input instanceof HTMLInputElement)) return;
+  const text = String(input.value || "").trim();
+  const isInvalid = Boolean(text) && normalizeDurationDefaultInput(text) == null;
+  input.classList.toggle("is-invalid", isInvalid);
+}
+
+function buildDurationDefaultsRow(type) {
+  const row = document.createElement("tr");
+  row.dataset.typeKey = type.key;
+
+  const typeCell = document.createElement("td");
+  typeCell.className = "planning-duration-defaults-table__type";
+  typeCell.textContent = type.label;
+
+  const countCell = document.createElement("td");
+  countCell.className = "planning-duration-defaults-table__count";
+  countCell.textContent = `${type.rowCount} ligne${type.rowCount > 1 ? "s" : ""}`;
+
+  row.append(typeCell, countCell);
+
+  DURATION_DEFAULT_SLOT_COLUMNS.forEach(({ slot, label }) => {
+    const cell = document.createElement("td");
+    const slotStats = type.slots?.[slot];
+
+    if (!slotStats?.supported) {
+      // Ce type n'a pas ce créneau : le montrer inerte vaut mieux que de le masquer,
+      // sinon la colonne semble avoir été oubliée.
+      const placeholder = document.createElement("span");
+      placeholder.className = "planning-duration-defaults-table__unavailable";
+      placeholder.textContent = "—";
+      placeholder.title = "Ce type de document n'utilise pas cette durée.";
+      cell.append(placeholder);
+      row.append(cell);
+      return;
+    }
+
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "0";
+    input.step = "1";
+    input.inputMode = "numeric";
+    input.className = "planning-duration-defaults-table__duration";
+    input.dataset.slot = slot;
+    input.placeholder = "—";
+    // Le seul repère d'un lecteur d'écran serait l'en-tête de colonne, identique pour
+    // toutes les lignes : on nomme le champ avec son type de document.
+    input.setAttribute("aria-label", `${label} — ${type.label}`);
+    input.title = `${slotStats.emptyCount} vide(s), ${slotStats.filledCount} déjà renseignée(s)`;
+    cell.append(input);
+    row.append(cell);
+  });
+
+  const modeCell = document.createElement("td");
+  const modeSelect = document.createElement("select");
+  modeSelect.className = "planning-duration-defaults-table__mode";
+  modeSelect.setAttribute("aria-label", `Appliquer à — ${type.label}`);
+  [
+    { value: DURATION_DEFAULT_MODES.EMPTY_ONLY, label: "Seulement les vides" },
+    { value: DURATION_DEFAULT_MODES.ALL, label: "Toutes les lignes" },
+  ].forEach(({ value, label }) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    modeSelect.append(option);
+  });
+  modeCell.append(modeSelect);
+  row.append(modeCell);
+
+  return row;
+}
+
+function renderDurationDefaultsBody(types) {
+  const els = getDurationDefaultsElements();
+  if (!els || !(els.body instanceof HTMLElement)) return;
+
+  if (!types.length) {
+    els.body.innerHTML =
+      '<p class="planning-duration-defaults-dialog__empty">Aucune ligne de planning dans la sélection courante.</p>';
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "planning-duration-defaults-table";
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th>Type de document</th>
+        <th>Concernées</th>
+        <th>${DURATION_DEFAULT_SLOT_COLUMNS[0].label}</th>
+        <th>${DURATION_DEFAULT_SLOT_COLUMNS[1].label}</th>
+        <th>Appliquer à</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  `;
+
+  const tbody = table.querySelector("tbody");
+  types.forEach((type) => tbody?.append(buildDurationDefaultsRow(type)));
+
+  els.body.replaceChildren(table);
+}
+
+function openDurationDefaultsDialog() {
+  if (!requirePlanningEditing("appliquer des durées par défaut")) return;
+
+  const els = getDurationDefaultsElements();
+  if (!els) return;
+
+  const scope = getDisplayedPlanningGroups();
+  const { selectedProject, selectedZone, groups } = scope;
+  if (!selectedProject) {
+    setPlanningStatus("Selectionne d'abord un projet.");
+    return;
+  }
+  durationDefaultsScope = scope;
+
+  const columns = APP_CONFIG.grist.planningTable?.columns || {};
+  renderDurationDefaultsBody(
+    collectDurationDefaultTypes(groups, columns, scope.rawRowsById)
+  );
+
+  if (els.scope instanceof HTMLElement) {
+    els.scope.textContent =
+      `Projet ${selectedProject} · ${selectedZone ? `zone ${selectedZone}` : "toutes les zones"}` +
+      ` · ${groups.length} ligne${groups.length > 1 ? "s" : ""} affichée${groups.length > 1 ? "s" : ""}.`;
+  }
+  setDurationDefaultsError("");
+  refreshDurationDefaultsPreview();
+
+  if (typeof els.root.showModal === "function" && !els.root.open) {
+    els.root.showModal();
+  } else {
+    els.root.setAttribute("open", "");
+  }
+}
+
+function closeDurationDefaultsDialog() {
+  const els = getDurationDefaultsElements();
+  if (!els) return;
+  if (typeof els.root.close === "function" && els.root.open) els.root.close();
+  else els.root.removeAttribute("open");
+}
+
+function setDurationDefaultsBusy(busy) {
+  durationDefaultsBusy = Boolean(busy);
+  const els = getDurationDefaultsElements();
+  if (!els) return;
+  els.root.querySelectorAll("input, select, button").forEach((control) => {
+    control.disabled = durationDefaultsBusy;
+  });
+  // Le rafraîchissement rétablit l'état réel du bouton Appliquer, qui dépend du
+  // contenu du formulaire et pas seulement de l'occupation.
+  if (!durationDefaultsBusy) refreshDurationDefaultsPreview();
+}
+
+async function applyDurationDefaults() {
+  // Le planning a pu être reverrouillé pendant que la fenêtre était ouverte.
+  if (!requirePlanningEditing("appliquer des durées par défaut")) {
+    setDurationDefaultsError("Planning verrouillé : clique sur Editer avant d'appliquer.");
+    return;
+  }
+
+  // Le périmètre est réévalué ici, pas repris de l'ouverture : le planning a pu être
+  // rafraîchi entre-temps, et écrire sur des lignes périmées écraserait le travail
+  // d'un autre.
+  durationDefaultsScope = getDisplayedPlanningGroups();
+  const plan = refreshDurationDefaultsPreview(durationDefaultsScope);
+  if (!plan.updates.length) {
+    setDurationDefaultsError("Aucune ligne à modifier avec ces réglages.");
+    return;
+  }
+
+  setDurationDefaultsError("");
+  setDurationDefaultsBusy(true);
+  try {
+    // Un seul lot d'actions pour toutes les lignes, et une seule capture des offsets
+    // de références : le coût ne dépend pas du nombre de lignes traitées.
+    setPlanningStatus("Application des durées par défaut en cours...");
+    const result = await runExclusivePlanningWrite(() => syncPlanningDerivedValues({
+      planningRows: cachedPlanningRows || [],
+      updates: plan.updates,
+    }));
+    // Le verrou peut rendre la main sans avoir rien écrit : le dire, plutôt que de
+    // fermer la fenêtre en laissant croire que c'est fait.
+    if (result?.skippedByLock) {
+      setDurationDefaultsError(
+        "Une synchronisation du planning est en cours. Réessaie dans quelques secondes."
+      );
+      setPlanningStatus("");
+      return;
+    }
+    closeDurationDefaultsDialog();
+    await refreshPlanning({
+      sync: true,
+      forceLoad: true,
+      forceSync: true,
+      reason: "duration-defaults",
+    });
+    // Après le refresh seulement : performPlanningRefresh réécrit la barre de statut.
+    setPlanningStatus(`Durées par défaut appliquées — ${describeDurationDefaultStats(plan.stats)}.`);
+  } catch (error) {
+    console.error("Erreur application des durées par défaut :", error);
+    setDurationDefaultsError(`Erreur : ${error.message}`);
+  } finally {
+    setDurationDefaultsBusy(false);
+  }
+}
+
+function bindDurationDefaultsDialog() {
+  if (durationDefaultsBound || HEADER_ONLY_EMBEDDED_MODE) return;
+  const els = getDurationDefaultsElements();
+  if (!els) return;
+  durationDefaultsBound = true;
+
+  document.getElementById("durationDefaultsToggle")
+    ?.addEventListener("click", () => openDurationDefaultsDialog());
+
+  els.closeBtn?.addEventListener("click", () => closeDurationDefaultsDialog());
+  els.cancelBtn?.addEventListener("click", () => closeDurationDefaultsDialog());
+
+  els.body?.addEventListener("input", (event) => {
+    const target = event.target;
+    if (target instanceof HTMLInputElement) markDurationDefaultsInputValidity(target);
+    refreshDurationDefaultsPreview();
+  });
+  els.body?.addEventListener("change", () => refreshDurationDefaultsPreview());
+
+  if (els.form instanceof HTMLFormElement) {
+    els.form.addEventListener("submit", (event) => {
+      // `method="dialog"` fermerait la fenêtre avant la fin de l'écriture Grist.
+      event.preventDefault();
+      void applyDurationDefaults();
+    });
+  }
+
+  // Échap ne doit pas fermer la fenêtre pendant l'écriture.
+  els.root.addEventListener("cancel", (event) => {
+    if (durationDefaultsBusy) event.preventDefault();
+  });
+}
+
+// Le planning est alimenté par quatre tables, toutes éditées depuis d'autres
+// widgets : le planning lui-même, la liste des projets, les références et la
+// liste des plans. Une modification doit s'afficher ici sans rechargement.
+function bindPlanningDataRefresh() {
+  if (planningDataRefreshBound || HEADER_ONLY_EMBEDDED_MODE) return;
+  const serviceContext = window.GristServiceContext;
+  if (typeof serviceContext?.watchContextTables !== "function") return;
+
+  planningDataRefreshBound = true;
+  serviceContext.watchContextTables(
+    ["Planning_Projet", "Projets2", "References2", "ListePlan_NDC_COF"],
+    ({ tables }) => {
+      void refreshPlanning({
+        forceLoad: true,
+        reason: `donnees-modifiees:${tables.join(",")}`,
+      });
+    },
+    {
+      nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
+      projectScopedSignals: true,
+      acceptAnyNativeTableSignal: true,
+      // References2 est surveillée sur son seul sous-ensemble bloquant, le seul que la
+      // timeline affiche : une ligne qui devient bloquante ou cesse de l'être entre ou
+      // sort du sous-ensemble, donc les deux bascules restent détectées. Sans ce
+      // filtre, la surveillance relit tout le projet à chaque signal et annule celui
+      // posé sur les lectures du widget.
+      tableRestFilters: { References2: REFERENCE_BLOQUANT_REST_FILTER },
+    }
+  );
 }
 
 function bindPlanningServiceRefresh() {
@@ -1553,6 +1958,7 @@ async function bootstrap() {
 
     bindAddZoneModal();
     bindManageZoneModal();
+    bindDurationDefaultsDialog();
     setPlanningDurationEditHandler(handleDurationCellEdit);
     setPlanningRetardJustificationHandler(handleRetardJustificationEdit);
     setPlanningClosureHandler(handlePlanningClosureAction);
@@ -1595,6 +2001,7 @@ async function bootstrap() {
     });
     bindPlanningLifecycleRefresh();
     bindPlanningServiceRefresh();
+    bindPlanningDataRefresh();
 
     await refreshPlanning({
       sync: true,

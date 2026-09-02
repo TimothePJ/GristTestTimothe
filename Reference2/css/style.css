@@ -1391,6 +1391,15 @@ dialog select {
   margin-left: 8px;
 }
 
+/* Le filtrage repose sur l'attribut `hidden`, mais la règle `[hidden]` du navigateur
+   perd contre le `display` d'auteur porté par `.emetteur-item` et par les deux
+   groupes : sans ce rappel, un document masqué resterait visible. */
+.duplicate-document-item[hidden],
+.duplicate-zone-group[hidden],
+.duplicate-document-group[hidden] {
+  display: none !important;
+}
+
 .duplicate-document-item label {
   min-width: 0;
   margin: 0 !important;
@@ -1513,8 +1522,20 @@ dialog select {
   min-width: 0;
 }
 
+/* La durée limite n'existe que pour une ligne bloquante : masquée, elle ne doit
+   pas garder sa cellule dans la grille. */
+.reference-field[hidden] {
+  display: none !important;
+}
+
 .reference-field-wide {
   grid-column: 1 / -1;
+}
+
+/* L'interrupteur « Bloquant » voisine un champ à étiquette : on lui rend la
+   hauteur de cette étiquette pour que les deux contrôles s'alignent. */
+.reference-row-dialog .reference-field .reference-switch-row {
+  padding-top: calc(1em + 6px);
 }
 
 .reference-row-dialog .reference-field label {
@@ -1603,15 +1624,23 @@ dialog select {
   display: none !important;
 }
 
+/* Recherche extensible, puis un menu de largeur fixe par filtre présent : la barre
+   s'adapte selon que le menu Zone est rendu ou non. Les deux dialogues la partagent. */
 .duplicate-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(160px, 220px);
+  grid-auto-flow: column;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-columns: minmax(140px, 200px);
+  align-items: start;
   gap: 10px;
   margin-bottom: 10px;
 }
 
-.reference-edit-other-documents .duplicate-toolbar {
-  grid-template-columns: minmax(0, 1fr);
+/* Dans la barre, un menu s'aligne sur le champ de recherche : libellé puis contrôle,
+   avec le seul écart porté par `.duplicate-toolbar select`. */
+.duplicate-toolbar .duplicate-filter-row {
+  gap: 0;
+  margin: 0;
 }
 
 .duplicate-toolbar label {
@@ -1897,6 +1926,12 @@ dialog select {
   .reference-form-grid,
   .duplicate-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  /* En écran étroit, les trois contrôles s'empilent au lieu de se serrer. */
+  .duplicate-toolbar {
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
   }
 
   .reference-file-row {

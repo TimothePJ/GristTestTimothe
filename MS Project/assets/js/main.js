@@ -22,11 +22,13 @@ import {
 
 let toolbarBound = false;
 let refreshInProgress = false;
+let refreshPending = false;
 let importButtonBound = false;
 let importFileInputEl = null;
 let importInProgress = false;
 let sortMode = "xml-order";
 let cachedMsProjectRows = null;
+let lastRenderedProject = "";
 
 const MS_PROJECT_PERF_DEBUG =
   typeof window !== "undefined" &&
@@ -134,6 +136,30 @@ function bindImportButton() {
   });
 }
 
+// Capture le défilement avant un re-rendu et le restitue après : une fois tout
+// de suite, une fois à la frame suivante, car vis-timeline ne repositionne ses
+// panneaux qu'au redraw qu'il programme en requestAnimationFrame. Sans cela une
+// simple édition de date renvoie l'utilisateur en haut du planning.
+function captureMsProjectScroll() {
+  const scroller = document.scrollingElement || document.documentElement;
+  const panes = Array.from(
+    document.querySelectorAll("#msProjectTimeline .vis-panel")
+  );
+  const documentTop = scroller ? scroller.scrollTop : 0;
+  const paneTops = panes.map((pane) => pane.scrollTop);
+
+  return () => {
+    const restore = () => {
+      if (scroller) scroller.scrollTop = documentTop;
+      panes.forEach((pane, index) => {
+        pane.scrollTop = paneTops[index];
+      });
+    };
+    restore();
+    requestAnimationFrame(restore);
+  };
+}
+
 function resolveDateColumnName(field) {
   const columns = APP_CONFIG.grist.msProjectTable?.columns || {};
   if (field === "start") return columns.start;
@@ -154,7 +180,9 @@ function renderMsProjectFromCache() {
     sortMode
   );
   if (!timelineData.rowCount) return;
+  const restoreScroll = captureMsProjectScroll();
   renderMsProjectTimeline(timelineData);
+  restoreScroll();
 }
 
 // Applique localement le champ modifié sur la ligne en cache (mise à jour
@@ -194,7 +222,11 @@ async function handleDateCellEdit({ rowId, field, isoDate }) {
 
     let planningSyncResult = null;
     if (field === "start") {
-      planningSyncResult = await syncPlanningDemarrageFromMsProjectStart(rowId, isoDate);
+      planningSyncResult = await syncPlanningDemarrageFromMsProjectStart(
+        rowId,
+        isoDate,
+        state.selectedProject
+      );
     }
 
     await refreshMsProject();
@@ -218,8 +250,13 @@ async function handleDateCellEdit({ rowId, field, isoDate }) {
 }
 
 async function refreshMsProject() {
-  if (refreshInProgress) return;
+  if (refreshInProgress) {
+    refreshPending = true;
+    return;
+  }
   refreshInProgress = true;
+  const requestedProject = state.selectedProject;
+  const requestedSortMode = sortMode;
 
   const startedAt = performance.now();
   const diagnosticsBefore = getMsProjectServiceDiagnostics();
@@ -234,35 +271,53 @@ async function refreshMsProject() {
       return;
     }
 
+    if (!requestedProject) {
+      cachedMsProjectRows = [];
+      clearMsProjectTimeline();
+      setMsProjectStatus("Selectionne un nom pour charger ses taches.");
+      return;
+    }
+
     setMsProjectStatus("Chargement des donnees MS Project...");
 
     const fetchStartedAt = performance.now();
-    const rows = await fetchMsProjectRows();
+    const rows = await fetchMsProjectRows(requestedProject);
     fetchDurationMs += performance.now() - fetchStartedAt;
+    if (requestedProject !== state.selectedProject || requestedSortMode !== sortMode) {
+      refreshPending = true;
+      return;
+    }
     cachedMsProjectRows = rows;
 
     const buildStartedAt = performance.now();
     const timelineData = buildTimelineDataFromMsProjectRows(
       rows,
-      state.selectedProject || "",
-      sortMode
+      requestedProject,
+      requestedSortMode
     );
     buildDurationMs += performance.now() - buildStartedAt;
 
     if (!timelineData.rowCount) {
       clearMsProjectTimeline();
 
-      if (!state.selectedProject) {
+      if (!requestedProject) {
         setMsProjectStatus("");
       } else {
-        setMsProjectStatus("Aucune tache exploitable trouvee pour le projet selectionne.");
+        setMsProjectStatus("Aucune tache exploitable trouvee pour le nom selectionne.");
       }
       return;
     }
 
+    // Le défilement n'est restitué que si l'on redessine le même projet :
+    // changer de projet doit repartir du haut.
+    const restoreScroll =
+      requestedProject === lastRenderedProject ? captureMsProjectScroll() : null;
+
     const renderStartedAt = performance.now();
     renderMsProjectTimeline(timelineData);
     renderDurationMs += performance.now() - renderStartedAt;
+    restoreScroll?.();
+    lastRenderedProject = requestedProject;
 
     if (!toolbarBound) {
       bindTimelineToolbar({
@@ -272,7 +327,7 @@ async function refreshMsProject() {
     }
 
     setMsProjectStatus(
-      `${timelineData.rowCount} tache(s) affichee(s) | Projet : ${state.selectedProject || "Tous les projets"}`
+      `${timelineData.rowCount} tache(s) affichee(s) | Nom : ${requestedProject}`
     );
   } catch (error) {
     console.error("Erreur MS Project :", error);
@@ -290,6 +345,10 @@ async function refreshMsProject() {
         diagnosticsAfter.fetchTableCount - diagnosticsBefore.fetchTableCount,
       fetchTableDurationMs:
         Math.round((diagnosticsAfter.fetchTableDurationMs - diagnosticsBefore.fetchTableDurationMs) * 10) / 10,
+      restFetchCount:
+        diagnosticsAfter.restFetchCount - diagnosticsBefore.restFetchCount,
+      restFetchDurationMs:
+        Math.round((diagnosticsAfter.restFetchDurationMs - diagnosticsBefore.restFetchDurationMs) * 10) / 10,
       actionBatchCount:
         diagnosticsAfter.actionBatchCount - diagnosticsBefore.actionBatchCount,
       actionCount:
@@ -297,6 +356,10 @@ async function refreshMsProject() {
       actionDurationMs:
         Math.round((diagnosticsAfter.actionDurationMs - diagnosticsBefore.actionDurationMs) * 10) / 10,
     });
+    if (refreshPending) {
+      refreshPending = false;
+      await refreshMsProject();
+    }
   }
 }
 
@@ -330,6 +393,7 @@ async function bootstrap() {
     });
 
     await refreshMsProject();
+
   } catch (error) {
     console.error("Erreur d'initialisation MS Project :", error);
 

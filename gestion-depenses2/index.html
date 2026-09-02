@@ -128,9 +128,57 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-    <script src="../shared/service-context-core.js"></script>
-    <script src="../shared/grist-service-context.js"></script>
-    <script type="module" src="assets/js/main.js"></script>
+    <script src="../shared/service-context-core.js?v=20260812-sync6"></script>
+    <script src="../shared/grist-service-context.js?v=20260812-sync6"></script>
+    <script>
+      // Contrat explicite des donnees modifiables depuis ce widget. Le test de
+      // couverture compare cette liste aux ecritures du service : ajouter un
+      // nouveau champ metier sans son canal de synchronisation fera echouer le test.
+      const gestionDepensesEditableTables = Object.freeze([
+        "Projets2", "Budget", "ProjectTeam", "TimeSegment", "TimeReal"
+      ]);
+      window.ProjectMutationSyncConfig = {
+        editableTables: gestionDepensesEditableTables,
+        mutationSignals: {
+          GestionDepenses_Sync: [
+            "Projets2", "Budget", "ListePlan_NDC_COF", "Planning_Projet",
+            "ProjectTeam", "Timesheet", "TimeSegment", "TimeReal", "Team"
+          ],
+          ChargePlanning_Sync: ["Planning_Projet", "ProjectTeam", "TimeSegment"],
+          PlanningProjet_Sync: ["Planning_Projet"],
+          Avancement_Sync: [
+            "Projets2", "Budget", "Planning_Projet", "ProjectTeam", "TimeReal"
+          ]
+        },
+        observedSignalColumns: [
+          "GestionDepenses_Sync",
+          "ChargePlanning_Sync",
+          "PlanningProjet_Sync",
+          "ListePlan_Sync",
+          "Avancement_Sync"
+        ],
+        observedSignalTables: {
+          GestionDepenses_Sync: [
+            "Projets2", "Budget", "ListePlan_NDC_COF", "Planning_Projet",
+            "ProjectTeam", "Timesheet", "TimeSegment", "TimeReal", "Team"
+          ],
+          ChargePlanning_Sync: ["Planning_Projet", "ProjectTeam", "TimeSegment"],
+          PlanningProjet_Sync: ["Planning_Projet"],
+          ListePlan_Sync: ["ListePlan_NDC_COF"],
+          Avancement_Sync: [
+            "Projets2", "Budget", "Planning_Projet", "ProjectTeam", "TimeReal"
+          ]
+        },
+        directSignalTables: [
+          "Budget", "ListePlan_NDC_COF", "Planning_Projet", "ProjectTeam",
+          "Timesheet", "TimeSegment", "TimeReal", "Team",
+          "Time-Out", "Time_Out", "TimeOut"
+        ],
+        dropdownIds: ["project-select"]
+      };
+    </script>
+    <script src="../shared/project-mutation-sync-relay.js?v=20260812-sync6"></script>
+    <script type="module" src="assets/js/main.js?v=20260812-sync6"></script>
 
     <div id="edit-budget-modal" class="modal" style="display: none;">
         <div class="modal-content modal-content--budget">
@@ -149,6 +197,7 @@
                     <button id="add-edit-budget-line-btn">Ajouter</button>
                 </div>
             </div>
+            <p id="edit-budget-feedback" class="segment-edit-feedback" hidden></p>
             <div class="budget-modal-footer">
                 <button id="save-edited-budget-btn">Enregistrer</button>
             </div>
@@ -172,36 +221,16 @@
         <div class="modal-content modal-content--segment">
             <div class="budget-modal-header">
                 <div>
-                    <h2>Modifier le segment</h2>
-                    <p class="budget-modal-subtitle">Choisissez une nouvelle plage au demi-jour pres.</p>
+                    <h2>Segment mensuel</h2>
+                    <p class="segment-edit-context">
+                        <span id="edit-segment-month-label"></span>
+                        <span id="edit-segment-worker-label"></span>
+                    </p>
+                    <p class="budget-modal-subtitle">Saisissez les jours effectivement travaillés sur ce mois.</p>
                 </div>
-                <button id="cancel-edit-segment-btn" type="button" class="budget-modal-close-btn">Fermer</button>
+                <button id="cancel-edit-segment-btn" type="button" class="budget-modal-close-btn">Annuler</button>
             </div>
             <div class="segment-edit-form">
-                <div class="segment-edit-grid">
-                    <label class="segment-edit-field">
-                        <span>Début</span>
-                        <input type="date" id="edit-segment-start-date">
-                    </label>
-                    <label class="segment-edit-field">
-                        <span>Période</span>
-                        <select id="edit-segment-start-part">
-                            <option value="am">Matin</option>
-                            <option value="pm">Apres-midi</option>
-                        </select>
-                    </label>
-                    <label class="segment-edit-field">
-                        <span>Fin</span>
-                        <input type="date" id="edit-segment-end-date">
-                    </label>
-                    <label class="segment-edit-field">
-                        <span>Période</span>
-                        <select id="edit-segment-end-part">
-                            <option value="am">Matin</option>
-                            <option value="pm">Apres-midi</option>
-                        </select>
-                    </label>
-                </div>
                 <section class="segment-edit-section" aria-labelledby="edit-segment-effectif-title">
                     <div class="segment-edit-section-copy">
                         <h3 id="edit-segment-effectif-title">Jours Effectifs :</h3>
@@ -215,14 +244,38 @@
                             <input
                                 type="number"
                                 id="edit-segment-effectif"
-                                min="0"
+                                min="0.5"
                                 step="0.5"
                                 placeholder="0"
                             >
                         </label>
                         <div class="segment-edit-metric">
-                            <span class="segment-edit-metric-label">Jours disponibles dans la plage</span>
+                            <span class="segment-edit-metric-label">Jours disponibles dans le mois</span>
                             <strong id="edit-segment-calculated-days">--</strong>
+                        </div>
+                    </div>
+                    <!-- Charge TOTALE de la personne sur ce mois, tous projets et
+                         tous services confondus (cf. utils/monthLoad.js). -->
+                    <div class="segment-edit-load" id="edit-segment-load" hidden>
+                        <div class="segment-edit-load-head">
+                            <span class="segment-edit-load-label">Charge du mois — tous projets et tous services</span>
+                            <strong id="edit-segment-load-days">--</strong>
+                        </div>
+                        <div
+                            class="segment-edit-load-track"
+                            id="edit-segment-load-track"
+                            role="progressbar"
+                            aria-valuemin="0"
+                            aria-valuemax="100"
+                            aria-valuenow="0"
+                            aria-labelledby="edit-segment-load-days"
+                        >
+                            <span class="segment-edit-load-fill" id="edit-segment-load-fill"></span>
+                        </div>
+                        <p class="segment-edit-load-message" id="edit-segment-load-message" aria-live="polite"></p>
+                        <div class="segment-edit-load-projects" id="edit-segment-load-projects" hidden>
+                            <span class="segment-edit-load-projects-label">Deja engage ce mois-ci</span>
+                            <ul class="segment-edit-load-projects-list" id="edit-segment-load-projects-list"></ul>
                         </div>
                     </div>
                 </section>

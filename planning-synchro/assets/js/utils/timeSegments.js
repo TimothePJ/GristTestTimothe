@@ -4,16 +4,20 @@
 // HALF_DAY_PARTS, HALF_DAY_TIMES, createLocalDate, isValidDate, isBusinessDay,
 // toDateKey, createHalfDaySlotKey, getHalfDaySlotRange,
 // getBusinessHalfDaySlotsBetween (and its private getHalfDaySlotsBetween),
-// getSegmentAllocationDays, getSegmentEffectiveDays, toGristDateTimeValue are
-// ported verbatim from `gestion-depenses2/assets/js/utils/timeSegments.js`
-// (~lines 3-16, 18-28, 30-32, 77-193). The original `parseRawDateTime` calls
-// are replaced with `parseDateTime` imported from `./dates.js` (this widget's
-// renamed port of that function); `parseRawDateTime` itself is not redefined
-// here.
+// getSegmentAllocationDays, getSegmentEffectiveDays are ported verbatim from
+// `gestion-depenses2/assets/js/utils/timeSegments.js` (~lines 3-16, 18-28,
+// 30-32, 77-193). The original `parseRawDateTime` calls are replaced with
+// `parseDateTime` imported from `./dates.js` (this widget's renamed port of
+// that function); `parseRawDateTime` itself is not redefined here.
+//
+// `toGristDateTimeValue` a ete retire : depuis le passage de TimeSegment au
+// mois, plus personne dans planning-synchro n'ecrit de date/heure (la colonne
+// `Mois` passe par toGristMonthValue de monthSegments.js).
 
 import { toFiniteNumber } from "./format.js";
 import { parseDateTime } from "./dates.js";
 import { isFrenchHoliday } from "./frenchHolidays.js";
+import { getMonthBusinessDays } from "./monthSegments.js";
 
 export const HALF_DAY_PARTS = ["am", "pm"];
 
@@ -44,12 +48,6 @@ function createLocalDate(baseDate, hour, minute = 0) {
 
 export function isValidDate(value) {
   return value instanceof Date && !Number.isNaN(value.getTime());
-}
-
-export function toGristDateTimeValue(value) {
-  const date = parseDateTime(value);
-  if (!date) return null;
-  return Math.floor(date.getTime() / 1000);
 }
 
 export function isBusinessDay(date) {
@@ -136,23 +134,19 @@ export function getBusinessHalfDaySlotsBetween(startValue, endValue) {
   });
 }
 
+// Capacite d'un segment = jours ouvres de son mois (week-ends et feries exclus).
+// Depuis le passage au mois, `allocationDays` stocke en base n'est plus lu : il
+// reste ecrit pour la lisibilite de la grille Grist, mais la verite est le mois.
 export function getSegmentAllocationDays(segment) {
-  const explicitAllocation = toFiniteNumber(segment?.allocationDays, 0);
-  if (explicitAllocation > 0) {
-    return explicitAllocation;
-  }
-
-  const slots = getBusinessHalfDaySlotsBetween(segment?.startAt, segment?.endAt);
-  return slots.length / 2;
+  return getMonthBusinessDays(segment?.monthKey);
 }
 
 export function getSegmentEffectiveDays(segment) {
   const allocationDays = getSegmentAllocationDays(segment);
-  const rawEffectifDays = segment?.effectifDays ?? segment?.effectif;
+  if (allocationDays <= 0) return 0;
 
-  if (rawEffectifDays == null || rawEffectifDays === "") {
-    return 0;
-  }
+  const rawEffectifDays = segment?.effectifDays ?? segment?.effectif;
+  if (rawEffectifDays == null || rawEffectifDays === "") return 0;
 
   const parsedEffectifDays = Math.max(0, toFiniteNumber(rawEffectifDays, 0));
   return Math.min(allocationDays, parsedEffectifDays);

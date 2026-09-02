@@ -365,3 +365,201 @@ test("les mutations d'affectation sont détectées sans protéger toute la table
   ), false);
   assert.deepEqual(core.getMutationRecordIds(["BulkRemoveRecord", "Budget", [1, 2]]), [1, 2]);
 });
+
+test("les filtres REST mono-projet combinent Service et identité projet exacte", () => {
+  const currentProject = PROJECTS[0];
+  const references = core.buildContextTableFilter("References2", {
+    selectedService: "Synthèse",
+    currentProject,
+  });
+  assert.deepEqual(references.filter, {
+    Service: ["Synthese", "Synthèse"],
+    NomProjet: ["ERA QUAI D'ORSAY", "Alias ERA"],
+  });
+  assert.deepEqual(core.buildContextTableFilter("ListePlan_NDC_COF", {
+    selectedService: "Structure",
+    currentProject,
+  }).filter, {
+    Service: ["Structure"],
+    Nom_projet: ["ERA QUAI D'ORSAY", "Alias ERA"],
+  });
+  assert.deepEqual(core.buildContextTableFilter("Budget", {
+    selectedService: "Structure",
+    currentProject,
+  }).filter, {
+    Service: ["Structure"],
+    NumeroProjet: ["252035"],
+  });
+  assert.deepEqual(core.buildContextTableFilter("Emetteurs", {
+    selectedService: "Structure",
+    currentProject,
+  }).filter, { Service: ["Structure"] });
+});
+
+test("les politiques classent explicitement les tables REST filtrées et REST complètes", () => {
+  const expectedModes = {
+    References2: core.TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+    ListePlan_NDC_COF: core.TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+    Planning_Projet: core.TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+    Envois: core.TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+    Budget: core.TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+    ProjectTeam: core.TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+    TimeSegment: core.TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+    TimeReal: core.TABLE_POLICY_MODES.REST_PROJECT_SERVICE,
+    Emetteurs: core.TABLE_POLICY_MODES.REST_SERVICE,
+    Team: core.TABLE_POLICY_MODES.REST_FULL,
+    Projets2: core.TABLE_POLICY_MODES.REST_FULL,
+    "Time-Out": core.TABLE_POLICY_MODES.REST_FULL,
+    Time_Out: core.TABLE_POLICY_MODES.REST_FULL,
+    TimeOut: core.TABLE_POLICY_MODES.REST_FULL,
+    Timesheet: core.TABLE_POLICY_MODES.REST_FULL,
+    Ventilation: core.TABLE_POLICY_MODES.REST_FULL,
+    MsProject: core.TABLE_POLICY_MODES.REST_FULL,
+    Planning_Project: core.TABLE_POLICY_MODES.REST_FULL,
+    "ListePlan NDC+COF": core.TABLE_POLICY_MODES.REST_FULL,
+    "ListePlan_NDC+COF": core.TABLE_POLICY_MODES.REST_FULL,
+    _grist_Tables: core.TABLE_POLICY_MODES.REST_FULL,
+    _grist_Tables_column: core.TABLE_POLICY_MODES.REST_FULL,
+  };
+  Object.entries(expectedModes).forEach(([tableName, mode]) => {
+    assert.equal(core.getTablePolicy(tableName).mode, mode, tableName);
+  });
+  const timeOut = core.buildContextTableFilter("Time-Out", {
+    selectedService: "Structure",
+    currentProject: PROJECTS[0],
+  });
+  assert.equal(timeOut.supported, true);
+  assert.equal(timeOut.unfiltered, true);
+  assert.equal(timeOut.filter, null);
+  const msProject = core.buildContextTableFilter("MsProject", {
+    selectedService: "Structure",
+    currentProject: PROJECTS[0],
+  });
+  assert.equal(msProject.supported, true);
+  assert.equal(msProject.unfiltered, true);
+  assert.equal(msProject.filter, null);
+  const unknown = core.buildContextTableFilter("TableMetierNonConfiguree", {
+    selectedService: "Structure",
+    currentProject: PROJECTS[0],
+  });
+  assert.equal(unknown.mode, core.TABLE_POLICY_MODES.REST_FULL);
+  assert.equal(unknown.unfiltered, true);
+});
+
+test("une politique future projet uniquement n'invente aucun filtre Service", () => {
+  const result = core.buildTableFilterFromPolicy({
+    mode: core.TABLE_POLICY_MODES.REST_PROJECT,
+    projectColumn: "NomProjet",
+    projectIdentity: "name",
+  }, {
+    selectedService: "Synthese",
+    currentProject: PROJECTS[0],
+  });
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.filter, {
+    NomProjet: ["ERA QUAI D'ORSAY", "Alias ERA"],
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(result.filter, "Service"), false);
+});
+
+test("les filtres REST multiprojets regroupent tous les numéros, noms et alias", () => {
+  assert.deepEqual(core.buildContextTableFilter("TimeSegment", {
+    selectedService: "Topographie",
+    allowedProjects: PROJECTS.slice(0, 3),
+    multiProject: true,
+  }).filter, {
+    Service: ["Topographie"],
+    NumeroProjet: ["252035", "2520", "9999"],
+  });
+  assert.deepEqual(core.buildContextTableFilter("Planning_Projet", {
+    selectedService: "Structure",
+    allowedProjects: PROJECTS.slice(0, 3),
+    multiProject: true,
+  }).filter, {
+    Service: ["Structure"],
+    NomProjet: ["ERA QUAI D'ORSAY", "Alias ERA", "Projet court", "Projet topo"],
+  });
+});
+
+test("un contexte REST incomplet interdit toute requête métier", () => {
+  assert.equal(core.buildContextTableFilter("References2", {
+    selectedService: "",
+    currentProject: PROJECTS[0],
+  }).complete, false);
+  assert.equal(core.buildContextTableFilter("Budget", {
+    selectedService: "Structure",
+    currentProject: null,
+  }).complete, false);
+});
+
+test("les filtres REST trop longs sont découpés sans perdre leur Service", () => {
+  const filter = {
+    Service: ["Structure"],
+    NumeroProjet: ["1", "2", "3", "4", "5"],
+  };
+  const chunks = core.splitContextTableFilter(filter, "NumeroProjet", { maxValues: 2 });
+  assert.deepEqual(chunks, [
+    { Service: ["Structure"], NumeroProjet: ["1", "2"] },
+    { Service: ["Structure"], NumeroProjet: ["3", "4"] },
+    { Service: ["Structure"], NumeroProjet: ["5"] },
+  ]);
+  assert.deepEqual(filter.NumeroProjet, ["1", "2", "3", "4", "5"]);
+});
+
+test("les enveloppes REST sont converties sans mutation et conservent les types", () => {
+  const envelope = {
+    records: [
+      { id: 1, fields: { Service: "Structure", Nullable: null, Active: false, Amount: 12.5 } },
+      { id: 2, fields: { Service: "Structure", Active: true } },
+    ],
+  };
+  const before = structuredClone(envelope);
+  assert.deepEqual(core.restRecordsToRows(envelope), [
+    { id: 1, Service: "Structure", Nullable: null, Active: false, Amount: 12.5 },
+    { id: 2, Service: "Structure", Active: true },
+  ]);
+  assert.deepEqual(core.restRecordsToTableData(envelope), {
+    id: [1, 2],
+    Service: ["Structure", "Structure"],
+    Nullable: [null, null],
+    Active: [false, true],
+    Amount: [12.5, null],
+  });
+  assert.deepEqual(envelope, before);
+});
+
+test("la fusion REST déduplique les alias par id et garde un ordre stable", () => {
+  const merged = core.mergeRestRecordEnvelopes([
+    { records: [{ id: 1, fields: { Name: "A" } }, { id: 2, fields: { Name: "B" } }] },
+    { records: [{ id: 2, fields: { Name: "B bis" } }, { id: 3, fields: { Name: "C" } }] },
+  ]);
+  assert.deepEqual(core.restRecordsToRows(merged), [
+    { id: 1, Name: "A" },
+    { id: 2, Name: "B" },
+    { id: 3, Name: "C" },
+  ]);
+});
+
+test("le signal de donnees conserve sa portee projet sans casser l'ancien parseur", () => {
+  const rawSignal = JSON.stringify({
+    version: core.DATA_SIGNAL_VERSION,
+    tables: ["References2", "References2", "ListePlan_NDC_COF"],
+    projectId: 12,
+    projectNumber: " 00100 ",
+  });
+
+  assert.deepEqual(core.parseDataChangeSignal(rawSignal), [
+    "References2",
+    "ListePlan_NDC_COF",
+  ]);
+  assert.deepEqual(core.parseDataChangeSignalDetail(rawSignal), {
+    tables: ["References2", "ListePlan_NDC_COF"],
+    projectId: 12,
+    projectNumber: "00100",
+  });
+  assert.deepEqual(core.parseDataChangeSignalDetail("invalide"), {
+    tables: [],
+    projectId: null,
+    projectNumber: "",
+  });
+});

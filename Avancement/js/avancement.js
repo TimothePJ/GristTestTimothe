@@ -140,20 +140,21 @@ function init() {
   grist.ready({ requiredAccess: 'full' });
   Chart.register(ChartDataLabels);
   void refreshProjectDropdownFromProjectsTable();
-  window.addEventListener('pageshow', () => {
-    void refreshProjectDropdownFromProjectsTable();
-  });
-  window.addEventListener('focus', () => {
+  // Ni le retour de page (bfcache) ni le retour de focus ne doivent relire pour
+  // relire : ils remettraient la page en haut sans raison. Le contexte partagé
+  // relit déjà et ne rappelle le watcher que si les données ont changé. Seul un
+  // état dégradé — liste de projets vide, sélection perdue — justifie une reprise.
+  const recoverProjectDropdownIfDegraded = () => {
     const savedSelection = readSharedProjectSelection();
     if (
       elements.projectDropdown.options.length <= 1 ||
       (savedSelection && !elements.projectDropdown.value)
     ) {
       void refreshProjectDropdownFromProjectsTable();
-    } else if (state.recordsReady && elements.projectDropdown.value) {
-      void updateDashboard();
     }
-  });
+  };
+  window.addEventListener('pageshow', recoverProjectDropdownIfDegraded);
+  window.addEventListener('focus', recoverProjectDropdownIfDegraded);
 
   elements.projectDropdown.addEventListener('change', () => {
     state.selectionFeedback = null;
@@ -161,7 +162,7 @@ function init() {
     updateDashboard();
   });
 
-  window.GristServiceContext.onRecords((newRecords) => {
+  window.GristServiceContext.watchContextTable('ListePlan_NDC_COF', (newRecords) => {
     state.records = newRecords || [];
     state.recordsReady = true;
     if (!elements.projectDropdown.value && elements.projectDropdown.options.length > 1) {
@@ -182,6 +183,32 @@ function init() {
       }
     }
     updateDashboard();
+  }, {
+    nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
+    projectScopedSignals: true,
+    acceptAnyNativeTableSignal: true,
+  });
+
+  // Le tableau de bord n'agrège pas que les plans : la saisie d'avancement vit
+  // dans Projets2, le budget dans Budget, les dates de clôture dans Planning_Projet
+  // et les dépenses réelles dans ProjectTeam + TimeReal. Toutes sont éditées depuis
+  // d'autres widgets. Les surveiller remplace la relecture aveugle au retour de
+  // focus : le runtime relit ses watchers à ce moment-là, en requête conditionnelle,
+  // et ne rappelle que si la table a réellement changé. La première livraison de
+  // chaque table correspond au chargement initial, déjà couvert par updateDashboard().
+  const dashboardSourceTables = [
+    TABLES.projects,
+    TABLES.budget,
+    TABLES.planningProject,
+    TABLES.projectTeam,
+    TABLES.timeReal,
+  ];
+  window.GristServiceContext.watchContextTables(dashboardSourceTables, () => {
+    if (state.recordsReady && elements.projectDropdown.value) void updateDashboard();
+  }, {
+    nativeSignalFilter: window.ProjectMutationSyncRelay?.acceptNativeSignalForCurrentProject,
+    projectScopedSignals: true,
+    acceptAnyNativeTableSignal: true,
   });
 }
 
@@ -312,14 +339,48 @@ function findMatchingProject(projects = [], requestedProject = '') {
   ) || '';
 }
 
+// Filet de sécurité : le nouveau contenu peut être plus court que l'ancien, et le
+// navigateur ramène alors le défilement dans les limites de la nouvelle hauteur.
+// On remet la position d'avant le rendu. Seul un changement de projet justifie de
+// repartir du haut.
+function captureDashboardScroll() {
+  const scroller = document.scrollingElement || document.documentElement;
+  const panes = [elements.averageIndicesContainer, elements.statsOutput];
+  const documentTop = scroller ? scroller.scrollTop : 0;
+  const paneTops = panes.map((pane) => (pane ? pane.scrollTop : 0));
+
+  return () => {
+    const restore = () => {
+      if (scroller) scroller.scrollTop = documentTop;
+      panes.forEach((pane, index) => {
+        if (pane) pane.scrollTop = paneTops[index];
+      });
+    };
+    // Une fois tout de suite, une fois après la mise en page : les graphiques
+    // n'ont pas toujours fini de fixer leur hauteur au premier passage.
+    restore();
+    requestAnimationFrame(restore);
+  };
+}
+
 async function updateDashboard() {
   const updateRevision = ++dashboardUpdateRevision;
   const selectedProject = elements.projectDropdown.value;
-  clearOutput();
+  const restoreScroll = selectedProject && selectedProject === state.lastSelectedProject
+    ? captureDashboardScroll()
+    : null;
+  // À projet constant, le contenu précédent reste en place pendant le recalcul :
+  // le vider ferait s'effondrer la hauteur de page, le navigateur ramènerait le
+  // défilement à zéro et un rendu concurrent laisserait l'écran blanc. Chaque
+  // sortie de cette fonction réécrit `#stats-output` de toute façon.
 
   if (selectedProject !== state.lastSelectedProject) {
     state.selectionFeedback = null;
     state.lastSelectedProject = selectedProject;
+    // Changement de projet : les lectures qui suivent durent plusieurs allers-retours
+    // réseau. Laisser le tableau précédent afficherait les chiffres du projet A sous
+    // le nom du projet B.
+    elements.statsOutput.innerHTML = '';
   }
 
   if (!selectedProject) {
@@ -375,10 +436,7 @@ async function updateDashboard() {
   bindBudgetProgressControls();
   renderSidePanel(dashboardData, projectRecords, projectConfig);
   renderCharts(dashboardData.totals);
-}
-
-function clearOutput() {
-  elements.statsOutput.innerHTML = '';
+  restoreScroll?.();
 }
 
 function showEmptyState(message) {

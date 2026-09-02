@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildTaskLoadSeries } from "../assets/js/top/planningChart.js";
+import { buildTaskLoadSeries, getChartWindowBounds } from "../assets/js/top/planningChart.js";
 
 const columns = {
   taskName: "Taches",
@@ -127,6 +127,98 @@ test("buildTaskLoadSeries: week granularity buckets tasks per ISO week", () => {
 
   // Same grand total as the month view (5 in-window tasks), just spread by week.
   assert.equal(series.total.reduce((a, b) => a + b, 0), 5);
+});
+
+// --- calibration against the frise below -------------------------------------
+// The chart must span exactly the same window, with the same date -> x mapping,
+// as the planning in the bottom pane (sync/viewportMath.getDayBoundaryLeftPx:
+// a day is contentWidthPx / visibleDays wide, day 0 starting at
+// firstVisibleDate 00:00).
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+test("getChartWindowBounds: covers whole days, ending at rangeEndDate + 1 day 00:00", () => {
+  const bounds = getChartWindowBounds({ firstVisibleDate: "2027-01-01", rangeEndDate: "2027-12-31" });
+
+  assert.equal(bounds.minTs, new Date(2027, 0, 1).getTime(), "starts at the first visible day 00:00");
+  assert.equal(bounds.maxTs, new Date(2028, 0, 1).getTime(), "ends at the day AFTER rangeEndDate");
+  // 2027 is not a leap year: 365 whole days, matching visibleDays for this window.
+  assert.equal((bounds.maxTs - bounds.minTs) / DAY_MS, 365);
+});
+
+test("getChartWindowBounds: window width equals visibleDays whole days", () => {
+  // A 30-day window (mode "mois"): Jun 1 .. Jun 30 inclusive.
+  const bounds = getChartWindowBounds({ firstVisibleDate: "2027-06-01", rangeEndDate: "2027-06-30" });
+  assert.equal((bounds.maxTs - bounds.minTs) / DAY_MS, 30);
+});
+
+test("getChartWindowBounds: invalid viewport -> null", () => {
+  assert.equal(getChartWindowBounds({}), null);
+  assert.equal(getChartWindowBounds({ firstVisibleDate: "2027-06-10", rangeEndDate: "2027-06-01" }), null);
+});
+
+test("month points sit at the true midpoint of their month, not the 15th", () => {
+  const series = buildTaskLoadSeries(rows, columns, viewport);
+
+  series.points.forEach((point) => {
+    const startTs = new Date(point.year, point.monthNumber - 1, 1).getTime();
+    const endTs = new Date(point.year, point.monthNumber, 1).getTime();
+    assert.equal(point.startTs, startTs, `${point.monthKey} starts on the 1st at 00:00`);
+    assert.equal(point.midTs, startTs + (endTs - startTs) / 2, `${point.monthKey} midpoint`);
+  });
+
+  // A 31-day month's centre is the 16th at 12:00 — the old 15th-at-00:00 point
+  // was 1.5 days (~4% of the month's width) to its left.
+  const january = series.points.find((point) => point.monthKey === "2027-01");
+  assert.equal(january.midTs, new Date(2027, 0, 16, 12, 0, 0).getTime());
+});
+
+test("week points sit at the bucket midpoint, Thursday 12:00 (Monday + 3.5 days)", () => {
+  const series = buildTaskLoadSeries(rows, columns, viewport, { granularity: "week" });
+
+  const week = series.points.find((point) => point.weekKey === "2027-02-15");
+  assert.equal(week.startTs, new Date(2027, 1, 15).getTime(), "bucket starts Monday 00:00");
+  assert.equal(week.midTs, new Date(2027, 1, 18, 12, 0, 0).getTime(), "midpoint is Thursday 12:00");
+
+  // Every bucket's midpoint is halfway between its two Monday boundaries. The
+  // next Monday is derived by CALENDAR arithmetic, not startTs + 7 * DAY_MS:
+  // across a DST transition the week is 167h or 169h long, and the midpoint
+  // moves with it (this is exactly what the boundary-derived midTs gets right).
+  series.points.forEach((point) => {
+    const monday = new Date(point.startTs);
+    const nextMonday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 7);
+    const expected = point.startTs + (nextMonday.getTime() - point.startTs) / 2;
+    assert.equal(point.midTs, expected, `week ${point.weekKey} midpoint`);
+  });
+
+  // The DST weeks prove the point: in Europe/Paris, the spring-forward week is
+  // 167h so its midpoint is Thursday 11:00, and the autumn week is 169h so its
+  // midpoint is Thursday 13:00 — the old fixed "Thursday 12:00" was an hour off
+  // on both, which the linear timestamp axis would have shown as drift.
+  const springWeek = series.points.find((point) => point.weekKey === "2027-03-22");
+  const autumnWeek = series.points.find((point) => point.weekKey === "2027-10-25");
+  if (springWeek) {
+    const offsetHours = (springWeek.midTs - springWeek.startTs) / (60 * 60 * 1000);
+    assert.ok(offsetHours === 83.5 || offsetHours === 84, `spring week offset ${offsetHours}h`);
+  }
+  if (autumnWeek) {
+    const offsetHours = (autumnWeek.midTs - autumnWeek.startTs) / (60 * 60 * 1000);
+    assert.ok(offsetHours === 84.5 || offsetHours === 84, `autumn week offset ${offsetHours}h`);
+  }
+});
+
+test("bucket startTs values are the gridline boundaries, inside the window", () => {
+  const bounds = getChartWindowBounds(viewport);
+  const series = buildTaskLoadSeries(rows, columns, viewport);
+
+  series.points.forEach((point) => {
+    assert.ok(
+      point.startTs >= bounds.minTs && point.startTs < bounds.maxTs,
+      `${point.monthKey} boundary is inside the visible window`
+    );
+  });
+  // The window starts on a 1st, so the first gridline is the window's left edge.
+  assert.equal(series.points[0].startTs, bounds.minTs);
 });
 
 test("buildTaskLoadSeries: empty / invalid viewport -> empty series", () => {

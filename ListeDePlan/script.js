@@ -688,25 +688,27 @@ window.__LP_GET_CURRENT_TYPE = function () {
 
 grist.ready({ requiredAccess: "full" });
 void initializeListeDePlanShell();
-window.addEventListener("pageshow", () => {
-  void refreshProjectDropdownFromProjectsTable();
-});
-window.addEventListener("focus", () => {
+// Retour de page (bfcache) et retour de focus ne servent qu'à rattraper un état
+// dégradé : liste de projets vide ou sélection perdue. Reconstruire `#plans-output`
+// à chaque retour renverrait l'utilisateur en haut alors que rien n'a bougé ; le
+// contexte partagé relit déjà au retour de focus et ne livre que si la table a
+// réellement changé.
+function recoverListeDePlanProjectDropdown() {
   const dropdown = document.getElementById("projectDropdown");
   const savedSelection = loadLastSelection().projectLabel;
   if (!dropdown || dropdown.options.length <= 1 || (savedSelection && !dropdown.value)) {
     void refreshProjectDropdownFromProjectsTable();
-  } else {
-    refreshListeDePlanProjectFromRecords();
   }
-});
+}
+window.addEventListener("pageshow", recoverListeDePlanProjectDropdown);
+window.addEventListener("focus", recoverListeDePlanProjectDropdown);
 
 async function initializeListeDePlanShell() {
   await loadExternalComponents();
   await refreshProjectDropdownFromProjectsTable();
 }
 
-window.GristServiceContext.onRecords(async (rec) => {
+window.GristServiceContext.watchContextTable("ListePlan_NDC_COF", async (rec) => {
   listeDePlanRecordsReady = false;
   window.records = rec.sort((a, b) => {
     const aDoc = a.NumeroDocument || "";
@@ -738,11 +740,51 @@ window.GristServiceContext.onRecords(async (rec) => {
   populateDropdown("projectDropdown", projets);
   listeDePlanRecordsReady = true;
   refreshListeDePlanProjectFromRecords();
+}, {
+  // Une installation historique peut porter le widget sur une vue liee. Le flux
+  // onRecords reste uniquement un signal ; les lignes sont relues dans la vraie
+  // table ListePlan_NDC_COF avant d'etre livrees.
+  acceptAnyNativeTableSignal: true,
+  nativeSignalFilter: window.ListePlanSyncRelay?.acceptNativeSignalForCurrentProject,
+  projectScopedSignals: true,
 });
+
+// Filet de sécurité autour d'un réaffichage déclenché par une livraison de données :
+// `afficherPlansFiltres` reconstruit `#plans-output`, la hauteur s'effondre le temps
+// du rendu et le navigateur ramène le défilement à zéro alors que l'utilisateur n'a
+// rien demandé. Un changement de sélection, lui, passe par les listes déroulantes et
+// repart du haut, ce qui est le comportement attendu.
+function capturePlansOutputScroll() {
+  const scroller = document.scrollingElement || document.documentElement;
+  const output = document.getElementById("plans-output");
+  const documentTop = scroller ? scroller.scrollTop : 0;
+  const outputTop = output ? output.scrollTop : 0;
+  const outputLeft = output ? output.scrollLeft : 0;
+  const tableLefts = output
+    ? Array.from(output.querySelectorAll(".plan-table-scroll"), (pane) => pane.scrollLeft)
+    : [];
+
+  return () => {
+    const restore = () => {
+      if (scroller) scroller.scrollTop = documentTop;
+      if (!output) return;
+      output.scrollTop = outputTop;
+      output.scrollLeft = outputLeft;
+      output.querySelectorAll(".plan-table-scroll").forEach((pane, index) => {
+        if (tableLefts[index] != null) pane.scrollLeft = tableLefts[index];
+      });
+    };
+    // Une fois tout de suite, une fois après la mise en page : les tableaux ne
+    // fixent pas toujours leur largeur au premier passage.
+    restore();
+    requestAnimationFrame(restore);
+  };
+}
 
 function refreshListeDePlanProjectFromRecords() {
   if (!listeDePlanRecordsReady || !Array.isArray(window.records)) return false;
 
+  const restorePlansScroll = capturePlansOutputScroll();
   const selectedProject = document.getElementById("projectDropdown")?.value || "";
   if (!selectedProject) {
     populateTypeDocumentDropdown([]);
@@ -783,6 +825,7 @@ function refreshListeDePlanProjectFromRecords() {
       document.getElementById("zoneDropdown")?.value ||
         (window.LISTE_DE_PLAN_ALL_ZONES_VALUE || "__ALL_ZONES__")
     );
+    restorePlansScroll();
   }
   return true;
 }
@@ -799,6 +842,12 @@ function populateDropdown(id, values) {
     const opt = document.createElement("option");
     opt.value = val;
     opt.textContent = val;
+    if (id === "projectDropdown") {
+      const project = _projectsData.find((candidate) => (
+        normalizeProjectSelectionKey(candidate.name) === normalizeProjectSelectionKey(val)
+      ));
+      if (project?.id) opt.dataset.projectId = String(project.id);
+    }
     dropdown.appendChild(opt);
   });
 

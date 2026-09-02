@@ -240,6 +240,23 @@ export function createSyncController({ planningRenderer, chargeBoard, bounds, on
     return current;
   }
 
+  // Bornes de la frise partagee. Elles sont fixees a la construction, mais le
+  // pane bas peut faire APPARAITRE un mois hors de ces bornes : une creation de
+  // segment est appliquee localement (sans rechargement du projet), et sans
+  // cette entree la fenetre serait ecretee juste avant la barre qui vient
+  // d etre creee. L appelant n elargit jamais que vers l exterieur (main.js) :
+  // retrecir les bornes deplacerait la fenetre courante sous les yeux de
+  // l utilisateur.
+  function setBounds(nextBounds) {
+    if (!nextBounds || !nextBounds.startDate || !nextBounds.endDate) return bounds;
+    bounds = nextBounds;
+    return bounds;
+  }
+
+  function getBounds() {
+    return bounds;
+  }
+
   function applyMode(mode) {
     return setViewport(applyViewportMode(getBaseViewport(), mode));
   }
@@ -503,6 +520,8 @@ export function createSyncController({ planningRenderer, chargeBoard, bounds, on
   return {
     setViewport,
     getViewport,
+    setBounds,
+    getBounds,
     applyMode,
     pan,
     today,

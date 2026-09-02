@@ -17,7 +17,9 @@ import {
   getHalfDaySlotRange,
   getSegmentEffectiveDays,
 } from "../utils/timeSegments.js";
-import { availableDaysAfterLeave, isAbsenceSlot } from "../utils/leaveAbsences.js";
+import { getMonthAvailableDays, getMonthBounds } from "../utils/monthSegments.js";
+import { isAbsenceSlot } from "../utils/leaveAbsences.js";
+import { buildMonthOverloadIndex } from "../utils/monthLoad.js";
 
 const activeVisibleSlotsByBoard = new WeakMap();
 let currentBoardEl = null;
@@ -29,7 +31,7 @@ const DEFAULT_TIMELINE_OPTIONS = {
   showEditToggle: false,
   editModeEnabled: false,
   helperText:
-    "Glissez dans une ligne pour creer un segment. Redimensionnez-le avec ses poignees. Utilisez le clic droit sur une barre pour la modifier ou la supprimer.",
+    "Cliquez sur un mois dans une ligne pour saisir les jours effectifs de ce mois. Utilisez le clic droit sur une barre pour la modifier ou la supprimer.",
   lockedHelperText:
     "Activez le mode edition pour creer, modifier ou supprimer des segments.",
 };
@@ -668,13 +670,14 @@ function buildVisibleSegmentBars(worker, visibleSlots, options = {}, absenceSet 
 
   return (worker?.[timelineOptions.segmentsField] || [])
     .map((segment) => {
-      const startAt = segment?.startAt instanceof Date ? segment.startAt : null;
-      const endAt = segment?.endAt instanceof Date ? segment.endAt : null;
-      if (!startAt || !endAt || Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) {
+      // Un segment = un mois : la barre epouse les bornes du mois, jamais une
+      // plage libre. Un segment sans `monthKey` (TimeReal) n'est pas affichable.
+      const bounds = getMonthBounds(segment?.monthKey);
+      if (!bounds) {
         return null;
       }
 
-      const slotRange = getVisibleSlotRange(startAt, endAt, visibleSlots);
+      const slotRange = getVisibleSlotRange(bounds.startAt, bounds.endAt, visibleSlots);
       if (!slotRange) {
         return null;
       }
@@ -683,12 +686,19 @@ function buildVisibleSegmentBars(worker, visibleSlots, options = {}, absenceSet 
       const label = segment?.label || `${formatDayValue(effectiveDays)} j`;
       const planningTaskCount = countPlanningTasksOverlappingRange(
         planningTasks,
-        startAt,
-        endAt
+        bounds.startAt,
+        bounds.endAt
       );
       const rawEffectif = segment?.effectifDays ?? null;
-      const available = availableDaysAfterLeave(startAt, endAt, absenceSet);
+      const available = getMonthAvailableDays(segment.monthKey, absenceSet);
       const incoherent = rawEffectif != null && Number(rawEffectif) > available;
+      // Surcharge de la PERSONNE sur ce mois, tous projets confondus : la barre
+      // peut virer sans que rien ne cloche sur le projet affiche, parce que la
+      // charge est ailleurs. D'ou l'infobulle, qui donne les chiffres.
+      const overloadIndex = timelineOptions.overloadIndex || null;
+      const overloadLoad = overloadIndex?.isOverloaded(worker?.name, segment.monthKey)
+        ? overloadIndex.getLoad(worker?.name, segment.monthKey)
+        : null;
       const leftPx = slotRange.firstSlot.leftPx;
       const widthPx =
         slotRange.lastSlot.leftPx +
@@ -698,15 +708,15 @@ function buildVisibleSegmentBars(worker, visibleSlots, options = {}, absenceSet 
       return {
         segmentId: segment.id,
         workerId: worker.id,
-        startSlotIndex: slotRange.firstSlot.slotIndex,
-        endSlotIndex: slotRange.lastSlot.slotIndex,
-        startAtMs: startAt.getTime(),
-        endAtMs: endAt.getTime(),
+        monthKey: segment.monthKey,
+        startAtMs: bounds.startAt.getTime(),
+        endAtMs: bounds.endAt.getTime(),
         leftPx,
         widthPx,
         label,
         planningTaskCount,
         incoherent,
+        overloadLoad,
         available,
         rawEffectif,
       };
@@ -743,38 +753,36 @@ function renderSegmentBars(assignedBars) {
     .map((bar) => {
       const compact = bar.widthPx < 64;
       const planningTooltip = `${bar.planningTaskCount} plan(s) Planning Projet sur cette periode`;
+      // Priorite au rouge : `is-incoherent` denonce une saisie fausse, l'ambre
+      // une charge trop lourde. La saisie fausse doit rester la plus visible.
+      const overloadTooltip = bar.overloadLoad
+        ? `Surcharge : ${formatDayValue(bar.overloadLoad.totalDays)} j sur ${formatDayValue(
+            bar.overloadLoad.availableDays
+          )} j disponibles ce mois, tous projets confondus`
+        : "";
       const tooltip = bar.incoherent
         ? `Effectif ${formatDayValue(bar.rawEffectif)} j > disponible apres absences ${formatDayValue(
             bar.available
           )} j`
-        : planningTooltip;
+        : overloadTooltip || planningTooltip;
       return `
         <div
           class="charge-plan-segment-bar ${compact ? "is-compact" : ""} ${
             bar.incoherent ? "is-incoherent" : ""
-          }"
+          } ${!bar.incoherent && bar.overloadLoad ? "is-overloaded" : ""}"
           style="left:${bar.leftPx}px; top:${10 + bar.laneIndex * 32}px; width:${Math.max(
             12,
             bar.widthPx
           )}px"
           data-segment-id="${bar.segmentId}"
           data-worker-id="${bar.workerId}"
-          data-start-slot-index="${bar.startSlotIndex}"
-          data-end-slot-index="${bar.endSlotIndex}"
+          data-month-key="${escapeHtml(bar.monthKey)}"
           data-start-at-ms="${bar.startAtMs}"
           data-end-at-ms="${bar.endAtMs}"
           data-planning-tooltip="${escapeHtml(planningTooltip)}"
           title="${escapeHtml(tooltip)}"
         >
-          <span
-            class="charge-plan-segment-handle is-start"
-            data-resize-edge="start"
-          ></span>
           <span class="charge-plan-segment-label">${escapeHtml(bar.label)}</span>
-          <span
-            class="charge-plan-segment-handle is-end"
-            data-resize-edge="end"
-          ></span>
         </div>
       `;
     })
@@ -821,6 +829,7 @@ function renderWorkerRow(
           data-timeline-width="${timelineWidth}"
         >
           ${renderTrackGrid(months, zoomMode, zoomScale, sizingContext, absenceSet)}
+          <div class="charge-plan-month-hover" hidden></div>
           <div class="charge-plan-track-bars">
             ${renderSegmentBars(assignedBars)}
           </div>
@@ -1140,6 +1149,22 @@ export function renderChargePlanTimeline(dom, project, viewState, options = {}) 
   const activeVisibleSlots = buildVisibleSlots(months, zoomMode, zoomScale, sizingContext);
   activeVisibleSlotsByBoard.set(currentBoardEl, activeVisibleSlots);
 
+  // Index de surcharge : un seul balayage de TimeSegment par couple
+  // (personne, mois) affiche. Le construire ici et non dans le constructeur de
+  // barres evite de rebalayer la table pour chacune des dizaines de barres.
+  timelineOptions.overloadIndex = buildMonthOverloadIndex({
+    entries: (project?.workers || []).flatMap((worker) =>
+      (worker?.[timelineOptions.segmentsField] || []).map((segment) => ({
+        personName: worker?.name,
+        monthKey: segment?.monthKey,
+      }))
+    ),
+    allSegmentRows: timelineOptions.allTimeSegmentRows || [],
+    columns: timelineOptions.timeSegmentColumns || {},
+    resolveAbsenceSet: (personName) =>
+      (project?.workers || []).find((worker) => worker?.name === personName)?.absenceSet || null,
+  });
+
   const groupedWorkers = groupWorkersByRole(project?.workers || []);
   const rows = Object.entries(groupedWorkers)
     .map(([roleLabel, workers]) => {
@@ -1229,18 +1254,6 @@ export function renderChargePlanTimeline(dom, project, viewState, options = {}) 
   `;
 }
 
-export function renderRealChargeTimeline(dom, project, viewState) {
-  return renderChargePlanTimeline(dom, project, viewState, {
-    boardEl: dom?.realChargeBoard || null,
-    daysField: "workedDays",
-    segmentsField: "realSegments",
-    timelineKind: "real",
-    showControls: true,
-    helperText:
-      "Glissez dans une ligne pour creer un segment reel. Redimensionnez-le avec ses poignees. Utilisez le clic droit sur une barre pour la modifier ou la supprimer.",
-  });
-}
-
 export function clearChargePlanTimeline(target) {
   currentBoardEl =
     target instanceof HTMLElement ? target : target?.chargePlanBoard || null;
@@ -1253,14 +1266,6 @@ export function clearChargePlanTimeline(target) {
     );
     delete currentBoardEl.dataset.segmentEditMode;
     currentBoardEl.innerHTML = "";
-  }
-}
-
-export function clearRealChargeTimeline(target) {
-  const boardEl = target instanceof HTMLElement ? target : target?.realChargeBoard || null;
-  if (boardEl) {
-    activeVisibleSlotsByBoard.delete(boardEl);
-    boardEl.innerHTML = "";
   }
 }
 
@@ -1308,29 +1313,10 @@ export function getChargePlanSlotIndexAtClientX(trackEl, clientX) {
   return getSlotIndexFromClientX(trackEl, clientX);
 }
 
-export function computeChargePlanSelection(trackEl, startClientX, endClientX) {
-  const firstSlotIndex = getSlotIndexFromClientX(trackEl, startClientX);
-  const lastSlotIndex = getSlotIndexFromClientX(trackEl, endClientX);
-  return computeChargePlanSelectionFromSlotIndexes(trackEl, firstSlotIndex, lastSlotIndex);
-}
-
-export function updateChargePlanSelectionPreview(trackEl, selection) {
-  const previewEl = trackEl?.querySelector(".charge-plan-selection-preview");
-  const labelEl = previewEl?.querySelector(".charge-plan-selection-label");
-  if (!(previewEl instanceof HTMLElement) || !(labelEl instanceof HTMLElement)) {
-    return;
-  }
-
-  if (!selection || selection.widthPx <= 0 || selection.totalDays <= 0) {
-    clearChargePlanSelectionPreview(trackEl);
-    return;
-  }
-
-  previewEl.hidden = false;
-  previewEl.style.left = `${selection.leftPx}px`;
-  previewEl.style.width = `${selection.widthPx}px`;
-  previewEl.classList.toggle("is-invalid", Boolean(selection.hasOverlap));
-  labelEl.textContent = `${formatDayValue(selection.totalDays)} j`;
+// Accesseur sur la WeakMap interne : main.js en a besoin pour caler la barre
+// provisoire et le surlignage de mois sur la geometrie reellement rendue.
+export function getChargePlanTrackSlots(trackEl) {
+  return getTrackSlots(trackEl);
 }
 
 export function clearChargePlanSelectionPreview(trackEl) {
@@ -1342,7 +1328,6 @@ export function clearChargePlanSelectionPreview(trackEl) {
   previewEl.hidden = true;
   previewEl.style.left = "0px";
   previewEl.style.width = "0px";
-  previewEl.classList.remove("is-invalid");
 
   const labelEl = previewEl.querySelector(".charge-plan-selection-label");
   if (labelEl instanceof HTMLElement) {

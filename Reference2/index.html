@@ -7,6 +7,7 @@
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <script src="../shared/service-context-core.js"></script>
   <script src="../shared/grist-service-context.js"></script>
+  <script src="../shared/reference-project-sync-relay.js"></script>
   <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
   
   <link rel="stylesheet" href="./css/style.css">
@@ -58,6 +59,7 @@
   <div class="table-container">
     <table id="dataTable">
       <thead>
+        <!-- Entêtes réécrits par populateTable() : garder l'ordre de REFERENCE_TABLE_COLUMNS. -->
         <tr id="tableHeader">
           <th>ID</th>
           <th>Emetteur</th>
@@ -65,7 +67,10 @@
           <th>Indice</th>
           <th>Recu</th>
           <th>DescriptionObservations</th>
+          <th>Remarque</th>
+          <th>Durée limite (sem.)</th>
           <th>Date limite calculée</th>
+          <th>Retard</th>
           <th>Bloquant</th>
           <th>Archive</th>
         </tr>
@@ -139,6 +144,14 @@
           </div>
 
           <div class="reference-field">
+            <label for="bloquant" class="reference-switch-row">
+              <input type="checkbox" id="bloquant" name="bloquant">
+              <span>Bloquant</span>
+            </label>
+            <small>Cochez pour fixer une durée limite de réception.</small>
+          </div>
+
+          <div class="reference-field" id="dureeLimiteField" hidden>
             <label for="dureeLimite">Durée limite (semaines)</label>
             <input type="number" id="dureeLimite" name="dureeLimite" min="0" step="1" inputmode="numeric" placeholder="Exemple : 2">
           </div>
@@ -496,6 +509,14 @@
           </div>
 
           <div class="reference-field">
+            <label for="editBloquant" class="reference-switch-row">
+              <input type="checkbox" id="editBloquant" name="bloquant">
+              <span>Bloquant</span>
+            </label>
+            <small>Cochez pour fixer une durée limite de réception.</small>
+          </div>
+
+          <div class="reference-field" id="editDureeLimiteField" hidden>
             <label for="editDureeLimite">Durée limite (semaines)</label>
             <input type="number" id="editDureeLimite" name="dureeLimite" min="0" step="1" inputmode="numeric" placeholder="Exemple : 2">
           </div>
@@ -550,6 +571,7 @@
 
   
   <script src="./js/edit-group-utils.js" defer></script>
+  <script src="./js/document-filter-utils.js" defer></script>
   <script src="./js/legacy.js" defer></script>
   <script type="module" src="./js/main.js"></script>
 </body>

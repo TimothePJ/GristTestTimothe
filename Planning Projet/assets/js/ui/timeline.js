@@ -27,7 +27,6 @@ let referenceDetailsDialogEl = null;
 let referenceDetailsRefreshInFlight = false;
 let referenceDetailsRefreshPending = false;
 let referenceDetailsLifecycleBound = false;
-let referenceDetailsMidnightTimer = 0;
 let stickyAxisBound = false;
 let stickyAxisRafPending = false;
 let axisLeftFillerEl = null;
@@ -594,7 +593,6 @@ function enforceEmbeddedPlanningViewportBounds(range = null) {
   planningViewportBoundsCorrectionPending = true;
   timelineInstance.setWindow(clampedRange.start, clampedRange.end, { animation: false });
   updateDateRangeDisplay();
-  updateNavCenterButtonLabel();
   requestStickyAxisSync();
   requestAnimationFrame(() => {
     planningViewportBoundsCorrectionPending = false;
@@ -1245,6 +1243,24 @@ function getHoverElementFromPoint(event, containerEl) {
   return null;
 }
 
+// Le nom de tâche est coupé par la largeur de sa colonne. Le survol en montre la
+// totalité, dans la même bulle que les phases du planning — et sans dépendre du mode
+// édition, qui ne concerne que l'écriture.
+function showTaskNameTooltip(taskCell, eventLike) {
+  const label = String(taskCell?.textContent || "").trim();
+  if (!label) {
+    hideHoverTooltip();
+    return;
+  }
+
+  const html = `<div class="planning-tooltip-title">${escapeHtml(label)}</div>`;
+  if (hoverTooltipEl?.innerHTML !== html || hoverTooltipEl?.style.display === "none") {
+    showHoverTooltip(html, eventLike);
+  } else {
+    placeHoverTooltip(eventLike);
+  }
+}
+
 function showTooltipForItem(item, eventLike) {
   if (!item) {
     hideHoverTooltip();
@@ -1314,6 +1330,17 @@ function bindHoverTooltip(containerEl) {
       const pointerEvent = pendingHoverTooltipEvent;
       pendingHoverTooltipEvent = null;
       if (!pointerEvent) return;
+
+      // Le volet gauche passe avant la recherche d'une phase : sans cela le survol
+      // d'un nom de tâche, qui n'appartient à aucun élément de la timeline, se
+      // contenterait de masquer la bulle.
+      const taskCell = pointerEvent.target instanceof Element
+        ? pointerEvent.target.closest(".cell-task")
+        : null;
+      if (taskCell) {
+        showTaskNameTooltip(taskCell, pointerEvent);
+        return;
+      }
 
       const hoverEl = getHoverElementFromPoint(pointerEvent, containerEl);
       if (!hoverEl || !containerEl.contains(hoverEl)) {
@@ -2014,6 +2041,25 @@ function normalizeReferenceDetailsLimitDateIso(value = "") {
   return "";
 }
 
+// Applique un même état à un lot de cases. L'état voulu est un paramètre, jamais
+// relu depuis la case pilote : les notifications émises pour chaque ligne modifiée
+// remontent à cette case pilote et la réécrivent en cours de route.
+// Les cases déjà dans l'état voulu ne sont pas notifiées : rien n'a changé pour
+// elles, et les marquer modifiées ferait croire à une saisie de l'utilisateur.
+export function applyBulkCheckboxState(checkboxes, shouldCheck, onChanged) {
+  const targetState = Boolean(shouldCheck);
+  let changedCount = 0;
+
+  (Array.isArray(checkboxes) ? checkboxes : []).forEach((checkbox) => {
+    if (!checkbox || Boolean(checkbox.checked) === targetState) return;
+    checkbox.checked = targetState;
+    changedCount += 1;
+    if (typeof onChanged === "function") onChanged(checkbox);
+  });
+
+  return changedCount;
+}
+
 function parseReferenceDetailsDurationWeeks(value = "") {
   const text = String(value ?? "").trim();
   if (!text) return null;
@@ -2239,21 +2285,10 @@ async function refreshOpenReferenceDetailsDialog() {
   }
 }
 
-function scheduleReferenceDetailsMidnightRefresh() {
-  if (referenceDetailsMidnightTimer) {
-    window.clearTimeout(referenceDetailsMidnightTimer);
-  }
-
-  const now = new Date();
-  const nextMidnight = new Date(now);
-  nextMidnight.setHours(24, 0, 1, 0);
-  referenceDetailsMidnightTimer = window.setTimeout(() => {
-    referenceDetailsMidnightTimer = 0;
-    void refreshOpenReferenceDetailsDialog();
-    scheduleReferenceDetailsMidnightRefresh();
-  }, Math.max(1000, nextMidnight.getTime() - now.getTime()));
-}
-
+// Le dialog "Détails références" ne se recharge plus ni sur minuterie ni au
+// simple retour de focus : ces relectures repartaient chercher Grist sans
+// qu'aucune donnée n'ait bougé. Le signal d'écriture inter-widgets (storage)
+// reste le seul déclencheur, complété par la réouverture du dialog.
 function bindReferenceDetailsLifecycleRefresh() {
   if (referenceDetailsLifecycleBound || typeof window === "undefined") return;
   referenceDetailsLifecycleBound = true;
@@ -2263,15 +2298,6 @@ function bindReferenceDetailsLifecycleRefresh() {
       void refreshOpenReferenceDetailsDialog();
     }
   });
-  window.addEventListener("focus", () => {
-    void refreshOpenReferenceDetailsDialog();
-  });
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {
-      void refreshOpenReferenceDetailsDialog();
-    }
-  });
-  scheduleReferenceDetailsMidnightRefresh();
 }
 
 function renderReferenceDetailsBody(dialog, data = {}) {
@@ -2295,7 +2321,13 @@ function renderReferenceDetailsBody(dialog, data = {}) {
           <th>Données d'entrées</th>
           <th>Reference</th>
           <th><label class="planning-ref-select-all-label"><input type="checkbox" class="planning-ref-select-all" title="Tout sélectionner / désélectionner"> Bloquant</label></th>
-          <th>Durée limite (sem.)</th>
+          <th>
+            <span class="planning-ref-bulk-duration-label">Durée limite (sem.)</span>
+            <span class="planning-ref-bulk-duration-controls">
+              <input type="number" min="0" step="1" inputmode="numeric" class="planning-ref-bulk-duration" aria-label="Durée à appliquer à toutes les lignes" placeholder="—">
+              <button type="button" class="planning-ref-bulk-duration-apply" title="Appliquer cette durée à toutes les lignes" disabled>⤵</button>
+            </span>
+          </th>
           <th>Date limite calculée</th>
           <th>Retards</th>
         </tr>
@@ -2443,8 +2475,12 @@ function renderReferenceDetailsBody(dialog, data = {}) {
   const selectAllCb = body.querySelector(".planning-ref-select-all");
   const bloquantCbs = [...body.querySelectorAll(".planning-reference-details-table__bloquant")];
 
+  // Pendant une application groupée, l'en-tête est la source de vérité : il ne doit
+  // pas se laisser réécrire par les lignes qu'il est en train de modifier.
+  let syncingSelectAll = false;
+
   function syncSelectAll() {
-    if (!selectAllCb) return;
+    if (!selectAllCb || syncingSelectAll) return;
     const allChecked = bloquantCbs.length > 0 && bloquantCbs.every((cb) => cb.checked);
     const someChecked = bloquantCbs.some((cb) => cb.checked);
     selectAllCb.checked = allChecked;
@@ -2454,14 +2490,58 @@ function renderReferenceDetailsBody(dialog, data = {}) {
   if (selectAllCb) {
     selectAllCb.addEventListener("change", () => {
       markReferenceDetailsDialogDirty(dialog);
-      bloquantCbs.forEach((cb) => {
-        cb.checked = selectAllCb.checked;
-        markReferenceDetailsControlDirty(cb, dialog);
-        cb.dispatchEvent(new Event("change", { bubbles: true }));
-      });
+      // La valeur voulue est lue UNE fois. Chaque `change` relancé ci-dessous
+      // rappelle `syncSelectAll`, qui réécrit l'état de l'en-tête : relire
+      // `selectAllCb.checked` à chaque tour ne cochait que la première ligne, puis
+      // recopiait « décoché » sur toutes les suivantes.
+      const shouldCheck = selectAllCb.checked;
+      syncingSelectAll = true;
+      try {
+        applyBulkCheckboxState(bloquantCbs, shouldCheck, (checkbox) => {
+          markReferenceDetailsControlDirty(checkbox, dialog);
+          checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+      } finally {
+        syncingSelectAll = false;
+      }
+      syncSelectAll();
     });
     syncSelectAll();
     bloquantCbs.forEach((cb) => cb.addEventListener("change", syncSelectAll));
+  }
+
+  // Saisir la même durée ligne par ligne était le geste le plus répétitif du
+  // dialogue : une valeur, un bouton, toutes les lignes. Chaque champ reçoit son
+  // événement `input` pour que date limite et retard se recalculent comme si
+  // l'utilisateur avait tapé lui-même.
+  const bulkDurationInput = body.querySelector(".planning-ref-bulk-duration");
+  const bulkDurationButton = body.querySelector(".planning-ref-bulk-duration-apply");
+  const durationInputs = [...body.querySelectorAll(".planning-reference-details-table__duration")];
+
+  if (bulkDurationInput && bulkDurationButton) {
+    const readBulkDuration = () => {
+      const text = String(bulkDurationInput.value || "").trim();
+      if (!text) return null;
+      return parseReferenceDetailsDurationWeeks(text);
+    };
+
+    const syncBulkDurationState = () => {
+      bulkDurationButton.disabled = !durationInputs.length || readBulkDuration() == null;
+    };
+
+    bulkDurationInput.addEventListener("input", syncBulkDurationState);
+    bulkDurationButton.addEventListener("click", () => {
+      const durationWeeks = readBulkDuration();
+      if (durationWeeks == null) return;
+
+      markReferenceDetailsDialogDirty(dialog);
+      durationInputs.forEach((input) => {
+        input.value = String(durationWeeks);
+        markReferenceDetailsControlDirty(input, dialog);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    });
+    syncBulkDurationState();
   }
 }
 
@@ -5475,7 +5555,6 @@ export function refreshPlanningTimelineLayout() {
 
   timelineInstance.redraw();
   updateDateRangeDisplay();
-  updateNavCenterButtonLabel();
   requestStickyAxisSync();
   return getPlanningViewportState();
 }
@@ -5537,7 +5616,6 @@ export function applyPlanningViewportState(viewport = {}) {
       rememberProgrammaticPlanningViewportFromRange(nextMode, clampedRange);
       timelineInstance.setWindow(clampedRange.start, clampedRange.end, { animation: false });
       updateDateRangeDisplay();
-      updateNavCenterButtonLabel();
       requestStickyAxisSync();
       queuePlanningViewportSettled(settleToken);
       return waitForPlanningViewportSettled();
@@ -5560,7 +5638,6 @@ export function applyPlanningViewportState(viewport = {}) {
       rememberProgrammaticPlanningViewportFromRange(nextMode, { start, end });
       timelineInstance.setWindow(start, end, { animation: false });
       updateDateRangeDisplay();
-      updateNavCenterButtonLabel();
       requestStickyAxisSync();
       queuePlanningViewportSettled(settleToken);
       return waitForPlanningViewportSettled();
@@ -5580,7 +5657,6 @@ export function applyPlanningViewportState(viewport = {}) {
     const settleToken = beginPlanningViewportSettle();
     setWindowForMode(nextMode, anchorDate);
     rememberProgrammaticPlanningViewport(getPlanningViewportLogicalSignature(getPlanningViewportState()));
-    updateNavCenterButtonLabel();
     requestStickyAxisSync();
     queuePlanningViewportSettled(settleToken);
     return waitForPlanningViewportSettled();
@@ -5625,43 +5701,11 @@ export function subscribePlanningSelectionChanges(listener) {
   };
 }
 
-function updateNavCenterButtonLabel() {
-  const todayBtn = document.getElementById("btn-today");
-  if (!todayBtn) return;
-  const mode = getCurrentZoomMode();
-  const anchorDate = getWindowCenterDate();
-  const label = getDynamicNavLabel(mode, anchorDate);
-  todayBtn.textContent = label;
-  todayBtn.title = label;
-}
-
-function getDynamicNavLabel(mode, anchorDate = new Date()) {
-  if (mode === "week") {
-    const d = new Date(anchorDate);
-    const day = d.getDay();
-    const diffToMonday = day === 0 ? -6 : 1 - day;
-    const monday = new Date(d);
-    monday.setDate(d.getDate() + diffToMonday);
-    monday.setHours(0, 0, 0, 0);
-    return `Semaine du ${monday.toLocaleDateString("fr-FR")}`;
-  }
-  if (mode === "month") {
-    const monthLabel = anchorDate.toLocaleDateString("fr-FR", {
-      month: "long",
-      year: "numeric",
-    });
-    return monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1);
-  }
-  if (mode === "year") return String(anchorDate.getFullYear());
-  return "Période";
-}
-
 function setActiveZoomButton(mode) {
   const buttons = document.querySelectorAll(".zoom-buttons button");
   buttons.forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.zoom === mode);
   });
-  updateNavCenterButtonLabel();
 }
 
 function setWindowForMode(mode, anchorDate = new Date()) {
@@ -5736,7 +5780,6 @@ export function setPlanningZoomMode(mode, anchorDate = null) {
   setActiveZoomButton(nextMode);
   const settleToken = beginPlanningViewportSettle();
   setWindowForMode(nextMode, nextAnchorDate);
-  updateNavCenterButtonLabel();
   requestStickyAxisSync();
   queuePlanningViewportSettled(settleToken);
   return waitForPlanningViewportSettled();
@@ -5749,7 +5792,6 @@ export function movePlanningViewportByMode(direction = 1) {
 
   const settleToken = beginPlanningViewportSettle();
   moveWindowByMode(direction >= 0 ? 1 : -1);
-  updateNavCenterButtonLabel();
   requestStickyAxisSync();
   queuePlanningViewportSettled(settleToken);
   return waitForPlanningViewportSettled();
@@ -5763,7 +5805,6 @@ export function focusPlanningDataAnchor() {
   const mode = getCurrentZoomMode();
   const settleToken = beginPlanningViewportSettle();
   setWindowForMode(mode, dataAnchorDate || getWindowCenterDate());
-  updateNavCenterButtonLabel();
   requestStickyAxisSync();
   queuePlanningViewportSettled(settleToken);
   return waitForPlanningViewportSettled();
@@ -5863,6 +5904,30 @@ function isUsableTimelineWindow(range) {
   );
 }
 
+// Mémorise le défilement avant un re-rendu : vis-timeline reconstruit ses
+// panneaux et la hauteur du contenu passe transitoirement à zéro, ce qui ramène
+// #timelineWrapper (et la page) en haut et fait perdre à l'utilisateur la ligne
+// qu'il regardait.
+function capturePlanningScroll() {
+  const scroller = document.scrollingElement || document.documentElement;
+  const panes = [document.getElementById("timelineWrapper")];
+  const documentTop = scroller ? scroller.scrollTop : 0;
+  const paneTops = panes.map((pane) => (pane instanceof HTMLElement ? pane.scrollTop : 0));
+
+  return () => {
+    const restore = () => {
+      if (scroller) scroller.scrollTop = documentTop;
+      panes.forEach((pane, index) => {
+        if (pane instanceof HTMLElement) pane.scrollTop = paneTops[index];
+      });
+    };
+    // Une fois tout de suite, une fois après la mise en page : vis-timeline ne
+    // fige la hauteur de ses groupes qu'à la frame suivante.
+    restore();
+    requestAnimationFrame(restore);
+  };
+}
+
 export function renderPlanningTimeline(timelineData = {}) {
   lastPlanningTimelineData = {
     groups: timelineData.groups || [],
@@ -5898,6 +5963,9 @@ export function renderPlanningTimeline(timelineData = {}) {
   ) {
     return;
   }
+  // Sur changement de projet, repartir du haut est le comportement attendu :
+  // on ne mémorise le défilement que pour un rafraîchissement de données.
+  const restorePlanningScroll = shouldResetViewport ? null : capturePlanningScroll();
   const previousWindow = timelineInstance?.getWindow?.() || null;
 
   // Création de l'instance une seule fois
@@ -6061,7 +6129,7 @@ export function renderPlanningTimeline(timelineData = {}) {
     }
 
     updateDateRangeDisplay();
-    updateNavCenterButtonLabel();
+    restorePlanningScroll?.();
     requestStickyAxisSync();
     queuePlanningViewportSettled(settleToken);
   });
@@ -6072,23 +6140,7 @@ export function bindTimelineToolbar() {
   if (toolbarListenersBound) return;
   toolbarListenersBound = true;
 
-  const prevBtn = document.getElementById("btn-prev");
-  const todayBtn = document.getElementById("btn-today");
-  const nextBtn = document.getElementById("btn-next");
   const zoomButtons = document.querySelectorAll(".zoom-buttons button");
-
-  prevBtn?.addEventListener("click", () => {
-    moveWindowByMode(-1);
-  });
-
-  nextBtn?.addEventListener("click", () => {
-    moveWindowByMode(1);
-  });
-
-  todayBtn?.addEventListener("click", () => {
-    const mode = getCurrentZoomMode();
-    setWindowForMode(mode, dataAnchorDate || getWindowCenterDate());
-  });
 
   zoomButtons.forEach((btn) => {
     btn.addEventListener("click", (e) => {
@@ -6107,20 +6159,17 @@ export function bindTimelineToolbar() {
         return;
       }
       updateDateRangeDisplay();
-      updateNavCenterButtonLabel();
     });
     timelineInstance.on("rangechanged", () => {
       if (enforceEmbeddedPlanningViewportBounds()) {
         return;
       }
       updateDateRangeDisplay();
-      updateNavCenterButtonLabel();
       emitPlanningViewportChange("rangechanged");
     });
   }
 
   // Initialisation affichage
-  updateNavCenterButtonLabel();
   updateDateRangeDisplay();
   window.addEventListener("resize", () => {
     refreshPlanningTimelineLayout();
@@ -6180,7 +6229,6 @@ export function setPlanningVisualAggregateMode(enabled = false) {
         rememberProgrammaticPlanningViewportFromRange(getCurrentZoomMode(), previousWindow);
         timelineInstance.setWindow(previousWindow.start, previousWindow.end, { animation: false });
         updateDateRangeDisplay();
-        updateNavCenterButtonLabel();
         requestStickyAxisSync();
       });
     }

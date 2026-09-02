@@ -607,6 +607,28 @@ tbody tr.employee-group-end td {
   color: #6d3b00;
 }
 
+/* Capacite nulle : semaine entierement feriee ou posee en conge. Etat distinct
+   d'un 0 %, qui se lirait « disponible » — soit l'inverse de la realite. */
+.week-cell.is-leave {
+  color: #6b7280;
+  background: repeating-linear-gradient(45deg, #f3f4f6 0 6px, #e5e7eb 6px 12px);
+  font-style: italic;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+/* Capacite nulle MAIS des jours y sont planifies : aucun pourcentage n'est
+   calculable, la cellule est donc le seul signal possible. Elle doit se
+   distinguer d'un conge ordinaire, sans quoi la charge disparait de la vue.
+   Meme specificite (0,2,0) que .week-cell.is-leave, qu'elle surcharge : elle
+   doit donc rester APRES elle dans le fichier. Toutes deux l'emportent sur
+   .total-row td (0,1,1), la ligne total comprise. */
+.week-cell.is-leave-overloaded {
+  color: #8a1c1c;
+  background: repeating-linear-gradient(45deg, #fde8e8 0 6px, #f7c7c7 6px 12px);
+  box-shadow: inset 0 0 0 2px rgba(237, 27, 45, 0.45);
+}
+
 .empty-state {
   position: absolute;
   inset: 18px;

@@ -212,6 +212,11 @@
     </div>
 
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <script>
+        window.GristServiceContextConfig = Object.freeze({ mode: 'rest-first' });
+    </script>
+    <script src="../shared/service-context-core.js"></script>
+    <script src="../shared/grist-service-context.js"></script>
     <script src="app.js"></script>
 </body>
 

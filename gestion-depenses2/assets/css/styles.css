@@ -1660,12 +1660,40 @@ td input {
   filter: brightness(1.03);
 }
 
+/* SURCHARGE : la PERSONNE depasse sa capacite du mois, tous projets confondus.
+   La barre peut donc virer sans que rien ne cloche sur le projet affiche — la
+   charge est ailleurs, et c'est l'infobulle qui le dit.
+
+   Teinte PLATE et non degradee : c'est exactement --load-overload, la meme que
+   la barre de la fenetre d'edition, la ligne Charge et Gestion-User. Un degrade
+   la diluerait et la parite visuelle entre les surfaces serait perdue.
+
+   Le label est blanc par defaut (fond bleu fonce) : illisible sur #ffe1a8, il
+   repasse donc en --load-overload-text. Le liseré compense le faible contraste
+   de la pastille claire sur le fond clair de la piste, comme pour
+   .ps-segment-edit-load-fill.
+
+   PRIORITE : .is-incoherent (rouge) est declare APRES et l'emporte donc a
+   specificite egale — et le rendu ne pose de toute facon jamais les deux
+   classes ensemble. Une saisie fausse doit rester plus visible qu'une charge
+   lourde. */
+.charge-plan-segment-bar.is-overloaded {
+  background: var(--load-overload);
+  color: var(--load-overload-text);
+  box-shadow: inset 0 0 0 1px rgba(109, 59, 0, 0.32);
+}
+
 .charge-plan-segment-bar.is-incoherent {
   background: linear-gradient(135deg, #e5534b, #b42318);
 }
 
 #charge-plan-board.is-segment-editing-locked .charge-plan-track:not(.charge-plan-track--readonly) {
   cursor: not-allowed;
+}
+
+/* Un clic = un mois : la piste editable est cliquable sur toute sa longueur. */
+#charge-plan-board.is-segment-editing-enabled .charge-plan-track:not(.charge-plan-track--readonly) {
+  cursor: pointer;
 }
 
 #charge-plan-board.is-segment-editing-locked .charge-plan-segment-bar {
@@ -1677,59 +1705,20 @@ td input {
   filter: saturate(0.78);
 }
 
-#charge-plan-board.is-segment-editing-locked .charge-plan-segment-handle {
-  display: none;
-}
-
-.charge-plan-segment-bar.is-resizing {
-  opacity: 0.38;
-}
-
 .charge-plan-segment-bar.is-compact {
   padding: 0 10px;
-  cursor: ew-resize;
 }
 
-.charge-plan-segment-bar.is-compact .charge-plan-segment-handle {
-  display: none;
-}
-
-.charge-plan-segment-handle {
+/* Survol : le mois entier sous le curseur s'eclaire, puisque c'est l'unite de
+   creation depuis le passage de TimeSegment au mois. */
+.charge-plan-month-hover {
   position: absolute;
-  top: 50%;
-  width: 14px;
-  height: 18px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.9);
-  cursor: ew-resize;
-  transform: translateY(-50%);
-  box-shadow: 0 0 0 1px rgba(6, 60, 123, 0.08);
-}
-
-.charge-plan-segment-handle.is-start {
-  left: 3px;
-}
-
-.charge-plan-segment-handle.is-end {
-  right: 3px;
-}
-
-.charge-plan-segment-handle.is-start::after,
-.charge-plan-segment-handle.is-end::after {
-  content: "";
-  position: absolute;
-  top: -4px;
-  bottom: -4px;
-}
-
-.charge-plan-segment-handle.is-start::after {
-  right: -4px;
-  left: -8px;
-}
-
-.charge-plan-segment-handle.is-end::after {
-  right: -8px;
-  left: -4px;
+  top: 0;
+  bottom: 0;
+  background: rgba(0, 73, 144, 0.08);
+  border-left: 1px solid rgba(0, 73, 144, 0.25);
+  border-right: 1px solid rgba(0, 73, 144, 0.25);
+  pointer-events: none;
 }
 
 .charge-plan-segment-label {
@@ -1780,13 +1769,11 @@ td input {
   display: none !important;
 }
 
-.charge-plan-selection-preview.is-invalid {
-  border-color: rgba(180, 35, 24, 0.72);
-  background: rgba(180, 35, 24, 0.16);
-}
-
-.charge-plan-selection-preview.is-invalid .charge-plan-selection-label {
-  color: #b42318;
+/* Barre provisoire : rien n'est encore ecrit en base, les hachures le disent. */
+.charge-plan-selection-preview.is-provisional {
+  background-image: repeating-linear-gradient(
+    45deg, rgba(0, 73, 144, 0.18) 0 6px, transparent 6px 12px
+  );
 }
 
 #edit-segment-effectif.is-over-available {
@@ -2811,6 +2798,25 @@ td input {
   gap: 14px;
 }
 
+/* Rappel du couple (mois, personne) : la fenetre ne les fait plus saisir. */
+.segment-edit-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 2px 0 0;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.segment-edit-context span:empty {
+  display: none;
+}
+
+.segment-edit-context span + span {
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
 .segment-edit-section {
   display: grid;
   gap: 14px;
@@ -2875,6 +2881,176 @@ td input {
   color: var(--color-primary);
 }
 
+/* Teintes de charge, partagees par la barre de la fenetre d'edition, la liste
+   « Deja engage ce mois-ci » ET les barres de segment du plan de charge.
+   Reprises de Gestion-User (--color-partial / --color-balanced /
+   --color-overload) et identiques a celles de planning-synchro : la meme
+   charge doit se lire de la meme couleur dans les trois widgets.
+
+   Declarees ici sur :root et NON sur .segment-edit-load : les barres de
+   segment vivent hors de cette fenetre et n'heriteraient pas d'une variable
+   scopee — sans erreur, juste sans couleur, en silence. */
+:root {
+  --load-partial: #edf4fb;
+  --load-balanced: #d7eccb;
+  --load-overload: #ffe1a8;
+  --load-overload-text: #6d3b00;
+}
+
+/* --- Barre de charge mensuelle -------------------------------------------- */
+/* Charge TOTALE de la personne sur le mois, tous projets et tous services
+   confondus. */
+.segment-edit-load {
+  display: grid;
+  gap: 8px;
+}
+
+.segment-edit-load[hidden] {
+  display: none;
+}
+
+.segment-edit-load-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.segment-edit-load-label {
+  font-size: 0.88rem;
+  color: var(--color-text-muted);
+}
+
+.segment-edit-load-head strong {
+  color: var(--color-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* LISERE OBLIGATOIRE : --color-partial (#edf4fb) est un bleu si pale qu'il est
+   quasi blanc. En pastille sur le fond gris de Gestion-User il se lit ; ici,
+   sur le fond blanc de la fenetre, un remplissage sans contour serait
+   invisible. Le contour du conteneur (et celui du remplissage) est donc ce qui
+   rend la barre lisible — la teinte, elle, reste celle de Gestion-User. */
+.segment-edit-load-track {
+  position: relative;
+  height: 14px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid rgba(0, 73, 144, 0.35);
+  box-shadow: inset 0 1px 2px rgba(18, 37, 63, 0.08);
+}
+
+.segment-edit-load-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  /* PLANCHER DE LARGEUR : mesure navigateur a 0,5 j sur 20, le remplissage
+     tombait a 11,89 x 12 px — plus large que haut, la pastille degenerait en
+     point. 14 px = la hauteur de la piste, donc une pastille ronde lisible.
+     Cf. la regle [hidden] plus bas pour le cas 0 j, qui doit rester VIDE. */
+  min-width: 14px;
+  border-radius: 999px;
+  background: var(--load-partial);
+  /* CONTRASTE : --load-partial (#edf4fb) ne fait que 1,11:1 contre le blanc du
+     vide — invisible seul. Le liseré porte donc tout le travail : 0,55 d'opacite
+     le monte a ~2,6:1 (il etait a 0,28, soit 1,86:1). On renforce le CONTOUR,
+     jamais la teinte, qui reste celle de Gestion-User. Les etats pleine et
+     surcharge gardent leur liseré : leurs teintes, elles, se voient deja. */
+  box-shadow: inset 0 0 0 1px rgba(0, 73, 144, 0.55);
+  transition: width 120ms ease-out;
+}
+
+/* 0 j : le plancher ci-dessus afficherait une pastille de 14 px sur une barre
+   qui doit rester vide. Le rendu pose donc `hidden` sur le remplissage des que
+   la largeur retombe a 0 (main.js / editSegmentModal.js). `display: block`
+   ci-dessus l'emporterait sur le `hidden` natif : d'ou cette regle explicite. */
+.segment-edit-load-fill[hidden] {
+  display: none;
+}
+
+.segment-edit-load.is-balanced .segment-edit-load-fill {
+  background: var(--load-balanced);
+  box-shadow: inset 0 0 0 1px rgba(56, 106, 30, 0.32);
+}
+
+.segment-edit-load.is-overload .segment-edit-load-fill {
+  background: var(--load-overload);
+  box-shadow: inset 0 0 0 1px rgba(109, 59, 0, 0.32);
+}
+
+/* --- Detail par projet ----------------------------------------------------- */
+/* La barre dit COMBIEN de jours sont deja pris ; cette liste dit OU. Masquee
+   (hidden) quand la personne n'a rien pose ailleurs : un titre sans liste
+   vaudrait moins que rien. Meme decoupage que planning-synchro. */
+.segment-edit-load-projects {
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 73, 144, 0.1);
+}
+
+.segment-edit-load-projects[hidden] {
+  display: none;
+}
+
+.segment-edit-load-projects-label {
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+}
+
+.segment-edit-load-projects-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+
+/* Le nom prend la place restante et se tronque ; les jours gardent la leur.
+   L'inverse ferait sauter la colonne de droite d'une ligne a l'autre selon la
+   longueur du nom, et la liste ne se lirait plus en colonne. */
+.segment-edit-load-project {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.88rem;
+}
+
+.segment-edit-load-project-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.segment-edit-load-project-days {
+  flex: 0 0 auto;
+  color: var(--color-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.segment-edit-load-message {
+  margin: 0;
+  min-height: 20px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.segment-edit-load.is-balanced .segment-edit-load-message {
+  color: #386a1e;
+}
+
+/* Surcharge : #6d3b00 sur #ffe1a8, exactement le couple de Gestion-User. */
+.segment-edit-load.is-overload .segment-edit-load-message {
+  color: #6d3b00;
+  background: var(--load-overload);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  justify-self: start;
+}
+
 .segment-edit-feedback {
   margin: 0;
   min-height: 22px;
@@ -2886,6 +3062,37 @@ td input {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+}
+
+/* Ecriture en cours : Enregistrer et Annuler sont desactives le temps de
+   l'aller-retour Grist (cf. le verrou de saveEditedChargePlanSegment). */
+.segment-edit-footer button:disabled,
+#edit-segment-modal .budget-modal-close-btn:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* Etat de l'ecriture, pose par applyChargePlanSaveLockToUi sur la racine de la
+   fenetre. `is-submitting` : aller-retour Grist en cours, la fenetre est
+   verrouillee. `is-stalled` : le delai de garde a expire, la fenetre redevient
+   fermable mais l'ecriture est TOUJOURS en vol (Enregistrer reste desactive) —
+   avertissement, pas erreur : il faut recharger le widget pour savoir si le
+   segment a ete enregistre. */
+#edit-segment-modal.is-submitting .modal-content--segment {
+  cursor: progress;
+}
+
+#edit-segment-modal.is-submitting .segment-edit-form,
+#edit-segment-modal.is-stalled .segment-edit-form {
+  opacity: 0.72;
+}
+
+#edit-segment-modal.is-stalled .modal-content--segment {
+  box-shadow: inset 0 3px 0 0 #b54708;
+}
+
+#edit-segment-modal.is-stalled .segment-edit-feedback {
+  color: #b54708;
 }
 
 .budget-edit-list {

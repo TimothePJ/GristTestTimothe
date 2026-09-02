@@ -56,18 +56,19 @@
 // --check here, browser-verified once Task 14 wires main.js (see task-11-report.md).
 
 import { toFiniteNumber, formatNumber, buildDisplayedMonths } from "../utils/format.js";
-import { parseDateTime, normalizeDecimal, toText, formatIsoDate, parseCalendarDate } from "../utils/dates.js";
+import { normalizeDecimal, toText, formatIsoDate, parseCalendarDate } from "../utils/dates.js";
 import {
   HALF_DAY_PARTS,
   isBusinessDay,
   getHalfDaySlotRange,
   createHalfDaySlotKey,
   getSegmentEffectiveDays,
-  getSegmentAllocationDays,
-  getBusinessHalfDaySlotsBetween,
 } from "../utils/timeSegments.js";
+import { resolveSegmentMonthKey, getMonthBounds, getMonthAvailableDays } from "../utils/monthSegments.js";
 import { countPlanningTasksOverlappingRange } from "../top/phases.js";
-import { availableDaysAfterLeave, isAbsenceSlot, normalizeName } from "../utils/leaveAbsences.js";
+import { isAbsenceSlot, normalizeName } from "../utils/leaveAbsences.js";
+import { computeProjectCharge } from "./documentCharge.js";
+import { buildMonthOverloadIndex } from "../utils/monthLoad.js";
 import { APP_CONFIG } from "../config.js";
 
 const MIN_CONTENT_WIDTH_PX = 280;
@@ -122,9 +123,12 @@ export function buildWorkersFromSegments(timeSegmentRows, projectTeamRows, colum
     const name = toText(row?.[tsCols.name]);
     if (!name) return;
 
-    const startAt = parseDateTime(row?.[tsCols.startDate]);
-    const endAt = parseDateTime(row?.[tsCols.endDate]);
-    if (!startAt || !endAt) return;
+    // Un segment = un mois : Mois d'abord, repli legacy sur Start_At (voir
+    // monthSegments.js). Un mois non resoluble (colonnes disparues) ecarte
+    // silencieusement la ligne, sans erreur.
+    const monthKey = resolveSegmentMonthKey(row, tsCols);
+    const bounds = getMonthBounds(monthKey);
+    if (!bounds) return;
 
     const nameKey = normalizeNameKey(name);
     let worker = workersByNameKey.get(nameKey);
@@ -137,9 +141,9 @@ export function buildWorkersFromSegments(timeSegmentRows, projectTeamRows, colum
 
     worker.segments.push({
       id: row?.[tsCols.id] ?? `s-${segmentSeq++}`,
-      startAt,
-      endAt,
-      allocationDays: normalizeDecimal(row?.[tsCols.allocationDays]) ?? 0,
+      monthKey,
+      startAt: bounds.startAt,
+      endAt: bounds.endAt,
       effectif: normalizeDecimal(row?.[tsCols.effectif]),
       label: toText(row?.[tsCols.label]),
     });
@@ -312,7 +316,13 @@ function getVisibleSlotRange(startAt, endAt, visibleSlots) {
   return { firstSlot, lastSlot };
 }
 
-function buildVisibleSegmentBars(worker, visibleSlots, planningTasks = [], absenceSet = new Set()) {
+function buildVisibleSegmentBars(
+  worker,
+  visibleSlots,
+  planningTasks = [],
+  absenceSet = new Set(),
+  overloadIndex = null
+) {
   return (worker?.segments || [])
     .map((segment) => {
       const startAt = segment?.startAt instanceof Date ? segment.startAt : null;
@@ -332,14 +342,22 @@ function buildVisibleSegmentBars(worker, visibleSlots, planningTasks = [], absen
       // Like gestion-depenses2: how many planning tasks fall within this segment's
       // period — surfaced as the bar's hover title (see renderSegmentBars).
       const planningTaskCount = countPlanningTasksOverlappingRange(planningTasks, startAt, endAt);
-      // Leave-aware coherence check: the RAW stored effectif vs the geometry-based
-      // days actually available in the range after removing absence half-days.
+      // Leave-aware coherence check: the RAW stored effectif vs the days actually
+      // available in the segment's MONTH after removing absence half-days (un
+      // segment = un mois, donc plus de geometrie startAt/endAt arbitraire ici).
       const rawEffectif = segment?.effectif ?? segment?.effectifDays ?? null;
-      const available = availableDaysAfterLeave(segment.startAt, segment.endAt, absenceSet);
+      const available = getMonthAvailableDays(segment.monthKey, absenceSet);
       const incoherent = rawEffectif != null && Number(rawEffectif) > available;
+      // Surcharge de la PERSONNE sur ce mois, tous projets confondus : la barre
+      // peut virer sans que rien ne cloche sur le projet affiche, parce que la
+      // charge est ailleurs. D'ou l'infobulle, qui donne les chiffres.
+      const overloadLoad = overloadIndex?.isOverloaded(worker?.name, segment.monthKey)
+        ? overloadIndex.getLoad(worker?.name, segment.monthKey)
+        : null;
 
       return {
         segmentId: segment.id,
+        monthKey: segment.monthKey,
         workerName: worker?.name,
         startSlotIndex: slotRange.firstSlot.slotIndex,
         endSlotIndex: slotRange.lastSlot.slotIndex,
@@ -351,6 +369,7 @@ function buildVisibleSegmentBars(worker, visibleSlots, planningTasks = [], absen
         // unset — this module is DOM-driven, so the value rides on the bar.
         effectif: segment?.effectif == null ? "" : segment.effectif,
         incoherent,
+        overloadLoad,
         available,
         leftPx,
         widthPx,
@@ -389,14 +408,24 @@ function renderSegmentBars(assignedBars) {
       const planningTooltip = `${taskCount} tâche(s) Planning Projet sur cette période`;
       // When the stored effectif exceeds the leave-adjusted availability, the bar
       // turns red and its tooltip explains the mismatch (see is-incoherent CSS).
+      // Priorite au rouge : `is-incoherent` denonce une saisie fausse, l'ambre
+      // une charge trop lourde. La saisie fausse doit rester la plus visible.
+      const overloadTooltip = bar.overloadLoad
+        ? `Surcharge : ${formatDayValue(bar.overloadLoad.totalDays)} j sur ${formatDayValue(
+            bar.overloadLoad.availableDays
+          )} j disponibles ce mois, tous projets confondus`
+        : "";
       const title = bar.incoherent
         ? `Effectif ${bar.effectif} j > disponible après absences ${bar.available} j`
-        : planningTooltip;
+        : overloadTooltip || planningTooltip;
       return `
         <div
-          class="charge-plan-segment-bar ${compact ? "is-compact" : ""} ${bar.incoherent ? "is-incoherent" : ""}"
+          class="charge-plan-segment-bar ${compact ? "is-compact" : ""} ${bar.incoherent ? "is-incoherent" : ""} ${
+            !bar.incoherent && bar.overloadLoad ? "is-overloaded" : ""
+          }"
           style="left:${bar.leftPx}px; top:${10 + bar.laneIndex * 32}px; width:${Math.max(12, bar.widthPx)}px"
           data-segment-id="${escapeHtml(String(bar.segmentId))}"
+          data-month-key="${escapeHtml(String(bar.monthKey))}"
           data-worker-name="${escapeHtml(bar.workerName)}"
           data-start-slot-index="${bar.startSlotIndex}"
           data-end-slot-index="${bar.endSlotIndex}"
@@ -406,9 +435,7 @@ function renderSegmentBars(assignedBars) {
           data-planning-tooltip="${escapeHtml(planningTooltip)}"
           title="${escapeHtml(title)}"
         >
-          <span class="charge-plan-segment-handle is-start" data-resize-edge="start"></span>
           <span class="charge-plan-segment-label">${escapeHtml(bar.label)}</span>
-          <span class="charge-plan-segment-handle is-end" data-resize-edge="end"></span>
         </div>
       `;
     })
@@ -426,8 +453,23 @@ function renderRoleRow(roleLabel, timelineWidth) {
   `;
 }
 
-function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWidth, planningTasks = [], absenceSet = new Set()) {
-  const visibleSegmentBars = buildVisibleSegmentBars(worker, visibleSlots, planningTasks, absenceSet);
+function renderWorkerRow(
+  worker,
+  visibleSlots,
+  timelineWidth,
+  windowDays,
+  dayWidth,
+  planningTasks = [],
+  absenceSet = new Set(),
+  overloadIndex = null
+) {
+  const visibleSegmentBars = buildVisibleSegmentBars(
+    worker,
+    visibleSlots,
+    planningTasks,
+    absenceSet,
+    overloadIndex
+  );
   const assignedBars = assignSegmentLanes(visibleSegmentBars);
   const laneCount = Math.max(
     1,
@@ -445,6 +487,10 @@ function renderWorkerRow(worker, visibleSlots, timelineWidth, windowDays, dayWid
           data-timeline-width="${timelineWidth}"
         >
           ${renderTrackGrid(windowDays, dayWidth, absenceSet)}
+          <!-- Surlignage du mois survole (bottom/chargeEditing.js) : un clic vaut le
+               mois entier, c est la seule chose qui le montre. Absent de la piste
+               Total, en lecture seule. -->
+          <div class="charge-plan-month-hover" hidden></div>
           <div class="charge-plan-track-bars">${renderSegmentBars(assignedBars)}</div>
           <div class="charge-plan-selection-preview" hidden>
             <span class="charge-plan-selection-label"></span>
@@ -491,49 +537,36 @@ function getWindowMonths(windowDays, dayWidth) {
   }));
 }
 
-// Business days of a segment that fall inside [rangeStart, rangeEnd].
-function segmentBusinessDaysInRange(segment, rangeStart, rangeEnd) {
-  const start = segment?.startAt instanceof Date ? segment.startAt : null;
-  const end = segment?.endAt instanceof Date ? segment.endAt : null;
-  if (!start || !end) return 0;
-  const clampStart = start > rangeStart ? start : rangeStart;
-  const clampEnd = end < rangeEnd ? end : rangeEnd;
-  if (clampStart >= clampEnd) return 0;
-  return getBusinessHalfDaySlotsBetween(clampStart, clampEnd).length / 2;
-}
-
-// Total effective person-days across all workers whose segments fall in `month`,
-// each segment's effective days spread proportionally over its business days.
+// Un segment = un mois : le total mensuel est une somme, plus un prorata.
 function computeMonthTotalDays(workers, month) {
-  const rangeStart = new Date(month.year, month.monthNumber - 1, 1, 0, 0, 0);
-  const rangeEnd = new Date(month.year, month.monthNumber, 0, 23, 59, 59);
   let total = 0;
   (workers || []).forEach((worker) => {
     (worker?.segments || []).forEach((segment) => {
-      const effectiveDays = getSegmentEffectiveDays(segment);
-      if (!(effectiveDays > 0)) return;
-      const totalBusinessDays = getSegmentAllocationDays(segment);
-      if (!(totalBusinessDays > 0)) return;
-      const businessDaysInMonth = segmentBusinessDaysInRange(segment, rangeStart, rangeEnd);
-      if (!(businessDaysInMonth > 0)) return;
-      total += effectiveDays * (businessDaysInMonth / totalBusinessDays);
+      if (segment?.monthKey !== month.key) return;
+      total += getSegmentEffectiveDays(segment);
     });
   });
   return Math.round(total * 100) / 100;
+}
+
+// Pastille d'un mois : meme geometrie pour la ligne Total et la ligne Charge.
+// Les deux se lisent l'une au-dessus de l'autre — une formule dupliquee finirait
+// par deriver d'un seul cote, en silence.
+// Le plancher a 0,08 garde une pastille visible pour une valeur infime ; les
+// 12 px retranches sont les 6 px de marge de chaque cote (cf. .charge-plan-month-fill).
+function renderMonthFillPill(value, month) {
+  if (!(value > 0)) return "";
+  const fillRatio = Math.min(1, Math.max(0.08, value / Math.max(1, month.businessDayCount)));
+  return `<span class="charge-plan-month-fill" style="width:calc((100% - 12px) * ${fillRatio})">
+               <span class="charge-plan-month-label">${formatDayValue(value)} j</span>
+             </span>`;
 }
 
 function renderReadonlyMonthTrack(workers, months) {
   return months
     .map((month) => {
       const totalDays = computeMonthTotalDays(workers, month);
-      const fillRatio =
-        totalDays > 0 ? Math.min(1, Math.max(0.08, totalDays / Math.max(1, month.businessDayCount))) : 0;
-      const fill =
-        totalDays > 0
-          ? `<span class="charge-plan-month-fill" style="width:calc((100% - 12px) * ${fillRatio})">
-               <span class="charge-plan-month-label">${formatDayValue(totalDays)} j</span>
-             </span>`
-          : "";
+      const fill = renderMonthFillPill(totalDays, month);
       return `<span class="charge-plan-month-segment" style="width:${month.widthPx}px">${fill}</span>`;
     })
     .join("");
@@ -560,8 +593,74 @@ function renderTotalRow(workers, months, timelineWidth) {
   `;
 }
 
+// --- Charge row: required vs. planned days, per month -------------------------
+// La ligne Charge compare, mois par mois, ce qui est REQUIS par le bareme
+// (Task 1, documentCharge.js) a ce qui est PLANIFIE (Task 2 fournit les
+// colonnes Duree_*). Elle vit juste sous Total pour que les deux lignes
+// s'alignent visuellement sur les memes colonnes de mois.
+
+// Etat d'une cellule mensuelle : on compare les jours PLANIFIES — exactement le
+// chiffre que la ligne Total affiche deja, via computeMonthTotalDays — aux jours
+// REQUIS par le bareme. Les deux lignes doivent parler du meme nombre, d'ou la
+// reutilisation de la meme fonction plutot qu'un calcul parallele.
+const CHARGE_EPSILON = 1e-9;
+
+function getChargeCellState(plannedDays, requiredDays) {
+  if (requiredDays <= CHARGE_EPSILON && plannedDays <= CHARGE_EPSILON) return "";
+  if (Math.abs(plannedDays - requiredDays) < CHARGE_EPSILON) return "is-balanced";
+  return plannedDays < requiredDays ? "is-overload" : "is-partial";
+}
+
+function renderChargeMonthTrack(workers, months, chargeByMonth) {
+  return months
+    .map((month) => {
+      const requiredDays = chargeByMonth.get(month.key) || 0;
+      const plannedDays = computeMonthTotalDays(workers, month);
+      const state = getChargeCellState(plannedDays, requiredDays);
+      const fill = renderMonthFillPill(requiredDays, month);
+      return `<span class="charge-plan-month-segment ${state}" style="width:${month.widthPx}px">${fill}</span>`;
+    })
+    .join("");
+}
+
+// La ligne se rend TOUJOURS des qu'un projet est charge, meme sans aucune duree
+// saisie : sinon le bouton « Charge » — seul point d'entree de la fenetre —
+// serait introuvable.
+// Le badge ne porte QUE la valeur : le libelle « non place » vit dans son
+// `title` (deja survole — la pastille est en `cursor: help`). La cellule de nom
+// fait 220 px FIXES et loge deja le bouton « Charge » ; avec le prefixe,
+// « non place : 240 j » y tenait a quelques pixels pres, et l'etat de deploiement
+// attendu — 112 lignes COFFRAGE encore sans dates — donne un total a QUATRE
+// chiffres qui debordait ou se faisait rogner (`white-space: nowrap`).
+function renderChargeRow(workers, months, timelineWidth, charge) {
+  const unplaced =
+    charge.unplacedDays > 0
+      ? `<span class="charge-plan-charge-unplaced" title="Charge non placee : ${formatDayValue(charge.unplacedDays)} j — documents sans dates de planning, leur charge n'est encore rattachee a aucun mois.">
+           ${formatDayValue(charge.unplacedDays)} j
+         </span>`
+      : "";
+  return `
+    <div class="charge-plan-row charge-plan-row--charge" style="--timeline-width:${timelineWidth}px; --row-height:72px">
+      <div class="charge-plan-cell charge-plan-cell--name">
+        <button type="button" class="charge-plan-charge-btn" data-charge-assign-open>Charge</button>
+        ${unplaced}
+      </div>
+      <div class="charge-plan-cell charge-plan-cell--timeline">
+        <div class="charge-plan-track charge-plan-track--readonly">
+          ${renderChargeMonthTrack(workers, months, charge.byMonth)}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // --- Editer toggle (port of renderTimelineEditToolbar) ------------------------
 
+// `.charge-plan-feedback` : zone de message d'etat du board, alimentee par
+// `chargeEditing.setBoardFeedback()`. Portee du jumeau gestion-depenses2
+// (ui/chargeTimeline.js renderChargePlanTimeline + setChargePlanFeedback) : sans
+// elle, l'echec d'une suppression n'avait AUCUN endroit ou s'afficher — la seule
+// zone de message du widget vivait dans la fenetre modale, fermee a ce moment-la.
 function renderTimelineEditToolbar(editModeEnabled) {
   return `
     <div class="charge-plan-edit-toolbar">
@@ -573,6 +672,7 @@ function renderTimelineEditToolbar(editModeEnabled) {
       >
         ${editModeEnabled ? "Verrouiller" : "Editer"}
       </button>
+      <span class="charge-plan-feedback" hidden></span>
     </div>
   `;
 }
@@ -636,6 +736,17 @@ export function createChargeBoard(containerEl) {
   // viewport-only re-render (setWindow) omits it, so we keep the last value to
   // preserve grey shading + red bars across zoom/pan.
   let lastAbsencesByWorker = new Map();
+  // Lignes Planning_Projet (Task 1's computeProjectCharge input). Comme
+  // lastPlanningTasks : seul le render() pilote par les donnees (main.js) les
+  // transmet, la reconstruction de fenetre (setWindow) ne les fait pas
+  // transiter — sans memoire, un zoom/pan viderait la ligne Charge a chaque
+  // rafraichissement de fenetre.
+  let lastPlanningRows = [];
+  // TOUTES les lignes TimeSegment, tous projets et tous services : la surcharge
+  // d'une personne se compte sur l'ensemble de son engagement, pas sur le seul
+  // projet affiche. Memorise comme lastPlanningRows, puisque le re-rendu de
+  // viewport (setWindow) ne le retransmet pas.
+  let lastAllTimeSegmentRows = [];
   // Rebuild throttling. A zoom/pan gesture drives setWindow ~60x/s and each call
   // used to rebuild the whole innerHTML — the dominant jank source. We throttle
   // the rebuild to at most one per REBUILD_THROTTLE_MS (leading + trailing): the
@@ -664,7 +775,15 @@ export function createChargeBoard(containerEl) {
     activeVisibleSlots = [];
   }
 
-  function render({ workers, viewport, editMode, planningTasks, absencesByWorker } = {}) {
+  function render({
+    workers,
+    viewport,
+    editMode,
+    planningTasks,
+    absencesByWorker,
+    planningRows,
+    allTimeSegmentRows,
+  } = {}) {
     if (!(containerEl instanceof HTMLElement) || !viewport) {
       clear();
       return;
@@ -682,11 +801,30 @@ export function createChargeBoard(containerEl) {
     // Only the data-driven render() (from main.js) carries planningTasks; the
     // viewport-only re-render (setWindow) omits it and keeps the last set.
     if (planningTasks !== undefined) lastPlanningTasks = Array.isArray(planningTasks) ? planningTasks : [];
+    if (allTimeSegmentRows !== undefined) {
+      lastAllTimeSegmentRows = Array.isArray(allTimeSegmentRows) ? allTimeSegmentRows : [];
+    }
     if (absencesByWorker !== undefined) {
       lastAbsencesByWorker = absencesByWorker instanceof Map ? absencesByWorker : new Map();
     }
+    if (planningRows !== undefined) lastPlanningRows = Array.isArray(planningRows) ? planningRows : [];
 
     containerEl.classList.add("charge-plan-board");
+
+    // Index de surcharge : un seul balayage de la table par couple
+    // (personne, mois) affiche. Le construire ici et non dans le constructeur de
+    // barres evite de rebalayer TimeSegment pour chacune des dizaines de barres.
+    const overloadIndex = buildMonthOverloadIndex({
+      entries: lastWorkers.flatMap((worker) =>
+        (worker?.segments || []).map((segment) => ({
+          personName: worker?.name,
+          monthKey: segment?.monthKey,
+        }))
+      ),
+      allSegmentRows: lastAllTimeSegmentRows,
+      columns: APP_CONFIG.grist.columns.timeSegment,
+      resolveAbsenceSet: (personName) => lastAbsencesByWorker.get(normalizeName(personName)) || null,
+    });
 
     const groupedWorkers = groupWorkersByRole(lastWorkers);
     const windowDays = buildWindowDays(viewport);
@@ -710,7 +848,8 @@ export function createChargeBoard(containerEl) {
               windowDays,
               dayWidth,
               lastPlanningTasks,
-              absenceSet
+              absenceSet,
+              overloadIndex
             );
           }),
         ].join("")
@@ -722,6 +861,11 @@ export function createChargeBoard(containerEl) {
     const windowMonths = getWindowMonths(windowDays, dayWidth);
     const totalRowHtml = renderTotalRow(lastWorkers, windowMonths, timelineWidth);
 
+    // Ligne Charge : requis (documentCharge.js, Task 1) vs planifie (memes
+    // workers/mois que Total ci-dessus).
+    const charge = computeProjectCharge(lastPlanningRows, APP_CONFIG.grist.columns.planningProject);
+    const chargeRowHtml = renderChargeRow(lastWorkers, windowMonths, timelineWidth, charge);
+
     containerEl.classList.toggle("is-segment-editing-enabled", lastEditMode);
     containerEl.classList.toggle("is-segment-editing-locked", !lastEditMode);
     containerEl.dataset.segmentEditMode = lastEditMode ? "enabled" : "locked";
@@ -731,6 +875,7 @@ export function createChargeBoard(containerEl) {
         <div class="charge-plan-timeline" style="--timeline-width:${timelineWidth}px">
           ${rowsHtml}
           ${totalRowHtml}
+          ${chargeRowHtml}
         </div>
       </div>
       ${renderTimelineEditToolbar(lastEditMode)}

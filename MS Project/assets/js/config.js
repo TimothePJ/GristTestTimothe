@@ -2,13 +2,6 @@ export const APP_CONFIG = {
   storageKey: "ms-project.selected-project",
 
   grist: {
-    projectsTable: {
-      sourceTable: "Projets2",
-      columns: {
-        project: "Nom_de_projet",
-      },
-    },
-
     msProjectTable: {
       enabled: true,
       sourceTable: "MsProject",
@@ -40,6 +33,13 @@ export const APP_CONFIG = {
       sourceNameCandidates: [
         "Nom",
       ],
+    },
+
+    msProjectNamesTable: {
+      sourceTable: "MsProjectNom",
+      columns: {
+        name: "Nom",
+      },
     },
 
     planningSyncTable: {
