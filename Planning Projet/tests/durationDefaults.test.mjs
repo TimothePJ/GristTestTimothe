@@ -113,12 +113,14 @@ test("une saisie de durée n'est acceptée qu'entière et positive", () => {
   assert.equal(normalizeDurationDefaultInput(null), null);
 });
 
-test("zéro est une durée renseignée, pas une case vide", () => {
-  assert.equal(isDurationValueEmpty(0), false);
-  assert.equal(isDurationValueEmpty("0"), false);
+test("zéro représente une durée non renseignée dans Planning_Projet", () => {
+  assert.equal(isDurationValueEmpty(0), true);
+  assert.equal(isDurationValueEmpty("0"), true);
+  assert.equal(isDurationValueEmpty("0,0"), true);
   assert.equal(isDurationValueEmpty(null), true);
   assert.equal(isDurationValueEmpty(""), true);
   assert.equal(isDurationValueEmpty("   "), true);
+  assert.equal(isDurationValueEmpty(4), false);
 });
 
 /* ---------------- Le contrat qui avait été présumé au lieu d'être vérifié -------- */
@@ -136,7 +138,7 @@ test("group.meta n'est pas la ligne Grist : les valeurs stockées viennent des l
   assert.equal(rawRowsById.get(11).Duree_1, 4, "la ligne brute porte la valeur stockée");
 });
 
-test("le mode « Seulement les vides » épargne réellement les durées déjà saisies", () => {
+test("le mode « Seulement les vides » remplit les valeurs nulles ou à zéro", () => {
   const rows = [
     rawRow({ id: 1, typeDoc: "NDC", duree1: null, demarrage: "2026-08-12" }),
     rawRow({ id: 2, typeDoc: "NDC", duree1: 0, demarrage: "2026-08-12" }),
@@ -146,19 +148,20 @@ test("le mode « Seulement les vides » épargne réellement les durées déjà 
     NDC: settings({ slot1: 9, mode: DURATION_DEFAULT_MODES.EMPTY_ONLY }),
   });
 
-  assert.deepEqual(updates.map((update) => update.id), [1]);
-  assert.equal(stats.skippedAlreadyFilled, 2, "0 et 4 sont des durées renseignées");
+  assert.deepEqual(updates.map((update) => update.id).sort((a, b) => a - b), [1, 2]);
+  assert.equal(stats.skippedAlreadyFilled, 1, "seule la durée 4 est déjà renseignée");
 });
 
 test("le formulaire annonce le vrai décompte vides / renseignées", () => {
   const [ndc] = typesFor([
     rawRow({ id: 1, typeDoc: "NDC", duree1: 4, demarrage: "2026-08-12" }),
     rawRow({ id: 2, typeDoc: "NDC", duree1: null, demarrage: "2026-08-12" }),
+    rawRow({ id: 3, typeDoc: "NDC", duree1: 0, demarrage: "2026-08-12" }),
   ]);
 
-  assert.equal(ndc.rowCount, 2);
+  assert.equal(ndc.rowCount, 3);
   assert.equal(ndc.slots[DURATION_SLOTS.DEBUT_FIN].filledCount, 1);
-  assert.equal(ndc.slots[DURATION_SLOTS.DEBUT_FIN].emptyCount, 1);
+  assert.equal(ndc.slots[DURATION_SLOTS.DEBUT_FIN].emptyCount, 2);
 });
 
 // Sans Type_doc lisible, buildPlanningDurationUpdateFields ne rentrait dans aucune
@@ -246,6 +249,38 @@ test("un COFFRAGE de groupe est daté sur l'ancre affichée, pas sur sa valeur s
   // Ancre de groupe 2026-06-10 (et non 2026-09-30) moins 2 semaines.
   assert.equal(coffrageUpdate.fields.Date_limite, "2026-05-27");
   assert.equal(coffrageUpdate.fields.Diff_coffrage, "2026-06-10");
+});
+
+test("un COFFRAGE à zéro reçoit la durée par défaut depuis l'ancre de ses ARMATURES", () => {
+  const rows = [
+    rawRow({
+      id: 30,
+      typeDoc: "ARMATURES",
+      zone: "Zone A",
+      groupe: "17",
+      diffCoffrage: "2026-10-29",
+      diffArmature: "2026-11-26",
+    }),
+    rawRow({
+      id: 31,
+      typeDoc: "COFFRAGE",
+      zone: "Zone A",
+      groupe: "17",
+      duree1: 0,
+      dateLimite: "2026-10-29",
+      diffCoffrage: null,
+    }),
+  ];
+
+  const { updates } = plan(rows, {
+    COFFRAGE: settings({ slot1: 4, mode: DURATION_DEFAULT_MODES.EMPTY_ONLY }),
+  });
+  const coffrageUpdate = updates.find((update) => update.id === 31);
+
+  assert.ok(coffrageUpdate, "le COFFRAGE à zéro doit être planifié");
+  assert.equal(coffrageUpdate.fields.Duree_1, 4);
+  assert.equal(coffrageUpdate.fields.Diff_coffrage, "2026-10-29");
+  assert.equal(coffrageUpdate.fields.Date_limite, "2026-10-01");
 });
 
 /* ------------------------------- Choix des lignes ------------------------------- */
