@@ -51,11 +51,14 @@ function toText(value) {
   return String(value).trim();
 }
 
-// Une durée vide, c'est une case jamais renseignée. Zéro est une durée légitime — la
-// date de gauche vaut alors la date d'ancrage — et ne doit jamais compter comme vide,
-// sinon le mode « cases vides » écraserait toutes les lignes à 0.
+// Dans Planning_Projet, une durée non renseignée est stockée soit vide, soit à zéro.
+// Le mode « Seulement les vides » doit donc traiter ces deux formes de la même
+// manière, afin qu'une valeur par défaut puisse remplacer les zéros de la base.
 export function isDurationValueEmpty(rawValue) {
-  return toText(rawValue) === "";
+  const text = toText(rawValue);
+  if (!text) return true;
+
+  return Number(text.replace(",", ".")) === 0;
 }
 
 // Même normalisation que la saisie au clavier dans une cellule de durée : virgule
