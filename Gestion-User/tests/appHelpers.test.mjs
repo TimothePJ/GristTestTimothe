@@ -10,6 +10,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getMonthBounds } from "../assets/js/monthSegments.js";
+import { getWeekRange } from "../assets/js/dateRange.js";
+import { compareText, normalizeKey, toText } from "../assets/js/utils.js";
 
 const APP_SOURCE = readFileSync(
   fileURLToPath(new URL("../assets/js/app.js", import.meta.url)),
@@ -49,6 +51,24 @@ const getSegmentYearBounds = buildFromSource(
 // Fenetre visible du widget pour l'annee 2026 : de la semaine 1 (qui commence
 // le 29/12/2025) a la fin de la semaine 53.
 const VUE_2026 = { start: new Date(2025, 11, 29), end: new Date(2027, 0, 4) };
+
+// Etat minimal de app.js pour exercer getFilteredEmployeesAndSegments : une
+// employee, deux projets dont un seul coche, plus un segment hors fenetre.
+const MARIE = { key: "marie dupont", absenceKey: "marie dupont", name: "Marie DUPONT", firstName: "Marie", lastName: "DUPONT", service: "Structure", role: "Projeteur" };
+
+const APP_STATE = {
+  weeks: ["2026-W36", "2026-W37"].map((value) => ({ value, range: getWeekRange(value) })),
+  filters: { service: "", role: "", dop: "", includeEmptyEmployees: false },
+  data: {
+    employees: [MARIE],
+    projects: new Map(),
+    segmentsByEmployee: new Map([[MARIE.key, [
+      { employeeKey: MARIE.key, monthKey: "2026-09", effectif: 11, projectNumber: "25-0142" },
+      { employeeKey: MARIE.key, monthKey: "2026-09", effectif: 11, projectNumber: "25-0999" },
+      { employeeKey: MARIE.key, monthKey: "2024-03", effectif: 11, projectNumber: "25-0142" },
+    ]]]),
+  },
+};
 
 // =====================================================================
 // REGRESSION CRITIQUE — segmentOverlapsRange lisait segment.startTime,
@@ -242,5 +262,49 @@ test("le service d'utilisation recoit bien l'index d'absences", () => {
     APP_SOURCE,
     /computeWeeklyUtilizationMatrix\(\{[\s\S]*?absencesByEmployee: state\.data\.absencesByEmployee[\s\S]*?\}\)/,
     "app.js ne transmet plus absencesByEmployee a computeWeeklyUtilizationMatrix"
+  );
+});
+
+// =====================================================================
+// Le filtre projet est desormais la seule affaire de utilizationService :
+// c'est lui qui masque la ligne APRES avoir compte la charge dans le
+// total. Si app.js retire les segments en amont, le service ne les voit
+// jamais et le total redevient celui du seul perimetre affiche.
+// =====================================================================
+const getFilteredEmployeesAndSegments = buildFromSource(
+  [
+    "getFilteredEmployeesAndSegments",
+    "getVisibleTimelineRange",
+    "sortEmployeesForView",
+    "employeeMatchesFilters",
+    "segmentOverlapsRange",
+    "getServiceLabel",
+    "getRoleLabel",
+    "getFilterKey",
+  ],
+  "getFilteredEmployeesAndSegments",
+  ["state", APP_STATE],
+  ["getMonthBounds", getMonthBounds],
+  ["compareText", compareText],
+  ["normalizeKey", normalizeKey],
+  ["toText", toText]
+);
+
+test("les segments d'un projet decoche parviennent quand meme au service", () => {
+  const { segmentsByEmployee } = getFilteredEmployeesAndSegments();
+
+  assert.deepEqual(
+    (segmentsByEmployee.get("marie dupont") || []).map((segment) => segment.projectNumber).sort(),
+    ["25-0142", "25-0999"],
+    "app.js filtre encore les segments par projet : le total sera tronque"
+  );
+});
+
+test("les segments hors de la fenetre affichee restent ecartes par app.js", () => {
+  const { segmentsByEmployee } = getFilteredEmployeesAndSegments();
+
+  assert.ok(
+    !(segmentsByEmployee.get("marie dupont") || []).some((segment) => segment.monthKey === "2024-03"),
+    "un segment hors de l'annee affichee a traverse le filtre de fenetre"
   );
 });

@@ -205,6 +205,12 @@ export function computeWeeklyUtilizationMatrix({
     // de la charge, et celles dont le mois touche une semaine non travaillee —
     // ces dernieres sont a 0 % mais doivent afficher « Congé ».
     const keptProjectNumbers = new Set();
+    // Charge de la PERSONNE, tous projets confondus — y compris ceux que le
+    // filtre masque (cf. isVisible plus bas). Aucun ecretage a 100 % non plus :
+    // sur un mois non aligne sur les semaines ISO, une semaine de bord garde une
+    // capacite minuscule et une charge de 364 % s'y lisait « 100 », c'est-a-dire
+    // exactement comme un plan equilibre. Un depassement doit rester un
+    // depassement, ligne projet comprise.
     const totals = createWeekValues(normalizedWeeks);
     const employeeSegments = groupedSegments.get(employee.key) || [];
     // Sortie anticipee : sans segment ni option d'affichage, cet employe serait
@@ -252,18 +258,21 @@ export function computeWeeklyUtilizationMatrix({
       row.weekStates[weekValue] = LEAVE_OVERLOADED_STATE;
       if (!row.weekLeaveDays) row.weekLeaveDays = createWeekValues(normalizedWeeks);
       row.weekLeaveDays[weekValue] += days;
-      totalLeaveDays[weekValue] += days;
     }
 
     employeeSegments.forEach((segment) => {
       const projectNumber = segment.projectNumber || "Sans projet";
-      if (visibleProjectNumbers && !visibleProjectNumbers.has(projectNumber)) return;
-
       const monthTimes = getSegmentMonthTimes(segment.monthKey || "", monthTimesCache);
       if (!monthTimes) return;
 
-      let row = projectRowsByNumber.get(projectNumber);
-      if (!row) {
+      // Un projet decoche ne cree PAS de ligne, mais sa charge est comptee
+      // quand meme : le filtre choisit ce qui s'affiche, pas ce qui pese. Sans
+      // cela un collaborateur a 100 % se lisait « disponible » des qu'on isolait
+      // un projet, et la couleur de surcharge disparaissait avec les lignes.
+      const isVisible = !visibleProjectNumbers || visibleProjectNumbers.has(projectNumber);
+
+      let row = isVisible ? projectRowsByNumber.get(projectNumber) : null;
+      if (isVisible && !row) {
         row = {
           type: "project",
           projectNumber,
@@ -290,12 +299,19 @@ export function computeWeeklyUtilizationMatrix({
 
         if (capacity > 0) {
           if (days > 0) {
-            row.weekPercents[week.value] += (days / capacity) * 100;
-            keptProjectNumbers.add(projectNumber);
+            const percent = (days / capacity) * 100;
+            totals[week.value] += percent;
+            if (row) {
+              row.weekPercents[week.value] += percent;
+              keptProjectNumbers.add(projectNumber);
+            }
           }
         } else {
-          keptProjectNumbers.add(projectNumber);
-          if (days > 0) markLeaveOverload(row, week.value, days);
+          if (row) keptProjectNumbers.add(projectNumber);
+          if (days > 0) {
+            totalLeaveDays[week.value] += days;
+            if (row) markLeaveOverload(row, week.value, days);
+          }
         }
 
         weekIndex += 1;
@@ -305,16 +321,6 @@ export function computeWeeklyUtilizationMatrix({
     const projectRows = Array.from(projectRowsByNumber.values())
       .filter((row) => keptProjectNumbers.has(row.projectNumber))
       .sort((left, right) => compareText(left.projectLabel, right.projectLabel));
-
-    // Aucun ecretage a 100 % : sur un mois non aligne sur les semaines ISO, une
-    // semaine de bord garde une capacite minuscule et une charge de 364 % s'y
-    // lisait « 100 », c'est-a-dire exactement comme un plan equilibre. Un
-    // depassement doit rester un depassement, ligne projet comprise.
-    projectRows.forEach((row) => {
-      normalizedWeeks.forEach((week) => {
-        totals[week.value] += row.weekPercents[week.value] || 0;
-      });
-    });
 
     if (!projectRows.length && !includeEmployeesWithoutProjects) {
       return null;

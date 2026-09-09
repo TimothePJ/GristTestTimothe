@@ -501,3 +501,108 @@ test("un employe issu des seuls segments herite de l'absenceKey de ceux-ci", () 
   assert.equal(row.employee.absenceKey, EMPLOYEE.absenceKey);
   assert.equal(row.totalRow.weekStates["2026-W37"], "leave");
 });
+
+// =====================================================================
+// Le filtre projet masque des LIGNES, il ne retire pas de la charge.
+// « Total employe » annonce la charge de la personne : la tronquer au
+// perimetre affiche fait lire « disponible » un collaborateur a 100 %,
+// et efface la couleur de surcharge de la seule ligne qui la portait.
+// La charge se compte donc AVANT le filtre, l'affichage seul le suit.
+// =====================================================================
+const PROJET_MASQUE = "25-0999";
+
+test("le total employe couvre les projets masques par le filtre", () => {
+  const weeks = weeksOf("2026-W37");
+  const commun = {
+    employees: [EMPLOYEE],
+    segments: [segmentOf(11), segmentOf(11, { projectNumber: PROJET_MASQUE })],
+    projects: PROJECTS,
+    weeks,
+    absencesByEmployee: new Map(),
+  };
+
+  const [complet] = computeWeeklyUtilizationMatrix(commun);
+  const [filtre] = computeWeeklyUtilizationMatrix({
+    ...commun,
+    visibleProjectNumbers: new Set(["25-0142"]),
+  });
+
+  assert.equal(filtre.projectRows.length, 1, "le filtre doit masquer la ligne du projet decoche");
+  assert.equal(filtre.projectRows[0].projectNumber, "25-0142");
+  assert.ok(
+    Math.abs(filtre.totalRow.weekPercents["2026-W37"] - complet.totalRow.weekPercents["2026-W37"]) < 1e-9,
+    `total tronque par le filtre : ${filtre.totalRow.weekPercents["2026-W37"]} % au lieu de ${complet.totalRow.weekPercents["2026-W37"]} %`
+  );
+});
+
+// Corollaire : le pourcentage de la ligne AFFICHEE, lui, ne bouge pas — la
+// capacite ne depend que du couple (personne, semaine). Seul le total agrege.
+test("le filtre ne modifie pas le pourcentage de la ligne affichee", () => {
+  const weeks = weeksOf("2026-W37");
+  const commun = {
+    employees: [EMPLOYEE],
+    segments: [segmentOf(11), segmentOf(11, { projectNumber: PROJET_MASQUE })],
+    projects: PROJECTS,
+    weeks,
+    absencesByEmployee: new Map(),
+  };
+
+  const [complet] = computeWeeklyUtilizationMatrix(commun);
+  const [filtre] = computeWeeklyUtilizationMatrix({
+    ...commun,
+    visibleProjectNumbers: new Set(["25-0142"]),
+  });
+
+  assert.equal(
+    filtre.projectRows[0].weekPercents["2026-W37"],
+    complet.projectRows.find((row) => row.projectNumber === "25-0142").weekPercents["2026-W37"]
+  );
+});
+
+// Meme regle pour la charge posee sur une semaine a capacite nulle : elle se
+// compte en JOURS faute de pourcentage, et un projet masque ne doit pas la
+// faire disparaitre de la ligne total.
+test("les jours d'un projet masque restent comptes dans le total en conge", () => {
+  const weeks = weeksOf(...SEPTEMBER_WEEKS);
+  const commun = {
+    employees: [EMPLOYEE],
+    segments: [segmentOf(11), segmentOf(11, { projectNumber: PROJET_MASQUE })],
+    projects: PROJECTS,
+    weeks,
+    absencesByEmployee: new Map([[EMPLOYEE.absenceKey, absencesForWholeMonth("2026-09", 30)]]),
+  };
+
+  const joursTraces = (bloc) => weeks.reduce(
+    (somme, week) => somme + (bloc.totalRow.weekLeaveDays?.[week.value] || 0),
+    0
+  );
+
+  const [complet] = computeWeeklyUtilizationMatrix(commun);
+  const [filtre] = computeWeeklyUtilizationMatrix({
+    ...commun,
+    visibleProjectNumbers: new Set(["25-0142"]),
+  });
+
+  assert.equal(filtre.projectRows.length, 1, "le filtre doit masquer la ligne du projet decoche");
+  assert.ok(joursTraces(complet) > 0, "temoin sans valeur : aucun jour trace hors filtre");
+  assert.ok(
+    Math.abs(joursTraces(filtre) - joursTraces(complet)) < 1e-9,
+    `${joursTraces(filtre)} jours traces sous filtre au lieu des ${joursTraces(complet)} planifies`
+  );
+});
+
+// Un employe dont TOUS les projets sont decoches n'a plus rien a montrer : il
+// sort de la matrice comme avant. Compter la charge en amont ne doit pas le
+// faire reapparaitre avec une ligne de repli.
+test("un employe dont tous les projets sont masques quitte la matrice", () => {
+  const matrix = computeWeeklyUtilizationMatrix({
+    employees: [EMPLOYEE],
+    segments: [segmentOf(11)],
+    projects: PROJECTS,
+    weeks: weeksOf("2026-W37"),
+    absencesByEmployee: new Map(),
+    visibleProjectNumbers: new Set([PROJET_MASQUE]),
+  });
+
+  assert.deepEqual(matrix, []);
+});
