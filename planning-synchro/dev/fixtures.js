@@ -40,6 +40,17 @@ function monthlyTimeSegmentRows({ idStart, numeroProjet, name, startMonthKey, en
 // Project 3 has MORE than 16 tasks (deliberately) to exercise the top pane's
 // 16-row visible ceiling + internal vertical scroll (sticky frise). A long task
 // name is included to exercise single-line truncation (ellipsis + title tooltip).
+// TEST SANS PREVISIONNEL : le cas qui manquait au harnais. Une equipe et un
+// planning, mais AUCUNE ligne TimeSegment — l'etat de tout projet avant que
+// quiconque ait pose son premier segment. Le pane bas doit montrer les pistes
+// vides de l'equipe (et non se vider entierement, comme il le faisait), pour
+// qu'on puisse y creer ce premier segment sans passer par gestion-depenses2.
+const NO_FORECAST_NUMBER = "121212";
+// TEST EQUIPE SEULE : le cas degenere. Une equipe affectee, mais ni segment ni
+// phase datable — les bornes de la frise doivent s'ouvrir autour d'aujourd'hui
+// plutot que de se refermer sur un mois fige et non navigable.
+const TEAM_ONLY_NUMBER = "131313";
+
 const MANY_TASK_NUMBER = "999999";
 const MANY_TASK_ROWS = Array.from({ length: 20 }, (_, i) => {
   const n = i + 1;
@@ -89,6 +100,8 @@ export const FIXTURE_TABLES = {
     { id: 6, Nom_de_projet: "TEST FUSION", Numero_de_projet: "666666" }, // 2 close same-type segments -> aggregate must keep them on ONE line
     { id: 7, Nom_de_projet: "TEST MAXZOOM", Numero_de_projet: "777777" }, // bounds span > max window -> at max zoom an early phase is off-screen (placement/phantom test)
     { id: 8, Nom_de_projet: "TEST EN COURS", Numero_de_projet: "888888" }, // a phase spanning today -> past/current split must stay on ONE line
+    { id: 9, Nom_de_projet: "TEST SANS PREVISIONNEL", Numero_de_projet: NO_FORECAST_NUMBER }, // equipe + planning, ZERO TimeSegment -> les pistes doivent s'afficher quand meme
+    { id: 10, Nom_de_projet: "TEST EQUIPE SEULE", Numero_de_projet: TEAM_ONLY_NUMBER }, // equipe SEULE : ni segment ni phase -> frise ancree sur aujourd'hui
   ],
   Planning_Projet: [
     // Mixed date formats (FR + ISO) on purpose to exercise the robust parser.
@@ -121,6 +134,11 @@ export const FIXTURE_TABLES = {
     // A TINY past portion (starts a few days before today) — its darker "past"
     // half must be the SAME height as the current half, not appear shorter.
     { id: 8002, NomProjet: "TEST EN COURS", ID2: "8002", Zone: "Z1", Taches: "MUR PETIT PASSE - COF", Type_doc: "COFFRAGE", Date_limite: "2026-07-02", Diff_coffrage: "2026-11-01" },
+    // TEST SANS PREVISIONNEL : des phases bien datees, mais pas un seul
+    // TimeSegment en face (cf. l'absence de ce numero dans TimeSegment ci-dessous).
+    { id: 9001, NomProjet: "TEST SANS PREVISIONNEL", ID2: "9001", Zone: "Z1", Taches: "SEMELLES - COF", Type_doc: "COFFRAGE", Date_limite: "2027-03-01", Diff_coffrage: "2027-03-20", Demarrages_travaux: "2027-04-01" },
+    { id: 9002, NomProjet: "TEST SANS PREVISIONNEL", ID2: "9002", Zone: "Z1", Taches: "SEMELLES - ARM", Type_doc: "ARMATURES", Date_limite: "2027-03-10", Diff_coffrage: "2027-03-10", Diff_armature: "2027-04-02" },
+    { id: 9003, NomProjet: "TEST SANS PREVISIONNEL", ID2: "9003", Zone: "Z2", Taches: "VOILES R+1 - COF", Type_doc: "COFFRAGE", Date_limite: "2027-05-15", Diff_coffrage: "2027-06-05" },
   ],
   // Un segment = un mois (bascule TimeSegment) : chaque bloc ci-dessous est une
   // ligne Mois par mois, generee par monthlyTimeSegmentRows() sur EXACTEMENT la
@@ -180,6 +198,13 @@ export const FIXTURE_TABLES = {
     { id: 30, NumeroProjet: "666666", Name: "Equipe Fusion", Role: "Projeteur", Daily_Rate: 0 },
     { id: 40, NumeroProjet: "777777", Name: "Equipe MZ", Role: "Projeteur", Daily_Rate: 0 },
     { id: 50, NumeroProjet: "888888", Name: "Equipe EC", Role: "Projeteur", Daily_Rate: 0 },
+    // TEST SANS PREVISIONNEL : ces trois-la n'ont AUCUN TimeSegment. Ils doivent
+    // apparaitre quand meme, en pistes vides et cliquables en mode Editer.
+    { id: 60, NumeroProjet: NO_FORECAST_NUMBER, Name: "Camille Aubert", Role: "Projeteur", Daily_Rate: 0 },
+    { id: 61, NumeroProjet: NO_FORECAST_NUMBER, Name: "Hugo Lemaire", Role: "Ingenieur", Daily_Rate: 0 },
+    { id: 62, NumeroProjet: NO_FORECAST_NUMBER, Name: "BET Externe", Role: "Sous-traitant", Daily_Rate: 0 },
+    // TEST EQUIPE SEULE : une personne, rien d'autre nulle part.
+    { id: 70, NumeroProjet: TEAM_ONLY_NUMBER, Name: "Ines Moreau", Role: "Projeteur", Daily_Rate: 0 },
   ],
   // "Données d'entrées" (reception) references, linked to planning rows by
   // NomProjet + NumeroDocument(=ID2) + Type_document + NomDocument(=Taches) + Zone.

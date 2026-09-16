@@ -27,11 +27,17 @@ import {
   readSharedSelection,
   writeSharedSelection,
 } from "./services/projectRegistry.js";
-import { getFirstPhaseDate, buildRowPhases, computePlanningPhaseBounds, buildPlanningTaskRanges } from "./top/phases.js";
+import { getFirstPhaseDate, computePlanningPhaseBounds, buildPlanningTaskRanges } from "./top/phases.js";
 import { computeTimeSegmentBounds } from "./top/bounds.js";
 import { createPlanningRenderer } from "./top/planningRenderer.js";
 import { createPlanningChart } from "./top/planningChart.js";
 import { createChargeBoard, buildWorkersFromSegments } from "./bottom/chargeBoard.js";
+import {
+  unionDateBounds,
+  resolveChargeBounds,
+  resolveChargePaneVisibility,
+  resolveViewportAnchorDate,
+} from "./bottom/chargePaneState.js";
 import { attachChargeEditing } from "./bottom/chargeEditing.js";
 import { createChargeAssignModal } from "./bottom/chargeAssignModal.js";
 import { applySegmentChangeLocally, timeSegmentRowsSignature } from "./bottom/localSegmentUpdate.js";
@@ -40,11 +46,8 @@ import { createTopPaneResizer } from "./ui/topPaneResizer.js";
 import { buildProjectRealisationTargetLookup } from "./top/vendor/planningProjetBuilder.js";
 import { buildInitialProjectViewport, buildCanonicalSharedViewport } from "./viewport/build.js";
 import { normalizeIsoDate } from "./viewport/normalize.js";
-import { formatIsoDate } from "./utils/dates.js";
 import { createSyncController } from "./sync/controller.js";
 import { state, loadPersistedViewport, persistViewport } from "./state.js";
-
-const DEFAULT_MONTH_VISIBLE_DAYS = 31;
 
 function todayIsoDate() {
   const now = new Date();
@@ -56,59 +59,6 @@ function todayIsoDate() {
 
 function selectionKeyFor(project) {
   return project ? `${project.id}|${project.name}` : "";
-}
-
-// Bounds fallback used when a project has zero TimeSegment rows (bottom pane
-// is empty/hidden): derives a start/end from the Planning_Projet phase dates
-// themselves (via the already-exported buildRowPhases), so the top pane can
-// still be panned/zoomed across its own real date range instead of being
-// locked to the tiny default-month window. Falls back to that default
-// window's own start/end when there isn't a single dated phase either (e.g.
-// an entirely empty project) so the controller always gets a non-null,
-// internally consistent bounds object.
-// Union of two { startDate, endDate } ISO bounds (either may be null). ISO dates
-// compare lexicographically, so min-start / max-end is a plain string compare.
-function unionDateBounds(a, b) {
-  if (!a) return b || null;
-  if (!b) return a || null;
-  return {
-    startDate: a.startDate < b.startDate ? a.startDate : b.startDate,
-    endDate: a.endDate > b.endDate ? a.endDate : b.endDate,
-  };
-}
-
-function computePlanningDerivedBounds(planningRows, columns, fallbackViewport) {
-  let minMs = Infinity;
-  let maxMs = -Infinity;
-
-  (planningRows || []).forEach((row) => {
-    buildRowPhases(row, columns).forEach((phase) => {
-      if (phase.start instanceof Date && !Number.isNaN(phase.start.getTime())) {
-        minMs = Math.min(minMs, phase.start.getTime());
-        maxMs = Math.max(maxMs, phase.start.getTime());
-      }
-      if (phase.end instanceof Date && !Number.isNaN(phase.end.getTime())) {
-        minMs = Math.min(minMs, phase.end.getTime());
-        maxMs = Math.max(maxMs, phase.end.getTime());
-      }
-    });
-  });
-
-  if (Number.isFinite(minMs) && Number.isFinite(maxMs) && maxMs >= minMs) {
-    return { startDate: formatIsoDate(new Date(minMs)), endDate: formatIsoDate(new Date(maxMs)) };
-  }
-
-  return { startDate: fallbackViewport.firstVisibleDate, endDate: fallbackViewport.rangeEndDate };
-}
-
-function buildDefaultMonthViewport(anchorIsoDate) {
-  const anchor = normalizeIsoDate(anchorIsoDate) || todayIsoDate();
-  return buildCanonicalSharedViewport({
-    firstVisibleDate: anchor,
-    rangeStartDate: anchor,
-    anchorDate: anchor,
-    visibleDays: DEFAULT_MONTH_VISIBLE_DAYS,
-  });
 }
 
 function viewportFitsWithinBounds(viewport, bounds) {
@@ -492,74 +442,76 @@ function bootstrapApp() {
       // (referenceReceptionLookup omitted) — removed at the user's request.
     });
 
-    let viewport;
+    // Reassignable : renderChargeFromLocalRows ELARGIT ces bornes quand un segment
+    // est cree hors de la frise courante.
     let controllerBounds;
 
     // Planning task ranges for the bottom-pane segment hover title (how many
     // planning tasks to do during each segment) — like gestion-depenses2.
     const planningTasks = buildPlanningTaskRanges(planningRows, pc.planningProject);
 
-    if (bounds) {
-      els.chargeEmpty.hidden = true;
-      els.charge.hidden = false;
-      controllerBounds = unionDateBounds(bounds, planBounds) || bounds;
+    // CE QU'ON MONTRE ne depend PAS de l'existence d'un segment. Un projet dont
+    // personne n'a encore pose de previsionnel a bien quelque chose a afficher :
+    // son equipe, en pistes vides, prete a recevoir un premier segment. Faire
+    // dependre ce choix de `bounds` rendait le pane bas ENTIEREMENT vide dans ce
+    // cas — donc rien a cliquer, donc premier segment impossible a creer ici : il
+    // fallait aller le poser dans gestion-depenses2 pour que l'equipe apparaisse.
+    // Les regles vivent dans bottom/chargePaneState.js, partagees avec
+    // renderChargeFromLocalRows plus bas (les deux chemins divergeaient).
+    const paneVisibility = resolveChargePaneVisibility({
+      workerCount: workers.length,
+      planningRowCount: Array.isArray(planningRows) ? planningRows.length : 0,
+    });
+    els.charge.hidden = !paneVisibility.showBoard;
+    els.chargeEmpty.hidden = !paneVisibility.showEmptyMessage;
 
-      const initialViewport = buildInitialProjectViewport({ firstPlanningDate, bounds: controllerBounds });
-      // Only reuse a persisted window for the SAME project it was saved from
-      // (persisted.projectId === project.id) AND only if it still fits the
-      // current bounds. Any other case (different project, or a window that no
-      // longer fits) always falls back to the fresh ~1-year initial window —
-      // this preserves same-project reload continuity without letting Project
-      // A's stale window leak onto Project B just because B's bounds happen to
-      // contain it.
-      const persisted = loadPersistedViewport();
-      const canReusePersisted =
-        persisted &&
-        persisted.projectId === project.id &&
-        viewportFitsWithinBounds(persisted.viewport, controllerBounds);
-      viewport = canReusePersisted ? buildCanonicalSharedViewport(persisted.viewport) : initialViewport;
+    // Bornes de la frise : l'union du previsionnel et des phases du planning.
+    // Sans ni l'un ni l'autre, une fenetre large autour d'aujourd'hui — sinon les
+    // bornes se refermaient sur le mois par defaut lui-meme, un seul mois
+    // atteignable et aucun pan possible pour en sortir.
+    controllerBounds = resolveChargeBounds({
+      segmentBounds: bounds,
+      planBounds,
+      todayIso: todayIsoDate(),
+    });
 
-      // `allTimeSegmentRows` : la surcharge d'une personne se compte tous projets
-      // confondus, le board ne peut pas la deduire de ses seuls `workers`.
-      chargeBoard.render({
-        workers,
-        viewport,
-        editMode: false,
-        planningTasks,
-        absencesByWorker,
-        planningRows,
-        allTimeSegmentRows,
-      });
-    } else {
-      // No TimeSegment data for this project: bottom pane stays empty, but
-      // the top (Planning_Projet) pane must still render on a sane default
-      // window instead of crashing — anchor on the first phase date (or
-      // today) for ~1 month, per the task brief.
-      els.chargeEmpty.hidden = false;
-      // Le conteneur n'est plus masque sur la seule absence de TimeSegment : la
-      // ligne Charge y est rendue elle aussi, et son bouton « Charge » est le
-      // SEUL point d'entree de la fenetre d'assignation. Le masquer ici le
-      // rendait introuvable exactement dans le cas que cette fonctionnalite
-      // sert — definir les charges de reference AVANT d'avoir pose le moindre
-      // previsionnel (cf. les projets « toutes les lignes COFFRAGE » de
-      // tests/documentCharge.test.mjs). Le message « Aucun previsionnel » reste,
-      // lui, affiche : il parle des lignes de PERSONNES, qui, elles, manquent
-      // bien.
-      els.charge.hidden = !(Array.isArray(planningRows) && planningRows.length > 0);
+    const initialViewport = buildInitialProjectViewport({
+      // Ancre GARANTIE dans les bornes : `firstPlanningDate` vient de
+      // buildRowPhases alors que `planBounds` vient du builder vendorise, qui
+      // ecarte certaines lignes — une date de planning sans bornes correspondantes
+      // rabattrait la fenetre a un seul jour (cf. chargePaneState.js).
+      firstPlanningDate: resolveViewportAnchorDate({
+        firstPlanningDate,
+        bounds: controllerBounds,
+        todayIso: todayIsoDate(),
+      }),
+      bounds: controllerBounds,
+    });
+    // Only reuse a persisted window for the SAME project it was saved from
+    // (persisted.projectId === project.id) AND only if it still fits the
+    // current bounds. Any other case (different project, or a window that no
+    // longer fits) always falls back to the fresh ~1-year initial window —
+    // this preserves same-project reload continuity without letting Project
+    // A's stale window leak onto Project B just because B's bounds happen to
+    // contain it.
+    const persisted = loadPersistedViewport();
+    const canReusePersisted =
+      persisted &&
+      persisted.projectId === project.id &&
+      viewportFitsWithinBounds(persisted.viewport, controllerBounds);
+    const viewport = canReusePersisted ? buildCanonicalSharedViewport(persisted.viewport) : initialViewport;
 
-      viewport = buildDefaultMonthViewport(firstPlanningDate);
-      // No TimeSegment: the frise still spans the planning phases (builder bounds),
-      // falling back to the phase-derived range when the builder yields none.
-      controllerBounds = planBounds || computePlanningDerivedBounds(planningRows, pc.planningProject, viewport);
-      chargeBoard.render({
-        workers: [],
-        viewport,
-        editMode: false,
-        absencesByWorker,
-        planningRows,
-        allTimeSegmentRows,
-      });
-    }
+    // `allTimeSegmentRows` : la surcharge d'une personne se compte tous projets
+    // confondus, le board ne peut pas la deduire de ses seuls `workers`.
+    chargeBoard.render({
+      workers,
+      viewport,
+      editMode: false,
+      planningTasks,
+      absencesByWorker,
+      planningRows,
+      allTimeSegmentRows,
+    });
 
     // Dernier mode de zoom appliqué (semaine/mois/année). La hauteur bornée du
     // pane haut ne dépend que du nombre de lignes (invariant au zoom/pan) et de la
@@ -651,16 +603,15 @@ function bootstrapApp() {
       );
       const nextBounds = computeTimeSegmentBounds(projectTimeSegmentRows, pc.timeSegment);
 
-      if (nextBounds) {
-        els.chargeEmpty.hidden = true;
-        els.charge.hidden = false;
-      } else {
-        // Meme regle qu'au premier rendu (cf. loadProject) : sans TimeSegment le
-        // pane bas garde sa ligne Charge — donc son bouton — des qu'il y a des
-        // lignes de planning.
-        els.chargeEmpty.hidden = false;
-        els.charge.hidden = !(Array.isArray(planningRows) && planningRows.length > 0);
-      }
+      // EXACTEMENT la meme regle qu'au premier rendu (loadProject, plus haut) :
+      // c'est le meme appel, pas une regle jumelle. Les deux chemins divergeaient
+      // — celui-ci affichait deja les personnes que l'autre jetait.
+      const nextVisibility = resolveChargePaneVisibility({
+        workerCount: nextWorkers.length,
+        planningRowCount: Array.isArray(planningRows) ? planningRows.length : 0,
+      });
+      els.charge.hidden = !nextVisibility.showBoard;
+      els.chargeEmpty.hidden = !nextVisibility.showEmptyMessage;
 
       // Un segment cree sur un mois hors des bornes actuelles doit rester
       // atteignable : la frise partagee s'ELARGIT pour le couvrir. Jamais

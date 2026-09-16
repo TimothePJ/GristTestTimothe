@@ -747,7 +747,11 @@ function sortEmployeesForView(employees) {
   );
 }
 
-function getFilteredEmployeesAndSegments(visibleProjectNumbers) {
+// Seule la fenetre affichee filtre ici. Le filtre PROJET est volontairement
+// absent : computeWeeklyUtilizationMatrix a besoin de tous les segments de la
+// personne pour que « Total employe » reste sa charge reelle, et c'est lui qui
+// masque ensuite les lignes decochees. Refiltrer en amont tronquait le total.
+function getFilteredEmployeesAndSegments() {
   const visibleRange = getVisibleTimelineRange();
   const employees = sortEmployeesForView(
     state.data.employees.filter(employeeMatchesFilters)
@@ -756,12 +760,11 @@ function getFilteredEmployeesAndSegments(visibleProjectNumbers) {
 
   employees.forEach((employee) => {
     const sourceSegments = state.data.segmentsByEmployee.get(employee.key) || [];
-    const visibleSegments = sourceSegments.filter((segment) =>
-      visibleProjectNumbers.has(segment.projectNumber) &&
+    const segmentsInRange = sourceSegments.filter((segment) =>
       segmentOverlapsRange(segment, visibleRange)
     );
-    if (visibleSegments.length) {
-      segmentsByEmployee.set(employee.key, visibleSegments);
+    if (segmentsInRange.length) {
+      segmentsByEmployee.set(employee.key, segmentsInRange);
     }
   });
 
@@ -784,7 +787,7 @@ function render() {
   }
 
   const visibleProjectNumbers = getVisibleProjectNumbersForFilters();
-  const filteredData = getFilteredEmployeesAndSegments(visibleProjectNumbers);
+  const filteredData = getFilteredEmployeesAndSegments();
 
   const matrix = computeWeeklyUtilizationMatrix({
     employees: filteredData.employees,
