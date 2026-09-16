@@ -257,8 +257,12 @@ function showContextMenu(event, recordId) {
 
   const contextMenu = document.getElementById('contextMenu');
   contextMenu.style.display = 'block';
-  contextMenu.style.left = `${event.pageX}px`;
-  contextMenu.style.top = `${event.pageY}px`;
+  // La page ne defile plus (corps en pleine hauteur) : on garde le menu dans la fenetre.
+  const menuRect = contextMenu.getBoundingClientRect();
+  const maxLeft = Math.max(0, window.innerWidth - menuRect.width - 4);
+  const maxTop = Math.max(0, window.innerHeight - menuRect.height - 4);
+  contextMenu.style.left = `${Math.min(event.pageX, maxLeft)}px`;
+  contextMenu.style.top = `${Math.min(event.pageY, maxTop)}px`;
 }
 
 // Cacher le menu contextuel lorsqu'on clique ailleurs
@@ -5133,8 +5137,12 @@ function showContextMenu(event, recordId) {
 
   const contextMenu = document.getElementById('contextMenu');
   contextMenu.style.display = 'block';
-  contextMenu.style.left = `${event.pageX}px`;
-  contextMenu.style.top = `${event.pageY}px`;
+  // La page ne defile plus (corps en pleine hauteur) : on garde le menu dans la fenetre.
+  const menuRect = contextMenu.getBoundingClientRect();
+  const maxLeft = Math.max(0, window.innerWidth - menuRect.width - 4);
+  const maxTop = Math.max(0, window.innerHeight - menuRect.height - 4);
+  contextMenu.style.left = `${Math.min(event.pageX, maxLeft)}px`;
+  contextMenu.style.top = `${Math.min(event.pageY, maxTop)}px`;
 }
 
 // Add event listener for "Ajouter une ligne" option

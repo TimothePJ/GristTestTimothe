@@ -944,7 +944,11 @@ body {
 }
 
 body {
-  min-height: 100vh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
   padding: 12px !important;
   background-color: var(--vc-bg) !important;
   color: var(--vc-text) !important;
@@ -955,6 +959,7 @@ body {
   position: sticky;
   top: 0;
   z-index: 1000;
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: 320px 360px 220px 240px max-content;
   gap: 12px 18px;
@@ -1113,7 +1118,9 @@ body[data-reference-access-mode="hidden"] select[data-reference-write-control="t
 }
 
 .table-container {
-  max-height: calc(100vh - 128px) !important;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none !important;
   margin-top: 16px !important;
   overflow: auto !important;
   background-color: var(--vc-panel) !important;
@@ -1909,7 +1916,7 @@ dialog select {
   }
 
   .table-container {
-    max-height: calc(100vh - 260px) !important;
+    max-height: none !important;
   }
 
   .reference-row-dialog {
