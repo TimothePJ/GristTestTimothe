@@ -213,6 +213,33 @@ montre, **par mois visible**, le total des **jours‑personne effectifs** planif
 tous collaborateurs confondus (barre de remplissage proportionnelle + « X j »),
 avec le **total général** dans la cellule de nom.
 
+### Projet sans aucun `TimeSegment`
+
+Ce que le pane bas affiche ne dépend **pas** de l'existence d'un segment, mais de
+ce qu'il y a à montrer (`bottom/chargePaneState.js`, règles pures partagées par le
+chargement initial et le rafraîchissement post-écriture) :
+
+- **des personnes dans `ProjectTeam`** → leurs pistes s'affichent, vides, prêtes à
+  recevoir un premier segment ; le message « Aucun prévisionnel pour ce projet. »
+  ne s'affiche **pas** (il parle des personnes, pas des segments) ;
+- **aucune personne mais des lignes `Planning_Projet`** → la grille reste rendue,
+  pour la ligne **Charge** et son bouton, seul point d'entrée de la fenêtre
+  d'assignation des charges de référence ; le message s'affiche ;
+- **ni l'un ni l'autre** → le pane bas est masqué.
+
+Les **bornes de la frise** sont l'union du prévisionnel et des phases du planning ;
+sans ni l'un ni l'autre, elles s'ouvrent sur **aujourd'hui ± 1 an** et la fenêtre
+s'ancre sur aujourd'hui — sinon elles se refermaient sur le mois par défaut
+lui-même, rendant tout déplacement impossible. La fenêtre initiale fait **~1 an**
+dans tous les cas (`APP_CONFIG.initialWindowDays`).
+
+> Auparavant, un projet sans le moindre segment se rendait **entièrement vide** :
+> `loadProject` passait `workers: []` au board. Aucune piste à cliquer, donc aucun
+> moyen de créer le premier segment depuis ce widget — il fallait aller le poser
+> dans `gestion-depenses2`, après quoi toute l'équipe apparaissait d'un coup.
+> Fixtures de non-régression : `TEST SANS PREVISIONNEL` et `TEST EQUIPE SEULE`
+> (`dev/fixtures.js`).
+
 À la sélection d'un projet, le pane haut est **remis en haut** (première ligne) —
 `planningRenderer.scrollToTop`, ré‑appliqué sur les frames suivantes car vis peut
 ré‑ajuster son scroll après son propre redraw.

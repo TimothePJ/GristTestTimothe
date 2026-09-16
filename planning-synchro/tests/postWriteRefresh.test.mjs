@@ -46,6 +46,12 @@ import vm from "node:vm";
 import { APP_CONFIG } from "../assets/js/config.js";
 import { applySegmentChangeLocally, timeSegmentRowsSignature } from "../assets/js/bottom/localSegmentUpdate.js";
 import { buildWorkersFromSegments } from "../assets/js/bottom/chargeBoard.js";
+import {
+  unionDateBounds,
+  resolveChargeBounds,
+  resolveChargePaneVisibility,
+  resolveViewportAnchorDate,
+} from "../assets/js/bottom/chargePaneState.js";
 import { computeTimeSegmentBounds } from "../assets/js/top/bounds.js";
 import { getFirstPhaseDate, buildRowPhases, computePlanningPhaseBounds, buildPlanningTaskRanges } from "../assets/js/top/phases.js";
 import { buildAbsenceIndex, normalizeName } from "../assets/js/utils/leaveAbsences.js";
@@ -60,6 +66,7 @@ const source = fs.readFileSync(MAIN_PATH, "utf8");
 
 const SEGMENT_COLUMNS = APP_CONFIG.grist.columns.timeSegment;
 const PLANNING_COLUMNS = APP_CONFIG.grist.columns.planningProject;
+const TEAM_COLUMNS = APP_CONFIG.grist.columns.projectTeam;
 const TIME_SEGMENT_TABLE = APP_CONFIG.grist.tables.timeSegment;
 const PLANNING_TABLE = APP_CONFIG.grist.tables.planningProject;
 const PROJECTS_TABLE = APP_CONFIG.grist.tables.projects;
@@ -120,9 +127,6 @@ function extractBlock(header) {
 
 const BLOCK_HEADERS = [
   "function todayIsoDate() {",
-  "function unionDateBounds(a, b) {",
-  "function computePlanningDerivedBounds(planningRows, columns, fallbackViewport) {",
-  "function buildDefaultMonthViewport(anchorIsoDate) {",
   "function viewportFitsWithinBounds(viewport, bounds) {",
   "function readAllTimeSegmentRows(payload) {",
   "function projectRegistrySignature(projects) {",
@@ -200,9 +204,22 @@ function initialPlanningRows() {
   ];
 }
 
+// Membres de ProjectTeam : ils existent INDEPENDAMMENT de tout TimeSegment. Un
+// projet peut avoir son equipe affectee bien avant que quiconque ait pose le
+// premier segment previsionnel — c'est meme l'ordre normal des choses.
+function teamMemberRow({ id, name, role, projectNumber = PROJECT.number }) {
+  return {
+    id,
+    [TEAM_COLUMNS.projectNumber]: projectNumber,
+    [TEAM_COLUMNS.name]: name,
+    [TEAM_COLUMNS.role]: role,
+    [TEAM_COLUMNS.dailyRate]: 0,
+  };
+}
+
 // --- montage du vrai loadProject sur un environnement bouchonne ---------------
 
-async function mount({ segmentRows, planningRows = [] } = {}) {
+async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = {}) {
   const calls = {
     fetchProjectData: 0,
     reconcileAndLoad: 0,
@@ -226,6 +243,9 @@ async function mount({ segmentRows, planningRows = [] } = {}) {
   // Les lignes Planning_Projet, mutables pour les memes raisons (notre propre
   // ecriture de charge, ou celle d'un voisin).
   let remotePlanningRows = planningRows;
+  // Les membres de ProjectTeam : ils alimentent les lignes du pane bas meme sans
+  // le moindre TimeSegment (buildWorkersFromSegments les amorce en premier).
+  let remoteProjectTeamRows = projectTeamRows;
   // Le catalogue Projets2, lui aussi mutable : le relais y ecrit une colonne de
   // signal a CHAQUE mutation, et un vrai widget de creation de projet peut y
   // ajouter une ligne. Les deux se ressemblent par le nom de table, jamais par
@@ -258,7 +278,9 @@ async function mount({ segmentRows, planningRows = [] } = {}) {
     const payload = {
       planningRows: remotePlanningRows.map((row) => ({ ...row })),
       timeSegmentRows: all.filter((row) => String(row[SEGMENT_COLUMNS.projectNumber]) === String(number)),
-      projectTeamRows: [],
+      projectTeamRows: remoteProjectTeamRows
+        .filter((row) => String(row[TEAM_COLUMNS.projectNumber]) === String(number))
+        .map((row) => ({ ...row })),
       teamRows: [],
       timeOutRows: [],
       allTimeSegmentRows: all,
@@ -378,6 +400,10 @@ async function mount({ segmentRows, planningRows = [] } = {}) {
     normalizeName,
     buildInitialProjectViewport,
     buildCanonicalSharedViewport,
+    unionDateBounds,
+    resolveChargeBounds,
+    resolveChargePaneVisibility,
+    resolveViewportAnchorDate,
     normalizeIsoDate,
     formatIsoDate,
 
@@ -473,7 +499,6 @@ async function mount({ segmentRows, planningRows = [] } = {}) {
       "let desiredTopRows = APP_CONFIG.topPane.defaultRows;",
       "let refreshChargeOnly = null;",
       "let projectRegistryFingerprint = '';",
-      "const DEFAULT_MONTH_VISIBLE_DAYS = 31;",
       ...BLOCKS,
       `globalThis.__api = {
          loadProject,
@@ -1039,6 +1064,75 @@ test("sans aucun TimeSegment, le conteneur du pane bas reste visible pour la lig
     "le message « Aucun previsionnel » reste : il parle des lignes de PERSONNES"
   );
   assert.equal(h.calls.chargeRender, 1, "la ligne Charge est bien rendue dans ce conteneur visible");
+});
+
+// LE BUG : `loadProject` passait `workers: []` au board des que le projet
+// n'avait aucun TimeSegment — alors que `buildWorkersFromSegments` amorce
+// justement TOUS les membres de ProjectTeam avant d'y accrocher les segments. Le
+// pane bas n'affichait donc ni role ni personne : aucune piste a cliquer, donc
+// impossible de creer le premier segment depuis planning-synchro. Il fallait
+// aller le poser dans gestion-depenses2, apres quoi l'equipe entiere apparaissait
+// d'un coup. `renderChargeFromLocalRows`, lui, passait deja ses `nextWorkers`
+// dans les deux cas : les deux chemins divergeaient.
+test("sans aucun TimeSegment, l'equipe du projet s'affiche quand meme", async () => {
+  const h = await mount({
+    segmentRows: [],
+    planningRows: initialPlanningRows(),
+    projectTeamRows: [
+      teamMemberRow({ id: 1, name: "Alice", role: "Projeteur" }),
+      teamMemberRow({ id: 2, name: "Bob", role: "Ingenieur" }),
+      teamMemberRow({ id: 3, name: "Chloe", role: "Projeteur" }),
+      teamMemberRow({ id: 4, name: "Ailleurs", role: "Projeteur", projectNumber: PROJECT_B.number }),
+    ],
+  });
+
+  assert.deepEqual(
+    workerNames(h.lastChargeRender()).sort(),
+    ["Alice", "Bob", "Chloe"],
+    "les membres de ProjectTeam doivent etre rendus, segment ou pas"
+  );
+  assert.equal(h.els.charge.hidden, false);
+  assert.equal(
+    h.els.chargeEmpty.hidden,
+    true,
+    "avec des personnes a l'ecran, « Aucun previsionnel » serait un contresens"
+  );
+});
+
+// Sans segment, la fenetre s'ouvrait sur ~31 jours (buildDefaultMonthViewport)
+// la ou le cas normal en ouvre ~365. Pour poser un premier segment il faut
+// pouvoir atteindre le bon mois.
+test("sans aucun TimeSegment, la frise s'ouvre sur une annee et non sur un mois", async () => {
+  const h = await mount({
+    segmentRows: [],
+    planningRows: initialPlanningRows(),
+    projectTeamRows: [teamMemberRow({ id: 1, name: "Alice", role: "Projeteur" })],
+  });
+
+  assert.equal(h.lastChargeRender()?.viewport?.visibleDays, APP_CONFIG.initialWindowDays);
+});
+
+// Cas degenere : une equipe affectee, mais ni segment ni phase datable. Les
+// bornes retombaient sur la fenetre par defaut elle-meme (~31 jours figes) : un
+// seul mois atteignable, pan impossible. On s'ancre desormais sur AUJOURD'HUI,
+// dans des bornes assez larges pour en sortir.
+test("sans aucune donnee datee, la frise s'ouvre sur aujourd'hui", async () => {
+  const h = await mount({
+    segmentRows: [],
+    planningRows: [],
+    projectTeamRows: [teamMemberRow({ id: 1, name: "Alice", role: "Projeteur" })],
+  });
+
+  const now = new Date();
+  const todayIso = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+
+  assert.equal(h.els.charge.hidden, false, "une equipe sans planning a bien quelque chose a montrer");
+  assert.equal(h.lastChargeRender()?.viewport?.firstVisibleDate, todayIso);
+  assert.equal(h.lastChargeRender()?.viewport?.visibleDays, APP_CONFIG.initialWindowDays);
 });
 
 test("sans TimeSegment NI ligne de planning, le pane bas reste masque", async () => {
