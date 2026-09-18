@@ -487,7 +487,8 @@ export function buildExpenseData({
       Zone: getFirstText(row, [listePlanColumns.zone]),
       Service: getFirstText(row, [listePlanColumns.service]),
       Indice: getFirstText(row, [listePlanColumns.indice]),
-      DateDiffusion: getFirstText(row, [listePlanColumns.diffusionDate]),
+      // Valeur brute : une date Grist arrive en secondes epoch, que toText rendrait illisible.
+      DateDiffusion: row?.[listePlanColumns.diffusionDate] ?? null,
     };
 
     linkedProjects.forEach((project) => {

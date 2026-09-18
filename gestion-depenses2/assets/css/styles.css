@@ -282,6 +282,28 @@ input {
   text-align: right;
 }
 
+.avancement-average-indices {
+  margin-top: 20px;
+}
+
+.avancement-average-indices h3 {
+  margin: 0;
+  color: var(--color-primary);
+  font-size: 1rem;
+}
+
+.avancement-average-index-chart {
+  position: relative;
+  height: 340px;
+  margin-top: 10px;
+}
+
+.avancement-average-indices-legend {
+  margin: 6px 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
 .avancement-not-applicable-cell {
   background: rgba(0, 73, 144, 0.06);
   color: rgba(0, 73, 144, 0.55);
@@ -322,6 +344,11 @@ input {
   background: var(--color-primary);
   color: #fff;
   font-weight: 700;
+}
+
+.avancement-summary-table tr.avancement-total-row td,
+.avancement-summary-table tr.avancement-total-row strong {
+  color: #fff;
 }
 
 .container {

@@ -281,6 +281,28 @@ select:focus {
   background: #eef5fd;
 }
 
+.average-indices-summary {
+  padding: 14px 12px 12px;
+  border-top: 1px solid var(--vc-line);
+}
+
+.average-indices-summary h3 {
+  margin: 0 0 10px;
+  color: var(--vc-blue);
+  font-size: 0.95rem;
+}
+
+.average-index-chart {
+  position: relative;
+  height: 340px;
+}
+
+.average-indices-legend {
+  margin: 6px 0 0;
+  color: var(--vc-muted);
+  font-size: 0.82rem;
+}
+
 .not-applicable-cell {
   background: rgba(0, 73, 144, 0.05);
   color: rgba(23, 50, 77, 0.46);
@@ -326,7 +348,9 @@ select:focus {
 
 .total-row td,
 .total-row .budget-progress-suffix,
-.total-row .budget-progress-editable {
+.total-row .budget-progress-editable,
+.summary-table tr.total-row td,
+.summary-table tr.total-row strong {
   color: #ffffff;
 }
 
