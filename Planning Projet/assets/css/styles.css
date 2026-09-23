@@ -2585,3 +2585,618 @@ body #toolbar.grist-service-context-host > #grist-service-context-control .grist
     max-width: 110px;
   }
 }
+
+/* ==========================================================
+   Service Synthese : l'équipe du projet sur une chronologie,
+   les tâches non affectées en dessous
+   ========================================================== */
+
+body.is-synthese-service .planning-header-row,
+body.is-synthese-service #timelineWrapper,
+body.is-synthese-service #planningPaneResizer,
+body.is-synthese-service #planningStatus,
+body.is-synthese-service label[for="zoneDropdown"],
+body.is-synthese-service #zoneDropdown,
+body.is-synthese-service #durationDefaultsToggle {
+  display: none !important;
+}
+
+.synthese-view {
+  --synthese-label-width: 240px;
+  --synthese-row-min-height: 48px;
+  --synthese-accent: var(--vinci-blue, #004990);
+  /* Segments, d'après le planificateur d'équipe de MS Project */
+  --synthese-task-bg: #d9eef7;
+  --synthese-task-border: #1f7ad1;
+  --synthese-task-fill: #a9cdf0;
+  --synthese-task-done-bg: #b4b4b4;
+  --synthese-task-done-border: #2e8b3a;
+  --synthese-task-late-border: #d92d20;
+  --synthese-task-selected: #0b2e59;
+  --synthese-drop: #2e8b3a;
+
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #fff;
+}
+
+.synthese-view[hidden] {
+  display: none;
+}
+
+.synthese-header-row {
+  display: grid;
+  grid-template-columns: var(--synthese-label-width) 1fr;
+  flex-shrink: 0;
+  min-height: var(--planning-row-height);
+  background: var(--grist-theme-panel-header-bg);
+  border-bottom: 1px solid var(--grist-theme-border);
+  font-weight: 600;
+}
+
+.synthese-header-left,
+.synthese-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.synthese-header-left {
+  border-right: 1px solid var(--grist-theme-border);
+}
+
+.synthese-header-count {
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: #e6eef7;
+  color: var(--synthese-accent);
+  font-size: 12px;
+  text-align: center;
+}
+
+.synthese-header-count:empty {
+  display: none;
+}
+
+.synthese-team-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 60%;
+  min-height: 120px;
+}
+
+.synthese-message {
+  margin: 0;
+  padding: 24px 16px;
+  color: #555;
+}
+
+/* Chaque volet réserve la même gouttière de barre de défilement à droite, qu'il
+   défile ou non : les dates restent alignées d'un volet à l'autre. */
+.synthese-timeline {
+  position: relative;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+/* Échelle des dates, fixe au-dessus de la liste de l'équipe */
+.synthese-axis {
+  flex: 0 0 auto;
+  padding-left: var(--synthese-label-width);
+  overflow-y: hidden;
+  border-bottom: 1px solid #c9d3de;
+}
+
+.synthese-axis .vis-panel.vis-center {
+  display: none;
+}
+
+.synthese-scroll {
+  flex: 1 1 auto;
+}
+
+/* En-tête de la chronologie : glisser pour se déplacer, molette pour zoomer */
+.synthese-pannable {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.synthese-pannable.is-panning,
+.synthese-pannable.is-panning * {
+  cursor: grabbing;
+}
+
+.synthese-timeline[hidden] {
+  display: none;
+}
+
+.synthese-timeline .vis-timeline {
+  border: 0;
+}
+
+/* vis-timeline pose un calque de chargement par-dessus la vue jusqu'à la fin
+   de son premier dessin : il ne doit jamais capter la souris. */
+.synthese-timeline > .vis-loading-screen {
+  pointer-events: none;
+}
+
+/* Barre de séparation, comme « Tâches non affectées » dans MS Project */
+.synthese-backlog-bar {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  min-height: 30px;
+  padding: 4px 12px;
+  border-top: 2px solid #4b5563;
+  background: #eef1f5;
+  font-size: 13px;
+}
+
+.synthese-backlog-hint {
+  color: #6a7280;
+}
+
+.synthese-notice {
+  margin-left: auto;
+  color: #1f5f2e;
+}
+
+.synthese-notice[data-tone="error"] {
+  color: #b42318;
+  font-weight: 600;
+}
+
+.synthese-backlog {
+  flex: 0 0 34%;
+  min-height: 110px;
+  border-top: 1px solid var(--grist-theme-border);
+}
+
+.synthese-backlog.is-drop-target {
+  outline: 2px dashed var(--synthese-drop);
+  outline-offset: -3px;
+}
+
+body:not(.is-synthese-readonly) .synthese-backlog .vis-panel.vis-center {
+  cursor: crosshair;
+}
+
+/* Colonne des personnes : une ligne de base, qui grandit quand des
+   segments se chevauchent (empilement de vis-timeline) */
+.synthese-timeline .vis-labelset .vis-label {
+  width: var(--synthese-label-width);
+  min-height: var(--synthese-row-min-height);
+  border-bottom: 1px solid #c9d3de;
+}
+
+.synthese-timeline .vis-labelset .vis-label .vis-inner {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  min-height: var(--synthese-row-min-height);
+  padding: 8px 12px;
+}
+
+.synthese-timeline .vis-foreground .vis-group {
+  min-height: var(--synthese-row-min-height);
+  border-bottom: 1px solid #c9d3de;
+}
+
+.synthese-timeline .vis-foreground .vis-group.is-drop-target,
+.synthese-timeline .vis-labelset .vis-label.is-drop-target {
+  background: rgba(46, 139, 58, 0.1);
+}
+
+.synthese-backlog .vis-labelset .vis-label,
+.synthese-backlog .vis-foreground .vis-group {
+  border-bottom: 0;
+}
+
+.synthese-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.synthese-person__avatar {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--synthese-accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.synthese-person__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.synthese-person__name {
+  overflow: hidden;
+  color: var(--grist-theme-text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.synthese-person__role {
+  color: #6a7280;
+  font-size: 12px;
+}
+
+.synthese-timeline .vis-time-axis .vis-grid.vis-minor {
+  border-color: #f0f0f0;
+}
+
+.synthese-timeline .vis-time-axis .vis-grid.vis-major {
+  border-color: #e0e0e0;
+}
+
+.synthese-timeline .vis-time-axis .vis-text {
+  color: #444;
+}
+
+.synthese-timeline .vis-current-time {
+  background-color: var(--vinci-red, #ed1b2d);
+}
+
+/* Week-ends et jours fériés, visibles à tous les zooms */
+.synthese-timeline .vis-item.vis-background.synthese-offday {
+  background-color: #eef0f3;
+  border: 0;
+}
+
+.synthese-timeline .vis-item.vis-background.synthese-offday--holiday {
+  background-color: #e3e7ed;
+}
+
+/* Absences saisies dans Time-Out, sur la ligne de la personne */
+.synthese-timeline .vis-item.vis-background.synthese-absence {
+  z-index: 1;
+  background-color: #f3eee4;
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(146, 110, 40, 0.28) 0 2px,
+    transparent 2px 7px
+  );
+  border: 0;
+  border-left: 2px solid #b08a3e;
+}
+
+/* Segments de travail : fond bleu clair, partie réalisée plus soutenue.
+   Contour : bleu par défaut, vert une fois réalisés (fond gris), rouge quand la
+   date de fin est dépassée sans qu'ils soient finis. La sélection ajoute un
+   halo foncé, pour ne pas se confondre avec ces états. */
+.synthese-timeline .vis-item.synthese-task,
+.synthese-drag-ghost {
+  border: 1px solid var(--synthese-task-border);
+  border-radius: 0;
+  background: var(--synthese-task-bg);
+  color: #111;
+  font-size: 13px;
+  line-height: 1.25;
+  cursor: grab;
+}
+
+.synthese-timeline .vis-item.synthese-task .vis-item-content {
+  display: block;
+  width: 100%;
+  padding: 0;
+}
+
+.synthese-task__body {
+  position: relative;
+  display: block;
+  min-height: 34px;
+  overflow: hidden;
+}
+
+.synthese-task__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--synthese-task-fill);
+}
+
+.synthese-task__label {
+  position: relative;
+  display: -webkit-box;
+  padding: 1px 4px;
+  overflow: hidden;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.synthese-timeline .vis-item.synthese-task--done {
+  border-color: var(--synthese-task-done-border);
+  background: var(--synthese-task-done-bg);
+}
+
+.synthese-timeline .vis-item.synthese-task--late {
+  border-color: var(--synthese-task-late-border);
+}
+
+.synthese-timeline .vis-item.synthese-task--done,
+.synthese-timeline .vis-item.synthese-task--late {
+  border-width: 2px;
+}
+
+.synthese-timeline .vis-item.synthese-task--done .synthese-task__fill {
+  display: none;
+}
+
+.synthese-timeline .vis-item.synthese-task.is-selected {
+  z-index: 2;
+  box-shadow: 0 0 0 2px var(--synthese-task-selected);
+}
+
+body.is-synthese-readonly .synthese-timeline .vis-item.synthese-task {
+  cursor: default;
+}
+
+.synthese-drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  box-sizing: border-box;
+  opacity: 0.85;
+  pointer-events: none;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.25);
+}
+
+body.is-synthese-dragging,
+body.is-synthese-dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+.synthese-create-preview {
+  position: absolute;
+  z-index: 5;
+  height: 34px;
+  border: 1px dashed var(--synthese-task-border);
+  background: rgba(217, 238, 247, 0.8);
+  pointer-events: none;
+}
+
+/* Infobulle grise, comme celle de MS Project */
+.synthese-tooltip {
+  position: fixed;
+  z-index: 1100;
+  max-width: 320px;
+  padding: 10px 14px;
+  border: 1px solid #bdbdbd;
+  border-radius: 6px;
+  background: #ececec;
+  color: #222;
+  font-size: 13px;
+  line-height: 1.45;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+
+.synthese-tooltip__title {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.synthese-tooltip__block {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 6px;
+  margin: 0;
+}
+
+.synthese-tooltip__block + .synthese-tooltip__block {
+  margin-top: 8px;
+}
+
+.synthese-tooltip__block dd {
+  margin: 0;
+}
+
+.synthese-context-menu {
+  position: fixed;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 4px 0;
+  border: 1px solid #c4ccd6;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.18);
+}
+
+.synthese-context-menu[hidden] {
+  display: none;
+}
+
+.synthese-context-menu button {
+  padding: 7px 14px;
+  border: 0;
+  background: transparent;
+  color: #1f2937;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.synthese-context-menu button:hover,
+.synthese-context-menu button:focus-visible {
+  background: #e6f2fa;
+  outline: none;
+}
+
+.synthese-context-menu button.is-danger {
+  color: #b42318;
+}
+
+/* Fenêtre de création / modification */
+.synthese-task-dialog {
+  width: min(520px, calc(100vw - 32px));
+  padding: 18px;
+  border: 1px solid #bcc9d6;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2937;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+}
+
+.synthese-task-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.synthese-task-dialog__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.synthese-task-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.synthese-task-dialog__header h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.synthese-task-dialog__close {
+  border: 0;
+  background: transparent;
+  color: #4b5563;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.synthese-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.synthese-field input[type="text"],
+.synthese-field input[type="date"],
+.synthese-field input[type="number"] {
+  padding: 7px 8px;
+  border: 1px solid #c4ccd6;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 400;
+}
+
+.synthese-field input:focus-visible {
+  outline: 2px solid #004990;
+  outline-offset: 1px;
+}
+
+.synthese-task-dialog__dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr 110px;
+  gap: 10px;
+}
+
+.synthese-task-dialog__progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.synthese-task-dialog__progress input[type="range"] {
+  flex: 1 1 auto;
+}
+
+.synthese-task-dialog__progress input[type="number"] {
+  width: 70px;
+}
+
+.synthese-task-dialog__hint {
+  margin: -4px 0 0;
+  color: #6a4a00;
+  font-size: 12px;
+}
+
+.synthese-task-dialog__summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #f3f6f9;
+}
+
+.synthese-task-dialog__summary dt {
+  color: #6a7280;
+  font-size: 12px;
+}
+
+.synthese-task-dialog__summary dd {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.synthese-task-dialog__error {
+  margin: 0;
+  color: #b42318;
+  font-size: 13px;
+}
+
+.synthese-task-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.synthese-button {
+  padding: 7px 14px;
+  border: 1px solid #c4ccd6;
+  border-radius: 6px;
+  background: #fff;
+  color: #1f2937;
+  font: inherit;
+  cursor: pointer;
+}
+
+.synthese-button--primary {
+  border-color: #004990;
+  background: #004990;
+  color: #fff;
+}
+
+.synthese-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (max-width: 520px) {
+  .synthese-task-dialog__dates,
+  .synthese-task-dialog__summary {
+    grid-template-columns: 1fr;
+  }
+}

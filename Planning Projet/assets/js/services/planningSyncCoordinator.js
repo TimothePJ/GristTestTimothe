@@ -10,6 +10,7 @@ import {
   buildPlanningRealiseUpdates,
   buildPlanningRetardUpdates,
 } from "./planningService.js";
+import { isSyntheseTypeDoc } from "./syntheseTasks.js";
 
 const PLANNING_SYNC_LOCK_NAME = "planning-projet-derived-sync";
 const PLANNING_SYNC_LOCK_STORAGE_KEY = "planning-projet.derived-sync-lock";
@@ -17,9 +18,16 @@ const PLANNING_SYNC_LOCK_STORAGE_KEY = "planning-projet.derived-sync-lock";
 function getProjectPlanningRows(planningRows, selectedProject) {
   const columns = APP_CONFIG.grist.planningTable?.columns || {};
   const projectCol = columns.projectLink || columns.nomProjet || "NomProjet";
+  const typeDocCol = columns.typeDoc || "Type_doc";
   const projectName = toText(selectedProject);
   if (!projectName) return [];
-  return (planningRows || []).filter((row) => toText(row?.[projectCol]) === projectName);
+  // Les segments de la vue Synthese vivent dans la même table mais leur
+  // avancement est saisi à la main : le recalcul automatique (Realise, Retards,
+  // dates) les remettrait à zéro.
+  return (planningRows || []).filter((row) => (
+    toText(row?.[projectCol]) === projectName &&
+    !isSyntheseTypeDoc(row?.[typeDocCol])
+  ));
 }
 
 function mergeDerivedUpdatesIntoRows(rows, updates = []) {

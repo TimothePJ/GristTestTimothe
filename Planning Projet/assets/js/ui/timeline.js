@@ -5690,6 +5690,58 @@ export function subscribePlanningViewportChanges(listener) {
   };
 }
 
+// Fenêtre de dates brute, sans la déduplication des émissions de viewport : la vue
+// Synthese la suit à chaque mouvement, y compris ceux déclenchés par le bandeau.
+const planningWindowListeners = new Set();
+
+function notifyPlanningWindowListeners() {
+  if (!timelineInstance || !planningWindowListeners.size) return;
+  const range = timelineInstance.getWindow();
+  planningWindowListeners.forEach((listener) => listener(range));
+}
+
+// Un zoom à la souris change l'échelle : le bouton actif suit l'étendue visible.
+// Les seuils sont les moyennes géométriques des étendues de chaque mode
+// (7, 30 et 365 jours), à mi-chemin sur une échelle de zoom logarithmique.
+const ZOOM_WEEK_MAX_DAYS = Math.sqrt(7 * 30);
+const ZOOM_MONTH_MAX_DAYS = Math.sqrt(30 * 365);
+
+function getZoomModeForRange(start, end) {
+  const visibleDays = (end - start) / 86400000;
+  if (visibleDays < ZOOM_WEEK_MAX_DAYS) return "week";
+  if (visibleDays < ZOOM_MONTH_MAX_DAYS) return "month";
+  return "year";
+}
+
+function syncZoomButtonToRange(start, end) {
+  // En mode intégré, le mode de zoom appartient à planning-synchro.
+  if (EMBEDDED_PLANNING_SYNC_MODE) return;
+  if (!(start instanceof Date) || !(end instanceof Date)) return;
+  setActiveZoomButton(getZoomModeForRange(start, end));
+}
+
+export function getPlanningWindow() {
+  return timelineInstance ? timelineInstance.getWindow() : null;
+}
+
+export function setPlanningWindow(start, end, { byUser = false } = {}) {
+  if (!timelineInstance) return;
+  timelineInstance.setWindow(start, end, { animation: false });
+  updateDateRangeDisplay();
+  if (byUser) syncZoomButtonToRange(start, end);
+}
+
+export function subscribePlanningWindowChanges(listener) {
+  if (typeof listener !== "function") {
+    return () => {};
+  }
+
+  planningWindowListeners.add(listener);
+  return () => {
+    planningWindowListeners.delete(listener);
+  };
+}
+
 export function subscribePlanningSelectionChanges(listener) {
   if (typeof listener !== "function") {
     return () => {};
@@ -6025,6 +6077,16 @@ export function renderPlanningTimeline(timelineData = {}) {
       },
     });
 
+    // vis-timeline fait un « fit » sur toutes les données au premier dessin
+    // réussi. Le planning fixe toujours lui-même sa fenêtre ; ce fit l'écrasait
+    // sur les fonds de zones (2021-2041) quand le premier dessin arrivait tard,
+    // par exemple au retour du service Synthese où le planning était masqué.
+    timelineInstance.initialFitDone = true;
+    timelineInstance.on("rangechange", notifyPlanningWindowListeners);
+    timelineInstance.on("rangechanged", notifyPlanningWindowListeners);
+    timelineInstance.on("rangechange", ({ byUser, start, end } = {}) => {
+      if (byUser) syncZoomButtonToRange(start, end);
+    });
     bindHoverTooltip(container);
     bindDurationCellEditing(container);
     // Drag désactivé en mode embedded (synchronisation-plannings) : réservé à Planning Projet direct.

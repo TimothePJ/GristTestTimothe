@@ -120,6 +120,85 @@
     title="Glisser pour ajuster la largeur des colonnes"
   ></button>
 
+  <!-- Vue propre au service Synthese : remplace le planning sous le bandeau -->
+  <section id="syntheseView" class="synthese-view" aria-label="Équipe Synthese du projet" hidden>
+    <div class="synthese-header-row">
+      <div class="synthese-header-left">
+        Équipe <span id="syntheseTeamCount" class="synthese-header-count"></span>
+      </div>
+      <div class="synthese-header-right">Chronologie</div>
+    </div>
+    <div class="synthese-team-pane">
+      <div id="syntheseAxis" class="synthese-timeline synthese-axis"></div>
+      <p id="syntheseMessage" class="synthese-message" hidden></p>
+      <div id="syntheseTimeline" class="synthese-timeline synthese-scroll"></div>
+    </div>
+    <div class="synthese-backlog-bar">
+      <span>T&acirc;ches non affect&eacute;es : <strong id="syntheseBacklogCount">0</strong></span>
+      <span class="synthese-backlog-hint">Cliquez-glissez dans cette zone pour cr&eacute;er une t&acirc;che</span>
+      <span id="syntheseNotice" class="synthese-notice" role="status" aria-live="polite" hidden></span>
+    </div>
+    <div id="syntheseBacklogTimeline" class="synthese-timeline synthese-scroll synthese-backlog"></div>
+  </section>
+
+  <div id="syntheseTooltip" class="synthese-tooltip" role="tooltip" hidden></div>
+  <div id="syntheseContextMenu" class="synthese-context-menu" role="menu" hidden>
+    <button type="button" role="menuitem" data-action="edit">Modifier</button>
+    <button type="button" role="menuitem" data-action="delete" class="is-danger">Supprimer</button>
+  </div>
+
+  <dialog id="syntheseTaskDialog" class="synthese-task-dialog" aria-labelledby="syntheseTaskDialogTitle">
+    <form id="syntheseTaskForm" class="synthese-task-dialog__form" method="dialog" novalidate>
+      <div class="synthese-task-dialog__header">
+        <h3 id="syntheseTaskDialogTitle">Nouvelle t&acirc;che</h3>
+        <button type="button" id="syntheseTaskClose" class="synthese-task-dialog__close" aria-label="Fermer">&times;</button>
+      </div>
+
+      <label class="synthese-field synthese-field--wide">
+        <span>Nom</span>
+        <input id="syntheseTaskName" type="text" maxlength="160" autocomplete="off" placeholder="Ex. D&eacute;marrage analyse synth&egrave;se" />
+      </label>
+
+      <div class="synthese-task-dialog__dates">
+        <label class="synthese-field">
+          <span>D&eacute;but</span>
+          <input id="syntheseTaskStart" type="date" />
+        </label>
+        <label class="synthese-field">
+          <span>Fin</span>
+          <input id="syntheseTaskEnd" type="date" />
+        </label>
+        <label class="synthese-field synthese-field--narrow">
+          <span>Dur&eacute;e (j ouvr&eacute;s)</span>
+          <input id="syntheseTaskDuration" type="number" min="1" step="1" />
+        </label>
+      </div>
+      <p id="syntheseTaskHint" class="synthese-task-dialog__hint" hidden></p>
+
+      <div class="synthese-field synthese-field--wide">
+        <label for="syntheseTaskRealise">% achev&eacute;</label>
+        <div class="synthese-task-dialog__progress">
+          <input id="syntheseTaskRealiseRange" type="range" min="0" max="100" step="1" aria-label="% achev&eacute;" />
+          <input id="syntheseTaskRealise" type="number" min="0" max="100" step="1" />
+          <span aria-hidden="true">%</span>
+        </div>
+      </div>
+
+      <dl class="synthese-task-dialog__summary">
+        <div><dt>Travail</dt><dd id="syntheseTaskWork">0h</dd></div>
+        <div><dt>Travail restant</dt><dd id="syntheseTaskRemaining">0h</dd></div>
+        <div><dt>Personne</dt><dd id="syntheseTaskResource">Non affect&eacute;e</dd></div>
+      </dl>
+
+      <p id="syntheseTaskError" class="synthese-task-dialog__error" role="alert" hidden></p>
+
+      <div class="synthese-task-dialog__actions">
+        <button type="button" id="syntheseTaskCancel" class="synthese-button">Annuler</button>
+        <button type="submit" id="syntheseTaskSubmit" class="synthese-button synthese-button--primary">Cr&eacute;er la t&acirc;che</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="addZoneModal" class="add-zone-modal" hidden aria-hidden="true">
     <div class="add-zone-modal__backdrop" data-zone-modal-close></div>
     <div

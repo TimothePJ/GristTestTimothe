@@ -70,6 +70,11 @@ import {
   subscribePlanningSelectionChanges,
   subscribePlanningViewportChanges,
 } from "./ui/timeline.js";
+import {
+  refreshSyntheseView,
+  setSyntheseEditingEnabled,
+  setSyntheseViewActive,
+} from "./ui/syntheseView.js";
 
 let toolbarBound = false;
 let pendingRefreshOptions = null;
@@ -277,6 +282,7 @@ function setPlanningEditingEnabled(nextEnabled, { rerender = true, notify = true
   planningEditingEnabled =
     Boolean(nextEnabled) && !EMBEDDED_PLANNING_SYNC_MODE && !HEADER_ONLY_EMBEDDED_MODE;
   updatePlanningEditToggle();
+  setSyntheseEditingEnabled(isPlanningEditingUnlocked());
 
   if (notify) {
     setPlanningStatus(
@@ -1930,6 +1936,41 @@ function bindPlanningServiceRefresh() {
   });
 }
 
+// Le service Synthese a sa propre vue sous le bandeau (l'équipe du projet sur
+// une chronologie) : on masque le planning, la zone et les durées par défaut.
+const SYNTHESE_SERVICE = "Synthese";
+let syntheseViewActive = false;
+
+function applySyntheseView(selectedService) {
+  const isSynthese = selectedService === SYNTHESE_SERVICE;
+  const wasSynthese = syntheseViewActive;
+  syntheseViewActive = isSynthese;
+  document.body.classList.toggle("is-synthese-service", isSynthese);
+  const syntheseView = document.getElementById("syntheseView");
+  if (syntheseView) syntheseView.hidden = !isSynthese;
+  if (isSynthese) {
+    setSyntheseViewActive(true);
+  } else if (wasSynthese) {
+    setSyntheseViewActive(false);
+    // Le planning était masqué : vis-timeline doit recalculer ses dimensions.
+    requestAnimationFrame(() => refreshPlanningTimelineLayout());
+  }
+}
+
+function bindSyntheseView() {
+  if (EMBEDDED_PLANNING_SYNC_MODE) return;
+  const serviceContext = window.GristServiceContext;
+  if (typeof serviceContext?.subscribe !== "function") return;
+  setSyntheseEditingEnabled(isPlanningEditingUnlocked());
+  // Le contexte notifie aussi les changements de projet : l'équipe se recharge.
+  serviceContext.subscribe((context) => applySyntheseView(context?.selectedService));
+  // Team et Time-Out alimentent les absences, Planning_Projet les tâches.
+  serviceContext.watchContextTables?.(
+    ["ProjectTeam", "Team", "Time-Out", "Planning_Projet"],
+    () => refreshSyntheseView()
+  );
+}
+
 async function handleProjectChange(currentState) {
   console.log("Projet sélectionné :", currentState.selectedProject || "(aucun)");
   await refreshPlanning({ sync: true, forceLoad: true, reason: "project-change" });
@@ -1956,6 +1997,7 @@ async function bootstrap() {
       return;
     }
 
+    bindSyntheseView();
     bindAddZoneModal();
     bindManageZoneModal();
     bindDurationDefaultsDialog();

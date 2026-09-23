@@ -748,6 +748,7 @@ export function buildExpenseData({
     id: Number(row?.[columns.team.id]),
     firstName: toText(row?.[columns.team.firstName]),
     lastName: toText(row?.[columns.team.lastName]),
+    service: row?.[columns.team.service] ?? "",
     role: (() => {
       const explicitRole = toText(row?.[columns.team.role]);
       if (explicitRole) {

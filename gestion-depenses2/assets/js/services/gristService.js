@@ -52,7 +52,7 @@ const TIME_REAL_COLUMN_ALIASES = {
   service: ["Service"],
 };
 
-function getActiveService() {
+export function getActiveService() {
   if (typeof globalThis === "undefined") return "Structure";
   return globalThis.GristServiceContext?.getService?.()
     || globalThis.GristServiceContextCore?.normalizeService?.(
