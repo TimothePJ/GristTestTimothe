@@ -708,6 +708,8 @@ async function initializeListeDePlanShell() {
   await refreshProjectDropdownFromProjectsTable();
 }
 
+bindSharedProjectZones();
+
 window.GristServiceContext.watchContextTable("ListePlan_NDC_COF", async (rec) => {
   listeDePlanRecordsReady = false;
   window.records = rec.sort((a, b) => {
@@ -978,6 +980,43 @@ function getZoneDropdownOptionLabel(zoneValue) {
   return normalizedZone || (window.LISTE_DE_PLAN_NO_ZONE_LABEL || "Sans zone");
 }
 
+// Zones du projet créées depuis n'importe quel service (Structure, Synthese…),
+// tenues à jour par le contexte partagé : une zone appartient au projet, elle
+// reste visible quel que soit le service sélectionné.
+let sharedProjectZones = [];
+let sharedProjectZonesProjectKeys = new Set();
+
+function getSharedZonesForProject(projectName) {
+  const projectKey = normalizeProjectName(projectName).toLocaleLowerCase("fr");
+  return projectKey && sharedProjectZonesProjectKeys.has(projectKey) ? sharedProjectZones : [];
+}
+
+function bindSharedProjectZones() {
+  const watch = window.GristServiceContext?.watchProjectZones;
+  if (typeof watch !== "function") return;
+  watch((zones, meta = {}) => {
+    sharedProjectZones = Array.isArray(zones) ? zones : [];
+    sharedProjectZonesProjectKeys = new Set(
+      (Array.isArray(meta.projectNames) ? meta.projectNames : [])
+        .map((name) => normalizeProjectName(name).toLocaleLowerCase("fr"))
+        .filter(Boolean)
+    );
+    const selectedProject = document.getElementById("projectDropdown")?.value || "";
+    if (!selectedProject) return;
+    const zoneDropdown = document.getElementById("zoneDropdown");
+    const previousZoneValue = zoneDropdown?.value || null;
+    populateZoneDropdown(
+      collectZoneValues(selectedProject, getSelectedTypeDocumentValues(), window.records),
+      previousZoneValue
+    );
+    // La zone filtrée a disparu de la liste : l'affichage suit le retour à
+    // « Toutes les zones ».
+    if (zoneDropdown && previousZoneValue && zoneDropdown.value !== previousZoneValue) {
+      refreshCurrentPlanDisplay({ refreshZones: false });
+    }
+  });
+}
+
 function collectZoneValues(selectedProject, selectedTypeDocument, records = window.records) {
   const normalizedProject = normalizeProjectName(selectedProject);
   const allTypesValue = getAllTypesValue();
@@ -1001,6 +1040,14 @@ function collectZoneValues(selectedProject, selectedTypeDocument, records = wind
 
     zoneSet.add(normalizeZoneDropdownValue(record?.Zone));
   }
+
+  const knownZoneKeys = new Set([...zoneSet].map(normalizeZoneManageKey).filter(Boolean));
+  getSharedZonesForProject(selectedProject).forEach((zoneValue) => {
+    const zoneKey = normalizeZoneManageKey(zoneValue);
+    if (!zoneKey || knownZoneKeys.has(zoneKey)) return;
+    knownZoneKeys.add(zoneKey);
+    zoneSet.add(normalizeZoneDropdownValue(zoneValue));
+  });
 
   return [...zoneSet].sort((left, right) => {
     const leftZone = normalizeZoneDropdownValue(left);
@@ -1736,7 +1783,10 @@ function populateZoneDropdown(values, preferredValue = null) {
     requestedValue === MANAGE_ZONE_OPTION_VALUE
       ? lastRegularZoneSelection || allZonesValue
       : requestedValue;
-  const hasManageableZones = zoneValues.some((zoneValue) => normalizeZoneManageKey(zoneValue));
+  // Les zones des autres services figurent dans la liste mais ne sont pas
+  // modifiables d'ici : « Modifier Zone » ne dépend que des zones de ce service.
+  const currentProject = document.getElementById("projectDropdown")?.value || "";
+  const hasManageableZones = collectProjectZoneValues(currentProject).length > 0;
 
   dropdown.innerHTML = `<option value="${allZonesValue}">${allZonesLabel}</option>`;
   zoneValues.forEach((zoneValue) => {

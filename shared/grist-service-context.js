@@ -274,6 +274,7 @@
   }
 
   function notify(detail = getPublicState()) {
+    scheduleProjectZonesRefresh();
     window.dispatchEvent(new CustomEvent("grist-service-context-change", { detail }));
     listeners.forEach((listener) => {
       try {
@@ -376,6 +377,10 @@
       if (entry.tableName === normalizedTableName) contextTableCache.delete(key);
     }
     invalidateRawTableCache(normalizedTableName);
+    if (core.ZONE_SOURCE_TABLES.includes(normalizedTableName)) {
+      projectZonesEpoch += 1;
+      scheduleProjectZonesRefresh();
+    }
   }
 
   function normalizeExplicitRestFilter(restFilter) {
@@ -2095,6 +2100,127 @@
   // Point d'entree pour un signal externe deja recu par le widget (storage,
   // BroadcastChannel, etc.). Il invalide uniquement les tables annoncees puis
   // reveille leurs watchers, sans rediffuser le signal et sans minuterie.
+  /* ---------- Zones du projet, tous services confondus ---------- */
+  // Une zone appartient au projet : elle reste visible quel que soit le service
+  // sélectionné, et quel que soit le service qui l'a créée. Cette lecture filtre
+  // donc par projet seulement, et ne renvoie que des noms de zones.
+  const projectZoneWatchers = new Set();
+  let projectZonesEntry = { key: "", epoch: -1, zones: [], loadedAt: 0, promise: null };
+  let projectZonesEpoch = 0;
+  let projectZonesRefreshTimer = null;
+
+  function getProjectZonesKey(project) {
+    return project ? `${project.id ?? ""}|${project.number ?? ""}|${project.name ?? ""}` : "";
+  }
+
+  async function readProjectZoneRows(tableName, project, projectNames) {
+    const projectColumn = core.PROJECT_NAME_COLUMNS[tableName];
+    if (!projectColumn || !projectNames.length) return [];
+    if (hasRestApiSupport() && !restUnavailableTables.has(tableName)) {
+      try {
+        const access = await ensureRestDocumentVisibility();
+        const envelope = await fetchRestRecords(
+          tableName,
+          { [projectColumn]: projectNames },
+          { accessOverride: access }
+        );
+        // La visibilité du jeton est déjà vérifiée : une réponse vide est fiable.
+        return core.tableToRows(envelope);
+      } catch (error) {
+        if (error?.name === "AbortError") throw error;
+        if (!error?.isContextRestUnavailable) throw error;
+        markRestTableUnavailable(tableName, error?.message || "REST indisponible");
+      }
+    }
+    const rawTable = await fetchRawTableCached(tableName);
+    return core.tableToRows(core.filterRawTableByProject(rawTable, tableName, project));
+  }
+
+  function getProjectZoneNames(project) {
+    return core.uniqueExactValues([
+      project?.name,
+      ...(Array.isArray(project?.names) ? project.names : []),
+    ]);
+  }
+
+  // Une table illisible fait échouer toute la lecture : une liste partielle
+  // ferait disparaître des zones, mieux vaut garder la précédente.
+  async function loadProjectZones(project) {
+    const projectNames = getProjectZoneNames(project);
+    const rowsByTable = await Promise.all(core.ZONE_SOURCE_TABLES.map((tableName) => (
+      readProjectZoneRows(tableName, project, projectNames)
+    )));
+    return core.collectZoneNames(rowsByTable.flat());
+  }
+
+  async function fetchProjectZones({ forceRefresh = false } = {}) {
+    await initialize();
+    const project = state.currentProject;
+    const key = getProjectZonesKey(project);
+    if (!key) return [];
+    const entry = projectZonesEntry;
+    if (!forceRefresh && entry.key === key && entry.epoch === projectZonesEpoch) {
+      if (entry.promise) return entry.promise;
+      if (isFreshTimestamp(entry.loadedAt, CONTEXT_TABLE_CACHE_TTL_MS)) return [...entry.zones];
+    }
+    const nextEntry = { key, epoch: projectZonesEpoch, zones: [], loadedAt: 0, promise: null };
+    nextEntry.promise = loadProjectZones(project)
+      .then((zones) => {
+        nextEntry.zones = zones;
+        nextEntry.loadedAt = Date.now();
+        return [...zones];
+      })
+      .finally(() => {
+        nextEntry.promise = null;
+      });
+    projectZonesEntry = nextEntry;
+    return nextEntry.promise;
+  }
+
+  async function deliverProjectZones(watcher) {
+    // Deux lectures peuvent se croiser : seule la plus récente est livrée.
+    const sequence = watcher.sequence + 1;
+    watcher.sequence = sequence;
+    try {
+      await initialize();
+      const project = state.currentProject;
+      const key = getProjectZonesKey(project);
+      const zones = key ? await fetchProjectZones() : [];
+      if (!projectZoneWatchers.has(watcher) || watcher.sequence !== sequence) return;
+      // Le projet a changé pendant la lecture : la livraison suivante suivra.
+      if (getProjectZonesKey(state.currentProject) !== key) return;
+      const signature = [key, ...zones].join("\n");
+      if (signature === watcher.signature) return;
+      watcher.signature = signature;
+      watcher.listener([...zones], {
+        projectKey: key,
+        projectNames: getProjectZoneNames(project),
+      });
+    } catch (error) {
+      console.warn("Zones du projet indisponibles, la liste précédente est conservée :", error);
+    }
+  }
+
+  function scheduleProjectZonesRefresh() {
+    if (!projectZoneWatchers.size || projectZonesRefreshTimer) return;
+    projectZonesRefreshTimer = window.setTimeout(() => {
+      projectZonesRefreshTimer = null;
+      projectZoneWatchers.forEach((watcher) => {
+        void deliverProjectZones(watcher);
+      });
+    }, 0);
+  }
+
+  // Le rappel reçoit la liste triée des zones du projet courant, au départ puis
+  // à chaque changement (projet, écriture, signal d'un widget voisin).
+  function watchProjectZones(listener) {
+    if (typeof listener !== "function") return () => {};
+    const watcher = { listener, signature: null, sequence: 0 };
+    projectZoneWatchers.add(watcher);
+    void deliverProjectZones(watcher);
+    return () => projectZoneWatchers.delete(watcher);
+  }
+
   function refreshContextTables(tableNames, {
     reason = "external-signal",
     forceRefresh = true,
@@ -2407,6 +2533,8 @@
     watchContextTable,
     watchContextTables,
     refreshContextTables,
+    fetchProjectZones,
+    watchProjectZones,
     isSignalForCurrentProject,
     invalidateContextTable,
     invalidateCache(tableName) {

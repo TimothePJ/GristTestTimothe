@@ -1,3 +1,5 @@
+// ARCHIVE vue Synthese v1 : plus importé par main.js (vue désactivée, refaite
+// autrement). Fichier gardé pour trace uniquement.
 // Fenêtre de création / modification d'un segment de travail Synthese.
 // Déplacer le début garde la durée (le segment glisse), changer la fin ou la
 // durée redimensionne le segment. Les dates sont toujours recalées sur des

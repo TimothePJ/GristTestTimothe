@@ -7,8 +7,8 @@
 
   <!-- Grist -->
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-  <script src="../shared/service-context-core.js?v=20260818-sync11"></script>
-  <script src="../shared/grist-service-context.js?v=20260818-sync11"></script>
+  <script src="../shared/service-context-core.js?v=20260928-dates1"></script>
+  <script src="../shared/grist-service-context.js?v=20260928-dates1"></script>
   <script>
     window.ProjectMutationSyncConfig = {
       mutationSignals: {
@@ -29,7 +29,7 @@
       dropdownIds: ["projectDropdown"]
     };
   </script>
-  <script src="../shared/project-mutation-sync-relay.js?v=20260818-sync11"></script>
+  <script src="../shared/project-mutation-sync-relay.js?v=20260928-dates1"></script>
 
   <!-- vis-timeline (même système que timeline-calendar.zip) -->
   <script src="https://unpkg.com/vis-timeline/standalone/umd/vis-timeline-graph2d.min.js"></script>
@@ -40,10 +40,10 @@
 
   <!-- Styles app -->
   <link rel="stylesheet" href="./assets/css/variables.css" />
-  <link rel="stylesheet" href="./assets/css/styles.css" />
+  <link rel="stylesheet" href="./assets/css/styles.css?v=20260928-dates1" />
 
   <!-- App -->
-  <script type="module" src="./assets/js/main.js?v=20260818-sync11" defer></script>
+  <script type="module" src="./assets/js/main.js?v=20260928-dates1" defer></script>
 </head>
 <body>
   <!-- Toolbar style timeline-calendar -->
@@ -120,7 +120,10 @@
     title="Glisser pour ajuster la largeur des colonnes"
   ></button>
 
-  <!-- Vue propre au service Synthese : remplace le planning sous le bandeau -->
+  <!-- Vue Synthese : tableau de tâches, construit par assets/js/ui/syntheseTaskTable.js -->
+  <section id="syntheseSpace" class="synthese-space" aria-label="Vue Synthese" hidden></section>
+
+  <!-- ARCHIVE vue Synthese v1 (équipe sur chronologie) : désactivée, gardée pour trace.
   <section id="syntheseView" class="synthese-view" aria-label="Équipe Synthese du projet" hidden>
     <div class="synthese-header-row">
       <div class="synthese-header-left">
@@ -198,6 +201,7 @@
       </div>
     </form>
   </dialog>
+  FIN ARCHIVE vue Synthese v1 -->
 
   <div id="addZoneModal" class="add-zone-modal" hidden aria-hidden="true">
     <div class="add-zone-modal__backdrop" data-zone-modal-close></div>

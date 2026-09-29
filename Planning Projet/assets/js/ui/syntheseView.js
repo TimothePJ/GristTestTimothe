@@ -1,3 +1,5 @@
+// ARCHIVE vue Synthese v1 : plus importé par main.js (vue désactivée, refaite
+// autrement). Fichier gardé pour trace uniquement.
 // Vue du service Synthese : l'équipe affectée au projet (ProjectTeam) sur une
 // chronologie, et en dessous les tâches non affectées. Les tâches sont des
 // lignes SYNTHESE de Planning_Projet ; la personne est dans la colonne Ressource.

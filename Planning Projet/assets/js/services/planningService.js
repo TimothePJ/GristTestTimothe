@@ -1406,12 +1406,21 @@ function formatZoneHeaderLabel(zoneLabel) {
   return normalized;
 }
 
+function toZoneSoftKey(value) {
+  return toText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("fr")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
 export function buildTimelineDataFromPlanningRows(
   rawRows,
   selectedProject = "",
   selectedZone = "",
   targetLookup = null,
-  referenceReceptionLookup = null
+  referenceReceptionLookup = null,
+  sharedZones = []
 ) {
   const cfg = APP_CONFIG.grist.planningTable.columns;
   const projectLinkCol = cfg.projectLink || cfg.nomProjet;
@@ -1604,6 +1613,18 @@ export function buildTimelineDataFromPlanningRows(
     if (!zoneCatalog.has(zoneKey)) {
       zoneCatalog.set(zoneKey, String(row.zone || ""));
     }
+  });
+  // Zones du projet créées depuis un autre service : elles ont leur bandeau,
+  // vide tant qu'aucun document de ce service n'y est rangé.
+  const knownZoneSoftKeys = new Set([...zoneCatalog.values()].map(toZoneSoftKey));
+  (Array.isArray(sharedZones) ? sharedZones : []).forEach((zoneName) => {
+    const zoneText = toText(zoneName);
+    const softKey = toZoneSoftKey(zoneText);
+    if (!softKey || knownZoneSoftKeys.has(softKey)) return;
+    const zoneKey = zoneText.toLocaleLowerCase("fr");
+    if (selectedZoneKey && zoneKey !== selectedZoneKey) return;
+    knownZoneSoftKeys.add(softKey);
+    zoneCatalog.set(zoneKey, zoneText);
   });
   // "Sans zone" toujours présente par défaut.
   if (!zoneCatalog.has("")) {

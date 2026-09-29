@@ -2978,3 +2978,119 @@ test("TimeSegment : fullTable rend aussi la table entiere par le repli fetchTabl
   const full = await harness.grist.docApi.fetchTable("TimeSegment", { fullTable: true });
   assert.deepEqual(Array.from(full.id), [1, 2, 3], "fullTable doit sauter le filtre client");
 });
+
+// Une zone appartient au projet, pas au service : chaque service doit voir les
+// zones créées par les autres.
+function addZoneSourceTables(harness) {
+  harness.tables.Planning_Projet = {
+    id: [1, 2, 3, 4],
+    NomProjet: ["Alpha", "Alpha", "Beta", "Alpha Alias"],
+    Zone: ["Zone A", "Zone S", "Zone B", ""],
+    Service: ["Structure", "Synthese", "Structure", "Structure"],
+  };
+  harness.tables.References2 = {
+    id: [1, 2],
+    NomProjet: ["Alpha", "Alpha"],
+    Zone: ["Zone T", "zone a"],
+    Service: ["Topographie", "Structure"],
+  };
+  harness.tables.ListePlan_NDC_COF = {
+    id: [1],
+    Nom_projet: ["Alpha Alias"],
+    Zone: ["Zone L"],
+    Service: ["Synthese"],
+  };
+}
+
+test("fetchProjectZones rassemble les zones du projet de tous les services", async () => {
+  const harness = createRuntimeHarness();
+  addZoneSourceTables(harness);
+  await harness.api.whenReady();
+  assert.equal(harness.api.getState().selectedService, "Structure");
+
+  assert.deepEqual(Array.from(await harness.api.fetchProjectZones()), ["Zone A", "Zone L", "Zone S", "Zone T"]);
+  // Le cache sert les appels suivants sans relire les tables.
+  const planningReads = harness.fetchCount("Planning_Projet");
+  await harness.api.fetchProjectZones();
+  assert.equal(harness.fetchCount("Planning_Projet"), planningReads);
+});
+
+test("fetchProjectZones filtre en REST par projet, sans filtre de service", async () => {
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async (url) => {
+      const table = new URL(url).pathname.split("/").slice(-2)[0];
+      if (table === "Planning_Projet") {
+        return restResponse([{ id: 1, fields: { NomProjet: "Alpha", Zone: "Zone S", Service: "Synthese" } }]);
+      }
+      return restResponse([{ id: 2, fields: { NomProjet: "Alpha", Nom_projet: "Alpha", Zone: `Zone ${table}` } }]);
+    },
+  });
+  await harness.api.whenReady();
+
+  const zones = Array.from(await harness.api.fetchProjectZones());
+  assert.deepEqual(zones, ["Zone ListePlan_NDC_COF", "Zone References2", "Zone S"]);
+  const filters = harness.restRequests.map((request) => JSON.stringify(requestFilter(request))).sort();
+  assert.deepEqual(filters, [
+    JSON.stringify({ NomProjet: ["Alpha", "Alpha Alias"] }),
+    JSON.stringify({ NomProjet: ["Alpha", "Alpha Alias"] }),
+    JSON.stringify({ Nom_projet: ["Alpha", "Alpha Alias"] }),
+  ].sort());
+});
+
+test("watchProjectZones notifie au départ puis après une écriture sur une table source", async () => {
+  const harness = createRuntimeHarness();
+  addZoneSourceTables(harness);
+  await harness.api.whenReady();
+
+  const deliveries = [];
+  const unsubscribe = harness.api.watchProjectZones((zones) => deliveries.push(Array.from(zones)));
+  await flushAsyncWork();
+  assert.deepEqual(deliveries, [["Zone A", "Zone L", "Zone S", "Zone T"]]);
+
+  harness.tables.Planning_Projet.id.push(5);
+  harness.tables.Planning_Projet.NomProjet.push("Alpha");
+  harness.tables.Planning_Projet.Zone.push("Zone N");
+  harness.tables.Planning_Projet.Service.push("Topographie");
+  harness.api.invalidateContextTable("Planning_Projet");
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await flushAsyncWork();
+  assert.deepEqual(deliveries.at(-1), ["Zone A", "Zone L", "Zone N", "Zone S", "Zone T"]);
+
+  // Un changement de service ne change pas la liste : pas de nouvelle livraison.
+  const count = deliveries.length;
+  await harness.api.selectService("Synthese");
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await flushAsyncWork();
+  assert.equal(deliveries.length, count);
+  unsubscribe();
+});
+
+test("fetchProjectZones se fie à une réponse REST vide, sans relire la table entière", async () => {
+  const harness = createRuntimeHarness({ rest: true, restFetch: async () => restResponse([]) });
+  addZoneSourceTables(harness);
+  await harness.api.whenReady();
+
+  assert.deepEqual(Array.from(await harness.api.fetchProjectZones()), []);
+  assert.equal(harness.fetchCount("Planning_Projet"), 0);
+  assert.equal(harness.fetchCount("References2"), 0);
+  assert.equal(harness.fetchCount("ListePlan_NDC_COF"), 0);
+});
+
+test("une lecture de zones en échec conserve la liste déjà livrée", async () => {
+  const harness = createRuntimeHarness();
+  addZoneSourceTables(harness);
+  await harness.api.whenReady();
+
+  const deliveries = [];
+  harness.api.watchProjectZones((zones, meta) => deliveries.push({ zones: Array.from(zones), meta }));
+  await flushAsyncWork();
+  assert.equal(deliveries.length, 1);
+  assert.deepEqual(Array.from(deliveries[0].meta.projectNames), ["Alpha", "Alpha Alias"]);
+
+  delete harness.tables.References2;
+  harness.api.invalidateContextTable("References2");
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await flushAsyncWork();
+  assert.equal(deliveries.length, 1);
+});

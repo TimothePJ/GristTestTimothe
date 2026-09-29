@@ -1,3 +1,5 @@
+// ARCHIVE vue Synthese v1 : plus importé par main.js (vue désactivée, refaite
+// autrement). Fichier gardé pour trace uniquement.
 // Interactions souris de la vue Synthese, sur deux timelines vis :
 //  - l'équipe (une ligne par personne) et la zone « non affectées » en dessous ;
 //  - survol : infobulle du segment ;
