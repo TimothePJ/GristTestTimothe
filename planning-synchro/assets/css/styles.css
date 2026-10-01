@@ -846,10 +846,14 @@ body.ps-panning * {
   overflow: hidden !important;
 }
 
-/* Zone header rows (Planning Projet's zone-header-group / zone-header-fill).
+/* Zone header rows (Planning Projet's zone-header-group).
    Read-only bands; the left cell shows the zone name (single-line, ellipsis via
-   the .vis-inner rule above), the timeline side gets the light-blue background
-   band from the vendored builder's zone-header-fill background item. */
+   the .vis-inner rule above). The timeline side is painted on the group's own
+   FOREGROUND row (vis copies the group className onto it and sizes it exactly
+   like the label), NOT with the builder's zone-header-fill background item:
+   vis positions a background item from its row's offsetTop at redraw time and
+   never re-syncs it, so the bands drifted onto task rows (planningRenderer.js
+   filters those items out). */
 #ps-planning .vis-labelset .vis-label.zone-header-group,
 #ps-planning .vis-labelset .vis-label.zone-header-group .vis-inner {
   background: #e8f2ff !important;
@@ -858,9 +862,8 @@ body.ps-panning * {
   text-transform: uppercase;
 }
 
-#ps-planning .vis-item.vis-background.zone-header-fill {
-  background: #e8f2ff !important;
-  border: 0 !important;
+#ps-planning .vis-foreground .vis-group.zone-header-group {
+  background: #e8f2ff;
 }
 
 /* Vertical red "today" line — drawn by planningRenderer.updateTodayLine as a

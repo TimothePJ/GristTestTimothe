@@ -209,7 +209,7 @@ export function createPlanningRenderer(containerEl) {
   }
 
   // Push into the vis DataSet only the items within a small PIXEL buffer of the
-  // current visible window; background bands (zone fills) always pass.
+  // current visible window.
   // WHY: vis-timeline keeps a DOM node for an item that is far outside the window
   // but leaves it UNPOSITIONED (no transform) — it then renders at left:0, i.e. a
   // stray segment pinned at the far-left edge of the frise (a reception band
@@ -238,7 +238,6 @@ export function createPlanningRenderer(containerEl) {
       const lo = lastWindowStartMs - marginMs;
       const hi = lastWindowEndMs + marginMs;
       visible = allItems.filter((item) => {
-        if ((item.type || "range") === "background") return true;
         const startMs = new Date(item.start).getTime();
         const endMs = new Date(item.end != null ? item.end : item.start).getTime();
         if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return false;
@@ -332,7 +331,14 @@ export function createPlanningRenderer(containerEl) {
 
     groupsDataSet.clear();
     groupsDataSet.add(toVisGroups(groups));
-    allItems = items;
+    // Les items "background" du builder (zone-header-fill) ne sont PAS donnés à
+    // vis : un BackgroundItem prend pour `top` l'offsetTop de sa ligne lu au
+    // moment de son redraw, et vis ne le recale pas quand la hauteur des lignes
+    // au-dessus change ensuite -> bandes bleues décalées sur des lignes de
+    // tâches. La bande de zone est peinte à la place sur la ligne elle-même
+    // (`.vis-foreground .vis-group.zone-header-group`, styles.css), dont vis
+    // gère la hauteur comme celle du libellé : alignée par construction.
+    allItems = (items || []).filter((item) => (item.type || "range") !== "background");
     // Nouveau projet/données : vider le DataSet et l'ensemble suivi, puis laisser
     // applyWindowedItems ajouter la fenêtre courante par diff (depuis vide).
     itemsDataSet.clear();
