@@ -2,7 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { buildMenuItems, createDeferredRenderer } from "../assets/js/ui/syntheseTaskTable.js";
+import {
+  DEFAULT_COLUMN_WIDTHS,
+  MIN_COLUMN_WIDTH,
+  MIN_NAME_WIDTH,
+  buildMenuItems,
+  createDeferredRenderer,
+  dragColumn,
+  minLeftWidth,
+  readColumnWidths,
+} from "../assets/js/ui/syntheseTaskTable.js";
 
 const css = await readFile(new URL("../assets/css/styles.css", import.meta.url), "utf8");
 const source = await readFile(new URL("../assets/js/ui/syntheseTaskTable.js", import.meta.url), "utf8");
@@ -101,7 +110,7 @@ test("étages dans le tableau : saisie du nom, repli, poignée seulement en mode
 });
 
 test("styles des étages, de la poignée et de l'enregistrement en cours", () => {
-  assert.match(css, /--stt-floor-bg:\s*#c6e0b4;/);
+  assert.match(css, /--stt-floor-bg:\s*#fce4d6;/);
   assert.match(css, /\.stt-line--floor \.stt-cell--name\s*\{[^}]*background:\s*var\(--stt-floor-bg\);/);
   assert.match(css, /\.stt-line--task\.is-in-floor \.stt-cell--name\s*\{[^}]*padding-left:\s*46px;/);
   assert.match(css, /\.stt-grip\s*\{[^}]*visibility:\s*hidden;/);
@@ -138,8 +147,8 @@ test("tableau devenu non modifiable pendant un glisser : le glisser est annulé 
   assert.match(css, /\.stt-grip\s*\{[^}]*touch-action:\s*none;/);
 });
 
-test("Tab sur le nom d'un étage garde le focus sur l'étage", () => {
-  assert.match(source, /\} else if \(refocus \|\| \(move && target\.kind === "floor"\)\) \{/);
+test("Tab sur le nom d'un étage ou d'un groupe garde le focus sur l'étage ou le groupe", () => {
+  assert.match(source, /\} else if \(refocus \|\| \(move && target\.kind !== "task"\)\) \{/);
 });
 
 test("glisser : copie de la ligne tenue par la poignée, ligne d'origine estompée, main fermée partout", () => {
@@ -173,4 +182,103 @@ test("Durée : ↑ / ↓ et boutons ▲▼ changent la valeur d'un jour sans fer
   assert.match(css, /\.stt-spin\s*\{[^}]*flex-direction:\s*column;/);
   assert.match(css, /\.stt-spin__button\s*\{[^}]*color:\s*#1f1f1f;/);
   assert.match(css, /\.stt-cell--duration\.is-editing \.stt-input\s*\{[^}]*min-width:\s*0;/);
+});
+
+test("menu : cycle, sous-groupe et tâche d'un groupe", () => {
+  const cycle = { kind: "group", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 203, nature: "cycle" };
+  assert.deepEqual(buildMenuItems(cycle), [
+    { label: "Ajouter une tâche", action: "addTask", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 203 },
+    { label: "Supprimer le cycle", action: "deleteGroup", groupRowId: 203, danger: true },
+  ]);
+  assert.equal(buildMenuItems({ ...cycle, nature: "sous-groupe", groupRowId: 212 })[1].label, "Supprimer le sous-groupe");
+  assert.deepEqual(
+    buildMenuItems({ kind: "task", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 203, taskId: 204 })[0],
+    { label: "Ajouter une tâche", action: "addTask", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 203 }
+  );
+});
+
+test("colonnes N° et Indice ; lignes de groupe : saisie du nom, repli, suppression", () => {
+  assert.match(source, /\{ field: "id2", label: "N°" \}/);
+  assert.match(source, /\{ field: "indice", label: "Indice" \}/);
+  assert.match(source, /function startEditingGroup\(groupRowId\)/);
+  assert.match(source, /await onRenameGroup\?\.\(target\.groupRowId, value\)/);
+  assert.match(source, /\{ type: "toggleGroup", groupRowId: Number\(groupRowId\) \}/);
+  assert.match(source, /onDeleteGroup\?\.\(item\.groupRowId\)/);
+  assert.match(source, /onAddTask\?\.\(item\.zoneKey, item\.floorKey, item\.groupRowId \?\? null\)/);
+  assert.match(source, /setStatus,\s*startEditingGroup,/);
+  assert.match(source, /input\.maxLength = 50;/);
+});
+
+test("styles : couleurs de la capture, colonnes N° et Indice, retraits par niveau", () => {
+  assert.match(css, /--stt-cycle-bg:\s*#bfbfbf;/);
+  assert.match(css, /--stt-meeting-bg:\s*#bdd7ee;/);
+  assert.match(css, /--stt-kickoff-bg:\s*#e6b8b7;/);
+  assert.match(css, /\.stt-line--floor \.stt-left\s*\{[^}]*background:\s*var\(--stt-floor-bg\);/);
+  assert.match(css, /\.stt-line--group\.is-nature-cycle \.stt-left\s*\{[^}]*background:\s*var\(--stt-cycle-bg\);/);
+  assert.match(css, /\.stt-line--task\.is-nature-reunion \.stt-left\s*\{[^}]*background:\s*var\(--stt-meeting-bg\);/);
+  assert.match(css, /\.stt-line--task\.is-nature-demarrage \.stt-left\s*\{[^}]*background:\s*var\(--stt-kickoff-bg\);/);
+  assert.match(css, /\.stt-line--group\.is-level-3 \.stt-cell--name\s*\{[^}]*padding-left:\s*48px;/);
+  assert.match(css, /\.stt-line--task\.is-level-4 \.stt-cell--name\s*\{[^}]*padding-left:\s*78px;/);
+});
+
+test("ligne de zone : le vert couvre toutes ses cellules, pas seulement le nom ; texte noir", () => {
+  assert.match(css, /--stt-zone-bg:\s*#5a8a3c;/);
+  assert.match(css, /\.stt-line--zone \.stt-left\s*\{[^}]*background:\s*var\(--stt-zone-bg\);/);
+  assert.match(css, /\.stt-line--zone \.stt-cell\s*\{[^}]*color:\s*#000;/);
+});
+
+// ---------- Largeur des colonnes ----------
+
+test("largeurs par défaut : Durée, Début et Fin plus étroites ; le nom prend le reste", () => {
+  assert.deepEqual({ ...DEFAULT_COLUMN_WIDTHS }, { id2: 56, indice: 56, duration: 60, start: 92, end: 92 });
+  assert.equal(MIN_COLUMN_WIDTH, 36);
+  assert.equal(MIN_NAME_WIDTH, 120);
+  assert.equal(minLeftWidth(DEFAULT_COLUMN_WIDTHS), 476, "les colonnes + 120 px de nom au moins");
+});
+
+test("largeurs mémorisées : relues, bornées, valeurs par défaut pour ce qui manque ou ne va pas", () => {
+  assert.deepEqual(readColumnWidths(null), { ...DEFAULT_COLUMN_WIDTHS });
+  assert.deepEqual(readColumnWidths("pas du json"), { ...DEFAULT_COLUMN_WIDTHS });
+  assert.deepEqual(
+    readColumnWidths(JSON.stringify({ duration: 80, start: 10, end: "x", inconnu: 50 })),
+    { ...DEFAULT_COLUMN_WIDTHS, duration: 80, start: 36 }
+  );
+});
+
+test("glisser le bord d'une colonne : elle change de largeur et pousse le Gantt, le nom ne bouge pas", () => {
+  const start = { widths: { ...DEFAULT_COLUMN_WIDTHS }, leftWidth: 676 };
+  assert.deepEqual(dragColumn(start, "duration", 20), {
+    widths: { ...DEFAULT_COLUMN_WIDTHS, duration: 80 },
+    leftWidth: 696,
+  });
+  assert.deepEqual(dragColumn(start, "start", -100), {
+    widths: { ...DEFAULT_COLUMN_WIDTHS, start: 36 },
+    leftWidth: 620,
+  }, "jamais sous 36 px");
+  assert.deepEqual(dragColumn(start, "name", 50), { widths: { ...DEFAULT_COLUMN_WIDTHS }, leftWidth: 726 });
+  assert.equal(dragColumn(start, "name", -1000).leftWidth, 476, "le nom garde 120 px");
+  assert.deepEqual(start, { widths: { ...DEFAULT_COLUMN_WIDTHS }, leftWidth: 676 }, "l'état de départ n'est pas modifié");
+});
+
+test("en-tête : une poignée par colonne, double-clic pour revenir à la largeur par défaut, largeurs mémorisées", () => {
+  assert.match(source, /createElement\("span", "stt-col-resize"\)/);
+  assert.match(source, /head\.addEventListener\("dblclick"/);
+  assert.match(source, /setProperty\(`--stt-col-\$\{field\}`/);
+  assert.match(source, /COLUMN_WIDTHS_STORAGE_KEY = "planning-projet\.synthese-tasks\.column-widths"/);
+  // Nouvelle clé : l'ancienne largeur mémorisée (620 px, colonnes plus larges) est oubliée une fois.
+  assert.match(source, /LEFT_WIDTH_STORAGE_KEY = "planning-projet\.synthese-tasks\.left-width\.v2"/);
+});
+
+test("styles : une largeur par colonne, poignées dans l'en-tête, séparateur sous l'en-tête", () => {
+  assert.match(css, /--stt-left-width:\s*676px;/);
+  assert.match(css, /--stt-col-id2:\s*56px;/);
+  assert.match(css, /--stt-col-indice:\s*56px;/);
+  assert.match(css, /--stt-col-duration:\s*60px;/);
+  assert.match(css, /--stt-col-start:\s*92px;/);
+  assert.match(css, /--stt-col-end:\s*92px;/);
+  assert.match(css, /\.stt-left\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) var\(--stt-col-id2\) var\(--stt-col-indice\) var\(--stt-col-duration\) var\(--stt-col-start\) var\(--stt-col-end\);/);
+  assert.match(css, /\.stt-line--head \.stt-cell\s*\{[^}]*position:\s*relative;/);
+  assert.match(css, /\.stt-col-resize\s*\{[^}]*position:\s*absolute;[^}]*cursor:\s*col-resize;/);
+  // Le bord droit de « Fin » dans l'en-tête est sa poignée ; le séparateur commence dessous.
+  assert.match(css, /\.stt-splitter\s*\{[^}]*top:\s*var\(--stt-head-height\);/);
 });

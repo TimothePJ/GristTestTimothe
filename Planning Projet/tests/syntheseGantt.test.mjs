@@ -37,3 +37,16 @@ test("couleurs des crochets d'étage et des flèches", () => {
   assert.match(css, /\.stg-link\s*\{[^}]*stroke:\s*#3b9bb0;/);
   assert.match(css, /\.stg-link-head\s*\{[^}]*fill:\s*#3b9bb0;/);
 });
+
+test("pointes des flèches dans les quatre directions", () => {
+  for (const direction of ["down", "up", "right", "left"]) {
+    assert.match(source, new RegExp(`${direction}: \\(x, y\\) =>`));
+  }
+});
+
+// Les libellés laissent libre le couloir des flèches : le dessin prend son écart dans la
+// géométrie, là où le tracé des flèches le prend aussi.
+test("libellés à LABEL_GAP_PX de la géométrie (couloir des flèches libre)", () => {
+  assert.match(source, /import \{[^}]*\bLABEL_GAP_PX\b[^}]*\} from "\.\.\/services\/syntheseGanttGeometry\.js";/);
+  assert.equal(/const LABEL_GAP_PX = /.test(source), false);
+});

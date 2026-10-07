@@ -21,6 +21,7 @@ import {
   findBestPlanningDocumentMatches,
   formatPlanningCalendarDateIso,
   getTargetIndiceForDocumentType,
+  isSynthesePlanningTask,
 } from "../utils/planningRealisation.js";
 import { buildAbsenceIndex, normalizeName } from "../utils/leaveAbsences.js";
 
@@ -538,7 +539,14 @@ export function buildExpenseData({
         project?.avancementConfigRaw
       );
       const typeDoc = toText(row?.[planningColumns.typeDoc]);
-      const indice = toText(row?.[planningColumns.indice]);
+      // Une tâche Synthese garde son Indice pour elle : il ne compte pas dans l'avancement.
+      const indice = isSynthesePlanningTask({
+        service: row?.[planningColumns.service],
+        typeDoc,
+        taskName: row?.[planningColumns.taskName] ?? row?.[planningColumns.taskNameAlt],
+      })
+        ? ""
+        : toText(row?.[planningColumns.indice]);
       const targetIndice = getTargetIndiceForDocumentType(typeDoc, targetIndiceByType);
       const dateCloture = formatPlanningCalendarDateIso(row?.[planningColumns.dateCloture]);
       const task = {

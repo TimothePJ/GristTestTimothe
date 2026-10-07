@@ -44,7 +44,7 @@ test("le bouton Durées est masqué dans la vue Synthese", () => {
 
 test("les scripts sont servis dans leur nouvelle version", () => {
   assert.equal(html.includes("20260923-zones1"), false);
-  assert.ok(html.includes("main.js?v=20260928-dates1"));
+  assert.ok(html.includes("main.js?v=20261007-lien2"));
 });
 
 test("la surveillance de Planning_Projet de main.js rafraîchit aussi le tableau de tâches", () => {

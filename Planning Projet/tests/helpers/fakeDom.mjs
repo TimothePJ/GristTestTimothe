@@ -34,6 +34,22 @@ export class FakeElement {
     return child;
   }
 
+  replaceChildren(...nodes) {
+    this.children.forEach((child) => {
+      child.parentNode = null;
+    });
+    this.children = [];
+    nodes.forEach((node) => this.appendChild(node));
+  }
+
+  setAttribute(name, value) {
+    this.attributes = { ...(this.attributes || {}), [name]: String(value) };
+  }
+
+  getAttribute(name) {
+    return this.attributes?.[name] ?? null;
+  }
+
   remove() {
     if (!this.parentNode) return;
     this.parentNode.children = this.parentNode.children.filter((node) => node !== this);

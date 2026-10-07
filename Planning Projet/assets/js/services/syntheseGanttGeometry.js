@@ -13,7 +13,10 @@ export const MIN_PX_PER_DAY_FOR_OFF_DAYS = 6;
 // Formes dans une ligne de 26 px (partagées avec le dessin) et écart des flèches.
 export const TASK_BAR_HEIGHT_PX = 14;
 export const MILESTONE_HALF_PX = 6;
-export const LINK_GAP_PX = 6;
+// Couloir des flèches : les traits verticaux passent à LINK_GAP_PX du bout d'une barre, et
+// son libellé commence à LABEL_GAP_PX, si bien que le couloir reste libre.
+export const LINK_GAP_PX = 5;
+export const LABEL_GAP_PX = 10;
 
 function toMs(value) {
   return value instanceof Date ? value.getTime() : Number(value);
@@ -70,6 +73,12 @@ function formatDayMonth(date) {
   return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}`;
 }
 
+// Abscisse d'un jalon : lié en fin → début, il tombe à l'heure de fin de son prédécesseur et se
+// dessine à la fin de sa journée, comme dans MS Project ; sinon au milieu de sa journée.
+function milestoneX(line, scale) {
+  return scale.dateToX(line.link?.type === "FD" ? dayEnd(line.start) : dayCenter(line.start));
+}
+
 // Une forme par ligne datée du modèle de lignes, à la hauteur de sa ligne. Les lignes
 // sans dates ne dessinent rien mais gardent leur rang.
 export function buildGanttShapes(lines, scale, { rowHeight = ROW_HEIGHT_PX } = {}) {
@@ -77,9 +86,9 @@ export function buildGanttShapes(lines, scale, { rowHeight = ROW_HEIGHT_PX } = {
   (lines || []).forEach((line, row) => {
     if (!(line?.start instanceof Date) || !(line?.end instanceof Date)) return;
     const y = row * rowHeight;
-    // Zone (barre noire) et étage (crochet) : du Début à la Fin du récapitulatif, au centre
-    // du jour quand il commence ou finit par un jalon.
-    if (line.kind === "zone" || line.kind === "floor") {
+    // Zone (barre noire), étage, cycle et sous-groupe (crochet) : du Début à la Fin du
+    // récapitulatif, au centre du jour quand il commence ou finit par un jalon.
+    if (line.kind === "zone" || line.kind === "floor" || line.kind === "group") {
       const from = line.startsWithMilestone ? dayCenter(line.start) : dayStart(line.start);
       const to = line.endsWithMilestone ? dayCenter(line.end) : dayEnd(line.end);
       const x1 = scale.dateToX(from);
@@ -100,7 +109,7 @@ export function buildGanttShapes(lines, scale, { rowHeight = ROW_HEIGHT_PX } = {
         row,
         key: line.key,
         y,
-        x: scale.dateToX(dayCenter(line.start)),
+        x: milestoneX(line, scale),
         label: line.name,
         dateLabel: formatDayMonth(line.start),
       });
@@ -128,7 +137,7 @@ function isDatedTask(line) {
 // dernier, ou losange ; point d'arrivée d'une flèche (début du segment, sommet du losange).
 function taskSpan(line, scale) {
   if (line.isMilestone) {
-    const center = scale.dateToX(dayCenter(line.start));
+    const center = milestoneX(line, scale);
     return { x1: center - MILESTONE_HALF_PX, x2: center + MILESTONE_HALF_PX, entryX: center, halfHeight: MILESTONE_HALF_PX };
   }
   const x1 = scale.dateToX(dayStart(line.start));
@@ -140,44 +149,139 @@ function taskSpan(line, scale) {
   };
 }
 
-// Flèches (dessin seul) : une tâche datée vers la tâche datée juste en dessous, si les deux
-// sont du même groupe (même zone et même étage, ou toutes deux au niveau zone). Tracé MS
-// Project : du bout de la tâche jusqu'au début de la suivante, pointe vers le bas quand
-// elle commence au même x ou après ; sinon détour en S et pointe vers la droite.
+// Conteneur d'une tâche pour les flèches dessinées : son groupe, son étage ou le niveau zone.
+function containerOf(line) {
+  return line.groupRowId ? `group:${line.groupRowId}` : `${line.zoneKey}/${line.floorKey || ""}`;
+}
+
+/* ---------- Tracé des flèches ----------
+   Convention MS Project : une flèche fin → début part du bout du prédécesseur à mi-hauteur,
+   va à droite jusqu'au début du successeur et descend dans son coin haut gauche (sommet d'un
+   losange) ; les successeurs qui commencent au même endroit partagent la même descente. Pour
+   rester lisible : entre des barres jointives, la flèche entre LINK_GAP_PX dans la suivante
+   au lieu de longer les bords ; vers un jalon plusieurs lignes plus bas, elle descend dans le
+   couloir qui sépare les fins de barres de leurs libellés ; un successeur qui commence avant
+   la fin de son prédécesseur est rejoint par un S passant dans l'interligne. */
+
+function rowMiddle(row, rowHeight) {
+  return row * rowHeight + rowHeight / 2;
+}
+
+function link(fromRow, toRow, points, head) {
+  return { fromRow, toRow, points, head };
+}
+
+// Géométrie commune d'une flèche entre deux lignes.
+function linkFrame(from, fromRow, to, toRow, scale, rowHeight) {
+  const b = taskSpan(to, scale);
+  const down = toRow > fromRow;
+  const sign = down ? 1 : -1;
+  const toMiddle = rowMiddle(toRow, rowHeight);
+  return {
+    a: taskSpan(from, scale),
+    b,
+    sign,
+    vertical: down ? "down" : "up",
+    fromY: rowMiddle(fromRow, rowHeight),
+    toMiddle,
+    // Haut (ou bas) du successeur, où entre une flèche verticale.
+    edge: toMiddle - sign * b.halfHeight,
+    // Interligne du côté du successeur, et du côté du prédécesseur.
+    nearTo: down ? toRow * rowHeight : (toRow + 1) * rowHeight,
+    nearFrom: down ? (fromRow + 1) * rowHeight : fromRow * rowHeight,
+    adjacent: Math.abs(toRow - fromRow) === 1,
+  };
+}
+
+// À droite au niveau du prédécesseur (depuis son bout `fromX`), puis droit sur le successeur.
+function rightThenDown(frame, fromRow, toRow, fromX, x) {
+  const { fromY, edge, vertical } = frame;
+  return link(fromRow, toRow, [[fromX, fromY], [x, fromY], [x, edge]], { x, y: edge, direction: vertical });
+}
+
+// Aplomb depuis le dessous (ou le dessus) du prédécesseur, droit sur le successeur.
+function plumb(frame, fromRow, toRow, x) {
+  const { a, sign, fromY, edge, vertical } = frame;
+  return link(fromRow, toRow, [[x, fromY + sign * a.halfHeight], [x, edge]], { x, y: edge, direction: vertical });
+}
+
+// Fin → début.
+function finishToStartLink(from, fromRow, to, toRow, scale, rowHeight) {
+  const frame = linkFrame(from, fromRow, to, toRow, scale, rowHeight);
+  const { a, b, fromY, toMiddle, edge, vertical, nearTo, nearFrom, adjacent } = frame;
+  const lane = a.x2 + LINK_GAP_PX;
+  if (to.isMilestone) {
+    if (b.entryX >= lane) return rightThenDown(frame, fromRow, toRow, a.x2, b.entryX);
+    // Jalon juste sous le prédécesseur (à sa fin) : aplomb droit, comme MS Project.
+    if (adjacent && b.entryX >= a.x1 && b.entryX <= a.x2) return plumb(frame, fromRow, toRow, b.entryX);
+    // Plus bas : par le couloir, puis l'interligne juste au-dessus du jalon.
+    return link(fromRow, toRow,
+      [[a.x2, fromY], [lane, fromY], [lane, nearTo], [b.entryX, nearTo], [b.entryX, edge]],
+      { x: b.entryX, y: edge, direction: vertical });
+  }
+  if (b.x1 >= lane) return rightThenDown(frame, fromRow, toRow, a.x2, b.x1);
+  // Barres jointives : la flèche entre dans la suivante, sans longer les bords.
+  if (b.x1 >= a.x2 - 0.5 && lane <= b.x2 - MIN_BAR_WIDTH_PX) return rightThenDown(frame, fromRow, toRow, a.x2, lane);
+  // Le successeur commence avant la fin du prédécesseur : S par l'interligne, entrée par la gauche.
+  const leftX = b.x1 - LINK_GAP_PX;
+  return link(fromRow, toRow,
+    [[a.x2, fromY], [lane, fromY], [lane, nearFrom], [leftX, nearFrom], [leftX, toMiddle], [b.x1, toMiddle]],
+    { x: b.x1, y: toMiddle, direction: "right" });
+}
+
+// Début → début : par la gauche du début, comme MS Project. Depuis un jalon (dont le nom est
+// écrit à gauche) : à droite puis vers le bas quand le successeur commence après lui, aplomb
+// depuis sa pointe quand le jalon tombe dans le successeur.
+function startToStartLink(from, fromRow, to, toRow, scale, rowHeight) {
+  const frame = linkFrame(from, fromRow, to, toRow, scale, rowHeight);
+  const { a, b, fromY, toMiddle } = frame;
+  if (from.isMilestone) {
+    if (b.x1 >= a.x2 + LINK_GAP_PX) return rightThenDown(frame, fromRow, toRow, a.x2, b.x1);
+    if (a.entryX >= b.x1 && a.entryX <= b.x2) return plumb(frame, fromRow, toRow, a.entryX);
+  }
+  const lane = Math.min(a.x1, b.x1) - LINK_GAP_PX;
+  return link(fromRow, toRow,
+    [[a.x1, fromY], [lane, fromY], [lane, toMiddle], [b.x1, toMiddle]],
+    { x: b.x1, y: toMiddle, direction: "right" });
+}
+
+// Fin → fin : du bout droit du prédécesseur dans le couloir, retour sur la fin du successeur.
+function finishToFinishLink(from, fromRow, to, toRow, scale, rowHeight) {
+  const { a, b, fromY, toMiddle } = linkFrame(from, fromRow, to, toRow, scale, rowHeight);
+  const lane = Math.max(a.x2, b.x2) + LINK_GAP_PX;
+  return link(fromRow, toRow,
+    [[a.x2, fromY], [lane, fromY], [lane, toMiddle], [b.x2, toMiddle]],
+    { x: b.x2, y: toMiddle, direction: "left" });
+}
+
+const LINK_BUILDERS = Object.freeze({ FD: finishToStartLink, DD: startToStartLink, FF: finishToFinishLink });
+
+// Flèches : une par lien (colonne Lien) entre deux tâches visibles et datées, quel que soit
+// l'écart entre leurs lignes. Dans un conteneur où aucune tâche n'a de lien, flèches dessinées
+// comme avant : une tâche datée vers la tâche datée juste en dessous, du même conteneur.
 export function buildGanttLinks(lines, scale, { rowHeight = ROW_HEIGHT_PX } = {}) {
+  const list = lines || [];
+  const rowByTaskId = new Map();
+  const linkedContainers = new Set();
+  list.forEach((line, row) => {
+    if (line?.kind !== "task") return;
+    rowByTaskId.set(line.taskId, row);
+    if (line.link) linkedContainers.add(containerOf(line));
+  });
   const links = [];
-  (lines || []).forEach((line, row) => {
-    const next = lines[row + 1];
-    if (!isDatedTask(line) || !isDatedTask(next)) return;
-    if (line.zoneKey !== next.zoneKey || (line.floorKey || "") !== (next.floorKey || "")) return;
-    const from = taskSpan(line, scale);
-    const to = taskSpan(next, scale);
-    const fromY = row * rowHeight + rowHeight / 2;
-    const toMiddle = (row + 1) * rowHeight + rowHeight / 2;
-    if (to.entryX >= from.x2) {
-      const toTop = toMiddle - to.halfHeight;
-      links.push({
-        fromRow: row,
-        toRow: row + 1,
-        points: [[from.x2, fromY], [to.entryX, fromY], [to.entryX, toTop]],
-        head: { x: to.entryX, y: toTop, direction: "down" },
-      });
+  list.forEach((line, row) => {
+    if (!isDatedTask(line)) return;
+    if (line.link) {
+      const predRow = rowByTaskId.get(line.link.predId);
+      const build = LINK_BUILDERS[line.link.type];
+      if (predRow == null || !build || !isDatedTask(list[predRow])) return;
+      links.push(build(list[predRow], predRow, line, row, scale, rowHeight));
       return;
     }
-    const between = (row + 1) * rowHeight;
-    links.push({
-      fromRow: row,
-      toRow: row + 1,
-      points: [
-        [from.x2, fromY],
-        [from.x2 + LINK_GAP_PX, fromY],
-        [from.x2 + LINK_GAP_PX, between],
-        [to.x1 - LINK_GAP_PX, between],
-        [to.x1 - LINK_GAP_PX, toMiddle],
-        [to.x1, toMiddle],
-      ],
-      head: { x: to.x1, y: toMiddle, direction: "right" },
-    });
+    const next = list[row + 1];
+    if (!isDatedTask(next) || linkedContainers.has(containerOf(line))) return;
+    if (containerOf(line) !== containerOf(next)) return;
+    links.push(finishToStartLink(line, row, next, row + 1, scale, rowHeight));
   });
   return links;
 }

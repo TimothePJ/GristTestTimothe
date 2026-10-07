@@ -1949,6 +1949,245 @@ body.planning-row-dragging {
   background-color: #f1f7ff;
 }
 
+/* Bouton « Lien Structure » : même allure que « Editer », visible dans la vue Synthese
+   seulement. */
+#toolbar .planning-structure-link-toggle {
+  min-width: 112px;
+  border-color: #b7c7d9;
+  font-weight: 700;
+  color: #23415f;
+  box-shadow: inset 0 0 0 1px rgba(35, 65, 95, 0.05);
+}
+
+#toolbar .planning-structure-link-toggle:hover {
+  border-color: #7fa7cf;
+  background-color: #f1f7ff;
+}
+
+body:not(.is-synthese-space) #structureLinkToggle {
+  display: none !important;
+}
+
+/* Fenêtre « Lien Structure » : pour chaque zone, les étages de Synthese à gauche et les
+   coffrages de Structure à droite. Grist impose son thème au widget : la fenêtre fixe ses
+   couleurs (texte foncé sur fond clair). */
+.structure-link-dialog {
+  width: min(820px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  border: 1px solid #bcc9d6;
+  border-radius: 8px;
+  padding: 18px;
+  color: #1f2937;
+  background: #ffffff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+  color-scheme: light;
+}
+
+.structure-link-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.structure-link-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.structure-link-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.structure-link-dialog h3 {
+  margin: 0;
+  color: #004990;
+}
+
+.structure-link-dialog__close {
+  border: 0;
+  background: transparent;
+  color: #475569;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.structure-link-dialog__status {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+}
+
+.structure-link-dialog__status[hidden] {
+  display: none;
+}
+
+.structure-link-dialog__columns,
+.structure-link-zone {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.structure-link-dialog__columns {
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: #333333;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.structure-link-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.structure-link-zone {
+  padding: 8px 10px;
+  border: 1px solid #e2e2e2;
+  border-radius: 4px;
+}
+
+.structure-link-zone-name {
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.structure-link-list {
+  margin: 4px 0 0;
+  padding: 0 0 0 14px;
+  list-style: none;
+  font-size: 13px;
+}
+
+.structure-link-item,
+.structure-link-empty {
+  padding: 2px 0;
+  overflow-wrap: anywhere;
+}
+
+.structure-link-item::before {
+  content: "→";
+  margin-right: 6px;
+  color: #475569;
+}
+
+.structure-link-empty {
+  color: #6b7280;
+  font-style: italic;
+}
+
+/* Lien Structure : un étage est une cible de dépôt ; son lien change de couleur selon son
+   état ; un coffrage se déplace quand on peut écrire. */
+.structure-link-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+
+.structure-link-floor {
+  margin: 2px 0;
+  padding: 3px 6px;
+  border: 1px dashed transparent;
+  border-radius: 4px;
+}
+
+.structure-link-floor.is-droppable {
+  border-color: #7fa7cf;
+  background: #f1f7ff;
+}
+
+.structure-link-floor.is-drop-target {
+  border-style: solid;
+  border-color: #004990;
+  background: #dbeafe;
+}
+
+.structure-link-floor-name,
+.structure-link-formwork-label {
+  font-weight: 600;
+}
+
+.structure-link-plan,
+.structure-link-issue,
+.structure-link-used,
+.structure-link-link {
+  color: #475569;
+  font-size: 12px;
+}
+
+.structure-link-linkrow {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding-left: 20px;
+}
+
+.structure-link-floor.is-state-current .structure-link-link {
+  color: #166534;
+}
+
+.structure-link-floor.is-state-stale .structure-link-link {
+  color: #9a3412;
+  font-weight: 600;
+}
+
+.structure-link-floor.is-state-missing .structure-link-link {
+  color: #b91c1c;
+}
+
+.structure-link-formwork.is-draggable {
+  cursor: grab;
+}
+
+.structure-link-formwork.is-dragging {
+  opacity: 0.5;
+}
+
+.structure-link-action {
+  border: 1px solid #b7c7d9;
+  border-radius: 4px;
+  padding: 1px 8px;
+  background: #ffffff;
+  color: #23415f;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.structure-link-action:hover {
+  border-color: #7fa7cf;
+  background: #f1f7ff;
+}
+
+.structure-link-unlink {
+  border-color: transparent;
+  padding: 1px 6px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.structure-link-dialog__status.is-error {
+  color: #b91c1c;
+}
+
+/* Écriture en route : la fenêtre attend la réponse de Grist avant un nouveau geste. */
+.structure-link-dialog__body.is-busy,
+.structure-link-dialog__body.is-busy .structure-link-formwork.is-draggable,
+.structure-link-dialog__body.is-busy .structure-link-action {
+  cursor: progress;
+}
+
 #planningTimeline .group-row-grid .cell-type {
   font-weight: 600;
 }
@@ -2613,13 +2852,20 @@ body.is-synthese-space #durationDefaultsToggle {
 /* Tableau de tâches (façon MS Project) : une ligne = partie gauche (4 colonnes) +
    partie droite (futur Gantt), hauteur fixe pour garder les deux alignés. */
 .stt {
-  --stt-left-width: 620px;
+  --stt-left-width: 676px;
   --stt-row-height: 26px;
   --stt-head-height: 32px;
-  --stt-col-duration: 84px;
-  --stt-col-date: 116px;
+  /* Largeurs par défaut des colonnes (réglables, voir DEFAULT_COLUMN_WIDTHS du tableau). */
+  --stt-col-id2: 56px;
+  --stt-col-indice: 56px;
+  --stt-col-duration: 60px;
+  --stt-col-start: 92px;
+  --stt-col-end: 92px;
+  --stt-cycle-bg: #bfbfbf;
+  --stt-meeting-bg: #bdd7ee;
+  --stt-kickoff-bg: #e6b8b7;
   --stt-zone-bg: #5a8a3c;
-  --stt-floor-bg: #c6e0b4;
+  --stt-floor-bg: #fce4d6;
   --stt-head-bg: #333333;
   --stt-grid: #e2e2e2;
   --stt-accent: var(--vinci-blue, #004990);
@@ -2652,7 +2898,7 @@ body.is-synthese-space #durationDefaultsToggle {
 
 .stt-left {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--stt-col-duration) var(--stt-col-date) var(--stt-col-date);
+  grid-template-columns: minmax(0, 1fr) var(--stt-col-id2) var(--stt-col-indice) var(--stt-col-duration) var(--stt-col-start) var(--stt-col-end);
   min-width: 0;
   background: #fff;
   border-right: 1px solid #bdbdbd;
@@ -2689,7 +2935,25 @@ body.is-synthese-space #durationDefaultsToggle {
 }
 
 .stt-line--head .stt-cell {
+  position: relative;
   border-color: #555555;
+}
+
+/* Poignée de largeur sur le bord droit de chaque en-tête de colonne. */
+.stt-col-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.stt-col-resize:hover,
+.stt.is-resizing .stt-col-resize:active {
+  background: rgba(255, 255, 255, 0.45);
 }
 
 .stt-text {
@@ -2699,14 +2963,19 @@ body.is-synthese-space #durationDefaultsToggle {
 }
 
 .stt-line--zone .stt-cell {
+  color: #000;
   font-weight: 700;
+}
+
+/* Le vert de la zone couvre toutes les cellules de sa ligne (nom, N°, Indice, Durée, Début,
+   Fin), comme les couleurs d'étage plus bas. */
+.stt-line--zone .stt-left {
+  background: var(--stt-zone-bg);
 }
 
 .stt-line--zone .stt-cell--name {
   gap: 4px;
   padding-left: 4px;
-  background: var(--stt-zone-bg);
-  color: #000;
   font-size: 14px;
   text-decoration: underline;
 }
@@ -2745,7 +3014,7 @@ body.is-synthese-space #durationDefaultsToggle {
   color: #1f1f1f;
 }
 
-/* Contour de focus du triangle lisible sur le vert clair de l'étage. */
+/* Contour de focus du triangle lisible sur l'orange clair de l'étage. */
 .stt-line--floor .stt-toggle:focus-visible {
   outline-color: var(--stt-accent);
 }
@@ -2756,6 +3025,57 @@ body.is-synthese-space #durationDefaultsToggle {
 
 /* En saisie, le champ occupe toute la cellule, comme pour les tâches du niveau zone. */
 .stt-line--task.is-in-floor .stt-cell--name.is-editing {
+  padding-left: 0;
+}
+
+/* Couleurs de la capture MS Project, sur toute la partie gauche de la ligne : étage (orange
+   clair), cycle (gris), réunion (bleu), démarrage GO (rouge). */
+.stt-line--floor .stt-left {
+  background: var(--stt-floor-bg);
+}
+
+.stt-line--group.is-nature-cycle .stt-left {
+  background: var(--stt-cycle-bg);
+}
+
+.stt-line--task.is-nature-reunion .stt-left {
+  background: var(--stt-meeting-bg);
+}
+
+.stt-line--task.is-nature-demarrage .stt-left {
+  background: var(--stt-kickoff-bg);
+}
+
+/* Cycles et sous-groupes : en gras, avec triangle de repli, un cran de retrait par niveau. */
+.stt-line--group .stt-cell {
+  font-weight: 700;
+}
+
+.stt-line--group .stt-cell--name {
+  gap: 4px;
+  padding-left: 32px;
+}
+
+.stt-line--group.is-level-3 .stt-cell--name {
+  padding-left: 48px;
+}
+
+.stt-line--group .stt-toggle:focus-visible {
+  outline-color: var(--stt-accent);
+}
+
+/* Tâches d'un cycle (niveau 3) et d'un sous-groupe (niveau 4). */
+.stt-line--task.is-level-3 .stt-cell--name {
+  padding-left: 62px;
+}
+
+.stt-line--task.is-level-4 .stt-cell--name {
+  padding-left: 78px;
+}
+
+.stt-line--group .stt-cell--name.is-editing,
+.stt-line--task.is-level-3 .stt-cell--name.is-editing,
+.stt-line--task.is-level-4 .stt-cell--name.is-editing {
   padding-left: 0;
 }
 
@@ -2807,6 +3127,15 @@ body.is-synthese-space #durationDefaultsToggle {
   font: inherit;
 }
 
+/* Saisie d'une date dans une colonne étroite : le champ déborde sur la cellule voisine
+   plutôt que de cacher la date et le calendrier. */
+.stt-cell--start.is-editing .stt-input,
+.stt-cell--end.is-editing .stt-input {
+  position: relative;
+  z-index: 1;
+  min-width: 118px;
+}
+
 /* Saisie de la Durée : le champ et ses boutons ▲▼ côte à côte, comme dans MS Project. */
 .stt-cell--duration.is-editing .stt-input {
   flex: 1 1 auto;
@@ -2847,9 +3176,10 @@ body.is-synthese-space #durationDefaultsToggle {
   font-size: 13px;
 }
 
+/* Le séparateur commence sous l'en-tête : dans l'en-tête, ce bord est la poignée de « Fin ». */
 .stt-splitter {
   position: absolute;
-  top: 0;
+  top: var(--stt-head-height);
   bottom: 0;
   left: var(--stt-left-width);
   z-index: 3;
@@ -3065,6 +3395,16 @@ html.is-stt-dragging * {
 .stg-date {
   fill: #1f1f1f;
   font-size: 11px;
+}
+
+/* Comme dans MS Project, le texte passe par-dessus les flèches : un liseré blanc autour des
+   lettres le garde lisible quand un trait passe dessous. */
+.stg-label,
+.stg-date {
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3px;
+  stroke-linejoin: round;
 }
 
 .stg-floor {

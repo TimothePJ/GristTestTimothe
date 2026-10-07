@@ -31,9 +31,27 @@ function monthKeyOf(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
+// Tache de la vue Synthese de Planning Projet (service Synthese, nom de tache rempli,
+// sans type de document) : meme avec un N° (ID2), ce n'est pas un document.
+function isSynthesePlanningTask(row, columns) {
+  const service = toText(row?.[columns?.service ?? "Service"])
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase();
+  return (
+    service === "synthese" &&
+    !toText(row?.[columns?.typeDoc]) &&
+    Boolean(
+      toText(row?.[columns?.taskName ?? "Taches"]) ||
+        toText(row?.[columns?.taskNameAlt ?? "Tache"])
+    )
+  );
+}
+
 // Les en-tetes de zone de Planning_Projet n'ont ni ID2 ni Type_doc : elles
 // structurent l'affichage et ne representent aucun document.
 export function isDocumentRow(row, columns) {
+  if (isSynthesePlanningTask(row, columns)) return false;
   return Boolean(toText(row?.[columns?.id2]) || toText(row?.[columns?.typeDoc]));
 }
 

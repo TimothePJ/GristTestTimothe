@@ -2,15 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  MAX_CODE_LENGTH,
+  NATURES,
   NO_ZONE_KEY,
   PLANNING_TABLE,
   TASK_COLUMNS,
+  detectTemplateColumns,
   floorKeyOf,
   formatDate,
   formatDuration,
   isFloorRow,
+  isGroupRow,
   isSyntheseRow,
   isTaskRow,
+  natureKeyOf,
   nextWorkingDay,
   previousWorkingDay,
   readTask,
@@ -78,7 +83,10 @@ test("dates manquantes ou inversées", () => {
   const undated = readTask(taskRow({ Diff_coffrage: null, Diff_armature: "" }));
   assert.equal(undated.start, null);
   assert.equal(undated.end, null);
-  assert.equal(undated.durationDays, null);
+  assert.equal(undated.durationDays, 11, "sans dates : la durée prévue (Duree_1)");
+  assert.equal(readTask(taskRow({ Diff_coffrage: null, Diff_armature: null, Duree_1: "" })).durationDays, null);
+  assert.equal(readTask(taskRow({ Diff_coffrage: null, Diff_armature: null, Duree_1: 0 })).durationDays, 0, "jalon prévu");
+  assert.equal(readTask(taskRow({ Diff_coffrage: null, Diff_armature: null, Duree_1: 2.5 })).durationDays, null);
   const reversed = readTask(taskRow({ Diff_coffrage: "2026-10-23", Diff_armature: "2026-10-09" }));
   assert.equal(iso(reversed.start), "2026-10-09");
   assert.equal(iso(reversed.end), "2026-10-23");
@@ -123,6 +131,12 @@ test("les colonnes Grist utilisées", () => {
     start: "Diff_coffrage",
     end: "Diff_armature",
     duration: "Duree_1",
+    indice: "Indice",
+    service: "Service",
+    nature: "Nature",
+    parent: "Parent",
+    link: "Lien",
+    structureLink: "Lien_Structure",
   });
 });
 
@@ -184,4 +198,53 @@ test("floorKeyOf distingue les niveaux signés : R+1 ≠ R-1, sans séparer « P
   assert.equal(floorKeyOf("PH R+1"), floorKeyOf("ph r + 1"));
   assert.notEqual(floorKeyOf("Niveau -2"), floorKeyOf("Niveau 2"));
   assert.equal(floorKeyOf("PH RDB"), floorKeyOf("ph-rdb"));
+});
+
+test("une tâche Synthese garde son N° : le Service décide", () => {
+  const synthese = { Service: "Synthese" };
+  assert.equal(isTaskRow(taskRow({ ID2: "2001", ...synthese })), true);
+  assert.equal(isTaskRow(taskRow({ ID2: "2001", Service: "Synthèse " })), true, "accents et espaces ignorés");
+  assert.equal(isTaskRow(taskRow({ ID2: "2001", Service: "Structure" })), false, "document d'un autre service");
+  assert.equal(isTaskRow(taskRow({ ID2: "2001", Type_doc: "COFFRAGE", ...synthese })), false, "document Synthese typé");
+  assert.equal(isSyntheseRow(taskRow({ ID2: "2001", ...synthese })), true);
+});
+
+test("natures : lecture sans accents ni casse ; cycles et sous-groupes ne sont pas des tâches", () => {
+  assert.deepEqual({ ...NATURES }, { cycle: "Cycle", subgroup: "Sous-groupe", meeting: "Reunion", kickoff: "Demarrage" });
+  assert.equal(natureKeyOf("Réunion"), "reunion");
+  assert.equal(natureKeyOf(" sous groupe "), "sous-groupe");
+  assert.equal(natureKeyOf("DEMARRAGE"), "demarrage");
+  assert.equal(natureKeyOf("autre"), "");
+  assert.equal(natureKeyOf(null), "");
+  const cycle = taskRow({ Taches: "CYCLE 1", Nature: "Cycle", Groupe: "SS1" });
+  assert.equal(isGroupRow(cycle), true);
+  assert.equal(isTaskRow(cycle), false);
+  assert.equal(isSyntheseRow(cycle), true);
+  assert.equal(isGroupRow(taskRow({ Nature: "Sous-groupe" })), true);
+  assert.equal(isGroupRow(taskRow({ Nature: "Reunion" })), false, "une réunion est une tâche");
+  assert.equal(isTaskRow(taskRow({ Nature: "Reunion" })), true);
+  assert.equal(isGroupRow(taskRow({ Nature: "Cycle", Etage: true })), false, "un étage reste un étage");
+});
+
+test("readTask : nature, Parent, Lien, N° et Indice", () => {
+  const task = readTask(taskRow({ Nature: "Reunion", Parent: " 203 ", Lien: "208 FD", ID2: " 2001 ", Indice: "A", Service: "Synthese" }));
+  assert.equal(task.natureKey, "reunion");
+  assert.equal(task.parentId, 203);
+  assert.equal(task.groupRowId, null);
+  assert.deepEqual(task.link, { predId: 208, type: "FD", lag: 0 });
+  assert.equal(task.id2, "2001");
+  assert.equal(task.indice, "A");
+  const plain = readTask(taskRow({ Parent: "abc", Lien: "n'importe quoi" }));
+  assert.equal(plain.parentId, null);
+  assert.equal(plain.link, null);
+  assert.equal(plain.natureKey, "");
+  assert.equal(readTask(taskRow({ Lien: "5 FD" })).link, null, "une tâche ne dépend pas d'elle-même");
+});
+
+test("colonnes Nature, Parent et Lien : présentes, absentes, ou inconnues sans ligne", () => {
+  assert.equal(detectTemplateColumns([]), null);
+  assert.equal(detectTemplateColumns([{ id: 1, Taches: "" }]), false);
+  assert.equal(detectTemplateColumns([{ id: 1, Nature: "", Parent: "" }]), false);
+  assert.equal(detectTemplateColumns([{ id: 1, Nature: "", Parent: "", Lien: "" }]), true);
+  assert.equal(MAX_CODE_LENGTH, 50);
 });

@@ -2143,6 +2143,16 @@
     ]);
   }
 
+  // Lignes d'une table pour le projet courant, tous services confondus. Lecture
+  // seule, pour ce qui se montre d'un service à l'autre (les coffrages de
+  // Structure vus depuis Synthese) : rien n'est filtré ni écrit par le service.
+  async function fetchProjectRows(tableName) {
+    await initialize();
+    const project = state.currentProject;
+    if (!project) return [];
+    return readProjectZoneRows(core.toText(tableName), project, getProjectZoneNames(project));
+  }
+
   // Une table illisible fait échouer toute la lecture : une liste partielle
   // ferait disparaître des zones, mieux vaut garder la précédente.
   async function loadProjectZones(project) {
@@ -2535,6 +2545,7 @@
     refreshContextTables,
     fetchProjectZones,
     watchProjectZones,
+    fetchProjectRows,
     isSignalForCurrentProject,
     invalidateContextTable,
     invalidateCache(tableName) {

@@ -42,6 +42,6 @@ test("main.js branche le Gantt sur la période du planning", () => {
 test("scripts et feuille de style servis dans leur nouvelle version", () => {
   assert.equal(html.includes("20260923-taches1"), false);
   assert.equal(html.includes("20260925-couleurs1"), false);
-  assert.ok(html.includes("main.js?v=20260928-dates1"));
-  assert.ok(html.includes("styles.css?v=20260928-dates1"));
+  assert.ok(html.includes("main.js?v=20261007-lien2"));
+  assert.ok(html.includes("styles.css?v=20261007-lien2"));
 });

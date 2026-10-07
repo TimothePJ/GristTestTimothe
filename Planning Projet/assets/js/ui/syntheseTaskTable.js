@@ -6,9 +6,15 @@
 import { floorKeyOf, formatDate, formatDuration, stepDurationText } from "../services/syntheseTaskModel.js";
 import { createTaskDrag } from "./syntheseTaskDrag.js";
 
-const LEFT_WIDTH_STORAGE_KEY = "planning-projet.synthese-tasks.left-width";
-const DEFAULT_LEFT_WIDTH = 620;
-const MIN_LEFT_WIDTH = 360;
+// « .v2 » : la largeur mémorisée avant les colonnes réglables (plus larges) est oubliée une fois.
+const LEFT_WIDTH_STORAGE_KEY = "planning-projet.synthese-tasks.left-width.v2";
+const COLUMN_WIDTHS_STORAGE_KEY = "planning-projet.synthese-tasks.column-widths";
+// Largeur par défaut des colonnes à droite du nom (px), identique aux --stt-col-* de
+// styles.css ; le nom prend le reste du tableau.
+export const DEFAULT_COLUMN_WIDTHS = Object.freeze({ id2: 56, indice: 56, duration: 60, start: 92, end: 92 });
+export const MIN_COLUMN_WIDTH = 36;
+export const MIN_NAME_WIDTH = 120;
+const DEFAULT_NAME_WIDTH = 320;
 const MIN_RIGHT_WIDTH = 160;
 // Hauteur d'une ligne, identique à --stt-row-height (styles.css) : le Gantt s'aligne dessus.
 const ROW_HEIGHT_PX = 26;
@@ -19,11 +25,18 @@ const INFO_STATUS_DELAY_MS = 6000;
 const GRIP_GLYPH = "⠿";
 const COLUMNS = Object.freeze([
   { field: "name", label: "Nom de la tâche" },
+  { field: "id2", label: "N°" },
+  { field: "indice", label: "Indice" },
   { field: "duration", label: "Durée" },
   { field: "start", label: "Début" },
   { field: "end", label: "Fin" },
 ]);
 const EDITABLE_FIELDS = COLUMNS.map((column) => column.field);
+const CODE_FIELDS = new Set(["id2", "indice"]);
+// Lignes récapitulatives : triangle de repli, Durée / Début / Fin calculés.
+const SUMMARY_KINDS = new Set(["zone", "floor", "group"]);
+// Actions qui ouvrent une saisie.
+const EDIT_ACTIONS = new Set(["edit", "editFloor", "editGroup"]);
 
 // Un rafraîchissement arrivant pendant une saisie (écriture, relecture, signal d'un
 // autre widget) détruirait la cellule en cours : on garde le dernier état demandé et
@@ -53,7 +66,8 @@ export function createDeferredRenderer(draw) {
 
 // Entrées du menu contextuel selon la ligne visée : zone (sauf « Sans zone ») → tâche ou
 // étage ; « Sans zone » → tâche ; étage → tâche dans l'étage ou suppression de l'étage ;
-// tâche → tâche dans le même groupe ou suppression de la tâche.
+// cycle / sous-groupe → tâche dans le groupe ou suppression du groupe ; tâche → tâche dans
+// le même conteneur ou suppression de la tâche.
 export function buildMenuItems(line, { canAddFloor = true } = {}) {
   if (!line) return [];
   if (line.kind === "zone") {
@@ -69,13 +83,65 @@ export function buildMenuItems(line, { canAddFloor = true } = {}) {
       { label: "Supprimer l'étage", action: "deleteFloor", zoneKey: line.zoneKey, floorKey: line.floorKey, danger: true },
     ];
   }
-  if (line.kind === "task") {
+  if (line.kind === "group") {
     return [
-      { label: "Ajouter une tâche", action: "addTask", zoneKey: line.zoneKey, floorKey: line.floorKey || "" },
-      { label: "Supprimer la tâche", action: "deleteTask", taskId: line.taskId, danger: true },
+      { label: "Ajouter une tâche", action: "addTask", zoneKey: line.zoneKey, floorKey: line.floorKey, groupRowId: line.groupRowId },
+      {
+        label: line.nature === "cycle" ? "Supprimer le cycle" : "Supprimer le sous-groupe",
+        action: "deleteGroup",
+        groupRowId: line.groupRowId,
+        danger: true,
+      },
     ];
   }
+  if (line.kind === "task") {
+    const addTask = { label: "Ajouter une tâche", action: "addTask", zoneKey: line.zoneKey, floorKey: line.floorKey || "" };
+    if (line.groupRowId) addTask.groupRowId = line.groupRowId;
+    return [addTask, { label: "Supprimer la tâche", action: "deleteTask", taskId: line.taskId, danger: true }];
+  }
   return [];
+}
+
+function sumWidths(widths) {
+  return Object.values(widths).reduce((total, width) => total + width, 0);
+}
+
+const DEFAULT_LEFT_WIDTH = DEFAULT_NAME_WIDTH + sumWidths(DEFAULT_COLUMN_WIDTHS);
+
+// Largeur minimale du tableau : toutes les colonnes, plus un nom lisible.
+export function minLeftWidth(widths) {
+  return sumWidths(widths) + MIN_NAME_WIDTH;
+}
+
+// Largeurs mémorisées (texte JSON) : chaque colonne connue reprend la sienne, au moins
+// MIN_COLUMN_WIDTH ; ce qui manque ou ne se lit pas garde la largeur par défaut.
+export function readColumnWidths(raw) {
+  let stored = null;
+  try {
+    stored = raw ? JSON.parse(raw) : null;
+  } catch (_error) {
+    stored = null;
+  }
+  const widths = { ...DEFAULT_COLUMN_WIDTHS };
+  if (stored && typeof stored === "object") {
+    Object.keys(widths).forEach((field) => {
+      const value = Number(stored[field]);
+      if (Number.isFinite(value) && value > 0) widths[field] = Math.max(MIN_COLUMN_WIDTH, Math.round(value));
+    });
+  }
+  return widths;
+}
+
+// Glisser le bord droit d'une colonne de `delta` px : la colonne change de largeur et le
+// tableau avec elle (le Gantt se décale), les autres colonnes gardent la leur. Le nom prend
+// le reste du tableau : son bord déplace la limite du tableau, sans descendre sous un nom
+// de MIN_NAME_WIDTH.
+export function dragColumn({ widths, leftWidth }, field, delta) {
+  if (field === "name") {
+    return { widths: { ...widths }, leftWidth: Math.max(minLeftWidth(widths), leftWidth + delta) };
+  }
+  const width = Math.max(MIN_COLUMN_WIDTH, Math.round(widths[field] + delta));
+  return { widths: { ...widths, [field]: width }, leftWidth: leftWidth + width - widths[field] };
 }
 
 function readStoredWidth() {
@@ -95,6 +161,22 @@ function storeWidth(width) {
   }
 }
 
+function readStoredColumnWidths() {
+  try {
+    return readColumnWidths(window.localStorage.getItem(COLUMN_WIDTHS_STORAGE_KEY));
+  } catch (_error) {
+    return { ...DEFAULT_COLUMN_WIDTHS };
+  }
+}
+
+function storeColumnWidths(widths) {
+  try {
+    window.localStorage.setItem(COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(widths));
+  } catch (_error) {
+    // Stockage indisponible : les largeurs restent celles de la session.
+  }
+}
+
 function toInputDate(date) {
   if (!(date instanceof Date)) return "";
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -109,10 +191,11 @@ function createElement(tag, className, text) {
   return element;
 }
 
-// Une zone ou un étage sans tâche datée n'a pas de récapitulatif : cellules vides. Une
-// tâche sans dates affiche « — ».
+// Une ligne récapitulative sans tâche datée n'a pas de récapitulatif : cellules vides. Une
+// tâche sans dates affiche « — » (et sa durée prévue). N° et Indice : tâches seulement.
 function formatCellValue(line, field) {
-  if ((line.kind === "zone" || line.kind === "floor") && line.durationDays == null) return "";
+  if (CODE_FIELDS.has(field)) return line.kind === "task" ? (line[field] || "") : "";
+  if (SUMMARY_KINDS.has(line.kind) && line.durationDays == null) return "";
   if (field === "duration") return formatDuration(line.durationDays);
   if (field === "start") return formatDate(line.start);
   return formatDate(line.end);
@@ -121,13 +204,16 @@ function formatCellValue(line, field) {
 export function createSyntheseTaskTable(host, {
   onEdit,
   onRenameFloor,
+  onRenameGroup,
   onAddTask,
   onAddFloor,
   onDeleteTask,
   onDeleteFloor,
+  onDeleteGroup,
   onMoveTask,
   onToggleZone,
   onToggleFloor,
+  onToggleGroup,
   onLockedAttempt,
 } = {}, { createGantt } = {}) {
   const root = createElement("div", "stt");
@@ -141,6 +227,12 @@ export function createSyntheseTaskTable(host, {
   COLUMNS.forEach(({ field, label }) => {
     const cell = createElement("div", `stt-cell stt-cell--${field}`, label);
     cell.setAttribute("role", "columnheader");
+    // Poignée de largeur sur le bord droit de l'en-tête, comme dans MS Project.
+    const handle = createElement("span", "stt-col-resize");
+    handle.dataset.field = field;
+    handle.setAttribute("aria-hidden", "true");
+    handle.title = `Glisser pour changer la largeur de « ${label} » ; double-clic : largeur par défaut`;
+    cell.appendChild(handle);
     headLeft.appendChild(cell);
   });
   // Bande réservée à l'échelle des dates du Gantt.
@@ -190,13 +282,29 @@ export function createSyntheseTaskTable(host, {
   let ignoreNextClick = false;
   let statusTimer = 0;
   let leftWidth = readStoredWidth();
+  let columnWidths = readStoredColumnWidths();
 
-  /* ---------- Largeur du panneau gauche ---------- */
+  /* ---------- Largeur du panneau gauche et des colonnes ---------- */
 
   function clampWidth(width) {
+    const min = minLeftWidth(columnWidths);
     const available = root.clientWidth;
-    const max = available ? Math.max(MIN_LEFT_WIDTH, available - MIN_RIGHT_WIDTH) : Infinity;
-    return Math.min(max, Math.max(MIN_LEFT_WIDTH, width));
+    const max = available ? Math.max(min, available - MIN_RIGHT_WIDTH) : Infinity;
+    return Math.min(max, Math.max(min, width));
+  }
+
+  function applyColumnWidths() {
+    Object.entries(columnWidths).forEach(([field, width]) => {
+      root.style.setProperty(`--stt-col-${field}`, `${width}px`);
+    });
+  }
+
+  // Nouvelle largeur d'une colonne (et du tableau, qui la suit).
+  function resizeColumn(next, { persist = false } = {}) {
+    columnWidths = next.widths;
+    applyColumnWidths();
+    applyWidth(next.leftWidth, { persist });
+    if (persist) storeColumnWidths(columnWidths);
   }
 
   function applyWidth(width, { persist = false } = {}) {
@@ -214,7 +322,7 @@ export function createSyntheseTaskTable(host, {
     cell.setAttribute("role", "gridcell");
     cell.dataset.field = "name";
     cell.title = line.name;
-    if (line.kind === "zone" || line.kind === "floor") {
+    if (SUMMARY_KINDS.has(line.kind)) {
       const toggle = createElement("button", "stt-toggle", line.collapsed ? "▸" : "▾");
       toggle.type = "button";
       toggle.dataset.action = "toggle";
@@ -236,18 +344,19 @@ export function createSyntheseTaskTable(host, {
   }
 
   function buildLine(line) {
-    const element = createElement("div", `stt-line stt-line--${line.kind}`);
+    const element = createElement("div", `stt-line stt-line--${line.kind} is-level-${line.level}`);
     element.setAttribute("role", "row");
     element.setAttribute("aria-level", String(line.level + 1));
     element.dataset.kind = line.kind;
     element.dataset.lineKey = line.key;
     element.dataset.zoneKey = line.zoneKey;
     element.dataset.floorKey = line.floorKey || "";
-    if (line.kind === "zone" || line.kind === "floor") {
-      element.setAttribute("aria-expanded", String(!line.collapsed));
-    }
+    element.dataset.groupRowId = line.groupRowId ? String(line.groupRowId) : "";
+    if (SUMMARY_KINDS.has(line.kind)) element.setAttribute("aria-expanded", String(!line.collapsed));
     if (line.kind === "task") element.dataset.taskId = String(line.taskId);
     if (line.kind === "task" && line.floorKey) element.classList.add("is-in-floor");
+    // Couleur de la capture : cycle (gris), réunion (bleu), démarrage (rouge).
+    if (line.nature) element.classList.add(`is-nature-${line.nature}`);
     if (line.isMilestone) element.classList.add("is-milestone");
     if (line.key === dropTargetKey) element.classList.add("is-drop-target");
     if (line.key === dragSourceKey) element.classList.add("is-drag-source");
@@ -261,7 +370,8 @@ export function createSyntheseTaskTable(host, {
         cell.setAttribute("role", "gridcell");
         cell.dataset.field = field;
       }
-      if (editable && (line.kind === "task" || (line.kind === "floor" && field === "name"))) {
+      const nameOnly = line.kind === "floor" || line.kind === "group";
+      if (editable && (line.kind === "task" || (nameOnly && field === "name"))) {
         cell.classList.add("is-editable");
         cell.tabIndex = 0;
       }
@@ -302,6 +412,10 @@ export function createSyntheseTaskTable(host, {
     );
   }
 
+  function findGroupCell(groupRowId) {
+    return body.querySelector(`.stt-line--group[data-group-row-id="${groupRowId}"] .stt-cell--name`);
+  }
+
   function startEditing(taskId, field) {
     if (!editable || !EDITABLE_FIELDS.includes(field)) return;
     if (editor) {
@@ -329,6 +443,19 @@ export function createSyntheseTaskTable(host, {
     openEditor({ target: { kind: "floor", zoneKey, floorKey }, field: "name", cell, input: createInput("name", line) });
   }
 
+  // Nom d'un cycle ou d'un sous-groupe : même saisie que le nom d'une tâche.
+  function startEditingGroup(groupRowId) {
+    if (!editable) return;
+    if (editor) {
+      queuedAction = { type: "editGroup", groupRowId };
+      return;
+    }
+    const line = lines.find((candidate) => candidate.kind === "group" && candidate.groupRowId === groupRowId);
+    const cell = findGroupCell(groupRowId);
+    if (!line || !cell) return;
+    openEditor({ target: { kind: "group", groupRowId }, field: "name", cell, input: createInput("name", line) });
+  }
+
   function createInput(field, line) {
     const input = document.createElement("input");
     input.className = "stt-input";
@@ -336,6 +463,11 @@ export function createSyntheseTaskTable(host, {
       input.type = "text";
       input.maxLength = 200;
       input.value = line.name;
+    } else if (CODE_FIELDS.has(field)) {
+      input.type = "text";
+      input.maxLength = 50;
+      input.autocomplete = "off";
+      input.value = line[field] || "";
     } else if (field === "duration") {
       // Texte et non « number » : la molette sur un champ numérique actif changerait la
       // valeur au lieu de faire défiler le tableau.
@@ -347,10 +479,8 @@ export function createSyntheseTaskTable(host, {
       input.type = "date";
       input.value = toInputDate(line[field]);
     }
-    input.setAttribute(
-      "aria-label",
-      line.kind === "floor" ? "Nom de l'étage" : COLUMNS.find((column) => column.field === field).label
-    );
+    const labels = { floor: "Nom de l'étage", group: "Nom du groupe" };
+    input.setAttribute("aria-label", labels[line.kind] || COLUMNS.find((column) => column.field === field).label);
     return input;
   }
 
@@ -409,7 +539,7 @@ export function createSyntheseTaskTable(host, {
 
     cell.scrollIntoView?.({ block: "nearest" });
     input.focus();
-    if (field === "name" || field === "duration") {
+    if (field === "name" || field === "duration" || CODE_FIELDS.has(field)) {
       try {
         input.select();
       } catch (_error) {
@@ -429,6 +559,7 @@ export function createSyntheseTaskTable(host, {
     if (commit && value !== current.initialValue) {
       try {
         if (target.kind === "floor") await onRenameFloor?.(target.zoneKey, target.floorKey, value);
+        else if (target.kind === "group") await onRenameGroup?.(target.groupRowId, value);
         else await onEdit?.(target.taskId, current.field, value);
       } catch (error) {
         console.error("Saisie de tâche non enregistrée :", error);
@@ -444,13 +575,17 @@ export function createSyntheseTaskTable(host, {
       startEditing(target.taskId, EDITABLE_FIELDS[nextIndex]);
     } else if (queued) {
       runAction(queued);
-    } else if (refocus || (move && target.kind === "floor")) {
+    } else if (refocus || (move && target.kind !== "task")) {
       // Un étage renommé change de clé : on le retrouve sous l'ancienne (refus, même clé) ou
       // sous la nouvelle.
-      const cell = target.kind === "floor"
-        ? findFloorCell(target.zoneKey, target.floorKey)
-          || findFloorCell(target.zoneKey, floorKeyOf(value))
-        : findCell(target.taskId, current.field);
+      let cell;
+      if (target.kind === "floor") {
+        cell = findFloorCell(target.zoneKey, target.floorKey) || findFloorCell(target.zoneKey, floorKeyOf(value));
+      } else if (target.kind === "group") {
+        cell = findGroupCell(target.groupRowId);
+      } else {
+        cell = findCell(target.taskId, current.field);
+      }
       cell?.focus();
     }
   }
@@ -464,9 +599,10 @@ export function createSyntheseTaskTable(host, {
   }
 
   function runMenuItem(item) {
-    if (item.action === "addTask") return onAddTask?.(item.zoneKey, item.floorKey);
+    if (item.action === "addTask") return onAddTask?.(item.zoneKey, item.floorKey, item.groupRowId ?? null);
     if (item.action === "addFloor") return onAddFloor?.(item.zoneKey);
     if (item.action === "deleteFloor") return onDeleteFloor?.(item.zoneKey, item.floorKey);
+    if (item.action === "deleteGroup") return onDeleteGroup?.(item.groupRowId);
     if (item.action === "deleteTask") return onDeleteTask?.(item.taskId);
     return undefined;
   }
@@ -521,25 +657,30 @@ export function createSyntheseTaskTable(host, {
 
   /* ---------- Souris et clavier sur les lignes ---------- */
 
-  // Action d'un appui, d'un clic ou d'une touche sur une ligne : replier / déplier une zone
-  // ou un étage, ou ouvrir la saisie d'une cellule de tâche ou du nom d'un étage.
+  // Action d'un appui, d'un clic ou d'une touche sur une ligne : replier / déplier une zone,
+  // un étage ou un groupe, ou ouvrir la saisie d'une cellule de tâche ou d'un nom d'étage ou
+  // de groupe.
   function actionAt(target, lineElement) {
-    const { kind = "", zoneKey = "", floorKey = "" } = lineElement.dataset;
+    const { kind = "", zoneKey = "", floorKey = "", groupRowId = "" } = lineElement.dataset;
     if (target.closest('[data-action="toggle"]')) {
+      if (kind === "group") return { type: "toggleGroup", groupRowId: Number(groupRowId) };
       return kind === "floor" ? { type: "toggleFloor", zoneKey, floorKey } : { type: "toggle", zoneKey };
     }
     const cell = target.closest(".stt-cell[data-field]");
     if (!cell || cell.classList.contains("is-editing")) return null;
     if (kind === "task") return { type: "edit", taskId: Number(lineElement.dataset.taskId), field: cell.dataset.field };
     if (kind === "floor" && cell.dataset.field === "name") return { type: "editFloor", zoneKey, floorKey };
+    if (kind === "group" && cell.dataset.field === "name") return { type: "editGroup", groupRowId: Number(groupRowId) };
     return null;
   }
 
   function runAction(action) {
     if (action.type === "edit") startEditing(action.taskId, action.field);
     else if (action.type === "editFloor") startEditingFloor(action.zoneKey, action.floorKey);
+    else if (action.type === "editGroup") startEditingGroup(action.groupRowId);
     else if (action.type === "toggle") onToggleZone?.(action.zoneKey);
     else if (action.type === "toggleFloor") onToggleFloor?.(action.zoneKey, action.floorKey);
+    else if (action.type === "toggleGroup") onToggleGroup?.(action.groupRowId);
   }
 
   // Un appui ailleurs pendant une saisie la ferme (perte du focus) et redessine le
@@ -569,7 +710,7 @@ export function createSyntheseTaskTable(host, {
     if (!lineElement || target.closest(".stt-grip")) return;
     const action = actionAt(target, lineElement);
     if (!action) return;
-    if ((action.type === "edit" || action.type === "editFloor") && !editable) {
+    if (EDIT_ACTIONS.has(action.type) && !editable) {
       onLockedAttempt?.();
       return;
     }
@@ -591,7 +732,7 @@ export function createSyntheseTaskTable(host, {
     if (!cell || !lineElement || cell.classList.contains("is-editing")) return;
     if (event.key === "Enter" || event.key === "F2") {
       const action = actionAt(target, lineElement);
-      if (action?.type !== "edit" && action?.type !== "editFloor") return;
+      if (!EDIT_ACTIONS.has(action?.type)) return;
       event.preventDefault();
       if (!editable) {
         onLockedAttempt?.();
@@ -660,6 +801,45 @@ export function createSyntheseTaskTable(host, {
     onDrop: (taskId, target) => onMoveTask?.(taskId, target),
   });
 
+  /* ---------- Largeur des colonnes (poignées de l'en-tête) ---------- */
+
+  head.addEventListener("pointerdown", (event) => {
+    const handle = event.target instanceof Element ? event.target.closest(".stt-col-resize") : null;
+    if (!handle || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const { field } = handle.dataset;
+    const startX = event.clientX;
+    const start = { widths: { ...columnWidths }, leftWidth };
+    try {
+      handle.setPointerCapture(event.pointerId);
+    } catch (_error) {
+      // Pointeur déjà relâché.
+    }
+    root.classList.add("is-resizing");
+    const onMove = (moveEvent) => resizeColumn(dragColumn(start, field, moveEvent.clientX - startX));
+    const onEnd = () => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onEnd);
+      handle.removeEventListener("pointercancel", onEnd);
+      root.classList.remove("is-resizing");
+      resizeColumn({ widths: columnWidths, leftWidth }, { persist: true });
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onEnd);
+    handle.addEventListener("pointercancel", onEnd);
+  });
+
+  // Double-clic sur une poignée : la colonne reprend sa largeur par défaut.
+  head.addEventListener("dblclick", (event) => {
+    const handle = event.target instanceof Element ? event.target.closest(".stt-col-resize") : null;
+    if (!handle) return;
+    const { field } = handle.dataset;
+    const current = field === "name" ? leftWidth - sumWidths(columnWidths) : columnWidths[field];
+    const wanted = field === "name" ? DEFAULT_NAME_WIDTH : DEFAULT_COLUMN_WIDTHS[field];
+    resizeColumn(dragColumn({ widths: columnWidths, leftWidth }, field, wanted - current), { persist: true });
+  });
+
   /* ---------- Séparateur ---------- */
 
   splitter.addEventListener("pointerdown", (event) => {
@@ -713,6 +893,7 @@ export function createSyntheseTaskTable(host, {
     }
   }
 
+  applyColumnWidths();
   applyWidth(leftWidth);
 
   return {
@@ -722,5 +903,6 @@ export function createSyntheseTaskTable(host, {
     startEditing,
     startEditingFloor,
     setStatus,
+    startEditingGroup,
   };
 }

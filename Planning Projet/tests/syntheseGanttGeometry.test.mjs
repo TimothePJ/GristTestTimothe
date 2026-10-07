@@ -191,30 +191,34 @@ test("flèches : vers la tâche datée juste en dessous, du même groupe seuleme
   assert.deepEqual(links.map((link) => [link.fromRow, link.toRow]), [[1, 2]]);
 });
 
-test("flèche simple : du bout de la tâche, puis vers le bas sur le début de la suivante", () => {
+// Convention MS Project : la flèche part du bout de la barre à mi-hauteur, va à droite jusqu'au
+// début de la suivante et descend dans son coin haut gauche. Barres jointives : elle entre 5 px
+// dans la suivante, pour ne pas longer les bords.
+test("barres jointives : la flèche entre 5 px dans le haut de la suivante", () => {
   const [link] = buildGanttLinks([
     groupTask(1, day(2026, 9, 14), day(2026, 9, 15)),
     groupTask(2, day(2026, 9, 16), day(2026, 9, 16)),
   ], WEEK);
-  assert.deepEqual(link.points, [[200, 13], [200, 13], [200, 32]]);
-  assert.deepEqual(link.head, { x: 200, y: 32, direction: "down" });
+  assert.deepEqual(link.points, [[200, 13], [205, 13], [205, 32]]);
+  assert.deepEqual(link.head, { x: 205, y: 32, direction: "down" });
 });
 
-test("détour en S quand la suivante commence avant la fin de la précédente", () => {
+test("détour en S quand la suivante commence avant la fin de la précédente : par l'interligne", () => {
   const [link] = buildGanttLinks([
     groupTask(1, day(2026, 9, 14), day(2026, 9, 16)),
     groupTask(2, day(2026, 9, 15), day(2026, 9, 17)),
   ], WEEK);
-  assert.deepEqual(link.points, [[300, 13], [306, 13], [306, 26], [94, 26], [94, 39], [100, 39]]);
+  assert.deepEqual(link.points, [[300, 13], [305, 13], [305, 26], [95, 26], [95, 39], [100, 39]]);
   assert.deepEqual(link.head, { x: 100, y: 39, direction: "right" });
 });
 
-test("jalons : départ de la pointe droite du losange, arrivée sur son sommet", () => {
+test("jalons : de la pointe droite du losange à droite puis vers le bas ; arrivée sur son sommet", () => {
   const [fromMilestone] = buildGanttLinks([
     groupTask(1, day(2026, 9, 15), day(2026, 9, 15), { isMilestone: true, durationDays: 0 }),
     groupTask(2, day(2026, 9, 16), day(2026, 9, 16)),
   ], WEEK);
   assert.deepEqual(fromMilestone.points, [[156, 13], [200, 13], [200, 32]]);
+  assert.deepEqual(fromMilestone.head, { x: 200, y: 32, direction: "down" });
   const [toMilestone] = buildGanttLinks([
     groupTask(1, day(2026, 9, 14), day(2026, 9, 14)),
     groupTask(2, day(2026, 9, 16), day(2026, 9, 16), { isMilestone: true, durationDays: 0 }),

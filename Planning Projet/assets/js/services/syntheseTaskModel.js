@@ -11,6 +11,15 @@ import {
   parseGristDate,
   toIsoDate,
 } from "./syntheseTasks.js";
+import {
+  nextWorkingDay,
+  parseLink,
+  previousWorkingDay,
+  startBeforeWorkingDays,
+} from "./syntheseLinks.js";
+
+// Recalage sur les jours ouvrés : défini avec les liens, exporté ici comme avant.
+export { nextWorkingDay, previousWorkingDay };
 
 export const PLANNING_TABLE = "Planning_Projet";
 
@@ -26,6 +35,12 @@ export const TASK_COLUMNS = Object.freeze({
   start: "Diff_coffrage",
   end: "Diff_armature",
   duration: "Duree_1",
+  indice: "Indice",
+  service: "Service",
+  nature: "Nature",
+  parent: "Parent",
+  link: "Lien",
+  structureLink: "Lien_Structure",
 });
 
 export const NEW_TASK_NAME = "Nouvelle tâche";
@@ -39,8 +54,36 @@ export const MAX_DURATION_DAYS = 9999;
 export const MIN_TASK_YEAR = 2000;
 export const MAX_TASK_YEAR = 2100;
 
+// N° (ID2) et Indice d'une tâche : texte libre, court.
+export const MAX_CODE_LENGTH = 50;
+
+// Colonne Nature : ce que la ligne représente dans un étage. Valeurs écrites par le widget ;
+// lecture sans accents ni casse (« Réunion » = « reunion »).
+export const NATURES = Object.freeze({
+  cycle: "Cycle",
+  subgroup: "Sous-groupe",
+  meeting: "Reunion",
+  kickoff: "Demarrage",
+});
+const NATURE_KEYS = new Set(["cycle", "sous-groupe", "reunion", "demarrage"]);
+const GROUP_NATURE_KEYS = new Set(["cycle", "sous-groupe"]);
+
 function toText(value) {
   return value == null ? "" : String(value).trim();
+}
+
+function plainKey(value) {
+  return toText(value).normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase("fr");
+}
+
+export function natureKeyOf(value) {
+  const key = plainKey(value).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return NATURE_KEYS.has(key) ? key : "";
+}
+
+// Ligne du service Synthese (colonne Service, sans accents, casse ni espaces).
+export function isSyntheseServiceRow(row) {
+  return plainKey(row?.[TASK_COLUMNS.service]).replace(/[^a-z0-9]+/g, "") === "synthese";
 }
 
 function toDay(date) {
@@ -54,33 +97,6 @@ function shiftDays(date, days) {
 function isSameDay(left, right) {
   if (!(left instanceof Date) || !(right instanceof Date)) return left == null && right == null;
   return left.getTime() === right.getTime();
-}
-
-// Un Début tombant un week-end ou un férié avance au jour ouvré suivant ; une Fin
-// recule au jour ouvré précédent. Une date déjà ouvrée est gardée telle quelle.
-export function nextWorkingDay(date) {
-  let cursor = toDay(date);
-  while (!isWorkingDay(cursor)) cursor = shiftDays(cursor, 1);
-  return cursor;
-}
-
-export function previousWorkingDay(date) {
-  let cursor = toDay(date);
-  while (!isWorkingDay(cursor)) cursor = shiftDays(cursor, -1);
-  return cursor;
-}
-
-// Début d'un segment de `days` jours ouvrés finissant à `end` (déjà ouvré) : l'inverse de
-// endAfterWorkingDays.
-function startBeforeWorkingDays(end, days) {
-  const wanted = Math.max(1, Math.round(Number(days) || 1));
-  let cursor = toDay(end);
-  let counted = isWorkingDay(cursor) ? 1 : 0;
-  while (counted < wanted) {
-    cursor = shiftDays(cursor, -1);
-    if (isWorkingDay(cursor)) counted += 1;
-  }
-  return cursor;
 }
 
 // Clé de comparaison d'une zone : « ZONE 1A (BAT A3, A4) » = « zone-1a bat a3 a4 ».
@@ -108,14 +124,14 @@ export function floorKeyOf(value) {
     .replace(/[^a-z0-9]+/g, "");
 }
 
-// Ligne propre à la vue Synthese : nommée, sans type de document ni ID (les lignes de
-// zone n'ont pas de nom, les documents ont un type et un numéro).
+// Ligne propre à la vue Synthese : nommée, sans type de document. Un N° (ID2) ne fait un
+// document que hors du service Synthese : une tâche Synthese garde son N° et son indice.
 function isNamedPlainRow(row) {
   const id = Number(row?.[TASK_COLUMNS.id]);
   return Number.isInteger(id) && id > 0 &&
     Boolean(toText(row?.[TASK_COLUMNS.name])) &&
     !toText(row?.[TASK_COLUMNS.typeDoc]) &&
-    !toText(row?.[TASK_COLUMNS.id2]);
+    (!toText(row?.[TASK_COLUMNS.id2]) || isSyntheseServiceRow(row));
 }
 
 // Colonne Etage : booléen Grist, ou le texte « true » si la colonne est du texte.
@@ -123,17 +139,22 @@ export function isFloorValue(value) {
   return value === true || toText(value).toLocaleLowerCase("fr") === "true";
 }
 
-// Un étage est une ligne Synthese marquée Etage ; une tâche, une ligne Synthese qui ne
-// l'est pas.
+// Un étage est une ligne Synthese marquée Etage ; un groupe (cycle ou sous-groupe), une ligne
+// Synthese de Nature Cycle ou Sous-groupe ; une tâche, toute autre ligne Synthese.
 export function isFloorRow(row) {
   return isNamedPlainRow(row) && isFloorValue(row?.[TASK_COLUMNS.floor]);
 }
 
-export function isTaskRow(row) {
-  return isNamedPlainRow(row) && !isFloorValue(row?.[TASK_COLUMNS.floor]);
+export function isGroupRow(row) {
+  return isNamedPlainRow(row) && !isFloorValue(row?.[TASK_COLUMNS.floor]) &&
+    GROUP_NATURE_KEYS.has(natureKeyOf(row?.[TASK_COLUMNS.nature]));
 }
 
-// Tâches et étages : le planning Structure les ignore.
+export function isTaskRow(row) {
+  return isNamedPlainRow(row) && !isFloorValue(row?.[TASK_COLUMNS.floor]) && !isGroupRow(row);
+}
+
+// Tâches, étages et groupes : le planning Structure et son recalcul les ignorent.
 export function isSyntheseRow(row) {
   return isNamedPlainRow(row);
 }
@@ -142,9 +163,24 @@ function isStoredMilestone(value) {
   return value !== "" && value != null && Number(value) === 0;
 }
 
-// Les dates font foi pour la Durée ; Duree_1 ne sert qu'à reconnaître un jalon
-// (0 jour) d'une tâche d'un jour, qui ont toutes deux Début = Fin.
+// Colonne Parent : id (texte) du cycle ou du sous-groupe qui contient la ligne.
+function readParentId(row) {
+  const id = Number(toText(row?.[TASK_COLUMNS.parent]));
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+// Durée prévue d'une tâche sans dates : Duree_1 (0 = jalon prévu) ; vide ou illisible → null.
+function readPlannedDays(value) {
+  if (value == null || toText(value) === "") return null;
+  const days = Number(value);
+  return Number.isInteger(days) && days >= 0 && days <= MAX_DURATION_DAYS ? days : null;
+}
+
+// Les dates font foi pour la Durée ; Duree_1 sert à reconnaître un jalon (0 jour) d'une
+// tâche d'un jour, qui ont toutes deux Début = Fin, et donne la durée prévue d'une tâche
+// sans dates (modèle d'étage).
 export function readTask(row) {
+  const id = Number(row?.[TASK_COLUMNS.id]);
   const zoneName = toText(row?.[TASK_COLUMNS.zone]);
   let start = parseGristDate(row?.[TASK_COLUMNS.start]);
   let end = parseGristDate(row?.[TASK_COLUMNS.end]);
@@ -152,8 +188,9 @@ export function readTask(row) {
   const hasDates = Boolean(start && end);
   const isMilestone = hasDates && isSameDay(start, end) &&
     isStoredMilestone(row?.[TASK_COLUMNS.duration]);
+  const link = parseLink(row?.[TASK_COLUMNS.link]);
   return {
-    id: Number(row?.[TASK_COLUMNS.id]),
+    id,
     name: toText(row?.[TASK_COLUMNS.name]),
     zoneName,
     zoneKey: zoneKeyOf(zoneName),
@@ -161,8 +198,17 @@ export function readTask(row) {
     floorKey: floorKeyOf(row?.[TASK_COLUMNS.group]),
     start,
     end,
-    durationDays: hasDates ? (isMilestone ? 0 : countWorkingDays(start, end)) : null,
+    durationDays: hasDates
+      ? (isMilestone ? 0 : countWorkingDays(start, end))
+      : readPlannedDays(row?.[TASK_COLUMNS.duration]),
     isMilestone,
+    natureKey: natureKeyOf(row?.[TASK_COLUMNS.nature]),
+    parentId: readParentId(row),
+    // Groupe effectif (cycle ou sous-groupe), posé par buildSections.
+    groupRowId: null,
+    link: link && link.predId !== id ? link : null,
+    id2: toText(row?.[TASK_COLUMNS.id2]),
+    indice: toText(row?.[TASK_COLUMNS.indice]),
   };
 }
 
@@ -182,16 +228,21 @@ function accept(task, fields) {
   return { ok: true, task, fields };
 }
 
+// Colonnes de dates d'une tâche datée (Début, Fin, Durée), pour une écriture.
+export function dateFieldsOf(task) {
+  return {
+    [TASK_COLUMNS.start]: toIsoDate(task.start),
+    [TASK_COLUMNS.end]: toIsoDate(task.end),
+    [TASK_COLUMNS.duration]: task.isMilestone ? 0 : task.durationDays,
+  };
+}
+
 function withDates(task, start, end, isMilestone) {
   const durationDays = isMilestone ? 0 : countWorkingDays(start, end);
   const next = { ...task, start, end, durationDays, isMilestone };
   const unchanged = isSameDay(task.start, start) && isSameDay(task.end, end) &&
     task.isMilestone === isMilestone;
-  return accept(next, unchanged ? {} : {
-    [TASK_COLUMNS.start]: toIsoDate(start),
-    [TASK_COLUMNS.end]: toIsoDate(end),
-    [TASK_COLUMNS.duration]: durationDays,
-  });
+  return accept(next, unchanged ? {} : dateFieldsOf(next));
 }
 
 // Flèche ↑ / ↓ (ou bouton ▲▼) dans la saisie de la Durée : ±1 jour à partir du nombre qui
@@ -207,6 +258,17 @@ export function stepDurationText(text, step) {
 // Durée → la Fin suit ; Début ou Fin → la Durée suit, sauf si la date saisie croise
 // l'autre : la tâche se décale alors en gardant sa Durée ; un jalon se déplace.
 export function applyTaskEdit(task, field, rawValue, { today = new Date() } = {}) {
+  if (field === "id2" || field === "indice") {
+    const value = toText(rawValue);
+    if (value.length > MAX_CODE_LENGTH) {
+      return refuse(field === "id2"
+        ? `Le N° est limité à ${MAX_CODE_LENGTH} caractères.`
+        : `L'indice est limité à ${MAX_CODE_LENGTH} caractères.`);
+    }
+    const column = field === "id2" ? TASK_COLUMNS.id2 : TASK_COLUMNS.indice;
+    return accept({ ...task, [field]: value }, value === toText(task[field]) ? {} : { [column]: value });
+  }
+
   if (field === "name") {
     const name = toText(rawValue);
     if (!name) return refuse("Le nom de la tâche ne peut pas être vide.");
@@ -223,6 +285,11 @@ export function applyTaskEdit(task, field, rawValue, { today = new Date() } = {}
       return refuse(`La durée doit être un nombre entier de jours, de 0 (jalon) à ${MAX_DURATION_DAYS}.`);
     }
     const days = Number(match[1]);
+    // Tâche sans aucune date : la durée est seulement mémorisée ; les dates viendront d'une
+    // date saisie ou d'un lien.
+    if (!task.start && !task.end) {
+      return accept({ ...task, durationDays: days }, days === task.durationDays ? {} : { [TASK_COLUMNS.duration]: days });
+    }
     const start = task.start || nextWorkingDay(today);
     if (days === 0) return withDates(task, start, start, true);
     return withDates(task, start, endAfterWorkingDays(start, days), false);
@@ -233,6 +300,21 @@ export function applyTaskEdit(task, field, rawValue, { today = new Date() } = {}
     if (!date) return refuse("Date invalide.");
     if (date.getFullYear() < MIN_TASK_YEAR || date.getFullYear() > MAX_TASK_YEAR) {
       return refuse(`Date invalide : choisissez une date entre ${MIN_TASK_YEAR} et ${MAX_TASK_YEAR}.`);
+    }
+    // Tâche sans aucune date : sa durée prévue donne l'autre date (0 : jalon ; inconnue :
+    // un jour).
+    if (!task.start && !task.end) {
+      const planned = Number.isInteger(task.durationDays) ? task.durationDays : 1;
+      if (planned === 0) {
+        const moved = nextWorkingDay(date);
+        return withDates(task, moved, moved, true);
+      }
+      if (field === "start") {
+        const start = nextWorkingDay(date);
+        return withDates(task, start, endAfterWorkingDays(start, planned), false);
+      }
+      const end = previousWorkingDay(date);
+      return withDates(task, startBeforeWorkingDays(end, planned), end, false);
     }
     if (task.isMilestone) {
       const moved = nextWorkingDay(date);
@@ -268,10 +350,25 @@ export function applyTaskEdit(task, field, rawValue, { today = new Date() } = {}
   return refuse("Cette colonne ne se modifie pas.");
 }
 
+// Décale une tâche pour qu'elle commence à `date` (le jour ouvré suivant si ce n'en est pas
+// un) en gardant sa durée — 0 : jalon ; inconnue : un jour. Sert au lien Structure : la tâche
+// suit la date d'un coffrage comme une tâche liée suit son prédécesseur, là où une saisie dans
+// « Début » allonge ou raccourcit la tâche. Même réponse qu'applyTaskEdit.
+export function moveTaskStart(task, date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return refuse("Date invalide.");
+  if (date.getFullYear() < MIN_TASK_YEAR || date.getFullYear() > MAX_TASK_YEAR) {
+    return refuse(`Date invalide : choisissez une date entre ${MIN_TASK_YEAR} et ${MAX_TASK_YEAR}.`);
+  }
+  const start = nextWorkingDay(date);
+  const days = Number.isInteger(task.durationDays) ? task.durationDays : 1;
+  if (task.isMilestone || days === 0) return withDates(task, start, start, true);
+  return withDates(task, start, endAfterWorkingDays(start, days), false);
+}
+
 // Une nouvelle tâche démarre le jour ouvré qui suit la plus tardive des Fins de son
 // groupe — l'étage, ou le niveau zone — (aujourd'hui, ou le jour ouvré suivant, si le
 // groupe n'a rien de daté) et dure un jour.
-export function buildNewTask({ zoneName = "", groupName = "", groupTasks = [], today = new Date() } = {}) {
+export function buildNewTask({ zoneName = "", groupName = "", groupTasks = [], today = new Date(), parentId = null } = {}) {
   const ends = (groupTasks || [])
     .map((groupTask) => groupTask?.end)
     .filter((end) => end instanceof Date);
@@ -290,6 +387,7 @@ export function buildNewTask({ zoneName = "", groupName = "", groupTasks = [], t
     end: start,
     durationDays: 1,
     isMilestone: false,
+    parentId: Number.isInteger(parentId) && parentId > 0 ? parentId : null,
   };
 }
 
@@ -305,6 +403,8 @@ export function buildTaskFields(task, { projectName = "" } = {}) {
   // Tâche d'un étage : le nom de l'étage dans Groupe (rien au niveau zone).
   const group = toText(task?.groupName);
   if (group) fields[TASK_COLUMNS.group] = group;
+  // Tâche d'un cycle ou d'un sous-groupe : l'id du groupe dans Parent (texte).
+  if (task?.parentId) fields[TASK_COLUMNS.parent] = String(task.parentId);
   return fields;
 }
 
@@ -346,7 +446,37 @@ export function buildFloorFields({ name = "", zoneName = "", projectName = "" } 
   };
 }
 
-// Renommer un étage : ses lignes-étages et le Groupe de ses tâches, en une seule écriture.
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Le nom d'un étage dans les noms de ses tâches (« … NIV SS1 », « DEMARRAGE GO SS1 … ») :
+// « NIV » ou « GO », puis le nom exact, suivi d'un espace, d'une parenthèse ou de la fin.
+export function renameFloorInTaskName(taskName, oldName, newName) {
+  const text = toText(taskName);
+  const previous = toText(oldName);
+  if (!previous) return text;
+  const pattern = new RegExp(`\\b(NIV|GO) ${escapeRegExp(previous)}(?=$|[\\s(])`, "g");
+  return text.replace(pattern, (_match, prefix) => `${prefix} ${toText(newName)}`);
+}
+
+// Renommer un étage, ligne par ligne : ses lignes-étages (nom), ses groupes (Groupe), ses
+// tâches (Groupe, et le nom quand il contient « NIV / GO <ancien nom> »).
+export function buildFloorRenameChanges(floor, name) {
+  const changes = new Map();
+  (floor?.rowIds || []).forEach((rowId) => changes.set(rowId, { [TASK_COLUMNS.name]: name }));
+  (floor?.groups || []).forEach((group) => changes.set(group.rowId, { [TASK_COLUMNS.group]: name }));
+  (floor?.tasks || []).forEach((task) => {
+    const fields = { [TASK_COLUMNS.group]: name };
+    const current = toText(task.name);
+    const renamed = renameFloorInTaskName(current, floor.name, name);
+    if (renamed !== current) fields[TASK_COLUMNS.name] = renamed;
+    changes.set(task.id, fields);
+  });
+  return changes;
+}
+
+// Les mêmes changements, en une seule écriture Grist.
 export function buildFloorRenameActions(floor, name) {
   const actions = [];
   const rowIds = floor?.rowIds || [];
@@ -355,16 +485,36 @@ export function buildFloorRenameActions(floor, name) {
   } else if (rowIds.length > 1) {
     actions.push(["BulkUpdateRecord", PLANNING_TABLE, [...rowIds], { [TASK_COLUMNS.name]: rowIds.map(() => name) }]);
   }
-  const taskIds = (floor?.tasks || []).map((task) => task.id);
-  if (taskIds.length) {
-    actions.push(["BulkUpdateRecord", PLANNING_TABLE, taskIds, { [TASK_COLUMNS.group]: taskIds.map(() => name) }]);
+  const memberIds = [
+    ...(floor?.tasks || []).map((task) => task.id),
+    ...(floor?.groups || []).map((group) => group.rowId),
+  ];
+  if (memberIds.length) {
+    actions.push(["BulkUpdateRecord", PLANNING_TABLE, memberIds, { [TASK_COLUMNS.group]: memberIds.map(() => name) }]);
+  }
+  const renamed = (floor?.tasks || [])
+    .map((task) => [task.id, toText(task.name), renameFloorInTaskName(task.name, floor.name, name)])
+    .filter(([, current, next]) => next !== current);
+  if (renamed.length) {
+    actions.push(["BulkUpdateRecord", PLANNING_TABLE, renamed.map(([id]) => id), {
+      [TASK_COLUMNS.name]: renamed.map(([, , next]) => next),
+    }]);
   }
   return actions;
 }
 
-// Supprimer un étage : ses lignes-étages et toutes ses tâches, en une seule écriture.
+// Lignes d'un étage à supprimer : ses lignes-étages, ses groupes et toutes ses tâches.
+export function floorRemovalIds(floor) {
+  return [
+    ...(floor?.rowIds || []),
+    ...(floor?.groups || []).map((group) => group.rowId),
+    ...(floor?.tasks || []).map((task) => task.id),
+  ];
+}
+
+// Supprimer un étage : toutes ses lignes, en une seule écriture.
 export function buildFloorDeleteActions(floor) {
-  const ids = [...(floor?.rowIds || []), ...(floor?.tasks || []).map((task) => task.id)];
+  const ids = floorRemovalIds(floor);
   return ids.length ? [["BulkRemoveRecord", PLANNING_TABLE, ids]] : [];
 }
 
@@ -375,16 +525,62 @@ export function buildFloorDeleteQuestion(floor) {
   return `Supprimer l'étage « ${floor.name} » et ses ${count} tâches ?`;
 }
 
-// Conteneur d'une ligne de tâche : son étage, ou le niveau zone de sa zone (même format
-// que la clé de la ligne d'en-tête du conteneur).
+// Nom d'un cycle ou d'un sous-groupe : obligatoire, limité comme un nom de tâche ; les
+// doublons sont permis.
+export function validateGroupName(rawValue) {
+  const name = toText(rawValue);
+  if (!name) return refuse("Le nom ne peut pas être vide.");
+  if (name.length > MAX_TASK_NAME_LENGTH) return refuse(`Le nom est limité à ${MAX_TASK_NAME_LENGTH} caractères.`);
+  return { ok: true, name };
+}
+
+export function buildGroupRenameAction(group, name) {
+  return ["UpdateRecord", PLANNING_TABLE, group.rowId, { [TASK_COLUMNS.name]: name }];
+}
+
+// Lignes d'un groupe à supprimer : la sienne, ses sous-groupes et toutes ses tâches.
+export function groupRemovalIds(group) {
+  return [
+    group.rowId,
+    ...(group.groups || []).map((child) => child.rowId),
+    ...(group.tasks || []).map((task) => task.id),
+  ];
+}
+
+export function buildGroupDeleteActions(group) {
+  return [["BulkRemoveRecord", PLANNING_TABLE, groupRemovalIds(group)]];
+}
+
+export function buildGroupDeleteQuestion(group) {
+  const count = (group?.tasks || []).length;
+  if (!count) return `Supprimer « ${group.name} » ?`;
+  if (count === 1) return `Supprimer « ${group.name} » et sa tâche ?`;
+  return `Supprimer « ${group.name} » et ses ${count} tâches ?`;
+}
+
+// Conteneur d'une ligne de tâche : son groupe, son étage, ou le niveau zone de sa zone (même
+// format que la clé de la ligne d'en-tête du conteneur).
 export function containerKeyOf(line) {
+  if (line?.groupRowId) return `group:${line.groupRowId}`;
   return line?.floorKey ? `floor:${line.zoneKey}/${line.floorKey}` : `zone:${line?.zoneKey ?? ""}`;
 }
 
-// Cible d'un dépôt d'après la ligne visée : ligne de zone → niveau zone de cette zone ;
-// ligne d'étage ou tâche d'un étage → cet étage ; tâche du niveau zone → niveau zone.
+// Cible d'un dépôt d'après la ligne visée : ligne de groupe ou tâche d'un groupe → ce groupe ;
+// ligne d'étage ou tâche directe d'un étage → cet étage ; ligne de zone ou tâche du niveau
+// zone → niveau zone de cette zone.
 export function resolveDropTarget(line) {
-  if (!line || !["zone", "floor", "task"].includes(line.kind)) return null;
+  if (!line || !["zone", "floor", "group", "task"].includes(line.kind)) return null;
+  if (line.groupRowId) {
+    return {
+      key: `group:${line.groupRowId}`,
+      zoneKey: line.zoneKey,
+      zoneName: line.zoneName,
+      floorKey: line.floorKey,
+      floorName: line.floorName,
+      groupRowId: line.groupRowId,
+      label: `Déplacer dans « ${line.groupLabel} »`,
+    };
+  }
   if (line.kind === "floor" || (line.kind === "task" && line.floorKey)) {
     return {
       key: `floor:${line.zoneKey}/${line.floorKey}`,
@@ -405,17 +601,21 @@ export function resolveDropTarget(line) {
   };
 }
 
-// Colonnes à écrire pour déplacer une tâche vers une cible : seulement ce qui change,
-// rien si la cible est son conteneur actuel (dans « Sans zone », la tâche est au niveau
-// zone même si son Groupe nomme un étage).
+// Colonnes à écrire pour déplacer une tâche vers une cible : seulement ce qui change, rien si
+// la cible est son conteneur actuel (dans « Sans zone », la tâche est au niveau zone même si
+// son Groupe nomme un étage). Parent suit le groupe visé (vide hors groupe).
 export function buildMoveFields(task, target) {
   if (!task || !target) return {};
   const currentFloorKey = task.zoneKey === NO_ZONE_KEY ? "" : task.floorKey;
-  if (target.zoneKey === task.zoneKey && target.floorKey === currentFloorKey) return {};
+  const currentGroup = task.groupRowId ?? null;
+  const targetGroup = target.groupRowId ?? null;
+  if (target.zoneKey === task.zoneKey && target.floorKey === currentFloorKey && targetGroup === currentGroup) return {};
   const fields = {};
   if (target.zoneKey !== task.zoneKey) fields[TASK_COLUMNS.zone] = toText(target.zoneName);
   const group = target.floorKey ? toText(target.floorName) : "";
   if (group !== task.groupName) fields[TASK_COLUMNS.group] = group;
+  const parent = targetGroup ? String(targetGroup) : "";
+  if (parent !== (task.parentId ? String(task.parentId) : "")) fields[TASK_COLUMNS.parent] = parent;
   return fields;
 }
 
@@ -426,21 +626,39 @@ export function detectFloorColumn(rows = []) {
   return rows.some((row) => row != null && Object.prototype.hasOwnProperty.call(row, TASK_COLUMNS.floor));
 }
 
+// Les colonnes Nature, Parent et Lien existent-elles ? Comme pour Etage : null si aucune
+// ligne ne permet de le savoir.
+export function detectTemplateColumns(rows = []) {
+  if (!rows?.length) return null;
+  return [TASK_COLUMNS.nature, TASK_COLUMNS.parent, TASK_COLUMNS.link].every((column) => (
+    rows.some((row) => row != null && Object.prototype.hasOwnProperty.call(row, column))
+  ));
+}
+
+// La colonne Lien_Structure existe-t-elle ? Comme pour Etage : null si aucune ligne ne permet
+// de le savoir.
+export function detectStructureLinkColumn(rows = []) {
+  if (!rows?.length) return null;
+  return rows.some((row) => row != null && Object.prototype.hasOwnProperty.call(row, TASK_COLUMNS.structureLink));
+}
+
 function hasDates(task) {
   return task?.start instanceof Date && task?.end instanceof Date;
 }
 
 // Récapitulatif d'une zone, règle MS Project : une tâche occupe ses jours du Début
-// à la Fin ; un jalon n'occupe que l'instant du début de son jour. La Durée compte
-// les jours ouvrés entre le premier début et la dernière fin : un jalon placé en
-// dernier ne compte donc pas son propre jour.
+// à la Fin ; un jalon libre n'occupe que l'instant du début de son jour (placé en
+// dernier, il ne compte pas son propre jour) ; un jalon lié en FD se place en fin
+// de journée.
 export function summarizeTasks(tasks) {
   const dated = (tasks || []).filter(hasDates);
   if (!dated.length) return null;
   const start = new Date(Math.min(...dated.map((task) => task.start.getTime())));
   let last = null;
   dated.forEach((task) => {
-    const endsAtDayStart = Boolean(task.isMilestone);
+    // Un jalon lié en fin → début suit une tâche : il se place en fin de journée et compte
+    // son jour, comme dans MS Project ; un jalon libre reste au début de son jour.
+    const endsAtDayStart = Boolean(task.isMilestone) && task.link?.type !== "FD";
     if (
       !last ||
       task.end > last.end ||
@@ -494,6 +712,64 @@ function readFloor(row) {
   };
 }
 
+// Un cycle ou un sous-groupe, lu depuis sa ligne.
+function readGroup(row) {
+  const floorName = toText(row?.[TASK_COLUMNS.group]);
+  const zoneName = toText(row?.[TASK_COLUMNS.zone]);
+  return {
+    rowId: Number(row?.[TASK_COLUMNS.id]),
+    name: toText(row?.[TASK_COLUMNS.name]),
+    natureKey: natureKeyOf(row?.[TASK_COLUMNS.nature]),
+    parentId: readParentId(row),
+    zoneKey: zoneKeyOf(zoneName),
+    floorKey: floorKeyOf(floorName),
+    floorName,
+  };
+}
+
+function itemRowId(item) {
+  return item.kind === "task" ? item.task.id : item.group.rowId;
+}
+
+// Contenu d'un étage, dans l'ordre de création (ordre du modèle) : ses tâches et ses cycles ;
+// dans un cycle, ses tâches et ses sous-groupes ; dans un sous-groupe, ses tâches. Une ligne
+// dont le Parent ne désigne pas un groupe de l'étage (ou un sous-groupe dont le Parent n'est
+// pas un cycle) se range directement dans l'étage. Récapitulatif d'un groupe : toutes ses
+// tâches, sous-groupes compris.
+function placeFloorContent(floor) {
+  const groupsById = new Map(floor.groups.map((group) => [group.rowId, group]));
+  floor.groups.forEach((group) => {
+    const parent = group.natureKey === "sous-groupe" ? groupsById.get(group.parentId) : null;
+    group.parentGroup = parent?.natureKey === "cycle" ? parent : null;
+    (group.parentGroup ? group.parentGroup.items : floor.items).push({ kind: "group", group });
+    if (group.parentGroup) group.parentGroup.groups.push(group);
+  });
+  floor.tasks.forEach((task) => {
+    const group = groupsById.get(task.parentId) || null;
+    task.groupRowId = group ? group.rowId : null;
+    (group ? group.items : floor.items).push({ kind: "task", task });
+    for (let container = group; container; container = container.parentGroup) container.tasks.push(task);
+  });
+  const byRowId = (left, right) => itemRowId(left) - itemRowId(right);
+  floor.items.sort(byRowId);
+  floor.groups.forEach((group) => {
+    group.items.sort(byRowId);
+    group.summary = summarizeTasks(group.tasks);
+  });
+  floor.summary = summarizeTasks(floor.tasks);
+}
+
+// Le groupe (cycle ou sous-groupe) d'id rowId dans les sections, ou null.
+export function findGroup(sections = [], rowId) {
+  for (const section of sections || []) {
+    for (const floor of section.floors || []) {
+      const group = (floor.groups || []).find((candidate) => candidate.rowId === rowId);
+      if (group) return group;
+    }
+  }
+  return null;
+}
+
 function itemBounds(item) {
   if (item.kind === "floor") {
     return { start: item.floor.summary?.start ?? null, end: item.floor.summary?.end ?? null, name: item.floor.name };
@@ -524,9 +800,9 @@ function compareItems(left, right) {
 // Sections du tableau : une par zone du projet (celles des lignes lues et celles des
 // autres services), triées par nom, puis « Sans zone » si des tâches n'ont pas de zone.
 // Chaque section porte toutes ses tâches (récapitulatif de zone), ses étages (lignes-étages
-// et noms trouvés dans le Groupe des tâches) et son niveau zone : tâches hors étage en haut,
-// puis étages, chacun par date. Pas d'étage dans « Sans zone ». Un filtre de zone n'en garde
-// qu'une.
+// et noms trouvés dans le Groupe des tâches et des groupes), chacun avec son contenu dans
+// l'ordre de création ; son niveau zone : tâches hors étage en haut, puis étages, chacun par
+// date. Pas d'étage dans « Sans zone ». Un filtre de zone n'en garde qu'une.
 export function buildSections({ rows = [], sharedZones = [], zoneFilter = "" } = {}) {
   const zoneNames = new Map();
   const rememberZone = (value) => {
@@ -550,15 +826,35 @@ export function buildSections({ rows = [], sharedZones = [], zoneFilter = "" } =
     floorRowsByZone.get(floorRow.zoneKey).push(floorRow);
   });
 
+  const groupRowsByZone = new Map();
+  rows.filter(isGroupRow).map(readGroup).forEach((group) => {
+    if (group.zoneKey === NO_ZONE_KEY || !group.floorKey) return;
+    if (!groupRowsByZone.has(group.zoneKey)) groupRowsByZone.set(group.zoneKey, []);
+    groupRowsByZone.get(group.zoneKey).push(group);
+  });
+
   const toSection = (zoneKey, zoneName) => {
     const tasks = (tasksByZone.get(zoneKey) || []).slice().sort(compareTasks);
     const floors = new Map();
     const floorFor = (key, name) => {
-      if (!floors.has(key)) floors.set(key, { key, name, rowIds: [], tasks: [], summary: null });
+      if (!floors.has(key)) floors.set(key, { key, name, rowIds: [], tasks: [], groups: [], items: [], summary: null });
       return floors.get(key);
     };
     (floorRowsByZone.get(zoneKey) || []).forEach((floorRow) => {
       floorFor(floorRow.floorKey, floorRow.name).rowIds.push(floorRow.rowId);
+    });
+    (groupRowsByZone.get(zoneKey) || []).forEach((group) => {
+      const floor = floorFor(group.floorKey, group.floorName);
+      floor.groups.push({
+        ...group,
+        zoneName,
+        floorName: floor.name,
+        parentGroup: null,
+        items: [],
+        tasks: [],
+        groups: [],
+        summary: null,
+      });
     });
     const items = [];
     tasks.forEach((task) => {
@@ -566,7 +862,7 @@ export function buildSections({ rows = [], sharedZones = [], zoneFilter = "" } =
       else items.push({ kind: "task", task });
     });
     floors.forEach((floor) => {
-      floor.summary = summarizeTasks(floor.tasks);
+      placeFloorContent(floor);
       items.push({ kind: "floor", floor });
     });
     items.sort(compareItems);
@@ -597,6 +893,11 @@ export function floorCollapseKey(zoneKey, floorKey) {
   return `${zoneKey}/${floorKey}`;
 }
 
+// Clé de repli d'un cycle ou d'un sous-groupe.
+export function groupCollapseKey(rowId) {
+  return `group:${rowId}`;
+}
+
 function summaryFields(summary) {
   return {
     start: summary?.start ?? null,
@@ -608,24 +909,35 @@ function summaryFields(summary) {
   };
 }
 
-// Le modèle de lignes : exactement ce qui est affiché, dans l'ordre, une entrée par
-// ligne — la zone (niveau 0), puis son niveau zone : tâches hors étage (niveau 1) et
-// étages (niveau 1) suivis de leurs tâches (niveau 2). Le tableau le dessine ; le Gantt
-// dessine la même liste, à la même hauteur de ligne.
+// Champs propres aux tâches et aux groupes, vides sur les lignes de zone et d'étage.
+const NO_GROUP_FIELDS = Object.freeze({ groupRowId: null, groupLabel: "", nature: "", link: null, id2: "", indice: "" });
+
+// Le modèle de lignes : exactement ce qui est affiché, dans l'ordre, une entrée par ligne —
+// la zone (niveau 0), puis son niveau zone : tâches hors étage (1) et étages (1) ; dans un
+// étage, ses tâches et ses cycles (2) ; dans un cycle, ses tâches et ses sous-groupes (3) ;
+// dans un sous-groupe, ses tâches (4). Le tableau le dessine ; le Gantt dessine la même liste,
+// à la même hauteur de ligne.
 export function buildRowModel(sections = [], {
   collapsedZoneKeys = new Set(),
   collapsedFloorKeys = new Set(),
+  collapsedGroupKeys = new Set(),
 } = {}) {
   const lines = [];
-  const taskLine = (section, task, floor) => ({
+  const taskLine = (section, task, floor, group, level) => ({
     key: `task:${task.id}`,
     kind: "task",
-    level: floor ? 2 : 1,
+    level,
     zoneKey: section.zoneKey,
     zoneName: section.zoneName,
     floorKey: floor ? floor.key : "",
     floorName: floor ? floor.name : "",
     floorRowIds: [],
+    groupRowId: group ? group.rowId : null,
+    groupLabel: group ? group.name : "",
+    nature: task.natureKey || "",
+    link: task.link || null,
+    id2: task.id2 || "",
+    indice: task.indice || "",
     taskId: task.id,
     name: task.name,
     start: task.start,
@@ -637,6 +949,38 @@ export function buildRowModel(sections = [], {
     collapsed: false,
     childCount: 0,
   });
+  const pushItems = (section, floor, group, items, level) => {
+    items.forEach((item) => {
+      if (item.kind === "task") {
+        lines.push(taskLine(section, item.task, floor, group, level));
+        return;
+      }
+      const child = item.group;
+      const collapsed = collapsedGroupKeys.has(groupCollapseKey(child.rowId));
+      lines.push({
+        key: `group:${child.rowId}`,
+        kind: "group",
+        level,
+        zoneKey: section.zoneKey,
+        zoneName: section.zoneName,
+        floorKey: floor.key,
+        floorName: floor.name,
+        floorRowIds: [],
+        groupRowId: child.rowId,
+        groupLabel: child.name,
+        nature: child.natureKey,
+        link: null,
+        id2: "",
+        indice: "",
+        taskId: null,
+        name: child.name,
+        ...summaryFields(child.summary),
+        collapsed,
+        childCount: child.items.length,
+      });
+      if (!collapsed) pushItems(section, floor, child, child.items, level + 1);
+    });
+  };
   sections.forEach((section) => {
     const collapsed = collapsedZoneKeys.has(section.zoneKey);
     lines.push({
@@ -648,6 +992,7 @@ export function buildRowModel(sections = [], {
       floorKey: "",
       floorName: "",
       floorRowIds: [],
+      ...NO_GROUP_FIELDS,
       taskId: null,
       name: section.label,
       ...summaryFields(section.summary),
@@ -657,7 +1002,7 @@ export function buildRowModel(sections = [], {
     if (collapsed) return;
     section.items.forEach((item) => {
       if (item.kind === "task") {
-        lines.push(taskLine(section, item.task, null));
+        lines.push(taskLine(section, item.task, null, null, 1));
         return;
       }
       const { floor } = item;
@@ -671,14 +1016,15 @@ export function buildRowModel(sections = [], {
         floorKey: floor.key,
         floorName: floor.name,
         floorRowIds: [...floor.rowIds],
+        ...NO_GROUP_FIELDS,
         taskId: null,
         name: floor.name,
         ...summaryFields(floor.summary),
         collapsed: floorCollapsed,
-        childCount: floor.tasks.length,
+        childCount: floor.items.length,
       });
       if (floorCollapsed) return;
-      floor.tasks.forEach((task) => lines.push(taskLine(section, task, floor)));
+      pushItems(section, floor, null, floor.items, 2);
     });
   });
   return lines;

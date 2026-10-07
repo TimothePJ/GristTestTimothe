@@ -24,3 +24,13 @@ test("le recalcul automatique ignore aussi les étages Synthese", () => {
   ];
   assert.deepEqual(getProjectPlanningRows(rows, "P").map((row) => row.id), [1]);
 });
+
+// Review Focus 5 : le N° d'une tâche Synthese n'en fait pas un document à recalculer.
+test("le recalcul automatique ignore une tâche Synthese qui a un N° et un indice", () => {
+  const rows = [
+    { id: 1, NomProjet: "P", Taches: "RDC", Type_doc: "COFFRAGE", ID2: "001", Service: "Synthese" },
+    { id: 8, NomProjet: "P", Taches: "PLAN DE SYNTHESE RESEAUX NIV SS1", Type_doc: "", ID2: "2001", Indice: "A", Service: "Synthese" },
+    { id: 9, NomProjet: "P", Taches: "Plan sans type", Type_doc: "", ID2: "3001", Service: "Structure" },
+  ];
+  assert.deepEqual(getProjectPlanningRows(rows, "P").map((row) => row.id), [1, 9]);
+});

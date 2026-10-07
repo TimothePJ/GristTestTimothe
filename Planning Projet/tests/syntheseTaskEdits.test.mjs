@@ -2,12 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  MAX_CODE_LENGTH,
   MAX_DURATION_DAYS,
   MAX_TASK_NAME_LENGTH,
   NEW_TASK_NAME,
   applyTaskEdit,
   buildNewTask,
   buildTaskFields,
+  dateFieldsOf,
   readTask,
   stepDurationText,
 } from "../assets/js/services/syntheseTaskModel.js";
@@ -25,7 +27,7 @@ function task(fields) {
 // Visa MOE : Ven 09/10/26 → Ven 23/10/26, 11 jours.
 const visa = () => task({ id: 5, Taches: "Visa MOE", Diff_coffrage: "2026-10-09", Diff_armature: "2026-10-23", Duree_1: 11 });
 const milestone = () => task({ id: 6, Taches: "Réunion de synthèse", Diff_coffrage: "2026-11-12", Diff_armature: "2026-11-12", Duree_1: 0 });
-const undated = () => task({ id: 7, Taches: "À planifier", Diff_coffrage: null, Diff_armature: null, Duree_1: 0 });
+const undated = () => task({ id: 7, Taches: "À planifier", Diff_coffrage: null, Diff_armature: null, Duree_1: "" });
 const edit = (target, field, value) => applyTaskEdit(target, field, value, { today: TODAY });
 
 test("Durée : la Fin suit, Duree_1 est écrite", () => {
@@ -136,10 +138,14 @@ test("tâche sans dates : une date saisie en fait une tâche d'un jour", () => {
   assert.equal(end.task.durationDays, 1);
 });
 
-test("tâche sans dates : une Durée part du prochain jour ouvré", () => {
-  const result = applyTaskEdit(undated(), "duration", "3", { today: day(2026, 9, 26) }); // samedi
-  assert.equal(iso(result.task.start), "2026-09-28");
-  assert.equal(iso(result.task.end), "2026-09-30");
+test("tâche sans dates : la Durée est seulement mémorisée, aucune date n'est créée", () => {
+  const result = applyTaskEdit(undated(), "duration", "3", { today: day(2026, 9, 26) });
+  assert.equal(result.ok, true);
+  assert.equal(result.task.start, null);
+  assert.equal(result.task.durationDays, 3);
+  assert.deepEqual(result.fields, { Duree_1: 3 });
+  const planned = task({ id: 8, Taches: "Visa", Diff_coffrage: null, Diff_armature: null, Duree_1: 3 });
+  assert.deepEqual(applyTaskEdit(planned, "duration", "3", { today: TODAY }).fields, {});
 });
 
 test("dates invalides refusées", () => {
@@ -214,4 +220,35 @@ test("dates hors de 2000-2100 refusées (faute de frappe)", () => {
   assert.match(far.error, /entre 2000 et 2100/);
   assert.equal(edit(visa(), "start", "1999-12-31").ok, false);
   assert.equal(edit(visa(), "end", "2100-12-31").ok, true);
+});
+
+test("tâche sans dates avec une durée prévue : la date saisie donne l'autre", () => {
+  const visa = task({ id: 8, Taches: "VISA Indice 0", Diff_coffrage: null, Diff_armature: null, Duree_1: 10 });
+  const byStart = edit(visa, "start", "2026-01-20");
+  assert.deepEqual([iso(byStart.task.start), iso(byStart.task.end), byStart.task.durationDays], ["2026-01-20", "2026-02-02", 10]);
+  assert.deepEqual(byStart.fields, { Diff_coffrage: "2026-01-20", Diff_armature: "2026-02-02", Duree_1: 10 });
+  const byEnd = edit(visa, "end", "2026-02-02");
+  assert.equal(iso(byEnd.task.start), "2026-01-20");
+  const jalon = task({ id: 9, Taches: "DIFFUSION FDS", Diff_coffrage: null, Diff_armature: null, Duree_1: 0 });
+  const placed = edit(jalon, "start", "2026-01-03"); // samedi → lundi
+  assert.deepEqual([iso(placed.task.start), iso(placed.task.end), placed.task.isMilestone], ["2026-01-05", "2026-01-05", true]);
+  assert.deepEqual(placed.fields, { Diff_coffrage: "2026-01-05", Diff_armature: "2026-01-05", Duree_1: 0 });
+});
+
+test("N° et Indice : texte libre, espaces retirés, vide permis, 50 caractères au plus", () => {
+  const base = visa();
+  assert.deepEqual(edit(base, "id2", " 2001 ").fields, { ID2: "2001" });
+  assert.equal(edit(base, "id2", " 2001 ").task.id2, "2001");
+  assert.deepEqual(edit(base, "indice", "A").fields, { Indice: "A" });
+  assert.deepEqual(edit({ ...base, indice: "A" }, "indice", "A").fields, {});
+  assert.deepEqual(edit({ ...base, id2: "2001" }, "id2", "").fields, { ID2: "" });
+  const tooLong = "x".repeat(MAX_CODE_LENGTH + 1);
+  assert.deepEqual(edit(base, "id2", tooLong), { ok: false, error: "Le N° est limité à 50 caractères." });
+  assert.deepEqual(edit(base, "indice", tooLong), { ok: false, error: "L'indice est limité à 50 caractères." });
+});
+
+test("colonnes de dates d'une tâche datée", () => {
+  const result = edit(visa(), "duration", "0");
+  assert.deepEqual(dateFieldsOf(result.task), { Diff_coffrage: "2026-10-09", Diff_armature: "2026-10-09", Duree_1: 0 });
+  assert.deepEqual(dateFieldsOf(visa()), { Diff_coffrage: "2026-10-09", Diff_armature: "2026-10-23", Duree_1: 11 });
 });

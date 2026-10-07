@@ -1050,6 +1050,13 @@ async function buildPlanningProjetTextUpdateActions({
   }
 }
 
+// Tâche de la vue Synthese de Planning Projet (service Synthese, nom de tâche rempli, sans type de document) :
+// son Indice se saisit à la main ; la synchro des indices de ListeDePlan n'y touche pas.
+function isSynthesePlanningTask(row) {
+  const service = String(row?.Service ?? "").normalize("NFD").replace(/\p{M}/gu, "").trim().toLowerCase();
+  return service === "synthese" && !String(row?.Type_doc ?? "").trim() && Boolean(String(row?.Taches ?? row?.Tache ?? "").trim());
+}
+
 async function syncPlanningProjetIndicesFromListeDePlan() {
   try {
     const planningHelpers = await loadPlanningRealisationHelpers();
@@ -1108,6 +1115,7 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
     for (const p of planningRows) {
       const planningId = p.id;
       if (planningId == null) continue;
+      if (isSynthesePlanningTask(p)) continue;
 
       const planningIdentity = {
         project: normalizeProject(p.NomProjet),

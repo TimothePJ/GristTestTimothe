@@ -4,6 +4,7 @@
 // planning : glisser la déplace, Ctrl + molette (ou la molette sur l'échelle) zoome.
 // Lecture seule : les dates se modifient dans le tableau.
 import {
+  LABEL_GAP_PX,
   MILESTONE_HALF_PX,
   ROW_HEIGHT_PX,
   TASK_BAR_HEIGHT_PX,
@@ -21,7 +22,6 @@ import {
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const SCALE_TIER_HEIGHT_PX = 16;
-const LABEL_GAP_PX = 6;
 const LABEL_BASELINE_PX = 4;
 const ZONE_BAR_TOP_PX = 7;
 const ZONE_BAR_HEIGHT_PX = 5;
@@ -29,6 +29,14 @@ const ZONE_CAP_PX = 6;
 const FLOOR_BRACKET_TOP_PX = 8;
 const FLOOR_TICK_PX = 6;
 const LINK_HEAD_PX = 4;
+
+// Pointe pleine d'une flèche, selon sa direction.
+const LINK_HEADS = Object.freeze({
+  down: (x, y) => [[x - LINK_HEAD_PX, y - LINK_HEAD_PX], [x + LINK_HEAD_PX, y - LINK_HEAD_PX], [x, y]],
+  up: (x, y) => [[x - LINK_HEAD_PX, y + LINK_HEAD_PX], [x + LINK_HEAD_PX, y + LINK_HEAD_PX], [x, y]],
+  right: (x, y) => [[x - LINK_HEAD_PX, y - LINK_HEAD_PX], [x - LINK_HEAD_PX, y + LINK_HEAD_PX], [x, y]],
+  left: (x, y) => [[x + LINK_HEAD_PX, y - LINK_HEAD_PX], [x + LINK_HEAD_PX, y + LINK_HEAD_PX], [x, y]],
+});
 
 function svgElement(tag, attributes = {}, text = null) {
   const element = document.createElementNS(SVG_NS, tag);
@@ -198,12 +206,10 @@ export function createSyntheseGantt({ headHost, layerHost, interactionHost, rowH
     ];
   }
 
-  // Flèche entre deux tâches : trait, puis pointe pleine vers le bas ou vers la droite.
+  // Flèche entre deux tâches : trait, puis pointe pleine dans sa direction.
   function drawLink(link) {
     const { x, y, direction } = link.head;
-    const head = direction === "down"
-      ? [[x - LINK_HEAD_PX, y - LINK_HEAD_PX], [x + LINK_HEAD_PX, y - LINK_HEAD_PX], [x, y]]
-      : [[x - LINK_HEAD_PX, y - LINK_HEAD_PX], [x - LINK_HEAD_PX, y + LINK_HEAD_PX], [x, y]];
+    const head = (LINK_HEADS[direction] || LINK_HEADS.right)(x, y);
     return [
       svgElement("polyline", { class: "stg-link", points: toPoints(link.points) }),
       svgElement("polygon", { class: "stg-link-head", points: toPoints(head) }),

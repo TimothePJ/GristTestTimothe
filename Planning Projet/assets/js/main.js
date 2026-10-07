@@ -82,6 +82,7 @@ import {
 import { createSyntheseTaskTable } from "./ui/syntheseTaskTable.js";
 import { createSyntheseTasksController } from "./ui/syntheseTasksController.js";
 import { createSyntheseGantt } from "./ui/syntheseGantt.js";
+import { createStructureLinkDialog } from "./ui/structureLinkDialog.js";
 
 let toolbarBound = false;
 // Tableau de tâches de la vue Synthese : créé à la première activation du service.
@@ -2141,6 +2142,48 @@ function bindSyntheseSpace() {
   serviceContext.subscribe((context) => applySyntheseSpace(context?.selectedService));
 }
 
+// Bouton « Lien Structure » de la vue Synthese : une fenêtre montre, zone par zone, les étages
+// de Synthese en face des coffrages de Structure ; on y glisse un coffrage sur un étage pour
+// les lier et reprendre sa date de diffusion à l'indice 0. Les coffrages et la liste de plans
+// sont lus pour le projet, tous services confondus ; les étages et toute écriture passent par
+// le tableau de tâches.
+function bindStructureLinkDialog() {
+  if (EMBEDDED_PLANNING_SYNC_MODE) return;
+  const serviceContext = window.GristServiceContext;
+  const dialog = document.getElementById("structureLinkDialog");
+  if (!dialog || typeof serviceContext?.fetchProjectRows !== "function") return;
+  const structureLinkDialog = createStructureLinkDialog({
+    dialog,
+    title: document.getElementById("structureLinkTitle"),
+    status: document.getElementById("structureLinkStatus"),
+    body: document.getElementById("structureLinkBody"),
+    closeButton: document.getElementById("structureLinkCloseBtn"),
+  }, {
+    loadRows: async () => {
+      const [projectRows, planRows] = await Promise.all([
+        serviceContext.fetchProjectRows("Planning_Projet"),
+        serviceContext.fetchProjectRows("ListePlan_NDC_COF"),
+      ]);
+      return { projectRows, planRows };
+    },
+    getSource: () => syntheseTasks?.getStructureLinkSource() || null,
+    applyLink: (request) => (syntheseTasks
+      ? syntheseTasks.applyStructureLink(request)
+      : Promise.resolve({ ok: false, error: "Les étages ne sont pas encore chargés : fermez la fenêtre puis rouvrez-la." })),
+    getProjectName: () => serviceContext.getCurrentProject?.()?.name || "",
+  });
+  // Projet ou service changé (ici, dans un autre widget ou un autre onglet) : la fenêtre
+  // montrait l'ancien — elle se ferme plutôt que de laisser écrire à côté.
+  serviceContext.subscribe?.((context) => {
+    if (context?.selectedService !== SYNTHESE_SERVICE_NAME) structureLinkDialog.close();
+    else structureLinkDialog.closeIfStale();
+  });
+  document.getElementById("structureLinkToggle")
+    ?.addEventListener("click", () => {
+      void structureLinkDialog.open();
+    });
+}
+
 async function handleProjectChange(currentState) {
   console.log("Projet sélectionné :", currentState.selectedProject || "(aucun)");
   // La zone du bandeau vient d'être remise à zéro : le tableau de tâches la suit tout de
@@ -2173,6 +2216,7 @@ async function bootstrap() {
 
     // ARCHIVE vue Synthese v1 : bindSyntheseView();
     bindSyntheseSpace();
+    bindStructureLinkDialog();
     bindSharedProjectZones();
     bindAddZoneModal();
     bindManageZoneModal();

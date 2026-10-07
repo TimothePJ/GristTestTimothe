@@ -10,21 +10,43 @@ import {
   applyTaskEdit,
   buildFloorDeleteActions,
   buildFloorDeleteQuestion,
-  buildFloorFields,
   buildFloorRenameActions,
+  buildFloorRenameChanges,
+  buildGroupDeleteActions,
+  buildGroupDeleteQuestion,
+  buildGroupRenameAction,
   buildMoveFields,
   buildNewTask,
   buildRowModel,
   buildSections,
   buildTaskFields,
+  dateFieldsOf,
   detectFloorColumn,
+  detectStructureLinkColumn,
+  detectTemplateColumns,
+  findGroup,
   floorCollapseKey,
   floorKeyOf,
+  floorRemovalIds,
+  groupCollapseKey,
+  groupRemovalIds,
+  moveTaskStart,
   nextFloorName,
   validateFloorName,
+  validateGroupName,
 } from "../services/syntheseTaskModel.js";
+import {
+  buildBulkAddAction,
+  buildFloorFromTemplate,
+  buildTemplateLinks,
+} from "../services/syntheseFloorTemplate.js";
+import { cascadeFrom } from "../services/syntheseLinks.js";
+import { findFloorStart } from "../services/structureLinkModel.js";
 
 const SAVING_DELAY_MS = 1000;
+
+// Saisies qui changent les dates : les tâches liées en aval suivent.
+const DATE_FIELDS = new Set(["start", "end", "duration"]);
 
 const MESSAGES = Object.freeze({
   noProject: "Choisissez un projet pour afficher ses tâches.",
@@ -36,7 +58,19 @@ const MESSAGES = Object.freeze({
   saving: "Enregistrement…",
   contextChanged: "Le projet ou le service a changé avant l'enregistrement : recommencez.",
   noFloorColumn: "La colonne « Etage » n'existe pas dans Planning_Projet : ajoutez-la (type Booléen) pour créer des étages.",
+  noTemplateColumns: "Les colonnes « Nature », « Parent » et « Lien » (Texte) manquent dans Planning_Projet : ajoutez-les pour créer des étages.",
+  templateFailed: "L'étage n'a pas pu être créé complètement : rien n'a été gardé. Réessayez.",
+  noLinkColumn: "La colonne « Lien_Structure » (Texte) manque dans Planning_Projet : ajoutez-la pour lier les étages aux coffrages.",
+  floorGone: "Cet étage n'existe plus : fermez la fenêtre puis rouvrez-la.",
+  noFloorRow: "Cet étage n'a pas de ligne « étage » dans Planning_Projet : le lien ne peut pas être mémorisé.",
+  noPlanTask: "Cet étage n'a pas de tâche « FOND DE PLAN DE SYNTHESE » : aucune date ne peut être posée.",
+  badIssueDate: "La date de diffusion à l'indice 0 de ce coffrage n'est pas utilisable (elle doit être entre 2000 et 2100) : corrigez-la dans la liste de plans.",
 });
+
+// Seul cas où la création d'un étage ne peut ni réussir ni être annulée : le dire précisément.
+function floorCleanupFailedMessage(name) {
+  return `L'étage n'a pas pu être créé complètement et ses lignes n'ont pas pu être retirées : supprimez l'étage « ${name} » à la main.`;
+}
 
 function toText(value) {
   return value == null ? "" : String(value).trim();
@@ -55,9 +89,23 @@ function describeWriteError(error) {
   if (/a changé pendant/i.test(message)) {
     return "Le projet ou le service a changé pendant l'enregistrement : recommencez.";
   }
+  // Colonne du lien Structure inconnue de Grist.
+  if (/\bLien_Structure\b/.test(message)) return MESSAGES.noLinkColumn;
   // Grist refuse une colonne inconnue : seule l'écriture d'un étage utilise Etage.
   if (/\bEtage\b/.test(message)) return MESSAGES.noFloorColumn;
+  // Colonnes du modèle d'étage inconnues de Grist.
+  if (/\b(Nature|Parent|Lien)\b/.test(message)) return MESSAGES.noTemplateColumns;
   return "L'enregistrement dans Grist a échoué. Réessayez.";
+}
+
+// Champs de plusieurs lignes (mêmes colonnes) → colonnes d'un BulkUpdateRecord.
+function toColumns(fieldsList) {
+  const columns = {};
+  fieldsList.forEach((fields, index) => Object.entries(fields).forEach(([name, value]) => {
+    if (!columns[name]) columns[name] = new Array(fieldsList.length).fill(null);
+    columns[name][index] = value;
+  }));
+  return columns;
 }
 
 export function createSyntheseTasksController({
@@ -85,8 +133,13 @@ export function createSyntheseTasksController({
   let loadToken = 0;
   const collapsedZoneKeys = new Set();
   const collapsedFloorKeys = new Set();
+  const collapsedGroupKeys = new Set();
   // Colonne Etage : true / false d'après les lignes lues, null tant qu'on ne sait pas.
   let floorColumn = null;
+  // Colonnes Nature, Parent et Lien (modèle d'étage) : même principe que Etage.
+  let templateColumns = null;
+  // Colonne Lien_Structure (lien vers un coffrage de Structure) : même principe que Etage.
+  let structureLinkColumn = null;
   // Opérations affichées mais pas encore enregistrées, dans l'ordre (voir submit).
   let pendingOps = [];
   let writeQueue = Promise.resolve();
@@ -100,13 +153,16 @@ export function createSyntheseTasksController({
   const table = createTable({
     onEdit: (taskId, field, rawValue) => handleEdit(taskId, field, rawValue),
     onRenameFloor: (zoneKey, floorKey, rawValue) => handleRenameFloor(zoneKey, floorKey, rawValue),
-    onAddTask: (zoneKey, floorKey = "") => handleAddTask(zoneKey, floorKey),
+    onRenameGroup: (groupRowId, rawValue) => handleRenameGroup(groupRowId, rawValue),
+    onAddTask: (zoneKey, floorKey = "", groupRowId = null) => handleAddTask(zoneKey, floorKey, groupRowId),
     onAddFloor: (zoneKey) => handleAddFloor(zoneKey),
     onDeleteTask: (taskId) => handleDeleteTask(taskId),
     onDeleteFloor: (zoneKey, floorKey) => handleDeleteFloor(zoneKey, floorKey),
+    onDeleteGroup: (groupRowId) => handleDeleteGroup(groupRowId),
     onMoveTask: (taskId, target) => handleMoveTask(taskId, target),
     onToggleZone: (zoneKey) => toggleZone(zoneKey),
     onToggleFloor: (zoneKey, floorKey) => toggleFloor(zoneKey, floorKey),
+    onToggleGroup: (groupRowId) => toggleGroup(groupRowId),
     onLockedAttempt: () => setStatus(lockedMessage(), "error"),
   });
 
@@ -199,13 +255,17 @@ export function createSyntheseTasksController({
     sections = project
       ? buildSections({ rows: displayedRows(), sharedZones: getSharedZones(project), zoneFilter })
       : [];
-    const lines = buildRowModel(sections, { collapsedZoneKeys, collapsedFloorKeys });
+    const lines = buildRowModel(sections, { collapsedZoneKeys, collapsedFloorKeys, collapsedGroupKeys });
     let emptyMessage = "";
     if (!project) emptyMessage = MESSAGES.noProject;
     else if (!loaded) emptyMessage = MESSAGES.loading;
     else if (readError) emptyMessage = MESSAGES.readFailed;
     else if (!lines.length) emptyMessage = MESSAGES.noZone;
-    table.render(lines, { editable: isEditable(), emptyMessage, canAddFloor: floorColumn !== false });
+    table.render(lines, {
+      editable: isEditable(),
+      emptyMessage,
+      canAddFloor: floorColumn !== false && templateColumns !== false,
+    });
   }
 
   async function load({ forceRefresh = false } = {}) {
@@ -217,7 +277,10 @@ export function createSyntheseTasksController({
       projectKey = nextProjectKey;
       collapsedZoneKeys.clear();
       collapsedFloorKeys.clear();
+      collapsedGroupKeys.clear();
       floorColumn = null;
+      templateColumns = null;
+      structureLinkColumn = null;
       rows = [];
       loaded = false;
       readError = false;
@@ -248,6 +311,8 @@ export function createSyntheseTasksController({
     if (token !== loadToken || !active) return;
     rows = Array.isArray(nextRows) ? nextRows : [];
     floorColumn = detectFloorColumn(rows);
+    templateColumns = detectTemplateColumns(rows);
+    structureLinkColumn = detectStructureLinkColumn(rows);
     readError = false;
     loaded = true;
     render();
@@ -263,6 +328,10 @@ export function createSyntheseTasksController({
       if (task) return task;
     }
     return null;
+  }
+
+  function allTasks() {
+    return sections.flatMap((section) => section.tasks);
   }
 
   function findRow(rowId) {
@@ -327,9 +396,10 @@ export function createSyntheseTasksController({
   }
 
   // Une opération : ce qu'elle change à l'affichage en attendant Grist (valeurs par ligne,
-  // lignes retirées), ses actions Grist et le contexte où elle a été demandée.
-  function createOp({ changes = new Map(), removals = [], actions }) {
-    return { changes, removals: new Set(removals), actions, context: captureContext() };
+  // lignes retirées), ses actions Grist — ou `perform`, quand l'écriture se fait en plusieurs
+  // temps — et le contexte où elle a été demandée.
+  function createOp({ changes = new Map(), removals = [], actions = [], perform = null }) {
+    return { changes, removals: new Set(removals), actions, perform, context: captureContext() };
   }
 
   // Échec : l'opération est retirée, et avec elle les suivantes qui touchent les mêmes
@@ -359,7 +429,7 @@ export function createSyntheseTasksController({
       let result;
       try {
         assertSameContext(op.context);
-        result = await write(op.actions);
+        result = op.perform ? await op.perform() : await write(op.actions);
       } catch (error) {
         const dropped = dropFrom(op);
         render();
@@ -381,9 +451,10 @@ export function createSyntheseTasksController({
     render();
   }
 
-  // Saisie : affichée tout de suite, enregistrée ensuite en arrière-plan, dans l'ordre. Le
-  // tableau passe aussitôt à la cellule suivante : rien de ce qui est tapé entre-temps
-  // n'est perdu.
+  // Saisie : affichée tout de suite, enregistrée ensuite en arrière-plan, dans l'ordre. Une
+  // date ou une durée changée entraîne les tâches liées en aval, dans la même écriture. Le
+  // tableau passe aussitôt à la cellule suivante : rien de ce qui est tapé entre-temps n'est
+  // perdu.
   function handleEdit(taskId, field, rawValue) {
     if (!isEditable()) {
       refuseLocked();
@@ -401,11 +472,18 @@ export function createSyntheseTasksController({
       render();
       return;
     }
+    const changes = new Map([[taskId, result.fields]]);
+    const actions = [["UpdateRecord", PLANNING_TABLE, taskId, result.fields]];
+    if (DATE_FIELDS.has(field)) {
+      const updates = cascadeFrom(result.task, allTasks());
+      if (updates.length) {
+        const fieldsList = updates.map(dateFieldsOf);
+        updates.forEach((update, index) => changes.set(update.id, fieldsList[index]));
+        actions.push(["BulkUpdateRecord", PLANNING_TABLE, updates.map((update) => update.id), toColumns(fieldsList)]);
+      }
+    }
     clearStatus();
-    void submit(createOp({
-      changes: new Map([[taskId, result.fields]]),
-      actions: [["UpdateRecord", PLANNING_TABLE, taskId, result.fields]],
-    }), {
+    void submit(createOp({ changes, actions }), {
       onFailure: (error, dropped) => fail("Modification de la tâche impossible :", error, dropped),
     });
   }
@@ -414,35 +492,45 @@ export function createSyntheseTasksController({
     return section?.floors.find((floor) => floor.key === floorKey) || null;
   }
 
-  // Nouvelle tâche dans un groupe : l'étage floorKey, ou le niveau zone ("").
-  function handleAddTask(zoneKey, floorKey = "") {
+  // Nouvelle tâche dans un conteneur : un groupe (cycle ou sous-groupe), un étage, ou le
+  // niveau zone.
+  function handleAddTask(zoneKey, floorKey = "", groupRowId = null) {
     if (!isEditable()) {
       refuseLocked();
       return Promise.resolve();
     }
     const project = getProject();
-    const section = findSection(zoneKey);
-    const floor = floorKey ? findFloor(section, floorKey) : null;
-    if (!project || !section || (floorKey && !floor)) return Promise.resolve();
-    const groupTasks = floor
-      ? floor.tasks
-      : section.items.filter((item) => item.kind === "task").map((item) => item.task);
+    const group = groupRowId ? findGroup(sections, groupRowId) : null;
+    if (groupRowId && !group) return Promise.resolve();
+    const section = findSection(group ? group.zoneKey : zoneKey);
+    const wantedFloorKey = group ? group.floorKey : floorKey;
+    const floor = wantedFloorKey ? findFloor(section, wantedFloorKey) : null;
+    if (!project || !section || (wantedFloorKey && !floor)) return Promise.resolve();
+    const groupTasks = group
+      ? group.tasks
+      : floor
+        ? floor.tasks
+        : section.items.filter((item) => item.kind === "task").map((item) => item.task);
     const task = buildNewTask({
       zoneName: section.zoneName,
       groupName: floor ? floor.name : "",
       groupTasks,
       today: now(),
+      parentId: group ? group.rowId : null,
     });
     const fields = buildTaskFields(task, { projectName: project.name });
-    const where = floor ? `l'étage « ${floor.name} »` : `« ${section.label} »`;
+    const where = group ? `« ${group.name} »` : floor ? `l'étage « ${floor.name} »` : `« ${section.label} »`;
     clearStatus();
     return submit(createOp({ actions: [["AddRecord", PLANNING_TABLE, null, fields]] }), {
       onSuccess: (result) => {
         const newId = Number(result?.retValues?.[0]);
         const hasId = Number.isInteger(newId) && newId > 0;
         if (hasId && !findRow(newId)) rows = [...rows, { id: newId, ...fields }];
-        collapsedZoneKeys.delete(zoneKey);
-        if (floor) collapsedFloorKeys.delete(floorCollapseKey(zoneKey, floor.key));
+        collapsedZoneKeys.delete(section.zoneKey);
+        if (floor) collapsedFloorKeys.delete(floorCollapseKey(section.zoneKey, floor.key));
+        for (let container = group; container; container = container.parentGroup) {
+          collapsedGroupKeys.delete(groupCollapseKey(container.rowId));
+        }
         render();
         if (hasId) table.startEditing(newId, "name");
         info(`Tâche ajoutée dans ${where}.`);
@@ -469,6 +557,9 @@ export function createSyntheseTasksController({
     });
   }
 
+  // Nouvel étage d'après le modèle : ses 26 lignes, puis Parent et Lien une fois les ids
+  // connus. Si le second temps échoue, les lignes créées sont retirées : rien de bancal ne
+  // reste dans Grist.
   function handleAddFloor(zoneKey) {
     if (!isEditable()) {
       refuseLocked();
@@ -478,27 +569,81 @@ export function createSyntheseTasksController({
       setStatus(MESSAGES.noFloorColumn, "error");
       return Promise.resolve();
     }
+    if (templateColumns === false) {
+      setStatus(MESSAGES.noTemplateColumns, "error");
+      return Promise.resolve();
+    }
     const project = getProject();
     const section = findSection(zoneKey);
     if (!project || !section || section.zoneKey === NO_ZONE_KEY) return Promise.resolve();
     const name = nextFloorName(section.floors);
-    const fields = buildFloorFields({ name, zoneName: section.zoneName, projectName: project.name });
+    const newRows = buildFloorFromTemplate({ floorName: name, zoneName: section.zoneName, projectName: project.name });
     clearStatus();
-    return submit(createOp({ actions: [["AddRecord", PLANNING_TABLE, null, fields]] }), {
-      onSuccess: (result) => {
-        const newId = Number(result?.retValues?.[0]);
-        const hasId = Number.isInteger(newId) && newId > 0;
-        if (hasId && !findRow(newId)) rows = [...rows, { id: newId, ...fields }];
+    // `op` est référencé depuis `perform` (fermeture) : le second temps de l'écriture doit
+    // revérifier le contexte capturé au premier (submit ne le revérifie qu'une fois, avant
+    // `perform`).
+    const op = createOp({
+      perform: async () => {
+        const added = await write([buildBulkAddAction(newRows)]);
+        const ids = Array.isArray(added?.retValues?.[0]) ? added.retValues[0].map(Number) : [];
+        try {
+          assertSameContext(op.context);
+          const links = buildTemplateLinks(ids);
+          await write([links.action]);
+          return { ids, linkFields: links.fieldsById };
+        } catch (error) {
+          const created = ids.filter((id) => Number.isInteger(id) && id > 0);
+          let cleanupFailed = false;
+          if (created.length) {
+            try {
+              // Annulation de notre propre écriture : directement par docApi, pas par write(),
+              // pour qu'un « Editer » désactivé entre les deux temps ne la bloque pas aussi.
+              await docApi.applyUserActions([["BulkRemoveRecord", PLANNING_TABLE, created]]);
+            } catch (cleanupError) {
+              console.error("Lignes de l'étage incomplet non retirées :", cleanupError);
+              cleanupFailed = true;
+            }
+          }
+          const message = describeWriteError(error);
+          const failure = new Error(MESSAGES.templateFailed, { cause: error });
+          failure.userMessage = cleanupFailed
+            ? floorCleanupFailedMessage(name)
+            : message === MESSAGES.contextChanged
+              ? MESSAGES.contextChanged
+              : message === MESSAGES.noTemplateColumns
+                ? MESSAGES.noTemplateColumns
+                : MESSAGES.templateFailed;
+          throw failure;
+        }
+      },
+    });
+    return submit(op, {
+      onSuccess: ({ ids, linkFields }) => {
+        const known = new Set(rows.map((row) => Number(row?.[TASK_COLUMNS.id])));
+        // Une relecture partagée a pu arriver entre les deux temps de l'écriture : les 26
+        // lignes sont alors déjà dans `rows`, sans Parent ni Lien — à compléter, pas à ignorer.
+        rows = rows.map((row) => {
+          const fields = linkFields.get(Number(row?.[TASK_COLUMNS.id]));
+          return fields ? { ...row, ...fields } : row;
+        });
+        const added = newRows
+          .map((fields, index) => ({ id: ids[index], ...fields, ...(linkFields.get(ids[index]) || {}) }))
+          .filter((row) => !known.has(row.id));
+        rows = [...rows, ...added];
         collapsedZoneKeys.delete(zoneKey);
+        // Grist réutilise les ids : un ancien repli (étage ou cycle supprimé) ne doit pas
+        // s'appliquer au nouvel étage. Le nouvel étage est aussi déplié d'après la spec.
+        collapsedFloorKeys.delete(floorCollapseKey(zoneKey, floorKeyOf(name)));
+        ids.forEach((id) => collapsedGroupKeys.delete(groupCollapseKey(id)));
         render();
-        if (hasId) table.startEditingFloor(zoneKey, floorKeyOf(name));
+        table.startEditingFloor(zoneKey, floorKeyOf(name));
         info(`Étage ajouté dans « ${section.label} ».`);
       },
       onFailure: (error, dropped) => {
-        if (describeWriteError(error) === MESSAGES.noFloorColumn) {
-          floorColumn = false;
-          render();
-        }
+        const message = describeWriteError(error);
+        if (message === MESSAGES.noFloorColumn) floorColumn = false;
+        if (message === MESSAGES.noTemplateColumns) templateColumns = false;
+        render();
         fail("Ajout de l'étage impossible :", error, dropped);
       },
     });
@@ -524,9 +669,7 @@ export function createSyntheseTasksController({
       render();
       return;
     }
-    const changes = new Map();
-    floor.rowIds.forEach((rowId) => changes.set(rowId, { [TASK_COLUMNS.name]: result.name }));
-    floor.tasks.forEach((task) => changes.set(task.id, { [TASK_COLUMNS.group]: result.name }));
+    const changes = buildFloorRenameChanges(floor, result.name);
     // Le repli suit l'étage sous son nouveau nom.
     if (collapsedFloorKeys.delete(floorCollapseKey(zoneKey, floor.key))) {
       collapsedFloorKeys.add(floorCollapseKey(zoneKey, result.key));
@@ -547,11 +690,66 @@ export function createSyntheseTasksController({
     if (!confirm(buildFloorDeleteQuestion(floor))) return Promise.resolve();
     clearStatus();
     return submit(createOp({
-      removals: [...floor.rowIds, ...floor.tasks.map((task) => task.id)],
+      removals: floorRemovalIds(floor),
       actions: buildFloorDeleteActions(floor),
     }), {
-      onSuccess: () => info(`Étage « ${floor.name} » supprimé.`),
+      onSuccess: () => {
+        // Grist réutilise les ids : sans ce nettoyage, un étage recréé plus tard avec les
+        // mêmes ids retrouverait les replis de celui-ci.
+        collapsedFloorKeys.delete(floorCollapseKey(zoneKey, floor.key));
+        floor.groups.forEach((group) => collapsedGroupKeys.delete(groupCollapseKey(group.rowId)));
+        info(`Étage « ${floor.name} » supprimé.`);
+      },
       onFailure: (error, dropped) => fail("Suppression de l'étage impossible :", error, dropped),
+    });
+  }
+
+  // Renommer un cycle ou un sous-groupe : sa ligne seulement (ses tâches pointent vers son id).
+  function handleRenameGroup(groupRowId, rawValue) {
+    if (!isEditable()) {
+      refuseLocked();
+      return;
+    }
+    const group = findGroup(sections, groupRowId);
+    if (!group) return;
+    const result = validateGroupName(rawValue);
+    if (!result.ok) {
+      setStatus(result.error, "error");
+      render();
+      return;
+    }
+    if (result.name === group.name) {
+      render();
+      return;
+    }
+    clearStatus();
+    void submit(createOp({
+      changes: new Map([[group.rowId, { [TASK_COLUMNS.name]: result.name }]]),
+      actions: [buildGroupRenameAction(group, result.name)],
+    }), {
+      onFailure: (error, dropped) => fail("Renommage impossible :", error, dropped),
+    });
+  }
+
+  // Supprimer un cycle ou un sous-groupe : sa ligne et tout son contenu, après confirmation.
+  function handleDeleteGroup(groupRowId) {
+    if (!isEditable()) {
+      refuseLocked();
+      return Promise.resolve();
+    }
+    const group = findGroup(sections, groupRowId);
+    if (!group) return Promise.resolve();
+    if (!confirm(buildGroupDeleteQuestion(group))) return Promise.resolve();
+    clearStatus();
+    return submit(createOp({ removals: groupRemovalIds(group), actions: buildGroupDeleteActions(group) }), {
+      onSuccess: () => {
+        // Même raison que pour un étage supprimé : les ids réutilisés ne doivent pas hériter
+        // d'un repli du cycle ou sous-groupe supprimé.
+        collapsedGroupKeys.delete(groupCollapseKey(group.rowId));
+        (group.groups || []).forEach((child) => collapsedGroupKeys.delete(groupCollapseKey(child.rowId)));
+        info(`« ${group.name} » supprimé.`);
+      },
+      onFailure: (error, dropped) => fail("Suppression impossible :", error, dropped),
     });
   }
 
@@ -567,6 +765,9 @@ export function createSyntheseTasksController({
     if (!Object.keys(fields).length) return;
     collapsedZoneKeys.delete(target.zoneKey);
     if (target.floorKey) collapsedFloorKeys.delete(floorCollapseKey(target.zoneKey, target.floorKey));
+    for (let container = findGroup(sections, target.groupRowId); container; container = container.parentGroup) {
+      collapsedGroupKeys.delete(groupCollapseKey(container.rowId));
+    }
     clearStatus();
     void submit(createOp({
       changes: new Map([[taskId, fields]]),
@@ -574,6 +775,74 @@ export function createSyntheseTasksController({
     }), {
       onFailure: (error, dropped) => fail("Déplacement de la tâche impossible :", error, dropped),
     });
+  }
+
+  // Toutes les zones du projet, sans le filtre du bandeau : la fenêtre « Lien Structure » les
+  // montre toutes.
+  function allSections() {
+    const project = getProject();
+    return project ? buildSections({ rows: displayedRows(), sharedZones: getSharedZones(project) }) : [];
+  }
+
+  // Fenêtre « Lien Structure » : mémorise le coffrage d'un étage (formworkNumber : son N° ;
+  // "" : délier ; absent : inchangé) et / ou pose une date de diffusion sur le début de l'étage
+  // (date). Une seule opération : le lien et les dates s'écrivent ensemble, ou pas du tout. La
+  // réponse arrive quand Grist a répondu.
+  function applyStructureLink({ zoneKey, floorKey, formworkNumber, date } = {}) {
+    const refusal = (error) => Promise.resolve({ ok: false, error });
+    if (!isEditable()) return refusal(lockedMessage());
+    const linking = formworkNumber !== undefined;
+    if (linking && structureLinkColumn === false) return refusal(MESSAGES.noLinkColumn);
+    const all = allSections();
+    const floor = findFloor(all.find((section) => section.zoneKey === zoneKey) || null, floorKey);
+    if (!floor) return refusal(MESSAGES.floorGone);
+    const changes = new Map();
+    const actions = [];
+    if (linking) {
+      if (!floor.rowIds.length) return refusal(MESSAGES.noFloorRow);
+      const number = toText(formworkNumber);
+      const shown = displayedRows();
+      const rowIds = floor.rowIds.filter((rowId) => {
+        const row = shown.find((candidate) => Number(candidate?.[TASK_COLUMNS.id]) === rowId);
+        return toText(row?.[TASK_COLUMNS.structureLink]) !== number;
+      });
+      if (rowIds.length) {
+        rowIds.forEach((rowId) => changes.set(rowId, { [TASK_COLUMNS.structureLink]: number }));
+        actions.push(["BulkUpdateRecord", PLANNING_TABLE, rowIds, { [TASK_COLUMNS.structureLink]: rowIds.map(() => number) }]);
+      }
+    }
+    if (date != null) {
+      const { anchor } = findFloorStart(floor.tasks);
+      if (!anchor) return refusal(MESSAGES.noPlanTask);
+      const moved = moveTaskStart(anchor, date);
+      if (!moved.ok) return refusal(MESSAGES.badIssueDate);
+      if (Object.keys(moved.fields).length) {
+        changes.set(anchor.id, moved.fields);
+        actions.push(["UpdateRecord", PLANNING_TABLE, anchor.id, moved.fields]);
+      }
+      // Même si l'ancre ne bouge pas : un fond de plan retouché à la main est recalé sur elle.
+      const updates = cascadeFrom(moved.task, all.flatMap((section) => section.tasks));
+      if (updates.length) {
+        const fieldsList = updates.map(dateFieldsOf);
+        updates.forEach((update, index) => changes.set(update.id, fieldsList[index]));
+        actions.push(["BulkUpdateRecord", PLANNING_TABLE, updates.map((update) => update.id), toColumns(fieldsList)]);
+      }
+    }
+    if (!actions.length) return Promise.resolve({ ok: true });
+    clearStatus();
+    // Une opération écartée par l'échec d'une précédente n'appelle aucun des deux retours.
+    let outcome = { ok: false, error: describeWriteError(null) };
+    return submit(createOp({ changes, actions }), {
+      onSuccess: () => {
+        outcome = { ok: true };
+      },
+      onFailure: (error, dropped) => {
+        const message = describeWriteError(error);
+        if (message === MESSAGES.noLinkColumn) structureLinkColumn = false;
+        fail("Lien Structure impossible :", error, dropped);
+        outcome = { ok: false, error: message };
+      },
+    }).then(() => outcome);
   }
 
   function toggleZone(zoneKey) {
@@ -586,6 +855,13 @@ export function createSyntheseTasksController({
     const key = floorCollapseKey(zoneKey, floorKey);
     if (collapsedFloorKeys.has(key)) collapsedFloorKeys.delete(key);
     else collapsedFloorKeys.add(key);
+    render();
+  }
+
+  function toggleGroup(groupRowId) {
+    const key = groupCollapseKey(groupRowId);
+    if (collapsedGroupKeys.has(key)) collapsedGroupKeys.delete(key);
+    else collapsedGroupKeys.add(key);
     render();
   }
 
@@ -632,5 +908,18 @@ export function createSyntheseTasksController({
     refresh({ forceRefresh = false } = {}) {
       return load({ forceRefresh });
     },
+    // Ce que la fenêtre « Lien Structure » lit du tableau : les lignes telles qu'affichées
+    // (écritures en attente comprises) et ce qui permet, ou non, d'y écrire.
+    getStructureLinkSource() {
+      const editable = isEditable();
+      return {
+        ready: loaded && !readError,
+        rows: displayedRows(),
+        editable,
+        lockedMessage: editable ? "" : lockedMessage(),
+        linkColumn: structureLinkColumn,
+      };
+    },
+    applyStructureLink,
   };
 }

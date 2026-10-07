@@ -3094,3 +3094,38 @@ test("une lecture de zones en échec conserve la liste déjà livrée", async ()
   await flushAsyncWork();
   assert.equal(deliveries.length, 1);
 });
+
+// Lecture d'un service à l'autre : la vue Synthese de Planning Projet affiche les coffrages
+// de Structure. Lecture seule, bornée au projet courant.
+test("fetchProjectRows rend les lignes du projet de tous les services, sans celles des autres projets", async () => {
+  const harness = createRuntimeHarness();
+  addZoneSourceTables(harness);
+  await harness.api.whenReady();
+  assert.equal(harness.api.getState().selectedService, "Structure");
+
+  const rows = Array.from(await harness.api.fetchProjectRows("Planning_Projet"));
+  assert.deepEqual(rows.map((row) => row.id).sort(), [1, 2, 4]);
+  assert.deepEqual(rows.map((row) => row.Service).sort(), ["Structure", "Structure", "Synthese"]);
+});
+
+test("fetchProjectRows filtre en REST par projet, sans filtre de service", async () => {
+  const harness = createRuntimeHarness({
+    rest: true,
+    restFetch: async () => restResponse([
+      { id: 1, fields: { NomProjet: "Alpha", Zone: "Zone A", Service: "Structure" } },
+      { id: 2, fields: { NomProjet: "Alpha", Zone: "Zone S", Service: "Synthese" } },
+    ]),
+  });
+  await harness.api.whenReady();
+
+  const rows = Array.from(await harness.api.fetchProjectRows("Planning_Projet"));
+  assert.deepEqual(rows.map((row) => row.Service), ["Structure", "Synthese"]);
+  assert.deepEqual(harness.restRequests.map(requestFilter), [{ NomProjet: ["Alpha", "Alpha Alias"] }]);
+});
+
+test("fetchProjectRows : table sans colonne de projet connue, aucune ligne", async () => {
+  const harness = createRuntimeHarness();
+  addZoneSourceTables(harness);
+  await harness.api.whenReady();
+  assert.deepEqual(Array.from(await harness.api.fetchProjectRows("Team")), []);
+});
