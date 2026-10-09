@@ -44,7 +44,7 @@ test("le bouton Durées est masqué dans la vue Synthese", () => {
 
 test("les scripts sont servis dans leur nouvelle version", () => {
   assert.equal(html.includes("20260923-zones1"), false);
-  assert.ok(html.includes("main.js?v=20261007-lien2"));
+  assert.ok(html.includes("main.js?v=20261009-limite3"));
 });
 
 test("la surveillance de Planning_Projet de main.js rafraîchit aussi le tableau de tâches", () => {
@@ -55,4 +55,21 @@ test("la surveillance de Planning_Projet de main.js rafraîchit aussi le tableau
 test("changement de projet : le filtre de zone du tableau suit tout de suite", () => {
   const handler = sliceBetween(mainJs, "async function handleProjectChange(", "async function handleZoneChange(");
   assert.match(handler, /syncSyntheseTasksZoneFilter\(\);\s*await refreshPlanning\(/);
+});
+
+// Limite de fin du plan de réservations du cycle 3 : le début du plan de coffrage, lu dans le
+// planning Structure du projet.
+test("le tableau de tâches lit le début des plans de coffrage dans le planning Structure", () => {
+  assert.match(mainJs, /import \{ buildFormworkStarts \} from "\.\/services\/formworkStarts\.js";/);
+  const factory = sliceBetween(mainJs, "function getSyntheseTasks(", "function syncSyntheseTasksZoneFilter(");
+  assert.match(
+    factory,
+    /loadFormworkStarts: async \(\) => buildFormworkStarts\(await context\.fetchProjectRows\("Planning_Projet"\)\),/
+  );
+});
+
+test("la surveillance de Planning_Projet rafraîchit aussi le début des plans de coffrage", () => {
+  const watcher = sliceBetween(mainJs, "function bindPlanningDataRefresh(", "function bindPlanningServiceRefresh(");
+  assert.match(watcher, /if \(tables\.includes\("Planning_Projet"\)\) void syntheseTasks\?\.refreshFormworkStarts\(\);/);
+  assert.equal(watcher.includes("refreshPlans"), false);
 });

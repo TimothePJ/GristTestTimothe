@@ -1,14 +1,19 @@
 // Fenêtre « Lien Structure » de la vue Synthese : zone par zone, les étages de Synthese en
 // face des coffrages de Structure (documents de type COFFRAGE), le coffrage lié à chaque
-// étage (colonne Lien_Structure de sa ligne-étage) et la date de diffusion à l'indice 0 de
-// chaque coffrage (table ListePlan_NDC_COF). Module pur, sans DOM ni Grist.
+// étage (colonne Lien_Structure de sa ligne-étage) et la date prévisionnelle de l'indice 0
+// de chaque coffrage (colonne « 0 Prev » de la liste de plans, table ListePlan_NDC_COF).
+// Module pur, sans DOM ni Grist.
 import {
   NO_ZONE_KEY,
   NO_ZONE_LABEL,
   TASK_COLUMNS,
   buildSections,
   floorKeyOf,
+  formatDate,
   isFloorRow,
+  isGroupRow,
+  isTaskRow,
+  natureKeyOf,
   nextWorkingDay,
   zoneKeyOf,
 } from "./syntheseTaskModel.js";
@@ -16,8 +21,15 @@ import { parseGristDate } from "./syntheseTasks.js";
 
 const STRUCTURE_SERVICE_KEY = "structure";
 const FORMWORK_TYPE = "COFFRAGE";
-const FIRST_INDICE = "0";
+// Indice des lignes qui portent la date « 0 Prev » dans la liste de plans (écrit « Prev 0 »),
+// en clé de comparaison.
+const FORECAST_INDICE_KEY = "prev 0";
 const PLAN_NAME_START = "fond de plan de synthese";
+// Le plan de réservations du cycle 3 d'un étage lié (tâche « PLAN DE SYNTHESE RESERVATIONS … »
+// rangée dans le cycle nommé « CYCLE 3 ») doit finir au plus tard le jour où commence le plan
+// de coffrage de son étage dans le planning Structure. Celui du cycle 2 n'est pas concerné.
+const RESERVATION_NAME_START = "plan de synthese reservations";
+const RESERVATION_CYCLE = /^cycle ?3(?!\d)/;
 
 // Colonnes lues dans ListePlan_NDC_COF.
 const PLAN_COLUMNS = Object.freeze({
@@ -29,7 +41,7 @@ const PLAN_COLUMNS = Object.freeze({
 });
 
 // État du lien d'un étage : pas de lien ; coffrage introuvable ; étage sans fond de plan ;
-// coffrage sans indice 0 ; fond de plan à la date d'indice 0 ; fond de plan à une autre date.
+// coffrage sans date 0 Prev ; fond de plan à la date 0 Prev ; fond de plan à une autre date.
 export const LINK_STATES = Object.freeze({
   none: "none",
   missing: "missing",
@@ -85,15 +97,16 @@ export function formworkLabel({ number = "", name = "" } = {}) {
   return number ? `${number} — ${name}` : name;
 }
 
-// Date de diffusion à l'indice 0 de chaque coffrage, par clé de N° : la plus ancienne des
-// dates lisibles des lignes COFFRAGE (service Structure, ou sans service) à l'indice « 0 ».
+// Date 0 Prev de chaque coffrage, par clé de N° : la plus ancienne des dates lisibles des
+// lignes COFFRAGE (service Structure, ou sans service) à l'indice « Prev 0 ». Les indices
+// diffusés (0, A…) ne comptent pas.
 export function formworkIssueDates(planRows) {
   const dates = new Map();
   (Array.isArray(planRows) ? planRows : []).forEach((row) => {
     const service = plainKey(row?.[PLAN_COLUMNS.service]);
     if (service && service !== STRUCTURE_SERVICE_KEY) return;
     if (!plain(row?.[PLAN_COLUMNS.type]).toLocaleUpperCase("fr").includes(FORMWORK_TYPE)) return;
-    if (toText(row?.[PLAN_COLUMNS.indice]) !== FIRST_INDICE) return;
+    if (plainKey(row?.[PLAN_COLUMNS.indice]) !== FORECAST_INDICE_KEY) return;
     const key = numberKeyOf(row?.[PLAN_COLUMNS.number]);
     const date = parseGristDate(row?.[PLAN_COLUMNS.date]);
     if (!key || !date) return;
@@ -116,6 +129,88 @@ export function readFloorLinks(syntheseRows) {
       if (number && !links.has(key)) links.set(key, number);
     });
   return links;
+}
+
+function parentIdOf(row) {
+  return Number(toText(row?.[TASK_COLUMNS.parent]));
+}
+
+// Nom du cycle qui contient une tâche : son groupe si c'est un cycle, sinon le cycle de son
+// sous-groupe ; "" hors cycle.
+function cycleNameOf(row, groupsById) {
+  const group = groupsById.get(parentIdOf(row));
+  const cycle = group?.natureKey === "sous-groupe" ? groupsById.get(group.parentId) : group;
+  return cycle?.natureKey === "cycle" ? cycle.name : "";
+}
+
+// Limite de fin du plan de réservations du cycle 3, par id de tâche : le dernier jour permis
+// (début du plan de coffrage lié à son étage, colonne « Début » du planning Structure) et le
+// N° de ce coffrage. Rien pour un étage sans lien, ou dont le coffrage n'a pas de date de
+// début. `syntheseRows` : les lignes du tableau de tâches ; `formworkStarts` : les coffrages
+// de Structure du projet (N°, zone, début — voir formworkStarts.js).
+export function reservationEndLimits({ syntheseRows = [], formworkStarts = [] } = {}) {
+  const rows = Array.isArray(syntheseRows) ? syntheseRows : [];
+  const starts = Array.isArray(formworkStarts) ? formworkStarts : [];
+  const links = readFloorLinks(rows);
+  const limits = new Map();
+  if (!starts.length || !links.size) return limits;
+  // Coffrage d'un N° : celui de la zone de l'étage d'abord, sinon le premier du projet — comme
+  // dans la fenêtre « Lien Structure ».
+  const findFormwork = (number, zoneKey) => {
+    const key = numberKeyOf(number);
+    const sameNumber = starts.filter((formwork) => numberKeyOf(formwork?.number) === key);
+    return sameNumber.find((formwork) => zoneKeyOf(formwork.zoneName) === zoneKey) || sameNumber[0] || null;
+  };
+  const groupsById = new Map(rows.filter(isGroupRow).map((row) => [Number(row[TASK_COLUMNS.id]), {
+    name: toText(row[TASK_COLUMNS.name]),
+    natureKey: natureKeyOf(row[TASK_COLUMNS.nature]),
+    parentId: parentIdOf(row),
+  }]));
+  rows.filter(isTaskRow).forEach((row) => {
+    if (!plainKey(row[TASK_COLUMNS.name]).startsWith(RESERVATION_NAME_START)) return;
+    if (!RESERVATION_CYCLE.test(plainKey(cycleNameOf(row, groupsById)))) return;
+    const zoneKey = zoneKeyOf(row[TASK_COLUMNS.zone]);
+    const number = links.get(floorId(zoneKey, floorKeyOf(row[TASK_COLUMNS.group])));
+    const start = number ? findFormwork(number, zoneKey)?.start : null;
+    if (!(start instanceof Date)) return;
+    limits.set(Number(row[TASK_COLUMNS.id]), { limit: start, formworkNumber: number });
+  });
+  return limits;
+}
+
+// Reporte ces limites sur les lignes du tableau, que le Gantt dessine aussi : le dernier jour
+// permis, si la Fin de la tâche le dépasse, et la phrase qui l'explique.
+export function applyEndLimits(lines, limits) {
+  if (!limits?.size) return lines;
+  return lines.map((line) => {
+    const entry = line.kind === "task" ? limits.get(line.taskId) : null;
+    if (!entry) return line;
+    const isOverEndLimit = line.end instanceof Date && line.end > entry.limit;
+    const rule = `finir au plus tard le ${formatDate(entry.limit)} ` +
+      `(début du plan de coffrage ${entry.formworkNumber} dans le planning Structure).`;
+    return {
+      ...line,
+      endLimit: entry.limit,
+      isOverEndLimit,
+      endLimitNote: isOverEndLimit ? `Fin trop tardive : à ${rule}` : `À ${rule}`,
+    };
+  });
+}
+
+// Reporte sur chaque ligne d'étage le N° du coffrage qui lui est lié ("" sans lien) et la
+// phrase de son emblème. `links` : les liens lus par readFloorLinks.
+export function applyFloorLinks(lines, links) {
+  return lines.map((line) => {
+    if (line.kind !== "floor") return line;
+    const number = links?.get(floorId(line.zoneKey, line.floorKey)) || "";
+    return {
+      ...line,
+      structureLink: number,
+      structureLinkNote: number
+        ? `Étage lié au coffrage ${number} de Structure.`
+        : "Étage non lié à un coffrage de Structure.",
+    };
+  });
 }
 
 // Le fond de plan d'un étage (sa plus ancienne tâche « FOND DE PLAN DE SYNTHESE … ») et son
@@ -155,7 +250,7 @@ function linkStateOf({ number, formwork, plan, expectedStart }) {
 
 // Les zones du projet (celles de tous les services, une seule par graphie, triées), chacune
 // avec ses étages de Synthese — leur coffrage lié, leur fond de plan, l'état du lien — et ses
-// coffrages de Structure — leur date d'indice 0, les étages qu'ils servent ; « Sans zone » à
+// coffrages de Structure — leur date 0 Prev, les étages qu'ils servent ; « Sans zone » à
 // la fin pour les coffrages qui n'en ont pas. `syntheseRows` : les lignes du tableau de tâches
 // (service Synthese) ; `projectRows` : Planning_Projet du projet, tous services ; `planRows` :
 // ListePlan_NDC_COF du projet.

@@ -41,7 +41,13 @@ import {
   buildTemplateLinks,
 } from "../services/syntheseFloorTemplate.js";
 import { cascadeFrom } from "../services/syntheseLinks.js";
-import { findFloorStart } from "../services/structureLinkModel.js";
+import {
+  applyEndLimits,
+  applyFloorLinks,
+  findFloorStart,
+  readFloorLinks,
+  reservationEndLimits,
+} from "../services/structureLinkModel.js";
 
 const SAVING_DELAY_MS = 1000;
 
@@ -64,7 +70,7 @@ const MESSAGES = Object.freeze({
   floorGone: "Cet étage n'existe plus : fermez la fenêtre puis rouvrez-la.",
   noFloorRow: "Cet étage n'a pas de ligne « étage » dans Planning_Projet : le lien ne peut pas être mémorisé.",
   noPlanTask: "Cet étage n'a pas de tâche « FOND DE PLAN DE SYNTHESE » : aucune date ne peut être posée.",
-  badIssueDate: "La date de diffusion à l'indice 0 de ce coffrage n'est pas utilisable (elle doit être entre 2000 et 2100) : corrigez-la dans la liste de plans.",
+  badIssueDate: "La date 0 Prev de ce coffrage n'est pas utilisable (elle doit être entre 2000 et 2100) : corrigez-la dans la liste de plans.",
 });
 
 // Seul cas où la création d'un étage ne peut ni réussir ni être annulée : le dire précisément.
@@ -118,6 +124,8 @@ export function createSyntheseTasksController({
     setTimeout: (callback, delay) => setTimeout(callback, delay),
     clearTimeout: (handle) => clearTimeout(handle),
   },
+  // Lecture des coffrages de Structure du projet : N°, zone et début de leur plan.
+  loadFormworkStarts = null,
 } = {}) {
   let active = false;
   let bound = false;
@@ -131,6 +139,11 @@ export function createSyntheseTasksController({
   let sharedZonesProjectKeys = new Set();
   let sections = [];
   let loadToken = 0;
+  // Coffrages de Structure du projet et début de leur plan : la limite de fin du plan de
+  // réservations du cycle 3. Lus à part des tâches (voir loadStarts).
+  let formworkStarts = [];
+  let startsToken = 0;
+  let startsDue = false;
   const collapsedZoneKeys = new Set();
   const collapsedFloorKeys = new Set();
   const collapsedGroupKeys = new Set();
@@ -252,10 +265,20 @@ export function createSyntheseTasksController({
   function render() {
     if (!active) return;
     const project = getProject();
+    const shownRows = project ? displayedRows() : [];
     sections = project
-      ? buildSections({ rows: displayedRows(), sharedZones: getSharedZones(project), zoneFilter })
+      ? buildSections({ rows: shownRows, sharedZones: getSharedZones(project), zoneFilter })
       : [];
-    const lines = buildRowModel(sections, { collapsedZoneKeys, collapsedFloorKeys, collapsedGroupKeys });
+    // Le plan de réservations du cycle 3 porte sa limite de fin (début du plan de coffrage de
+    // son étage) : le tableau et le Gantt le signalent quand il la dépasse. Chaque étage porte
+    // son lien Structure, que son emblème montre.
+    const lines = applyFloorLinks(
+      applyEndLimits(
+        buildRowModel(sections, { collapsedZoneKeys, collapsedFloorKeys, collapsedGroupKeys }),
+        reservationEndLimits({ syntheseRows: shownRows, formworkStarts })
+      ),
+      readFloorLinks(shownRows)
+    );
     let emptyMessage = "";
     if (!project) emptyMessage = MESSAGES.noProject;
     else if (!loaded) emptyMessage = MESSAGES.loading;
@@ -266,6 +289,25 @@ export function createSyntheseTasksController({
       emptyMessage,
       canAddFloor: floorColumn !== false && templateColumns !== false,
     });
+  }
+
+  // Les coffrages se lisent à l'ouverture de la vue, au changement de projet et quand
+  // Planning_Projet change (refreshFormworkStarts) — pas à chaque relecture des tâches.
+  // Illisibles, ils ne bloquent rien : les tâches s'affichent sans limite.
+  async function loadStarts() {
+    if (!active || typeof loadFormworkStarts !== "function") return;
+    const token = ++startsToken;
+    let next = [];
+    try {
+      if (getProject()) next = await loadFormworkStarts();
+    } catch (error) {
+      if (token !== startsToken) return;
+      console.error("Lecture des coffrages de Structure impossible :", error);
+      return;
+    }
+    if (token !== startsToken || !active) return;
+    formworkStarts = Array.isArray(next) ? next : [];
+    render();
   }
 
   async function load({ forceRefresh = false } = {}) {
@@ -282,9 +324,15 @@ export function createSyntheseTasksController({
       templateColumns = null;
       structureLinkColumn = null;
       rows = [];
+      formworkStarts = [];
+      startsDue = true;
       loaded = false;
       readError = false;
       render();
+    }
+    if (startsDue) {
+      startsDue = false;
+      void loadStarts();
     }
     if (!project) {
       render();
@@ -891,7 +939,11 @@ export function createSyntheseTasksController({
         return;
       }
       bind();
-      if (!wasActive) void load();
+      if (!wasActive) {
+        // Le planning Structure a pu changer pendant que la vue était fermée.
+        startsDue = true;
+        void load();
+      }
     },
     setEditingEnabled(enabled) {
       editingEnabled = Boolean(enabled);
@@ -907,6 +959,13 @@ export function createSyntheseTasksController({
     // la table : le cache partagé est frais, inutile de forcer une nouvelle lecture.
     refresh({ forceRefresh = false } = {}) {
       return load({ forceRefresh });
+    },
+    // Appelée par la même surveillance : un coffrage déplacé dans le planning Structure
+    // déplace la limite de fin du plan de réservations. Le tableau n'écrit que des lignes
+    // Synthese : un changement signalé pendant une de ses écritures vient de lui, les
+    // coffrages n'ont pas bougé — pas de relecture.
+    refreshFormworkStarts() {
+      return queuedWrites ? Promise.resolve() : loadStarts();
     },
     // Ce que la fenêtre « Lien Structure » lit du tableau : les lignes telles qu'affichées
     // (écritures en attente comprises) et ce qui permet, ou non, d'y écrire.

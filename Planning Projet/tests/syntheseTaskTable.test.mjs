@@ -6,6 +6,7 @@ import {
   DEFAULT_COLUMN_WIDTHS,
   MIN_COLUMN_WIDTH,
   MIN_NAME_WIDTH,
+  buildLinkBadge,
   buildMenuItems,
   createDeferredRenderer,
   dragColumn,
@@ -281,4 +282,37 @@ test("styles : une largeur par colonne, poignées dans l'en-tête, séparateur s
   assert.match(css, /\.stt-col-resize\s*\{[^}]*position:\s*absolute;[^}]*cursor:\s*col-resize;/);
   // Le bord droit de « Fin » dans l'en-tête est sa poignée ; le séparateur commence dessous.
   assert.match(css, /\.stt-splitter\s*\{[^}]*top:\s*var\(--stt-head-height\);/);
+});
+
+// Plan de réservations du cycle 3 qui dépasse sa limite de fin (début du plan de coffrage de son étage).
+test("limite de fin dépassée : Fin en rouge, la limite en infobulle", () => {
+  assert.match(css, /\.stt-line--task\.is-over-limit \.stt-cell--end\s*\{[^}]*color:\s*#c00000;/);
+  const building = sliceBetween(source, "function buildLine(", "function draw(");
+  assert.match(building, /if \(line\.isOverEndLimit\) element\.classList\.add\("is-over-limit"\);/);
+  assert.match(building, /if \(field === "end" && line\.endLimitNote\) cell\.title = line\.endLimitNote;/);
+});
+
+// Emblème de lien d'un étage : deux maillons à côté de son nom, verts quand il est lié à un
+// coffrage de Structure, rouges sinon ; le survol le dit en toutes lettres.
+test("emblème de lien d'un étage : classe et phrase selon le lien", () => {
+  const doc = {
+    createElement: (tag) => ({ tag, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } }),
+  };
+  const linked = buildLinkBadge({ structureLink: "3021", structureLinkNote: "Étage lié au coffrage 3021 de Structure." }, doc);
+  assert.deepEqual(
+    [linked.tag, linked.className, linked.title, linked.attributes["aria-label"]],
+    ["span", "stt-floor-link is-linked", "Étage lié au coffrage 3021 de Structure.", "Étage lié au coffrage 3021 de Structure."]
+  );
+  const unlinked = buildLinkBadge({ structureLink: "", structureLinkNote: "Étage non lié à un coffrage de Structure." }, doc);
+  assert.deepEqual(
+    [unlinked.className, unlinked.title],
+    ["stt-floor-link is-unlinked", "Étage non lié à un coffrage de Structure."]
+  );
+});
+
+test("emblème de lien : à côté du nom de l'étage, vert quand il est lié, rouge sinon", () => {
+  assert.match(css, /\.stt-floor-link\s*\{[^}]*color:\s*#2e7d32;/);
+  assert.match(css, /\.stt-floor-link\.is-unlinked\s*\{[^}]*color:\s*#c00000;/);
+  const naming = sliceBetween(source, "function buildNameCell(", "function buildLine(");
+  assert.match(naming, /if \(line\.kind === "floor" && line\.structureLinkNote\) cell\.appendChild\(buildLinkBadge\(line\)\);/);
 });

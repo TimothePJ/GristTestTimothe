@@ -79,6 +79,11 @@ function milestoneX(line, scale) {
   return scale.dateToX(line.link?.type === "FD" ? dayEnd(line.start) : dayCenter(line.start));
 }
 
+// Tâche dont la Fin dépasse sa limite : sa forme le porte, pour être dessinée en alerte.
+function overLimitOf(line) {
+  return line.isOverEndLimit ? { overLimit: true } : {};
+}
+
 // Une forme par ligne datée du modèle de lignes, à la hauteur de sa ligne. Les lignes
 // sans dates ne dessinent rien mais gardent leur rang.
 export function buildGanttShapes(lines, scale, { rowHeight = ROW_HEIGHT_PX } = {}) {
@@ -112,6 +117,7 @@ export function buildGanttShapes(lines, scale, { rowHeight = ROW_HEIGHT_PX } = {
         x: milestoneX(line, scale),
         label: line.name,
         dateLabel: formatDayMonth(line.start),
+        ...overLimitOf(line),
       });
       return;
     }
@@ -124,6 +130,21 @@ export function buildGanttShapes(lines, scale, { rowHeight = ROW_HEIGHT_PX } = {
       x1,
       x2: Math.max(scale.dateToX(dayEnd(line.end)), x1 + MIN_BAR_WIDTH_PX),
       label: line.name,
+      ...overLimitOf(line),
+    });
+  });
+  // Limite de fin d'une tâche (plan de réservations du cycle 3) : un repère à la fin de son
+  // dernier jour permis — sa barre ne doit pas le franchir. Dessiné par-dessus les barres,
+  // même pour une tâche pas encore datée.
+  (lines || []).forEach((line, row) => {
+    if (!(line?.endLimit instanceof Date)) return;
+    shapes.push({
+      type: "endLimit",
+      row,
+      key: line.key,
+      y: row * rowHeight,
+      x: scale.dateToX(dayEnd(line.endLimit)),
+      overLimit: Boolean(line.isOverEndLimit),
     });
   });
   return shapes;

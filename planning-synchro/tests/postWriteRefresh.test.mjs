@@ -384,7 +384,8 @@ async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = 
     state: { registry: [], selectedProject: null, viewport: null },
     els,
     APP_CONFIG,
-    realisationTargetLookup: null,
+    // loadProject demande la table des indices de reference du service affiche.
+    getRealisationTargetLookup: () => null,
 
     // --- dependances reelles (pures) -----------------------------------------
     buildRegistry,

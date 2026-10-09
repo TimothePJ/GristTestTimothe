@@ -18,9 +18,9 @@ const PROJECT_ROWS = [
   { id: 21, Taches: "PH SS2", Zone: "Zone 1", Service: "Structure", Type_doc: "COFFRAGE", ID2: "3002" },
   { id: 22, Taches: "RDC", Zone: "Zone 2", Service: "Structure", Type_doc: "COFFRAGE", ID2: "3010" },
 ];
-// Liste de plans : seul le coffrage 3001 a été diffusé à l'indice 0 (jeudi 27/11/25).
+// Liste de plans : seul le coffrage 3001 a une date 0 Prev (jeudi 27/11/25).
 const PLAN_ROWS = [
-  { Type_document: "COFFRAGE", NumeroDocument: "3001", Indice: "0", DateDiffusion: "2025-11-27", Service: "Structure" },
+  { Type_document: "COFFRAGE", NumeroDocument: "3001", Indice: "Prev 0", DateDiffusion: "2025-11-27", Service: "Structure" },
 ];
 
 // Lignes du tableau de tâches : Zone 1 avec SS1 (RECEPTION et FOND DE PLAN liés « même début »)
@@ -130,7 +130,7 @@ function silenceConsoleError(run) {
   }).then(() => errors);
 }
 
-test("rendu : étages avec leur fond de plan et leur lien, coffrages avec leur indice 0", () => {
+test("rendu : étages avec leur fond de plan et leur lien, coffrages avec leur 0 Prev", () => {
   const { doc } = createFakeEnvironment();
   const body = new FakeElement("div");
   const formwork = {
@@ -166,7 +166,7 @@ test("rendu : étages avec leur fond de plan et leur lien, coffrages avec leur i
   assert.deepEqual(textsOf(left, "structure-link-plan"), ["Fond de plan : début Jeu 27/11/25", "Fond de plan : début —"]);
   assert.deepEqual(textsOf(left, "structure-link-link"), [
     "3001 — PH SS1 · à jour",
-    "3001 — PH SS1 · à mettre à jour : ind. 0 le Jeu 27/11/25",
+    "3001 — PH SS1 · à mettre à jour : 0 Prev le Jeu 27/11/25",
     "Déposez un coffrage ici",
   ]);
   assert.deepEqual(all(left, "structure-link-action").map((button) => [button.dataset.action, button.textContent]), [
@@ -177,14 +177,14 @@ test("rendu : étages avec leur fond de plan et leur lien, coffrages avec leur i
   assert.equal(all(left, "structure-link-unlink")[0].getAttribute("aria-label"), "Délier SS1");
   assert.ok(all(left, "structure-link-floor")[1].classes.has("is-state-stale"));
   assert.deepEqual(textsOf(right, "structure-link-formwork-label"), ["3001 — PH SS1", "Sans numéro"]);
-  assert.deepEqual(textsOf(right, "structure-link-issue"), ["ind. 0 : Jeu 27/11/25", "pas d'indice 0"]);
+  assert.deepEqual(textsOf(right, "structure-link-issue"), ["0 Prev : Jeu 27/11/25", "pas de 0 Prev"]);
   assert.deepEqual(textsOf(right, "structure-link-used"), ["lié : SS1, SS2"]);
   assert.deepEqual(all(right, "structure-link-formwork").map((item) => Boolean(item.draggable)), [true, false], "sans N° : ne se déplace pas");
   assert.deepEqual(textsOf(zone2, "structure-link-empty"), ["Aucun étage", "Aucun coffrage"]);
   assert.deepEqual([result.floors.length, result.formworks.length], [3, 2]);
 });
 
-test("rendu : coffrage introuvable, étage sans fond de plan, coffrage sans indice 0", () => {
+test("rendu : coffrage introuvable, étage sans fond de plan, coffrage sans 0 Prev", () => {
   const { doc } = createFakeEnvironment();
   const body = new FakeElement("div");
   const formwork = { id: 20, number: "3001", name: "PH SS1", label: "3001 — PH SS1", zoneKey: "zone1", issueDate: null, floorNames: [] };
@@ -203,7 +203,7 @@ test("rendu : coffrage introuvable, étage sans fond de plan, coffrage sans indi
   assert.deepEqual(textsOf(body, "structure-link-link"), [
     "Coffrage 9999 introuvable",
     "3001 — PH SS1 · pas de tâche « FOND DE PLAN DE SYNTHESE » dans cet étage",
-    "3001 — PH SS1 · en attente de l'indice 0",
+    "3001 — PH SS1 · en attente du 0 Prev",
   ]);
   assert.deepEqual(all(body, "structure-link-action").map((button) => button.dataset.action), ["unlink", "unlink", "unlink"]);
 });
@@ -247,7 +247,7 @@ test("ouverture : titre, lecture, étages du tableau de tâches en face des coff
   assert.deepEqual([env.status.textContent, env.status.hidden], [HINT, false]);
   assert.deepEqual(textsOf(env.body, "structure-link-floor-name"), ["SS1", "SS2", "RDC"]);
   assert.deepEqual(textsOf(env.body, "structure-link-formwork-label"), ["3001 — PH SS1", "3002 — PH SS2", "3010 — RDC"]);
-  assert.deepEqual(textsOf(env.body, "structure-link-issue"), ["ind. 0 : Jeu 27/11/25", "pas d'indice 0", "pas d'indice 0"]);
+  assert.deepEqual(textsOf(env.body, "structure-link-issue"), ["0 Prev : Jeu 27/11/25", "pas de 0 Prev", "pas de 0 Prev"]);
 });
 
 test("aucun projet choisi : un message, aucune lecture", async () => {
@@ -331,7 +331,7 @@ test("rouverte pendant une lecture : seule la dernière lecture est affichée", 
   assert.deepEqual(textsOf(env.body, "structure-link-formwork-label"), [], "les coffrages de la première lecture ne sont pas affichés");
 });
 
-test("glisser un coffrage sur un étage de sa zone : lien et date d'indice 0 envoyés au tableau", async () => {
+test("glisser un coffrage sur un étage de sa zone : lien et date 0 Prev envoyés au tableau", async () => {
   const env = setup({
     applyLink: (request, source) => {
       // Le tableau affiche tout de suite l'écriture en attente.
@@ -358,14 +358,14 @@ test("glisser un coffrage sur un étage de sa zone : lien et date d'indice 0 env
   assert.deepEqual(textsOf(formworkElement(env, "3001"), "structure-link-used"), ["lié : SS1"]);
 });
 
-test("coffrage sans indice 0 : le lien seul, la date viendra", async () => {
+test("coffrage sans 0 Prev : le lien seul, la date viendra", async () => {
   const env = setup();
   await env.controller.open();
   dragOnto(env, "3002", floorElement(env, "zone1", "ss1"));
   const [request] = env.requests;
   assert.deepEqual([request.formworkNumber, "date" in request], ["3002", false]);
   await flush();
-  assert.equal(env.status.textContent, "SS1 lié au coffrage 3002. La date sera à reprendre quand l'indice 0 sera diffusé.");
+  assert.equal(env.status.textContent, "SS1 lié au coffrage 3002. La date sera à reprendre quand le 0 Prev sera renseigné.");
 });
 
 test("étage sans fond de plan : le lien seul, aucune date posée", async () => {
@@ -413,7 +413,7 @@ test("glisser abandonné : les repères disparaissent", async () => {
   assert.equal(env.requests.length, 0);
 });
 
-test("« Mettre à jour » : la date d'indice 0 est renvoyée au tableau, sans toucher au lien", async () => {
+test("« Mettre à jour » : la date 0 Prev est renvoyée au tableau, sans toucher au lien", async () => {
   const env = setup({
     rows: syntheseRows({ ss1Link: "3001", planStart: "2026-01-02" }),
     applyLink: (request, source) => {
@@ -423,7 +423,7 @@ test("« Mettre à jour » : la date d'indice 0 est renvoyée au tableau, sans t
   });
   await env.controller.open();
   const floor = floorElement(env, "zone1", "ss1");
-  assert.deepEqual(textsOf(floor, "structure-link-link"), ["3001 — PH SS1 · à mettre à jour : ind. 0 le Jeu 27/11/25"]);
+  assert.deepEqual(textsOf(floor, "structure-link-link"), ["3001 — PH SS1 · à mettre à jour : 0 Prev le Jeu 27/11/25"]);
   dispatch(actionOf(floor, "refresh"), "click");
   const [request] = env.requests;
   assert.deepEqual(

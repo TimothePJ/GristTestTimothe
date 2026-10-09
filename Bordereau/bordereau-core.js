@@ -109,6 +109,15 @@
     ]);
   }
 
+  // « Prev 0 » dans la colonne Indice porte la date prévisionnelle de l'indice 0,
+  // saisie dans la liste de plans. Ce n'est pas un indice diffusé : une telle ligne
+  // ne part jamais sur un bordereau.
+  function excludeForecastPlans(plans) {
+    return (plans || []).filter(
+      (plan) => normalizeIdentityValue(plan?.Indice) !== "prev 0"
+    );
+  }
+
   function isEnvoyeValue(value) {
     return value === true || value === 1 || normalizeCompareValue(value) === "true";
   }
@@ -211,6 +220,7 @@
     buildUniqueTypeAssignments,
     collectTypeCandidates,
     compareText,
+    excludeForecastPlans,
     getDocumentIndiceKey,
     getDocumentKey,
     isTableColumnDefinitelyMissing,

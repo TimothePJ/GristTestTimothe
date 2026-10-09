@@ -26,6 +26,7 @@ import {
   buildProjectRealisationTargetLookup,
   buildTimelineDataFromPlanningRows,
 } from "./services/planningService.js";
+import { createRealisationTargetCache } from "./services/realisationTargetCache.js";
 import {
   runExclusivePlanningWrite,
   synchronizePlanningDerivedData,
@@ -83,6 +84,7 @@ import { createSyntheseTaskTable } from "./ui/syntheseTaskTable.js";
 import { createSyntheseTasksController } from "./ui/syntheseTasksController.js";
 import { createSyntheseGantt } from "./ui/syntheseGantt.js";
 import { createStructureLinkDialog } from "./ui/structureLinkDialog.js";
+import { buildFormworkStarts } from "./services/formworkStarts.js";
 
 let toolbarBound = false;
 // Tableau de tâches de la vue Synthese : créé à la première activation du service.
@@ -94,7 +96,12 @@ let planningDataRefreshBound = false;
 let planningServiceRefreshBound = false;
 let cachedPlanningRows = null;
 let cachedProjectAvancementConfigs = [];
-let cachedRealisationTargetLookup = null;
+// Indices de référence (« 100 % réalisé ») : la configuration d'avancement est tenue par
+// service, la table suit donc le service affiché au lieu d'être gardée depuis le chargement.
+const realisationTargets = createRealisationTargetCache({
+  build: buildProjectRealisationTargetLookup,
+  getService: () => window.GristServiceContext?.getService?.() || "",
+});
 let cachedPlanningReferenceReceptionLookup = null;
 let lastAutoSyncAt = 0;
 let lastAutoSyncProject = "";
@@ -953,7 +960,7 @@ function renderPlanningFromCache() {
     cachedPlanningRows,
     selectedProject,
     normalizedZone,
-    cachedRealisationTargetLookup,
+    realisationTargets.get(),
     cachedPlanningReferenceReceptionLookup,
     getSharedZonesForSelectedProject()
   );
@@ -977,7 +984,7 @@ function getDisplayedPlanningGroups() {
     cachedPlanningRows,
     selectedProject,
     normalizedZone,
-    cachedRealisationTargetLookup,
+    realisationTargets.get(),
     cachedPlanningReferenceReceptionLookup,
     getSharedZonesForSelectedProject()
   );
@@ -1406,7 +1413,7 @@ async function performPlanningRefresh(options = {}) {
           planningRows: cachedPlanningRows,
           selectedProject,
           projectAvancementConfigs: cachedProjectAvancementConfigs,
-          realisationTargetLookup: cachedRealisationTargetLookup,
+          realisationTargetLookup: realisationTargets.get(),
         });
         lastAutoSyncAt = Date.now();
         lastAutoSyncProject = selectedProject;
@@ -1451,7 +1458,7 @@ async function performPlanningRefresh(options = {}) {
       planningRows,
       selectedProject,
       normalizedZone,
-      cachedRealisationTargetLookup,
+      realisationTargets.get(),
       cachedPlanningReferenceReceptionLookup,
       getSharedZonesForSelectedProject()
     );
@@ -1580,9 +1587,7 @@ function applyProjectBootstrapData({
   fallbackToState = false,
 } = {}) {
   cachedProjectAvancementConfigs = projectAvancementConfigs;
-  cachedRealisationTargetLookup = buildProjectRealisationTargetLookup(
-    cachedProjectAvancementConfigs
-  );
+  realisationTargets.setConfigs(cachedProjectAvancementConfigs);
   planningProjectOptions = projectOptions.map((project) => project.name);
   return updateProjectSelectorOptions(projectOptions, {
     notify,
@@ -2011,6 +2016,9 @@ function bindPlanningDataRefresh() {
       // Le tableau de tâches Synthese relit Planning_Projet, que cette surveillance
       // vient de rafraîchir : pas de nouvelle lecture forcée.
       if (tables.includes("Planning_Projet")) void syntheseTasks?.refresh();
+      // Un coffrage déplacé dans le planning Structure déplace la limite de fin du plan de
+      // réservations de son étage.
+      if (tables.includes("Planning_Projet")) void syntheseTasks?.refreshFormworkStarts();
       void refreshPlanning({
         forceLoad: true,
         reason: `donnees-modifiees:${tables.join(",")}`,
@@ -2107,6 +2115,9 @@ function getSyntheseTasks() {
     context,
     docApi,
     createTable: (callbacks) => createSyntheseTaskTable(host, callbacks, { createGantt: createSyntheseGanttForTable }),
+    // Début du plan de coffrage de chaque coffrage, d'après le planning Structure du projet :
+    // la limite de fin du plan de réservations du cycle 3 de l'étage qui lui est lié.
+    loadFormworkStarts: async () => buildFormworkStarts(await context.fetchProjectRows("Planning_Projet")),
   });
   syntheseTasks.setEditingEnabled(isPlanningEditingUnlocked());
   syntheseTasks.setZoneFilter(state.selectedZone || "");
@@ -2144,7 +2155,7 @@ function bindSyntheseSpace() {
 
 // Bouton « Lien Structure » de la vue Synthese : une fenêtre montre, zone par zone, les étages
 // de Synthese en face des coffrages de Structure ; on y glisse un coffrage sur un étage pour
-// les lier et reprendre sa date de diffusion à l'indice 0. Les coffrages et la liste de plans
+// les lier et reprendre sa date prévisionnelle « 0 Prev ». Les coffrages et la liste de plans
 // sont lus pour le projet, tous services confondus ; les étages et toute écriture passent par
 // le tableau de tâches.
 function bindStructureLinkDialog() {
@@ -2235,9 +2246,7 @@ async function bootstrap() {
       projectAvancementConfigs,
     } = await fetchProjectBootstrapData();
     cachedProjectAvancementConfigs = projectAvancementConfigs;
-    cachedRealisationTargetLookup = buildProjectRealisationTargetLookup(
-      cachedProjectAvancementConfigs
-    );
+    realisationTargets.setConfigs(cachedProjectAvancementConfigs);
     planningProjectOptions = projectOptions.map((project) => project.name);
 
     initZoneSelector({

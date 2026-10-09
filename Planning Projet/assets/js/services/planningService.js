@@ -157,12 +157,16 @@ function normalizeProjectLookupKey(value) {
     .toLowerCase();
 }
 
-export function buildProjectRealisationTargetLookup(projectConfigs = []) {
+// Indices de référence (« 100 % réalisé ») par projet et par type de document. La
+// configuration d'avancement est tenue par service : la table vaut pour `selectedService`
+// seulement — sans lui, pour le service affiché au moment de l'appel.
+export function buildProjectRealisationTargetLookup(projectConfigs = [], selectedService = undefined) {
   const lookup = new Map();
 
   (projectConfigs || []).forEach((projectConfig) => {
     const targetIndiceByType = buildTargetIndiceByTypeFromAvancement(
-      projectConfig?.avancementConfigRaw
+      projectConfig?.avancementConfigRaw,
+      selectedService || undefined
     );
 
     [

@@ -50,3 +50,13 @@ test("libellés à LABEL_GAP_PX de la géométrie (couloir des flèches libre)",
   assert.match(source, /import \{[^}]*\bLABEL_GAP_PX\b[^}]*\} from "\.\.\/services\/syntheseGanttGeometry\.js";/);
   assert.equal(/const LABEL_GAP_PX = /.test(source), false);
 });
+
+// Plan de réservations du cycle 3 qui dépasse sa limite de fin (début du plan de coffrage de son étage).
+test("limite de fin : repère rouge en pointillé, barre et jalon en rouge quand elle est dépassée", () => {
+  assert.match(css, /\.stg-limit\s*\{[^}]*stroke:\s*#c00000;[^}]*stroke-dasharray:/);
+  assert.match(css, /\.stg-task\.is-over-limit\s*\{[^}]*fill:\s*#f4b6ae;[^}]*stroke:\s*#c00000;/);
+  assert.match(css, /\.stg-milestone\.is-over-limit\s*\{[^}]*fill:\s*#c00000;/);
+  assert.match(source, /shape\.type === "endLimit"/);
+  assert.match(source, /shape\.overLimit \? "stg-task is-over-limit" : "stg-task"/);
+  assert.match(source, /shape\.overLimit \? "stg-milestone is-over-limit" : "stg-milestone"/);
+});

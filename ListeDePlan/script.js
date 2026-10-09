@@ -2228,6 +2228,8 @@ function getPrintAvailableIndexValues(selectedProject) {
     if (!hasDateDiffusion) continue;
 
     const indice = normalizePrintIndexValue(record?.Indice);
+    // La date prévisionnelle (« Prev 0 », voir affichage.js) n'est pas un indice diffusé.
+    if (typeof isPrevIndice === "function" && isPrevIndice(indice)) continue;
     if (indice) indexSet.add(indice);
   }
 

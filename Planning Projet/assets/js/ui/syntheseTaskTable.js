@@ -191,6 +191,17 @@ function createElement(tag, className, text) {
   return element;
 }
 
+// Emblème de lien d'un étage, à côté de son nom : deux maillons (dessinés en CSS), verts quand
+// l'étage est lié à un coffrage de Structure, rouges sinon. Le survol le dit en toutes lettres.
+export function buildLinkBadge(line, doc = document) {
+  const badge = doc.createElement("span");
+  badge.className = `stt-floor-link ${line.structureLink ? "is-linked" : "is-unlinked"}`;
+  badge.title = line.structureLinkNote;
+  badge.setAttribute("role", "img");
+  badge.setAttribute("aria-label", line.structureLinkNote);
+  return badge;
+}
+
 // Une ligne récapitulative sans tâche datée n'a pas de récapitulatif : cellules vides. Une
 // tâche sans dates affiche « — » (et sa durée prévue). N° et Indice : tâches seulement.
 function formatCellValue(line, field) {
@@ -340,6 +351,7 @@ export function createSyntheseTaskTable(host, {
       cell.appendChild(grip);
     }
     cell.appendChild(createElement("span", "stt-text", line.name));
+    if (line.kind === "floor" && line.structureLinkNote) cell.appendChild(buildLinkBadge(line));
     return cell;
   }
 
@@ -358,6 +370,8 @@ export function createSyntheseTaskTable(host, {
     // Couleur de la capture : cycle (gris), réunion (bleu), démarrage (rouge).
     if (line.nature) element.classList.add(`is-nature-${line.nature}`);
     if (line.isMilestone) element.classList.add("is-milestone");
+    // Plan de réservations du cycle 3 dont la Fin dépasse le début du plan de coffrage de son étage.
+    if (line.isOverEndLimit) element.classList.add("is-over-limit");
     if (line.key === dropTargetKey) element.classList.add("is-drop-target");
     if (line.key === dragSourceKey) element.classList.add("is-drag-source");
 
@@ -370,6 +384,7 @@ export function createSyntheseTaskTable(host, {
         cell.setAttribute("role", "gridcell");
         cell.dataset.field = field;
       }
+      if (field === "end" && line.endLimitNote) cell.title = line.endLimitNote;
       const nameOnly = line.kind === "floor" || line.kind === "group";
       if (editable && (line.kind === "task" || (nameOnly && field === "name"))) {
         cell.classList.add("is-editable");

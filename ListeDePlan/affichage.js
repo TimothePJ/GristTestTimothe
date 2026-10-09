@@ -1,4 +1,9 @@
 const INDICES = ["0", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
+// Date prévisionnelle de l'indice 0 : une ligne ListePlan dont la colonne Indice vaut
+// « Prev 0 ». Ce n'est pas un indice diffusé, elle reste donc hors de INDICES : ni
+// alerte de date manquante, ni avancement côté Planning.
+const PREV_INDICE_VALUE = "Prev 0";
+const PREV_INDICE_LABEL = "0 Prev";
 const DOCUMENT_PLANNING_TABLE_CANDIDATES = ["Planning_Projet", "Planning_Project"];
 let projetsDictGlobal = null;
 let planningRealisationHelpersPromise = null;
@@ -243,6 +248,14 @@ function normalizeRows(raw) {
 
 function normalizeIndice(value) {
   return normalizeText(value).toUpperCase();
+}
+
+function isPrevIndice(value) {
+  return normalizeIndice(value) === normalizeIndice(PREV_INDICE_VALUE);
+}
+
+function getIndiceColumnLabel(indice) {
+  return isPrevIndice(indice) ? PREV_INDICE_LABEL : indice;
 }
 
 function normalizePlanningLookupText(value) {
@@ -1244,10 +1257,11 @@ function renderPlanTableSection(
         lignes: {}
       });
     }
-    if (!plansMap.get(key).lignes[r.Indice]) {
-      plansMap.get(key).lignes[r.Indice] = [];
+    const indiceKey = isPrevIndice(r.Indice) ? PREV_INDICE_VALUE : r.Indice;
+    if (!plansMap.get(key).lignes[indiceKey]) {
+      plansMap.get(key).lignes[indiceKey] = [];
     }
-    plansMap.get(key).lignes[r.Indice].push(r);
+    plansMap.get(key).lignes[indiceKey].push(r);
   }
 
   const warningDiv = document.createElement('div');
@@ -1332,7 +1346,7 @@ function renderPlanTableSection(
   const headerRow = document.createElement("tr");
   ["N° Document", "Désignation", ...indicesToShow].forEach(title => {
     const th = document.createElement("th");
-    th.textContent = title;
+    th.textContent = getIndiceColumnLabel(title);
     if (title === "Désignation") th.classList.add("nomplan");
     if (!["N° Document", "Désignation"].includes(title)) {
       th.classList.add("indice");
@@ -1455,7 +1469,9 @@ function getPlanTableIndicesToShow(
     ...[...allIndicesUsed].map((indice) => INDICES.indexOf(indice)).filter((index) => index >= 0)
   );
   const extraColumnCount = includeNextIndiceColumn ? 2 : 1;
-  return applyMaxColumns(INDICES.slice(0, lastUsedIndex + extraColumnCount));
+  const indices = applyMaxColumns(INDICES.slice(0, lastUsedIndex + extraColumnCount));
+  // L'impression ne liste que les indices diffusés : la prévision n'en est pas un.
+  return datedIndicesOnly ? indices : [PREV_INDICE_VALUE, ...indices];
 }
 
 function getOrderedZoneKeys(zoneKeys, zoneOrder = null) {
@@ -2001,8 +2017,10 @@ function getDateCellContext(td) {
 function getOtherDatedIndiceCells(td) {
   const tr = td?.parentElement;
   if (!tr) return [];
+  // Une prévision n'est pas une diffusion : seule, elle ne retient pas l'indice
+  // d'une ligne dont on efface la date.
   return Array.from(tr.querySelectorAll("td.indice")).filter((cell) =>
-    cell !== td && cell.textContent.trim() !== ""
+    cell !== td && cell.textContent.trim() !== "" && !isPrevIndice(cell.dataset.indice)
   );
 }
 
@@ -2348,7 +2366,7 @@ function ouvrirPickerRemplirCellules(cells, anchorCell) {
   if (selectedIndices.length === 1) {
     title.append(" de la colonne ");
     const strong = document.createElement("strong");
-    strong.textContent = selectedIndices[0];
+    strong.textContent = getIndiceColumnLabel(selectedIndices[0]);
     title.appendChild(strong);
   } else {
     title.append(" selectionnees");

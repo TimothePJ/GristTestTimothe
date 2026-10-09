@@ -226,3 +226,26 @@ test("jalons : de la pointe droite du losange à droite puis vers le bas ; arriv
   assert.deepEqual(toMilestone.points, [[100, 13], [250, 13], [250, 33]]);
   assert.deepEqual(toMilestone.head, { x: 250, y: 33, direction: "down" });
 });
+
+// Plan de réservations du cycle 3 : sa Fin ne doit pas dépasser le jour limite (début du plan
+// de coffrage de son étage).
+test("limite de fin : repère à la fin du jour limite, forme signalée quand la Fin le dépasse", () => {
+  const shapes = buildGanttShapes([
+    line({ key: "task:1", start: day(2026, 9, 15), end: day(2026, 9, 16), durationDays: 2, endLimit: day(2026, 9, 16), isOverEndLimit: false }),
+    line({ key: "task:2", start: day(2026, 9, 15), end: day(2026, 9, 17), durationDays: 3, endLimit: day(2026, 9, 16), isOverEndLimit: true }),
+    line({ key: "task:3", endLimit: day(2026, 9, 17), isOverEndLimit: false }), // pas encore datée
+    line({ key: "task:4", start: day(2026, 9, 15), end: day(2026, 9, 15), durationDays: 1 }), // sans limite
+    line({ key: "task:5", start: day(2026, 9, 18), end: day(2026, 9, 18), durationDays: 0, isMilestone: true, endLimit: day(2026, 9, 16), isOverEndLimit: true }),
+  ], WEEK, { rowHeight: 26 });
+  assert.deepEqual(shapes.map((shape) => [shape.type, shape.row, shape.x ?? shape.x2, Boolean(shape.overLimit)]), [
+    ["taskBar", 0, 300, false], // la barre finit le jour limite, au ras du repère : tenu
+    ["taskBar", 1, 400, true],
+    ["taskBar", 3, 200, false],
+    ["milestone", 4, 450, true],
+    ["endLimit", 0, 300, false],
+    ["endLimit", 1, 300, true],
+    ["endLimit", 2, 400, false],
+    ["endLimit", 4, 300, true],
+  ]);
+  assert.deepEqual([shapes[4].key, shapes[4].y, shapes[6].y], ["task:1", 0, 52]);
+});

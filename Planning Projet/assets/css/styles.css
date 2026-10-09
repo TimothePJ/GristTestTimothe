@@ -3014,6 +3014,42 @@ body.is-synthese-space #durationDefaultsToggle {
   color: #1f1f1f;
 }
 
+/* Emblème de lien d'un étage, à côté de son nom : deux maillons, verts quand l'étage est lié à
+   un coffrage de Structure, rouges sinon. */
+.stt-floor-link {
+  position: relative;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 12px;
+  margin-left: 2px;
+  color: #2e7d32;
+  cursor: help;
+}
+
+.stt-floor-link.is-unlinked {
+  color: #c00000;
+}
+
+.stt-floor-link::before,
+.stt-floor-link::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  box-sizing: border-box;
+  width: 11px;
+  height: 8px;
+  border: 2px solid currentColor;
+  border-radius: 4px;
+}
+
+.stt-floor-link::before {
+  left: 0;
+}
+
+.stt-floor-link::after {
+  left: 7px;
+}
+
 /* Contour de focus du triangle lisible sur l'orange clair de l'étage. */
 .stt-line--floor .stt-toggle:focus-visible {
   outline-color: var(--stt-accent);
@@ -3044,6 +3080,12 @@ body.is-synthese-space #durationDefaultsToggle {
 
 .stt-line--task.is-nature-demarrage .stt-left {
   background: var(--stt-kickoff-bg);
+}
+
+/* Plan de réservations du cycle 3 dont la Fin dépasse le début du plan de coffrage de son étage. */
+.stt-line--task.is-over-limit .stt-cell--end {
+  color: #c00000;
+  font-weight: 700;
 }
 
 /* Cycles et sous-groupes : en gras, avec triangle de repli, un cran de retrait par niveau. */
@@ -3380,6 +3422,22 @@ html.is-stt-dragging * {
 
 .stg-milestone {
   fill: #2f8fa3;
+}
+
+/* Limite de fin du plan de réservations du cycle 3 : son repère, et la tâche qui la dépasse. */
+.stg-limit {
+  stroke: #c00000;
+  stroke-width: 1.5;
+  stroke-dasharray: 3 2;
+}
+
+.stg-task.is-over-limit {
+  fill: #f4b6ae;
+  stroke: #c00000;
+}
+
+.stg-milestone.is-over-limit {
+  fill: #c00000;
 }
 
 .stg-zone {

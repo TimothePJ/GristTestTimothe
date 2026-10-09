@@ -22,7 +22,7 @@ function all(node, className) {
 }
 
 // Zone Z2A, étage SS1 du modèle (ligne-étage 201, RECEPTION 202, FOND DE PLAN 204) ; côté
-// Structure, le coffrage 3021 de la même zone, diffusé à l'indice 0 le jeudi 27/11/25.
+// Structure, le coffrage 3021 de la même zone, avec un 0 Prev au jeudi 27/11/25.
 async function setup() {
   const state = { currentProject: { name: "HOTEL DIEU", names: ["HOTEL DIEU"] }, accessMode: "editable" };
   const rows = templateRows({ zoneName: "Zone Z2A" }).map((row) => ({ ...row, Lien_Structure: "" }));
@@ -75,7 +75,7 @@ async function setup() {
         { id: 900, NomProjet: "HOTEL DIEU", Taches: "PH SS1 - COF", Zone: "Zone Z2A", Service: "Structure", Type_doc: "COFFRAGE", ID2: "3021" },
       ],
       planRows: [
-        { Type_document: "COFFRAGE", NumeroDocument: "3021", Indice: "0", DateDiffusion: "2025-11-27", Service: "Structure" },
+        { Type_document: "COFFRAGE", NumeroDocument: "3021", Indice: "Prev 0", DateDiffusion: "2025-11-27", Service: "Structure" },
       ],
     }),
     getSource: () => tasks.getStructureLinkSource(),

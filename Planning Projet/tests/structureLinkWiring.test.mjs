@@ -78,7 +78,7 @@ test("styles du lien : cibles de dépôt, états, coffrage déplaçable, boutons
 });
 
 test("les scripts sont servis dans leur nouvelle version", () => {
-  assert.ok(html.includes("main.js?v=20261007-lien2"));
-  assert.ok(html.includes("styles.css?v=20261007-lien2"));
-  assert.ok(html.includes("grist-service-context.js?v=20261007-lien2"));
+  assert.ok(html.includes("main.js?v=20261009-limite3"));
+  assert.ok(html.includes("styles.css?v=20261009-limite3"));
+  assert.ok(html.includes("grist-service-context.js?v=20261009-limite3"));
 });

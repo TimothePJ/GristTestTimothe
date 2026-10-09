@@ -43,7 +43,7 @@ function manualTimers() {
   };
 }
 
-function setup({ rows = planningRows(), accessMode = "editable", applyUserActions = null, confirm = () => true, timers = manualTimers() } = {}) {
+function setup({ rows = planningRows(), accessMode = "editable", applyUserActions = null, confirm = () => true, timers = manualTimers(), loadFormworkStarts = undefined } = {}) {
   const state = { currentProject: { name: "HOTEL DIEU", names: ["HOTEL DIEU"] }, accessMode };
   const listeners = { tables: [], context: [], zones: [] };
   const context = {
@@ -83,6 +83,7 @@ function setup({ rows = planningRows(), accessMode = "editable", applyUserAction
     confirm,
     now: () => TODAY,
     timers,
+    loadFormworkStarts,
   });
   const lastRender = () => table.renders.at(-1);
   const taskLine = (taskId) => lastRender().lines.find((line) => line.taskId === taskId);
@@ -923,7 +924,7 @@ test("F3 : nettoyage refusé après un échec : message demandant de supprimer l
   });
 });
 
-// ---------- Lien Structure : coffrage d'un étage et date d'indice 0 ----------
+// ---------- Lien Structure : coffrage d'un étage et date 0 Prev ----------
 
 const SS1 = { zoneKey: Z2A, floorKey: "ss1" };
 const NOV_27 = new Date(2025, 10, 27); // jeudi
@@ -1116,14 +1117,158 @@ test("source de la fenêtre : colonne Lien_Structure absente des lignes lues", a
   assert.equal(env.controller.getStructureLinkSource().linkColumn, false);
 });
 
-test("lien Structure : date d'indice 0 inutilisable — refus qui la nomme, rien n'est écrit", async () => {
+test("lien Structure : date 0 Prev inutilisable — refus qui la nomme, rien n'est écrit", async () => {
   const env = setup({ rows: linkFloorRows() });
   await activate(env);
   const result = await env.controller.applyStructureLink({ ...SS1, formworkNumber: "3021", date: new Date(1925, 10, 27) });
   assert.deepEqual(result, {
     ok: false,
-    error: "La date de diffusion à l'indice 0 de ce coffrage n'est pas utilisable (elle doit être entre 2000 et 2100) : corrigez-la dans la liste de plans.",
+    error: "La date 0 Prev de ce coffrage n'est pas utilisable (elle doit être entre 2000 et 2100) : corrigez-la dans la liste de plans.",
   });
   assert.equal(env.writes.length, 0);
   assert.equal(linkOf(env, 201), "");
+});
+
+// ---------- Plan de réservations du cycle 3 : fin au plus tard au début du plan de coffrage ----------
+
+// Étage SS1 daté (linkFloorRows) : son plan de réservations du cycle 3 (222) finit le lundi
+// 23/02/26, celui du cycle 2 (214) le 09/02/26. Planning Structure : le plan du coffrage 3021
+// commence à `start`.
+function withFormwork(start) {
+  const formwork = { start, reads: 0, failing: false };
+  formwork.load = async () => {
+    formwork.reads += 1;
+    if (formwork.failing) throw new Error("planning Structure illisible");
+    return [{ number: "3021", zoneName: "Zone Z2A", start: formwork.start }];
+  };
+  return formwork;
+}
+
+const linkedFloor = (formwork, options = {}) => setup({
+  rows: linkFloorRows({ dated: true, link: "3021" }),
+  loadFormworkStarts: formwork.load,
+  ...options,
+});
+
+const limitOf = (env, taskId) => [isoOf(env.taskLine(taskId).endLimit ?? null), env.taskLine(taskId).isOverEndLimit ?? null];
+
+test("plan de réservations du cycle 3 d'un étage lié : sa limite est le début du plan de coffrage, dépassée dès le lendemain", async () => {
+  const formwork = withFormwork(new Date(2026, 1, 20)); // vendredi 20/02/26
+  const env = linkedFloor(formwork);
+  await activate(env);
+  assert.equal(formwork.reads, 1);
+  assert.deepEqual(limitOf(env, 222), ["2026-02-20", true]);
+  assert.deepEqual(limitOf(env, 214), [null, null], "celui du cycle 2 n'est pas concerné");
+  assert.deepEqual(limitOf(env, 221), [null, null], "les autres tâches du cycle 3 non plus");
+  assert.equal(
+    env.taskLine(222).endLimitNote,
+    "Fin trop tardive : à finir au plus tard le Ven 20/02/26 (début du plan de coffrage 3021 dans le planning Structure)."
+  );
+});
+
+test("plan de réservations fini le jour où le plan de coffrage commence : tenu", async () => {
+  const env = linkedFloor(withFormwork(new Date(2026, 1, 23)));
+  await activate(env);
+  assert.deepEqual(limitOf(env, 222), ["2026-02-23", false]);
+  assert.equal(
+    env.taskLine(222).endLimitNote,
+    "À finir au plus tard le Lun 23/02/26 (début du plan de coffrage 3021 dans le planning Structure)."
+  );
+});
+
+test("étage sans lien : pas de limite, même si le coffrage a une date de début", async () => {
+  const formwork = withFormwork(new Date(2026, 1, 20));
+  const env = setup({ rows: linkFloorRows({ dated: true }), loadFormworkStarts: formwork.load });
+  await activate(env);
+  assert.deepEqual(limitOf(env, 222), [null, null]);
+});
+
+test("une saisie qui repousse le plan de réservations au-delà de sa limite le signale aussitôt, sans rien refuser", async () => {
+  const env = linkedFloor(withFormwork(new Date(2026, 1, 23)));
+  await activate(env);
+  assert.deepEqual(limitOf(env, 222), ["2026-02-23", false]);
+  // PLAN DE SYNTHESE RESEAUX du cycle 3 (221) : 5 → 6 jours ; son plan de réservations (222)
+  // finit avec lui (lien fin → fin).
+  env.table.callbacks.onEdit(221, "duration", "6");
+  await flush();
+  assert.equal(isoOf(env.taskLine(222).end), "2026-02-24", "la saisie est acceptée telle quelle");
+  assert.deepEqual(limitOf(env, 222), ["2026-02-23", true]);
+  assert.deepEqual(env.table.statuses.filter((status) => status.tone === "error"), []);
+});
+
+test("le planning Structure est relu quand Planning_Projet change : la limite suit le nouveau début", async () => {
+  const formwork = withFormwork(new Date(2026, 1, 20));
+  const env = linkedFloor(formwork);
+  await activate(env);
+  await env.controller.refresh();
+  assert.equal(formwork.reads, 1, "relire les tâches ne relit pas le planning Structure");
+  formwork.start = new Date(2026, 1, 23);
+  await env.controller.refreshFormworkStarts();
+  assert.equal(formwork.reads, 2);
+  assert.deepEqual(limitOf(env, 222), ["2026-02-23", false]);
+});
+
+// Le tableau n'écrit que des lignes Synthese : le changement de Planning_Projet signalé pendant
+// une de ses écritures vient de lui, les coffrages n'ont pas bougé.
+test("le planning Structure n'est pas relu pendant une écriture du tableau lui-même", async () => {
+  const formwork = withFormwork(new Date(2026, 1, 23));
+  const pending = manualWrites();
+  const env = linkedFloor(formwork, { applyUserActions: pending.applyUserActions });
+  await activate(env);
+  env.table.callbacks.onEdit(221, "duration", "6");
+  await env.controller.refreshFormworkStarts();
+  assert.equal(formwork.reads, 1);
+  pending.calls[0].resolve({ retValues: [] });
+  await flush();
+  await env.controller.refreshFormworkStarts();
+  assert.equal(formwork.reads, 2);
+});
+
+test("changement de projet : le planning Structure du nouveau projet est lu", async () => {
+  const formwork = withFormwork(new Date(2026, 1, 20));
+  const env = linkedFloor(formwork);
+  await activate(env);
+  env.state.currentProject = { name: "VENTADOUR", names: ["VENTADOUR"] };
+  env.listeners.context.forEach((listener) => listener());
+  await flush();
+  assert.equal(formwork.reads, 2);
+});
+
+test("planning Structure illisible : les tâches s'affichent, sans limite", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const formwork = withFormwork(new Date(2026, 1, 20));
+  formwork.failing = true;
+  const env = linkedFloor(formwork);
+  await activate(env);
+  assert.equal(isoOf(env.taskLine(222).end), "2026-02-23");
+  assert.deepEqual(limitOf(env, 222), [null, null]);
+  assert.deepEqual(env.table.statuses.filter((status) => status.tone === "error"), []);
+});
+
+// ---------- Emblème de lien des étages ----------
+
+const floorLineOf = (env) => env.lastRender().lines.find((line) => line.kind === "floor");
+
+test("ligne d'étage : emblème lié au coffrage, ou non lié", async () => {
+  const linked = setup({ rows: linkFloorRows({ link: "3021" }) });
+  await activate(linked);
+  assert.deepEqual(
+    [floorLineOf(linked).structureLink, floorLineOf(linked).structureLinkNote],
+    ["3021", "Étage lié au coffrage 3021 de Structure."]
+  );
+  const unlinked = setup({ rows: linkFloorRows() });
+  await activate(unlinked);
+  assert.deepEqual(
+    [floorLineOf(unlinked).structureLink, floorLineOf(unlinked).structureLinkNote],
+    ["", "Étage non lié à un coffrage de Structure."]
+  );
+});
+
+test("lier un étage dans la fenêtre « Lien Structure » passe aussitôt son emblème à « lié »", async () => {
+  const env = setup({ rows: linkFloorRows() });
+  await activate(env);
+  await env.controller.applyStructureLink({ ...SS1, formworkNumber: "3021" });
+  assert.equal(floorLineOf(env).structureLink, "3021");
+  await env.controller.applyStructureLink({ ...SS1, formworkNumber: "" });
+  assert.equal(floorLineOf(env).structureLink, "");
 });

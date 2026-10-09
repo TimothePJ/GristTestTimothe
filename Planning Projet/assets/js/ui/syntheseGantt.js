@@ -28,6 +28,7 @@ const ZONE_BAR_HEIGHT_PX = 5;
 const ZONE_CAP_PX = 6;
 const FLOOR_BRACKET_TOP_PX = 8;
 const FLOOR_TICK_PX = 6;
+const LIMIT_INSET_PX = 2;
 const LINK_HEAD_PX = 4;
 
 // Pointe pleine d'une flèche, selon sa direction.
@@ -132,10 +133,20 @@ export function createSyntheseGantt({ headHost, layerHost, interactionHost, rowH
   function drawShape(shape) {
     const middle = shape.y + rowHeight / 2;
     const baseline = middle + LABEL_BASELINE_PX;
+    // Limite de fin d'un plan de réservations : un trait pointillé sur la hauteur de sa ligne.
+    if (shape.type === "endLimit") {
+      return [svgElement("line", {
+        class: "stg-limit",
+        x1: px(shape.x),
+        x2: px(shape.x),
+        y1: px(shape.y + LIMIT_INSET_PX),
+        y2: px(shape.y + rowHeight - LIMIT_INSET_PX),
+      })];
+    }
     if (shape.type === "taskBar") {
       return [
         svgElement("rect", {
-          class: "stg-task",
+          class: shape.overLimit ? "stg-task is-over-limit" : "stg-task",
           x: px(shape.x1),
           y: px(middle - TASK_BAR_HEIGHT_PX / 2),
           width: px(shape.x2 - shape.x1),
@@ -148,7 +159,7 @@ export function createSyntheseGantt({ headHost, layerHost, interactionHost, rowH
       const half = MILESTONE_HALF_PX;
       return [
         svgElement("polygon", {
-          class: "stg-milestone",
+          class: shape.overLimit ? "stg-milestone is-over-limit" : "stg-milestone",
           points: toPoints([
             [shape.x, middle - half],
             [shape.x + half, middle],
