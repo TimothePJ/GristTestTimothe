@@ -3,6 +3,8 @@ import { APP_CONFIG } from "./config.js";
 export const state = {
   selectedProject: "",
   selectedZone: "",
+  // Vue Global (planning Synthèse + Structure fusionné) affichée à la place du planning du service.
+  globalView: false,
 };
 
 function readStoredProjectName() {
@@ -38,6 +40,7 @@ export function loadState() {
       (typeof parsed.selectedProject === "string" ? parsed.selectedProject : "");
     state.selectedZone =
       typeof parsed.selectedZone === "string" ? parsed.selectedZone : "";
+    state.globalView = parsed.globalView === true;
   } catch (error) {
     console.warn("Erreur chargement localStorage :", error);
   }

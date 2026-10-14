@@ -1272,3 +1272,117 @@ test("lier un étage dans la fenêtre « Lien Structure » passe aussitôt son e
   await env.controller.applyStructureLink({ ...SS1, formworkNumber: "" });
   assert.equal(floorLineOf(env).structureLink, "");
 });
+
+// ---------- Tâche contrôlée choisie à la main (colonne Controle_Coffrage) ----------
+
+const NO_CHECK_COLUMN = "La colonne « Controle_Coffrage » (Booléen) manque dans Planning_Projet : ajoutez-la pour choisir la tâche contrôlée par rapport au coffrage.";
+
+// Étage SS1 daté et lié au coffrage 3021, colonne Controle_Coffrage présente. Dans son cycle 3 :
+// plan de réservations (222) et plan des terminaux (223) finis le 23/02/26, signature (225) le
+// 09/03/26. `checked` : les tâches déjà cochées.
+function checkRows(checked = []) {
+  return linkFloorRows({ dated: true, link: "3021" })
+    .map((row) => ({ ...row, Controle_Coffrage: checked.includes(row.id) }));
+}
+
+// Le plan du coffrage 3021 commence le lundi 23/02/26.
+const checkedFloor = (checked = [], options = {}) => setup({
+  rows: checkRows(checked),
+  loadFormworkStarts: withFormwork(new Date(2026, 1, 23)).load,
+  ...options,
+});
+
+const controlOf = (env, taskId) => [env.taskLine(taskId).isControlTask ?? false, env.taskLine(taskId).isChosenControlTask ?? false];
+const lastStatus = (env) => env.table.statuses.at(-1);
+
+test("sans tâche cochée : le plan de réservations du cycle 3 est la tâche contrôlée, par défaut", async () => {
+  const env = checkedFloor();
+  await activate(env);
+  assert.deepEqual(controlOf(env, 222), [true, false]);
+  assert.deepEqual(controlOf(env, 225), [false, false]);
+  assert.deepEqual(limitOf(env, 222), ["2026-02-23", false]);
+});
+
+test("« Contrôler par rapport au coffrage » : la tâche est cochée et la limite passe sur elle", async () => {
+  const env = checkedFloor();
+  await activate(env);
+  await env.table.callbacks.onSetFormworkCheck(225, true);
+  assert.deepEqual(env.writes, [[["BulkUpdateRecord", "Planning_Projet", [225], { Controle_Coffrage: [true] }]]]);
+  assert.deepEqual(controlOf(env, 225), [true, true]);
+  assert.deepEqual(controlOf(env, 222), [false, false]);
+  assert.deepEqual(limitOf(env, 225), ["2026-02-23", true], "signature le 09/03/26 : trop tard");
+  assert.deepEqual(limitOf(env, 222), [null, null]);
+  assert.deepEqual(lastStatus(env), {
+    text: "« SIGNATURE PLANS SYNTHESE » est maintenant la tâche contrôlée par rapport au coffrage de l'étage « SS1 ».",
+    tone: "info",
+  });
+});
+
+test("choisir une autre tâche décoche la précédente, dans la même écriture", async () => {
+  const env = checkedFloor([225]);
+  await activate(env);
+  assert.deepEqual(controlOf(env, 225), [true, true]);
+  await env.table.callbacks.onSetFormworkCheck(223, true);
+  assert.deepEqual(env.writes, [[
+    ["BulkUpdateRecord", "Planning_Projet", [225, 223], { Controle_Coffrage: [false, true] }],
+  ]]);
+  assert.deepEqual(controlOf(env, 223), [true, true]);
+  assert.deepEqual(controlOf(env, 225), [false, false]);
+  assert.deepEqual(limitOf(env, 223), ["2026-02-23", false]);
+});
+
+test("« Ne plus contrôler » : la tâche est décochée, l'étage revient au plan de réservations du cycle 3", async () => {
+  const env = checkedFloor([225]);
+  await activate(env);
+  await env.table.callbacks.onSetFormworkCheck(225, false);
+  assert.deepEqual(env.writes, [[["BulkUpdateRecord", "Planning_Projet", [225], { Controle_Coffrage: [false] }]]]);
+  assert.deepEqual(controlOf(env, 225), [false, false]);
+  assert.deepEqual(controlOf(env, 222), [true, false]);
+  assert.deepEqual(lastStatus(env), {
+    text: "L'étage « SS1 » revient à sa tâche contrôlée par défaut.",
+    tone: "info",
+  });
+});
+
+test("tâche contrôlée par défaut : rien n'est écrit, un message le dit", async () => {
+  const env = checkedFloor();
+  await activate(env);
+  await env.table.callbacks.onSetFormworkCheck(222, true);
+  assert.equal(env.writes.length, 0);
+  assert.deepEqual(lastStatus(env), {
+    text: "« PLAN DE SYNTHESE RESERVATIONS NIV SS1 » est déjà la tâche contrôlée de l'étage « SS1 », par défaut.",
+    tone: "info",
+  });
+});
+
+test("colonne Controle_Coffrage absente : refus qui la nomme, rien n'est écrit", async () => {
+  const env = setup({ rows: linkFloorRows({ dated: true, link: "3021" }) });
+  await activate(env);
+  await env.table.callbacks.onSetFormworkCheck(225, true);
+  assert.equal(env.writes.length, 0);
+  assert.deepEqual(lastStatus(env), { text: NO_CHECK_COLUMN, tone: "error" });
+  assert.deepEqual(controlOf(env, 222), [true, false], "le choix par défaut reste en place");
+});
+
+test("colonne Controle_Coffrage refusée par Grist : l'affichage revient, le refus la nomme", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const env = checkedFloor([], {
+    applyUserActions: async () => {
+      throw new Error("Invalid column 'Controle_Coffrage'");
+    },
+  });
+  await activate(env);
+  await env.table.callbacks.onSetFormworkCheck(225, true);
+  assert.deepEqual(lastStatus(env), { text: NO_CHECK_COLUMN, tone: "error" });
+  assert.deepEqual(controlOf(env, 225), [false, false]);
+  assert.deepEqual(controlOf(env, 222), [true, false]);
+});
+
+test("« Editer » désactivé : choisir une tâche contrôlée est refusé", async () => {
+  const env = checkedFloor();
+  await activate(env, { editing: false });
+  await env.table.callbacks.onSetFormworkCheck(225, true);
+  assert.equal(env.writes.length, 0);
+  assert.equal(lastStatus(env).tone, "error");
+  assert.match(lastStatus(env).text, /Activez « Editer »/);
+});

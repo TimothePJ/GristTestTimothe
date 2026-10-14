@@ -41,6 +41,7 @@ export const TASK_COLUMNS = Object.freeze({
   parent: "Parent",
   link: "Lien",
   structureLink: "Lien_Structure",
+  formworkCheck: "Controle_Coffrage",
 });
 
 export const NEW_TASK_NAME = "Nouvelle tâche";
@@ -640,6 +641,13 @@ export function detectTemplateColumns(rows = []) {
 export function detectStructureLinkColumn(rows = []) {
   if (!rows?.length) return null;
   return rows.some((row) => row != null && Object.prototype.hasOwnProperty.call(row, TASK_COLUMNS.structureLink));
+}
+
+// La colonne Controle_Coffrage (tâche contrôlée par rapport au coffrage, choisie à la main)
+// existe-t-elle ? Comme pour Etage : null si aucune ligne ne permet de le savoir.
+export function detectFormworkCheckColumn(rows = []) {
+  if (!rows?.length) return null;
+  return rows.some((row) => row != null && Object.prototype.hasOwnProperty.call(row, TASK_COLUMNS.formworkCheck));
 }
 
 function hasDates(task) {

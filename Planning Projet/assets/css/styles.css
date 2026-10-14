@@ -3481,6 +3481,463 @@ html.is-stt-dragging * {
   fill: #3b9bb0;
 }
 
+/* Vue Global : les barres d'un document Structure sont celles du planning Structure. Chaque
+   règle `.stg-seg.phase-…` est la jumelle d'une règle `#planningTimeline .vis-item.phase-…` de
+   la frise Structure, aux mêmes couleurs — fond → --seg-bg, bord → --seg-border, texte →
+   --seg-text (vérifié par les tests). Une barre en retard reçoit ses couleurs à part (style). */
+.stg-seg {
+  --seg-bg: #ffffff;
+  --seg-border: var(--grist-theme-border, #d0d0d0);
+  --seg-text: #222222;
+}
+
+.stg-seg-box {
+  fill: var(--seg-bg);
+  stroke: var(--seg-border);
+  stroke-width: 1;
+}
+
+.stg-seg-text {
+  fill: var(--seg-text);
+  font-size: 12px;
+}
+
+.stg-seg.phase-limite {
+  --seg-bg: #dbeafe;
+  --seg-border: #bfdbfe;
+  --seg-text: #1e3a8a;
+}
+
+.stg-seg.phase-coffrage {
+  --seg-bg: #fef3c7;
+  --seg-border: #fde68a;
+  --seg-text: #92400e;
+}
+
+.stg-seg.phase-coffrage.phase-past {
+  --seg-bg: #ead7a2;
+  --seg-border: #d6bd74;
+  --seg-text: #7a4b12;
+}
+
+.stg-seg.phase-coffrage.phase-realise-complete {
+  --seg-border: #86efac;
+}
+
+.stg-seg.phase-armature {
+  --seg-bg: #f3f4f6;
+  --seg-border: #d1d5db;
+  --seg-text: #475569;
+}
+
+.stg-seg.phase-armature.phase-past {
+  --seg-bg: #e5e7eb;
+  --seg-border: #cbd5e1;
+  --seg-text: #334155;
+}
+
+.stg-seg.phase-armature.phase-realise-complete {
+  --seg-border: #bbf7d0;
+}
+
+.stg-seg.phase-ndc {
+  --seg-bg: #e9e6f2;
+  --seg-border: #c9c0de;
+  --seg-text: #4d426a;
+}
+
+.stg-seg.phase-ndc.phase-past {
+  --seg-bg: #d8d2e6;
+  --seg-border: #b8aecf;
+  --seg-text: #3f365a;
+}
+
+.stg-seg.phase-ndc.phase-realise-complete {
+  --seg-border: #a7f3d0;
+}
+
+.stg-seg.phase-coupes {
+  --seg-bg: #d4f7e6;
+  --seg-border: #43cd80;
+  --seg-text: #1a5c38;
+}
+
+.stg-seg.phase-coupes.phase-past {
+  --seg-bg: #b8e8d0;
+  --seg-border: #2da862;
+  --seg-text: #14452a;
+}
+
+.stg-seg.phase-coupes.phase-realise-complete {
+  --seg-border: #a7f3d0;
+}
+
+.stg-seg.phase-demolition {
+  --seg-bg: #fde8e8;
+  --seg-border: #cd0000;
+  --seg-text: #7a0000;
+}
+
+.stg-seg.phase-demolition.phase-past {
+  --seg-bg: #f5cfcf;
+  --seg-border: #a80000;
+  --seg-text: #5c0000;
+}
+
+.stg-seg.phase-demolition.phase-realise-complete {
+  --seg-border: #a7f3d0;
+}
+
+.stg-seg.phase-generic {
+  --seg-bg: #ede9ff;
+  --seg-border: #8470ff;
+  --seg-text: #3d2e8a;
+}
+
+.stg-seg.phase-generic.phase-past {
+  --seg-bg: #dad4ff;
+  --seg-border: #6858e0;
+  --seg-text: #2d2266;
+}
+
+.stg-seg.phase-generic.phase-realise-complete {
+  --seg-border: #a7f3d0;
+}
+
+/* Données d'entrées : texte gras, centré, ombre portée. */
+.stg-seg.phase-reference-reception {
+  font-weight: 700;
+}
+
+.stg-seg.phase-reference-reception .stg-seg-text {
+  font-size: 11px;
+}
+
+.stg-seg.phase-reference-reception .stg-seg-box {
+  filter: drop-shadow(0 1px 4px rgba(15, 23, 42, 0.14));
+}
+
+.stg-seg.phase-reference-reception--complete {
+  --seg-bg: #dcfce7;
+  --seg-border: #22c55e;
+  --seg-text: #14532d;
+}
+
+.stg-seg.phase-reference-reception--missing {
+  --seg-bg: #fee2e2;
+  --seg-border: #ef4444;
+  --seg-text: #7f1d1d;
+}
+
+.stg-seg.phase-reference-reception--mixed {
+  --seg-bg: #ffedd5;
+  --seg-border: #f97316;
+  --seg-text: #7c2d12;
+}
+
+.stg-seg.phase-travaux {
+  --seg-bg: #dcfce7;
+  --seg-border: #bbf7d0;
+  --seg-text: #166534;
+}
+
+.stg-seg.phase-demarrage {
+  --seg-bg: #dcfce7;
+  --seg-border: #86efac;
+  --seg-text: transparent;
+}
+
+/* Le crochet d'un niveau, d'un étage ou d'un cycle qui contient un retard passe au rouge. */
+.stg-floor.is-late {
+  stroke: #c00000;
+}
+
+/* ==========================================================
+   Vue Global : planning Synthèse + Structure fusionné, en lecture seule
+   ========================================================== */
+
+/* Bouton « Global » du bandeau : même allure que « Editer », plein quand la vue est active. */
+#toolbar .planning-global-toggle {
+  min-width: 74px;
+  border-color: #b7c7d9;
+  font-weight: 700;
+  color: #23415f;
+  box-shadow: inset 0 0 0 1px rgba(35, 65, 95, 0.05);
+}
+
+#toolbar .planning-global-toggle:hover {
+  border-color: #7fa7cf;
+  background-color: #f1f7ff;
+}
+
+#toolbar .planning-global-toggle.is-active {
+  border-color: #0f6bb8;
+  background-color: #0f6bb8;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(15, 107, 184, 0.2);
+}
+
+#toolbar .planning-global-toggle.is-active:hover {
+  background-color: #0b5a9c;
+  border-color: #0b5a9c;
+}
+
+/* Modes embarqués (planning-synchro) : pas de vue Global. */
+body.planning-sync-embedded #globalViewToggle {
+  display: none !important;
+}
+
+/* Vue active : elle remplace la frise Structure et le tableau Synthese ; ce qui sert à
+   modifier disparaît du bandeau. */
+body.is-global-space .planning-header-row,
+body.is-global-space #timelineWrapper,
+body.is-global-space #planningPaneResizer,
+body.is-global-space #planningStatus,
+body.is-global-space #syntheseSpace,
+body.is-global-space #planningEditToggle,
+body.is-global-space #structureLinkToggle,
+body.is-global-space #durationDefaultsToggle {
+  display: none !important;
+}
+
+/* Liste « Zone » : « Ajouter Zone », « Modifier Zone » et leur séparateur n'y ont pas leur place. */
+body.is-global-space #zoneDropdown option[value="__add_zone__"],
+body.is-global-space #zoneDropdown option[value="__manage_zone__"],
+body.is-global-space #zoneDropdown option:disabled {
+  display: none;
+}
+
+.global-space {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.global-space[hidden] {
+  display: none;
+}
+
+/* Le tableau reprend la mise en page du tableau de tâches (.stt) et lui ajoute la colonne
+   « État ». */
+.gpl {
+  --stt-left-width: 980px;
+  --gpl-col-name-min: 180px;
+  --gpl-col-state-min: 120px;
+  --gpl-col-state: 300px;
+  --gpl-level-bg: #dbe5f1;
+  --gpl-red: #c00000;
+}
+
+.gpl .stt-left {
+  grid-template-columns:
+    minmax(var(--gpl-col-name-min), 1fr) var(--stt-col-id2) var(--stt-col-indice) var(--stt-col-duration)
+    var(--stt-col-start) var(--stt-col-end) minmax(var(--gpl-col-state-min), var(--gpl-col-state));
+}
+
+.gpl-line .stt-cell--name {
+  gap: 4px;
+}
+
+.gpl .stt-toggle:focus-visible {
+  outline-color: var(--stt-accent);
+}
+
+/* Couleurs des lignes : celles de la vue Synthese pour la zone, l'étage, le cycle, la réunion
+   et le démarrage ; celles du tableau du planning Structure pour ses documents, selon leur type ;
+   bleu-gris pour un niveau lié, propre à la vue Global. */
+.gpl-line--zone .stt-left {
+  background: var(--stt-zone-bg);
+}
+
+.gpl-line--zone .stt-cell {
+  color: #000;
+  font-weight: 700;
+}
+
+.gpl-line--zone .stt-cell--name {
+  font-size: 14px;
+  text-decoration: underline;
+}
+
+.gpl-line--zone .stt-toggle {
+  text-decoration: none;
+}
+
+.gpl-line--level .stt-left {
+  background: var(--gpl-level-bg);
+}
+
+.gpl-line--floor .stt-left {
+  background: var(--stt-floor-bg);
+}
+
+.gpl-line--group.is-nature-cycle .stt-left {
+  background: var(--stt-cycle-bg);
+}
+
+.gpl-line--task.is-nature-reunion .stt-left {
+  background: var(--stt-meeting-bg);
+}
+
+.gpl-line--task.is-nature-demarrage .stt-left {
+  background: var(--stt-kickoff-bg);
+}
+
+/* Jumelles des règles `#planningTimeline .group-row-grid.row-type-…` (vérifié par les tests) ;
+   une armature reste sans couleur, comme dans le planning Structure. */
+.gpl-line.is-type-coffrage .stt-left {
+  background: #fff8dc;
+}
+
+.gpl-line.is-type-ndc .stt-left {
+  background: #e9e6f2;
+}
+
+.gpl-line.is-type-coupes .stt-left {
+  background: #d4f7e6;
+}
+
+.gpl-line.is-type-demolition .stt-left {
+  background: #fde8e8;
+}
+
+.gpl-line.is-type-generic .stt-left {
+  background: #ede9ff;
+}
+
+.gpl-line--level .stt-cell,
+.gpl-line--floor .stt-cell,
+.gpl-line--group .stt-cell,
+.gpl-line--type .stt-cell {
+  font-weight: 700;
+}
+
+.gpl-line--formwork .stt-cell {
+  font-weight: 600;
+}
+
+/* Nombre d'armatures, à côté du nom du coffrage. */
+.gpl-count {
+  flex: 0 0 auto;
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+/* Colonne « État » : une pastille par alerte, lisible sur toutes les couleurs de ligne. */
+.gpl .stt-cell--state {
+  gap: 4px;
+}
+
+.gpl-state__part {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 1px 7px;
+  border-radius: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+}
+
+/* La première part, la plus grave, ne se tronque pas. */
+.gpl-state__part:first-child {
+  flex-shrink: 0;
+}
+
+.gpl-state__sep {
+  flex: 0 0 auto;
+  color: #6b7280;
+}
+
+.gpl-state__part.is-tone-late,
+.gpl-state__part.is-tone-error {
+  background: #fde7e7;
+  color: #a51d1d;
+}
+
+.gpl-state__part.is-tone-warn {
+  background: #fff0d8;
+  color: #8b4e00;
+}
+
+.gpl-state__part.is-tone-ok {
+  background: #e8f5ec;
+  color: #1e6b37;
+}
+
+.gpl-state__part.is-tone-muted {
+  background: #f1f1f1;
+  color: #555555;
+  font-weight: 400;
+}
+
+/* Retard de la Synthèse par rapport à Structure : la date de fin en rouge gras, comme celle d'un
+   plan de réservations en retard dans le tableau Synthese. Rien ne clignote. */
+.gpl .stt-cell--end.is-late {
+  color: var(--gpl-red);
+  font-weight: 700;
+}
+
+/* Barre d'état : compteurs du projet, avertissement de relecture, deux boutons. */
+.gpl-bar {
+  position: relative;
+  z-index: 4;
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--stt-grid);
+  background: #f7f7f7;
+  font-size: 12px;
+}
+
+.gpl-bar__counts {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.gpl-bar__notice {
+  color: #b42318;
+  font-weight: 600;
+}
+
+.gpl-bar__notice[hidden] {
+  display: none;
+}
+
+.gpl-bar__button {
+  padding: 4px 10px;
+  border: 1px solid #b7c7d9;
+  border-radius: 4px;
+  background: #fff;
+  color: #23415f;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gpl-bar__button:hover {
+  border-color: #7fa7cf;
+  background: #f1f7ff;
+}
+
+.gpl-bar__button:focus-visible {
+  outline: 2px solid var(--stt-accent);
+  outline-offset: 1px;
+}
+
+.gpl-bar__button.is-active {
+  border-color: var(--gpl-red);
+  background: var(--gpl-red);
+  color: #fff;
+}
+
 /* ARCHIVE vue Synthese v1 (jusqu'à la fin du fichier) : ces règles ne
    s'appliquent plus, le balisage et main.js sont désactivés. Gardé pour trace. */
 

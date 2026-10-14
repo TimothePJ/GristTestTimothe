@@ -7,8 +7,8 @@
 
   <!-- Grist -->
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-  <script src="../shared/service-context-core.js?v=20261009-limite3"></script>
-  <script src="../shared/grist-service-context.js?v=20261009-limite3"></script>
+  <script src="../shared/service-context-core.js?v=20261013-global1"></script>
+  <script src="../shared/grist-service-context.js?v=20261013-global1"></script>
   <script>
     window.ProjectMutationSyncConfig = {
       mutationSignals: {
@@ -29,7 +29,7 @@
       dropdownIds: ["projectDropdown"]
     };
   </script>
-  <script src="../shared/project-mutation-sync-relay.js?v=20261009-limite3"></script>
+  <script src="../shared/project-mutation-sync-relay.js?v=20261013-global1"></script>
 
   <!-- vis-timeline (même système que timeline-calendar.zip) -->
   <script src="https://unpkg.com/vis-timeline/standalone/umd/vis-timeline-graph2d.min.js"></script>
@@ -40,10 +40,10 @@
 
   <!-- Styles app -->
   <link rel="stylesheet" href="./assets/css/variables.css" />
-  <link rel="stylesheet" href="./assets/css/styles.css?v=20261009-limite3" />
+  <link rel="stylesheet" href="./assets/css/styles.css?v=20261013-global1" />
 
   <!-- App -->
-  <script type="module" src="./assets/js/main.js?v=20261009-limite3" defer></script>
+  <script type="module" src="./assets/js/main.js?v=20261013-global1" defer></script>
 </head>
 <body>
   <!-- Toolbar style timeline-calendar -->
@@ -58,6 +58,14 @@
       <select id="zoneDropdown" disabled>
         <option value="">Toutes les zones</option>
       </select>
+      <button
+        id="globalViewToggle"
+        type="button"
+        class="planning-global-toggle"
+        aria-pressed="false"
+        title="Voir ensemble le planning Synthèse et le planning Structure, en lecture seule"
+        data-service-context-navigation
+      >Global</button>
       <button
         id="planningEditToggle"
         type="button"
@@ -129,6 +137,10 @@
 
   <!-- Vue Synthese : tableau de tâches, construit par assets/js/ui/syntheseTaskTable.js -->
   <section id="syntheseSpace" class="synthese-space" aria-label="Vue Synthese" hidden></section>
+
+  <!-- Vue Global : planning Synthèse + Structure fusionné, en lecture seule, construit par
+       assets/js/ui/globalPlanningTable.js -->
+  <section id="globalSpace" class="global-space" aria-label="Vue Global" hidden></section>
 
   <!-- ARCHIVE vue Synthese v1 (équipe sur chronologie) : désactivée, gardée pour trace.
   <section id="syntheseView" class="synthese-view" aria-label="Équipe Synthese du projet" hidden>

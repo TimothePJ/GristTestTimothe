@@ -64,10 +64,23 @@ export function createDeferredRenderer(draw) {
   };
 }
 
+// Entrée « contrôle par rapport au coffrage » d'une tâche d'étage : la choisir comme tâche
+// contrôlée de son étage, ou la décocher pour revenir au choix par défaut. La tâche contrôlée
+// par défaut le dit, en grisé.
+function formworkCheckItem(line) {
+  const item = { action: "setFormworkCheck", taskId: line.taskId };
+  if (line.isChosenControlTask) return { label: "Ne plus contrôler par rapport au coffrage", ...item, checked: false };
+  if (line.isControlTask) {
+    return { label: "Contrôlée par rapport au coffrage (par défaut)", ...item, checked: true, disabled: true };
+  }
+  return { label: "Contrôler par rapport au coffrage", ...item, checked: true };
+}
+
 // Entrées du menu contextuel selon la ligne visée : zone (sauf « Sans zone ») → tâche ou
 // étage ; « Sans zone » → tâche ; étage → tâche dans l'étage ou suppression de l'étage ;
 // cycle / sous-groupe → tâche dans le groupe ou suppression du groupe ; tâche → tâche dans
-// le même conteneur ou suppression de la tâche.
+// le même conteneur, contrôle par rapport au coffrage (tâche d'étage) ou suppression de la
+// tâche.
 export function buildMenuItems(line, { canAddFloor = true } = {}) {
   if (!line) return [];
   if (line.kind === "zone") {
@@ -97,7 +110,11 @@ export function buildMenuItems(line, { canAddFloor = true } = {}) {
   if (line.kind === "task") {
     const addTask = { label: "Ajouter une tâche", action: "addTask", zoneKey: line.zoneKey, floorKey: line.floorKey || "" };
     if (line.groupRowId) addTask.groupRowId = line.groupRowId;
-    return [addTask, { label: "Supprimer la tâche", action: "deleteTask", taskId: line.taskId, danger: true }];
+    return [
+      addTask,
+      ...(line.floorKey ? [formworkCheckItem(line)] : []),
+      { label: "Supprimer la tâche", action: "deleteTask", taskId: line.taskId, danger: true },
+    ];
   }
   return [];
 }
@@ -221,6 +238,7 @@ export function createSyntheseTaskTable(host, {
   onDeleteTask,
   onDeleteFloor,
   onDeleteGroup,
+  onSetFormworkCheck,
   onMoveTask,
   onToggleZone,
   onToggleFloor,
@@ -619,6 +637,7 @@ export function createSyntheseTaskTable(host, {
     if (item.action === "deleteFloor") return onDeleteFloor?.(item.zoneKey, item.floorKey);
     if (item.action === "deleteGroup") return onDeleteGroup?.(item.groupRowId);
     if (item.action === "deleteTask") return onDeleteTask?.(item.taskId);
+    if (item.action === "setFormworkCheck") return onSetFormworkCheck?.(item.taskId, item.checked);
     return undefined;
   }
 

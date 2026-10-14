@@ -22,6 +22,7 @@ import {
   buildTaskFields,
   dateFieldsOf,
   detectFloorColumn,
+  detectFormworkCheckColumn,
   detectStructureLinkColumn,
   detectTemplateColumns,
   findGroup,
@@ -42,11 +43,13 @@ import {
 } from "../services/syntheseFloorTemplate.js";
 import { cascadeFrom } from "../services/syntheseLinks.js";
 import {
+  applyControlTasks,
   applyEndLimits,
   applyFloorLinks,
+  controlTaskEndLimits,
   findFloorStart,
+  readControlTasks,
   readFloorLinks,
-  reservationEndLimits,
 } from "../services/structureLinkModel.js";
 
 const SAVING_DELAY_MS = 1000;
@@ -67,6 +70,7 @@ const MESSAGES = Object.freeze({
   noTemplateColumns: "Les colonnes « Nature », « Parent » et « Lien » (Texte) manquent dans Planning_Projet : ajoutez-les pour créer des étages.",
   templateFailed: "L'étage n'a pas pu être créé complètement : rien n'a été gardé. Réessayez.",
   noLinkColumn: "La colonne « Lien_Structure » (Texte) manque dans Planning_Projet : ajoutez-la pour lier les étages aux coffrages.",
+  noCheckColumn: "La colonne « Controle_Coffrage » (Booléen) manque dans Planning_Projet : ajoutez-la pour choisir la tâche contrôlée par rapport au coffrage.",
   floorGone: "Cet étage n'existe plus : fermez la fenêtre puis rouvrez-la.",
   noFloorRow: "Cet étage n'a pas de ligne « étage » dans Planning_Projet : le lien ne peut pas être mémorisé.",
   noPlanTask: "Cet étage n'a pas de tâche « FOND DE PLAN DE SYNTHESE » : aucune date ne peut être posée.",
@@ -97,6 +101,8 @@ function describeWriteError(error) {
   }
   // Colonne du lien Structure inconnue de Grist.
   if (/\bLien_Structure\b/.test(message)) return MESSAGES.noLinkColumn;
+  // Colonne de la tâche contrôlée inconnue de Grist.
+  if (/\bControle_Coffrage\b/.test(message)) return MESSAGES.noCheckColumn;
   // Grist refuse une colonne inconnue : seule l'écriture d'un étage utilise Etage.
   if (/\bEtage\b/.test(message)) return MESSAGES.noFloorColumn;
   // Colonnes du modèle d'étage inconnues de Grist.
@@ -153,6 +159,8 @@ export function createSyntheseTasksController({
   let templateColumns = null;
   // Colonne Lien_Structure (lien vers un coffrage de Structure) : même principe que Etage.
   let structureLinkColumn = null;
+  // Colonne Controle_Coffrage (tâche contrôlée choisie à la main) : même principe que Etage.
+  let formworkCheckColumn = null;
   // Opérations affichées mais pas encore enregistrées, dans l'ordre (voir submit).
   let pendingOps = [];
   let writeQueue = Promise.resolve();
@@ -172,6 +180,7 @@ export function createSyntheseTasksController({
     onDeleteTask: (taskId) => handleDeleteTask(taskId),
     onDeleteFloor: (zoneKey, floorKey) => handleDeleteFloor(zoneKey, floorKey),
     onDeleteGroup: (groupRowId) => handleDeleteGroup(groupRowId),
+    onSetFormworkCheck: (taskId, checked) => handleSetFormworkCheck(taskId, checked),
     onMoveTask: (taskId, target) => handleMoveTask(taskId, target),
     onToggleZone: (zoneKey) => toggleZone(zoneKey),
     onToggleFloor: (zoneKey, floorKey) => toggleFloor(zoneKey, floorKey),
@@ -269,16 +278,14 @@ export function createSyntheseTasksController({
     sections = project
       ? buildSections({ rows: shownRows, sharedZones: getSharedZones(project), zoneFilter })
       : [];
-    // Le plan de réservations du cycle 3 porte sa limite de fin (début du plan de coffrage de
-    // son étage) : le tableau et le Gantt le signalent quand il la dépasse. Chaque étage porte
-    // son lien Structure, que son emblème montre.
-    const lines = applyFloorLinks(
-      applyEndLimits(
-        buildRowModel(sections, { collapsedZoneKeys, collapsedFloorKeys, collapsedGroupKeys }),
-        reservationEndLimits({ syntheseRows: shownRows, formworkStarts })
-      ),
-      readFloorLinks(shownRows)
-    );
+    // La tâche contrôlée de chaque étage (cochée, sinon le plan de réservations du cycle 3)
+    // porte sa limite de fin, le début du plan de coffrage de son étage : le tableau et le
+    // Gantt la signalent quand elle la dépasse, et son menu dit si elle est contrôlée. Chaque
+    // étage porte son lien Structure, que son emblème montre.
+    let lines = buildRowModel(sections, { collapsedZoneKeys, collapsedFloorKeys, collapsedGroupKeys });
+    lines = applyEndLimits(lines, controlTaskEndLimits({ syntheseRows: shownRows, formworkStarts }));
+    lines = applyControlTasks(lines, readControlTasks(shownRows));
+    lines = applyFloorLinks(lines, readFloorLinks(shownRows));
     let emptyMessage = "";
     if (!project) emptyMessage = MESSAGES.noProject;
     else if (!loaded) emptyMessage = MESSAGES.loading;
@@ -323,6 +330,7 @@ export function createSyntheseTasksController({
       floorColumn = null;
       templateColumns = null;
       structureLinkColumn = null;
+      formworkCheckColumn = null;
       rows = [];
       formworkStarts = [];
       startsDue = true;
@@ -361,6 +369,7 @@ export function createSyntheseTasksController({
     floorColumn = detectFloorColumn(rows);
     templateColumns = detectTemplateColumns(rows);
     structureLinkColumn = detectStructureLinkColumn(rows);
+    formworkCheckColumn = detectFormworkCheckColumn(rows);
     readError = false;
     loaded = true;
     render();
@@ -822,6 +831,54 @@ export function createSyntheseTasksController({
       actions: [["UpdateRecord", PLANNING_TABLE, taskId, fields]],
     }), {
       onFailure: (error, dropped) => fail("Déplacement de la tâche impossible :", error, dropped),
+    });
+  }
+
+  // Menu d'une tâche d'étage : la choisir comme tâche contrôlée par rapport au coffrage — les
+  // autres tâches cochées de l'étage sont décochées dans la même écriture — ou la décocher,
+  // ce qui rend à l'étage son choix par défaut.
+  function handleSetFormworkCheck(taskId, checked) {
+    if (!isEditable()) {
+      refuseLocked();
+      return Promise.resolve();
+    }
+    const task = findTask(taskId);
+    if (!task || !findRow(taskId) || !task.floorKey) return Promise.resolve();
+    if (formworkCheckColumn === false) {
+      setStatus(MESSAGES.noCheckColumn, "error");
+      return Promise.resolve();
+    }
+    const controls = readControlTasks(displayedRows());
+    const current = controls.get(taskId);
+    const floorLabel = `l'étage « ${task.groupName} »`;
+    if (checked && current && !current.chosen) {
+      clearStatus();
+      info(`« ${task.name} » est déjà la tâche contrôlée de ${floorLabel}, par défaut.`);
+      return Promise.resolve();
+    }
+    if (Boolean(checked) === Boolean(current?.chosen)) return Promise.resolve();
+    const column = TASK_COLUMNS.formworkCheck;
+    const changes = new Map();
+    if (checked) {
+      controls.forEach((entry, otherId) => {
+        const sameFloor = entry.zoneKey === task.zoneKey && entry.floorKey === task.floorKey;
+        if (entry.chosen && sameFloor) changes.set(otherId, { [column]: false });
+      });
+    }
+    changes.set(taskId, { [column]: Boolean(checked) });
+    const rowIds = [...changes.keys()];
+    clearStatus();
+    return submit(createOp({
+      changes,
+      actions: [["BulkUpdateRecord", PLANNING_TABLE, rowIds, { [column]: rowIds.map((rowId) => changes.get(rowId)[column]) }]],
+    }), {
+      onSuccess: () => info(checked
+        ? `« ${task.name} » est maintenant la tâche contrôlée par rapport au coffrage de ${floorLabel}.`
+        : `L'étage « ${task.groupName} » revient à sa tâche contrôlée par défaut.`),
+      onFailure: (error, dropped) => {
+        if (describeWriteError(error) === MESSAGES.noCheckColumn) formworkCheckColumn = false;
+        fail("Choix de la tâche contrôlée impossible :", error, dropped);
+      },
     });
   }
 

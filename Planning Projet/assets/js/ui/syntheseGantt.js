@@ -7,6 +7,7 @@ import {
   LABEL_GAP_PX,
   MILESTONE_HALF_PX,
   ROW_HEIGHT_PX,
+  SEGMENT_INSET_PX,
   TASK_BAR_HEIGHT_PX,
   buildGanttLinks,
   buildGanttShapes,
@@ -30,6 +31,9 @@ const FLOOR_BRACKET_TOP_PX = 8;
 const FLOOR_TICK_PX = 6;
 const LIMIT_INSET_PX = 2;
 const LINK_HEAD_PX = 4;
+// Barres d'un document Structure : coins et marge du libellé de la frise Structure.
+const SEGMENT_RADIUS_PX = 2;
+const SEGMENT_LABEL_PAD_PX = 4;
 
 // Pointe pleine d'une flèche, selon sa direction.
 const LINK_HEADS = Object.freeze({
@@ -130,6 +134,49 @@ export function createSyntheseGantt({ headHost, layerHost, interactionHost, rowH
     scaleSvg.replaceChildren(...nodes);
   }
 
+  // Une barre d'un document Structure (vue Global), dessinée comme dans le planning Structure :
+  // fond, bord et texte de ses classes (mêmes couleurs que la frise) ; en retard, la part
+  // réalisée à sa couleur, le reste à la couleur de retard, le bord de retard. Le libellé est
+  // écrit dans une fenêtre de la taille de la barre, qui le coupe à son bord.
+  function drawSegment(piece, rowTop) {
+    const width = piece.x2 - piece.x1;
+    const height = rowHeight - 2 * SEGMENT_INSET_PX;
+    const box = { x: px(piece.x1), y: px(rowTop + SEGMENT_INSET_PX), width: px(width), height: px(height) };
+    const group = svgElement("g", { class: `stg-seg ${piece.classes}` });
+    if (piece.paint) {
+      const doneWidth = (width * piece.paint.realise) / 100;
+      if (doneWidth > 0) group.appendChild(svgElement("rect", { ...box, width: px(doneWidth), style: `fill: ${piece.paint.done}` }));
+      group.appendChild(svgElement("rect", {
+        ...box,
+        x: px(piece.x1 + doneWidth),
+        width: px(width - doneWidth),
+        style: `fill: ${piece.paint.late}`,
+      }));
+      group.appendChild(svgElement("rect", {
+        ...box,
+        class: "stg-seg-box",
+        rx: SEGMENT_RADIUS_PX,
+        style: `fill: none; stroke: ${piece.paint.border}`,
+      }));
+    } else {
+      group.appendChild(svgElement("rect", { ...box, class: "stg-seg-box", rx: SEGMENT_RADIUS_PX }));
+    }
+    if (piece.label) {
+      // Données d'entrées : libellé centré, comme dans le planning Structure.
+      const centered = piece.kind === "reference";
+      const frame = svgElement("svg", { ...box });
+      frame.appendChild(svgElement("text", {
+        class: "stg-seg-text",
+        x: centered ? px(width / 2) : SEGMENT_LABEL_PAD_PX,
+        y: px(height / 2 + LABEL_BASELINE_PX),
+        ...(centered ? { "text-anchor": "middle" } : {}),
+        ...(piece.paint ? { style: `fill: ${piece.paint.text}` } : {}),
+      }, piece.label));
+      group.appendChild(frame);
+    }
+    return group;
+  }
+
   function drawShape(shape) {
     const middle = shape.y + rowHeight / 2;
     const baseline = middle + LABEL_BASELINE_PX;
@@ -142,6 +189,12 @@ export function createSyntheseGantt({ headHost, layerHost, interactionHost, rowH
         y1: px(shape.y + LIMIT_INSET_PX),
         y2: px(shape.y + rowHeight - LIMIT_INSET_PX),
       })];
+    }
+    if (shape.type === "segments") {
+      return [
+        ...shape.pieces.map((piece) => drawSegment(piece, shape.y)),
+        ...(shape.label ? [svgElement("text", { class: "stg-label", x: px(shape.labelX + LABEL_GAP_PX), y: px(baseline) }, shape.label)] : []),
+      ];
     }
     if (shape.type === "taskBar") {
       return [
@@ -181,7 +234,7 @@ export function createSyntheseGantt({ headHost, layerHost, interactionHost, rowH
       const top = shape.y + FLOOR_BRACKET_TOP_PX;
       return [
         svgElement("polyline", {
-          class: "stg-floor",
+          class: shape.tone === "late" ? "stg-floor is-late" : "stg-floor",
           points: toPoints([
             [shape.x1, top + FLOOR_TICK_PX],
             [shape.x1, top],

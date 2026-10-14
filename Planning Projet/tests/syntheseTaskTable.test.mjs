@@ -97,6 +97,7 @@ test("menu contextuel selon la ligne", () => {
   ]);
   assert.deepEqual(buildMenuItems({ kind: "task", zoneKey: "zonez3a", floorKey: "phrdb", taskId: 5 }), [
     { label: "Ajouter une tâche", action: "addTask", zoneKey: "zonez3a", floorKey: "phrdb" },
+    { label: "Contrôler par rapport au coffrage", action: "setFormworkCheck", taskId: 5, checked: true },
     { label: "Supprimer la tâche", action: "deleteTask", taskId: 5, danger: true },
   ]);
   assert.deepEqual(buildMenuItems(null), []);

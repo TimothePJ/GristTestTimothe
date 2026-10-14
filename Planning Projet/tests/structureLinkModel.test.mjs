@@ -6,13 +6,13 @@ import {
   applyEndLimits,
   applyFloorLinks,
   buildStructureLink,
+  controlTaskEndLimits,
   findFloorStart,
   formworkIssueDates,
   formworkLabel,
   isFormworkRow,
   numberKeyOf,
   readFloorLinks,
-  reservationEndLimits,
 } from "../assets/js/services/structureLinkModel.js";
 import { readTask, zoneKeyOf } from "../assets/js/services/syntheseTaskModel.js";
 
@@ -327,13 +327,13 @@ test("limite de fin du plan de réservations du cycle 3 : le début du plan de c
     { number: " 3003", zoneName: "Zone 9", start: new Date(2026, 2, 30) }, // même N° dans une autre zone
     { number: "3003", zoneName: "Zone 2", start: new Date(2026, 3, 1) }, // celui de la zone de l'étage : préféré
   ];
-  const limits = reservationEndLimits({ syntheseRows, formworkStarts });
+  const limits = controlTaskEndLimits({ syntheseRows, formworkStarts });
   assert.deepEqual(
     [...limits.entries()].map(([taskId, entry]) => [taskId, iso(entry.limit), entry.formworkNumber]),
     [[12, "2026-02-19", "3001"], [13, "2026-02-19", "3001"], [41, "2026-04-01", "3003"]]
   );
-  assert.equal(reservationEndLimits().size, 0);
-  assert.equal(reservationEndLimits({ syntheseRows: null, formworkStarts: null }).size, 0);
+  assert.equal(controlTaskEndLimits().size, 0);
+  assert.equal(controlTaskEndLimits({ syntheseRows: null, formworkStarts: null }).size, 0);
 });
 
 test("report des limites sur les lignes : la Fin ne doit pas dépasser le jour limite", () => {

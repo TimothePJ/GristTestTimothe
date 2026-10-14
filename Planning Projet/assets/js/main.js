@@ -85,10 +85,16 @@ import { createSyntheseTasksController } from "./ui/syntheseTasksController.js";
 import { createSyntheseGantt } from "./ui/syntheseGantt.js";
 import { createStructureLinkDialog } from "./ui/structureLinkDialog.js";
 import { buildFormworkStarts } from "./services/formworkStarts.js";
+import { createGlobalPlanningTable } from "./ui/globalPlanningTable.js";
+import { createGlobalPlanningController } from "./ui/globalPlanningController.js";
 
 let toolbarBound = false;
 // Tableau de tâches de la vue Synthese : créé à la première activation du service.
 let syntheseTasks = null;
+// Vue Global (planning Synthèse + Structure fusionné, en lecture seule) : créée à sa première
+// ouverture.
+let globalPlanning = null;
+let globalSpaceActive = false;
 let pendingRefreshOptions = null;
 let refreshQueuePromise = null;
 let resolveRefreshQueue = null;
@@ -2019,6 +2025,9 @@ function bindPlanningDataRefresh() {
       // Un coffrage déplacé dans le planning Structure déplace la limite de fin du plan de
       // réservations de son étage.
       if (tables.includes("Planning_Projet")) void syntheseTasks?.refreshFormworkStarts();
+      // La vue Global montre les deux services : elle relit ses tables quelle que soit la table
+      // signalée (une écriture de l'autre service arrive par les colonnes de signal du projet).
+      void globalPlanning?.refresh();
       void refreshPlanning({
         forceLoad: true,
         reason: `donnees-modifiees:${tables.join(",")}`,
@@ -2126,6 +2135,8 @@ function getSyntheseTasks() {
 
 function syncSyntheseTasksZoneFilter() {
   syntheseTasks?.setZoneFilter(state.selectedZone || "");
+  // La vue Global suit le même filtre de zone.
+  globalPlanning?.setZoneFilter(state.selectedZone || "");
 }
 
 function applySyntheseSpace(selectedService) {
@@ -2195,6 +2206,73 @@ function bindStructureLinkDialog() {
     });
 }
 
+// Vue Global : le planning Synthèse et le planning Structure du projet dans un même tableau,
+// en lecture seule. Le bouton « Global » du bandeau l'affiche à la place du planning du service
+// choisi ; ses deux tables sont lues pour le projet, tous services confondus.
+function getGlobalPlanning() {
+  if (globalPlanning) return globalPlanning;
+  const host = document.getElementById("globalSpace");
+  const context = window.GristServiceContext;
+  if (!host || typeof context?.fetchProjectRows !== "function") return null;
+  globalPlanning = createGlobalPlanningController({
+    context,
+    createTable: (callbacks) => createGlobalPlanningTable(host, callbacks, { createGantt: createSyntheseGanttForTable }),
+    loadRows: async () => {
+      const [projectRows, planRows] = await Promise.all([
+        context.fetchProjectRows("Planning_Projet"),
+        context.fetchProjectRows("ListePlan_NDC_COF"),
+      ]);
+      // Barres Structure dessinées comme dans le planning Structure : ses indices de référence
+      // (ceux du service Structure, quel que soit le service affiché) et ses données d'entrées.
+      const targetLookup = buildProjectRealisationTargetLookup(cachedProjectAvancementConfigs, "Structure");
+      const referenceLookup = await fetchPlanningReferenceReceptionSummaries(projectRows).catch((error) => {
+        console.error("Données d'entrées du planning global illisibles :", error);
+        return new Map();
+      });
+      return { projectRows, planRows, targetLookup, referenceLookup };
+    },
+  });
+  globalPlanning.setZoneFilter(state.selectedZone || "");
+  return globalPlanning;
+}
+
+function applyGlobalSpace(nextActive) {
+  const active = Boolean(nextActive);
+  const button = document.getElementById("globalViewToggle");
+  if (button) {
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+    button.classList.toggle("is-active", active);
+    button.title = active
+      ? "Revenir au planning du service"
+      : "Voir ensemble le planning Synthèse et le planning Structure, en lecture seule";
+  }
+  if (active === globalSpaceActive) return;
+  globalSpaceActive = active;
+  document.body.classList.toggle("is-global-space", active);
+  const space = document.getElementById("globalSpace");
+  if (space) space.hidden = !active;
+  if (active) {
+    // La vue Global ne modifie rien : « Editer » repasse à l'état verrouillé.
+    if (planningEditingEnabled) setPlanningEditingEnabled(false, { rerender: true, notify: false });
+    getGlobalPlanning()?.setActive(true);
+  } else {
+    globalPlanning?.setActive(false);
+    // Le planning était masqué : vis-timeline doit recalculer ses dimensions.
+    requestAnimationFrame(() => refreshPlanningTimelineLayout());
+  }
+}
+
+function bindGlobalSpace() {
+  if (EMBEDDED_PLANNING_SYNC_MODE) return;
+  document.getElementById("globalViewToggle")?.addEventListener("click", () => {
+    const next = !globalSpaceActive;
+    setState({ globalView: next });
+    applyGlobalSpace(next);
+  });
+  // Le choix de la dernière session est repris.
+  applyGlobalSpace(state.globalView);
+}
+
 async function handleProjectChange(currentState) {
   console.log("Projet sélectionné :", currentState.selectedProject || "(aucun)");
   // La zone du bandeau vient d'être remise à zéro : le tableau de tâches la suit tout de
@@ -2228,6 +2306,7 @@ async function bootstrap() {
     // ARCHIVE vue Synthese v1 : bindSyntheseView();
     bindSyntheseSpace();
     bindStructureLinkDialog();
+    bindGlobalSpace();
     bindSharedProjectZones();
     bindAddZoneModal();
     bindManageZoneModal();

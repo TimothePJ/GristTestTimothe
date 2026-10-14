@@ -1092,44 +1092,59 @@ function getPhasePalette(className) {
   return null;
 }
 
-function buildRetardPhaseStyle(className, realiseValue, retardDays) {
+// Couleurs d'une barre en retard et pas encore réalisée : la part réalisée (`realise` %, de 0 à
+// 100) garde sa couleur (`done`), le reste prend la couleur de retard (`late`). null : barre à
+// ses couleurs habituelles. Lue aussi par la vue Global, qui redessine ces barres.
+export function retardPhasePaint(className, realiseValue, retardDays) {
   const palette = getPhasePalette(className);
   if (!palette) {
-    return "";
+    return null;
   }
 
   const normalizedRetardDays = toNumber(retardDays);
   if (normalizedRetardDays == null || normalizedRetardDays <= 0) {
-    return "";
+    return null;
   }
 
   const normalizedRealise = clampPercentage(realiseValue);
   if (normalizedRealise >= 100) {
+    return null;
+  }
+
+  return {
+    realise: normalizedRealise,
+    done: palette.background,
+    late: palette.overdueBackground,
+    border: normalizedRealise <= 0 ? palette.overdueBorder : palette.border,
+    text: palette.text,
+  };
+}
+
+export function buildRetardPhaseStyle(className, realiseValue, retardDays) {
+  const paint = retardPhasePaint(className, realiseValue, retardDays);
+  if (!paint) {
     return "";
   }
 
-  if (normalizedRealise <= 0) {
-    return [
-      `background: ${palette.overdueBackground} !important`,
-      `border-color: ${palette.overdueBorder} !important`,
-      `color: ${palette.text} !important`,
-    ].join("; ");
-  }
-
+  const background = paint.realise <= 0
+    ? paint.late
+    : `linear-gradient(to right, ${paint.done} 0%, ${paint.done} ${paint.realise}%, ${paint.late} ${paint.realise}%, ${paint.late} 100%)`;
   return [
-    `background: linear-gradient(to right, ${palette.background} 0%, ${palette.background} ${normalizedRealise}%, ${palette.overdueBackground} ${normalizedRealise}%, ${palette.overdueBackground} 100%) !important`,
-    `border-color: ${palette.border} !important`,
-    `color: ${palette.text} !important`,
+    `background: ${background} !important`,
+    `border-color: ${paint.border} !important`,
+    `color: ${paint.text} !important`,
   ].join("; ");
 }
 
-function buildPhaseClassName(className, realiseValue) {
+export function buildPhaseClassName(className, realiseValue) {
   return clampPercentage(realiseValue) >= 100
     ? `${className} phase-realise-complete`
     : className;
 }
 
-function createSplitPhaseItems({
+// Barre d'une phase, coupée à l'heure actuelle en partie passée et partie à venir (exportée
+// pour la vue Global, qui dessine ses barres de section de la même façon).
+export function createSplitPhaseItems({
   itemIdBase,
   groupId,
   start,

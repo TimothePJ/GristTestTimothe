@@ -137,6 +137,7 @@ test("les colonnes Grist utilisées", () => {
     parent: "Parent",
     link: "Lien",
     structureLink: "Lien_Structure",
+    formworkCheck: "Controle_Coffrage",
   });
 });
 

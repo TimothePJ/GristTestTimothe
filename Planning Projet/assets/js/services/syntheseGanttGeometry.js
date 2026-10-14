@@ -13,6 +13,9 @@ export const MIN_PX_PER_DAY_FOR_OFF_DAYS = 6;
 // Formes dans une ligne de 26 px (partagées avec le dessin) et écart des flèches.
 export const TASK_BAR_HEIGHT_PX = 14;
 export const MILESTONE_HALF_PX = 6;
+// Barres d'un document Structure (vue Global) : comme dans le planning Structure, elles
+// laissent 4 px libres en haut et en bas de leur ligne.
+export const SEGMENT_INSET_PX = 4;
 // Couloir des flèches : les traits verticaux passent à LINK_GAP_PX du bout d'une barre, et
 // son libellé commence à LABEL_GAP_PX, si bien que le couloir reste libre.
 export const LINK_GAP_PX = 5;
@@ -79,9 +82,37 @@ function milestoneX(line, scale) {
   return scale.dateToX(line.link?.type === "FD" ? dayEnd(line.start) : dayCenter(line.start));
 }
 
-// Tâche dont la Fin dépasse sa limite : sa forme le porte, pour être dessinée en alerte.
+// Tâche en retard : sa forme le porte, pour être dessinée en alerte — Fin au-delà de sa
+// limite, ou retard signalé par la vue Global (ton « late »).
 function overLimitOf(line) {
-  return line.isOverEndLimit ? { overLimit: true } : {};
+  return line.isOverEndLimit || (line.kind === "task" && line.tone === "late") ? { overLimit: true } : {};
+}
+
+// Document Structure (vue Global) : les barres que le planning Structure dessine pour lui, de
+// leur début à leur fin à l'heure près, comme dans la frise ; son nom après la dernière. Groupe
+// d'un type replié : son nom est déjà dans sa barre, rien après elle.
+function segmentsShape(line, row, scale, rowHeight) {
+  const pieces = line.segments.map((segment) => {
+    const x1 = scale.dateToX(segment.start);
+    return {
+      kind: segment.kind,
+      classes: segment.classes,
+      label: segment.label,
+      paint: segment.paint,
+      x1,
+      x2: Math.max(scale.dateToX(segment.end), x1 + MIN_BAR_WIDTH_PX),
+    };
+  });
+  if (!pieces.length) return null;
+  return {
+    type: "segments",
+    row,
+    key: line.key,
+    y: row * rowHeight,
+    label: line.kind === "type" ? "" : line.name,
+    labelX: Math.max(...pieces.map((piece) => piece.x2)),
+    pieces,
+  };
 }
 
 // Une forme par ligne datée du modèle de lignes, à la hauteur de sa ligne. Les lignes
@@ -89,11 +120,17 @@ function overLimitOf(line) {
 export function buildGanttShapes(lines, scale, { rowHeight = ROW_HEIGHT_PX } = {}) {
   const shapes = [];
   (lines || []).forEach((line, row) => {
+    if (Array.isArray(line?.segments)) {
+      const shape = segmentsShape(line, row, scale, rowHeight);
+      if (shape) shapes.push(shape);
+      return;
+    }
     if (!(line?.start instanceof Date) || !(line?.end instanceof Date)) return;
     const y = row * rowHeight;
-    // Zone (barre noire), étage, cycle et sous-groupe (crochet) : du Début à la Fin du
-    // récapitulatif, au centre du jour quand il commence ou finit par un jalon.
-    if (line.kind === "zone" || line.kind === "floor" || line.kind === "group") {
+    // Zone (barre noire), étage, cycle, sous-groupe, et niveau ou groupe d'un type déplié de la
+    // vue Global (crochet) : du Début à la Fin du récapitulatif, au centre du jour quand il
+    // commence ou finit par un jalon.
+    if (["zone", "floor", "group", "level", "type"].includes(line.kind)) {
       const from = line.startsWithMilestone ? dayCenter(line.start) : dayStart(line.start);
       const to = line.endsWithMilestone ? dayCenter(line.end) : dayEnd(line.end);
       const x1 = scale.dateToX(from);
@@ -105,6 +142,8 @@ export function buildGanttShapes(lines, scale, { rowHeight = ROW_HEIGHT_PX } = {
         x1,
         x2: Math.max(scale.dateToX(to), x1 + MIN_BAR_WIDTH_PX),
         label: line.name,
+        // Crochet en alerte (vue Global) : il contient une tâche en retard.
+        ...(line.kind !== "zone" && line.tone === "late" ? { tone: "late" } : {}),
       });
       return;
     }

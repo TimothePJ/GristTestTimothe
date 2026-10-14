@@ -25,9 +25,10 @@ const FORMWORK_TYPE = "COFFRAGE";
 // en clé de comparaison.
 const FORECAST_INDICE_KEY = "prev 0";
 const PLAN_NAME_START = "fond de plan de synthese";
-// Le plan de réservations du cycle 3 d'un étage lié (tâche « PLAN DE SYNTHESE RESERVATIONS … »
-// rangée dans le cycle nommé « CYCLE 3 ») doit finir au plus tard le jour où commence le plan
-// de coffrage de son étage dans le planning Structure. Celui du cycle 2 n'est pas concerné.
+// La tâche contrôlée d'un étage lié doit finir au plus tard le jour où commence le plan de
+// coffrage de son étage dans le planning Structure. C'est la tâche cochée par l'utilisateur
+// (colonne Controle_Coffrage) ; sans tâche cochée, le plan de réservations du cycle 3 (tâche
+// « PLAN DE SYNTHESE RESERVATIONS … » rangée dans le cycle nommé « CYCLE 3 »).
 const RESERVATION_NAME_START = "plan de synthese reservations";
 const RESERVATION_CYCLE = /^cycle ?3(?!\d)/;
 
@@ -143,12 +144,52 @@ function cycleNameOf(row, groupsById) {
   return cycle?.natureKey === "cycle" ? cycle.name : "";
 }
 
-// Limite de fin du plan de réservations du cycle 3, par id de tâche : le dernier jour permis
+// Colonne Controle_Coffrage : booléen Grist, ou le texte « true » si la colonne est du texte.
+function isChecked(value) {
+  return value === true || toText(value).toLocaleLowerCase("fr") === "true";
+}
+
+// Tâche contrôlée de chaque étage, par id de tâche : sa zone, son étage et `chosen` — vrai
+// quand l'utilisateur l'a cochée, faux quand c'est le choix par défaut (plan de réservations
+// du cycle 3 d'un étage où rien n'est coché). Plusieurs tâches cochées dans un même étage
+// sont toutes contrôlées. Les tâches hors étage ne le sont jamais.
+export function readControlTasks(syntheseRows) {
+  const rows = Array.isArray(syntheseRows) ? syntheseRows : [];
+  const tasks = rows.filter(isTaskRow)
+    .map((row) => ({
+      row,
+      id: Number(row[TASK_COLUMNS.id]),
+      zoneKey: zoneKeyOf(row[TASK_COLUMNS.zone]),
+      floorKey: floorKeyOf(row[TASK_COLUMNS.group]),
+    }))
+    .filter((task) => task.zoneKey !== NO_ZONE_KEY && task.floorKey);
+  const controls = new Map();
+  const chosenFloors = new Set();
+  tasks.forEach(({ row, id, zoneKey, floorKey }) => {
+    if (!isChecked(row[TASK_COLUMNS.formworkCheck])) return;
+    controls.set(id, { zoneKey, floorKey, chosen: true });
+    chosenFloors.add(floorId(zoneKey, floorKey));
+  });
+  const groupsById = new Map(rows.filter(isGroupRow).map((row) => [Number(row[TASK_COLUMNS.id]), {
+    name: toText(row[TASK_COLUMNS.name]),
+    natureKey: natureKeyOf(row[TASK_COLUMNS.nature]),
+    parentId: parentIdOf(row),
+  }]));
+  tasks.forEach(({ row, id, zoneKey, floorKey }) => {
+    if (chosenFloors.has(floorId(zoneKey, floorKey))) return;
+    if (!plainKey(row[TASK_COLUMNS.name]).startsWith(RESERVATION_NAME_START)) return;
+    if (!RESERVATION_CYCLE.test(plainKey(cycleNameOf(row, groupsById)))) return;
+    controls.set(id, { zoneKey, floorKey, chosen: false });
+  });
+  return controls;
+}
+
+// Limite de fin de la tâche contrôlée de chaque étage, par id de tâche : le dernier jour permis
 // (début du plan de coffrage lié à son étage, colonne « Début » du planning Structure) et le
 // N° de ce coffrage. Rien pour un étage sans lien, ou dont le coffrage n'a pas de date de
 // début. `syntheseRows` : les lignes du tableau de tâches ; `formworkStarts` : les coffrages
 // de Structure du projet (N°, zone, début — voir formworkStarts.js).
-export function reservationEndLimits({ syntheseRows = [], formworkStarts = [] } = {}) {
+export function controlTaskEndLimits({ syntheseRows = [], formworkStarts = [] } = {}) {
   const rows = Array.isArray(syntheseRows) ? syntheseRows : [];
   const starts = Array.isArray(formworkStarts) ? formworkStarts : [];
   const links = readFloorLinks(rows);
@@ -161,21 +202,23 @@ export function reservationEndLimits({ syntheseRows = [], formworkStarts = [] } 
     const sameNumber = starts.filter((formwork) => numberKeyOf(formwork?.number) === key);
     return sameNumber.find((formwork) => zoneKeyOf(formwork.zoneName) === zoneKey) || sameNumber[0] || null;
   };
-  const groupsById = new Map(rows.filter(isGroupRow).map((row) => [Number(row[TASK_COLUMNS.id]), {
-    name: toText(row[TASK_COLUMNS.name]),
-    natureKey: natureKeyOf(row[TASK_COLUMNS.nature]),
-    parentId: parentIdOf(row),
-  }]));
-  rows.filter(isTaskRow).forEach((row) => {
-    if (!plainKey(row[TASK_COLUMNS.name]).startsWith(RESERVATION_NAME_START)) return;
-    if (!RESERVATION_CYCLE.test(plainKey(cycleNameOf(row, groupsById)))) return;
-    const zoneKey = zoneKeyOf(row[TASK_COLUMNS.zone]);
-    const number = links.get(floorId(zoneKey, floorKeyOf(row[TASK_COLUMNS.group])));
+  readControlTasks(rows).forEach(({ zoneKey, floorKey }, taskId) => {
+    const number = links.get(floorId(zoneKey, floorKey));
     const start = number ? findFormwork(number, zoneKey)?.start : null;
     if (!(start instanceof Date)) return;
-    limits.set(Number(row[TASK_COLUMNS.id]), { limit: start, formworkNumber: number });
+    limits.set(taskId, { limit: start, formworkNumber: number });
   });
   return limits;
+}
+
+// Reporte sur les lignes de tâche si la tâche est contrôlée, et si c'est par choix (cochée)
+// ou par défaut : le menu de la tâche en dépend.
+export function applyControlTasks(lines, controls) {
+  if (!controls?.size) return lines;
+  return lines.map((line) => {
+    const entry = line.kind === "task" ? controls.get(line.taskId) : null;
+    return entry ? { ...line, isControlTask: true, isChosenControlTask: entry.chosen } : line;
+  });
 }
 
 // Reporte ces limites sur les lignes du tableau, que le Gantt dessine aussi : le dernier jour
