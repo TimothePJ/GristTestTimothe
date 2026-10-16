@@ -137,10 +137,10 @@ test("section d'un coffrage : une barre du début de sa phase à la fin de sa de
   const zone2 = zoneOf(planning, ZONE_2);
   const headOf = (number) => [...zoneOf(planning, ZONE_1).entries, ...zone2.entries]
     .find((entry) => (entry.kind === "level" || entry.kind === "formwork") && entry.doc.number === number);
-  // 3032 et son armature 3314 : passées ; l'armature en retard à 0 % → couleurs de retard.
+  // 3032 et son armature 3314 : passées. L'armature est en retard, mais la barre repliée garde
+  // les couleurs d'un coffrage (le retard se lit dans « État » et une fois déplié).
   assert.deepEqual(headOf("3032").section.map(briefSegment), [
-    ["phase", "phase-coffrage phase-past", "Coffrage", utcDay("2026-08-19").getTime(), utcDay("2026-09-16").getTime(),
-      { realise: 0, done: "#ead7a2", late: "#d88f8f", border: "#bb6b6b", text: "#7a4b12" }],
+    ["phase", "phase-coffrage phase-past", "Coffrage", utcDay("2026-08-19").getTime(), utcDay("2026-09-16").getTime(), null],
   ]);
   // 3012 et son armature 3306 : en cours, coupée à l'heure actuelle ; rien en retard.
   assert.deepEqual(headOf("3012").section.map(briefSegment), [
@@ -191,13 +191,16 @@ test("autres documents : un groupe par type dans leur zone, à la place de son p
 test("groupe d'un type : une barre de sa première à sa dernière phase, aux couleurs du type", () => {
   const planning = atNow(NOW, () => build(withOtherDocs()));
   const typeOf = (label) => zoneOf(planning, ZONE_2).entries.find((entry) => entry.kind === "type" && entry.label === label);
-  // 3901 en retard à 0 % : toute la barre aux couleurs de retard de la démolition.
+  // 3901 est en retard, mais la barre repliée garde les couleurs de la démolition : les
+  // couleurs de retard du planning Structure (jaunes pour une démolition ou une coupe) ne
+  // s'appliquent qu'à la barre d'un document.
   assert.deepEqual(typeOf("DÉMOLITION").section.map(briefSegment), [
-    ["phase", "phase-demolition phase-past", "", utcDay("2026-09-01").getTime(), NOW.getTime(),
-      { realise: 0, done: "#f5cfcf", late: "#fde68a", border: "#f59e0b", text: "#5c0000" }],
-    ["phase", "phase-demolition", "DÉMOLITION", NOW.getTime(), utcDay("2026-11-03").getTime(),
-      { realise: 0, done: "#fde8e8", late: "#fef3c7", border: "#fcd34d", text: "#7a0000" }],
+    ["phase", "phase-demolition phase-past", "", utcDay("2026-09-01").getTime(), NOW.getTime(), null],
+    ["phase", "phase-demolition", "DÉMOLITION", NOW.getTime(), utcDay("2026-11-03").getTime(), null],
   ]);
+  // Déplié, le document en retard a bien ses couleurs de retard, comme dans le planning Structure.
+  const late = typeOf("DÉMOLITION").docs.find((doc) => doc.number === "3901");
+  assert.deepEqual(late.segments.map((segment) => segment.paint?.late), ["#fde68a"]);
   assert.deepEqual(typeOf("Carnet").section.map(briefSegment), [
     ["phase", "phase-generic", "Carnet", utcDay("2026-11-01").getTime(), utcDay("2026-12-15").getTime(), null],
   ]);

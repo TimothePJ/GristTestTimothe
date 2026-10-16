@@ -3365,6 +3365,23 @@ html.is-stt-dragging * {
   outline-offset: -2px;
 }
 
+/* Glisser une tâche entre deux autres (colonne Ordre) : trait d'insertion à la limite des deux
+   lignes, là où elle arrivera. */
+.stt-drop-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--stt-accent);
+  pointer-events: none;
+}
+
+.stt-drop-line[hidden] {
+  display: none;
+}
+
 /* Diagramme de Gantt (panneau droit) : couche SVG alignée sur les lignes du tableau,
    couleurs fixes reprises de MS Project, indépendantes du thème Grist. */
 .stt-gantt-layer {
@@ -3882,7 +3899,7 @@ body.is-global-space #zoneDropdown option:disabled {
   font-weight: 700;
 }
 
-/* Barre d'état : compteurs du projet, avertissement de relecture, deux boutons. */
+/* Barre d'état : compteurs du projet, avertissement de relecture, « Alertes seulement ». */
 .gpl-bar {
   position: relative;
   z-index: 4;

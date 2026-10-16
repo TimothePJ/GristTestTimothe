@@ -287,8 +287,12 @@ Le Gantt de la vue Synthese, sur les lignes de la vue Global, avec la même pér
 - Coffrage replié sur ses armatures (décision du 14/10/2026) : **une seule barre pour toute sa
   section**, du début de la première phase (coffrage ou armature) à la fin de la dernière, aux
   couleurs d'une barre de coffrage, libellé « Coffrage », coupée à l'heure actuelle par le code
-  du planning Structure (`createSplitPhaseItems`). Couleurs de retard dès qu'un document de la
-  section est en retard sans être réalisé ; bord vert quand tous sont réalisés. Ni démarrage
+  du planning Structure (`createSplitPhaseItems`). **Toujours aux couleurs habituelles du type**,
+  bord vert quand tous ses documents sont réalisés : les couleurs de retard du planning Structure
+  (jaunes pour une coupe ou une démolition, rouges pour un coffrage) ne valent que pour la barre
+  d'un document — sur une barre repliée, elles faisaient prendre une section de coupes pour un
+  coffrage (signalé par l'utilisateur le 14/10/2026). Les retards se lisent dans « État » et une
+  fois déplié. Ni démarrage
   des travaux ni données d'entrées sur cette barre. Déplié : les barres de chaque document,
   comme dans le planning Structure. En « Alertes seulement », un coffrage dont aucune armature
   n'est affichée montre aussi la barre de sa section. Les colonnes Début et Fin restent celles
@@ -310,7 +314,8 @@ Le Gantt de la vue Synthese, sur les lignes de la vue Global, avec la même pér
   introuvable » quand il y en a.
 - Bouton **« Alertes seulement »** : ne garde que les lignes en alerte et leurs parentes,
   dépliées jusqu'à la ligne fautive. Un second appui rend l'affichage précédent.
-- Bouton **« Actualiser »** : relit les deux tables.
+- Pas de bouton « Actualiser » (retiré à la demande de l'utilisateur le 14/10/2026) : la vue se
+  relit d'elle-même (§ 7).
 
 ### 6.6 Messages
 
@@ -320,8 +325,8 @@ Le Gantt de la vue Synthese, sur les lignes de la vue Global, avec la même pér
   « Aucune ligne de planning dans cette zone. »
 - « Alertes seulement » sans alerte : « Aucune alerte sur ce projet. » ; avec une zone filtrée :
   « Aucune alerte dans cette zone. »
-- première lecture impossible : « Le planning global n'a pas pu être lu. Cliquez sur
-  « Actualiser ». »
+- première lecture impossible : « Le planning global n'a pas pu être lu. Rouvrez la vue Global
+  pour réessayer. »
 - relecture impossible, données déjà affichées : elles restent, avec « La dernière relecture a
   échoué : les dates affichées peuvent être anciennes. »
 
@@ -335,8 +340,10 @@ La vue lit ses deux tables en parallèle :
   signalée. Cette surveillance ne compare que les lignes du service affiché : une écriture faite
   par l'autre service depuis un widget lui parvient par les colonnes de signal du projet
   (`…_Sync` de `Projets2`), donc sous le nom d'une autre table ;
-- sur « Actualiser » — seul moyen de voir une modification faite par l'autre service directement
-  dans une table Grist, hors widget.
+- une modification faite par l'autre service directement dans une table Grist, hors widget,
+  n'apparaît qu'à la lecture suivante : au prochain rappel de la surveillance, au changement de
+  projet, ou en rouvrant la vue (« Global » deux fois). Le bouton « Actualiser » qui servait à
+  cela a été retiré le 14/10/2026.
 
 Inactive, elle ne lit rien. Une réponse arrivée après un changement de projet ou une
 désactivation est ignorée. Aucune minuterie n'est ajoutée.
@@ -396,7 +403,7 @@ Non modifiés : `shared/`, `ui/syntheseTaskTable.js`, `ui/syntheseTasksControlle
   documents, crochet en alerte ; la vue Synthese dessine comme avant.
 - **Tableau** : rendu des lignes et des états, Fin en retard, replis, aucune cellule
   modifiable, barre d'état, messages.
-- **Contrôleur** : lecture à l'activation, au changement de projet, au signal, sur « Actualiser » ;
+- **Contrôleur** : lecture à l'activation, au changement de projet, au signal ;
   rien quand la vue est inactive ; réponse périmée ignorée ; échec de lecture.
 - **Branchement** : `main.js`, `state.js`, `index.html`, CSS, versions ; modes embarqués.
 

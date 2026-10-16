@@ -36,7 +36,7 @@ function buildBody(body) {
   return grips;
 }
 
-function setup({ enabled = true } = {}) {
+function setup({ enabled = true, canOrder = false } = {}) {
   globalThis.Element = FakeElement;
   const env = createFakeEnvironment();
   const root = new FakeElement("div", "stt");
@@ -50,6 +50,7 @@ function setup({ enabled = true } = {}) {
   const highlights = [];
   const previews = [];
   const sources = [];
+  const slots = [];
   createTaskDrag({
     root,
     scroller,
@@ -67,13 +68,15 @@ function setup({ enabled = true } = {}) {
       return preview;
     },
     markSource: (key) => sources.push(key),
+    canOrder: () => canOrder,
+    markSlot: (slot) => slots.push(slot),
     onDrop: (taskId, target) => drops.push({ taskId, target }),
     doc: env.doc,
     win: env.win,
   });
   const ghost = () => root.children.find((node) => node.classes.has("stt-drag-ghost")) || null;
   const caption = () => ghost()?.children.find((node) => node.classes.has("stt-drag-ghost__label")) || null;
-  return { env, root, scroller, body, grips, drops, highlights, previews, sources, ghost, caption };
+  return { env, root, scroller, body, grips, drops, highlights, previews, sources, slots, ghost, caption };
 }
 
 // Appui à x = 20 ; les mouvements se font par défaut à x = 30 (au-delà du seuil de 4 px).
@@ -275,4 +278,51 @@ test("en butée, le défilement automatique s'arrête", () => {
   env.runFrames();
   assert.equal(scroller.scrollTop, 0);
   assert.equal(env.frames.size, 0, "plus d'image demandée en haut de la liste");
+});
+
+// ---------- Ordre libre (colonne Ordre) : placer une tâche avant ou après une autre ----------
+
+test("avec la colonne Ordre : moitié haute d'une tâche → « Placer avant », trait d'insertion, dépôt à cette place", () => {
+  const { scroller, grips, drops, highlights, slots, caption } = setup({ canOrder: true });
+  press(grips.get(1), rowY(1));
+  move(scroller, 100 + 3 * ROW + 4);
+  assert.equal(caption().textContent, "Placer avant « FOND DE PLAN »");
+  assert.deepEqual(slots.at(-1), { taskId: 2, side: "before" });
+  assert.equal(highlights.at(-1), null, "pas de conteneur surligné : le trait suffit");
+  release(scroller, 100 + 3 * ROW + 4);
+  assert.deepEqual(drops.map((drop) => [drop.taskId, drop.target.key, drop.target.position]), [
+    [1, "slot:2:before", { taskId: 2, side: "before" }],
+  ]);
+  assert.equal(slots.at(-1), null, "trait retiré à la fin du glisser");
+});
+
+test("avec la colonne Ordre : moitié basse → « Placer après » ; dans son propre conteneur aussi", () => {
+  const { scroller, grips, slots, caption } = setup({ canOrder: true });
+  press(grips.get(2), rowY(3));
+  move(scroller, 100 + 4 * ROW + 20);
+  assert.equal(caption().textContent, "Placer après « Visa MOE »");
+  assert.deepEqual(slots.at(-1), { taskId: 3, side: "after" });
+  move(scroller, rowY(3));
+  assert.equal(caption().hidden, true, "sur elle-même : nulle part");
+  assert.equal(slots.at(-1), null);
+});
+
+test("avec la colonne Ordre : sur une ligne d'étage, la fin de l'étage, surligné", () => {
+  const { scroller, grips, highlights, slots, caption } = setup({ canOrder: true });
+  press(grips.get(3), rowY(4));
+  move(scroller, rowY(2));
+  assert.equal(caption().textContent, "Déplacer à la fin de « PH RDB »", "son propre étage : la fin");
+  assert.equal(highlights.at(-1), "floor:zonez3a/phrdb");
+  assert.equal(slots.at(-1), null);
+});
+
+test("avec la colonne Ordre : Échap pendant qu'une place est visée → trait retiré, rien n'est déposé", () => {
+  const { env, scroller, grips, drops, slots } = setup({ canOrder: true });
+  press(grips.get(1), rowY(1));
+  move(scroller, 100 + 3 * ROW + 4);
+  assert.deepEqual(slots.at(-1), { taskId: 2, side: "before" }, "le trait est affiché");
+  dispatch(env.doc, "keydown", { key: "Escape" });
+  assert.equal(slots.at(-1), null);
+  release(scroller, 100 + 3 * ROW + 4);
+  assert.equal(drops.length, 0);
 });

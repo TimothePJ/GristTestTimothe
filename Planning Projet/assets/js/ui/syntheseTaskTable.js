@@ -110,6 +110,8 @@ export function buildMenuItems(line, { canAddFloor = true } = {}) {
   if (line.kind === "task") {
     const addTask = { label: "Ajouter une tâche", action: "addTask", zoneKey: line.zoneKey, floorKey: line.floorKey || "" };
     if (line.groupRowId) addTask.groupRowId = line.groupRowId;
+    // Avec la colonne Ordre, la nouvelle tâche va juste sous la tâche cliquée.
+    addTask.afterTaskId = line.taskId;
     return [
       addTask,
       ...(line.floorKey ? [formworkCheckItem(line)] : []),
@@ -278,6 +280,11 @@ export function createSyntheseTaskTable(host, {
   // reconstruit ; alignée sur les lignes par la hauteur fixe.
   const ganttLayer = createElement("div", "stt-gantt-layer");
   scroller.appendChild(ganttLayer);
+  // Trait d'insertion du glisser, à la limite de deux lignes.
+  const dropLine = createElement("div", "stt-drop-line");
+  dropLine.setAttribute("aria-hidden", "true");
+  dropLine.hidden = true;
+  scroller.appendChild(dropLine);
   const gantt = typeof createGantt === "function"
     ? createGantt({ headHost: headRight, layerHost: ganttLayer, interactionHost: scroller, rowHeight: ROW_HEIGHT_PX })
     : null;
@@ -303,7 +310,11 @@ export function createSyntheseTaskTable(host, {
   let lines = [];
   let editable = false;
   let canAddFloor = true;
+  // Colonne Ordre présente : glisser une tâche entre deux autres.
+  let canOrder = false;
   let dropTargetKey = null;
+  // Place visée par le glisser ({ taskId, side }), montrée par le trait d'insertion.
+  let dropSlot = null;
   let dragSourceKey = null;
   let taskDrag = null;
   let editor = null;
@@ -419,6 +430,7 @@ export function createSyntheseTaskTable(host, {
     lines = Array.isArray(nextLines) ? nextLines : [];
     editable = Boolean(options?.editable);
     canAddFloor = options?.canAddFloor !== false;
+    canOrder = Boolean(options?.canOrder);
     // Tableau devenu non modifiable : un glisser en cours est abandonné, sans dépôt.
     if (!editable) taskDrag?.cancel();
     applyWidth(leftWidth);
@@ -429,6 +441,7 @@ export function createSyntheseTaskTable(host, {
     body.hidden = Boolean(message);
     body.replaceChildren(...(message ? [] : lines.map(buildLine)));
     gantt?.render(message ? [] : lines);
+    placeDropLine();
   }
 
   const renderer = createDeferredRenderer(draw);
@@ -632,7 +645,9 @@ export function createSyntheseTaskTable(host, {
   }
 
   function runMenuItem(item) {
-    if (item.action === "addTask") return onAddTask?.(item.zoneKey, item.floorKey, item.groupRowId ?? null);
+    if (item.action === "addTask") {
+      return onAddTask?.(item.zoneKey, item.floorKey, item.groupRowId ?? null, item.afterTaskId ?? null);
+    }
     if (item.action === "addFloor") return onAddFloor?.(item.zoneKey);
     if (item.action === "deleteFloor") return onDeleteFloor?.(item.zoneKey, item.floorKey);
     if (item.action === "deleteGroup") return onDeleteGroup?.(item.groupRowId);
@@ -812,6 +827,24 @@ export function createSyntheseTaskTable(host, {
     if (key) body.querySelector(`[data-line-key="${key}"]`)?.classList.add("is-drag-source");
   }
 
+  // Trait d'insertion à la limite haute (avant) ou basse (après) de la tâche visée ; caché sans
+  // place visée ou si la tâche n'est plus affichée. Replacé à chaque redessin.
+  function placeDropLine() {
+    const index = dropSlot ? lines.findIndex((line) => line.kind === "task" && line.taskId === dropSlot.taskId) : -1;
+    if (index < 0) {
+      dropLine.hidden = true;
+      return;
+    }
+    const boundary = index + (dropSlot.side === "after" ? 1 : 0);
+    dropLine.style.top = `${HEAD_HEIGHT_PX + boundary * ROW_HEIGHT_PX}px`;
+    dropLine.hidden = false;
+  }
+
+  function markDropSlot(slot) {
+    dropSlot = slot;
+    placeDropLine();
+  }
+
   // Copie de la ligne glissée, tenue sous le pointeur : même rendu que dans le tableau, sans
   // la partie Gantt ni l'estompage.
   function renderDragPreview(line) {
@@ -832,6 +865,8 @@ export function createSyntheseTaskTable(host, {
     highlight: highlightDropTarget,
     renderPreview: renderDragPreview,
     markSource: markDragSource,
+    canOrder: () => canOrder && editable,
+    markSlot: markDropSlot,
     onDrop: (taskId, target) => onMoveTask?.(taskId, target),
   });
 

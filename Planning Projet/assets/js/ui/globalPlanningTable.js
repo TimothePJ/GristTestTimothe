@@ -2,7 +2,7 @@
 // Structure, en lecture seule. Même mise en page que le tableau de tâches de la vue Synthese
 // (en-tête collant, hauteur de ligne fixe, panneau droit réservé au Gantt, séparateur
 // déplaçable), avec une colonne « État » et une barre d'état. Aucune saisie, aucun menu : il
-// signale seulement les replis et les deux boutons de la barre. Ses dépendances sont
+// signale seulement les replis et le bouton « Alertes seulement ». Ses dépendances sont
 // injectées (document, fenêtre, stockage, fabrique du Gantt) : doublures en test.
 import { formatDate } from "../services/syntheseTaskModel.js";
 import { describeCounts } from "../services/globalChecks.js";
@@ -142,7 +142,6 @@ function safeStorage(win) {
 export function createGlobalPlanningTable(host, {
   onToggle,
   onToggleAlertsOnly,
-  onRefresh,
 } = {}, {
   createGantt = null,
   doc = document,
@@ -198,14 +197,9 @@ export function createGlobalPlanningTable(host, {
   alertsButton.dataset.serviceContextNavigation = "";
   alertsButton.setAttribute("aria-pressed", "false");
   alertsButton.title = "Ne garder que les lignes en alerte";
-  const refreshButton = createElement(doc, "button", "gpl-bar__button", "Actualiser");
-  refreshButton.type = "button";
-  refreshButton.dataset.serviceContextNavigation = "";
-  refreshButton.title = "Relire le planning du projet";
   bar.appendChild(counts);
   bar.appendChild(notice);
   bar.appendChild(alertsButton);
-  bar.appendChild(refreshButton);
 
   root.appendChild(scroller);
   root.appendChild(splitter);
@@ -267,7 +261,7 @@ export function createGlobalPlanningTable(host, {
 
   win.addEventListener?.("resize", () => applyWidth(leftWidth));
 
-  /* ---------- Replis et boutons ---------- */
+  /* ---------- Replis et bouton ---------- */
 
   body.addEventListener("click", (event) => {
     const toggle = closestOf(event.target, "stt-toggle");
@@ -275,7 +269,6 @@ export function createGlobalPlanningTable(host, {
     if (lineElement) onToggle?.(lineElement.dataset.lineKey);
   });
   alertsButton.addEventListener("click", () => onToggleAlertsOnly?.());
-  refreshButton.addEventListener("click", () => onRefresh?.());
 
   applyWidth(leftWidth);
 

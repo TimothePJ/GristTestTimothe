@@ -178,14 +178,16 @@ export function readStructureDocs(projectRows, { targetLookup = null, referenceL
 // Barre unique d'une section repliée (un coffrage et ses armatures, ou les documents d'un même
 // type dans une zone) : du début de la première phase de ses documents à la fin de la dernière,
 // dans la classe de barre `phase` (« phase-coffrage »…) et coupée à l'heure actuelle par le code
-// même du planning Structure. Couleurs de retard dès qu'un de ses documents est en retard sans
-// être réalisé ; bord vert quand tous sont réalisés.
+// même du planning Structure. Toujours aux couleurs habituelles du type, bord vert quand tous ses
+// documents sont réalisés : les couleurs de retard du planning Structure (jaunes pour une coupe
+// ou une démolition, rouges pour un coffrage) ne valent que pour la barre d'un document, et
+// feraient prendre la section pour un autre type. Ses retards se lisent dans « État » et une
+// fois dépliée.
 function sectionSegments(docs, { id, phase, label }) {
   const phases = docs.flatMap((doc) => doc.segments.filter((segment) => segment.kind === "phase"));
   if (!phases.length) return [];
   const start = new Date(Math.min(...phases.map((segment) => segment.start.getTime())));
   const end = new Date(Math.max(...phases.map((segment) => segment.end.getTime())));
-  const late = docs.some((doc) => retardPhasePaint(phase, doc.barRealise, doc.barRetard));
   const done = docs.every((doc) => doc.barRealise >= 100);
   return createSplitPhaseItems({
     itemIdBase: id,
@@ -201,7 +203,7 @@ function sectionSegments(docs, { id, phase, label }) {
     label: toText(item.content),
     start: new Date(item.start.getTime()),
     end: new Date(item.end.getTime()),
-    paint: late ? retardPhasePaint(item.className, 0, 1) : null,
+    paint: null,
   }));
 }
 

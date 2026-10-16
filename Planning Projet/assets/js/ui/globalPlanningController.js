@@ -12,7 +12,7 @@ const MESSAGES = Object.freeze({
   emptyZone: "Aucune ligne de planning dans cette zone.",
   noAlert: "Aucune alerte sur ce projet.",
   noAlertZone: "Aucune alerte dans cette zone.",
-  readFailed: "Le planning global n'a pas pu être lu. Cliquez sur « Actualiser ».",
+  readFailed: "Le planning global n'a pas pu être lu. Rouvrez la vue Global pour réessayer.",
   refreshFailed: "La dernière relecture a échoué : les dates affichées peuvent être anciennes.",
 });
 
@@ -50,9 +50,6 @@ export function createGlobalPlanningController({
   const table = createTable({
     onToggle: (key) => toggle(key),
     onToggleAlertsOnly: () => toggleAlertsOnly(),
-    onRefresh: () => {
-      void load();
-    },
   });
 
   function getProject() {
@@ -185,7 +182,7 @@ export function createGlobalPlanningController({
       zoneFilter = next;
       render();
     },
-    // Appelée par la surveillance de tables de main.js et par « Actualiser ».
+    // Appelée par la surveillance de tables de main.js.
     refresh() {
       return load();
     },

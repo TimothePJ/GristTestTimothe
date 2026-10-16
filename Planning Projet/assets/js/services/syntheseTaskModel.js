@@ -42,6 +42,7 @@ export const TASK_COLUMNS = Object.freeze({
   link: "Lien",
   structureLink: "Lien_Structure",
   formworkCheck: "Controle_Coffrage",
+  order: "Ordre",
 });
 
 export const NEW_TASK_NAME = "Nouvelle tâche";
@@ -177,6 +178,15 @@ function readPlannedDays(value) {
   return Number.isInteger(days) && days >= 0 && days <= MAX_DURATION_DAYS ? days : null;
 }
 
+// Colonne Ordre (texte ou nombre) : le rang d'une tâche ou d'un groupe dans son conteneur, lu
+// comme un nombre (« 10 » vient après « 9 ») ; vide ou illisible → null.
+export function readOrder(value) {
+  const text = toText(value).replace(",", ".");
+  if (!text) return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+}
+
 // Les dates font foi pour la Durée ; Duree_1 sert à reconnaître un jalon (0 jour) d'une
 // tâche d'un jour, qui ont toutes deux Début = Fin, et donne la durée prévue d'une tâche
 // sans dates (modèle d'étage).
@@ -210,6 +220,7 @@ export function readTask(row) {
     link: link && link.predId !== id ? link : null,
     id2: toText(row?.[TASK_COLUMNS.id2]),
     indice: toText(row?.[TASK_COLUMNS.indice]),
+    order: readOrder(row?.[TASK_COLUMNS.order]),
   };
 }
 
@@ -650,6 +661,13 @@ export function detectFormworkCheckColumn(rows = []) {
   return rows.some((row) => row != null && Object.prototype.hasOwnProperty.call(row, TASK_COLUMNS.formworkCheck));
 }
 
+// La colonne Ordre (rang libre des tâches) existe-t-elle ? Comme pour Etage : null si aucune
+// ligne ne permet de le savoir.
+export function detectOrderColumn(rows = []) {
+  if (!rows?.length) return null;
+  return rows.some((row) => row != null && Object.prototype.hasOwnProperty.call(row, TASK_COLUMNS.order));
+}
+
 function hasDates(task) {
   return task?.start instanceof Date && task?.end instanceof Date;
 }
@@ -732,6 +750,7 @@ function readGroup(row) {
     zoneKey: zoneKeyOf(zoneName),
     floorKey: floorKeyOf(floorName),
     floorName,
+    order: readOrder(row?.[TASK_COLUMNS.order]),
   };
 }
 
@@ -739,7 +758,25 @@ function itemRowId(item) {
   return item.kind === "task" ? item.task.id : item.group.rowId;
 }
 
-// Contenu d'un étage, dans l'ordre de création (ordre du modèle) : ses tâches et ses cycles ;
+// Rang d'un élément de conteneur (tâche ou groupe), ou null.
+function itemOrder(item) {
+  if (item.kind === "task") return item.task.order ?? null;
+  if (item.kind === "group") return item.group.order ?? null;
+  return null;
+}
+
+// Contenu d'un conteneur : d'abord les éléments rangés (colonne Ordre), par rang puis par id ;
+// ensuite les autres, dans l'ordre par défaut du conteneur (`fallback`).
+export function compareRanked(left, right, fallback) {
+  const leftOrder = itemOrder(left);
+  const rightOrder = itemOrder(right);
+  if ((leftOrder == null) !== (rightOrder == null)) return leftOrder == null ? 1 : -1;
+  if (leftOrder != null) return leftOrder - rightOrder || itemRowId(left) - itemRowId(right);
+  return fallback(left, right);
+}
+
+// Contenu d'un étage, par rang (colonne Ordre) puis dans l'ordre de création (ordre du
+// modèle) : ses tâches et ses cycles ;
 // dans un cycle, ses tâches et ses sous-groupes ; dans un sous-groupe, ses tâches. Une ligne
 // dont le Parent ne désigne pas un groupe de l'étage (ou un sous-groupe dont le Parent n'est
 // pas un cycle) se range directement dans l'étage. Récapitulatif d'un groupe : toutes ses
@@ -759,9 +796,10 @@ function placeFloorContent(floor) {
     for (let container = group; container; container = container.parentGroup) container.tasks.push(task);
   });
   const byRowId = (left, right) => itemRowId(left) - itemRowId(right);
-  floor.items.sort(byRowId);
+  const byRank = (left, right) => compareRanked(left, right, byRowId);
+  floor.items.sort(byRank);
   floor.groups.forEach((group) => {
-    group.items.sort(byRowId);
+    group.items.sort(byRank);
     group.summary = summarizeTasks(group.tasks);
   });
   floor.summary = summarizeTasks(floor.tasks);
@@ -785,10 +823,15 @@ function itemBounds(item) {
   return { start: item.task.start, end: item.task.end, name: item.task.name };
 }
 
-// Niveau zone : les tâches hors étage en haut, puis les étages ; dans chaque groupe, par date
-// de début, puis de fin, puis par nom ; le non daté à la fin du groupe.
+// Niveau zone : les tâches hors étage en haut, puis les étages. Tâches : rangées d'abord
+// (colonne Ordre), puis par date ; étages : par date. Par date : début, puis fin, puis nom ; le
+// non daté à la fin.
 function compareItems(left, right) {
   if (left.kind !== right.kind) return left.kind === "task" ? -1 : 1;
+  return left.kind === "task" ? compareRanked(left, right, compareByDates) : compareByDates(left, right);
+}
+
+function compareByDates(left, right) {
   const a = itemBounds(left);
   const b = itemBounds(right);
   const aDated = a.start instanceof Date && a.end instanceof Date;
@@ -808,9 +851,11 @@ function compareItems(left, right) {
 // Sections du tableau : une par zone du projet (celles des lignes lues et celles des
 // autres services), triées par nom, puis « Sans zone » si des tâches n'ont pas de zone.
 // Chaque section porte toutes ses tâches (récapitulatif de zone), ses étages (lignes-étages
-// et noms trouvés dans le Groupe des tâches et des groupes), chacun avec son contenu dans
-// l'ordre de création ; son niveau zone : tâches hors étage en haut, puis étages, chacun par
-// date. Pas d'étage dans « Sans zone ». Un filtre de zone n'en garde qu'une.
+// et noms trouvés dans le Groupe des tâches et des groupes), chacun avec son contenu ; son
+// niveau zone : tâches hors étage en haut, puis étages. Le contenu de chaque conteneur vient
+// d'abord par rang (colonne Ordre), puis dans l'ordre par défaut : création dans un étage, un
+// cycle ou un sous-groupe, date au niveau zone. Pas d'étage dans « Sans zone ». Un filtre de
+// zone n'en garde qu'une.
 export function buildSections({ rows = [], sharedZones = [], zoneFilter = "" } = {}) {
   const zoneNames = new Map();
   const rememberZone = (value) => {

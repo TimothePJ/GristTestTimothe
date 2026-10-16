@@ -264,3 +264,14 @@ test("récapitulatif d'une zone : de la première à la dernière date de son co
   const empty = lineOf(lines, "zone:");
   assert.deepEqual([empty.start, empty.end, empty.name], [null, null, "Sans zone"]);
 });
+
+// Ordre libre de la vue Synthese (colonne Ordre) : même modèle d'étage, même ordre dans la vue
+// Global. PLAN SYT CYCLE 3 de RDC (419) : RÉSEAUX 420, RÉSERVATIONS 421, TERMINAUX 422, rangés à
+// l'envers.
+test("ordre libre de la vue Synthese : la vue Global le reprend", () => {
+  const ranks = { 420: "3", 421: "2", 422: "1" };
+  const rows = projectRows().map((row) => (row.id in ranks ? { ...row, Ordre: ranks[row.id] } : row));
+  const { lines } = model({ toggledKeys: new Set(RDC_PATH) }, rows);
+  const at = keys(lines).indexOf("group:419");
+  assert.deepEqual(keys(lines).slice(at + 1, at + 4), ["task:422", "task:421", "task:420"]);
+});

@@ -15,14 +15,12 @@ import {
   buildGroupDeleteActions,
   buildGroupDeleteQuestion,
   buildGroupRenameAction,
-  buildMoveFields,
-  buildNewTask,
   buildRowModel,
   buildSections,
-  buildTaskFields,
   dateFieldsOf,
   detectFloorColumn,
   detectFormworkCheckColumn,
+  detectOrderColumn,
   detectStructureLinkColumn,
   detectTemplateColumns,
   findGroup,
@@ -42,6 +40,14 @@ import {
   buildTemplateLinks,
 } from "../services/syntheseFloorTemplate.js";
 import { cascadeFrom } from "../services/syntheseLinks.js";
+import {
+  buildUpdateActions,
+  planInsertFollowUp,
+  planOrphanLinks,
+  planTaskInsert,
+  planTaskMove,
+  planTaskRemoval,
+} from "../services/syntheseTaskOrder.js";
 import {
   applyControlTasks,
   applyEndLimits,
@@ -75,6 +81,8 @@ const MESSAGES = Object.freeze({
   noFloorRow: "Cet étage n'a pas de ligne « étage » dans Planning_Projet : le lien ne peut pas être mémorisé.",
   noPlanTask: "Cet étage n'a pas de tâche « FOND DE PLAN DE SYNTHESE » : aucune date ne peut être posée.",
   badIssueDate: "La date 0 Prev de ce coffrage n'est pas utilisable (elle doit être entre 2000 et 2100) : corrigez-la dans la liste de plans.",
+  insertFailed: "La tâche n'a pas pu être ajoutée complètement : elle a été retirée. Réessayez.",
+  insertCleanupFailed: "La tâche n'a pas pu être ajoutée complètement et n'a pas pu être retirée : supprimez « Nouvelle tâche » à la main.",
 });
 
 // Seul cas où la création d'un étage ne peut ni réussir ni être annulée : le dire précisément.
@@ -161,6 +169,9 @@ export function createSyntheseTasksController({
   let structureLinkColumn = null;
   // Colonne Controle_Coffrage (tâche contrôlée choisie à la main) : même principe que Etage.
   let formworkCheckColumn = null;
+  // Colonne Ordre (rang libre des tâches) : même principe que Etage. Sans elle, ni ordre libre
+  // ni chaînage automatique.
+  let orderColumn = null;
   // Opérations affichées mais pas encore enregistrées, dans l'ordre (voir submit).
   let pendingOps = [];
   let writeQueue = Promise.resolve();
@@ -175,7 +186,9 @@ export function createSyntheseTasksController({
     onEdit: (taskId, field, rawValue) => handleEdit(taskId, field, rawValue),
     onRenameFloor: (zoneKey, floorKey, rawValue) => handleRenameFloor(zoneKey, floorKey, rawValue),
     onRenameGroup: (groupRowId, rawValue) => handleRenameGroup(groupRowId, rawValue),
-    onAddTask: (zoneKey, floorKey = "", groupRowId = null) => handleAddTask(zoneKey, floorKey, groupRowId),
+    onAddTask: (zoneKey, floorKey = "", groupRowId = null, afterTaskId = null) => (
+      handleAddTask(zoneKey, floorKey, groupRowId, afterTaskId)
+    ),
     onAddFloor: (zoneKey) => handleAddFloor(zoneKey),
     onDeleteTask: (taskId) => handleDeleteTask(taskId),
     onDeleteFloor: (zoneKey, floorKey) => handleDeleteFloor(zoneKey, floorKey),
@@ -295,6 +308,7 @@ export function createSyntheseTasksController({
       editable: isEditable(),
       emptyMessage,
       canAddFloor: floorColumn !== false && templateColumns !== false,
+      canOrder: orderColumn === true,
     });
   }
 
@@ -331,6 +345,7 @@ export function createSyntheseTasksController({
       templateColumns = null;
       structureLinkColumn = null;
       formworkCheckColumn = null;
+      orderColumn = null;
       rows = [];
       formworkStarts = [];
       startsDue = true;
@@ -370,6 +385,7 @@ export function createSyntheseTasksController({
     templateColumns = detectTemplateColumns(rows);
     structureLinkColumn = detectStructureLinkColumn(rows);
     formworkCheckColumn = detectFormworkCheckColumn(rows);
+    orderColumn = detectOrderColumn(rows);
     readError = false;
     loaded = true;
     render();
@@ -549,9 +565,46 @@ export function createSyntheseTasksController({
     return section?.floors.find((floor) => floor.key === floorKey) || null;
   }
 
+  // Second temps d'un ajout dont la tâche du dessous doit suivre la nouvelle : la tâche (son id
+  // d'abord), puis le lien de la tâche du dessous et les dates qui suivent. Si ce second temps
+  // échoue, la tâche créée est retirée : rien de bancal ne reste dans Grist.
+  async function addThenFollow(op, plan, addActions) {
+    const added = await write(addActions);
+    const newId = Number(added?.retValues?.[0]);
+    if (!Number.isInteger(newId) || newId <= 0) return { newId: null, followChanges: new Map() };
+    try {
+      assertSameContext(op.context);
+      const followChanges = planInsertFollowUp({
+        sections: allSections(),
+        newTask: { ...plan.task, id: newId },
+        successorId: plan.follow.successorId,
+        lag: plan.follow.lag,
+      });
+      if (followChanges.size) await write(buildUpdateActions(followChanges));
+      return { newId, followChanges };
+    } catch (error) {
+      let cleanupFailed = false;
+      try {
+        // Annulation de notre propre écriture : directement par docApi, comme pour un étage.
+        await docApi.applyUserActions([["RemoveRecord", PLANNING_TABLE, newId]]);
+      } catch (cleanupError) {
+        console.error("Tâche incomplète non retirée :", cleanupError);
+        cleanupFailed = true;
+      }
+      const failure = new Error(MESSAGES.insertFailed, { cause: error });
+      failure.userMessage = cleanupFailed
+        ? MESSAGES.insertCleanupFailed
+        : describeWriteError(error) === MESSAGES.contextChanged
+          ? MESSAGES.contextChanged
+          : MESSAGES.insertFailed;
+      throw failure;
+    }
+  }
+
   // Nouvelle tâche dans un conteneur : un groupe (cycle ou sous-groupe), un étage, ou le
-  // niveau zone.
-  function handleAddTask(zoneKey, floorKey = "", groupRowId = null) {
+  // niveau zone ; juste sous la tâche cliquée (`afterTaskId`) avec la colonne Ordre, sinon à la
+  // fin. Avec Ordre et Lien, elle suit la tâche du dessus (voir planTaskInsert).
+  function handleAddTask(zoneKey, floorKey = "", groupRowId = null, afterTaskId = null) {
     if (!isEditable()) {
       refuseLocked();
       return Promise.resolve();
@@ -563,26 +616,37 @@ export function createSyntheseTasksController({
     const wantedFloorKey = group ? group.floorKey : floorKey;
     const floor = wantedFloorKey ? findFloor(section, wantedFloorKey) : null;
     if (!project || !section || (wantedFloorKey && !floor)) return Promise.resolve();
-    const groupTasks = group
-      ? group.tasks
-      : floor
-        ? floor.tasks
-        : section.items.filter((item) => item.kind === "task").map((item) => item.task);
-    const task = buildNewTask({
-      zoneName: section.zoneName,
-      groupName: floor ? floor.name : "",
-      groupTasks,
+    const plan = planTaskInsert({
+      sections: allSections(),
+      container: { zoneKey: section.zoneKey, floorKey: floor ? floor.key : "", groupRowId: group ? group.rowId : null },
+      afterTaskId,
+      canOrder: orderColumn === true,
+      canLink: templateColumns === true,
       today: now(),
-      parentId: group ? group.rowId : null,
+      projectName: project.name,
     });
-    const fields = buildTaskFields(task, { projectName: project.name });
+    if (!plan) return Promise.resolve();
+    const { fields } = plan;
     const where = group ? `« ${group.name} »` : floor ? `l'étage « ${floor.name} »` : `« ${section.label} »`;
+    const clicked = plan.atEnd ? findTask(afterTaskId) : null;
+    const addedText = clicked
+      ? `Tâche ajoutée à la fin de ${where} : la colonne « Ordre » (Texte) manque dans Planning_Projet pour la placer sous « ${clicked.name} ».`
+      : `Tâche ajoutée dans ${where}.`;
+    const addActions = [["AddRecord", PLANNING_TABLE, null, fields], ...buildUpdateActions(plan.changes)];
     clearStatus();
-    return submit(createOp({ actions: [["AddRecord", PLANNING_TABLE, null, fields]] }), {
+    const op = createOp({
+      changes: plan.changes,
+      ...(plan.follow ? { perform: () => addThenFollow(op, plan, addActions) } : { actions: addActions }),
+    });
+    return submit(op, {
       onSuccess: (result) => {
-        const newId = Number(result?.retValues?.[0]);
+        const newId = Number(plan.follow ? result?.newId : result?.retValues?.[0]);
         const hasId = Number.isInteger(newId) && newId > 0;
         if (hasId && !findRow(newId)) rows = [...rows, { id: newId, ...fields }];
+        (result?.followChanges || new Map()).forEach((followFields, rowId) => {
+          const row = findRow(rowId);
+          if (row) Object.assign(row, followFields);
+        });
         collapsedZoneKeys.delete(section.zoneKey);
         if (floor) collapsedFloorKeys.delete(floorCollapseKey(section.zoneKey, floor.key));
         for (let container = group; container; container = container.parentGroup) {
@@ -590,7 +654,7 @@ export function createSyntheseTasksController({
         }
         render();
         if (hasId) table.startEditing(newId, "name");
-        info(`Tâche ajoutée dans ${where}.`);
+        info(addedText);
       },
       onFailure: (error, dropped) => fail("Ajout de la tâche impossible :", error, dropped),
     });
@@ -604,10 +668,13 @@ export function createSyntheseTasksController({
     const task = findTask(taskId);
     if (!task || !findRow(taskId)) return Promise.resolve();
     if (!confirm(`Supprimer la tâche « ${task.name} » ?`)) return Promise.resolve();
+    // Avec Lien : la chaîne se referme à sa place, les liens qui la désignaient sont effacés.
+    const changes = planTaskRemoval({ sections: allSections(), taskId, canLink: templateColumns === true });
     clearStatus();
     return submit(createOp({
+      changes,
       removals: [taskId],
-      actions: [["RemoveRecord", PLANNING_TABLE, taskId]],
+      actions: [["RemoveRecord", PLANNING_TABLE, taskId], ...buildUpdateActions(changes)],
     }), {
       onSuccess: () => info(`Tâche « ${task.name} » supprimée.`),
       onFailure: (error, dropped) => fail("Suppression de la tâche impossible :", error, dropped),
@@ -745,10 +812,14 @@ export function createSyntheseTasksController({
     const floor = findFloor(findSection(zoneKey), floorKey);
     if (!floor) return Promise.resolve();
     if (!confirm(buildFloorDeleteQuestion(floor))) return Promise.resolve();
+    const removals = floorRemovalIds(floor);
+    // Avec Lien : les liens des autres tâches vers les lignes supprimées sont effacés.
+    const changes = planOrphanLinks({ sections: allSections(), removedIds: removals, canLink: templateColumns === true });
     clearStatus();
     return submit(createOp({
-      removals: floorRemovalIds(floor),
-      actions: buildFloorDeleteActions(floor),
+      changes,
+      removals,
+      actions: [...buildFloorDeleteActions(floor), ...buildUpdateActions(changes)],
     }), {
       onSuccess: () => {
         // Grist réutilise les ids : sans ce nettoyage, un étage recréé plus tard avec les
@@ -797,8 +868,15 @@ export function createSyntheseTasksController({
     const group = findGroup(sections, groupRowId);
     if (!group) return Promise.resolve();
     if (!confirm(buildGroupDeleteQuestion(group))) return Promise.resolve();
+    const removals = groupRemovalIds(group);
+    // Avec Lien : les liens des autres tâches vers les lignes supprimées sont effacés.
+    const changes = planOrphanLinks({ sections: allSections(), removedIds: removals, canLink: templateColumns === true });
     clearStatus();
-    return submit(createOp({ removals: groupRemovalIds(group), actions: buildGroupDeleteActions(group) }), {
+    return submit(createOp({
+      changes,
+      removals,
+      actions: [...buildGroupDeleteActions(group), ...buildUpdateActions(changes)],
+    }), {
       onSuccess: () => {
         // Même raison que pour un étage supprimé : les ids réutilisés ne doivent pas hériter
         // d'un repli du cycle ou sous-groupe supprimé.
@@ -810,7 +888,9 @@ export function createSyntheseTasksController({
     });
   }
 
-  // Glisser-déposer : la tâche change de zone et / ou d'étage ; le conteneur visé est déplié.
+  // Glisser-déposer : la tâche change de conteneur et / ou de place (colonne Ordre) ; avec Ordre
+  // et Lien, la chaîne se referme à l'ancienne place et se renoue à la nouvelle, et les dates
+  // suivent (voir planTaskMove). Le conteneur visé est déplié.
   function handleMoveTask(taskId, target) {
     if (!isEditable()) {
       refuseLocked();
@@ -818,18 +898,21 @@ export function createSyntheseTasksController({
     }
     const task = findTask(taskId);
     if (!task || !findRow(taskId) || !target) return;
-    const fields = buildMoveFields(task, target);
-    if (!Object.keys(fields).length) return;
+    const changes = planTaskMove({
+      sections: allSections(),
+      taskId,
+      target,
+      canOrder: orderColumn === true,
+      canLink: templateColumns === true,
+    });
+    if (!changes.size) return;
     collapsedZoneKeys.delete(target.zoneKey);
     if (target.floorKey) collapsedFloorKeys.delete(floorCollapseKey(target.zoneKey, target.floorKey));
     for (let container = findGroup(sections, target.groupRowId); container; container = container.parentGroup) {
       collapsedGroupKeys.delete(groupCollapseKey(container.rowId));
     }
     clearStatus();
-    void submit(createOp({
-      changes: new Map([[taskId, fields]]),
-      actions: [["UpdateRecord", PLANNING_TABLE, taskId, fields]],
-    }), {
+    void submit(createOp({ changes, actions: buildUpdateActions(changes) }), {
       onFailure: (error, dropped) => fail("Déplacement de la tâche impossible :", error, dropped),
     });
   }

@@ -184,7 +184,7 @@ test("filtre de zone du bandeau : une section, sans nouvelle lecture", async () 
   assert.equal(env.loads.length, 1);
 });
 
-test("rafraîchissement (signal ou « Actualiser ») : nouvelle lecture, replis gardés, pas de « Chargement… »", async () => {
+test("rafraîchissement (signal de la surveillance) : nouvelle lecture, replis gardés, pas de « Chargement… »", async () => {
   const env = setup();
   await activate(env);
   env.table.callbacks.onToggle("level:113");
@@ -195,9 +195,6 @@ test("rafraîchissement (signal ou « Actualiser ») : nouvelle lecture, replis 
   assert.equal(env.table.renders.length, count + 1, "un seul dessin, celui des nouvelles données");
   assert.equal(env.keys().includes("floor:zone2batb/rdc"), true, "le niveau reste déplié");
   assert.equal(env.lastRender().options.totals.synthese, 0, "la tâche contrôlée finit maintenant à temps");
-  env.table.callbacks.onRefresh();
-  await flush();
-  assert.equal(env.loads.length, 3);
 });
 
 test("changement de projet : nouvelle lecture, replis remis à zéro ; changement de service : rien", async () => {
@@ -247,7 +244,7 @@ test("désactivée puis réactivée : relit le projet", async () => {
   assert.deepEqual(env.keys(), DEFAULT_KEYS);
 });
 
-test("première lecture impossible : message, puis « Actualiser » relit", async () => {
+test("première lecture impossible : message, puis relue en rouvrant la vue ou au signal suivant", async () => {
   const loads = manualLoads();
   const env = setup({ loadRows: loads.loadRows });
   const errors = [];
@@ -257,12 +254,13 @@ test("première lecture impossible : message, puis « Actualiser » relit", asyn
     await activate(env);
     loads.calls[0].reject(new Error("réseau"));
     await flush();
-    assert.equal(env.lastRender().options.emptyMessage, "Le planning global n'a pas pu être lu. Cliquez sur « Actualiser ».");
-    env.table.callbacks.onRefresh();
+    assert.equal(env.lastRender().options.emptyMessage, "Le planning global n'a pas pu être lu. Rouvrez la vue Global pour réessayer.");
+    env.controller.setActive(false);
+    env.controller.setActive(true);
     loads.calls[1].reject(new Error("réseau"));
     await flush();
-    assert.equal(env.lastRender().options.emptyMessage, "Le planning global n'a pas pu être lu. Cliquez sur « Actualiser ».");
-    env.table.callbacks.onRefresh();
+    assert.equal(env.lastRender().options.emptyMessage, "Le planning global n'a pas pu être lu. Rouvrez la vue Global pour réessayer.");
+    void env.controller.refresh();
     loads.calls[2].resolve(env.data);
     await flush();
     assert.deepEqual(env.keys(), DEFAULT_KEYS);
@@ -313,7 +311,7 @@ test("lecture réussie mais construction impossible : message d'échec, pas de �
   console.error = (...args) => errors.push(args);
   try {
     await activate(env);
-    assert.equal(env.lastRender().options.emptyMessage, "Le planning global n'a pas pu être lu. Cliquez sur « Actualiser ».");
+    assert.equal(env.lastRender().options.emptyMessage, "Le planning global n'a pas pu être lu. Rouvrez la vue Global pour réessayer.");
     assert.ok(errors.length >= 1);
   } finally {
     console.error = original;
@@ -377,8 +375,7 @@ test("lecture seule : le contrôleur ne connaît que la lecture des deux tables"
   await activate(env);
   env.table.callbacks.onToggle("level:113");
   env.table.callbacks.onToggleAlertsOnly();
-  env.table.callbacks.onRefresh();
-  await flush();
-  assert.deepEqual(Object.keys(env.table.callbacks).sort(), ["onRefresh", "onToggle", "onToggleAlertsOnly"]);
+  await env.controller.refresh();
+  assert.deepEqual(Object.keys(env.table.callbacks).sort(), ["onToggle", "onToggleAlertsOnly"]);
   assert.deepEqual(env.loads.map((args) => args.length), [0, 0]);
 });

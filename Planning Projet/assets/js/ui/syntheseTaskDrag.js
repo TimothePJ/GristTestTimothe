@@ -3,9 +3,11 @@
 // position verticale du pointeur (hauteur de ligne fixe), pas de l'élément survolé, si
 // bien qu'un redessin du tableau pendant le glisser ne le perturbe pas. Pendant le glisser,
 // une copie de la ligne (rendue par le tableau) suit le pointeur, tenue là où on l'a
-// attrapée, avec la destination en légende. Le module ne décide que de la cible : le
-// déplacement lui-même est confié à onDrop.
-import { containerKeyOf, resolveDropTarget } from "../services/syntheseTaskModel.js";
+// attrapée, avec la destination en légende. Avec la colonne Ordre (`canOrder`), la moitié
+// haute ou basse d'une tâche vise la place avant ou après elle, montrée par `markSlot` (trait
+// d'insertion). Le module ne décide que de la cible : le déplacement lui-même est confié à onDrop.
+import { containerKeyOf } from "../services/syntheseTaskModel.js";
+import { resolveDropSlot } from "../services/syntheseTaskOrder.js";
 
 export const DRAG_THRESHOLD_PX = 4;
 export const AUTO_SCROLL_EDGE_PX = 24;
@@ -30,6 +32,10 @@ export function createTaskDrag({
   renderPreview = () => null,
   // Ligne d'origine à estomper (clé de ligne), puis null à la fin du glisser.
   markSource = () => {},
+  // La colonne Ordre existe : on peut viser une place entre deux tâches.
+  canOrder = () => false,
+  // Place visée ({ taskId, side }) pour le trait d'insertion, ou null.
+  markSlot = () => {},
   onDrop = () => {},
   doc = document,
   win = window,
@@ -83,24 +89,30 @@ export function createTaskDrag({
   }
 
   // Cible sous le pointeur, seulement dans la bande visible des lignes (sous l'en-tête collant,
-  // dans le conteneur défilant) : ailleurs rien n'est visé, et lâcher annule.
+  // dans le conteneur défilant) : ailleurs rien n'est visé, et lâcher annule. Sans la colonne
+  // Ordre, son propre conteneur n'est pas une destination ; avec, toute autre place l'est.
   function update() {
     const rect = scroller.getBoundingClientRect();
     const inRows = drag.clientY >= rect.top + headHeight && drag.clientY < rect.bottom &&
       drag.clientX >= rect.left && drag.clientX < rect.right;
     const lines = getLines();
-    const index = inRows
-      ? lineIndexAt(drag.clientY, body.getBoundingClientRect().top, rowHeight, lines.length)
-      : -1;
-    const target = index >= 0 ? resolveDropTarget(lines[index]) : null;
-    drag.target = target && target.key !== drag.sourceKey ? target : null;
+    const bodyTop = body.getBoundingClientRect().top;
+    const index = inRows ? lineIndexAt(drag.clientY, bodyTop, rowHeight, lines.length) : -1;
+    const ordering = Boolean(canOrder());
+    const side = drag.clientY - bodyTop - index * rowHeight < rowHeight / 2 ? "before" : "after";
+    const target = index >= 0
+      ? resolveDropSlot(lines[index], side, { canOrder: ordering, draggedTaskId: drag.taskId })
+      : null;
+    drag.target = target && (ordering || target.key !== drag.sourceKey) ? target : null;
     const label = drag.target ? drag.target.label : "";
     if (caption.textContent !== label) caption.textContent = label;
     caption.hidden = !label;
     // La copie garde l'écart entre le pointeur et le coin de la ligne au moment de l'appui.
     ghost.style.left = `${drag.clientX - drag.offsetX}px`;
     ghost.style.top = `${drag.clientY - drag.offsetY}px`;
-    highlight(drag.target ? drag.target.key : null);
+    // Une place entre deux tâches se montre par le trait d'insertion ; un conteneur, surligné.
+    highlight(drag.target && !drag.target.position ? drag.target.key : null);
+    markSlot(drag.target?.position ? { ...drag.target.position } : null);
     updateAutoScroll(rect);
   }
 
@@ -122,6 +134,7 @@ export function createTaskDrag({
     root.classList.remove("is-dragging");
     doc.documentElement.classList.remove("is-stt-dragging");
     highlight(null);
+    markSlot(null);
     markSource(null);
     doc.removeEventListener("keydown", onKeyDown, true);
   }

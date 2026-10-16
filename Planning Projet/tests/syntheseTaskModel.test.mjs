@@ -138,6 +138,7 @@ test("les colonnes Grist utilisées", () => {
     link: "Lien",
     structureLink: "Lien_Structure",
     formworkCheck: "Controle_Coffrage",
+    order: "Ordre",
   });
 });
 

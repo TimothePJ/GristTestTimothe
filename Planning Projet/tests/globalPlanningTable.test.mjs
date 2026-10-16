@@ -55,7 +55,7 @@ const TOTALS = { linkedFloors: 3, unlinkedFloors: 1, synthese: 1, missing: 0, st
 function setup({ stored = null, clientWidth = 0 } = {}) {
   const { doc, win } = createFakeEnvironment();
   const host = new FakeElement("section");
-  const calls = { toggles: [], alerts: 0, refresh: 0, ganttRenders: [], ganttResizes: 0, ganttHosts: null, stored: [] };
+  const calls = { toggles: [], alerts: 0, ganttRenders: [], ganttResizes: 0, ganttHosts: null, stored: [] };
   const storage = {
     getItem: () => stored,
     setItem: (key, value) => calls.stored.push([key, value]),
@@ -63,7 +63,6 @@ function setup({ stored = null, clientWidth = 0 } = {}) {
   const table = createGlobalPlanningTable(host, {
     onToggle: (key) => calls.toggles.push(key),
     onToggleAlertsOnly: () => { calls.alerts += 1; },
-    onRefresh: () => { calls.refresh += 1; },
   }, {
     doc,
     win,
@@ -191,18 +190,18 @@ test("clic sur un triangle : repli demandé pour sa ligne ; clic ailleurs : rien
   assert.deepEqual(calls.toggles, ["level:113"]);
 });
 
-test("barre d'état : compteurs, « Alertes seulement », « Actualiser », relecture en échec", () => {
+test("barre d'état : compteurs, « Alertes seulement », relecture en échec ; pas de bouton « Actualiser »", () => {
   const { table, calls, root } = setup();
   table.render(LINES, { totals: TOTALS });
   assert.equal(one(root, "gpl-bar__counts").textContent, "3 étages liés · 1 non lié · 1 retard Synthèse · 1 à mettre à jour · 2 retards Structure");
-  const [alerts, refresh] = all(root, "gpl-bar__button");
-  assert.deepEqual([alerts.textContent, refresh.textContent], ["Alertes seulement", "Actualiser"]);
+  const buttons = all(root, "gpl-bar__button");
+  assert.deepEqual(buttons.map((button) => button.textContent), ["Alertes seulement"]);
+  const [alerts] = buttons;
   assert.deepEqual([alerts.getAttribute("aria-pressed"), alerts.classes.has("is-active")], ["false", false]);
-  assert.deepEqual([alerts.dataset.serviceContextNavigation, refresh.dataset.serviceContextNavigation], ["", ""]);
+  assert.equal(alerts.dataset.serviceContextNavigation, "");
   assert.equal(one(root, "gpl-bar__notice").hidden, true);
   dispatch(alerts, "click");
-  dispatch(refresh, "click");
-  assert.deepEqual([calls.alerts, calls.refresh], [1, 1]);
+  assert.equal(calls.alerts, 1);
 
   table.render(LINES, { totals: TOTALS, alertsOnly: true, notice: "La dernière relecture a échoué." });
   assert.deepEqual([alerts.getAttribute("aria-pressed"), alerts.classes.has("is-active")], ["true", true]);

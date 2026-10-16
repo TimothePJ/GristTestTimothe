@@ -96,7 +96,7 @@ test("menu contextuel selon la ligne", () => {
     { label: "Supprimer l'étage", action: "deleteFloor", zoneKey: "zonez3a", floorKey: "phrdb", danger: true },
   ]);
   assert.deepEqual(buildMenuItems({ kind: "task", zoneKey: "zonez3a", floorKey: "phrdb", taskId: 5 }), [
-    { label: "Ajouter une tâche", action: "addTask", zoneKey: "zonez3a", floorKey: "phrdb" },
+    { label: "Ajouter une tâche", action: "addTask", zoneKey: "zonez3a", floorKey: "phrdb", afterTaskId: 5 },
     { label: "Contrôler par rapport au coffrage", action: "setFormworkCheck", taskId: 5, checked: true },
     { label: "Supprimer la tâche", action: "deleteTask", taskId: 5, danger: true },
   ]);
@@ -195,7 +195,7 @@ test("menu : cycle, sous-groupe et tâche d'un groupe", () => {
   assert.equal(buildMenuItems({ ...cycle, nature: "sous-groupe", groupRowId: 212 })[1].label, "Supprimer le sous-groupe");
   assert.deepEqual(
     buildMenuItems({ kind: "task", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 203, taskId: 204 })[0],
-    { label: "Ajouter une tâche", action: "addTask", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 203 }
+    { label: "Ajouter une tâche", action: "addTask", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 203, afterTaskId: 204 }
   );
 });
 
@@ -206,7 +206,7 @@ test("colonnes N° et Indice ; lignes de groupe : saisie du nom, repli, suppress
   assert.match(source, /await onRenameGroup\?\.\(target\.groupRowId, value\)/);
   assert.match(source, /\{ type: "toggleGroup", groupRowId: Number\(groupRowId\) \}/);
   assert.match(source, /onDeleteGroup\?\.\(item\.groupRowId\)/);
-  assert.match(source, /onAddTask\?\.\(item\.zoneKey, item\.floorKey, item\.groupRowId \?\? null\)/);
+  assert.match(source, /onAddTask\?\.\(item\.zoneKey, item\.floorKey, item\.groupRowId \?\? null, item\.afterTaskId \?\? null\)/);
   assert.match(source, /setStatus,\s*startEditingGroup,/);
   assert.match(source, /input\.maxLength = 50;/);
 });
@@ -316,4 +316,23 @@ test("emblème de lien : à côté du nom de l'étage, vert quand il est lié, r
   assert.match(css, /\.stt-floor-link\.is-unlinked\s*\{[^}]*color:\s*#c00000;/);
   const naming = sliceBetween(source, "function buildNameCell(", "function buildLine(");
   assert.match(naming, /if \(line\.kind === "floor" && line\.structureLinkNote\) cell\.appendChild\(buildLinkBadge\(line\)\);/);
+});
+
+// ---------- Ordre libre (colonne Ordre) ----------
+
+test("« Ajouter une tâche » sur une tâche : la tâche cliquée va au contrôleur", () => {
+  const running = sliceBetween(source, "function runMenuItem(", "function openMenu(");
+  assert.match(running, /onAddTask\?\.\(item\.zoneKey, item\.floorKey, item\.groupRowId \?\? null, item\.afterTaskId \?\? null\)/);
+});
+
+test("glisser entre deux tâches : seulement avec la colonne Ordre, en mode modifiable ; trait d'insertion", () => {
+  assert.match(source, /canOrder = Boolean\(options\?\.canOrder\);/);
+  assert.match(source, /canOrder: \(\) => canOrder && editable,/);
+  assert.match(source, /markSlot: markDropSlot,/);
+  const placing = sliceBetween(source, "function placeDropLine(", "function markDropSlot(");
+  assert.match(placing, /const boundary = index \+ \(dropSlot\.side === "after" \? 1 : 0\);/);
+  assert.match(placing, /dropLine\.style\.top = \`\$\{HEAD_HEIGHT_PX \+ boundary \* ROW_HEIGHT_PX\}px\`;/);
+  assert.match(sliceBetween(source, "function draw(", "const renderer ="), /placeDropLine\(\);/);
+  assert.match(css, /\.stt-drop-line\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*1;[^}]*height:\s*2px;[^}]*background:\s*var\(--stt-accent\);[^}]*pointer-events:\s*none;/);
+  assert.match(css, /\.stt-drop-line\[hidden\]\s*\{\s*display:\s*none;/);
 });
