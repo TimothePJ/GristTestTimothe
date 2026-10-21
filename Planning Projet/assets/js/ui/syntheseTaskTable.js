@@ -77,11 +77,11 @@ function formworkCheckItem(line) {
 }
 
 // Entrées du menu contextuel selon la ligne visée : zone (sauf « Sans zone ») → tâche ou
-// étage ; « Sans zone » → tâche ; étage → tâche dans l'étage ou suppression de l'étage ;
-// cycle / sous-groupe → tâche dans le groupe ou suppression du groupe ; tâche → tâche dans
+// étage ; « Sans zone » → tâche ; étage → tâche, cycle ou suppression de l'étage ; cycle /
+// sous-cycle → tâche, sous-cycle ou suppression du cycle ; tâche → tâche dans
 // le même conteneur, contrôle par rapport au coffrage (tâche d'étage) ou suppression de la
 // tâche.
-export function buildMenuItems(line, { canAddFloor = true } = {}) {
+export function buildMenuItems(line, { canAddFloor = true, canAddCycle = true } = {}) {
   if (!line) return [];
   if (line.kind === "zone") {
     const items = [{ label: "Ajouter une tâche", action: "addTask", zoneKey: line.zoneKey, floorKey: "" }];
@@ -93,6 +93,14 @@ export function buildMenuItems(line, { canAddFloor = true } = {}) {
   if (line.kind === "floor") {
     return [
       { label: "Ajouter une tâche", action: "addTask", zoneKey: line.zoneKey, floorKey: line.floorKey },
+      {
+        label: "Ajouter un cycle",
+        action: "addCycle",
+        zoneKey: line.zoneKey,
+        floorKey: line.floorKey,
+        parentGroupRowId: null,
+        disabled: !canAddCycle,
+      },
       { label: "Supprimer l'étage", action: "deleteFloor", zoneKey: line.zoneKey, floorKey: line.floorKey, danger: true },
     ];
   }
@@ -100,7 +108,15 @@ export function buildMenuItems(line, { canAddFloor = true } = {}) {
     return [
       { label: "Ajouter une tâche", action: "addTask", zoneKey: line.zoneKey, floorKey: line.floorKey, groupRowId: line.groupRowId },
       {
-        label: line.nature === "cycle" ? "Supprimer le cycle" : "Supprimer le sous-groupe",
+        label: "Ajouter un sous-cycle",
+        action: "addCycle",
+        zoneKey: line.zoneKey,
+        floorKey: line.floorKey,
+        parentGroupRowId: line.groupRowId,
+        disabled: !canAddCycle,
+      },
+      {
+        label: line.nature === "cycle" ? "Supprimer le cycle" : "Supprimer le sous-cycle",
         action: "deleteGroup",
         groupRowId: line.groupRowId,
         danger: true,
@@ -231,12 +247,30 @@ function formatCellValue(line, field) {
   return formatDate(line.end);
 }
 
+// Où poser le trait d'insertion d'une place visée (`slot` : { taskId, side } ou { groupRowId, side }) :
+// à la limite haute ou basse de la ligne de la tâche ou du cycle visé, au retrait de son niveau
+// (celui du conteneur d'arrivée, pour distinguer « après la dernière tâche d'un cycle » de
+// « avant le cycle suivant »). null si la ligne n'est pas affichée.
+export function placeOfDropSlot(lines, slot, { headHeight = 32, rowHeight = 26, indentPx = 16 } = {}) {
+  if (!slot) return null;
+  const index = lines.findIndex((line) => (slot.taskId != null
+    ? line.kind === "task" && line.taskId === slot.taskId
+    : line.kind === "group" && line.groupRowId === slot.groupRowId));
+  if (index < 0) return null;
+  return {
+    top: headHeight + (index + (slot.side === "after" ? 1 : 0)) * rowHeight,
+    left: lines[index].level * indentPx,
+  };
+}
+
 export function createSyntheseTaskTable(host, {
   onEdit,
   onRenameFloor,
   onRenameGroup,
   onAddTask,
   onAddFloor,
+  onAddCycle,
+  onMoveCycle,
   onDeleteTask,
   onDeleteFloor,
   onDeleteGroup,
@@ -310,10 +344,13 @@ export function createSyntheseTaskTable(host, {
   let lines = [];
   let editable = false;
   let canAddFloor = true;
+  let canAddCycle = true;
+  // Colonne Ordre présente en plus des colonnes du modèle d'étage : glisser un cycle.
+  let canMoveCycles = false;
   // Colonne Ordre présente : glisser une tâche entre deux autres.
   let canOrder = false;
   let dropTargetKey = null;
-  // Place visée par le glisser ({ taskId, side }), montrée par le trait d'insertion.
+  // Place visée par le glisser ({ taskId, side } ou { groupRowId, side }), montrée par le trait d'insertion.
   let dropSlot = null;
   let dragSourceKey = null;
   let taskDrag = null;
@@ -362,6 +399,13 @@ export function createSyntheseTaskTable(host, {
     cell.setAttribute("role", "gridcell");
     cell.dataset.field = "name";
     cell.title = line.name;
+    // Poignée d'un cycle, avant le triangle de repli : glisser le cycle vers une autre place de son étage.
+    if (line.kind === "group" && editable && canMoveCycles) {
+      const grip = createElement("span", "stt-grip", GRIP_GLYPH);
+      grip.setAttribute("aria-hidden", "true");
+      grip.title = line.nature === "cycle" ? "Glisser pour déplacer le cycle" : "Glisser pour déplacer le sous-cycle";
+      cell.appendChild(grip);
+    }
     if (SUMMARY_KINDS.has(line.kind)) {
       const toggle = createElement("button", "stt-toggle", line.collapsed ? "▸" : "▾");
       toggle.type = "button";
@@ -385,7 +429,9 @@ export function createSyntheseTaskTable(host, {
   }
 
   function buildLine(line) {
-    const element = createElement("div", `stt-line stt-line--${line.kind} is-level-${line.level}`);
+    const element = createElement("div", `stt-line stt-line--${line.kind}`);
+    // Retrait sans plafond : le CSS le calcule depuis le niveau de la ligne.
+    element.style.setProperty("--stt-level", String(line.level));
     element.setAttribute("role", "row");
     element.setAttribute("aria-level", String(line.level + 1));
     element.dataset.kind = line.kind;
@@ -430,6 +476,8 @@ export function createSyntheseTaskTable(host, {
     lines = Array.isArray(nextLines) ? nextLines : [];
     editable = Boolean(options?.editable);
     canAddFloor = options?.canAddFloor !== false;
+    canAddCycle = options?.canAddCycle !== false;
+    canMoveCycles = options?.canMoveCycles === true;
     canOrder = Boolean(options?.canOrder);
     // Tableau devenu non modifiable : un glisser en cours est abandonné, sans dépôt.
     if (!editable) taskDrag?.cancel();
@@ -525,7 +573,7 @@ export function createSyntheseTaskTable(host, {
       input.type = "date";
       input.value = toInputDate(line[field]);
     }
-    const labels = { floor: "Nom de l'étage", group: "Nom du groupe" };
+    const labels = { floor: "Nom de l'étage", group: "Nom du cycle" };
     input.setAttribute("aria-label", labels[line.kind] || COLUMNS.find((column) => column.field === field).label);
     return input;
   }
@@ -649,6 +697,7 @@ export function createSyntheseTaskTable(host, {
       return onAddTask?.(item.zoneKey, item.floorKey, item.groupRowId ?? null, item.afterTaskId ?? null);
     }
     if (item.action === "addFloor") return onAddFloor?.(item.zoneKey);
+    if (item.action === "addCycle") return onAddCycle?.(item.zoneKey, item.floorKey, item.parentGroupRowId ?? null);
     if (item.action === "deleteFloor") return onDeleteFloor?.(item.zoneKey, item.floorKey);
     if (item.action === "deleteGroup") return onDeleteGroup?.(item.groupRowId);
     if (item.action === "deleteTask") return onDeleteTask?.(item.taskId);
@@ -662,7 +711,7 @@ export function createSyntheseTaskTable(host, {
       return;
     }
     const line = lines.find((candidate) => candidate.key === lineElement.dataset.lineKey);
-    const items = buildMenuItems(line, { canAddFloor });
+    const items = buildMenuItems(line, { canAddFloor, canAddCycle });
     if (!items.length) return;
     menu.replaceChildren(...items.map((item) => {
       const classes = ["stt-menu__item"];
@@ -827,16 +876,17 @@ export function createSyntheseTaskTable(host, {
     if (key) body.querySelector(`[data-line-key="${key}"]`)?.classList.add("is-drag-source");
   }
 
-  // Trait d'insertion à la limite haute (avant) ou basse (après) de la tâche visée ; caché sans
-  // place visée ou si la tâche n'est plus affichée. Replacé à chaque redessin.
+  // Trait d'insertion à la limite haute (avant) ou basse (après) de la tâche ou du cycle visé, au
+  // retrait de son niveau ; caché sans place visée ou si la ligne n'est plus affichée. Replacé à
+  // chaque redessin.
   function placeDropLine() {
-    const index = dropSlot ? lines.findIndex((line) => line.kind === "task" && line.taskId === dropSlot.taskId) : -1;
-    if (index < 0) {
+    const place = placeOfDropSlot(lines, dropSlot, { headHeight: HEAD_HEIGHT_PX, rowHeight: ROW_HEIGHT_PX });
+    if (!place) {
       dropLine.hidden = true;
       return;
     }
-    const boundary = index + (dropSlot.side === "after" ? 1 : 0);
-    dropLine.style.top = `${HEAD_HEIGHT_PX + boundary * ROW_HEIGHT_PX}px`;
+    dropLine.style.top = `${place.top}px`;
+    dropLine.style.left = `${place.left}px`;
     dropLine.hidden = false;
   }
 
@@ -867,7 +917,9 @@ export function createSyntheseTaskTable(host, {
     markSource: markDragSource,
     canOrder: () => canOrder && editable,
     markSlot: markDropSlot,
+    canMoveCycles: () => canMoveCycles && editable,
     onDrop: (taskId, target) => onMoveTask?.(taskId, target),
+    onDropCycle: (groupRowId, target) => onMoveCycle?.(groupRowId, target),
   });
 
   /* ---------- Largeur des colonnes (poignées de l'en-tête) ---------- */

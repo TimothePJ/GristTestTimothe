@@ -21,13 +21,18 @@ afterEach(() => {
 });
 
 // (Re)construit les lignes du corps, comme un redessin du tableau ; renvoie les poignées.
-function buildBody(body) {
+function buildBody(body, lines = LINES) {
   body.children = [];
   const grips = new Map();
-  LINES.forEach((line, index) => {
+  lines.forEach((line, index) => {
     const element = body.appendChild(new FakeElement("div", `stt-line stt-line--${line.kind}`));
     element.rect = { left: 0, top: 100 + index * ROW, width: 600, height: ROW };
     element.dataset.kind = line.kind;
+    if (line.kind === "group") {
+      element.dataset.groupRowId = String(line.groupRowId);
+      const cell = element.appendChild(new FakeElement("div", "stt-cell stt-cell--name"));
+      grips.set(`group:${line.groupRowId}`, cell.appendChild(new FakeElement("span", "stt-grip")));
+    }
     if (line.kind !== "task") return;
     element.dataset.taskId = String(line.taskId);
     const cell = element.appendChild(new FakeElement("div", "stt-cell stt-cell--name"));
@@ -36,7 +41,7 @@ function buildBody(body) {
   return grips;
 }
 
-function setup({ enabled = true, canOrder = false } = {}) {
+function setup({ enabled = true, canOrder = false, canMoveCycles = false, lines = LINES } = {}) {
   globalThis.Element = FakeElement;
   const env = createFakeEnvironment();
   const root = new FakeElement("div", "stt");
@@ -44,20 +49,21 @@ function setup({ enabled = true, canOrder = false } = {}) {
   // En-tête collant de 32 px : les lignes commencent en y = 100 ; bas du conteneur en y = 368.
   scroller.rect = { left: 0, top: 68, width: 600, height: 300 };
   const body = scroller.appendChild(new FakeElement("div", "stt-body"));
-  body.rect = { left: 0, top: 100, width: 600, height: LINES.length * ROW };
-  const grips = buildBody(body);
+  body.rect = { left: 0, top: 100, width: 600, height: lines.length * ROW };
+  const grips = buildBody(body, lines);
   const drops = [];
   const highlights = [];
   const previews = [];
   const sources = [];
   const slots = [];
+  const cycleDrops = [];
   createTaskDrag({
     root,
     scroller,
     body,
     rowHeight: ROW,
     headHeight: 32,
-    getLines: () => LINES,
+    getLines: () => lines,
     isEnabled: () => enabled,
     highlight: (key) => highlights.push(key),
     // Copie de la ligne : le tableau la construit avec son propre rendu.
@@ -70,13 +76,15 @@ function setup({ enabled = true, canOrder = false } = {}) {
     markSource: (key) => sources.push(key),
     canOrder: () => canOrder,
     markSlot: (slot) => slots.push(slot),
+    canMoveCycles: () => canMoveCycles,
     onDrop: (taskId, target) => drops.push({ taskId, target }),
+    onDropCycle: (groupRowId, target) => cycleDrops.push({ groupRowId, target }),
     doc: env.doc,
     win: env.win,
   });
   const ghost = () => root.children.find((node) => node.classes.has("stt-drag-ghost")) || null;
   const caption = () => ghost()?.children.find((node) => node.classes.has("stt-drag-ghost__label")) || null;
-  return { env, root, scroller, body, grips, drops, highlights, previews, sources, slots, ghost, caption };
+  return { env, root, scroller, body, grips, drops, cycleDrops, highlights, previews, sources, slots, ghost, caption };
 }
 
 // Appui à x = 20 ; les mouvements se font par défaut à x = 30 (au-delà du seuil de 4 px).
@@ -325,4 +333,59 @@ test("avec la colonne Ordre : Échap pendant qu'une place est visée → trait r
   assert.equal(slots.at(-1), null);
   release(scroller, 100 + 3 * ROW + 4);
   assert.equal(drops.length, 0);
+});
+
+// Étage PH RDB avec deux cycles (A = 10, contenant la tâche 11 ; B = 20, contenant la tâche 21).
+const inFloor = { zoneKey: "zonez3a", zoneName: "Zone Z3A", floorKey: "phrdb", floorName: "PH RDB" };
+const CYCLE_LINES = [
+  { key: "floor:zonez3a/phrdb", kind: "floor", cyclePath: [], ...inFloor },
+  { key: "group:10", kind: "group", groupRowId: 10, groupLabel: "CYCLE A", parentGroupRowId: null, cyclePath: [10], ...inFloor },
+  { key: "task:11", kind: "task", taskId: 11, name: "Tâche A1", groupRowId: 10, cyclePath: [10], ...inFloor },
+  { key: "group:20", kind: "group", groupRowId: 20, groupLabel: "CYCLE B", parentGroupRowId: null, cyclePath: [20], ...inFloor },
+  { key: "task:21", kind: "task", taskId: 21, name: "Tâche B1", groupRowId: 20, cyclePath: [20], ...inFloor },
+];
+
+test("glisser un cycle par sa poignée : moitié haute d'un autre cycle → place avant, onDropCycle et non onDrop", () => {
+  const { scroller, grips, drops, cycleDrops, slots, highlights, caption } = setup({ canOrder: true, canMoveCycles: true, lines: CYCLE_LINES });
+  press(grips.get("group:20"), rowY(3));
+  move(scroller, 100 + 1 * ROW + 4);
+  assert.deepEqual(slots.at(-1), { groupRowId: 10, side: "before" });
+  assert.equal(highlights.at(-1), null, "une place se montre par le trait, pas par un surlignage");
+  assert.equal(caption().textContent, "Placer avant « CYCLE A »");
+  release(scroller, 100 + 1 * ROW + 4);
+  assert.equal(drops.length, 0);
+  assert.equal(cycleDrops.length, 1);
+  assert.equal(cycleDrops[0].groupRowId, 20);
+  assert.deepEqual(cycleDrops[0].target.position, { groupRowId: 10, side: "before" });
+  assert.equal(cycleDrops[0].target.groupRowId, null);
+  assert.equal(slots.at(-1), null);
+});
+
+test("glisser un cycle : moitié basse d'un autre cycle → fin de ce cycle ; son propre contenu → rien", () => {
+  const { scroller, grips, cycleDrops, highlights, caption } = setup({ canOrder: true, canMoveCycles: true, lines: CYCLE_LINES });
+  press(grips.get("group:20"), rowY(3));
+  move(scroller, 100 + 1 * ROW + 20);
+  assert.equal(highlights.at(-1), "group:10");
+  assert.equal(caption().textContent, "Déplacer à la fin de « CYCLE A »");
+  move(scroller, rowY(4));
+  assert.equal(caption().hidden, true, "une tâche du cycle glissé : rien n'est visé");
+  release(scroller, rowY(4));
+  assert.equal(cycleDrops.length, 0);
+});
+
+test("glisser un cycle : l'étage vise la fin de l'étage, sans filtre de conteneur d'origine", () => {
+  const { scroller, grips, cycleDrops } = setup({ canOrder: true, canMoveCycles: true, lines: CYCLE_LINES });
+  press(grips.get("group:10"), rowY(1));
+  move(scroller, rowY(0));
+  release(scroller, rowY(0));
+  assert.deepEqual(cycleDrops.map((drop) => [drop.groupRowId, drop.target.key, drop.target.groupRowId]), [[10, "floor:zonez3a/phrdb", null]]);
+});
+
+test("la poignée d'un cycle ne glisse pas sans canMoveCycles", () => {
+  const { scroller, grips, cycleDrops, drops, root } = setup({ canOrder: true, canMoveCycles: false, lines: CYCLE_LINES });
+  press(grips.get("group:20"), rowY(3));
+  move(scroller, 100 + 1 * ROW + 4);
+  assert.equal(root.classes.has("is-dragging"), false);
+  release(scroller, 100 + 1 * ROW + 4);
+  assert.equal(cycleDrops.length + drops.length, 0);
 });

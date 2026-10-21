@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 globalThis.window = { location: { search: "" } };
 
 const { buildGlobalPlanning, buildGlobalRowModel } = await import("../assets/js/services/globalPlanningModel.js");
-const { TODAY, ZONE_1, planRows, projectRows } = await import("./helpers/globalRows.mjs");
+const { TODAY, ZONE_1, ZONE_2, PROJECT, planRows, projectRows } = await import("./helpers/globalRows.mjs");
 
 const iso = (date) => (date instanceof Date
   ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
@@ -274,4 +274,25 @@ test("ordre libre de la vue Synthese : la vue Global le reprend", () => {
   const { lines } = model({ toggledKeys: new Set(RDC_PATH) }, rows);
   const at = keys(lines).indexOf("group:419");
   assert.deepEqual(keys(lines).slice(at + 1, at + 4), ["task:422", "task:421", "task:420"]);
+});
+
+// Cycles imbriqués : un sous-cycle (700) du plan 419 est un cran plus bas que son parent, et ses
+// tâches un cran plus bas encore, sans plafond.
+test("vue Global : un sous-cycle imbriqué est un cran plus bas que son parent", () => {
+  const plain = {
+    NomProjet: PROJECT, Service: "Synthese", Type_doc: "", ID2: "", Etage: false, Lien: "", Lien_Structure: "",
+    Controle_Coffrage: false, Zone: ZONE_2, Groupe: "RDC",
+  };
+  const rows = [
+    ...projectRows(),
+    { ...plain, id: 700, Taches: "Sous-cycle", Nature: "Cycle", Parent: "419", Diff_coffrage: null, Diff_armature: null, Duree_1: 0 },
+    { ...plain, id: 701, Taches: "Tâche du sous-cycle", Nature: "", Parent: "700", Diff_coffrage: "2026-10-12", Diff_armature: "2026-10-12", Duree_1: 1 },
+  ];
+  const { lines } = model({ toggledKeys: new Set([...RDC_PATH, "group:700"]) }, rows);
+  const group419 = lineOf(lines, "group:419");
+  const group700 = lineOf(lines, "group:700");
+  const task701 = lineOf(lines, "task:701");
+  assert.ok(group700 && task701);
+  assert.equal(group700.level, group419.level + 1);
+  assert.equal(task701.level, group700.level + 1);
 });

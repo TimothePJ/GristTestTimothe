@@ -80,7 +80,7 @@ test("groupes : nom obligatoire, renommer, supprimer avec tout leur contenu", ()
   assert.deepEqual(validateGroupName(" CYCLE 1 bis "), { ok: true, name: "CYCLE 1 bis" });
   const c2 = findGroup(sections, 210);
   assert.deepEqual(buildGroupRenameAction(c2, "CYCLE 2 bis"), ["UpdateRecord", "Planning_Projet", 210, { Taches: "CYCLE 2 bis" }]);
-  assert.equal(buildGroupDeleteQuestion(c2), "Supprimer « CYCLE 2 » et ses 5 tâches ?");
+  assert.equal(buildGroupDeleteQuestion(c2), "Supprimer « CYCLE 2 », son sous-cycle et ses 5 tâches ?");
   assert.deepEqual([...groupRemovalIds(c2)].sort(byNumber), [210, 211, 212, 213, 214, 215, 216]);
   assert.deepEqual(buildGroupDeleteActions(c2), [["BulkRemoveRecord", "Planning_Projet", groupRemovalIds(c2)]]);
   assert.deepEqual([...groupRemovalIds(findGroup(sections, 212))].sort(byNumber), [212, 213, 214, 215]);

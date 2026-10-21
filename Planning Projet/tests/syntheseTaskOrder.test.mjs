@@ -9,11 +9,13 @@ import {
   buildUpdateActions,
   findContainer,
   locateTask,
+  planTaskMove,
   renumberItems,
   resolveDropSlot,
   taskOrder,
 } from "../assets/js/services/syntheseTaskOrder.js";
 import { templateRows } from "./helpers/templateRows.mjs";
+import { ERA_ZONE, ERA_ZONE_KEY, eraSs1Rows } from "./helpers/eraSs1Rows.mjs";
 
 // Modèle d'étage SS1 (Zone Z3A), ids 201 à 226 (voir tests/helpers/templateRows.mjs) ; plus une
 // tâche « Visa MOE » (301) au niveau zone.
@@ -132,4 +134,35 @@ test("cible d'un dépôt avec la colonne Ordre : avant ou après une tâche ; fi
     ]
   );
   assert.equal(resolveDropSlot(null, "after", { canOrder: true }), null);
+});
+
+test("tâche glissée sur la moitié haute d'un cycle : avant le cycle, dans son conteneur", () => {
+  const lines = buildRowModel(sections());
+  const cycle = lines.find((candidate) => candidate.key === "group:217");
+  const before = resolveDropSlot(cycle, "before", { canOrder: true });
+  assert.deepEqual(before, {
+    key: "slot:group:217:before", zoneKey: ZONE, zoneName: "Zone Z3A", floorKey: "ss1", floorName: "SS1", groupRowId: null,
+    label: "Placer avant « CYCLE 3 »", position: { groupRowId: 217, side: "before" },
+  });
+  const after = resolveDropSlot(cycle, "after", { canOrder: true });
+  assert.deepEqual([after.key, after.groupRowId, after.position], ["group:217", 217, undefined], "moitié basse : fin du cycle");
+  assert.deepEqual(resolveDropSlot(cycle, "before"), resolveDropSlot(cycle, "after"), "sans Ordre, rien ne change");
+  assert.equal(resolveDropSlot(cycle, "before").position, undefined);
+  // Dans un sous-groupe : le conteneur est le cycle qui le contient.
+  const nested = resolveDropSlot(lines.find((candidate) => candidate.key === "group:220"), "before", { canOrder: true });
+  assert.deepEqual([nested.groupRowId, nested.position], [217, { groupRowId: 220, side: "before" }]);
+
+  const all = buildSections({ rows: eraSs1Rows() });
+  const changes = planTaskMove({
+    sections: all,
+    taskId: 1061,
+    target: { zoneKey: ERA_ZONE_KEY, zoneName: ERA_ZONE, floorKey: "ss1", floorName: "SS1", groupRowId: null, position: { groupRowId: 992, side: "before" } },
+    canOrder: true,
+    canLink: false,
+  });
+  assert.deepEqual(changes.get(1061), { Parent: "", Ordre: "3" });
+  assert.deepEqual(
+    [984, 985, 992, 999].map((rowId) => changes.get(rowId)),
+    [{ Ordre: "1" }, { Ordre: "2" }, { Ordre: "4" }, { Ordre: "5" }]
+  );
 });

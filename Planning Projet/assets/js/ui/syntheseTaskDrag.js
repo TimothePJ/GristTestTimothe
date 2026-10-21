@@ -5,7 +5,10 @@
 // une copie de la ligne (rendue par le tableau) suit le pointeur, tenue là où on l'a
 // attrapée, avec la destination en légende. Avec la colonne Ordre (`canOrder`), la moitié
 // haute ou basse d'une tâche vise la place avant ou après elle, montrée par `markSlot` (trait
-// d'insertion). Le module ne décide que de la cible : le déplacement lui-même est confié à onDrop.
+// d'insertion). Avec `canMoveCycles`, la poignée d'un cycle le glisse de la même façon, vers une
+// place de son étage (resolveCycleDropSlot), confiée à onDropCycle. Le module ne décide que de la
+// cible : le déplacement lui-même est confié à onDrop / onDropCycle.
+import { resolveCycleDropSlot } from "../services/syntheseCycles.js";
 import { containerKeyOf } from "../services/syntheseTaskModel.js";
 import { resolveDropSlot } from "../services/syntheseTaskOrder.js";
 
@@ -36,7 +39,10 @@ export function createTaskDrag({
   canOrder = () => false,
   // Place visée ({ taskId, side }) pour le trait d'insertion, ou null.
   markSlot = () => {},
+  // La colonne Ordre existe et le tableau est modifiable : la poignée d'un cycle le glisse.
+  canMoveCycles = () => false,
   onDrop = () => {},
+  onDropCycle = () => {},
   doc = document,
   win = window,
 } = {}) {
@@ -90,7 +96,8 @@ export function createTaskDrag({
 
   // Cible sous le pointeur, seulement dans la bande visible des lignes (sous l'en-tête collant,
   // dans le conteneur défilant) : ailleurs rien n'est visé, et lâcher annule. Sans la colonne
-  // Ordre, son propre conteneur n'est pas une destination ; avec, toute autre place l'est.
+  // Ordre, son propre conteneur n'est pas une destination ; avec, toute autre place l'est. Un
+  // cycle glissé ne vise que les places de son étage, sans filtre de conteneur d'origine.
   function update() {
     const rect = scroller.getBoundingClientRect();
     const inRows = drag.clientY >= rect.top + headHeight && drag.clientY < rect.bottom &&
@@ -100,10 +107,17 @@ export function createTaskDrag({
     const index = inRows ? lineIndexAt(drag.clientY, bodyTop, rowHeight, lines.length) : -1;
     const ordering = Boolean(canOrder());
     const side = drag.clientY - bodyTop - index * rowHeight < rowHeight / 2 ? "before" : "after";
-    const target = index >= 0
-      ? resolveDropSlot(lines[index], side, { canOrder: ordering, draggedTaskId: drag.taskId })
-      : null;
-    drag.target = target && (ordering || target.key !== drag.sourceKey) ? target : null;
+    if (drag.kind === "group") {
+      const { groupRowId, line } = drag;
+      drag.target = index >= 0
+        ? resolveCycleDropSlot(lines[index], side, { groupRowId, zoneKey: line.zoneKey, floorKey: line.floorKey })
+        : null;
+    } else {
+      const target = index >= 0
+        ? resolveDropSlot(lines[index], side, { canOrder: ordering, draggedTaskId: drag.taskId })
+        : null;
+      drag.target = target && (ordering || target.key !== drag.sourceKey) ? target : null;
+    }
     const label = drag.target ? drag.target.label : "";
     if (caption.textContent !== label) caption.textContent = label;
     caption.hidden = !label;
@@ -145,16 +159,21 @@ export function createTaskDrag({
     if (drag || event.button !== 0 || !isEnabled()) return;
     const target = event.target instanceof Element ? event.target : null;
     const lineElement = target?.closest(".stt-grip")?.closest(".stt-line");
-    if (!lineElement || lineElement.dataset.kind !== "task") return;
-    const taskId = Number(lineElement.dataset.taskId);
-    const line = getLines().find((candidate) => candidate.kind === "task" && candidate.taskId === taskId);
+    const kind = lineElement?.dataset.kind;
+    if (kind !== "task" && !(kind === "group" && canMoveCycles())) return;
+    const taskId = kind === "task" ? Number(lineElement.dataset.taskId) : null;
+    const groupRowId = kind === "group" ? Number(lineElement.dataset.groupRowId) : null;
+    const line = getLines().find((candidate) => candidate.kind === kind &&
+      (kind === "task" ? candidate.taskId === taskId : candidate.groupRowId === groupRowId));
     if (!line) return;
     const lineRect = lineElement.getBoundingClientRect();
     drag = {
       pointerId: event.pointerId,
+      kind,
       taskId,
+      groupRowId,
       line,
-      sourceKey: containerKeyOf(line),
+      sourceKey: kind === "task" ? containerKeyOf(line) : null,
       offsetX: event.clientX - lineRect.left,
       offsetY: event.clientY - lineRect.top,
       startX: event.clientX,
@@ -190,9 +209,11 @@ export function createTaskDrag({
 
   scroller.addEventListener("pointerup", (event) => {
     if (!drag || event.pointerId !== drag.pointerId) return;
-    const { started, target, taskId } = drag;
+    const { started, target, taskId, groupRowId, kind } = drag;
     finish();
-    if (started && target) onDrop(taskId, target);
+    if (!started || !target) return;
+    if (kind === "group") onDropCycle(groupRowId, target);
+    else onDrop(taskId, target);
   });
 
   // La liste peut défiler sans que le pointeur bouge (molette, clavier) : la cible suit.

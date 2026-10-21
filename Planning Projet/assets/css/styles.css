@@ -3056,7 +3056,7 @@ body.is-synthese-space #durationDefaultsToggle {
 }
 
 .stt-line--task.is-in-floor .stt-cell--name {
-  padding-left: 46px;
+  padding-left: calc(14px + var(--stt-level, 2) * 16px);
 }
 
 /* En saisie, le champ occupe toute la cellule, comme pour les tâches du niveau zone. */
@@ -3088,36 +3088,28 @@ body.is-synthese-space #durationDefaultsToggle {
   font-weight: 700;
 }
 
-/* Cycles et sous-groupes : en gras, avec triangle de repli, un cran de retrait par niveau. */
+/* Cycles et sous-cycles : en gras, avec triangle de repli, un cran de retrait (16 px) par niveau,
+   sans plafond (--stt-level posée sur la ligne). */
 .stt-line--group .stt-cell {
   font-weight: 700;
 }
 
 .stt-line--group .stt-cell--name {
   gap: 4px;
-  padding-left: 32px;
-}
-
-.stt-line--group.is-level-3 .stt-cell--name {
-  padding-left: 48px;
+  padding-left: calc(var(--stt-level, 2) * 16px);
 }
 
 .stt-line--group .stt-toggle:focus-visible {
   outline-color: var(--stt-accent);
 }
 
-/* Tâches d'un cycle (niveau 3) et d'un sous-groupe (niveau 4). */
-.stt-line--task.is-level-3 .stt-cell--name {
-  padding-left: 62px;
+/* Le nom d'un cycle a un écart de 4 px que les tâches n'ont pas : sans cette marge à zéro, la
+   poignée (boîte externe nulle : -16 + 12 + 4) décalerait le triangle et le nom en mode « Éditer ». */
+.stt-line--group .stt-grip {
+  margin-right: 0;
 }
 
-.stt-line--task.is-level-4 .stt-cell--name {
-  padding-left: 78px;
-}
-
-.stt-line--group .stt-cell--name.is-editing,
-.stt-line--task.is-level-3 .stt-cell--name.is-editing,
-.stt-line--task.is-level-4 .stt-cell--name.is-editing {
+.stt-line--group .stt-cell--name.is-editing {
   padding-left: 0;
 }
 
@@ -3137,6 +3129,11 @@ body.is-synthese-space #durationDefaultsToggle {
 }
 
 .stt-line--task:hover .stt-grip {
+  visibility: visible;
+}
+
+/* Poignée d'un cycle (glisser le cycle, colonne Ordre présente). */
+.stt-line--group:hover .stt-grip {
   visibility: visible;
 }
 

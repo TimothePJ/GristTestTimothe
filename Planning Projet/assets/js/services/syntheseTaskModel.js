@@ -550,11 +550,17 @@ export function buildGroupRenameAction(group, name) {
   return ["UpdateRecord", PLANNING_TABLE, group.rowId, { [TASK_COLUMNS.name]: name }];
 }
 
-// Lignes d'un groupe à supprimer : la sienne, ses sous-groupes et toutes ses tâches.
+// Tous les sous-cycles d'un groupe, à toute profondeur : en profondeur d'abord, dans l'ordre
+// d'affichage.
+export function descendantGroups(group) {
+  return (group?.groups || []).flatMap((child) => [child, ...descendantGroups(child)]);
+}
+
+// Lignes d'un groupe à supprimer : la sienne, tous ses sous-cycles et toutes ses tâches.
 export function groupRemovalIds(group) {
   return [
     group.rowId,
-    ...(group.groups || []).map((child) => child.rowId),
+    ...descendantGroups(group).map((child) => child.rowId),
     ...(group.tasks || []).map((task) => task.id),
   ];
 }
@@ -564,10 +570,14 @@ export function buildGroupDeleteActions(group) {
 }
 
 export function buildGroupDeleteQuestion(group) {
-  const count = (group?.tasks || []).length;
-  if (!count) return `Supprimer « ${group.name} » ?`;
-  if (count === 1) return `Supprimer « ${group.name} » et sa tâche ?`;
-  return `Supprimer « ${group.name} » et ses ${count} tâches ?`;
+  const subCount = descendantGroups(group).length;
+  const taskCount = (group?.tasks || []).length;
+  const parts = [];
+  if (subCount) parts.push(subCount === 1 ? "son sous-cycle" : `ses ${subCount} sous-cycles`);
+  if (taskCount) parts.push(taskCount === 1 ? "sa tâche" : `ses ${taskCount} tâches`);
+  if (!parts.length) return `Supprimer « ${group.name} » ?`;
+  if (parts.length === 1) return `Supprimer « ${group.name} » et ${parts[0]} ?`;
+  return `Supprimer « ${group.name} », ${parts[0]} et ${parts[1]} ?`;
 }
 
 // Conteneur d'une ligne de tâche : son groupe, son étage, ou le niveau zone de sa zone (même
@@ -776,18 +786,34 @@ export function compareRanked(left, right, fallback) {
 }
 
 // Contenu d'un étage, par rang (colonne Ordre) puis dans l'ordre de création (ordre du
-// modèle) : ses tâches et ses cycles ;
-// dans un cycle, ses tâches et ses sous-groupes ; dans un sous-groupe, ses tâches. Une ligne
-// dont le Parent ne désigne pas un groupe de l'étage (ou un sous-groupe dont le Parent n'est
-// pas un cycle) se range directement dans l'étage. Récapitulatif d'un groupe : toutes ses
-// tâches, sous-groupes compris.
+// modèle) : ses tâches et ses cycles ; dans un cycle, ses tâches et ses sous-cycles, à toute
+// profondeur. Le conteneur d'un cycle est le cycle de l'étage que désigne son Parent ; un
+// Parent étranger à l'étage, illisible ou égal à la ligne elle-même range le cycle directement
+// dans l'étage, et dans une boucle de Parent le cycle de plus petit id passe dans l'étage. La
+// profondeur (1 = directement dans l'étage) vient de la place réelle, jamais de la valeur
+// stockée dans Nature. Récapitulatif d'un groupe : toutes ses tâches, sous-cycles compris.
 function placeFloorContent(floor) {
   const groupsById = new Map(floor.groups.map((group) => [group.rowId, group]));
   floor.groups.forEach((group) => {
-    const parent = group.natureKey === "sous-groupe" ? groupsById.get(group.parentId) : null;
-    group.parentGroup = parent?.natureKey === "cycle" ? parent : null;
+    const parent = groupsById.get(group.parentId) || null;
+    group.parentGroup = parent === group ? null : parent;
+  });
+  // Boucle : en remontant les parents, le cycle se retrouve lui-même. Parcours par id
+  // croissant : le plus petit de la boucle est coupé en premier, ce qui la défait.
+  [...floor.groups].sort((left, right) => left.rowId - right.rowId).forEach((group) => {
+    const seen = new Set();
+    for (let up = group.parentGroup; up && !seen.has(up); up = up.parentGroup) {
+      if (up === group) {
+        group.parentGroup = null;
+        return;
+      }
+      seen.add(up);
+    }
+  });
+  const depthOf = (group) => 1 + (group.parentGroup ? depthOf(group.parentGroup) : 0);
+  floor.groups.forEach((group) => {
+    group.depth = depthOf(group);
     (group.parentGroup ? group.parentGroup.items : floor.items).push({ kind: "group", group });
-    if (group.parentGroup) group.parentGroup.groups.push(group);
   });
   floor.tasks.forEach((task) => {
     const group = groupsById.get(task.parentId) || null;
@@ -800,6 +826,8 @@ function placeFloorContent(floor) {
   floor.items.sort(byRank);
   floor.groups.forEach((group) => {
     group.items.sort(byRank);
+    // Sous-cycles directs, dans l'ordre d'affichage.
+    group.groups = group.items.filter((item) => item.kind === "group").map((item) => item.group);
     group.summary = summarizeTasks(group.tasks);
   });
   floor.summary = summarizeTasks(floor.tasks);
@@ -903,6 +931,7 @@ export function buildSections({ rows = [], sharedZones = [], zoneFilter = "" } =
         zoneName,
         floorName: floor.name,
         parentGroup: null,
+        depth: 1,
         items: [],
         tasks: [],
         groups: [],
@@ -963,20 +992,25 @@ function summaryFields(summary) {
 }
 
 // Champs propres aux tâches et aux groupes, vides sur les lignes de zone et d'étage.
-const NO_GROUP_FIELDS = Object.freeze({ groupRowId: null, groupLabel: "", nature: "", link: null, id2: "", indice: "" });
+const NO_GROUP_FIELDS = Object.freeze({
+  groupRowId: null, groupLabel: "", nature: "", link: null, id2: "", indice: "",
+  cyclePath: Object.freeze([]),
+});
 
 // Le modèle de lignes : exactement ce qui est affiché, dans l'ordre, une entrée par ligne —
 // la zone (niveau 0), puis son niveau zone : tâches hors étage (1) et étages (1) ; dans un
-// étage, ses tâches et ses cycles (2) ; dans un cycle, ses tâches et ses sous-groupes (3) ;
-// dans un sous-groupe, ses tâches (4). Le tableau le dessine ; le Gantt dessine la même liste,
-// à la même hauteur de ligne.
+// étage, ses tâches et ses cycles (2) ; dans un cycle, ses tâches et ses sous-cycles (3), sans
+// limite de profondeur : chaque cycle ajoute un niveau. Toute ligne porte `cyclePath` : les ids
+// des cycles qui la contiennent, du plus extérieur au plus intérieur (sa propre ligne comprise
+// pour un cycle). Le tableau le dessine ; le Gantt dessine la même liste, à la même hauteur de
+// ligne.
 export function buildRowModel(sections = [], {
   collapsedZoneKeys = new Set(),
   collapsedFloorKeys = new Set(),
   collapsedGroupKeys = new Set(),
 } = {}) {
   const lines = [];
-  const taskLine = (section, task, floor, group, level) => ({
+  const taskLine = (section, task, floor, group, level, cyclePath) => ({
     key: `task:${task.id}`,
     kind: "task",
     level,
@@ -1001,14 +1035,16 @@ export function buildRowModel(sections = [], {
     endsWithMilestone: false,
     collapsed: false,
     childCount: 0,
+    cyclePath,
   });
-  const pushItems = (section, floor, group, items, level) => {
+  const pushItems = (section, floor, group, items, level, path) => {
     items.forEach((item) => {
       if (item.kind === "task") {
-        lines.push(taskLine(section, item.task, floor, group, level));
+        lines.push(taskLine(section, item.task, floor, group, level, path));
         return;
       }
       const child = item.group;
+      const childPath = [...path, child.rowId];
       const collapsed = collapsedGroupKeys.has(groupCollapseKey(child.rowId));
       lines.push({
         key: `group:${child.rowId}`,
@@ -1021,7 +1057,11 @@ export function buildRowModel(sections = [], {
         floorRowIds: [],
         groupRowId: child.rowId,
         groupLabel: child.name,
-        nature: child.natureKey,
+        // Nature d'après la place réelle, jamais d'après la valeur stockée.
+        nature: child.depth === 1 ? "cycle" : "sous-groupe",
+        depth: child.depth,
+        parentGroupRowId: child.parentGroup ? child.parentGroup.rowId : null,
+        cyclePath: childPath,
         link: null,
         id2: "",
         indice: "",
@@ -1031,7 +1071,7 @@ export function buildRowModel(sections = [], {
         collapsed,
         childCount: child.items.length,
       });
-      if (!collapsed) pushItems(section, floor, child, child.items, level + 1);
+      if (!collapsed) pushItems(section, floor, child, child.items, level + 1, childPath);
     });
   };
   sections.forEach((section) => {
@@ -1055,7 +1095,7 @@ export function buildRowModel(sections = [], {
     if (collapsed) return;
     section.items.forEach((item) => {
       if (item.kind === "task") {
-        lines.push(taskLine(section, item.task, null, null, 1));
+        lines.push(taskLine(section, item.task, null, null, 1, []));
         return;
       }
       const { floor } = item;
@@ -1077,7 +1117,7 @@ export function buildRowModel(sections = [], {
         childCount: floor.items.length,
       });
       if (floorCollapsed) return;
-      pushItems(section, floor, null, floor.items, 2);
+      pushItems(section, floor, null, floor.items, 2, []);
     });
   });
   return lines;

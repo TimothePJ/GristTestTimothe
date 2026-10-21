@@ -11,8 +11,12 @@ import {
   createDeferredRenderer,
   dragColumn,
   minLeftWidth,
+  placeOfDropSlot,
   readColumnWidths,
 } from "../assets/js/ui/syntheseTaskTable.js";
+
+import { buildRowModel, buildSections } from "../assets/js/services/syntheseTaskModel.js";
+import { eraSs1Rows } from "./helpers/eraSs1Rows.mjs";
 
 const css = await readFile(new URL("../assets/css/styles.css", import.meta.url), "utf8");
 const source = await readFile(new URL("../assets/js/ui/syntheseTaskTable.js", import.meta.url), "utf8");
@@ -93,6 +97,7 @@ test("menu contextuel selon la ligne", () => {
   assert.deepEqual(buildMenuItems({ kind: "zone", zoneKey: "", floorKey: "" }).map((item) => item.action), ["addTask"]);
   assert.deepEqual(buildMenuItems({ kind: "floor", zoneKey: "zonez3a", floorKey: "phrdb" }), [
     { label: "Ajouter une tâche", action: "addTask", zoneKey: "zonez3a", floorKey: "phrdb" },
+    { label: "Ajouter un cycle", action: "addCycle", zoneKey: "zonez3a", floorKey: "phrdb", parentGroupRowId: null, disabled: false },
     { label: "Supprimer l'étage", action: "deleteFloor", zoneKey: "zonez3a", floorKey: "phrdb", danger: true },
   ]);
   assert.deepEqual(buildMenuItems({ kind: "task", zoneKey: "zonez3a", floorKey: "phrdb", taskId: 5 }), [
@@ -114,7 +119,7 @@ test("étages dans le tableau : saisie du nom, repli, poignée seulement en mode
 test("styles des étages, de la poignée et de l'enregistrement en cours", () => {
   assert.match(css, /--stt-floor-bg:\s*#fce4d6;/);
   assert.match(css, /\.stt-line--floor \.stt-cell--name\s*\{[^}]*background:\s*var\(--stt-floor-bg\);/);
-  assert.match(css, /\.stt-line--task\.is-in-floor \.stt-cell--name\s*\{[^}]*padding-left:\s*46px;/);
+  assert.match(css, /\.stt-line--task\.is-in-floor \.stt-cell--name\s*\{[^}]*padding-left:\s*calc\(14px \+ var\(--stt-level, 2\) \* 16px\);/);
   assert.match(css, /\.stt-grip\s*\{[^}]*visibility:\s*hidden;/);
   assert.match(css, /\.stt-line--task:hover \.stt-grip\s*\{[^}]*visibility:\s*visible;/);
   assert.match(css, /\.stt-status\[data-tone="saving"\]\s*\{/);
@@ -190,13 +195,25 @@ test("menu : cycle, sous-groupe et tâche d'un groupe", () => {
   const cycle = { kind: "group", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 203, nature: "cycle" };
   assert.deepEqual(buildMenuItems(cycle), [
     { label: "Ajouter une tâche", action: "addTask", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 203 },
+    { label: "Ajouter un sous-cycle", action: "addCycle", zoneKey: "zonez3a", floorKey: "ss1", parentGroupRowId: 203, disabled: false },
     { label: "Supprimer le cycle", action: "deleteGroup", groupRowId: 203, danger: true },
   ]);
-  assert.equal(buildMenuItems({ ...cycle, nature: "sous-groupe", groupRowId: 212 })[1].label, "Supprimer le sous-groupe");
+  assert.equal(buildMenuItems(cycle, { canAddCycle: false })[1].disabled, true);
+  assert.equal(buildMenuItems({ ...cycle, nature: "sous-groupe", groupRowId: 212 })[2].label, "Supprimer le sous-cycle");
   assert.deepEqual(
     buildMenuItems({ kind: "task", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 203, taskId: 204 })[0],
     { label: "Ajouter une tâche", action: "addTask", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 203, afterTaskId: 204 }
   );
+});
+
+test("menu d'étage : « Ajouter un cycle » grisé sans les colonnes du modèle", () => {
+  const floor = { kind: "floor", zoneKey: "zonez3a", floorKey: "ss1" };
+  assert.equal(buildMenuItems(floor, { canAddCycle: false })[1].disabled, true);
+});
+
+test("l'entrée « Ajouter un cycle » appelle onAddCycle ; l'option canAddCycle est lue au rendu", () => {
+  assert.ok(source.includes("onAddCycle?.(item.zoneKey, item.floorKey, item.parentGroupRowId ?? null)"));
+  assert.ok(source.includes("canAddCycle = options?.canAddCycle !== false;"));
 });
 
 test("colonnes N° et Indice ; lignes de groupe : saisie du nom, repli, suppression", () => {
@@ -219,8 +236,13 @@ test("styles : couleurs de la capture, colonnes N° et Indice, retraits par nive
   assert.match(css, /\.stt-line--group\.is-nature-cycle \.stt-left\s*\{[^}]*background:\s*var\(--stt-cycle-bg\);/);
   assert.match(css, /\.stt-line--task\.is-nature-reunion \.stt-left\s*\{[^}]*background:\s*var\(--stt-meeting-bg\);/);
   assert.match(css, /\.stt-line--task\.is-nature-demarrage \.stt-left\s*\{[^}]*background:\s*var\(--stt-kickoff-bg\);/);
-  assert.match(css, /\.stt-line--group\.is-level-3 \.stt-cell--name\s*\{[^}]*padding-left:\s*48px;/);
-  assert.match(css, /\.stt-line--task\.is-level-4 \.stt-cell--name\s*\{[^}]*padding-left:\s*78px;/);
+  assert.match(css, /\.stt-line--group \.stt-cell--name\s*\{[^}]*padding-left:\s*calc\(var\(--stt-level, 2\) \* 16px\);/);
+  assert.match(css, /\.stt-line--group \.stt-cell--name\.is-editing\s*\{[^}]*padding-left:\s*0;/);
+  // Retrait sans plafond : une variable par ligne, plus de classe par niveau.
+  assert.doesNotMatch(css, /is-level-/);
+  assert.doesNotMatch(source, /is-level-/);
+  assert.match(source, /element\.style\.setProperty\("--stt-level", String\(line\.level\)\)/);
+  assert.match(source, /group: "Nom du cycle"/);
 });
 
 test("ligne de zone : le vert couvre toutes ses cellules, pas seulement le nom ; texte noir", () => {
@@ -330,9 +352,33 @@ test("glisser entre deux tâches : seulement avec la colonne Ordre, en mode modi
   assert.match(source, /canOrder: \(\) => canOrder && editable,/);
   assert.match(source, /markSlot: markDropSlot,/);
   const placing = sliceBetween(source, "function placeDropLine(", "function markDropSlot(");
-  assert.match(placing, /const boundary = index \+ \(dropSlot\.side === "after" \? 1 : 0\);/);
-  assert.match(placing, /dropLine\.style\.top = \`\$\{HEAD_HEIGHT_PX \+ boundary \* ROW_HEIGHT_PX\}px\`;/);
+  assert.match(placing, /placeOfDropSlot\(lines, dropSlot, \{ headHeight: HEAD_HEIGHT_PX, rowHeight: ROW_HEIGHT_PX \}\)/);
+  assert.match(placing, /dropLine\.style\.top = \`\$\{place\.top\}px\`;/);
+  assert.match(placing, /dropLine\.style\.left = \`\$\{place\.left\}px\`;/);
   assert.match(sliceBetween(source, "function draw(", "const renderer ="), /placeDropLine\(\);/);
   assert.match(css, /\.stt-drop-line\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*1;[^}]*height:\s*2px;[^}]*background:\s*var\(--stt-accent\);[^}]*pointer-events:\s*none;/);
   assert.match(css, /\.stt-drop-line\[hidden\]\s*\{\s*display:\s*none;/);
+});
+
+test("place du trait d'insertion : limite haute ou basse de la ligne visée, au retrait de son niveau", () => {
+  const lines = buildRowModel(buildSections({ rows: eraSs1Rows() }));
+  assert.deepEqual(placeOfDropSlot(lines, { groupRowId: 985, side: "before" }), { top: 32 + 26 * 3, left: 32 });
+  assert.deepEqual(placeOfDropSlot(lines, { taskId: 1000, side: "after" }), { top: 32 + 26 * 20, left: 48 });
+  assert.deepEqual(placeOfDropSlot(lines, { taskId: 1000, side: "before" }, { headHeight: 0, rowHeight: 10, indentPx: 1 }), { top: 190, left: 3 });
+  assert.equal(placeOfDropSlot(lines, { taskId: 9999, side: "after" }), null);
+  assert.equal(placeOfDropSlot(lines, { groupRowId: 9999, side: "before" }), null);
+  assert.equal(placeOfDropSlot(lines, null), null);
+});
+
+test("poignée d'un cycle : avant le triangle de repli, seulement avec canMoveCycles ; survol au CSS", () => {
+  assert.match(source, /line\.kind === "group" && editable && canMoveCycles/);
+  assert.match(source, /Glisser pour déplacer le sous-cycle/);
+  assert.match(source, /Glisser pour déplacer le cycle/);
+  assert.match(source, /canMoveCycles = options\?\.canMoveCycles === true;/);
+  assert.match(source, /canMoveCycles: \(\) => canMoveCycles && editable,/);
+  assert.match(source, /onDropCycle: \(groupRowId, target\) => onMoveCycle\?\.\(groupRowId, target\),/);
+  assert.match(css, /\.stt-line--group:hover \.stt-grip\s*\{[^}]*visibility:\s*visible;/);
+  assert.match(css, /\.stt-line--group \.stt-grip\s*\{[^}]*margin-right:\s*0;/);
+  const naming = sliceBetween(source, "function buildNameCell(", "function buildLine(");
+  assert.ok(naming.indexOf('"stt-grip"') < naming.indexOf('"stt-toggle"'), "la poignée précède le triangle");
 });

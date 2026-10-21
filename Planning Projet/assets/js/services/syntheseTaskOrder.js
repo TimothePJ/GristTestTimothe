@@ -113,24 +113,44 @@ export function buildUpdateActions(changes) {
   });
 }
 
+// Place « avant / après » une tâche, dans son conteneur : `place` porte la zone, l'étage et le
+// conteneur d'arrivée (groupRowId) ; partagée avec le glisser des cycles (syntheseCycles.js).
+export function taskSlot(place, line, side) {
+  const placement = side === "before" ? "before" : "after";
+  return {
+    ...place,
+    key: `slot:${line.taskId}:${placement}`,
+    label: `${placement === "before" ? "Placer avant" : "Placer après"} « ${line.name} »`,
+    position: { taskId: line.taskId, side: placement },
+  };
+}
+
+// Place « avant » un cycle, dans le conteneur de ce cycle (`parentGroupRowId`, null : l'étage) ;
+// partagée avec le glisser des cycles.
+export function groupBeforeSlot(place, line) {
+  return {
+    ...place,
+    key: `slot:group:${line.groupRowId}:before`,
+    groupRowId: line.parentGroupRowId,
+    label: `Placer avant « ${line.groupLabel} »`,
+    position: { groupRowId: line.groupRowId, side: "before" },
+  };
+}
+
 // Cible d'un dépôt d'après la ligne survolée et sa moitié (`side` : "before" pour la moitié
 // haute, "after" pour la basse). Sans la colonne Ordre (`canOrder` faux) : le conteneur de la
 // ligne, comme avant. Avec : sur une tâche, une place avant ou après elle dans son conteneur (rien
-// sur la tâche glissée elle-même) ; sur une ligne de zone, d'étage ou de groupe, la fin de ce
-// conteneur.
+// sur la tâche glissée elle-même) ; sur la moitié haute d'une ligne de cycle, la place avant ce
+// cycle, dans son conteneur ; sur une ligne de zone, d'étage ou de groupe (moitié basse), la fin de
+// ce conteneur.
 export function resolveDropSlot(line, side, { canOrder = false, draggedTaskId = null } = {}) {
   const target = resolveDropTarget(line);
   if (!target || !canOrder) return target;
   if (line.kind === "task") {
     if (line.taskId === draggedTaskId) return null;
-    const placement = side === "before" ? "before" : "after";
-    return {
-      ...target,
-      key: `slot:${line.taskId}:${placement}`,
-      label: `${placement === "before" ? "Placer avant" : "Placer après"} « ${line.name} »`,
-      position: { taskId: line.taskId, side: placement },
-    };
+    return taskSlot(target, line, side);
   }
+  if (line.kind === "group" && side === "before") return groupBeforeSlot(target, line);
   if (line.kind === "zone") {
     return { ...target, label: `Déplacer à la fin du niveau de la zone « ${line.zoneName || NO_ZONE_LABEL} »` };
   }
@@ -139,11 +159,13 @@ export function resolveDropSlot(line, side, { canOrder = false, draggedTaskId = 
 
 /* ---------- Chaînage automatique ---------- */
 
-function allTasksOf(sections) {
+// Les briques exportées ici (tâches, liens, dates, place d'un dépôt) servent aussi à la règle du
+// bloc des cycles (syntheseCycles.js).
+export function allTasksOf(sections) {
   return (sections || []).flatMap((section) => section.tasks);
 }
 
-function mergeChanges(target, source) {
+export function mergeChanges(target, source) {
   source.forEach((fields, rowId) => target.set(rowId, { ...target.get(rowId), ...fields }));
   return target;
 }
@@ -163,12 +185,12 @@ function sameDay(left, right) {
 }
 
 // Lien de chaque tâche (id → { predId, type, lag } ou null).
-function linkMap(tasks) {
+export function linkMap(tasks) {
   return new Map(tasks.map((task) => [task.id, task.link || null]));
 }
 
 // Colonne Lien des seules tâches dont le lien change ("" : plus de lien).
-function linkChanges(original, links) {
+export function linkChanges(original, links) {
   const changes = new Map();
   links.forEach((link, rowId) => {
     if (sameLink(original.get(rowId) || null, link)) return;
@@ -205,20 +227,27 @@ function placeInChain(links, order, taskId, former) {
   if (above !== null && below !== null && isFinishToStart(links.get(below), above)) {
     links.set(below, { predId: taskId, type: "FD", lag: links.get(below).lag || 0 });
   }
+  const current = findUpstream(links, above, (rowId) => links.get(rowId)?.predId === taskId);
+  if (current == null) return null;
+  const relinked = former && former.predId !== current ? { ...former } : null;
+  links.set(current, relinked);
+  return relinked ? current : null;
+}
+
+// En remontant les prédécesseurs de proche en proche depuis `fromId` (compris), la première
+// tâche qui vérifie `matches`, ou null ; une boucle saisie à la main arrête la remontée.
+export function findUpstream(links, fromId, matches) {
   const seen = new Set();
-  for (let current = above; current != null && !seen.has(current); current = links.get(current)?.predId ?? null) {
+  for (let current = fromId; current != null && !seen.has(current); current = links.get(current)?.predId ?? null) {
+    if (matches(current)) return current;
     seen.add(current);
-    if (links.get(current)?.predId !== taskId) continue;
-    const relinked = former && former.predId !== current ? { ...former } : null;
-    links.set(current, relinked);
-    return relinked ? current : null;
   }
   return null;
 }
 
 // Les liens d'une ligne supprimée disparaissent avec elle : les tâches restantes qui la
 // désignaient n'ont plus de lien (Grist réutilise les ids).
-function clearOrphans(links, removed) {
+export function clearOrphans(links, removed) {
   links.forEach((link, rowId) => {
     if (link && removed.has(link.predId) && !removed.has(rowId)) links.set(rowId, null);
   });
@@ -227,7 +256,7 @@ function clearOrphans(links, removed) {
 // Dates après un changement de liens : chaque tâche racine prend les dates que lui donne son lien
 // (son prédécesseur doit être daté), puis ses tâches liées en aval suivent. Renvoie les champs de
 // dates des seules tâches qui changent.
-function recomputeDates(tasks, links, rootIds) {
+export function recomputeDates(tasks, links, rootIds) {
   const original = new Map(tasks.map((task) => [task.id, task]));
   const current = new Map(tasks.map((task) => [task.id, { ...task, link: links.has(task.id) ? links.get(task.id) : task.link }]));
   rootIds.forEach((rootId) => {
@@ -254,10 +283,17 @@ function insertionIndex(items, afterTaskId) {
   return index >= 0 ? index + 1 : items.length;
 }
 
-// Place visée par un dépôt dans `items` (sans la tâche déplacée) : avant ou après une tâche ;
-// sans position (ligne d'en-tête), ou tâche introuvable : à la fin.
-function slotIndex(items, position) {
-  const index = position ? items.findIndex((item) => item.kind === "task" && item.task.id === position.taskId) : -1;
+// L'élément d'un conteneur que désigne une position de dépôt : un cycle (`groupRowId`) ou une
+// tâche (`taskId`).
+function isPositionItem(item, position) {
+  if (position.groupRowId != null) return item.kind === "group" && item.group.rowId === position.groupRowId;
+  return item.kind === "task" && item.task.id === position.taskId;
+}
+
+// Place visée par un dépôt dans `items` (sans l'élément déplacé) : avant ou après une tâche, ou
+// avant un cycle ; sans position (ligne d'en-tête), ou élément introuvable : à la fin.
+export function slotIndex(items, position) {
+  const index = position ? items.findIndex((item) => isPositionItem(item, position)) : -1;
   if (index < 0) return items.length;
   return position.side === "before" ? index : index + 1;
 }

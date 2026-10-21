@@ -137,7 +137,7 @@ test("Fin en retard : rouge et grasse comme dans le tableau Synthese, sans clign
 
 test("les scripts sont servis dans leur nouvelle version", () => {
   assert.equal(html.includes("20261009-limite3"), false);
-  assert.equal(html.split("?v=20261013-global1").length - 1, 5);
+  assert.equal(html.split("?v=20261013-global1").length - 1, 3);
 });
 
 // state.js mémorise le choix avec le projet et la zone du widget.

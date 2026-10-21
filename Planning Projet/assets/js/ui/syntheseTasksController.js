@@ -24,6 +24,7 @@ import {
   detectStructureLinkColumn,
   detectTemplateColumns,
   findGroup,
+  descendantGroups,
   floorCollapseKey,
   floorKeyOf,
   floorRemovalIds,
@@ -40,6 +41,7 @@ import {
   buildTemplateLinks,
 } from "../services/syntheseFloorTemplate.js";
 import { cascadeFrom } from "../services/syntheseLinks.js";
+import { planCycleInsert, planCycleMove, planCycleRemoval } from "../services/syntheseCycles.js";
 import {
   buildUpdateActions,
   planInsertFollowUp,
@@ -74,6 +76,7 @@ const MESSAGES = Object.freeze({
   contextChanged: "Le projet ou le service a changé avant l'enregistrement : recommencez.",
   noFloorColumn: "La colonne « Etage » n'existe pas dans Planning_Projet : ajoutez-la (type Booléen) pour créer des étages.",
   noTemplateColumns: "Les colonnes « Nature », « Parent » et « Lien » (Texte) manquent dans Planning_Projet : ajoutez-les pour créer des étages.",
+  noCycleColumns: "Les colonnes « Nature », « Parent » et « Lien » (Texte) manquent dans Planning_Projet : ajoutez-les pour créer des cycles.",
   templateFailed: "L'étage n'a pas pu être créé complètement : rien n'a été gardé. Réessayez.",
   noLinkColumn: "La colonne « Lien_Structure » (Texte) manque dans Planning_Projet : ajoutez-la pour lier les étages aux coffrages.",
   noCheckColumn: "La colonne « Controle_Coffrage » (Booléen) manque dans Planning_Projet : ajoutez-la pour choisir la tâche contrôlée par rapport au coffrage.",
@@ -190,11 +193,13 @@ export function createSyntheseTasksController({
       handleAddTask(zoneKey, floorKey, groupRowId, afterTaskId)
     ),
     onAddFloor: (zoneKey) => handleAddFloor(zoneKey),
+    onAddCycle: (zoneKey, floorKey, parentGroupRowId = null) => handleAddCycle(zoneKey, floorKey, parentGroupRowId),
     onDeleteTask: (taskId) => handleDeleteTask(taskId),
     onDeleteFloor: (zoneKey, floorKey) => handleDeleteFloor(zoneKey, floorKey),
     onDeleteGroup: (groupRowId) => handleDeleteGroup(groupRowId),
     onSetFormworkCheck: (taskId, checked) => handleSetFormworkCheck(taskId, checked),
     onMoveTask: (taskId, target) => handleMoveTask(taskId, target),
+    onMoveCycle: (groupRowId, target) => handleMoveCycle(groupRowId, target),
     onToggleZone: (zoneKey) => toggleZone(zoneKey),
     onToggleFloor: (zoneKey, floorKey) => toggleFloor(zoneKey, floorKey),
     onToggleGroup: (groupRowId) => toggleGroup(groupRowId),
@@ -308,7 +313,9 @@ export function createSyntheseTasksController({
       editable: isEditable(),
       emptyMessage,
       canAddFloor: floorColumn !== false && templateColumns !== false,
+      canAddCycle: templateColumns !== false,
       canOrder: orderColumn === true,
+      canMoveCycles: orderColumn === true && templateColumns === true,
     });
   }
 
@@ -660,6 +667,61 @@ export function createSyntheseTasksController({
     });
   }
 
+  // Nouveau cycle à la fin d'un étage, ou sous-cycle à la fin d'un cycle : une seule écriture
+  // (la ligne et, avec la colonne Ordre, les rangs du conteneur). Le nom passe aussitôt en saisie.
+  function handleAddCycle(zoneKey, floorKey = "", parentGroupRowId = null) {
+    if (!isEditable()) {
+      refuseLocked();
+      return Promise.resolve();
+    }
+    if (templateColumns === false) {
+      setStatus(MESSAGES.noCycleColumns, "error");
+      return Promise.resolve();
+    }
+    const project = getProject();
+    if (!project) return Promise.resolve();
+    const plan = planCycleInsert({
+      sections: allSections(),
+      zoneKey,
+      floorKey,
+      parentGroupRowId,
+      canOrder: orderColumn === true,
+      projectName: project.name,
+    });
+    if (!plan) return Promise.resolve();
+    const { fields, parent, floor } = plan;
+    clearStatus();
+    return submit(createOp({
+      changes: plan.changes,
+      actions: [["AddRecord", PLANNING_TABLE, null, fields], ...buildUpdateActions(plan.changes)],
+    }), {
+      onSuccess: (result) => {
+        const newId = Number(result?.retValues?.[0]);
+        const hasId = Number.isInteger(newId) && newId > 0;
+        if (hasId && !findRow(newId)) rows = [...rows, { id: newId, ...fields }];
+        // Grist réutilise les ids : un ancien repli ne doit pas s'appliquer au nouveau cycle.
+        if (hasId) collapsedGroupKeys.delete(groupCollapseKey(newId));
+        collapsedZoneKeys.delete(zoneKey);
+        collapsedFloorKeys.delete(floorCollapseKey(zoneKey, floor.key));
+        for (let container = parent; container; container = container.parentGroup) {
+          collapsedGroupKeys.delete(groupCollapseKey(container.rowId));
+        }
+        render();
+        if (hasId) table.startEditingGroup(newId);
+        info(parent ? `Sous-cycle ajouté dans « ${parent.name} ».` : `Cycle ajouté dans l'étage « ${floor.name} ».`);
+      },
+      onFailure: (error, dropped) => {
+        if (describeWriteError(error) === MESSAGES.noTemplateColumns) {
+          templateColumns = false;
+          render();
+          setStatus(MESSAGES.noCycleColumns, "error");
+          return;
+        }
+        fail("Ajout du cycle impossible :", error, dropped);
+      },
+    });
+  }
+
   function handleDeleteTask(taskId) {
     if (!isEditable()) {
       refuseLocked();
@@ -869,8 +931,8 @@ export function createSyntheseTasksController({
     if (!group) return Promise.resolve();
     if (!confirm(buildGroupDeleteQuestion(group))) return Promise.resolve();
     const removals = groupRemovalIds(group);
-    // Avec Lien : les liens des autres tâches vers les lignes supprimées sont effacés.
-    const changes = planOrphanLinks({ sections: allSections(), removedIds: removals, canLink: templateColumns === true });
+    // Avec Lien : la chaîne se referme à la place du cycle et les liens vers ses lignes sont effacés.
+    const changes = planCycleRemoval({ sections: allSections(), groupRowId, canLink: templateColumns === true });
     clearStatus();
     return submit(createOp({
       changes,
@@ -881,7 +943,7 @@ export function createSyntheseTasksController({
         // Même raison que pour un étage supprimé : les ids réutilisés ne doivent pas hériter
         // d'un repli du cycle ou sous-groupe supprimé.
         collapsedGroupKeys.delete(groupCollapseKey(group.rowId));
-        (group.groups || []).forEach((child) => collapsedGroupKeys.delete(groupCollapseKey(child.rowId)));
+        descendantGroups(group).forEach((child) => collapsedGroupKeys.delete(groupCollapseKey(child.rowId)));
         info(`« ${group.name} » supprimé.`);
       },
       onFailure: (error, dropped) => fail("Suppression impossible :", error, dropped),
@@ -914,6 +976,32 @@ export function createSyntheseTasksController({
     clearStatus();
     void submit(createOp({ changes, actions: buildUpdateActions(changes) }), {
       onFailure: (error, dropped) => fail("Déplacement de la tâche impossible :", error, dropped),
+    });
+  }
+
+  // Glisser-déposer d'un cycle ou d'un sous-cycle : une seule écriture (Parent, Nature, rangs et, avec
+  // Lien, chaîne et dates : voir planCycleMove). Le conteneur d'arrivée et ses parents sont dépliés.
+  function handleMoveCycle(groupRowId, target) {
+    if (!isEditable()) {
+      refuseLocked();
+      return;
+    }
+    if (orderColumn !== true || templateColumns !== true || !target) return;
+    const changes = planCycleMove({
+      sections: allSections(),
+      groupRowId,
+      target,
+      canLink: templateColumns === true,
+    });
+    if (!changes.size) return;
+    collapsedZoneKeys.delete(target.zoneKey);
+    if (target.floorKey) collapsedFloorKeys.delete(floorCollapseKey(target.zoneKey, target.floorKey));
+    for (let container = findGroup(sections, target.groupRowId); container; container = container.parentGroup) {
+      collapsedGroupKeys.delete(groupCollapseKey(container.rowId));
+    }
+    clearStatus();
+    void submit(createOp({ changes, actions: buildUpdateActions(changes) }), {
+      onFailure: (error, dropped) => fail("Déplacement du cycle impossible :", error, dropped),
     });
   }
 

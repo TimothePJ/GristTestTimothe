@@ -13,7 +13,6 @@ import {
   isFloorRow,
   isGroupRow,
   isTaskRow,
-  natureKeyOf,
   nextWorkingDay,
   zoneKeyOf,
 } from "./syntheseTaskModel.js";
@@ -136,12 +135,19 @@ function parentIdOf(row) {
   return Number(toText(row?.[TASK_COLUMNS.parent]));
 }
 
-// Nom du cycle qui contient une tâche : son groupe si c'est un cycle, sinon le cycle de son
-// sous-groupe ; "" hors cycle.
-function cycleNameOf(row, groupsById) {
-  const group = groupsById.get(parentIdOf(row));
-  const cycle = group?.natureKey === "sous-groupe" ? groupsById.get(group.parentId) : group;
-  return cycle?.natureKey === "cycle" ? cycle.name : "";
+// Noms des cycles qui contiennent une tâche, à toute profondeur (remontée par Parent, gardée
+// contre les boucles) ; la remontée s'arrête à un cycle d'une autre zone ou d'un autre étage,
+// que le planning n'affiche pas autour de la tâche. Vide hors cycle.
+function cycleNamesOf(row, zoneKey, floorKey, groupsById) {
+  const names = [];
+  const seen = new Set();
+  for (let id = parentIdOf(row); groupsById.has(id) && !seen.has(id); id = groupsById.get(id).parentId) {
+    const group = groupsById.get(id);
+    if (group.zoneKey !== zoneKey || group.floorKey !== floorKey) break;
+    seen.add(id);
+    names.push(group.name);
+  }
+  return names;
 }
 
 // Colonne Controle_Coffrage : booléen Grist, ou le texte « true » si la colonne est du texte.
@@ -172,13 +178,14 @@ export function readControlTasks(syntheseRows) {
   });
   const groupsById = new Map(rows.filter(isGroupRow).map((row) => [Number(row[TASK_COLUMNS.id]), {
     name: toText(row[TASK_COLUMNS.name]),
-    natureKey: natureKeyOf(row[TASK_COLUMNS.nature]),
+    zoneKey: zoneKeyOf(row[TASK_COLUMNS.zone]),
+    floorKey: floorKeyOf(row[TASK_COLUMNS.group]),
     parentId: parentIdOf(row),
   }]));
   tasks.forEach(({ row, id, zoneKey, floorKey }) => {
     if (chosenFloors.has(floorId(zoneKey, floorKey))) return;
     if (!plainKey(row[TASK_COLUMNS.name]).startsWith(RESERVATION_NAME_START)) return;
-    if (!RESERVATION_CYCLE.test(plainKey(cycleNameOf(row, groupsById)))) return;
+    if (!cycleNamesOf(row, zoneKey, floorKey, groupsById).some((name) => RESERVATION_CYCLE.test(plainKey(name)))) return;
     controls.set(id, { zoneKey, floorKey, chosen: false });
   });
   return controls;

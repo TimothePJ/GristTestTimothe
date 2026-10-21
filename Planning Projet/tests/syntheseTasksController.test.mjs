@@ -814,7 +814,7 @@ test("supprimer un cycle : confirmation avec le nombre de tâches, tout son cont
   const env = setup({ rows: ss1Rows(), confirm: (question) => { questions.push(question); return true; } });
   await activate(env);
   await env.table.callbacks.onDeleteGroup(210);
-  assert.deepEqual(questions, ["Supprimer « CYCLE 2 » et ses 5 tâches ?"]);
+  assert.deepEqual(questions, ["Supprimer « CYCLE 2 », son sous-cycle et ses 5 tâches ?"]);
   assert.equal(env.writes[0][0][0], "BulkRemoveRecord");
   assert.deepEqual([...env.writes[0][0][2]].sort((a, b) => a - b), [210, 211, 212, 213, 214, 215, 216]);
   assert.ok(!env.lastRender().lines.some((line) => line.key === "group:210" || line.key === "task:213"));
