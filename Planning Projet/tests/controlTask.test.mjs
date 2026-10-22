@@ -124,8 +124,8 @@ test("colonne Controle_Coffrage : présente, absente, inconnue sans ligne", () =
 
 test("menu d'une tâche d'étage : la contrôler, ne plus la contrôler, ou contrôlée par défaut", () => {
   const line = { kind: "task", zoneKey: "zonez3a", floorKey: "ss1", taskId: 5 };
-  const controlItem = (extra) => buildMenuItems({ ...line, ...extra })[1];
-  assert.deepEqual(buildMenuItems(line).map((item) => item.action), ["addTask", "setFormworkCheck", "deleteTask"]);
+  const controlItem = (extra) => buildMenuItems({ ...line, ...extra })[2];
+  assert.deepEqual(buildMenuItems(line).map((item) => item.action), ["addTask", "editLink", "setFormworkCheck", "deleteTask"]);
   assert.deepEqual(controlItem({}), {
     label: "Contrôler par rapport au coffrage",
     action: "setFormworkCheck",
@@ -149,5 +149,5 @@ test("menu d'une tâche d'étage : la contrôler, ne plus la contrôler, ou cont
 
 test("menu d'une tâche hors étage : pas de contrôle par rapport au coffrage", () => {
   const actions = buildMenuItems({ kind: "task", zoneKey: "zonez3a", floorKey: "", taskId: 5 }).map((item) => item.action);
-  assert.deepEqual(actions, ["addTask", "deleteTask"]);
+  assert.deepEqual(actions, ["addTask", "editLink", "deleteTask"]);
 });

@@ -5,6 +5,9 @@ import { readFile } from "node:fs/promises";
 import {
   DEFAULT_COLUMN_WIDTHS,
   MIN_COLUMN_WIDTH,
+  TABLE_COLUMNS,
+  cellText,
+  isEditableCell,
   MIN_NAME_WIDTH,
   buildLinkBadge,
   buildMenuItems,
@@ -13,6 +16,7 @@ import {
   minLeftWidth,
   placeOfDropSlot,
   readColumnWidths,
+  readLeftWidth,
 } from "../assets/js/ui/syntheseTaskTable.js";
 
 import { buildRowModel, buildSections } from "../assets/js/services/syntheseTaskModel.js";
@@ -102,6 +106,7 @@ test("menu contextuel selon la ligne", () => {
   ]);
   assert.deepEqual(buildMenuItems({ kind: "task", zoneKey: "zonez3a", floorKey: "phrdb", taskId: 5 }), [
     { label: "Ajouter une tâche", action: "addTask", zoneKey: "zonez3a", floorKey: "phrdb", afterTaskId: 5 },
+    { label: "Modifier le lien…", action: "editLink", taskId: 5, disabled: false },
     { label: "Contrôler par rapport au coffrage", action: "setFormworkCheck", taskId: 5, checked: true },
     { label: "Supprimer la tâche", action: "deleteTask", taskId: 5, danger: true },
   ]);
@@ -211,6 +216,24 @@ test("menu d'étage : « Ajouter un cycle » grisé sans les colonnes du modèle
   assert.equal(buildMenuItems(floor, { canAddCycle: false })[1].disabled, true);
 });
 
+test("menu d'un cycle : passer en escalier ou en parallèle selon son mode actuel", () => {
+  const cycle = { kind: "group", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 212, nature: "sous-groupe" };
+  const toSeries = { label: "Passer en escalier", action: "setCycleMode", groupRowId: 212, mode: "series" };
+  const toParallel = { label: "Passer en parallèle", action: "setCycleMode", groupRowId: 212, mode: "parallel" };
+  const modeItems = (line, options) => buildMenuItems(line, options).filter((item) => item.action === "setCycleMode");
+  assert.deepEqual(modeItems({ ...cycle, cycleMode: "parallel" }), [toSeries]);
+  assert.deepEqual(modeItems({ ...cycle, cycleMode: "series" }), [toParallel]);
+  assert.deepEqual(modeItems({ ...cycle, cycleMode: "mixed" }), [toSeries, toParallel]);
+  assert.deepEqual(modeItems({ ...cycle, cycleMode: null }), []);
+  assert.deepEqual(modeItems({ ...cycle, cycleMode: "mixed" }, { canSetCycleMode: false }), []);
+  // Juste avant la suppression du cycle.
+  assert.deepEqual(buildMenuItems({ ...cycle, cycleMode: "series" }).map((item) => item.action), [
+    "addTask", "addCycle", "setCycleMode", "deleteGroup",
+  ]);
+  assert.ok(source.includes("onSetCycleMode?.(item.groupRowId, item.mode)"));
+  assert.ok(source.includes("canSetCycleMode = options?.canSetCycleMode !== false;"));
+});
+
 test("l'entrée « Ajouter un cycle » appelle onAddCycle ; l'option canAddCycle est lue au rendu", () => {
   assert.ok(source.includes("onAddCycle?.(item.zoneKey, item.floorKey, item.parentGroupRowId ?? null)"));
   assert.ok(source.includes("canAddCycle = options?.canAddCycle !== false;"));
@@ -254,10 +277,10 @@ test("ligne de zone : le vert couvre toutes ses cellules, pas seulement le nom ;
 // ---------- Largeur des colonnes ----------
 
 test("largeurs par défaut : Durée, Début et Fin plus étroites ; le nom prend le reste", () => {
-  assert.deepEqual({ ...DEFAULT_COLUMN_WIDTHS }, { id2: 56, indice: 56, duration: 60, start: 92, end: 92 });
+  assert.deepEqual({ ...DEFAULT_COLUMN_WIDTHS }, { line: 36, id2: 56, indice: 56, duration: 60, start: 92, end: 92, link: 72 });
   assert.equal(MIN_COLUMN_WIDTH, 36);
   assert.equal(MIN_NAME_WIDTH, 120);
-  assert.equal(minLeftWidth(DEFAULT_COLUMN_WIDTHS), 476, "les colonnes + 120 px de nom au moins");
+  assert.equal(minLeftWidth(DEFAULT_COLUMN_WIDTHS), 584, "les colonnes + 120 px de nom au moins");
 });
 
 test("largeurs mémorisées : relues, bornées, valeurs par défaut pour ce qui manque ou ne va pas", () => {
@@ -280,7 +303,7 @@ test("glisser le bord d'une colonne : elle change de largeur et pousse le Gantt,
     leftWidth: 620,
   }, "jamais sous 36 px");
   assert.deepEqual(dragColumn(start, "name", 50), { widths: { ...DEFAULT_COLUMN_WIDTHS }, leftWidth: 726 });
-  assert.equal(dragColumn(start, "name", -1000).leftWidth, 476, "le nom garde 120 px");
+  assert.equal(dragColumn(start, "name", -1000).leftWidth, 584, "le nom garde 120 px");
   assert.deepEqual(start, { widths: { ...DEFAULT_COLUMN_WIDTHS }, leftWidth: 676 }, "l'état de départ n'est pas modifié");
 });
 
@@ -289,18 +312,20 @@ test("en-tête : une poignée par colonne, double-clic pour revenir à la largeu
   assert.match(source, /head\.addEventListener\("dblclick"/);
   assert.match(source, /setProperty\(`--stt-col-\$\{field\}`/);
   assert.match(source, /COLUMN_WIDTHS_STORAGE_KEY = "planning-projet\.synthese-tasks\.column-widths"/);
-  // Nouvelle clé : l'ancienne largeur mémorisée (620 px, colonnes plus larges) est oubliée une fois.
-  assert.match(source, /LEFT_WIDTH_STORAGE_KEY = "planning-projet\.synthese-tasks\.left-width\.v2"/);
+  // Nouvelle clé : l'ancienne largeur mémorisée (sans les colonnes N° de ligne et Lien) est oubliée une fois.
+  assert.match(source, /LEFT_WIDTH_STORAGE_KEY = "planning-projet\.synthese-tasks\.left-width\.v3"/);
 });
 
 test("styles : une largeur par colonne, poignées dans l'en-tête, séparateur sous l'en-tête", () => {
-  assert.match(css, /--stt-left-width:\s*676px;/);
+  assert.match(css, /--stt-left-width:\s*784px;/);
+  assert.match(css, /--stt-col-line:\s*36px;/);
+  assert.match(css, /--stt-col-link:\s*72px;/);
   assert.match(css, /--stt-col-id2:\s*56px;/);
   assert.match(css, /--stt-col-indice:\s*56px;/);
   assert.match(css, /--stt-col-duration:\s*60px;/);
   assert.match(css, /--stt-col-start:\s*92px;/);
   assert.match(css, /--stt-col-end:\s*92px;/);
-  assert.match(css, /\.stt-left\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) var\(--stt-col-id2\) var\(--stt-col-indice\) var\(--stt-col-duration\) var\(--stt-col-start\) var\(--stt-col-end\);/);
+  assert.match(css, /\.stt-left\s*\{[^}]*grid-template-columns:\s*var\(--stt-col-line\) minmax\(0, 1fr\) var\(--stt-col-id2\) var\(--stt-col-indice\) var\(--stt-col-duration\) var\(--stt-col-start\) var\(--stt-col-end\) var\(--stt-col-link\);/);
   assert.match(css, /\.stt-line--head \.stt-cell\s*\{[^}]*position:\s*relative;/);
   assert.match(css, /\.stt-col-resize\s*\{[^}]*position:\s*absolute;[^}]*cursor:\s*col-resize;/);
   // Le bord droit de « Fin » dans l'en-tête est sa poignée ; le séparateur commence dessous.
@@ -352,7 +377,7 @@ test("glisser entre deux tâches : seulement avec la colonne Ordre, en mode modi
   assert.match(source, /canOrder: \(\) => canOrder && editable,/);
   assert.match(source, /markSlot: markDropSlot,/);
   const placing = sliceBetween(source, "function placeDropLine(", "function markDropSlot(");
-  assert.match(placing, /placeOfDropSlot\(lines, dropSlot, \{ headHeight: HEAD_HEIGHT_PX, rowHeight: ROW_HEIGHT_PX \}\)/);
+  assert.match(placing, /placeOfDropSlot\(lines, dropSlot, \{ headHeight: HEAD_HEIGHT_PX, rowHeight: ROW_HEIGHT_PX, offsetPx: columnWidths\.line \}\)/);
   assert.match(placing, /dropLine\.style\.top = \`\$\{place\.top\}px\`;/);
   assert.match(placing, /dropLine\.style\.left = \`\$\{place\.left\}px\`;/);
   assert.match(sliceBetween(source, "function draw(", "const renderer ="), /placeDropLine\(\);/);
@@ -381,4 +406,52 @@ test("poignée d'un cycle : avant le triangle de repli, seulement avec canMoveCy
   assert.match(css, /\.stt-line--group \.stt-grip\s*\{[^}]*margin-right:\s*0;/);
   const naming = sliceBetween(source, "function buildNameCell(", "function buildLine(");
   assert.ok(naming.indexOf('"stt-grip"') < naming.indexOf('"stt-toggle"'), "la poignée précède le triangle");
+});
+
+// ---------- Colonnes N° de ligne et Lien ----------
+
+test("colonnes : N° de ligne tout à gauche, Lien après Fin", () => {
+  assert.deepEqual(TABLE_COLUMNS.map((column) => column.field), ["line", "name", "id2", "indice", "duration", "start", "end", "link"]);
+  assert.deepEqual(TABLE_COLUMNS.filter((column) => ["line", "link"].includes(column.field)).map((column) => column.label), ["", "Lien"]);
+});
+
+test("cellules : chaque ligne montre son numéro, une tâche son lien ; le reste comme avant", () => {
+  const task = { kind: "task", lineNumber: 21, linkText: "20FD", durationDays: 10, start: null, end: null };
+  const group = { kind: "group", lineNumber: 22, linkText: "", durationDays: null };
+  assert.deepEqual([cellText(task, "line"), cellText(task, "link"), cellText(task, "duration")], ["21", "20FD", "10 jours"]);
+  assert.deepEqual([cellText(group, "line"), cellText(group, "link")], ["22", ""]);
+  assert.equal(cellText({ kind: "task", lineNumber: null, linkText: "" }, "line"), "");
+});
+
+test("saisie dans le tableau : ni le lien ni le numéro de ligne (le lien se choisit par le clic droit)", () => {
+  const task = { kind: "task" };
+  const group = { kind: "group" };
+  const on = { editable: true, canEditLink: true };
+  assert.deepEqual(["line", "name", "duration", "link"].map((field) => isEditableCell(task, field, on)), [false, true, true, false]);
+  assert.deepEqual(["name", "link", "line"].map((field) => isEditableCell(group, field, on)), [true, false, false]);
+  assert.doesNotMatch(source, /input\.value = line\.linkText/);
+  assert.match(css, /\.stt-cell--line\s*\{[^}]*justify-content:\s*center;/);
+});
+
+test("menu d'une tâche : « Modifier le lien… » ouvre la fenêtre du contrôleur ; grisé sans la colonne Lien", () => {
+  const task = { kind: "task", zoneKey: "zonez3a", floorKey: "ss1", taskId: 5 };
+  assert.equal(buildMenuItems(task, { canEditLink: false })[1].disabled, true);
+  assert.match(source, /if \(item\.action === "editLink"\) return onEditLink\?\.\(item\.taskId\);/);
+  assert.match(source, /buildMenuItems\(line, \{ canAddFloor, canAddCycle, canSetCycleMode, canEditLink \}\)/);
+});
+
+test("trait d'insertion : décalé de la largeur de la colonne N° de ligne", () => {
+  const lines = buildRowModel(buildSections({ rows: eraSs1Rows() }));
+  assert.deepEqual(placeOfDropSlot(lines, { taskId: 1000, side: "after" }, { offsetPx: 36 }), { top: 32 + 26 * 20, left: 36 + 48 });
+});
+
+test("le numéro de ligne n'est pas une cellule de saisie : un clic dessus ne dit pas « verrouillé »", () => {
+  assert.match(source, /if \(field !== "name" && field !== "line"\) \{/);
+});
+
+test("largeur du tableau : la nouvelle clé, sinon l'ancienne (sans les colonnes N° de ligne et Lien) + 108 px", () => {
+  assert.equal(readLeftWidth("900", "676"), 900);
+  assert.equal(readLeftWidth(null, "676"), 784);
+  assert.equal(readLeftWidth(null, null), 784);
+  assert.equal(readLeftWidth("x", "y"), 784);
 });

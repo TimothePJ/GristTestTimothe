@@ -63,7 +63,9 @@ test("liste des tâches d'un étage : cycles et sous-groupes traversés, dans l'
   // Contenu d'un conteneur remplacé : simulation d'un placement.
   const group = findContainer(all, { zoneKey: ZONE, floorKey: "ss1", groupRowId: 220 });
   const reversed = new Map([["group:220", group.items.slice().reverse()]]);
-  assert.deepEqual(taskOrder(group, reversed).slice(14, 17), [223, 222, 221]);
+  // PLAN SYT CYCLE 3 est en parallèle : sa tâche pilote RÉSEAUX (221) mène la chaîne, même affichée
+  // en dernier ; les autres suivent dans l'ordre affiché.
+  assert.deepEqual(taskOrder(group, reversed).slice(14, 17), [221, 223, 222]);
   const placeholder = { kind: "task", task: { id: NEW_TASK_ID } };
   const withNew = new Map([["group:220", [...group.items, placeholder]]]);
   assert.deepEqual(taskOrder(group, withNew).slice(14, 18), [221, 222, 223, NEW_TASK_ID]);

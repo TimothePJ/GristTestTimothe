@@ -12,6 +12,7 @@ import {
   toIsoDate,
 } from "./syntheseTasks.js";
 import {
+  computeLinkedDates,
   nextWorkingDay,
   parseLink,
   previousWorkingDay,
@@ -265,11 +266,47 @@ export function stepDurationText(text, step) {
   return String(Math.min(MAX_DURATION_DAYS, Math.max(0, days + step)));
 }
 
+// Le prédécesseur daté dont la tâche suit la Fin (lien fin → fin), ou null : sa Fin est alors celle
+// que lui donne le lien.
+function finishLeader(task, predecessor) {
+  const link = task?.link;
+  if (link?.type !== "FF" || predecessor?.id !== link.predId) return null;
+  return hasDates(predecessor) ? predecessor : null;
+}
+
+// Le prédécesseur daté dont la tâche suit la Fin ou le Début (lien fin → début ou début → début), ou
+// null : la Durée saisie garde alors la tâche à la place que lui donne ce lien.
+function startLeader(task, predecessor) {
+  const link = task?.link;
+  if ((link?.type !== "FD" && link?.type !== "DD") || predecessor?.id !== link.predId) return null;
+  return hasDates(predecessor) ? predecessor : null;
+}
+
+// Saisie d'une Durée ou d'une date sur une tâche qui finit avec son prédécesseur : la Fin reste celle
+// du lien. La Durée fait reculer ou avancer le Début ; un Début saisi change la Durée (refusé après
+// la Fin) ; la Fin, et la date d'un jalon, ne se saisissent pas.
+function applyFinishTiedEdit(task, field, value, leader) {
+  const tied = `« ${task.name} » finit avec « ${leader.name} » (lien FF)`;
+  if (field === "duration") {
+    const dates = computeLinkedDates(leader, task.link, value);
+    return withDates(task, dates.start, dates.end, dates.isMilestone);
+  }
+  if (field === "end" || task.isMilestone) return refuse(`${tied} : changez sa durée, ou la fin de « ${leader.name} ».`);
+  const { end } = computeLinkedDates(leader, task.link, 1);
+  const start = nextWorkingDay(value);
+  if (start > end) return refuse(`Le début ne peut pas être après la fin : ${tied}.`);
+  return withDates(task, start, end, false);
+}
+
 // Applique une saisie du tableau à une tâche. Renvoie la tâche recalculée et les
 // seules colonnes Grist à écrire ({} si rien ne change), ou le motif du refus.
-// Durée → la Fin suit ; Début ou Fin → la Durée suit, sauf si la date saisie croise
-// l'autre : la tâche se décale alors en gardant sa Durée ; un jalon se déplace.
-export function applyTaskEdit(task, field, rawValue, { today = new Date() } = {}) {
+// Durée → la Fin suit (une tâche liée en fin → début ou début → début reste à la place de son
+// lien : voir startLeader) ; Début ou Fin → la Durée suit, sauf si la date saisie croise
+// l'autre : la tâche se décale alors en gardant sa Durée ; un jalon se déplace. Une tâche
+// qui finit avec son prédécesseur (`predecessor`, lien fin → fin) garde la Fin du lien : voir
+// applyFinishTiedEdit.
+export function applyTaskEdit(task, field, rawValue, { today = new Date(), predecessor = null } = {}) {
+  const leader = finishLeader(task, predecessor);
   if (field === "id2" || field === "indice") {
     const value = toText(rawValue);
     if (value.length > MAX_CODE_LENGTH) {
@@ -297,6 +334,16 @@ export function applyTaskEdit(task, field, rawValue, { today = new Date() } = {}
       return refuse(`La durée doit être un nombre entier de jours, de 0 (jalon) à ${MAX_DURATION_DAYS}.`);
     }
     const days = Number(match[1]);
+    if (leader) return applyFinishTiedEdit(task, field, days, leader);
+    // Tâche liée en fin → début ou début → début (datée ou non) : elle est à la place que lui donne
+    // son lien, comme dans MS Project. En fin → début, un jalon se pose sur la Fin du prédécesseur et
+    // une tâche commence le jour ouvré qui suit : le jalon d'un étage neuf qui prend une durée avance
+    // d'un jour (escalier).
+    const follower = startLeader(task, predecessor);
+    if (follower) {
+      const dates = computeLinkedDates(follower, task.link, days);
+      return withDates(task, dates.start, dates.end, dates.isMilestone);
+    }
     // Tâche sans aucune date : la durée est seulement mémorisée ; les dates viendront d'une
     // date saisie ou d'un lien.
     if (!task.start && !task.end) {
@@ -313,6 +360,7 @@ export function applyTaskEdit(task, field, rawValue, { today = new Date() } = {}
     if (date.getFullYear() < MIN_TASK_YEAR || date.getFullYear() > MAX_TASK_YEAR) {
       return refuse(`Date invalide : choisissez une date entre ${MIN_TASK_YEAR} et ${MAX_TASK_YEAR}.`);
     }
+    if (leader) return applyFinishTiedEdit(task, field, date, leader);
     // Tâche sans aucune date : sa durée prévue donne l'autre date (0 : jalon ; inconnue :
     // un jour).
     if (!task.start && !task.end) {

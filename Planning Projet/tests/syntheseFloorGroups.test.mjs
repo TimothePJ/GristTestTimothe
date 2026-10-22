@@ -78,15 +78,16 @@ test("repli : un cycle replié masque ses tâches et son sous-groupe", () => {
   assert.equal(lines.find((line) => line.key === "group:210").collapsed, true);
 });
 
-test("récapitulatifs de la capture : étage 47 j, cycles 22 / 10 / 20 j, PLAN SYT CYCLE 2 5 j", () => {
+test("récapitulatifs du modèle daté : étage 42 j, cycles 22 / 10 / 15 j, PLAN SYT CYCLE 2 5 j", () => {
   const [section] = buildSections({ rows: datedRows() });
   const [floor] = section.floors;
   const summary = (item) => [iso(item.summary.start), iso(item.summary.end), item.summary.durationDays];
-  assert.deepEqual(summary(floor), ["2026-01-02", "2026-03-09", 47]);
+  // SIGNATURE et DEMARRAGE GO, 5 jours après la REUNION du cycle 3, le 02/03, comme la fin de VISA A.
+  assert.deepEqual(summary(floor), ["2026-01-02", "2026-03-02", 42]);
   assert.deepEqual(summary(findGroup([section], 203)), ["2026-01-02", "2026-02-02", 22]);
   assert.deepEqual(summary(findGroup([section], 210)), ["2026-01-27", "2026-02-09", 10]);
   assert.deepEqual(summary(findGroup([section], 212)), ["2026-02-03", "2026-02-09", 5]);
-  assert.deepEqual(summary(findGroup([section], 217)), ["2026-02-10", "2026-03-09", 20]);
+  assert.deepEqual(summary(findGroup([section], 217)), ["2026-02-10", "2026-03-02", 15]);
   assert.equal(floor.summary.endsWithMilestone, false, "jalons liés en FD : fin de journée");
   assert.equal(floor.summary.startsWithMilestone, false, "FOND DE PLAN commence le jour du premier jalon");
 });

@@ -69,7 +69,7 @@ début, `FF` fin → fin, `+n` = décalage en jours ouvrés.
 | T15 | PLAN DE SYNTHESE RESERVATIONS NIV {E} | | S3 | 2 | T14 FF |
 | T16 | PLAN DE SYNTHESE TERMINAUX NIV {E} | | S3 | 2 | T14 FF |
 | T17 | REUNION + DIFFUSION SYT | Reunion | C3 | 0 | T14 FD |
-| T18 | SIGNATURE PLANS SYNTHESE | | C3 | 0 | T13 FD+5 |
+| T18 | SIGNATURE PLANS SYNTHESE | | C3 | 0 | T17 FD+5 |
 | T19 | DEMARRAGE GO {E} (date prévisionnelle) | Demarrage | C3 | 0 | T18 FD |
 
 Soit 26 lignes avec la ligne-étage (comme les lignes 2 à 27 de la capture).
@@ -77,10 +77,15 @@ Soit 26 lignes avec la ligne-étage (comme les lignes 2 à 27 de la capture).
 **Contrôle** : en saisissant le Début de T0 au Ven 02/01/26, la cascade doit redonner exactement
 la capture : T1 02/01 → 05/01 ; T2 05/01 ; T3 06/01 → 19/01 ; T4 20/01 → 02/02 ; T5 20/01 → 26/01 ;
 T6 26/01 ; T7 27/01 → 02/02 ; T8 03/02 → 09/02 ; T9, T10 06/02 → 09/02 ; T11 09/02 ; T12 10/02 →
-16/02 ; T13 17/02 → 02/03 ; T14 17/02 → 23/02 ; T15, T16 20/02 → 23/02 ; T17 23/02 ; T18 09/03 ;
-T19 09/03. Récapitulatifs : cycle 1 = 22 jours (02/01 → 02/02), cycle 2 = 10 jours (27/01 →
-09/02), cycle 3 = 20 jours (10/02 → 09/03), PLAN SYT CYCLE 2 = 5 jours (03/02 → 09/02), étage =
-47 jours (02/01 → 09/03).
+16/02 ; T13 17/02 → 02/03 ; T14 17/02 → 23/02 ; T15, T16 20/02 → 23/02 ; T17 23/02 ; T18 02/03 ;
+T19 02/03. Récapitulatifs : cycle 1 = 22 jours (02/01 → 02/02), cycle 2 = 10 jours (27/01 →
+09/02), cycle 3 = 15 jours (10/02 → 02/03), PLAN SYT CYCLE 2 = 5 jours (03/02 → 09/02), étage =
+42 jours (02/01 → 02/03).
+
+**Changement du 22/10/2026 (demande de l'utilisateur)** : SIGNATURE PLANS SYNTHESE (T18) suit la
+REUNION + DIFFUSION SYT du cycle 3 (T17) avec 5 jours ouvrés de décalage, et non plus VISA Indice A
+(T13) ; DEMARRAGE GO (T19) la suit le même jour. La capture MS Project d'origine plaçait T18 et T19
+au 09/03.
 
 Le modèle vit dans un module à part (`services/syntheseFloorTemplate.js`), sous forme de données :
 le changer plus tard ne touche pas au reste.

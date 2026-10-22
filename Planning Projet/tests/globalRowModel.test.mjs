@@ -234,7 +234,8 @@ test("démarrage du gros œuvre après le démarrage des travaux : seconde alert
   const rows = projectRows().map((row) => (row.id === 123 ? { ...row, Demarrages_travaux: "2026-02-25" } : row));
   const { lines, totals } = model({ toggledKeys: new Set(RDC_PATH) }, rows);
   const kickoff = lineOf(lines, "task:425");
-  assert.deepEqual(kickoff.state.parts, [{ text: "retard 12 j", tone: "late" }]);
+  // DEMARRAGE GO le 02/03 (5 jours ouvrés après la REUNION du cycle 3) : 5 jours après le 25/02.
+  assert.deepEqual(kickoff.state.parts, [{ text: "retard 5 j", tone: "late" }]);
   assert.equal(kickoff.state.title, "Démarrage prévu après le démarrage des travaux de Structure (Mer 25/02/26).");
   assert.deepEqual([kickoff.lateEnd, kickoff.tone], [true, "late"]);
   assert.deepEqual(texts(lineOf(lines, "group:416")), ["2 retards Synthèse"]);

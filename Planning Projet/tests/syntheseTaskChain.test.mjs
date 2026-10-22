@@ -49,7 +49,7 @@ function rowsWithTest() {
   return [...rows, { id: 400, Type_doc: "", ID2: "", Etage: false, Nature: "", ...fields }];
 }
 
-test("exemple 2 : « Test » glissé avant VISA A → suit RECEPTION RENDU, VISA le suit, SIGNATURE et DÉMARRAGE suivent", () => {
+test("exemple 2 : « Test » glissé avant VISA A → suit RECEPTION RENDU, VISA le suit ; SIGNATURE et DÉMARRAGE (après la REUNION) ne bougent pas", () => {
   const changes = move(rowsWithTest(), 400, { groupRowId: 217, position: { taskId: 219, side: "before" } });
   assert.deepEqual(entries(changes), [
     [400, { Parent: "217", Ordre: "2", Lien: "218 FD", Diff_coffrage: "2026-02-17", Diff_armature: "2026-02-17", Duree_1: 1 }],
@@ -57,8 +57,8 @@ test("exemple 2 : « Test » glissé avant VISA A → suit RECEPTION RENDU, VISA
     [219, { Ordre: "3", Lien: "400 FD", Diff_coffrage: "2026-02-18", Diff_armature: "2026-03-03", Duree_1: 10 }],
     [220, { Ordre: "4" }],
     [224, { Ordre: "5" }],
-    [225, { Ordre: "6", Diff_coffrage: "2026-03-10", Diff_armature: "2026-03-10", Duree_1: 0 }],
-    [226, { Ordre: "7", Diff_coffrage: "2026-03-10", Diff_armature: "2026-03-10", Duree_1: 0 }],
+    [225, { Ordre: "6" }],
+    [226, { Ordre: "7" }],
   ]);
   assert.equal(changes.has(221), false, "RÉSEAUX suit RECEPTION RENDU mais n'est pas juste en dessous : inchangé");
 });
@@ -69,7 +69,9 @@ test("exemple 3 : TERMINAUX avant RÉSERVATIONS → déjà liée à RÉSEAUX, se
 });
 
 test("exemple 4 : suppression de VISA A → pas de chaîne à refermer, SIGNATURE perd son lien et garde ses dates", () => {
-  assert.deepEqual(entries(planTaskRemoval({ sections: sectionsOf(datedRows()), taskId: 219, canLink: true })), [
+  // SIGNATURE liée à VISA A à la main (le modèle la lie à la REUNION).
+  const rows = datedRows().map((row) => (row.id === 225 ? { ...row, Lien: "219 FD+5" } : row));
+  assert.deepEqual(entries(planTaskRemoval({ sections: sectionsOf(rows), taskId: 219, canLink: true })), [
     [225, { Lien: "" }],
   ]);
 });
@@ -147,10 +149,11 @@ test("jamais de boucle, avec un ancien lien : la tâche rattachée prend les dat
   assert.deepEqual(changes.get(219), { Ordre: "2", Diff_coffrage: "2026-02-03", Diff_armature: "2026-02-16", Duree_1: 10 });
 });
 
-test("RÉSEAUX glissé après TERMINAUX : TERMINAUX reprend « 218 FD » et RÉSEAUX le suit", () => {
+test("RÉSEAUX, tâche pilote de PLAN SYT CYCLE 3 en parallèle, glissée après TERMINAUX : seuls les rangs changent", () => {
+  // Dans un cycle en parallèle, la tâche pilote (la plus longue) mène la chaîne où qu'elle soit
+  // affichée : ni lien ni date ne bouge.
   const changes = move(datedRows(), 221, { groupRowId: 220, position: { taskId: 223, side: "after" } });
-  assert.deepEqual(changes.get(223), { Ordre: "2", Lien: "218 FD", Diff_coffrage: "2026-02-17", Diff_armature: "2026-02-18", Duree_1: 2 });
-  assert.deepEqual(changes.get(221), { Ordre: "3", Lien: "223 FD", Diff_coffrage: "2026-02-19", Diff_armature: "2026-02-25", Duree_1: 5 });
+  assert.deepEqual(entries(changes), [[222, { Ordre: "1" }], [223, { Ordre: "2" }], [221, { Ordre: "3" }]]);
 });
 
 test("tâche du dessus sans dates (modèle pas encore planifié) : nouvelle tâche sans dates, durée prévue 1 jour", () => {

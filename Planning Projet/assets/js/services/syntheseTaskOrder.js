@@ -10,6 +10,7 @@ import {
   buildNewTask,
   buildTaskFields,
   dateFieldsOf,
+  findGroup,
   resolveDropTarget,
 } from "./syntheseTaskModel.js";
 import { cascadeFrom, computeLinkedDates, formatLink } from "./syntheseLinks.js";
@@ -66,18 +67,50 @@ export function locateTask(sections, taskId) {
   return null;
 }
 
-// Ids des tâches de l'étage d'un conteneur — cycles et sous-groupes traversés, lignes de groupe
-// ignorées — ou des tâches du niveau zone, dans l'ordre affiché. `overrides` (clé de conteneur →
-// éléments) remplace le contenu de conteneurs pour simuler un placement.
-export function taskOrder(container, overrides = new Map()) {
-  const ids = [];
-  const walk = (key, items) => (overrides.get(key) || items).forEach((item) => {
-    if (item.kind === "task") ids.push(item.task.id);
-    else if (item.kind === "group") walk(`group:${item.group.rowId}`, item.group.items);
+// La tâche pilote d'un cycle bâti en parallèle — l'une de ses tâches, à toute profondeur, d'ordinaire
+// la plus longue — si chaque autre élément finit avec elle : une tâche par un lien fin → fin sans
+// décalage, un sous-cycle bâti de même autour de sa propre tâche pilote, qui finit avec elle. Un
+// sous-cycle sans tâche est ignoré. null sinon, ou sans tâche. `links` : id → lien.
+export function parallelPilotOf(group, links) {
+  const heads = [];
+  for (const item of group.items) {
+    if (item.kind === "group" && !item.group.tasks?.length) continue;
+    const head = item.kind === "task" ? item.task.id : parallelPilotOf(item.group, links);
+    if (head == null) return null;
+    heads.push(head);
+  }
+  const finishesWith = (head, pilot) => {
+    const link = links.get(head);
+    return link?.type === "FF" && link.predId === pilot && !link.lag;
+  };
+  return heads.find((pilot) => heads.every((head) => head === pilot || finishesWith(head, pilot))) ?? null;
+}
+
+// Ids des tâches d'un contenu dans l'ordre de chaîne : l'ordre affiché, sauf dans un cycle en
+// parallèle (`group`), qui commence par l'élément de sa tâche pilote — c'est elle qui suit la tâche
+// d'avant le cycle.
+function chainIds(key, items, overrides, group = null) {
+  const chunks = (overrides.get(key) || items).map((item) => {
+    if (item.kind === "task") return [item.task.id];
+    if (item.kind === "group") return chainIds(`group:${item.group.rowId}`, item.group.items, overrides, item.group);
+    return [];
   });
-  if (container.floor) walk(`floor:${container.section.zoneKey}/${container.floor.key}`, container.floor.items);
-  else walk(container.key, container.items);
-  return ids;
+  const pilot = group ? parallelPilotOf(group, linkMap(group.tasks || [])) : null;
+  const lead = pilot == null ? -1 : chunks.findIndex((chunk) => chunk.includes(pilot));
+  if (lead > 0) chunks.unshift(...chunks.splice(lead, 1));
+  return chunks.flat();
+}
+
+// Ids des tâches de l'étage d'un conteneur — cycles et sous-groupes traversés, lignes de groupe
+// ignorées — ou des tâches du niveau zone, dans l'ordre de chaîne : l'ordre affiché, un cycle en
+// parallèle commençant par sa tâche pilote (voir chainIds). `container.group` : le cycle dont on
+// veut seulement le contenu (voir blockOf). `overrides` (clé de conteneur → éléments) remplace le
+// contenu de conteneurs pour simuler un placement.
+export function taskOrder(container, overrides = new Map()) {
+  if (container.floor) {
+    return chainIds(`floor:${container.section.zoneKey}/${container.floor.key}`, container.floor.items, overrides);
+  }
+  return chainIds(container.key, container.items, overrides, container.group || null);
 }
 
 // Rangs 1, 2, 3… (texte) du contenu d'un conteneur dans l'ordre voulu : seulement les lignes
@@ -160,7 +193,7 @@ export function resolveDropSlot(line, side, { canOrder = false, draggedTaskId = 
 /* ---------- Chaînage automatique ---------- */
 
 // Les briques exportées ici (tâches, liens, dates, place d'un dépôt) servent aussi à la règle du
-// bloc des cycles (syntheseCycles.js).
+// bloc des cycles (syntheseCycles.js) et à leur mode escalier / parallèle (syntheseCycleModes.js).
 export function allTasksOf(sections) {
   return (sections || []).flatMap((section) => section.tasks);
 }
@@ -172,6 +205,47 @@ export function mergeChanges(target, source) {
 
 function isFinishToStart(link, predId) {
   return link?.type === "FD" && link.predId === predId;
+}
+
+// La tâche `taskId` (lien `link`) suit-elle en fin → début ce qui est juste au-dessus d'elle dans
+// l'ordre de chaîne : la tâche `above`, ou un cycle qui finit juste au-dessus d'elle (son bloc,
+// `overrides` compris, finit par `above` et contient le prédécesseur) ? La tâche sous un cycle en
+// parallèle suit d'ordinaire sa tâche pilote, pas la dernière de la chaîne. `scope` : les sections
+// et les contenus simulés.
+export function followsAbove(link, above, taskId, { sections = [], overrides = new Map() } = {}) {
+  if (link?.type !== "FD" || above == null) return false;
+  if (link.predId === above) return true;
+  const aboveTask = allTasksOf(sections).find((task) => task.id === above);
+  for (let group = aboveTask?.groupRowId ? findGroup(sections, aboveTask.groupRowId) : null; group; group = group.parentGroup) {
+    const ids = chainIds(`group:${group.rowId}`, group.items, overrides, group);
+    if (ids.includes(taskId) || ids[ids.length - 1] !== above) return false;
+    if (ids.includes(link.predId)) return true;
+  }
+  return false;
+}
+
+// La tâche que suit une tâche `taskId` placée juste sous `above` dans l'ordre de chaîne : `above`, ou
+// la tâche pilote du cycle en parallèle le plus englobant qui finit en `above` sans la contenir
+// (`overrides` compris) — tout y finit avec elle, et la tâche du dessous y reste accrochée quand une
+// autre tâche du cycle part. null sans `above`.
+export function anchorAbove(above, taskId, { sections = [], overrides = new Map() } = {}) {
+  if (above == null) return null;
+  let anchor = above;
+  const aboveTask = allTasksOf(sections).find((task) => task.id === above);
+  for (let group = aboveTask?.groupRowId ? findGroup(sections, aboveTask.groupRowId) : null; group; group = group.parentGroup) {
+    const ids = chainIds(`group:${group.rowId}`, group.items, overrides, group);
+    if (ids.includes(taskId) || ids[ids.length - 1] !== above) break;
+    const pilot = parallelPilotOf(group, linkMap(group.tasks || []));
+    if (pilot != null && pilot !== taskId && ids.includes(pilot)) anchor = pilot;
+  }
+  return anchor;
+}
+
+// Une tâche placée sous `above` garde-t-elle son lien `link` ? Oui s'il désigne déjà la tâche à
+// suivre (`anchor`) : quel que soit son type quand c'est `above`, en fin → début seulement quand c'est
+// la tâche pilote d'un cycle en parallèle (un fin → fin n'y tenait qu'au cycle).
+export function keepsLink(link, anchor, above) {
+  return link?.predId === anchor && (anchor === above || link.type === "FD");
 }
 
 function sameLink(left, right) {
@@ -200,36 +274,46 @@ export function linkChanges(original, links) {
 }
 
 // La chaîne se referme à l'ancienne place d'une tâche (A au-dessus, B en dessous, dans `order`) :
-// si elle suivait A et que B la suivait, en fin → début, B suit A avec son propre décalage.
-// Renvoie l'id de B rattachée, ou null.
-function closeChain(links, order, taskId) {
+// si elle suivait A — ou le cycle qui finit en A (voir followsAbove) — et que B la suivait, en
+// fin → début, B suit ce qu'elle suivait avec son propre décalage. Renvoie l'id de B rattachée, ou
+// null.
+function closeChain(links, order, taskId, scope) {
   const index = order.indexOf(taskId);
   if (index <= 0 || index >= order.length - 1) return null;
   const above = order[index - 1];
   const below = order[index + 1];
-  if (!isFinishToStart(links.get(taskId), above) || !isFinishToStart(links.get(below), taskId)) return null;
-  links.set(below, { predId: above, type: "FD", lag: links.get(below).lag || 0 });
+  const link = links.get(taskId);
+  if (!followsAbove(link, above, taskId, scope) || !isFinishToStart(links.get(below), taskId)) return null;
+  links.set(below, { predId: link.predId, type: "FD", lag: links.get(below).lag || 0 });
   return below;
 }
 
-// Une tâche à sa nouvelle place dans `order` (P au-dessus, N en dessous) : elle suit P — son lien
-// est gardé s'il désigne déjà P, quel que soit son type ; sans P, plus de lien. N la suit si N
-// suivait P en fin → début (décalage gardé). Jamais de boucle : si P dépend d'elle, la tâche de
+// Une tâche à sa nouvelle place dans `order` (P au-dessus, N en dessous) : elle suit P — ou la tâche
+// pilote du cycle en parallèle qui finit en P (voir anchorAbove) ; son lien est gardé s'il la désigne
+// déjà, quel que soit son type ; sans P, plus de lien. N la suit si N suivait P — ou le cycle qui
+// finit en P (voir followsAbove) — en fin → début (décalage gardé). Jamais de boucle : si P dépend d'elle, la tâche de
 // la chaîne de P qui la suivait reprend son ancien lien (`former`), ou plus de lien. Renvoie l'id
 // de cette tâche rattachée à l'ancien lien (ses dates et celles de sa chaîne sont à recalculer
 // avant celles de la tâche), ou null.
-function placeInChain(links, order, taskId, former) {
+function placeInChain(links, order, taskId, former, scope) {
   const index = order.indexOf(taskId);
   const above = index > 0 ? order[index - 1] : null;
   const below = index >= 0 && index < order.length - 1 ? order[index + 1] : null;
-  if (above === null) links.set(taskId, null);
-  else if (links.get(taskId)?.predId !== above) links.set(taskId, { predId: above, type: "FD", lag: 0 });
-  if (above !== null && below !== null && isFinishToStart(links.get(below), above)) {
+  const anchor = anchorAbove(above, taskId, scope);
+  if (anchor === null) links.set(taskId, null);
+  else if (!keepsLink(links.get(taskId), anchor, above)) links.set(taskId, { predId: anchor, type: "FD", lag: 0 });
+  // N ne la suit pas si elle-même dépend déjà de N (boucle).
+  if (
+    above !== null && below !== null && followsAbove(links.get(below), above, below, scope) &&
+    findUpstream(links, taskId, (rowId) => rowId === below) == null
+  ) {
     links.set(below, { predId: taskId, type: "FD", lag: links.get(below).lag || 0 });
   }
-  const current = findUpstream(links, above, (rowId) => links.get(rowId)?.predId === taskId);
+  const current = findUpstream(links, anchor, (rowId) => links.get(rowId)?.predId === taskId);
   if (current == null) return null;
-  const relinked = former && former.predId !== current ? { ...former } : null;
+  // L'ancien lien n'est repris que s'il ne ferme pas à son tour une boucle.
+  const loops = former ? findUpstream(links, former.predId, (rowId) => rowId === current) != null : false;
+  const relinked = former && former.predId !== current && !loops ? { ...former } : null;
   links.set(current, relinked);
   return relinked ? current : null;
 }
@@ -303,14 +387,17 @@ export function slotIndex(items, position) {
 // la fin, sans rang ni lien, comme avant ; `atEnd` dit qu'une place sous une tâche était demandée.
 // Avec Ordre et Lien (`canLink`) : la tâche suit la tâche du dessus (FD) et en prend ses dates —
 // sans dates si celle-ci n'en a pas ; `follow` désigne la tâche du dessous qui devra la suivre une
-// fois son id connu. Renvoie la tâche, ses champs Grist, les rangs des autres lignes, `follow`,
-// `atEnd` ; null si le conteneur n'existe pas.
+// fois son id connu. Dans un cycle en parallèle (`finishWith` : sa tâche pilote), elle finit au
+// contraire avec la tâche pilote (lien fin → fin, un jour) et personne ne la suit. Renvoie la
+// tâche, ses champs Grist, les rangs des autres lignes, `follow`, `atEnd` ; null si le conteneur
+// n'existe pas.
 export function planTaskInsert({
   sections,
   container,
   afterTaskId = null,
   canOrder = false,
   canLink = false,
+  finishWith = null,
   today = new Date(),
   projectName = "",
 } = {}) {
@@ -337,14 +424,21 @@ export function planTaskInsert({
       const order = taskOrder(destination, new Map([[destination.key, placed]]));
       const at = order.indexOf(NEW_TASK_ID);
       const tasksById = new Map(allTasksOf(sections).map((candidate) => [candidate.id, candidate]));
-      const above = at > 0 ? tasksById.get(order[at - 1]) : null;
+      const scope = { sections, overrides: new Map([[destination.key, placed]]) };
+      const above = at > 0 ? tasksById.get(anchorAbove(order[at - 1], NEW_TASK_ID, scope)) : null;
       const below = at < order.length - 1 ? tasksById.get(order[at + 1]) : null;
-      if (above) {
+      const pilot = finishWith != null ? tasksById.get(finishWith) : null;
+      if (pilot) {
+        const link = { predId: pilot.id, type: "FF", lag: 0 };
+        const dates = computeLinkedDates(pilot, link, 1) || { start: null, end: null, durationDays: 1, isMilestone: false };
+        task = { ...task, ...dates, link };
+        extra[TASK_COLUMNS.link] = formatLink(link);
+      } else if (above) {
         const link = { predId: above.id, type: "FD", lag: 0 };
         const dates = computeLinkedDates(above, link, 1) || { start: null, end: null, durationDays: 1, isMilestone: false };
         task = { ...task, ...dates, link };
         extra[TASK_COLUMNS.link] = formatLink(link);
-        if (below && isFinishToStart(below.link, above.id)) follow = { successorId: below.id, lag: below.link.lag || 0 };
+        if (below && followsAbove(below.link, order[at - 1], below.id, scope)) follow = { successorId: below.id, lag: below.link.lag || 0 };
       }
     }
   }
@@ -391,12 +485,17 @@ export function planTaskMove({ sections, taskId, target, canOrder = false, canLi
   if (!canLink) return changes;
   const overrides = new Map([[destination.key, placed]]);
   if (source.key !== destination.key) overrides.set(source.key, source.items.filter((candidate) => candidate !== item));
+  // Même conteneur, même ordre de chaîne (la tâche pilote d'un cycle en parallèle mène la chaîne où
+  // qu'elle soit affichée) : ni lien ni date ne change.
+  const formerOrder = taskOrder(source);
+  const order = taskOrder(destination, overrides);
+  if (source.key === destination.key && order.every((rowId, at) => rowId === formerOrder[at])) return changes;
   const tasks = allTasksOf(sections);
   const links = linkMap(tasks);
   const original = new Map(links);
   const former = links.get(taskId);
-  const closed = closeChain(links, taskOrder(source), taskId);
-  const relinked = placeInChain(links, taskOrder(destination, overrides), taskId, former);
+  const closed = closeChain(links, formerOrder, taskId, { sections });
+  const relinked = placeInChain(links, order, taskId, former, { sections, overrides });
   mergeChanges(changes, linkChanges(original, links));
   return mergeChanges(changes, recomputeDates(tasks, links, [closed, relinked, taskId].filter((rowId) => rowId != null)));
 }
@@ -409,7 +508,7 @@ export function planTaskRemoval({ sections, taskId, canLink = false } = {}) {
   const tasks = allTasksOf(sections);
   const links = linkMap(tasks);
   const original = new Map(links);
-  const closed = container ? closeChain(links, taskOrder(container), taskId) : null;
+  const closed = container ? closeChain(links, taskOrder(container), taskId, { sections }) : null;
   clearOrphans(links, new Set([taskId]));
   links.delete(taskId);
   original.delete(taskId);

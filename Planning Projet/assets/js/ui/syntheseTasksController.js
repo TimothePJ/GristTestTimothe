@@ -41,9 +41,20 @@ import {
   buildTemplateLinks,
 } from "../services/syntheseFloorTemplate.js";
 import { cascadeFrom } from "../services/syntheseLinks.js";
+import { applyLineNumbers, lineNumbersOf, linkChoices, planLinkChange, previewLink } from "../services/syntheseLinkColumn.js";
+import { createLinkDialog as createDefaultLinkDialog } from "./syntheseLinkDialog.js";
 import { planCycleInsert, planCycleMove, planCycleRemoval } from "../services/syntheseCycles.js";
 import {
+  applyCycleModes,
+  cycleModes,
+  parallelPilot,
+  planCycleMode,
+  planParallelRealign,
+  planParentsParallel,
+} from "../services/syntheseCycleModes.js";
+import {
   buildUpdateActions,
+  mergeChanges,
   planInsertFollowUp,
   planOrphanLinks,
   planTaskInsert,
@@ -77,6 +88,7 @@ const MESSAGES = Object.freeze({
   noFloorColumn: "La colonne « Etage » n'existe pas dans Planning_Projet : ajoutez-la (type Booléen) pour créer des étages.",
   noTemplateColumns: "Les colonnes « Nature », « Parent » et « Lien » (Texte) manquent dans Planning_Projet : ajoutez-les pour créer des étages.",
   noCycleColumns: "Les colonnes « Nature », « Parent » et « Lien » (Texte) manquent dans Planning_Projet : ajoutez-les pour créer des cycles.",
+  noTaskLinkColumn: "La colonne « Lien » (Texte) manque dans Planning_Projet : ajoutez-la pour lier les tâches.",
   templateFailed: "L'étage n'a pas pu être créé complètement : rien n'a été gardé. Réessayez.",
   noLinkColumn: "La colonne « Lien_Structure » (Texte) manque dans Planning_Projet : ajoutez-la pour lier les étages aux coffrages.",
   noCheckColumn: "La colonne « Controle_Coffrage » (Booléen) manque dans Planning_Projet : ajoutez-la pour choisir la tâche contrôlée par rapport au coffrage.",
@@ -143,6 +155,8 @@ export function createSyntheseTasksController({
   },
   // Lecture des coffrages de Structure du projet : N°, zone et début de leur plan.
   loadFormworkStarts = null,
+  // Fenêtre « Lien de la tâche » (clic droit) : créée à la première ouverture.
+  createLinkDialog = createDefaultLinkDialog,
 } = {}) {
   let active = false;
   let bound = false;
@@ -195,11 +209,13 @@ export function createSyntheseTasksController({
     onAddFloor: (zoneKey) => handleAddFloor(zoneKey),
     onAddCycle: (zoneKey, floorKey, parentGroupRowId = null) => handleAddCycle(zoneKey, floorKey, parentGroupRowId),
     onDeleteTask: (taskId) => handleDeleteTask(taskId),
+    onEditLink: (taskId) => handleEditLink(taskId),
     onDeleteFloor: (zoneKey, floorKey) => handleDeleteFloor(zoneKey, floorKey),
     onDeleteGroup: (groupRowId) => handleDeleteGroup(groupRowId),
     onSetFormworkCheck: (taskId, checked) => handleSetFormworkCheck(taskId, checked),
     onMoveTask: (taskId, target) => handleMoveTask(taskId, target),
     onMoveCycle: (groupRowId, target) => handleMoveCycle(groupRowId, target),
+    onSetCycleMode: (groupRowId, mode) => handleSetCycleMode(groupRowId, mode),
     onToggleZone: (zoneKey) => toggleZone(zoneKey),
     onToggleFloor: (zoneKey, floorKey) => toggleFloor(zoneKey, floorKey),
     onToggleGroup: (groupRowId) => toggleGroup(groupRowId),
@@ -299,11 +315,15 @@ export function createSyntheseTasksController({
     // La tâche contrôlée de chaque étage (cochée, sinon le plan de réservations du cycle 3)
     // porte sa limite de fin, le début du plan de coffrage de son étage : le tableau et le
     // Gantt la signalent quand elle la dépasse, et son menu dit si elle est contrôlée. Chaque
-    // étage porte son lien Structure, que son emblème montre.
+    // étage porte son lien Structure, que son emblème montre. Chaque cycle porte son mode, escalier
+    // ou parallèle, lu dans les liens : son menu propose l'autre.
     let lines = buildRowModel(sections, { collapsedZoneKeys, collapsedFloorKeys, collapsedGroupKeys });
     lines = applyEndLimits(lines, controlTaskEndLimits({ syntheseRows: shownRows, formworkStarts }));
     lines = applyControlTasks(lines, readControlTasks(shownRows));
     lines = applyFloorLinks(lines, readFloorLinks(shownRows));
+    lines = applyCycleModes(lines, cycleModes(sections));
+    // Numéros de ligne sur tout le projet, tout déplié : replier ou filtrer une zone ne les change pas.
+    lines = applyLineNumbers(lines, lineNumbersOf(project ? buildSections({ rows: shownRows, sharedZones: getSharedZones(project) }) : []));
     let emptyMessage = "";
     if (!project) emptyMessage = MESSAGES.noProject;
     else if (!loaded) emptyMessage = MESSAGES.loading;
@@ -316,6 +336,8 @@ export function createSyntheseTasksController({
       canAddCycle: templateColumns !== false,
       canOrder: orderColumn === true,
       canMoveCycles: orderColumn === true && templateColumns === true,
+      canSetCycleMode: templateColumns === true,
+      canEditLink: templateColumns === true,
     });
   }
 
@@ -542,7 +564,12 @@ export function createSyntheseTasksController({
     }
     const task = findTask(taskId);
     if (!task || !findRow(taskId)) return;
-    const result = applyTaskEdit(task, field, rawValue, { today: now() });
+    // Toutes les tâches du projet, sans le filtre de zone : un lien peut viser une tâche d'une zone
+    // masquée, et l'aval peut s'y trouver.
+    const everyTask = allSections().flatMap((section) => section.tasks);
+    // Son prédécesseur : une tâche qui finit avec lui (lien fin → fin) garde la Fin du lien.
+    const predecessor = task.link ? everyTask.find((candidate) => candidate.id === task.link.predId) || null : null;
+    const result = applyTaskEdit(task, field, rawValue, { today: now(), predecessor });
     if (!result.ok) {
       setStatus(result.error, "error");
       render();
@@ -553,18 +580,83 @@ export function createSyntheseTasksController({
       return;
     }
     const changes = new Map([[taskId, result.fields]]);
-    const actions = [["UpdateRecord", PLANNING_TABLE, taskId, result.fields]];
+    let actions = [["UpdateRecord", PLANNING_TABLE, taskId, result.fields]];
     if (DATE_FIELDS.has(field)) {
-      const updates = cascadeFrom(result.task, allTasks());
+      const updates = cascadeFrom(result.task, everyTask);
       if (updates.length) {
         const fieldsList = updates.map(dateFieldsOf);
         updates.forEach((update, index) => changes.set(update.id, fieldsList[index]));
         actions.push(["BulkUpdateRecord", PLANNING_TABLE, updates.map((update) => update.id), toColumns(fieldsList)]);
       }
+      // Un cycle en parallèle dont une durée change garde sa tâche la plus longue comme tâche pilote
+      // (voir planParallelRealign) : tout part dans la même écriture.
+      const realign = parallelRealignOf(changes);
+      if (realign.size) actions = buildUpdateActions(mergeChanges(changes, realign));
     }
     clearStatus();
     void submit(createOp({ changes, actions }), {
       onFailure: (error, dropped) => fail("Modification de la tâche impossible :", error, dropped),
+    });
+  }
+
+  // « Modifier le lien… » (clic droit sur une tâche) : la fenêtre montre son lien, les tâches de sa
+  // zone (avec leur numéro de ligne) et l'aperçu des dates ; « Valider » passe par handleLinkChange.
+  let linkDialog = null;
+  let linkTaskId = null;
+  // Projet pour lequel la fenêtre a été ouverte : elle se ferme s'il change.
+  let linkProject = "";
+  function handleEditLink(taskId) {
+    if (!isEditable()) {
+      refuseLocked();
+      return;
+    }
+    if (templateColumns !== true) {
+      setStatus(MESSAGES.noTaskLinkColumn, "error");
+      return;
+    }
+    const all = allSections();
+    const choices = linkChoices({ sections: all, taskId, numbering: lineNumbersOf(all) });
+    if (!choices) return;
+    linkDialog ||= createLinkDialog({ onSubmit: (link) => handleLinkChange(linkTaskId, link) });
+    linkTaskId = taskId;
+    linkProject = toText(getProject()?.name);
+    linkDialog.open({
+      ...choices,
+      preview: (link) => previewLink({ sections: allSections(), taskId, link }),
+    });
+  }
+
+  // Lien choisi (`link` : { predId, type, lag }, null pour plus de lien) : le lien, les dates qu'il
+  // donne à la tâche et celles de l'aval (zones masquées comprises), dans la même écriture. Écrit tel
+  // quel : aucun recalage des cycles en parallèle (un cycle dont on change un lien peut devenir
+  // mélangé).
+  function handleLinkChange(taskId, link) {
+    if (!isEditable()) {
+      refuseLocked();
+      return;
+    }
+    if (templateColumns !== true) {
+      setStatus(MESSAGES.noTaskLinkColumn, "error");
+      render();
+      return;
+    }
+    const all = allSections();
+    const result = planLinkChange({ sections: all, taskId, link });
+    if (!result.ok) {
+      setStatus(result.error, "error");
+      render();
+      return;
+    }
+    if (!Object.keys(result.fields).length) {
+      render();
+      return;
+    }
+    const changes = new Map([[taskId, result.fields]]);
+    // L'aval sur tout le projet, zones masquées comprises.
+    cascadeFrom(result.task, all.flatMap((section) => section.tasks)).forEach((update) => changes.set(update.id, dateFieldsOf(update)));
+    clearStatus();
+    void submit(createOp({ changes, actions: buildUpdateActions(changes) }), {
+      onFailure: (error, dropped) => fail("Modification du lien impossible :", error, dropped),
     });
   }
 
@@ -575,18 +667,21 @@ export function createSyntheseTasksController({
   // Second temps d'un ajout dont la tâche du dessous doit suivre la nouvelle : la tâche (son id
   // d'abord), puis le lien de la tâche du dessous et les dates qui suivent. Si ce second temps
   // échoue, la tâche créée est retirée : rien de bancal ne reste dans Grist.
-  async function addThenFollow(op, plan, addActions) {
+  async function addThenFollow(op, plan, addActions, before) {
     const added = await write(addActions);
     const newId = Number(added?.retValues?.[0]);
     if (!Number.isInteger(newId) || newId <= 0) return { newId: null, followChanges: new Map() };
     try {
       assertSameContext(op.context);
-      const followChanges = planInsertFollowUp({
-        sections: allSections(),
-        newTask: { ...plan.task, id: newId },
-        successorId: plan.follow.successorId,
-        lag: plan.follow.lag,
-      });
+      const followChanges = plan.follow
+        ? planInsertFollowUp({
+          sections: allSections(),
+          newTask: { ...plan.task, id: newId },
+          successorId: plan.follow.successorId,
+          lag: plan.follow.lag,
+        })
+        : new Map();
+      mergeChanges(followChanges, parallelRealignAfterAdd(before, plan, newId, followChanges));
       if (followChanges.size) await write(buildUpdateActions(followChanges));
       return { newId, followChanges };
     } catch (error) {
@@ -608,9 +703,29 @@ export function createSyntheseTasksController({
     }
   }
 
+  // Une tâche ajoutée (`plan` de planTaskInsert, d'id `newId`, puis `followChanges`) : les champs qui
+  // gardent en parallèle les cycles qui l'étaient avant l'ajout (`before` : les sections d'alors).
+  function parallelRealignAfterAdd(before, plan, newId, followChanges = new Map()) {
+    if (templateColumns !== true) return new Map();
+    const changes = mergeChanges(new Map(plan.changes), followChanges);
+    // La ligne ajoutée, une fois (Grist a pu déjà la renvoyer).
+    const others = displayedRows().filter((row) => Number(row?.[TASK_COLUMNS.id]) !== newId);
+    const after = [...others, { [TASK_COLUMNS.id]: newId, ...plan.fields }].map((row) => {
+      const fields = changes.get(Number(row?.[TASK_COLUMNS.id]));
+      return fields ? { ...row, ...fields } : row;
+    });
+    return planParallelRealign({ before, rows: after, canLink: true });
+  }
+
+  // Un id qu'aucune ligne n'a encore, le temps d'évaluer un ajout.
+  function nextFreeRowId() {
+    return displayedRows().reduce((max, row) => Math.max(max, Number(row?.[TASK_COLUMNS.id]) || 0), 0) + 1;
+  }
+
   // Nouvelle tâche dans un conteneur : un groupe (cycle ou sous-groupe), un étage, ou le
   // niveau zone ; juste sous la tâche cliquée (`afterTaskId`) avec la colonne Ordre, sinon à la
-  // fin. Avec Ordre et Lien, elle suit la tâche du dessus (voir planTaskInsert).
+  // fin. Avec Ordre et Lien, elle suit la tâche du dessus (voir planTaskInsert) ; dans un cycle en
+  // parallèle, elle finit avec sa tâche pilote, ou en devient la tâche pilote.
   function handleAddTask(zoneKey, floorKey = "", groupRowId = null, afterTaskId = null) {
     if (!isEditable()) {
       refuseLocked();
@@ -623,12 +738,16 @@ export function createSyntheseTasksController({
     const wantedFloorKey = group ? group.floorKey : floorKey;
     const floor = wantedFloorKey ? findFloor(section, wantedFloorKey) : null;
     if (!project || !section || (wantedFloorKey && !floor)) return Promise.resolve();
+    const all = allSections();
     const plan = planTaskInsert({
-      sections: allSections(),
+      sections: all,
       container: { zoneKey: section.zoneKey, floorKey: floor ? floor.key : "", groupRowId: group ? group.rowId : null },
       afterTaskId,
       canOrder: orderColumn === true,
       canLink: templateColumns === true,
+      // Dans un cycle en parallèle (ou pris dans un cycle en parallèle), la nouvelle tâche finit avec
+      // sa tâche pilote.
+      finishWith: group ? parallelPilot(all, group.rowId) : null,
       today: now(),
       projectName: project.name,
     });
@@ -641,13 +760,16 @@ export function createSyntheseTasksController({
       : `Tâche ajoutée dans ${where}.`;
     const addActions = [["AddRecord", PLANNING_TABLE, null, fields], ...buildUpdateActions(plan.changes)];
     clearStatus();
+    // En deux temps si la tâche du dessous doit la suivre, ou si un cycle en parallèle doit être
+    // rebâti autour d'elle (elle en devient la tâche pilote) : les liens vers elle attendent son id.
+    const twoSteps = Boolean(plan.follow) || parallelRealignAfterAdd(all, plan, nextFreeRowId()).size > 0;
     const op = createOp({
       changes: plan.changes,
-      ...(plan.follow ? { perform: () => addThenFollow(op, plan, addActions) } : { actions: addActions }),
+      ...(twoSteps ? { perform: () => addThenFollow(op, plan, addActions, all) } : { actions: addActions }),
     });
     return submit(op, {
       onSuccess: (result) => {
-        const newId = Number(plan.follow ? result?.newId : result?.retValues?.[0]);
+        const newId = Number(twoSteps ? result?.newId : result?.retValues?.[0]);
         const hasId = Number.isInteger(newId) && newId > 0;
         if (hasId && !findRow(newId)) rows = [...rows, { id: newId, ...fields }];
         (result?.followChanges || new Map()).forEach((followFields, rowId) => {
@@ -730,8 +852,12 @@ export function createSyntheseTasksController({
     const task = findTask(taskId);
     if (!task || !findRow(taskId)) return Promise.resolve();
     if (!confirm(`Supprimer la tâche « ${task.name} » ?`)) return Promise.resolve();
-    // Avec Lien : la chaîne se referme à sa place, les liens qui la désignaient sont effacés.
-    const changes = planTaskRemoval({ sections: allSections(), taskId, canLink: templateColumns === true });
+    // Avec Lien : la chaîne se referme à sa place, les liens qui la désignaient sont effacés, et un
+    // cycle en parallèle le reste.
+    const changes = withParallelRealign(
+      planTaskRemoval({ sections: allSections(), taskId, canLink: templateColumns === true }),
+      [taskId]
+    );
     clearStatus();
     return submit(createOp({
       changes,
@@ -931,8 +1057,12 @@ export function createSyntheseTasksController({
     if (!group) return Promise.resolve();
     if (!confirm(buildGroupDeleteQuestion(group))) return Promise.resolve();
     const removals = groupRemovalIds(group);
-    // Avec Lien : la chaîne se referme à la place du cycle et les liens vers ses lignes sont effacés.
-    const changes = planCycleRemoval({ sections: allSections(), groupRowId, canLink: templateColumns === true });
+    // Avec Lien : la chaîne se referme à la place du cycle, les liens vers ses lignes sont effacés,
+    // et un cycle en parallèle le reste.
+    const changes = withParallelRealign(
+      planCycleRemoval({ sections: allSections(), groupRowId, canLink: templateColumns === true }),
+      removals
+    );
     clearStatus();
     return submit(createOp({
       changes,
@@ -952,7 +1082,8 @@ export function createSyntheseTasksController({
 
   // Glisser-déposer : la tâche change de conteneur et / ou de place (colonne Ordre) ; avec Ordre
   // et Lien, la chaîne se referme à l'ancienne place et se renoue à la nouvelle, et les dates
-  // suivent (voir planTaskMove). Le conteneur visé est déplié.
+  // suivent (voir planTaskMove) ; glissée dans un cycle en parallèle, elle finit avec sa tâche
+  // pilote. Le conteneur visé est déplié.
   function handleMoveTask(taskId, target) {
     if (!isEditable()) {
       refuseLocked();
@@ -960,13 +1091,13 @@ export function createSyntheseTasksController({
     }
     const task = findTask(taskId);
     if (!task || !findRow(taskId) || !target) return;
-    const changes = planTaskMove({
+    const changes = withParallelRealign(planTaskMove({
       sections: allSections(),
       taskId,
       target,
       canOrder: orderColumn === true,
       canLink: templateColumns === true,
-    });
+    }));
     if (!changes.size) return;
     collapsedZoneKeys.delete(target.zoneKey);
     if (target.floorKey) collapsedFloorKeys.delete(floorCollapseKey(target.zoneKey, target.floorKey));
@@ -980,19 +1111,20 @@ export function createSyntheseTasksController({
   }
 
   // Glisser-déposer d'un cycle ou d'un sous-cycle : une seule écriture (Parent, Nature, rangs et, avec
-  // Lien, chaîne et dates : voir planCycleMove). Le conteneur d'arrivée et ses parents sont dépliés.
+  // Lien, chaîne et dates : voir planCycleMove ; un cycle en parallèle le reste). Le conteneur
+  // d'arrivée et ses parents sont dépliés.
   function handleMoveCycle(groupRowId, target) {
     if (!isEditable()) {
       refuseLocked();
       return;
     }
     if (orderColumn !== true || templateColumns !== true || !target) return;
-    const changes = planCycleMove({
+    const changes = withParallelRealign(planCycleMove({
       sections: allSections(),
       groupRowId,
       target,
       canLink: templateColumns === true,
-    });
+    }));
     if (!changes.size) return;
     collapsedZoneKeys.delete(target.zoneKey);
     if (target.floorKey) collapsedFloorKeys.delete(floorCollapseKey(target.zoneKey, target.floorKey));
@@ -1002,6 +1134,39 @@ export function createSyntheseTasksController({
     clearStatus();
     void submit(createOp({ changes, actions: buildUpdateActions(changes) }), {
       onFailure: (error, dropped) => fail("Déplacement du cycle impossible :", error, dropped),
+    });
+  }
+
+  // Passer un cycle en escalier ou en parallèle : une seule écriture, les liens de son contenu et de
+  // la tâche qui le suit, et les dates qui en découlent (voir planCycleMode). Un lien qui fermerait
+  // une boucle n'est pas posé : le message dit alors, d'après le mode relu, que le cycle n'a changé
+  // qu'en partie, ou pas.
+  function handleSetCycleMode(groupRowId, mode) {
+    if (!isEditable()) {
+      refuseLocked();
+      return Promise.resolve();
+    }
+    const group = findGroup(sections, groupRowId);
+    if (templateColumns !== true || !group) return Promise.resolve();
+    const changes = planCycleMode({ sections: allSections(), groupRowId, mode, canLink: true });
+    // Un cycle qui l'englobe et se lit alors en parallèle garde sa tâche la plus longue comme tâche
+    // pilote : même écriture.
+    if (changes.size) mergeChanges(changes, planParentsParallel({ rows: rowsAfter(changes), groupRowId }));
+    const modeLabel = mode === "series" ? "en escalier" : "en parallèle";
+    // Le mode tel qu'affiché, écritures en attente comprises.
+    const reached = () => cycleModes(sections).get(groupRowId) === mode;
+    clearStatus();
+    if (!changes.size) {
+      info(reached()
+        ? `« ${group.name} » est déjà ${modeLabel}.`
+        : `« ${group.name} » n'a pas pu passer ${modeLabel}.`);
+      return Promise.resolve();
+    }
+    return submit(createOp({ changes, actions: buildUpdateActions(changes) }), {
+      onSuccess: () => info(reached()
+        ? `« ${group.name} » passé ${modeLabel}.`
+        : `« ${group.name} » n'est passé qu'en partie ${modeLabel}.`),
+      onFailure: (error, dropped) => fail("Changement de mode du cycle impossible :", error, dropped),
     });
   }
 
@@ -1051,6 +1216,30 @@ export function createSyntheseTasksController({
         fail("Choix de la tâche contrôlée impossible :", error, dropped);
       },
     });
+  }
+
+  // Les lignes affichées une fois une opération faite (champs par ligne, lignes retirées).
+  function rowsAfter(changes, removals = []) {
+    const removed = new Set(removals);
+    return displayedRows()
+      .filter((row) => !removed.has(Number(row?.[TASK_COLUMNS.id])))
+      .map((row) => {
+        const fields = changes.get(Number(row?.[TASK_COLUMNS.id]));
+        return fields ? { ...row, ...fields } : row;
+      });
+  }
+
+  // Les champs qui, avec Lien, gardent en parallèle chaque cycle qui l'était, après une opération
+  // (champs par ligne, lignes retirées) : voir planParallelRealign.
+  function parallelRealignOf(changes, removals = []) {
+    if (templateColumns !== true || (!changes.size && !removals.length)) return new Map();
+    return planParallelRealign({ before: allSections(), rows: rowsAfter(changes, removals), canLink: true });
+  }
+
+  // Une opération complétée pour que chaque cycle qui était en parallèle le reste : tout part dans la
+  // même écriture.
+  function withParallelRealign(changes, removals = []) {
+    return mergeChanges(changes, parallelRealignOf(changes, removals));
   }
 
   // Toutes les zones du projet, sans le filtre du bandeau : la fenêtre « Lien Structure » les
@@ -1147,6 +1336,8 @@ export function createSyntheseTasksController({
     // Les changements de Planning_Projet arrivent par la surveillance de main.js
     // (options de signal du relais, sans sondage), qui appelle refresh().
     context?.subscribe?.(() => {
+      // Projet changé : la fenêtre de lien montrait l'ancien.
+      if (linkDialog && toText(getProject()?.name) !== linkProject) linkDialog.close();
       void load();
     });
     context?.watchProjectZones?.((zones, meta = {}) => {
@@ -1164,6 +1355,7 @@ export function createSyntheseTasksController({
       active = Boolean(nextActive);
       if (!active) {
         loadToken += 1;
+        linkDialog?.close();
         return;
       }
       bind();
@@ -1175,6 +1367,8 @@ export function createSyntheseTasksController({
     },
     setEditingEnabled(enabled) {
       editingEnabled = Boolean(enabled);
+      // Tableau verrouillé : la fenêtre de lien se ferme.
+      if (!editingEnabled) linkDialog?.close();
       render();
     },
     setZoneFilter(zoneName) {

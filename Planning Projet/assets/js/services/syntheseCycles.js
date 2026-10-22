@@ -2,14 +2,19 @@
 // d'un autre cycle), les champs de sa ligne Planning_Projet et la renumérotation (colonne Ordre)
 // de son conteneur ; un cycle déplacé ou supprimé, selon la règle du bloc : ses tâches bougent
 // d'un seul tenant, la chaîne de liens se referme à l'ancienne place et se renoue à la nouvelle,
-// et les dates suivent. Module pur, sans DOM ni Grist : il rend les champs à écrire, par ligne.
+// et les dates suivent. Module pur, sans DOM ni Grist : il rend les champs à écrire, par ligne. Ses
+// briques de bloc exportées (bloc, voisins, tâche de sortie, garde de boucle) servent aussi au mode
+// escalier / parallèle d'un cycle (syntheseCycleModes.js).
 import { NATURES, TASK_COLUMNS, findGroup, groupRemovalIds, natureKeyOf } from "./syntheseTaskModel.js";
 import {
   allTasksOf,
+  anchorAbove,
   clearOrphans,
   findContainer,
   findUpstream,
+  followsAbove,
   groupBeforeSlot,
+  keepsLink,
   linkChanges,
   linkMap,
   mergeChanges,
@@ -96,15 +101,16 @@ function placeFields(group, parent) {
 }
 
 // Le bloc d'un cycle : ses tâches dans l'ordre de chaîne, à toute profondeur ; `first` (D) et
-// `last` (L) sont la première et la dernière.
-function blockOf(group) {
-  const ids = taskOrder({ key: `group:${group.rowId}`, items: group.items });
+// `last` (L) sont la première et la dernière. D est sa tâche d'entrée : la première affichée, ou
+// la tâche pilote d'un cycle en parallèle (voir taskOrder).
+export function blockOf(group) {
+  const ids = taskOrder({ key: `group:${group.rowId}`, items: group.items, group });
   const members = new Set(ids);
   return { ids, has: (rowId) => members.has(rowId), first: ids[0], last: ids[ids.length - 1] };
 }
 
 // Les tâches juste au-dessus et juste en dessous du bloc dans `order` (null : aucune).
-function neighboursOf(order, block) {
+export function neighboursOf(order, block) {
   const start = order.indexOf(block.first);
   const end = order.indexOf(block.last);
   return {
@@ -113,21 +119,31 @@ function neighboursOf(order, block) {
   };
 }
 
-function followsBlock(link, block) {
+export function followsBlock(link, block) {
   return link?.type === "FD" && block.has(link.predId);
 }
 
-// Lien d'entrée du bloc : le lien de sa première tâche s'il désigne une tâche hors du bloc
-// (quel que soit son type, décalage compris), sinon null.
-function entryLink(links, block) {
+// La tâche qui porte le lien d'entrée du bloc : sa tâche d'entrée (la première de l'ordre de
+// chaîne), sauf si son lien désigne une tâche du bloc — dans un cycle mélangé dont le lien d'entrée
+// n'est pas sur sa première tâche — : alors la première tâche du bloc qui suit la tâche juste
+// au-dessus (`above`), s'il y en a une.
+export function entryHolderOf(links, block, above = null) {
   const link = links.get(block.first) || null;
+  if (!link || !block.has(link.predId) || above == null) return block.first;
+  return block.ids.find((rowId) => links.get(rowId)?.predId === above) ?? block.first;
+}
+
+// Lien d'entrée du bloc : le lien de la tâche qui le porte (voir entryHolderOf) s'il désigne une
+// tâche hors du bloc (quel que soit son type, décalage compris), sinon null.
+export function entryLink(links, block, above = null) {
+  const link = links.get(entryHolderOf(links, block, above)) || null;
   return link && !block.has(link.predId) ? link : null;
 }
 
 // Tâche de sortie du bloc : celle que suivait en fin → début la tâche du dessous à l'ancienne
 // place ; à défaut, celle qui finit le plus tard (à égalité, la dernière dans l'ordre de chaîne ;
 // rien de daté : la dernière du bloc).
-function exitTask(links, block, below, tasksById) {
+export function exitTask(links, block, below, tasksById) {
   const belowLink = below != null ? links.get(below) : null;
   if (followsBlock(belowLink, block)) return belowLink.predId;
   let exit = block.last;
@@ -143,7 +159,7 @@ function exitTask(links, block, below, tasksById) {
 
 // Poser `link` sur la tâche `taskId` fermerait-il une boucle ? Oui si son prédécesseur est la
 // tâche elle-même ou dépend d'elle, de proche en proche.
-function closesLoop(links, taskId, link) {
+export function closesLoop(links, taskId, link) {
   return Boolean(link) && findUpstream(links, link.predId, (rowId) => rowId === taskId) != null;
 }
 
@@ -171,40 +187,45 @@ function breakLoop(links, block, above, entry) {
   links.set(current, entry && !closesLoop(links, current, entry) ? { ...entry } : null);
 }
 
-// Nouvelle place, le bloc s'insère entre P (au-dessus) et N (en dessous) dans `order`. La
-// première tâche du bloc suit P — son lien est gardé s'il désigne déjà P, sinon « P FD » — ou,
-// si N était liée à P autrement qu'en fin → début, reprend exactement ce lien ; sans P, plus de
-// lien. N, si elle était liée à P, suit la tâche de sortie en fin → début (avec son décalage
-// s'il était en fin → début), sauf si ce lien fermait une boucle : elle garde alors le sien.
-function placeBlock(links, order, block, { exit, entry }) {
+// Nouvelle place, le bloc s'insère entre P (au-dessus) et N (en dessous) dans `order`. La tâche
+// qui porte son lien d'entrée (`holder`, voir entryHolderOf) suit P — ou la tâche pilote du cycle
+// en parallèle qui finit en P (voir anchorAbove) ; son lien est gardé s'il la désigne déjà, sinon
+// « P FD » — ou, si N était liée à P autrement qu'en fin → début, reprend exactement ce lien ; sans
+// P, plus de lien. N, si elle était liée à P (ou suivait le cycle qui finit en P, voir followsAbove),
+// suit la tâche de sortie en fin → début (avec son décalage s'il était en fin → début), sauf si ce
+// lien fermait une boucle : elle garde alors le sien. `scope` : les sections et les contenus
+// simulés.
+function placeBlock(links, order, block, { exit, entry, holder, scope }) {
   const { above, below } = neighboursOf(order, block);
-  const former = links.get(block.first) || null;
+  const anchor = anchorAbove(above, block.first, scope);
+  const former = links.get(holder) || null;
   const belowLink = above != null && below != null ? links.get(below) : null;
-  const tied = belowLink != null && belowLink.predId === above;
-  if (above == null) links.set(block.first, null);
-  else if (tied && belowLink.type !== "FD") links.set(block.first, { ...belowLink });
-  else if (former?.predId !== above) links.set(block.first, { predId: above, type: "FD", lag: 0 });
-  breakLoop(links, block, above, entry);
+  const tied = belowLink != null && (belowLink.predId === above || followsAbove(belowLink, above, below, scope));
+  if (anchor == null) links.set(holder, null);
+  else if (tied && belowLink.type !== "FD") links.set(holder, { ...belowLink });
+  else if (!keepsLink(former, anchor, above)) links.set(holder, { predId: anchor, type: "FD", lag: 0 });
+  breakLoop(links, block, anchor, entry);
   if (!tied) return;
   const next = { predId: exit, type: "FD", lag: belowLink.type === "FD" ? belowLink.lag || 0 : 0 };
   if (!closesLoop(links, below, next)) links.set(below, next);
 }
 
 // Liens et dates d'un cycle déplacé : `before` et `after` sont l'ordre de chaîne de l'étage
-// avant et après le déplacement. Les tâches dont le lien change prennent les dates que leur
+// avant et après le déplacement (`overrides` : les contenus simulés). Les tâches dont le lien change prennent les dates que leur
 // donne leur lien, puis tout l'aval suit. Un cycle sans tâche, ou un déplacement qui ne change
 // pas l'ordre de chaîne, ne change ni lien ni date.
-function chainMovedBlock(sections, group, before, after) {
+function chainMovedBlock(sections, group, before, after, overrides) {
   const block = blockOf(group);
   if (!block.ids.length || after.every((rowId, at) => rowId === before[at])) return new Map();
   const tasks = allTasksOf(sections);
   const links = linkMap(tasks);
   const original = new Map(links);
-  const entry = entryLink(links, block);
-  const { below } = neighboursOf(before, block);
+  const { above, below } = neighboursOf(before, block);
+  const holder = entryHolderOf(links, block, above);
+  const entry = entryLink(links, block, above);
   const exit = exitTask(links, block, below, new Map(tasks.map((task) => [task.id, task])));
   closeBlock(links, block, below, entry);
-  placeBlock(links, after, block, { exit, entry });
+  placeBlock(links, after, block, { exit, entry, holder, scope: { sections, overrides } });
   const changes = linkChanges(original, links);
   return mergeChanges(changes, recomputeDates(tasks, links, [...changes.keys()]));
 }
@@ -240,7 +261,7 @@ export function planCycleMove({ sections, groupRowId, target, canLink = false } 
   if (!canLink) return changes;
   const overrides = new Map([[destination.key, placed]]);
   if (source.key !== destination.key) overrides.set(source.key, source.items.filter((candidate) => candidate !== item));
-  return mergeChanges(changes, chainMovedBlock(sections, group, taskOrder(source), taskOrder(source, overrides)));
+  return mergeChanges(changes, chainMovedBlock(sections, group, taskOrder(source), taskOrder(source, overrides), overrides));
 }
 
 // Supprimer un cycle (sa ligne, ses sous-cycles et ses tâches) : avec Lien, la chaîne se referme
@@ -257,8 +278,8 @@ export function planCycleRemoval({ sections, groupRowId, canLink = false } = {})
   const block = blockOf(group);
   let closed = null;
   if (block.ids.length) {
-    const { below } = neighboursOf(taskOrder(containerOf(sections, group)), block);
-    closed = closeBlock(links, block, below, entryLink(links, block));
+    const { above, below } = neighboursOf(taskOrder(containerOf(sections, group)), block);
+    closed = closeBlock(links, block, below, entryLink(links, block, above));
   }
   clearOrphans(links, removed);
   removed.forEach((rowId) => {

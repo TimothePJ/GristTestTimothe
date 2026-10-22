@@ -2852,15 +2852,17 @@ body.is-synthese-space #durationDefaultsToggle {
 /* Tableau de tâches (façon MS Project) : une ligne = partie gauche (4 colonnes) +
    partie droite (futur Gantt), hauteur fixe pour garder les deux alignés. */
 .stt {
-  --stt-left-width: 676px;
+  --stt-left-width: 784px;
   --stt-row-height: 26px;
   --stt-head-height: 32px;
   /* Largeurs par défaut des colonnes (réglables, voir DEFAULT_COLUMN_WIDTHS du tableau). */
+  --stt-col-line: 36px;
   --stt-col-id2: 56px;
   --stt-col-indice: 56px;
   --stt-col-duration: 60px;
   --stt-col-start: 92px;
   --stt-col-end: 92px;
+  --stt-col-link: 72px;
   --stt-cycle-bg: #bfbfbf;
   --stt-meeting-bg: #bdd7ee;
   --stt-kickoff-bg: #e6b8b7;
@@ -2898,7 +2900,7 @@ body.is-synthese-space #durationDefaultsToggle {
 
 .stt-left {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--stt-col-id2) var(--stt-col-indice) var(--stt-col-duration) var(--stt-col-start) var(--stt-col-end);
+  grid-template-columns: var(--stt-col-line) minmax(0, 1fr) var(--stt-col-id2) var(--stt-col-indice) var(--stt-col-duration) var(--stt-col-start) var(--stt-col-end) var(--stt-col-link);
   min-width: 0;
   background: #fff;
   border-right: 1px solid #bdbdbd;
@@ -2932,6 +2934,14 @@ body.is-synthese-space #durationDefaultsToggle {
   border-bottom: 1px solid var(--stt-grid);
   white-space: nowrap;
   overflow: hidden;
+}
+
+/* Numéro de ligne, comme MS Project : centré, gris, plus petit. */
+.stt-cell--line {
+  justify-content: center;
+  padding: 0 2px;
+  color: #6b6b6b;
+  font-size: 11px;
 }
 
 .stt-line--head .stt-cell {
@@ -4571,3 +4581,178 @@ body.is-synthese-dragging * {
 }
 
 /* FIN ARCHIVE vue Synthese v1 */
+
+/* Fenêtre « Lien de la tâche » (clic droit sur une tâche de la vue Synthese) : la tâche à suivre,
+   le type de lien, le décalage, et l'aperçu des nouvelles dates. */
+.synthese-link-dialog {
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 18px;
+  border: 1px solid #bcc9d6;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2937;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+  color-scheme: light;
+}
+
+.synthese-link-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.synthese-link-dialog__form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.synthese-link-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.synthese-link-dialog__header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.synthese-link-dialog__close {
+  border: 0;
+  background: transparent;
+  color: #4b5563;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.synthese-link-dialog__search,
+.synthese-link-dialog__lag input {
+  padding: 6px 8px;
+  border: 1px solid #c4ccd6;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.synthese-link-dialog__lag input {
+  width: 80px;
+}
+
+.synthese-link-dialog__label {
+  margin: 0;
+  font-weight: 600;
+}
+
+.synthese-link-dialog__list {
+  max-height: 46vh;
+  overflow: auto;
+  border: 1px solid #d5dbe3;
+  border-radius: 6px;
+}
+
+.synthese-link-dialog__group {
+  padding: 4px 8px 4px calc(8px + var(--sld-level, 0) * 16px);
+  background: #f1f4f8;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.synthese-link-dialog__option {
+  display: grid;
+  grid-template-columns: auto 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px calc(8px + var(--sld-level, 0) * 16px);
+  cursor: pointer;
+}
+
+.synthese-link-dialog__option:hover {
+  background: #e6f2fa;
+}
+
+/* La tâche elle-même et celles qui dépendent d'elle : grisées. */
+.synthese-link-dialog__option.is-disabled {
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+/* Masquées par la recherche (la grille l'emporterait sur [hidden]). */
+.synthese-link-dialog__option[hidden],
+.synthese-link-dialog__group[hidden] {
+  display: none;
+}
+
+.synthese-link-dialog__number {
+  color: #6b6b6b;
+  font-size: 11px;
+  text-align: right;
+}
+
+.synthese-link-dialog__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.synthese-link-dialog__dates {
+  color: #6b7280;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.synthese-link-dialog__types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid #d5dbe3;
+  border-radius: 6px;
+}
+
+.synthese-link-dialog__types legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+
+.synthese-link-dialog__preview {
+  min-height: 1.2em;
+  margin: 0;
+  color: #004990;
+  font-weight: 600;
+}
+
+.synthese-link-dialog__error {
+  margin: 0;
+  color: #b42318;
+}
+
+.synthese-link-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.synthese-link-dialog__actions button {
+  padding: 6px 14px;
+  border: 1px solid #c4ccd6;
+  border-radius: 6px;
+  background: #fff;
+  color: #1f2937;
+  font: inherit;
+  cursor: pointer;
+}
+
+.synthese-link-dialog__actions .synthese-link-dialog__submit {
+  border-color: #004990;
+  background: #004990;
+  color: #fff;
+}
+
+.synthese-link-dialog__submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

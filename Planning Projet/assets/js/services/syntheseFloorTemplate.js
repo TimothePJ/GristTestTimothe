@@ -36,7 +36,8 @@ export const FLOOR_TEMPLATE = Object.freeze([
   { code: "T15", name: "PLAN DE SYNTHESE RESERVATIONS NIV {E}", parent: "S3", link: "T14 FF" },
   { code: "T16", name: "PLAN DE SYNTHESE TERMINAUX NIV {E}", parent: "S3", link: "T14 FF" },
   { code: "T17", name: "REUNION + DIFFUSION SYT", nature: NATURES.meeting, parent: "C3", link: "T14 FD" },
-  { code: "T18", name: "SIGNATURE PLANS SYNTHESE", parent: "C3", link: "T13 FD+5" },
+  // 5 jours ouvrés après la REUNION + DIFFUSION SYT du cycle 3 ; DEMARRAGE GO la suit le même jour.
+  { code: "T18", name: "SIGNATURE PLANS SYNTHESE", parent: "C3", link: "T17 FD+5" },
   { code: "T19", name: "DEMARRAGE GO {E} (date prévisionnelle)", nature: NATURES.kickoff, parent: "C3", link: "T18 FD" },
 ].map((item) => Object.freeze(item)));
 
@@ -81,7 +82,7 @@ export function buildBulkAddAction(rows) {
   return ["BulkAddRecord", PLANNING_TABLE, rows.map(() => null), columns];
 }
 
-// « T13 FD+5 » → « 219 FD+5 » : le code de la tâche remplacé par son id.
+// « T17 FD+5 » → « 224 FD+5 » : le code de la tâche remplacé par son id.
 function resolveLink(text, idByCode) {
   const [code, ...rest] = text.split(" ");
   return [String(idByCode.get(code)), ...rest].join(" ");

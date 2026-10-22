@@ -72,6 +72,7 @@ test("colonne Ordre : le tableau le sait (glisser entre deux tâches)", async ()
   assert.equal(without.table.renders.at(-1).options.canOrder, false);
 });
 
+// PLAN SYT CYCLE 3 est en parallèle : la nouvelle tâche finit avec sa tâche pilote, RESEAUX (221).
 test("« Ajouter une tâche » sur TERMINAUX : une écriture — la tâche, son rang, son lien, les rangs des autres", async () => {
   const env = setup({ applyUserActions: () => ({ retValues: [400] }) });
   await activate(env);
@@ -79,8 +80,8 @@ test("« Ajouter une tâche » sur TERMINAUX : une écriture — la tâche, son 
   assert.equal(env.writes.length, 1);
   assert.deepEqual(env.writes[0], [
     ["AddRecord", "Planning_Projet", null, {
-      Taches: "Nouvelle tâche", Diff_coffrage: "2026-02-24", Diff_armature: "2026-02-24", Duree_1: 1,
-      NomProjet: "HOTEL DIEU", Zone: "Zone Z3A", Groupe: "SS1", Parent: "220", Ordre: "4", Lien: "223 FD",
+      Taches: "Nouvelle tâche", Diff_coffrage: "2026-02-23", Diff_armature: "2026-02-23", Duree_1: 1,
+      NomProjet: "HOTEL DIEU", Zone: "Zone Z3A", Groupe: "SS1", Parent: "220", Ordre: "4", Lien: "221 FF",
     }],
     ["BulkUpdateRecord", "Planning_Projet", [221, 222, 223], { Ordre: ["1", "2", "3"] }],
   ]);

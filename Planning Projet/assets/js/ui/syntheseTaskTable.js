@@ -7,11 +7,13 @@ import { floorKeyOf, formatDate, formatDuration, stepDurationText } from "../ser
 import { createTaskDrag } from "./syntheseTaskDrag.js";
 
 // « .v2 » : la largeur mémorisée avant les colonnes réglables (plus larges) est oubliée une fois.
-const LEFT_WIDTH_STORAGE_KEY = "planning-projet.synthese-tasks.left-width.v2";
+const LEFT_WIDTH_STORAGE_KEY = "planning-projet.synthese-tasks.left-width.v3";
+// Ancienne clé, d'avant les colonnes N° de ligne et Lien : sa largeur est reprise, élargie d'elles.
+const LEGACY_LEFT_WIDTH_STORAGE_KEY = "planning-projet.synthese-tasks.left-width.v2";
 const COLUMN_WIDTHS_STORAGE_KEY = "planning-projet.synthese-tasks.column-widths";
 // Largeur par défaut des colonnes à droite du nom (px), identique aux --stt-col-* de
 // styles.css ; le nom prend le reste du tableau.
-export const DEFAULT_COLUMN_WIDTHS = Object.freeze({ id2: 56, indice: 56, duration: 60, start: 92, end: 92 });
+export const DEFAULT_COLUMN_WIDTHS = Object.freeze({ line: 36, id2: 56, indice: 56, duration: 60, start: 92, end: 92, link: 72 });
 export const MIN_COLUMN_WIDTH = 36;
 export const MIN_NAME_WIDTH = 120;
 const DEFAULT_NAME_WIDTH = 320;
@@ -23,15 +25,21 @@ const HEAD_HEIGHT_PX = 32;
 const KEYBOARD_STEP_PX = 24;
 const INFO_STATUS_DELAY_MS = 6000;
 const GRIP_GLYPH = "⠿";
+// Comme MS Project : numéro de ligne tout à gauche (sans titre), Lien (prédécesseur) après Fin.
 const COLUMNS = Object.freeze([
+  { field: "line", label: "", title: "N° de ligne" },
   { field: "name", label: "Nom de la tâche" },
   { field: "id2", label: "N°" },
   { field: "indice", label: "Indice" },
   { field: "duration", label: "Durée" },
   { field: "start", label: "Début" },
   { field: "end", label: "Fin" },
-]);
-const EDITABLE_FIELDS = COLUMNS.map((column) => column.field);
+  { field: "link", label: "Lien" },
+].map((column) => Object.freeze(column)));
+export const TABLE_COLUMNS = COLUMNS;
+// Ni le numéro de ligne ni le Lien ne se saisissent dans le tableau : le lien se choisit dans la
+// fenêtre ouverte par le clic droit sur une tâche (« Modifier le lien… »).
+const EDITABLE_FIELDS = COLUMNS.map((column) => column.field).filter((field) => field !== "line" && field !== "link");
 const CODE_FIELDS = new Set(["id2", "indice"]);
 // Lignes récapitulatives : triangle de repli, Durée / Début / Fin calculés.
 const SUMMARY_KINDS = new Set(["zone", "floor", "group"]);
@@ -76,12 +84,24 @@ function formworkCheckItem(line) {
   return { label: "Contrôler par rapport au coffrage", ...item, checked: true };
 }
 
+// Entrées « mode » d'un cycle, d'après son mode lu dans les liens : en escalier, il propose de passer
+// en parallèle ; en parallèle, en escalier ; s'il mélange les deux, les deux ; avec moins de deux
+// éléments, rien.
+function cycleModeItems(line) {
+  const toSeries = { label: "Passer en escalier", action: "setCycleMode", groupRowId: line.groupRowId, mode: "series" };
+  const toParallel = { label: "Passer en parallèle", action: "setCycleMode", groupRowId: line.groupRowId, mode: "parallel" };
+  if (line.cycleMode === "series") return [toParallel];
+  if (line.cycleMode === "parallel") return [toSeries];
+  if (line.cycleMode === "mixed") return [toSeries, toParallel];
+  return [];
+}
+
 // Entrées du menu contextuel selon la ligne visée : zone (sauf « Sans zone ») → tâche ou
 // étage ; « Sans zone » → tâche ; étage → tâche, cycle ou suppression de l'étage ; cycle /
-// sous-cycle → tâche, sous-cycle ou suppression du cycle ; tâche → tâche dans
-// le même conteneur, contrôle par rapport au coffrage (tâche d'étage) ou suppression de la
-// tâche.
-export function buildMenuItems(line, { canAddFloor = true, canAddCycle = true } = {}) {
+// sous-cycle → tâche, sous-cycle, passage en escalier ou en parallèle (avec la colonne Lien) ou
+// suppression du cycle ; tâche → tâche dans le même conteneur, contrôle par rapport au coffrage
+// (tâche d'étage) ou suppression de la tâche.
+export function buildMenuItems(line, { canAddFloor = true, canAddCycle = true, canSetCycleMode = true, canEditLink = true } = {}) {
   if (!line) return [];
   if (line.kind === "zone") {
     const items = [{ label: "Ajouter une tâche", action: "addTask", zoneKey: line.zoneKey, floorKey: "" }];
@@ -115,6 +135,7 @@ export function buildMenuItems(line, { canAddFloor = true, canAddCycle = true } 
         parentGroupRowId: line.groupRowId,
         disabled: !canAddCycle,
       },
+      ...(canSetCycleMode ? cycleModeItems(line) : []),
       {
         label: line.nature === "cycle" ? "Supprimer le cycle" : "Supprimer le sous-cycle",
         action: "deleteGroup",
@@ -130,6 +151,8 @@ export function buildMenuItems(line, { canAddFloor = true, canAddCycle = true } 
     addTask.afterTaskId = line.taskId;
     return [
       addTask,
+      // Grisé sans la colonne Lien : le contrôleur dit qu'elle manque.
+      { label: "Modifier le lien…", action: "editLink", taskId: line.taskId, disabled: !canEditLink },
       ...(line.floorKey ? [formworkCheckItem(line)] : []),
       { label: "Supprimer la tâche", action: "deleteTask", taskId: line.taskId, danger: true },
     ];
@@ -179,10 +202,24 @@ export function dragColumn({ widths, leftWidth }, field, delta) {
   return { widths: { ...widths, [field]: width }, leftWidth: leftWidth + width - widths[field] };
 }
 
+// Largeur mémorisée du tableau (texte) : celle de la clé actuelle, sinon celle de l'ancienne clé
+// élargie des colonnes N° de ligne et Lien, sinon la largeur par défaut.
+export function readLeftWidth(current, legacy) {
+  const value = Number(current);
+  if (current != null && Number.isFinite(value) && value > 0) return value;
+  const former = Number(legacy);
+  if (legacy != null && Number.isFinite(former) && former > 0) {
+    return former + DEFAULT_COLUMN_WIDTHS.line + DEFAULT_COLUMN_WIDTHS.link;
+  }
+  return DEFAULT_LEFT_WIDTH;
+}
+
 function readStoredWidth() {
   try {
-    const value = Number(window.localStorage.getItem(LEFT_WIDTH_STORAGE_KEY));
-    return Number.isFinite(value) && value > 0 ? value : DEFAULT_LEFT_WIDTH;
+    return readLeftWidth(
+      window.localStorage.getItem(LEFT_WIDTH_STORAGE_KEY),
+      window.localStorage.getItem(LEGACY_LEFT_WIDTH_STORAGE_KEY),
+    );
   } catch (_error) {
     return DEFAULT_LEFT_WIDTH;
   }
@@ -238,8 +275,11 @@ export function buildLinkBadge(line, doc = document) {
 }
 
 // Une ligne récapitulative sans tâche datée n'a pas de récapitulatif : cellules vides. Une
-// tâche sans dates affiche « — » (et sa durée prévue). N° et Indice : tâches seulement.
-function formatCellValue(line, field) {
+// tâche sans dates affiche « — » (et sa durée prévue). N° et Indice : tâches seulement. Chaque
+// ligne montre son numéro ; une tâche, son lien (« 20FD »).
+export function cellText(line, field) {
+  if (field === "line") return line.lineNumber == null ? "" : String(line.lineNumber);
+  if (field === "link") return line.kind === "task" ? (line.linkText || "") : "";
   if (CODE_FIELDS.has(field)) return line.kind === "task" ? (line[field] || "") : "";
   if (SUMMARY_KINDS.has(line.kind) && line.durationDays == null) return "";
   if (field === "duration") return formatDuration(line.durationDays);
@@ -247,11 +287,19 @@ function formatCellValue(line, field) {
   return formatDate(line.end);
 }
 
+// Une cellule se saisit-elle ? En mode modifiable : celles d'une tâche sauf le numéro de ligne et
+// le Lien (il se choisit par le clic droit), et le nom d'un étage ou d'un cycle.
+export function isEditableCell(line, field, { editable = false } = {}) {
+  if (!editable || field === "line" || field === "link") return false;
+  if (line.kind === "task") return true;
+  return (line.kind === "floor" || line.kind === "group") && field === "name";
+}
+
 // Où poser le trait d'insertion d'une place visée (`slot` : { taskId, side } ou { groupRowId, side }) :
 // à la limite haute ou basse de la ligne de la tâche ou du cycle visé, au retrait de son niveau
 // (celui du conteneur d'arrivée, pour distinguer « après la dernière tâche d'un cycle » de
 // « avant le cycle suivant »). null si la ligne n'est pas affichée.
-export function placeOfDropSlot(lines, slot, { headHeight = 32, rowHeight = 26, indentPx = 16 } = {}) {
+export function placeOfDropSlot(lines, slot, { headHeight = 32, rowHeight = 26, indentPx = 16, offsetPx = 0 } = {}) {
   if (!slot) return null;
   const index = lines.findIndex((line) => (slot.taskId != null
     ? line.kind === "task" && line.taskId === slot.taskId
@@ -259,7 +307,7 @@ export function placeOfDropSlot(lines, slot, { headHeight = 32, rowHeight = 26, 
   if (index < 0) return null;
   return {
     top: headHeight + (index + (slot.side === "after" ? 1 : 0)) * rowHeight,
-    left: lines[index].level * indentPx,
+    left: offsetPx + lines[index].level * indentPx,
   };
 }
 
@@ -271,7 +319,9 @@ export function createSyntheseTaskTable(host, {
   onAddFloor,
   onAddCycle,
   onMoveCycle,
+  onSetCycleMode,
   onDeleteTask,
+  onEditLink,
   onDeleteFloor,
   onDeleteGroup,
   onSetFormworkCheck,
@@ -289,14 +339,18 @@ export function createSyntheseTaskTable(host, {
   const head = createElement("div", "stt-line stt-line--head");
   head.setAttribute("role", "row");
   const headLeft = createElement("div", "stt-left");
-  COLUMNS.forEach(({ field, label }) => {
+  COLUMNS.forEach(({ field, label, title }) => {
     const cell = createElement("div", `stt-cell stt-cell--${field}`, label);
     cell.setAttribute("role", "columnheader");
+    if (title) {
+      cell.title = title;
+      cell.setAttribute("aria-label", title);
+    }
     // Poignée de largeur sur le bord droit de l'en-tête, comme dans MS Project.
     const handle = createElement("span", "stt-col-resize");
     handle.dataset.field = field;
     handle.setAttribute("aria-hidden", "true");
-    handle.title = `Glisser pour changer la largeur de « ${label} » ; double-clic : largeur par défaut`;
+    handle.title = `Glisser pour changer la largeur de « ${label || title} » ; double-clic : largeur par défaut`;
     cell.appendChild(handle);
     headLeft.appendChild(cell);
   });
@@ -345,10 +399,13 @@ export function createSyntheseTaskTable(host, {
   let editable = false;
   let canAddFloor = true;
   let canAddCycle = true;
+  // Colonne Lien présente (colonnes du modèle d'étage) : passer un cycle en escalier ou en parallèle.
+  let canSetCycleMode = true;
   // Colonne Ordre présente en plus des colonnes du modèle d'étage : glisser un cycle.
   let canMoveCycles = false;
   // Colonne Ordre présente : glisser une tâche entre deux autres.
   let canOrder = false;
+  let canEditLink = false;
   let dropTargetKey = null;
   // Place visée par le glisser ({ taskId, side } ou { groupRowId, side }), montrée par le trait d'insertion.
   let dropSlot = null;
@@ -454,14 +511,16 @@ export function createSyntheseTaskTable(host, {
     COLUMNS.forEach(({ field }) => {
       const cell = field === "name"
         ? buildNameCell(line)
-        : createElement("div", `stt-cell stt-cell--${field}`, formatCellValue(line, field));
-      if (field !== "name") {
+        : createElement("div", `stt-cell stt-cell--${field}`, cellText(line, field));
+      // Le numéro de ligne n'est pas une cellule de saisie : pas de data-field (un clic n'y ouvre
+      // rien, ni n'avertit d'un verrouillage).
+      if (field !== "name" && field !== "line") {
         cell.setAttribute("role", "gridcell");
         cell.dataset.field = field;
       }
+      if (field === "line") cell.setAttribute("role", "rowheader");
       if (field === "end" && line.endLimitNote) cell.title = line.endLimitNote;
-      const nameOnly = line.kind === "floor" || line.kind === "group";
-      if (editable && (line.kind === "task" || (nameOnly && field === "name"))) {
+      if (isEditableCell(line, field, { editable })) {
         cell.classList.add("is-editable");
         cell.tabIndex = 0;
       }
@@ -477,8 +536,10 @@ export function createSyntheseTaskTable(host, {
     editable = Boolean(options?.editable);
     canAddFloor = options?.canAddFloor !== false;
     canAddCycle = options?.canAddCycle !== false;
+    canSetCycleMode = options?.canSetCycleMode !== false;
     canMoveCycles = options?.canMoveCycles === true;
     canOrder = Boolean(options?.canOrder);
+    canEditLink = options?.canEditLink === true;
     // Tableau devenu non modifiable : un glisser en cours est abandonné, sans dépôt.
     if (!editable) taskDrag?.cancel();
     applyWidth(leftWidth);
@@ -698,9 +759,11 @@ export function createSyntheseTaskTable(host, {
     }
     if (item.action === "addFloor") return onAddFloor?.(item.zoneKey);
     if (item.action === "addCycle") return onAddCycle?.(item.zoneKey, item.floorKey, item.parentGroupRowId ?? null);
+    if (item.action === "setCycleMode") return onSetCycleMode?.(item.groupRowId, item.mode);
     if (item.action === "deleteFloor") return onDeleteFloor?.(item.zoneKey, item.floorKey);
     if (item.action === "deleteGroup") return onDeleteGroup?.(item.groupRowId);
     if (item.action === "deleteTask") return onDeleteTask?.(item.taskId);
+    if (item.action === "editLink") return onEditLink?.(item.taskId);
     if (item.action === "setFormworkCheck") return onSetFormworkCheck?.(item.taskId, item.checked);
     return undefined;
   }
@@ -711,7 +774,7 @@ export function createSyntheseTaskTable(host, {
       return;
     }
     const line = lines.find((candidate) => candidate.key === lineElement.dataset.lineKey);
-    const items = buildMenuItems(line, { canAddFloor, canAddCycle });
+    const items = buildMenuItems(line, { canAddFloor, canAddCycle, canSetCycleMode, canEditLink });
     if (!items.length) return;
     menu.replaceChildren(...items.map((item) => {
       const classes = ["stt-menu__item"];
@@ -880,7 +943,8 @@ export function createSyntheseTaskTable(host, {
   // retrait de son niveau ; caché sans place visée ou si la ligne n'est plus affichée. Replacé à
   // chaque redessin.
   function placeDropLine() {
-    const place = placeOfDropSlot(lines, dropSlot, { headHeight: HEAD_HEIGHT_PX, rowHeight: ROW_HEIGHT_PX });
+    // Décalé de la colonne N° de ligne, à gauche du nom.
+    const place = placeOfDropSlot(lines, dropSlot, { headHeight: HEAD_HEIGHT_PX, rowHeight: ROW_HEIGHT_PX, offsetPx: columnWidths.line });
     if (!place) {
       dropLine.hidden = true;
       return;

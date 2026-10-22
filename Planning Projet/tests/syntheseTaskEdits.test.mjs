@@ -252,3 +252,102 @@ test("colonnes de dates d'une tâche datée", () => {
   assert.deepEqual(dateFieldsOf(result.task), { Diff_coffrage: "2026-10-09", Diff_armature: "2026-10-09", Duree_1: 0 });
   assert.deepEqual(dateFieldsOf(visa()), { Diff_coffrage: "2026-10-09", Diff_armature: "2026-10-23", Duree_1: 11 });
 });
+
+// Lien fin → fin : la tâche finit avec son prédécesseur (cycle en parallèle, « PLAN SYT CYCLE n »).
+// RESEAUX : Mar 16/12/25 → Lun 22/12/25 ; RESERVATIONS, en « 995 FF » : Ven 19/12 → Lun 22/12, 2 jours.
+const reseaux = () => task({ id: 995, Taches: "PLAN DE SYNTHESE RESEAUX NIV SS1", Diff_coffrage: "2025-12-16", Diff_armature: "2025-12-22", Duree_1: 5 });
+const reservations = () => task({
+  id: 996, Taches: "PLAN DE SYNTHESE RESERVATIONS NIV SS1", Diff_coffrage: "2025-12-19", Diff_armature: "2025-12-22", Duree_1: 2, Lien: "995 FF",
+});
+const editFinishing = (target, field, value) => applyTaskEdit(target, field, value, { today: TODAY, predecessor: reseaux() });
+const TIED_END = "« PLAN DE SYNTHESE RESERVATIONS NIV SS1 » finit avec « PLAN DE SYNTHESE RESEAUX NIV SS1 » (lien FF) : "
+  + "changez sa durée, ou la fin de « PLAN DE SYNTHESE RESEAUX NIV SS1 ».";
+
+test("lien fin → fin : la Durée garde la Fin calée sur le prédécesseur, le Début recule", () => {
+  const result = editFinishing(reservations(), "duration", "4");
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.fields, { Diff_coffrage: "2025-12-17", Diff_armature: "2025-12-22", Duree_1: 4 });
+  const milestone = editFinishing(reservations(), "duration", "0");
+  assert.deepEqual(milestone.fields, { Diff_coffrage: "2025-12-22", Diff_armature: "2025-12-22", Duree_1: 0 });
+});
+
+test("lien fin → fin : la Fin ne se saisit pas, elle suit le prédécesseur", () => {
+  const result = editFinishing(reservations(), "end", "2025-12-24");
+  assert.deepEqual(result, { ok: false, error: TIED_END });
+});
+
+test("lien fin → fin : le Début change la Durée, la Fin reste ; un Début après la Fin est refusé", () => {
+  const result = editFinishing(reservations(), "start", "2025-12-18");
+  assert.deepEqual(result.fields, { Diff_coffrage: "2025-12-18", Diff_armature: "2025-12-22", Duree_1: 3 });
+  assert.deepEqual(editFinishing(reservations(), "start", "2025-12-23"), {
+    ok: false,
+    error: "Le début ne peut pas être après la fin : « PLAN DE SYNTHESE RESERVATIONS NIV SS1 » finit avec « PLAN DE SYNTHESE RESEAUX NIV SS1 » (lien FF).",
+  });
+});
+
+test("lien fin → fin : un jalon ne se déplace pas, il suit le prédécesseur", () => {
+  const reunion = task({ id: 996, Taches: "PLAN DE SYNTHESE RESERVATIONS NIV SS1", Diff_coffrage: "2025-12-22", Diff_armature: "2025-12-22", Duree_1: 0, Lien: "995 FF" });
+  assert.deepEqual(editFinishing(reunion, "start", "2025-12-24"), { ok: false, error: TIED_END });
+});
+
+test("lien fin → fin sans prédécesseur daté connu : la saisie d'avant (le Début reste)", () => {
+  const result = applyTaskEdit(reservations(), "duration", "4", { today: TODAY });
+  assert.deepEqual(result.fields, { Diff_coffrage: "2025-12-19", Diff_armature: "2025-12-24", Duree_1: 4 });
+});
+
+// Lien fin → début ou début → début : la Durée saisie garde la tâche à la place que lui donne son
+// lien, comme dans MS Project. Un étage neuf a toutes ses tâches à 0 jour : chacune est un jalon posé
+// sur la Fin de la tâche d'avant ; sa durée la fait commencer le jour ouvré qui suit (escalier).
+// RECEPTION RENDU CET RSX RESA TER (1000) : Mar 23/12/25 → Mar 30/12/25 ; VISA Indice A en « 1000 FD ».
+const reception = () => task({
+  id: 1000, Taches: "RECEPTION RENDU CET RSX RESA TER", Diff_coffrage: "2025-12-23", Diff_armature: "2025-12-30", Duree_1: 5,
+});
+const visaA = (fields) => task({ id: 1001, Taches: "VISA Indice A", Lien: "1000 FD", ...fields });
+const editFollowing = (target, field, value) => applyTaskEdit(target, field, value, { today: TODAY, predecessor: reception() });
+
+test("lien fin → début : un jalon qui prend une durée commence le jour ouvré qui suit la Fin d'avant (escalier)", () => {
+  // Fin le mardi 30/12 : début le mercredi 31/12 ; 10 jours ouvrés sans le 1er janvier : fin le 14/01.
+  const result = editFollowing(visaA({ Diff_coffrage: "2025-12-30", Diff_armature: "2025-12-30", Duree_1: 0 }), "duration", "10");
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.fields, { Diff_coffrage: "2025-12-31", Diff_armature: "2026-01-14", Duree_1: 10 });
+});
+
+test("lien fin → début : une tâche qui passe à 0 jour se pose sur la Fin d'avant", () => {
+  const result = editFollowing(visaA({ Diff_coffrage: "2025-12-31", Diff_armature: "2026-01-14", Duree_1: 10 }), "duration", "0");
+  assert.deepEqual(result.fields, { Diff_coffrage: "2025-12-30", Diff_armature: "2025-12-30", Duree_1: 0 });
+});
+
+test("lien fin → début : une tâche qui commençait le jour de la Fin d'avant revient en escalier", () => {
+  // Étage créé avant la correction : VISA A commençait le 30/12, le jour de la Fin de RECEPTION.
+  const result = editFollowing(visaA({ Diff_coffrage: "2025-12-30", Diff_armature: "2026-01-13", Duree_1: 10 }), "duration", "10");
+  assert.deepEqual(result.fields, { Diff_coffrage: "2025-12-31", Diff_armature: "2026-01-14", Duree_1: 10 });
+});
+
+test("décalage et début → début : la Durée garde la tâche à la place de son lien", () => {
+  // SIGNATURE en « 1001 FD+5 » après VISA A (Fin le 14/01) : jalon le 21/01 ; 2 jours : 22/01 → 23/01.
+  const visa = visaA({ Diff_coffrage: "2025-12-31", Diff_armature: "2026-01-14", Duree_1: 10 });
+  const signature = task({
+    id: 1007, Taches: "SIGNATURE PLANS SYNTHESE", Lien: "1001 FD+5", Diff_coffrage: "2026-01-21", Diff_armature: "2026-01-21", Duree_1: 0,
+  });
+  assert.deepEqual(applyTaskEdit(signature, "duration", "2", { today: TODAY, predecessor: visa }).fields, {
+    Diff_coffrage: "2026-01-22", Diff_armature: "2026-01-23", Duree_1: 2,
+  });
+  // FOND DE PLAN en « 984 DD » : même Début que RECEPTION ARCH/TOPO/STR (Ven 14/11/25), quelle que soit sa durée.
+  const arch = task({ id: 984, Taches: "RECEPTION ARCH/TOPO/STR", Diff_coffrage: "2025-11-14", Diff_armature: "2025-11-14", Duree_1: 0 });
+  const fond = task({
+    id: 986, Taches: "FOND DE PLAN DE SYNTHESE NIV SS1", Lien: "984 DD", Diff_coffrage: "2025-11-14", Diff_armature: "2025-11-17", Duree_1: 2,
+  });
+  assert.deepEqual(applyTaskEdit(fond, "duration", "3", { today: TODAY, predecessor: arch }).fields, {
+    Diff_coffrage: "2025-11-14", Diff_armature: "2025-11-18", Duree_1: 3,
+  });
+});
+
+test("lien fin → début sans prédécesseur daté connu : la saisie d'avant (le Début reste)", () => {
+  const result = applyTaskEdit(visaA({ Diff_coffrage: "2025-12-30", Diff_armature: "2025-12-30", Duree_1: 0 }), "duration", "10", { today: TODAY });
+  assert.deepEqual(result.fields, { Diff_coffrage: "2025-12-30", Diff_armature: "2026-01-13", Duree_1: 10 });
+});
+
+test("tâche sans dates liée à une tâche datée : la Durée lui donne les dates de son lien", () => {
+  const result = editFollowing(visaA({ Diff_coffrage: null, Diff_armature: null, Duree_1: "" }), "duration", "10");
+  assert.deepEqual(result.fields, { Diff_coffrage: "2025-12-31", Diff_armature: "2026-01-14", Duree_1: 10 });
+});

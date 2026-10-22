@@ -123,7 +123,7 @@ test("Parent et Lien d'après les ids rendus par Grist", () => {
       222: ["220", "221 FF"],
       223: ["220", "221 FF"],
       224: ["217", "221 FD"],
-      225: ["217", "219 FD+5"],
+      225: ["217", "224 FD+5"],
       226: ["217", "225 FD"],
     }
   );
@@ -131,7 +131,8 @@ test("Parent et Lien d'après les ids rendus par Grist", () => {
   assert.equal(action[1], "Planning_Projet");
   assert.deepEqual(action[2], [...fieldsById.keys()]);
   assert.equal(action[3].Parent.length, 21);
-  assert.equal(action[3].Lien[action[2].indexOf(225)], "219 FD+5");
+  // SIGNATURE : 5 jours ouvrés après la REUNION + DIFFUSION SYT du cycle 3 (et DEMARRAGE GO le même jour).
+  assert.equal(action[3].Lien[action[2].indexOf(225)], "224 FD+5");
 });
 
 test("ids incomplets ou invalides : erreur", () => {
@@ -141,7 +142,7 @@ test("ids incomplets ou invalides : erreur", () => {
 });
 
 // Avec les durées de la capture saisies, les liens du modèle redonnent ses dates.
-test("le modèle redonne la capture : premier jalon au 02/01/26, SIGNATURE et DEMARRAGE GO au 09/03/26", () => {
+test("le modèle avec les durées de la capture : premier jalon au 02/01/26, SIGNATURE et DEMARRAGE GO 5 jours après la REUNION (02/03/26)", () => {
   const { fieldsById } = buildTemplateLinks(IDS);
   const tasks = FLOOR_TEMPLATE
     .map((item, index) => ({ item, id: IDS[index + 1] }))
@@ -159,6 +160,8 @@ test("le modèle redonne la capture : premier jalon au 02/01/26, SIGNATURE et DE
   assert.equal(byId.size, 19);
   assert.deepEqual([iso(byId.get(204).start), iso(byId.get(204).end)], ["2026-01-02", "2026-01-05"]);
   assert.deepEqual([iso(byId.get(219).start), iso(byId.get(219).end)], ["2026-02-17", "2026-03-02"]);
-  assert.equal(iso(byId.get(225).start), "2026-03-09");
-  assert.equal(iso(byId.get(226).start), "2026-03-09");
+  // REUNION + DIFFUSION SYT du cycle 3 (224) le 23/02 ; 5 jours ouvrés plus tard : 02/03.
+  assert.equal(iso(byId.get(224).start), "2026-02-23");
+  assert.equal(iso(byId.get(225).start), "2026-03-02");
+  assert.equal(iso(byId.get(226).start), "2026-03-02");
 });
