@@ -1,13 +1,21 @@
-# Simple workflow for deploying static content to GitHub Pages
+# Deploys main at the site root and a test branch under /test/.
+# GitHub Pages hosts a single site per repository and every deployment
+# replaces it entirely, so each run rebuilds BOTH parts, whichever branch
+# triggered it. Keep this file identical on main and on the test branch.
 name: Deploy static content to Pages
 
 on:
-  # Runs on pushes targeting the default branch
+  # Runs on pushes targeting the default branch or the test branch
+  # (keep in sync with TEST_BRANCH below)
   push:
-    branches: ["main"]
+    branches: ["main", "feature/SyntheseInterfacePlanning"]
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
+
+# Branch published under https://timothepj.github.io/GristTestTimothe/test/
+env:
+  TEST_BRANCH: feature/SyntheseInterfacePlanning
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
@@ -31,8 +39,21 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout main (prod)
         uses: actions/checkout@v4
+        with:
+          ref: main
+          path: prod
+      - name: Checkout test branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TEST_BRANCH }}
+          path: test-src
+      - name: Assemble site (main at root, test branch under /test/)
+        run: |
+          mkdir _site
+          rsync -a --exclude=.git prod/ _site/
+          rsync -a --exclude=.git test-src/ _site/test/
       - name: Setup Pages
         uses: actions/configure-pages@v5
       # A re-run of a failed attempt keeps the previous attempt's "github-pages"
@@ -59,8 +80,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload entire repository
-          path: '.'
+          path: _site
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
