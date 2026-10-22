@@ -323,7 +323,11 @@ export function createSyntheseTasksController({
     lines = applyFloorLinks(lines, readFloorLinks(shownRows));
     lines = applyCycleModes(lines, cycleModes(sections));
     // Numéros de ligne sur tout le projet, tout déplié : replier ou filtrer une zone ne les change pas.
-    lines = applyLineNumbers(lines, lineNumbersOf(project ? buildSections({ rows: shownRows, sharedZones: getSharedZones(project) }) : []));
+    // Sans filtre de zone, les sections affichées sont déjà tout le projet : pas de second calcul.
+    const numberingSections = project && zoneFilter
+      ? buildSections({ rows: shownRows, sharedZones: getSharedZones(project) })
+      : sections;
+    lines = applyLineNumbers(lines, lineNumbersOf(numberingSections));
     let emptyMessage = "";
     if (!project) emptyMessage = MESSAGES.noProject;
     else if (!loaded) emptyMessage = MESSAGES.loading;

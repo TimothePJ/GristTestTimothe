@@ -39,7 +39,8 @@ const COLUMNS = Object.freeze([
 export const TABLE_COLUMNS = COLUMNS;
 // Ni le numéro de ligne ni le Lien ne se saisissent dans le tableau : le lien se choisit dans la
 // fenêtre ouverte par le clic droit sur une tâche (« Modifier le lien… »).
-const EDITABLE_FIELDS = COLUMNS.map((column) => column.field).filter((field) => field !== "line" && field !== "link");
+const READ_ONLY_FIELDS = new Set(["line", "link"]);
+const EDITABLE_FIELDS = COLUMNS.map((column) => column.field).filter((field) => !READ_ONLY_FIELDS.has(field));
 const CODE_FIELDS = new Set(["id2", "indice"]);
 // Lignes récapitulatives : triangle de repli, Durée / Début / Fin calculés.
 const SUMMARY_KINDS = new Set(["zone", "floor", "group"]);
@@ -290,7 +291,7 @@ export function cellText(line, field) {
 // Une cellule se saisit-elle ? En mode modifiable : celles d'une tâche sauf le numéro de ligne et
 // le Lien (il se choisit par le clic droit), et le nom d'un étage ou d'un cycle.
 export function isEditableCell(line, field, { editable = false } = {}) {
-  if (!editable || field === "line" || field === "link") return false;
+  if (!editable || READ_ONLY_FIELDS.has(field)) return false;
   if (line.kind === "task") return true;
   return (line.kind === "floor" || line.kind === "group") && field === "name";
 }
@@ -512,13 +513,14 @@ export function createSyntheseTaskTable(host, {
       const cell = field === "name"
         ? buildNameCell(line)
         : createElement("div", `stt-cell stt-cell--${field}`, cellText(line, field));
-      // Le numéro de ligne n'est pas une cellule de saisie : pas de data-field (un clic n'y ouvre
-      // rien, ni n'avertit d'un verrouillage).
-      if (field !== "name" && field !== "line") {
+      // Le numéro de ligne et le Lien ne sont pas des cellules de saisie : pas de data-field (un clic
+      // n'y ouvre rien, ni n'avertit d'un verrouillage) ; le lien se choisit par le clic droit.
+      if (field !== "name" && !READ_ONLY_FIELDS.has(field)) {
         cell.setAttribute("role", "gridcell");
         cell.dataset.field = field;
       }
       if (field === "line") cell.setAttribute("role", "rowheader");
+      if (field === "link") cell.setAttribute("role", "gridcell");
       if (field === "end" && line.endLimitNote) cell.title = line.endLimitNote;
       if (isEditableCell(line, field, { editable })) {
         cell.classList.add("is-editable");

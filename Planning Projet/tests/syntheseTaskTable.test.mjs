@@ -445,8 +445,9 @@ test("trait d'insertion : décalé de la largeur de la colonne N° de ligne", ()
   assert.deepEqual(placeOfDropSlot(lines, { taskId: 1000, side: "after" }, { offsetPx: 36 }), { top: 32 + 26 * 20, left: 36 + 48 });
 });
 
-test("le numéro de ligne n'est pas une cellule de saisie : un clic dessus ne dit pas « verrouillé »", () => {
-  assert.match(source, /if \(field !== "name" && field !== "line"\) \{/);
+test("le numéro de ligne et le Lien ne sont pas des cellules de saisie : un clic dessus ne dit pas « verrouillé »", () => {
+  assert.match(source, /if \(field !== "name" && !READ_ONLY_FIELDS\.has\(field\)\) \{/);
+  assert.match(source, /const READ_ONLY_FIELDS = new Set\(\["line", "link"\]\);/);
 });
 
 test("largeur du tableau : la nouvelle clé, sinon l'ancienne (sans les colonnes N° de ligne et Lien) + 108 px", () => {
