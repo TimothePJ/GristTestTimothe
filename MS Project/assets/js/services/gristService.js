@@ -13,6 +13,7 @@ const _msProjectServiceDiagnostics = {
 let _cachedProjectNames = null;
 let _readOnlyAccessTokenEntry = null;
 let _readOnlyAccessTokenPromise = null;
+let _restUnavailable = false;
 
 export function getMsProjectServiceDiagnostics() {
   return { ..._msProjectServiceDiagnostics };
@@ -164,6 +165,31 @@ async function fetchRestRows(tableName, filter = null, { authRetry = false } = {
     throw new Error("Reponse REST Grist invalide.");
   }
   return restRecordsToRows(raw);
+}
+
+function rowMatchesRestFilter(row, filter) {
+  if (!filter || typeof filter !== "object") return true;
+  return Object.entries(filter).every(([column, values]) =>
+    (Array.isArray(values) ? values : [values]).some((value) => Object.is(row?.[column], value))
+  );
+}
+
+// Même règle que le runtime partagé (shared/grist-service-context.js) : si REST
+// est injoignable (jeton refusé, adresse API du serveur fausse, réponse en
+// erreur), on relit la table par le canal Grist du widget et on applique le
+// filtre ici. Cette lecture est complète ; après une panne, REST n'est plus
+// retenté jusqu'au rechargement du widget.
+async function fetchRowsRestFirst(tableName, filter = null) {
+  if (!_restUnavailable) {
+    try {
+      return await fetchRestRows(tableName, filter);
+    } catch (error) {
+      _restUnavailable = true;
+      console.warn("Lecture REST Grist indisponible ; repli sur fetchTable.", error);
+    }
+  }
+  const rows = await fetchTableRows(tableName);
+  return rows.filter((row) => rowMatchesRestFilter(row, filter));
 }
 
 function invalidateMsProjectCaches({ catalog = false } = {}) {
@@ -911,7 +937,7 @@ export async function importMsProjectXmlFile(file) {
     throw new Error("Aucune tache exploitable trouvee (UID/Name manquants).");
   }
 
-  const existingRows = await fetchRestRows(table.sourceTable, {
+  const existingRows = await fetchRowsRestFirst(table.sourceTable, {
     [sourceNameCol]: [sourceFileName],
   });
   const columnNames = existingRows.length
@@ -1073,7 +1099,7 @@ export async function syncPlanningDemarrageFromMsProjectStart(
   if (!normalizedProject) {
     return { updatedCount: 0, matchedCount: 0, skipped: true };
   }
-  const msRows = await fetchRestRows(msTable.sourceTable, {
+  const msRows = await fetchRowsRestFirst(msTable.sourceTable, {
     [sourceNameColumn]: [normalizedProject],
   });
   const msSourceNameCol = resolveColumn(
@@ -1316,7 +1342,7 @@ export async function fetchMsProjectRows(selectedProject = "") {
   const normalizedProject = toText(selectedProject);
   if (!normalizedProject) return [];
   const sourceNameColumn = table.columns?.sourceName || "Nom";
-  const rows = await fetchRestRows(table.sourceTable, {
+  const rows = await fetchRowsRestFirst(table.sourceTable, {
     [sourceNameColumn]: [normalizedProject],
   });
   const filteredRows = rows.filter((row) => Object.is(row?.[sourceNameColumn], normalizedProject));
