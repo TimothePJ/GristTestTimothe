@@ -1,21 +1,28 @@
-# Deploys main at the site root and a test branch under /test/.
+# Deploys main at the site root and each test branch under /<folder>/.
 # GitHub Pages hosts a single site per repository and every deployment
-# replaces it entirely, so each run rebuilds BOTH parts, whichever branch
-# triggered it. Keep this file identical on main and on the test branch.
+# replaces it entirely, so each run rebuilds ALL parts, whichever branch
+# triggered it. Keep this file identical on main and on every test branch.
 name: Deploy static content to Pages
 
 on:
-  # Runs on pushes targeting the default branch or the test branch
-  # (keep in sync with TEST_BRANCH below)
+  # Runs on pushes targeting the default branch or a test branch
+  # (keep in sync with TEST_SITES below)
   push:
-    branches: ["main", "feature/SyntheseInterfacePlanning"]
+    branches:
+      - "main"
+      - "feature/SyntheseInterfacePlanning"
+      - "feature/LissageStructure"
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# Branch published under https://timothepj.github.io/GristTestTimothe/test/
+# One "folder=branch" per line: the branch is published under
+# https://timothepj.github.io/GristTestTimothe/<folder>/
+# A branch missing on GitHub is skipped with a warning; prod still deploys.
 env:
-  TEST_BRANCH: feature/SyntheseInterfacePlanning
+  TEST_SITES: |
+    test=feature/SyntheseInterfacePlanning
+    TestStructure=feature/LissageStructure
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
@@ -44,16 +51,23 @@ jobs:
         with:
           ref: main
           path: prod
-      - name: Checkout test branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ env.TEST_BRANCH }}
-          path: test-src
-      - name: Assemble site (main at root, test branch under /test/)
+      - name: Assemble site (main at root, test branches under /<folder>/)
+        shell: bash
         run: |
           mkdir _site
           rsync -a --exclude=.git prod/ _site/
-          rsync -a --exclude=.git test-src/ _site/test/
+          while read -r line; do
+            [[ "$line" =~ ^([^=[:space:]]+)=([^[:space:]]+)$ ]] || continue
+            folder="${BASH_REMATCH[1]}"
+            branch="${BASH_REMATCH[2]}"
+            if git -C prod fetch --quiet --depth 1 origin "refs/heads/$branch"; then
+              mkdir -p "_site/$folder"
+              git -C prod archive FETCH_HEAD | tar -x -C "_site/$folder"
+              echo "Published $branch under /$folder/"
+            else
+              echo "::warning::Branch $branch not found, /$folder/ not published"
+            fi
+          done <<< "$TEST_SITES"
       - name: Setup Pages
         uses: actions/configure-pages@v5
       # A re-run of a failed attempt keeps the previous attempt's "github-pages"
