@@ -1112,7 +1112,8 @@ test("les quatre widgets audités respectent leur mode d'intégration", () => {
   assert.match(msHtml, /id="projectDropdown"/);
   assert.match(msMain, /fetchMsProjectRows\(requestedProject\)/);
   assert.match(msService, /grist\.ready\(\{\s*requiredAccess:\s*["']full["']\s*\}\)/);
-  assert.match(msService, /fetchRestRows\(table\.sourceTable,\s*\{\s*\[sourceNameColumn\]:\s*\[normalizedProject\]\s*,?\s*\}\)/);
+  assert.match(msService, /fetchRowsRestFirst\(table\.sourceTable,\s*\{\s*\[sourceNameColumn\]:\s*\[normalizedProject\]\s*,?\s*\}\)/);
+  assert.match(msService, /async function fetchRowsRestFirst[\s\S]*?fetchRestRows\(tableName, filter\)[\s\S]*?fetchTableRows\(tableName\)/);
   assert.doesNotMatch(msService, /GristServiceContext|restFilter/);
   const projectOptionsSource = msService.slice(
     msService.indexOf("export async function buildProjectOptions"),

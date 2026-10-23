@@ -319,6 +319,60 @@ test("un nouvel import ne lit pas toute la table quand le filtre REST ne renvoie
   assert.deepEqual(harness.tables.MsProjectNom.Nom, ["Nouveau projet"]);
 });
 
+function unreachableRestFetch(restCalls) {
+  return async (url) => {
+    restCalls.push(url);
+    throw new TypeError("Failed to fetch");
+  };
+}
+
+test("REST injoignable : la lecture d'un nom bascule sur fetchTable et garde le filtre exact", async () => {
+  const harness = createGristHarness({
+    MsProjectNom: { id: [1], Nom: ["Projet A"] },
+    MsProject: {
+      id: [10, 11, 12],
+      Nom: ["Projet A", "Projet B", " Projet A "],
+      Nom_Tache: ["A", "B", "A avec espaces"],
+    },
+  });
+  const restCalls = [];
+  const service = await loadService({
+    grist: harness.grist,
+    fetch: unreachableRestFetch(restCalls),
+  });
+
+  const firstRows = await service.fetchMsProjectRows("Projet A");
+  const secondRows = await service.fetchMsProjectRows("Projet B");
+
+  assert.deepEqual(firstRows.map((row) => row.id), [10]);
+  assert.deepEqual(secondRows.map((row) => row.id), [11]);
+  assert.equal(restCalls.length, 1, "REST n'est plus retenté après une panne");
+  assert.deepEqual(harness.fetchCalls.map((call) => call.tableName), ["MsProject", "MsProject"]);
+});
+
+test("REST injoignable : un réimport remplace les lignes du nom sans doublon", async () => {
+  const harness = createGristHarness({
+    MsProjectNom: { id: [], Nom: [] },
+    MsProject: emptyMsProjectTable(),
+  });
+  const service = await loadService({
+    grist: harness.grist,
+    fetch: unreachableRestFetch([]),
+    DOMParser: createXmlParser(),
+  });
+  const file = {
+    name: "Projet A.xml",
+    async text() { return "<Project />"; },
+  };
+
+  await service.importMsProjectXmlFile(file);
+  const secondResult = await service.importMsProjectXmlFile(file);
+
+  assert.equal(secondResult.deletedCount, 1);
+  assert.equal(harness.tables.MsProject.Nom.filter((name) => name === "Projet A").length, 1);
+  assert.deepEqual(harness.tables.MsProjectNom.Nom, ["Projet A"]);
+});
+
 test("un import dont l'écriture MsProject échoue ne modifie jamais MsProjectNom", async () => {
   const harness = createGristHarness(
     {
