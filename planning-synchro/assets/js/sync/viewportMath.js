@@ -40,6 +40,10 @@ export function panByDays(viewport, deltaDays) {
 // [firstVisibleDate, rangeEndDate] stays within bounds.{startDate,endDate}:
 // shift left if the window overruns the end, then shrink if it still can't
 // fit; the window never starts before bounds.startDate.
+//
+// Le dézoom s'arrête donc à l'étendue des données (bornes = prévisionnel,
+// phases du planning et mois lissés, cf. main.js), plafonnée par
+// viewport.maxVisibleDays (5 ans) : jamais de fenêtre qui déborde des limites.
 export function clampToBounds(viewport, bounds) {
   const boundsStart = normalizeIsoDate(bounds && bounds.startDate);
   const boundsEnd = normalizeIsoDate(bounds && bounds.endDate);

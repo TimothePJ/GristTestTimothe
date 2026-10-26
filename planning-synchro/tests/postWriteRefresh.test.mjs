@@ -60,6 +60,7 @@ import { buildInitialProjectViewport, buildCanonicalSharedViewport } from "../as
 import { normalizeIsoDate } from "../assets/js/viewport/normalize.js";
 import { formatIsoDate } from "../assets/js/utils/dates.js";
 import { toGristMonthValue } from "../assets/js/utils/monthSegments.js";
+import { buildChartTasks } from "../assets/js/top/taskLoadModel.js";
 
 const MAIN_PATH = new URL("../assets/js/main.js", import.meta.url);
 const source = fs.readFileSync(MAIN_PATH, "utf8");
@@ -127,6 +128,7 @@ function extractBlock(header) {
 
 const BLOCK_HEADERS = [
   "function todayIsoDate() {",
+  "function selectionKeyFor(project) {",
   "function viewportFitsWithinBounds(viewport, bounds) {",
   "function readAllTimeSegmentRows(payload) {",
   "function projectRegistrySignature(projects) {",
@@ -407,10 +409,30 @@ async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = 
     resolveViewportAnchorDate,
     normalizeIsoDate,
     formatIsoDate,
+    // Taches du graphique et du lissage, calculees par le vrai loadProject.
+    buildChartTasks,
 
     // --- bouchons ------------------------------------------------------------
     fetchProjectData,
     fetchTableRows,
+    // Ligne Projets2 relue a chaque chargement (cellule Lissage) : hors du
+    // compteur fetchProjectCatalog, qui ne compte que le chemin du signal.
+    fetchProjectRow: async (projectId) => {
+      const row = remoteProjectRows.find((candidate) => candidate.id === projectId);
+      return row ? { ...row } : null;
+    },
+    currentService: () => "Structure",
+    // Controleur du lissage (cree une fois par bootstrapApp, hors de ce chemin) :
+    // methodes vides, le chemin post-ecriture n'en depend pas.
+    smoothing: {
+      setProjectData: () => {},
+      getChartInput: () => ({ tasks: [], mode: "raw", active: false }),
+      getSmoothedBounds: () => null,
+      openMonthTasks: () => {},
+      refreshFromProjectRows: () => false,
+      clear: () => {},
+      destroy: () => {},
+    },
     attachChargeEditing,
     createChargeAssignModal,
     updatePlanningDurations,
@@ -452,9 +474,11 @@ async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = 
     },
     createPlanningChart: () => ({
       render: () => {},
+      setChartInput: () => {},
       destroy: () => {},
       setHeight: () => {},
       setViewport: () => {},
+      getUiState: () => ({ visibleLabels: null, knownLabels: null, granularity: "month" }),
     }),
     createSyncController: ({ bounds }) => {
       let activeBounds = bounds;
@@ -495,10 +519,11 @@ async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = 
       "let loadSeq = 0;",
       "let topView = 'planning';",
       "let lastTopPaneHeightPx = 0;",
-      "let chartRows = [];",
-      "let chartColumns = null;",
+      "let chartTasks = [];",
+      "let chartContextKey = '';",
       "let desiredTopRows = APP_CONFIG.topPane.defaultRows;",
       "let refreshChargeOnly = null;",
+      "let widenBoundsForSmoothing = null;",
       "let projectRegistryFingerprint = '';",
       ...BLOCKS,
       `globalThis.__api = {

@@ -64,3 +64,29 @@ export function persistViewport(viewport, project = null) {
     console.warn("Erreur sauvegarde localStorage planning-synchro :", error);
   }
 }
+
+// --- Mode d'affichage du lissage (graphique des tâches) ---------------------------
+// "raw" (non lissé) | "smoothed" (lissé) | "both" (les deux). Mémorisé dans le
+// navigateur ; valeur absente ou inconnue -> "both". Même garde Node que ci-dessus.
+const SMOOTHING_VIEWS = ["raw", "smoothed", "both"];
+const DEFAULT_SMOOTHING_VIEW = "both";
+
+export function loadSmoothingView() {
+  if (typeof localStorage === "undefined") return DEFAULT_SMOOTHING_VIEW;
+  try {
+    const raw = localStorage.getItem(APP_CONFIG.smoothingViewStorageKey);
+    return SMOOTHING_VIEWS.includes(raw) ? raw : DEFAULT_SMOOTHING_VIEW;
+  } catch (error) {
+    console.warn("Erreur lecture du mode de lissage :", error);
+    return DEFAULT_SMOOTHING_VIEW;
+  }
+}
+
+export function persistSmoothingView(mode) {
+  if (typeof localStorage === "undefined" || !SMOOTHING_VIEWS.includes(mode)) return;
+  try {
+    localStorage.setItem(APP_CONFIG.smoothingViewStorageKey, mode);
+  } catch (error) {
+    console.warn("Erreur sauvegarde du mode de lissage :", error);
+  }
+}

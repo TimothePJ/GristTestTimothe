@@ -611,3 +611,134 @@ test("updatePlanningDurations fusionne plusieurs entrees pour la MEME ligne en u
     globalThis.window = previousWindow;
   }
 });
+
+// Reglages de lissage (Projets2.Lissage) : relecture de la ligne projet et
+// ecriture d'une seule UpdateRecord sur la colonne Lissage.
+
+test("updateProjectSmoothing envoie UNE UpdateRecord sur Projets2.Lissage", async () => {
+  const calls = [];
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    grist: {
+      docApi: {
+        async applyUserActions(actions) {
+          calls.push(actions);
+          return { retValues: [null] };
+        },
+      },
+    },
+  };
+
+  try {
+    const service = await importFreshService("update-project-smoothing");
+    const value = '{"version":1,"services":{"Structure":{"maxTotal":4,"maxParType":{}}}}';
+    await service.updateProjectSmoothing(12, value);
+    assert.deepEqual(calls, [[["UpdateRecord", "Projets2", 12, { Lissage: value }]]]);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("updateProjectSmoothing refuse un id invalide sans appel", async () => {
+  const calls = [];
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    grist: {
+      docApi: {
+        async applyUserActions(actions) {
+          calls.push(actions);
+        },
+      },
+    },
+  };
+
+  try {
+    const service = await importFreshService("update-project-smoothing-invalid");
+    for (const bad of [0, -3, null, undefined, "abc"]) {
+      await assert.rejects(() => service.updateProjectSmoothing(bad, "x"), /Projet invalide : id manquant\./);
+    }
+    assert.equal(calls.length, 0);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("fetchProjectRow renvoie la ligne d'id demande, null si absente", async () => {
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    grist: {
+      docApi: {
+        async fetchTable() {
+          return { id: [11, 12], Nom_de_projet: ["A", "B"], Lissage: ["", "{}"] };
+        },
+      },
+    },
+  };
+
+  try {
+    const service = await importFreshService("fetch-project-row");
+    assert.deepEqual(await service.fetchProjectRow(12), { id: 12, Nom_de_projet: "B", Lissage: "{}" });
+    assert.equal(await service.fetchProjectRow(99), null);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+// En mode « automatic », le fetchTable patche par shared/grist-service-context.js
+// garde Projets2 en cache (30 s sur le chemin REST, 45 s sur le repli, car
+// Projets2 est une table d'acces) ; ce cache n'est vide que par NOS ecritures.
+// La relecture faite juste avant d'ecrire la cellule Lissage, et celle du
+// chargement du projet, doivent donc demander une lecture fraiche aux deux
+// niveaux de cache, sinon l'entree qu'un collegue vient d'enregistrer serait
+// effacee sans aucun signal.
+test("fetchProjectRow({ fresh: true }) force la relecture aux deux niveaux de cache", async () => {
+  const calls = [];
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    grist: {
+      docApi: {
+        __serviceContextPatched: true,
+        async fetchTable(...args) {
+          calls.push(args);
+          return { id: [11, 12], Nom_de_projet: ["A", "B"], Lissage: ["", "{}"] };
+        },
+      },
+    },
+  };
+
+  try {
+    const service = await importFreshService("fetch-project-row-fresh");
+    assert.deepEqual(await service.fetchProjectRow(12, { fresh: true }), { id: 12, Nom_de_projet: "B", Lissage: "{}" });
+    assert.deepEqual(calls.at(-1), ["Projets2", { forceRefresh: true, forceRawRefresh: true }]);
+
+    // Sans `fresh` : lecture ordinaire, sans option (le cache reste permis).
+    await service.fetchProjectRow(12);
+    assert.deepEqual(calls.at(-1), ["Projets2"]);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("fetchProjectRow({ fresh: true }) sans couche partagee : aucune option transmise", async () => {
+  // L'API RPC native et le mock de dev/harness.html n'acceptent que le nom de table.
+  const calls = [];
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    grist: {
+      docApi: {
+        async fetchTable(...args) {
+          calls.push(args);
+          return { id: [12], Lissage: ["{}"] };
+        },
+      },
+    },
+  };
+
+  try {
+    const service = await importFreshService("fetch-project-row-fresh-unpatched");
+    assert.deepEqual(await service.fetchProjectRow(12, { fresh: true }), { id: 12, Lissage: "{}" });
+    assert.deepEqual(calls, [["Projets2"]]);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});

@@ -403,6 +403,44 @@ body.ps-panning * {
   color: #fff;
 }
 
+/* Lissage des tâches : groupe « Afficher » + bouton « Lisser… » (vue Graphique). */
+.ps-chart-smoothing {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: var(--spacing-2);
+}
+.ps-chart-smoothing[hidden] {
+  display: none;
+}
+.ps-chart-smoothing .ps-chart-display {
+  flex-basis: auto;
+  margin-bottom: 0;
+}
+.ps-smoothing-open:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* « Lisser… » n'est pas une bascule : même actif, il garde le fond neutre ;
+   seule la pastille « actif » prend la couleur primaire. */
+.ps-smoothing-open.is-active {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+.ps-smoothing-open.is-active::after {
+  content: "actif";
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
 /* Chart view: replaces #ps-planning when "Graphique" is selected. The height is
    set from JS (planningChart.setHeight) to match the timeline it replaces; the
    canvas fills the container (Chart.js maintainAspectRatio:false).
@@ -2060,5 +2098,525 @@ body.ps-panning * {
   .ps-charge-assign-zone-head {
     flex-direction: column;
     align-items: stretch;
+  }
+}
+
+/* --- Fenetre « Taches du mois » (#ps-month-tasks-modal) ----------------------
+   Lecture seule. Meme charpente ps-modal / ps-modal-header / ps-modal-close-btn
+   que la fenetre de charge ; corps defilant, sections a pastille de couleur du
+   type, lignes compactes, mentions secondaires en gris, avertissement orange. */
+.ps-modal-content--month-tasks {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ps-month-tasks-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ps-month-tasks-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+}
+
+.ps-month-tasks-dot {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.ps-month-tasks-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ps-month-tasks-item {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ps-month-tasks-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 0.88rem;
+}
+
+.ps-month-tasks-date {
+  flex: 0 0 5.6em;
+  font-variant-numeric: tabular-nums;
+}
+
+.ps-month-tasks-id {
+  flex: 0 0 4.2em;
+  color: var(--color-text-muted);
+}
+
+.ps-month-tasks-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ps-month-tasks-place {
+  flex: 0 1 auto;
+  color: var(--color-text-muted);
+  text-align: right;
+}
+
+.ps-month-tasks-done {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.ps-month-tasks-note {
+  margin-left: calc(5.6em + 4.2em + 20px);
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}
+
+.ps-month-tasks-warning {
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.ps-month-tasks-warning[hidden] {
+  display: none;
+}
+
+.ps-month-tasks-empty {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 640px) {
+  .ps-modal-content--month-tasks {
+    width: min(100%, 100vw - 16px);
+    max-height: calc(100vh - 32px);
+    padding: 18px;
+  }
+
+  .ps-month-tasks-row {
+    flex-wrap: wrap;
+  }
+
+  .ps-month-tasks-note {
+    margin-left: 0;
+  }
+}
+
+/* --- Fenetre « Lissage des taches » (#ps-smoothing-modal) --------------------
+   Meme charpente ps-modal / ps-modal-header / ps-modal-close-btn que les autres
+   fenetres ; lignes a pastille de couleur du type, champs numeriques etroits,
+   tableau d'apercu compact, avertissement orange comme la liste du mois. */
+.ps-modal-content--smoothing {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ps-smoothing-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ps-smoothing-heading {
+  margin: 8px 0 0;
+  font-size: 0.95rem;
+}
+
+.ps-smoothing-types {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ps-smoothing-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) 76px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.ps-smoothing-type {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.ps-smoothing-dot {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.ps-smoothing-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ps-smoothing-input[aria-invalid="true"] {
+  border-color: #b42318;
+  background: #fef3f2;
+}
+
+.ps-smoothing-input:disabled {
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+}
+
+.ps-smoothing-unit,
+.ps-smoothing-peak {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.ps-smoothing-field-error,
+.ps-smoothing-feedback {
+  margin: 0;
+  color: #b42318;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.ps-smoothing-field-error[hidden],
+.ps-smoothing-feedback[hidden],
+.ps-smoothing-readonly[hidden] {
+  display: none;
+}
+
+.ps-smoothing-readonly {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.ps-smoothing-summary {
+  margin: 0;
+  font-weight: 600;
+}
+
+.ps-smoothing-warning {
+  margin: 6px 0 0;
+  color: #92400e;
+  font-weight: 600;
+}
+
+.ps-smoothing-overflows {
+  margin: 2px 0 0;
+  padding-left: 22px;
+  color: #92400e;
+  font-size: 0.85rem;
+}
+
+.ps-smoothing-table {
+  width: auto;
+  min-width: 260px;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ps-smoothing-table th,
+.ps-smoothing-table td {
+  padding: 3px 14px 3px 0;
+  border-bottom: 1px solid var(--color-border);
+  text-align: right;
+}
+
+.ps-smoothing-table th:first-child {
+  text-align: left;
+  font-weight: 600;
+}
+
+.ps-smoothing-table thead th {
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.ps-smoothing-table tr.is-overflow td,
+.ps-smoothing-table tr.is-overflow th {
+  color: #92400e;
+}
+
+/* « Lisser a partir de » et « Mois particuliers » : listes deroulantes au
+   style des champs, tableau compact (une colonne par serie, cases etroites
+   dont l'indication grisee reprend la valeur de tous les mois). */
+.ps-smoothing-select {
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.ps-smoothing-select:disabled {
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+}
+
+.ps-smoothing-row--start .ps-smoothing-select {
+  grid-column: 2 / -1;
+  justify-self: start;
+  min-width: 220px;
+}
+
+.ps-smoothing-hint,
+.ps-smoothing-empty {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.ps-smoothing-empty {
+  font-style: italic;
+}
+
+/* flex: none : avec overflow-x, la hauteur minimale automatique tombe a 0 et
+   la colonne defilante de la fenetre ecrasait le tableau. */
+.ps-smoothing-months {
+  flex: none;
+  overflow-x: auto;
+}
+
+.ps-smoothing-months-table {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ps-smoothing-months-table th,
+.ps-smoothing-months-table td {
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--color-border);
+  text-align: center;
+  vertical-align: middle;
+}
+
+.ps-smoothing-months-table thead th {
+  color: var(--color-text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ps-smoothing-months-table thead .ps-smoothing-dot {
+  display: inline-block;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+.ps-smoothing-months-table tbody th {
+  padding-left: 0;
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ps-smoothing-month-count {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+
+.ps-smoothing-input--cell {
+  width: 58px;
+  padding: 4px 6px;
+}
+
+.ps-smoothing-input--cell::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+.ps-smoothing-remove {
+  padding: 2px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ps-smoothing-remove:hover {
+  background: #fef3f2;
+  color: #b42318;
+}
+
+/* Texte lu par les lecteurs d'ecran seulement (en-tete de la colonne « Retirer »). */
+.ps-smoothing-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.ps-smoothing-add-month {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ps-smoothing-add-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ps-smoothing-add-btn:hover {
+  background: #eef4fb;
+}
+
+.ps-smoothing-add-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ps-smoothing-add-btn[hidden] {
+  display: none;
+}
+
+.ps-smoothing-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ps-smoothing-footer-spacer {
+  flex: 1 1 auto;
+}
+
+.ps-smoothing-delete {
+  padding: 8px 14px;
+  border: 1px solid #fda29b;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: #b42318;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ps-smoothing-delete:hover {
+  background: #fef3f2;
+}
+
+.ps-smoothing-delete[hidden],
+.ps-smoothing-footer button[hidden] {
+  display: none;
+}
+
+.ps-smoothing-footer button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* « Annuler » reprend ps-modal-close-btn, calee en haut dans l'en-tete
+   (align-self: flex-start) : ici, centree sur la ligne des boutons. */
+.ps-smoothing-footer .ps-modal-close-btn {
+  align-self: center;
+}
+
+/* « Enregistrer » : bouton principal, comme ceux des autres fenetres
+   (.ps-charge-assign-footer button), a la hauteur des deux autres boutons du
+   pied (bordure de 1 px, meme rembourrage vertical). Sans cette regle, il
+   restait un bouton natif du navigateur. */
+#ps-smoothing-save {
+  padding: 8px 18px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#ps-smoothing-save:hover {
+  background: #003a73;
+}
+
+#ps-smoothing-save:disabled {
+  cursor: not-allowed;
+}
+
+#ps-smoothing-save:disabled:hover {
+  background: var(--color-primary);
+}
+
+@media (max-width: 640px) {
+  .ps-modal-content--smoothing {
+    width: min(100%, 100vw - 16px);
+    max-height: calc(100vh - 32px);
+    padding: 18px;
+  }
+
+  .ps-smoothing-row {
+    grid-template-columns: 1fr 76px;
+  }
+
+  .ps-smoothing-row--start .ps-smoothing-select {
+    grid-column: 1 / -1;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .ps-smoothing-peak,
+  .ps-smoothing-unit {
+    grid-column: 1 / -1;
+  }
+
+  .ps-smoothing-footer {
+    flex-wrap: wrap;
   }
 }

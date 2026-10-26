@@ -1,10 +1,20 @@
-// Task-load line chart for the top pane — an alternative "Graphique" view that
-// REPLACES the read-only planning timeline when the aggregate ("Rassembler
-// visuellement le planning") mode is on. It plots, over the SAME visible
-// chronology as the frise / bottom pane, the number of tasks to realize per
-// month OR per week (user's choice, via the Mois/Semaine control), one line per
-// document type (Coffrage / Armature / NDC / Coupes / Démolition / Autres) plus a
-// Total line.
+// Graphique de charge des tâches du pane haut : la vue « Graphique », qui
+// REMPLACE la frise du planning (lecture seule) quand on la choisit dans le
+// sélecteur Planning / Graphique. Il est disponible à tout moment et ne dépend
+// pas du mode « Rassembler visuellement le planning » : ses tâches viennent des
+// lignes du planning, pas du regroupement de la frise. Il trace, sur la MÊME
+// chronologie visible que la frise et le pane bas, le nombre de tâches à
+// réaliser par mois OU par semaine (contrôle Mois / Semaine), une courbe par type
+// de document (Coffrage / Armature / NDC / Coupes / Démolition / Autres) et une
+// courbe Total ; en pointillé, les tâches déjà réalisées.
+//
+// Lissage des tâches (spec 2026-10-23, §6.3) : tâches et mode arrivent du
+// contrôleur du lissage (top/smoothingController.js) par setChartInput. Trois
+// modes : « Non lissé » (échéances d'origine), « Lissé » (dates lissées,
+// smoothedIso) et « Les deux » (courbe lissée pleine, courbe d'avant lissage
+// pâle et fine). Sans lissage défini (active:false), le mode retombe sur « Non
+// lissé ». Un clic sans glisser sur un mois ou une semaine appelle
+// onBucketClick (fenêtre « Tâches du mois »).
 //
 // Charting technology: Chart.js (globalThis.Chart, loaded from the CDN in
 // index.html / dev/harness.html) — the SAME library gestion-depenses2 uses for
@@ -19,47 +29,12 @@
 // setViewport()).
 
 import { APP_CONFIG } from "../config.js";
-import { buildDisplayedMonths, toFiniteNumber } from "../utils/format.js";
-import { parseCalendarDate, toText } from "../utils/dates.js";
-import { buildRowPhases, normalizePlanningDocumentType } from "./phases.js";
-
-const KNOWN_TYPES = ["COFFRAGE", "ARMATURES", "NDC", "COUPES", "DEMOLITION"];
-
-// Display order + colours per document-type line (solid line colours chosen to
-// echo the phase palette while staying distinguishable as thin lines).
-const TYPE_META = {
-  COFFRAGE: { label: "Coffrage", color: "#d97706" },
-  ARMATURES: { label: "Armature", color: "#475569" },
-  NDC: { label: "NDC", color: "#7c3aed" },
-  COUPES: { label: "Coupes", color: "#16a34a" },
-  DEMOLITION: { label: "Démolition", color: "#dc2626" },
-  AUTRES: { label: "Autres", color: "#8470ff" },
-};
-const TYPE_ORDER = ["COFFRAGE", "ARMATURES", "NDC", "COUPES", "DEMOLITION", "AUTRES"];
-const TOTAL_META = { label: "Total", color: "#004990" };
+import { buildDisplayedMonths } from "../utils/format.js";
+import { parseCalendarDate } from "../utils/dates.js";
+import { TOTAL_META, TYPE_META, TYPE_ORDER, formatMonthLabel } from "./taskLabels.js";
 
 function monthKeyOf(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function taskTypeKey(row, columns) {
-  const key = normalizePlanningDocumentType(toText(row?.[columns.typeDoc]));
-  return KNOWN_TYPES.includes(key) ? key : "AUTRES";
-}
-
-// A row's "à réaliser" date = the end (diffusion) date of its main phase
-// (démarrage markers excluded); that's when the document is due.
-function taskDueDate(row, columns) {
-  const phases = buildRowPhases(row, columns).filter((phase) => phase.type !== "demarrage");
-  if (!phases.length) return null;
-  const main = phases[0];
-  const due = main.end instanceof Date ? main.end : main.start;
-  return due instanceof Date && !Number.isNaN(due.getTime()) ? due : null;
-}
-
-// A task is "réalisé à 100%" when its Realise column reaches 100.
-function isTaskRealized(row, columns) {
-  return toFiniteNumber(row?.[columns.realise], 0) >= 100;
 }
 
 // Monday 00:00 of the ISO week containing `date`.
@@ -98,6 +73,7 @@ function buildMonthBuckets(first, last, monthsNames) {
       monthNumber: month.monthNumber,
       label: `${String(month.monthLabel || "").slice(0, 3)} ${month.year}`,
       startTs,
+      endTs,
       midTs: startTs + (endTs - startTs) / 2,
     };
   });
@@ -137,6 +113,7 @@ function buildWeekBuckets(first, last) {
       weekKey: `${cursor.getFullYear()}-${pad2(cursor.getMonth() + 1)}-${pad2(cursor.getDate())}`,
       weekStartTs: startMs,
       startTs: startMs,
+      endTs: nextMondayMs,
       label: `${pad2(cursor.getDate())}/${pad2(cursor.getMonth() + 1)}`,
       midTs: startMs + (nextMondayMs - startMs) / 2,
     });
@@ -152,15 +129,26 @@ function buildWeekBuckets(first, last) {
   };
 }
 
-// PURE: rows + columns + viewport (+ options.granularity "month"|"week") ->
+// Jour calendaire "AAAA-MM-JJ" d'un timestamp (horloge locale).
+function isoOfTs(ts) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+// PURE: tasks (ChartTask / SmoothedTask) + viewport (+ options.granularity
+// "month"|"week", options.dateKey "dueIso"|"smoothedIso") ->
 // { points, byType, total, byTypeRealized, totalRealized, typesPresent }.
 // `points` are the month OR week buckets spanning [firstVisibleDate ..
-// rangeEndDate]; byType/total are per-bucket task counts aligned to `points`, and
+// rangeEndDate], each with startTs (inclusive) and endTs (exclusive, start of the
+// next bucket); byType/total are per-bucket task counts aligned to `points`, and
 // byTypeRealized/totalRealized are the SAME counts restricted to tasks already
-// realized at 100% (the dotted companion lines). Tasks whose due date falls
-// outside the visible buckets are not counted (the chart follows the frise).
-export function buildTaskLoadSeries(rows, columns, viewport, options = {}) {
+// realized (the dotted companion lines). A task is dated by task[dateKey]
+// (smoothedIso when the smoothed view is asked, falling back to dueIso if absent).
+// Tasks whose date falls outside the visible buckets are not counted (the chart
+// follows the frise).
+export function buildTaskLoadSeries(tasks, viewport, options = {}) {
   const granularity = options.granularity === "week" ? "week" : "month";
+  const dateKey = options.dateKey === "smoothedIso" ? "smoothedIso" : "dueIso";
   const monthsNames = options.monthsNames || APP_CONFIG.months;
   const first = parseCalendarDate(viewport?.firstVisibleDate);
   const last = parseCalendarDate(viewport?.rangeEndDate);
@@ -178,20 +166,20 @@ export function buildTaskLoadSeries(rows, columns, viewport, options = {}) {
   const totalRealized = new Array(points.length).fill(0);
   const typesPresent = new Set();
 
-  (rows || []).forEach((row) => {
-    const due = taskDueDate(row, columns);
+  (tasks || []).forEach((task) => {
+    const due = parseCalendarDate(task?.[dateKey] || task?.dueIso);
     if (!due) return;
     const index = buckets.indexOf(due);
     if (index == null) return; // outside the visible range
 
-    const typeKey = taskTypeKey(row, columns);
+    const typeKey = TYPE_META[task.type] ? task.type : "AUTRES";
     if (!byType[typeKey]) byType[typeKey] = new Array(points.length).fill(0);
     if (!byTypeRealized[typeKey]) byTypeRealized[typeKey] = new Array(points.length).fill(0);
     byType[typeKey][index] += 1;
     total[index] += 1;
     typesPresent.add(typeKey);
 
-    if (isTaskRealized(row, columns)) {
+    if (task.realized) {
       byTypeRealized[typeKey][index] += 1;
       totalRealized[index] += 1;
     }
@@ -205,6 +193,55 @@ export function buildTaskLoadSeries(rows, columns, viewport, options = {}) {
     totalRealized,
     typesPresent: TYPE_ORDER.filter((type) => typesPresent.has(type)),
   };
+}
+
+// PURE: points + timestamp -> index du seau [startTs, endTs) qui le contient, ou
+// null (hors fenetre). Sert au clic sur le graphique.
+export function findBucketIndexAt(points, ts) {
+  if (!Array.isArray(points) || !Number.isFinite(ts)) return null;
+  const index = points.findIndex((point) => ts >= point.startTs && ts < point.endTs);
+  return index < 0 ? null : index;
+}
+
+// PURE: series brute + lissee + mode -> specifications des courbes, avant tout
+// style Chart.js. Pour chaque type present puis pour Total :
+//   - "before"   (mode both seulement) : la courbe NON lissee, tracee en pale ;
+//   - "main"     : la courbe principale (non lissee en raw, lissee sinon) ;
+//   - "realized" : le pointille des taches realisees, UNE SEULE fois par serie
+//     (une tache realisee ne bouge jamais : meme courbe lissee ou non).
+export function buildDatasetSpecs({ rawSeries, smoothedSeries, mode } = {}) {
+  const useSmoothed = (mode === "smoothed" || mode === "both") && smoothedSeries;
+  const main = useSmoothed ? smoothedSeries : rawSeries;
+  const showBefore = mode === "both" && Boolean(smoothedSeries) && Boolean(rawSeries);
+  if (!main) return [];
+  const length = main.points.length;
+  const zeros = () => new Array(length).fill(0);
+
+  // Types presents dans l'une ou l'autre serie, dans l'ordre du graphique.
+  const present = new Set([...(main.typesPresent || []), ...(showBefore ? rawSeries.typesPresent || [] : [])]);
+  const groups = TYPE_ORDER.filter((type) => present.has(type)).map((type) => ({
+    meta: TYPE_META[type],
+    values: main.byType[type] || zeros(),
+    before: showBefore ? rawSeries.byType[type] || zeros() : null,
+    realized: main.byTypeRealized[type] || zeros(),
+  }));
+  groups.push({
+    meta: TOTAL_META,
+    values: main.total,
+    before: showBefore ? rawSeries.total : null,
+    realized: main.totalRealized,
+  });
+
+  const specs = [];
+  groups.forEach(({ meta, values, before, realized }) => {
+    const base = { baseLabel: meta.label, color: meta.color };
+    if (before) {
+      specs.push({ ...base, label: `${meta.label} (avant lissage)`, kind: "before", values: before });
+    }
+    specs.push({ ...base, label: meta.label, kind: "main", values });
+    specs.push({ ...base, label: `${meta.label} (réalisé)`, kind: "realized", values: realized });
+  });
+  return specs;
 }
 
 // PURE: viewport -> { minTs, maxTs }, the x-axis window in timestamps (null for
@@ -232,12 +269,31 @@ function shortMonthLabel(ts) {
   return `${name.slice(0, 3)} ${String(date.getFullYear()).slice(2)}`;
 }
 
-// A type's base label groups its solid line and its dotted "(réalisé)" companion
-// under one name (e.g. "Coffrage" + "Coffrage (réalisé)" -> "Coffrage"), so the
-// checkbox filter toggles the whole type at once.
+// A type's base label groups its solid line, its pale "(avant lissage)" line and
+// its dotted "(réalisé)" companion under one name (e.g. "Coffrage" + "Coffrage
+// (réalisé)" -> "Coffrage"), so the checkbox filter toggles the whole type at once.
 function baseLabel(label) {
-  return String(label || "").replace(/\s*\(réalisé\)\s*$/, "");
+  return String(label || "").replace(/\s*\((?:réalisé|avant lissage)\)\s*$/, "");
 }
+
+// "#d97706" + 0.35 -> "rgba(217, 119, 6, 0.35)" (courbe « avant lissage », pâle).
+function withAlpha(hex, alpha) {
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || ""));
+  if (!match) return hex;
+  const [r, g, b] = [match[1], match[2], match[3]].map((part) => Number.parseInt(part, 16));
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// Note de la légende de gauche : rappelle la convention du mode affiché.
+function legendNoteFor(mode) {
+  if (mode === "both") return "plein = lissé · pâle = avant lissage · pointillé = réalisé";
+  if (mode === "smoothed") return "lissé · pointillé = réalisé";
+  return "pointillé = réalisé";
+}
+
+// Le pointeur a parcouru plus de ce nombre de pixels entre pointerdown et
+// pointerup : c'est un glisser (le graphique se déplace avec la frise), pas un clic.
+const CLICK_DRAG_THRESHOLD_PX = 4;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -251,15 +307,41 @@ function escapeHtml(value) {
 // stylesheet that failed to load). Must stay in sync with variables.css.
 const DEFAULT_AXIS_WIDTH_PX = 44;
 
-// createPlanningChart(canvasEl, filterEl, granularityEl, legendEl) ->
-// { render, setViewport, setHeight, destroy }.
-export function createPlanningChart(canvasEl, filterEl, granularityEl, legendEl) {
+// createPlanningChart(canvasEl, filterEl, granularityEl, legendEl, options) ->
+// { render, setChartInput, setViewport, setHeight, getUiState, destroy }.
+//   - chartInput = { tasks, mode: "raw"|"smoothed"|"both", active } : active:false
+//     force le mode "raw" (aucun lissage défini) ;
+//   - options.initialUiState = { visibleLabels, granularity } : filtre et
+//     regroupement à restaurer (mémorisés par main.js) ;
+//   - options.onBucketClick({ startIso, endIso, label, granularity, visibleTypeKeys })
+//     est appelé au clic (sans glisser) sur un seau du graphique ;
+//   - getUiState() -> { visibleLabels, knownLabels, granularity } : à repasser tel
+//     quel en initialUiState pour qu'un type nouveau arrive coché.
+export function createPlanningChart(
+  canvasEl,
+  filterEl,
+  granularityEl,
+  legendEl,
+  { initialUiState = null, onBucketClick = null } = {}
+) {
   let chart = null;
-  let lastRows = [];
-  let lastColumns = null;
+  let lastTasks = [];
+  // Mode de tracé demandé ("raw" | "smoothed" | "both"), déjà ramené à "raw" quand
+  // le lissage n'est pas actif.
+  let lastMode = "raw";
+  // Seaux du dernier tracé (clic -> seau).
+  let lastPoints = [];
   // Bucket granularity for the task-load lines: "month" (default) or "week". The
   // user picks it via the Mois/Semaine control (granularityEl).
-  let granularity = "month";
+  let granularity = initialUiState?.granularity === "week" ? "week" : "month";
+  // Geste en cours sur le canevas : { pointerId, x, y, dragged }, ou null.
+  let gesture = null;
+  // Libellés de cases connus au dernier rendu : un libellé absent de cette liste
+  // arrive coché. Restauré depuis initialUiState (le graphique est recréé à chaque
+  // rechargement), sinon null tant qu'aucun rendu n'a eu lieu.
+  let knownLabels = Array.isArray(initialUiState?.knownLabels)
+    ? new Set(initialUiState.knownLabels.map(String))
+    : null;
   // Last applied viewport, so a granularity change can re-render in place.
   let lastViewport = null;
   // Bucket start timestamps of the last rendered series, read back by the x
@@ -268,7 +350,9 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl, legendEl)
   // Type filter: Set of base labels (e.g. "Coffrage", "Total") currently CHECKED.
   // A dataset is shown iff its base label is in the set. Rebuilt per project and
   // re-applied on every viewport re-render (buildDatasets reads it).
-  let visibleTypes = null;
+  let visibleTypes = Array.isArray(initialUiState?.visibleLabels)
+    ? new Set(initialUiState.visibleLabels.map(String))
+    : null;
 
   // Axis / tooltip labels adapt to the granularity: months read "jui 26", weeks
   // read the week's Monday "dd/MM" (axis) / "Semaine du dd/MM/YYYY" (tooltip).
@@ -287,9 +371,9 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl, legendEl)
   // visible window) — the checkbox filter only lists these + Total.
   function computeAvailableLabels() {
     const present = new Set();
-    (lastRows || []).forEach((row) => {
-      if (!taskDueDate(row, lastColumns)) return;
-      present.add(taskTypeKey(row, lastColumns));
+    (lastTasks || []).forEach((task) => {
+      if (!parseCalendarDate(task?.dueIso)) return;
+      present.add(TYPE_META[task.type] ? task.type : "AUTRES");
     });
     const items = TYPE_ORDER.filter((type) => present.has(type)).map((type) => ({
       label: TYPE_META[type].label,
@@ -342,7 +426,7 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl, legendEl)
         .join("")}
       <div class="ps-chart-legend-note">
         <span class="ps-chart-legend-swatch ps-chart-legend-swatch--dashed"></span>
-        <span>pointillé = réalisé</span>
+        <span>${escapeHtml(legendNoteFor(lastMode))}</span>
       </div>
     `;
     syncLegend();
@@ -369,16 +453,25 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl, legendEl)
     return Number.isFinite(value) && value > 0 ? value : DEFAULT_AXIS_WIDTH_PX;
   }
 
-  // (Re)build the checkbox filter for the current project; everything checked.
+  // (Re)build the checkbox filter for the current tasks. The user's choice is
+  // kept (visibleTypes): a label already known stays as it was, a NEW type
+  // arrives checked. Without any previous choice everything is checked.
   function buildFilter() {
-    if (!(filterEl instanceof HTMLElement)) return;
     const items = computeAvailableLabels();
-    visibleTypes = new Set(items.map((item) => item.label));
+    const previous = visibleTypes;
+    const known = knownLabels;
+    visibleTypes = new Set(
+      items
+        .filter((item) => !previous || previous.has(item.label) || (known != null && !known.has(item.label)))
+        .map((item) => item.label)
+    );
+    knownLabels = new Set(items.map((item) => item.label));
+    if (!(filterEl instanceof HTMLElement)) return;
     filterEl.innerHTML = items
       .map(
         (item) => `
         <label class="ps-chart-filter-item">
-          <input type="checkbox" data-type-label="${escapeHtml(item.label)}" checked>
+          <input type="checkbox" data-type-label="${escapeHtml(item.label)}"${visibleTypes.has(item.label) ? " checked" : ""}>
           <span class="ps-chart-filter-swatch" style="background:${escapeHtml(item.color)}"></span>
           <span>${escapeHtml(item.label)}</span>
         </label>`
@@ -386,59 +479,131 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl, legendEl)
       .join("");
   }
 
-  // Each series is drawn as TWO lines of the same colour: a solid line (all tasks
-  // to realize) and a dotted companion line (the subset already réalisé à 100%).
-  function solidLine(label, color, points, values, width) {
+  // Style des trois sortes de courbes (voir buildDatasetSpecs) : "main" = trait
+  // plein (Total plus épais) ; "before" = même couleur à 35 % d'opacité, fine, sans
+  // pointillé ; "realized" = pointillé [3, 3].
+  function styleSpec(spec, points) {
+    const isTotal = spec.baseLabel === TOTAL_META.label;
+    const data = points.map((point, index) => ({ x: point.midTs, y: spec.values[index] }));
+    const common = { label: spec.label, data, tension: 0.25, fill: false, spanGaps: true };
+    if (spec.kind === "before") {
+      const pale = withAlpha(spec.color, 0.35);
+      return {
+        ...common,
+        borderColor: pale,
+        backgroundColor: pale,
+        borderWidth: 1.5,
+        pointRadius: 2,
+        pointHoverRadius: 4,
+      };
+    }
+    if (spec.kind === "realized") {
+      return {
+        ...common,
+        borderColor: spec.color,
+        backgroundColor: spec.color,
+        borderWidth: isTotal ? 3 : 2,
+        borderDash: [3, 3],
+        pointRadius: 2,
+        pointStyle: "circle",
+        pointHoverRadius: 4,
+      };
+    }
     return {
-      label,
-      data: points.map((point, index) => ({ x: point.midTs, y: values[index] })),
-      borderColor: color,
-      backgroundColor: color,
-      borderWidth: width,
+      ...common,
+      borderColor: spec.color,
+      backgroundColor: spec.color,
+      borderWidth: isTotal ? 3 : 2,
       pointRadius: 3,
       pointHoverRadius: 5,
-      tension: 0.25,
-      fill: false,
-      spanGaps: true,
     };
   }
 
-  function dottedLine(label, color, points, values, width) {
-    return {
-      label,
-      data: points.map((point, index) => ({ x: point.midTs, y: values[index] })),
-      borderColor: color,
-      backgroundColor: color,
-      borderWidth: width,
-      borderDash: [3, 3],
-      pointRadius: 2,
-      pointStyle: "circle",
-      pointHoverRadius: 4,
-      tension: 0.25,
-      fill: false,
-      spanGaps: true,
-    };
-  }
-
-  function buildDatasets(series) {
-    const datasets = [];
-    series.typesPresent.forEach((type) => {
-      const meta = TYPE_META[type];
-      datasets.push(solidLine(meta.label, meta.color, series.points, series.byType[type], 2));
-      datasets.push(
-        dottedLine(`${meta.label} (réalisé)`, meta.color, series.points, series.byTypeRealized[type] || [], 2)
-      );
-    });
-    datasets.push(solidLine(TOTAL_META.label, TOTAL_META.color, series.points, series.total, 3));
-    datasets.push(
-      dottedLine(`${TOTAL_META.label} (réalisé)`, TOTAL_META.color, series.points, series.totalRealized, 3)
-    );
+  function buildDatasets(rawSeries, smoothedSeries) {
+    const specs = buildDatasetSpecs({ rawSeries, smoothedSeries, mode: lastMode });
+    const datasets = specs.map((spec) => styleSpec(spec, rawSeries.points));
     // Re-apply the active type filter so it survives viewport re-renders.
     datasets.forEach((ds) => {
       ds.hidden = visibleTypes != null && !visibleTypes.has(baseLabel(ds.label));
     });
     return datasets;
   }
+
+  // Types (clés TYPE_ORDER) des cases cochées ; « Total » n'en désigne aucun.
+  function visibleTypeKeys() {
+    if (!visibleTypes) return [];
+    return TYPE_ORDER.filter((type) => visibleTypes.has(TYPE_META[type].label));
+  }
+
+  // Libellé et bornes (AAAA-MM-JJ, fin exclue) d'un seau.
+  function describeBucket(point) {
+    const start = new Date(point.startTs);
+    const label =
+      granularity === "week"
+        ? `semaine du ${pad2(start.getDate())}/${pad2(start.getMonth() + 1)}/${start.getFullYear()}`
+        : formatMonthLabel(point.monthKey);
+    return {
+      startIso: isoOfTs(point.startTs),
+      endIso: isoOfTs(point.endTs),
+      label,
+      granularity,
+      visibleTypeKeys: visibleTypeKeys(),
+    };
+  }
+
+  // Le clic est reconnu ICI, pas par le « click » de Chart.js : dans le widget, le
+  // panoramique de la frise (bindPan sur #ps-chart) écoute en capture, appelle
+  // stopPropagation et capture le pointeur, si bien que ni le canevas ni son
+  // « click » ne reçoivent rien. On écoute donc le document, premier nœud du
+  // chemin, avant tout stopPropagation d'un ancêtre.
+  //   pointerdown (bouton gauche, sur le canevas) : début de geste ;
+  //   pointermove : dès que le trajet dépasse 4 px, c'est un glisser ;
+  //   pointerup : sans glisser, le seau sous le pointeur est ouvert.
+  function handleDocPointerDown(event) {
+    const onCanvas = event.button === 0 && canvasEl.contains(event.target);
+    gesture = onCanvas
+      ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY, dragged: false }
+      : null;
+  }
+
+  function handleDocPointerMove(event) {
+    if (!gesture || event.pointerId !== gesture.pointerId || gesture.dragged) return;
+    if (Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > CLICK_DRAG_THRESHOLD_PX) {
+      gesture.dragged = true;
+    }
+  }
+
+  function handleDocPointerCancel() {
+    gesture = null;
+  }
+
+  function handleDocPointerUp(event) {
+    if (!gesture || event.pointerId !== gesture.pointerId) return;
+    const current = gesture;
+    gesture = null;
+    // Trajet > 4 px (mesuré au fil des pointermove) ou relâché loin de l'appui.
+    if (current.dragged) return;
+    if (Math.hypot(event.clientX - current.x, event.clientY - current.y) > CLICK_DRAG_THRESHOLD_PX) return;
+    if (typeof onBucketClick !== "function" || !chart?.scales?.x) return;
+    // Aucune case cochée : le graphique est vide, rien à lister.
+    if (visibleTypes && visibleTypes.size === 0) return;
+    const rect = canvasEl.getBoundingClientRect();
+    const px = event.clientX - rect.left;
+    const py = event.clientY - rect.top;
+    const area = chart.chartArea;
+    if (area && (px < area.left || px > area.right || py < area.top || py > area.bottom)) return;
+    const index = findBucketIndexAt(lastPoints, chart.scales.x.getValueForPixel(px));
+    if (index == null) return;
+    onBucketClick(describeBucket(lastPoints[index]));
+  }
+
+  const DOC_POINTER_HANDLERS = [
+    ["pointerdown", handleDocPointerDown],
+    ["pointermove", handleDocPointerMove],
+    ["pointerup", handleDocPointerUp],
+    ["pointercancel", handleDocPointerCancel],
+  ];
+  const ownerDoc = canvasEl instanceof HTMLElement ? canvasEl.ownerDocument : null;
 
   function ensureChart() {
     if (chart) return true;
@@ -524,14 +689,19 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl, legendEl)
     if (!chart) return;
     if (viewport) lastViewport = viewport;
     const vp = lastViewport;
-    const series = buildTaskLoadSeries(lastRows, lastColumns, vp, { granularity });
+    const rawSeries = buildTaskLoadSeries(lastTasks, vp, { granularity, dateKey: "dueIso" });
+    const smoothedSeries =
+      lastMode === "raw"
+        ? null
+        : buildTaskLoadSeries(lastTasks, vp, { granularity, dateKey: "smoothedIso" });
     const bounds = getChartWindowBounds(vp);
     if (bounds) {
       chart.options.scales.x.min = bounds.minTs;
       chart.options.scales.x.max = bounds.maxTs;
     }
-    lastBoundaryTicks = series.points.map((point) => point.startTs).filter(Number.isFinite);
-    chart.data.datasets = buildDatasets(series);
+    lastPoints = rawSeries.points;
+    lastBoundaryTicks = rawSeries.points.map((point) => point.startTs).filter(Number.isFinite);
+    chart.data.datasets = buildDatasets(rawSeries, smoothedSeries);
     chart.update("none");
   }
 
@@ -578,17 +748,32 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl, legendEl)
     applyViewport(lastViewport);
   }
 
-  function render({ rows, columns, viewport } = {}) {
-    lastRows = rows || [];
-    lastColumns = columns || null;
-    buildFilter(); // rebuild checkboxes for this project (all checked)
+  function render({ chartInput, viewport } = {}) {
+    lastTasks = chartInput?.tasks || [];
+    const requested = chartInput?.mode;
+    lastMode = chartInput?.active && (requested === "smoothed" || requested === "both") ? requested : "raw";
+    buildFilter(); // rebuild checkboxes for these tasks (user's choice kept)
     buildLegend(); // the left column mirrors those same types, in the same order
     if (!ensureChart()) return;
     applyViewport(viewport);
   }
 
+  // Nouvelles tâches ou nouveau mode, même fenêtre.
+  function setChartInput(chartInput) {
+    render({ chartInput, viewport: lastViewport });
+  }
+
   function setViewport(viewport) {
     applyViewport(viewport);
+  }
+
+  // État d'interface à mémoriser : cases cochées (null = tout) et regroupement.
+  function getUiState() {
+    return {
+      visibleLabels: visibleTypes ? [...visibleTypes] : null,
+      knownLabels: knownLabels ? [...knownLabels] : null,
+      granularity,
+    };
   }
 
   // Match the top pane's current height (driven by the splitter/resizer) so the
@@ -608,11 +793,17 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl, legendEl)
   function destroy() {
     if (chart && typeof chart.destroy === "function") chart.destroy();
     chart = null;
-    lastRows = [];
-    lastColumns = null;
+    lastTasks = [];
+    lastMode = "raw";
+    lastPoints = [];
     lastViewport = null;
     lastBoundaryTicks = [];
     visibleTypes = null;
+    knownLabels = null;
+    gesture = null;
+    if (ownerDoc) {
+      DOC_POINTER_HANDLERS.forEach(([type, fn]) => ownerDoc.removeEventListener(type, fn, true));
+    }
     if (legendEl instanceof HTMLElement) {
       legendEl.innerHTML = "";
     }
@@ -626,6 +817,9 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl, legendEl)
     }
   }
 
+  if (ownerDoc) {
+    DOC_POINTER_HANDLERS.forEach(([type, fn]) => ownerDoc.addEventListener(type, fn, true));
+  }
   if (filterEl instanceof HTMLElement) {
     filterEl.addEventListener("change", handleFilterChange);
   }
@@ -634,5 +828,5 @@ export function createPlanningChart(canvasEl, filterEl, granularityEl, legendEl)
     buildGranularityControl();
   }
 
-  return { render, setViewport, setHeight, destroy };
+  return { render, setChartInput, setViewport, setHeight, getUiState, destroy };
 }

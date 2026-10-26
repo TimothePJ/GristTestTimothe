@@ -48,3 +48,13 @@ window.grist = {
     },
   },
 };
+
+// Contexte de service partage (shared/grist-service-context.js en vrai) : le
+// harnais n'en charge pas, il n'en mime que la lecture du service affiche et du
+// mode lecture seule. "Structure" est le repli que le reste du widget prend deja
+// sans contexte (gristService, planningRealisation) ; le lissage, lui, range ses
+// maximums PAR service (Projets2.Lissage) et a besoin d'un nom de service.
+window.GristServiceContext = {
+  getService: () => "Structure",
+  isReadOnly: () => false,
+};
