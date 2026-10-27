@@ -680,6 +680,52 @@ const SCENARIOS = {
       t(5, "NDC", "2027-02-15"),
     ],
   }),
+
+  // --- 0 pour un mois precis : aucune tache ce mois-la ---
+
+  // Avril a 0 (4 pour les autres mois) : ses trois taches partent en mars, qui
+  // en a deja une et en tient quatre.
+  monthZero: () => ({
+    today: JANUARY,
+    settings: { maxTotal: 4, maxByType: {}, maxByMonth: { "2027-04": { maxTotal: 0, maxByType: {} } } },
+    tasks: [
+      t(1, "NDC", "2027-04-05"),
+      t(2, "COUPES", "2027-04-10"),
+      t(3, "NDC", "2027-04-15"),
+      t(4, "NDC", "2027-03-10"),
+    ],
+  }),
+
+  // Mars a 0, maximum 1 ailleurs : la tache en trop d'avril saute mars, vide
+  // mais interdit, et arrive en fevrier.
+  monthZeroSkipped: () => ({
+    today: JANUARY,
+    settings: { maxTotal: 1, maxByType: {}, maxByMonth: { "2027-03": { maxTotal: 0, maxByType: {} } } },
+    tasks: [t(1, "NDC", "2027-04-05"), t(2, "NDC", "2027-04-20")],
+  }),
+
+  // Avril a 0 armature seulement : les armatures partent, le coffrage reste.
+  monthZeroType: () => ({
+    today: JANUARY,
+    settings: { maxByType: {}, maxByMonth: { "2027-04": { maxTotal: null, maxByType: { ARMATURES: 0 } } } },
+    tasks: [t(1, "ARMATURES", "2027-04-05"), t(2, "ARMATURES", "2027-04-20"), t(3, "COFFRAGE", "2027-04-12")],
+  }),
+
+  // Mars a 0 avec une tache realisee : elle reste (figee) et le mois est signale
+  // en depassement ; la tache a venir part en fevrier.
+  monthZeroFrozen: () => ({
+    today: JANUARY,
+    settings: { maxByType: {}, maxByMonth: { "2027-03": { maxTotal: 0, maxByType: {} } } },
+    tasks: [t(1, "NDC", "2027-03-05", { realized: true }), t(2, "NDC", "2027-03-15")],
+  }),
+
+  // Le mois courant a 0, lissage parti du mois courant : rien ne peut partir
+  // avant lui, la tache reste et le mois est signale.
+  monthZeroCurrent: () => ({
+    today: JANUARY,
+    settings: { maxByType: {}, maxByMonth: { "2027-01": { maxTotal: 0, maxByType: {} } } },
+    tasks: [t(1, "NDC", "2027-01-20")],
+  }),
 };
 
 function unrelatedBase() {
@@ -1563,4 +1609,63 @@ test("maximum par type d'un seul mois : une file par type", () => {
 
   assert.deepEqual(monthsOf(result), { "2027-02": [2], "2027-03": [1, 3] });
   assert.deepEqual(result.overflows, []);
+});
+
+// --- 0 pour un mois precis : aucune tache ce mois-la -----------------------------
+
+test("mois à 0 : ses tâches à venir partent toutes dans les mois d'avant", () => {
+  const result = run("monthZero");
+
+  assert.deepEqual(monthsOf(result), { "2027-03": [1, 2, 3, 4] });
+  assert.equal(byRow(result).get(1).smoothedIso, "2027-03-05");
+  assert.deepEqual(result.overflows, []);
+});
+
+test("mois à 0 : aucune tâche n'y arrive, même vide", () => {
+  const result = run("monthZeroSkipped");
+
+  assert.deepEqual(monthsOf(result), { "2027-02": [1], "2027-04": [2] });
+  assert.deepEqual(result.overflows, []);
+});
+
+test("mois à 0 pour un type : seules les tâches de ce type partent", () => {
+  const result = run("monthZeroType");
+
+  assert.deepEqual(monthsOf(result), { "2027-03": [1, 2], "2027-04": [3] });
+  assert.deepEqual(result.overflows, []);
+});
+
+test("mois à 0 avec une tâche réalisée : elle reste, le mois est signalé", () => {
+  const result = run("monthZeroFrozen");
+
+  assert.deepEqual(monthsOf(result), { "2027-02": [2], "2027-03": [1] });
+  assert.deepEqual(result.overflows, [
+    { month: "2027-03", series: "TOTAL", count: 1, max: 0, reason: "taches-realisees" },
+  ]);
+});
+
+test("mois courant à 0, lissage parti du mois courant : la tâche reste, le mois est signalé", () => {
+  const result = run("monthZeroCurrent");
+
+  assert.deepEqual(monthsOf(result), { "2027-01": [1] });
+  assert.deepEqual(result.overflows, [
+    { month: "2027-01", series: "TOTAL", count: 1, max: 0, reason: "mois-en-cours" },
+  ]);
+});
+
+test("monthMaxima : un 0 de mois précis vaut 0, pas « pas de maximum »", () => {
+  const settings = {
+    maxTotal: 4,
+    maxByType: { ARMATURES: 2 },
+    maxByMonth: { "2027-03": { maxTotal: 0, maxByType: { ARMATURES: 0 } } },
+  };
+  assert.deepEqual(monthMaxima(settings, "2027-03"), { maxTotal: 0, maxByType: { ARMATURES: 0 } });
+  assert.deepEqual(monthMaxima(settings, "2027-04"), { maxTotal: 4, maxByType: { ARMATURES: 2 } });
+});
+
+test("0 pour tous les mois : ignoré (aucun lissage), comme avant", () => {
+  const result = smoothTasks([t(1, "NDC", "2027-04-05")], { maxTotal: 0, maxByType: { NDC: 0 } }, JANUARY);
+
+  assert.equal(result.active, false);
+  assertUnchanged(result);
 });

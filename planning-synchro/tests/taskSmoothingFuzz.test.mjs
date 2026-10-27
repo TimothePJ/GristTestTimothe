@@ -63,7 +63,7 @@ const isoOf = (day) => new Date(day * DAY_MS).toISOString().slice(0, 10);
 const FIRST_DAY = dayOf("2027-01-01");
 const LAST_DAY = dayOf("2027-08-31");
 
-function makeCase(seed, { extended = false, monthly = false } = {}) {
+function makeCase(seed, { extended = false, monthly = false, zero = false } = {}) {
   const rand = mulberry32(seed);
   const int = (min, max) => min + Math.floor(rand() * (max - min + 1));
   const dayBetween = (from, to) => int(from, to);
@@ -115,17 +115,19 @@ function makeCase(seed, { extended = false, monthly = false } = {}) {
     maxByType[type] = limit();
   });
   const settings = { maxTotal: limit(), maxByType };
-  if (monthly) addMonthlySettings(settings, today, int, rand);
+  if (monthly) addMonthlySettings(settings, today, int, rand, zero);
   return { today, tasks, settings };
 }
 
 // Fuzz « mois » : mois de depart (absent 30 %, sinon de novembre 2026 au mois
 // apres aujourd'hui, donc parfois passe, parfois le mois courant ou plus tard)
 // et 0 a 3 mois precis de janvier a aout 2027, chacun avec un maximum general
-// (une fois sur deux) et 0 a 2 maximums par type, de 1 a 5.
+// (une fois sur deux) et 0 a 2 maximums par type, de 1 a 5 — de 0 a 5 avec
+// `zero` (un 0 interdit le mois, ou le type ce mois-la).
 const MONTH_KEYS = ["2026-11", "2026-12", ...Array.from({ length: 8 }, (_, i) => `2027-0${i + 1}`)];
 
-function addMonthlySettings(settings, today, int, rand) {
+function addMonthlySettings(settings, today, int, rand, zero = false) {
+  const low = zero ? 0 : 1;
   if (rand() >= 0.3) {
     const last = MONTH_KEYS.indexOf(monthKeyOf(today)) + 1;
     settings.startMonth = MONTH_KEYS[int(0, last)];
@@ -134,9 +136,9 @@ function addMonthlySettings(settings, today, int, rand) {
   const count = int(0, 3);
   for (let k = 0; k < count; k += 1) {
     const month = MONTH_KEYS[int(2, MONTH_KEYS.length - 1)];
-    const entry = { maxTotal: rand() < 0.5 ? null : int(1, 5), maxByType: {} };
+    const entry = { maxTotal: rand() < 0.5 ? null : int(low, 5), maxByType: {} };
     const types = int(0, 2);
-    for (let n = 0; n < types; n += 1) entry.maxByType[TYPE_ORDER[int(0, TYPE_ORDER.length - 1)]] = int(1, 5);
+    for (let n = 0; n < types; n += 1) entry.maxByType[TYPE_ORDER[int(0, TYPE_ORDER.length - 1)]] = int(low, 5);
     maxByMonth[month] = entry;
   }
   settings.maxByMonth = maxByMonth;
@@ -297,7 +299,7 @@ function unfoundedExceptions(tasks, today, result) {
 
 function checkCase(seed, options) {
   const { today, tasks, settings } = makeCase(seed, options);
-  const where = `graine ${seed}${options?.extended ? " (étendu)" : ""}${options?.monthly ? " (mois)" : ""}`;
+  const where = `graine ${seed}${options?.extended ? " (étendu)" : ""}${options?.monthly ? " (mois)" : ""}${options?.zero ? " (0)" : ""}`;
   const result = smoothTasks(tasks, settings, today);
 
   assert.deepEqual(findSmoothingViolations(tasks, settings, today, result), [], where);
@@ -368,6 +370,15 @@ test("fuzz mois : mois de départ et maximums d'un mois précis (graines 1 à 20
   SEEDS.forEach((seed) => {
     checkCase(seed, { monthly: true });
     checkCase(seed, { monthly: true, extended: true });
+  });
+  assert.equal(warn.mock.callCount(), 0, "console.warn appelé");
+});
+
+test("fuzz mois à 0 : un mois précis peut interdire toute tâche, ou un type (graines 1 à 2000, simple et étendu)", (ctx) => {
+  const warn = ctx.mock.method(console, "warn", () => {});
+  SEEDS.forEach((seed) => {
+    checkCase(seed, { monthly: true, zero: true });
+    checkCase(seed, { monthly: true, zero: true, extended: true });
   });
   assert.equal(warn.mock.callCount(), 0, "console.warn appelé");
 });

@@ -11,8 +11,9 @@
 // du navigateur) ; les reglages sont { maxTotal, maxByType, startMonth?,
 // maxByMonth? } (top/smoothingSettings.js) : maximums entiers >= 1, une valeur
 // absente = pas de maximum ; maxByMonth donne, pour un mois precis, un maximum
-// general et/ou par type qui remplace celui de tous les mois (monthMaxima) ;
-// startMonth (AAAA-MM) est le mois de depart (§4.8).
+// general et/ou par type qui remplace celui de tous les mois (monthMaxima), 0
+// compris (aucune tache, ou aucune de ce type, ce mois-la) ; startMonth
+// (AAAA-MM) est le mois de depart (§4.8).
 //
 // VOCABULAIRE (§3.3) : le mois courant est celui de todayIso. Le MOIS DE DEPART
 // est le premier mois ou une tache peut etre placee : startMonth s'il est fixe
@@ -181,18 +182,21 @@ export function smoothingStartMonth(settings, todayIso) {
 
 // --- maximums --------------------------------------------------------------------
 
-// Entier >= 1, sinon pas de maximum. Les reglages arrivent deja valides
-// (smoothingSettings) ; on ne fait ici que s'en premunir.
-function readLimit(value) {
-  return Number.isInteger(value) && value >= 1 ? value : null;
+// Entier >= 1 (>= 0 pour un mois precis, `allowZero`), sinon pas de maximum.
+// Les reglages arrivent deja valides (smoothingSettings) ; on ne fait ici que
+// s'en premunir. Un 0 de mois precis interdit le mois (a ce type, ou a tout
+// type) : ses taches a venir sont en trop, aucune n'y est placee — fitsIn et
+// isOver le traitent comme n'importe quel maximum.
+function readLimit(value, allowZero = false) {
+  return Number.isInteger(value) && value >= (allowZero ? 0 : 1) ? value : null;
 }
 
 // { maxTotal, maxByType } -> { maxTotal: entier | null, maxByType: Map type -> entier }.
-function readMaxima(source) {
-  const maxTotal = readLimit(source?.maxTotal);
+function readMaxima(source, { allowZero = false } = {}) {
+  const maxTotal = readLimit(source?.maxTotal, allowZero);
   const maxByType = new Map();
   Object.entries(source?.maxByType || {}).forEach(([type, value]) => {
-    const limit = readLimit(value);
+    const limit = readLimit(value, allowZero);
     if (limit != null) maxByType.set(type, limit);
   });
   return { maxTotal, maxByType };
@@ -206,7 +210,7 @@ function readLimits(settings) {
   const byMonth = new Map();
   Object.entries(settings?.maxByMonth || {}).forEach(([key, value]) => {
     if (!MONTH_KEY.test(key)) return;
-    const maxima = readMaxima(value);
+    const maxima = readMaxima(value, { allowZero: true });
     if (maxima.maxTotal != null || maxima.maxByType.size > 0) byMonth.set(monthIndexOf(key), maxima);
   });
   const all = [base, ...byMonth.values()];

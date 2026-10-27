@@ -10,28 +10,34 @@
 //     (AAAA-MM) ; absent = le mois en cours ;
 //   - parMois (facultatif) : pour un mois precis, un maximum general et/ou par
 //     type qui remplace celui de tous les mois (une valeur absente reprend
-//     celle de tous les mois).
+//     celle de tous les mois). Un mois precis accepte 0 : aucune tache (de ce
+//     type) ce mois-la, ses taches a venir partent dans les mois d'avant
+//     (2026-10-27). Pour tous les mois, un maximum reste un entier >= 1.
 // Dans le code on manipule `{ maxTotal, maxByType, startMonth?, maxByMonth? }`
 // (forme attendue par smoothTasks de top/taskSmoothing.js) : startMonth n'est
 // present que s'il est fixe, maxByMonth que s'il a au moins un mois, et chaque
 // mois de maxByMonth vaut `{ maxTotal, maxByType }`.
 //
-// Lecture TOLERANTE : cellule vide, JSON illisible, valeur non entiere ou < 1 ->
-// ignorees avec un console.warn, jamais d'exception.
+// Lecture TOLERANTE : cellule vide, JSON illisible, valeur non entiere ou < 1
+// (< 0 pour un mois precis) -> ignorees avec un console.warn, jamais
+// d'exception.
 
 import { TYPE_ORDER } from "./taskLabels.js";
 
 const FORMAT_VERSION = 1;
 
 export const MAX_INPUT_ERROR = "Entrez un nombre entier supérieur ou égal à 1, ou laissez vide.";
+export const MONTH_MAX_INPUT_ERROR =
+  "Entrez un nombre entier, 0 compris (aucune tâche ce mois-là), ou laissez vide.";
 
 function emptySettings() {
   return { maxTotal: null, maxByType: {} };
 }
 
-// Un maximum valide est un nombre entier >= 1 (la chaine "3" est refusee).
-function isValidMax(value) {
-  return typeof value === "number" && Number.isInteger(value) && value >= 1;
+// Un maximum valide est un nombre entier >= 1, ou >= 0 pour un mois precis
+// (`allowZero`) ; la chaine "3" est refusee.
+function isValidMax(value, allowZero = false) {
+  return typeof value === "number" && Number.isInteger(value) && value >= (allowZero ? 0 : 1);
 }
 
 // Cle de mois valide : AAAA-MM, mois de 01 a 12.
@@ -40,12 +46,14 @@ export function isMonthKey(value) {
 }
 
 // Maximums d'une entree { maxTotal, maxParType } -> { maxTotal, maxByType } ;
-// `where` precise les avertissements (« » pour tous les mois, « de mars 2027 »...).
-function readMaxima(entry, where) {
+// `where` precise les avertissements (« » pour tous les mois, « de mars 2027 »...),
+// `allowZero` accepte 0 (mois precis).
+function readMaxima(entry, where, { allowZero = false } = {}) {
   const maxima = emptySettings();
+  const expected = allowZero ? "entier >= 0 attendu" : "entier >= 1 attendu";
   if (entry.maxTotal != null) {
-    if (isValidMax(entry.maxTotal)) maxima.maxTotal = entry.maxTotal;
-    else console.warn(`Lissage : maximum général${where} ignoré (entier >= 1 attendu).`);
+    if (isValidMax(entry.maxTotal, allowZero)) maxima.maxTotal = entry.maxTotal;
+    else console.warn(`Lissage : maximum général${where} ignoré (${expected}).`);
   }
 
   const perType = entry.maxParType;
@@ -53,10 +61,10 @@ function readMaxima(entry, where) {
     for (const [type, value] of Object.entries(perType)) {
       if (!TYPE_ORDER.includes(type)) {
         console.warn(`Lissage : type inconnu « ${type} »${where} ignoré.`);
-      } else if (isValidMax(value)) {
+      } else if (isValidMax(value, allowZero)) {
         maxima.maxByType[type] = value;
       } else {
-        console.warn(`Lissage : maximum du type « ${type} »${where} ignoré (entier >= 1 attendu).`);
+        console.warn(`Lissage : maximum du type « ${type} »${where} ignoré (${expected}).`);
       }
     }
   }
@@ -81,7 +89,7 @@ function readMonthMaxima(parMois) {
       console.warn(`Lissage : maximums du mois ${month} ignorés.`);
       continue;
     }
-    const maxima = readMaxima(entry, ` du mois ${month}`);
+    const maxima = readMaxima(entry, ` du mois ${month}`, { allowZero: true });
     if (hasMaxima(maxima)) byMonth[month] = maxima;
   }
   return byMonth;
@@ -169,12 +177,14 @@ export function serializeSmoothingCell(rawCell, service, settings) {
 }
 
 // Interprète la saisie d'un champ « maximum » : vide = pas de maximum ; sinon
-// un entier >= 1 (la virgule décimale « 2,5 » est donc refusée).
-export function parseMaxInput(text) {
+// un entier >= 1, ou >= 0 pour une case d'un mois précis (`allowZero`) ; la
+// virgule décimale « 2,5 » est donc refusée.
+export function parseMaxInput(text, { allowZero = false } = {}) {
+  const message = allowZero ? MONTH_MAX_INPUT_ERROR : MAX_INPUT_ERROR;
   const trimmed = String(text ?? "").trim();
   if (trimmed === "") return { ok: true, value: null };
-  if (!/^\d+$/.test(trimmed)) return { ok: false, message: MAX_INPUT_ERROR };
+  if (!/^\d+$/.test(trimmed)) return { ok: false, message };
   const value = Number(trimmed);
-  if (!Number.isSafeInteger(value) || value < 1) return { ok: false, message: MAX_INPUT_ERROR };
+  if (!Number.isSafeInteger(value) || value < (allowZero ? 0 : 1)) return { ok: false, message };
   return { ok: true, value };
 }

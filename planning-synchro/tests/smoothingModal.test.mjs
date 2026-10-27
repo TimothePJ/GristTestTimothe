@@ -734,11 +734,52 @@ test("mois particuliers : saisie invalide -> message et Enregistrer desactive", 
     },
   });
   modal.open(context);
-  const target = cellTarget("2027-01", "TOTAL", "0");
+  const target = cellTarget("2027-01", "TOTAL", "-1");
   get("months").dispatch("input", { target });
   assert.equal(target.attrs["aria-invalid"], "true");
   assert.equal(get("save").disabled, true);
   assert.ok(get("field-error").textContent.includes("nombre entier"));
+  assert.ok(get("field-error").textContent.includes("0"), "le message dit que 0 est permis");
+});
+
+test("mois particuliers : 0 accepte (aucune tache ce mois-la), enregistre tel quel", async () => {
+  const { get, modal, calls, context } = setup({
+    full: true,
+    tasks: PAST_TASKS(),
+    context: {
+      typesPresent: ["COFFRAGE", "NDC"],
+      settings: { maxTotal: 4, maxByType: {}, maxByMonth: { "2027-01": { maxTotal: 2, maxByType: {} } } },
+    },
+  });
+  modal.open(context);
+  const total = cellTarget("2027-01", "TOTAL", "0");
+  get("months").dispatch("input", { target: total });
+  get("months").dispatch("input", { target: cellTarget("2027-01", "NDC", "0") });
+  await sleep(10);
+  assert.equal(total.attrs["aria-invalid"], undefined);
+  assert.equal(get("save").disabled, false);
+  const expected = {
+    maxTotal: 4,
+    maxByType: {},
+    maxByMonth: { "2027-01": { maxTotal: 0, maxByType: { NDC: 0 } } },
+  };
+  assert.deepEqual(calls.compute.at(-1), expected);
+  get("save").dispatch("click");
+  await sleep(5);
+  assert.deepEqual(calls.submit.at(-1), expected);
+  // Rouvert : le 0 enregistre revient dans sa case, sans etre marque invalide.
+  modal.open({ ...context, settings: expected, saved: true });
+  const grid = get("months").innerHTML;
+  assert.ok(/data-month="2027-01" data-series="TOTAL"[^>]*value="0"/.test(grid), grid);
+  assert.ok(!/data-series="TOTAL"[^>]*value="0"[^>]*aria-invalid/.test(grid), grid);
+});
+
+test("maximum de tous les mois : 0 reste refuse", () => {
+  const { get, modal, context } = setup();
+  modal.open(context);
+  typeInTotal(get, "0");
+  assert.equal(get("total").getAttribute("aria-invalid"), "true");
+  assert.equal(get("save").disabled, true);
 });
 
 test("mois particuliers : un maximum enregistre pour un type sans colonne est conserve", async () => {

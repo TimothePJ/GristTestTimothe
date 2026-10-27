@@ -560,6 +560,14 @@ fenêtre **« Lissage des tâches — <Projet> · <Service> »**
   lissage ; ✕ retire le mois ;
 - valeurs : **entier ≥ 1**, ou **vide** = pas de maximum ; une saisie invalide est
   signalée sur le champ et bloque « Enregistrer » ;
+- **0 pour un mois particulier** (2026-10-27) : une case d'un mois particulier
+  accepte **0** — aucune tâche ce mois-là (case Total), ou aucune de ce type
+  (case d'un type). Ses tâches **à venir** sont avancées dans les mois d'avant,
+  là où elles tiennent, et aucune tâche n'y est avancée, même s'il est vide. Les
+  tâches figées (réalisées, en retard) y restent, et le mois est alors signalé en
+  dépassement avec sa raison (« tâches réalisées », « mois en cours » quand le
+  lissage part du mois courant, « plus de place avant »). Un 0 n'est pas permis
+  dans les maximums de tous les mois : il n'y laisserait aucune tâche nulle part ;
 - **Aperçu** recalculé à chaque saisie : nombre de tâches avancées, dépassements
   restants et leur raison, tableau **Avant / Après** des mois qui changent ou
   restent en dépassement ;
@@ -586,11 +594,12 @@ entrée par service** (comme `Projets2.Avancement`) :
 - deux clés facultatives : `"debut":"2025-06"` (mois de départ ; absent = mois
   courant) et `"parMois":{"2027-03":{"maxTotal":10,"maxParType":{"ARMATURES":6}}}`
   (maximums d'un mois précis, même forme ; une valeur absente reprend celle de
-  tous les mois ; un mois sans valeur n'est pas écrit). Une version du widget qui
-  ne les connaît pas les ignore et lisse avec les seuls maximums de tous les
-  mois ;
+  tous les mois ; `0` = aucune tâche, ou aucune de ce type, ce mois-là ; un mois
+  sans valeur n'est pas écrit). Une version du widget qui ne les connaît pas les
+  ignore et lisse avec les seuls maximums de tous les mois ; une version
+  d'avant le 2026-10-27 ignore aussi un `0` de mois (avec un `console.warn`) ;
 - lecture **tolérante** (`top/smoothingSettings.js`) : cellule vide, JSON
-  illisible, valeur non entière ou < 1 → ignorée avec un `console.warn`, jamais
+  illisible, valeur non entière ou < 1 (< 0 pour un mois précis) → ignorée avec un `console.warn`, jamais
   de plantage du graphique ; un enregistrement ultérieur réécrit une cellule
   propre ;
 - **colonne absente** (la prod tant qu'elle n'est pas créée) : le bouton

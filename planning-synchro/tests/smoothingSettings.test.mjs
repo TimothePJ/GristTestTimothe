@@ -5,6 +5,7 @@ import {
   hasAnyMax,
   serializeSmoothingCell,
   parseMaxInput,
+  MONTH_MAX_INPUT_ERROR,
 } from "../assets/js/top/smoothingSettings.js";
 
 const EMPTY = { maxTotal: null, maxByType: {} };
@@ -169,9 +170,9 @@ test("getServiceSettings : mois de départ ou mois particulier invalides ignoré
       debut: "juin",
       parMois: {
         "2027-13": { maxTotal: 2 },
-        "2027-03": { maxTotal: 0, maxParType: { BIDON: 1, NDC: 2 } },
+        "2027-03": { maxTotal: -1, maxParType: { BIDON: 1, NDC: 2 } },
         "2027-04": "x",
-        "2027-05": { maxTotal: 0 },
+        "2027-05": { maxTotal: 2.5 },
       },
     },
   });
@@ -228,6 +229,65 @@ test("serializeSmoothingCell puis getServiceSettings : aller-retour", () => {
     maxByMonth: { "2027-01": { maxTotal: 5, maxByType: { COFFRAGE: 1 } } },
   };
   assert.deepEqual(getServiceSettings(serializeSmoothingCell("", "Structure", settings), "Structure"), settings);
+});
+
+// --- 0 pour un mois particulier : aucune tâche ce mois-là ----------------------------
+// Un 0 n'a de sens que pour UN mois (ses tâches à venir partent dans les mois
+// d'avant, aucune n'y arrive) ; pour tous les mois, il n'en laisserait aucune
+// nulle part : il y reste refusé, comme avant.
+
+test("getServiceSettings : 0 accepté pour un mois particulier, refusé pour tous les mois", () => {
+  const raw = cell({
+    Structure: {
+      maxTotal: 0,
+      maxParType: { ARMATURES: 0, NDC: 3 },
+      parMois: {
+        "2027-03": { maxTotal: 0 },
+        "2027-04": { maxParType: { ARMATURES: 0, COFFRAGE: 2 } },
+      },
+    },
+  });
+  let result;
+  withWarnSpy(() => {
+    result = getServiceSettings(raw, "Structure");
+  });
+  assert.deepEqual(result, {
+    maxTotal: null,
+    maxByType: { NDC: 3 },
+    maxByMonth: {
+      "2027-03": { maxTotal: 0, maxByType: {} },
+      "2027-04": { maxTotal: null, maxByType: { ARMATURES: 0, COFFRAGE: 2 } },
+    },
+  });
+  assert.equal(hasAnyMax({ maxTotal: null, maxByType: {}, maxByMonth: { "2027-03": { maxTotal: 0, maxByType: {} } } }), true);
+});
+
+test("serializeSmoothingCell puis getServiceSettings : un mois à 0 fait l'aller-retour", () => {
+  const settings = {
+    maxTotal: 4,
+    maxByType: {},
+    maxByMonth: {
+      "2027-03": { maxTotal: 0, maxByType: {} },
+      "2027-04": { maxTotal: null, maxByType: { ARMATURES: 0 } },
+    },
+  };
+  const raw = serializeSmoothingCell("", "Structure", settings);
+  assert.deepEqual(JSON.parse(raw).services.Structure.parMois, {
+    "2027-03": { maxTotal: 0 },
+    "2027-04": { maxParType: { ARMATURES: 0 } },
+  });
+  assert.deepEqual(getServiceSettings(raw, "Structure"), settings);
+});
+
+test("parseMaxInput pour un mois particulier : 0 accepté, le reste comme avant", () => {
+  assert.deepEqual(parseMaxInput("0", { allowZero: true }), { ok: true, value: 0 });
+  assert.deepEqual(parseMaxInput(" 3 ", { allowZero: true }), { ok: true, value: 3 });
+  assert.deepEqual(parseMaxInput("", { allowZero: true }), { ok: true, value: null });
+  for (const text of ["-1", "2,5", "x"]) {
+    assert.deepEqual(parseMaxInput(text, { allowZero: true }), { ok: false, message: MONTH_MAX_INPUT_ERROR });
+  }
+  // Sans l'option (tous les mois), 0 reste refusé.
+  assert.deepEqual(parseMaxInput("0"), { ok: false, message: MESSAGE });
 });
 
 test("serializeSmoothingCell : sans mois de départ ni mois particulier, la cellule garde sa forme d'avant", () => {

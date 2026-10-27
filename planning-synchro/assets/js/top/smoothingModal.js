@@ -232,6 +232,9 @@ function renderTypeRows(types, draft, peaks, disabled) {
 }
 
 const NO_MONTH_TEXT = "Aucun mois particulier : les maximums ci-dessus valent pour tous les mois.";
+// Options de lecture d'une case de mois particulier : 0 y est permis (aucune
+// tache, ou aucune de ce type, ce mois-la), pas dans les maximums de tous les mois.
+const MONTH_CELL = { allowZero: true };
 const NO_CHOICE_TEXT = "Aucun mois à ajouter";
 
 function taskCountText(count) {
@@ -275,7 +278,8 @@ function renderMonthRows(months, types, draft, counts, disabled) {
       const cells = columns
         .map((column) => {
           const value = column.key === "TOTAL" ? raw.total : raw.byType[column.key] ?? "";
-          const invalid = !parseMaxInput(value).ok;
+          // 0 permis dans une case de mois : aucune tache (de ce type) ce mois-la.
+          const invalid = !parseMaxInput(value, MONTH_CELL).ok;
           return `<td><input class="ps-smoothing-input ps-smoothing-input--cell" type="text" inputmode="numeric" autocomplete="off" data-month="${escapeHtml(
             month
           )}" data-series="${escapeHtml(column.key)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(
@@ -354,18 +358,19 @@ export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debo
   const startKeyNow = () => smoothingStartMonth({ startMonth: draft.start || null }, context.todayIso);
 
   // Un groupe de champs { total, byType } -> { maxima, error } ; les types sans
-  // ligne gardent leur valeur enregistree (savedByType).
-  function readMaxima(raw, savedByType, shown) {
+  // ligne gardent leur valeur enregistree (savedByType). `options` : MONTH_CELL
+  // pour un mois particulier (0 permis).
+  function readMaxima(raw, savedByType, shown, options = undefined) {
     let error = null;
     const maxima = { maxTotal: null, maxByType: {} };
     Object.entries(savedByType || {}).forEach(([type, value]) => {
       if (!shown.includes(type)) maxima.maxByType[type] = value;
     });
-    const total = parseMaxInput(raw.total);
+    const total = parseMaxInput(raw.total, options);
     if (!total.ok) error = total.message;
     else maxima.maxTotal = total.value;
     shown.forEach((type) => {
-      const parsed = parseMaxInput(raw.byType[type] ?? "");
+      const parsed = parseMaxInput(raw.byType[type] ?? "", options);
       if (!parsed.ok) error = error || parsed.message;
       else if (parsed.value != null) maxima.maxByType[type] = parsed.value;
     });
@@ -387,7 +392,7 @@ export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debo
     Object.keys(draft.months)
       .sort()
       .forEach((month) => {
-        const own = readMaxima(draft.months[month], context.settings?.maxByMonth?.[month]?.maxByType, shown);
+        const own = readMaxima(draft.months[month], context.settings?.maxByMonth?.[month]?.maxByType, shown, MONTH_CELL);
         firstError = firstError || own.error;
         if (own.maxima.maxTotal != null || Object.keys(own.maxima.maxByType).length) maxByMonth[month] = own.maxima;
       });
@@ -632,7 +637,7 @@ export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debo
     } else if (type) draft.byType[type] = value;
     else if (target === totalEl) draft.total = value;
     else return;
-    const parsed = parseMaxInput(value);
+    const parsed = parseMaxInput(value, month ? MONTH_CELL : undefined);
     if (parsed.ok) target.removeAttribute?.("aria-invalid");
     else target.setAttribute?.("aria-invalid", "true");
     // Un maximum de tous les mois change : les cases vides du tableau
