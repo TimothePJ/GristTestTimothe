@@ -282,6 +282,28 @@ test("targetLookup transmis au constructeur (indice cible du projet)", () => {
   assert.equal(tasksOf(lines, { targetLookup: lookup })[0].realized, false);
 });
 
+// Pourcentage d'avancement : celui de la colonne « Réalisé » de Planning Projet
+// (indice du document face a l'indice cible du projet, 100 en cloture forcee).
+test("avancement : pourcentage et clôture forcée, comme Planning Projet", () => {
+  const lines = [
+    row({ id: 20, ID2: "90", Type_doc: "COFFRAGE", Date_limite: "2027-04-01", Diff_coffrage: "2027-04-20", Indice: "A" }),
+    row({ id: 21, ID2: "91", Type_doc: "COFFRAGE", Date_limite: "2027-04-01", Diff_coffrage: "2027-04-20", Indice: "0" }),
+    row({ id: 22, ID2: "92", Type_doc: "NDC", Date_limite: "2027-04-01", Diff_coffrage: "2027-04-20" }),
+    row({ id: 23, ID2: "93", Type_doc: "NDC", Date_limite: "2027-04-01", Diff_coffrage: "2027-04-20", Date_Cloture: "2026-05-12" }),
+  ];
+  const lookup = new Map([["p1", new Map([["COFFRAGE", "B"]])]]);
+  const byRow = new Map(tasksOf(lines, { targetLookup: lookup }).map((t) => [t.rowId, t]));
+  assert.deepEqual(
+    [20, 21, 22, 23].map((id) => [byRow.get(id).progress, byRow.get(id).closureLabel, byRow.get(id).realized]),
+    [
+      [67, "", false],
+      [33, "", false],
+      [0, "", false],
+      [100, "12/05/2026", true],
+    ]
+  );
+});
+
 test("liste vide : sans ligne, sans projet", () => {
   assert.deepEqual(buildChartTasks([], { project: PROJECT }), []);
   assert.deepEqual(buildChartTasks(null, { project: PROJECT }), []);

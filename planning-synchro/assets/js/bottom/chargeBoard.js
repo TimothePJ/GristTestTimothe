@@ -36,6 +36,11 @@
 //    getDayBoundaryLeftPx exactly. A literal getMonthWidth/month-grouped
 //    render would either spill days outside the window (if unfiltered) or
 //    require the same filtering anyway, so no separate getMonthWidth is kept.
+//    Fluidite (2026-10-27) : le board peut dessiner un peu PLUS que la fenetre
+//    — un jour de plus quand elle s'arrete sur une fraction de jour, une marge
+//    pendant un glisser — et decale alors ses pistes (transform) pour montrer
+//    la fenetre ; le jour N de la fenetre reste a N * dayWidth de son bord
+//    (voir « plage dessinee » plus bas).
 // 4. No worker.id: workers are grouped-by-name TimeSegment rows (no stable
 //    numeric id on the worker itself), so segment-bar/track DOM carries
 //    data-worker-name instead of the source's data-worker-id; Task 12 keys
@@ -62,7 +67,7 @@ import {
   isBusinessDay,
   getHalfDaySlotRange,
   createHalfDaySlotKey,
-  getSegmentEffectiveDays,
+  getSegmentEffectiveDays as computeSegmentEffectiveDays,
 } from "../utils/timeSegments.js";
 import { resolveSegmentMonthKey, getMonthBounds, getMonthAvailableDays } from "../utils/monthSegments.js";
 import { countPlanningTasksOverlappingRange } from "../top/phases.js";
@@ -86,6 +91,23 @@ function escapeHtml(value) {
 function formatDayValue(value) {
   const formatted = formatNumber(value);
   return formatted.endsWith(",00") ? formatted.slice(0, -3) : formatted;
+}
+
+// Jours effectifs d'un segment, memorises par segment. Le calcul (timeSegments.js)
+// recompte les jours ouvres du mois, demi-journee par demi-journee, a chaque
+// appel ; un rendu le demande ~6 fois par segment (barre, totaux de role, Total,
+// Charge) et c'etait le premier poste d'un zoom ou d'un pan. Un segment ne change
+// jamais apres buildWorkersFromSegments (les donnees neuves recreent les objets),
+// le resultat memorise reste donc exact.
+const segmentEffectiveDaysMemo = new WeakMap();
+function getSegmentEffectiveDays(segment) {
+  if (!segment || typeof segment !== "object") return computeSegmentEffectiveDays(segment);
+  let days = segmentEffectiveDaysMemo.get(segment);
+  if (days === undefined) {
+    days = computeSegmentEffectiveDays(segment);
+    segmentEffectiveDaysMemo.set(segment, days);
+  }
+  return days;
 }
 
 // --- worker building (pure) --------------------------------------------------
@@ -241,6 +263,67 @@ function buildWindowDays(viewport) {
   return windowDays;
 }
 
+// --- plage dessinee : fenetre visible, marge de glisser ------------------------
+//
+// Le board ne dessine plus exactement [firstVisibleDate .. rangeEndDate] :
+//   - avec une fraction de jour (offsetDays, glisser au pixel pres), il dessine
+//     un jour de plus a droite et decale ses pistes de -offsetDays x dayWidth ;
+//   - pendant un glisser, il dessine en plus une MARGE de chaque cote (jusqu'a
+//     une fenetre, bornee aux limites de la frise) puis se contente de DECALER
+//     ses pistes (transform, rendu par le compositeur) tant que la fenetre
+//     visible tient dans ce qui est dessine. Reconstruire tout le HTML a chaque
+//     pixel de glisser etait le premier poste du a-coup.
+// Les colonnes de la grille gardent la largeur VISIBLE (--timeline-width) et
+// coupent ce qui depasse (overflow: hidden) ; seules les pistes sont plus
+// larges (--charge-plan-track-width) et decalees (--charge-plan-transform).
+
+const DAY_MS = 24 * 3600 * 1000;
+// Marge maximale d'un cote : au-dela, le premier rendu du glisser coute plus
+// qu'il ne fait gagner (un dezoom de 5 ans dessinerait 15 ans).
+const MAX_PAN_BUFFER_DAYS = 400;
+
+function shiftIsoDays(iso, days) {
+  const date = parseCalendarDate(iso);
+  if (!date) return "";
+  return formatIsoDate(new Date(date.getFullYear(), date.getMonth(), date.getDate() + days));
+}
+
+function daysBetweenIso(fromIso, toIso) {
+  const from = parseCalendarDate(fromIso);
+  const to = parseCalendarDate(toIso);
+  if (!from || !to) return Number.NaN;
+  return Math.round(
+    (Date.UTC(to.getFullYear(), to.getMonth(), to.getDate()) -
+      Date.UTC(from.getFullYear(), from.getMonth(), from.getDate())) /
+      DAY_MS
+  );
+}
+
+function normalizeOffsetDays(value) {
+  const offset = Number(value);
+  return offset > 0 && offset < 1 ? offset : 0;
+}
+
+// { startIso, endIso, leadDays, offsetDays } : jours dessines, et position de la
+// fenetre visible dans ces jours (leadDays + offsetDays depuis startIso).
+function resolveRenderRange(viewport, visibleDays, { panning = false, bounds = null } = {}) {
+  const offsetDays = normalizeOffsetDays(viewport?.offsetDays);
+  const firstIso = viewport.firstVisibleDate;
+  const lastIso = offsetDays > 0 ? shiftIsoDays(viewport.rangeEndDate, 1) : viewport.rangeEndDate;
+  let startIso = firstIso;
+  let endIso = lastIso;
+  if (panning) {
+    const bufferDays = Math.min(Math.max(1, Math.round(visibleDays)), MAX_PAN_BUFFER_DAYS);
+    startIso = shiftIsoDays(firstIso, -bufferDays);
+    endIso = shiftIsoDays(lastIso, bufferDays);
+    const boundsStart = bounds?.startDate || "";
+    const boundsEnd = bounds?.endDate || "";
+    if (boundsStart && startIso < boundsStart) startIso = boundsStart < firstIso ? boundsStart : firstIso;
+    if (boundsEnd && endIso > boundsEnd) endIso = boundsEnd > lastIso ? boundsEnd : lastIso;
+  }
+  return { startIso, endIso, leadDays: daysBetweenIso(startIso, firstIso), offsetDays };
+}
+
 // --- half-day slot math (port of buildVisibleSlots, arithmetic path only) ----
 
 function buildVisibleSlots(windowDays, dayWidth) {
@@ -272,56 +355,139 @@ function buildVisibleSlots(windowDays, dayWidth) {
 
 // --- track grid (weekend shading), port of renderTrackGrid -------------------
 
-function renderTrackGrid(windowDays, dayWidth, absenceSet = new Set()) {
-  const gridSpans = windowDays
-    .map((date, dayIndex) => {
-      const dateKey = formatIsoDate(date);
-      const weekendSpan = isBusinessDay(date)
-        ? ""
-        : `
-        <span
-          class="charge-plan-grid-day is-weekend"
-          style="left:${dayIndex * dayWidth}px; width:${dayWidth}px"
-          data-date-key="${dateKey}"
-        ></span>
-      `;
-      const halfDayWidth = dayWidth / 2;
-      const absenceSpans = ["am", "pm"]
-        .map((part, partIndex) =>
-          isAbsenceSlot(absenceSet, dateKey, part)
-            ? `<span class="charge-plan-grid-day is-absence" style="left:${dayIndex * dayWidth + partIndex * halfDayWidth}px; width:${halfDayWidth}px" data-date-key="${dateKey}" data-part="${part}"></span>`
-            : "")
-        .join("");
-      return weekendSpan + absenceSpans;
-    })
-    .join("");
+// Week-ends : un seul degrade CSS repete (periode 7 jours), pose en fond de la
+// grille de CHAQUE piste par une variable du board (--charge-plan-weekends), au
+// lieu de deux cases par week-end et par piste — ~260 noeuds par personne au
+// dezoom de 5 ans, a reconstruire a chaque cran de molette. Meme teinte que
+// .charge-plan-grid-day.is-weekend. Les feries tombant en semaine restent des
+// cases (renderTrackGrid).
+const WEEKEND_SHADE = "rgba(8, 21, 38, 0.08)";
 
-  return `<div class="charge-plan-track-grid">${gridSpans}</div>`;
+function buildWeekendGradient(firstDate, dayWidth) {
+  if (!(firstDate instanceof Date) || !(dayWidth > 0)) return "none";
+  const period = 7 * dayWidth;
+  // Jours entre le premier jour dessine et le samedi qui suit (ou lui-meme).
+  const toSaturday = (6 - firstDate.getDay() + 7) % 7;
+  const stops =
+    toSaturday === 6
+      ? // Premier jour = dimanche : le week-end chevauche le debut de la periode.
+        [
+          `${WEEKEND_SHADE} 0px`,
+          `${WEEKEND_SHADE} ${dayWidth}px`,
+          `transparent ${dayWidth}px`,
+          `transparent ${6 * dayWidth}px`,
+          `${WEEKEND_SHADE} ${6 * dayWidth}px`,
+          `${WEEKEND_SHADE} ${period}px`,
+        ]
+      : [
+          "transparent 0px",
+          `transparent ${toSaturday * dayWidth}px`,
+          `${WEEKEND_SHADE} ${toSaturday * dayWidth}px`,
+          `${WEEKEND_SHADE} ${(toSaturday + 2) * dayWidth}px`,
+          `transparent ${(toSaturday + 2) * dayWidth}px`,
+          `transparent ${period}px`,
+        ];
+  return `repeating-linear-gradient(90deg, ${stops.join(", ")})`;
+}
+
+function isWeekendDay(date) {
+  const day = date.getDay();
+  return day === 0 || day === 6;
+}
+
+// Une case par SUITE de feries en semaine (les week-ends sont le degrade
+// ci-dessus) et une par suite de demi-journees d'absence, plutot qu'une case par
+// jour. Une absence ne tombe jamais un jour chome (leaveAbsences.js ne garde que
+// les demi-journees ouvrees), les suites ne se recouvrent pas.
+function renderTrackGrid(windowDays, dayWidth, absenceSet = new Set()) {
+  const halfDayWidth = dayWidth / 2;
+  const spans = [];
+  let offRun = null;
+  let absenceRun = null;
+  const closeOffRun = () => {
+    if (!offRun) return;
+    spans.push(
+      `<span class="charge-plan-grid-day is-weekend" style="left:${offRun.left}px; width:${offRun.width}px" data-date-key="${offRun.dateKey}"></span>`
+    );
+    offRun = null;
+  };
+  const closeAbsenceRun = () => {
+    if (!absenceRun) return;
+    spans.push(
+      `<span class="charge-plan-grid-day is-absence" style="left:${absenceRun.left}px; width:${absenceRun.width}px" data-date-key="${absenceRun.dateKey}" data-part="${absenceRun.part}"></span>`
+    );
+    absenceRun = null;
+  };
+
+  windowDays.forEach((date, dayIndex) => {
+    const dateKey = formatIsoDate(date);
+    if (isWeekendDay(date)) {
+      closeAbsenceRun();
+      closeOffRun();
+      return;
+    }
+    if (!isBusinessDay(date)) {
+      closeAbsenceRun();
+      if (offRun) offRun.width += dayWidth;
+      else offRun = { left: dayIndex * dayWidth, width: dayWidth, dateKey };
+      return;
+    }
+    closeOffRun();
+    ["am", "pm"].forEach((part, partIndex) => {
+      if (!isAbsenceSlot(absenceSet, dateKey, part)) {
+        closeAbsenceRun();
+        return;
+      }
+      if (absenceRun) absenceRun.width += halfDayWidth;
+      else absenceRun = { left: dayIndex * dayWidth + partIndex * halfDayWidth, width: halfDayWidth, dateKey, part };
+    });
+  });
+  closeOffRun();
+  closeAbsenceRun();
+
+  return `<div class="charge-plan-track-grid">${spans.join("")}</div>`;
 }
 
 // --- segment bars (port of buildVisibleSegmentBars / assignSegmentLanes / renderSegmentBars) ---
 
+// Les creneaux sont chronologiques et disjoints (buildVisibleSlots) : deux
+// recherches dichotomiques trouvent le premier et le dernier creneau touches.
+// Le balayage lineaire d'avant coutait creneaux x barres a CHAQUE rendu (3 652
+// creneaux au dezoom maximal) et dominait le cout d'un pan.
 function getVisibleSlotRange(startAt, endAt, visibleSlots) {
-  let firstSlot = null;
-  let lastSlot = null;
-
-  for (const slot of visibleSlots) {
-    if (startAt < slot.endAt && endAt > slot.startAt) {
-      if (!firstSlot) firstSlot = slot;
-      lastSlot = slot;
-    }
+  const slots = visibleSlots || [];
+  let low = 0;
+  let high = slots.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (slots[middle].endAt > startAt) high = middle;
+    else low = middle + 1;
   }
+  const firstIndex = low;
+  if (firstIndex >= slots.length || !(slots[firstIndex].startAt < endAt)) return null;
 
-  if (!firstSlot || !lastSlot) return null;
-  return { firstSlot, lastSlot };
+  low = firstIndex;
+  high = slots.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (slots[middle].startAt < endAt) low = middle + 1;
+    else high = middle;
+  }
+  return { firstSlot: slots[firstIndex], lastSlot: slots[low - 1] };
 }
 
+// Ce qu'une barre doit aux DONNEES seules (taches du planning, absences,
+// surcharge), jamais a la fenetre visible : `metaCache` (Map segment -> meta,
+// videe par le board quand les donnees changent) le garde d'un rendu a l'autre.
+// Sans lui, chaque cran de zoom et chaque pixel de pan recalculaient ces chiffres
+// pour toutes les barres — l'essentiel du temps d'un rendu.
 function buildVisibleSegmentBars(
   worker,
   visibleSlots,
   planningTasks = [],
   absenceSet = new Set(),
-  overloadIndex = null
+  overloadIndex = null,
+  metaCache = null
 ) {
   return (worker?.segments || [])
     .map((segment) => {
@@ -339,21 +505,27 @@ function buildVisibleSegmentBars(
       const leftPx = slotRange.firstSlot.leftPx;
       const widthPx =
         slotRange.lastSlot.leftPx + slotRange.lastSlot.widthPx - slotRange.firstSlot.leftPx;
-      // Like gestion-depenses2: how many planning tasks fall within this segment's
-      // period — surfaced as the bar's hover title (see renderSegmentBars).
-      const planningTaskCount = countPlanningTasksOverlappingRange(planningTasks, startAt, endAt);
-      // Leave-aware coherence check: the RAW stored effectif vs the days actually
-      // available in the segment's MONTH after removing absence half-days (un
-      // segment = un mois, donc plus de geometrie startAt/endAt arbitraire ici).
-      const rawEffectif = segment?.effectif ?? segment?.effectifDays ?? null;
-      const available = getMonthAvailableDays(segment.monthKey, absenceSet);
-      const incoherent = rawEffectif != null && Number(rawEffectif) > available;
-      // Surcharge de la PERSONNE sur ce mois, tous projets confondus : la barre
-      // peut virer sans que rien ne cloche sur le projet affiche, parce que la
-      // charge est ailleurs. D'ou l'infobulle, qui donne les chiffres.
-      const overloadLoad = overloadIndex?.isOverloaded(worker?.name, segment.monthKey)
-        ? overloadIndex.getLoad(worker?.name, segment.monthKey)
-        : null;
+      let meta = metaCache ? metaCache.get(segment) : null;
+      if (!meta) {
+        // Like gestion-depenses2: how many planning tasks fall within this segment's
+        // period — surfaced as the bar's hover title (see renderSegmentBars).
+        const planningTaskCount = countPlanningTasksOverlappingRange(planningTasks, startAt, endAt);
+        // Leave-aware coherence check: the RAW stored effectif vs the days actually
+        // available in the segment's MONTH after removing absence half-days (un
+        // segment = un mois, donc plus de geometrie startAt/endAt arbitraire ici).
+        const rawEffectif = segment?.effectif ?? segment?.effectifDays ?? null;
+        const available = getMonthAvailableDays(segment.monthKey, absenceSet);
+        const incoherent = rawEffectif != null && Number(rawEffectif) > available;
+        // Surcharge de la PERSONNE sur ce mois, tous projets confondus : la barre
+        // peut virer sans que rien ne cloche sur le projet affiche, parce que la
+        // charge est ailleurs. D'ou l'infobulle, qui donne les chiffres.
+        const overloadLoad = overloadIndex?.isOverloaded(worker?.name, segment.monthKey)
+          ? overloadIndex.getLoad(worker?.name, segment.monthKey)
+          : null;
+        meta = { planningTaskCount, available, incoherent, overloadLoad };
+        if (metaCache) metaCache.set(segment, meta);
+      }
+      const { planningTaskCount, available, incoherent, overloadLoad } = meta;
 
       return {
         segmentId: segment.id,
@@ -383,19 +555,64 @@ function buildVisibleSegmentBars(
     });
 }
 
-function assignSegmentLanes(bars) {
+function placeInLanes(entries) {
   const lanes = [];
 
-  return bars.map((bar) => {
-    let laneIndex = lanes.findIndex((laneRightEdge) => bar.leftPx >= laneRightEdge + 8);
+  return entries.map((entry) => {
+    let laneIndex = lanes.findIndex((laneRightEdge) => entry.leftPx >= laneRightEdge + 8);
     if (laneIndex === -1) {
       laneIndex = lanes.length;
       lanes.push(0);
     }
 
-    lanes[laneIndex] = bar.leftPx + bar.widthPx;
-    return { ...bar, laneIndex };
+    lanes[laneIndex] = entry.leftPx + entry.widthPx;
+    return { ...entry, laneIndex };
   });
+}
+
+function calendarDayNumber(date) {
+  return Math.round(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY_MS);
+}
+
+// Couloirs d'une personne, calcules sur TOUS ses segments et non sur les seules
+// barres dessinees : ni le couloir d'une barre ni le nombre de couloirs (donc la
+// hauteur de la ligne) ne dependent plus de la fenetre. Calcules sur les barres
+// visibles, ils changeaient des que la premiere barre a gauche changeait (un
+// mois de glisser suffisait) : toutes les barres sautaient d'un couloir a
+// l'autre et la ligne grandissait ou retrecissait de 12 px ; avec le glisser par
+// decalage, tout cela arrivait au relacher. Meme regle qu'avant (8 px d'ecart
+// minimum), sur les memes positions a une translation pres : quand tous les
+// segments sont visibles, le resultat est identique.
+function computeWorkerLanes(worker, dayWidth) {
+  const laneBySegmentId = new Map();
+  let laneCount = 0;
+  placeInLanes(
+    (worker?.segments || [])
+      .filter((segment) => segment?.startAt instanceof Date && segment?.endAt instanceof Date)
+      .map((segment) => {
+        const startDay = calendarDayNumber(segment.startAt);
+        return {
+          segmentId: segment.id,
+          leftPx: startDay * dayWidth,
+          widthPx: (calendarDayNumber(segment.endAt) + 1 - startDay) * dayWidth,
+        };
+      })
+      .sort((left, right) => left.leftPx - right.leftPx || left.widthPx - right.widthPx)
+  ).forEach((entry) => {
+    laneBySegmentId.set(String(entry.segmentId), entry.laneIndex);
+    laneCount = Math.max(laneCount, entry.laneIndex + 1);
+  });
+  return { laneBySegmentId, laneCount };
+}
+
+// `workerLanes` (computeWorkerLanes) absent : la regle d'origine sur les seules
+// barres recues.
+function assignSegmentLanes(bars, workerLanes = null) {
+  if (!workerLanes) return placeInLanes(bars);
+  return bars.map((bar) => ({
+    ...bar,
+    laneIndex: workerLanes.laneBySegmentId.get(String(bar.segmentId)) ?? 0,
+  }));
 }
 
 function renderSegmentBars(assignedBars) {
@@ -418,11 +635,14 @@ function renderSegmentBars(assignedBars) {
       const title = bar.incoherent
         ? `Effectif ${bar.effectif} j > disponible après absences ${bar.available} j`
         : overloadTooltip || planningTooltip;
+      // Barre qui part du premier jour dessine : son debut peut etre hors champ
+      // (fenetre arretee sur une fraction de jour), son libelle s'en ecarte
+      // d'autant (styles.css, --charge-plan-lead).
       return `
         <div
           class="charge-plan-segment-bar ${compact ? "is-compact" : ""} ${bar.incoherent ? "is-incoherent" : ""} ${
             !bar.incoherent && bar.overloadLoad ? "is-overloaded" : ""
-          }"
+          } ${bar.startSlotIndex === 0 ? "is-window-start" : ""}"
           style="left:${bar.leftPx}px; top:${10 + bar.laneIndex * 32}px; width:${Math.max(12, bar.widthPx)}px"
           data-segment-id="${escapeHtml(String(bar.segmentId))}"
           data-month-key="${escapeHtml(String(bar.monthKey))}"
@@ -444,11 +664,27 @@ function renderSegmentBars(assignedBars) {
 
 // --- rows (port of renderRoleRow / renderWorkerRow) ---------------------------
 
-function renderRoleRow(roleLabel, timelineWidth) {
+// Ligne d'un role (Projeteurs / Ingenieurs / Autres) : son nom et le TOTAL des
+// jours planifies de ses personnes (tous leurs segments, comme la ligne Total),
+// puis, mois par mois, une pastille des jours planifies du role (meme calcul
+// et meme pastille que la ligne Total, restreints aux personnes du role).
+function renderRoleRow(roleLabel, roleWorkers, months, timelineWidth) {
+  const roleTotal = (roleWorkers || []).reduce(
+    (sum, worker) =>
+      sum + (worker?.segments || []).reduce((segSum, segment) => segSum + getSegmentEffectiveDays(segment), 0),
+    0
+  );
   return `
     <div class="charge-plan-role-row" style="--timeline-width:${timelineWidth}px; --row-height:36px">
-      <div class="charge-plan-role-cell charge-plan-role-cell--label">${escapeHtml(roleLabel)}</div>
-      <div class="charge-plan-role-cell charge-plan-role-cell--filler"></div>
+      <div class="charge-plan-role-cell charge-plan-role-cell--label">
+        <span>${escapeHtml(roleLabel)}</span>
+        <span class="charge-plan-role-total">${formatDayValue(Math.round(roleTotal * 100) / 100)} j</span>
+      </div>
+      <div class="charge-plan-role-cell charge-plan-role-cell--track">
+        <div class="charge-plan-track charge-plan-track--readonly">
+          ${renderReadonlyMonthTrack(roleWorkers, months)}
+        </div>
+      </div>
     </div>
   `;
 }
@@ -461,18 +697,22 @@ function renderWorkerRow(
   dayWidth,
   planningTasks = [],
   absenceSet = new Set(),
-  overloadIndex = null
+  overloadIndex = null,
+  metaCache = null
 ) {
   const visibleSegmentBars = buildVisibleSegmentBars(
     worker,
     visibleSlots,
     planningTasks,
     absenceSet,
-    overloadIndex
+    overloadIndex,
+    metaCache
   );
-  const assignedBars = assignSegmentLanes(visibleSegmentBars);
+  const workerLanes = dayWidth > 0 ? computeWorkerLanes(worker, dayWidth) : null;
+  const assignedBars = assignSegmentLanes(visibleSegmentBars, workerLanes);
   const laneCount = Math.max(
     1,
+    workerLanes ? workerLanes.laneCount : 0,
     assignedBars.reduce((maxLane, bar) => Math.max(maxLane, bar.laneIndex + 1), 0)
   );
   const rowHeight = Math.max(72, 20 + laneCount * 32);
@@ -554,11 +794,13 @@ function computeMonthTotalDays(workers, month) {
 // par deriver d'un seul cote, en silence.
 // Le plancher a 0,08 garde une pastille visible pour une valeur infime ; les
 // 12 px retranches sont les 6 px de marge de chaque cote (cf. .charge-plan-month-fill).
-function renderMonthFillPill(value, month) {
-  if (!(value > 0)) return "";
-  const fillRatio = Math.min(1, Math.max(0.08, value / Math.max(1, month.businessDayCount)));
+// `label` (ligne Charge) remplace le « X j » par defaut, et rend la pastille meme
+// a 0 requis : elle porte alors encore les jours planifies.
+function renderMonthFillPill(value, month, label = "") {
+  if (!(value > 0) && !label) return "";
+  const fillRatio = Math.min(1, Math.max(0.08, (value > 0 ? value : 0) / Math.max(1, month.businessDayCount)));
   return `<span class="charge-plan-month-fill" style="width:calc((100% - 12px) * ${fillRatio})">
-               <span class="charge-plan-month-label">${formatDayValue(value)} j</span>
+               <span class="charge-plan-month-label">${label || `${formatDayValue(value)} j`}</span>
              </span>`;
 }
 
@@ -611,13 +853,22 @@ function getChargeCellState(plannedDays, requiredDays) {
   return plannedDays < requiredDays ? "is-overload" : "is-partial";
 }
 
+// Pastille d'un mois de la ligne Charge : « requis / planifie » du metier, les
+// deux termes que compare sa couleur (`workers` = les seules personnes de la
+// section du metier, cf. renderChargeRows). « — » quand rien n'est requis.
+function formatChargeLabel(requiredDays, plannedDays) {
+  if (!(requiredDays > 0) && !(plannedDays > 0)) return "";
+  const required = requiredDays > 0 ? `${formatDayValue(requiredDays)} j` : "—";
+  return `${required} / ${formatDayValue(plannedDays > 0 ? plannedDays : 0)} j`;
+}
+
 function renderChargeMonthTrack(workers, months, chargeByMonth) {
   return months
     .map((month) => {
       const requiredDays = chargeByMonth.get(month.key) || 0;
       const plannedDays = computeMonthTotalDays(workers, month);
       const state = getChargeCellState(plannedDays, requiredDays);
-      const fill = renderMonthFillPill(requiredDays, month);
+      const fill = renderMonthFillPill(requiredDays, month, formatChargeLabel(requiredDays, plannedDays));
       return `<span class="charge-plan-month-segment ${state}" style="width:${month.widthPx}px">${fill}</span>`;
     })
     .join("");
@@ -632,26 +883,56 @@ function renderChargeMonthTrack(workers, months, chargeByMonth) {
 // « non place : 240 j » y tenait a quelques pixels pres, et l'etat de deploiement
 // attendu — 112 lignes COFFRAGE encore sans dates — donne un total a QUATRE
 // chiffres qui debordait ou se faisait rogner (`white-space: nowrap`).
-function renderChargeRow(workers, months, timelineWidth, charge) {
+//
+// CHARGE PAR METIER (2026-10-26) : une ligne par metier (documentCharge.js,
+// CHARGE_ROLES), projeteurs puis ingenieurs (CHARGE_ROW_ORDER, l'ordre des
+// sections du board). Chacune compare la charge requise
+// de SON metier aux jours planifies des seules personnes de ce metier (groupe
+// « Ingenieurs » ou « Projeteurs » du board) ; les « Autres » ne comptent dans
+// aucune. UN SEUL bouton « Charge », sur la premiere ligne, ouvre la fenetre
+// qui regle les deux metiers ; chaque ligne porte le nom de son metier.
+const CHARGE_ROLE_GROUPS = { ingenieurs: "Ingenieurs", projeteurs: "Projeteurs" };
+// Ordre des lignes Charge a l'ecran : celui des sections du board (Projeteurs au
+// dessus des Ingenieurs, ROLE_GROUP_ORDER). CHARGE_ROLES, lui, reste l'ordre de
+// la cellule Grist (« ingenieurs;projeteurs ») et de la fenetre de saisie.
+const CHARGE_ROW_ORDER = ["projeteurs", "ingenieurs"];
+const CHARGE_ROLE_NAMES = { ingenieurs: "Ingénieurs", projeteurs: "Projeteurs" };
+
+// `workers` : les personnes du metier ; `roleCharge` : sa charge
+// ({ byMonth, unplacedDays, totalDays }, computeProjectCharge().byRole[role]) ;
+// `withButton` : cette ligne porte le bouton « Charge » (la premiere). La case
+// du bouton existe sur chaque ligne pour que les noms de metier s'alignent.
+function renderChargeRow(workers, months, timelineWidth, roleCharge, role, withButton) {
   const unplaced =
-    charge.unplacedDays > 0
-      ? `<span class="charge-plan-charge-unplaced" title="Charge non placee : ${formatDayValue(charge.unplacedDays)} j — documents sans dates de planning, leur charge n'est encore rattachee a aucun mois.">
-           ${formatDayValue(charge.unplacedDays)} j
+    roleCharge.unplacedDays > 0
+      ? `<span class="charge-plan-charge-unplaced" title="Charge non placee : ${formatDayValue(roleCharge.unplacedDays)} j — documents sans dates de planning, leur charge n'est encore rattachee a aucun mois.">
+           ${formatDayValue(roleCharge.unplacedDays)} j
          </span>`
       : "";
   return `
-    <div class="charge-plan-row charge-plan-row--charge" style="--timeline-width:${timelineWidth}px; --row-height:72px">
+    <div class="charge-plan-row charge-plan-row--charge charge-plan-row--charge-${role}" style="--timeline-width:${timelineWidth}px; --row-height:72px">
       <div class="charge-plan-cell charge-plan-cell--name">
-        <button type="button" class="charge-plan-charge-btn" data-charge-assign-open>Charge</button>
+        <span class="charge-plan-charge-action">${
+          withButton ? '<button type="button" class="charge-plan-charge-btn" data-charge-assign-open>Charge</button>' : ""
+        }</span>
+        <span class="charge-plan-charge-role">${CHARGE_ROLE_NAMES[role]}</span>
         ${unplaced}
       </div>
       <div class="charge-plan-cell charge-plan-cell--timeline">
         <div class="charge-plan-track charge-plan-track--readonly">
-          ${renderChargeMonthTrack(workers, months, charge.byMonth)}
+          ${renderChargeMonthTrack(workers, months, roleCharge.byMonth)}
         </div>
       </div>
     </div>
   `;
+}
+
+// Les lignes Charge, une par metier, chacune face a ses seules personnes.
+function renderChargeRows(workers, months, timelineWidth, charge) {
+  const grouped = groupWorkersByRole(workers);
+  return CHARGE_ROW_ORDER.map((role, index) =>
+    renderChargeRow(grouped[CHARGE_ROLE_GROUPS[role]] || [], months, timelineWidth, charge.byRole[role], role, index === 0)
+  ).join("");
 }
 
 // --- Editer toggle (port of renderTimelineEditToolbar) ------------------------
@@ -747,26 +1028,22 @@ export function createChargeBoard(containerEl) {
   // projet affiche. Memorise comme lastPlanningRows, puisque le re-rendu de
   // viewport (setWindow) ne le retransmet pas.
   let lastAllTimeSegmentRows = [];
-  // Rebuild throttling. A zoom/pan gesture drives setWindow ~60x/s and each call
-  // used to rebuild the whole innerHTML — the dominant jank source. We throttle
-  // the rebuild to at most one per REBUILD_THROTTLE_MS (leading + trailing): the
-  // top pane stays smooth every frame while the bottom pane still tracks ~8x/s
-  // and lands exactly right on the trailing edge. `renderSeq` counts real
-  // rebuilds (exposed on the container for the perf check).
-  const REBUILD_THROTTLE_MS = 120;
-  let lastRebuildAt = 0;
-  let rebuildTimerId = null;
+  // Tout ce que le rendu tire des DONNEES seules (index de surcharge, groupes de
+  // roles, charge du projet, chiffres de chaque barre) : calcule au premier rendu
+  // qui suit un changement de donnees, puis reutilise par les rendus de fenetre
+  // (zoom / pan), qui ne changent que la geometrie. Null = a recalculer.
+  let derived = null;
+  // Ce que le dernier rendu a dessine (plage, geometrie, marge ou non) et ses
+  // pistes, pour qu'un glisser les DECALE au lieu de tout reconstruire. Null =
+  // rien de dessine. `renderSeq` compte les vraies reconstructions (expose sur le
+  // conteneur, pour les mesures de fluidite).
+  let renderedLayout = null;
+  let trackEls = [];
   let renderSeq = 0;
 
-  function cancelPendingRebuild() {
-    if (rebuildTimerId != null) {
-      clearTimeout(rebuildTimerId);
-      rebuildTimerId = null;
-    }
-  }
-
   function clear() {
-    cancelPendingRebuild();
+    renderedLayout = null;
+    trackEls = [];
     if (containerEl instanceof HTMLElement) {
       containerEl.innerHTML = "";
       containerEl.classList.remove("is-segment-editing-enabled", "is-segment-editing-locked");
@@ -783,19 +1060,30 @@ export function createChargeBoard(containerEl) {
     absencesByWorker,
     planningRows,
     allTimeSegmentRows,
+    // Internes a setWindow : `panning` dessine la marge de glisser, `bounds`
+    // (bornes de la frise) l'empeche de deborder au-dela des donnees.
+    panning = false,
+    bounds = null,
   } = {}) {
     if (!(containerEl instanceof HTMLElement) || !viewport) {
       clear();
       return;
     }
 
-    // A real (committed) rebuild: drop any queued throttle-trailing rebuild and
-    // reset the throttle clock so the NEXT setWindow throttles from here.
-    cancelPendingRebuild();
-    lastRebuildAt = Date.now();
     renderSeq += 1;
     containerEl.dataset.psRenderSeq = String(renderSeq);
 
+    // Le rendu de fenetre (setWindow) repasse `lastWorkers` lui-meme et aucune
+    // autre donnee : tout autre appel apporte des donnees, le cache tombe.
+    if (
+      workers !== lastWorkers ||
+      planningTasks !== undefined ||
+      absencesByWorker !== undefined ||
+      planningRows !== undefined ||
+      allTimeSegmentRows !== undefined
+    ) {
+      derived = null;
+    }
     lastWorkers = workers || [];
     lastEditMode = Boolean(editMode);
     // Only the data-driven render() (from main.js) carries planningTasks; the
@@ -811,34 +1099,54 @@ export function createChargeBoard(containerEl) {
 
     containerEl.classList.add("charge-plan-board");
 
-    // Index de surcharge : un seul balayage de la table par couple
-    // (personne, mois) affiche. Le construire ici et non dans le constructeur de
-    // barres evite de rebalayer TimeSegment pour chacune des dizaines de barres.
-    const overloadIndex = buildMonthOverloadIndex({
-      entries: lastWorkers.flatMap((worker) =>
-        (worker?.segments || []).map((segment) => ({
-          personName: worker?.name,
-          monthKey: segment?.monthKey,
-        }))
-      ),
-      allSegmentRows: lastAllTimeSegmentRows,
-      columns: APP_CONFIG.grist.columns.timeSegment,
-      resolveAbsenceSet: (personName) => lastAbsencesByWorker.get(normalizeName(personName)) || null,
-    });
-
-    const groupedWorkers = groupWorkersByRole(lastWorkers);
-    const windowDays = buildWindowDays(viewport);
-    const visibleDays = Math.max(1, toFiniteNumber(viewport.visibleDays, windowDays.length || 1));
+    if (!derived) {
+      derived = {
+        // Index de surcharge : un seul balayage de la table par couple
+        // (personne, mois) affiche. Le construire ici et non dans le constructeur de
+        // barres evite de rebalayer TimeSegment pour chacune des dizaines de barres.
+        overloadIndex: buildMonthOverloadIndex({
+          entries: lastWorkers.flatMap((worker) =>
+            (worker?.segments || []).map((segment) => ({
+              personName: worker?.name,
+              monthKey: segment?.monthKey,
+            }))
+          ),
+          allSegmentRows: lastAllTimeSegmentRows,
+          columns: APP_CONFIG.grist.columns.timeSegment,
+          resolveAbsenceSet: (personName) => lastAbsencesByWorker.get(normalizeName(personName)) || null,
+        }),
+        groupedWorkers: groupWorkersByRole(lastWorkers),
+        charge: computeProjectCharge(lastPlanningRows, APP_CONFIG.grist.columns.planningProject),
+        segmentMeta: new Map(),
+      };
+    }
+    const { overloadIndex, groupedWorkers, charge, segmentMeta } = derived;
+    const requestedDays = toFiniteNumber(viewport.visibleDays, Number.NaN);
+    const visibleDays = Math.max(
+      1,
+      Number.isFinite(requestedDays) ? requestedDays : buildWindowDays(viewport).length || 1
+    );
+    const range = resolveRenderRange(viewport, visibleDays, { panning, bounds });
+    const windowDays = buildWindowDays({ firstVisibleDate: range.startIso, rangeEndDate: range.endIso });
     contentWidthPx = measureContentWidthPx(containerEl);
     const dayWidth = contentWidthPx / visibleDays;
+    // Largeur VISIBLE (colonnes de la grille) ; les pistes, elles, couvrent tous
+    // les jours dessines et sont decalees pour montrer la fenetre.
     const timelineWidth = dayWidth * visibleDays;
+    const trackWidth = dayWidth * windowDays.length;
+    const shiftPx = -(range.leadDays + range.offsetDays) * dayWidth;
+    // Fraction de jour hors champ a gauche : la pastille du premier mois s'en
+    // ecarte, sinon elle serait rognee par le bord (cf. styles.css).
+    const leadPx = range.leadDays === 0 ? range.offsetDays * dayWidth : 0;
 
     activeVisibleSlots = buildVisibleSlots(windowDays, dayWidth);
+    // Mois visibles : pastilles des lignes de role, de Total et de Charge.
+    const windowMonths = getWindowMonths(windowDays, dayWidth);
 
     const rowsHtml = Object.entries(groupedWorkers)
       .map(([roleLabel, roleWorkers]) =>
         [
-          renderRoleRow(roleLabel, timelineWidth),
+          renderRoleRow(roleLabel, roleWorkers, windowMonths, timelineWidth),
           ...roleWorkers.map((worker) => {
             const absenceSet = lastAbsencesByWorker.get(normalizeName(worker.name)) || new Set();
             return renderWorkerRow(
@@ -849,7 +1157,8 @@ export function createChargeBoard(containerEl) {
               dayWidth,
               lastPlanningTasks,
               absenceSet,
-              overloadIndex
+              overloadIndex,
+              segmentMeta
             );
           }),
         ].join("")
@@ -858,21 +1167,20 @@ export function createChargeBoard(containerEl) {
 
     // Aggregate "Total" row at the bottom (like gestion-depenses2): total
     // effective person-days per visible month across all workers.
-    const windowMonths = getWindowMonths(windowDays, dayWidth);
     const totalRowHtml = renderTotalRow(lastWorkers, windowMonths, timelineWidth);
 
-    // Ligne Charge : requis (documentCharge.js, Task 1) vs planifie (memes
-    // workers/mois que Total ci-dessus).
-    const charge = computeProjectCharge(lastPlanningRows, APP_CONFIG.grist.columns.planningProject);
-    const chargeRowHtml = renderChargeRow(lastWorkers, windowMonths, timelineWidth, charge);
+    // Lignes Charge, une par metier : requis (documentCharge.js, Task 1) vs
+    // planifie (memes mois que Total ci-dessus, personnes du metier).
+    const chargeRowHtml = renderChargeRows(lastWorkers, windowMonths, timelineWidth, charge);
 
     containerEl.classList.toggle("is-segment-editing-enabled", lastEditMode);
     containerEl.classList.toggle("is-segment-editing-locked", !lastEditMode);
     containerEl.dataset.segmentEditMode = lastEditMode ? "enabled" : "locked";
 
+    const transform = shiftPx === 0 ? "none" : `translateX(${shiftPx}px)`;
     containerEl.innerHTML = `
       <div class="charge-plan-scroll">
-        <div class="charge-plan-timeline" style="--timeline-width:${timelineWidth}px">
+        <div class="charge-plan-timeline" style="--timeline-width:${timelineWidth}px; --charge-plan-track-width:${trackWidth}px; --charge-plan-transform:${transform}; --charge-plan-lead:${leadPx}px; --charge-plan-weekends:${buildWeekendGradient(windowDays[0], dayWidth)}">
           ${rowsHtml}
           ${totalRowHtml}
           ${chargeRowHtml}
@@ -881,29 +1189,76 @@ export function createChargeBoard(containerEl) {
       ${renderTimelineEditToolbar(lastEditMode)}
       ${renderContextMenu()}
     `;
+
+    trackEls = Array.from(containerEl.querySelectorAll(".charge-plan-track"));
+    renderedLayout = {
+      startIso: range.startIso,
+      dayCount: windowDays.length,
+      dayWidth,
+      visibleDays,
+      contentWidthPx,
+      buffered: Boolean(panning),
+      firstVisibleDate: viewport.firstVisibleDate,
+      offsetDays: range.offsetDays,
+    };
   }
 
-  // Viewport-only change (zoom/pan): throttle the full rebuild. `render()` is the
-  // single committer (it resets the clock and clears any pending trailing timer),
-  // so this only decides "rebuild now" (enough time elapsed — leading edge) vs
-  // "rebuild soon" (coalesce a burst into one trailing rebuild). No CSS transform
-  // is used because the worker/role LABEL cells share the scaled layer and would
-  // distort — see docs/superpowers/plans/2026-07-06-planning-synchro-fluidity.md.
-  function setWindow(viewport) {
-    if (typeof setTimeout !== "function") {
-      render({ workers: lastWorkers, viewport, editMode: lastEditMode });
-      return;
+  // Glisser : decale les pistes deja dessinees jusqu'a la fenetre demandee, si
+  // elle tient dans ce qui est dessine (meme zoom, meme largeur). Rend false
+  // sinon : il faut alors redessiner, avec une marge neuve autour de la fenetre.
+  function shiftRenderedTo(viewport) {
+    const layout = renderedLayout;
+    if (!layout || !layout.buffered || !trackEls.length) return false;
+    if (Number(viewport.visibleDays) !== layout.visibleDays) return false;
+    const startDays =
+      daysBetweenIso(layout.startIso, viewport.firstVisibleDate) + normalizeOffsetDays(viewport.offsetDays);
+    if (!Number.isFinite(startDays) || startDays < 0 || startDays + layout.visibleDays > layout.dayCount) {
+      return false;
     }
-    cancelPendingRebuild();
-    const elapsed = Date.now() - lastRebuildAt;
-    if (elapsed >= REBUILD_THROTTLE_MS) {
-      render({ workers: lastWorkers, viewport, editMode: lastEditMode });
-      return;
-    }
-    rebuildTimerId = setTimeout(() => {
-      rebuildTimerId = null;
-      render({ workers: lastWorkers, viewport, editMode: lastEditMode });
-    }, REBUILD_THROTTLE_MS - elapsed);
+    const transform = `translateX(${-startDays * layout.dayWidth}px)`;
+    trackEls.forEach((trackEl) => {
+      trackEl.style.transform = transform;
+    });
+    return true;
+  }
+
+  // La fenetre exacte est-elle deja a l'ecran ? (meme fenetre, meme fraction,
+  // meme largeur, sans marge de glisser) — evite de redessiner pour rien quand
+  // main.js re-applique la fenetre juste apres un rendu de donnees.
+  function isRenderedExactly(viewport) {
+    const layout = renderedLayout;
+    return Boolean(
+      layout &&
+        !layout.buffered &&
+        layout.firstVisibleDate === viewport.firstVisibleDate &&
+        layout.visibleDays === Number(viewport.visibleDays) &&
+        layout.offsetDays === normalizeOffsetDays(viewport.offsetDays) &&
+        layout.contentWidthPx === measureContentWidthPx(containerEl)
+    );
+  }
+
+  // Changement de fenetre seul (zoom / glisser / toolbar), appele dans la frame
+  // du controleur (sync/controller.js), la meme ou vis redessine le pane haut :
+  // les deux panes bougent ensemble. Plus de bridage a 120 ms : il laissait le
+  // pane bas a ~8 images/s derriere le pane haut, et le rendu, debarrasse des
+  // calculs de donnees (cache `derived`), tient desormais dans la frame.
+  //   - glisser (`panning`) : decaler ce qui est dessine ; sinon redessiner avec
+  //     une marge, que les mouvements suivants decaleront ;
+  //   - autre geste : redessiner exactement la fenetre, sauf si elle est deja a
+  //     l'ecran.
+  //
+  // Mode Editer : celui qu'affiche le board (bottom/chargeEditing.js le pose sur
+  // le conteneur a chaque bascule), pas `lastEditMode`, que la bascule ne met pas
+  // a jour — sans quoi un zoom ou un glisser ramenait le bouton sur « Editer »
+  // alors que l'edition restait active.
+  function setWindow(viewport, { panning = false, bounds = null } = {}) {
+    if (!viewport) return;
+    if (panning ? shiftRenderedTo(viewport) : isRenderedExactly(viewport)) return;
+    const editMode =
+      containerEl instanceof HTMLElement && containerEl.dataset.segmentEditMode
+        ? containerEl.dataset.segmentEditMode === "enabled"
+        : lastEditMode;
+    render({ workers: lastWorkers, viewport, editMode, panning, bounds });
   }
 
   function getVisibleSlots() {
@@ -919,6 +1274,7 @@ export function createChargeBoard(containerEl) {
     contentWidthPx = 0;
     lastWorkers = [];
     lastEditMode = false;
+    derived = null;
     if (containerEl instanceof HTMLElement) {
       containerEl.classList.remove("charge-plan-board");
     }

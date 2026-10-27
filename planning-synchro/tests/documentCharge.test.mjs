@@ -2,12 +2,20 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  CHARGE_ROLES,
   isDocumentRow,
+  parseDurationPair,
+  formatDurationPair,
   resolveDocumentCharge,
   getDocumentWorkSpan,
   spreadChargeOverMonths,
   computeProjectCharge,
 } from "../assets/js/bottom/documentCharge.js";
+
+// Charge par metier : chaque colonne Duree_* porte « ingenieurs;projeteurs »
+// (« 2,5;3 »). Un nombre seul — l'ancien format — compte pour les ingenieurs.
+const ing = (value) => ({ ingenieurs: value, projeteurs: null });
+const pair = (ingenieurs, projeteurs) => ({ ingenieurs, projeteurs });
 
 const COLS = {
   id: "id",
@@ -32,28 +40,66 @@ test("isDocumentRow ecarte les en-tetes de zone", () => {
   assert.equal(isDocumentRow({ ID2: "3001" }, COLS), true);
 });
 
-test("resolveDocumentCharge applique la cascade Force > Zone > Projet", () => {
+test("CHARGE_ROLES : ingenieurs d'abord, projeteurs ensuite (ordre de la cellule)", () => {
+  assert.deepEqual(CHARGE_ROLES, ["ingenieurs", "projeteurs"]);
+});
+
+test("parseDurationPair : « ingenieurs;projeteurs », l'ancien nombre seul = ingenieurs", () => {
+  assert.deepEqual(parseDurationPair("2,5;3"), pair(2.5, 3));
+  assert.deepEqual(parseDurationPair("2.5;3"), pair(2.5, 3));
+  assert.deepEqual(parseDurationPair(" 2,5 ; 3 "), pair(2.5, 3));
+  assert.deepEqual(parseDurationPair(";3"), pair(null, 3));
+  assert.deepEqual(parseDurationPair("2,5;"), pair(2.5, null));
+  // Ancien format (colonne numerique ou texte) : tout pour les ingenieurs.
+  assert.deepEqual(parseDurationPair(2.5), ing(2.5));
+  assert.deepEqual(parseDurationPair("2,5"), ing(2.5));
+  // Vide, nul, negatif, illisible : null pour la part concernee.
+  for (const empty of [null, undefined, "", ";", 0, "0;0", "-1;bidon"]) {
+    assert.deepEqual(parseDurationPair(empty), pair(null, null), `valeur ${JSON.stringify(empty)}`);
+  }
+  assert.deepEqual(parseDurationPair("bidon;4"), pair(null, 4));
+});
+
+test("formatDurationPair : « 2,5;3 », l'ancien format quand seuls les ingenieurs ont une valeur", () => {
+  assert.equal(formatDurationPair(pair(2.5, 3)), "2,5;3");
+  assert.equal(formatDurationPair(pair(null, 3)), ";3");
+  assert.equal(formatDurationPair(pair(2.5, null)), "2,5");
+  assert.equal(formatDurationPair(pair(4, 0.5)), "4;0,5");
+  assert.equal(formatDurationPair(pair(null, null)), "");
+  // Aller-retour.
+  for (const text of ["2,5;3", ";3", "2,5", "4;0,5"]) {
+    assert.equal(formatDurationPair(parseDurationPair(text)), text);
+  }
+});
+
+test("resolveDocumentCharge applique la cascade Force > Zone > Projet, metier par metier", () => {
   const base = { ID2: "1", Type_doc: "COFFRAGE" };
-  assert.equal(resolveDocumentCharge({ ...base, Duree_Projet: 2 }, COLS), 2);
-  assert.equal(resolveDocumentCharge({ ...base, Duree_Projet: 2, Duree_Zone: 3 }, COLS), 3);
-  assert.equal(
+  assert.deepEqual(resolveDocumentCharge({ ...base, Duree_Projet: 2 }, COLS), ing(2));
+  assert.deepEqual(resolveDocumentCharge({ ...base, Duree_Projet: 2, Duree_Zone: 3 }, COLS), ing(3));
+  assert.deepEqual(
     resolveDocumentCharge({ ...base, Duree_Projet: 2, Duree_Zone: 3, Duree_Force: 4 }, COLS),
-    4
+    ing(4)
   );
-  assert.equal(resolveDocumentCharge(base, COLS), null);
+  assert.deepEqual(resolveDocumentCharge(base, COLS), pair(null, null));
+  // Chaque metier a sa propre cascade : la Force ne fixe que les projeteurs ici,
+  // les ingenieurs reprennent la valeur de la Zone.
+  assert.deepEqual(
+    resolveDocumentCharge({ ...base, Duree_Projet: "2;1", Duree_Zone: "3", Duree_Force: ";5" }, COLS),
+    pair(3, 5)
+  );
 });
 
 test("une valeur vide, nulle ou negative ne coupe pas la cascade", () => {
-  const base = { ID2: "1", Type_doc: "COFFRAGE", Duree_Projet: 2 };
+  const base = { ID2: "1", Type_doc: "COFFRAGE", Duree_Projet: "2;6" };
   // Un 0 explicite ne veut PAS dire « zero jour » : il laisse la main au niveau
   // du dessous. Pour dire « ce document ne coute rien », on laisse tout vide.
-  assert.equal(resolveDocumentCharge({ ...base, Duree_Zone: 0 }, COLS), 2);
-  assert.equal(resolveDocumentCharge({ ...base, Duree_Zone: "" }, COLS), 2);
-  assert.equal(resolveDocumentCharge({ ...base, Duree_Zone: null }, COLS), 2);
-  assert.equal(resolveDocumentCharge({ ...base, Duree_Zone: -1 }, COLS), 2);
-  assert.equal(resolveDocumentCharge({ ...base, Duree_Zone: "bidon" }, COLS), 2);
+  assert.deepEqual(resolveDocumentCharge({ ...base, Duree_Zone: 0 }, COLS), pair(2, 6));
+  assert.deepEqual(resolveDocumentCharge({ ...base, Duree_Zone: "" }, COLS), pair(2, 6));
+  assert.deepEqual(resolveDocumentCharge({ ...base, Duree_Zone: null }, COLS), pair(2, 6));
+  assert.deepEqual(resolveDocumentCharge({ ...base, Duree_Zone: -1 }, COLS), pair(2, 6));
+  assert.deepEqual(resolveDocumentCharge({ ...base, Duree_Zone: "bidon" }, COLS), pair(2, 6));
   // Virgule decimale francaise, comme ailleurs dans le depot.
-  assert.equal(resolveDocumentCharge({ ...base, Duree_Zone: "1,5" }, COLS), 1.5);
+  assert.deepEqual(resolveDocumentCharge({ ...base, Duree_Zone: "1,5" }, COLS), pair(1.5, 6));
 });
 
 test("getDocumentWorkSpan suit le type de document", () => {
@@ -124,7 +170,7 @@ test("un document realise compte toujours dans la charge", () => {
     Date_limite: "2026-09-01", Diff_coffrage: "2026-09-30",
     Duree_Projet: 2, Realise: true,
   };
-  assert.equal(computeProjectCharge([row], cols).byMonth.get("2026-09"), 2);
+  assert.equal(computeProjectCharge([row], cols).byRole.ingenieurs.byMonth.get("2026-09"), 2);
 });
 
 test("un document deplace reprend la duree de sa nouvelle zone", () => {
@@ -132,17 +178,17 @@ test("un document deplace reprend la duree de sa nouvelle zone", () => {
   // Zone ou Type_doc suffit a changer la charge. C'est tout le benefice de ne
   // jamais stocker la valeur resolue — il n'y a aucun code de migration a tenir.
   const doc = { ID2: "3001", Type_doc: "COFFRAGE", Zone: "Zone 1", Duree_Zone: 2 };
-  assert.equal(resolveDocumentCharge(doc, COLS), 2);
+  assert.deepEqual(resolveDocumentCharge(doc, COLS), ing(2));
 
   // Deplace en Zone 2, dont le COFFRAGE vaut 5 j. La fenetre ayant ecrit
   // Duree_Zone sur chaque ligne de la zone, le deplacement se traduit par la
   // reecriture de cette colonne — et rien d'autre a synchroniser.
   const moved = { ...doc, Zone: "Zone 2", Duree_Zone: 5 };
-  assert.equal(resolveDocumentCharge(moved, COLS), 5);
+  assert.deepEqual(resolveDocumentCharge(moved, COLS), ing(5));
 
   // Un document NEUF, sans Duree_Zone encore ecrite, retombe sur le defaut projet.
   const fresh = { ID2: "3002", Type_doc: "COFFRAGE", Zone: "Zone 2", Duree_Projet: 1 };
-  assert.equal(resolveDocumentCharge(fresh, COLS), 1);
+  assert.deepEqual(resolveDocumentCharge(fresh, COLS), ing(1));
 });
 
 test("computeProjectCharge agrege, compte le non place et detecte la divergence", () => {
@@ -161,16 +207,68 @@ test("computeProjectCharge agrege, compte le non place et detecte la divergence"
   ];
 
   const result = computeProjectCharge(rows, COLS);
+  const ingenieurs = result.byRole.ingenieurs;
 
-  assert.equal(result.byMonth.get("2026-09"), 2);
-  assert.equal(result.unplacedDays, 5); // 2 (id 3) + 3 (id 4)
-  assert.equal(result.totalDays, 7);
+  assert.equal(ingenieurs.byMonth.get("2026-09"), 2);
+  assert.equal(ingenieurs.unplacedDays, 5); // 2 (id 3) + 3 (id 4)
+  assert.equal(ingenieurs.totalDays, 7);
+  // Ancien format : rien pour les projeteurs.
+  assert.equal(result.byRole.projeteurs.totalDays, 0);
+  assert.equal(result.byRole.projeteurs.byMonth.size, 0);
 
   assert.equal(result.divergences.length, 1);
   assert.equal(result.divergences[0].scope, "project");
   assert.equal(result.divergences[0].typeDoc, "COFFRAGE");
-  assert.equal(result.divergences[0].kept, 2); // 2 apparait 2 fois, 3 une fois
+  assert.deepEqual(result.divergences[0].kept, ing(2)); // 2 apparait 2 fois, 3 une fois
   assert.deepEqual(result.divergences[0].others.map((entry) => entry.id2), ["1021"]);
+});
+
+test("computeProjectCharge : une charge par metier, chacune repartie sur ses mois", () => {
+  const rows = [
+    { id: 2, ID2: "3001", Type_doc: "COFFRAGE", Zone: "Zone 1",
+      Date_limite: "2026-09-01", Diff_coffrage: "2026-09-30", Duree_Projet: "2,5;3" },
+    { id: 3, ID2: "3002", Type_doc: "COFFRAGE", Zone: "Zone 1",
+      Date_limite: "2026-09-01", Diff_coffrage: "2026-09-30", Duree_Projet: "2,5;3", Duree_Force: ";1" },
+    // Sans date : non place, chaque metier pour sa part.
+    { id: 4, ID2: "3003", Type_doc: "COFFRAGE", Zone: "Zone 1", Duree_Projet: "2,5;3" },
+  ];
+
+  const { byRole, divergences } = computeProjectCharge(rows, COLS);
+
+  assert.equal(byRole.ingenieurs.byMonth.get("2026-09"), 5);
+  assert.equal(byRole.projeteurs.byMonth.get("2026-09"), 4); // 3 + 1 (Force)
+  assert.equal(byRole.ingenieurs.unplacedDays, 2.5);
+  assert.equal(byRole.projeteurs.unplacedDays, 3);
+  assert.equal(byRole.ingenieurs.totalDays, 7.5);
+  assert.equal(byRole.projeteurs.totalDays, 7);
+  // Meme paire sur les trois lignes : aucune divergence.
+  assert.deepEqual(divergences, []);
+});
+
+test("computeProjectCharge : a egalite, la plus petite valeur l'emporte (numerique, pas alphabetique)", () => {
+  const tie = (a, b) =>
+    computeProjectCharge(
+      [
+        { id: 1, ID2: "1", Type_doc: "NDC", Duree_Projet: a },
+        { id: 2, ID2: "2", Type_doc: "NDC", Duree_Projet: b },
+      ],
+      COLS
+    ).divergences[0].kept;
+  assert.deepEqual(tie("10", "9"), ing(9));
+  assert.deepEqual(tie("2;10", "2;9"), pair(2, 9));
+  // Une part vide passe apres une part remplie.
+  assert.deepEqual(tie(";4", "3;4"), pair(3, 4));
+});
+
+test("computeProjectCharge : deux paires differentes divergent, meme a ingenieurs egaux", () => {
+  const rows = [
+    { id: 1, ID2: "1", Type_doc: "NDC", Duree_Projet: "2;3" },
+    { id: 2, ID2: "2", Type_doc: "NDC", Duree_Projet: "2;3" },
+    { id: 3, ID2: "3", Type_doc: "NDC", Duree_Projet: "2;5" },
+  ];
+  const [divergence] = computeProjectCharge(rows, COLS).divergences;
+  assert.deepEqual(divergence.kept, pair(2, 3));
+  assert.deepEqual(divergence.others.map((entry) => entry.id2), ["3"]);
 });
 
 // Dette heritee de la Tache 1 (cf. task-4-brief.md « Debt you inherit ») : la
@@ -194,7 +292,7 @@ test("computeProjectCharge signale une divergence de portee zone", () => {
   assert.ok(zoneDivergence, "une divergence de portee zone doit etre remontee");
   assert.equal(zoneDivergence.typeDoc, "ARMATURES");
   assert.equal(zoneDivergence.zone, "Zone 1");
-  assert.equal(zoneDivergence.kept, 2); // 2 apparait 2 fois, 5 une fois
+  assert.deepEqual(zoneDivergence.kept, ing(2)); // 2 apparait 2 fois, 5 une fois
   assert.deepEqual(zoneDivergence.others.map((entry) => entry.id2), ["2003"]);
 
   // Aucune divergence de portee project ici (Duree_Projet n'est jamais renseignee).

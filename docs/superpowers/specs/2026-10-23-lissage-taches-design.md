@@ -508,7 +508,7 @@ est regroupé par semaine.
 ┌ Tâches à réaliser — avril 2027 · lissé ───────────────────── [Fermer] ┐
 │ Coffrage (2)                                                           │
 │   02/04/2027  N° 131  Voile R+1          Zone A · Groupe 3             │
-│   12/04/2027  N° 135  Dalle R+2          Zone A · Groupe 4   réalisée  │
+│   12/04/2027  N° 135  Dalle R+2          Zone A · Groupe 4    100 %    │
 │ Armature (4)                                                           │
 │   …                                                                    │
 │   12/04/2027  N° 145  Poteaux R+2        Zone B · Groupe 1             │
@@ -524,8 +524,12 @@ est regroupé par semaine.
   nombre de tâches). Un seul type : une liste simple.
 - Tri dans une section : par date, puis par N°.
 - Contenu d'une ligne : date (lissée en mode lissé), N° (`ID2`), nom de la tâche, zone et
-  groupe, marque « réalisée », pour une tâche avancée « avancée de <mois> (<date
-  d'origine>) », et pour un coffrage entraîné « avancé pour libérer l'armature N° … ».
+  groupe, **pourcentage d'avancement** (mise à jour du 2026-10-26 : celui de la colonne
+  « Réalisé » de Planning Projet ; « réalisation forcée le … » en note pour une clôture
+  forcée), pour une tâche avancée « avancée de <mois> (<date d'origine>) », et pour un
+  coffrage entraîné « avancé pour libérer l'armature N° … ». Une tâche réalisée (100 %) est
+  affichée **en vert**, comme une ligne réalisée de Planning Projet (elle remplace l'ancienne
+  marque « réalisée »).
 - Quand un lissage est défini, l'en-tête de chaque section rappelle le compte face au maximum
   (« Armature — 3 / 2 ») ; un mois qui reste en dépassement l'affiche en avertissement, avec
   sa raison (§4.7), dans tous les modes.

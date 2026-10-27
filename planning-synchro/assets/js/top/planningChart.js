@@ -257,9 +257,13 @@ export function getChartWindowBounds(viewport) {
   const first = parseCalendarDate(viewport?.firstVisibleDate);
   const last = parseCalendarDate(viewport?.rangeEndDate);
   if (!first || !last || last < first) return null;
+  // Fraction de jour du glisser au pixel pres (sync/controller.js) : le graphique
+  // se decale avec la frise, au lieu de suivre par jours entiers.
+  const offsetDays = Number(viewport?.offsetDays);
+  const offsetMs = offsetDays > 0 && offsetDays < 1 ? offsetDays * 24 * 3600 * 1000 : 0;
   return {
-    minTs: new Date(first.getFullYear(), first.getMonth(), first.getDate()).getTime(),
-    maxTs: new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1).getTime(),
+    minTs: new Date(first.getFullYear(), first.getMonth(), first.getDate()).getTime() + offsetMs,
+    maxTs: new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1).getTime() + offsetMs,
   };
 }
 

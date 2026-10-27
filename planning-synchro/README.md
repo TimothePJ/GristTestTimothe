@@ -75,6 +75,19 @@ appropriée du nouveau niveau, sans code de migration.
 Les valeurs sont exprimées en **jours, multiples de 0,5** (0, 0.5, 1, 1.5, etc.).
 Pour dire « ce document n'a aucun coût », laisser les trois colonnes vides.
 
+**Charge par métier** (2026-10-26) : chaque colonne porte **deux durées**, celle
+des **ingénieurs** puis celle des **projeteurs**, séparées par `;` — `2,5;3` =
+2,5 j ingénieurs et 3 j projeteurs. L'ancien format (un nombre seul, `2,5` ou
+`2.5`) vaut pour les ingénieurs ; `;3` n'a de valeur que pour les projeteurs.
+La cascade se résout **métier par métier** : une `Duree_Force` à `;5` ne fixe que
+les projeteurs, les ingénieurs reprennent `Duree_Zone` ou `Duree_Projet`
+(`bottom/documentCharge.js` : `parseDurationPair`, `formatDurationPair`,
+`resolveDocumentCharge`). Le widget écrit `2,5;3`, `;3`, ou `2,5` quand seuls
+les ingénieurs ont une valeur (l'ancien format), et `""` quand plus aucun.
+**Les trois colonnes doivent être de type Texte dans Grist** : une colonne
+Numérique garde `2,5;3` comme valeur invalide (cellule rouge) — le widget la lit
+quand même, mais la grille Grist la signale.
+
 La charge résolue est répartie sur les **mois que sa plage de dates touche**
 (mois du `Demarrages_travaux` jusqu'au mois de la `Date_limite`), **au prorata
 des jours ouvrés** de chaque mois. Ainsi un document de 10 jours en septembre et
@@ -84,10 +97,20 @@ somment exactement à la charge d'entrée. Un document qui n'a aucune date de
 planning (pas de phases) **ne peut s'attacher à aucun mois** ; sa charge apparaît
 dans une figure **« non placé »** affichée sur la ligne du document.
 
-Le **pane bas** affiche une ligne **Charge** sous la ligne **Total**. Par mois
-visible, elle compare les jours *planifiés* (de `TimeSegment`, calculés comme pour
-la ligne Total) contre les jours *requis* (somme des charges des documents). Trois
-couleurs indiquent la tension :
+Le **pane bas** affiche, sous la ligne **Total**, une ligne **Charge par
+métier** : **Projeteurs** puis **Ingénieurs**, dans l'ordre des sections du pane
+(la cellule Grist et la fenêtre de saisie gardent l'ordre ingénieurs ; projeteurs).
+Par mois visible,
+chacune compare les jours *planifiés* des seules personnes de ce métier (groupes
+« Ingenieurs » / « Projeteurs » du pane, d'après le rôle `ProjectTeam` ; les
+« Autres » ne comptent dans aucune) contre les jours *requis* de ce métier
+(somme des charges des documents). Les jours planifiés d'un métier sont donc ceux
+qu'affiche la ligne de sa section (« Ingenieurs », « Projeteurs ») ; la ligne
+**Total** est indicative et n'entre dans aucune comparaison. Chaque pastille
+porte les deux termes, **« requis / planifié »** (`39 j / 15 j`), `— / 12 j` quand
+rien n'est requis ce mois-là (`formatChargeLabel`, 2026-10-27) ; dans un mois trop
+étroit (coupé au bord, dézoom large), elle est coupée à la limite du mois. Chaque
+ligne a son badge « non placé ». Trois couleurs indiquent la tension :
 
 - `--load-balanced` `#d7eccb` (vert clair) : jours planifiés = jours requis ;
 - `--load-overload` `#ffe1a8` (beige clair) : **moins** de jours planifiés que
@@ -98,10 +121,17 @@ couleurs indiquent la tension :
 La charge n'est pas plafonnée : un mois peut requérir plus de jours qu'il n'en
 contient.
 
-Un **bouton Charge** sur cette ligne ouvre une **fenêtre de saisie** qui répartit
-les durées sur trois niveaux : Type de document → Zone → Document. À chaque
-niveau, un champ vide affiche la valeur héritée du niveau au-dessus (grisée, en
-lecture seule) ; seules les valeurs **explicites** sont modifiables. L'enregistrement
+Un **seul bouton Charge**, sur la première de ces deux lignes (la case du
+bouton reste vide sur la seconde, pour aligner les noms de métier), ouvre la
+**fenêtre de saisie** qui règle les deux métiers et répartit les durées sur trois niveaux : Type de
+document → Zone → Document. Chaque niveau a **deux champs**, Ingénieurs et
+Projeteurs. À chaque niveau, un champ vide affiche la valeur héritée du niveau
+au-dessus pour son métier (grisée, en lecture seule) ; seules les valeurs
+**explicites** sont modifiables. Une saisie ne change que le métier saisi :
+l'autre part de chaque ligne visée est gardée telle quelle ; aux niveaux type et
+zone, une ligne où elle est **vide** reçoit la valeur affichée pour ce niveau
+(sa valeur propre, jamais une valeur héritée), pour que la fenêtre ne crée pas
+elle-même de divergence. L'enregistrement
 écrit chaque ligne affectée en un **seul lot** d'`UpdateRecord`.
 
 ## Conception : frise partagée et alignement arithmétique
@@ -109,8 +139,8 @@ lecture seule) ; seules les valeurs **explicites** sont modifiables. L'enregistr
 Un **viewport canonique** unique (`{ mode, firstVisibleDate, visibleDays,
 rangeStartDate, rangeEndDate, anchorDate }`) est produit par toute
 interaction (toolbar semaine/mois/année, précédent/suivant/aujourd'hui,
-molette-zoom) et appliqué aux **deux** panes de façon synchrone, dans un
-seul `requestAnimationFrame` (`assets/js/sync/controller.js`). Comme les deux
+molette-zoom, glisser) et appliqué aux **deux** panes dans la **même image**
+(`assets/js/sync/controller.js` ; voir « Fluidité » plus bas). Comme les deux
 panes vivent dans le **même document**, à la **même largeur de contenu**, en
 recevant **les mêmes nombres** (`firstVisibleDate`/`visibleDays`), la largeur
 de jour (`dayWidth = contentWidthPx / visibleDays`) — et donc l'alignement
@@ -200,6 +230,63 @@ tronqué en `…` si trop long, avec le nom complet en info-bulle native (`title
   zoom. Le handler molette du contrôleur distingue la région (axe vs lignes).
 - **Toolbar** (semaine/mois/année, précédent/suivant/aujourd'hui) inchangée.
 
+#### Fluidité (2026-10-27)
+
+Mesuré dans Chrome sur l'export réel d'ERA QUAI D'ORSAY (190 tâches, 14
+personnes sur 2 ans) : le glisser en zoom année passait à **18 images/s** (pires
+images 0,5 s), la molette à **12 images/s**. Causes et remèdes :
+
+- **Glisser au pixel près.** Le glisser s'arrondissait au jour : en zoom mois la
+  frise avançait par sauts de ~44 px, en zoom semaine de ~200 px. La fenêtre
+  porte désormais une **fraction de jour** (`offsetDays`, à côté de
+  `firstVisibleDate` qui reste un jour entier) que les deux panes et le graphique
+  appliquent ; elle est gardée au relâcher, et tombe à 0 en butée (la fenêtre
+  s'arrête pile sur un jour, jamais au-delà des bornes). Toolbar et changement de
+  zoom repartent d'un jour entier.
+- **Le pane bas ne se reconstruit plus pendant un glisser.** Il dessine, dès
+  l'appui, une **marge** d'une fenêtre de chaque côté (plafonnée à 400 jours et
+  aux bornes de la frise), puis **décale** ses pistes (`transform`, un calque par
+  piste pendant le geste) ; il ne redessine que si la marge est épuisée, et une
+  fois au relâcher pour retrouver la fenêtre exacte (`bottom/chargeBoard.js`,
+  « plage dessinée »). Les cellules de la grille gardent la largeur visible et
+  coupent le reste.
+- **Plus de bridage à 120 ms.** Chaque rendu du pane bas coûtait 120 à 430 ms
+  (tout se recalculait à chaque pixel), le bridage ne servait donc jamais et,
+  une fois le rendu allégé, il laissait le pane bas à ~8 images/s derrière le
+  pane haut. Ce qui ne dépend que des données (jours effectifs, disponibilité
+  après absences, surcharge, tâches par barre, charge du projet) est calculé une
+  fois par changement de données ; la recherche des créneaux d'une barre est
+  dichotomique ; les week-ends sont **un seul dégradé** répété (les fériés en
+  semaine et les absences restent des cases, une par suite de jours). Le pane bas
+  est redessiné dans la frame du contrôleur, la même que vis.
+- **Les deux panes dans la même image.** vis-timeline redessine dans sa propre
+  frame : pendant un geste, il reçoit la fenêtre dans l'événement même, pour
+  redessiner dans la frame où le pane bas bouge (il avait une image de retard).
+  Hors geste (chargement d'un projet, toolbar), rien ne change : au chargement,
+  `#ps-main` est encore masqué et vis, servi en largeur nulle, écrasait le pane
+  haut.
+- **Molette proportionnelle et ancrée.** 10 % de jours par cran de 100 px
+  (comme avant pour une souris), un pavé tactile zoome par petites touches au
+  lieu de sauter de 10 % à chaque événement ; le jour sous le curseur, lu dans la
+  zone de la frise (hors colonne des noms), reste sous le curseur.
+- **Couloirs de barres stables.** Le couloir (1ʳᵉ ou 2ᵉ ligne) d'une barre et le
+  nombre de couloirs d'une personne se calculent sur tous ses segments, plus sur
+  les seules barres visibles : quand la fenêtre bouge, les barres ne changent
+  plus de couloir et les lignes ne grandissent ni ne rétrécissent plus de 12 px
+  (une personne aux mois contigus a toujours deux couloirs, même quand une seule
+  barre est visible).
+- **Mode Editer gardé.** Un zoom ou un glisser redessine le pane bas avec le mode
+  qu'il affiche (posé par `bottom/chargeEditing.js`) ; il revenait sur
+  « Editer » alors que l'édition restait active.
+
+Au relâcher, les libellés des mois coupés aux bords (pastilles, barres), qui ont
+glissé avec leur mois pendant le geste, reviennent au bord de la fenêtre.
+
+Après : glisser **56 à 60 images/s** à tous les zooms, les deux panes calés à
+moins d'1 px image par image ; molette ~51 images/s. Le coût restant est le
+redessin de vis-timeline lui-même (191 lignes). Tests :
+`tests/fluidity.test.mjs`.
+
 Le segment **démarrage de travaux** est rendu **exactement comme Planning
 Projet** — un marqueur vert clair (`#dcfce7` / `#86efac`, contenu transparent de
 largeur nulle) à pleine hauteur de ligne — produit pour les armatures (toujours)
@@ -222,7 +309,12 @@ identique à celle de `gestion-depenses2` : une piste en lecture seule
 (`bottom/chargeBoard.js` — port de `renderTotalRow` / `renderReadonlyTrack`) qui
 montre, **par mois visible**, le total des **jours‑personne effectifs** planifiés
 tous collaborateurs confondus (barre de remplissage proportionnelle + « X j »),
-avec le **total général** dans la cellule de nom.
+avec le **total général** dans la cellule de nom. Chaque **ligne de rôle**
+(« Projeteurs », « Ingenieurs », « Autres ») porte de même le **total du rôle**
+à droite de son nom et, par mois visible, une pastille des jours planifiés de
+ses seules personnes (`renderRoleRow`, même calcul et même pastille que la
+ligne Total). Une pastille s'élargit toujours au moins à sa valeur (« 5 j »,
+jamais « 5 » rogné), dans la limite de son mois.
 
 ### Projet sans aucun `TimeSegment`
 
@@ -546,8 +638,13 @@ pointeur et arrête la propagation : le canevas lui-même ne reçoit rien.
   graphique, avec le compte), un seul type → une liste simple ; tri par date
   puis par N°.
 - Une ligne : date (lissée en mode lissé), N° (`ID2`), nom, zone et groupe,
-  « réalisée », « avancée de <mois> (<date d'origine>) », « avancé pour libérer
-  l'armature N° … ».
+  **pourcentage d'avancement** (le même que la colonne « Réalisé » de Planning
+  Projet : indice du document face à l'indice cible du projet, recalculé par le
+  constructeur vendorisé — `ChartTask.progress`), « réalisation forcée le … »
+  pour une clôture forcée, « avancée de <mois> (<date d'origine>) », « avancé
+  pour libérer l'armature N° … ». Une tâche **réalisée** (100 %) est **en vert**
+  (fond vert pâle, liseré, texte `#15803d` comme une ligne réalisée de Planning
+  Projet).
 - Quand un lissage est défini, l'en-tête de section rappelle le compte face au
   maximum (« Armature (3 / 2) ») et un mois resté en dépassement l'affiche en
   avertissement, avec sa raison.

@@ -72,12 +72,19 @@ export function compareChartTasks(a, b) {
 
 // rows (lignes brutes Planning_Projet) + projet (+ table des indices cibles) ->
 // ChartTask[] triee :
-//   { rowId, id2, name, zone, groupe, groupKey, type, dueIso, realized }
-//   - dueIso   : fin (date metier) de la barre principale, AAAA-MM-JJ ;
-//   - type     : COFFRAGE | ARMATURES | NDC | COUPES | DEMOLITION | AUTRES ;
-//   - realized : la barre est realisee a 100 % (pas la colonne Realise stockee) ;
-//   - groupKey : cle zone + groupe d'un coffrage / d'une armature (vide sinon),
-//                la meme que celle du constructeur (comparaison en minuscules).
+//   { rowId, id2, name, zone, groupe, groupKey, type, dueIso, progress,
+//     closureLabel, realized }
+//   - dueIso       : fin (date metier) de la barre principale, AAAA-MM-JJ ;
+//   - type         : COFFRAGE | ARMATURES | NDC | COUPES | DEMOLITION | AUTRES ;
+//   - progress     : pourcentage d'avancement (0 a 100) de la colonne « Realise »
+//                    de Planning Projet, recalcule par le constructeur (indice du
+//                    document face a l'indice cible du projet, 100 en cloture
+//                    forcee) et non lu dans la colonne Realise stockee ;
+//   - closureLabel : date de cloture forcee (JJ/MM/AAAA), vide sinon ;
+//   - realized     : progress >= 100, comme une ligne realisee de Planning Projet ;
+//   - groupKey     : cle zone + groupe d'un coffrage / d'une armature (vide
+//                    sinon), la meme que celle du constructeur (comparaison en
+//                    minuscules).
 export function buildChartTasks(rows, { project = "", targetLookup = null } = {}) {
   const { groups, items } = buildTimelineDataFromPlanningRows(
     rows || [],
@@ -95,6 +102,8 @@ export function buildChartTasks(rows, { project = "", targetLookup = null } = {}
     if (!phase) return;
     const dueIso = formatIsoDate(phase.item.businessEnd);
     if (!dueIso) return;
+    const progressValue = Number(String(group.realiseLabel ?? "").trim().replace(",", "."));
+    const progress = Number.isFinite(progressValue) ? progressValue : 0;
     tasks.push({
       rowId: group.rowId ?? null,
       id2: group.id2Label ?? "",
@@ -104,7 +113,9 @@ export function buildChartTasks(rows, { project = "", targetLookup = null } = {}
       groupKey: group.meta?.groupCompositeKey || "",
       type: phase.type,
       dueIso,
-      realized: Number(group.realiseLabel) >= 100,
+      progress,
+      closureLabel: String(group.dateClotureLabel ?? "").trim(),
+      realized: progress >= 100,
     });
   });
 

@@ -162,6 +162,40 @@ test("tri par date puis id2, lieu, mention d'avance et de coffrage entraine", ()
   assert.equal(items[0].movedFrom, null);
 });
 
+test("avancement : pourcentage de chaque tache, cloture forcee en note, realisee marquee", () => {
+  const tasks = [
+    task({ rowId: 1, id2: "1", progress: 67 }),
+    task({ rowId: 2, id2: "2", progress: 100, realized: true }),
+    task({ rowId: 3, id2: "3", progress: 100, realized: true, closureLabel: "12/05/2026" }),
+    task({ rowId: 4, id2: "4" }), // sans avancement connu : 0 %
+  ];
+  const items = build({ result: noResult(tasks), visibleTypeKeys: ["COFFRAGE"] }).sections[0].items;
+  assert.deepEqual(
+    items.map((item) => [item.id2, item.progressLabel, item.realized, item.closureNote]),
+    [
+      ["1", "67 %", false, null],
+      ["2", "100 %", true, null],
+      ["3", "100 %", true, "réalisation forcée le 12/05/2026"],
+      ["4", "0 %", false, null],
+    ]
+  );
+});
+
+test("rendu : pourcentage sur chaque ligne, ligne verte et note de cloture forcee", () => {
+  const root = buildRoot();
+  const modal = createMonthTasksModal(root);
+  const tasks = [
+    task({ rowId: 1, id2: "1", progress: 33 }),
+    task({ rowId: 2, id2: "2", progress: 100, realized: true, closureLabel: "12/05/2026" }),
+  ];
+  modal.open(build({ result: noResult(tasks), visibleTypeKeys: ["COFFRAGE"] }));
+  const html = root.querySelector("#ps-month-tasks-body").innerHTML;
+  assert.ok(/<li class="ps-month-tasks-item"[^>]*>[\s\S]*?N° 1<[\s\S]*?ps-month-tasks-progress[^>]*>33 %/.test(html), html);
+  assert.ok(/<li class="ps-month-tasks-item is-realized"[^>]*>[\s\S]*?N° 2<[\s\S]*?100 %/.test(html), html);
+  assert.ok(html.includes("réalisation forcée le 12/05/2026"), html);
+  modal.destroy();
+});
+
 test("pulledFor vide : repli sur le nom de l'armature du groupe", () => {
   const tasks = [
     task({ rowId: 1, groupKey: "G1", dueIso: "2027-05-05", smoothedIso: "2027-04-05", moved: true, pulledFor: "" }),
@@ -285,7 +319,7 @@ test("rendu : sections, avertissement, banniere et parties plus tot", () => {
   const root = buildRoot();
   const modal = createMonthTasksModal(root);
   const tasks = [
-    task({ rowId: 1, id2: "131", type: "COFFRAGE", realized: true }),
+    task({ rowId: 1, id2: "131", type: "COFFRAGE", realized: true, progress: 100 }),
     task({ rowId: 2, id2: "120", name: "Parti", dueIso: "2027-04-20", smoothedIso: "2027-03-20", moved: true }),
   ];
   const result = {
@@ -295,7 +329,8 @@ test("rendu : sections, avertissement, banniere et parties plus tot", () => {
   const model = build({ result, mode: "both", settings: { maxTotal: 1, maxByType: {} }, visibleTypeKeys: ["COFFRAGE", "ARMATURES"] });
   modal.open(model);
   const html = root.querySelector("#ps-month-tasks-body").innerHTML;
-  assert.ok(html.includes("réalisée"));
+  // Tache realisee : ligne verte (classe is-realized) et 100 %.
+  assert.ok(/<li class="ps-month-tasks-item is-realized"[^>]*>[\s\S]*?N° 131[\s\S]*?100 %/.test(html), html);
   assert.ok(html.includes("Parties plus tôt (1)"));
   assert.ok(html.includes("mars 2027"));
   const banner = root.querySelector("#ps-month-tasks-banner");

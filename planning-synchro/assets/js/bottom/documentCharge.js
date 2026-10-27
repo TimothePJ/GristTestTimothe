@@ -8,10 +8,20 @@
 // C'est ce qui fait qu'un document deplace (nouveau type, nouvelle zone) est
 // reclasse tout seul, sans code de « reassignation » a maintenir.
 //
+// CHARGE PAR METIER (2026-10-26) : chaque colonne porte deux durees, celle des
+// ingenieurs puis celle des projeteurs, separees par « ; » : « 2,5;3 ». Un
+// nombre seul (l'ancien format, ou une colonne numerique) vaut pour les
+// ingenieurs. Une part vide (« ;3 », « 2,5 ») n'a pas de valeur a ce niveau. La
+// cascade Force > Zone > Projet se resout METIER PAR METIER : une Force « ;5 »
+// ne fixe que les projeteurs, les ingenieurs reprennent la Zone ou le Projet.
+//
 // Module PUR : aucun DOM, aucun appel Grist. Testable sous `node --test`.
 
 import { buildRowPhases } from "../top/phases.js";
 import { isBusinessDay } from "../utils/timeSegments.js";
+
+// Les deux metiers, dans l'ordre de la cellule (« ingenieurs;projeteurs »).
+export const CHARGE_ROLES = ["ingenieurs", "projeteurs"];
 
 // Une duree lue en base. Vide, nulle, negative ou non numerique => null, ce qui
 // laisse la main au niveau suivant de la cascade. Un 0 explicite ne veut donc
@@ -21,6 +31,38 @@ function readDuration(value) {
   const numeric = typeof value === "number" ? value : Number(String(value).trim().replace(",", "."));
   if (!Number.isFinite(numeric) || numeric <= 0) return null;
   return numeric;
+}
+
+// Valeur d'une colonne Duree_* -> { ingenieurs, projeteurs } (nombre ou null
+// chacun). Un nombre, ou un texte sans « ; », vaut pour les ingenieurs.
+export function parseDurationPair(value) {
+  if (typeof value === "number") return { ingenieurs: readDuration(value), projeteurs: null };
+  const parts = value == null ? [] : String(value).split(";");
+  return { ingenieurs: readDuration(parts[0]), projeteurs: readDuration(parts[1]) };
+}
+
+// Une duree en texte francais : 2.5 -> "2,5" ; null -> "".
+function formatDuration(value) {
+  return value == null ? "" : String(value).replace(".", ",");
+}
+
+// { ingenieurs, projeteurs } -> texte a ecrire dans la colonne : « 2,5;3 »,
+// « ;3 », l'ancien format « 2,5 » quand seuls les ingenieurs ont une valeur, et
+// "" quand aucun (ce qui rend la main au niveau du dessus).
+export function formatDurationPair(pair) {
+  const ingenieurs = formatDuration(pair?.ingenieurs ?? null);
+  const projeteurs = formatDuration(pair?.projeteurs ?? null);
+  if (!projeteurs) return ingenieurs;
+  return `${ingenieurs};${projeteurs}`;
+}
+
+function hasDuration(pair) {
+  return CHARGE_ROLES.some((role) => pair[role] != null);
+}
+
+// Cle de comparaison d'une paire (divergences) : « 2;3 », « 2; », « ;3 ».
+function pairKey(pair) {
+  return `${pair.ingenieurs ?? ""};${pair.projeteurs ?? ""}`;
 }
 
 function toText(value) {
@@ -55,13 +97,17 @@ export function isDocumentRow(row, columns) {
   return Boolean(toText(row?.[columns?.id2]) || toText(row?.[columns?.typeDoc]));
 }
 
+// Charge d'un document -> { ingenieurs, projeteurs }, chaque metier par sa
+// propre cascade Force > Zone > Projet.
 export function resolveDocumentCharge(row, columns) {
-  return (
-    readDuration(row?.[columns?.dureeForce]) ??
-    readDuration(row?.[columns?.dureeZone]) ??
-    readDuration(row?.[columns?.dureeProjet]) ??
-    null
+  const levels = [columns?.dureeForce, columns?.dureeZone, columns?.dureeProjet].map((column) =>
+    parseDurationPair(row?.[column])
   );
+  const charge = {};
+  CHARGE_ROLES.forEach((role) => {
+    charge[role] = levels.map((level) => level[role]).find((value) => value != null) ?? null;
+  });
+  return charge;
 }
 
 // La plage de travail d'un document, telle que le pane haut la dessine deja.
@@ -139,41 +185,68 @@ export function spreadChargeOverMonths(chargeDays, start, end) {
 // ecrivant toujours TOUT le groupe d'un coup, une divergence ne peut venir que
 // d'une edition manuelle dans la grille Grist : autant la rendre visible plutot
 // que de la trancher en silence. Majorite plutot que « premiere valeur » pour
-// qu'une seule ligne aberrante ne fasse pas basculer tout le groupe.
+// qu'une seule ligne aberrante ne fasse pas basculer tout le groupe. Les
+// valeurs sont des PAIRES (ingenieurs, projeteurs) : deux lignes divergent des
+// que l'une des deux parts differe. `kept` est la paire majoritaire.
+// A egalite de voix, la plus petite paire l'emporte : ingenieurs d'abord, puis
+// projeteurs, une part vide passant apres une part remplie.
+function comparePairs(left, right) {
+  for (const role of CHARGE_ROLES) {
+    const a = left[role] ?? Number.POSITIVE_INFINITY;
+    const b = right[role] ?? Number.POSITIVE_INFINITY;
+    if (a !== b) return a < b ? -1 : 1;
+  }
+  return 0;
+}
+
 function pickMajority(entries) {
   const tally = new Map();
-  entries.forEach(({ value }) => tally.set(value, (tally.get(value) || 0) + 1));
+  entries.forEach(({ key, value }) => {
+    const slot = tally.get(key) || { value, count: 0 };
+    slot.count += 1;
+    tally.set(key, slot);
+  });
+  let keptKey = null;
   let kept = null;
   let bestCount = -1;
-  [...tally.entries()].forEach(([value, count]) => {
-    if (count > bestCount || (count === bestCount && value < kept)) {
-      kept = value;
-      bestCount = count;
+  tally.forEach((slot, key) => {
+    if (slot.count > bestCount || (slot.count === bestCount && comparePairs(slot.value, kept) < 0)) {
+      keptKey = key;
+      kept = slot.value;
+      bestCount = slot.count;
     }
   });
-  return { kept, others: entries.filter((entry) => entry.value !== kept) };
+  return {
+    kept,
+    others: entries.filter((entry) => entry.key !== keptKey).map(({ id2, value }) => ({ id2, value })),
+  };
 }
 
 function collectDivergences(documents, columns) {
   const groups = new Map();
+  const addEntry = (key, group, doc, value) => {
+    if (!groups.has(key)) groups.set(key, { ...group, entries: [] });
+    groups.get(key).entries.push({ id2: doc.id2, value, key: pairKey(value) });
+  };
   documents.forEach((doc) => {
-    const projectValue = readDuration(doc.row?.[columns.dureeProjet]);
-    if (projectValue != null) {
-      const key = `project|${doc.typeDoc}`;
-      if (!groups.has(key)) groups.set(key, { scope: "project", typeDoc: doc.typeDoc, zone: "", entries: [] });
-      groups.get(key).entries.push({ id2: doc.id2, value: projectValue });
+    const projectValue = parseDurationPair(doc.row?.[columns.dureeProjet]);
+    if (hasDuration(projectValue)) {
+      addEntry(`project|${doc.typeDoc}`, { scope: "project", typeDoc: doc.typeDoc, zone: "" }, doc, projectValue);
     }
-    const zoneValue = readDuration(doc.row?.[columns.dureeZone]);
-    if (zoneValue != null) {
-      const key = `zone|${doc.typeDoc}|${doc.zone}`;
-      if (!groups.has(key)) groups.set(key, { scope: "zone", typeDoc: doc.typeDoc, zone: doc.zone, entries: [] });
-      groups.get(key).entries.push({ id2: doc.id2, value: zoneValue });
+    const zoneValue = parseDurationPair(doc.row?.[columns.dureeZone]);
+    if (hasDuration(zoneValue)) {
+      addEntry(
+        `zone|${doc.typeDoc}|${doc.zone}`,
+        { scope: "zone", typeDoc: doc.typeDoc, zone: doc.zone },
+        doc,
+        zoneValue
+      );
     }
   });
 
   const divergences = [];
   groups.forEach((group) => {
-    const distinct = new Set(group.entries.map((entry) => entry.value));
+    const distinct = new Set(group.entries.map((entry) => entry.key));
     if (distinct.size <= 1) return;
     const { kept, others } = pickMajority(group.entries);
     divergences.push({ scope: group.scope, typeDoc: group.typeDoc, zone: group.zone, kept, others });
@@ -181,10 +254,15 @@ function collectDivergences(documents, columns) {
   return divergences;
 }
 
+// Lignes Planning_Projet -> charge du projet :
+//   { byRole: { ingenieurs: RoleCharge, projeteurs: RoleCharge }, divergences }
+//   RoleCharge = { byMonth: Map "AAAA-MM" -> jours, unplacedDays, totalDays }
+// Chaque metier se repartit sur la plage de travail du document, comme avant.
 export function computeProjectCharge(planningRows, columns) {
-  const byMonth = new Map();
-  let unplacedDays = 0;
-  let totalDays = 0;
+  const byRole = {};
+  CHARGE_ROLES.forEach((role) => {
+    byRole[role] = { byMonth: new Map(), unplacedDays: 0, totalDays: 0 };
+  });
 
   const documents = (planningRows || [])
     .filter((row) => isDocumentRow(row, columns))
@@ -197,24 +275,28 @@ export function computeProjectCharge(planningRows, columns) {
 
   documents.forEach((doc) => {
     const charge = resolveDocumentCharge(doc.row, columns);
-    if (charge == null) return;
-    totalDays += charge;
-
+    if (!hasDuration(charge)) return;
     const span = getDocumentWorkSpan(doc.row, columns);
-    if (!span) {
-      unplacedDays += charge;
-      return;
-    }
 
-    spreadChargeOverMonths(charge, span.start, span.end).forEach((days, monthKey) => {
-      byMonth.set(monthKey, Math.round(((byMonth.get(monthKey) || 0) + days) * 100) / 100);
+    CHARGE_ROLES.forEach((role) => {
+      const days = charge[role];
+      if (days == null) return;
+      const target = byRole[role];
+      target.totalDays += days;
+      if (!span) {
+        target.unplacedDays += days;
+        return;
+      }
+      spreadChargeOverMonths(days, span.start, span.end).forEach((monthDays, monthKey) => {
+        target.byMonth.set(monthKey, Math.round(((target.byMonth.get(monthKey) || 0) + monthDays) * 100) / 100);
+      });
     });
   });
 
-  return {
-    byMonth,
-    unplacedDays: Math.round(unplacedDays * 100) / 100,
-    totalDays: Math.round(totalDays * 100) / 100,
-    divergences: collectDivergences(documents, columns),
-  };
+  CHARGE_ROLES.forEach((role) => {
+    byRole[role].unplacedDays = Math.round(byRole[role].unplacedDays * 100) / 100;
+    byRole[role].totalDays = Math.round(byRole[role].totalDays * 100) / 100;
+  });
+
+  return { byRole, divergences: collectDivergences(documents, columns) };
 }

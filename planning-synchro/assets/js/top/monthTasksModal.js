@@ -45,6 +45,13 @@ function monthKeyOf(iso) {
   return String(iso ?? "").slice(0, 7);
 }
 
+// « 67 % » : avancement de la tache, celui de la colonne « Realise » de Planning
+// Projet (ChartTask.progress) ; sans valeur connue, 0 %.
+function progressLabelOf(task) {
+  const value = Number(task.progress);
+  return `${Number.isFinite(value) ? value : 0} %`;
+}
+
 // Libelle « Zone A · Groupe 3 » (parties vides omises).
 function placeOf(task) {
   const parts = [];
@@ -123,6 +130,8 @@ export function buildBucketTaskList({ result, mode, bucket, visibleTypeKeys, set
       name: String(task.name ?? ""),
       place: placeOf(task),
       realized: Boolean(task.realized),
+      progressLabel: progressLabelOf(task),
+      closureNote: task.closureLabel ? `réalisation forcée le ${task.closureLabel}` : null,
       movedFrom:
         showSmoothed && task.moved
           ? `${formatMonthLabel(monthKeyOf(task.dueIso))} (${formatDateFr(task.dueIso)})`
@@ -182,17 +191,22 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
+// Une ligne par tache : date, N°, nom, lieu et pourcentage d'avancement (comme
+// la colonne « Realise » de Planning Projet). Une tache realisee est en vert
+// (classe is-realized), comme une ligne realisee de Planning Projet.
 function renderItem(item) {
   const secondary = [];
+  if (item.closureNote) secondary.push(item.closureNote);
   if (item.movedFrom) secondary.push(`avancée ${de(item.movedFrom)}`);
   if (item.pulledFor) secondary.push(`avancé pour libérer l'armature ${item.pulledFor}`);
-  return `<li class="ps-month-tasks-item">
+  const realizedTitle = item.realized ? ' title="Tâche réalisée"' : "";
+  return `<li class="ps-month-tasks-item${item.realized ? " is-realized" : ""}"${realizedTitle}>
     <div class="ps-month-tasks-row">
       <span class="ps-month-tasks-date">${escapeHtml(item.dateLabel)}</span>
       <span class="ps-month-tasks-id">${item.id2 ? `N° ${escapeHtml(item.id2)}` : ""}</span>
       <span class="ps-month-tasks-name">${escapeHtml(item.name)}</span>
       <span class="ps-month-tasks-place">${escapeHtml(item.place)}</span>
-      ${item.realized ? '<span class="ps-month-tasks-done">réalisée</span>' : ""}
+      <span class="ps-month-tasks-progress">${escapeHtml(item.progressLabel)}</span>
     </div>
     ${secondary.length ? `<div class="ps-month-tasks-note">${escapeHtml(secondary.join(" · "))}</div>` : ""}
   </li>`;
