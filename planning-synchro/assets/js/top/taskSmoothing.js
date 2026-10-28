@@ -18,18 +18,22 @@
 // VOCABULAIRE (§3.3) : le mois courant est celui de todayIso. Le MOIS DE DEPART
 // est le premier mois ou une tache peut etre placee : startMonth s'il est fixe
 // et pas apres le mois courant, sinon le mois courant (smoothingStartMonth).
-// Une tache est FIGEE si elle est realisee ou si son echeance tombe dans un mois
-// passe (tache en retard) : elle garde son mois et compte dans ce mois. Les
-// autres, les taches A VENIR, sont MOBILES. Avec un depart passe, les mois
-// passes du depart au mois courant deviennent des CIBLES (vides ou non, leurs
-// taches figees comptent) ; ils ne sont jamais source. Les mois d'avant le
-// depart ne sont ni cible ni signales.
+// Une tache est FIGEE si elle est realisee, ou si elle est en retard (echeance
+// dans un mois passe) sans mois de depart avant elle (isFrozenTask) : elle garde
+// son mois et compte dans ce mois. Les autres sont MOBILES : les taches A VENIR,
+// et, avec un depart passe, les taches EN RETARD d'un mois posterieur au depart
+// (2026-10-28). Avec un depart passe, les mois passes du depart au mois courant
+// deviennent des CIBLES (vides ou non, leurs taches figees comptent). Les taches
+// a venir y sont placees d'abord, les taches en retard ensuite, dans la place
+// qui reste : leur mobilite ne prive jamais les mois a venir. Les mois d'avant
+// le depart ne sont ni cible ni signales.
 //
 // REGLES STRICTES (§4.2), verifiees par findSmoothingViolations :
 //   1. jamais plus tard ;
 //   2. jamais avant le mois de depart ; et, quand le depart est le mois
 //      courant, jamais a une date anterieure a aujourd'hui ;
-//   3. les taches figees (realisees ou en retard) ne bougent pas ;
+//   3. les taches figees (realisees, ou en retard sans mois de depart avant
+//      elles) ne bougent pas ;
 //   4. armature apres son coffrage : une armature avancee n'a jamais une date
 //      lissee anterieure a celle d'un coffrage NON REALISE de son groupe
 //      (groupKey ; un groupKey vide = pas de groupe, donc pas de coffrage) ;
@@ -294,6 +298,20 @@ function fitsIn(counter, limits, month, type) {
   return totalMax == null || counter.get(month, TOTAL) < totalMax;
 }
 
+// --- taches figees (regle 3) -------------------------------------------------------
+
+// Une tache est FIGEE si elle est realisee, ou si elle est en retard (echeance
+// dans un mois passe) SANS mois de depart avant elle. Avec un depart passe, une
+// tache en retard d'un mois posterieur au depart est MOBILE : elle peut etre
+// avancee dans les mois du depart a son mois, comme une tache a venir
+// (2026-10-28, demande de l'utilisateur : « j'ai selectionne octobre 2024, il y
+// a beaucoup de marge mais il s'en sert pas »). Avec le depart par defaut (le
+// mois courant), aucune tache en retard n'a de mois avant elle : toutes restent
+// figees, comme avant.
+function isFrozenTask(task, dueMonth, currentMonth, startMonth) {
+  return Boolean(task?.realized) || (dueMonth < currentMonth && dueMonth <= startMonth);
+}
+
 // --- armature / coffrage (regle 4, §4.6) -------------------------------------------
 
 // Coffrages qui contraignent les armatures : non realises (un coffrage realise
@@ -382,7 +400,7 @@ export function smoothTasks(tasks, settings, todayIso) {
       task,
       dueMonth,
       month: dueMonth,
-      frozen: Boolean(task.realized) || dueMonth < currentMonth,
+      frozen: isFrozenTask(task, dueMonth, currentMonth, startMonth),
       pulledFor: null,
       rule4Exception: false,
     };
@@ -450,9 +468,12 @@ export function smoothTasks(tasks, settings, todayIso) {
     for (let k = fromMonth - 1; k >= startMonth; k -= 1) {
       if (!fitsIn(counter, limits, k, entry.task.type)) continue;
       const behind = coffrages.filter((coffrage) => coffrage.month > k);
-      // Avec un depart passe, k peut preceder un coffrage EN RETARD (fige, non
-      // realise) : il ne bouge pas, et l'armature ne peut passer avant lui, ni
-      // en k ni plus tot. Elle reste, retenue par son coffrage.
+      // Filet de securite : un coffrage FIGE non realise (en retard, sans mois
+      // de depart avant lui) ne bouge pas, et l'armature ne pourrait passer
+      // avant lui, ni en k ni plus tot ; elle resterait, retenue par lui. Depuis
+      // que les coffrages en retard d'un mois posterieur au depart sont mobiles
+      // (2026-10-28), un tel coffrage est au plus au mois de depart, donc jamais
+      // apres k : le cas ne se presente plus.
       if (behind.some((coffrage) => coffrage.frozen)) {
         blockedByCoffrage.add(entry);
         return;
@@ -492,25 +513,39 @@ export function smoothTasks(tasks, settings, todayIso) {
     return isOver(counter, limits, month, TOTAL) ? pending[0] || null : null;
   };
 
-  const sourceMonths = [...new Set(mobiles.map((entry) => entry.dueMonth))].sort((a, b) => a - b);
-  sourceMonths.forEach((month) => {
-    const monthTasks = mobiles.filter((entry) => entry.dueMonth === month);
-    const tried = new Set();
-    // Chaque tour essaie une tache encore jamais essayee : au plus
-    // monthTasks.length tours. Le plafond n'est qu'un filet de securite.
-    let rounds = 0;
-    let candidate = pickCandidate(monthTasks, tried, month);
-    while (candidate) {
-      if (rounds >= monthTasks.length) {
-        console.warn(`[lissage] placement interrompu en ${monthKeyOfIndex(month)} : plafond de tours atteint.`);
-        break;
+  // Passe montante sur un groupe de taches candidates : chaque mois source, du
+  // plus tot au plus tardif, avance ses taches en trop.
+  const placeCandidates = (candidates) => {
+    const sourceMonths = [...new Set(candidates.map((entry) => entry.dueMonth))].sort((a, b) => a - b);
+    sourceMonths.forEach((month) => {
+      const monthTasks = candidates.filter((entry) => entry.dueMonth === month);
+      const tried = new Set();
+      // Chaque tour essaie une tache encore jamais essayee : au plus
+      // monthTasks.length tours. Le plafond n'est qu'un filet de securite.
+      let rounds = 0;
+      let candidate = pickCandidate(monthTasks, tried, month);
+      while (candidate) {
+        if (rounds >= monthTasks.length) {
+          console.warn(`[lissage] placement interrompu en ${monthKeyOfIndex(month)} : plafond de tours atteint.`);
+          break;
+        }
+        rounds += 1;
+        tried.add(candidate);
+        placeEntry(candidate, month);
+        candidate = pickCandidate(monthTasks, tried, month);
       }
-      rounds += 1;
-      tried.add(candidate);
-      placeEntry(candidate, month);
-      candidate = pickCandidate(monthTasks, tried, month);
-    }
-  });
+    });
+  };
+
+  // Les taches A VENIR d'abord, puis les taches EN RETARD rendues mobiles par un
+  // depart passe, dans la place qui reste. Placees ensemble, les taches en
+  // retard (plus tot dans le calendrier, donc traitees les premieres) prenaient
+  // les mois libres et en privaient les mois a venir : sur l'export ERA (maximum
+  // 4 partout, depart juin 2025), 26 taches en trop a venir au lieu de 3. En
+  // second, elles ne prennent qu'une place que personne d'autre ne demande : le
+  // resultat des mois a venir ne se degrade jamais.
+  placeCandidates(mobiles.filter((entry) => entry.dueMonth >= currentMonth));
+  placeCandidates(mobiles.filter((entry) => entry.dueMonth < currentMonth));
 
   // Etapes 2 et 3 — remise en ordre de chaque file, avec garde-fou. La
   // reference est l'ensemble des violations du placement (vide, sauf defaut).
@@ -522,10 +557,15 @@ export function smoothTasks(tasks, settings, todayIso) {
   const violationsNow = () => collectViolations(list, settings, todayIso, { tasks: smoothedNow() });
   let reference = new Set(violationsNow().map((violation) => violation.key));
   const queues = new Map();
+  // Une file par classe de priorite (a venir / en retard), comme au placement :
+  // une tache en retard restee dans un mois plein, melee aux taches a venir,
+  // ferait echouer chaque essai de remise en ordre (une tache a venir y
+  // arriverait, regle 5), et les taches a venir perdraient leur ordre.
   mobiles
     .filter((entry) => !pullInvolved.has(entry))
     .forEach((entry) => {
-      const key = limits.typed.size > 0 ? entry.task.type : TOTAL;
+      const series = limits.typed.size > 0 ? entry.task.type : TOTAL;
+      const key = `${entry.dueMonth < currentMonth ? "retard" : "a-venir"}|${series}`;
       if (!queues.has(key)) queues.set(key, []);
       queues.get(key).push(entry);
     });
@@ -657,8 +697,8 @@ export function smoothTasks(tasks, settings, todayIso) {
 //   - regle 1 : smoothedIso <= dueIso ;
 //   - regle 2 : une tache dont la date change n'arrive pas avant le mois de
 //     depart, ni, quand le depart est le mois courant, avant aujourd'hui ;
-//   - regle 3 : une tache figee (realisee, ou en retard : echeance dans un mois
-//     passe) garde son echeance ;
+//   - regle 3 : une tache figee (isFrozenTask : realisee, ou en retard sans
+//     mois de depart avant elle) garde son echeance ;
 //   - regle 4 : une armature dont la date change n'est pas avant un coffrage
 //     non realise de son groupe (groupKey non vide) : date lissee du coffrage
 //     <= date lissee de l'armature ;
@@ -734,7 +774,7 @@ function collectViolations(tasks, settings, todayIso, result) {
     } else if (!(month >= startMonth)) {
       report(2, "", `placée le ${smoothedIso}, avant le début du lissage (${startKey})`);
     }
-    if (task.realized || dueMonth < currentMonth) {
+    if (isFrozenTask(task, dueMonth, currentMonth, startMonth)) {
       report(3, "", `tâche figée déplacée au ${smoothedIso}`);
     }
     coffragesOf(coffrageIndex, task).forEach((j) => {

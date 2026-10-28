@@ -551,8 +551,9 @@ const SCENARIOS = {
     ],
   }),
 
-  // Tache en retard (fevrier, non realisee) : figee, elle garde son mois et le
-  // remplit ; la tache de mars en trop passe donc en janvier.
+  // Tache en retard (fevrier, non realisee), depart en janvier : mobile, mais
+  // les taches a venir passent d'abord. La tache de mars en trop prend janvier,
+  // la seule place libre ; la tache en retard n'en trouve plus et reste.
   lateTasks: () => ({
     today: "2027-03-15",
     settings: { maxTotal: 1, maxByType: {}, startMonth: "2027-01" },
@@ -564,15 +565,17 @@ const SCENARIOS = {
     ],
   }),
 
-  // Mois passe deja plein de taches en retard : raison « taches-passees ».
+  // Mois passe deja plein de taches en retard, et c'est le mois de depart :
+  // aucun mois avant elles, elles restent. Raison « taches-passees ».
   lateMonthOver: () => ({
     today: "2027-03-15",
     settings: { maxTotal: 1, maxByType: {}, startMonth: "2027-01" },
     tasks: [t(1, "NDC", "2027-01-10"), t(2, "NDC", "2027-01-20")],
   }),
 
-  // Coffrage C en retard (fevrier) : il ne bouge pas, et son armature A1 ne
-  // peut pas passer en janvier, avant lui (fevrier est plein d'armatures).
+  // Coffrage C en retard (fevrier), depart en janvier : mobile. Son armature
+  // A1, en trop en mars, ne tient qu'en janvier (fevrier est plein
+  // d'armatures) : elle y passe et y entraine C.
   lateCoffrage: () => ({
     today: "2027-03-15",
     settings: { maxByType: { ARMATURES: 1 }, startMonth: "2027-01" },
@@ -581,6 +584,33 @@ const SCENARIOS = {
       t(2, "ARMATURES", "2027-02-20", { realized: true }), // fevrier plein
       t(3, "ARMATURES", "2027-03-05", { groupKey: "a||1" }), // A1
       t(4, "ARMATURES", "2027-03-10", { groupKey: "a||1" }), // A2
+    ],
+  }),
+
+  // Le bug du 2026-10-28 en miniature : depart passe tres tot, des mois libres,
+  // et des taches en retard en trop dans un mois passe. Elles descendent dans
+  // les mois libres, a partir du plus tardif.
+  lateUseMargin: () => ({
+    today: "2027-03-15",
+    settings: { maxTotal: 1, maxByType: {}, startMonth: "2026-06" },
+    tasks: [
+      t(1, "NDC", "2027-02-05"), // en retard
+      t(2, "NDC", "2027-02-12"), // en retard
+      t(3, "NDC", "2027-02-20"), // en retard
+      t(4, "NDC", "2027-02-25", { realized: true }),
+    ],
+  }),
+
+  // Les taches a venir passent avant les taches en retard : janvier, seule
+  // place libre, va a la tache de mars ; fevrier reste en depassement.
+  latePriority: () => ({
+    today: "2027-03-15",
+    settings: { maxTotal: 1, maxByType: {}, startMonth: "2027-01" },
+    tasks: [
+      t(1, "NDC", "2027-02-10"), // en retard
+      t(2, "NDC", "2027-02-20"), // en retard
+      t(3, "NDC", "2027-03-05"),
+      t(4, "NDC", "2027-03-10"),
     ],
   }),
 
@@ -1478,12 +1508,12 @@ test("départ passé : jamais avant le mois de départ ; les mois d'avant resten
   ]);
 });
 
-test("départ passé : une tâche en retard reste à sa place et compte ; celle à venir passe avant", () => {
+test("départ passé : la tâche à venir passe d'abord ; la tâche en retard, mobile, n'a plus de place et reste", () => {
   const result = run("lateTasks");
 
   assert.deepEqual(monthsOf(result), { "2027-01": [2], "2027-02": [1], "2027-03": [3, 4] });
   const rows = byRow(result);
-  assert.equal(rows.get(1).frozen, true);
+  assert.equal(rows.get(1).frozen, false);
   assert.equal(rows.get(1).moved, false);
   assert.equal(rows.get(2).smoothedIso, "2027-01-05");
   assert.deepEqual(result.overflows, [
@@ -1500,17 +1530,48 @@ test("départ passé : un mois passé plein de tâches en retard a la raison « 
   ]);
 });
 
-test("départ passé : un coffrage en retard ne bouge pas et retient son armature", () => {
+test("départ passé : un coffrage en retard est entraîné par son armature", () => {
   const result = run("lateCoffrage");
 
-  assertUnchanged(result);
+  assert.deepEqual(monthsOf(result), { "2027-01": [1, 3], "2027-02": [2], "2027-03": [4] });
   const rows = byRow(result);
-  assert.equal(rows.get(1).frozen, true);
-  assert.equal(rows.get(1).pulledFor, null);
-  assert.equal(rows.get(3).rule4Exception, true);
+  assert.equal(rows.get(1).frozen, false);
+  assert.equal(rows.get(1).pulledFor, "3");
+  assert.ok(rows.get(1).smoothedIso <= rows.get(3).smoothedIso, "le coffrage reste avant son armature");
+  assert.deepEqual(result.overflows, []);
+});
+
+test("départ passé : les tâches en retard en trop descendent dans les mois libres (bug du 28/10/2026)", () => {
+  const result = run("lateUseMargin");
+
+  // Fevrier garde la tache realisee ; les trois en retard partent en janvier,
+  // decembre et novembre, du plus tardif au plus tot, dans l'ordre chronologique.
+  assert.deepEqual(monthsOf(result), {
+    "2026-11": [1],
+    "2026-12": [2],
+    "2027-01": [3],
+    "2027-02": [4],
+  });
+  assert.equal(byRow(result).get(1).smoothedIso, "2026-11-05");
+  assert.equal(byRow(result).get(4).frozen, true);
+  assert.deepEqual(result.overflows, []);
+});
+
+test("départ passé : les tâches à venir passent avant les tâches en retard", () => {
+  const result = run("latePriority");
+
+  assert.deepEqual(monthsOf(result), { "2027-01": [3], "2027-02": [1, 2], "2027-03": [4] });
   assert.deepEqual(result.overflows, [
-    { month: "2027-03", series: "ARMATURES", count: 2, max: 1, reason: "coffrage-sans-place" },
+    { month: "2027-02", series: "TOTAL", count: 2, max: 1, reason: "plus-de-place" },
   ]);
+});
+
+test("mois de départ par défaut (mois en cours) : les tâches en retard restent figées, comme avant", () => {
+  const { tasks, today } = SCENARIOS.lateUseMargin();
+  const result = smoothTasks(tasks, { maxTotal: 1, maxByType: {} }, today);
+
+  assertUnchanged(result);
+  assert.ok(result.tasks.every((task) => task.frozen), "toutes figées : aucun mois avant le mois en cours");
 });
 
 test("départ après le mois en cours : le mois en cours vaut", () => {

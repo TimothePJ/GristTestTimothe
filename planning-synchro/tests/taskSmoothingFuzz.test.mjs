@@ -242,9 +242,15 @@ function recountOverflows(result, settings, today) {
 }
 
 const monthOf = (iso) => Number(iso.slice(0, 4)) * 12 + Number(iso.slice(5, 7)) - 1;
-// Mobile : a venir (mois courant ou plus tard) et non realisee. Le mois de
-// depart n'y change rien : une tache en retard reste a sa place.
-const isMobile = (task, today) => !task.realized && monthOf(task.dueIso) >= monthOf(today);
+// Mobile : non realisee, et a venir (mois courant ou plus tard) ou en retard
+// d'un mois posterieur au mois de depart (depart passe : elle peut etre avancee
+// jusqu'a lui). Une tache en retard sans mois de depart avant elle reste a sa
+// place.
+const isMobile = (task, today, settings) => {
+  if (task.realized) return false;
+  const due = monthOf(task.dueIso);
+  return due >= monthOf(today) || due > monthOf(`${startKeyOf(settings, today)}-01`);
+};
 
 // Liee a la regle 4 par les donnees : armature dont le groupe (groupKey non
 // vide) a un coffrage non realise, ou coffrage non realise dont le groupe a
@@ -275,11 +281,18 @@ function unjustifiedInversions(tasks, settings, today, result) {
     typed(settings.maxByType) || Object.values(settings.maxByMonth || {}).some((own) => typed(own.maxByType));
   const ordered = tasks
     .map((task, i) => ({ task, out: result.tasks[i] }))
-    .filter(({ task, out }) => isMobile(task, today) && !out.rule4Exception);
+    .filter(({ task, out }) => isMobile(task, today, settings) && !out.rule4Exception);
   const inversions = [];
+  // Priorite aux taches a venir : une tache EN RETARD (rendue mobile par un
+  // depart passe) ne prend que la place qu'aucune tache a venir ne demande. Elle
+  // peut donc rester dans son mois quand une tache a venir, plus tardive, a pris
+  // avant elle la derniere place libre ; les echanger ferait arriver la tache a
+  // venir dans un mois plein (regle 5). Seul ce cas est dispense.
+  const late = (task) => monthOf(task.dueIso) < monthOf(today);
   ordered.forEach((a) => {
     ordered.forEach((b) => {
       if (byType && a.task.type !== b.task.type) return;
+      if (late(a.task) && !late(b.task)) return;
       if (compareChartTasks(a.task, b.task) < 0 && monthOf(a.out.smoothedIso) > monthOf(b.out.smoothedIso)) {
         inversions.push(`${a.task.rowId}>${b.task.rowId}`);
       }
@@ -291,9 +304,9 @@ function unjustifiedInversions(tasks, settings, today, result) {
 // Lignes marquees rule4Exception sans pouvoir l'etre : une tache figee, ou une
 // tache sans lien avec la regle 4 (l'oracle ci-dessus ne doit dispenser
 // personne d'autre).
-function unfoundedExceptions(tasks, today, result) {
+function unfoundedExceptions(tasks, today, settings, result) {
   return tasks
-    .filter((task, i) => result.tasks[i].rule4Exception && !(isMobile(task, today) && isLinked(tasks, task)))
+    .filter((task, i) => result.tasks[i].rule4Exception && !(isMobile(task, today, settings) && isLinked(tasks, task)))
     .map((task) => task.rowId);
 }
 
@@ -326,7 +339,7 @@ function checkCase(seed, options) {
     `${where} : dépassements`
   );
   assert.deepEqual(unjustifiedInversions(tasks, settings, today, result), [], `${where} : préférence 4`);
-  assert.deepEqual(unfoundedExceptions(tasks, today, result), [], `${where} : rule4Exception`);
+  assert.deepEqual(unfoundedExceptions(tasks, today, settings, result), [], `${where} : rule4Exception`);
 
   const byId2 = new Map(result.tasks.map((task) => [task.id2, task]));
   result.tasks.forEach((task) => {
@@ -360,7 +373,7 @@ test("fuzz ciblé : armatures retenues, aucune tâche doublée hors exception de
     const result = smoothTasks(tasks, settings, today);
     assert.deepEqual(findSmoothingViolations(tasks, settings, today, result), [], where);
     assert.deepEqual(unjustifiedInversions(tasks, settings, today, result), [], `${where} : préférence 4`);
-    assert.deepEqual(unfoundedExceptions(tasks, today, result), [], `${where} : rule4Exception`);
+    assert.deepEqual(unfoundedExceptions(tasks, today, settings, result), [], `${where} : rule4Exception`);
   });
   assert.equal(warn.mock.callCount(), 0, "console.warn appelé");
 });

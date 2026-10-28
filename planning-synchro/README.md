@@ -476,9 +476,12 @@ strictes).
 **Vocabulaire.** Le **mois courant** est celui de la date du jour (horloge du
 navigateur). Le **mois de départ** est le premier mois où une tâche peut être
 placée : le mois courant par défaut, ou un mois passé choisi dans la fenêtre
-(« Lisser à partir de »). Une tâche est **figée** si elle est réalisée ou si son
-échéance tombe dans un mois passé (en retard) : elle garde son mois et y compte,
-quel que soit le mois de départ. Les autres, **à venir**, sont **mobiles**. Les
+(« Lisser à partir de »). Une tâche est **figée** si elle est réalisée, ou si
+elle est **en retard** (échéance dans un mois passé) **sans mois de départ avant
+elle** : elle garde son mois et y compte. Les autres sont **mobiles** : les
+tâches **à venir**, et, avec un départ passé, les tâches en retard d'un mois
+postérieur au départ (2026-10-28). Les tâches à venir sont placées **d'abord**,
+les tâches en retard **ensuite**, dans la place qui reste. Les
 maximums valent **par mois**, même quand le graphique est regroupé par semaine ;
 un **mois particulier** peut avoir ses propres maximums (voir les réglages).
 
@@ -488,8 +491,8 @@ un **mois particulier** peut avoir ses propres maximums (voir les réglages).
    mois antérieur.
 2. **Jamais avant le mois de départ** ; quand le départ est le mois courant (par
    défaut), jamais non plus à une date antérieure à aujourd'hui. Avec un départ
-   passé, les mois passés à partir de lui reçoivent des tâches à venir, même
-   s'ils sont vides.
+   passé, les mois passés à partir de lui reçoivent des tâches à venir ou en
+   retard, même s'ils sont vides.
 3. **Les tâches figées ne bougent pas.**
 4. **Armature après son coffrage** : l'échéance lissée d'une armature n'est
    jamais antérieure à celle d'un coffrage non réalisé de son groupe (même Zone
@@ -498,8 +501,9 @@ un **mois particulier** peut avoir ses propres maximums (voir les réglages).
    l'armature, où il tient sous ses propres maximums, et il est marqué « avancé
    pour libérer l'armature N° … ». Si le coffrage ne trouve pas de place,
    l'armature reste (raison « coffrage sans place »). Un coffrage réalisé ne
-   contraint plus rien ; un coffrage en retard ne bouge pas mais contraint
-   toujours (une armature ne passe jamais avant lui).
+   contraint plus rien ; un coffrage en retard contraint toujours (une armature
+   ne passe jamais avant lui) et, mobile avec un départ passé, il est entraîné
+   comme les autres.
 5. **Une tâche n'est avancée que là où elle tient** : le mois qui la reçoit
    respecte, après lissage, le maximum de **son type** et le **maximum
    général** de **ce mois**. Une tâche sans place reste dans son mois d'origine.
@@ -513,7 +517,10 @@ avancer **le moins possible** (le mois le plus tardif où la tâche tient) ;
 conserver l'**ordre chronologique** dans la file soumise au maximum qui déborde
 (une file unique quand seul le maximum général existe, une file par type dès
 qu'un maximum par type existe) ; à échéance égale, ordre par N° (`ID2`) puis par
-identifiant de ligne. La première préférence est **visée, pas garantie** : le
+identifiant de ligne. L'ordre vaut entre tâches à venir et entre tâches en
+retard : une tâche en retard peut rester dans son mois quand une tâche à venir,
+plus tardive, a pris avant elle la dernière place libre (priorité aux tâches à
+venir). La première préférence est **visée, pas garantie** : le
 calcul se fait en une passe, et dans de rares cas il laisse un dépassement qu'un
 déplacement en chaîne aurait résolu. Il est alors signalé ; aucune règle stricte
 n'est enfreinte.
@@ -533,12 +540,19 @@ parti du mois courant : impossible d'avancer avant lui), **tâches réalisées**
 les mois antérieurs, jusqu'au mois de départ, sont pleins), **coffrage sans
 place**. Les mois d'avant le mois de départ ne sont ni lissés ni signalés.
 
-**Pourquoi les tâches en retard restent à leur place** (essai sur l'export
-d'ERA QUAI D'ORSAY du 2026-10-26, maximum 4 partout) : mobiles, elles
-prendraient d'abord les places libres des mois passés et rien ne se libérerait
-pour les mois à venir (39 tâches en trop à partir d'octobre 2026, quel que soit
-le départ jusqu'à janvier 2026). Figées, elles comptent sans bouger : 30 tâches
-en trop avec un départ en janvier 2026, 3 avec un départ en juin 2025.
+**Tâches en retard : mobiles, mais après les tâches à venir** (2026-10-28).
+Jusque-là figées, elles empêchaient d'utiliser la marge d'un départ lointain :
+départ octobre 2024, maximum 3 armatures (export ERA), la cascade s'arrêtait en
+novembre 2025 et juillet, août et septembre 2026 restaient en dépassement, pleins
+d'armatures en retard, alors que vingt mois libres les précédaient. Elles sont
+désormais mobiles, mais placées **après** les tâches à venir : placées ensemble,
+étant plus tôt dans le calendrier, elles prenaient d'abord les mois libres et en
+privaient les mois à venir (maximum 4 partout, départ juin 2025 : 26 tâches en
+trop à venir au lieu de 3). Mesuré sur l'export ERA, les mois à venir ont
+exactement le même résultat qu'avec des tâches en retard figées, et les mois
+passés ne peuvent que s'améliorer : 0 dépassement au lieu de 7 dans le cas
+ci-dessus ; maximum 4 partout, départ octobre 2024 : 4 tâches en trop passées
+au lieu de 24.
 
 #### Réglages : bouton « Lisser… » et colonne `Projets2.Lissage`
 
@@ -562,9 +576,9 @@ fenêtre **« Lissage des tâches — <Projet> · <Service> »**
   signalée sur le champ et bloque « Enregistrer » ;
 - **0 pour un mois particulier** (2026-10-27) : une case d'un mois particulier
   accepte **0** — aucune tâche ce mois-là (case Total), ou aucune de ce type
-  (case d'un type). Ses tâches **à venir** sont avancées dans les mois d'avant,
+  (case d'un type). Ses tâches mobiles sont avancées dans les mois d'avant,
   là où elles tiennent, et aucune tâche n'y est avancée, même s'il est vide. Les
-  tâches figées (réalisées, en retard) y restent, et le mois est alors signalé en
+  tâches figées (réalisées, en retard sans mois avant elles) y restent, et le mois est alors signalé en
   dépassement avec sa raison (« tâches réalisées », « mois en cours » quand le
   lissage part du mois courant, « plus de place avant »). Un 0 n'est pas permis
   dans les maximums de tous les mois : il n'y laisserait aucune tâche nulle part ;
