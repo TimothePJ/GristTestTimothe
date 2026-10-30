@@ -3,6 +3,7 @@ import {
   formatPlanningCalendarDateIso,
   normalizePlanningDocumentType,
 } from "../../../../gestion-depenses2/assets/js/utils/planningRealisation.js";
+import { isSyntheseTypeDoc } from "./syntheseTasks.js";
 
 const REFERENCES_TABLE_NAME = "References2";
 const REFERENCE_EMPTY_DATE_ISO = "1900-01-01";
@@ -3177,7 +3178,12 @@ export async function reorganizePlanningRowForTypeChange({ rowId, oldTypeDoc, ne
 
 export async function fetchPlanningRows() {
   const table = APP_CONFIG.grist.planningTable;
-  const rows = await fetchTableRows(table.sourceTable);
+  // Les segments de la vue Synthese partagent la table mais pas le modèle du
+  // planning (ni zone, ni type de document, ni échéances de référence) : le
+  // planning ne les lit pas.
+  const rows = (await fetchTableRows(table.sourceTable)).filter(
+    (row) => !isSyntheseTypeDoc(row?.[table.columns?.typeDoc || "Type_doc"])
+  );
   _planningRowsCache = rows;  // alimente le cache pour fetchPlanningRowById
   return rows;
 }

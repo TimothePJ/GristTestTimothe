@@ -200,3 +200,29 @@ test("computeProjectCharge signale une divergence de portee zone", () => {
   // Aucune divergence de portee project ici (Duree_Projet n'est jamais renseignee).
   assert.equal(result.divergences.some((entry) => entry.scope === "project"), false);
 });
+
+// Review Focus 5 : une tâche de la vue Synthese de Planning Projet garde son N° sans devenir
+// un document à charger.
+test("isDocumentRow : une tâche Synthese avec un N° n'est pas un document", () => {
+  const cols = { ...COLS, service: "Service" };
+  assert.equal(isDocumentRow({ ID2: "2001", Taches: "PLAN", Service: "Synthese" }, cols), false);
+  assert.equal(isDocumentRow({ ID2: "2001", Taches: "PLAN", Service: "Synthèse" }, cols), false);
+  assert.equal(isDocumentRow({ ID2: "2001", Type_doc: "RESEAUX", Service: "Synthese" }, cols), true);
+  assert.equal(isDocumentRow({ ID2: "2001", Service: "Structure" }, cols), true);
+  // Une tâche Synthese SANS nom de tâche (Taches vide) reste un document : la Tâche
+  // Synthese exige Taches rempli (spec § 9), pas seulement Service + Type_doc vide.
+  assert.equal(isDocumentRow({ ID2: "2001", Taches: "", Service: "Synthese" }, cols), true);
+  // Taches vide mais Tache (l'alias) rempli : toujours une Tâche Synthese, pas un document.
+  assert.equal(
+    isDocumentRow(
+      { ID2: "2001", Taches: "", Tache: "PLAN", Service: "Synthese" },
+      { ...COLS, service: "Service", taskNameAlt: "Tache" }
+    ),
+    false
+  );
+  assert.equal(
+    isDocumentRow({ ID2: "2001", Taches: "PLAN", Service: "Synthese" }, COLS),
+    false,
+    "colonne Service par défaut"
+  );
+});

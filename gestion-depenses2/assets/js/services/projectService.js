@@ -21,6 +21,7 @@ import {
   findBestPlanningDocumentMatches,
   formatPlanningCalendarDateIso,
   getTargetIndiceForDocumentType,
+  isSynthesePlanningTask,
 } from "../utils/planningRealisation.js";
 import { buildAbsenceIndex, normalizeName } from "../utils/leaveAbsences.js";
 
@@ -487,7 +488,8 @@ export function buildExpenseData({
       Zone: getFirstText(row, [listePlanColumns.zone]),
       Service: getFirstText(row, [listePlanColumns.service]),
       Indice: getFirstText(row, [listePlanColumns.indice]),
-      DateDiffusion: getFirstText(row, [listePlanColumns.diffusionDate]),
+      // Valeur brute : une date Grist arrive en secondes epoch, que toText rendrait illisible.
+      DateDiffusion: row?.[listePlanColumns.diffusionDate] ?? null,
     };
 
     linkedProjects.forEach((project) => {
@@ -537,7 +539,14 @@ export function buildExpenseData({
         project?.avancementConfigRaw
       );
       const typeDoc = toText(row?.[planningColumns.typeDoc]);
-      const indice = toText(row?.[planningColumns.indice]);
+      // Une tâche Synthese garde son Indice pour elle : il ne compte pas dans l'avancement.
+      const indice = isSynthesePlanningTask({
+        service: row?.[planningColumns.service],
+        typeDoc,
+        taskName: row?.[planningColumns.taskName] ?? row?.[planningColumns.taskNameAlt],
+      })
+        ? ""
+        : toText(row?.[planningColumns.indice]);
       const targetIndice = getTargetIndiceForDocumentType(typeDoc, targetIndiceByType);
       const dateCloture = formatPlanningCalendarDateIso(row?.[planningColumns.dateCloture]);
       const task = {
@@ -747,6 +756,7 @@ export function buildExpenseData({
     id: Number(row?.[columns.team.id]),
     firstName: toText(row?.[columns.team.firstName]),
     lastName: toText(row?.[columns.team.lastName]),
+    service: row?.[columns.team.service] ?? "",
     role: (() => {
       const explicitRole = toText(row?.[columns.team.role]);
       if (explicitRole) {

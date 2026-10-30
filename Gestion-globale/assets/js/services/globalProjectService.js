@@ -649,6 +649,7 @@ function buildAggregatedWorkers(projects) {
 function buildAggregatedAvancementRecords(projects) {
   return projects.flatMap((project, projectIndex) => {
     const prefix = getProjectPrefix(project, projectIndex);
+    const projectLabel = getProjectDisplayName(project);
     const indiceByType = buildAvancementIndiceByType(project);
 
     return (project?.avancementRecords || []).map((record, recordIndex) => {
@@ -658,6 +659,7 @@ function buildAggregatedAvancementRecords(projects) {
         ...record,
         id: `${prefix}-doc-${record?.id ?? recordIndex}`,
         NumeroDocument: `${prefix} - ${toText(record?.NumeroDocument)}`,
+        AvancementProjectLabel: projectLabel,
         AvancementSelectedIndice: selectedIndice || "",
       };
     });

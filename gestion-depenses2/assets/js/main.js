@@ -15,6 +15,7 @@ import {
   createProjectWithBudget,
   fetchProjectsForDropdown,
   fetchProjectDataTables,
+  getActiveService,
   initGrist,
   removeProjectWorker,
   removeTimeSegment,
@@ -2122,7 +2123,12 @@ function renderApp() {
   ) {
     resetEditChargePlanForm();
   }
-  renderWorkerOptions(dom.workerNameSelect, state.teamMembers, selectedProject);
+  renderWorkerOptions(
+    dom.workerNameSelect,
+    state.teamMembers,
+    selectedProject,
+    getActiveService()
+  );
   dom.saveWorkerBtn.disabled = dom.workerNameSelect.disabled || !selectedProject;
   renderBudgetPreview(dom.budgetLinesContainer, state.newProjectBudgetLines);
 

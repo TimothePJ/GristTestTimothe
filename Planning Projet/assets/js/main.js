@@ -26,6 +26,7 @@ import {
   buildProjectRealisationTargetLookup,
   buildTimelineDataFromPlanningRows,
 } from "./services/planningService.js";
+import { createRealisationTargetCache } from "./services/realisationTargetCache.js";
 import {
   runExclusivePlanningWrite,
   synchronizePlanningDerivedData,
@@ -69,9 +70,31 @@ import {
   setPlanningInitializeHandler,
   subscribePlanningSelectionChanges,
   subscribePlanningViewportChanges,
+  getPlanningWindow,
+  setPlanningWindow,
+  subscribePlanningWindowChanges,
 } from "./ui/timeline.js";
+// ARCHIVE vue Synthese v1 (équipe sur chronologie) : désactivée, gardée pour trace.
+// import {
+//   refreshSyntheseView,
+//   setSyntheseEditingEnabled,
+//   setSyntheseViewActive,
+// } from "./ui/syntheseView.js";
+import { createSyntheseTaskTable } from "./ui/syntheseTaskTable.js";
+import { createSyntheseTasksController } from "./ui/syntheseTasksController.js";
+import { createSyntheseGantt } from "./ui/syntheseGantt.js";
+import { createStructureLinkDialog } from "./ui/structureLinkDialog.js";
+import { buildFormworkStarts } from "./services/formworkStarts.js";
+import { createGlobalPlanningTable } from "./ui/globalPlanningTable.js";
+import { createGlobalPlanningController } from "./ui/globalPlanningController.js";
 
 let toolbarBound = false;
+// Tableau de tâches de la vue Synthese : créé à la première activation du service.
+let syntheseTasks = null;
+// Vue Global (planning Synthèse + Structure fusionné, en lecture seule) : créée à sa première
+// ouverture.
+let globalPlanning = null;
+let globalSpaceActive = false;
 let pendingRefreshOptions = null;
 let refreshQueuePromise = null;
 let resolveRefreshQueue = null;
@@ -79,7 +102,12 @@ let planningDataRefreshBound = false;
 let planningServiceRefreshBound = false;
 let cachedPlanningRows = null;
 let cachedProjectAvancementConfigs = [];
-let cachedRealisationTargetLookup = null;
+// Indices de référence (« 100 % réalisé ») : la configuration d'avancement est tenue par
+// service, la table suit donc le service affiché au lieu d'être gardée depuis le chargement.
+const realisationTargets = createRealisationTargetCache({
+  build: buildProjectRealisationTargetLookup,
+  getService: () => window.GristServiceContext?.getService?.() || "",
+});
 let cachedPlanningReferenceReceptionLookup = null;
 let lastAutoSyncAt = 0;
 let lastAutoSyncProject = "";
@@ -277,6 +305,8 @@ function setPlanningEditingEnabled(nextEnabled, { rerender = true, notify = true
   planningEditingEnabled =
     Boolean(nextEnabled) && !EMBEDDED_PLANNING_SYNC_MODE && !HEADER_ONLY_EMBEDDED_MODE;
   updatePlanningEditToggle();
+  // ARCHIVE vue Synthese v1 : setSyntheseEditingEnabled(isPlanningEditingUnlocked());
+  syntheseTasks?.setEditingEnabled(isPlanningEditingUnlocked());
 
   if (notify) {
     setPlanningStatus(
@@ -429,7 +459,10 @@ function bindAddZoneModal() {
       const projectName = state.selectedProject || "";
       const zoneValue =
         els.zoneName instanceof HTMLInputElement ? els.zoneName.value : "";
-      const normalizedZone = toText(zoneValue);
+      const typedZone = toText(zoneValue);
+      // Même zone qu'une zone existante (tous services) : on garde sa graphie.
+      const existingZone = findExistingProjectZone(typedZone);
+      const normalizedZone = existingZone || typedZone;
 
       if (!projectName) {
         setAddZoneModalHint("Selectionne d'abord un projet.");
@@ -440,6 +473,11 @@ function bindAddZoneModal() {
         if (els.zoneName instanceof HTMLInputElement) {
           els.zoneName.focus();
         }
+        return;
+      }
+
+      if (existingZone) {
+        setAddZoneModalHint(`La zone « ${existingZone} » existe deja pour ce projet.`);
         return;
       }
 
@@ -501,16 +539,21 @@ function setManageZoneModalHint(message = "") {
   els.hint.textContent = String(message ?? "").trim();
 }
 
+// Renommer ou supprimer une zone ne touche que les lignes du service courant :
+// seules ses propres zones sont proposées, pas celles des autres services.
 function getCurrentManageableZoneOptions() {
-  const zoneSelect = document.getElementById("zoneDropdown");
-  if (!(zoneSelect instanceof HTMLSelectElement)) return [];
+  const localZones = buildZoneOptionsForSelectedProject(
+    cachedPlanningRows,
+    state.selectedProject || "",
+    { includeSharedZones: false }
+  );
 
   const options = [];
   const seenKeys = new Set();
 
-  for (const option of Array.from(zoneSelect.options || [])) {
-    const value = toText(option.value);
-    if (!value || value === "__add_zone__" || value === "__manage_zone__" || option.disabled) continue;
+  for (const zone of localZones) {
+    const value = toText(zone);
+    if (!value) continue;
 
     const key = normalizeManageZoneKey(value);
     if (!key || seenKeys.has(key)) continue;
@@ -805,7 +848,40 @@ function resolvePlanningColumnName(columnKey) {
   return String(columns[columnKey] ?? "").trim();
 }
 
-function buildZoneOptionsForSelectedProject(planningRows, selectedProject = "") {
+// Zones du projet créées depuis n'importe quel service (Structure, Synthese…),
+// tenues à jour par le contexte partagé : une zone appartient au projet.
+let sharedProjectZones = [];
+let sharedProjectZonesProjectKeys = new Set();
+
+function toSharedZoneProjectKey(projectName) {
+  return toText(projectName).replace(/\s+/g, " ").toLocaleLowerCase("fr");
+}
+
+// Les zones partagées sont celles du projet du contexte : on ne les applique
+// qu'au même projet, le temps que les deux sélections se rejoignent.
+function getSharedZonesForSelectedProject() {
+  const projectKey = toSharedZoneProjectKey(state.selectedProject);
+  return projectKey && sharedProjectZonesProjectKeys.has(projectKey) ? sharedProjectZones : [];
+}
+
+function hasSharedZonesForSelectedProject() {
+  return sharedProjectZonesProjectKeys.has(toSharedZoneProjectKey(state.selectedProject));
+}
+
+function mergeWithSharedZones(localZones) {
+  const sharedZones = getSharedZonesForSelectedProject();
+  const merge = window.GristServiceContextCore?.mergeZoneNames;
+  if (typeof merge === "function") return merge(localZones, sharedZones);
+  return [...new Set([...localZones, ...sharedZones])].sort((a, b) =>
+    a.localeCompare(b, "fr", { sensitivity: "base", numeric: true })
+  );
+}
+
+function buildZoneOptionsForSelectedProject(
+  planningRows,
+  selectedProject = "",
+  { includeSharedZones = true } = {}
+) {
   const projectName = toText(selectedProject);
   if (!projectName) return [];
 
@@ -821,9 +897,47 @@ function buildZoneOptionsForSelectedProject(planningRows, selectedProject = "") 
     zoneValues.add(zone);
   }
 
-  return [...zoneValues].sort((a, b) =>
+  const localZones = [...zoneValues].sort((a, b) =>
     a.localeCompare(b, "fr", { sensitivity: "base", numeric: true })
   );
+  return includeSharedZones ? mergeWithSharedZones(localZones) : localZones;
+}
+
+function findExistingProjectZone(zoneName) {
+  const key = normalizeManageZoneKey(zoneName);
+  if (!key) return "";
+  const zones = buildZoneOptionsForSelectedProject(cachedPlanningRows, state.selectedProject || "");
+  return zones.find((zone) => normalizeManageZoneKey(zone) === key) || "";
+}
+
+function bindSharedProjectZones() {
+  if (EMBEDDED_PLANNING_SYNC_MODE) return;
+  const watch = window.GristServiceContext?.watchProjectZones;
+  if (typeof watch !== "function") return;
+  watch((zones, meta = {}) => {
+    sharedProjectZones = Array.isArray(zones) ? zones : [];
+    sharedProjectZonesProjectKeys = new Set(
+      (Array.isArray(meta.projectNames) ? meta.projectNames : [])
+        .map(toSharedZoneProjectKey)
+        .filter(Boolean)
+    );
+    const selectedProject = state.selectedProject || "";
+    if (!selectedProject || !Array.isArray(cachedPlanningRows)) return;
+    const zoneOptions = buildZoneOptionsForSelectedProject(cachedPlanningRows, selectedProject);
+    // La zone mémorisée peut n'exister que dans un autre service : elle est
+    // restaurée maintenant que ces zones sont connues, ou oubliée si elle a disparu.
+    const normalizedZone = normalizeSelectedZone(zoneOptions, state.selectedZone);
+    if (hasSharedZonesForSelectedProject() && normalizedZone !== (state.selectedZone || "")) {
+      setState({ selectedZone: normalizedZone });
+    }
+    syncSyntheseTasksZoneFilter();
+    updateZoneSelector(zoneOptions, {
+      selectedValue: normalizedZone,
+      enabled: true,
+      canManageZones: getCurrentManageableZoneOptions().length > 0,
+    });
+    renderPlanningFromCache();
+  });
 }
 
 function normalizeSelectedZone(zoneOptions, selectedZone) {
@@ -852,8 +966,9 @@ function renderPlanningFromCache() {
     cachedPlanningRows,
     selectedProject,
     normalizedZone,
-    cachedRealisationTargetLookup,
-    cachedPlanningReferenceReceptionLookup
+    realisationTargets.get(),
+    cachedPlanningReferenceReceptionLookup,
+    getSharedZonesForSelectedProject()
   );
   if (!timelineData.rowCount) return;
   timelineData.resetViewport = false;
@@ -875,8 +990,9 @@ function getDisplayedPlanningGroups() {
     cachedPlanningRows,
     selectedProject,
     normalizedZone,
-    cachedRealisationTargetLookup,
-    cachedPlanningReferenceReceptionLookup
+    realisationTargets.get(),
+    cachedPlanningReferenceReceptionLookup,
+    getSharedZonesForSelectedProject()
   );
 
   return {
@@ -1303,7 +1419,7 @@ async function performPlanningRefresh(options = {}) {
           planningRows: cachedPlanningRows,
           selectedProject,
           projectAvancementConfigs: cachedProjectAvancementConfigs,
-          realisationTargetLookup: cachedRealisationTargetLookup,
+          realisationTargetLookup: realisationTargets.get(),
         });
         lastAutoSyncAt = Date.now();
         lastAutoSyncProject = selectedProject;
@@ -1327,13 +1443,20 @@ async function performPlanningRefresh(options = {}) {
 
     const zoneOptions = buildZoneOptionsForSelectedProject(planningRows, selectedProject);
     const normalizedZone = normalizeSelectedZone(zoneOptions, state.selectedZone);
-    if (normalizedZone !== (state.selectedZone || "")) {
+    // Tant que les zones des autres services ne sont pas connues, une zone
+    // mémorisée introuvable n'est pas oubliée : elle vient peut-être d'eux.
+    if (
+      normalizedZone !== (state.selectedZone || "") &&
+      hasSharedZonesForSelectedProject()
+    ) {
       setState({ selectedZone: normalizedZone });
     }
+    syncSyntheseTasksZoneFilter();
 
     updateZoneSelector(zoneOptions, {
       selectedValue: normalizedZone,
       enabled: Boolean(selectedProject),
+      canManageZones: getCurrentManageableZoneOptions().length > 0,
     });
 
     const buildStartedAt = performance.now();
@@ -1341,8 +1464,9 @@ async function performPlanningRefresh(options = {}) {
       planningRows,
       selectedProject,
       normalizedZone,
-      cachedRealisationTargetLookup,
-      cachedPlanningReferenceReceptionLookup
+      realisationTargets.get(),
+      cachedPlanningReferenceReceptionLookup,
+      getSharedZonesForSelectedProject()
     );
     buildDurationMs += performance.now() - buildStartedAt;
     timelineData.resetViewport = lastRenderedProject !== selectedProject;
@@ -1469,9 +1593,7 @@ function applyProjectBootstrapData({
   fallbackToState = false,
 } = {}) {
   cachedProjectAvancementConfigs = projectAvancementConfigs;
-  cachedRealisationTargetLookup = buildProjectRealisationTargetLookup(
-    cachedProjectAvancementConfigs
-  );
+  realisationTargets.setConfigs(cachedProjectAvancementConfigs);
   planningProjectOptions = projectOptions.map((project) => project.name);
   return updateProjectSelectorOptions(projectOptions, {
     notify,
@@ -1897,6 +2019,15 @@ function bindPlanningDataRefresh() {
   serviceContext.watchContextTables(
     ["Planning_Projet", "Projets2", "References2", "ListePlan_NDC_COF"],
     ({ tables }) => {
+      // Le tableau de tâches Synthese relit Planning_Projet, que cette surveillance
+      // vient de rafraîchir : pas de nouvelle lecture forcée.
+      if (tables.includes("Planning_Projet")) void syntheseTasks?.refresh();
+      // Un coffrage déplacé dans le planning Structure déplace la limite de fin du plan de
+      // réservations de son étage.
+      if (tables.includes("Planning_Projet")) void syntheseTasks?.refreshFormworkStarts();
+      // La vue Global montre les deux services : elle relit ses tables quelle que soit la table
+      // signalée (une écriture de l'autre service arrive par les colonnes de signal du projet).
+      void globalPlanning?.refresh();
       void refreshPlanning({
         forceLoad: true,
         reason: `donnees-modifiees:${tables.join(",")}`,
@@ -1930,13 +2061,229 @@ function bindPlanningServiceRefresh() {
   });
 }
 
+// ---------- ARCHIVE vue Synthese v1 ----------
+// Désactivée : la vue Synthese est refaite autrement. Code gardé pour trace.
+//
+// // Le service Synthese a sa propre vue sous le bandeau (l'équipe du projet sur
+// // une chronologie) : on masque le planning, la zone et les durées par défaut.
+// const SYNTHESE_SERVICE = "Synthese";
+// let syntheseViewActive = false;
+//
+// function applySyntheseView(selectedService) {
+//   const isSynthese = selectedService === SYNTHESE_SERVICE;
+//   const wasSynthese = syntheseViewActive;
+//   syntheseViewActive = isSynthese;
+//   document.body.classList.toggle("is-synthese-service", isSynthese);
+//   const syntheseView = document.getElementById("syntheseView");
+//   if (syntheseView) syntheseView.hidden = !isSynthese;
+//   if (isSynthese) {
+//     setSyntheseViewActive(true);
+//   } else if (wasSynthese) {
+//     setSyntheseViewActive(false);
+//     // Le planning était masqué : vis-timeline doit recalculer ses dimensions.
+//     requestAnimationFrame(() => refreshPlanningTimelineLayout());
+//   }
+// }
+//
+// function bindSyntheseView() {
+//   if (EMBEDDED_PLANNING_SYNC_MODE) return;
+//   const serviceContext = window.GristServiceContext;
+//   if (typeof serviceContext?.subscribe !== "function") return;
+//   setSyntheseEditingEnabled(isPlanningEditingUnlocked());
+//   // Le contexte notifie aussi les changements de projet : l'équipe se recharge.
+//   serviceContext.subscribe((context) => applySyntheseView(context?.selectedService));
+//   // Team et Time-Out alimentent les absences, Planning_Projet les tâches.
+//   serviceContext.watchContextTables?.(
+//     ["ProjectTeam", "Team", "Time-Out", "Planning_Projet"],
+//     () => refreshSyntheseView()
+//   );
+// }
+
+// Service Synthese : le planning laisse la place à un espace vide sous le
+// bandeau, en attendant la nouvelle vue.
+const SYNTHESE_SERVICE_NAME = "Synthese";
+let syntheseSpaceActive = false;
+
+// Le Gantt du tableau de tâches suit la période du planning (boutons Semaine / Mois /
+// Année, plage de dates du bandeau) et la modifie quand on le fait glisser ou zoomer.
+function createSyntheseGanttForTable(hosts) {
+  return createSyntheseGantt(hosts, {
+    getWindow: getPlanningWindow,
+    setWindow: (start, end) => setPlanningWindow(start, end, { byUser: true }),
+    subscribe: subscribePlanningWindowChanges,
+  });
+}
+
+function getSyntheseTasks() {
+  if (syntheseTasks) return syntheseTasks;
+  const host = document.getElementById("syntheseSpace");
+  const context = window.GristServiceContext;
+  const docApi = window.grist?.docApi;
+  if (!host || !context || !docApi) return null;
+  syntheseTasks = createSyntheseTasksController({
+    context,
+    docApi,
+    createTable: (callbacks) => createSyntheseTaskTable(host, callbacks, { createGantt: createSyntheseGanttForTable }),
+    // Début du plan de coffrage de chaque coffrage, d'après le planning Structure du projet :
+    // la limite de fin du plan de réservations du cycle 3 de l'étage qui lui est lié.
+    loadFormworkStarts: async () => buildFormworkStarts(await context.fetchProjectRows("Planning_Projet")),
+  });
+  syntheseTasks.setEditingEnabled(isPlanningEditingUnlocked());
+  syntheseTasks.setZoneFilter(state.selectedZone || "");
+  return syntheseTasks;
+}
+
+function syncSyntheseTasksZoneFilter() {
+  syntheseTasks?.setZoneFilter(state.selectedZone || "");
+  // La vue Global suit le même filtre de zone.
+  globalPlanning?.setZoneFilter(state.selectedZone || "");
+}
+
+function applySyntheseSpace(selectedService) {
+  const isSynthese = selectedService === SYNTHESE_SERVICE_NAME;
+  if (isSynthese === syntheseSpaceActive) return;
+  syntheseSpaceActive = isSynthese;
+  document.body.classList.toggle("is-synthese-space", isSynthese);
+  const space = document.getElementById("syntheseSpace");
+  if (space) space.hidden = !isSynthese;
+  if (isSynthese) {
+    getSyntheseTasks()?.setActive(true);
+  } else {
+    syntheseTasks?.setActive(false);
+  }
+  if (!isSynthese) {
+    // Le planning était masqué : vis-timeline doit recalculer ses dimensions.
+    requestAnimationFrame(() => refreshPlanningTimelineLayout());
+  }
+}
+
+function bindSyntheseSpace() {
+  if (EMBEDDED_PLANNING_SYNC_MODE) return;
+  const serviceContext = window.GristServiceContext;
+  if (typeof serviceContext?.subscribe !== "function") return;
+  serviceContext.subscribe((context) => applySyntheseSpace(context?.selectedService));
+}
+
+// Bouton « Lien Structure » de la vue Synthese : une fenêtre montre, zone par zone, les étages
+// de Synthese en face des coffrages de Structure ; on y glisse un coffrage sur un étage pour
+// les lier et reprendre sa date prévisionnelle « 0 Prev ». Les coffrages et la liste de plans
+// sont lus pour le projet, tous services confondus ; les étages et toute écriture passent par
+// le tableau de tâches.
+function bindStructureLinkDialog() {
+  if (EMBEDDED_PLANNING_SYNC_MODE) return;
+  const serviceContext = window.GristServiceContext;
+  const dialog = document.getElementById("structureLinkDialog");
+  if (!dialog || typeof serviceContext?.fetchProjectRows !== "function") return;
+  const structureLinkDialog = createStructureLinkDialog({
+    dialog,
+    title: document.getElementById("structureLinkTitle"),
+    status: document.getElementById("structureLinkStatus"),
+    body: document.getElementById("structureLinkBody"),
+    closeButton: document.getElementById("structureLinkCloseBtn"),
+  }, {
+    loadRows: async () => {
+      const [projectRows, planRows] = await Promise.all([
+        serviceContext.fetchProjectRows("Planning_Projet"),
+        serviceContext.fetchProjectRows("ListePlan_NDC_COF"),
+      ]);
+      return { projectRows, planRows };
+    },
+    getSource: () => syntheseTasks?.getStructureLinkSource() || null,
+    applyLink: (request) => (syntheseTasks
+      ? syntheseTasks.applyStructureLink(request)
+      : Promise.resolve({ ok: false, error: "Les étages ne sont pas encore chargés : fermez la fenêtre puis rouvrez-la." })),
+    getProjectName: () => serviceContext.getCurrentProject?.()?.name || "",
+  });
+  // Projet ou service changé (ici, dans un autre widget ou un autre onglet) : la fenêtre
+  // montrait l'ancien — elle se ferme plutôt que de laisser écrire à côté.
+  serviceContext.subscribe?.((context) => {
+    if (context?.selectedService !== SYNTHESE_SERVICE_NAME) structureLinkDialog.close();
+    else structureLinkDialog.closeIfStale();
+  });
+  document.getElementById("structureLinkToggle")
+    ?.addEventListener("click", () => {
+      void structureLinkDialog.open();
+    });
+}
+
+// Vue Global : le planning Synthèse et le planning Structure du projet dans un même tableau,
+// en lecture seule. Le bouton « Global » du bandeau l'affiche à la place du planning du service
+// choisi ; ses deux tables sont lues pour le projet, tous services confondus.
+function getGlobalPlanning() {
+  if (globalPlanning) return globalPlanning;
+  const host = document.getElementById("globalSpace");
+  const context = window.GristServiceContext;
+  if (!host || typeof context?.fetchProjectRows !== "function") return null;
+  globalPlanning = createGlobalPlanningController({
+    context,
+    createTable: (callbacks) => createGlobalPlanningTable(host, callbacks, { createGantt: createSyntheseGanttForTable }),
+    loadRows: async () => {
+      const [projectRows, planRows] = await Promise.all([
+        context.fetchProjectRows("Planning_Projet"),
+        context.fetchProjectRows("ListePlan_NDC_COF"),
+      ]);
+      // Barres Structure dessinées comme dans le planning Structure : ses indices de référence
+      // (ceux du service Structure, quel que soit le service affiché) et ses données d'entrées.
+      const targetLookup = buildProjectRealisationTargetLookup(cachedProjectAvancementConfigs, "Structure");
+      const referenceLookup = await fetchPlanningReferenceReceptionSummaries(projectRows).catch((error) => {
+        console.error("Données d'entrées du planning global illisibles :", error);
+        return new Map();
+      });
+      return { projectRows, planRows, targetLookup, referenceLookup };
+    },
+  });
+  globalPlanning.setZoneFilter(state.selectedZone || "");
+  return globalPlanning;
+}
+
+function applyGlobalSpace(nextActive) {
+  const active = Boolean(nextActive);
+  const button = document.getElementById("globalViewToggle");
+  if (button) {
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+    button.classList.toggle("is-active", active);
+    button.title = active
+      ? "Revenir au planning du service"
+      : "Voir ensemble le planning Synthèse et le planning Structure, en lecture seule";
+  }
+  if (active === globalSpaceActive) return;
+  globalSpaceActive = active;
+  document.body.classList.toggle("is-global-space", active);
+  const space = document.getElementById("globalSpace");
+  if (space) space.hidden = !active;
+  if (active) {
+    // La vue Global ne modifie rien : « Editer » repasse à l'état verrouillé.
+    if (planningEditingEnabled) setPlanningEditingEnabled(false, { rerender: true, notify: false });
+    getGlobalPlanning()?.setActive(true);
+  } else {
+    globalPlanning?.setActive(false);
+    // Le planning était masqué : vis-timeline doit recalculer ses dimensions.
+    requestAnimationFrame(() => refreshPlanningTimelineLayout());
+  }
+}
+
+function bindGlobalSpace() {
+  if (EMBEDDED_PLANNING_SYNC_MODE) return;
+  document.getElementById("globalViewToggle")?.addEventListener("click", () => {
+    const next = !globalSpaceActive;
+    setState({ globalView: next });
+    applyGlobalSpace(next);
+  });
+  // Le choix de la dernière session est repris.
+  applyGlobalSpace(state.globalView);
+}
+
 async function handleProjectChange(currentState) {
   console.log("Projet sélectionné :", currentState.selectedProject || "(aucun)");
+  // La zone du bandeau vient d'être remise à zéro : le tableau de tâches la suit tout de
+  // suite, sans garder celle de l'ancien projet.
+  syncSyntheseTasksZoneFilter();
   await refreshPlanning({ sync: true, forceLoad: true, reason: "project-change" });
 }
 
 async function handleZoneChange(currentState) {
   console.log("Zone sélectionnée :", currentState.selectedZone || "(toutes)");
+  syncSyntheseTasksZoneFilter();
   await refreshPlanning({ reason: "zone-change" });
 }
 
@@ -1956,6 +2303,11 @@ async function bootstrap() {
       return;
     }
 
+    // ARCHIVE vue Synthese v1 : bindSyntheseView();
+    bindSyntheseSpace();
+    bindStructureLinkDialog();
+    bindGlobalSpace();
+    bindSharedProjectZones();
     bindAddZoneModal();
     bindManageZoneModal();
     bindDurationDefaultsDialog();
@@ -1973,9 +2325,7 @@ async function bootstrap() {
       projectAvancementConfigs,
     } = await fetchProjectBootstrapData();
     cachedProjectAvancementConfigs = projectAvancementConfigs;
-    cachedRealisationTargetLookup = buildProjectRealisationTargetLookup(
-      cachedProjectAvancementConfigs
-    );
+    realisationTargets.setConfigs(cachedProjectAvancementConfigs);
     planningProjectOptions = projectOptions.map((project) => project.name);
 
     initZoneSelector({

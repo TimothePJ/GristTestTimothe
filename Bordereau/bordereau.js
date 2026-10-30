@@ -200,7 +200,7 @@ function renderEmptyTableRow(message) {
 
 function getPlanRows() {
   const ids = Array.isArray(allPlans.id) ? allPlans.id : [];
-  return ids.map((id, i) => ({
+  return window.BordereauCore.excludeForecastPlans(ids.map((id, i) => ({
     id,
     NumeroDocument: allPlans.NumeroDocument?.[i],
     NomDocument: allPlans.NomDocument?.[i],
@@ -210,7 +210,7 @@ function getPlanRows() {
     Nom_projet: resolveProjectName(allPlans.Nom_projet?.[i]),
     Zone: allPlans.Zone?.[i],
     DateDiffusion: allPlans.DateDiffusion?.[i],
-  }));
+  })));
 }
 
 function getProjectPlanTypeCandidates(projectName, planNumber) {

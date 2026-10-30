@@ -1,0 +1,363 @@
+// Fenêtre « Lien Structure » de la vue Synthese : zone par zone, les étages de Synthese en
+// face des coffrages de Structure (documents de type COFFRAGE), le coffrage lié à chaque
+// étage (colonne Lien_Structure de sa ligne-étage) et la date prévisionnelle de l'indice 0
+// de chaque coffrage (colonne « 0 Prev » de la liste de plans, table ListePlan_NDC_COF).
+// Module pur, sans DOM ni Grist.
+import {
+  NO_ZONE_KEY,
+  NO_ZONE_LABEL,
+  TASK_COLUMNS,
+  buildSections,
+  floorKeyOf,
+  formatDate,
+  isFloorRow,
+  isGroupRow,
+  isTaskRow,
+  natureKeyOf,
+  nextWorkingDay,
+  zoneKeyOf,
+} from "./syntheseTaskModel.js";
+import { parseGristDate } from "./syntheseTasks.js";
+
+const STRUCTURE_SERVICE_KEY = "structure";
+const FORMWORK_TYPE = "COFFRAGE";
+// Indice des lignes qui portent la date « 0 Prev » dans la liste de plans (écrit « Prev 0 »),
+// en clé de comparaison.
+const FORECAST_INDICE_KEY = "prev 0";
+const PLAN_NAME_START = "fond de plan de synthese";
+// La tâche contrôlée d'un étage lié doit finir au plus tard le jour où commence le plan de
+// coffrage de son étage dans le planning Structure. C'est la tâche cochée par l'utilisateur
+// (colonne Controle_Coffrage) ; sans tâche cochée, le plan de réservations du cycle 3 (tâche
+// « PLAN DE SYNTHESE RESERVATIONS … » rangée dans le cycle nommé « CYCLE 3 »).
+const RESERVATION_NAME_START = "plan de synthese reservations";
+const RESERVATION_CYCLE = /^cycle ?3(?!\d)/;
+
+// Colonnes lues dans ListePlan_NDC_COF.
+const PLAN_COLUMNS = Object.freeze({
+  type: "Type_document",
+  number: "NumeroDocument",
+  indice: "Indice",
+  date: "DateDiffusion",
+  service: "Service",
+});
+
+// État du lien d'un étage : pas de lien ; coffrage introuvable ; étage sans fond de plan ;
+// coffrage sans date 0 Prev ; fond de plan à la date 0 Prev ; fond de plan à une autre date.
+export const LINK_STATES = Object.freeze({
+  none: "none",
+  missing: "missing",
+  noPlan: "noPlan",
+  waiting: "waiting",
+  current: "current",
+  stale: "stale",
+});
+
+function toText(value) {
+  return value == null ? "" : String(value).trim();
+}
+
+function plain(value) {
+  return toText(value).normalize("NFD").replace(/\p{M}/gu, "");
+}
+
+// Sans accents, sans casse, espaces resserrés.
+function plainKey(value) {
+  return plain(value).replace(/\s+/g, " ").toLocaleLowerCase("fr");
+}
+
+function compareNatural(left, right) {
+  return left.localeCompare(right, "fr", { sensitivity: "base", numeric: true });
+}
+
+function isSameDay(left, right) {
+  return left instanceof Date && right instanceof Date && left.getTime() === right.getTime();
+}
+
+function floorId(zoneKey, floorKey) {
+  return `${zoneKey}/${floorKey}`;
+}
+
+// Clé de comparaison d'un N° de document, comme la reconnaissance des documents du planning
+// (shared/planning-closure-core.js) : sans accents ni casse, toute ponctuation vaut une
+// espace. Les zéros comptent : « 0110 » n'est pas « 110 ».
+export function numberKeyOf(value) {
+  return plain(value).toLocaleLowerCase("fr").replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+// Coffrage de Structure : une ligne nommée du service Structure dont le type de document
+// contient « COFFRAGE » (même règle que le planning Structure).
+export function isFormworkRow(row) {
+  const id = Number(row?.[TASK_COLUMNS.id]);
+  return Number.isInteger(id) && id > 0 &&
+    plainKey(row?.[TASK_COLUMNS.service]) === STRUCTURE_SERVICE_KEY &&
+    plain(row?.[TASK_COLUMNS.typeDoc]).toLocaleUpperCase("fr").includes(FORMWORK_TYPE) &&
+    Boolean(toText(row?.[TASK_COLUMNS.name]));
+}
+
+export function formworkLabel({ number = "", name = "" } = {}) {
+  return number ? `${number} — ${name}` : name;
+}
+
+// Date 0 Prev de chaque coffrage, par clé de N° : la plus ancienne des dates lisibles des
+// lignes COFFRAGE (service Structure, ou sans service) à l'indice « Prev 0 ». Les indices
+// diffusés (0, A…) ne comptent pas.
+export function formworkIssueDates(planRows) {
+  const dates = new Map();
+  (Array.isArray(planRows) ? planRows : []).forEach((row) => {
+    const service = plainKey(row?.[PLAN_COLUMNS.service]);
+    if (service && service !== STRUCTURE_SERVICE_KEY) return;
+    if (!plain(row?.[PLAN_COLUMNS.type]).toLocaleUpperCase("fr").includes(FORMWORK_TYPE)) return;
+    if (plainKey(row?.[PLAN_COLUMNS.indice]) !== FORECAST_INDICE_KEY) return;
+    const key = numberKeyOf(row?.[PLAN_COLUMNS.number]);
+    const date = parseGristDate(row?.[PLAN_COLUMNS.date]);
+    if (!key || !date) return;
+    const known = dates.get(key);
+    if (!known || date < known) dates.set(key, date);
+  });
+  return dates;
+}
+
+// N° du coffrage lié à chaque étage (clé « zone/étage »), lu sur ses lignes-étages : la
+// première valeur non vide, de la plus ancienne ligne à la plus récente.
+export function readFloorLinks(syntheseRows) {
+  const links = new Map();
+  (Array.isArray(syntheseRows) ? syntheseRows : [])
+    .filter(isFloorRow)
+    .sort((left, right) => Number(left[TASK_COLUMNS.id]) - Number(right[TASK_COLUMNS.id]))
+    .forEach((row) => {
+      const number = toText(row[TASK_COLUMNS.structureLink]);
+      const key = floorId(zoneKeyOf(row[TASK_COLUMNS.zone]), floorKeyOf(row[TASK_COLUMNS.name]));
+      if (number && !links.has(key)) links.set(key, number);
+    });
+  return links;
+}
+
+function parentIdOf(row) {
+  return Number(toText(row?.[TASK_COLUMNS.parent]));
+}
+
+// Nom du cycle qui contient une tâche : son groupe si c'est un cycle, sinon le cycle de son
+// sous-groupe ; "" hors cycle.
+function cycleNameOf(row, groupsById) {
+  const group = groupsById.get(parentIdOf(row));
+  const cycle = group?.natureKey === "sous-groupe" ? groupsById.get(group.parentId) : group;
+  return cycle?.natureKey === "cycle" ? cycle.name : "";
+}
+
+// Colonne Controle_Coffrage : booléen Grist, ou le texte « true » si la colonne est du texte.
+function isChecked(value) {
+  return value === true || toText(value).toLocaleLowerCase("fr") === "true";
+}
+
+// Tâche contrôlée de chaque étage, par id de tâche : sa zone, son étage et `chosen` — vrai
+// quand l'utilisateur l'a cochée, faux quand c'est le choix par défaut (plan de réservations
+// du cycle 3 d'un étage où rien n'est coché). Plusieurs tâches cochées dans un même étage
+// sont toutes contrôlées. Les tâches hors étage ne le sont jamais.
+export function readControlTasks(syntheseRows) {
+  const rows = Array.isArray(syntheseRows) ? syntheseRows : [];
+  const tasks = rows.filter(isTaskRow)
+    .map((row) => ({
+      row,
+      id: Number(row[TASK_COLUMNS.id]),
+      zoneKey: zoneKeyOf(row[TASK_COLUMNS.zone]),
+      floorKey: floorKeyOf(row[TASK_COLUMNS.group]),
+    }))
+    .filter((task) => task.zoneKey !== NO_ZONE_KEY && task.floorKey);
+  const controls = new Map();
+  const chosenFloors = new Set();
+  tasks.forEach(({ row, id, zoneKey, floorKey }) => {
+    if (!isChecked(row[TASK_COLUMNS.formworkCheck])) return;
+    controls.set(id, { zoneKey, floorKey, chosen: true });
+    chosenFloors.add(floorId(zoneKey, floorKey));
+  });
+  const groupsById = new Map(rows.filter(isGroupRow).map((row) => [Number(row[TASK_COLUMNS.id]), {
+    name: toText(row[TASK_COLUMNS.name]),
+    natureKey: natureKeyOf(row[TASK_COLUMNS.nature]),
+    parentId: parentIdOf(row),
+  }]));
+  tasks.forEach(({ row, id, zoneKey, floorKey }) => {
+    if (chosenFloors.has(floorId(zoneKey, floorKey))) return;
+    if (!plainKey(row[TASK_COLUMNS.name]).startsWith(RESERVATION_NAME_START)) return;
+    if (!RESERVATION_CYCLE.test(plainKey(cycleNameOf(row, groupsById)))) return;
+    controls.set(id, { zoneKey, floorKey, chosen: false });
+  });
+  return controls;
+}
+
+// Limite de fin de la tâche contrôlée de chaque étage, par id de tâche : le dernier jour permis
+// (début du plan de coffrage lié à son étage, colonne « Début » du planning Structure) et le
+// N° de ce coffrage. Rien pour un étage sans lien, ou dont le coffrage n'a pas de date de
+// début. `syntheseRows` : les lignes du tableau de tâches ; `formworkStarts` : les coffrages
+// de Structure du projet (N°, zone, début — voir formworkStarts.js).
+export function controlTaskEndLimits({ syntheseRows = [], formworkStarts = [] } = {}) {
+  const rows = Array.isArray(syntheseRows) ? syntheseRows : [];
+  const starts = Array.isArray(formworkStarts) ? formworkStarts : [];
+  const links = readFloorLinks(rows);
+  const limits = new Map();
+  if (!starts.length || !links.size) return limits;
+  // Coffrage d'un N° : celui de la zone de l'étage d'abord, sinon le premier du projet — comme
+  // dans la fenêtre « Lien Structure ».
+  const findFormwork = (number, zoneKey) => {
+    const key = numberKeyOf(number);
+    const sameNumber = starts.filter((formwork) => numberKeyOf(formwork?.number) === key);
+    return sameNumber.find((formwork) => zoneKeyOf(formwork.zoneName) === zoneKey) || sameNumber[0] || null;
+  };
+  readControlTasks(rows).forEach(({ zoneKey, floorKey }, taskId) => {
+    const number = links.get(floorId(zoneKey, floorKey));
+    const start = number ? findFormwork(number, zoneKey)?.start : null;
+    if (!(start instanceof Date)) return;
+    limits.set(taskId, { limit: start, formworkNumber: number });
+  });
+  return limits;
+}
+
+// Reporte sur les lignes de tâche si la tâche est contrôlée, et si c'est par choix (cochée)
+// ou par défaut : le menu de la tâche en dépend.
+export function applyControlTasks(lines, controls) {
+  if (!controls?.size) return lines;
+  return lines.map((line) => {
+    const entry = line.kind === "task" ? controls.get(line.taskId) : null;
+    return entry ? { ...line, isControlTask: true, isChosenControlTask: entry.chosen } : line;
+  });
+}
+
+// Reporte ces limites sur les lignes du tableau, que le Gantt dessine aussi : le dernier jour
+// permis, si la Fin de la tâche le dépasse, et la phrase qui l'explique.
+export function applyEndLimits(lines, limits) {
+  if (!limits?.size) return lines;
+  return lines.map((line) => {
+    const entry = line.kind === "task" ? limits.get(line.taskId) : null;
+    if (!entry) return line;
+    const isOverEndLimit = line.end instanceof Date && line.end > entry.limit;
+    const rule = `finir au plus tard le ${formatDate(entry.limit)} ` +
+      `(début du plan de coffrage ${entry.formworkNumber} dans le planning Structure).`;
+    return {
+      ...line,
+      endLimit: entry.limit,
+      isOverEndLimit,
+      endLimitNote: isOverEndLimit ? `Fin trop tardive : à ${rule}` : `À ${rule}`,
+    };
+  });
+}
+
+// Reporte sur chaque ligne d'étage le N° du coffrage qui lui est lié ("" sans lien) et la
+// phrase de son emblème. `links` : les liens lus par readFloorLinks.
+export function applyFloorLinks(lines, links) {
+  return lines.map((line) => {
+    if (line.kind !== "floor") return line;
+    const number = links?.get(floorId(line.zoneKey, line.floorKey)) || "";
+    return {
+      ...line,
+      structureLink: number,
+      structureLinkNote: number
+        ? `Étage lié au coffrage ${number} de Structure.`
+        : "Étage non lié à un coffrage de Structure.",
+    };
+  });
+}
+
+// Le fond de plan d'un étage (sa plus ancienne tâche « FOND DE PLAN DE SYNTHESE … ») et son
+// ancre, la tâche qui reçoit la date : le prédécesseur du fond de plan quand il lui est lié
+// « même début » sans décalage (RECEPTION ARCH/TOPO/STR dans le modèle), sinon le fond de plan.
+export function findFloorStart(tasks) {
+  const list = Array.isArray(tasks) ? tasks : [];
+  const plan = list
+    .filter((task) => plainKey(task?.name).startsWith(PLAN_NAME_START))
+    .sort((left, right) => left.id - right.id)[0] || null;
+  if (!plan) return { plan: null, anchor: null };
+  const link = plan.link;
+  const pred = link?.type === "DD" && !link.lag ? list.find((task) => task.id === link.predId) : null;
+  return { plan, anchor: pred || plan };
+}
+
+function readFormwork(row) {
+  const number = toText(row?.[TASK_COLUMNS.id2]);
+  const name = toText(row?.[TASK_COLUMNS.name]);
+  return { id: Number(row?.[TASK_COLUMNS.id]), number, name, label: formworkLabel({ number, name }) };
+}
+
+// Par N° (ordre naturel), les coffrages sans N° à la fin, puis par nom.
+function compareFormworks(left, right) {
+  if (Boolean(left.number) !== Boolean(right.number)) return left.number ? -1 : 1;
+  return compareNatural(left.number, right.number) || compareNatural(left.name, right.name) || left.id - right.id;
+}
+
+// Conditions lues de haut en bas (voir LINK_STATES).
+function linkStateOf({ number, formwork, plan, expectedStart }) {
+  if (!number) return LINK_STATES.none;
+  if (!formwork) return LINK_STATES.missing;
+  if (!plan) return LINK_STATES.noPlan;
+  if (!expectedStart) return LINK_STATES.waiting;
+  return isSameDay(plan.start, expectedStart) ? LINK_STATES.current : LINK_STATES.stale;
+}
+
+// Les zones du projet (celles de tous les services, une seule par graphie, triées), chacune
+// avec ses étages de Synthese — leur coffrage lié, leur fond de plan, l'état du lien — et ses
+// coffrages de Structure — leur date 0 Prev, les étages qu'ils servent ; « Sans zone » à
+// la fin pour les coffrages qui n'en ont pas. `syntheseRows` : les lignes du tableau de tâches
+// (service Synthese) ; `projectRows` : Planning_Projet du projet, tous services ; `planRows` :
+// ListePlan_NDC_COF du projet.
+export function buildStructureLink({ syntheseRows = [], projectRows = [], planRows = [] } = {}) {
+  const synthese = Array.isArray(syntheseRows) ? syntheseRows : [];
+  const project = Array.isArray(projectRows) ? projectRows : [];
+  const issueDates = formworkIssueDates(planRows);
+  const links = readFloorLinks(synthese);
+
+  const allFormworks = project.filter(isFormworkRow).map((row) => {
+    const formwork = readFormwork(row);
+    return {
+      ...formwork,
+      zoneKey: zoneKeyOf(row?.[TASK_COLUMNS.zone]),
+      issueDate: (formwork.number && issueDates.get(numberKeyOf(formwork.number))) || null,
+      floorNames: [],
+    };
+  }).sort(compareFormworks);
+  const formworksByZone = new Map();
+  allFormworks.forEach((formwork) => {
+    if (!formworksByZone.has(formwork.zoneKey)) formworksByZone.set(formwork.zoneKey, []);
+    formworksByZone.get(formwork.zoneKey).push(formwork);
+  });
+  // Coffrage d'un N° : celui de la zone de l'étage d'abord, sinon le premier du projet.
+  const findFormwork = (number, zoneKey) => {
+    const key = numberKeyOf(number);
+    const sameNumber = (formwork) => numberKeyOf(formwork.number) === key;
+    return (formworksByZone.get(zoneKey) || []).find(sameNumber) || allFormworks.find(sameNumber) || null;
+  };
+
+  const sections = buildSections({
+    rows: synthese,
+    sharedZones: project.map((row) => row?.[TASK_COLUMNS.zone]),
+  });
+  const zones = sections.map((section) => ({
+    zoneKey: section.zoneKey,
+    zoneName: section.zoneName,
+    label: section.label,
+    floors: section.floors.map((floor) => {
+      const number = links.get(floorId(section.zoneKey, floor.key)) || "";
+      const formwork = number ? findFormwork(number, section.zoneKey) : null;
+      const { plan } = findFloorStart(floor.tasks);
+      const expectedStart = formwork?.issueDate ? nextWorkingDay(formwork.issueDate) : null;
+      if (formwork) formwork.floorNames.push(floor.name);
+      return {
+        key: floor.key,
+        name: floor.name,
+        formworkNumber: number,
+        formwork,
+        plan: plan ? { id: plan.id, name: plan.name, start: plan.start } : null,
+        expectedStart,
+        state: linkStateOf({ number, formwork, plan, expectedStart }),
+      };
+    }),
+    formworks: formworksByZone.get(section.zoneKey) || [],
+  }));
+  if (formworksByZone.has(NO_ZONE_KEY) && !zones.some((zone) => zone.zoneKey === NO_ZONE_KEY)) {
+    zones.push({
+      zoneKey: NO_ZONE_KEY,
+      zoneName: "",
+      label: NO_ZONE_LABEL,
+      floors: [],
+      formworks: formworksByZone.get(NO_ZONE_KEY),
+    });
+  }
+  return { zones };
+}

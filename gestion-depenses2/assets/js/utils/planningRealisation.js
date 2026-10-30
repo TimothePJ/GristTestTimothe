@@ -65,6 +65,13 @@ export function normalizePlanningDocumentType(value) {
   return normalized || "NON SPECIFIE";
 }
 
+// Tâche de la vue Synthese de Planning Projet (service Synthese, nom de tâche rempli, sans
+// type de document) : son Indice, saisi à la main, ne dit rien de l'avancement d'un document.
+export function isSynthesePlanningTask({ service, typeDoc, taskName } = {}) {
+  const key = String(service ?? "").normalize("NFD").replace(/\p{M}/gu, "").trim().toLowerCase();
+  return key === "synthese" && !String(typeDoc ?? "").trim() && Boolean(String(taskName ?? "").trim());
+}
+
 export function getDefaultTargetIndiceForDocumentType(typeDoc) {
   return normalizePlanningDocumentType(typeDoc) === "COFFRAGE" ? "A" : "0";
 }

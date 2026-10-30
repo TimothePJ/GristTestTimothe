@@ -281,7 +281,21 @@ function bootstrapApp() {
   // Realisation target-indice lookup, keyed by project (name/number/id), built
   // from Projets2.Avancement — feeds the vendored builder so a row with an empty
   // `Realise` still gets the exact realisation state Planning Projet would show.
+  // Projets2.Avancement is kept PER SERVICE, so a lookup is only right for the
+  // service it was built for: it is rebuilt whenever the displayed service
+  // differs, never carried over from the service shown at startup.
+  let realisationConfigs = [];
   let realisationTargetLookup = null;
+  let realisationTargetService = null;
+
+  function getRealisationTargetLookup() {
+    const service = window.GristServiceContext?.getService?.() || "";
+    if (!realisationTargetLookup || service !== realisationTargetService) {
+      realisationTargetLookup = buildProjectRealisationTargetLookup(realisationConfigs);
+      realisationTargetService = service;
+    }
+    return realisationTargetLookup;
+  }
 
   function teardown() {
     if (chargeAssignModal) {
@@ -437,7 +451,7 @@ function bootstrapApp() {
       columns: pc.planningProject,
       aggregate,
       project: project.name,
-      targetLookup: realisationTargetLookup,
+      targetLookup: getRealisationTargetLookup(),
       // Reception ("Données d'entrées") bands are intentionally NOT rendered
       // (referenceReceptionLookup omitted) — removed at the user's request.
     });
@@ -1087,14 +1101,13 @@ function bootstrapApp() {
     projectRegistryFingerprint = projectRegistrySignature(state.registry);
 
     const pcp = APP_CONFIG.grist.columns.projects;
-    realisationTargetLookup = buildProjectRealisationTargetLookup(
-      (projectRows || []).map((row) => ({
-        projectId: String(row?.id ?? ""),
-        projectName: String(row?.[pcp.name] ?? ""),
-        projectNumber: String(row?.[pcp.number] ?? ""),
-        avancementConfigRaw: row?.[pcp.avancement],
-      }))
-    );
+    realisationConfigs = (projectRows || []).map((row) => ({
+      projectId: String(row?.id ?? ""),
+      projectName: String(row?.[pcp.name] ?? ""),
+      projectNumber: String(row?.[pcp.number] ?? ""),
+      avancementConfigRaw: row?.[pcp.avancement],
+    }));
+    realisationTargetLookup = null;
 
     populateProjectSelect();
 

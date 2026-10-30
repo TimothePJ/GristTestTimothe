@@ -157,12 +157,16 @@ function normalizeProjectLookupKey(value) {
     .toLowerCase();
 }
 
-export function buildProjectRealisationTargetLookup(projectConfigs = []) {
+// Indices de référence (« 100 % réalisé ») par projet et par type de document. La
+// configuration d'avancement est tenue par service : la table vaut pour `selectedService`
+// seulement — sans lui, pour le service affiché au moment de l'appel.
+export function buildProjectRealisationTargetLookup(projectConfigs = [], selectedService = undefined) {
   const lookup = new Map();
 
   (projectConfigs || []).forEach((projectConfig) => {
     const targetIndiceByType = buildTargetIndiceByTypeFromAvancement(
-      projectConfig?.avancementConfigRaw
+      projectConfig?.avancementConfigRaw,
+      selectedService || undefined
     );
 
     [
@@ -1088,44 +1092,59 @@ function getPhasePalette(className) {
   return null;
 }
 
-function buildRetardPhaseStyle(className, realiseValue, retardDays) {
+// Couleurs d'une barre en retard et pas encore réalisée : la part réalisée (`realise` %, de 0 à
+// 100) garde sa couleur (`done`), le reste prend la couleur de retard (`late`). null : barre à
+// ses couleurs habituelles. Lue aussi par la vue Global, qui redessine ces barres.
+export function retardPhasePaint(className, realiseValue, retardDays) {
   const palette = getPhasePalette(className);
   if (!palette) {
-    return "";
+    return null;
   }
 
   const normalizedRetardDays = toNumber(retardDays);
   if (normalizedRetardDays == null || normalizedRetardDays <= 0) {
-    return "";
+    return null;
   }
 
   const normalizedRealise = clampPercentage(realiseValue);
   if (normalizedRealise >= 100) {
+    return null;
+  }
+
+  return {
+    realise: normalizedRealise,
+    done: palette.background,
+    late: palette.overdueBackground,
+    border: normalizedRealise <= 0 ? palette.overdueBorder : palette.border,
+    text: palette.text,
+  };
+}
+
+export function buildRetardPhaseStyle(className, realiseValue, retardDays) {
+  const paint = retardPhasePaint(className, realiseValue, retardDays);
+  if (!paint) {
     return "";
   }
 
-  if (normalizedRealise <= 0) {
-    return [
-      `background: ${palette.overdueBackground} !important`,
-      `border-color: ${palette.overdueBorder} !important`,
-      `color: ${palette.text} !important`,
-    ].join("; ");
-  }
-
+  const background = paint.realise <= 0
+    ? paint.late
+    : `linear-gradient(to right, ${paint.done} 0%, ${paint.done} ${paint.realise}%, ${paint.late} ${paint.realise}%, ${paint.late} 100%)`;
   return [
-    `background: linear-gradient(to right, ${palette.background} 0%, ${palette.background} ${normalizedRealise}%, ${palette.overdueBackground} ${normalizedRealise}%, ${palette.overdueBackground} 100%) !important`,
-    `border-color: ${palette.border} !important`,
-    `color: ${palette.text} !important`,
+    `background: ${background} !important`,
+    `border-color: ${paint.border} !important`,
+    `color: ${paint.text} !important`,
   ].join("; ");
 }
 
-function buildPhaseClassName(className, realiseValue) {
+export function buildPhaseClassName(className, realiseValue) {
   return clampPercentage(realiseValue) >= 100
     ? `${className} phase-realise-complete`
     : className;
 }
 
-function createSplitPhaseItems({
+// Barre d'une phase, coupée à l'heure actuelle en partie passée et partie à venir (exportée
+// pour la vue Global, qui dessine ses barres de section de la même façon).
+export function createSplitPhaseItems({
   itemIdBase,
   groupId,
   start,
@@ -1406,12 +1425,21 @@ function formatZoneHeaderLabel(zoneLabel) {
   return normalized;
 }
 
+function toZoneSoftKey(value) {
+  return toText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("fr")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
 export function buildTimelineDataFromPlanningRows(
   rawRows,
   selectedProject = "",
   selectedZone = "",
   targetLookup = null,
-  referenceReceptionLookup = null
+  referenceReceptionLookup = null,
+  sharedZones = []
 ) {
   const cfg = APP_CONFIG.grist.planningTable.columns;
   const projectLinkCol = cfg.projectLink || cfg.nomProjet;
@@ -1604,6 +1632,18 @@ export function buildTimelineDataFromPlanningRows(
     if (!zoneCatalog.has(zoneKey)) {
       zoneCatalog.set(zoneKey, String(row.zone || ""));
     }
+  });
+  // Zones du projet créées depuis un autre service : elles ont leur bandeau,
+  // vide tant qu'aucun document de ce service n'y est rangé.
+  const knownZoneSoftKeys = new Set([...zoneCatalog.values()].map(toZoneSoftKey));
+  (Array.isArray(sharedZones) ? sharedZones : []).forEach((zoneName) => {
+    const zoneText = toText(zoneName);
+    const softKey = toZoneSoftKey(zoneText);
+    if (!softKey || knownZoneSoftKeys.has(softKey)) return;
+    const zoneKey = zoneText.toLocaleLowerCase("fr");
+    if (selectedZoneKey && zoneKey !== selectedZoneKey) return;
+    knownZoneSoftKeys.add(softKey);
+    zoneCatalog.set(zoneKey, zoneText);
   });
   // "Sans zone" toujours présente par défaut.
   if (!zoneCatalog.has("")) {

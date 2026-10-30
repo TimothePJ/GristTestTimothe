@@ -164,6 +164,24 @@
   //  ZONES (cache asynchrone chargé à l'ouverture du dialog)
   // ============================================================
   async function fetchAndCacheProjectZones(projectName) {
+    // Zones du projet tous services confondus : une zone créée en Structure est
+    // proposée en Synthese, et inversement. Le contexte partagé tient son cache.
+    const fetchSharedZones = window.GristServiceContext?.fetchProjectZones;
+    const contextProject = window.GristServiceContext?.getCurrentProject?.();
+    const contextProjectNames = [
+      contextProject?.name,
+      ...(Array.isArray(contextProject?.names) ? contextProject.names : []),
+    ].map((name) => _norm(String(name ?? '')));
+    // Ces zones sont celles du projet du contexte : seulement s'il s'agit du même.
+    if (typeof fetchSharedZones === 'function' && contextProjectNames.includes(_norm(projectName))) {
+      try {
+        cachedProjectZones = await fetchSharedZones();
+        cachedProjectForZones = projectName;
+        return cachedProjectZones;
+      } catch (_e) {
+        // Repli : zones lues dans References2 pour le service courant.
+      }
+    }
     if (cachedProjectForZones === projectName && cachedProjectZones.length > 0) {
       return cachedProjectZones;
     }
