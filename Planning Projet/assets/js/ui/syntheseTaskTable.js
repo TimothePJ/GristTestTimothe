@@ -43,9 +43,9 @@ const READ_ONLY_FIELDS = new Set(["line", "link"]);
 const EDITABLE_FIELDS = COLUMNS.map((column) => column.field).filter((field) => !READ_ONLY_FIELDS.has(field));
 const CODE_FIELDS = new Set(["id2", "indice"]);
 // Lignes récapitulatives : triangle de repli, Durée / Début / Fin calculés.
-const SUMMARY_KINDS = new Set(["zone", "floor", "group"]);
+const SUMMARY_KINDS = new Set(["zone", "floor", "storey", "group"]);
 // Actions qui ouvrent une saisie.
-const EDIT_ACTIONS = new Set(["edit", "editFloor", "editGroup"]);
+const EDIT_ACTIONS = new Set(["edit", "editFloor", "editStorey", "editGroup"]);
 
 // Un rafraîchissement arrivant pendant une saisie (écriture, relecture, signal d'un
 // autre widget) détruirait la cellule en cours : on garde le dernier état demandé et
@@ -101,17 +101,45 @@ function cycleModeItems(line) {
 // étage ; « Sans zone » → tâche ; étage → tâche, cycle ou suppression de l'étage ; cycle /
 // sous-cycle → tâche, sous-cycle, passage en escalier ou en parallèle (avec la colonne Lien) ou
 // suppression du cycle ; tâche → tâche dans le même conteneur, contrôle par rapport au coffrage
-// (tâche d'étage) ou suppression de la tâche.
-export function buildMenuItems(line, { canAddFloor = true, canAddCycle = true, canSetCycleMode = true, canEditLink = true } = {}) {
+// (tâche d'étage) ou suppression de la tâche. En affichage par étage, la ligne étage (`storey`)
+// propose « Ajouter un étage… » (fenêtre de choix des zones), d'ajouter l'étage à une zone qui ne
+// l'a pas, ou de le supprimer ; le bloc « Sans étage » n'a que « Ajouter un étage… », comme ses
+// zones (où elle remplace l'ajout direct). Avec un filtre de zone, ces entrées sont grisées.
+export function buildMenuItems(
+  line,
+  { canAddFloor = true, canAddCycle = true, canSetCycleMode = true, canEditLink = true, zoneFiltered = false } = {},
+) {
   if (!line) return [];
+  if (line.kind === "storey") {
+    const addStorey = { label: "Ajouter un étage…", action: "addStorey", zoneKey: "", disabled: !canAddFloor || zoneFiltered };
+    if (!line.floorKey) return [addStorey];
+    const missing = Array.isArray(line.missingZones) ? line.missingZones : [];
+    const add = zoneFiltered || !missing.length
+      ? [{ label: "Ajouter une zone", action: "addZoneToFloor", floorKey: line.floorKey, zoneKey: "", disabled: true }]
+      : missing.map(({ zoneKey, label }) => ({
+        // L'entrée nomme l'étage ajouté et la zone qui le reçoit : « Ajouter « R+1 » dans « Zone 3 » ».
+        label: `Ajouter « ${line.name} » dans « ${label} »`,
+        action: "addZoneToFloor",
+        floorKey: line.floorKey,
+        zoneKey,
+        disabled: !canAddFloor,
+      }));
+    const remove = { label: "Supprimer l'étage", action: "deleteStorey", floorKey: line.floorKey, danger: true };
+    if (zoneFiltered) remove.disabled = true;
+    return [addStorey, ...add, remove];
+  }
   if (line.kind === "zone") {
     const items = [{ label: "Ajouter une tâche", action: "addTask", zoneKey: line.zoneKey, floorKey: "" }];
-    if (line.zoneKey) {
+    if (line.zoneKey && line.layout === "floor") {
+      items.push({ label: "Ajouter un étage…", action: "addStorey", zoneKey: line.zoneKey, disabled: !canAddFloor || zoneFiltered });
+    } else if (line.zoneKey) {
       items.push({ label: "Ajouter un étage", action: "addFloor", zoneKey: line.zoneKey, disabled: !canAddFloor });
     }
     return items;
   }
   if (line.kind === "floor") {
+    // Étage d'une zone, en affichage par étage : seule la suppression change de libellé.
+    const inStorey = line.look === "zone";
     return [
       { label: "Ajouter une tâche", action: "addTask", zoneKey: line.zoneKey, floorKey: line.floorKey },
       {
@@ -122,7 +150,13 @@ export function buildMenuItems(line, { canAddFloor = true, canAddCycle = true, c
         parentGroupRowId: null,
         disabled: !canAddCycle,
       },
-      { label: "Supprimer l'étage", action: "deleteFloor", zoneKey: line.zoneKey, floorKey: line.floorKey, danger: true },
+      {
+        label: inStorey ? "Supprimer l'étage dans cette zone" : "Supprimer l'étage",
+        action: "deleteFloor",
+        zoneKey: line.zoneKey,
+        floorKey: line.floorKey,
+        danger: true,
+      },
     ];
   }
   if (line.kind === "group") {
@@ -289,11 +323,13 @@ export function cellText(line, field) {
 }
 
 // Une cellule se saisit-elle ? En mode modifiable : celles d'une tâche sauf le numéro de ligne et
-// le Lien (il se choisit par le clic droit), et le nom d'un étage ou d'un cycle.
+// le Lien (il se choisit par le clic droit), et le nom d'un étage ou d'un cycle (pas
+// celui d'une zone dans un étage, ni du bloc « Sans étage »).
 export function isEditableCell(line, field, { editable = false } = {}) {
   if (!editable || READ_ONLY_FIELDS.has(field)) return false;
   if (line.kind === "task") return true;
-  return (line.kind === "floor" || line.kind === "group") && field === "name";
+  if (line.kind === "floor") return line.look !== "zone" && field === "name";
+  return (line.kind === "storey" ? Boolean(line.floorKey) : line.kind === "group") && field === "name";
 }
 
 // Où poser le trait d'insertion d'une place visée (`slot` : { taskId, side } ou { groupRowId, side }) :
@@ -318,6 +354,7 @@ export function createSyntheseTaskTable(host, {
   onRenameGroup,
   onAddTask,
   onAddFloor,
+  onAddStorey,
   onAddCycle,
   onMoveCycle,
   onSetCycleMode,
@@ -325,6 +362,10 @@ export function createSyntheseTaskTable(host, {
   onEditLink,
   onDeleteFloor,
   onDeleteGroup,
+  onToggleStorey,
+  onRenameStorey,
+  onAddZoneToFloor,
+  onDeleteStorey,
   onSetFormworkCheck,
   onMoveTask,
   onToggleZone,
@@ -407,6 +448,8 @@ export function createSyntheseTaskTable(host, {
   // Colonne Ordre présente : glisser une tâche entre deux autres.
   let canOrder = false;
   let canEditLink = false;
+  // Filtre de zone actif : l'étage ne peut ni gagner une zone ni être supprimé.
+  let zoneFiltered = false;
   let dropTargetKey = null;
   // Place visée par le glisser ({ taskId, side } ou { groupRowId, side }), montrée par le trait d'insertion.
   let dropSlot = null;
@@ -487,12 +530,15 @@ export function createSyntheseTaskTable(host, {
   }
 
   function buildLine(line) {
-    const element = createElement("div", `stt-line stt-line--${line.kind}`);
+    // En affichage par étage, `look` donne l'aspect (étage, zone, groupe, tâche) et `kind` le comportement.
+    const element = createElement("div", `stt-line stt-line--${line.look || line.kind}`);
     // Retrait sans plafond : le CSS le calcule depuis le niveau de la ligne.
     element.style.setProperty("--stt-level", String(line.level));
     element.setAttribute("role", "row");
     element.setAttribute("aria-level", String(line.level + 1));
     element.dataset.kind = line.kind;
+    if (line.layout) element.dataset.layout = line.layout;
+    if (line.look) element.dataset.look = line.look;
     element.dataset.lineKey = line.key;
     element.dataset.zoneKey = line.zoneKey;
     element.dataset.floorKey = line.floorKey || "";
@@ -500,6 +546,7 @@ export function createSyntheseTaskTable(host, {
     if (SUMMARY_KINDS.has(line.kind)) element.setAttribute("aria-expanded", String(!line.collapsed));
     if (line.kind === "task") element.dataset.taskId = String(line.taskId);
     if (line.kind === "task" && line.floorKey) element.classList.add("is-in-floor");
+    else if (line.kind === "task" && line.layout === "floor") element.classList.add("is-in-block");
     // Couleur de la capture : cycle (gris), réunion (bleu), démarrage (rouge).
     if (line.nature) element.classList.add(`is-nature-${line.nature}`);
     if (line.isMilestone) element.classList.add("is-milestone");
@@ -542,6 +589,7 @@ export function createSyntheseTaskTable(host, {
     canMoveCycles = options?.canMoveCycles === true;
     canOrder = Boolean(options?.canOrder);
     canEditLink = options?.canEditLink === true;
+    zoneFiltered = options?.zoneFiltered === true;
     // Tableau devenu non modifiable : un glisser en cours est abandonné, sans dépôt.
     if (!editable) taskDrag?.cancel();
     applyWidth(leftWidth);
@@ -565,8 +613,12 @@ export function createSyntheseTaskTable(host, {
 
   function findFloorCell(zoneKey, floorKey) {
     return body.querySelector(
-      `.stt-line--floor[data-zone-key="${zoneKey}"][data-floor-key="${floorKey}"] .stt-cell--name`
+      `.stt-line[data-kind="floor"][data-zone-key="${zoneKey}"][data-floor-key="${floorKey}"] .stt-cell--name`
     );
+  }
+
+  function findStoreyCell(floorKey) {
+    return body.querySelector(`.stt-line[data-kind="storey"][data-floor-key="${floorKey}"] .stt-cell--name`);
   }
 
   function findGroupCell(groupRowId) {
@@ -598,6 +650,19 @@ export function createSyntheseTaskTable(host, {
     const cell = findFloorCell(zoneKey, floorKey);
     if (!line || !cell) return;
     openEditor({ target: { kind: "floor", zoneKey, floorKey }, field: "name", cell, input: createInput("name", line) });
+  }
+
+  // Nom d'une ligne étage (affichage par étage) : la validation renomme l'étage dans toutes ses zones.
+  function startEditingStorey(floorKey) {
+    if (!editable || !floorKey) return;
+    if (editor) {
+      queuedAction = { type: "editStorey", floorKey };
+      return;
+    }
+    const line = lines.find((candidate) => candidate.kind === "storey" && candidate.floorKey === floorKey);
+    const cell = findStoreyCell(floorKey);
+    if (!line || !cell) return;
+    openEditor({ target: { kind: "storey", floorKey }, field: "name", cell, input: createInput("name", line) });
   }
 
   // Nom d'un cycle ou d'un sous-groupe : même saisie que le nom d'une tâche.
@@ -636,7 +701,7 @@ export function createSyntheseTaskTable(host, {
       input.type = "date";
       input.value = toInputDate(line[field]);
     }
-    const labels = { floor: "Nom de l'étage", group: "Nom du cycle" };
+    const labels = { floor: "Nom de l'étage", storey: "Nom de l'étage", group: "Nom du cycle" };
     input.setAttribute("aria-label", labels[line.kind] || COLUMNS.find((column) => column.field === field).label);
     return input;
   }
@@ -716,6 +781,7 @@ export function createSyntheseTaskTable(host, {
     if (commit && value !== current.initialValue) {
       try {
         if (target.kind === "floor") await onRenameFloor?.(target.zoneKey, target.floorKey, value);
+        else if (target.kind === "storey") await onRenameStorey?.(target.floorKey, value);
         else if (target.kind === "group") await onRenameGroup?.(target.groupRowId, value);
         else await onEdit?.(target.taskId, current.field, value);
       } catch (error) {
@@ -738,6 +804,8 @@ export function createSyntheseTaskTable(host, {
       let cell;
       if (target.kind === "floor") {
         cell = findFloorCell(target.zoneKey, target.floorKey) || findFloorCell(target.zoneKey, floorKeyOf(value));
+      } else if (target.kind === "storey") {
+        cell = findStoreyCell(target.floorKey) || findStoreyCell(floorKeyOf(value));
       } else if (target.kind === "group") {
         cell = findGroupCell(target.groupRowId);
       } else {
@@ -760,9 +828,12 @@ export function createSyntheseTaskTable(host, {
       return onAddTask?.(item.zoneKey, item.floorKey, item.groupRowId ?? null, item.afterTaskId ?? null);
     }
     if (item.action === "addFloor") return onAddFloor?.(item.zoneKey);
+    if (item.action === "addStorey") return onAddStorey?.(item.zoneKey);
     if (item.action === "addCycle") return onAddCycle?.(item.zoneKey, item.floorKey, item.parentGroupRowId ?? null);
     if (item.action === "setCycleMode") return onSetCycleMode?.(item.groupRowId, item.mode);
     if (item.action === "deleteFloor") return onDeleteFloor?.(item.zoneKey, item.floorKey);
+    if (item.action === "addZoneToFloor") return onAddZoneToFloor?.(item.floorKey, item.zoneKey);
+    if (item.action === "deleteStorey") return onDeleteStorey?.(item.floorKey);
     if (item.action === "deleteGroup") return onDeleteGroup?.(item.groupRowId);
     if (item.action === "deleteTask") return onDeleteTask?.(item.taskId);
     if (item.action === "editLink") return onEditLink?.(item.taskId);
@@ -776,7 +847,10 @@ export function createSyntheseTaskTable(host, {
       return;
     }
     const line = lines.find((candidate) => candidate.key === lineElement.dataset.lineKey);
-    const items = buildMenuItems(line, { canAddFloor, canAddCycle, canSetCycleMode, canEditLink });
+    // Le filtre de zone ne concerne que la ligne étage et les zones du bloc « Sans étage ».
+    const items = line?.kind === "storey" || (line?.kind === "zone" && line.layout === "floor")
+      ? buildMenuItems(line, { canAddFloor, canAddCycle, canSetCycleMode, canEditLink, zoneFiltered })
+      : buildMenuItems(line, { canAddFloor, canAddCycle, canSetCycleMode, canEditLink });
     if (!items.length) return;
     menu.replaceChildren(...items.map((item) => {
       const classes = ["stt-menu__item"];
@@ -827,12 +901,17 @@ export function createSyntheseTaskTable(host, {
     const { kind = "", zoneKey = "", floorKey = "", groupRowId = "" } = lineElement.dataset;
     if (target.closest('[data-action="toggle"]')) {
       if (kind === "group") return { type: "toggleGroup", groupRowId: Number(groupRowId) };
+      if (kind === "storey") return { type: "toggleStorey", floorKey };
       return kind === "floor" ? { type: "toggleFloor", zoneKey, floorKey } : { type: "toggle", zoneKey };
     }
     const cell = target.closest(".stt-cell[data-field]");
     if (!cell || cell.classList.contains("is-editing")) return null;
     if (kind === "task") return { type: "edit", taskId: Number(lineElement.dataset.taskId), field: cell.dataset.field };
-    if (kind === "floor" && cell.dataset.field === "name") return { type: "editFloor", zoneKey, floorKey };
+    // Une zone dans un étage (aspect « zone ») ne se renomme pas ici ; le bloc « Sans étage » non plus.
+    if (kind === "floor" && lineElement.dataset.look !== "zone" && cell.dataset.field === "name") {
+      return { type: "editFloor", zoneKey, floorKey };
+    }
+    if (kind === "storey" && floorKey && cell.dataset.field === "name") return { type: "editStorey", floorKey };
     if (kind === "group" && cell.dataset.field === "name") return { type: "editGroup", groupRowId: Number(groupRowId) };
     return null;
   }
@@ -840,9 +919,11 @@ export function createSyntheseTaskTable(host, {
   function runAction(action) {
     if (action.type === "edit") startEditing(action.taskId, action.field);
     else if (action.type === "editFloor") startEditingFloor(action.zoneKey, action.floorKey);
+    else if (action.type === "editStorey") startEditingStorey(action.floorKey);
     else if (action.type === "editGroup") startEditingGroup(action.groupRowId);
     else if (action.type === "toggle") onToggleZone?.(action.zoneKey);
     else if (action.type === "toggleFloor") onToggleFloor?.(action.zoneKey, action.floorKey);
+    else if (action.type === "toggleStorey") onToggleStorey?.(action.floorKey);
     else if (action.type === "toggleGroup") onToggleGroup?.(action.groupRowId);
   }
 
@@ -1091,5 +1172,6 @@ export function createSyntheseTaskTable(host, {
     startEditingFloor,
     setStatus,
     startEditingGroup,
+    startEditingStorey,
   };
 }

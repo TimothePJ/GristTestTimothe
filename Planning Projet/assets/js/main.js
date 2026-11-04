@@ -80,6 +80,24 @@ import {
 //   setSyntheseEditingEnabled,
 //   setSyntheseViewActive,
 // } from "./ui/syntheseView.js";
+import { createRefreshCoalescer } from "./services/refreshCoalescer.js";
+import {
+  LAYOUT_FLOOR,
+  LAYOUT_ZONE,
+  buildLayoutModeActions,
+  hasLayoutModeColumn,
+  layoutForProject,
+  withLayoutMode,
+} from "./services/syntheseLayout.js";
+import {
+  ZONE_DATA_READ_FAILED,
+  ZONE_DATA_TABLES,
+  ZONE_RENAME_READ_FAILED,
+  buildZoneLeftoverNotice,
+  buildZoneNotHereMessage,
+  buildZoneRefusal,
+  findZoneHolders,
+} from "./services/zoneGuard.js";
 import { createSyntheseTaskTable } from "./ui/syntheseTaskTable.js";
 import { createSyntheseTasksController } from "./ui/syntheseTasksController.js";
 import { createSyntheseGantt } from "./ui/syntheseGantt.js";
@@ -114,7 +132,6 @@ let lastAutoSyncProject = "";
 let lastRenderedProject = "";
 let planningLifecycleRefreshBound = false;
 let planningLifecycleRefreshTimer = 0;
-let projectRegistryRefreshPromise = null;
 let addZoneModalBound = false;
 let addZoneModalOpen = false;
 let manageZoneModalBound = false;
@@ -539,14 +556,11 @@ function setManageZoneModalHint(message = "") {
   els.hint.textContent = String(message ?? "").trim();
 }
 
-// Renommer ou supprimer une zone ne touche que les lignes du service courant :
-// seules ses propres zones sont proposées, pas celles des autres services.
+// Toutes les zones du projet (celles des autres services comprises, comme la liste « Zone »
+// du bandeau) : le renommage / la suppression d'une zone d'un autre service est refuse ou
+// explique par les handlers.
 function getCurrentManageableZoneOptions() {
-  const localZones = buildZoneOptionsForSelectedProject(
-    cachedPlanningRows,
-    state.selectedProject || "",
-    { includeSharedZones: false }
-  );
+  const localZones = buildZoneOptionsForSelectedProject(cachedPlanningRows, state.selectedProject || "");
 
   const options = [];
   const seenKeys = new Set();
@@ -675,6 +689,50 @@ function openManageZoneModal() {
   });
 }
 
+function currentServiceName() {
+  return window.GristServiceContext?.getState?.()?.selectedService || "";
+}
+
+// Lit les trois tables de zones du projet, tous services confondus, et renvoie les autres
+// services qui ont des données dans la zone (data) ou qui la gardent vide (empty).
+// Rejette si la lecture est impossible.
+async function findZoneHoldersElsewhere(zone) {
+  const context = window.GristServiceContext;
+  if (typeof context?.fetchProjectRows !== "function") {
+    throw new Error("Lecture des autres services indisponible.");
+  }
+  const tables = await Promise.all(ZONE_DATA_TABLES.map((tableName) => context.fetchProjectRows(tableName)));
+  const rowsByTable = Object.fromEntries(ZONE_DATA_TABLES.map((tableName, index) => [tableName, tables[index]]));
+  return findZoneHolders(rowsByTable, {
+    zone,
+    service: currentServiceName(),
+  });
+}
+
+// Garde-fou commun au renommage et a la suppression : renvoie les holders si aucun autre
+// service n'a de donnees dans la zone ; sinon affiche le refus (ou l'echec de lecture)
+// dans la fenetre et renvoie null.
+async function checkZoneHolders(zone, { readFailedMessage, action }) {
+  setManageZoneModalBusy(true);
+  setManageZoneModalHint("Vérification des données des autres services…");
+  let holders;
+  try {
+    holders = await findZoneHoldersElsewhere(zone);
+  } catch (error) {
+    console.error("Lecture des autres services impossible :", error);
+    setManageZoneModalBusy(false);
+    setManageZoneModalHint(readFailedMessage);
+    return null;
+  }
+  setManageZoneModalBusy(false);
+  if (holders.data.length) {
+    setManageZoneModalHint(buildZoneRefusal(zone, holders.data, { action }));
+    return null;
+  }
+  setManageZoneModalHint("");
+  return holders;
+}
+
 function bindManageZoneModal() {
   if (manageZoneModalBound) return;
   const els = getManageZoneModalElements();
@@ -735,15 +793,34 @@ function bindManageZoneModal() {
         return;
       }
 
+      const holders = await checkZoneHolders(sourceZone, {
+        readFailedMessage: ZONE_RENAME_READ_FAILED,
+        action: "renommer",
+      });
+      if (!holders) return;
+
       try {
         setManageZoneModalBusy(true);
         setManageZoneModalHint("Renommage en cours...");
-        await renameProjectZone({
+        const result = await renameProjectZone({
           projectName,
           sourceZone,
           targetZone,
         });
-        closeManageZoneModal({ restoreSelection: false });
+        if (result?.updated === false) {
+          setManageZoneModalBusy(false);
+          setManageZoneModalHint(
+            buildZoneNotHereMessage({
+              action: "renommer",
+              zone: sourceZone,
+              service: currentServiceName(),
+              empty: holders.empty,
+            })
+          );
+          return;
+        }
+        const keepOpen = holders.empty.length > 0;
+        if (!keepOpen) closeManageZoneModal({ restoreSelection: false });
         setState({ selectedZone: targetZone });
         await refreshPlanning({
           sync: true,
@@ -751,6 +828,14 @@ function bindManageZoneModal() {
           forceSync: true,
           reason: "zone-rename",
         });
+        if (keepOpen) {
+          setManageZoneModalBusy(false);
+          populateManageZoneSelect(getCurrentManageableZoneOptions(), targetZone);
+          setManageZoneModalHint(
+            buildZoneLeftoverNotice({ action: "renommer", zone: sourceZone, targetZone, empty: holders.empty })
+          );
+          return;
+        }
         setPlanningStatus(`Zone renommee: ${sourceZone} -> ${targetZone}.`);
       } catch (error) {
         setManageZoneModalBusy(false);
@@ -779,6 +864,12 @@ function bindManageZoneModal() {
         return;
       }
 
+      const holders = await checkZoneHolders(sourceZone, {
+        readFailedMessage: ZONE_DATA_READ_FAILED,
+        action: "supprimer",
+      });
+      if (!holders) return;
+
       const confirmed = window.confirm(
         `Supprimer la zone "${sourceZone}" ? Les documents seront conserves et passeront en Sans zone.`
       );
@@ -787,11 +878,24 @@ function bindManageZoneModal() {
       try {
         setManageZoneModalBusy(true);
         setManageZoneModalHint("Suppression de la zone en cours...");
-        await clearProjectZone({
+        const result = await clearProjectZone({
           projectName,
           sourceZone,
         });
-        closeManageZoneModal({ restoreSelection: false });
+        if (result?.updated === false) {
+          setManageZoneModalBusy(false);
+          setManageZoneModalHint(
+            buildZoneNotHereMessage({
+              action: "supprimer",
+              zone: sourceZone,
+              service: currentServiceName(),
+              empty: holders.empty,
+            })
+          );
+          return;
+        }
+        const keepOpen = holders.empty.length > 0;
+        if (!keepOpen) closeManageZoneModal({ restoreSelection: false });
         setState({ selectedZone: "" });
         await refreshPlanning({
           sync: true,
@@ -799,6 +903,14 @@ function bindManageZoneModal() {
           forceSync: true,
           reason: "zone-delete",
         });
+        if (keepOpen) {
+          setManageZoneModalBusy(false);
+          populateManageZoneSelect(getCurrentManageableZoneOptions(), "");
+          setManageZoneModalHint(
+            buildZoneLeftoverNotice({ action: "supprimer", zone: sourceZone, empty: holders.empty })
+          );
+          return;
+        }
         setPlanningStatus(`Zone supprimee: ${sourceZone}.`);
       } catch (error) {
         setManageZoneModalBusy(false);
@@ -1595,6 +1707,8 @@ function applyProjectBootstrapData({
   cachedProjectAvancementConfigs = projectAvancementConfigs;
   realisationTargets.setConfigs(cachedProjectAvancementConfigs);
   planningProjectOptions = projectOptions.map((project) => project.name);
+  // Le mode d'affichage (Projets2.Mode) vient d'être relu.
+  syncSyntheseLayout();
   return updateProjectSelectorOptions(projectOptions, {
     notify,
     clearInvalid,
@@ -1602,34 +1716,31 @@ function applyProjectBootstrapData({
   });
 }
 
+// Les demandes arrivées pendant un rechargement sont regroupées : une demande plus forte (lecture
+// hors cache, notification, purge d'un projet invalide) relance UN rechargement ensuite.
+const requestProjectRegistryRefresh = createRefreshCoalescer(
+  ({ notify, clearInvalid, forceRefresh }) => fetchProjectBootstrapData({ forceRefresh })
+    .then((bootstrapData) => applyProjectBootstrapData(bootstrapData, {
+      notify,
+      clearInvalid,
+      fallbackToState: false,
+    }))
+    .catch((error) => {
+      console.warn("Impossible de recharger la liste des projets :", error);
+      return { project: null, changed: false, missing: true };
+    }),
+  ["notify", "clearInvalid", "forceRefresh"],
+);
+
 function refreshProjectRegistryFromGrist({
   notify = true,
   clearInvalid = true,
+  forceRefresh = false,
 } = {}) {
   if (HEADER_ONLY_EMBEDDED_MODE) {
     return Promise.resolve({ project: null, changed: false, missing: false });
   }
-  if (projectRegistryRefreshPromise) {
-    return projectRegistryRefreshPromise;
-  }
-
-  projectRegistryRefreshPromise = fetchProjectBootstrapData()
-    .then((bootstrapData) => {
-      const result = applyProjectBootstrapData(bootstrapData, {
-        notify,
-        clearInvalid,
-        fallbackToState: false,
-      });
-      return result;
-    })
-    .catch((error) => {
-      console.warn("Impossible de recharger la liste des projets :", error);
-      return { project: null, changed: false, missing: true };
-    })
-    .finally(() => {
-      projectRegistryRefreshPromise = null;
-    });
-  return projectRegistryRefreshPromise;
+  return requestProjectRegistryRefresh({ notify, clearInvalid, forceRefresh });
 }
 
 function bindPlanningLifecycleRefresh() {
@@ -2025,6 +2136,11 @@ function bindPlanningDataRefresh() {
       // Un coffrage déplacé dans le planning Structure déplace la limite de fin du plan de
       // réservations de son étage.
       if (tables.includes("Planning_Projet")) void syntheseTasks?.refreshFormworkStarts();
+      // Le mode d'affichage de Synthese (Projets2.Mode) est relu hors cache ; applyProjectBootstrapData
+      // le transmet au tableau.
+      if (tables.includes("Projets2")) {
+        void refreshProjectRegistryFromGrist({ notify: false, clearInvalid: false, forceRefresh: true });
+      }
       // La vue Global montre les deux services : elle relit ses tables quelle que soit la table
       // signalée (une écriture de l'autre service arrive par les colonnes de signal du projet).
       void globalPlanning?.refresh();
@@ -2127,10 +2243,64 @@ function getSyntheseTasks() {
     // Début du plan de coffrage de chaque coffrage, d'après le planning Structure du projet :
     // la limite de fin du plan de réservations du cycle 3 de l'étage qui lui est lié.
     loadFormworkStarts: async () => buildFormworkStarts(await context.fetchProjectRows("Planning_Projet")),
+    saveLayout: (layout) => saveSyntheseLayout(layout),
   });
   syntheseTasks.setEditingEnabled(isPlanningEditingUnlocked());
   syntheseTasks.setZoneFilter(state.selectedZone || "");
+  syncSyntheseLayout();
   return syntheseTasks;
+}
+
+// Affichage du tableau Synthese : par zone (défaut) ou par étage, selon Projets2.Mode du projet courant.
+function syncSyntheseLayout() {
+  const project = window.GristServiceContext?.getState?.()?.currentProject || null;
+  const layout = layoutForProject(cachedProjectAvancementConfigs, project);
+  syntheseTasks?.setLayout(layout);
+  updateSyntheseLayoutToggle(layout, hasLayoutModeColumn(cachedProjectAvancementConfigs, project));
+}
+
+// Bouton « Par étage » : visible si la colonne Mode existe pour le projet, enfoncé en affichage par étage.
+// Les deux titres gardent « enregistré » : le contexte partagé grise les boutons d'écriture en lecture seule.
+function updateSyntheseLayoutToggle(layout, available) {
+  const button = document.getElementById("syntheseLayoutToggle");
+  if (!button) return;
+  const pressed = layout === LAYOUT_FLOOR;
+  button.hidden = !available || EMBEDDED_PLANNING_SYNC_MODE;
+  button.setAttribute("aria-pressed", pressed ? "true" : "false");
+  button.classList.toggle("is-active", pressed);
+  button.title = pressed
+    ? "Revenir à l'affichage par zone (réglage du projet, enregistré dans Projets2)"
+    : "Afficher la Synthèse par étage, les zones à l'intérieur (réglage du projet, enregistré dans Projets2)";
+}
+
+// Écrit le mode dans toutes les lignes Projets2 du projet (une seule action Grist), puis applique
+// l'affichage sans attendre la surveillance et relit la liste des projets hors cache.
+async function saveSyntheseLayout(layout) {
+  const project = window.GristServiceContext?.getState?.()?.currentProject || null;
+  const { sourceTable, columns } = APP_CONFIG.grist.projectsTable;
+  const actions = buildLayoutModeActions(cachedProjectAvancementConfigs, project, layout, {
+    table: sourceTable,
+    column: columns.mode,
+  });
+  if (!actions.length) throw new Error("Aucune ligne Projets2 pour le projet courant.");
+  await window.grist.docApi.applyUserActions(actions);
+  // Le cache courant, pas une copie d'avant l'attente : un rechargement du registre a pu passer.
+  cachedProjectAvancementConfigs = withLayoutMode(cachedProjectAvancementConfigs, project, layout);
+  syncSyntheseLayout();
+  void refreshProjectRegistryFromGrist({ notify: false, clearInvalid: false, forceRefresh: true });
+}
+
+function bindSyntheseLayoutToggle() {
+  if (EMBEDDED_PLANNING_SYNC_MODE) return;
+  const button = document.getElementById("syntheseLayoutToggle");
+  if (!button) return;
+  button.addEventListener("click", () => {
+    const tasks = getSyntheseTasks();
+    if (!tasks) return;
+    const project = window.GristServiceContext?.getState?.()?.currentProject || null;
+    const current = layoutForProject(cachedProjectAvancementConfigs, project);
+    void tasks.changeLayout(current === LAYOUT_FLOOR ? LAYOUT_ZONE : LAYOUT_FLOOR);
+  });
 }
 
 function syncSyntheseTasksZoneFilter() {
@@ -2161,7 +2331,10 @@ function bindSyntheseSpace() {
   if (EMBEDDED_PLANNING_SYNC_MODE) return;
   const serviceContext = window.GristServiceContext;
   if (typeof serviceContext?.subscribe !== "function") return;
-  serviceContext.subscribe((context) => applySyntheseSpace(context?.selectedService));
+  serviceContext.subscribe((context) => {
+    applySyntheseSpace(context?.selectedService);
+    syncSyntheseLayout();
+  });
 }
 
 // Bouton « Lien Structure » de la vue Synthese : une fenêtre montre, zone par zone, les étages
@@ -2307,6 +2480,7 @@ async function bootstrap() {
     bindSyntheseSpace();
     bindStructureLinkDialog();
     bindGlobalSpace();
+    bindSyntheseLayoutToggle();
     bindSharedProjectZones();
     bindAddZoneModal();
     bindManageZoneModal();
@@ -2325,6 +2499,9 @@ async function bootstrap() {
       projectAvancementConfigs,
     } = await fetchProjectBootstrapData();
     cachedProjectAvancementConfigs = projectAvancementConfigs;
+    // Le tableau Synthese a pu naître avant cette lecture (notification du contexte partagé), avec
+    // l'affichage par zone faute de configurations : son mode (Projets2.Mode) suit maintenant.
+    syncSyntheseLayout();
     realisationTargets.setConfigs(cachedProjectAvancementConfigs);
     planningProjectOptions = projectOptions.map((project) => project.name);
 

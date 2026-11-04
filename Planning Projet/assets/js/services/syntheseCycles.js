@@ -5,7 +5,14 @@
 // et les dates suivent. Module pur, sans DOM ni Grist : il rend les champs à écrire, par ligne. Ses
 // briques de bloc exportées (bloc, voisins, tâche de sortie, garde de boucle) servent aussi au mode
 // escalier / parallèle d'un cycle (syntheseCycleModes.js).
-import { NATURES, TASK_COLUMNS, findGroup, groupRemovalIds, natureKeyOf } from "./syntheseTaskModel.js";
+import {
+  NATURES,
+  TASK_COLUMNS,
+  findGroup,
+  floorLayoutZoneSuffix,
+  groupRemovalIds,
+  natureKeyOf,
+} from "./syntheseTaskModel.js";
 import {
   allTasksOf,
   anchorAbove,
@@ -296,7 +303,8 @@ export function planCycleRemoval({ sections, groupRowId, canLink = false } = {})
 // ligne survolée et sa moitié (`side` : "before" pour la haute, "after" pour la basse) — le tableau
 // du §7.2 de la spec. Sur une tâche : avant ou après elle, dans son conteneur ; sur un autre cycle :
 // avant lui (moitié haute, dans son conteneur) ou à sa fin (moitié basse) ; sur l'étage : la fin de
-// l'étage. null (rien n'est visé) sur le cycle glissé et tout ce qu'il contient, sur une zone et sur
+// l'étage (en affichage par étage, la ligne de zone dans l'étage : la légende nomme aussi la zone).
+// null (rien n'est visé) sur le cycle glissé et tout ce qu'il contient, sur une zone et sur
 // tout ce qui n'est pas dans l'étage du cycle : il ne quitte jamais son étage.
 export function resolveCycleDropSlot(line, side, { groupRowId, zoneKey, floorKey } = {}) {
   if (!line || !floorKey || line.zoneKey !== zoneKey || line.floorKey !== floorKey) return null;
@@ -310,7 +318,7 @@ export function resolveCycleDropSlot(line, side, { groupRowId, zoneKey, floorKey
     return { ...place, key: `group:${line.groupRowId}`, groupRowId: line.groupRowId, label: `Déplacer à la fin de « ${line.groupLabel} »` };
   }
   if (line.kind === "floor") {
-    return { ...place, key: `floor:${line.zoneKey}/${line.floorKey}`, groupRowId: null, label: `Déplacer à la fin de « ${line.floorName} »` };
+    return { ...place, key: `floor:${line.zoneKey}/${line.floorKey}`, groupRowId: null, label: `Déplacer à la fin de « ${line.floorName} »${floorLayoutZoneSuffix(line)}` };
   }
   return null;
 }

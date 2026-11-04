@@ -10,10 +10,10 @@ import { allTasksOf, findUpstream, linkMap } from "./syntheseTaskOrder.js";
 
 // Numéros des lignes des sections, toutes dépliées : `byKey` (clé de ligne → numéro) et `lineAt`
 // (numéro → ligne).
-export function lineNumbersOf(sections) {
+export function lineNumbersOf(sections, { layout = "zone" } = {}) {
   const byKey = new Map();
   const lineAt = new Map();
-  buildRowModel(sections).forEach((line, index) => {
+  buildRowModel(sections, { layout }).forEach((line, index) => {
     byKey.set(line.key, index + 1);
     lineAt.set(index + 1, line);
   });

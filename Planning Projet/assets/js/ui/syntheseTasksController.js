@@ -32,17 +32,31 @@ import {
   groupRemovalIds,
   moveTaskStart,
   nextFloorName,
+  storeyCollapseKey,
   validateFloorName,
   validateGroupName,
 } from "../services/syntheseTaskModel.js";
+import { LAYOUT_FLOOR, LAYOUT_ZONE } from "../services/syntheseLayout.js";
+import {
+  buildStoreyDeleteQuestion,
+  buildStoreyRename,
+  checkNewZoneName,
+  storeyFloorsOf,
+  storeyRemovalIds,
+  validateNewStorey,
+  validateStoreyRename,
+  zonesWithFloorName,
+} from "../services/syntheseStoreys.js";
 import {
   buildBulkAddAction,
   buildFloorFromTemplate,
   buildTemplateLinks,
+  buildZoneAnchorRow,
 } from "../services/syntheseFloorTemplate.js";
 import { cascadeFrom } from "../services/syntheseLinks.js";
 import { applyLineNumbers, lineNumbersOf, linkChoices, planLinkChange, previewLink } from "../services/syntheseLinkColumn.js";
 import { createLinkDialog as createDefaultLinkDialog } from "./syntheseLinkDialog.js";
+import { createFloorDialog as createDefaultFloorDialog } from "./syntheseFloorDialog.js";
 import { planCycleInsert, planCycleMove, planCycleRemoval } from "../services/syntheseCycles.js";
 import {
   applyCycleModes,
@@ -84,6 +98,7 @@ const MESSAGES = Object.freeze({
   locked: "Activez « Editer » dans le bandeau pour modifier les tâches.",
   readOnly: "Ce service est en lecture seule pour vous : les tâches ne sont pas modifiables.",
   saving: "Enregistrement…",
+  layoutFailed: "Le mode d'affichage n'a pas pu être enregistré dans Projets2 : l'affichage ne change pas. Vérifiez vos droits sur Projets2, puis réessayez.",
   contextChanged: "Le projet ou le service a changé avant l'enregistrement : recommencez.",
   noFloorColumn: "La colonne « Etage » n'existe pas dans Planning_Projet : ajoutez-la (type Booléen) pour créer des étages.",
   noTemplateColumns: "Les colonnes « Nature », « Parent » et « Lien » (Texte) manquent dans Planning_Projet : ajoutez-les pour créer des étages.",
@@ -98,7 +113,16 @@ const MESSAGES = Object.freeze({
   badIssueDate: "La date 0 Prev de ce coffrage n'est pas utilisable (elle doit être entre 2000 et 2100) : corrigez-la dans la liste de plans.",
   insertFailed: "La tâche n'a pas pu être ajoutée complètement : elle a été retirée. Réessayez.",
   insertCleanupFailed: "La tâche n'a pas pu être ajoutée complètement et n'a pas pu être retirée : supprimez « Nouvelle tâche » à la main.",
+  storeyDeleteFiltered: "Retirez le filtre de zone pour supprimer l'étage dans toutes ses zones.",
+  storeyAddZoneFiltered: "Retirez le filtre de zone pour ajouter une zone à cet étage.",
+  storeyInAllZones: "Toutes les zones du projet ont déjà cet étage.",
+  storeyAddFiltered: "Retirez le filtre de zone pour ajouter un étage.",
 });
+
+// « 2 zones », « 1 zone ».
+function zoneCountText(count) {
+  return `${count} zone${count > 1 ? "s" : ""}`;
+}
 
 // Seul cas où la création d'un étage ne peut ni réussir ni être annulée : le dire précisément.
 function floorCleanupFailedMessage(name) {
@@ -157,6 +181,11 @@ export function createSyntheseTasksController({
   loadFormworkStarts = null,
   // Fenêtre « Lien de la tâche » (clic droit) : créée à la première ouverture.
   createLinkDialog = createDefaultLinkDialog,
+  // Fenêtre « Ajouter un étage… » (clic droit, affichage par étage) : créée à la première ouverture.
+  createFloorDialog = createDefaultFloorDialog,
+  // Écriture du mode d'affichage dans Projets2 (bouton « Par étage »), fournie par main.js :
+  // async (layout) => void ; elle applique aussi l'affichage une fois Grist confirmé.
+  saveLayout = null,
 } = {}) {
   let active = false;
   let bound = false;
@@ -178,6 +207,10 @@ export function createSyntheseTasksController({
   const collapsedZoneKeys = new Set();
   const collapsedFloorKeys = new Set();
   const collapsedGroupKeys = new Set();
+  // Lignes étage repliées (affichage par étage) : clés de storeyCollapseKey.
+  const collapsedStoreyKeys = new Set();
+  // Affichage du projet : par zone (défaut) ou par étage (voir setLayout).
+  let layout = LAYOUT_ZONE;
   // Colonne Etage : true / false d'après les lignes lues, null tant qu'on ne sait pas.
   let floorColumn = null;
   // Colonnes Nature, Parent et Lien (modèle d'étage) : même principe que Etage.
@@ -195,6 +228,7 @@ export function createSyntheseTasksController({
   let queuedWrites = 0;
   let savingTimer = null;
   let savingShown = false;
+  let layoutSaving = false;
   let errorShown = false;
   // La file est occupée depuis plus d'une seconde : « Enregistrement… » doit rester affiché.
   let savingDue = false;
@@ -207,11 +241,15 @@ export function createSyntheseTasksController({
       handleAddTask(zoneKey, floorKey, groupRowId, afterTaskId)
     ),
     onAddFloor: (zoneKey) => handleAddFloor(zoneKey),
+    onAddStorey: (zoneKey) => handleAddStorey(zoneKey),
     onAddCycle: (zoneKey, floorKey, parentGroupRowId = null) => handleAddCycle(zoneKey, floorKey, parentGroupRowId),
     onDeleteTask: (taskId) => handleDeleteTask(taskId),
     onEditLink: (taskId) => handleEditLink(taskId),
     onDeleteFloor: (zoneKey, floorKey) => handleDeleteFloor(zoneKey, floorKey),
     onDeleteGroup: (groupRowId) => handleDeleteGroup(groupRowId),
+    onRenameStorey: (floorKey, rawValue) => handleRenameStorey(floorKey, rawValue),
+    onAddZoneToFloor: (floorKey, zoneKey) => handleAddZoneToFloor(floorKey, zoneKey),
+    onDeleteStorey: (floorKey) => handleDeleteStorey(floorKey),
     onSetFormworkCheck: (taskId, checked) => handleSetFormworkCheck(taskId, checked),
     onMoveTask: (taskId, target) => handleMoveTask(taskId, target),
     onMoveCycle: (groupRowId, target) => handleMoveCycle(groupRowId, target),
@@ -219,6 +257,7 @@ export function createSyntheseTasksController({
     onToggleZone: (zoneKey) => toggleZone(zoneKey),
     onToggleFloor: (zoneKey, floorKey) => toggleFloor(zoneKey, floorKey),
     onToggleGroup: (groupRowId) => toggleGroup(groupRowId),
+    onToggleStorey: (floorKey) => toggleStorey(floorKey),
     onLockedAttempt: () => setStatus(lockedMessage(), "error"),
   });
 
@@ -317,17 +356,24 @@ export function createSyntheseTasksController({
     // Gantt la signalent quand elle la dépasse, et son menu dit si elle est contrôlée. Chaque
     // étage porte son lien Structure, que son emblème montre. Chaque cycle porte son mode, escalier
     // ou parallèle, lu dans les liens : son menu propose l'autre.
-    let lines = buildRowModel(sections, { collapsedZoneKeys, collapsedFloorKeys, collapsedGroupKeys });
+    let lines = buildRowModel(sections, {
+      collapsedZoneKeys,
+      collapsedFloorKeys,
+      collapsedGroupKeys,
+      collapsedStoreyKeys,
+      layout,
+    });
     lines = applyEndLimits(lines, controlTaskEndLimits({ syntheseRows: shownRows, formworkStarts }));
     lines = applyControlTasks(lines, readControlTasks(shownRows));
     lines = applyFloorLinks(lines, readFloorLinks(shownRows));
     lines = applyCycleModes(lines, cycleModes(sections));
-    // Numéros de ligne sur tout le projet, tout déplié : replier ou filtrer une zone ne les change pas.
-    // Sans filtre de zone, les sections affichées sont déjà tout le projet : pas de second calcul.
+    // Numéros de ligne sur tout le projet, tout déplié, dans l'ordre de l'affichage courant : replier
+    // ou filtrer une zone ne les change pas. Sans filtre de zone, les sections affichées sont déjà tout
+    // le projet : pas de second calcul.
     const numberingSections = project && zoneFilter
       ? buildSections({ rows: shownRows, sharedZones: getSharedZones(project) })
       : sections;
-    lines = applyLineNumbers(lines, lineNumbersOf(numberingSections));
+    lines = applyLineNumbers(lines, lineNumbersOf(numberingSections, { layout }));
     let emptyMessage = "";
     if (!project) emptyMessage = MESSAGES.noProject;
     else if (!loaded) emptyMessage = MESSAGES.loading;
@@ -342,6 +388,8 @@ export function createSyntheseTasksController({
       canMoveCycles: orderColumn === true && templateColumns === true,
       canSetCycleMode: templateColumns === true,
       canEditLink: templateColumns === true,
+      // Ligne étage : ni ajout de zone ni suppression dans des zones masquées.
+      zoneFiltered: Boolean(zoneFilter),
     });
   }
 
@@ -374,6 +422,7 @@ export function createSyntheseTasksController({
       collapsedZoneKeys.clear();
       collapsedFloorKeys.clear();
       collapsedGroupKeys.clear();
+      collapsedStoreyKeys.clear();
       floorColumn = null;
       templateColumns = null;
       structureLinkColumn = null;
@@ -619,7 +668,8 @@ export function createSyntheseTasksController({
       return;
     }
     const all = allSections();
-    const choices = linkChoices({ sections: all, taskId, numbering: lineNumbersOf(all) });
+    // Numéros du même affichage que le tableau : la colonne Lien et la fenêtre se répondent.
+    const choices = linkChoices({ sections: all, taskId, numbering: lineNumbersOf(all, { layout }) });
     if (!choices) return;
     linkDialog ||= createLinkDialog({ onSubmit: (link) => handleLinkChange(linkTaskId, link) });
     linkTaskId = taskId;
@@ -782,6 +832,8 @@ export function createSyntheseTasksController({
         });
         collapsedZoneKeys.delete(section.zoneKey);
         if (floor) collapsedFloorKeys.delete(floorCollapseKey(section.zoneKey, floor.key));
+        // Affichage par étage : la ligne étage qui reçoit (« Sans étage » au niveau zone).
+        collapsedStoreyKeys.delete(storeyCollapseKey(floor ? floor.key : ""));
         for (let container = group; container; container = container.parentGroup) {
           collapsedGroupKeys.delete(groupCollapseKey(container.rowId));
         }
@@ -829,6 +881,7 @@ export function createSyntheseTasksController({
         if (hasId) collapsedGroupKeys.delete(groupCollapseKey(newId));
         collapsedZoneKeys.delete(zoneKey);
         collapsedFloorKeys.delete(floorCollapseKey(zoneKey, floor.key));
+        collapsedStoreyKeys.delete(storeyCollapseKey(floor.key));
         for (let container = parent; container; container = container.parentGroup) {
           collapsedGroupKeys.delete(groupCollapseKey(container.rowId));
         }
@@ -873,27 +926,151 @@ export function createSyntheseTasksController({
     });
   }
 
-  // Nouvel étage d'après le modèle : ses 26 lignes, puis Parent et Lien une fois les ids
-  // connus. Si le second temps échoue, les lignes créées sont retirées : rien de bancal ne
-  // reste dans Grist.
+  // Colonnes qu'exige un étage créé d'après le modèle : refus expliqué si l'une manque.
+  function refuseFloorTemplate() {
+    if (floorColumn === false) {
+      setStatus(MESSAGES.noFloorColumn, "error");
+      return true;
+    }
+    if (templateColumns === false) {
+      setStatus(MESSAGES.noTemplateColumns, "error");
+      return true;
+    }
+    return false;
+  }
+
+  // « Ajouter un étage » sur une zone : un étage « Nouvel étage » (ou « Nouvel étage 2 »…) dont le
+  // nom passe aussitôt en saisie. Par étage, le nom est libre dans tout le projet, pour que le nouvel
+  // étage arrive seul sur sa ligne étage, où s'ouvre la saisie.
   function handleAddFloor(zoneKey) {
     if (!isEditable()) {
       refuseLocked();
       return Promise.resolve();
     }
-    if (floorColumn === false) {
-      setStatus(MESSAGES.noFloorColumn, "error");
-      return Promise.resolve();
-    }
-    if (templateColumns === false) {
-      setStatus(MESSAGES.noTemplateColumns, "error");
-      return Promise.resolve();
-    }
+    if (refuseFloorTemplate()) return Promise.resolve();
     const project = getProject();
     const section = findSection(zoneKey);
     if (!project || !section || section.zoneKey === NO_ZONE_KEY) return Promise.resolve();
-    const name = nextFloorName(section.floors);
-    const newRows = buildFloorFromTemplate({ floorName: name, zoneName: section.zoneName, projectName: project.name });
+    const name = nextFloorName(layout === LAYOUT_FLOOR ? allSections().flatMap((each) => each.floors) : section.floors);
+    return addFloorFromTemplate(project, [section], name, (floorKey) => {
+      if (layout === LAYOUT_FLOOR) table.startEditingStorey(floorKey);
+      else table.startEditingFloor(section.zoneKey, floorKey);
+      info(`Étage ajouté dans « ${section.label} ».`);
+    });
+  }
+
+  // « Ajouter un étage… » (clic droit, affichage par étage) : la fenêtre propose le nom et les zones
+  // du projet à cocher (la zone cliquée l'est d'avance) ; « Créer » passe par handleCreateStorey.
+  let floorDialog = null;
+  // Projet pour lequel la fenêtre a été ouverte : elle se ferme s'il change.
+  let floorProject = "";
+  function refuseStoreyAdd() {
+    if (!isEditable()) {
+      refuseLocked();
+      return true;
+    }
+    if (zoneFilter) {
+      setStatus(MESSAGES.storeyAddFiltered, "error");
+      return true;
+    }
+    return refuseFloorTemplate();
+  }
+
+  function namedSections() {
+    return allSections().filter((section) => section.zoneKey !== NO_ZONE_KEY);
+  }
+
+  function handleAddStorey(zoneKey = "") {
+    if (refuseStoreyAdd()) return Promise.resolve();
+    const project = getProject();
+    if (!project) return Promise.resolve();
+    // Sans zone nommée, la fenêtre s'ouvre quand même : on y crée la première.
+    floorDialog ||= createFloorDialog({
+      onSubmit: ({ name, zoneKeys, newZones }) => handleCreateStorey(name, zoneKeys, newZones),
+    });
+    floorProject = toText(project.name);
+    floorDialog.open({
+      // Nom libre dans tout le projet, « Sans zone » compris : ses étages ont aussi leur ligne étage.
+      name: nextFloorName(allSections().flatMap((section) => section.floors)),
+      zones: namedSections().map((section) => ({ zoneKey: section.zoneKey, label: section.label })),
+      checked: zoneKey ? [zoneKey] : [],
+      takenZones: (name) => zonesWithFloorName(allSections(), name),
+      checkZoneName: (raw) => checkNewZoneName(raw, { sections: allSections() }),
+      validate: (name, zoneKeys, newZones) => validateNewStorey(name, zoneKeys, { sections: allSections(), newZones }),
+    });
+    return Promise.resolve();
+  }
+
+  // « Créer » : l'étage d'après le modèle dans chaque zone cochée et dans chaque nouvelle zone (avec
+  // sa ligne vide qui la garde), tout ou rien. Tout est revérifié sur les zones d'à présent (la
+  // fenêtre a pu rester ouverte pendant un changement).
+  function handleCreateStorey(name, zoneKeys, newZones = []) {
+    if (refuseStoreyAdd()) return Promise.resolve();
+    const project = getProject();
+    if (!project) return Promise.resolve();
+    const result = validateNewStorey(name, zoneKeys, { sections: allSections(), newZones });
+    if (!result.ok) {
+      setStatus(result.error, "error");
+      return Promise.resolve();
+    }
+    const existing = namedSections().filter((section) => result.zoneKeys.includes(section.zoneKey));
+    const created = result.newZones.map(({ zoneKey, label }) => ({ zoneKey, zoneName: label, label, floors: [] }));
+    const anchors = created.map(({ zoneName }) => buildZoneAnchorRow({ zoneName, projectName: project.name }));
+    const total = existing.length + created.length;
+    return addFloorFromTemplate(project, [...existing, ...created], result.name, () => {
+      if (total === 1) {
+        info(created.length
+          ? `Zone « ${created[0].label} » créée, avec l'étage « ${result.name} ».`
+          : `Étage « ${result.name} » ajouté dans « ${existing[0].label} ».`);
+        return;
+      }
+      const fresh = created.length
+        ? `, dont ${created.length} nouvelle${created.length > 1 ? "s" : ""}`
+        : "";
+      info(`Étage « ${result.name} » ajouté dans ${total} zones${fresh}.`);
+    }, { anchors });
+  }
+
+  // « Ajouter « R+1 » dans « Zone 3 » » sur une ligne étage (affichage par étage) : l'étage du même
+  // nom, d'après le modèle, dans une zone qui ne l'a pas. Jamais dans une zone masquée par le filtre.
+  function handleAddZoneToFloor(floorKey, zoneKey) {
+    if (!isEditable()) {
+      refuseLocked();
+      return Promise.resolve();
+    }
+    if (zoneFilter) {
+      setStatus(MESSAGES.storeyAddZoneFiltered, "error");
+      return Promise.resolve();
+    }
+    if (!zoneKey) {
+      setStatus(MESSAGES.storeyInAllZones, "error");
+      return Promise.resolve();
+    }
+    if (refuseFloorTemplate()) return Promise.resolve();
+    const project = getProject();
+    const all = allSections();
+    const entries = storeyFloorsOf(all, floorKey);
+    const section = all.find((candidate) => candidate.zoneKey === zoneKey) || null;
+    if (!project || !entries.length || !section || section.zoneKey === NO_ZONE_KEY) return Promise.resolve();
+    if (findFloor(section, floorKey)) return Promise.resolve();
+    // Le nom de la ligne étage : celui de sa première zone.
+    const name = entries[0].floor.name;
+    return addFloorFromTemplate(project, [section], name, () => {
+      info(`Étage « ${name} » ajouté dans « ${section.label} ».`);
+    });
+  }
+
+  // Nouvel étage `name` d'après le modèle, dans chacune des zones `sections` : leurs 26 lignes en une
+  // écriture, puis Parent et Lien de chaque zone une fois les ids connus. Tout ou rien : si le second
+  // temps échoue, toutes les lignes créées sont retirées, rien de bancal ne reste dans Grist. Réussi :
+  // l'étage est déplié (zones, étages de zone, ligne étage), puis `onAdded(floorKey)`. `anchors` : lignes
+  // vides des zones créées avec l'étage, ajoutées en fin d'écriture (sans Parent ni Lien).
+  function addFloorFromTemplate(project, sections, name, onAdded, { anchors = [] } = {}) {
+    const perSection = sections.map((section) => (
+      buildFloorFromTemplate({ floorName: name, zoneName: section.zoneName, projectName: project.name })
+    ));
+    // Les lignes vides des nouvelles zones suivent toutes les lignes du modèle, dans la même écriture.
+    const newRows = [...perSection.flat(), ...anchors];
     clearStatus();
     // `op` est référencé depuis `perform` (fermeture) : le second temps de l'écriture doit
     // revérifier le contexte capturé au premier (submit ne le revérifie qu'une fois, avant
@@ -904,9 +1081,17 @@ export function createSyntheseTasksController({
         const ids = Array.isArray(added?.retValues?.[0]) ? added.retValues[0].map(Number) : [];
         try {
           assertSameContext(op.context);
-          const links = buildTemplateLinks(ids);
-          await write([links.action]);
-          return { ids, linkFields: links.fieldsById };
+          // Les ids rendus se répartissent entre les zones selon le nombre de lignes de chacune.
+          let offset = 0;
+          const links = perSection.map((sectionRows) => {
+            const own = buildTemplateLinks(ids.slice(offset, offset + sectionRows.length));
+            offset += sectionRows.length;
+            return own;
+          });
+          await write(links.map((own) => own.action));
+          const linkFields = new Map();
+          links.forEach((own) => own.fieldsById.forEach((fields, id) => linkFields.set(id, fields)));
+          return { ids, linkFields };
         } catch (error) {
           const created = ids.filter((id) => Number.isInteger(id) && id > 0);
           let cleanupFailed = false;
@@ -946,14 +1131,17 @@ export function createSyntheseTasksController({
           .map((fields, index) => ({ id: ids[index], ...fields, ...(linkFields.get(ids[index]) || {}) }))
           .filter((row) => !known.has(row.id));
         rows = [...rows, ...added];
-        collapsedZoneKeys.delete(zoneKey);
+        const floorKey = floorKeyOf(name);
         // Grist réutilise les ids : un ancien repli (étage ou cycle supprimé) ne doit pas
         // s'appliquer au nouvel étage. Le nouvel étage est aussi déplié d'après la spec.
-        collapsedFloorKeys.delete(floorCollapseKey(zoneKey, floorKeyOf(name)));
+        sections.forEach(({ zoneKey }) => {
+          collapsedZoneKeys.delete(zoneKey);
+          collapsedFloorKeys.delete(floorCollapseKey(zoneKey, floorKey));
+        });
+        collapsedStoreyKeys.delete(storeyCollapseKey(floorKey));
         ids.forEach((id) => collapsedGroupKeys.delete(groupCollapseKey(id)));
         render();
-        table.startEditingFloor(zoneKey, floorKeyOf(name));
-        info(`Étage ajouté dans « ${section.label} ».`);
+        onAdded(floorKey);
       },
       onFailure: (error, dropped) => {
         const message = describeWriteError(error);
@@ -996,14 +1184,57 @@ export function createSyntheseTasksController({
     });
   }
 
+  // Renommer une ligne étage (affichage par étage) : l'étage dans toutes les zones du projet qui
+  // l'ont, filtre de zone ou non (sinon il se couperait en deux lignes une fois le filtre retiré).
+  // Une seule écriture ; le nom est vérifié dans chacune de ses zones.
+  function handleRenameStorey(floorKey, rawValue) {
+    if (!isEditable()) {
+      refuseLocked();
+      return;
+    }
+    const all = allSections();
+    const entries = storeyFloorsOf(all, floorKey);
+    if (!entries.length) return;
+    const result = validateStoreyRename(rawValue, { sections: all, floorKey });
+    if (!result.ok) {
+      setStatus(result.error, "error");
+      render();
+      return;
+    }
+    if (entries.every(({ floor }) => floor.name === result.name)) {
+      render();
+      return;
+    }
+    const { changes, actions } = buildStoreyRename(entries, result.name);
+    // Les replis suivent l'étage sous son nouveau nom : la ligne étage et l'étage de chaque zone.
+    if (collapsedStoreyKeys.delete(storeyCollapseKey(floorKey))) {
+      collapsedStoreyKeys.add(storeyCollapseKey(result.key));
+    }
+    entries.forEach(({ section }) => {
+      if (collapsedFloorKeys.delete(floorCollapseKey(section.zoneKey, floorKey))) {
+        collapsedFloorKeys.add(floorCollapseKey(section.zoneKey, result.key));
+      }
+    });
+    clearStatus();
+    void submit(createOp({ changes, actions }), {
+      onSuccess: () => info(`Étage renommé dans ${zoneCountText(entries.length)}.`),
+      onFailure: (error, dropped) => fail("Renommage de l'étage impossible :", error, dropped),
+    });
+  }
+
   function handleDeleteFloor(zoneKey, floorKey) {
     if (!isEditable()) {
       refuseLocked();
       return Promise.resolve();
     }
-    const floor = findFloor(findSection(zoneKey), floorKey);
+    const section = findSection(zoneKey);
+    const floor = findFloor(section, floorKey);
     if (!floor) return Promise.resolve();
-    if (!confirm(buildFloorDeleteQuestion(floor))) return Promise.resolve();
+    // Par étage, l'étage se répète dans plusieurs zones : la question nomme la zone.
+    const question = layout === LAYOUT_FLOOR
+      ? buildFloorDeleteQuestion(floor, { zoneLabel: section.label })
+      : buildFloorDeleteQuestion(floor);
+    if (!confirm(question)) return Promise.resolve();
     const removals = floorRemovalIds(floor);
     // Avec Lien : les liens des autres tâches vers les lignes supprimées sont effacés.
     const changes = planOrphanLinks({ sections: allSections(), removedIds: removals, canLink: templateColumns === true });
@@ -1019,6 +1250,46 @@ export function createSyntheseTasksController({
         collapsedFloorKeys.delete(floorCollapseKey(zoneKey, floor.key));
         floor.groups.forEach((group) => collapsedGroupKeys.delete(groupCollapseKey(group.rowId)));
         info(`Étage « ${floor.name} » supprimé.`);
+      },
+      onFailure: (error, dropped) => fail("Suppression de l'étage impossible :", error, dropped),
+    });
+  }
+
+  // « Supprimer l'étage » sur une ligne étage (affichage par étage) : l'étage dans toutes ses
+  // zones, en une seule écriture, après confirmation. Jamais pendant un filtre de zone : rien ne
+  // se supprime dans une zone qu'on ne voit pas.
+  function handleDeleteStorey(floorKey) {
+    if (!isEditable()) {
+      refuseLocked();
+      return Promise.resolve();
+    }
+    if (zoneFilter) {
+      setStatus(MESSAGES.storeyDeleteFiltered, "error");
+      return Promise.resolve();
+    }
+    const all = allSections();
+    const entries = storeyFloorsOf(all, floorKey);
+    if (!entries.length) return Promise.resolve();
+    const { name } = entries[0].floor;
+    const taskCount = entries.reduce((count, { floor }) => count + floor.tasks.length, 0);
+    if (!confirm(buildStoreyDeleteQuestion({ name, zoneCount: entries.length, taskCount }))) return Promise.resolve();
+    const removals = storeyRemovalIds(entries);
+    // Avec Lien : les liens des autres tâches vers les lignes supprimées sont effacés.
+    const changes = planOrphanLinks({ sections: all, removedIds: removals, canLink: templateColumns === true });
+    clearStatus();
+    return submit(createOp({
+      changes,
+      removals,
+      actions: [["BulkRemoveRecord", PLANNING_TABLE, removals], ...buildUpdateActions(changes)],
+    }), {
+      onSuccess: () => {
+        // Grist réutilise les ids, et un étage recréé sous ce nom ne doit pas naître replié.
+        collapsedStoreyKeys.delete(storeyCollapseKey(floorKey));
+        entries.forEach(({ section, floor }) => {
+          collapsedFloorKeys.delete(floorCollapseKey(section.zoneKey, floor.key));
+          floor.groups.forEach((group) => collapsedGroupKeys.delete(groupCollapseKey(group.rowId)));
+        });
+        info(`Étage « ${name} » supprimé dans ${zoneCountText(entries.length)}.`);
       },
       onFailure: (error, dropped) => fail("Suppression de l'étage impossible :", error, dropped),
     });
@@ -1105,6 +1376,7 @@ export function createSyntheseTasksController({
     if (!changes.size) return;
     collapsedZoneKeys.delete(target.zoneKey);
     if (target.floorKey) collapsedFloorKeys.delete(floorCollapseKey(target.zoneKey, target.floorKey));
+    collapsedStoreyKeys.delete(storeyCollapseKey(target.floorKey || ""));
     for (let container = findGroup(sections, target.groupRowId); container; container = container.parentGroup) {
       collapsedGroupKeys.delete(groupCollapseKey(container.rowId));
     }
@@ -1132,6 +1404,7 @@ export function createSyntheseTasksController({
     if (!changes.size) return;
     collapsedZoneKeys.delete(target.zoneKey);
     if (target.floorKey) collapsedFloorKeys.delete(floorCollapseKey(target.zoneKey, target.floorKey));
+    collapsedStoreyKeys.delete(storeyCollapseKey(target.floorKey || ""));
     for (let container = findGroup(sections, target.groupRowId); container; container = container.parentGroup) {
       collapsedGroupKeys.delete(groupCollapseKey(container.rowId));
     }
@@ -1334,6 +1607,14 @@ export function createSyntheseTasksController({
     render();
   }
 
+  // Ligne étage (affichage par étage) ; `floorKey` vide : le bloc « Sans étage ».
+  function toggleStorey(floorKey) {
+    const key = storeyCollapseKey(floorKey);
+    if (collapsedStoreyKeys.has(key)) collapsedStoreyKeys.delete(key);
+    else collapsedStoreyKeys.add(key);
+    render();
+  }
+
   function bind() {
     if (bound) return;
     bound = true;
@@ -1342,6 +1623,7 @@ export function createSyntheseTasksController({
     context?.subscribe?.(() => {
       // Projet changé : la fenêtre de lien montrait l'ancien.
       if (linkDialog && toText(getProject()?.name) !== linkProject) linkDialog.close();
+      if (floorDialog && toText(getProject()?.name) !== floorProject) floorDialog.close();
       void load();
     });
     context?.watchProjectZones?.((zones, meta = {}) => {
@@ -1360,6 +1642,7 @@ export function createSyntheseTasksController({
       if (!active) {
         loadToken += 1;
         linkDialog?.close();
+        floorDialog?.close();
         return;
       }
       bind();
@@ -1372,7 +1655,10 @@ export function createSyntheseTasksController({
     setEditingEnabled(enabled) {
       editingEnabled = Boolean(enabled);
       // Tableau verrouillé : la fenêtre de lien se ferme.
-      if (!editingEnabled) linkDialog?.close();
+      if (!editingEnabled) {
+        linkDialog?.close();
+        floorDialog?.close();
+      }
       render();
     },
     setZoneFilter(zoneName) {
@@ -1380,6 +1666,45 @@ export function createSyntheseTasksController({
       if (next === zoneFilter) return;
       zoneFilter = next;
       render();
+    },
+    // Affichage du projet : "floor" (par étage), toute autre valeur par zone. Les clés de repli n'ont
+    // pas le même sens d'un affichage à l'autre : tout est déplié au changement. La fenêtre de lien
+    // montrait les numéros de ligne de l'ancien affichage : elle se ferme.
+    setLayout(nextLayout) {
+      const next = nextLayout === LAYOUT_FLOOR ? LAYOUT_FLOOR : LAYOUT_ZONE;
+      if (next === layout) return;
+      layout = next;
+      linkDialog?.close();
+      floorDialog?.close();
+      collapsedZoneKeys.clear();
+      collapsedFloorKeys.clear();
+      collapsedGroupKeys.clear();
+      collapsedStoreyKeys.clear();
+      render();
+    },
+    // Bouton « Par étage » : enregistre le mode dans Projets2 (saveLayout) avec les droits de toute
+    // modification du tableau. Vrai si l'affichage demandé est (ou devient) celui du projet.
+    async changeLayout(nextLayout) {
+      const next = nextLayout === LAYOUT_FLOOR ? LAYOUT_FLOOR : LAYOUT_ZONE;
+      if (layoutSaving) return false;
+      if (!isEditable()) {
+        setStatus(lockedMessage(), "error");
+        return false;
+      }
+      if (next === layout) return true;
+      if (typeof saveLayout !== "function") return false;
+      layoutSaving = true;
+      try {
+        await saveLayout(next);
+        clearStatus();
+        return true;
+      } catch (error) {
+        console.error("Mode d'affichage non enregistré", error);
+        setStatus(error?.userMessage || MESSAGES.layoutFailed, "error");
+        return false;
+      } finally {
+        layoutSaving = false;
+      }
     },
     // Appelée par la surveillance de Planning_Projet de main.js, qui vient de relire
     // la table : le cache partagé est frais, inutile de forcer une nouvelle lecture.
