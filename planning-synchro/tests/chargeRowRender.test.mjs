@@ -20,6 +20,8 @@ import vm from "node:vm";
 import { getSegmentEffectiveDays } from "../assets/js/utils/timeSegments.js";
 import { getMonthBusinessDays } from "../assets/js/utils/monthSegments.js";
 import { formatNumber } from "../assets/js/utils/format.js";
+import { groupWorkersByRole } from "../assets/js/bottom/chargeBoard.js";
+import { CHARGE_ROLES } from "../assets/js/bottom/documentCharge.js";
 
 const CHARGE_BOARD_PATH = new URL("../assets/js/bottom/chargeBoard.js", import.meta.url);
 const source = fs.readFileSync(CHARGE_BOARD_PATH, "utf8");
@@ -64,16 +66,24 @@ function extractLine(pattern, label) {
 }
 
 const CHARGE_EPSILON_LINE = extractLine(/const CHARGE_EPSILON = [^;]+;/, "CHARGE_EPSILON");
+const CHARGE_ROLE_GROUPS_LINE = extractLine(/const CHARGE_ROLE_GROUPS = [^;]+;/, "CHARGE_ROLE_GROUPS");
+const CHARGE_ROLE_NAMES_LINE = extractLine(/const CHARGE_ROLE_NAMES = [^;]+;/, "CHARGE_ROLE_NAMES");
+const CHARGE_ROW_ORDER_LINE = extractLine(/const CHARGE_ROW_ORDER = [^;]+;/, "CHARGE_ROW_ORDER");
 
 const BLOCK_HEADERS = [
+  "function escapeHtml(value) {",
   "function formatDayValue(value) {",
   "function computeMonthTotalDays(workers, month) {",
   // Partagee avec la ligne Total (renderReadonlyMonthTrack) depuis la
   // deduplication de la pastille : renderChargeMonthTrack en depend.
-  "function renderMonthFillPill(value, month) {",
+  "function renderMonthFillPill(value, month, label = \"\") {",
+  "function formatChargeLabel(requiredDays, plannedDays) {",
+  "function renderReadonlyMonthTrack(workers, months) {",
   "function getChargeCellState(plannedDays, requiredDays) {",
   "function renderChargeMonthTrack(workers, months, chargeByMonth) {",
-  "function renderChargeRow(workers, months, timelineWidth, charge) {",
+  "function renderChargeRow(workers, months, timelineWidth, roleCharge, role, withButton) {",
+  "function renderChargeRows(workers, months, timelineWidth, charge) {",
+  "function renderRoleRow(roleLabel, roleWorkers, months, timelineWidth) {",
 ];
 
 // L'extraction elle-meme est la garde : `extractBlock`/`extractLine` font
@@ -91,16 +101,23 @@ function buildApi() {
   const sandbox = {
     getSegmentEffectiveDays,
     formatNumber,
+    groupWorkersByRole,
+    CHARGE_ROLES,
   };
   const context = vm.createContext(sandbox);
   vm.runInContext(
     [
       CHARGE_EPSILON_LINE,
+      CHARGE_ROLE_GROUPS_LINE,
+      CHARGE_ROLE_NAMES_LINE,
+      CHARGE_ROW_ORDER_LINE,
       ...BLOCKS,
       `globalThis.__api = {
          getChargeCellState,
          renderChargeMonthTrack,
          renderChargeRow,
+         renderChargeRows,
+         renderRoleRow,
          formatDayValue,
          computeMonthTotalDays,
        };`,
@@ -199,6 +216,58 @@ test("un mois a 0 requis ET 0 planifie reste neutre", () => {
   assert.ok(!html.includes("is-partial"));
 });
 
+// --- 4 bis. La pastille porte les DEUX chiffres : requis / planifie du metier ----
+// La couleur compare deja la charge requise du metier aux jours planifies des
+// seules personnes de sa section (ligne de role) ; la pastille ne montrait que le
+// requis, il fallait remonter a la ligne de la section pour lire l'autre terme.
+
+function chargeLabels(html) {
+  return [...html.matchAll(/class="charge-plan-month-label">([^<]*)</g)].map((match) => match[1].trim());
+}
+
+test("la pastille Charge affiche « requis / planifie » du metier", () => {
+  const api = buildApi();
+  assert.ok(MONTH_BUSINESS_DAYS >= 18, "fixture invalide : le mois choisi n'a pas assez de jours ouvres");
+
+  const html = api.renderChargeMonthTrack([worker("Alice", 18)], [month()], chargeByMonth([[MONTH_KEY, 22]]));
+
+  assert.deepEqual(chargeLabels(html), ["22 j / 18 j"]);
+});
+
+test("pastille Charge : decimales a la francaise, comme la ligne Total", () => {
+  const api = buildApi();
+
+  const html = api.renderChargeMonthTrack([worker("Alice", 3)], [month()], chargeByMonth([[MONTH_KEY, 2.5]]));
+
+  assert.deepEqual(chargeLabels(html), ["2,50 j / 3 j"]);
+});
+
+test("pastille Charge sans charge requise : « — / planifie », visible", () => {
+  const api = buildApi();
+
+  const html = api.renderChargeMonthTrack([worker("Alice", 6)], [month()], chargeByMonth([]));
+
+  assert.deepEqual(chargeLabels(html), ["— / 6 j"]);
+  assert.match(html, /class="charge-plan-month-segment is-partial"/);
+});
+
+test("pastille Charge sans personne planifiee : « requis / 0 j »", () => {
+  const api = buildApi();
+
+  const html = api.renderChargeMonthTrack([], [month()], chargeByMonth([[MONTH_KEY, 10]]));
+
+  assert.deepEqual(chargeLabels(html), ["10 j / 0 j"]);
+  assert.match(html, /class="charge-plan-month-segment is-overload"/);
+});
+
+test("ni requis ni planifie : aucune pastille", () => {
+  const api = buildApi();
+
+  const html = api.renderChargeMonthTrack([], [month()], chargeByMonth([]));
+
+  assert.ok(!html.includes("charge-plan-month-fill"));
+});
+
 // --- 5. tolerance a l'arithmetique flottante ------------------------------------
 
 test("l'egalite tolere l'arithmetique flottante", () => {
@@ -225,8 +294,7 @@ test("la cellule « non place » s'affiche puis se masque a zero", () => {
     byMonth: chargeByMonth([]),
     unplacedDays: 240,
     totalDays: 240,
-    divergences: [],
-  });
+  }, "ingenieurs");
   assert.match(shown, /charge-plan-charge-unplaced/);
   // Scope au badge lui-meme : un simple /240/ matcherait n'importe ou dans le
   // HTML de la ligne (par ex. une largeur de piste ou un autre nombre qui
@@ -256,8 +324,7 @@ test("la cellule « non place » s'affiche puis se masque a zero", () => {
     byMonth: chargeByMonth([]),
     unplacedDays: 0,
     totalDays: 0,
-    divergences: [],
-  });
+  }, "ingenieurs");
   assert.ok(!hidden.includes("charge-plan-charge-unplaced"));
 });
 
@@ -272,11 +339,85 @@ test("la ligne se rend meme sans aucune duree renseignee", () => {
     byMonth: chargeByMonth([]),
     unplacedDays: 0,
     totalDays: 0,
-    divergences: [],
-  });
+  }, "ingenieurs", true);
 
   // Sans cette garantie, le bouton « Charge » — seul point d'entree de la
   // fenetre d'assignation (Task 4) — serait tout simplement introuvable.
-  assert.match(html, /class="charge-plan-row charge-plan-row--charge"/);
+  assert.match(html, /class="charge-plan-row charge-plan-row--charge charge-plan-row--charge-ingenieurs"/);
   assert.match(html, /class="charge-plan-charge-btn"[^>]*data-charge-assign-open/);
+});
+
+// --- 8. une ligne Charge par metier --------------------------------------------
+
+function roleCharge(entries, unplacedDays = 0) {
+  return { byMonth: chargeByMonth(entries), unplacedDays, totalDays: unplacedDays };
+}
+
+function roleWorker(name, role, effectif) {
+  return { name, role, segments: [{ monthKey: MONTH_KEY, effectif }] };
+}
+
+test("deux lignes Charge : projeteurs puis ingenieurs (l'ordre des sections), chacune face aux jours planifies de son metier", () => {
+  const api = buildApi();
+  assert.ok(MONTH_BUSINESS_DAYS >= 12, "fixture invalide : le mois choisi n'a pas assez de jours ouvres");
+
+  const workers = [
+    roleWorker("Ines", "Ingénieure structure", 8),
+    roleWorker("Paul", "Projeteur", 12),
+    roleWorker("Autre", "Conducteur", 5), // ni l'un ni l'autre : dans aucune ligne Charge
+  ];
+  const html = api.renderChargeRows(workers, [month()], 1000, {
+    byRole: {
+      ingenieurs: roleCharge([[MONTH_KEY, 8]]),
+      projeteurs: roleCharge([[MONTH_KEY, 20]], 3),
+    },
+    divergences: [],
+  });
+
+  const rows = html.split('<div class="charge-plan-row charge-plan-row--charge').slice(1);
+  assert.equal(rows.length, 2, "une ligne par metier");
+  // UN SEUL bouton « Charge », sur la premiere ligne : il regle les deux metiers.
+  assert.equal((html.match(/data-charge-assign-open/g) || []).length, 1, "un seul bouton Charge");
+  assert.match(rows[0], /data-charge-assign-open[^>]*>\s*Charge\s*</);
+  assert.ok(!rows[1].includes("data-charge-assign-open"));
+  assert.match(rows[0], /charge-plan-row--charge-projeteurs/);
+  assert.match(rows[0], /class="charge-plan-charge-role">\s*Projeteurs/);
+  // Projeteurs : 12 planifies (Paul seul) < 20 requis -> manque.
+  assert.match(rows[0], /class="charge-plan-month-segment is-overload"/);
+  assert.match(rows[0], /charge-plan-charge-unplaced"[^>]*>\s*3 j/);
+  assert.match(rows[1], /charge-plan-row--charge-ingenieurs/);
+  assert.match(rows[1], /class="charge-plan-charge-role">\s*Ingénieurs/);
+  // Ingenieurs : 8 planifies (Ines seule) = 8 requis -> equilibre.
+  assert.match(rows[1], /class="charge-plan-month-segment is-balanced"/);
+  assert.ok(!rows[1].includes("charge-plan-charge-unplaced"));
+});
+
+// --- 9. total de chaque role sur sa ligne -------------------------------------------
+
+test("ligne de role : total du role a gauche et jours planifies de ses personnes, mois par mois", () => {
+  const api = buildApi();
+  const nextKey = "2026-09";
+  const workers = [
+    { name: "Paul", role: "Projeteur", segments: [{ monthKey: MONTH_KEY, effectif: 12 }, { monthKey: nextKey, effectif: 3 }] },
+    { name: "Lea", role: "Projeteuse", segments: [{ monthKey: MONTH_KEY, effectif: 2.5 }] },
+  ];
+  const months = [month(), month({ key: nextKey, businessDayCount: getMonthBusinessDays(nextKey) }), month({ key: "2026-10" })];
+  const html = api.renderRoleRow("Projeteurs", workers, months, 1000);
+
+  assert.match(html, /class="charge-plan-role-row"/);
+  assert.match(html, /charge-plan-role-cell--label[^>]*>[\s\S]*?Projeteurs/);
+  // Total du role (tous ses segments) dans la cellule du nom.
+  assert.match(html, /class="charge-plan-role-total">\s*17,50 j/);
+  // Une pastille par mois charge : 14,50 j en aout (12 + 2,5), 3 j en
+  // septembre, rien en octobre (meme format que la ligne Total).
+  const labels = [...html.matchAll(/class="charge-plan-month-label">([^<]*)</g)].map((match) => match[1].trim());
+  assert.deepEqual(labels, ["14,50 j", "3 j"]);
+  assert.equal((html.match(/class="charge-plan-month-segment"/g) || []).length, 3, "un segment par mois visible");
+});
+
+test("ligne de role sans personne planifiee : 0 j, aucune pastille", () => {
+  const api = buildApi();
+  const html = api.renderRoleRow("Ingenieurs", [{ name: "Ines", role: "Ingénieure", segments: [] }], [month()], 1000);
+  assert.match(html, /class="charge-plan-role-total">\s*0 j/);
+  assert.ok(!html.includes("charge-plan-month-fill"));
 });

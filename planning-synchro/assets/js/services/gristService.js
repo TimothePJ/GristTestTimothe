@@ -480,6 +480,44 @@ export async function updatePlanningDurations(writes) {
   await applyActions(actions);
 }
 
+// Reglages de lissage (Projets2.Lissage, texte JSON — cf. top/smoothingSettings.js).
+// Relit la table Projets2 a chaque appel (l'instantane du demarrage n'est jamais
+// reconstruit) et renvoie la ligne d'id demande, ou null si elle est absente.
+//
+// `fresh: true` contourne les DEUX caches du fetchTable patche par
+// shared/grist-service-context.js : celui des tables de contexte (30 s, chemin
+// REST) et celui des lectures brutes (45 s, chemin de repli : Projets2 est une
+// table d'acces). Ces caches ne sont vides que par NOS ecritures : sans cette
+// option, l'entree qu'un collegue vient d'enregistrer n'apparaitrait pas, et
+// l'ecriture suivante l'effacerait. Les options ne partent que vers la couche
+// partagee (cf. fetchTableRaw) ; l'API native et le mock les ignorent.
+export async function fetchProjectRow(projectId, { fresh = false } = {}) {
+  const id = toReferenceId(projectId);
+  if (!id) return null;
+  const rows = await fetchTableRows(
+    APP_CONFIG.grist.tables.projects,
+    fresh ? { forceRefresh: true, forceRawRefresh: true } : undefined
+  );
+  return rows.find((row) => Number(row.id) === id) || null;
+}
+
+// Ecrit la colonne Lissage de la ligne projet : UNE SEULE UpdateRecord, aucune
+// autre colonne. Un id invalide fait echouer la fonction avant tout appel.
+export async function updateProjectSmoothing(projectId, value) {
+  const id = toReferenceId(projectId);
+  if (!id || id < 1) {
+    throw new Error("Projet invalide : id manquant.");
+  }
+  await applyActions([
+    [
+      "UpdateRecord",
+      APP_CONFIG.grist.tables.projects,
+      id,
+      { [APP_CONFIG.grist.columns.projects.lissage]: String(value ?? "") },
+    ],
+  ]);
+}
+
 export async function removeTimeSegment(segmentId) {
   const normalizedId = toReferenceId(segmentId);
   if (!normalizedId) return;

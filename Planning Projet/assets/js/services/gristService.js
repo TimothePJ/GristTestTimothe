@@ -3050,12 +3050,17 @@ function buildProjectAvancementConfigsFromRows(rows = []) {
     projectName: toText(row?.[columns.project]),
     projectNumber: toText(row?.[columns.projectNumber]),
     avancementConfigRaw: row?.[columns.avancement],
+    modeRaw: row?.[columns.mode],
   }));
 }
 
-export async function fetchProjectBootstrapData() {
+export async function fetchProjectBootstrapData({ forceRefresh = false } = {}) {
   const table = APP_CONFIG.grist.projectsTable;
-  const rows = await fetchTableRows(table.sourceTable);
+  // Après une modification de Projets2 (le mode d'affichage par exemple), les caches du contexte
+  // partagé renverraient l'ancienne valeur : on les contourne.
+  const rows = forceRefresh
+    ? await fetchTableRows(table.sourceTable, { forceRefresh: true, forceRawRefresh: true })
+    : await fetchTableRows(table.sourceTable);
   return {
     projectOptions: buildProjectOptionsFromRows(rows),
     projectAvancementConfigs: buildProjectAvancementConfigsFromRows(rows),

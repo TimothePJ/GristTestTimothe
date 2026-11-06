@@ -34,8 +34,21 @@
 // Vider un champ ecrit "" (jamais 0, qui pour la cascade est une valeur
 // legitime a un autre niveau — cf. documentCharge.js) : "" rend la main au
 // niveau du dessus.
+//
+// CHARGE PAR METIER (2026-10-26) : chaque niveau a DEUX champs, Ingenieurs et
+// Projeteurs, ecrits ensemble dans la meme colonne au format « 2,5;3 »
+// (documentCharge.js, parseDurationPair / formatDurationPair). Chaque metier
+// herite separement du niveau au-dessus. Une edition ne touche que le metier
+// edite : l'autre part de chaque ligne visee est relue et gardee telle quelle.
 
-import { computeProjectCharge, isDocumentRow, resolveDocumentCharge } from "./documentCharge.js";
+import {
+  CHARGE_ROLES,
+  computeProjectCharge,
+  formatDurationPair,
+  isDocumentRow,
+  parseDurationPair,
+  resolveDocumentCharge,
+} from "./documentCharge.js";
 import { toText } from "../utils/dates.js";
 import { parseOptionalNumberInput } from "../utils/format.js";
 import {
@@ -50,24 +63,30 @@ import {
 
 // --- helpers purs (aucun DOM) -------------------------------------------------
 
-// Lecture BRUTE d'une duree a UN niveau precis (pas la cascade resolue) :
-// vide/nulle/negative/non-numerique -> null. Copie volontaire de la regle
-// privee `readDuration` de documentCharge.js (meme comportement, virgule
-// francaise comprise) : ce fichier ne doit pas etre modifie (cf. brief), et
-// cette regle n'y est pas exportee. Duplication d'une fonction de 5 lignes,
-// pas d'une logique metier — le seul cout d'un contrat prive.
-function readRawDuration(value) {
-  if (value == null || value === "") return null;
-  const numeric = typeof value === "number" ? value : Number(String(value).trim().replace(",", "."));
-  if (!Number.isFinite(numeric) || numeric <= 0) return null;
-  return numeric;
+// Paire vide : aucun metier n'a de valeur a ce niveau.
+const EMPTY_PAIR = Object.freeze({ ingenieurs: null, projeteurs: null });
+
+function hasPairValue(pair) {
+  return CHARGE_ROLES.some((role) => pair?.[role] != null);
 }
 
-function firstNonNull(values) {
-  for (const value of values) {
-    if (value != null) return value;
-  }
-  return null;
+// Premiere paire non vide d'une liste (lecture BRUTE d'un niveau, pas la
+// cascade), sinon la paire vide.
+function firstPair(pairs) {
+  return pairs.find(hasPairValue) || EMPTY_PAIR;
+}
+
+// Niveau affiche : sa propre paire, chaque metier vide reprenant la valeur du
+// niveau au-dessus (`parent`) -> { value, inherited } ; inherited dit, metier
+// par metier, si la valeur vient du dessus.
+function inheritPair(own, parent) {
+  const value = {};
+  const inherited = {};
+  CHARGE_ROLES.forEach((role) => {
+    inherited[role] = own?.[role] == null;
+    value[role] = inherited[role] ? parent?.[role] ?? null : own[role];
+  });
+  return { value, inherited };
 }
 
 // Meme regle que le `toText` prive et non exporte de documentCharge.js
@@ -95,6 +114,8 @@ function documentLabel(row, cols) {
 //   -> [{ typeDoc, value, divergent, divergentIds,
 //         zones: [{ zone, value, inherited, divergent, divergentIds,
 //                    documents: [{ id, id2, label, value, inherited }] }] }]
+// `value` est une paire { ingenieurs, projeteurs } (nombre ou null chacun) et
+// `inherited` une paire de booleens : chaque metier herite separement.
 //
 // Un noeud par type de document (ordre d'apparition dans `planningRows`), un
 // noeud par zone A L'INTERIEUR de ce type (meme ordre), une entree par
@@ -150,7 +171,7 @@ export function buildChargeTree(planningRows, columns) {
     // — la premiere suffit donc, pas besoin de refaire le calcul de majorite.
     const typeValue = typeDivergence
       ? typeDivergence.kept
-      : firstNonNull(docsOfType.map((doc) => readRawDuration(doc.row?.[cols.dureeProjet])));
+      : firstPair(docsOfType.map((doc) => parseDurationPair(doc.row?.[cols.dureeProjet])));
 
     const zoneOrder = [];
     const byZone = new Map();
@@ -167,25 +188,24 @@ export function buildChargeTree(planningRows, columns) {
       const zoneDivergence = zoneDivergenceByKey.get(`${typeDoc}|${zone}`) || null;
       const ownZoneValue = zoneDivergence
         ? zoneDivergence.kept
-        : firstNonNull(docsOfZone.map((doc) => readRawDuration(doc.row?.[cols.dureeZone])));
-      const zoneInherited = ownZoneValue == null;
-      const zoneValue = zoneInherited ? typeValue : ownZoneValue;
+        : firstPair(docsOfZone.map((doc) => parseDurationPair(doc.row?.[cols.dureeZone])));
+      const zoneShown = inheritPair(ownZoneValue, typeValue);
 
       const documentsOut = docsOfZone.map((doc) => {
-        const ownForce = readRawDuration(doc.row?.[cols.dureeForce]);
+        const ownForce = parseDurationPair(doc.row?.[cols.dureeForce]);
         return {
           id: doc.id,
           id2: doc.id2,
           label: doc.label,
           value: resolveDocumentCharge(doc.row, cols),
-          inherited: ownForce == null,
+          inherited: inheritPair(ownForce, EMPTY_PAIR).inherited,
         };
       });
 
       return {
         zone,
-        value: zoneValue,
-        inherited: zoneInherited,
+        value: zoneShown.value,
+        inherited: zoneShown.inherited,
         divergent: Boolean(zoneDivergence),
         divergentIds: zoneDivergence ? zoneDivergence.others.map((entry) => entry.id2) : [],
         documents: documentsOut,
@@ -206,12 +226,23 @@ export function buildChargeTree(planningRows, columns) {
 //
 // `tree` a la FORME de buildChargeTree, mais avec une semantique differente
 // pour `value` : ici, `value` dit ce qu'il faut ECRIRE, pas ce qu'il faut
-// AFFICHER.
-//   - `value == null` (jamais touche par l'utilisateur)   -> rien n'est ecrit
-//     a ce niveau.
-//   - `value === ""` (champ vide explicitement)            -> ecrit "" (rend
-//     la main au niveau du dessus).
-//   - `value` = un nombre                                  -> ecrit ce nombre.
+// AFFICHER. C'est un objet { ingenieurs?, projeteurs? } des seuls metiers
+// edites :
+//   - `value == null`, ou metier absent (jamais touche)    -> rien ne change
+//     pour ce metier a ce niveau ;
+//   - metier a "" (champ vide explicitement)               -> sa part est
+//     videe (rend la main au niveau du dessus) ;
+//   - metier a un nombre                                   -> sa part prend
+//     ce nombre.
+// Chaque ligne visee recoit sa paire actuelle a ce niveau, ou seuls les
+// metiers edites changent, reecrite au format « 2,5;3 » (formatDurationPair ;
+// "" si plus aucun metier n'a de valeur). Exception, aux niveaux type et zone :
+// une ligne visee dont l'AUTRE metier est vide a ce niveau (un document ajoute
+// apres la saisie, par exemple) le recoit avec la valeur que la fenetre affiche
+// pour ce niveau — sa valeur PROPRE, jamais une valeur heritee du dessus. Sans
+// cela, la fenetre creait elle-meme une divergence (« 4 » a cote de « 4;3 »),
+// que retaper la valeur affichee ne corrigeait pas. Une part deja remplie, meme
+// differente, est gardee telle quelle.
 // Le controleur DOM ne repasse donc QUE les niveaux reellement edites par
 // l'utilisateur, jamais l'arbre entier tel qu'affiche — sinon rouvrir la
 // fenetre et cliquer Enregistrer sans rien toucher re-ecrirait chaque ligne du
@@ -229,35 +260,79 @@ export function collectChargeWrites(tree, planningRows, columns) {
   const documents = rows
     .filter((row) => isDocumentRow(row, cols))
     .map((row) => ({
+      row,
       id: row?.[cols.id],
       typeDoc: joinKeyText(row?.[cols.typeDoc]),
       zone: joinKeyText(row?.[cols.zone]),
     }));
+  const rowById = new Map(documents.map((doc) => [doc.id, doc.row]));
+
+  // Valeurs PROPRES affichees par la fenetre pour chaque type et chaque zone
+  // (celles d'une zone sans les metiers qu'elle herite du type) : de quoi
+  // remplir l'autre metier d'une ligne qui ne l'a pas a ce niveau.
+  const shownByType = new Map();
+  const shownByZone = new Map();
+  buildChargeTree(rows, cols).forEach((typeNode) => {
+    shownByType.set(typeNode.typeDoc, typeNode.value);
+    typeNode.zones.forEach((zoneNode) => {
+      const own = {};
+      CHARGE_ROLES.forEach((role) => {
+        own[role] = zoneNode.inherited[role] ? null : zoneNode.value[role];
+      });
+      shownByZone.set(`${typeNode.typeDoc}|${zoneNode.zone}`, own);
+    });
+  });
+
+  // Metiers edites d'un niveau, ou null si aucun.
+  const editedRoles = (edits) =>
+    edits && typeof edits === "object"
+      ? CHARGE_ROLES.filter((role) => edits[role] !== null && edits[role] !== undefined)
+      : [];
+
+  // Texte a ecrire dans `column` pour `row` : sa paire actuelle, metiers edites
+  // remplaces ("" -> vide), autre metier vide rempli par `fill` s'il y en a un.
+  const nextCellValue = (row, column, edits, roles, fill) => {
+    const next = { ...parseDurationPair(row?.[column]) };
+    roles.forEach((role) => {
+      next[role] = edits[role] === "" ? null : edits[role];
+    });
+    CHARGE_ROLES.filter((role) => !roles.includes(role)).forEach((role) => {
+      if (next[role] == null && fill?.[role] != null) next[role] = fill[role];
+    });
+    return formatDurationPair(next);
+  };
 
   const writes = [];
+  const writeLevel = (targets, column, edits, fill = null) => {
+    const roles = editedRoles(edits);
+    if (!roles.length) return;
+    targets.forEach((doc) =>
+      writes.push({ recordId: doc.id, fields: { [column]: nextCellValue(doc.row, column, edits, roles, fill) } })
+    );
+  };
 
   (Array.isArray(tree) ? tree : []).forEach((typeNode) => {
     const typeDoc = joinKeyText(typeNode?.typeDoc);
 
-    if (typeNode?.value !== null && typeNode?.value !== undefined) {
-      documents
-        .filter((doc) => doc.typeDoc === typeDoc)
-        .forEach((doc) => writes.push({ recordId: doc.id, fields: { [cols.dureeProjet]: typeNode.value } }));
-    }
+    writeLevel(
+      documents.filter((doc) => doc.typeDoc === typeDoc),
+      cols.dureeProjet,
+      typeNode?.value,
+      shownByType.get(typeDoc)
+    );
 
     (Array.isArray(typeNode?.zones) ? typeNode.zones : []).forEach((zoneNode) => {
       const zone = joinKeyText(zoneNode?.zone);
 
-      if (zoneNode?.value !== null && zoneNode?.value !== undefined) {
-        documents
-          .filter((doc) => doc.typeDoc === typeDoc && doc.zone === zone)
-          .forEach((doc) => writes.push({ recordId: doc.id, fields: { [cols.dureeZone]: zoneNode.value } }));
-      }
+      writeLevel(
+        documents.filter((doc) => doc.typeDoc === typeDoc && doc.zone === zone),
+        cols.dureeZone,
+        zoneNode?.value,
+        shownByZone.get(`${typeDoc}|${zone}`)
+      );
 
       (Array.isArray(zoneNode?.documents) ? zoneNode.documents : []).forEach((docNode) => {
-        if (docNode?.value !== null && docNode?.value !== undefined) {
-          writes.push({ recordId: docNode.id, fields: { [cols.dureeForce]: docNode.value } });
-        }
+        writeLevel([{ id: docNode?.id, row: rowById.get(docNode?.id) }], cols.dureeForce, docNode?.value);
       });
     });
   });
@@ -308,15 +383,19 @@ function renderDivergenceBanner(label, node) {
   )}</p>`;
 }
 
-// Champ de saisie d'un niveau. `original` porte la valeur RENDUE (vide si
-// heritee) : c'est a elle que le controleur compare la saisie courante pour
-// decider si le champ a reellement ete touche (cf. handleFieldChange) — sans
-// ca, un champ herite jamais ouvert par l'utilisateur ecrirait quand meme "".
-function renderField({ scope, typeDoc, zone, docId, value, inherited }) {
+// Libelles des metiers, dans l'ordre des champs (celui de la cellule).
+const ROLE_LABELS = { ingenieurs: "Ingénieurs", projeteurs: "Projeteurs" };
+
+// Champ de saisie d'un metier a un niveau. `original` porte la valeur RENDUE
+// (vide si heritee) : c'est a elle que le controleur compare la saisie courante
+// pour decider si le champ a reellement ete touche (cf. handleFieldChange) —
+// sans ca, un champ herite jamais ouvert par l'utilisateur ecrirait quand meme "".
+function renderField({ scope, typeDoc, zone, docId, role, value, inherited }) {
   const shown = inherited ? "" : formatChargeValue(value);
   const placeholder = inherited && value != null ? `${formatChargeValue(value)} (herite)` : "—";
   const dataAttrs = [
     `data-scope="${escapeHtml(scope)}"`,
+    `data-role="${escapeHtml(role)}"`,
     typeDoc != null ? `data-type-doc="${escapeHtml(typeDoc)}"` : "",
     zone != null ? `data-zone="${escapeHtml(zone)}"` : "",
     docId != null ? `data-doc-id="${escapeHtml(String(docId))}"` : "",
@@ -331,7 +410,35 @@ function renderField({ scope, typeDoc, zone, docId, value, inherited }) {
       data-original="${escapeHtml(shown)}"
       value="${escapeHtml(shown)}"
       placeholder="${escapeHtml(placeholder)}"
+      aria-label="${escapeHtml(ROLE_LABELS[role])}"
     >
+  `;
+}
+
+// Les deux champs d'un niveau (« Duree_Projet », « Duree_Zone » ou
+// « Duree_Force ») : Ingenieurs puis Projeteurs. `value` et `inherited` sont
+// des paires ; `inherited` absent = aucun metier n'herite (niveau type).
+function renderLevelFields(level, { scope, typeDoc, zone, docId, value, inherited }) {
+  const roleFields = CHARGE_ROLES.map(
+    (role) => `
+      <label class="ps-charge-assign-role">
+        <span class="ps-charge-assign-role-name">${escapeHtml(ROLE_LABELS[role])}</span>
+        ${renderField({
+          scope,
+          typeDoc,
+          zone,
+          docId,
+          role,
+          value: value?.[role] ?? null,
+          inherited: Boolean(inherited?.[role]),
+        })}
+      </label>`
+  ).join("");
+  return `
+    <div class="ps-charge-assign-field">
+      <span class="ps-charge-assign-level">${escapeHtml(level)}</span>
+      ${roleFields}
+    </div>
   `;
 }
 
@@ -339,10 +446,12 @@ function renderDocumentRow(doc) {
   return `
     <div class="ps-charge-assign-document">
       <span class="ps-charge-assign-document-label">${escapeHtml(doc.label || doc.id2)}</span>
-      <label class="ps-charge-assign-field">
-        <span>Duree_Force</span>
-        ${renderField({ scope: "document", docId: doc.id, value: doc.value, inherited: doc.inherited })}
-      </label>
+      ${renderLevelFields("Duree_Force", {
+        scope: "document",
+        docId: doc.id,
+        value: doc.value,
+        inherited: doc.inherited,
+      })}
     </div>
   `;
 }
@@ -352,16 +461,13 @@ function renderZoneBlock(typeDoc, zoneNode) {
     <div class="ps-charge-assign-zone">
       <div class="ps-charge-assign-zone-head">
         <span class="ps-charge-assign-zone-name">${escapeHtml(zoneNode.zone)}</span>
-        <label class="ps-charge-assign-field">
-          <span>Duree_Zone</span>
-          ${renderField({
-            scope: "zone",
-            typeDoc,
-            zone: zoneNode.zone,
-            value: zoneNode.value,
-            inherited: zoneNode.inherited,
-          })}
-        </label>
+        ${renderLevelFields("Duree_Zone", {
+          scope: "zone",
+          typeDoc,
+          zone: zoneNode.zone,
+          value: zoneNode.value,
+          inherited: zoneNode.inherited,
+        })}
       </div>
       ${renderDivergenceBanner(zoneNode.zone, zoneNode)}
       <details class="ps-charge-assign-disclosure">
@@ -379,15 +485,11 @@ function renderTypeBlock(typeNode) {
     <div class="ps-charge-assign-type">
       <div class="ps-charge-assign-type-head">
         <span class="ps-charge-assign-type-name">${escapeHtml(typeNode.typeDoc)}</span>
-        <label class="ps-charge-assign-field">
-          <span>Duree_Projet</span>
-          ${renderField({
-            scope: "type",
-            typeDoc: typeNode.typeDoc,
-            value: typeNode.value,
-            inherited: false,
-          })}
-        </label>
+        ${renderLevelFields("Duree_Projet", {
+          scope: "type",
+          typeDoc: typeNode.typeDoc,
+          value: typeNode.value,
+        })}
       </div>
       ${renderDivergenceBanner(typeNode.typeDoc, typeNode)}
       <details class="ps-charge-assign-disclosure">
@@ -504,26 +606,31 @@ export function createChargeAssignModal(rootEl, { onSubmit, stallTimeoutMs } = {
     return `${typeDoc}|${zone}`;
   }
 
-  function rememberEdit(target, value) {
+  // Map et cle d'un champ selon son niveau ; chaque entree est un objet
+  // { ingenieurs?, projeteurs? } des seuls metiers edites a ce niveau.
+  function editSlot(target) {
     const scope = target.dataset.scope;
-    if (scope === "type") {
-      editsByType.set(target.dataset.typeDoc, value);
-    } else if (scope === "zone") {
-      editsByZone.set(zoneKey(target.dataset.typeDoc, target.dataset.zone), value);
-    } else if (scope === "document") {
-      editsByDoc.set(target.dataset.docId, value);
-    }
+    if (scope === "type") return [editsByType, target.dataset.typeDoc];
+    if (scope === "zone") return [editsByZone, zoneKey(target.dataset.typeDoc, target.dataset.zone)];
+    if (scope === "document") return [editsByDoc, target.dataset.docId];
+    return [null, null];
+  }
+
+  function rememberEdit(target, value) {
+    const role = target.dataset.role;
+    const [edits, key] = editSlot(target);
+    if (!edits || !CHARGE_ROLES.includes(role)) return;
+    edits.set(key, { ...(edits.get(key) || {}), [role]: value });
   }
 
   function forgetEdit(target) {
-    const scope = target.dataset.scope;
-    if (scope === "type") {
-      editsByType.delete(target.dataset.typeDoc);
-    } else if (scope === "zone") {
-      editsByZone.delete(zoneKey(target.dataset.typeDoc, target.dataset.zone));
-    } else if (scope === "document") {
-      editsByDoc.delete(target.dataset.docId);
-    }
+    const role = target.dataset.role;
+    const [edits, key] = editSlot(target);
+    if (!edits || !edits.has(key)) return;
+    const next = { ...edits.get(key) };
+    delete next[role];
+    if (Object.keys(next).length) edits.set(key, next);
+    else edits.delete(key);
   }
 
   function hasPendingEdits() {

@@ -11,6 +11,7 @@ import {
   buildTaskFields,
   dateFieldsOf,
   findGroup,
+  floorLayoutZoneSuffix,
   resolveDropTarget,
 } from "./syntheseTaskModel.js";
 import { cascadeFrom, computeLinkedDates, formatLink } from "./syntheseLinks.js";
@@ -175,8 +176,19 @@ export function groupBeforeSlot(place, line) {
 // ligne, comme avant. Avec : sur une tâche, une place avant ou après elle dans son conteneur (rien
 // sur la tâche glissée elle-même) ; sur la moitié haute d'une ligne de cycle, la place avant ce
 // cycle, dans son conteneur ; sur une ligne de zone, d'étage ou de groupe (moitié basse), la fin de
-// ce conteneur.
-export function resolveDropSlot(line, side, { canOrder = false, draggedTaskId = null } = {}) {
+// ce conteneur. En affichage par étage, les cycles et tâches d'un étage portent les mêmes noms dans
+// chaque zone (modèle) : avec `draggedZoneKey` (zone de la tâche glissée), la légende d'une place
+// dans un cycle ou près d'une tâche d'une autre zone finit par cette zone. Les légendes d'étage et
+// de zone la nomment déjà ; affichage par zone : inchangées.
+export function resolveDropSlot(line, side, { canOrder = false, draggedTaskId = null, draggedZoneKey = null } = {}) {
+  const slot = dropSlotOf(line, side, canOrder, draggedTaskId);
+  if (!slot || draggedZoneKey === null || slot.zoneKey === draggedZoneKey) return slot;
+  if (slot.key.startsWith("zone:") || slot.key.startsWith("floor:")) return slot;
+  const suffix = floorLayoutZoneSuffix(line);
+  return suffix ? { ...slot, label: `${slot.label}${suffix}` } : slot;
+}
+
+function dropSlotOf(line, side, canOrder, draggedTaskId) {
   const target = resolveDropTarget(line);
   if (!target || !canOrder) return target;
   if (line.kind === "task") {
@@ -187,7 +199,8 @@ export function resolveDropSlot(line, side, { canOrder = false, draggedTaskId = 
   if (line.kind === "zone") {
     return { ...target, label: `Déplacer à la fin du niveau de la zone « ${line.zoneName || NO_ZONE_LABEL} »` };
   }
-  return { ...target, label: `Déplacer à la fin de « ${line.kind === "group" ? line.groupLabel : line.floorName} »` };
+  const suffix = line.kind === "group" ? "" : floorLayoutZoneSuffix(line);
+  return { ...target, label: `Déplacer à la fin de « ${line.kind === "group" ? line.groupLabel : line.floorName} »${suffix}` };
 }
 
 /* ---------- Chaînage automatique ---------- */

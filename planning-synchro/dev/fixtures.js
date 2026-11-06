@@ -92,7 +92,12 @@ const HOMONYM_ROWS = [
 
 export const FIXTURE_TABLES = {
   Projets2: [
-    { id: 1, Nom_de_projet: "ERA QUAI D'ORSAY", Numero_de_projet: "252035", Avancement: '[{"typeDocument":"COFFRAGE","indice":"B"},{"typeDocument":"ARMATURES","indice":"0"}]' },
+    // TEST LISSAGE : maximum general de 1 tache par mois pour le service
+    // Structure (celui du mock, dev/mock-grist.js). Mars 2027 (coffrage + NDC) et
+    // avril 2027 (armature + coffrage) portent 2 taches chacun : le lissage avance
+    // 3 taches (janvier, fevrier, mars) et laisse 1 tache par mois — l'ecart est
+    // net en mode « Les deux » de la vue Graphique.
+    { id: 1, Nom_de_projet: "ERA QUAI D'ORSAY", Numero_de_projet: "252035", Avancement: '[{"typeDocument":"COFFRAGE","indice":"B"},{"typeDocument":"ARMATURES","indice":"0"}]', Lissage: '{"version":1,"services":{"Structure":{"maxTotal":1,"maxParType":{}}}}' },
     { id: 2, Nom_de_projet: "HOTEL DIEU", Numero_de_projet: "12345" }, // no TimeSegment -> empty-state demo
     { id: 3, Nom_de_projet: "TEST SCROLL 20 TACHES", Numero_de_projet: MANY_TASK_NUMBER }, // >16 tasks -> scroll demo
     { id: 4, Nom_de_projet: "TEST ZONES HOMONYMES", Numero_de_projet: HOMONYM_NUMBER }, // homonym tasks across zones

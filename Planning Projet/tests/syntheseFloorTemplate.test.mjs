@@ -6,6 +6,7 @@ import {
   buildBulkAddAction,
   buildFloorFromTemplate,
   buildTemplateLinks,
+  buildZoneAnchorRow,
 } from "../assets/js/services/syntheseFloorTemplate.js";
 import { cascadeFrom, parseLink } from "../assets/js/services/syntheseLinks.js";
 import { CAPTURE_DAYS, isTemplateTask } from "./helpers/templateRows.mjs";
@@ -164,4 +165,33 @@ test("le modèle avec les durées de la capture : premier jalon au 02/01/26, SIG
   assert.equal(iso(byId.get(224).start), "2026-02-23");
   assert.equal(iso(byId.get(225).start), "2026-03-02");
   assert.equal(iso(byId.get(226).start), "2026-03-02");
+});
+
+// --- Ligne vide qui garde une zone créée depuis la fenêtre « Ajouter un étage… » ---
+
+test("buildZoneAnchorRow : mêmes colonnes que les lignes du modèle, sans nom, ni groupe, ni étage", () => {
+  const anchor = buildZoneAnchorRow({ zoneName: "  Zone 4 ", projectName: " HOTEL DIEU " });
+  const [templateRow] = buildFloorFromTemplate({ floorName: "R+1", zoneName: "Zone 1", projectName: "HOTEL DIEU" });
+  assert.deepEqual(Object.keys(anchor).sort(), Object.keys(templateRow).sort());
+  assert.deepEqual(anchor, {
+    Taches: "", Zone: "Zone 4", Groupe: "", Etage: false, NomProjet: "HOTEL DIEU", Nature: "", Duree_1: 0,
+  });
+  assert.deepEqual(buildZoneAnchorRow(), {
+    Taches: "", Zone: "", Groupe: "", Etage: false, NomProjet: "", Nature: "", Duree_1: 0,
+  });
+});
+
+test("buildBulkAddAction avec la ligne vide en fin : aucune colonne à null", () => {
+  const rows = [
+    ...buildFloorFromTemplate({ floorName: "R+1", zoneName: "Zone 1", projectName: "P" }),
+    buildZoneAnchorRow({ zoneName: "Zone 4", projectName: "P" }),
+  ];
+  const action = buildBulkAddAction(rows);
+  assert.equal(action[2].length, 27);
+  Object.values(action[3]).forEach((column) => {
+    assert.equal(column.length, 27);
+    assert.equal(column.includes(null), false);
+  });
+  assert.equal(action[3].Taches[26], "");
+  assert.equal(action[3].Zone[26], "Zone 4");
 });

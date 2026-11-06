@@ -9,6 +9,7 @@ export const APP_CONFIG = {
         project: "Nom_de_projet",
         projectNumber: "Numero_de_projet",
         avancement: "Avancement",
+        mode: "Mode",
       },
     },
 

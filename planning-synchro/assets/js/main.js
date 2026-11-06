@@ -17,9 +17,23 @@
 // TWO arguments, a pre-formatted "DD/MM/YYYY - DD/MM/YYYY" label string
 // first, the full canonical viewport second. This file adapts to that real
 // signature (uses the ready-made label directly instead of re-formatting).
+//
+// Lissage des taches (spec 2026-10-23) : le controleur du lissage
+// (top/smoothingController.js) est cree UNE SEULE FOIS ici, hors du cycle par
+// projet, pour que ses deux fenetres survivent au rechargement du meme projet.
+// loadProject() lui remet a chaque chargement les taches du graphique
+// (top/taskLoadModel.js, datees comme les barres du planning) et la ligne
+// Projets2 relue (colonne Lissage) ; le graphique trace ce qu'il renvoie.
 
 import { APP_CONFIG } from "./config.js";
-import { initGrist, fetchTableRows, fetchProjectData, updatePlanningDurations } from "./services/gristService.js";
+import {
+  initGrist,
+  fetchTableRows,
+  fetchProjectData,
+  fetchProjectRow,
+  updatePlanningDurations,
+  updateProjectSmoothing,
+} from "./services/gristService.js";
 import {
   buildRegistry,
   resolveProjectNameByNumber,
@@ -31,6 +45,8 @@ import { getFirstPhaseDate, computePlanningPhaseBounds, buildPlanningTaskRanges 
 import { computeTimeSegmentBounds } from "./top/bounds.js";
 import { createPlanningRenderer } from "./top/planningRenderer.js";
 import { createPlanningChart } from "./top/planningChart.js";
+import { buildChartTasks } from "./top/taskLoadModel.js";
+import { createSmoothingController } from "./top/smoothingController.js";
 import { createChargeBoard, buildWorkersFromSegments } from "./bottom/chargeBoard.js";
 import {
   unionDateBounds,
@@ -223,6 +239,13 @@ function bootstrapApp() {
     chartFilter: document.getElementById("ps-chart-filter"),
     chartGranularity: document.getElementById("ps-chart-granularity"),
     chartLegend: document.getElementById("ps-chart-legend"),
+    // Lissage : en-tete du graphique (groupe « Afficher » + bouton « Lisser… »)
+    // et ses deux fenetres.
+    chartSmoothing: document.getElementById("ps-chart-smoothing"),
+    chartDisplay: document.getElementById("ps-chart-display"),
+    smoothingOpen: document.getElementById("ps-smoothing-open"),
+    smoothingModal: document.getElementById("ps-smoothing-modal"),
+    monthTasksModal: document.getElementById("ps-month-tasks-modal"),
   };
 
   if (!(els.select instanceof HTMLElement)) {
@@ -256,6 +279,11 @@ function bootstrapApp() {
   // projet n'est charge — le signal retombe alors sur le rechargement complet.
   let refreshChargeOnly = null;
 
+  // Elargissement de la frise aux mois lisses, publie par loadProject() une fois
+  // son controleur cree ; appele par le lissage (onChange) apres un
+  // enregistrement ou un signal Projets2. Null tant qu'aucun projet n'est charge.
+  let widenBoundsForSmoothing = null;
+
   // Empreinte du catalogue projets tel que ce widget l'affiche, posee par
   // bootstrap() puis remise a jour a chaque changement REEL. Elle sert a
   // distinguer une ecriture de colonne de signal sur Projets2 (rien n'a bouge)
@@ -268,9 +296,15 @@ function bootstrapApp() {
   // directly, independent of how the timeline is grouped).
   let topView = "planning";
   let lastTopPaneHeightPx = 0;
-  // Planning rows/columns kept for the chart (same data the timeline renders).
-  let chartRows = [];
-  let chartColumns = null;
+  // Taches du graphique du projet charge (buildChartTasks : une tache = une barre
+  // principale du planning, datee comme elle). Le graphique lui-meme les recoit
+  // du controleur du lissage (smoothing.getChartInput) ; ce tableau ne sert qu'a
+  // savoir s'il y a quelque chose a tracer (updateViewSwitchVisibility).
+  let chartTasks = [];
+  // Contexte du dernier chargement : `${selectionKeyFor(project)}|${service}`.
+  // Meme contexte au chargement suivant (un collegue a modifie le planning) : on
+  // garde la vue, le filtre et le regroupement du graphique (spec §6.5).
+  let chartContextKey = "";
 
   // Session-scoped visible-rows target for the top pane's splitter: kept here
   // (not per-project, not persisted to localStorage) so a height chosen on one
@@ -296,6 +330,38 @@ function bootstrapApp() {
     }
     return realisationTargetLookup;
   }
+
+  // Service affiche (Structure, Synthese...) ; "" hors du contexte partage.
+  function currentService() {
+    return window.GristServiceContext?.getService?.() || "";
+  }
+
+  // Controleur du lissage : cree UNE SEULE FOIS (pas dans loadProject) pour que
+  // les fenetres « Lissage » et « Taches du mois » survivent au rechargement du
+  // meme projet. Il ecrit lui-meme la colonne Projets2.Lissage (relue juste
+  // avant), puis appelle onChange : le graphique est alors redessine sur place
+  // s'il est affiche, sinon il le sera au prochain applyTopView().
+  const smoothing = createSmoothingController({
+    els: {
+      displayGroup: els.chartDisplay,
+      openButton: els.smoothingOpen,
+      smoothingModalEl: els.smoothingModal,
+      monthTasksModalEl: els.monthTasksModal,
+    },
+    saveCell: updateProjectSmoothing,
+    // Relecture FRAICHE juste avant d'ecrire : le cache de la couche partagee
+    // ne verrait pas l'entree qu'un collegue vient d'enregistrer.
+    loadProjectRow: (projectId) => fetchProjectRow(projectId, { fresh: true }),
+    getService: currentService,
+    isReadOnly: () => Boolean(window.GristServiceContext?.isReadOnly?.()),
+    todayIso: todayIsoDate,
+    onChange: () => {
+      // La frise d'abord : le graphique redessine ensuite sur des bornes qui
+      // couvrent deja les mois lisses.
+      if (widenBoundsForSmoothing) widenBoundsForSmoothing();
+      if (topView === "chart" && planningChart) planningChart.setChartInput(smoothing.getChartInput());
+    },
+  });
 
   function teardown() {
     if (chargeAssignModal) {
@@ -354,14 +420,21 @@ function bootstrapApp() {
     // tant que celui-ci n est pas remplace, un signal TimeSegment partirait relire
     // l ancien numero et son resultat serait jete par `seq !== loadSeq` — l ecriture
     // externe serait perdue. Pendant un chargement, le signal doit retomber sur le
-    // chemin complet ; loadProject republiera le sien a la fin.
+    // chemin complet ; loadProject republiera le sien a la fin. Meme chose pour
+    // l'elargissement de la frise au lissage : il viserait l'ancienne frise.
     refreshChargeOnly = null;
+    widenBoundsForSmoothing = null;
 
     state.selectedProject = project || null;
 
     if (!project) {
       teardown();
       currentPlanningRows = [];
+      // Plus de projet : le lissage oublie tout (fenetres fermees, bouton grise),
+      // et le prochain projet arrivera sur la vue Planning.
+      chartTasks = [];
+      chartContextKey = "";
+      smoothing.clear();
       els.empty.hidden = false;
       els.main.hidden = true;
       return;
@@ -372,12 +445,25 @@ function bootstrapApp() {
     // ramènerait le défilement à zéro (écran blanc entre-temps). On garde
     // l'affichage précédent et on ne démonte qu'au moment de reconstruire.
 
+    // La ligne Projets2 du projet est relue EN MEME TEMPS que ses donnees : la
+    // cellule Lissage n'est jamais prise dans l'instantane du demarrage (spec
+    // §5.2), sinon le lissage enregistre par un collegue n'apparaitrait jamais ;
+    // et elle est relue FRAICHE, hors du cache de la couche partagee, pour la
+    // meme raison. Un echec n'empeche pas le chargement : la ligne vaut alors
+    // null (« lecture impossible »), et le controleur garde ce qu'il savait de
+    // la cellule (meme projet, meme service) ou grise le bouton « Lisser… ».
+    const projectRowRequest = fetchProjectRow(project.id, { fresh: true }).catch((error) => {
+      console.warn("Lissage : lecture de la ligne Projets2 impossible.", error);
+      return null;
+    });
+
     let data = { planningRows: [], timeSegmentRows: [], projectTeamRows: [], teamRows: [], timeOutRows: [] };
     try {
       data = await fetchProjectData({ name: project.name, number: project.number });
     } catch (error) {
       console.error("Erreur chargement des donnees du projet :", error);
     }
+    const projectRow = await projectRowRequest;
 
     if (seq !== loadSeq) return; // superseded by a newer project switch
 
@@ -428,6 +514,22 @@ function bootstrapApp() {
     const planBounds = computePlanningPhaseBounds(planningRows, project.name);
     if (seq !== loadSeq) return; // superseded while awaiting References2
 
+    // Taches du graphique et du lissage : prises dans la sortie du constructeur
+    // vendorise, donc datees et marquees realisees EXACTEMENT comme les barres
+    // que dessine le pane haut (spec §3.2), et plus sur les colonnes brutes.
+    const nextChartTasks = buildChartTasks(planningRows, {
+      project: project.name,
+      targetLookup: getRealisationTargetLookup(),
+    });
+
+    // Meme projet ET meme service qu'au chargement precedent (un collegue a
+    // modifie le planning, une autre ecriture a tout relu) : l'utilisateur garde
+    // sa vue, son filtre et son regroupement (spec §6.5). L'etat du graphique est
+    // lu AVANT teardown(), qui le detruit.
+    const contextKey = `${selectionKeyFor(project)}|${currentService()}`;
+    const sameContext = contextKey === chartContextKey;
+    const chartUiState = sameContext && planningChart ? planningChart.getUiState() : null;
+
     // Démontage juste avant la reconstruction : tout ce qui suit est synchrone,
     // l'ancien affichage est donc remplacé sans passer par un écran vide.
     teardown();
@@ -437,13 +539,23 @@ function bootstrapApp() {
       els.chartCanvas,
       els.chartFilter,
       els.chartGranularity,
-      els.chartLegend
+      els.chartLegend,
+      {
+        initialUiState: chartUiState,
+        // Clic (sans glisser) sur un mois / une semaine : liste de ses taches.
+        onBucketClick: (bucket) => smoothing.openMonthTasks(bucket),
+      }
     );
-    // Keep the planning data for the chart view; always arrive on the planning
-    // (timeline) view, scrolled to the first rows (see scrollToTop below).
-    chartRows = planningRows;
-    chartColumns = pc.planningProject;
-    topView = "planning";
+    chartTasks = nextChartTasks;
+    chartContextKey = contextKey;
+    // Nouveau projet ou nouveau service : on arrive sur la vue Planning, comme
+    // toujours. Meme contexte : la vue en cours est gardee, sauf s'il n'y a plus
+    // rien a tracer (le selecteur Planning / Graphique va disparaitre).
+    if (!sameContext || chartTasks.length === 0) topView = "planning";
+    // Avant applyTopView() : le graphique trace ce que le lissage renvoie. Un
+    // changement de contexte ferme ses fenetres ; le meme contexte les garde
+    // ouvertes et les rafraichit.
+    smoothing.setProjectData({ contextKey, project, tasks: chartTasks, projectRow });
 
     const aggregate = Boolean(els.aggregateToggle && els.aggregateToggle.checked);
     planningRenderer.render({
@@ -479,15 +591,21 @@ function bootstrapApp() {
     els.charge.hidden = !paneVisibility.showBoard;
     els.chargeEmpty.hidden = !paneVisibility.showEmptyMessage;
 
-    // Bornes de la frise : l'union du previsionnel et des phases du planning.
-    // Sans ni l'un ni l'autre, une fenetre large autour d'aujourd'hui — sinon les
-    // bornes se refermaient sur le mois par defaut lui-meme, un seul mois
-    // atteignable et aucun pan possible pour en sortir.
-    controllerBounds = resolveChargeBounds({
-      segmentBounds: bounds,
-      planBounds,
-      todayIso: todayIsoDate(),
-    });
+    // Bornes de la frise : l'union du previsionnel (pane bas : un segment plus tot
+    // que la premiere tache ouvre la frise jusqu'a lui) et des phases du
+    // planning. Sans ni l'un ni l'autre, une fenetre large autour d'aujourd'hui —
+    // sinon les bornes se refermaient sur le mois par defaut lui-meme, un seul
+    // mois atteignable et aucun pan possible pour en sortir. S'y ajoutent les
+    // mois des taches lissees (setProjectData plus haut) : un mois de depart
+    // passe peut les avancer bien avant le planning.
+    controllerBounds = unionDateBounds(
+      resolveChargeBounds({
+        segmentBounds: bounds,
+        planBounds,
+        todayIso: todayIsoDate(),
+      }),
+      smoothing.getSmoothedBounds()
+    );
 
     const initialViewport = buildInitialProjectViewport({
       // Ancre GARANTIE dans les bornes : `firstPlanningDate` vient de
@@ -598,9 +716,10 @@ function bootstrapApp() {
     controller.setViewport(viewport);
     topPaneResizer.refresh();
 
-    // Arrive on the planning view, at the FIRST rows (not wherever the previous
-    // project was scrolled), and show/hide the Planning/Graphique switch to match
-    // the current aggregate state.
+    // Timeline at its FIRST rows (not wherever the previous project was
+    // scrolled); show the Planning/Graphique switch only when there are tasks to
+    // plot, then show the view chosen above (planning, or the chart kept for the
+    // same project and service).
     planningRenderer.scrollToTop();
     updateViewSwitchVisibility();
     applyTopView();
@@ -728,10 +847,11 @@ function bootstrapApp() {
 
       // Seules les durees ont bouge : la ligne Charge est la seule concernee. On
       // recopie les trois colonnes dans les objets-ligne DEJA en memoire plutot
-      // que de remplacer le tableau — `currentPlanningRows` (bouton delegue),
-      // `chartRows` (vue graphique) et le `planningRows` passe au board tiennent
-      // tous CETTE meme reference, et handleChargeAssignSubmit mute de la meme
-      // facon. Les remplacer ici les laisserait pointer sur l'instantane d'avant.
+      // que de remplacer le tableau — `currentPlanningRows` (bouton delegue) et
+      // le `planningRows` passe au board tiennent tous deux CETTE meme reference,
+      // et handleChargeAssignSubmit mute de la meme facon. Les remplacer ici les
+      // laisserait pointer sur l'instantane d'avant. Les taches du graphique
+      // (chartTasks) ne lisent aucune colonne de duree : rien a recalculer.
       const planningDurationsChanged =
         planningRowsSignature(nextPlanningRows, chargeColumns, true) !==
         planningRowsSignature(planningRows, chargeColumns, true);
@@ -771,6 +891,23 @@ function bootstrapApp() {
     // Publie pour le relais : un changement qui ne touche que TimeSegment se
     // rafraichit ainsi, sans repasser par loadProject().
     refreshChargeOnly = reloadChargeFromGrist;
+
+    // Publie pour le lissage : des taches lissees avant les bornes actuelles (mois
+    // de depart passe) doivent rester atteignables, la frise s'ELARGIT pour les
+    // couvrir. Jamais l'inverse, comme pour un segment cree hors de la frise : le
+    // prochain chargement repart des donnees.
+    widenBoundsForSmoothing = () => {
+      const widenedBounds = unionDateBounds(controllerBounds, smoothing.getSmoothedBounds());
+      if (
+        widenedBounds &&
+        controllerBounds &&
+        (widenedBounds.startDate !== controllerBounds.startDate ||
+          widenedBounds.endDate !== controllerBounds.endDate)
+      ) {
+        controllerBounds = widenedBounds;
+        controller.setBounds(widenedBounds);
+      }
+    };
 
     editing = attachChargeEditing(els.charge, {
       getProjectNumber: () => project.number,
@@ -843,7 +980,8 @@ function bootstrapApp() {
     // Les
     // objets-ligne de `planningRows` sont donc mutes EN PLACE (pas le tableau
     // qui les contient) : c'est cette meme reference que `currentPlanningRows`
-    // et `chartRows` retiennent deja, nul besoin de la republier ailleurs.
+    // retient deja, nul besoin de la republier ailleurs (les taches du graphique
+    // ne dependent pas des colonnes de duree).
     // Une ligne absente de `planningRows` (jamais le cas en pratique, la
     // fenetre construit ses ecritures a partir de ces memes lignes) est
     // ignoree plutot que de planter le rendu.
@@ -962,6 +1100,12 @@ function bootstrapApp() {
       return true;
     }
 
+    // Projets2 vient d'etre relue : si la cellule Lissage du projet affiche a
+    // change (un collegue a enregistre un lissage, spec §5.4), le graphique est
+    // redessine sur place. Sinon rien : surtout PAS de rechargement complet, ce
+    // signal suit chacune de nos propres ecritures.
+    smoothing.refreshFromProjectRows(projectRows);
+
     const signature = projectRegistrySignature(
       buildRegistry(projectRows, APP_CONFIG.grist.columns.projects)
     );
@@ -1025,11 +1169,12 @@ function bootstrapApp() {
     controller.setViewport(controller.getViewport());
   }
 
-  // Show the Planning/Graphique switch whenever the project has planning data —
-  // independent of the aggregate toggle (the chart is always available).
+  // Show the Planning/Graphique switch whenever the project has tasks to plot
+  // (chartTasks : rows the planning actually draws) — independent of the
+  // aggregate toggle (the chart is always available).
   function updateViewSwitchVisibility() {
     if (!(els.viewSwitch instanceof HTMLElement)) return;
-    els.viewSwitch.hidden = !(Array.isArray(chartRows) && chartRows.length > 0);
+    els.viewSwitch.hidden = !(Array.isArray(chartTasks) && chartTasks.length > 0);
   }
 
   function setTopView(view) {
@@ -1049,6 +1194,9 @@ function bootstrapApp() {
     if (els.chart instanceof HTMLElement) els.chart.hidden = !chartActive;
     if (els.chartFilter instanceof HTMLElement) els.chartFilter.hidden = !chartActive;
     if (els.chartGranularity instanceof HTMLElement) els.chartGranularity.hidden = !chartActive;
+    // « Afficher » + « Lisser… » : vue Graphique seulement. Le groupe « Afficher »
+    // lui-meme n'apparait que si un lissage est defini (gere par le controleur).
+    if (els.chartSmoothing instanceof HTMLElement) els.chartSmoothing.hidden = !chartActive;
 
     if (els.viewSwitch instanceof HTMLElement) {
       els.viewSwitch.querySelectorAll("[data-ps-view]").forEach((button) => {
@@ -1061,9 +1209,9 @@ function bootstrapApp() {
     if (chartActive && planningChart && controller) {
       const heightPx = lastTopPaneHeightPx || (els.planning ? els.planning.offsetHeight : 0) || 320;
       planningChart.setHeight(heightPx);
+      // Taches lissees ou non, et mode d'affichage : c'est le lissage qui decide.
       planningChart.render({
-        rows: chartRows,
-        columns: chartColumns,
+        chartInput: smoothing.getChartInput(),
         viewport: controller.getViewport(),
       });
     } else if (!chartActive && topPaneResizer) {

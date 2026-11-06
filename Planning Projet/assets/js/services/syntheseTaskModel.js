@@ -578,11 +578,13 @@ export function buildFloorDeleteActions(floor) {
   return ids.length ? [["BulkRemoveRecord", PLANNING_TABLE, ids]] : [];
 }
 
-export function buildFloorDeleteQuestion(floor) {
+// `zoneLabel` (affichage par étage) précise la zone : « de « Zone 1 » » ; absent, rien ne change.
+export function buildFloorDeleteQuestion(floor, { zoneLabel = "" } = {}) {
   const count = (floor?.tasks || []).length;
-  if (!count) return `Supprimer l'étage « ${floor.name} » ?`;
-  if (count === 1) return `Supprimer l'étage « ${floor.name} » et sa tâche ?`;
-  return `Supprimer l'étage « ${floor.name} » et ses ${count} tâches ?`;
+  const where = zoneLabel ? ` de « ${zoneLabel} »` : "";
+  if (!count) return `Supprimer l'étage « ${floor.name} »${where} ?`;
+  if (count === 1) return `Supprimer l'étage « ${floor.name} »${where} et sa tâche ?`;
+  return `Supprimer l'étage « ${floor.name} »${where} et ses ${count} tâches ?`;
 }
 
 // Nom d'un cycle ou d'un sous-groupe : obligatoire, limité comme un nom de tâche ; les
@@ -635,6 +637,11 @@ export function containerKeyOf(line) {
   return line?.floorKey ? `floor:${line.zoneKey}/${line.floorKey}` : `zone:${line?.zoneKey ?? ""}`;
 }
 
+// En mode étage, un étage se répète par zone : le libellé de la cible nomme aussi la zone.
+export function floorLayoutZoneSuffix(line) {
+  return line?.layout === "floor" ? ` (« ${line.zoneName || NO_ZONE_LABEL} »)` : "";
+}
+
 // Cible d'un dépôt d'après la ligne visée : ligne de groupe ou tâche d'un groupe → ce groupe ;
 // ligne d'étage ou tâche directe d'un étage → cet étage ; ligne de zone ou tâche du niveau
 // zone → niveau zone de cette zone.
@@ -658,7 +665,7 @@ export function resolveDropTarget(line) {
       zoneName: line.zoneName,
       floorKey: line.floorKey,
       floorName: line.floorName,
-      label: `Déplacer dans « ${line.floorName} »`,
+      label: `Déplacer dans « ${line.floorName} »${floorLayoutZoneSuffix(line)}`,
     };
   }
   return {
@@ -1028,6 +1035,14 @@ export function groupCollapseKey(rowId) {
   return `group:${rowId}`;
 }
 
+// Libellé du bloc des éléments hors étage, en mode « étage d'abord ».
+export const NO_FLOOR_LABEL = "Sans étage";
+
+// Clé de repli d'une ligne étage (mode étage d'abord) ; « Sans étage » : "storey:".
+export function storeyCollapseKey(floorKey) {
+  return `storey:${floorKey}`;
+}
+
 function summaryFields(summary) {
   return {
     start: summary?.start ?? null,
@@ -1056,6 +1071,8 @@ export function buildRowModel(sections = [], {
   collapsedZoneKeys = new Set(),
   collapsedFloorKeys = new Set(),
   collapsedGroupKeys = new Set(),
+  collapsedStoreyKeys = new Set(),
+  layout = "zone",
 } = {}) {
   const lines = [];
   const taskLine = (section, task, floor, group, level, cyclePath) => ({
@@ -1122,6 +1139,7 @@ export function buildRowModel(sections = [], {
       if (!collapsed) pushItems(section, floor, child, child.items, level + 1, childPath);
     });
   };
+  if (layout === "floor") return buildFloorFirstLines();
   sections.forEach((section) => {
     const collapsed = collapsedZoneKeys.has(section.zoneKey);
     lines.push({
@@ -1169,4 +1187,101 @@ export function buildRowModel(sections = [], {
     });
   });
   return lines;
+
+  // Mode « étage d'abord » : étage (0) → zones qui l'ont (1) → contenu (2…), puis le bloc
+  // « Sans étage » (0) → une ligne par zone (1) → ses tâches hors étage (2). Sans aucune zone, aucune
+  // ligne, comme en mode zone (le tableau dit alors qu'il n'y a pas de zone).
+  function buildFloorFirstLines() {
+    if (!sections.length) return [];
+    const storeys = new Map();
+    sections.forEach((section) => {
+      section.floors.forEach((floor) => {
+        if (!storeys.has(floor.key)) storeys.set(floor.key, { key: floor.key, name: floor.name, entries: [], tasks: [] });
+        const storey = storeys.get(floor.key);
+        storey.entries.push({ section, floor });
+        storey.tasks.push(...floor.tasks);
+      });
+    });
+    const ordered = [...storeys.values()]
+      .map((storey) => ({ storey, kind: "floor", floor: { name: storey.name, summary: summarizeTasks(storey.tasks) } }))
+      .sort(compareByDates);
+    const namedZones = sections.filter((section) => section.zoneKey !== NO_ZONE_KEY);
+    const storeyLine = (key, floorKey, name, summary, zoneCount, missingZones) => ({
+      key,
+      kind: "storey",
+      level: 0,
+      zoneKey: "",
+      zoneName: "",
+      floorKey,
+      floorName: name,
+      floorRowIds: [],
+      ...NO_GROUP_FIELDS,
+      taskId: null,
+      name,
+      ...summaryFields(summary),
+      collapsed: collapsedStoreyKeys.has(key),
+      childCount: zoneCount,
+      zoneCount,
+      missingZones,
+    });
+    ordered.forEach(({ storey, floor: merged }) => {
+      const key = storeyCollapseKey(storey.key);
+      const line = storeyLine(key, storey.key, storey.name, merged.summary, storey.entries.length,
+        namedZones
+          .filter((section) => !storey.entries.some((entry) => entry.section === section))
+          .map((section) => ({ zoneKey: section.zoneKey, zoneName: section.zoneName, label: section.label })));
+      lines.push(line);
+      if (line.collapsed) return;
+      storey.entries.forEach(({ section, floor }) => {
+        const floorCollapsed = collapsedFloorKeys.has(floorCollapseKey(section.zoneKey, floor.key));
+        lines.push({
+          key: `floor:${section.zoneKey}/${floor.key}`,
+          kind: "floor",
+          level: 1,
+          zoneKey: section.zoneKey,
+          zoneName: section.zoneName,
+          floorKey: floor.key,
+          floorName: floor.name,
+          floorRowIds: [...floor.rowIds],
+          ...NO_GROUP_FIELDS,
+          taskId: null,
+          name: section.label,
+          ...summaryFields(floor.summary),
+          collapsed: floorCollapsed,
+          childCount: floor.items.length,
+        });
+        if (!floorCollapsed) pushItems(section, floor, null, floor.items, 2, []);
+      });
+    });
+    const looseOf = (section) => section.items.filter((item) => item.kind === "task");
+    const noFloor = storeyLine(storeyCollapseKey(""), "", NO_FLOOR_LABEL,
+      summarizeTasks(sections.flatMap((section) => looseOf(section).map((item) => item.task))),
+      sections.length, []);
+    lines.push(noFloor);
+    if (!noFloor.collapsed) {
+      sections.forEach((section) => {
+        const loose = looseOf(section);
+        const collapsed = collapsedZoneKeys.has(section.zoneKey);
+        lines.push({
+          key: `zone:${section.zoneKey}`,
+          kind: "zone",
+          level: 1,
+          zoneKey: section.zoneKey,
+          zoneName: section.zoneName,
+          floorKey: "",
+          floorName: "",
+          floorRowIds: [],
+          ...NO_GROUP_FIELDS,
+          taskId: null,
+          name: section.label,
+          ...summaryFields(summarizeTasks(loose.map((item) => item.task))),
+          collapsed,
+          childCount: loose.length,
+        });
+        if (!collapsed) loose.forEach((item) => lines.push(taskLine(section, item.task, null, null, 2, [])));
+      });
+    }
+    const lookOf = { storey: "floor", floor: "zone", zone: "zone" };
+    return lines.map((line) => ({ ...line, layout: "floor", look: lookOf[line.kind] || line.kind }));
+  }
 }

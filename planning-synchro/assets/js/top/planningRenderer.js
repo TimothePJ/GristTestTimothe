@@ -346,10 +346,15 @@ export function createPlanningRenderer(containerEl) {
     applyWindowedItems();
   }
 
-  function setWindow(startDate, endDate) {
+  // `offsetDays` : fraction de jour au-dela de startDate (glisser au pixel pres,
+  // sync/controller.js). vis place sa fenetre a la milliseconde, il suffit donc
+  // de decaler les deux bornes d'autant.
+  function setWindow(startDate, endDate, offsetDays = 0) {
     if (!timeline) return;
-    const startAt = new Date(startDate + "T00:00:00");
-    const endAt = new Date(endDate + "T23:59:59");
+    const offset = Number(offsetDays);
+    const offsetMs = offset > 0 && offset < 1 ? offset * DAY_MS : 0;
+    const startAt = new Date(new Date(startDate + "T00:00:00").getTime() + offsetMs);
+    const endAt = new Date(new Date(endDate + "T23:59:59").getTime() + offsetMs);
     lastWindowStartMs = startAt.getTime();
     lastWindowEndMs = endAt.getTime();
     // Re-window the item set BEFORE moving the view so vis never briefly holds an

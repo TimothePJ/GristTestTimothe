@@ -130,12 +130,14 @@ export function buildGanttShapes(lines, scale, { rowHeight = ROW_HEIGHT_PX } = {
     // Zone (barre noire), étage, cycle, sous-groupe, et niveau ou groupe d'un type déplié de la
     // vue Global (crochet) : du Début à la Fin du récapitulatif, au centre du jour quand il
     // commence ou finit par un jalon.
-    if (["zone", "floor", "group", "level", "type"].includes(line.kind)) {
+    if (["zone", "floor", "storey", "group", "level", "type"].includes(line.kind)) {
+      // En mode étage, `look` donne l'aspect de la ligne (barre de zone ou crochet).
+      const look = line.look || line.kind;
       const from = line.startsWithMilestone ? dayCenter(line.start) : dayStart(line.start);
       const to = line.endsWithMilestone ? dayCenter(line.end) : dayEnd(line.end);
       const x1 = scale.dateToX(from);
       shapes.push({
-        type: line.kind === "zone" ? "zoneBar" : "floorBracket",
+        type: look === "zone" ? "zoneBar" : "floorBracket",
         row,
         key: line.key,
         y,
@@ -143,7 +145,7 @@ export function buildGanttShapes(lines, scale, { rowHeight = ROW_HEIGHT_PX } = {
         x2: Math.max(scale.dateToX(to), x1 + MIN_BAR_WIDTH_PX),
         label: line.name,
         // Crochet en alerte (vue Global) : il contient une tâche en retard.
-        ...(line.kind !== "zone" && line.tone === "late" ? { tone: "late" } : {}),
+        ...(look !== "zone" && line.tone === "late" ? { tone: "late" } : {}),
       });
       return;
     }

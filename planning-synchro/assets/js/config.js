@@ -2,6 +2,7 @@ export const APP_CONFIG = {
   sharedProjectStorageKey: "grist.selected-project",
   sharedProjectIdStorageKey: "grist.selected-project-id",
   storageKey: "planning-synchro.state",
+  smoothingViewStorageKey: "planning-synchro.smoothing-view",
   initialWindowDays: 365,
   months: ["janvier","fevrier","mars","avril","mai","juin","juillet","aout","septembre","octobre","novembre","decembre"],
   zoomModes: {
@@ -9,9 +10,9 @@ export const APP_CONFIG = {
     month: { label: "Mois",    targetVisibleDays: 31 },
     year:  { label: "Annee",   targetVisibleDays: 365 },
   },
-  // maxVisibleDays caps the widest window at ~14 months (14 * 30.4375 ≈ 426),
-  // so the user is no longer limited to a single year and can zoom out further.
-  viewport: { minVisibleDays: 7, maxVisibleDays: 426, referenceMonthDays: 30.4375 },
+  // maxVisibleDays caps the widest window at 5 years (1826 days): the wheel can
+  // zoom out freely well beyond a single year (was ~14 months, 426 days).
+  viewport: { minVisibleDays: 7, maxVisibleDays: 1826, referenceMonthDays: 30.4375 },
   // Top (planning) pane resizable visible-rows window (see top/paneMath.js and
   // ui/topPaneResizer.js): min 5 / max 16 visible rows, defaulting to 10 so the
   // editable bottom pane stays in view on load. `fallbackRowHeightPx`/
@@ -28,7 +29,7 @@ export const APP_CONFIG = {
       timeOut: "Time-Out",
     },
     columns: {
-      projects:  { id: "id", name: "Nom_de_projet", number: "Numero_de_projet", avancement: "Avancement" },
+      projects:  { id: "id", name: "Nom_de_projet", number: "Numero_de_projet", avancement: "Avancement", lissage: "Lissage" },
       planningProject: {
         id: "id", projectName: "NomProjet", id2: "ID2", taskName: "Taches", taskNameAlt: "Tache",
         typeDoc: "Type_doc", groupe: "Groupe", lignePlanning: "Ligne_planning", zone: "Zone",

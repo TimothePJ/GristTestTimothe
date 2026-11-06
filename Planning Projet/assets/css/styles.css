@@ -1968,6 +1968,11 @@ body:not(.is-synthese-space) #structureLinkToggle {
   display: none !important;
 }
 
+body:not(.is-synthese-space) #syntheseLayoutToggle,
+#syntheseLayoutToggle[hidden] {
+  display: none !important;
+}
+
 /* Fenêtre « Lien Structure » : pour chaque zone, les étages de Synthese à gauche et les
    coffrages de Structure à droite. Grist impose son thème au widget : la fenêtre fixe ses
    couleurs (texte foncé sur fond clair). */
@@ -2990,6 +2995,12 @@ body.is-synthese-space #durationDefaultsToggle {
   text-decoration: underline;
 }
 
+/* Affichage par étage : les zones rangées sous un étage ou dans le bloc « Sans étage » sont en
+   retrait, 16 px par niveau. */
+.stt-line--zone[data-layout="floor"] .stt-cell--name {
+  padding-left: calc(4px + var(--stt-level, 0) * 16px);
+}
+
 .stt-toggle {
   flex: 0 0 auto;
   width: 18px;
@@ -3022,6 +3033,26 @@ body.is-synthese-space #durationDefaultsToggle {
   padding-left: 16px;
   background: var(--stt-floor-bg);
   color: #1f1f1f;
+}
+
+/* Affichage par étage : la ligne étage (niveau 0) a le retrait d'une zone de l'affichage par zone,
+   un niveau avant ses zones (20 px) ; en saisie de son nom, le champ occupe toute la cellule. */
+.stt-line[data-kind="storey"] .stt-cell--name {
+  padding-left: 4px;
+}
+
+.stt-line[data-kind="storey"] .stt-cell--name.is-editing {
+  padding-left: 0;
+}
+
+/* Affichage par étage : tailles de texte inversées — l'étage (niveau 0) prend celle d'une zone de
+   l'affichage par zone (14 px), les zones (sous un étage ou dans « Sans étage ») celle d'un étage. */
+.stt-line[data-kind="storey"][data-layout="floor"] .stt-cell--name {
+  font-size: 14px;
+}
+
+.stt-line--zone[data-layout="floor"] .stt-cell--name {
+  font-size: inherit;
 }
 
 /* Emblème de lien d'un étage, à côté de son nom : deux maillons, verts quand l'étage est lié à
@@ -3069,8 +3100,17 @@ body.is-synthese-space #durationDefaultsToggle {
   padding-left: calc(14px + var(--stt-level, 2) * 16px);
 }
 
+/* Tâche d'une zone du bloc « Sans étage » (affichage par étage) : même retrait, selon son niveau. */
+.stt-line--task.is-in-block .stt-cell--name {
+  padding-left: calc(14px + var(--stt-level, 2) * 16px);
+}
+
 /* En saisie, le champ occupe toute la cellule, comme pour les tâches du niveau zone. */
 .stt-line--task.is-in-floor .stt-cell--name.is-editing {
+  padding-left: 0;
+}
+
+.stt-line--task.is-in-block .stt-cell--name.is-editing {
   padding-left: 0;
 }
 
@@ -3681,7 +3721,8 @@ html.is-stt-dragging * {
    ========================================================== */
 
 /* Bouton « Global » du bandeau : même allure que « Editer », plein quand la vue est active. */
-#toolbar .planning-global-toggle {
+#toolbar .planning-global-toggle,
+#toolbar .planning-synthese-layout-toggle {
   min-width: 74px;
   border-color: #b7c7d9;
   font-weight: 700;
@@ -3689,21 +3730,32 @@ html.is-stt-dragging * {
   box-shadow: inset 0 0 0 1px rgba(35, 65, 95, 0.05);
 }
 
-#toolbar .planning-global-toggle:hover {
+#toolbar .planning-global-toggle:hover,
+#toolbar .planning-synthese-layout-toggle:hover {
   border-color: #7fa7cf;
   background-color: #f1f7ff;
 }
 
-#toolbar .planning-global-toggle.is-active {
+#toolbar .planning-global-toggle.is-active,
+#toolbar .planning-synthese-layout-toggle.is-active {
   border-color: #0f6bb8;
   background-color: #0f6bb8;
   color: #fff;
   box-shadow: 0 2px 8px rgba(15, 107, 184, 0.2);
 }
 
-#toolbar .planning-global-toggle.is-active:hover {
+#toolbar .planning-global-toggle.is-active:hover,
+#toolbar .planning-synthese-layout-toggle.is-active:hover {
   background-color: #0b5a9c;
   border-color: #0b5a9c;
+}
+
+/* « Par étage » : bandeau plein, le bouton rétrécissait et son texte passait sur deux lignes. Il
+   garde sa largeur et son texte sur une ligne, centré. */
+#toolbar .planning-synthese-layout-toggle {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  text-align: center;
 }
 
 /* Modes embarqués (planning-synchro) : pas de vue Global. */
@@ -3720,6 +3772,7 @@ body.is-global-space #planningStatus,
 body.is-global-space #syntheseSpace,
 body.is-global-space #planningEditToggle,
 body.is-global-space #structureLinkToggle,
+body.is-global-space #syntheseLayoutToggle,
 body.is-global-space #durationDefaultsToggle {
   display: none !important;
 }
@@ -4736,7 +4789,8 @@ body.is-synthese-dragging * {
   gap: 8px;
 }
 
-.synthese-link-dialog__actions button {
+.synthese-link-dialog__actions button,
+.synthese-floor-dialog__add {
   padding: 6px 14px;
   border: 1px solid #c4ccd6;
   border-radius: 6px;
@@ -4755,4 +4809,62 @@ body.is-synthese-dragging * {
 .synthese-link-dialog__submit:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Fenêtre « Ajouter un étage » : la fenêtre de lien, avec des cases à cocher pour les zones. */
+.synthese-floor-dialog {
+  width: min(420px, calc(100vw - 32px));
+}
+
+.synthese-floor-dialog .synthese-link-dialog__search {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.synthese-floor-dialog__zone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.synthese-floor-dialog__zone:hover {
+  background: #e6f2fa;
+}
+
+.synthese-floor-dialog__zone.is-disabled {
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.synthese-floor-dialog__note {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.synthese-floor-dialog__note[hidden] {
+  display: none;
+}
+
+.synthese-floor-dialog__new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.synthese-floor-dialog__new .synthese-link-dialog__search {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* « Ajouter la zone » : allure d'« Annuler », sur une ligne, sans rétrécir. */
+.synthese-floor-dialog__add {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* Simple information (zone existante cochée) : texte normal, pas le rouge d'un refus. */
+.synthese-link-dialog__error.is-info {
+  color: #1f2937;
 }

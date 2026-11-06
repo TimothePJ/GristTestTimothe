@@ -69,6 +69,22 @@ export function buildFloorFromTemplate({ floorName = "", zoneName = "", projectN
   return [floorRow, ...rows];
 }
 
+// La ligne vide qui garde une zone créée depuis la fenêtre « Ajouter un étage… » (comme « Ajouter
+// une zone » du bandeau) : ni tâche, ni N°, ni type de document, donc jamais une ligne du tableau ;
+// elle fait seulement exister la zone, qui reste si l'étage est supprimé. Mêmes colonnes que les
+// lignes du modèle, pour une seule écriture.
+export function buildZoneAnchorRow({ zoneName = "", projectName = "" } = {}) {
+  return {
+    [TASK_COLUMNS.name]: "",
+    [TASK_COLUMNS.zone]: toText(zoneName),
+    [TASK_COLUMNS.group]: "",
+    [TASK_COLUMNS.floor]: false,
+    [TASK_COLUMNS.project]: toText(projectName),
+    [TASK_COLUMNS.nature]: "",
+    [TASK_COLUMNS.duration]: 0,
+  };
+}
+
 // Lignes → une écriture BulkAddRecord (ids choisis par Grist).
 export function buildBulkAddAction(rows) {
   const names = [];

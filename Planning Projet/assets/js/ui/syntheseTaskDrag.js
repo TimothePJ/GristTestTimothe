@@ -15,6 +15,8 @@ import { resolveDropSlot } from "../services/syntheseTaskOrder.js";
 export const DRAG_THRESHOLD_PX = 4;
 export const AUTO_SCROLL_EDGE_PX = 24;
 export const AUTO_SCROLL_STEP_PX = 12;
+// Légende sur une ligne étage ou « Sans étage » (affichage par étage) : on n'y dépose rien.
+const STOREY_DROP_HINT = "Visez une zone de l'étage";
 
 // Rang de la ligne sous le pointeur, ou -1 hors des lignes.
 export function lineIndexAt(clientY, bodyTop, rowHeight, count) {
@@ -97,7 +99,10 @@ export function createTaskDrag({
   // Cible sous le pointeur, seulement dans la bande visible des lignes (sous l'en-tête collant,
   // dans le conteneur défilant) : ailleurs rien n'est visé, et lâcher annule. Sans la colonne
   // Ordre, son propre conteneur n'est pas une destination ; avec, toute autre place l'est. Un
-  // cycle glissé ne vise que les places de son étage, sans filtre de conteneur d'origine.
+  // cycle glissé ne vise que les places de son étage, sans filtre de conteneur d'origine. Une
+  // tâche glissée donne sa zone : en affichage par étage, la légende nomme une autre zone visée.
+  // Sur une ligne étage ou « Sans étage » (affichage par étage), rien n'est visé, mais la légende
+  // dit de viser une zone.
   function update() {
     const rect = scroller.getBoundingClientRect();
     const inRows = drag.clientY >= rect.top + headHeight && drag.clientY < rect.bottom &&
@@ -107,18 +112,20 @@ export function createTaskDrag({
     const index = inRows ? lineIndexAt(drag.clientY, bodyTop, rowHeight, lines.length) : -1;
     const ordering = Boolean(canOrder());
     const side = drag.clientY - bodyTop - index * rowHeight < rowHeight / 2 ? "before" : "after";
+    const { line } = drag;
     if (drag.kind === "group") {
-      const { groupRowId, line } = drag;
+      const { groupRowId } = drag;
       drag.target = index >= 0
         ? resolveCycleDropSlot(lines[index], side, { groupRowId, zoneKey: line.zoneKey, floorKey: line.floorKey })
         : null;
     } else {
       const target = index >= 0
-        ? resolveDropSlot(lines[index], side, { canOrder: ordering, draggedTaskId: drag.taskId })
+        ? resolveDropSlot(lines[index], side, { canOrder: ordering, draggedTaskId: drag.taskId, draggedZoneKey: line.zoneKey })
         : null;
       drag.target = target && (ordering || target.key !== drag.sourceKey) ? target : null;
     }
-    const label = drag.target ? drag.target.label : "";
+    let label = drag.target ? drag.target.label : "";
+    if (!drag.target && lines[index]?.kind === "storey") label = STOREY_DROP_HINT;
     if (caption.textContent !== label) caption.textContent = label;
     caption.hidden = !label;
     // La copie garde l'écart entre le pointeur et le coin de la ligne au moment de l'appui.
