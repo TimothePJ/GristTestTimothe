@@ -24,6 +24,10 @@ import {
   isSynthesePlanningTask,
 } from "../utils/planningRealisation.js";
 import { buildAbsenceIndex, normalizeName } from "../utils/leaveAbsences.js";
+import {
+  buildBilledAmountsByProject,
+  normalizeIdentifier as normalizeAvancementIdentifier,
+} from "../utils/avancementBilling.js";
 
 function parseBillingPercentageByMonth(rawValue, projectNumber) {
   if (!rawValue) return {};
@@ -353,6 +357,12 @@ export function buildExpenseData({
   timeRealRows,
   teamRows,
   timeOutRows,
+  // Facturation a l'avancement (T_Avancement + Service) et service du widget au
+  // moment de la lecture. Absentes (Gestion-globale) : la facturation reste celle
+  // de Projets2, et billedAmountByMonth n'est pas pose.
+  avancementRows,
+  serviceRows,
+  activeService,
 }) {
   const columns = APP_CONFIG.grist.columns;
 
@@ -382,6 +392,21 @@ export function buildExpenseData({
 
   const projectsByNumber = createProjectNumberIndex(projects);
   const projectsByAvancementKey = createProjectLookupIndex(projects);
+
+  if (Array.isArray(avancementRows)) {
+    const billedAmountsByProject = buildBilledAmountsByProject(
+      avancementRows,
+      serviceRows,
+      activeService
+    );
+    projects.forEach((project) => {
+      project.billedAmountByMonth = {
+        ...(billedAmountsByProject.get(
+          normalizeAvancementIdentifier(project.projectNumber)
+        ) || {}),
+      };
+    });
+  }
 
   const projectsByPlanningKey = new Map();
   projects.forEach((project) => {
@@ -1257,10 +1282,39 @@ export function getProjectKpis(project) {
   };
 }
 
+// Facturation du graphique. Deux sources :
+// - "avancement" : montants mensuels T_Avancement (billedAmountByMonth, pose par
+//   buildExpenseData dans gestion-depenses2) ; la serie est leur CUMUL, en euros
+//   et en % du budget total ;
+// - "manual" : ancienne saisie Projets2.Pourcentage_Facturation_Par_Mois, encore
+//   utilisee par Gestion-globale qui n'a pas bascule.
+function getBillingSource(project) {
+  const billedAmountByMonth = project?.billedAmountByMonth;
+  return billedAmountByMonth && typeof billedAmountByMonth === "object"
+    ? "avancement"
+    : "manual";
+}
+
+function buildCumulativeBilledAmountGetter(billedAmountByMonth) {
+  const monthlyEntries = Object.entries(billedAmountByMonth || {})
+    .map(([monthKey, amount]) => [monthKey, toFiniteNumber(amount, 0)])
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+
+  return (monthKey) =>
+    monthlyEntries.reduce(
+      (total, [entryMonthKey, amount]) => (entryMonthKey <= monthKey ? total + amount : total),
+      0
+    );
+}
+
 export function buildChartSeries(project, { selectedYear, selectedMonth, monthSpan }) {
   const allMonthKeys = new Set();
+  const billingSource = getBillingSource(project);
+  const billingMonthKeys = billingSource === "avancement"
+    ? Object.keys(project.billedAmountByMonth)
+    : Object.keys(project?.billingPercentageByMonth || {});
 
-  Object.keys(project?.billingPercentageByMonth || {}).forEach((monthKey) => {
+  billingMonthKeys.forEach((monthKey) => {
     allMonthKeys.add(monthKey);
   });
 
@@ -1327,12 +1381,23 @@ export function buildChartSeries(project, { selectedYear, selectedMonth, monthSp
   const provisionalPercentData = [];
   const realPercentData = [];
   const billingPercentData = [];
+  const getCumulativeBilledAmount = billingSource === "avancement"
+    ? buildCumulativeBilledAmountGetter(project.billedAmountByMonth)
+    : null;
 
-    displayedMonths.forEach(({ monthKey, monthLabel, year }) => {
+  displayedMonths.forEach(({ monthKey, monthLabel, year }) => {
+    labels.push([monthLabel, String(year)]);
+    if (getCumulativeBilledAmount) {
+      const cumulativeBilledAmount = getCumulativeBilledAmount(monthKey);
+      billedAmountData.push(cumulativeBilledAmount);
+      billingPercentData.push(
+        totalBudget > 0 ? (cumulativeBilledAmount * 100) / totalBudget : 0
+      );
+    } else {
       const billingPercentage = getBillingPercentageForMonth(project, monthKey);
-      labels.push([monthLabel, String(year)]);
       billingPercentData.push(billingPercentage);
       billedAmountData.push(getBillingAmountFromPercentage(totalBudget, billingPercentage));
+    }
 
     let provisionalValue = 0;
     let realValue = 0;
@@ -1370,5 +1435,6 @@ export function buildChartSeries(project, { selectedYear, selectedMonth, monthSp
     provisionalPercentData,
     realPercentData,
     billingPercentData,
+    billingSource,
   };
 }
