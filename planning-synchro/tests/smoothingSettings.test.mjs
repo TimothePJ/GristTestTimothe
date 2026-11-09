@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   getServiceSettings,
   hasAnyMax,
+  hasManualDates,
+  hasSmoothing,
   serializeSmoothingCell,
   parseMaxInput,
   MONTH_MAX_INPUT_ERROR,
@@ -293,4 +295,50 @@ test("parseMaxInput pour un mois particulier : 0 accepté, le reste comme avant"
 test("serializeSmoothingCell : sans mois de départ ni mois particulier, la cellule garde sa forme d'avant", () => {
   const out = JSON.parse(serializeSmoothingCell("", "Structure", { maxTotal: 4, maxByType: {}, maxByMonth: {} }));
   assert.deepEqual(out.services.Structure, { maxTotal: 4, maxParType: {} });
+});
+
+test("serializeSmoothingCell : le mois de départ est gardé avec des dates manuelles seules", () => {
+  const settings = {
+    maxTotal: null,
+    maxByType: {},
+    startMonth: "2026-10",
+    manualDates: { "1": "2027-01-02" },
+  };
+  const out = serializeSmoothingCell("", "Structure", settings);
+  assert.equal(out, '{"version":1,"services":{"Structure":{"maxParType":{},"debut":"2026-10"}}}');
+  assert.ok(!out.includes("manualDates"));
+  assert.ok(!out.includes("2027-01-02"));
+  const back = getServiceSettings(out, "Structure");
+  assert.equal(back.startMonth, "2026-10");
+  assert.equal(hasAnyMax(back), false);
+});
+
+test("serializeSmoothingCell : mois de départ seul, sans dates manuelles -> cellule vide", () => {
+  const settings = { maxTotal: null, maxByType: {}, startMonth: "2026-10" };
+  assert.equal(serializeSmoothingCell("", "Structure", settings), "");
+  assert.equal(serializeSmoothingCell("", "Structure", { ...settings, manualDates: {} }), "");
+});
+
+test("serializeSmoothingCell : dates manuelles sans mois de départ -> pas d'entrée", () => {
+  const settings = { maxTotal: null, maxByType: {}, manualDates: { "1": "2027-01-02" } };
+  assert.equal(serializeSmoothingCell("", "Structure", settings), "");
+});
+
+test("serializeSmoothingCell : les dates manuelles ne fuient jamais avec un maximum", () => {
+  const settings = { maxTotal: 3, maxByType: {}, manualDates: { "1": "2027-01-02" } };
+  const out = serializeSmoothingCell("", "Structure", settings);
+  assert.ok(!out.includes("manual"));
+  assert.ok(!out.includes("2027-01-02"));
+});
+
+test("hasManualDates / hasSmoothing", () => {
+  const base = { maxTotal: null, maxByType: {} };
+  assert.equal(hasManualDates({ ...base, manualDates: { "1": "2027-01-02" } }), true);
+  assert.equal(hasManualDates({ ...base, manualDates: {} }), false);
+  assert.equal(hasManualDates(base), false);
+  assert.equal(hasManualDates(null), false);
+  assert.equal(hasSmoothing({ ...base, manualDates: { "1": "2027-01-02" } }), true);
+  assert.equal(hasSmoothing({ ...base, manualDates: {} }), false);
+  assert.equal(hasSmoothing({ maxTotal: 2, maxByType: {} }), true);
+  assert.equal(hasSmoothing(null), false);
 });

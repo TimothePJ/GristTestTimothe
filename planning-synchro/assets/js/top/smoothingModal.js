@@ -2,23 +2,32 @@
 // de la spec du lissage). Le bouton « Lisser… » du graphique l'ouvre ; elle
 // permet de choisir le mois de depart (« Lisser a partir de », §4.8), de fixer
 // un maximum general et un maximum par type de document pour tous les mois,
-// puis de les remplacer pour des mois precis (« Mois particuliers »). Elle
-// montre l'effet du lissage en direct (apercu) et remet les reglages au
-// controleur.
+// puis de les remplacer pour des mois precis (« Mois particuliers »). La
+// section « Plan particulier » impose la date de fin de plans precis en mode
+// lisse (dates manuelles, spec 2026-11-09 §5.1 a §5.4), directement ou par la
+// fenetre « Choisir les plans » (#ps-plan-pick-modal, top/planSearchModal.js)
+// ouverte PAR-DESSUS celle-ci et pilotee d'ici. Elle montre l'effet du lissage
+// en direct (apercu) et remet les reglages au controleur.
 //
 // La fenetre N'ECRIT RIEN elle-meme : elle appelle onSubmit(settings) ou
 // onDelete(), fournis par le controleur (Tache 8), et affiche leur echec. Meme
 // decoupage que bottom/chargeAssignModal.js : fonctions PURES (computeTypePeaks,
-// buildPreviewRows, buildStartOptions, buildMonthChoices, testees sans DOM) puis
-// un controleur DOM (createSmoothingModal). Tout texte insere en HTML est echappe.
+// buildPreviewRows, buildStartOptions, buildMonthChoices, buildManualPlanRows,
+// buildPlanChoices, testees sans DOM) puis un controleur DOM
+// (createSmoothingModal). Tout texte insere en HTML est echappe.
 
 import { isMonthKey, parseMaxInput } from "./smoothingSettings.js";
 import { monthKeyOf, smoothingStartMonth } from "./taskSmoothing.js";
+import { compareChartTasks } from "./taskLoadModel.js";
+import { firstAllowedManualIso, isIsoDate } from "./manualDates.js";
+import { placeOf } from "./monthTasksModal.js";
+import { buildPlanSearchEntries, createPlanSearchModal } from "./planSearchModal.js";
 import {
   OVERFLOW_REASON_LABELS,
   TOTAL_META,
   TYPE_META,
   TYPE_ORDER,
+  formatDateFr,
   formatMonthLabel,
 } from "./taskLabels.js";
 
@@ -144,6 +153,106 @@ function countByMonth(tasks) {
   return counts;
 }
 
+// --- plan particulier (dates manuelles, spec 2026-11-09 §5.1) ----------------------
+
+const hasKey = (object, key) => Object.prototype.hasOwnProperty.call(object || {}, key);
+
+// Plan qui peut recevoir une date manuelle : non realise, avec une ligne Grist.
+const isManualCandidate = (task) => Boolean(task) && !task.realized && task.rowId != null;
+
+// « N mois plus tôt » / « N mois plus tard » / « même mois » : ecart entre la
+// date manuelle et l'echeance sans lissage (monthsAdvanced < 0 = plus tard).
+// Memes mots que la fenetre « Rechercher un plan ».
+function manualShiftLabel(monthsAdvanced) {
+  const months = Number(monthsAdvanced) || 0;
+  if (months > 0) return `${months} mois plus tôt`;
+  if (months < 0) return `${-months} mois plus tard`;
+  return "même mois";
+}
+
+// « N° 12 » ; une armature sans N° est nommee.
+function armatureLabel(task) {
+  const id2 = String(task.id2 ?? "").trim();
+  if (id2) return `N° ${id2}`;
+  return String(task.name ?? "").trim() || "N° ?";
+}
+
+// Lignes du tableau « Plan particulier » : les plans non realises dont le
+// rowId est dans la saisie (draftManual, { rowId: "AAAA-MM-JJ" | "" }), tries
+// par date manuelle (les cases vides en dernier) puis dans l'ordre du
+// graphique. note : l'ecart de mois du dernier apercu (result, SmoothingResult
+// ou null) pour un plan fixe, puis, pour un coffrage, « après son armature N° … »
+// pour chaque armature non realisee de son groupe dont la date lissee (a
+// defaut l'echeance) est avant sa date manuelle (§4.3).
+export function buildManualPlanRows({ tasks, draftManual, result } = {}) {
+  const list = Array.isArray(tasks) ? tasks : [];
+  const draft = draftManual || {};
+  const smoothedByRow = new Map();
+  (Array.isArray(result?.tasks) ? result.tasks : []).forEach((task) => {
+    if (task?.rowId != null) smoothedByRow.set(String(task.rowId), task);
+  });
+  const smoothedIsoOf = (task) =>
+    (task.rowId != null ? smoothedByRow.get(String(task.rowId))?.smoothedIso : null) || task.dueIso;
+
+  return list
+    .filter((task) => isManualCandidate(task) && hasKey(draft, String(task.rowId)))
+    .map((task) => {
+      const key = String(task.rowId);
+      const value = String(draft[key] ?? "");
+      const meta = TYPE_META[task.type] || TYPE_META.AUTRES;
+      const parts = [];
+      const smoothed = smoothedByRow.get(key);
+      if (smoothed?.manual) parts.push(manualShiftLabel(smoothed.monthsAdvanced));
+      if (task.type === "COFFRAGE" && task.groupKey && value) {
+        list.forEach((other) => {
+          if (other?.type !== "ARMATURES" || other.realized || other.groupKey !== task.groupKey) return;
+          const date = smoothedIsoOf(other);
+          if (date && date < value) parts.push(`après son armature ${armatureLabel(other)}`);
+        });
+      }
+      return {
+        task,
+        row: {
+          rowId: task.rowId,
+          id2: String(task.id2 ?? "").trim(),
+          name: String(task.name ?? "").trim(),
+          place: placeOf(task),
+          type: task.type,
+          typeLabel: meta.label,
+          typeColor: meta.color,
+          dueIso: task.dueIso,
+          value,
+          note: parts.join(" · "),
+        },
+      };
+    })
+    .sort((left, right) => {
+      const a = left.row.value;
+      const b = right.row.value;
+      if (a !== b) {
+        if (!a) return 1;
+        if (!b) return -1;
+        return a < b ? -1 : 1;
+      }
+      return compareChartTasks(left.task, right.task);
+    })
+    .map((entry) => entry.row);
+}
+
+// Plans proposes par la liste « Plan à ajouter » : non realises, sans entree
+// dans la saisie (draftManual), dans l'ordre des taches (celui du graphique).
+export function buildPlanChoices(tasks, draftManual) {
+  const draft = draftManual || {};
+  return (Array.isArray(tasks) ? tasks : [])
+    .filter((task) => isManualCandidate(task) && !hasKey(draft, String(task.rowId)))
+    .map((task) => {
+      const id2 = String(task.id2 ?? "").trim();
+      const name = String(task.name ?? "").trim();
+      const zone = String(task.zone ?? "").trim();
+      return { value: String(task.rowId), label: `${id2 ? `N° ${id2} — ` : ""}${name}${zone ? ` (${zone})` : ""}` };
+    });
+}
+
 // --- rendu HTML ---------------------------------------------------------------------
 
 function escapeHtml(value) {
@@ -164,7 +273,17 @@ function movedText(count) {
   return count === 1 ? "1 tâche avancée" : `${count} tâches avancées`;
 }
 
-// Les taches ne sont jamais retardees (regle 1) : la mention est constante.
+function manualCountText(count) {
+  return count === 1 ? "1 date manuelle" : `${count} dates manuelles`;
+}
+
+// Le lissage ne retarde jamais une tache (regle 1) : seule une date manuelle
+// placee apres l'echeance retarde un plan (delayedCount).
+function delayedText(count) {
+  if (!count) return NEVER_DELAYED_TEXT;
+  return count === 1 ? "1 retardée par une date manuelle" : `${count} retardées par une date manuelle`;
+}
+
 const NEVER_DELAYED_TEXT = "aucune tâche retardée";
 const INACTIVE_TEXT = "Aucun maximum défini : rien n'est lissé.";
 const READ_ONLY_TEXT = "Lecture seule : le service affiché n'est pas votre service de rattachement.";
@@ -174,9 +293,13 @@ function renderPreview(result, fromIso) {
     return `<p class="ps-smoothing-summary">${escapeHtml(INACTIVE_TEXT)}</p>`;
   }
   const overflows = Array.isArray(result.overflows) ? result.overflows : [];
-  let html = `<p class="ps-smoothing-summary">${escapeHtml(
-    `${movedText(result.movedCount)} · ${NEVER_DELAYED_TEXT}`
-  )}</p>`;
+  const manualCount = Number(result.manualCount) || 0;
+  const summary = [
+    movedText(result.movedCount),
+    ...(manualCount > 0 ? [manualCountText(manualCount)] : []),
+    delayedText(Number(result.delayedCount) || 0),
+  ].join(" · ");
+  let html = `<p class="ps-smoothing-summary">${escapeHtml(summary)}</p>`;
 
   if (overflows.length) {
     const title = overflows.length === 1 ? "1 dépassement reste" : `${overflows.length} dépassements restent`;
@@ -302,6 +425,49 @@ function renderMonthRows(months, types, draft, counts, disabled) {
   return `<table class="ps-smoothing-months-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
 
+const NO_PLAN_TEXT = "Aucun plan particulier : le lissage place chaque plan lui-même.";
+const NO_PLAN_CHOICE_TEXT = "Aucun plan à ajouter";
+
+// Tableau « Plan particulier » (rows : buildManualPlanRows) : N°, plan (nom,
+// zone et groupe dessous), type a pastille, echeance sans lissage, case date,
+// note et bouton « Retirer », sauf en lecture seule. isValid(rowId, valeur)
+// marque une case invalide ; minIso borne le calendrier de la case.
+function renderManualPlanRows(rows, { minIso, disabled, isValid }) {
+  if (!rows.length) return `<p class="ps-smoothing-empty">${escapeHtml(NO_PLAN_TEXT)}</p>`;
+  const head = `<tr><th scope="col">N°</th><th scope="col">Plan</th><th scope="col">Type</th><th scope="col">Échéance sans lissage</th><th scope="col">Date manuelle</th><th scope="col"><span class="ps-smoothing-sr">Note</span></th>${
+    disabled ? "" : '<th scope="col"><span class="ps-smoothing-sr">Retirer</span></th>'
+  }</tr>`;
+  const body = rows
+    .map((row) => {
+      const key = String(row.rowId);
+      const number = row.id2 ? `N° ${row.id2}` : row.name || "sans N°";
+      const remove = disabled
+        ? ""
+        : `<td><button type="button" class="ps-smoothing-remove" data-remove-plan="${escapeHtml(key)}" aria-label="${escapeHtml(
+            `Retirer le plan ${number}`
+          )}" title="Retirer ce plan">✕</button></td>`;
+      return `<tr>
+        <td class="ps-plan-search-number">${escapeHtml(row.id2)}</td>
+        <td class="ps-smoothing-plan"><span class="ps-plan-search-name">${escapeHtml(row.name)}</span>${
+          row.place ? `<span class="ps-plan-search-place">${escapeHtml(row.place)}</span>` : ""
+        }</td>
+        <td class="ps-plan-search-type"><span class="ps-plan-search-dot" style="background:${escapeHtml(
+          row.typeColor
+        )}"></span>${escapeHtml(row.typeLabel)}</td>
+        <td class="ps-plan-search-date">${escapeHtml(formatDateFr(row.dueIso))}</td>
+        <td><input class="ps-smoothing-input ps-smoothing-input--date" type="date" data-manual-plan="${escapeHtml(
+          key
+        )}" value="${escapeHtml(row.value)}" min="${escapeHtml(minIso)}" aria-label="${escapeHtml(
+          `Date manuelle, ${number}`
+        )}"${isValid(key, row.value) ? "" : ' aria-invalid="true"'}${disabled ? " disabled" : ""}></td>
+        <td class="ps-smoothing-plan-note" data-note-for="${escapeHtml(key)}">${escapeHtml(row.note)}</td>
+        ${remove}
+      </tr>`;
+    })
+    .join("");
+  return `<table class="ps-smoothing-plans-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+
 // --- controleur DOM ---------------------------------------------------------------------
 
 // rootEl = #ps-smoothing-modal. Elements internes (par id) :
@@ -312,16 +478,40 @@ function renderMonthRows(months, types, draft, counts, disabled) {
 //   #ps-smoothing-save ; et, pour le mois de depart et les mois particuliers,
 //   #ps-smoothing-start (liste « Lisser a partir de »), #ps-smoothing-months
 //   (tableau), #ps-smoothing-month-select et #ps-smoothing-month-add (ajout
-//   d'un mois).
+//   d'un mois) ; pour le plan particulier, #ps-smoothing-plans-unavailable
+//   (message « colonne absente »), #ps-smoothing-plans (tableau),
+//   #ps-smoothing-plan-select, #ps-smoothing-plan-add et
+//   #ps-smoothing-plan-browse (« Choisir dans la liste… »).
 // compute(settings) -> SmoothingResult ; onSubmit / onDelete -> Promise<{ ok, error? }>.
+// pickerEl = #ps-plan-pick-modal, la fenetre « Choisir les plans », creee par
+// createPicker (createPlanSearchModal, injectable pour les tests) avec le
+// prefixe ps-plan-pick.
+//
+// Contexte d'open / refresh : { title, typesPresent, tasks, todayIso, settings,
+// saved, readOnly, manualDates ({ rowId: "AAAA-MM-JJ" } enregistrees),
+// hasManualColumn, subtitle (« Projet · Service »), service }. refresh accepte
+// tasks, todayIso et manualDates.
+//
+// Dates manuelles. La saisie (draft.manual, { rowId: "AAAA-MM-JJ" | "" } : une
+// case videe garde sa ligne, sans date) note les plans touches pendant la
+// session (ajoutes, modifies, retires) ; une relecture (refresh avec
+// manualDates) ne remplace que les autres, et open remet tout a zero. Les
+// dates de plans non affiches (realises, absents des taches) sont gardees
+// telles quelles. readDraft().settings.manualDates porte toutes les dates non
+// vides de la saisie, toujours present (meme {}) quand hasManualColumn, absent
+// sinon.
 //
 // Balisage absent (un index.html reste en cache sans ce bloc) : fenetre inerte,
 // sans exception — le controleur du lissage la cree au demarrage du widget, et
 // une exception ici laisserait tout le widget blanc. Meme garde que
 // bottom/chargeAssignModal.js. Un index.html en cache SANS les quatre elements
-// du mois de depart et des mois particuliers garde une fenetre qui marche : ces
-// reglages-la n'y sont simplement pas modifiables (ceux enregistres sont gardes).
-export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debounceMs = 150 } = {}) {
+// du mois de depart et des mois particuliers, ou sans ceux du plan
+// particulier, garde une fenetre qui marche : ces reglages-la n'y sont
+// simplement pas modifiables (ceux enregistres sont gardes).
+export function createSmoothingModal(
+  rootEl,
+  { compute, onSubmit, onDelete, debounceMs = 150, pickerEl = null, createPicker = createPlanSearchModal } = {}
+) {
   if (typeof HTMLElement === "undefined" || !(rootEl instanceof HTMLElement)) {
     return { open() {}, refresh() {}, close() {}, isOpen: () => false, destroy() {} };
   }
@@ -342,6 +532,11 @@ export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debo
   const monthsEl = $("ps-smoothing-months");
   const monthSelectEl = $("ps-smoothing-month-select");
   const monthAddBtn = $("ps-smoothing-month-add");
+  const plansUnavailableEl = $("ps-smoothing-plans-unavailable");
+  const plansEl = $("ps-smoothing-plans");
+  const planSelectEl = $("ps-smoothing-plan-select");
+  const planAddBtn = $("ps-smoothing-plan-add");
+  const planBrowseBtn = $("ps-smoothing-plan-browse");
 
   let opened = false;
   let submitting = false;
@@ -349,13 +544,72 @@ export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debo
   // Contexte courant (open / refresh) et saisie en cours (TEXTE brut des champs :
   // la saisie survit a un refresh du contexte). draft.start : mois de depart
   // choisi ("" = mois en cours) ; draft.months : mois particuliers ajoutes,
-  // { "AAAA-MM": { total, byType } }.
-  let context = { title: "", typesPresent: [], tasks: [], todayIso: "", settings: null, saved: false, readOnly: false };
-  let draft = { total: "", byType: {}, start: "", months: {} };
+  // { "AAAA-MM": { total, byType } } ; draft.manual : dates manuelles,
+  // { rowId: "AAAA-MM-JJ" | "" }.
+  let context = {
+    title: "",
+    typesPresent: [],
+    tasks: [],
+    todayIso: "",
+    settings: null,
+    saved: false,
+    readOnly: false,
+    manualDates: {},
+    hasManualColumn: false,
+    subtitle: "",
+    service: "",
+  };
+  let draft = { total: "", byType: {}, start: "", months: {}, manual: {} };
+  // rowId (texte) des plans ajoutes, modifies ou retires pendant la session.
+  let touched = new Set();
+  // Dernier resultat de l'apercu (SmoothingResult ou null) : date lissee d'un
+  // plan ajoute, notes des lignes, plans de la fenetre « Choisir les plans ».
+  let lastResult = null;
+
+  // Fenetre « Choisir les plans », creee AVANT l'ecouteur d'Echap de celle-ci :
+  // le sien passe donc d'abord (voir handleKeyDown). Inerte si createPicker
+  // ne rend rien.
+  const picker = (typeof createPicker === "function"
+    ? createPicker(pickerEl, { idPrefix: "ps-plan-pick", onManualDateChange: handlePickerChange })
+    : null) || { open() {}, update() {}, close() {}, isOpen: () => false, destroy() {} };
 
   const presentTypes = () => TYPE_ORDER.filter((type) => (context.typesPresent || []).includes(type));
   // Mois de depart de la saisie (AAAA-MM), comme le lissage le calcule.
   const startKeyNow = () => smoothingStartMonth({ startMonth: draft.start || null }, context.todayIso);
+  // Premiere date manuelle qu'on peut saisir (§5.3).
+  const minManualIso = () => firstAllowedManualIso(startKeyNow(), context.todayIso);
+
+  // Date manuelle acceptee : vide (pas de date), ou date reelle a partir de la
+  // premiere date permise — ou egale a la date enregistree (le temps a passe).
+  function manualValueOk(key, value, minIso = minManualIso()) {
+    if (!value) return true;
+    return isIsoDate(value) && (value >= minIso || value === context.manualDates?.[key]);
+  }
+
+  // rowId des plans affiches dans le tableau (non realises, dans la saisie).
+  function shownManualKeys() {
+    return (context.tasks || [])
+      .filter((task) => isManualCandidate(task) && hasKey(draft.manual, String(task.rowId)))
+      .map((task) => String(task.rowId));
+  }
+
+  // Saisie des dates -> { manualDates, error } ; manualDates est null sans
+  // colonne. Seules les dates affichees sont verifiees.
+  function readManualDraft() {
+    if (!context.hasManualColumn) return { manualDates: null, error: null };
+    const manualDates = {};
+    Object.keys(draft.manual).forEach((key) => {
+      if (draft.manual[key]) manualDates[key] = draft.manual[key];
+    });
+    const minIso = minManualIso();
+    const invalid = shownManualKeys().some((key) => !manualValueOk(key, draft.manual[key], minIso));
+    return { manualDates, error: invalid ? `Choisissez une date à partir du ${formatDateFr(minIso)}.` : null };
+  }
+
+  // Dates valides de la saisie, pour la fenetre « Choisir les plans ».
+  function validManualDates() {
+    return Object.fromEntries(Object.entries(draft.manual).filter(([, value]) => isIsoDate(value)));
+  }
 
   // Un groupe de champs { total, byType } -> { maxima, error } ; les types sans
   // ligne gardent leur valeur enregistree (savedByType). `options` : MONTH_CELL
@@ -379,7 +633,8 @@ export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debo
 
   // Saisie -> { settings, firstError } ; settings ignore les champs invalides.
   // startMonth n'y figure que s'il est choisi, maxByMonth que si un mois porte
-  // au moins un maximum (un mois ajoute mais laisse vide n'est pas enregistre).
+  // au moins un maximum (un mois ajoute mais laisse vide n'est pas enregistre),
+  // manualDates des que la colonne existe (voir readManualDraft).
   function readDraft() {
     // Maximums enregistres pour un type sans tache (donc sans ligne ni
     // colonne) : conserves.
@@ -397,6 +652,9 @@ export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debo
         if (own.maxima.maxTotal != null || Object.keys(own.maxima.maxByType).length) maxByMonth[month] = own.maxima;
       });
     if (Object.keys(maxByMonth).length) settings.maxByMonth = maxByMonth;
+    const manual = readManualDraft();
+    if (manual.manualDates) settings.manualDates = manual.manualDates;
+    firstError = firstError || manual.error;
     return { settings, firstError };
   }
 
@@ -424,18 +682,23 @@ export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debo
   }
 
   function renderPreviewNow() {
-    if (!previewEl) return;
     const { settings, firstError } = readDraft();
     // Saisie invalide : on garde le dernier apercu valide plutot que d'afficher
     // un calcul sur des maximums partiels.
-    if (firstError) return;
-    let result = null;
-    try {
-      result = typeof compute === "function" ? compute(settings) : null;
-    } catch (error) {
-      console.warn("Lissage : calcul de l'aperçu impossible.", error);
+    if (previewEl && !firstError) {
+      let result = null;
+      try {
+        result = typeof compute === "function" ? compute(settings) : null;
+      } catch (error) {
+        console.warn("Lissage : calcul de l'aperçu impossible.", error);
+      }
+      lastResult = result;
+      previewEl.innerHTML = renderPreview(result, startKeyNow());
     }
-    previewEl.innerHTML = renderPreview(result, startKeyNow());
+    // Les notes des plans et la fenetre « Choisir les plans » (« Échéance
+    // lissée ») suivent l'apercu.
+    renderPlans();
+    if (picker.isOpen()) picker.update(pickerModel());
   }
 
   function schedulePreview() {
@@ -541,6 +804,109 @@ export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debo
     }
   }
 
+  // Plans et mode affiches par le dernier rendu complet du tableau « Plan
+  // particulier ».
+  let renderedPlansKey = null;
+
+  // Tableau « Plan particulier ». Memes plans et meme mode qu'au dernier rendu
+  // (apercu recalcule, refresh, frappe dans une case, date posee par la
+  // fenetre par-dessus) : les cases sont mises a jour en place, sans etre
+  // recreees, pour ne pas detruire la case en cours de frappe (voir
+  // syncPlanCells ; blurred : case qui perd le focus). Sans colonne : tableau
+  // vide.
+  function renderPlans(blurred = null) {
+    if (!plansEl) return;
+    if (!context.hasManualColumn) {
+      plansEl.innerHTML = "";
+      renderedPlansKey = null;
+      return;
+    }
+    const rows = buildManualPlanRows({ tasks: context.tasks, draftManual: draft.manual, result: lastResult });
+    const readOnly = Boolean(context.readOnly);
+    const key = `${rows.map((row) => String(row.rowId)).sort().join(",")}|${readOnly ? "ro" : "rw"}`;
+    if (key === renderedPlansKey && typeof plansEl.querySelectorAll === "function") {
+      syncPlanCells(rows, blurred);
+      return;
+    }
+    const minIso = minManualIso();
+    plansEl.innerHTML = renderManualPlanRows(rows, {
+      minIso,
+      disabled: readOnly,
+      isValid: (rowKey, value) => manualValueOk(rowKey, value, minIso),
+    });
+    renderedPlansKey = key;
+  }
+
+  function markManualValidity(input, key, value, minIso = minManualIso()) {
+    if (manualValueOk(key, value, minIso)) input.removeAttribute?.("aria-invalid");
+    else input.setAttribute?.("aria-invalid", "true");
+  }
+
+  // Mise a jour en place : notes, puis, pour chaque case, sa date (la saisie a
+  // pu changer par la fenetre « Choisir les plans » ou par une relecture), sa
+  // borne et sa marque d'erreur (le mois de depart a pu changer). La case qui
+  // a le focus garde ce qui y est tape (une date en cours de frappe vaut "") ;
+  // elle reprend la saisie quand elle perd le focus (blurred, handlePlansFocusOut).
+  function syncPlanCells(rows, blurred = null) {
+    const notes = new Map(rows.map((row) => [String(row.rowId), row.note]));
+    Array.from(plansEl.querySelectorAll("[data-note-for]")).forEach((cell) => {
+      const key = cell.dataset?.noteFor;
+      if (notes.has(key)) cell.textContent = notes.get(key);
+    });
+    const minIso = minManualIso();
+    const focused = typeof document !== "undefined" ? document.activeElement : null;
+    Array.from(plansEl.querySelectorAll("input[data-manual-plan]")).forEach((input) => {
+      const key = input.dataset?.manualPlan;
+      if (!key) return;
+      const value = String(draft.manual[key] ?? "");
+      if ((input !== focused || input === blurred) && input.value !== value) input.value = value;
+      input.min = minIso;
+      markManualValidity(input, key, value, minIso);
+    });
+  }
+
+  // Ligne d'ajout : liste des plans sans date manuelle (le choix courant est
+  // garde s'il reste propose), « Ajouter ce plan », « Choisir dans la liste… ».
+  // Lecture seule : seule la fenetre « Choisir les plans » reste, en
+  // consultation. Colonne absente : message, liste et boutons desactives.
+  function renderPlanChoices() {
+    const readOnly = Boolean(context.readOnly);
+    const hasColumn = Boolean(context.hasManualColumn);
+    if (plansUnavailableEl) plansUnavailableEl.hidden = hasColumn;
+    const choices = hasColumn ? buildPlanChoices(context.tasks, draft.manual) : [];
+    if (planSelectEl) {
+      const previous = String(planSelectEl.value ?? "");
+      planSelectEl.innerHTML = choices.length
+        ? choices.map((choice) => `<option value="${escapeHtml(choice.value)}">${escapeHtml(choice.label)}</option>`).join("")
+        : `<option value="">${escapeHtml(NO_PLAN_CHOICE_TEXT)}</option>`;
+      planSelectEl.value = choices.some((choice) => choice.value === previous) ? previous : choices[0]?.value ?? "";
+      planSelectEl.hidden = readOnly;
+      planSelectEl.disabled = readOnly || !choices.length;
+    }
+    if (planAddBtn) {
+      planAddBtn.hidden = readOnly;
+      planAddBtn.disabled = readOnly || !choices.length;
+    }
+    if (planBrowseBtn) {
+      planBrowseBtn.hidden = false;
+      planBrowseBtn.disabled = !hasColumn;
+    }
+  }
+
+  // Modele de la fenetre « Choisir les plans » : les plans du dernier apercu
+  // (SmoothedTask) si le lissage est actif, sinon ceux du contexte.
+  function pickerModel() {
+    const active = Boolean(lastResult?.active);
+    const tasks = active && Array.isArray(lastResult.tasks) ? lastResult.tasks : context.tasks;
+    return {
+      subtitle: context.subtitle || "",
+      service: context.service || "",
+      active,
+      entries: buildPlanSearchEntries({ tasks, active }),
+      manual: { dates: validManualDates(), minIso: minManualIso(), readOnly: Boolean(context.readOnly) },
+    };
+  }
+
   function renderStatic() {
     if (titleEl) titleEl.textContent = context.title || "Lissage des tâches";
     if (readonlyEl) {
@@ -579,38 +945,72 @@ export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debo
     Object.entries(settings.maxByMonth || {}).forEach(([month, maxima]) => {
       draft.months[month] = draftMaxima(maxima);
     });
+    draft.manual = cleanManualDates(context.manualDates);
+    touched = new Set();
+    lastResult = null;
+    // Une saisie remise a zero : la fenetre par-dessus montrerait l'ancienne.
+    picker.close();
     submitting = false;
     showFeedback("");
     renderStatic();
     renderStart();
     renderedKey = null; // ouverture : les lignes sont toujours reconstruites
     renderedMonthsKey = null;
+    renderedPlansKey = null;
     renderTypes();
     renderMonths();
     renderMonthChoices();
+    renderPlans();
+    renderPlanChoices();
     syncButtons();
     renderPreviewNow();
     rootEl.style.display = "flex";
     opened = true;
   }
 
+  // { rowId: iso } -> copie aux cles texte, sans valeur vide.
+  function cleanManualDates(dates) {
+    const clean = {};
+    Object.entries(dates || {}).forEach(([key, iso]) => {
+      if (iso) clean[String(key)] = String(iso);
+    });
+    return clean;
+  }
+
+  // Nouvelles dates enregistrees (relecture) : les plans non touches les
+  // prennent (une date disparue retire la ligne), les plans touches gardent la
+  // saisie ; elles deviennent l'etat enregistre de reference.
+  function mergeManualDates(dates) {
+    const incoming = cleanManualDates(dates);
+    new Set([...Object.keys(draft.manual), ...Object.keys(incoming)]).forEach((key) => {
+      if (touched.has(key)) return;
+      if (hasKey(incoming, key)) draft.manual[key] = incoming[key];
+      else delete draft.manual[key];
+    });
+    context.manualDates = incoming;
+  }
+
   // Le projet a ete relu (un collegue a modifie le planning) : on recalcule les
   // pics et l'apercu sur les nouvelles taches, en gardant la saisie en cours.
-  function refresh({ tasks, todayIso } = {}) {
+  function refresh({ tasks, todayIso, manualDates } = {}) {
     if (!opened) return;
     if (tasks) context.tasks = tasks;
     if (todayIso) context.todayIso = todayIso;
+    if (manualDates) mergeManualDates(manualDates);
     cancelPreviewTimer();
     renderStart();
     renderTypes();
     renderMonths();
     renderMonthChoices();
+    renderPlans();
+    renderPlanChoices();
     syncButtons();
     renderPreviewNow();
   }
 
   function close() {
     cancelPreviewTimer();
+    picker.close();
     rootEl.style.display = "none";
     opened = false;
   }
@@ -648,12 +1048,13 @@ export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debo
     schedulePreview();
   }
 
-  // Le mois de depart change : mois proposes et apercu suivent (les pics, eux,
-  // ne comptent que les taches a venir).
+  // Le mois de depart change : mois proposes, premiere date manuelle permise et
+  // apercu suivent (les pics, eux, ne comptent que les taches a venir).
   function handleStartChange() {
     if (context.readOnly || !startEl) return;
     draft.start = String(startEl.value ?? "");
     renderMonthChoices();
+    renderPlans();
     showFeedback("");
     syncButtons();
     schedulePreview();
@@ -691,6 +1092,102 @@ export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debo
     schedulePreview();
   }
 
+  // --- plan particulier ---
+
+  const canEditManual = () => !context.readOnly && Boolean(context.hasManualColumn);
+
+  // La saisie des dates a change (ajout, retrait, fenetre par-dessus) : lignes,
+  // choix, boutons et apercu suivent.
+  function afterManualChange() {
+    renderPlans();
+    renderPlanChoices();
+    showFeedback("");
+    syncButtons();
+    schedulePreview();
+  }
+
+  // Frappe dans une case « Date manuelle » (evenement delegue). Le tableau
+  // n'est pas reconstruit : la case garde le focus. Vider la case retire la
+  // date, pas la ligne.
+  function handlePlansInput(event) {
+    if (!canEditManual()) return;
+    const target = event?.target;
+    const key = target?.dataset?.manualPlan;
+    if (!key || !hasKey(draft.manual, key)) return;
+    const value = String(target.value ?? "");
+    draft.manual[key] = value;
+    touched.add(key);
+    markManualValidity(target, key, value);
+    showFeedback("");
+    syncButtons();
+    schedulePreview();
+  }
+
+  // Le focus quitte une case date : si la saisie a change pendant qu'elle
+  // l'avait (relecture), elle la reprend. Une date en cours de frappe vaut deja
+  // "" dans la saisie : rien n'est reecrit. (Pendant focusout, le navigateur
+  // peut encore designer cette case comme activeElement : elle est passee.)
+  function handlePlansFocusOut(event) {
+    const target = event?.target;
+    if (target?.dataset?.manualPlan === undefined) return;
+    renderPlans(target);
+  }
+
+  // Bouton « Retirer » d'une ligne du tableau (evenement delegue).
+  function handlePlansClick(event) {
+    if (!canEditManual()) return;
+    const target = event?.target;
+    const button = typeof target?.closest === "function" ? target.closest("[data-remove-plan]") : target;
+    const key = button?.dataset?.removePlan;
+    if (!key || !hasKey(draft.manual, key)) return;
+    delete draft.manual[key];
+    touched.add(key);
+    afterManualChange();
+  }
+
+  // Ajoute le plan choisi avec sa date lissee du dernier apercu (a defaut son
+  // echeance), jamais avant la premiere date permise (un plan en retard
+  // arriverait sinon deja en erreur), et place le curseur dans sa case.
+  function handleAddPlan() {
+    if (!canEditManual() || !planSelectEl) return;
+    const key = String(planSelectEl.value ?? "");
+    const task = (context.tasks || []).find((item) => isManualCandidate(item) && String(item.rowId) === key);
+    if (!task || hasKey(draft.manual, key)) return;
+    const smoothed = (Array.isArray(lastResult?.tasks) ? lastResult.tasks : []).find(
+      (item) => item?.rowId != null && String(item.rowId) === key
+    );
+    const iso = String(smoothed?.smoothedIso || task.dueIso || "");
+    const minIso = minManualIso();
+    draft.manual[key] = !iso || iso < minIso ? minIso : iso;
+    touched.add(key);
+    afterManualChange();
+    const input = typeof plansEl?.querySelector === "function"
+      ? plansEl.querySelector(`input[data-manual-plan="${key}"]`)
+      : null;
+    input?.focus?.();
+  }
+
+  // « Choisir dans la liste… » : la fenetre par-dessus, en consultation en
+  // lecture seule.
+  function handleBrowse() {
+    if (!context.hasManualColumn) return;
+    picker.open(pickerModel());
+  }
+
+  // Case date de la fenetre « Choisir les plans » : une date la pose (et ajoute
+  // la ligne). "" (✕, ou date en cours de frappe) vide la case sans retirer la
+  // ligne ; pour un plan sans ligne, il ne change rien.
+  function handlePickerChange(rowId, value) {
+    if (!opened || !canEditManual()) return;
+    const key = String(rowId);
+    const iso = String(value ?? "");
+    if (iso || hasKey(draft.manual, key)) {
+      draft.manual[key] = iso;
+      touched.add(key);
+    }
+    afterManualChange();
+  }
+
   // Lance une ecriture deleguee au controleur ; ferme sur succes, sinon affiche
   // l'erreur et garde la saisie.
   async function runAction(action, fallbackError) {
@@ -723,7 +1220,7 @@ export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debo
   function handleDelete() {
     if (context.readOnly || !context.saved) return;
     const confirmed = typeof window !== "undefined" && window.confirm
-      ? window.confirm("Supprimer le lissage de ce service ?")
+      ? window.confirm("Supprimer le lissage de ce service (maximums et dates manuelles) ?")
       : true;
     if (!confirmed) return;
     return runAction(() => onDelete(), "La suppression a échoué.");
@@ -733,8 +1230,13 @@ export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debo
     if (!submitting) close();
   }
 
+  // Echap avec « Choisir les plans » ouverte : seule celle-ci se ferme. Son
+  // ecouteur passe avant celui-ci (il ferme et appelle preventDefault) ou
+  // apres (elle est encore ouverte) : les deux cas sont couverts.
   function handleKeyDown(event) {
-    if (event.key === "Escape" && opened) handleClose();
+    if (event.key !== "Escape" || !opened) return;
+    if (event.defaultPrevented || picker.isOpen()) return;
+    handleClose();
   }
 
   function handleBackdropClick(event) {
@@ -747,6 +1249,11 @@ export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debo
   monthsEl?.addEventListener("click", handleMonthsClick);
   startEl?.addEventListener("change", handleStartChange);
   monthAddBtn?.addEventListener("click", handleAddMonth);
+  plansEl?.addEventListener("input", handlePlansInput);
+  plansEl?.addEventListener("click", handlePlansClick);
+  plansEl?.addEventListener("focusout", handlePlansFocusOut);
+  planAddBtn?.addEventListener("click", handleAddPlan);
+  planBrowseBtn?.addEventListener("click", handleBrowse);
   closeBtn?.addEventListener("click", handleClose);
   cancelBtn?.addEventListener("click", handleClose);
   saveBtn?.addEventListener("click", handleSave);
@@ -762,12 +1269,18 @@ export function createSmoothingModal(rootEl, { compute, onSubmit, onDelete, debo
     monthsEl?.removeEventListener("click", handleMonthsClick);
     startEl?.removeEventListener("change", handleStartChange);
     monthAddBtn?.removeEventListener("click", handleAddMonth);
+    plansEl?.removeEventListener("input", handlePlansInput);
+    plansEl?.removeEventListener("click", handlePlansClick);
+    plansEl?.removeEventListener("focusout", handlePlansFocusOut);
+    planAddBtn?.removeEventListener("click", handleAddPlan);
+    planBrowseBtn?.removeEventListener("click", handleBrowse);
     closeBtn?.removeEventListener("click", handleClose);
     cancelBtn?.removeEventListener("click", handleClose);
     saveBtn?.removeEventListener("click", handleSave);
     deleteBtn?.removeEventListener("click", handleDelete);
     rootEl.removeEventListener("click", handleBackdropClick);
     document.removeEventListener("keydown", handleKeyDown);
+    picker.destroy();
   }
 
   return { open, refresh, close, isOpen, destroy };

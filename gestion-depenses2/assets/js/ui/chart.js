@@ -90,13 +90,7 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
     provisionalPercentData,
     realPercentData,
     billingPercentData,
-    billingSource,
   } = buildChartSeries(project, viewState);
-  // T_Avancement (gestion-depenses2) : les barres bleues sont un cumul.
-  // Gestion-globale garde l'ancienne facturation Projets2 et son libelle.
-  const billedAmountLabel = billingSource === "avancement"
-    ? "Montant facture cumule (€)"
-    : "Montant facture mensuel (€)";
 
   destroyChart(currentChart);
 
@@ -167,7 +161,8 @@ export function renderSpendingChart(canvas, currentChart, project, viewState) {
         },
         {
           type: "bar",
-          label: billedAmountLabel,
+          // Cumul des montants T_Avancement, cf. buildChartSeries.
+          label: "Montant facture cumule (€)",
           data: billedAmountData,
           backgroundColor: SPENDING_CHART_COLORS.billing.fill,
           borderColor: SPENDING_CHART_COLORS.billing.solid,

@@ -47,6 +47,7 @@ import { createPlanningRenderer } from "./top/planningRenderer.js";
 import { createPlanningChart } from "./top/planningChart.js";
 import { buildChartTasks } from "./top/taskLoadModel.js";
 import { createSmoothingController } from "./top/smoothingController.js";
+import { readManualDates, sameManualDates } from "./top/manualDates.js";
 import { createChargeBoard, buildWorkersFromSegments } from "./bottom/chargeBoard.js";
 import {
   unionDateBounds,
@@ -188,7 +189,11 @@ function classifyContextSignal(tables, timeSegmentTableName, projectsTableName, 
 //   - `durationsOnly = true`  : les seules colonnes Duree_Projet / Duree_Zone /
 //     Duree_Force, dont depend uniquement la LIGNE CHARGE du pane bas ;
 //   - `durationsOnly = false` : tout le reste, c'est-a-dire ce qui dessine le
-//     pane HAUT (dates, libelles, Realise, ...) et la composition des lignes.
+//     pane HAUT (dates, libelles, Realise, ...) et la composition des lignes —
+//     SAUF la date manuelle du lissage (Date_Manuel_Lissage), qui n'est dans
+//     aucune des deux moities : elle a son propre chemin leger (readManualDates
+//     et sameManualDates dans reloadChargeFromGrist), car elle ne change que le
+//     calcul du lissage, jamais la frise ni la ligne Charge.
 // C'est cette separation qui permet a reloadChargeFromGrist de rafraichir la
 // ligne Charge en place quand SEULES les durees ont bouge, et de retomber sur le
 // rechargement complet des que la frise est concernee.
@@ -203,12 +208,15 @@ function planningRowsSignature(rows, columns, durationsOnly) {
   const durationColumns = new Set(
     [cols.dureeProjet, cols.dureeZone, cols.dureeForce].filter(Boolean)
   );
+  // Colonne de date manuelle : exclue des DEUX moities (cf. plus haut).
+  const manualColumn = cols.manualSmoothingDate;
   const rowSeparator = "\u001E";
   return (Array.isArray(rows) ? rows : [])
     .map((row) => {
       const source = row || {};
       const picked = {};
       Object.keys(source)
+        .filter((key) => key !== manualColumn)
         .filter((key) => durationColumns.has(key) === Boolean(durationsOnly))
         .sort()
         .forEach((key) => {
@@ -246,6 +254,11 @@ function bootstrapApp() {
     smoothingOpen: document.getElementById("ps-smoothing-open"),
     smoothingModal: document.getElementById("ps-smoothing-modal"),
     monthTasksModal: document.getElementById("ps-month-tasks-modal"),
+    // Loupe « Rechercher un plan » de la vue Graphique et sa fenetre.
+    planSearchOpen: document.getElementById("ps-search-open"),
+    planSearchModal: document.getElementById("ps-plan-search-modal"),
+    // Fenetre « Choisir les plans » (dates manuelles du lissage).
+    planPickModal: document.getElementById("ps-plan-pick-modal"),
   };
 
   if (!(els.select instanceof HTMLElement)) {
@@ -347,6 +360,9 @@ function bootstrapApp() {
       openButton: els.smoothingOpen,
       smoothingModalEl: els.smoothingModal,
       monthTasksModalEl: els.monthTasksModal,
+      planSearchButton: els.planSearchOpen,
+      planSearchModalEl: els.planSearchModal,
+      planPickModalEl: els.planPickModal,
     },
     saveCell: updateProjectSmoothing,
     // Relecture FRAICHE juste avant d'ecrire : le cache de la couche partagee
@@ -555,7 +571,18 @@ function bootstrapApp() {
     // Avant applyTopView() : le graphique trace ce que le lissage renvoie. Un
     // changement de contexte ferme ses fenetres ; le meme contexte les garde
     // ouvertes et les rafraichit.
-    smoothing.setProjectData({ contextKey, project, tasks: chartTasks, projectRow });
+    // Dates manuelles du lissage : lues dans les lignes Planning_Projet a chaque
+    // chargement. `currentManual` garde la derniere lecture pour que la
+    // relecture legere (reloadChargeFromGrist) sache si seule cette colonne a bouge.
+    let currentManual = readManualDates(planningRows, pc.planningProject);
+    smoothing.setProjectData({
+      contextKey,
+      project,
+      tasks: chartTasks,
+      projectRow,
+      manualDates: currentManual.dates,
+      hasManualColumn: currentManual.hasColumn,
+    });
 
     const aggregate = Boolean(els.aggregateToggle && els.aggregateToggle.checked);
     planningRenderer.render({
@@ -843,6 +870,34 @@ function bootstrapApp() {
       ) {
         reconcileAndLoad({ force: true });
         return;
+      }
+
+      // Date manuelle du lissage (Date_Manuel_Lissage). Exclue de la moitie
+      // « tout le reste » ci-dessus : ni la frise ni la ligne Charge ne la lisent.
+      // - La colonne apparait ou disparait : le lissage doit etre reconstruit
+      //   (section activee/desactivee), on recharge tout.
+      // - Seules les dates changent (notre propre ecriture, ou celle d'un
+      //   collegue) : on recopie la colonne dans les lignes EN MEMOIRE (meme
+      //   reference, comme les durees), puis le controleur recalcule et redessine
+      //   le graphique, sans loadProject ni rechargement visible. Il ne fait rien
+      //   si les dates sont identiques.
+      const nextManual = readManualDates(nextPlanningRows, chargeColumns);
+      if (nextManual.hasColumn !== currentManual.hasColumn) {
+        reconcileAndLoad({ force: true });
+        return;
+      }
+      if (!sameManualDates(nextManual.dates, currentManual.dates)) {
+        const manualKey = chargeColumns.manualSmoothingDate;
+        const nextRowsByIdForManual = new Map(
+          nextPlanningRows.map((row) => [row?.[chargeColumns.id], row])
+        );
+        (Array.isArray(planningRows) ? planningRows : []).forEach((row) => {
+          const nextRow = nextRowsByIdForManual.get(row?.[chargeColumns.id]);
+          if (!nextRow || !Object.prototype.hasOwnProperty.call(nextRow, manualKey)) return;
+          row[manualKey] = nextRow[manualKey];
+        });
+        currentManual = nextManual;
+        smoothing.setManualDates(nextManual.dates);
       }
 
       // Seules les durees ont bouge : la ligne Charge est la seule concernee. On

@@ -2566,10 +2566,6 @@ td input {
   min-width: 72px;
 }
 
-.billing-percentage {
-  width: 84px;
-}
-
 .modal {
   position: fixed;
   inset: 0;

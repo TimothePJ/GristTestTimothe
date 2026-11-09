@@ -9,11 +9,13 @@
 // Module PUR, sans DOM. Les taches sont les ChartTask de top/taskLoadModel.js ;
 // la date du jour est passee explicitement (todayIso, AAAA-MM-JJ, horloge locale
 // du navigateur) ; les reglages sont { maxTotal, maxByType, startMonth?,
-// maxByMonth? } (top/smoothingSettings.js) : maximums entiers >= 1, une valeur
-// absente = pas de maximum ; maxByMonth donne, pour un mois precis, un maximum
-// general et/ou par type qui remplace celui de tous les mois (monthMaxima), 0
-// compris (aucune tache, ou aucune de ce type, ce mois-la) ; startMonth
-// (AAAA-MM) est le mois de depart (§4.8).
+// maxByMonth?, manualDates? } (top/smoothingSettings.js) : maximums entiers
+// >= 1, une valeur absente = pas de maximum ; maxByMonth donne, pour un mois
+// precis, un maximum general et/ou par type qui remplace celui de tous les mois
+// (monthMaxima), 0 compris (aucune tache, ou aucune de ce type, ce mois-la) ;
+// startMonth (AAAA-MM) est le mois de depart (§4.8) ; manualDates
+// ({ [rowId]: "AAAA-MM-JJ" }) donne les dates manuelles (DATES MANUELLES
+// ci-dessous).
 //
 // VOCABULAIRE (§3.3) : le mois courant est celui de todayIso. Le MOIS DE DEPART
 // est le premier mois ou une tache peut etre placee : startMonth s'il est fixe
@@ -26,9 +28,11 @@
 // deviennent des CIBLES (vides ou non, leurs taches figees comptent). Les taches
 // a venir y sont placees d'abord, les taches en retard ensuite, dans la place
 // qui reste : leur mobilite ne prive jamais les mois a venir. Les mois d'avant
-// le depart ne sont ni cible ni signales.
+// le depart ne sont ni cible ni signales. Un PLAN FIXE (date manuelle, voir
+// DATES MANUELLES) n'est ni fige ni mobile : il est traite comme fige.
 //
-// REGLES STRICTES (§4.2), verifiees par findSmoothingViolations :
+// REGLES STRICTES (§4.2), verifiees par findSmoothingViolations (exemptions
+// des plans fixes et des coffrages qui les suivent : DATES MANUELLES) :
 //   1. jamais plus tard ;
 //   2. jamais avant le mois de depart ; et, quand le depart est le mois
 //      courant, jamais a une date anterieure a aujourd'hui ;
@@ -42,7 +46,45 @@
 //      qu'ils valent pour CE mois ;
 //   6. deterministe.
 //
+// DATES MANUELLES (spec 2026-11-09, §4, citee « S§ ») : settings.manualDates
+// impose la date de fin de certains plans, en mode lisse seulement (l'echeance
+// ne change pas). Un plan est FIXE s'il n'est pas realise, si son rowId figure
+// dans manualDates et si sa date est reelle (manualIsoOf ; une date stockee sur
+// un plan realise est ignoree). Un plan fixe :
+//   - prend sa date manuelle comme date lissee, et le mois de celle-ci comme
+//     mois de travail DES LE DEPART : il compte dans les maximums de ce mois
+//     (Total et son type), et les taches mobiles se lissent autour de lui (un
+//     mois rempli par des plans fixes fait avancer ses autres taches) ;
+//   - ne bouge jamais : il est traite comme une tache figee au placement et a
+//     la remise en ordre. Sa date n'est bornee ni par le mois de depart ni par
+//     aujourd'hui, et peut etre apres l'echeance : il quitte alors le mois de
+//     son echeance, ou une place se libere ;
+//   - n'est verifie par aucune regle stricte, mais compte dans les mois ;
+//   - n'est pas « avance » (moved faux, hors de movedCount) : monthsAdvanced
+//     vaut mois de l'echeance moins mois de la date manuelle, negatif quand
+//     celle-ci est plus tard (delayedCount compte ces plans).
+// Une ARMATURE FIXEE entraine ses coffrages (S§4.2) : avant l'etape 1, pour
+// chaque armature fixee dans l'ordre des taches, chacun de ses coffrages
+// mobiles (ni figes ni fixes) d'un mois apres le sien, du plus tardif au plus
+// tot, part dans le mois le plus tardif <= celui de l'armature ou il tient
+// (latestFit). S'il ne tient nulle part, il y va QUAND MEME (forced) : le mois
+// depasse, avec la raison « dates-manuelles ». Sa date, comme celle d'un
+// coffrage mobile deja dans le mois de l'armature mais un jour plus tard, est
+// bornee a la date manuelle de l'armature : jamais apres elle. Ces coffrages
+// portent pulledFor (N° de l'armature) et followsManual ; un coffrage seulement
+// borne garde monthsAdvanced 0 (il n'est pas avance). Les coffrages entraines
+// au pre-placement entrent dans pullInvolved (rule4Exception), pas l'armature
+// fixee. Les regles 2 et 5 ne visent pas un coffrage followsManual (elles
+// cedent devant la date choisie, meme passee ou avant le depart) ; la regle 1
+// si. Un COFFRAGE FIXE apres son armature la retient : l'armature n'est pas
+// retardee (le lissage ne retarde jamais une tache mobile), ni avancee avant
+// lui (filet de securite de placeEntry : un coffrage fige bloque).
+// Le lissage est actif des qu'un maximum existe OU qu'un plan est fixe ; sans
+// maximum, seuls les plans fixes et leurs coffrages bougent, et aucun
+// depassement n'est rapporte.
+//
 // ALGORITHME, EN UN COUP D'OEIL :
+//   0. Pre-placement des coffrages des armatures fixees (DATES MANUELLES).
 //   1. Placement (passe montante, du mois de depart au dernier mois) : tant
 //      qu'un mois depasse un de SES maximums, sa tache mobile la plus tot part
 //      dans le mois le plus TARDIF avant lui (et pas avant le mois de depart),
@@ -312,6 +354,28 @@ function isFrozenTask(task, dueMonth, currentMonth, startMonth) {
   return Boolean(task?.realized) || (dueMonth < currentMonth && dueMonth <= startMonth);
 }
 
+// --- plans fixes (dates manuelles, S§4.1) ------------------------------------------
+
+// Vrai pour une date AAAA-MM-JJ reelle (le 30 fevrier est refuse). Meme test
+// que isIsoDate de top/manualDates.js, garde ici : ce module-la importe
+// celui-ci.
+function isRealIsoDate(value) {
+  const match = ISO_DATE.exec(String(value ?? ""));
+  if (!match) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+// Date manuelle (AAAA-MM-JJ) d'un plan FIXE : non realise, rowId present dans
+// settings.manualDates, date reelle. null sinon (pas de date, date illisible,
+// ou plan realise : sa date est ignoree).
+function manualIsoOf(task, settings) {
+  if (!task || task.realized || task.rowId == null) return null;
+  const iso = settings?.manualDates?.[String(task.rowId)];
+  return isRealIsoDate(iso) ? iso : null;
+}
+
 // --- armature / coffrage (regle 4, §4.6) -------------------------------------------
 
 // Coffrages qui contraignent les armatures : non realises (un coffrage realise
@@ -341,52 +405,89 @@ function coffragesOf(coffrageIndex, task) {
 // mois, elle garde son jour (borne a la fin du mois). Quand le depart est le
 // mois courant, une tache qui y arrive a une date deja passee prend aujourd'hui ;
 // avec un depart passe, les dates passees sont permises et le jour est garde.
-// Les coffrages d'abord : une armature avancee dans le meme mois qu'un coffrage
-// de son groupe prend au plus tot la date lissee de ce coffrage (elle reste dans
-// son mois, donc avant son echeance). Un coffrage entraine n'a ainsi jamais une
-// date posterieure a celle de son armature.
-function buildSmoothedTasks(entries, coffrageIndex, todayIso, currentMonth, startMonth) {
+// Un plan fixe prend sa date manuelle. Puis la borne de jour (S§4.2) : un
+// coffrage mobile (ni fige ni fixe) dans le meme mois qu'une armature fixee de
+// son groupe, a une date plus tardive que la sienne, prend la date manuelle de
+// l'armature, avec pulledFor (son N°) et followsManual ; les armatures fixees
+// sont prises dans l'ordre des taches (fixedArmatures), pour qu'a dates egales
+// pulledFor ne depende pas de l'ordre d'entree. Les coffrages d'abord : une
+// armature avancee (pas un plan fixe) dans le meme mois qu'un coffrage de son
+// groupe prend au plus tot la date lissee de ce coffrage, borne compris (elle
+// reste dans son mois, donc avant son echeance). Un coffrage entraine n'a ainsi
+// jamais une date posterieure a celle de son armature.
+function buildSmoothedTasks(entries, coffrageIndex, fixedArmatures, todayIso, currentMonth, startMonth) {
   const dates = entries.map((entry) => {
+    if (entry.manualIso) return entry.manualIso;
     if (!(entry.dueMonth - entry.month > 0)) return entry.task.dueIso;
     const shifted = shiftIsoByMonths(entry.task.dueIso, entry.month - entry.dueMonth);
     const startsToday = startMonth === currentMonth && entry.month === currentMonth;
     return startsToday && shifted < todayIso ? todayIso : shifted;
   });
+  const boundFor = entries.map(() => null);
+  fixedArmatures.forEach((i) => {
+    const armature = entries[i];
+    coffragesOf(coffrageIndex, armature.task).forEach((j) => {
+      const coffrage = entries[j];
+      if (coffrage.frozen || coffrage.month !== armature.month || !(dates[j] > armature.manualIso)) return;
+      dates[j] = armature.manualIso;
+      boundFor[j] = String(armature.task.id2 ?? "");
+    });
+  });
   entries.forEach((entry, i) => {
-    if (!(entry.dueMonth - entry.month > 0)) return;
+    if (entry.manualIso || !(entry.dueMonth - entry.month > 0)) return;
     coffragesOf(coffrageIndex, entry.task).forEach((j) => {
       if (entries[j].month === entry.month && dates[j] > dates[i]) dates[i] = dates[j];
     });
   });
   return entries.map((entry, i) => {
     const monthsAdvanced = entry.dueMonth - entry.month;
+    const manual = entry.manualIso != null;
     return {
       ...entry.task,
       smoothedIso: dates[i],
       monthsAdvanced,
-      moved: monthsAdvanced > 0,
-      frozen: entry.frozen,
-      pulledFor: entry.pulledFor,
+      moved: !manual && monthsAdvanced > 0,
+      frozen: entry.frozen && !manual,
+      manual,
+      forced: entry.forced,
+      followsManual: entry.followsManual || boundFor[i] != null,
+      pulledFor: boundFor[i] ?? entry.pulledFor,
       rule4Exception: entry.rule4Exception,
     };
   });
 }
 
-// tasks (ChartTask[]) + maximums + date du jour -> SmoothingResult :
+// tasks (ChartTask[]) + reglages + date du jour -> SmoothingResult :
 //   { active, tasks: SmoothedTask[] (meme ordre que l'entree), movedCount,
+//     manualCount, delayedCount,
 //     overflows: [{ month: "AAAA-MM", series: "TOTAL" | type, count, max,
 //                   reason }] tries par mois puis par serie }
+//   movedCount : taches avancees (moved) ; manualCount : plans fixes ;
+//   delayedCount : plans fixes dont la date manuelle est apres l'echeance.
 //   SmoothedTask = ChartTask & { smoothedIso, monthsAdvanced, moved, frozen,
-//                                pulledFor, rule4Exception }
-//   pulledFor : pour un coffrage entraine par une armature (§4.6), le N° (id2)
-//   de cette armature ; null sinon.
+//                                manual, forced, followsManual, pulledFor,
+//                                rule4Exception }
+//   monthsAdvanced : mois de l'echeance moins mois lisse ; negatif pour un plan
+//   fixe a une date plus tardive.
+//   moved : avancee d'au moins un mois par le lissage ; faux pour un plan fixe.
+//   frozen : tache figee (§3.3) ; faux pour un plan fixe, que porte manual.
+//   manual : plan fixe (date manuelle, S§4.1), a sa date manuelle.
+//   forced : coffrage d'une armature fixee mis dans le mois de celle-ci sans y
+//   tenir (S§4.2).
+//   followsManual : coffrage replace a cause d'une armature fixee de son
+//   groupe : entraine au pre-placement, ou borne a sa date manuelle (S§4.2).
+//   Les regles 2 et 5 ne le visent pas.
+//   pulledFor : pour un coffrage entraine par une armature (§4.6), ou borne a
+//   la date d'une armature fixee, le N° (id2) de cette armature ; null sinon.
 //   rule4Exception : vrai pour une tache que la regle 4 soustrait a la
 //   preference 4 (§4.3) : armature retenue par son coffrage, coffrage entraine
-//   et armature qui l'a entraine, armature ou coffrage retire de la remise en
-//   ordre parce qu'elle y passerait avant son coffrage. Seules ces taches
-//   peuvent doubler une tache plus tot de leur file, ou etre doublees par une
-//   plus tardive (verifie par tests/taskSmoothingFuzz.test.mjs) ; faux sinon.
-// Sans aucun maximum : active = false et chaque tache garde son echeance.
+//   et armature qui l'a entraine (pas une armature fixee), armature ou coffrage
+//   retire de la remise en ordre parce qu'elle y passerait avant son coffrage.
+//   Seules ces taches peuvent doubler une tache plus tot de leur file, ou etre
+//   doublees par une plus tardive (verifie par tests/taskSmoothingFuzz.test.mjs) ;
+//   faux sinon.
+// Sans aucun maximum ni plan fixe : active = false et chaque tache garde son
+// echeance (une date manuelle sur un plan realise ne rend pas actif).
 export function smoothTasks(tasks, settings, todayIso) {
   const list = Array.isArray(tasks) ? tasks : [];
   const limits = readLimits(settings);
@@ -394,24 +495,38 @@ export function smoothTasks(tasks, settings, todayIso) {
   const startMonth = monthIndexOf(smoothingStartMonth(settings, todayIso));
   const coffrageIndex = indexCoffrages(list);
 
+  // Entrees de travail. Un plan fixe part du mois de sa date manuelle (il y
+  // compte des le depart) et est traite comme fige : il ne bouge jamais.
   const entries = list.map((task) => {
     const dueMonth = monthIndexOf(task.dueIso);
+    const manualIso = manualIsoOf(task, settings);
     return {
       task,
       dueMonth,
-      month: dueMonth,
-      frozen: isFrozenTask(task, dueMonth, currentMonth, startMonth),
+      month: manualIso ? monthIndexOf(manualIso) : dueMonth,
+      frozen: manualIso != null || isFrozenTask(task, dueMonth, currentMonth, startMonth),
+      manualIso,
+      forced: false,
+      followsManual: false,
       pulledFor: null,
       rule4Exception: false,
     };
   });
-  const smoothedNow = () => buildSmoothedTasks(entries, coffrageIndex, todayIso, currentMonth, startMonth);
+  // Armatures fixees qui ont des coffrages (positions), dans l'ordre des taches.
+  const fixedArmatures = entries
+    .map((entry, i) => i)
+    .filter((i) => entries[i].manualIso && coffragesOf(coffrageIndex, entries[i].task).length > 0)
+    .sort((a, b) => compareChartTasks(entries[a].task, entries[b].task));
+  const smoothedNow = () =>
+    buildSmoothedTasks(entries, coffrageIndex, fixedArmatures, todayIso, currentMonth, startMonth);
 
-  if (!limits.active) {
+  if (!limits.active && !entries.some((entry) => entry.manualIso)) {
     return {
       active: false,
       tasks: smoothedNow(),
       movedCount: 0,
+      manualCount: 0,
+      delayedCount: 0,
       overflows: [],
     };
   }
@@ -426,7 +541,9 @@ export function smoothTasks(tasks, settings, todayIso) {
   // (avant le leur), et un coffrage entraine va au plus au mois de son
   // armature : rien n'est jamais pousse vers un mois plus tardif. Quand un mois
   // est traite, il ne contient donc que ses propres taches, moins les coffrages
-  // deja entraines plus tot.
+  // deja entraines plus tot, plus les plans fixes a une date de ce mois et les
+  // coffrages que leur armature fixee y a mis (etape 0) : ceux-la comptent,
+  // mais n'en partent jamais comme candidats.
 
   // Taches d'un entrainement (coffrages entraines et armatures qui les ont
   // entraines), tenues hors de la remise en ordre ; armatures restees faute de
@@ -460,7 +577,9 @@ export function smoothTasks(tasks, settings, todayIso) {
   // total de k). Le plus tardif des coffrages se place le premier : ils gardent
   // leur ordre chronologique, quel que soit l'ordre d'entree. Si l'un d'eux n'a
   // aucune place, tout est defait et la recherche s'arrete : un mois plus tot
-  // n'offrirait au coffrage qu'une partie des memes mois.
+  // n'offrirait au coffrage qu'une partie des memes mois. Un coffrage force
+  // (etape 0) qu'une armature mobile entraine encore plus tot tient dans son
+  // nouveau mois : il n'est plus force.
   const placeEntry = (entry, fromMonth) => {
     const coffrages = coffragesOf(coffrageIndex, entry.task)
       .map((j) => entries[j])
@@ -474,21 +593,27 @@ export function smoothTasks(tasks, settings, todayIso) {
       // que les coffrages en retard d'un mois posterieur au depart sont mobiles
       // (2026-10-28), un tel coffrage est au plus au mois de depart, donc jamais
       // apres k : le cas ne se presente plus.
+      // Un coffrage FIXE (date manuelle) est traite comme fige : une armature
+      // ne passe jamais avant lui (S§4.3). Ce cas-la se presente.
       if (behind.some((coffrage) => coffrage.frozen)) {
         blockedByCoffrage.add(entry);
         return;
       }
-      const undo = [[entry, entry.month]];
+      const undo = [[entry, entry.month, entry.forced]];
       moveEntry(entry, k);
       const allPlaced = behind.every((coffrage) => {
         const target = latestFit(coffrage.task.type, k);
         if (target == null) return false;
-        undo.push([coffrage, coffrage.month]);
+        undo.push([coffrage, coffrage.month, coffrage.forced]);
         moveEntry(coffrage, target);
+        coffrage.forced = false;
         return true;
       });
       if (!allPlaced) {
-        undo.reverse().forEach(([moved, month]) => moveEntry(moved, month));
+        undo.reverse().forEach(([moved, month, forced]) => {
+          moveEntry(moved, month);
+          moved.forced = forced;
+        });
         blockedByCoffrage.add(entry);
         return;
       }
@@ -536,6 +661,30 @@ export function smoothTasks(tasks, settings, todayIso) {
       }
     });
   };
+
+  // Etape 0 (avant le placement) — une armature fixee entraine ses coffrages
+  // (S§4.2) : pour chaque armature fixee, dans l'ordre des taches, ses coffrages
+  // mobiles d'un mois apres le sien, du plus tardif au plus tot, partent dans le
+  // mois le plus tardif <= le sien ou ils tiennent ; sans place, dans son mois
+  // quand meme (forced). Ils prennent leur place avant toute autre tache :
+  // celles-ci se lissent autour, et aucune n'arrive dans un mois qu'un coffrage
+  // force fait deborder. L'armature fixee n'entre pas dans pullInvolved : elle
+  // ne fait de toute facon partie d'aucune file.
+  fixedArmatures.forEach((i) => {
+    const armature = entries[i];
+    coffragesOf(coffrageIndex, armature.task)
+      .map((j) => entries[j])
+      .filter((coffrage) => !coffrage.frozen && coffrage.month > armature.month)
+      .sort((a, b) => compareChartTasks(b.task, a.task))
+      .forEach((coffrage) => {
+        const target = latestFit(COFFRAGE, armature.month);
+        coffrage.forced = target == null;
+        moveEntry(coffrage, target ?? armature.month);
+        coffrage.pulledFor = String(armature.task.id2 ?? "");
+        coffrage.followsManual = true;
+        pullInvolved.add(coffrage);
+      });
+  });
 
   // Les taches A VENIR d'abord, puis les taches EN RETARD rendues mobiles par un
   // depart passe, dans la place qui reste. Placees ensemble, les taches en
@@ -646,19 +795,30 @@ export function smoothTasks(tasks, settings, todayIso) {
 
   // Depassements restants (§4.7), mois de depart et suivants, comptes sur les
   // dates lissees finales, chacun avec le maximum de SON mois. Raison, dans cet
-  // ordre : les taches figees depassent deja seules (« taches-realisees », ou
-  // « taches-passees » dans un mois passe, ou elles sont realisees ou en
-  // retard) ; mois courant quand le lissage part de lui (rien ne peut aller
-  // plus tot) ; une armature retenue par son coffrage est dans ce mois (series
-  // Armature et Total) ; sinon plus de place avant. Un mois passe ne recoit que
-  // des taches qui y tiennent : il ne deborde que par ses taches figees.
+  // ordre : les taches figees (hors plans fixes) depassent deja seules
+  // (« taches-realisees », ou « taches-passees » dans un mois passe, ou elles
+  // sont realisees ou en retard) ; les taches figees, les plans fixes et les
+  // coffrages forces le depassent ensemble, ou le mois contient un coffrage
+  // force de la serie (pour le Total, tout coffrage force du mois) :
+  // « dates-manuelles » (S§4.5) ; mois courant quand le lissage part de lui
+  // (rien ne peut aller plus tot) ; une armature retenue par son coffrage est
+  // dans ce mois (series Armature et Total) ; sinon plus de place avant. Un
+  // mois passe ne recoit que des taches qui y tiennent : il ne deborde que par
+  // ses taches figees, ses plans fixes et ses coffrages forces.
   const finalCounter = createCounter();
   smoothed.forEach((task) => finalCounter.add(monthIndexOf(task.smoothedIso), task.type, 1));
   const blockedMonths = new Set([...blockedByCoffrage].map((entry) => entry.month));
   const frozenCounter = createCounter();
-  entries
-    .filter((entry) => entry.frozen)
-    .forEach((entry) => frozenCounter.add(entry.month, entry.task.type, 1));
+  const manualCounter = createCounter();
+  const forcedCounter = createCounter();
+  entries.forEach((entry) => {
+    if (entry.manualIso) manualCounter.add(entry.month, entry.task.type, 1);
+    else if (entry.frozen) frozenCounter.add(entry.month, entry.task.type, 1);
+    if (entry.forced) {
+      manualCounter.add(entry.month, entry.task.type, 1);
+      forcedCounter.add(entry.month, entry.task.type, 1);
+    }
+  });
   const series = watchedSeries(limits);
   const overflows = [];
   finalCounter
@@ -670,8 +830,11 @@ export function smoothTasks(tasks, settings, todayIso) {
         const count = finalCounter.get(month, name);
         if (max == null || count <= max) return;
         let reason = "plus-de-place";
-        if (frozenCounter.get(month, name) > max) reason = month < currentMonth ? "taches-passees" : "taches-realisees";
-        else if (month === currentMonth && startMonth === currentMonth) reason = "mois-en-cours";
+        const frozen = frozenCounter.get(month, name);
+        if (frozen > max) reason = month < currentMonth ? "taches-passees" : "taches-realisees";
+        else if (frozen + manualCounter.get(month, name) > max || forcedCounter.get(month, name) > 0) {
+          reason = "dates-manuelles";
+        } else if (month === currentMonth && startMonth === currentMonth) reason = "mois-en-cours";
         else if (blockedMonths.has(month) && (name === ARMATURES || name === TOTAL)) {
           reason = "coffrage-sans-place";
         }
@@ -683,6 +846,8 @@ export function smoothTasks(tasks, settings, todayIso) {
     active: true,
     tasks: smoothed,
     movedCount: smoothed.filter((task) => task.moved).length,
+    manualCount: smoothed.filter((task) => task.manual).length,
+    delayedCount: smoothed.filter((task) => task.manual && task.smoothedIso > task.dueIso).length,
     overflows,
   };
   const remaining = findSmoothingViolations(list, settings, todayIso, result);
@@ -704,6 +869,11 @@ export function smoothTasks(tasks, settings, todayIso) {
 //     <= date lissee de l'armature ;
 //   - regle 5 : dans le mois d'arrivee d'une tache avancee, le compte de son
 //     type et le total respectent les maximums de ce mois.
+// Dates manuelles (S§4.6) : un plan fixe (connu par settings.manualDates) n'est
+// verifie par aucune regle, mais compte dans les comptes de son mois ; une
+// tache marquee followsManual dans le resultat (coffrage replace a cause d'une
+// armature fixee) n'est visee ni par la regle 2 ni par la regle 5, mais l'est
+// par la regle 1.
 export function findSmoothingViolations(tasks, settings, todayIso, result) {
   return collectViolations(tasks, settings, todayIso, result).map((violation) => violation.message);
 }
@@ -759,19 +929,23 @@ function collectViolations(tasks, settings, todayIso, result) {
       });
       return;
     }
+    // Plan fixe : aucune regle (il compte deja dans `counter`).
+    if (manualIsoOf(task, settings)) return;
     const smoothedIso = out.smoothedIso;
     if (!(smoothedIso <= task.dueIso)) {
       report(1, "", `date lissée ${smoothedIso} après l'échéance ${task.dueIso}`);
     }
     if (smoothedIso === task.dueIso) return;
 
+    // Coffrage qui suit une armature fixee : ni regle 2, ni regle 5.
+    const followsManual = Boolean(out.followsManual);
     const dueMonth = monthIndexOf(task.dueIso);
     const month = monthIndexOf(smoothedIso);
-    if (startMonth === currentMonth) {
+    if (!followsManual && startMonth === currentMonth) {
       if (!(month >= currentMonth) || !(smoothedIso >= todayIso)) {
         report(2, "", `placée le ${smoothedIso}, avant aujourd'hui (${todayIso})`);
       }
-    } else if (!(month >= startMonth)) {
+    } else if (!followsManual && !(month >= startMonth)) {
       report(2, "", `placée le ${smoothedIso}, avant le début du lissage (${startKey})`);
     }
     if (isFrozenTask(task, dueMonth, currentMonth, startMonth)) {
@@ -788,7 +962,7 @@ function collectViolations(tasks, settings, todayIso, result) {
         );
       }
     });
-    if (month < dueMonth) {
+    if (month < dueMonth && !followsManual) {
       const typeMax = limitOf(limits, month, task.type);
       const typeCount = counter.get(month, task.type);
       if (typeMax != null && typeCount > typeMax) {

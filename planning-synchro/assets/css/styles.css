@@ -419,7 +419,8 @@ body.ps-panning * {
   flex-basis: auto;
   margin-bottom: 0;
 }
-.ps-smoothing-open:disabled {
+.ps-smoothing-open:disabled,
+.ps-search-open:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -2390,6 +2391,247 @@ body.ps-panning .charge-plan-board .charge-plan-track {
   }
 }
 
+/* --- Loupe et fenetre « Rechercher un plan » (#ps-plan-search-modal) -----------
+   Loupe : meme pastille que « Lisser… », l'icone seule. Fenetre : meme charpente
+   ps-modal / ps-modal-header / ps-modal-close-btn que les autres ; pastille de
+   couleur du type (TYPE_META) et ligne realisee en vert, regles reprises de la
+   liste des taches du mois (.ps-month-tasks-item.is-realized). */
+.ps-search-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  color: var(--color-primary);
+}
+
+.ps-search-open:focus-visible,
+.ps-plan-search-reset:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* `overflow-y: auto` : dans un widget peu haut (panneau Grist ouvert), la
+   fenetre defile au lieu de couper son en-tete et le bouton « Fermer ». */
+.ps-modal-content--plan-search {
+  width: min(1040px, calc(100vw - 32px));
+  max-height: min(860px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.ps-plan-search-form {
+  display: grid;
+  /* N° court, nom large, puis zone, type et etat (« Avancés par le lissage »). */
+  grid-template-columns:
+    minmax(110px, 0.7fr) minmax(200px, 1.4fr) repeat(2, minmax(140px, 1fr))
+    minmax(210px, 1.2fr);
+  gap: 12px;
+  margin: 0;
+}
+
+.ps-plan-search-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ps-plan-search-field > span {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.ps-plan-search-field input,
+.ps-plan-search-field select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.ps-plan-search-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.ps-plan-search-summary {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ps-plan-search-lissage {
+  flex: 1 1 260px;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.88rem;
+}
+
+.ps-plan-search-lissage.is-active {
+  color: var(--color-primary);
+}
+
+.ps-plan-search-reset {
+  font-size: 0.88rem;
+}
+
+.ps-plan-search-results {
+  flex: 1 1 auto;
+  min-height: 160px;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Sur un ecran etroit, le tableau defile dans son cadre plutot que de tasser
+   ses colonnes de dates ; l'en-tete reste en haut pendant le defilement. */
+.ps-plan-search-table {
+  width: 100%;
+  min-width: 780px;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.ps-plan-search-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 10px 12px;
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.ps-plan-search-table td {
+  padding: 9px 12px;
+  border-top: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.ps-plan-search-number,
+.ps-plan-search-date,
+.ps-plan-search-progress {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ps-plan-search-number {
+  font-weight: 700;
+}
+
+.ps-plan-search-table .ps-plan-search-progress {
+  text-align: right;
+}
+
+.ps-plan-search-plan {
+  min-width: 220px;
+}
+
+.ps-plan-search-name,
+.ps-plan-search-place,
+.ps-plan-search-note,
+.ps-plan-search-shift {
+  display: block;
+}
+
+.ps-plan-search-name {
+  overflow-wrap: anywhere;
+}
+
+.ps-plan-search-place,
+.ps-plan-search-note {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}
+
+/* La note « avancé pour libérer l'armature … » peut porter un nom long : elle
+   passe a la ligne au lieu d'elargir la colonne des dates (nowrap). */
+.ps-plan-search-date .ps-plan-search-note {
+  white-space: normal;
+}
+
+.ps-plan-search-type {
+  white-space: nowrap;
+}
+
+.ps-plan-search-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 8px;
+  border-radius: 50%;
+}
+
+.ps-plan-search-date--unchanged {
+  color: var(--color-text-muted);
+}
+
+/* L'echeance avancee par le lissage : la seule valeur mise en avant. */
+.ps-plan-search-date--moved strong,
+.ps-plan-search-shift {
+  color: var(--color-primary);
+}
+
+.ps-plan-search-shift {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.ps-plan-search-row.is-realized td {
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.ps-plan-search-row.is-realized td:first-child {
+  box-shadow: inset 3px 0 0 #16a34a;
+}
+
+.ps-plan-search-row.is-realized .ps-plan-search-place,
+.ps-plan-search-row.is-realized .ps-plan-search-note {
+  color: #15803d;
+}
+
+.ps-plan-search-row.is-realized .ps-plan-search-progress {
+  font-weight: 700;
+}
+
+.ps-plan-search-empty {
+  margin: 0;
+  padding: 24px 16px;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .ps-plan-search-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ps-plan-search-field--name {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Petits ecrans : memes marges reduites que la liste des taches du mois. */
+@media (max-width: 640px) {
+  .ps-modal-content--plan-search {
+    width: min(100%, 100vw - 16px);
+    max-height: calc(100vh - 32px);
+    padding: 18px;
+  }
+}
+
 /* --- Fenetre « Lissage des taches » (#ps-smoothing-modal) --------------------
    Meme charpente ps-modal / ps-modal-header / ps-modal-close-btn que les autres
    fenetres ; lignes a pastille de couleur du type, champs numeriques etroits,
@@ -2661,7 +2903,8 @@ body.ps-panning .charge-plan-board .charge-plan-track {
   white-space: nowrap;
 }
 
-.ps-smoothing-add-month {
+.ps-smoothing-add-month,
+.ps-smoothing-add-plan {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -2690,6 +2933,56 @@ body.ps-panning .charge-plan-board .charge-plan-track {
 
 .ps-smoothing-add-btn[hidden] {
   display: none;
+}
+
+/* « Plan particulier » : tableau compact des plans a date manuelle, aux
+   bordures des mois particuliers ; N°, nom, lieu, pastille et echeance
+   reprennent les classes de la fenetre « Rechercher un plan », la case date
+   le style des champs du lissage (.ps-smoothing-input). */
+.ps-smoothing-plans {
+  flex: none;
+  overflow-x: auto;
+}
+
+.ps-smoothing-plans-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.ps-smoothing-plans-table th,
+.ps-smoothing-plans-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.ps-smoothing-plans-table thead th {
+  color: var(--color-text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ps-smoothing-plan {
+  min-width: 160px;
+}
+
+.ps-smoothing-input--date {
+  width: auto;
+  padding: 4px 6px;
+  text-align: left;
+}
+
+.ps-smoothing-plan-note {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}
+
+.ps-smoothing-add-plan .ps-smoothing-select {
+  flex: 1 1 240px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .ps-smoothing-footer {
@@ -2737,7 +3030,8 @@ body.ps-panning .charge-plan-board .charge-plan-track {
    (.ps-charge-assign-footer button), a la hauteur des deux autres boutons du
    pied (bordure de 1 px, meme rembourrage vertical). Sans cette regle, il
    restait un bouton natif du navigateur. */
-#ps-smoothing-save {
+#ps-smoothing-save,
+#ps-plan-pick-done {
   padding: 8px 18px;
   border: 1px solid var(--color-primary);
   border-radius: var(--radius-sm);
@@ -2748,15 +3042,18 @@ body.ps-panning .charge-plan-board .charge-plan-track {
   cursor: pointer;
 }
 
-#ps-smoothing-save:hover {
+#ps-smoothing-save:hover,
+#ps-plan-pick-done:hover {
   background: #003a73;
 }
 
-#ps-smoothing-save:disabled {
+#ps-smoothing-save:disabled,
+#ps-plan-pick-done:disabled {
   cursor: not-allowed;
 }
 
-#ps-smoothing-save:disabled:hover {
+#ps-smoothing-save:disabled:hover,
+#ps-plan-pick-done:disabled:hover {
   background: var(--color-primary);
 }
 
@@ -2785,4 +3082,55 @@ body.ps-panning .charge-plan-board .charge-plan-track {
   .ps-smoothing-footer {
     flex-wrap: wrap;
   }
+}
+
+/* --- Fenetre « Choisir les plans » (#ps-plan-pick-modal) ------------------------
+   Meme fenetre que la recherche (.ps-plan-search-*), ouverte PAR-DESSUS la
+   fenetre « Lissage » (z-index 20) ; colonne « Date manuelle » avec une case
+   date (memes bordures et couleurs que .ps-smoothing-input) et un ✕ pour
+   effacer la date. */
+.ps-modal--over {
+  z-index: 25;
+}
+
+.ps-plan-pick-cell {
+  white-space: nowrap;
+}
+
+.ps-plan-pick-date {
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.ps-plan-pick-clear {
+  margin-left: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ps-plan-pick-clear:hover {
+  color: var(--color-primary);
+}
+
+.ps-plan-pick-date:focus-visible,
+.ps-plan-pick-clear:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Plan fixe a une date manuelle : la date en gras (couleur de l'echeance
+   avancee), « date manuelle » et l'ecart en note. */
+.ps-plan-search-date--manual strong {
+  color: var(--color-primary);
 }

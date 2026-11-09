@@ -8,15 +8,24 @@
 // entre janvier et aout 2027, de types tires dans TYPE_ORDER ; 0 a 4 groupes
 // « g||n » formes d'un coffrage puis d'armatures d'echeance >= la sienne ;
 // 20 % de taches realisees ; maximum general et maximum de chaque type : aucun
-// (60 %) ou 1 a 4.
+// (60 %) ou 1 a 4 ; dates manuelles (spec 2026-11-09, §4) sur 15 % des taches
+// non realisees, de janvier a aout 2027.
 //
 // Verifications ajoutees au brief : aucun console.warn (smoothTasks avertit si
 // son resultat enfreint une regle stricte) ; le resultat, ligne par ligne, ne
 // depend pas de l'ordre d'entree ; les depassements rapportes sont exactement
-// ceux du resultat recompte ; un coffrage marque pulledFor est avance, et
-// l'armature qu'il nomme aussi, du meme groupe. Un second fuzz
+// ceux du resultat recompte ; un coffrage marque pulledFor est avance (ou
+// borne a la date d'une armature fixee, followsManual), et l'armature qu'il
+// nomme est avancee ou fixee, du meme groupe. Un second fuzz
 // (« etendu ») tire aussi des groupes a deux coffrages et des armatures
 // d'echeance anterieure a leur coffrage.
+//
+// Plans fixes (dates manuelles) : chacun est a sa date manuelle et marque
+// manual ; manualCount et delayedCount sont justes ; aucun coffrage mobile
+// n'est apres une armature fixee de son groupe ; forced implique
+// followsManual, qui ne vise qu'un coffrage d'un groupe a armature fixee. Un
+// plan fixe n'est pas mobile : il sort de l'oracle de la preference 4, et ne
+// doit jamais etre marque rule4Exception.
 //
 // Preference 4 (§4.3) : dans une meme file, deux taches mobiles ne se doublent
 // jamais, sauf si l'une d'elles est soustraite a l'ordre par la regle 4 dans
@@ -116,6 +125,15 @@ function makeCase(seed, { extended = false, monthly = false, zero = false } = {}
   });
   const settings = { maxTotal: limit(), maxByType };
   if (monthly) addMonthlySettings(settings, today, int, rand, zero);
+  // Dates manuelles (spec 2026-11-09, §4) : 15 % des taches non realisees, une
+  // date de janvier a aout 2027 (parfois avant aujourd'hui ou avant le mois de
+  // depart, parfois apres l'echeance). Tirees en dernier : les taches et les
+  // maximums de chaque graine restent ceux d'avant.
+  const manualDates = {};
+  tasks.forEach((task) => {
+    if (!task.realized && rand() < 0.15) manualDates[String(task.rowId)] = isoOf(dayBetween(FIRST_DAY, LAST_DAY));
+  });
+  settings.manualDates = manualDates;
   return { today, tasks, settings };
 }
 
@@ -242,12 +260,16 @@ function recountOverflows(result, settings, today) {
 }
 
 const monthOf = (iso) => Number(iso.slice(0, 4)) * 12 + Number(iso.slice(5, 7)) - 1;
-// Mobile : non realisee, et a venir (mois courant ou plus tard) ou en retard
-// d'un mois posterieur au mois de depart (depart passe : elle peut etre avancee
-// jusqu'a lui). Une tache en retard sans mois de depart avant elle reste a sa
-// place.
+// Date manuelle d'un plan FIXE (non realise, rowId present dans
+// settings.manualDates ; les dates tirees sont toujours valides), sinon null.
+const fixedIsoOf = (task, settings) =>
+  task.realized || task.rowId == null ? null : settings.manualDates?.[String(task.rowId)] ?? null;
+// Mobile : non realisee, non fixee, et a venir (mois courant ou plus tard) ou
+// en retard d'un mois posterieur au mois de depart (depart passe : elle peut
+// etre avancee jusqu'a lui). Une tache en retard sans mois de depart avant elle
+// reste a sa place ; un plan fixe ne bouge pas de sa date manuelle.
 const isMobile = (task, today, settings) => {
-  if (task.realized) return false;
+  if (task.realized || fixedIsoOf(task, settings)) return false;
   const due = monthOf(task.dueIso);
   return due >= monthOf(today) || due > monthOf(`${startKeyOf(settings, today)}-01`);
 };
@@ -301,9 +323,10 @@ function unjustifiedInversions(tasks, settings, today, result) {
   return inversions;
 }
 
-// Lignes marquees rule4Exception sans pouvoir l'etre : une tache figee, ou une
-// tache sans lien avec la regle 4 (l'oracle ci-dessus ne doit dispenser
-// personne d'autre).
+// Lignes marquees rule4Exception sans pouvoir l'etre : une tache figee, un plan
+// fixe (il n'est pas mobile, et l'armature fixee n'entre pas dans
+// l'entrainement de ses coffrages), ou une tache sans lien avec la regle 4
+// (l'oracle ci-dessus ne doit dispenser personne d'autre).
 function unfoundedExceptions(tasks, today, settings, result) {
   return tasks
     .filter((task, i) => result.tasks[i].rule4Exception && !(isMobile(task, today, settings) && isLinked(tasks, task)))
@@ -328,9 +351,12 @@ function checkCase(seed, options) {
     byRowId(result),
     `${where} : dépend de l'ordre d'entrée`
   );
+  // Tache avancee : mois lisse avant celui de l'echeance, hors plan fixe (un
+  // plan fixe n'est jamais « avance », et un coffrage borne a la date de son
+  // armature fixee, dans son propre mois, non plus).
   assert.equal(
     result.movedCount,
-    result.tasks.filter((task) => task.smoothedIso < task.dueIso).length,
+    result.tasks.filter((task) => !fixedIsoOf(task, settings) && monthOf(task.smoothedIso) < monthOf(task.dueIso)).length,
     `${where} : movedCount`
   );
   assert.deepEqual(
@@ -341,15 +367,60 @@ function checkCase(seed, options) {
   assert.deepEqual(unjustifiedInversions(tasks, settings, today, result), [], `${where} : préférence 4`);
   assert.deepEqual(unfoundedExceptions(tasks, today, settings, result), [], `${where} : rule4Exception`);
 
+  // Plans fixes : chacun a sa date manuelle, marque manual ; comptes.
+  const fixed = result.tasks.filter((task) => fixedIsoOf(task, settings));
+  result.tasks.forEach((task) => {
+    const fixedIso = fixedIsoOf(task, settings);
+    assert.equal(task.manual, Boolean(fixedIso), `${where} : manual de la ligne ${task.rowId}`);
+    if (fixedIso) assert.equal(task.smoothedIso, fixedIso, `${where} : plan fixé ${task.rowId} hors de sa date`);
+    if (task.forced) assert.ok(task.followsManual, `${where} : forced sans followsManual (ligne ${task.rowId})`);
+    if (task.followsManual) {
+      assert.ok(
+        task.type === "COFFRAGE" &&
+          Boolean(task.groupKey) &&
+          result.tasks.some((other) => other.type === "ARMATURES" && other.manual && other.groupKey === task.groupKey),
+        `${where} : followsManual sur la ligne ${task.rowId}`
+      );
+    }
+  });
+  assert.equal(result.manualCount, fixed.length, `${where} : manualCount`);
+  assert.equal(
+    result.delayedCount,
+    fixed.filter((task) => task.smoothedIso > task.dueIso).length,
+    `${where} : delayedCount`
+  );
+  // Aucun coffrage mobile n'est apres une armature fixee de son groupe.
+  fixed
+    .filter((armature) => armature.type === "ARMATURES" && armature.groupKey)
+    .forEach((armature) => {
+      tasks.forEach((coffrage, i) => {
+        if (coffrage.type !== "COFFRAGE" || coffrage.groupKey !== armature.groupKey) return;
+        if (!isMobile(coffrage, today, settings)) return;
+        assert.ok(
+          result.tasks[i].smoothedIso <= armature.smoothedIso,
+          `${where} : coffrage ${coffrage.rowId} après son armature fixée ${armature.rowId}`
+        );
+      });
+    });
+
   const byId2 = new Map(result.tasks.map((task) => [task.id2, task]));
   result.tasks.forEach((task) => {
     if (task.pulledFor == null) return;
     const armature = byId2.get(task.pulledFor);
-    assert.ok(task.type === "COFFRAGE" && task.moved, `${where} : pulledFor sur la ligne ${task.rowId}`);
     assert.ok(
-      armature?.type === "ARMATURES" && armature.moved && armature.groupKey === task.groupKey,
+      task.type === "COFFRAGE" && (task.moved || task.followsManual),
+      `${where} : pulledFor sur la ligne ${task.rowId}`
+    );
+    assert.ok(
+      armature?.type === "ARMATURES" && (armature.moved || armature.manual) && armature.groupKey === task.groupKey,
       `${where} : armature ${task.pulledFor} de la ligne ${task.rowId}`
     );
+    if (armature.manual) {
+      assert.ok(
+        task.smoothedIso <= armature.smoothedIso,
+        `${where} : coffrage ${task.rowId} après son armature fixée ${task.pulledFor}`
+      );
+    }
   });
 }
 

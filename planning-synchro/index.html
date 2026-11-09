@@ -75,6 +75,9 @@
             <button type="button" class="ps-chart-gran-btn" data-smoothing-view="both">Les deux</button>
           </div>
           <button type="button" id="ps-smoothing-open" class="ps-chart-gran-btn ps-smoothing-open">Lisser…</button>
+          <button type="button" id="ps-search-open" class="ps-chart-gran-btn ps-search-open" aria-label="Rechercher un plan" title="Rechercher un plan">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"></circle><line x1="15.4" y1="15.4" x2="20.5" y2="20.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"></line></svg>
+          </button>
         </div>
         <div id="ps-chart-filter" class="ps-chart-filter" role="group" aria-label="Filtrer les types de document" hidden></div>
       </div>
@@ -183,6 +186,45 @@
       <div id="ps-month-tasks-body" class="ps-month-tasks-body"></div>
     </div>
   </div>
+  <div id="ps-plan-search-modal" class="ps-modal" style="display: none;" aria-hidden="true">
+    <div class="ps-modal-content ps-modal-content--plan-search" role="dialog" aria-modal="true" aria-labelledby="ps-plan-search-title">
+      <div class="ps-modal-header">
+        <div>
+          <h2 id="ps-plan-search-title">Rechercher un plan</h2>
+          <p id="ps-plan-search-subtitle" class="ps-modal-subtitle"></p>
+        </div>
+        <button id="ps-plan-search-close" type="button" class="ps-modal-close-btn">Fermer</button>
+      </div>
+      <form class="ps-plan-search-form" autocomplete="off" role="search">
+        <label class="ps-plan-search-field">
+          <span>N° du plan</span>
+          <input type="search" id="ps-plan-search-number" placeholder="Ex. 145">
+        </label>
+        <label class="ps-plan-search-field ps-plan-search-field--name">
+          <span>Nom du plan</span>
+          <input type="search" id="ps-plan-search-name" placeholder="Ex. voile R+2">
+        </label>
+        <label class="ps-plan-search-field">
+          <span>Zone</span>
+          <select id="ps-plan-search-zone"></select>
+        </label>
+        <label class="ps-plan-search-field">
+          <span>Type de document</span>
+          <select id="ps-plan-search-type"></select>
+        </label>
+        <label class="ps-plan-search-field">
+          <span>État</span>
+          <select id="ps-plan-search-status"></select>
+        </label>
+      </form>
+      <div class="ps-plan-search-bar">
+        <p id="ps-plan-search-summary" class="ps-plan-search-summary" aria-live="polite"></p>
+        <p id="ps-plan-search-lissage" class="ps-plan-search-lissage"></p>
+        <button id="ps-plan-search-reset" type="button" class="ps-modal-close-btn ps-plan-search-reset">Effacer la recherche</button>
+      </div>
+      <div id="ps-plan-search-results" class="ps-plan-search-results"></div>
+    </div>
+  </div>
   <div id="ps-smoothing-modal" class="ps-modal" style="display: none;">
     <div class="ps-modal-content ps-modal-content--smoothing" role="dialog" aria-modal="true" aria-labelledby="ps-smoothing-title">
       <div class="ps-modal-header">
@@ -215,6 +257,15 @@
           <select id="ps-smoothing-month-select" class="ps-smoothing-select" aria-label="Mois à ajouter"></select>
           <button id="ps-smoothing-month-add" type="button" class="ps-smoothing-add-btn">Ajouter ce mois</button>
         </div>
+        <h3 class="ps-smoothing-heading">Plan particulier</h3>
+        <p class="ps-smoothing-hint">Imposez la date de fin d'un plan en mode lissé. Il compte dans le maximum de son mois et les autres plans se lissent autour. L'échéance sans lissage ne change pas.</p>
+        <p id="ps-smoothing-plans-unavailable" class="ps-smoothing-hint" hidden>Ajoutez une colonne Date « Date_Manuel_Lissage » dans Planning_Projet pour imposer la date d'un plan.</p>
+        <div id="ps-smoothing-plans" class="ps-smoothing-plans"></div>
+        <div class="ps-smoothing-add-plan">
+          <select id="ps-smoothing-plan-select" class="ps-smoothing-select" aria-label="Plan à ajouter"></select>
+          <button id="ps-smoothing-plan-add" type="button" class="ps-smoothing-add-btn">Ajouter ce plan</button>
+          <button id="ps-smoothing-plan-browse" type="button" class="ps-smoothing-add-btn">Choisir dans la liste…</button>
+        </div>
         <p id="ps-smoothing-field-error" class="ps-smoothing-field-error" role="alert" hidden></p>
         <h3 class="ps-smoothing-heading">Aperçu</h3>
         <div id="ps-smoothing-preview" class="ps-smoothing-preview" aria-live="polite"></div>
@@ -225,6 +276,50 @@
         <span class="ps-smoothing-footer-spacer"></span>
         <button id="ps-smoothing-cancel" type="button" class="ps-modal-close-btn">Annuler</button>
         <button id="ps-smoothing-save" type="button">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+  <div id="ps-plan-pick-modal" class="ps-modal ps-modal--over" style="display: none;" aria-hidden="true">
+    <div class="ps-modal-content ps-modal-content--plan-search" role="dialog" aria-modal="true" aria-labelledby="ps-plan-pick-title">
+      <div class="ps-modal-header">
+        <div>
+          <h2 id="ps-plan-pick-title">Choisir les plans</h2>
+          <p id="ps-plan-pick-subtitle" class="ps-modal-subtitle"></p>
+          <p class="ps-modal-subtitle">Changez la date manuelle d'un plan : la fenêtre « Lissage » en dessous suit. Rien n'est enregistré avant « Enregistrer ».</p>
+        </div>
+        <button id="ps-plan-pick-close" type="button" class="ps-modal-close-btn">Fermer</button>
+      </div>
+      <form class="ps-plan-search-form" autocomplete="off" role="search">
+        <label class="ps-plan-search-field">
+          <span>N° du plan</span>
+          <input type="search" id="ps-plan-pick-number" placeholder="Ex. 145">
+        </label>
+        <label class="ps-plan-search-field ps-plan-search-field--name">
+          <span>Nom du plan</span>
+          <input type="search" id="ps-plan-pick-name" placeholder="Ex. voile R+2">
+        </label>
+        <label class="ps-plan-search-field">
+          <span>Zone</span>
+          <select id="ps-plan-pick-zone"></select>
+        </label>
+        <label class="ps-plan-search-field">
+          <span>Type de document</span>
+          <select id="ps-plan-pick-type"></select>
+        </label>
+        <label class="ps-plan-search-field">
+          <span>État</span>
+          <select id="ps-plan-pick-status"></select>
+        </label>
+      </form>
+      <div class="ps-plan-search-bar">
+        <p id="ps-plan-pick-summary" class="ps-plan-search-summary" aria-live="polite"></p>
+        <p id="ps-plan-pick-lissage" class="ps-plan-search-lissage"></p>
+        <button id="ps-plan-pick-reset" type="button" class="ps-modal-close-btn ps-plan-search-reset">Effacer la recherche</button>
+      </div>
+      <div id="ps-plan-pick-results" class="ps-plan-search-results"></div>
+      <div class="ps-smoothing-footer">
+        <span class="ps-smoothing-footer-spacer"></span>
+        <button id="ps-plan-pick-done" type="button">Terminé</button>
       </div>
     </div>
   </div>

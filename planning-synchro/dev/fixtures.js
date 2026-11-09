@@ -112,7 +112,7 @@ export const FIXTURE_TABLES = {
     // Mixed date formats (FR + ISO) on purpose to exercise the robust parser.
     { id: 1, NomProjet: "ERA QUAI D'ORSAY", Taches: "FONDATIONS", Type_doc: "COFFRAGE", Ligne_planning: "1", Zone: "Z01", Date_limite: "02/02/2027", Diff_coffrage: "2027-03-16", Diff_armature: "2027-04-01", Demarrages_travaux: "2027-05-01" },
     { id: 2, NomProjet: "ERA QUAI D'ORSAY", Taches: "LONGRINES", Type_doc: "ARMATURES", Ligne_planning: "2", Zone: "Z01", Date_limite: "2027-02-10", Diff_coffrage: "2027-03-20", Diff_armature: "2027-04-05" },
-    { id: 3, NomProjet: "ERA QUAI D'ORSAY", Taches: "PH 1er SOUS-SOL - VOILES", Type_doc: "COFFRAGE", Ligne_planning: "3", Zone: "Z01", Date_limite: "20/02/2027", Diff_coffrage: "2027-04-10", Diff_armature: "2027-04-25", Demarrages_travaux: "2027-05-10" },
+    { id: 3, NomProjet: "ERA QUAI D'ORSAY", Taches: "PH 1er SOUS-SOL - VOILES", Type_doc: "COFFRAGE", Ligne_planning: "3", Zone: "Z01", Date_limite: "20/02/2027", Diff_coffrage: "2027-04-10", Diff_armature: "2027-04-25", Demarrages_travaux: "2027-05-10", Date_Manuel_Lissage: "2027-02-15" },
     { id: 4, NomProjet: "ERA QUAI D'ORSAY", Taches: "RSO", Type_doc: "NDC", Ligne_planning: "4", Zone: "Z01", Date_limite: "2027-03-01", Diff_coffrage: "2027-03-25" },
     { id: 5, NomProjet: "ERA QUAI D'ORSAY", Taches: "", Type_doc: "", Zone: "Z02" }, // zone-only header -> excluded
     ...MANY_TASK_ROWS,

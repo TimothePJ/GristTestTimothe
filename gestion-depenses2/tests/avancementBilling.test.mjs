@@ -7,10 +7,10 @@ import {
   buildBilledAmountsByProject,
   parseAvcAmount,
 } from "../assets/js/utils/avancementBilling.js";
-import {
-  buildChartSeries,
-  buildExpenseData,
-} from "../assets/js/services/projectService.js";
+import * as projectService from "../assets/js/services/projectService.js";
+import { APP_CONFIG } from "../assets/js/config.js";
+
+const { buildChartSeries, buildExpenseData } = projectService;
 
 // Extraits reels de BaseDRTO (Service + T_Avancement), types tels que Grist
 // les rend apres import : nombres pour les identifiants, montants et mois.
@@ -104,6 +104,14 @@ test("avc_Date : 202509, '202509' et '2025-09' designent septembre 2025", () => 
   assert.equal(avcDateToMonthKey(""), "");
 });
 
+test("avc_Date : un nombre qui n'est pas AAAAMM (cellule vide = 0) ne devient pas janvier 1970", () => {
+  [0, 2025, 20259, "0", "2025", "20259"].forEach((value) => {
+    assert.equal(avcDateToMonthKey(value), "", `valeur ${JSON.stringify(value)}`);
+  });
+  // Une vraie colonne Date Grist (secondes depuis 1970) reste lue.
+  assert.equal(avcDateToMonthKey(Date.UTC(2025, 8, 15) / 1000), "2025-09");
+});
+
 function projectWithBudget(extra = {}) {
   return {
     id: 1,
@@ -111,7 +119,6 @@ function projectWithBudget(extra = {}) {
     name: "ERA QUAI D'ORSAY",
     budgetLines: [{ id: 1, chapter: "Etudes", amount: 100000 }],
     workers: [],
-    billingPercentageByMonth: {},
     ...extra,
   };
 }
@@ -137,7 +144,6 @@ test("graphique : la facturation est le cumul des montants T_Avancement, en euro
   );
   assert.deepEqual(series.billedAmountData, [0, 11800, 22375, 22375]);
   assert.deepEqual(series.billingPercentData, [0, 11.8, 22.375, 22.375]);
-  assert.equal(series.billingSource, "avancement");
 });
 
 test("graphique : les mois factures elargissent la plage meme sans pointage", () => {
@@ -154,31 +160,23 @@ test("graphique : les mois factures elargissent la plage meme sans pointage", ()
   assert.deepEqual(series.billedAmountData, [1000, 1000, 1500]);
 });
 
-test("graphique : la saisie manuelle Projets2 n'est plus lue quand T_Avancement est branche", () => {
-  const project = projectWithBudget({
+test("graphique : l'ancienne saisie Projets2 n'est plus jamais lue", () => {
+  const legacyBilling = { "2025-09": 50 };
+  const withEmptyAvancement = projectWithBudget({
     billedAmountByMonth: {},
-    billingPercentageByMonth: { "2025-09": 50 },
+    billingPercentageByMonth: legacyBilling,
+    workers: [{ id: 1, dailyRate: 500, provisionalDays: { "2025-09": 2 }, workedDays: {} }],
+  });
+  const withoutAvancement = projectWithBudget({
+    billingPercentageByMonth: legacyBilling,
     workers: [{ id: 1, dailyRate: 500, provisionalDays: { "2025-09": 2 }, workedDays: {} }],
   });
 
-  const series = buildChartSeries(project, VIEW_STATE);
-
-  assert.deepEqual(series.billingPercentData, [0]);
-  assert.deepEqual(series.billedAmountData, [0]);
-});
-
-// Garde de non-regression : Gestion-globale reutilise ce graphique avec son
-// propre agregat Projets2 et n'est pas concerne par la bascule.
-test("graphique : sans billedAmountByMonth (Gestion-globale), l'ancienne facturation Projets2 reste lue", () => {
-  const project = projectWithBudget({
-    billingPercentageByMonth: { "2025-09": 40 },
+  [withEmptyAvancement, withoutAvancement].forEach((project) => {
+    const series = buildChartSeries(project, VIEW_STATE);
+    assert.deepEqual(series.billingPercentData, [0]);
+    assert.deepEqual(series.billedAmountData, [0]);
   });
-
-  const series = buildChartSeries(project, VIEW_STATE);
-
-  assert.deepEqual(series.billingPercentData, [40]);
-  assert.deepEqual(series.billedAmountData, [40000]);
-  assert.equal(series.billingSource, "manual");
 });
 
 function expenseTables(extra = {}) {
@@ -214,11 +212,37 @@ test("buildExpenseData rattache la facturation T_Avancement a chaque projet par 
   assert.deepEqual(byNumber["262023"].billedAmountByMonth, {});
 });
 
-test("buildExpenseData sans lignes T_Avancement (Gestion-globale) ne pose pas billedAmountByMonth", () => {
+test("buildExpenseData sans lignes T_Avancement pose une facturation vide sur chaque projet", () => {
   const { projects } = buildExpenseData(expenseTables());
 
   projects.forEach((project) => {
-    assert.equal(project.billedAmountByMonth, undefined);
+    assert.deepEqual(project.billedAmountByMonth, {});
+  });
+});
+
+test("l'ancienne facturation Projets2 a disparu du modele et de la configuration", () => {
+  const { projects } = buildExpenseData(expenseTables({
+    projectRows: [{
+      id: 1,
+      Numero_de_projet: "252035",
+      Nom_de_projet: "ERA QUAI D'ORSAY",
+      Pourcentage_Facturation: 12,
+      Pourcentage_Facturation_Par_Mois: JSON.stringify({ "2025-09": 50 }),
+    }],
+  }));
+
+  assert.equal("billingPercentage" in projects[0], false);
+  assert.equal("billingPercentageByMonth" in projects[0], false);
+  assert.equal("billingPercentage" in APP_CONFIG.grist.columns.projects, false);
+  assert.equal("billingPercentageByMonth" in APP_CONFIG.grist.columns.projects, false);
+  [
+    "getBillingPercentageForMonth",
+    "getBillingAmountFromPercentage",
+    "getBillingPercentageFromAmount",
+    "normalizeBillingPercentageValue",
+    "getPriorCumulativeBilling",
+  ].forEach((legacyExport) => {
+    assert.equal(legacyExport in projectService, false, `${legacyExport} doit disparaitre`);
   });
 });
 
@@ -286,15 +310,6 @@ test("graphique : les barres bleues T_Avancement sont libellees comme un cumul",
   const bars = config.data.datasets.find((dataset) => /Montant facture/.test(dataset.label));
   assert.equal(bars.label, "Montant facture cumule (€)");
   assert.deepEqual(bars.data, [1000, 1500]);
-});
-
-test("graphique : Gestion-globale garde son libelle de facturation", async () => {
-  const config = await captureChartConfig(projectWithBudget({
-    billingPercentageByMonth: { "2025-09": 40 },
-  }));
-
-  const bars = config.data.datasets.find((dataset) => /Montant facture/.test(dataset.label));
-  assert.equal(bars.label, "Montant facture mensuel (€)");
 });
 
 const read = (relativePath) =>

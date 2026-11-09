@@ -35,6 +35,14 @@ export function avcDateToMonthKey(value) {
       ? `${compactMatch[1]}-${compactMatch[2]}`
       : "";
   }
+  // Un nombre qui n'est pas AAAAMM (0 d'une cellule vide, 2025...) serait lu
+  // comme un horodatage et tomberait en janvier 1970 : la frise du graphique
+  // partirait alors de 1970. Seule une vraie date Grist (secondes, apres 2001)
+  // passe au repli.
+  const isNumericText = /^-?\d+(?:[.,]\d+)?$/.test(text);
+  if (isNumericText && !(typeof value === "number" && value >= 1e9)) {
+    return "";
+  }
   // Repli : colonne convertie en date ou en texte "2025-09" cote Grist.
   return getMonthKeyFromRawMonth(value);
 }

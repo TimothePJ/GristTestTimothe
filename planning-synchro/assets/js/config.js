@@ -40,6 +40,8 @@ export const APP_CONFIG = {
         // Charge de reference : trois niveaux resolus en cascade a la lecture
         // (Force > Zone > Projet), jamais stockes resolus — cf. bottom/documentCharge.js.
         dureeProjet: "Duree_Projet", dureeZone: "Duree_Zone", dureeForce: "Duree_Force",
+        // Date de fin imposee au lissage (colonne Date, facultative) — cf. top/manualDates.js.
+        manualSmoothingDate: "Date_Manuel_Lissage",
       },
       timeSegment: {
         id: "id", projectNumber: "NumeroProjet", name: "Name",

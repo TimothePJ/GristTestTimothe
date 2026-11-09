@@ -10,18 +10,36 @@
 // cree les deux fenetres, recalcule smoothTasks a chaque setProjectData,
 // enregistrement ou refreshFromProjectRows, et ecrit la cellule Lissage (une
 // seule action, relue juste avant d'ecrire : ruling 10).
+//
+// Il porte aussi la loupe « Rechercher un plan » et sa fenetre
+// (top/planSearchModal.js) : elle cherche dans CES taches et CE resultat, les
+// memes que le graphique, donc avec ses echeances sans et avec lissage.
+//
+// Dates manuelles (spec 2026-11-09) : il tient aussi les dates imposees par plan
+// (`Planning_Projet.Date_Manuel_Lissage`, {rowId: "AAAA-MM-JJ"}) fournies par
+// setProjectData, les passe a smoothTasks par `settings.manualDates` et a la
+// fenetre « Lissage », ecrit celles qui changent (diffManualDates) dans le meme
+// lot que la cellule Lissage, et expose setManualDates pour la relecture
+// legere (sans loadProject). Sans colonne de date, aucune ecriture manuelle.
 
 import { APP_CONFIG } from "../config.js";
 import { loadSmoothingView, persistSmoothingView } from "../state.js";
 import { createMonthTasksModal as defaultCreateMonthTasksModal, buildBucketTaskList } from "./monthTasksModal.js";
 import { createSmoothingModal as defaultCreateSmoothingModal } from "./smoothingModal.js";
-import { getServiceSettings, hasAnyMax, serializeSmoothingCell } from "./smoothingSettings.js";
+import {
+  buildPlanSearchEntries,
+  createPlanSearchModal as defaultCreatePlanSearchModal,
+} from "./planSearchModal.js";
+import { diffManualDates, sameManualDates } from "./manualDates.js";
+import { getServiceSettings, hasSmoothing, serializeSmoothingCell } from "./smoothingSettings.js";
 import { TYPE_ORDER } from "./taskLabels.js";
 import { monthKeyOf, smoothTasks } from "./taskSmoothing.js";
 
 const NO_COLUMN_TITLE = "Ajoutez une colonne texte « Lissage » dans Projets2 pour activer le lissage.";
 const READ_FAILED_TITLE = "Lecture de Projets2 impossible : rechargez le projet.";
 const NO_TASK_TITLE = "Aucune tâche à lisser";
+const PLAN_SEARCH_TITLE = "Rechercher un plan";
+const NO_PLAN_TITLE = "Aucun plan dans le planning de ce projet";
 const SAVE_ERROR = "L'enregistrement du lissage a échoué. Réessayez.";
 const BUSY_ERROR = "Un enregistrement du lissage est déjà en cours.";
 const READ_FAILED_SAVE_ERROR = "Lecture de Projets2 impossible : l'enregistrement est annulé. Réessayez.";
@@ -44,13 +62,18 @@ function cellText(value) {
   return value == null ? "" : String(value);
 }
 
-// els = { displayGroup, openButton, smoothingModalEl, monthTasksModalEl } ; un
-// element absent (index.html en cache sans les nouveaux blocs) est tolere.
-// saveCell(projectId, value) -> Promise<void> ; loadProjectRow(projectId) ->
+// els = { displayGroup, openButton, smoothingModalEl, monthTasksModalEl,
+// planSearchButton, planSearchModalEl, planPickModalEl } ; un element absent
+// (index.html en cache sans les nouveaux blocs) est tolere. planPickModalEl est
+// la fenetre « Choisir les plans », passee en `pickerEl` a la fenetre Lissage.
+// saveCell(projectId, value, manualWrites) -> Promise<void> (manualWrites :
+// [{rowId, iso|null}], vide sans colonne de date) ; loadProjectRow(projectId) ->
 // Promise<object|null> (relecture de la ligne Projets2 avant d'ecrire).
 // setProjectData({ projectRow }) : la ligne Projets2 du projet, ou null quand
 // elle n'a pas pu etre lue (« lecture impossible », distincte de « colonne
 // absente », qui est une ligne lue sans la colonne Lissage).
+// setProjectData({ manualDates = {}, hasManualColumn = false }) : dates
+// manuelles lues dans Planning_Projet et presence de leur colonne.
 export function createSmoothingController({
   els,
   saveCell,
@@ -61,8 +84,17 @@ export function createSmoothingController({
   onChange,
   createSmoothingModal = defaultCreateSmoothingModal,
   createMonthTasksModal = defaultCreateMonthTasksModal,
+  createPlanSearchModal = defaultCreatePlanSearchModal,
 } = {}) {
-  const { displayGroup, openButton, smoothingModalEl, monthTasksModalEl } = els || {};
+  const {
+    displayGroup,
+    openButton,
+    smoothingModalEl,
+    monthTasksModalEl,
+    planSearchButton,
+    planSearchModalEl,
+    planPickModalEl,
+  } = els || {};
 
   // --- etat (hors du cycle par projet) ---
   let mode = loadSmoothingView();
@@ -79,6 +111,10 @@ export function createSmoothingController({
   // contexte : bouton grise avec READ_FAILED_TITLE.
   let rowUnreadable = false;
   let settings = { maxTotal: null, maxByType: {} };
+  // Dates manuelles connues {rowId: iso} et presence de la colonne
+  // Date_Manuel_Lissage ; sans colonne, rien n'est lu ni ecrit.
+  let manualDates = {};
+  let hasManualColumn = false;
   // Service dont `settings` porte les reglages (celui du dernier recompute) :
   // entre un changement de service et la fin du loadProject qui suit, il
   // differe encore du service courant.
@@ -101,9 +137,11 @@ export function createSmoothingController({
   const smoothingModal = createSmoothingModal(smoothingModalEl, {
     compute: (nextSettings) => smoothTasks(tasks, nextSettings, today()),
     onSubmit: (nextSettings) => saveSettings(nextSettings),
-    onDelete: () => saveSettings({ maxTotal: null, maxByType: {} }),
+    onDelete: () => saveSettings({ maxTotal: null, maxByType: {}, manualDates: {} }),
+    pickerEl: planPickModalEl ?? null,
   });
   const monthModal = createMonthTasksModal(monthTasksModalEl);
+  const planSearchModal = createPlanSearchModal(planSearchModalEl);
 
   const isActive = () => Boolean(result && result.active);
 
@@ -111,6 +149,7 @@ export function createSmoothingController({
   function recompute() {
     settingsService = service();
     settings = hasColumn ? getServiceSettings(rawCell, settingsService) : { maxTotal: null, maxByType: {} };
+    if (hasColumn && hasManualColumn) settings = { ...settings, manualDates };
     result = tasks.length ? smoothTasks(tasks, settings, today()) : null;
   }
 
@@ -124,6 +163,10 @@ export function createSmoothingController({
       openButton.disabled = Boolean(title);
       openButton.title = title;
       openButton.classList.toggle("is-active", isActive());
+    }
+    if (planSearchButton) {
+      planSearchButton.disabled = !tasks.length;
+      planSearchButton.title = tasks.length ? PLAN_SEARCH_TITLE : NO_PLAN_TITLE;
     }
     if (displayGroup) {
       displayGroup.hidden = !isActive();
@@ -153,10 +196,49 @@ export function createSmoothingController({
     if (model) monthModal.update(model);
   }
 
+  // Fenetre « Rechercher un plan » : les taches du graphique, lissees quand le
+  // lissage est actif, quel que soit le mode d'affichage (les deux echeances
+  // sont montrees cote a cote).
+  function planSearchModel() {
+    const active = isActive();
+    return {
+      subtitle: contextLabel(),
+      service: displayedService(),
+      active,
+      entries: buildPlanSearchEntries({ tasks: active ? result.tasks : tasks, active }),
+    };
+  }
+
+  function openPlanSearch() {
+    if (!tasks.length) return;
+    planSearchModal.open(planSearchModel());
+  }
+
+  function updatePlanSearch() {
+    if (planSearchModal.isOpen()) planSearchModal.update(planSearchModel());
+  }
+
+  // Tout ce qui recalcule le lissage met a jour les deux fenetres de lecture.
+  function updateReadWindows() {
+    updateMonthModal();
+    updatePlanSearch();
+  }
+
+  // Service dont les reglages sont affiches : celui du dernier recompute.
+  function displayedService() {
+    return settingsService ?? service();
+  }
+
+  // « <Projet> · <Service> », commun aux fenetres « Lissage » et « Rechercher
+  // un plan ».
+  function contextLabel() {
+    return [project?.name, displayedService()].filter(Boolean).join(" · ");
+  }
+
   // « Lissage des tâches — <Projet> · <Service> » (§6.2), repli sur le titre seul.
   // Le service nomme est celui des reglages affiches.
   function titleText() {
-    const parts = [project?.name, settingsService ?? service()].filter(Boolean).join(" · ");
+    const parts = contextLabel();
     return parts ? `Lissage des tâches — ${parts}` : "Lissage des tâches";
   }
 
@@ -167,7 +249,11 @@ export function createSmoothingController({
       tasks,
       todayIso: today(),
       settings,
-      saved: hasAnyMax(settings),
+      manualDates,
+      hasManualColumn,
+      subtitle: contextLabel(),
+      service: displayedService(),
+      saved: hasSmoothing(settings),
       readOnly: typeof isReadOnly === "function" ? Boolean(isReadOnly()) : false,
     };
   }
@@ -177,7 +263,7 @@ export function createSmoothingController({
   // changer et que le rechargement n'a pas encore suivi : la fenetre montre
   // alors les reglages de l'ancien service, et l'enregistrement sera refuse.
   function openSmoothingWindow() {
-    openedService = settingsService ?? service();
+    openedService = displayedService();
     smoothingModal.open(smoothingContext());
   }
 
@@ -189,6 +275,7 @@ export function createSmoothingController({
   function closeWindows() {
     smoothingModal.close();
     monthModal.close();
+    planSearchModal.close();
     lastBucket = null;
     openedService = null;
   }
@@ -224,6 +311,11 @@ export function createSmoothingController({
     // d'un autre projet peut arriver pendant l'attente.
     let base = rawCell;
     let baseKnown = rowKnown;
+    // Dates manuelles prises au meme instant : le diff des ecritures se fait
+    // sur cet instantane, pas sur l'etat apres l'attente (une date recue d'un
+    // collegue ou un changement de service ne doit pas fuir dans le lot).
+    const snapshotDates = manualDates;
+    const snapshotHasColumn = hasManualColumn;
     if (typeof loadProjectRow === "function") {
       let fresh = null;
       try {
@@ -241,8 +333,12 @@ export function createSmoothingController({
     if (!baseKnown) return { ok: false, error: READ_FAILED_SAVE_ERROR };
 
     const value = serializeSmoothingCell(base, targetService, nextSettings);
+    // Seulement les dates touchees (la fenetre fusionne les changements
+    // entrants dans les lignes non touchees) ; aucune sans colonne de date.
+    const submittedDates = nextSettings.manualDates ?? snapshotDates;
+    const manualWrites = snapshotHasColumn ? diffManualDates(snapshotDates, submittedDates) : [];
     try {
-      await saveCell(target.id, value);
+      await saveCell(target.id, value, manualWrites);
     } catch (error) {
       console.warn("Lissage : échec de l'enregistrement.", error);
       return { ok: false, error: SAVE_ERROR };
@@ -255,15 +351,25 @@ export function createSmoothingController({
     rawCell = value;
     rowKnown = true;
     rowUnreadable = false;
+    // Les ecritures sont appliquees sur l'etat courant (et non le brouillon) :
+    // une date recue pendant l'attente est conservee.
+    if (hasManualColumn && manualWrites.length) {
+      const nextDates = { ...manualDates };
+      for (const { rowId, iso } of manualWrites) {
+        if (iso == null) delete nextDates[rowId];
+        else nextDates[rowId] = iso;
+      }
+      manualDates = nextDates;
+    }
     recompute();
-    // « Les deux » pour montrer l'effet, seulement si un maximum subsiste
-    // (une suppression ne change pas le mode memorise).
-    if (hasAnyMax(nextSettings)) {
+    // « Les deux » pour montrer l'effet, seulement si un maximum ou une date
+    // manuelle subsiste (une suppression ne change pas le mode memorise).
+    if (hasSmoothing(nextSettings)) {
       mode = "both";
       persistSmoothingView(mode);
     }
     renderHeader();
-    updateMonthModal();
+    updateReadWindows();
     notify();
     return { ok: true };
   }
@@ -279,6 +385,8 @@ export function createSmoothingController({
     contextKey = data.contextKey ?? null;
     project = data.project || null;
     tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    manualDates = { ...(data.manualDates || {}) };
+    hasManualColumn = Boolean(data.hasManualColumn);
     const row = data.projectRow || null;
     if (row) {
       hasColumn = Object.prototype.hasOwnProperty.call(row, lissageColumn());
@@ -304,11 +412,26 @@ export function createSmoothingController({
           // Cas rare, accepte : la saisie en cours est perdue.
           openSmoothingWindow();
         } else {
-          smoothingModal.refresh({ tasks, todayIso: today() });
+          smoothingModal.refresh({ tasks, todayIso: today(), manualDates });
         }
       }
-      updateMonthModal();
+      updateReadWindows();
     }
+  }
+
+  // Relecture legere : seules les dates manuelles ont change (pas de
+  // loadProject). Faux sans projet ou si rien ne change.
+  function setManualDates(dates) {
+    if (!project) return false;
+    const next = dates || {};
+    if (sameManualDates(manualDates, next)) return false;
+    manualDates = { ...next };
+    recompute();
+    renderHeader();
+    if (smoothingModal.isOpen()) smoothingModal.refresh({ tasks, todayIso: today(), manualDates });
+    updateReadWindows();
+    notify();
+    return true;
   }
 
   // { tasks, mode, active } pour createPlanningChart().setChartInput.
@@ -360,8 +483,8 @@ export function createSmoothingController({
     rowUnreadable = false;
     recompute();
     renderHeader();
-    if (smoothingModal.isOpen()) smoothingModal.refresh({ tasks, todayIso: today() });
-    updateMonthModal();
+    if (smoothingModal.isOpen()) smoothingModal.refresh({ tasks, todayIso: today(), manualDates });
+    updateReadWindows();
     notify();
     return true;
   }
@@ -376,6 +499,8 @@ export function createSmoothingController({
     rowKnown = false;
     rowUnreadable = false;
     settings = { maxTotal: null, maxByType: {} };
+    manualDates = {};
+    hasManualColumn = false;
     settingsService = null;
     result = null;
     renderHeader();
@@ -396,14 +521,17 @@ export function createSmoothingController({
 
   displayGroup?.addEventListener("click", handleViewClick);
   openButton?.addEventListener("click", openSmoothing);
+  planSearchButton?.addEventListener("click", openPlanSearch);
   renderHeader();
 
   function destroy() {
     displayGroup?.removeEventListener("click", handleViewClick);
     openButton?.removeEventListener("click", openSmoothing);
+    planSearchButton?.removeEventListener("click", openPlanSearch);
     smoothingModal.destroy();
     monthModal.destroy();
+    planSearchModal.destroy();
   }
 
-  return { setProjectData, getChartInput, getSmoothedBounds, openMonthTasks, refreshFromProjectRows, clear, destroy };
+  return { setProjectData, getChartInput, getSmoothedBounds, openMonthTasks, refreshFromProjectRows, setManualDates, clear, destroy };
 }

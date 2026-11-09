@@ -34,6 +34,7 @@ import * as leaveAbsencesModule from "../assets/js/utils/leaveAbsences.js";
 import * as projectRegistryModule from "../assets/js/services/projectRegistry.js";
 import * as viewportBuildModule from "../assets/js/viewport/build.js";
 import * as viewportNormalizeModule from "../assets/js/viewport/normalize.js";
+import { readManualDates, sameManualDates } from "../assets/js/top/manualDates.js";
 
 const MAIN_PATH = new URL("../assets/js/main.js", import.meta.url);
 const source = fs.readFileSync(MAIN_PATH, "utf8");
@@ -123,6 +124,8 @@ function makeHarness() {
     ...projectRegistryModule,
     ...viewportBuildModule,
     ...viewportNormalizeModule,
+    readManualDates,
+    sameManualDates,
     buildChartTasks,
     getRealisationTargetLookup: () => null,
     currentService: () => env.service,

@@ -61,6 +61,7 @@ import { normalizeIsoDate } from "../assets/js/viewport/normalize.js";
 import { formatIsoDate } from "../assets/js/utils/dates.js";
 import { toGristMonthValue } from "../assets/js/utils/monthSegments.js";
 import { buildChartTasks } from "../assets/js/top/taskLoadModel.js";
+import { readManualDates, sameManualDates } from "../assets/js/top/manualDates.js";
 
 const MAIN_PATH = new URL("../assets/js/main.js", import.meta.url);
 const source = fs.readFileSync(MAIN_PATH, "utf8");
@@ -239,6 +240,8 @@ async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = 
   const chargeRenders = [];
   const setBoundsCalls = [];
   const pendingFetches = [];
+  // Appels recus par le faux controleur du lissage (dates manuelles).
+  const smoothingCalls = { setProjectData: [], setManualDates: [] };
 
   // La base : mutable, pour simuler l'ecriture d'un autre widget/utilisateur.
   let remoteRows = segmentRows === undefined ? initialRemoteRows() : segmentRows;
@@ -411,6 +414,9 @@ async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = 
     formatIsoDate,
     // Taches du graphique et du lissage, calculees par le vrai loadProject.
     buildChartTasks,
+    // Lecture / comparaison des dates manuelles (pures).
+    readManualDates,
+    sameManualDates,
 
     // --- bouchons ------------------------------------------------------------
     fetchProjectData,
@@ -425,7 +431,13 @@ async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = 
     // Controleur du lissage (cree une fois par bootstrapApp, hors de ce chemin) :
     // methodes vides, le chemin post-ecriture n'en depend pas.
     smoothing: {
-      setProjectData: () => {},
+      setProjectData: (data) => {
+        smoothingCalls.setProjectData.push(data);
+      },
+      setManualDates: (dates) => {
+        smoothingCalls.setManualDates.push(dates);
+        return true;
+      },
       getChartInput: () => ({ tasks: [], mode: "raw", active: false }),
       getSmoothedBounds: () => null,
       openMonthTasks: () => {},
@@ -571,6 +583,7 @@ async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = 
     },
     getRemotePlanningRows: () => remotePlanningRows,
     planningWrites,
+    smoothingCalls,
     // Options passees a createChargeAssignModal par le VRAI loadProject :
     // `onSubmit` EST handleChargeAssignSubmit.
     getChargeAssignOptions: () => chargeAssignOptions,
@@ -1056,6 +1069,75 @@ test("Planning_Projet — un changement HORS colonnes de duree recharge tout le 
 
   assert.equal(h.calls.reconcileAndLoad, 1, "le pane haut ne se met a jour que par loadProject()");
   assert.equal(h.calls.chargeRender, 0, "et surtout pas un demi-rafraichissement du seul pane bas");
+});
+
+// --- dates manuelles du lissage (colonne Date_Manuel_Lissage) -----------------
+
+const MANUAL = PLANNING_COLUMNS.manualSmoothingDate;
+const MARCH_15_SECONDS = Date.UTC(2027, 2, 15) / 1000;
+
+function planningRowsWithManualColumn() {
+  return initialPlanningRows().map((row) => ({ ...row, [MANUAL]: null }));
+}
+
+test("dates manuelles — loadProject passe manualDates et hasManualColumn au lissage", async () => {
+  const rows = planningRowsWithManualColumn();
+  rows[1][MANUAL] = MARCH_15_SECONDS;
+  const h = await mount({ planningRows: rows });
+
+  const call = h.smoothingCalls.setProjectData.at(-1);
+  assert.equal(call.hasManualColumn, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(call.manualDates)), { 502: "2027-03-15" });
+});
+
+test("dates manuelles — colonne absente : hasManualColumn faux, aucune date", async () => {
+  const h = await mount({ planningRows: initialPlanningRows() });
+  const call = h.smoothingCalls.setProjectData.at(-1);
+  assert.equal(call.hasManualColumn, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(call.manualDates)), {});
+});
+
+test("dates manuelles — seule la date change : pas de loadProject, setManualDates, ligne en memoire a jour", async () => {
+  const h = await mount({ planningRows: planningRowsWithManualColumn() });
+  const boardRows = h.lastChargeRender().planningRows;
+  h.reset();
+
+  h.setRemotePlanningRows(h.getRemotePlanningRows().map((row) => (
+    row.id === 502 ? { ...row, [MANUAL]: MARCH_15_SECONDS } : row
+  )));
+  h.api.handleContextTablesChanged({ tables: [PLANNING_TABLE] });
+  await h.flush();
+
+  assert.equal(h.calls.reconcileAndLoad, 0, "aucun rechargement complet");
+  assert.equal(h.calls.createPlanningRenderer, 0, "le pane haut n'est pas reconstruit");
+  assert.equal(h.smoothingCalls.setManualDates.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.smoothingCalls.setManualDates[0])), { 502: "2027-03-15" });
+  assert.equal(
+    boardRows.find((row) => row.id === 502)[MANUAL],
+    MARCH_15_SECONDS,
+    "la ligne EN MEMOIRE (meme reference) porte la nouvelle valeur"
+  );
+});
+
+test("dates manuelles — une relecture identique n'appelle pas setManualDates", async () => {
+  const h = await mount({ planningRows: planningRowsWithManualColumn() });
+  h.reset();
+  h.api.handleContextTablesChanged({ tables: [PLANNING_TABLE] });
+  await h.flush();
+  assert.equal(h.calls.reconcileAndLoad, 0);
+  assert.equal(h.smoothingCalls.setManualDates.length, 0);
+});
+
+test("dates manuelles — la colonne apparait : rechargement complet", async () => {
+  const h = await mount({ planningRows: initialPlanningRows() });
+  h.reset();
+
+  h.setRemotePlanningRows(planningRowsWithManualColumn());
+  h.api.handleContextTablesChanged({ tables: [PLANNING_TABLE] });
+  await h.flush();
+
+  assert.equal(h.calls.reconcileAndLoad, 1, "l'ajout de la colonne recharge tout");
+  assert.equal(h.smoothingCalls.setManualDates.length, 0);
 });
 
 test("Planning_Projet — une ligne ajoutee ailleurs recharge tout le projet", async () => {

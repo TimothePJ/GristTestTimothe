@@ -17,6 +17,7 @@
 import { APP_CONFIG } from "../config.js";
 import { toText } from "../utils/dates.js";
 import { toFiniteNumber } from "../utils/format.js";
+import { isoToGristDate } from "../top/manualDates.js";
 import { toGristMonthValue, getMonthBusinessDays } from "../utils/monthSegments.js";
 
 const resolvedColumnCache = new Map();
@@ -501,13 +502,50 @@ export async function fetchProjectRow(projectId, { fresh = false } = {}) {
   return rows.find((row) => Number(row.id) === id) || null;
 }
 
-// Ecrit la colonne Lissage de la ligne projet : UNE SEULE UpdateRecord, aucune
-// autre colonne. Un id invalide fait echouer la fonction avant tout appel.
-export async function updateProjectSmoothing(projectId, value) {
+// Ecrit la colonne Lissage de la ligne projet ET, le cas echeant, les dates
+// manuelles modifiees (Planning_Projet.Date_Manuel_Lissage) en UN SEUL
+// applyUserActions : un enregistrement ne doit pas laisser les reglages et les
+// dates dans deux etats differents, et un lot unique ne declenche qu'un
+// rafraichissement via le relais de synchronisation inter-widgets.
+//
+// `manualWrites` = [{ rowId, iso | null }] (cf. top/manualDates.js::
+// diffManualDates) ; iso est converti en secondes UTC (isoToGristDate), null
+// efface la cellule. Sans ecriture manuelle (defaut), le lot reste l'unique
+// UpdateRecord de Projets2, aucune autre colonne.
+//
+// Ordre du lot : Projets2 d'abord, puis une UpdateRecord par ligne de
+// planning. La couche partagee valide chaque ligne mutee et complete les
+// UpdateRecord de Planning_Projet (Service, NomProjet), cf. le test
+// « updateProjectSmoothing : le lot traverse la couche de contexte partagee ».
+//
+// Validation de CHAQUE id et de CHAQUE date AVANT de construire les actions :
+// un id (projet ou ligne) ou une date invalide fait echouer la fonction avant
+// tout appel a applyActions — aucune ecriture partielle ne doit partir.
+export async function updateProjectSmoothing(projectId, value, manualWrites = []) {
   const id = toReferenceId(projectId);
   if (!id || id < 1) {
     throw new Error("Projet invalide : id manquant.");
   }
+
+  const manualColumn = APP_CONFIG.grist.columns.planningProject.manualSmoothingDate;
+  const manualActions = (Array.isArray(manualWrites) ? manualWrites : []).map((write) => {
+    const rowId = toReferenceId(write?.rowId);
+    if (!rowId || rowId < 1) {
+      throw new Error("Ligne de planning invalide : id manquant.");
+    }
+    const hasDate = write?.iso !== null && write?.iso !== undefined && write?.iso !== "";
+    const seconds = hasDate ? isoToGristDate(write.iso) : null;
+    if (hasDate && seconds === null) {
+      throw new Error("Date manuelle invalide.");
+    }
+    return [
+      "UpdateRecord",
+      APP_CONFIG.grist.tables.planningProject,
+      rowId,
+      { [manualColumn]: seconds },
+    ];
+  });
+
   await applyActions([
     [
       "UpdateRecord",
@@ -515,6 +553,7 @@ export async function updateProjectSmoothing(projectId, value) {
       id,
       { [APP_CONFIG.grist.columns.projects.lissage]: String(value ?? "") },
     ],
+    ...manualActions,
   ]);
 }
 

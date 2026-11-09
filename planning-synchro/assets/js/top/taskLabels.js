@@ -47,6 +47,8 @@ export const OVERFLOW_REASON_LABELS = {
   "taches-passees": "tâches réalisées ou en retard",
   "coffrage-sans-place": "coffrage sans place",
   "plus-de-place": "plus de place avant",
+  // Plans a date manuelle et coffrages forces (spec 2026-11-09, §4.5).
+  "dates-manuelles": "dates manuelles",
 };
 
 // "2027-04" -> "avril 2027". Cle invalide -> "".

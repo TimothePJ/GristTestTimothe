@@ -138,6 +138,17 @@ export function hasAnyMax(settings) {
   return hasMaxima(settings) || Object.values(settings.maxByMonth || {}).some(hasMaxima);
 }
 
+// Vrai dès qu'une date manuelle est imposée (settings.manualDates, jamais
+// stocké dans la cellule : il vient de Planning_Projet).
+export function hasManualDates(settings) {
+  return Boolean(settings) && Object.keys(settings.manualDates || {}).length > 0;
+}
+
+// Le lissage a quelque chose à faire : un maximum ou une date manuelle.
+export function hasSmoothing(settings) {
+  return hasAnyMax(settings) || hasManualDates(settings);
+}
+
 // Maximums d'un mois -> entree « parMois » de la cellule (seulement les valeurs
 // fixees).
 function writeMonthMaxima(maxima) {
@@ -153,7 +164,9 @@ function writeMonthMaxima(maxima) {
 export function serializeSmoothingCell(rawCell, service, settings) {
   const services = { ...readServices(rawCell) };
 
-  if (hasAnyMax(settings)) {
+  // Avec des dates manuelles seules, on garde le mois de départ (sinon il serait
+  // perdu) ; les dates manuelles elles-mêmes ne sont jamais écrites ici.
+  if (hasAnyMax(settings) || (settings && settings.startMonth && hasManualDates(settings))) {
     const entry = {};
     if (settings.maxTotal != null) entry.maxTotal = settings.maxTotal;
     entry.maxParType = { ...(settings.maxByType || {}) };

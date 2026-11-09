@@ -50,15 +50,39 @@ document.addEventListener("contextmenu", function (e) {
     menu.appendChild(modifyTypeOption);
   }
 
-  // Option: Supprimer
-  const deleteOption = document.createElement("div");
-  deleteOption.className = "context-menu-item";
-  deleteOption.textContent = "Supprimer";
-  deleteOption.addEventListener("click", async () => {
-    removeExistingContextMenu();
-    await supprimerLigne(targetCell);
-  });
-  menu.appendChild(deleteOption);
+  // Clic droit sur une case d'une sélection (Ctrl ou glisser) : supprimer toutes ses dates.
+  const bulkDateCells = typeof getDateBulkSelectionForCell === "function"
+    ? getDateBulkSelectionForCell(targetCell)
+    : [];
+  const bulkDateCount = bulkDateCells.length > 0 ? countDeletableDateCells(bulkDateCells) : 0;
+
+  if (bulkDateCount > 0) {
+    const bulkDeleteOption = document.createElement("div");
+    bulkDeleteOption.className = "context-menu-item";
+    bulkDeleteOption.textContent =
+      `Supprimer les dates (${bulkDateCount} case${bulkDateCount > 1 ? "s" : ""})`;
+    bulkDeleteOption.addEventListener("click", async () => {
+      removeExistingContextMenu();
+      closeDateBulkSelection();
+      try {
+        await supprimerDatesSurCellules(bulkDateCells);
+      } catch (err) {
+        console.error("Suppression des dates échouée", err);
+        alert("La suppression des dates a échoué. Vérifie la console pour les erreurs.");
+      }
+    });
+    menu.appendChild(bulkDeleteOption);
+  } else {
+    // Option: Supprimer
+    const deleteOption = document.createElement("div");
+    deleteOption.className = "context-menu-item";
+    deleteOption.textContent = "Supprimer";
+    deleteOption.addEventListener("click", async () => {
+      removeExistingContextMenu();
+      await supprimerLigne(targetCell);
+    });
+    menu.appendChild(deleteOption);
+  }
 
   document.body.appendChild(menu);
 });

@@ -88,8 +88,6 @@ export const APP_CONFIG = {
         name: "Nom_de_projet",
         dop: "DOP",
         avancement: "Avancement",
-        billingPercentage: "Pourcentage_Facturation",
-        billingPercentageByMonth: "Pourcentage_Facturation_Par_Mois",
       },
       budget: {
         id: "id",

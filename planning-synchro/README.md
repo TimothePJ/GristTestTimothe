@@ -632,6 +632,47 @@ même temps que les données du projet), jamais prise dans l'instantané de
 `Projets2` du démarrage ; un changement de service relit l'entrée du nouveau
 service.
 
+#### Plan particulier : date de fin imposée
+
+Un plan peut recevoir une **date de fin imposée**, utilisée **uniquement en mode
+lissé** (colonne `Planning_Projet.Date_Manuel_Lissage`) :
+
+- le plan **compte dans le maximum de son mois** (celui de la date imposée) et
+  les **autres plans se lissent autour de lui** ; lui-même n'est jamais déplacé
+  par le lissage ;
+- l'**échéance sans lissage** (mode « Non lissé », courbe pâle de « Les deux »)
+  reste **inchangée** ;
+- **colonne à créer dans Grist** : `Date_Manuel_Lissage`, type **Date**, format
+  `DD/MM/YYYY`, dans `Planning_Projet`. Sans elle, la section est **désactivée**
+  et affiche « Ajoutez une colonne Date « Date_Manuel_Lissage » dans
+  Planning_Projet pour imposer la date d'un plan. » ;
+- **section « Plan particulier »** de la fenêtre « Lissage des tâches » : la liste
+  des plans à date imposée (une case date par ligne), « Ajouter ce plan »
+  (ajoute le plan choisi dans la liste déroulante « Plan à ajouter » de la
+  fenêtre « Lissage », avec pour date sa date lissée actuelle, mais jamais avant
+  la première date permise : un plan en retard part de ce minimum),
+  « Choisir dans la liste… » (ouvre la fenêtre « Choisir les plans ») et ✕ pour
+  **Retirer** la date d'un plan ; sans plan, « Aucun plan particulier : le
+  lissage place chaque plan lui-même. » ;
+- **fenêtre « Choisir les plans »** : ouverte par-dessus la fenêtre « Lissage »,
+  elle fonctionne comme « Rechercher un plan » (N°/nom, zone, type, état) avec en
+  plus une **case date** par plan ; « Terminé » la ferme, et **Échap ne ferme
+  qu'elle** (la fenêtre « Lissage » reste ouverte) ;
+- **règles** : un plan **réalisé** ne reçoit pas de date ; une date **plus tôt ou
+  plus tard** que l'échéance est permise ; une **armature à date manuelle entraîne
+  ses coffrages** ; « Supprimer le lissage » **efface aussi** les dates manuelles ;
+  « Enregistrer » n'écrit que les **plans touchés** (les autres dates, y compris
+  celles de plans absents de la liste, ne sont jamais effacées) ;
+- **date minimale** : aujourd'hui quand le lissage part du mois en cours, sinon
+  le 1er du mois de départ choisi (« Lisser à partir de ») ; une date déjà
+  enregistrée plus tôt reste acceptée tant qu'on ne la modifie pas ;
+- **activation** : des dates manuelles suffisent à activer le lissage, même sans
+  aucun maximum (les modes « Lissé » et « Les deux » sont alors disponibles) ;
+- **où on la voit** : « Rechercher un plan » indique « date manuelle » et propose
+  le filtre « Dates manuelles » ; la fenêtre « Tâches du mois » ajoute la note
+  « date manuelle (échéance JJ/MM/AAAA) » ; l'aperçu du lissage compte « N dates
+  manuelles ».
+
 #### Modes « Non lissé / Lissé / Les deux »
 
 Le groupe **« Afficher »** n'apparaît que lorsqu'un lissage est défini :

@@ -6,7 +6,8 @@
 // findSmoothingViolations : les regles strictes de §4.2 doivent tenir partout.
 // Dans A a H, aucune armature n'a de coffrage a entrainer (groupKey vide ou
 // groupes sans armature) ; la dependance armature / coffrage (§4.6) a ses
-// propres scenarios (I, J et suivants). Le fuzz est dans
+// propres scenarios (I, J et suivants). Les dates manuelles (plans fixes, spec
+// 2026-11-09 §4) ont les scenarios P1 a P10. Le fuzz est dans
 // taskSmoothingFuzz.test.mjs.
 //
 // Mois courant : janvier 2027, sauf mention.
@@ -22,6 +23,7 @@ import {
   shiftIsoByMonths,
   smoothingStartMonth,
 } from "../assets/js/top/taskSmoothing.js";
+import { OVERFLOW_REASON_LABELS } from "../assets/js/top/taskLabels.js";
 
 function t(id, type, dueIso, extra = {}) {
   return {
@@ -755,6 +757,110 @@ const SCENARIOS = {
     today: JANUARY,
     settings: { maxByType: {}, maxByMonth: { "2027-01": { maxTotal: 0, maxByType: {} } } },
     tasks: [t(1, "NDC", "2027-01-20")],
+  }),
+
+  // --- dates manuelles (spec 2026-11-09, §4) ---
+
+  // P1. Maximum general 2 : le plan 3 (avril) est fixe au 25/03. Il compte en
+  //     mars, qui passe a 3 : la tache la plus tot de mars part en fevrier.
+  P1: () => ({
+    today: JANUARY,
+    settings: { maxTotal: 2, maxByType: {}, manualDates: { 3: "2027-03-25" } },
+    tasks: [t(1, "COFFRAGE", "2027-03-05"), t(2, "NDC", "2027-03-20"), t(3, "NDC", "2027-04-10")],
+  }),
+
+  // P2. Maximum general 1 : le plan 1 (mars) est fixe plus tard, au 12/05. Il
+  //     libere mars : le plan 2 y reste.
+  P2: () => ({
+    today: JANUARY,
+    settings: { maxTotal: 1, maxByType: {}, manualDates: { 1: "2027-05-12" } },
+    tasks: [t(1, "NDC", "2027-03-05"), t(2, "NDC", "2027-03-20")],
+  }),
+
+  // P3. Un plan realise ignore sa date manuelle (et ne rend pas le lissage actif).
+  P3: () => ({
+    today: JANUARY,
+    settings: { maxTotal: null, maxByType: {}, manualDates: { 1: "2027-06-01" } },
+    tasks: [t(1, "NDC", "2027-03-05", { realized: true })],
+  }),
+
+  // P4. Sans maximum : l'armature 2 (mai) fixee au 10/03 entraine son coffrage
+  //     d'avril en mars, borne a sa date.
+  P4: () => ({
+    today: JANUARY,
+    settings: { maxTotal: null, maxByType: {}, manualDates: { 2: "2027-03-10" } },
+    tasks: [
+      t(1, "COFFRAGE", "2027-04-20", { groupKey: "g" }),
+      t(2, "ARMATURES", "2027-05-10", { groupKey: "g" }),
+    ],
+  }),
+
+  // P5. Maximum Coffrage 1, janvier a mars deja pleins : l'armature 2 fixee au
+  //     12/03 entraine quand meme son coffrage en mars (coffrage force).
+  P5: () => ({
+    today: JANUARY,
+    settings: { maxTotal: null, maxByType: { COFFRAGE: 1 }, manualDates: { 2: "2027-03-12" } },
+    tasks: [
+      t(10, "COFFRAGE", "2027-01-15"),
+      t(11, "COFFRAGE", "2027-02-15"),
+      t(12, "COFFRAGE", "2027-03-15"),
+      t(1, "COFFRAGE", "2027-05-20", { groupKey: "g" }),
+      t(2, "ARMATURES", "2027-06-10", { groupKey: "g" }),
+    ],
+  }),
+
+  // P6. Maximum general 1 : le coffrage 1 est fixe au 25/04, apres son
+  //     armature (10/04). L'armature ne peut pas passer avant lui : elle reste,
+  //     et la NDC d'avril part en mars a sa place.
+  P6: () => ({
+    today: JANUARY,
+    settings: { maxTotal: 1, maxByType: {}, manualDates: { 1: "2027-04-25" } },
+    tasks: [
+      t(1, "COFFRAGE", "2027-03-05", { groupKey: "g" }),
+      t(2, "ARMATURES", "2027-04-10", { groupKey: "g" }),
+      t(3, "NDC", "2027-04-20"),
+    ],
+  }),
+
+  // P7. Aucun maximum, une date manuelle : le lissage est actif.
+  P7: () => ({
+    today: JANUARY,
+    settings: { maxTotal: null, maxByType: {}, manualDates: { 1: "2027-02-01" } },
+    tasks: [t(1, "NDC", "2027-03-05"), t(2, "NDC", "2027-03-06")],
+  }),
+
+  // P8. Coffrage deja dans le mois de son armature fixee, un jour plus tard :
+  //     il est borne a la date de l'armature, sans etre avance d'un mois.
+  P8: () => ({
+    today: JANUARY,
+    settings: { maxTotal: null, maxByType: {}, manualDates: { 2: "2027-03-12" } },
+    tasks: [
+      t(1, "COFFRAGE", "2027-03-20", { groupKey: "g" }),
+      t(2, "ARMATURES", "2027-04-10", { groupKey: "g" }),
+    ],
+  }),
+
+  // P9. Date manuelle passee (avant aujourd'hui, 10/01) : le coffrage suit
+  //     quand meme l'armature, a sa date (exemption de la regle 2).
+  P9: () => ({
+    today: JANUARY,
+    settings: { maxTotal: null, maxByType: {}, manualDates: { 2: "2027-01-05" } },
+    tasks: [
+      t(1, "COFFRAGE", "2027-02-10", { groupKey: "g" }),
+      t(2, "ARMATURES", "2027-02-20", { groupKey: "g" }),
+    ],
+  }),
+
+  // P10. Date manuelle avant le mois de depart (decembre 2026, mois courant
+  //      janvier) : aucun mois de la recherche, le coffrage est force dans le
+  //      mois de l'armature.
+  P10: () => ({
+    today: JANUARY,
+    settings: { maxTotal: 2, maxByType: {}, manualDates: { 2: "2026-12-15" } },
+    tasks: [
+      t(1, "COFFRAGE", "2027-02-10", { groupKey: "g" }),
+      t(2, "ARMATURES", "2027-02-20", { groupKey: "g" }),
+    ],
   }),
 };
 
@@ -1729,4 +1835,243 @@ test("0 pour tous les mois : ignoré (aucun lissage), comme avant", () => {
 
   assert.equal(result.active, false);
   assertUnchanged(result);
+});
+
+// --- dates manuelles : plans fixes (spec 2026-11-09, §4) ---------------------------
+
+test("P1 : un plan fixé compte dans son mois, une autre tâche avance", () => {
+  const result = run("P1");
+  const rows = byRow(result);
+
+  assert.equal(rows.get(1).smoothedIso, "2027-02-05");
+  assert.equal(rows.get(2).smoothedIso, "2027-03-20");
+  assert.equal(rows.get(3).smoothedIso, "2027-03-25");
+  assert.equal(rows.get(3).manual, true);
+  assert.equal(rows.get(3).moved, false);
+  assert.equal(rows.get(3).monthsAdvanced, 1);
+  assert.equal(rows.get(1).manual, false);
+  assert.equal(result.movedCount, 1);
+  assert.equal(result.manualCount, 1);
+  assert.equal(result.delayedCount, 0);
+  assert.deepEqual(result.overflows, []);
+});
+
+test("P2 : un plan fixé plus tard libère son mois", () => {
+  const result = run("P2");
+  const rows = byRow(result);
+
+  assert.equal(rows.get(2).smoothedIso, "2027-03-20");
+  assert.equal(rows.get(1).smoothedIso, "2027-05-12");
+  assert.equal(rows.get(1).monthsAdvanced, -2);
+  assert.equal(rows.get(1).moved, false);
+  assert.equal(result.delayedCount, 1);
+  assert.equal(result.movedCount, 0);
+  assert.deepEqual(result.overflows, []);
+});
+
+test("P3 : un plan réalisé ignore sa date manuelle", () => {
+  const result = run("P3");
+  const task = byRow(result).get(1);
+
+  assert.equal(result.active, false);
+  assert.equal(task.smoothedIso, "2027-03-05");
+  assert.equal(task.manual, false);
+  assert.equal(result.manualCount, 0);
+  assert.equal(result.delayedCount, 0);
+});
+
+test("P4 : une armature fixée entraîne son coffrage, sans maximum, borné à sa date", () => {
+  const result = run("P4");
+  const coffrage = byRow(result).get(1);
+
+  assert.equal(result.active, true);
+  assert.equal(coffrage.smoothedIso, "2027-03-10");
+  assert.equal(coffrage.pulledFor, "2");
+  assert.equal(coffrage.followsManual, true);
+  assert.equal(coffrage.forced, false);
+  assert.equal(coffrage.moved, true);
+  // L'armature fixee n'entre pas dans l'entrainement (rule4Exception), et
+  // n'est pas marquee followsManual.
+  const armature = byRow(result).get(2);
+  assert.equal(armature.smoothedIso, "2027-03-10");
+  assert.equal(armature.manual, true);
+  assert.equal(armature.followsManual, false);
+  assert.equal(armature.rule4Exception, false);
+  assert.deepEqual(result.overflows, []);
+});
+
+test("P5 : coffrage forcé dans le mois de son armature fixée, raison « dates-manuelles »", () => {
+  const result = run("P5");
+  const coffrage = byRow(result).get(1);
+
+  assert.equal(coffrage.smoothedIso, "2027-03-12");
+  assert.equal(coffrage.forced, true);
+  assert.equal(coffrage.followsManual, true);
+  assert.equal(coffrage.pulledFor, "2");
+  // La tache de mars n'a pas de place avant : elle reste.
+  assert.equal(byRow(result).get(12).smoothedIso, "2027-03-15");
+  assert.deepEqual(result.overflows, [
+    { month: "2027-03", series: "COFFRAGE", count: 2, max: 1, reason: "dates-manuelles" },
+  ]);
+  assert.equal(OVERFLOW_REASON_LABELS["dates-manuelles"], "dates manuelles");
+});
+
+test("P5 bis : raison « dates-manuelles » aussi pour le Total, par un coffrage forcé", () => {
+  const { tasks, settings, today } = SCENARIOS.P5();
+  const result = smoothTasks(tasks, { ...settings, maxTotal: 2 }, today);
+
+  // Mars : 12, l'armature fixee et le coffrage force, pour un Total de 2.
+  assert.deepEqual(
+    result.overflows.filter((overflow) => overflow.month === "2027-03"),
+    [
+      { month: "2027-03", series: "TOTAL", count: 3, max: 2, reason: "dates-manuelles" },
+      { month: "2027-03", series: "COFFRAGE", count: 2, max: 1, reason: "dates-manuelles" },
+    ]
+  );
+});
+
+test("plans fixés seuls au-dessus du maximum : raison « dates-manuelles »", () => {
+  const result = smoothTasks(
+    [t(1, "NDC", "2027-04-05"), t(2, "NDC", "2027-05-05"), t(3, "NDC", "2027-03-08", { realized: true })],
+    { maxTotal: 1, maxByType: {}, manualDates: { 1: "2027-03-10", 2: "2027-03-20" } },
+    JANUARY
+  );
+
+  assert.deepEqual(result.overflows, [
+    { month: "2027-03", series: "TOTAL", count: 3, max: 1, reason: "dates-manuelles" },
+  ]);
+  assert.equal(result.manualCount, 2);
+});
+
+test("tâches figées seules au-dessus du maximum : la raison reste « taches-realisees »", () => {
+  const result = smoothTasks(
+    [
+      t(1, "NDC", "2027-03-05", { realized: true }),
+      t(2, "NDC", "2027-03-15", { realized: true }),
+      t(3, "NDC", "2027-05-05"),
+    ],
+    { maxTotal: 1, maxByType: {}, manualDates: { 3: "2027-03-20" } },
+    JANUARY
+  );
+
+  assert.deepEqual(result.overflows, [
+    { month: "2027-03", series: "TOTAL", count: 3, max: 1, reason: "taches-realisees" },
+  ]);
+});
+
+test("P6 : un coffrage fixé après son armature la bloque", () => {
+  const result = run("P6");
+  const rows = byRow(result);
+
+  assert.equal(rows.get(2).smoothedIso, "2027-04-10");
+  assert.equal(rows.get(2).rule4Exception, true);
+  assert.equal(monthKeyOf(rows.get(3).smoothedIso), "2027-03");
+  assert.equal(rows.get(1).smoothedIso, "2027-04-25");
+});
+
+test("P7 : des dates manuelles seules rendent le lissage actif", () => {
+  const result = run("P7");
+  const rows = byRow(result);
+
+  assert.equal(result.active, true);
+  assert.deepEqual(result.overflows, []);
+  assert.equal(rows.get(1).smoothedIso, "2027-02-01");
+  assert.equal(rows.get(2).smoothedIso, "2027-03-06");
+  assert.equal(rows.get(2).moved, false);
+  assert.equal(result.movedCount, 0);
+  assert.equal(result.manualCount, 1);
+});
+
+test("P8 : coffrage du même mois, un jour plus tard, borné à la date de l'armature fixée", () => {
+  const result = run("P8");
+  const coffrage = byRow(result).get(1);
+
+  assert.equal(coffrage.smoothedIso, "2027-03-12");
+  assert.equal(coffrage.pulledFor, "2");
+  assert.equal(coffrage.followsManual, true);
+  assert.equal(coffrage.forced, false);
+  assert.equal(coffrage.monthsAdvanced, 0);
+  assert.equal(coffrage.moved, false);
+  assert.equal(result.movedCount, 0);
+});
+
+test("P9 : date manuelle passée, le coffrage suit l'armature à sa date", () => {
+  const result = run("P9");
+
+  assert.equal(byRow(result).get(1).smoothedIso, "2027-01-05");
+  assert.equal(byRow(result).get(1).followsManual, true);
+  assert.equal(byRow(result).get(2).smoothedIso, "2027-01-05");
+});
+
+test("P10 : date manuelle avant le mois de départ, le coffrage est forcé dans son mois", () => {
+  const result = run("P10");
+  const coffrage = byRow(result).get(1);
+
+  assert.equal(monthKeyOf(coffrage.smoothedIso), "2026-12");
+  assert.equal(coffrage.forced, true);
+  assert.equal(coffrage.pulledFor, "2");
+  assert.equal(byRow(result).get(2).smoothedIso, "2026-12-15");
+  // Les mois d'avant le depart ne sont pas signales.
+  assert.deepEqual(result.overflows, []);
+});
+
+test("date manuelle invalide, ou ligne sans rowId : le plan n'est pas fixé", () => {
+  const tasks = [t(1, "NDC", "2027-03-05"), t(2, "NDC", "2027-03-06"), t(3, "NDC", "2027-03-07", { rowId: null })];
+  const result = smoothTasks(
+    tasks,
+    { maxTotal: null, maxByType: {}, manualDates: { 1: "2027-02-30", 2: "demain", null: "2027-02-01" } },
+    JANUARY
+  );
+
+  assert.equal(result.active, false);
+  assert.equal(result.manualCount, 0);
+  result.tasks.forEach((task) => {
+    assert.equal(task.manual, false);
+    assert.equal(task.smoothedIso, task.dueIso);
+  });
+});
+
+test("findSmoothingViolations : un plan fixé n'est vérifié par aucune règle", () => {
+  // P2 : le plan 1 fixe au 12/05, apres son echeance (regle 1 ignoree).
+  const { tasks, settings, today } = SCENARIOS.P2();
+  const result = smoothTasks(tasks, settings, today);
+  assert.deepEqual(findSmoothingViolations(tasks, settings, today, result), []);
+  // Sans la date manuelle dans les reglages, le meme resultat enfreint la regle 1.
+  const plain = { ...settings, manualDates: {} };
+  assertRule(findSmoothingViolations(tasks, plain, today, result), 1, 1, "après l'échéance 2027-03-05");
+});
+
+test("findSmoothingViolations : coffrage followsManual exempté des règles 2 et 5, pas de la règle 1", () => {
+  // P9 : le coffrage est au 05/01, avant aujourd'hui (regle 2 ignoree).
+  const { tasks, settings, today } = SCENARIOS.P9();
+  const result = smoothTasks(tasks, settings, today);
+  const unflagged = {
+    ...result,
+    tasks: result.tasks.map((task) => (task.rowId === 1 ? { ...task, followsManual: false } : task)),
+  };
+  assertRule(findSmoothingViolations(tasks, settings, today, unflagged), 2, 1, "avant aujourd'hui");
+  // Regle 1 : un coffrage followsManual reporte apres son echeance est signale.
+  const late = {
+    ...result,
+    tasks: result.tasks.map((task) => (task.rowId === 1 ? { ...task, smoothedIso: "2027-03-01" } : task)),
+  };
+  assertRule(findSmoothingViolations(tasks, settings, today, late), 1, 1, "après l'échéance 2027-02-10");
+  // Regle 5 : P5, le coffrage force sans followsManual est signale.
+  const p5 = SCENARIOS.P5();
+  const forced = smoothTasks(p5.tasks, p5.settings, p5.today);
+  const forcedUnflagged = {
+    ...forced,
+    tasks: forced.tasks.map((task) => (task.rowId === 1 ? { ...task, followsManual: false } : task)),
+  };
+  assertRule(findSmoothingViolations(p5.tasks, p5.settings, p5.today, forcedUnflagged), 5, 1, "COFFRAGE 2 / 1");
+});
+
+test("dates manuelles : déterministe, et indépendant de l'ordre d'entrée", () => {
+  ["P1", "P4", "P5", "P6", "P8"].forEach((name) => {
+    const { tasks, settings, today } = SCENARIOS[name]();
+    const result = smoothTasks(tasks, settings, today);
+    assert.deepEqual(smoothTasks(tasks, settings, today), result, name);
+    const reversed = smoothTasks(tasks.slice().reverse(), settings, today);
+    assert.deepEqual(reversed.tasks.slice().reverse(), result.tasks, name);
+  });
 });

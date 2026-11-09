@@ -2153,6 +2153,96 @@ async function appliquerDateSurCellules(cells, isoDate, { syncPlanning = true } 
   return { updatedCount: visualUpdates.length };
 }
 
+// Lignes ListePlan affichées dans une case de date (plusieurs si dates multiples).
+function getDateCellRecordIds(td) {
+  const ids = [];
+  const recordId = parseInt(td?.dataset?.recordId, 10);
+  if (Number.isFinite(recordId)) ids.push(recordId);
+  if (td?.dataset?.conflicts) {
+    try {
+      for (const conflict of JSON.parse(td.dataset.conflicts) || []) {
+        const id = parseInt(conflict?.id, 10);
+        if (Number.isFinite(id)) ids.push(id);
+      }
+    } catch (err) {
+      console.error("Impossible de lire les conflits de dates :", err);
+    }
+  }
+  return [...new Set(ids)];
+}
+
+function countDeletableDateCells(cells) {
+  return (cells || []).filter((td) => getDateCellRecordIds(td).length > 0).length;
+}
+
+function getListePlanDocumentKey(record) {
+  return [
+    getRecordProjectName(record),
+    record?.NumeroDocument,
+    record?.Designation,
+    record?.Type_document,
+    getRecordZone(record),
+    record?.Service
+  ].map(normalizeDocumentIdentityText).join("___");
+}
+
+// Même suppression que « Supprimer » sur une seule date, pour toutes les cases.
+// Un document dont toutes les lignes partent garde la première, vidée,
+// pour rester dans la liste.
+function buildDateCellsDeletionActions(cells, records = []) {
+  const idsToDelete = new Set();
+  for (const td of cells || []) {
+    getDateCellRecordIds(td).forEach((id) => idsToDelete.add(id));
+  }
+  if (idsToDelete.size === 0) return [];
+
+  const recordsById = new Map((records || []).map((record) => [Number(record.id), record]));
+  const remainingRowsByDocument = new Map();
+  for (const record of records || []) {
+    if (idsToDelete.has(Number(record.id))) continue;
+    const key = getListePlanDocumentKey(record);
+    remainingRowsByDocument.set(key, (remainingRowsByDocument.get(key) || 0) + 1);
+  }
+
+  const keptDocuments = new Set();
+  const actions = [];
+  for (const id of idsToDelete) {
+    const record = recordsById.get(id);
+    const key = record ? getListePlanDocumentKey(record) : null;
+    if (key && !remainingRowsByDocument.get(key) && !keptDocuments.has(key)) {
+      keptDocuments.add(key);
+      actions.push(["UpdateRecord", "ListePlan_NDC_COF", id, { Indice: null, DateDiffusion: null }]);
+    } else {
+      actions.push(["RemoveRecord", "ListePlan_NDC_COF", id]);
+    }
+  }
+  return actions;
+}
+
+function markDateCellCleared(td) {
+  td.classList.remove("missing-date-error", "multi-date-error");
+  td.textContent = "";
+  delete td.dataset.recordId;
+  delete td.dataset.conflicts;
+}
+
+async function supprimerDatesSurCellules(cells, { syncPlanning = true } = {}) {
+  const uniqueCells = Array.from(new Set(cells || [])).filter((cell) =>
+    cell?.matches?.("td.indice.editable")
+  );
+  const actions = buildDateCellsDeletionActions(uniqueCells, window.records || []);
+  if (actions.length === 0) return { deletedCount: 0 };
+
+  const clearedCells = uniqueCells.filter((td) => getDateCellRecordIds(td).length > 0);
+  await grist.docApi.applyUserActions(actions);
+  clearedCells.forEach(markDateCellCleared);
+
+  if (syncPlanning) {
+    await syncPlanningProjetIndicesFromListeDePlan();
+  }
+  return { deletedCount: clearedCells.length };
+}
+
 const dateDragSelection = {
   active: false,
   pointerId: null,
@@ -2255,6 +2345,27 @@ function openDateCtrlSelectionPicker() {
   dateCtrlSelection.openWhenReady = false;
   suppressNextDateCellClick();
   ouvrirPickerRemplirCellules(selectedCells, anchorCell);
+}
+
+// Calendrier « Remplir N case(s) » ouvert : ses cases et sa fermeture.
+let activeBulkDatePicker = null;
+
+// Cases visées par un clic droit : la sélection Ctrl en cours, sinon celle du
+// calendrier « Remplir » ouvert (Ctrl relâché ou glisser). Vide si la case
+// cliquée n'en fait pas partie ou s'il n'y a qu'une case.
+function getDateBulkSelectionForCell(cell) {
+  const ctrlCells = getDateCtrlSelectedCells();
+  const pickerCells = activeBulkDatePicker?.popup?.isConnected
+    ? activeBulkDatePicker.cells.filter((pickerCell) => pickerCell?.isConnected)
+    : [];
+  const selection = ctrlCells.length ? ctrlCells : pickerCells;
+  return selection.length > 1 && selection.includes(cell) ? selection : [];
+}
+
+function closeDateBulkSelection() {
+  if (activeBulkDatePicker) activeBulkDatePicker.close();
+  clearDateCtrlSelection();
+  clearDateDragHighlights();
 }
 
 function resetDateDragState({ keepHighlights = false } = {}) {
@@ -2395,6 +2506,7 @@ function ouvrirPickerRemplirCellules(cells, anchorCell) {
   clampFloatingDatePopup(popup);
 
   const closePopup = () => {
+    if (activeBulkDatePicker?.popup === popup) activeBulkDatePicker = null;
     fp.destroy();
     popup.remove();
     clearDateDragHighlights(selectedCells);
@@ -2421,6 +2533,7 @@ function ouvrirPickerRemplirCellules(cells, anchorCell) {
   });
 
   cancelBtn.onclick = closePopup;
+  activeBulkDatePicker = { popup, cells: selectedCells, close: closePopup };
   fp.open();
 }
 
@@ -2532,6 +2645,8 @@ document.addEventListener("keydown", (event) => {
 
 document.addEventListener("keyup", (event) => {
   if (event.key !== "Control" && event.key !== "Meta") return;
+  // Menu clic droit ouvert sur la sélection : le calendrier s'ouvrirait derrière.
+  if (document.getElementById("customContextMenu")) return;
   openDateCtrlSelectionPicker();
 });
 

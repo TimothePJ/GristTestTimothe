@@ -96,6 +96,9 @@ function makeEls() {
       openButton: new FakeElement(),
       smoothingModalEl: new FakeElement(),
       monthTasksModalEl: new FakeElement(),
+      planSearchButton: new FakeElement(),
+      planSearchModalEl: new FakeElement(),
+      planPickModalEl: new FakeElement(),
     },
     rawBtn,
     smoothedBtn,
@@ -105,8 +108,25 @@ function makeEls() {
 
 // Espions a la place des deux fenetres.
 function makeSpies() {
-  const spies = { smoothing: null, month: null };
-  const calls = { smoothing: [], month: [] };
+  const spies = { smoothing: null, month: null, search: null };
+  const calls = { smoothing: [], month: [], search: [] };
+  spies.createPlanSearchModal = () => {
+    let opened = false;
+    spies.search = {
+      open: (model) => {
+        opened = true;
+        calls.search.push(["open", model]);
+      },
+      update: (model) => calls.search.push(["update", model]),
+      close: () => {
+        opened = false;
+        calls.search.push(["close"]);
+      },
+      isOpen: () => opened,
+      destroy: () => calls.search.push(["destroy"]),
+    };
+    return spies.search;
+  };
   spies.createSmoothingModal = (rootEl, options) => {
     let opened = false;
     spies.smoothing = {
@@ -166,11 +186,13 @@ function build(overrides = {}) {
   const { els, rawBtn, smoothedBtn, bothBtn } = makeEls();
   const { spies, calls } = makeSpies();
   const saved = [];
+  const writes = [];
   const changes = [];
   const options = {
     els,
-    saveCell: async (projectId, value) => {
+    saveCell: async (projectId, value, manualWrites) => {
       saved.push([projectId, value]);
+      writes.push(manualWrites);
     },
     getService: () => "Structure",
     isReadOnly: () => false,
@@ -178,10 +200,11 @@ function build(overrides = {}) {
     onChange: () => changes.push(1),
     createSmoothingModal: spies.createSmoothingModal,
     createMonthTasksModal: spies.createMonthTasksModal,
+    createPlanSearchModal: spies.createPlanSearchModal,
     ...overrides,
   };
   const controller = createSmoothingController(options);
-  return { controller, els, rawBtn, smoothedBtn, bothBtn, spies, calls, saved, changes };
+  return { controller, els, rawBtn, smoothedBtn, bothBtn, spies, calls, saved, writes, changes };
 }
 
 function data(projectRow, extra = {}) {
@@ -782,4 +805,248 @@ test("getSmoothedBounds : mois des dates lissees quand le lissage est actif, nul
 
     controller.clear();
     assert.equal(controller.getSmoothedBounds(), null);
+  }));
+
+// --- Fenetre « Rechercher un plan » (loupe de la vue Graphique) --------------
+// Le controleur lui donne SES taches et SON resultat de lissage : les memes que
+// le graphique, sans recalcul. Modele : { subtitle, service, active, entries }
+// (top/planSearchModal.js, buildPlanSearchEntries).
+
+test("loupe : grisee sans tache, utilisable des qu'il y a des taches", () =>
+  withLocalStorage(() => {
+    const { controller, els } = build();
+    controller.setProjectData(data({ id: 7, Lissage: "" }, { tasks: [] }));
+    assert.equal(els.planSearchButton.disabled, true);
+
+    controller.setProjectData(data({ id: 7, Lissage: "" }));
+    assert.equal(els.planSearchButton.disabled, false);
+  }));
+
+test("loupe : avec un lissage actif, la recherche porte les dates lissees du graphique", () =>
+  withLocalStorage(() => {
+    const { controller, els, calls } = build();
+    controller.setProjectData(data({ id: 7, Lissage: CELL_MAX2 }));
+    els.planSearchButton.click();
+
+    const [kind, model] = calls.search.at(-1);
+    assert.equal(kind, "open");
+    assert.equal(model.active, true);
+    assert.equal(model.subtitle, "Projet X · Structure");
+    assert.equal(model.service, "Structure");
+    assert.equal(model.entries.length, 4);
+    // Novembre compte 3 coffrages pour un maximum de 2 : le premier avance en octobre.
+    const moved = model.entries.filter((entry) => entry.moved);
+    assert.deepEqual(moved.map((entry) => entry.rowId), [2]);
+    assert.equal(moved[0].smoothedIso.slice(0, 7), "2026-10");
+  }));
+
+test("loupe : sans lissage pour le service, seulement les echeances du planning", () =>
+  withLocalStorage(() => {
+    const { controller, els, calls } = build();
+    controller.setProjectData(data({ id: 7, Lissage: CELL_OTHER }));
+    els.planSearchButton.click();
+
+    const [, model] = calls.search.at(-1);
+    assert.equal(model.active, false);
+    model.entries.forEach((entry) => {
+      assert.equal(entry.smoothedIso, null);
+      assert.equal(entry.moved, false);
+    });
+  }));
+
+test("loupe : meme projet relu, la fenetre ouverte suit ; autre projet, elle se ferme", () =>
+  withLocalStorage(() => {
+    const { controller, els, calls } = build();
+    controller.setProjectData(data({ id: 7, Lissage: "" }));
+    els.planSearchButton.click();
+
+    controller.setProjectData(data({ id: 7, Lissage: CELL_MAX2 }));
+    const [kind, model] = calls.search.at(-1);
+    assert.equal(kind, "update");
+    assert.equal(model.active, true, "le lissage enregistre par un collegue apparait");
+
+    controller.setProjectData(data({ id: 8, Lissage: "" }, { contextKey: "8|Structure" }));
+    assert.deepEqual(calls.search.at(-1), ["close"]);
+  }));
+
+test("loupe : un lissage enregistre met a jour la recherche ouverte", () =>
+  withLocalStorage(async () => {
+    const { controller, els, spies, calls } = build();
+    controller.setProjectData(data({ id: 7, Lissage: "" }));
+    els.planSearchButton.click();
+    els.openButton.click();
+    assert.deepEqual(await spies.smoothing.options.onSubmit({ maxTotal: 2, maxByType: {} }), { ok: true });
+
+    const [kind, model] = calls.search.at(-1);
+    assert.equal(kind, "update");
+    assert.equal(model.active, true);
+  }));
+
+// --- dates manuelles (spec 2026-11-09 §4.4, §5.4, §6) ---------------------------
+
+// Les rowId de TASKS vont de 1 a 4 : 2 porte la date « active », 5 est un plan
+// absent des taches (date conservee mais sans effet).
+const MANUAL_DATA = { manualDates: { 5: "2027-03-01" }, hasManualColumn: true };
+const MANUAL_ACTIVE = { manualDates: { 2: "2027-03-01" }, hasManualColumn: true };
+
+test("dates manuelles : le lot d'ecriture porte le diff etat connu -> brouillon", () =>
+  withLocalStorage(async () => {
+    const { controller, spies, writes } = build();
+    controller.setProjectData(data({ id: 7, Lissage: "" }, MANUAL_DATA));
+    const outcome = await spies.smoothing.options.onSubmit({
+      maxTotal: null,
+      maxByType: {},
+      manualDates: { 3: "2027-02-15" },
+    });
+    assert.deepEqual(outcome, { ok: true });
+    assert.deepEqual(writes[0], [
+      { rowId: 3, iso: "2027-02-15" },
+      { rowId: 5, iso: null },
+    ]);
+  }));
+
+test("dates manuelles : succes -> le resultat recalcule place la tache a la date imposee", () =>
+  withLocalStorage(async () => {
+    const { controller, spies } = build();
+    controller.setProjectData(data({ id: 7, Lissage: "" }, MANUAL_DATA));
+    await spies.smoothing.options.onSubmit({ maxTotal: null, maxByType: {}, manualDates: { 3: "2027-02-15" } });
+    const placed = controller.getChartInput().tasks.find((t) => t.rowId === 3);
+    assert.equal(placed.smoothedIso, "2027-02-15");
+  }));
+
+test("dates manuelles : echec de saveCell -> etat local inchange", () =>
+  withLocalStorage(async () => {
+    const { controller, spies, changes } = build({
+      saveCell: async () => {
+        throw new Error("reseau");
+      },
+    });
+    controller.setProjectData(data({ id: 7, Lissage: "" }, MANUAL_DATA));
+    const outcome = await spies.smoothing.options.onSubmit({ maxTotal: null, maxByType: {}, manualDates: { 3: "2027-02-15" } });
+    assert.equal(outcome.ok, false);
+    assert.equal(changes.length, 0);
+    const input = controller.getChartInput();
+    assert.equal(input.tasks.find((t) => t.rowId === 3).smoothedIso === "2027-02-15", false);
+    // l'ancien etat sert encore de base au diff suivant
+    assert.equal(controller.setManualDates({ 5: "2027-03-01" }), false);
+  }));
+
+test("dates manuelles : supprimer efface toutes les dates et le lissage actif disparait", () =>
+  withLocalStorage(async () => {
+    const { controller, spies, writes, els } = build();
+    controller.setProjectData(data({ id: 7, Lissage: "" }, MANUAL_ACTIVE));
+    assert.equal(controller.getChartInput().active, true);
+    assert.deepEqual(await spies.smoothing.options.onDelete(), { ok: true });
+    assert.deepEqual(writes[0], [{ rowId: 2, iso: null }]);
+    assert.equal(controller.getChartInput().active, false);
+    assert.equal(els.displayGroup.hidden, true);
+    assert.equal(els.openButton.classList.contains("is-active"), false);
+  }));
+
+test("dates manuelles : setManualDates identiques -> false sans onChange ; differentes -> true et fenetres a jour", () =>
+  withLocalStorage(() => {
+    const { controller, els, spies, calls, changes } = build();
+    assert.equal(controller.setManualDates({ 3: "2027-02-15" }), false, "sans projet");
+    controller.setProjectData(data({ id: 7, Lissage: "" }, MANUAL_DATA));
+    els.planSearchButton.click();
+    els.openButton.click();
+    assert.equal(controller.setManualDates({ 5: "2027-03-01" }), false);
+    assert.equal(changes.length, 0);
+    assert.equal(controller.setManualDates({ 3: "2027-02-15" }), true);
+    assert.equal(changes.length, 1);
+    assert.equal(controller.getChartInput().tasks.find((t) => t.rowId === 3).smoothedIso, "2027-02-15");
+    const refresh = calls.smoothing.filter(([kind]) => kind === "refresh").at(-1);
+    assert.deepEqual(refresh[1].manualDates, { 3: "2027-02-15" });
+    assert.equal(calls.search.at(-1)[0], "update");
+  }));
+
+test("dates manuelles seules : lissage actif et groupe « Afficher » visible", () =>
+  withLocalStorage(() => {
+    const { controller, els } = build();
+    controller.setProjectData(data({ id: 7, Lissage: "" }, MANUAL_ACTIVE));
+    assert.equal(controller.getChartInput().active, true);
+    assert.equal(els.displayGroup.hidden, false);
+    assert.equal(els.openButton.classList.contains("is-active"), true);
+  }));
+
+test("colonne de date absente : aucune ecriture manuelle, le reste du lissage marche", () =>
+  withLocalStorage(async () => {
+    const { controller, spies, writes } = build();
+    controller.setProjectData(data({ id: 7, Lissage: "" }));
+    const outcome = await spies.smoothing.options.onSubmit({ maxTotal: 2, maxByType: {}, manualDates: { 3: "2027-02-15" } });
+    assert.deepEqual(outcome, { ok: true });
+    assert.deepEqual(writes[0], []);
+    assert.equal(controller.getChartInput().tasks.find((t) => t.rowId === 3).smoothedIso === "2027-02-15", false);
+  }));
+
+test("dates manuelles : le contexte de la fenetre porte dates, colonne, sous-titre et service", () =>
+  withLocalStorage(() => {
+    const { controller, els, calls } = build();
+    controller.setProjectData(data({ id: 7, Lissage: "" }, MANUAL_DATA));
+    els.openButton.click();
+    const context = calls.smoothing.find(([kind]) => kind === "open")[1];
+    assert.deepEqual(context.manualDates, { 5: "2027-03-01" });
+    assert.equal(context.hasManualColumn, true);
+    assert.equal(context.subtitle, "Projet X · Structure");
+    assert.equal(context.service, "Structure");
+    assert.equal(context.saved, true);
+  }));
+
+test("dates manuelles : le selecteur de plans recoit planPickModalEl", () =>
+  withLocalStorage(() => {
+    const { els, spies } = build();
+    assert.equal(spies.smoothing.options.pickerEl, els.planPickModalEl);
+  }));
+
+// --- dates manuelles : ecriture pendant la relecture (revue finale) -----------
+
+function deferredRow() {
+  let release;
+  const promise = new Promise((resolve) => {
+    release = () => resolve({ id: 7, Lissage: "" });
+  });
+  return { loadProjectRow: () => promise, release };
+}
+
+test("dates manuelles : une date recue pendant la relecture n'est pas ecrasee (diff sur l'instantane)", () =>
+  withLocalStorage(async () => {
+    const { loadProjectRow, release } = deferredRow();
+    const { controller, spies, writes } = build({ loadProjectRow });
+    controller.setProjectData(data({ id: 7, Lissage: "" }, MANUAL_DATA));
+    const pending = spies.smoothing.options.onSubmit({
+      maxTotal: null,
+      maxByType: {},
+      manualDates: { 3: "2027-02-15", 5: "2027-03-01" },
+    });
+    // un collegue pose la date du plan 2 pendant l'attente
+    assert.equal(controller.setManualDates({ 5: "2027-03-01", 2: "2027-03-20" }), true);
+    release();
+    assert.deepEqual(await pending, { ok: true });
+    assert.deepEqual(writes[0], [{ rowId: 3, iso: "2027-02-15" }], "la date du collegue n'est pas effacee");
+    // l'ecriture est appliquee sur l'etat courant : la date du collegue reste
+    const tasks = controller.getChartInput().tasks;
+    assert.equal(tasks.find((t) => t.rowId === 3).smoothedIso, "2027-02-15");
+    assert.equal(tasks.find((t) => t.rowId === 2).smoothedIso, "2027-03-20");
+  }));
+
+test("dates manuelles : changement de service pendant la relecture -> n'efface pas les dates de l'autre service", () =>
+  withLocalStorage(async () => {
+    const { loadProjectRow, release } = deferredRow();
+    let svc = "Structure";
+    const { controller, spies, writes } = build({ loadProjectRow, getService: () => svc });
+    controller.setProjectData(data({ id: 7, Lissage: "" }, MANUAL_DATA));
+    const pending = spies.smoothing.options.onSubmit({ maxTotal: null, maxByType: {}, manualDates: { 3: "2027-02-15", 5: "2027-03-01" } });
+    svc = "Autre";
+    controller.setProjectData({
+      contextKey: "7|Autre",
+      project: { id: 7, name: "Projet X" },
+      tasks: TASKS,
+      projectRow: { id: 7, Lissage: "" },
+      manualDates: { 50: "2027-06-01", 51: "2027-07-01" },
+      hasManualColumn: true,
+    });
+    release();
+    await pending;
+    assert.deepEqual(writes[0], [{ rowId: 3, iso: "2027-02-15" }], "ni 50 ni 51 ne sont effaces");
+    assert.equal(controller.setManualDates({ 50: "2027-06-01", 51: "2027-07-01" }), false, "etat du nouveau service intact");
   }));

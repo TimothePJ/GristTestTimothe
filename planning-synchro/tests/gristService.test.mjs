@@ -742,3 +742,134 @@ test("fetchProjectRow({ fresh: true }) sans couche partagee : aucune option tran
     globalThis.window = previousWindow;
   }
 });
+
+// Dates manuelles (Planning_Projet.Date_Manuel_Lissage) : ecrites dans le MEME
+// lot que Projets2.Lissage (spec §3 « Ecriture »), pour qu'un enregistrement
+// ne puisse pas laisser les reglages et les dates dans deux etats differents.
+
+function smoothingStubWindow(calls) {
+  return {
+    grist: {
+      docApi: {
+        async applyUserActions(actions) {
+          calls.push(actions);
+          return { retValues: actions.map(() => null) };
+        },
+      },
+    },
+  };
+}
+
+test("updateProjectSmoothing ecrit Lissage ET les dates manuelles en UN SEUL lot", async () => {
+  const calls = [];
+  const previousWindow = globalThis.window;
+  globalThis.window = smoothingStubWindow(calls);
+
+  try {
+    const service = await importFreshService("update-project-smoothing-manual");
+    await service.updateProjectSmoothing(12, "{}", [
+      { rowId: 101, iso: "2026-03-15" },
+      { rowId: 102, iso: null },
+    ]);
+    assert.equal(calls.length, 1, "un seul applyUserActions");
+    assert.deepEqual(calls[0], [
+      ["UpdateRecord", "Projets2", 12, { Lissage: "{}" }],
+      ["UpdateRecord", "Planning_Projet", 101, { Date_Manuel_Lissage: Date.UTC(2026, 2, 15) / 1000 }],
+      ["UpdateRecord", "Planning_Projet", 102, { Date_Manuel_Lissage: null }],
+    ]);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("updateProjectSmoothing sans ecriture manuelle reste a UNE action", async () => {
+  const calls = [];
+  const previousWindow = globalThis.window;
+  globalThis.window = smoothingStubWindow(calls);
+
+  try {
+    const service = await importFreshService("update-project-smoothing-no-manual");
+    await service.updateProjectSmoothing(12, "{}", []);
+    await service.updateProjectSmoothing(12, "{}", undefined);
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls[0], [["UpdateRecord", "Projets2", 12, { Lissage: "{}" }]]);
+    assert.deepEqual(calls[1], calls[0]);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("updateProjectSmoothing rejette un id de ligne ou une date invalide, sans aucun appel", async () => {
+  const calls = [];
+  const previousWindow = globalThis.window;
+  globalThis.window = smoothingStubWindow(calls);
+
+  try {
+    const service = await importFreshService("update-project-smoothing-manual-invalid");
+    for (const bad of [0, -2, null, undefined, "abc"]) {
+      await assert.rejects(
+        () => service.updateProjectSmoothing(12, "{}", [
+          { rowId: 101, iso: "2026-03-15" },
+          { rowId: bad, iso: "2026-03-16" },
+        ]),
+        /Ligne de planning invalide : id manquant\./
+      );
+    }
+    for (const badIso of ["2026-02-30", "pas une date", "15/03/2026"]) {
+      await assert.rejects(
+        () => service.updateProjectSmoothing(12, "{}", [{ rowId: 101, iso: badIso }]),
+        /Date manuelle invalide\./
+      );
+    }
+    assert.equal(calls.length, 0, "aucune ecriture partielle");
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("updateProjectSmoothing : le lot traverse la couche de contexte partagee", async () => {
+  const rows = [
+    ...PLANNING_ROWS_IN_DOC,
+    { id: 12, Numero_de_projet: "25-0142" },
+  ];
+  const layer = contextPatchedApplyUserActions({ rows });
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    GristServiceContext: {
+      getService: () => "Structure",
+      getCurrentProject: () => ({ id: 12, number: "25-0142", name: "ERA QUAI D'ORSAY" }),
+    },
+    grist: {
+      docApi: {
+        __serviceContextPatched: true,
+        applyUserActions: layer.applyUserActions,
+      },
+    },
+  };
+
+  try {
+    const service = await importFreshService("update-project-smoothing-context-layer");
+    await service.updateProjectSmoothing(12, "{}", [
+      { rowId: 101, iso: "2026-03-15" },
+      { rowId: 102, iso: null },
+    ]);
+
+    assert.equal(layer.appliedBatches.length, 1, "un seul lot atteint Grist");
+    const [batch] = layer.appliedBatches;
+    assert.deepEqual(batch.map((action) => [action[0], action[1], action[2]]), [
+      ["UpdateRecord", "Projets2", 12],
+      ["UpdateRecord", "Planning_Projet", 101],
+      ["UpdateRecord", "Planning_Projet", 102],
+    ]);
+    assert.equal(batch[0][3].Lissage, "{}");
+    // La date survit telle quelle (secondes UTC, ou null qui efface la cellule).
+    assert.equal(batch[1][3].Date_Manuel_Lissage, Date.UTC(2026, 2, 15) / 1000);
+    assert.equal(batch[2][3].Date_Manuel_Lissage, null);
+    // Ce que la couche AJOUTE au passage sur Planning_Projet (cf. le test
+    // d'updatePlanningDurations) : Service et NomProjet.
+    assert.equal(batch[1][3].Service, "Structure");
+    assert.equal(batch[1][3].NomProjet, "ERA QUAI D'ORSAY");
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});

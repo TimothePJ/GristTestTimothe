@@ -45,15 +45,18 @@ function monthKeyOf(iso) {
   return String(iso ?? "").slice(0, 7);
 }
 
+// Les trois libelles ci-dessous sont exportes pour la fenetre « Rechercher un
+// plan » (top/planSearchModal.js) : une tache s'y lit dans les memes mots.
+
 // « 67 % » : avancement de la tache, celui de la colonne « Realise » de Planning
 // Projet (ChartTask.progress) ; sans valeur connue, 0 %.
-function progressLabelOf(task) {
+export function progressLabelOf(task) {
   const value = Number(task.progress);
   return `${Number.isFinite(value) ? value : 0} %`;
 }
 
 // Libelle « Zone A · Groupe 3 » (parties vides omises).
-function placeOf(task) {
+export function placeOf(task) {
   const parts = [];
   if (String(task.zone ?? "").trim()) parts.push(String(task.zone).trim());
   if (String(task.groupe ?? "").trim()) parts.push(`Groupe ${String(task.groupe).trim()}`);
@@ -63,7 +66,7 @@ function placeOf(task) {
 // « N° 145 » pour un coffrage entraine par une armature. `pulledFor` porte l'id2
 // de l'armature (SmoothedTask), qui peut etre vide : on retombe alors sur le nom
 // d'une armature du meme groupe dont l'id2 est vide, sinon « N° ? ».
-function pulledForLabel(task, allTasks) {
+export function pulledForLabel(task, allTasks) {
   if (task.pulledFor == null) return null;
   const id2 = String(task.pulledFor).trim();
   if (id2 !== "") return `N° ${id2}`;
@@ -137,6 +140,7 @@ export function buildBucketTaskList({ result, mode, bucket, visibleTypeKeys, set
           ? `${formatMonthLabel(monthKeyOf(task.dueIso))} (${formatDateFr(task.dueIso)})`
           : null,
       pulledFor: showSmoothed ? pulledForLabel(task, allTasks) : null,
+      manualNote: showSmoothed && task.manual ? `date manuelle (échéance ${formatDateFr(task.dueIso)})` : null,
     }));
 
     const max = hasLimits && monthly && maxByType[type] != null ? maxByType[type] : null;
@@ -199,6 +203,7 @@ function renderItem(item) {
   if (item.closureNote) secondary.push(item.closureNote);
   if (item.movedFrom) secondary.push(`avancée ${de(item.movedFrom)}`);
   if (item.pulledFor) secondary.push(`avancé pour libérer l'armature ${item.pulledFor}`);
+  if (item.manualNote) secondary.push(item.manualNote);
   const realizedTitle = item.realized ? ' title="Tâche réalisée"' : "";
   return `<li class="ps-month-tasks-item${item.realized ? " is-realized" : ""}"${realizedTitle}>
     <div class="ps-month-tasks-row">

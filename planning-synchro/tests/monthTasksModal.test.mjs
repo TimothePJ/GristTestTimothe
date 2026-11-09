@@ -162,6 +162,15 @@ test("tri par date puis id2, lieu, mention d'avance et de coffrage entraine", ()
   assert.equal(items[0].movedFrom, null);
 });
 
+test("date manuelle : note avec l'échéance en mode lissé, aucune en mode brut", () => {
+  const tasks = [task({ rowId: 1, dueIso: "2027-03-16", smoothedIso: "2027-04-15", manual: true, monthsAdvanced: -1 })];
+  const smoothed = build({ result: noResult(tasks), mode: "smoothed", visibleTypeKeys: ["COFFRAGE"] });
+  assert.equal(smoothed.sections[0].items[0].manualNote, "date manuelle (échéance 16/03/2027)");
+  const MARCH = { startIso: "2027-03-01", endIso: "2027-04-01", label: "mars 2027" };
+  const raw = build({ result: noResult(tasks), mode: "raw", bucket: MARCH, visibleTypeKeys: ["COFFRAGE"] });
+  assert.equal(raw.sections[0].items[0].manualNote, null);
+});
+
 test("avancement : pourcentage de chaque tache, cloture forcee en note, realisee marquee", () => {
   const tasks = [
     task({ rowId: 1, id2: "1", progress: 67 }),
