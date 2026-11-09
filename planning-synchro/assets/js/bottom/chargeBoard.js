@@ -945,9 +945,15 @@ function renderChargeRows(workers, months, timelineWidth, charge) {
 // Legende des deux lignes Charge, juste sous elles (a gauche du bouton Editer) :
 // ce que disent les deux nombres d'une pastille (formatChargeLabel) et ses trois
 // teintes (getChargeCellState), avec les memes couleurs que les pastilles.
-function renderChargeLegend() {
+// `smoothed` : la charge suit le planning lisse (mode « Lissé » ou « Les deux »
+// du graphique) ; la legende le rappelle, le mode valant aussi en vue Planning.
+function renderChargeLegend(smoothed) {
+  const mode = smoothed
+    ? '<span class="charge-plan-legend-mode" title="Les plans avancés par le lissage (ou à date manuelle) portent leur charge à leur date lissée. Choisissez « Non lissé » dans le Graphique pour revenir aux dates d\'origine.">Charge lissée</span>'
+    : "";
   return `
     <div class="charge-plan-legend" title="À gauche, la charge que demandent les plans du mois (bouton « Charge ») ; à droite, les jours posés aux personnes du métier.">
+      ${mode}
       <span class="charge-plan-legend-sample">10 j / 8 j</span>
       <span>= charge des plans / jours planifiés</span>
       <span class="charge-plan-legend-item"><span class="charge-plan-legend-swatch is-balanced" aria-hidden="true"></span>équilibré</span>
@@ -957,10 +963,10 @@ function renderChargeLegend() {
   `;
 }
 
-function renderTimelineEditToolbar(editModeEnabled) {
+function renderTimelineEditToolbar(editModeEnabled, chargeSmoothed = false) {
   return `
     <div class="charge-plan-edit-toolbar">
-      ${renderChargeLegend()}
+      ${renderChargeLegend(chargeSmoothed)}
       <button
         type="button"
         class="charge-plan-edit-mode-toggle ${editModeEnabled ? "is-active" : ""}"
@@ -1039,6 +1045,10 @@ export function createChargeBoard(containerEl) {
   // transiter — sans memoire, un zoom/pan viderait la ligne Charge a chaque
   // rafraichissement de fenetre.
   let lastPlanningRows = [];
+  // Decalage de la charge en mode lisse (Map String(rowId) -> jours, cf.
+  // smoothingController.getChargeShift), null en « Non lissé ». Memorise comme
+  // lastPlanningRows : le re-rendu de fenetre (setWindow) ne le retransmet pas.
+  let lastChargeShift = null;
   // TOUTES les lignes TimeSegment, tous projets et tous services : la surcharge
   // d'une personne se compte sur l'ensemble de son engagement, pas sur le seul
   // projet affiche. Memorise comme lastPlanningRows, puisque le re-rendu de
@@ -1076,6 +1086,7 @@ export function createChargeBoard(containerEl) {
     absencesByWorker,
     planningRows,
     allTimeSegmentRows,
+    chargeShift,
     // Internes a setWindow : `panning` dessine la marge de glisser, `bounds`
     // (bornes de la frise) l'empeche de deborder au-dela des donnees.
     panning = false,
@@ -1096,7 +1107,8 @@ export function createChargeBoard(containerEl) {
       planningTasks !== undefined ||
       absencesByWorker !== undefined ||
       planningRows !== undefined ||
-      allTimeSegmentRows !== undefined
+      allTimeSegmentRows !== undefined ||
+      chargeShift !== undefined
     ) {
       derived = null;
     }
@@ -1112,6 +1124,7 @@ export function createChargeBoard(containerEl) {
       lastAbsencesByWorker = absencesByWorker instanceof Map ? absencesByWorker : new Map();
     }
     if (planningRows !== undefined) lastPlanningRows = Array.isArray(planningRows) ? planningRows : [];
+    if (chargeShift !== undefined) lastChargeShift = chargeShift instanceof Map ? chargeShift : null;
 
     containerEl.classList.add("charge-plan-board");
 
@@ -1132,7 +1145,9 @@ export function createChargeBoard(containerEl) {
           resolveAbsenceSet: (personName) => lastAbsencesByWorker.get(normalizeName(personName)) || null,
         }),
         groupedWorkers: groupWorkersByRole(lastWorkers),
-        charge: computeProjectCharge(lastPlanningRows, APP_CONFIG.grist.columns.planningProject),
+        charge: computeProjectCharge(lastPlanningRows, APP_CONFIG.grist.columns.planningProject, {
+          shiftDaysByRowId: lastChargeShift,
+        }),
         segmentMeta: new Map(),
       };
     }
@@ -1202,7 +1217,7 @@ export function createChargeBoard(containerEl) {
           ${chargeRowHtml}
         </div>
       </div>
-      ${renderTimelineEditToolbar(lastEditMode)}
+      ${renderTimelineEditToolbar(lastEditMode, lastChargeShift instanceof Map)}
       ${renderContextMenu()}
     `;
 

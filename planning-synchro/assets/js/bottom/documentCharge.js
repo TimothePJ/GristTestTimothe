@@ -254,11 +254,22 @@ function collectDivergences(documents, columns) {
   return divergences;
 }
 
+// Plage decalee de `days` jours calendaires (debut et fin ensemble : la duree
+// du document ne change pas).
+function shiftSpan(span, days) {
+  const move = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+  return { start: move(span.start), end: move(span.end) };
+}
+
 // Lignes Planning_Projet -> charge du projet :
 //   { byRole: { ingenieurs: RoleCharge, projeteurs: RoleCharge }, divergences }
 //   RoleCharge = { byMonth: Map "AAAA-MM" -> jours, unplacedDays, totalDays }
 // Chaque metier se repartit sur la plage de travail du document, comme avant.
-export function computeProjectCharge(planningRows, columns) {
+// `shiftDaysByRowId` (Map String(id de ligne) -> jours, facultatif) : en mode
+// lisse, l'ecart entre la date lissee et l'echeance de chaque plan deplace
+// (top/taskSmoothing.js, smoothingDayShifts) ; la plage du document est decalee
+// d'autant, sa charge suit le planning lisse.
+export function computeProjectCharge(planningRows, columns, { shiftDaysByRowId = null } = {}) {
   const byRole = {};
   CHARGE_ROLES.forEach((role) => {
     byRole[role] = { byMonth: new Map(), unplacedDays: 0, totalDays: 0 };
@@ -276,7 +287,9 @@ export function computeProjectCharge(planningRows, columns) {
   documents.forEach((doc) => {
     const charge = resolveDocumentCharge(doc.row, columns);
     if (!hasDuration(charge)) return;
-    const span = getDocumentWorkSpan(doc.row, columns);
+    const rawSpan = getDocumentWorkSpan(doc.row, columns);
+    const shiftDays = shiftDaysByRowId instanceof Map ? shiftDaysByRowId.get(String(doc.row?.[columns.id])) : 0;
+    const span = rawSpan && Number.isFinite(shiftDays) && shiftDays !== 0 ? shiftSpan(rawSpan, shiftDays) : rawSpan;
 
     CHARGE_ROLES.forEach((role) => {
       const days = charge[role];

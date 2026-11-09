@@ -201,6 +201,26 @@ export function shiftIsoByMonths(iso, deltaMonths) {
   return `${year}-${pad2(month)}-${pad2(Math.min(Number(match[3]), lastDay))}`;
 }
 
+// Jours (UTC, sans fuseau) d'une date AAAA-MM-JJ, ou NaN.
+function dayIndexOf(iso) {
+  const match = ISO_DATE.exec(String(iso ?? ""));
+  return match ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) / 86400000 : Number.NaN;
+}
+
+// Taches lissees -> Map String(rowId) -> ecart en jours entre la date lissee et
+// l'echeance (negatif = plus tot), pour les seules taches dont la date change.
+// La ligne Charge du board (bottom/documentCharge.js) decale de cet ecart toute
+// la plage de travail du plan : sa charge suit le planning lisse.
+export function smoothingDayShifts(tasks) {
+  const shifts = new Map();
+  (Array.isArray(tasks) ? tasks : []).forEach((task) => {
+    if (task?.rowId == null || !task.smoothedIso) return;
+    const delta = dayIndexOf(task.smoothedIso) - dayIndexOf(task.dueIso);
+    if (Number.isFinite(delta) && delta !== 0) shifts.set(String(task.rowId), delta);
+  });
+  return shifts;
+}
+
 // En interne, un mois est un entier (annee * 12 + mois - 1) : comparaisons et
 // parcours d'un mois a l'autre sans arithmetique de dates.
 function monthIndexOf(iso) {

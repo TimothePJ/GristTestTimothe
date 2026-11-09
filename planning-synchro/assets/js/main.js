@@ -297,6 +297,12 @@ function bootstrapApp() {
   // enregistrement ou un signal Projets2. Null tant qu'aucun projet n'est charge.
   let widenBoundsForSmoothing = null;
 
+  // Re-rendu du plan de charge quand le lissage change (mode Non lissé / Lissé /
+  // Les deux, enregistrement, dates manuelles) : les lignes Charge suivent alors
+  // le planning lisse (smoothing.getChargeShift). Publie par loadProject(), null
+  // tant qu'aucun projet n'est charge.
+  let rerenderChargeForSmoothing = null;
+
   // Empreinte du catalogue projets tel que ce widget l'affiche, posee par
   // bootstrap() puis remise a jour a chaque changement REEL. Elle sert a
   // distinguer une ecriture de colonne de signal sur Projets2 (rien n'a bouge)
@@ -376,6 +382,8 @@ function bootstrapApp() {
       // couvrent deja les mois lisses.
       if (widenBoundsForSmoothing) widenBoundsForSmoothing();
       if (topView === "chart" && planningChart) planningChart.setChartInput(smoothing.getChartInput());
+      // Les lignes Charge du bas suivent le mode choisi, dans les deux vues.
+      if (rerenderChargeForSmoothing) rerenderChargeForSmoothing();
     },
   });
 
@@ -440,6 +448,7 @@ function bootstrapApp() {
     // l'elargissement de la frise au lissage : il viserait l'ancienne frise.
     refreshChargeOnly = null;
     widenBoundsForSmoothing = null;
+    rerenderChargeForSmoothing = null;
 
     state.selectedProject = project || null;
 
@@ -670,6 +679,9 @@ function bootstrapApp() {
       absencesByWorker,
       planningRows,
       allTimeSegmentRows,
+      // Lignes Charge : decalees comme le planning lisse en « Lissé » / « Les
+      // deux », d'origine en « Non lissé » (null).
+      chargeShift: smoothing.getChargeShift(),
     });
 
     // Dernier mode de zoom appliqué (semaine/mois/année). La hauteur bornée du
@@ -808,6 +820,7 @@ function bootstrapApp() {
         // Chemin post-ecriture : sans cette ligne, la couleur de surcharge
         // resterait celle d'avant la modification.
         allTimeSegmentRows,
+        chargeShift: smoothing.getChargeShift(),
       });
       controller.setViewport(controller.getViewport());
       restoreScroll();
@@ -946,6 +959,9 @@ function bootstrapApp() {
     // Publie pour le relais : un changement qui ne touche que TimeSegment se
     // rafraichit ainsi, sans repasser par loadProject().
     refreshChargeOnly = reloadChargeFromGrist;
+    // Publie pour le lissage : un changement de mode ou de reglage redessine les
+    // lignes Charge en place (meme chemin que le rafraichissement local).
+    rerenderChargeForSmoothing = renderChargeFromLocalRows;
 
     // Publie pour le lissage : des taches lissees avant les bornes actuelles (mois
     // de depart passe) doivent rester atteignables, la frise s'ELARGIT pour les

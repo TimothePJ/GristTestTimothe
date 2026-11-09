@@ -33,7 +33,7 @@ import {
 import { diffManualDates, sameManualDates } from "./manualDates.js";
 import { getServiceSettings, hasSmoothing, serializeSmoothingCell } from "./smoothingSettings.js";
 import { TYPE_ORDER } from "./taskLabels.js";
-import { monthKeyOf, smoothTasks } from "./taskSmoothing.js";
+import { monthKeyOf, smoothingDayShifts, smoothTasks } from "./taskSmoothing.js";
 
 const NO_COLUMN_TITLE = "Ajoutez une colonne texte « Lissage » dans Projets2 pour activer le lissage.";
 const READ_FAILED_TITLE = "Lecture de Projets2 impossible : rechargez le projet.";
@@ -440,6 +440,15 @@ export function createSmoothingController({
     return { tasks: result.tasks, mode, active: true };
   }
 
+  // Decalage de la charge des lignes Charge du board (bottom/documentCharge.js) :
+  // Map String(rowId) -> jours quand le lissage est actif et affiche (« Lissé »
+  // ou « Les deux »), null en « Non lissé » ou sans lissage. Le mode memorise
+  // vaut aussi en vue Planning (decision de l'utilisateur, 2026-11-09).
+  function getChargeShift() {
+    if (!isActive() || mode === "raw") return null;
+    return smoothingDayShifts(result.tasks);
+  }
+
   // Mois couverts par les dates lissees, { startDate, endDate } du 1er jour du
   // premier mois au dernier jour du dernier ; null sans lissage actif. main.js
   // en elargit les bornes de la frise : un lissage qui avance des taches avant
@@ -533,5 +542,5 @@ export function createSmoothingController({
     planSearchModal.destroy();
   }
 
-  return { setProjectData, getChartInput, getSmoothedBounds, openMonthTasks, refreshFromProjectRows, setManualDates, clear, destroy };
+  return { setProjectData, getChartInput, getChargeShift, getSmoothedBounds, openMonthTasks, refreshFromProjectRows, setManualDates, clear, destroy };
 }

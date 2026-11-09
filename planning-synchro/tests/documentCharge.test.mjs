@@ -324,3 +324,42 @@ test("isDocumentRow : une tâche Synthese avec un N° n'est pas un document", ()
     "colonne Service par défaut"
   );
 });
+
+// --- charge suivant le lissage ------------------------------------------------
+
+test("computeProjectCharge : un decalage en jours deplace toute la plage du plan, et sa charge avec", () => {
+  const rows = [
+    // 01/09 -> 30/09 : avance de 31 jours, la plage devient 01/08 -> 30/08.
+    { id: 2, ID2: "3001", Type_doc: "COFFRAGE", Zone: "Z1",
+      Date_limite: "2026-09-01", Diff_coffrage: "2026-09-30", Duree_Projet: "2;4" },
+    // Sans decalage : reste en septembre.
+    { id: 3, ID2: "3002", Type_doc: "COFFRAGE", Zone: "Z1",
+      Date_limite: "2026-09-01", Diff_coffrage: "2026-09-30", Duree_Projet: "1;1" },
+  ];
+
+  const raw = computeProjectCharge(rows, COLS);
+  assert.equal(raw.byRole.ingenieurs.byMonth.get("2026-09"), 3);
+  assert.equal(raw.byRole.projeteurs.byMonth.get("2026-09"), 5);
+  assert.equal(raw.byRole.ingenieurs.byMonth.has("2026-08"), false);
+
+  const shifted = computeProjectCharge(rows, COLS, { shiftDaysByRowId: new Map([["2", -31]]) });
+  assert.equal(shifted.byRole.ingenieurs.byMonth.get("2026-08"), 2);
+  assert.equal(shifted.byRole.projeteurs.byMonth.get("2026-08"), 4);
+  assert.equal(shifted.byRole.ingenieurs.byMonth.get("2026-09"), 1);
+  assert.equal(shifted.byRole.projeteurs.byMonth.get("2026-09"), 1);
+  // Les totaux ne changent pas : la charge se deplace, elle ne se cree pas.
+  assert.equal(shifted.byRole.ingenieurs.totalDays, raw.byRole.ingenieurs.totalDays);
+  assert.equal(shifted.byRole.projeteurs.totalDays, raw.byRole.projeteurs.totalDays);
+});
+
+test("computeProjectCharge : sans option, avec une table vide ou un decalage nul, rien ne bouge", () => {
+  const rows = [
+    { id: 2, ID2: "3001", Type_doc: "COFFRAGE", Zone: "Z1",
+      Date_limite: "2026-09-01", Diff_coffrage: "2026-09-30", Duree_Projet: "2;4" },
+  ];
+  const expected = computeProjectCharge(rows, COLS).byRole.ingenieurs.byMonth.get("2026-09");
+  for (const options of [undefined, {}, { shiftDaysByRowId: null }, { shiftDaysByRowId: new Map() },
+    { shiftDaysByRowId: new Map([["2", 0]]) }]) {
+    assert.equal(computeProjectCharge(rows, COLS, options).byRole.ingenieurs.byMonth.get("2026-09"), expected);
+  }
+});

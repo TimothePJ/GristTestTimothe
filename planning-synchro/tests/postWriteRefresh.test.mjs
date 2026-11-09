@@ -222,7 +222,7 @@ function teamMemberRow({ id, name, role, projectNumber = PROJECT.number }) {
 
 // --- montage du vrai loadProject sur un environnement bouchonne ---------------
 
-async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = {}) {
+async function mount({ segmentRows, planningRows = [], projectTeamRows = [], chargeShift = null } = {}) {
   const calls = {
     fetchProjectData: 0,
     reconcileAndLoad: 0,
@@ -439,6 +439,8 @@ async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = 
         return true;
       },
       getChartInput: () => ({ tasks: [], mode: "raw", active: false }),
+      // Decalage de la charge (mode lisse) : celui que le test demande.
+      getChargeShift: () => chargeShift,
       getSmoothedBounds: () => null,
       openMonthTasks: () => {},
       refreshFromProjectRows: () => false,
@@ -1669,4 +1671,16 @@ test("selection vidée : plus rien a rafraichir en place", async () => {
   h.api.handleContextTablesChanged({ tables: [TIME_SEGMENT_TABLE] });
   assert.equal(h.calls.reconcileAndLoad, 1);
   assert.equal(h.calls.fetchProjectData, 0);
+});
+
+test("charge lissee — le premier rendu du board recoit le decalage de charge du lissage", async () => {
+  const shift = new Map([["502", -10]]);
+  const h = await mount({ planningRows: initialPlanningRows(), chargeShift: shift });
+  assert.ok(h.chargeRenders.length >= 1, "le board doit etre rendu");
+  assert.equal(h.chargeRenders[0].chargeShift, shift);
+});
+
+test("charge lissee — en « Non lissé » (null), le board recoit null : charge d'origine", async () => {
+  const h = await mount({ planningRows: initialPlanningRows() });
+  assert.equal(h.chargeRenders[0].chargeShift, null);
 });

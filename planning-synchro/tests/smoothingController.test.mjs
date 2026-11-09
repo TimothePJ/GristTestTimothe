@@ -1050,3 +1050,19 @@ test("dates manuelles : changement de service pendant la relecture -> n'efface p
     assert.deepEqual(writes[0], [{ rowId: 3, iso: "2027-02-15" }], "ni 50 ni 51 ne sont effaces");
     assert.equal(controller.setManualDates({ 50: "2027-06-01", 51: "2027-07-01" }), false, "etat du nouveau service intact");
   }));
+
+test("getChargeShift : decalages de la charge en « Lissé » et « Les deux », null en « Non lissé » ou sans lissage", () =>
+  withLocalStorage(() => {
+    const { controller, els, rawBtn, smoothedBtn, bothBtn } = build();
+    controller.setProjectData(data({ id: 7, Lissage: "" }));
+    assert.equal(controller.getChargeShift(), null, "lissage inactif");
+
+    controller.setProjectData(data({ id: 7, Lissage: CELL_MAX2 }));
+    els.displayGroup.click(rawBtn);
+    assert.equal(controller.getChargeShift(), null, "Non lissé");
+    els.displayGroup.click(smoothedBtn);
+    // Novembre a 3 coffrages pour un maximum de 2 : le N° 2 (10/11) passe au 10/10.
+    assert.deepEqual([...controller.getChargeShift().entries()], [["2", -31]]);
+    els.displayGroup.click(bothBtn);
+    assert.deepEqual([...controller.getChargeShift().entries()], [["2", -31]]);
+  }));

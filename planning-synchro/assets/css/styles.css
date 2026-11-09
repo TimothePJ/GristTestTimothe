@@ -1504,6 +1504,17 @@ body.ps-panning .charge-plan-board .charge-plan-track {
   cursor: help;
 }
 
+/* « Charge lissée » : rappel du mode (la charge suit le planning lisse), dans
+   la voix du bouton « Charge » (fond primaire, texte blanc). */
+.charge-plan-legend-mode {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: #fff;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .charge-plan-legend-sample {
   padding: 2px 10px;
   border-radius: 999px;

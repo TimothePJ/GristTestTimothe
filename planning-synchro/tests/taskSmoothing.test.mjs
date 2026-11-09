@@ -22,6 +22,7 @@ import {
   monthMaxima,
   shiftIsoByMonths,
   smoothingStartMonth,
+  smoothingDayShifts,
 } from "../assets/js/top/taskSmoothing.js";
 import { OVERFLOW_REASON_LABELS } from "../assets/js/top/taskLabels.js";
 
@@ -2074,4 +2075,17 @@ test("dates manuelles : déterministe, et indépendant de l'ordre d'entrée", ()
     const reversed = smoothTasks(tasks.slice().reverse(), settings, today);
     assert.deepEqual(reversed.tasks.slice().reverse(), result.tasks, name);
   });
+});
+
+// --- decalage de la charge (lignes Charge du board) -----------------------------
+
+test("smoothingDayShifts : ecart en jours entre date lissee et echeance, par ligne", () => {
+  const shifts = smoothingDayShifts([
+    { rowId: 2, dueIso: "2027-03-16", smoothedIso: "2027-01-16" }, // avance de 59 jours
+    { rowId: 3, dueIso: "2027-04-10", smoothedIso: "2027-04-10" }, // inchange : absent
+    { rowId: "4", dueIso: "2027-03-05", smoothedIso: "2027-05-12" }, // date manuelle plus tard
+    { rowId: null, dueIso: "2027-03-05", smoothedIso: "2027-01-05" }, // sans ligne : ignore
+    { rowId: 5, dueIso: "2027-03-05" }, // sans date lissee : ignore
+  ]);
+  assert.deepEqual([...shifts.entries()], [["2", -59], ["4", 68]]);
 });

@@ -142,6 +142,7 @@ function makeHarness() {
       setProjectData: (data) => log.push(["setProjectData", data.contextKey, data.tasks.length, data.projectRow?.id ?? null]),
       getChartInput: () => ({ tasks: [], mode: "raw", active: false }),
       getSmoothedBounds: () => env.smoothedBounds,
+      getChargeShift: () => null,
       openMonthTasks: (bucket) => log.push(["openMonthTasks", bucket]),
       refreshFromProjectRows: (rows) => log.push(["refreshFromProjectRows", rows.map((row) => row.id)]),
       clear: () => log.push(["clear"]),
@@ -192,7 +193,7 @@ function makeHarness() {
       "let editing = null; let chargeAssignModal = null; let currentPlanningRows = []; let topPaneResizer = null;",
       "let loadSeq = 0; let topView = 'planning'; let lastTopPaneHeightPx = 0; let chartTasks = [];",
       "let chartContextKey = ''; let desiredTopRows = APP_CONFIG.topPane.defaultRows; let refreshChargeOnly = null;",
-      "let projectRegistryFingerprint = ''; let widenBoundsForSmoothing = null;",
+      "let projectRegistryFingerprint = ''; let widenBoundsForSmoothing = null; let rerenderChargeForSmoothing = null;",
       ...LOAD_BLOCKS,
       "globalThis.__api = {",
       "  loadProject,",
@@ -354,7 +355,7 @@ test("lissage enregistre apres le chargement : la frise s'elargit, sans jamais r
   assert.equal(env.setBounds.length, 1);
 });
 
-test("controleur du lissage : onChange elargit la frise avant de redessiner le graphique", () => {
+test("controleur du lissage : onChange elargit la frise, redessine le graphique puis les lignes Charge", () => {
   const block = `${extractBlock("  const smoothing = createSmoothingController({")});`;
   const captured = [];
   const order = [];
@@ -364,6 +365,7 @@ test("controleur du lissage : onChange elargit la frise avant de redessiner le g
     topView: "chart",
     planningChart: { setChartInput: () => order.push("setChartInput") },
     widenBoundsForSmoothing: () => order.push("widen"),
+    rerenderChargeForSmoothing: () => order.push("charge"),
     createSmoothingController: (options) => {
       captured.push(options);
       return { getChartInput: () => ({}) };
@@ -376,5 +378,5 @@ test("controleur du lissage : onChange elargit la frise avant de redessiner le g
   const context = vm.createContext(sandbox);
   vm.runInContext(`${block}\nglobalThis.smoothing = smoothing;`, context);
   captured[0].onChange();
-  assert.deepEqual(order, ["widen", "setChartInput"]);
+  assert.deepEqual(order, ["widen", "setChartInput", "charge"]);
 });

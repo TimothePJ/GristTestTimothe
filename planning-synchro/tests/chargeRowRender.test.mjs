@@ -84,8 +84,8 @@ const BLOCK_HEADERS = [
   "function renderChargeRow(workers, months, timelineWidth, roleCharge, role, withButton) {",
   "function renderChargeRows(workers, months, timelineWidth, charge) {",
   "function renderRoleRow(roleLabel, roleWorkers, months, timelineWidth) {",
-  "function renderChargeLegend() {",
-  "function renderTimelineEditToolbar(editModeEnabled) {",
+  "function renderChargeLegend(smoothed) {",
+  "function renderTimelineEditToolbar(editModeEnabled, chargeSmoothed = false) {",
 ];
 
 // L'extraction elle-meme est la garde : `extractBlock`/`extractLine` font
@@ -451,4 +451,12 @@ test("la legende Charge se place sous les lignes, dans la barre du bouton Editer
   const buttonAt = html.indexOf("data-charge-plan-edit-toggle");
   assert.ok(legendAt >= 0, "legende absente de la barre");
   assert.ok(legendAt < buttonAt, "la legende doit preceder le bouton Editer");
+});
+
+test("legende Charge : « Charge lissée » seulement quand la charge suit le lissage", () => {
+  const api = buildApi();
+  assert.ok(!api.renderChargeLegend(false).includes("Charge lissée"), "mode Non lissé : aucune mention");
+  assert.ok(api.renderChargeLegend(true).includes(">Charge lissée<"), "mode Lissé : mention visible");
+  assert.ok(api.renderTimelineEditToolbar(false, true).includes(">Charge lissée<"), "transmise par la barre");
+  assert.ok(!api.renderTimelineEditToolbar(false).includes("Charge lissée"), "par defaut : charge d'origine");
 });
