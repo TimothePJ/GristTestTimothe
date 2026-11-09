@@ -84,6 +84,8 @@ const BLOCK_HEADERS = [
   "function renderChargeRow(workers, months, timelineWidth, roleCharge, role, withButton) {",
   "function renderChargeRows(workers, months, timelineWidth, charge) {",
   "function renderRoleRow(roleLabel, roleWorkers, months, timelineWidth) {",
+  "function renderChargeLegend() {",
+  "function renderTimelineEditToolbar(editModeEnabled) {",
 ];
 
 // L'extraction elle-meme est la garde : `extractBlock`/`extractLine` font
@@ -118,6 +120,8 @@ function buildApi() {
          renderChargeRow,
          renderChargeRows,
          renderRoleRow,
+         renderChargeLegend,
+         renderTimelineEditToolbar,
          formatDayValue,
          computeMonthTotalDays,
        };`,
@@ -420,4 +424,31 @@ test("ligne de role sans personne planifiee : 0 j, aucune pastille", () => {
   const html = api.renderRoleRow("Ingenieurs", [{ name: "Ines", role: "Ingénieure", segments: [] }], [month()], 1000);
   assert.match(html, /class="charge-plan-role-total">\s*0 j/);
   assert.ok(!html.includes("charge-plan-month-fill"));
+});
+
+// --- legende des lignes Charge ---------------------------------------------------
+
+test("legende Charge : « 10 j / 8 j » = charge des plans / jours planifies, et les trois teintes", () => {
+  const html = buildApi().renderChargeLegend();
+  assert.match(html, /class="charge-plan-legend"/);
+  assert.ok(html.includes(">10 j / 8 j<"), "pastille d'exemple « 10 j / 8 j »");
+  assert.ok(html.includes("= charge des plans / jours planifiés"), "sens des deux nombres");
+  [
+    ["is-balanced", "équilibré"],
+    ["is-overload", "jours manquants"],
+    ["is-partial", "jours en plus"],
+  ].forEach(([state, label]) => {
+    assert.ok(
+      html.includes(`charge-plan-legend-swatch ${state}" aria-hidden="true"></span>${label}<`),
+      `carré ${state} suivi de « ${label} »`
+    );
+  });
+});
+
+test("la legende Charge se place sous les lignes, dans la barre du bouton Editer, avant lui", () => {
+  const html = buildApi().renderTimelineEditToolbar(false);
+  const legendAt = html.indexOf('class="charge-plan-legend"');
+  const buttonAt = html.indexOf("data-charge-plan-edit-toggle");
+  assert.ok(legendAt >= 0, "legende absente de la barre");
+  assert.ok(legendAt < buttonAt, "la legende doit preceder le bouton Editer");
 });

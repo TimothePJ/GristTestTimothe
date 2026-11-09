@@ -942,9 +942,25 @@ function renderChargeRows(workers, months, timelineWidth, charge) {
 // (ui/chargeTimeline.js renderChargePlanTimeline + setChargePlanFeedback) : sans
 // elle, l'echec d'une suppression n'avait AUCUN endroit ou s'afficher — la seule
 // zone de message du widget vivait dans la fenetre modale, fermee a ce moment-la.
+// Legende des deux lignes Charge, juste sous elles (a gauche du bouton Editer) :
+// ce que disent les deux nombres d'une pastille (formatChargeLabel) et ses trois
+// teintes (getChargeCellState), avec les memes couleurs que les pastilles.
+function renderChargeLegend() {
+  return `
+    <div class="charge-plan-legend" title="À gauche, la charge que demandent les plans du mois (bouton « Charge ») ; à droite, les jours posés aux personnes du métier.">
+      <span class="charge-plan-legend-sample">10 j / 8 j</span>
+      <span>= charge des plans / jours planifiés</span>
+      <span class="charge-plan-legend-item"><span class="charge-plan-legend-swatch is-balanced" aria-hidden="true"></span>équilibré</span>
+      <span class="charge-plan-legend-item"><span class="charge-plan-legend-swatch is-overload" aria-hidden="true"></span>jours manquants</span>
+      <span class="charge-plan-legend-item"><span class="charge-plan-legend-swatch is-partial" aria-hidden="true"></span>jours en plus</span>
+    </div>
+  `;
+}
+
 function renderTimelineEditToolbar(editModeEnabled) {
   return `
     <div class="charge-plan-edit-toolbar">
+      ${renderChargeLegend()}
       <button
         type="button"
         class="charge-plan-edit-mode-toggle ${editModeEnabled ? "is-active" : ""}"
