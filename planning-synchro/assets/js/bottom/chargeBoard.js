@@ -964,9 +964,14 @@ function renderChargeLegend(smoothed) {
 }
 
 function renderTimelineEditToolbar(editModeEnabled, chargeSmoothed = false) {
+  // CHARGE DESACTIVEE (2026-11-10) : la legende des lignes Charge est masquee.
+  // Pour reactiver : decommenter la ligne suivante et supprimer
+  // `const chargeLegendHtml = "";`.
+  // const chargeLegendHtml = renderChargeLegend(chargeSmoothed);
+  const chargeLegendHtml = "";
   return `
     <div class="charge-plan-edit-toolbar">
-      ${renderChargeLegend(chargeSmoothed)}
+      ${chargeLegendHtml}
       <button
         type="button"
         class="charge-plan-edit-mode-toggle ${editModeEnabled ? "is-active" : ""}"
@@ -1145,9 +1150,13 @@ export function createChargeBoard(containerEl) {
           resolveAbsenceSet: (personName) => lastAbsencesByWorker.get(normalizeName(personName)) || null,
         }),
         groupedWorkers: groupWorkersByRole(lastWorkers),
-        charge: computeProjectCharge(lastPlanningRows, APP_CONFIG.grist.columns.planningProject, {
-          shiftDaysByRowId: lastChargeShift,
-        }),
+        // CHARGE DESACTIVEE (2026-11-10) : les lignes Charge ne sont plus
+        // affichees, leur calcul est donc mis de cote. Pour reactiver :
+        // decommenter les 3 lignes suivantes et supprimer `charge: null,`.
+        // charge: computeProjectCharge(lastPlanningRows, APP_CONFIG.grist.columns.planningProject, {
+        //   shiftDaysByRowId: lastChargeShift,
+        // }),
+        charge: null,
         segmentMeta: new Map(),
       };
     }
@@ -1202,7 +1211,11 @@ export function createChargeBoard(containerEl) {
 
     // Lignes Charge, une par metier : requis (documentCharge.js, Task 1) vs
     // planifie (memes mois que Total ci-dessus, personnes du metier).
-    const chargeRowHtml = renderChargeRows(lastWorkers, windowMonths, timelineWidth, charge);
+    // CHARGE DESACTIVEE (2026-11-10) : les deux lignes Charge (et le bouton
+    // « Charge » qu'elles portent) sont masquees. Pour reactiver : decommenter la
+    // ligne suivante et supprimer `const chargeRowHtml = "";`.
+    // const chargeRowHtml = renderChargeRows(lastWorkers, windowMonths, timelineWidth, charge);
+    const chargeRowHtml = "";
 
     containerEl.classList.toggle("is-segment-editing-enabled", lastEditMode);
     containerEl.classList.toggle("is-segment-editing-locked", !lastEditMode);

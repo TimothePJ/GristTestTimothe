@@ -76,12 +76,19 @@ export function resolveChargeBounds({ segmentBounds, planBounds, todayIso } = {}
 // porte la ligne Charge, dont le bouton est le SEUL point d'entree de la fenetre
 // d'assignation des charges de reference — exactement le cas ou l'on veut definir
 // les charges AVANT d'avoir pose le moindre previsionnel.
+//
+// CHARGE DESACTIVEE (2026-11-10) : la ligne Charge et son bouton sont mis de
+// cote, une grille sans personne n'aurait plus rien a montrer (une ligne Total a
+// 0 j) : elle est masquee, seul le message s'affiche. Pour reactiver :
+// decommenter les deux lignes marquees ci-dessous et supprimer
+// `showBoard: hasWorkers,`.
 export function resolveChargePaneVisibility({ workerCount, planningRowCount } = {}) {
   const hasWorkers = Number(workerCount) > 0;
-  const hasPlanningRows = Number(planningRowCount) > 0;
+  // const hasPlanningRows = Number(planningRowCount) > 0;
 
   return {
-    showBoard: hasWorkers || hasPlanningRows,
+    // showBoard: hasWorkers || hasPlanningRows,
+    showBoard: hasWorkers,
     showEmptyMessage: !hasWorkers,
   };
 }

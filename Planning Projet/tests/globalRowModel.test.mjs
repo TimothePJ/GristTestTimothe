@@ -100,8 +100,8 @@ test("coffrage déplié : ses armatures, avec les barres du planning Structure",
   assert.deepEqual(rebar.segments.map((segment) => [segment.kind, segment.label]), [["phase", "Armature"], ["works", ""]]);
   assert.equal("marker" in rebar, false, "le démarrage des travaux est une de ses barres");
   assert.deepEqual(lineOf(lines, "floor:zone2batb/rdc").segments, undefined, "lignes de Synthèse : sans barres Structure");
-  assert.deepEqual(texts(rebar), ["retard 23 j"]);
-  assert.deepEqual(texts(lineOf(lines, "doc:113")), ["retard 37 j", "1 armature en retard"]);
+  assert.deepEqual(texts(rebar), ["retard 17 j"]);
+  assert.deepEqual(texts(lineOf(lines, "doc:113")), ["retard 27 j", "1 armature en retard"]);
   const { lines: zoneLevel } = model({ toggledKeys: new Set(["doc:111"]) });
   assert.deepEqual([lineOf(zoneLevel, "doc:121").level, lineOf(zoneLevel, "doc:111").level], [2, 1], "coffrage sans étage");
 });
@@ -166,7 +166,7 @@ test("étage déplié : le contenu de la vue Synthese, un cran sous l'étage", (
 test("tâche contrôlée en retard : Fin en rouge, limite de fin, alerte remontée jusqu'à la zone", () => {
   const { lines } = model({ toggledKeys: new Set(RDC_PATH) });
   const task = lineOf(lines, "task:420");
-  assert.deepEqual(task.state.parts, [{ text: "retard 103 j", tone: "late" }]);
+  assert.deepEqual(task.state.parts, [{ text: "retard 72 j", tone: "late" }]);
   assert.match(task.state.title, /à finir au plus tard le Mer 19\/08\/26 \(début du plan de coffrage 3032/);
   assert.deepEqual([task.lateEnd, task.isOverEndLimit, iso(task.endLimit), task.tone], [true, true, "2026-08-19", "late"]);
   assert.equal(lineOf(lines, "task:421").lateEnd, false);
@@ -175,7 +175,7 @@ test("tâche contrôlée en retard : Fin en rouge, limite de fin, alerte remont�
     assert.equal(lineOf(lines, key).tone, "late", key);
   }
   const level = lineOf(lines, "level:113");
-  assert.deepEqual(texts(level), ["Synthèse en retard de 103 j", "2 retards Structure"]);
+  assert.deepEqual(texts(level), ["Synthèse en retard de 72 j", "2 retards Structure"]);
   assert.equal(level.tone, "late");
   assert.match(level.state.title, /Non vérifiable : le coffrage 3032 n'a pas de date 0 Prev\./);
   const zone = lineOf(lines, "zone:zone2batb");
@@ -234,12 +234,12 @@ test("démarrage du gros œuvre après le démarrage des travaux : seconde alert
   const rows = projectRows().map((row) => (row.id === 123 ? { ...row, Demarrages_travaux: "2026-02-25" } : row));
   const { lines, totals } = model({ toggledKeys: new Set(RDC_PATH) }, rows);
   const kickoff = lineOf(lines, "task:425");
-  // DEMARRAGE GO le 02/03 (5 jours ouvrés après la REUNION du cycle 3) : 5 jours après le 25/02.
-  assert.deepEqual(kickoff.state.parts, [{ text: "retard 5 j", tone: "late" }]);
+  // DEMARRAGE GO le 02/03 (5 jours ouvrés après la REUNION du cycle 3) : 3 jours ouvrés après le mercredi 25/02 (5 calendaires).
+  assert.deepEqual(kickoff.state.parts, [{ text: "retard 3 j", tone: "late" }]);
   assert.equal(kickoff.state.title, "Démarrage prévu après le démarrage des travaux de Structure (Mer 25/02/26).");
   assert.deepEqual([kickoff.lateEnd, kickoff.tone], [true, "late"]);
   assert.deepEqual(texts(lineOf(lines, "group:416")), ["2 retards Synthèse"]);
-  assert.deepEqual(texts(lineOf(lines, "level:113")), ["Synthèse en retard de 103 j", "2 retards Structure"]);
+  assert.deepEqual(texts(lineOf(lines, "level:113")), ["Synthèse en retard de 72 j", "2 retards Structure"]);
   assert.equal(totals.synthese, 2);
 });
 

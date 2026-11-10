@@ -6,6 +6,7 @@ import {
   fetchProjectBootstrapData,
   fetchPlanningRows,
   fetchPlanningReferenceReceptionSummaries,
+  fetchListePlanRows,
   getPlanningServiceDiagnostics,
   updatePlanningDurationAndLeftDate,
   updatePlanningClosureDate,
@@ -23,8 +24,11 @@ import {
   toText,
 } from "./services/gristService.js";
 import {
+  buildPlanningClosureIndiceOptions,
   buildProjectRealisationTargetLookup,
   buildTimelineDataFromPlanningRows,
+  describePlanningClosureChoice,
+  resolvePlanningClosureIndiceDate,
 } from "./services/planningService.js";
 import { createRealisationTargetCache } from "./services/realisationTargetCache.js";
 import {
@@ -1226,9 +1230,24 @@ async function handleRetardJustificationEdit({ rowId, remarque }) {
   }
 }
 
-async function handlePlanningClosureAction({ action, context = {}, dateCloture = null } = {}) {
-  assertPlanningEditing("modifier la réalisation du plan");
+// Indices du plan diffusés dans la liste de plans, avec leur date : ce que la réalisation
+// forcée propose. Simple lecture, possible même planning verrouillé.
+async function loadPlanningClosureIndiceOptions(recordId) {
+  const row = (cachedPlanningRows || []).find((item) => Number(item?.id) === recordId);
+  if (!row) {
+    throw new Error("Ligne Planning_Projet introuvable : actualisez le planning.");
+  }
+  const listePlan = await fetchListePlanRows();
+  if (!listePlan?.tableName) {
+    throw new Error("La liste de plans (ListePlan_NDC_COF) n'a pas pu être lue. Réessayez.");
+  }
+  return buildPlanningClosureIndiceOptions(row, listePlan.rows, cachedProjectAvancementConfigs);
+}
 
+// Réalisation forcée. « options » : les indices proposés. « save » : l'indice choisi ; sa date
+// de diffusion, relue dans la liste de plans au moment d'écrire (jamais reprise de la fenêtre),
+// devient Date_Cloture. « delete » : efface Date_Cloture.
+async function handlePlanningClosureAction({ action, context = {}, indice = "" } = {}) {
   const recordId = Number(context?.rowId);
   if (!Number.isInteger(recordId) || recordId <= 0) {
     throw new Error("Identifiant de ligne Planning_Projet invalide.");
@@ -1238,9 +1257,14 @@ async function handlePlanningClosureAction({ action, context = {}, dateCloture =
       "La réalisation forcée est indisponible : la colonne Planning_Projet.Date_Cloture est absente de cet environnement."
     );
   }
+  if (action === "options") {
+    const options = await loadPlanningClosureIndiceOptions(recordId);
+    return { options, ...describePlanningClosureChoice(options, context.dateCloture) };
+  }
   if (action !== "save" && action !== "delete") {
     throw new Error("Action de réalisation forcée invalide.");
   }
+  assertPlanningEditing("modifier la réalisation du plan");
 
   try {
     setPlanningStatus(
@@ -1248,7 +1272,16 @@ async function handlePlanningClosureAction({ action, context = {}, dateCloture =
         ? "Suppression de la réalisation forcée..."
         : "Sauvegarde de la réalisation forcée..."
     );
-    await updatePlanningClosureDate(recordId, action === "delete" ? null : dateCloture);
+    let dateCloture = null;
+    if (action === "save") {
+      const choice = resolvePlanningClosureIndiceDate(
+        await loadPlanningClosureIndiceOptions(recordId),
+        indice
+      );
+      if (!choice.ok) throw new Error(choice.error);
+      dateCloture = choice.dateIso;
+    }
+    await updatePlanningClosureDate(recordId, dateCloture);
     await refreshPlanning({
       sync: true,
       forceLoad: true,

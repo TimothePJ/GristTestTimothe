@@ -5,6 +5,7 @@ import {
   buildPlanningDocumentIdentity,
   buildTargetIndiceByTypeFromAvancement,
   computePlanningRealisationValue,
+  computePlanningRetardDays,
   findBestPlanningDocumentMatches,
   formatPlanningCalendarDateFr,
   formatPlanningCalendarDateIso,
@@ -12,7 +13,6 @@ import {
   getTargetIndiceForDocumentType,
   normalizePlanningDocumentType,
   normalizePlanningIndice,
-  parsePlanningCalendarDate,
 } from "../../../../gestion-depenses2/assets/js/utils/planningRealisation.js";
 
 function toNumber(value) {
@@ -47,6 +47,10 @@ function parseDate(value) {
 
   const str = String(value).trim();
   if (!str) return null;
+
+  // Secondes Grist rendues en texte par certaines voies REST : même lecture qu'un nombre
+  // (et que le calcul du retard, planningRetard.js), sinon la barre disparaît.
+  if (/^-?\d+(?:\.\d+)?$/.test(str)) return parseDate(Number(str));
 
   // DD/MM/YYYY
   const frMatch = str.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+.*)?$/);
@@ -93,27 +97,6 @@ function startOfDay(date) {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
   return d;
-}
-
-function getDelayDays(segmentEndDate, referenceDate) {
-  if (
-    !(segmentEndDate instanceof Date) ||
-    Number.isNaN(segmentEndDate.getTime()) ||
-    !(referenceDate instanceof Date) ||
-    Number.isNaN(referenceDate.getTime())
-  ) {
-    return 0;
-  }
-
-  const segmentEndDay = startOfDay(segmentEndDate);
-  const referenceDay = startOfDay(referenceDate);
-  if (referenceDay <= segmentEndDay) {
-    return 0;
-  }
-
-  const msPerDay = 24 * 60 * 60 * 1000;
-  const diffDays = Math.floor((referenceDay.getTime() - segmentEndDay.getTime()) / msPerDay);
-  return Math.max(0, diffDays);
 }
 
 function isAllowedTypeDoc(value) {
@@ -208,35 +191,9 @@ export function computePlanningRealiseValue(
   return computePlanningRealisationValue(typeDoc, indice, targetIndice, dateCloture);
 }
 
-function resolvePlanningSegmentEndDate({
-  typeDoc,
-  lignePlanningRaw,
-  diffCoffrageRaw,
-  diffArmatureRaw,
-  demarrageRaw,
-  duree3Raw,
-}) {
-  if (isCoffrageTypeDoc(typeDoc)) {
-    return resolveCoffrageDiffCoffrageDate({
-      typeDoc,
-      lignePlanningRaw,
-      diffCoffrageRaw,
-      demarrageRaw,
-      duree3Raw,
-    });
-  }
-
-  if (isArmaturesTypeDoc(typeDoc)) {
-    return parseDate(diffArmatureRaw);
-  }
-
-  if (isAllowedTypeDoc(typeDoc)) {
-    return parseDate(diffCoffrageRaw);
-  }
-
-  return null;
-}
-
+// Jours de retard d'une ligne, en jours ouvrés. La règle (échéance, date de réalisation,
+// décompte) est celle du module partagé planningRetard.js, que ListeDePlan applique aussi :
+// ici, on ne fait que calculer le réalisé à partir de l'indice.
 export function computePlanningRetardValue(
   {
     typeDoc,
@@ -253,41 +210,21 @@ export function computePlanningRetardValue(
   },
   currentInstant = getCurrentInstant()
 ) {
-  if (!isAllowedTypeDoc(typeDoc)) {
-    return 0;
-  }
-
-  const closureDate = parsePlanningCalendarDate(dateClotureRaw);
-  const realiseValue = computePlanningRealiseValue(
-    typeDoc,
-    indice,
-    targetIndice,
-    dateClotureRaw
+  return computePlanningRetardDays(
+    {
+      typeDoc,
+      realise: computePlanningRealiseValue(typeDoc, indice, targetIndice, dateClotureRaw),
+      lignePlanning: lignePlanningRaw,
+      diffCoffrage: diffCoffrageRaw,
+      diffArmature: diffArmatureRaw,
+      demarrage: demarrageRaw,
+      duree3: duree3Raw,
+      dateRealise: dateRealiseRaw,
+      dateCloture: dateClotureRaw,
+      currentRetard,
+    },
+    currentInstant
   );
-  const segmentEndDate = resolvePlanningSegmentEndDate({
-    typeDoc,
-    lignePlanningRaw,
-    diffCoffrageRaw,
-    diffArmatureRaw,
-    demarrageRaw,
-    duree3Raw,
-  });
-
-  if (realiseValue >= 100) {
-    const dateRealise = closureDate || parseDate(dateRealiseRaw);
-    if (dateRealise && segmentEndDate) {
-      return getDelayDays(segmentEndDate, dateRealise);
-    }
-
-    const frozenRetard = toNumber(currentRetard);
-    return frozenRetard != null && frozenRetard >= 0 ? frozenRetard : 0;
-  }
-
-  if (!segmentEndDate) {
-    return 0;
-  }
-
-  return getDelayDays(segmentEndDate, currentInstant);
 }
 
 export function buildPlanningRealiseUpdates(rawRows, targetLookup = null) {
@@ -417,19 +354,9 @@ function normalizeIsoDateValue(value) {
   return toText(value);
 }
 
-export function buildPlanningListePlanSyncUpdates(
-  planningRows,
-  listePlanRows,
-  projectConfigs = [],
-  targetLookup = null,
-  currentInstant = getCurrentInstant()
-) {
-  const cfg = APP_CONFIG.grist.planningTable.columns;
-  const projectLinkCol = cfg.projectLink || cfg.nomProjet;
-  const projectIdToName = buildProjectIdToNameLookup(projectConfigs);
-  const effectiveTargetLookup =
-    targetLookup instanceof Map ? targetLookup : buildProjectRealisationTargetLookup(projectConfigs);
-
+// Diffusions de la liste de plans (ListePlan_NDC_COF) exploitables : indice reconnu et date
+// de diffusion lisible, chacune avec l'identité du document qu'elle concerne.
+function buildListePlanDiffusionCandidates(listePlanRows, projectIdToName) {
   const listePlanCandidates = [];
 
   (listePlanRows || []).forEach((row) => {
@@ -467,30 +394,124 @@ export function buildPlanningListePlanSyncUpdates(
     listePlanCandidates.push(latestRecord);
   });
 
+  return listePlanCandidates;
+}
+
+// Diffusions de la liste de plans qui concernent une ligne du planning (même projet, service,
+// numéro, type, zone, désignation — voir findBestPlanningDocumentMatches).
+function findPlanningRowDiffusions(row, listePlanCandidates, projectIdToName) {
+  const cfg = APP_CONFIG.grist.planningTable.columns;
+  const projectLinkCol = cfg.projectLink || cfg.nomProjet;
+  return findBestPlanningDocumentMatches(
+    {
+      project: normalizeSyncProjectValue(row?.[projectLinkCol], projectIdToName),
+      service: row?.[cfg.service],
+      documentNumber: row?.[cfg.id2],
+      typeDocument: toText(row?.[cfg.typeDoc]),
+      zone: row?.[cfg.zone],
+      designation: row?.[cfg.taches] ?? row?.[cfg.tacheAlt],
+    },
+    listePlanCandidates,
+    (candidate) => candidate.identity
+  );
+}
+
+// Réalisation forcée : les indices du plan diffusés dans la liste de plans, chacun une fois
+// avec sa PREMIÈRE date de diffusion, du plus bas au plus haut. Une diffusion datée après
+// aujourd'hui (saisie à l'avance) n'est pas encore une diffusion : elle n'est pas proposée.
+// Liste vide : rien n'a été diffusé, la réalisation ne peut pas être forcée.
+export function buildPlanningClosureIndiceOptions(
+  planningRow,
+  listePlanRows,
+  projectConfigs = [],
+  currentInstant = getCurrentInstant()
+) {
+  const todayIso = fmtIsoCellDate(currentInstant);
+  const projectIdToName = buildProjectIdToNameLookup(projectConfigs);
+  const candidates = buildListePlanDiffusionCandidates(listePlanRows, projectIdToName);
+  const firstByIndice = new Map();
+  findPlanningRowDiffusions(planningRow, candidates, projectIdToName).forEach((record) => {
+    const known = firstByIndice.get(record.indice);
+    if (!known || record.dateSortValue < known.dateSortValue) firstByIndice.set(record.indice, record);
+  });
+  return [...firstByIndice.values()]
+    .sort((left, right) => left.indiceRank - right.indiceRank)
+    .map((record) => ({
+      indice: record.indice,
+      dateIso: fmtIsoCellDate(parseDate(record.dateDiffusion)),
+    }))
+    .filter((option) => option.dateIso && option.dateIso <= todayIso);
+}
+
+// État de la fenêtre de réalisation forcée. Indice proposé : celui dont la date est la
+// réalisation forcée actuelle, sinon le plus haut. Une réalisation forcée qui ne correspond à
+// aucune diffusion (date saisie à la main avant le choix par indice) est signalée.
+export function describePlanningClosureChoice(options = [], dateCloture = null) {
+  const list = Array.isArray(options) ? options : [];
+  if (!list.length) {
+    return {
+      canSave: false,
+      selectedIndice: "",
+      manualNote: "",
+      emptyMessage:
+        "Aucun indice de ce plan n'a été diffusé dans la liste de plans : la réalisation ne peut pas être forcée.",
+    };
+  }
+  const currentIso = formatPlanningCalendarDateIso(dateCloture);
+  const matching = currentIso ? list.find((option) => option.dateIso === currentIso) : null;
+  return {
+    canSave: true,
+    selectedIndice: (matching || list[list.length - 1]).indice,
+    manualNote: currentIso && !matching
+      ? `Réalisation forcée actuelle : le ${formatPlanningCalendarDateFr(currentIso)} (date saisie à la main, sans indice).`
+      : "",
+    emptyMessage: "",
+  };
+}
+
+// Date de réalisation de l'indice choisi : sa date de diffusion, refusée si l'indice n'est pas
+// diffusé pour ce plan ou si cette date est future.
+export function resolvePlanningClosureIndiceDate(options = [], indice = "", currentInstant = getCurrentInstant()) {
+  const wanted = normalizePlanningIndice(indice);
+  const option = (Array.isArray(options) ? options : []).find((item) => item.indice === wanted);
+  if (!option) {
+    return {
+      ok: false,
+      error: `L'indice ${wanted || "choisi"} n'est pas diffusé dans la liste de plans pour ce plan.`,
+    };
+  }
+  if (option.dateIso > fmtIsoCellDate(currentInstant)) {
+    return {
+      ok: false,
+      error: `L'indice ${wanted} est diffusé le ${formatPlanningCalendarDateFr(option.dateIso)}, une date future : ` +
+        "la réalisation ne peut pas être forcée.",
+    };
+  }
+  return { ok: true, indice: wanted, dateIso: option.dateIso };
+}
+
+export function buildPlanningListePlanSyncUpdates(
+  planningRows,
+  listePlanRows,
+  projectConfigs = [],
+  targetLookup = null,
+  currentInstant = getCurrentInstant()
+) {
+  const cfg = APP_CONFIG.grist.planningTable.columns;
+  const projectIdToName = buildProjectIdToNameLookup(projectConfigs);
+  const effectiveTargetLookup =
+    targetLookup instanceof Map ? targetLookup : buildProjectRealisationTargetLookup(projectConfigs);
+  const listePlanCandidates = buildListePlanDiffusionCandidates(listePlanRows, projectIdToName);
+
   return (planningRows || []).reduce((updates, row) => {
     const rowId = Number(row?.[cfg.id]);
     if (!Number.isInteger(rowId) || rowId <= 0) {
       return updates;
     }
 
-    const projectValue = normalizeSyncProjectValue(row?.[projectLinkCol], projectIdToName);
-    const documentNumber = row?.[cfg.id2];
+    const projectValue = normalizeSyncProjectValue(row?.[cfg.projectLink || cfg.nomProjet], projectIdToName);
     const typeDoc = toText(row?.[cfg.typeDoc]);
-    const designation = row?.[cfg.taches] ?? row?.[cfg.tacheAlt];
-    const zone = row?.[cfg.zone];
-    const service = row?.[cfg.service];
-    const matchingRecords = findBestPlanningDocumentMatches(
-      {
-        project: projectValue,
-        service,
-        documentNumber,
-        typeDocument: typeDoc,
-        zone,
-        designation,
-      },
-      listePlanCandidates,
-      (candidate) => candidate.identity
-    );
+    const matchingRecords = findPlanningRowDiffusions(row, listePlanCandidates, projectIdToName);
 
     const targetIndice = getPlanningTargetIndice(typeDoc, projectValue, effectiveTargetLookup);
     const progress = buildPlanningIndiceProgress(
@@ -505,9 +526,11 @@ export function buildPlanningListePlanSyncUpdates(
       targetIndice,
       row?.[cfg.dateCloture]
     );
+    // Date de la première diffusion qui atteint l'indice cible : un indice supérieur diffusé
+    // plus tard ne la déplace pas (ni, donc, le retard du document).
     const nextDateRealise = forcedClosureIso || (
-      progress.targetReached && progress.latestRecord
-        ? fmtIsoCellDate(parseDate(progress.latestRecord.dateDiffusion))
+      progress.targetReached && progress.realisationRecord
+        ? fmtIsoCellDate(parseDate(progress.realisationRecord.dateDiffusion))
         : null
     );
     const targetRetard = computePlanningRetardValue(
@@ -1610,7 +1633,22 @@ export function buildTimelineDataFromPlanningRows(
         );
         return String(computedRealise ?? 0);
       })(),
-      retards: toText(r[cfg.retards]),
+      // Retard calculé à l'affichage, comme le réalisé : la valeur enregistrée dans Retards
+      // n'est réécrite que par une synchronisation (refusée en lecture seule, espacée
+      // d'une minute), elle peut donc dater de la veille.
+      retards: String(computePlanningRetardValue({
+        typeDoc: typeDocText,
+        indice: toText(r[cfg.indice]),
+        targetIndice,
+        currentRetard: r[cfg.retards],
+        lignePlanningRaw: r[cfg.lignePlanning],
+        diffCoffrageRaw: diffCoffrageValue,
+        diffArmatureRaw: diffArmatureValue,
+        demarrageRaw: demarrageTravauxValue,
+        duree3Raw: duree3Value,
+        dateRealiseRaw: r[cfg.dateRealise],
+        dateClotureRaw: r[cfg.dateCloture],
+      })),
       remarque: toText(r[cfg.remarque || "Remarque"]),
       referenceReception,
     };

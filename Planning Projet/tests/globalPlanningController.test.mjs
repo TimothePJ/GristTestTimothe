@@ -94,7 +94,7 @@ test("les retards sont comptés au jour de l'horloge", async () => {
   await activate(env);
   env.table.callbacks.onToggle("level:113");
   const formwork = env.lastRender().lines.find((line) => line.key === "doc:113");
-  assert.equal(formwork.state.parts[0].text, "retard 37 j", "Fin le 02/09/26, aujourd'hui le 09/10/26");
+  assert.equal(formwork.state.parts[0].text, "retard 27 j", "Fin le 02/09/26, aujourd'hui le 09/10/26 : 27 jours ouvrés (37 calendaires)");
 });
 
 test("barres Structure : indices de référence et données d'entrées lus avec les tables vont au modèle", async () => {

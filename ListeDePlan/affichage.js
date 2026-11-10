@@ -446,12 +446,6 @@ function toNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-function toInteger(value) {
-  const number = toNumber(value);
-  if (number == null || !Number.isInteger(number)) return null;
-  return number;
-}
-
 function parsePlanningSyncDate(value) {
   if (value == null || value === "") return null;
 
@@ -531,162 +525,12 @@ function isFrenchDateText(value) {
   return /^\d{2}\/\d{2}\/\d{4}(?:\s+.*)?$/.test(normalizeText(value));
 }
 
-function addDaysToPlanningDate(date, days) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
-  const nextDate = new Date(date);
-  nextDate.setDate(nextDate.getDate() + days);
-  return nextDate;
-}
-
-function subtractWeeksFromPlanningDate(date, weeks) {
-  const normalizedWeeks = toInteger(weeks);
-  if (normalizedWeeks == null || normalizedWeeks < 0) return null;
-  return addDaysToPlanningDate(date, -(normalizedWeeks * 7));
-}
-
-function startOfPlanningDay(date) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
-  const nextDate = new Date(date);
-  nextDate.setHours(0, 0, 0, 0);
-  return nextDate;
-}
-
-function getPlanningDelayDays(segmentEndDate, referenceDate) {
-  const segmentEndDay = startOfPlanningDay(segmentEndDate);
-  const referenceDay = startOfPlanningDay(referenceDate);
-  if (!segmentEndDay || !referenceDay || referenceDay <= segmentEndDay) return 0;
-
-  const msPerDay = 24 * 60 * 60 * 1000;
-  return Math.max(0, Math.floor((referenceDay.getTime() - segmentEndDay.getTime()) / msPerDay));
-}
-
-function isCoffrageTypeDoc(value) {
-  return normalizeText(value).toUpperCase().includes("COFFRAGE");
-}
-
-function isArmaturesTypeDoc(value) {
-  return normalizeText(value).toUpperCase().includes("ARMATURES");
-}
-
-function isAllowedPlanningTypeDoc(value) {
-  return Boolean(normalizeText(value));
-}
-
-function hasPlanningLinkValue(value) {
-  const text = normalizeText(value);
-  if (!text) return false;
-
-  const numericValue = Number(text);
-  if (Number.isFinite(numericValue)) {
-    return numericValue !== 0;
-  }
-
-  return true;
-}
-
 function computePlanningRealiseValue(typeDoc, indice, targetIndice = "", dateCloture = null) {
   if (hasValidDate(dateCloture)) return 100;
   const effectiveTargetIndice =
     normalizeIndice(targetIndice) || getDefaultTargetIndiceForDocumentTypeLocal(typeDoc);
 
   return computeIndexedRealisationLocal(indice, effectiveTargetIndice);
-}
-
-function resolveCoffrageDiffCoffrageDate({
-  typeDoc,
-  lignePlanningRaw,
-  diffCoffrageRaw,
-  demarrageRaw,
-  duree3Raw,
-}) {
-  if (!isCoffrageTypeDoc(typeDoc)) {
-    return parsePlanningSyncDate(diffCoffrageRaw);
-  }
-
-  if (!hasPlanningLinkValue(lignePlanningRaw)) {
-    return parsePlanningSyncDate(diffCoffrageRaw);
-  }
-
-  const demarrageDate = parsePlanningSyncDate(demarrageRaw);
-  const computedDate = subtractWeeksFromPlanningDate(demarrageDate, duree3Raw);
-  return computedDate || parsePlanningSyncDate(diffCoffrageRaw);
-}
-
-function resolvePlanningSegmentEndDate({
-  typeDoc,
-  lignePlanningRaw,
-  diffCoffrageRaw,
-  diffArmatureRaw,
-  demarrageRaw,
-  duree3Raw,
-}) {
-  if (isCoffrageTypeDoc(typeDoc)) {
-    return resolveCoffrageDiffCoffrageDate({
-      typeDoc,
-      lignePlanningRaw,
-      diffCoffrageRaw,
-      demarrageRaw,
-      duree3Raw,
-    });
-  }
-
-  if (isArmaturesTypeDoc(typeDoc)) {
-    return parsePlanningSyncDate(diffArmatureRaw);
-  }
-
-  if (isAllowedPlanningTypeDoc(typeDoc)) {
-    return parsePlanningSyncDate(diffCoffrageRaw);
-  }
-
-  return null;
-}
-
-function computePlanningRetardValue({
-  typeDoc,
-  indice,
-  targetIndice,
-  realiseValue,
-  currentRetard,
-  lignePlanningRaw,
-  diffCoffrageRaw,
-  diffArmatureRaw,
-  demarrageRaw,
-  duree3Raw,
-  dateRealiseRaw,
-  dateClotureRaw,
-}, currentInstant = new Date()) {
-  if (!isAllowedPlanningTypeDoc(typeDoc)) {
-    return 0;
-  }
-
-  const effectiveRealiseValue =
-    hasValidDate(dateClotureRaw)
-      ? 100
-      : toNumber(realiseValue) ?? computePlanningRealiseValue(typeDoc, indice, targetIndice);
-  const segmentEndDate = resolvePlanningSegmentEndDate({
-    typeDoc,
-    lignePlanningRaw,
-    diffCoffrageRaw,
-    diffArmatureRaw,
-    demarrageRaw,
-    duree3Raw,
-  });
-
-  if (effectiveRealiseValue >= 100) {
-    const dateRealise = parsePlanningSyncDate(dateClotureRaw) || parsePlanningSyncDate(dateRealiseRaw);
-    if (dateRealise && segmentEndDate) {
-      return getPlanningDelayDays(segmentEndDate, dateRealise);
-    }
-
-    const frozenRetard = toNumber(currentRetard);
-    return frozenRetard != null && frozenRetard >= 0 ? frozenRetard : 0;
-  }
-
-  if (!segmentEndDate) {
-    return 0;
-  }
-
-  return getPlanningDelayDays(segmentEndDate, currentInstant);
 }
 
 function getPlanningDateSortValue(value) {
@@ -1073,6 +917,9 @@ function isSynthesePlanningTask(row) {
 async function syncPlanningProjetIndicesFromListeDePlan() {
   try {
     const planningHelpers = await loadPlanningRealisationHelpers();
+    // Sans le module partagé (repli local), Date_Realise et Retards ne sont pas écrits :
+    // une seconde règle de calcul écraserait celle de Planning Projet.
+    const canComputeRetard = typeof planningHelpers.computePlanningRetardDays === "function";
     const projetsMap = await chargerProjetsMap();
     const projectIdToName = new Map(
       Object.entries(projetsMap || {}).map(([name, id]) => [String(id), name])
@@ -1165,8 +1012,10 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
         p.Date_Cloture
       );
       const currentDateRealise = toGristDateValue(p.Date_Realise) || normalizeText(p.Date_Realise);
-      const targetDateRealiseFromListe = progress.targetReached && progress.latestRecord
-        ? toGristDateValue(progress.latestRecord.dateDiffusion)
+      // Première diffusion atteignant l'indice cible : un indice supérieur diffusé plus tard
+      // ne déplace ni la date de réalisation ni, donc, le retard.
+      const targetDateRealiseFromListe = progress.targetReached && progress.realisationRecord
+        ? toGristDateValue(progress.realisationRecord.dateDiffusion)
         : null;
 
       const nextDateRealise = forcedClosureIso || targetDateRealiseFromListe || null;
@@ -1174,20 +1023,21 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
         (currentDateRealise || "") !== (nextDateRealise || "");
 
       const dateRealiseForRetard = targetRealise >= 100 ? nextDateRealise : "";
-      const targetRetard = computePlanningRetardValue({
-        typeDoc: p.Type_doc,
-        indice: latestIndice,
-        targetIndice: effectiveTargetIndice,
-        realiseValue: targetRealise,
-        currentRetard: p.Retards,
-        lignePlanningRaw: p.Ligne_planning,
-        diffCoffrageRaw: p.Diff_coffrage,
-        diffArmatureRaw: p.Diff_armature,
-        demarrageRaw: p.Demarrages_travaux,
-        duree3Raw: p.Duree_3,
-        dateRealiseRaw: dateRealiseForRetard,
-        dateClotureRaw: p.Date_Cloture,
-      });
+      // Même règle que Planning Projet (jours ouvrés) : le module partagé planningRetard.js.
+      const targetRetard = canComputeRetard
+        ? planningHelpers.computePlanningRetardDays({
+          typeDoc: p.Type_doc,
+          realise: targetRealise,
+          lignePlanning: p.Ligne_planning,
+          diffCoffrage: p.Diff_coffrage,
+          diffArmature: p.Diff_armature,
+          demarrage: p.Demarrages_travaux,
+          duree3: p.Duree_3,
+          dateRealise: dateRealiseForRetard,
+          dateCloture: p.Date_Cloture,
+          currentRetard: p.Retards,
+        })
+        : null;
       const currentRetard = toNumber(p.Retards);
 
       const updates = {};
@@ -1197,10 +1047,10 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
       if (hasRealiseColumn && currentRealiseStored !== targetRealise) {
         updates.Realise = targetRealise;
       }
-      if (hasDateRealiseColumn && shouldUpdateDateRealise) {
+      if (canComputeRetard && hasDateRealiseColumn && shouldUpdateDateRealise) {
         updates.Date_Realise = nextDateRealise;
       }
-      if (hasRetardsColumn && currentRetard !== targetRetard) {
+      if (canComputeRetard && hasRetardsColumn && currentRetard !== targetRetard) {
         updates.Retards = targetRetard;
       }
 

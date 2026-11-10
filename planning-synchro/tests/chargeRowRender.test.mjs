@@ -445,7 +445,10 @@ test("legende Charge : « 10 j / 8 j » = charge des plans / jours planifies, et
   });
 });
 
-test("la legende Charge se place sous les lignes, dans la barre du bouton Editer, avant lui", () => {
+// CHARGE DESACTIVEE (2026-11-10) : les deux tests suivants sont mis de cote avec
+// la legende. A la reactivation, remettre `test(` et supprimer les tests
+// « CHARGE DESACTIVEE » en fin de fichier.
+test.skip("la legende Charge se place sous les lignes, dans la barre du bouton Editer, avant lui", () => {
   const html = buildApi().renderTimelineEditToolbar(false);
   const legendAt = html.indexOf('class="charge-plan-legend"');
   const buttonAt = html.indexOf("data-charge-plan-edit-toggle");
@@ -453,10 +456,26 @@ test("la legende Charge se place sous les lignes, dans la barre du bouton Editer
   assert.ok(legendAt < buttonAt, "la legende doit preceder le bouton Editer");
 });
 
-test("legende Charge : « Charge lissée » seulement quand la charge suit le lissage", () => {
+test.skip("legende Charge : « Charge lissée » seulement quand la charge suit le lissage", () => {
   const api = buildApi();
   assert.ok(!api.renderChargeLegend(false).includes("Charge lissée"), "mode Non lissé : aucune mention");
   assert.ok(api.renderChargeLegend(true).includes(">Charge lissée<"), "mode Lissé : mention visible");
   assert.ok(api.renderTimelineEditToolbar(false, true).includes(">Charge lissée<"), "transmise par la barre");
   assert.ok(!api.renderTimelineEditToolbar(false).includes("Charge lissée"), "par defaut : charge d'origine");
+});
+
+// --- CHARGE DESACTIVEE (2026-11-10) : a supprimer a la reactivation -------------
+
+test("CHARGE DESACTIVEE : la barre du bouton Editer ne montre plus la legende Charge", () => {
+  const html = buildApi().renderTimelineEditToolbar(false, true);
+  assert.ok(!html.includes('class="charge-plan-legend"'), "legende absente de la barre");
+  assert.ok(!html.includes("Charge lissée"), "mention « Charge lissée » absente");
+  assert.match(html, /data-charge-plan-edit-toggle/, "le bouton Editer reste");
+});
+
+test("CHARGE DESACTIVEE : le rendu du board n'insere plus les lignes Charge ni leur calcul", () => {
+  assert.match(source, /^\s*const chargeRowHtml = "";/m, "lignes Charge remplacees par du vide");
+  assert.doesNotMatch(source, /^\s*const chargeRowHtml = renderChargeRows\(/m, "appel actif a renderChargeRows");
+  assert.match(source, /^\s*charge: null,/m, "charge du projet non calculee");
+  assert.doesNotMatch(source, /^\s*charge: computeProjectCharge\(/m, "appel actif a computeProjectCharge");
 });

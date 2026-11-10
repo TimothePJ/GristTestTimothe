@@ -31,7 +31,9 @@ import {
   fetchTableRows,
   fetchProjectData,
   fetchProjectRow,
-  updatePlanningDurations,
+  // CHARGE DESACTIVEE (2026-11-10) : ecriture des durees de la fenetre
+  // « Assigner la charge de reference », mise de cote avec elle.
+  // updatePlanningDurations,
   updateProjectSmoothing,
 } from "./services/gristService.js";
 import {
@@ -56,7 +58,10 @@ import {
   resolveViewportAnchorDate,
 } from "./bottom/chargePaneState.js";
 import { attachChargeEditing } from "./bottom/chargeEditing.js";
-import { createChargeAssignModal } from "./bottom/chargeAssignModal.js";
+// CHARGE DESACTIVEE (2026-11-10) : fenetre « Assigner la charge de reference »
+// (bouton « Charge » du pane bas) mise de cote. Pour reactiver, decommenter
+// toutes les lignes marquees CHARGE DESACTIVEE dans planning-synchro.
+// import { createChargeAssignModal } from "./bottom/chargeAssignModal.js";
 import { applySegmentChangeLocally, timeSegmentRowsSignature } from "./bottom/localSegmentUpdate.js";
 import { buildAbsenceIndex, normalizeName } from "./utils/leaveAbsences.js";
 import { createTopPaneResizer } from "./ui/topPaneResizer.js";
@@ -961,7 +966,9 @@ function bootstrapApp() {
     refreshChargeOnly = reloadChargeFromGrist;
     // Publie pour le lissage : un changement de mode ou de reglage redessine les
     // lignes Charge en place (meme chemin que le rafraichissement local).
-    rerenderChargeForSmoothing = renderChargeFromLocalRows;
+    // CHARGE DESACTIVEE (2026-11-10) : sans lignes Charge, le lissage n'a plus
+    // rien a redessiner dans le pane bas.
+    // rerenderChargeForSmoothing = renderChargeFromLocalRows;
 
     // Publie pour le lissage : des taches lissees avant les bornes actuelles (mois
     // de depart passe) doivent rester atteignables, la frise s'ELARGIT pour les
@@ -1061,35 +1068,37 @@ function bootstrapApp() {
     // meme scenario que dans gristService.updatePlanningDurations) : le
     // Object.assign ci-dessous fusionne alors chaque entree sur la MEME ligne,
     // cf. son commentaire pour le detail du choix.
-    async function handleChargeAssignSubmit(writes) {
-      try {
-        await updatePlanningDurations(writes);
-      } catch (error) {
-        console.error("Erreur enregistrement de la charge de reference :", error);
-        return {
-          ok: false,
-          error: "L'enregistrement de la charge a echoue. Reessayez.",
-        };
-      }
-
-      const chargeCols = pc.planningProject;
-      const rowsById = new Map(
-        planningRows.map((row) => [row?.[chargeCols.id], row])
-      );
-      (Array.isArray(writes) ? writes : []).forEach((write) => {
-        const row = rowsById.get(write?.recordId);
-        if (row) Object.assign(row, write?.fields || {});
-      });
-
-      renderChargeFromLocalRows();
-      return { ok: true };
-    }
+    // CHARGE DESACTIVEE (2026-11-10) : enregistrement et creation de la fenetre
+    // mis de cote. Pour reactiver : decommenter les deux blocs ci-dessous.
+    // async function handleChargeAssignSubmit(writes) {
+    //   try {
+    //     await updatePlanningDurations(writes);
+    //   } catch (error) {
+    //     console.error("Erreur enregistrement de la charge de reference :", error);
+    //     return {
+    //       ok: false,
+    //       error: "L'enregistrement de la charge a echoue. Reessayez.",
+    //     };
+    //   }
+    //
+    //   const chargeCols = pc.planningProject;
+    //   const rowsById = new Map(
+    //     planningRows.map((row) => [row?.[chargeCols.id], row])
+    //   );
+    //   (Array.isArray(writes) ? writes : []).forEach((write) => {
+    //     const row = rowsById.get(write?.recordId);
+    //     if (row) Object.assign(row, write?.fields || {});
+    //   });
+    //
+    //   renderChargeFromLocalRows();
+    //   return { ok: true };
+    // }
 
     // Fenetre "Assigner la charge de reference" (Tache 4) : montee/demontee
     // au meme rythme qu'`editing` juste au-dessus (teardown()/loadProject()).
-    chargeAssignModal = createChargeAssignModal(els.chargeAssignModal, {
-      onSubmit: handleChargeAssignSubmit,
-    });
+    // chargeAssignModal = createChargeAssignModal(els.chargeAssignModal, {
+    //   onSubmit: handleChargeAssignSubmit,
+    // });
 
     els.main.hidden = false;
     els.empty.hidden = true;
@@ -1345,19 +1354,21 @@ function bootstrapApp() {
     // `chargeAssignModal`/`currentPlanningRows` sont relus au moment du clic
     // (fermeture sur les `let` du scope englobant), toujours ceux du projet
     // courant meme si loadProject() les a recrees entre-temps.
-    if (els.charge instanceof HTMLElement) {
-      els.charge.addEventListener("click", (event) => {
-        const target =
-          event.target instanceof Element ? event.target.closest("[data-charge-assign-open]") : null;
-        if (!(target instanceof HTMLElement)) return;
-        event.preventDefault();
-        if (!chargeAssignModal) return;
-        chargeAssignModal.open({
-          planningRows: currentPlanningRows,
-          columns: APP_CONFIG.grist.columns.planningProject,
-        });
-      });
-    }
+    // CHARGE DESACTIVEE (2026-11-10) : plus de bouton « Charge » a ecouter.
+    // Pour reactiver : decommenter le bloc ci-dessous.
+    // if (els.charge instanceof HTMLElement) {
+    //   els.charge.addEventListener("click", (event) => {
+    //     const target =
+    //       event.target instanceof Element ? event.target.closest("[data-charge-assign-open]") : null;
+    //     if (!(target instanceof HTMLElement)) return;
+    //     event.preventDefault();
+    //     if (!chargeAssignModal) return;
+    //     chargeAssignModal.open({
+    //       planningRows: currentPlanningRows,
+    //       columns: APP_CONFIG.grist.columns.planningProject,
+    //     });
+    //   });
+    // }
     window.addEventListener("storage", handleStorageEvent);
     window.GristServiceContext?.onServiceChange?.(handleServiceChange);
 

@@ -336,6 +336,18 @@ test("limite de fin du plan de réservations du cycle 3 : le début du plan de c
   assert.equal(controlTaskEndLimits({ syntheseRows: null, formworkStarts: null }).size, 0);
 });
 
+test("report des limites : un dépassement sur le seul week-end n'est pas « trop tard » (jours ouvrés)", () => {
+  // Limite le vendredi 21/08/26 : même règle que les retards de la vue Global (checkFloor).
+  const limits = new Map([[1, { limit: new Date(2026, 7, 21), formworkNumber: "3032" }], [2, { limit: new Date(2026, 7, 21), formworkNumber: "3032" }]]);
+  const [saturday, monday] = applyEndLimits([
+    { key: "task:1", kind: "task", taskId: 1, name: "T", end: new Date(2026, 7, 22) },
+    { key: "task:2", kind: "task", taskId: 2, name: "T", end: new Date(2026, 7, 24) },
+  ], limits);
+  assert.equal(saturday.isOverEndLimit, false);
+  assert.match(saturday.endLimitNote, /^À finir/);
+  assert.equal(monday.isOverEndLimit, true);
+});
+
 test("report des limites sur les lignes : la Fin ne doit pas dépasser le jour limite", () => {
   const limit = new Date(2026, 1, 19);
   const limits = new Map([11, 12, 13, 14].map((taskId) => [taskId, { limit, formworkNumber: "3001" }]));

@@ -58,6 +58,19 @@ sur la seule colonne `Projets2.Lissage` (maximums du lissage).
 
 ## Charge de référence
 
+> ⚠️ **Désactivée depuis le 2026-11-10.** Les lignes Charge (Projeteurs /
+> Ingénieurs), leur légende, le bouton « Charge » et la fenêtre « Assigner la
+> charge de référence » sont **mis en commentaire** dans le code, repère
+> `CHARGE DESACTIVEE` (`bottom/chargeBoard.js`, `bottom/chargePaneState.js`,
+> `main.js`, `index.html`, `dev/harness.html`). Un projet sans personne dans
+> `ProjectTeam` n'affiche donc plus la grille, seulement le message « Aucun
+> prévisionnel pour ce projet. ». Les modules (`bottom/documentCharge.js`,
+> `bottom/chargeAssignModal.js`) et le CSS restent en place.
+> **Pour réactiver** : chercher `CHARGE DESACTIVEE` dans `planning-synchro/` et
+> suivre l'indication de chaque repère (décommenter le code, remettre `test(` à
+> la place de `test.skip(`, supprimer les tests nommés « CHARGE DESACTIVEE »).
+> La description ci-dessous est celle du comportement actif.
+
 Chaque document `Planning_Projet` déclare, dans trois colonnes, le nombre de
 jours de travail qu'il requiert :
 
@@ -327,7 +340,9 @@ chargement initial et le rafraîchissement post-écriture) :
   ne s'affiche **pas** (il parle des personnes, pas des segments) ;
 - **aucune personne mais des lignes `Planning_Projet`** → la grille reste rendue,
   pour la ligne **Charge** et son bouton, seul point d'entrée de la fenêtre
-  d'assignation des charges de référence ; le message s'affiche ;
+  d'assignation des charges de référence ; le message s'affiche
+  (**désactivé** avec la charge de référence le 2026-11-10 : le pane bas est
+  alors masqué, seul le message reste) ;
 - **ni l'un ni l'autre** → le pane bas est masqué.
 
 Les **bornes de la frise** sont l'union du prévisionnel et des phases du planning ;

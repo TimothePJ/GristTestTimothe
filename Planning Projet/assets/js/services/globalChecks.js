@@ -2,10 +2,10 @@
 // rapport à Structure (tâche contrôlée, démarrage du gros œuvre), fond de plan à mettre à
 // jour, coffrage introuvable, retard d'un document Structure ; puis ce que chaque ligne
 // affiche dans sa colonne « État » et les compteurs de la barre d'état.
-// Module pur, sans DOM ni Grist. Les retards se comptent en jours calendaires.
+// Module pur, sans DOM ni Grist. Tous les retards se comptent en jours ouvrés (week-ends et
+// jours fériés exclus), comme la colonne Retards et les durées de la Synthèse.
+import { countPlanningLateWorkingDays } from "../../../../gestion-depenses2/assets/js/utils/planningRetard.js";
 import { formatDate } from "./syntheseTaskModel.js";
-
-const DAY_MS = 86400000;
 
 // Familles d'alertes, de la plus grave à la moins grave.
 export const FAMILIES = Object.freeze(["synthese", "missing", "stale", "structure"]);
@@ -14,18 +14,8 @@ function toText(value) {
   return value == null ? "" : String(value).trim();
 }
 
-function toDay(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
 function plural(count) {
   return count > 1 ? "s" : "";
-}
-
-// Nombre de jours calendaires de `from` à `to` (négatif si `to` est avant).
-export function daysBetween(from, to) {
-  if (!(from instanceof Date) || !(to instanceof Date)) return 0;
-  return Math.round((toDay(to).getTime() - toDay(from).getTime()) / DAY_MS);
 }
 
 export function emptyCounts() {
@@ -51,16 +41,17 @@ export function countAlerts(alerts) {
   return counts;
 }
 
-// Retard d'un document Structure. Non terminé : jours entre sa Fin et aujourd'hui ; une
-// justification (Remarque) le passe en orange. Terminé : le retard stocké reste lisible,
-// sans alerte. Renvoie l'alerte (ou null), ce que la ligne affiche (ou null) et l'infobulle.
+// Retard d'un document Structure. Non terminé : jours ouvrés entre sa Fin et aujourd'hui
+// (même règle que la colonne Retards) ; une justification (Remarque) le passe en orange.
+// Terminé : le retard stocké reste lisible, sans alerte. Renvoie l'alerte (ou null), ce que
+// la ligne affiche (ou null) et l'infobulle.
 export function checkDocument(doc, today) {
   if (Number(doc?.realise) >= 100) {
     const stored = Number(doc?.storedRetard);
     const text = stored > 0 ? `terminé (retard ${stored} j)` : "terminé";
     return { alert: null, part: { text, tone: "muted" }, title: "" };
   }
-  const days = doc?.end instanceof Date ? Math.max(0, daysBetween(doc.end, today)) : 0;
+  const days = doc?.end instanceof Date ? countPlanningLateWorkingDays(doc.end, today) : 0;
   if (!days) return { alert: null, part: null, title: "" };
   const justification = toText(doc.remarque);
   const tone = justification ? "warn" : "error";
@@ -128,11 +119,13 @@ export function checkFloor({ tasks = [], link = null, controls = new Map(), limi
         return;
       }
       checked += 1;
-      if (task.end <= entry.limit) return;
+      // Retard en jours ouvrés : finir le week-end qui suit la limite n'en coûte aucun.
+      const lateDays = countPlanningLateWorkingDays(entry.limit, task.end);
+      if (!lateDays) return;
       late += 1;
       addTaskAlert(task.id, lateAlert(
         "late",
-        daysBetween(entry.limit, task.end),
+        lateDays,
         `Fin trop tardive : à finir au plus tard le ${formatDate(entry.limit)} ` +
           `(début du plan de coffrage ${entry.formworkNumber} dans le planning Structure).`
       ));
@@ -148,10 +141,10 @@ export function checkFloor({ tasks = [], link = null, controls = new Map(), limi
     result.unverifiable.push("pas de jalon de démarrage daté dans l'étage");
   } else if (!(worksStart instanceof Date)) {
     result.unverifiable.push(`aucun démarrage des travaux pour le coffrage ${number}`);
-  } else if (kickoff.start > worksStart) {
+  } else if (countPlanningLateWorkingDays(worksStart, kickoff.start) > 0) {
     addTaskAlert(kickoff.id, lateAlert(
       "goLate",
-      daysBetween(worksStart, kickoff.start),
+      countPlanningLateWorkingDays(worksStart, kickoff.start),
       `Démarrage prévu après le démarrage des travaux de Structure (${formatDate(worksStart)}).`
     ));
   } else {

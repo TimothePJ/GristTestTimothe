@@ -102,6 +102,8 @@ import {
   getMonthBusinessDays,
   toGristMonthValue,
 } from "./utils/monthSegments.js";
+// Retard en jours ouvres : meme decompte que la colonne Retards de Planning Projet.
+import { countPlanningLateWorkingDays } from "./utils/planningRetard.js";
 // Noyau pur de la barre de charge mensuelle de la fenetre segment. Module
 // VENDORISE : copie identique octet pour octet dans planning-synchro,
 // verrouillee par shared/tests/vendored-charge-modules-parity.test.cjs.
@@ -323,34 +325,6 @@ function formatPlanningAlertDate(date) {
   return date.toLocaleDateString("fr-FR");
 }
 
-function getCalendarDelayDays(referenceDate, currentDate = new Date()) {
-  if (
-    !(referenceDate instanceof Date) ||
-    Number.isNaN(referenceDate.getTime()) ||
-    !(currentDate instanceof Date) ||
-    Number.isNaN(currentDate.getTime())
-  ) {
-    return 0;
-  }
-
-  const referenceDay = new Date(
-    referenceDate.getFullYear(),
-    referenceDate.getMonth(),
-    referenceDate.getDate()
-  );
-  const currentDay = new Date(
-    currentDate.getFullYear(),
-    currentDate.getMonth(),
-    currentDate.getDate()
-  );
-
-  if (currentDay <= referenceDay) {
-    return 0;
-  }
-
-  return Math.floor((currentDay.getTime() - referenceDay.getTime()) / DAY_IN_MS);
-}
-
 function getPlanningAlertEndDate(task = {}) {
   return task?.endAt instanceof Date && !Number.isNaN(task.endAt.getTime())
     ? task.endAt
@@ -368,7 +342,7 @@ function buildPlanningDelayAlerts(project = null) {
       }
 
       const endDate = getPlanningAlertEndDate(task);
-      const computedDelayDays = endDate ? getCalendarDelayDays(endDate) : 0;
+      const computedDelayDays = endDate ? countPlanningLateWorkingDays(endDate, new Date()) : 0;
       const retardsDays = Math.max(
         0,
         Math.round(toFiniteNumber(task?.retardsDays, 0))

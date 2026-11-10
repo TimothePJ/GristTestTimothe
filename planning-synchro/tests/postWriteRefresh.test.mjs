@@ -985,7 +985,9 @@ test("classifyContextSignal : TimeSegment seul est direct, Projets2 demande une 
 // retire revenait sur l'ecriture la plus lourde du produit, et ecrasait au
 // passage la mise a jour EN PLACE que handleChargeAssignSubmit venait de poser.
 
-test("Planning_Projet — le signal declenche par NOTRE ecriture de charge ne reactualise pas la page", async () => {
+// CHARGE DESACTIVEE (2026-11-10) : la fenetre d'assignation n'est plus creee par
+// loadProject. A la reactivation, remettre `test(`.
+test.skip("Planning_Projet — le signal declenche par NOTRE ecriture de charge ne reactualise pas la page", async () => {
   const h = await mount({ planningRows: initialPlanningRows() });
   h.setEditMode(true);
   h.reset(); // on ne compte plus le chargement initial
@@ -1164,7 +1166,9 @@ test("Planning_Projet — une ligne ajoutee ailleurs recharge tout le projet", a
 // Tache 3 ne pouvait pas le voir : il appelle `renderChargeRow` dans un vm, deux
 // couches sous le conteneur qui le masque.
 
-test("sans aucun TimeSegment, le conteneur du pane bas reste visible pour la ligne Charge", async () => {
+// CHARGE DESACTIVEE (2026-11-10) : test mis de cote avec le bloc Charge. A la
+// reactivation, remettre `test(` et supprimer le test « CHARGE DESACTIVEE » qui suit.
+test.skip("sans aucun TimeSegment, le conteneur du pane bas reste visible pour la ligne Charge", async () => {
   const h = await mount({ segmentRows: [], planningRows: initialPlanningRows() });
 
   assert.equal(h.els.charge.hidden, false, "sinon le bouton « Charge » serait introuvable");
@@ -1174,6 +1178,15 @@ test("sans aucun TimeSegment, le conteneur du pane bas reste visible pour la lig
     "le message « Aucun previsionnel » reste : il parle des lignes de PERSONNES"
   );
   assert.equal(h.calls.chargeRender, 1, "la ligne Charge est bien rendue dans ce conteneur visible");
+});
+
+// CHARGE DESACTIVEE (2026-11-10) : a supprimer a la reactivation.
+test("CHARGE DESACTIVEE : pas de fenetre d'assignation, et sans equipe le pane bas est masque", async () => {
+  const h = await mount({ segmentRows: [], planningRows: initialPlanningRows() });
+
+  assert.equal(h.getChargeAssignOptions(), null, "la fenetre « Assigner la charge » n'est plus creee");
+  assert.equal(h.els.charge.hidden, true, "sans personne, la grille n'a plus rien a montrer");
+  assert.equal(h.els.chargeEmpty.hidden, false, "le message « Aucun previsionnel » s'affiche");
 });
 
 // LE BUG : `loadProject` passait `workers: []` au board des que le projet
@@ -1254,7 +1267,9 @@ test("sans TimeSegment NI ligne de planning, le pane bas reste masque", async ()
   assert.equal(h.els.chargeEmpty.hidden, false);
 });
 
-test("la suppression du DERNIER segment ne fait pas disparaitre la ligne Charge", async () => {
+// CHARGE DESACTIVEE (2026-11-10) : plus de ligne Charge a garder visible. A la
+// reactivation, remettre `test(`.
+test.skip("la suppression du DERNIER segment ne fait pas disparaitre la ligne Charge", async () => {
   // Meme regle sur le chemin de RE-rendu (renderChargeFromLocalRows), pas
   // seulement au premier chargement.
   const h = await mount({ planningRows: initialPlanningRows() });

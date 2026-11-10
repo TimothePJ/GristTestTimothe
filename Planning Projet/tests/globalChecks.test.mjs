@@ -8,7 +8,6 @@ import {
   checkDocument,
   checkFloor,
   countAlerts,
-  daysBetween,
   describeCounts,
   emptyCounts,
   floorAlerts,
@@ -37,20 +36,16 @@ const controls = new Map([[1, { chosen: true }]]);
 const limits = new Map([[1, { limit: LIMIT, formworkNumber: "3032" }]]);
 const texts = (state) => state.parts.map((part) => part.text);
 
-test("jours calendaires entre deux dates, changement d'heure compris", () => {
-  assert.equal(daysBetween(LIMIT, day(2026, 11, 30)), 103);
-  assert.equal(daysBetween(day(2026, 10, 24), day(2026, 10, 26)), 2, "nuit du passage à l'heure d'hiver");
-  assert.equal(daysBetween(day(2026, 3, 28), day(2026, 3, 30)), 2, "nuit du passage à l'heure d'été");
-  assert.equal(daysBetween(day(2026, 8, 20), LIMIT), -1);
-  assert.equal(daysBetween(null, LIMIT), 0);
-});
 
-test("document Structure non terminé : retard compté depuis sa Fin jusqu'à aujourd'hui", () => {
+test("document Structure non terminé : retard en jours ouvrés depuis sa Fin jusqu'à aujourd'hui", () => {
+  // Du mercredi 16/09 au vendredi 09/10 : 23 jours calendaires, 17 jours ouvrés.
   const late = checkDocument({ realise: 67, end: day(2026, 9, 16), storedRetard: 5, remarque: "" }, TODAY);
-  assert.deepEqual(late.part, { text: "retard 23 j", tone: "error" });
+  assert.deepEqual(late.part, { text: "retard 17 j", tone: "error" });
   assert.equal(late.alert.family, "structure");
-  assert.equal(late.alert.days, 23);
-  assert.equal(late.title, "Fin prévue le Mer 16/09/26 : 23 j de retard.");
+  assert.equal(late.alert.days, 17);
+  assert.equal(late.title, "Fin prévue le Mer 16/09/26 : 17 j de retard.");
+  // Fin le vendredi 02/10, aujourd'hui le lundi 05/10 : un seul jour ouvré.
+  assert.equal(checkDocument({ realise: 0, end: day(2026, 10, 2) }, day(2026, 10, 5)).alert.days, 1);
   assert.equal(checkDocument({ realise: 0, end: TODAY }, TODAY).alert, null, "Fin aujourd'hui : pas de retard");
   assert.equal(checkDocument({ realise: 0, end: day(2026, 12, 1) }, TODAY).part, null);
   assert.equal(checkDocument({ realise: 0, end: null, storedRetard: 12 }, TODAY).part, null, "sans Fin : rien");
@@ -58,7 +53,7 @@ test("document Structure non terminé : retard compté depuis sa Fin jusqu'à au
 
 test("retard justifié : orange, la justification au survol, et il compte toujours", () => {
   const result = checkDocument({ realise: 33, end: day(2026, 9, 16), remarque: " Attente plans archi " }, TODAY);
-  assert.deepEqual(result.part, { text: "retard 23 j (justifié)", tone: "warn" });
+  assert.deepEqual(result.part, { text: "retard 17 j (justifié)", tone: "warn" });
   assert.equal(result.title, "Retard justifié : Attente plans archi");
   assert.equal(result.alert.family, "structure");
 });
@@ -88,8 +83,8 @@ test("tâche contrôlée qui finit après le début du plan de coffrage : retard
     code: "late",
     family: "synthese",
     tone: "late",
-    days: 103,
-    text: "retard 103 j",
+    days: 72,
+    text: "retard 72 j",
     title: "Fin trop tardive : à finir au plus tard le Mer 19/08/26 (début du plan de coffrage 3032 dans le planning Structure).",
   }, "pas de clignotement porté par l'alerte : seule la Fin de la tâche clignote");
   assert.equal(check.linked, true);
@@ -99,6 +94,22 @@ test("tâche contrôlée qui finit le jour du début du plan : contrôle passé"
   const check = checkFloor({ tasks: [controlTask(LIMIT)], link: linked(), controls, limits, worksStart: null });
   assert.equal(check.taskAlerts.size, 0);
   assert.equal(check.passed, 2, "tâche contrôlée et fond de plan");
+});
+
+test("retards Synthèse en jours ouvrés : un dépassement sur le seul week-end n'est pas un retard", () => {
+  // Plan de coffrage commencé le vendredi 21/08 : finir le samedi 22/08 ne coûte aucun jour ouvré.
+  const friday = new Map([[1, { limit: day(2026, 8, 21), formworkNumber: "3032" }]]);
+  const weekend = checkFloor({ tasks: [controlTask(day(2026, 8, 22))], link: linked(), controls, limits: friday, worksStart: null });
+  assert.equal(weekend.taskAlerts.size, 0);
+  assert.equal(weekend.passed, 2);
+  // Le lundi 24/08 : un jour ouvré de retard.
+  const monday = checkFloor({ tasks: [controlTask(day(2026, 8, 24))], link: linked(), controls, limits: friday, worksStart: null });
+  assert.equal(monday.taskAlerts.get(1)[0].days, 1);
+  // Démarrage GO le lundi 19/10 pour des travaux démarrés le vendredi 16/10 : 1 jour ouvré.
+  const go = checkFloor({ tasks: [kickoff(day(2026, 10, 19))], link: linked(), worksStart: day(2026, 10, 16) });
+  assert.equal(go.taskAlerts.get(9)[0].days, 1);
+  const goWeekend = checkFloor({ tasks: [kickoff(day(2026, 10, 18))], link: linked(), worksStart: day(2026, 10, 16) });
+  assert.equal(goWeekend.taskAlerts.size, 0, "démarrage le dimanche après des travaux du vendredi");
 });
 
 test("plusieurs tâches contrôlées : une seule en retard suffit à faire échouer le contrôle", () => {
@@ -127,7 +138,7 @@ test("jalon de démarrage après le démarrage des travaux de Structure : retard
   const works = day(2026, 10, 14);
   const late = checkFloor({ tasks: [kickoff(day(2026, 10, 26))], link: linked(), worksStart: works });
   const [alert] = late.taskAlerts.get(9);
-  assert.deepEqual([alert.code, alert.family, alert.tone, alert.days, alert.text], ["goLate", "synthese", "late", 12, "retard 12 j"]);
+  assert.deepEqual([alert.code, alert.family, alert.tone, alert.days, alert.text], ["goLate", "synthese", "late", 8, "retard 8 j"]);
   assert.equal(alert.title, "Démarrage prévu après le démarrage des travaux de Structure (Mer 14/10/26).");
   const onTime = checkFloor({ tasks: [kickoff(works)], link: linked(), worksStart: works });
   assert.equal(onTime.taskAlerts.size, 0);
@@ -237,7 +248,7 @@ test("état d'un niveau lié : cohérent, partiel, non vérifiable, en défaut",
   const late = checkFloor({ tasks: [controlTask(day(2026, 11, 30))], link: linked("stale"), controls, limits });
   const lateState = levelState({ checks: [late, all], counts: { synthese: 1, missing: 0, stale: 1, structure: 2 } });
   assert.deepEqual(lateState.parts, [
-    { text: "Synthèse en retard de 103 j", tone: "late" },
+    { text: "Synthèse en retard de 72 j", tone: "late" },
     { text: "à mettre à jour", tone: "warn" },
     { text: "2 retards Structure", tone: "error" },
   ]);
@@ -249,7 +260,7 @@ test("état d'un niveau lié : cohérent, partiel, non vérifiable, en défaut",
 test("état d'un coffrage : le sien, puis ses armatures en retard", () => {
   assert.equal(formworkState({ own: checkDocument({ realise: 0, end: null }, TODAY), lateRebars: 0 }), null);
   const own = checkDocument({ realise: 67, end: day(2026, 9, 2) }, TODAY);
-  assert.deepEqual(texts(formworkState({ own, lateRebars: 2 })), ["retard 37 j", "2 armatures en retard"]);
+  assert.deepEqual(texts(formworkState({ own, lateRebars: 2 })), ["retard 27 j", "2 armatures en retard"]);
   assert.deepEqual(texts(formworkState({ own: null, lateRebars: 1 })), ["1 armature en retard"]);
 });
 

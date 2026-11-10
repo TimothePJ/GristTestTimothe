@@ -1470,14 +1470,28 @@ body.planning-row-dragging {
   font-weight: 700;
 }
 
-.planning-closure-dialog__field input {
-  width: min(240px, 100%);
+.planning-closure-dialog__field input,
+.planning-closure-dialog__field select {
+  width: min(320px, 100%);
   border: 1px solid #bcc9d6;
   border-radius: 6px;
   padding: 9px 10px;
   color: #1f2937;
   background: #ffffff;
   font: inherit;
+}
+
+/* `display: flex` l'emporte sur l'attribut hidden : il faut le redire. */
+.planning-closure-dialog__field[hidden],
+.planning-closure-dialog__note[hidden] {
+  display: none;
+}
+
+/* Réalisation forcée saisie à la main avant le choix par indice, ou plan sans diffusion. */
+.planning-closure-dialog__note {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
 }
 
 .planning-closure-dialog__error {
@@ -1509,7 +1523,8 @@ body.planning-row-dragging {
 }
 
 .planning-closure-dialog__actions button:disabled,
-.planning-closure-dialog__field input:disabled {
+.planning-closure-dialog__field input:disabled,
+.planning-closure-dialog__field select:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

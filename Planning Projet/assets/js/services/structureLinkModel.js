@@ -17,6 +17,7 @@ import {
   zoneKeyOf,
 } from "./syntheseTaskModel.js";
 import { parseGristDate } from "./syntheseTasks.js";
+import { countPlanningLateWorkingDays } from "../../../../gestion-depenses2/assets/js/utils/planningRetard.js";
 
 const STRUCTURE_SERVICE_KEY = "structure";
 const FORMWORK_TYPE = "COFFRAGE";
@@ -235,7 +236,9 @@ export function applyEndLimits(lines, limits) {
   return lines.map((line) => {
     const entry = line.kind === "task" ? limits.get(line.taskId) : null;
     if (!entry) return line;
-    const isOverEndLimit = line.end instanceof Date && line.end > entry.limit;
+    // En jours ouvrés, comme les retards de la vue Global : finir le week-end qui suit la
+    // limite n'est pas trop tard.
+    const isOverEndLimit = line.end instanceof Date && countPlanningLateWorkingDays(entry.limit, line.end) > 0;
     const rule = `finir au plus tard le ${formatDate(entry.limit)} ` +
       `(début du plan de coffrage ${entry.formworkNumber} dans le planning Structure).`;
     return {

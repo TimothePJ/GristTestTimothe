@@ -239,8 +239,8 @@ test("une zone : niveaux et coffrages dans l'ordre de Structure, puis le reste d
 test("armatures : sous le coffrage de leur zone et de leur Groupe", () => {
   const level = zoneOf(build(), ZONE_2).entries[0];
   assert.deepEqual(level.rebars.map((rebar) => rebar.number), ["3314"]);
-  assert.equal(level.doc.check.alert.days, 37, "retard du coffrage, compté jusqu'à aujourd'hui");
-  assert.equal(level.rebars[0].check.alert.days, 23);
+  assert.equal(level.doc.check.alert.days, 27, "retard du coffrage, en jours ouvrés jusqu'à aujourd'hui");
+  assert.equal(level.rebars[0].check.alert.days, 17);
 });
 
 // Deux coffrages d'un même groupe prennent les dates de son armature : à dates égales, le
@@ -260,7 +260,7 @@ test("étage lié : ses contrôles, avec le démarrage des travaux de son niveau
   const [rdc] = zoneOf(planning, ZONE_2).entries[0].floors;
   assert.deepEqual([rdc.key, rdc.link.state, rdc.check.linked, rdc.otherZoneLabel], ["rdc", "waiting", true, ""]);
   const [alert] = rdc.check.taskAlerts.get(420);
-  assert.deepEqual([alert.code, alert.days], ["late", 103]);
+  assert.deepEqual([alert.code, alert.days], ["late", 72]);
   assert.equal(rdc.check.passed, 1, "démarrage du gros œuvre avant le démarrage des travaux (14/10/26)");
   assert.deepEqual(rdc.check.unverifiable, ["le coffrage 3032 n'a pas de date 0 Prev"]);
   const [ss1] = zoneOf(planning, ZONE_2).entries[2].floors;
@@ -335,8 +335,8 @@ test("dates en secondes Grist : mêmes dates, mêmes retards qu'en texte", () =>
   const level = zoneOf(planning, ZONE_2).entries[0];
   assert.equal(brief(level), "level:3032<RDC>+1");
   assert.deepEqual([iso(level.doc.start), iso(level.doc.end), iso(level.rebars[0].worksStart)], ["2026-08-19", "2026-09-02", "2026-10-14"]);
-  assert.equal(level.doc.check.alert.days, 37);
-  assert.equal(level.floors[0].check.taskAlerts.get(420)[0].days, 103);
+  assert.equal(level.doc.check.alert.days, 27);
+  assert.equal(level.floors[0].check.taskAlerts.get(420)[0].days, 72);
   assert.equal(zoneOf(planning, ZONE_2).entries[2].floors[0].link.state, "current", "0 Prev lu en secondes");
 });
 

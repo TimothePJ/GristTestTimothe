@@ -16,6 +16,9 @@ export const {
   findBestPlanningDocumentMatches,
 } = planningClosureCore;
 
+// Calcul du retard (jours ouvrés), réexporté ici : ListeDePlan charge ce seul module.
+export * from "./planningRetard.js";
+
 function toCleanText(value) {
   return String(value ?? "").trim();
 }
@@ -157,17 +160,52 @@ export function selectLatestPlanningIndiceRecord(records = []) {
   return latestRecord;
 }
 
+// Diffusion qui a réalisé le document : la PREMIÈRE (date la plus ancienne) dont l'indice
+// atteint l'indice cible. Une diffusion ultérieure d'un indice supérieur ne la déplace pas :
+// sa date fixe Date_Realise, donc le retard du document. null si la cible n'est pas atteinte.
+export function selectPlanningRealisationRecord(records = [], targetIndice = "") {
+  let realisationRecord = null;
+
+  (records || []).forEach((record) => {
+    const indice = normalizePlanningIndice(record?.indice);
+    const indiceRank = getIndiceRank(indice);
+    const dateSortValue = Number(record?.dateSortValue);
+    if (!indice || indiceRank == null || !Number.isFinite(dateSortValue)) {
+      return;
+    }
+    if (!isPlanningIndiceAtLeast(indice, targetIndice)) {
+      return;
+    }
+
+    if (!realisationRecord || dateSortValue < realisationRecord.dateSortValue) {
+      realisationRecord = {
+        ...record,
+        indice,
+        indiceRank,
+        dateSortValue,
+      };
+    }
+  });
+
+  return realisationRecord;
+}
+
 export function buildPlanningIndiceProgress(records = [], targetIndice = "") {
   const latestRecord = selectLatestPlanningIndiceRecord(records);
   const latestIndice = latestRecord?.indice || "";
   const effectiveTargetIndice = normalizePlanningIndice(targetIndice);
   const realisation = computeIndexedRealisation(latestIndice, effectiveTargetIndice);
+  const targetReached = isPlanningIndiceAtLeast(latestIndice, effectiveTargetIndice);
 
   return {
     latestRecord,
     latestIndice,
     targetIndice: effectiveTargetIndice,
-    targetReached: isPlanningIndiceAtLeast(latestIndice, effectiveTargetIndice),
+    targetReached,
+    // Date de réalisation à retenir : voir selectPlanningRealisationRecord.
+    realisationRecord: targetReached
+      ? selectPlanningRealisationRecord(records, effectiveTargetIndice)
+      : null,
     realisation,
   };
 }
