@@ -1983,6 +1983,35 @@ body:not(.is-synthese-space) #structureLinkToggle {
   display: none !important;
 }
 
+/* Bouton « Exporter » (fichier Excel du planning) : même allure que « Durées », sur la frise
+   Structure / Topographie seulement — le tableau Synthèse et la vue Global ont d'autres
+   colonnes. Il ne rétrécit pas quand le bandeau est plein. */
+#toolbar .planning-export-toggle {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  min-width: 80px;
+  border-color: #b7c7d9;
+  font-weight: 700;
+  color: #23415f;
+  box-shadow: inset 0 0 0 1px rgba(35, 65, 95, 0.05);
+}
+
+#toolbar .planning-export-toggle:hover:not(:disabled) {
+  border-color: #7fa7cf;
+  background-color: #f1f7ff;
+}
+
+#toolbar .planning-export-toggle:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+body.is-synthese-space #planningExportBtn,
+body.is-global-space #planningExportBtn,
+body.planning-sync-embedded #planningExportBtn {
+  display: none !important;
+}
+
 body:not(.is-synthese-space) #syntheseLayoutToggle,
 #syntheseLayoutToggle[hidden] {
   display: none !important;

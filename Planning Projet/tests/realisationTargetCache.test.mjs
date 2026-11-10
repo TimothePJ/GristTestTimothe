@@ -93,6 +93,6 @@ test("main.js : la table des indices de référence suit le service affiché, à
     /const realisationTargets = createRealisationTargetCache\(\{\s*build: buildProjectRealisationTargetLookup,\s*getService: \(\) => window\.GristServiceContext\?\.getService\?\.\(\) \|\| "",\s*\}\);/
   );
   assert.equal(mainJs.match(/realisationTargets\.setConfigs\(cachedProjectAvancementConfigs\);/g)?.length, 2);
-  assert.equal(mainJs.match(/realisationTargets\.get\(\)/g)?.length, 4, "rendu depuis le cache, lignes affichées, synchronisation, rendu");
+  assert.equal(mainJs.match(/realisationTargets\.get\(\)/g)?.length, 5, "rendu depuis le cache, lignes affichées, synchronisation, rendu, export Excel");
   assert.ok(!mainJs.includes("cachedRealisationTargetLookup"), "plus de table gardée d'un service à l'autre");
 });

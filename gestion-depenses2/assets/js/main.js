@@ -63,11 +63,9 @@ import {
   getExpenseGraphDisplayMode,
   getTeamManagementSummaryDisplayMode,
   getTeamManagementSummaryGroupedByRole,
-  getTeamManagementSummaryMode,
   setExpenseGraphDisplayMode,
   setTeamManagementSummaryDisplayMode,
   setTeamManagementSummaryGroupedByRole,
-  setTeamManagementSummaryMode,
 } from "./ui/expenseTimeline.js";
 import { clearKpi, renderKpi } from "./ui/kpi.js";
 import {
@@ -5054,14 +5052,7 @@ function handleTeamManagementSummaryToggleChange(event) {
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) return;
 
-  if (target.classList.contains("team-summary-mode-toggle-input")) {
-    const nextMode = target.checked ? "real" : "provisional";
-    if (getTeamManagementSummaryMode() === nextMode) {
-      return;
-    }
-
-    setTeamManagementSummaryMode(nextMode);
-  } else if (target.classList.contains("team-summary-group-toggle-input")) {
+  if (target.classList.contains("team-summary-group-toggle-input")) {
     const nextGroupedState = target.checked;
     if (getTeamManagementSummaryGroupedByRole() === nextGroupedState) {
       return;
