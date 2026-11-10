@@ -789,10 +789,6 @@ body.spending-chart-sync-embedded .avancement-dashboard-section {
   gap: 10px;
 }
 
-.team-summary-mode-toggle-input {
-  margin: 0;
-}
-
 .team-summary-group-toggle-input {
   margin: 0;
 }
@@ -807,20 +803,59 @@ body.spending-chart-sync-embedded .avancement-dashboard-section {
   white-space: nowrap;
 }
 
+/* Deux barres empilees (Previsionnel puis Reel), legende commune en dessous. */
 .team-summary-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 240px;
-  gap: 20px;
+  gap: 18px;
+}
+
+.team-summary-rows {
+  display: grid;
+  gap: 12px;
+}
+
+.team-summary-row {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 16px;
   align-items: center;
+}
+
+.team-summary-row-head {
+  display: grid;
+  gap: 4px;
+}
+
+.team-summary-row-label {
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.team-summary-row-total {
+  color: var(--color-text-muted);
+  font-size: 0.92rem;
 }
 
 .team-summary-bar {
   display: flex;
-  min-height: 122px;
+  min-height: 76px;
   overflow: hidden;
   border-radius: var(--radius-md);
   border: 1px solid rgba(0, 73, 144, 0.1);
   background: #eef3f9;
+}
+
+.team-summary-bar-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 76px;
+  padding: 0 16px;
+  border: 1px dashed rgba(0, 73, 144, 0.2);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  text-align: center;
+  background: rgba(255, 255, 255, 0.78);
 }
 
 .team-summary-segment {
@@ -842,7 +877,8 @@ body.spending-chart-sync-embedded .avancement-dashboard-section {
 
 .team-summary-legend {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 12px 20px;
 }
 
 .team-summary-legend-item {
@@ -3175,8 +3211,14 @@ canvas {
     justify-content: stretch;
   }
 
-  .team-summary-bar {
-    min-height: 104px;
+  .team-summary-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .team-summary-bar,
+  .team-summary-bar-empty {
+    min-height: 64px;
   }
 
   .charge-plan-view-controls {

@@ -14,9 +14,13 @@ import {
 } from "../../../gestion-depenses2/assets/js/ui/avancementDashboard.js";
 import {
   clearExpenseTimeline,
+  clearTeamSummary,
   renderExpenseTimeline,
   renderRealExpenseTimeline,
+  renderTeamSummary,
   setExpenseGraphDisplayMode,
+  setTeamManagementSummaryDisplayMode,
+  setTeamManagementSummaryGroupedByRole,
 } from "../../../gestion-depenses2/assets/js/ui/expenseTimeline.js";
 import {
   clearSpendingChartControls,
@@ -133,6 +137,7 @@ function getDomRefs() {
     remainingBudget: document.getElementById("global-remaining-budget"),
     chartsEmptyState: document.getElementById("charts-empty-state"),
     avancementDashboardSection: document.getElementById("avancement-dashboard-section"),
+    teamSummaryBoard: document.getElementById("team-summary-board"),
     expenseBoard: document.getElementById("expense-board"),
     realExpenseBoard: document.getElementById("real-expense-board"),
     expenseNavigationModeButtons: [...document.querySelectorAll(".expense-navigation-mode-btn")],
@@ -582,6 +587,7 @@ function renderKpis(aggregatedProject) {
 
 function clearAggregateViews() {
   clearAvancementDashboard(dom.avancementDashboardSection);
+  clearTeamSummary(dom.teamSummaryBoard);
   clearExpenseTimeline(dom.expenseBoard);
   clearExpenseTimeline(dom.realExpenseBoard);
   clearSpendingChartControls(dom.spendingChartControls);
@@ -607,6 +613,10 @@ function renderAggregateViews(aggregatedProject, selectedProjects = getVisibleSe
       saveLocalAvancementConfig(selectedProjects, project, serializedConfig)
     ),
   });
+  // Synthese equipe des projets selectionnes : une personne presente sur
+  // plusieurs projets y est comptee une fois, au cout de chacun (cf.
+  // buildAggregatedWorkers).
+  renderTeamSummary(dom.teamSummaryBoard, aggregatedProject);
   renderExpenseTimeline(dom.expenseBoard, aggregatedProject);
   renderRealExpenseTimeline(dom.realExpenseBoard, aggregatedProject);
   renderSpendingChartControls(dom.spendingChartControls);
@@ -768,6 +778,23 @@ function bindEvents() {
         selectedProjects
       );
     });
+  });
+
+  dom.teamSummaryBoard.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+
+    if (target.classList.contains("team-summary-group-toggle-input")) {
+      setTeamManagementSummaryGroupedByRole(target.checked);
+    } else if (target.classList.contains("team-summary-display-toggle-input")) {
+      setTeamManagementSummaryDisplayMode(target.checked ? "days" : "currency");
+    } else {
+      return;
+    }
+
+    // Seule la synthese depend de ces deux options : inutile de redessiner les
+    // graphiques voisins.
+    renderTeamSummary(dom.teamSummaryBoard, buildAggregatedProject(getVisibleSelectedProjects()));
   });
 
   dom.spendingChartControls.addEventListener("change", (event) => {

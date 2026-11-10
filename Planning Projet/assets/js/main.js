@@ -109,6 +109,8 @@ import { createStructureLinkDialog } from "./ui/structureLinkDialog.js";
 import { buildFormworkStarts } from "./services/formworkStarts.js";
 import { createGlobalPlanningTable } from "./ui/globalPlanningTable.js";
 import { createGlobalPlanningController } from "./ui/globalPlanningController.js";
+import { buildPlanningExportModel } from "./services/planningExport.js";
+import { createPlanningExportAction } from "./ui/planningExportAction.js";
 
 let toolbarBound = false;
 // Tableau de tâches de la vue Synthese : créé à la première activation du service.
@@ -148,6 +150,7 @@ let planningEditingEnabled = false;
 let planningEditToggleBound = false;
 let durationDefaultsBound = false;
 let durationDefaultsBusy = false;
+let planningExportBound = false;
 // Périmètre figé à l'ouverture de la fenêtre : lignes affichées + lignes brutes.
 let durationDefaultsScope = null;
 const planningWarningListeners = new Set();
@@ -2151,6 +2154,44 @@ function bindDurationDefaultsDialog() {
   });
 }
 
+// Bouton « Exporter » : tout le planning du projet choisi en fichier Excel, dans l'ordre et avec
+// les valeurs de la frise. Toutes les zones, quel que soit le filtre du bandeau ; les lignes sont
+// relues au moment du clic pour que le fichier montre Grist tel qu'il est.
+async function collectPlanningExportModel() {
+  const selectedProject = state.selectedProject || "";
+  if (!selectedProject) throw new Error("choisissez d'abord un projet.");
+  const planningRows = await fetchPlanningRows();
+  const timelineData = buildTimelineDataFromPlanningRows(
+    planningRows,
+    selectedProject,
+    "",
+    realisationTargets.get(),
+    // Les données d'entrées ne servent qu'aux barres et aux bulles, pas aux colonnes.
+    null,
+    getSharedZonesForSelectedProject()
+  );
+  const currentProject = window.GristServiceContext?.getCurrentProject?.() || null;
+  return buildPlanningExportModel({
+    groups: timelineData.groups,
+    projectName: selectedProject,
+    projectNumber: currentProject?.number || "",
+    serviceName: currentServiceName(),
+    exportedAt: new Date(),
+  });
+}
+
+function bindPlanningExport() {
+  if (planningExportBound || EMBEDDED_PLANNING_SYNC_MODE) return;
+  const button = document.getElementById("planningExportBtn");
+  if (!button) return;
+  planningExportBound = true;
+  createPlanningExportAction({
+    button,
+    collectModel: collectPlanningExportModel,
+    setStatus: setPlanningStatus,
+  });
+}
+
 // Le planning est alimenté par quatre tables, toutes éditées depuis d'autres
 // widgets : le planning lui-même, la liste des projets, les références et la
 // liste des plans. Une modification doit s'afficher ici sans rechargement.
@@ -2518,6 +2559,7 @@ async function bootstrap() {
     bindAddZoneModal();
     bindManageZoneModal();
     bindDurationDefaultsDialog();
+    bindPlanningExport();
     setPlanningDurationEditHandler(handleDurationCellEdit);
     setPlanningRetardJustificationHandler(handleRetardJustificationEdit);
     setPlanningClosureHandler(handlePlanningClosureAction);

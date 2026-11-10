@@ -40,10 +40,10 @@
 
   <!-- Styles app -->
   <link rel="stylesheet" href="./assets/css/variables.css" />
-  <link rel="stylesheet" href="./assets/css/styles.css?v=20261020-cycles1" />
+  <link rel="stylesheet" href="./assets/css/styles.css?v=20261110-export1" />
 
   <!-- App -->
-  <script type="module" src="./assets/js/main.js?v=20261020-cycles1" defer></script>
+  <script type="module" src="./assets/js/main.js?v=20261110-export1" defer></script>
 </head>
 <body>
   <!-- Toolbar style timeline-calendar -->
@@ -94,6 +94,13 @@
         class="planning-duration-defaults-toggle"
         title="Renseigner les durées par défaut, par type de document"
       >Dur&eacute;es</button>
+      <button
+        id="planningExportBtn"
+        type="button"
+        class="planning-export-toggle"
+        title="Télécharger tout le planning du projet (toutes les zones) au format Excel"
+        data-service-context-navigation
+      >Exporter</button>
     </div>
 
     <!-- Zoom : uniquement semaine / mois / année -->
