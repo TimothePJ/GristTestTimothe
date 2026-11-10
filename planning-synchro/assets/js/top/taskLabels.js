@@ -1,11 +1,12 @@
 // Libelles et couleurs partages des taches du graphique (top/planningChart.js) et
 // des fenetres du lissage (liste du mois, fenetre « Lissage »).
 //
-// Module PUR, sans DOM : il ne porte que des constantes et deux formateurs de
+// Module PUR, sans DOM : il ne porte que des constantes et trois formateurs de
 // texte francais. Il est la SOURCE UNIQUE des constantes TYPE_META / TYPE_ORDER /
-// TOTAL_META et de formatMonthLabel : le graphique (top/planningChart.js), le
-// lissage (taskSmoothing.js, smoothingSettings.js, smoothingController.js) et
-// les deux fenetres les importent d'ici, aucun n'en garde de copie.
+// TOTAL_META, de formatMonthLabel et de formatWeekLabel : le graphique
+// (top/planningChart.js), le lissage (taskSmoothing.js, smoothingSettings.js,
+// smoothingController.js) et les deux fenetres les importent d'ici, aucun n'en
+// garde de copie.
 
 // Ordre d'affichage des six types de tache, tel que le graphique les trace.
 export const TYPE_ORDER = ["COFFRAGE", "ARMATURES", "NDC", "COUPES", "DEMOLITION", "AUTRES"];
@@ -63,4 +64,12 @@ export function formatMonthLabel(monthKey) {
 export function formatDateFr(iso) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso ?? "").trim());
   return match ? `${match[3]}/${match[2]}/${match[1]}` : "";
+}
+
+// "2027-04-05" (lundi du seau) -> "semaine du 05/04/2027". Date invalide -> "".
+// Titre d'un seau hebdomadaire de la fenetre « Taches du mois », qu'il vienne
+// d'un clic sur le graphique ou des fleches de la fenetre.
+export function formatWeekLabel(startIso) {
+  const date = formatDateFr(startIso);
+  return date ? `semaine du ${date}` : "";
 }

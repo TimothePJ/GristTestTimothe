@@ -1,7 +1,9 @@
 // Fenetre « Taches du mois » de planning-synchro (#ps-month-tasks-modal, §6.4 de
 // la spec du lissage). Un clic sur le graphique des taches (top/planningChart.js,
 // onBucketClick) l'ouvre sur la liste des taches du seau (mois ou semaine) situe
-// sous le pointeur, filtree par les types coches.
+// sous le pointeur, filtree par les types coches. Les fleches < > de l'en-tete
+// (et les touches ← →) passent au seau voisin sans fermer la fenetre
+// (shiftBucket) ; le controleur du lissage recalcule alors la liste.
 //
 // Lecture seule : aucune ecriture Grist, aucun bouton d'action.
 //
@@ -10,7 +12,14 @@
 // puis un controleur DOM (createMonthTasksModal) qui n'en rend que le resultat.
 // Tout texte venant d'une tache est echappe avant d'entrer dans le HTML.
 
-import { OVERFLOW_REASON_LABELS, TYPE_META, TYPE_ORDER, formatDateFr, formatMonthLabel } from "./taskLabels.js";
+import {
+  OVERFLOW_REASON_LABELS,
+  TYPE_META,
+  TYPE_ORDER,
+  formatDateFr,
+  formatMonthLabel,
+  formatWeekLabel,
+} from "./taskLabels.js";
 import { monthMaxima } from "./taskSmoothing.js";
 
 // --- modele pur (aucun DOM) -----------------------------------------------------
@@ -35,6 +44,80 @@ function isMonthlyBucket(bucket) {
   const month = Number(start[2]);
   const next = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
   return bucket.endIso === next;
+}
+
+// Granularite d'un seau : celle que le graphique a posee (bucket.granularity),
+// sinon deduite des bornes.
+function granularityOf(bucket) {
+  if (bucket?.granularity === "month" || bucket?.granularity === "week") return bucket.granularity;
+  return isMonthlyBucket(bucket || {}) ? "month" : "week";
+}
+
+// Libelles des fleches de l'en-tete, selon la granularite du seau.
+const NAV_TITLES = {
+  month: { previous: "Mois précédent", next: "Mois suivant" },
+  week: { previous: "Semaine précédente", next: "Semaine suivante" },
+};
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+// "AAAA-MM-JJ" -> minuit UTC de ce jour, ou null. Les calculs de jours se font
+// en UTC : un decalage d'une semaine ne traverse jamais un changement d'heure.
+function utcOfIso(iso) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso ?? ""));
+  return match ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null;
+}
+
+function isoOfUtc(ms) {
+  const date = new Date(ms);
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
+}
+
+// Indice de mois absolu (annee * 12 + mois 0-11) -> "AAAA-MM-01".
+function monthStartIso(monthIndex) {
+  const year = Math.floor(monthIndex / 12);
+  const month = monthIndex - year * 12;
+  return `${year}-${pad2(month + 1)}-01`;
+}
+
+// Seau voisin d'un seau de la fenetre : step = -1 (precedent) ou +1 (suivant),
+// tout entier accepte. Seau mensuel -> le mois decale, du 1er au 1er du mois
+// suivant ; seau hebdomadaire -> la semaine decalee de 7 jours par pas. Le
+// libelle suit (formatMonthLabel / formatWeekLabel, ceux du clic sur le
+// graphique) ; granularite et types coches sont gardes. Aucune borne : un mois
+// sans tache affiche simplement la liste vide. Seau illisible ou pas nul ->
+// le seau tel quel.
+export function shiftBucket(bucket, step) {
+  const start = utcOfIso(bucket?.startIso);
+  const offset = Math.trunc(Number(step));
+  if (start == null || !Number.isFinite(offset) || offset === 0) return bucket;
+  const granularity = granularityOf(bucket);
+  const visibleTypeKeys = Array.isArray(bucket.visibleTypeKeys) ? bucket.visibleTypeKeys.slice() : [];
+  if (granularity === "week") {
+    const startMs = start + offset * 7 * DAY_MS;
+    const startIso = isoOfUtc(startMs);
+    return {
+      startIso,
+      endIso: isoOfUtc(startMs + 7 * DAY_MS),
+      label: formatWeekLabel(startIso),
+      granularity,
+      visibleTypeKeys,
+    };
+  }
+  const startDate = new Date(start);
+  const monthIndex = startDate.getUTCFullYear() * 12 + startDate.getUTCMonth() + offset;
+  const startIso = monthStartIso(monthIndex);
+  return {
+    startIso,
+    endIso: monthStartIso(monthIndex + 1),
+    label: formatMonthLabel(startIso.slice(0, 7)),
+    granularity,
+    visibleTypeKeys,
+  };
 }
 
 function compareById(a, b) {
@@ -174,9 +257,12 @@ export function buildBucketTaskList({ result, mode, bucket, visibleTypeKeys, set
           }))
       : [];
 
+  const navTitles = NAV_TITLES[granularityOf(bucket)];
   return {
     title: `Tâches à réaliser — ${bucket.label} · ${modeLabel}`,
     modeLabel,
+    previousTitle: navTitles.previous,
+    nextTitle: navTitles.next,
     banner: totalOverflow ? overflowText(totalOverflow, "Dépassement du total") : null,
     flat: sections.length <= 1,
     sections,
@@ -259,13 +345,19 @@ function renderBody(model) {
 
 // rootEl = #ps-month-tasks-modal. Elements internes (par id) :
 //   #ps-month-tasks-title, #ps-month-tasks-banner, #ps-month-tasks-body,
-//   #ps-month-tasks-close.
+//   #ps-month-tasks-close, #ps-month-tasks-prev, #ps-month-tasks-next.
+//
+// options.onNavigate(step) : appele par les fleches < > (step -1 / +1) et par
+// les touches ← → quand la fenetre est ouverte ; l'appelant recalcule le seau
+// voisin (shiftBucket) et repasse le modele par update(). Sans onNavigate, les
+// fleches sont masquees. Les touches sont ignorees avec Alt / Ctrl / Maj / Cmd
+// (Alt+← est le retour du navigateur) et dans un champ de saisie.
 //
 // Balisage absent (un index.html reste en cache sans ce bloc) : fenetre inerte,
 // sans exception — le controleur du lissage la cree au demarrage du widget, et
 // une exception ici laisserait tout le widget blanc. Meme garde que
 // bottom/chargeAssignModal.js.
-export function createMonthTasksModal(rootEl) {
+export function createMonthTasksModal(rootEl, { onNavigate = null } = {}) {
   if (typeof HTMLElement === "undefined" || !(rootEl instanceof HTMLElement)) {
     return { open() {}, update() {}, close() {}, isOpen: () => false, destroy() {} };
   }
@@ -274,7 +366,20 @@ export function createMonthTasksModal(rootEl) {
   const bannerEl = rootEl.querySelector("#ps-month-tasks-banner");
   const bodyEl = rootEl.querySelector("#ps-month-tasks-body");
   const closeBtn = rootEl.querySelector("#ps-month-tasks-close");
+  const prevBtn = rootEl.querySelector("#ps-month-tasks-prev");
+  const nextBtn = rootEl.querySelector("#ps-month-tasks-next");
+  const canNavigate = typeof onNavigate === "function";
   let opened = false;
+
+  [prevBtn, nextBtn].forEach((button) => {
+    if (button) button.hidden = !canNavigate;
+  });
+
+  function setNavTitle(button, text) {
+    if (!button || !text) return;
+    button.title = text;
+    button.setAttribute("aria-label", text);
+  }
 
   function render(model) {
     if (titleEl) titleEl.textContent = model.title;
@@ -283,6 +388,8 @@ export function createMonthTasksModal(rootEl) {
       bannerEl.hidden = !model.banner;
     }
     if (bodyEl) bodyEl.innerHTML = renderBody(model);
+    setNavTitle(prevBtn, model.previousTitle);
+    setNavTitle(nextBtn, model.nextTitle);
   }
 
   function open(model) {
@@ -306,8 +413,33 @@ export function createMonthTasksModal(rootEl) {
     return opened;
   }
 
+  // Seau voisin : la liste repart du haut (une mise a jour des donnees, elle,
+  // garde le defilement).
+  function navigate(step) {
+    if (!opened || !canNavigate) return;
+    onNavigate(step);
+    if (bodyEl) bodyEl.scrollTop = 0;
+  }
+
+  const handlePrevClick = () => navigate(-1);
+  const handleNextClick = () => navigate(1);
+
+  function isEditableTarget(target) {
+    const tag = String(target?.tagName || "").toUpperCase();
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || Boolean(target?.isContentEditable);
+  }
+
   function handleKeyDown(event) {
-    if (event.key === "Escape" && opened) close();
+    if (!opened) return;
+    if (event.key === "Escape") {
+      close();
+      return;
+    }
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    if (!canNavigate || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (isEditableTarget(event.target)) return;
+    if (typeof event.preventDefault === "function") event.preventDefault();
+    navigate(event.key === "ArrowLeft" ? -1 : 1);
   }
 
   function handleBackdropClick(event) {
@@ -315,12 +447,16 @@ export function createMonthTasksModal(rootEl) {
   }
 
   closeBtn?.addEventListener("click", close);
+  prevBtn?.addEventListener("click", handlePrevClick);
+  nextBtn?.addEventListener("click", handleNextClick);
   rootEl.addEventListener("click", handleBackdropClick);
   document.addEventListener("keydown", handleKeyDown);
 
   function destroy() {
     close();
     closeBtn?.removeEventListener("click", close);
+    prevBtn?.removeEventListener("click", handlePrevClick);
+    nextBtn?.removeEventListener("click", handleNextClick);
     rootEl.removeEventListener("click", handleBackdropClick);
     document.removeEventListener("keydown", handleKeyDown);
   }

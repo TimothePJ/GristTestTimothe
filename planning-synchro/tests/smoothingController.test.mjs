@@ -145,7 +145,8 @@ function makeSpies() {
     };
     return spies.smoothing;
   };
-  spies.createMonthTasksModal = () => {
+  spies.createMonthTasksModal = (_el, options = {}) => {
+    spies.monthOptions = options;
     let opened = false;
     spies.month = {
       open: (model) => {
@@ -1065,4 +1066,30 @@ test("getChargeShift : decalages de la charge en « Lissé » et « Les deux »,
     assert.deepEqual([...controller.getChargeShift().entries()], [["2", -31]]);
     els.displayGroup.click(bothBtn);
     assert.deepEqual([...controller.getChargeShift().entries()], [["2", -31]]);
+  }));
+
+test("Tâches du mois : les fleches passent au mois voisin, memes types coches", () =>
+  withLocalStorage(() => {
+    persistSmoothingView("smoothed");
+    const { controller, spies, calls } = build();
+    controller.setProjectData(data({ id: 7, Lissage: CELL_MAX2 }));
+    // fenetre fermee : la fleche ne fait rien
+    spies.monthOptions.onNavigate(1);
+    assert.ok(!calls.month.some((c) => c[0] === "update"));
+
+    controller.openMonthTasks({ startIso: "2026-11-01", endIso: "2026-12-01", label: "novembre 2026", granularity: "month", visibleTypeKeys: ["COFFRAGE"] });
+    calls.month.length = 0;
+    spies.monthOptions.onNavigate(1);
+    let model = calls.month.at(-1)[1];
+    assert.equal(calls.month.at(-1)[0], "update");
+    assert.match(model.title, /décembre 2026/);
+    assert.match(model.title, /lissé/);
+    assert.ok(model.sections.every((section) => section.type === "COFFRAGE"));
+
+    spies.monthOptions.onNavigate(-1);
+    spies.monthOptions.onNavigate(-1);
+    model = calls.month.at(-1)[1];
+    assert.match(model.title, /octobre 2026/);
+    // la fenetre n'a jamais ete fermee ni rouverte
+    assert.ok(!calls.month.some((c) => c[0] === "close" || c[0] === "open"));
   }));

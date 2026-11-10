@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { buildBucketTaskList, createMonthTasksModal, de } from "../assets/js/top/monthTasksModal.js";
+import { buildBucketTaskList, createMonthTasksModal, de, shiftBucket } from "../assets/js/top/monthTasksModal.js";
 import { OVERFLOW_REASON_LABELS } from "../assets/js/top/taskLabels.js";
 
 // --- DOM minimal ---------------------------------------------------------------
@@ -19,6 +19,13 @@ class FakeElement {
     this.style = {};
     this.children = [];
     this.listeners = new Map();
+    this.attributes = {};
+  }
+  setAttribute(name, value) {
+    this.attributes[name] = String(value);
+  }
+  getAttribute(name) {
+    return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null;
   }
   querySelector(selector) {
     const id = selector.replace("#", "");
@@ -66,6 +73,8 @@ function buildRoot() {
     new FakeElement("ps-month-tasks-banner"),
     new FakeElement("ps-month-tasks-body"),
     new FakeElement("ps-month-tasks-close"),
+    new FakeElement("ps-month-tasks-prev"),
+    new FakeElement("ps-month-tasks-next"),
   ];
   return root;
 }
@@ -421,4 +430,142 @@ test("countLabel : le maximum propre au mois du seau remplace celui de tous les 
   const model = build({ result, mode: "smoothed", settings });
   assert.equal(model.sections.find((s) => s.type === "ARMATURES").countLabel, "2 / 2");
   assert.equal(model.sections.find((s) => s.type === "COFFRAGE").countLabel, "1 / 1");
+});
+
+// --- navigation entre seaux (fleches < > de l'en-tete) ---------------------------------
+
+test("shiftBucket : mois precedent / suivant, passage d'annee, types coches gardes", () => {
+  const april = { ...APRIL, granularity: "month", visibleTypeKeys: ["COFFRAGE"] };
+  assert.deepEqual(shiftBucket(april, -1), {
+    startIso: "2027-03-01", endIso: "2027-04-01", label: "mars 2027", granularity: "month", visibleTypeKeys: ["COFFRAGE"],
+  });
+  assert.deepEqual(shiftBucket(april, 1), {
+    startIso: "2027-05-01", endIso: "2027-06-01", label: "mai 2027", granularity: "month", visibleTypeKeys: ["COFFRAGE"],
+  });
+  // les types sont copies, pas partages avec le seau d'origine
+  assert.notEqual(shiftBucket(april, 1).visibleTypeKeys, april.visibleTypeKeys);
+
+  const december = { startIso: "2026-12-01", endIso: "2027-01-01", label: "décembre 2026", granularity: "month", visibleTypeKeys: [] };
+  const january = shiftBucket(december, 1);
+  assert.equal(january.startIso, "2027-01-01");
+  assert.equal(january.endIso, "2027-02-01");
+  assert.equal(january.label, "janvier 2027");
+  assert.deepEqual(shiftBucket(january, -1), december);
+  // fevrier : 28 jours, borne de fin au 1er mars
+  assert.equal(shiftBucket(january, 1).endIso, "2027-03-01");
+  // plusieurs pas d'un coup
+  assert.equal(shiftBucket(december, -12).label, "décembre 2025");
+});
+
+test("shiftBucket : semaine precedente / suivante, changement d'heure et d'annee", () => {
+  // Lundi 22/03/2027 ; le passage a l'heure d'ete tombe le dimanche 28/03/2027.
+  const week = { startIso: "2027-03-22", endIso: "2027-03-29", label: "semaine du 22/03/2027", granularity: "week", visibleTypeKeys: [] };
+  assert.deepEqual(shiftBucket(week, 1), {
+    startIso: "2027-03-29", endIso: "2027-04-05", label: "semaine du 29/03/2027", granularity: "week", visibleTypeKeys: [],
+  });
+  assert.equal(shiftBucket(week, -1).startIso, "2027-03-15");
+  const lastOf2026 = { startIso: "2026-12-28", endIso: "2027-01-04", label: "semaine du 28/12/2026", granularity: "week", visibleTypeKeys: [] };
+  assert.equal(shiftBucket(lastOf2026, 1).startIso, "2027-01-04");
+  assert.equal(shiftBucket(lastOf2026, 1).label, "semaine du 04/01/2027");
+  assert.deepEqual(shiftBucket(shiftBucket(lastOf2026, 1), -1), lastOf2026);
+});
+
+test("shiftBucket : granularite deduite des bornes, seau illisible ou pas nul inchange", () => {
+  // sans granularite : du 1er au 1er du mois suivant = un mois
+  assert.equal(shiftBucket(APRIL, 1).label, "mai 2027");
+  assert.equal(shiftBucket(APRIL, 1).granularity, "month");
+  const bareWeek = { startIso: "2027-04-05", endIso: "2027-04-12", label: "semaine du 05/04/2027" };
+  assert.equal(shiftBucket(bareWeek, 1).label, "semaine du 12/04/2027");
+  assert.equal(shiftBucket(APRIL, 0), APRIL);
+  assert.equal(shiftBucket(APRIL, "x"), APRIL);
+  const broken = { startIso: "", endIso: "", label: "?" };
+  assert.equal(shiftBucket(broken, 1), broken);
+});
+
+test("modele : libelles des fleches selon la granularite", () => {
+  const monthly = build();
+  assert.equal(monthly.previousTitle, "Mois précédent");
+  assert.equal(monthly.nextTitle, "Mois suivant");
+  const weekly = build({ bucket: { startIso: "2027-04-05", endIso: "2027-04-12", label: "semaine du 05/04/2027", granularity: "week" } });
+  assert.equal(weekly.previousTitle, "Semaine précédente");
+  assert.equal(weekly.nextTitle, "Semaine suivante");
+});
+
+test("fleches : clic < / > et touches ← → appellent onNavigate, la liste repart du haut", () => {
+  const root = buildRoot();
+  const steps = [];
+  const modal = createMonthTasksModal(root, { onNavigate: (step) => steps.push(step) });
+  const prev = root.querySelector("#ps-month-tasks-prev");
+  const next = root.querySelector("#ps-month-tasks-next");
+  const body = root.querySelector("#ps-month-tasks-body");
+  assert.equal(prev.hidden, false);
+  assert.equal(next.hidden, false);
+
+  // fenetre fermee : rien
+  prev.dispatch("click");
+  document.fire("keydown", { key: "ArrowRight" });
+  assert.deepEqual(steps, []);
+
+  modal.open(build({ bucket: { startIso: "2027-04-05", endIso: "2027-04-12", label: "semaine du 05/04/2027", granularity: "week" } }));
+  assert.equal(prev.title, "Semaine précédente");
+  assert.equal(prev.getAttribute("aria-label"), "Semaine précédente");
+  assert.equal(next.title, "Semaine suivante");
+  modal.update(build());
+  assert.equal(prev.title, "Mois précédent");
+  assert.equal(next.getAttribute("aria-label"), "Mois suivant");
+
+  body.scrollTop = 120;
+  prev.dispatch("click");
+  assert.equal(body.scrollTop, 0);
+  next.dispatch("click");
+  let prevented = 0;
+  const key = (over) => document.fire("keydown", { key: "ArrowLeft", target: {}, preventDefault: () => (prevented += 1), ...over });
+  key({});
+  key({ key: "ArrowRight" });
+  assert.deepEqual(steps, [-1, 1, -1, 1]);
+  assert.equal(prevented, 2);
+
+  // modificateurs (Alt+← = retour du navigateur) et champs de saisie : ignores
+  key({ altKey: true });
+  key({ ctrlKey: true });
+  key({ shiftKey: true });
+  key({ metaKey: true });
+  key({ target: { tagName: "input" } });
+  key({ target: { tagName: "SELECT" } });
+  key({ target: { isContentEditable: true } });
+  key({ key: "ArrowUp" });
+  assert.deepEqual(steps, [-1, 1, -1, 1]);
+  assert.equal(modal.isOpen(), true);
+
+  modal.destroy();
+  assert.equal(prev.listeners.get("click").length, 0);
+  assert.equal(next.listeners.get("click").length, 0);
+  assert.equal(documentListeners.get("keydown").length, 0);
+});
+
+test("fleches : sans onNavigate, masquees et touches ← → sans effet", () => {
+  const root = buildRoot();
+  const modal = createMonthTasksModal(root);
+  assert.equal(root.querySelector("#ps-month-tasks-prev").hidden, true);
+  assert.equal(root.querySelector("#ps-month-tasks-next").hidden, true);
+  modal.open(build());
+  assert.doesNotThrow(() => {
+    root.querySelector("#ps-month-tasks-next").dispatch("click");
+    document.fire("keydown", { key: "ArrowRight", target: {} });
+  });
+  assert.equal(modal.isOpen(), true);
+  modal.destroy();
+});
+
+test("balisage sans fleches (index.html en cache) : la fenetre marche sans elles", () => {
+  const root = buildRoot();
+  root.children = root.children.filter((child) => !/prev|next/.test(child.id));
+  const steps = [];
+  const modal = createMonthTasksModal(root, { onNavigate: (step) => steps.push(step) });
+  assert.doesNotThrow(() => modal.open(build()));
+  assert.equal(modal.isOpen(), true);
+  // les touches restent disponibles
+  document.fire("keydown", { key: "ArrowLeft", target: {} });
+  assert.deepEqual(steps, [-1]);
+  modal.destroy();
 });

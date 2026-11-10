@@ -24,7 +24,7 @@
 
 import { APP_CONFIG } from "../config.js";
 import { loadSmoothingView, persistSmoothingView } from "../state.js";
-import { createMonthTasksModal as defaultCreateMonthTasksModal, buildBucketTaskList } from "./monthTasksModal.js";
+import { createMonthTasksModal as defaultCreateMonthTasksModal, buildBucketTaskList, shiftBucket } from "./monthTasksModal.js";
 import { createSmoothingModal as defaultCreateSmoothingModal } from "./smoothingModal.js";
 import {
   buildPlanSearchEntries,
@@ -140,7 +140,7 @@ export function createSmoothingController({
     onDelete: () => saveSettings({ maxTotal: null, maxByType: {}, manualDates: {} }),
     pickerEl: planPickModalEl ?? null,
   });
-  const monthModal = createMonthTasksModal(monthTasksModalEl);
+  const monthModal = createMonthTasksModal(monthTasksModalEl, { onNavigate: navigateMonthTasks });
   const planSearchModal = createPlanSearchModal(planSearchModalEl);
 
   const isActive = () => Boolean(result && result.active);
@@ -468,6 +468,15 @@ export function createSmoothingController({
     lastBucket = bucketInfo;
     const model = monthModel();
     if (model) monthModal.open(model);
+  }
+
+  // Fleches < > (ou touches ← →) de la fenetre « Taches du mois » : seau voisin
+  // (mois ou semaine, selon le seau ouvert), memes types coches, meme mode ; la
+  // fenetre reste ouverte et la liste est recalculee.
+  function navigateMonthTasks(step) {
+    if (!lastBucket) return;
+    lastBucket = shiftBucket(lastBucket, step);
+    updateMonthModal();
   }
 
   // Lignes Projets2 relues (signal du catalogue) : redessine si la cellule a change.

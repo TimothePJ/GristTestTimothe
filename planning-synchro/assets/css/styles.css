@@ -70,7 +70,8 @@ body {
 }
 
 .ps-nav button,
-.ps-zoom button {
+.ps-zoom button,
+.ps-month-tasks-nav {
   padding: 8px 14px;
   font: inherit;
   font-weight: 600;
@@ -86,13 +87,15 @@ body {
 }
 
 .ps-nav button:hover,
-.ps-zoom button:hover {
+.ps-zoom button:hover,
+.ps-month-tasks-nav:hover {
   background: var(--color-accent);
   transform: translateY(-1px);
 }
 
 #ps-prev,
-#ps-next {
+#ps-next,
+.ps-month-tasks-nav {
   min-width: 34px;
   padding-inline: 0;
   font-size: 1rem;
@@ -2315,18 +2318,47 @@ body.ps-panning .charge-plan-board .charge-plan-track {
    Lecture seule. Meme charpente ps-modal / ps-modal-header / ps-modal-close-btn
    que la fenetre de charge ; corps defilant, sections a pastille de couleur du
    type, lignes compactes, mentions secondaires en gris, avertissement orange. */
+/* Taille FIXE, pas seulement maximale : la fenetre est centree, une hauteur
+   qui suivrait le nombre de taches la ferait monter ou descendre a chaque mois,
+   et les fleches < > avec elle, hors du curseur. La liste defile dedans. */
 .ps-modal-content--month-tasks {
   width: min(760px, calc(100vw - 32px));
-  max-height: min(720px, calc(100vh - 48px));
+  height: min(720px, calc(100vh - 48px));
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* Fleches < > du mois (ou de la semaine) precedent / suivant, groupees AVANT le
+   titre : la largeur du titre change d'un mois a l'autre (« mai » /
+   « septembre »), les fleches ne bougent donc pas sous la souris. Elles
+   reprennent les regles des boutons < > de la barre d'outils (.ps-nav button,
+   #ps-prev / #ps-next, plus haut). */
+.ps-month-tasks-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ps-month-tasks-nav-group {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+/* Ligne de titre a la hauteur des fleches (32 px) : sur une ligne, le titre
+   est centre sur elles ; sur deux, il s'allonge vers le bas sans les bouger. */
+.ps-month-tasks-heading h2 {
+  margin: 0;
+  line-height: 32px;
 }
 
 .ps-month-tasks-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -2442,7 +2474,7 @@ body.ps-panning .charge-plan-board .charge-plan-track {
 @media (max-width: 640px) {
   .ps-modal-content--month-tasks {
     width: min(100%, 100vw - 16px);
-    max-height: calc(100vh - 32px);
+    height: calc(100vh - 32px);
     padding: 18px;
   }
 

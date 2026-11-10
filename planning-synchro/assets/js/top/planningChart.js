@@ -31,7 +31,7 @@
 import { APP_CONFIG } from "../config.js";
 import { buildDisplayedMonths } from "../utils/format.js";
 import { parseCalendarDate } from "../utils/dates.js";
-import { TOTAL_META, TYPE_META, TYPE_ORDER, formatMonthLabel } from "./taskLabels.js";
+import { TOTAL_META, TYPE_META, TYPE_ORDER, formatMonthLabel, formatWeekLabel } from "./taskLabels.js";
 
 function monthKeyOf(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
@@ -541,11 +541,8 @@ export function createPlanningChart(
 
   // Libellé et bornes (AAAA-MM-JJ, fin exclue) d'un seau.
   function describeBucket(point) {
-    const start = new Date(point.startTs);
     const label =
-      granularity === "week"
-        ? `semaine du ${pad2(start.getDate())}/${pad2(start.getMonth() + 1)}/${start.getFullYear()}`
-        : formatMonthLabel(point.monthKey);
+      granularity === "week" ? formatWeekLabel(isoOfTs(point.startTs)) : formatMonthLabel(point.monthKey);
     return {
       startIso: isoOfTs(point.startTs),
       endIso: isoOfTs(point.endTs),

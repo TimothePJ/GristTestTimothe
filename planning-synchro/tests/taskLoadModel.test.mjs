@@ -22,6 +22,7 @@ import {
   TOTAL_META,
   formatMonthLabel,
   formatDateFr,
+  formatWeekLabel,
 } from "../assets/js/top/taskLabels.js";
 
 const PROJECT = "P1";
@@ -337,4 +338,10 @@ test("formatDateFr : AAAA-MM-JJ → JJ/MM/AAAA", () => {
   assert.equal(formatDateFr("2027-03-05"), "05/03/2027");
   assert.equal(formatDateFr(""), "");
   assert.equal(formatDateFr("pas une date"), "");
+});
+
+test("formatWeekLabel : lundi AAAA-MM-JJ → « semaine du JJ/MM/AAAA »", () => {
+  assert.equal(formatWeekLabel("2027-04-05"), "semaine du 05/04/2027");
+  assert.equal(formatWeekLabel(""), "");
+  assert.equal(formatWeekLabel("pas une date"), "");
 });

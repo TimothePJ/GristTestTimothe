@@ -733,6 +733,20 @@ pointeur et arrête la propagation : le canevas lui-même ne reçoit rien.
   d'arrivée).
 - Seau vide : « Aucune tâche à réaliser sur cette période. » ; la fenêtre est
   en lecture seule.
+- **Flèches `<` `>`** (avant le titre, mêmes boutons que ceux de la barre
+  d'outils) et **touches ← →** : mois précédent / suivant (semaine précédente /
+  suivante si le graphique est regroupé par semaine) **sans fermer la
+  fenêtre**. Mêmes types cochés, même mode (non lissé / lissé / les deux) ; la
+  liste repart du haut. La navigation n'est pas bornée à la fenêtre visible du
+  graphique : un mois sans tâche affiche la liste vide. Les touches sont
+  ignorées avec Alt / Ctrl / Maj (Alt+← reste le retour du navigateur). Calcul
+  du seau voisin : `shiftBucket` (`top/monthTasksModal.js`, en UTC pour qu'une
+  semaine ne glisse pas au changement d'heure) ; libellé de semaine partagé
+  avec le clic sur le graphique (`formatWeekLabel`, `top/taskLabels.js`).
+- La fenêtre a une **taille fixe** (760 × 720 px au plus, sinon la hauteur de
+  l'écran) : centrée, elle ne monte ni ne descend d'un mois à l'autre, et les
+  flèches restent sous le curseur ; la liste défile à l'intérieur. Les flèches
+  sont calées en haut : un titre qui passe sur deux lignes ne les déplace pas.
 
 #### Rechargement, autres utilisateurs
 

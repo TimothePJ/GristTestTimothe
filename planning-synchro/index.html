@@ -182,7 +182,13 @@
   <div id="ps-month-tasks-modal" class="ps-modal" style="display: none;">
     <div class="ps-modal-content ps-modal-content--month-tasks">
       <div class="ps-modal-header">
-        <h2 id="ps-month-tasks-title">Tâches à réaliser</h2>
+        <div class="ps-month-tasks-heading">
+          <div class="ps-month-tasks-nav-group" role="group" aria-label="Changer de période">
+            <button id="ps-month-tasks-prev" type="button" class="ps-month-tasks-nav" title="Mois précédent" aria-label="Mois précédent">&lt;</button>
+            <button id="ps-month-tasks-next" type="button" class="ps-month-tasks-nav" title="Mois suivant" aria-label="Mois suivant">&gt;</button>
+          </div>
+          <h2 id="ps-month-tasks-title">Tâches à réaliser</h2>
+        </div>
         <button id="ps-month-tasks-close" type="button" class="ps-modal-close-btn">Fermer</button>
       </div>
       <p id="ps-month-tasks-banner" class="ps-month-tasks-warning" hidden></p>
