@@ -15,33 +15,29 @@ import {
   createProjectWithBudget,
   fetchProjectsForDropdown,
   fetchProjectDataTables,
+  getActiveService,
   initGrist,
   removeProjectWorker,
   removeTimeSegment,
   saveBudgetChanges,
   updateTimeSegment,
   updateProjectAvancementConfig,
-  updateProjectBillingPercentages,
   updateWorkerDailyRate,
   resolveTimeOutTableId,
 } from "./services/gristService.js";
 import {
   buildExpenseData,
-  getBillingPercentageFromAmount,
   getProjectDateBounds,
   getProjectAverageAnchorDate,
   getEarliestProjectMonth,
   getProjectFirstAnchorDate,
   getProjectBudgetTotal,
-  normalizeBillingPercentageValue,
 } from "./services/projectService.js";
 import { assertDomRefs, getDomRefs } from "./ui/dom.js";
 import {
-  clearSpendingBillingEditor,
   clearSpendingChartControls,
   destroyChart,
   getSpendingChartBarsFromTop,
-  renderSpendingBillingEditor,
   renderSpendingChartControls,
   renderSpendingChart,
   setSpendingChartBarsFromTop,
@@ -106,6 +102,8 @@ import {
   getMonthBusinessDays,
   toGristMonthValue,
 } from "./utils/monthSegments.js";
+// Retard en jours ouvres : meme decompte que la colonne Retards de Planning Projet.
+import { countPlanningLateWorkingDays } from "./utils/planningRetard.js";
 // Noyau pur de la barre de charge mensuelle de la fenetre segment. Module
 // VENDORISE : copie identique octet pour octet dans planning-synchro,
 // verrouillee par shared/tests/vendored-charge-modules-parity.test.cjs.
@@ -327,34 +325,6 @@ function formatPlanningAlertDate(date) {
   return date.toLocaleDateString("fr-FR");
 }
 
-function getCalendarDelayDays(referenceDate, currentDate = new Date()) {
-  if (
-    !(referenceDate instanceof Date) ||
-    Number.isNaN(referenceDate.getTime()) ||
-    !(currentDate instanceof Date) ||
-    Number.isNaN(currentDate.getTime())
-  ) {
-    return 0;
-  }
-
-  const referenceDay = new Date(
-    referenceDate.getFullYear(),
-    referenceDate.getMonth(),
-    referenceDate.getDate()
-  );
-  const currentDay = new Date(
-    currentDate.getFullYear(),
-    currentDate.getMonth(),
-    currentDate.getDate()
-  );
-
-  if (currentDay <= referenceDay) {
-    return 0;
-  }
-
-  return Math.floor((currentDay.getTime() - referenceDay.getTime()) / DAY_IN_MS);
-}
-
 function getPlanningAlertEndDate(task = {}) {
   return task?.endAt instanceof Date && !Number.isNaN(task.endAt.getTime())
     ? task.endAt
@@ -372,7 +342,7 @@ function buildPlanningDelayAlerts(project = null) {
       }
 
       const endDate = getPlanningAlertEndDate(task);
-      const computedDelayDays = endDate ? getCalendarDelayDays(endDate) : 0;
+      const computedDelayDays = endDate ? countPlanningLateWorkingDays(endDate, new Date()) : 0;
       const retardsDays = Math.max(
         0,
         Math.round(toFiniteNumber(task?.retardsDays, 0))
@@ -567,7 +537,6 @@ function applyEmbeddedPlanningSyncMode() {
       "#expense-board",
       "#real-charge-board",
       "#real-expense-board",
-      "#spending-billing-editor",
       "#spending-chart-shell",
     ];
 
@@ -585,7 +554,7 @@ function applyEmbeddedPlanningSyncMode() {
       "expense-board",
       "real-charge-board",
       "real-expense-board",
-      "spending-billing-editor",
+      "spending-chart-shell",
     ].forEach((id) => {
       const boardEl = document.getElementById(id);
       const headerEl = boardEl?.previousElementSibling;
@@ -630,14 +599,12 @@ function applyEmbeddedPlanningSyncMode() {
       }
     });
 
-    [dom?.spendingBillingEditor, dom?.spendingChartShell].forEach((element) => {
-      if (element instanceof HTMLElement) {
-        element.hidden = false;
-        element.style.display = "";
-      }
-    });
+    if (dom?.spendingChartShell instanceof HTMLElement) {
+      dom.spendingChartShell.hidden = false;
+      dom.spendingChartShell.style.display = "";
+    }
 
-    const chartHeaderEl = dom?.spendingBillingEditor?.previousElementSibling;
+    const chartHeaderEl = dom?.spendingChartShell?.previousElementSibling;
     if (chartHeaderEl instanceof HTMLElement && chartHeaderEl.classList.contains("table-header")) {
       chartHeaderEl.hidden = false;
       chartHeaderEl.style.display = "";
@@ -662,7 +629,6 @@ function applyEmbeddedPlanningSyncMode() {
     "#expense-board",
     "#real-charge-board",
     "#real-expense-board",
-    "#spending-billing-editor",
     "#spending-chart-shell",
   ];
 
@@ -675,7 +641,7 @@ function applyEmbeddedPlanningSyncMode() {
     });
   });
 
-  ["expense-board", "real-charge-board", "real-expense-board", "spending-billing-editor"].forEach(
+  ["expense-board", "real-charge-board", "real-expense-board", "spending-chart-shell"].forEach(
     (id) => {
       const boardEl = document.getElementById(id);
       const headerEl = boardEl?.previousElementSibling;
@@ -2062,7 +2028,6 @@ const SCROLLABLE_PANE_SELECTORS = [
   ".expense-graph-legend",
   ".expense-plan-scroll",
   ".real-worked-table-shell",
-  ".billing-editor-scroll",
 ];
 
 function captureAppScroll() {
@@ -2122,7 +2087,12 @@ function renderApp() {
   ) {
     resetEditChargePlanForm();
   }
-  renderWorkerOptions(dom.workerNameSelect, state.teamMembers, selectedProject);
+  renderWorkerOptions(
+    dom.workerNameSelect,
+    state.teamMembers,
+    selectedProject,
+    getActiveService()
+  );
   dom.saveWorkerBtn.disabled = dom.workerNameSelect.disabled || !selectedProject;
   renderBudgetPreview(dom.budgetLinesContainer, state.newProjectBudgetLines);
 
@@ -2136,7 +2106,6 @@ function renderApp() {
     clearRealWorkedDaysTable(dom.realChargeBoard);
     clearPlanningManagement(dom.planManagementBoard);
     clearTables(dom);
-    clearSpendingBillingEditor(dom.spendingBillingEditor);
     clearSpendingChartControls(dom.spendingChartControls);
     state.spendingChart = destroyChart(state.spendingChart);
     return;
@@ -2154,7 +2123,6 @@ function renderApp() {
 function renderDeferredProjectViews(selectedProject = getSelectedProject()) {
   if (!selectedProject) {
     clearTables(dom);
-    clearSpendingBillingEditor(dom.spendingBillingEditor);
     clearSpendingChartControls(dom.spendingChartControls);
     clearKpi(dom);
     state.spendingChart = destroyChart(state.spendingChart);
@@ -2168,11 +2136,6 @@ function renderDeferredProjectViews(selectedProject = getSelectedProject()) {
     monthSpan: state.monthSpan,
   });
   restoreDailyRateDraft(dom.teamManagementRates, rateDraft);
-  renderSpendingBillingEditor(dom.spendingBillingEditor, selectedProject, {
-    selectedYear: state.selectedYear,
-    selectedMonth: state.selectedMonth,
-    monthSpan: state.monthSpan,
-  });
   renderSpendingChartControls(dom.spendingChartControls);
   renderKpi(dom, selectedProject);
   state.spendingChart = renderSpendingChart(
@@ -2618,6 +2581,9 @@ async function initProjectDropdown() {
     budgetRows: [], listePlanRows: [], planningProjectRows: [],
     projectTeamRows: [], timesheetRows: [], timeSegmentRows: [],
     timeRealRows: [], teamRows: [],
+    // Facturation T_Avancement vide tant que les donnees ne sont pas lues : la
+    // saisie manuelle Projets2 ne doit plus jamais apparaitre dans ce widget.
+    avancementRows: [], serviceRows: [],
   };
   const { projects } = buildExpenseData(emptyTables);
   setState({ projects });
@@ -2827,6 +2793,10 @@ function bindExpenseDataRefresh() {
       tables.timeSegment,
       tables.timeReal,
       tables.team,
+      // Facturation du graphique : T_Avancement s'enrichit a chaque import
+      // BaseDRTO, relu au retour sur le widget comme les autres tables.
+      tables.avancement,
+      tables.services,
     ],
     ({ tables: changedTables }) => {
       // Avant la première sélection il n'y a rien à redessiner.
@@ -5019,52 +4989,6 @@ async function handleTableInputChange(event) {
     worker.dailyRate = dailyRate;
     await updateWorkerDailyRate(worker.id, dailyRate);
     renderAppPreservingScroll();
-    return;
-  }
-
-  if (target.classList.contains("billing-percentage")) {
-    const monthKey = target.dataset.month || "";
-    if (!monthKey) return;
-
-    const billingPct = normalizeBillingPercentageValue(
-      parseOptionalNumberInput(target.value),
-      0
-    );
-    selectedProject.billingPercentageByMonth = {
-      ...(selectedProject.billingPercentageByMonth || {}),
-      [monthKey]: billingPct,
-    };
-
-    await updateProjectBillingPercentages(
-      selectedProject.id,
-      selectedProject.billingPercentageByMonth
-    );
-    renderAppPreservingScroll();
-    return;
-  }
-
-  if (target.classList.contains("billing-amount")) {
-    const monthKey = target.dataset.month || "";
-    if (!monthKey) return;
-
-    const totalBudget = getProjectBudgetTotal(selectedProject);
-    const billingAmount = Math.max(0, parseOptionalNumberInput(target.value) ?? 0);
-    const billingPct = normalizeBillingPercentageValue(
-      getBillingPercentageFromAmount(totalBudget, billingAmount),
-      0
-    );
-
-    selectedProject.billingPercentageByMonth = {
-      ...(selectedProject.billingPercentageByMonth || {}),
-      [monthKey]: billingPct,
-    };
-
-    await updateProjectBillingPercentages(
-      selectedProject.id,
-      selectedProject.billingPercentageByMonth
-    );
-    renderAppPreservingScroll();
-    return;
   }
 }
 
@@ -5092,64 +5016,6 @@ function handleExpenseGraphControlChange(event) {
     selectedMonth: state.selectedMonth,
     monthSpan: state.monthSpan,
   });
-}
-
-function formatBillingEditorInputValue(value, maximumFractionDigits = 2) {
-  const numericValue = Number(value);
-  if (!Number.isFinite(numericValue)) {
-    return "";
-  }
-
-  return numericValue
-    .toFixed(maximumFractionDigits)
-    .replace(/\.0+$/, "")
-    .replace(/(\.\d*?)0+$/, "$1");
-}
-
-function handleSpendingBillingEditorInput(event) {
-  const target = event.target;
-  if (!(target instanceof HTMLInputElement)) return;
-
-  const selectedProject = getSelectedProject();
-  if (!selectedProject) return;
-
-  const monthKey = String(target.dataset.month || "").trim();
-  if (!monthKey) return;
-
-  const totalBudget = getProjectBudgetTotal(selectedProject);
-
-  if (target.classList.contains("billing-percentage")) {
-    const billingPct = normalizeBillingPercentageValue(
-      parseOptionalNumberInput(target.value),
-      0
-    );
-    const amountInput = dom.spendingBillingEditor?.querySelector(
-      `.billing-amount[data-month="${monthKey}"]`
-    );
-    if (amountInput instanceof HTMLInputElement) {
-      amountInput.value = formatBillingEditorInputValue(
-        totalBudget > 0 ? (totalBudget * billingPct) / 100 : 0,
-        2
-      );
-    }
-    return;
-  }
-
-  if (target.classList.contains("billing-amount")) {
-    const billingAmount = Math.max(0, parseOptionalNumberInput(target.value) ?? 0);
-    const percentageInput = dom.spendingBillingEditor?.querySelector(
-      `.billing-percentage[data-month="${monthKey}"]`
-    );
-    if (percentageInput instanceof HTMLInputElement) {
-      percentageInput.value = formatBillingEditorInputValue(
-        normalizeBillingPercentageValue(
-          getBillingPercentageFromAmount(totalBudget, billingAmount),
-          0
-        ),
-        4
-      );
-    }
-  }
 }
 
 function handleSpendingChartControlChange(event) {
@@ -6073,8 +5939,6 @@ function bindEvents() {
   dom.expenseBoard.addEventListener("change", handleExpenseGraphControlChange);
   dom.expenseBoard.addEventListener("change", handleTableInputChange);
   dom.realExpenseBoard.addEventListener("change", handleExpenseGraphControlChange);
-  dom.spendingBillingEditor.addEventListener("input", handleSpendingBillingEditorInput);
-  dom.spendingBillingEditor.addEventListener("change", handleTableInputChange);
   dom.spendingChartControls.addEventListener("change", handleSpendingChartControlChange);
   dom.planManagementBoard.addEventListener("click", handlePlanningManagementControlClick);
   dom.planManagementBoard.addEventListener("change", handlePlanningManagementControlChange);

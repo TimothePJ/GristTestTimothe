@@ -202,3 +202,20 @@ test("une table Envois vide ne prouve pas que Type_Document manque", () => {
     false
   );
 });
+
+test("la date previsionnelle « Prev 0 » n'est jamais un plan a envoyer", () => {
+  const document = {
+    Nom_projet: "Projet Alpha",
+    NumeroDocument: "0115",
+    Type_document: "COFFRAGE",
+  };
+  const sendable = core.excludeForecastPlans([
+    { ...document, id: 1, Indice: "" },
+    { ...document, id: 2, Indice: "Prev 0" },
+    { ...document, id: 3, Indice: "0" },
+    { ...document, id: 4, Indice: "A" },
+    { ...document, id: 5, NumeroDocument: "0200", Indice: " prev 0 " },
+  ]);
+
+  assert.deepEqual(sendable.map((plan) => plan.id), [1, 3, 4]);
+});

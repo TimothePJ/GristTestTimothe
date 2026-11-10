@@ -58,7 +58,7 @@ export function parseDateTime(value) {
     const date = new Date(
       Number(year),
       Number(month) - 1,
-      Number(day),
+      Number(day), 
       Number(hour),
       Number(minute)
     );

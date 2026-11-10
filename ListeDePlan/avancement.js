@@ -22,8 +22,14 @@ function saveSharedProjectSelection(projectName = '') {
 // Register the datalabels plugin
 Chart.register(ChartDataLabels);
 
+// « Prev 0 » porte la date prévisionnelle de l'indice 0, saisie dans la liste de plans.
+// Ce n'est pas une diffusion : le tableau de bord l'ignore.
+function isPrevIndice(value) {
+  return String(value ?? '').trim().toUpperCase() === 'PREV 0';
+}
+
 window.GristServiceContext.watchContextTable('ListePlan_NDC_COF', (newRecords) => {
-  records = newRecords;
+  records = newRecords.filter((record) => !isPrevIndice(record.Indice));
   populateProjectDropdown();
   updateDashboard();
 }, {

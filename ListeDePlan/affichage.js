@@ -1,4 +1,9 @@
 const INDICES = ["0", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
+// Date prévisionnelle de l'indice 0 : une ligne ListePlan dont la colonne Indice vaut
+// « Prev 0 ». Ce n'est pas un indice diffusé, elle reste donc hors de INDICES : ni
+// alerte de date manquante, ni avancement côté Planning.
+const PREV_INDICE_VALUE = "Prev 0";
+const PREV_INDICE_LABEL = "0 Prev";
 const DOCUMENT_PLANNING_TABLE_CANDIDATES = ["Planning_Projet", "Planning_Project"];
 let projetsDictGlobal = null;
 let planningRealisationHelpersPromise = null;
@@ -245,6 +250,14 @@ function normalizeIndice(value) {
   return normalizeText(value).toUpperCase();
 }
 
+function isPrevIndice(value) {
+  return normalizeIndice(value) === normalizeIndice(PREV_INDICE_VALUE);
+}
+
+function getIndiceColumnLabel(indice) {
+  return isPrevIndice(indice) ? PREV_INDICE_LABEL : indice;
+}
+
 function normalizePlanningLookupText(value) {
   return normalizeText(value)
     .normalize("NFD")
@@ -433,12 +446,6 @@ function toNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-function toInteger(value) {
-  const number = toNumber(value);
-  if (number == null || !Number.isInteger(number)) return null;
-  return number;
-}
-
 function parsePlanningSyncDate(value) {
   if (value == null || value === "") return null;
 
@@ -518,162 +525,12 @@ function isFrenchDateText(value) {
   return /^\d{2}\/\d{2}\/\d{4}(?:\s+.*)?$/.test(normalizeText(value));
 }
 
-function addDaysToPlanningDate(date, days) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
-  const nextDate = new Date(date);
-  nextDate.setDate(nextDate.getDate() + days);
-  return nextDate;
-}
-
-function subtractWeeksFromPlanningDate(date, weeks) {
-  const normalizedWeeks = toInteger(weeks);
-  if (normalizedWeeks == null || normalizedWeeks < 0) return null;
-  return addDaysToPlanningDate(date, -(normalizedWeeks * 7));
-}
-
-function startOfPlanningDay(date) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
-  const nextDate = new Date(date);
-  nextDate.setHours(0, 0, 0, 0);
-  return nextDate;
-}
-
-function getPlanningDelayDays(segmentEndDate, referenceDate) {
-  const segmentEndDay = startOfPlanningDay(segmentEndDate);
-  const referenceDay = startOfPlanningDay(referenceDate);
-  if (!segmentEndDay || !referenceDay || referenceDay <= segmentEndDay) return 0;
-
-  const msPerDay = 24 * 60 * 60 * 1000;
-  return Math.max(0, Math.floor((referenceDay.getTime() - segmentEndDay.getTime()) / msPerDay));
-}
-
-function isCoffrageTypeDoc(value) {
-  return normalizeText(value).toUpperCase().includes("COFFRAGE");
-}
-
-function isArmaturesTypeDoc(value) {
-  return normalizeText(value).toUpperCase().includes("ARMATURES");
-}
-
-function isAllowedPlanningTypeDoc(value) {
-  return Boolean(normalizeText(value));
-}
-
-function hasPlanningLinkValue(value) {
-  const text = normalizeText(value);
-  if (!text) return false;
-
-  const numericValue = Number(text);
-  if (Number.isFinite(numericValue)) {
-    return numericValue !== 0;
-  }
-
-  return true;
-}
-
 function computePlanningRealiseValue(typeDoc, indice, targetIndice = "", dateCloture = null) {
   if (hasValidDate(dateCloture)) return 100;
   const effectiveTargetIndice =
     normalizeIndice(targetIndice) || getDefaultTargetIndiceForDocumentTypeLocal(typeDoc);
 
   return computeIndexedRealisationLocal(indice, effectiveTargetIndice);
-}
-
-function resolveCoffrageDiffCoffrageDate({
-  typeDoc,
-  lignePlanningRaw,
-  diffCoffrageRaw,
-  demarrageRaw,
-  duree3Raw,
-}) {
-  if (!isCoffrageTypeDoc(typeDoc)) {
-    return parsePlanningSyncDate(diffCoffrageRaw);
-  }
-
-  if (!hasPlanningLinkValue(lignePlanningRaw)) {
-    return parsePlanningSyncDate(diffCoffrageRaw);
-  }
-
-  const demarrageDate = parsePlanningSyncDate(demarrageRaw);
-  const computedDate = subtractWeeksFromPlanningDate(demarrageDate, duree3Raw);
-  return computedDate || parsePlanningSyncDate(diffCoffrageRaw);
-}
-
-function resolvePlanningSegmentEndDate({
-  typeDoc,
-  lignePlanningRaw,
-  diffCoffrageRaw,
-  diffArmatureRaw,
-  demarrageRaw,
-  duree3Raw,
-}) {
-  if (isCoffrageTypeDoc(typeDoc)) {
-    return resolveCoffrageDiffCoffrageDate({
-      typeDoc,
-      lignePlanningRaw,
-      diffCoffrageRaw,
-      demarrageRaw,
-      duree3Raw,
-    });
-  }
-
-  if (isArmaturesTypeDoc(typeDoc)) {
-    return parsePlanningSyncDate(diffArmatureRaw);
-  }
-
-  if (isAllowedPlanningTypeDoc(typeDoc)) {
-    return parsePlanningSyncDate(diffCoffrageRaw);
-  }
-
-  return null;
-}
-
-function computePlanningRetardValue({
-  typeDoc,
-  indice,
-  targetIndice,
-  realiseValue,
-  currentRetard,
-  lignePlanningRaw,
-  diffCoffrageRaw,
-  diffArmatureRaw,
-  demarrageRaw,
-  duree3Raw,
-  dateRealiseRaw,
-  dateClotureRaw,
-}, currentInstant = new Date()) {
-  if (!isAllowedPlanningTypeDoc(typeDoc)) {
-    return 0;
-  }
-
-  const effectiveRealiseValue =
-    hasValidDate(dateClotureRaw)
-      ? 100
-      : toNumber(realiseValue) ?? computePlanningRealiseValue(typeDoc, indice, targetIndice);
-  const segmentEndDate = resolvePlanningSegmentEndDate({
-    typeDoc,
-    lignePlanningRaw,
-    diffCoffrageRaw,
-    diffArmatureRaw,
-    demarrageRaw,
-    duree3Raw,
-  });
-
-  if (effectiveRealiseValue >= 100) {
-    const dateRealise = parsePlanningSyncDate(dateClotureRaw) || parsePlanningSyncDate(dateRealiseRaw);
-    if (dateRealise && segmentEndDate) {
-      return getPlanningDelayDays(segmentEndDate, dateRealise);
-    }
-
-    const frozenRetard = toNumber(currentRetard);
-    return frozenRetard != null && frozenRetard >= 0 ? frozenRetard : 0;
-  }
-
-  if (!segmentEndDate) {
-    return 0;
-  }
-
-  return getPlanningDelayDays(segmentEndDate, currentInstant);
 }
 
 function getPlanningDateSortValue(value) {
@@ -1050,9 +907,19 @@ async function buildPlanningProjetTextUpdateActions({
   }
 }
 
+// Tâche de la vue Synthese de Planning Projet (service Synthese, nom de tâche rempli, sans type de document) :
+// son Indice se saisit à la main ; la synchro des indices de ListeDePlan n'y touche pas.
+function isSynthesePlanningTask(row) {
+  const service = String(row?.Service ?? "").normalize("NFD").replace(/\p{M}/gu, "").trim().toLowerCase();
+  return service === "synthese" && !String(row?.Type_doc ?? "").trim() && Boolean(String(row?.Taches ?? row?.Tache ?? "").trim());
+}
+
 async function syncPlanningProjetIndicesFromListeDePlan() {
   try {
     const planningHelpers = await loadPlanningRealisationHelpers();
+    // Sans le module partagé (repli local), Date_Realise et Retards ne sont pas écrits :
+    // une seconde règle de calcul écraserait celle de Planning Projet.
+    const canComputeRetard = typeof planningHelpers.computePlanningRetardDays === "function";
     const projetsMap = await chargerProjetsMap();
     const projectIdToName = new Map(
       Object.entries(projetsMap || {}).map(([name, id]) => [String(id), name])
@@ -1108,6 +975,7 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
     for (const p of planningRows) {
       const planningId = p.id;
       if (planningId == null) continue;
+      if (isSynthesePlanningTask(p)) continue;
 
       const planningIdentity = {
         project: normalizeProject(p.NomProjet),
@@ -1144,8 +1012,10 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
         p.Date_Cloture
       );
       const currentDateRealise = toGristDateValue(p.Date_Realise) || normalizeText(p.Date_Realise);
-      const targetDateRealiseFromListe = progress.targetReached && progress.latestRecord
-        ? toGristDateValue(progress.latestRecord.dateDiffusion)
+      // Première diffusion atteignant l'indice cible : un indice supérieur diffusé plus tard
+      // ne déplace ni la date de réalisation ni, donc, le retard.
+      const targetDateRealiseFromListe = progress.targetReached && progress.realisationRecord
+        ? toGristDateValue(progress.realisationRecord.dateDiffusion)
         : null;
 
       const nextDateRealise = forcedClosureIso || targetDateRealiseFromListe || null;
@@ -1153,20 +1023,21 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
         (currentDateRealise || "") !== (nextDateRealise || "");
 
       const dateRealiseForRetard = targetRealise >= 100 ? nextDateRealise : "";
-      const targetRetard = computePlanningRetardValue({
-        typeDoc: p.Type_doc,
-        indice: latestIndice,
-        targetIndice: effectiveTargetIndice,
-        realiseValue: targetRealise,
-        currentRetard: p.Retards,
-        lignePlanningRaw: p.Ligne_planning,
-        diffCoffrageRaw: p.Diff_coffrage,
-        diffArmatureRaw: p.Diff_armature,
-        demarrageRaw: p.Demarrages_travaux,
-        duree3Raw: p.Duree_3,
-        dateRealiseRaw: dateRealiseForRetard,
-        dateClotureRaw: p.Date_Cloture,
-      });
+      // Même règle que Planning Projet (jours ouvrés) : le module partagé planningRetard.js.
+      const targetRetard = canComputeRetard
+        ? planningHelpers.computePlanningRetardDays({
+          typeDoc: p.Type_doc,
+          realise: targetRealise,
+          lignePlanning: p.Ligne_planning,
+          diffCoffrage: p.Diff_coffrage,
+          diffArmature: p.Diff_armature,
+          demarrage: p.Demarrages_travaux,
+          duree3: p.Duree_3,
+          dateRealise: dateRealiseForRetard,
+          dateCloture: p.Date_Cloture,
+          currentRetard: p.Retards,
+        })
+        : null;
       const currentRetard = toNumber(p.Retards);
 
       const updates = {};
@@ -1176,10 +1047,10 @@ async function syncPlanningProjetIndicesFromListeDePlan() {
       if (hasRealiseColumn && currentRealiseStored !== targetRealise) {
         updates.Realise = targetRealise;
       }
-      if (hasDateRealiseColumn && shouldUpdateDateRealise) {
+      if (canComputeRetard && hasDateRealiseColumn && shouldUpdateDateRealise) {
         updates.Date_Realise = nextDateRealise;
       }
-      if (hasRetardsColumn && currentRetard !== targetRetard) {
+      if (canComputeRetard && hasRetardsColumn && currentRetard !== targetRetard) {
         updates.Retards = targetRetard;
       }
 
@@ -1236,10 +1107,11 @@ function renderPlanTableSection(
         lignes: {}
       });
     }
-    if (!plansMap.get(key).lignes[r.Indice]) {
-      plansMap.get(key).lignes[r.Indice] = [];
+    const indiceKey = isPrevIndice(r.Indice) ? PREV_INDICE_VALUE : r.Indice;
+    if (!plansMap.get(key).lignes[indiceKey]) {
+      plansMap.get(key).lignes[indiceKey] = [];
     }
-    plansMap.get(key).lignes[r.Indice].push(r);
+    plansMap.get(key).lignes[indiceKey].push(r);
   }
 
   const warningDiv = document.createElement('div');
@@ -1324,7 +1196,7 @@ function renderPlanTableSection(
   const headerRow = document.createElement("tr");
   ["N° Document", "Désignation", ...indicesToShow].forEach(title => {
     const th = document.createElement("th");
-    th.textContent = title;
+    th.textContent = getIndiceColumnLabel(title);
     if (title === "Désignation") th.classList.add("nomplan");
     if (!["N° Document", "Désignation"].includes(title)) {
       th.classList.add("indice");
@@ -1447,7 +1319,9 @@ function getPlanTableIndicesToShow(
     ...[...allIndicesUsed].map((indice) => INDICES.indexOf(indice)).filter((index) => index >= 0)
   );
   const extraColumnCount = includeNextIndiceColumn ? 2 : 1;
-  return applyMaxColumns(INDICES.slice(0, lastUsedIndex + extraColumnCount));
+  const indices = applyMaxColumns(INDICES.slice(0, lastUsedIndex + extraColumnCount));
+  // L'impression ne liste que les indices diffusés : la prévision n'en est pas un.
+  return datedIndicesOnly ? indices : [PREV_INDICE_VALUE, ...indices];
 }
 
 function getOrderedZoneKeys(zoneKeys, zoneOrder = null) {
@@ -1993,8 +1867,10 @@ function getDateCellContext(td) {
 function getOtherDatedIndiceCells(td) {
   const tr = td?.parentElement;
   if (!tr) return [];
+  // Une prévision n'est pas une diffusion : seule, elle ne retient pas l'indice
+  // d'une ligne dont on efface la date.
   return Array.from(tr.querySelectorAll("td.indice")).filter((cell) =>
-    cell !== td && cell.textContent.trim() !== ""
+    cell !== td && cell.textContent.trim() !== "" && !isPrevIndice(cell.dataset.indice)
   );
 }
 
@@ -2127,6 +2003,96 @@ async function appliquerDateSurCellules(cells, isoDate, { syncPlanning = true } 
   return { updatedCount: visualUpdates.length };
 }
 
+// Lignes ListePlan affichées dans une case de date (plusieurs si dates multiples).
+function getDateCellRecordIds(td) {
+  const ids = [];
+  const recordId = parseInt(td?.dataset?.recordId, 10);
+  if (Number.isFinite(recordId)) ids.push(recordId);
+  if (td?.dataset?.conflicts) {
+    try {
+      for (const conflict of JSON.parse(td.dataset.conflicts) || []) {
+        const id = parseInt(conflict?.id, 10);
+        if (Number.isFinite(id)) ids.push(id);
+      }
+    } catch (err) {
+      console.error("Impossible de lire les conflits de dates :", err);
+    }
+  }
+  return [...new Set(ids)];
+}
+
+function countDeletableDateCells(cells) {
+  return (cells || []).filter((td) => getDateCellRecordIds(td).length > 0).length;
+}
+
+function getListePlanDocumentKey(record) {
+  return [
+    getRecordProjectName(record),
+    record?.NumeroDocument,
+    record?.Designation,
+    record?.Type_document,
+    getRecordZone(record),
+    record?.Service
+  ].map(normalizeDocumentIdentityText).join("___");
+}
+
+// Même suppression que « Supprimer » sur une seule date, pour toutes les cases.
+// Un document dont toutes les lignes partent garde la première, vidée,
+// pour rester dans la liste.
+function buildDateCellsDeletionActions(cells, records = []) {
+  const idsToDelete = new Set();
+  for (const td of cells || []) {
+    getDateCellRecordIds(td).forEach((id) => idsToDelete.add(id));
+  }
+  if (idsToDelete.size === 0) return [];
+
+  const recordsById = new Map((records || []).map((record) => [Number(record.id), record]));
+  const remainingRowsByDocument = new Map();
+  for (const record of records || []) {
+    if (idsToDelete.has(Number(record.id))) continue;
+    const key = getListePlanDocumentKey(record);
+    remainingRowsByDocument.set(key, (remainingRowsByDocument.get(key) || 0) + 1);
+  }
+
+  const keptDocuments = new Set();
+  const actions = [];
+  for (const id of idsToDelete) {
+    const record = recordsById.get(id);
+    const key = record ? getListePlanDocumentKey(record) : null;
+    if (key && !remainingRowsByDocument.get(key) && !keptDocuments.has(key)) {
+      keptDocuments.add(key);
+      actions.push(["UpdateRecord", "ListePlan_NDC_COF", id, { Indice: null, DateDiffusion: null }]);
+    } else {
+      actions.push(["RemoveRecord", "ListePlan_NDC_COF", id]);
+    }
+  }
+  return actions;
+}
+
+function markDateCellCleared(td) {
+  td.classList.remove("missing-date-error", "multi-date-error");
+  td.textContent = "";
+  delete td.dataset.recordId;
+  delete td.dataset.conflicts;
+}
+
+async function supprimerDatesSurCellules(cells, { syncPlanning = true } = {}) {
+  const uniqueCells = Array.from(new Set(cells || [])).filter((cell) =>
+    cell?.matches?.("td.indice.editable")
+  );
+  const actions = buildDateCellsDeletionActions(uniqueCells, window.records || []);
+  if (actions.length === 0) return { deletedCount: 0 };
+
+  const clearedCells = uniqueCells.filter((td) => getDateCellRecordIds(td).length > 0);
+  await grist.docApi.applyUserActions(actions);
+  clearedCells.forEach(markDateCellCleared);
+
+  if (syncPlanning) {
+    await syncPlanningProjetIndicesFromListeDePlan();
+  }
+  return { deletedCount: clearedCells.length };
+}
+
 const dateDragSelection = {
   active: false,
   pointerId: null,
@@ -2229,6 +2195,27 @@ function openDateCtrlSelectionPicker() {
   dateCtrlSelection.openWhenReady = false;
   suppressNextDateCellClick();
   ouvrirPickerRemplirCellules(selectedCells, anchorCell);
+}
+
+// Calendrier « Remplir N case(s) » ouvert : ses cases et sa fermeture.
+let activeBulkDatePicker = null;
+
+// Cases visées par un clic droit : la sélection Ctrl en cours, sinon celle du
+// calendrier « Remplir » ouvert (Ctrl relâché ou glisser). Vide si la case
+// cliquée n'en fait pas partie ou s'il n'y a qu'une case.
+function getDateBulkSelectionForCell(cell) {
+  const ctrlCells = getDateCtrlSelectedCells();
+  const pickerCells = activeBulkDatePicker?.popup?.isConnected
+    ? activeBulkDatePicker.cells.filter((pickerCell) => pickerCell?.isConnected)
+    : [];
+  const selection = ctrlCells.length ? ctrlCells : pickerCells;
+  return selection.length > 1 && selection.includes(cell) ? selection : [];
+}
+
+function closeDateBulkSelection() {
+  if (activeBulkDatePicker) activeBulkDatePicker.close();
+  clearDateCtrlSelection();
+  clearDateDragHighlights();
 }
 
 function resetDateDragState({ keepHighlights = false } = {}) {
@@ -2340,7 +2327,7 @@ function ouvrirPickerRemplirCellules(cells, anchorCell) {
   if (selectedIndices.length === 1) {
     title.append(" de la colonne ");
     const strong = document.createElement("strong");
-    strong.textContent = selectedIndices[0];
+    strong.textContent = getIndiceColumnLabel(selectedIndices[0]);
     title.appendChild(strong);
   } else {
     title.append(" selectionnees");
@@ -2369,6 +2356,7 @@ function ouvrirPickerRemplirCellules(cells, anchorCell) {
   clampFloatingDatePopup(popup);
 
   const closePopup = () => {
+    if (activeBulkDatePicker?.popup === popup) activeBulkDatePicker = null;
     fp.destroy();
     popup.remove();
     clearDateDragHighlights(selectedCells);
@@ -2395,6 +2383,7 @@ function ouvrirPickerRemplirCellules(cells, anchorCell) {
   });
 
   cancelBtn.onclick = closePopup;
+  activeBulkDatePicker = { popup, cells: selectedCells, close: closePopup };
   fp.open();
 }
 
@@ -2506,6 +2495,8 @@ document.addEventListener("keydown", (event) => {
 
 document.addEventListener("keyup", (event) => {
   if (event.key !== "Control" && event.key !== "Meta") return;
+  // Menu clic droit ouvert sur la sélection : le calendrier s'ouvrirait derrière.
+  if (document.getElementById("customContextMenu")) return;
   openDateCtrlSelectionPicker();
 });
 

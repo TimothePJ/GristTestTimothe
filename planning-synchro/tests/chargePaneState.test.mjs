@@ -101,9 +101,20 @@ test("visibilite : des personnes sans segment -> le board s'affiche, sans messag
 // Sans personne mais avec un planning, le board reste rendu : c'est lui qui porte
 // la ligne Charge, dont le bouton est le SEUL point d'entree de la fenetre
 // d'assignation des charges de reference.
-test("visibilite : sans personne mais avec un planning, le board reste rendu", () => {
+// CHARGE DESACTIVEE (2026-11-10) : test mis de cote avec le bloc Charge. A la
+// reactivation, remettre `test(` et supprimer le test « CHARGE DESACTIVEE » qui suit.
+test.skip("visibilite : sans personne mais avec un planning, le board reste rendu", () => {
   assert.deepEqual(resolveChargePaneVisibility({ workerCount: 0, planningRowCount: 12 }), {
     showBoard: true,
+    showEmptyMessage: true,
+  });
+});
+
+// CHARGE DESACTIVEE (2026-11-10) : sans ligne Charge, une grille sans personne
+// n'a plus rien a montrer. A supprimer a la reactivation.
+test("CHARGE DESACTIVEE : sans personne, la grille est masquee meme avec un planning", () => {
+  assert.deepEqual(resolveChargePaneVisibility({ workerCount: 0, planningRowCount: 12 }), {
+    showBoard: false,
     showEmptyMessage: true,
   });
 });

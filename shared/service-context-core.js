@@ -1316,6 +1316,46 @@
   }
 
 
+  // Une zone est un texte libre porté par les lignes documentaires d'un projet.
+  // Elle appartient au projet et non à un service : ces tables servent à
+  // retrouver toutes les zones du projet, quel que soit le service qui les a créées.
+  const ZONE_SOURCE_TABLES = Object.freeze([
+    "Planning_Projet",
+    "References2",
+    "ListePlan_NDC_COF",
+  ]);
+
+  function normalizeZoneKey(value) {
+    const text = toText(value);
+    if (!text || text.toLocaleLowerCase("fr") === "sans zone") return "";
+    return text
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLocaleLowerCase("fr")
+      .replace(/[^a-z0-9]+/g, "");
+  }
+
+  function compareZoneNames(left, right) {
+    return left.localeCompare(right, "fr", { sensitivity: "base", numeric: true });
+  }
+
+  // Deux graphies d'une même zone (« Zone A », « zone-a ») n'en font qu'une :
+  // la première rencontrée est gardée.
+  function mergeZoneNames(primary, extra) {
+    const byKey = new Map();
+    [primary, extra].forEach((names) => {
+      (Array.isArray(names) ? names : []).forEach((name) => {
+        const key = normalizeZoneKey(name);
+        if (key && !byKey.has(key)) byKey.set(key, toText(name));
+      });
+    });
+    return [...byKey.values()].sort(compareZoneNames);
+  }
+
+  function collectZoneNames(rows) {
+    return mergeZoneNames((Array.isArray(rows) ? rows : []).map((row) => row?.Zone), []);
+  }
+
   function parseDataChangeSignalDetail(rawValue) {
     const empty = { tables: [], projectId: null, projectNumber: "" };
     if (!rawValue) return empty;
@@ -1404,6 +1444,10 @@
     getProjectScope,
     getProjectAssignees,
     tableToRows,
+    ZONE_SOURCE_TABLES,
+    normalizeZoneKey,
+    mergeZoneNames,
+    collectZoneNames,
     filterRawTable,
     filterRawTableByService,
     getRowProjectIdentity,

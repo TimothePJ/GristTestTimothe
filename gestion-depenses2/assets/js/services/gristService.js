@@ -52,7 +52,7 @@ const TIME_REAL_COLUMN_ALIASES = {
   service: ["Service"],
 };
 
-function getActiveService() {
+export function getActiveService() {
   if (typeof globalThis === "undefined") return "Structure";
   return globalThis.GristServiceContext?.getService?.()
     || globalThis.GristServiceContextCore?.normalizeService?.(
@@ -346,6 +346,8 @@ export async function fetchProjectDataTables() {
     timeRealRows,
     teamRows,
     timeOutRows,
+    avancementRows,
+    serviceRows,
   ] = await Promise.all([
     fetchTableRows(tables.budget),
     fetchOptionalTableRows(tables.listePlan),
@@ -359,6 +361,11 @@ export async function fetchProjectDataTables() {
     fetchNormalizedTimeRealRows(),
     fetchTableRows(tables.team),
     fetchOptionalTableRows(timeOutTableId),
+    // Facturation du graphique : tables inconnues de la couche de contexte, donc
+    // lues en entier. Le tri par projet et par service se fait dans
+    // buildExpenseData (utils/avancementBilling.js).
+    fetchOptionalTableRows(tables.avancement),
+    fetchOptionalTableRows(tables.services),
   ]);
 
   return {
@@ -376,6 +383,11 @@ export async function fetchProjectDataTables() {
     timeRealRows,
     teamRows,
     timeOutRows,
+    avancementRows,
+    serviceRows,
+    // Service sous lequel ces lignes ont ete lues : la facturation T_Avancement
+    // en depend, comme le budget filtre par la couche de contexte.
+    activeService: getActiveService(),
   };
 }
 
@@ -757,21 +769,6 @@ export async function removeTimeSegment(segmentId) {
 
   await applyActions([
     ["RemoveRecord", APP_CONFIG.grist.tables.timeSegment, normalizedId],
-  ]);
-}
-
-export async function updateProjectBillingPercentages(projectId, billingPercentageByMonth) {
-  await applyActions([
-    [
-      "UpdateRecord",
-      APP_CONFIG.grist.tables.projects,
-      projectId,
-      {
-        [APP_CONFIG.grist.columns.projects.billingPercentageByMonth]: JSON.stringify(
-          billingPercentageByMonth || {}
-        ),
-      },
-    ],
   ]);
 }
 

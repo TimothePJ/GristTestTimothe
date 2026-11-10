@@ -1665,7 +1665,7 @@ function ensureRetardContextMenu() {
     } else if (action === "initialize") {
       void handlePlanningRowInitializeFromMenu();
     } else if (action === "closure-edit") {
-      openPlanningClosureDialog();
+      void openPlanningClosureDialog();
     } else if (action === "closure-delete") {
       void deletePlanningClosureFromMenu();
     } else {
@@ -1701,15 +1701,6 @@ function ensureRetardContextMenu() {
   return retardContextMenuEl;
 }
 
-function getLocalTodayIso() {
-  const today = new Date();
-  return [
-    String(today.getFullYear()).padStart(4, "0"),
-    String(today.getMonth() + 1).padStart(2, "0"),
-    String(today.getDate()).padStart(2, "0"),
-  ].join("-");
-}
-
 function ensurePlanningClosureDialog() {
   if (planningClosureDialogEl instanceof HTMLDialogElement) return planningClosureDialogEl;
 
@@ -1731,11 +1722,13 @@ function ensurePlanningClosureDialog() {
       </dl>
       <p class="planning-closure-dialog__warning">
         Cette action considérera le plan comme terminé à 100 %, même si son indice cible n’est pas atteint.
+        Sa date de réalisation sera la date de diffusion de l’indice choisi.
       </p>
-      <label class="planning-closure-dialog__field">
-        <span>Date de réalisation <strong aria-hidden="true">*</strong></span>
-        <input type="date" name="dateCloture" required>
+      <label class="planning-closure-dialog__field" data-planning-closure-indice-field>
+        <span>Indice de réalisation <strong aria-hidden="true">*</strong></span>
+        <select name="indiceCloture" required></select>
       </label>
+      <p class="planning-closure-dialog__note" data-planning-closure-note hidden></p>
       <p class="planning-closure-dialog__error" role="alert" aria-live="polite"></p>
       <footer class="planning-closure-dialog__actions">
         <button type="button" class="planning-closure-dialog__cancel">Annuler</button>
@@ -1764,7 +1757,80 @@ function ensurePlanningClosureDialog() {
   return dialog;
 }
 
-function openPlanningClosureDialog() {
+function formatClosureDateFr(iso) {
+  const match = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : String(iso || "");
+}
+
+function getPlanningClosureControls(dialog) {
+  return {
+    select: dialog.querySelector('select[name="indiceCloture"]'),
+    field: dialog.querySelector("[data-planning-closure-indice-field]"),
+    note: dialog.querySelector("[data-planning-closure-note]"),
+    error: dialog.querySelector(".planning-closure-dialog__error"),
+    save: dialog.querySelector(".planning-closure-dialog__save"),
+  };
+}
+
+function setPlanningClosureNote(note, text) {
+  if (!(note instanceof HTMLElement)) return;
+  note.textContent = text || "";
+  note.hidden = !text;
+}
+
+function renderPlanningClosureLoading(dialog) {
+  const { select, field, note, error, save } = getPlanningClosureControls(dialog);
+  if (select instanceof HTMLSelectElement) {
+    select.replaceChildren(new Option("Recherche des indices diffusés…", ""));
+    select.disabled = true;
+  }
+  if (field instanceof HTMLElement) field.hidden = false;
+  setPlanningClosureNote(note, "");
+  if (error) error.textContent = "";
+  if (save instanceof HTMLButtonElement) save.disabled = true;
+}
+
+// Montre le choix rendu par le gestionnaire (« options » de handlePlanningClosureAction) :
+// la liste des indices diffusés, ou, sans aucun, la raison pour laquelle on ne peut pas forcer.
+function renderPlanningClosureChoice(dialog, choice) {
+  const { select, field, note, error, save } = getPlanningClosureControls(dialog);
+  const options = Array.isArray(choice?.options) ? choice.options : [];
+  if (error) error.textContent = "";
+  if (!choice?.canSave || !options.length) {
+    if (select instanceof HTMLSelectElement) select.replaceChildren();
+    if (field instanceof HTMLElement) field.hidden = true;
+    setPlanningClosureNote(
+      note,
+      choice?.emptyMessage || "Aucun indice de ce plan n'a été diffusé : la réalisation ne peut pas être forcée."
+    );
+    if (save instanceof HTMLButtonElement) save.disabled = true;
+    return;
+  }
+  if (select instanceof HTMLSelectElement) {
+    select.replaceChildren(...options.map((option) => new Option(
+      `${option.indice} — diffusé le ${formatClosureDateFr(option.dateIso)}`,
+      option.indice
+    )));
+    select.value = choice.selectedIndice || options[options.length - 1].indice;
+    select.disabled = false;
+  }
+  if (field instanceof HTMLElement) field.hidden = false;
+  setPlanningClosureNote(note, choice.manualNote);
+  if (save instanceof HTMLButtonElement) save.disabled = false;
+  select?.focus();
+}
+
+function renderPlanningClosureFailure(dialog, message) {
+  const { select, error, save } = getPlanningClosureControls(dialog);
+  if (select instanceof HTMLSelectElement) {
+    select.replaceChildren();
+    select.disabled = true;
+  }
+  if (error) error.textContent = message;
+  if (save instanceof HTMLButtonElement) save.disabled = true;
+}
+
+async function openPlanningClosureDialog() {
   if (!planningClosureHandler || !activeRetardJustificationContext) return;
   const context = activeRetardJustificationContext;
   if (!context.dateClotureColumnAvailable) {
@@ -1773,10 +1839,10 @@ function openPlanningClosureDialog() {
   }
 
   const dialog = ensurePlanningClosureDialog();
-  const existingDate = String(context.dateCloture || "").trim();
+  const hasClosure = Boolean(String(context.dateCloture || "").trim());
   const title = dialog.querySelector("h3");
-  if (title) title.textContent = existingDate
-    ? "Modifier la date de réalisation"
+  if (title) title.textContent = hasClosure
+    ? "Modifier la réalisation forcée"
     : "Forcer la réalisation du plan";
 
   ["id2", "task", "typeDoc", "zone", "indice", "realise"].forEach((key) => {
@@ -1786,16 +1852,25 @@ function openPlanningClosureDialog() {
   const zoneRow = dialog.querySelector("[data-planning-closure-zone-row]");
   if (zoneRow instanceof HTMLElement) zoneRow.hidden = !String(context.zone || "").trim();
 
-  const input = dialog.querySelector('input[name="dateCloture"]');
-  if (input instanceof HTMLInputElement) {
-    input.max = getLocalTodayIso();
-    input.value = existingDate || getLocalTodayIso();
-  }
-  const errorEl = dialog.querySelector(".planning-closure-dialog__error");
-  if (errorEl) errorEl.textContent = "";
   dialog.dataset.saving = "false";
   dialog.showModal();
-  input?.focus();
+
+  // Indices diffusés : ceux trouvés à l'ouverture du menu, sinon relus maintenant.
+  if (context.closureChoice) {
+    renderPlanningClosureChoice(dialog, context.closureChoice);
+    return;
+  }
+  renderPlanningClosureLoading(dialog);
+  try {
+    const choice = await planningClosureHandler({ action: "options", context: { ...context } });
+    if (activeRetardJustificationContext !== context || !dialog.open) return;
+    context.closureChoice = choice;
+    renderPlanningClosureChoice(dialog, choice);
+  } catch (error) {
+    if (activeRetardJustificationContext !== context || !dialog.open) return;
+    console.error("Erreur indices diffusés :", error);
+    renderPlanningClosureFailure(dialog, error?.message || "Impossible de lire les indices diffusés.");
+  }
 }
 
 async function savePlanningClosureDialog() {
@@ -1803,41 +1878,25 @@ async function savePlanningClosureDialog() {
   const dialog = ensurePlanningClosureDialog();
   if (dialog.dataset.saving === "true") return;
 
-  const input = dialog.querySelector('input[name="dateCloture"]');
-  const errorEl = dialog.querySelector(".planning-closure-dialog__error");
-  const value = input instanceof HTMLInputElement ? input.value : "";
-  const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  const parsed = isoMatch
-    ? new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]))
-    : null;
-  const valid = Boolean(
-    parsed &&
-    parsed.getFullYear() === Number(isoMatch[1]) &&
-    parsed.getMonth() === Number(isoMatch[2]) - 1 &&
-    parsed.getDate() === Number(isoMatch[3])
-  );
-  if (!valid) {
-    if (errorEl) errorEl.textContent = "Saisissez une date de réalisation valide.";
-    input?.focus();
-    return;
-  }
-  if (value > getLocalTodayIso()) {
-    if (errorEl) errorEl.textContent = "La date de réalisation ne peut pas être future.";
-    input?.focus();
+  const { select, error: errorEl } = getPlanningClosureControls(dialog);
+  const indice = select instanceof HTMLSelectElement && !select.disabled ? select.value : "";
+  if (!indice) {
+    if (errorEl) errorEl.textContent = "Choisissez l'indice auquel le plan a été réalisé.";
     return;
   }
 
   dialog.dataset.saving = "true";
-  dialog.querySelectorAll("button, input").forEach((control) => {
+  dialog.querySelectorAll("button, select").forEach((control) => {
     control.disabled = true;
   });
   if (errorEl) errorEl.textContent = "";
 
   try {
+    // Seul l'indice part : la date est relue dans la liste de plans au moment d'écrire.
     await planningClosureHandler({
       action: "save",
       context: { ...activeRetardJustificationContext },
-      dateCloture: value,
+      indice,
     });
     dialog.close();
   } catch (error) {
@@ -1845,10 +1904,29 @@ async function savePlanningClosureDialog() {
     if (errorEl) errorEl.textContent = error?.message || "Échec de la sauvegarde.";
   } finally {
     dialog.dataset.saving = "false";
-    dialog.querySelectorAll("button, input").forEach((control) => {
+    dialog.querySelectorAll("button, select").forEach((control) => {
       control.disabled = false;
     });
   }
+}
+
+// Les indices diffusés du plan sont cherchés dès l'ouverture du menu : s'il n'y en a aucun,
+// l'entrée « Forcer la réalisation » est grisée. En cas d'échec de lecture, elle reste
+// active : la fenêtre relira et dira pourquoi.
+async function preloadPlanningClosureChoice(context, button, label) {
+  button.disabled = true;
+  button.textContent = `${label} (recherche des indices…)`;
+  let choice = null;
+  try {
+    choice = await planningClosureHandler({ action: "options", context: { ...context } });
+  } catch (error) {
+    console.warn("Indices diffusés introuvables :", error);
+  }
+  if (activeRetardJustificationContext !== context) return;
+  if (choice) context.closureChoice = choice;
+  const blocked = Boolean(choice) && !choice.canSave;
+  button.disabled = blocked;
+  button.textContent = blocked ? "Réalisation forcée impossible : aucun indice diffusé" : label;
 }
 
 async function deletePlanningClosureFromMenu() {
@@ -2670,17 +2748,23 @@ function openRetardContextMenu(event, rowEl) {
   const editButton = menu.querySelector('[data-planning-retard-action="closure-edit"]');
   const deleteButton = menu.querySelector('[data-planning-retard-action="closure-delete"]');
   const unavailableButton = menu.querySelector('[data-planning-retard-action="closure-unavailable"]');
+  const editLabel = hasClosure
+    ? "Modifier la réalisation forcée…"
+    : "Forcer la réalisation du plan…";
   if (editButton instanceof HTMLElement) {
     editButton.hidden = !closureAvailable;
-    editButton.textContent = hasClosure
-      ? "Modifier la date de réalisation…"
-      : "Forcer la réalisation du plan…";
+    editButton.textContent = editLabel;
   }
   if (deleteButton instanceof HTMLElement) {
     deleteButton.hidden = !closureAvailable || !hasClosure;
   }
   if (unavailableButton instanceof HTMLElement) {
     unavailableButton.hidden = closureAvailable;
+  }
+  // Lancée avant le placement : son texte d'attente, le plus long que l'entrée prenne, est
+  // posé tout de suite, si bien que le menu est placé à sa largeur maximale et ne déborde pas.
+  if (closureAvailable && editButton instanceof HTMLButtonElement) {
+    void preloadPlanningClosureChoice(context, editButton, editLabel);
   }
   positionFixedElementNearPointer(menu, event);
 }
@@ -5690,6 +5774,58 @@ export function subscribePlanningViewportChanges(listener) {
   };
 }
 
+// Fenêtre de dates brute, sans la déduplication des émissions de viewport : la vue
+// Synthese la suit à chaque mouvement, y compris ceux déclenchés par le bandeau.
+const planningWindowListeners = new Set();
+
+function notifyPlanningWindowListeners() {
+  if (!timelineInstance || !planningWindowListeners.size) return;
+  const range = timelineInstance.getWindow();
+  planningWindowListeners.forEach((listener) => listener(range));
+}
+
+// Un zoom à la souris change l'échelle : le bouton actif suit l'étendue visible.
+// Les seuils sont les moyennes géométriques des étendues de chaque mode
+// (7, 30 et 365 jours), à mi-chemin sur une échelle de zoom logarithmique.
+const ZOOM_WEEK_MAX_DAYS = Math.sqrt(7 * 30);
+const ZOOM_MONTH_MAX_DAYS = Math.sqrt(30 * 365);
+
+function getZoomModeForRange(start, end) {
+  const visibleDays = (end - start) / 86400000;
+  if (visibleDays < ZOOM_WEEK_MAX_DAYS) return "week";
+  if (visibleDays < ZOOM_MONTH_MAX_DAYS) return "month";
+  return "year";
+}
+
+function syncZoomButtonToRange(start, end) {
+  // En mode intégré, le mode de zoom appartient à planning-synchro.
+  if (EMBEDDED_PLANNING_SYNC_MODE) return;
+  if (!(start instanceof Date) || !(end instanceof Date)) return;
+  setActiveZoomButton(getZoomModeForRange(start, end));
+}
+
+export function getPlanningWindow() {
+  return timelineInstance ? timelineInstance.getWindow() : null;
+}
+
+export function setPlanningWindow(start, end, { byUser = false } = {}) {
+  if (!timelineInstance) return;
+  timelineInstance.setWindow(start, end, { animation: false });
+  updateDateRangeDisplay();
+  if (byUser) syncZoomButtonToRange(start, end);
+}
+
+export function subscribePlanningWindowChanges(listener) {
+  if (typeof listener !== "function") {
+    return () => {};
+  }
+
+  planningWindowListeners.add(listener);
+  return () => {
+    planningWindowListeners.delete(listener);
+  };
+}
+
 export function subscribePlanningSelectionChanges(listener) {
   if (typeof listener !== "function") {
     return () => {};
@@ -6025,6 +6161,16 @@ export function renderPlanningTimeline(timelineData = {}) {
       },
     });
 
+    // vis-timeline fait un « fit » sur toutes les données au premier dessin
+    // réussi. Le planning fixe toujours lui-même sa fenêtre ; ce fit l'écrasait
+    // sur les fonds de zones (2021-2041) quand le premier dessin arrivait tard,
+    // par exemple au retour du service Synthese où le planning était masqué.
+    timelineInstance.initialFitDone = true;
+    timelineInstance.on("rangechange", notifyPlanningWindowListeners);
+    timelineInstance.on("rangechanged", notifyPlanningWindowListeners);
+    timelineInstance.on("rangechange", ({ byUser, start, end } = {}) => {
+      if (byUser) syncZoomButtonToRange(start, end);
+    });
     bindHoverTooltip(container);
     bindDurationCellEditing(container);
     // Drag désactivé en mode embedded (synchronisation-plannings) : réservé à Planning Projet direct.

@@ -60,6 +60,8 @@ import { buildInitialProjectViewport, buildCanonicalSharedViewport } from "../as
 import { normalizeIsoDate } from "../assets/js/viewport/normalize.js";
 import { formatIsoDate } from "../assets/js/utils/dates.js";
 import { toGristMonthValue } from "../assets/js/utils/monthSegments.js";
+import { buildChartTasks } from "../assets/js/top/taskLoadModel.js";
+import { readManualDates, sameManualDates } from "../assets/js/top/manualDates.js";
 
 const MAIN_PATH = new URL("../assets/js/main.js", import.meta.url);
 const source = fs.readFileSync(MAIN_PATH, "utf8");
@@ -127,6 +129,7 @@ function extractBlock(header) {
 
 const BLOCK_HEADERS = [
   "function todayIsoDate() {",
+  "function selectionKeyFor(project) {",
   "function viewportFitsWithinBounds(viewport, bounds) {",
   "function readAllTimeSegmentRows(payload) {",
   "function projectRegistrySignature(projects) {",
@@ -219,7 +222,7 @@ function teamMemberRow({ id, name, role, projectNumber = PROJECT.number }) {
 
 // --- montage du vrai loadProject sur un environnement bouchonne ---------------
 
-async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = {}) {
+async function mount({ segmentRows, planningRows = [], projectTeamRows = [], chargeShift = null } = {}) {
   const calls = {
     fetchProjectData: 0,
     reconcileAndLoad: 0,
@@ -237,6 +240,8 @@ async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = 
   const chargeRenders = [];
   const setBoundsCalls = [];
   const pendingFetches = [];
+  // Appels recus par le faux controleur du lissage (dates manuelles).
+  const smoothingCalls = { setProjectData: [], setManualDates: [] };
 
   // La base : mutable, pour simuler l'ecriture d'un autre widget/utilisateur.
   let remoteRows = segmentRows === undefined ? initialRemoteRows() : segmentRows;
@@ -384,7 +389,8 @@ async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = 
     state: { registry: [], selectedProject: null, viewport: null },
     els,
     APP_CONFIG,
-    realisationTargetLookup: null,
+    // loadProject demande la table des indices de reference du service affiche.
+    getRealisationTargetLookup: () => null,
 
     // --- dependances reelles (pures) -----------------------------------------
     buildRegistry,
@@ -406,10 +412,41 @@ async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = 
     resolveViewportAnchorDate,
     normalizeIsoDate,
     formatIsoDate,
+    // Taches du graphique et du lissage, calculees par le vrai loadProject.
+    buildChartTasks,
+    // Lecture / comparaison des dates manuelles (pures).
+    readManualDates,
+    sameManualDates,
 
     // --- bouchons ------------------------------------------------------------
     fetchProjectData,
     fetchTableRows,
+    // Ligne Projets2 relue a chaque chargement (cellule Lissage) : hors du
+    // compteur fetchProjectCatalog, qui ne compte que le chemin du signal.
+    fetchProjectRow: async (projectId) => {
+      const row = remoteProjectRows.find((candidate) => candidate.id === projectId);
+      return row ? { ...row } : null;
+    },
+    currentService: () => "Structure",
+    // Controleur du lissage (cree une fois par bootstrapApp, hors de ce chemin) :
+    // methodes vides, le chemin post-ecriture n'en depend pas.
+    smoothing: {
+      setProjectData: (data) => {
+        smoothingCalls.setProjectData.push(data);
+      },
+      setManualDates: (dates) => {
+        smoothingCalls.setManualDates.push(dates);
+        return true;
+      },
+      getChartInput: () => ({ tasks: [], mode: "raw", active: false }),
+      // Decalage de la charge (mode lisse) : celui que le test demande.
+      getChargeShift: () => chargeShift,
+      getSmoothedBounds: () => null,
+      openMonthTasks: () => {},
+      refreshFromProjectRows: () => false,
+      clear: () => {},
+      destroy: () => {},
+    },
     attachChargeEditing,
     createChargeAssignModal,
     updatePlanningDurations,
@@ -451,9 +488,11 @@ async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = 
     },
     createPlanningChart: () => ({
       render: () => {},
+      setChartInput: () => {},
       destroy: () => {},
       setHeight: () => {},
       setViewport: () => {},
+      getUiState: () => ({ visibleLabels: null, knownLabels: null, granularity: "month" }),
     }),
     createSyncController: ({ bounds }) => {
       let activeBounds = bounds;
@@ -494,10 +533,11 @@ async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = 
       "let loadSeq = 0;",
       "let topView = 'planning';",
       "let lastTopPaneHeightPx = 0;",
-      "let chartRows = [];",
-      "let chartColumns = null;",
+      "let chartTasks = [];",
+      "let chartContextKey = '';",
       "let desiredTopRows = APP_CONFIG.topPane.defaultRows;",
       "let refreshChargeOnly = null;",
+      "let widenBoundsForSmoothing = null;",
       "let projectRegistryFingerprint = '';",
       ...BLOCKS,
       `globalThis.__api = {
@@ -545,6 +585,7 @@ async function mount({ segmentRows, planningRows = [], projectTeamRows = [] } = 
     },
     getRemotePlanningRows: () => remotePlanningRows,
     planningWrites,
+    smoothingCalls,
     // Options passees a createChargeAssignModal par le VRAI loadProject :
     // `onSubmit` EST handleChargeAssignSubmit.
     getChargeAssignOptions: () => chargeAssignOptions,
@@ -944,7 +985,9 @@ test("classifyContextSignal : TimeSegment seul est direct, Projets2 demande une 
 // retire revenait sur l'ecriture la plus lourde du produit, et ecrasait au
 // passage la mise a jour EN PLACE que handleChargeAssignSubmit venait de poser.
 
-test("Planning_Projet — le signal declenche par NOTRE ecriture de charge ne reactualise pas la page", async () => {
+// CHARGE DESACTIVEE (2026-11-10) : la fenetre d'assignation n'est plus creee par
+// loadProject. A la reactivation, remettre `test(`.
+test.skip("Planning_Projet — le signal declenche par NOTRE ecriture de charge ne reactualise pas la page", async () => {
   const h = await mount({ planningRows: initialPlanningRows() });
   h.setEditMode(true);
   h.reset(); // on ne compte plus le chargement initial
@@ -1032,6 +1075,75 @@ test("Planning_Projet — un changement HORS colonnes de duree recharge tout le 
   assert.equal(h.calls.chargeRender, 0, "et surtout pas un demi-rafraichissement du seul pane bas");
 });
 
+// --- dates manuelles du lissage (colonne Date_Manuel_Lissage) -----------------
+
+const MANUAL = PLANNING_COLUMNS.manualSmoothingDate;
+const MARCH_15_SECONDS = Date.UTC(2027, 2, 15) / 1000;
+
+function planningRowsWithManualColumn() {
+  return initialPlanningRows().map((row) => ({ ...row, [MANUAL]: null }));
+}
+
+test("dates manuelles — loadProject passe manualDates et hasManualColumn au lissage", async () => {
+  const rows = planningRowsWithManualColumn();
+  rows[1][MANUAL] = MARCH_15_SECONDS;
+  const h = await mount({ planningRows: rows });
+
+  const call = h.smoothingCalls.setProjectData.at(-1);
+  assert.equal(call.hasManualColumn, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(call.manualDates)), { 502: "2027-03-15" });
+});
+
+test("dates manuelles — colonne absente : hasManualColumn faux, aucune date", async () => {
+  const h = await mount({ planningRows: initialPlanningRows() });
+  const call = h.smoothingCalls.setProjectData.at(-1);
+  assert.equal(call.hasManualColumn, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(call.manualDates)), {});
+});
+
+test("dates manuelles — seule la date change : pas de loadProject, setManualDates, ligne en memoire a jour", async () => {
+  const h = await mount({ planningRows: planningRowsWithManualColumn() });
+  const boardRows = h.lastChargeRender().planningRows;
+  h.reset();
+
+  h.setRemotePlanningRows(h.getRemotePlanningRows().map((row) => (
+    row.id === 502 ? { ...row, [MANUAL]: MARCH_15_SECONDS } : row
+  )));
+  h.api.handleContextTablesChanged({ tables: [PLANNING_TABLE] });
+  await h.flush();
+
+  assert.equal(h.calls.reconcileAndLoad, 0, "aucun rechargement complet");
+  assert.equal(h.calls.createPlanningRenderer, 0, "le pane haut n'est pas reconstruit");
+  assert.equal(h.smoothingCalls.setManualDates.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.smoothingCalls.setManualDates[0])), { 502: "2027-03-15" });
+  assert.equal(
+    boardRows.find((row) => row.id === 502)[MANUAL],
+    MARCH_15_SECONDS,
+    "la ligne EN MEMOIRE (meme reference) porte la nouvelle valeur"
+  );
+});
+
+test("dates manuelles — une relecture identique n'appelle pas setManualDates", async () => {
+  const h = await mount({ planningRows: planningRowsWithManualColumn() });
+  h.reset();
+  h.api.handleContextTablesChanged({ tables: [PLANNING_TABLE] });
+  await h.flush();
+  assert.equal(h.calls.reconcileAndLoad, 0);
+  assert.equal(h.smoothingCalls.setManualDates.length, 0);
+});
+
+test("dates manuelles — la colonne apparait : rechargement complet", async () => {
+  const h = await mount({ planningRows: initialPlanningRows() });
+  h.reset();
+
+  h.setRemotePlanningRows(planningRowsWithManualColumn());
+  h.api.handleContextTablesChanged({ tables: [PLANNING_TABLE] });
+  await h.flush();
+
+  assert.equal(h.calls.reconcileAndLoad, 1, "l'ajout de la colonne recharge tout");
+  assert.equal(h.smoothingCalls.setManualDates.length, 0);
+});
+
 test("Planning_Projet — une ligne ajoutee ailleurs recharge tout le projet", async () => {
   const h = await mount({ planningRows: initialPlanningRows() });
   h.reset();
@@ -1054,7 +1166,9 @@ test("Planning_Projet — une ligne ajoutee ailleurs recharge tout le projet", a
 // Tache 3 ne pouvait pas le voir : il appelle `renderChargeRow` dans un vm, deux
 // couches sous le conteneur qui le masque.
 
-test("sans aucun TimeSegment, le conteneur du pane bas reste visible pour la ligne Charge", async () => {
+// CHARGE DESACTIVEE (2026-11-10) : test mis de cote avec le bloc Charge. A la
+// reactivation, remettre `test(` et supprimer le test « CHARGE DESACTIVEE » qui suit.
+test.skip("sans aucun TimeSegment, le conteneur du pane bas reste visible pour la ligne Charge", async () => {
   const h = await mount({ segmentRows: [], planningRows: initialPlanningRows() });
 
   assert.equal(h.els.charge.hidden, false, "sinon le bouton « Charge » serait introuvable");
@@ -1064,6 +1178,15 @@ test("sans aucun TimeSegment, le conteneur du pane bas reste visible pour la lig
     "le message « Aucun previsionnel » reste : il parle des lignes de PERSONNES"
   );
   assert.equal(h.calls.chargeRender, 1, "la ligne Charge est bien rendue dans ce conteneur visible");
+});
+
+// CHARGE DESACTIVEE (2026-11-10) : a supprimer a la reactivation.
+test("CHARGE DESACTIVEE : pas de fenetre d'assignation, et sans equipe le pane bas est masque", async () => {
+  const h = await mount({ segmentRows: [], planningRows: initialPlanningRows() });
+
+  assert.equal(h.getChargeAssignOptions(), null, "la fenetre « Assigner la charge » n'est plus creee");
+  assert.equal(h.els.charge.hidden, true, "sans personne, la grille n'a plus rien a montrer");
+  assert.equal(h.els.chargeEmpty.hidden, false, "le message « Aucun previsionnel » s'affiche");
 });
 
 // LE BUG : `loadProject` passait `workers: []` au board des que le projet
@@ -1144,7 +1267,9 @@ test("sans TimeSegment NI ligne de planning, le pane bas reste masque", async ()
   assert.equal(h.els.chargeEmpty.hidden, false);
 });
 
-test("la suppression du DERNIER segment ne fait pas disparaitre la ligne Charge", async () => {
+// CHARGE DESACTIVEE (2026-11-10) : plus de ligne Charge a garder visible. A la
+// reactivation, remettre `test(`.
+test.skip("la suppression du DERNIER segment ne fait pas disparaitre la ligne Charge", async () => {
   // Meme regle sur le chemin de RE-rendu (renderChargeFromLocalRows), pas
   // seulement au premier chargement.
   const h = await mount({ planningRows: initialPlanningRows() });
@@ -1561,4 +1686,16 @@ test("selection vidée : plus rien a rafraichir en place", async () => {
   h.api.handleContextTablesChanged({ tables: [TIME_SEGMENT_TABLE] });
   assert.equal(h.calls.reconcileAndLoad, 1);
   assert.equal(h.calls.fetchProjectData, 0);
+});
+
+test("charge lissee — le premier rendu du board recoit le decalage de charge du lissage", async () => {
+  const shift = new Map([["502", -10]]);
+  const h = await mount({ planningRows: initialPlanningRows(), chargeShift: shift });
+  assert.ok(h.chargeRenders.length >= 1, "le board doit etre rendu");
+  assert.equal(h.chargeRenders[0].chargeShift, shift);
+});
+
+test("charge lissee — en « Non lissé » (null), le board recoit null : charge d'origine", async () => {
+  const h = await mount({ planningRows: initialPlanningRows() });
+  assert.equal(h.chargeRenders[0].chargeShift, null);
 });

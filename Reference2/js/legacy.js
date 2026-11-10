@@ -2373,6 +2373,60 @@ function collectProjectZones(projectName) {
   return zones.sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base', numeric: true }));
 }
 
+// Zones du projet créées depuis n'importe quel service (Structure, Synthese…),
+// tenues à jour par le contexte partagé : une zone appartient au projet, elle
+// reste visible quel que soit le service sélectionné.
+let sharedProjectZones = [];
+let sharedProjectZonesProjectKeys = new Set();
+
+function getSharedZonesForProject(projectName) {
+  const projectKey = normalizeReferenceDocumentIdentityPart(projectName);
+  return projectKey && sharedProjectZonesProjectKeys.has(projectKey) ? sharedProjectZones : [];
+}
+
+function mergeSharedProjectZones(zones, projectName) {
+  const merged = [...zones];
+  const knownKeys = new Set(zones.map((zone) => normalizeZoneMatchKey(zone)).filter(Boolean));
+  getSharedZonesForProject(projectName).forEach((zone) => {
+    const zoneKey = normalizeZoneMatchKey(zone);
+    if (!zoneKey || knownKeys.has(zoneKey)) return;
+    knownKeys.add(zoneKey);
+    merged.push(normalizeZoneValue(zone));
+  });
+  return merged;
+}
+
+// Zones proposées à la saisie et au filtre : celles du service courant, puis
+// celles créées par les autres services.
+function collectVisibleProjectZones(projectName) {
+  return mergeSharedProjectZones(collectProjectZones(projectName), projectName)
+    .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base', numeric: true }));
+}
+
+function bindSharedProjectZones() {
+  const watch = window.GristServiceContext?.watchProjectZones;
+  if (typeof watch !== 'function') return;
+  watch((zones, meta = {}) => {
+    sharedProjectZones = Array.isArray(zones) ? zones : [];
+    sharedProjectZonesProjectKeys = new Set(
+      (Array.isArray(meta.projectNames) ? meta.projectNames : [])
+        .map(normalizeReferenceDocumentIdentityPart)
+        .filter(Boolean)
+    );
+    if (!selectedFirstValue) return;
+    const previousZoneValue = selectedZoneValue;
+    populateZoneDropdown(selectedFirstValue, selectedZoneValue);
+    // La zone filtrée a disparu de la liste : le tableau suit le retour à
+    // « Toutes les zones », comme après un choix dans la liste.
+    if (selectedZoneValue !== previousZoneValue) {
+      document.getElementById('zoneDropdown')?.dispatchEvent(new Event('change'));
+    }
+    refreshZoneSuggestionList('documentZoneList', selectedFirstValue);
+    refreshZoneSuggestionList('multipleDocumentZoneList', selectedFirstValue);
+    refreshReferenceZoneSuggestionLists();
+  });
+}
+
 function collectProjectZoneFilterValues(projectName, typeValue = '') {
   const project = normalizeReferenceDocumentIdentityPart(projectName);
   const normalizedType = normalizeTypeDocument(typeValue);
@@ -2394,7 +2448,7 @@ function collectProjectZoneFilterValues(projectName, typeValue = '') {
     }
   });
 
-  return Array.from(zonesByKey.values()).sort(compareZoneKeys);
+  return mergeSharedProjectZones(Array.from(zonesByKey.values()), projectName).sort(compareZoneKeys);
 }
 
 function resetZoneDropdown(disabled = true) {
@@ -2460,7 +2514,7 @@ function refreshZoneSuggestionList(datalistId, projectName) {
   const datalist = document.getElementById(datalistId);
   if (!datalist) return;
 
-  const zones = collectProjectZones(projectName);
+  const zones = collectVisibleProjectZones(projectName);
   datalist.innerHTML = '';
   zones.forEach((zone) => {
     const option = document.createElement('option');
@@ -3737,7 +3791,7 @@ function collectPendingReferenceZones() {
 }
 
 function refreshReferenceZoneSuggestionLists() {
-  const mergedZones = [...collectProjectZones(selectedFirstValue), ...collectPendingReferenceZones()];
+  const mergedZones = [...collectVisibleProjectZones(selectedFirstValue), ...collectPendingReferenceZones()];
   const uniqueZones = [];
   const seen = new Set();
 
@@ -3763,7 +3817,7 @@ function refreshReferenceZoneSuggestionLists() {
 
 function resolveReferenceDocumentZone(value, projectName = selectedFirstValue) {
   return resolveCanonicalZoneValue(value, [
-    ...collectProjectZones(projectName),
+    ...collectVisibleProjectZones(projectName),
     ...collectPendingReferenceZones(),
   ]);
 }
@@ -8289,6 +8343,8 @@ window.GristServiceContext.watchContextTables(
     restoreScroll?.();
   }
 );
+
+bindSharedProjectZones();
 
 ensureReferenceAccessObserver();
 window.GristServiceContext.subscribe((contextState) => {

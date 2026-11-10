@@ -602,7 +602,9 @@ test("index.html et dev/harness.html portent des fenetres identiques", async () 
   const harness = read("../dev/harness.html");
   const index = read("../index.html");
 
-  ["ps-edit-segment", "ps-charge-assign"].forEach((prefix) => {
+  // ps-plan-search : fenetre « Rechercher un plan » (loupe de la vue Graphique).
+  // ps-month-tasks : fenetre « Taches du mois » (clic sur le graphique, fleches < >).
+  ["ps-edit-segment", "ps-charge-assign", "ps-plan-search", "ps-plan-pick", "ps-month-tasks"].forEach((prefix) => {
     assert.equal(
       modalSlice(harness, prefix, "dev/harness.html"),
       modalSlice(index, prefix, "index.html"),

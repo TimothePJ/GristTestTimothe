@@ -259,7 +259,7 @@ function mountChargeAssign({ stallTimeoutMs = STALL_MS, onSubmit } = {}) {
 test("controleur reel : double-clic sur Enregistrer -> une seule ecriture", async () => {
   const h = mountChargeAssign();
   h.open();
-  h.editField({ scope: "type", typeDoc: "COFFRAGE", original: "" }, "5");
+  h.editField({ scope: "type", role: "ingenieurs", typeDoc: "COFFRAGE", original: "" }, "5");
   h.clickSave();
   h.clickSave();
   await flush();
@@ -290,7 +290,7 @@ test("verrou partage : une ecriture de charge en vol empeche la fenetre de segme
   });
 
   charge.open();
-  charge.editField({ scope: "type", typeDoc: "COFFRAGE", original: "" }, "5");
+  charge.editField({ scope: "type", role: "ingenieurs", typeDoc: "COFFRAGE", original: "" }, "5");
   charge.clickSave();
   await flush();
   assert.equal(charge.calls.length, 1, "l'ecriture de charge est partie");
@@ -313,7 +313,7 @@ test("verrou partage : une ecriture de charge en vol empeche la fenetre de segme
 test("apres le delai de garde, Echap ferme la fenetre de charge mais Enregistrer reste bloque", async () => {
   const h = mountChargeAssign();
   h.open();
-  h.editField({ scope: "type", typeDoc: "COFFRAGE", original: "" }, "5");
+  h.editField({ scope: "type", role: "ingenieurs", typeDoc: "COFFRAGE", original: "" }, "5");
   h.clickSave();
   await flush();
   await afterStall();
@@ -338,7 +338,7 @@ test("un echec renvoye laisse la fenetre ouverte avec son message", async () => 
     onSubmit: async () => ({ ok: false, error: "L'enregistrement de la charge a echoue." }),
   });
   h.open();
-  h.editField({ scope: "type", typeDoc: "COFFRAGE", original: "" }, "5");
+  h.editField({ scope: "type", role: "ingenieurs", typeDoc: "COFFRAGE", original: "" }, "5");
   h.clickSave();
   await flush();
 
@@ -366,7 +366,7 @@ test("vider un champ qui avait sa propre valeur transmet Duree_Force:'' a onSubm
   // d'effacement, contrairement a un champ herite jamais touche.
   const field = new FakeInput("");
   field.classList.add("ps-charge-assign-input");
-  field.dataset = { scope: "document", docId: "77", original: "4" };
+  field.dataset = { scope: "document", role: "ingenieurs", docId: "77", original: "4" };
   field.value = "";
   h.body().dispatch("input", { target: field });
 
@@ -410,7 +410,7 @@ test("une saisie que le navigateur ne sait pas convertir est invalide, JAMAIS un
   // leve `validity.badInput`.
   const mistyped = new FakeInput("");
   mistyped.classList.add("ps-charge-assign-input");
-  mistyped.dataset = { scope: "document", docId: "77", original: "4" };
+  mistyped.dataset = { scope: "document", role: "ingenieurs", docId: "77", original: "4" };
   mistyped.value = "";
   mistyped.validity = { badInput: true };
   h.body().dispatch("input", { target: mistyped });
@@ -422,7 +422,7 @@ test("une saisie que le navigateur ne sait pas convertir est invalide, JAMAIS un
   // fenetre sans appeler onSubmit, et masquerait le defaut).
   const valid = new FakeInput("");
   valid.classList.add("ps-charge-assign-input");
-  valid.dataset = { scope: "document", docId: "78", original: "2" };
+  valid.dataset = { scope: "document", role: "ingenieurs", docId: "78", original: "2" };
   valid.value = "3";
   h.body().dispatch("input", { target: valid });
 
@@ -432,7 +432,7 @@ test("une saisie que le navigateur ne sait pas convertir est invalide, JAMAIS un
   assert.ok(received, "onSubmit a ete appele");
   assert.deepEqual(
     received,
-    [{ recordId: 78, fields: { Duree_Force: 3 } }],
+    [{ recordId: 78, fields: { Duree_Force: "3" } }],
     "la ligne mal tapee ne doit produire AUCUNE ecriture — surtout pas Duree_Force:''"
   );
   assert.ok(
@@ -451,7 +451,7 @@ test("corriger une saisie mal tapee leve le marqueur d'invalidite", async () => 
 
   const field = new FakeInput("");
   field.classList.add("ps-charge-assign-input");
-  field.dataset = { scope: "document", docId: "77", original: "4" };
+  field.dataset = { scope: "document", role: "ingenieurs", docId: "77", original: "4" };
   field.value = "";
   field.validity = { badInput: true };
   h.body().dispatch("input", { target: field });
@@ -464,7 +464,7 @@ test("corriger une saisie mal tapee leve le marqueur d'invalidite", async () => 
 
   h.clickSave();
   await flush();
-  assert.deepEqual(h.calls[0], [{ recordId: 77, fields: { Duree_Force: 2.5 } }]);
+  assert.deepEqual(h.calls[0], [{ recordId: 77, fields: { Duree_Force: "2,5" } }]);
   h.pending().resolve({ ok: true });
   await flush();
   h.modal.destroy();
@@ -493,7 +493,7 @@ test("un champ tape puis ramene a sa valeur d'origine ferme sans appeler onSubmi
 
   const field = new FakeInput("");
   field.classList.add("ps-charge-assign-input");
-  field.dataset = { scope: "document", docId: "77", original: "4" };
+  field.dataset = { scope: "document", role: "ingenieurs", docId: "77", original: "4" };
 
   field.value = "6";
   h.body().dispatch("input", { target: field }); // edition en attente : Duree_Force -> 6
@@ -611,6 +611,37 @@ test("un champ herite de zone rend value=\"\" / data-original=\"\", la valeur he
   h.modal.destroy();
 });
 
+// --- charge par metier : deux champs par niveau ------------------------------------
+
+test("charge par metier : Ingenieurs et Projeteurs a chaque niveau, seule la part editee change", async () => {
+  const rows = [{ id: 91, ID2: "3001", Type_doc: "COFFRAGE", Zone: "Zone 1", Duree_Projet: "2;3" }];
+  const received = [];
+  const h = mountChargeAssign({
+    onSubmit: async (writes) => {
+      received.push(...writes);
+      return { ok: true };
+    },
+  });
+  h.open({ planningRows: rows });
+
+  const html = h.body().innerHTML;
+  const typeInputs = [...html.matchAll(/<input[^>]*data-scope="type"[^>]*>/g)].map((match) => match[0]);
+  assert.equal(typeInputs.length, 2, "deux champs Duree_Projet");
+  assert.match(typeInputs[0], /data-role="ingenieurs"/);
+  assert.match(typeInputs[0], /value="2"/);
+  assert.match(typeInputs[1], /data-role="projeteurs"/);
+  assert.match(typeInputs[1], /value="3"/);
+  assert.ok(html.includes("Ingénieurs") && html.includes("Projeteurs"), "les metiers sont nommes");
+  assert.equal([...html.matchAll(/data-scope="zone"/g)].length, 2, "deux champs Duree_Zone");
+  assert.equal([...html.matchAll(/data-scope="document"/g)].length, 2, "deux champs Duree_Force");
+
+  h.editField({ scope: "type", role: "projeteurs", typeDoc: "COFFRAGE", original: "3" }, "4,5");
+  h.clickSave();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(received, [{ recordId: 91, fields: { Duree_Projet: "2;4,5" } }]);
+  h.modal.destroy();
+});
+
 // --- FIX ROUND 1, minor : banniere de divergence ------------------------------
 
 test("la banniere de divergence accorde diverge (singulier) et divergent (pluriel)", async () => {
@@ -666,7 +697,7 @@ test("fermer avec des editions en attente demande confirmation ; refuser garde l
 
   const field = new FakeInput("");
   field.classList.add("ps-charge-assign-input");
-  field.dataset = { scope: "document", docId: "77", original: "4" };
+  field.dataset = { scope: "document", role: "ingenieurs", docId: "77", original: "4" };
   field.value = "6";
   h.body().dispatch("input", { target: field });
 
@@ -698,7 +729,7 @@ test("confirmation acceptee du premier coup : la fenetre se ferme et l'edition e
 
   const field = new FakeInput("");
   field.classList.add("ps-charge-assign-input");
-  field.dataset = { scope: "document", docId: "77", original: "4" };
+  field.dataset = { scope: "document", role: "ingenieurs", docId: "77", original: "4" };
   field.value = "6";
   h.body().dispatch("input", { target: field });
 
@@ -726,7 +757,7 @@ test("un hote qui DEFINIT confirm sans rien demander ne bloque pas la fermeture"
 
     const field = new FakeInput("");
     field.classList.add("ps-charge-assign-input");
-    field.dataset = { scope: "document", docId: "77", original: "4" };
+    field.dataset = { scope: "document", role: "ingenieurs", docId: "77", original: "4" };
     field.value = "6";
     h.body().dispatch("input", { target: field });
 
@@ -752,7 +783,7 @@ test("une nouvelle ouverture repose la question : la soupape ne se propage pas",
   const edit = () => {
     const field = new FakeInput("");
     field.classList.add("ps-charge-assign-input");
-    field.dataset = { scope: "document", docId: "77", original: "4" };
+    field.dataset = { scope: "document", role: "ingenieurs", docId: "77", original: "4" };
     field.value = "6";
     h.body().dispatch("input", { target: field });
   };

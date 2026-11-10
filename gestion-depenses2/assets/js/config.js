@@ -76,6 +76,10 @@ export const APP_CONFIG = {
       timeReal: "TimeReal",
       team: "Team",
       timeOut: "Time-Out",
+      // Facturation a l'avancement (import BaseDRTO) et table de rattachement de
+      // ses services : elles alimentent la serie bleue du graphique des depenses.
+      avancement: "T_Avancement",
+      services: "Service",
     },
     columns: {
       projects: {
@@ -84,8 +88,6 @@ export const APP_CONFIG = {
         name: "Nom_de_projet",
         dop: "DOP",
         avancement: "Avancement",
-        billingPercentage: "Pourcentage_Facturation",
-        billingPercentageByMonth: "Pourcentage_Facturation_Par_Mois",
       },
       budget: {
         id: "id",
@@ -181,6 +183,26 @@ export const APP_CONFIG = {
         // "PrenomNom || (Prenom + ' ' + Nom)" fallback works here too (spec §4).
         prenom: "Prenom",
         nom: "Nom",
+        service: "Service",
+      },
+      avancement: {
+        projectNumber: "avc_ID_Affaire",
+        chapter: "avc_ID_Chapitre",
+        ventilation: "avc_ID_Ventilation",
+        // Mois au format AAAAMM (202509 = septembre 2025).
+        date: "avc_Date",
+        // Identifiant BaseDRTO du service, a rapprocher de Service.ID_Service.
+        serviceId: "avc_ID_Service",
+        budget: "avc_Budget",
+        percent: "avc_Pourcent",
+        // Montant facture CE mois-ci (increment, pas un cumul).
+        amount: "avc_Montant",
+      },
+      services: {
+        id: "ID_Service",
+        label: "Libelle_service",
+        // Service du widget (Structure, Synthese, Topographie). Vide = service
+        // BaseDRTO sans equivalent : ses lignes T_Avancement sont ignorees.
         service: "Service",
       },
       timeOut: {

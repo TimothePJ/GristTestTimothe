@@ -305,8 +305,10 @@ Aucun filtre indirect n'est supposé sans schéma fiable.
 Le widget MS Project n'embarque pas le runtime Projet/Service. Le chargement des
 tâches utilise une requête REST autonome avec un filtre exact sur
 `MsProject.Nom`, avec la valeur choisie dans `projectDropdown`. La défense
-cliente applique ensuite une égalité stricte sur le même nom et il n'existe
-aucun fallback complet sur `MsProject`. La liste est alimentée exclusivement par
+cliente applique ensuite une égalité stricte sur le même nom. Si REST est
+injoignable (jeton refusé, adresse API du serveur fausse), le widget relit
+`MsProject` en entier par `fetchTable` et applique le même filtre côté client,
+comme le runtime partagé. La liste est alimentée exclusivement par
 la petite table `MsProjectNom` (colonne texte `Nom`) via
 `fetchTable("MsProjectNom")`. Les valeurs sont
 nettoyées, les vides ignorés, les doublons supprimés et le résultat trié.

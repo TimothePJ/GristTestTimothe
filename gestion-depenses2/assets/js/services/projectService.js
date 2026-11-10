@@ -21,27 +21,13 @@ import {
   findBestPlanningDocumentMatches,
   formatPlanningCalendarDateIso,
   getTargetIndiceForDocumentType,
+  isSynthesePlanningTask,
 } from "../utils/planningRealisation.js";
 import { buildAbsenceIndex, normalizeName } from "../utils/leaveAbsences.js";
-
-function parseBillingPercentageByMonth(rawValue, projectNumber) {
-  if (!rawValue) return {};
-
-  try {
-    const parsed = typeof rawValue === "string" ? JSON.parse(rawValue) : rawValue;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    return parsed;
-  } catch (error) {
-    console.warn(
-      "Pourcentage_Facturation_Par_Mois JSON invalide pour le projet",
-      projectNumber,
-      error
-    );
-    return {};
-  }
-}
+import {
+  buildBilledAmountsByProject,
+  normalizeIdentifier as normalizeAvancementIdentifier,
+} from "../utils/avancementBilling.js";
 
 function createProjectNumberIndex(projects) {
   const index = new Map();
@@ -352,8 +338,19 @@ export function buildExpenseData({
   timeRealRows,
   teamRows,
   timeOutRows,
+  // Facturation a l'avancement (T_Avancement + Service), seule source de la serie
+  // bleue du graphique, et service du widget au moment de la lecture : seules les
+  // lignes de ce service comptent. Sans lignes, la facturation est vide.
+  avancementRows,
+  serviceRows,
+  activeService,
 }) {
   const columns = APP_CONFIG.grist.columns;
+  const billedAmountsByProject = buildBilledAmountsByProject(
+    avancementRows,
+    serviceRows,
+    activeService
+  );
 
   const projects = (projectRows || []).map((row) => {
     const projectNumber = toText(row?.[columns.projects.projectNumber]);
@@ -364,14 +361,10 @@ export function buildExpenseData({
       name: toText(row?.[columns.projects.name]),
       dop: toText(row?.[columns.projects.dop]),
       avancementConfigRaw: row?.[columns.projects.avancement],
-      billingPercentage: toFiniteNumber(
-        row?.[columns.projects.billingPercentage],
-        0
-      ),
-      billingPercentageByMonth: parseBillingPercentageByMonth(
-        row?.[columns.projects.billingPercentageByMonth],
-        projectNumber
-      ),
+      // { "AAAA-MM": montant facture ce mois-la }, cf. utils/avancementBilling.js.
+      billedAmountByMonth: {
+        ...(billedAmountsByProject.get(normalizeAvancementIdentifier(projectNumber)) || {}),
+      },
       budgetLines: [],
       avancementRecords: [],
       planningTasks: [],
@@ -487,7 +480,8 @@ export function buildExpenseData({
       Zone: getFirstText(row, [listePlanColumns.zone]),
       Service: getFirstText(row, [listePlanColumns.service]),
       Indice: getFirstText(row, [listePlanColumns.indice]),
-      DateDiffusion: getFirstText(row, [listePlanColumns.diffusionDate]),
+      // Valeur brute : une date Grist arrive en secondes epoch, que toText rendrait illisible.
+      DateDiffusion: row?.[listePlanColumns.diffusionDate] ?? null,
     };
 
     linkedProjects.forEach((project) => {
@@ -537,7 +531,14 @@ export function buildExpenseData({
         project?.avancementConfigRaw
       );
       const typeDoc = toText(row?.[planningColumns.typeDoc]);
-      const indice = toText(row?.[planningColumns.indice]);
+      // Une tâche Synthese garde son Indice pour elle : il ne compte pas dans l'avancement.
+      const indice = isSynthesePlanningTask({
+        service: row?.[planningColumns.service],
+        typeDoc,
+        taskName: row?.[planningColumns.taskName] ?? row?.[planningColumns.taskNameAlt],
+      })
+        ? ""
+        : toText(row?.[planningColumns.indice]);
       const targetIndice = getTargetIndiceForDocumentType(typeDoc, targetIndiceByType);
       const dateCloture = formatPlanningCalendarDateIso(row?.[planningColumns.dateCloture]);
       const task = {
@@ -747,6 +748,7 @@ export function buildExpenseData({
     id: Number(row?.[columns.team.id]),
     firstName: toText(row?.[columns.team.firstName]),
     lastName: toText(row?.[columns.team.lastName]),
+    service: row?.[columns.team.service] ?? "",
     role: (() => {
       const explicitRole = toText(row?.[columns.team.role]);
       if (explicitRole) {
@@ -790,10 +792,6 @@ export function getProjectBudgetTotal(project) {
     (sum, line) => sum + toFiniteNumber(line?.amount, 0),
     0
   );
-}
-
-export function normalizeBillingPercentageValue(value, fallback = 0) {
-  return Math.max(0, toFiniteNumber(value, fallback));
 }
 
 export function getWorkerTotalDays(daysByMonth) {
@@ -842,33 +840,6 @@ export function calculateRealSpending(project, monthKey) {
   }, 0);
 }
 
-export function getBillingPercentageForMonth(project, monthKey) {
-  const raw = project?.billingPercentageByMonth?.[monthKey];
-  if (raw != null && raw !== "") {
-    return normalizeBillingPercentageValue(raw, 0);
-  }
-
-  return normalizeBillingPercentageValue(project?.billingPercentage, 0);
-}
-
-export function getBillingAmountFromPercentage(totalBudget, billingPercentage) {
-  const normalizedBudget = Math.max(0, toFiniteNumber(totalBudget, 0));
-  if (normalizedBudget <= 0) {
-    return 0;
-  }
-
-  return normalizedBudget * (normalizeBillingPercentageValue(billingPercentage, 0) / 100);
-}
-
-export function getBillingPercentageFromAmount(totalBudget, billingAmount) {
-  const normalizedBudget = Math.max(0, toFiniteNumber(totalBudget, 0));
-  if (normalizedBudget <= 0) {
-    return 0;
-  }
-
-  return (Math.max(0, toFiniteNumber(billingAmount, 0)) / normalizedBudget) * 100;
-}
-
 export function getPriorCumulativeSpending(project, boundaryMonthKey) {
   let real = 0;
   let provisional = 0;
@@ -901,28 +872,6 @@ export function getPriorCumulativeSpending(project, boundaryMonthKey) {
   });
 
   return { real, provisional };
-}
-
-export function getPriorCumulativeBilling(project, boundaryMonthKey) {
-  let total = 0;
-  const allMonthKeys = new Set();
-
-  (project?.workers || []).forEach((worker) => {
-    Object.keys(worker?.workedDays || {}).forEach((monthKey) => {
-      allMonthKeys.add(monthKey);
-    });
-  });
-
-  [...allMonthKeys]
-    .sort()
-    .forEach((monthKey) => {
-      if (monthKey >= boundaryMonthKey) return;
-      const monthlyReal = calculateRealSpending(project, monthKey);
-      const billingPct = getBillingPercentageForMonth(project, monthKey) / 100;
-      total += monthlyReal * billingPct;
-    });
-
-  return total;
 }
 
 export function groupWorkersByRole(workers) {
@@ -1248,11 +1197,8 @@ export function getProjectKpis(project) {
 }
 
 export function buildChartSeries(project, { selectedYear, selectedMonth, monthSpan }) {
-  const allMonthKeys = new Set();
-
-  Object.keys(project?.billingPercentageByMonth || {}).forEach((monthKey) => {
-    allMonthKeys.add(monthKey);
-  });
+  const billedAmountByMonth = project?.billedAmountByMonth || {};
+  const allMonthKeys = new Set(Object.keys(billedAmountByMonth));
 
   (project?.workers || []).forEach((worker) => {
     Object.keys(worker?.provisionalDays || {}).forEach((monthKey) => {
@@ -1266,6 +1212,10 @@ export function buildChartSeries(project, { selectedYear, selectedMonth, monthSp
   const sortedKeys = [...allMonthKeys].sort();
   const cumulativeProvisionalMap = new Map();
   const cumulativeRealMap = new Map();
+  // Serie bleue du graphique : CUMUL des montants mensuels T_Avancement
+  // (billedAmountByMonth, pose par buildExpenseData ; somme des projets
+  // selectionnes dans Gestion-globale), en euros et en % du budget total.
+  const cumulativeBilledMap = new Map();
 
   if (sortedKeys.length > 0) {
     const [startYear, startMonth] = sortedKeys[0].split("-").map(Number);
@@ -1275,6 +1225,7 @@ export function buildChartSeries(project, { selectedYear, selectedMonth, monthSp
     let currentMonth = startMonth;
     let runningProvisionalTotal = 0;
     let runningRealTotal = 0;
+    let runningBilledTotal = 0;
 
     while (
       currentYear < endYear ||
@@ -1283,9 +1234,11 @@ export function buildChartSeries(project, { selectedYear, selectedMonth, monthSp
       const monthKey = `${currentYear}-${String(currentMonth).padStart(2, "0")}`;
       runningProvisionalTotal += calculateProvisionalSpending(project, monthKey);
       runningRealTotal += calculateRealSpending(project, monthKey);
+      runningBilledTotal += toFiniteNumber(billedAmountByMonth[monthKey], 0);
 
       cumulativeProvisionalMap.set(monthKey, runningProvisionalTotal);
       cumulativeRealMap.set(monthKey, runningRealTotal);
+      cumulativeBilledMap.set(monthKey, runningBilledTotal);
 
       currentMonth += 1;
       if (currentMonth > 12) {
@@ -1318,11 +1271,13 @@ export function buildChartSeries(project, { selectedYear, selectedMonth, monthSp
   const realPercentData = [];
   const billingPercentData = [];
 
-    displayedMonths.forEach(({ monthKey, monthLabel, year }) => {
-      const billingPercentage = getBillingPercentageForMonth(project, monthKey);
-      labels.push([monthLabel, String(year)]);
-      billingPercentData.push(billingPercentage);
-      billedAmountData.push(getBillingAmountFromPercentage(totalBudget, billingPercentage));
+  displayedMonths.forEach(({ monthKey, monthLabel, year }) => {
+    labels.push([monthLabel, String(year)]);
+    const cumulativeBilledAmount = cumulativeBilledMap.get(monthKey) || 0;
+    billedAmountData.push(cumulativeBilledAmount);
+    billingPercentData.push(
+      totalBudget > 0 ? (cumulativeBilledAmount * 100) / totalBudget : 0
+    );
 
     let provisionalValue = 0;
     let realValue = 0;

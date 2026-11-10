@@ -17,6 +17,7 @@
 import { APP_CONFIG } from "../config.js";
 import { toText } from "../utils/dates.js";
 import { toFiniteNumber } from "../utils/format.js";
+import { isoToGristDate } from "../top/manualDates.js";
 import { toGristMonthValue, getMonthBusinessDays } from "../utils/monthSegments.js";
 
 const resolvedColumnCache = new Map();
@@ -478,6 +479,82 @@ export async function updatePlanningDurations(writes) {
 
   if (!actions.length) return;
   await applyActions(actions);
+}
+
+// Reglages de lissage (Projets2.Lissage, texte JSON — cf. top/smoothingSettings.js).
+// Relit la table Projets2 a chaque appel (l'instantane du demarrage n'est jamais
+// reconstruit) et renvoie la ligne d'id demande, ou null si elle est absente.
+//
+// `fresh: true` contourne les DEUX caches du fetchTable patche par
+// shared/grist-service-context.js : celui des tables de contexte (30 s, chemin
+// REST) et celui des lectures brutes (45 s, chemin de repli : Projets2 est une
+// table d'acces). Ces caches ne sont vides que par NOS ecritures : sans cette
+// option, l'entree qu'un collegue vient d'enregistrer n'apparaitrait pas, et
+// l'ecriture suivante l'effacerait. Les options ne partent que vers la couche
+// partagee (cf. fetchTableRaw) ; l'API native et le mock les ignorent.
+export async function fetchProjectRow(projectId, { fresh = false } = {}) {
+  const id = toReferenceId(projectId);
+  if (!id) return null;
+  const rows = await fetchTableRows(
+    APP_CONFIG.grist.tables.projects,
+    fresh ? { forceRefresh: true, forceRawRefresh: true } : undefined
+  );
+  return rows.find((row) => Number(row.id) === id) || null;
+}
+
+// Ecrit la colonne Lissage de la ligne projet ET, le cas echeant, les dates
+// manuelles modifiees (Planning_Projet.Date_Manuel_Lissage) en UN SEUL
+// applyUserActions : un enregistrement ne doit pas laisser les reglages et les
+// dates dans deux etats differents, et un lot unique ne declenche qu'un
+// rafraichissement via le relais de synchronisation inter-widgets.
+//
+// `manualWrites` = [{ rowId, iso | null }] (cf. top/manualDates.js::
+// diffManualDates) ; iso est converti en secondes UTC (isoToGristDate), null
+// efface la cellule. Sans ecriture manuelle (defaut), le lot reste l'unique
+// UpdateRecord de Projets2, aucune autre colonne.
+//
+// Ordre du lot : Projets2 d'abord, puis une UpdateRecord par ligne de
+// planning. La couche partagee valide chaque ligne mutee et complete les
+// UpdateRecord de Planning_Projet (Service, NomProjet), cf. le test
+// « updateProjectSmoothing : le lot traverse la couche de contexte partagee ».
+//
+// Validation de CHAQUE id et de CHAQUE date AVANT de construire les actions :
+// un id (projet ou ligne) ou une date invalide fait echouer la fonction avant
+// tout appel a applyActions — aucune ecriture partielle ne doit partir.
+export async function updateProjectSmoothing(projectId, value, manualWrites = []) {
+  const id = toReferenceId(projectId);
+  if (!id || id < 1) {
+    throw new Error("Projet invalide : id manquant.");
+  }
+
+  const manualColumn = APP_CONFIG.grist.columns.planningProject.manualSmoothingDate;
+  const manualActions = (Array.isArray(manualWrites) ? manualWrites : []).map((write) => {
+    const rowId = toReferenceId(write?.rowId);
+    if (!rowId || rowId < 1) {
+      throw new Error("Ligne de planning invalide : id manquant.");
+    }
+    const hasDate = write?.iso !== null && write?.iso !== undefined && write?.iso !== "";
+    const seconds = hasDate ? isoToGristDate(write.iso) : null;
+    if (hasDate && seconds === null) {
+      throw new Error("Date manuelle invalide.");
+    }
+    return [
+      "UpdateRecord",
+      APP_CONFIG.grist.tables.planningProject,
+      rowId,
+      { [manualColumn]: seconds },
+    ];
+  });
+
+  await applyActions([
+    [
+      "UpdateRecord",
+      APP_CONFIG.grist.tables.projects,
+      id,
+      { [APP_CONFIG.grist.columns.projects.lissage]: String(value ?? "") },
+    ],
+    ...manualActions,
+  ]);
 }
 
 export async function removeTimeSegment(segmentId) {

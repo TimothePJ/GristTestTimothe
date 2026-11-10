@@ -24,7 +24,7 @@ correction pixel.
 
 | Table | Rôle | Colonnes utilisées |
 |---|---|---|
-| `Projets2` | Registre canonique des projets, pont nom ↔ numéro | `id`, `Nom_de_projet`, `Numero_de_projet` |
+| `Projets2` | Registre canonique des projets, pont nom ↔ numéro ; indices cibles et maximums du lissage | `id`, `Nom_de_projet`, `Numero_de_projet`, `Avancement`, `Lissage` (texte, facultative — voir « Lissage des tâches ») |
 | `Planning_Projet` | Planning projet (haut, lecture seule), filtré par `NomProjet` | `id`, `ID2`, `NomProjet`, `Taches`/`Tache`, `Type_doc`, `Groupe`, `Ligne_planning`, `Zone`, `Date_limite`, `Diff_coffrage`, `Diff_armature`, `Demarrages_travaux`, `Duree_Force`, `Duree_Zone`, `Duree_Projet` |
 | `TimeSegment` | Plan de charge prévisionnel (bas, éditable), filtré par `NumeroProjet` — **un segment couvre un mois entier** | `NumeroProjet`, `Name`, `Mois`, `Effectif`, `Allocation_Days`, `Label` |
 | `ProjectTeam` | Rôle de chaque personne pour le regroupement (Projeteurs / Ingénieurs / Autres), filtré par `NumeroProjet` | `NumeroProjet`, `Name`, `Role`, `Daily_Rate` |
@@ -53,9 +53,23 @@ Le widget appelle `grist.ready({ requiredAccess: "full" })` au démarrage
 (`assets/js/services/gristService.js`, `initGrist()`) : lecture de
 `Projets2`/`Planning_Projet`/`TimeSegment`/`ProjectTeam`, et écriture sur
 `TimeSegment` (création/modification/suppression de segments depuis le pane
-bas).
+bas), sur les colonnes de durée de `Planning_Projet` (charge de référence) et
+sur la seule colonne `Projets2.Lissage` (maximums du lissage).
 
 ## Charge de référence
+
+> ⚠️ **Désactivée depuis le 2026-11-10.** Les lignes Charge (Projeteurs /
+> Ingénieurs), leur légende, le bouton « Charge » et la fenêtre « Assigner la
+> charge de référence » sont **mis en commentaire** dans le code, repère
+> `CHARGE DESACTIVEE` (`bottom/chargeBoard.js`, `bottom/chargePaneState.js`,
+> `main.js`, `index.html`, `dev/harness.html`). Un projet sans personne dans
+> `ProjectTeam` n'affiche donc plus la grille, seulement le message « Aucun
+> prévisionnel pour ce projet. ». Les modules (`bottom/documentCharge.js`,
+> `bottom/chargeAssignModal.js`) et le CSS restent en place.
+> **Pour réactiver** : chercher `CHARGE DESACTIVEE` dans `planning-synchro/` et
+> suivre l'indication de chaque repère (décommenter le code, remettre `test(` à
+> la place de `test.skip(`, supprimer les tests nommés « CHARGE DESACTIVEE »).
+> La description ci-dessous est celle du comportement actif.
 
 Chaque document `Planning_Projet` déclare, dans trois colonnes, le nombre de
 jours de travail qu'il requiert :
@@ -74,6 +88,19 @@ appropriée du nouveau niveau, sans code de migration.
 Les valeurs sont exprimées en **jours, multiples de 0,5** (0, 0.5, 1, 1.5, etc.).
 Pour dire « ce document n'a aucun coût », laisser les trois colonnes vides.
 
+**Charge par métier** (2026-10-26) : chaque colonne porte **deux durées**, celle
+des **ingénieurs** puis celle des **projeteurs**, séparées par `;` — `2,5;3` =
+2,5 j ingénieurs et 3 j projeteurs. L'ancien format (un nombre seul, `2,5` ou
+`2.5`) vaut pour les ingénieurs ; `;3` n'a de valeur que pour les projeteurs.
+La cascade se résout **métier par métier** : une `Duree_Force` à `;5` ne fixe que
+les projeteurs, les ingénieurs reprennent `Duree_Zone` ou `Duree_Projet`
+(`bottom/documentCharge.js` : `parseDurationPair`, `formatDurationPair`,
+`resolveDocumentCharge`). Le widget écrit `2,5;3`, `;3`, ou `2,5` quand seuls
+les ingénieurs ont une valeur (l'ancien format), et `""` quand plus aucun.
+**Les trois colonnes doivent être de type Texte dans Grist** : une colonne
+Numérique garde `2,5;3` comme valeur invalide (cellule rouge) — le widget la lit
+quand même, mais la grille Grist la signale.
+
 La charge résolue est répartie sur les **mois que sa plage de dates touche**
 (mois du `Demarrages_travaux` jusqu'au mois de la `Date_limite`), **au prorata
 des jours ouvrés** de chaque mois. Ainsi un document de 10 jours en septembre et
@@ -83,10 +110,20 @@ somment exactement à la charge d'entrée. Un document qui n'a aucune date de
 planning (pas de phases) **ne peut s'attacher à aucun mois** ; sa charge apparaît
 dans une figure **« non placé »** affichée sur la ligne du document.
 
-Le **pane bas** affiche une ligne **Charge** sous la ligne **Total**. Par mois
-visible, elle compare les jours *planifiés* (de `TimeSegment`, calculés comme pour
-la ligne Total) contre les jours *requis* (somme des charges des documents). Trois
-couleurs indiquent la tension :
+Le **pane bas** affiche, sous la ligne **Total**, une ligne **Charge par
+métier** : **Projeteurs** puis **Ingénieurs**, dans l'ordre des sections du pane
+(la cellule Grist et la fenêtre de saisie gardent l'ordre ingénieurs ; projeteurs).
+Par mois visible,
+chacune compare les jours *planifiés* des seules personnes de ce métier (groupes
+« Ingenieurs » / « Projeteurs » du pane, d'après le rôle `ProjectTeam` ; les
+« Autres » ne comptent dans aucune) contre les jours *requis* de ce métier
+(somme des charges des documents). Les jours planifiés d'un métier sont donc ceux
+qu'affiche la ligne de sa section (« Ingenieurs », « Projeteurs ») ; la ligne
+**Total** est indicative et n'entre dans aucune comparaison. Chaque pastille
+porte les deux termes, **« requis / planifié »** (`39 j / 15 j`), `— / 12 j` quand
+rien n'est requis ce mois-là (`formatChargeLabel`, 2026-10-27) ; dans un mois trop
+étroit (coupé au bord, dézoom large), elle est coupée à la limite du mois. Chaque
+ligne a son badge « non placé ». Trois couleurs indiquent la tension :
 
 - `--load-balanced` `#d7eccb` (vert clair) : jours planifiés = jours requis ;
 - `--load-overload` `#ffe1a8` (beige clair) : **moins** de jours planifiés que
@@ -97,10 +134,17 @@ couleurs indiquent la tension :
 La charge n'est pas plafonnée : un mois peut requérir plus de jours qu'il n'en
 contient.
 
-Un **bouton Charge** sur cette ligne ouvre une **fenêtre de saisie** qui répartit
-les durées sur trois niveaux : Type de document → Zone → Document. À chaque
-niveau, un champ vide affiche la valeur héritée du niveau au-dessus (grisée, en
-lecture seule) ; seules les valeurs **explicites** sont modifiables. L'enregistrement
+Un **seul bouton Charge**, sur la première de ces deux lignes (la case du
+bouton reste vide sur la seconde, pour aligner les noms de métier), ouvre la
+**fenêtre de saisie** qui règle les deux métiers et répartit les durées sur trois niveaux : Type de
+document → Zone → Document. Chaque niveau a **deux champs**, Ingénieurs et
+Projeteurs. À chaque niveau, un champ vide affiche la valeur héritée du niveau
+au-dessus pour son métier (grisée, en lecture seule) ; seules les valeurs
+**explicites** sont modifiables. Une saisie ne change que le métier saisi :
+l'autre part de chaque ligne visée est gardée telle quelle ; aux niveaux type et
+zone, une ligne où elle est **vide** reçoit la valeur affichée pour ce niveau
+(sa valeur propre, jamais une valeur héritée), pour que la fenêtre ne crée pas
+elle-même de divergence. L'enregistrement
 écrit chaque ligne affectée en un **seul lot** d'`UpdateRecord`.
 
 ## Conception : frise partagée et alignement arithmétique
@@ -108,8 +152,8 @@ lecture seule) ; seules les valeurs **explicites** sont modifiables. L'enregistr
 Un **viewport canonique** unique (`{ mode, firstVisibleDate, visibleDays,
 rangeStartDate, rangeEndDate, anchorDate }`) est produit par toute
 interaction (toolbar semaine/mois/année, précédent/suivant/aujourd'hui,
-molette-zoom) et appliqué aux **deux** panes de façon synchrone, dans un
-seul `requestAnimationFrame` (`assets/js/sync/controller.js`). Comme les deux
+molette-zoom, glisser) et appliqué aux **deux** panes dans la **même image**
+(`assets/js/sync/controller.js` ; voir « Fluidité » plus bas). Comme les deux
 panes vivent dans le **même document**, à la **même largeur de contenu**, en
 recevant **les mêmes nombres** (`firstVisibleDate`/`visibleDays`), la largeur
 de jour (`dayWidth = contentWidthPx / visibleDays`) — et donc l'alignement
@@ -122,9 +166,19 @@ correction). Les bornes de la frise sont l'**union** de la plage `TimeSegment`
 `top/bounds.computeTimeSegmentBounds`) **et** de la plage de toutes les phases
 `Planning_Projet` (dateBounds du builder, via `computePlanningPhaseBounds` +
 `unionDateBounds` dans `main.js`), afin qu'une tâche dont les phases tombent hors
-du prévisionnel reste visible et navigable. La fenêtre visible se déplace
+du prévisionnel reste visible et navigable — et un segment du pane bas posé plus
+tôt que la première tâche ouvre la frise jusqu'à son mois. Quand un lissage est
+actif, s'y ajoutent les **mois des tâches lissées** (`smoothing.getSmoothedBounds()`) :
+un mois de départ passé peut avancer des tâches bien avant le planning, et la
+frise s'ouvre jusqu'à elles, au chargement comme juste après un enregistrement
+(elle s'élargit alors sans jamais rétrécir). La fenêtre visible se déplace
 librement dans ces bornes (toolbar / molette-zoom sur l'axe / glisser) et
-s'ouvre au maximum sur **14 mois** (`viewport.maxVisibleDays`).
+s'ouvre au maximum sur **5 ans** (`viewport.maxVisibleDays` = 1826 jours ; c'était
+14 mois jusqu'au 2026-10-26). Le dézoom s'arrête à l'**étendue des données** :
+jamais de fenêtre qui déborde des bornes, une fenêtre plus large est ramenée
+exactement sur elles (`sync/viewportMath.clampToBounds`). Un projet long (ou
+lissé loin en arrière) se dézoome donc sur plus d'un an, un projet court sur sa
+seule durée.
 
 ## Pane haut = rendu Planning Projet exact (lecture seule, colonne Tâche)
 
@@ -189,6 +243,63 @@ tronqué en `…` si trop long, avec le nom complet en info-bulle native (`title
   zoom. Le handler molette du contrôleur distingue la région (axe vs lignes).
 - **Toolbar** (semaine/mois/année, précédent/suivant/aujourd'hui) inchangée.
 
+#### Fluidité (2026-10-27)
+
+Mesuré dans Chrome sur l'export réel d'ERA QUAI D'ORSAY (190 tâches, 14
+personnes sur 2 ans) : le glisser en zoom année passait à **18 images/s** (pires
+images 0,5 s), la molette à **12 images/s**. Causes et remèdes :
+
+- **Glisser au pixel près.** Le glisser s'arrondissait au jour : en zoom mois la
+  frise avançait par sauts de ~44 px, en zoom semaine de ~200 px. La fenêtre
+  porte désormais une **fraction de jour** (`offsetDays`, à côté de
+  `firstVisibleDate` qui reste un jour entier) que les deux panes et le graphique
+  appliquent ; elle est gardée au relâcher, et tombe à 0 en butée (la fenêtre
+  s'arrête pile sur un jour, jamais au-delà des bornes). Toolbar et changement de
+  zoom repartent d'un jour entier.
+- **Le pane bas ne se reconstruit plus pendant un glisser.** Il dessine, dès
+  l'appui, une **marge** d'une fenêtre de chaque côté (plafonnée à 400 jours et
+  aux bornes de la frise), puis **décale** ses pistes (`transform`, un calque par
+  piste pendant le geste) ; il ne redessine que si la marge est épuisée, et une
+  fois au relâcher pour retrouver la fenêtre exacte (`bottom/chargeBoard.js`,
+  « plage dessinée »). Les cellules de la grille gardent la largeur visible et
+  coupent le reste.
+- **Plus de bridage à 120 ms.** Chaque rendu du pane bas coûtait 120 à 430 ms
+  (tout se recalculait à chaque pixel), le bridage ne servait donc jamais et,
+  une fois le rendu allégé, il laissait le pane bas à ~8 images/s derrière le
+  pane haut. Ce qui ne dépend que des données (jours effectifs, disponibilité
+  après absences, surcharge, tâches par barre, charge du projet) est calculé une
+  fois par changement de données ; la recherche des créneaux d'une barre est
+  dichotomique ; les week-ends sont **un seul dégradé** répété (les fériés en
+  semaine et les absences restent des cases, une par suite de jours). Le pane bas
+  est redessiné dans la frame du contrôleur, la même que vis.
+- **Les deux panes dans la même image.** vis-timeline redessine dans sa propre
+  frame : pendant un geste, il reçoit la fenêtre dans l'événement même, pour
+  redessiner dans la frame où le pane bas bouge (il avait une image de retard).
+  Hors geste (chargement d'un projet, toolbar), rien ne change : au chargement,
+  `#ps-main` est encore masqué et vis, servi en largeur nulle, écrasait le pane
+  haut.
+- **Molette proportionnelle et ancrée.** 10 % de jours par cran de 100 px
+  (comme avant pour une souris), un pavé tactile zoome par petites touches au
+  lieu de sauter de 10 % à chaque événement ; le jour sous le curseur, lu dans la
+  zone de la frise (hors colonne des noms), reste sous le curseur.
+- **Couloirs de barres stables.** Le couloir (1ʳᵉ ou 2ᵉ ligne) d'une barre et le
+  nombre de couloirs d'une personne se calculent sur tous ses segments, plus sur
+  les seules barres visibles : quand la fenêtre bouge, les barres ne changent
+  plus de couloir et les lignes ne grandissent ni ne rétrécissent plus de 12 px
+  (une personne aux mois contigus a toujours deux couloirs, même quand une seule
+  barre est visible).
+- **Mode Editer gardé.** Un zoom ou un glisser redessine le pane bas avec le mode
+  qu'il affiche (posé par `bottom/chargeEditing.js`) ; il revenait sur
+  « Editer » alors que l'édition restait active.
+
+Au relâcher, les libellés des mois coupés aux bords (pastilles, barres), qui ont
+glissé avec leur mois pendant le geste, reviennent au bord de la fenêtre.
+
+Après : glisser **56 à 60 images/s** à tous les zooms, les deux panes calés à
+moins d'1 px image par image ; molette ~51 images/s. Le coût restant est le
+redessin de vis-timeline lui-même (191 lignes). Tests :
+`tests/fluidity.test.mjs`.
+
 Le segment **démarrage de travaux** est rendu **exactement comme Planning
 Projet** — un marqueur vert clair (`#dcfce7` / `#86efac`, contenu transparent de
 largeur nulle) à pleine hauteur de ligne — produit pour les armatures (toujours)
@@ -211,7 +322,12 @@ identique à celle de `gestion-depenses2` : une piste en lecture seule
 (`bottom/chargeBoard.js` — port de `renderTotalRow` / `renderReadonlyTrack`) qui
 montre, **par mois visible**, le total des **jours‑personne effectifs** planifiés
 tous collaborateurs confondus (barre de remplissage proportionnelle + « X j »),
-avec le **total général** dans la cellule de nom.
+avec le **total général** dans la cellule de nom. Chaque **ligne de rôle**
+(« Projeteurs », « Ingenieurs », « Autres ») porte de même le **total du rôle**
+à droite de son nom et, par mois visible, une pastille des jours planifiés de
+ses seules personnes (`renderRoleRow`, même calcul et même pastille que la
+ligne Total). Une pastille s'élargit toujours au moins à sa valeur (« 5 j »,
+jamais « 5 » rogné), dans la limite de son mois.
 
 ### Projet sans aucun `TimeSegment`
 
@@ -224,7 +340,9 @@ chargement initial et le rafraîchissement post-écriture) :
   ne s'affiche **pas** (il parle des personnes, pas des segments) ;
 - **aucune personne mais des lignes `Planning_Projet`** → la grille reste rendue,
   pour la ligne **Charge** et son bouton, seul point d'entrée de la fenêtre
-  d'assignation des charges de référence ; le message s'affiche ;
+  d'assignation des charges de référence ; le message s'affiche
+  (**désactivé** avec la charge de référence le 2026-11-10 : le pane bas est
+  alors masqué, seul le message reste) ;
 - **ni l'un ni l'autre** → le pane bas est masqué.
 
 Les **bornes de la frise** sont l'union du prévisionnel et des phases du planning ;
@@ -266,16 +384,36 @@ réduite pour tenir plus de tâches à l'écran.
 
 ### Vue « Graphique » (premier planning)
 
-Quand la case **« Rassembler visuellement le planning »** est cochée, un
-sélecteur **Planning / Graphique** apparaît au-dessus du pane haut. **Graphique**
-**remplace** la timeline par un graphique en **courbes** (`top/planningChart.js`)
-utilisant **Chart.js** — la **même technologie** que la section « Graphique des
-dépenses » de `gestion-depenses2` (`assets/js/ui/chart.js`). Il trace, par mois,
-le **nombre de tâches à réaliser** (date de diffusion de la phase) avec **une
-ligne par type de document** (Coffrage / Armature / NDC / Coupes / Démolition /
-Autres) **et une ligne Total**. **Chaque ligne est doublée d'une ligne en
-pointillé « (réalisé) »** montrant, aux mêmes dates, le sous-ensemble de ces
-tâches **réalisées à 100 %** (colonne `Realise` ≥ 100).
+Dès que le projet a au moins une tâche que le planning dessine, un sélecteur
+**Planning / Graphique** apparaît au-dessus du pane haut — que la case
+**« Rassembler visuellement le planning »** soit cochée ou non : le graphique ne
+dépend plus de ce mode. **Graphique** **remplace** la timeline par un graphique en
+**courbes** (`top/planningChart.js`) utilisant **Chart.js** — la **même
+technologie** que la section « Graphique des dépenses » de `gestion-depenses2`
+(`assets/js/ui/chart.js`). Il trace, par mois ou par semaine (**Regrouper par :
+Mois | Semaine**), le **nombre de tâches à réaliser** avec **une ligne par type
+de document** (Coffrage / Armature / NDC / Coupes / Démolition / Autres) **et
+une ligne Total**. **Chaque ligne est doublée d'une ligne en pointillé
+« (réalisé) »** montrant, aux mêmes dates, le sous-ensemble de ces tâches
+**réalisées à 100 %**.
+
+**Une tâche est datée comme la barre dessinée** (`top/taskLoadModel.js`) : le
+graphique ne relit plus les colonnes brutes `Date_limite` / `Diff_coffrage` /
+`Diff_armature` / `Realise`. Il prend ses tâches dans la sortie du constructeur
+vendorisé, celui qui dessine le pane haut, qui **recalcule** les dates comme
+Planning Projet (coffrage lié à MS Project : `Demarrages_travaux` − `Duree_3`
+semaines ; coffrage de groupe : plus petite `Diff_coffrage` des armatures du
+groupe ; début = fin − `Duree_1` semaines) :
+
+- **échéance** = date de fin de la barre principale de la ligne ;
+- **type** = celui de la barre (`phase-generic` → Autres) ;
+- **réalisé** = état réalisé de la barre (indice, indice cible de
+  `Projets2.Avancement`, `Date_Cloture`), et non la colonne `Realise` stockée.
+
+Une ligne que le planning ne dessine pas (pas de type, dates manquantes) n'est pas
+une tâche. Effet visible : pour les lignes dont les colonnes brutes ne suivent pas
+les dates recalculées, les courbes ont légèrement changé ; elles collent
+désormais au planning. Le lissage (section suivante) part de ces mêmes tâches.
 
 Son axe des temps est **coordonné avec la frise** (mêmes dates visibles que le
 pane bas ; `min`/`max` = fenêtre courante), donc il **suit le zoom et le
@@ -315,19 +453,324 @@ timeline remplacée).
 
 **Filtre par cases à cocher** (`#ps-chart-filter`, au-dessus du graphique) : une
 case **par type de document présent** dans le projet (+ Total), toutes cochées au
-départ. Décocher un type **masque** ses deux lignes (pleine + « réalisé »), le
-cocher les ré-affiche ; on affiche donc uniquement les types voulus. Le filtre
-est conservé au **zoom / déplacement** (ré-appliqué à chaque reconstruction des
-séries) et se réinitialise (tout coché) au changement de projet.
+départ. Décocher un type **masque** toutes ses lignes (pleine, « réalisé » et,
+en mode « Les deux », « avant lissage »), le cocher les ré-affiche ; on affiche
+donc uniquement les types voulus. Le filtre est conservé au **zoom /
+déplacement** (ré-appliqué à chaque reconstruction des séries) et au
+**rechargement du même projet et du même service** (un collègue modifie le
+planning : la vue en cours, le regroupement Mois / Semaine et le filtre restent
+tels quels, un type nouveau arrive coché). Il se réinitialise (tout coché) au
+changement de projet ou de service, qui ramène aussi sur la vue Planning.
 
 **Légende** (`#ps-chart-legend`, colonne de gauche du graphique) : la légende
 intégrée de Chart.js est désactivée (`plugins.legend.display: false` — placée en
 bas, sa hauteur rognait le tracé) au profit d'une liste HTML verticale dans la
 colonne de gauche, à la même largeur que la colonne des noms du planning du bas.
 Elle porte le titre de l'axe Y (« Tâches à réaliser », sorti du canvas où il
-consommait une partie de la bande d'axe) et rappelle la convention
-plein / pointillé. Elle est **en lecture seule** : le filtre ci-dessus pilote la
-visibilité, et la légende **grise** (`.is-off`) les types décochés.
+consommait une partie de la bande d'axe) et rappelle la convention du mode
+affiché (plein / pointillé, plus « pâle = avant lissage » en mode « Les deux »).
+Elle est **en lecture seule** : le filtre ci-dessus pilote la visibilité, et la
+légende **grise** (`.is-off`) les types décochés.
+
+**Clic sur le graphique** : un clic **sans glisser** ouvre la liste des tâches
+du mois (ou de la semaine) sous le pointeur — voir « Lissage des tâches »
+ci-dessous.
+
+### Lissage des tâches (vue Graphique)
+
+Le graphique montre des **pics** (8 tâches en avril, 0 en mars). Le lissage
+fixe un **nombre maximum de tâches par mois**, en général et/ou par type de
+document, et calcule un **planning lissé** dans lequel les tâches en trop sont
+**réalisées plus tôt, jamais plus tard** : aucune tâche lissée n'est en retard
+sur sa date réelle. C'est un **planning cible** : il ne modifie **aucune date**
+de `Planning_Projet`. Seuls les maximums sont enregistrés (`Projets2.Lissage`) ;
+le lissé est **recalculé à chaque affichage** à partir des maximums et du
+planning courant (`top/taskSmoothing.js`, pur et testé, dont un fuzz des règles
+strictes).
+
+**Vocabulaire.** Le **mois courant** est celui de la date du jour (horloge du
+navigateur). Le **mois de départ** est le premier mois où une tâche peut être
+placée : le mois courant par défaut, ou un mois passé choisi dans la fenêtre
+(« Lisser à partir de »). Une tâche est **figée** si elle est réalisée, ou si
+elle est **en retard** (échéance dans un mois passé) **sans mois de départ avant
+elle** : elle garde son mois et y compte. Les autres sont **mobiles** : les
+tâches **à venir**, et, avec un départ passé, les tâches en retard d'un mois
+postérieur au départ (2026-10-28). Les tâches à venir sont placées **d'abord**,
+les tâches en retard **ensuite**, dans la place qui reste. Les
+maximums valent **par mois**, même quand le graphique est regroupé par semaine ;
+un **mois particulier** peut avoir ses propres maximums (voir les réglages).
+
+**Règles strictes** (jamais enfreintes) :
+
+1. **Jamais plus tard** : le mois lissé d'une tâche est son mois d'origine ou un
+   mois antérieur.
+2. **Jamais avant le mois de départ** ; quand le départ est le mois courant (par
+   défaut), jamais non plus à une date antérieure à aujourd'hui. Avec un départ
+   passé, les mois passés à partir de lui reçoivent des tâches à venir ou en
+   retard, même s'ils sont vides.
+3. **Les tâches figées ne bougent pas.**
+4. **Armature après son coffrage** : l'échéance lissée d'une armature n'est
+   jamais antérieure à celle d'un coffrage non réalisé de son groupe (même Zone
+   et même Groupe). Une armature qui doit avancer avant son coffrage **entraîne
+   le coffrage** : il part dans le mois le plus tardif, au plus celui de
+   l'armature, où il tient sous ses propres maximums, et il est marqué « avancé
+   pour libérer l'armature N° … ». Si le coffrage ne trouve pas de place,
+   l'armature reste (raison « coffrage sans place »). Un coffrage réalisé ne
+   contraint plus rien ; un coffrage en retard contraint toujours (une armature
+   ne passe jamais avant lui) et, mobile avec un départ passé, il est entraîné
+   comme les autres.
+5. **Une tâche n'est avancée que là où elle tient** : le mois qui la reçoit
+   respecte, après lissage, le maximum de **son type** et le **maximum
+   général** de **ce mois**. Une tâche sans place reste dans son mois d'origine.
+6. **Déterministe** : mêmes tâches, mêmes maximums, même mois courant → même
+   résultat.
+
+**Préférences**, dans l'ordre : laisser le moins de tâches possible au-dessus
+des maximums ; un dépassement impossible à résorber reste dans le mois le plus
+tardif (son mois d'origine), et la place libre va au **premier** mois débordant ;
+avancer **le moins possible** (le mois le plus tardif où la tâche tient) ;
+conserver l'**ordre chronologique** dans la file soumise au maximum qui déborde
+(une file unique quand seul le maximum général existe, une file par type dès
+qu'un maximum par type existe) ; à échéance égale, ordre par N° (`ID2`) puis par
+identifiant de ligne. L'ordre vaut entre tâches à venir et entre tâches en
+retard : une tâche en retard peut rester dans son mois quand une tâche à venir,
+plus tardive, a pris avant elle la dernière place libre (priorité aux tâches à
+venir). La première préférence est **visée, pas garantie** : le
+calcul se fait en une passe, et dans de rares cas il laisse un dépassement qu'un
+déplacement en chaîne aurait résolu. Il est alors signalé ; aucune règle stricte
+n'est enfreinte.
+
+**Date lissée** : une tâche avancée de N mois garde **son jour du mois**
+(12 avril → 12 mars ; 31 mai → 30 avril) ; quand le lissage part du mois
+courant, une date déjà passée dans le mois courant devient **aujourd'hui** (avec
+un départ passé, le jour est gardé) ; une armature ne prend jamais une date
+antérieure à l'échéance lissée de son coffrage. Une tâche non avancée garde sa
+date.
+
+**Dépassements restants**, rapportés par mois et par série (type ou Total),
+chacun avec le maximum de son mois et sa raison : **mois en cours** (lissage
+parti du mois courant : impossible d'avancer avant lui), **tâches réalisées**
+(les tâches figées dépassent déjà le maximum), **tâches réalisées ou en retard**
+(un mois passé déjà plein, avec un départ passé), **plus de place avant** (tous
+les mois antérieurs, jusqu'au mois de départ, sont pleins), **coffrage sans
+place**. Les mois d'avant le mois de départ ne sont ni lissés ni signalés.
+
+**Tâches en retard : mobiles, mais après les tâches à venir** (2026-10-28).
+Jusque-là figées, elles empêchaient d'utiliser la marge d'un départ lointain :
+départ octobre 2024, maximum 3 armatures (export ERA), la cascade s'arrêtait en
+novembre 2025 et juillet, août et septembre 2026 restaient en dépassement, pleins
+d'armatures en retard, alors que vingt mois libres les précédaient. Elles sont
+désormais mobiles, mais placées **après** les tâches à venir : placées ensemble,
+étant plus tôt dans le calendrier, elles prenaient d'abord les mois libres et en
+privaient les mois à venir (maximum 4 partout, départ juin 2025 : 26 tâches en
+trop à venir au lieu de 3). Mesuré sur l'export ERA, les mois à venir ont
+exactement le même résultat qu'avec des tâches en retard figées, et les mois
+passés ne peuvent que s'améliorer : 0 dépassement au lieu de 7 dans le cas
+ci-dessus ; maximum 4 partout, départ octobre 2024 : 4 tâches en trop passées
+au lieu de 24.
+
+#### Réglages : bouton « Lisser… » et colonne `Projets2.Lissage`
+
+Le bouton **« Lisser… »** n'apparaît qu'en vue Graphique ; il porte une marque
+« actif » quand un lissage est défini pour ce projet et ce service. Il ouvre la
+fenêtre **« Lissage des tâches — <Projet> · <Service> »**
+(`top/smoothingModal.js`) :
+
+- **Lisser à partir de** : « Mois en cours (…) » par défaut, ou un mois passé,
+  jusqu'à 5 ans avant la première échéance du projet (des mois vides) ;
+- **Maximum général (tous types)** et **un champ par type présent** dans le
+  projet, avec le **pic actuel** du type (plus grand nombre de tâches non lissées
+  sur un mois à venir, mois courant inclus) pour aider à choisir ; ces valeurs
+  valent pour **tous les mois** ;
+- **Mois particuliers** : « Ajouter ce mois » ajoute une ligne (Total + une
+  colonne par type) dont les cases **remplacent**, pour ce mois seulement, les
+  maximums de tous les mois ; une case vide reprend la valeur de tous les mois
+  (rappelée en grisé) ; « N tâches prévues » donne la charge du mois avant
+  lissage ; ✕ retire le mois ;
+- valeurs : **entier ≥ 1**, ou **vide** = pas de maximum ; une saisie invalide est
+  signalée sur le champ et bloque « Enregistrer » ;
+- **0 pour un mois particulier** (2026-10-27) : une case d'un mois particulier
+  accepte **0** — aucune tâche ce mois-là (case Total), ou aucune de ce type
+  (case d'un type). Ses tâches mobiles sont avancées dans les mois d'avant,
+  là où elles tiennent, et aucune tâche n'y est avancée, même s'il est vide. Les
+  tâches figées (réalisées, en retard sans mois avant elles) y restent, et le mois est alors signalé en
+  dépassement avec sa raison (« tâches réalisées », « mois en cours » quand le
+  lissage part du mois courant, « plus de place avant »). Un 0 n'est pas permis
+  dans les maximums de tous les mois : il n'y laisserait aucune tâche nulle part ;
+- **Aperçu** recalculé à chaque saisie : nombre de tâches avancées, dépassements
+  restants et leur raison, tableau **Avant / Après** des mois qui changent ou
+  restent en dépassement ;
+- **Enregistrer** écrit la cellule puis, si un maximum subsiste, passe le
+  graphique en « Les deux » pour montrer l'effet ; **Supprimer le lissage** (après confirmation) retire
+  l'entrée du service ; **Échap**, « Fermer » ou « Annuler » ferment sans rien
+  écrire ;
+- **lecture seule** quand le service affiché n'est pas votre service de
+  rattachement (`GristServiceContext.isReadOnly()`) : la fenêtre s'ouvre en
+  consultation, champs et boutons d'écriture désactivés.
+
+La colonne **`Projets2.Lissage`** est une colonne **texte**, à **créer à la
+main** dans Grist (document de test, puis prod). Elle contient un JSON, **une
+entrée par service** (comme `Projets2.Avancement`) :
+
+```json
+{"version":1,"services":{"Structure":{"maxTotal":4,"maxParType":{"COFFRAGE":2,"ARMATURES":2}}}}
+```
+
+- clés de type : `COFFRAGE`, `ARMATURES`, `NDC`, `COUPES`, `DEMOLITION`,
+  `AUTRES` ; une clé absente = pas de maximum pour ce type, `maxTotal` absent =
+  pas de maximum général ; un service sans aucune valeur n'a pas d'entrée (pas de
+  lissage) ;
+- deux clés facultatives : `"debut":"2025-06"` (mois de départ ; absent = mois
+  courant) et `"parMois":{"2027-03":{"maxTotal":10,"maxParType":{"ARMATURES":6}}}`
+  (maximums d'un mois précis, même forme ; une valeur absente reprend celle de
+  tous les mois ; `0` = aucune tâche, ou aucune de ce type, ce mois-là ; un mois
+  sans valeur n'est pas écrit). Une version du widget qui ne les connaît pas les
+  ignore et lisse avec les seuls maximums de tous les mois ; une version
+  d'avant le 2026-10-27 ignore aussi un `0` de mois (avec un `console.warn`) ;
+- lecture **tolérante** (`top/smoothingSettings.js`) : cellule vide, JSON
+  illisible, valeur non entière ou < 1 (< 0 pour un mois précis) → ignorée avec un `console.warn`, jamais
+  de plantage du graphique ; un enregistrement ultérieur réécrit une cellule
+  propre ;
+- **colonne absente** (la prod tant qu'elle n'est pas créée) : le bouton
+  « Lisser… » est grisé avec l'explication « Ajoutez une colonne texte « Lissage »
+  dans Projets2 pour activer le lissage. » ; le reste du graphique fonctionne ;
+- projet sans tâche datée : bouton grisé, « Aucune tâche à lisser » ;
+- **écriture** : la cellule est **relue juste avant** d'écrire, seule l'entrée
+  du service courant est remplacée (les autres services sont conservés tels
+  quels), en **une seule** `UpdateRecord` sur la colonne `Lissage`
+  (`updateProjectSmoothing`). L'écran de celui qui enregistre se met à jour tout
+  de suite, sans rechargement. En cas d'échec, un message s'affiche dans la
+  fenêtre et la saisie est gardée.
+
+La cellule est **relue à chaque chargement de projet** (`fetchProjectRow`, en
+même temps que les données du projet), jamais prise dans l'instantané de
+`Projets2` du démarrage ; un changement de service relit l'entrée du nouveau
+service.
+
+#### Plan particulier : date de fin imposée
+
+Un plan peut recevoir une **date de fin imposée**, utilisée **uniquement en mode
+lissé** (colonne `Planning_Projet.Date_Manuel_Lissage`) :
+
+- le plan **compte dans le maximum de son mois** (celui de la date imposée) et
+  les **autres plans se lissent autour de lui** ; lui-même n'est jamais déplacé
+  par le lissage ;
+- l'**échéance sans lissage** (mode « Non lissé », courbe pâle de « Les deux »)
+  reste **inchangée** ;
+- **colonne à créer dans Grist** : `Date_Manuel_Lissage`, type **Date**, format
+  `DD/MM/YYYY`, dans `Planning_Projet`. Sans elle, la section est **désactivée**
+  et affiche « Ajoutez une colonne Date « Date_Manuel_Lissage » dans
+  Planning_Projet pour imposer la date d'un plan. » ;
+- **section « Plan particulier »** de la fenêtre « Lissage des tâches » : la liste
+  des plans à date imposée (une case date par ligne), « Ajouter ce plan »
+  (ajoute le plan choisi dans la liste déroulante « Plan à ajouter » de la
+  fenêtre « Lissage », avec pour date sa date lissée actuelle, mais jamais avant
+  la première date permise : un plan en retard part de ce minimum),
+  « Choisir dans la liste… » (ouvre la fenêtre « Choisir les plans ») et ✕ pour
+  **Retirer** la date d'un plan ; sans plan, « Aucun plan particulier : le
+  lissage place chaque plan lui-même. » ;
+- **fenêtre « Choisir les plans »** : ouverte par-dessus la fenêtre « Lissage »,
+  elle fonctionne comme « Rechercher un plan » (N°/nom, zone, type, état) avec en
+  plus une **case date** par plan ; « Terminé » la ferme, et **Échap ne ferme
+  qu'elle** (la fenêtre « Lissage » reste ouverte) ;
+- **règles** : un plan **réalisé** ne reçoit pas de date ; une date **plus tôt ou
+  plus tard** que l'échéance est permise ; une **armature à date manuelle entraîne
+  ses coffrages** ; « Supprimer le lissage » **efface aussi** les dates manuelles ;
+  « Enregistrer » n'écrit que les **plans touchés** (les autres dates, y compris
+  celles de plans absents de la liste, ne sont jamais effacées) ;
+- **date minimale** : aujourd'hui quand le lissage part du mois en cours, sinon
+  le 1er du mois de départ choisi (« Lisser à partir de ») ; une date déjà
+  enregistrée plus tôt reste acceptée tant qu'on ne la modifie pas ;
+- **activation** : des dates manuelles suffisent à activer le lissage, même sans
+  aucun maximum (les modes « Lissé » et « Les deux » sont alors disponibles) ;
+- **où on la voit** : « Rechercher un plan » indique « date manuelle » et propose
+  le filtre « Dates manuelles » ; la fenêtre « Tâches du mois » ajoute la note
+  « date manuelle (échéance JJ/MM/AAAA) » ; l'aperçu du lissage compte « N dates
+  manuelles ».
+
+#### Modes « Non lissé / Lissé / Les deux »
+
+Le groupe **« Afficher »** n'apparaît que lorsqu'un lissage est défini :
+
+- **Non lissé** : le graphique d'avant (trait plein = toutes les tâches,
+  pointillé = réalisées) ;
+- **Lissé** : le même graphique, calculé sur les **dates lissées** ;
+- **Les deux** : pour chaque série cochée, trait plein = **lissé**, trait **pâle
+  et fin** de la même couleur = **avant lissage** ; les tâches réalisées ne
+  bougeant jamais, une seule courbe en pointillé « réalisé » est tracée.
+
+Le choix est **mémorisé par navigateur** (`localStorage`,
+`planning-synchro.smoothing-view`, « Les deux » par défaut), pas dans Grist. Le
+filtre par type s'applique aux trois modes.
+
+#### Fenêtre « Tâches du mois »
+
+Un **clic** sur le graphique (`top/monthTasksModal.js`) ouvre la liste des tâches
+du **seau** sous le pointeur : le mois, ou la semaine si le graphique est
+regroupé par semaine. **Un glisser n'ouvre jamais la liste** : au-delà de 4 px
+parcourus, le geste est un déplacement de la frise. Le geste est reconnu sur le
+document, en capture, parce que le panoramique (`bindPan(#ps-chart)`) capture le
+pointeur et arrête la propagation : le canevas lui-même ne reçoit rien.
+
+- Seuls les **types cochés** sont listés (seul « Total » coché → tous les
+  types) ; plusieurs types → **une section par type** (ordre et couleur du
+  graphique, avec le compte), un seul type → une liste simple ; tri par date
+  puis par N°.
+- Une ligne : date (lissée en mode lissé), N° (`ID2`), nom, zone et groupe,
+  **pourcentage d'avancement** (le même que la colonne « Réalisé » de Planning
+  Projet : indice du document face à l'indice cible du projet, recalculé par le
+  constructeur vendorisé — `ChartTask.progress`), « réalisation forcée le … »
+  pour une clôture forcée, « avancée de <mois> (<date d'origine>) », « avancé
+  pour libérer l'armature N° … ». Une tâche **réalisée** (100 %) est **en vert**
+  (fond vert pâle, liseré, texte `#15803d` comme une ligne réalisée de Planning
+  Projet).
+- Quand un lissage est défini, l'en-tête de section rappelle le compte face au
+  maximum (« Armature (3 / 2) ») et un mois resté en dépassement l'affiche en
+  avertissement, avec sa raison.
+- **Non lissé** : tâches dont l'échéance d'origine tombe dans le seau ;
+  **Lissé** : échéance lissée ; **Les deux** : comme Lissé, plus une section
+  **« Parties plus tôt »** (tâches avancées hors du seau, avec leur mois
+  d'arrivée).
+- Seau vide : « Aucune tâche à réaliser sur cette période. » ; la fenêtre est
+  en lecture seule.
+- **Flèches `<` `>`** (avant le titre, mêmes boutons que ceux de la barre
+  d'outils) et **touches ← →** : mois précédent / suivant (semaine précédente /
+  suivante si le graphique est regroupé par semaine) **sans fermer la
+  fenêtre**. Mêmes types cochés, même mode (non lissé / lissé / les deux) ; la
+  liste repart du haut. La navigation n'est pas bornée à la fenêtre visible du
+  graphique : un mois sans tâche affiche la liste vide. Les touches sont
+  ignorées avec Alt / Ctrl / Maj (Alt+← reste le retour du navigateur). Calcul
+  du seau voisin : `shiftBucket` (`top/monthTasksModal.js`, en UTC pour qu'une
+  semaine ne glisse pas au changement d'heure) ; libellé de semaine partagé
+  avec le clic sur le graphique (`formatWeekLabel`, `top/taskLabels.js`).
+- La fenêtre a une **taille fixe** (760 × 720 px au plus, sinon la hauteur de
+  l'écran) : centrée, elle ne monte ni ne descend d'un mois à l'autre, et les
+  flèches restent sous le curseur ; la liste défile à l'intérieur. Les flèches
+  sont calées en haut : un titre qui passe sur deux lignes ne les déplace pas.
+
+#### Rechargement, autres utilisateurs
+
+- **Pas de mise à jour en direct chez les collègues.** Le relais de
+  synchronisation (`ProjectMutationSyncConfig` de `index.html`) ne signale pas
+  les écritures dans `Projets2` : un lissage enregistré par un collègue apparaît
+  quand on **rouvre ou resélectionne le projet**. Si un signal `Projets2` arrive
+  malgré tout (relecture du catalogue après une autre écriture), la cellule
+  relue est comparée à celle en mémoire et le graphique est redessiné si elle a
+  changé — jamais de rechargement complet pour autant. Une saisie manuelle dans
+  la grille Grist est prise au chargement suivant du projet.
+- **Rechargement du même projet et du même service** (une date ou un avancement
+  modifié ailleurs) : le lissé est recalculé sur le nouveau planning ; la vue en
+  cours, le mode, le regroupement et le filtre restent ; la fenêtre « Lissage »
+  garde la saisie en cours et recalcule son aperçu ; la fenêtre « Tâches du
+  mois » se rafraîchit.
+- **Changement de projet ou de service** : les deux fenêtres se ferment et le
+  pane haut revient sur la vue Planning.
+
+Branchement : le contrôleur `top/smoothingController.js` est créé **une seule
+fois** par `main.js` (hors du cycle par projet, pour que les fenêtres survivent
+au rechargement) ; `loadProject()` lui remet les tâches (`buildChartTasks`), la
+ligne `Projets2` relue et la clé de contexte `projet|service`, et le graphique
+trace ce qu'il renvoie (`getChartInput()`).
 
 ## Mode Editer du pane bas : un segment = un mois
 
@@ -455,3 +898,11 @@ reflète après re-rendu. Elles sont aussi capturées dans `window.__appliedActi
 (mêmes tuples), utile pour vérifier par script (CDP/console) que le bouton
 **Editer** et la modale **Modifier** produisent bien les actions attendues sans
 dépendre d'un document Grist réel.
+
+Le mock fournit aussi un `window.GristServiceContext` minimal (service
+**Structure**, jamais en lecture seule) : le lissage range ses maximums par
+service. Le projet **ERA QUAI D'ORSAY** porte une cellule `Lissage` (maximum
+général de 1 tâche par mois) : en vue Graphique, mode « Les deux », trois tâches
+de mars et avril 2027 sont avancées en janvier, février et mars. Le balisage du
+harnais (en-tête du graphique et fenêtres) doit rester identique à celui
+d'`index.html`.

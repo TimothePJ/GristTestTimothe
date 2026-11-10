@@ -620,7 +620,7 @@ body.is-frozen #invoiceTable tbody tr {
   }
 }
 
-@media (max-width: 1120px) {
+@media (max-width: 1260px) {
   .sticky-container {
     grid-template-columns: 1fr 1fr;
   }

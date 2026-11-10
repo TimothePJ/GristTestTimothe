@@ -51,6 +51,21 @@ test("une personne deja affectee masque toutes ses lignes Team", () => {
   assert.deepEqual(availableMembers.map((member) => member.id), [23]);
 });
 
+test("seules les personnes du service affiche peuvent etre ajoutees", () => {
+  const members = [
+    { id: 31, firstName: "Baptiste", lastName: "Chevau", role: "Ingenieur", service: "Synthèse" },
+    { id: 32, firstName: "Laurent", lastName: "Orven", role: "Projeteur", service: "Structure" },
+    { id: 33, firstName: "Salwa", lastName: "Aoun", role: "Ingenieur", service: ["L", "Structure", "Synthese"] },
+    { id: 34, firstName: "Sans", lastName: "Service", role: "Projeteur", service: "" },
+  ];
+
+  const syntheseIds = getAvailableTeamMembers(members, null, "Synthese").map((member) => member.id);
+  const structureIds = getAvailableTeamMembers(members, null, "Structure").map((member) => member.id);
+
+  assert.deepEqual(syntheseIds, [31, 33]);
+  assert.deepEqual(structureIds, [32, 33]);
+});
+
 test("le selecteur expose l'ID canonique au relais de synchronisation", () => {
   const previousDocument = globalThis.document;
   globalThis.document = {

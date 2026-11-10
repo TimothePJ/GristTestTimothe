@@ -56,13 +56,29 @@ function getWorkerRoleGroup(role) {
   return "Autres";
 }
 
-export function getAvailableTeamMembers(teamMembers, project = null) {
+// « Synthèse » et « Synthese » désignent le même service ; une colonne Service
+// en liste de choix arrive sous la forme ["L", "Structure", ...].
+function getMemberServiceKeys(member) {
+  const rawService = member?.service;
+  const services = Array.isArray(rawService)
+    ? rawService.filter((value) => value !== "L")
+    : [rawService];
+  return services.map(normalizeName).filter(Boolean);
+}
+
+export function getAvailableTeamMembers(teamMembers, project = null, service = "") {
   const existingNames = new Set(
     (project?.workers || []).map((worker) => normalizeName(worker?.name))
   );
+  const serviceKey = normalizeName(service);
   const uniqueMembersByName = new Map();
 
   (teamMembers || []).forEach((member) => {
+    // Seules les personnes du service affiché peuvent être ajoutées au projet.
+    if (serviceKey && !getMemberServiceKeys(member).includes(serviceKey)) {
+      return;
+    }
+
     const displayName = getWorkerDisplayName(member);
     const personKey = normalizeName(displayName);
 
@@ -105,10 +121,10 @@ export function renderProjectOptions(projectSelect, projects, selectedProjectId)
   );
 }
 
-export function renderWorkerOptions(workerSelect, teamMembers, project = null) {
+export function renderWorkerOptions(workerSelect, teamMembers, project = null, service = "") {
   workerSelect.innerHTML = "";
 
-  const availableMembers = getAvailableTeamMembers(teamMembers, project);
+  const availableMembers = getAvailableTeamMembers(teamMembers, project, service);
 
   const placeholderOption = document.createElement("option");
   placeholderOption.value = "";

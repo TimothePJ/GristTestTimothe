@@ -3,6 +3,7 @@ import {
   formatPlanningCalendarDateIso,
   normalizePlanningDocumentType,
 } from "../../../../gestion-depenses2/assets/js/utils/planningRealisation.js";
+import { isSyntheseTypeDoc } from "./syntheseTasks.js";
 
 const REFERENCES_TABLE_NAME = "References2";
 const REFERENCE_EMPTY_DATE_ISO = "1900-01-01";
@@ -3049,12 +3050,17 @@ function buildProjectAvancementConfigsFromRows(rows = []) {
     projectName: toText(row?.[columns.project]),
     projectNumber: toText(row?.[columns.projectNumber]),
     avancementConfigRaw: row?.[columns.avancement],
+    modeRaw: row?.[columns.mode],
   }));
 }
 
-export async function fetchProjectBootstrapData() {
+export async function fetchProjectBootstrapData({ forceRefresh = false } = {}) {
   const table = APP_CONFIG.grist.projectsTable;
-  const rows = await fetchTableRows(table.sourceTable);
+  // Après une modification de Projets2 (le mode d'affichage par exemple), les caches du contexte
+  // partagé renverraient l'ancienne valeur : on les contourne.
+  const rows = forceRefresh
+    ? await fetchTableRows(table.sourceTable, { forceRefresh: true, forceRawRefresh: true })
+    : await fetchTableRows(table.sourceTable);
   return {
     projectOptions: buildProjectOptionsFromRows(rows),
     projectAvancementConfigs: buildProjectAvancementConfigsFromRows(rows),
@@ -3177,7 +3183,12 @@ export async function reorganizePlanningRowForTypeChange({ rowId, oldTypeDoc, ne
 
 export async function fetchPlanningRows() {
   const table = APP_CONFIG.grist.planningTable;
-  const rows = await fetchTableRows(table.sourceTable);
+  // Les segments de la vue Synthese partagent la table mais pas le modèle du
+  // planning (ni zone, ni type de document, ni échéances de référence) : le
+  // planning ne les lit pas.
+  const rows = (await fetchTableRows(table.sourceTable)).filter(
+    (row) => !isSyntheseTypeDoc(row?.[table.columns?.typeDoc || "Type_doc"])
+  );
   _planningRowsCache = rows;  // alimente le cache pour fetchPlanningRowById
   return rows;
 }

@@ -163,9 +163,10 @@ test("le retard d'une clôture est calculé à Date_Cloture puis reste figé", (
     duree3Raw: null,
     dateRealiseRaw: null,
   };
+  // Jours ouvrés du vendredi 10/07 au mercredi 15/07 : lundi 13 et mercredi 15 (le 14 est férié).
   assert.equal(
     computePlanningRetardValue({ ...base, dateClotureRaw: "2026-07-15" }, new Date(2030, 0, 1)),
-    5
+    2
   );
   assert.equal(
     computePlanningRetardValue({ ...base, dateClotureRaw: "2026-07-05" }, new Date(2030, 0, 1)),

@@ -112,10 +112,32 @@ const CHART_COLORS = {
   },
 };
 
+const AVERAGE_INDEX_COLORS = {
+  series: [
+    '#004990',
+    '#ed1b2d',
+    '#08785f',
+    '#e08a00',
+    '#7b3fa0',
+    '#1a9fc9',
+    '#b5487a',
+    '#6b8e23',
+    '#8c564b',
+    '#5c6b7a',
+  ],
+  total: '#17324d',
+};
+
+const MONTH_LABEL_FORMATTER = new Intl.DateTimeFormat('fr-FR', {
+  month: 'short',
+  year: 'numeric',
+});
+
 const state = {
   records: [],
   recordsReady: false,
   detailedChart: null,
+  averageIndexChart: null,
   generalChart: null,
   expensesChart: null,
   currentProjectConfig: null,
@@ -380,6 +402,7 @@ async function updateDashboard() {
     // Changement de projet : les lectures qui suivent durent plusieurs allers-retours
     // réseau. Laisser le tableau précédent afficherait les chiffres du projet A sous
     // le nom du projet B.
+    destroyAverageIndexChart();
     elements.statsOutput.innerHTML = '';
   }
 
@@ -432,7 +455,9 @@ async function updateDashboard() {
 
   showDashboard();
   renderDetailedChart(dashboardData.chart);
-  renderStatsTable(dashboardData.tableRows, dashboardData.totals);
+  const averageIndexTimeline = buildAverageIndexTimeline(projectRecords);
+  renderStatsTable(dashboardData.tableRows, dashboardData.totals, averageIndexTimeline);
+  renderAverageIndexChart(averageIndexTimeline);
   bindBudgetProgressControls();
   renderSidePanel(dashboardData, projectRecords, projectConfig);
   renderCharts(dashboardData.totals);
@@ -918,7 +943,6 @@ function findDocumentType(documentTypes, candidates) {
 function buildDashboardData(projectRecords, ventilation, projectConfig, realExpenses) {
   const selectedIndicesByType = buildSelectedIndicesByType(projectRecords, projectConfig.selections);
   const statsByType = buildStatsByType(projectRecords, selectedIndicesByType);
-  const averageIndices = buildAverageIndices(projectRecords);
   const sortedTypes = Object.keys(statsByType).sort(compareDocumentTypes);
   const fondPlansRows = buildFondPlansRows(projectRecords, ventilation);
   const standardRows = buildTableRows(sortedTypes, statsByType, ventilation);
@@ -933,7 +957,6 @@ function buildDashboardData(projectRecords, ventilation, projectConfig, realExpe
   const chart = buildDetailedChartData(chartRows, totals);
 
   return {
-    averageIndices,
     chart,
     selectedIndicesByType,
     sortedTypes,
@@ -1079,27 +1102,107 @@ function createStatsBucket(selectedIndice) {
   };
 }
 
-function buildAverageIndices(projectRecords) {
-  const averageIndices = {};
+// Rang d'indice : sans indice = 0, '0' = 1, A = 2, B = 3...
+// Chaque mois, un plan vaut le rang de son indice le plus élevé diffusé au plus
+// tard à la fin du mois ; un plan pas encore diffusé vaut 0.
+function buildAverageIndexTimeline(projectRecords, now = new Date()) {
+  const documents = collectIndexedDocuments(projectRecords);
+  const diffusionTimes = documents.flatMap((document) => (
+    document.diffusions.map((diffusion) => diffusion.time)
+  ));
+  if (diffusionTimes.length === 0) {
+    return null;
+  }
+
+  const firstTime = diffusionTimes.reduce((min, time) => Math.min(min, time), Infinity);
+  const lastTime = diffusionTimes.reduce((max, time) => Math.max(max, time), now.getTime());
+  const months = buildMonthRange(new Date(firstTime), new Date(lastTime));
+  const monthEndTimes = months.map(getMonthEndTime);
+  const ranksByDocument = documents.map((document) => (
+    monthEndTimes.map((monthEndTime) => getDocumentRankAt(document, monthEndTime))
+  ));
+
+  const documentIndexesByType = new Map();
+  documents.forEach((document, documentIndex) => {
+    if (!documentIndexesByType.has(document.type)) {
+      documentIndexesByType.set(document.type, []);
+    }
+    documentIndexesByType.get(document.type).push(documentIndex);
+  });
+
+  const buildSeries = (label, documentIndexes) => ({
+    label,
+    documentCount: documentIndexes.length,
+    values: monthEndTimes.map((_, monthIndex) => (
+      documentIndexes.reduce((sum, documentIndex) => sum + ranksByDocument[documentIndex][monthIndex], 0) /
+      documentIndexes.length
+    )),
+  });
+
+  return {
+    months: months.map((month) => MONTH_LABEL_FORMATTER.format(month)),
+    series: [...documentIndexesByType.keys()]
+      .sort(compareDocumentTypes)
+      .map((type) => buildSeries(type, documentIndexesByType.get(type))),
+    total: buildSeries(DOCUMENT_TYPES.total, documents.map((_, documentIndex) => documentIndex)),
+  };
+}
+
+function collectIndexedDocuments(projectRecords) {
+  const documentsByKey = new Map();
 
   projectRecords.forEach((record) => {
-    const type = getDocumentType(record);
-    const indice = getRecordIndice(record);
-
-    if (!averageIndices[type]) {
-      averageIndices[type] = { withIndex: 0, withIndexZero: 0 };
+    const documentKey = getRecordDocumentKey(record);
+    if (!documentKey) {
+      return;
     }
 
-    if (indice) {
-      averageIndices[type].withIndex += 1;
+    if (!documentsByKey.has(documentKey)) {
+      documentsByKey.set(documentKey, { type: getDocumentType(record), diffusions: [] });
     }
 
-    if (indice === INDICES.advanced) {
-      averageIndices[type].withIndexZero += 1;
+    const rank = getAverageIndiceRank(getRecordIndice(record));
+    const diffusionDate = window.PlanningClosureCore?.parsePlanningCalendarDate(record.DateDiffusion);
+    if (rank > 0 && diffusionDate) {
+      documentsByKey.get(documentKey).diffusions.push({ time: diffusionDate.getTime(), rank });
     }
   });
 
-  return averageIndices;
+  return [...documentsByKey.values()];
+}
+
+function getDocumentRankAt(document, time) {
+  return document.diffusions.reduce(
+    (maxRank, diffusion) => (diffusion.time <= time ? Math.max(maxRank, diffusion.rank) : maxRank),
+    0,
+  );
+}
+
+function buildMonthRange(startDate, endDate) {
+  const months = [];
+  const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+  const lastMonth = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+
+  while (cursor <= lastMonth) {
+    months.push(new Date(cursor));
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+
+  return months;
+}
+
+function getMonthEndTime(month) {
+  return new Date(month.getFullYear(), month.getMonth() + 1, 1).getTime() - 1;
+}
+
+function getAverageIndiceRank(value) {
+  return normalizeIndice(value) ? getPlanningIndiceRank(value) : 0;
+}
+
+function getIndiceFromRank(rank) {
+  if (rank <= 0) return '';
+  if (rank === 1) return INDICES.advanced;
+  return String.fromCharCode(rank + 63);
 }
 
 function buildTableRows(sortedTypes, statsByType, ventilation) {
@@ -1311,7 +1414,7 @@ function buildDetailedChartData(rows, totals) {
   };
 }
 
-function renderStatsTable(tableRows, totals) {
+function renderStatsTable(tableRows, totals, averageIndexTimeline = null) {
   elements.statsOutput.innerHTML = `
     <table class="summary-table">
       <thead>
@@ -1330,6 +1433,7 @@ function renderStatsTable(tableRows, totals) {
         ${renderTotalRow(totals)}
       </tbody>
     </table>
+    ${renderAverageIndexSection(averageIndexTimeline)}
   `;
 }
 
@@ -1398,21 +1502,94 @@ function renderSidePanel(dashboardData, projectRecords, projectConfig) {
   bindIndexSelectionControls(projectRecords, dashboardData.selectedIndicesByType);
 }
 
-function renderAverageIndices(averageIndices, sortedTypes) {
-  const lines = sortedTypes
-    .map((type) => renderAverageIndexLine(type, averageIndices[type]))
-    .join('');
+function renderAverageIndexSection(timeline) {
+  if (!timeline) {
+    return `
+      <section class="average-indices-summary">
+        <h3>Évolution de l'indice moyen</h3>
+        <p class="average-indices-legend">Aucune date de diffusion pour ce projet.</p>
+      </section>
+    `;
+  }
 
-  return `<section class="average-indices"><h3>Indice moyen</h3>${lines}</section>`;
+  return `
+    <section class="average-indices-summary">
+      <h3>Évolution de l'indice moyen par type de document</h3>
+      <div class="average-index-chart">
+        <canvas id="averageIndexChart"></canvas>
+      </div>
+      <p class="average-indices-legend">
+        Moyenne en fin de mois des rangs d'indice : sans indice = 0, 0 = 1, A = 2, B = 3...
+      </p>
+    </section>
+  `;
 }
 
-function renderAverageIndexLine(type, averageData) {
-  const average =
-    averageData && averageData.withIndexZero > 0
-      ? (averageData.withIndex / averageData.withIndexZero).toFixed(2)
-      : 'N/A';
+function renderAverageIndexChart(timeline) {
+  destroyAverageIndexChart();
 
-  return `<p><strong>${escapeHtml(type)}:</strong> ${average}</p>`;
+  const canvas = document.getElementById('averageIndexChart');
+  if (!timeline || !canvas) {
+    return;
+  }
+
+  const maxRank = [timeline.total, ...timeline.series]
+    .flatMap((series) => series.values)
+    .reduce((max, value) => Math.max(max, value), 1);
+
+  state.averageIndexChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: timeline.months,
+      datasets: [
+        ...timeline.series.map((series, seriesIndex) => buildAverageIndexDataset(
+          series,
+          AVERAGE_INDEX_COLORS.series[seriesIndex % AVERAGE_INDEX_COLORS.series.length],
+        )),
+        buildAverageIndexDataset(timeline.total, AVERAGE_INDEX_COLORS.total, true),
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        y: {
+          min: 0,
+          max: Math.min(27, Math.ceil(maxRank) + 1),
+          ticks: {
+            stepSize: 1,
+            callback: (value) => (Number.isInteger(value) ? getIndiceFromRank(value) || 'Aucun' : ''),
+          },
+          title: { display: true, text: 'Indice moyen' },
+        },
+      },
+      plugins: {
+        legend: { position: 'bottom' },
+        datalabels: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (context) => `${context.dataset.label} : ${formatAverageIndex(context.parsed.y)}`,
+          },
+        },
+      },
+    },
+  });
+}
+
+function buildAverageIndexDataset(series, color, isTotal = false) {
+  return {
+    label: `${series.label} (${series.documentCount} plans)`,
+    data: series.values,
+    borderColor: color,
+    backgroundColor: color,
+    borderWidth: isTotal ? 3 : 2,
+    borderDash: isTotal ? [6, 4] : [],
+    pointRadius: 2,
+    pointHoverRadius: 5,
+    tension: 0.2,
+    fill: false,
+  };
 }
 
 function renderIndexSelectionPanel(projectRecords, projectConfig, selectedIndicesByType) {
@@ -2004,7 +2181,15 @@ function formatTooltipLabel(context) {
 
 function destroyCharts() {
   destroyDetailedChart();
+  destroyAverageIndexChart();
   destroySummaryCharts();
+}
+
+function destroyAverageIndexChart() {
+  if (state.averageIndexChart) {
+    state.averageIndexChart.destroy();
+    state.averageIndexChart = null;
+  }
 }
 
 function destroySummaryCharts() {
@@ -2233,6 +2418,14 @@ function formatTableValue(value) {
 
 function formatPercentage(value) {
   return `${Math.round(value)}%`;
+}
+
+function formatAverageIndex(value) {
+  return `${getIndiceFromRank(Math.round(value)) || 'Aucun'} (${formatAverageRank(value)})`;
+}
+
+function formatAverageRank(value) {
+  return toNumber(value).toFixed(1).replace('.', ',');
 }
 
 function formatInputNumber(value) {

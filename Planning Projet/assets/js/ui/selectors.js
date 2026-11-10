@@ -342,15 +342,18 @@ export function initZoneSelector({ onChange, onAddZone, onManageZone } = {}) {
 
 export function updateZoneSelector(
   zoneOptions,
-  { selectedValue = "", enabled = false } = {}
+  { selectedValue = "", enabled = false, canManageZones = null } = {}
 ) {
   const zoneSelect = document.getElementById("zoneDropdown");
   if (!zoneSelect) return;
 
   const options = Array.isArray(zoneOptions) ? zoneOptions : [];
+  // La liste contient aussi les zones des autres services, que ce service ne
+  // peut ni renommer ni supprimer : l'appelant dit s'il a des zones à lui.
+  const hasManageableZones = canManageZones == null ? options.length > 0 : Boolean(canManageZones);
   fillSelect(zoneSelect, options, "Toutes les zones", selectedValue, {
     addZoneOption: true,
-    manageZoneOption: enabled && options.length > 0,
+    manageZoneOption: enabled && hasManageableZones,
   });
   zoneSelect.disabled = !enabled;
 }

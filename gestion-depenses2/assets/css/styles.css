@@ -282,6 +282,28 @@ input {
   text-align: right;
 }
 
+.avancement-average-indices {
+  margin-top: 20px;
+}
+
+.avancement-average-indices h3 {
+  margin: 0;
+  color: var(--color-primary);
+  font-size: 1rem;
+}
+
+.avancement-average-index-chart {
+  position: relative;
+  height: 340px;
+  margin-top: 10px;
+}
+
+.avancement-average-indices-legend {
+  margin: 6px 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
 .avancement-not-applicable-cell {
   background: rgba(0, 73, 144, 0.06);
   color: rgba(0, 73, 144, 0.55);
@@ -324,6 +346,11 @@ input {
   font-weight: 700;
 }
 
+.avancement-summary-table tr.avancement-total-row td,
+.avancement-summary-table tr.avancement-total-row strong {
+  color: #fff;
+}
+
 .container {
   width: 100%;
 }
@@ -347,7 +374,6 @@ body.planning-sync-embedded .team-management-section,
 body.planning-sync-embedded #expense-board,
 body.planning-sync-embedded #real-charge-board,
 body.planning-sync-embedded #real-expense-board,
-body.planning-sync-embedded #spending-billing-editor,
 body.planning-sync-embedded #spending-chart-shell {
   display: none !important;
 }
@@ -409,10 +435,6 @@ body.spending-chart-sync-embedded .container {
 
 body.spending-chart-sync-embedded .table-header {
   margin-bottom: 12px;
-}
-
-body.spending-chart-sync-embedded #spending-billing-editor {
-  margin: 0 0 12px;
 }
 
 body.spending-chart-sync-embedded #spending-chart-shell {
@@ -960,10 +982,6 @@ td input {
 #real-expense-board {
   margin: 16px 0 24px;
   min-width: 0;
-}
-
-#spending-billing-editor {
-  margin: 0 0 16px;
 }
 
 #spending-chart-shell {
@@ -2504,28 +2522,6 @@ td input {
   font-size: 0.8rem;
 }
 
-.billing-editor-panel {
-  display: grid;
-  gap: 14px;
-  padding: 18px;
-  border: 1px solid rgba(0, 73, 144, 0.12);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-}
-
-.billing-editor-toolbar {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-
-.billing-editor-copy {
-  display: grid;
-  gap: 4px;
-}
-
 .billing-editor-toggle {
   display: inline-flex;
   align-items: center;
@@ -2555,100 +2551,6 @@ td input {
   justify-content: flex-end;
 }
 
-.billing-editor-title {
-  color: var(--color-text);
-}
-
-.billing-editor-subtitle {
-  color: var(--color-text-muted);
-  font-size: 0.9rem;
-}
-
-.billing-editor-scroll {
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 6px;
-  scrollbar-gutter: stable both-edges;
-}
-
-.billing-editor-grid {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(132px, 1fr);
-  gap: 12px;
-}
-
-.billing-editor-item {
-  display: grid;
-  gap: 10px;
-  min-width: 132px;
-  padding: 12px;
-  border: 1px solid rgba(0, 73, 144, 0.08);
-  border-radius: var(--radius-sm);
-  background: linear-gradient(180deg, rgba(0, 73, 144, 0.02), rgba(0, 73, 144, 0.05));
-}
-
-.billing-editor-month {
-  color: var(--color-text);
-  font-size: 0.84rem;
-  font-weight: 700;
-  text-align: center;
-}
-
-.billing-editor-fields {
-  display: grid;
-  gap: 10px;
-}
-
-.billing-editor-field {
-  display: grid;
-  gap: 6px;
-}
-
-.billing-editor-field-label {
-  color: var(--color-text-muted);
-  font-size: 0.76rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  text-transform: uppercase;
-}
-
-.billing-editor-input-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-}
-
-.billing-editor-input {
-  min-width: 0;
-  width: 100%;
-  text-align: right;
-}
-
-.billing-editor-unit {
-  color: var(--color-text-muted);
-  font-weight: 700;
-}
-
-.billing-editor-scroll::-webkit-scrollbar {
-  height: 10px;
-}
-
-.billing-editor-scroll::-webkit-scrollbar-track {
-  border-radius: 999px;
-  background: rgba(0, 73, 144, 0.08);
-}
-
-.billing-editor-scroll::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(0, 73, 144, 0.32);
-}
-
-.billing-editor-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 73, 144, 0.46);
-}
-
 .expense-graph-canvas {
   display: block;
   width: 100% !important;
@@ -2662,10 +2564,6 @@ td input {
 
 .cell-input {
   min-width: 72px;
-}
-
-.billing-percentage {
-  width: 84px;
 }
 
 .modal {

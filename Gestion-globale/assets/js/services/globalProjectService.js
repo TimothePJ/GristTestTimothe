@@ -1,10 +1,7 @@
 import { APP_CONFIG } from "../../../../gestion-depenses2/assets/js/config.js";
 import {
   buildExpenseData,
-  getBillingPercentageForMonth,
   getProjectDateBounds,
-  getProjectBudgetTotal,
-  normalizeBillingPercentageValue,
 } from "../../../../gestion-depenses2/assets/js/services/projectService.js";
 import {
   getMonthEndDate,
@@ -321,8 +318,7 @@ function createTimeRealSyntheticProject(entry) {
     name: `Projet TimeReal ${entry.projectNumber}`,
     dop: "",
     avancementConfigRaw: "",
-    billingPercentage: 0,
-    billingPercentageByMonth: {},
+    billedAmountByMonth: {},
     budgetLines: [],
     avancementRecords: [],
     planningTasks: [],
@@ -649,6 +645,7 @@ function buildAggregatedWorkers(projects) {
 function buildAggregatedAvancementRecords(projects) {
   return projects.flatMap((project, projectIndex) => {
     const prefix = getProjectPrefix(project, projectIndex);
+    const projectLabel = getProjectDisplayName(project);
     const indiceByType = buildAvancementIndiceByType(project);
 
     return (project?.avancementRecords || []).map((record, recordIndex) => {
@@ -658,6 +655,7 @@ function buildAggregatedAvancementRecords(projects) {
         ...record,
         id: `${prefix}-doc-${record?.id ?? recordIndex}`,
         NumeroDocument: `${prefix} - ${toText(record?.NumeroDocument)}`,
+        AvancementProjectLabel: projectLabel,
         AvancementSelectedIndice: selectedIndice || "",
       };
     });
@@ -677,47 +675,16 @@ function buildAggregatedPlanningTasks(projects) {
   });
 }
 
-function collectBillingMonthKeys(projects) {
-  const monthKeys = new Set();
+// Facturation T_Avancement des projets selectionnes, additionnee mois par mois.
+// Le graphique en tire le cumul et le % du budget total agrege (buildChartSeries).
+function buildAggregatedBilledAmounts(projects) {
+  const billedAmountByMonth = {};
 
   projects.forEach((project) => {
-    Object.keys(project?.billingPercentageByMonth || {}).forEach((monthKey) => {
-      if (monthKey) monthKeys.add(monthKey);
-    });
-
-    (project?.workers || []).forEach((worker) => {
-      Object.keys(worker?.provisionalDays || {}).forEach((monthKey) => monthKeys.add(monthKey));
-      Object.keys(worker?.workedDays || {}).forEach((monthKey) => monthKeys.add(monthKey));
-    });
+    mergeNumericMapValues(billedAmountByMonth, project?.billedAmountByMonth);
   });
 
-  return [...monthKeys].sort();
-}
-
-function buildAggregatedBilling(projects, totalBudget) {
-  const billingPercentageByMonth = {};
-
-  collectBillingMonthKeys(projects).forEach((monthKey) => {
-    const billedAmount = projects.reduce((sum, project) => {
-      const projectBudget = getProjectBudgetTotal(project);
-      const percentage = getBillingPercentageForMonth(project, monthKey);
-      return sum + projectBudget * (percentage / 100);
-    }, 0);
-
-    billingPercentageByMonth[monthKey] = totalBudget > 0
-      ? (billedAmount / totalBudget) * 100
-      : 0;
-  });
-
-  const fallbackBilledAmount = projects.reduce((sum, project) => {
-    const projectBudget = getProjectBudgetTotal(project);
-    return sum + projectBudget * (normalizeBillingPercentageValue(project?.billingPercentage, 0) / 100);
-  }, 0);
-
-  return {
-    billingPercentage: totalBudget > 0 ? (fallbackBilledAmount / totalBudget) * 100 : 0,
-    billingPercentageByMonth,
-  };
+  return billedAmountByMonth;
 }
 
 function getMonthKeyFromDateValue(value) {
@@ -898,13 +865,9 @@ function buildCanonicalProjectRegistry(projectRows = []) {
       [columns.dop || DOP_COLUMN]: canonicalDop,
     };
 
-    [
-      columns.avancement,
-      columns.billingPercentage,
-      columns.billingPercentageByMonth,
-    ].filter(Boolean).forEach((columnId) => {
-      canonicalRow[columnId] = getFirstMeaningfulValue(group.rows, columnId);
-    });
+    if (columns.avancement) {
+      canonicalRow[columns.avancement] = getFirstMeaningfulValue(group.rows, columns.avancement);
+    }
 
     groups.push({
       ...group,
@@ -1206,20 +1169,13 @@ export function buildAggregatedProject(projects) {
     return null;
   }
 
-  const totalBudget = selectedProjects.reduce(
-    (sum, project) => sum + getProjectBudgetTotal(project),
-    0
-  );
-  const billing = buildAggregatedBilling(selectedProjects, totalBudget);
-
   return {
     id: "global",
     projectNumber: "GLOBAL",
     name: `${selectedProjects.length} projet(s) selectionne(s)`,
     dop: "global",
     avancementConfigRaw: buildAggregatedAvancementConfig(selectedProjects),
-    billingPercentage: billing.billingPercentage,
-    billingPercentageByMonth: billing.billingPercentageByMonth,
+    billedAmountByMonth: buildAggregatedBilledAmounts(selectedProjects),
     budgetLines: buildAggregatedBudgetLines(selectedProjects),
     avancementRecords: buildAggregatedAvancementRecords(selectedProjects),
     planningTasks: buildAggregatedPlanningTasks(selectedProjects),

@@ -84,6 +84,9 @@ function filterTablesByPersonService(tables) {
     window.GristServiceContext?.getService?.()
       || window.localStorage?.getItem("grist.selected-service")
   );
+  // La facturation T_Avancement est rattachee a ce meme service (cf.
+  // gestion-depenses2/assets/js/utils/avancementBilling.js) : sans service
+  // choisi, aucune ligne ne lui est attribuee.
   if (!selectedService) {
     return {
       ...tables,
@@ -91,6 +94,7 @@ function filterTablesByPersonService(tables) {
       projectTeamRows: [],
       timeSegmentRows: [],
       timeRealRows: [],
+      activeService: selectedService,
     };
   }
 
@@ -111,6 +115,7 @@ function filterTablesByPersonService(tables) {
     projectTeamRows: (tables?.projectTeamRows || []).filter(keepPersonRow),
     timeSegmentRows: (tables?.timeSegmentRows || []).filter(keepPersonRow),
     timeRealRows: (tables?.timeRealRows || []).filter(keepPersonRow),
+    activeService: selectedService,
   };
 }
 
@@ -878,6 +883,9 @@ function bindGlobalDataRefresh() {
       tables.projectTeam,
       tables.timeSegment,
       tables.timeReal,
+      // Facturation du graphique, enrichie a chaque import BaseDRTO.
+      tables.avancement,
+      tables.services,
     ],
     () => {
       void loadData().catch((error) => {
