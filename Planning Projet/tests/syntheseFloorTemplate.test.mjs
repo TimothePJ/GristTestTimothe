@@ -84,7 +84,7 @@ test("lignes d'un nouvel étage : la ligne-étage puis le modèle, sans dates, l
     assert.equal("Diff_armature" in row, false);
   });
   assert.deepEqual(rows.map((row) => row.Nature).filter(Boolean), [
-    "Cycle", "Reunion", "Cycle", "Sous-groupe", "Reunion", "Cycle", "Sous-groupe", "Reunion", "Demarrage",
+    "Cycle", "Reunion", "Cycle", "Sous-groupe", "Reunion", "Cycle", "Sous-groupe", "Reunion", "Signature", "Demarrage",
   ]);
 });
 
@@ -124,8 +124,9 @@ test("Parent et Lien d'après les ids rendus par Grist", () => {
       222: ["220", "221 FF"],
       223: ["220", "221 FF"],
       224: ["217", "221 FD"],
-      225: ["217", "224 FD+5"],
-      226: ["217", "225 FD"],
+      // Fin d'étage fixe : hors du CYCLE 3.
+      225: ["", "224 FD+5"],
+      226: ["", "225 FD"],
     }
   );
   assert.equal(action[0], "BulkUpdateRecord");

@@ -378,3 +378,17 @@ test("CSS : tailles de texte inversées entre étage et zone en affichage par é
   assert.match(css, /\.stt-line--zone\[data-layout="floor"\] \.stt-cell--name\s*\{\s*font-size:\s*inherit;\s*\}/);
   assert.match(css, /\.stt-line--zone \.stt-cell--name\s*\{[^}]*font-size:\s*14px;/);
 });
+
+// Fin d'étage fixe : SIGNATURE PLANS SYNTHESE et DEMARRAGE GO ne se déplacent pas, les autres tâches si.
+test("lignes fixes de fin d'étage : pas de poignée de déplacement", () => {
+  const { table, lineOf } = makeTable();
+  table.render([
+    { kind: "floor", key: "floor:zone1/ss1", level: 1, zoneKey: "zone1", floorKey: "ss1", name: "SS1", collapsed: false },
+    { kind: "task", key: "task:7", level: 2, zoneKey: "zone1", floorKey: "ss1", taskId: 7, name: "REUNION", collapsed: false },
+    { kind: "task", key: "task:8", level: 2, zoneKey: "zone1", floorKey: "ss1", taskId: 8, name: "SIGNATURE PLANS SYNTHESE", floorEnd: "signature", collapsed: false },
+    { kind: "task", key: "task:9", level: 2, zoneKey: "zone1", floorKey: "ss1", taskId: 9, name: "DEMARRAGE GO SS1", floorEnd: "kickoff", collapsed: false },
+  ], { editable: true });
+  assert.ok(lineOf("task:7").querySelector(".stt-grip"));
+  assert.equal(lineOf("task:8").querySelector(".stt-grip"), null);
+  assert.equal(lineOf("task:9").querySelector(".stt-grip"), null);
+});

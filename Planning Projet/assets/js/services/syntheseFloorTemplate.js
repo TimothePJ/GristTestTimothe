@@ -1,6 +1,7 @@
 // Modèle d'étage de la vue Synthese, repris du planning MS Project de l'utilisateur
 // (« NIVEAU Sous-Sol 1 ») : trois cycles, deux sous-groupes « PLAN SYT CYCLE n » et vingt
 // tâches avec leurs liens, créées sans durée (0) : les durées se saisissent. {E} = nom de l'étage.
+// SIGNATURE et DEMARRAGE GO ne sont dans aucun cycle : c'est la fin d'étage fixe (voir floorEndOf).
 // Module pur : les lignes à ajouter, puis Parent et Lien une fois les ids connus.
 import {
   NATURES,
@@ -36,9 +37,10 @@ export const FLOOR_TEMPLATE = Object.freeze([
   { code: "T15", name: "PLAN DE SYNTHESE RESERVATIONS NIV {E}", parent: "S3", link: "T14 FF" },
   { code: "T16", name: "PLAN DE SYNTHESE TERMINAUX NIV {E}", parent: "S3", link: "T14 FF" },
   { code: "T17", name: "REUNION + DIFFUSION SYT", nature: NATURES.meeting, parent: "C3", link: "T14 FD" },
-  // 5 jours ouvrés après la REUNION + DIFFUSION SYT du cycle 3 ; DEMARRAGE GO la suit le même jour.
-  { code: "T18", name: "SIGNATURE PLANS SYNTHESE", parent: "C3", link: "T17 FD+5" },
-  { code: "T19", name: "DEMARRAGE GO {E} (date prévisionnelle)", nature: NATURES.kickoff, parent: "C3", link: "T18 FD" },
+  // Fin d'étage fixe, hors des cycles : 5 jours ouvrés après la dernière tâche du dernier cycle (ici la
+  // REUNION + DIFFUSION SYT du cycle 3) ; DEMARRAGE GO la suit le même jour.
+  { code: "T18", name: "SIGNATURE PLANS SYNTHESE", nature: NATURES.signature, link: "T17 FD+5" },
+  { code: "T19", name: "DEMARRAGE GO {E} (date prévisionnelle)", nature: NATURES.kickoff, link: "T18 FD" },
 ].map((item) => Object.freeze(item)));
 
 function toText(value) {

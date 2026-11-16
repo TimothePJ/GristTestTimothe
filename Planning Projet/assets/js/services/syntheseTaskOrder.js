@@ -11,6 +11,7 @@ import {
   buildTaskFields,
   dateFieldsOf,
   findGroup,
+  floorEndStart,
   floorLayoutZoneSuffix,
   resolveDropTarget,
 } from "./syntheseTaskModel.js";
@@ -159,6 +160,13 @@ export function taskSlot(place, line, side) {
   };
 }
 
+// Place visée sur une ligne de la fin d'étage fixe (SIGNATURE ou DEMARRAGE GO) : juste avant
+// SIGNATURE, rien ne va en dessous. null sur une autre ligne. Partagée avec le glisser des cycles.
+export function floorEndSlot(place, line) {
+  const lead = line?.kind === "task" ? line.floorEndLead : null;
+  return lead ? taskSlot(place, { taskId: lead.taskId, name: lead.name }, "before") : null;
+}
+
 // Place « avant » un cycle, dans le conteneur de ce cycle (`parentGroupRowId`, null : l'étage) ;
 // partagée avec le glisser des cycles.
 export function groupBeforeSlot(place, line) {
@@ -193,7 +201,7 @@ function dropSlotOf(line, side, canOrder, draggedTaskId) {
   if (!target || !canOrder) return target;
   if (line.kind === "task") {
     if (line.taskId === draggedTaskId) return null;
-    return taskSlot(target, line, side);
+    return floorEndSlot(target, line) || taskSlot(target, line, side);
   }
   if (line.kind === "group" && side === "before") return groupBeforeSlot(target, line);
   if (line.kind === "zone") {
@@ -254,6 +262,15 @@ export function anchorAbove(above, taskId, { sections = [], overrides = new Map(
   return anchor;
 }
 
+// La tâche `taskId` est-elle la SIGNATURE de fin d'étage (voir floorEndOf), liée en fin → début
+// (`link`) ? Elle suit alors toujours ce qui arrive juste au-dessus d'elle — la dernière tâche du
+// dernier cycle —, avec son décalage, même si elle suivait une autre tâche (étages d'avant :
+// « VISA A +5 ») ; jamais au prix d'une boucle (chaque appelant la refuse).
+export function followsIntoFloorEnd(link, taskId, sections = []) {
+  if (link?.type !== "FD") return false;
+  return allTasksOf(sections).some((task) => task.id === taskId && task.floorEnd === "signature");
+}
+
 // Une tâche placée sous `above` garde-t-elle son lien `link` ? Oui s'il désigne déjà la tâche à
 // suivre (`anchor`) : quel que soit son type quand c'est `above`, en fin → début seulement quand c'est
 // la tâche pilote d'un cycle en parallèle (un fin → fin n'y tenait qu'au cycle).
@@ -304,7 +321,8 @@ function closeChain(links, order, taskId, scope) {
 // Une tâche à sa nouvelle place dans `order` (P au-dessus, N en dessous) : elle suit P — ou la tâche
 // pilote du cycle en parallèle qui finit en P (voir anchorAbove) ; son lien est gardé s'il la désigne
 // déjà, quel que soit son type ; sans P, plus de lien. N la suit si N suivait P — ou le cycle qui
-// finit en P (voir followsAbove) — en fin → début (décalage gardé). Jamais de boucle : si P dépend d'elle, la tâche de
+// finit en P (voir followsAbove), ou si N est la SIGNATURE de fin d'étage (voir followsIntoFloorEnd) —
+// en fin → début (décalage gardé). Jamais de boucle : si P dépend d'elle, la tâche de
 // la chaîne de P qui la suivait reprend son ancien lien (`former`), ou plus de lien. Renvoie l'id
 // de cette tâche rattachée à l'ancien lien (ses dates et celles de sa chaîne sont à recalculer
 // avant celles de la tâche), ou null.
@@ -316,10 +334,9 @@ function placeInChain(links, order, taskId, former, scope) {
   if (anchor === null) links.set(taskId, null);
   else if (!keepsLink(links.get(taskId), anchor, above)) links.set(taskId, { predId: anchor, type: "FD", lag: 0 });
   // N ne la suit pas si elle-même dépend déjà de N (boucle).
-  if (
-    above !== null && below !== null && followsAbove(links.get(below), above, below, scope) &&
-    findUpstream(links, taskId, (rowId) => rowId === below) == null
-  ) {
+  const belowFollows = below !== null &&
+    (followsAbove(links.get(below), above, below, scope) || followsIntoFloorEnd(links.get(below), below, scope.sections));
+  if (above !== null && belowFollows && findUpstream(links, taskId, (rowId) => rowId === below) == null) {
     links.set(below, { predId: taskId, type: "FD", lag: links.get(below).lag || 0 });
   }
   const current = findUpstream(links, anchor, (rowId) => links.get(rowId)?.predId === taskId);
@@ -374,10 +391,11 @@ export function recomputeDates(tasks, links, rootIds) {
   return changes;
 }
 
-// Place d'une nouvelle tâche dans son conteneur : juste sous la tâche cliquée, sinon à la fin.
+// Place d'une nouvelle tâche dans son conteneur : juste sous la tâche cliquée, sinon à la fin ;
+// jamais sous la fin d'étage fixe (voir floorEndStart).
 function insertionIndex(items, afterTaskId) {
   const index = afterTaskId ? items.findIndex((item) => item.kind === "task" && item.task.id === afterTaskId) : -1;
-  return index >= 0 ? index + 1 : items.length;
+  return Math.min(index >= 0 ? index + 1 : items.length, floorEndStart(items));
 }
 
 // L'élément d'un conteneur que désigne une position de dépôt : un cycle (`groupRowId`) ou une
@@ -388,11 +406,12 @@ function isPositionItem(item, position) {
 }
 
 // Place visée par un dépôt dans `items` (sans l'élément déplacé) : avant ou après une tâche, ou
-// avant un cycle ; sans position (ligne d'en-tête), ou élément introuvable : à la fin.
+// avant un cycle ; sans position (ligne d'en-tête), ou élément introuvable : à la fin. Jamais sous
+// la fin d'étage fixe : au plus juste au-dessus de SIGNATURE (voir floorEndStart).
 export function slotIndex(items, position) {
   const index = position ? items.findIndex((item) => isPositionItem(item, position)) : -1;
-  if (index < 0) return items.length;
-  return position.side === "before" ? index : index + 1;
+  const wanted = index < 0 ? items.length : position.side === "before" ? index : index + 1;
+  return Math.min(wanted, floorEndStart(items));
 }
 
 // « Ajouter une tâche » dans un conteneur ({ zoneKey, floorKey, groupRowId }), juste sous
@@ -437,6 +456,7 @@ export function planTaskInsert({
       const order = taskOrder(destination, new Map([[destination.key, placed]]));
       const at = order.indexOf(NEW_TASK_ID);
       const tasksById = new Map(allTasksOf(sections).map((candidate) => [candidate.id, candidate]));
+      const links = linkMap(allTasksOf(sections));
       const scope = { sections, overrides: new Map([[destination.key, placed]]) };
       const above = at > 0 ? tasksById.get(anchorAbove(order[at - 1], NEW_TASK_ID, scope)) : null;
       const below = at < order.length - 1 ? tasksById.get(order[at + 1]) : null;
@@ -451,7 +471,11 @@ export function planTaskInsert({
         const dates = computeLinkedDates(above, link, 1) || { start: null, end: null, durationDays: 1, isMilestone: false };
         task = { ...task, ...dates, link };
         extra[TASK_COLUMNS.link] = formatLink(link);
-        if (below && followsAbove(below.link, order[at - 1], below.id, scope)) follow = { successorId: below.id, lag: below.link.lag || 0 };
+        const tied = below && (followsAbove(below.link, order[at - 1], below.id, scope) || followsIntoFloorEnd(below.link, below.id, sections));
+        // Jamais de boucle : la tâche du dessous ne suit pas une tâche qui dépend déjà d'elle.
+        if (tied && findUpstream(links, above.id, (rowId) => rowId === below.id) == null) {
+          follow = { successorId: below.id, lag: below.link.lag || 0 };
+        }
       }
     }
   }
@@ -460,7 +484,8 @@ export function planTaskInsert({
     fields: { ...buildTaskFields(task, { projectName }), ...extra },
     changes,
     follow,
-    atEnd: Boolean(afterTaskId) && !canOrder,
+    // Sur la fin d'étage fixe, rien ne va jamais dessous : aucune place n'est manquée.
+    atEnd: Boolean(afterTaskId) && !canOrder && !allTasksOf(sections).some((candidate) => candidate.id === afterTaskId && candidate.floorEnd),
   };
 }
 
@@ -470,6 +495,8 @@ export function planInsertFollowUp({ sections, newTask, successorId, lag = 0 } =
   const tasks = [...allTasksOf(sections).filter((task) => task.id !== newTask.id), newTask];
   const links = linkMap(tasks);
   if (!links.has(successorId)) return new Map();
+  // Jamais de boucle : pas de lien vers une tâche qui dépend déjà de la tâche du dessous.
+  if (findUpstream(links, newTask.id, (rowId) => rowId === successorId) != null) return new Map();
   const original = new Map(links);
   links.set(successorId, { predId: newTask.id, type: "FD", lag });
   return mergeChanges(linkChanges(original, links), recomputeDates(tasks, links, [successorId]));
@@ -484,6 +511,8 @@ export function planTaskMove({ sections, taskId, target, canOrder = false, canLi
   const destination = findContainer(sections, target || {});
   if (!source || !destination) return new Map();
   const item = source.items.find((candidate) => candidate.kind === "task" && candidate.task.id === taskId);
+  // La fin d'étage fixe ne se déplace pas.
+  if (!item || item.task.floorEnd) return new Map();
   const moveFields = buildMoveFields(item.task, target);
   const changes = new Map();
   if (Object.keys(moveFields).length) changes.set(taskId, moveFields);

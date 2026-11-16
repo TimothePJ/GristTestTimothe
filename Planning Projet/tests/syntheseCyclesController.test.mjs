@@ -83,10 +83,11 @@ test("Ajouter un cycle : une écriture, nom en saisie, message", async () => {
     ["AddRecord", "Planning_Projet", null, {
       Taches: "Nouveau cycle", Zone: ERA_ZONE, Groupe: "SS1", NomProjet: ERA_PROJECT, Nature: "Cycle", Duree_1: 0, Ordre: "5",
     }],
-    ["BulkUpdateRecord", "Planning_Projet", [984, 985, 992, 999], { Ordre: ["1", "2", "3", "4"] }],
+    ["BulkUpdateRecord", "Planning_Projet", [984, 985, 992, 999, 1007, 1008], { Ordre: ["1", "2", "3", "4", "6", "7"] }],
   ]);
   assert.deepEqual(env.table.editingGroups, [3000]);
-  assert.ok(env.keys().includes("group:3000"));
+  // Sous le CYCLE 3, au-dessus de la fin d'étage fixe (SIGNATURE, DEMARRAGE GO).
+  assert.deepEqual(env.keys().slice(-3), ["group:3000", "task:1007", "task:1008"]);
   assert.deepEqual(env.table.statuses.at(-1), { text: "Cycle ajouté dans l'étage « SS1 ».", tone: "info" });
 });
 
@@ -397,8 +398,9 @@ test("supprimer le sous-cycle qui porte la tâche pilote : la tâche restante re
 });
 
 test("glisser un sous-cycle en escalier dans un cycle en parallèle : il y est bâti en parallèle", async () => {
+  // SIGNATURE et DEMARRAGE de l'export, renommée et sans Nature : plus la fin d'étage fixe.
   const rows = withRows([...eraSs1Rows(), cycleRow(2020, "SOUS-CYCLE", "999")], {
-    1007: { Parent: "2020" }, 1008: { Parent: "2020" },
+    1007: { Parent: "2020", Taches: "TACHE A" }, 1008: { Parent: "2020", Nature: "" },
   });
   const env = setup({ rows });
   await activate(env);
@@ -604,4 +606,60 @@ test("fenêtre de lien ouverte : elle se ferme si le tableau est verrouillé, la
   assert.equal(env.linkDialog.closes, 1);
   env.controller.setActive(false);
   assert.equal(env.linkDialog.closes, 2);
+});
+
+// Étage existant : SIGNATURE (1007) n'est reconnue fixe que par son nom ; la renommer lui écrit sa
+// Nature « Signature » (et la sort du CYCLE 3 dans Parent), sinon elle retournerait dans le cycle.
+test("renommer une ancienne SIGNATURE : Nature « Signature » et Parent vidé dans la même écriture, elle reste en fin d'étage", async () => {
+  const env = setup();
+  await activate(env);
+  env.table.callbacks.onEdit(1007, "name", "SIGNATURE DES PLANS");
+  await flush();
+  assert.deepEqual(env.writes[0], [["UpdateRecord", "Planning_Projet", 1007, {
+    Taches: "SIGNATURE DES PLANS", Nature: "Signature", Parent: "",
+  }]]);
+  assert.deepEqual(env.keys().slice(-2), ["task:1007", "task:1008"]);
+});
+
+test("renommer une SIGNATURE qui a déjà sa Nature, ou sans les colonnes du modèle : seulement le nom", async () => {
+  const marked = setup({ rows: eraSs1Rows().map((row) => (row.id === 1007 ? { ...row, Nature: "Signature", Parent: "" } : row)) });
+  await activate(marked);
+  marked.table.callbacks.onEdit(1007, "name", "SIGNATURE DES PLANS");
+  await flush();
+  assert.deepEqual(marked.writes[0], [["UpdateRecord", "Planning_Projet", 1007, { Taches: "SIGNATURE DES PLANS" }]]);
+  const bare = setup({ rows: withoutColumns(eraSs1Rows(), ["Nature", "Parent", "Lien"]) });
+  await activate(bare);
+  bare.table.callbacks.onEdit(1007, "name", "SIGNATURE DES PLANS");
+  await flush();
+  assert.deepEqual(bare.writes[0], [["UpdateRecord", "Planning_Projet", 1007, { Taches: "SIGNATURE DES PLANS" }]]);
+});
+
+// Ancien étage : SIGNATURE (1007) et DEMARRAGE GO (1008) sont encore rangées dans le CYCLE 3 (Parent
+// 999) ; supprimer le cycle ne les emporte pas, et SIGNATURE se raccroche à la REUNION de CYCLE 2.
+test("supprimer le CYCLE 3 d'un ancien étage : SIGNATURE et DEMARRAGE GO restent, SIGNATURE suit le CYCLE 2 avec ses 5 jours", async () => {
+  const questions = [];
+  const env = setup({ confirm: (question) => { questions.push(question); return true; } });
+  await activate(env);
+  await env.table.callbacks.onDeleteGroup(999);
+  assert.deepEqual(questions, ["Supprimer « CYCLE 3 », son sous-cycle et ses 6 tâches ?"]);
+  const [removal] = env.writes[0];
+  assert.deepEqual([...removal[2]].sort((a, b) => a - b), [999, 1000, 1001, 1002, 1003, 1004, 1005, 1006]);
+  assert.equal(writtenFields(env.writes[0], 1007).Lien, "998 FD+5");
+  assert.deepEqual(env.keys().slice(-2), ["task:1007", "task:1008"]);
+});
+
+// Le scénario demandé, de bout en bout : « Ajouter un cycle » (ligne 3000), puis une tâche dedans
+// (ligne 3001) ; la seconde écriture fait suivre SIGNATURE à la nouvelle tâche, avec ses 5 jours.
+test("CYCLE 4 puis une tâche dedans : la tâche suit la REUNION du CYCLE 3, SIGNATURE la suit avec ses 5 jours", async () => {
+  let nextId = 3000;
+  const env = setup({ applyUserActions: (actions) => ({ retValues: actions.map((action) => (action[0] === "AddRecord" ? nextId++ : null)) }) });
+  await activate(env);
+  await env.table.callbacks.onAddCycle(ERA_ZONE_KEY, "ss1", null);
+  await env.table.callbacks.onAddTask(ERA_ZONE_KEY, "ss1", 3000, null);
+  await flush();
+  assert.equal(env.writes.length, 3, "le cycle, la tâche, puis SIGNATURE qui la suit");
+  assert.equal(env.writes[1][0][3].Lien, "1006 FD");
+  assert.equal(env.writes[1][0][3].Parent, "3000");
+  assert.equal(writtenFields(env.writes[2], 1007).Lien, "3001 FD+5");
+  assert.deepEqual(env.keys().slice(-4), ["group:3000", "task:3001", "task:1007", "task:1008"]);
 });

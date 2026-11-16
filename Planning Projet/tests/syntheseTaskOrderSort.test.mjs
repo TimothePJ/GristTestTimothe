@@ -14,7 +14,7 @@ import { templateRows } from "./helpers/templateRows.mjs";
 
 // Modèle d'étage SS1 (Zone Z3A), ids 201 à 226 : CYCLE 3 = 217 ; dans le cycle 3, RECEPTION
 // RENDU 218, VISA A 219, PLAN SYT CYCLE 3 220 (RÉSEAUX 221, RÉSERVATIONS 222, TERMINAUX 223),
-// REUNION 224, SIGNATURE 225, DÉMARRAGE GO 226.
+// REUNION 224 ; puis, hors des cycles, la fin d'étage fixe : SIGNATURE 225, DÉMARRAGE GO 226.
 const withOrder = (rows, orders) => rows.map((row) => (row.id in orders ? { ...row, Ordre: orders[row.id] } : row));
 const keysAfter = (lines, key) => {
   const keys = lines.map((line) => line.key);
@@ -44,11 +44,13 @@ test("sans rang : l'ordre de création dans l'étage, ses cycles et ses sous-gro
 });
 
 test("avec rang : les éléments rangés d'abord (par rang, « 10 » après « 9 »), puis les autres par création", () => {
-  const rows = withOrder(templateRows(), { 219: "1", 218: "2", 220: "3", 226: "4", 221: "10", 222: "9" });
+  // RECEPTION RENDU (218) sans rang passe après la REUNION (224) rangée ; DÉMARRAGE GO (226) reste la
+  // dernière ligne de l'étage, quel que soit son rang.
+  const rows = withOrder(templateRows(), { 219: "1", 224: "2", 220: "3", 226: "4", 221: "10", 222: "9" });
   const lines = buildRowModel(buildSections({ rows }));
   assert.deepEqual(keysAfter(lines, "group:217"), [
-    "group:217", "task:219", "task:218", "group:220", "task:222", "task:221", "task:223",
-    "task:226", "task:224", "task:225",
+    "group:217", "task:219", "task:224", "group:220", "task:222", "task:221", "task:223",
+    "task:218", "task:225", "task:226",
   ]);
   const task = buildSections({ rows })[0].floors[0].tasks.find((candidate) => candidate.id === 221);
   assert.equal(task.order, 10);

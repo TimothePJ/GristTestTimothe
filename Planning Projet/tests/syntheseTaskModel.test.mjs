@@ -212,7 +212,10 @@ test("une tâche Synthese garde son N° : le Service décide", () => {
 });
 
 test("natures : lecture sans accents ni casse ; cycles et sous-groupes ne sont pas des tâches", () => {
-  assert.deepEqual({ ...NATURES }, { cycle: "Cycle", subgroup: "Sous-groupe", meeting: "Reunion", kickoff: "Demarrage" });
+  assert.deepEqual({ ...NATURES }, {
+    cycle: "Cycle", subgroup: "Sous-groupe", meeting: "Reunion", kickoff: "Demarrage", signature: "Signature",
+  });
+  assert.equal(natureKeyOf("SIGNATURE"), "signature");
   assert.equal(natureKeyOf("Réunion"), "reunion");
   assert.equal(natureKeyOf(" sous groupe "), "sous-groupe");
   assert.equal(natureKeyOf("DEMARRAGE"), "demarrage");

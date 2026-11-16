@@ -4,7 +4,8 @@
 // DIFFUSION FDS 205 (« 204 FD », jalon), RECEPTION RENDU 206 (« 205 FD »), VISA 0 207
 // (« 206 FD ») ; dans le cycle 3 (217), RECEPTION RENDU 218, VISA A 219 (« 218 FD »), PLAN SYT
 // CYCLE 3 220 : RÉSEAUX 221 (« 218 FD »), RÉSERVATIONS 222 et TERMINAUX 223 (« 221 FF »), puis
-// REUNION 224 (« 221 FD »), SIGNATURE 225 (« 219 FD+5 »), DÉMARRAGE GO 226 (« 225 FD »).
+// REUNION 224 (« 221 FD ») ; hors des cycles, la fin d'étage fixe : SIGNATURE 225 (« 224 FD+5 »),
+// DÉMARRAGE GO 226 (« 225 FD »).
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -57,10 +58,9 @@ test("exemple 2 : « Test » glissé avant VISA A → suit RECEPTION RENDU, VISA
     [219, { Ordre: "3", Lien: "400 FD", Diff_coffrage: "2026-02-18", Diff_armature: "2026-03-03", Duree_1: 10 }],
     [220, { Ordre: "4" }],
     [224, { Ordre: "5" }],
-    [225, { Ordre: "6" }],
-    [226, { Ordre: "7" }],
   ]);
   assert.equal(changes.has(221), false, "RÉSEAUX suit RECEPTION RENDU mais n'est pas juste en dessous : inchangé");
+  assert.equal(changes.has(225), false, "SIGNATURE, fin d'étage fixe, n'est pas dans le cycle 3");
 });
 
 test("exemple 3 : TERMINAUX avant RÉSERVATIONS → déjà liée à RÉSEAUX, seul l'ordre change", () => {
@@ -115,6 +115,8 @@ test("en tête de l'étage : plus de lien ; la chaîne se referme à l'ancienne 
     [203, { Ordre: "3" }],
     [210, { Ordre: "4" }],
     [217, { Ordre: "5" }],
+    [225, { Ordre: "6" }],
+    [226, { Ordre: "7" }],
     [206, { Lien: "204 FD" }],
   ]);
 });

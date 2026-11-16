@@ -9,6 +9,7 @@ import {
   NATURES,
   TASK_COLUMNS,
   findGroup,
+  floorEndStart,
   floorLayoutZoneSuffix,
   groupRemovalIds,
   natureKeyOf,
@@ -19,7 +20,9 @@ import {
   clearOrphans,
   findContainer,
   findUpstream,
+  floorEndSlot,
   followsAbove,
+  followsIntoFloorEnd,
   groupBeforeSlot,
   keepsLink,
   linkChanges,
@@ -42,10 +45,11 @@ export function natureForDepth(depth) {
 }
 
 // Création d'un cycle (parentGroupRowId null : directement dans l'étage) ou d'un sous-cycle (dans
-// ce cycle), toujours à la fin de son conteneur. Avec la colonne Ordre (`canOrder`), le nouveau
-// cycle prend le rang suivant et le contenu actuel est renuméroté 1, 2, 3… ; sans elle, aucun
-// rang. null si le conteneur n'existe pas ou n'est pas dans un étage (pas de cycle au niveau
-// zone).
+// ce cycle), toujours à la fin de son conteneur — dans l'étage, juste au-dessus de la fin d'étage
+// fixe (SIGNATURE, DEMARRAGE GO). Avec la colonne Ordre (`canOrder`), le nouveau cycle prend ce
+// rang et le contenu est renuméroté 1, 2, 3… autour de lui ; sans elle, aucun rang (l'affichage
+// garde la fin d'étage en dernier). null si le conteneur n'existe pas ou n'est pas dans un étage
+// (pas de cycle au niveau zone).
 export function planCycleInsert({
   sections,
   zoneKey,
@@ -68,8 +72,11 @@ export function planCycleInsert({
     [TASK_COLUMNS.duration]: 0,
   };
   if (parent) fields[TASK_COLUMNS.parent] = String(parent.rowId);
-  if (canOrder) fields[TASK_COLUMNS.order] = String(items.length + 1);
-  return { fields, changes: canOrder ? renumberItems(items) : new Map(), depth, name, floor, parent };
+  const index = floorEndStart(items);
+  if (canOrder) fields[TASK_COLUMNS.order] = String(index + 1);
+  // Le nouveau cycle n'a pas encore d'id : sa place est sautée par la renumérotation.
+  const placed = [...items.slice(0, index), { kind: "group", group: { rowId: 0, order: null } }, ...items.slice(index)];
+  return { fields, changes: canOrder ? renumberItems(placed) : new Map(), depth, name, floor, parent };
 }
 
 /* ---------- Déplacer et supprimer un cycle : la règle du bloc ---------- */
@@ -198,16 +205,19 @@ function breakLoop(links, block, above, entry) {
 // qui porte son lien d'entrée (`holder`, voir entryHolderOf) suit P — ou la tâche pilote du cycle
 // en parallèle qui finit en P (voir anchorAbove) ; son lien est gardé s'il la désigne déjà, sinon
 // « P FD » — ou, si N était liée à P autrement qu'en fin → début, reprend exactement ce lien ; sans
-// P, plus de lien. N, si elle était liée à P (ou suivait le cycle qui finit en P, voir followsAbove),
-// suit la tâche de sortie en fin → début (avec son décalage s'il était en fin → début), sauf si ce
-// lien fermait une boucle : elle garde alors le sien. `scope` : les sections et les contenus
-// simulés.
+// P, plus de lien. N, si elle était liée à P (ou suivait le cycle qui finit en P, voir followsAbove ;
+// ou si c'est la SIGNATURE de fin d'étage, voir followsIntoFloorEnd), suit la tâche de sortie en
+// fin → début (avec son décalage s'il était en fin → début), sauf si ce lien fermait une boucle :
+// elle garde alors le sien. `scope` : les sections et les contenus simulés.
 function placeBlock(links, order, block, { exit, entry, holder, scope }) {
   const { above, below } = neighboursOf(order, block);
   const anchor = anchorAbove(above, block.first, scope);
   const former = links.get(holder) || null;
   const belowLink = above != null && below != null ? links.get(below) : null;
-  const tied = belowLink != null && (belowLink.predId === above || followsAbove(belowLink, above, below, scope));
+  const tied = belowLink != null && (
+    belowLink.predId === above || followsAbove(belowLink, above, below, scope) ||
+    followsIntoFloorEnd(belowLink, below, scope.sections)
+  );
   if (anchor == null) links.set(holder, null);
   else if (tied && belowLink.type !== "FD") links.set(holder, { ...belowLink });
   else if (!keepsLink(former, anchor, above)) links.set(holder, { predId: anchor, type: "FD", lag: 0 });
@@ -311,7 +321,8 @@ export function resolveCycleDropSlot(line, side, { groupRowId, zoneKey, floorKey
   if (line.cyclePath?.includes(groupRowId)) return null;
   const place = { zoneKey: line.zoneKey, zoneName: line.zoneName, floorKey: line.floorKey, floorName: line.floorName };
   if (line.kind === "task") {
-    return taskSlot({ ...place, groupRowId: line.groupRowId }, line, side);
+    const taskPlace = { ...place, groupRowId: line.groupRowId };
+    return floorEndSlot(taskPlace, line) || taskSlot(taskPlace, line, side);
   }
   if (line.kind === "group" && side === "before") return groupBeforeSlot(place, line);
   if (line.kind === "group") {

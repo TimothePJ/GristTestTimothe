@@ -67,8 +67,9 @@ export const NATURES = Object.freeze({
   subgroup: "Sous-groupe",
   meeting: "Reunion",
   kickoff: "Demarrage",
+  signature: "Signature",
 });
-const NATURE_KEYS = new Set(["cycle", "sous-groupe", "reunion", "demarrage"]);
+const NATURE_KEYS = new Set(["cycle", "sous-groupe", "reunion", "demarrage", "signature"]);
 const GROUP_NATURE_KEYS = new Set(["cycle", "sous-groupe"]);
 
 function toText(value) {
@@ -82,6 +83,39 @@ function plainKey(value) {
 export function natureKeyOf(value) {
   const key = plainKey(value).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return NATURE_KEYS.has(key) ? key : "";
+}
+
+// Fin d'étage fixe : SIGNATURE PLANS SYNTHESE puis DEMARRAGE GO, les deux dernières lignes de leur
+// étage, hors de tout cycle (leur Parent est ignoré). Reconnues par leur Nature ; une SIGNATURE des
+// étages créés avant la Nature « Signature » l'est par son nom. Rang dans le bloc : 1, 2 ; 0 sinon.
+const LEGACY_SIGNATURE_NAME = "signature plans synthese";
+const FLOOR_END_RANKS = Object.freeze({ signature: 1, kickoff: 2 });
+
+// Rôle d'une tâche d'étage dans la fin d'étage fixe : "signature", "kickoff", ou "".
+export function floorEndOf(task) {
+  if (task?.natureKey === "demarrage") return "kickoff";
+  if (task?.natureKey === "signature") return "signature";
+  const legacy = !task?.natureKey && plainKey(task?.name).replace(/[^a-z0-9]+/g, " ").trim() === LEGACY_SIGNATURE_NAME;
+  return legacy ? "signature" : "";
+}
+
+function floorEndRank(item) {
+  return item.kind === "task" ? FLOOR_END_RANKS[item.task.floorEnd] || 0 : 0;
+}
+
+// Place du bloc fixe dans le contenu d'un étage (`items`, dans l'ordre affiché) : l'indice de sa
+// première ligne, ou la fin du contenu sans bloc (cycle, niveau zone). Une tâche ou un cycle ajouté
+// ou déposé en fin d'étage va là, juste au-dessus de SIGNATURE.
+export function floorEndStart(items = []) {
+  const index = items.findIndex((item) => floorEndRank(item) > 0);
+  return index < 0 ? items.length : index;
+}
+
+// Une SIGNATURE reconnue par son seul nom, renommée, ne le serait plus : avec les colonnes du modèle,
+// la même écriture lui donne sa Nature et la sort du cycle qui la rangeait. Champs à ajouter, ou {}.
+export function floorEndRenameFields(task) {
+  if (task?.floorEnd !== "signature" || task.natureKey === "signature") return {};
+  return { [TASK_COLUMNS.nature]: NATURES.signature, [TASK_COLUMNS.parent]: "" };
 }
 
 // Ligne du service Synthese (colonne Service, sans accents, casse ni espaces).
@@ -871,14 +905,18 @@ function placeFloorContent(floor) {
     (group.parentGroup ? group.parentGroup.items : floor.items).push({ kind: "group", group });
   });
   floor.tasks.forEach((task) => {
-    const group = groupsById.get(task.parentId) || null;
+    const floorEnd = floorEndOf(task);
+    if (floorEnd) task.floorEnd = floorEnd;
+    // Fin d'étage fixe : directement dans l'étage, quel que soit son Parent.
+    const group = floorEnd ? null : groupsById.get(task.parentId) || null;
     task.groupRowId = group ? group.rowId : null;
     (group ? group.items : floor.items).push({ kind: "task", task });
     for (let container = group; container; container = container.parentGroup) container.tasks.push(task);
   });
   const byRowId = (left, right) => itemRowId(left) - itemRowId(right);
   const byRank = (left, right) => compareRanked(left, right, byRowId);
-  floor.items.sort(byRank);
+  // La fin d'étage fixe en dernier, SIGNATURE puis DEMARRAGE GO, quels que soient les rangs.
+  floor.items.sort((left, right) => floorEndRank(left) - floorEndRank(right) || byRank(left, right));
   floor.groups.forEach((group) => {
     group.items.sort(byRank);
     // Sous-cycles directs, dans l'ordre d'affichage.
@@ -1103,9 +1141,13 @@ export function buildRowModel(sections = [], {
     cyclePath,
   });
   const pushItems = (section, floor, group, items, level, path) => {
+    // Fin d'étage fixe : chaque ligne du bloc nomme sa première (SIGNATURE), la place que vise un dépôt.
+    const leadItem = group ? null : items[floorEndStart(items)] || null;
+    const floorEndLead = leadItem ? { taskId: leadItem.task.id, name: leadItem.task.name } : null;
     items.forEach((item) => {
       if (item.kind === "task") {
-        lines.push(taskLine(section, item.task, floor, group, level, path));
+        const line = taskLine(section, item.task, floor, group, level, path);
+        lines.push(item.task.floorEnd ? { ...line, floorEnd: item.task.floorEnd, floorEndLead } : line);
         return;
       }
       const child = item.group;

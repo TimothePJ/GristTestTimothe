@@ -26,6 +26,7 @@ import {
   findGroup,
   descendantGroups,
   floorCollapseKey,
+  floorEndRenameFields,
   floorKeyOf,
   floorRemovalIds,
   groupCollapseKey,
@@ -632,8 +633,12 @@ export function createSyntheseTasksController({
       render();
       return;
     }
-    const changes = new Map([[taskId, result.fields]]);
-    let actions = [["UpdateRecord", PLANNING_TABLE, taskId, result.fields]];
+    // Une ancienne SIGNATURE renommée garde sa place en fin d'étage : sa Nature s'écrit avec le nom.
+    const fields = field === "name" && templateColumns === true
+      ? { ...result.fields, ...floorEndRenameFields(task) }
+      : result.fields;
+    const changes = new Map([[taskId, fields]]);
+    let actions = [["UpdateRecord", PLANNING_TABLE, taskId, fields]];
     if (DATE_FIELDS.has(field)) {
       const updates = cascadeFrom(result.task, everyTask);
       if (updates.length) {

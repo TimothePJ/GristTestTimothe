@@ -238,7 +238,8 @@ test("démarrage du gros œuvre après le démarrage des travaux : seconde alert
   assert.deepEqual(kickoff.state.parts, [{ text: "retard 3 j", tone: "late" }]);
   assert.equal(kickoff.state.title, "Démarrage prévu après le démarrage des travaux de Structure (Mer 25/02/26).");
   assert.deepEqual([kickoff.lateEnd, kickoff.tone], [true, "late"]);
-  assert.deepEqual(texts(lineOf(lines, "group:416")), ["2 retards Synthèse"]);
+  // DEMARRAGE GO n'est plus dans le cycle 3 (fin d'étage fixe) : le cycle ne compte que la tâche contrôlée.
+  assert.deepEqual(texts(lineOf(lines, "group:416")), ["1 retard Synthèse"]);
   assert.deepEqual(texts(lineOf(lines, "level:113")), ["Synthèse en retard de 72 j", "2 retards Structure"]);
   assert.equal(totals.synthese, 2);
 });

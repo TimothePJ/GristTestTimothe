@@ -38,9 +38,10 @@ test("conteneurs : niveau zone (ses tâches), étage, cycle, sous-groupe ; intro
   const zone = findContainer(all, { zoneKey: ZONE });
   assert.deepEqual([zone.key, idsOf(zone.items), zone.floor], [`zone:${ZONE}`, [301], null]);
   const floor = findContainer(all, { zoneKey: ZONE, floorKey: "ss1" });
-  assert.deepEqual([floor.key, idsOf(floor.items)], [`floor:${ZONE}/ss1`, [202, 203, 210, 217]]);
+  // SIGNATURE (225) et DEMARRAGE GO (226) : la fin d'étage fixe, hors des cycles.
+  assert.deepEqual([floor.key, idsOf(floor.items)], [`floor:${ZONE}/ss1`, [202, 203, 210, 217, 225, 226]]);
   const cycle = findContainer(all, { zoneKey: ZONE, floorKey: "ss1", groupRowId: 217 });
-  assert.deepEqual([cycle.key, idsOf(cycle.items), cycle.floor.key], ["group:217", [218, 219, 220, 224, 225, 226], "ss1"]);
+  assert.deepEqual([cycle.key, idsOf(cycle.items), cycle.floor.key], ["group:217", [218, 219, 220, 224], "ss1"]);
   assert.deepEqual(idsOf(findContainer(all, { zoneKey: ZONE, floorKey: "ss1", groupRowId: 220 }).items), [221, 222, 223]);
   assert.equal(findContainer(all, { zoneKey: "inconnue" }), null);
   assert.equal(findContainer(all, { zoneKey: ZONE, floorKey: "r1" }), null);
@@ -75,15 +76,14 @@ test("renumérotation : 1, 2, 3… en texte, seulement pour les lignes dont le r
   const group = findContainer(sections(), { zoneKey: ZONE, floorKey: "ss1", groupRowId: 217 });
   const changes = renumberItems(group.items);
   assert.deepEqual([...changes.entries()], [
-    [218, { Ordre: "1" }], [219, { Ordre: "2" }], [220, { Ordre: "3" }],
-    [224, { Ordre: "4" }], [225, { Ordre: "5" }], [226, { Ordre: "6" }],
+    [218, { Ordre: "1" }], [219, { Ordre: "2" }], [220, { Ordre: "3" }], [224, { Ordre: "4" }],
   ]);
   const ranked = group.items.map((item, index) => (item.kind === "task"
     ? { kind: "task", task: { ...item.task, order: index + 1 } }
     : { kind: "group", group: { ...item.group, order: index + 1 } }));
   assert.equal(renumberItems(ranked).size, 0, "déjà rangés");
   const withNew = [{ kind: "task", task: { id: NEW_TASK_ID, order: null } }, ...ranked];
-  assert.deepEqual([...renumberItems(withNew).keys()], [218, 219, 220, 224, 225, 226], "la nouvelle tâche est ignorée");
+  assert.deepEqual([...renumberItems(withNew).keys()], [218, 219, 220, 224], "la nouvelle tâche est ignorée");
 });
 
 test("écritures : une par jeu de colonnes, ids triés ; une seule ligne → UpdateRecord", () => {

@@ -16,7 +16,7 @@ test("nature écrite selon la profondeur", () => {
   assert.equal(NEW_SUBCYCLE_NAME, "Nouveau sous-cycle");
 });
 
-test("nouveau cycle dans l'étage : fin de l'étage, Nature Cycle, sans Parent", () => {
+test("nouveau cycle dans l'étage : fin de l'étage (au-dessus de SIGNATURE), Nature Cycle, sans Parent", () => {
   const plan = planCycleInsert({
     sections: sections(), zoneKey: ERA_ZONE_KEY, floorKey: "ss1", canOrder: true, projectName: ERA_PROJECT,
   });
@@ -25,7 +25,10 @@ test("nouveau cycle dans l'étage : fin de l'étage, Nature Cycle, sans Parent",
   });
   assert.deepEqual(
     [...plan.changes],
-    [[984, { Ordre: "1" }], [985, { Ordre: "2" }], [992, { Ordre: "3" }], [999, { Ordre: "4" }]]
+    [
+      [984, { Ordre: "1" }], [985, { Ordre: "2" }], [992, { Ordre: "3" }], [999, { Ordre: "4" }],
+      [1007, { Ordre: "6" }], [1008, { Ordre: "7" }],
+    ]
   );
   assert.equal(plan.depth, 1);
   assert.equal(plan.parent, null);

@@ -517,8 +517,9 @@ export function createSyntheseTaskTable(host, {
       toggle.setAttribute("aria-label", `${line.collapsed ? "Déplier" : "Replier"} ${line.name}`);
       cell.appendChild(toggle);
     }
-    // Poignée pour glisser la tâche vers un autre étage ou une autre zone.
-    if (line.kind === "task" && editable) {
+    // Poignée pour glisser la tâche vers un autre étage ou une autre zone ; aucune sur la fin d'étage
+    // fixe (SIGNATURE, DEMARRAGE GO), qui ne se déplace pas.
+    if (line.kind === "task" && editable && !line.floorEnd) {
       const grip = createElement("span", "stt-grip", GRIP_GLYPH);
       grip.setAttribute("aria-hidden", "true");
       grip.title = "Glisser pour déplacer la tâche";
