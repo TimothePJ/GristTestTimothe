@@ -40,10 +40,10 @@
 
   <!-- Styles app -->
   <link rel="stylesheet" href="./assets/css/variables.css" />
-  <link rel="stylesheet" href="./assets/css/styles.css?v=20261110-export1" />
+  <link rel="stylesheet" href="./assets/css/styles.css?v=20261116-param1" />
 
   <!-- App -->
-  <script type="module" src="./assets/js/main.js?v=20261110-export1" defer></script>
+  <script type="module" src="./assets/js/main.js?v=20261116-param1" defer></script>
 </head>
 <body>
   <!-- Toolbar style timeline-calendar -->
@@ -89,6 +89,13 @@
         hidden
       >Par &eacute;tage</button>
       <button
+        id="syntheseParametreToggle"
+        type="button"
+        class="planning-synthese-parametre-toggle"
+        title="Modèle d'étage du projet : cycles, tâches, liens et durées d'un nouvel étage"
+        data-service-context-navigation
+      >Paramètre</button>
+      <button
         id="durationDefaultsToggle"
         type="button"
         class="planning-duration-defaults-toggle"
@@ -103,14 +110,21 @@
       >Exporter</button>
     </div>
 
-    <!-- Zoom : uniquement semaine / mois / année -->
-    <div class="zoom-buttons" aria-label="Niveau de zoom">
-      <button type="button" data-zoom="week" class="active">Semaine</button>
-      <button type="button" data-zoom="month">Mois</button>
-      <button type="button" data-zoom="year">Année</button>
+    <!-- Échelle et dates du planning, groupées à droite : le bouton montre l'échelle affichée,
+         un clic passe à la suivante (Semaine → Mois → Année → Semaine). -->
+    <div class="planning-period">
+      <div class="zoom-buttons" aria-label="Échelle du planning">
+        <button
+          id="zoomCycleButton"
+          type="button"
+          class="zoom-cycle-button"
+          data-zoom="week"
+          title="Échelle : Semaine. Cliquer pour passer à Mois"
+          data-service-context-navigation
+        >Semaine</button>
+      </div>
+      <div id="current-date-range" aria-live="polite"></div>
     </div>
-
-    <div id="current-date-range" aria-live="polite"></div>
   </div>
 
   <!-- Header tableau (4 colonnes à gauche + planning à droite) -->

@@ -107,9 +107,25 @@ function cycleModeItems(line) {
 // zones (où elle remplace l'ajout direct). Avec un filtre de zone, ces entrées sont grisées.
 export function buildMenuItems(
   line,
-  { canAddFloor = true, canAddCycle = true, canSetCycleMode = true, canEditLink = true, zoneFiltered = false } = {},
+  { canAddFloor = true, canAddCycle = true, canSetCycleMode = true, canEditLink = true, zoneFiltered = false, templateMode = false } = {},
 ) {
   if (!line) return [];
+  // Mode modèle (fenêtre « Paramètre ») : l'étage du modèle n'a que l'ajout d'une tâche ou d'un cycle,
+  // la zone n'a aucun menu ; les menus de tâche et de cycle restent ceux du tableau principal.
+  if (templateMode && line.kind === "zone") return [];
+  if (templateMode && line.kind === "floor") {
+    return buildMenuItems(line, { canAddFloor, canAddCycle, canSetCycleMode, canEditLink, zoneFiltered })
+      .filter((item) => ["addTask", "addMeeting", "addCycle"].includes(item.action));
+  }
+  // « Ajouter une réunion » suit chaque « Ajouter une tâche », pour la même place ; grisée sans les
+  // colonnes du modèle d'étage (Nature…), comme l'ajout d'un cycle.
+  const withMeeting = (items) => items.flatMap((item) => (item.action === "addTask"
+    ? [item, { ...item, label: "Ajouter une réunion", action: "addMeeting", disabled: !canAddCycle }]
+    : [item]));
+  return withMeeting(baseMenuItems(line, { canAddFloor, canAddCycle, canSetCycleMode, canEditLink, zoneFiltered }));
+}
+
+function baseMenuItems(line, { canAddFloor, canAddCycle, canSetCycleMode, canEditLink, zoneFiltered }) {
   if (line.kind === "storey") {
     const addStorey = { label: "Ajouter un étage…", action: "addStorey", zoneKey: "", disabled: !canAddFloor || zoneFiltered };
     if (!line.floorKey) return [addStorey];
@@ -249,36 +265,38 @@ export function readLeftWidth(current, legacy) {
   return DEFAULT_LEFT_WIDTH;
 }
 
-function readStoredWidth() {
+// Clés de stockage des largeurs : celles du tableau principal, ou celles d'une autre instance
+// (`storageKeys` : { leftWidth, columnWidths }) qui ne doit pas partager les réglages du principal.
+function readStoredWidth(key = LEFT_WIDTH_STORAGE_KEY) {
   try {
     return readLeftWidth(
-      window.localStorage.getItem(LEFT_WIDTH_STORAGE_KEY),
-      window.localStorage.getItem(LEGACY_LEFT_WIDTH_STORAGE_KEY),
+      window.localStorage.getItem(key),
+      key === LEFT_WIDTH_STORAGE_KEY ? window.localStorage.getItem(LEGACY_LEFT_WIDTH_STORAGE_KEY) : null,
     );
   } catch (_error) {
     return DEFAULT_LEFT_WIDTH;
   }
 }
 
-function storeWidth(width) {
+function storeWidth(width, key = LEFT_WIDTH_STORAGE_KEY) {
   try {
-    window.localStorage.setItem(LEFT_WIDTH_STORAGE_KEY, String(Math.round(width)));
+    window.localStorage.setItem(key, String(Math.round(width)));
   } catch (_error) {
     // Stockage indisponible : la largeur reste celle de la session.
   }
 }
 
-function readStoredColumnWidths() {
+function readStoredColumnWidths(key = COLUMN_WIDTHS_STORAGE_KEY) {
   try {
-    return readColumnWidths(window.localStorage.getItem(COLUMN_WIDTHS_STORAGE_KEY));
+    return readColumnWidths(window.localStorage.getItem(key));
   } catch (_error) {
     return { ...DEFAULT_COLUMN_WIDTHS };
   }
 }
 
-function storeColumnWidths(widths) {
+function storeColumnWidths(widths, key = COLUMN_WIDTHS_STORAGE_KEY) {
   try {
-    window.localStorage.setItem(COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(widths));
+    window.localStorage.setItem(key, JSON.stringify(widths));
   } catch (_error) {
     // Stockage indisponible : les largeurs restent celles de la session.
   }
@@ -325,10 +343,11 @@ export function cellText(line, field) {
 // Une cellule se saisit-elle ? En mode modifiable : celles d'une tâche sauf le numéro de ligne et
 // le Lien (il se choisit par le clic droit), et le nom d'un étage ou d'un cycle (pas
 // celui d'une zone dans un étage, ni du bloc « Sans étage »).
-export function isEditableCell(line, field, { editable = false } = {}) {
+export function isEditableCell(line, field, { editable = false, templateMode = false } = {}) {
   if (!editable || READ_ONLY_FIELDS.has(field)) return false;
   if (line.kind === "task") return true;
-  if (line.kind === "floor") return line.look !== "zone" && field === "name";
+  // Mode modèle : l'étage du modèle garde son nom.
+  if (line.kind === "floor") return !templateMode && line.look !== "zone" && field === "name";
   return (line.kind === "storey" ? Boolean(line.floorKey) : line.kind === "group") && field === "name";
 }
 
@@ -353,6 +372,7 @@ export function createSyntheseTaskTable(host, {
   onRenameFloor,
   onRenameGroup,
   onAddTask,
+  onAddMeeting,
   onAddFloor,
   onAddStorey,
   onAddCycle,
@@ -372,8 +392,23 @@ export function createSyntheseTaskTable(host, {
   onToggleFloor,
   onToggleGroup,
   onLockedAttempt,
-} = {}, { createGantt } = {}) {
-  const root = createElement("div", "stt");
+} = {}, {
+  createGantt,
+  hiddenFields = [],
+  rightPane = true,
+  templateMode = false,
+  storageKeys = null,
+} = {}) {
+  // Colonnes affichées par cette instance (la fenêtre « Paramètre » masque Début et Fin).
+  const hidden = new Set(hiddenFields);
+  const columns = COLUMNS.filter((column) => !hidden.has(column.field));
+  const editableFields = EDITABLE_FIELDS.filter((field) => !hidden.has(field));
+  const leftWidthKey = storageKeys?.leftWidth || LEFT_WIDTH_STORAGE_KEY;
+  const columnWidthsKey = storageKeys?.columnWidths || COLUMN_WIDTHS_STORAGE_KEY;
+  // Largeurs des seules colonnes affichées : les champs masqués ne comptent ni dans le minimum du
+  // tableau ni dans sa largeur totale.
+  const visibleWidths = (widths) => Object.fromEntries(Object.entries(widths).filter(([field]) => !hidden.has(field)));
+  const root = createElement("div", rightPane ? "stt" : "stt stt--no-right");
   const scroller = createElement("div", "stt-scroll");
   scroller.setAttribute("role", "treegrid");
   scroller.setAttribute("aria-label", "Tâches du projet");
@@ -381,7 +416,7 @@ export function createSyntheseTaskTable(host, {
   const head = createElement("div", "stt-line stt-line--head");
   head.setAttribute("role", "row");
   const headLeft = createElement("div", "stt-left");
-  COLUMNS.forEach(({ field, label, title }) => {
+  columns.forEach(({ field, label, title }) => {
     const cell = createElement("div", `stt-cell stt-cell--${field}`, label);
     cell.setAttribute("role", "columnheader");
     if (title) {
@@ -398,7 +433,8 @@ export function createSyntheseTaskTable(host, {
   });
   // Bande réservée à l'échelle des dates du Gantt.
   const headRight = createElement("div", "stt-right stt-right--head");
-  head.append(headLeft, headRight);
+  if (rightPane) head.append(headLeft, headRight);
+  else head.append(headLeft);
 
   const body = createElement("div", "stt-body");
   body.setAttribute("role", "rowgroup");
@@ -415,7 +451,7 @@ export function createSyntheseTaskTable(host, {
   dropLine.setAttribute("aria-hidden", "true");
   dropLine.hidden = true;
   scroller.appendChild(dropLine);
-  const gantt = typeof createGantt === "function"
+  const gantt = rightPane && typeof createGantt === "function"
     ? createGantt({ headHost: headRight, layerHost: ganttLayer, interactionHost: scroller, rowHeight: ROW_HEIGHT_PX })
     : null;
 
@@ -434,7 +470,8 @@ export function createSyntheseTaskTable(host, {
   menu.setAttribute("role", "menu");
   menu.hidden = true;
 
-  root.append(scroller, splitter, status, menu);
+  if (rightPane) root.append(scroller, splitter, status, menu);
+  else root.append(scroller, status, menu);
   host.replaceChildren(root);
 
   let lines = [];
@@ -459,15 +496,30 @@ export function createSyntheseTaskTable(host, {
   let queuedAction = null;
   let ignoreNextClick = false;
   let statusTimer = 0;
-  let leftWidth = readStoredWidth();
-  let columnWidths = readStoredColumnWidths();
+  let leftWidth = readStoredWidth(leftWidthKey);
+  let columnWidths = readStoredColumnWidths(columnWidthsKey);
+  // Largeur par défaut sans les colonnes masquées (une largeur mémorisée est reprise telle quelle).
+  if (leftWidth === DEFAULT_LEFT_WIDTH && hidden.size) {
+    leftWidth -= sumWidths(Object.fromEntries(Object.entries(columnWidths).filter(([field]) => hidden.has(field))));
+  }
+  // Pistes de la grille : seulement les colonnes affichées. Sans colonne masquée, la variable n'est pas
+  // posée et le CSS garde ses huit pistes.
+  if (hidden.size) {
+    const tracks = columns.map(({ field }) => (field === "name" ? "minmax(0, 1fr)" : `var(--stt-col-${field})`));
+    root.style.setProperty("--stt-left-columns", tracks.join(" "));
+  }
+  // Glisser une bordure : le calcul ne voit que les colonnes affichées, les largeurs masquées sont reprises telles quelles.
+  function dragVisibleColumn(state, field, delta) {
+    const next = dragColumn({ widths: visibleWidths(state.widths), leftWidth: state.leftWidth }, field, delta);
+    return { widths: { ...state.widths, ...next.widths }, leftWidth: next.leftWidth };
+  }
 
   /* ---------- Largeur du panneau gauche et des colonnes ---------- */
 
   function clampWidth(width) {
-    const min = minLeftWidth(columnWidths);
+    const min = minLeftWidth(visibleWidths(columnWidths));
     const available = root.clientWidth;
-    const max = available ? Math.max(min, available - MIN_RIGHT_WIDTH) : Infinity;
+    const max = available && rightPane ? Math.max(min, available - MIN_RIGHT_WIDTH) : Infinity;
     return Math.min(max, Math.max(min, width));
   }
 
@@ -482,14 +534,14 @@ export function createSyntheseTaskTable(host, {
     columnWidths = next.widths;
     applyColumnWidths();
     applyWidth(next.leftWidth, { persist });
-    if (persist) storeColumnWidths(columnWidths);
+    if (persist) storeColumnWidths(columnWidths, columnWidthsKey);
   }
 
   function applyWidth(width, { persist = false } = {}) {
     leftWidth = clampWidth(width);
     root.style.setProperty("--stt-left-width", `${Math.round(leftWidth)}px`);
     splitter.setAttribute("aria-valuenow", String(Math.round(leftWidth)));
-    if (persist) storeWidth(leftWidth);
+    if (persist) storeWidth(leftWidth, leftWidthKey);
     gantt?.resize();
   }
 
@@ -526,7 +578,8 @@ export function createSyntheseTaskTable(host, {
       cell.appendChild(grip);
     }
     cell.appendChild(createElement("span", "stt-text", line.name));
-    if (line.kind === "floor" && line.structureLinkNote) cell.appendChild(buildLinkBadge(line));
+    // Pas d'emblème dans la fenêtre Paramètre : « Étage type » n'est lié à aucune Structure.
+    if (line.kind === "floor" && line.structureLinkNote && !templateMode) cell.appendChild(buildLinkBadge(line));
     return cell;
   }
 
@@ -557,7 +610,7 @@ export function createSyntheseTaskTable(host, {
     if (line.key === dragSourceKey) element.classList.add("is-drag-source");
 
     const left = createElement("div", "stt-left");
-    COLUMNS.forEach(({ field }) => {
+    columns.forEach(({ field }) => {
       const cell = field === "name"
         ? buildNameCell(line)
         : createElement("div", `stt-cell stt-cell--${field}`, cellText(line, field));
@@ -570,19 +623,23 @@ export function createSyntheseTaskTable(host, {
       if (field === "line") cell.setAttribute("role", "rowheader");
       if (field === "link") cell.setAttribute("role", "gridcell");
       if (field === "end" && line.endLimitNote) cell.title = line.endLimitNote;
-      if (isEditableCell(line, field, { editable })) {
+      if (isEditableCell(line, field, { editable, templateMode })) {
         cell.classList.add("is-editable");
         cell.tabIndex = 0;
       }
       left.appendChild(cell);
     });
     // Emplacement de la ligne dans le Gantt : même hauteur, même ordre.
-    element.append(left, createElement("div", "stt-right"));
+    if (rightPane) element.append(left, createElement("div", "stt-right"));
+    else element.append(left);
     return element;
   }
 
   function draw({ lines: nextLines, options }) {
-    lines = Array.isArray(nextLines) ? nextLines : [];
+    // Mode modèle : les lignes de zone ne sont pas dessinées. La liste filtrée est celle du tableau,
+    // pour que le glisser, le trait d'insertion et les recherches de ligne voient les lignes rendues.
+    const received = Array.isArray(nextLines) ? nextLines : [];
+    lines = templateMode ? received.filter((line) => line.kind !== "zone") : received;
     editable = Boolean(options?.editable);
     canAddFloor = options?.canAddFloor !== false;
     canAddCycle = options?.canAddCycle !== false;
@@ -627,7 +684,7 @@ export function createSyntheseTaskTable(host, {
   }
 
   function startEditing(taskId, field) {
-    if (!editable || !EDITABLE_FIELDS.includes(field)) return;
+    if (!editable || !editableFields.includes(field)) return;
     if (editor) {
       queuedAction = { type: "edit", taskId, field };
       return;
@@ -640,7 +697,7 @@ export function createSyntheseTaskTable(host, {
 
   // Nom d'un étage : même saisie que le nom d'une tâche ; la validation le renomme.
   function startEditingFloor(zoneKey, floorKey) {
-    if (!editable) return;
+    if (!editable || templateMode) return;
     if (editor) {
       queuedAction = { type: "editFloor", zoneKey, floorKey };
       return;
@@ -794,9 +851,9 @@ export function createSyntheseTaskTable(host, {
 
     const queued = queuedAction;
     queuedAction = null;
-    const nextIndex = EDITABLE_FIELDS.indexOf(current.field) + move;
-    if (target.kind === "task" && move && nextIndex >= 0 && nextIndex < EDITABLE_FIELDS.length) {
-      startEditing(target.taskId, EDITABLE_FIELDS[nextIndex]);
+    const nextIndex = editableFields.indexOf(current.field) + move;
+    if (target.kind === "task" && move && nextIndex >= 0 && nextIndex < editableFields.length) {
+      startEditing(target.taskId, editableFields[nextIndex]);
     } else if (queued) {
       runAction(queued);
     } else if (refocus || (move && target.kind !== "task")) {
@@ -828,6 +885,9 @@ export function createSyntheseTaskTable(host, {
     if (item.action === "addTask") {
       return onAddTask?.(item.zoneKey, item.floorKey, item.groupRowId ?? null, item.afterTaskId ?? null);
     }
+    if (item.action === "addMeeting") {
+      return onAddMeeting?.(item.zoneKey, item.floorKey, item.groupRowId ?? null, item.afterTaskId ?? null);
+    }
     if (item.action === "addFloor") return onAddFloor?.(item.zoneKey);
     if (item.action === "addStorey") return onAddStorey?.(item.zoneKey);
     if (item.action === "addCycle") return onAddCycle?.(item.zoneKey, item.floorKey, item.parentGroupRowId ?? null);
@@ -849,9 +909,11 @@ export function createSyntheseTaskTable(host, {
     }
     const line = lines.find((candidate) => candidate.key === lineElement.dataset.lineKey);
     // Le filtre de zone ne concerne que la ligne étage et les zones du bloc « Sans étage ».
-    const items = line?.kind === "storey" || (line?.kind === "zone" && line.layout === "floor")
-      ? buildMenuItems(line, { canAddFloor, canAddCycle, canSetCycleMode, canEditLink, zoneFiltered })
-      : buildMenuItems(line, { canAddFloor, canAddCycle, canSetCycleMode, canEditLink });
+    const items = templateMode
+      ? buildMenuItems(line, { canAddFloor, canAddCycle, canSetCycleMode, canEditLink, templateMode })
+      : line?.kind === "storey" || (line?.kind === "zone" && line.layout === "floor")
+        ? buildMenuItems(line, { canAddFloor, canAddCycle, canSetCycleMode, canEditLink, zoneFiltered })
+        : buildMenuItems(line, { canAddFloor, canAddCycle, canSetCycleMode, canEditLink });
     if (!items.length) return;
     menu.replaceChildren(...items.map((item) => {
       const classes = ["stt-menu__item"];
@@ -909,7 +971,7 @@ export function createSyntheseTaskTable(host, {
     if (!cell || cell.classList.contains("is-editing")) return null;
     if (kind === "task") return { type: "edit", taskId: Number(lineElement.dataset.taskId), field: cell.dataset.field };
     // Une zone dans un étage (aspect « zone ») ne se renomme pas ici ; le bloc « Sans étage » non plus.
-    if (kind === "floor" && lineElement.dataset.look !== "zone" && cell.dataset.field === "name") {
+    if (kind === "floor" && !templateMode && lineElement.dataset.look !== "zone" && cell.dataset.field === "name") {
       return { type: "editFloor", zoneKey, floorKey };
     }
     if (kind === "storey" && floorKey && cell.dataset.field === "name") return { type: "editStorey", floorKey };
@@ -1086,7 +1148,7 @@ export function createSyntheseTaskTable(host, {
       // Pointeur déjà relâché.
     }
     root.classList.add("is-resizing");
-    const onMove = (moveEvent) => resizeColumn(dragColumn(start, field, moveEvent.clientX - startX));
+    const onMove = (moveEvent) => resizeColumn(dragVisibleColumn(start, field, moveEvent.clientX - startX));
     const onEnd = () => {
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onEnd);
@@ -1104,9 +1166,9 @@ export function createSyntheseTaskTable(host, {
     const handle = event.target instanceof Element ? event.target.closest(".stt-col-resize") : null;
     if (!handle) return;
     const { field } = handle.dataset;
-    const current = field === "name" ? leftWidth - sumWidths(columnWidths) : columnWidths[field];
+    const current = field === "name" ? leftWidth - sumWidths(visibleWidths(columnWidths)) : columnWidths[field];
     const wanted = field === "name" ? DEFAULT_NAME_WIDTH : DEFAULT_COLUMN_WIDTHS[field];
-    resizeColumn(dragColumn({ widths: columnWidths, leftWidth }, field, wanted - current), { persist: true });
+    resizeColumn(dragVisibleColumn({ widths: columnWidths, leftWidth }, field, wanted - current), { persist: true });
   });
 
   /* ---------- Séparateur ---------- */

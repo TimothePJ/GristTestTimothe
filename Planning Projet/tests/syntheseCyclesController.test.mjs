@@ -663,3 +663,23 @@ test("CYCLE 4 puis une tâche dedans : la tâche suit la REUNION du CYCLE 3, SIG
   assert.equal(writtenFields(env.writes[2], 1007).Lien, "3001 FD+5");
   assert.deepEqual(env.keys().slice(-4), ["group:3000", "task:3001", "task:1007", "task:1008"]);
 });
+
+// « Ajouter une réunion » sous VISA A (1001) dans le CYCLE 3 : une écriture, pas de saisie du nom.
+test("Ajouter une réunion : REUNION + DIFFUSION SYT, Nature Reunion, 0 jour, message ; sans les colonnes du modèle : refus", async () => {
+  const env = setup({ applyUserActions: () => ({ retValues: [3100] }) });
+  await activate(env);
+  await env.table.callbacks.onAddMeeting(ERA_ZONE_KEY, "ss1", 999, 1001);
+  await flush();
+  const added = env.writes[0].find((action) => action[0] === "AddRecord");
+  assert.ok(added, "AddRecord écrit");
+  assert.deepEqual([added[3].Taches, added[3].Nature, added[3].Duree_1], ["REUNION + DIFFUSION SYT", "Reunion", 0]);
+  assert.deepEqual(env.table.editing, [], "le nom est déjà celui du modèle : pas de saisie");
+  assert.deepEqual(env.table.statuses.at(-1), { text: "Réunion ajoutée dans « CYCLE 3 ».", tone: "info" });
+
+  const bare = setup({ rows: withoutColumns(eraSs1Rows(), ["Nature", "Parent", "Lien"]) });
+  await activate(bare);
+  await bare.table.callbacks.onAddMeeting(ERA_ZONE_KEY, "ss1", null, 1001);
+  assert.equal(bare.writes.length, 0);
+  assert.equal(bare.table.statuses.at(-1).tone, "error");
+  assert.match(bare.table.statuses.at(-1).text, /réunions/);
+});

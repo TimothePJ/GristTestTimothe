@@ -95,17 +95,20 @@ test("menu contextuel selon la ligne", () => {
   const zone = { kind: "zone", zoneKey: "zonez3a", floorKey: "" };
   assert.deepEqual(buildMenuItems(zone), [
     { label: "Ajouter une tâche", action: "addTask", zoneKey: "zonez3a", floorKey: "" },
+    { label: "Ajouter une réunion", action: "addMeeting", zoneKey: "zonez3a", floorKey: "", disabled: false },
     { label: "Ajouter un étage", action: "addFloor", zoneKey: "zonez3a", disabled: false },
   ]);
-  assert.equal(buildMenuItems(zone, { canAddFloor: false })[1].disabled, true);
-  assert.deepEqual(buildMenuItems({ kind: "zone", zoneKey: "", floorKey: "" }).map((item) => item.action), ["addTask"]);
+  assert.equal(buildMenuItems(zone, { canAddFloor: false })[2].disabled, true);
+  assert.deepEqual(buildMenuItems({ kind: "zone", zoneKey: "", floorKey: "" }).map((item) => item.action), ["addTask", "addMeeting"]);
   assert.deepEqual(buildMenuItems({ kind: "floor", zoneKey: "zonez3a", floorKey: "phrdb" }), [
     { label: "Ajouter une tâche", action: "addTask", zoneKey: "zonez3a", floorKey: "phrdb" },
+    { label: "Ajouter une réunion", action: "addMeeting", zoneKey: "zonez3a", floorKey: "phrdb", disabled: false },
     { label: "Ajouter un cycle", action: "addCycle", zoneKey: "zonez3a", floorKey: "phrdb", parentGroupRowId: null, disabled: false },
     { label: "Supprimer l'étage", action: "deleteFloor", zoneKey: "zonez3a", floorKey: "phrdb", danger: true },
   ]);
   assert.deepEqual(buildMenuItems({ kind: "task", zoneKey: "zonez3a", floorKey: "phrdb", taskId: 5 }), [
     { label: "Ajouter une tâche", action: "addTask", zoneKey: "zonez3a", floorKey: "phrdb", afterTaskId: 5 },
+    { label: "Ajouter une réunion", action: "addMeeting", zoneKey: "zonez3a", floorKey: "phrdb", afterTaskId: 5, disabled: false },
     { label: "Modifier le lien…", action: "editLink", taskId: 5, disabled: false },
     { label: "Contrôler par rapport au coffrage", action: "setFormworkCheck", taskId: 5, checked: true },
     { label: "Supprimer la tâche", action: "deleteTask", taskId: 5, danger: true },
@@ -200,11 +203,12 @@ test("menu : cycle, sous-groupe et tâche d'un groupe", () => {
   const cycle = { kind: "group", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 203, nature: "cycle" };
   assert.deepEqual(buildMenuItems(cycle), [
     { label: "Ajouter une tâche", action: "addTask", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 203 },
+    { label: "Ajouter une réunion", action: "addMeeting", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 203, disabled: false },
     { label: "Ajouter un sous-cycle", action: "addCycle", zoneKey: "zonez3a", floorKey: "ss1", parentGroupRowId: 203, disabled: false },
     { label: "Supprimer le cycle", action: "deleteGroup", groupRowId: 203, danger: true },
   ]);
-  assert.equal(buildMenuItems(cycle, { canAddCycle: false })[1].disabled, true);
-  assert.equal(buildMenuItems({ ...cycle, nature: "sous-groupe", groupRowId: 212 })[2].label, "Supprimer le sous-cycle");
+  assert.equal(buildMenuItems(cycle, { canAddCycle: false })[2].disabled, true);
+  assert.equal(buildMenuItems({ ...cycle, nature: "sous-groupe", groupRowId: 212 })[3].label, "Supprimer le sous-cycle");
   assert.deepEqual(
     buildMenuItems({ kind: "task", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 203, taskId: 204 })[0],
     { label: "Ajouter une tâche", action: "addTask", zoneKey: "zonez3a", floorKey: "ss1", groupRowId: 203, afterTaskId: 204 }
@@ -213,7 +217,7 @@ test("menu : cycle, sous-groupe et tâche d'un groupe", () => {
 
 test("menu d'étage : « Ajouter un cycle » grisé sans les colonnes du modèle", () => {
   const floor = { kind: "floor", zoneKey: "zonez3a", floorKey: "ss1" };
-  assert.equal(buildMenuItems(floor, { canAddCycle: false })[1].disabled, true);
+  assert.equal(buildMenuItems(floor, { canAddCycle: false })[2].disabled, true);
 });
 
 test("menu d'un cycle : passer en escalier ou en parallèle selon son mode actuel", () => {
@@ -228,7 +232,7 @@ test("menu d'un cycle : passer en escalier ou en parallèle selon son mode actue
   assert.deepEqual(modeItems({ ...cycle, cycleMode: "mixed" }, { canSetCycleMode: false }), []);
   // Juste avant la suppression du cycle.
   assert.deepEqual(buildMenuItems({ ...cycle, cycleMode: "series" }).map((item) => item.action), [
-    "addTask", "addCycle", "setCycleMode", "deleteGroup",
+    "addTask", "addMeeting", "addCycle", "setCycleMode", "deleteGroup",
   ]);
   assert.ok(source.includes("onSetCycleMode?.(item.groupRowId, item.mode)"));
   assert.ok(source.includes("canSetCycleMode = options?.canSetCycleMode !== false;"));
@@ -325,7 +329,7 @@ test("styles : une largeur par colonne, poignées dans l'en-tête, séparateur s
   assert.match(css, /--stt-col-duration:\s*60px;/);
   assert.match(css, /--stt-col-start:\s*92px;/);
   assert.match(css, /--stt-col-end:\s*92px;/);
-  assert.match(css, /\.stt-left\s*\{[^}]*grid-template-columns:\s*var\(--stt-col-line\) minmax\(0, 1fr\) var\(--stt-col-id2\) var\(--stt-col-indice\) var\(--stt-col-duration\) var\(--stt-col-start\) var\(--stt-col-end\) var\(--stt-col-link\);/);
+  assert.match(css, /\.stt-left\s*\{[^}]*grid-template-columns:\s*var\(--stt-left-columns, var\(--stt-col-line\) minmax\(0, 1fr\) var\(--stt-col-id2\) var\(--stt-col-indice\) var\(--stt-col-duration\) var\(--stt-col-start\) var\(--stt-col-end\) var\(--stt-col-link\)\);/);
   assert.match(css, /\.stt-line--head \.stt-cell\s*\{[^}]*position:\s*relative;/);
   assert.match(css, /\.stt-col-resize\s*\{[^}]*position:\s*absolute;[^}]*cursor:\s*col-resize;/);
   // Le bord droit de « Fin » dans l'en-tête est sa poignée ; le séparateur commence dessous.
@@ -362,7 +366,7 @@ test("emblème de lien : à côté du nom de l'étage, vert quand il est lié, r
   assert.match(css, /\.stt-floor-link\s*\{[^}]*color:\s*#2e7d32;/);
   assert.match(css, /\.stt-floor-link\.is-unlinked\s*\{[^}]*color:\s*#c00000;/);
   const naming = sliceBetween(source, "function buildNameCell(", "function buildLine(");
-  assert.match(naming, /if \(line\.kind === "floor" && line\.structureLinkNote\) cell\.appendChild\(buildLinkBadge\(line\)\);/);
+  assert.match(naming, /if \(line\.kind === "floor" && line\.structureLinkNote && !templateMode\) cell\.appendChild\(buildLinkBadge\(line\)\);/);
 });
 
 // ---------- Ordre libre (colonne Ordre) ----------
@@ -435,7 +439,7 @@ test("saisie dans le tableau : ni le lien ni le numéro de ligne (le lien se cho
 
 test("menu d'une tâche : « Modifier le lien… » ouvre la fenêtre du contrôleur ; grisé sans la colonne Lien", () => {
   const task = { kind: "task", zoneKey: "zonez3a", floorKey: "ss1", taskId: 5 };
-  assert.equal(buildMenuItems(task, { canEditLink: false })[1].disabled, true);
+  assert.equal(buildMenuItems(task, { canEditLink: false })[2].disabled, true);
   assert.match(source, /if \(item\.action === "editLink"\) return onEditLink\?\.\(item\.taskId\);/);
   assert.match(source, /buildMenuItems\(line, \{ canAddFloor, canAddCycle, canSetCycleMode, canEditLink \}\)/);
 });

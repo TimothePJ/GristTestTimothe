@@ -196,11 +196,28 @@ body.is-planning-pane-resizing * {
   cursor: not-allowed;
 }
 
-#current-date-range {
+/* Échelle et dates du planning, groupées à droite du bandeau : la place libre passe à gauche du
+   bouton d'échelle, qui reste collé aux dates. Les dates n'ont que la largeur de leur texte, choisi
+   d'après la place que le bouton leur laisse dans le groupe (dateRangeAvailableWidth, timeline.js). */
+#toolbar > .planning-period {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
   margin-left: auto;
-  flex: 0 1 360px;
-  min-width: 150px;
-  max-width: min(34vw, 440px);
+  flex: 0 1 448px;
+  min-width: 238px;
+  max-width: min(40vw, 528px);
+}
+
+/* Même largeur pour Semaine, Mois et Année : le bouton ne bouge pas quand on change d'échelle. */
+#toolbar .zoom-cycle-button {
+  min-width: 80px;
+}
+
+#current-date-range {
+  flex: 0 1 auto;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -279,7 +296,7 @@ body.planning-sync-embedded #toolbar {
   gap: 10px;
 }
 
-body.planning-sync-embedded #current-date-range {
+body.planning-sync-embedded #toolbar > .planning-period {
   flex: 1 1 auto;
   max-width: none;
 }
@@ -1983,6 +2000,27 @@ body:not(.is-synthese-space) #structureLinkToggle {
   display: none !important;
 }
 
+/* Bouton « Paramètre » (modèle d'étage du projet) : même allure que « Lien Structure », visible
+   dans la vue Synthese seulement (jamais en Global ni intégré). */
+#toolbar .planning-synthese-parametre-toggle {
+  min-width: 96px;
+  border-color: #b7c7d9;
+  font-weight: 700;
+  color: #23415f;
+  box-shadow: inset 0 0 0 1px rgba(35, 65, 95, 0.05);
+}
+
+#toolbar .planning-synthese-parametre-toggle:hover {
+  border-color: #7fa7cf;
+  background-color: #f1f7ff;
+}
+
+body:not(.is-synthese-space) #syntheseParametreToggle,
+body.is-global-space #syntheseParametreToggle,
+body.planning-sync-embedded #syntheseParametreToggle {
+  display: none !important;
+}
+
 /* Bouton « Exporter » (fichier Excel du planning) : même allure que « Durées », sur la frise
    Structure / Topographie seulement — le tableau Synthèse et la vue Global ont d'autres
    colonnes. Il ne rétrécit pas quand le bandeau est plein. */
@@ -2664,11 +2702,12 @@ body.is-manage-zone-modal-open {
     flex-wrap: nowrap;
   }
 
+  #toolbar > .planning-period {
+    flex-basis: 328px;
+    max-width: 328px;
+  }
+
   #current-date-range {
-    margin-left: auto;
-    width: auto;
-    flex-basis: 240px;
-    max-width: 240px;
     font-size: 12px;
   }
 
@@ -2704,10 +2743,13 @@ body.is-manage-zone-modal-open {
     font-size: 12px;
   }
 
+  #toolbar > .planning-period {
+    flex-basis: 258px;
+    min-width: 208px;
+    max-width: 258px;
+  }
+
   #current-date-range {
-    flex-basis: 170px;
-    min-width: 120px;
-    max-width: 170px;
     font-size: 11px;
   }
 }
@@ -2738,7 +2780,7 @@ body #toolbar.grist-service-context-host::-webkit-scrollbar {
   display: none;
 }
 
-body #toolbar.grist-service-context-host > .zoom-buttons {
+body #toolbar.grist-service-context-host .zoom-buttons {
   flex: 0 0 auto;
   white-space: nowrap;
 }
@@ -2749,10 +2791,10 @@ body #toolbar.grist-service-context-host > .filters {
   white-space: nowrap;
 }
 
-body #toolbar.grist-service-context-host > #current-date-range {
-  flex: 1 1 230px;
-  min-width: 96px;
-  max-width: 300px;
+body #toolbar.grist-service-context-host > .planning-period {
+  flex: 1 1 318px;
+  min-width: 184px;
+  max-width: 388px;
   margin-left: 0;
 }
 
@@ -2807,9 +2849,12 @@ body #toolbar.grist-service-context-host > #grist-service-context-control .grist
     min-width: 76px;
   }
 
-  body #toolbar.grist-service-context-host > #current-date-range {
-    flex-basis: 180px;
-    max-width: 210px;
+  body #toolbar.grist-service-context-host > .planning-period {
+    flex-basis: 268px;
+    max-width: 298px;
+  }
+
+  body #toolbar.grist-service-context-host #current-date-range {
     font-size: 12px;
   }
 }
@@ -2840,10 +2885,13 @@ body #toolbar.grist-service-context-host > #grist-service-context-control .grist
     min-width: 68px;
   }
 
-  body #toolbar.grist-service-context-host > #current-date-range {
-    flex-basis: 120px;
-    min-width: 80px;
-    max-width: 150px;
+  body #toolbar.grist-service-context-host > .planning-period {
+    flex-basis: 208px;
+    min-width: 168px;
+    max-width: 238px;
+  }
+
+  body #toolbar.grist-service-context-host #current-date-range {
     font-size: 11px;
   }
 
@@ -2867,10 +2915,10 @@ body #toolbar.grist-service-context-host > #grist-service-context-control .grist
     font-size: 11px;
   }
 
-  body #toolbar.grist-service-context-host > #current-date-range {
-    flex-basis: 96px;
-    min-width: 72px;
-    max-width: 110px;
+  body #toolbar.grist-service-context-host > .planning-period {
+    flex-basis: 184px;
+    min-width: 160px;
+    max-width: 198px;
   }
 }
 
@@ -2949,7 +2997,8 @@ body.is-synthese-space #durationDefaultsToggle {
 
 .stt-left {
   display: grid;
-  grid-template-columns: var(--stt-col-line) minmax(0, 1fr) var(--stt-col-id2) var(--stt-col-indice) var(--stt-col-duration) var(--stt-col-start) var(--stt-col-end) var(--stt-col-link);
+  /* Une instance qui masque des colonnes pose --stt-left-columns (pistes des seules colonnes affichées). */
+  grid-template-columns: var(--stt-left-columns, var(--stt-col-line) minmax(0, 1fr) var(--stt-col-id2) var(--stt-col-indice) var(--stt-col-duration) var(--stt-col-start) var(--stt-col-end) var(--stt-col-link));
   min-width: 0;
   background: #fff;
   border-right: 1px solid #bdbdbd;
@@ -3489,6 +3538,20 @@ html.is-stt-dragging * {
    l'en-tête le temps d'un redessin. */
 .stt-right--head {
   overflow: hidden;
+}
+
+/* Tableau sans panneau droit (fenêtre « Paramètre ») : le tableau prend toute la largeur, sans Gantt ni séparateur. */
+.stt--no-right .stt-line {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.stt--no-right .stt-left {
+  border-right: 0;
+}
+
+.stt--no-right .stt-gantt-layer,
+.stt--no-right .stt-splitter {
+  display: none;
 }
 
 .stt-scroll.is-panning,
@@ -4911,4 +4974,94 @@ body.is-synthese-dragging * {
 /* Simple information (zone existante cochée) : texte normal, pas le rouge d'un refus. */
 .synthese-link-dialog__error.is-info {
   color: #1f2937;
+}
+
+/* Fenêtre « Paramètre » (modèle d'étage du projet) : la fenêtre de lien en grand, avec le tableau
+   Synthese sur un seul étage (sans Début, Fin ni Gantt), une ligne d'aide, une zone de message et un
+   pied à trois boutons. */
+.synthese-parameter-dialog {
+  box-sizing: border-box;
+  width: 90vw;
+  height: 85vh;
+  max-width: none;
+  max-height: none;
+}
+
+.synthese-parameter-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.synthese-parameter-dialog .synthese-link-dialog__header h3 {
+  color: #004990;
+}
+
+.synthese-parameter-dialog__help {
+  margin: 0;
+  color: #475569;
+}
+
+/* Hôte du tableau : il prend la hauteur restante ; le tableau défile à l'intérieur. */
+.synthese-parameter-dialog__table {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #d5dbe3;
+  border-radius: 6px;
+}
+
+/* « Enregistrer » en cours : plus de geste dans le tableau. */
+.synthese-parameter-dialog__table.is-busy {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.synthese-parameter-dialog__messages {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 20vh;
+  overflow: auto;
+}
+
+.synthese-parameter-dialog__messages[hidden] {
+  display: none;
+}
+
+.synthese-parameter-dialog__message {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: #1f2937;
+  background: #f1f4f8;
+}
+
+/* Avertissement sans blocage : couleurs de l'avertissement de la fenêtre de clôture. */
+.synthese-parameter-dialog__message.is-warning {
+  border: 1px solid #f59e0b;
+  color: #78350f;
+  background: #fffbeb;
+}
+
+/* Refus ou erreur : couleurs de la barre d'état du tableau en erreur. */
+.synthese-parameter-dialog__message.is-error {
+  color: #b42318;
+  background: #fef3f2;
+}
+
+.synthese-parameter-dialog__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.synthese-parameter-dialog__actions {
+  display: flex;
+  gap: 8px;
 }
