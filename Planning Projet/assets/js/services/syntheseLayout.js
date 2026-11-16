@@ -23,7 +23,7 @@ export const LAYOUT_MODE_VALUES = Object.freeze({ [LAYOUT_FLOOR]: "Étage", [LAY
 
 // Les lignes du projet : celles dont l'id est dans project.ids (ou égale project.id), ou dont le
 // numéro (non vide) est celui du projet. Par id croissant.
-function projectRows(configs, project) {
+export function projectRows(configs, project) {
   if (!project || !Array.isArray(configs)) return [];
   const ids = new Set((project.ids || []).map(toText));
   if (project.id !== undefined && project.id !== null) ids.add(toText(project.id));

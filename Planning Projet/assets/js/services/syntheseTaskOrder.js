@@ -3,6 +3,8 @@
 // qui changent (la tâche suit celle du dessus, la chaîne se referme là où elle était) et les
 // dates qui suivent. Module pur, sans DOM ni Grist : il rend les champs à écrire, par ligne.
 import {
+  NATURES,
+  NEW_MEETING_NAME,
   NO_ZONE_LABEL,
   PLANNING_TABLE,
   TASK_COLUMNS,
@@ -420,9 +422,10 @@ export function slotIndex(items, position) {
 // Avec Ordre et Lien (`canLink`) : la tâche suit la tâche du dessus (FD) et en prend ses dates —
 // sans dates si celle-ci n'en a pas ; `follow` désigne la tâche du dessous qui devra la suivre une
 // fois son id connu. Dans un cycle en parallèle (`finishWith` : sa tâche pilote), elle finit au
-// contraire avec la tâche pilote (lien fin → fin, un jour) et personne ne la suit. Renvoie la
-// tâche, ses champs Grist, les rangs des autres lignes, `follow`, `atEnd` ; null si le conteneur
-// n'existe pas.
+// contraire avec la tâche pilote (lien fin → fin, un jour) et personne ne la suit. Avec `meeting`,
+// la ligne est une réunion du modèle : « REUNION + DIFFUSION SYT », Nature Reunion, jalon de 0 jour,
+// mêmes place et lien. Renvoie la tâche, ses champs Grist, les rangs des autres lignes, `follow`,
+// `atEnd` ; null si le conteneur n'existe pas.
 export function planTaskInsert({
   sections,
   container,
@@ -432,9 +435,12 @@ export function planTaskInsert({
   finishWith = null,
   today = new Date(),
   projectName = "",
+  meeting = false,
 } = {}) {
   const destination = findContainer(sections, container || {});
   if (!destination) return null;
+  // Durée de la nouvelle ligne : un jour, ou 0 (jalon) pour une réunion.
+  const days = meeting ? 0 : 1;
   const { section, floor, group } = destination;
   let task = buildNewTask({
     zoneName: section.zoneName,
@@ -443,8 +449,9 @@ export function planTaskInsert({
     today,
     parentId: group ? group.rowId : null,
   });
+  if (meeting) task = { ...task, name: NEW_MEETING_NAME, end: task.start, durationDays: 0, isMilestone: true };
   const changes = new Map();
-  const extra = {};
+  const extra = meeting ? { [TASK_COLUMNS.nature]: NATURES.meeting } : {};
   let follow = null;
   if (canOrder) {
     const index = insertionIndex(destination.items, afterTaskId);
@@ -463,12 +470,12 @@ export function planTaskInsert({
       const pilot = finishWith != null ? tasksById.get(finishWith) : null;
       if (pilot) {
         const link = { predId: pilot.id, type: "FF", lag: 0 };
-        const dates = computeLinkedDates(pilot, link, 1) || { start: null, end: null, durationDays: 1, isMilestone: false };
+        const dates = computeLinkedDates(pilot, link, days) || { start: null, end: null, durationDays: days, isMilestone: false };
         task = { ...task, ...dates, link };
         extra[TASK_COLUMNS.link] = formatLink(link);
       } else if (above) {
         const link = { predId: above.id, type: "FD", lag: 0 };
-        const dates = computeLinkedDates(above, link, 1) || { start: null, end: null, durationDays: 1, isMilestone: false };
+        const dates = computeLinkedDates(above, link, days) || { start: null, end: null, durationDays: days, isMilestone: false };
         task = { ...task, ...dates, link };
         extra[TASK_COLUMNS.link] = formatLink(link);
         const tied = below && (followsAbove(below.link, order[at - 1], below.id, scope) || followsIntoFloorEnd(below.link, below.id, sections));

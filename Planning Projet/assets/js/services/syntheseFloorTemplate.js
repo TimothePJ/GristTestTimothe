@@ -47,27 +47,66 @@ function toText(value) {
   return value == null ? "" : String(value).trim();
 }
 
-// Les 26 lignes d'un nouvel étage, dans l'ordre du modèle : la ligne-étage, puis tâches,
-// cycles et sous-groupes. Mêmes colonnes pour toutes (une seule écriture) ; pas de dates ;
-// Parent et Lien viendront avec les ids.
-export function buildFloorFromTemplate({ floorName = "", zoneName = "", projectName = "" } = {}) {
+// Profondeur d'un élément dans le modèle : 1 = à la racine, +1 par parent (garde contre un cycle).
+function templateDepth(item, byCode) {
+  let depth = 1;
+  let current = item;
+  while (current.parent && byCode.has(current.parent) && depth <= byCode.size) {
+    current = byCode.get(current.parent);
+    depth += 1;
+  }
+  return depth;
+}
+
+// Les lignes d'un nouvel étage, dans l'ordre du modèle : la ligne-étage, puis tâches, cycles et
+// sous-groupes (26 lignes pour FLOOR_TEMPLATE). Mêmes colonnes pour toutes (une seule écriture) ;
+// pas de dates ; Parent et Lien viendront avec les ids. Un groupe prend sa Nature d'après sa
+// profondeur réelle dans le modèle (1 = cycle, au-delà = sous-groupe) ; une tâche garde celle de
+// l'élément. Les colonnes N° / Indice / Contrôle coffrage ne s'ajoutent, à toutes les lignes, que
+// si le modèle s'en sert (le contrôle seulement avec withFormworkCheck).
+export function buildFloorFromTemplate({
+  floorName = "",
+  zoneName = "",
+  projectName = "",
+  template = FLOOR_TEMPLATE,
+  replaceToken = true,
+  withFormworkCheck = false,
+} = {}) {
   const floor = toText(floorName);
   const zone = toText(zoneName);
   const project = toText(projectName);
+  const byCode = new Map(template.map((item) => [item.code, item]));
+  const isGroup = (item) => template.some((other) => other.parent === item.code);
+  const useId2 = template.some((item) => toText(item.id2));
+  const useIndice = template.some((item) => toText(item.indice));
+  const useCheck = withFormworkCheck && template.some((item) => item.control === true);
+  const optional = (item) => ({
+    ...(useId2 ? { [TASK_COLUMNS.id2]: toText(item?.id2) } : {}),
+    ...(useIndice ? { [TASK_COLUMNS.indice]: toText(item?.indice) } : {}),
+    ...(useCheck ? { [TASK_COLUMNS.formworkCheck]: item?.control === true } : {}),
+  });
   const floorRow = {
     ...buildFloorFields({ name: floor, zoneName: zone, projectName: project }),
     [TASK_COLUMNS.nature]: "",
     [TASK_COLUMNS.duration]: 0,
+    ...optional(null),
   };
-  const rows = FLOOR_TEMPLATE.map((item) => ({
-    [TASK_COLUMNS.name]: item.name.split(FLOOR_NAME_TOKEN).join(floor),
-    [TASK_COLUMNS.zone]: zone,
-    [TASK_COLUMNS.group]: floor,
-    [TASK_COLUMNS.floor]: false,
-    [TASK_COLUMNS.project]: project,
-    [TASK_COLUMNS.nature]: item.nature || "",
-    [TASK_COLUMNS.duration]: 0,
-  }));
+  const rows = template.map((item) => {
+    const group = isGroup(item) || item.nature === NATURES.cycle || item.nature === NATURES.subgroup;
+    let nature = item.nature || "";
+    if (group) nature = templateDepth(item, byCode) === 1 ? NATURES.cycle : NATURES.subgroup;
+    const days = Number.parseInt(item.days, 10);
+    return {
+      [TASK_COLUMNS.name]: replaceToken ? item.name.split(FLOOR_NAME_TOKEN).join(floor) : item.name,
+      [TASK_COLUMNS.zone]: zone,
+      [TASK_COLUMNS.group]: floor,
+      [TASK_COLUMNS.floor]: false,
+      [TASK_COLUMNS.project]: project,
+      [TASK_COLUMNS.nature]: nature,
+      [TASK_COLUMNS.duration]: !group && Number.isInteger(days) && days > 0 ? days : 0,
+      ...optional(item),
+    };
+  });
   return [floorRow, ...rows];
 }
 
@@ -85,6 +124,16 @@ export function buildZoneAnchorRow({ zoneName = "", projectName = "" } = {}) {
     [TASK_COLUMNS.nature]: "",
     [TASK_COLUMNS.duration]: 0,
   };
+}
+
+// Les colonnes optionnelles (N°, Indice, Contrôle coffrage) de la ligne-étage `floorRow`, reprises
+// vides ("" / false) sur une ligne d'ancrage : toutes les lignes d'une écriture ont les mêmes colonnes.
+export function completeZoneAnchorRow(anchor, floorRow) {
+  const optional = {};
+  [TASK_COLUMNS.id2, TASK_COLUMNS.indice, TASK_COLUMNS.formworkCheck].forEach((column) => {
+    if (floorRow && column in floorRow) optional[column] = typeof floorRow[column] === "boolean" ? false : "";
+  });
+  return { ...optional, ...anchor };
 }
 
 // Lignes → une écriture BulkAddRecord (ids choisis par Grist).
@@ -108,14 +157,14 @@ function resolveLink(text, idByCode) {
 
 // Parent et Lien des lignes du modèle, d'après les ids rendus par Grist dans l'ordre des
 // lignes de buildFloorFromTemplate : l'écriture à faire et les valeurs par ligne.
-export function buildTemplateLinks(ids) {
+export function buildTemplateLinks(ids, template = FLOOR_TEMPLATE) {
   const rowIds = Array.isArray(ids) ? ids.map(Number) : [];
-  if (rowIds.length !== FLOOR_TEMPLATE.length + 1 || !rowIds.every((id) => Number.isInteger(id) && id > 0)) {
+  if (rowIds.length !== template.length + 1 || !rowIds.every((id) => Number.isInteger(id) && id > 0)) {
     throw new Error("Ids des lignes du modèle d'étage incomplets.");
   }
-  const idByCode = new Map(FLOOR_TEMPLATE.map((item, index) => [item.code, rowIds[index + 1]]));
+  const idByCode = new Map(template.map((item, index) => [item.code, rowIds[index + 1]]));
   const fieldsById = new Map();
-  FLOOR_TEMPLATE.forEach((item, index) => {
+  template.forEach((item, index) => {
     if (!item.parent && !item.link) return;
     fieldsById.set(rowIds[index + 1], {
       [TASK_COLUMNS.parent]: item.parent ? String(idByCode.get(item.parent)) : "",

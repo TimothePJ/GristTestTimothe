@@ -50,9 +50,11 @@ import {
 } from "../services/syntheseStoreys.js";
 import {
   buildBulkAddAction,
+  FLOOR_TEMPLATE,
   buildFloorFromTemplate,
   buildTemplateLinks,
   buildZoneAnchorRow,
+  completeZoneAnchorRow,
 } from "../services/syntheseFloorTemplate.js";
 import { cascadeFrom } from "../services/syntheseLinks.js";
 import { applyLineNumbers, lineNumbersOf, linkChoices, planLinkChange, previewLink } from "../services/syntheseLinkColumn.js";
@@ -104,6 +106,7 @@ const MESSAGES = Object.freeze({
   noFloorColumn: "La colonne « Etage » n'existe pas dans Planning_Projet : ajoutez-la (type Booléen) pour créer des étages.",
   noTemplateColumns: "Les colonnes « Nature », « Parent » et « Lien » (Texte) manquent dans Planning_Projet : ajoutez-les pour créer des étages.",
   noCycleColumns: "Les colonnes « Nature », « Parent » et « Lien » (Texte) manquent dans Planning_Projet : ajoutez-les pour créer des cycles.",
+  noMeetingColumns: "Les colonnes « Nature », « Parent » et « Lien » (Texte) manquent dans Planning_Projet : ajoutez-les pour créer des réunions.",
   noTaskLinkColumn: "La colonne « Lien » (Texte) manque dans Planning_Projet : ajoutez-la pour lier les tâches.",
   templateFailed: "L'étage n'a pas pu être créé complètement : rien n'a été gardé. Réessayez.",
   noLinkColumn: "La colonne « Lien_Structure » (Texte) manque dans Planning_Projet : ajoutez-la pour lier les étages aux coffrages.",
@@ -187,6 +190,12 @@ export function createSyntheseTasksController({
   // Écriture du mode d'affichage dans Projets2 (bouton « Par étage »), fournie par main.js :
   // async (layout) => void ; elle applique aussi l'affichage une fois Grist confirmé.
   saveLayout = null,
+  // Modèle d'étage du projet courant : { template, invalid } (voir floorTemplateFor). Par défaut le
+  // modèle d'origine ; main.js fournit celui du paramètre du projet.
+  getFloorTemplate = () => ({ template: FLOOR_TEMPLATE, invalid: false }),
+  // Numéros de ligne sans les lignes de zone : la fenêtre « Paramètre » les masque, ses numéros (colonne
+  // Lien, fenêtre de lien) suivent ce qu'elle affiche. Le tableau principal les compte.
+  skipZoneLines = false,
 } = {}) {
   let active = false;
   let bound = false;
@@ -240,6 +249,9 @@ export function createSyntheseTasksController({
     onRenameGroup: (groupRowId, rawValue) => handleRenameGroup(groupRowId, rawValue),
     onAddTask: (zoneKey, floorKey = "", groupRowId = null, afterTaskId = null) => (
       handleAddTask(zoneKey, floorKey, groupRowId, afterTaskId)
+    ),
+    onAddMeeting: (zoneKey, floorKey = "", groupRowId = null, afterTaskId = null) => (
+      handleAddTask(zoneKey, floorKey, groupRowId, afterTaskId, { meeting: true })
     ),
     onAddFloor: (zoneKey) => handleAddFloor(zoneKey),
     onAddStorey: (zoneKey) => handleAddStorey(zoneKey),
@@ -374,7 +386,7 @@ export function createSyntheseTasksController({
     const numberingSections = project && zoneFilter
       ? buildSections({ rows: shownRows, sharedZones: getSharedZones(project) })
       : sections;
-    lines = applyLineNumbers(lines, lineNumbersOf(numberingSections, { layout }));
+    lines = applyLineNumbers(lines, lineNumbersOf(numberingSections, { layout, skipZoneLines }));
     let emptyMessage = "";
     if (!project) emptyMessage = MESSAGES.noProject;
     else if (!loaded) emptyMessage = MESSAGES.loading;
@@ -674,7 +686,7 @@ export function createSyntheseTasksController({
     }
     const all = allSections();
     // Numéros du même affichage que le tableau : la colonne Lien et la fenêtre se répondent.
-    const choices = linkChoices({ sections: all, taskId, numbering: lineNumbersOf(all, { layout }) });
+    const choices = linkChoices({ sections: all, taskId, numbering: lineNumbersOf(all, { layout, skipZoneLines }) });
     if (!choices) return;
     linkDialog ||= createLinkDialog({ onSubmit: (link) => handleLinkChange(linkTaskId, link) });
     linkTaskId = taskId;
@@ -785,9 +797,15 @@ export function createSyntheseTasksController({
   // niveau zone ; juste sous la tâche cliquée (`afterTaskId`) avec la colonne Ordre, sinon à la
   // fin. Avec Ordre et Lien, elle suit la tâche du dessus (voir planTaskInsert) ; dans un cycle en
   // parallèle, elle finit avec sa tâche pilote, ou en devient la tâche pilote.
-  function handleAddTask(zoneKey, floorKey = "", groupRowId = null, afterTaskId = null) {
+  // Avec `meeting` : une réunion du modèle (« REUNION + DIFFUSION SYT », Nature Reunion, 0 jour), même
+  // place et même lien ; son nom n'est pas ouvert en saisie. Il faut la colonne Nature.
+  function handleAddTask(zoneKey, floorKey = "", groupRowId = null, afterTaskId = null, { meeting = false } = {}) {
     if (!isEditable()) {
       refuseLocked();
+      return Promise.resolve();
+    }
+    if (meeting && templateColumns === false) {
+      setStatus(MESSAGES.noMeetingColumns, "error");
       return Promise.resolve();
     }
     const project = getProject();
@@ -809,14 +827,16 @@ export function createSyntheseTasksController({
       finishWith: group ? parallelPilot(all, group.rowId) : null,
       today: now(),
       projectName: project.name,
+      meeting,
     });
     if (!plan) return Promise.resolve();
     const { fields } = plan;
     const where = group ? `« ${group.name} »` : floor ? `l'étage « ${floor.name} »` : `« ${section.label} »`;
     const clicked = plan.atEnd ? findTask(afterTaskId) : null;
+    const added = meeting ? "Réunion ajoutée" : "Tâche ajoutée";
     const addedText = clicked
-      ? `Tâche ajoutée à la fin de ${where} : la colonne « Ordre » (Texte) manque dans Planning_Projet pour la placer sous « ${clicked.name} ».`
-      : `Tâche ajoutée dans ${where}.`;
+      ? `${added} à la fin de ${where} : la colonne « Ordre » (Texte) manque dans Planning_Projet pour la placer sous « ${clicked.name} ».`
+      : `${added} dans ${where}.`;
     const addActions = [["AddRecord", PLANNING_TABLE, null, fields], ...buildUpdateActions(plan.changes)];
     clearStatus();
     // En deux temps si la tâche du dessous doit la suivre, ou si un cycle en parallèle doit être
@@ -843,10 +863,10 @@ export function createSyntheseTasksController({
           collapsedGroupKeys.delete(groupCollapseKey(container.rowId));
         }
         render();
-        if (hasId) table.startEditing(newId, "name");
+        if (hasId && !meeting) table.startEditing(newId, "name");
         info(addedText);
       },
-      onFailure: (error, dropped) => fail("Ajout de la tâche impossible :", error, dropped),
+      onFailure: (error, dropped) => fail(meeting ? "Ajout de la réunion impossible :" : "Ajout de la tâche impossible :", error, dropped),
     });
   }
 
@@ -1065,17 +1085,25 @@ export function createSyntheseTasksController({
     });
   }
 
-  // Nouvel étage `name` d'après le modèle, dans chacune des zones `sections` : leurs 26 lignes en une
-  // écriture, puis Parent et Lien de chaque zone une fois les ids connus. Tout ou rien : si le second
+  // Nouvel étage `name` d'après le modèle, dans chacune des zones `sections` : leurs lignes (celles du modèle, plus la ligne
+  // étage) en une écriture, puis Parent et Lien de chaque zone une fois les ids connus. Tout ou rien : si le second
   // temps échoue, toutes les lignes créées sont retirées, rien de bancal ne reste dans Grist. Réussi :
   // l'étage est déplié (zones, étages de zone, ligne étage), puis `onAdded(floorKey)`. `anchors` : lignes
   // vides des zones créées avec l'étage, ajoutées en fin d'écriture (sans Parent ni Lien).
   function addFloorFromTemplate(project, sections, name, onAdded, { anchors = [] } = {}) {
+    // Le modèle est lu une fois par opération, pour toutes les zones.
+    const { template, invalid } = getFloorTemplate();
     const perSection = sections.map((section) => (
-      buildFloorFromTemplate({ floorName: name, zoneName: section.zoneName, projectName: project.name })
+      buildFloorFromTemplate({
+        floorName: name,
+        zoneName: section.zoneName,
+        projectName: project.name,
+        template,
+        withFormworkCheck: formworkCheckColumn === true,
+      })
     ));
     // Les lignes vides des nouvelles zones suivent toutes les lignes du modèle, dans la même écriture.
-    const newRows = [...perSection.flat(), ...anchors];
+    const newRows = [...perSection.flat(), ...anchors.map((anchor) => completeZoneAnchorRow(anchor, perSection[0]?.[0]))];
     clearStatus();
     // `op` est référencé depuis `perform` (fermeture) : le second temps de l'écriture doit
     // revérifier le contexte capturé au premier (submit ne le revérifie qu'une fois, avant
@@ -1089,7 +1117,7 @@ export function createSyntheseTasksController({
           // Les ids rendus se répartissent entre les zones selon le nombre de lignes de chacune.
           let offset = 0;
           const links = perSection.map((sectionRows) => {
-            const own = buildTemplateLinks(ids.slice(offset, offset + sectionRows.length));
+            const own = buildTemplateLinks(ids.slice(offset, offset + sectionRows.length), template);
             offset += sectionRows.length;
             return own;
           });
@@ -1147,6 +1175,7 @@ export function createSyntheseTasksController({
         ids.forEach((id) => collapsedGroupKeys.delete(groupCollapseKey(id)));
         render();
         onAdded(floorKey);
+        if (invalid) info("Modèle d'étage du projet illisible : étage créé avec le modèle d'origine.");
       },
       onFailure: (error, dropped) => {
         const message = describeWriteError(error);
@@ -1715,6 +1744,12 @@ export function createSyntheseTasksController({
     // la table : le cache partagé est frais, inutile de forcer une nouvelle lecture.
     refresh({ forceRefresh = false } = {}) {
       return load({ forceRefresh });
+    },
+    // Résolue quand la file d'écriture est vide : chaque opération demandée jusque-là est écrite, ou
+    // a échoué. Une opération ajoutée pendant l'attente est attendue aussi. La fenêtre « Paramètre »
+    // s'en sert avant de lire ses lignes en mémoire.
+    async whenIdle() {
+      while (queuedWrites) await writeQueue;
     },
     // Appelée par la même surveillance : un coffrage déplacé dans le planning Structure
     // déplace la limite de fin du plan de réservations. Le tableau n'écrit que des lignes

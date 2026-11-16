@@ -14,7 +14,7 @@ function sliceBetween(source, startToken, endToken) {
 }
 
 test("le tableau crée la couche du Gantt hors du corps redessiné", () => {
-  assert.match(tableJs, /\} = \{\}, \{ createGantt \} = \{\}\) \{/);
+  assert.match(tableJs, /\} = \{\}, \{\s*createGantt,/);
   assert.match(tableJs, /const ganttLayer = createElement\("div", "stt-gantt-layer"\);/);
   assert.match(tableJs, /scroller\.appendChild\(ganttLayer\);/);
   assert.match(tableJs, /createGantt\(\{ headHost: headRight, layerHost: ganttLayer, interactionHost: scroller, rowHeight: ROW_HEIGHT_PX \}\)/);
@@ -42,6 +42,6 @@ test("main.js branche le Gantt sur la période du planning", () => {
 test("scripts et feuille de style servis dans leur nouvelle version", () => {
   assert.equal(html.includes("20260923-taches1"), false);
   assert.equal(html.includes("20260925-couleurs1"), false);
-  assert.ok(html.includes("main.js?v=20261110-export1"));
-  assert.ok(html.includes("styles.css?v=20261110-export1"));
+  assert.ok(html.includes("main.js?v=20261116-param1"));
+  assert.ok(html.includes("styles.css?v=20261116-param1"));
 });

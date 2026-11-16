@@ -199,23 +199,25 @@ test("menu d'une zone du bloc « Sans étage » : tâche, puis « Ajouter un ét
   const zoneInBlock = { layout: "floor", look: "zone", kind: "zone", key: "zone:zone1", level: 1, zoneKey: "zone1", floorKey: "", name: "Zone 1" };
   assert.deepEqual(buildMenuItems(zoneInBlock), [
     { label: "Ajouter une tâche", action: "addTask", zoneKey: "zone1", floorKey: "" },
+    { label: "Ajouter une réunion", action: "addMeeting", zoneKey: "zone1", floorKey: "", disabled: false },
     { label: "Ajouter un étage…", action: "addStorey", zoneKey: "zone1", disabled: false },
   ]);
-  assert.equal(buildMenuItems(zoneInBlock, { zoneFiltered: true })[1].disabled, true);
-  assert.equal(buildMenuItems(zoneInBlock, { canAddFloor: false })[1].disabled, true);
+  assert.equal(buildMenuItems(zoneInBlock, { zoneFiltered: true })[2].disabled, true);
+  assert.equal(buildMenuItems(zoneInBlock, { canAddFloor: false })[2].disabled, true);
   const { layout, look, ...legacy } = zoneInBlock;
-  assert.deepEqual(buildMenuItems(legacy)[1], { label: "Ajouter un étage", action: "addFloor", zoneKey: "zone1", disabled: false });
+  assert.deepEqual(buildMenuItems(legacy)[2], { label: "Ajouter un étage", action: "addFloor", zoneKey: "zone1", disabled: false });
 });
 
 test("menu d'une zone dans un étage : tâche, cycle, puis suppression dans cette zone", () => {
   assert.deepEqual(buildMenuItems(zoneInStorey()), [
     { label: "Ajouter une tâche", action: "addTask", zoneKey: "zone1", floorKey: "ss1" },
+    { label: "Ajouter une réunion", action: "addMeeting", zoneKey: "zone1", floorKey: "ss1", disabled: false },
     { label: "Ajouter un cycle", action: "addCycle", zoneKey: "zone1", floorKey: "ss1", parentGroupRowId: null, disabled: false },
     { label: "Supprimer l'étage dans cette zone", action: "deleteFloor", zoneKey: "zone1", floorKey: "ss1", danger: true },
   ]);
   // Mode par zone : inchangé.
   const { look, layout, ...legacy } = zoneInStorey();
-  assert.equal(buildMenuItems(legacy)[2].label, "Supprimer l'étage");
+  assert.equal(buildMenuItems(legacy)[3].label, "Supprimer l'étage");
 });
 
 test("cellules : la ligne étage est récapitulative, son nom se saisit sauf « Sans étage » et zone dans l'étage", () => {
@@ -356,8 +358,8 @@ test("filtre de zone : les entrées du menu étage restent cliquables mais gris�
   block.table.render([{ layout: "floor", look: "zone", kind: "zone", key: "zone:zone1", level: 1, zoneKey: "zone1", floorKey: "", name: "Zone 1" }], { editable: true, zoneFiltered: true });
   dispatch(block.lineOf("zone:zone1"), "contextmenu", { clientX: 10, clientY: 10 });
   const zoneItems = block.host.querySelector(".stt-menu").querySelectorAll("button");
-  assert.equal(zoneItems[1].getAttribute("aria-disabled"), "true");
-  click(zoneItems[1]);
+  assert.equal(zoneItems[2].getAttribute("aria-disabled"), "true");
+  click(zoneItems[2]);
   assert.deepEqual(added, ["", "zone1"]);
 });
 

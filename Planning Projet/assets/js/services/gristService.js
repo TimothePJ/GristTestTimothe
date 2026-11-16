@@ -3051,6 +3051,7 @@ function buildProjectAvancementConfigsFromRows(rows = []) {
     projectNumber: toText(row?.[columns.projectNumber]),
     avancementConfigRaw: row?.[columns.avancement],
     modeRaw: row?.[columns.mode],
+    parametreRaw: row?.[columns.syntheseParametre],
   }));
 }
 

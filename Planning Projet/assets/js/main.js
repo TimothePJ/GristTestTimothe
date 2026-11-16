@@ -105,6 +105,16 @@ import {
 import { createSyntheseTaskTable } from "./ui/syntheseTaskTable.js";
 import { createSyntheseTasksController } from "./ui/syntheseTasksController.js";
 import { createSyntheseGantt } from "./ui/syntheseGantt.js";
+import { createParameterDialog } from "./ui/syntheseParameterDialog.js";
+import {
+  buildParametreActions,
+  floorTemplateFor,
+  projectKeyOf,
+  readProjectParameter,
+  shouldCloseParameterDialog,
+  withParametre,
+} from "./services/syntheseFloorParameter.js";
+import { FLOOR_TEMPLATE } from "./services/syntheseFloorTemplate.js";
 import { createStructureLinkDialog } from "./ui/structureLinkDialog.js";
 import { buildFormworkStarts } from "./services/formworkStarts.js";
 import { createGlobalPlanningTable } from "./ui/globalPlanningTable.js";
@@ -115,6 +125,8 @@ import { createPlanningExportAction } from "./ui/planningExportAction.js";
 let toolbarBound = false;
 // Tableau de tâches de la vue Synthese : créé à la première activation du service.
 let syntheseTasks = null;
+// Fenêtre « Paramètre » (modèle d'étage du projet) : créée au démarrage, hors mode intégré.
+let parameterDialog = null;
 // Vue Global (planning Synthèse + Structure fusionné, en lecture seule) : créée à sa première
 // ouverture.
 let globalPlanning = null;
@@ -331,6 +343,12 @@ function setPlanningEditingEnabled(nextEnabled, { rerender = true, notify = true
   updatePlanningEditToggle();
   // ARCHIVE vue Synthese v1 : setSyntheseEditingEnabled(isPlanningEditingUnlocked());
   syntheseTasks?.setEditingEnabled(isPlanningEditingUnlocked());
+  // La fenêtre « Paramètre » ouverte suit « Editer » (colonne présente ou non, état courant).
+  if (parameterDialog?.isOpen()) {
+    parameterDialog?.setCanEdit(canEditSyntheseParameter(
+      readProjectParameter(cachedProjectAvancementConfigs, currentSyntheseProject()).column
+    ));
+  }
 
   if (notify) {
     setPlanningStatus(
@@ -2318,6 +2336,8 @@ function getSyntheseTasks() {
     // la limite de fin du plan de réservations du cycle 3 de l'étage qui lui est lié.
     loadFormworkStarts: async () => buildFormworkStarts(await context.fetchProjectRows("Planning_Projet")),
     saveLayout: (layout) => saveSyntheseLayout(layout),
+    // Modèle d'étage du projet (colonne Projets2.Synthese_Parametre), sinon le modèle d'origine.
+    getFloorTemplate: () => floorTemplateFor(cachedProjectAvancementConfigs, currentSyntheseProject()),
   });
   syntheseTasks.setEditingEnabled(isPlanningEditingUnlocked());
   syntheseTasks.setZoneFilter(state.selectedZone || "");
@@ -2327,7 +2347,7 @@ function getSyntheseTasks() {
 
 // Affichage du tableau Synthese : par zone (défaut) ou par étage, selon Projets2.Mode du projet courant.
 function syncSyntheseLayout() {
-  const project = window.GristServiceContext?.getState?.()?.currentProject || null;
+  const project = currentSyntheseProject();
   const layout = layoutForProject(cachedProjectAvancementConfigs, project);
   syntheseTasks?.setLayout(layout);
   updateSyntheseLayoutToggle(layout, hasLayoutModeColumn(cachedProjectAvancementConfigs, project));
@@ -2362,6 +2382,91 @@ async function saveSyntheseLayout(layout) {
   cachedProjectAvancementConfigs = withLayoutMode(cachedProjectAvancementConfigs, project, layout);
   syncSyntheseLayout();
   void refreshProjectRegistryFromGrist({ notify: false, clearInvalid: false, forceRefresh: true });
+}
+
+// Projet courant du contexte partagé (nom), ou null.
+function currentSyntheseProject() {
+  return window.GristServiceContext?.getState?.()?.currentProject || null;
+}
+
+// Droit de modifier le modèle : « Editer » actif, document modifiable et colonne présente.
+function canEditSyntheseParameter(columnPresent) {
+  return Boolean(
+    isPlanningEditingUnlocked()
+    && window.GristServiceContext?.getState?.()?.accessMode === "editable"
+    && columnPresent
+  );
+}
+
+// Fenêtre « Paramètre » : le modèle d'étage du projet (colonne Projets2.Synthese_Parametre, JSON),
+// édité dans un tableau de tâches à part. Elle relit Projets2 hors cache à l'ouverture, écrit
+// toutes les lignes du projet en une action, et se ferme sans confirmation si le projet ou le
+// service change.
+function bindSyntheseParameterDialog() {
+  if (EMBEDDED_PLANNING_SYNC_MODE) return;
+  const serviceContext = window.GristServiceContext;
+  const button = document.getElementById("syntheseParametreToggle");
+  if (!button || !serviceContext) return;
+  // Projet (objet du contexte partagé) et sa clé au moment de l'ouverture : l'enregistrement vise
+  // celui-là, jamais le projet courant s'il a changé entre-temps.
+  let openedProject = null;
+  let openedKey = "";
+  parameterDialog = createParameterDialog({
+    onSave: async (text) => {
+      // Le message lisible (userMessage) est celui que la fenêtre affiche.
+      const refuse = (message) => Object.assign(new Error(message), { userMessage: message });
+      if (!canEditSyntheseParameter(true)) {
+        throw refuse("Modification impossible : activez « Editer » dans un service modifiable.");
+      }
+      if (projectKeyOf(currentSyntheseProject()) !== openedKey) {
+        throw refuse("Le projet a changé : fermez la fenêtre et rouvrez-la.");
+      }
+      const { sourceTable, columns } = APP_CONFIG.grist.projectsTable;
+      const actions = buildParametreActions(cachedProjectAvancementConfigs, openedProject, text, {
+        table: sourceTable,
+        column: columns.syntheseParametre,
+      });
+      if (!actions.length) throw refuse("Aucune ligne Projets2 pour le projet courant.");
+      await window.grist.docApi.applyUserActions(actions);
+      // Le cache courant, pas une copie d'avant l'attente : un rechargement du registre a pu passer.
+      cachedProjectAvancementConfigs = withParametre(cachedProjectAvancementConfigs, openedProject, text);
+      void refreshProjectRegistryFromGrist({ notify: false, clearInvalid: false, forceRefresh: true });
+    },
+  });
+  serviceContext.subscribe?.((context) => {
+    if (!parameterDialog?.isOpen()) return;
+    if (shouldCloseParameterDialog({
+      selectedService: context?.selectedService,
+      currentKey: projectKeyOf(currentSyntheseProject()),
+      openedKey,
+      service: SYNTHESE_SERVICE_NAME,
+    })) {
+      parameterDialog.close();
+    }
+  });
+  button.addEventListener("click", async () => {
+    const project = currentSyntheseProject();
+    if (!project) return;
+    try {
+      // Hors cache : la fenêtre ne doit pas montrer un modèle plus ancien que celui de Grist.
+      await refreshProjectRegistryFromGrist({ notify: false, clearInvalid: false, forceRefresh: true });
+      // Le projet a changé pendant la relecture : la fenêtre ne s'ouvre pas sur l'ancien.
+      if (projectKeyOf(currentSyntheseProject()) !== projectKeyOf(project)) return;
+      const read = readProjectParameter(cachedProjectAvancementConfigs, project);
+      openedProject = project;
+      openedKey = projectKeyOf(project);
+      parameterDialog.open({
+        projectName: project.name || project.number || "",
+        items: read.items || FLOOR_TEMPLATE,
+        invalid: read.invalid,
+        canEdit: canEditSyntheseParameter(read.column),
+        columnMissing: !read.column,
+      });
+    } catch (error) {
+      console.error("Fenêtre Paramètre : ouverture impossible :", error);
+      setPlanningStatus("Ouverture du modèle d'étage impossible : réessayez dans un instant.");
+    }
+  });
 }
 
 function bindSyntheseLayoutToggle() {
@@ -2555,6 +2660,7 @@ async function bootstrap() {
     bindStructureLinkDialog();
     bindGlobalSpace();
     bindSyntheseLayoutToggle();
+    bindSyntheseParameterDialog();
     bindSharedProjectZones();
     bindAddZoneModal();
     bindManageZoneModal();

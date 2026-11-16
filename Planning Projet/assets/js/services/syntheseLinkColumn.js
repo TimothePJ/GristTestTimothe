@@ -9,11 +9,13 @@ import { computeLinkedDates, formatLink } from "./syntheseLinks.js";
 import { allTasksOf, findUpstream, linkMap } from "./syntheseTaskOrder.js";
 
 // Numéros des lignes des sections, toutes dépliées : `byKey` (clé de ligne → numéro) et `lineAt`
-// (numéro → ligne).
-export function lineNumbersOf(sections, { layout = "zone" } = {}) {
+// (numéro → ligne). `skipZoneLines` : les lignes de zone n'ont pas de numéro (fenêtre « Paramètre »,
+// où elles sont masquées) ; par défaut, toutes les lignes comptent.
+export function lineNumbersOf(sections, { layout = "zone", skipZoneLines = false } = {}) {
   const byKey = new Map();
   const lineAt = new Map();
-  buildRowModel(sections, { layout }).forEach((line, index) => {
+  const lines = buildRowModel(sections, { layout });
+  (skipZoneLines ? lines.filter((line) => line.kind !== "zone") : lines).forEach((line, index) => {
     byKey.set(line.key, index + 1);
     lineAt.set(index + 1, line);
   });

@@ -10,6 +10,7 @@ export const APP_CONFIG = {
         projectNumber: "Numero_de_projet",
         avancement: "Avancement",
         mode: "Mode",
+        syntheseParametre: "Synthese_Parametre",
       },
     },
 

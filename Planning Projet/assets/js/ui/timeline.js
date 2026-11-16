@@ -1,3 +1,5 @@
+import { ZOOM_MODES, nextZoomMode, zoomModeLabel } from "../services/zoomCycle.js";
+
 let timelineInstance = null;
 let groupsDataSet = null;
 let itemsDataSet = null;
@@ -5277,6 +5279,19 @@ function buildDateRangeDisplayText(startDate, endDate, availableWidth = Infinity
   return minimal;
 }
 
+// Place des dates dans le bandeau : celle que leur laisse le bouton d'échelle dans leur groupe
+// (.planning-period, calé à droite), les dates n'ayant que la largeur de leur texte ; hors du groupe,
+// la largeur de leur propre boîte.
+function dateRangeAvailableWidth(el) {
+  const period = el.closest(".planning-period");
+  if (!period) return Math.max(0, Math.round(el.getBoundingClientRect().width || el.clientWidth || 0));
+  const gap = Number.parseFloat(getComputedStyle(period).columnGap) || 0;
+  const taken = [...period.children]
+    .filter((child) => child !== el)
+    .reduce((sum, child) => sum + child.getBoundingClientRect().width + gap, 0);
+  return Math.max(0, Math.round(period.getBoundingClientRect().width - taken));
+}
+
 function updateDateRangeDisplay() {
   if (!timelineInstance) return;
 
@@ -5284,10 +5299,7 @@ function updateDateRangeDisplay() {
   if (!el) return;
 
   const range = timelineInstance.getWindow();
-  const availableWidth = Math.max(
-    0,
-    Math.round(el.getBoundingClientRect().width || el.clientWidth || 0)
-  );
+  const availableWidth = dateRangeAvailableWidth(el);
   const fullText = buildDateRangeDisplayText(range.start, range.end, Number.MAX_SAFE_INTEGER);
   const displayText = buildDateRangeDisplayText(range.start, range.end, availableWidth);
 
@@ -5296,8 +5308,8 @@ function updateDateRangeDisplay() {
 }
 
 function getCurrentZoomMode() {
-  const activeBtn = document.querySelector(".zoom-buttons button.active");
-  return activeBtn?.dataset.zoom || "week";
+  const button = document.getElementById("zoomCycleButton");
+  return button?.dataset.zoom || "week";
 }
 
 function normalizePlanningZoomMode(mode) {
@@ -5837,11 +5849,15 @@ export function subscribePlanningSelectionChanges(listener) {
   };
 }
 
-function setActiveZoomButton(mode) {
-  const buttons = document.querySelectorAll(".zoom-buttons button");
-  buttons.forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.zoom === mode);
-  });
+// Le bouton d'échelle montre l'échelle affichée ; son clic passe à la suivante. Une échelle inconnue
+// vaut la semaine, comme quand aucun des trois anciens boutons n'était actif.
+function setActiveZoomButton(requestedMode) {
+  const button = document.getElementById("zoomCycleButton");
+  if (!button) return;
+  const mode = ZOOM_MODES.includes(requestedMode) ? requestedMode : "week";
+  button.dataset.zoom = mode;
+  button.textContent = zoomModeLabel(mode);
+  button.title = `Échelle : ${zoomModeLabel(mode)}. Cliquer pour passer à ${zoomModeLabel(nextZoomMode(mode))}`;
 }
 
 function setWindowForMode(mode, anchorDate = new Date()) {
@@ -6286,16 +6302,11 @@ export function bindTimelineToolbar() {
   if (toolbarListenersBound) return;
   toolbarListenersBound = true;
 
-  const zoomButtons = document.querySelectorAll(".zoom-buttons button");
-
-  zoomButtons.forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      const mode = e.currentTarget?.dataset?.zoom;
-      if (!mode) return;
-
-      setActiveZoomButton(mode);
-      setWindowForMode(mode, dataAnchorDate || new Date());
-    });
+  // Un seul bouton d'échelle : Semaine → Mois → Année → Semaine…
+  document.getElementById("zoomCycleButton")?.addEventListener("click", () => {
+    const mode = nextZoomMode(getCurrentZoomMode());
+    setActiveZoomButton(mode);
+    setWindowForMode(mode, dataAnchorDate || new Date());
   });
 
   // Mettre à jour le texte quand l’utilisateur déplace/zoome à la souris

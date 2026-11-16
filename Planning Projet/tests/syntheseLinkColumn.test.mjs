@@ -35,6 +35,29 @@ test("numéros de ligne : toutes les lignes, dans l'ordre affiché, comme si tou
   assert.equal(lineAt.size, 28);
 });
 
+test("numéros sans les lignes de zone (skipZoneLines, fenêtre « Paramètre ») : l'étage est la ligne 1", () => {
+  const sections = buildSections({ rows: eraSs1Rows() });
+  const { byKey, lineAt } = lineNumbersOf(sections, { skipZoneLines: true });
+  assert.equal(byKey.has(`zone:${ERA_ZONE_KEY}`), false);
+  assert.equal(lineAt.get(1).kind, "floor");
+  assert.deepEqual(["task:984", "group:985", "task:1061", "group:992", "task:997", "task:1001", "group:1002", "task:1008"].map((key) => byKey.get(key)), [
+    2, 3, 7, 11, 16, 20, 21, 27,
+  ]);
+  assert.equal(lineAt.size, 27);
+  const lines = applyLineNumbers(buildRowModel(sections), lineNumbersOf(sections, { skipZoneLines: true }));
+  assert.deepEqual(["task:1001", "task:1007", "task:996"].map((key) => lines.find((line) => line.key === key).linkText), ["19FD", "20FD+5", "14FF"]);
+});
+
+test("numéros par défaut (tableau principal) : inchangés, la ligne de zone compte", () => {
+  const sections = buildSections({ rows: eraSs1Rows() });
+  const byDefault = lineNumbersOf(sections);
+  const explicit = lineNumbersOf(sections, { skipZoneLines: false });
+  assert.deepEqual([...byDefault.byKey], [...explicit.byKey]);
+  assert.equal(byDefault.byKey.get(`zone:${ERA_ZONE_KEY}`), 1);
+  assert.equal(byDefault.byKey.get("task:984"), 3);
+  assert.equal(byDefault.lineAt.size, 28);
+});
+
 test("lignes affichées : leur numéro, même repliées, et le lien des tâches par le numéro à suivre", () => {
   const sections = buildSections({ rows: eraSs1Rows() });
   const folded = buildRowModel(sections, { collapsedGroupKeys: new Set(["group:985"]) });

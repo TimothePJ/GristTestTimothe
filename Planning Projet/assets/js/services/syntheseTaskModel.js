@@ -47,6 +47,8 @@ export const TASK_COLUMNS = Object.freeze({
 });
 
 export const NEW_TASK_NAME = "Nouvelle tâche";
+// « Ajouter une réunion » (clic droit) : la réunion du modèle d'étage, ligne bleue (Nature Reunion).
+export const NEW_MEETING_NAME = "REUNION + DIFFUSION SYT";
 export const NO_ZONE_KEY = "";
 export const NO_ZONE_LABEL = "Sans zone";
 export const MAX_TASK_NAME_LENGTH = 200;
@@ -554,16 +556,38 @@ export function renameFloorInTaskName(taskName, oldName, newName) {
   return text.replace(pattern, (_match, prefix) => `${prefix} ${toText(newName)}`);
 }
 
+// « Nouvel étage », ou « Nouvel étage » + espace + entier ≥ 2 (ce que produit nextFloorName) : le nom
+// qu'un étage garde tant que l'utilisateur ne l'a pas choisi ({E} du modèle y vaut ce nom).
+export function isDefaultFloorName(name) {
+  const text = toText(name);
+  if (text === NEW_FLOOR_NAME) return true;
+  const match = new RegExp(`^${escapeRegExp(NEW_FLOOR_NAME)} (\\d+)$`).exec(text);
+  return Boolean(match) && Number(match[1]) >= 2;
+}
+
+// Nom d'une tâche ou d'un groupe d'étage renommé : étage au nom par défaut, chaque occurrence exacte de
+// l'ancien nom ; sinon la règle NIV / GO d'aujourd'hui (groupes : inchangés).
+function renamedMemberName(text, floor, name, isGroup) {
+  const current = toText(text);
+  if (isDefaultFloorName(floor?.name)) return current.split(toText(floor.name)).join(name);
+  return isGroup ? current : renameFloorInTaskName(current, floor?.name, name);
+}
+
 // Renommer un étage, ligne par ligne : ses lignes-étages (nom), ses groupes (Groupe), ses
 // tâches (Groupe, et le nom quand il contient « NIV / GO <ancien nom> »).
 export function buildFloorRenameChanges(floor, name) {
   const changes = new Map();
   (floor?.rowIds || []).forEach((rowId) => changes.set(rowId, { [TASK_COLUMNS.name]: name }));
-  (floor?.groups || []).forEach((group) => changes.set(group.rowId, { [TASK_COLUMNS.group]: name }));
+  (floor?.groups || []).forEach((group) => {
+    const fields = { [TASK_COLUMNS.group]: name };
+    const renamed = renamedMemberName(group.name, floor, name, true);
+    if (renamed !== toText(group.name)) fields[TASK_COLUMNS.name] = renamed;
+    changes.set(group.rowId, fields);
+  });
   (floor?.tasks || []).forEach((task) => {
     const fields = { [TASK_COLUMNS.group]: name };
     const current = toText(task.name);
-    const renamed = renameFloorInTaskName(current, floor.name, name);
+    const renamed = renamedMemberName(current, floor, name, false);
     if (renamed !== current) fields[TASK_COLUMNS.name] = renamed;
     changes.set(task.id, fields);
   });
@@ -587,11 +611,19 @@ export function buildFloorRenameActions(floor, name) {
     actions.push(["BulkUpdateRecord", PLANNING_TABLE, memberIds, { [TASK_COLUMNS.group]: memberIds.map(() => name) }]);
   }
   const renamed = (floor?.tasks || [])
-    .map((task) => [task.id, toText(task.name), renameFloorInTaskName(task.name, floor.name, name)])
+    .map((task) => [task.id, toText(task.name), renamedMemberName(task.name, floor, name, false)])
     .filter(([, current, next]) => next !== current);
   if (renamed.length) {
     actions.push(["BulkUpdateRecord", PLANNING_TABLE, renamed.map(([id]) => id), {
       [TASK_COLUMNS.name]: renamed.map(([, , next]) => next),
+    }]);
+  }
+  const renamedGroups = (floor?.groups || [])
+    .map((group) => [group.rowId, toText(group.name), renamedMemberName(group.name, floor, name, true)])
+    .filter(([, current, next]) => next !== current);
+  if (renamedGroups.length) {
+    actions.push(["BulkUpdateRecord", PLANNING_TABLE, renamedGroups.map(([id]) => id), {
+      [TASK_COLUMNS.name]: renamedGroups.map(([, , next]) => next),
     }]);
   }
   return actions;
