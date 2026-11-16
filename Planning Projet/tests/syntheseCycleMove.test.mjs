@@ -3,8 +3,9 @@
 // RECEPTION ARCH/TOPO/STR 984, puis CYCLE 1 (985 : FOND DE PLAN 986 en « 984 DD » … REUNION 991),
 // CYCLE 2 (992 : RECEPTION 993 en « 991 FD », PLAN SYT CYCLE 2 994 avec RESEAUX 995, RESERVATIONS
 // 996 et TERMINAUX 997, REUNION 998 en « 995 FD ») et CYCLE 3 (999 : RECEPTION 1000 en « 998 FD »,
-// VISA A 1001, PLAN SYT CYCLE 3 1002 avec 1003 à 1005, REUNION 1006 en « 1003 FD », SIGNATURE
-// 1007, DEMARRAGE GO 1008).
+// VISA A 1001, PLAN SYT CYCLE 3 1002 avec 1003 à 1005, REUNION 1006 en « 1003 FD ») ; SIGNATURE 1007
+// (« 1001 FD+5 ») et DEMARRAGE GO 1008, rangées dans le CYCLE 3 de l'export, sont la fin d'étage
+// fixe : affichées en dernier, hors des cycles, rien ne se place sous elles.
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -45,19 +46,20 @@ function hasLoop(rows, changes) {
 
 test("exemple 1 de la spec : CYCLE 3 au-dessus de CYCLE 2", () => {
   const changes = move(999, target(null, { groupRowId: 992, side: "before" }));
-  assert.deepEqual(column(changes, "Ordre"), { 984: "1", 985: "2", 999: "3", 992: "4" });
+  assert.deepEqual(column(changes, "Ordre"), { 984: "1", 985: "2", 999: "3", 992: "4", 1007: "5", 1008: "6" });
   assert.deepEqual(changes.get(999), { Ordre: "3" }, "déjà un cycle de l'étage : ni Parent ni Nature");
-  // La RECEPTION de CYCLE 3 suit la REUNION de CYCLE 1 ; celle de CYCLE 2 suit DEMARRAGE GO, la
-  // dernière à finir de CYCLE 3 (à égalité avec SIGNATURE : la dernière dans l'ordre).
-  assert.deepEqual(column(changes, "Lien"), { 1000: "991 FD", 993: "1008 FD" });
+  // La RECEPTION de CYCLE 3 suit la REUNION de CYCLE 1 ; celle de CYCLE 2 suit VISA A, la tâche de
+  // CYCLE 3 que suivait SIGNATURE ; SIGNATURE, toujours en fin d'étage, suit la REUNION de CYCLE 2,
+  // désormais juste au-dessus d'elle, avec ses 5 jours.
+  assert.deepEqual(column(changes, "Lien"), { 1000: "991 FD", 993: "1001 FD", 1007: "998 FD+5" });
   assert.equal(changes.get(1000).Diff_coffrage, "2025-12-09");
   assert.equal(changes.get(1000).Diff_armature, "2025-12-15");
-  assert.ok(changes.get(993).Diff_coffrage > changes.get(1008).Diff_armature, "CYCLE 2 recalé après CYCLE 3");
+  assert.ok(changes.get(993).Diff_coffrage > changes.get(1001).Diff_armature, "CYCLE 2 recalé après CYCLE 3");
 });
 
 test("exemple 2 : CYCLE 2 au-dessus de CYCLE 1, reprise du lien d'entrée", () => {
   const changes = move(992, target(null, { groupRowId: 985, side: "before" }));
-  assert.deepEqual(column(changes, "Ordre"), { 984: "1", 992: "2", 985: "3", 999: "4" });
+  assert.deepEqual(column(changes, "Ordre"), { 984: "1", 992: "2", 985: "3", 999: "4", 1007: "5", 1008: "6" });
   // CYCLE 2 reprend le « DD » du FOND DE PLAN sur la RECEPTION ; le FOND DE PLAN suit la REUNION
   // de CYCLE 2 ; à l'ancienne place, CYCLE 3 suit la REUNION de CYCLE 1.
   assert.deepEqual(column(changes, "Lien"), { 993: "984 DD", 986: "998 FD", 1000: "991 FD" });
@@ -67,7 +69,7 @@ test("exemple 2 : CYCLE 2 au-dessus de CYCLE 1, reprise du lien d'entrée", () =
 test("exemple 3 : PLAN SYT CYCLE 2 en tête de CYCLE 3", () => {
   const changes = move(994, target(999, { taskId: 1000, side: "before" }));
   assert.deepEqual(changes.get(994), { Parent: "999", Ordre: "1" }, "toujours un sous-cycle : pas de Nature");
-  assert.deepEqual(column(changes, "Ordre"), { 994: "1", 1000: "2", 1001: "3", 1002: "4", 1006: "5", 1007: "6", 1008: "7" });
+  assert.deepEqual(column(changes, "Ordre"), { 994: "1", 1000: "2", 1001: "3", 1002: "4", 1006: "5" });
   // La REUNION de CYCLE 2 reprend le lien d'entrée ; RESEAUX la suit et la RECEPTION de CYCLE 3
   // suit RESEAUX ; RESERVATIONS et TERMINAUX restent en FF sur RESEAUX.
   assert.deepEqual(column(changes, "Lien"), { 998: "993 FD", 995: "998 FD", 1000: "995 FD" });
@@ -88,11 +90,13 @@ test("B suivait le bloc autrement qu'en fin → début : rien ne change à l'anc
   assert.equal("Lien" in (changes.get(1000) || {}), false);
 });
 
-test("PLAN SYT CYCLE 3 sorti à la fin de l'étage : il redevient cycle", () => {
+test("PLAN SYT CYCLE 3 sorti à la fin de l'étage : il redevient cycle, au-dessus de SIGNATURE", () => {
   const changes = move(1002, target(null));
   assert.deepEqual(changes.get(1002), { Parent: "", Nature: "Cycle", Ordre: "5" });
-  // La REUNION de CYCLE 3 reprend « 1000 FD » ; RESEAUX suit DEMARRAGE GO, la dernière de l'étage.
-  assert.deepEqual(column(changes, "Lien"), { 1006: "1000 FD", 1003: "1008 FD" });
+  assert.deepEqual([changes.get(1007).Ordre, changes.get(1008).Ordre], ["6", "7"]);
+  // La REUNION de CYCLE 3 reprend « 1000 FD » ; RESEAUX suit cette REUNION, juste au-dessus ;
+  // SIGNATURE, qui suivait CYCLE 3, suit le nouveau cycle (sa sortie RESEAUX) avec ses 5 jours.
+  assert.deepEqual(column(changes, "Lien"), { 1006: "1000 FD", 1003: "1006 FD", 1007: "1003 FD+5" });
 });
 
 test("refus : dans lui-même, dans un de ses sous-cycles, dans un autre étage", () => {
@@ -122,6 +126,7 @@ test("cycle vide : seul l'ordre bouge", () => {
   const changes = move(2000, target(null, { groupRowId: 985, side: "before" }), { rows: [...rows, empty] });
   assert.deepEqual([...changes], [
     [984, { Ordre: "1" }], [2000, { Ordre: "2" }], [985, { Ordre: "3" }], [992, { Ordre: "4" }], [999, { Ordre: "5" }],
+    [1007, { Ordre: "6" }], [1008, { Ordre: "7" }],
   ]);
 });
 
@@ -137,9 +142,11 @@ test("jamais de boucle", () => {
   // dépendre de sa propre suite. Elle reprendrait le lien d'entrée, qui la désigne : plus de lien.
   const changes = move(992, target(null), { rows: withRow(eraSs1Rows(), 991, { Lien: "996 FF" }) });
   assert.equal(changes.get(991).Lien, "");
-  // VISA A (CYCLE 3) dépend de TERMINAUX : elle reprend le lien d'entrée de CYCLE 2.
-  const visa = move(992, target(null), { rows: withRow(eraSs1Rows(), 1001, { Lien: "997 FD" }) });
-  assert.equal(visa.get(1001).Lien, "991 FD");
+  // RESEAUX de PLAN SYT CYCLE 3 dépend de TERMINAUX : CYCLE 2, glissé sous CYCLE 3 (au-dessus de
+  // SIGNATURE), suivrait la REUNION de CYCLE 3, qui dépend d'elle : elle reprend le lien d'entrée de CYCLE 2.
+  const reseaux = move(992, target(null), { rows: withRow(eraSs1Rows(), 1003, { Lien: "997 FD" }) });
+  assert.equal(reseaux.get(1003).Lien, "991 FD");
+  assert.equal(reseaux.get(993).Lien, "1006 FD");
   // Boucle déjà saisie (REUNION de CYCLE 1 en « 993 FF ») : la RECEPTION de CYCLE 2 suivrait
   // DEMARRAGE GO, qui dépend d'elle ; ce lien n'est pas posé, elle garde le sien.
   const kept = move(999, target(null, { groupRowId: 992, side: "before" }), { rows: withRow(eraSs1Rows(), 991, { Lien: "993 FF" }) });
@@ -153,13 +160,14 @@ test("jamais de boucle, sur des données sans boucle : aucun lien posé ne se re
   // place, elle dépend du bloc et perd son lien.
   const self = withRows(eraSs1Rows(), { 995: { Lien: "998 DD" }, 997: { Lien: "" }, 998: { Lien: "997 FD" } });
   const selfChanges = move(994, target(999), { rows: self });
-  assert.deepEqual(column(selfChanges, "Lien"), { 995: "1008 FD", 998: "" });
+  // SIGNATURE, juste sous le bloc arrivé en fin de CYCLE 3, suit sa sortie avec ses 5 jours.
+  assert.deepEqual(column(selfChanges, "Lien"), { 995: "1006 FD", 998: "", 1007: "997 FD+5" });
   assert.equal(hasLoop(self, selfChanges), false);
   // Entrée « 1000 DD » sur la RECEPTION de CYCLE 3, qui suit la REUNION : ni la REUNION à
   // l'ancienne place, ni à l'étape 3, ne la reprennent (elle dépend d'elles).
   const chained = withRows(eraSs1Rows(), { 995: { Lien: "1000 DD" }, 997: { Lien: "" }, 998: { Lien: "997 FD" } });
   const chainedChanges = move(994, target(999), { rows: chained });
-  assert.deepEqual(column(chainedChanges, "Lien"), { 995: "1008 FD", 998: "" });
+  assert.deepEqual(column(chainedChanges, "Lien"), { 995: "1006 FD", 998: "", 1007: "997 FD+5" });
   assert.equal(hasLoop(chained, chainedChanges), false);
 });
 
@@ -174,18 +182,25 @@ test("bloc non daté : liens refaits, aucune date", () => {
 });
 
 test("bloc non daté sans tâche en dessous : la tâche de sortie est la dernière du bloc", () => {
-  // CYCLE 3 (217, dernier de l'étage) avant CYCLE 2 : rien n'est daté, CYCLE 2 suit DEMARRAGE GO.
+  // CYCLE 3 (217) avant CYCLE 2, dans un étage sans fin d'étage (SIGNATURE et DEMARRAGE GO
+  // supprimées) : rien n'est daté, CYCLE 2 suit la REUNION, la dernière de CYCLE 3.
+  const cible = { zoneKey: "zonez3a", zoneName: "Zone Z3A", floorKey: "ss1", floorName: "SS1", groupRowId: null, position: { groupRowId: 210, side: "before" } };
+  const bare = templateRows().filter((row) => row.id !== 225 && row.id !== 226).map((row) => ({ ...row, Ordre: "" }));
+  const changes = planCycleMove({ sections: buildSections({ rows: bare }), groupRowId: 217, canLink: true, target: cible });
+  assert.deepEqual(column(changes, "Lien"), { 218: "209 FD", 211: "224 FD" });
+  // Avec la fin d'étage : CYCLE 2 suit la REUNION de CYCLE 3, que suivait SIGNATURE ; SIGNATURE suit
+  // la REUNION de CYCLE 2, désormais le dernier cycle, avec ses 5 jours.
   const rows = templateRows().map((row) => ({ ...row, Ordre: "" }));
-  const changes = planCycleMove({
-    sections: buildSections({ rows }), groupRowId: 217, canLink: true,
-    target: { zoneKey: "zonez3a", zoneName: "Zone Z3A", floorKey: "ss1", floorName: "SS1", groupRowId: null, position: { groupRowId: 210, side: "before" } },
-  });
-  assert.deepEqual(column(changes, "Lien"), { 218: "209 FD", 211: "226 FD" });
+  const withEnd = planCycleMove({ sections: buildSections({ rows }), groupRowId: 217, canLink: true, target: cible });
+  assert.deepEqual(column(withEnd, "Lien"), { 218: "209 FD", 211: "224 FD", 225: "216 FD+5" });
 });
 
 test("sans la colonne Lien : seulement Parent, Nature, Ordre", () => {
   const changes = move(992, target(null, { groupRowId: 985, side: "before" }), { canLink: false });
-  assert.deepEqual([...changes], [[984, { Ordre: "1" }], [992, { Ordre: "2" }], [985, { Ordre: "3" }], [999, { Ordre: "4" }]]);
+  assert.deepEqual([...changes], [
+    [984, { Ordre: "1" }], [992, { Ordre: "2" }], [985, { Ordre: "3" }], [999, { Ordre: "4" }],
+    [1007, { Ordre: "5" }], [1008, { Ordre: "6" }],
+  ]);
 });
 
 test("supprimer un cycle referme la chaîne", () => {

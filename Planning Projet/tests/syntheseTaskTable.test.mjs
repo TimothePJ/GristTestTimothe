@@ -117,7 +117,7 @@ test("étages dans le tableau : saisie du nom, repli, poignée seulement en mode
   assert.match(source, /function startEditingFloor\(zoneKey, floorKey\)/);
   assert.match(source, /await onRenameFloor\?\.\(target\.zoneKey, target\.floorKey, value\)/);
   assert.match(source, /\{ type: "toggleFloor", zoneKey, floorKey \}/);
-  assert.match(source, /if \(line\.kind === "task" && editable\) \{\s*const grip = createElement\("span", "stt-grip"/);
+  assert.match(source, /if \(line\.kind === "task" && editable && !line\.floorEnd\) \{\s*const grip = createElement\("span", "stt-grip"/);
   assert.match(source, /startEditingFloor,\s*setStatus,/);
 });
 

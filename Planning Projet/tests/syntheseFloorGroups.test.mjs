@@ -21,7 +21,8 @@ test("étage du modèle : tâches, cycles et sous-groupes rangés par ordre de c
   const [section] = buildSections({ rows: templateRows() });
   const [floor] = section.floors;
   assert.equal(floor.name, "SS1");
-  assert.deepEqual(floor.items.map(itemKey), [202, "g203", "g210", "g217"]);
+  // SIGNATURE (225) et DEMARRAGE GO (226) : la fin d'étage fixe, hors des cycles.
+  assert.deepEqual(floor.items.map(itemKey), [202, "g203", "g210", "g217", 225, 226]);
   const c2 = findGroup([section], 210);
   assert.equal(c2.name, "CYCLE 2");
   assert.equal(c2.natureKey, "cycle");
@@ -63,7 +64,7 @@ test("modèle de lignes : zone, étage, cycle, sous-groupe, tâches, sur 5 nivea
   assert.equal(byKey.get("task:226").nature, "demarrage");
   assert.equal(byKey.get("task:204").durationDays, 0, "tâche du modèle créée sans durée : 0");
   const floorLine = byKey.get("floor:zonez3a/ss1");
-  assert.deepEqual([floorLine.groupRowId, floorLine.groupLabel, floorLine.nature, floorLine.childCount], [null, "", "", 4]);
+  assert.deepEqual([floorLine.groupRowId, floorLine.groupLabel, floorLine.nature, floorLine.childCount], [null, "", "", 6]);
   assert.deepEqual([byKey.get("task:202").groupRowId, byKey.get("task:202").id2], [null, ""]);
 });
 
@@ -118,7 +119,7 @@ test("Parent cassé : la ligne se range directement dans son étage ; cycle sans
   rows.push(extra(302, { Taches: "Tâche du cycle orphelin", Groupe: "", Parent: "301" }));
   const [section] = buildSections({ rows });
   const ss1 = section.floors.find((floor) => floor.key === "ss1");
-  assert.deepEqual(ss1.items.map(itemKey), [202, "g203", 204, 205, "g210", "g212", "g217"]);
+  assert.deepEqual(ss1.items.map(itemKey), [202, "g203", 204, 205, "g210", "g212", "g217", 225, 226]);
   const rdb = section.floors.find((floor) => floor.key === "phrdb");
   assert.deepEqual(rdb.items.map(itemKey), [300], "Parent d'un autre étage : directement dans son étage");
   assert.ok(section.items.some((item) => item.kind === "task" && item.task.id === 302));

@@ -69,8 +69,8 @@ début, `FF` fin → fin, `+n` = décalage en jours ouvrés.
 | T15 | PLAN DE SYNTHESE RESERVATIONS NIV {E} | | S3 | 2 | T14 FF |
 | T16 | PLAN DE SYNTHESE TERMINAUX NIV {E} | | S3 | 2 | T14 FF |
 | T17 | REUNION + DIFFUSION SYT | Reunion | C3 | 0 | T14 FD |
-| T18 | SIGNATURE PLANS SYNTHESE | | C3 | 0 | T17 FD+5 |
-| T19 | DEMARRAGE GO {E} (date prévisionnelle) | Demarrage | C3 | 0 | T18 FD |
+| T18 | SIGNATURE PLANS SYNTHESE | Signature | étage | 0 | T17 FD+5 |
+| T19 | DEMARRAGE GO {E} (date prévisionnelle) | Demarrage | étage | 0 | T18 FD |
 
 Soit 26 lignes avec la ligne-étage (comme les lignes 2 à 27 de la capture).
 
@@ -86,6 +86,16 @@ T19 02/03. Récapitulatifs : cycle 1 = 22 jours (02/01 → 02/02), cycle 2 = 10 
 REUNION + DIFFUSION SYT du cycle 3 (T17) avec 5 jours ouvrés de décalage, et non plus VISA Indice A
 (T13) ; DEMARRAGE GO (T19) la suit le même jour. La capture MS Project d'origine plaçait T18 et T19
 au 09/03.
+
+**Changement du 16/11/2026 (demande de l'utilisateur)** : SIGNATURE (T18, Nature « Signature ») et
+DEMARRAGE GO (T19) ne sont plus dans le CYCLE 3 : ce sont les deux dernières lignes de l'étage, à
+place fixe (affichées en dernier quel que soit leur rang, sans poignée de glisser). Un cycle ajouté,
+une tâche ajoutée sur l'étage ou sur l'une d'elles, une tâche ou un cycle déposé en fin d'étage vont
+juste au-dessus de SIGNATURE, qui suit alors (chaînage existant) la nouvelle dernière tâche avec ses
+5 jours ouvrés. Les étages créés avant gardent leurs lignes telles quelles dans Grist ; l'affichage
+les place quand même en fin d'étage (DEMARRAGE par sa Nature, SIGNATURE par son nom tant qu'elle n'a
+pas de Nature ; la renommer lui écrit sa Nature « Signature » et vide son Parent). Récapitulatif du
+cycle 3 inchangé (VISA A finit aussi le 02/03).
 
 Le modèle vit dans un module à part (`services/syntheseFloorTemplate.js`), sous forme de données :
 le changer plus tard ne touche pas au reste.

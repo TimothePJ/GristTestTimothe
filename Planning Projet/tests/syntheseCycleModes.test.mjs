@@ -2,8 +2,9 @@
 // son contenu direct, puis appliqué. Étage SS1 de la zone « Zone 1 / BAT BC » (ids 983 à 1008 et
 // 1061) : CYCLE 1 (985) mélange les deux ; CYCLE 2 (992 : RECEPTION 993, PLAN SYT CYCLE 2 994,
 // REUNION 998 en « 995 FD ») est en escalier ; PLAN SYT CYCLE 2 (994 : RESEAUX 995, RESERVATIONS
-// 996 et TERMINAUX 997 en « 995 FF ») est en parallèle ; CYCLE 3 (999) mélange ; PLAN SYT CYCLE 3
-// (1002) est en parallèle.
+// 996 et TERMINAUX 997 en « 995 FF ») est en parallèle ; CYCLE 3 (999 : … REUNION 1006) mélange ;
+// PLAN SYT CYCLE 3 (1002) est en parallèle. SIGNATURE 1007 (« 1001 FD+5 ») et DEMARRAGE GO 1008 sont
+// la fin d'étage fixe, hors des cycles.
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -175,7 +176,8 @@ test("CYCLE 2 en parallèle : tout finit avec la RECEPTION, CYCLE 3 la suit", ()
 
 test("cycle mélangé en escalier : seuls les liens qui ne suivent pas déjà le précédent changent", () => {
   const changes = plan(999, "series");
-  assert.deepEqual(column(changes, "Lien"), { 1003: "1001 FD", 1007: "1006 FD" });
+  // SIGNATURE, sous le cycle, suit sa nouvelle sortie (la REUNION, dernière en escalier) avec ses 5 jours.
+  assert.deepEqual(column(changes, "Lien"), { 1003: "1001 FD", 1007: "1006 FD+5" });
 });
 
 test("un décalage est gardé quand la tâche suit déjà le bon prédécesseur avec le même type", () => {
@@ -326,9 +328,10 @@ test("une tâche glissée en tête d'un cycle en parallèle finit avec la tâche
 });
 
 test("un sous-cycle en escalier glissé dans un cycle en parallèle : il y est bâti en parallèle", () => {
-  // SIGNATURE puis DEMARRAGE, en escalier, dans un sous-cycle de CYCLE 3, glissé à la fin de PLAN SYT CYCLE 2.
+  // SIGNATURE puis DEMARRAGE, en escalier, dans un sous-cycle de CYCLE 3, glissé à la fin de PLAN SYT
+  // CYCLE 2 ; renommée et sans Nature, elles ne sont plus la fin d'étage fixe.
   const rows = withRows([...eraSs1Rows(), cycleRow(2020, "SOUS-CYCLE", "999")], {
-    1007: { Parent: "2020" }, 1008: { Parent: "2020" },
+    1007: { Parent: "2020", Taches: "TACHE A" }, 1008: { Parent: "2020", Nature: "" },
   });
   const before = buildSections({ rows });
   const target = { zoneKey: ERA_ZONE_KEY, zoneName: ERA_ZONE, floorKey: "ss1", floorName: "SS1", groupRowId: 994 };
@@ -479,7 +482,9 @@ test("un cycle en parallèle glissé ailleurs : sa tâche pilote suit la nouvell
   const before = buildSections({ rows });
   const target = { zoneKey: ERA_ZONE_KEY, zoneName: ERA_ZONE, floorKey: "ss1", floorName: "SS1", groupRowId: 999 };
   const changes = planCycleMove({ sections: before, groupRowId: 994, target, canLink: true });
-  assert.deepEqual(column(changes, "Lien"), { 996: "1008 FD", 998: "993 FD" });
+  // À la fin de CYCLE 3 : sa tâche pilote suit la REUNION, la dernière du cycle ; SIGNATURE, juste
+  // en dessous, suit sa sortie (la tâche pilote) avec ses 5 jours.
+  assert.deepEqual(column(changes, "Lien"), { 996: "1006 FD", 998: "993 FD", 1007: "996 FD+5" });
   const after = applied(rows, changes);
   assert.equal(cycleModes(buildSections({ rows: after })).get(994), "parallel");
   assert.equal(hasLoop(after), false);
@@ -646,7 +651,7 @@ test("le sous-cycle de la tâche pilote glissé hors du cycle : la tâche restan
   const before = buildSections({ rows });
   const moved = applied(rows, planCycleMove({ sections: before, groupRowId: 2030, target: { ...SS1, groupRowId: 999 }, canLink: true }));
   const after = applied(moved, planParallelRealign({ before, rows: moved, canLink: true }));
-  assert.deepEqual(linksOf(after, [995, 997, 998]), { 995: "1008 FD", 997: "993 FD", 998: "997 FD" });
+  assert.deepEqual(linksOf(after, [995, 997, 998]), { 995: "1006 FD", 997: "993 FD", 998: "997 FD" });
   assert.equal(cycleModes(buildSections({ rows: after })).get(2030), "parallel");
 });
 
@@ -663,7 +668,7 @@ test("un cycle glissé entre un cycle en parallèle et la tâche qui le suit : i
 test("cycle mélangé dont le lien d'entrée n'est pas sur la première tâche, glissé ailleurs : il n'est pas coupé", () => {
   const rows = withRows(eraSs1Rows(), { ...RESA_PILOT, 997: { ...RESA_PILOT[997], Lien: "996 FD" } });
   const changes = planCycleMove({ sections: buildSections({ rows }), groupRowId: 994, target: { ...SS1, groupRowId: 999 }, canLink: true });
-  assert.deepEqual(column(changes, "Lien"), { 996: "1008 FD", 998: "993 FD" });
+  assert.deepEqual(column(changes, "Lien"), { 996: "1006 FD", 998: "993 FD", 1007: "996 FD+5" });
 });
 
 test("la tâche pilote d'un sous-cycle glissée dans le cycle parent, dont elle reste la tâche pilote : le sous-cycle finit avec elle", () => {
