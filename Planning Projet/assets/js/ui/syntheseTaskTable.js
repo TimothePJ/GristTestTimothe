@@ -327,6 +327,46 @@ export function buildLinkBadge(line, doc = document) {
   return badge;
 }
 
+// Repère : un petit dessin (fait en CSS) à côté d'un nom, que le survol dit en toutes lettres.
+function buildMark(className, text, doc) {
+  const mark = doc.createElement("span");
+  mark.className = className;
+  mark.title = text;
+  mark.setAttribute("role", "img");
+  mark.setAttribute("aria-label", text);
+  return mark;
+}
+
+// Mode d'une tâche d'après le type de son lien : nom du dessin et phrase du survol.
+const TASK_MODES = new Map([
+  ["FD", { name: "series", note: "En escalier : commence après la tâche qu'elle suit" }],
+  ["FF", { name: "parallel", note: "En parallèle : finit en même temps que la tâche qu'elle suit" }],
+  ["DD", { name: "start", note: "Commence en même temps que la tâche qu'elle suit" }],
+]);
+
+// Repère du mode d'une tâche, à côté de son nom, lu dans son lien : trois petits traits discrets, en
+// escalier (fin → début), en parallèle (fin → fin : ils finissent au même bord) ou partant du même
+// bord (début → début). Le survol le dit et rappelle le lien (« 13FD »). null sans lien. Les cycles
+// n'en portent pas : leur mode est celui de leurs tâches.
+export function buildTaskModeBadge(line, doc = document) {
+  const mode = line?.kind === "task" ? TASK_MODES.get(line.link?.type) : null;
+  if (!mode) return null;
+  const text = line.linkText ? `${mode.note} (lien ${line.linkText}).` : `${mode.note}.`;
+  return buildMark(`stt-task-mode is-${mode.name}`, text, doc);
+}
+
+// Repère de la tâche contrôlée par rapport au coffrage, à côté de son nom : un petit trait arrêté
+// par le pointillé de sa limite, rouge quand la Fin la dépasse. Le survol dit si elle l'est par choix ou
+// par défaut, et sa limite quand elle est connue (étage lié à un coffrage daté). null pour les autres
+// lignes.
+export function buildControlBadge(line, doc = document) {
+  if (line?.kind !== "task" || !line.isControlTask) return null;
+  const base = line.isChosenControlTask
+    ? "Tâche contrôlée par rapport au coffrage."
+    : "Tâche contrôlée par rapport au coffrage (par défaut).";
+  return buildMark("stt-control-task", line.endLimitNote ? `${base} ${line.endLimitNote}` : base, doc);
+}
+
 // Une ligne récapitulative sans tâche datée n'a pas de récapitulatif : cellules vides. Une
 // tâche sans dates affiche « — » (et sa durée prévue). N° et Indice : tâches seulement. Chaque
 // ligne montre son numéro ; une tâche, son lien (« 20FD »).
@@ -578,6 +618,11 @@ export function createSyntheseTaskTable(host, {
       cell.appendChild(grip);
     }
     cell.appendChild(createElement("span", "stt-text", line.name));
+    // Repères après le nom d'une tâche : son mode (lu dans son lien), puis la tâche contrôlée par
+    // rapport au coffrage.
+    [buildTaskModeBadge(line), buildControlBadge(line)].forEach((mark) => {
+      if (mark) cell.appendChild(mark);
+    });
     // Pas d'emblème dans la fenêtre Paramètre : « Étage type » n'est lié à aucune Structure.
     if (line.kind === "floor" && line.structureLinkNote && !templateMode) cell.appendChild(buildLinkBadge(line));
     return cell;

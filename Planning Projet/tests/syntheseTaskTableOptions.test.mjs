@@ -278,3 +278,41 @@ test("templateMode : pas d'emblème de lien Structure sur la ligne étage ; par 
   main.table.render([zoneLine(), floorLine({ structureLinkNote: note })], { editable: true });
   assert.ok(main.host.querySelector(".stt-floor-link"));
 });
+
+test("repère du mode : sur chaque tâche liée, après son nom ; jamais sur un cycle", () => {
+  const { table, lineOf } = makeTable();
+  const link = (type) => ({ predId: 9, type, lag: 0 });
+  table.render([
+    { ...groupLine(), cycleMode: "parallel" },
+    taskLine({ link: link("FD"), linkText: "3FD" }),
+    taskLine({ key: "task:2", taskId: 2, name: "Avec", link: link("FF"), linkText: "4FF" }),
+    taskLine({ key: "task:3", taskId: 3, name: "Sans lien", link: null }),
+  ], { editable: true });
+  assert.equal(lineOf("group:7").querySelector(".stt-task-mode"), null);
+  const children = lineOf("task:1").querySelector(".stt-cell--name").children.map((child) => child.className);
+  assert.equal(children[children.length - 1], "stt-task-mode is-series");
+  assert.equal(children[children.length - 2], "stt-text");
+  assert.ok(lineOf("task:2").querySelector(".stt-task-mode.is-parallel"));
+  assert.equal(lineOf("task:3").querySelector(".stt-task-mode"), null);
+  // En lecture seule aussi : c'est une information, pas une action.
+  table.render([taskLine({ link: link("DD"), linkText: "3DD" })], { editable: false });
+  assert.ok(lineOf("task:1").querySelector(".stt-task-mode.is-start"));
+});
+
+test("repère de la tâche contrôlée : après son nom et son mode, dans le tableau comme dans la fenêtre Paramètre", () => {
+  const { table, lineOf } = makeTable();
+  table.render([
+    taskLine({ isControlTask: true, isChosenControlTask: true, link: { predId: 9, type: "FF", lag: 0 }, linkText: "9FF" }),
+    taskLine({ key: "task:2", taskId: 2, name: "Autre" }),
+  ], { editable: true });
+  const cell = lineOf("task:1").querySelector(".stt-cell--name");
+  const children = cell.children.map((child) => child.className);
+  assert.equal(children[children.length - 1], "stt-control-task");
+  assert.equal(children[children.length - 2], "stt-task-mode is-parallel");
+  assert.equal(children[children.length - 3], "stt-text");
+  assert.equal(lineOf("task:1").querySelector(".stt-control-task").title, "Tâche contrôlée par rapport au coffrage.");
+  assert.equal(lineOf("task:2").querySelector(".stt-control-task"), null);
+  const inWindow = makeTable({}, { templateMode: true });
+  inWindow.table.render([taskLine({ isControlTask: true, isChosenControlTask: false })], { editable: false });
+  assert.ok(inWindow.lineOf("task:1").querySelector(".stt-control-task"));
+});

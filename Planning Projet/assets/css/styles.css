@@ -3184,6 +3184,59 @@ body.is-synthese-space #durationDefaultsToggle {
   left: 7px;
 }
 
+/* Repères à côté du nom d'une tâche (son mode, tâche contrôlée par rapport au coffrage) : petits
+   dessins au trait de 2 px, de la couleur du texte de leur ligne et estompés, dans le ton du
+   tableau (poignée, numéros de ligne). La couleur est réservée à l'alerte. */
+.stt-task-mode,
+.stt-control-task {
+  --stt-mark: linear-gradient(currentColor, currentColor);
+  flex: 0 0 auto;
+  background-repeat: no-repeat;
+  opacity: 0.6;
+  cursor: help;
+}
+
+/* Mode d'une tâche, d'après son lien : trois traits, en escalier (fin → début : chacun après le
+   précédent), en parallèle (fin → fin : ils finissent au même bord) ou partant du même bord
+   (début → début). */
+.stt-task-mode {
+  width: 11px;
+  height: 8px;
+  margin-left: 6px;
+  background-image: var(--stt-mark), var(--stt-mark), var(--stt-mark);
+}
+
+.stt-task-mode.is-series {
+  background-size: 5px 2px;
+  background-position: 0 0, 3px 3px, 6px 6px;
+}
+
+.stt-task-mode.is-parallel {
+  background-size: 11px 2px, 8px 2px, 5px 2px;
+  background-position: 0 0, 3px 3px, 6px 6px;
+}
+
+.stt-task-mode.is-start {
+  background-size: 11px 2px, 8px 2px, 5px 2px;
+  background-position: 0 0, 0 3px, 0 6px;
+}
+
+/* Tâche contrôlée par rapport au coffrage : un trait arrêté par le pointillé de sa limite ; au rouge
+   de la Fin (.stt-cell--end) quand elle dépasse la limite. */
+.stt-control-task {
+  width: 9px;
+  height: 10px;
+  margin-left: 6px;
+  background-image: var(--stt-mark), repeating-linear-gradient(to bottom, currentColor 0 2px, transparent 2px 4px);
+  background-size: 6px 2px, 2px 10px;
+  background-position: 0 4px, 7px 0;
+}
+
+.stt-line--task.is-over-limit .stt-control-task {
+  color: #c00000;
+  opacity: 1;
+}
+
 /* Contour de focus du triangle lisible sur l'orange clair de l'étage. */
 .stt-line--floor .stt-toggle:focus-visible {
   outline-color: var(--stt-accent);
