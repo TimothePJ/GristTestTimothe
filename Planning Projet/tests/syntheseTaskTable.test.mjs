@@ -9,8 +9,10 @@ import {
   cellText,
   isEditableCell,
   MIN_NAME_WIDTH,
+  buildControlBadge,
   buildLinkBadge,
   buildMenuItems,
+  buildTaskModeBadge,
   createDeferredRenderer,
   dragColumn,
   minLeftWidth,
@@ -367,6 +369,105 @@ test("emblème de lien : à côté du nom de l'étage, vert quand il est lié, r
   assert.match(css, /\.stt-floor-link\.is-unlinked\s*\{[^}]*color:\s*#c00000;/);
   const naming = sliceBetween(source, "function buildNameCell(", "function buildLine(");
   assert.match(naming, /if \(line\.kind === "floor" && line\.structureLinkNote && !templateMode\) cell\.appendChild\(buildLinkBadge\(line\)\);/);
+});
+
+// Repères à côté du nom d'une tâche : son mode, lu dans son lien (en escalier, en parallèle…), et la
+// tâche contrôlée par rapport au coffrage. Les cycles n'en portent pas : leur mode est celui de leurs
+// tâches (un cycle « mixte » a simplement des tâches aux repères différents).
+const badgeDoc = {
+  createElement: (tag) => ({ tag, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } }),
+};
+const badgeFacts = (badge) => [badge.tag, badge.className, badge.title, badge.attributes.role, badge.attributes["aria-label"]];
+const linkedTask = (type, linkText) => ({ kind: "task", link: { predId: 7, type, lag: 0 }, linkText });
+
+test("repère du mode d'une tâche : classe et phrase selon son lien", () => {
+  const series = "En escalier : commence après la tâche qu'elle suit (lien 13FD).";
+  assert.deepEqual(
+    badgeFacts(buildTaskModeBadge(linkedTask("FD", "13FD"), badgeDoc)),
+    ["span", "stt-task-mode is-series", series, "img", series]
+  );
+  const parallel = "En parallèle : finit en même temps que la tâche qu'elle suit (lien 15FF).";
+  assert.deepEqual(
+    badgeFacts(buildTaskModeBadge(linkedTask("FF", "15FF"), badgeDoc)),
+    ["span", "stt-task-mode is-parallel", parallel, "img", parallel]
+  );
+  const start = "Commence en même temps que la tâche qu'elle suit (lien 3DD).";
+  assert.deepEqual(
+    badgeFacts(buildTaskModeBadge(linkedTask("DD", "3DD"), badgeDoc)),
+    ["span", "stt-task-mode is-start", start, "img", start]
+  );
+  // Le décalage se lit dans le lien rappelé.
+  assert.equal(
+    buildTaskModeBadge(linkedTask("FD", "21FD+5"), badgeDoc).title,
+    "En escalier : commence après la tâche qu'elle suit (lien 21FD+5)."
+  );
+});
+
+test("repère du mode : sans numéro de ligne, la phrase seule ; rien sans lien, ni sur une autre ligne", () => {
+  assert.equal(buildTaskModeBadge(linkedTask("FF", ""), badgeDoc).title, "En parallèle : finit en même temps que la tâche qu'elle suit.");
+  assert.equal(buildTaskModeBadge({ kind: "task", link: null }, badgeDoc), null);
+  assert.equal(buildTaskModeBadge({ kind: "task" }, badgeDoc), null);
+  assert.equal(buildTaskModeBadge(linkedTask("constructor", ""), badgeDoc), null);
+  // Un cycle n'a pas de repère, quel que soit son mode.
+  assert.equal(buildTaskModeBadge({ kind: "group", cycleMode: "parallel", link: null }, badgeDoc), null);
+  assert.equal(buildTaskModeBadge({ kind: "group", link: { predId: 7, type: "FD", lag: 0 } }, badgeDoc), null);
+  assert.equal(buildTaskModeBadge(null, badgeDoc), null);
+});
+
+test("repère de la tâche contrôlée : par choix ou par défaut, avec sa limite quand elle est connue", () => {
+  const chosen = "Tâche contrôlée par rapport au coffrage.";
+  assert.deepEqual(
+    badgeFacts(buildControlBadge({ kind: "task", isControlTask: true, isChosenControlTask: true }, badgeDoc)),
+    ["span", "stt-control-task", chosen, "img", chosen]
+  );
+  const byDefault = buildControlBadge({ kind: "task", isControlTask: true, isChosenControlTask: false }, badgeDoc);
+  assert.equal(byDefault.title, "Tâche contrôlée par rapport au coffrage (par défaut).");
+  const limited = buildControlBadge({
+    kind: "task",
+    isControlTask: true,
+    isChosenControlTask: false,
+    endLimitNote: "À finir au plus tard le 12/01/26 (début du plan de coffrage 3021 dans le planning Structure).",
+  }, badgeDoc);
+  assert.equal(
+    limited.title,
+    "Tâche contrôlée par rapport au coffrage (par défaut). À finir au plus tard le 12/01/26 (début du plan de coffrage 3021 dans le planning Structure)."
+  );
+  assert.equal(limited.attributes["aria-label"], limited.title);
+});
+
+test("repère de la tâche contrôlée : rien pour une tâche non contrôlée ni pour une autre ligne", () => {
+  assert.equal(buildControlBadge({ kind: "task" }, badgeDoc), null);
+  assert.equal(buildControlBadge({ kind: "task", isControlTask: false }, badgeDoc), null);
+  assert.equal(buildControlBadge({ kind: "group", isControlTask: true }, badgeDoc), null);
+  assert.equal(buildControlBadge(null, badgeDoc), null);
+});
+
+test("repères : dessinés après le nom, le mode puis la tâche contrôlée ; plus rien sur les cycles", () => {
+  const naming = sliceBetween(source, "function buildNameCell(", "function buildLine(");
+  const text = naming.indexOf('createElement("span", "stt-text", line.name)');
+  const marks = naming.indexOf("[buildTaskModeBadge(line), buildControlBadge(line)]");
+  assert.ok(text >= 0 && marks > text, "les repères viennent après le nom");
+  assert.doesNotMatch(source, /stt-cycle-mode|buildCycleModeBadge/);
+  assert.doesNotMatch(css, /stt-cycle-mode/);
+});
+
+test("repères : discrets, au trait fin de la couleur du texte ; la couleur seulement en alerte", () => {
+  // Les deux repères : couleur du texte de la ligne, estompée — ni bleu ni couleurs du Gantt.
+  const shared = css.match(/\.stt-task-mode,\s*\.stt-control-task\s*\{([^}]*)\}/)[1];
+  assert.match(shared, /--stt-mark:\s*linear-gradient\(currentColor, currentColor\);/);
+  assert.match(shared, /opacity:\s*0\.6;/);
+  assert.doesNotMatch(shared, /(^|\s)color:/);
+  const rules = [...css.matchAll(/\.stt-(?:task-mode|control-task)[^{]*\{([^}]*)\}/g)].map((match) => match[1]).join("\n");
+  assert.doesNotMatch(rules, /var\(--stt-accent\)|#3b9bb0|#7cc7d8/);
+  // Escalier : trois traits égaux décalés ; parallèle : trois traits qui finissent au même bord ;
+  // début → début : les mêmes traits, qui commencent au même bord.
+  assert.match(css, /\.stt-task-mode\.is-series\s*\{[^}]*background-size:\s*5px 2px;[^}]*background-position:\s*0 0, 3px 3px, 6px 6px;/);
+  assert.match(css, /\.stt-task-mode\.is-parallel\s*\{[^}]*background-size:\s*11px 2px, 8px 2px, 5px 2px;[^}]*background-position:\s*0 0, 3px 3px, 6px 6px;/);
+  assert.match(css, /\.stt-task-mode\.is-start\s*\{[^}]*background-size:\s*11px 2px, 8px 2px, 5px 2px;[^}]*background-position:\s*0 0, 0 3px, 0 6px;/);
+  // Tâche contrôlée : un trait et le pointillé de sa limite ; en dépassement, le rouge de la Fin.
+  assert.match(css, /\.stt-control-task\s*\{[^}]*repeating-linear-gradient\(to bottom, currentColor 0 2px, transparent 2px 4px\)/);
+  const lateEnd = css.match(/\.stt-line--task\.is-over-limit \.stt-cell--end\s*\{[^}]*color:\s*(#[0-9a-f]{6});/)[1];
+  assert.match(css, new RegExp(`\\.stt-line--task\\.is-over-limit \\.stt-control-task\\s*\\{[^}]*color:\\s*${lateEnd};[^}]*opacity:\\s*1;`));
 });
 
 // ---------- Ordre libre (colonne Ordre) ----------
