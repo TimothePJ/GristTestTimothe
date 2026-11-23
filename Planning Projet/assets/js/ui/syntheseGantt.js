@@ -34,6 +34,11 @@ const LINK_HEAD_PX = 4;
 // Barres d'un document Structure : coins et marge du libellé de la frise Structure.
 const SEGMENT_RADIUS_PX = 2;
 const SEGMENT_LABEL_PAD_PX = 4;
+// Flèches et barres déjà dessinées, décalées d'un bloc au lieu d'être redessinées : l'écart
+// toléré avec un dessin neuf (les formes sont placées au dixième de pixel), et le décalage
+// au-delà duquel le dessin est refait, les très grandes abscisses perdant en précision.
+const MAX_CONTENT_DRIFT_PX = 0.05;
+const MAX_CONTENT_SHIFT_PX = 100000;
 
 // Pointe pleine d'une flèche, selon sa direction.
 const LINK_HEADS = Object.freeze({
@@ -48,6 +53,13 @@ function svgElement(tag, attributes = {}, text = null) {
   Object.entries(attributes).forEach(([name, value]) => element.setAttribute(name, String(value)));
   if (text != null) element.textContent = text;
   return element;
+}
+
+// Un attribut n'est réécrit que quand il change : réécrire la taille d'un <svg>, même avec la
+// même valeur, fait refaire au navigateur la mise en page de tout ce qu'il contient.
+function setAttributeIfChanged(element, name, value) {
+  const text = String(value);
+  if (element.getAttribute(name) !== text) element.setAttribute(name, text);
 }
 
 function px(value) {
@@ -73,9 +85,17 @@ export function createSyntheseGantt({ headHost, layerHost, interactionHost, rowH
   let drag = null;
   let wheelPending = 0;
   let fallbackRange = null;
+  // Échelle avec laquelle les flèches et les barres en place ont été dessinées ; null quand
+  // elles sont à refaire (nouvelles lignes, panneau masqué).
+  let drawnContent = null;
 
   const scaleSvg = svgElement("svg", { class: "stg-scale", "aria-hidden": "true" });
   const layerSvg = svgElement("svg", { class: "stg-layer", "aria-hidden": "true" });
+  // La couche en deux groupes : le fond, qui dépend de la période visible, et par-dessus les
+  // flèches et les barres, qui ne dépendent que des lignes et du zoom.
+  const backdropGroup = svgElement("g", { class: "stg-backdrop" });
+  const contentGroup = svgElement("g", { class: "stg-content" });
+  layerSvg.replaceChildren(backdropGroup, contentGroup);
   headHost.replaceChildren(scaleSvg);
   layerHost.replaceChildren(layerSvg);
 
@@ -129,8 +149,8 @@ export function createSyntheseGantt({ headHost, layerHost, interactionHost, rowH
       y1: SCALE_TIER_HEIGHT_PX,
       y2: SCALE_TIER_HEIGHT_PX,
     }));
-    scaleSvg.setAttribute("width", String(px(scale.width)));
-    scaleSvg.setAttribute("height", String(SCALE_TIER_HEIGHT_PX * 2));
+    setAttributeIfChanged(scaleSvg, "width", px(scale.width));
+    setAttributeIfChanged(scaleSvg, "height", SCALE_TIER_HEIGHT_PX * 2);
     scaleSvg.replaceChildren(...nodes);
   }
 
@@ -280,7 +300,8 @@ export function createSyntheseGantt({ headHost, layerHost, interactionHost, rowH
     ];
   }
 
-  function drawLayer(scale, height) {
+  // Fond : jours non travaillés et trait d'aujourd'hui de la période visible.
+  function drawBackdrop(scale, height) {
     const nodes = buildNonWorkingBands(scale).map((band) => svgElement("rect", {
       class: "stg-off",
       x: px(band.x1),
@@ -292,11 +313,29 @@ export function createSyntheseGantt({ headHost, layerHost, interactionHost, rowH
     if (today != null) {
       nodes.push(svgElement("line", { class: "stg-today", x1: px(today), x2: px(today), y1: 0, y2: height }));
     }
+    backdropGroup.replaceChildren(...nodes);
+  }
+
+  // Flèches puis barres de toutes les lignes, à l'échelle donnée.
+  function drawContent(scale) {
+    const nodes = [];
     buildGanttLinks(lines, scale, { rowHeight }).forEach((link) => nodes.push(...drawLink(link)));
     buildGanttShapes(lines, scale, { rowHeight }).forEach((shape) => nodes.push(...drawShape(shape)));
-    layerSvg.setAttribute("width", String(px(scale.width)));
-    layerSvg.setAttribute("height", String(height));
-    layerSvg.replaceChildren(...nodes);
+    contentGroup.replaceChildren(...nodes);
+    drawnContent = { start: scale.start, span: scale.end - scale.start, width: scale.width };
+  }
+
+  // Décalage qui amène les flèches et les barres en place à l'échelle donnée, ou null quand il
+  // faut les redessiner. Déplacer la période sans changer le zoom décale toutes les formes
+  // d'autant : il suffit alors de décaler leur groupe.
+  function contentShift(scale) {
+    if (!drawnContent || drawnContent.width !== scale.width) return null;
+    const span = scale.end - scale.start;
+    const shift = ((drawnContent.start - scale.start) * scale.width) / span;
+    if (Math.abs(shift) > MAX_CONTENT_SHIFT_PX) return null;
+    // Zoom changé : l'écart avec un dessin neuf grandit avec la distance au dessin d'origine.
+    const drift = (Math.abs(span - drawnContent.span) * (Math.abs(shift) + scale.width)) / span;
+    return drift <= MAX_CONTENT_DRIFT_PX ? shift : null;
   }
 
   function draw() {
@@ -306,13 +345,23 @@ export function createSyntheseGantt({ headHost, layerHost, interactionHost, rowH
     const width = layerHost.clientWidth;
     if (!(width > 0)) {
       scaleSvg.replaceChildren();
-      layerSvg.replaceChildren();
+      backdropGroup.replaceChildren();
+      contentGroup.replaceChildren();
+      drawnContent = null;
       return;
     }
     const range = currentWindow();
     const scale = createTimeScale({ start: range.start, end: range.end, width });
     drawScale(scale);
-    drawLayer(scale, height);
+    setAttributeIfChanged(layerSvg, "width", px(scale.width));
+    setAttributeIfChanged(layerSvg, "height", height);
+    drawBackdrop(scale, height);
+    let shift = contentShift(scale);
+    if (shift == null) {
+      drawContent(scale);
+      shift = 0;
+    }
+    setAttributeIfChanged(contentGroup, "transform", `translate(${px(shift)} 0)`);
   }
 
   // Un seul dessin par image, quel que soit le nombre de demandes (lignes, période, taille).
@@ -406,6 +455,7 @@ export function createSyntheseGantt({ headHost, layerHost, interactionHost, rowH
   return {
     render(nextLines) {
       lines = Array.isArray(nextLines) ? nextLines : [];
+      drawnContent = null;
       schedule();
     },
     resize() {

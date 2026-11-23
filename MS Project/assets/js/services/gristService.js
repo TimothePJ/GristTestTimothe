@@ -1,4 +1,23 @@
 import { APP_CONFIG } from "../config.js";
+// Règles partagées avec Planning Projet : les deux widgets écrivent les mêmes colonnes de
+// Planning_Projet et de References2, ils doivent y trouver les mêmes valeurs.
+import {
+  buildMsLinkedPlanningDateFields,
+  keepChangedPlanningDateFields,
+} from "../../../../gestion-depenses2/assets/js/utils/msProjectPlanningDates.js";
+import {
+  buildReferenceDocumentRestFilter,
+  dedupeReferenceActions,
+  getPlanningSegmentStartDate,
+  planReferenceDeadlineActions,
+} from "../../../../gestion-depenses2/assets/js/utils/planningReferenceDeadlines.js";
+
+const REFERENCES_TABLE_NAME = "References2";
+const REFERENCE_DATA_CHANGE_STORAGE_KEY = "grist.references-data-change";
+const REFERENCE_READ_CHUNK_SIZE = 20;
+const REFERENCE_FULL_READ_CACHE_MS = 30000;
+// Colonne « service » de Planning_Projet et de References2, celle du runtime partagé.
+const SERVICE_COLUMN = "Service";
 
 const _msProjectServiceDiagnostics = {
   fetchTableCount: 0,
@@ -14,6 +33,13 @@ let _cachedProjectNames = null;
 let _readOnlyAccessTokenEntry = null;
 let _readOnlyAccessTokenPromise = null;
 let _restUnavailable = false;
+// Tables dont la lecture REST filtrée n'est pas fiable ici : jeton sans visibilité (réponse
+// vide alors que le widget, lui, voit des lignes), filtre refusé, panne.
+const _restBlindTables = new Set();
+// Tables où le jeton REST a montré au moins une ligne : une réponse vide y est vraie.
+const _restVisibleTables = new Set();
+// Dernière lecture complète de References2 au repli : { rows, loadedAt }.
+let _referenceFullRead = null;
 
 export function getMsProjectServiceDiagnostics() {
   return { ..._msProjectServiceDiagnostics };
@@ -133,7 +159,7 @@ async function getReadOnlyAccessToken({ forceRefresh = false } = {}) {
   return _readOnlyAccessTokenPromise;
 }
 
-async function fetchRestRows(tableName, filter = null, { authRetry = false } = {}) {
+async function fetchRestRows(tableName, filter = null, { authRetry = false, limit = 0 } = {}) {
   if (typeof window.fetch !== "function") {
     throw new Error("API fetch indisponible pour la lecture REST Grist.");
   }
@@ -142,6 +168,9 @@ async function fetchRestRows(tableName, filter = null, { authRetry = false } = {
   const query = [];
   if (filter && typeof filter === "object") {
     query.push(`filter=${encodeURIComponent(JSON.stringify(filter))}`);
+  }
+  if (limit > 0) {
+    query.push(`limit=${limit}`);
   }
   query.push(`auth=${encodeURIComponent(access.token)}`);
   const baseUrl = access.baseUrl.replace(/\/+$/, "");
@@ -154,7 +183,7 @@ async function fetchRestRows(tableName, filter = null, { authRetry = false } = {
   if ([401, 403].includes(Number(response?.status)) && !authRetry) {
     _readOnlyAccessTokenEntry = null;
     await getReadOnlyAccessToken({ forceRefresh: true });
-    return fetchRestRows(tableName, filter, { authRetry: true });
+    return fetchRestRows(tableName, filter, { authRetry: true, limit });
   }
   if (!response?.ok) {
     throw new Error(`Lecture REST Grist impossible (${Number(response?.status) || "reseau"}).`);
@@ -192,6 +221,53 @@ async function fetchRowsRestFirst(tableName, filter = null) {
   return rows.filter((row) => rowMatchesRestFilter(row, filter));
 }
 
+// Lecture filtrée d'une table soumise aux droits d'accès (Planning_Projet, References2) :
+// REST d'abord, pour que seules les lignes utiles voyagent. Le résultat contient AU MOINS
+// les lignes qui passent le filtre — au repli c'est la table entière, non filtrée :
+// l'appelant refait de toute façon sa propre correspondance, plus tolérante que le filtre.
+//
+// Le jeton REST est en lecture seule et plafonné au rôle lecteur : un propriétaire absent
+// de la table Team n'y voit aucune ligne, alors que le canal Grist du widget les lui
+// montre. Une réponse vide n'est donc crue qu'une fois la table vue par REST ; sinon la
+// table est relue en entier, comme avant, et REST n'est plus tenté pour elle.
+async function fetchRowsFilteredOrFull(
+  tableName,
+  filter = null,
+  { readFullTable = fetchTableRows } = {}
+) {
+  if (filter && !_restUnavailable && !_restBlindTables.has(tableName)) {
+    try {
+      const rows = await fetchRestRows(tableName, filter);
+      if (rows.length || _restVisibleTables.has(tableName)) {
+        _restVisibleTables.add(tableName);
+        return rows;
+      }
+      if ((await fetchRestRows(tableName, null, { limit: 1 })).length) {
+        _restVisibleTables.add(tableName);
+        return rows;
+      }
+      _restBlindTables.add(tableName);
+    } catch (error) {
+      _restBlindTables.add(tableName);
+      console.warn(`Lecture REST filtrée de ${tableName} impossible ; lecture complète.`, error);
+    }
+  }
+  return readFullTable(tableName);
+}
+
+// Repli de References2 (REST injoignable ou sans visibilité) : la table entière est gardée
+// 30 s, comme le fait le runtime partagé pour Planning Projet. Sans cela, chaque date
+// modifiée la ferait relire en entier. Elle est oubliée dès que ce widget y écrit.
+async function fetchAllReferenceRows() {
+  const cached = _referenceFullRead;
+  if (cached && Date.now() - cached.loadedAt < REFERENCE_FULL_READ_CACHE_MS) {
+    return cached.rows;
+  }
+  const rows = await fetchTableRows(REFERENCES_TABLE_NAME);
+  _referenceFullRead = { rows, loadedAt: Date.now() };
+  return rows;
+}
+
 function invalidateMsProjectCaches({ catalog = false } = {}) {
   if (!catalog) return;
 
@@ -200,94 +276,6 @@ function invalidateMsProjectCaches({ catalog = false } = {}) {
 
 function isIsoDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? "").trim());
-}
-
-function toInteger(value) {
-  if (value == null || value === "") return null;
-  const number = Number(value);
-  if (!Number.isFinite(number) || !Number.isInteger(number)) return null;
-  return number;
-}
-
-function normalizeUtcDateToLocalCalendar(date) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
-  return new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
-}
-
-function parseCalendarDate(value) {
-  if (value == null || value === "") return null;
-
-  if (value instanceof Date) {
-    return normalizeUtcDateToLocalCalendar(value);
-  }
-
-  if (typeof value === "number") {
-    const normalized = value > 1e9 && value < 1e11 ? value * 1000 : value;
-    return normalizeUtcDateToLocalCalendar(new Date(normalized));
-  }
-
-  const text = String(value).trim();
-  if (!text) return null;
-
-  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
-  if (isoMatch) {
-    const year = Number(isoMatch[1]);
-    const month = Number(isoMatch[2]);
-    const day = Number(isoMatch[3]);
-    const date = new Date(year, month - 1, day);
-    if (
-      date.getFullYear() === year &&
-      date.getMonth() === month - 1 &&
-      date.getDate() === day
-    ) {
-      return date;
-    }
-    return null;
-  }
-
-  const frMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+.*)?$/);
-  if (frMatch) {
-    const day = Number(frMatch[1]);
-    const month = Number(frMatch[2]);
-    const year = Number(frMatch[3]);
-    const date = new Date(year, month - 1, day);
-    if (
-      date.getFullYear() === year &&
-      date.getMonth() === month - 1 &&
-      date.getDate() === day
-    ) {
-      return date;
-    }
-    return null;
-  }
-
-  const fallback = new Date(text);
-  return Number.isNaN(fallback.getTime()) ? null : fallback;
-}
-
-function formatIsoDate(date) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function subtractWeeksFromDate(date, weeks) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
-  const normalizedWeeks = toInteger(weeks);
-  if (normalizedWeeks == null || normalizedWeeks < 0) return null;
-  const shiftedDate = new Date(date);
-  shiftedDate.setDate(shiftedDate.getDate() - (normalizedWeeks * 7));
-  return shiftedDate;
-}
-
-function isCoffrageTypeDoc(value) {
-  return String(value ?? "").toUpperCase().includes("COFFRAGE");
-}
-
-function isArmaturesTypeDoc(value) {
-  return String(value ?? "").toUpperCase().includes("ARMATURES");
 }
 
 function extractIsoDatePart(value) {
@@ -633,6 +621,11 @@ function resolvePlanningDemarrageSyncColumns(planningRows, planningTable) {
   const columns = planningTable.columns || {};
   return {
     idCol: columns.id || "id",
+    projectCol: resolveColumn(
+      planningRows,
+      columns.projectLink,
+      planningTable.projectLinkCandidates || []
+    ),
     lineCol: resolveColumn(
       planningRows,
       columns.linePlanning,
@@ -686,93 +679,186 @@ function resolvePlanningDemarrageSyncColumns(planningRows, planningTable) {
   };
 }
 
-function buildPlanningDemarrageSyncAction(
-  row,
-  normalizedIsoDate,
-  planningTable,
-  syncColumns,
-  msEndIso = ""
-) {
-  const planningRowId = Number(row?.[syncColumns.idCol]);
-  if (!Number.isInteger(planningRowId) || planningRowId <= 0) return null;
-
-  const demarrageDate = parseCalendarDate(normalizedIsoDate);
-  const msEndDate = parseCalendarDate(msEndIso);
-  const updates = {
-    [syncColumns.demarrageCol]: normalizedIsoDate,
+// Noms des colonnes de Planning_Projet, tels que les attendent les modules partagés avec
+// Planning Projet (règle des dates, suivi des données d'entrée).
+function toSharedPlanningColumns(syncColumns) {
+  return {
+    id: syncColumns.idCol,
+    projectLink: syncColumns.projectCol,
+    typeDoc: syncColumns.typeDocCol,
+    dateLimite: syncColumns.dateLimiteCol,
+    duree1: syncColumns.duree1Col,
+    diffCoffrage: syncColumns.diffCoffrageCol,
+    duree2: syncColumns.duree2Col,
+    diffArmature: syncColumns.diffArmatureCol,
+    duree3: syncColumns.duree3Col,
+    demarragesTravaux: syncColumns.demarrageCol,
   };
-
-  const typeDoc = toText(row?.[syncColumns.typeDocCol]);
-  const isGenericMsLinkedTypeDoc =
-    Boolean(typeDoc) &&
-    !isCoffrageTypeDoc(typeDoc) &&
-    !isArmaturesTypeDoc(typeDoc);
-
-  if (isCoffrageTypeDoc(typeDoc) || isGenericMsLinkedTypeDoc) {
-    const duree1 = toInteger(row?.[syncColumns.duree1Col]);
-    const duree3 = toInteger(row?.[syncColumns.duree3Col]);
-    const diffCoffrageDate =
-      demarrageDate && duree3 != null && duree3 >= 0
-        ? subtractWeeksFromDate(demarrageDate, duree3)
-        : parseCalendarDate(row?.[syncColumns.diffCoffrageCol]) || msEndDate;
-    const dateLimiteDate =
-      diffCoffrageDate && duree1 != null && duree1 >= 0
-        ? subtractWeeksFromDate(diffCoffrageDate, duree1)
-        : parseCalendarDate(row?.[syncColumns.dateLimiteCol]);
-
-    const diffCoffrageIso = formatIsoDate(diffCoffrageDate);
-    const dateLimiteIso = formatIsoDate(dateLimiteDate);
-    if (syncColumns.diffCoffrageCol && diffCoffrageIso) {
-      updates[syncColumns.diffCoffrageCol] = diffCoffrageIso;
-    }
-    if (syncColumns.dateLimiteCol && dateLimiteIso) {
-      updates[syncColumns.dateLimiteCol] = dateLimiteIso;
-    } else if (syncColumns.dateLimiteCol && normalizedIsoDate) {
-      updates[syncColumns.dateLimiteCol] = normalizedIsoDate;
-    }
-  } else if (isArmaturesTypeDoc(typeDoc)) {
-    const duree2 = toInteger(row?.[syncColumns.duree2Col]);
-    const duree3 = toInteger(row?.[syncColumns.duree3Col]);
-    const diffArmatureDate =
-      demarrageDate && duree3 != null && duree3 >= 0
-        ? subtractWeeksFromDate(demarrageDate, duree3)
-        : parseCalendarDate(row?.[syncColumns.diffArmatureCol]) || msEndDate;
-    const diffCoffrageDate =
-      diffArmatureDate && duree2 != null && duree2 >= 0
-        ? subtractWeeksFromDate(diffArmatureDate, duree2)
-        : parseCalendarDate(row?.[syncColumns.diffCoffrageCol]);
-
-    const diffArmatureIso = formatIsoDate(diffArmatureDate);
-    const diffCoffrageIso = formatIsoDate(diffCoffrageDate);
-    if (syncColumns.diffArmatureCol && diffArmatureIso) {
-      updates[syncColumns.diffArmatureCol] = diffArmatureIso;
-    }
-    if (syncColumns.diffCoffrageCol && diffCoffrageIso) {
-      updates[syncColumns.diffCoffrageCol] = diffCoffrageIso;
-    }
-  }
-
-  return [
-    "UpdateRecord",
-    planningTable.sourceTable,
-    planningRowId,
-    updates,
-  ];
 }
 
-async function applyPlanningSyncActions(actions) {
-  if (!actions.length) return;
+// Valeurs d'un filtre REST sur un numéro unique : Grist le rend en texte ou en nombre
+// selon le type de la colonne, le filtre compare à l'identique.
+function buildLinkFilterValues(value) {
+  const text = toText(value);
+  const values = [text];
+  const number = parseComparableNumber(text);
+  if (number != null) values.push(number);
+  return values;
+}
 
-  const grist = getGrist();
-  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
-    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+// Les widgets voisins qui affichent References2 (même navigateur) se rafraîchissent sur ce
+// signal local : il ne coûte aucune requête.
+function emitReferenceDataChangeSignal() {
+  try {
+    window.localStorage?.setItem(
+      REFERENCE_DATA_CHANGE_STORAGE_KEY,
+      JSON.stringify({ at: Date.now(), source: "ms-project", nonce: Math.random() })
+    );
+  } catch (_error) {
+    // Stockage indisponible dans une iframe restrictive : les voisins se rafraîchiront plus tard.
+  }
+}
+
+// Données d'entrée des lignes données. Le filtre voyage dans l'adresse de la requête : il
+// est posé par lots de lignes pour qu'elle reste courte.
+async function fetchReferenceRowsForPlanningRows(planningRows, columns) {
+  const rows = [];
+  for (let index = 0; index < planningRows.length; index += REFERENCE_READ_CHUNK_SIZE) {
+    const filter = buildReferenceDocumentRestFilter(
+      planningRows.slice(index, index + REFERENCE_READ_CHUNK_SIZE),
+      columns
+    );
+    // Sans nom ni numéro de document, une ligne n'a aucune donnée d'entrée à retrouver.
+    if (!filter) continue;
+    rows.push(...await fetchRowsFilteredOrFull(REFERENCES_TABLE_NAME, filter, {
+      readFullTable: fetchAllReferenceRows,
+    }));
+    // Au repli, la table entière vient d'être lue : inutile de la relire pour le lot suivant.
+    if (_restUnavailable || _restBlindTables.has(REFERENCES_TABLE_NAME)) break;
+  }
+  return rows;
+}
+
+// Écritures References2 des lignes dont le DÉBUT de barre bouge : leur date limite garde
+// son écart en semaines, leur retard est recompté. Même règle que Planning Projet, qui la
+// joue à chacune de ses propres écritures de dates.
+async function planReferenceFollowUp(writtenRows, fieldsByRowId, columns) {
+  const idCol = columns.id || "id";
+  const movedRows = writtenRows.filter((row) => {
+    const before = getPlanningSegmentStartDate(row, columns);
+    const after = getPlanningSegmentStartDate(
+      { ...row, ...fieldsByRowId.get(Number(row?.[idCol])) },
+      columns
+    );
+    return (before?.getTime() ?? null) !== (after?.getTime() ?? null);
+  });
+  if (!movedRows.length) return [];
+
+  let referenceRows = [];
+  try {
+    referenceRows = await fetchReferenceRowsForPlanningRows(movedRows, columns);
+  } catch (error) {
+    // Les dates du planning sont écrites quand même : les données d'entrée seront recalées
+    // à la prochaine modification de la ligne dans Planning Projet.
+    console.warn("Données d'entrée illisibles : leurs dates limites ne suivent pas.", error);
+    return [];
   }
 
-  _msProjectServiceDiagnostics.actionBatchCount += 1;
-  _msProjectServiceDiagnostics.actionCount += actions.length;
-  const actionsStartedAt = performance.now();
-  await grist.docApi.applyUserActions(actions);
-  _msProjectServiceDiagnostics.actionDurationMs += performance.now() - actionsStartedAt;
+  // Planning Projet ne lit que les données d'entrée du service affiché. MS Project n'a pas
+  // de service : il se cale sur celui de la ligne qu'il déplace, pour ne jamais écrire les
+  // données d'entrée d'un autre service. Une ligne ou une référence sans service (anciennes
+  // données) n'est pas restreinte.
+  const rowsByService = new Map();
+  movedRows.forEach((row) => {
+    const serviceKey = toServiceKey(row?.[SERVICE_COLUMN]);
+    if (!rowsByService.has(serviceKey)) rowsByService.set(serviceKey, []);
+    rowsByService.get(serviceKey).push(row);
+  });
+
+  const actions = [];
+  rowsByService.forEach((planningRows, serviceKey) => {
+    const serviceReferences = serviceKey
+      ? referenceRows.filter((reference) => {
+          const referenceService = toServiceKey(reference?.[SERVICE_COLUMN]);
+          return !referenceService || referenceService === serviceKey;
+        })
+      : referenceRows;
+    actions.push(...planReferenceDeadlineActions({
+      planningRows,
+      fieldsByRowId,
+      referenceRows: serviceReferences,
+      columns,
+    }));
+  });
+  return dedupeReferenceActions(actions);
+}
+
+function toServiceKey(value) {
+  return toText(value).normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase("fr");
+}
+
+// Pour des lignes liées à une tâche MS Project (`linkedRows` : { row, msStart, msEnd }),
+// écrit les dates que donne la tâche — la règle est celle du dépôt dans Planning Projet —
+// puis fait suivre leurs données d'entrée. Une ligne dont aucune date ne change n'est pas
+// réécrite : l'écriture coûte au serveur et réveille les autres widgets.
+async function applyPlanningDateSync(planningTable, syncColumns, linkedRows) {
+  const columns = toSharedPlanningColumns(syncColumns);
+  const fieldsByRowId = new Map();
+  const writtenRows = [];
+
+  for (const { row, msStart, msEnd } of linkedRows) {
+    const rowId = Number(row?.[syncColumns.idCol]);
+    if (!Number.isInteger(rowId) || rowId <= 0 || fieldsByRowId.has(rowId)) continue;
+
+    const fields = keepChangedPlanningDateFields(
+      row,
+      buildMsLinkedPlanningDateFields(row, columns, { msStart, msEnd })
+    );
+    if (!Object.keys(fields).length) continue;
+
+    fieldsByRowId.set(rowId, fields);
+    writtenRows.push(row);
+  }
+
+  if (!writtenRows.length) {
+    return { updatedCount: 0, referenceUpdatedCount: 0, referenceFailed: false };
+  }
+
+  const planningActions = [...fieldsByRowId].map(([rowId, fields]) => [
+    "UpdateRecord",
+    planningTable.sourceTable,
+    rowId,
+    fields,
+  ]);
+  // Calculé avant toute écriture : l'écart de chaque donnée d'entrée se mesure sur les
+  // lignes telles qu'elles sont encore.
+  const referenceActions = await planReferenceFollowUp(writtenRows, fieldsByRowId, columns);
+
+  await applyUserActionsInBatches(planningActions);
+
+  // Les données d'entrée partent ensuite, à part, comme dans Planning Projet : un refus sur
+  // References2 (droits, ligne supprimée entre la lecture et l'écriture) ne doit pas
+  // bloquer les dates du planning, que ce widget écrivait déjà seules.
+  let referenceUpdatedCount = 0;
+  let referenceFailed = false;
+  if (referenceActions.length) {
+    try {
+      await applyUserActionsInBatches(referenceActions);
+      referenceUpdatedCount = referenceActions.length;
+      emitReferenceDataChangeSignal();
+    } catch (error) {
+      referenceFailed = true;
+      console.warn("Dates du planning écrites, mais pas celles de leurs données d'entrée.", error);
+    } finally {
+      _referenceFullRead = null;
+    }
+  }
+
+  return {
+    updatedCount: planningActions.length,
+    referenceUpdatedCount,
+    referenceFailed,
+  };
 }
 
 async function syncPlanningDemarragesFromImportedMsProjectRows(
@@ -783,7 +869,14 @@ async function syncPlanningDemarragesFromImportedMsProjectRows(
   const planningTable = APP_CONFIG.grist.planningSyncTable;
 
   if (!planningTable?.enabled) {
-    return { updatedCount: 0, matchedCount: 0, skipped: true, invalidStartCount: 0 };
+    return {
+      updatedCount: 0,
+      matchedCount: 0,
+      skipped: true,
+      invalidStartCount: 0,
+      referenceUpdatedCount: 0,
+      referenceFailed: false,
+    };
   }
   if (!planningTable?.sourceTable) {
     throw new Error("Configuration table Planning_Projet manquante.");
@@ -796,7 +889,14 @@ async function syncPlanningDemarragesFromImportedMsProjectRows(
     throw new Error("Mapping MS Project incomplet pour la synchronisation Planning_Projet.");
   }
 
-  const planningRows = await fetchTableRows(planningTable.sourceTable);
+  // Seules les lignes liées à ce fichier XML sont concernées : inutile de lire la table
+  // entière, tous projets confondus.
+  const xmlName = toText(sourceFileName);
+  const nomXmlColumn = toText(planningTable.columns?.nomXml);
+  const planningRows = await fetchRowsFilteredOrFull(
+    planningTable.sourceTable,
+    nomXmlColumn && xmlName ? { [nomXmlColumn]: [xmlName] } : null
+  );
   const syncColumns = resolvePlanningDemarrageSyncColumns(planningRows, planningTable);
   if (!syncColumns.lineCol || !syncColumns.demarrageCol) {
     throw new Error("Colonnes Planning_Projet introuvables pour la synchronisation.");
@@ -806,8 +906,7 @@ async function syncPlanningDemarragesFromImportedMsProjectRows(
     importedRecords,
     uniqueNumberCol
   );
-  const xmlName = toText(sourceFileName);
-  const actions = [];
+  const linkedRows = [];
   let matchedCount = 0;
   let invalidStartCount = 0;
 
@@ -828,24 +927,21 @@ async function syncPlanningDemarragesFromImportedMsProjectRows(
       continue;
     }
 
-    const action = buildPlanningDemarrageSyncAction(
-      row,
-      startIso,
-      planningTable,
-      syncColumns,
-      toText(msRow?.[endCol])
-    );
-    if (action) {
-      actions.push(action);
-    }
+    linkedRows.push({ row, msStart: startIso, msEnd: toText(msRow?.[endCol]) });
   }
 
-  await applyPlanningSyncActions(actions);
+  const { updatedCount, referenceUpdatedCount, referenceFailed } = await applyPlanningDateSync(
+    planningTable,
+    syncColumns,
+    linkedRows
+  );
   return {
-    updatedCount: actions.length,
+    updatedCount,
     matchedCount,
     skipped: false,
     invalidStartCount,
+    referenceUpdatedCount,
+    referenceFailed,
   };
 }
 
@@ -1016,6 +1112,8 @@ export async function importMsProjectXmlFile(file) {
     planningSyncMatchedCount: planningSyncResult.matchedCount,
     planningSyncSkipped: planningSyncResult.skipped,
     planningSyncInvalidStartCount: planningSyncResult.invalidStartCount,
+    planningSyncReferenceUpdatedCount: planningSyncResult.referenceUpdatedCount,
+    planningSyncReferenceFailed: planningSyncResult.referenceFailed,
     catalogNameAdded,
     sourceFileName,
   };
@@ -1063,16 +1161,25 @@ export async function updateMsProjectDate(rowId, columnName, isoDate) {
   _msProjectServiceDiagnostics.actionDurationMs += performance.now() - actionsStartedAt;
 }
 
+// `msRow` : la tâche telle que le widget l'affiche déjà. Fournie, elle évite de la relire.
 export async function syncPlanningDemarrageFromMsProjectStart(
   rowId,
   isoDate,
-  selectedProject = ""
+  selectedProject = "",
+  { msRow: knownMsRow = null } = {}
 ) {
   const msTable = APP_CONFIG.grist.msProjectTable;
   const planningTable = APP_CONFIG.grist.planningSyncTable;
+  const skippedResult = {
+    updatedCount: 0,
+    matchedCount: 0,
+    skipped: true,
+    referenceUpdatedCount: 0,
+    referenceFailed: false,
+  };
 
   if (!planningTable?.enabled) {
-    return { updatedCount: 0, matchedCount: 0, skipped: true };
+    return skippedResult;
   }
 
   if (!msTable?.sourceTable) {
@@ -1095,13 +1202,20 @@ export async function syncPlanningDemarrageFromMsProjectStart(
   const sourceNameColumn = msTable.columns?.sourceName || "Nom";
   const msIdCol = msTable.columns?.id || "id";
   const msUniqueCol = msTable.columns?.uniqueNumber;
-  const normalizedProject = toText(selectedProject);
-  if (!normalizedProject) {
-    return { updatedCount: 0, matchedCount: 0, skipped: true };
+  const msEndCol = msTable.columns?.end;
+
+  let msRow = knownMsRow && Number(knownMsRow?.[msIdCol]) === recordId ? knownMsRow : null;
+  let msRows = msRow ? [msRow] : [];
+  if (!msRow) {
+    const normalizedProject = toText(selectedProject);
+    if (!normalizedProject) {
+      return skippedResult;
+    }
+    msRows = await fetchRowsRestFirst(msTable.sourceTable, {
+      [sourceNameColumn]: [normalizedProject],
+    });
+    msRow = msRows.find((row) => Number(row?.[msIdCol]) === recordId) || null;
   }
-  const msRows = await fetchRowsRestFirst(msTable.sourceTable, {
-    [sourceNameColumn]: [normalizedProject],
-  });
   const msSourceNameCol = resolveColumn(
     msRows,
     msTable.columns?.sourceName || "Nom",
@@ -1112,164 +1226,50 @@ export async function syncPlanningDemarrageFromMsProjectStart(
     throw new Error("Colonne Numero_Unique non configuree dans MsProject.");
   }
 
-  const msRow = msRows.find((row) => Number(row?.[msIdCol]) === recordId);
   if (!msRow) {
-    return { updatedCount: 0, matchedCount: 0, skipped: true };
+    return skippedResult;
   }
 
   const msUniqueValue = msRow[msUniqueCol];
   const msXmlName = msSourceNameCol ? toText(msRow[msSourceNameCol]) : "";
   if (msUniqueValue == null || msUniqueValue === "") {
-    return { updatedCount: 0, matchedCount: 0, skipped: true };
+    return skippedResult;
   }
 
-  const planningRows = await fetchTableRows(planningTable.sourceTable);
-  const planningIdCol = planningTable.columns?.id || "id";
-  const planningLineCol = resolveColumn(
-    planningRows,
-    planningTable.columns?.linePlanning,
-    planningTable.linePlanningCandidates || []
+  // Seules les lignes liées à cette tâche sont concernées : inutile de lire la table
+  // entière, tous projets confondus.
+  const lineColumn = toText(planningTable.columns?.linePlanning);
+  const planningRows = await fetchRowsFilteredOrFull(
+    planningTable.sourceTable,
+    lineColumn ? { [lineColumn]: buildLinkFilterValues(msUniqueValue) } : null
   );
-  const planningNomXmlCol = resolveColumn(
-    planningRows,
-    planningTable.columns?.nomXml,
-    planningTable.nomXmlCandidates || []
-  );
-  const planningDemarrageCol = resolveColumn(
-    planningRows,
-    planningTable.columns?.demarragesTravaux,
-    planningTable.demarrageCandidates || []
-  );
-  const planningTypeDocCol = resolveColumn(
-    planningRows,
-    planningTable.columns?.typeDoc || "Type_doc",
-    ["Type_doc", "TypeDoc"]
-  );
-  const planningDateLimiteCol = resolveColumn(
-    planningRows,
-    planningTable.columns?.dateLimite || "Date_limite",
-    ["Date_limite", "DateLimite"]
-  );
-  const planningDuree1Col = resolveColumn(
-    planningRows,
-    planningTable.columns?.duree1 || "Duree_1",
-    ["Duree_1", "Duree1"]
-  );
-  const planningDiffCoffrageCol = resolveColumn(
-    planningRows,
-    planningTable.columns?.diffCoffrage || "Diff_coffrage",
-    ["Diff_coffrage", "DiffCoffrage"]
-  );
-  const planningDuree2Col = resolveColumn(
-    planningRows,
-    planningTable.columns?.duree2 || "Duree_2",
-    ["Duree_2", "Duree2"]
-  );
-  const planningDiffArmatureCol = resolveColumn(
-    planningRows,
-    planningTable.columns?.diffArmature || "Diff_armature",
-    ["Diff_armature", "DiffArmature"]
-  );
-  const planningDuree3Col = resolveColumn(
-    planningRows,
-    planningTable.columns?.duree3 || "Duree_3",
-    ["Duree_3", "Duree3"]
-  );
-
-  if (!planningLineCol || !planningDemarrageCol) {
+  const syncColumns = resolvePlanningDemarrageSyncColumns(planningRows, planningTable);
+  if (!syncColumns.lineCol || !syncColumns.demarrageCol) {
     throw new Error("Colonnes Planning_Projet introuvables pour la synchronisation.");
   }
 
   const matchingRows = planningRows.filter((row) => {
-    if (!equalsByTextOrNumber(row[planningLineCol], msUniqueValue)) return false;
-    if (!planningNomXmlCol || !msXmlName) return true;
-    return toText(row[planningNomXmlCol]) === msXmlName;
+    if (!equalsByTextOrNumber(row[syncColumns.lineCol], msUniqueValue)) return false;
+    if (!syncColumns.nomXmlCol || !msXmlName) return true;
+    return toText(row[syncColumns.nomXmlCol]) === msXmlName;
   });
 
   if (!matchingRows.length) {
-    return { updatedCount: 0, matchedCount: 0, skipped: false };
+    return { ...skippedResult, skipped: false };
   }
 
-  const demarrageDate = parseCalendarDate(normalizedIsoDate);
-  const actions = matchingRows
-    .map((row) => {
-      const planningRowId = Number(row?.[planningIdCol]);
-      if (!Number.isInteger(planningRowId) || planningRowId <= 0) return null;
-
-      const updates = {
-        [planningDemarrageCol]: normalizedIsoDate,
-      };
-
-      const typeDoc = toText(row?.[planningTypeDocCol]);
-      if (isCoffrageTypeDoc(typeDoc)) {
-        const duree1 = toInteger(row?.[planningDuree1Col]);
-        const duree3 = toInteger(row?.[planningDuree3Col]);
-        const diffCoffrageDate =
-          demarrageDate && duree3 != null && duree3 >= 0
-            ? subtractWeeksFromDate(demarrageDate, duree3)
-            : parseCalendarDate(row?.[planningDiffCoffrageCol]);
-        const dateLimiteDate =
-          diffCoffrageDate && duree1 != null && duree1 >= 0
-            ? subtractWeeksFromDate(diffCoffrageDate, duree1)
-            : parseCalendarDate(row?.[planningDateLimiteCol]);
-
-        const diffCoffrageIso = formatIsoDate(diffCoffrageDate);
-        const dateLimiteIso = formatIsoDate(dateLimiteDate);
-        if (planningDiffCoffrageCol && diffCoffrageIso) {
-          updates[planningDiffCoffrageCol] = diffCoffrageIso;
-        }
-        if (planningDateLimiteCol && dateLimiteIso) {
-          updates[planningDateLimiteCol] = dateLimiteIso;
-        }
-      } else if (isArmaturesTypeDoc(typeDoc)) {
-        const duree2 = toInteger(row?.[planningDuree2Col]);
-        const duree3 = toInteger(row?.[planningDuree3Col]);
-        const diffArmatureDate =
-          demarrageDate && duree3 != null && duree3 >= 0
-            ? subtractWeeksFromDate(demarrageDate, duree3)
-            : parseCalendarDate(row?.[planningDiffArmatureCol]);
-        const diffCoffrageDate =
-          diffArmatureDate && duree2 != null && duree2 >= 0
-            ? subtractWeeksFromDate(diffArmatureDate, duree2)
-            : parseCalendarDate(row?.[planningDiffCoffrageCol]);
-
-        const diffArmatureIso = formatIsoDate(diffArmatureDate);
-        const diffCoffrageIso = formatIsoDate(diffCoffrageDate);
-        if (planningDiffArmatureCol && diffArmatureIso) {
-          updates[planningDiffArmatureCol] = diffArmatureIso;
-        }
-        if (planningDiffCoffrageCol && diffCoffrageIso) {
-          updates[planningDiffCoffrageCol] = diffCoffrageIso;
-        }
-      }
-
-      return [
-        "UpdateRecord",
-        planningTable.sourceTable,
-        planningRowId,
-        updates,
-      ];
-    })
-    .filter(Boolean);
-
-  if (!actions.length) {
-    return { updatedCount: 0, matchedCount: matchingRows.length, skipped: false };
-  }
-
-  const grist = getGrist();
-  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
-    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
-  }
-
-  _msProjectServiceDiagnostics.actionBatchCount += 1;
-  _msProjectServiceDiagnostics.actionCount += actions.length;
-  const actionsStartedAt = performance.now();
-  await grist.docApi.applyUserActions(actions);
-  _msProjectServiceDiagnostics.actionDurationMs += performance.now() - actionsStartedAt;
+  const msEndIso = msEndCol ? toText(msRow[msEndCol]) : "";
+  const { updatedCount, referenceUpdatedCount, referenceFailed } = await applyPlanningDateSync(
+    planningTable,
+    syncColumns,
+    matchingRows.map((row) => ({ row, msStart: normalizedIsoDate, msEnd: msEndIso }))
+  );
   return {
-    updatedCount: actions.length,
+    updatedCount,
     matchedCount: matchingRows.length,
     skipped: false,
+    referenceUpdatedCount,
+    referenceFailed,
   };
 }
 

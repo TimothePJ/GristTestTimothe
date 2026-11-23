@@ -122,7 +122,7 @@ afterEach(() => {
   delete globalThis.ResizeObserver;
 });
 
-function setup({ width = 400, hasPlanningWindow = true } = {}) {
+function setup({ width = 400, hasPlanningWindow = true, period = WINDOW } = {}) {
   const frames = [];
   globalThis.Element = FakeElement;
   globalThis.document = { createElementNS: (_namespace, tag) => new FakeElement(tag) };
@@ -146,7 +146,12 @@ function setup({ width = 400, hasPlanningWindow = true } = {}) {
 
   const calls = [];
   const listeners = [];
-  let current = WINDOW;
+  let current = period;
+  // Période déplacée par le planning lui-même (boutons du bandeau) : il prévient ses abonnés.
+  const movePlanningWindow = (next) => {
+    current = next;
+    listeners.forEach((listener) => listener());
+  };
   const gantt = createSyntheseGantt({ headHost: headRight, layerHost: layer, interactionHost: scroller }, {
     getWindow: () => (hasPlanningWindow ? current : null),
     setWindow: (start, end) => {
@@ -159,11 +164,20 @@ function setup({ width = 400, hasPlanningWindow = true } = {}) {
     },
     now: () => new Date(2026, 8, 16, 12),
   });
-  return { gantt, frames, calls, listeners, scroller, headRight, rowLeft, rowRight, layer };
+  return {
+    gantt, frames, calls, listeners, scroller, headRight, rowLeft, rowRight, layer,
+    movePlanningWindow,
+    currentWindow: () => current,
+  };
 }
 
 const scaleSvg = (context) => context.headRight.children[0];
 const layerSvg = (context) => context.layer.children[0];
+// La couche : le fond (jours non travaillés, aujourd'hui), puis le contenu (flèches et barres).
+const backdropGroup = (context) => layerSvg(context).children[0];
+const contentGroup = (context) => layerSvg(context).children[1];
+const layerNodes = (context) => layerSvg(context).children.flatMap((group) => group.children);
+const shiftOf = (group) => Number(/^translate\((-?[\d.]+) 0\)$/.exec(group.getAttribute("transform"))[1]);
 
 test("molette seule sur les lignes : défilement normal du tableau, pas de zoom", () => {
   const { calls, rowRight } = setup();
@@ -246,14 +260,14 @@ test("un seul dessin par image ; panneau masqué : rien n'est dessiné", () => {
   assert.equal(frames.length, 1);
   frames.shift()();
   assert.equal(layer.style.height, "26px");
-  assert.equal(layerSvg(context).children.length, 0);
+  assert.equal(layerNodes(context).length, 0);
   assert.equal(scaleSvg(context).children.length, 0);
 
   layer.clientWidth = 400;
   gantt.resize();
   assert.equal(frames.length, 1);
   frames.shift()();
-  const classes = layerSvg(context).children.map((node) => node.getAttribute("class"));
+  const classes = layerNodes(context).map((node) => node.getAttribute("class"));
   assert.ok(classes.includes("stg-off"));
   assert.ok(classes.includes("stg-today"));
   assert.ok(classes.includes("stg-zone"));
@@ -350,9 +364,363 @@ test("étages et flèches dessinés : crochet, trait et pointe, sous les barres"
   const second = { ...first, key: "task:2", taskId: 2, name: "Visa", start: day(2026, 9, 16), end: day(2026, 9, 17), durationDays: 2 };
   context.gantt.render([ZONE, floorLine, first, second]);
   context.frames.shift()();
-  const classes = layerSvg(context).children.map((node) => node.getAttribute("class"));
+  const classes = layerNodes(context).map((node) => node.getAttribute("class"));
   assert.ok(classes.includes("stg-floor"));
   assert.ok(classes.includes("stg-link"));
   assert.ok(classes.includes("stg-link-head"));
   assert.ok(classes.indexOf("stg-link") < classes.indexOf("stg-task"), "flèches sous les barres");
+  assert.ok(classes.indexOf("stg-off") < classes.indexOf("stg-link"), "jours non travaillés sous les flèches");
+});
+
+/* ---------- Glisser sans tout redessiner ----------
+   Déplacer la période sans changer le zoom ne change la place d'aucune forme par rapport aux
+   autres : les flèches et les barres déjà dessinées sont décalées d'un bloc, sans être
+   reconstruites. Seuls l'échelle et le fond (jours non travaillés, aujourd'hui), qui dépendent
+   de la période visible, sont redessinés. */
+
+const FLOOR = { ...ZONE, key: "floor:a/f", kind: "floor", level: 1, floorKey: "f", floorName: "PH RDB", name: "PH RDB" };
+const PLANS = {
+  ...ZONE,
+  key: "task:1",
+  kind: "task",
+  level: 2,
+  floorKey: "f",
+  taskId: 1,
+  name: "Plans",
+  start: day(2026, 9, 15),
+  end: day(2026, 9, 15),
+  durationDays: 1,
+};
+const VISA = {
+  ...PLANS,
+  key: "task:2",
+  taskId: 2,
+  name: "Visa",
+  start: day(2026, 9, 16),
+  end: day(2026, 9, 17),
+  durationDays: 2,
+  link: { predId: 1, type: "FD" },
+  endLimit: day(2026, 9, 18),
+};
+const START = {
+  ...PLANS,
+  key: "task:3",
+  taskId: 3,
+  name: "Démarrage",
+  start: day(2026, 9, 18),
+  end: day(2026, 9, 18),
+  durationDays: 0,
+  isMilestone: true,
+  link: { predId: 2, type: "FD" },
+};
+// Document Structure de la vue Global : ses barres, dont une en retard (peinte en deux parts).
+const PLAN = {
+  key: "doc:3021",
+  kind: "document",
+  level: 2,
+  name: "3021",
+  segments: [
+    { kind: "phase", classes: "phase-coffrage", label: "Coffrage", paint: null, start: day(2026, 9, 14), end: day(2026, 9, 16) },
+    {
+      kind: "phase",
+      classes: "phase-armature",
+      label: "Armature",
+      paint: { realise: 40, done: "#00aa00", late: "#aa0000", border: "#000000", text: "#ffffff" },
+      start: day(2026, 9, 16),
+      end: day(2026, 9, 19),
+    },
+    { kind: "reference", classes: "phase-reference-reception", label: "DE", paint: null, start: day(2026, 9, 12), end: day(2026, 9, 13) },
+  ],
+};
+const LINES = [ZONE, FLOOR, PLANS, VISA, START, PLAN];
+
+function drawLines(context, lines = LINES) {
+  context.gantt.render(lines);
+  context.frames.shift()();
+}
+
+// Glisser de `deltaPx` pixels, puis l'image suivante.
+function dragBy(context, deltaPx, pointerId = 21) {
+  dispatch(context.rowRight, "pointerdown", { button: 0, buttons: 1, pointerId, clientX: 300 });
+  dispatch(context.scroller, "pointermove", { pointerId, buttons: 1, clientX: 300 + deltaPx });
+  dispatch(context.scroller, "pointerup", { pointerId, buttons: 0, clientX: 300 + deltaPx });
+  context.frames.shift()();
+}
+
+const X_ATTRIBUTES = new Set(["x", "x1", "x2"]);
+
+// Ce que montre une forme : ses nombres (abscisses décalées de `shift`, le décalage de son
+// groupe), son texte et ses autres attributs. Les enfants d'un <svg> imbriqué sont placés par
+// rapport à lui ; ceux d'un <g>, par rapport à la couche.
+function shown(node, shift = 0) {
+  const numbers = [];
+  const others = [];
+  node.attributes.forEach((value, name) => {
+    if (name === "transform") return;
+    if (name === "points") {
+      value.split(" ").forEach((pair) => {
+        const [x, y] = pair.split(",").map(Number);
+        numbers.push(x + shift, y);
+      });
+    } else if (value !== "" && Number.isFinite(Number(value))) {
+      numbers.push(Number(value) + (X_ATTRIBUTES.has(name) ? shift : 0));
+    } else {
+      others.push(`${name}=${value}`);
+    }
+  });
+  return {
+    tag: node.tagName,
+    text: node.textContent,
+    others,
+    numbers,
+    children: node.children.map((child) => shown(child, node.tagName === "svg" ? 0 : shift)),
+  };
+}
+
+// Dessin complet : l'échelle et le fond tels quels, le contenu à sa place réelle.
+function drawingOf(context) {
+  const content = contentGroup(context);
+  const shift = shiftOf(content);
+  return {
+    scale: scaleSvg(context).children.map((node) => shown(node)),
+    backdrop: backdropGroup(context).children.map((node) => shown(node)),
+    content: content.children.map((node) => shown(node, shift)),
+  };
+}
+
+// Deux arrondis au dixième de pixel (la forme, le décalage) séparent au plus les deux dessins.
+const SAME_PLACE_PX = 0.2;
+
+function assertSameShapes(actual, expected, tolerance, label) {
+  assert.equal(actual.length, expected.length, `${label} : nombre de formes`);
+  actual.forEach((shape, index) => {
+    const other = expected[index];
+    const where = `${label} › ${shape.tag} n° ${index}`;
+    assert.deepEqual(
+      { tag: shape.tag, text: shape.text, others: shape.others },
+      { tag: other.tag, text: other.text, others: other.others },
+      where,
+    );
+    assert.equal(shape.numbers.length, other.numbers.length, `${where} : nombres`);
+    shape.numbers.forEach((value, rank) => {
+      assert.ok(
+        Math.abs(value - other.numbers[rank]) <= tolerance,
+        `${where} : ${value} au lieu de ${other.numbers[rank]}`,
+      );
+    });
+    assertSameShapes(shape.children, other.children, tolerance, where);
+  });
+}
+
+function assertSameDrawing(actual, expected, label = "dessin") {
+  assert.ok(expected.scale.length > 0 && expected.backdrop.length > 0 && expected.content.length > 0, `${label} : dessin vide`);
+  assertSameShapes(actual.scale, expected.scale, 0, `${label}, échelle`);
+  assertSameShapes(actual.backdrop, expected.backdrop, 0, `${label}, fond`);
+  assertSameShapes(actual.content, expected.content, SAME_PLACE_PX, `${label}, contenu`);
+}
+
+// Le dessin d'un Gantt neuf pour ces lignes, cette période et cette largeur.
+function freshDrawing({ period, width = 400, lines = LINES }) {
+  const fresh = setup({ period, width });
+  drawLines(fresh, lines);
+  return drawingOf(fresh);
+}
+
+function randomOf(seed) {
+  let state = seed;
+  return () => {
+    state = (state * 1664525 + 1013904223) % 4294967296;
+    return state / 4294967296;
+  };
+}
+
+test("glisser : les barres ne sont pas reconstruites, leur groupe est décalé", () => {
+  const context = setup();
+  drawLines(context);
+  const drawn = [...contentGroup(context).children];
+  assert.ok(drawn.length > 10, "flèches et barres dessinées");
+  assert.equal(shiftOf(contentGroup(context)), 0);
+
+  dragBy(context, -100);
+  const kept = contentGroup(context).children;
+  assert.equal(kept.length, drawn.length);
+  assert.ok(kept.every((node, index) => node === drawn[index]), "aucune forme reconstruite");
+  assert.equal(shiftOf(contentGroup(context)), -100);
+
+  // Un second glisser repart de la période atteinte ; le décalage se mesure depuis le dessin.
+  dragBy(context, 30, 22);
+  assert.ok(contentGroup(context).children.every((node, index) => node === drawn[index]));
+  assert.equal(shiftOf(contentGroup(context)), -70);
+});
+
+// Réécrire la taille d'un <svg>, même avec la même valeur, fait refaire au navigateur la mise en
+// page de tout son contenu (mesuré : 38 ms pour 4 000 formes, contre 0,3 ms pour le décalage).
+test("la taille de la couche et de l'échelle n'est réécrite que quand elle change", () => {
+  const context = setup();
+  drawLines(context);
+  const written = [];
+  [["couche", layerSvg(context)], ["échelle", scaleSvg(context)]].forEach(([label, svg]) => {
+    const write = svg.setAttribute.bind(svg);
+    svg.setAttribute = (name, value) => {
+      written.push(`${label} ${name}`);
+      write(name, value);
+    };
+  });
+  dragBy(context, -100);
+  assert.deepEqual(written, []);
+
+  context.layer.clientWidth = 520;
+  context.gantt.resize();
+  context.frames.shift()();
+  assert.deepEqual(written, ["échelle width", "couche width"]);
+  assert.equal(layerSvg(context).getAttribute("width"), "520");
+  assert.equal(scaleSvg(context).getAttribute("width"), "520");
+
+  drawLines(context, [...LINES, { ...PLANS, key: "task:9", taskId: 9, link: null }]);
+  assert.deepEqual(written.slice(2), ["couche height"]);
+  assert.equal(layerSvg(context).getAttribute("height"), String(7 * 26));
+});
+
+test("glisser : l'échelle et le fond suivent la période, comme sur un Gantt neuf", () => {
+  const context = setup();
+  drawLines(context);
+  const todayBefore = backdropGroup(context).children.find((node) => node.getAttribute("class") === "stg-today");
+  dragBy(context, -100);
+  const todayAfter = backdropGroup(context).children.find((node) => node.getAttribute("class") === "stg-today");
+  const todayMove = Number(todayAfter.getAttribute("x1")) - Number(todayBefore.getAttribute("x1"));
+  assert.ok(Math.abs(todayMove + 100) < 0.01, `trait d'aujourd'hui déplacé de ${todayMove} px`);
+  assertSameDrawing(drawingOf(context), freshDrawing({ period: context.currentWindow() }));
+});
+
+test("glissers au hasard : le dessin reste celui d'un Gantt neuf sur la période atteinte", () => {
+  for (const seed of [3, 17, 41]) {
+    const random = randomOf(seed);
+    const context = setup();
+    drawLines(context);
+    const drawn = [...contentGroup(context).children];
+    assert.ok(drawn.length > 10);
+    for (let pointerId = 30; pointerId < 36; pointerId += 1) {
+      let x = 50 + Math.floor(random() * 300);
+      dispatch(context.rowRight, "pointerdown", { button: 0, buttons: 1, pointerId, clientX: x });
+      for (let move = 0; move < 5; move += 1) {
+        x += Math.floor(random() * 241) - 120;
+        dispatch(context.scroller, "pointermove", { pointerId, buttons: 1, clientX: x });
+        // Plusieurs mouvements peuvent arriver entre deux images.
+        if (random() < 0.7) context.frames.shift()?.();
+      }
+      dispatch(context.scroller, "pointerup", { pointerId, buttons: 0, clientX: x });
+      context.frames.shift()?.();
+    }
+    assert.equal(context.frames.length, 0);
+    assert.ok(contentGroup(context).children.every((node, index) => node === drawn[index]), `graine ${seed} : rien de reconstruit`);
+    assert.notDeepEqual(context.currentWindow(), WINDOW);
+    assertSameDrawing(drawingOf(context), freshDrawing({ period: context.currentWindow() }), `graine ${seed}`);
+  }
+});
+
+test("période déplacée par le planning, même zoom : décalage sans reconstruire", () => {
+  const context = setup();
+  drawLines(context);
+  const drawn = [...contentGroup(context).children];
+  // Semaine suivante ; le planning arrondit à la milliseconde, la durée peut en changer d'une.
+  const next = { start: day(2026, 9, 21), end: new Date(day(2026, 9, 28).getTime() + 1) };
+  context.movePlanningWindow(next);
+  context.frames.shift()();
+  assert.ok(contentGroup(context).children.every((node, index) => node === drawn[index]));
+  assert.equal(shiftOf(contentGroup(context)), -400);
+  assertSameDrawing(drawingOf(context), freshDrawing({ period: next }));
+});
+
+test("durée de la période à peine changée (une heure sur une semaine) : redessiné, pas décalé", () => {
+  const context = setup();
+  drawLines(context);
+  const drawn = [...contentGroup(context).children];
+  // Décalées, les formes de droite seraient à plus d'un pixel de leur place.
+  const next = { start: day(2026, 9, 21), end: new Date(day(2026, 9, 28).getTime() + 3600000) };
+  context.movePlanningWindow(next);
+  context.frames.shift()();
+  assert.ok(contentGroup(context).children.every((node) => !drawn.includes(node)), "tout est reconstruit");
+  assert.equal(shiftOf(contentGroup(context)), 0);
+  assertSameDrawing(drawingOf(context), freshDrawing({ period: next }));
+});
+
+test("zoom : les barres sont redessinées à la nouvelle échelle", () => {
+  const context = setup();
+  drawLines(context);
+  dragBy(context, -100);
+  const drawn = [...contentGroup(context).children];
+  dispatch(context.rowRight, "wheel", { deltaY: -100, deltaMode: 0, ctrlKey: true, clientX: 100 });
+  context.frames.shift()();
+  assert.ok(contentGroup(context).children.every((node) => !drawn.includes(node)), "tout est reconstruit");
+  assert.equal(shiftOf(contentGroup(context)), 0);
+  assertSameDrawing(drawingOf(context), freshDrawing({ period: context.currentWindow() }));
+});
+
+test("glisser après un zoom : décalage mesuré depuis le dessin refait, sans reconstruire", () => {
+  const context = setup();
+  drawLines(context);
+  dragBy(context, -100);
+  dispatch(context.rowRight, "wheel", { deltaY: -100, deltaMode: 0, ctrlKey: true, clientX: 100 });
+  context.frames.shift()();
+  const drawn = [...contentGroup(context).children];
+
+  dragBy(context, -60, 22);
+  assert.ok(contentGroup(context).children.every((node, index) => node === drawn[index]), "aucune forme reconstruite");
+  assert.equal(shiftOf(contentGroup(context)), -60);
+  assertSameDrawing(drawingOf(context), freshDrawing({ period: context.currentWindow() }));
+});
+
+test("nouvelles lignes : redessinées, même après un glisser", () => {
+  const context = setup();
+  drawLines(context);
+  dragBy(context, -100);
+  const drawn = [...contentGroup(context).children];
+  const lines = [ZONE, FLOOR, { ...PLANS, end: day(2026, 9, 16), durationDays: 2 }, VISA, START];
+  drawLines(context, lines);
+  assert.ok(contentGroup(context).children.every((node) => !drawn.includes(node)));
+  assert.equal(shiftOf(contentGroup(context)), 0);
+  assertSameDrawing(drawingOf(context), freshDrawing({ period: context.currentWindow(), lines }));
+});
+
+test("largeur du panneau changée : redessinées à la nouvelle largeur", () => {
+  const context = setup();
+  drawLines(context);
+  dragBy(context, -100);
+  const drawn = [...contentGroup(context).children];
+  context.layer.clientWidth = 520;
+  context.gantt.resize();
+  context.frames.shift()();
+  assert.ok(contentGroup(context).children.every((node) => !drawn.includes(node)));
+  assert.equal(shiftOf(contentGroup(context)), 0);
+  assertSameDrawing(drawingOf(context), freshDrawing({ period: context.currentWindow(), width: 520 }));
+});
+
+test("panneau masqué puis réaffiché sur une autre période : tout est redessiné", () => {
+  const context = setup();
+  drawLines(context);
+  context.layer.clientWidth = 0;
+  context.gantt.resize();
+  context.frames.shift()();
+  assert.equal(layerNodes(context).length, 0);
+  const next = { start: day(2026, 9, 21), end: day(2026, 9, 28) };
+  context.movePlanningWindow(next);
+  context.frames.shift()();
+  assert.equal(layerNodes(context).length, 0);
+  context.layer.clientWidth = 400;
+  context.gantt.resize();
+  context.frames.shift()();
+  assertSameDrawing(drawingOf(context), freshDrawing({ period: next }));
+});
+
+test("glisser très loin : le dessin est refait autour de la période atteinte", () => {
+  const context = setup();
+  drawLines(context);
+  dragBy(context, -99000);
+  const drawn = [...contentGroup(context).children];
+  assert.equal(shiftOf(contentGroup(context)), -99000);
+  // Au-delà de 100 000 px de décalage, les grandes abscisses perdraient en précision.
+  dragBy(context, -2000, 22);
+  assert.ok(contentGroup(context).children.every((node) => !drawn.includes(node)), "dessin refait");
+  assert.equal(shiftOf(contentGroup(context)), 0);
+  assertSameDrawing(drawingOf(context), freshDrawing({ period: context.currentWindow() }));
 });

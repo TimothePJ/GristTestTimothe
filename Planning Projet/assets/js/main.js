@@ -13,6 +13,7 @@ import {
   updatePlanningRetardJustification,
   fetchPlanningReferenceDetails,
   updatePlanningReferenceDetails,
+  planPlanningMsProjectDrop,
   updatePlanningFromMsProjectDrop,
   updatePlanningGroupZoneFromPlanningDrop,
   updatePlanningZoneFromZoneHeaderDrop,
@@ -31,6 +32,7 @@ import {
   resolvePlanningClosureIndiceDate,
 } from "./services/planningService.js";
 import { createRealisationTargetCache } from "./services/realisationTargetCache.js";
+import { createOptimisticRows } from "./services/optimisticRows.js";
 import {
   runExclusivePlanningWrite,
   synchronizePlanningDerivedData,
@@ -1162,6 +1164,30 @@ function applyOptimisticPlanningRowUpdate(rowId, fieldUpdates) {
   renderPlanningFromCache();
 }
 
+// Affichage immédiat d'une écriture en cours, avec retour arrière si elle échoue.
+const optimisticPlanningRows = createOptimisticRows({
+  getRows: () => cachedPlanningRows,
+  setRows: (rows) => {
+    cachedPlanningRows = rows;
+  },
+  render: renderPlanningFromCache,
+  idCol: APP_CONFIG.grist.planningTable?.columns?.id || "id",
+  pendingRender: () => refreshQueuePromise,
+});
+
+// Le dépôt d'une tâche MS Project se voit tout de suite : le lien et les dates sont
+// calculés sur les lignes affichées, par la fonction même que l'écriture utilise. Rend le
+// retour arrière.
+function showMsProjectDropOptimistically(drop) {
+  try {
+    const { fieldsByRowId } = planPlanningMsProjectDrop(cachedPlanningRows, drop);
+    return optimisticPlanningRows.show(fieldsByRowId);
+  } catch (_error) {
+    // Ligne absente des lignes affichées : rien à anticiper, l'écriture relit la table.
+    return () => {};
+  }
+}
+
 async function handleDurationCellEdit({
   rowId,
   durationWeeks,
@@ -1381,16 +1407,21 @@ async function handleMsProjectRowDrop({
       ? `${droppedStartIso} -> ${droppedEndIso}`
       : (droppedEndIso || droppedStartIso || "");
 
+  const drop = {
+    rowId: targetRowId,
+    uniqueNumber: normalizedUniqueNumber,
+    xmlName: droppedXmlName,
+    msStartIso: droppedStartIso,
+    msEndIso: droppedEndIso,
+  };
+  let undoOptimisticDrop = () => {};
+
   try {
     const dateSuffix = droppedDateLabel ? ` | Date: ${droppedDateLabel}` : "";
     setPlanningStatus(`Mise a jour ligne planning${taskSuffix}${dateSuffix}...`);
-    await updatePlanningFromMsProjectDrop({
-      rowId: targetRowId,
-      uniqueNumber: normalizedUniqueNumber,
-      xmlName: droppedXmlName,
-      msStartIso: droppedStartIso,
-      msEndIso: droppedEndIso,
-    });
+    // Le planning montre le dépôt tout de suite ; l'écriture puis la relecture le confirment.
+    undoOptimisticDrop = showMsProjectDropOptimistically(drop);
+    await updatePlanningFromMsProjectDrop(drop);
     await refreshPlanning({
       sync: true,
       forceLoad: true,
@@ -1402,6 +1433,7 @@ async function handleMsProjectRowDrop({
       `Drop applique: Ligne_planning=${normalizedUniqueNumber}${taskSuffix}${appliedDateSuffix}`
     );
   } catch (error) {
+    undoOptimisticDrop();
     setPlanningStatus(`Erreur drop MS Project : ${error.message}`);
     throw error;
   }

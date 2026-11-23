@@ -3,12 +3,34 @@ import {
   formatPlanningCalendarDateIso,
   normalizePlanningDocumentType,
 } from "../../../../gestion-depenses2/assets/js/utils/planningRealisation.js";
+import {
+  buildMsLinkedPlanningDateFields,
+} from "../../../../gestion-depenses2/assets/js/utils/msProjectPlanningDates.js";
+// Données d'entrée d'une ligne (References2) : règle partagée avec le widget MS Project.
+import {
+  buildLinkedReferenceLookup,
+  buildPlanningReferenceChange,
+  buildReferenceDateLimiteSyncActions,
+  buildReferenceDocumentRestFilter,
+  buildReferenceOffsetSnapshots,
+  buildReferenceTableContext,
+  computeReferenceRetardDays,
+  dedupeReferenceActions,
+  filterReferenceRowsForPlanningRows,
+  findLinkedReferenceRowsFromLookup,
+  formatReferenceDateIso,
+  getPlanningSegmentStartDate,
+  getReferenceDurationWeeksFromLimitDate,
+  isEmptyReferenceDate,
+  parseReferenceDurationLimit,
+  referenceRetardStoredValueMatches,
+  toReferenceRetardStorageValue,
+} from "../../../../gestion-depenses2/assets/js/utils/planningReferenceDeadlines.js";
 import { isSyntheseTypeDoc } from "./syntheseTasks.js";
 
 const REFERENCES_TABLE_NAME = "References2";
 const REFERENCE_EMPTY_DATE_ISO = "1900-01-01";
 const REFERENCE_DATA_CHANGE_STORAGE_KEY = "grist.references-data-change";
-const DAY_MS = 86400000;
 const LISTEPLAN_TABLE_CANDIDATES = [
   "ListePlan_NDC_COF",
   "ListePlan NDC+COF",
@@ -157,29 +179,6 @@ function fetchBloquantReferenceRows() {
   });
 }
 
-// Les références d'une ligne de planning se reconnaissent à leur document. Le
-// filtre porte donc sur le couple (nom, numéro) des lignes visées : avec plusieurs
-// lignes il laisse passer quelques croisements en trop, que la jointure client
-// écarte ensuite — mais il divise la lecture par l'ordre de grandeur du document.
-function buildReferenceDocumentRestFilter(planningRows = [], columns = {}) {
-  const nameCol = columns.taches || "Taches";
-  const altNameCol = columns.tacheAlt || "Tache";
-  const numberCol = columns.id2 || "ID2";
-  const names = new Set();
-  const numbers = new Set();
-
-  (Array.isArray(planningRows) ? planningRows : []).forEach((row) => {
-    const name = toText(row?.[nameCol]) || toText(row?.[altNameCol]);
-    const number = toText(row?.[numberCol]);
-    if (!name || !number) return;
-    names.add(name);
-    numbers.add(number);
-  });
-
-  if (!names.size || !numbers.size) return null;
-  return { NomDocument: [...names], NumeroDocument: [...numbers] };
-}
-
 // Sans document exploitable on ne peut rien restreindre : mieux vaut lire la table
 // du contexte que de renvoyer une liste vide et faire croire à l'absence de lien.
 function fetchReferenceRowsForPlanningRows(planningRows = [], columns = {}) {
@@ -204,15 +203,6 @@ function subtractWeeksFromDate(date, weeks) {
   if (w == null || w < 0) return null;
   const d = new Date(date);
   d.setDate(d.getDate() - (w * 7));
-  return d;
-}
-
-function addWeeksToDate(date, weeks) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
-  const w = toInteger(weeks);
-  if (w == null || w < 0) return null;
-  const d = new Date(date);
-  d.setDate(d.getDate() + (w * 7));
   return d;
 }
 
@@ -760,80 +750,6 @@ function buildZoneSyncActionsForTable(context, zoneChanges = []) {
   return actions;
 }
 
-function getPlanningSegmentStartDate(row, columns = {}) {
-  const typeDoc = row?.[columns.typeDoc || "Type_doc"];
-  if (isArmaturesTypeDoc(typeDoc)) {
-    return parseCalendarDate(row?.[columns.diffCoffrage || "Diff_coffrage"]);
-  }
-
-  return (
-    parseCalendarDate(row?.[columns.dateLimite || "Date_limite"]) ||
-    parseCalendarDate(row?.[columns.diffCoffrage || "Diff_coffrage"]) ||
-    parseCalendarDate(row?.[columns.demarragesTravaux || "Demarrages_travaux"])
-  );
-}
-
-function isEmptyReferenceDate(date) {
-  return (
-    !(date instanceof Date) ||
-    Number.isNaN(date.getTime()) ||
-    (
-      date.getFullYear() === 1900 &&
-      date.getMonth() === 0 &&
-      date.getDate() === 1
-    )
-  );
-}
-
-function formatReferenceDateIso(value) {
-  const date = parseCalendarDate(value);
-  return isEmptyReferenceDate(date) ? "" : formatIsoDate(date);
-}
-
-function getReferenceCalendarMs(date) {
-  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function computeReferenceRetardDays(recuValue, dateLimiteValue, currentDateValue = new Date()) {
-  const recuDate = parseCalendarDate(recuValue);
-  const dateLimite = parseCalendarDate(dateLimiteValue);
-  const currentDate = currentDateValue instanceof Date
-    ? new Date(
-        currentDateValue.getFullYear(),
-        currentDateValue.getMonth(),
-        currentDateValue.getDate()
-      )
-    : parseCalendarDate(currentDateValue);
-
-  if (isEmptyReferenceDate(dateLimite)) {
-    return null;
-  }
-
-  const comparisonDate = isEmptyReferenceDate(recuDate) ? currentDate : recuDate;
-  if (isEmptyReferenceDate(comparisonDate)) {
-    return null;
-  }
-
-  const recuMs = getReferenceCalendarMs(comparisonDate);
-  const limiteMs = getReferenceCalendarMs(dateLimite);
-  if (recuMs <= limiteMs) {
-    return null;
-  }
-
-  return Math.floor((recuMs - limiteMs) / DAY_MS);
-}
-
-function toReferenceRetardStorageValue(value) {
-  const numericValue = Number(value);
-  return Number.isFinite(numericValue) && numericValue > 0
-    ? String(Math.trunc(numericValue))
-    : "";
-}
-
-function referenceRetardStoredValueMatches(currentValue, expectedValue) {
-  return toText(currentValue) === toReferenceRetardStorageValue(expectedValue);
-}
-
 function buildChangedReferenceFields(referenceRow, fields = {}) {
   const changedFields = {};
   Object.entries(fields || {}).forEach(([fieldName, nextValue]) => {
@@ -902,159 +818,13 @@ async function syncReferenceRetardRows(referenceRows = [], currentDateValue = ne
   return actions.length;
 }
 
-function parseReferenceDurationLimit(value) {
-  const text = toText(value);
-  if (!text) return null;
-  const normalized = text.replace(",", ".");
-  const numericValue = Number(normalized);
-  if (!Number.isFinite(numericValue) || !Number.isInteger(numericValue) || numericValue < 0) {
-    return null;
-  }
-  return numericValue;
-}
-
-function getReferenceDurationWeeksFromLimitDate(startDate, limitDate) {
-  if (
-    !(startDate instanceof Date) ||
-    Number.isNaN(startDate.getTime()) ||
-    !(limitDate instanceof Date) ||
-    Number.isNaN(limitDate.getTime())
-  ) {
-    return null;
-  }
-
-  const startMs = Date.UTC(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
-  const limitMs = Date.UTC(limitDate.getFullYear(), limitDate.getMonth(), limitDate.getDate());
-  const diffDays = Math.round((startMs - limitMs) / DAY_MS);
-  if (diffDays < 0 || diffDays % 7 !== 0) return null;
-  return diffDays / 7;
-}
-
-function buildPlanningReferenceChange(row, columns = {}) {
-  return {
-    projectName: row?.[columns.projectLink || columns.nomProjet || "NomProjet"],
-    numeroDocument: row?.[columns.id2 || "ID2"],
-    typeDocument: row?.[columns.typeDoc || "Type_doc"],
-    designation: row?.[columns.taches || columns.tacheAlt || "Taches"],
-    sourceZone: row?.[columns.zone || "Zone"],
-  };
-}
-
-function filterReferenceRowsForPlanningRows(referenceRows = [], planningRows = [], columns = {}) {
-  const targetKeys = new Set();
-  (Array.isArray(planningRows) ? planningRows : []).forEach((planningRow) => {
-    const change = buildPlanningReferenceChange(planningRow, columns);
-    const project = normalizeLookupText(change.projectName);
-    const number = normalizeDocumentNumberForMatch(change.numeroDocument);
-    const type = normalizeLookupText(change.typeDocument);
-    const designation = normalizeLookupText(change.designation);
-    if (project && number && type && designation) {
-      targetKeys.add([project, number, type, designation].join("||"));
-    }
-  });
-  if (!targetKeys.size) return [];
-
-  return (Array.isArray(referenceRows) ? referenceRows : []).filter((referenceRow) => {
-    const project = normalizeLookupText(
-      getFirstNonEmptyRowValue(referenceRow, ["NomProjetString", "NomProjet", "Nom_projet"])
-    );
-    const number = normalizeDocumentNumberForMatch(referenceRow?.NumeroDocument);
-    const type = normalizeLookupText(referenceRow?.Type_document ?? referenceRow?.TypeDocument);
-    const designation = normalizeLookupText(
-      getFirstNonEmptyRowValue(referenceRow, ["NomDocument", "Designation"])
-    );
-    return (
-      project &&
-      number &&
-      type &&
-      designation &&
-      targetKeys.has([project, number, type, designation].join("||"))
-    );
-  });
-}
-
 function findLinkedReferenceRowsForPlanningRow(planningRow, referenceRows, columns = {}) {
-  const context = buildZoneSyncTableContext(REFERENCES_TABLE_NAME, referenceRows, {
-    projectCandidates: ["NomProjetString", "NomProjet", "Nom_projet"],
-    numberCandidates: ["NumeroDocument"],
-    typeCandidates: ["Type_document", "TypeDocument"],
-    zoneCandidates: ["Zone"],
-    designationCandidates: ["NomDocument", "Designation"],
-  });
-  if (!context) return [];
-
+  const context = buildReferenceTableContext(referenceRows);
   const change = buildPlanningReferenceChange(planningRow, columns);
   return filterMatchingRowsForZoneSync(context, change, {
     requireDesignation: true,
     sourceZoneFallbackToBlank: true,
   });
-}
-
-function addReferenceLookupRow(map, key, row) {
-  if (!map.has(key)) {
-    map.set(key, []);
-  }
-  map.get(key).push(row);
-}
-
-function buildLinkedReferenceLookup(referenceRows = []) {
-  const context = buildZoneSyncTableContext(REFERENCES_TABLE_NAME, referenceRows, {
-    projectCandidates: ["NomProjetString", "NomProjet", "Nom_projet"],
-    numberCandidates: ["NumeroDocument"],
-    typeCandidates: ["Type_document", "TypeDocument"],
-    zoneCandidates: ["Zone"],
-    designationCandidates: ["NomDocument", "Designation"],
-  });
-  if (!context) return null;
-
-  const strict = new Map();
-  context.rows.forEach((row) => {
-    const rowId = Number(row?.id);
-    if (!Number.isInteger(rowId) || rowId <= 0) return;
-    const project = context.projectCol ? normalizeLookupText(row?.[context.projectCol]) : "";
-    const number = normalizeDocumentNumberForMatch(row?.[context.numberCol]);
-    const type = context.typeCol ? normalizeLookupText(row?.[context.typeCol]) : "";
-    const designation = context.designationCols.length
-      ? normalizeLookupText(getFirstNonEmptyRowValue(row, context.designationCols))
-      : "";
-    const zone = context.zoneCol ? normalizeZoneValueForStorage(row?.[context.zoneCol]) : "";
-    if (project && number && type && designation) {
-      addReferenceLookupRow(strict, [project, number, type, designation, zone].join("||"), row);
-    }
-  });
-  return { context, strict };
-}
-
-function getUniqueReferenceLookupRows(map, keys = []) {
-  const rowsById = new Map();
-  keys.forEach((key) => {
-    (map.get(key) || []).forEach((row) => rowsById.set(Number(row.id), row));
-  });
-  return [...rowsById.values()];
-}
-
-function findLinkedReferenceRowsFromLookup(planningRow, lookup, columns = {}) {
-  if (!lookup?.context) return [];
-  const change = buildPlanningReferenceChange(planningRow, columns);
-  const project = lookup.context.projectCol ? normalizeLookupText(change.projectName) : "";
-  const number = normalizeDocumentNumberForMatch(change.numeroDocument);
-  const type = lookup.context.typeCol ? normalizeLookupText(change.typeDocument) : "";
-  const designation = lookup.context.designationCols.length
-    ? normalizeLookupText(change.designation)
-    : "";
-  const sourceZone = lookup.context.zoneCol
-    ? normalizeZoneValueForStorage(change.sourceZone)
-    : "";
-  const zones = sourceZone ? [sourceZone, ""] : [""];
-  if (!project || !number || !type || !designation) return [];
-
-  for (const zone of zones) {
-    const strictRows = getUniqueReferenceLookupRows(lookup.strict, [
-      [project, number, type, designation, zone].join("||"),
-    ]);
-    if (strictRows.length) return strictRows;
-  }
-  return [];
 }
 
 async function fetchPlanningRowById(rowId) {
@@ -1079,147 +849,23 @@ async function fetchPlanningRowById(rowId) {
   return { row, columns };
 }
 
-async function buildReferenceOffsetSnapshotForPlanningRow(
-  planningRow,
-  columns = {},
-  referenceRowsOverride = null,
-  referenceLookupOverride = null
-) {
-  const startDate = getPlanningSegmentStartDate(planningRow, columns);
-  const hasValidStartDate = startDate instanceof Date && !Number.isNaN(startDate.getTime());
-
-  const allReferenceRows = Array.isArray(referenceRowsOverride)
-    ? referenceRowsOverride
-    : await fetchReferenceRowsForPlanningRows([planningRow], columns).catch(() => []);
-  const referenceRows = filterReferenceRowsForPlanningRows(allReferenceRows, [planningRow], columns);
-  const linkedRows = referenceLookupOverride
-    ? findLinkedReferenceRowsFromLookup(planningRow, referenceLookupOverride, columns)
-    : findLinkedReferenceRowsForPlanningRow(planningRow, referenceRows, columns);
-  const seenReferenceIds = new Set();
-  const offsets = [];
-
-  linkedRows.forEach((row) => {
-    const referenceId = Number(row?.id);
-    if (!Number.isInteger(referenceId) || referenceId <= 0 || seenReferenceIds.has(referenceId)) {
-      return;
-    }
-
-    const currentDurationWeeks = parseReferenceDurationLimit(row?.DureeLimite);
-    const referenceLimitDate = parseCalendarDate(row?.DateLimite);
-    const durationWeeks =
-      currentDurationWeeks ??
-      (
-        !hasValidStartDate || isEmptyReferenceDate(referenceLimitDate)
-          ? (Boolean(row?.Bloquant) && hasValidStartDate ? 0 : null)
-          : getReferenceDurationWeeksFromLimitDate(startDate, referenceLimitDate)
-      );
-
-    if (durationWeeks == null) {
-      return;
-    }
-
-    seenReferenceIds.add(referenceId);
-    offsets.push({
-      referenceId,
-      durationWeeks,
-      preserveBlankDuration: currentDurationWeeks == null && Boolean(row?.Bloquant),
-      recuValue: row?.Recu,
-      currentDateLimiteIso: formatReferenceDateIso(row?.DateLimite),
-      currentDurationWeeks,
-      currentRetardValue: row?.Retard,
-    });
-  });
-
-  return offsets.length ? { offsets } : null;
-}
-
 async function buildReferenceOffsetSnapshotsForPlanningRows(planningRows = [], columns = {}) {
   const idCol = columns.id || "id";
-  const uniqueRowsById = new Map();
-  (Array.isArray(planningRows) ? planningRows : []).forEach((row) => {
+  const affectedRows = (Array.isArray(planningRows) ? planningRows : []).filter((row) => {
     const rowId = Number(row?.[idCol]);
-    if (Number.isInteger(rowId) && rowId > 0 && !uniqueRowsById.has(rowId)) {
-      uniqueRowsById.set(rowId, row);
-    }
+    return Number.isInteger(rowId) && rowId > 0;
   });
-
-  if (!uniqueRowsById.size) {
+  if (!affectedRows.length) {
     return new Map();
   }
 
-  const affectedRows = [...uniqueRowsById.values()];
-  const allReferenceRows = await fetchReferenceRowsForPlanningRows(affectedRows, columns)
+  const referenceRows = await fetchReferenceRowsForPlanningRows(affectedRows, columns)
     .catch(() => []);
-  const referenceRows = filterReferenceRowsForPlanningRows(
-    allReferenceRows,
-    affectedRows,
-    columns
-  );
-  const referenceLookup = buildLinkedReferenceLookup(referenceRows);
-  const snapshotsByRowId = new Map();
-  for (const [rowId, row] of uniqueRowsById.entries()) {
-    const snapshot = await buildReferenceOffsetSnapshotForPlanningRow(
-      row,
-      columns,
-      referenceRows,
-      referenceLookup
-    );
-    if (snapshot?.offsets?.length) {
-      snapshotsByRowId.set(rowId, snapshot);
-    }
-  }
-
-  return snapshotsByRowId;
-}
-
-function buildReferenceDateLimiteSyncActions(snapshot, planningRow, columns = {}) {
-  if (!snapshot?.offsets?.length) return [];
-
-  const startDate = getPlanningSegmentStartDate(planningRow, columns);
-  if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) {
-    return [];
-  }
-
-  return snapshot.offsets
-    .map((offset) => {
-      const dateLimite = subtractWeeksFromDate(startDate, offset.durationWeeks);
-      const dateLimiteIso = formatIsoDate(dateLimite);
-      if (!dateLimiteIso) return null;
-      const nextRetard = toReferenceRetardStorageValue(
-        computeReferenceRetardDays(offset.recuValue, dateLimiteIso)
-      );
-      const fields = {};
-      if (offset.currentDateLimiteIso !== dateLimiteIso) {
-        fields.DateLimite = dateLimiteIso;
-      }
-      if (offset.currentDurationWeeks !== offset.durationWeeks && !offset.preserveBlankDuration) {
-        fields.DureeLimite = offset.durationWeeks;
-      }
-      if (!referenceRetardStoredValueMatches(offset.currentRetardValue, nextRetard)) {
-        fields.Retard = nextRetard;
-      }
-      if (!Object.keys(fields).length) return null;
-
-      return [
-        "UpdateRecord",
-        REFERENCES_TABLE_NAME,
-        offset.referenceId,
-        fields,
-      ];
-    })
-    .filter(Boolean);
+  return buildReferenceOffsetSnapshots(affectedRows, referenceRows, columns);
 }
 
 async function applyReferenceDateLimiteSyncActions(actions = []) {
-  const actionsByReferenceId = new Map();
-  (Array.isArray(actions) ? actions : []).forEach((action) => {
-    const referenceId = Number(action?.[2]);
-    if (Number.isInteger(referenceId) && referenceId > 0) {
-      actionsByReferenceId.set(referenceId, action);
-    }
-  });
-
-  const dedupedActions = [...actionsByReferenceId.values()];
+  const dedupedActions = dedupeReferenceActions(actions);
   if (!dedupedActions.length) return 0;
 
   const grist = getGrist();
@@ -2220,19 +1866,12 @@ export async function updatePlanningLignePlanning(rowId, lignePlanningValue) {
   ]);
 }
 
-export async function updatePlanningFromMsProjectDrop({
-  rowId,
-  uniqueNumber,
-  xmlName = "",
-  msStartIso = "",
-  msEndIso = "",
-}) {
+function readMsProjectDropTarget({ rowId, uniqueNumber } = {}) {
   const table = APP_CONFIG.grist.planningTable;
   if (!table?.sourceTable) {
     throw new Error("Nom de table Planning_Projet manquant dans la configuration.");
   }
 
-  const columns = table.columns || {};
   const recordId = Number(rowId);
   if (!Number.isInteger(recordId) || recordId <= 0) {
     throw new Error("Identifiant de ligne Planning_Projet invalide.");
@@ -2243,6 +1882,31 @@ export async function updatePlanningFromMsProjectDrop({
     throw new Error("Numero unique MS Project vide.");
   }
 
+  return {
+    table,
+    columns: table.columns || {},
+    recordId,
+    uniqueNumber: normalizedUniqueNumber,
+  };
+}
+
+// Dépôt d'une tâche MS Project sur une ligne : ce qui sera écrit, calculé sans rien lire ni
+// écrire. Le planning l'affiche tout de suite avec ces champs ; l'écriture refait le même
+// calcul, par cette même fonction, sur des lignes relues.
+export function planPlanningMsProjectDrop(rows, {
+  rowId,
+  uniqueNumber,
+  xmlName = "",
+  msStartIso = "",
+  msEndIso = "",
+} = {}) {
+  const {
+    table,
+    columns,
+    recordId,
+    uniqueNumber: normalizedUniqueNumber,
+  } = readMsProjectDropTarget({ rowId, uniqueNumber });
+
   const lignePlanningField = String(columns.lignePlanning || "Ligne_planning").trim();
   const nomXmlField = String(columns.nomXml || "Nom_XML").trim();
   const idCol = columns.id || "id";
@@ -2250,21 +1914,10 @@ export async function updatePlanningFromMsProjectDrop({
   const zoneCol = String(columns.zone || "Zone").trim();
   const typeDocCol = columns.typeDoc || "Type_doc";
   const projectCol = String(columns.projectLink || columns.nomProjet || "NomProjet").trim();
-  const dateLimiteCol = columns.dateLimite || "Date_limite";
-  const duree1Col = columns.duree1 || "Duree_1";
-  const diffCoffrageCol = columns.diffCoffrage || "Diff_coffrage";
-  const duree2Col = columns.duree2 || "Duree_2";
-  const diffArmatureCol = columns.diffArmature || "Diff_armature";
-  const duree3Col = columns.duree3 || "Duree_3";
   const demarrageCol = columns.demarragesTravaux || "Demarrages_travaux";
 
-  const grist = getGrist();
-  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
-    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
-  }
-
-  const rows = await fetchTableRows(table.sourceTable);
-  const currentRow = rows.find((row) => Number(row?.[idCol]) === recordId) || null;
+  const planningRows = Array.isArray(rows) ? rows : [];
+  const currentRow = planningRows.find((row) => Number(row?.[idCol]) === recordId) || null;
   if (!currentRow) {
     throw new Error("Ligne Planning_Projet introuvable.");
   }
@@ -2277,10 +1930,6 @@ export async function updatePlanningFromMsProjectDrop({
   const currentGroup = toText(currentRow[groupCol]);
   const currentZone = normalizeZoneValueForStorage(currentRow[zoneCol]);
   const currentProject = toText(currentRow[projectCol]);
-  const droppedStartDate = parseCalendarDate(msStartIso);
-  const droppedEndDate = parseCalendarDate(msEndIso);
-  const droppedStartIso = formatIsoDate(droppedStartDate);
-  const droppedEndIso = formatIsoDate(droppedEndDate);
 
   const updates = {
     [lignePlanningField]: normalizedUniqueNumber,
@@ -2289,80 +1938,22 @@ export async function updatePlanningFromMsProjectDrop({
     updates[nomXmlField] = toText(xmlName);
   }
 
-  if (isCoffrageTypeDoc(typeDoc) || isNdcLike) {
-    let demarrageDate = droppedStartDate || parseCalendarDate(currentRow[demarrageCol]);
-    let diffCoffrageDate = parseCalendarDate(currentRow[diffCoffrageCol]);
-    let dateLimiteDate = parseCalendarDate(currentRow[dateLimiteCol]);
-    const duree1 = toInteger(currentRow[duree1Col]);
-    const duree3 = toInteger(currentRow[duree3Col]);
-
-    // COFFRAGE/NDC lie a MS Project:
-    // Demarrage travaux = Debut MS Project
-    // Diff_coffrage = Demarrage travaux - Duree_3
-    // Date_limite = Diff_coffrage - Duree_1
-    if (demarrageDate && duree3 != null && duree3 >= 0) {
-      diffCoffrageDate = subtractWeeksFromDate(demarrageDate, duree3);
-    } else if (!diffCoffrageDate && droppedEndDate) {
-      diffCoffrageDate = droppedEndDate;
-    }
-
-    if (diffCoffrageDate && duree1 != null && duree1 >= 0) {
-      dateLimiteDate = subtractWeeksFromDate(diffCoffrageDate, duree1);
-    } else if (droppedStartIso) {
-      updates[dateLimiteCol] = droppedStartIso;
-    }
-
-    const computedDemarrageIso = formatIsoDate(demarrageDate);
-    const computedDateLimiteIso = formatIsoDate(dateLimiteDate);
-    const computedDiffCoffrageIso = formatIsoDate(diffCoffrageDate);
-    if (computedDemarrageIso) updates[demarrageCol] = computedDemarrageIso;
-    if (computedDateLimiteIso) updates[dateLimiteCol] = computedDateLimiteIso;
-    if (computedDiffCoffrageIso) updates[diffCoffrageCol] = computedDiffCoffrageIso;
-    if (isNdcLike && groupCol) updates[groupCol] = "";
-  } else if (isArmaturesTypeDoc(typeDoc)) {
-    let demarrageDate =
-      droppedStartDate ||
-      parseCalendarDate(currentRow[demarrageCol]);
-    let diffArmatureDate = parseCalendarDate(currentRow[diffArmatureCol]);
-    let diffCoffrageDate = parseCalendarDate(currentRow[diffCoffrageCol]);
-    const duree2 = toInteger(currentRow[duree2Col]);
-    const duree3 = toInteger(currentRow[duree3Col]);
-
-    // Le drop MS fixe prioritairement le "Debut des travaux" (demarrage),
-    // puis on recalcule les autres dates en remontant les durées.
-    if (demarrageDate && duree3 != null && duree3 >= 0) {
-      diffArmatureDate = subtractWeeksFromDate(demarrageDate, duree3);
-    } else if (!diffArmatureDate && droppedEndDate) {
-      diffArmatureDate = droppedEndDate;
-    }
-
-    if (diffArmatureDate && duree2 != null && duree2 >= 0) {
-      diffCoffrageDate = subtractWeeksFromDate(diffArmatureDate, duree2);
-    } else if (!diffCoffrageDate && droppedStartDate) {
-      diffCoffrageDate = droppedStartDate;
-    }
-
-    if (!demarrageDate && diffArmatureDate && duree3 != null && duree3 >= 0) {
-      demarrageDate = addWeeksToDate(diffArmatureDate, duree3);
-    }
-
-    const computedDemarrageIso = formatIsoDate(demarrageDate);
-    const computedDiffCoffrageIso = formatIsoDate(diffCoffrageDate);
-    const computedDiffArmatureIso = formatIsoDate(diffArmatureDate);
-    if (computedDemarrageIso) updates[demarrageCol] = computedDemarrageIso;
-    if (computedDiffCoffrageIso) updates[diffCoffrageCol] = computedDiffCoffrageIso;
-    if (computedDiffArmatureIso) updates[diffArmatureCol] = computedDiffArmatureIso;
-  } else {
-    // Fallback for unexpected Type_doc values.
-    if (droppedStartIso) updates[dateLimiteCol] = droppedStartIso;
-    if (droppedEndIso) updates[diffCoffrageCol] = droppedEndIso;
-  }
+  // Dates de la ligne : la règle partagée avec le widget MS Project (import XML, édition
+  // d'une date), pour que les trois gestes trouvent les mêmes.
+  Object.assign(
+    updates,
+    buildMsLinkedPlanningDateFields(currentRow, columns, {
+      msStart: msStartIso,
+      msEnd: msEndIso,
+    })
+  );
+  if (isNdcLike && groupCol) updates[groupCol] = "";
 
   const groupHasArmatures =
     !isNdcLike &&
     Boolean(currentZone) &&
     Boolean(currentGroup) &&
-    groupHasArmaturesRow(rows, {
+    groupHasArmaturesRow(planningRows, {
       idCol,
       zoneCol,
       groupCol,
@@ -2389,7 +1980,7 @@ export async function updatePlanningFromMsProjectDrop({
     );
 
   const planningLinkResetActions = shouldResetGroupCoffragePlanningLinks
-    ? buildCoffragePlanningLinkResetActions(rows, {
+    ? buildCoffragePlanningLinkResetActions(planningRows, {
         idCol,
         zoneCol,
         groupCol,
@@ -2415,6 +2006,24 @@ export async function updatePlanningFromMsProjectDrop({
     ],
     ...planningLinkResetActions,
   ];
+
+  return {
+    actions,
+    // Champs écrits par ligne : la cible du dépôt, et les coffrages du groupe qui perdent leur lien.
+    fieldsByRowId: new Map(actions.map((action) => [Number(action[2]), action[3]])),
+  };
+}
+
+export async function updatePlanningFromMsProjectDrop(drop = {}) {
+  const { table, columns } = readMsProjectDropTarget(drop);
+
+  const grist = getGrist();
+  if (!grist.docApi || typeof grist.docApi.applyUserActions !== "function") {
+    throw new Error("grist.docApi.applyUserActions(...) indisponible.");
+  }
+
+  const rows = await fetchTableRows(table.sourceTable);
+  const { actions } = planPlanningMsProjectDrop(rows, drop);
   const referenceSyncContext = await captureReferenceDateLimiteSyncContext(
     rows,
     actions,
