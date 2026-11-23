@@ -58,6 +58,49 @@ test("fin de saisie sans rafraîchissement : le dernier état est redessiné (an
   assert.deepEqual(drawn, ["v1", "v1"]);
 });
 
+// Une relecture qui ne rapporte rien de nouveau (sa propre écriture relue, signal d'un autre widget
+// sans effet ici) redemande ce qui est déjà à l'écran : rien n'est reconstruit.
+test("un rafraîchissement identique à ce qui est déjà dessiné n'est pas redessiné", () => {
+  const drawn = [];
+  const renderer = createDeferredRenderer((payload) => drawn.push(payload.text), {
+    isSame: (left, right) => left.text === right.text,
+  });
+  renderer.render({ text: "v1" });
+  renderer.render({ text: "v1" });
+  assert.deepEqual(drawn, ["v1"]);
+  renderer.render({ text: "v2" });
+  renderer.render({ text: "v2" });
+  assert.deepEqual(drawn, ["v1", "v2"]);
+});
+
+test("la comparaison se fait avec le dernier dessin : revenir à un contenu plus ancien redessine", () => {
+  const drawn = [];
+  const renderer = createDeferredRenderer((payload) => drawn.push(payload.text), {
+    isSame: (left, right) => left.text === right.text,
+  });
+  renderer.render({ text: "v1" });
+  renderer.render({ text: "v2" });
+  renderer.render({ text: "v1" });
+  assert.deepEqual(drawn, ["v1", "v2", "v1"]);
+});
+
+// La saisie a remplacé le contenu d'une cellule par un champ : même si rien n'a changé, le tableau
+// est redessiné à la fin, sinon le champ resterait.
+test("fin de saisie : redessiné même à l'identique ; ensuite le même contenu n'est plus redessiné", () => {
+  const drawn = [];
+  const renderer = createDeferredRenderer((payload) => drawn.push(payload.text), {
+    isSame: (left, right) => left.text === right.text,
+  });
+  renderer.render({ text: "v1" });
+  renderer.beginEditing();
+  renderer.render({ text: "v1" });
+  assert.deepEqual(drawn, ["v1"]);
+  renderer.endEditing();
+  assert.deepEqual(drawn, ["v1", "v1"]);
+  renderer.render({ text: "v1" });
+  assert.deepEqual(drawn, ["v1", "v1"]);
+});
+
 test("styles : vue masquable, hauteur de ligne fixe, en-tête collant", () => {
   assert.match(css, /\.synthese-space\[hidden\]\s*\{\s*display:\s*none;/);
   assert.match(css, /--stt-row-height:\s*26px;/);

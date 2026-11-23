@@ -42,6 +42,25 @@ export class FakeElement {
     nodes.forEach((node) => this.appendChild(node));
   }
 
+  // Comme dans le navigateur : un nœud déjà placé ailleurs est déplacé ; sans repère, il va à la fin.
+  insertBefore(child, reference = null) {
+    child.remove();
+    child.parentNode = this;
+    const index = reference ? this.children.indexOf(reference) : -1;
+    if (index < 0) this.children.push(child);
+    else this.children.splice(index, 0, child);
+    return child;
+  }
+
+  get firstElementChild() {
+    return this.children[0] || null;
+  }
+
+  get nextElementSibling() {
+    const siblings = this.parentNode?.children || [];
+    return siblings[siblings.indexOf(this) + 1] || null;
+  }
+
   setAttribute(name, value) {
     this.attributes = { ...(this.attributes || {}), [name]: String(value) };
   }

@@ -21,7 +21,7 @@ test("le tableau crée la couche du Gantt hors du corps redessiné", () => {
 });
 
 test("le Gantt est redessiné avec les lignes du tableau, et à chaque changement de largeur", () => {
-  const draw = sliceBetween(tableJs, "function draw(", "const renderer = createDeferredRenderer(draw);");
+  const draw = sliceBetween(tableJs, "function draw(", "const renderer = createDeferredRenderer(draw");
   assert.match(draw, /gantt\?\.render\(message \? \[\] : lines\);/);
   const width = sliceBetween(tableJs, "function applyWidth(", "/* ---------- Rendu ---------- */");
   assert.match(width, /gantt\?\.resize\(\);/);
@@ -42,6 +42,6 @@ test("main.js branche le Gantt sur la période du planning", () => {
 test("scripts et feuille de style servis dans leur nouvelle version", () => {
   assert.equal(html.includes("20260923-taches1"), false);
   assert.equal(html.includes("20260925-couleurs1"), false);
-  assert.ok(html.includes("main.js?v=20261117-reperes3"));
-  assert.ok(html.includes("styles.css?v=20261117-reperes3"));
+  assert.ok(html.includes("main.js?v=20261123-fluide2"));
+  assert.ok(html.includes("styles.css?v=20261123-fluide2"));
 });

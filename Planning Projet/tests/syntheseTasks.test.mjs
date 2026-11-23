@@ -13,6 +13,7 @@ import {
   getProgressState,
   isTaskLate,
   isSyntheseTypeDoc,
+  isWorkingDay,
   parseGristDate,
   snapToWorkingRange,
   toIsoDate,
@@ -37,6 +38,66 @@ test("un jour férié ne compte pas et une plage sans jour ouvré est refusée",
   // 11 novembre 2026 : mercredi férié.
   assert.equal(countWorkingDays(day("2026-11-09"), day("2026-11-13")), 4);
   assert.equal(snapToWorkingRange(day("2026-09-26"), day("2026-09-27")), null);
+});
+
+// Le décompte se fait par soustraction dans un cumul des jours ouvrés, plus jour par jour : il doit
+// donner exactement ce que donne le parcours des jours, qui sert ici de référence.
+function countDayByDay(start, end) {
+  if (!(start instanceof Date) || !(end instanceof Date) || end < start) return 0;
+  let count = 0;
+  for (
+    let cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    cursor <= end;
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1)
+  ) {
+    if (isWorkingDay(cursor)) count += 1;
+  }
+  return count;
+}
+
+test("jours ouvrés d'une plage : même compte que jour par jour, sur des plages tirées au hasard", () => {
+  // Tirage reproductible : toujours les mêmes plages.
+  let seed = 20261123;
+  const random = (max) => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed % max;
+  };
+  for (let index = 0; index < 4000; index += 1) {
+    // De 1998 à 2103 : la plupart dans le cumul (2000–2100), quelques-unes à cheval ou en dehors.
+    const start = new Date(1998 + random(104), random(12), 1 + random(31), random(24), random(60));
+    const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + random(900) - 20, random(24), random(60));
+    assert.equal(
+      countWorkingDays(start, end),
+      countDayByDay(start, end),
+      `du ${start.toISOString()} au ${end.toISOString()}`
+    );
+  }
+});
+
+test("jours ouvrés d'une plage : bornes du cumul, fériés, même jour, plage inversée, dates illisibles", () => {
+  const cases = [
+    [new Date(2000, 0, 1), new Date(2000, 0, 31)],
+    [new Date(1999, 11, 27), new Date(2000, 0, 7)],
+    [new Date(2100, 11, 1), new Date(2100, 11, 31)],
+    [new Date(2100, 11, 27), new Date(2101, 0, 8)],
+    // Lundi de Pâques, 1er et 8 mai, Ascension 2026.
+    [new Date(2026, 3, 3), new Date(2026, 4, 18)],
+    // Changements d'heure : derniers dimanches de mars et d'octobre.
+    [new Date(2026, 2, 27), new Date(2026, 2, 31)],
+    [new Date(2026, 9, 23), new Date(2026, 9, 27)],
+    // Même jour, avec et sans heure ; fin plus tôt dans la même journée que le début.
+    [new Date(2026, 8, 23), new Date(2026, 8, 23)],
+    [new Date(2026, 8, 23, 8), new Date(2026, 8, 23, 17)],
+    [new Date(2026, 8, 23, 17), new Date(2026, 8, 23, 8)],
+    [new Date(2026, 8, 25), new Date(2026, 8, 21)],
+    [new Date(NaN), new Date(2026, 8, 21)],
+    [new Date(2026, 8, 21), new Date(NaN)],
+  ];
+  cases.forEach(([start, end]) => {
+    assert.equal(countWorkingDays(start, end), countDayByDay(start, end), `du ${String(start)} au ${String(end)}`);
+  });
+  assert.equal(countWorkingDays(new Date(2026, 8, 21), new Date(2026, 8, 25)), 5);
+  assert.equal(countWorkingDays("2026-09-21", new Date(2026, 8, 25)), 0);
 });
 
 test("la fin se déduit d'une durée en jours ouvrés", () => {

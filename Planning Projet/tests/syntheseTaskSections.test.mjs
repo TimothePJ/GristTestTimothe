@@ -6,7 +6,10 @@ import {
   NO_ZONE_LABEL,
   buildRowModel,
   buildSections,
+  filterSections,
   floorCollapseKey,
+  floorKeyOf,
+  natureKeyOf,
   readTask,
   summarizeTasks,
   zoneKeyOf,
@@ -104,6 +107,45 @@ test("filtre de zone : une seule section, même vide", () => {
   assert.deepEqual(buildSections({ rows, zoneFilter: "zone-z2a" }).map((section) => section.label), ["Zone Z2A"]);
   assert.deepEqual(buildSections({ rows, zoneFilter: "PH SS1" })[0].tasks, []);
   assert.deepEqual(buildSections({ rows, zoneFilter: "Zone X" }).map((section) => section.label), ["Zone X"]);
+});
+
+// Le contrôleur garde les sections de tout le projet et en tire celles du filtre : le filtre appliqué
+// après coup doit donner exactement les sections bâties avec lui.
+test("filtrer des sections déjà bâties : même résultat que les bâtir avec le filtre", () => {
+  const rows = [
+    task(1, "Visa MOE", "Zone Z2A", "2026-10-09", "2026-10-23", 11),
+    task(2, "Plans CET", "PH SS1", "2026-10-12", "2026-10-16", 5),
+    task(3, "Orpheline", "", "2026-10-05", "2026-10-05", 1),
+  ];
+  const sharedZones = ["Zone des autres"];
+  const all = buildSections({ rows, sharedZones });
+  ["", "zone-z2a", "PH SS1", "Zone des autres", "Zone X", "Sans zone"].forEach((zoneFilter) => {
+    assert.deepEqual(filterSections(all, zoneFilter), buildSections({ rows, sharedZones, zoneFilter }), `filtre « ${zoneFilter} »`);
+  });
+  assert.equal(filterSections(all, ""), all, "sans filtre, les mêmes sections, sans copie");
+  assert.equal(filterSections(all, "zone-z2a")[0], all.find((section) => section.zoneKey === zoneKeyOf("Zone Z2A")));
+});
+
+// Les clés de zone, d'étage et de nature sont gardées par texte, dans une mémoire bornée qui se vide
+// quand elle est pleine : la clé d'un texte reste la même avant et après.
+test("clés de zone, d'étage et de nature : inchangées après des milliers d'autres textes", () => {
+  const expected = [zoneKeyOf("ZONE 1A (BAT A3, A4)"), floorKeyOf("R+1"), floorKeyOf("R-1"), natureKeyOf("Réunion"), natureKeyOf("Sous-groupe")];
+  assert.deepEqual(expected, ["zone1abata3a4", "rp1", "rm1", "reunion", "sous-groupe"]);
+  for (let index = 0; index < 12000; index += 1) {
+    zoneKeyOf(`Zone ${index}`);
+    floorKeyOf(`Étage ${index}`);
+    natureKeyOf(`Nature ${index}`);
+  }
+  assert.equal(zoneKeyOf("Zone 11999"), "zone11999");
+  assert.equal(floorKeyOf("Étage 11999"), "etage11999");
+  assert.equal(natureKeyOf("Nature 11999"), "");
+  assert.deepEqual(
+    [zoneKeyOf("ZONE 1A (BAT A3, A4)"), floorKeyOf("R+1"), floorKeyOf("R-1"), natureKeyOf("Réunion"), natureKeyOf("Sous-groupe")],
+    expected
+  );
+  assert.equal(zoneKeyOf("  Sans zone "), NO_ZONE_KEY);
+  assert.equal(zoneKeyOf(null), NO_ZONE_KEY);
+  assert.equal(floorKeyOf(undefined), "");
 });
 
 test("modèle de lignes : zone puis ses tâches, repli, clés stables", () => {

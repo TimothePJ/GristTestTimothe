@@ -4,6 +4,7 @@
 // (tâches, nom des étages), le menu contextuel et les poignées de glisser, mais ne lit ni
 // n'écrit jamais Grist : il signale les intentions au contrôleur.
 import { floorKeyOf, formatDate, formatDuration, stepDurationText } from "../services/syntheseTaskModel.js";
+import { sameValue } from "../utils/sameValue.js";
 import { createTaskDrag } from "./syntheseTaskDrag.js";
 
 // « .v2 » : la largeur mémorisée avant les colonnes réglables (plus larges) est oubliée une fois.
@@ -49,23 +50,33 @@ const EDIT_ACTIONS = new Set(["edit", "editFloor", "editStorey", "editGroup"]);
 
 // Un rafraîchissement arrivant pendant une saisie (écriture, relecture, signal d'un
 // autre widget) détruirait la cellule en cours : on garde le dernier état demandé et
-// on le dessine à la fermeture de la saisie.
-export function createDeferredRenderer(draw) {
+// on le dessine à la fermeture de la saisie. Hors saisie, redemander ce qui est déjà dessiné
+// (`isSame`) ne redessine rien : une saisie est suivie de relectures qui ne rapportent rien de neuf.
+export function createDeferredRenderer(draw, { isSame = () => false } = {}) {
   let latest = null;
   let hasLatest = false;
   let editing = false;
+  let drawn = null;
+  let hasDrawn = false;
+  function paint(payload) {
+    drawn = payload;
+    hasDrawn = true;
+    draw(payload);
+  }
   return {
     render(payload) {
       latest = payload;
       hasLatest = true;
-      if (!editing) draw(payload);
+      if (editing || (hasDrawn && isSame(drawn, payload))) return;
+      paint(payload);
     },
     beginEditing() {
       editing = true;
     },
+    // Toujours redessiné, même à l'identique : la saisie a remplacé le contenu d'une cellule par un champ.
     endEditing() {
       editing = false;
-      if (hasLatest) draw(latest);
+      if (hasLatest) paint(latest);
     },
     get isEditing() {
       return editing;
@@ -536,6 +547,17 @@ export function createSyntheseTaskTable(host, {
   let queuedAction = null;
   let ignoreNextClick = false;
   let statusTimer = 0;
+  // Place disponible (largeur de la vue) au dernier dessin.
+  let drawnAvailableWidth = null;
+  // Lignes dessinées, par clé (l'élément et la ligne qu'il montre), et leur ordre.
+  let drawnRows = new Map();
+  let drawnKeys = [];
+  // Ce qui change l'allure de toutes les lignes : tableau modifiable, cycles déplaçables.
+  let drawnRowLook = "";
+  // Lignes dont une cellule a été remplacée par un champ de saisie : refaites au dessin suivant.
+  const editedKeys = new Set();
+  // Le Gantt a reçu ses lignes au moins une fois.
+  let ganttFed = false;
   let leftWidth = readStoredWidth(leftWidthKey);
   let columnWidths = readStoredColumnWidths(columnWidthsKey);
   // Largeur par défaut sans les colonnes masquées (une largeur mémorisée est reprise telle quelle).
@@ -695,18 +717,71 @@ export function createSyntheseTaskTable(host, {
     zoneFiltered = options?.zoneFiltered === true;
     // Tableau devenu non modifiable : un glisser en cours est abandonné, sans dépôt.
     if (!editable) taskDrag?.cancel();
-    applyWidth(leftWidth);
+    drawnAvailableWidth = root.clientWidth;
+    // La largeur n'est reposée (et le Gantt prévenu) que si la place disponible la change.
+    if (clampWidth(leftWidth) !== leftWidth) applyWidth(leftWidth);
     root.classList.toggle("is-readonly", !editable);
     const message = options?.emptyMessage || "";
     empty.textContent = message;
     empty.hidden = !message;
     body.hidden = Boolean(message);
-    body.replaceChildren(...(message ? [] : lines.map(buildLine)));
-    gantt?.render(message ? [] : lines);
+    const listChanged = drawRows(message ? [] : lines);
+    // Le Gantt ne redessine ses barres que si la liste des lignes a changé : ni pour une saisie
+    // refermée sans changement, ni pour un tableau devenu (non) modifiable.
+    if (listChanged || !ganttFed) {
+      ganttFed = true;
+      gantt?.render(message ? [] : lines);
+    }
     placeDropLine();
   }
 
-  const renderer = createDeferredRenderer(draw);
+  // Met le corps du tableau à jour ligne par ligne : une ligne redemandée à l'identique garde son
+  // élément (et le focus qu'il porte), seules les lignes changées, ajoutées ou saisies sont refaites ;
+  // les éléments gardés ne bougent que si leur place change. Renvoie vrai si la liste des lignes a
+  // changé (contenu, présence ou ordre).
+  function drawRows(shown) {
+    const look = `${editable}|${canMoveCycles}`;
+    const sameLook = look === drawnRowLook;
+    const nextRows = new Map();
+    let keptCount = 0;
+    let listChanged = shown.length !== drawnKeys.length;
+    const elements = shown.map((line, index) => {
+      // Une clé ne garde qu'un élément : une ligne de même clé plus bas en reçoit un neuf.
+      const known = nextRows.has(line.key) ? null : drawnRows.get(line.key);
+      const sameLine = Boolean(known) && sameValue(known.line, line);
+      if (!sameLine || drawnKeys[index] !== line.key) listChanged = true;
+      const keep = sameLine && sameLook && !editedKeys.has(line.key);
+      if (keep) keptCount += 1;
+      const element = keep ? known.element : buildLine(line);
+      nextRows.set(line.key, { element, line });
+      return element;
+    });
+    if (!keptCount) {
+      body.replaceChildren(...elements);
+    } else {
+      // Les lignes disparues ou refaites sortent d'abord : les lignes gardées restent alors en place.
+      const kept = new Set(elements);
+      [...body.children].forEach((child) => {
+        if (!kept.has(child)) child.remove();
+      });
+      let cursor = body.firstElementChild;
+      elements.forEach((element) => {
+        if (element === cursor) cursor = cursor.nextElementSibling;
+        else body.insertBefore(element, cursor);
+      });
+    }
+    drawnRows = nextRows;
+    drawnKeys = shown.map((line) => line.key);
+    drawnRowLook = look;
+    editedKeys.clear();
+    return listChanged;
+  }
+
+  // Même contenu redemandé : rien n'est refait, sauf si la place disponible a changé depuis le dernier
+  // dessin (vue masquée pendant que la fenêtre changeait de taille) — le dessin recale la largeur du tableau.
+  const renderer = createDeferredRenderer(draw, {
+    isSame: (drawn, next) => root.clientWidth === drawnAvailableWidth && sameValue(drawn, next),
+  });
 
   /* ---------- Édition dans les cellules ---------- */
 
@@ -839,6 +914,9 @@ export function createSyntheseTaskTable(host, {
   function openEditor({ target, field, cell, input }) {
     editor = { target, field, input, cell, initialValue: input.value, finalized: false };
     renderer.beginEditing();
+    // Le champ prend la place du contenu de la cellule : sa ligne sera refaite à la fin de la saisie.
+    const editedKey = cell.closest(".stt-line")?.dataset.lineKey;
+    if (editedKey) editedKeys.add(editedKey);
     cell.replaceChildren(input);
     if (field === "duration") cell.appendChild(createDurationSpin());
     cell.classList.add("is-editing");

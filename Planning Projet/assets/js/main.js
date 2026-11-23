@@ -1603,8 +1603,11 @@ async function performPlanningRefresh(options = {}) {
 
     const planningRows = cachedPlanningRows || [];
     const referenceSummaryStartedAt = performance.now();
-    cachedPlanningReferenceReceptionLookup =
-      await fetchPlanningReferenceReceptionSummaries(planningRows);
+    // Les données d'entrées (References2) ne servent qu'aux barres de la frise : masquée par la vue
+    // Synthese, dont chaque saisie relance ce chargement, elle ne les fait pas relire.
+    cachedPlanningReferenceReceptionLookup = isPlanningHiddenBySyntheseSpace()
+      ? new Map()
+      : await fetchPlanningReferenceReceptionSummaries(planningRows);
     fetchDurationMs += performance.now() - referenceSummaryStartedAt;
 
     const zoneOptions = buildZoneOptionsForSelectedProject(planningRows, selectedProject);
@@ -2311,6 +2314,13 @@ function bindPlanningServiceRefresh() {
 // bandeau, en attendant la nouvelle vue.
 const SYNTHESE_SERVICE_NAME = "Synthese";
 let syntheseSpaceActive = false;
+
+// Le planning Structure est masqué par le tableau de tâches : la vue Synthese est affichée, et le
+// service du contexte partagé — celui dont les lignes sont lues — est bien Synthese. Au changement de
+// service, le planning est rechargé en entier (bindPlanningServiceRefresh).
+function isPlanningHiddenBySyntheseSpace() {
+  return syntheseSpaceActive && currentServiceName() === SYNTHESE_SERVICE_NAME;
+}
 
 // Le Gantt du tableau de tâches suit la période du planning (boutons Semaine / Mois /
 // Année, plage de dates du bandeau) et la modifie quand on le fait glisser ou zoomer.
