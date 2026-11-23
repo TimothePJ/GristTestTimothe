@@ -406,17 +406,26 @@ function planPilotTakeover(former, group, context) {
 export function planParallelRealign({ before, rows = [], canLink = false } = {}) {
   const changes = new Map();
   if (!canLink) return changes;
-  const formerContext = chainContextOf(before);
   const formerGroups = [...cycleModes(before)]
     .filter(([, mode]) => mode === CYCLE_MODES.parallel)
     .map(([rowId]) => findGroup(before, rowId))
     .sort((left, right) => left.depth - right.depth);
+  // Aucun cycle n'était en parallèle : rien à garder, les sections d'après ne sont pas calculées.
+  if (!formerGroups.length) return changes;
+  const formerContext = chainContextOf(before);
   let sections = buildSections({ rows });
-  const contextOf = (group) => ({ ...chainContextOf(sections), order: floorOrderOf(sections, group) });
+  // Tâches et liens des sections du moment : les mêmes pour tous les cycles tant qu'aucun n'est
+  // rebâti (apply) — relus une fois, pas pour chaque cycle. Lus seulement, jamais modifiés.
+  let chain = null;
+  const contextOf = (group) => {
+    chain ||= chainContextOf(sections);
+    return { ...chain, order: floorOrderOf(sections, group) };
+  };
   const apply = (fields) => {
     if (!fields.size) return;
     mergeChanges(changes, fields);
     sections = buildSections({ rows: withChanges(rows, changes) });
+    chain = null;
   };
   formerGroups.forEach((formerGroup) => {
     const group = findGroup(sections, formerGroup.rowId);

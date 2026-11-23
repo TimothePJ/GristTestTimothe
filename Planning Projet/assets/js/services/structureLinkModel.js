@@ -65,8 +65,11 @@ function plainKey(value) {
   return plain(value).replace(/\s+/g, " ").toLocaleLowerCase("fr");
 }
 
+// Règles de tri préparées une fois (voir compareNames de syntheseTaskModel.js).
+const NATURAL_COLLATOR = new Intl.Collator("fr", { sensitivity: "base", numeric: true });
+
 function compareNatural(left, right) {
-  return left.localeCompare(right, "fr", { sensitivity: "base", numeric: true });
+  return NATURAL_COLLATOR.compare(left, right);
 }
 
 function isSameDay(left, right) {

@@ -82,9 +82,30 @@ function plainKey(value) {
   return toText(value).normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase("fr");
 }
 
-export function natureKeyOf(value) {
-  const key = plainKey(value).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+// Les mêmes textes (zone, étage, nature) reviennent sur toutes les lignes : la clé d'un texte n'est
+// calculée qu'une fois. Mémoire bornée : vidée quand elle est pleine.
+const MAX_KNOWN_KEYS = 5000;
+
+function keyMemory(compute) {
+  const known = new Map();
+  return (value) => {
+    const text = toText(value);
+    const cached = known.get(text);
+    if (cached !== undefined) return cached;
+    if (known.size >= MAX_KNOWN_KEYS) known.clear();
+    const key = compute(text);
+    known.set(text, key);
+    return key;
+  };
+}
+
+const natureKeys = keyMemory((text) => {
+  const key = plainKey(text).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return NATURE_KEYS.has(key) ? key : "";
+});
+
+export function natureKeyOf(value) {
+  return natureKeys(value);
 }
 
 // Fin d'étage fixe : SIGNATURE PLANS SYNTHESE puis DEMARRAGE GO, les deux dernières lignes de leur
@@ -140,27 +161,32 @@ function isSameDay(left, right) {
 
 // Clé de comparaison d'une zone : « ZONE 1A (BAT A3, A4) » = « zone-1a bat a3 a4 ».
 // Même règle que le contexte partagé ; "" pour une zone vide ou « Sans zone ».
-export function zoneKeyOf(value) {
-  const text = toText(value);
+const zoneKeys = keyMemory((text) => {
   if (!text || text.toLocaleLowerCase("fr") === "sans zone") return NO_ZONE_KEY;
   return text
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
     .toLocaleLowerCase("fr")
     .replace(/[^a-z0-9]+/g, "");
+});
+
+export function zoneKeyOf(value) {
+  return zoneKeys(value);
 }
 
 // Clé de comparaison d'un étage dans sa zone : « PH RDB » = « ph-rdb » = « Ph Rdb ». Un signe
 // placé devant un chiffre compte (« R+1 » au-dessus du sol, « R-1 » au-dessous) : « + » devient
 // « p », « - », « – » ou « − » devient « m » ; le reste de la ponctuation disparaît.
+const floorKeys = keyMemory((text) => text
+  .normalize("NFD")
+  .replace(/\p{M}/gu, "")
+  .toLocaleLowerCase("fr")
+  .replace(/\+\s*(?=\d)/g, "p")
+  .replace(/[-–−]\s*(?=\d)/g, "m")
+  .replace(/[^a-z0-9]+/g, ""));
+
 export function floorKeyOf(value) {
-  return toText(value)
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLocaleLowerCase("fr")
-    .replace(/\+\s*(?=\d)/g, "p")
-    .replace(/[-–−]\s*(?=\d)/g, "m")
-    .replace(/[^a-z0-9]+/g, "");
+  return floorKeys(value);
 }
 
 // Ligne propre à la vue Synthese : nommée, sans type de document. Un N° (ID2) ne fait un
@@ -840,8 +866,12 @@ export function summarizeTasks(tasks) {
   };
 }
 
+// Les règles de tri sont préparées une fois : `localeCompare` les reconstruit à chaque comparaison,
+// ce qui prenait un tiers du calcul des sections.
+const NAME_COLLATOR = new Intl.Collator("fr", { sensitivity: "base", numeric: true });
+
 function compareNames(left, right) {
-  return left.localeCompare(right, "fr", { sensitivity: "base", numeric: true });
+  return NAME_COLLATOR.compare(left, right);
 }
 
 function compareTasks(left, right) {
@@ -1089,10 +1119,19 @@ export function buildSections({ rows = [], sharedZones = [], zoneFilter = "" } =
     .map(([zoneKey, zoneName]) => toSection(zoneKey, zoneName));
   if (tasksByZone.has(NO_ZONE_KEY)) sections.push(toSection(NO_ZONE_KEY, ""));
 
+  return filterSections(sections, zoneFilter);
+}
+
+// Les sections d'un filtre de zone, tirées des sections de tout le projet : la seule section de
+// cette zone — les mêmes objets, sans copie — ou, pour une zone qu'aucune ligne ne porte, une section
+// vide à son nom. Sans filtre : les sections telles quelles.
+export function filterSections(sections, zoneFilter = "") {
   const filterKey = zoneKeyOf(zoneFilter);
   if (!filterKey) return sections;
   const filtered = sections.filter((section) => section.zoneKey === filterKey);
-  return filtered.length ? filtered : [toSection(filterKey, toText(zoneFilter))];
+  if (filtered.length) return filtered;
+  const zoneName = toText(zoneFilter);
+  return [{ zoneKey: filterKey, zoneName, label: zoneName || NO_ZONE_LABEL, tasks: [], summary: null, floors: [], items: [] }];
 }
 
 // Clé de repli d'un étage (un même nom d'étage peut exister dans deux zones).

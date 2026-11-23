@@ -44,12 +44,28 @@ test("le bouton Durées est masqué dans la vue Synthese", () => {
 
 test("les scripts sont servis dans leur nouvelle version", () => {
   assert.equal(html.includes("20260923-zones1"), false);
-  assert.ok(html.includes("main.js?v=20261117-reperes3"));
+  assert.ok(html.includes("main.js?v=20261123-fluide2"));
 });
 
 test("la surveillance de Planning_Projet de main.js rafraîchit aussi le tableau de tâches", () => {
   const watcher = sliceBetween(mainJs, "function bindPlanningDataRefresh(", "function bindPlanningServiceRefresh(");
   assert.match(watcher, /if \(tables\.includes\("Planning_Projet"\)\) void syntheseTasks\?\.refresh\(\);/);
+});
+
+// Chaque saisie du tableau de tâches relance le chargement du planning Structure, masqué dans la vue
+// Synthese : ses données d'entrées (References2) ne servent qu'aux barres de la frise, elles ne sont
+// pas relues. La liste des zones du bandeau et la période (frise masquée) restent tenues à jour.
+test("vue Synthese affichée : les données d'entrées du planning Structure masqué ne sont pas relues", () => {
+  const hidden = sliceBetween(mainJs, "function isPlanningHiddenBySyntheseSpace(", "function createSyntheseGanttForTable(");
+  assert.match(hidden, /return syntheseSpaceActive && currentServiceName\(\) === SYNTHESE_SERVICE_NAME;/);
+  const refresh = sliceBetween(mainJs, "async function performPlanningRefresh(", "async function drainPlanningRefreshQueue(");
+  assert.match(
+    refresh,
+    /cachedPlanningReferenceReceptionLookup = isPlanningHiddenBySyntheseSpace\(\)\s*\? new Map\(\)\s*: await fetchPlanningReferenceReceptionSummaries\(planningRows\);/
+  );
+  assert.equal(refresh.split("fetchPlanningReferenceReceptionSummaries(").length - 1, 1, "une seule lecture, celle-là");
+  assert.match(refresh, /updateZoneSelector\(zoneOptions,/, "les zones du bandeau suivent toujours");
+  assert.match(refresh, /renderPlanningTimeline\(timelineData\);/, "la frise masquée garde sa période pour le Gantt");
 });
 
 test("changement de projet : le filtre de zone du tableau suit tout de suite", () => {

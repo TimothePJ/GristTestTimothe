@@ -89,9 +89,34 @@ export function snapToWorkingRange(start, end) {
   return first <= last ? { start: first, end: last } : null;
 }
 
+// Cumul des jours ouvrés depuis le 1er janvier 2000, complété à la demande : workingDaysBefore[i] est
+// le nombre de jours ouvrés parmi les i premiers jours. Compter une plage devient une soustraction :
+// le récapitulatif de chaque zone, étage et cycle n'est plus un parcours jour par jour à chaque dessin.
+const CUMUL_FIRST_YEAR = 2000;
+const CUMUL_LAST_YEAR = 2100;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const workingDaysBefore = [0];
+
+// Rang du jour calendaire local d'une date dans le cumul (0 : 1er janvier 2000), sans heure ni fuseau.
+function cumulIndex(date) {
+  return (Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) - Date.UTC(CUMUL_FIRST_YEAR, 0, 1)) / DAY_MS;
+}
+
+function workingDaysUpTo(index) {
+  for (let next = workingDaysBefore.length - 1; next < index; next += 1) {
+    const worked = isWorkingDay(new Date(CUMUL_FIRST_YEAR, 0, 1 + next)) ? 1 : 0;
+    workingDaysBefore.push(workingDaysBefore[next] + worked);
+  }
+  return workingDaysBefore[index];
+}
+
 // Jours ouvrés entre deux dates, bornes incluses.
 export function countWorkingDays(start, end) {
   if (!(start instanceof Date) || !(end instanceof Date) || end < start) return 0;
+  if (start.getFullYear() >= CUMUL_FIRST_YEAR && end.getFullYear() <= CUMUL_LAST_YEAR) {
+    return workingDaysUpTo(cumulIndex(end) + 1) - workingDaysUpTo(cumulIndex(start));
+  }
+  // Hors du cumul (date aberrante, illisible) : jour par jour.
   let count = 0;
   for (let cursor = toDay(start); cursor <= end; cursor = shiftDays(cursor, 1)) {
     if (isWorkingDay(cursor)) count += 1;

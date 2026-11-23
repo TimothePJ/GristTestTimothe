@@ -214,6 +214,88 @@ test("sans options : zone rendue, étage modifiable, panneau droit présent", ()
   assert.ok(host.querySelector(".stt-input"));
 });
 
+// Une saisie est suivie de relectures (ses propres lignes relues, les coffrages, un signal voisin) qui
+// redemandent le même tableau : ni les lignes ni le Gantt ne sont refaits.
+function makeTableWithGantt() {
+  const ganttRenders = [];
+  const ganttResizes = [];
+  const made = makeTable({}, {
+    createGantt: () => ({ render: (lines) => ganttRenders.push(lines), resize: () => ganttResizes.push(1) }),
+  });
+  return { ...made, ganttRenders, ganttResizes };
+}
+
+test("même contenu redemandé : les lignes déjà dessinées sont gardées, le Gantt n'est pas redessiné", () => {
+  const { table, lineOf, ganttRenders } = makeTableWithGantt();
+  table.render([zoneLine(), floorLine(), taskLine()], { editable: true });
+  const drawn = lineOf("task:1");
+  table.render([zoneLine(), floorLine(), taskLine()], { editable: true });
+  assert.equal(lineOf("task:1"), drawn);
+  assert.equal(ganttRenders.length, 1);
+});
+
+test("contenu changé : le tableau et le Gantt sont redessinés", () => {
+  const { table, lineOf, ganttRenders } = makeTableWithGantt();
+  table.render([taskLine()], { editable: true });
+  const drawn = lineOf("task:1");
+  table.render([taskLine({ end: new Date(2026, 0, 12), durationDays: 6 })], { editable: true });
+  assert.notEqual(lineOf("task:1"), drawn);
+  assert.equal(ganttRenders.length, 2);
+  assert.equal(ganttRenders[1][0].durationDays, 6);
+});
+
+test("mêmes lignes mais tableau devenu non modifiable : redessiné, plus de cellule de saisie", () => {
+  const { table, host, lineOf } = makeTableWithGantt();
+  table.render([taskLine()], { editable: true });
+  const drawn = lineOf("task:1");
+  assert.ok(host.querySelector(".stt-cell.is-editable"));
+  table.render([taskLine()], { editable: false });
+  assert.notEqual(lineOf("task:1"), drawn);
+  assert.equal(host.querySelector(".stt-cell.is-editable"), null);
+});
+
+// La vue a pu être masquée (autre service) pendant que la fenêtre changeait de taille : au retour, le
+// même contenu redemandé recale la largeur du tableau sur la place disponible. Les lignes, elles, n'ont
+// pas changé : elles gardent leur élément.
+test("même contenu mais place disponible changée depuis le dernier dessin : largeur recalée, Gantt prévenu", () => {
+  const { table, host, lineOf, ganttRenders, ganttResizes } = makeTableWithGantt();
+  const root = host.querySelector(".stt");
+  const leftWidth = () => Number.parseInt(root.style["--stt-left-width"], 10);
+  table.render([taskLine()], { editable: true });
+  const drawn = lineOf("task:1");
+  const wide = leftWidth();
+  const resizes = ganttResizes.length;
+  root.clientWidth = 640;
+  table.render([taskLine()], { editable: true });
+  assert.ok(leftWidth() < wide, `largeur du tableau : ${wide} px puis ${leftWidth()} px`);
+  assert.equal(ganttResizes.length, resizes + 1, "le Gantt est prévenu de sa nouvelle largeur");
+  assert.equal(lineOf("task:1"), drawn, "les lignes ne sont pas refaites pour autant");
+  assert.equal(ganttRenders.length, 1, "ni les barres");
+  table.render([taskLine()], { editable: true });
+  assert.equal(ganttResizes.length, resizes + 1, "à largeur égale, plus rien n'est refait");
+});
+
+// Chaque dessin reposait la largeur et faisait redessiner le Gantt, même sans changement.
+test("largeur inchangée : un dessin ne fait pas redessiner le Gantt pour sa largeur", () => {
+  const { table, ganttResizes } = makeTableWithGantt();
+  table.render([taskLine()], { editable: true });
+  const resizes = ganttResizes.length;
+  table.render([taskLine({ name: "Coffrage RDC" })], { editable: true });
+  table.render([taskLine({ name: "Coffrage RDC" }), taskLine({ key: "task:2", taskId: 2 })], { editable: true });
+  assert.equal(ganttResizes.length, resizes);
+});
+
+test("saisie annulée sans changement : la cellule redevient une cellule", async () => {
+  const { table, host, lineOf } = makeTableWithGantt();
+  table.render([taskLine()], { editable: true });
+  click(lineOf("task:1").querySelector(".stt-cell--duration"));
+  assert.ok(host.querySelector(".stt-input"));
+  dispatch(host.querySelector(".stt-input"), "keydown", { key: "Escape", preventDefault() {} });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(host.querySelector(".stt-input"), null);
+  assert.equal(lineOf("task:1").querySelector(".stt-cell--duration").textContent, "5 jours");
+});
+
 test("storageKeys : largeurs lues et écrites sous les clés fournies", () => {
   storage.clear();
   storage.set("k.left", "900");
@@ -315,4 +397,194 @@ test("repère de la tâche contrôlée : après son nom et son mode, dans le tab
   const inWindow = makeTable({}, { templateMode: true });
   inWindow.table.render([taskLine({ isControlTask: true, isChosenControlTask: false })], { editable: false });
   assert.ok(inWindow.lineOf("task:1").querySelector(".stt-control-task"));
+});
+
+// ---------- Seules les lignes modifiées sont refaites ----------
+
+const bodyOf = (host) => host.querySelector(".stt-body");
+const keysOf = (host) => bodyOf(host).children.map((element) => element.dataset.lineKey);
+const elementsOf = (host) => new Map(bodyOf(host).children.map((element) => [element.dataset.lineKey, element]));
+const otherTask = (id, overrides = {}) => taskLine({ key: `task:${id}`, taskId: id, name: `Tâche ${id}`, ...overrides });
+
+test("une valeur changée dans une ligne : seule cette ligne est refaite, les autres gardent leur élément", () => {
+  const { table, host } = makeTableWithGantt();
+  table.render([zoneLine(), floorLine(), taskLine(), otherTask(2)], { editable: true });
+  const before = elementsOf(host);
+  table.render([zoneLine(), floorLine(), taskLine(), otherTask(2, { durationDays: 8 })], { editable: true });
+  const after = elementsOf(host);
+  assert.deepEqual(keysOf(host), ["zone:zone1", "floor:zone1/ss1", "task:1", "task:2"]);
+  ["zone:zone1", "floor:zone1/ss1", "task:1"].forEach((key) => assert.equal(after.get(key), before.get(key), key));
+  assert.notEqual(after.get("task:2"), before.get("task:2"));
+  assert.equal(after.get("task:2").querySelector(".stt-cell--duration").textContent, "8 jours");
+});
+
+test("ligne ajoutée, retirée ou déplacée : les lignes inchangées gardent leur élément, l'ordre du tableau suit", () => {
+  const { table, host } = makeTableWithGantt();
+  table.render([zoneLine(), floorLine(), taskLine(), otherTask(2)], { editable: true });
+  const first = elementsOf(host);
+  // Ajout au milieu.
+  table.render([zoneLine(), floorLine(), otherTask(3), taskLine(), otherTask(2)], { editable: true });
+  assert.deepEqual(keysOf(host), ["zone:zone1", "floor:zone1/ss1", "task:3", "task:1", "task:2"]);
+  const second = elementsOf(host);
+  ["zone:zone1", "floor:zone1/ss1", "task:1", "task:2"].forEach((key) => assert.equal(second.get(key), first.get(key), key));
+  // Retrait et déplacement : la tâche 1 disparaît, la tâche 2 passe avant la tâche 3.
+  table.render([zoneLine(), floorLine(), otherTask(2), otherTask(3)], { editable: true });
+  assert.deepEqual(keysOf(host), ["zone:zone1", "floor:zone1/ss1", "task:2", "task:3"]);
+  const third = elementsOf(host);
+  ["zone:zone1", "floor:zone1/ss1", "task:2", "task:3"].forEach((key) => assert.equal(third.get(key), second.get(key), key));
+  assert.equal(first.get("task:1").parentNode, null, "la ligne retirée a quitté le tableau");
+  // Une ligne remontée tout en haut, une autre descendue tout en bas.
+  table.render([otherTask(3), floorLine(), otherTask(2), zoneLine()], { editable: true });
+  assert.deepEqual(keysOf(host), ["task:3", "floor:zone1/ss1", "task:2", "zone:zone1"]);
+  const fourth = elementsOf(host);
+  ["zone:zone1", "floor:zone1/ss1", "task:2", "task:3"].forEach((key) => assert.equal(fourth.get(key), third.get(key), key));
+});
+
+test("fin de saisie sans changement : seule la ligne saisie est refaite, le Gantt n'est pas redessiné", async () => {
+  const { table, host, lineOf, ganttRenders } = makeTableWithGantt();
+  table.render([zoneLine(), floorLine(), taskLine(), otherTask(2)], { editable: true });
+  const before = elementsOf(host);
+  click(lineOf("task:1").querySelector(".stt-cell--duration"));
+  assert.ok(host.querySelector(".stt-input"));
+  dispatch(host.querySelector(".stt-input"), "keydown", { key: "Escape", preventDefault() {} });
+  await new Promise((resolve) => setImmediate(resolve));
+  const after = elementsOf(host);
+  assert.equal(host.querySelector(".stt-input"), null);
+  ["zone:zone1", "floor:zone1/ss1", "task:2"].forEach((key) => assert.equal(after.get(key), before.get(key), key));
+  assert.notEqual(after.get("task:1"), before.get("task:1"));
+  assert.equal(after.get("task:1").querySelector(".stt-cell--duration").textContent, "5 jours");
+  assert.equal(ganttRenders.length, 1);
+});
+
+test("Gantt : redessiné quand une ligne change, s'ajoute, disparaît ou change de place ; pas quand seuls les droits changent", () => {
+  const { table, host, lineOf, ganttRenders } = makeTableWithGantt();
+  table.render([zoneLine(), taskLine(), otherTask(2)], { editable: true });
+  assert.equal(ganttRenders.length, 1);
+  table.render([zoneLine(), taskLine({ name: "Coffrage RDC" }), otherTask(2)], { editable: true });
+  assert.equal(ganttRenders.length, 2, "ligne changée");
+  table.render([zoneLine(), taskLine({ name: "Coffrage RDC" }), otherTask(2), otherTask(3)], { editable: true });
+  assert.equal(ganttRenders.length, 3, "ligne ajoutée");
+  table.render([zoneLine(), otherTask(2), taskLine({ name: "Coffrage RDC" }), otherTask(3)], { editable: true });
+  assert.equal(ganttRenders.length, 4, "ligne déplacée");
+  table.render([zoneLine(), otherTask(2), otherTask(3)], { editable: true });
+  assert.equal(ganttRenders.length, 5, "ligne retirée");
+  assert.deepEqual(ganttRenders[4].map((line) => line.key), ["zone:zone1", "task:2", "task:3"]);
+  const drawn = lineOf("task:2");
+  table.render([zoneLine(), otherTask(2), otherTask(3)], { editable: false });
+  assert.equal(ganttRenders.length, 5, "seuls les droits changent : les barres sont les mêmes");
+  assert.notEqual(lineOf("task:2"), drawn, "mais les lignes du tableau sont refaites");
+  assert.equal(host.querySelector(".stt-cell.is-editable"), null);
+});
+
+test("tableau vidé par un message, puis rempli de nouveau : lignes et Gantt suivent", () => {
+  const { table, host, ganttRenders } = makeTableWithGantt();
+  table.render([zoneLine(), taskLine()], { editable: true });
+  table.render([], { editable: true, emptyMessage: "Chargement des tâches…" });
+  assert.deepEqual(keysOf(host), []);
+  assert.deepEqual(ganttRenders.at(-1), []);
+  table.render([zoneLine(), taskLine()], { editable: true });
+  assert.deepEqual(keysOf(host), ["zone:zone1", "task:1"]);
+  assert.deepEqual(ganttRenders.at(-1).map((line) => line.key), ["zone:zone1", "task:1"]);
+  assert.equal(ganttRenders.length, 3);
+});
+
+// Garde-fou : un tableau redessiné de proche en proche doit montrer exactement ce que montre un tableau
+// neuf dessiné d'un coup avec les mêmes lignes — sur une longue suite de changements tirés au hasard.
+function snapshot(element) {
+  const style = Object.fromEntries(Object.entries(element.style || {}).filter(([, value]) => typeof value !== "function"));
+  return {
+    tag: element.tagName,
+    classes: [...element.classes].sort(),
+    dataset: { ...element.dataset },
+    attributes: { ...(element.attributes || {}) },
+    style,
+    title: element.title ?? null,
+    tabIndex: element.tabIndex ?? null,
+    text: element.children.length ? "" : element.textContent,
+    children: element.children.map(snapshot),
+  };
+}
+
+test("tableau redessiné de proche en proche : identique à un tableau neuf, sur 300 changements au hasard", () => {
+  let seed = 4242;
+  const random = (max) => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed % max;
+  };
+  let nextId = 10;
+  const newTask = () => {
+    nextId += 1;
+    return otherTask(nextId, { level: 1 + random(3), durationDays: random(9), isMilestone: random(6) === 0 });
+  };
+  let lines = [zoneLine(), floorLine(), groupLine(), taskLine(), otherTask(2), otherTask(3), otherTask(4)];
+  let options = { editable: true, canMoveCycles: true };
+  const { table, host } = makeTableWithGantt();
+  const changes = [
+    () => {
+      const at = random(lines.length);
+      lines = lines.map((line, index) => (index === at ? { ...line, name: `${line.name} ${random(9)}` } : line));
+    },
+    () => {
+      lines = lines.map((line) => (line.kind === "task" && random(3) === 0
+        ? { ...line, durationDays: random(15), end: new Date(2026, 0, 9 + random(20)) }
+        : line));
+    },
+    () => {
+      lines = lines.map((line) => (line.kind === "task" && random(4) === 0
+        ? { ...line, link: { predId: 1, type: ["FD", "DD", "FF"][random(3)], lag: 0 }, linkText: `${random(30)}FD` }
+        : line));
+    },
+    () => {
+      lines = lines.map((line) => (line.kind !== "task" && random(2) === 0 ? { ...line, collapsed: !line.collapsed } : line));
+    },
+    () => {
+      lines = lines.map((line) => (line.kind === "task" && random(5) === 0
+        ? { ...line, isOverEndLimit: !line.isOverEndLimit, nature: random(2) ? "reunion" : "" }
+        : line));
+    },
+    () => {
+      lines = lines.map((line, index) => ({ ...line, lineNumber: index + 1 }));
+    },
+    () => {
+      const at = random(lines.length + 1);
+      lines = [...lines.slice(0, at), newTask(), ...lines.slice(at)];
+    },
+    () => {
+      const at = random(lines.length + 1);
+      lines = [...lines.slice(0, at), newTask(), newTask(), ...lines.slice(at)];
+    },
+    () => {
+      if (lines.length <= 2) return;
+      const at = random(lines.length);
+      lines = lines.filter((_, index) => index !== at);
+    },
+    () => {
+      if (lines.length < 2) return;
+      const from = random(lines.length);
+      const moved = lines[from];
+      const rest = lines.filter((_, index) => index !== from);
+      const to = random(rest.length + 1);
+      lines = [...rest.slice(0, to), moved, ...rest.slice(to)];
+    },
+    () => {
+      lines = [...lines].reverse();
+    },
+    () => {
+      options = { ...options, editable: !options.editable };
+    },
+    () => {
+      options = { ...options, canMoveCycles: !options.canMoveCycles };
+    },
+    () => {
+      options = { ...options, emptyMessage: options.emptyMessage ? "" : "Chargement des tâches…" };
+    },
+  ];
+  for (let step = 1; step <= 300; step += 1) {
+    const index = random(changes.length);
+    changes[index]();
+    table.render(lines, options);
+    const fresh = makeTableWithGantt();
+    fresh.table.render(lines, options);
+    assert.deepEqual(snapshot(bodyOf(host)), snapshot(bodyOf(fresh.host)), `changement ${step} (n° ${index})`);
+  }
 });

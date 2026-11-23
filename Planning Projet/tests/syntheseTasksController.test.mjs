@@ -269,6 +269,52 @@ test("changement de projet : une réponse arrivée trop tard est ignorée", asyn
   assert.deepEqual(env.lastRender().lines.map((line) => line.name), ["ZONE 01"]);
 });
 
+// La couche partagée rend telle quelle une lecture croisée par une écriture, « peut-être en retard » :
+// arrivée après l'enregistrement, elle remettrait l'ancienne valeur à l'écran jusqu'à la relecture suivante.
+test("lecture partie avant une écriture du tableau et revenue après : jetée et refaite, l'ancienne valeur ne revient pas", async () => {
+  const pending = manualWrites();
+  const env = setup({ applyUserActions: pending.applyUserActions });
+  await activate(env);
+  let releaseRead;
+  env.context.nextFetch = () => new Promise((resolve) => { releaseRead = resolve; });
+  const reading = env.controller.refresh();
+  env.context.nextFetch = null;
+  const rendersBeforeEdit = env.table.renders.length;
+  env.table.callbacks.onEdit(5, "duration", "5");
+  pending.calls[0].resolve({ retValues: [null] });
+  await flush();
+  // Grist a enregistré : une lecture faite maintenant rapporte la nouvelle durée.
+  env.context.rows = planningRows().map((row) => (row.id === 5 ? { ...row, Diff_armature: "2026-10-15", Duree_1: 5 } : row));
+  const fetchesBeforeReturn = env.context.fetches.length;
+  releaseRead(planningRows());
+  await reading;
+  await flush();
+  const shown = env.table.renders.slice(rendersBeforeEdit).map(({ lines }) => lines.find((line) => line.taskId === 5).durationDays);
+  assert.ok(shown.length > 0 && shown.every((days) => days === 5), `durées affichées depuis la saisie : ${shown.join(", ")}`);
+  assert.equal(env.context.fetches.length, fetchesBeforeReturn + 1, "la lecture en retard est refaite");
+  assert.deepEqual(env.context.fetches.at(-1).options, { forceRefresh: true }, "hors cache");
+});
+
+test("écriture refusée pendant une lecture : rien n'a changé dans Grist, la lecture est gardée sans en refaire une", async () => {
+  const pending = manualWrites();
+  const env = setup({ applyUserActions: pending.applyUserActions });
+  await activate(env);
+  let releaseRead;
+  env.context.nextFetch = () => new Promise((resolve) => { releaseRead = resolve; });
+  const reading = env.controller.refresh();
+  env.context.nextFetch = null;
+  env.table.callbacks.onEdit(5, "duration", "5");
+  pending.calls[0].reject(new Error("refus"));
+  await flush();
+  const fetchesBeforeReturn = env.context.fetches.length;
+  releaseRead(planningRows().map((row) => (row.id === 5 ? { ...row, Taches: "Visa MOE et BET" } : row)));
+  await reading;
+  await flush();
+  assert.equal(env.context.fetches.length, fetchesBeforeReturn);
+  assert.equal(env.taskLine(5).name, "Visa MOE et BET");
+  assert.equal(env.taskLine(5).durationDays, 11);
+});
+
 test("refresh() relit le cache frais ; inactif, il ne lit rien", async () => {
   const env = setup();
   await activate(env);
@@ -1208,6 +1254,22 @@ test("le planning Structure est relu quand Planning_Projet change : la limite su
   assert.deepEqual(limitOf(env, 222), ["2026-02-23", false]);
 });
 
+// Chaque saisie du tableau fait relire le planning Structure, qui n'a presque jamais bougé : sans
+// changement, rien n'est recalculé ni redessiné.
+test("planning Structure relu sans changement : le tableau n'est pas redessiné ; un début changé l'est", async () => {
+  const formwork = withFormwork(new Date(2026, 1, 20));
+  const env = linkedFloor(formwork);
+  await activate(env);
+  const renders = env.table.renders.length;
+  await env.controller.refreshFormworkStarts();
+  assert.equal(formwork.reads, 2, "la lecture a bien eu lieu");
+  assert.equal(env.table.renders.length, renders);
+  formwork.start = new Date(2026, 1, 23);
+  await env.controller.refreshFormworkStarts();
+  assert.equal(env.table.renders.length, renders + 1);
+  assert.deepEqual(limitOf(env, 222), ["2026-02-23", false]);
+});
+
 // Le tableau n'écrit que des lignes Synthese : le changement de Planning_Projet signalé pendant
 // une de ses écritures vient de lui, les coffrages n'ont pas bougé.
 test("le planning Structure n'est pas relu pendant une écriture du tableau lui-même", async () => {
@@ -1385,4 +1447,56 @@ test("« Editer » désactivé : choisir une tâche contrôlée est refusé", as
   assert.equal(env.writes.length, 0);
   assert.equal(lastStatus(env).tone, "error");
   assert.match(lastStatus(env).text, /Activez « Editer »/);
+});
+
+// ---------- Sections gardées en mémoire tant que les données n'ont pas changé ----------
+
+// Le lien d'une tâche affichée est l'objet même que portent les sections : le retrouver identique
+// d'un dessin à l'autre montre qu'elles n'ont pas été rebâties.
+function memoryRows() {
+  const base = { NomProjet: "HOTEL DIEU", Type_doc: "", ID2: "", Groupe: "", Etage: false, Nature: "", Parent: "" };
+  return [
+    { ...base, id: 5, Taches: "Visa MOE", Zone: "Zone Z2A", Lien: "", Diff_coffrage: "2026-10-09", Diff_armature: "2026-10-23", Duree_1: 11 },
+    { ...base, id: 6, Taches: "Plans CET", Zone: "Zone Z2A", Lien: "5 FD", Diff_coffrage: "2026-10-26", Diff_armature: "2026-10-30", Duree_1: 5 },
+    { ...base, id: 7, Taches: "Synthèse RDC", Zone: "Zone B", Lien: "", Diff_coffrage: "2026-10-12", Diff_armature: "2026-10-16", Duree_1: 5 },
+  ];
+}
+
+test("vue changée sans changement de données (repli, filtre de zone) : les sections ne sont pas rebâties", async () => {
+  const env = setup({ rows: memoryRows() });
+  await activate(env);
+  const link = env.taskLine(6).link;
+  assert.deepEqual(link, { predId: 5, type: "FD", lag: 0 });
+  env.table.callbacks.onToggleZone(zoneKeyOf("Zone B"));
+  assert.equal(env.taskLine(6).link, link, "une autre zone repliée");
+  env.controller.setZoneFilter("Zone Z2A");
+  assert.deepEqual(env.lastRender().lines.map((line) => line.key), [`zone:${Z2A}`, "task:5", "task:6"]);
+  assert.equal(env.taskLine(6).link, link, "filtre sur sa zone");
+  env.controller.setZoneFilter("");
+  env.table.callbacks.onToggleZone(zoneKeyOf("Zone B"));
+  assert.equal(env.taskLine(6).link, link, "filtre retiré, zone dépliée");
+  assert.equal(env.lastRender().lines.length, 5);
+});
+
+test("données changées (saisie, puis relecture) : les sections sont rebâties avec les nouvelles valeurs", async () => {
+  const env = setup({ rows: memoryRows() });
+  await activate(env);
+  const link = env.taskLine(6).link;
+  // Visa MOE passe de 11 à 3 jours : Plans CET, qui le suit, avance.
+  env.table.callbacks.onEdit(5, "duration", "3");
+  assert.equal(env.taskLine(5).durationDays, 3, "affichée pendant l'écriture");
+  assert.notEqual(env.taskLine(6).link, link, "sections rebâties pour la saisie");
+  assert.equal(isoOf(env.taskLine(6).start), "2026-10-14");
+  await flush();
+  const afterWrite = env.taskLine(6).link;
+  // Seconde saisie, sans relecture entre les deux : elle part bien des valeurs enregistrées.
+  env.table.callbacks.onEdit(5, "duration", "4");
+  assert.notEqual(env.taskLine(6).link, afterWrite);
+  assert.equal(isoOf(env.taskLine(6).start), "2026-10-15");
+  await flush();
+  // Relecture : un autre utilisateur a renommé la tâche.
+  env.context.rows = memoryRows().map((row) => (row.id === 6 ? { ...row, Taches: "Plans CET indice B" } : row));
+  await env.controller.refresh();
+  assert.equal(env.taskLine(6).name, "Plans CET indice B");
+  assert.equal(env.taskLine(5).durationDays, 11, "les valeurs relues remplacent tout");
 });

@@ -18,6 +18,7 @@ import {
   buildRowModel,
   buildSections,
   dateFieldsOf,
+  filterSections,
   detectFloorColumn,
   detectFormworkCheckColumn,
   detectOrderColumn,
@@ -87,8 +88,12 @@ import {
   readControlTasks,
   readFloorLinks,
 } from "../services/structureLinkModel.js";
+import { remember } from "../utils/remember.js";
+import { sameValue } from "../utils/sameValue.js";
 
 const SAVING_DELAY_MS = 1000;
+// Projet sans zone connue des autres services : toujours la même liste (voir remember).
+const NO_SHARED_ZONES = Object.freeze([]);
 
 // Saisies qui changent les dates : les tâches liées en aval suivent.
 const DATE_FIELDS = new Set(["start", "end", "duration"]);
@@ -236,6 +241,9 @@ export function createSyntheseTasksController({
   let pendingOps = [];
   let writeQueue = Promise.resolve();
   let queuedWrites = 0;
+  // Nombre d'écritures du tableau enregistrées par Grist : une lecture qui en a croisé une a pu
+  // partir avant elle (voir load).
+  let savedWrites = 0;
   let savingTimer = null;
   let savingShown = false;
   let layoutSaving = false;
@@ -301,7 +309,7 @@ export function createSyntheseTasksController({
   }
 
   function getSharedZones(project) {
-    return projectKeysOf(project).some((key) => sharedZonesProjectKeys.has(key)) ? sharedZones : [];
+    return projectKeysOf(project).some((key) => sharedZonesProjectKeys.has(key)) ? sharedZones : NO_SHARED_ZONES;
   }
 
   // Barre d'état : une erreur reste jusqu'à la saisie acceptée suivante ; ni un message
@@ -338,32 +346,56 @@ export function createSyntheseTasksController({
     );
   }
 
-  // Lignes lues dans Grist, avec par-dessus les opérations pas encore enregistrées : une
-  // relecture pendant une écriture ne fait ni réapparaître une ancienne valeur, ni revenir
-  // une ligne en cours de suppression.
-  function displayedRows() {
-    if (!pendingOps.length) return rows;
+  // Ce qui se calcule à partir des lignes est gardé tant que ses sources sont les mêmes (voir
+  // remember) : replier une zone, filtrer, ou enchaîner plusieurs calculs dans une même action ne
+  // rebâtit rien. La règle qui le permet : `rows`, `pendingOps` et `sharedZones` ne sont jamais
+  // modifiés sur place — chaque changement en fait une nouvelle liste — et aucun calcul ne modifie
+  // les lignes ni les sections qu'il reçoit.
+  const shownRowsOf = remember((readRows, ops) => {
+    if (!ops.length) return readRows;
     const overlay = new Map();
     const removed = new Set();
-    pendingOps.forEach((op) => {
+    ops.forEach((op) => {
       op.changes.forEach((fields, rowId) => overlay.set(rowId, { ...overlay.get(rowId), ...fields }));
       op.removals.forEach((rowId) => removed.add(rowId));
     });
-    return rows
+    return readRows
       .filter((row) => !removed.has(Number(row?.[TASK_COLUMNS.id])))
       .map((row) => {
         const fields = overlay.get(Number(row?.[TASK_COLUMNS.id]));
         return fields ? { ...row, ...fields } : row;
       });
+  });
+  const sectionsOf = remember((shownRows, zones) => buildSections({ rows: shownRows, sharedZones: zones }));
+  const filteredSectionsOf = remember((all, filter) => filterSections(all, filter));
+  const endLimitsOf = remember((shownRows, starts) => controlTaskEndLimits({ syntheseRows: shownRows, formworkStarts: starts }));
+  const controlTasksOf = remember((shownRows) => readControlTasks(shownRows));
+  const floorLinksOf = remember((shownRows) => readFloorLinks(shownRows));
+  const cycleModesOf = remember((shownSections) => cycleModes(shownSections));
+  const lineNumbersFor = remember((all, shownLayout) => lineNumbersOf(all, { layout: shownLayout, skipZoneLines }));
+
+  // Lignes lues dans Grist, avec par-dessus les opérations pas encore enregistrées : une
+  // relecture pendant une écriture ne fait ni réapparaître une ancienne valeur, ni revenir
+  // une ligne en cours de suppression.
+  function displayedRows() {
+    return shownRowsOf(rows, pendingOps);
+  }
+
+  // Lignes de `list` avec, par-dessus, des champs par ligne : une nouvelle liste (voir shownRowsOf).
+  function withFields(list, fieldsById) {
+    if (!fieldsById?.size) return list;
+    return list.map((row) => {
+      const fields = fieldsById.get(Number(row?.[TASK_COLUMNS.id]));
+      return fields ? { ...row, ...fields } : row;
+    });
   }
 
   function render() {
     if (!active) return;
     const project = getProject();
     const shownRows = project ? displayedRows() : [];
-    sections = project
-      ? buildSections({ rows: shownRows, sharedZones: getSharedZones(project), zoneFilter })
-      : [];
+    const all = project ? allSections() : [];
+    sections = filteredSectionsOf(all, zoneFilter);
     // La tâche contrôlée de chaque étage (cochée, sinon le plan de réservations du cycle 3)
     // porte sa limite de fin, le début du plan de coffrage de son étage : le tableau et le
     // Gantt la signalent quand elle la dépasse, et son menu dit si elle est contrôlée. Chaque
@@ -376,17 +408,13 @@ export function createSyntheseTasksController({
       collapsedStoreyKeys,
       layout,
     });
-    lines = applyEndLimits(lines, controlTaskEndLimits({ syntheseRows: shownRows, formworkStarts }));
-    lines = applyControlTasks(lines, readControlTasks(shownRows));
-    lines = applyFloorLinks(lines, readFloorLinks(shownRows));
-    lines = applyCycleModes(lines, cycleModes(sections));
+    lines = applyEndLimits(lines, endLimitsOf(shownRows, formworkStarts));
+    lines = applyControlTasks(lines, controlTasksOf(shownRows));
+    lines = applyFloorLinks(lines, floorLinksOf(shownRows));
+    lines = applyCycleModes(lines, cycleModesOf(sections));
     // Numéros de ligne sur tout le projet, tout déplié, dans l'ordre de l'affichage courant : replier
-    // ou filtrer une zone ne les change pas. Sans filtre de zone, les sections affichées sont déjà tout
-    // le projet : pas de second calcul.
-    const numberingSections = project && zoneFilter
-      ? buildSections({ rows: shownRows, sharedZones: getSharedZones(project) })
-      : sections;
-    lines = applyLineNumbers(lines, lineNumbersOf(numberingSections, { layout, skipZoneLines }));
+    // ou filtrer une zone ne les change pas.
+    lines = applyLineNumbers(lines, lineNumbersFor(all, layout));
     let emptyMessage = "";
     if (!project) emptyMessage = MESSAGES.noProject;
     else if (!loaded) emptyMessage = MESSAGES.loading;
@@ -421,7 +449,10 @@ export function createSyntheseTasksController({
       return;
     }
     if (token !== startsToken || !active) return;
-    formworkStarts = Array.isArray(next) ? next : [];
+    const starts = Array.isArray(next) ? next : [];
+    // Relus sans avoir bougé (chaque saisie du tableau les fait relire) : rien à recalculer ni à redessiner.
+    if (sameValue(formworkStarts, starts)) return;
+    formworkStarts = starts;
     render();
   }
 
@@ -457,6 +488,7 @@ export function createSyntheseTasksController({
       return;
     }
     let nextRows;
+    const savedAtStart = savedWrites;
     try {
       nextRows = await context.fetchContextRows(
         PLANNING_TABLE,
@@ -475,6 +507,13 @@ export function createSyntheseTasksController({
       return;
     }
     if (token !== loadToken || !active) return;
+    // Une écriture du tableau a été enregistrée pendant cette lecture : partie avant elle, elle
+    // rapporterait l'ancien état, et l'afficherait une fois l'écriture sortie de pendingOps. Elle est
+    // jetée, et refaite hors cache.
+    if (savedAtStart !== savedWrites) {
+      await load({ forceRefresh: true });
+      return;
+    }
     rows = Array.isArray(nextRows) ? nextRows : [];
     floorColumn = detectFloorColumn(rows);
     templateColumns = detectTemplateColumns(rows);
@@ -590,7 +629,7 @@ export function createSyntheseTasksController({
   // lues prennent ses valeurs en attendant la relecture ; échouée, elle disparaît de
   // l'affichage, avec les suivantes qui en dépendaient.
   function submit(op, { onSuccess, onFailure } = {}) {
-    pendingOps.push(op);
+    pendingOps = [...pendingOps, op];
     render();
     return enqueue(async () => {
       if (!pendingOps.includes(op)) return;
@@ -604,10 +643,8 @@ export function createSyntheseTasksController({
         onFailure?.(error, dropped);
         return;
       }
-      op.changes.forEach((fields, rowId) => {
-        const row = findRow(rowId);
-        if (row) Object.assign(row, fields);
-      });
+      savedWrites += 1;
+      rows = withFields(rows, op.changes);
       if (op.removals.size) rows = rows.filter((row) => !op.removals.has(Number(row?.[TASK_COLUMNS.id])));
       pendingOps = pendingOps.filter((candidate) => candidate !== op);
       onSuccess?.(result);
@@ -851,10 +888,7 @@ export function createSyntheseTasksController({
         const newId = Number(twoSteps ? result?.newId : result?.retValues?.[0]);
         const hasId = Number.isInteger(newId) && newId > 0;
         if (hasId && !findRow(newId)) rows = [...rows, { id: newId, ...fields }];
-        (result?.followChanges || new Map()).forEach((followFields, rowId) => {
-          const row = findRow(rowId);
-          if (row) Object.assign(row, followFields);
-        });
+        rows = withFields(rows, result?.followChanges);
         collapsedZoneKeys.delete(section.zoneKey);
         if (floor) collapsedFloorKeys.delete(floorCollapseKey(section.zoneKey, floor.key));
         // Affichage par étage : la ligne étage qui reçoit (« Sans étage » au niveau zone).
@@ -1557,7 +1591,7 @@ export function createSyntheseTasksController({
   // montre toutes.
   function allSections() {
     const project = getProject();
-    return project ? buildSections({ rows: displayedRows(), sharedZones: getSharedZones(project) }) : [];
+    return project ? sectionsOf(displayedRows(), getSharedZones(project)) : [];
   }
 
   // Fenêtre « Lien Structure » : mémorise le coffrage d'un étage (formworkNumber : son N° ;
