@@ -318,6 +318,26 @@ absent ; un remplacement portant le même nom ne crée aucune ligne de catalogue
 Le cache local de `MsProjectNom` est invalidé après ces mutations. Aucun filtre
 `Service` ou `NomProjet` n'est inventé pour ces tables.
 
+Quand MS Project recale les lignes de `Planning_Projet` liées à une tâche
+(édition d'une date de début, import XML), il ne lit plus la table entière : une
+requête REST porte le filtre exact `Ligne_planning = numéro unique` (édition) ou
+`Nom_XML = nom du fichier` (import). Les données d'entrée des lignes dont le
+début de barre bouge sont lues dans `References2` par le filtre document
+(`NomDocument`, `NumeroDocument`), par lots de 20 lignes. Une réponse filtrée
+vide n'est crue qu'une fois la table vue par REST : sinon une vérification
+limitée à une ligne est faite sur cette table et, si elle est vide elle aussi
+(jeton plafonné au rôle lecteur, propriétaire absent de `Team`), la table est
+relue en entier par `fetchTable` et REST n'est plus tenté pour elle jusqu'au
+rechargement du widget. Même repli si la requête filtrée échoue ; au repli, la
+lecture complète de `References2` est gardée 30 s et oubliée dès que le widget y
+écrit. Les dates sont calculées par les modules partagés avec Planning Projet
+(`gestion-depenses2/assets/js/utils/msProjectPlanningDates.js` et
+`planningReferenceDeadlines.js`) ; seules les lignes dont une date change sont
+écrites. Leurs données d'entrée partent dans une seconde écriture, limitée à
+celles du même `Service` que la ligne (une ligne ou une référence sans service
+n'est pas restreinte) : si elle est refusée, les dates du planning restent
+écrites et le message d'état le signale.
+
 Avant la première lecture métier REST de chaque jeton, une sonde légère demande
 au plus une ligne de `Projets2`, sans cache. Si le catalogue brut déjà chargé
 contient des projets mais que le jeton REST répond en HTTP `200` avec

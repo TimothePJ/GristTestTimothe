@@ -103,8 +103,8 @@ test("main.js : bindSyntheseParameterDialog est appelé au démarrage", () => {
 });
 
 test("versions servies", () => {
-  assert.ok(html.includes("main.js?v=20261123-fluide2"));
-  assert.ok(html.includes("styles.css?v=20261123-fluide2"));
+  assert.ok(html.includes("main.js?v=20261123-glisser1"));
+  assert.ok(html.includes("styles.css?v=20261123-glisser1"));
 });
 
 test("main.js : erreurs d'enregistrement lisibles (userMessage), droits revérifiés, ouverture gardée", () => {

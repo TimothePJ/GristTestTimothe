@@ -93,9 +93,13 @@ function ensureImportFileInput() {
           : result.planningSyncMatchedCount > 0
             ? ", aucune date Planning_Projet modifiee"
             : ", aucune liaison Planning_Projet trouvee";
+      const referenceSyncSuffix = describeReferenceSync(
+        result.planningSyncReferenceUpdatedCount,
+        result.planningSyncReferenceFailed
+      );
 
       setMsProjectStatus(
-        `Import termine (${result.sourceFileName}) : ${result.deletedCount || 0} ancienne(s) ligne(s) supprimee(s), ${result.importedCount} ligne(s) ajoutee(s)${planningSyncSuffix}.`
+        `Import termine (${result.sourceFileName}) : ${result.deletedCount || 0} ancienne(s) ligne(s) supprimee(s), ${result.importedCount} ligne(s) ajoutee(s)${planningSyncSuffix}${referenceSyncSuffix}.`
       );
     } catch (error) {
       console.error("Erreur import XML MS Project :", error);
@@ -204,6 +208,37 @@ function applyOptimisticMsProjectRowUpdate(rowId, fieldUpdates) {
   renderMsProjectFromCache();
 }
 
+function findCachedMsProjectRow(rowId) {
+  const idColumn = APP_CONFIG.grist.msProjectTable?.columns?.id || "id";
+  const targetId = Number(rowId);
+  return (cachedMsProjectRows || []).find((row) => Number(row?.[idColumn]) === targetId) || null;
+}
+
+// Suite d'un message de synchronisation : ce que sont devenues les données d'entrée des
+// lignes déplacées. Leur écriture part après celle du planning et peut être refusée seule.
+function describeReferenceSync(referenceUpdatedCount = 0, referenceFailed = false) {
+  if (referenceFailed) return ", donnees d'entree non recalees (ecriture refusee)";
+  return referenceUpdatedCount > 0
+    ? `, ${referenceUpdatedCount} donnee(s) d'entree recalee(s)`
+    : "";
+}
+
+// Une ligne liée dont aucune date ne change n'est pas réécrite : le compte ne porte que sur
+// les lignes réellement modifiées.
+function describePlanningSync({
+  updatedCount = 0,
+  matchedCount = 0,
+  referenceUpdatedCount = 0,
+  referenceFailed = false,
+} = {}) {
+  if (updatedCount > 0) {
+    return `Sync Planning_Projet: ${updatedCount} ligne(s)${describeReferenceSync(referenceUpdatedCount, referenceFailed)}`;
+  }
+  return matchedCount > 0
+    ? "Sync Planning_Projet: dates deja a jour"
+    : "Sync Planning_Projet: aucune correspondance";
+}
+
 async function handleDateCellEdit({ rowId, field, isoDate }) {
   const columnName = resolveDateColumnName(field);
   if (!columnName) {
@@ -222,10 +257,13 @@ async function handleDateCellEdit({ rowId, field, isoDate }) {
 
     let planningSyncResult = null;
     if (field === "start") {
+      // La tâche est déjà en mémoire, avec sa nouvelle date : la synchronisation n'a pas à
+      // la relire.
       planningSyncResult = await syncPlanningDemarrageFromMsProjectStart(
         rowId,
         isoDate,
-        state.selectedProject
+        state.selectedProject,
+        { msRow: findCachedMsProjectRow(rowId) }
       );
     }
 
@@ -233,15 +271,7 @@ async function handleDateCellEdit({ rowId, field, isoDate }) {
 
     if (planningSyncResult && !planningSyncResult.skipped) {
       const baseStatus = document.getElementById("msProjectStatus")?.textContent || "";
-      if (planningSyncResult.updatedCount > 0) {
-        setMsProjectStatus(
-          `${baseStatus} | Sync Planning_Projet: ${planningSyncResult.updatedCount} ligne(s)`
-        );
-      } else {
-        setMsProjectStatus(
-          `${baseStatus} | Sync Planning_Projet: aucune correspondance`
-        );
-      }
+      setMsProjectStatus(`${baseStatus} | ${describePlanningSync(planningSyncResult)}`);
     }
   } catch (error) {
     setMsProjectStatus(`Erreur mise a jour ${fieldLabel.toLowerCase()} : ${error.message}`);
