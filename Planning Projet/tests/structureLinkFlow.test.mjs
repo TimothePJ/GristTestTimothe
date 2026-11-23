@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 
 import { createSyntheseTasksController } from "../assets/js/ui/syntheseTasksController.js";
 import { createStructureLinkDialog } from "../assets/js/ui/structureLinkDialog.js";
-import { templateRows } from "./helpers/templateRows.mjs";
+import { datedRows, templateRows } from "./helpers/templateRows.mjs";
 import { FakeElement, createFakeEnvironment, dispatch } from "./helpers/fakeDom.mjs";
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
@@ -22,10 +22,12 @@ function all(node, className) {
 }
 
 // Zone Z2A, étage SS1 du modèle (ligne-étage 201, RECEPTION 202, FOND DE PLAN 204) ; côté
-// Structure, le coffrage 3021 de la même zone, avec un 0 Prev au jeudi 27/11/25.
-async function setup() {
+// Structure, le coffrage 3021 de la même zone, avec un 0 Prev au jeudi 27/11/25. Sans `dated`,
+// l'étage sort du modèle, sans aucune date ; avec, il est daté depuis RECEPTION au 02/01/26.
+async function setup({ dated = false } = {}) {
   const state = { currentProject: { name: "HOTEL DIEU", names: ["HOTEL DIEU"] }, accessMode: "editable" };
-  const rows = templateRows({ zoneName: "Zone Z2A" }).map((row) => ({ ...row, Lien_Structure: "" }));
+  const floorRows = dated ? datedRows({ zoneName: "Zone Z2A" }) : templateRows({ zoneName: "Zone Z2A" });
+  const rows = floorRows.map((row) => ({ ...row, Lien_Structure: "" }));
   const context = {
     async fetchContextRows() {
       return rows.map((row) => ({ ...row }));
@@ -119,6 +121,32 @@ test("du glisser à Grist : le lien, la date sur RECEPTION et la cascade en une 
     all(env.elements.body, "structure-link-used").map((element) => element.textContent),
     ["lié : SS1"]
   );
+});
+
+test("étage déjà daté : le dépôt n'écrit que le lien ; « Mettre à jour » pose ensuite la date et la cascade", async () => {
+  const env = await setup({ dated: true });
+  const linkTexts = () => all(env.elements.body, "structure-link-link").map((element) => element.textContent);
+  await dropFormworkOnFloor(env);
+  assert.deepEqual(env.writes, [
+    [["BulkUpdateRecord", "Planning_Projet", [201], { Lien_Structure: ["3021"] }]],
+  ], "aucune date écrite");
+  assert.deepEqual(
+    all(env.elements.body, "structure-link-plan").map((element) => element.textContent),
+    ["Fond de plan : début Ven 02/01/26"]
+  );
+  assert.deepEqual(linkTexts(), ["3021 — PH SS1 - COF · à mettre à jour : 0 Prev le Jeu 27/11/25"]);
+  const refresh = all(env.elements.body, "structure-link-action").find((button) => button.dataset.action === "refresh");
+  dispatch(refresh, "click");
+  await flush();
+  assert.equal(env.writes.length, 2);
+  const [anchor, cascade] = env.writes[1];
+  assert.deepEqual(anchor, ["UpdateRecord", "Planning_Projet", 202, {
+    Diff_coffrage: "2025-11-27",
+    Diff_armature: "2025-11-27",
+    Duree_1: 0,
+  }]);
+  assert.ok(cascade[2].includes(204), "FOND DE PLAN suit par son lien");
+  assert.deepEqual(linkTexts(), ["3021 — PH SS1 - COF · à jour"]);
 });
 
 test("projet changé pendant que la fenêtre est ouverte : le dépôt n'écrit rien dans l'autre projet", async () => {

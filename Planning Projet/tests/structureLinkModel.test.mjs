@@ -260,6 +260,33 @@ test("état du lien de chaque étage, date 0 Prev et étages servis de chaque co
   assert.equal(formworks["3001"].zoneKey, zoneKeyOf(zone));
 });
 
+// Au dépôt d'un coffrage, la date 0 Prev n'est posée d'office que sur un étage encore sans date.
+test("étage déjà daté : son fond de plan, ou la tâche qui reçoit la date, a un début", () => {
+  const zone = "Zone 1";
+  const dated = { Diff_coffrage: "2026-01-02", Diff_armature: "2026-01-02" };
+  const fondDePlan = (id, floorName, fields) => floorTask(id, zone, floorName, `FOND DE PLAN DE SYNTHESE NIV ${floorName}`, fields);
+  const reception = (id, floorName, fields) => floorTask(id, zone, floorName, "RECEPTION ARCH/TOPO/STR", fields);
+  const syntheseRows = [
+    floor(1, zone, "A"), // pas de fond de plan
+    floor(2, zone, "B"), fondDePlan(20, "B"), // rien de daté
+    floor(3, zone, "C"), fondDePlan(30, "C", dated),
+    floor(4, zone, "D"), reception(40, "D", dated), fondDePlan(41, "D", { Lien: "40 DD" }), // seule la réception est datée
+    floor(5, zone, "E"), reception(50, "E"), fondDePlan(51, "E", { Lien: "50 DD" }),
+    floor(6, zone, "F"), reception(60, "F", dated), fondDePlan(61, "F"), // réception datée, mais sans lien avec le fond de plan
+    floor(7, zone, "G"), reception(70, "G"), fondDePlan(71, "G", { Lien: "70 DD", ...dated }), // seul le fond de plan est daté
+  ];
+  const [section] = buildStructureLink({ syntheseRows }).zones;
+  assert.deepEqual(Object.fromEntries(section.floors.map((item) => [item.name, item.isDated])), {
+    A: false,
+    B: false,
+    C: true,
+    D: true,
+    E: false,
+    F: false,
+    G: true,
+  });
+});
+
 test("deux coffrages de même N° : celui de la zone de l'étage ; sinon le premier du projet", () => {
   const syntheseRows = [
     floor(1, "Zone 1", "SS1", "3001"),

@@ -2560,9 +2560,10 @@ function bindSyntheseSpace() {
 
 // Bouton « Lien Structure » de la vue Synthese : une fenêtre montre, zone par zone, les étages
 // de Synthese en face des coffrages de Structure ; on y glisse un coffrage sur un étage pour
-// les lier et reprendre sa date prévisionnelle « 0 Prev ». Les coffrages et la liste de plans
-// sont lus pour le projet, tous services confondus ; les étages et toute écriture passent par
-// le tableau de tâches.
+// les lier et, si l'étage n'a pas encore de date, reprendre sa date prévisionnelle « 0 Prev »
+// (un étage déjà daté ne la reprend que par son bouton « Mettre à jour »). Les coffrages et la
+// liste de plans sont lus pour le projet, tous services confondus ; les étages et toute
+// écriture passent par le tableau de tâches.
 function bindStructureLinkDialog() {
   if (EMBEDDED_PLANNING_SYNC_MODE) return;
   const serviceContext = window.GristServiceContext;

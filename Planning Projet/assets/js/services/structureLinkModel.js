@@ -305,11 +305,11 @@ function linkStateOf({ number, formwork, plan, expectedStart }) {
 }
 
 // Les zones du projet (celles de tous les services, une seule par graphie, triées), chacune
-// avec ses étages de Synthese — leur coffrage lié, leur fond de plan, l'état du lien — et ses
-// coffrages de Structure — leur date 0 Prev, les étages qu'ils servent ; « Sans zone » à
-// la fin pour les coffrages qui n'en ont pas. `syntheseRows` : les lignes du tableau de tâches
-// (service Synthese) ; `projectRows` : Planning_Projet du projet, tous services ; `planRows` :
-// ListePlan_NDC_COF du projet.
+// avec ses étages de Synthese — leur coffrage lié, leur fond de plan, s'ils sont déjà datés,
+// l'état du lien — et ses coffrages de Structure — leur date 0 Prev, les étages qu'ils
+// servent ; « Sans zone » à la fin pour les coffrages qui n'en ont pas. `syntheseRows` : les
+// lignes du tableau de tâches (service Synthese) ; `projectRows` : Planning_Projet du projet,
+// tous services ; `planRows` : ListePlan_NDC_COF du projet.
 export function buildStructureLink({ syntheseRows = [], projectRows = [], planRows = [] } = {}) {
   const synthese = Array.isArray(syntheseRows) ? syntheseRows : [];
   const project = Array.isArray(projectRows) ? projectRows : [];
@@ -348,7 +348,7 @@ export function buildStructureLink({ syntheseRows = [], projectRows = [], planRo
     floors: section.floors.map((floor) => {
       const number = links.get(floorId(section.zoneKey, floor.key)) || "";
       const formwork = number ? findFormwork(number, section.zoneKey) : null;
-      const { plan } = findFloorStart(floor.tasks);
+      const { plan, anchor } = findFloorStart(floor.tasks);
       const expectedStart = formwork?.issueDate ? nextWorkingDay(formwork.issueDate) : null;
       if (formwork) formwork.floorNames.push(floor.name);
       return {
@@ -357,6 +357,8 @@ export function buildStructureLink({ syntheseRows = [], projectRows = [], planRo
         formworkNumber: number,
         formwork,
         plan: plan ? { id: plan.id, name: plan.name, start: plan.start } : null,
+        // Une date est déjà saisie : sur le fond de plan, ou sur la tâche qui reçoit la date.
+        isDated: Boolean(plan?.start || anchor?.start),
         expectedStart,
         state: linkStateOf({ number, formwork, plan, expectedStart }),
       };
