@@ -331,7 +331,7 @@ test("rouverte pendant une lecture : seule la dernière lecture est affichée", 
   assert.deepEqual(textsOf(env.body, "structure-link-formwork-label"), [], "les coffrages de la première lecture ne sont pas affichés");
 });
 
-test("glisser un coffrage sur un étage de sa zone : lien et date 0 Prev envoyés au tableau", async () => {
+test("glisser un coffrage sur un étage de sa zone, encore sans date : lien et date 0 Prev envoyés au tableau", async () => {
   const env = setup({
     applyLink: (request, source) => {
       // Le tableau affiche tout de suite l'écriture en attente.
@@ -379,6 +379,60 @@ test("étage sans fond de plan : le lien seul, aucune date posée", async () => 
     env.status.textContent,
     "SS2 lié au coffrage 3001. Aucune date posée : l'étage n'a pas de tâche « FOND DE PLAN DE SYNTHESE »."
   );
+});
+
+// Une date déjà saisie n'est jamais changée par le dépôt : seul « Mettre à jour » la change.
+test("étage déjà daté : le dépôt n'envoie que le lien, la date attend « Mettre à jour »", async () => {
+  const env = setup({
+    rows: syntheseRows({ planStart: "2026-01-02" }),
+    applyLink: (request, source) => {
+      source.rows = syntheseRows({ ss1Link: "3001", planStart: request.date ? "2025-11-27" : "2026-01-02" });
+      return Promise.resolve({ ok: true });
+    },
+  });
+  await env.controller.open();
+  dragOnto(env, "3001", floorElement(env, "zone1", "ss1"));
+  assert.equal(env.requests.length, 1);
+  assert.deepEqual(env.requests[0], { zoneKey: "zone1", floorKey: "ss1", formworkNumber: "3001" });
+  await flush();
+  assert.equal(
+    env.status.textContent,
+    "SS1 lié au coffrage 3001. L'étage a déjà une date, elle n'est pas changée : cliquez sur « Mettre à jour » pour reprendre le 0 Prev."
+  );
+  assert.ok(!env.status.classes.has("is-error"));
+  const floor = floorElement(env, "zone1", "ss1");
+  assert.deepEqual(textsOf(floor, "structure-link-plan"), ["Fond de plan : début Ven 02/01/26"], "date gardée");
+  assert.deepEqual(textsOf(floor, "structure-link-link"), ["3001 — PH SS1 · à mettre à jour : 0 Prev le Jeu 27/11/25"]);
+  dispatch(actionOf(floor, "refresh"), "click");
+  assert.equal(env.requests.length, 2);
+  assert.deepEqual([iso(env.requests[1].date), "formworkNumber" in env.requests[1]], ["2025-11-27", false]);
+  await flush();
+  assert.deepEqual(textsOf(floorElement(env, "zone1", "ss1"), "structure-link-link"), ["3001 — PH SS1 · à jour"]);
+});
+
+test("étage déjà à la date du 0 Prev : le lien seul, dit à jour", async () => {
+  const env = setup({
+    rows: syntheseRows({ planStart: "2025-11-27" }),
+    applyLink: (request, source) => {
+      source.rows = syntheseRows({ ss1Link: "3001", planStart: "2025-11-27" });
+      return Promise.resolve({ ok: true });
+    },
+  });
+  await env.controller.open();
+  dragOnto(env, "3001", floorElement(env, "zone1", "ss1"));
+  assert.deepEqual(env.requests, [{ zoneKey: "zone1", floorKey: "ss1", formworkNumber: "3001" }]);
+  await flush();
+  assert.equal(env.status.textContent, "SS1 lié au coffrage 3001 : le fond de plan débute déjà à la date du 0 Prev.");
+  assert.deepEqual(textsOf(floorElement(env, "zone1", "ss1"), "structure-link-link"), ["3001 — PH SS1 · à jour"]);
+});
+
+test("étage déjà daté, coffrage sans 0 Prev : le lien seul, la date viendra", async () => {
+  const env = setup({ rows: syntheseRows({ planStart: "2026-01-02" }) });
+  await env.controller.open();
+  dragOnto(env, "3002", floorElement(env, "zone1", "ss1"));
+  assert.deepEqual(env.requests, [{ zoneKey: "zone1", floorKey: "ss1", formworkNumber: "3002" }]);
+  await flush();
+  assert.equal(env.status.textContent, "SS1 lié au coffrage 3002. La date sera à reprendre quand le 0 Prev sera renseigné.");
 });
 
 test("glisser : seuls les étages de la zone du coffrage acceptent le dépôt", async () => {
