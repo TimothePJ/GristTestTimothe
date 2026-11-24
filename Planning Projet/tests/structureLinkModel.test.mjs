@@ -260,20 +260,24 @@ test("état du lien de chaque étage, date 0 Prev et étages servis de chaque co
   assert.equal(formworks["3001"].zoneKey, zoneKeyOf(zone));
 });
 
-// Au dépôt d'un coffrage, la date 0 Prev n'est posée d'office que sur un étage encore sans date.
-test("étage déjà daté : son fond de plan, ou la tâche qui reçoit la date, a un début", () => {
+// Au dépôt d'un coffrage, la date 0 Prev n'est posée d'office que sur un étage sans aucune date.
+test("étage déjà daté : une de ses tâches, n'importe laquelle, a une date", () => {
   const zone = "Zone 1";
   const dated = { Diff_coffrage: "2026-01-02", Diff_armature: "2026-01-02" };
   const fondDePlan = (id, floorName, fields) => floorTask(id, zone, floorName, `FOND DE PLAN DE SYNTHESE NIV ${floorName}`, fields);
   const reception = (id, floorName, fields) => floorTask(id, zone, floorName, "RECEPTION ARCH/TOPO/STR", fields);
+  const cycle = (id, floorName) => synthese(id, { Zone: zone, Groupe: floorName, Taches: "CYCLE 3", Nature: "Cycle" });
   const syntheseRows = [
-    floor(1, zone, "A"), // pas de fond de plan
-    floor(2, zone, "B"), fondDePlan(20, "B"), // rien de daté
+    floor(1, zone, "A"), // aucune tâche
+    floor(2, zone, "B"), reception(20, "B"), fondDePlan(21, "B", { Lien: "20 DD" }), // rien de daté
     floor(3, zone, "C"), fondDePlan(30, "C", dated),
     floor(4, zone, "D"), reception(40, "D", dated), fondDePlan(41, "D", { Lien: "40 DD" }), // seule la réception est datée
-    floor(5, zone, "E"), reception(50, "E"), fondDePlan(51, "E", { Lien: "50 DD" }),
-    floor(6, zone, "F"), reception(60, "F", dated), fondDePlan(61, "F"), // réception datée, mais sans lien avec le fond de plan
-    floor(7, zone, "G"), reception(70, "G"), fondDePlan(71, "G", { Lien: "70 DD", ...dated }), // seul le fond de plan est daté
+    // Les premières tâches sans date, une autre datée.
+    floor(5, zone, "E"), reception(50, "E"), fondDePlan(51, "E", { Lien: "50 DD" }), floorTask(52, zone, "E", "PLAN DE SYNTHESE NIV E", dated),
+    // La seule tâche datée est rangée dans un cycle.
+    floor(6, zone, "F"), fondDePlan(60, "F"), cycle(61, "F"), floorTask(62, zone, "F", "VISA", { Parent: "61", ...dated }),
+    floor(7, zone, "G"), fondDePlan(70, "G"), floorTask(71, zone, "G", "VISA", { Diff_armature: "2026-01-02" }), // une Fin seule
+    floor(8, zone, "H"), fondDePlan(80, "H"), // la date d'un autre étage ne compte pas
   ];
   const [section] = buildStructureLink({ syntheseRows }).zones;
   assert.deepEqual(Object.fromEntries(section.floors.map((item) => [item.name, item.isDated])), {
@@ -281,9 +285,10 @@ test("étage déjà daté : son fond de plan, ou la tâche qui reçoit la date, 
     B: false,
     C: true,
     D: true,
-    E: false,
-    F: false,
+    E: true,
+    F: true,
     G: true,
+    H: false,
   });
 });
 

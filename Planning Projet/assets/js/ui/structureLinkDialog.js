@@ -1,11 +1,11 @@
 // Fenêtre « Lien Structure » de la vue Synthese : zone par zone, les étages de Synthese à
 // gauche et les coffrages de Structure à droite. On glisse un coffrage sur un étage de sa
-// zone : l'étage retient son N° et, s'il n'a pas encore de date, prend sa date 0 Prev
-// (prévision de l'indice 0, saisie dans la liste de plans) ; un étage déjà daté garde sa date
-// tant qu'on ne clique pas sur « Mettre à jour ». Les étages viennent du tableau de tâches
-// (lignes telles qu'affichées) ; les coffrages et la liste de plans sont lus à chaque
-// ouverture ; toute écriture passe par le tableau de tâches. Ses dépendances sont injectées
-// (éléments, lectures, écriture, nom du projet) : doublures en test.
+// zone : l'étage retient son N° et, s'il n'a encore aucune date, prend sa date 0 Prev
+// (prévision de l'indice 0, saisie dans la liste de plans) ; un étage dont une tâche est déjà
+// datée garde ses dates tant qu'on ne clique pas sur « Mettre à jour ». Les étages viennent
+// du tableau de tâches (lignes telles qu'affichées) ; les coffrages et la liste de plans sont
+// lus à chaque ouverture ; toute écriture passe par le tableau de tâches. Ses dépendances
+// sont injectées (éléments, lectures, écriture, nom du projet) : doublures en test.
 import { LINK_STATES, buildStructureLink } from "../services/structureLinkModel.js";
 import { formatDate } from "../services/syntheseTaskModel.js";
 
@@ -297,8 +297,9 @@ export function createStructureLinkDialog({ dialog, title, status, body, closeBu
   }
 
   // Dépôt : le lien, et la date 0 Prev si le coffrage en a une et si l'étage a un fond de plan
-  // encore sans date. Une date déjà saisie n'est pas changée par le dépôt : l'étage est montré
-  // « à mettre à jour », et c'est son bouton qui la change.
+  // mais aucune date, sur aucune de ses tâches. Dès qu'une tâche de l'étage est datée, le dépôt
+  // ne change aucune date : l'étage est montré « à mettre à jour », et c'est son bouton qui
+  // pose la date.
   function link(zoneKey, floorKey, number) {
     const floor = findFloor(zoneKey, floorKey);
     const formwork = findFormwork(zoneKey, number);
@@ -314,7 +315,7 @@ export function createStructureLinkDialog({ dialog, title, status, body, closeBu
       if (findFloor(zoneKey, floorKey)?.state === LINK_STATES.current) {
         return `${linked} : le fond de plan débute déjà à la date du 0 Prev.`;
       }
-      return `${linked}. L'étage a déjà une date, elle n'est pas changée : cliquez sur « ${MESSAGES.refresh} » pour reprendre le 0 Prev.`;
+      return `${linked}. L'étage a déjà des dates, elles ne sont pas changées : cliquez sur « ${MESSAGES.refresh} » pour reprendre le 0 Prev.`;
     });
   }
 
