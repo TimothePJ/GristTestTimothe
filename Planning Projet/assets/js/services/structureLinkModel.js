@@ -348,7 +348,7 @@ export function buildStructureLink({ syntheseRows = [], projectRows = [], planRo
     floors: section.floors.map((floor) => {
       const number = links.get(floorId(section.zoneKey, floor.key)) || "";
       const formwork = number ? findFormwork(number, section.zoneKey) : null;
-      const { plan, anchor } = findFloorStart(floor.tasks);
+      const { plan } = findFloorStart(floor.tasks);
       const expectedStart = formwork?.issueDate ? nextWorkingDay(formwork.issueDate) : null;
       if (formwork) formwork.floorNames.push(floor.name);
       return {
@@ -357,8 +357,8 @@ export function buildStructureLink({ syntheseRows = [], projectRows = [], planRo
         formworkNumber: number,
         formwork,
         plan: plan ? { id: plan.id, name: plan.name, start: plan.start } : null,
-        // Une date est déjà saisie : sur le fond de plan, ou sur la tâche qui reçoit la date.
-        isDated: Boolean(plan?.start || anchor?.start),
+        // Une date est déjà saisie dans l'étage, sur n'importe laquelle de ses tâches.
+        isDated: floor.tasks.some((task) => Boolean(task.start || task.end)),
         expectedStart,
         state: linkStateOf({ number, formwork, plan, expectedStart }),
       };

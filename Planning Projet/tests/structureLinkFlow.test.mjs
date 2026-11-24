@@ -22,11 +22,10 @@ function all(node, className) {
 }
 
 // Zone Z2A, étage SS1 du modèle (ligne-étage 201, RECEPTION 202, FOND DE PLAN 204) ; côté
-// Structure, le coffrage 3021 de la même zone, avec un 0 Prev au jeudi 27/11/25. Sans `dated`,
-// l'étage sort du modèle, sans aucune date ; avec, il est daté depuis RECEPTION au 02/01/26.
-async function setup({ dated = false } = {}) {
+// Structure, le coffrage 3021 de la même zone, avec un 0 Prev au jeudi 27/11/25. Par défaut,
+// l'étage sort du modèle, sans aucune date.
+async function setup({ floorRows = templateRows({ zoneName: "Zone Z2A" }) } = {}) {
   const state = { currentProject: { name: "HOTEL DIEU", names: ["HOTEL DIEU"] }, accessMode: "editable" };
-  const floorRows = dated ? datedRows({ zoneName: "Zone Z2A" }) : templateRows({ zoneName: "Zone Z2A" });
   const rows = floorRows.map((row) => ({ ...row, Lien_Structure: "" }));
   const context = {
     async fetchContextRows() {
@@ -123,8 +122,29 @@ test("du glisser à Grist : le lien, la date sur RECEPTION et la cascade en une 
   );
 });
 
+// L'étage du modèle sans date sur ses premières tâches, mais avec une date saisie sur sa
+// dernière (226) : le dépôt ne recale rien.
+test("étage daté seulement sur une tâche plus loin : le dépôt n'écrit que le lien", async () => {
+  const floorRows = templateRows({ zoneName: "Zone Z2A" })
+    .map((row) => (row.id === 226 ? { ...row, Diff_coffrage: "2026-03-02", Diff_armature: "2026-03-02" } : row));
+  const env = await setup({ floorRows });
+  await dropFormworkOnFloor(env);
+  assert.deepEqual(env.writes, [
+    [["BulkUpdateRecord", "Planning_Projet", [201], { Lien_Structure: ["3021"] }]],
+  ], "aucune date écrite");
+  assert.deepEqual(
+    all(env.elements.body, "structure-link-link").map((element) => element.textContent),
+    ["3021 — PH SS1 - COF · à mettre à jour : 0 Prev le Jeu 27/11/25"]
+  );
+  const refresh = all(env.elements.body, "structure-link-action").find((button) => button.dataset.action === "refresh");
+  dispatch(refresh, "click");
+  await flush();
+  assert.equal(env.writes.length, 2);
+  assert.deepEqual(env.writes[1][0].slice(0, 3), ["UpdateRecord", "Planning_Projet", 202], "« Mettre à jour » pose la date");
+});
+
 test("étage déjà daté : le dépôt n'écrit que le lien ; « Mettre à jour » pose ensuite la date et la cascade", async () => {
-  const env = await setup({ dated: true });
+  const env = await setup({ floorRows: datedRows({ zoneName: "Zone Z2A" }) });
   const linkTexts = () => all(env.elements.body, "structure-link-link").map((element) => element.textContent);
   await dropFormworkOnFloor(env);
   assert.deepEqual(env.writes, [

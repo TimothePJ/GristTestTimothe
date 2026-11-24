@@ -23,9 +23,9 @@ const PLAN_ROWS = [
   { Type_document: "COFFRAGE", NumeroDocument: "3001", Indice: "Prev 0", DateDiffusion: "2025-11-27", Service: "Structure" },
 ];
 
-// Lignes du tableau de tâches : Zone 1 avec SS1 (RECEPTION et FOND DE PLAN liés « même début »)
-// et SS2 (vide) ; Zone 2 avec RDC (vide).
-function syntheseRows({ ss1Link = "", planStart = null } = {}) {
+// Lignes du tableau de tâches : Zone 1 avec SS1 (RECEPTION et FOND DE PLAN liés « même début »,
+// puis une autre tâche, datée à part) et SS2 (vide) ; Zone 2 avec RDC (vide).
+function syntheseRows({ ss1Link = "", planStart = null, otherStart = null } = {}) {
   const base = {
     NomProjet: "HOTEL DIEU", Type_doc: "", ID2: "", Groupe: "", Etage: false, Nature: "", Parent: "", Lien: "",
     Lien_Structure: "", Diff_coffrage: null, Diff_armature: null, Duree_1: 0,
@@ -36,6 +36,7 @@ function syntheseRows({ ss1Link = "", planStart = null } = {}) {
     { ...base, id: 13, Taches: "RDC", Zone: "Zone 2", Etage: true },
     { ...base, id: 30, Taches: "RECEPTION ARCH/TOPO/STR", Zone: "Zone 1", Groupe: "SS1", Diff_coffrage: planStart, Diff_armature: planStart },
     { ...base, id: 31, Taches: "FOND DE PLAN DE SYNTHESE NIV SS1", Zone: "Zone 1", Groupe: "SS1", Lien: "30 DD", Diff_coffrage: planStart, Diff_armature: planStart },
+    { ...base, id: 32, Taches: "PLAN DE SYNTHESE NIV SS1", Zone: "Zone 1", Groupe: "SS1", Diff_coffrage: otherStart, Diff_armature: otherStart },
   ];
 }
 
@@ -397,11 +398,38 @@ test("étage déjà daté : le dépôt n'envoie que le lien, la date attend « M
   await flush();
   assert.equal(
     env.status.textContent,
-    "SS1 lié au coffrage 3001. L'étage a déjà une date, elle n'est pas changée : cliquez sur « Mettre à jour » pour reprendre le 0 Prev."
+    "SS1 lié au coffrage 3001. L'étage a déjà des dates, elles ne sont pas changées : cliquez sur « Mettre à jour » pour reprendre le 0 Prev."
   );
   assert.ok(!env.status.classes.has("is-error"));
   const floor = floorElement(env, "zone1", "ss1");
   assert.deepEqual(textsOf(floor, "structure-link-plan"), ["Fond de plan : début Ven 02/01/26"], "date gardée");
+  assert.deepEqual(textsOf(floor, "structure-link-link"), ["3001 — PH SS1 · à mettre à jour : 0 Prev le Jeu 27/11/25"]);
+  dispatch(actionOf(floor, "refresh"), "click");
+  assert.equal(env.requests.length, 2);
+  assert.deepEqual([iso(env.requests[1].date), "formworkNumber" in env.requests[1]], ["2025-11-27", false]);
+  await flush();
+  assert.deepEqual(textsOf(floorElement(env, "zone1", "ss1"), "structure-link-link"), ["3001 — PH SS1 · à jour"]);
+});
+
+// Des dates dans l'étage, mais pas sur ses premières tâches : le dépôt ne les recale pas non plus.
+test("étage daté ailleurs que sur son fond de plan : le lien seul, la date attend « Mettre à jour »", async () => {
+  const env = setup({
+    rows: syntheseRows({ otherStart: "2026-01-02" }),
+    applyLink: (request, source) => {
+      source.rows = syntheseRows({ ss1Link: "3001", planStart: request.date ? "2025-11-27" : null, otherStart: "2026-01-02" });
+      return Promise.resolve({ ok: true });
+    },
+  });
+  await env.controller.open();
+  dragOnto(env, "3001", floorElement(env, "zone1", "ss1"));
+  assert.deepEqual(env.requests, [{ zoneKey: "zone1", floorKey: "ss1", formworkNumber: "3001" }]);
+  await flush();
+  assert.equal(
+    env.status.textContent,
+    "SS1 lié au coffrage 3001. L'étage a déjà des dates, elles ne sont pas changées : cliquez sur « Mettre à jour » pour reprendre le 0 Prev."
+  );
+  const floor = floorElement(env, "zone1", "ss1");
+  assert.deepEqual(textsOf(floor, "structure-link-plan"), ["Fond de plan : début —"]);
   assert.deepEqual(textsOf(floor, "structure-link-link"), ["3001 — PH SS1 · à mettre à jour : 0 Prev le Jeu 27/11/25"]);
   dispatch(actionOf(floor, "refresh"), "click");
   assert.equal(env.requests.length, 2);
