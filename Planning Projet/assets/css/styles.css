@@ -76,7 +76,9 @@ body.is-ms-project-drag-cursor * {
 html.is-planning-pane-resizing,
 html.is-planning-pane-resizing *,
 body.is-planning-pane-resizing,
-body.is-planning-pane-resizing * {
+body.is-planning-pane-resizing *,
+html.is-planning-col-resizing,
+html.is-planning-col-resizing * {
   cursor: col-resize !important;
   user-select: none !important;
 }
@@ -517,12 +519,44 @@ body.planning-sync-embedded #planningTimeline .group-row-grid .cell-ligne-planni
 }
 
 .planning-header-left .hcol {
+  position: relative;
   padding: 8px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--grist-theme-text);
   font-weight: 600;
+}
+
+/* Poignée de largeur sur le bord droit de chaque titre de colonne, comme en Synthèse
+   (ajoutée par ui/planningColumnResize.js). */
+.planning-col-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+/* Repère discret entre deux titres, à la même hauteur quel que soit le nombre de lignes du titre. */
+.planning-col-resize::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 1px;
+  height: 16px;
+  background: #cbd5e1;
+  transform: translateY(-50%);
+}
+
+.planning-col-resize:hover::after,
+html.is-planning-col-resizing .planning-col-resize:active::after {
+  width: 2px;
+  background: #0a4f99;
 }
 
 .planning-header-left .c-start,
@@ -5117,4 +5151,138 @@ body.is-synthese-dragging * {
 .synthese-parameter-dialog__actions {
   display: flex;
   gap: 8px;
+}
+
+/* Onglets de la fenêtre « Paramètre » : « Modèle d'étage » (les étages à venir) et « Tâche
+   contrôlée » (les étages déjà créés). */
+.synthese-parameter-dialog__tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #d5dbe3;
+}
+
+.synthese-parameter-dialog__tab {
+  margin-bottom: -1px;
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: #475569;
+  font: inherit;
+  cursor: pointer;
+}
+
+.synthese-parameter-dialog__tab:hover {
+  background: #e6f2fa;
+}
+
+/* Onglet montré : il recouvre le trait et se fond dans son panneau. */
+.synthese-parameter-dialog__tab.is-active {
+  border-color: #d5dbe3;
+  background: #fff;
+  color: #004990;
+  font-weight: 600;
+}
+
+/* Panneau d'un onglet : il prend la hauteur restante de la fenêtre. */
+.synthese-parameter-dialog__panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.synthese-parameter-dialog__panel[hidden] {
+  display: none;
+}
+
+/* Onglet « Tâche contrôlée » : les tâches des étages déjà créés, rangées par cycle comme dans le
+   tableau, avec le nombre d'étages qui ont chacune ; dessous, ce que le choix change, puis le pied. */
+.synthese-control-panel__help {
+  margin: 0;
+  color: #475569;
+}
+
+.synthese-control-panel__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #d5dbe3;
+  border-radius: 6px;
+}
+
+.synthese-control-panel__list[hidden] {
+  display: none;
+}
+
+.synthese-control-panel__group {
+  padding: 4px 8px 4px calc(8px + var(--scp-level, 0) * 16px);
+  background: #f1f4f8;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Colonnes de largeur fixe : les nombres d'étages s'alignent d'une ligne à l'autre. */
+.synthese-control-panel__option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 120px 170px;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px 4px calc(8px + var(--scp-level, 0) * 16px);
+  cursor: pointer;
+}
+
+.synthese-control-panel__option:hover,
+.synthese-control-panel__option.is-selected {
+  background: #e6f2fa;
+}
+
+.synthese-control-panel__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.synthese-control-panel__count {
+  color: #6b7280;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* La tâche manque dans des étages : couleur de l'avertissement de la fenêtre. */
+.synthese-control-panel__count.is-partial {
+  color: #78350f;
+  font-weight: 600;
+}
+
+.synthese-control-panel__state {
+  color: #004990;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Les messages gardent leur hauteur (c'est la liste qui cède la place) : l'avertissement des étages
+   non modifiés reste lisible en entier, jusqu'à 20vh puis en défilant. */
+.synthese-control-panel__messages {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 20vh;
+  overflow: auto;
+}
+
+.synthese-control-panel__messages[hidden] {
+  display: none;
+}
+
+/* Pied : toujours en bas du panneau, même sans liste. */
+.synthese-control-panel__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: auto;
 }

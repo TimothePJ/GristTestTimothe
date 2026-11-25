@@ -88,6 +88,7 @@ import {
   readControlTasks,
   readFloorLinks,
 } from "../services/structureLinkModel.js";
+import { controlTaskChoices, planControlTask } from "../services/syntheseControlChoice.js";
 import { remember } from "../utils/remember.js";
 import { sameValue } from "../utils/sameValue.js";
 
@@ -116,6 +117,8 @@ const MESSAGES = Object.freeze({
   templateFailed: "L'étage n'a pas pu être créé complètement : rien n'a été gardé. Réessayez.",
   noLinkColumn: "La colonne « Lien_Structure » (Texte) manque dans Planning_Projet : ajoutez-la pour lier les étages aux coffrages.",
   noCheckColumn: "La colonne « Controle_Coffrage » (Booléen) manque dans Planning_Projet : ajoutez-la pour choisir la tâche contrôlée par rapport au coffrage.",
+  controlNotReady: "Les étages ne sont pas encore chargés : fermez la fenêtre puis rouvrez-la.",
+  controlTaskGone: "Cette tâche n'existe plus dans les étages du projet : choisissez-en une autre.",
   floorGone: "Cet étage n'existe plus : fermez la fenêtre puis rouvrez-la.",
   noFloorRow: "Cet étage n'a pas de ligne « étage » dans Planning_Projet : le lien ne peut pas être mémorisé.",
   noPlanTask: "Cet étage n'a pas de tâche « FOND DE PLAN DE SYNTHESE » : aucune date ne peut être posée.",
@@ -131,6 +134,11 @@ const MESSAGES = Object.freeze({
 // « 2 zones », « 1 zone ».
 function zoneCountText(count) {
   return `${count} zone${count > 1 ? "s" : ""}`;
+}
+
+// « 2 étages », « 1 étage ».
+function floorCountText(count) {
+  return `${count} étage${count > 1 ? "s" : ""}`;
 }
 
 // Seul cas où la création d'un étage ne peut ni réussir ni être annulée : le dire précisément.
@@ -1655,6 +1663,43 @@ export function createSyntheseTasksController({
     }).then(() => outcome);
   }
 
+  // Onglet « Tâche contrôlée » de la fenêtre « Paramètre » : la tâche `key` (voir
+  // controlTaskChoices) devient la tâche contrôlée par rapport au coffrage de chaque étage du
+  // projet qui l'a — toutes zones, avec ou sans filtre du bandeau — en une seule écriture ; les
+  // autres tâches cochées de ces étages sont décochées. Un étage qui n'a pas cette tâche n'est pas
+  // modifié. La réponse arrive quand Grist a répondu : { ok: true, change, current, missing }
+  // (libellés des étages changés, déjà à jour, sans la tâche) ou { ok: false, error }.
+  function applyControlTask({ key } = {}) {
+    const refusal = (error) => Promise.resolve({ ok: false, error });
+    if (!isEditable()) return refusal(lockedMessage());
+    if (!loaded || readError) return refusal(MESSAGES.controlNotReady);
+    if (formworkCheckColumn === false) return refusal(MESSAGES.noCheckColumn);
+    const plan = planControlTask({ sections: allSections(), rows: displayedRows(), key });
+    if (!plan.found) return refusal(MESSAGES.controlTaskGone);
+    const report = { change: plan.change, current: plan.current, missing: plan.missing };
+    if (!plan.changes.size) return Promise.resolve({ ok: true, ...report });
+    const column = TASK_COLUMNS.formworkCheck;
+    const rowIds = [...plan.changes.keys()];
+    clearStatus();
+    // Une opération écartée par l'échec d'une précédente n'appelle aucun des deux retours.
+    let outcome = { ok: false, error: describeWriteError(null) };
+    return submit(createOp({
+      changes: plan.changes,
+      actions: [["BulkUpdateRecord", PLANNING_TABLE, rowIds, { [column]: rowIds.map((rowId) => plan.changes.get(rowId)[column]) }]],
+    }), {
+      onSuccess: () => {
+        outcome = { ok: true, ...report };
+        info(`Tâche contrôlée par rapport au coffrage changée dans ${floorCountText(plan.change.length)}.`);
+      },
+      onFailure: (error, dropped) => {
+        const message = describeWriteError(error);
+        if (message === MESSAGES.noCheckColumn) formworkCheckColumn = false;
+        fail("Changement de la tâche contrôlée impossible :", error, dropped);
+        outcome = { ok: false, error: message };
+      },
+    }).then(() => outcome);
+  }
+
   function toggleZone(zoneKey) {
     if (collapsedZoneKeys.has(zoneKey)) collapsedZoneKeys.delete(zoneKey);
     else collapsedZoneKeys.add(zoneKey);
@@ -1805,5 +1850,20 @@ export function createSyntheseTasksController({
       };
     },
     applyStructureLink,
+    // Ce que l'onglet « Tâche contrôlée » de la fenêtre « Paramètre » lit du tableau : les tâches
+    // de tous les étages du projet telles qu'affichées (écritures en attente comprises, sans le
+    // filtre de zone), ce que choisir chacune changerait, et ce qui empêche d'écrire
+    // (`blockedMessage` : tableau verrouillé ou colonne Controle_Coffrage absente ; "" sinon).
+    getControlTaskSource() {
+      let blockedMessage = "";
+      if (!isEditable()) blockedMessage = lockedMessage();
+      else if (formworkCheckColumn === false) blockedMessage = MESSAGES.noCheckColumn;
+      return {
+        ready: loaded && !readError,
+        blockedMessage,
+        ...controlTaskChoices({ sections: allSections(), rows: displayedRows() }),
+      };
+    },
+    applyControlTask,
   };
 }

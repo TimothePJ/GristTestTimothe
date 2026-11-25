@@ -702,3 +702,325 @@ test("fermeture : la fenêtre « Lien de la tâche » ouverte est fermée avec l
   env.dialog.close();
   assert.equal(linkDialog.open, false, "fermée avec la fenêtre Paramètre");
 });
+
+// ---------- Onglet « Tâche contrôlée » : la tâche contrôlée des étages déjà créés ----------
+
+const RESA_E = "PLAN DE SYNTHESE RESERVATIONS NIV {E}";
+const CONTROL_HELP = "Choisissez la tâche contrôlée par rapport au coffrage des étages déjà créés. « Appliquer aux étages » la coche tout de suite dans chaque étage qui a cette tâche, au même nom et dans le même cycle ; un étage qui ne l'a pas n'est pas modifié. {E} remplace le nom de l'étage. Pour les étages à venir, cochez la tâche dans l'onglet « Modèle d'étage ».";
+const ALL_FLOORS = ["R+1 (Zone 1)", "R+2 (Zone 1)", "R+1 (Zone 2)"];
+
+// Ce que le tableau de tâches rend à l'onglet : trois étages, dont un seul (R+2) a un cycle 4.
+function controlSource(overrides = {}) {
+  return {
+    ready: true,
+    blockedMessage: "",
+    floorCount: 3,
+    choices: [
+      { key: "c3-resa", name: RESA_E, path: ["CYCLE 3", "PLAN SYT CYCLE 3"], rank: 1, controlled: 2, change: ["R+1 (Zone 2)"], current: ["R+1 (Zone 1)", "R+2 (Zone 1)"], missing: [] },
+      { key: "c3-reunion-2", name: "REUNION + DIFFUSION SYT", path: ["CYCLE 3"], rank: 2, controlled: 0, change: ALL_FLOORS, current: [], missing: [] },
+      { key: "c4-resa", name: RESA_E, path: ["CYCLE 4"], rank: 1, controlled: 0, change: ["R+2 (Zone 1)"], current: [], missing: ["R+1 (Zone 1)", "R+1 (Zone 2)"] },
+      { key: "go", name: "DEMARRAGE GO {E} (date prévisionnelle)", path: [], rank: 1, controlled: 0, change: ALL_FLOORS, current: [], missing: [] },
+    ],
+    ...overrides,
+  };
+}
+
+function setupControl({ source = controlSource(), apply = null, answer = () => true } = {}) {
+  const state = { source };
+  const reads = [];
+  const applied = [];
+  const questions = [];
+  const controllers = [];
+  const tables = [];
+  const dialog = createParameterDialog({
+    doc: document,
+    confirm: (message) => {
+      questions.push(message);
+      return answer(message);
+    },
+    onSave: async () => {},
+    createController: (options) => {
+      const controller = createSyntheseTasksController(options);
+      controllers.push(controller);
+      return controller;
+    },
+    createTable: spyTable(tables),
+    getControlSource: () => {
+      reads.push(1);
+      return state.source;
+    },
+    applyControlTask: async (request) => {
+      applied.push(request);
+      return apply ? apply(request) : { ok: true, change: [], current: [], missing: [] };
+    },
+  });
+  const root = document.body.children.at(-1);
+  const button = (label) => root.querySelectorAll("button").find((element) => element.textContent === label);
+  const panel = () => root.querySelector(".synthese-control-panel");
+  const modelPanel = () => root.querySelectorAll(".synthese-parameter-dialog__panel").find((element) => element !== panel());
+  const options = () => panel().querySelectorAll(".synthese-control-panel__option");
+  const inputOf = (row) => row.querySelector("input");
+  const option = (key) => options().find((row) => inputOf(row).value === key);
+  const choose = (key) => dispatch(inputOf(option(key)), "change");
+  const lines = () => {
+    const zone = panel().querySelector(".synthese-control-panel__messages");
+    return zone.hidden ? [] : zone.children.map((line) => [line.textContent, line.className]);
+  };
+  const title = () => root.querySelector("h3").textContent;
+  return {
+    dialog, root, state, reads, applied, questions, controllers, tables,
+    button, panel, modelPanel, options, inputOf, option, choose, lines, title,
+  };
+}
+
+const INFO = "synthese-parameter-dialog__message";
+const WARNING = "synthese-parameter-dialog__message is-warning";
+const ERROR = "synthese-parameter-dialog__message is-error";
+
+test("onglets : le modèle d'abord ; « Tâche contrôlée » relit le tableau, le modèle reste monté", async () => {
+  const env = setupControl();
+  env.dialog.open(model());
+  await flush();
+  const bar = env.root.querySelector(".synthese-parameter-dialog__tabs");
+  const tabs = bar.children;
+  assert.equal(bar.getAttribute("role"), "tablist");
+  assert.deepEqual(tabs.map((tab) => tab.textContent), ["Modèle d'étage", "Tâche contrôlée"]);
+  assert.deepEqual(tabs.map((tab) => tab.getAttribute("aria-selected")), ["true", "false"]);
+  assert.equal(env.modelPanel().hidden, false);
+  assert.equal(env.panel().hidden, true);
+  assert.equal(env.title(), "Paramètre — modèle d'étage · HOTEL DIEU");
+  assert.equal(env.reads.length, 0, "le tableau n'est pas lu tant que l'onglet n'est pas montré");
+
+  click(env.button("Tâche contrôlée"));
+  assert.deepEqual(tabs.map((tab) => tab.getAttribute("aria-selected")), ["false", "true"]);
+  assert.deepEqual(tabs.map((tab) => tab.classes.has("is-active")), [false, true]);
+  assert.equal(env.modelPanel().hidden, true);
+  assert.equal(env.panel().hidden, false);
+  assert.equal(env.title(), "Paramètre — tâche contrôlée · HOTEL DIEU");
+  assert.equal(env.reads.length, 1);
+  assert.equal(env.panel().querySelector(".synthese-control-panel__help").textContent, CONTROL_HELP);
+
+  click(env.button("Modèle d'étage"));
+  assert.equal(env.modelPanel().hidden, false);
+  assert.equal(env.panel().hidden, true);
+  assert.equal(env.title(), "Paramètre — modèle d'étage · HOTEL DIEU");
+  assert.equal(env.controllers.length, 1, "le tableau du modèle n'a pas été recréé");
+  click(env.button("Tâche contrôlée"));
+  assert.equal(env.reads.length, 2, "relu à chaque retour sur l'onglet");
+});
+
+test("liste : les tâches rangées par cycle, le nombre d'étages qui les ont, celles déjà contrôlées", async () => {
+  const env = setupControl();
+  env.dialog.open(model());
+  await flush();
+  click(env.button("Tâche contrôlée"));
+  const list = env.panel().querySelector(".synthese-control-panel__list");
+  assert.equal(list.getAttribute("role"), "radiogroup");
+  const isCycle = (node) => node.classes.has("synthese-control-panel__group");
+  const shown = list.children.map((node) => [
+    isCycle(node) ? "cycle" : "tâche",
+    node.style["--scp-level"],
+    isCycle(node) ? node.textContent : node.querySelector(".synthese-control-panel__name").textContent,
+  ]);
+  assert.deepEqual(shown, [
+    ["cycle", "0", "CYCLE 3"],
+    ["cycle", "1", "PLAN SYT CYCLE 3"],
+    ["tâche", "2", RESA_E],
+    // Retour dans le cycle 3 : son titre n'est pas répété ; la seconde réunion du cycle porte son rang.
+    ["tâche", "1", "REUNION + DIFFUSION SYT (2)"],
+    ["cycle", "0", "CYCLE 4"],
+    ["tâche", "1", RESA_E],
+    ["tâche", "0", "DEMARRAGE GO {E} (date prévisionnelle)"],
+  ]);
+  const cell = (key, name) => env.option(key).querySelector(`.synthese-control-panel__${name}`);
+  assert.equal(cell("c3-resa", "count").textContent, "3 étages sur 3");
+  assert.equal(cell("c3-resa", "count").classes.has("is-partial"), false);
+  assert.equal(cell("c3-resa", "state").textContent, "contrôlée dans 2 étages");
+  assert.equal(cell("c4-resa", "count").textContent, "1 étage sur 3");
+  assert.equal(cell("c4-resa", "count").classes.has("is-partial"), true, "des étages n'ont pas cette tâche");
+  assert.equal(cell("c4-resa", "state").textContent, "");
+  const inputs = env.options().map(env.inputOf);
+  assert.ok(inputs.every((input) => input.type === "radio" && input.name === "syntheseControlTask" && !input.checked));
+  assert.equal(env.button("Appliquer aux étages").disabled, true, "rien de choisi");
+  assert.deepEqual(env.lines(), []);
+});
+
+test("choisir une tâche du cycle 4 : les étages à trois cycles sont annoncés, puis laissés tels quels", async () => {
+  const env = setupControl({
+    apply: () => {
+      env.state.source = controlSource({
+        choices: controlSource().choices.map((choice) => (choice.key === "c4-resa"
+          ? { ...choice, controlled: 1, change: [], current: ["R+2 (Zone 1)"] }
+          : choice)),
+      });
+      return { ok: true, change: ["R+2 (Zone 1)"], current: [], missing: ["R+1 (Zone 1)", "R+1 (Zone 2)"] };
+    },
+  });
+  env.dialog.open(model());
+  await flush();
+  click(env.button("Tâche contrôlée"));
+  env.choose("c4-resa");
+  assert.equal(env.inputOf(env.option("c4-resa")).checked, true);
+  assert.equal(env.option("c4-resa").classes.has("is-selected"), true);
+  assert.equal(env.option("c3-resa").classes.has("is-selected"), false);
+  assert.deepEqual(env.lines(), [
+    [`« ${RESA_E} » deviendra la tâche contrôlée de 1 étage.`, INFO],
+    ["2 étages n'ont pas cette tâche et ne seront pas modifiés : R+1 (Zone 1), R+1 (Zone 2).", WARNING],
+  ]);
+  const apply = env.button("Appliquer aux étages");
+  assert.equal(apply.disabled, false);
+  assert.ok(apply.classes.has("synthese-button--primary"));
+
+  click(apply);
+  assert.equal(apply.disabled, true, "écriture en cours");
+  assert.ok(env.options().every((row) => env.inputOf(row).disabled));
+  await flush();
+  assert.deepEqual(env.applied, [{ key: "c4-resa" }]);
+  assert.deepEqual(env.lines(), [
+    [`« ${RESA_E} » est maintenant la tâche contrôlée de 1 étage.`, INFO],
+    ["2 étages non modifiés, la tâche n'y existe pas : R+1 (Zone 1), R+1 (Zone 2).", WARNING],
+  ]);
+  // La liste est relue : la tâche est en place dans R+2, plus rien à appliquer.
+  assert.equal(env.option("c4-resa").querySelector(".synthese-control-panel__state").textContent, "contrôlée dans 1 étage");
+  assert.equal(env.inputOf(env.option("c4-resa")).checked, true, "le choix reste coché");
+  assert.equal(env.inputOf(env.option("c4-resa")).disabled, false);
+  assert.equal(apply.disabled, true);
+  assert.equal(gristCalls.length, 0, "l'onglet n'écrit que par le tableau de tâches");
+
+  // Un autre choix efface le résultat et montre ce qu'il changerait.
+  env.choose("c3-resa");
+  assert.deepEqual(env.lines(), [
+    [`« ${RESA_E} » deviendra la tâche contrôlée de 1 étage ; elle l'est déjà dans 2 étages.`, INFO],
+  ]);
+});
+
+test("déjà en place partout : rien à appliquer", async () => {
+  const source = controlSource({
+    floorCount: 1,
+    choices: [{ key: "only", name: RESA_E, path: ["CYCLE 3"], rank: 1, controlled: 1, change: [], current: ["R+1 (Zone 1)"], missing: [] }],
+  });
+  const env = setupControl({ source });
+  env.dialog.open(model());
+  await flush();
+  click(env.button("Tâche contrôlée"));
+  env.choose("only");
+  assert.deepEqual(env.lines(), [[`Rien à changer : « ${RESA_E} » est déjà la tâche contrôlée du seul étage qui l'a.`, INFO]]);
+  assert.equal(env.button("Appliquer aux étages").disabled, true);
+  click(env.button("Appliquer aux étages"));
+  await flush();
+  assert.deepEqual(env.applied, []);
+});
+
+test("écriture impossible : tableau verrouillé, étages pas lus, projet sans étage", async () => {
+  const locked = "Activez « Editer » dans le bandeau pour modifier les tâches.";
+  const env = setupControl({ source: controlSource({ blockedMessage: locked }) });
+  env.dialog.open(model());
+  await flush();
+  click(env.button("Tâche contrôlée"));
+  assert.deepEqual(env.lines(), [[locked, INFO]]);
+  env.choose("c4-resa");
+  assert.equal(env.lines()[0][0], locked);
+  assert.equal(env.lines().length, 3, "ce que le choix changerait reste lisible");
+  assert.equal(env.button("Appliquer aux étages").disabled, true);
+
+  // Pas encore lus, ou tableau absent (null).
+  for (const source of [controlSource({ ready: false }), null]) {
+    env.state.source = source;
+    click(env.button("Modèle d'étage"));
+    click(env.button("Tâche contrôlée"));
+    assert.deepEqual(env.lines(), [["Les étages du projet ne sont pas encore chargés : fermez la fenêtre puis rouvrez-la.", INFO]]);
+    assert.equal(env.options().length, 0);
+    assert.equal(env.panel().querySelector(".synthese-control-panel__list").hidden, true);
+    assert.equal(env.button("Appliquer aux étages").disabled, true);
+  }
+
+  env.state.source = controlSource({ floorCount: 0, choices: [] });
+  click(env.button("Modèle d'étage"));
+  click(env.button("Tâche contrôlée"));
+  assert.deepEqual(env.lines(), [["Ce projet n'a pas encore d'étage.", INFO]]);
+});
+
+test("refus ou erreur à l'écriture : dit en rouge, on peut réessayer", async () => {
+  let attempt = 0;
+  const env = setupControl({
+    apply: () => {
+      attempt += 1;
+      if (attempt === 1) return { ok: false, error: "L'enregistrement dans Grist a échoué. Réessayez." };
+      throw new Error("coupure");
+    },
+  });
+  env.dialog.open(model());
+  await flush();
+  click(env.button("Tâche contrôlée"));
+  env.choose("go");
+  click(env.button("Appliquer aux étages"));
+  await flush();
+  assert.deepEqual(env.lines(), [["L'enregistrement dans Grist a échoué. Réessayez.", ERROR]]);
+  assert.equal(env.button("Appliquer aux étages").disabled, false);
+  click(env.button("Appliquer aux étages"));
+  await flush();
+  assert.deepEqual(env.lines(), [["La tâche contrôlée n'a pas pu être changée. Réessayez.", ERROR]]);
+  assert.equal(attempt, 2);
+});
+
+test("« Fermer » ferme la fenêtre ; rouverte, elle revient au modèle sans choix ni résultat", async () => {
+  let release = null;
+  const env = setupControl({
+    apply: () => new Promise((resolve) => {
+      release = () => resolve({ ok: true, change: ["R+2 (Zone 1)"], current: [], missing: [] });
+    }),
+  });
+  env.dialog.open(model());
+  await flush();
+  click(env.button("Tâche contrôlée"));
+  env.choose("c4-resa");
+  click(env.button("Appliquer aux étages"));
+  await flush();
+  click(env.button("Fermer"));
+  assert.equal(env.dialog.isOpen(), false);
+  assert.deepEqual(env.questions, [], "modèle non modifié : pas de question");
+
+  env.dialog.open(model());
+  await flush();
+  assert.equal(env.modelPanel().hidden, false, "onglet du modèle");
+  assert.equal(env.panel().hidden, true);
+  click(env.button("Tâche contrôlée"));
+  const untouched = () => env.options().every((row) => !env.inputOf(row).checked && !env.inputOf(row).disabled);
+  assert.ok(untouched(), "ni choix ni écriture en cours");
+  assert.deepEqual(env.lines(), []);
+
+  // La réponse de l'écriture d'avant la fermeture arrive maintenant : elle n'est montrée nulle part.
+  release();
+  await flush();
+  assert.ok(untouched());
+  assert.deepEqual(env.lines(), [], "pas de résultat d'une écriture de la session précédente");
+});
+
+test("« Fermer » avec un modèle modifié : l'abandon se confirme, comme « Annuler »", async () => {
+  let answer = false;
+  const env = setupControl({ answer: () => answer });
+  env.dialog.open(model());
+  await flush();
+  const table = env.tables.at(-1);
+  const first = table.renders.at(-1).lines.find((line) => line.kind === "task");
+  table.callbacks.onEdit(first.taskId, "duration", "2");
+  await flush();
+  click(env.button("Tâche contrôlée"));
+  click(env.button("Fermer"));
+  assert.deepEqual(env.questions, [ABANDON]);
+  assert.equal(env.dialog.isOpen(), true, "refus : la fenêtre reste ouverte, sur le même onglet");
+  assert.equal(env.panel().hidden, false);
+  answer = true;
+  click(env.button("Fermer"));
+  assert.equal(env.dialog.isOpen(), false);
+});
+
+test("CSS : onglets, panneaux masqués, liste qui défile, pied en bas", () => {
+  assert.match(css, /\.synthese-parameter-dialog__tab\.is-active\s*\{[^}]*color:\s*#004990;/);
+  assert.match(css, /\.synthese-parameter-dialog__panel\s*\{[^}]*flex:\s*1 1 auto;[^}]*min-height:\s*0;[^}]*display:\s*flex;/);
+  assert.match(css, /\.synthese-parameter-dialog__panel\[hidden\]\s*\{\s*display:\s*none;\s*\}/);
+  assert.match(css, /\.synthese-control-panel__list\s*\{[^}]*flex:\s*1 1 auto;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/);
+  assert.match(css, /\.synthese-control-panel__option\s*\{[^}]*padding:[^;]*var\(--scp-level, 0\) \* 16px\)/);
+  assert.match(css, /\.synthese-control-panel__messages\[hidden\]\s*\{\s*display:\s*none;\s*\}/);
+  assert.match(css, /\.synthese-control-panel__footer\s*\{[^}]*margin-top:\s*auto;/);
+});
