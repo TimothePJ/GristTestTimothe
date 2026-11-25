@@ -1,4 +1,14 @@
+import {
+  PLANNING_COLUMNS,
+  columnCssVar,
+  fitColumnWidths,
+  maxColumnWidth,
+  paneRoom,
+  paneWidthBounds,
+  paneWidthDuringResize,
+} from "../services/planningColumnWidths.js";
 import { ZOOM_MODES, nextZoomMode, zoomModeLabel } from "../services/zoomCycle.js";
+import { bindPlanningColumnResize } from "./planningColumnResize.js";
 
 let timelineInstance = null;
 let groupsDataSet = null;
@@ -98,6 +108,10 @@ let planningPaneResizerBound = false;
 let activePlanningPaneResize = null;
 let pendingPlanningPaneResizeWidth = null;
 let planningPaneResizeRafId = 0;
+// Réglage de la largeur des colonnes (poignées des titres), une fois branché.
+let planningColumnResize = null;
+// État du volet gauche relevé au début du glisser d'une colonne.
+let planningColumnResizeStart = null;
 let visualAggregateModeEnabled = false;
 let lastPlanningTimelineData = { groups: [], items: [], editingEnabled: false };
 
@@ -106,8 +120,6 @@ const REFERENCE_DETAILS_EMPTY_DATE_ISO = "1900-01-01";
 const REFERENCE_DETAILS_DAY_MS = 86400000;
 
 const PLANNING_ROW_DRAG_HANDLED_FLAG = "__planningRowDragHandled";
-const PLANNING_PANE_MIN_WIDTH = 260;
-const PLANNING_PANE_MIN_TIMELINE_WIDTH = 320;
 const PLANNING_PANE_RESIZE_STEP = 24;
 const LEGACY_PLANNING_PANE_WIDTH_STORAGE_KEY = "planning-projet.left-panel-width";
 
@@ -211,21 +223,8 @@ function readPlanningCssPixelVar(name) {
 }
 
 function getPlanningPaneNaturalWidth() {
-  const columnNames = [
-    "--col-id2",
-    "--col-task",
-    "--col-ligne-planning",
-    "--col-start",
-    "--col-duration-1",
-    "--col-end",
-    "--col-duration-2",
-    "--col-demarrage",
-    "--col-indice",
-    "--col-realise",
-    "--col-retards",
-  ];
-  const columnsWidth = columnNames.reduce(
-    (sum, name) => sum + readPlanningCssPixelVar(name),
+  const columnsWidth = PLANNING_COLUMNS.reduce(
+    (sum, { key }) => sum + readPlanningCssPixelVar(columnCssVar(key)),
     0
   );
   const padX = readPlanningCssPixelVar("--left-pad-x");
@@ -240,21 +239,16 @@ function getPlanningPaneNaturalWidth() {
     : 0;
 }
 
+function getPlanningViewportWidth(fallbackWidth = 0) {
+  return window.innerWidth || document.documentElement?.clientWidth || fallbackWidth;
+}
+
 function getPlanningPaneWidthBounds() {
-  const viewportWidth =
-    window.innerWidth ||
-    document.documentElement?.clientWidth ||
-    getPlanningPaneNaturalWidth();
   const naturalWidth = getPlanningPaneNaturalWidth();
-  const maxWidth = Math.max(
-    PLANNING_PANE_MIN_WIDTH,
-    Math.min(naturalWidth || PLANNING_PANE_MIN_WIDTH, viewportWidth - PLANNING_PANE_MIN_TIMELINE_WIDTH)
-  );
-  const minWidth = Math.min(PLANNING_PANE_MIN_WIDTH, maxWidth);
+  const viewportWidth = getPlanningViewportWidth(naturalWidth);
 
   return {
-    minWidth,
-    maxWidth,
+    ...paneWidthBounds({ naturalWidth, viewportWidth }),
     naturalWidth,
   };
 }
@@ -330,9 +324,20 @@ function setPlanningPaneWidth(width, { redraw = true } = {}) {
   }
 }
 
-function resetPlanningPaneWidth() {
+// Largeur de départ du volet gauche : toutes ses colonnes. Si l'utilisateur en a élargi au point
+// de dépasser la place disponible, le volet est borné pour que le planning reste visible.
+function applyInitialPlanningPaneWidth() {
   document.documentElement.style.removeProperty("--planning-left-panel-width");
-  syncPlanningPaneResizerAria(clampPlanningPaneWidth(getPlanningPaneNaturalWidth()));
+  const { maxWidth, naturalWidth } = getPlanningPaneWidthBounds();
+  if (planningColumnResize?.hasCustomWidths() && naturalWidth > maxWidth) {
+    setPlanningPaneWidth(maxWidth, { redraw: false });
+    return;
+  }
+  syncPlanningPaneResizerAria(clampPlanningPaneWidth(naturalWidth));
+}
+
+function resetPlanningPaneWidth() {
+  applyInitialPlanningPaneWidth();
   refreshPlanningPaneLayout();
 }
 
@@ -419,8 +424,7 @@ function bindPlanningPaneResizer() {
 
   if (!planningPaneResizerBound) {
     clearLegacyStoredPlanningPaneWidth();
-    document.documentElement.style.removeProperty("--planning-left-panel-width");
-    syncPlanningPaneResizerAria(getCurrentPlanningPaneWidth());
+    applyInitialPlanningPaneWidth();
   }
 
   if (planningPaneResizerBound) return;
@@ -452,10 +456,78 @@ function bindPlanningPaneResizer() {
   });
   window.addEventListener("resize", () => {
     if (!isPlanningPaneResizeEnabled()) return;
+    // Fenêtre plus étroite ou plus large : les colonnes réglées reprennent ce qui tient.
+    planningColumnResize?.refit();
     setPlanningPaneWidth(getCurrentPlanningPaneWidth(), {
       redraw: true,
     });
   });
+}
+
+function getPlanningLocalStorage() {
+  try {
+    return window.localStorage;
+  } catch (_error) {
+    // Stockage refusé (contexte intégré) : les largeurs restent celles de la session.
+    return null;
+  }
+}
+
+// Largeur des colonnes du planning : une poignée sur le bord droit de chaque titre, largeurs
+// mémorisées dans le navigateur. Le volet gauche suit la colonne réglée et la timeline est
+// redessinée une fois, à la fin du glisser. Pas dans les vues intégrées (colonnes masquées).
+export function bindPlanningColumnWidths() {
+  if (planningColumnResize || !isPlanningPaneResizeEnabled()) return;
+  const header = document.querySelector(".planning-header-left");
+  if (!(header instanceof HTMLElement)) return;
+
+  planningColumnResize = bindPlanningColumnResize({
+    header,
+    root: document.documentElement,
+    storage: getPlanningLocalStorage(),
+    readWidth: (key) => readPlanningCssPixelVar(columnCssVar(key)),
+    // Colonne réglée sur un écran plus large : affichée à ce qui laisse sa poignée atteignable.
+    fitWidths: ({ custom, defaults }) => fitColumnWidths({
+      custom,
+      defaults,
+      viewportWidth: getPlanningViewportWidth(),
+      padX: readPlanningCssPixelVar("--left-pad-x"),
+    }),
+    getMaxWidth: ({ width, cell }) => maxColumnWidth({
+      width,
+      cellRight: cell.getBoundingClientRect().right,
+      room: paneRoom(planningColumnResizeStart),
+      padX: readPlanningCssPixelVar("--left-pad-x"),
+    }),
+    onResizeStart: () => {
+      const naturalWidth = getPlanningPaneNaturalWidth();
+      planningColumnResizeStart = {
+        paneWidth: getCurrentPlanningPaneWidth(),
+        naturalWidth,
+        viewportWidth: getPlanningViewportWidth(naturalWidth),
+      };
+    },
+    // Écrit sans rien relire : un seul recalcul de style par mouvement.
+    onResize: (delta) => {
+      if (!planningColumnResizeStart) return;
+      document.documentElement.style.setProperty(
+        "--planning-left-panel-width",
+        `${paneWidthDuringResize(planningColumnResizeStart, delta)}px`
+      );
+    },
+    onResizeEnd: ({ moved }) => {
+      planningColumnResizeStart = null;
+      if (!moved) return;
+      // Volet qui montre toutes ses colonnes : il reprend sa largeur automatique, celle de ses colonnes.
+      if (getCurrentPlanningPaneWidth() >= getPlanningPaneNaturalWidth()) {
+        document.documentElement.style.removeProperty("--planning-left-panel-width");
+      }
+      syncPlanningPaneResizerAria(getCurrentPlanningPaneWidth());
+      // Timeline redessinée à sa nouvelle largeur, même si la colonne est revenue à celle de départ.
+      refreshPlanningPaneLayout();
+    },
+  });
+  applyInitialPlanningPaneWidth();
 }
 
 function ensureStickyAxisLeftFiller(container) {

@@ -58,6 +58,7 @@ import {
   renderPlanningTimeline,
   clearPlanningTimeline,
   bindTimelineToolbar,
+  bindPlanningColumnWidths,
   getPlanningViewportState,
   refreshPlanningTimelineLayout,
   setPlanningZoomMode,
@@ -2693,6 +2694,8 @@ async function bootstrap() {
     applyEmbeddedPlanningSyncMode();
     loadState();
     bindPlanningEditToggle();
+    // Largeurs de colonnes mémorisées : posées avant le chargement, pour que l'en-tête ne saute pas.
+    bindPlanningColumnWidths();
 
     initGrist();
     if (HEADER_ONLY_EMBEDDED_MODE) {

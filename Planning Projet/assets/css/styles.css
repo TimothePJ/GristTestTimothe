@@ -76,7 +76,9 @@ body.is-ms-project-drag-cursor * {
 html.is-planning-pane-resizing,
 html.is-planning-pane-resizing *,
 body.is-planning-pane-resizing,
-body.is-planning-pane-resizing * {
+body.is-planning-pane-resizing *,
+html.is-planning-col-resizing,
+html.is-planning-col-resizing * {
   cursor: col-resize !important;
   user-select: none !important;
 }
@@ -517,12 +519,44 @@ body.planning-sync-embedded #planningTimeline .group-row-grid .cell-ligne-planni
 }
 
 .planning-header-left .hcol {
+  position: relative;
   padding: 8px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--grist-theme-text);
   font-weight: 600;
+}
+
+/* Poignée de largeur sur le bord droit de chaque titre de colonne, comme en Synthèse
+   (ajoutée par ui/planningColumnResize.js). */
+.planning-col-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+/* Repère discret entre deux titres, à la même hauteur quel que soit le nombre de lignes du titre. */
+.planning-col-resize::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 1px;
+  height: 16px;
+  background: #cbd5e1;
+  transform: translateY(-50%);
+}
+
+.planning-col-resize:hover::after,
+html.is-planning-col-resizing .planning-col-resize:active::after {
+  width: 2px;
+  background: #0a4f99;
 }
 
 .planning-header-left .c-start,
