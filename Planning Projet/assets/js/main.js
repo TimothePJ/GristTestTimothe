@@ -2474,6 +2474,12 @@ function bindSyntheseParameterDialog() {
       cachedProjectAvancementConfigs = withParametre(cachedProjectAvancementConfigs, openedProject, text);
       void refreshProjectRegistryFromGrist({ notify: false, clearInvalid: false, forceRefresh: true });
     },
+    // Onglet « Tâche contrôlée » : il lit les étages du tableau de tâches et écrit par lui (mêmes
+    // droits, même file d'écriture, projet et service revérifiés au moment d'écrire).
+    getControlSource: () => syntheseTasks?.getControlTaskSource() || null,
+    applyControlTask: (request) => (syntheseTasks
+      ? syntheseTasks.applyControlTask(request)
+      : Promise.resolve({ ok: false, error: "Les étages ne sont pas encore chargés : fermez la fenêtre puis rouvrez-la." })),
   });
   serviceContext.subscribe?.((context) => {
     if (!parameterDialog?.isOpen()) return;

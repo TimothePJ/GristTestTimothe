@@ -22,7 +22,7 @@ test("bouton Paramètre juste après Par étage", () => {
   assert.ok(button, "bouton Paramètre absent juste après Par étage");
   assert.match(button, /type="button"/);
   assert.match(button, /class="planning-synthese-parametre-toggle"/);
-  assert.match(button, /title="Modèle d'étage du projet : cycles, tâches, liens et durées d'un nouvel étage"/);
+  assert.ok(button.includes("title=\"Modèle d'étage du projet (cycles, tâches, liens et durées d'un nouvel étage) et tâche contrôlée des étages déjà créés\""));
   assert.match(button, /data-service-context-navigation/);
   assert.match(button, />Paramètre<\/button>$/);
 });
@@ -98,13 +98,20 @@ test("main.js : le projet est un objet, identifié par projectKeyOf", () => {
   assert.match(body, /withParametre\(cachedProjectAvancementConfigs, openedProject,/);
 });
 
+test("main.js : l'onglet « Tâche contrôlée » lit le tableau de tâches et écrit par lui", () => {
+  const body = functionBody(mainJs, "bindSyntheseParameterDialog");
+  assert.match(body, /getControlSource: \(\) => syntheseTasks\?\.getControlTaskSource\(\) \|\| null/);
+  assert.match(body, /syntheseTasks\.applyControlTask\(request\)/);
+  assert.ok(body.includes("Les étages ne sont pas encore chargés : fermez la fenêtre puis rouvrez-la."));
+});
+
 test("main.js : bindSyntheseParameterDialog est appelé au démarrage", () => {
   assert.ok(mainJs.includes("bindSyntheseParameterDialog();"));
 });
 
 test("versions servies", () => {
-  assert.ok(html.includes("main.js?v=20261123-liendate2"));
-  assert.ok(html.includes("styles.css?v=20261123-liendate2"));
+  assert.ok(html.includes("main.js?v=20261125-controle1"));
+  assert.ok(html.includes("styles.css?v=20261125-controle1"));
 });
 
 test("main.js : erreurs d'enregistrement lisibles (userMessage), droits revérifiés, ouverture gardée", () => {

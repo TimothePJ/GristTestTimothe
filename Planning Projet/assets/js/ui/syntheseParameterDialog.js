@@ -5,9 +5,13 @@
 // part vers Grist pendant la saisie : « Enregistrer » rend le texte JSON du modèle à `onSave`, qui
 // l'écrit dans Projets2 (main.js). Ses dépendances sont injectées (document, confirmation, fabriques
 // du contrôleur et du tableau) : doublures en test.
+// Un second onglet, « Tâche contrôlée », change la tâche contrôlée par rapport au coffrage dans les
+// étages déjà créés du projet (voir syntheseControlPanel.js) : lui écrit tout de suite, par le tableau
+// de tâches principal (getControlSource, applyControlTask), sans passer par « Enregistrer ».
 import { createSyntheseTasksController } from "./syntheseTasksController.js";
 import { createSyntheseTaskTable } from "./syntheseTaskTable.js";
 import { createLinkDialog } from "./syntheseLinkDialog.js";
+import { createControlPanel } from "./syntheseControlPanel.js";
 import { createMemoryDocApi } from "../services/memoryDocApi.js";
 import { FLOOR_TEMPLATE } from "../services/syntheseFloorTemplate.js";
 import { NATURES } from "../services/syntheseTaskModel.js";
@@ -19,7 +23,12 @@ import {
   templateWarnings,
 } from "../services/syntheseFloorParameter.js";
 
-const TITLE = "Paramètre — modèle d'étage";
+// Titre de la fenêtre selon l'onglet montré.
+const TITLES = Object.freeze({
+  model: "Paramètre — modèle d'étage",
+  control: "Paramètre — tâche contrôlée",
+});
+const TAB_LABELS = Object.freeze({ model: "Modèle d'étage", control: "Tâche contrôlée" });
 const MESSAGES = Object.freeze({
   help: "Un nouvel étage de ce projet reçoit ces lignes, ces liens et ces durées. {E} est remplacé par le nom de l'étage. Les étages déjà créés ne changent pas.",
   abandon: "Abandonner les modifications du modèle ?",
@@ -54,12 +63,16 @@ const isTaskItem = (item) => item.nature !== NATURES.cycle && item.nature !== NA
 // items (éléments du modèle), invalid (paramètre illisible), canEdit, columnMissing } — et
 // `onSave(text)` reçoit le JSON à écrire : la fenêtre se ferme quand la promesse est résolue, et
 // affiche l'erreur si elle est rejetée. `setCanEdit` suit « Editer » pendant qu'elle est ouverte.
+// `getControlSource` et `applyControlTask` : ce que l'onglet « Tâche contrôlée » lit du tableau de
+// tâches principal, et l'écriture qu'il lui demande.
 export function createParameterDialog({
   doc = document,
   confirm = (message) => window.confirm(message),
   onSave = async () => {},
   createController = createSyntheseTasksController,
   createTable = createSyntheseTaskTable,
+  getControlSource = () => null,
+  applyControlTask = async () => ({ ok: false }),
 } = {}) {
   function createElement(tag, className, text) {
     const element = doc.createElement(tag);
@@ -78,7 +91,7 @@ export function createParameterDialog({
   dialog.setAttribute("aria-labelledby", "syntheseParameterDialogTitle");
 
   const header = createElement("div", "synthese-link-dialog__header");
-  const title = createElement("h3", "", TITLE);
+  const title = createElement("h3", "", TITLES.model);
   title.id = "syntheseParameterDialogTitle";
   const closeButton = createButton("synthese-link-dialog__close", "×");
   closeButton.setAttribute("aria-label", "Fermer");
@@ -101,7 +114,31 @@ export function createParameterDialog({
   actions.append(cancelButton, saveButton);
   footer.append(revertButton, actions);
 
-  dialog.append(header, help, host, messages, footer);
+  // Onglets : le modèle d'étage (les étages à venir) et la tâche contrôlée (les étages déjà créés).
+  const tabs = createElement("div", "synthese-parameter-dialog__tabs");
+  tabs.setAttribute("role", "tablist");
+  const tabButtons = Object.fromEntries(Object.entries(TAB_LABELS).map(([name, label]) => {
+    const button = createButton("synthese-parameter-dialog__tab", label);
+    button.setAttribute("role", "tab");
+    return [name, button];
+  }));
+  tabs.append(tabButtons.model, tabButtons.control);
+
+  const modelPanel = createElement("div", "synthese-parameter-dialog__panel");
+  modelPanel.setAttribute("role", "tabpanel");
+  modelPanel.append(help, host, messages, footer);
+  const controlPanel = createControlPanel({
+    doc,
+    getSource: getControlSource,
+    applyControlTask,
+    onClose: () => requestClose(),
+  });
+  controlPanel.element.classList.add("synthese-parameter-dialog__panel");
+  controlPanel.element.setAttribute("role", "tabpanel");
+  controlPanel.element.hidden = true;
+  const panels = { model: modelPanel, control: controlPanel.element };
+
+  dialog.append(header, tabs, modelPanel, controlPanel.element);
   doc.body.appendChild(dialog);
 
   // Instance en cours : { memory, controller } ; null fenêtre fermée.
@@ -117,6 +154,23 @@ export function createParameterDialog({
   // Refus ou erreur du dernier « Enregistrer » ; effacé au geste suivant.
   let errorText = "";
   let warnings = [];
+  // Onglet montré : "model" à chaque ouverture.
+  let activeTab = "model";
+
+  // L'onglet montré : son panneau, son bouton enfoncé, le titre de la fenêtre. « Tâche contrôlée »
+  // relit le tableau de tâches à chaque fois qu'on y vient. Le modèle garde ses modifications en
+  // cours : son panneau est seulement masqué.
+  function showTab(name) {
+    activeTab = panels[name] ? name : "model";
+    Object.entries(panels).forEach(([key, panel]) => {
+      const shown = key === activeTab;
+      panel.hidden = !shown;
+      tabButtons[key].classList.toggle("is-active", shown);
+      tabButtons[key].setAttribute("aria-selected", shown ? "true" : "false");
+    });
+    title.textContent = projectName ? `${TITLES[activeTab]} · ${projectName}` : TITLES[activeTab];
+    if (activeTab === "control") controlPanel.show();
+  }
 
   // Modifier et enregistrer : « Editer » actif dans un service modifiable (canEdit, fourni par
   // main.js) et colonne Synthese_Parametre présente.
@@ -216,6 +270,7 @@ export function createParameterDialog({
     errorText = "";
     warnings = [];
     invalid = false;
+    controlPanel.reset();
     if (dialog.open) dialog.close();
   }
 
@@ -238,7 +293,8 @@ export function createParameterDialog({
     const items = !columnMissing && !invalid && Array.isArray(model.items) && model.items.length
       ? model.items
       : FLOOR_TEMPLATE;
-    title.textContent = projectName ? `${TITLE} · ${projectName}` : TITLE;
+    controlPanel.reset();
+    showTab("model");
     if (!dialog.open) dialog.showModal();
     mount(items);
     renderState();
@@ -284,6 +340,9 @@ export function createParameterDialog({
   }
 
   closeButton.addEventListener("click", () => requestClose());
+  Object.entries(tabButtons).forEach(([name, button]) => {
+    button.addEventListener("click", () => showTab(name));
+  });
   cancelButton.addEventListener("click", () => requestClose());
   revertButton.addEventListener("click", () => revert());
   saveButton.addEventListener("click", () => {
@@ -314,6 +373,8 @@ export function createParameterDialog({
       if (!session) return;
       session.controller.setEditingEnabled(editable());
       renderState();
+      // « Editer » compte aussi pour l'onglet « Tâche contrôlée » : il relit ce qui l'empêche d'écrire.
+      if (activeTab === "control") controlPanel.show();
     },
     isOpen: () => Boolean(dialog.open),
     openedProject: () => (session ? projectName : ""),
