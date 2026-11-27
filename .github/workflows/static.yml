@@ -43,7 +43,7 @@ jobs:
   deploy:
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url || steps.deployment_last.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main (prod)
@@ -95,6 +95,31 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
+      # deploy-pages looks the artifact up once, the instant the upload ends, and
+      # does not retry. GitHub's artifact listing lags behind the upload (usually
+      # by a few seconds, sometimes close to a minute), so it finds 0 artifact
+      # and fails ("No artifacts named github-pages were found") although the
+      # artifact exists: actions/deploy-pages issue #451. Hence a short wait
+      # before the first attempt, then up to two more attempts after longer
+      # waits. Only the last attempt is allowed to fail the job.
+      - name: Wait for the artifact to be listed
+        run: sleep 10
       - name: Deploy to GitHub Pages
         id: deployment
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - name: Wait before the second deployment attempt
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 30
+      - name: Deploy to GitHub Pages (second attempt)
+        id: deployment_retry
+        if: steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - name: Wait before the third deployment attempt
+        if: steps.deployment_retry.outcome == 'failure'
+        run: sleep 60
+      - name: Deploy to GitHub Pages (third attempt)
+        id: deployment_last
+        if: steps.deployment_retry.outcome == 'failure'
         uses: actions/deploy-pages@v4
