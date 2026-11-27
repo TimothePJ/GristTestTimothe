@@ -11,6 +11,8 @@ let debugEventsBound = false;
 let dateCellEditHandler = null;
 let dateCellEditBound = false;
 let activeDateEditor = null;
+let outlineToggleHandler = null;
+let outlineToggleBound = false;
 let rowDragBound = false;
 let activeDraggedRowEl = null;
 let activeNativeDragImageEl = null;
@@ -1108,6 +1110,56 @@ function bindDateCellEditing(containerEl) {
   });
 }
 
+// Clic sur la flèche d'une section : le repli est décidé par l'appelant, qui redessine.
+function bindOutlineToggle(containerEl) {
+  if (!containerEl || outlineToggleBound) return;
+  outlineToggleBound = true;
+
+  containerEl.addEventListener("click", (event) => {
+    const targetEl = event.target;
+    if (!(targetEl instanceof Element)) return;
+
+    const toggleEl = targetEl.closest(".group-row-grid .outline-toggle");
+    if (!(toggleEl instanceof HTMLElement) || !containerEl.contains(toggleEl)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof outlineToggleHandler === "function") {
+      outlineToggleHandler(toggleEl.dataset.outlineId || "");
+    }
+  });
+}
+
+// Cellule « Tâche » d'un planning hiérarchisé : retrait selon la profondeur, flèche pour
+// replier ou déplier une section, emplacement vide de même largeur pour une tâche simple.
+function fillOutlineTaskCell(cellEl, group) {
+  const taskLabel = String(group.taskLabel ?? "");
+  cellEl.classList.add("has-outline");
+  cellEl.style.setProperty("--outline-depth", String(group.outlineDepth));
+
+  let markerEl;
+  if (group.isExpandable) {
+    markerEl = document.createElement("button");
+    markerEl.type = "button";
+    markerEl.className = "outline-toggle";
+    markerEl.dataset.outlineId = String(group.idLabel ?? "");
+    markerEl.setAttribute("aria-expanded", group.isCollapsed ? "false" : "true");
+    markerEl.title = group.isCollapsed ? "Déplier" : "Replier";
+    markerEl.setAttribute("aria-label", `${markerEl.title} ${taskLabel}`.trim());
+  } else {
+    markerEl = document.createElement("span");
+    markerEl.className = "outline-spacer";
+  }
+
+  // Le retrait laisse moins de place au nom : il reste lisible en entier au survol.
+  const labelEl = document.createElement("span");
+  labelEl.className = "outline-label";
+  labelEl.textContent = taskLabel;
+  labelEl.title = taskLabel;
+
+  cellEl.append(markerEl, labelEl);
+}
+
 function buildMsProjectRowDragPayload(rowEl) {
   if (!(rowEl instanceof HTMLElement)) return null;
 
@@ -1582,7 +1634,12 @@ function buildGroupLabelElement(group) {
 
   const task = document.createElement("div");
   task.className = "cell-task";
-  task.textContent = String(group?.taskLabel ?? "");
+  // `outlineDepth` absent : planning sans arborescence, cellule inchangée.
+  if (group?.outlineDepth == null) {
+    task.textContent = String(group?.taskLabel ?? "");
+  } else {
+    fillOutlineTaskCell(task, group);
+  }
 
   const start = document.createElement("div");
   start.className = "cell-start";
@@ -1857,6 +1914,11 @@ export function setMsProjectDateEditHandler(handler) {
   dateCellEditHandler = typeof handler === "function" ? handler : null;
 }
 
+// `handler(numeroUnique)` : appelé au clic sur la flèche d'une section.
+export function setMsProjectOutlineToggleHandler(handler) {
+  outlineToggleHandler = typeof handler === "function" ? handler : null;
+}
+
 function fingerprintTimelineRecord(record) {
   return JSON.stringify(record);
 }
@@ -1906,7 +1968,9 @@ function syncTimelineDataSet(dataSet, records = [], fingerprintCache) {
   }
 }
 
-export function renderMsProjectTimeline({ groups, items }) {
+// `keepWindow` : garde la période affichée telle quelle (repli ou dépli d'une section), au
+// lieu de la recaler sur l'étendue des tâches.
+export function renderMsProjectTimeline({ groups, items }, { keepWindow = false } = {}) {
   const container = getTimelineContainer();
   bindPersistentHeader();
   bindTimelineHeaderWheelZoom();
@@ -1957,6 +2021,7 @@ export function renderMsProjectTimeline({ groups, items }) {
     bindDebugTimelineEvents();
     bindHoverTooltip(container);
     bindDateCellEditing(container);
+    bindOutlineToggle(container);
     bindRowDragging(container);
   }
 
@@ -1969,25 +2034,31 @@ export function renderMsProjectTimeline({ groups, items }) {
   });
 
   requestAnimationFrame(() => {
-    timelineInstance.redraw();
+    // Un repli ne change le contenu d'aucune barre et vis-timeline s'est déjà redessiné à
+    // la mise à jour des lignes : lui faire remesurer toutes les barres et rattacher toutes
+    // les lignes une seconde fois doublerait le temps du clic.
+    if (!keepWindow) timelineInstance.redraw();
     syncTimelineChrome(container);
     decorateRenderedTimelineItems(container);
     syncNativeItemTitles(container);
     bindItemHoverInteractions(container);
     debugLog("Timeline redraw completed.");
 
-    const range = computeRange(items || []);
-    if (range) {
-      dataDateRange = range;
-      dataAnchorDate = computeRangeCenter(range);
-      fitDataWindowForMode(getCurrentZoomMode());
-    } else if ((groups || []).length) {
-      dataDateRange = null;
-      dataAnchorDate = new Date();
-      setWindowForMode(getCurrentZoomMode(), dataAnchorDate);
-    } else {
-      dataDateRange = null;
-      dataAnchorDate = null;
+    // Replier une section masque des lignes sans changer les tâches : rien à recaler.
+    if (!keepWindow) {
+      const range = computeRange(items || []);
+      if (range) {
+        dataDateRange = range;
+        dataAnchorDate = computeRangeCenter(range);
+        fitDataWindowForMode(getCurrentZoomMode());
+      } else if ((groups || []).length) {
+        dataDateRange = null;
+        dataAnchorDate = new Date();
+        setWindowForMode(getCurrentZoomMode(), dataAnchorDate);
+      } else {
+        dataDateRange = null;
+        dataAnchorDate = null;
+      }
     }
 
     updateDateRangeDisplay();

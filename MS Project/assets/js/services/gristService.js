@@ -336,6 +336,16 @@ function getDirectChildTextByLocalName(parentNode, localName) {
   return toText(child?.textContent);
 }
 
+// Niveau hiérarchique MS Project d'une tâche : 1 pour une section de premier rang, 2 pour ce
+// qu'elle contient, etc. C'est lui qui permet de replier une section dans le widget. Vide
+// quand il est illisible.
+function readOutlineLevel(taskNode) {
+  const text = getDirectChildTextByLocalName(taskNode, "OutlineLevel");
+  if (!/^\d+$/.test(text)) return "";
+  const level = Number(text);
+  return level >= 1 ? String(level) : "";
+}
+
 function getFileNameWithoutExtension(fileName) {
   const text = toText(fileName);
   if (!text) return "";
@@ -961,6 +971,7 @@ export async function importMsProjectXmlFile(file) {
   const indicatorCol = columns.indicator;
   const teamCol = columns.team;
   const subTeamCol = columns.subTeam;
+  const levelCol = columns.level;
   const effortCol = columns.effort;
   const projectLinkCol = columns.projectLink;
   const titleCol = columns.title;
@@ -1011,6 +1022,7 @@ export async function importMsProjectXmlFile(file) {
 
     if (teamCol) record[teamCol] = "";
     if (subTeamCol) record[subTeamCol] = "";
+    if (levelCol) record[levelCol] = readOutlineLevel(taskNode);
     if (indicatorCol) record[indicatorCol] = taskIndex + 1;
     if (effortCol) record[effortCol] = "";
     if (projectLinkCol) record[projectLinkCol] = "";

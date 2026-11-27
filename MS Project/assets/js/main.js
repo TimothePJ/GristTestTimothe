@@ -11,6 +11,7 @@ import {
   getMsProjectServiceDiagnostics,
 } from "./services/gristService.js";
 import { buildTimelineDataFromMsProjectRows } from "./services/msProjectService.js";
+import { createOutlineStateStore } from "./outlineState.js";
 import { state, setState } from "./state.js";
 import { initProjectSelector, updateProjectSelector } from "./ui/selectors.js";
 import {
@@ -18,6 +19,7 @@ import {
   clearMsProjectTimeline,
   bindTimelineToolbar,
   setMsProjectDateEditHandler,
+  setMsProjectOutlineToggleHandler,
 } from "./ui/timeline.js";
 
 let toolbarBound = false;
@@ -34,9 +36,31 @@ const MS_PROJECT_PERF_DEBUG =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).get("msProjectDebug") === "1";
 
+// Dans une page intégrée, le simple accès à localStorage peut être refusé par le navigateur.
+function getBrowserStorage() {
+  try {
+    return window.localStorage;
+  } catch (error) {
+    return null;
+  }
+}
+
+const outlineState = createOutlineStateStore(getBrowserStorage());
+
 function setMsProjectStatus(message = "") {
   const el = document.getElementById("msProjectStatus");
   if (el) el.textContent = message;
+}
+
+function describeDisplayedTasks(rowCount, projectName) {
+  return `${rowCount} tache(s) affichee(s) | Nom : ${projectName}`;
+}
+
+// Lignes et barres à afficher pour un planning, sections repliées par l'utilisateur comprises.
+function buildMsProjectTimelineData(rows, projectName, requestedSortMode) {
+  return buildTimelineDataFromMsProjectRows(rows, projectName, requestedSortMode, {
+    collapsedIds: outlineState.getCollapsedIds(projectName),
+  });
 }
 
 function traceMsProjectPerformance(label, details = {}) {
@@ -175,18 +199,33 @@ function resolveDateColumnName(field) {
 // (sans aller chercher les données sur Grist), pour un retour visuel
 // instantané après une édition. La réconciliation complète arrive ensuite
 // via refreshMsProject().
-function renderMsProjectFromCache() {
-  if (!Array.isArray(cachedMsProjectRows) || !state.selectedProject) return;
+function renderMsProjectFromCache({ keepWindow = false } = {}) {
+  if (!Array.isArray(cachedMsProjectRows) || !state.selectedProject) return null;
 
-  const timelineData = buildTimelineDataFromMsProjectRows(
+  const timelineData = buildMsProjectTimelineData(
     cachedMsProjectRows,
     state.selectedProject || "",
     sortMode
   );
-  if (!timelineData.rowCount) return;
+  if (!timelineData.rowCount) return null;
   const restoreScroll = captureMsProjectScroll();
-  renderMsProjectTimeline(timelineData);
+  renderMsProjectTimeline(timelineData, { keepWindow });
   restoreScroll();
+  return timelineData;
+}
+
+// Replie ou déplie une section. L'état est retenu dans le navigateur, puis le planning est
+// redessiné depuis les lignes déjà chargées : pas de lecture Grist, et la période affichée
+// ne bouge pas.
+function handleOutlineToggle(taskId) {
+  const projectName = state.selectedProject;
+  if (!taskId || !projectName) return;
+
+  outlineState.toggle(projectName, taskId);
+  const timelineData = renderMsProjectFromCache({ keepWindow: true });
+  if (timelineData) {
+    setMsProjectStatus(describeDisplayedTasks(timelineData.rowCount, projectName));
+  }
 }
 
 // Applique localement le champ modifié sur la ligne en cache (mise à jour
@@ -320,7 +359,7 @@ async function refreshMsProject() {
     cachedMsProjectRows = rows;
 
     const buildStartedAt = performance.now();
-    const timelineData = buildTimelineDataFromMsProjectRows(
+    const timelineData = buildMsProjectTimelineData(
       rows,
       requestedProject,
       requestedSortMode
@@ -356,9 +395,7 @@ async function refreshMsProject() {
       toolbarBound = true;
     }
 
-    setMsProjectStatus(
-      `${timelineData.rowCount} tache(s) affichee(s) | Nom : ${requestedProject}`
-    );
+    setMsProjectStatus(describeDisplayedTasks(timelineData.rowCount, requestedProject));
   } catch (error) {
     console.error("Erreur MS Project :", error);
     clearMsProjectTimeline();
@@ -413,6 +450,7 @@ async function bootstrap() {
   try {
     initGrist();
     setMsProjectDateEditHandler(handleDateCellEdit);
+    setMsProjectOutlineToggleHandler(handleOutlineToggle);
     bindImportButton();
 
     setState({ selectedProject: "" });

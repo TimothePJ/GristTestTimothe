@@ -29,6 +29,7 @@ const TEST_CONFIG = {
         end: "Fin",
         team: "Equipe",
         subTeam: "Sous_Equipe",
+        level: "Niveau",
         barStyle: "Style_Barre",
         bold: "Bold",
         title: "Titre",
@@ -201,23 +202,26 @@ function createGristHarness(
   return { grist, fetch, tables, fetchCalls, restCalls, actionBatches };
 }
 
-function createXmlParser() {
+// Sans argument : une seule tâche. Sinon une tâche par objet { balise: texte }, complété par
+// les valeurs de cette tâche par défaut.
+function createXmlParser(taskFields = [{}]) {
   const child = (localName, textContent) => ({ localName, textContent });
-  const task = {
-    children: [
-      child("UID", "1"),
-      child("Name", "Tâche importée"),
-      child("Start", "2026-08-10T08:00:00"),
-      child("Finish", "2026-08-11T17:00:00"),
-      child("Duration", "PT7H24M"),
-      child("Summary", "0"),
-    ],
-  };
+  const tasks = taskFields.map((fields) => ({
+    children: Object.entries({
+      UID: "1",
+      Name: "Tâche importée",
+      Start: "2026-08-10T08:00:00",
+      Finish: "2026-08-11T17:00:00",
+      Duration: "PT7H24M",
+      Summary: "0",
+      ...fields,
+    }).map(([localName, textContent]) => child(localName, textContent)),
+  }));
   const document = {
     documentElement: { children: [] },
     querySelector() { return null; },
     getElementsByTagNameNS(_namespace, localName) {
-      return localName === "Task" ? [task] : [];
+      return localName === "Task" ? tasks : [];
     },
   };
   return class DOMParser {
@@ -237,6 +241,7 @@ function emptyMsProjectTable() {
     Fin: [],
     Equipe: [],
     Sous_Equipe: [],
+    Niveau: [],
     Style_Barre: [],
     Style: [],
     Bold: [],
@@ -369,6 +374,45 @@ test("un nouvel import ne lit pas toute la table quand le filtre REST ne renvoie
   assert.deepEqual(msProjectFetches[0].filter, { Nom: ["Nouveau projet"] });
   assert.equal(importedAction[3].Nom, "Nouveau projet");
   assert.deepEqual(harness.tables.MsProjectNom.Nom, ["Nouveau projet"]);
+});
+
+// Le niveau est ce qui permet au widget de replier une section sur ses sous-tâches.
+async function importTasks(taskFields) {
+  const harness = createGristHarness({
+    MsProjectNom: { id: [], Nom: [] },
+    MsProject: emptyMsProjectTable(),
+  });
+  const service = await loadService({
+    grist: harness.grist,
+    fetch: harness.fetch,
+    DOMParser: createXmlParser(taskFields),
+  });
+  await service.importMsProjectXmlFile({
+    name: "Projet A.xml",
+    async text() { return "<Project />"; },
+  });
+  return harness.tables.MsProject;
+}
+
+test("import : le niveau hiérarchique de chaque tâche est écrit dans Niveau", async () => {
+  const table = await importTasks([
+    { UID: "1", Name: "Section", OutlineLevel: "1", Summary: "1" },
+    { UID: "2", Name: "Sous-section", OutlineLevel: "2", Summary: "1" },
+    { UID: "3", Name: "Tâche", OutlineLevel: "3" },
+  ]);
+
+  assert.deepEqual(table.Nom_Tache, ["Section", "Sous-section", "Tâche"]);
+  assert.deepEqual(table.Niveau, ["1", "2", "3"]);
+});
+
+test("import : une tâche sans niveau lisible laisse Niveau vide", async () => {
+  const table = await importTasks([
+    { UID: "1", Name: "Sans balise" },
+    { UID: "2", Name: "Niveau zéro", OutlineLevel: "0" },
+    { UID: "3", Name: "Niveau illisible", OutlineLevel: "abc" },
+  ]);
+
+  assert.deepEqual(table.Niveau, ["", "", ""]);
 });
 
 function unreachableRestFetch(restCalls) {
