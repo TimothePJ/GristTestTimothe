@@ -1,5 +1,6 @@
 import { APP_CONFIG } from "../config.js";
 import { toText } from "./gristService.js";
+import { resolveRowStyle } from "./rowStyle.js";
 
 function toNumber(value) {
   if (value == null || value === "") return null;
@@ -551,10 +552,53 @@ function compareRowsBySortMode(a, b, sortMode) {
   return compareRowsChronologically(a, b);
 }
 
+function parseOutlineLevel(value) {
+  const text = toText(value);
+  if (!/^\d+$/.test(text)) return null;
+  const level = Number(text);
+  return level >= 1 ? level : null;
+}
+
+// Arborescence d'un planning rangé dans l'ordre du fichier XML : pour chaque ligne, sa
+// profondeur, si elle contient d'autres lignes, et si une section repliée la masque.
+// Renvoie `null` quand aucune ligne n'a de niveau (planning importé avant que le niveau soit
+// enregistré) : l'affichage reste alors à plat, comme avant.
+function buildOutline(rows, collapsedIds) {
+  let hasLevel = false;
+  let previousLevel = 1;
+  // Une ligne sans niveau lisible reste dans la section de la ligne qui la précède.
+  const levels = rows.map((row) => {
+    const ownLevel = parseOutlineLevel(row.levelLabel);
+    if (ownLevel != null) hasLevel = true;
+    previousLevel = ownLevel ?? previousLevel;
+    return previousLevel;
+  });
+  if (!hasLevel) return null;
+
+  const collapsed = new Set(Array.from(collapsedIds || [], (id) => toText(id)));
+  // Niveau de la section repliée en cours : tout ce qui est plus profond est masqué.
+  let hiddenBelowLevel = null;
+
+  return rows.map((row, index) => {
+    const level = levels[index];
+    if (hiddenBelowLevel != null && level > hiddenBelowLevel) {
+      return { isHidden: true };
+    }
+
+    const isExpandable = index + 1 < rows.length && levels[index + 1] > level;
+    const isCollapsed = isExpandable && collapsed.has(row.id);
+    hiddenBelowLevel = isCollapsed ? level : null;
+    return { isHidden: false, depth: level - 1, isExpandable, isCollapsed };
+  });
+}
+
+// `collapsedIds` : numéros uniques des sections repliées. L'arborescence n'existe que dans
+// l'ordre du fichier XML ; les autres tris affichent toutes les lignes à plat.
 export function buildTimelineDataFromMsProjectRows(
   rawRows,
   selectedProject = "",
-  sortMode = "xml-order"
+  sortMode = "xml-order",
+  { collapsedIds = [] } = {}
 ) {
   const config = APP_CONFIG.grist.msProjectTable;
   const columns = config.columns;
@@ -602,6 +646,12 @@ export function buildTimelineDataFromMsProjectRows(
       isTitleRow,
       isBoldRow,
       isBaseDefaultStyle: baseDefaultStyle,
+      // Couleur de fond de la ligne dans le tableau ; `null` : aspect habituel.
+      rowStyle: resolveRowStyle({
+        styleName: rawRow[columns.rowStyle],
+        level: parseOutlineLevel(level),
+        isSection: isBoldRow,
+      }),
       indicatorLabel: indicator,
       effortValue: effort,
       projectLabel: projectFilterColumn ? toText(rawRow[projectFilterColumn]) : "",
@@ -617,10 +667,14 @@ export function buildTimelineDataFromMsProjectRows(
 
   rows.sort((a, b) => compareRowsBySortMode(a, b, sortMode));
 
+  const outline = sortMode === "xml-order" ? buildOutline(rows, collapsedIds) : null;
   const groups = [];
   const items = [];
 
   rows.forEach((row, index) => {
+    const outlineRow = outline ? outline[index] : null;
+    if (outlineRow?.isHidden) return;
+
     // Identifiant stable basé sur la ligne Grist (indépendant du tri), pour
     // permettre une synchronisation différentielle du dataset vis-timeline.
     const groupId = `ms-${row.rowId}`;
@@ -642,10 +696,17 @@ export function buildTimelineDataFromMsProjectRows(
       isTitleRow: Boolean(row.isTitleRow),
       isBoldRow: Boolean(row.isBoldRow),
       isBaseDefaultStyle: Boolean(row.isBaseDefaultStyle),
+      rowStyle: row.rowStyle,
       levelLabel: row.levelLabel,
       indicatorLabel: row.indicatorLabel,
       effortValue: row.effortValue,
+      // Rang dans le planning complet : replier une section ne renumérote pas les lignes
+      // qui restent, vis-timeline n'a donc pas à les redessiner.
       sortIndex: index,
+      // `null` : planning sans arborescence, ligne affichée comme avant.
+      outlineDepth: outlineRow ? outlineRow.depth : null,
+      isExpandable: Boolean(outlineRow?.isExpandable),
+      isCollapsed: Boolean(outlineRow?.isCollapsed),
     });
 
     if (!row.startDate || !row.endDate) return;
@@ -733,6 +794,7 @@ export function buildTimelineDataFromMsProjectRows(
   return {
     groups,
     items,
-    rowCount: rows.length,
+    rowCount: groups.length,
+    hasOutline: Boolean(outline),
   };
 }

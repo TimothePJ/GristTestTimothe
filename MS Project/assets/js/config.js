@@ -18,6 +18,7 @@ export const APP_CONFIG = {
         subTeam: "Sous_Equipe",
         level: "Niveau",
         barStyle: "Style_Barre",
+        rowStyle: "Style_Ligne",
         bold: "Bold",
         title: "Titre",
         effort: "Eff",

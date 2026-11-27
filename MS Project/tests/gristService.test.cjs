@@ -29,7 +29,9 @@ const TEST_CONFIG = {
         end: "Fin",
         team: "Equipe",
         subTeam: "Sous_Equipe",
+        level: "Niveau",
         barStyle: "Style_Barre",
+        rowStyle: "Style_Ligne",
         bold: "Bold",
         title: "Titre",
         effort: "Eff",
@@ -201,23 +203,34 @@ function createGristHarness(
   return { grist, fetch, tables, fetchCalls, restCalls, actionBatches };
 }
 
-function createXmlParser() {
-  const child = (localName, textContent) => ({ localName, textContent });
-  const task = {
+// Balise XML factice : un texte, ou une liste de balises enfants.
+const xmlNode = (localName, content) => (Array.isArray(content)
+  ? { localName, textContent: "", children: content }
+  : { localName, textContent: content });
+
+// Sans argument : une seule tâche. Sinon une tâche par objet { balise: texte }, complété par
+// les valeurs de cette tâche par défaut ; `nodes` y ajoute des balises à enfants.
+// `projectNodes` : balises du projet lui-même (définitions de ses champs personnalisés).
+function createXmlParser(taskFields = [{}], projectNodes = []) {
+  const tasks = taskFields.map(({ nodes = [], ...fields }) => ({
     children: [
-      child("UID", "1"),
-      child("Name", "Tâche importée"),
-      child("Start", "2026-08-10T08:00:00"),
-      child("Finish", "2026-08-11T17:00:00"),
-      child("Duration", "PT7H24M"),
-      child("Summary", "0"),
+      ...Object.entries({
+        UID: "1",
+        Name: "Tâche importée",
+        Start: "2026-08-10T08:00:00",
+        Finish: "2026-08-11T17:00:00",
+        Duration: "PT7H24M",
+        Summary: "0",
+        ...fields,
+      }).map(([localName, textContent]) => xmlNode(localName, textContent)),
+      ...nodes,
     ],
-  };
+  }));
   const document = {
-    documentElement: { children: [] },
+    documentElement: { children: projectNodes },
     querySelector() { return null; },
     getElementsByTagNameNS(_namespace, localName) {
-      return localName === "Task" ? [task] : [];
+      return localName === "Task" ? tasks : [];
     },
   };
   return class DOMParser {
@@ -237,7 +250,9 @@ function emptyMsProjectTable() {
     Fin: [],
     Equipe: [],
     Sous_Equipe: [],
+    Niveau: [],
     Style_Barre: [],
+    Style_Ligne: [],
     Style: [],
     Bold: [],
     Titre: [],
@@ -369,6 +384,109 @@ test("un nouvel import ne lit pas toute la table quand le filtre REST ne renvoie
   assert.deepEqual(msProjectFetches[0].filter, { Nom: ["Nouveau projet"] });
   assert.equal(importedAction[3].Nom, "Nouveau projet");
   assert.deepEqual(harness.tables.MsProjectNom.Nom, ["Nouveau projet"]);
+});
+
+// Le niveau est ce qui permet au widget de replier une section sur ses sous-tâches.
+async function importTasks(taskFields, projectNodes = []) {
+  const harness = createGristHarness({
+    MsProjectNom: { id: [], Nom: [] },
+    MsProject: emptyMsProjectTable(),
+  });
+  const service = await loadService({
+    grist: harness.grist,
+    fetch: harness.fetch,
+    DOMParser: createXmlParser(taskFields, projectNodes),
+  });
+  await service.importMsProjectXmlFile({
+    name: "Projet A.xml",
+    async text() { return "<Project />"; },
+  });
+  return harness.tables.MsProject;
+}
+
+test("import : le niveau hiérarchique de chaque tâche est écrit dans Niveau", async () => {
+  const table = await importTasks([
+    { UID: "1", Name: "Section", OutlineLevel: "1", Summary: "1" },
+    { UID: "2", Name: "Sous-section", OutlineLevel: "2", Summary: "1" },
+    { UID: "3", Name: "Tâche", OutlineLevel: "3" },
+  ]);
+
+  assert.deepEqual(table.Nom_Tache, ["Section", "Sous-section", "Tâche"]);
+  assert.deepEqual(table.Niveau, ["1", "2", "3"]);
+});
+
+test("import : une tâche sans niveau lisible laisse Niveau vide", async () => {
+  const table = await importTasks([
+    { UID: "1", Name: "Sans balise" },
+    { UID: "2", Name: "Niveau zéro", OutlineLevel: "0" },
+    { UID: "3", Name: "Niveau illisible", OutlineLevel: "abc" },
+  ]);
+
+  assert.deepEqual(table.Niveau, ["", "", ""]);
+});
+
+// Le modèle de planning range le style de chaque ligne du tableau (sa couleur de fond dans
+// MS Project) dans un champ personnalisé nommé « StyleTab ». Comme dans un vrai fichier : la
+// définition du champ, sa liste de valeurs rattachée par identifiant, et la valeur d'une tâche.
+const STYLE_TAB_FIELD_ID = "188744104";
+const STYLE_TAB_LIST_ID = "B8172EED-519F-4D6C-B65F-5A908BD70532";
+const STYLE_TAB_VALUES = { auto: "351", niv3: "357", hlRouge: "365" };
+
+function styleTabProjectNodes(alias = "StyleTab") {
+  const value = (id, parentId, label) => xmlNode("Value", [
+    xmlNode("ValueID", id),
+    xmlNode("ParentValueID", parentId),
+    xmlNode("Value", label),
+  ]);
+  return [
+    xmlNode("ExtendedAttributes", [
+      xmlNode("ExtendedAttribute", [
+        xmlNode("FieldID", STYLE_TAB_FIELD_ID),
+        xmlNode("FieldName", "Code hiérarchique5"),
+        xmlNode("Alias", alias),
+        xmlNode("Ltuid", STYLE_TAB_LIST_ID),
+      ]),
+    ]),
+    xmlNode("OutlineCodes", [
+      xmlNode("OutlineCode", [
+        xmlNode("Guid", STYLE_TAB_LIST_ID),
+        xmlNode("Values", [
+          value(STYLE_TAB_VALUES.auto, "0", "Auto"),
+          value("354", "0", "Niv"),
+          value(STYLE_TAB_VALUES.niv3, "354", "3"),
+          value("364", "0", "HL"),
+          value(STYLE_TAB_VALUES.hlRouge, "364", "Rouge"),
+        ]),
+      ]),
+    ]),
+  ];
+}
+
+const styleTabChoice = (valueId) => xmlNode("OutlineCode", [
+  xmlNode("FieldID", STYLE_TAB_FIELD_ID),
+  xmlNode("ValueID", valueId),
+]);
+
+test("import : le style de ligne de chaque tâche est écrit dans Style_Ligne", async () => {
+  const table = await importTasks([
+    { UID: "1", Name: "Section", nodes: [styleTabChoice(STYLE_TAB_VALUES.auto)] },
+    { UID: "2", Name: "Niveau imposé", nodes: [styleTabChoice(STYLE_TAB_VALUES.niv3)] },
+    { UID: "3", Name: "Surlignée", nodes: [styleTabChoice(STYLE_TAB_VALUES.hlRouge)] },
+    { UID: "4", Name: "Sans style" },
+  ], styleTabProjectNodes());
+
+  assert.deepEqual(table.Nom_Tache, ["Section", "Niveau imposé", "Surlignée", "Sans style"]);
+  assert.deepEqual(table.Style_Ligne, ["Auto", "Niv_3", "HL_Rouge", ""]);
+});
+
+// Le numéro du champ (Code hiérarchique5) est un emplacement libre de MS Project : un autre
+// modèle de planning peut y ranger tout autre chose. Seul le nom « StyleTab » fait foi.
+test("import : un planning sans champ StyleTab laisse Style_Ligne vide", async () => {
+  const table = await importTasks([
+    { UID: "1", Name: "Autre modèle", nodes: [styleTabChoice(STYLE_TAB_VALUES.auto)] },
+  ], styleTabProjectNodes("Zone de travail"));
+
+  assert.deepEqual(table.Style_Ligne, [""]);
 });
 
 function unreachableRestFetch(restCalls) {
