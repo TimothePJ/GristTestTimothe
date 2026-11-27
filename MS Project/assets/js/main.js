@@ -12,6 +12,7 @@ import {
 } from "./services/gristService.js";
 import { buildTimelineDataFromMsProjectRows } from "./services/msProjectService.js";
 import { createOutlineStateStore } from "./outlineState.js";
+import { createTwoStageRunner, planFirstUnfoldStage } from "./unfoldStages.js";
 import { state, setState } from "./state.js";
 import { initProjectSelector, updateProjectSelector } from "./ui/selectors.js";
 import {
@@ -46,6 +47,29 @@ function getBrowserStorage() {
 }
 
 const outlineState = createOutlineStateStore(getBrowserStorage());
+
+// Lignes actuellement à l'écran (identifiants vis-timeline).
+let displayedGroupIds = new Set();
+
+// Dépli d'une grosse section en deux temps : le reste part une fois le premier temps
+// affiché, c'est-à-dire après la prochaine image du navigateur.
+const unfoldStages = createTwoStageRunner((callback) => {
+  requestAnimationFrame(() => setTimeout(callback, 0));
+});
+
+// Tout affichage du planning passe par ici : la suite d'un dépli en deux temps encore en
+// attente serait périmée, elle est annulée.
+function showTimelineData(timelineData, options) {
+  unfoldStages.cancel();
+  renderMsProjectTimeline(timelineData, options);
+  displayedGroupIds = new Set(timelineData.groups.map((group) => group.id));
+}
+
+function clearTimeline() {
+  unfoldStages.cancel();
+  displayedGroupIds = new Set();
+  clearMsProjectTimeline();
+}
 
 function setMsProjectStatus(message = "") {
   const el = document.getElementById("msProjectStatus");
@@ -199,7 +223,9 @@ function resolveDateColumnName(field) {
 // (sans aller chercher les données sur Grist), pour un retour visuel
 // instantané après une édition. La réconciliation complète arrive ensuite
 // via refreshMsProject().
-function renderMsProjectFromCache({ keepWindow = false } = {}) {
+// `inTwoStages` : si l'affichage ajoute beaucoup de lignes d'un coup (dépli d'une grosse
+// section), les premières sont affichées tout de suite et le reste juste après.
+function renderMsProjectFromCache({ keepWindow = false, inTwoStages = false } = {}) {
   if (!Array.isArray(cachedMsProjectRows) || !state.selectedProject) return null;
 
   const timelineData = buildMsProjectTimelineData(
@@ -208,9 +234,23 @@ function renderMsProjectFromCache({ keepWindow = false } = {}) {
     sortMode
   );
   if (!timelineData.rowCount) return null;
-  const restoreScroll = captureMsProjectScroll();
-  renderMsProjectTimeline(timelineData, { keepWindow });
-  restoreScroll();
+
+  const show = (data) => {
+    const restoreScroll = captureMsProjectScroll();
+    showTimelineData(data, { keepWindow });
+    restoreScroll();
+  };
+  const firstStage = inTwoStages
+    ? planFirstUnfoldStage(timelineData, displayedGroupIds)
+    : null;
+  if (firstStage) {
+    unfoldStages.run(
+      () => show(firstStage),
+      () => show(timelineData)
+    );
+  } else {
+    show(timelineData);
+  }
   return timelineData;
 }
 
@@ -222,7 +262,7 @@ function handleOutlineToggle(taskId) {
   if (!taskId || !projectName) return;
 
   outlineState.toggle(projectName, taskId);
-  const timelineData = renderMsProjectFromCache({ keepWindow: true });
+  const timelineData = renderMsProjectFromCache({ keepWindow: true, inTwoStages: true });
   if (timelineData) {
     setMsProjectStatus(describeDisplayedTasks(timelineData.rowCount, projectName));
   }
@@ -335,14 +375,14 @@ async function refreshMsProject() {
 
   try {
     if (!isMsProjectEnabled()) {
-      clearMsProjectTimeline();
+      clearTimeline();
       setMsProjectStatus(getMsProjectSetupMessage());
       return;
     }
 
     if (!requestedProject) {
       cachedMsProjectRows = [];
-      clearMsProjectTimeline();
+      clearTimeline();
       setMsProjectStatus("Selectionne un nom pour charger ses taches.");
       return;
     }
@@ -367,7 +407,7 @@ async function refreshMsProject() {
     buildDurationMs += performance.now() - buildStartedAt;
 
     if (!timelineData.rowCount) {
-      clearMsProjectTimeline();
+      clearTimeline();
 
       if (!requestedProject) {
         setMsProjectStatus("");
@@ -383,7 +423,7 @@ async function refreshMsProject() {
       requestedProject === lastRenderedProject ? captureMsProjectScroll() : null;
 
     const renderStartedAt = performance.now();
-    renderMsProjectTimeline(timelineData);
+    showTimelineData(timelineData);
     renderDurationMs += performance.now() - renderStartedAt;
     restoreScroll?.();
     lastRenderedProject = requestedProject;
@@ -398,7 +438,7 @@ async function refreshMsProject() {
     setMsProjectStatus(describeDisplayedTasks(timelineData.rowCount, requestedProject));
   } catch (error) {
     console.error("Erreur MS Project :", error);
-    clearMsProjectTimeline();
+    clearTimeline();
     setMsProjectStatus(`Erreur MS Project : ${error.message}`);
   } finally {
     refreshInProgress = false;

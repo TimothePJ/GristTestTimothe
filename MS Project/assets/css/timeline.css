@@ -5,6 +5,9 @@
 #msProjectTimeline .group-row-grid > .cell-task.has-outline {
   display: flex !important;
   align-items: center !important;
+  /* La cellule occupe toute la hauteur de la ligne, pour que la zone de clic de la flèche
+     l'occupe aussi ; son contenu reste centré. */
+  align-self: stretch !important;
   gap: 4px;
   padding-left: calc(8px + var(--outline-depth, 0) * 14px) !important;
 }
@@ -28,13 +31,35 @@
   position: relative;
   padding: 0;
   border: 0;
-  border-radius: 3px;
+  border-radius: 4px;
   background: transparent;
   cursor: pointer !important;
+  transition: background-color 90ms ease, box-shadow 90ms ease;
 }
 
+/* Zone de clic de la flèche : toute la hauteur de la ligne et le double de sa largeur, pour
+   ne pas avoir à viser le chevron. Invisible, elle ne déplace rien et s'arrête au nom de la
+   tâche. */
+#msProjectTimeline .group-row-grid .outline-toggle::after {
+  content: "";
+  position: absolute;
+  top: calc((16px - var(--row-height)) / 2);
+  bottom: calc((16px - var(--row-height)) / 2);
+  left: -8px;
+  right: -4px;
+}
+
+/* La flèche réagit : une pastille l'entoure dès que le pointeur entre dans sa zone, et
+   fonce pendant l'appui. La teinte est translucide pour rester lisible sur une ligne
+   blanche comme sur une ligne colorée. */
 #msProjectTimeline .group-row-grid .outline-toggle:hover {
-  background: var(--panel-selection);
+  background-color: rgba(15, 23, 42, 0.1);
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.1);
+}
+
+#msProjectTimeline .group-row-grid .outline-toggle:active {
+  background-color: rgba(15, 23, 42, 0.2);
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.2);
 }
 
 #msProjectTimeline .group-row-grid .outline-toggle:focus-visible {
@@ -48,15 +73,49 @@
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
   border-right: 2px solid var(--text-muted);
   border-bottom: 2px solid var(--text-muted);
   transform: translate(-50%, -70%) rotate(45deg);
+  transition: border-color 90ms ease;
 }
 
 #msProjectTimeline .group-row-grid .outline-toggle[aria-expanded="false"]::before {
   transform: translate(-70%, -50%) rotate(-45deg);
+}
+
+#msProjectTimeline .group-row-grid .outline-toggle:hover::before {
+  border-color: var(--text-main);
+}
+
+/* La flèche qui vient d'être cliquée tourne vers sa nouvelle position au lieu d'y sauter. */
+@keyframes ms-outline-arrow-unfolded {
+  from {
+    transform: translate(-70%, -50%) rotate(-45deg);
+  }
+}
+
+@keyframes ms-outline-arrow-folded {
+  from {
+    transform: translate(-50%, -70%) rotate(45deg);
+  }
+}
+
+#msProjectTimeline .group-row-grid .outline-toggle.is-just-toggled::before {
+  animation: ms-outline-arrow-unfolded 140ms ease-out;
+}
+
+#msProjectTimeline .group-row-grid .outline-toggle.is-just-toggled[aria-expanded="false"]::before {
+  animation-name: ms-outline-arrow-folded;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #msProjectTimeline .group-row-grid .outline-toggle,
+  #msProjectTimeline .group-row-grid .outline-toggle::before {
+    transition: none;
+    animation: none !important;
+  }
 }
 
 /* Couleur de fond d'une ligne du tableau, reprise du planning MS Project (nuancier :
@@ -81,13 +140,20 @@
   color: #ffffff !important;
 }
 
-/* Sur un fond foncé : flèche de repli blanche, et son survol reste lisible. */
-#msProjectTimeline .group-row-grid.row-text-white .outline-toggle::before {
+/* Sur un fond foncé : flèche de repli blanche, pastille claire au survol et à l'appui. */
+#msProjectTimeline .group-row-grid.row-text-white .outline-toggle::before,
+#msProjectTimeline .group-row-grid.row-text-white .outline-toggle:hover::before {
   border-color: #ffffff;
 }
 
 #msProjectTimeline .group-row-grid.row-text-white .outline-toggle:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background-color: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
+}
+
+#msProjectTimeline .group-row-grid.row-text-white .outline-toggle:active {
+  background-color: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.4);
 }
 
 /* Une date survolée ou en cours de saisie passe sur fond clair : son texte redevient foncé. */

@@ -1,3 +1,5 @@
+import { installInPlaceGroupOrdering } from "./groupOrder.js";
+
 let timelineInstance = null;
 let groupsDataSet = null;
 let itemsDataSet = null;
@@ -13,6 +15,10 @@ let dateCellEditBound = false;
 let activeDateEditor = null;
 let outlineToggleHandler = null;
 let outlineToggleBound = false;
+// Numéro de la section dont la flèche vient d'être cliquée, le temps de la redessiner.
+let justToggledOutlineId = null;
+// Vrai tant que le dernier appui de souris a commencé sur une flèche de section.
+let rowPressStartedOnToggle = false;
 let rowDragBound = false;
 let activeDraggedRowEl = null;
 let activeNativeDragImageEl = null;
@@ -1125,7 +1131,13 @@ function bindOutlineToggle(containerEl) {
     event.preventDefault();
     event.stopPropagation();
     if (typeof outlineToggleHandler === "function") {
-      outlineToggleHandler(toggleEl.dataset.outlineId || "");
+      // La ligne cliquée est redessinée pendant l'appel : sa flèche jouera sa rotation.
+      justToggledOutlineId = toggleEl.dataset.outlineId || "";
+      try {
+        outlineToggleHandler(justToggledOutlineId);
+      } finally {
+        justToggledOutlineId = null;
+      }
     }
   });
 }
@@ -1146,6 +1158,16 @@ function fillOutlineTaskCell(cellEl, group) {
     markerEl.setAttribute("aria-expanded", group.isCollapsed ? "false" : "true");
     markerEl.title = group.isCollapsed ? "Déplier" : "Replier";
     markerEl.setAttribute("aria-label", `${markerEl.title} ${taskLabel}`.trim());
+    if (justToggledOutlineId && markerEl.dataset.outlineId === justToggledOutlineId) {
+      // Rotation jouée une seule fois : sans ce retrait, elle reprendrait à chaque fois que
+      // la ligne est replacée dans la page.
+      markerEl.classList.add("is-just-toggled");
+      markerEl.addEventListener(
+        "animationend",
+        () => markerEl.classList.remove("is-just-toggled"),
+        { once: true }
+      );
+    }
   } else {
     markerEl = document.createElement("span");
     markerEl.className = "outline-spacer";
@@ -1450,6 +1472,13 @@ function handleMsProjectNativeDragStart(event, forcedRowEl = null) {
 
   event[ROW_DRAG_HANDLED_FLAG] = true;
 
+  // Pendant un clic la main bouge souvent de quelques pixels : parti d'une flèche de section,
+  // ce mouvement ferait glisser la ligne et le clic serait perdu.
+  if (rowPressStartedOnToggle) {
+    event.preventDefault();
+    return;
+  }
+
   const payload = buildMsProjectRowDragPayload(rowEl);
   if (!payload) {
     dragDebug("dragstart:ignored-no-payload");
@@ -1496,6 +1525,18 @@ function bindGlobalRowDragging() {
   if (rowDragGlobalListenersBound) return;
   rowDragGlobalListenersBound = true;
   dragDebug("bindGlobalRowDragging:bound");
+
+  // Retient où commence chaque appui : un glisser parti d'une flèche de section est refusé.
+  window.addEventListener(
+    "pointerdown",
+    (event) => {
+      const targetEl = getEventTargetElement(event);
+      rowPressStartedOnToggle =
+        targetEl instanceof Element &&
+        Boolean(targetEl.closest(".group-row-grid .outline-toggle"));
+    },
+    true
+  );
 
   window.addEventListener(
     "pointerdown",
@@ -2026,6 +2067,9 @@ export function renderMsProjectTimeline({ groups, items }, { keepWindow = false 
       groupOrder: (a, b) => a.sortIndex - b.sortIndex,
     });
     debugLog("vis Timeline instance created.");
+    // Quand des lignes arrivent ou partent (repli, dépli), seules celles-là sont déplacées
+    // dans la page, au lieu de toutes (voir groupOrder.js).
+    installInPlaceGroupOrdering(timelineInstance);
     bindDebugTimelineEvents();
     bindHoverTooltip(container);
     bindDateCellEditing(container);
