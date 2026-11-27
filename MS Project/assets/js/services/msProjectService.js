@@ -1,5 +1,6 @@
 import { APP_CONFIG } from "../config.js";
 import { toText } from "./gristService.js";
+import { resolveRowStyle } from "./rowStyle.js";
 
 function toNumber(value) {
   if (value == null || value === "") return null;
@@ -645,6 +646,12 @@ export function buildTimelineDataFromMsProjectRows(
       isTitleRow,
       isBoldRow,
       isBaseDefaultStyle: baseDefaultStyle,
+      // Couleur de fond de la ligne dans le tableau ; `null` : aspect habituel.
+      rowStyle: resolveRowStyle({
+        styleName: rawRow[columns.rowStyle],
+        level: parseOutlineLevel(level),
+        isSection: isBoldRow,
+      }),
       indicatorLabel: indicator,
       effortValue: effort,
       projectLabel: projectFilterColumn ? toText(rawRow[projectFilterColumn]) : "",
@@ -689,6 +696,7 @@ export function buildTimelineDataFromMsProjectRows(
       isTitleRow: Boolean(row.isTitleRow),
       isBoldRow: Boolean(row.isBoldRow),
       isBaseDefaultStyle: Boolean(row.isBaseDefaultStyle),
+      rowStyle: row.rowStyle,
       levelLabel: row.levelLabel,
       indicatorLabel: row.indicatorLabel,
       effortValue: row.effortValue,

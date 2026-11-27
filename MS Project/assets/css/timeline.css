@@ -58,3 +58,40 @@
 #msProjectTimeline .group-row-grid .outline-toggle[aria-expanded="false"]::before {
   transform: translate(-70%, -50%) rotate(-45deg);
 }
+
+/* Couleur de fond d'une ligne du tableau, reprise du planning MS Project (nuancier :
+   services/rowStyle.js). vis-timeline entoure chaque ligne d'une marge intérieure de 5 px :
+   la ligne colorée déborde d'autant de chaque côté, sans déplacer son contenu, pour que le
+   fond aille d'un bord à l'autre du tableau. Le filet du bas redessine la séparation entre
+   lignes, que le fond recouvrirait. */
+#msProjectTimeline .group-row-grid.has-row-fill {
+  flex: 0 0 auto;
+  width: calc(100% + 10px) !important;
+  margin: 0 -5px;
+  padding: 0 calc(var(--left-pad-x) + 5px) !important;
+  background-color: var(--row-fill) !important;
+  box-shadow: inset 0 -1px 0 #edf1f5;
+}
+
+#msProjectTimeline .group-row-grid.row-text-bold > div {
+  font-weight: 700 !important;
+}
+
+#msProjectTimeline .group-row-grid.row-text-white > div {
+  color: #ffffff !important;
+}
+
+/* Sur un fond foncé : flèche de repli blanche, et son survol reste lisible. */
+#msProjectTimeline .group-row-grid.row-text-white .outline-toggle::before {
+  border-color: #ffffff;
+}
+
+#msProjectTimeline .group-row-grid.row-text-white .outline-toggle:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Une date survolée ou en cours de saisie passe sur fond clair : son texte redevient foncé. */
+#msProjectTimeline .group-row-grid.row-text-white > .editable-date-cell:hover,
+#msProjectTimeline .group-row-grid.row-text-white > .editable-date-cell.is-editing-date {
+  color: var(--text-main) !important;
+}

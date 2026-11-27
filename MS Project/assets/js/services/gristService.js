@@ -541,6 +541,26 @@ function createBarStyleResolver(xmlDocument) {
   };
 }
 
+// Style de ligne du tableau MS Project, rangé par le modèle de planning dans son champ
+// « StyleTab » : « Auto », « Niv_3 », « Titre_1 », « HL_Rouge »… Le fichier XML ne porte que
+// ce nom, jamais la couleur : c'est le widget qui la retrouve à l'affichage.
+// Le champ n'est reconnu qu'à son nom : son numéro est un emplacement libre de MS Project,
+// qu'un autre modèle de planning peut employer à tout autre chose.
+function createRowStyleResolver(xmlDocument) {
+  const definition = findProjectExtendedAttribute(xmlDocument, { aliases: ["StyleTab"] });
+  const fieldId = getDirectChildTextByLocalName(definition, "FieldID");
+  const outlineCode = definition
+    ? findProjectOutlineCode(xmlDocument, definition, fieldId)
+    : null;
+  const valueMap = outlineCode ? buildOutlineCodeValueMap(outlineCode) : null;
+
+  return {
+    resolve(taskNode) {
+      return valueMap ? valueMap.resolve(findOutlineCodeValueId(taskNode, fieldId)) : "";
+    },
+  };
+}
+
 async function applyUserActionsInBatches(actions, batchSize = 200) {
   if (!Array.isArray(actions) || !actions.length) return;
   const grist = getGrist();
@@ -968,6 +988,7 @@ export async function importMsProjectXmlFile(file) {
   const endCol = columns.end;
   const durationCol = columns.duration;
   const barStyleCol = columns.barStyle;
+  const rowStyleCol = columns.rowStyle;
   const indicatorCol = columns.indicator;
   const teamCol = columns.team;
   const subTeamCol = columns.subTeam;
@@ -1000,6 +1021,7 @@ export async function importMsProjectXmlFile(file) {
 
   const sourceFileName = getFileNameWithoutExtension(file.name);
   const barStyleResolver = createBarStyleResolver(xmlDocument);
+  const rowStyleResolver = createRowStyleResolver(xmlDocument);
   const importedRecords = [];
 
   for (const [taskIndex, taskNode] of taskNodes.entries()) {
@@ -1023,6 +1045,7 @@ export async function importMsProjectXmlFile(file) {
     if (teamCol) record[teamCol] = "";
     if (subTeamCol) record[subTeamCol] = "";
     if (levelCol) record[levelCol] = readOutlineLevel(taskNode);
+    if (rowStyleCol) record[rowStyleCol] = rowStyleResolver.resolve(taskNode);
     if (indicatorCol) record[indicatorCol] = taskIndex + 1;
     if (effortCol) record[effortCol] = "";
     if (projectLinkCol) record[projectLinkCol] = "";

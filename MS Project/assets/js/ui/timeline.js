@@ -1627,6 +1627,14 @@ function buildGroupLabelElement(group) {
   if (group?.isTitleRow) {
     row.classList.add("row-is-title");
   }
+  // Couleur de fond reprise du planning MS Project (nuancier : services/rowStyle.js).
+  // Absente : la ligne garde son aspect habituel.
+  if (group?.rowStyle) {
+    row.classList.add("has-row-fill");
+    row.style.setProperty("--row-fill", group.rowStyle.fill);
+    row.classList.toggle("row-text-white", Boolean(group.rowStyle.whiteText));
+    row.classList.toggle("row-text-bold", Boolean(group.rowStyle.bold));
+  }
 
   const id = document.createElement("div");
   id.className = "cell-id";
